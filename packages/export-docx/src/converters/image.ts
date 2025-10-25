@@ -2,7 +2,7 @@ import { Paragraph, ImageRun, IImageOptions } from "docx";
 import { ImageNode } from "../types";
 import { getImageTypeFromSrc } from "../utils";
 import { imageMeta as getImageMetadata, type ImageMeta } from "image-meta";
-import { PropertiesOptions } from "../option";
+import { DocxOptions } from "../option";
 
 /**
  * Fetch image data and metadata from URL
@@ -48,7 +48,7 @@ async function fetchImageData(
  */
 export async function convertImage(
   node: ImageNode,
-  options: PropertiesOptions["image"],
+  options: DocxOptions["image"],
 ): Promise<Paragraph> {
   // Get image type from metadata or URL
   const getImageType = (metaType?: string): "jpg" | "png" | "gif" | "bmp" => {

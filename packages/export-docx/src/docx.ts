@@ -14,7 +14,7 @@ import {
   AlignmentType,
   convertInchesToTwip,
 } from "docx";
-import { type PropertiesOptions } from "./option";
+import { type DocxOptions } from "./option";
 import { convertParagraph } from "./converters/paragraph";
 import { convertHeading } from "./converters/heading";
 import { convertBlockquote } from "./converters/blockquote";
@@ -47,9 +47,9 @@ import type {
  * @param options - Options for document properties
  * @returns Promise with DOCX in specified format
  */
-export async function generateDOCX<T extends OutputType = "arraybuffer">(
+export async function generateDOCX<T extends OutputType>(
   docJson: JSONContent,
-  options: PropertiesOptions<T>,
+  options: DocxOptions<T>,
 ): Promise<OutputByType[T]> {
   const {
     // Document metadata
@@ -143,7 +143,7 @@ export async function generateDOCX<T extends OutputType = "arraybuffer">(
  */
 async function convertDocumentContent(
   node: JSONContent,
-  options: PropertiesOptions,
+  options: DocxOptions,
 ): Promise<FileChild[]> {
   const elements: FileChild[] = [];
 
@@ -168,7 +168,7 @@ async function convertDocumentContent(
  */
 async function convertNode(
   node: JSONContent,
-  options: PropertiesOptions,
+  options: DocxOptions,
 ): Promise<FileChild | FileChild[] | null> {
   if (!node || !node.type) {
     return null;

@@ -1,7 +1,7 @@
 import { Table, Paragraph, ITableOptions } from "docx";
 import { TableNode } from "../types";
 import { convertTableRow } from "./table-row";
-import { PropertiesOptions } from "../option";
+import { DocxOptions } from "../option";
 
 /**
  * Convert TipTap table node to DOCX Table
@@ -12,7 +12,7 @@ import { PropertiesOptions } from "../option";
  */
 export function convertTable(
   node: TableNode,
-  options: PropertiesOptions["table"],
+  options: DocxOptions["table"],
 ): Array<Table | Paragraph> {
   // Convert table rows
   const rows = node.content?.map((row) => convertTableRow(row, options)) || [];
@@ -20,7 +20,7 @@ export function convertTable(
   // Build table options with options
   const tableOptions: ITableOptions = {
     rows,
-    ...options?.properties, // Apply table options
+    ...options?.run, // Apply table options
   };
 
   // Create table

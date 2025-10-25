@@ -12,7 +12,7 @@ import {
 /**
  * Options for generating DOCX documents
  */
-export interface PropertiesOptions<T extends OutputType = OutputType> {
+export interface DocxOptions<T extends OutputType = OutputType> {
   // === IPropertiesOptions fields (in order) ===
   sections?: ISectionOptions[];
   title?: string;
@@ -44,10 +44,20 @@ export interface PropertiesOptions<T extends OutputType = OutputType> {
   };
 
   table?: {
-    properties?: Partial<ITableOptions>;
-    row?: Partial<ITableRowOptions>;
-    cell?: Partial<ITableCellOptions>;
-    header?: Partial<ITableCellOptions>;
+    paragraph?: Partial<IParagraphOptions>;
+    run?: Partial<ITableOptions>;
+    row?: {
+      paragraph?: Partial<IParagraphOptions>;
+      run?: Partial<ITableRowOptions>;
+    };
+    cell?: {
+      paragraph?: Partial<IParagraphOptions>;
+      run?: Partial<ITableCellOptions>;
+    };
+    header?: {
+      paragraph?: Partial<IParagraphOptions>;
+      run?: Partial<ITableCellOptions>;
+    };
   };
 
   // Export options

@@ -82,13 +82,21 @@ jsonFiles.forEach(async (jsonFile) => {
       title: docxFile.replace(".docx", ""),
       outputType: "nodebuffer",
       table: {
-        properties: {
+        paragraph: {
+          alignment: "center",
+        },
+        run: {
           width: {
             size: 100,
             type: "pct", // Percentage width
           },
           alignment: "center", // Center align tables
           layout: "autofit", // Fixed layout for auto-width behavior
+        },
+        cell: {
+          run: {
+            verticalAlign: "center",
+          },
         },
       },
       styles: {

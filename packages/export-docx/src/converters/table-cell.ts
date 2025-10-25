@@ -1,7 +1,7 @@
 import { TableCell } from "docx";
 import { TableCellNode } from "../types";
 import { convertParagraph } from "./paragraph";
-import { PropertiesOptions } from "../option";
+import { DocxOptions } from "../option";
 
 /**
  * Convert TipTap table cell node to DOCX TableCell
@@ -12,15 +12,23 @@ import { PropertiesOptions } from "../option";
  */
 export function convertTableCell(
   node: TableCellNode,
-  options: PropertiesOptions["table"],
+  options: DocxOptions["table"],
 ): TableCell {
   // Convert paragraphs in the cell
-  const paragraphs = node.content?.map((p) => convertParagraph(p)) || [];
+  const paragraphs =
+    node.content?.map((p) =>
+      convertParagraph(
+        p,
+        options?.cell?.paragraph ??
+          options?.row?.paragraph ??
+          options?.paragraph,
+      ),
+    ) || [];
 
   // Create table cell with options
   const cell = new TableCell({
     children: paragraphs,
-    ...options?.cell,
+    ...options?.cell?.run,
   });
 
   // Add column span if present
