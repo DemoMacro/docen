@@ -1,0 +1,37 @@
+{
+  "name": "@demomacro/tiptap-extension",
+  "version": "0.0.0",
+  "description": "",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm -r prepack --stub",
+    "build": "pnpm -r prepack",
+    "lint": "basis lint --all",
+    "postinstall": "pnpm dev && basis git setup"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DemoMacro/tiptap-extension.git"
+  },
+  "keywords": [],
+  "author": {
+    "name": "Demo Macro",
+    "email": "abc@imst.xyz",
+    "url": "https://imst.xyz/"
+  },
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/DemoMacro/tiptap-extension/issues"
+  },
+  "homepage": "https://github.com/DemoMacro/tiptap-extension#readme",
+  "devDependencies": {
+    "@funish/basis": "0.1.2",
+    "@prettier/plugin-oxc": "0.0.4",
+    "@types/node": "24.9.1",
+    "oxlint": "1.24.0",
+    "oxlint-tsgolint": "0.3.0",
+    "prettier": "3.6.2",
+    "unbuild": "3.6.1"
+  },
+  "packageManager": "pnpm@10.19.0+sha512.c9fc7236e92adf5c8af42fd5bf1612df99c2ceb62f27047032f4720b33f8eacdde311865e91c411f2774f618d82f320808ecb51718bfa82c060c4ba7c76a32b8"
+}

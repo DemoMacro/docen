@@ -1,0 +1,113 @@
+{
+  "type": "doc",
+  "content": [
+    {
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "marks": [
+            {
+              "type": "textStyle",
+              "attrs": {
+                "color": "red"
+              }
+            }
+          ],
+          "text": "Red text"
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "marks": [
+            {
+              "type": "textStyle",
+              "attrs": {
+                "color": "#0000ff"
+              }
+            }
+          ],
+          "text": "Blue text with hex"
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "marks": [
+            {
+              "type": "textStyle",
+              "attrs": {
+                "color": "#008000"
+              }
+            }
+          ],
+          "text": "Green text"
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "marks": [
+            {
+              "type": "textStyle",
+              "attrs": {
+                "color": "#ff6600"
+              }
+            }
+          ],
+          "text": "Orange text with hex"
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "marks": [
+            {
+              "type": "textStyle",
+              "attrs": {
+                "color": "#800080"
+              }
+            },
+            {
+              "type": "bold"
+            }
+          ],
+          "text": "Bold purple text"
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "marks": [
+            {
+              "type": "textStyle",
+              "attrs": {
+                "color": "#008080"
+              }
+            },
+            {
+              "type": "italic"
+            }
+          ],
+          "text": "Italic teal text"
+        }
+      ]
+    }
+  ]
+}

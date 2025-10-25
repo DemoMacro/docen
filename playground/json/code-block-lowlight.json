@@ -1,0 +1,41 @@
+{
+  "type": "doc",
+  "content": [
+    {
+      "type": "codeBlock",
+      "attrs": {
+        "language": null
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "function hello() {\n    console.log(\"Hello, World!\");\n}"
+        }
+      ]
+    },
+    {
+      "type": "codeBlock",
+      "attrs": {
+        "language": "javascript"
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "// JavaScript code example\nconst greet = (name) => {\n    return `Hello, ${name}!`;\n};"
+        }
+      ]
+    },
+    {
+      "type": "codeBlock",
+      "attrs": {
+        "language": "python"
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "# Python code example\ndef greet(name):\n    return f\"Hello, {name}!\""
+        }
+      ]
+    }
+  ]
+}

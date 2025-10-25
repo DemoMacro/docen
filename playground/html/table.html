@@ -1,0 +1,92 @@
+<!-- Basic table -->
+<table>
+  <thead>
+    <tr>
+      <th>Header 1</th>
+      <th>Header 2</th>
+      <th>Header 3</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Cell 1</td>
+      <td>Cell 2</td>
+      <td>Cell 3</td>
+    </tr>
+    <tr>
+      <td><strong>Bold cell</strong></td>
+      <td><em>Italic cell</em></td>
+      <td>Normal cell</td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- Table with colspan -->
+<table>
+  <thead>
+    <tr>
+      <th colspan="2">Merged Header</th>
+      <th>Header 3</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Cell 1</td>
+      <td>Cell 2</td>
+      <td>Cell 3</td>
+    </tr>
+    <tr>
+      <td>Cell 4</td>
+      <td>Cell 5</td>
+      <td>Cell 6</td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- Table with rowspan -->
+<table>
+  <thead>
+    <tr>
+      <th>Header 1</th>
+      <th>Header 2</th>
+      <th>Header 3</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td rowspan="2">Row 1-2</td>
+      <td>Cell 2</td>
+      <td>Cell 3</td>
+    </tr>
+    <tr>
+      <td>Cell 5</td>
+      <td>Cell 6</td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- Complex table with multiple merges -->
+<table>
+  <thead>
+    <tr>
+      <th>Corner</th>
+      <th colspan="2">Group Header</th>
+      <th>Single</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td rowspan="3">Side</td>
+      <td>A1</td>
+      <td>B1</td>
+      <td>C1</td>
+    </tr>
+    <tr>
+      <td colspan="2" rowspan="2">Center Block</td>
+      <td>C2</td>
+    </tr>
+    <tr>
+      <td>C3</td>
+    </tr>
+  </tbody>
+</table>
