@@ -1,6 +1,8 @@
 # TipTap Extension - DOCX Export
 
-![GitHub](https://img.shields.io/github/license/DemoMacro/tiptap-extension-export-docx)
+![npm version](https://img.shields.io/npm/v/tiptap-extension-export-docx)
+![npm downloads](https://img.shields.io/npm/dw/tiptap-extension-export-docx)
+![npm license](https://img.shields.io/npm/l/tiptap-extension-export-docx)
 [![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg)](https://www.contributor-covenant.org/version/2/1/code_of_conduct/)
 
 > A powerful TipTap/ProseMirror extension that converts editor content to Microsoft Word DOCX format.
