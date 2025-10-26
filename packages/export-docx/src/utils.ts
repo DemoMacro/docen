@@ -2,6 +2,8 @@
  * Shared utility functions for the export-docx package
  */
 
+import { imageMeta as getImageMetadata, type ImageMeta } from "image-meta";
+
 /**
  * Extract image type from URL or base64 data
  */
@@ -66,4 +68,71 @@ export function createFloatingOptions() {
     behindDocument: false,
     inFrontOfText: false,
   };
+}
+
+/**
+ * Get image width with clear priority: node attrs > options.run > image metadata > default
+ */
+export function getImageWidth(
+  node: { attrs?: { width?: number | null } },
+  options?: { run?: { transformation?: { width?: number } } },
+  imageMeta?: { width?: number },
+): number {
+  if (node.attrs?.width) return node.attrs.width;
+  if (options?.run?.transformation?.width)
+    return options.run.transformation.width;
+  if (imageMeta?.width) return Math.min(imageMeta.width, 600);
+  return 400;
+}
+
+/**
+ * Get image height with clear priority: node attrs > options.run > calculated > default
+ */
+export function getImageHeight(
+  node: { attrs?: { height?: number | null } },
+  width: number,
+  options?: { run?: { transformation?: { height?: number } } },
+  imageMeta?: { width?: number; height?: number },
+): number {
+  if (node.attrs?.height) return node.attrs.height;
+  if (options?.run?.transformation?.height)
+    return options.run.transformation.height;
+  if (imageMeta?.width && imageMeta?.height)
+    return Math.round((width * imageMeta.height) / imageMeta.width);
+  return 300;
+}
+
+/**
+ * Fetch image data and metadata from URL
+ */
+export async function getImageDataAndMeta(
+  url: string,
+): Promise<{ data: Uint8Array; meta: ImageMeta }> {
+  try {
+    // For binary data, use fetch API directly following official pattern
+    const fetchResponse = await fetch(url);
+    const blob = await fetchResponse.blob();
+    const arrayBuffer = await blob.arrayBuffer();
+    const data = new Uint8Array(arrayBuffer);
+
+    // Get image metadata using image-meta
+    let meta: ImageMeta;
+    try {
+      meta = getImageMetadata(data);
+    } catch (error) {
+      // If metadata extraction fails, use default values
+      console.warn(`Failed to extract image metadata:`, error);
+      meta = {
+        width: undefined,
+        height: undefined,
+        type: getImageTypeFromSrc(url) || "png",
+        orientation: undefined,
+      };
+    }
+
+    return { data, meta };
+  } catch (error) {
+    console.warn(`Failed to fetch image from ${url}:`, error);
+    throw error;
+  }
 }

@@ -40,7 +40,10 @@ export interface DocxOptions<T extends OutputType = OutputType> {
   // === Specific options ===
   image?: {
     paragraph?: Partial<IParagraphOptions>;
-    run?: Partial<IImageOptions>;
+    run?: Pick<
+      IImageOptions,
+      "transformation" | "floating" | "altText" | "outline"
+    >;
   };
 
   table?: {

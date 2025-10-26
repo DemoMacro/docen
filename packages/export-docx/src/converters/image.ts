@@ -1,43 +1,13 @@
 import { Paragraph, ImageRun, IImageOptions } from "docx";
 import { ImageNode } from "../types";
-import { getImageTypeFromSrc } from "../utils";
+import {
+  getImageTypeFromSrc,
+  getImageWidth,
+  getImageHeight,
+  getImageDataAndMeta,
+} from "../utils";
 import { imageMeta as getImageMetadata, type ImageMeta } from "image-meta";
 import { DocxOptions } from "../option";
-
-/**
- * Fetch image data and metadata from URL
- */
-async function fetchImageData(
-  url: string,
-): Promise<{ data: Uint8Array; meta: ImageMeta }> {
-  try {
-    // For binary data, use fetch API directly following official pattern
-    const fetchResponse = await fetch(url);
-    const blob = await fetchResponse.blob();
-    const arrayBuffer = await blob.arrayBuffer();
-    const data = new Uint8Array(arrayBuffer);
-
-    // Get image metadata using image-meta
-    let meta: ImageMeta;
-    try {
-      meta = getImageMetadata(data);
-    } catch (error) {
-      // If metadata extraction fails, use default values
-      console.warn(`Failed to extract image metadata:`, error);
-      meta = {
-        width: undefined,
-        height: undefined,
-        type: getImageTypeFromSrc(url) || "png",
-        orientation: undefined,
-      };
-    }
-
-    return { data, meta };
-  } catch (error) {
-    console.warn(`Failed to fetch image from ${url}:`, error);
-    throw error;
-  }
-}
 
 /**
  * Convert TipTap image node to DOCX Paragraph with ImageRun
@@ -87,7 +57,7 @@ export async function convertImage(
   try {
     const src = node.attrs?.src || "";
     if (src.startsWith("http")) {
-      const result = await fetchImageData(src);
+      const result = await getImageDataAndMeta(src);
       imageData = result.data;
       imageMeta = result.meta;
     } else if (src.startsWith("data:")) {
@@ -131,57 +101,9 @@ export async function convertImage(
     });
   }
 
-  // Determine final dimensions
-  // Priority: 1. Node attributes > 2. Image metadata > 3. Default size
-  let finalWidth: number;
-  let finalHeight: number;
-
-  const nodeWidth = node.attrs?.width;
-  const nodeHeight = node.attrs?.height;
-
-  if (
-    nodeWidth !== null &&
-    nodeWidth !== undefined &&
-    nodeHeight !== null &&
-    nodeHeight !== undefined
-  ) {
-    // Use dimensions from node attributes
-    finalWidth = nodeWidth;
-    finalHeight = nodeHeight;
-  } else if (imageMeta.width && imageMeta.height) {
-    // Use dimensions from image metadata
-    if (nodeWidth !== null && nodeWidth !== undefined) {
-      // Scale height based on aspect ratio
-      finalWidth = nodeWidth;
-      finalHeight = Math.round(
-        (nodeWidth * imageMeta.height) / imageMeta.width,
-      );
-    } else if (nodeHeight !== null && nodeHeight !== undefined) {
-      // Scale width based on aspect ratio
-      finalHeight = nodeHeight;
-      finalWidth = Math.round(
-        (nodeHeight * imageMeta.width) / imageMeta.height,
-      );
-    } else {
-      // Use original dimensions, but limit if too large
-      const maxSize = 600;
-      if (imageMeta.width > maxSize || imageMeta.height > maxSize) {
-        const scale = Math.min(
-          maxSize / imageMeta.width,
-          maxSize / imageMeta.height,
-        );
-        finalWidth = Math.round(imageMeta.width * scale);
-        finalHeight = Math.round(imageMeta.height * scale);
-      } else {
-        finalWidth = imageMeta.width;
-        finalHeight = imageMeta.height;
-      }
-    }
-  } else {
-    // Fallback to default size or optionsed default
-    finalWidth = 400;
-    finalHeight = 300;
-  }
+  // Determine final dimensions using utils functions: first width, then height based on aspect ratio
+  const finalWidth = getImageWidth(node, options, imageMeta);
+  const finalHeight = getImageHeight(node, finalWidth, options, imageMeta);
 
   // Build complete image options
   const imageOptions: IImageOptions = {
@@ -196,6 +118,14 @@ export async function convertImage(
       description: undefined,
       title: node.attrs?.title || undefined,
     },
+    ...(options?.run &&
+      options.run.floating && {
+        floating: options.run.floating,
+      }),
+    ...(options?.run &&
+      options.run.outline && {
+        outline: options.run.outline,
+      }),
   };
 
   // Create image run
@@ -205,7 +135,6 @@ export async function convertImage(
   const paragraphOptions = options?.paragraph || {};
   const paragraph = new Paragraph({
     children: [imageRun],
-    alignment: "center", // Default center align
     ...paragraphOptions, // Allow override of paragraph properties
   });
 
