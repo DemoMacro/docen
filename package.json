@@ -1,7 +1,7 @@
 {
   "name": "@demomacro/tiptap-extension",
   "version": "0.0.0",
-  "description": "",
+  "description": "A collection of powerful extensions for TipTap editor, including DOCX export functionality",
   "private": true,
   "scripts": {
     "dev": "pnpm -r prepack --stub",
@@ -13,7 +13,17 @@
     "type": "git",
     "url": "git+https://github.com/DemoMacro/tiptap-extension.git"
   },
-  "keywords": [],
+  "keywords": [
+    "tiptap",
+    "editor",
+    "extensions",
+    "wysiwyg",
+    "prosemirror",
+    "docx",
+    "export",
+    "microsoft-word",
+    "typescript"
+  ],
   "author": {
     "name": "Demo Macro",
     "email": "abc@imst.xyz",
