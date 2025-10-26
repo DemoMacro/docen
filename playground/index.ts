@@ -7,7 +7,8 @@ import {
   mkdirSync,
 } from "node:fs";
 import { join } from "node:path";
-import { generateJSON, generateDOCX } from "../packages/export-docx/src";
+import { generateDOCX } from "../packages/export-docx/src";
+import { generateJSON } from "./html";
 
 // Get all HTML files from html directory
 const htmlDir = "html";

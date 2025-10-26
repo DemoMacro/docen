@@ -1,6 +1,5 @@
 import { Paragraph, HeadingLevel } from "docx";
 import { HeadingNode } from "../types";
-import { Level } from "@tiptap/extension-heading";
 import { convertText, convertHardBreak } from "./text";
 
 /**
@@ -11,7 +10,7 @@ import { convertText, convertHardBreak } from "./text";
  */
 export function convertHeading(node: HeadingNode): Paragraph {
   // Get heading level
-  const level: Level = node?.attrs?.level;
+  const level: HeadingNode["attrs"]["level"] = node?.attrs?.level;
 
   // Convert content using shared text converter
   const children =
@@ -26,7 +25,7 @@ export function convertHeading(node: HeadingNode): Paragraph {
 
   // Map to DOCX heading levels
   const headingMap: Record<
-    Level,
+    HeadingNode["attrs"]["level"],
     (typeof HeadingLevel)[keyof typeof HeadingLevel]
   > = {
     1: HeadingLevel.HEADING_1,

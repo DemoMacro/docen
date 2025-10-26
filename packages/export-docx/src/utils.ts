@@ -3,6 +3,7 @@
  */
 
 import { imageMeta as getImageMetadata, type ImageMeta } from "image-meta";
+import { ofetch } from "ofetch";
 
 /**
  * Extract image type from URL or base64 data
@@ -109,11 +110,9 @@ export async function getImageDataAndMeta(
   url: string,
 ): Promise<{ data: Uint8Array; meta: ImageMeta }> {
   try {
-    // For binary data, use fetch API directly following official pattern
-    const fetchResponse = await fetch(url);
-    const blob = await fetchResponse.blob();
-    const arrayBuffer = await blob.arrayBuffer();
-    const data = new Uint8Array(arrayBuffer);
+    // Use ofetch to get binary data with responseType: "blob"
+    const blob = await ofetch(url, { responseType: "blob" });
+    const data = await blob.bytes();
 
     // Get image metadata using image-meta
     let meta: ImageMeta;

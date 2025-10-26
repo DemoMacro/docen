@@ -31,6 +31,22 @@ importers:
 
   packages/export-docx:
     dependencies:
+      docx:
+        specifier: 9.5.1
+        version: 9.5.1
+      image-meta:
+        specifier: 0.2.2
+        version: 0.2.2
+      ofetch:
+        specifier: 1.4.1
+        version: 1.4.1
+    devDependencies:
+      "@tiptap/core":
+        specifier: 3.7.2
+        version: 3.7.2(@tiptap/pm@3.7.2)
+
+  playground:
+    devDependencies:
       "@tiptap/core":
         specifier: 3.7.2
         version: 3.7.2(@tiptap/pm@3.7.2)
@@ -124,18 +140,6 @@ importers:
       "@tiptap/pm":
         specifier: 3.7.2
         version: 3.7.2
-      docx:
-        specifier: 9.5.1
-        version: 9.5.1
-      image-meta:
-        specifier: 0.2.2
-        version: 0.2.2
-      ofetch:
-        specifier: 1.4.1
-        version: 1.4.1
-
-  playground:
-    devDependencies:
       tiptap-extension-export-docx:
         specifier: workspace:*
         version: link:../packages/export-docx

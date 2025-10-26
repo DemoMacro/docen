@@ -1,5 +1,4 @@
 import { JSONContent } from "@tiptap/core";
-import { Level } from "@tiptap/extension-heading";
 
 // Re-export JSONContent for convenience
 export type { JSONContent };
@@ -53,7 +52,7 @@ export interface ParagraphNode extends JSONContent {
 export interface HeadingNode extends JSONContent {
   type: "heading";
   attrs: {
-    level: Level;
+    level: 1 | 2 | 3 | 4 | 5 | 6;
   };
   content?: Array<TextNode | HardBreakNode>;
 }
