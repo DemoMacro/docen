@@ -13,6 +13,7 @@ import {
   LevelFormat,
   AlignmentType,
   convertInchesToTwip,
+  TableOfContents,
 } from "docx";
 import { type DocxOptions } from "./option";
 import { convertParagraph } from "./converters/paragraph";
@@ -64,6 +65,9 @@ export async function generateDOCX<T extends OutputType>(
     // Document styling
     styles,
 
+    // Table of contents
+    tableOfContents,
+
     // Document options
     sections,
     fonts,
@@ -80,17 +84,46 @@ export async function generateDOCX<T extends OutputType>(
   // Convert document content
   const children = await convertDocumentContent(docJson, options);
 
+  // Create table of contents if configured
+  const tocElement = tableOfContents
+    ? new TableOfContents(tableOfContents.title, {
+        ...tableOfContents.run,
+      })
+    : null;
+
   // Collect ordered list start values for numbering options
   const numberingOptions = createNumberingOptions(docJson);
+
+  // Build document sections - merge user config with generated content
+  const documentSections = sections
+    ? sections.map((section, index) => {
+        const sectionChildren: FileChild[] = [];
+
+        // Add table of contents to first section if configured
+        if (index === 0 && tocElement) {
+          sectionChildren.push(tocElement);
+        }
+
+        // Add main content to first section
+        if (index === 0) {
+          sectionChildren.push(...children);
+        }
+
+        return {
+          ...section,
+          ...(sectionChildren.length > 0 ? { children: sectionChildren } : {}),
+        };
+      })
+    : [
+        {
+          children: tocElement ? [tocElement, ...children] : children,
+        },
+      ];
 
   // Build document options
   const docOptions: IPropertiesOptions = {
     // Sections - required
-    sections: sections || [
-      {
-        children,
-      },
-    ],
+    sections: documentSections,
 
     // Metadata
     title: title || "Document",

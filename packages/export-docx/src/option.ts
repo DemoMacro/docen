@@ -7,6 +7,7 @@ import {
   IParagraphOptions,
   ITableOptions,
   ITableRowOptions,
+  ITableOfContentsOptions,
 } from "docx";
 
 /**
@@ -38,6 +39,11 @@ export interface DocxOptions<T extends OutputType = OutputType> {
   hyphenation?: IPropertiesOptions["hyphenation"];
 
   // === Specific options ===
+  tableOfContents?: {
+    title?: string;
+    run?: Partial<ITableOfContentsOptions>;
+  };
+
   image?: {
     paragraph?: Partial<IParagraphOptions>;
     run?: Pick<
