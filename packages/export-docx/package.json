@@ -1,6 +1,6 @@
 {
   "name": "tiptap-extension-export-docx",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "description": "A powerful TipTap/ProseMirror extension that converts editor content to Microsoft Word DOCX format",
   "main": "dist/index.mjs",
   "types": "dist/index.d.ts",
@@ -34,7 +34,12 @@
     "typescript",
     "editor",
     "wysiwyg",
-    "rich-text"
+    "rich-text",
+    "details",
+    "emoji",
+    "mathematics",
+    "horizontal-rule",
+    "table-of-contents"
   ],
   "author": {
     "name": "Demo Macro",

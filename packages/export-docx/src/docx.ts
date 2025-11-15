@@ -26,6 +26,8 @@ import { convertList } from "./converters/list";
 import { convertListItem } from "./converters/list-item";
 import { convertTaskList } from "./converters/task-list";
 import { convertTaskItem } from "./converters/task-item";
+import { convertHorizontalRule } from "./converters/horizontal-rule";
+import { convertDetails } from "./converters/details";
 import { convertHardBreak } from "./converters/text";
 import type {
   ParagraphNode,
@@ -39,6 +41,8 @@ import type {
   TaskItemNode,
   OrderedListNode,
   BulletListNode,
+  HorizontalRuleNode,
+  DetailsNode,
 } from "./types";
 
 /**
@@ -174,7 +178,7 @@ export async function generateDOCX<T extends OutputType>(
 /**
  * Convert document content to DOCX elements
  */
-async function convertDocumentContent(
+export async function convertDocumentContent(
   node: JSONContent,
   options: DocxOptions,
 ): Promise<FileChild[]> {
@@ -199,7 +203,7 @@ async function convertDocumentContent(
 /**
  * Convert a single node to DOCX element(s)
  */
-async function convertNode(
+export async function convertNode(
   node: JSONContent,
   options: DocxOptions,
 ): Promise<FileChild | FileChild[] | null> {
@@ -244,6 +248,15 @@ async function convertNode(
     case "hardBreak":
       // Wrap hardBreak in a paragraph
       return new Paragraph({ children: [convertHardBreak()] });
+
+    case "horizontalRule":
+      return convertHorizontalRule(
+        node as HorizontalRuleNode,
+        options.horizontalRule,
+      );
+
+    case "details":
+      return await convertDetails(node as DetailsNode, options);
 
     default:
       // Unknown node type, return a paragraph with text

@@ -69,6 +69,19 @@ export interface DocxOptions<T extends OutputType = OutputType> {
     };
   };
 
+  details?: {
+    summary?: {
+      paragraph?: Partial<IParagraphOptions>;
+    };
+    content?: {
+      paragraph?: Partial<IParagraphOptions>;
+    };
+  };
+
+  horizontalRule?: {
+    paragraph?: Partial<IParagraphOptions>;
+  };
+
   // Export options
   outputType: T;
 }

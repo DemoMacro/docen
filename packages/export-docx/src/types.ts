@@ -151,6 +151,22 @@ export interface ImageNode extends JSONContent {
   };
 }
 
+// Details node types
+export interface DetailsNode extends JSONContent {
+  type: "details";
+  content?: Array<DetailsSummaryNode | DetailsContentNode>;
+}
+
+export interface DetailsSummaryNode extends JSONContent {
+  type: "detailsSummary";
+  content?: Array<TextNode | HardBreakNode>;
+}
+
+export interface DetailsContentNode extends JSONContent {
+  type: "detailsContent";
+  content?: Array<BlockNode>;
+}
+
 // Generic converter types
 export type TextContent = TextNode | HardBreakNode;
 export type BlockNode =
@@ -163,4 +179,5 @@ export type BlockNode =
   | OrderedListNode
   | TaskListNode
   | TableNode
-  | ImageNode;
+  | ImageNode
+  | DetailsNode;

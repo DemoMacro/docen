@@ -9,13 +9,16 @@
 
 ## Features
 
-- 📝 **Rich Text Support** - Headings, paragraphs, lists, blockquotes
+- 📝 **Rich Text Support** - Headings, paragraphs, lists, blockquotes, horizontal rules
 - 🖼️ **Image Handling** - Automatic sizing and metadata extraction
 - 📊 **Table Support** - Complete table structure with headers
 - 📋 **Lists & Tasks** - Bullet lists, numbered lists, and task lists
-- 🎨 **Formatting** - Bold, italic, underline, strikethrough, colors
+- 🎨 **Formatting** - Bold, italic, underline, strikethrough, colors, highlights
 - 🔗 **Links** - Hyperlink support
 - 💻 **Code Blocks** - Syntax highlighted code blocks
+- 📂 **Collapsible Content** - Details/summary support
+- 😀 **Emoji Support** - Native emoji rendering
+- 🧮 **Mathematical Content** - LaTeX-style formula support
 - ⚙️ **Configurable** - Customizable export options
 
 ## Installation

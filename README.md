@@ -222,7 +222,7 @@ This project follows core principles:
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](./packages/export-docx/LICENSE) file for details.
+This project is licensed under the MIT License - see the [LICENSE](./LICENSE) file for details.
 
 ---
 

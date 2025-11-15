@@ -12,3 +12,5 @@ export * from "./list";
 export * from "./list-item";
 export * from "./task-list";
 export * from "./task-item";
+export * from "./horizontal-rule";
+export * from "./details";
