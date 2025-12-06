@@ -1,6 +1,6 @@
 import { Paragraph } from "docx";
 import { convertText, convertHardBreak } from "./text";
-import { convertNode } from "../docx";
+import { convertNode } from "../generator";
 import { DetailsNode, DetailsSummaryNode, DetailsContentNode } from "../types";
 import type { DocxOptions } from "../option";
 

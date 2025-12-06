@@ -2,7 +2,7 @@ import { defineBuildConfig } from "unbuild";
 
 export default defineBuildConfig({
   declaration: true,
-  entries: ["src/index"],
+  entries: ["src/index", "src/docx"],
   rollup: {
     emitCJS: true,
     esbuild: {

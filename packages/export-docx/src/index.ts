@@ -1,4 +1,4 @@
-export * from "./docx";
+export * from "./generator";
 export * from "./types";
 export * from "./converters";
 export * from "./option";
