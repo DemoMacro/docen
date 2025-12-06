@@ -9,6 +9,7 @@ import {
 import { join } from "node:path";
 import { generateDOCX } from "../packages/export-docx/src";
 import { generateJSON } from "./html";
+import { PageBreak } from "../packages/export-docx/src/docx";
 
 // Get all HTML files from html directory
 const htmlDir = "html";
@@ -112,6 +113,12 @@ jsonFiles.forEach(async (jsonFile) => {
               size: 28,
             },
           },
+        },
+      },
+      horizontalRule: {
+        paragraph: {
+          border: undefined,
+          children: [new PageBreak()],
         },
       },
     });
