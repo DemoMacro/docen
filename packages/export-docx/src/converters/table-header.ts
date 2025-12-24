@@ -42,11 +42,29 @@ export function convertTableHeader(
     Object.assign(headerCell.options, { rowSpan: node.attrs.rowspan });
   }
 
-  // Add column width if present
+  // Add column width if present, otherwise use default width
   if (node.attrs?.colwidth !== null && node.attrs?.colwidth !== undefined) {
+    // colwidth is an array in TipTap, take the first value
+    const width =
+      Array.isArray(node.attrs.colwidth) && node.attrs.colwidth.length > 0
+        ? node.attrs.colwidth[0]
+        : null;
+
+    if (width) {
+      Object.assign(headerCell.options, {
+        width: {
+          size: width,
+          type: "dxa" as const,
+        },
+      });
+    }
+  }
+
+  // If no width is set, apply a default minimum width to prevent cells from being too small
+  if (!headerCell.options.width) {
     Object.assign(headerCell.options, {
       width: {
-        size: node.attrs.colwidth,
+        size: 2000, // Default width of about 1.4 inches (2000/1440)
         type: "dxa" as const,
       },
     });
