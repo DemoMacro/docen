@@ -10,7 +10,7 @@ import { ofetch } from "ofetch";
  */
 export function getImageTypeFromSrc(
   src: string,
-): "png" | "jpeg" | "gif" | "bmp" | "tiff" {
+): "png" | "jpeg" | "gif" | "bmp" | "tiff" | "webp" {
   if (src.startsWith("data:")) {
     const match = src.match(/data:image\/(\w+);/);
     if (match) {
@@ -27,6 +27,8 @@ export function getImageTypeFromSrc(
           return "bmp";
         case "tiff":
           return "tiff";
+        case "webp":
+          return "webp";
         default:
           return "png";
       }
@@ -45,6 +47,8 @@ export function getImageTypeFromSrc(
         return "bmp";
       case "tiff":
         return "tiff";
+      case "webp":
+        return "webp";
       default:
         return "png";
     }
@@ -77,12 +81,17 @@ export function createFloatingOptions() {
 export function getImageWidth(
   node: { attrs?: { width?: number | null } },
   options?: { run?: { transformation?: { width?: number } } },
-  imageMeta?: { width?: number },
+  imageMeta?: { width?: number | null },
 ): number {
-  if (node.attrs?.width) return node.attrs.width;
-  if (options?.run?.transformation?.width)
+  if (node.attrs?.width && typeof node.attrs.width === "number") {
+    return node.attrs.width;
+  }
+  if (options?.run?.transformation?.width) {
     return options.run.transformation.width;
-  if (imageMeta?.width) return Math.min(imageMeta.width, 600);
+  }
+  if (imageMeta?.width && typeof imageMeta.width === "number") {
+    return Math.min(imageMeta.width, 600);
+  }
   return 400;
 }
 
@@ -93,13 +102,22 @@ export function getImageHeight(
   node: { attrs?: { height?: number | null } },
   width: number,
   options?: { run?: { transformation?: { height?: number } } },
-  imageMeta?: { width?: number; height?: number },
+  imageMeta?: { width?: number | null; height?: number | null },
 ): number {
-  if (node.attrs?.height) return node.attrs.height;
-  if (options?.run?.transformation?.height)
+  if (node.attrs?.height && typeof node.attrs.height === "number") {
+    return node.attrs.height;
+  }
+  if (options?.run?.transformation?.height) {
     return options.run.transformation.height;
-  if (imageMeta?.width && imageMeta?.height)
+  }
+  if (
+    imageMeta?.width &&
+    typeof imageMeta.width === "number" &&
+    imageMeta?.height &&
+    typeof imageMeta.height === "number"
+  ) {
     return Math.round((width * imageMeta.height) / imageMeta.width);
+  }
   return 300;
 }
 
@@ -111,8 +129,13 @@ export async function getImageDataAndMeta(
 ): Promise<{ data: Uint8Array; meta: ImageMeta }> {
   try {
     // Use ofetch to get binary data with responseType: "blob"
-    const blob = await ofetch(url, { responseType: "blob" });
-    const data = await blob.bytes();
+    const blob = await ofetch(url, {
+      responseType: "blob",
+      redirect: "follow",
+      timeout: 30000,
+    });
+    const arrayBuffer = await blob.arrayBuffer();
+    const data = new Uint8Array(arrayBuffer);
 
     // Get image metadata using image-meta
     let meta: ImageMeta;

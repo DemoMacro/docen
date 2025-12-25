@@ -21,7 +21,9 @@ export async function convertImage(
   options: DocxOptions["image"],
 ): Promise<Paragraph> {
   // Get image type from metadata or URL
-  const getImageType = (metaType?: string): "jpg" | "png" | "gif" | "bmp" => {
+  const getImageType = (
+    metaType?: string,
+  ): "jpg" | "png" | "gif" | "bmp" | "webp" => {
     // Try metadata type first
     switch (metaType) {
       case "jpeg":
@@ -33,6 +35,8 @@ export async function convertImage(
         return "gif";
       case "bmp":
         return "bmp";
+      case "webp":
+        return "png";
     }
 
     // Fallback to URL-based type detection
@@ -46,6 +50,8 @@ export async function convertImage(
         return "gif";
       case "bmp":
         return "bmp";
+      case "webp":
+        return "png";
       default:
         return "png";
     }
