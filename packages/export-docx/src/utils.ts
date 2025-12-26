@@ -90,7 +90,9 @@ export function getImageWidth(
     return options.run.transformation.width;
   }
   if (imageMeta?.width && typeof imageMeta.width === "number") {
-    return Math.min(imageMeta.width, 600);
+    const width = Math.min(imageMeta.width, 600);
+    // 如果图片太小，使用默认尺寸
+    return width < 50 ? 400 : width;
   }
   return 400;
 }
@@ -116,7 +118,9 @@ export function getImageHeight(
     imageMeta?.height &&
     typeof imageMeta.height === "number"
   ) {
-    return Math.round((width * imageMeta.height) / imageMeta.width);
+    const height = Math.round((width * imageMeta.height) / imageMeta.width);
+    // 如果计算出的高度太小，使用默认尺寸
+    return height < 50 ? 300 : height;
   }
   return 300;
 }
