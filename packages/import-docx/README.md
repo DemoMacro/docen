@@ -68,7 +68,9 @@ interface DocxImportOptions {
   /** Custom image converter (default: embed as base64) */
   convertImage?: (image: DocxImageInfo) => Promise<DocxImageResult>;
 
-  /** Whether to ignore empty paragraphs (default: false) */
+  /** Whether to ignore empty paragraphs (default: false).
+   * Empty paragraphs are those without text content or images.
+   * Paragraphs containing only whitespace or images are not considered empty. */
   ignoreEmptyParagraphs?: boolean;
 }
 ```

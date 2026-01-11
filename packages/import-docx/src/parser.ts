@@ -656,7 +656,7 @@ function extractTextFromParagraph(element: Element): Array<{ type: string; text:
 }
 
 /**
- * Check if a paragraph is empty (has no text content)
+ * Check if a paragraph is empty (has no text content or images)
  */
 function isEmptyParagraph(element: Element): boolean {
   // Check if paragraph has any text runs with content
@@ -665,6 +665,7 @@ function isEmptyParagraph(element: Element): boolean {
 
     const run = child;
     for (const runChild of run.children) {
+      // Check for text content
       if (runChild.type === "element" && runChild.name === "w:t") {
         const textNode = runChild.children.find((c) => c.type === "text");
         if (textNode && "value" in textNode) {
@@ -675,9 +676,21 @@ function isEmptyParagraph(element: Element): boolean {
           }
         }
       }
+
+      // Check for images (w:drawing, mc:AlternateContent, or w:pict)
+      if (runChild.type === "element") {
+        if (
+          runChild.name === "w:drawing" ||
+          runChild.name === "mc:AlternateContent" ||
+          runChild.name === "w:pict"
+        ) {
+          // Paragraph contains an image, not empty
+          return false;
+        }
+      }
     }
   }
 
-  // No text content found, paragraph is empty
+  // No text content or images found, paragraph is empty
   return true;
 }
