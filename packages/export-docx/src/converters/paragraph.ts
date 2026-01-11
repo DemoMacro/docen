@@ -17,6 +17,12 @@ export async function convertParagraph(
   options?: IParagraphOptions,
   exportOptions?: DocxExportOptions,
 ): Promise<Paragraph> {
+  // Check if paragraph contains only images (for image-specific styling)
+  const onlyContainsImages =
+    node.content &&
+    node.content.length > 0 &&
+    node.content.every((child) => child.type === "image");
+
   // Convert content to text runs and images
   const children = await Promise.all(
     (node.content || []).map(async (contentNode) => {
@@ -36,11 +42,26 @@ export async function convertParagraph(
   // Flatten the array of arrays
   const flattenedChildren = children.flat();
 
-  // Create paragraph with options
-  const paragraphOptions: IParagraphOptions = {
+  // Determine paragraph options based on content type
+  let paragraphOptions: IParagraphOptions = {
     children: flattenedChildren,
-    ...options,
   };
+
+  if (onlyContainsImages && exportOptions?.image?.paragraph) {
+    // Apply image-specific paragraph options (e.g., alignment for centering)
+    paragraphOptions = {
+      ...paragraphOptions,
+      ...exportOptions.image.paragraph,
+    };
+  }
+
+  // Apply any passed-in options (e.g., numbering for lists)
+  if (options) {
+    paragraphOptions = {
+      ...paragraphOptions,
+      ...options,
+    };
+  }
 
   return new Paragraph(paragraphOptions);
 }
