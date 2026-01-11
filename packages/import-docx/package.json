@@ -1,6 +1,6 @@
 {
   "name": "@docen/import-docx",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "A powerful TipTap/ProseMirror extension that imports Microsoft Word DOCX files to editor content",
   "keywords": [
     "converter",
