@@ -58,9 +58,7 @@ export function convertText(node: TextNode): TextRun | ExternalHyperlink {
 
   // Handle text color and background color
   const textColor = convertColorToHex(textStyleMark?.attrs?.color);
-  const backgroundColor = convertColorToHex(
-    textStyleMark?.attrs?.backgroundColor,
-  );
+  const backgroundColor = convertColorToHex(textStyleMark?.attrs?.backgroundColor);
 
   // Handle font size (convert px to half-points)
   let fontSize: number | undefined;

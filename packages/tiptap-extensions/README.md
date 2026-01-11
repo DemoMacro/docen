@@ -30,10 +30,7 @@ $ pnpm add @docen/tiptap-extensions
 ## Quick Start
 
 ```typescript
-import {
-  tiptapExtensions,
-  tiptapMarkExtensions,
-} from "@docen/tiptap-extensions";
+import { tiptapExtensions, tiptapMarkExtensions } from "@docen/tiptap-extensions";
 
 const editor = new Editor({
   extensions: [
@@ -289,10 +286,7 @@ This package provides two import paths for flexibility:
 
 ```typescript
 // Main entry point - extensions and types
-import {
-  tiptapExtensions,
-  tiptapMarkExtensions,
-} from "@docen/tiptap-extensions";
+import { tiptapExtensions, tiptapMarkExtensions } from "@docen/tiptap-extensions";
 import type { JSONContent, ParagraphNode } from "@docen/tiptap-extensions";
 
 // Types-only path for type definitions

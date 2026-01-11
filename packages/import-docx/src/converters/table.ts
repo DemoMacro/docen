@@ -82,11 +82,7 @@ function convertTableRow(
 
       // If this cell doesn't have vMerge (not a merged cell), calculate actual rowspan
       if (cellProps && cellProps.rowspan === 1) {
-        const actualRowspan = calculateRowspan(
-          allRows,
-          currentRowIndex,
-          colIndex,
-        );
+        const actualRowspan = calculateRowspan(allRows, currentRowIndex, colIndex);
         if (actualRowspan > 1) {
           cellProps = { ...cellProps, rowspan: actualRowspan };
         }
@@ -200,20 +196,12 @@ function getCellProperties(cellNode: Element): {
 /**
  * Calculate the actual rowspan of a cell by counting consecutive vMerge/continue cells below it
  */
-function calculateRowspan(
-  allRows: Element[],
-  startRowIndex: number,
-  colIndex: number,
-): number {
+function calculateRowspan(allRows: Element[], startRowIndex: number, colIndex: number): number {
   let rowspan = 1;
   let currentColIndex = colIndex;
 
   // Check each subsequent row
-  for (
-    let rowIndex = startRowIndex + 1;
-    rowIndex < allRows.length;
-    rowIndex++
-  ) {
+  for (let rowIndex = startRowIndex + 1; rowIndex < allRows.length; rowIndex++) {
     const row = allRows[rowIndex];
     let cellFound = false;
 

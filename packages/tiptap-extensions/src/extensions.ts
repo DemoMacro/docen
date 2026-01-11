@@ -2,11 +2,7 @@
 import Blockquote from "@tiptap/extension-blockquote";
 import BulletList from "@tiptap/extension-bullet-list";
 import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
-import {
-  Details,
-  DetailsSummary,
-  DetailsContent,
-} from "@tiptap/extension-details";
+import { Details, DetailsSummary, DetailsContent } from "@tiptap/extension-details";
 import Document from "@tiptap/extension-document";
 import Emoji from "@tiptap/extension-emoji";
 import HardBreak from "@tiptap/extension-hard-break";
@@ -91,7 +87,4 @@ export const tiptapMarkExtensions = [
 ];
 
 // Complete extension set
-export const tiptapExtensions = [
-  ...tiptapNodeExtensions,
-  ...tiptapMarkExtensions,
-];
+export const tiptapExtensions = [...tiptapNodeExtensions, ...tiptapMarkExtensions];

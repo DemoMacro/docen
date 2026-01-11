@@ -46,15 +46,3 @@ export function isHorizontalRule(node: Element): boolean {
 
   return false;
 }
-
-/**
- * Helper: Find first child element with given name
- */
-function findChild(element: Element, name: string): Element | undefined {
-  for (const child of element.children) {
-    if (child.type === "element" && child.name === name) {
-      return child;
-    }
-  }
-  return undefined;
-}

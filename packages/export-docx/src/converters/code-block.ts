@@ -9,8 +9,7 @@ import { CodeBlockNode } from "../types";
  */
 export function convertCodeBlock(node: CodeBlockNode): Paragraph {
   // Extract text content
-  const codeText =
-    node.content?.map((textNode) => textNode.text || "").join("") || "";
+  const codeText = node.content?.map((textNode) => textNode.text || "").join("") || "";
 
   // Create paragraph with monospace font
   const paragraph = new Paragraph({

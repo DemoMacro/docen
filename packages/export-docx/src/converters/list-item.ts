@@ -13,10 +13,7 @@ import { convertParagraph } from "./paragraph";
  * @param options - Optional paragraph options (e.g., numbering)
  * @returns DOCX Paragraph object
  */
-export function convertListItem(
-  node: ListItemNode,
-  options?: IParagraphOptions,
-): Paragraph {
+export function convertListItem(node: ListItemNode, options?: IParagraphOptions): Paragraph {
   if (!node.content || node.content.length === 0) {
     return new Paragraph({});
   }

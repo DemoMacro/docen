@@ -8,9 +8,7 @@ import { ofetch } from "ofetch";
 /**
  * Extract image type from URL or base64 data
  */
-export function getImageTypeFromSrc(
-  src: string,
-): "png" | "jpeg" | "gif" | "bmp" | "tiff" {
+export function getImageTypeFromSrc(src: string): "png" | "jpeg" | "gif" | "bmp" | "tiff" {
   if (src.startsWith("data:")) {
     const match = src.match(/data:image\/(\w+);/);
     if (match) {
@@ -80,8 +78,7 @@ export function getImageWidth(
   imageMeta?: { width?: number },
 ): number {
   if (node.attrs?.width) return node.attrs.width;
-  if (options?.run?.transformation?.width)
-    return options.run.transformation.width;
+  if (options?.run?.transformation?.width) return options.run.transformation.width;
   if (imageMeta?.width) return Math.min(imageMeta.width, 600);
   return 400;
 }
@@ -96,8 +93,7 @@ export function getImageHeight(
   imageMeta?: { width?: number; height?: number },
 ): number {
   if (node.attrs?.height) return node.attrs.height;
-  if (options?.run?.transformation?.height)
-    return options.run.transformation.height;
+  if (options?.run?.transformation?.height) return options.run.transformation.height;
   if (imageMeta?.width && imageMeta?.height)
     return Math.round((width * imageMeta.height) / imageMeta.width);
   return 300;

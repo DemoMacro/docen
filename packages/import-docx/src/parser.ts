@@ -43,10 +43,7 @@ export async function parseDOCX(
   options: DocxImportOptions = {},
 ): Promise<JSONContent> {
   // Apply defaults
-  const {
-    convertImage = defaultImageConverter,
-    ignoreEmptyParagraphs = false,
-  } = options;
+  const { convertImage = defaultImageConverter, ignoreEmptyParagraphs = false } = options;
 
   // Convert input to Uint8Array
   const uint8Array = await toUint8Array(input);
@@ -129,24 +126,16 @@ function parseNumberingXml(files: Record<string, Uint8Array>): ListTypeMap {
 
         // First pass: collect all abstractNum definitions
         for (const numChild of numbering.children) {
-          if (
-            numChild.type === "element" &&
-            numChild.name === "w:abstractNum"
-          ) {
+          if (numChild.type === "element" && numChild.name === "w:abstractNum") {
             const abstractNum = numChild;
-            const abstractNumId = abstractNum.attributes[
-              "w:abstractNumId"
-            ] as string;
+            const abstractNumId = abstractNum.attributes["w:abstractNumId"] as string;
 
             // Find first level and get its format
             for (const lvlChild of abstractNum.children) {
               if (lvlChild.type === "element" && lvlChild.name === "w:lvl") {
                 // numFmt is a child element, not an attribute
                 for (const fmtChild of lvlChild.children) {
-                  if (
-                    fmtChild.type === "element" &&
-                    fmtChild.name === "w:numFmt"
-                  ) {
+                  if (fmtChild.type === "element" && fmtChild.name === "w:numFmt") {
                     const numFmt = fmtChild.attributes["w:val"] as string;
                     if (numFmt) {
                       abstractNumFormats.set(abstractNumId, numFmt);
@@ -156,16 +145,10 @@ function parseNumberingXml(files: Record<string, Uint8Array>): ListTypeMap {
                 }
                 // Extract start value if present
                 for (const startChild of lvlChild.children) {
-                  if (
-                    startChild.type === "element" &&
-                    startChild.name === "w:start"
-                  ) {
+                  if (startChild.type === "element" && startChild.name === "w:start") {
                     const startVal = startChild.attributes["w:val"] as string;
                     if (startVal) {
-                      abstractNumStarts.set(
-                        abstractNumId,
-                        parseInt(startVal, 10),
-                      );
+                      abstractNumStarts.set(abstractNumId, parseInt(startVal, 10));
                     }
                     break;
                   }
@@ -185,10 +168,7 @@ function parseNumberingXml(files: Record<string, Uint8Array>): ListTypeMap {
 
             // Find abstractNumId reference
             for (const numChild2 of num.children) {
-              if (
-                numChild2.type === "element" &&
-                numChild2.name === "w:abstractNumId"
-              ) {
+              if (numChild2.type === "element" && numChild2.name === "w:abstractNumId") {
                 const abstractNumId = numChild2.attributes["w:val"] as string;
                 const numFmt = abstractNumFormats.get(abstractNumId);
 
@@ -226,9 +206,7 @@ function parseNumberingXml(files: Record<string, Uint8Array>): ListTypeMap {
  * Extract images from DOCX relationships
  * Returns Map of relationship ID to raw image data (Uint8Array)
  */
-function extractImages(
-  files: Record<string, Uint8Array>,
-): Map<string, Uint8Array> {
+function extractImages(files: Record<string, Uint8Array>): Map<string, Uint8Array> {
   const images = new Map<string, Uint8Array>();
 
   const relsXml = files["word/_rels/document.xml.rels"];
@@ -272,9 +250,7 @@ function extractImages(
 /**
  * Extract hyperlinks from DOCX relationships
  */
-function extractHyperlinks(
-  files: Record<string, Uint8Array>,
-): Map<string, string> {
+function extractHyperlinks(files: Record<string, Uint8Array>): Map<string, string> {
   const hyperlinks = new Map<string, string>();
   const relsXml = files["word/_rels/document.xml.rels"];
   if (!relsXml) return hyperlinks;
@@ -412,13 +388,7 @@ function processElements(
 
       // Check for list items
       if (isListItem(element)) {
-        const listNodes = processLists(
-          elements,
-          i,
-          images,
-          hyperlinks,
-          listTypeMap,
-        );
+        const listNodes = processLists(elements, i, images, hyperlinks, listTypeMap);
         result.push(...listNodes);
         i += getListConsumed(elements, i);
         continue;
@@ -446,10 +416,7 @@ function processElements(
 /**
  * Process consecutive code blocks
  */
-function processCodeBlocks(
-  elements: Element[],
-  startIndex: number,
-): JSONContent[] {
+function processCodeBlocks(elements: Element[], startIndex: number): JSONContent[] {
   const result: JSONContent[] = [];
   let i = startIndex;
 
@@ -567,10 +534,7 @@ function getListConsumed(elements: Element[], startIndex: number): number {
 /**
  * Process consecutive task lists
  */
-function processTaskLists(
-  elements: Element[],
-  startIndex: number,
-): JSONContent[] {
+function processTaskLists(elements: Element[], startIndex: number): JSONContent[] {
   const items: JSONContent[] = [];
   let i = startIndex;
 
@@ -617,9 +581,7 @@ function getTaskListConsumed(elements: Element[], startIndex: number): number {
 /**
  * Extract text content from a paragraph (for code blocks)
  */
-function extractTextFromParagraph(
-  element: Element,
-): Array<{ type: string; text: string }> {
+function extractTextFromParagraph(element: Element): Array<{ type: string; text: string }> {
   const content: Array<{ type: string; text: string }> = [];
 
   for (const child of element.children) {

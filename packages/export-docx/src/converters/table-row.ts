@@ -11,10 +11,7 @@ import { DocxExportOptions } from "../option";
  * @param options - Table options from PropertiesOptions
  * @returns DOCX TableRow object
  */
-export function convertTableRow(
-  node: TableRowNode,
-  options: DocxExportOptions["table"],
-): TableRow {
+export function convertTableRow(node: TableRowNode, options: DocxExportOptions["table"]): TableRow {
   // Choose row options
   const rowOptions = options?.row;
 
