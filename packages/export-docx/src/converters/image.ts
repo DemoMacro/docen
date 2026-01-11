@@ -7,7 +7,7 @@ import {
   getImageDataAndMeta,
 } from "../utils";
 import { imageMeta as getImageMetadata, type ImageMeta } from "image-meta";
-import { DocxOptions } from "../option";
+import { DocxExportOptions } from "../option";
 
 /**
  * Convert TipTap image node to DOCX Paragraph with ImageRun
@@ -18,7 +18,7 @@ import { DocxOptions } from "../option";
  */
 export async function convertImage(
   node: ImageNode,
-  options: DocxOptions["image"],
+  options: DocxExportOptions["image"],
 ): Promise<Paragraph> {
   // Get image type from metadata or URL
   const getImageType = (metaType?: string): "jpg" | "png" | "gif" | "bmp" => {

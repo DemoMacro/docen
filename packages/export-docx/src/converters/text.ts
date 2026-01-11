@@ -42,11 +42,8 @@ function convertColorToHex(color?: string): string | undefined {
 
 /**
  * Convert TipTap text node to DOCX TextRun or ExternalHyperlink
- *
- * @param node - TipTap text node
- * @returns DOCX TextRun or ExternalHyperlink
  */
-export const convertText = (node: TextNode): TextRun | ExternalHyperlink => {
+export function convertText(node: TextNode): TextRun | ExternalHyperlink {
   // Check for marks
   const isBold = node.marks?.some((m) => m.type === "bold");
   const isItalic = node.marks?.some((m) => m.type === "italic");
@@ -59,8 +56,33 @@ export const convertText = (node: TextNode): TextRun | ExternalHyperlink => {
   const textStyleMark = node.marks?.find((m) => m.type === "textStyle");
   const hasHighlight = node.marks?.some((m) => m.type === "highlight");
 
-  // Handle text color
+  // Handle text color and background color
   const textColor = convertColorToHex(textStyleMark?.attrs?.color);
+  const backgroundColor = convertColorToHex(
+    textStyleMark?.attrs?.backgroundColor,
+  );
+
+  // Handle font size (convert px to half-points)
+  let fontSize: number | undefined;
+  if (textStyleMark?.attrs?.fontSize) {
+    const fontSizeStr = textStyleMark.attrs.fontSize;
+    if (fontSizeStr.endsWith("px")) {
+      const px = parseFloat(fontSizeStr);
+      if (!isNaN(px)) {
+        // Convert px to half-points: 1px ≈ 0.75pt, 1pt = 2 half-points
+        // So: px * 0.75 * 2 = px * 1.5
+        fontSize = Math.round(px * 1.5);
+      }
+    }
+  }
+
+  // Handle font family (prioritize code font, then textStyle font)
+  let fontFamily: string | undefined;
+  if (isCode) {
+    fontFamily = "Consolas";
+  } else if (textStyleMark?.attrs?.fontFamily) {
+    fontFamily = textStyleMark.attrs.fontFamily;
+  }
 
   // Build text run options
   const baseOptions: IRunOptions = {
@@ -69,10 +91,12 @@ export const convertText = (node: TextNode): TextRun | ExternalHyperlink => {
     italics: isItalic || undefined,
     underline: isUnderline ? {} : undefined,
     strike: isStrike || undefined,
-    font: isCode ? "Consolas" : undefined,
+    font: fontFamily,
+    size: fontSize,
     subScript: isSubscript || undefined,
     superScript: isSuperscript || undefined,
     color: textColor,
+    shading: backgroundColor ? { fill: backgroundColor } : undefined,
     highlight: hasHighlight ? "yellow" : undefined,
   };
 
@@ -91,13 +115,52 @@ export const convertText = (node: TextNode): TextRun | ExternalHyperlink => {
 
   // Return regular text run
   return new TextRun(baseOptions);
-};
+}
 
 /**
  * Convert TipTap hardBreak node to DOCX TextRun with break
- *
- * @returns DOCX TextRun with break
  */
-export const convertHardBreak = (): TextRun => {
-  return new TextRun({ text: "", break: 1 });
-};
+export function convertHardBreak(
+  marks?: Array<{ type: string; attrs?: Record<string, any> }>,
+): TextRun {
+  // Build options object with proper types
+  const options: {
+    text: string;
+    break: number;
+    bold?: boolean;
+    italics?: boolean;
+    underline?: {};
+    strike?: boolean;
+    color?: string;
+  } = {
+    text: "",
+    break: 1,
+  };
+
+  // Apply formatting marks to hardBreak
+  if (marks) {
+    for (const mark of marks) {
+      switch (mark.type) {
+        case "bold":
+          options.bold = true;
+          break;
+        case "italic":
+          options.italics = true;
+          break;
+        case "underline":
+          options.underline = {}; // Empty object for single underline
+          break;
+        case "strike":
+          options.strike = true;
+          break;
+        case "textStyle":
+          if (mark.attrs?.color) {
+            options.color = mark.attrs.color;
+          }
+          break;
+      }
+    }
+  }
+
+  return new TextRun(options);
+}

@@ -1,7 +1,7 @@
 {
-  "name": "@docen/export-docx",
+  "name": "@docen/import-docx",
   "version": "0.0.0",
-  "description": "A powerful TipTap/ProseMirror extension that converts editor content to Microsoft Word DOCX format",
+  "description": "A powerful TipTap/ProseMirror extension that imports Microsoft Word DOCX files to editor content",
   "main": "dist/index.mjs",
   "types": "dist/index.d.ts",
   "files": [
@@ -11,11 +11,6 @@
     ".": {
       "import": "./dist/index.mjs",
       "require": "./dist/index.cjs"
-    },
-    "./docx": {
-      "import": "./dist/docx.mjs",
-      "require": "./dist/docx.cjs",
-      "types": "./dist/docx.d.ts"
     }
   },
   "scripts": {
@@ -32,7 +27,7 @@
     "tiptap",
     "prosemirror",
     "docx",
-    "export",
+    "import",
     "microsoft-word",
     "document",
     "converter",
@@ -54,12 +49,13 @@
   },
   "homepage": "https://github.com/DemoMacro/docen#readme",
   "dependencies": {
-    "docx": "9.5.1",
-    "image-meta": "0.2.2",
-    "ofetch": "1.4.1"
+    "fflate": "0.8.2",
+    "undio": "0.2.0",
+    "xast-util-from-xml": "4.0.0"
   },
   "devDependencies": {
     "@docen/tiptap-extensions": "workspace:*",
-    "@tiptap/core": "3.7.2"
+    "@tiptap/core": "3.7.2",
+    "@types/xast": "2.0.4"
   }
 }

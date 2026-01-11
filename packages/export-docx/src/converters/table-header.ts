@@ -1,7 +1,7 @@
 import { TableCell } from "docx";
 import { TableHeaderNode } from "../types";
 import { convertParagraph } from "./paragraph";
-import { DocxOptions } from "../option";
+import { DocxExportOptions } from "../option";
 
 /**
  * Convert TipTap table header node to DOCX TableCell
@@ -12,7 +12,7 @@ import { DocxOptions } from "../option";
  */
 export function convertTableHeader(
   node: TableHeaderNode,
-  options: DocxOptions["table"],
+  options: DocxExportOptions["table"],
 ): TableCell {
   // Convert paragraphs in the header
   const paragraphs =
@@ -26,31 +26,34 @@ export function convertTableHeader(
       ),
     ) || [];
 
-  // Create table header cell with header options
-  const headerCell = new TableCell({
+  // Create table header cell options
+  const headerCellOptions = {
     children: paragraphs,
     ...options?.header?.run,
-  });
+  };
 
   // Add column span if present
   if (node.attrs?.colspan && node.attrs.colspan > 1) {
-    Object.assign(headerCell.options, { columnSpan: node.attrs.colspan });
+    headerCellOptions.columnSpan = node.attrs.colspan;
   }
 
   // Add row span if present
   if (node.attrs?.rowspan && node.attrs.rowspan > 1) {
-    Object.assign(headerCell.options, { rowSpan: node.attrs.rowspan });
+    headerCellOptions.rowSpan = node.attrs.rowspan;
   }
 
   // Add column width if present
-  if (node.attrs?.colwidth !== null && node.attrs?.colwidth !== undefined) {
-    Object.assign(headerCell.options, {
-      width: {
-        size: node.attrs.colwidth,
-        type: "dxa" as const,
-      },
-    });
+  // colwidth is an array of column widths, use the first one for this cell
+  if (
+    node.attrs?.colwidth !== null &&
+    node.attrs?.colwidth !== undefined &&
+    node.attrs.colwidth.length > 0
+  ) {
+    headerCellOptions.width = {
+      size: node.attrs.colwidth[0],
+      type: "dxa" as const,
+    };
   }
 
-  return headerCell;
+  return new TableCell(headerCellOptions);
 }

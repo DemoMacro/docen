@@ -2,7 +2,7 @@ import { TableRow } from "docx";
 import { TableRowNode } from "../types";
 import { convertTableCell } from "./table-cell";
 import { convertTableHeader } from "./table-header";
-import { DocxOptions } from "../option";
+import { DocxExportOptions } from "../option";
 
 /**
  * Convert TipTap table row node to DOCX TableRow
@@ -13,7 +13,7 @@ import { DocxOptions } from "../option";
  */
 export function convertTableRow(
   node: TableRowNode,
-  options: DocxOptions["table"],
+  options: DocxExportOptions["table"],
 ): TableRow {
   // Choose row options
   const rowOptions = options?.row;

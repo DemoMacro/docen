@@ -130,4 +130,4 @@ dist
 .pnp.*
 
 # Ignore specific HTML files that cause prettier errors
-playground/html/horizontal-rule.html
+playground/html/

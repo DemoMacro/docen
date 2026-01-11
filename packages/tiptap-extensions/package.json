@@ -1,0 +1,85 @@
+{
+  "name": "@docen/tiptap-extensions",
+  "version": "0.0.0",
+  "description": "Collection of TipTap extensions with TypeScript type definitions for Docen",
+  "main": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs"
+    },
+    "./types": {
+      "import": "./dist/types.mjs",
+      "require": "./dist/types.cjs",
+      "types": "./dist/types.d.ts"
+    }
+  },
+  "scripts": {
+    "dev": "unbuild --stub",
+    "build": "unbuild",
+    "prepack": "pnpm build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DemoMacro/docen.git"
+  },
+  "keywords": [
+    "docen",
+    "tiptap",
+    "extensions",
+    "types",
+    "typescript",
+    "editor",
+    "wysiwyg",
+    "prosemirror"
+  ],
+  "author": {
+    "name": "Demo Macro",
+    "email": "abc@imst.xyz",
+    "url": "https://imst.xyz/"
+  },
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/DemoMacro/docen/issues"
+  },
+  "homepage": "https://github.com/DemoMacro/docen#readme",
+  "dependencies": {
+    "@tiptap/core": "3.7.2",
+    "@tiptap/extension-blockquote": "3.7.2",
+    "@tiptap/extension-bold": "3.7.2",
+    "@tiptap/extension-bullet-list": "3.7.2",
+    "@tiptap/extension-code": "3.7.2",
+    "@tiptap/extension-code-block-lowlight": "3.7.2",
+    "@tiptap/extension-details": "3.10.7",
+    "@tiptap/extension-document": "3.7.2",
+    "@tiptap/extension-emoji": "3.10.7",
+    "@tiptap/extension-hard-break": "3.7.2",
+    "@tiptap/extension-heading": "3.7.2",
+    "@tiptap/extension-highlight": "3.7.2",
+    "@tiptap/extension-horizontal-rule": "3.10.7",
+    "@tiptap/extension-image": "3.7.2",
+    "@tiptap/extension-italic": "3.7.2",
+    "@tiptap/extension-link": "3.7.2",
+    "@tiptap/extension-list-item": "3.7.2",
+    "@tiptap/extension-mathematics": "3.10.7",
+    "@tiptap/extension-mention": "3.10.7",
+    "@tiptap/extension-ordered-list": "3.7.2",
+    "@tiptap/extension-paragraph": "3.7.2",
+    "@tiptap/extension-strike": "3.7.2",
+    "@tiptap/extension-subscript": "3.7.2",
+    "@tiptap/extension-superscript": "3.7.2",
+    "@tiptap/extension-table": "3.7.2",
+    "@tiptap/extension-table-cell": "3.7.2",
+    "@tiptap/extension-table-header": "3.7.2",
+    "@tiptap/extension-table-row": "3.7.2",
+    "@tiptap/extension-task-item": "3.7.2",
+    "@tiptap/extension-task-list": "3.7.2",
+    "@tiptap/extension-text": "3.7.2",
+    "@tiptap/extension-text-style": "3.7.2",
+    "@tiptap/extension-underline": "3.7.2"
+  }
+}

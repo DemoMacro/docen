@@ -1,18 +1,18 @@
 import { Paragraph, BorderStyle } from "docx";
 import { HorizontalRuleNode } from "../types";
-import type { DocxOptions } from "../option";
+import type { DocxExportOptions } from "../option";
 
 /**
  * Convert TipTap horizontalRule node to DOCX Paragraph
  * Creates a horizontal line using bottom border
  *
  * @param node - TipTap horizontalRule node
- * @param options - Docx options for horizontal rule styling
+ * @param options - Export options for horizontal rule styling
  * @returns DOCX Paragraph object with horizontal rule styling
  */
 export function convertHorizontalRule(
   node: HorizontalRuleNode,
-  options: DocxOptions["horizontalRule"],
+  options: DocxExportOptions["horizontalRule"],
 ): Paragraph {
   return new Paragraph({
     children: [], // Empty content
