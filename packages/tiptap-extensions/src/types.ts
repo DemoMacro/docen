@@ -50,7 +50,7 @@ export interface DocumentNode extends JSONContent {
 
 export interface ParagraphNode extends JSONContent {
   type: "paragraph";
-  content?: Array<TextNode | HardBreakNode>;
+  content?: Array<TextNode | HardBreakNode | ImageNode>;
 }
 
 export interface HeadingNode extends JSONContent {

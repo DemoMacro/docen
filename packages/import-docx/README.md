@@ -127,6 +127,7 @@ await parseDOCX(buffer, {
 ### Media & Embeds
 
 - **Images** with automatic base64 conversion
+- **Grouped Images** (DOCX image groups) support
 - **Links** (hyperlinks) with href extraction
 
 ## Parsing Algorithm
@@ -214,8 +215,8 @@ All colors are imported as hex values (e.g., "#FF0000", "#008000"). Color names 
 ### Image Limitations
 
 - Only embedded images are supported (external image links are not fetched)
-- Image width/height metadata is preserved but visual sizing may vary
-- Title, alt text, and other image attributes have limited DOCX support
+- Image dimensions and title are extracted from DOCX metadata
+- Some DOCX image features (like advanced positioning or text wrapping) have limited support
 
 ### Table Cell Types
 

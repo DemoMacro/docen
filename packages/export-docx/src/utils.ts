@@ -77,9 +77,12 @@ export function getImageWidth(
   options?: { run?: { transformation?: { width?: number } } },
   imageMeta?: { width?: number },
 ): number {
-  if (node.attrs?.width) return node.attrs.width;
+  // Check node.attrs.width (including 0 as valid value)
+  if (node.attrs?.width !== undefined && node.attrs?.width !== null) {
+    return node.attrs.width;
+  }
   if (options?.run?.transformation?.width) return options.run.transformation.width;
-  if (imageMeta?.width) return Math.min(imageMeta.width, 600);
+  if (imageMeta?.width) return imageMeta.width;
   return 400;
 }
 
@@ -92,7 +95,10 @@ export function getImageHeight(
   options?: { run?: { transformation?: { height?: number } } },
   imageMeta?: { width?: number; height?: number },
 ): number {
-  if (node.attrs?.height) return node.attrs.height;
+  // Check node.attrs.height (including 0 as valid value)
+  if (node.attrs?.height !== undefined && node.attrs?.height !== null) {
+    return node.attrs.height;
+  }
   if (options?.run?.transformation?.height) return options.run.transformation.height;
   if (imageMeta?.width && imageMeta?.height)
     return Math.round((width * imageMeta.height) / imageMeta.width);

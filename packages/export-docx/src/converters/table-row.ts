@@ -9,26 +9,35 @@ import { DocxExportOptions } from "../option";
  *
  * @param node - TipTap table row node
  * @param options - Table options from PropertiesOptions
- * @returns DOCX TableRow object
+ * @param exportOptions - Export options (for image processing)
+ * @returns Promise<DOCX TableRow object>
  */
-export function convertTableRow(node: TableRowNode, options: DocxExportOptions["table"]): TableRow {
+export async function convertTableRow(
+  node: TableRowNode,
+  options: DocxExportOptions["table"],
+  exportOptions?: DocxExportOptions,
+): Promise<TableRow> {
   // Choose row options
   const rowOptions = options?.row;
 
   // Convert table cells and headers
-  const cells =
-    node.content?.flatMap((cellNode) => {
+  const cells = await Promise.all(
+    (node.content || []).map(async (cellNode) => {
       if (cellNode.type === "tableCell") {
-        return convertTableCell(cellNode, options);
+        return await convertTableCell(cellNode, options, exportOptions);
       } else if (cellNode.type === "tableHeader") {
-        return convertTableHeader(cellNode, options);
+        return await convertTableHeader(cellNode, options, exportOptions);
       }
-      return [];
-    }) || [];
+      return null;
+    }),
+  );
+
+  // Filter out null values
+  const validCells = cells.filter((cell) => cell !== null);
 
   // Create table row with options
   const row = new TableRow({
-    children: cells,
+    children: validCells,
     ...rowOptions,
   });
 

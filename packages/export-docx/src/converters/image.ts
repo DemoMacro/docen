@@ -5,16 +5,16 @@ import { imageMeta as getImageMetadata, type ImageMeta } from "image-meta";
 import { DocxExportOptions } from "../option";
 
 /**
- * Convert TipTap image node to DOCX Paragraph with ImageRun
+ * Convert TipTap image node to DOCX ImageRun
  *
  * @param node - TipTap image node
  * @param options - Image options from PropertiesOptions
- * @returns Promise<DOCX Paragraph> object with image
+ * @returns Promise<DOCX ImageRun>
  */
-export async function convertImage(
+export async function convertImageToRun(
   node: ImageNode,
   options: DocxExportOptions["image"],
-): Promise<Paragraph> {
+): Promise<ImageRun> {
   // Get image type from metadata or URL
   const getImageType = (metaType?: string): "jpg" | "png" | "gif" | "bmp" => {
     // Try metadata type first
@@ -58,6 +58,11 @@ export async function convertImage(
     } else if (src.startsWith("data:")) {
       // Handle data URLs - extract the base64 part
       const base64Data = src.split(",")[1];
+
+      if (!base64Data) {
+        throw new Error("Invalid data URL: missing base64 data");
+      }
+
       // Use TextEncoder to create Uint8Array from base64 (works in both Node and browser)
       const binaryString = atob(base64Data);
       const bytes = new Uint8Array(binaryString.length);
@@ -65,6 +70,7 @@ export async function convertImage(
         bytes[i] = binaryString.charCodeAt(i);
       }
       imageData = bytes;
+
       // Extract metadata from data URL
       try {
         imageMeta = getImageMetadata(imageData);
@@ -81,16 +87,12 @@ export async function convertImage(
     }
   } catch (error) {
     console.warn(`Failed to process image:`, error);
-    // Create placeholder paragraph
-    return new Paragraph({
-      children: [
-        new ImageRun({
-          type: "png",
-          data: new Uint8Array(0), // Empty Uint8Array as placeholder
-          transformation: { width: 100, height: 100 },
-          altText: { name: node.attrs?.alt || "Failed to load image" },
-        }),
-      ],
+    // Return placeholder ImageRun
+    return new ImageRun({
+      type: "png",
+      data: new Uint8Array(0),
+      transformation: { width: 100, height: 100 },
+      altText: { name: node.attrs?.alt || "Failed to load image" },
     });
   }
 
@@ -98,7 +100,7 @@ export async function convertImage(
   const finalWidth = getImageWidth(node, options, imageMeta);
   const finalHeight = getImageHeight(node, finalWidth, options, imageMeta);
 
-  // Build complete image options
+  // Build ImageRun options
   const imageOptions: IImageOptions = {
     type: getImageType(imageMeta.type),
     data: imageData,
@@ -121,8 +123,22 @@ export async function convertImage(
       }),
   };
 
-  // Create image run
-  const imageRun = new ImageRun(imageOptions);
+  return new ImageRun(imageOptions);
+}
+
+/**
+ * Convert TipTap image node to DOCX Paragraph with ImageRun
+ *
+ * @param node - TipTap image node
+ * @param options - Image options from PropertiesOptions
+ * @returns Promise<DOCX Paragraph> object with image
+ */
+export async function convertImage(
+  node: ImageNode,
+  options: DocxExportOptions["image"],
+): Promise<Paragraph> {
+  // Reuse convertImageToRun
+  const imageRun = await convertImageToRun(node, options);
 
   // Create paragraph with image
   const paragraphOptions = options?.paragraph || {};

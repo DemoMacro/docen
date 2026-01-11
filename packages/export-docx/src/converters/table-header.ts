@@ -8,23 +8,27 @@ import { DocxExportOptions } from "../option";
  *
  * @param node - TipTap table header node
  * @param options - Table options from PropertiesOptions
- * @returns DOCX TableCell object for header
+ * @param exportOptions - Export options (for image processing)
+ * @returns Promise<DOCX TableCell object for header>
  */
-export function convertTableHeader(
+export async function convertTableHeader(
   node: TableHeaderNode,
   options: DocxExportOptions["table"],
-): TableCell {
+  exportOptions?: DocxExportOptions,
+): Promise<TableCell> {
   // Convert paragraphs in the header
-  const paragraphs =
-    node.content?.map((p) =>
+  const paragraphs = await Promise.all(
+    (node.content || []).map((p) =>
       convertParagraph(
         p,
         options?.header?.paragraph ??
           options?.cell?.paragraph ??
           options?.row?.paragraph ??
           options?.paragraph,
+        exportOptions,
       ),
-    ) || [];
+    ),
+  );
 
   // Create table header cell options
   const headerCellOptions = {

@@ -1,6 +1,7 @@
 import { BulletListNode, OrderedListNode, ListItemNode } from "../types";
 import { Paragraph } from "docx";
 import { convertListItem } from "./list-item";
+import { DocxExportOptions } from "../option";
 
 export interface ListOptions {
   numbering: {
@@ -37,10 +38,11 @@ export function convertOrderedList(node: OrderedListNode): ListOptions {
 /**
  * Convert list nodes (bullet or ordered) with proper numbering
  */
-export function convertList(
+export async function convertList(
   node: BulletListNode | OrderedListNode,
   listType: "bullet" | "ordered",
-): Paragraph[] {
+  exportOptions?: DocxExportOptions,
+): Promise<Paragraph[]> {
   if (!node.content) {
     return [];
   }
@@ -60,12 +62,16 @@ export function convertList(
   // Convert list items
   for (const item of node.content) {
     if (item.type === "listItem") {
-      const paragraph = convertListItem(item as ListItemNode, {
-        numbering: {
-          reference: numberingReference,
-          level: 0,
+      const paragraph = await convertListItem(
+        item as ListItemNode,
+        {
+          numbering: {
+            reference: numberingReference,
+            level: 0,
+          },
         },
-      });
+        exportOptions,
+      );
       elements.push(paragraph);
     }
   }

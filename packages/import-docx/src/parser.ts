@@ -4,7 +4,8 @@ import type { Root, Element } from "xast";
 import type { JSONContent } from "@tiptap/core";
 import type { DocxImportOptions } from "./option";
 import type { DocxImageConverter, DocxImageInfo } from "./types";
-import { toBase64, toUint8Array, DataType } from "undio";
+import { toUint8Array, DataType } from "undio";
+import { imageMeta } from "image-meta";
 import {
   convertParagraph,
   convertTable,
@@ -24,14 +25,53 @@ interface ListInfo {
 type ListTypeMap = Map<string, ListInfo>;
 
 /**
+ * Base64 lookup table for fast encoding
+ */
+const BASE64_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+/**
+ * Convert Uint8Array to base64 string using lookup table and bitwise operations
+ * Similar to base64-arraybuffer implementation but without external dependencies
+ * Performance: O(n) time complexity, no stack overflow risk
+ */
+function uint8ArrayToBase64(bytes: Uint8Array): string {
+  const len = bytes.length;
+  const resultLen = Math.ceil(len / 3) * 4;
+  const result = Array.from<string>({ length: resultLen });
+  let resultIndex = 0;
+
+  // Process 3 bytes at a time (24 bits -> 4 base64 chars)
+  for (let i = 0; i < len; i += 3) {
+    // Read 3 bytes (24 bits)
+    const byte1 = bytes[i];
+    const byte2 = i + 1 < len ? bytes[i + 1] : 0;
+    const byte3 = i + 2 < len ? bytes[i + 2] : 0;
+
+    // Extract 4 x 6-bit values using bitwise operations
+    const index0 = byte1 >> 2;
+    const index1 = ((byte1 & 0x03) << 4) | (byte2 >> 4);
+    const index2 = ((byte2 & 0x0f) << 2) | (byte3 >> 6);
+    const index3 = byte3 & 0x3f;
+
+    // Encode to base64 characters using lookup table
+    result[resultIndex++] = BASE64_CHARS[index0];
+    result[resultIndex++] = BASE64_CHARS[index1];
+    result[resultIndex++] = i + 1 < len ? BASE64_CHARS[index2] : "=";
+    result[resultIndex++] = i + 2 < len ? BASE64_CHARS[index3] : "=";
+  }
+
+  return result.join("");
+}
+
+/**
  * Default image converter implementation
  * Embeds images as base64 data URLs
  * Exported for users who want to reuse or extend this behavior
  */
 export const defaultImageConverter: DocxImageConverter = async (image) => {
-  const base64 = toBase64(image.data);
+  const base64 = uint8ArrayToBase64(image.data);
   return {
-    src: base64,
+    src: `data:${image.contentType};base64,${base64}`,
   };
 };
 
@@ -58,12 +98,15 @@ export async function parseDOCX(
   const convertedImages = new Map<string, string>();
   for (const [rId, imageData] of rawImages.entries()) {
     try {
-      // Determine content type from file extension (DOCX stores by extension)
-      const imagePath = Object.keys(files).find(
-        (key) => key.endsWith(rId) || key.includes(`media/${rId}`),
-      );
-      const ext = imagePath?.split(".").pop()?.toLowerCase() || "png";
-      const contentType = `image/${ext}`;
+      // Get actual image type using image-meta
+      let contentType: string;
+      try {
+        const meta = imageMeta(imageData);
+        contentType = `image/${meta.type}`;
+      } catch {
+        // Fallback to png if type detection fails
+        contentType = "image/png";
+      }
 
       const imageInfo: DocxImageInfo = {
         id: rId,
@@ -76,7 +119,15 @@ export async function parseDOCX(
     } catch (error) {
       // If image conversion fails, use fallback
       console.warn(`Failed to convert image ${rId}:`, error);
-      const fallbackUrl = toBase64(imageData);
+      let fallbackContentType = "image/png";
+      try {
+        const meta = imageMeta(imageData);
+        fallbackContentType = `image/${meta.type}`;
+      } catch {
+        // Keep default png
+      }
+      const fallbackBase64 = uint8ArrayToBase64(imageData);
+      const fallbackUrl = `data:${fallbackContentType};base64,${fallbackBase64}`;
       convertedImages.set(rId, fallbackUrl);
     }
   }
