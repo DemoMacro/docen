@@ -47,6 +47,15 @@ export async function convertParagraph(
     children: flattenedChildren,
   };
 
+  // Apply default paragraph styles directly to each paragraph for better compatibility
+  // instead of relying on <w:pPrDefault> which may not be handled correctly by some word processors
+  if (!onlyContainsImages && exportOptions?.styles?.default?.document?.paragraph) {
+    paragraphOptions = {
+      ...paragraphOptions,
+      ...exportOptions.styles.default.document.paragraph,
+    };
+  }
+
   if (onlyContainsImages && exportOptions?.image?.paragraph) {
     // Apply image-specific paragraph options (e.g., alignment for centering)
     paragraphOptions = {
