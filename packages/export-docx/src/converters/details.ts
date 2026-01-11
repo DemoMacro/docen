@@ -2,19 +2,19 @@ import { Paragraph } from "docx";
 import { convertText, convertHardBreak } from "./text";
 import { convertNode } from "../generator";
 import { DetailsNode, DetailsSummaryNode, DetailsContentNode } from "../types";
-import type { DocxOptions } from "../option";
+import type { DocxExportOptions } from "../option";
 
 /**
  * Convert TipTap details node to array of DOCX Paragraphs
  * Simulates collapsible content using indentation and borders
  *
  * @param node - TipTap details node
- * @param options - Docx options for nested content conversion
+ * @param options - Export options for nested content conversion
  * @returns Array of DOCX Paragraph objects
  */
 export async function convertDetails(
   node: DetailsNode,
-  options: DocxOptions,
+  options: DocxExportOptions,
 ): Promise<Paragraph[]> {
   if (!node.content) return [];
 
@@ -37,7 +37,7 @@ export async function convertDetails(
       if (textNode.type === "text") {
         return convertText(textNode);
       } else if (textNode.type === "hardBreak") {
-        return convertHardBreak();
+        return convertHardBreak(textNode.marks);
       }
       return [];
     });

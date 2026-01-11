@@ -15,7 +15,7 @@ import {
   convertInchesToTwip,
   TableOfContents,
 } from "docx";
-import { type DocxOptions } from "./option";
+import { type DocxExportOptions } from "./option";
 import { convertParagraph } from "./converters/paragraph";
 import { convertHeading } from "./converters/heading";
 import { convertBlockquote } from "./converters/blockquote";
@@ -49,12 +49,12 @@ import type {
  * Convert TipTap JSONContent to DOCX format
  *
  * @param docJson - TipTap document JSON
- * @param options - Options for document properties
+ * @param options - Export options
  * @returns Promise with DOCX in specified format
  */
 export async function generateDOCX<T extends OutputType>(
   docJson: JSONContent,
-  options: DocxOptions<T>,
+  options: DocxExportOptions<T>,
 ): Promise<OutputByType[T]> {
   const {
     // Document metadata
@@ -180,7 +180,7 @@ export async function generateDOCX<T extends OutputType>(
  */
 export async function convertDocumentContent(
   node: JSONContent,
-  options: DocxOptions,
+  options: DocxExportOptions,
 ): Promise<FileChild[]> {
   const elements: FileChild[] = [];
 
@@ -205,7 +205,7 @@ export async function convertDocumentContent(
  */
 export async function convertNode(
   node: JSONContent,
-  options: DocxOptions,
+  options: DocxExportOptions,
 ): Promise<FileChild | FileChild[] | null> {
   if (!node || !node.type) {
     return null;

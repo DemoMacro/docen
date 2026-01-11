@@ -19,7 +19,7 @@ export function convertParagraph(
       if (contentNode.type === "text") {
         return convertText(contentNode);
       } else if (contentNode.type === "hardBreak") {
-        return convertHardBreak();
+        return convertHardBreak(contentNode.marks);
       }
       return [];
     }) || [];

@@ -132,3 +132,7 @@ dist
 # playground
 /playground/json
 /playground/docx
+/playground/json-parsed
+/playground/html-parsed
+/playground/docx-parsed
+/playground/docx-structure

@@ -11,9 +11,9 @@ import {
 } from "docx";
 
 /**
- * Options for generating DOCX documents
+ * Options for exporting TipTap content to DOCX
  */
-export interface DocxOptions<T extends OutputType = OutputType> {
+export interface DocxExportOptions<T extends OutputType = OutputType> {
   // === IPropertiesOptions fields (in order) ===
   sections?: ISectionOptions[];
   title?: string;

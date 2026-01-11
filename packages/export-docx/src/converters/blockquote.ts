@@ -20,7 +20,7 @@ export function convertBlockquote(node: BlockquoteNode): Paragraph[] {
           if (node.type === "text") {
             return convertText(node);
           } else if (node.type === "hardBreak") {
-            return convertHardBreak();
+            return convertHardBreak(node.marks);
           }
           return [];
         }) || [];

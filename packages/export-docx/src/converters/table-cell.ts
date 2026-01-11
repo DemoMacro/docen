@@ -1,7 +1,7 @@
 import { TableCell } from "docx";
 import { TableCellNode } from "../types";
 import { convertParagraph } from "./paragraph";
-import { DocxOptions } from "../option";
+import { DocxExportOptions } from "../option";
 
 /**
  * Convert TipTap table cell node to DOCX TableCell
@@ -12,7 +12,7 @@ import { DocxOptions } from "../option";
  */
 export function convertTableCell(
   node: TableCellNode,
-  options: DocxOptions["table"],
+  options: DocxExportOptions["table"],
 ): TableCell {
   // Convert paragraphs in the cell
   const paragraphs =
@@ -25,31 +25,34 @@ export function convertTableCell(
       ),
     ) || [];
 
-  // Create table cell with options
-  const cell = new TableCell({
+  // Create table cell options
+  const cellOptions = {
     children: paragraphs,
     ...options?.cell?.run,
-  });
+  };
 
   // Add column span if present
   if (node.attrs?.colspan && node.attrs.colspan > 1) {
-    Object.assign(cell.options, { columnSpan: node.attrs.colspan });
+    cellOptions.columnSpan = node.attrs.colspan;
   }
 
   // Add row span if present
   if (node.attrs?.rowspan && node.attrs.rowspan > 1) {
-    Object.assign(cell.options, { rowSpan: node.attrs.rowspan });
+    cellOptions.rowSpan = node.attrs.rowspan;
   }
 
   // Add column width if present
-  if (node.attrs?.colwidth !== null && node.attrs?.colwidth !== undefined) {
-    Object.assign(cell.options, {
-      width: {
-        size: node.attrs.colwidth,
-        type: "dxa" as const,
-      },
-    });
+  // colwidth is an array of column widths, use the first one for this cell
+  if (
+    node.attrs?.colwidth !== null &&
+    node.attrs?.colwidth !== undefined &&
+    node.attrs.colwidth.length > 0
+  ) {
+    cellOptions.width = {
+      size: node.attrs.colwidth[0],
+      type: "dxa" as const,
+    };
   }
 
-  return cell;
+  return new TableCell(cellOptions);
 }
