@@ -90,10 +90,11 @@ Converts TipTap/ProseMirror content to DOCX format.
 **Configuration Options:**
 
 - `title` - Document title
-- `author` - Document author
+- `creator` - Document author
 - `description` - Document description
 - `outputType` - Output format (required)
 - `table` - Table styling defaults (alignment, spacing, borders)
+- `image` - Image handling options
 - `styles` - Document default styles (font, line height, spacing)
 - `horizontalRule` - Horizontal rule style
 
