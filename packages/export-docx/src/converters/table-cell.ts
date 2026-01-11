@@ -19,9 +19,7 @@ export function convertTableCell(
     node.content?.map((p) =>
       convertParagraph(
         p,
-        options?.cell?.paragraph ??
-          options?.row?.paragraph ??
-          options?.paragraph,
+        options?.cell?.paragraph ?? options?.row?.paragraph ?? options?.paragraph,
       ),
     ) || [];
 

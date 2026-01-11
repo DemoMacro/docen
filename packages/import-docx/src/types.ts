@@ -23,6 +23,4 @@ export interface DocxImageResult {
 /**
  * Custom image converter function type
  */
-export type DocxImageConverter = (
-  image: DocxImageInfo,
-) => Promise<DocxImageResult>;
+export type DocxImageConverter = (image: DocxImageInfo) => Promise<DocxImageResult>;

@@ -170,9 +170,7 @@ export async function generateDOCX<T extends OutputType>(
 
   const doc = new Document(docOptions);
 
-  return Packer.pack(doc, outputType || "arraybuffer") as Promise<
-    OutputByType[T]
-  >;
+  return Packer.pack(doc, outputType || "arraybuffer") as Promise<OutputByType[T]>;
 }
 
 /**
@@ -250,10 +248,7 @@ export async function convertNode(
       return new Paragraph({ children: [convertHardBreak()] });
 
     case "horizontalRule":
-      return convertHorizontalRule(
-        node as HorizontalRuleNode,
-        options.horizontalRule,
-      );
+      return convertHorizontalRule(node as HorizontalRuleNode, options.horizontalRule);
 
     case "details":
       return await convertDetails(node as DetailsNode, options);

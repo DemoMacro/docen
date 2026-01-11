@@ -49,9 +49,7 @@ export function convertList(
 
   // Get list options
   const listOptions =
-    listType === "bullet"
-      ? convertBulletList()
-      : convertOrderedList(node as OrderedListNode);
+    listType === "bullet" ? convertBulletList() : convertOrderedList(node as OrderedListNode);
 
   // Determine numbering reference based on start value
   let numberingReference = listOptions.numbering.reference;

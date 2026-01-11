@@ -20,10 +20,7 @@ export function isTaskItem(node: Element): boolean {
           if (textNode && "value" in textNode) {
             const text = (textNode as { value: string }).value;
             // Check if text starts with checkbox symbol
-            return (
-              text.startsWith(CHECKBOX_UNCHECKED) ||
-              text.startsWith(CHECKBOX_CHECKED)
-            );
+            return text.startsWith(CHECKBOX_UNCHECKED) || text.startsWith(CHECKBOX_CHECKED);
           }
         }
       }
@@ -91,10 +88,7 @@ function convertTaskItemParagraph(node: Element): JSONContent {
             const textNode = runChild.children.find((c) => c.type === "text");
             if (textNode && "value" in textNode) {
               const text = (textNode as { value: string }).value;
-              if (
-                text.startsWith(CHECKBOX_UNCHECKED) ||
-                text.startsWith(CHECKBOX_CHECKED)
-              ) {
+              if (text.startsWith(CHECKBOX_UNCHECKED) || text.startsWith(CHECKBOX_CHECKED)) {
                 isCheckboxRun = true;
                 firstTextSkipped = true;
 

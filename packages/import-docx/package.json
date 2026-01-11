@@ -2,11 +2,41 @@
   "name": "@docen/import-docx",
   "version": "0.0.0",
   "description": "A powerful TipTap/ProseMirror extension that imports Microsoft Word DOCX files to editor content",
-  "main": "dist/index.mjs",
-  "types": "dist/index.d.ts",
+  "keywords": [
+    "converter",
+    "docen",
+    "document",
+    "docx",
+    "editor",
+    "import",
+    "microsoft-word",
+    "office",
+    "prosemirror",
+    "rich-text",
+    "tiptap",
+    "typescript",
+    "word",
+    "wysiwyg"
+  ],
+  "homepage": "https://github.com/DemoMacro/docen#readme",
+  "bugs": {
+    "url": "https://github.com/DemoMacro/docen/issues"
+  },
+  "license": "MIT",
+  "author": {
+    "name": "Demo Macro",
+    "email": "abc@imst.xyz",
+    "url": "https://imst.xyz/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DemoMacro/docen.git"
+  },
   "files": [
     "dist"
   ],
+  "main": "dist/index.mjs",
+  "types": "dist/index.d.ts",
   "exports": {
     ".": {
       "import": "./dist/index.mjs",
@@ -18,36 +48,6 @@
     "build": "unbuild",
     "prepack": "pnpm build"
   },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/DemoMacro/docen.git"
-  },
-  "keywords": [
-    "docen",
-    "tiptap",
-    "prosemirror",
-    "docx",
-    "import",
-    "microsoft-word",
-    "document",
-    "converter",
-    "word",
-    "office",
-    "typescript",
-    "editor",
-    "wysiwyg",
-    "rich-text"
-  ],
-  "author": {
-    "name": "Demo Macro",
-    "email": "abc@imst.xyz",
-    "url": "https://imst.xyz/"
-  },
-  "license": "MIT",
-  "bugs": {
-    "url": "https://github.com/DemoMacro/docen/issues"
-  },
-  "homepage": "https://github.com/DemoMacro/docen#readme",
   "dependencies": {
     "fflate": "0.8.2",
     "undio": "0.2.0",

@@ -46,10 +46,7 @@ export interface DocxExportOptions<T extends OutputType = OutputType> {
 
   image?: {
     paragraph?: Partial<IParagraphOptions>;
-    run?: Pick<
-      IImageOptions,
-      "transformation" | "floating" | "altText" | "outline"
-    >;
+    run?: Pick<IImageOptions, "transformation" | "floating" | "altText" | "outline">;
   };
 
   table?: {

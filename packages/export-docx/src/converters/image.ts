@@ -1,11 +1,6 @@
 import { Paragraph, ImageRun, IImageOptions } from "docx";
 import { ImageNode } from "../types";
-import {
-  getImageTypeFromSrc,
-  getImageWidth,
-  getImageHeight,
-  getImageDataAndMeta,
-} from "../utils";
+import { getImageTypeFromSrc, getImageWidth, getImageHeight, getImageDataAndMeta } from "../utils";
 import { imageMeta as getImageMetadata, type ImageMeta } from "image-meta";
 import { DocxExportOptions } from "../option";
 
@@ -82,9 +77,7 @@ export async function convertImage(
         };
       }
     } else {
-      throw new Error(
-        `Unsupported image source format: ${src.substring(0, 20)}...`,
-      );
+      throw new Error(`Unsupported image source format: ${src.substring(0, 20)}...`);
     }
   } catch (error) {
     console.warn(`Failed to process image:`, error);

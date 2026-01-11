@@ -1,11 +1,4 @@
-import {
-  readFileSync,
-  writeFileSync,
-  existsSync,
-  readdirSync,
-  rmSync,
-  mkdirSync,
-} from "node:fs";
+import { readFileSync, writeFileSync, existsSync, readdirSync, rmSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { generateDOCX } from "../packages/export-docx/src";
@@ -137,9 +130,7 @@ function compareJSON(original: any, parsed: any, path = ""): string[] {
   if (original === parsed) return differences;
 
   if (typeof original !== typeof parsed) {
-    differences.push(
-      `${path}: Type mismatch (${typeof original} vs ${typeof parsed})`,
-    );
+    differences.push(`${path}: Type mismatch (${typeof original} vs ${typeof parsed})`);
     return differences;
   }
 
@@ -155,22 +146,17 @@ function compareJSON(original: any, parsed: any, path = ""): string[] {
   // Handle arrays
   if (Array.isArray(original) && Array.isArray(parsed)) {
     if (original.length !== parsed.length) {
-      differences.push(
-        `${path}: Array length mismatch (${original.length} vs ${parsed.length})`,
-      );
+      differences.push(`${path}: Array length mismatch (${original.length} vs ${parsed.length})`);
       return differences;
     }
 
     // For marks array, compare as sets (ignore order)
     if (path.includes("marks")) {
-      const matched = new Array(parsed.length).fill(false);
+      const matched = Array.from({ length: parsed.length }, () => false);
       for (let i = 0; i < original.length; i++) {
         let found = false;
         for (let j = 0; j < parsed.length; j++) {
-          if (
-            !matched[j] &&
-            compareJSON(original[i], parsed[j], "").length === 0
-          ) {
+          if (!matched[j] && compareJSON(original[i], parsed[j], "").length === 0) {
             matched[j] = true;
             found = true;
             break;
@@ -196,12 +182,7 @@ function compareJSON(original: any, parsed: any, path = ""): string[] {
   }
 
   // Special handling for link marks: only compare href, ignore unsupported attributes (target, rel, class)
-  if (
-    original.type === "link" &&
-    parsed.type === "link" &&
-    original.attrs &&
-    parsed.attrs
-  ) {
+  if (original.type === "link" && parsed.type === "link" && original.attrs && parsed.attrs) {
     // Only compare href attribute for links
     if (original.attrs.href !== parsed.attrs.href) {
       differences.push(
@@ -238,11 +219,7 @@ function compareJSON(original: any, parsed: any, path = ""): string[] {
     for (const key of originalKeys) {
       if (parsedKeys.includes(key)) {
         differences.push(
-          ...compareJSON(
-            originalCopy[key],
-            parsedCopy[key],
-            path ? `${path}.${key}` : key,
-          ),
+          ...compareJSON(originalCopy[key], parsedCopy[key], path ? `${path}.${key}` : key),
         );
       }
     }
@@ -273,13 +250,7 @@ function compareJSON(original: any, parsed: any, path = ""): string[] {
     // Compare only common keys
     for (const key of originalKeys) {
       if (parsedKeys.includes(key)) {
-        differences.push(
-          ...compareJSON(
-            original[key],
-            parsed[key],
-            path ? `${path}.${key}` : key,
-          ),
-        );
+        differences.push(...compareJSON(original[key], parsed[key], path ? `${path}.${key}` : key));
       }
     }
     return differences;
@@ -307,13 +278,7 @@ function compareJSON(original: any, parsed: any, path = ""): string[] {
   // Compare common keys
   for (const key of originalKeys) {
     if (parsedKeys.includes(key)) {
-      differences.push(
-        ...compareJSON(
-          original[key],
-          parsed[key],
-          path ? `${path}.${key}` : key,
-        ),
-      );
+      differences.push(...compareJSON(original[key], parsed[key], path ? `${path}.${key}` : key));
     }
   }
 
@@ -335,7 +300,7 @@ const skipComparisonFiles = new Set([
 ]);
 
 // Process files sequentially
-(async () => {
+void (async () => {
   for (const jsonFile of jsonFiles) {
     try {
       console.log(`\n--- Processing ${jsonFile} ---`);
@@ -479,13 +444,9 @@ const skipComparisonFiles = new Set([
           console.log(`  ✓ ✓ ✓ Perfect match! JSONs are identical.`);
         } else {
           console.log(`  ✗ ✗ ✗ Found ${differences.length} differences:`);
-          differences
-            .slice(0, 10)
-            .forEach((diff) => console.log(`    - ${diff}`));
+          differences.slice(0, 10).forEach((diff) => console.log(`    - ${diff}`));
           if (differences.length > 10) {
-            console.log(
-              `    ... and ${differences.length - 10} more differences`,
-            );
+            console.log(`    ... and ${differences.length - 10} more differences`);
           }
         }
       }

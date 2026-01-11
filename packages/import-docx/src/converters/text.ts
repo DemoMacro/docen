@@ -48,9 +48,7 @@ export function extractRuns(
             const textElement = findChild(run, "w:t");
             if (!textElement) continue;
 
-            const text = textElement.children.find(
-              (c): c is Text => c.type === "text",
-            );
+            const text = textElement.children.find((c): c is Text => c.type === "text");
             if (!text || !text.value) continue;
 
             // Extract formatting marks
@@ -116,9 +114,7 @@ export function extractRuns(
       const textElement = findChild(run, "w:t");
       if (!textElement) continue;
 
-      const text = textElement.children.find(
-        (c): c is Text => c.type === "text",
-      );
+      const text = textElement.children.find((c): c is Text => c.type === "text");
       if (!text || !text.value) continue;
 
       // Extract formatting marks
@@ -147,9 +143,7 @@ export function extractRuns(
 /**
  * Extract formatting marks
  */
-export function extractMarks(
-  run: Element,
-): Array<{ type: string; attrs?: Record<string, any> }> {
+export function extractMarks(run: Element): Array<{ type: string; attrs?: Record<string, any> }> {
   const marks: Array<{ type: string; attrs?: Record<string, any> }> = [];
 
   // Find w:rPr (run properties)
@@ -224,9 +218,7 @@ export function extractMarks(
     if (hasBackgroundColor && hasBackgroundColor.attributes["w:fill"]) {
       const fillColor = hasBackgroundColor.attributes["w:fill"] as string;
       if (fillColor !== "auto") {
-        const hexColor = fillColor.startsWith("#")
-          ? fillColor
-          : `#${fillColor}`;
+        const hexColor = fillColor.startsWith("#") ? fillColor : `#${fillColor}`;
         textStyleAttrs.backgroundColor = hexColor;
       }
     }

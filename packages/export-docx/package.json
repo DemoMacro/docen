@@ -2,20 +2,50 @@
   "name": "@docen/export-docx",
   "version": "0.0.0",
   "description": "A powerful TipTap/ProseMirror extension that converts editor content to Microsoft Word DOCX format",
-  "main": "dist/index.mjs",
-  "types": "dist/index.d.ts",
+  "keywords": [
+    "converter",
+    "docen",
+    "document",
+    "docx",
+    "editor",
+    "export",
+    "microsoft-word",
+    "office",
+    "prosemirror",
+    "rich-text",
+    "tiptap",
+    "typescript",
+    "word",
+    "wysiwyg"
+  ],
+  "homepage": "https://github.com/DemoMacro/docen#readme",
+  "bugs": {
+    "url": "https://github.com/DemoMacro/docen/issues"
+  },
+  "license": "MIT",
+  "author": {
+    "name": "Demo Macro",
+    "email": "abc@imst.xyz",
+    "url": "https://imst.xyz/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DemoMacro/docen.git"
+  },
   "files": [
     "dist"
   ],
+  "main": "dist/index.mjs",
+  "types": "dist/index.d.ts",
   "exports": {
     ".": {
       "import": "./dist/index.mjs",
       "require": "./dist/index.cjs"
     },
     "./docx": {
+      "types": "./dist/docx.d.ts",
       "import": "./dist/docx.mjs",
-      "require": "./dist/docx.cjs",
-      "types": "./dist/docx.d.ts"
+      "require": "./dist/docx.cjs"
     }
   },
   "scripts": {
@@ -23,36 +53,6 @@
     "build": "unbuild",
     "prepack": "pnpm build"
   },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/DemoMacro/docen.git"
-  },
-  "keywords": [
-    "docen",
-    "tiptap",
-    "prosemirror",
-    "docx",
-    "export",
-    "microsoft-word",
-    "document",
-    "converter",
-    "word",
-    "office",
-    "typescript",
-    "editor",
-    "wysiwyg",
-    "rich-text"
-  ],
-  "author": {
-    "name": "Demo Macro",
-    "email": "abc@imst.xyz",
-    "url": "https://imst.xyz/"
-  },
-  "license": "MIT",
-  "bugs": {
-    "url": "https://github.com/DemoMacro/docen/issues"
-  },
-  "homepage": "https://github.com/DemoMacro/docen#readme",
   "dependencies": {
     "docx": "9.5.1",
     "image-meta": "0.2.2",
