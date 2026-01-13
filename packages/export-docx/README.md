@@ -113,7 +113,7 @@ Converts TipTap/ProseMirror content to DOCX format.
 - **Headings** (H1-H6) with level attribute
 - **Paragraphs** with text alignment (left, right, center, justify)
 - **Blockquotes** (Note: Exported as indented paragraphs with left border due to DOCX format)
-- **Horizontal Rules** (Exported as page breaks)
+- **Horizontal Rules** (Exported as page breaks by default)
 - **Code Blocks** with language support
 
 ### Lists
