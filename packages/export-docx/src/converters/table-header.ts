@@ -47,18 +47,21 @@ export async function convertTableHeader(
   }
 
   // Add column width if present
-  // colwidth is an array of column widths (in pixels), use the first one for this cell
-  if (
-    node.attrs?.colwidth !== null &&
-    node.attrs?.colwidth !== undefined &&
-    node.attrs.colwidth.length > 0
-  ) {
-    // Convert pixels to twips (1 inch = 96 pixels = 1440 twips at 96 DPI)
-    const twips = Math.round(node.attrs.colwidth[0] * 15);
-    headerCellOptions.width = {
-      size: twips,
-      type: "dxa" as const,
-    };
+  // colwidth can be a number (pixels) or an array of column widths
+  if (node.attrs?.colwidth !== null && node.attrs?.colwidth !== undefined) {
+    // Handle both number and array formats
+    const widthInPixels = Array.isArray(node.attrs.colwidth)
+      ? node.attrs.colwidth[0]
+      : node.attrs.colwidth;
+
+    if (widthInPixels && widthInPixels > 0) {
+      // Convert pixels to twips (1 inch = 96 pixels = 1440 twips at 96 DPI)
+      const twips = Math.round(widthInPixels * 15);
+      headerCellOptions.width = {
+        size: twips,
+        type: "dxa" as const,
+      };
+    }
   }
 
   return new TableCell(headerCellOptions);
