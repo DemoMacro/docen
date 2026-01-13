@@ -152,6 +152,7 @@ export interface ImageNode extends JSONContent {
     title?: string | null;
     width?: number | null;
     height?: number | null;
+    rotation?: number; // Image rotation in degrees (non-standard, for DOCX round-trip)
   };
 }
 
