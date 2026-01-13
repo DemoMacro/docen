@@ -18,22 +18,49 @@ export const Image = BaseImage.extend({
       // Add rotation attribute
       rotation: {
         default: null,
-        // Parse rotation from CSS transform when importing HTML
-        parseHTML: (element) => {
-          const style = (element as HTMLElement).getAttribute("style") || "";
-          const rotationMatch = style.match(/transform:\s*rotate\(([\d.]+)deg\)/);
-          return rotationMatch ? parseFloat(rotationMatch[1]) : null;
-        },
-        // Render rotation as CSS transform when exporting to HTML
-        renderHTML: (attributes) => {
-          if (!attributes.rotation) {
-            return {};
-          }
-          return {
-            style: `transform: rotate(${attributes.rotation}deg)`,
-          };
-        },
       },
     };
+  },
+
+  parseHTML() {
+    return [
+      {
+        // Match img tags
+        tag: "img[src]",
+        // Extract all attributes including rotation from style
+        getAttributes: (element: HTMLElement) => {
+          const attrs = {
+            src: element.getAttribute("src"),
+            alt: element.getAttribute("alt"),
+            title: element.getAttribute("title"),
+            width: element.getAttribute("width"),
+            height: element.getAttribute("height"),
+          };
+
+          // Parse rotation from CSS transform (only if present)
+          const style = element.getAttribute("style") || "";
+          const rotationMatch = style.match(/transform:\s*rotate\(([\d.]+)deg\)/);
+
+          // Only add rotation attribute if it exists in HTML
+          // Otherwise, TipTap will use the default value (null) from addAttributes()
+          return rotationMatch ? { ...attrs, rotation: parseFloat(rotationMatch[1]) } : attrs;
+        },
+      },
+    ];
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    // Extract rotation from attributes
+    const { rotation, ...otherAttrs } = HTMLAttributes;
+
+    // If rotation exists, add it to style
+    if (rotation) {
+      const existingStyle = otherAttrs.style || "";
+      otherAttrs.style = existingStyle
+        ? `${existingStyle}; transform: rotate(${rotation}deg)`
+        : `transform: rotate(${rotation}deg)`;
+    }
+
+    return ["img", otherAttrs];
   },
 });
