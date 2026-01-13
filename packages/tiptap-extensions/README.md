@@ -154,7 +154,7 @@ interface TableCellNode {
   content?: Array<ParagraphNode>;
 }
 
-// Image with attributes
+// Image with attributes (extended from TipTap)
 interface ImageNode {
   type: "image";
   attrs?: {
@@ -163,6 +163,7 @@ interface ImageNode {
     title?: string | null;
     width?: number | null;
     height?: number | null;
+    rotation?: number; // Additional attribute: rotation in degrees (not in TipTap core)
   };
 }
 ```
