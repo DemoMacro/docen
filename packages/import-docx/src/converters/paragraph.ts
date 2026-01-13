@@ -1,15 +1,17 @@
 import type { Element } from "xast";
 import type { JSONContent } from "@tiptap/core";
+import type { DocxImportOptions } from "../option";
 import { extractRuns, extractAlignment } from "./text";
 
 /**
  * Convert DOCX paragraph node to TipTap paragraph
  */
-export function convertParagraph(
+export async function convertParagraph(
   node: Element,
   hyperlinks: Map<string, string>,
   images: Map<string, string>,
-): JSONContent {
+  options?: DocxImportOptions,
+): Promise<JSONContent> {
   // Check if it's a heading by finding w:pPr > w:pStyle
   let styleName: string | undefined;
   for (const child of node.children) {
@@ -30,12 +32,12 @@ export function convertParagraph(
     const headingMatch = styleName.match(/^Heading(\d)$/);
     if (headingMatch) {
       const level = parseInt(headingMatch[1]) as 1 | 2 | 3 | 4 | 5 | 6;
-      return convertHeading(node, hyperlinks, level, images);
+      return convertHeading(node, hyperlinks, level, images, options);
     }
   }
 
   // Extract runs (text, images, hardBreaks)
-  const runs = extractRuns(hyperlinks, node, images);
+  const runs = await extractRuns(hyperlinks, node, images, options);
 
   // Check if this is a horizontal rule (page break)
   if (runs.length === 1 && runs[0].type === "hardBreak") {
@@ -71,15 +73,16 @@ export function convertParagraph(
 /**
  * Convert to heading (internal function)
  */
-function convertHeading(
+async function convertHeading(
   node: Element,
   hyperlinks: Map<string, string>,
   level: 1 | 2 | 3 | 4 | 5 | 6,
   images: Map<string, string>,
-): JSONContent {
+  options?: DocxImportOptions,
+): Promise<JSONContent> {
   return {
     type: "heading",
     attrs: { level },
-    content: extractRuns(hyperlinks, node, images),
+    content: await extractRuns(hyperlinks, node, images, options),
   };
 }

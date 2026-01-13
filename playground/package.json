@@ -3,6 +3,7 @@
     "@docen/export-docx": "workspace:*",
     "@docen/import-docx": "workspace:*",
     "@docen/tiptap-extensions": "workspace:*",
+    "@napi-rs/canvas": "0.1.88",
     "@tiptap/core": "3.7.2",
     "@tiptap/html": "3.7.2",
     "@tiptap/pm": "3.7.2",

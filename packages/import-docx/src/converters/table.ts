@@ -1,5 +1,6 @@
 import type { Element } from "xast";
 import type { JSONContent } from "@tiptap/core";
+import type { DocxImportOptions } from "../option";
 import { convertParagraph } from "./paragraph";
 
 /**
@@ -12,11 +13,12 @@ export function isTable(node: Element): boolean {
 /**
  * Convert a table element to TipTap JSON
  */
-export function convertTable(
+export async function convertTable(
   node: Element,
   hyperlinks: Map<string, string>,
   images: Map<string, string>,
-): JSONContent {
+  options?: DocxImportOptions,
+): Promise<JSONContent> {
   const rows: JSONContent[] = [];
 
   // Collect all rows first to enable rowspan calculation
@@ -30,9 +32,10 @@ export function convertTable(
   const activeRowspans = new Map<number, number>();
 
   // Convert each row
-  rowElements.forEach((rowElement, rowIndex) => {
+  for (let rowIndex = 0; rowIndex < rowElements.length; rowIndex++) {
+    const rowElement = rowElements[rowIndex];
     rows.push(
-      convertTableRow(
+      await convertTableRow(
         rowElement,
         rowIndex === 0,
         hyperlinks,
@@ -40,9 +43,10 @@ export function convertTable(
         activeRowspans,
         rowElements,
         rowIndex,
+        options,
       ),
     );
-  });
+  }
 
   return {
     type: "table",
@@ -53,7 +57,7 @@ export function convertTable(
 /**
  * Convert a table row to TipTap JSON
  */
-function convertTableRow(
+async function convertTableRow(
   rowNode: Element,
   isFirstRow: boolean,
   hyperlinks: Map<string, string>,
@@ -61,7 +65,8 @@ function convertTableRow(
   activeRowspans: Map<number, number>,
   allRows: Element[],
   currentRowIndex: number,
-): JSONContent {
+  options?: DocxImportOptions,
+): Promise<JSONContent> {
   const cells: JSONContent[] = [];
   let colIndex = 0;
 
@@ -105,7 +110,7 @@ function convertTableRow(
       const cellType = "tableCell";
 
       // Convert cell content
-      const paragraphs = convertCellContent(child, hyperlinks, images);
+      const paragraphs = await convertCellContent(child, hyperlinks, images, options);
 
       cells.push({
         type: cellType,
@@ -241,17 +246,18 @@ function calculateRowspan(allRows: Element[], startRowIndex: number, colIndex: n
 /**
  * Convert cell content (typically paragraphs)
  */
-function convertCellContent(
+async function convertCellContent(
   cellNode: Element,
   hyperlinks: Map<string, string>,
   images: Map<string, string>,
-): JSONContent[] {
+  options?: DocxImportOptions,
+): Promise<JSONContent[]> {
   // Find all paragraphs in the cell
   const paragraphs: JSONContent[] = [];
 
   for (const child of cellNode.children) {
     if (child.type === "element" && child.name === "w:p") {
-      const paragraph = convertParagraph(child, hyperlinks, images);
+      const paragraph = await convertParagraph(child, hyperlinks, images, options);
       paragraphs.push(paragraph);
     }
   }

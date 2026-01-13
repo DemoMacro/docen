@@ -9,13 +9,15 @@
 ## Features
 
 - 📝 **Rich Text Parsing** - Accurate parsing of headings, paragraphs, and blockquotes with formatting
-- 🖼️ **Image Extraction** - Automatic image extraction and base64 conversion
+- 🖼️ **Image Extraction** - Automatic image extraction with base64 conversion and cropping support
 - 📊 **Table Support** - Complete table structure with colspan/rowspan detection algorithm
 - ✅ **Lists & Tasks** - Bullet lists, numbered lists with start number extraction, and task lists with checkbox detection
 - 🎨 **Text Formatting** - Bold, italic, underline, strikethrough, subscript, superscript, and highlights
 - 🎯 **Text Styles** - Comprehensive style support including colors, backgrounds, fonts, sizes, and line heights
 - 🔗 **Links** - Hyperlink extraction with href preservation
 - 💻 **Code Blocks** - Code block detection with language attribute extraction
+- 🌐 **Cross-Platform** - Works in both browser and Node.js environments
+- ✂️ **Image Cropping** - Automatic cropping of images based on DOCX crop metadata
 - 🧠 **Smart Parsing** - DOCX XML parsing with proper element grouping and structure reconstruction
 - ⚡ **Fast Processing** - Uses fflate for ultra-fast ZIP decompression
 
@@ -72,6 +74,27 @@ interface DocxImportOptions {
    * Empty paragraphs are those without text content or images.
    * Paragraphs containing only whitespace or images are not considered empty. */
   ignoreEmptyParagraphs?: boolean;
+
+  /**
+   * Dynamic import function for @napi-rs/canvas
+   * Required for image cropping in Node.js environment, ignored in browser
+   *
+   * @example
+   * import { parseDOCX } from '@docen/import-docx';
+   * const content = await parseDOCX(buffer, {
+   *   canvasImport: () => import('@napi-rs/canvas')
+   * });
+   */
+  canvasImport?: () => Promise<typeof import("@napi-rs/canvas")>;
+
+  /**
+   * Enable or disable image cropping during import
+   * When true (default), images with crop information in DOCX will be cropped
+   * When false, crop information is ignored and full image is used
+   *
+   * @default true
+   */
+  enableImageCrop?: boolean;
 }
 ```
 
@@ -195,6 +218,33 @@ async function importDocx(file: File) {
 }
 ```
 
+### Node.js Environment with Image Cropping
+
+In Node.js environment, you need to provide `@napi-rs/canvas` for image cropping:
+
+```typescript
+import { parseDOCX } from "@docen/import-docx";
+import { readFileSync } from "node:fs";
+
+// Install @napi-rs/canvas first: pnpm add @napi-rs/canvas
+const buffer = readFileSync("document.docx");
+
+const content = await parseDOCX(buffer, {
+  canvasImport: () => import("@napi-rs/canvas"),
+  enableImageCrop: true, // default is true
+});
+```
+
+### Disable Image Cropping
+
+If you want to ignore crop information in DOCX and use full images:
+
+```typescript
+const content = await parseDOCX(buffer, {
+  enableImageCrop: false,
+});
+```
+
 ## Known Limitations
 
 ### Blockquote Detection
@@ -218,6 +268,10 @@ All colors are imported as hex values (e.g., "#FF0000", "#008000"). Color names 
 
 - Only embedded images are supported (external image links are not fetched)
 - Image dimensions and title are extracted from DOCX metadata
+- **Image Cropping in Node.js**: Requires `@napi-rs/canvas` as an optional dependency
+  - In browser environments, cropping works natively with Canvas API
+  - In Node.js, you must provide `canvasImport` option with dynamic import of `@napi-rs/canvas`
+  - If `@napi-rs/canvas` is not available, images will be imported without cropping (graceful degradation)
 - Some DOCX image features (like advanced positioning or text wrapping) have limited support
 
 ### Table Cell Types
