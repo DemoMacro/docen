@@ -100,14 +100,27 @@ export async function convertImageToRun(
   const finalWidth = getImageWidth(node, options, imageMeta);
   const finalHeight = getImageHeight(node, finalWidth, options, imageMeta);
 
+  // Build transformation object
+  const transformation: {
+    width: number;
+    height: number;
+    rotation?: number;
+  } = {
+    width: finalWidth,
+    height: finalHeight,
+  };
+
+  // Add rotation if present (in degrees)
+  // Note: docx library will handle the conversion to DOCX format (1/60000 degrees) internally
+  if (node.attrs?.rotation !== undefined) {
+    transformation.rotation = node.attrs.rotation;
+  }
+
   // Build ImageRun options
   const imageOptions: IImageOptions = {
     type: getImageType(imageMeta.type),
     data: imageData,
-    transformation: {
-      width: finalWidth,
-      height: finalHeight,
-    },
+    transformation,
     altText: {
       name: node.attrs?.alt || "",
       description: undefined,

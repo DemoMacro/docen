@@ -358,6 +358,21 @@ function extractSingleImage(
     }
   }
 
+  // Extract rotation from a:xfrm/@rot (unit: 1/60000 degrees)
+  const xfrm = findDeepChild(drawing, "a:xfrm");
+  let rotation: number | undefined;
+
+  if (xfrm) {
+    const rotAttr = xfrm.attributes["rot"];
+    if (typeof rotAttr === "string") {
+      const rot = parseInt(rotAttr, 10);
+      if (!isNaN(rot)) {
+        // Convert from 1/60000 degrees to degrees
+        rotation = rot / 60000;
+      }
+    }
+  }
+
   // Extract title from wp:docPr
   const docPr = findDeepChild(drawing, "wp:docPr");
   let title: string | undefined;
@@ -376,6 +391,7 @@ function extractSingleImage(
       alt: "",
       ...(width !== undefined && { width }),
       ...(height !== undefined && { height }),
+      ...(rotation !== undefined && { rotation }),
       ...(title !== undefined && { title }),
     },
   };
