@@ -1,28 +1,27 @@
-import { Paragraph, BorderStyle } from "docx";
+import { Paragraph, PageBreak, IParagraphOptions } from "docx";
 import { HorizontalRuleNode } from "../types";
 import type { DocxExportOptions } from "../option";
 
 /**
  * Convert TipTap horizontalRule node to DOCX Paragraph
- * Creates a horizontal line using bottom border
+ * Uses page break by default (consistent with import-docx behavior)
  *
  * @param node - TipTap horizontalRule node
  * @param options - Export options for horizontal rule styling
- * @returns DOCX Paragraph object with horizontal rule styling
+ * @returns DOCX Paragraph object with page break or custom styling
  */
 export function convertHorizontalRule(
   node: HorizontalRuleNode,
   options: DocxExportOptions["horizontalRule"],
 ): Paragraph {
+  // Default: use page break (consistent with import-docx which detects page breaks as horizontal rules)
+  const paragraphOptions: IParagraphOptions = {
+    children: [new PageBreak()],
+  };
+
+  // Allow user to override with custom styling (e.g., border instead of page break)
   return new Paragraph({
-    children: [], // Empty content
-    border: {
-      bottom: {
-        style: BorderStyle.SINGLE,
-        size: 1,
-        color: "auto",
-      },
-    },
+    ...paragraphOptions,
     ...options?.paragraph,
   });
 }
