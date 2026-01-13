@@ -8,7 +8,7 @@ import Emoji from "@tiptap/extension-emoji";
 import HardBreak from "@tiptap/extension-hard-break";
 import Heading from "@tiptap/extension-heading";
 import HorizontalRule from "@tiptap/extension-horizontal-rule";
-import Image from "@tiptap/extension-image";
+import { Image } from "./extends/image";
 import ListItem from "@tiptap/extension-list-item";
 import { Mathematics } from "@tiptap/extension-mathematics";
 import OrderedList from "@tiptap/extension-ordered-list";
