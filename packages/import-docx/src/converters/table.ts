@@ -105,12 +105,12 @@ function convertTableRow(
       const cellType = "tableCell";
 
       // Convert cell content
-      const content = convertCellContent(child, hyperlinks, images);
+      const paragraphs = convertCellContent(child, hyperlinks, images);
 
       cells.push({
         type: cellType,
         ...(cellProps && { attrs: cellProps }),
-        content: [content],
+        content: paragraphs,
       });
 
       // Move column index by colspan
@@ -245,7 +245,7 @@ function convertCellContent(
   cellNode: Element,
   hyperlinks: Map<string, string>,
   images: Map<string, string>,
-): JSONContent {
+): JSONContent[] {
   // Find all paragraphs in the cell
   const paragraphs: JSONContent[] = [];
 
@@ -256,7 +256,7 @@ function convertCellContent(
     }
   }
 
-  // If there's only one paragraph, return it directly
-  // Otherwise, return the first paragraph (TipTap tables typically have one paragraph per cell)
-  return paragraphs[0] || { type: "paragraph", content: [] };
+  // Return all paragraphs to preserve complete cell content
+  // DOCX cells can contain multiple paragraphs
+  return paragraphs.length > 0 ? paragraphs : [{ type: "paragraph", content: [] }];
 }
