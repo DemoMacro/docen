@@ -47,14 +47,16 @@ export async function convertTableHeader(
   }
 
   // Add column width if present
-  // colwidth is an array of column widths, use the first one for this cell
+  // colwidth is an array of column widths (in pixels), use the first one for this cell
   if (
     node.attrs?.colwidth !== null &&
     node.attrs?.colwidth !== undefined &&
     node.attrs.colwidth.length > 0
   ) {
+    // Convert pixels to twips (1 inch = 96 pixels = 1440 twips at 96 DPI)
+    const twips = Math.round(node.attrs.colwidth[0] * 15);
     headerCellOptions.width = {
-      size: node.attrs.colwidth[0],
+      size: twips,
       type: "dxa" as const,
     };
   }

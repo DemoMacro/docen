@@ -184,7 +184,9 @@ function getCellProperties(cellNode: Element): {
     if (child.type === "element" && child.name === "w:tcW") {
       const val = child.attributes["w:w"];
       if (val) {
-        props.colwidth = parseInt(val as string);
+        const twips = parseInt(val as string);
+        // Convert twips to pixels (1 inch = 1440 twips = 96 pixels at 96 DPI)
+        props.colwidth = Math.round(twips / 15);
       }
       break;
     }
