@@ -1,18 +1,23 @@
 import type { Element, Text } from "xast";
+import type { DocxImportOptions } from "../option";
 import { imageMeta } from "image-meta";
+import { cropImageIfNeeded, type CropRect } from "../utils/image";
 
 /**
  * Extract all text runs from paragraph
  */
-export function extractRuns(
+export async function extractRuns(
   hyperlinks: Map<string, string>,
   paragraph: Element,
   images: Map<string, string>,
-): Array<{
-  type: string;
-  text?: string;
-  marks?: Array<{ type: string; attrs?: Record<string, any> }>;
-}> {
+  options?: DocxImportOptions,
+): Promise<
+  Array<{
+    type: string;
+    text?: string;
+    marks?: Array<{ type: string; attrs?: Record<string, any> }>;
+  }>
+> {
   const runs: Array<{
     type: string;
     text?: string;
@@ -51,14 +56,14 @@ export function extractRuns(
 
             if (drawing) {
               // 对于超链接中的图片，使用单张图片的提取逻辑（从 wp:extent 获取正确的尺寸）
-              const image = extractSingleImage(drawing, images);
+              const image = await extractSingleImage(drawing, images, options);
               if (image) {
                 runs.push(image);
                 continue;
               }
 
               // 如果单张图片提取失败，尝试分组图片提取
-              const imageList = extractImages(drawing, images);
+              const imageList = await extractImages(drawing, images, options);
               runs.push(...imageList);
               if (imageList.length > 0) {
                 continue;
@@ -116,7 +121,7 @@ export function extractRuns(
       }
 
       if (drawing) {
-        const imageList = extractImages(drawing, images);
+        const imageList = await extractImages(drawing, images, options);
         runs.push(...imageList);
         if (imageList.length > 0) {
           continue;
@@ -310,10 +315,11 @@ export function extractAlignment(
  * @param images - Map of relationship IDs to image data URLs
  * @returns Single image node or null
  */
-function extractSingleImage(
+async function extractSingleImage(
   drawing: Element,
   images: Map<string, string>,
-): {
+  options?: DocxImportOptions,
+): Promise<{
   type: string;
   attrs: {
     src: string;
@@ -323,15 +329,63 @@ function extractSingleImage(
     title?: string;
     [key: string]: any;
   };
-} | null {
+} | null> {
   // Find blip (image data reference)
   const blip = findDeepChild(drawing, "a:blip");
   if (!blip?.attributes["r:embed"]) return null;
 
   const rId = blip.attributes["r:embed"] as string;
-  const src = images.get(rId);
+  let src = images.get(rId);
 
   if (!src) return null;
+
+  // Extract crop rectangle from a:srcRect (DOCX unit: 1/100000 of percentage)
+  const srcRect = findDeepChild(drawing, "a:srcRect");
+  let crop: CropRect | undefined;
+
+  if (srcRect) {
+    const left = srcRect.attributes["l"];
+    const top = srcRect.attributes["t"];
+    const right = srcRect.attributes["r"];
+    const bottom = srcRect.attributes["b"];
+
+    if (left || top || right || bottom) {
+      crop = {
+        left: left ? parseInt(left as string, 10) : undefined,
+        top: top ? parseInt(top as string, 10) : undefined,
+        right: right ? parseInt(right as string, 10) : undefined,
+        bottom: bottom ? parseInt(bottom as string, 10) : undefined,
+      };
+    }
+  }
+
+  // Apply crop if present
+  if (crop && src.startsWith("data:")) {
+    // Extract base64 data from data URL
+    const [metadata, base64Data] = src.split(",");
+    if (base64Data) {
+      const binaryString = atob(base64Data);
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+
+      try {
+        // Crop the image
+        const croppedData = await cropImageIfNeeded(bytes, crop, {
+          canvasImport: options?.canvasImport,
+          enabled: options?.enableImageCrop !== false,
+        });
+
+        // Convert back to data URL
+        const croppedBase64 = btoa(String.fromCharCode(...croppedData));
+        src = `${metadata},${croppedBase64}`;
+      } catch (error) {
+        // Crop failed, use original image
+        console.warn("Image cropping failed, using original image:", error);
+      }
+    }
+  }
 
   // Extract width and height from wp:extent (EMU units: 1 inch = 914400 EMU)
   // At 96 DPI: 1 pixel = 9525 EMU
@@ -404,20 +458,23 @@ function extractSingleImage(
  * @param images - Map of relationship IDs to image data URLs
  * @returns Array of image nodes (may be empty if no images found)
  */
-function extractImages(
+async function extractImages(
   drawing: Element,
   images: Map<string, string>,
-): Array<{
-  type: string;
-  attrs: {
-    src: string;
-    alt: string;
-    width?: number;
-    height?: number;
-    title?: string;
-    [key: string]: any;
-  };
-}> {
+  options?: DocxImportOptions,
+): Promise<
+  Array<{
+    type: string;
+    attrs: {
+      src: string;
+      alt: string;
+      width?: number;
+      height?: number;
+      title?: string;
+      [key: string]: any;
+    };
+  }>
+> {
   const result: Array<{
     type: string;
     attrs: {
@@ -582,7 +639,7 @@ function extractImages(
         attributes: {},
       } as Element;
 
-      const image = extractSingleImage(syntheticDrawing, images);
+      const image = await extractSingleImage(syntheticDrawing, images, options);
       if (image) {
         // For grouped images, adjust dimensions based on aspect ratio
         if (groupWidth !== undefined && groupHeight !== undefined && image.attrs.src) {
@@ -641,7 +698,7 @@ function extractImages(
     }
   } else {
     // Handle single image
-    const image = extractSingleImage(drawing, images);
+    const image = await extractSingleImage(drawing, images, options);
     if (image) {
       result.push(image);
     }

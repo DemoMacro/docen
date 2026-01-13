@@ -144,12 +144,13 @@ export async function parseDOCX(
   const listTypeMap = parseNumberingXml(files);
 
   // Convert document
-  const content = convertDocument(
+  const content = await convertDocument(
     documentXast,
     convertedImages,
     hyperlinks,
     listTypeMap,
     ignoreEmptyParagraphs,
+    options,
   );
 
   return content;
@@ -339,13 +340,14 @@ function extractHyperlinks(files: Record<string, Uint8Array>): Map<string, strin
 /**
  * Convert document XAST to TipTap JSON
  */
-function convertDocument(
+async function convertDocument(
   documentXast: Root,
   images: Map<string, string>,
   hyperlinks: Map<string, string>,
   listTypeMap: ListTypeMap,
   ignoreEmptyParagraphs: boolean,
-): JSONContent {
+  options?: DocxImportOptions,
+): Promise<JSONContent> {
   if (documentXast.type !== "root") {
     return { type: "doc", content: [] };
   }
@@ -361,12 +363,13 @@ function convertDocument(
           const body = bodyChild;
 
           // Process all elements in body
-          const content = processElements(
+          const content = await processElements(
             body.children.filter((c) => c.type === "element") as Element[],
             images,
             hyperlinks,
             listTypeMap,
             ignoreEmptyParagraphs,
+            options,
           );
 
           return {
@@ -385,13 +388,14 @@ function convertDocument(
 /**
  * Process all elements in document body
  */
-function processElements(
+async function processElements(
   elements: Element[],
   images: Map<string, string>,
   hyperlinks: Map<string, string>,
   listTypeMap: ListTypeMap,
   ignoreEmptyParagraphs: boolean,
-): JSONContent[] {
+  options?: DocxImportOptions,
+): Promise<JSONContent[]> {
   const result: JSONContent[] = [];
   let i = 0;
 
@@ -400,7 +404,7 @@ function processElements(
 
     // Handle tables
     if (element.name === "w:tbl") {
-      result.push(convertTable(element, hyperlinks, images));
+      result.push(await convertTable(element, hyperlinks, images, options));
       i++;
       // Skip empty paragraph after table (export-docx adds these for spacing)
       if (
@@ -453,7 +457,7 @@ function processElements(
       }
 
       // Regular paragraph
-      result.push(convertParagraph(element, hyperlinks, images));
+      result.push(await convertParagraph(element, hyperlinks, images, options));
       i++;
       continue;
     }
