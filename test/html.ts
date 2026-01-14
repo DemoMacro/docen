@@ -2,7 +2,7 @@ import {
   generateHTML as generateTiptapHTML,
   generateJSON as generateTiptapJSON,
 } from "@tiptap/html";
-import { tiptapExtensions } from "./extensions";
+import { tiptapExtensions } from "@docen/tiptap-extensions";
 import { JSONContent, Extensions } from "@tiptap/core";
 import { ParseOptions } from "@tiptap/pm/model";
 
