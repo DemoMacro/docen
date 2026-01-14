@@ -443,7 +443,7 @@ async function processElements(
 
       // Check for list items
       if (isListItem(element)) {
-        const listNodes = processLists(elements, i, images, hyperlinks, listTypeMap);
+        const listNodes = await processLists(elements, i, images, hyperlinks, listTypeMap, options);
         result.push(...listNodes);
         i += getListConsumed(elements, i);
         continue;
@@ -498,13 +498,14 @@ function processCodeBlocks(elements: Element[], startIndex: number): JSONContent
 /**
  * Process consecutive list items and group into lists
  */
-function processLists(
+async function processLists(
   elements: Element[],
   startIndex: number,
   images: Map<string, string>,
   hyperlinks: Map<string, string>,
   listTypeMap: ListTypeMap,
-): JSONContent[] {
+  options?: DocxImportOptions,
+): Promise<JSONContent[]> {
   const result: JSONContent[] = [];
   let i = startIndex;
 
@@ -537,7 +538,7 @@ function processLists(
       }
 
       // Convert list item
-      const paragraph = convertParagraph(el, hyperlinks, images);
+      const paragraph = await convertParagraph(el, hyperlinks, images, options);
       const listItem = {
         type: "listItem",
         content: [paragraph],
