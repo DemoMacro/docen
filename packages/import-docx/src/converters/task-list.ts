@@ -1,5 +1,7 @@
-import type { Element } from "xast";
+import type { Element, Text } from "xast";
 import type { JSONContent } from "@tiptap/core";
+import { findChild } from "../utils/xml";
+import { extractAlignment } from "./text";
 
 /**
  * Checkbox symbols used in DOCX
@@ -12,43 +14,33 @@ const CHECKBOX_CHECKED = "☑";
  */
 export function isTaskItem(node: Element): boolean {
   // Get the first text run
-  for (const child of node.children) {
-    if (child.type === "element" && child.name === "w:r") {
-      for (const runChild of child.children) {
-        if (runChild.type === "element" && runChild.name === "w:t") {
-          const textNode = runChild.children.find((c) => c.type === "text");
-          if (textNode && "value" in textNode) {
-            const text = (textNode as { value: string }).value;
-            // Check if text starts with checkbox symbol
-            return text.startsWith(CHECKBOX_UNCHECKED) || text.startsWith(CHECKBOX_CHECKED);
-          }
-        }
-      }
-      break;
-    }
-  }
-  return false;
+  const run = findChild(node, "w:r");
+  if (!run) return false;
+
+  const textElement = findChild(run, "w:t");
+  if (!textElement) return false;
+
+  const textNode = textElement.children.find((c): c is Text => c.type === "text");
+  if (!textNode || !textNode.value) return false;
+
+  const text = textNode.value;
+  return text.startsWith(CHECKBOX_UNCHECKED) || text.startsWith(CHECKBOX_CHECKED);
 }
 
 /**
  * Get the checked state from a task item
  */
 export function getTaskItemChecked(node: Element): boolean {
-  for (const child of node.children) {
-    if (child.type === "element" && child.name === "w:r") {
-      for (const runChild of child.children) {
-        if (runChild.type === "element" && runChild.name === "w:t") {
-          const textNode = runChild.children.find((c) => c.type === "text");
-          if (textNode && "value" in textNode) {
-            const text = (textNode as { value: string }).value;
-            return text.startsWith(CHECKBOX_CHECKED);
-          }
-        }
-      }
-      break;
-    }
-  }
-  return false;
+  const run = findChild(node, "w:r");
+  if (!run) return false;
+
+  const textElement = findChild(run, "w:t");
+  if (!textElement) return false;
+
+  const textNode = textElement.children.find((c): c is Text => c.type === "text");
+  if (!textNode || !textNode.value) return false;
+
+  return textNode.value.startsWith(CHECKBOX_CHECKED);
 }
 
 /**
@@ -83,23 +75,22 @@ function convertTaskItemParagraph(node: Element): JSONContent {
       let isCheckboxRun = false;
 
       if (!firstTextSkipped) {
-        for (const runChild of child.children) {
-          if (runChild.type === "element" && runChild.name === "w:t") {
-            const textNode = runChild.children.find((c) => c.type === "text");
-            if (textNode && "value" in textNode) {
-              const text = (textNode as { value: string }).value;
-              if (text.startsWith(CHECKBOX_UNCHECKED) || text.startsWith(CHECKBOX_CHECKED)) {
-                isCheckboxRun = true;
-                firstTextSkipped = true;
+        const textElement = findChild(child, "w:t");
+        if (textElement) {
+          const textNode = textElement.children.find((c): c is Text => c.type === "text");
+          if (textNode && textNode.value) {
+            const text = textNode.value;
+            if (text.startsWith(CHECKBOX_UNCHECKED) || text.startsWith(CHECKBOX_CHECKED)) {
+              isCheckboxRun = true;
+              firstTextSkipped = true;
 
-                // Extract the remaining text after the checkbox
-                const remainingText = text.substring(2).trimStart();
-                if (remainingText.length > 0) {
-                  content.push({
-                    type: "text",
-                    text: remainingText,
-                  });
-                }
+              // Extract the remaining text after the checkbox
+              const remainingText = text.substring(2).trimStart();
+              if (remainingText.length > 0) {
+                content.push({
+                  type: "text",
+                  text: remainingText,
+                });
               }
             }
           }
@@ -110,25 +101,24 @@ function convertTaskItemParagraph(node: Element): JSONContent {
         // Convert run to text marks
         const marks = extractMarksFromRun(child);
 
-        for (const runChild of child.children) {
-          if (runChild.type === "element" && runChild.name === "w:t") {
-            const textNode = runChild.children.find((c) => c.type === "text");
-            if (textNode && "value" in textNode) {
-              const textNodeData = {
-                type: "text",
-                text: (textNode as { value: string }).value,
-              } as {
-                type: string;
-                text: string;
-                marks?: Array<{ type: string }>;
-              };
+        const textElement = findChild(child, "w:t");
+        if (textElement) {
+          const textNode = textElement.children.find((c): c is Text => c.type === "text");
+          if (textNode && textNode.value) {
+            const textNodeData = {
+              type: "text",
+              text: textNode.value,
+            } as {
+              type: string;
+              text: string;
+              marks?: Array<{ type: string }>;
+            };
 
-              if (marks.length > 0) {
-                textNodeData.marks = marks;
-              }
-
-              content.push(textNodeData);
+            if (marks.length > 0) {
+              textNodeData.marks = marks;
             }
+
+            content.push(textNodeData);
           }
         }
       }
@@ -150,69 +140,13 @@ function convertTaskItemParagraph(node: Element): JSONContent {
  */
 function extractMarksFromRun(run: Element): Array<{ type: string }> {
   const marks: Array<{ type: string }> = [];
+  const rPr = findChild(run, "w:rPr");
+  if (!rPr) return marks;
 
-  for (const child of run.children) {
-    if (child.type === "element" && child.name === "w:rPr") {
-      const rPr = child;
-
-      // Check for bold
-      for (const prop of rPr.children) {
-        if (prop.type === "element" && prop.name === "w:b") {
-          marks.push({ type: "bold" });
-          break;
-        }
-      }
-
-      // Check for italic
-      for (const prop of rPr.children) {
-        if (prop.type === "element" && prop.name === "w:i") {
-          marks.push({ type: "italic" });
-          break;
-        }
-      }
-
-      // Check for underline
-      for (const prop of rPr.children) {
-        if (prop.type === "element" && prop.name === "w:u") {
-          marks.push({ type: "underline" });
-          break;
-        }
-      }
-
-      // Check for strike
-      for (const prop of rPr.children) {
-        if (prop.type === "element" && prop.name === "w:strike") {
-          marks.push({ type: "strike" });
-          break;
-        }
-      }
-
-      break;
-    }
-  }
+  if (findChild(rPr, "w:b")) marks.push({ type: "bold" });
+  if (findChild(rPr, "w:i")) marks.push({ type: "italic" });
+  if (findChild(rPr, "w:u")) marks.push({ type: "underline" });
+  if (findChild(rPr, "w:strike")) marks.push({ type: "strike" });
 
   return marks;
-}
-
-/**
- * Extract paragraph alignment
- */
-function extractAlignment(
-  node: Element,
-): { textAlign: "left" | "right" | "center" | "justify" } | undefined {
-  for (const child of node.children) {
-    if (child.type === "element" && child.name === "w:pPr") {
-      const pPr = child;
-      for (const prop of pPr.children) {
-        if (prop.type === "element" && prop.name === "w:jc") {
-          const align = prop.attributes["w:val"] as string;
-          if (align === "both") return { textAlign: "justify" };
-          if (align === "center") return { textAlign: "center" };
-          if (align === "right") return { textAlign: "right" };
-          if (align === "left") return { textAlign: "left" };
-        }
-      }
-    }
-  }
-  return undefined;
 }

@@ -1,4 +1,5 @@
 import type { Element } from "xast";
+import { findChild } from "../utils/xml";
 
 /**
  * Check if a paragraph is a code block
@@ -32,17 +33,5 @@ export function getCodeBlockLanguage(node: Element): string | undefined {
     return lang || undefined;
   }
 
-  return undefined;
-}
-
-/**
- * Helper: Find first child element with given name
- */
-function findChild(element: Element, name: string): Element | undefined {
-  for (const child of element.children) {
-    if (child.type === "element" && child.name === name) {
-      return child;
-    }
-  }
   return undefined;
 }

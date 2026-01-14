@@ -11,14 +11,15 @@ import { DocxExportOptions } from "../option";
  * converting the paragraph content of the list item.
  *
  * @param node - TipTap list item node
- * @param options - Optional paragraph options (e.g., numbering)
- * @param exportOptions - Export options (for image processing)
+ * @param params - Conversion parameters
  * @returns Promise<DOCX Paragraph object>
  */
 export async function convertListItem(
   node: ListItemNode,
-  options?: IParagraphOptions,
-  exportOptions?: DocxExportOptions,
+  params: {
+    options?: IParagraphOptions;
+    exportOptions?: DocxExportOptions;
+  },
 ): Promise<Paragraph> {
   if (!node.content || node.content.length === 0) {
     return new Paragraph({});
@@ -27,7 +28,7 @@ export async function convertListItem(
   // Convert the first paragraph in the list item
   const firstParagraph = node.content[0];
   if (firstParagraph.type === "paragraph") {
-    return await convertParagraph(firstParagraph, options, exportOptions);
+    return await convertParagraph(firstParagraph, params);
   }
 
   // Fallback to empty paragraph

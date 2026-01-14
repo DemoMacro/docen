@@ -8,15 +8,18 @@ import { DocxExportOptions } from "../option";
  * Convert TipTap table row node to DOCX TableRow
  *
  * @param node - TipTap table row node
- * @param options - Table options from PropertiesOptions
- * @param exportOptions - Export options (for image processing)
+ * @param params - Conversion parameters
  * @returns Promise<DOCX TableRow object>
  */
 export async function convertTableRow(
   node: TableRowNode,
-  options: DocxExportOptions["table"],
-  exportOptions?: DocxExportOptions,
+  params: {
+    options: DocxExportOptions["table"];
+    exportOptions?: DocxExportOptions;
+  },
 ): Promise<TableRow> {
+  const { options } = params;
+
   // Choose row options
   const rowOptions = options?.row;
 
@@ -24,9 +27,9 @@ export async function convertTableRow(
   const cells = await Promise.all(
     (node.content || []).map(async (cellNode) => {
       if (cellNode.type === "tableCell") {
-        return await convertTableCell(cellNode, options, exportOptions);
+        return await convertTableCell(cellNode, params);
       } else if (cellNode.type === "tableHeader") {
-        return await convertTableHeader(cellNode, options, exportOptions);
+        return await convertTableHeader(cellNode, params);
       }
       return null;
     }),

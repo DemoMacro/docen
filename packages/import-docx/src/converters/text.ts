@@ -2,15 +2,19 @@ import type { Element, Text } from "xast";
 import type { DocxImportOptions } from "../option";
 import { imageMeta } from "image-meta";
 import { cropImageIfNeeded, type CropRect } from "../utils/image";
+import { findChild, findDeepChild, findDeepChildren } from "../utils/xml";
+import { uint8ArrayToBase64 } from "../utils/base64";
 
 /**
  * Extract all text runs from paragraph
  */
 export async function extractRuns(
-  hyperlinks: Map<string, string>,
   paragraph: Element,
-  images: Map<string, string>,
-  options?: DocxImportOptions,
+  params: {
+    hyperlinks: Map<string, string>;
+    images: Map<string, string>;
+    options?: DocxImportOptions;
+  },
 ): Promise<
   Array<{
     type: string;
@@ -18,6 +22,7 @@ export async function extractRuns(
     marks?: Array<{ type: string; attrs?: Record<string, any> }>;
   }>
 > {
+  const { hyperlinks, images: _images, options: _options } = params;
   const runs: Array<{
     type: string;
     text?: string;
@@ -56,14 +61,14 @@ export async function extractRuns(
 
             if (drawing) {
               // 对于超链接中的图片，使用单张图片的提取逻辑（从 wp:extent 获取正确的尺寸）
-              const image = await extractSingleImage(drawing, images, options);
+              const image = await extractSingleImage(drawing, params);
               if (image) {
                 runs.push(image);
                 continue;
               }
 
               // 如果单张图片提取失败，尝试分组图片提取
-              const imageList = await extractImages(drawing, images, options);
+              const imageList = await extractImages(drawing, params);
               runs.push(...imageList);
               if (imageList.length > 0) {
                 continue;
@@ -121,7 +126,7 @@ export async function extractRuns(
       }
 
       if (drawing) {
-        const imageList = await extractImages(drawing, images, options);
+        const imageList = await extractImages(drawing, params);
         runs.push(...imageList);
         if (imageList.length > 0) {
           continue;
@@ -317,8 +322,10 @@ export function extractAlignment(
  */
 async function extractSingleImage(
   drawing: Element,
-  images: Map<string, string>,
-  options?: DocxImportOptions,
+  params: {
+    images: Map<string, string>;
+    options?: DocxImportOptions;
+  },
 ): Promise<{
   type: string;
   attrs: {
@@ -330,6 +337,8 @@ async function extractSingleImage(
     [key: string]: any;
   };
 } | null> {
+  const { images, options } = params;
+
   // Find blip (image data reference)
   const blip = findDeepChild(drawing, "a:blip");
   if (!blip?.attributes["r:embed"]) return null;
@@ -377,8 +386,8 @@ async function extractSingleImage(
           enabled: options?.enableImageCrop !== false,
         });
 
-        // Convert back to data URL
-        const croppedBase64 = btoa(String.fromCharCode(...croppedData));
+        // Convert back to data URL using optimized base64 encoder
+        const croppedBase64 = uint8ArrayToBase64(croppedData);
         src = `${metadata},${croppedBase64}`;
       } catch (error) {
         // Crop failed, use original image
@@ -460,8 +469,10 @@ async function extractSingleImage(
  */
 async function extractImages(
   drawing: Element,
-  images: Map<string, string>,
-  options?: DocxImportOptions,
+  params: {
+    images: Map<string, string>;
+    options?: DocxImportOptions;
+  },
 ): Promise<
   Array<{
     type: string;
@@ -475,6 +486,7 @@ async function extractImages(
     };
   }>
 > {
+  const { images, options: _options } = params;
   const result: Array<{
     type: string;
     attrs: {
@@ -541,14 +553,14 @@ async function extractImages(
     if (groupSp) {
       // Collect all picture elements from the group
       // Try both "pic:pic" and just "pic" (namespace might be stripped)
-      const pictures = findChildrenRecursive(groupSp, "pic:pic");
-      const pictures2 = findChildrenRecursive(groupSp, "pic");
+      const pictures = findDeepChildren(groupSp, "pic:pic");
+      const pictures2 = findDeepChildren(groupSp, "pic");
 
       allPictures = [...pictures, ...pictures2];
     } else {
       // Some grouped images have pic:pic as direct children of wpg:wgp
-      const directPictures = findChildrenRecursive(group, "pic:pic");
-      const directPictures2 = findChildrenRecursive(group, "pic");
+      const directPictures = findDeepChildren(group, "pic:pic");
+      const directPictures2 = findDeepChildren(group, "pic");
 
       allPictures = [...directPictures, ...directPictures2];
     }
@@ -639,7 +651,7 @@ async function extractImages(
         attributes: {},
       } as Element;
 
-      const image = await extractSingleImage(syntheticDrawing, images, options);
+      const image = await extractSingleImage(syntheticDrawing, params);
       if (image) {
         // For grouped images, adjust dimensions based on aspect ratio
         if (groupWidth !== undefined && groupHeight !== undefined && image.attrs.src) {
@@ -698,69 +710,9 @@ async function extractImages(
     }
   } else {
     // Handle single image
-    const image = await extractSingleImage(drawing, images, options);
+    const image = await extractSingleImage(drawing, params);
     if (image) {
       result.push(image);
-    }
-  }
-
-  return result;
-}
-
-/**
- * Helper: Find first child element with given name
- */
-function findChild(element: Element, name: string): Element | undefined {
-  for (const child of element.children) {
-    if (child.type === "element" && child.name === name) {
-      return child;
-    }
-  }
-  return undefined;
-}
-
-/**
- * Recursively find first child element with given name at any depth
- */
-function findDeepChild(element: Element, name: string): Element | undefined {
-  // Check direct children
-  for (const child of element.children) {
-    if (child.type === "element" && child.name === name) {
-      return child;
-    }
-  }
-
-  // Recursively search in children
-  for (const child of element.children) {
-    if (child.type === "element") {
-      const found = findDeepChild(child as Element, name);
-      if (found) return found;
-    }
-  }
-
-  return undefined;
-}
-
-/**
- * Recursively find all child elements with given name at any depth
- * @param element - The element to search in
- * @param name - The element name to find
- * @returns Array of matching elements
- */
-function findChildrenRecursive(element: Element, name: string): Element[] {
-  const result: Element[] = [];
-
-  // Check direct children
-  for (const child of element.children) {
-    if (child.type === "element" && child.name === name) {
-      result.push(child);
-    }
-  }
-
-  // Recursively search in children
-  for (const child of element.children) {
-    if (child.type === "element") {
-      result.push(...findChildrenRecursive(child as Element, name));
     }
   }
 

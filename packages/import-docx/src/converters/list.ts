@@ -1,4 +1,5 @@
 import type { Element } from "xast";
+import { findChild } from "../utils/xml";
 
 /**
  * Check if a paragraph is a list item
@@ -33,16 +34,4 @@ export function getListInfo(node: Element): {
     numId: numId.attributes["w:val"] as string,
     level: parseInt((ilvl.attributes["w:val"] as string) || "0"),
   };
-}
-
-/**
- * Helper: Find first child element with given name
- */
-function findChild(element: Element, name: string): Element | undefined {
-  for (const child of element.children) {
-    if (child.type === "element" && child.name === name) {
-      return child;
-    }
-  }
-  return undefined;
 }

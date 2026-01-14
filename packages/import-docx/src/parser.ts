@@ -1,6 +1,6 @@
 import { fromXml } from "xast-util-from-xml";
 import { unzipSync } from "fflate";
-import type { Root, Element } from "xast";
+import type { Root, Element, Text } from "xast";
 import type { JSONContent } from "@tiptap/core";
 import type { DocxImportOptions } from "./option";
 import type { DocxImageConverter, DocxImageInfo } from "./types";
@@ -17,51 +17,16 @@ import {
   isTaskItem,
   convertTaskItem,
 } from "./converters";
+import { uint8ArrayToBase64 } from "./utils/base64";
+import { findChild, findDeepChildren } from "./utils/xml";
+import { extractImages } from "./parsing/images";
+import { extractHyperlinks } from "./parsing/hyperlinks";
 
 interface ListInfo {
   type: "bullet" | "ordered";
   start?: number;
 }
 type ListTypeMap = Map<string, ListInfo>;
-
-/**
- * Base64 lookup table for fast encoding
- */
-const BASE64_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-/**
- * Convert Uint8Array to base64 string using lookup table and bitwise operations
- * Similar to base64-arraybuffer implementation but without external dependencies
- * Performance: O(n) time complexity, no stack overflow risk
- */
-function uint8ArrayToBase64(bytes: Uint8Array): string {
-  const len = bytes.length;
-  const resultLen = Math.ceil(len / 3) * 4;
-  const result = Array.from<string>({ length: resultLen });
-  let resultIndex = 0;
-
-  // Process 3 bytes at a time (24 bits -> 4 base64 chars)
-  for (let i = 0; i < len; i += 3) {
-    // Read 3 bytes (24 bits)
-    const byte1 = bytes[i];
-    const byte2 = i + 1 < len ? bytes[i + 1] : 0;
-    const byte3 = i + 2 < len ? bytes[i + 2] : 0;
-
-    // Extract 4 x 6-bit values using bitwise operations
-    const index0 = byte1 >> 2;
-    const index1 = ((byte1 & 0x03) << 4) | (byte2 >> 4);
-    const index2 = ((byte2 & 0x0f) << 2) | (byte3 >> 6);
-    const index3 = byte3 & 0x3f;
-
-    // Encode to base64 characters using lookup table
-    result[resultIndex++] = BASE64_CHARS[index0];
-    result[resultIndex++] = BASE64_CHARS[index1];
-    result[resultIndex++] = i + 1 < len ? BASE64_CHARS[index2] : "=";
-    result[resultIndex++] = i + 2 < len ? BASE64_CHARS[index3] : "=";
-  }
-
-  return result.join("");
-}
 
 /**
  * Default image converter implementation
@@ -161,180 +126,58 @@ export async function parseDOCX(
  */
 function parseNumberingXml(files: Record<string, Uint8Array>): ListTypeMap {
   const listTypeMap = new Map<string, ListInfo>();
-  // Build abstractNumId -u003e start value mapping
   const abstractNumStarts = new Map<string, number>();
   const numberingXml = files["word/numbering.xml"];
   if (!numberingXml) return listTypeMap;
 
   const numberingXast = fromXml(new TextDecoder().decode(numberingXml));
-
-  // Build abstractNumId -> numFmt mapping
   const abstractNumFormats = new Map<string, string>();
 
-  if (numberingXast.type === "root") {
-    for (const child of numberingXast.children) {
-      if (child.type === "element" && child.name === "w:numbering") {
-        const numbering = child;
+  const numbering = findChild(numberingXast, "w:numbering");
+  if (!numbering) return listTypeMap;
 
-        // First pass: collect all abstractNum definitions
-        for (const numChild of numbering.children) {
-          if (numChild.type === "element" && numChild.name === "w:abstractNum") {
-            const abstractNum = numChild;
-            const abstractNumId = abstractNum.attributes["w:abstractNumId"] as string;
+  // First pass: collect all abstractNum definitions
+  const abstractNums = findDeepChildren(numbering, "w:abstractNum");
+  for (const abstractNum of abstractNums) {
+    const abstractNumId = abstractNum.attributes["w:abstractNumId"] as string;
+    const lvl = findChild(abstractNum, "w:lvl");
+    if (!lvl) continue;
 
-            // Find first level and get its format
-            for (const lvlChild of abstractNum.children) {
-              if (lvlChild.type === "element" && lvlChild.name === "w:lvl") {
-                // numFmt is a child element, not an attribute
-                for (const fmtChild of lvlChild.children) {
-                  if (fmtChild.type === "element" && fmtChild.name === "w:numFmt") {
-                    const numFmt = fmtChild.attributes["w:val"] as string;
-                    if (numFmt) {
-                      abstractNumFormats.set(abstractNumId, numFmt);
-                      break;
-                    }
-                  }
-                }
-                // Extract start value if present
-                for (const startChild of lvlChild.children) {
-                  if (startChild.type === "element" && startChild.name === "w:start") {
-                    const startVal = startChild.attributes["w:val"] as string;
-                    if (startVal) {
-                      abstractNumStarts.set(abstractNumId, parseInt(startVal, 10));
-                    }
-                    break;
-                  }
-                }
-                // Only check first level
-                break;
-              }
-            }
-          }
-        }
+    const numFmt = findChild(lvl, "w:numFmt");
+    if (numFmt?.attributes["w:val"]) {
+      abstractNumFormats.set(abstractNumId, numFmt.attributes["w:val"] as string);
+    }
 
-        // Second pass: map numId to list type
-        for (const numChild of numbering.children) {
-          if (numChild.type === "element" && numChild.name === "w:num") {
-            const num = numChild;
-            const numId = num.attributes["w:numId"] as string;
+    const start = findChild(lvl, "w:start");
+    if (start?.attributes["w:val"]) {
+      abstractNumStarts.set(abstractNumId, parseInt(start.attributes["w:val"] as string, 10));
+    }
+  }
 
-            // Find abstractNumId reference
-            for (const numChild2 of num.children) {
-              if (numChild2.type === "element" && numChild2.name === "w:abstractNumId") {
-                const abstractNumId = numChild2.attributes["w:val"] as string;
-                const numFmt = abstractNumFormats.get(abstractNumId);
+  // Second pass: map numId to list type
+  const nums = findDeepChildren(numbering, "w:num");
+  for (const num of nums) {
+    const numId = num.attributes["w:numId"] as string;
+    const abstractNumId = findChild(num, "w:abstractNumId");
+    if (!abstractNumId?.attributes["w:val"]) continue;
 
-                if (numFmt) {
-                  // Determine list type from numFmt
-                  // Common formats: bullet, decimal, lowerLetter, upperLetter, lowerRoman, upperRoman
-                  const start = abstractNumStarts.get(abstractNumId);
+    const abstractNumIdVal = abstractNumId.attributes["w:val"] as string;
+    const numFmt = abstractNumFormats.get(abstractNumIdVal);
+    if (!numFmt) continue;
 
-                  if (numFmt === "bullet") {
-                    listTypeMap.set(numId, {
-                      type: "bullet",
-                    });
-                  } else {
-                    // decimal, letter, and roman formats are all ordered lists
-                    listTypeMap.set(numId, {
-                      type: "ordered",
-                      ...(start !== undefined && { start }),
-                    });
-                  }
-                }
-                break;
-              }
-            }
-          }
-        }
-        break;
-      }
+    const start = abstractNumStarts.get(abstractNumIdVal);
+
+    if (numFmt === "bullet") {
+      listTypeMap.set(numId, { type: "bullet" });
+    } else {
+      listTypeMap.set(numId, {
+        type: "ordered",
+        ...(start !== undefined && { start }),
+      });
     }
   }
 
   return listTypeMap;
-}
-
-/**
- * Extract images from DOCX relationships
- * Returns Map of relationship ID to raw image data (Uint8Array)
- */
-function extractImages(files: Record<string, Uint8Array>): Map<string, Uint8Array> {
-  const images = new Map<string, Uint8Array>();
-
-  const relsXml = files["word/_rels/document.xml.rels"];
-  if (!relsXml) return images;
-
-  const relsXast = fromXml(new TextDecoder().decode(relsXml));
-
-  if (relsXast.type === "root") {
-    for (const child of relsXast.children) {
-      if (child.type === "element" && child.name === "Relationships") {
-        const relationships = child;
-        for (const relChild of relationships.children) {
-          if (relChild.type === "element" && relChild.name === "Relationship") {
-            const rel = relChild;
-            const type = rel.attributes.Type;
-            const imageRelType =
-              "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image";
-
-            if (type && type === imageRelType) {
-              const rId = rel.attributes.Id;
-              const target = rel.attributes.Target;
-              if (rId && target) {
-                // Extract image from media folder
-                const imagePath = "word/" + (target as string);
-                const imageData = files[imagePath];
-                if (imageData) {
-                  images.set(rId as string, imageData);
-                }
-              }
-            }
-          }
-        }
-        break;
-      }
-    }
-  }
-
-  return images;
-}
-
-/**
- * Extract hyperlinks from DOCX relationships
- */
-function extractHyperlinks(files: Record<string, Uint8Array>): Map<string, string> {
-  const hyperlinks = new Map<string, string>();
-  const relsXml = files["word/_rels/document.xml.rels"];
-  if (!relsXml) return hyperlinks;
-
-  const relsXast = fromXml(new TextDecoder().decode(relsXml));
-
-  // Find Relationships element first (CRITICAL FIX)
-  if (relsXast.type === "root") {
-    for (const child of relsXast.children) {
-      if (child.type === "element" && child.name === "Relationships") {
-        const relationships = child;
-        // Now iterate through Relationship elements
-        for (const relChild of relationships.children) {
-          if (relChild.type === "element" && relChild.name === "Relationship") {
-            const rel = relChild;
-            const type = rel.attributes.Type;
-            const hyperlinkRelType =
-              "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink";
-            if (type && type === hyperlinkRelType) {
-              const rId = rel.attributes.Id;
-              const target = rel.attributes.Target;
-              if (rId && target) {
-                hyperlinks.set(rId as string, target as string);
-              }
-            }
-          }
-        }
-        break;
-      }
-    }
-  }
-  return hyperlinks;
 }
 
 /**
@@ -352,37 +195,26 @@ async function convertDocument(
     return { type: "doc", content: [] };
   }
 
-  // Find w:document element
-  for (const child of documentXast.children) {
-    if (child.type === "element" && child.name === "w:document") {
-      const document = child;
+  const document = findChild(documentXast, "w:document");
+  if (!document) return { type: "doc", content: [] };
 
-      // Find w:body element
-      for (const bodyChild of document.children) {
-        if (bodyChild.type === "element" && bodyChild.name === "w:body") {
-          const body = bodyChild;
+  const body = findChild(document, "w:body");
+  if (!body) return { type: "doc", content: [] };
 
-          // Process all elements in body
-          const content = await processElements(
-            body.children.filter((c) => c.type === "element") as Element[],
-            images,
-            hyperlinks,
-            listTypeMap,
-            ignoreEmptyParagraphs,
-            options,
-          );
+  // Process all elements in body
+  const content = await processElements(
+    body.children.filter((c) => c.type === "element") as Element[],
+    images,
+    hyperlinks,
+    listTypeMap,
+    ignoreEmptyParagraphs,
+    options,
+  );
 
-          return {
-            type: "doc",
-            content,
-          };
-        }
-      }
-      break;
-    }
-  }
-
-  return { type: "doc", content: [] };
+  return {
+    type: "doc",
+    content,
+  };
 }
 
 /**
@@ -404,7 +236,7 @@ async function processElements(
 
     // Handle tables
     if (element.name === "w:tbl") {
-      result.push(await convertTable(element, hyperlinks, images, options));
+      result.push(await convertTable(element, { hyperlinks, images, options }));
       i++;
       // Skip empty paragraph after table (export-docx adds these for spacing)
       if (
@@ -443,7 +275,12 @@ async function processElements(
 
       // Check for list items
       if (isListItem(element)) {
-        const listNodes = await processLists(elements, i, images, hyperlinks, listTypeMap, options);
+        const listNodes = await processLists(elements, i, {
+          hyperlinks,
+          images,
+          listTypeMap,
+          options,
+        });
         result.push(...listNodes);
         i += getListConsumed(elements, i);
         continue;
@@ -457,7 +294,7 @@ async function processElements(
       }
 
       // Regular paragraph
-      result.push(await convertParagraph(element, hyperlinks, images, options));
+      result.push(await convertParagraph(element, { hyperlinks, images, options }));
       i++;
       continue;
     }
@@ -501,11 +338,14 @@ function processCodeBlocks(elements: Element[], startIndex: number): JSONContent
 async function processLists(
   elements: Element[],
   startIndex: number,
-  images: Map<string, string>,
-  hyperlinks: Map<string, string>,
-  listTypeMap: ListTypeMap,
-  options?: DocxImportOptions,
+  params: {
+    hyperlinks: Map<string, string>;
+    images: Map<string, string>;
+    listTypeMap: Map<string, { type: "bullet" | "ordered"; start?: number }>;
+    options?: DocxImportOptions;
+  },
 ): Promise<JSONContent[]> {
+  const { listTypeMap } = params;
   const result: JSONContent[] = [];
   let i = startIndex;
 
@@ -538,7 +378,7 @@ async function processLists(
       }
 
       // Convert list item
-      const paragraph = await convertParagraph(el, hyperlinks, images, options);
+      const paragraph = await convertParagraph(el, params);
       const listItem = {
         type: "listItem",
         content: [paragraph],
@@ -640,20 +480,17 @@ function getTaskListConsumed(elements: Element[], startIndex: number): number {
 function extractTextFromParagraph(element: Element): Array<{ type: string; text: string }> {
   const content: Array<{ type: string; text: string }> = [];
 
-  for (const child of element.children) {
-    if (child.type !== "element" || child.name !== "w:r") continue;
+  const runs = findDeepChildren(element, "w:r");
+  for (const run of runs) {
+    const textElement = findChild(run, "w:t");
+    if (!textElement) continue;
 
-    const run = child;
-    for (const runChild of run.children) {
-      if (runChild.type === "element" && runChild.name === "w:t") {
-        const textNode = runChild.children.find((c) => c.type === "text");
-        if (textNode && "value" in textNode) {
-          content.push({
-            type: "text",
-            text: (textNode as { value: string }).value,
-          });
-        }
-      }
+    const textNode = textElement.children.find((c): c is Text => c.type === "text");
+    if (textNode && textNode.value) {
+      content.push({
+        type: "text",
+        text: textNode.value,
+      });
     }
   }
 
@@ -665,34 +502,24 @@ function extractTextFromParagraph(element: Element): Array<{ type: string; text:
  */
 function isEmptyParagraph(element: Element): boolean {
   // Check if paragraph has any text runs with content
-  for (const child of element.children) {
-    if (child.type !== "element" || child.name !== "w:r") continue;
-
-    const run = child;
-    for (const runChild of run.children) {
-      // Check for text content
-      if (runChild.type === "element" && runChild.name === "w:t") {
-        const textNode = runChild.children.find((c) => c.type === "text");
-        if (textNode && "value" in textNode) {
-          const text = (textNode as { value: string }).value;
-          // If there's any non-whitespace text, paragraph is not empty
-          if (text.trim().length > 0) {
-            return false;
-          }
-        }
+  const runs = findDeepChildren(element, "w:r");
+  for (const run of runs) {
+    // Check for text content
+    const textElement = findChild(run, "w:t");
+    if (textElement) {
+      const textNode = textElement.children.find((c): c is Text => c.type === "text");
+      if (textNode && textNode.value && textNode.value.trim().length > 0) {
+        return false;
       }
+    }
 
-      // Check for images (w:drawing, mc:AlternateContent, or w:pict)
-      if (runChild.type === "element") {
-        if (
-          runChild.name === "w:drawing" ||
-          runChild.name === "mc:AlternateContent" ||
-          runChild.name === "w:pict"
-        ) {
-          // Paragraph contains an image, not empty
-          return false;
-        }
-      }
+    // Check for images (w:drawing, mc:AlternateContent, or w:pict)
+    if (
+      findChild(run, "w:drawing") ||
+      findChild(run, "mc:AlternateContent") ||
+      findChild(run, "w:pict")
+    ) {
+      return false;
     }
   }
 
