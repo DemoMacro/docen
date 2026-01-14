@@ -40,9 +40,13 @@ export function convertOrderedList(node: OrderedListNode): ListOptions {
  */
 export async function convertList(
   node: BulletListNode | OrderedListNode,
-  listType: "bullet" | "ordered",
-  exportOptions?: DocxExportOptions,
+  params: {
+    listType: "bullet" | "ordered";
+    exportOptions?: DocxExportOptions;
+  },
 ): Promise<Paragraph[]> {
+  const { listType, exportOptions } = params;
+
   if (!node.content) {
     return [];
   }
@@ -62,16 +66,15 @@ export async function convertList(
   // Convert list items
   for (const item of node.content) {
     if (item.type === "listItem") {
-      const paragraph = await convertListItem(
-        item as ListItemNode,
-        {
+      const paragraph = await convertListItem(item as ListItemNode, {
+        options: {
           numbering: {
             reference: numberingReference,
             level: 0,
           },
         },
         exportOptions,
-      );
+      });
       elements.push(paragraph);
     }
   }

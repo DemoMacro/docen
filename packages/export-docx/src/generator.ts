@@ -211,7 +211,10 @@ export async function convertNode(
 
   switch (node.type) {
     case "paragraph":
-      return await convertParagraph(node as ParagraphNode, undefined, options);
+      return await convertParagraph(node as ParagraphNode, {
+        options: undefined,
+        exportOptions: options,
+      });
 
     case "heading":
       return convertHeading(node as HeadingNode);
@@ -226,19 +229,31 @@ export async function convertNode(
       return await convertImage(node as ImageNode, options.image);
 
     case "table":
-      return await convertTable(node as TableNode, options.table, options);
+      return await convertTable(node as TableNode, {
+        options: options.table,
+        exportOptions: options,
+      });
 
     case "bulletList":
-      return await convertList(node as BulletListNode, "bullet", options);
+      return await convertList(node as BulletListNode, {
+        listType: "bullet",
+        exportOptions: options,
+      });
 
     case "orderedList":
-      return await convertList(node as OrderedListNode, "ordered", options);
+      return await convertList(node as OrderedListNode, {
+        listType: "ordered",
+        exportOptions: options,
+      });
 
     case "taskList":
       return convertTaskList(node as TaskListNode);
 
     case "listItem":
-      return convertListItem(node as ListItemNode);
+      return convertListItem(node as ListItemNode, {
+        options: undefined,
+        exportOptions: undefined,
+      });
 
     case "taskItem":
       return convertTaskItem(node as TaskItemNode);

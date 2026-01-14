@@ -1,4 +1,5 @@
-import type { Element } from "xast";
+import type { Element, Text } from "xast";
+import { findChild } from "../utils/xml";
 
 /**
  * Check if a paragraph is a horizontal rule (page break)
@@ -6,43 +7,33 @@ import type { Element } from "xast";
  */
 export function isHorizontalRule(node: Element): boolean {
   // Check if this paragraph contains only a page break
-  for (const child of node.children) {
-    if (child.type === "element" && child.name === "w:r") {
-      const run = child;
+  const run = findChild(node, "w:r");
+  if (!run) return false;
 
-      // Check all children of the run
-      let hasPageBreak = false;
-      let hasOtherContent = false;
+  // Check all children of the run
+  let hasPageBreak = false;
+  let hasOtherContent = false;
 
-      for (const runChild of run.children) {
-        if (runChild.type === "element") {
-          if (runChild.name === "w:br") {
-            const brType = runChild.attributes["w:type"];
-            if (brType === "page") {
-              hasPageBreak = true;
-            }
-          } else if (runChild.name === "w:t") {
-            // Check if text element has content
-            const textNode = runChild.children.find((c) => c.type === "text");
-            if (textNode && "value" in textNode && textNode.value) {
-              const text = (textNode as { value: string }).value.trim();
-              if (text.length > 0) {
-                hasOtherContent = true;
-              }
-            }
-          } else if (runChild.name !== "w:rPr") {
-            // Other elements besides properties
-            hasOtherContent = true;
-          }
+  for (const runChild of run.children) {
+    if (runChild.type === "element") {
+      if (runChild.name === "w:br") {
+        const brType = runChild.attributes["w:type"];
+        if (brType === "page") {
+          hasPageBreak = true;
         }
-      }
-
-      // Return true if we found a page break and no other content
-      if (hasPageBreak && !hasOtherContent) {
-        return true;
+      } else if (runChild.name === "w:t") {
+        // Check if text element has content
+        const textNode = runChild.children.find((c): c is Text => c.type === "text");
+        if (textNode && textNode.value && textNode.value.trim().length > 0) {
+          hasOtherContent = true;
+        }
+      } else if (runChild.name !== "w:rPr") {
+        // Other elements besides properties
+        hasOtherContent = true;
       }
     }
   }
 
-  return false;
+  // Return true if we found a page break and no other content
+  return hasPageBreak && !hasOtherContent;
 }

@@ -8,15 +8,18 @@ import { DocxExportOptions } from "../option";
  * Convert TipTap paragraph node to DOCX Paragraph
  *
  * @param node - TipTap paragraph node
- * @param options - Optional paragraph options (e.g., numbering)
- * @param exportOptions - Export options (for image processing)
+ * @param params - Conversion parameters
  * @returns Promise<DOCX Paragraph object>
  */
 export async function convertParagraph(
   node: ParagraphNode,
-  options?: IParagraphOptions,
-  exportOptions?: DocxExportOptions,
+  params: {
+    options?: IParagraphOptions;
+    exportOptions?: DocxExportOptions;
+  },
 ): Promise<Paragraph> {
+  const { options, exportOptions } = params;
+
   // Check if paragraph contains only images (for image-specific styling)
   const onlyContainsImages =
     node.content &&

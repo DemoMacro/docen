@@ -2,6 +2,7 @@ import type { Element } from "xast";
 import type { JSONContent } from "@tiptap/core";
 import type { DocxImportOptions } from "../option";
 import { convertParagraph } from "./paragraph";
+import { findChild } from "../utils/xml";
 
 /**
  * Check if an element is a table
@@ -15,9 +16,11 @@ export function isTable(node: Element): boolean {
  */
 export async function convertTable(
   node: Element,
-  hyperlinks: Map<string, string>,
-  images: Map<string, string>,
-  options?: DocxImportOptions,
+  params: {
+    hyperlinks: Map<string, string>;
+    images: Map<string, string>;
+    options?: DocxImportOptions;
+  },
 ): Promise<JSONContent> {
   const rows: JSONContent[] = [];
 
@@ -38,12 +41,10 @@ export async function convertTable(
       await convertTableRow(
         rowElement,
         rowIndex === 0,
-        hyperlinks,
-        images,
+        params,
         activeRowspans,
         rowElements,
         rowIndex,
-        options,
       ),
     );
   }
@@ -60,12 +61,14 @@ export async function convertTable(
 async function convertTableRow(
   rowNode: Element,
   isFirstRow: boolean,
-  hyperlinks: Map<string, string>,
-  images: Map<string, string>,
+  params: {
+    hyperlinks: Map<string, string>;
+    images: Map<string, string>;
+    options?: DocxImportOptions;
+  },
   activeRowspans: Map<number, number>,
   allRows: Element[],
   currentRowIndex: number,
-  options?: DocxImportOptions,
 ): Promise<JSONContent> {
   const cells: JSONContent[] = [];
   let colIndex = 0;
@@ -110,7 +113,7 @@ async function convertTableRow(
       const cellType = "tableCell";
 
       // Convert cell content
-      const paragraphs = await convertCellContent(child, hyperlinks, images, options);
+      const paragraphs = await convertCellContent(child, params);
 
       cells.push({
         type: cellType,
@@ -143,58 +146,31 @@ function getCellProperties(cellNode: Element): {
     colwidth: null as number | null,
   };
 
-  // Find cell properties element
-  let tcPr: Element | undefined;
-  for (const child of cellNode.children) {
-    if (child.type === "element" && child.name === "w:tcPr") {
-      tcPr = child;
-      break;
-    }
-  }
-
-  if (!tcPr) {
-    return props;
-  }
+  const tcPr = findChild(cellNode, "w:tcPr");
+  if (!tcPr) return props;
 
   // Check for gridSpan (colspan)
-  for (const child of tcPr.children) {
-    if (child.type === "element" && child.name === "w:gridSpan") {
-      const val = child.attributes["w:val"];
-      if (val) {
-        props.colspan = parseInt(val as string);
-      }
-      break;
-    }
+  const gridSpan = findChild(tcPr, "w:gridSpan");
+  if (gridSpan?.attributes["w:val"]) {
+    props.colspan = parseInt(gridSpan.attributes["w:val"] as string);
   }
 
   // Check for vMerge (rowspan)
   // DOCX format: cells with vMerge/@val='continue' are merged into the cell above
   // Cells without vMerge or with vMerge but no val attribute are normal cells
-  for (const child of tcPr.children) {
-    if (child.type === "element" && child.name === "w:vMerge") {
-      const val = child.attributes["w:val"];
-      // If vMerge has val="continue", this cell is merged (rowspan should be 0 or handled specially)
-      // If vMerge exists but no val attribute, or val is not "continue", it's a normal cell
-      if (val === "continue") {
-        props.rowspan = 0; // This cell is merged, should be skipped or handled specially
-      }
-      // Note: We don't set rowspan > 1 here because DOCX doesn't explicitly store the rowspan value
-      // The rowspan value needs to be calculated by counting consecutive "continue" cells
-      break;
-    }
+  const vMerge = findChild(tcPr, "w:vMerge");
+  if (vMerge?.attributes["w:val"] === "continue") {
+    props.rowspan = 0; // This cell is merged, should be skipped or handled specially
   }
+  // Note: We don't set rowspan > 1 here because DOCX doesn't explicitly store the rowspan value
+  // The rowspan value needs to be calculated by counting consecutive "continue" cells
 
   // Check for column width
-  for (const child of tcPr.children) {
-    if (child.type === "element" && child.name === "w:tcW") {
-      const val = child.attributes["w:w"];
-      if (val) {
-        const twips = parseInt(val as string);
-        // Convert twips to pixels (1 inch = 1440 twips = 96 pixels at 96 DPI)
-        props.colwidth = Math.round(twips / 15);
-      }
-      break;
-    }
+  const tcW = findChild(tcPr, "w:tcW");
+  if (tcW?.attributes["w:w"]) {
+    const twips = parseInt(tcW.attributes["w:w"] as string);
+    // Convert twips to pixels (1 inch = 1440 twips = 96 pixels at 96 DPI)
+    props.colwidth = Math.round(twips / 15);
   }
 
   return props;
@@ -248,16 +224,18 @@ function calculateRowspan(allRows: Element[], startRowIndex: number, colIndex: n
  */
 async function convertCellContent(
   cellNode: Element,
-  hyperlinks: Map<string, string>,
-  images: Map<string, string>,
-  options?: DocxImportOptions,
+  params: {
+    hyperlinks: Map<string, string>;
+    images: Map<string, string>;
+    options?: DocxImportOptions;
+  },
 ): Promise<JSONContent[]> {
   // Find all paragraphs in the cell
   const paragraphs: JSONContent[] = [];
 
   for (const child of cellNode.children) {
     if (child.type === "element" && child.name === "w:p") {
-      const paragraph = await convertParagraph(child, hyperlinks, images, options);
+      const paragraph = await convertParagraph(child, params);
       paragraphs.push(paragraph);
     }
   }

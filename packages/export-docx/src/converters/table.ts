@@ -7,19 +7,20 @@ import { DocxExportOptions } from "../option";
  * Convert TipTap table node to DOCX Table
  *
  * @param node - TipTap table node
- * @param options - Table options from PropertiesOptions
- * @param exportOptions - Export options (for image processing)
+ * @param params - Conversion parameters
  * @returns Promise<Array containing Table and a following Paragraph to prevent merging>
  */
 export async function convertTable(
   node: TableNode,
-  options: DocxExportOptions["table"],
-  exportOptions?: DocxExportOptions,
+  params: {
+    options: DocxExportOptions["table"];
+    exportOptions?: DocxExportOptions;
+  },
 ): Promise<Array<Table | Paragraph>> {
+  const { options } = params;
+
   // Convert table rows
-  const rows = await Promise.all(
-    (node.content || []).map((row) => convertTableRow(row, options, exportOptions)),
-  );
+  const rows = await Promise.all((node.content || []).map((row) => convertTableRow(row, params)));
 
   // Build table options with options
   const tableOptions: ITableOptions = {
