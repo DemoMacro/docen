@@ -15,7 +15,6 @@ export async function convertTableRow(
   node: TableRowNode,
   params: {
     options: DocxExportOptions["table"];
-    exportOptions?: DocxExportOptions;
   },
 ): Promise<TableRow> {
   const { options } = params;

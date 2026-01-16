@@ -8,6 +8,7 @@ import {
   ITableOptions,
   ITableRowOptions,
   ITableOfContentsOptions,
+  IParagraphStyleOptions,
 } from "docx";
 
 /**
@@ -45,13 +46,20 @@ export interface DocxExportOptions<T extends OutputType = OutputType> {
   };
 
   image?: {
-    paragraph?: Partial<IParagraphOptions>;
+    // Style definition for image paragraphs
+    style?: IParagraphStyleOptions;
+
+    // Image-specific run options
     run?: Pick<IImageOptions, "transformation" | "floating" | "altText" | "outline">;
   };
 
   table?: {
-    paragraph?: Partial<IParagraphOptions>;
+    // Style definition for table paragraphs
+    style?: IParagraphStyleOptions;
+
+    // Table-level options
     run?: Partial<ITableOptions>;
+
     row?: {
       paragraph?: Partial<IParagraphOptions>;
       run?: Partial<ITableRowOptions>;

@@ -1,4 +1,4 @@
-import { Table, Paragraph, ITableOptions } from "docx";
+import { Table, ITableOptions } from "docx";
 import { TableNode } from "../types";
 import { convertTableRow } from "./table-row";
 import { DocxExportOptions } from "../option";
@@ -8,15 +8,14 @@ import { DocxExportOptions } from "../option";
  *
  * @param node - TipTap table node
  * @param params - Conversion parameters
- * @returns Promise<Array containing Table and a following Paragraph to prevent merging>
+ * @returns Promise<Table>
  */
 export async function convertTable(
   node: TableNode,
   params: {
     options: DocxExportOptions["table"];
-    exportOptions?: DocxExportOptions;
   },
-): Promise<Array<Table | Paragraph>> {
+): Promise<Table> {
   const { options } = params;
 
   // Convert table rows
@@ -28,9 +27,6 @@ export async function convertTable(
     ...options?.run, // Apply table options
   };
 
-  // Create table
-  const table = new Table(tableOptions);
-
-  // Return table with a following empty paragraph to prevent automatic merging with adjacent tables
-  return [table, new Paragraph({})];
+  // Create and return table
+  return new Table(tableOptions);
 }

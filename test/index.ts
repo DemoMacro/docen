@@ -319,9 +319,6 @@ void (async () => {
         title: docxFile.replace(".docx", ""),
         outputType: "nodebuffer",
         table: {
-          paragraph: {
-            alignment: "center",
-          },
           run: {
             width: {
               size: 100,
@@ -331,6 +328,9 @@ void (async () => {
             layout: "autofit",
           },
           cell: {
+            paragraph: {
+              alignment: "center",
+            },
             run: {
               verticalAlign: "center",
             },
@@ -392,9 +392,6 @@ void (async () => {
         title: parsedDocxFile.replace(".docx", ""),
         outputType: "nodebuffer",
         table: {
-          paragraph: {
-            alignment: "center",
-          },
           run: {
             width: {
               size: 100,
@@ -404,6 +401,9 @@ void (async () => {
             layout: "autofit",
           },
           cell: {
+            paragraph: {
+              alignment: "center",
+            },
             run: {
               verticalAlign: "center",
             },

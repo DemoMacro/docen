@@ -1,4 +1,4 @@
-import { TableCell } from "docx";
+import { TableCell, IParagraphOptions } from "docx";
 import { TableHeaderNode } from "../types";
 import { convertParagraph } from "./paragraph";
 import { DocxExportOptions } from "../option";
@@ -14,21 +14,27 @@ export async function convertTableHeader(
   node: TableHeaderNode,
   params: {
     options: DocxExportOptions["table"];
-    exportOptions?: DocxExportOptions;
   },
 ): Promise<TableCell> {
-  const { options, exportOptions } = params;
+  const { options } = params;
+
+  // Prepare paragraph options for table header cells
+  let headerParagraphOptions: IParagraphOptions =
+    options?.header?.paragraph ?? options?.cell?.paragraph ?? options?.row?.paragraph ?? {};
+
+  // Apply style reference if configured
+  if (options?.style) {
+    headerParagraphOptions = {
+      ...headerParagraphOptions,
+      style: options.style.id,
+    };
+  }
 
   // Convert paragraphs in the header
   const paragraphs = await Promise.all(
     (node.content || []).map((p) =>
       convertParagraph(p, {
-        options:
-          options?.header?.paragraph ??
-          options?.cell?.paragraph ??
-          options?.row?.paragraph ??
-          options?.paragraph,
-        exportOptions,
+        options: headerParagraphOptions,
       }),
     ),
   );

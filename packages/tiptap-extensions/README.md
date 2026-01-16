@@ -125,20 +125,30 @@ import type {
 **Content Nodes:**
 
 ```typescript
-// Paragraph with text alignment
+// Paragraph with text alignment and spacing
 interface ParagraphNode {
   type: "paragraph";
   attrs?: {
     textAlign?: "left" | "right" | "center" | "justify";
+    indentLeft?: number;
+    indentRight?: number;
+    indentFirstLine?: number;
+    spacingBefore?: number;
+    spacingAfter?: number;
   };
   content?: Array<TextContent>;
 }
 
-// Heading with level
+// Heading with level and spacing
 interface HeadingNode {
   type: "heading";
   attrs: {
     level: 1 | 2 | 3 | 4 | 5 | 6;
+    indentLeft?: number;
+    indentRight?: number;
+    indentFirstLine?: number;
+    spacingBefore?: number;
+    spacingAfter?: number;
   };
   content?: Array<TextContent>;
 }
