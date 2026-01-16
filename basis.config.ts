@@ -3,7 +3,7 @@ import { defineBasisConfig } from "@funish/basis";
 export default defineBasisConfig({
   lint: {
     staged: {
-      "*": "bun lint",
+      "*": "pnpm lint",
     },
     project: {
       check: "oxlint --fix --fix-suggestions --type-aware",

@@ -1,8 +1,7 @@
 import { Paragraph, IParagraphOptions } from "docx";
 import { convertText, convertHardBreak } from "./text";
-import { convertImageToRun } from "./image";
+import { convertImage } from "./image";
 import { ParagraphNode, ImageNode } from "../types";
-import { DocxExportOptions } from "../option";
 
 /**
  * Convert pixels to TWIPs (Twentieth of a Point)
@@ -21,18 +20,11 @@ function pxToTwip(px: number): number {
  */
 export async function convertParagraph(
   node: ParagraphNode,
-  params: {
+  params?: {
     options?: IParagraphOptions;
-    exportOptions?: DocxExportOptions;
   },
 ): Promise<Paragraph> {
-  const { options, exportOptions } = params;
-
-  // Check if paragraph contains only images (for image-specific styling)
-  const onlyContainsImages =
-    node.content &&
-    node.content.length > 0 &&
-    node.content.every((child) => child.type === "image");
+  const { options } = params || {};
 
   // Convert content to text runs and images
   const children = await Promise.all(
@@ -43,7 +35,7 @@ export async function convertParagraph(
         return convertHardBreak(contentNode.marks);
       } else if (contentNode.type === "image") {
         // Convert image node to ImageRun directly
-        const imageRun = await convertImageToRun(contentNode as ImageNode, exportOptions?.image);
+        const imageRun = await convertImage(contentNode as ImageNode);
         return imageRun;
       }
       return [];
@@ -53,29 +45,12 @@ export async function convertParagraph(
   // Flatten the array of arrays
   const flattenedChildren = children.flat();
 
-  // Determine paragraph options based on content type
+  // Determine paragraph options
   let paragraphOptions: IParagraphOptions = {
     children: flattenedChildren,
   };
 
-  // Apply default paragraph styles directly to each paragraph for better compatibility
-  // instead of relying on <w:pPrDefault> which may not be handled correctly by some word processors
-  if (!onlyContainsImages && exportOptions?.styles?.default?.document?.paragraph) {
-    paragraphOptions = {
-      ...paragraphOptions,
-      ...exportOptions.styles.default.document.paragraph,
-    };
-  }
-
-  if (onlyContainsImages && exportOptions?.image?.paragraph) {
-    // Apply image-specific paragraph options (e.g., alignment for centering)
-    paragraphOptions = {
-      ...paragraphOptions,
-      ...exportOptions.image.paragraph,
-    };
-  }
-
-  // Apply any passed-in options (e.g., numbering for lists)
+  // Apply any passed-in options (e.g., numbering for lists, style references)
   if (options) {
     paragraphOptions = {
       ...paragraphOptions,

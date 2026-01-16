@@ -14,6 +14,8 @@ import {
   AlignmentType,
   convertInchesToTwip,
   TableOfContents,
+  StyleForParagraph,
+  IParagraphOptions,
 } from "docx";
 import { type DocxExportOptions } from "./option";
 import { convertParagraph } from "./converters/paragraph";
@@ -66,9 +68,6 @@ export async function generateDOCX<T extends OutputType>(
     lastModifiedBy,
     revision,
 
-    // Document styling
-    styles,
-
     // Table of contents
     tableOfContents,
 
@@ -97,6 +96,27 @@ export async function generateDOCX<T extends OutputType>(
 
   // Collect ordered list start values for numbering options
   const numberingOptions = createNumberingOptions(docJson);
+
+  // Build styles - merge user styles with auto-generated image/table styles
+  const importedStyles: Array<StyleForParagraph> = [];
+
+  // Add image style if defined
+  if (options.image?.style) {
+    importedStyles.push(new StyleForParagraph(options.image.style));
+  }
+
+  // Add table style if defined
+  if (options.table?.style) {
+    importedStyles.push(new StyleForParagraph(options.table.style));
+  }
+
+  const styles: IPropertiesOptions["styles"] = {
+    default: options.styles?.default || {},
+    paragraphStyles: [...(options.styles?.paragraphStyles || [])],
+    ...(importedStyles.length > 0 && {
+      importedStyles: [...(options.styles?.importedStyles || []), ...importedStyles],
+    }),
+  };
 
   // Build document sections - merge user config with generated content
   const documentSections = sections
@@ -139,7 +159,7 @@ export async function generateDOCX<T extends OutputType>(
     revision: revision || 1,
 
     // Styling
-    styles,
+    styles: styles,
     numbering: numberingOptions,
   };
 
@@ -192,6 +212,15 @@ export async function convertDocumentContent(
       elements.push(...element);
     } else if (element) {
       elements.push(element);
+
+      // Insert empty paragraph between adjacent tables to prevent merging
+      if (
+        childNode.type === "table" &&
+        elements.length >= 2 &&
+        elements[elements.length - 2].constructor.name === "Table"
+      ) {
+        elements.push(new Paragraph({}));
+      }
     }
   }
 
@@ -211,10 +240,7 @@ export async function convertNode(
 
   switch (node.type) {
     case "paragraph":
-      return await convertParagraph(node as ParagraphNode, {
-        options: undefined,
-        exportOptions: options,
-      });
+      return await convertParagraph(node as ParagraphNode);
 
     case "heading":
       return convertHeading(node as HeadingNode);
@@ -226,12 +252,24 @@ export async function convertNode(
       return convertCodeBlock(node as CodeBlockNode);
 
     case "image":
-      return await convertImage(node as ImageNode, options.image);
+      // Convert image node to ImageRun and wrap in Paragraph with style
+      const imageRun = await convertImage(node as ImageNode);
+
+      // Build paragraph options with style reference if configured
+      const imageParagraphOptions: IParagraphOptions = options.image?.style
+        ? {
+            children: [imageRun],
+            style: options.image.style.id,
+          }
+        : {
+            children: [imageRun],
+          };
+
+      return new Paragraph(imageParagraphOptions);
 
     case "table":
       return await convertTable(node as TableNode, {
         options: options.table,
-        exportOptions: options,
       });
 
     case "bulletList":

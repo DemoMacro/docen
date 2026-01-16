@@ -1,20 +1,15 @@
-import { Paragraph, ImageRun, IImageOptions } from "docx";
+import { ImageRun, IImageOptions } from "docx";
 import { ImageNode } from "../types";
 import { getImageTypeFromSrc, getImageWidth, getImageHeight, getImageDataAndMeta } from "../utils";
 import { imageMeta as getImageMetadata, type ImageMeta } from "image-meta";
-import { DocxExportOptions } from "../option";
 
 /**
  * Convert TipTap image node to DOCX ImageRun
  *
  * @param node - TipTap image node
- * @param options - Image options from PropertiesOptions
  * @returns Promise<DOCX ImageRun>
  */
-export async function convertImageToRun(
-  node: ImageNode,
-  options: DocxExportOptions["image"],
-): Promise<ImageRun> {
+export async function convertImage(node: ImageNode): Promise<ImageRun> {
   // Get image type from metadata or URL
   const getImageType = (metaType?: string): "jpg" | "png" | "gif" | "bmp" => {
     // Try metadata type first
@@ -96,9 +91,9 @@ export async function convertImageToRun(
     });
   }
 
-  // Determine final dimensions using utils functions: first width, then height based on aspect ratio
-  const finalWidth = getImageWidth(node, options, imageMeta);
-  const finalHeight = getImageHeight(node, finalWidth, options, imageMeta);
+  // Determine final dimensions: first from node attrs, then from image metadata
+  const finalWidth = getImageWidth(node, undefined, imageMeta);
+  const finalHeight = getImageHeight(node, finalWidth, undefined, imageMeta);
 
   // Build transformation object
   const transformation: {
@@ -126,39 +121,7 @@ export async function convertImageToRun(
       description: undefined,
       title: node.attrs?.title || undefined,
     },
-    ...(options?.run &&
-      options.run.floating && {
-        floating: options.run.floating,
-      }),
-    ...(options?.run &&
-      options.run.outline && {
-        outline: options.run.outline,
-      }),
   };
 
   return new ImageRun(imageOptions);
-}
-
-/**
- * Convert TipTap image node to DOCX Paragraph with ImageRun
- *
- * @param node - TipTap image node
- * @param options - Image options from PropertiesOptions
- * @returns Promise<DOCX Paragraph> object with image
- */
-export async function convertImage(
-  node: ImageNode,
-  options: DocxExportOptions["image"],
-): Promise<Paragraph> {
-  // Reuse convertImageToRun
-  const imageRun = await convertImageToRun(node, options);
-
-  // Create paragraph with image
-  const paragraphOptions = options?.paragraph || {};
-  const paragraph = new Paragraph({
-    children: [imageRun],
-    ...paragraphOptions, // Allow override of paragraph properties
-  });
-
-  return paragraph;
 }

@@ -1,4 +1,4 @@
-import { TableCell } from "docx";
+import { TableCell, IParagraphOptions } from "docx";
 import { TableCellNode } from "../types";
 import { convertParagraph } from "./paragraph";
 import { DocxExportOptions } from "../option";
@@ -14,17 +14,27 @@ export async function convertTableCell(
   node: TableCellNode,
   params: {
     options: DocxExportOptions["table"];
-    exportOptions?: DocxExportOptions;
   },
 ): Promise<TableCell> {
-  const { options, exportOptions } = params;
+  const { options } = params;
+
+  // Prepare paragraph options for table cells
+  let cellParagraphOptions: IParagraphOptions =
+    options?.cell?.paragraph ?? options?.row?.paragraph ?? {};
+
+  // Apply style reference if configured
+  if (options?.style) {
+    cellParagraphOptions = {
+      ...cellParagraphOptions,
+      style: options.style.id,
+    };
+  }
 
   // Convert paragraphs in the cell
   const paragraphs = await Promise.all(
     (node.content || []).map((p) =>
       convertParagraph(p, {
-        options: options?.cell?.paragraph ?? options?.row?.paragraph ?? options?.paragraph,
-        exportOptions,
+        options: cellParagraphOptions,
       }),
     ),
   );
