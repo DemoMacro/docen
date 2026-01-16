@@ -1,7 +1,24 @@
 import { JSONContent } from "@tiptap/core";
+import type {
+  IFloating,
+  IImageOptions,
+  IHorizontalPositionOptions,
+  IVerticalPositionOptions,
+} from "docx";
 
 // Re-export JSONContent for convenience
 export type { JSONContent };
+
+// Floating positioning options for images
+// IFloating requires horizontalPosition and verticalPosition to be required
+// But we make all other properties optional
+export type ImageFloatingOptions = {
+  horizontalPosition: IHorizontalPositionOptions;
+  verticalPosition: IVerticalPositionOptions;
+} & Partial<Omit<IFloating, "horizontalPosition" | "verticalPosition">>;
+
+// Extract outline type from IImageOptions
+export type ImageOutlineOptions = IImageOptions["outline"];
 
 // Text and content node types
 export interface TextNode {
@@ -170,6 +187,8 @@ export interface ImageNode extends JSONContent {
     width?: number | null;
     height?: number | null;
     rotation?: number; // Image rotation in degrees (non-standard, for DOCX round-trip)
+    floating?: ImageFloatingOptions; // Floating positioning options (non-standard, for DOCX round-trip)
+    outline?: ImageOutlineOptions; // Image border/outline options (non-standard, for DOCX round-trip)
   };
 }
 

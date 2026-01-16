@@ -19,6 +19,16 @@ export const Image = BaseImage.extend({
       rotation: {
         default: null,
       },
+
+      // Add floating attribute for image positioning
+      floating: {
+        default: null,
+      },
+
+      // Add outline attribute for image border
+      outline: {
+        default: null,
+      },
     };
   },
 

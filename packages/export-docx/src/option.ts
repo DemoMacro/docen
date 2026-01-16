@@ -49,8 +49,8 @@ export interface DocxExportOptions<T extends OutputType = OutputType> {
     // Style definition for image paragraphs
     style?: IParagraphStyleOptions;
 
-    // Image-specific run options
-    run?: Pick<IImageOptions, "transformation" | "floating" | "altText" | "outline">;
+    // Image-specific run options (global defaults, can be overridden by node.attrs)
+    run?: Partial<IImageOptions>;
   };
 
   table?: {

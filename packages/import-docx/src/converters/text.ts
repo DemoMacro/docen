@@ -447,6 +447,145 @@ async function extractSingleImage(
     }
   }
 
+  // Extract floating positioning from wp:positionH and wp:positionV
+  const positionH = findDeepChild(drawing, "wp:positionH");
+  const positionV = findDeepChild(drawing, "wp:positionV");
+  let floating:
+    | {
+        horizontalPosition: {
+          relative: string;
+          align?: string;
+          offset?: number;
+        };
+        verticalPosition: {
+          relative: string;
+          align?: string;
+          offset?: number;
+        };
+        allowOverlap?: boolean;
+        lockAnchor?: boolean;
+        behindDocument?: boolean;
+        layoutInCell?: boolean;
+      }
+    | undefined;
+
+  if (positionH || positionV) {
+    floating = {
+      horizontalPosition: {
+        relative: (positionH?.attributes["relativeFrom"] as string) || "page",
+      },
+      verticalPosition: {
+        relative: (positionV?.attributes["relativeFrom"] as string) || "page",
+      },
+    };
+
+    if (positionH) {
+      const relative = positionH.attributes["relativeFrom"] as string;
+      const alignEl = findChild(positionH, "wp:align");
+      const offsetEl = findChild(positionH, "wp:posOffset");
+
+      floating.horizontalPosition = {
+        relative,
+        ...(alignEl &&
+          alignEl.children[0]?.type === "text" && {
+            align: alignEl.children[0].value,
+          }),
+        ...(offsetEl &&
+          offsetEl.children[0]?.type === "text" && {
+            offset: parseInt(offsetEl.children[0].value, 10),
+          }),
+      };
+    }
+
+    if (positionV) {
+      const relative = positionV.attributes["relativeFrom"] as string;
+      const alignEl = findChild(positionV, "wp:align");
+      const offsetEl = findChild(positionV, "wp:posOffset");
+
+      floating.verticalPosition = {
+        relative,
+        ...(alignEl &&
+          alignEl.children[0]?.type === "text" && {
+            align: alignEl.children[0].value,
+          }),
+        ...(offsetEl &&
+          offsetEl.children[0]?.type === "text" && {
+            offset: parseInt(offsetEl.children[0].value, 10),
+          }),
+      };
+    }
+
+    // Extract additional floating properties from wp:effectExtent
+    const effectExtent = findDeepChild(drawing, "wp:effectExtent");
+    if (effectExtent) {
+      const l = effectExtent.attributes["l"] as string;
+      const t = effectExtent.attributes["t"] as string;
+      const r = effectExtent.attributes["r"] as string;
+      const b = effectExtent.attributes["b"] as string;
+
+      if (l || t || r || b) {
+        floating.effectExtent = {
+          left: l ? parseInt(l, 10) : 0,
+          top: t ? parseInt(t, 10) : 0,
+          right: r ? parseInt(r, 10) : 0,
+          bottom: b ? parseInt(b, 10) : 0,
+        };
+      }
+    }
+
+    // Extract distL/distR/distT/distB from wp:anchor as margins
+    const anchor = findChild(drawing, "wp:anchor") || findDeepChild(drawing, "wp:anchor");
+    if (anchor) {
+      const distL = anchor.attributes["distL"] as string;
+      const distR = anchor.attributes["distR"] as string;
+      const distT = anchor.attributes["distT"] as string;
+      const distB = anchor.attributes["distB"] as string;
+
+      if (distL || distR || distT || distB) {
+        floating.margins = {
+          left: distL ? parseInt(distL, 10) : undefined,
+          right: distR ? parseInt(distR, 10) : undefined,
+          top: distT ? parseInt(distT, 10) : undefined,
+          bottom: distB ? parseInt(distB, 10) : undefined,
+        };
+      }
+    }
+
+    // Extract simple properties from wp:wrap
+    const wrap = findDeepChild(drawing, "wp:wrap");
+    if (wrap) {
+      // Extract wrap settings if needed
+    }
+  }
+
+  // Extract outline from pic:spPr/a:ln
+  const spPr = findDeepChild(drawing, "pic:spPr");
+  let outline:
+    | {
+        type: "solidFill";
+        solidFillType: "rgb";
+        value: string;
+      }
+    | undefined;
+
+  if (spPr) {
+    const ln = findDeepChild(spPr, "a:ln");
+    if (ln) {
+      const solidFill = findDeepChild(ln, "a:solidFill");
+      if (solidFill) {
+        const srgbClr = findDeepChild(solidFill, "a:srgbClr");
+        if (srgbClr) {
+          const val = srgbClr.attributes["val"] as string;
+          outline = {
+            type: "solidFill",
+            solidFillType: "rgb",
+            value: val,
+          };
+        }
+      }
+    }
+  }
+
   return {
     type: "image",
     attrs: {
@@ -456,6 +595,8 @@ async function extractSingleImage(
       ...(height !== undefined && { height }),
       ...(rotation !== undefined && { rotation }),
       ...(title !== undefined && { title }),
+      ...(floating && { floating }),
+      ...(outline && { outline }),
     },
   };
 }
