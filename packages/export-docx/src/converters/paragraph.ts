@@ -5,6 +5,14 @@ import { ParagraphNode, ImageNode } from "../types";
 import { DocxExportOptions } from "../option";
 
 /**
+ * Convert pixels to TWIPs (Twentieth of a Point)
+ * 1 inch = 1440 TWIPs, 1px ≈ 15 TWIPs (at 96 DPI: 1px = 0.75pt = 15 TWIP)
+ */
+function pxToTwip(px: number): number {
+  return Math.round(px * 15);
+}
+
+/**
  * Convert TipTap paragraph node to DOCX Paragraph
  *
  * @param node - TipTap paragraph node
@@ -73,6 +81,34 @@ export async function convertParagraph(
       ...paragraphOptions,
       ...options,
     };
+  }
+
+  // Handle paragraph style attributes from node.attrs
+  if (node.attrs) {
+    const { indentLeft, indentRight, indentFirstLine, spacingBefore, spacingAfter } = node.attrs;
+
+    // Convert indentation to DOCX format
+    if (indentLeft || indentRight || indentFirstLine) {
+      paragraphOptions = {
+        ...paragraphOptions,
+        indent: {
+          ...(indentLeft && { left: pxToTwip(indentLeft) }),
+          ...(indentRight && { right: pxToTwip(indentRight) }),
+          ...(indentFirstLine && { firstLine: pxToTwip(indentFirstLine) }),
+        },
+      };
+    }
+
+    // Convert spacing to DOCX format
+    if (spacingBefore || spacingAfter) {
+      paragraphOptions = {
+        ...paragraphOptions,
+        spacing: {
+          ...(spacingBefore && { before: pxToTwip(spacingBefore) }),
+          ...(spacingAfter && { after: pxToTwip(spacingAfter) }),
+        },
+      };
+    }
   }
 
   return new Paragraph(paragraphOptions);

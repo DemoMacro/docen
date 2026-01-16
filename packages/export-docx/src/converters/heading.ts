@@ -3,6 +3,14 @@ import { HeadingNode } from "../types";
 import { convertText, convertHardBreak } from "./text";
 
 /**
+ * Convert pixels to TWIPs (Twentieth of a Point)
+ * 1 inch = 1440 TWIPs, 1px ≈ 15 TWIPs (at 96 DPI: 1px = 0.75pt = 15 TWIP)
+ */
+function pxToTwip(px: number): number {
+  return Math.round(px * 15);
+}
+
+/**
  * Convert TipTap heading node to DOCX paragraph
  *
  * @param node - TipTap heading node
@@ -36,11 +44,54 @@ export function convertHeading(node: HeadingNode): Paragraph {
     6: HeadingLevel.HEADING_6,
   };
 
-  // Create heading paragraph
-  const paragraph = new Paragraph({
+  // Build paragraph options
+  let paragraphOptions: {
+    children: ReturnType<typeof convertText>[];
+    heading: (typeof HeadingLevel)[keyof typeof HeadingLevel];
+    indent?: {
+      left?: number;
+      right?: number;
+      firstLine?: number;
+    };
+    spacing?: {
+      before?: number;
+      after?: number;
+    };
+  } = {
     children,
     heading: headingMap[level],
-  });
+  };
+
+  // Handle paragraph style attributes from node.attrs
+  if (node.attrs) {
+    const { indentLeft, indentRight, indentFirstLine, spacingBefore, spacingAfter } = node.attrs;
+
+    // Convert indentation to DOCX format
+    if (indentLeft || indentRight || indentFirstLine) {
+      paragraphOptions = {
+        ...paragraphOptions,
+        indent: {
+          ...(indentLeft && { left: pxToTwip(indentLeft) }),
+          ...(indentRight && { right: pxToTwip(indentRight) }),
+          ...(indentFirstLine && { firstLine: pxToTwip(indentFirstLine) }),
+        },
+      };
+    }
+
+    // Convert spacing to DOCX format
+    if (spacingBefore || spacingAfter) {
+      paragraphOptions = {
+        ...paragraphOptions,
+        spacing: {
+          ...(spacingBefore && { before: pxToTwip(spacingBefore) }),
+          ...(spacingAfter && { after: pxToTwip(spacingAfter) }),
+        },
+      };
+    }
+  }
+
+  // Create heading paragraph
+  const paragraph = new Paragraph(paragraphOptions);
 
   return paragraph;
 }
