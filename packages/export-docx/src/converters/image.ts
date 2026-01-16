@@ -121,6 +121,14 @@ export async function convertImage(node: ImageNode): Promise<ImageRun> {
       description: undefined,
       title: node.attrs?.title || undefined,
     },
+    // Apply floating positioning from node.attrs if present
+    ...(node.attrs?.floating && {
+      floating: node.attrs.floating, // Type assertion needed for compatibility
+    }),
+    // Apply outline from node.attrs if present
+    ...(node.attrs?.outline && {
+      outline: node.attrs.outline, // Type assertion needed for compatibility
+    }),
   };
 
   return new ImageRun(imageOptions);
