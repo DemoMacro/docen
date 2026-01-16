@@ -50,6 +50,16 @@ export interface DocumentNode extends JSONContent {
 
 export interface ParagraphNode extends JSONContent {
   type: "paragraph";
+  attrs?: {
+    textAlign?: "left" | "center" | "right" | "justify";
+    // Paragraph indentation (in pixels)
+    indentLeft?: number;
+    indentRight?: number;
+    indentFirstLine?: number;
+    // Paragraph spacing (in pixels)
+    spacingBefore?: number;
+    spacingAfter?: number;
+  };
   content?: Array<TextNode | HardBreakNode | ImageNode>;
 }
 
@@ -57,6 +67,13 @@ export interface HeadingNode extends JSONContent {
   type: "heading";
   attrs: {
     level: 1 | 2 | 3 | 4 | 5 | 6;
+    // Paragraph indentation (in pixels)
+    indentLeft?: number;
+    indentRight?: number;
+    indentFirstLine?: number;
+    // Paragraph spacing (in pixels)
+    spacingBefore?: number;
+    spacingAfter?: number;
   };
   content?: Array<TextNode | HardBreakNode>;
 }

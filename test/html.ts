@@ -7,7 +7,7 @@ import { JSONContent, Extensions } from "@tiptap/core";
 import { ParseOptions } from "@tiptap/pm/model";
 
 export function generateHTML(doc: JSONContent, extensions?: Extensions) {
-  return generateTiptapHTML(doc, extensions ?? tiptapExtensions);
+  return generateTiptapHTML(doc, extensions ?? (tiptapExtensions as Extensions));
 }
 
 export function generateJSON(
@@ -15,5 +15,5 @@ export function generateJSON(
   extensions?: Extensions,
   options?: ParseOptions,
 ): JSONContent {
-  return generateTiptapJSON(html, extensions ?? tiptapExtensions, options);
+  return generateTiptapJSON(html, extensions ?? (tiptapExtensions as Extensions), options);
 }

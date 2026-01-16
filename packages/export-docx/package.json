@@ -56,10 +56,10 @@
   "dependencies": {
     "docx": "9.5.1",
     "image-meta": "0.2.2",
-    "ofetch": "1.4.1"
+    "ofetch": "1.5.1"
   },
   "devDependencies": {
     "@docen/tiptap-extensions": "workspace:*",
-    "@tiptap/core": "3.7.2"
+    "@tiptap/core": "3.15.3"
   }
 }

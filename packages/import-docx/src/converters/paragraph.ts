@@ -5,6 +5,84 @@ import { extractRuns, extractAlignment } from "./text";
 import { findChild } from "../utils/xml";
 
 /**
+ * Convert TWIPs to pixels
+ * 1 inch = 1440 TWIPs, 1px ≈ 15 TWIPs (at 96 DPI: 1px = 0.75pt = 15 TWIP)
+ */
+function twipToPx(twip: number): number {
+  return Math.round(twip / 15);
+}
+
+/**
+ * Extract paragraph style attributes from DOCX paragraph properties
+ */
+function extractParagraphStyles(node: Element): {
+  indentLeft?: number;
+  indentRight?: number;
+  indentFirstLine?: number;
+  spacingBefore?: number;
+  spacingAfter?: number;
+} | null {
+  const pPr = findChild(node, "w:pPr");
+  if (!pPr) return null;
+
+  const result: {
+    indentLeft?: number;
+    indentRight?: number;
+    indentFirstLine?: number;
+    spacingBefore?: number;
+    spacingAfter?: number;
+  } = {};
+
+  // Extract indentation from w:ind
+  const ind = findChild(pPr, "w:ind");
+  if (ind) {
+    const left = ind.attributes["w:left"];
+    const right = ind.attributes["w:right"];
+    const firstLine = ind.attributes["w:firstLine"];
+    const hanging = ind.attributes["w:hanging"];
+
+    if (typeof left === "string") {
+      const leftValue = parseInt(left, 10);
+      if (!isNaN(leftValue)) result.indentLeft = twipToPx(leftValue);
+    }
+
+    if (typeof right === "string") {
+      const rightValue = parseInt(right, 10);
+      if (!isNaN(rightValue)) result.indentRight = twipToPx(rightValue);
+    }
+
+    if (typeof firstLine === "string") {
+      const firstLineValue = parseInt(firstLine, 10);
+      if (!isNaN(firstLineValue)) result.indentFirstLine = twipToPx(firstLineValue);
+    } else if (typeof hanging === "string") {
+      // Convert hanging indent to negative first line indent
+      const hangingValue = parseInt(hanging, 10);
+      if (!isNaN(hangingValue)) result.indentFirstLine = -twipToPx(hangingValue);
+    }
+  }
+
+  // Extract spacing from w:spacing
+  const spacing = findChild(pPr, "w:spacing");
+  if (spacing) {
+    const before = spacing.attributes["w:before"];
+    const after = spacing.attributes["w:after"];
+
+    if (typeof before === "string") {
+      const beforeValue = parseInt(before, 10);
+      if (!isNaN(beforeValue)) result.spacingBefore = twipToPx(beforeValue);
+    }
+
+    if (typeof after === "string") {
+      const afterValue = parseInt(after, 10);
+      if (!isNaN(afterValue)) result.spacingAfter = twipToPx(afterValue);
+    }
+  }
+
+  // Return null if no styles found
+  return Object.keys(result).length > 0 ? result : null;
+}
+
+/**
  * Convert DOCX paragraph node to TipTap paragraph
  */
 export async function convertParagraph(
@@ -57,9 +135,17 @@ export async function convertParagraph(
 
   // Regular paragraph
   const attrs = extractAlignment(node);
+  const paragraphStyles = extractParagraphStyles(node);
+
+  // Merge alignment and paragraph styles
+  const mergedAttrs = {
+    ...attrs,
+    ...paragraphStyles,
+  };
+
   return {
     type: "paragraph",
-    ...(attrs && { attrs }),
+    ...(Object.keys(mergedAttrs).length > 0 && { attrs: mergedAttrs }),
     content: runs,
   };
 }
@@ -76,9 +162,14 @@ async function convertHeading(
   },
   level: 1 | 2 | 3 | 4 | 5 | 6,
 ): Promise<JSONContent> {
+  const paragraphStyles = extractParagraphStyles(node);
+
   return {
     type: "heading",
-    attrs: { level },
+    attrs: {
+      level,
+      ...paragraphStyles,
+    },
     content: await extractRuns(node, params),
   };
 }
