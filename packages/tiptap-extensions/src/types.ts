@@ -91,6 +91,8 @@ export interface HeadingNode extends JSONContent {
     // Paragraph spacing (CSS values: e.g., "10px", "1rem", "1.5em")
     spacingBefore?: string;
     spacingAfter?: string;
+    // Text alignment
+    textAlign?: "left" | "right" | "center" | "justify";
   };
   content?: Array<TextNode | HardBreakNode>;
 }
