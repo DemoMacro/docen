@@ -2,6 +2,36 @@ import { TableCell, IParagraphOptions } from "docx";
 import { TableHeaderNode } from "../types";
 import { convertParagraph } from "./paragraph";
 import { DocxExportOptions } from "../option";
+import type { TableCellBorder } from "@docen/tiptap-extensions/types";
+
+/**
+ * Convert TipTap border to DOCX border format
+ */
+function convertBorder(
+  border: TableCellBorder | null | undefined,
+):
+  | { color?: string; size?: number; style: "single" | "dashed" | "dotted" | "double" | "none" }
+  | undefined {
+  if (!border) return undefined;
+
+  const styleMap: Record<string, "single" | "dashed" | "dotted" | "double" | "none"> = {
+    solid: "single",
+    dashed: "dashed",
+    dotted: "dotted",
+    double: "double",
+    none: "none",
+  };
+
+  const docxStyle = border.style ? styleMap[border.style] || "single" : "single";
+  const color = border.color?.replace("#", "") || "auto";
+  const size = border.width ? border.width * 6 : 4; // Convert pixels to eighth-points
+
+  return {
+    color,
+    size,
+    style: docxStyle,
+  };
+}
 
 /**
  * Convert TipTap table header node to DOCX TableCell
@@ -46,22 +76,22 @@ export async function convertTableHeader(
   };
 
   // Add column span if present
-  if (node.attrs?.colspan && node.attrs.colspan > 1) {
-    headerCellOptions.columnSpan = node.attrs.colspan;
+  if (node.attrs?.colSpan && node.attrs.colSpan > 1) {
+    headerCellOptions.columnSpan = node.attrs.colSpan;
   }
 
   // Add row span if present
-  if (node.attrs?.rowspan && node.attrs.rowspan > 1) {
-    headerCellOptions.rowSpan = node.attrs.rowspan;
+  if (node.attrs?.rowSpan && node.attrs.rowSpan > 1) {
+    headerCellOptions.rowSpan = node.attrs.rowSpan;
   }
 
   // Add column width if present
-  // colwidth can be a number (pixels) or an array of column widths
-  if (node.attrs?.colwidth !== null && node.attrs?.colwidth !== undefined) {
+  // colWidth can be a number (pixels) or an array of column widths
+  if (node.attrs?.colWidth !== null && node.attrs?.colWidth !== undefined) {
     // Handle both number and array formats
-    const widthInPixels = Array.isArray(node.attrs.colwidth)
-      ? node.attrs.colwidth[0]
-      : node.attrs.colwidth;
+    const widthInPixels = Array.isArray(node.attrs.colWidth)
+      ? node.attrs.colWidth[0]
+      : node.attrs.colWidth;
 
     if (widthInPixels && widthInPixels > 0) {
       // Convert pixels to twips (1 inch = 96 pixels = 1440 twips at 96 DPI)
@@ -71,6 +101,31 @@ export async function convertTableHeader(
         type: "dxa" as const,
       };
     }
+  }
+
+  // Add background color if present
+  if (node.attrs?.backgroundColor) {
+    const hexColor = node.attrs.backgroundColor.replace("#", "");
+    headerCellOptions.shading = { fill: hexColor };
+  }
+
+  // Add vertical alignment if present
+  if (node.attrs?.verticalAlign) {
+    // CSS "middle" → DOCX "center"
+    const align = node.attrs.verticalAlign === "middle" ? "center" : node.attrs.verticalAlign;
+    headerCellOptions.verticalAlign = align;
+  }
+
+  // Add borders if present
+  const borders = {
+    top: convertBorder(node.attrs?.borderTop),
+    bottom: convertBorder(node.attrs?.borderBottom),
+    left: convertBorder(node.attrs?.borderLeft),
+    right: convertBorder(node.attrs?.borderRight),
+  };
+
+  if (borders.top || borders.bottom || borders.left || borders.right) {
+    headerCellOptions.borders = borders;
   }
 
   return new TableCell(headerCellOptions);

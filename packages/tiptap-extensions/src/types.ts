@@ -148,23 +148,46 @@ export interface TaskItemNode extends JSONContent {
   content?: Array<ParagraphNode>;
 }
 
+// Table cell border definition
+export interface TableCellBorder {
+  color?: string; // "#FF0000"
+  width?: number; // border width in pixels
+  style?: "solid" | "dashed" | "dotted" | "double" | "none";
+}
+
 // Table node types
 export interface TableNode extends JSONContent {
   type: "table";
+  attrs?: {
+    // Table-level cell margins (applies to all cells in the table)
+    marginTop?: number | null;
+    marginBottom?: number | null;
+    marginLeft?: number | null;
+    marginRight?: number | null;
+  };
   content?: Array<TableRowNode>;
 }
 
 export interface TableRowNode extends JSONContent {
   type: "tableRow";
+  attrs?: {
+    rowHeight?: string | null; // Row height (CSS value: "20px", "1.5em", etc.)
+  };
   content?: Array<TableCellNode | TableHeaderNode>;
 }
 
 export interface TableCellNode extends JSONContent {
   type: "tableCell";
   attrs?: {
-    colspan?: number;
-    rowspan?: number;
-    colwidth?: number[] | null;
+    colSpan?: number;
+    rowSpan?: number;
+    colWidth?: number[] | null;
+    backgroundColor?: string | null; // "#FF0000"
+    verticalAlign?: "top" | "middle" | "bottom" | null;
+    borderTop?: TableCellBorder | null;
+    borderBottom?: TableCellBorder | null;
+    borderLeft?: TableCellBorder | null;
+    borderRight?: TableCellBorder | null;
   };
   content?: Array<ParagraphNode>;
 }
@@ -172,9 +195,15 @@ export interface TableCellNode extends JSONContent {
 export interface TableHeaderNode extends JSONContent {
   type: "tableHeader";
   attrs?: {
-    colspan?: number;
-    rowspan?: number;
-    colwidth?: number[] | null;
+    colSpan?: number;
+    rowSpan?: number;
+    colWidth?: number[] | null;
+    backgroundColor?: string | null; // "#FF0000"
+    verticalAlign?: "top" | "middle" | "bottom" | null;
+    borderTop?: TableCellBorder | null;
+    borderBottom?: TableCellBorder | null;
+    borderLeft?: TableCellBorder | null;
+    borderRight?: TableCellBorder | null;
   };
   content?: Array<ParagraphNode>;
 }

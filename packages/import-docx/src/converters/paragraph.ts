@@ -2,6 +2,7 @@ import type { Element } from "xast";
 import type { JSONContent } from "@tiptap/core";
 import type { DocxImportOptions } from "../option";
 import type { StyleMap, StyleInfo } from "../parsing/styles";
+import type { ImageInfo } from "../parsing/types";
 import { extractRuns, extractAlignment } from "./text";
 import { findChild } from "../utils/xml";
 
@@ -29,61 +30,51 @@ function extractParagraphStyles(node: Element): {
   const pPr = findChild(node, "w:pPr");
   if (!pPr) return null;
 
-  const result: {
-    indentLeft?: string;
-    indentRight?: string;
-    indentFirstLine?: string;
-    spacingBefore?: string;
-    spacingAfter?: string;
-  } = {};
+  const result: Record<string, string> = {};
 
   // Extract indentation from w:ind
   const ind = findChild(pPr, "w:ind");
   if (ind) {
-    const left = ind.attributes["w:left"];
-    const right = ind.attributes["w:right"];
-    const firstLine = ind.attributes["w:firstLine"];
-    const hanging = ind.attributes["w:hanging"];
+    const parseAttr = (attr: string) => {
+      const value = ind.attributes[attr];
+      if (typeof value !== "string") return null;
+      const num = parseInt(value, 10);
+      return isNaN(num) ? null : convertTwipToPixels(num);
+    };
 
-    if (typeof left === "string") {
-      const leftValue = parseInt(left, 10);
-      if (!isNaN(leftValue)) result.indentLeft = convertTwipToPixels(leftValue);
-    }
+    const left = parseAttr("w:left");
+    if (left) result.indentLeft = left;
 
-    if (typeof right === "string") {
-      const rightValue = parseInt(right, 10);
-      if (!isNaN(rightValue)) result.indentRight = convertTwipToPixels(rightValue);
-    }
+    const right = parseAttr("w:right");
+    if (right) result.indentRight = right;
 
-    if (typeof firstLine === "string") {
-      const firstLineValue = parseInt(firstLine, 10);
-      if (!isNaN(firstLineValue)) result.indentFirstLine = convertTwipToPixels(firstLineValue);
-    } else if (typeof hanging === "string") {
-      // Convert hanging indent to negative first line indent
-      const hangingValue = parseInt(hanging, 10);
-      if (!isNaN(hangingValue)) result.indentFirstLine = `-${convertTwipToPixels(hangingValue)}`;
+    const firstLine = parseAttr("w:firstLine");
+    if (firstLine) {
+      result.indentFirstLine = firstLine;
+    } else {
+      const hanging = parseAttr("w:hanging");
+      if (hanging) result.indentFirstLine = `-${hanging}`;
     }
   }
 
   // Extract spacing from w:spacing
   const spacing = findChild(pPr, "w:spacing");
   if (spacing) {
-    const before = spacing.attributes["w:before"];
-    const after = spacing.attributes["w:after"];
+    const parseAttr = (attr: string) => {
+      const value = spacing.attributes[attr];
+      if (typeof value !== "string") return null;
+      const num = parseInt(value, 10);
+      return isNaN(num) ? null : convertTwipToPixels(num);
+    };
 
-    if (typeof before === "string") {
-      const beforeValue = parseInt(before, 10);
-      if (!isNaN(beforeValue)) result.spacingBefore = convertTwipToPixels(beforeValue);
-    }
+    const before = parseAttr("w:before");
+    if (before) result.spacingBefore = before;
 
-    if (typeof after === "string") {
-      const afterValue = parseInt(after, 10);
-      if (!isNaN(afterValue)) result.spacingAfter = convertTwipToPixels(afterValue);
-    }
+    const after = parseAttr("w:after");
+    if (after) result.spacingAfter = after;
   }
 
-  // Return null if no styles found
-  return Object.keys(result).length > 0 ? result : null;
+  return Object.keys(result).length ? result : null;
 }
 
 /**
@@ -93,118 +84,102 @@ export async function convertParagraph(
   node: Element,
   params: {
     hyperlinks: Map<string, string>;
-    images: Map<string, string>;
+    images: Map<string, ImageInfo>;
     options?: DocxImportOptions;
     styleMap?: StyleMap;
   },
 ): Promise<JSONContent> {
-  // Check if it's a heading by finding w:pPr > w:pStyle
   const pPr = findChild(node, "w:pPr");
-  let styleName: string | undefined;
-  if (pPr) {
-    const pStyle = findChild(pPr, "w:pStyle");
-    if (pStyle) {
-      styleName = pStyle.attributes["w:val"] as string;
-    }
-  }
+  const pStyle = pPr && findChild(pPr, "w:pStyle");
+  const styleName = pStyle?.attributes["w:val"] as string | undefined;
 
+  // Check if it's a heading
   if (styleName && params.styleMap) {
-    // First, check if style has outlineLvl (reliable heading indicator)
     const styleInfo = params.styleMap.get(styleName);
+
+    // Check outlineLvl (reliable heading indicator)
     if (
       styleInfo?.outlineLvl !== undefined &&
       styleInfo.outlineLvl >= 0 &&
       styleInfo.outlineLvl <= 5
     ) {
-      // outlineLvl 0 = Heading 1, outlineLvl 1 = Heading 2, etc.
       const level = (styleInfo.outlineLvl + 1) as 1 | 2 | 3 | 4 | 5 | 6;
       return convertHeading(node, params, styleInfo, level);
     }
 
-    // Fallback: Check if style name matches "Heading1", "Heading2", etc.
+    // Fallback: Check style name pattern
     const headingMatch = styleName.match(/^Heading(\d+)$/);
     if (headingMatch) {
-      const level = parseInt(headingMatch[1]) as 1 | 2 | 3 | 4 | 5 | 6;
+      const level = parseInt(headingMatch[1], 10) as 1 | 2 | 3 | 4 | 5 | 6;
       return convertHeading(node, params, styleInfo, level);
     }
   }
 
-  // Extract runs (text, images, hardBreaks)
   const styleInfo = styleName && params.styleMap ? params.styleMap.get(styleName) : undefined;
   const runs = await extractRuns(node, { ...params, styleInfo });
 
-  // Extract alignment and paragraph styles (needed for page break handling)
-  const attrs = extractAlignment(node);
-  const paragraphStyles = extractParagraphStyles(node);
-  const mergedAttrs = {
-    ...attrs,
-    ...paragraphStyles,
+  const attrs = {
+    ...extractAlignment(node),
+    ...extractParagraphStyles(node),
   };
 
-  // Check if paragraph contains page break (w:br w:type="page")
-  // We check the original XML directly, as page breaks can be mixed with other content
-  const hasPageBreakInParagraph = (() => {
-    // Find all w:r elements in this paragraph
-    const runElements: Element[] = [];
-    const findRuns = (n: Element) => {
-      if (n.name === "w:r") {
-        runElements.push(n);
-      } else if (n.children) {
-        for (const child of n.children) {
-          if (child.type === "element") {
-            findRuns(child as Element);
-          }
-        }
-      }
-    };
-    findRuns(node);
-
-    // Check if any run contains a page break
-    return runElements.some((run) => {
-      const br = findChild(run, "w:br");
-      return br && br.attributes["w:type"] === "page";
-    });
-  })();
-
-  if (hasPageBreakInParagraph) {
-    // Filter out page break hardBreaks
+  // Check if paragraph contains page break
+  const hasPageBreak = checkForPageBreak(node);
+  if (hasPageBreak) {
     const filteredRuns = runs.filter((run) => run.type !== "hardBreak");
-
-    // Return paragraph with filtered runs
     const paragraphNode: JSONContent = {
       type: "paragraph",
-      ...(Object.keys(mergedAttrs).length > 0 && { attrs: mergedAttrs }),
-      content: filteredRuns.length > 0 ? filteredRuns : undefined,
+      ...(Object.keys(attrs).length && { attrs }),
+      content: filteredRuns.length ? filteredRuns : undefined,
     };
-
-    // Return paragraph followed by horizontalRule (page break)
     return [paragraphNode, { type: "horizontalRule" }];
   }
 
-  // Check if this is a horizontal rule (page break)
+  // Check if pure page break
   if (runs.length === 1 && runs[0].type === "hardBreak") {
-    // Check if it's a page break type
     const run = findChild(node, "w:r");
-    if (run) {
-      const br = findChild(run, "w:br");
-      if (br && br.attributes["w:type"] === "page") {
-        return { type: "horizontalRule" };
-      }
+    const br = run && findChild(run, "w:br");
+    if (br?.attributes["w:type"] === "page") {
+      return { type: "horizontalRule" };
     }
   }
 
-  // Check if paragraph contains only an image (no text)
-  // In this case, return the image node directly instead of wrapping in paragraph
+  // Check if pure image
   if (runs.length === 1 && runs[0].type === "image") {
     return runs[0] as JSONContent;
   }
 
-  // Regular paragraph
   return {
     type: "paragraph",
-    ...(Object.keys(mergedAttrs).length > 0 && { attrs: mergedAttrs }),
+    ...(Object.keys(attrs).length && { attrs }),
     content: runs,
   };
+}
+
+/**
+ * Check if paragraph contains page break
+ */
+function checkForPageBreak(node: Element): boolean {
+  const runElements: Element[] = [];
+
+  const collectRuns = (n: Element) => {
+    if (n.name === "w:r") {
+      runElements.push(n);
+    } else {
+      for (const child of n.children) {
+        if (child.type === "element") {
+          collectRuns(child as Element);
+        }
+      }
+    }
+  };
+
+  collectRuns(node);
+
+  return runElements.some((run) => {
+    const br = findChild(run, "w:br");
+    return br?.attributes["w:type"] === "page";
+  });
 }
 
 /**
@@ -214,19 +189,17 @@ async function convertHeading(
   node: Element,
   params: {
     hyperlinks: Map<string, string>;
-    images: Map<string, string>;
+    images: Map<string, ImageInfo>;
     options?: DocxImportOptions;
   },
   styleInfo: StyleInfo | undefined,
   level: 1 | 2 | 3 | 4 | 5 | 6,
 ): Promise<JSONContent> {
-  const paragraphStyles = extractParagraphStyles(node);
-
   return {
     type: "heading",
     attrs: {
       level,
-      ...paragraphStyles,
+      ...extractParagraphStyles(node),
     },
     content: await extractRuns(node, { ...params, styleInfo }),
   };

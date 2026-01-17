@@ -4,3 +4,9 @@ export interface ListInfo {
 }
 
 export type ListTypeMap = Map<string, ListInfo>;
+
+export interface ImageInfo {
+  src: string; // data URL (e.g., "data:image/png;base64,...")
+  width?: number;
+  height?: number;
+}
