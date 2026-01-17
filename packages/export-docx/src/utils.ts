@@ -4,7 +4,7 @@
 
 import { imageMeta as getImageMetadata, type ImageMeta } from "image-meta";
 import { ofetch } from "ofetch";
-import type { IImageOptions, PositiveUniversalMeasure } from "docx";
+import type { PositiveUniversalMeasure } from "docx";
 import type { DocxExportOptions } from "./option";
 
 /**
