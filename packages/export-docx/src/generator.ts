@@ -98,8 +98,31 @@ export async function generateDOCX<T extends OutputType>(
   // Collect ordered list start values for numbering options
   const numberingOptions = createNumberingOptions(docJson);
 
-  // Build styles - merge user styles with auto-generated image/table styles
+  // Build styles - merge user styles with auto-generated image/table/heading styles
   const importedStyles: Array<StyleForParagraph> = [];
+
+  // Add heading styles with outlineLvl for proper TOC and document structure
+  // Note: Don't set run properties to preserve original document formatting
+  for (let i = 1; i <= 6; i++) {
+    importedStyles.push(
+      new StyleForParagraph({
+        id: `Heading${i}`,
+        name: `Heading ${i}`,
+        basedOn: "Normal",
+        next: "Normal",
+        quickFormat: true,
+        // Don't set run properties - let paragraph-level formatting take effect
+        // Only set paragraph properties
+        paragraph: {
+          spacing: {
+            before: 240,
+            after: 120,
+          },
+          outlineLevel: i - 1, // outlineLvl 0 = Heading1, 1 = Heading2, etc.
+        },
+      }),
+    );
+  }
 
   // Add image style if defined
   if (options.image?.style) {
