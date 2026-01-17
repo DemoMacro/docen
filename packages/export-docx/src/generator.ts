@@ -14,7 +14,7 @@ import {
   AlignmentType,
   convertInchesToTwip,
   TableOfContents,
-  StyleForParagraph,
+  IParagraphStyleOptions,
   IParagraphOptions,
 } from "docx";
 import { type DocxExportOptions } from "./option";
@@ -69,6 +69,9 @@ export async function generateDOCX<T extends OutputType>(
     lastModifiedBy,
     revision,
 
+    // Styling
+    styles,
+
     // Table of contents
     tableOfContents,
 
@@ -98,49 +101,30 @@ export async function generateDOCX<T extends OutputType>(
   // Collect ordered list start values for numbering options
   const numberingOptions = createNumberingOptions(docJson);
 
-  // Build styles - merge user styles with auto-generated image/table/heading styles
-  const importedStyles: Array<StyleForParagraph> = [];
+  // Build styles - merge user styles with auto-generated image/table styles
+  const additionalParagraphStyles: IParagraphStyleOptions[] = [];
 
-  // Add heading styles with outlineLvl for proper TOC and document structure
-  // Note: Don't set run properties to preserve original document formatting
-  for (let i = 1; i <= 6; i++) {
-    importedStyles.push(
-      new StyleForParagraph({
-        id: `Heading${i}`,
-        name: `Heading ${i}`,
-        basedOn: "Normal",
-        next: "Normal",
-        quickFormat: true,
-        // Don't set run properties - let paragraph-level formatting take effect
-        // Only set paragraph properties
-        paragraph: {
-          spacing: {
-            before: 240,
-            after: 120,
-          },
-          outlineLevel: i - 1, // outlineLvl 0 = Heading1, 1 = Heading2, etc.
-        },
-      }),
-    );
-  }
-
-  // Add image style if defined
+  // Add image style if configured
   if (options.image?.style) {
-    importedStyles.push(new StyleForParagraph(options.image.style));
+    additionalParagraphStyles.push(options.image.style);
   }
 
-  // Add table style if defined
+  // Add table style if configured
   if (options.table?.style) {
-    importedStyles.push(new StyleForParagraph(options.table.style));
+    additionalParagraphStyles.push(options.table.style);
   }
 
-  const styles: IPropertiesOptions["styles"] = {
-    default: options.styles?.default || {},
-    paragraphStyles: [...(options.styles?.paragraphStyles || [])],
-    ...(importedStyles.length > 0 && {
-      importedStyles: [...(options.styles?.importedStyles || []), ...importedStyles],
-    }),
-  };
+  const mergedStyles = styles
+    ? Object.assign(
+        {},
+        styles,
+        additionalParagraphStyles.length > 0
+          ? {
+              paragraphStyles: [...(styles.paragraphStyles || []), ...additionalParagraphStyles],
+            }
+          : {},
+      )
+    : {};
 
   // Build document sections - merge user config with generated content
   const documentSections = sections
@@ -183,7 +167,7 @@ export async function generateDOCX<T extends OutputType>(
     revision: revision || 1,
 
     // Styling
-    styles: styles,
+    styles: mergedStyles,
     numbering: numberingOptions,
   };
 
