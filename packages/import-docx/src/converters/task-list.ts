@@ -3,25 +3,29 @@ import type { JSONContent } from "@tiptap/core";
 import { findChild } from "../utils/xml";
 import { extractAlignment } from "./text";
 
-/**
- * Checkbox symbols used in DOCX
- */
 const CHECKBOX_UNCHECKED = "☐";
 const CHECKBOX_CHECKED = "☑";
+
+/**
+ * Get first text node from element
+ */
+function getFirstTextNode(node: Element): Text | null {
+  const run = findChild(node, "w:r");
+  if (!run) return null;
+
+  const textElement = findChild(run, "w:t");
+  if (!textElement) return null;
+
+  const textNode = textElement.children.find((c): c is Text => c.type === "text");
+  return (textNode?.value && textNode) || null;
+}
 
 /**
  * Check if a paragraph is a task item
  */
 export function isTaskItem(node: Element): boolean {
-  // Get the first text run
-  const run = findChild(node, "w:r");
-  if (!run) return false;
-
-  const textElement = findChild(run, "w:t");
-  if (!textElement) return false;
-
-  const textNode = textElement.children.find((c): c is Text => c.type === "text");
-  if (!textNode || !textNode.value) return false;
+  const textNode = getFirstTextNode(node);
+  if (!textNode) return false;
 
   const text = textNode.value;
   return text.startsWith(CHECKBOX_UNCHECKED) || text.startsWith(CHECKBOX_CHECKED);
@@ -31,34 +35,20 @@ export function isTaskItem(node: Element): boolean {
  * Get the checked state from a task item
  */
 export function getTaskItemChecked(node: Element): boolean {
-  const run = findChild(node, "w:r");
-  if (!run) return false;
-
-  const textElement = findChild(run, "w:t");
-  if (!textElement) return false;
-
-  const textNode = textElement.children.find((c): c is Text => c.type === "text");
-  if (!textNode || !textNode.value) return false;
-
-  return textNode.value.startsWith(CHECKBOX_CHECKED);
+  const textNode = getFirstTextNode(node);
+  return textNode?.value.startsWith(CHECKBOX_CHECKED) || false;
 }
 
 /**
  * Convert a task item to TipTap JSON
- * This removes the checkbox symbol from the text
  */
 export function convertTaskItem(node: Element): JSONContent {
   const checked = getTaskItemChecked(node);
 
-  // Convert the paragraph, but we need to remove the checkbox from the first text run
-  const paragraph = convertTaskItemParagraph(node);
-
   return {
     type: "taskItem",
-    attrs: {
-      checked,
-    },
-    content: [paragraph],
+    attrs: { checked },
+    content: [convertTaskItemParagraph(node)],
   };
 }
 
@@ -70,68 +60,52 @@ function convertTaskItemParagraph(node: Element): JSONContent {
   let firstTextSkipped = false;
 
   for (const child of node.children) {
-    if (child.type === "element" && child.name === "w:r") {
-      // Check if this is the checkbox run
-      let isCheckboxRun = false;
+    if (child.type !== "element" || child.name !== "w:r") continue;
 
-      if (!firstTextSkipped) {
-        const textElement = findChild(child, "w:t");
-        if (textElement) {
-          const textNode = textElement.children.find((c): c is Text => c.type === "text");
-          if (textNode && textNode.value) {
-            const text = textNode.value;
-            if (text.startsWith(CHECKBOX_UNCHECKED) || text.startsWith(CHECKBOX_CHECKED)) {
-              isCheckboxRun = true;
-              firstTextSkipped = true;
+    // Handle checkbox run
+    if (!firstTextSkipped) {
+      const textElement = findChild(child, "w:t");
+      const textNode = textElement?.children.find((c): c is Text => c.type === "text");
 
-              // Extract the remaining text after the checkbox
-              const remainingText = text.substring(2).trimStart();
-              if (remainingText.length > 0) {
-                content.push({
-                  type: "text",
-                  text: remainingText,
-                });
-              }
-            }
+      if (textNode?.value) {
+        const text = textNode.value;
+        if (text.startsWith(CHECKBOX_UNCHECKED) || text.startsWith(CHECKBOX_CHECKED)) {
+          firstTextSkipped = true;
+          const remainingText = text.substring(2).trimStart();
+          if (remainingText) {
+            content.push({ type: "text", text: remainingText });
           }
-        }
-      }
-
-      if (!isCheckboxRun) {
-        // Convert run to text marks
-        const marks = extractMarksFromRun(child);
-
-        const textElement = findChild(child, "w:t");
-        if (textElement) {
-          const textNode = textElement.children.find((c): c is Text => c.type === "text");
-          if (textNode && textNode.value) {
-            const textNodeData = {
-              type: "text",
-              text: textNode.value,
-            } as {
-              type: string;
-              text: string;
-              marks?: Array<{ type: string }>;
-            };
-
-            if (marks.length > 0) {
-              textNodeData.marks = marks;
-            }
-
-            content.push(textNodeData);
-          }
+          continue;
         }
       }
     }
+
+    // Convert regular run
+    const marks = extractMarksFromRun(child);
+    const textElement = findChild(child, "w:t");
+    const textNode = textElement?.children.find((c): c is Text => c.type === "text");
+
+    if (textNode?.value) {
+      const textNodeData: {
+        type: string;
+        text: string;
+        marks?: Array<{ type: string }>;
+      } = {
+        type: "text",
+        text: textNode.value,
+      };
+
+      if (marks.length) textNodeData.marks = marks;
+      content.push(textNodeData);
+    }
   }
 
-  // Extract paragraph alignment
   const attrs = extractAlignment(node);
 
   return {
     type: "paragraph",
     ...(attrs && { attrs }),
-    content: content.length > 0 ? content : undefined,
+    content: content.length ? content : undefined,
   };
 }
 

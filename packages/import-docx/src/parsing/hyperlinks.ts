@@ -1,4 +1,8 @@
 import { fromXml } from "xast-util-from-xml";
+import { findChild, findDeepChildren } from "../utils/xml";
+
+const HYPERLINK_REL_TYPE =
+  "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink";
 
 /**
  * Extract hyperlinks from DOCX relationships
@@ -10,31 +14,15 @@ export function extractHyperlinks(files: Record<string, Uint8Array>): Map<string
   if (!relsXml) return hyperlinks;
 
   const relsXast = fromXml(new TextDecoder().decode(relsXml));
+  const relationships = findChild(relsXast, "Relationships");
+  if (!relationships) return hyperlinks;
 
-  // Find Relationships element first (CRITICAL FIX)
-  if (relsXast.type === "root") {
-    for (const child of relsXast.children) {
-      if (child.type === "element" && child.name === "Relationships") {
-        const relationships = child;
-        // Now iterate through Relationship elements
-        for (const relChild of relationships.children) {
-          if (relChild.type === "element" && relChild.name === "Relationship") {
-            const rel = relChild;
-            const type = rel.attributes.Type;
-            const hyperlinkRelType =
-              "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink";
-            if (type && type === hyperlinkRelType) {
-              const rId = rel.attributes.Id;
-              const target = rel.attributes.Target;
-              if (rId && target) {
-                hyperlinks.set(rId as string, target as string);
-              }
-            }
-          }
-        }
-        break;
-      }
+  const rels = findDeepChildren(relationships, "Relationship");
+  for (const rel of rels) {
+    if (rel.attributes.Type === HYPERLINK_REL_TYPE && rel.attributes.Id && rel.attributes.Target) {
+      hyperlinks.set(rel.attributes.Id as string, rel.attributes.Target as string);
     }
   }
+
   return hyperlinks;
 }

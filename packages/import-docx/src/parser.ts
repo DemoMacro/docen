@@ -3,11 +3,9 @@ import { unzipSync } from "fflate";
 import type { Root, Element, Text } from "xast";
 import type { JSONContent } from "@tiptap/core";
 import type { DocxImportOptions } from "./option";
-import type { DocxImageConverter, DocxImageInfo } from "./types";
 import type { StyleMap, StyleInfo } from "./parsing/styles";
-import type { ListInfo, ListTypeMap } from "./parsing/types";
+import type { ListInfo, ListTypeMap, ImageInfo } from "./parsing/types";
 import { toUint8Array, DataType } from "undio";
-import { imageMeta } from "image-meta";
 import {
   convertParagraph,
   convertTable,
@@ -19,7 +17,6 @@ import {
   isTaskItem,
   convertTaskItem,
 } from "./converters";
-import { uint8ArrayToBase64 } from "./utils/base64";
 import { findChild, findDeepChildren } from "./utils/xml";
 import { extractImages } from "./parsing/images";
 import { extractHyperlinks } from "./parsing/hyperlinks";
@@ -27,19 +24,7 @@ import { parseNumberingXml } from "./parsing/numbering";
 import { parseStylesXml } from "./parsing/styles";
 
 // Export types for use in converters
-export type { StyleMap, StyleInfo, ListInfo, ListTypeMap };
-
-/**
- * Default image converter implementation
- * Embeds images as base64 data URLs
- * Exported for users who want to reuse or extend this behavior
- */
-export const defaultImageConverter: DocxImageConverter = async (image) => {
-  const base64 = uint8ArrayToBase64(image.data);
-  return {
-    src: `data:${image.contentType};base64,${base64}`,
-  };
-};
+export type { StyleMap, StyleInfo, ListInfo, ListTypeMap, ImageInfo };
 
 /**
  * Main entry point: Parse DOCX file and convert to TipTap JSON
@@ -48,55 +33,16 @@ export async function parseDOCX(
   input: DataType,
   options: DocxImportOptions = {},
 ): Promise<JSONContent> {
-  // Apply defaults
-  const { convertImage = defaultImageConverter, ignoreEmptyParagraphs = false } = options;
+  const { ignoreEmptyParagraphs = false } = options;
 
   // Convert input to Uint8Array
   const uint8Array = await toUint8Array(input);
   // Unzip DOCX file
   const files = unzipSync(uint8Array);
 
-  // Extract hyperlinks and images
+  // Extract hyperlinks and images (images are already converted to base64 data URLs)
   const hyperlinks = extractHyperlinks(files);
-  const rawImages = extractImages(files);
-
-  // Process images with custom converter
-  const convertedImages = new Map<string, string>();
-  for (const [rId, imageData] of rawImages.entries()) {
-    try {
-      // Get actual image type using image-meta
-      let contentType: string;
-      try {
-        const meta = imageMeta(imageData);
-        contentType = `image/${meta.type}`;
-      } catch {
-        // Fallback to png if type detection fails
-        contentType = "image/png";
-      }
-
-      const imageInfo: DocxImageInfo = {
-        id: rId,
-        contentType,
-        data: imageData,
-      };
-
-      const result = await convertImage(imageInfo);
-      convertedImages.set(rId, result.src);
-    } catch (error) {
-      // If image conversion fails, use fallback
-      console.warn(`Failed to convert image ${rId}:`, error);
-      let fallbackContentType = "image/png";
-      try {
-        const meta = imageMeta(imageData);
-        fallbackContentType = `image/${meta.type}`;
-      } catch {
-        // Keep default png
-      }
-      const fallbackBase64 = uint8ArrayToBase64(imageData);
-      const fallbackUrl = `data:${fallbackContentType};base64,${fallbackBase64}`;
-      convertedImages.set(rId, fallbackUrl);
-    }
-  }
+  const images = extractImages(files);
 
   // Parse document.xml
   const documentXml = files["word/document.xml"];
@@ -113,7 +59,7 @@ export async function parseDOCX(
   // Convert document
   const content = await convertDocument(
     documentXast,
-    convertedImages,
+    images,
     hyperlinks,
     listTypeMap,
     styleMap,
@@ -129,7 +75,7 @@ export async function parseDOCX(
  */
 async function convertDocument(
   documentXast: Root,
-  images: Map<string, string>,
+  images: Map<string, ImageInfo>,
   hyperlinks: Map<string, string>,
   listTypeMap: ListTypeMap,
   styleMap: StyleMap,
@@ -168,7 +114,7 @@ async function convertDocument(
  */
 async function processElements(
   elements: Element[],
-  images: Map<string, string>,
+  images: Map<string, ImageInfo>,
   hyperlinks: Map<string, string>,
   listTypeMap: ListTypeMap,
   styleMap: StyleMap,
@@ -299,7 +245,7 @@ async function processLists(
   startIndex: number,
   params: {
     hyperlinks: Map<string, string>;
-    images: Map<string, string>;
+    images: Map<string, ImageInfo>;
     listTypeMap: Map<string, { type: "bullet" | "ordered"; start?: number }>;
     styleMap: StyleMap;
     options?: DocxImportOptions;

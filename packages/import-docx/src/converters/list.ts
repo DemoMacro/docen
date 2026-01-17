@@ -6,10 +6,7 @@ import { findChild } from "../utils/xml";
  */
 export function isListItem(node: Element): boolean {
   const pPr = findChild(node, "w:pPr");
-  if (!pPr) return false;
-
-  const numPr = findChild(pPr, "w:numPr");
-  return !!numPr;
+  return !!pPr && findChild(pPr, "w:numPr") !== undefined;
 }
 
 /**
@@ -20,9 +17,7 @@ export function getListInfo(node: Element): {
   level: number;
 } | null {
   const pPr = findChild(node, "w:pPr");
-  if (!pPr) return null;
-
-  const numPr = findChild(pPr, "w:numPr");
+  const numPr = pPr && findChild(pPr, "w:numPr");
   if (!numPr) return null;
 
   const ilvl = findChild(numPr, "w:ilvl");
@@ -32,6 +27,6 @@ export function getListInfo(node: Element): {
 
   return {
     numId: numId.attributes["w:val"] as string,
-    level: parseInt((ilvl.attributes["w:val"] as string) || "0"),
+    level: parseInt((ilvl.attributes["w:val"] as string) || "0", 10),
   };
 }

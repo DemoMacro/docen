@@ -6,14 +6,10 @@ import { findChild } from "../utils/xml";
  */
 export function isCodeBlock(node: Element): boolean {
   const pPr = findChild(node, "w:pPr");
-  if (!pPr) return false;
+  const pStyle = pPr && findChild(pPr, "w:pStyle");
+  const style = pStyle?.attributes["w:val"] as string;
 
-  const pStyle = findChild(pPr, "w:pStyle");
-  if (!pStyle) return false;
-
-  const style = pStyle.attributes["w:val"] as string;
-  // Check for code block style patterns
-  return style === "CodeBlock" || style?.startsWith("Code");
+  return style === "CodeBlock" || style?.startsWith("Code") || false;
 }
 
 /**
@@ -21,17 +17,11 @@ export function isCodeBlock(node: Element): boolean {
  */
 export function getCodeBlockLanguage(node: Element): string | undefined {
   const pPr = findChild(node, "w:pPr");
-  if (!pPr) return undefined;
+  const pStyle = pPr && findChild(pPr, "w:pStyle");
+  const style = pStyle?.attributes["w:val"] as string;
 
-  const pStyle = findChild(pPr, "w:pStyle");
-  if (!pStyle) return undefined;
+  if (!style?.startsWith("CodeBlock")) return undefined;
 
-  const style = pStyle.attributes["w:val"] as string;
-  // Extract language from style name like "CodeBlockJavaScript" -> "javascript"
-  if (style?.startsWith("CodeBlock")) {
-    const lang = style.replace("CodeBlock", "").toLowerCase();
-    return lang || undefined;
-  }
-
-  return undefined;
+  const lang = style.replace("CodeBlock", "").toLowerCase();
+  return lang || undefined;
 }

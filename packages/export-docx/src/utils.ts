@@ -49,20 +49,17 @@ export const convertCssLengthToPixels = (value: string): number => {
 
   const unit = match[2] || "px";
 
-  // Convert to pixels
-  switch (unit) {
-    case "px":
-      return Math.round(num);
-    case "pt":
-      return Math.round(num * 1.333); // 1pt = 1.333px
-    case "em":
-    case "rem":
-      return Math.round(num * 16); // Assume 16px base font size
-    case "%":
-      return Math.round((num * 16) / 100); // % of em, assume 16px base
-    default:
-      return Math.round(num);
-  }
+  // Unit conversion factors to pixels
+  const UNIT_TO_PIXELS: Record<string, number> = {
+    px: 1,
+    pt: 1.333, // 1pt = 1.333px (96/72)
+    em: 16, // Assume 16px base font size
+    rem: 16, // Same as em
+    "%": 0.16, // % of em, assume 16px base (16/100)
+  };
+
+  const factor = UNIT_TO_PIXELS[unit] ?? 1;
+  return Math.round(num * factor);
 };
 
 /**

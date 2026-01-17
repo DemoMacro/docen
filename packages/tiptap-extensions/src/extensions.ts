@@ -16,7 +16,7 @@ import { Paragraph } from "./extends/paragraph";
 import { Table } from "@tiptap/extension-table";
 import TableCell from "@tiptap/extension-table-cell";
 import TableHeader from "@tiptap/extension-table-header";
-import TableRow from "@tiptap/extension-table-row";
+import { TableRow } from "./extends/table-row";
 import TaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
 import Text from "@tiptap/extension-text";
@@ -91,43 +91,43 @@ export const tiptapExtensions = [...tiptapNodeExtensions, ...tiptapMarkExtension
 
 // Export all individual extensions for direct imports
 // Nodes
-export { Blockquote } from "@tiptap/extension-blockquote";
-export { BulletList } from "@tiptap/extension-bullet-list";
-export { default as CodeBlockLowlight } from "@tiptap/extension-code-block-lowlight";
-export { Details, DetailsSummary, DetailsContent } from "@tiptap/extension-details";
-export { Document } from "@tiptap/extension-document";
-export { Emoji } from "@tiptap/extension-emoji";
-export { HardBreak } from "@tiptap/extension-hard-break";
-export { Heading } from "./extends/heading";
-export { HorizontalRule } from "@tiptap/extension-horizontal-rule";
-export { Image } from "./extends/image";
-export { ListItem } from "@tiptap/extension-list-item";
-export { Mathematics } from "@tiptap/extension-mathematics";
-export { OrderedList } from "@tiptap/extension-ordered-list";
-export { Paragraph } from "./extends/paragraph";
-export { Table } from "@tiptap/extension-table";
-export { TableCell } from "@tiptap/extension-table-cell";
-export { TableHeader } from "@tiptap/extension-table-header";
-export { TableRow } from "@tiptap/extension-table-row";
-export { TaskList } from "@tiptap/extension-task-list";
-export { TaskItem } from "@tiptap/extension-task-item";
-export { Text } from "@tiptap/extension-text";
+export { Blockquote };
+export { BulletList };
+export { CodeBlockLowlight };
+export { Details, DetailsSummary, DetailsContent };
+export { Document };
+export { Emoji };
+export { HardBreak };
+export { Heading };
+export { HorizontalRule };
+export { Image };
+export { ListItem };
+export { Mathematics };
+export { OrderedList };
+export { Paragraph };
+export { Table };
+export { TableCell };
+export { TableHeader };
+export { TableRow };
+export { TaskList };
+export { TaskItem };
+export { Text };
 
 // Marks
-export { Bold } from "@tiptap/extension-bold";
-export { Code } from "@tiptap/extension-code";
-export { Highlight } from "@tiptap/extension-highlight";
-export { Italic } from "@tiptap/extension-italic";
-export { Link } from "@tiptap/extension-link";
-export { Strike } from "@tiptap/extension-strike";
-export { Subscript } from "@tiptap/extension-subscript";
-export { Superscript } from "@tiptap/extension-superscript";
-export { TextStyle } from "@tiptap/extension-text-style";
-export { Underline } from "@tiptap/extension-underline";
+export { Bold };
+export { Code };
+export { Highlight };
+export { Italic };
+export { Link };
+export { Strike };
+export { Subscript };
+export { Superscript };
+export { TextStyle };
+export { Underline };
 
 // Text Style Extensions
-export { Color } from "@tiptap/extension-text-style";
-export { BackgroundColor } from "@tiptap/extension-text-style";
-export { FontFamily } from "@tiptap/extension-text-style";
-export { FontSize } from "@tiptap/extension-text-style";
-export { LineHeight } from "@tiptap/extension-text-style";
+export { Color };
+export { BackgroundColor };
+export { FontFamily };
+export { FontSize };
+export { LineHeight };
