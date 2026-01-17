@@ -4,6 +4,8 @@ import type { Root, Element, Text } from "xast";
 import type { JSONContent } from "@tiptap/core";
 import type { DocxImportOptions } from "./option";
 import type { DocxImageConverter, DocxImageInfo } from "./types";
+import type { StyleMap, StyleInfo } from "./parsing/styles";
+import type { ListInfo, ListTypeMap } from "./parsing/types";
 import { toUint8Array, DataType } from "undio";
 import { imageMeta } from "image-meta";
 import {
@@ -21,12 +23,11 @@ import { uint8ArrayToBase64 } from "./utils/base64";
 import { findChild, findDeepChildren } from "./utils/xml";
 import { extractImages } from "./parsing/images";
 import { extractHyperlinks } from "./parsing/hyperlinks";
+import { parseNumberingXml } from "./parsing/numbering";
+import { parseStylesXml } from "./parsing/styles";
 
-interface ListInfo {
-  type: "bullet" | "ordered";
-  start?: number;
-}
-type ListTypeMap = Map<string, ListInfo>;
+// Export types for use in converters
+export type { StyleMap, StyleInfo, ListInfo, ListTypeMap };
 
 /**
  * Default image converter implementation
@@ -105,8 +106,9 @@ export async function parseDOCX(
 
   const documentXast = fromXml(new TextDecoder().decode(documentXml));
 
-  // Build list type map
+  // Build list type map and style map
   const listTypeMap = parseNumberingXml(files);
+  const styleMap = parseStylesXml(files);
 
   // Convert document
   const content = await convertDocument(
@@ -114,70 +116,12 @@ export async function parseDOCX(
     convertedImages,
     hyperlinks,
     listTypeMap,
+    styleMap,
     ignoreEmptyParagraphs,
     options,
   );
 
   return content;
-}
-
-/**
- * Parse numbering.xml to build list type map
- */
-function parseNumberingXml(files: Record<string, Uint8Array>): ListTypeMap {
-  const listTypeMap = new Map<string, ListInfo>();
-  const abstractNumStarts = new Map<string, number>();
-  const numberingXml = files["word/numbering.xml"];
-  if (!numberingXml) return listTypeMap;
-
-  const numberingXast = fromXml(new TextDecoder().decode(numberingXml));
-  const abstractNumFormats = new Map<string, string>();
-
-  const numbering = findChild(numberingXast, "w:numbering");
-  if (!numbering) return listTypeMap;
-
-  // First pass: collect all abstractNum definitions
-  const abstractNums = findDeepChildren(numbering, "w:abstractNum");
-  for (const abstractNum of abstractNums) {
-    const abstractNumId = abstractNum.attributes["w:abstractNumId"] as string;
-    const lvl = findChild(abstractNum, "w:lvl");
-    if (!lvl) continue;
-
-    const numFmt = findChild(lvl, "w:numFmt");
-    if (numFmt?.attributes["w:val"]) {
-      abstractNumFormats.set(abstractNumId, numFmt.attributes["w:val"] as string);
-    }
-
-    const start = findChild(lvl, "w:start");
-    if (start?.attributes["w:val"]) {
-      abstractNumStarts.set(abstractNumId, parseInt(start.attributes["w:val"] as string, 10));
-    }
-  }
-
-  // Second pass: map numId to list type
-  const nums = findDeepChildren(numbering, "w:num");
-  for (const num of nums) {
-    const numId = num.attributes["w:numId"] as string;
-    const abstractNumId = findChild(num, "w:abstractNumId");
-    if (!abstractNumId?.attributes["w:val"]) continue;
-
-    const abstractNumIdVal = abstractNumId.attributes["w:val"] as string;
-    const numFmt = abstractNumFormats.get(abstractNumIdVal);
-    if (!numFmt) continue;
-
-    const start = abstractNumStarts.get(abstractNumIdVal);
-
-    if (numFmt === "bullet") {
-      listTypeMap.set(numId, { type: "bullet" });
-    } else {
-      listTypeMap.set(numId, {
-        type: "ordered",
-        ...(start !== undefined && { start }),
-      });
-    }
-  }
-
-  return listTypeMap;
 }
 
 /**
@@ -188,6 +132,7 @@ async function convertDocument(
   images: Map<string, string>,
   hyperlinks: Map<string, string>,
   listTypeMap: ListTypeMap,
+  styleMap: StyleMap,
   ignoreEmptyParagraphs: boolean,
   options?: DocxImportOptions,
 ): Promise<JSONContent> {
@@ -207,6 +152,7 @@ async function convertDocument(
     images,
     hyperlinks,
     listTypeMap,
+    styleMap,
     ignoreEmptyParagraphs,
     options,
   );
@@ -225,6 +171,7 @@ async function processElements(
   images: Map<string, string>,
   hyperlinks: Map<string, string>,
   listTypeMap: ListTypeMap,
+  styleMap: StyleMap,
   ignoreEmptyParagraphs: boolean,
   options?: DocxImportOptions,
 ): Promise<JSONContent[]> {
@@ -236,7 +183,7 @@ async function processElements(
 
     // Handle tables
     if (element.name === "w:tbl") {
-      result.push(await convertTable(element, { hyperlinks, images, options }));
+      result.push(await convertTable(element, { hyperlinks, images, options, styleMap }));
       i++;
       // Skip empty paragraph after table (export-docx adds these for spacing)
       if (
@@ -279,6 +226,7 @@ async function processElements(
           hyperlinks,
           images,
           listTypeMap,
+          styleMap,
           options,
         });
         result.push(...listNodes);
@@ -294,7 +242,7 @@ async function processElements(
       }
 
       // Regular paragraph
-      result.push(await convertParagraph(element, { hyperlinks, images, options }));
+      result.push(await convertParagraph(element, { hyperlinks, images, options, styleMap }));
       i++;
       continue;
     }
@@ -342,6 +290,7 @@ async function processLists(
     hyperlinks: Map<string, string>;
     images: Map<string, string>;
     listTypeMap: Map<string, { type: "bullet" | "ordered"; start?: number }>;
+    styleMap: StyleMap;
     options?: DocxImportOptions;
   },
 ): Promise<JSONContent[]> {

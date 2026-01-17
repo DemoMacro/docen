@@ -1,6 +1,7 @@
 import type { Element, Text } from "xast";
 import type { DocxImportOptions } from "../option";
 import type { ImageFloatingOptions } from "@docen/tiptap-extensions/types";
+import type { StyleInfo } from "../parsing/styles";
 import { imageMeta } from "image-meta";
 import { cropImageIfNeeded, type CropRect } from "../utils/image";
 import { findChild, findDeepChild, findDeepChildren } from "../utils/xml";
@@ -15,6 +16,7 @@ export async function extractRuns(
     hyperlinks: Map<string, string>;
     images: Map<string, string>;
     options?: DocxImportOptions;
+    styleInfo?: StyleInfo;
   },
 ): Promise<
   Array<{
@@ -23,7 +25,7 @@ export async function extractRuns(
     marks?: Array<{ type: string; attrs?: Record<string, any> }>;
   }>
 > {
-  const { hyperlinks, images: _images, options: _options } = params;
+  const { hyperlinks, images: _images, options: _options, styleInfo } = params;
   const runs: Array<{
     type: string;
     text?: string;
@@ -84,7 +86,7 @@ export async function extractRuns(
             if (!text || !text.value) continue;
 
             // Extract formatting marks
-            const marks = extractMarks(run);
+            const marks = extractMarks(run, styleInfo);
             // Add link mark
             marks.push({ type: "link", attrs: { href } });
 
@@ -138,7 +140,7 @@ export async function extractRuns(
       const br = findChild(run, "w:br");
       if (br) {
         // Extract formatting marks for hardBreak
-        const marks = extractMarks(run);
+        const marks = extractMarks(run, styleInfo);
         const hardBreakNode: {
           type: string;
           marks?: Array<{ type: string; attrs?: Record<string, any> }>;
@@ -162,7 +164,7 @@ export async function extractRuns(
       if (!text || !text.value) continue;
 
       // Extract formatting marks
-      const marks = extractMarks(run);
+      const marks = extractMarks(run, styleInfo);
 
       const textNode: {
         type: string;
@@ -186,102 +188,153 @@ export async function extractRuns(
 
 /**
  * Extract formatting marks
+ * Merges style character format with run-level formatting (run takes precedence)
  */
-export function extractMarks(run: Element): Array<{ type: string; attrs?: Record<string, any> }> {
+export function extractMarks(
+  run: Element,
+  styleInfo?: StyleInfo,
+): Array<{ type: string; attrs?: Record<string, any> }> {
   const marks: Array<{ type: string; attrs?: Record<string, any> }> = [];
 
   // Find w:rPr (run properties)
   const rPr = findChild(run, "w:rPr");
-  if (!rPr) return marks;
 
-  // Bold
-  if (findChild(rPr, "w:b")) {
-    marks.push({ type: "bold" });
+  // Step 1: Initialize with style character format (base layer)
+  let mergedFormat: {
+    color?: string;
+    bold?: boolean;
+    italic?: boolean;
+    underline?: boolean;
+    strike?: boolean;
+    fontSize?: number; // Half-points
+    fontFamily?: string;
+    backgroundColor?: string;
+  } = {};
+
+  if (styleInfo?.charFormat) {
+    mergedFormat = { ...styleInfo.charFormat };
   }
 
-  // Italic
-  if (findChild(rPr, "w:i")) {
-    marks.push({ type: "italic" });
-  }
+  // Step 2: Run-level format overrides (higher priority)
+  if (rPr) {
+    // Bold (run can override style)
+    const boldEl = findChild(rPr, "w:b");
+    if (boldEl) {
+      // Check if explicitly set to false
+      if (boldEl.attributes["w:val"] === "false") {
+        mergedFormat.bold = false;
+      } else {
+        mergedFormat.bold = true;
+      }
+    }
 
-  // Underline
-  if (findChild(rPr, "w:u")) {
-    marks.push({ type: "underline" });
-  }
+    // Italic
+    const italicEl = findChild(rPr, "w:i");
+    if (italicEl) {
+      if (italicEl.attributes["w:val"] === "false") {
+        mergedFormat.italic = false;
+      } else {
+        mergedFormat.italic = true;
+      }
+    }
 
-  // Strike
-  if (findChild(rPr, "w:strike")) {
-    marks.push({ type: "strike" });
-  }
+    // Underline
+    if (findChild(rPr, "w:u")) {
+      mergedFormat.underline = true;
+    }
 
-  // Highlight
-  if (findChild(rPr, "w:highlight")) {
-    marks.push({ type: "highlight" });
-  }
+    // Strike
+    if (findChild(rPr, "w:strike")) {
+      mergedFormat.strike = true;
+    }
 
-  // Subscript/Superscript
-  const vertAlign = findChild(rPr, "w:vertAlign");
-  if (vertAlign) {
-    const val = vertAlign.attributes["w:val"] as string;
-    if (val === "subscript") {
-      marks.push({ type: "subscript" });
-    } else if (val === "superscript") {
-      marks.push({ type: "superscript" });
+    // Text color (run overrides style)
+    const colorEl = findChild(rPr, "w:color");
+    if (colorEl?.attributes["w:val"] && colorEl.attributes["w:val"] !== "auto") {
+      const colorVal = colorEl.attributes["w:val"] as string;
+      mergedFormat.color = colorVal.startsWith("#") ? colorVal : `#${colorVal}`;
+    }
+
+    // Font size (run overrides style)
+    const szEl = findChild(rPr, "w:sz");
+    if (szEl?.attributes["w:val"]) {
+      const sizeVal = szEl.attributes["w:val"] as string;
+      const size = parseInt(sizeVal, 10);
+      if (!isNaN(size)) {
+        mergedFormat.fontSize = size;
+      }
+    }
+
+    // Font family (run overrides style)
+    const rFontsEl = findChild(rPr, "w:rFonts");
+    if (rFontsEl?.attributes["w:ascii"]) {
+      mergedFormat.fontFamily = rFontsEl.attributes["w:ascii"] as string;
+    }
+
+    // Background color (shading)
+    const shdEl = findChild(rPr, "w:shd");
+    if (shdEl?.attributes["w:fill"] && shdEl.attributes["w:fill"] !== "auto") {
+      const fillColor = shdEl.attributes["w:fill"] as string;
+      mergedFormat.backgroundColor = fillColor.startsWith("#") ? fillColor : `#${fillColor}`;
+    }
+
+    // Highlight
+    if (findChild(rPr, "w:highlight")) {
+      marks.push({ type: "highlight" });
+    }
+
+    // Subscript/Superscript
+    const vertAlign = findChild(rPr, "w:vertAlign");
+    if (vertAlign) {
+      const val = vertAlign.attributes["w:val"] as string;
+      if (val === "subscript") {
+        marks.push({ type: "subscript" });
+      } else if (val === "superscript") {
+        marks.push({ type: "superscript" });
+      }
     }
   }
 
-  // Text style (colors, font size, font family, etc.)
-  // Check if DOCX has any text style properties
-  const hasColor = findChild(rPr, "w:color");
-  const hasBackgroundColor = findChild(rPr, "w:shd");
-  const hasFontSize = findChild(rPr, "w:sz");
-  const hasFontFamily = findChild(rPr, "w:rFonts");
+  // Step 3: Convert merged format to marks
+  if (mergedFormat.bold) {
+    marks.push({ type: "bold" });
+  }
 
-  // Only create textStyle if there's at least one style property
-  // This matches TipTap HTML parser behavior
-  if (hasColor || hasBackgroundColor || hasFontSize || hasFontFamily) {
+  if (mergedFormat.italic) {
+    marks.push({ type: "italic" });
+  }
+
+  if (mergedFormat.underline) {
+    marks.push({ type: "underline" });
+  }
+
+  if (mergedFormat.strike) {
+    marks.push({ type: "strike" });
+  }
+
+  // Text style (colors, font size, font family, etc.)
+  if (
+    mergedFormat.color ||
+    mergedFormat.backgroundColor ||
+    mergedFormat.fontSize ||
+    mergedFormat.fontFamily
+  ) {
     const textStyleAttrs: Record<string, string> = {
-      color: "",
-      backgroundColor: "",
+      color: mergedFormat.color || "",
+      backgroundColor: mergedFormat.backgroundColor || "",
       fontSize: "",
       fontFamily: "",
       lineHeight: "",
     };
 
-    // Text color
-    if (hasColor && hasColor.attributes["w:val"]) {
-      const colorVal = hasColor.attributes["w:val"] as string;
-      if (colorVal !== "auto") {
-        // Convert hex color (without #) to with #
-        const hexColor = colorVal.startsWith("#") ? colorVal : `#${colorVal}`;
-        textStyleAttrs.color = hexColor;
-      }
-    }
-
-    // Background color (shading)
-    if (hasBackgroundColor && hasBackgroundColor.attributes["w:fill"]) {
-      const fillColor = hasBackgroundColor.attributes["w:fill"] as string;
-      if (fillColor !== "auto") {
-        const hexColor = fillColor.startsWith("#") ? fillColor : `#${fillColor}`;
-        textStyleAttrs.backgroundColor = hexColor;
-      }
-    }
-
     // Font size (convert half-points to px)
-    if (hasFontSize && hasFontSize.attributes["w:val"]) {
-      const halfPoints = hasFontSize.attributes["w:val"] as string;
-      const sizeValue = parseFloat(halfPoints);
-      if (!isNaN(sizeValue)) {
-        // Convert half-points to px: 1 half-point = 0.5pt, 1pt ≈ 1.33px
-        // So: half-points / 2 * 4/3 = half-points / 1.5
-        const px = Math.round((sizeValue / 1.5) * 10) / 10; // Round to 1 decimal
-        textStyleAttrs.fontSize = `${px}px`;
-      }
+    if (mergedFormat.fontSize) {
+      const px = Math.round((mergedFormat.fontSize / 1.5) * 10) / 10;
+      textStyleAttrs.fontSize = `${px}px`;
     }
 
-    // Font family
-    if (hasFontFamily && hasFontFamily.attributes["w:ascii"]) {
-      textStyleAttrs.fontFamily = hasFontFamily.attributes["w:ascii"] as string;
+    if (mergedFormat.fontFamily) {
+      textStyleAttrs.fontFamily = mergedFormat.fontFamily;
     }
 
     marks.push({ type: "textStyle", attrs: textStyleAttrs });

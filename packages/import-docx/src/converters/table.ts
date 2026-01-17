@@ -1,6 +1,7 @@
 import type { Element } from "xast";
 import type { JSONContent } from "@tiptap/core";
 import type { DocxImportOptions } from "../option";
+import type { StyleMap } from "../parser";
 import { convertParagraph } from "./paragraph";
 import { findChild } from "../utils/xml";
 
@@ -20,6 +21,7 @@ export async function convertTable(
     hyperlinks: Map<string, string>;
     images: Map<string, string>;
     options?: DocxImportOptions;
+    styleMap?: StyleMap;
   },
 ): Promise<JSONContent> {
   const rows: JSONContent[] = [];

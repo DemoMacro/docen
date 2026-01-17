@@ -1,6 +1,7 @@
 import type { Element } from "xast";
 import type { JSONContent } from "@tiptap/core";
 import type { DocxImportOptions } from "../option";
+import type { StyleMap, StyleInfo } from "../parsing/styles";
 import { extractRuns, extractAlignment } from "./text";
 import { findChild } from "../utils/xml";
 
@@ -94,6 +95,7 @@ export async function convertParagraph(
     hyperlinks: Map<string, string>;
     images: Map<string, string>;
     options?: DocxImportOptions;
+    styleMap?: StyleMap;
   },
 ): Promise<JSONContent> {
   // Check if it's a heading by finding w:pPr > w:pStyle
@@ -106,17 +108,30 @@ export async function convertParagraph(
     }
   }
 
-  if (styleName) {
-    // Check if it's a heading (e.g., "Heading1", "Heading2")
-    const headingMatch = styleName.match(/^Heading(\d)$/);
+  if (styleName && params.styleMap) {
+    // First, check if style has outlineLvl (reliable heading indicator)
+    const styleInfo = params.styleMap.get(styleName);
+    if (
+      styleInfo?.outlineLvl !== undefined &&
+      styleInfo.outlineLvl >= 0 &&
+      styleInfo.outlineLvl <= 5
+    ) {
+      // outlineLvl 0 = Heading 1, outlineLvl 1 = Heading 2, etc.
+      const level = (styleInfo.outlineLvl + 1) as 1 | 2 | 3 | 4 | 5 | 6;
+      return convertHeading(node, params, styleInfo, level);
+    }
+
+    // Fallback: Check if style name matches "Heading1", "Heading2", etc.
+    const headingMatch = styleName.match(/^Heading(\d+)$/);
     if (headingMatch) {
       const level = parseInt(headingMatch[1]) as 1 | 2 | 3 | 4 | 5 | 6;
-      return convertHeading(node, params, level);
+      return convertHeading(node, params, styleInfo, level);
     }
   }
 
   // Extract runs (text, images, hardBreaks)
-  const runs = await extractRuns(node, params);
+  const styleInfo = styleName && params.styleMap ? params.styleMap.get(styleName) : undefined;
+  const runs = await extractRuns(node, { ...params, styleInfo });
 
   // Check if this is a horizontal rule (page break)
   if (runs.length === 1 && runs[0].type === "hardBreak") {
@@ -163,6 +178,7 @@ async function convertHeading(
     images: Map<string, string>;
     options?: DocxImportOptions;
   },
+  styleInfo: StyleInfo | undefined,
   level: 1 | 2 | 3 | 4 | 5 | 6,
 ): Promise<JSONContent> {
   const paragraphStyles = extractParagraphStyles(node);
@@ -173,6 +189,6 @@ async function convertHeading(
       level,
       ...paragraphStyles,
     },
-    content: await extractRuns(node, params),
+    content: await extractRuns(node, { ...params, styleInfo }),
   };
 }
