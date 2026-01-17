@@ -3,11 +3,19 @@ import { Image as BaseImage } from "@tiptap/extension-image";
 /**
  * Custom Image extension based on @tiptap/extension-image
  *
- * Adds rotation support for DOCX round-trip conversion:
- * - Rotation is stored as a number attribute (in degrees)
- * - When rendering to HTML, rotation is converted to CSS transform: rotate()
- * - When parsing from HTML, CSS transform is parsed back to rotation attribute
- * - This enables DOCX import/export to handle rotation while maintaining HTML compatibility
+ * Adds DOCX-specific attributes for round-trip conversion:
+ * - rotation: Image rotation in degrees (rendered as CSS transform)
+ * - floating: Image positioning options (stored as data-floating attribute)
+ * - outline: Image border/outline options (stored as data-outline attribute)
+ *
+ * HTML serialization strategy:
+ * - rotation: Mapped to CSS transform: rotate()
+ * - floating: Preserved as data-floating JSON attribute (no CSS equivalent)
+ * - outline: Preserved as data-outline JSON attribute (no CSS equivalent)
+ *
+ * Note: floating and outline are DOCX-specific features without direct CSS
+ * equivalents. They're preserved in HTML for round-trip conversion but only
+ * affect DOCX export/import.
  */
 export const Image = BaseImage.extend({
   addAttributes() {
@@ -15,62 +23,67 @@ export const Image = BaseImage.extend({
       // Inherit all parent attributes (src, alt, title, width, height)
       ...this.parent?.(),
 
-      // Add rotation attribute
+      // Add rotation attribute (in degrees)
       rotation: {
         default: null,
+        // Parse from CSS transform: rotate(Xdeg)
+        parseHTML: (element) => {
+          const style = element.getAttribute("style") || "";
+          const rotationMatch = style.match(/transform:\s*rotate\(([\d.]+)deg\)/);
+          return rotationMatch ? parseFloat(rotationMatch[1]) : null;
+        },
+        // Render as CSS transform
+        renderHTML: (attributes) => {
+          if (!attributes.rotation) return {};
+          return {
+            style: `transform: rotate(${attributes.rotation}deg)`,
+          };
+        },
       },
 
       // Add floating attribute for image positioning
       floating: {
         default: null,
-      },
-
-      // Add outline attribute for image border
-      outline: {
-        default: null,
-      },
-    };
-  },
-
-  parseHTML() {
-    return [
-      {
-        // Match img tags
-        tag: "img[src]",
-        // Extract all attributes including rotation from style
-        getAttributes: (element: HTMLElement) => {
-          const attrs = {
-            src: element.getAttribute("src"),
-            alt: element.getAttribute("alt"),
-            title: element.getAttribute("title"),
-            width: element.getAttribute("width"),
-            height: element.getAttribute("height"),
+        // Parse from data-floating attribute (JSON string)
+        parseHTML: (element) => {
+          const dataFloating = element.getAttribute("data-floating");
+          if (!dataFloating) return null;
+          try {
+            return JSON.parse(dataFloating);
+          } catch {
+            return null;
+          }
+        },
+        // Render as data-floating attribute (JSON string)
+        renderHTML: (attributes) => {
+          if (!attributes.floating) return {};
+          return {
+            "data-floating": JSON.stringify(attributes.floating),
           };
-
-          // Parse rotation from CSS transform (only if present)
-          const style = element.getAttribute("style") || "";
-          const rotationMatch = style.match(/transform:\s*rotate\(([\d.]+)deg\)/);
-
-          // Only add rotation attribute if it exists in HTML
-          // Otherwise, TipTap will use the default value (null) from addAttributes()
-          return rotationMatch ? { ...attrs, rotation: parseFloat(rotationMatch[1]) } : attrs;
         },
       },
-    ];
-  },
 
-  renderHTML({ HTMLAttributes }) {
-    // Extract rotation from attributes
-    const { rotation, ...otherAttrs } = HTMLAttributes;
-
-    // If rotation exists, add it to style
-    if (rotation) {
-      const existingStyle = otherAttrs.style || "";
-      otherAttrs.style = existingStyle
-        ? `${existingStyle}; transform: rotate(${rotation}deg)`
-        : `transform: rotate(${rotation}deg)`;
-    }
-
-    return ["img", otherAttrs];
+      // Add outline attribute for image border/outline
+      outline: {
+        default: null,
+        // Parse from data-outline attribute (JSON string)
+        parseHTML: (element) => {
+          const dataOutline = element.getAttribute("data-outline");
+          if (!dataOutline) return null;
+          try {
+            return JSON.parse(dataOutline);
+          } catch {
+            return null;
+          }
+        },
+        // Render as data-outline attribute (JSON string)
+        renderHTML: (attributes) => {
+          if (!attributes.outline) return {};
+          return {
+            "data-outline": JSON.stringify(attributes.outline),
+          };
+        },
+      },
+    };
   },
 });
