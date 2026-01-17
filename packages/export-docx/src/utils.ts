@@ -18,13 +18,61 @@ const DEFAULT_MAX_IMAGE_WIDTH_PIXELS = 6.5 * 96; // A4 effective width in pixels
 
 /**
  * Convert TWIPs to pixels
- * Follows docx.js naming convention: convert[From]To[To]
  *
  * @param twip - Value in TWIPs
  * @returns Value in pixels
  */
 export const convertTwipToPixels = (twip: number): number => {
   return Math.round((twip * DOCX_DPI) / 1440);
+};
+
+/**
+ * Parse CSS length value to pixels
+ * Supports: px, pt, em, rem, %, and unitless values
+ * Used for converting TipTap attrs (CSS strings) to pixels for DOCX conversion
+ *
+ * @param value - CSS length value (e.g., "20px", "1.5rem", "2em", "12pt")
+ * @returns Value in pixels
+ */
+export const convertCssLengthToPixels = (value: string): number => {
+  if (!value) return 0;
+
+  // Remove whitespace
+  value = value.trim();
+
+  // Match number and optional unit
+  const match = value.match(/^([\d.]+)(px|pt|em|rem|%|)?$/);
+  if (!match) return 0;
+
+  const num = parseFloat(match[1]);
+  if (isNaN(num)) return 0;
+
+  const unit = match[2] || "px";
+
+  // Convert to pixels
+  switch (unit) {
+    case "px":
+      return Math.round(num);
+    case "pt":
+      return Math.round(num * 1.333); // 1pt = 1.333px
+    case "em":
+    case "rem":
+      return Math.round(num * 16); // Assume 16px base font size
+    case "%":
+      return Math.round((num * 16) / 100); // % of em, assume 16px base
+    default:
+      return Math.round(num);
+  }
+};
+
+/**
+ * Convert pixels to TWIPs (Twentieth of a Point)
+ *
+ * @param px - Value in pixels
+ * @returns Value in TWIPs
+ */
+export const convertPixelsToTwip = (px: number): number => {
+  return Math.round(px * 15);
 };
 
 /**

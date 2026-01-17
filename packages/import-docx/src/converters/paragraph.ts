@@ -5,32 +5,35 @@ import { extractRuns, extractAlignment } from "./text";
 import { findChild } from "../utils/xml";
 
 /**
- * Convert TWIPs to pixels
+ * Convert TWIPs to CSS pixels
  * 1 inch = 1440 TWIPs, 1px ≈ 15 TWIPs (at 96 DPI: 1px = 0.75pt = 15 TWIP)
+ * @param twip - Value in TWIPs
+ * @returns CSS value in pixels (e.g., "20px")
  */
-function twipToPx(twip: number): number {
-  return Math.round(twip / 15);
+function convertTwipToPixels(twip: number): string {
+  const px = Math.round(twip / 15);
+  return `${px}px`;
 }
 
 /**
  * Extract paragraph style attributes from DOCX paragraph properties
  */
 function extractParagraphStyles(node: Element): {
-  indentLeft?: number;
-  indentRight?: number;
-  indentFirstLine?: number;
-  spacingBefore?: number;
-  spacingAfter?: number;
+  indentLeft?: string;
+  indentRight?: string;
+  indentFirstLine?: string;
+  spacingBefore?: string;
+  spacingAfter?: string;
 } | null {
   const pPr = findChild(node, "w:pPr");
   if (!pPr) return null;
 
   const result: {
-    indentLeft?: number;
-    indentRight?: number;
-    indentFirstLine?: number;
-    spacingBefore?: number;
-    spacingAfter?: number;
+    indentLeft?: string;
+    indentRight?: string;
+    indentFirstLine?: string;
+    spacingBefore?: string;
+    spacingAfter?: string;
   } = {};
 
   // Extract indentation from w:ind
@@ -43,21 +46,21 @@ function extractParagraphStyles(node: Element): {
 
     if (typeof left === "string") {
       const leftValue = parseInt(left, 10);
-      if (!isNaN(leftValue)) result.indentLeft = twipToPx(leftValue);
+      if (!isNaN(leftValue)) result.indentLeft = convertTwipToPixels(leftValue);
     }
 
     if (typeof right === "string") {
       const rightValue = parseInt(right, 10);
-      if (!isNaN(rightValue)) result.indentRight = twipToPx(rightValue);
+      if (!isNaN(rightValue)) result.indentRight = convertTwipToPixels(rightValue);
     }
 
     if (typeof firstLine === "string") {
       const firstLineValue = parseInt(firstLine, 10);
-      if (!isNaN(firstLineValue)) result.indentFirstLine = twipToPx(firstLineValue);
+      if (!isNaN(firstLineValue)) result.indentFirstLine = convertTwipToPixels(firstLineValue);
     } else if (typeof hanging === "string") {
       // Convert hanging indent to negative first line indent
       const hangingValue = parseInt(hanging, 10);
-      if (!isNaN(hangingValue)) result.indentFirstLine = -twipToPx(hangingValue);
+      if (!isNaN(hangingValue)) result.indentFirstLine = `-${convertTwipToPixels(hangingValue)}`;
     }
   }
 
@@ -69,12 +72,12 @@ function extractParagraphStyles(node: Element): {
 
     if (typeof before === "string") {
       const beforeValue = parseInt(before, 10);
-      if (!isNaN(beforeValue)) result.spacingBefore = twipToPx(beforeValue);
+      if (!isNaN(beforeValue)) result.spacingBefore = convertTwipToPixels(beforeValue);
     }
 
     if (typeof after === "string") {
       const afterValue = parseInt(after, 10);
-      if (!isNaN(afterValue)) result.spacingAfter = twipToPx(afterValue);
+      if (!isNaN(afterValue)) result.spacingAfter = convertTwipToPixels(afterValue);
     }
   }
 

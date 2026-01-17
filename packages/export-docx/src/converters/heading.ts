@@ -1,14 +1,7 @@
 import { Paragraph, HeadingLevel } from "docx";
 import { HeadingNode } from "../types";
 import { convertText, convertHardBreak } from "./text";
-
-/**
- * Convert pixels to TWIPs (Twentieth of a Point)
- * 1 inch = 1440 TWIPs, 1px ≈ 15 TWIPs (at 96 DPI: 1px = 0.75pt = 15 TWIP)
- */
-function pxToTwip(px: number): number {
-  return Math.round(px * 15);
-}
+import { convertCssLengthToPixels, convertPixelsToTwip } from "../utils";
 
 /**
  * Convert TipTap heading node to DOCX paragraph
@@ -71,9 +64,11 @@ export function convertHeading(node: HeadingNode): Paragraph {
       paragraphOptions = {
         ...paragraphOptions,
         indent: {
-          ...(indentLeft && { left: pxToTwip(indentLeft) }),
-          ...(indentRight && { right: pxToTwip(indentRight) }),
-          ...(indentFirstLine && { firstLine: pxToTwip(indentFirstLine) }),
+          ...(indentLeft && { left: convertPixelsToTwip(convertCssLengthToPixels(indentLeft)) }),
+          ...(indentRight && { right: convertPixelsToTwip(convertCssLengthToPixels(indentRight)) }),
+          ...(indentFirstLine && {
+            firstLine: convertPixelsToTwip(convertCssLengthToPixels(indentFirstLine)),
+          }),
         },
       };
     }
@@ -83,8 +78,12 @@ export function convertHeading(node: HeadingNode): Paragraph {
       paragraphOptions = {
         ...paragraphOptions,
         spacing: {
-          ...(spacingBefore && { before: pxToTwip(spacingBefore) }),
-          ...(spacingAfter && { after: pxToTwip(spacingAfter) }),
+          ...(spacingBefore && {
+            before: convertPixelsToTwip(convertCssLengthToPixels(spacingBefore)),
+          }),
+          ...(spacingAfter && {
+            after: convertPixelsToTwip(convertCssLengthToPixels(spacingAfter)),
+          }),
         },
       };
     }

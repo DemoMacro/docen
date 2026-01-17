@@ -1,49 +1,6 @@
 import { Heading as BaseHeading } from "@tiptap/extension-heading";
 
 /**
- * Parse CSS length value to pixels
- * Supports: px, pt, em, rem, %, and unitless values
- */
-function parseIndent(value: string | undefined): number | null {
-  if (!value) return null;
-
-  // Remove whitespace
-  value = value.trim();
-
-  // Match number and optional unit
-  const match = value.match(/^([\d.]+)(px|pt|em|rem|%|)?$/);
-  if (!match) return null;
-
-  const num = parseFloat(match[1]);
-  if (isNaN(num)) return null;
-
-  const unit = match[2] || "px";
-
-  // Convert to pixels (simplified conversion)
-  switch (unit) {
-    case "px":
-      return Math.round(num);
-    case "pt":
-      return Math.round(num * 1.333); // 1pt = 1.333px
-    case "em":
-    case "rem":
-      return Math.round(num * 16); // Assume 16px base font size
-    case "%":
-      return Math.round((num * 16) / 100); // % of em, assume 16px base
-    default:
-      return Math.round(num);
-  }
-}
-
-/**
- * Parse CSS spacing value to pixels
- * Uses the same logic as parseIndent
- */
-function parseSpacing(value: string | undefined): number | null {
-  return parseIndent(value);
-}
-
-/**
  * Custom Heading extension with DOCX-compatible style attributes
  *
  * Adds the same paragraph-level formatting as Paragraph extension:
@@ -51,6 +8,9 @@ function parseSpacing(value: string | undefined): number | null {
  * - Spacing: before, after
  *
  * This ensures consistency across all block-level elements for DOCX round-trip.
+ *
+ * Note: Attributes store CSS values as-is (no unit conversion).
+ * Conversion happens in export-docx/import-docx packages.
  */
 export const Heading = BaseHeading.extend({
   addAttributes() {
@@ -58,46 +18,44 @@ export const Heading = BaseHeading.extend({
       // Inherit all parent attributes (including level)
       ...this.parent?.(),
 
-      // Left indentation (in pixels)
+      // Left indentation (CSS value: e.g., "20px", "1.5rem")
       indentLeft: {
         default: null,
-        parseHTML: (element) => parseIndent(element.style.marginLeft),
+        parseHTML: (element) => element.style.marginLeft || null,
         renderHTML: (attributes) =>
-          attributes.indentLeft ? { style: `margin-left: ${attributes.indentLeft}px` } : {},
+          attributes.indentLeft ? { style: `margin-left: ${attributes.indentLeft}` } : {},
       },
 
-      // Right indentation (in pixels)
+      // Right indentation (CSS value)
       indentRight: {
         default: null,
-        parseHTML: (element) => parseIndent(element.style.marginRight),
+        parseHTML: (element) => element.style.marginRight || null,
         renderHTML: (attributes) =>
-          attributes.indentRight ? { style: `margin-right: ${attributes.indentRight}px` } : {},
+          attributes.indentRight ? { style: `margin-right: ${attributes.indentRight}` } : {},
       },
 
-      // First line indentation (in pixels)
+      // First line indentation (CSS value)
       indentFirstLine: {
         default: null,
-        parseHTML: (element) => parseIndent(element.style.textIndent),
+        parseHTML: (element) => element.style.textIndent || null,
         renderHTML: (attributes) =>
-          attributes.indentFirstLine
-            ? { style: `text-indent: ${attributes.indentFirstLine}px` }
-            : {},
+          attributes.indentFirstLine ? { style: `text-indent: ${attributes.indentFirstLine}` } : {},
       },
 
-      // Spacing before heading (in pixels)
+      // Spacing before heading (CSS value)
       spacingBefore: {
         default: null,
-        parseHTML: (element) => parseSpacing(element.style.marginTop),
+        parseHTML: (element) => element.style.marginTop || null,
         renderHTML: (attributes) =>
-          attributes.spacingBefore ? { style: `margin-top: ${attributes.spacingBefore}px` } : {},
+          attributes.spacingBefore ? { style: `margin-top: ${attributes.spacingBefore}` } : {},
       },
 
-      // Spacing after heading (in pixels)
+      // Spacing after heading (CSS value)
       spacingAfter: {
         default: null,
-        parseHTML: (element) => parseSpacing(element.style.marginBottom),
+        parseHTML: (element) => element.style.marginBottom || null,
         renderHTML: (attributes) =>
-          attributes.spacingAfter ? { style: `margin-bottom: ${attributes.spacingAfter}px` } : {},
+          attributes.spacingAfter ? { style: `margin-bottom: ${attributes.spacingAfter}` } : {},
       },
     };
   },
