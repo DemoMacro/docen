@@ -173,7 +173,9 @@ interface ImageNode {
     title?: string | null;
     width?: number | null;
     height?: number | null;
-    rotation?: number; // Additional attribute: rotation in degrees (not in TipTap core)
+    rotation?: number; // Rotation in degrees (not in TipTap core)
+    floating?: ImageFloatingOptions; // Floating positioning options (not in TipTap core)
+    outline?: ImageOutlineOptions; // Border/outline options (not in TipTap core)
   };
 }
 ```

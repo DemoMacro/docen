@@ -18,6 +18,7 @@ import {
   IParagraphOptions,
 } from "docx";
 import { type DocxExportOptions } from "./option";
+import { calculateEffectiveContentWidth } from "./utils";
 import { convertParagraph } from "./converters/paragraph";
 import { convertHeading } from "./converters/heading";
 import { convertBlockquote } from "./converters/blockquote";
@@ -238,9 +239,16 @@ export async function convertNode(
     return null;
   }
 
+  // Calculate effective content width once for all images
+  const effectiveContentWidth = calculateEffectiveContentWidth(options);
+
   switch (node.type) {
     case "paragraph":
-      return await convertParagraph(node as ParagraphNode);
+      return await convertParagraph(node as ParagraphNode, {
+        image: {
+          maxWidth: effectiveContentWidth,
+        },
+      });
 
     case "heading":
       return convertHeading(node as HeadingNode);
@@ -253,7 +261,9 @@ export async function convertNode(
 
     case "image":
       // Convert image node to ImageRun and wrap in Paragraph with style
-      const imageRun = await convertImage(node as ImageNode);
+      const imageRun = await convertImage(node as ImageNode, {
+        maxWidth: effectiveContentWidth,
+      });
 
       // Build paragraph options with style reference if configured
       const imageParagraphOptions: IParagraphOptions = options.image?.style
@@ -275,13 +285,11 @@ export async function convertNode(
     case "bulletList":
       return await convertList(node as BulletListNode, {
         listType: "bullet",
-        exportOptions: options,
       });
 
     case "orderedList":
       return await convertList(node as OrderedListNode, {
         listType: "ordered",
-        exportOptions: options,
       });
 
     case "taskList":
@@ -290,7 +298,6 @@ export async function convertNode(
     case "listItem":
       return convertListItem(node as ListItemNode, {
         options: undefined,
-        exportOptions: undefined,
       });
 
     case "taskItem":
@@ -301,10 +308,15 @@ export async function convertNode(
       return new Paragraph({ children: [convertHardBreak()] });
 
     case "horizontalRule":
-      return convertHorizontalRule(node as HorizontalRuleNode, options.horizontalRule);
+      return convertHorizontalRule(node as HorizontalRuleNode, {
+        options: options.horizontalRule,
+      });
 
     case "details":
-      return await convertDetails(node as DetailsNode, options);
+      return await convertDetails(node as DetailsNode, {
+        options: options.details,
+        exportOptions: options,
+      });
 
     default:
       // Unknown node type, return a paragraph with text

@@ -1,4 +1,4 @@
-import { ImageRun, IImageOptions } from "docx";
+import { ImageRun, IImageOptions, PositiveUniversalMeasure } from "docx";
 import { ImageNode } from "../types";
 import { getImageTypeFromSrc, getImageWidth, getImageHeight, getImageDataAndMeta } from "../utils";
 import { imageMeta as getImageMetadata, type ImageMeta } from "image-meta";
@@ -7,9 +7,18 @@ import { imageMeta as getImageMetadata, type ImageMeta } from "image-meta";
  * Convert TipTap image node to DOCX ImageRun
  *
  * @param node - TipTap image node
+ * @param params - Conversion parameters
  * @returns Promise<DOCX ImageRun>
  */
-export async function convertImage(node: ImageNode): Promise<ImageRun> {
+export async function convertImage(
+  node: ImageNode,
+  params?: {
+    /** Maximum available width (number = pixels, or string like "6in", "152.4mm") */
+    maxWidth?: number | PositiveUniversalMeasure;
+    /** Additional image options to apply */
+    options?: Partial<IImageOptions>;
+  },
+): Promise<ImageRun> {
   // Get image type from metadata or URL
   const getImageType = (metaType?: string): "jpg" | "png" | "gif" | "bmp" => {
     // Try metadata type first
@@ -92,8 +101,8 @@ export async function convertImage(node: ImageNode): Promise<ImageRun> {
   }
 
   // Determine final dimensions: first from node attrs, then from image metadata
-  const finalWidth = getImageWidth(node, undefined, imageMeta);
-  const finalHeight = getImageHeight(node, finalWidth, undefined, imageMeta);
+  const finalWidth = getImageWidth(node, imageMeta, params?.maxWidth);
+  const finalHeight = getImageHeight(node, finalWidth, imageMeta, params?.maxWidth);
 
   // Build transformation object
   const transformation: {

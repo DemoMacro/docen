@@ -9,12 +9,17 @@ import type { DocxExportOptions } from "../option";
  * Simulates collapsible content using indentation and borders
  *
  * @param node - TipTap details node
- * @param options - Export options for nested content conversion
+ * @param params - Conversion parameters
  * @returns Array of DOCX Paragraph objects
  */
 export async function convertDetails(
   node: DetailsNode,
-  options: DocxExportOptions,
+  params: {
+    /** Export options for details styling */
+    options?: DocxExportOptions["details"];
+    /** Full export options for nested content conversion */
+    exportOptions: DocxExportOptions;
+  },
 ): Promise<Paragraph[]> {
   if (!node.content) return [];
 
@@ -44,7 +49,7 @@ export async function convertDetails(
 
     const summaryParagraph = new Paragraph({
       children: summaryChildren,
-      ...options.details?.summary?.paragraph,
+      ...params.options?.summary?.paragraph,
     });
 
     result.push(summaryParagraph);
@@ -53,7 +58,7 @@ export async function convertDetails(
   // Convert content (indented paragraphs and other elements)
   if (contentNode?.content) {
     for (const contentElement of contentNode.content) {
-      const element = await convertNode(contentElement, options);
+      const element = await convertNode(contentElement, params.exportOptions);
       if (Array.isArray(element)) {
         result.push(...(element as Paragraph[]));
       } else if (element) {
