@@ -484,8 +484,15 @@ function isEmptyParagraph(element: Element): boolean {
     ) {
       return false;
     }
+
+    // Check for page breaks (w:br with w:type="page")
+    // Paragraphs with page breaks are not empty, they should be processed
+    const br = findChild(run, "w:br");
+    if (br && br.attributes["w:type"] === "page") {
+      return false;
+    }
   }
 
-  // No text content or images found, paragraph is empty
+  // No text content, images, or page breaks found, paragraph is empty
   return true;
 }
