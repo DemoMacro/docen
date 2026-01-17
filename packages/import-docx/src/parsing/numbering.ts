@@ -1,4 +1,3 @@
-import type { Root, Element } from "xast";
 import { fromXml } from "xast-util-from-xml";
 import type { ListTypeMap, ListInfo } from "./types";
 import { findChild, findDeepChildren } from "../utils/xml";
