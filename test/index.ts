@@ -7,6 +7,7 @@ import { generateJSON, generateHTML } from "./html";
 import { PageBreak } from "../packages/export-docx/src/docx";
 import { unzipSync } from "fflate";
 import { fromXml } from "xast-util-from-xml";
+import { convertMillimetersToTwip } from "docx";
 
 // Get current file directory
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -29,7 +30,7 @@ if (!existsSync(jsonDir)) {
   console.log("Clearing json directory...");
   const jsonFiles = readdirSync(jsonDir);
   for (const file of jsonFiles) {
-    rmSync(join(jsonDir, file), { force: true });
+    rmSync(join(jsonDir, file), { force: true, recursive: true });
   }
 }
 
@@ -41,7 +42,7 @@ if (!existsSync(docxDir)) {
   console.log("Clearing docx directory...");
   const docxFiles = readdirSync(docxDir);
   for (const file of docxFiles) {
-    rmSync(join(docxDir, file), { force: true });
+    rmSync(join(docxDir, file), { force: true, recursive: true });
   }
 }
 
@@ -53,7 +54,7 @@ if (!existsSync(parsedJsonDir)) {
   console.log("Clearing json-parsed directory...");
   const parsedJsonFiles = readdirSync(parsedJsonDir);
   for (const file of parsedJsonFiles) {
-    rmSync(join(parsedJsonDir, file), { force: true });
+    rmSync(join(parsedJsonDir, file), { force: true, recursive: true });
   }
 }
 
@@ -65,7 +66,7 @@ if (!existsSync(docxStructureDir)) {
   console.log("Clearing docx-structure directory...");
   const structureFiles = readdirSync(docxStructureDir);
   for (const file of structureFiles) {
-    rmSync(join(docxStructureDir, file), { force: true });
+    rmSync(join(docxStructureDir, file), { force: true, recursive: true });
   }
 }
 
@@ -77,7 +78,7 @@ if (!existsSync(parsedHtmlDir)) {
   console.log("Clearing html-parsed directory...");
   const parsedHtmlFiles = readdirSync(parsedHtmlDir);
   for (const file of parsedHtmlFiles) {
-    rmSync(join(parsedHtmlDir, file), { force: true });
+    rmSync(join(parsedHtmlDir, file), { force: true, recursive: true });
   }
 }
 
@@ -89,7 +90,7 @@ if (!existsSync(parsedDocxDir)) {
   console.log("Clearing docx-parsed directory...");
   const parsedDocxFiles = readdirSync(parsedDocxDir);
   for (const file of parsedDocxFiles) {
-    rmSync(join(parsedDocxDir, file), { force: true });
+    rmSync(join(parsedDocxDir, file), { force: true, recursive: true });
   }
 }
 
@@ -318,6 +319,25 @@ void (async () => {
       const docxBuffer = await generateDOCX(originalJSON, {
         title: docxFile.replace(".docx", ""),
         outputType: "nodebuffer",
+        sections: [
+          {
+            properties: {
+              page: {
+                size: {
+                  width: convertMillimetersToTwip(210),
+                  height: convertMillimetersToTwip(297),
+                },
+                margin: {
+                  top: convertMillimetersToTwip(20),
+                  right: convertMillimetersToTwip(20),
+                  bottom: convertMillimetersToTwip(20),
+                  left: convertMillimetersToTwip(20),
+                },
+              },
+            },
+            children: [],
+          },
+        ],
         table: {
           run: {
             width: {

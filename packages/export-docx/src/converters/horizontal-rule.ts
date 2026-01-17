@@ -7,12 +7,15 @@ import type { DocxExportOptions } from "../option";
  * Uses page break by default (consistent with import-docx behavior)
  *
  * @param node - TipTap horizontalRule node
- * @param options - Export options for horizontal rule styling
+ * @param params - Conversion parameters
  * @returns DOCX Paragraph object with page break or custom styling
  */
 export function convertHorizontalRule(
   node: HorizontalRuleNode,
-  options: DocxExportOptions["horizontalRule"],
+  params: {
+    /** Export options for horizontal rule styling */
+    options?: DocxExportOptions["horizontalRule"];
+  },
 ): Paragraph {
   // Default: use page break (consistent with import-docx which detects page breaks as horizontal rules)
   const paragraphOptions: IParagraphOptions = {
@@ -22,6 +25,6 @@ export function convertHorizontalRule(
   // Allow user to override with custom styling (e.g., border instead of page break)
   return new Paragraph({
     ...paragraphOptions,
-    ...options?.paragraph,
+    ...params.options?.paragraph,
   });
 }

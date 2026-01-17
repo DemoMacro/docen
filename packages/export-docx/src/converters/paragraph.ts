@@ -2,6 +2,7 @@ import { Paragraph, IParagraphOptions } from "docx";
 import { convertText, convertHardBreak } from "./text";
 import { convertImage } from "./image";
 import { ParagraphNode, ImageNode } from "../types";
+import type { PositiveUniversalMeasure } from "docx";
 
 /**
  * Convert pixels to TWIPs (Twentieth of a Point)
@@ -22,9 +23,14 @@ export async function convertParagraph(
   node: ParagraphNode,
   params?: {
     options?: IParagraphOptions;
+    /** Image conversion parameters */
+    image?: {
+      /** Maximum available width for inline images (number = pixels, or string like "6in", "152.4mm") */
+      maxWidth?: number | PositiveUniversalMeasure;
+    };
   },
 ): Promise<Paragraph> {
-  const { options } = params || {};
+  const { options, image } = params || {};
 
   // Convert content to text runs and images
   const children = await Promise.all(
@@ -35,7 +41,9 @@ export async function convertParagraph(
         return convertHardBreak(contentNode.marks);
       } else if (contentNode.type === "image") {
         // Convert image node to ImageRun directly
-        const imageRun = await convertImage(contentNode as ImageNode);
+        const imageRun = await convertImage(contentNode as ImageNode, {
+          maxWidth: image?.maxWidth,
+        });
         return imageRun;
       }
       return [];
