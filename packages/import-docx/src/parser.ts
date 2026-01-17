@@ -242,7 +242,18 @@ async function processElements(
       }
 
       // Regular paragraph
-      result.push(await convertParagraph(element, { hyperlinks, images, options, styleMap }));
+      const paragraphResult = await convertParagraph(element, {
+        hyperlinks,
+        images,
+        options,
+        styleMap,
+      });
+      // convertParagraph may return an array (e.g., [paragraph, horizontalRule])
+      if (Array.isArray(paragraphResult)) {
+        result.push(...paragraphResult);
+      } else {
+        result.push(paragraphResult);
+      }
       i++;
       continue;
     }
@@ -328,9 +339,12 @@ async function processLists(
 
       // Convert list item
       const paragraph = await convertParagraph(el, params);
+      // convertParagraph may return an array (e.g., [paragraph, horizontalRule])
+      // For list items, we only take the first element (the paragraph itself)
+      const listItemContent = Array.isArray(paragraph) ? paragraph[0] : paragraph;
       const listItem = {
         type: "listItem",
-        content: [paragraph],
+        content: [listItemContent],
       };
       items.push(listItem);
       i++;

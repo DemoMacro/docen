@@ -133,6 +133,54 @@ export async function convertParagraph(
   const styleInfo = styleName && params.styleMap ? params.styleMap.get(styleName) : undefined;
   const runs = await extractRuns(node, { ...params, styleInfo });
 
+  // Extract alignment and paragraph styles (needed for page break handling)
+  const attrs = extractAlignment(node);
+  const paragraphStyles = extractParagraphStyles(node);
+  const mergedAttrs = {
+    ...attrs,
+    ...paragraphStyles,
+  };
+
+  // Check if paragraph contains page break (w:br w:type="page")
+  // We check the original XML directly, as page breaks can be mixed with other content
+  const hasPageBreakInParagraph = (() => {
+    // Find all w:r elements in this paragraph
+    const runElements: Element[] = [];
+    const findRuns = (n: Element) => {
+      if (n.name === "w:r") {
+        runElements.push(n);
+      } else if (n.children) {
+        for (const child of n.children) {
+          if (child.type === "element") {
+            findRuns(child as Element);
+          }
+        }
+      }
+    };
+    findRuns(node);
+
+    // Check if any run contains a page break
+    return runElements.some((run) => {
+      const br = findChild(run, "w:br");
+      return br && br.attributes["w:type"] === "page";
+    });
+  })();
+
+  if (hasPageBreakInParagraph) {
+    // Filter out page break hardBreaks
+    const filteredRuns = runs.filter((run) => run.type !== "hardBreak");
+
+    // Return paragraph with filtered runs
+    const paragraphNode: JSONContent = {
+      type: "paragraph",
+      ...(Object.keys(mergedAttrs).length > 0 && { attrs: mergedAttrs }),
+      content: filteredRuns.length > 0 ? filteredRuns : undefined,
+    };
+
+    // Return paragraph followed by horizontalRule (page break)
+    return [paragraphNode, { type: "horizontalRule" }];
+  }
+
   // Check if this is a horizontal rule (page break)
   if (runs.length === 1 && runs[0].type === "hardBreak") {
     // Check if it's a page break type
@@ -152,15 +200,6 @@ export async function convertParagraph(
   }
 
   // Regular paragraph
-  const attrs = extractAlignment(node);
-  const paragraphStyles = extractParagraphStyles(node);
-
-  // Merge alignment and paragraph styles
-  const mergedAttrs = {
-    ...attrs,
-    ...paragraphStyles,
-  };
-
   return {
     type: "paragraph",
     ...(Object.keys(mergedAttrs).length > 0 && { attrs: mergedAttrs }),

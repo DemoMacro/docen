@@ -238,7 +238,12 @@ async function convertCellContent(
   for (const child of cellNode.children) {
     if (child.type === "element" && child.name === "w:p") {
       const paragraph = await convertParagraph(child, params);
-      paragraphs.push(paragraph);
+      // convertParagraph may return an array (e.g., [paragraph, horizontalRule])
+      if (Array.isArray(paragraph)) {
+        paragraphs.push(...paragraph);
+      } else {
+        paragraphs.push(paragraph);
+      }
     }
   }
 
