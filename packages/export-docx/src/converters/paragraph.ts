@@ -61,7 +61,8 @@ export async function convertParagraph(
 
   // Handle paragraph style attributes from node.attrs
   if (node.attrs) {
-    const { indentLeft, indentRight, indentFirstLine, spacingBefore, spacingAfter } = node.attrs;
+    const { indentLeft, indentRight, indentFirstLine, spacingBefore, spacingAfter, textAlign } =
+      node.attrs;
 
     // Convert indentation to DOCX format
     if (indentLeft || indentRight || indentFirstLine) {
@@ -89,6 +90,21 @@ export async function convertParagraph(
             after: convertPixelsToTwip(convertCssLengthToPixels(spacingAfter)),
           }),
         },
+      };
+    }
+
+    // Convert text alignment to DOCX format
+    // Note: TipTap uses "justify" but DOCX uses "both" for justified text
+    if (textAlign) {
+      const alignmentMap: Record<string, "left" | "right" | "center" | "both"> = {
+        left: "left",
+        right: "right",
+        center: "center",
+        justify: "both",
+      };
+      paragraphOptions = {
+        ...paragraphOptions,
+        alignment: alignmentMap[textAlign] || "left",
       };
     }
   }
