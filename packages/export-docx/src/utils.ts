@@ -137,8 +137,8 @@ export const convertMeasureToPixels = (value: number | PositiveUniversalMeasure)
  * @returns Effective content width in pixels
  */
 export function calculateEffectiveContentWidth(options?: DocxExportOptions): number {
-  const DEFAULT_PAGE_WIDTH_TWIP = 11905; // A4 width in TWIPs (210mm)
-  const DEFAULT_MARGIN_TWIP = 1133; // 20mm margin in TWIPs
+  const DEFAULT_PAGE_WIDTH_TWIP = 11906; // A4 width in TWIPs (210mm)
+  const DEFAULT_MARGIN_TWIP = 1440; // 1 inch margin in TWIPs (docx.js default)
 
   if (!options?.sections || options.sections.length === 0) {
     return convertTwipToPixels(DEFAULT_PAGE_WIDTH_TWIP - DEFAULT_MARGIN_TWIP * 2);
