@@ -1,7 +1,7 @@
 import { Paragraph, TextRun, ExternalHyperlink } from "docx";
 import { convertTextNodes } from "./text";
 import { convertNode } from "../generator";
-import { DetailsNode, DetailsSummaryNode, DetailsContentNode } from "../types";
+import { DetailsNode, DetailsSummaryNode, DetailsContentNode } from "@docen/extensions/types";
 import type { DocxExportOptions } from "../options";
 import { calculateEffectiveContentWidth } from "../utils";
 

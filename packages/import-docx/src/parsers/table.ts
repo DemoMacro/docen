@@ -1,6 +1,7 @@
 import type { Element } from "xast";
 import type { TableCellBorder } from "@docen/extensions/types";
 import { findChild } from "../utils/xml";
+import { convertTwipToPixelNumber } from "../utils/conversion";
 
 /**
  * Parse a single border element
@@ -141,8 +142,7 @@ export function parseRowProperties(rowNode: Element): {
   const trHeight = findChild(trPr, "w:trHeight");
   if (trHeight?.attributes["w:val"]) {
     const twips = parseInt(trHeight.attributes["w:val"] as string);
-    // Convert twips to pixels (1 inch = 1440 twips = 96 pixels at 96 DPI)
-    const pixels = Math.round(twips / 15);
+    const pixels = convertTwipToPixelNumber(twips);
     props.rowHeight = `${pixels}px`;
   }
 
@@ -200,7 +200,7 @@ export function parseCellProperties(cellNode: Element): {
   const tcW = findChild(tcPr, "w:tcW");
   if (tcW?.attributes["w:w"]) {
     const twips = parseInt(tcW.attributes["w:w"] as string);
-    props.colWidth = Math.round(twips / 15);
+    props.colWidth = convertTwipToPixelNumber(twips);
   }
 
   // Check for background color

@@ -1,7 +1,8 @@
 import type { Element, Parent } from "xast";
+import { convertTwipToPixels } from "./conversion";
 
 /**
- * XML element traversal utilities
+ * XML element traversal and attribute parsing utilities
  */
 
 /**
@@ -51,4 +52,17 @@ export function findDeepChildren(element: Element, name: string): Element[] {
   }
 
   return results;
+}
+
+/**
+ * Parse XML element attribute and convert TWIPs to pixels
+ * @param attributes - Element attributes object
+ * @param attr - Attribute name to parse (with or without namespace prefix)
+ * @returns CSS pixel value string (e.g., "20px") or null if invalid
+ */
+export function parseTwipAttr(attributes: Record<string, unknown>, attr: string): string | null {
+  const value = attributes[attr];
+  if (typeof value !== "string") return null;
+  const num = parseInt(value, 10);
+  return isNaN(num) ? null : convertTwipToPixels(num);
 }
