@@ -1,7 +1,7 @@
 import { Paragraph, IParagraphOptions } from "docx";
 import { convertText, convertHardBreak } from "./text";
 import { convertImage } from "./image";
-import { ParagraphNode, ImageNode } from "../types";
+import { ParagraphNode, ImageNode } from "@docen/extensions/types";
 import { applyParagraphStyleAttributes } from "../utils";
 import type { PositiveUniversalMeasure } from "docx";
 

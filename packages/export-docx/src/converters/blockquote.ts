@@ -1,6 +1,6 @@
 import { Paragraph } from "docx";
 import { convertText, convertHardBreak } from "./text";
-import { BlockquoteNode } from "../types";
+import { BlockquoteNode } from "@docen/extensions/types";
 
 /**
  * Convert TipTap blockquote node to array of DOCX Paragraphs

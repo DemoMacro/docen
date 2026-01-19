@@ -1,5 +1,5 @@
 import { Paragraph } from "docx";
-import { TaskListNode, TaskItemNode } from "../types";
+import { TaskListNode, TaskItemNode } from "@docen/extensions/types";
 import { convertTaskItem } from "./task-item";
 
 /**

@@ -1,6 +1,6 @@
 import { JSONContent } from "@tiptap/core";
 import { TextRun, ExternalHyperlink, IRunOptions } from "docx";
-import { TextNode } from "../types";
+import { TextNode } from "@docen/extensions/types";
 import { convertColorToHex } from "../utils";
 
 /**
@@ -130,10 +130,9 @@ export function convertHardBreak(
  * Convert array of text nodes (text, hardBreak) to DOCX elements
  * Returns flattened array of TextRun or ExternalHyperlink
  */
-
-export const convertTextNodes = (
+export function convertTextNodes(
   nodes: JSONContent[] = [],
-): Array<TextRun | ExternalHyperlink | undefined> => {
+): Array<TextRun | ExternalHyperlink | undefined> {
   return nodes.flatMap((contentNode) => {
     if (contentNode.type === "text") {
       return [convertText(contentNode as TextNode)];
@@ -142,4 +141,4 @@ export const convertTextNodes = (
     }
     return [];
   });
-};
+}

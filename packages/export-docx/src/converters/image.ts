@@ -1,5 +1,5 @@
 import { ImageRun, IImageOptions, PositiveUniversalMeasure } from "docx";
-import { ImageNode } from "../types";
+import { ImageNode } from "@docen/extensions/types";
 import {
   getImageTypeFromSrc,
   getImageWidth,

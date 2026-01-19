@@ -30,17 +30,15 @@ const UNIT_TO_INCHES: Record<string, number> = {
 /**
  * Convert TWIPs to pixels
  */
-
-export const convertTwipToPixels = (twip: number): number => {
+export function convertTwipToPixels(twip: number): number {
   return Math.round((twip * DOCX_DPI) / 1440);
-};
+}
 
 /**
  * Parse CSS length value to pixels
  * Supports: px, pt, em, rem, %, and unitless values
  */
-
-export const convertCssLengthToPixels = (value: string): number => {
+export function convertCssLengthToPixels(value: string): number {
   if (!value) return 0;
 
   value = value.trim();
@@ -54,22 +52,20 @@ export const convertCssLengthToPixels = (value: string): number => {
   const factor = UNIT_TO_PIXELS[unit] ?? 1;
 
   return Math.round(num * factor);
-};
+}
 
 /**
  * Convert pixels to TWIPs (Twentieth of a Point)
  */
-
-export const convertPixelsToTwip = (px: number): number => {
+export function convertPixelsToTwip(px: number): number {
   return Math.round(px * 15);
-};
+}
 
 /**
  * Convert universal measure to inches
  * Compatible with docx.js UniversalMeasure type
  */
-
-export const convertMeasureToInches = (value: number | PositiveUniversalMeasure): number => {
+export function convertMeasureToInches(value: number | PositiveUniversalMeasure): number {
   if (typeof value === "number") {
     return value;
   }
@@ -85,21 +81,20 @@ export const convertMeasureToInches = (value: number | PositiveUniversalMeasure)
 
   const num = parseFloat(value);
   return isNaN(num) ? 6.5 : num;
-};
+}
 
 /**
  * Convert universal measure to pixels
  * Compatible with docx.js UniversalMeasure type
  */
-
-export const convertMeasureToPixels = (value: number | PositiveUniversalMeasure): number => {
+export function convertMeasureToPixels(value: number | PositiveUniversalMeasure): number {
   if (typeof value === "number") {
     return value;
   }
 
   const inches = convertMeasureToInches(value);
   return Math.round(inches * DOCX_DPI);
-};
+}
 
 /**
  * Normalize margin value to TWIPs
@@ -116,8 +111,7 @@ const normalizeMarginToTwip = (
 /**
  * Calculate effective content width from document options
  */
-
-export const calculateEffectiveContentWidth = (options?: DocxExportOptions): number => {
+export function calculateEffectiveContentWidth(options?: DocxExportOptions): number {
   const DEFAULT_PAGE_WIDTH_TWIP = 11906; // A4 width in TWIPs
   const DEFAULT_MARGIN_TWIP = 1440; // 1 inch margin in TWIPs
 
@@ -147,4 +141,4 @@ export const calculateEffectiveContentWidth = (options?: DocxExportOptions): num
 
   const effectiveWidth = pageWidth - marginLeft - marginRight;
   return Math.max(convertTwipToPixels(effectiveWidth), DOCX_DPI);
-};
+}
