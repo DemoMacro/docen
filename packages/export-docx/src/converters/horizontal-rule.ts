@@ -1,6 +1,6 @@
 import { Paragraph, PageBreak, IParagraphOptions } from "docx";
 import { HorizontalRuleNode } from "../types";
-import type { DocxExportOptions } from "../option";
+import type { DocxExportOptions } from "../options";
 
 /**
  * Convert TipTap horizontalRule node to DOCX Paragraph

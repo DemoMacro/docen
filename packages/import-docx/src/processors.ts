@@ -1,8 +1,8 @@
 import type { Element } from "xast";
 import type { JSONContent } from "@tiptap/core";
-import type { DocxImportOptions } from "./option";
-import type { StyleMap } from "./parsing/styles";
-import type { ImageInfo } from "./parsing/types";
+import type { DocxImportOptions } from "./options";
+import type { StyleMap } from "./parsers/styles";
+import type { ImageInfo } from "./parsers/types";
 import { convertTable } from "./converters/table";
 import { convertParagraph } from "./converters/paragraph";
 import {

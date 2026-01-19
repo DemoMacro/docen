@@ -1,7 +1,7 @@
 import { Table, ITableOptions } from "docx";
 import { TableNode } from "../types";
 import { convertTableRow } from "./table-row";
-import { DocxExportOptions } from "../option";
+import { DocxExportOptions } from "../options";
 
 /**
  * Apply table margins to table options

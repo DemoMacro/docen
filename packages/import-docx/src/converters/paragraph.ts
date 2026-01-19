@@ -1,8 +1,8 @@
 import type { Element } from "xast";
 import type { JSONContent } from "@tiptap/core";
-import type { DocxImportOptions } from "../option";
-import type { StyleMap, StyleInfo } from "../parsing/styles";
-import type { ImageInfo } from "../parsing/types";
+import type { DocxImportOptions } from "../options";
+import type { StyleMap, StyleInfo } from "../parsers/styles";
+import type { ImageInfo } from "../parsers/types";
 import { extractRuns, extractAlignment } from "./text";
 import { findChild } from "../utils/xml";
 

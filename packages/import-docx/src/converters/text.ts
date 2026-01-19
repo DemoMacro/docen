@@ -1,13 +1,13 @@
 import type { Element, Text } from "xast";
-import type { DocxImportOptions } from "../option";
-import type { StyleInfo } from "../parsing/styles";
-import type { ImageInfo } from "../parsing/types";
+import type { DocxImportOptions } from "../options";
+import type { StyleInfo } from "../parsers/styles";
+import type { ImageInfo } from "../parsers/types";
 import { findChild } from "../utils/xml";
 import {
   findDrawingElement,
   extractImageFromDrawing,
   extractImagesFromDrawing,
-} from "../parsing/images";
+} from "../parsers/images";
 
 /**
  * Extract text node from run

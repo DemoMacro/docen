@@ -7,7 +7,7 @@ import type {
   ImageOutlineOptions,
 } from "@docen/tiptap-extensions/types";
 import type { ImageInfo } from "./types";
-import type { DocxImportOptions } from "../option";
+import type { DocxImportOptions } from "../options";
 import type { CropRect } from "../utils/image";
 import { findChild, findDeepChild, findDeepChildren } from "../utils/xml";
 import { uint8ArrayToBase64, base64ToUint8Array } from "../utils/base64";
