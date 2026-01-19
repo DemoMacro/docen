@@ -44,15 +44,14 @@ export async function parseDOCX(
   const styleMap = parseStylesXml(files);
 
   // Convert document
-  const content = await convertDocument(
-    documentXast,
+  const content = await convertDocument(documentXast, {
     images,
     hyperlinks,
     listTypeMap,
     styleMap,
     ignoreEmptyParagraphs,
     options,
-  );
+  });
 
   return content;
 }
@@ -61,31 +60,33 @@ export async function parseDOCX(
  * Convert document XAST to TipTap JSON
  */
 async function convertDocument(
-  documentXast: Root,
-  images: Map<string, ImageInfo>,
-  hyperlinks: Map<string, string>,
-  listTypeMap: ListTypeMap,
-  styleMap: StyleMap,
-  ignoreEmptyParagraphs: boolean,
-  options?: DocxImportOptions,
+  node: Root,
+  params: {
+    images: Map<string, ImageInfo>;
+    hyperlinks: Map<string, string>;
+    listTypeMap: ListTypeMap;
+    styleMap: StyleMap;
+    ignoreEmptyParagraphs: boolean;
+    options?: DocxImportOptions;
+  },
 ): Promise<JSONContent> {
-  if (documentXast.type !== "root") {
+  if (node.type !== "root") {
     return { type: "doc", content: [] };
   }
 
-  const document = findChild(documentXast, "w:document");
+  const document = findChild(node, "w:document");
   if (!document) return { type: "doc", content: [] };
 
   const body = findChild(document, "w:body");
   if (!body) return { type: "doc", content: [] };
 
   const context: ProcessContext = {
-    hyperlinks,
-    images,
-    listTypeMap,
-    styleMap,
-    ignoreEmptyParagraphs,
-    options,
+    hyperlinks: params.hyperlinks,
+    images: params.images,
+    listTypeMap: params.listTypeMap,
+    styleMap: params.styleMap,
+    ignoreEmptyParagraphs: params.ignoreEmptyParagraphs,
+    options: params.options,
   };
 
   const content = await processElements(

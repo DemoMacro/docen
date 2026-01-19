@@ -31,7 +31,7 @@ import { convertListItem } from "./converters/list-item";
 import { convertTaskList } from "./converters/task-list";
 import { convertTaskItem } from "./converters/task-item";
 import { convertHorizontalRule } from "./converters/horizontal-rule";
-import { convertDetails } from "./converters/details";
+import { convertDetailsSummary } from "./converters/details";
 import { convertHardBreak } from "./converters/text";
 import type {
   ParagraphNode,
@@ -46,7 +46,7 @@ import type {
   OrderedListNode,
   BulletListNode,
   HorizontalRuleNode,
-  DetailsNode,
+  DetailsSummaryNode,
 } from "@docen/extensions/types";
 
 /**
@@ -90,7 +90,7 @@ export async function generateDOCX<T extends OutputType>(
   } = options;
 
   // Convert document content
-  const children = await convertDocumentContent(docJson, options);
+  const children = await convertDocument(docJson, { options });
 
   // Create table of contents if configured
   const tocElement = tableOfContents
@@ -185,9 +185,11 @@ export async function generateDOCX<T extends OutputType>(
 /**
  * Convert document content to DOCX elements
  */
-export async function convertDocumentContent(
+export async function convertDocument(
   node: JSONContent,
-  options: DocxExportOptions,
+  params: {
+    options: DocxExportOptions;
+  },
 ): Promise<FileChild[]> {
   const elements: FileChild[] = [];
 
@@ -196,10 +198,10 @@ export async function convertDocumentContent(
   }
 
   // Pre-calculate effective content width once for all images
-  const effectiveContentWidth = calculateEffectiveContentWidth(options);
+  const effectiveContentWidth = calculateEffectiveContentWidth(params.options);
 
   for (const childNode of node.content) {
-    const element = await convertNode(childNode, options, effectiveContentWidth);
+    const element = await convertNode(childNode, params.options, effectiveContentWidth);
     if (Array.isArray(element)) {
       elements.push(...element);
     } else if (element) {
@@ -302,10 +304,26 @@ export async function convertNode(
       });
 
     case "details":
-      return await convertDetails(node as DetailsNode, {
+      // Flatten details: expand summary and content directly into document flow
+      const elements: FileChild[] = [];
+      if (node.content) {
+        for (const child of node.content) {
+          const element = await convertNode(child, options, effectiveContentWidth);
+          if (Array.isArray(element)) {
+            elements.push(...element);
+          } else if (element) {
+            elements.push(element);
+          }
+        }
+      }
+      return elements;
+
+    case "detailsSummary":
+      return convertDetailsSummary(node as DetailsSummaryNode, {
         options: options.details,
-        exportOptions: options,
       });
+
+    // detailsContent is automatically expanded when details is processed
 
     default:
       // Unknown node type, return a paragraph with text
