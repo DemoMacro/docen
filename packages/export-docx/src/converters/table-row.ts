@@ -1,4 +1,4 @@
-import { TableRow } from "docx";
+import { TableRow, TableCell } from "docx";
 import { TableRowNode } from "../types";
 import { convertTableCell } from "./table-cell";
 import { convertTableHeader } from "./table-header";
@@ -36,7 +36,7 @@ export async function convertTableRow(
   );
 
   // Filter out null values
-  const validCells = cells.filter((cell) => cell !== null);
+  const validCells = cells.filter((cell): cell is TableCell => cell !== undefined);
 
   // Prepare table row options
   const tableRowOptions: {

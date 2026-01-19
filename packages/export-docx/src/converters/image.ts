@@ -69,10 +69,7 @@ export async function convertImage(
 
       // Use TextEncoder to create Uint8Array from base64 (works in both Node and browser)
       const binaryString = atob(base64Data);
-      const bytes = new Uint8Array(binaryString.length);
-      for (let i = 0; i < binaryString.length; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-      }
+      const bytes = Uint8Array.from(binaryString, (char) => char.charCodeAt(0));
       imageData = bytes;
 
       // Extract metadata from data URL

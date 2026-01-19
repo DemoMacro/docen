@@ -1,7 +1,7 @@
-import { Paragraph, HeadingLevel } from "docx";
+import { Paragraph, HeadingLevel, TextRun, ExternalHyperlink } from "docx";
 import { HeadingNode } from "../types";
-import { convertText, convertHardBreak } from "./text";
-import { convertCssLengthToPixels, convertPixelsToTwip } from "../utils";
+import { convertTextNodes, convertText } from "./text";
+import { applyParagraphStyleAttributes } from "../utils";
 
 /**
  * Convert TipTap heading node to DOCX paragraph
@@ -14,15 +14,9 @@ export function convertHeading(node: HeadingNode): Paragraph {
   const level: HeadingNode["attrs"]["level"] = node?.attrs?.level;
 
   // Convert content using shared text converter
-  const children =
-    node.content?.flatMap((contentNode) => {
-      if (contentNode.type === "text") {
-        return convertText(contentNode);
-      } else if (contentNode.type === "hardBreak") {
-        return convertHardBreak(contentNode.marks);
-      }
-      return [];
-    }) || [];
+  const children = convertTextNodes(node.content).filter(
+    (item): item is TextRun | ExternalHyperlink => item !== undefined,
+  );
 
   // Map to DOCX heading levels
   const headingMap: Record<
@@ -58,52 +52,7 @@ export function convertHeading(node: HeadingNode): Paragraph {
 
   // Handle paragraph style attributes from node.attrs
   if (node.attrs) {
-    const { indentLeft, indentRight, indentFirstLine, spacingBefore, spacingAfter, textAlign } =
-      node.attrs;
-
-    // Convert indentation to DOCX format
-    if (indentLeft || indentRight || indentFirstLine) {
-      paragraphOptions = {
-        ...paragraphOptions,
-        indent: {
-          ...(indentLeft && { left: convertPixelsToTwip(convertCssLengthToPixels(indentLeft)) }),
-          ...(indentRight && { right: convertPixelsToTwip(convertCssLengthToPixels(indentRight)) }),
-          ...(indentFirstLine && {
-            firstLine: convertPixelsToTwip(convertCssLengthToPixels(indentFirstLine)),
-          }),
-        },
-      };
-    }
-
-    // Convert spacing to DOCX format
-    if (spacingBefore || spacingAfter) {
-      paragraphOptions = {
-        ...paragraphOptions,
-        spacing: {
-          ...(spacingBefore && {
-            before: convertPixelsToTwip(convertCssLengthToPixels(spacingBefore)),
-          }),
-          ...(spacingAfter && {
-            after: convertPixelsToTwip(convertCssLengthToPixels(spacingAfter)),
-          }),
-        },
-      };
-    }
-
-    // Convert text alignment to DOCX format
-    // Note: TipTap uses "justify" but DOCX uses "both" for justified text
-    if (textAlign) {
-      const alignmentMap: Record<string, "left" | "right" | "center" | "both"> = {
-        left: "left",
-        right: "right",
-        center: "center",
-        justify: "both",
-      };
-      paragraphOptions = {
-        ...paragraphOptions,
-        alignment: alignmentMap[textAlign] || "left",
-      };
-    }
+    paragraphOptions = applyParagraphStyleAttributes(paragraphOptions, node.attrs);
   }
 
   // Create heading paragraph
