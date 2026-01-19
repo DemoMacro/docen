@@ -7,7 +7,7 @@
 
 ## Packages
 
-- **[@docen/tiptap-extensions](./packages/tiptap-extensions)** - TipTap extensions with comprehensive TypeScript types
+- **[@docen/extensions](./packages/extensions)** - TipTap extensions with comprehensive TypeScript types
 - **[@docen/export-docx](./packages/export-docx)** - Export TipTap/ProseMirror content to Microsoft Word DOCX format
 - **[@docen/import-docx](./packages/import-docx)** - Import Microsoft Word DOCX files to TipTap/ProseMirror content
 

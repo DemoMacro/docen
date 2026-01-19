@@ -1,24 +1,26 @@
-import { Heading as BaseHeading } from "@tiptap/extension-heading";
+import { Paragraph as BaseParagraph } from "../tiptap";
 
 /**
- * Custom Heading extension with DOCX-compatible style attributes
+ * Custom Paragraph extension with DOCX-compatible style attributes
  *
- * Adds the same paragraph-level formatting as Paragraph extension:
+ * Adds support for paragraph-level formatting used in DOCX round-trip conversion:
  * - Indentation: left, right, first line
  * - Spacing: before, after
  *
- * This ensures consistency across all block-level elements for DOCX round-trip.
+ * These attributes map to CSS margin properties for HTML rendering
+ * and to DOCX paragraph properties for DOCX export/import.
  *
  * Note: Attributes store CSS values as-is (no unit conversion).
  * Conversion happens in export-docx/import-docx packages.
  */
-export const Heading = BaseHeading.extend({
+export const Paragraph = BaseParagraph.extend({
   addAttributes() {
     return {
-      // Inherit all parent attributes (including level)
+      // Inherit all parent attributes
       ...this.parent?.(),
 
       // Left indentation (CSS value: e.g., "20px", "1.5rem")
+      // Maps to CSS margin-left and DOCX w:ind/@w:left
       indentLeft: {
         default: null,
         parseHTML: (element) => element.style.marginLeft || null,
@@ -27,6 +29,7 @@ export const Heading = BaseHeading.extend({
       },
 
       // Right indentation (CSS value)
+      // Maps to CSS margin-right and DOCX w:ind/@w:right
       indentRight: {
         default: null,
         parseHTML: (element) => element.style.marginRight || null,
@@ -35,6 +38,7 @@ export const Heading = BaseHeading.extend({
       },
 
       // First line indentation (CSS value)
+      // Maps to CSS text-indent and DOCX w:ind/@w:firstLine
       indentFirstLine: {
         default: null,
         parseHTML: (element) => element.style.textIndent || null,
@@ -42,7 +46,8 @@ export const Heading = BaseHeading.extend({
           attributes.indentFirstLine ? { style: `text-indent: ${attributes.indentFirstLine}` } : {},
       },
 
-      // Spacing before heading (CSS value)
+      // Spacing before paragraph (CSS value)
+      // Maps to CSS margin-top and DOCX w:spacing/@w:before
       spacingBefore: {
         default: null,
         parseHTML: (element) => element.style.marginTop || null,
@@ -50,7 +55,8 @@ export const Heading = BaseHeading.extend({
           attributes.spacingBefore ? { style: `margin-top: ${attributes.spacingBefore}` } : {},
       },
 
-      // Spacing after heading (CSS value)
+      // Spacing after paragraph (CSS value)
+      // Maps to CSS margin-bottom and DOCX w:spacing/@w:after
       spacingAfter: {
         default: null,
         parseHTML: (element) => element.style.marginBottom || null,

@@ -2,7 +2,7 @@ import { defineBuildConfig } from "unbuild";
 
 export default defineBuildConfig({
   declaration: true,
-  entries: ["src/index", "src/types"],
+  entries: ["src/index", "src/tiptap", "src/types"],
   rollup: {
     emitCJS: true,
     esbuild: {

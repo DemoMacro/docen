@@ -1,6 +1,6 @@
 {
   "name": "@docen/import-docx",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "description": "A powerful TipTap/ProseMirror extension that imports Microsoft Word DOCX files to editor content",
   "keywords": [
     "converter",
@@ -55,7 +55,7 @@
     "xast-util-from-xml": "4.0.0"
   },
   "devDependencies": {
-    "@docen/tiptap-extensions": "workspace:*",
+    "@docen/extensions": "workspace:*",
     "@tiptap/core": "3.15.3",
     "@types/xast": "2.0.4"
   },

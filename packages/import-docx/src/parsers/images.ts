@@ -1,11 +1,7 @@
 import { fromXml } from "xast-util-from-xml";
 import { imageMeta } from "image-meta";
 import type { Element } from "xast";
-import type {
-  ImageFloatingOptions,
-  ImageNode,
-  ImageOutlineOptions,
-} from "@docen/tiptap-extensions/types";
+import type { ImageFloatingOptions, ImageNode, ImageOutlineOptions } from "@docen/extensions/types";
 import type { ImageInfo } from "./types";
 import type { DocxImportOptions } from "../options";
 import type { CropRect } from "../utils/image";

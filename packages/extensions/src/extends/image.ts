@@ -1,4 +1,4 @@
-import { Image as BaseImage } from "@tiptap/extension-image";
+import { Image as BaseImage } from "../tiptap";
 
 /**
  * Custom Image extension based on @tiptap/extension-image

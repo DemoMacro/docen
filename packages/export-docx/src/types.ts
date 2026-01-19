@@ -1,2 +1,2 @@
-// Re-export all types from @docen/tiptap-extensions
-export * from "@docen/tiptap-extensions/types";
+// Re-export all types from @docen/extensions
+export * from "@docen/extensions/types";

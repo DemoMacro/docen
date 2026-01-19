@@ -1,5 +1,5 @@
 import { convertCssLengthToPixels, convertPixelsToTwip } from "./conversion";
-import type { ParagraphNode } from "@docen/tiptap-extensions/types";
+import type { ParagraphNode } from "@docen/extensions/types";
 
 /**
  * Apply paragraph style attributes to options

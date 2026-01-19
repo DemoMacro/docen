@@ -2,7 +2,7 @@ import { TableCell, IParagraphOptions } from "docx";
 import { TableCellNode } from "../types";
 import { convertParagraph } from "./paragraph";
 import { DocxExportOptions } from "../options";
-import type { TableCellBorder } from "@docen/tiptap-extensions/types";
+import type { TableCellBorder } from "@docen/extensions/types";
 
 /**
  * Convert TipTap border to DOCX border format

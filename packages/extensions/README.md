@@ -1,8 +1,8 @@
-# @docen/tiptap-extensions
+# @docen/extensions
 
-![npm version](https://img.shields.io/npm/v/@docen/tiptap-extensions)
-![npm downloads](https://img.shields.io/npm/dw/@docen/tiptap-extensions)
-![npm license](https://img.shields.io/npm/l/@docen/tiptap-extensions)
+![npm version](https://img.shields.io/npm/v/@docen/extensions)
+![npm downloads](https://img.shields.io/npm/dw/@docen/extensions)
+![npm license](https://img.shields.io/npm/l/@docen/extensions)
 
 > Curated collection of TipTap extensions with comprehensive TypeScript type definitions for Docen.
 
@@ -18,19 +18,19 @@
 
 ```bash
 # Install with npm
-$ npm install @docen/tiptap-extensions
+$ npm install @docen/extensions
 
 # Install with yarn
-$ yarn add @docen/tiptap-extensions
+$ yarn add @docen/extensions
 
 # Install with pnpm
-$ pnpm add @docen/tiptap-extensions
+$ pnpm add @docen/extensions
 ```
 
 ## Quick Start
 
 ```typescript
-import { tiptapExtensions, tiptapMarkExtensions } from "@docen/tiptap-extensions";
+import { tiptapExtensions, tiptapMarkExtensions } from "@docen/extensions";
 
 const editor = new Editor({
   extensions: [
@@ -117,7 +117,7 @@ import type {
   // Type unions
   BlockNode,
   TextContent,
-} from "@docen/tiptap-extensions";
+} from "@docen/extensions";
 ```
 
 ### Type Definitions
@@ -228,7 +228,7 @@ interface Mark {
 ### Type-Safe Content Creation
 
 ```typescript
-import type { JSONContent, ParagraphNode } from "@docen/tiptap-extensions";
+import type { JSONContent, ParagraphNode } from "@docen/extensions";
 
 const doc: JSONContent = {
   type: "doc",
@@ -255,7 +255,7 @@ function isParagraph(node: JSONContent): node is ParagraphNode {
 ### Working with Tables
 
 ```typescript
-import type { TableNode, TableCellNode } from "@docen/tiptap-extensions";
+import type { TableNode, TableCellNode } from "@docen/extensions";
 
 const table: TableNode = {
   type: "table",
@@ -283,7 +283,7 @@ const table: TableNode = {
 
 ```typescript
 import { Editor } from "@tiptap/core";
-import { tiptapExtensions } from "@docen/tiptap-extensions";
+import { tiptapExtensions } from "@docen/extensions";
 
 const editor = new Editor({
   extensions: [
@@ -299,11 +299,11 @@ This package provides two import paths for flexibility:
 
 ```typescript
 // Main entry point - extensions and types
-import { tiptapExtensions, tiptapMarkExtensions } from "@docen/tiptap-extensions";
-import type { JSONContent, ParagraphNode } from "@docen/tiptap-extensions";
+import { tiptapExtensions, tiptapMarkExtensions } from "@docen/extensions";
+import type { JSONContent, ParagraphNode } from "@docen/extensions";
 
 // Types-only path for type definitions
-import type { JSONContent } from "@docen/tiptap-extensions/types";
+import type { JSONContent } from "@docen/extensions/types";
 ```
 
 ## Contributing

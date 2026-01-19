@@ -1,6 +1,6 @@
 {
-  "name": "@docen/tiptap-extensions",
-  "version": "0.0.7",
+  "name": "@docen/extensions",
+  "version": "0.0.8",
   "description": "Collection of TipTap extensions with TypeScript type definitions for Docen",
   "keywords": [
     "docen",
@@ -36,6 +36,11 @@
       "import": "./dist/index.mjs",
       "require": "./dist/index.cjs"
     },
+    "./tiptap": {
+      "types": "./dist/tiptap.d.ts",
+      "import": "./dist/tiptap.mjs",
+      "require": "./dist/tiptap.cjs"
+    },
     "./types": {
       "types": "./dist/types.d.ts",
       "import": "./dist/types.mjs",
@@ -48,6 +53,9 @@
     "prepack": "pnpm build"
   },
   "dependencies": {
+    "@tiptap/extension-mathematics": "^3.15.3"
+  },
+  "devDependencies": {
     "@tiptap/core": "3.15.3",
     "@tiptap/extension-blockquote": "3.15.3",
     "@tiptap/extension-bold": "3.15.3",
@@ -65,7 +73,6 @@
     "@tiptap/extension-italic": "3.15.3",
     "@tiptap/extension-link": "3.15.3",
     "@tiptap/extension-list-item": "3.15.3",
-    "@tiptap/extension-mathematics": "3.15.3",
     "@tiptap/extension-mention": "3.15.3",
     "@tiptap/extension-ordered-list": "3.15.3",
     "@tiptap/extension-paragraph": "3.15.3",
@@ -80,9 +87,7 @@
     "@tiptap/extension-task-list": "3.15.3",
     "@tiptap/extension-text": "3.15.3",
     "@tiptap/extension-text-style": "3.15.3",
-    "@tiptap/extension-underline": "3.15.3"
-  },
-  "devDependencies": {
+    "@tiptap/extension-underline": "3.15.3",
     "docx": "9.5.1"
   }
 }
