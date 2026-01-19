@@ -4,6 +4,29 @@ import { convertTableRow } from "./table-row";
 import { DocxExportOptions } from "../option";
 
 /**
+ * Apply table margins to table options
+ */
+
+const applyTableMargins = <T extends ITableOptions>(options: T, node: TableNode): T => {
+  const margins = {
+    top: node.attrs?.marginTop ?? undefined,
+    bottom: node.attrs?.marginBottom ?? undefined,
+    left: node.attrs?.marginLeft ?? undefined,
+    right: node.attrs?.marginRight ?? undefined,
+  };
+
+  // Only add margins if at least one is defined
+  if (margins.top || margins.bottom || margins.left || margins.right) {
+    return {
+      ...options,
+      margins,
+    };
+  }
+
+  return options;
+};
+
+/**
  * Convert TipTap table node to DOCX Table
  *
  * @param node - TipTap table node
@@ -22,28 +45,13 @@ export async function convertTable(
   const rows = await Promise.all((node.content || []).map((row) => convertTableRow(row, params)));
 
   // Build table options
-  const tableOptions: ITableOptions = {
+  let tableOptions: ITableOptions = {
     rows,
     ...options?.run,
   };
 
-  // Add table cell margins if present
-  if (
-    node.attrs?.marginTop !== undefined ||
-    node.attrs?.marginBottom !== undefined ||
-    node.attrs?.marginLeft !== undefined ||
-    node.attrs?.marginRight !== undefined
-  ) {
-    return new Table({
-      ...tableOptions,
-      margins: {
-        top: node.attrs.marginTop ?? undefined,
-        bottom: node.attrs.marginBottom ?? undefined,
-        left: node.attrs.marginLeft ?? undefined,
-        right: node.attrs.marginRight ?? undefined,
-      },
-    });
-  }
+  // Apply table margins
+  tableOptions = applyTableMargins(tableOptions, node);
 
   return new Table(tableOptions);
 }

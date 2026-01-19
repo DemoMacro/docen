@@ -1,44 +1,7 @@
+import { JSONContent } from "@tiptap/core";
 import { TextRun, ExternalHyperlink, IRunOptions } from "docx";
 import { TextNode } from "../types";
-
-/**
- * Convert color name to hex value
- */
-function convertColorToHex(color?: string): string | undefined {
-  if (!color) return undefined;
-
-  // If already hex, return as is
-  if (color.startsWith("#")) return color;
-
-  // Map of common color names to hex values
-  const colorMap: Record<string, string> = {
-    red: "#FF0000",
-    green: "#008000",
-    blue: "#0000FF",
-    yellow: "#FFFF00",
-    orange: "#FFA500",
-    purple: "#800080",
-    pink: "#FFC0CB",
-    brown: "#A52A2A",
-    black: "#000000",
-    white: "#FFFFFF",
-    gray: "#808080",
-    grey: "#808080",
-    cyan: "#00FFFF",
-    magenta: "#FF00FF",
-    lime: "#00FF00",
-    navy: "#000080",
-    teal: "#008080",
-    maroon: "#800000",
-    olive: "#808000",
-    silver: "#C0C0C0",
-    gold: "#FFD700",
-    indigo: "#4B0082",
-    violet: "#EE82EE",
-  };
-
-  return colorMap[color.toLowerCase()] || color;
-}
+import { convertColorToHex } from "../utils";
 
 /**
  * Convert TipTap text node to DOCX TextRun or ExternalHyperlink
@@ -162,3 +125,21 @@ export function convertHardBreak(
 
   return new TextRun(options);
 }
+
+/**
+ * Convert array of text nodes (text, hardBreak) to DOCX elements
+ * Returns flattened array of TextRun or ExternalHyperlink
+ */
+
+export const convertTextNodes = (
+  nodes: JSONContent[] = [],
+): Array<TextRun | ExternalHyperlink | undefined> => {
+  return nodes.flatMap((contentNode) => {
+    if (contentNode.type === "text") {
+      return [convertText(contentNode as TextNode)];
+    } else if (contentNode.type === "hardBreak") {
+      return [convertHardBreak(contentNode.marks)];
+    }
+    return [];
+  });
+};

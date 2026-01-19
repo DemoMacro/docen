@@ -2,7 +2,7 @@ import { Paragraph, IParagraphOptions } from "docx";
 import { convertText, convertHardBreak } from "./text";
 import { convertImage } from "./image";
 import { ParagraphNode, ImageNode } from "../types";
-import { convertCssLengthToPixels, convertPixelsToTwip } from "../utils";
+import { applyParagraphStyleAttributes } from "../utils";
 import type { PositiveUniversalMeasure } from "docx";
 
 /**
@@ -26,29 +26,24 @@ export async function convertParagraph(
   const { options, image } = params || {};
 
   // Convert content to text runs and images
-  const children = await Promise.all(
-    (node.content || []).map(async (contentNode) => {
-      if (contentNode.type === "text") {
-        return convertText(contentNode);
-      } else if (contentNode.type === "hardBreak") {
-        return convertHardBreak(contentNode.marks);
-      } else if (contentNode.type === "image") {
-        // Convert image node to ImageRun directly
-        const imageRun = await convertImage(contentNode as ImageNode, {
-          maxWidth: image?.maxWidth,
-        });
-        return imageRun;
-      }
-      return [];
-    }),
-  );
+  const children = [];
 
-  // Flatten the array of arrays
-  const flattenedChildren = children.flat();
+  for (const contentNode of node.content || []) {
+    if (contentNode.type === "text") {
+      children.push(convertText(contentNode));
+    } else if (contentNode.type === "hardBreak") {
+      children.push(convertHardBreak(contentNode.marks));
+    } else if (contentNode.type === "image") {
+      const imageRun = await convertImage(contentNode as ImageNode, {
+        maxWidth: image?.maxWidth,
+      });
+      children.push(imageRun);
+    }
+  }
 
   // Determine paragraph options
   let paragraphOptions: IParagraphOptions = {
-    children: flattenedChildren,
+    children,
   };
 
   // Apply any passed-in options (e.g., numbering for lists, style references)
@@ -61,52 +56,7 @@ export async function convertParagraph(
 
   // Handle paragraph style attributes from node.attrs
   if (node.attrs) {
-    const { indentLeft, indentRight, indentFirstLine, spacingBefore, spacingAfter, textAlign } =
-      node.attrs;
-
-    // Convert indentation to DOCX format
-    if (indentLeft || indentRight || indentFirstLine) {
-      paragraphOptions = {
-        ...paragraphOptions,
-        indent: {
-          ...(indentLeft && { left: convertPixelsToTwip(convertCssLengthToPixels(indentLeft)) }),
-          ...(indentRight && { right: convertPixelsToTwip(convertCssLengthToPixels(indentRight)) }),
-          ...(indentFirstLine && {
-            firstLine: convertPixelsToTwip(convertCssLengthToPixels(indentFirstLine)),
-          }),
-        },
-      };
-    }
-
-    // Convert spacing to DOCX format
-    if (spacingBefore || spacingAfter) {
-      paragraphOptions = {
-        ...paragraphOptions,
-        spacing: {
-          ...(spacingBefore && {
-            before: convertPixelsToTwip(convertCssLengthToPixels(spacingBefore)),
-          }),
-          ...(spacingAfter && {
-            after: convertPixelsToTwip(convertCssLengthToPixels(spacingAfter)),
-          }),
-        },
-      };
-    }
-
-    // Convert text alignment to DOCX format
-    // Note: TipTap uses "justify" but DOCX uses "both" for justified text
-    if (textAlign) {
-      const alignmentMap: Record<string, "left" | "right" | "center" | "both"> = {
-        left: "left",
-        right: "right",
-        center: "center",
-        justify: "both",
-      };
-      paragraphOptions = {
-        ...paragraphOptions,
-        alignment: alignmentMap[textAlign] || "left",
-      };
-    }
+    paragraphOptions = applyParagraphStyleAttributes(paragraphOptions, node.attrs);
   }
 
   return new Paragraph(paragraphOptions);

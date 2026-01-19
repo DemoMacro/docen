@@ -1,27 +1,17 @@
 import { fromXml } from "xast-util-from-xml";
 import { unzipSync } from "fflate";
-import type { Root, Element, Text } from "xast";
+import type { Root, Element } from "xast";
 import type { JSONContent } from "@tiptap/core";
 import type { DocxImportOptions } from "./option";
 import type { StyleMap, StyleInfo } from "./parsing/styles";
 import type { ListInfo, ListTypeMap, ImageInfo } from "./parsing/types";
 import { toUint8Array, DataType } from "undio";
-import {
-  convertParagraph,
-  convertTable,
-  isListItem,
-  getListInfo,
-  isCodeBlock,
-  getCodeBlockLanguage,
-  isHorizontalRule,
-  isTaskItem,
-  convertTaskItem,
-} from "./converters";
-import { findChild, findDeepChildren } from "./utils/xml";
+import { findChild } from "./utils/xml";
 import { extractImages } from "./parsing/images";
 import { extractHyperlinks } from "./parsing/hyperlinks";
 import { parseNumberingXml } from "./parsing/numbering";
 import { parseStylesXml } from "./parsing/styles";
+import { processElements, type ProcessContext } from "./processors";
 
 // Export types for use in converters
 export type { StyleMap, StyleInfo, ListInfo, ListTypeMap, ImageInfo };
@@ -92,353 +82,22 @@ async function convertDocument(
   const body = findChild(document, "w:body");
   if (!body) return { type: "doc", content: [] };
 
-  // Process all elements in body
-  const content = await processElements(
-    body.children.filter((c) => c.type === "element") as Element[],
-    images,
+  const context: ProcessContext = {
     hyperlinks,
+    images,
     listTypeMap,
     styleMap,
     ignoreEmptyParagraphs,
     options,
+  };
+
+  const content = await processElements(
+    body.children.filter((c): c is Element => c.type === "element"),
+    context,
   );
 
   return {
     type: "doc",
     content,
   };
-}
-
-/**
- * Process all elements in document body
- */
-async function processElements(
-  elements: Element[],
-  images: Map<string, ImageInfo>,
-  hyperlinks: Map<string, string>,
-  listTypeMap: ListTypeMap,
-  styleMap: StyleMap,
-  ignoreEmptyParagraphs: boolean,
-  options?: DocxImportOptions,
-): Promise<JSONContent[]> {
-  const result: JSONContent[] = [];
-  let i = 0;
-
-  while (i < elements.length) {
-    const element = elements[i];
-
-    // Handle tables
-    if (element.name === "w:tbl") {
-      result.push(await convertTable(element, { hyperlinks, images, options, styleMap }));
-      i++;
-      // Skip empty paragraph after table (export-docx adds these for spacing)
-      if (
-        i < elements.length &&
-        elements[i].name === "w:p" &&
-        isEmptyParagraph(elements[i] as Element)
-      ) {
-        i++;
-      }
-      continue;
-    }
-
-    // Handle paragraphs
-    if (element.name === "w:p") {
-      // Skip empty paragraphs if option is enabled
-      if (ignoreEmptyParagraphs && isEmptyParagraph(element)) {
-        i++;
-        continue;
-      }
-
-      // Check for code block
-      if (isCodeBlock(element)) {
-        const codeBlockNodes = processCodeBlocks(elements, i);
-        result.push(...codeBlockNodes);
-        i += codeBlockNodes.length;
-        continue;
-      }
-
-      // Check for task items (before regular list items)
-      if (isTaskItem(element)) {
-        const taskListNodes = processTaskLists(elements, i);
-        result.push(...taskListNodes);
-        i += getTaskListConsumed(elements, i);
-        continue;
-      }
-
-      // Check for list items
-      if (isListItem(element)) {
-        const listNodes = await processLists(elements, i, {
-          hyperlinks,
-          images,
-          listTypeMap,
-          styleMap,
-          options,
-        });
-        result.push(...listNodes);
-        i += getListConsumed(elements, i);
-        continue;
-      }
-
-      // Check for horizontal rule (page break)
-      if (isHorizontalRule(element)) {
-        result.push({ type: "horizontalRule" });
-        i++;
-        continue;
-      }
-
-      // Regular paragraph
-      const paragraphResult = await convertParagraph(element, {
-        hyperlinks,
-        images,
-        options,
-        styleMap,
-      });
-      // convertParagraph may return an array (e.g., [paragraph, horizontalRule])
-      if (Array.isArray(paragraphResult)) {
-        result.push(...paragraphResult);
-      } else {
-        result.push(paragraphResult);
-      }
-      i++;
-      continue;
-    }
-
-    i++;
-  }
-
-  return result;
-}
-
-/**
- * Process consecutive code blocks
- */
-function processCodeBlocks(elements: Element[], startIndex: number): JSONContent[] {
-  const result: JSONContent[] = [];
-  let i = startIndex;
-
-  while (i < elements.length) {
-    const element = elements[i];
-    if (element.name !== "w:p" || !isCodeBlock(element)) {
-      break;
-    }
-
-    const language = getCodeBlockLanguage(element);
-    const codeBlockNode: JSONContent = {
-      type: "codeBlock",
-      ...(language && { attrs: { language } }),
-      content: extractTextFromParagraph(element),
-    };
-
-    result.push(codeBlockNode);
-    i++;
-  }
-
-  return result;
-}
-
-/**
- * Process consecutive list items and group into lists
- */
-async function processLists(
-  elements: Element[],
-  startIndex: number,
-  params: {
-    hyperlinks: Map<string, string>;
-    images: Map<string, ImageInfo>;
-    listTypeMap: Map<string, { type: "bullet" | "ordered"; start?: number }>;
-    styleMap: StyleMap;
-    options?: DocxImportOptions;
-  },
-): Promise<JSONContent[]> {
-  const { listTypeMap } = params;
-  const result: JSONContent[] = [];
-  let i = startIndex;
-
-  while (i < elements.length) {
-    const element = elements[i];
-    if (element.name !== "w:p" || !isListItem(element)) {
-      break;
-    }
-
-    const listInfo = getListInfo(element);
-    if (!listInfo) {
-      break;
-    }
-
-    // Get list type from map
-    const listTypeInfo = listTypeMap.get(listInfo.numId);
-    const listType = listTypeInfo?.type || "bullet";
-
-    // Collect consecutive items with same numId
-    const items: JSONContent[] = [];
-    while (i < elements.length) {
-      const el = elements[i];
-      if (el.name !== "w:p" || !isListItem(el)) {
-        break;
-      }
-
-      const info = getListInfo(el);
-      if (!info || info.numId !== listInfo.numId) {
-        break;
-      }
-
-      // Convert list item
-      const paragraph = await convertParagraph(el, params);
-      // convertParagraph may return an array (e.g., [paragraph, horizontalRule])
-      // For list items, we only take the first element (the paragraph itself)
-      const listItemContent = Array.isArray(paragraph) ? paragraph[0] : paragraph;
-      const listItem = {
-        type: "listItem",
-        content: [listItemContent],
-      };
-      items.push(listItem);
-      i++;
-    }
-
-    // Create list node
-    const listNode: JSONContent = {
-      type: listType === "bullet" ? "bulletList" : "orderedList",
-      content: items,
-    };
-
-    // Add start attribute for ordered lists if available
-    if (listType === "ordered") {
-      listNode.attrs = {
-        type: null,
-        ...(listTypeInfo?.start !== undefined && { start: listTypeInfo.start }),
-      };
-    }
-
-    result.push(listNode);
-  }
-
-  return result;
-}
-
-/**
- * Get number of elements consumed by a list
- */
-function getListConsumed(elements: Element[], startIndex: number): number {
-  let count = 0;
-  let i = startIndex;
-
-  while (i < elements.length) {
-    const element = elements[i];
-    if (element.name !== "w:p" || !isListItem(element)) {
-      break;
-    }
-
-    count++;
-    i++;
-  }
-
-  return count;
-}
-
-/**
- * Process consecutive task lists
- */
-function processTaskLists(elements: Element[], startIndex: number): JSONContent[] {
-  const items: JSONContent[] = [];
-  let i = startIndex;
-
-  while (i < elements.length) {
-    const element = elements[i];
-    if (element.name !== "w:p" || !isTaskItem(element)) {
-      break;
-    }
-
-    const taskItem = convertTaskItem(element);
-    items.push(taskItem);
-    i++;
-  }
-
-  // Return taskList wrapper containing all items
-  return [
-    {
-      type: "taskList",
-      content: items,
-    },
-  ];
-}
-
-/**
- * Get number of elements consumed by a task list
- */
-function getTaskListConsumed(elements: Element[], startIndex: number): number {
-  let count = 0;
-  let i = startIndex;
-
-  while (i < elements.length) {
-    const element = elements[i];
-    if (element.name !== "w:p" || !isTaskItem(element)) {
-      break;
-    }
-
-    count++;
-    i++;
-  }
-
-  return count;
-}
-
-/**
- * Extract text content from a paragraph (for code blocks)
- */
-function extractTextFromParagraph(element: Element): Array<{ type: string; text: string }> {
-  const content: Array<{ type: string; text: string }> = [];
-
-  const runs = findDeepChildren(element, "w:r");
-  for (const run of runs) {
-    const textElement = findChild(run, "w:t");
-    if (!textElement) continue;
-
-    const textNode = textElement.children.find((c): c is Text => c.type === "text");
-    if (textNode && textNode.value) {
-      content.push({
-        type: "text",
-        text: textNode.value,
-      });
-    }
-  }
-
-  return content;
-}
-
-/**
- * Check if a paragraph is empty (has no text content or images)
- */
-function isEmptyParagraph(element: Element): boolean {
-  // Check if paragraph has any text runs with content
-  const runs = findDeepChildren(element, "w:r");
-  for (const run of runs) {
-    // Check for text content
-    const textElement = findChild(run, "w:t");
-    if (textElement) {
-      const textNode = textElement.children.find((c): c is Text => c.type === "text");
-      if (textNode && textNode.value && textNode.value.trim().length > 0) {
-        return false;
-      }
-    }
-
-    // Check for images (w:drawing, mc:AlternateContent, or w:pict)
-    if (
-      findChild(run, "w:drawing") ||
-      findChild(run, "mc:AlternateContent") ||
-      findChild(run, "w:pict")
-    ) {
-      return false;
-    }
-
-    // Check for page breaks (w:br with w:type="page")
-    // Paragraphs with page breaks are not empty, they should be processed
-    const br = findChild(run, "w:br");
-    if (br && br.attributes["w:type"] === "page") {
-      return false;
-    }
-  }
-
-  // No text content, images, or page breaks found, paragraph is empty
-  return true;
 }

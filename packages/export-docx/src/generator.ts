@@ -16,6 +16,7 @@ import {
   TableOfContents,
   IParagraphStyleOptions,
   IParagraphOptions,
+  Table,
 } from "docx";
 import { type DocxExportOptions } from "./option";
 import { calculateEffectiveContentWidth } from "./utils";
@@ -115,15 +116,12 @@ export async function generateDOCX<T extends OutputType>(
   }
 
   const mergedStyles = styles
-    ? Object.assign(
-        {},
-        styles,
-        additionalParagraphStyles.length > 0
-          ? {
-              paragraphStyles: [...(styles.paragraphStyles || []), ...additionalParagraphStyles],
-            }
-          : {},
-      )
+    ? {
+        ...styles,
+        ...(additionalParagraphStyles.length > 0 && {
+          paragraphStyles: [...(styles.paragraphStyles || []), ...additionalParagraphStyles],
+        }),
+      }
     : {};
 
   // Build document sections - merge user config with generated content
@@ -169,32 +167,15 @@ export async function generateDOCX<T extends OutputType>(
     // Styling
     styles: mergedStyles,
     numbering: numberingOptions,
+
+    // Optional properties - only include if provided
+    ...(fonts && fonts.length > 0 && { fonts }),
+    ...(hyphenation && { hyphenation }),
+    ...(compatibility && { compatibility }),
+    ...(customProperties && customProperties.length > 0 && { customProperties }),
+    ...(evenAndOddHeaderAndFooters !== undefined && { evenAndOddHeaderAndFooters }),
+    ...(defaultTabStop !== undefined && { defaultTabStop }),
   };
-
-  // Add optional properties only if provided
-  if (fonts && fonts.length > 0) {
-    Object.assign(docOptions, { fonts });
-  }
-
-  if (hyphenation) {
-    Object.assign(docOptions, { hyphenation });
-  }
-
-  if (compatibility) {
-    Object.assign(docOptions, { compatibility });
-  }
-
-  if (customProperties && customProperties.length > 0) {
-    Object.assign(docOptions, { customProperties });
-  }
-
-  if (evenAndOddHeaderAndFooters !== undefined) {
-    Object.assign(docOptions, { evenAndOddHeaderAndFooters });
-  }
-
-  if (defaultTabStop !== undefined) {
-    Object.assign(docOptions, { defaultTabStop });
-  }
 
   const doc = new Document(docOptions);
 
@@ -214,8 +195,11 @@ export async function convertDocumentContent(
     return elements;
   }
 
+  // Pre-calculate effective content width once for all images
+  const effectiveContentWidth = calculateEffectiveContentWidth(options);
+
   for (const childNode of node.content) {
-    const element = await convertNode(childNode, options);
+    const element = await convertNode(childNode, options, effectiveContentWidth);
     if (Array.isArray(element)) {
       elements.push(...element);
     } else if (element) {
@@ -225,7 +209,7 @@ export async function convertDocumentContent(
       if (
         childNode.type === "table" &&
         elements.length >= 2 &&
-        elements[elements.length - 2].constructor.name === "Table"
+        elements[elements.length - 2] instanceof Table
       ) {
         elements.push(new Paragraph({}));
       }
@@ -241,13 +225,11 @@ export async function convertDocumentContent(
 export async function convertNode(
   node: JSONContent,
   options: DocxExportOptions,
+  effectiveContentWidth: number,
 ): Promise<FileChild | FileChild[] | null> {
   if (!node || !node.type) {
     return null;
   }
-
-  // Calculate effective content width once for all images
-  const effectiveContentWidth = calculateEffectiveContentWidth(options);
 
   switch (node.type) {
     case "paragraph":

@@ -1,8 +1,9 @@
-import { Paragraph } from "docx";
-import { convertText, convertHardBreak } from "./text";
+import { Paragraph, TextRun, ExternalHyperlink } from "docx";
+import { convertTextNodes } from "./text";
 import { convertNode } from "../generator";
 import { DetailsNode, DetailsSummaryNode, DetailsContentNode } from "../types";
 import type { DocxExportOptions } from "../option";
+import { calculateEffectiveContentWidth } from "../utils";
 
 /**
  * Convert TipTap details node to array of DOCX Paragraphs
@@ -38,14 +39,9 @@ export async function convertDetails(
 
   // Convert summary (summary-style paragraph with border)
   if (summaryNode?.content) {
-    const summaryChildren = summaryNode.content.flatMap((textNode) => {
-      if (textNode.type === "text") {
-        return convertText(textNode);
-      } else if (textNode.type === "hardBreak") {
-        return convertHardBreak(textNode.marks);
-      }
-      return [];
-    });
+    const summaryChildren = convertTextNodes(summaryNode.content).filter(
+      (item): item is TextRun | ExternalHyperlink => item !== undefined,
+    );
 
     const summaryParagraph = new Paragraph({
       children: summaryChildren,
@@ -57,8 +53,14 @@ export async function convertDetails(
 
   // Convert content (indented paragraphs and other elements)
   if (contentNode?.content) {
+    const effectiveContentWidth = calculateEffectiveContentWidth(params.exportOptions);
+
     for (const contentElement of contentNode.content) {
-      const element = await convertNode(contentElement, params.exportOptions);
+      const element = await convertNode(
+        contentElement,
+        params.exportOptions,
+        effectiveContentWidth,
+      );
       if (Array.isArray(element)) {
         result.push(...(element as Paragraph[]));
       } else if (element) {
