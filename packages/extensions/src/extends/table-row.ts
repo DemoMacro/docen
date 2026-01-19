@@ -1,4 +1,4 @@
-import { TableRow as BaseTableRow } from "@tiptap/extension-table-row";
+import { TableRow as BaseTableRow } from "../tiptap";
 
 /**
  * Custom TableRow extension with row height support for DOCX round-trip

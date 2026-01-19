@@ -1,5 +1,5 @@
 import type { Element } from "xast";
-import type { TableCellBorder } from "@docen/tiptap-extensions/types";
+import type { TableCellBorder } from "@docen/extensions/types";
 import { findChild } from "../utils/xml";
 
 /**

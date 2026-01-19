@@ -1,8 +1,8 @@
 {
   "devDependencies": {
     "@docen/export-docx": "workspace:*",
+    "@docen/extensions": "workspace:*",
     "@docen/import-docx": "workspace:*",
-    "@docen/tiptap-extensions": "workspace:*",
     "@napi-rs/canvas": "0.1.88",
     "@tiptap/core": "3.15.3",
     "@tiptap/html": "3.15.3",
