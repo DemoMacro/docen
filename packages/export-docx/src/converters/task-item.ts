@@ -1,5 +1,5 @@
 import { Paragraph, TextRun } from "docx";
-import { TaskItemNode } from "../types";
+import { TaskItemNode } from "@docen/extensions/types";
 import { convertText, convertHardBreak } from "./text";
 
 /**

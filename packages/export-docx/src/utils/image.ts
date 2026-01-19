@@ -32,17 +32,16 @@ const MIME_TO_DOCX_TYPE: Record<string, "jpg" | "png" | "gif" | "bmp"> = {
 /**
  * Convert image MIME type to DOCX type
  */
-export const convertToDocxImageType = (mimeType?: string): "jpg" | "png" | "gif" | "bmp" => {
+export function convertToDocxImageType(mimeType?: string): "jpg" | "png" | "gif" | "bmp" {
   if (!mimeType) return "png";
   const typeKey = mimeType.toLowerCase();
   return MIME_TO_DOCX_TYPE[typeKey] ?? "png";
-};
+}
 
 /**
  * Extract image type from URL or base64 data
  */
-
-export const getImageTypeFromSrc = (src: string): "png" | "jpeg" | "gif" | "bmp" | "tiff" => {
+export function getImageTypeFromSrc(src: string): "png" | "jpeg" | "gif" | "bmp" | "tiff" {
   if (src.startsWith("data:")) {
     const match = src.match(/data:image\/(\w+);/);
     if (match) {
@@ -57,7 +56,7 @@ export const getImageTypeFromSrc = (src: string): "png" | "jpeg" | "gif" | "bmp"
   }
 
   return "png";
-};
+}
 
 /**
  * Calculate appropriate display size for image (mimicking Word's behavior)
@@ -91,8 +90,7 @@ const calculateDisplaySize = (
 /**
  * Create floating options for full-width images
  */
-
-export const createFloatingOptions = () => {
+export function createFloatingOptions() {
   return {
     horizontalPosition: {
       relative: "page",
@@ -106,17 +104,16 @@ export const createFloatingOptions = () => {
     behindDocument: false,
     inFrontOfText: false,
   };
-};
+}
 
 /**
  * Get image width with priority: node attrs > image meta > calculated > default
  */
-
-export const getImageWidth = (
+export function getImageWidth(
   node: { attrs?: { width?: number | null } },
   imageMeta?: { width?: number; height?: number },
   maxWidth?: number | PositiveUniversalMeasure,
-): number => {
+): number {
   if (node.attrs?.width !== undefined && node.attrs?.width !== null) {
     return node.attrs.width;
   }
@@ -129,18 +126,17 @@ export const getImageWidth = (
   }
 
   return maxWidthPixels || DEFAULT_MAX_IMAGE_WIDTH_PIXELS;
-};
+}
 
 /**
  * Get image height with priority: node attrs > image meta > calculated > default
  */
-
-export const getImageHeight = (
+export function getImageHeight(
   node: { attrs?: { height?: number | null } },
   width: number,
   imageMeta?: { width?: number; height?: number },
   maxWidth?: number | PositiveUniversalMeasure,
-): number => {
+): number {
   if (node.attrs?.height !== undefined && node.attrs?.height !== null) {
     return node.attrs.height;
   }
@@ -153,15 +149,14 @@ export const getImageHeight = (
   }
 
   return Math.round(width * 0.75);
-};
+}
 
 /**
  * Fetch image data and metadata from URL
  */
-
-export const getImageDataAndMeta = async (
+export async function getImageDataAndMeta(
   url: string,
-): Promise<{ data: Uint8Array; meta: ImageMeta }> => {
+): Promise<{ data: Uint8Array; meta: ImageMeta }> {
   try {
     const blob = await ofetch(url, { responseType: "blob" });
     const data = await blob.bytes();
@@ -184,4 +179,4 @@ export const getImageDataAndMeta = async (
     console.warn(`Failed to fetch image from ${url}:`, error);
     throw error;
   }
-};
+}

@@ -31,9 +31,8 @@ const COLOR_NAME_TO_HEX: Record<string, string> = {
 /**
  * Convert color name or hex to normalized hex value
  */
-
-export const convertColorToHex = (color?: string): string | undefined => {
+export function convertColorToHex(color?: string): string | undefined {
   if (!color) return undefined;
   if (color.startsWith("#")) return color;
   return COLOR_NAME_TO_HEX[color.toLowerCase()] || color;
-};
+}

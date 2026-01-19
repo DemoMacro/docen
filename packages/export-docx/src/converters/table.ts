@@ -1,5 +1,5 @@
 import { Table, ITableOptions } from "docx";
-import { TableNode } from "../types";
+import { TableNode } from "@docen/extensions/types";
 import { convertTableRow } from "./table-row";
 import { DocxExportOptions } from "../options";
 

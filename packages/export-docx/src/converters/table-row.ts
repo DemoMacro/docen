@@ -1,5 +1,5 @@
 import { TableRow, TableCell } from "docx";
-import { TableRowNode } from "../types";
+import { TableRowNode } from "@docen/extensions/types";
 import { convertTableCell } from "./table-cell";
 import { convertTableHeader } from "./table-header";
 import { DocxExportOptions } from "../options";

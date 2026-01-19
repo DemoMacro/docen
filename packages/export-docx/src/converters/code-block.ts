@@ -1,5 +1,5 @@
 import { Paragraph, TextRun } from "docx";
-import { CodeBlockNode } from "../types";
+import { CodeBlockNode } from "@docen/extensions/types";
 
 /**
  * Convert TipTap codeBlock node to DOCX Paragraph
