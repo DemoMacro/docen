@@ -8,17 +8,9 @@ import type { CropRect } from "../utils/image";
 import { findChild, findDeepChild, findDeepChildren } from "../utils/xml";
 import { uint8ArrayToBase64, base64ToUint8Array } from "../utils/base64";
 import { cropImageIfNeeded } from "../utils/image";
+import { convertEmuStringToPixels } from "../utils/conversion";
 
 const IMAGE_REL_TYPE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image";
-
-/**
- * Convert EMU to pixels (1 inch = 914400 EMU, at 96 DPI: 1 pixel = 9525 EMU)
- */
-function emuToPixels(emuStr: string): number | undefined {
-  const emu = parseInt(emuStr, 10);
-  if (isNaN(emu)) return undefined;
-  return Math.round(emu / 9525);
-}
 
 /**
  * Extract crop rectangle from a:srcRect element
@@ -199,8 +191,8 @@ export async function extractImageFromDrawing(
     const cx = extent.attributes["cx"];
     const cy = extent.attributes["cy"];
 
-    if (typeof cx === "string") width = emuToPixels(cx);
-    if (typeof cy === "string") height = emuToPixels(cy);
+    if (typeof cx === "string") width = convertEmuStringToPixels(cx);
+    if (typeof cy === "string") height = convertEmuStringToPixels(cy);
   }
 
   // Extract rotation from a:xfrm/@rot (unit: 1/60000 degrees)
@@ -329,8 +321,8 @@ export async function extractImagesFromDrawing(
     const cx = extent.attributes["cx"];
     const cy = extent.attributes["cy"];
 
-    if (typeof cx === "string") groupWidth = emuToPixels(cx);
-    if (typeof cy === "string") groupHeight = emuToPixels(cy);
+    if (typeof cx === "string") groupWidth = convertEmuStringToPixels(cx);
+    if (typeof cy === "string") groupHeight = convertEmuStringToPixels(cy);
   }
 
   const graphic = findChild(inline, "a:graphic");

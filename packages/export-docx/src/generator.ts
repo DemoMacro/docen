@@ -47,7 +47,7 @@ import type {
   BulletListNode,
   HorizontalRuleNode,
   DetailsNode,
-} from "./types";
+} from "@docen/extensions/types";
 
 /**
  * Convert TipTap JSONContent to DOCX format
@@ -316,6 +316,33 @@ export async function convertNode(
 }
 
 /**
+ * Create a single ordered list level configuration
+ */
+const createOrderedListLevel = (start?: number): ILevelsOptions => ({
+  level: 0,
+  format: LevelFormat.DECIMAL,
+  text: "%1.",
+  alignment: AlignmentType.START,
+  start: start ?? 1,
+  style: {
+    paragraph: {
+      indent: {
+        left: convertInchesToTwip(0.5),
+        hanging: convertInchesToTwip(0.25),
+      },
+    },
+  },
+});
+
+/**
+ * Create a numbering reference configuration
+ */
+const createNumberingReference = (start?: number) => ({
+  reference: start && start !== 1 ? `ordered-list-start-${start}` : "ordered-list",
+  levels: [createOrderedListLevel(start)],
+});
+
+/**
  * Create numbering options for the document
  */
 function createNumberingOptions(docJson: JSONContent): INumberingOptions {
@@ -336,38 +363,20 @@ function createNumberingOptions(docJson: JSONContent): INumberingOptions {
   collectListStarts(docJson);
 
   // Build numbering options
-  const options: ILevelsOptions[] = [
-    // Bullet list options
-    {
-      level: 0,
-      format: LevelFormat.BULLET,
-      text: "•",
-      alignment: AlignmentType.START,
-      style: {
-        paragraph: {
-          indent: {
-            left: convertInchesToTwip(0.5),
-            hanging: convertInchesToTwip(0.25),
-          },
+  const bulletLevel: ILevelsOptions = {
+    level: 0,
+    format: LevelFormat.BULLET,
+    text: "•",
+    alignment: AlignmentType.START,
+    style: {
+      paragraph: {
+        indent: {
+          left: convertInchesToTwip(0.5),
+          hanging: convertInchesToTwip(0.25),
         },
       },
     },
-    // Default ordered list options (starts at 1)
-    {
-      level: 0,
-      format: LevelFormat.DECIMAL,
-      text: "%1.",
-      alignment: AlignmentType.START,
-      style: {
-        paragraph: {
-          indent: {
-            left: convertInchesToTwip(0.5),
-            hanging: convertInchesToTwip(0.25),
-          },
-        },
-      },
-    },
-  ];
+  };
 
   // Create the final numbering options
   const numberingOptions: Array<{
@@ -376,39 +385,17 @@ function createNumberingOptions(docJson: JSONContent): INumberingOptions {
   }> = [
     {
       reference: "bullet-list",
-      levels: [options[0]],
+      levels: [bulletLevel],
     },
-    {
-      reference: "ordered-list",
-      levels: [options[1]], // Use the decimal options
-    },
+    createNumberingReference(1),
   ];
 
   // Add options for custom start values
-  for (const start of orderedListStarts) {
+  orderedListStarts.forEach((start) => {
     if (start !== 1) {
-      numberingOptions.push({
-        reference: `ordered-list-start-${start}`,
-        levels: [
-          {
-            level: 0,
-            format: LevelFormat.DECIMAL,
-            text: "%1.",
-            alignment: AlignmentType.START,
-            start,
-            style: {
-              paragraph: {
-                indent: {
-                  left: convertInchesToTwip(0.5),
-                  hanging: convertInchesToTwip(0.25),
-                },
-              },
-            },
-          },
-        ],
-      });
+      numberingOptions.push(createNumberingReference(start));
     }
-  }
+  });
 
   return { config: numberingOptions };
 }

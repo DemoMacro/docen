@@ -1,4 +1,4 @@
-import { BulletListNode, OrderedListNode, ListItemNode } from "../types";
+import { BulletListNode, OrderedListNode, ListItemNode } from "@docen/extensions/types";
 import { Paragraph } from "docx";
 import { convertListItem } from "./list-item";
 

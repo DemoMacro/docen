@@ -4,18 +4,7 @@ import type { DocxImportOptions } from "../options";
 import type { StyleMap, StyleInfo } from "../parsers/styles";
 import type { ImageInfo } from "../parsers/types";
 import { extractRuns, extractAlignment } from "./text";
-import { findChild } from "../utils/xml";
-
-/**
- * Convert TWIPs to CSS pixels
- * 1 inch = 1440 TWIPs, 1px ≈ 15 TWIPs (at 96 DPI: 1px = 0.75pt = 15 TWIP)
- * @param twip - Value in TWIPs
- * @returns CSS value in pixels (e.g., "20px")
- */
-function convertTwipToPixels(twip: number): string {
-  const px = Math.round(twip / 15);
-  return `${px}px`;
-}
+import { findChild, parseTwipAttr } from "../utils/xml";
 
 /**
  * Extract paragraph style attributes from DOCX paragraph properties
@@ -35,24 +24,17 @@ function extractParagraphStyles(node: Element): {
   // Extract indentation from w:ind
   const ind = findChild(pPr, "w:ind");
   if (ind) {
-    const parseAttr = (attr: string) => {
-      const value = ind.attributes[attr];
-      if (typeof value !== "string") return null;
-      const num = parseInt(value, 10);
-      return isNaN(num) ? null : convertTwipToPixels(num);
-    };
-
-    const left = parseAttr("w:left");
+    const left = parseTwipAttr(ind.attributes, "w:left");
     if (left) result.indentLeft = left;
 
-    const right = parseAttr("w:right");
+    const right = parseTwipAttr(ind.attributes, "w:right");
     if (right) result.indentRight = right;
 
-    const firstLine = parseAttr("w:firstLine");
+    const firstLine = parseTwipAttr(ind.attributes, "w:firstLine");
     if (firstLine) {
       result.indentFirstLine = firstLine;
     } else {
-      const hanging = parseAttr("w:hanging");
+      const hanging = parseTwipAttr(ind.attributes, "w:hanging");
       if (hanging) result.indentFirstLine = `-${hanging}`;
     }
   }
@@ -60,17 +42,10 @@ function extractParagraphStyles(node: Element): {
   // Extract spacing from w:spacing
   const spacing = findChild(pPr, "w:spacing");
   if (spacing) {
-    const parseAttr = (attr: string) => {
-      const value = spacing.attributes[attr];
-      if (typeof value !== "string") return null;
-      const num = parseInt(value, 10);
-      return isNaN(num) ? null : convertTwipToPixels(num);
-    };
-
-    const before = parseAttr("w:before");
+    const before = parseTwipAttr(spacing.attributes, "w:before");
     if (before) result.spacingBefore = before;
 
-    const after = parseAttr("w:after");
+    const after = parseTwipAttr(spacing.attributes, "w:after");
     if (after) result.spacingAfter = after;
   }
 

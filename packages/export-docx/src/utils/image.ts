@@ -5,22 +5,37 @@ import { convertMeasureToPixels } from "./conversion";
 
 const DEFAULT_MAX_IMAGE_WIDTH_PIXELS = 6.5 * 96; // A4 effective width in pixels
 
-const MIME_TO_TYPE: Record<string, "png" | "jpeg" | "gif" | "bmp" | "tiff"> = {
+/**
+ * Unified image type mapping for both MIME types and file extensions
+ * (They are identical, so we use a single mapping table)
+ */
+const IMAGE_TYPE_MAPPING: Record<string, "png" | "jpeg" | "gif" | "bmp" | "tiff"> = {
   jpg: "jpeg",
   jpeg: "jpeg",
   png: "png",
   gif: "gif",
   bmp: "bmp",
   tiff: "tiff",
-};
+} as const;
 
-const EXT_TO_TYPE: Record<string, "png" | "jpeg" | "gif" | "bmp" | "tiff"> = {
-  jpg: "jpeg",
-  jpeg: "jpeg",
+/**
+ * Mapping from image MIME types to DOCX image types
+ */
+const MIME_TO_DOCX_TYPE: Record<string, "jpg" | "png" | "gif" | "bmp"> = {
+  jpeg: "jpg",
+  jpg: "jpg",
   png: "png",
   gif: "gif",
   bmp: "bmp",
-  tiff: "tiff",
+} as const;
+
+/**
+ * Convert image MIME type to DOCX type
+ */
+export const convertToDocxImageType = (mimeType?: string): "jpg" | "png" | "gif" | "bmp" => {
+  if (!mimeType) return "png";
+  const typeKey = mimeType.toLowerCase();
+  return MIME_TO_DOCX_TYPE[typeKey] ?? "png";
 };
 
 /**
@@ -32,12 +47,12 @@ export const getImageTypeFromSrc = (src: string): "png" | "jpeg" | "gif" | "bmp"
     const match = src.match(/data:image\/(\w+);/);
     if (match) {
       const type = match[1].toLowerCase();
-      return MIME_TO_TYPE[type] || "png";
+      return IMAGE_TYPE_MAPPING[type] || "png";
     }
   } else {
     const extension = src.split(".").pop()?.toLowerCase();
     if (extension) {
-      return EXT_TO_TYPE[extension] || "png";
+      return IMAGE_TYPE_MAPPING[extension] || "png";
     }
   }
 

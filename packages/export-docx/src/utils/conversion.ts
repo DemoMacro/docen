@@ -102,6 +102,18 @@ export const convertMeasureToPixels = (value: number | PositiveUniversalMeasure)
 };
 
 /**
+ * Normalize margin value to TWIPs
+ * Converts number (already TWIPs) or PositiveUniversalMeasure to TWIPs
+ */
+const normalizeMarginToTwip = (
+  margin: number | PositiveUniversalMeasure | undefined,
+  fallback: number,
+): number => {
+  if (!margin) return fallback;
+  return typeof margin === "number" ? margin : Math.round(convertMeasureToInches(margin) * 1440);
+};
+
+/**
  * Calculate effective content width from document options
  */
 
@@ -130,16 +142,8 @@ export const calculateEffectiveContentWidth = (options?: DocxExportOptions): num
   }
 
   const marginSettings = pageSettings.margin;
-  const marginLeft = marginSettings?.left
-    ? typeof marginSettings.left === "number"
-      ? marginSettings.left
-      : Math.round(convertMeasureToInches(marginSettings.left) * 1440)
-    : DEFAULT_MARGIN_TWIP;
-  const marginRight = marginSettings?.right
-    ? typeof marginSettings.right === "number"
-      ? marginSettings.right
-      : Math.round(convertMeasureToInches(marginSettings.right) * 1440)
-    : DEFAULT_MARGIN_TWIP;
+  const marginLeft = normalizeMarginToTwip(marginSettings?.left, DEFAULT_MARGIN_TWIP);
+  const marginRight = normalizeMarginToTwip(marginSettings?.right, DEFAULT_MARGIN_TWIP);
 
   const effectiveWidth = pageWidth - marginLeft - marginRight;
   return Math.max(convertTwipToPixels(effectiveWidth), DOCX_DPI);

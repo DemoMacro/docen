@@ -1,6 +1,12 @@
 import { ImageRun, IImageOptions, PositiveUniversalMeasure } from "docx";
 import { ImageNode } from "../types";
-import { getImageTypeFromSrc, getImageWidth, getImageHeight, getImageDataAndMeta } from "../utils";
+import {
+  getImageTypeFromSrc,
+  getImageWidth,
+  getImageHeight,
+  getImageDataAndMeta,
+  convertToDocxImageType,
+} from "../utils";
 import { imageMeta as getImageMetadata, type ImageMeta } from "image-meta";
 
 /**
@@ -21,33 +27,9 @@ export async function convertImage(
 ): Promise<ImageRun> {
   // Get image type from metadata or URL
   const getImageType = (metaType?: string): "jpg" | "png" | "gif" | "bmp" => {
-    // Try metadata type first
-    switch (metaType) {
-      case "jpeg":
-      case "jpg":
-        return "jpg";
-      case "png":
-        return "png";
-      case "gif":
-        return "gif";
-      case "bmp":
-        return "bmp";
-    }
-
-    // Fallback to URL-based type detection
-    const type = getImageTypeFromSrc(node.attrs?.src || "");
-    switch (type) {
-      case "jpeg":
-        return "jpg";
-      case "png":
-        return "png";
-      case "gif":
-        return "gif";
-      case "bmp":
-        return "bmp";
-      default:
-        return "png";
-    }
+    // Try metadata type first, then fallback to URL-based type detection
+    const typeKey = metaType || getImageTypeFromSrc(node.attrs?.src || "");
+    return convertToDocxImageType(typeKey);
   };
 
   // Get image data and metadata
