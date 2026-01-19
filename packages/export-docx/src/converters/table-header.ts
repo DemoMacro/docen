@@ -1,7 +1,7 @@
 import { TableCell, IParagraphOptions } from "docx";
 import { TableHeaderNode } from "../types";
 import { convertParagraph } from "./paragraph";
-import { DocxExportOptions } from "../option";
+import { DocxExportOptions } from "../options";
 import type { TableCellBorder } from "@docen/tiptap-extensions/types";
 
 /**

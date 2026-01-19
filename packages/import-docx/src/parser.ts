@@ -2,15 +2,15 @@ import { fromXml } from "xast-util-from-xml";
 import { unzipSync } from "fflate";
 import type { Root, Element } from "xast";
 import type { JSONContent } from "@tiptap/core";
-import type { DocxImportOptions } from "./option";
-import type { StyleMap, StyleInfo } from "./parsing/styles";
-import type { ListInfo, ListTypeMap, ImageInfo } from "./parsing/types";
+import type { DocxImportOptions } from "./options";
+import type { StyleMap, StyleInfo } from "./parsers/styles";
+import type { ListInfo, ListTypeMap, ImageInfo } from "./parsers/types";
 import { toUint8Array, DataType } from "undio";
 import { findChild } from "./utils/xml";
-import { extractImages } from "./parsing/images";
-import { extractHyperlinks } from "./parsing/hyperlinks";
-import { parseNumberingXml } from "./parsing/numbering";
-import { parseStylesXml } from "./parsing/styles";
+import { extractImages } from "./parsers/images";
+import { extractHyperlinks } from "./parsers/hyperlinks";
+import { parseNumberingXml } from "./parsers/numbering";
+import { parseStylesXml } from "./parsers/styles";
 import { processElements, type ProcessContext } from "./processors";
 
 // Export types for use in converters

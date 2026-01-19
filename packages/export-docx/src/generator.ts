@@ -18,7 +18,7 @@ import {
   IParagraphOptions,
   Table,
 } from "docx";
-import { type DocxExportOptions } from "./option";
+import { type DocxExportOptions } from "./options";
 import { calculateEffectiveContentWidth } from "./utils";
 import { convertParagraph } from "./converters/paragraph";
 import { convertHeading } from "./converters/heading";

@@ -1,5 +1,5 @@
 import type { PositiveUniversalMeasure } from "docx";
-import type { DocxExportOptions } from "../option";
+import type { DocxExportOptions } from "../options";
 
 /**
  * Constants for unit conversion

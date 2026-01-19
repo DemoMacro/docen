@@ -1,10 +1,10 @@
 import type { Element } from "xast";
 import type { JSONContent } from "@tiptap/core";
-import type { DocxImportOptions } from "../option";
-import type { StyleMap } from "../parsing/styles";
-import type { ImageInfo } from "../parsing/types";
+import type { DocxImportOptions } from "../options";
+import type { StyleMap } from "../parsers/styles";
+import type { ImageInfo } from "../parsers/types";
 import { convertParagraph } from "./paragraph";
-import { parseTableProperties, parseRowProperties, parseCellProperties } from "../parsing/table";
+import { parseTableProperties, parseRowProperties, parseCellProperties } from "../parsers/table";
 
 /**
  * Check if an element is a table
