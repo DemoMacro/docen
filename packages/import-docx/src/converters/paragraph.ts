@@ -1,8 +1,7 @@
 import type { Element } from "xast";
 import type { JSONContent } from "@tiptap/core";
-import type { DocxImportOptions } from "../options";
-import type { StyleMap, StyleInfo } from "../parsers/styles";
-import type { ImageInfo } from "../parsers/types";
+import type { ParseContext } from "../parser";
+import type { StyleInfo } from "../parsers/styles";
 import { extractRuns, extractAlignment } from "./text";
 import { findChild, parseTwipAttr } from "../utils/xml";
 
@@ -57,20 +56,16 @@ function extractParagraphStyles(node: Element): {
  */
 export async function convertParagraph(
   node: Element,
-  params: {
-    hyperlinks: Map<string, string>;
-    images: Map<string, ImageInfo>;
-    options?: DocxImportOptions;
-    styleMap?: StyleMap;
-  },
+  params: { context: ParseContext; styleInfo?: StyleInfo },
 ): Promise<JSONContent> {
+  const { context, styleInfo: paramStyleInfo } = params;
   const pPr = findChild(node, "w:pPr");
   const pStyle = pPr && findChild(pPr, "w:pStyle");
   const styleName = pStyle?.attributes["w:val"] as string | undefined;
 
   // Check if it's a heading
-  if (styleName && params.styleMap) {
-    const styleInfo = params.styleMap.get(styleName);
+  if (styleName && context.styleMap) {
+    const styleInfo = context.styleMap.get(styleName);
 
     // Check outlineLvl (reliable heading indicator)
     if (
@@ -90,8 +85,8 @@ export async function convertParagraph(
     }
   }
 
-  const styleInfo = styleName && params.styleMap ? params.styleMap.get(styleName) : undefined;
-  const runs = await extractRuns(node, { ...params, styleInfo });
+  const styleInfo = styleName && context.styleMap ? context.styleMap.get(styleName) : undefined;
+  const runs = await extractRuns(node, { context, styleInfo: paramStyleInfo || styleInfo });
 
   const attrs = {
     ...extractAlignment(node),
@@ -162,11 +157,7 @@ function checkForPageBreak(node: Element): boolean {
  */
 async function convertHeading(
   node: Element,
-  params: {
-    hyperlinks: Map<string, string>;
-    images: Map<string, ImageInfo>;
-    options?: DocxImportOptions;
-  },
+  params: { context: ParseContext },
   styleInfo: StyleInfo | undefined,
   level: 1 | 2 | 3 | 4 | 5 | 6,
 ): Promise<JSONContent> {
@@ -176,6 +167,6 @@ async function convertHeading(
       level,
       ...extractParagraphStyles(node),
     },
-    content: await extractRuns(node, { ...params, styleInfo }),
+    content: await extractRuns(node, { context: params.context, styleInfo }),
   };
 }

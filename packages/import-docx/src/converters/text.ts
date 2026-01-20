@@ -1,7 +1,6 @@
 import type { Element, Text } from "xast";
-import type { DocxImportOptions } from "../options";
+import type { ParseContext } from "../parser";
 import type { StyleInfo } from "../parsers/styles";
-import type { ImageInfo } from "../parsers/types";
 import { findChild } from "../utils/xml";
 import {
   findDrawingElement,
@@ -39,12 +38,7 @@ function extractTextFromRun(
  */
 export async function extractRuns(
   paragraph: Element,
-  params: {
-    hyperlinks: Map<string, string>;
-    images: Map<string, ImageInfo>;
-    options?: DocxImportOptions;
-    styleInfo?: StyleInfo;
-  },
+  params: { context: ParseContext; styleInfo?: StyleInfo },
 ): Promise<
   Array<{
     type: string;
@@ -52,6 +46,7 @@ export async function extractRuns(
     marks?: Array<{ type: string; attrs?: Record<string, any> }>;
   }>
 > {
+  const { context, styleInfo } = params;
   const runs: Array<{
     type: string;
     text?: string;
@@ -64,7 +59,7 @@ export async function extractRuns(
     if (child.name === "w:hyperlink") {
       const hyperlink = child as Element;
       const rId = hyperlink.attributes["r:id"] as string;
-      const href = params.hyperlinks.get(rId);
+      const href = context.hyperlinks.get(rId);
       if (!href) continue;
 
       for (const hlChild of hyperlink.children) {
@@ -74,20 +69,20 @@ export async function extractRuns(
         const drawing = findDrawingElement(run);
 
         if (drawing) {
-          const image = await extractImageFromDrawing(drawing, params);
+          const image = await extractImageFromDrawing(drawing, context);
           if (image) {
             runs.push(image);
             continue;
           }
 
-          const imageList = await extractImagesFromDrawing(drawing, params);
+          const imageList = await extractImagesFromDrawing(drawing, context);
           if (imageList.length) {
             runs.push(...imageList);
             continue;
           }
         }
 
-        const textNode = extractTextFromRun(run, params.styleInfo);
+        const textNode = extractTextFromRun(run, styleInfo);
         if (textNode) {
           textNode.marks = textNode.marks || [];
           textNode.marks.push({ type: "link", attrs: { href } });
@@ -99,7 +94,7 @@ export async function extractRuns(
       const drawing = findDrawingElement(run);
 
       if (drawing) {
-        const imageList = await extractImagesFromDrawing(drawing, params);
+        const imageList = await extractImagesFromDrawing(drawing, context);
         if (imageList.length) {
           runs.push(...imageList);
           continue;
@@ -108,11 +103,11 @@ export async function extractRuns(
 
       const br = findChild(run, "w:br");
       if (br) {
-        const marks = extractMarks(run, params.styleInfo);
+        const marks = extractMarks(run, styleInfo);
         runs.push({ type: "hardBreak", ...(marks.length && { marks }) });
       }
 
-      const textNode = extractTextFromRun(run, params.styleInfo);
+      const textNode = extractTextFromRun(run, styleInfo);
       if (textNode) runs.push(textNode);
     }
   }

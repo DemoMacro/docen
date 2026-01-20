@@ -3,7 +3,7 @@ import { imageMeta } from "image-meta";
 import type { Element } from "xast";
 import type { ImageFloatingOptions, ImageNode, ImageOutlineOptions } from "@docen/extensions/types";
 import type { ImageInfo } from "./types";
-import type { DocxImportOptions } from "../options";
+import type { ParseContext } from "../parser";
 import type { CropRect } from "../utils/image";
 import { findChild, findDeepChild, findDeepChildren } from "../utils/xml";
 import { uint8ArrayToBase64, base64ToUint8Array } from "../utils/base64";
@@ -142,18 +142,15 @@ export function extractImages(files: Record<string, Uint8Array>): Map<string, Im
  */
 export async function extractImageFromDrawing(
   drawing: Element,
-  params: {
-    images: Map<string, ImageInfo>;
-    options?: DocxImportOptions;
-  },
+  params: { context: ParseContext },
 ): Promise<ImageNode | null> {
-  const { images, options } = params;
+  const { context } = params;
 
   const blip = findDeepChild(drawing, "a:blip");
   if (!blip?.attributes["r:embed"]) return null;
 
   const rId = blip.attributes["r:embed"] as string;
-  const imgInfo = images.get(rId);
+  const imgInfo = context.images.get(rId);
   if (!imgInfo) return null;
 
   let src = imgInfo.src;
@@ -169,8 +166,8 @@ export async function extractImageFromDrawing(
 
         try {
           const croppedData = await cropImageIfNeeded(bytes, crop, {
-            canvasImport: options?.canvasImport,
-            enabled: options?.enableImageCrop !== false,
+            canvasImport: context.canvasImport,
+            enabled: context.enableImageCrop !== false,
           });
 
           const croppedBase64 = uint8ArrayToBase64(croppedData);
@@ -302,10 +299,7 @@ function createGroupedImage(
  */
 export async function extractImagesFromDrawing(
   drawing: Element,
-  params: {
-    images: Map<string, ImageInfo>;
-    options?: DocxImportOptions;
-  },
+  params: { context: ParseContext },
 ): Promise<ImageNode[]> {
   const result: ImageNode[] = [];
 
@@ -353,7 +347,7 @@ export async function extractImagesFromDrawing(
         if (!blip?.attributes["r:embed"]) continue;
 
         const rId = blip.attributes["r:embed"] as string;
-        const imgInfo = params.images.get(rId);
+        const imgInfo = params.context.images.get(rId);
         if (!imgInfo) continue;
 
         result.push(createGroupedImage(imgInfo, groupWidth, groupHeight));
@@ -380,7 +374,7 @@ export async function extractImagesFromDrawing(
           : undefined;
 
       if (groupWidth && groupHeight && rId) {
-        const imgInfo = params.images.get(rId);
+        const imgInfo = params.context.images.get(rId);
         if (imgInfo?.width && imgInfo?.height) {
           const adjusted = fitToGroup(groupWidth, groupHeight, imgInfo.width, imgInfo.height);
           image.attrs!.width = adjusted.width;
