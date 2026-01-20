@@ -4,7 +4,7 @@ import type { Root, Element } from "xast";
 import type { JSONContent } from "@tiptap/core";
 import type { DocxImportOptions } from "./options";
 import type { StyleMap } from "./parsers/styles";
-import type { ListTypeMap, ImageInfo } from "./parsers/types";
+import type { ListTypeMap, ImageInfo } from "./types";
 import { toUint8Array, DataType } from "undio";
 import { findChild, findDeepChildren } from "@docen/utils";
 import { extractImages } from "./parsers/images";
@@ -13,10 +13,9 @@ import { parseNumberingXml } from "./parsers/numbering";
 import { parseStylesXml } from "./parsers/styles";
 import { convertTable } from "./converters/table";
 import { convertParagraph } from "./converters/paragraph";
-import { convertTaskItem } from "./converters/task-list";
+import { convertTaskList, isTaskItem } from "./converters/task-list";
 import { isCodeBlock, getCodeBlockLanguage } from "./converters/code-block";
 import { isListItem, getListInfo } from "./converters/list";
-import { isTaskItem } from "./converters/task-list";
 import { isHorizontalRule } from "./converters/horizontal-rule";
 
 /**
@@ -59,6 +58,8 @@ export async function parseDOCX(
 
   // Create parsing context
   const context: ParseContext = {
+    enableImageCrop: false, // Default to false (use full image, ignore crop info)
+    ignoreEmptyParagraphs: false, // Default to false if not specified
     ...options,
     hyperlinks,
     images,
@@ -106,8 +107,14 @@ async function convertElements(
   params: { context: ParseContext },
 ): Promise<JSONContent[]> {
   const result: JSONContent[] = [];
+  const processedIndices = new Set<number>();
 
   for (let i = 0; i < elements.length; i++) {
+    // Skip already processed indices
+    if (processedIndices.has(i)) {
+      continue;
+    }
+
     const element = elements[i];
 
     // Skip empty paragraphs if option is set
@@ -119,7 +126,7 @@ async function convertElements(
       continue;
     }
 
-    const node = await convertElement(element, elements, i, params);
+    const node = await convertElement(element, elements, i, params, processedIndices);
 
     if (Array.isArray(node)) {
       result.push(...node);
@@ -139,6 +146,7 @@ async function convertElement(
   siblings: Element[],
   index: number,
   params: { context: ParseContext },
+  processedIndices: Set<number>,
 ): Promise<JSONContent | JSONContent[] | null> {
   switch (element.name) {
     case "w:tbl":
@@ -151,11 +159,16 @@ async function convertElement(
       }
 
       if (isTaskItem(element)) {
-        return await convertTaskItem(element, params);
+        return await convertTaskList(element, {
+          ...params,
+          siblings,
+          index,
+          processedIndices,
+        });
       }
 
       if (isListItem(element)) {
-        return await convertList(element, siblings, index, params);
+        return await convertList(element, siblings, index, params, processedIndices);
       }
 
       if (isHorizontalRule(element)) {
@@ -192,6 +205,7 @@ async function convertList(
   siblings: Element[],
   startIndex: number,
   params: { context: ParseContext },
+  processedIndices: Set<number>,
 ): Promise<JSONContent> {
   const listInfo = getListInfo(startElement);
   if (!listInfo) {
@@ -215,6 +229,9 @@ async function convertList(
     if (!info || info.numId !== listInfo.numId) {
       break;
     }
+
+    // Mark this index as processed
+    processedIndices.add(i);
 
     // Convert list item paragraph
     const paragraph = await convertParagraph(el, params);

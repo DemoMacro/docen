@@ -179,9 +179,9 @@ export interface TableRowNode extends JSONContent {
 export interface TableCellNode extends JSONContent {
   type: "tableCell";
   attrs?: {
-    colSpan?: number;
-    rowSpan?: number;
-    colWidth?: number[] | null;
+    colspan?: number;
+    rowspan?: number;
+    colwidth?: number[] | null;
     backgroundColor?: string | null; // "#FF0000"
     verticalAlign?: "top" | "middle" | "bottom" | null;
     borderTop?: TableCellBorder | null;
@@ -195,9 +195,9 @@ export interface TableCellNode extends JSONContent {
 export interface TableHeaderNode extends JSONContent {
   type: "tableHeader";
   attrs?: {
-    colSpan?: number;
-    rowSpan?: number;
-    colWidth?: number[] | null;
+    colspan?: number;
+    rowspan?: number;
+    colwidth?: number[] | null;
     backgroundColor?: string | null; // "#FF0000"
     verticalAlign?: "top" | "middle" | "bottom" | null;
     borderTop?: TableCellBorder | null;

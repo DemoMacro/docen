@@ -1,5 +1,5 @@
 import { fromXml } from "xast-util-from-xml";
-import type { ListTypeMap, ListInfo } from "./types";
+import type { ListTypeMap, ListInfo } from "../types";
 import { findChild, findDeepChildren } from "@docen/utils";
 
 /**

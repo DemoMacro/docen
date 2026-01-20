@@ -2,7 +2,7 @@ import { fromXml } from "xast-util-from-xml";
 import { imageMeta } from "image-meta";
 import type { Element } from "xast";
 import type { ImageFloatingOptions, ImageNode, ImageOutlineOptions } from "@docen/extensions/types";
-import type { ImageInfo } from "./types";
+import type { ImageInfo } from "../types";
 import type { ParseContext } from "../parser";
 import type { CropRect } from "../utils/image";
 import { findChild, findDeepChild, findDeepChildren } from "@docen/utils";
@@ -51,13 +51,13 @@ function extractPosition(positionEl: Element): { align?: string; offset?: number
 /**
  * Find drawing element (handles both direct and mc:AlternateContent wrapping)
  */
-export function findDrawingElement(run: Element): Element | undefined {
+export function findDrawingElement(run: Element): Element | null {
   let drawing = findChild(run, "w:drawing");
   if (drawing) return drawing;
 
   const altContent = findChild(run, "mc:AlternateContent");
   const choice = altContent && findChild(altContent, "mc:Choice");
-  return choice && findChild(choice, "w:drawing");
+  return choice ? findChild(choice, "w:drawing") : null;
 }
 
 /**
@@ -167,7 +167,7 @@ export async function extractImageFromDrawing(
         try {
           const croppedData = await cropImageIfNeeded(bytes, crop, {
             canvasImport: context.canvasImport,
-            enabled: context.enableImageCrop !== false,
+            enabled: context.enableImageCrop,
           });
 
           const croppedBase64 = uint8ArrayToBase64(croppedData);

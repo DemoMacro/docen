@@ -3,18 +3,18 @@
  * Provides helper functions for traversing and parsing XML trees (xast)
  */
 
-import type { Element } from "xast";
+import type { Element, Root } from "xast";
 
 /**
  * Find direct child element with specified name
- * @param node - Parent XML element
+ * @param node - Parent XML element or root node
  * @param name - Child element name to find (can include namespace prefix, e.g., "w:p")
  * @returns Child element if found, null otherwise
  *
  * @example
  * const paragraph = findChild(document, "w:p");
  */
-export function findChild(node: Element, name: string): Element | null {
+export function findChild(node: Root | Element, name: string): Element | null {
   if (!node.children) return null;
 
   for (const child of node.children) {
@@ -36,7 +36,7 @@ export function findChild(node: Element, name: string): Element | null {
  * @example
  * const textElement = findDeepChild(run, "w:t");
  */
-export function findDeepChild(node: Element, name: string): Element | null {
+export function findDeepChild(node: Root | Element, name: string): Element | null {
   if (!node.children) return null;
 
   for (const child of node.children) {
@@ -63,7 +63,7 @@ export function findDeepChild(node: Element, name: string): Element | null {
  * @example
  * const allTextRuns = findDeepChildren(paragraph, "w:r");
  */
-export function findDeepChildren(node: Element, name: string): Element[] {
+export function findDeepChildren(node: Root | Element, name: string): Element[] {
   const results: Element[] = [];
 
   if (!node.children) return results;

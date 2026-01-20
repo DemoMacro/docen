@@ -58,6 +58,51 @@ export async function convertTaskItem(
 }
 
 /**
+ * Convert task list (handles consecutive task items)
+ */
+export async function convertTaskList(
+  _node: Element,
+  params: {
+    context: ParseContext;
+    styleInfo?: StyleInfo;
+    siblings: Element[];
+    index: number;
+    processedIndices: Set<number>;
+  },
+): Promise<JSONContent> {
+  const { siblings, index, processedIndices } = params;
+
+  // Collect consecutive task items
+  const items: JSONContent[] = [];
+  let i = index;
+
+  while (i < siblings.length) {
+    const el = siblings[i];
+    if (el.name !== "w:p" || !isTaskItem(el)) {
+      break;
+    }
+
+    // Mark this index as processed
+    processedIndices.add(i);
+
+    // Convert task item
+    const taskItem = await convertTaskItem(el, {
+      context: params.context,
+      styleInfo: params.styleInfo,
+    });
+    items.push(taskItem);
+
+    i++;
+  }
+
+  // Build task list node
+  return {
+    type: "taskList",
+    content: items,
+  };
+}
+
+/**
  * Convert a task item paragraph, removing the checkbox symbol
  */
 async function convertTaskItemParagraph(
