@@ -1,7 +1,9 @@
 import type { Element, Text } from "xast";
 import type { JSONContent } from "@tiptap/core";
+import type { ParseContext } from "../parser";
+import type { StyleInfo } from "../parsers/styles";
 import { findChild } from "../utils/xml";
-import { extractAlignment } from "./text";
+import { extractRuns, extractAlignment } from "./text";
 
 const CHECKBOX_UNCHECKED = "☐";
 const CHECKBOX_CHECKED = "☑";
@@ -42,61 +44,40 @@ export function getTaskItemChecked(node: Element): boolean {
 /**
  * Convert a task item to TipTap JSON
  */
-export function convertTaskItem(node: Element): JSONContent {
+export async function convertTaskItem(
+  node: Element,
+  params: { context: ParseContext; styleInfo?: StyleInfo },
+): Promise<JSONContent> {
   const checked = getTaskItemChecked(node);
 
   return {
     type: "taskItem",
     attrs: { checked },
-    content: [convertTaskItemParagraph(node)],
+    content: [await convertTaskItemParagraph(node, params)],
   };
 }
 
 /**
  * Convert a task item paragraph, removing the checkbox symbol
  */
-function convertTaskItemParagraph(node: Element): JSONContent {
-  const content: JSONContent[] = [];
-  let firstTextSkipped = false;
+async function convertTaskItemParagraph(
+  node: Element,
+  params: { context: ParseContext; styleInfo?: StyleInfo },
+): Promise<JSONContent> {
+  const { context, styleInfo } = params;
+  const runs = await extractRuns(node, { context, styleInfo });
 
-  for (const child of node.children) {
-    if (child.type !== "element" || child.name !== "w:r") continue;
-
-    // Handle checkbox run
-    if (!firstTextSkipped) {
-      const textElement = findChild(child, "w:t");
-      const textNode = textElement?.children.find((c): c is Text => c.type === "text");
-
-      if (textNode?.value) {
-        const text = textNode.value;
-        if (text.startsWith(CHECKBOX_UNCHECKED) || text.startsWith(CHECKBOX_CHECKED)) {
-          firstTextSkipped = true;
-          const remainingText = text.substring(2).trimStart();
-          if (remainingText) {
-            content.push({ type: "text", text: remainingText });
-          }
-          continue;
-        }
+  // Remove checkbox text from the first text run
+  if (runs.length > 0 && runs[0].type === "text") {
+    const firstRun = runs[0] as { text: string; marks?: Array<{ type: string }> };
+    const text = firstRun.text;
+    if (text.startsWith(CHECKBOX_UNCHECKED) || text.startsWith(CHECKBOX_CHECKED)) {
+      const remainingText = text.substring(2).trimStart();
+      if (remainingText) {
+        firstRun.text = remainingText;
+      } else {
+        runs.shift(); // Remove first run if no remaining text
       }
-    }
-
-    // Convert regular run
-    const marks = extractMarksFromRun(child);
-    const textElement = findChild(child, "w:t");
-    const textNode = textElement?.children.find((c): c is Text => c.type === "text");
-
-    if (textNode?.value) {
-      const textNodeData: {
-        type: string;
-        text: string;
-        marks?: Array<{ type: string }>;
-      } = {
-        type: "text",
-        text: textNode.value,
-      };
-
-      if (marks.length) textNodeData.marks = marks;
-      content.push(textNodeData);
     }
   }
 
@@ -105,22 +86,6 @@ function convertTaskItemParagraph(node: Element): JSONContent {
   return {
     type: "paragraph",
     ...(attrs && { attrs }),
-    content: content.length ? content : undefined,
+    content: runs.length ? runs : undefined,
   };
-}
-
-/**
- * Extract marks from a run (bold, italic, etc.)
- */
-function extractMarksFromRun(run: Element): Array<{ type: string }> {
-  const marks: Array<{ type: string }> = [];
-  const rPr = findChild(run, "w:rPr");
-  if (!rPr) return marks;
-
-  if (findChild(rPr, "w:b")) marks.push({ type: "bold" });
-  if (findChild(rPr, "w:i")) marks.push({ type: "italic" });
-  if (findChild(rPr, "w:u")) marks.push({ type: "underline" });
-  if (findChild(rPr, "w:strike")) marks.push({ type: "strike" });
-
-  return marks;
 }

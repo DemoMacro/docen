@@ -1,8 +1,6 @@
 import type { Element } from "xast";
 import type { JSONContent } from "@tiptap/core";
-import type { DocxImportOptions } from "../options";
-import type { StyleMap } from "../parsers/styles";
-import type { ImageInfo } from "../parsers/types";
+import type { ParseContext } from "../parser";
 import { convertParagraph } from "./paragraph";
 import { parseTableProperties, parseRowProperties, parseCellProperties } from "../parsers/table";
 
@@ -18,12 +16,7 @@ export function isTable(node: Element): boolean {
  */
 export async function convertTable(
   node: Element,
-  params: {
-    hyperlinks: Map<string, string>;
-    images: Map<string, ImageInfo>;
-    options?: DocxImportOptions;
-    styleMap?: StyleMap;
-  },
+  params: { context: ParseContext },
 ): Promise<JSONContent> {
   // Collect all rows first to enable rowspan calculation
   const rows: Element[] = [];
@@ -39,7 +32,7 @@ export async function convertTable(
   const content = await Promise.all(
     rows.map((row, rowIndex) =>
       convertTableRow(row, {
-        ...params,
+        context: params.context,
         activeRowspans,
         rows,
         rowIndex,
@@ -63,9 +56,7 @@ export async function convertTable(
 async function convertTableRow(
   rowNode: Element,
   params: {
-    hyperlinks: Map<string, string>;
-    images: Map<string, ImageInfo>;
-    options?: DocxImportOptions;
+    context: ParseContext;
     activeRowspans: Map<number, number>;
     rows: Element[];
     rowIndex: number;
@@ -90,7 +81,8 @@ async function convertTableRow(
 
     if (cellProps?.rowSpan === 1) {
       const actualRowSpan = calculateRowspan({
-        ...params,
+        rows: params.rows,
+        rowIndex: params.rowIndex,
         colIndex,
       });
       if (actualRowSpan > 1) {
@@ -166,11 +158,7 @@ function calculateRowspan(params: { rows: Element[]; rowIndex: number; colIndex:
  */
 async function convertCellContent(
   cellNode: Element,
-  params: {
-    hyperlinks: Map<string, string>;
-    images: Map<string, ImageInfo>;
-    options?: DocxImportOptions;
-  },
+  params: { context: ParseContext },
 ): Promise<JSONContent[]> {
   const paragraphs: JSONContent[] = [];
 
