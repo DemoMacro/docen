@@ -1,7 +1,7 @@
 import type { Element } from "xast";
 import type { TableCellBorder } from "@docen/extensions/types";
 import { findChild } from "@docen/utils";
-import { convertTwipToPixelNumber } from "@docen/utils";
+import { convertTwipToPixels } from "@docen/utils";
 
 /**
  * Parse a single border element
@@ -142,7 +142,7 @@ export function parseRowProperties(rowNode: Element): {
   const trHeight = findChild(trPr, "w:trHeight");
   if (trHeight?.attributes["w:val"]) {
     const twips = parseInt(trHeight.attributes["w:val"] as string);
-    const pixels = convertTwipToPixelNumber(twips);
+    const pixels = convertTwipToPixels(twips);
     props.rowHeight = `${pixels}px`;
   }
 
@@ -200,7 +200,7 @@ export function parseCellProperties(cellNode: Element): {
   const tcW = findChild(tcPr, "w:tcW");
   if (tcW?.attributes["w:w"]) {
     const twips = parseInt(tcW.attributes["w:w"] as string);
-    props.colWidth = convertTwipToPixelNumber(twips);
+    props.colWidth = convertTwipToPixels(twips);
   }
 
   // Check for background color

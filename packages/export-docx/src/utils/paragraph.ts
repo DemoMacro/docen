@@ -1,4 +1,4 @@
-import { convertCssLengthToPixels, convertPixelsToTwip } from "./conversion";
+import { convertCssLengthToPixels, convertPixelsToTwip } from "@docen/utils";
 import type { ParagraphNode } from "@docen/extensions/types";
 
 /**
