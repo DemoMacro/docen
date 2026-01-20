@@ -69,13 +69,13 @@ export async function extractRuns(
         const drawing = findDrawingElement(run);
 
         if (drawing) {
-          const image = await extractImageFromDrawing(drawing, context);
+          const image = await extractImageFromDrawing(drawing, { context });
           if (image) {
             runs.push(image);
             continue;
           }
 
-          const imageList = await extractImagesFromDrawing(drawing, context);
+          const imageList = await extractImagesFromDrawing(drawing, { context });
           if (imageList.length) {
             runs.push(...imageList);
             continue;
@@ -94,7 +94,7 @@ export async function extractRuns(
       const drawing = findDrawingElement(run);
 
       if (drawing) {
-        const imageList = await extractImagesFromDrawing(drawing, context);
+        const imageList = await extractImagesFromDrawing(drawing, { context });
         if (imageList.length) {
           runs.push(...imageList);
           continue;
