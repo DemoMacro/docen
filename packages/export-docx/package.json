@@ -1,6 +1,6 @@
 {
   "name": "@docen/export-docx",
-  "version": "0.0.8",
+  "version": "0.0.9",
   "description": "A powerful TipTap/ProseMirror extension that converts editor content to Microsoft Word DOCX format",
   "keywords": [
     "converter",
