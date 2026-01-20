@@ -1,5 +1,5 @@
 import type { Element, Text } from "xast";
-import { findChild } from "../utils/xml";
+import { findChild } from "@docen/utils";
 
 /**
  * Check if a paragraph is a horizontal rule (page break)

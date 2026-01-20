@@ -2,7 +2,7 @@ import type { Element, Text } from "xast";
 import type { JSONContent } from "@tiptap/core";
 import type { ParseContext } from "../parser";
 import type { StyleInfo } from "../parsers/styles";
-import { findChild } from "../utils/xml";
+import { findChild } from "@docen/utils";
 import { extractRuns, extractAlignment } from "./text";
 
 const CHECKBOX_UNCHECKED = "☐";

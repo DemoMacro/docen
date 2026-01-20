@@ -1,5 +1,5 @@
 import { fromXml } from "xast-util-from-xml";
-import { findChild, findDeepChildren } from "../utils/xml";
+import { findChild, findDeepChildren } from "@docen/utils";
 
 /**
  * Character format information from a style definition

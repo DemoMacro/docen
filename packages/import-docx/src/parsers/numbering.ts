@@ -1,6 +1,6 @@
 import { fromXml } from "xast-util-from-xml";
 import type { ListTypeMap, ListInfo } from "./types";
-import { findChild, findDeepChildren } from "../utils/xml";
+import { findChild, findDeepChildren } from "@docen/utils";
 
 /**
  * Parse numbering.xml to build list type map
