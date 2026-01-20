@@ -1,7 +1,7 @@
 import type { PositiveUniversalMeasure } from "docx";
 import { imageMeta as getImageMetadata, type ImageMeta } from "image-meta";
 import { ofetch } from "ofetch";
-import { convertMeasureToPixels } from "./conversion";
+import { convertMeasureToPixels } from "@docen/utils";
 
 const DEFAULT_MAX_IMAGE_WIDTH_PIXELS = 6.5 * 96; // A4 effective width in pixels
 
