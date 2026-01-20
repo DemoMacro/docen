@@ -150,12 +150,12 @@ export function parseRowProperties(rowNode: Element): {
 }
 
 /**
- * Get cell properties (colSpan, rowSpan, colWidth, backgroundColor, verticalAlign, borders)
+ * Get cell properties (colspan, rowspan, colwidth, backgroundColor, verticalAlign, borders)
  */
 export function parseCellProperties(cellNode: Element): {
-  colSpan: number;
-  rowSpan: number;
-  colWidth: number | null;
+  colspan: number;
+  rowspan: number;
+  colwidth: number[] | null;
   backgroundColor?: string;
   verticalAlign?: string;
   borderTop?: TableCellBorder;
@@ -164,9 +164,9 @@ export function parseCellProperties(cellNode: Element): {
   borderRight?: TableCellBorder;
 } | null {
   const props: {
-    colSpan: number;
-    rowSpan: number;
-    colWidth: number | null;
+    colspan: number;
+    rowspan: number;
+    colwidth: number[] | null;
     backgroundColor?: string;
     verticalAlign?: string;
     borderTop?: TableCellBorder;
@@ -174,9 +174,9 @@ export function parseCellProperties(cellNode: Element): {
     borderLeft?: TableCellBorder;
     borderRight?: TableCellBorder;
   } = {
-    colSpan: 1,
-    rowSpan: 1,
-    colWidth: null as number | null,
+    colspan: 1,
+    rowspan: 1,
+    colwidth: null as number[] | null,
   };
 
   const tcPr = findChild(cellNode, "w:tcPr");
@@ -184,23 +184,25 @@ export function parseCellProperties(cellNode: Element): {
     return props;
   }
 
-  // Check for gridSpan (colSpan)
+  // Check for gridSpan (colspan)
   const gridSpan = findChild(tcPr, "w:gridSpan");
   if (gridSpan?.attributes["w:val"]) {
-    props.colSpan = parseInt(gridSpan.attributes["w:val"] as string);
+    props.colspan = parseInt(gridSpan.attributes["w:val"] as string);
   }
 
-  // Check for vMerge (rowSpan)
+  // Check for vMerge (rowspan)
   const vMerge = findChild(tcPr, "w:vMerge");
   if (vMerge?.attributes["w:val"] === "continue") {
-    props.rowSpan = 0;
+    props.rowspan = 0;
   }
 
   // Check for column width
   const tcW = findChild(tcPr, "w:tcW");
   if (tcW?.attributes["w:w"]) {
     const twips = parseInt(tcW.attributes["w:w"] as string);
-    props.colWidth = convertTwipToPixels(twips);
+    const width = convertTwipToPixels(twips);
+    // DOCX stores single cell width → convert to array format
+    props.colwidth = [width];
   }
 
   // Check for background color

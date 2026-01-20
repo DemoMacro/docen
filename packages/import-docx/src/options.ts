@@ -24,10 +24,10 @@ export interface DocxImportOptions {
 
   /**
    * Enable or disable image cropping during import
-   * When true (default), images with crop information in DOCX will be cropped
-   * When false, crop information is ignored and full image is used
+   * When true, images with crop information in DOCX will be cropped
+   * When false (default), crop information is ignored and full image is used
    *
-   * @default true
+   * @default false
    */
   enableImageCrop?: boolean;
 }

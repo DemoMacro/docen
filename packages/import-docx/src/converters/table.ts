@@ -79,22 +79,22 @@ async function convertTableRow(
 
     let cellProps = parseCellProperties(child);
 
-    if (cellProps?.rowSpan === 1) {
+    if (cellProps?.rowspan === 1) {
       const actualRowSpan = calculateRowspan({
         rows: params.rows,
         rowIndex: params.rowIndex,
         colIndex,
       });
       if (actualRowSpan > 1) {
-        cellProps = { ...cellProps, rowSpan: actualRowSpan };
+        cellProps = { ...cellProps, rowspan: actualRowSpan };
       }
     }
 
-    if (cellProps?.rowSpan && cellProps.rowSpan > 1) {
-      params.activeRowspans.set(colIndex, cellProps.rowSpan - 1);
+    if (cellProps?.rowspan && cellProps.rowspan > 1) {
+      params.activeRowspans.set(colIndex, cellProps.rowspan - 1);
     }
 
-    if (cellProps?.rowSpan === 0) {
+    if (cellProps?.rowspan === 0) {
       colIndex++;
       continue;
     }
@@ -107,7 +107,7 @@ async function convertTableRow(
       content: paragraphs,
     });
 
-    colIndex += cellProps?.colSpan || 1;
+    colIndex += cellProps?.colspan || 1;
   }
 
   return {
@@ -132,10 +132,10 @@ function calculateRowspan(params: { rows: Element[]; rowIndex: number; colIndex:
       if (child.type !== "element" || child.name !== "w:tc") continue;
 
       const cellProps = parseCellProperties(child);
-      const colSpan = cellProps?.colSpan || 1;
+      const colSpan = cellProps?.colspan || 1;
 
       if (colIndex >= 0 && colIndex < colSpan) {
-        if (cellProps?.rowSpan === 0) {
+        if (cellProps?.rowspan === 0) {
           rowspan++;
           cellFound = true;
         } else {

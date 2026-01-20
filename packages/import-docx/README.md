@@ -89,10 +89,10 @@ interface DocxImportOptions {
 
   /**
    * Enable or disable image cropping during import
-   * When true (default), images with crop information in DOCX will be cropped
-   * When false, crop information is ignored and full image is used
+   * When true, images with crop information in DOCX will be cropped
+   * When false (default), crop information is ignored and full image is used
    *
-   * @default true
+   * @default false
    */
   enableImageCrop?: boolean;
 }
@@ -220,7 +220,7 @@ async function importDocx(file: File) {
 
 ### Node.js Environment with Image Cropping
 
-In Node.js environment, you need to provide `@napi-rs/canvas` for image cropping:
+To enable image cropping in Node.js environment, you need to provide `@napi-rs/canvas`:
 
 ```typescript
 import { parseDOCX } from "@docen/import-docx";
@@ -231,13 +231,15 @@ const buffer = readFileSync("document.docx");
 
 const content = await parseDOCX(buffer, {
   canvasImport: () => import("@napi-rs/canvas"),
-  enableImageCrop: true, // default is true
+  enableImageCrop: true, // Enable cropping (default is false)
 });
 ```
 
+**Note:** By default, image cropping is disabled. Images are imported in full size, ignoring crop information in DOCX.
+
 ### Disable Image Cropping
 
-If you want to ignore crop information in DOCX and use full images:
+If you want to explicitly ignore crop information in DOCX and use full images (this is the default behavior):
 
 ```typescript
 const content = await parseDOCX(buffer, {
@@ -268,10 +270,11 @@ All colors are imported as hex values (e.g., "#FF0000", "#008000"). Color names 
 
 - Only embedded images are supported (external image links are not fetched)
 - Image dimensions and title are extracted from DOCX metadata
-- **Image Cropping in Node.js**: Requires `@napi-rs/canvas` as an optional dependency
+- **Image Cropping**: By default, images are imported in full size (crop information is ignored)
+  - To enable cropping, set `enableImageCrop: true` in options
   - In browser environments, cropping works natively with Canvas API
-  - In Node.js, you must provide `canvasImport` option with dynamic import of `@napi-rs/canvas`
-  - If `@napi-rs/canvas` is not available, images will be imported without cropping (graceful degradation)
+  - In Node.js, you must also provide `canvasImport` option with dynamic import of `@napi-rs/canvas`
+  - If `@napi-rs/canvas` is not available in Node.js, images will be imported without cropping (graceful degradation)
 - Some DOCX image features (like advanced positioning or text wrapping) have limited support
 
 ### Table Cell Types

@@ -76,22 +76,22 @@ export async function convertTableCell(
   };
 
   // Add column span if present
-  if (node.attrs?.colSpan && node.attrs.colSpan > 1) {
-    cellOptions.columnSpan = node.attrs.colSpan;
+  if (node.attrs?.colspan && node.attrs.colspan > 1) {
+    cellOptions.columnSpan = node.attrs.colspan;
   }
 
   // Add row span if present
-  if (node.attrs?.rowSpan && node.attrs.rowSpan > 1) {
-    cellOptions.rowSpan = node.attrs.rowSpan;
+  if (node.attrs?.rowspan && node.attrs.rowspan > 1) {
+    cellOptions.rowSpan = node.attrs.rowspan;
   }
 
   // Add column width if present
-  // colWidth can be a number (pixels) or an array of column widths
-  if (node.attrs?.colWidth !== null && node.attrs?.colWidth !== undefined) {
-    // Handle both number and array formats
-    const widthInPixels = Array.isArray(node.attrs.colWidth)
-      ? node.attrs.colWidth[0]
-      : node.attrs.colWidth;
+  // colwidth is an array of column widths (TipTap standard)
+  if (node.attrs?.colwidth !== null && node.attrs?.colwidth !== undefined) {
+    // Handle array format - take first width for the cell
+    const widthInPixels = Array.isArray(node.attrs.colwidth)
+      ? node.attrs.colwidth[0]
+      : node.attrs.colwidth;
 
     if (widthInPixels && widthInPixels > 0) {
       // Convert pixels to twips (1 inch = 96 pixels = 1440 twips at 96 DPI)
