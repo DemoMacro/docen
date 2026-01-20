@@ -6,7 +6,7 @@ import type { DocxImportOptions } from "./options";
 import type { StyleMap } from "./parsers/styles";
 import type { ListTypeMap, ImageInfo } from "./parsers/types";
 import { toUint8Array, DataType } from "undio";
-import { findChild, findDeepChildren } from "./utils/xml";
+import { findChild, findDeepChildren } from "@docen/utils";
 import { extractImages } from "./parsers/images";
 import { extractHyperlinks } from "./parsers/hyperlinks";
 import { parseNumberingXml } from "./parsers/numbering";

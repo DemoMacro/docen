@@ -1,22 +1,15 @@
 {
-  "name": "@docen/export-docx",
+  "name": "@docen/utils",
   "version": "0.0.8",
-  "description": "A powerful TipTap/ProseMirror extension that converts editor content to Microsoft Word DOCX format",
+  "description": "Shared utility functions for DOCX processing, including unit conversions, color transformations, and XML helpers",
   "keywords": [
-    "converter",
+    "color",
+    "conversion",
     "docen",
-    "document",
     "docx",
-    "editor",
-    "export",
-    "microsoft-word",
-    "office",
-    "prosemirror",
-    "rich-text",
-    "tiptap",
-    "typescript",
-    "word",
-    "wysiwyg"
+    "unit-conversion",
+    "utilities",
+    "xml"
   ],
   "homepage": "https://github.com/DemoMacro/docen#readme",
   "bugs": {
@@ -41,11 +34,6 @@
     ".": {
       "import": "./dist/index.mjs",
       "require": "./dist/index.cjs"
-    },
-    "./docx": {
-      "types": "./dist/docx.d.ts",
-      "import": "./dist/docx.mjs",
-      "require": "./dist/docx.cjs"
     }
   },
   "scripts": {
@@ -53,14 +41,7 @@
     "build": "unbuild",
     "prepack": "pnpm build"
   },
-  "dependencies": {
-    "docx": "9.5.1",
-    "image-meta": "0.2.2",
-    "ofetch": "1.5.1"
-  },
   "devDependencies": {
-    "@docen/extensions": "workspace:*",
-    "@docen/utils": "workspace:*",
-    "@tiptap/core": "3.15.3"
+    "@types/xast": "2.0.4"
   }
 }

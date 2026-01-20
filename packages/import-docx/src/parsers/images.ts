@@ -5,10 +5,10 @@ import type { ImageFloatingOptions, ImageNode, ImageOutlineOptions } from "@doce
 import type { ImageInfo } from "./types";
 import type { ParseContext } from "../parser";
 import type { CropRect } from "../utils/image";
-import { findChild, findDeepChild, findDeepChildren } from "../utils/xml";
+import { findChild, findDeepChild, findDeepChildren } from "@docen/utils";
 import { uint8ArrayToBase64, base64ToUint8Array } from "../utils/base64";
 import { cropImageIfNeeded } from "../utils/image";
-import { convertEmuStringToPixels } from "../utils/conversion";
+import { convertEmuStringToPixels } from "@docen/utils";
 
 const IMAGE_REL_TYPE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image";
 

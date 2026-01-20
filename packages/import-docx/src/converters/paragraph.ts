@@ -3,7 +3,7 @@ import type { JSONContent } from "@tiptap/core";
 import type { ParseContext } from "../parser";
 import type { StyleInfo } from "../parsers/styles";
 import { extractRuns, extractAlignment } from "./text";
-import { findChild, parseTwipAttr } from "../utils/xml";
+import { findChild, parseTwipAttr } from "@docen/utils";
 
 /**
  * Extract paragraph style attributes from DOCX paragraph properties

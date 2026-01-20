@@ -1,7 +1,7 @@
 import type { Element } from "xast";
 import type { TableCellBorder } from "@docen/extensions/types";
-import { findChild } from "../utils/xml";
-import { convertTwipToPixelNumber } from "../utils/conversion";
+import { findChild } from "@docen/utils";
+import { convertTwipToPixelNumber } from "@docen/utils";
 
 /**
  * Parse a single border element
