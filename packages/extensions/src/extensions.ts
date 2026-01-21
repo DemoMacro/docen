@@ -97,7 +97,7 @@ export const tiptapMarkExtensions: Extensions = [
 ];
 
 // Complete extension set
-export const tiptapExtensions = [...tiptapNodeExtensions, ...tiptapMarkExtensions];
+export const tiptapExtensions: Extensions = [...tiptapNodeExtensions, ...tiptapMarkExtensions];
 
 // Export all individual extensions for direct imports
 export * from "./tiptap";
