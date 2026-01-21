@@ -6,6 +6,7 @@ import {
   getImageHeight,
   getImageDataAndMeta,
   convertToDocxImageType,
+  type DocxImageExportHandler,
 } from "../utils";
 import { imageMeta as getImageMetadata, type ImageMeta } from "image-meta";
 
@@ -23,6 +24,8 @@ export async function convertImage(
     maxWidth?: number | PositiveUniversalMeasure;
     /** Additional image options to apply */
     options?: Partial<IImageOptions>;
+    /** Custom image handler for fetching image data */
+    handler?: DocxImageExportHandler;
   },
 ): Promise<ImageRun> {
   // Get image type from metadata or URL
@@ -37,7 +40,24 @@ export async function convertImage(
   let imageMeta: ImageMeta;
   try {
     const src = node.attrs?.src || "";
-    if (src.startsWith("http")) {
+
+    // Use custom handler if provided
+    if (params?.handler) {
+      imageData = await params.handler(src);
+
+      // Extract metadata from fetched data
+      try {
+        imageMeta = getImageMetadata(imageData);
+      } catch {
+        imageMeta = {
+          type: getImageTypeFromSrc(src),
+          width: undefined,
+          height: undefined,
+          orientation: undefined,
+        };
+      }
+    } else if (src.startsWith("http")) {
+      // Default behavior: fetch HTTP images
       const result = await getImageDataAndMeta(src);
       imageData = result.data;
       imageMeta = result.meta;
@@ -101,6 +121,9 @@ export async function convertImage(
 
   // Build ImageRun options
   const imageOptions: IImageOptions = {
+    // Apply global options first
+    ...params?.options,
+    // Required fields (override global options)
     type: getImageType(imageMeta.type),
     data: imageData,
     transformation,

@@ -32,14 +32,108 @@ function extractCropRect(srcRect: Element): CropRect | undefined {
 }
 
 /**
- * Extract position (align/offset) from position element
+ * Type guards for valid horizontal/vertical alignment values
  */
-function extractPosition(positionEl: Element): { align?: string; offset?: number } | undefined {
+function isValidHorizontalAlign(
+  value: string,
+): value is "left" | "right" | "center" | "inside" | "outside" {
+  return ["left", "right", "center", "inside", "outside"].includes(value);
+}
+
+function isValidVerticalAlign(
+  value: string,
+): value is "top" | "bottom" | "center" | "inside" | "outside" {
+  return ["top", "bottom", "center", "inside", "outside"].includes(value);
+}
+
+function isValidHorizontalRelative(
+  value: string,
+): value is
+  | "page"
+  | "character"
+  | "column"
+  | "margin"
+  | "leftMargin"
+  | "rightMargin"
+  | "insideMargin"
+  | "outsideMargin" {
+  return [
+    "page",
+    "character",
+    "column",
+    "margin",
+    "leftMargin",
+    "rightMargin",
+    "insideMargin",
+    "outsideMargin",
+  ].includes(value);
+}
+
+function isValidVerticalRelative(
+  value: string,
+): value is
+  | "page"
+  | "paragraph"
+  | "margin"
+  | "topMargin"
+  | "bottomMargin"
+  | "insideMargin"
+  | "outsideMargin"
+  | "line" {
+  return [
+    "page",
+    "paragraph",
+    "margin",
+    "topMargin",
+    "bottomMargin",
+    "insideMargin",
+    "outsideMargin",
+    "line",
+  ].includes(value);
+}
+
+/**
+ * Extract horizontal position (align/offset) from position element
+ */
+function extractHorizontalPosition(
+  positionEl: Element,
+): { align?: "left" | "right" | "center" | "inside" | "outside"; offset?: number } | undefined {
   const alignEl = findChild(positionEl, "wp:align");
   const offsetEl = findChild(positionEl, "wp:posOffset");
 
-  const align =
-    alignEl?.children[0]?.type === "text" ? (alignEl.children[0].value as string) : undefined;
+  let align: "left" | "right" | "center" | "inside" | "outside" | undefined;
+  if (alignEl?.children[0]?.type === "text") {
+    const value = alignEl.children[0].value;
+    if (isValidHorizontalAlign(value)) {
+      align = value;
+    }
+  }
+
+  const offset =
+    offsetEl?.children[0]?.type === "text" ? parseInt(offsetEl.children[0].value, 10) : undefined;
+
+  if (!align && offset === undefined) return undefined;
+
+  return { ...(align && { align }), ...(offset !== undefined && { offset }) };
+}
+
+/**
+ * Extract vertical position (align/offset) from position element
+ */
+function extractVerticalPosition(
+  positionEl: Element,
+): { align?: "top" | "bottom" | "center" | "inside" | "outside"; offset?: number } | undefined {
+  const alignEl = findChild(positionEl, "wp:align");
+  const offsetEl = findChild(positionEl, "wp:posOffset");
+
+  let align: "top" | "bottom" | "center" | "inside" | "outside" | undefined;
+  if (alignEl?.children[0]?.type === "text") {
+    const value = alignEl.children[0].value;
+    if (isValidVerticalAlign(value)) {
+      align = value;
+    }
+  }
+
   const offset =
     offsetEl?.children[0]?.type === "text" ? parseInt(offsetEl.children[0].value, 10) : undefined;
 
@@ -88,10 +182,13 @@ function fitToGroup(
 }
 
 /**
- * Extract images from DOCX and convert to base64 data URLs
+ * Extract images from DOCX and convert to base64 data URLs or use custom handler
  * Returns Map of relationship ID to image info (src + dimensions)
  */
-export function extractImages(files: Record<string, Uint8Array>): Map<string, ImageInfo> {
+export async function extractImages(
+  files: Record<string, Uint8Array>,
+  handler?: import("../types").DocxImageImportHandler,
+): Promise<Map<string, ImageInfo>> {
   const images = new Map<string, ImageInfo>();
   const relsXml = files["word/_rels/document.xml.rels"];
   if (!relsXml) return images;
@@ -107,7 +204,7 @@ export function extractImages(files: Record<string, Uint8Array>): Map<string, Im
       const imageData = files[imagePath];
       if (!imageData) continue;
 
-      // Extract image metadata and convert to base64 data URL in one pass
+      // Extract image metadata
       let width: number | undefined;
       let height: number | undefined;
       let imageType = "png"; // default fallback
@@ -121,9 +218,20 @@ export function extractImages(files: Record<string, Uint8Array>): Map<string, Im
         // If metadata extraction fails, use defaults
       }
 
-      // Convert to base64 data URL
-      const base64 = uint8ArrayToBase64(imageData);
-      const src = `data:image/${imageType};base64,${base64}`;
+      // Use custom handler or default base64 encoding
+      let src: string;
+      if (handler) {
+        const result = await handler({
+          id: rel.attributes.Id as string,
+          contentType: `image/${imageType}`,
+          data: imageData,
+        });
+        src = result.src;
+      } else {
+        // Default behavior: convert to base64 data URL
+        const base64 = uint8ArrayToBase64(imageData);
+        src = `data:image/${imageType};base64,${base64}`;
+      }
 
       images.set(rel.attributes.Id as string, {
         src,
@@ -166,8 +274,8 @@ export async function extractImageFromDrawing(
 
         try {
           const croppedData = await cropImageIfNeeded(bytes, crop, {
-            canvasImport: context.canvasImport,
-            enabled: context.enableImageCrop,
+            canvasImport: context.image?.canvasImport,
+            enabled: context.image?.enableImageCrop ?? false,
           });
 
           const croppedBase64 = uint8ArrayToBase64(croppedData);
@@ -211,18 +319,27 @@ export async function extractImageFromDrawing(
   let floating: ImageFloatingOptions | undefined;
 
   if (positionH || positionV) {
-    const hPos = positionH ? extractPosition(positionH) : undefined;
-    const vPos = positionV ? extractPosition(positionV) : undefined;
+    const hPos = positionH ? extractHorizontalPosition(positionH) : undefined;
+    const vPos = positionV ? extractVerticalPosition(positionV) : undefined;
+
+    // Extract and validate relative values
+    const hRelative = positionH?.attributes["relativeFrom"];
+    const vRelative = positionV?.attributes["relativeFrom"];
+
+    const horizontalRelative =
+      typeof hRelative === "string" && isValidHorizontalRelative(hRelative) ? hRelative : "page";
+    const verticalRelative =
+      typeof vRelative === "string" && isValidVerticalRelative(vRelative) ? vRelative : "page";
 
     floating = {
       horizontalPosition: {
-        relative: (positionH?.attributes["relativeFrom"] as any) || "page",
-        ...(hPos?.align && { align: hPos.align as any }),
+        relative: horizontalRelative,
+        ...(hPos?.align && { align: hPos.align }),
         ...(hPos?.offset !== undefined && { offset: hPos.offset }),
       },
       verticalPosition: {
-        relative: (positionV?.attributes["relativeFrom"] as any) || "page",
-        ...(vPos?.align && { align: vPos.align as any }),
+        relative: verticalRelative,
+        ...(vPos?.align && { align: vPos.align }),
         ...(vPos?.offset !== undefined && { offset: vPos.offset }),
       },
     };

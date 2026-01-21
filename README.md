@@ -1,3 +1,5 @@
+> **⚠️ Warning:** This project is not yet stable and may undergo significant changes before reaching version 1.0.0. We strongly advise against using it in production environments.
+
 # Docen
 
 ![GitHub](https://img.shields.io/github/license/DemoMacro/docen)
