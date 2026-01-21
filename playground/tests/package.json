@@ -4,9 +4,9 @@
     "@docen/extensions": "workspace:*",
     "@docen/import-docx": "workspace:*",
     "@napi-rs/canvas": "0.1.88",
-    "@tiptap/core": "3.15.3",
-    "@tiptap/html": "3.15.3",
-    "@tiptap/pm": "3.15.3",
+    "@tiptap/core": "3.16.0",
+    "@tiptap/html": "3.16.0",
+    "@tiptap/pm": "3.16.0",
     "fflate": "0.8.2",
     "xast-util-from-xml": "4.0.0"
   }

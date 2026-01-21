@@ -1,10 +1,10 @@
 import { readFileSync, writeFileSync, existsSync, readdirSync, rmSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { generateDOCX } from "../packages/export-docx/src";
-import { parseDOCX } from "../packages/import-docx/src";
+import { generateDOCX } from "../../packages/export-docx/src";
+import { parseDOCX } from "../../packages/import-docx/src";
 import { generateJSON, generateHTML } from "./html";
-import { PageBreak } from "../packages/export-docx/src/docx";
+import { PageBreak } from "../../packages/export-docx/src/docx";
 import { unzipSync } from "fflate";
 import { fromXml } from "xast-util-from-xml";
 import { convertMillimetersToTwip } from "docx";
