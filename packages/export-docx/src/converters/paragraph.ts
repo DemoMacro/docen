@@ -1,9 +1,10 @@
-import { Paragraph, IParagraphOptions } from "docx";
+import { Paragraph, IParagraphOptions, type IImageOptions } from "docx";
 import { convertText, convertHardBreak } from "./text";
 import { convertImage } from "./image";
 import { ParagraphNode, ImageNode } from "@docen/extensions/types";
 import { applyParagraphStyleAttributes } from "../utils";
 import type { PositiveUniversalMeasure } from "docx";
+import type { DocxImageExportHandler } from "../utils/image";
 
 /**
  * Convert TipTap paragraph node to DOCX Paragraph
@@ -20,6 +21,10 @@ export async function convertParagraph(
     image?: {
       /** Maximum available width for inline images (number = pixels, or string like "6in", "152.4mm") */
       maxWidth?: number | PositiveUniversalMeasure;
+      /** Additional image options to apply */
+      options?: Partial<IImageOptions>;
+      /** Custom image handler for fetching image data */
+      handler?: DocxImageExportHandler;
     };
   },
 ): Promise<Paragraph> {
@@ -36,6 +41,8 @@ export async function convertParagraph(
     } else if (contentNode.type === "image") {
       const imageRun = await convertImage(contentNode as ImageNode, {
         maxWidth: image?.maxWidth,
+        options: image?.options,
+        handler: image?.handler,
       });
       children.push(imageRun);
     }

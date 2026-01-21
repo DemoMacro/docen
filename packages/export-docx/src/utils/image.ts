@@ -3,6 +3,9 @@ import { imageMeta as getImageMetadata, type ImageMeta } from "image-meta";
 import { ofetch } from "ofetch";
 import { convertMeasureToPixels } from "@docen/utils";
 
+// Custom image handler for fetching image data
+export type DocxImageExportHandler = (src: string) => Promise<Uint8Array>;
+
 const DEFAULT_MAX_IMAGE_WIDTH_PIXELS = 6.5 * 96; // A4 effective width in pixels
 
 /**
@@ -152,7 +155,8 @@ export function getImageHeight(
 }
 
 /**
- * Fetch image data and metadata from URL
+ * Fetch image data and metadata from HTTP/HTTPS URL
+ * (Only for use without custom handler)
  */
 export async function getImageDataAndMeta(
   url: string,

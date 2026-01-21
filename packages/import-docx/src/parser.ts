@@ -40,9 +40,9 @@ export async function parseDOCX(
   // Unzip DOCX file
   const files = unzipSync(uint8Array);
 
-  // Extract hyperlinks and images (images are already converted to base64 data URLs)
+  // Extract hyperlinks and images
   const hyperlinks = extractHyperlinks(files);
-  const images = extractImages(files);
+  const images = await extractImages(files, options.image?.handler);
 
   // Parse document.xml
   const documentXml = files["word/document.xml"];
@@ -58,8 +58,6 @@ export async function parseDOCX(
 
   // Create parsing context
   const context: ParseContext = {
-    enableImageCrop: false, // Default to false (use full image, ignore crop info)
-    ignoreEmptyParagraphs: false, // Default to false if not specified
     ...options,
     hyperlinks,
     images,

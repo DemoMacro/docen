@@ -10,6 +10,7 @@ import {
   ITableOfContentsOptions,
   IParagraphStyleOptions,
 } from "docx";
+import type { DocxImageExportHandler } from "./utils/image";
 
 /**
  * Options for exporting TipTap content to DOCX
@@ -46,6 +47,9 @@ export interface DocxExportOptions<T extends OutputType = OutputType> {
   };
 
   image?: {
+    // Custom image handler to replace default fetch behavior
+    handler?: DocxImageExportHandler;
+
     // Style definition for image paragraphs
     style?: IParagraphStyleOptions;
 

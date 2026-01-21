@@ -57,7 +57,7 @@
   "devDependencies": {
     "@docen/extensions": "workspace:*",
     "@docen/utils": "workspace:*",
-    "@tiptap/core": "3.15.3",
+    "@tiptap/core": "3.16.0",
     "@types/xast": "2.0.4"
   },
   "peerDependencies": {

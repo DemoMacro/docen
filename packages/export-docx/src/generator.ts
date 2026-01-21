@@ -238,6 +238,8 @@ export async function convertNode(
       return await convertParagraph(node as ParagraphNode, {
         image: {
           maxWidth: effectiveContentWidth,
+          options: options.image?.run,
+          handler: options.image?.handler,
         },
       });
 
@@ -254,6 +256,8 @@ export async function convertNode(
       // Convert image node to ImageRun and wrap in Paragraph with style
       const imageRun = await convertImage(node as ImageNode, {
         maxWidth: effectiveContentWidth,
+        options: options.image?.run,
+        handler: options.image?.handler,
       });
 
       // Build paragraph options with style reference if configured
