@@ -1,9 +1,12 @@
-import { Paragraph, IParagraphOptions } from "docx";
+import { IParagraphOptions } from "docx";
 import { ListItemNode } from "@docen/extensions/types";
 import { convertParagraph } from "./paragraph";
 
 /**
- * Convert TipTap list item node to DOCX Paragraph
+ * Convert TipTap list item node to paragraph options
+ *
+ * This converter only handles data transformation from node content to DOCX format properties.
+ * It returns pure data objects (IParagraphOptions), not DOCX instances.
  *
  * Note: The numbering reference (including start value) is typically
  * handled by the parent list converter. This function focuses on
@@ -11,16 +14,16 @@ import { convertParagraph } from "./paragraph";
  *
  * @param node - TipTap list item node
  * @param params - Conversion parameters
- * @returns Promise<DOCX Paragraph object>
+ * @returns Promise<Paragraph options (pure data object)>
  */
 export async function convertListItem(
   node: ListItemNode,
   params: {
     options?: IParagraphOptions;
   },
-): Promise<Paragraph> {
+): Promise<IParagraphOptions> {
   if (!node.content || node.content.length === 0) {
-    return new Paragraph({});
+    return {};
   }
 
   // Convert the first paragraph in the list item
@@ -31,6 +34,6 @@ export async function convertListItem(
     });
   }
 
-  // Fallback to empty paragraph
-  return new Paragraph({});
+  // Fallback to empty paragraph options
+  return {};
 }

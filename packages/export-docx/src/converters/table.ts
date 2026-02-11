@@ -7,7 +7,7 @@ import { DocxExportOptions } from "../options";
  * Apply table margins to table options
  */
 
-const applyTableMargins = <T extends ITableOptions>(options: T, node: TableNode): T => {
+export const applyTableMargins = <T extends ITableOptions>(options: T, node: TableNode): T => {
   const margins = {
     top: node.attrs?.marginTop ?? undefined,
     bottom: node.attrs?.marginBottom ?? undefined,

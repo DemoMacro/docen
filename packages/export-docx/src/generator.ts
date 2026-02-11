@@ -27,7 +27,6 @@ import { convertImage } from "./converters/image";
 import { convertTable } from "./converters/table";
 import { convertCodeBlock } from "./converters/code-block";
 import { convertList } from "./converters/list";
-import { convertListItem } from "./converters/list-item";
 import { convertTaskList } from "./converters/task-list";
 import { convertTaskItem } from "./converters/task-item";
 import { convertHorizontalRule } from "./converters/horizontal-rule";
@@ -41,7 +40,6 @@ import type {
   ImageNode,
   TableNode,
   TaskListNode,
-  ListItemNode,
   TaskItemNode,
   OrderedListNode,
   BulletListNode,
@@ -228,6 +226,11 @@ export async function convertDocument(
 
 /**
  * Convert a single node to DOCX element(s)
+ *
+ * This function implements a three-layer architecture:
+ * 1. Data Transformation: Convert node.attrs → IParagraphOptions (pure data)
+ * 2. Style Application: Apply styleId references (if configured)
+ * 3. Object Creation: Create actual DOCX instances (Paragraph, Table, etc.)
  */
 export async function convertNode(
   node: JSONContent,
@@ -238,6 +241,45 @@ export async function convertNode(
     return null;
   }
 
+  // Layer 1: Data Transformation (node.attrs → IParagraphOptions)
+  const dataResult = await convertNodeData(node, options, effectiveContentWidth);
+
+  // Handle Table and FileChild[] (already final objects)
+  if (dataResult instanceof Table) {
+    return dataResult;
+  }
+
+  // Handle arrays of IParagraphOptions - convert to Paragraph objects
+  if (Array.isArray(dataResult)) {
+    // For arrays, convert each IParagraphOptions to Paragraph
+    const styleId = getStyleIdByNodeType(node.type, options);
+    return dataResult.map((paragraphOptions: IParagraphOptions): FileChild => {
+      const styledOptions = applyStyleReference(paragraphOptions, styleId);
+      // We know this won't be a Table since we started with IParagraphOptions
+      return new Paragraph(styledOptions);
+    });
+  }
+
+  // Layer 2: Style Application (apply styleId if configured)
+  const styleId = getStyleIdByNodeType(node.type, options);
+  const styledOptions = applyStyleReference(dataResult, styleId);
+
+  // Layer 3: Object Creation (create DOCX instance)
+  return createDOCXObject(styledOptions);
+}
+
+/**
+ * Layer 1: Data Transformation
+ *
+ * Convert node data to DOCX format properties.
+ * Returns pure data objects (IParagraphOptions) or arrays, not DOCX instances.
+ * This layer does NOT handle styleId references.
+ */
+async function convertNodeData(
+  node: JSONContent,
+  options: DocxExportOptions,
+  effectiveContentWidth: number,
+): Promise<IParagraphOptions | IParagraphOptions[] | Table | FileChild[]> {
   switch (node.type) {
     case "paragraph":
       return await convertParagraph(node as ParagraphNode, {
@@ -255,36 +297,16 @@ export async function convertNode(
       return convertBlockquote(node as BlockquoteNode);
 
     case "codeBlock":
-      const codeParagraph = convertCodeBlock(node as CodeBlockNode);
-
-      // Apply style if configured
-      if (options.code?.style) {
-        return new Paragraph({
-          children: [codeParagraph],
-          style: options.code.style.id,
-        });
-      }
-      return codeParagraph;
+      return convertCodeBlock(node as CodeBlockNode);
 
     case "image":
-      // Convert image node to ImageRun and wrap in Paragraph with style
+      // Image is special: returns paragraph options wrapping an ImageRun
       const imageRun = await convertImage(node as ImageNode, {
         maxWidth: effectiveContentWidth,
         options: options.image?.run,
         handler: options.image?.handler,
       });
-
-      // Build paragraph options with style reference if configured
-      const imageParagraphOptions: IParagraphOptions = options.image?.style
-        ? {
-            children: [imageRun],
-            style: options.image.style.id,
-          }
-        : {
-            children: [imageRun],
-          };
-
-      return new Paragraph(imageParagraphOptions);
+      return { children: [imageRun] };
 
     case "table":
       return await convertTable(node as TableNode, {
@@ -304,17 +326,12 @@ export async function convertNode(
     case "taskList":
       return convertTaskList(node as TaskListNode);
 
-    case "listItem":
-      return convertListItem(node as ListItemNode, {
-        options: undefined,
-      });
-
     case "taskItem":
       return convertTaskItem(node as TaskItemNode);
 
     case "hardBreak":
       // Wrap hardBreak in a paragraph
-      return new Paragraph({ children: [convertHardBreak()] });
+      return { children: [convertHardBreak()] };
 
     case "horizontalRule":
       return convertHorizontalRule(node as HorizontalRuleNode, {
@@ -323,32 +340,41 @@ export async function convertNode(
 
     case "details":
       // Flatten details: expand summary and content directly into document flow
-      const elements: FileChild[] = [];
-      if (node.content) {
-        for (const child of node.content) {
-          const element = await convertNode(child, options, effectiveContentWidth);
-          if (Array.isArray(element)) {
-            elements.push(...element);
-          } else if (element) {
-            elements.push(element);
-          }
-        }
-      }
-      return elements;
+      return await convertDetails(node, options, effectiveContentWidth);
 
     case "detailsSummary":
       return convertDetailsSummary(node as DetailsSummaryNode, {
         options: options.details,
       });
 
-    // detailsContent is automatically expanded when details is processed
-
     default:
       // Unknown node type, return a paragraph with text
-      return new Paragraph({
+      return {
         children: [new TextRun({ text: `[Unsupported: ${node.type}]` })],
-      });
+      };
   }
+}
+
+/**
+ * Helper to convert details node (needs to recursively call convertNode)
+ */
+async function convertDetails(
+  node: JSONContent,
+  options: DocxExportOptions,
+  effectiveContentWidth: number,
+): Promise<FileChild[]> {
+  const elements: FileChild[] = [];
+  if (node.content) {
+    for (const child of node.content) {
+      const element = await convertNode(child, options, effectiveContentWidth);
+      if (Array.isArray(element)) {
+        elements.push(...element);
+      } else if (element) {
+        elements.push(element);
+      }
+    }
+  }
+  return elements;
 }
 
 /**
@@ -434,4 +460,66 @@ function createNumberingOptions(docJson: JSONContent): INumberingOptions {
   });
 
   return { config: numberingOptions };
+}
+
+/**
+ * Get style ID for a specific node type from export options
+ *
+ * This is a centralized mapping of node types to their configured style IDs.
+ * Style references are applied separately from data transformation.
+ *
+ * @param nodeType - The type of TipTap node
+ * @param options - Export options containing style configurations
+ * @returns Style ID string if configured, undefined otherwise
+ */
+function getStyleIdByNodeType(nodeType: string, options: DocxExportOptions): string | undefined {
+  const styleMap: Record<string, string | undefined> = {
+    codeBlock: options.code?.style?.id,
+    image: options.image?.style?.id,
+    // Note: table, heading, paragraph, blockquote, etc. don't use styleId
+    // They rely on direct formatting from node.attrs
+  };
+
+  return styleMap[nodeType];
+}
+
+/**
+ * Apply style reference to paragraph options
+ *
+ * This function handles the final step of adding a style ID reference to
+ * paragraph options. It's called after data transformation is complete.
+ *
+ * @param paragraphOptions - Paragraph options from converter
+ * @param styleId - Style ID to apply (optional)
+ * @returns Paragraph options with style ID applied if provided
+ */
+function applyStyleReference(
+  paragraphOptions: IParagraphOptions,
+  styleId?: string,
+): IParagraphOptions {
+  if (!styleId) {
+    return paragraphOptions;
+  }
+
+  // Style is just a string reference, applied at the end
+  return {
+    ...paragraphOptions,
+    style: styleId,
+  };
+}
+
+/**
+ * Create a DOCX object from paragraph options
+ *
+ * This is the final step that creates actual DOCX instances from
+ * pure data objects.
+ *
+ * @param options - Paragraph options or table
+ * @returns DOCX Paragraph or Table instance
+ */
+function createDOCXObject(options: IParagraphOptions | Table): Paragraph | Table {
+  if (options instanceof Table) {
+    return options;
+  }
+  return new Paragraph(options);
 }

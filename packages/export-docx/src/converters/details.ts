@@ -1,14 +1,17 @@
-import { Paragraph, TextRun, ExternalHyperlink } from "docx";
+import { TextRun, ExternalHyperlink, type IParagraphOptions } from "docx";
 import { convertTextNodes } from "./text";
 import type { DetailsSummaryNode } from "@docen/extensions/types";
 import type { DocxExportOptions } from "../options";
 
 /**
- * Convert TipTap detailsSummary node to DOCX Paragraph
+ * Convert TipTap detailsSummary node to paragraph options
+ *
+ * This converter only handles data transformation from node content to DOCX format properties.
+ * It returns pure data objects (IParagraphOptions), not DOCX instances.
  *
  * @param node - TipTap detailsSummary node
  * @param params - Conversion parameters
- * @returns DOCX Paragraph with summary styling
+ * @returns Paragraph options (pure data object) with summary styling
  */
 export function convertDetailsSummary(
   node: DetailsSummaryNode,
@@ -16,15 +19,15 @@ export function convertDetailsSummary(
     /** Export options for details styling */
     options?: DocxExportOptions["details"];
   },
-): Paragraph {
+): IParagraphOptions {
   // Convert summary content to text runs
   const summaryChildren = convertTextNodes(node.content || []).filter(
     (item): item is TextRun | ExternalHyperlink => item !== undefined,
   );
 
-  // Create summary paragraph with styling
-  return new Paragraph({
+  // Return paragraph options with styling
+  return {
     children: summaryChildren,
     ...params.options?.summary?.paragraph,
-  });
+  };
 }

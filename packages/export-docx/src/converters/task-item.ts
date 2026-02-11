@@ -1,17 +1,20 @@
-import { Paragraph, TextRun } from "docx";
+import { TextRun, type IParagraphOptions } from "docx";
 import { TaskItemNode } from "@docen/extensions/types";
 import { convertText, convertHardBreak } from "./text";
 import { CHECKBOX_SYMBOLS } from "../utils";
 
 /**
- * Convert TipTap task item node to DOCX Paragraph with checkbox
+ * Convert TipTap task item node to paragraph options with checkbox
+ *
+ * This converter only handles data transformation from node content to DOCX format properties.
+ * It returns pure data objects (IParagraphOptions), not DOCX instances.
  *
  * @param node - TipTap task item node
- * @returns DOCX Paragraph object with checkbox
+ * @returns Paragraph options (pure data object) with checkbox
  */
-export function convertTaskItem(node: TaskItemNode): Paragraph {
+export function convertTaskItem(node: TaskItemNode): IParagraphOptions {
   if (!node.content || node.content.length === 0) {
-    return new Paragraph({});
+    return {};
   }
 
   // Convert the first paragraph in the task item
@@ -37,11 +40,11 @@ export function convertTaskItem(node: TaskItemNode): Paragraph {
     // Add checkbox as first text run
     const checkboxRun = new TextRun({ text: checkboxText });
 
-    return new Paragraph({
+    return {
       children: [checkboxRun, ...children],
-    });
+    };
   }
 
-  // Fallback to empty paragraph
-  return new Paragraph({});
+  // Fallback to empty paragraph options
+  return {};
 }

@@ -1,37 +1,8 @@
-import { TableCell, IParagraphOptions } from "docx";
+import { TableCell, Paragraph, IParagraphOptions } from "docx";
 import { TableCellNode } from "@docen/extensions/types";
 import { convertParagraph } from "./paragraph";
+import { convertBorder } from "../utils";
 import { DocxExportOptions } from "../options";
-import type { TableCellBorder } from "@docen/extensions/types";
-
-/**
- * Convert TipTap border to DOCX border format
- */
-function convertBorder(
-  border: TableCellBorder | null | undefined,
-):
-  | { color?: string; size?: number; style: "single" | "dashed" | "dotted" | "double" | "none" }
-  | undefined {
-  if (!border) return undefined;
-
-  const styleMap: Record<string, "single" | "dashed" | "dotted" | "double" | "none"> = {
-    solid: "single",
-    dashed: "dashed",
-    dotted: "dotted",
-    double: "double",
-    none: "none",
-  };
-
-  const docxStyle = border.style ? styleMap[border.style] || "single" : "single";
-  const color = border.color?.replace("#", "") || "auto";
-  const size = border.width ? border.width * 6 : 4; // Convert pixels to eighth-points
-
-  return {
-    color,
-    size,
-    style: docxStyle,
-  };
-}
 
 /**
  * Convert TipTap table cell node to DOCX TableCell
@@ -61,13 +32,16 @@ export async function convertTableCell(
   }
 
   // Convert paragraphs in the cell
-  const paragraphs = await Promise.all(
+  const paragraphOptionsList = await Promise.all(
     (node.content || []).map((p) =>
       convertParagraph(p, {
         options: cellParagraphOptions,
       }),
     ),
   );
+
+  // Convert IParagraphOptions[] to Paragraph[] for TableCell children
+  const paragraphs = paragraphOptionsList.map((options) => new Paragraph(options));
 
   // Create table cell options
   const cellOptions = {
