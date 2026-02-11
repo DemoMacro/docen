@@ -1,15 +1,18 @@
-import { Paragraph, HeadingLevel, TextRun, ExternalHyperlink } from "docx";
+import { HeadingLevel, TextRun, ExternalHyperlink, type IParagraphOptions } from "docx";
 import { HeadingNode } from "@docen/extensions/types";
-import { convertTextNodes, convertText } from "./text";
+import { convertTextNodes } from "./text";
 import { applyParagraphStyleAttributes } from "../utils";
 
 /**
- * Convert TipTap heading node to DOCX paragraph
+ * Convert TipTap heading node to DOCX paragraph options
+ *
+ * This converter only handles data transformation from node.attrs to DOCX format properties.
+ * It returns pure data objects (IParagraphOptions), not DOCX instances.
  *
  * @param node - TipTap heading node
- * @returns DOCX Paragraph object
+ * @returns DOCX paragraph options (pure data object)
  */
-export function convertHeading(node: HeadingNode): Paragraph {
+export function convertHeading(node: HeadingNode): IParagraphOptions {
   // Get heading level
   const level: HeadingNode["attrs"]["level"] = node?.attrs?.level;
 
@@ -31,21 +34,8 @@ export function convertHeading(node: HeadingNode): Paragraph {
     6: HeadingLevel.HEADING_6,
   };
 
-  // Build paragraph options
-  let paragraphOptions: {
-    children: ReturnType<typeof convertText>[];
-    heading: (typeof HeadingLevel)[keyof typeof HeadingLevel];
-    indent?: {
-      left?: number;
-      right?: number;
-      firstLine?: number;
-    };
-    spacing?: {
-      before?: number;
-      after?: number;
-    };
-    alignment?: "left" | "right" | "center" | "both";
-  } = {
+  // Build paragraph options with heading level
+  let paragraphOptions: IParagraphOptions = {
     children,
     heading: headingMap[level],
   };
@@ -55,8 +45,5 @@ export function convertHeading(node: HeadingNode): Paragraph {
     paragraphOptions = applyParagraphStyleAttributes(paragraphOptions, node.attrs);
   }
 
-  // Create heading paragraph
-  const paragraph = new Paragraph(paragraphOptions);
-
-  return paragraph;
+  return paragraphOptions;
 }

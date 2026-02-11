@@ -10,3 +10,4 @@ export * from "@docen/utils";
 export * from "./conversion";
 export * from "./image";
 export * from "./paragraph";
+export * from "./table";

@@ -1,15 +1,17 @@
-import { Paragraph } from "docx";
+import { type IParagraphOptions } from "docx";
 import { convertText, convertHardBreak } from "./text";
 import { BlockquoteNode } from "@docen/extensions/types";
 
 /**
- * Convert TipTap blockquote node to array of DOCX Paragraphs
- * Each paragraph in blockquote is indented and styled
+ * Convert TipTap blockquote node to array of paragraph options
+ *
+ * This converter only handles data transformation from node content to DOCX format properties.
+ * It returns pure data objects (IParagraphOptions[]), not DOCX instances.
  *
  * @param node - TipTap blockquote node
- * @returns Array of DOCX Paragraph objects
+ * @returns Array of paragraph options (pure data objects)
  */
-export function convertBlockquote(node: BlockquoteNode): Paragraph[] {
+export function convertBlockquote(node: BlockquoteNode): IParagraphOptions[] {
   if (!node.content) return [];
 
   return node.content.map((contentNode) => {
@@ -25,8 +27,8 @@ export function convertBlockquote(node: BlockquoteNode): Paragraph[] {
           return [];
         }) || [];
 
-      // Create indented paragraph for blockquote
-      const paragraph = new Paragraph({
+      // Return paragraph options with blockquote styling
+      return {
         children,
         indent: {
           left: 720,
@@ -36,13 +38,11 @@ export function convertBlockquote(node: BlockquoteNode): Paragraph[] {
             style: "single",
           },
         },
-      });
-
-      return paragraph;
+      };
     }
 
     // Handle other content types within blockquote
-    // For now, return empty paragraph as fallback
-    return new Paragraph({});
+    // For now, return empty paragraph options as fallback
+    return {};
   });
 }

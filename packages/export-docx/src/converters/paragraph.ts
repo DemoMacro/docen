@@ -1,4 +1,4 @@
-import { Paragraph, IParagraphOptions, type IImageOptions } from "docx";
+import { IParagraphOptions, type IImageOptions } from "docx";
 import { convertText, convertHardBreak } from "./text";
 import { convertImage } from "./image";
 import { ParagraphNode, ImageNode } from "@docen/extensions/types";
@@ -7,11 +7,14 @@ import type { PositiveUniversalMeasure } from "docx";
 import type { DocxImageExportHandler } from "../utils/image";
 
 /**
- * Convert TipTap paragraph node to DOCX Paragraph
+ * Convert TipTap paragraph node to DOCX paragraph options
+ *
+ * This converter only handles data transformation from node.attrs to DOCX format properties.
+ * It returns pure data objects (IParagraphOptions), not DOCX instances.
  *
  * @param node - TipTap paragraph node
  * @param params - Conversion parameters
- * @returns Promise<DOCX Paragraph object>
+ * @returns Promise<DOCX paragraph options (pure data object)>
  */
 export async function convertParagraph(
   node: ParagraphNode,
@@ -27,7 +30,7 @@ export async function convertParagraph(
       handler?: DocxImageExportHandler;
     };
   },
-): Promise<Paragraph> {
+): Promise<IParagraphOptions> {
   const { options, image } = params || {};
 
   // Convert content to text runs and images
@@ -48,12 +51,12 @@ export async function convertParagraph(
     }
   }
 
-  // Determine paragraph options
+  // Build paragraph options
   let paragraphOptions: IParagraphOptions = {
     children,
   };
 
-  // Apply any passed-in options (e.g., numbering for lists, style references)
+  // Apply any passed-in options (e.g., numbering for lists)
   if (options) {
     paragraphOptions = {
       ...paragraphOptions,
@@ -66,5 +69,5 @@ export async function convertParagraph(
     paragraphOptions = applyParagraphStyleAttributes(paragraphOptions, node.attrs);
   }
 
-  return new Paragraph(paragraphOptions);
+  return paragraphOptions;
 }

@@ -1,25 +1,28 @@
-import { Paragraph, TextRun } from "docx";
+import { TextRun, type IParagraphOptions } from "docx";
 import { CodeBlockNode, TextNode } from "@docen/extensions/types";
 import { DEFAULT_CODE_FONT } from "../utils";
 import { convertText } from "./text";
 
 /**
- * Convert TipTap codeBlock node to DOCX Paragraph
+ * Convert TipTap codeBlock node to DOCX paragraph options
+ *
+ * This converter only handles data transformation from node.attrs to DOCX format properties.
+ * It returns pure data objects (IParagraphOptions), not DOCX instances.
  *
  * @param node - TipTap codeBlock node
- * @returns DOCX Paragraph object with code styling
+ * @returns DOCX paragraph options (pure data object)
  */
-export function convertCodeBlock(node: CodeBlockNode): Paragraph {
-  // If no content, return empty paragraph with code font
+export function convertCodeBlock(node: CodeBlockNode): IParagraphOptions {
+  // If no content, return empty paragraph options with code font
   if (!node.content || node.content.length === 0) {
-    return new Paragraph({
+    return {
       children: [
         new TextRun({
           text: "",
           font: DEFAULT_CODE_FONT,
         }),
       ],
-    });
+    };
   }
 
   // Process each text node through convertText to preserve formatting
@@ -30,8 +33,8 @@ export function convertCodeBlock(node: CodeBlockNode): Paragraph {
     return [];
   });
 
-  // Create paragraph with processed text runs
-  return new Paragraph({
+  // Return paragraph options with processed text runs
+  return {
     children: textRuns.length > 0 ? textRuns : [new TextRun({ text: "", font: DEFAULT_CODE_FONT })],
-  });
+  };
 }
