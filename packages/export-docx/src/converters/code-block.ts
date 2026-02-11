@@ -1,5 +1,7 @@
 import { Paragraph, TextRun } from "docx";
-import { CodeBlockNode } from "@docen/extensions/types";
+import { CodeBlockNode, TextNode } from "@docen/extensions/types";
+import { DEFAULT_CODE_FONT } from "../utils";
+import { convertText } from "./text";
 
 /**
  * Convert TipTap codeBlock node to DOCX Paragraph
@@ -8,18 +10,28 @@ import { CodeBlockNode } from "@docen/extensions/types";
  * @returns DOCX Paragraph object with code styling
  */
 export function convertCodeBlock(node: CodeBlockNode): Paragraph {
-  // Extract text content
-  const codeText = node.content?.map((textNode) => textNode.text || "").join("") || "";
+  // If no content, return empty paragraph with code font
+  if (!node.content || node.content.length === 0) {
+    return new Paragraph({
+      children: [
+        new TextRun({
+          text: "",
+          font: DEFAULT_CODE_FONT,
+        }),
+      ],
+    });
+  }
 
-  // Create paragraph with monospace font
-  const paragraph = new Paragraph({
-    children: [
-      new TextRun({
-        text: codeText,
-        font: "Consolas",
-      }),
-    ],
+  // Process each text node through convertText to preserve formatting
+  const textRuns = node.content.flatMap((contentNode) => {
+    if (contentNode.type === "text") {
+      return convertText(contentNode as TextNode);
+    }
+    return [];
   });
 
-  return paragraph;
+  // Create paragraph with processed text runs
+  return new Paragraph({
+    children: textRuns.length > 0 ? textRuns : [new TextRun({ text: "", font: DEFAULT_CODE_FONT })],
+  });
 }

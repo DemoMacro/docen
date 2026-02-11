@@ -1,6 +1,7 @@
 import { Paragraph, TextRun } from "docx";
 import { TaskItemNode } from "@docen/extensions/types";
 import { convertText, convertHardBreak } from "./text";
+import { CHECKBOX_SYMBOLS } from "../utils";
 
 /**
  * Convert TipTap task item node to DOCX Paragraph with checkbox
@@ -18,7 +19,9 @@ export function convertTaskItem(node: TaskItemNode): Paragraph {
   if (firstParagraph.type === "paragraph") {
     // Add checkbox based on checked state
     const isChecked = node.attrs?.checked || false;
-    const checkboxText = isChecked ? "☑ " : "☐ ";
+    const checkboxText = isChecked
+      ? CHECKBOX_SYMBOLS.checked + " "
+      : CHECKBOX_SYMBOLS.unchecked + " ";
 
     // Convert paragraph content to text runs
     const children =

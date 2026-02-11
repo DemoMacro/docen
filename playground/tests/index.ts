@@ -405,6 +405,20 @@ void (async () => {
             children: [],
           },
         ],
+        styles: {
+          default: {
+            document: {
+              paragraph: {
+                spacing: {
+                  line: 480,
+                },
+              },
+              run: {
+                size: 28,
+              },
+            },
+          },
+        },
         table: {
           run: {
             width: {
@@ -423,16 +437,12 @@ void (async () => {
             },
           },
         },
-        styles: {
-          default: {
-            document: {
-              paragraph: {
-                spacing: {
-                  line: 480,
-                },
-              },
-              run: {
-                size: 28,
+        code: {
+          style: {
+            id: "Code",
+            run: {
+              font: {
+                name: "Consolas",
               },
             },
           },

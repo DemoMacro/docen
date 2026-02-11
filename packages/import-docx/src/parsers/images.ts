@@ -5,12 +5,58 @@ import type { ImageFloatingOptions, ImageNode, ImageOutlineOptions } from "@doce
 import type { ImageInfo } from "../types";
 import type { ParseContext } from "../parser";
 import type { CropRect } from "../utils/image";
-import { findChild, findDeepChild, findDeepChildren } from "@docen/utils";
+import {
+  findChild,
+  findDeepChild,
+  findDeepChildren,
+  createStringValidator,
+  convertEmuStringToPixels,
+} from "@docen/utils";
 import { uint8ArrayToBase64, base64ToUint8Array } from "../utils/base64";
 import { cropImageIfNeeded } from "../utils/image";
-import { convertEmuStringToPixels } from "@docen/utils";
 
 const IMAGE_REL_TYPE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image";
+
+/**
+ * Type guards for valid horizontal/vertical alignment values
+ */
+const isValidHorizontalAlign = createStringValidator([
+  "left",
+  "right",
+  "center",
+  "inside",
+  "outside",
+] as const);
+
+const isValidVerticalAlign = createStringValidator([
+  "top",
+  "bottom",
+  "center",
+  "inside",
+  "outside",
+] as const);
+
+const isValidHorizontalRelative = createStringValidator([
+  "page",
+  "character",
+  "column",
+  "margin",
+  "leftMargin",
+  "rightMargin",
+  "insideMargin",
+  "outsideMargin",
+] as const);
+
+const isValidVerticalRelative = createStringValidator([
+  "page",
+  "paragraph",
+  "margin",
+  "topMargin",
+  "bottomMargin",
+  "insideMargin",
+  "outsideMargin",
+  "line",
+] as const);
 
 /**
  * Extract crop rectangle from a:srcRect element
@@ -32,67 +78,6 @@ function extractCropRect(srcRect: Element): CropRect | undefined {
 }
 
 /**
- * Type guards for valid horizontal/vertical alignment values
- */
-function isValidHorizontalAlign(
-  value: string,
-): value is "left" | "right" | "center" | "inside" | "outside" {
-  return ["left", "right", "center", "inside", "outside"].includes(value);
-}
-
-function isValidVerticalAlign(
-  value: string,
-): value is "top" | "bottom" | "center" | "inside" | "outside" {
-  return ["top", "bottom", "center", "inside", "outside"].includes(value);
-}
-
-function isValidHorizontalRelative(
-  value: string,
-): value is
-  | "page"
-  | "character"
-  | "column"
-  | "margin"
-  | "leftMargin"
-  | "rightMargin"
-  | "insideMargin"
-  | "outsideMargin" {
-  return [
-    "page",
-    "character",
-    "column",
-    "margin",
-    "leftMargin",
-    "rightMargin",
-    "insideMargin",
-    "outsideMargin",
-  ].includes(value);
-}
-
-function isValidVerticalRelative(
-  value: string,
-): value is
-  | "page"
-  | "paragraph"
-  | "margin"
-  | "topMargin"
-  | "bottomMargin"
-  | "insideMargin"
-  | "outsideMargin"
-  | "line" {
-  return [
-    "page",
-    "paragraph",
-    "margin",
-    "topMargin",
-    "bottomMargin",
-    "insideMargin",
-    "outsideMargin",
-    "line",
-  ].includes(value);
-}
-
-/**
  * Extract horizontal position (align/offset) from position element
  */
 function extractHorizontalPosition(
@@ -105,7 +90,7 @@ function extractHorizontalPosition(
   if (alignEl?.children[0]?.type === "text") {
     const value = alignEl.children[0].value;
     if (isValidHorizontalAlign(value)) {
-      align = value;
+      align = value as "left" | "right" | "center" | "inside" | "outside";
     }
   }
 
@@ -130,7 +115,7 @@ function extractVerticalPosition(
   if (alignEl?.children[0]?.type === "text") {
     const value = alignEl.children[0].value;
     if (isValidVerticalAlign(value)) {
-      align = value;
+      align = value as "top" | "bottom" | "center" | "inside" | "outside";
     }
   }
 
@@ -327,9 +312,29 @@ export async function extractImageFromDrawing(
     const vRelative = positionV?.attributes["relativeFrom"];
 
     const horizontalRelative =
-      typeof hRelative === "string" && isValidHorizontalRelative(hRelative) ? hRelative : "page";
+      typeof hRelative === "string" && isValidHorizontalRelative(hRelative)
+        ? (hRelative as
+            | "page"
+            | "character"
+            | "column"
+            | "margin"
+            | "leftMargin"
+            | "rightMargin"
+            | "insideMargin"
+            | "outsideMargin")
+        : "page";
     const verticalRelative =
-      typeof vRelative === "string" && isValidVerticalRelative(vRelative) ? vRelative : "page";
+      typeof vRelative === "string" && isValidVerticalRelative(vRelative)
+        ? (vRelative as
+            | "page"
+            | "paragraph"
+            | "margin"
+            | "topMargin"
+            | "bottomMargin"
+            | "insideMargin"
+            | "outsideMargin"
+            | "line")
+        : "page";
 
     floating = {
       horizontalPosition: {

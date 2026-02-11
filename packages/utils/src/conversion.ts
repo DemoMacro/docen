@@ -3,17 +3,8 @@
  * Handles conversions between TWIPs, EMUs, pixels, and other units
  */
 
-/**
- * DOCX DPI (dots per inch) for pixel conversions
- * Word uses 96 DPI internally
- */
-export const DOCX_DPI = 96;
+import { DOCX_DPI, TWIPS_PER_INCH, EMUS_PER_INCH } from "./constants";
 
-/**
- * Conversion factors for DOCX units
- */
-const TWIPS_PER_INCH = 1440; // 1 inch = 1440 TWIPs
-const EMUS_PER_INCH = 914400; // 1 inch = 914400 EMUs
 const PIXELS_PER_INCH = DOCX_DPI; // 96 DPI
 
 /**

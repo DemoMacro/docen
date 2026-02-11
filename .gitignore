@@ -130,9 +130,9 @@ dist
 .pnp.*
 
 # playground
-/test/json
-/test/docx
-/test/json-parsed
-/test/html-parsed
-/test/docx-parsed
-/test/docx-structure
+playground/tests/json
+playground/tests/docx
+playground/tests/json-parsed
+playground/tests/html-parsed
+playground/tests/docx-parsed
+playground/tests/docx-structure

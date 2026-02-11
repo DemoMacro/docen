@@ -1,4 +1,4 @@
-import { convertCssLengthToPixels, convertPixelsToTwip } from "@docen/utils";
+import { convertCssLengthToPixels, convertPixelsToTwip, TEXT_ALIGN_MAP } from "@docen/utils";
 import type { ParagraphNode } from "@docen/extensions/types";
 
 /**
@@ -45,15 +45,10 @@ export const applyParagraphStyleAttributes = <T extends Record<string, unknown>>
   }
 
   if (attrs.textAlign) {
-    const ALIGNMENT_MAP: Record<string, "left" | "right" | "center" | "both"> = {
-      left: "left",
-      right: "right",
-      center: "center",
-      justify: "both",
-    } as const;
     result = {
       ...result,
-      alignment: ALIGNMENT_MAP[attrs.textAlign],
+      alignment:
+        TEXT_ALIGN_MAP.tiptapToDocx[attrs.textAlign as keyof typeof TEXT_ALIGN_MAP.tiptapToDocx],
     };
   }
 

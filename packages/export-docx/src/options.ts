@@ -78,6 +78,11 @@ export interface DocxExportOptions<T extends OutputType = OutputType> {
     };
   };
 
+  code?: {
+    // Style definition for code block paragraphs
+    style?: IParagraphStyleOptions;
+  };
+
   details?: {
     summary?: {
       paragraph?: Partial<IParagraphOptions>;

@@ -38,10 +38,10 @@
   },
   "devDependencies": {
     "@funish/basis": "0.1.2",
-    "@types/node": "25.0.9",
-    "oxfmt": "0.26.0",
-    "oxlint": "1.41.0",
-    "oxlint-tsgolint": "0.11.1",
+    "@types/node": "25.2.3",
+    "oxfmt": "0.31.0",
+    "oxlint": "1.46.0",
+    "oxlint-tsgolint": "0.11.5",
     "unbuild": "3.6.1"
   }
 }
