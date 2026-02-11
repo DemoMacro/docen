@@ -1,35 +1,35 @@
 import type { PositiveUniversalMeasure } from "docx";
 import { imageMeta as getImageMetadata, type ImageMeta } from "image-meta";
 import { ofetch } from "ofetch";
-import { convertMeasureToPixels } from "@docen/utils";
+import { convertMeasureToPixels, DOCX_DPI } from "@docen/utils";
 
 // Custom image handler for fetching image data
 export type DocxImageExportHandler = (src: string) => Promise<Uint8Array>;
 
-const DEFAULT_MAX_IMAGE_WIDTH_PIXELS = 6.5 * 96; // A4 effective width in pixels
+const DEFAULT_MAX_IMAGE_WIDTH_PIXELS = 6.5 * DOCX_DPI; // A4 effective width in pixels
 
 /**
- * Unified image type mapping for both MIME types and file extensions
- * (They are identical, so we use a single mapping table)
+ * Unified image type mapping
+ * Maps file extensions and MIME types to standardized type names and DOCX types
  */
-const IMAGE_TYPE_MAPPING: Record<string, "png" | "jpeg" | "gif" | "bmp" | "tiff"> = {
-  jpg: "jpeg",
-  jpeg: "jpeg",
-  png: "png",
-  gif: "gif",
-  bmp: "bmp",
-  tiff: "tiff",
-} as const;
-
-/**
- * Mapping from image MIME types to DOCX image types
- */
-const MIME_TO_DOCX_TYPE: Record<string, "jpg" | "png" | "gif" | "bmp"> = {
-  jpeg: "jpg",
-  jpg: "jpg",
-  png: "png",
-  gif: "gif",
-  bmp: "bmp",
+const IMAGE_TYPE_MAPPING = {
+  // Standard MIME types to internal type names
+  mimeToInternal: {
+    jpg: "jpeg",
+    jpeg: "jpeg",
+    png: "png",
+    gif: "gif",
+    bmp: "bmp",
+    tiff: "tiff",
+  } as const,
+  // Internal type names to DOCX types
+  internalToDocx: {
+    jpeg: "jpg",
+    png: "png",
+    gif: "gif",
+    bmp: "bmp",
+    tiff: "bmp", // Fallback for unsupported formats
+  } as const,
 } as const;
 
 /**
@@ -38,7 +38,14 @@ const MIME_TO_DOCX_TYPE: Record<string, "jpg" | "png" | "gif" | "bmp"> = {
 export function convertToDocxImageType(mimeType?: string): "jpg" | "png" | "gif" | "bmp" {
   if (!mimeType) return "png";
   const typeKey = mimeType.toLowerCase();
-  return MIME_TO_DOCX_TYPE[typeKey] ?? "png";
+  const internalType =
+    IMAGE_TYPE_MAPPING.mimeToInternal[typeKey as keyof typeof IMAGE_TYPE_MAPPING.mimeToInternal] ||
+    "png";
+  return (
+    IMAGE_TYPE_MAPPING.internalToDocx[
+      internalType as keyof typeof IMAGE_TYPE_MAPPING.internalToDocx
+    ] || "png"
+  );
 }
 
 /**
@@ -49,12 +56,19 @@ export function getImageTypeFromSrc(src: string): "png" | "jpeg" | "gif" | "bmp"
     const match = src.match(/data:image\/(\w+);/);
     if (match) {
       const type = match[1].toLowerCase();
-      return IMAGE_TYPE_MAPPING[type] || "png";
+      return (
+        IMAGE_TYPE_MAPPING.mimeToInternal[type as keyof typeof IMAGE_TYPE_MAPPING.mimeToInternal] ||
+        "png"
+      );
     }
   } else {
     const extension = src.split(".").pop()?.toLowerCase();
     if (extension) {
-      return IMAGE_TYPE_MAPPING[extension] || "png";
+      return (
+        IMAGE_TYPE_MAPPING.mimeToInternal[
+          extension as keyof typeof IMAGE_TYPE_MAPPING.mimeToInternal
+        ] || "png"
+      );
     }
   }
 

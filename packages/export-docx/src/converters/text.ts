@@ -1,7 +1,7 @@
 import { JSONContent } from "@tiptap/core";
 import { TextRun, ExternalHyperlink, IRunOptions } from "docx";
 import { TextNode } from "@docen/extensions/types";
-import { convertColorToHex } from "../utils";
+import { convertColorToHex, DEFAULT_CODE_FONT, HALF_POINTS_PER_PIXEL } from "../utils";
 
 /**
  * Convert TipTap text node to DOCX TextRun or ExternalHyperlink
@@ -30,9 +30,7 @@ export function convertText(node: TextNode): TextRun | ExternalHyperlink {
     if (fontSizeStr.endsWith("px")) {
       const px = parseFloat(fontSizeStr);
       if (!isNaN(px)) {
-        // Convert px to half-points: 1px ≈ 0.75pt, 1pt = 2 half-points
-        // So: px * 0.75 * 2 = px * 1.5
-        fontSize = Math.round(px * 1.5);
+        fontSize = Math.round(px * HALF_POINTS_PER_PIXEL);
       }
     }
   }
@@ -40,7 +38,7 @@ export function convertText(node: TextNode): TextRun | ExternalHyperlink {
   // Handle font family (prioritize code font, then textStyle font)
   let fontFamily: string | undefined;
   if (isCode) {
-    fontFamily = "Consolas";
+    fontFamily = DEFAULT_CODE_FONT;
   } else if (textStyleMark?.attrs?.fontFamily) {
     fontFamily = textStyleMark.attrs.fontFamily;
   }

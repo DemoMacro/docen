@@ -1,7 +1,7 @@
 import type { Element, Text } from "xast";
 import type { ParseContext } from "../parser";
 import type { StyleInfo } from "../parsers/styles";
-import { findChild } from "@docen/utils";
+import { findChild, TEXT_ALIGN_MAP, PIXELS_PER_HALF_POINT } from "@docen/utils";
 import {
   findDrawingElement,
   extractImageFromDrawing,
@@ -258,7 +258,7 @@ export function extractMarks(
 
     // Font size (convert half-points to px)
     if (mergedFormat.fontSize) {
-      const px = Math.round((mergedFormat.fontSize / 1.5) * 10) / 10;
+      const px = Math.round(mergedFormat.fontSize * PIXELS_PER_HALF_POINT * 10) / 10;
       textStyleAttrs.fontSize = `${px}px`;
     }
 
@@ -286,13 +286,7 @@ export function extractAlignment(
   if (!jc?.attributes["w:val"]) return undefined;
 
   const alignment = jc.attributes["w:val"] as string;
-  const map: Record<string, "left" | "right" | "center" | "justify"> = {
-    left: "left",
-    right: "right",
-    center: "center",
-    both: "justify",
-  };
-
-  const textAlign = map[alignment];
+  const textAlign =
+    TEXT_ALIGN_MAP.docxToTipTap[alignment as keyof typeof TEXT_ALIGN_MAP.docxToTipTap];
   return textAlign ? { textAlign } : undefined;
 }

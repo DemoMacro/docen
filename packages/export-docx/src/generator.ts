@@ -115,6 +115,11 @@ export async function generateDOCX<T extends OutputType>(
     additionalParagraphStyles.push(options.table.style);
   }
 
+  // Add code block style if configured
+  if (options.code?.style) {
+    additionalParagraphStyles.push(options.code.style);
+  }
+
   const mergedStyles = styles
     ? {
         ...styles,
@@ -250,7 +255,16 @@ export async function convertNode(
       return convertBlockquote(node as BlockquoteNode);
 
     case "codeBlock":
-      return convertCodeBlock(node as CodeBlockNode);
+      const codeParagraph = convertCodeBlock(node as CodeBlockNode);
+
+      // Apply style if configured
+      if (options.code?.style) {
+        return new Paragraph({
+          children: [codeParagraph],
+          style: options.code.style.id,
+        });
+      }
+      return codeParagraph;
 
     case "image":
       // Convert image node to ImageRun and wrap in Paragraph with style
