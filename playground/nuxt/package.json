@@ -7,6 +7,10 @@
     "preview": "nuxt preview"
   },
   "devDependencies": {
+    "@docen/export-docx": "workspace:*",
+    "@docen/extensions": "workspace:*",
+    "@docen/import-docx": "workspace:*",
+    "@iconify-json/lucide": "1.2.90",
     "@nuxt/ui": "4.4.0",
     "nuxt": "4.3.1",
     "tailwindcss": "4.1.18"

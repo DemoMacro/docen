@@ -41,7 +41,7 @@
     "@types/node": "25.2.3",
     "oxfmt": "0.31.0",
     "oxlint": "1.46.0",
-    "oxlint-tsgolint": "0.11.5",
+    "oxlint-tsgolint": "0.12.0",
     "unbuild": "3.6.1"
   }
 }

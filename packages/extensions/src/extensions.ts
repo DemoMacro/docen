@@ -39,6 +39,7 @@ import {
   FontFamily,
   FontSize,
   LineHeight,
+  TextAlign,
 } from "./tiptap";
 
 // Import customized extensions (replace official ones)
@@ -47,10 +48,12 @@ import { Image } from "./extends/image";
 import { Paragraph } from "./extends/paragraph";
 import { TableRow } from "./extends/table-row";
 
-import { Extensions } from "@tiptap/core";
+import { AnyExtension } from "@tiptap/core";
+
+import { all, createLowlight } from "lowlight";
 
 // Nodes
-export const tiptapNodeExtensions: Extensions = [
+export const tiptapNodeExtensions: AnyExtension[] = [
   Document,
   Paragraph, // Customized version from extends/
   Text,
@@ -59,7 +62,9 @@ export const tiptapNodeExtensions: Extensions = [
   OrderedList,
   BulletList,
   ListItem,
-  CodeBlockLowlight,
+  CodeBlockLowlight.configure({
+    lowlight: createLowlight(all),
+  }),
   Details,
   DetailsSummary,
   DetailsContent,
@@ -75,10 +80,13 @@ export const tiptapNodeExtensions: Extensions = [
   TaskList,
   TaskItem,
   Heading, // Customized version from extends/
+  TextAlign.configure({
+    types: ["heading", "paragraph"],
+  }),
 ];
 
 // Marks
-export const tiptapMarkExtensions: Extensions = [
+export const tiptapMarkExtensions: AnyExtension[] = [
   Bold,
   Code,
   Highlight,
@@ -97,7 +105,7 @@ export const tiptapMarkExtensions: Extensions = [
 ];
 
 // Complete extension set
-export const tiptapExtensions: Extensions = [...tiptapNodeExtensions, ...tiptapMarkExtensions];
+export const tiptapExtensions: AnyExtension[] = [...tiptapNodeExtensions, ...tiptapMarkExtensions];
 
 // Export all individual extensions for direct imports
 export * from "./tiptap";
@@ -105,3 +113,4 @@ export { Heading } from "./extends/heading";
 export { Image } from "./extends/image";
 export { Paragraph } from "./extends/paragraph";
 export { TableRow } from "./extends/table-row";
+export { TextAlign } from "@tiptap/extension-text-align";
