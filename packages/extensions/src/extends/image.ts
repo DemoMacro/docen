@@ -23,6 +23,13 @@ export const Image = BaseImage.extend({
       // Inherit all parent attributes (src, alt, title, width, height)
       ...this.parent?.(),
 
+      // Set display to inline-block for inline images to make text-align work properly
+      display: {
+        default: null,
+        parseHTML: () => (this.options.inline ? "inline-block" : null),
+        renderHTML: () => (this.options.inline ? { style: "display: inline-block" } : {}),
+      },
+
       // Add rotation attribute (in degrees)
       rotation: {
         default: null,
