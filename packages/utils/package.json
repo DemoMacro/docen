@@ -1,6 +1,6 @@
 {
   "name": "@docen/utils",
-  "version": "0.0.9",
+  "version": "0.0.10",
   "description": "Shared utility functions for DOCX processing, including unit conversions, color transformations, and XML helpers",
   "keywords": [
     "color",
