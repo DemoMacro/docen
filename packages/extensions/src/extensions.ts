@@ -70,7 +70,9 @@ export const tiptapNodeExtensions: AnyExtension[] = [
   DetailsContent,
   Emoji,
   HorizontalRule,
-  Image, // Customized version from extends/
+  Image.configure({
+    inline: true,
+  }), // Customized version from extends/
   Mathematics,
   Mention,
   Table,
