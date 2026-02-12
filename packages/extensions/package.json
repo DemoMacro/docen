@@ -83,6 +83,7 @@
     "@tiptap/extension-task-item": "3.19.0",
     "@tiptap/extension-task-list": "3.19.0",
     "@tiptap/extension-text": "3.19.0",
+    "@tiptap/extension-text-align": "3.19.0",
     "@tiptap/extension-text-style": "3.19.0",
     "@tiptap/extension-underline": "3.19.0",
     "docx": "9.5.1"

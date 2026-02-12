@@ -86,9 +86,9 @@ export function convertEmuStringToPixels(emuStr: string): number | undefined {
 
 /**
  * Regular expression for matching CSS length values
- * Supports: px, pt, em, rem, %, and unitless values
+ * Supports: px, pt, em, rem, %, and unitless values (including negative values)
  */
-const CSS_LENGTH_REGEX = /^([\d.]+)(px|pt|em|rem|%|)?$/;
+const CSS_LENGTH_REGEX = /^(-?[\d.]+)(px|pt|em|rem|%|)?$/;
 
 /**
  * Conversion factors from various units to pixels
@@ -111,6 +111,7 @@ const UNIT_TO_PIXELS: Record<string, number> = {
  * convertCssLengthToPixels("20px") // returns 20
  * convertCssLengthToPixels("1.5em") // returns 24
  * convertCssLengthToPixels("100%") // returns 16
+ * convertCssLengthToPixels("20") // returns 20 (unitless treated as px)
  */
 export function convertCssLengthToPixels(value: string): number {
   if (!value) return 0;

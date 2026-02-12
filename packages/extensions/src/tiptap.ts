@@ -39,3 +39,4 @@ export { BackgroundColor } from "@tiptap/extension-text-style";
 export { FontFamily } from "@tiptap/extension-text-style";
 export { FontSize } from "@tiptap/extension-text-style";
 export { LineHeight } from "@tiptap/extension-text-style";
+export { TextAlign } from "@tiptap/extension-text-align";

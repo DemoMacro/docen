@@ -3,7 +3,7 @@ import type { JSONContent } from "@tiptap/core";
 import type { ParseContext } from "../parser";
 import type { StyleInfo } from "../parsers/styles";
 import { extractRuns, extractAlignment } from "./text";
-import { findChild, parseTwipAttr } from "@docen/utils";
+import { findChild, parseTwipAttr, convertTwipToCssString } from "@docen/utils";
 
 /**
  * Extract paragraph style attributes from DOCX paragraph properties
@@ -24,17 +24,32 @@ function extractParagraphStyles(node: Element): {
   const ind = findChild(pPr, "w:ind");
   if (ind) {
     const left = parseTwipAttr(ind.attributes, "w:left");
-    if (left) result.indentLeft = left;
+    if (left) {
+      const leftTwip = parseInt(left, 10);
+      result.indentLeft = convertTwipToCssString(leftTwip);
+    }
 
     const right = parseTwipAttr(ind.attributes, "w:right");
-    if (right) result.indentRight = right;
+    if (right) {
+      const rightTwip = parseInt(right, 10);
+      result.indentRight = convertTwipToCssString(rightTwip);
+    }
 
     const firstLine = parseTwipAttr(ind.attributes, "w:firstLine");
     if (firstLine) {
-      result.indentFirstLine = firstLine;
+      const firstLineTwip = parseInt(firstLine, 10);
+      result.indentFirstLine = convertTwipToCssString(firstLineTwip);
     } else {
+      // Hanging indent: first line is LESS indented than other lines
+      // For example: left=480, hanging=480 means first line indent=0, other lines=480
+      // We store the actual first line indent (left - hanging)
       const hanging = parseTwipAttr(ind.attributes, "w:hanging");
-      if (hanging) result.indentFirstLine = `-${hanging}`;
+      if (hanging) {
+        const leftTwip = left ? parseInt(left, 10) : 0;
+        const hangingTwip = parseInt(hanging, 10);
+        const firstLineTwip = leftTwip - hangingTwip;
+        result.indentFirstLine = convertTwipToCssString(firstLineTwip);
+      }
     }
   }
 
@@ -42,10 +57,16 @@ function extractParagraphStyles(node: Element): {
   const spacing = findChild(pPr, "w:spacing");
   if (spacing) {
     const before = parseTwipAttr(spacing.attributes, "w:before");
-    if (before) result.spacingBefore = before;
+    if (before) {
+      const beforeTwip = parseInt(before, 10);
+      result.spacingBefore = convertTwipToCssString(beforeTwip);
+    }
 
     const after = parseTwipAttr(spacing.attributes, "w:after");
-    if (after) result.spacingAfter = after;
+    if (after) {
+      const afterTwip = parseInt(after, 10);
+      result.spacingAfter = convertTwipToCssString(afterTwip);
+    }
   }
 
   return Object.keys(result).length ? result : null;
@@ -116,7 +137,13 @@ export async function convertParagraph(
 
   // Check if pure image
   if (runs.length === 1 && runs[0].type === "image") {
-    return runs[0] as JSONContent;
+    // Wrap image in paragraph to preserve paragraph-level styles (alignment, indents, spacing)
+    const imageNode = runs[0] as JSONContent;
+    return {
+      type: "paragraph",
+      ...(Object.keys(attrs).length && { attrs }),
+      content: [imageNode],
+    };
   }
 
   return {
