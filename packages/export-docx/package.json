@@ -54,13 +54,13 @@
     "prepack": "pnpm build"
   },
   "dependencies": {
-    "docx": "9.5.1",
+    "docx": "9.5.3",
     "image-meta": "0.2.2",
     "ofetch": "1.5.1"
   },
   "devDependencies": {
     "@docen/extensions": "workspace:*",
     "@docen/utils": "workspace:*",
-    "@tiptap/core": "3.19.0"
+    "@tiptap/core": "3.20.0"
   }
 }
