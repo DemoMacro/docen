@@ -1,9 +1,7 @@
 import { readFileSync, writeFileSync, existsSync, readdirSync, rmSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { generateDOCX } from "../../packages/export-docx/src";
-import { parseDOCX } from "../../packages/import-docx/src";
-import { generateJSON, generateHTML } from "./html";
+import { parseDOCX, generateDOCX, parseHTML, generateHTML } from "docen";
 import { PageBreak } from "../../packages/export-docx/src/docx";
 import { unzipSync } from "fflate";
 import { fromXml } from "xast-util-from-xml";
@@ -95,7 +93,7 @@ htmlFiles.forEach((htmlFile) => {
     const jsonPath = join(jsonDir, jsonFile);
 
     const html = readFileSync(htmlPath, "utf-8");
-    const json = generateJSON(html);
+    const json = parseHTML(html);
 
     writeFileSync(jsonPath, JSON.stringify(json, null, 2));
   } catch (error) {
