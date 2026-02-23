@@ -5,34 +5,56 @@
 ![GitHub](https://img.shields.io/github/license/DemoMacro/docen)
 [![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg)](https://www.contributor-covenant.org/version/2/1/code_of_conduct/)
 
-> A modern rich-text editor based on TipTap with comprehensive extensions for document processing.
+> Universal document format converter providing seamless transformation between Markdown, HTML, and DOCX formats. Built on TipTap/ProseMirror with comprehensive TypeScript support.
 
 ## Packages
 
-- **[@docen/extensions](./packages/extensions)** - TipTap extensions with comprehensive TypeScript types
+- **[docen](./packages/docen)** - Universal document converter with unified API for Markdown, HTML, and DOCX transformations
+- **[@docen/extensions](./packages/extensions)** - Comprehensive TipTap extension collection with full TypeScript types
 - **[@docen/export-docx](./packages/export-docx)** - Export TipTap/ProseMirror content to Microsoft Word DOCX format
 - **[@docen/import-docx](./packages/import-docx)** - Import Microsoft Word DOCX files to TipTap/ProseMirror content
 
 ## Quick Start
 
-### DOCX Export
+### Universal Format Converter (Recommended)
+
+For seamless conversion between Markdown, HTML, and DOCX formats, use the unified `docen` package:
 
 ```bash
 # Install with npm
-$ npm install @docen/export-docx
+$ npm install docen
 
 # Install with yarn
-$ yarn add @docen/export-docx
+$ yarn add docen
 
 # Install with pnpm
-$ pnpm add @docen/export-docx
+$ pnpm add docen
+```
+
+```typescript
+import { parseHTML, generateDOCX, parseMarkdown } from "docen";
+
+// HTML → DOCX
+const doc = parseHTML("<h1>Title</h1><p>Hello World</p>");
+const docx = await generateDOCX(doc, { outputType: "nodebuffer" });
+
+// Markdown → HTML
+const doc2 = parseMarkdown("# Title\n\nHello World");
+const html = generateHTML(doc2);
+```
+
+### Individual Format Packages
+
+#### DOCX Export
+
+```bash
+$ npm install @docen/export-docx
 ```
 
 ```typescript
 import { generateDOCX } from "@docen/export-docx";
 import { writeFileSync } from "node:fs";
 
-// Your TipTap/ProseMirror editor content
 const content = {
   type: "doc",
   content: [
@@ -49,22 +71,14 @@ const content = {
   ],
 };
 
-// Convert to DOCX and save to file
 const docx = await generateDOCX(content, { outputType: "nodebuffer" });
 writeFileSync("document.docx", docx);
 ```
 
-### DOCX Import
+#### DOCX Import
 
 ```bash
-# Install with npm
 $ npm install @docen/import-docx
-
-# Install with yarn
-$ yarn add @docen/import-docx
-
-# Install with pnpm
-$ pnpm add @docen/import-docx
 ```
 
 ```typescript

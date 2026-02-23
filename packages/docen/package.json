@@ -1,0 +1,59 @@
+{
+  "name": "docen",
+  "version": "0.0.10",
+  "description": "Universal document format converter providing unified API for seamless transformation between Markdown, HTML, and DOCX formats. Built on TipTap/ProseMirror ecosystem with comprehensive TypeScript support.",
+  "keywords": [
+    "converter",
+    "docen",
+    "document",
+    "docx",
+    "format-conversion",
+    "html",
+    "markdown",
+    "microsoft-word",
+    "office",
+    "prosemirror",
+    "rich-text",
+    "tiptap",
+    "typescript",
+    "unified-api",
+    "word"
+  ],
+  "homepage": "https://github.com/DemoMacro/docen#readme",
+  "bugs": {
+    "url": "https://github.com/DemoMacro/docen/issues"
+  },
+  "license": "MIT",
+  "author": {
+    "name": "Demo Macro",
+    "email": "abc@imst.xyz",
+    "url": "https://imst.xyz/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DemoMacro/docen.git"
+  },
+  "files": [
+    "dist"
+  ],
+  "main": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "scripts": {
+    "dev": "unbuild --stub",
+    "build": "unbuild",
+    "prepack": "pnpm build"
+  },
+  "dependencies": {
+    "@docen/export-docx": "workspace:*",
+    "@docen/extensions": "workspace:*",
+    "@docen/import-docx": "workspace:*",
+    "@tiptap/html": "3.20.0",
+    "@tiptap/markdown": "3.20.0"
+  }
+}
