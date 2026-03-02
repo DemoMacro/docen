@@ -1,23 +1,16 @@
 {
-  "name": "docen",
-  "version": "0.0.10",
-  "description": "Universal document format converter providing unified API for seamless transformation between Markdown, HTML, and DOCX formats. Built on TipTap/ProseMirror ecosystem with comprehensive TypeScript support.",
+  "name": "@docen/deduplicate",
+  "version": "0.0.0",
+  "description": "Text deduplication utilities for Tiptap/ProseMirror JSON documents using Levenshtein distance",
   "keywords": [
-    "converter",
+    "deduplication",
     "docen",
     "document",
-    "docx",
-    "format-conversion",
-    "html",
-    "markdown",
-    "microsoft-word",
-    "office",
+    "levenshtein",
+    "plagiarism",
     "prosemirror",
-    "rich-text",
-    "tiptap",
-    "typescript",
-    "unified-api",
-    "word"
+    "similarity",
+    "tiptap"
   ],
   "homepage": "https://github.com/DemoMacro/docen#readme",
   "bugs": {
@@ -50,10 +43,10 @@
     "prepack": "pnpm build"
   },
   "dependencies": {
-    "@docen/export-docx": "workspace:*",
+    "fastest-levenshtein": "1.0.16"
+  },
+  "devDependencies": {
     "@docen/extensions": "workspace:*",
-    "@docen/import-docx": "workspace:*",
-    "@tiptap/html": "3.20.0",
-    "@tiptap/markdown": "3.20.0"
+    "@tiptap/core": "3.20.0"
   }
 }
