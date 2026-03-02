@@ -9,10 +9,11 @@
 
 ## Packages
 
-- **[docen](./packages/docen)** - Universal document converter with unified API for Markdown, HTML, and DOCX transformations
-- **[@docen/extensions](./packages/extensions)** - Comprehensive TipTap extension collection with full TypeScript types
-- **[@docen/export-docx](./packages/export-docx)** - Export TipTap/ProseMirror content to Microsoft Word DOCX format
-- **[@docen/import-docx](./packages/import-docx)** - Import Microsoft Word DOCX files to TipTap/ProseMirror content
+- **[docen](./packages/docen/README.md)** - Universal document converter with unified API for Markdown, HTML, and DOCX transformations
+- **[@docen/extensions](./packages/extensions/README.md)** - Comprehensive TipTap extension collection with full TypeScript types
+- **[@docen/export-docx](./packages/export-docx/README.md)** - Export TipTap/ProseMirror content to Microsoft Word DOCX format
+- **[@docen/import-docx](./packages/import-docx/README.md)** - Import Microsoft Word DOCX files to TipTap/ProseMirror content
+- **[@docen/deduplicate](./packages/deduplicate/README.md)** - Document deduplication and similarity analysis utilities
 
 ## Quick Start
 
