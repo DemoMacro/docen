@@ -1,10 +1,10 @@
 {
   "devDependencies": {
+    "@docen/docen": "workspace:*",
     "@docen/export-docx": "workspace:*",
     "@docen/extensions": "workspace:*",
     "@docen/import-docx": "workspace:*",
-    "@napi-rs/canvas": "0.1.94",
-    "docen": "workspace:*",
+    "@napi-rs/canvas": "0.1.95",
     "fflate": "0.8.2",
     "xast-util-from-xml": "4.0.0"
   }

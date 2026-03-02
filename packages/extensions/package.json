@@ -30,26 +30,24 @@
     "dist"
   ],
   "main": "dist/index.mjs",
-  "types": "dist/index.d.ts",
+  "types": "dist/index.d.mts",
   "exports": {
     ".": {
-      "import": "./dist/index.mjs",
-      "require": "./dist/index.cjs"
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
     },
     "./tiptap": {
-      "types": "./dist/tiptap.d.ts",
-      "import": "./dist/tiptap.mjs",
-      "require": "./dist/tiptap.cjs"
+      "types": "./dist/tiptap.d.mts",
+      "import": "./dist/tiptap.mjs"
     },
     "./types": {
-      "types": "./dist/types.d.ts",
-      "import": "./dist/types.mjs",
-      "require": "./dist/types.cjs"
+      "types": "./dist/types.d.mts",
+      "import": "./dist/types.mjs"
     }
   },
   "scripts": {
-    "dev": "unbuild --stub",
-    "build": "unbuild",
+    "dev": "basis build --stub",
+    "build": "basis build",
     "prepack": "pnpm build"
   },
   "dependencies": {
@@ -84,6 +82,6 @@
     "@tiptap/extension-text-align": "3.20.0",
     "@tiptap/extension-text-style": "3.20.0",
     "@tiptap/extension-underline": "3.20.0",
-    "docx": "9.5.3"
+    "docx": "9.6.0"
   }
 }

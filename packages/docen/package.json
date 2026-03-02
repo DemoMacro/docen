@@ -1,5 +1,5 @@
 {
-  "name": "docen",
+  "name": "@docen/docen",
   "version": "0.0.10",
   "description": "Universal document format converter providing unified API for seamless transformation between Markdown, HTML, and DOCX formats. Built on TipTap/ProseMirror ecosystem with comprehensive TypeScript support.",
   "keywords": [
@@ -37,16 +37,16 @@
     "dist"
   ],
   "main": "dist/index.mjs",
-  "types": "dist/index.d.ts",
+  "types": "dist/index.d.mts",
   "exports": {
     ".": {
-      "import": "./dist/index.mjs",
-      "require": "./dist/index.cjs"
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
     }
   },
   "scripts": {
-    "dev": "unbuild --stub",
-    "build": "unbuild",
+    "dev": "basis build --stub",
+    "build": "basis build",
     "prepack": "pnpm build"
   },
   "dependencies": {

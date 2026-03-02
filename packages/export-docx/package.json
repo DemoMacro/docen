@@ -36,25 +36,24 @@
     "dist"
   ],
   "main": "dist/index.mjs",
-  "types": "dist/index.d.ts",
+  "types": "dist/index.d.mts",
   "exports": {
     ".": {
-      "import": "./dist/index.mjs",
-      "require": "./dist/index.cjs"
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
     },
     "./docx": {
-      "types": "./dist/docx.d.ts",
-      "import": "./dist/docx.mjs",
-      "require": "./dist/docx.cjs"
+      "types": "./dist/docx.d.mts",
+      "import": "./dist/docx.mjs"
     }
   },
   "scripts": {
-    "dev": "unbuild --stub",
-    "build": "unbuild",
+    "dev": "basis build --stub",
+    "build": "basis build",
     "prepack": "pnpm build"
   },
   "dependencies": {
-    "docx": "9.5.3",
+    "docx": "9.6.0",
     "image-meta": "0.2.2",
     "ofetch": "1.5.1"
   },
