@@ -31,17 +31,19 @@
     "url": "git+https://github.com/DemoMacro/docen.git"
   },
   "scripts": {
-    "dev": "pnpm -r prepack --stub",
-    "build": "pnpm -r prepack",
-    "lint": "basis lint --all",
+    "dev": "pnpm --filter \"./packages/**\" --recursive dev",
+    "build": "pnpm -r build",
+    "lint": "basis lint",
+    "fmt": "basis fmt",
+    "check": "basis check",
     "postinstall": "pnpm dev && basis git setup"
   },
   "devDependencies": {
-    "@funish/basis": "0.1.3",
-    "@types/node": "25.3.0",
-    "oxfmt": "0.35.0",
-    "oxlint": "1.50.0",
-    "oxlint-tsgolint": "0.14.2",
+    "@funish/basis": "0.2.4",
+    "@types/node": "25.3.3",
+    "oxfmt": "0.36.0",
+    "oxlint": "1.51.0",
+    "oxlint-tsgolint": "0.15.0",
     "unbuild": "3.6.1"
   }
 }

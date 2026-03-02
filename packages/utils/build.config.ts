@@ -1,13 +1,5 @@
-import { defineBuildConfig } from "unbuild";
+import { defineBuildConfig } from "@funish/basis/config";
 
 export default defineBuildConfig({
-  declaration: true,
   entries: ["src/index"],
-  rollup: {
-    emitCJS: true,
-    esbuild: {
-      minify: true,
-    },
-    inlineDependencies: true,
-  },
 });
