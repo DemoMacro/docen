@@ -41,21 +41,15 @@ const document = {
   content: [
     {
       type: "paragraph",
-      content: [
-        { type: "text", text: "机器学习是人工智能的一个重要分支。" },
-      ],
+      content: [{ type: "text", text: "机器学习是人工智能的一个重要分支。" }],
     },
     {
       type: "paragraph",
-      content: [
-        { type: "text", text: "机器学习是人工智能的一个重要分支。" },
-      ],
+      content: [{ type: "text", text: "机器学习是人工智能的一个重要分支。" }],
     },
     {
       type: "paragraph",
-      content: [
-        { type: "text", text: "深度学习是机器学习的子领域。" },
-      ],
+      content: [{ type: "text", text: "深度学习是机器学习的子领域。" }],
     },
   ],
 };
@@ -82,6 +76,7 @@ console.log(duplicates);
 Extracts all paragraph text from a Tiptap JSON document.
 
 **Parameters:**
+
 - `doc: JSONContent` - Tiptap/ProseMirror document
 
 **Returns:** `string[]` - Array of paragraph texts
@@ -98,6 +93,7 @@ const paragraphs = extractParagraphs(document);
 Calculates similarity ratio between two texts using Levenshtein distance.
 
 **Parameters:**
+
 - `text1: string` - First text
 - `text2: string` - Second text
 - `options?: DeduplicateOptions` - Configuration options
@@ -110,7 +106,7 @@ import { calculateSimilarity } from "@docen/deduplicate";
 const similarity = calculateSimilarity(
   "机器学习是人工智能的一个重要分支。",
   "机器学习是人工智能的重要分支。",
-  { ignoreCase: true, ignoreWhitespace: true }
+  { ignoreCase: true, ignoreWhitespace: true },
 );
 
 console.log(similarity); // 0.94 (94% similar)
@@ -120,9 +116,10 @@ console.log(similarity); // 0.94 (94% similar)
 
 ```typescript
 interface DeduplicateOptions {
-  threshold?: number;          // Similarity threshold (0-1), default: 0.85
-  ignoreWhitespace?: boolean;  // Ignore whitespace differences, default: true
-  ignoreCase?: boolean;        // Ignore case differences, default: true
+  threshold?: number; // Similarity threshold (0-1), default: 0.85
+  ignoreWhitespace?: boolean; // Ignore whitespace differences, default: true
+  ignoreCase?: boolean; // Ignore case differences, default: true
+  filter?: (text: string) => boolean; // Filter function, default: () => true
 }
 ```
 
@@ -131,6 +128,7 @@ interface DeduplicateOptions {
 Finds duplicate/similar paragraphs in a document.
 
 **Parameters:**
+
 - `doc: JSONContent` - Tiptap/ProseMirror document
 - `options?: DeduplicateOptions` - Configuration options
 
@@ -147,10 +145,10 @@ const duplicates = findDuplicates(document, {
 
 // Result type:
 interface DuplicateMatch {
-  index: number;           // Index of first occurrence
-  text: string;            // The paragraph text
-  duplicates: number[];    // Indices of duplicate occurrences
-  similarities: number[];  // Similarity scores for each duplicate
+  index: number; // Index of first occurrence
+  text: string; // The paragraph text
+  duplicates: number[]; // Indices of duplicate occurrences
+  similarities: number[]; // Similarity scores for each duplicate
 }
 ```
 
@@ -159,32 +157,37 @@ interface DuplicateMatch {
 Compares two documents and finds similar paragraphs.
 
 **Parameters:**
+
 - `doc1: JSONContent` - First document
 - `doc2: JSONContent` - Second document
 - `options?: DeduplicateOptions` - Configuration options
 
-**Returns:** `DocumentComparison[]` - Array of similar paragraph pairs
+**Returns:** `DocumentComparison[]` - Array of all paragraph comparisons
 
 ```typescript
 import { compareDocuments } from "@docen/deduplicate";
 
 const comparisons = compareDocuments(doc1, doc2, {
-  threshold: 0.7, // Lower threshold for cross-document comparison
+  filter: (text) => text.length >= 20, // Only compare texts >= 20 chars
 });
 
 // Result type:
 interface DocumentComparison {
   fromDoc1: { index: number; text: string };
-  fromDoc2: { index: number; text: string };
-  similarity: number;
+  fromDoc2: { index: number; text: string } | null; // null if no match
+  similarity: number; // 0 if filtered or no match
+  filtered: boolean; // true if filtered by filter function
 }
 ```
+
+**Note:** This function returns **all** paragraphs from `doc1`, including filtered ones. Use the `filtered` and `similarity` properties to determine the comparison result.
 
 ### `findMostSimilar(targetText, candidates, options?)`
 
 Finds the most similar text from a list of candidates.
 
 **Parameters:**
+
 - `targetText: string` - Target text to match
 - `candidates: string[]` - Array of candidate texts
 - `options?: DeduplicateOptions` - Configuration options
@@ -249,7 +252,9 @@ const duplicates = findDuplicates(document);
 duplicates.forEach((dup) => {
   console.log(`Found "${dup.text}" at index ${dup.index}`);
   console.log(`  Duplicates at: ${dup.duplicates.join(", ")}`);
-  console.log(`  Similarities: ${dup.similarities.map(s => (s * 100).toFixed(1) + "%").join(", ")}`);
+  console.log(
+    `  Similarities: ${dup.similarities.map((s) => (s * 100).toFixed(1) + "%").join(", ")}`,
+  );
 });
 ```
 
@@ -262,14 +267,16 @@ const studentEssay = parseEssay(studentSubmission);
 const referenceEssay = parseEssay(referenceMaterial);
 
 const comparisons = compareDocuments(studentEssay, referenceEssay, {
-  threshold: 0.75,
+  filter: (text) => text.length >= 30, // Only compare substantial paragraphs
 });
 
 comparisons.forEach((comp) => {
-  console.log(`Suspicious similarity detected:`);
-  console.log(`  Student: "${comp.fromDoc1.text}"`);
-  console.log(`  Reference: "${comp.fromDoc2.text}"`);
-  console.log(`  Similarity: ${(comp.similarity * 100).toFixed(1)}%`);
+  if (comp.similarity >= 0.75 && !comp.filtered) {
+    console.log(`Suspicious similarity detected:`);
+    console.log(`  Student: "${comp.fromDoc1.text}"`);
+    console.log(`  Reference: "${comp.fromDoc2.text}"`);
+    console.log(`  Similarity: ${(comp.similarity * 100).toFixed(1)}%`);
+  }
 });
 ```
 
@@ -282,16 +289,66 @@ import { findDuplicates, calculateSimilarity } from "@docen/deduplicate";
 const exactDuplicates = findDuplicates(document, { threshold: 0.95 });
 
 // High recall (catch more potential duplicates)
-const looseMatches = findDuplicates(document, { threshold: 0.70 });
+const looseMatches = findDuplicates(document, { threshold: 0.7 });
 
 // Manual similarity calculation
 const similarity = calculateSimilarity(
   "The quick brown fox jumps over the lazy dog.",
   "The quick brown cat jumps over the lazy dog.",
-  { ignoreCase: true, ignoreWhitespace: true }
+  { ignoreCase: true, ignoreWhitespace: true },
 );
 
 console.log(`Similarity: ${(similarity * 100).toFixed(1)}%`);
+```
+
+### Filtering Short Texts
+
+```typescript
+import { compareDocuments } from "@docen/deduplicate";
+
+const comparisons = compareDocuments(doc1, doc2, {
+  // Only compare paragraphs with at least 20 characters
+  filter: (text) => text.length >= 20,
+});
+
+// Process results
+comparisons.forEach((comp) => {
+  if (comp.filtered) {
+    console.log(`Skipped (too short): "${comp.fromDoc1.text}"`);
+  } else if (comp.fromDoc2) {
+    console.log(`Similarity: ${(comp.similarity * 100).toFixed(1)}%`);
+    console.log(`  Doc1: "${comp.fromDoc1.text}"`);
+    console.log(`  Doc2: "${comp.fromDoc2.text}"`);
+  } else {
+    console.log(`No match found: "${comp.fromDoc1.text}"`);
+  }
+});
+```
+
+### Advanced Filtering
+
+```typescript
+import { compareDocuments } from "@docen/deduplicate";
+
+const comparisons = compareDocuments(doc1, doc2, {
+  // Combine multiple conditions
+  filter: (text) => {
+    const minLength = 10;
+    const maxLength = 500;
+    const length = text.length;
+
+    // Skip very short or very long texts
+    if (length < minLength || length > maxLength) return false;
+
+    // Skip numbered lists like "1." "2." etc.
+    if (/^\d+\.$/.test(text.trim())) return false;
+
+    // Skip URLs
+    if (text.startsWith("http://") || text.startsWith("https://")) return false;
+
+    return true;
+  },
+});
 ```
 
 ### Language-Specific Options
@@ -300,27 +357,21 @@ console.log(`Similarity: ${(similarity * 100).toFixed(1)}%`);
 import { calculateSimilarity } from "@docen/deduplicate";
 
 // English: Case-insensitive comparison
-const enSimilarity = calculateSimilarity(
-  "Hello World",
-  "hello world",
-  { ignoreCase: true }
-);
+const enSimilarity = calculateSimilarity("Hello World", "hello world", { ignoreCase: true });
 // 1.0 (100% similar)
 
 // Chinese: No case sensitivity needed
 const zhSimilarity = calculateSimilarity(
   "机器学习是人工智能的重要分支",
   "机器学习是人工智能的重要分支",
-  { ignoreCase: true }
+  { ignoreCase: true },
 );
 // 1.0 (100% similar)
 
 // Whitespace handling
-const wsSimilarity = calculateSimilarity(
-  "机器学习　　是　一个　领域",
-  "机器学习 是 一个 领域",
-  { ignoreWhitespace: true }
-);
+const wsSimilarity = calculateSimilarity("机器学习　　是　一个　领域", "机器学习 是 一个 领域", {
+  ignoreWhitespace: true,
+});
 // 1.0 (100% similar, full-width vs half-width spaces)
 ```
 

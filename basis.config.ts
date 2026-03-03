@@ -19,8 +19,8 @@ export default defineBasisConfig({
     },
     staged: {
       rules: {
-        "*.{ts,tsx,js,jsx}": "basis lint --fix",
-        "*.{json,md,yml,yaml}": "basis fmt --write",
+        "*.{ts,tsx,js,jsx}": "pnpm basis lint",
+        "*.{json,md,yml,yaml}": "pnpm basis fmt",
       },
     },
   },

@@ -84,10 +84,7 @@ export function calculateSimilarity(
   text2: string,
   options: DeduplicateOptions = {},
 ): number {
-  const {
-    ignoreWhitespace = true,
-    ignoreCase = true,
-  } = options;
+  const { ignoreWhitespace = true, ignoreCase = true } = options;
 
   const normalized1 = normalizeText(text1, ignoreWhitespace, ignoreCase);
   const normalized2 = normalizeText(text2, ignoreWhitespace, ignoreCase);
@@ -114,9 +111,7 @@ export function findDuplicates(
   doc: JSONContent,
   options: DeduplicateOptions = {},
 ): DuplicateMatch[] {
-  const {
-    threshold = 0.85,
-  } = options;
+  const { threshold = 0.85 } = options;
 
   const paragraphs = extractParagraphs(doc);
   const matches: DuplicateMatch[] = [];
@@ -157,26 +152,45 @@ export function findDuplicates(
 
 /**
  * Compares two documents and finds similar paragraphs
+ * Returns all paragraph comparisons with their similarity scores
+ * Filtered texts are included in results but marked with filtered: true
  */
 export function compareDocuments(
   doc1: JSONContent,
   doc2: JSONContent,
   options: DeduplicateOptions = {},
 ): DocumentComparison[] {
-  const {
-    threshold = 0.7, // Lower threshold for cross-document comparison
-  } = options;
+  const { filter = () => true } = options;
 
   const paragraphs1 = extractParagraphs(doc1);
   const paragraphs2 = extractParagraphs(doc2);
   const comparisons: DocumentComparison[] = [];
 
   for (let i = 0; i < paragraphs1.length; i++) {
+    const text1 = paragraphs1[i];
+
+    // Check if text1 is filtered
+    if (!filter(text1)) {
+      comparisons.push({
+        fromDoc1: { index: i, text: text1 },
+        fromDoc2: null,
+        similarity: 0,
+        filtered: true,
+      });
+      continue;
+    }
+
+    // Find best match in doc2
     let bestMatch = -1;
     let bestSimilarity = 0;
 
     for (let j = 0; j < paragraphs2.length; j++) {
-      const similarity = calculateSimilarity(paragraphs1[i], paragraphs2[j], options);
+      const text2 = paragraphs2[j];
+
+      // Skip filtered paragraphs in doc2
+      if (!filter(text2)) continue;
+
+      const similarity = calculateSimilarity(text1, text2, options);
 
       if (similarity > bestSimilarity) {
         bestSimilarity = similarity;
@@ -184,11 +198,20 @@ export function compareDocuments(
       }
     }
 
-    if (bestMatch >= 0 && bestSimilarity >= threshold) {
+    if (bestMatch >= 0) {
       comparisons.push({
-        fromDoc1: { index: i, text: paragraphs1[i] },
+        fromDoc1: { index: i, text: text1 },
         fromDoc2: { index: bestMatch, text: paragraphs2[bestMatch] },
         similarity: bestSimilarity,
+        filtered: false,
+      });
+    } else {
+      // No match found (all candidates were filtered or no similar content)
+      comparisons.push({
+        fromDoc1: { index: i, text: text1 },
+        fromDoc2: null,
+        similarity: 0,
+        filtered: false,
       });
     }
   }
@@ -206,14 +229,11 @@ export function findMostSimilar(
 ): MostSimilarResult | null {
   if (candidates.length === 0) return null;
 
-  const {
-    ignoreWhitespace = true,
-    ignoreCase = true,
-  } = options;
+  const { ignoreWhitespace = true, ignoreCase = true } = options;
 
   const normalizedTarget = normalizeText(targetText, ignoreWhitespace, ignoreCase);
   const normalizedCandidates = candidates.map((c) =>
-    normalizeText(c, ignoreWhitespace, ignoreCase)
+    normalizeText(c, ignoreWhitespace, ignoreCase),
   );
 
   const closestMatch = closest(normalizedTarget, normalizedCandidates);
