@@ -20,6 +20,21 @@ export interface DeduplicateOptions {
    * @default true
    */
   ignoreCase?: boolean;
+  /**
+   * Filter function to exclude certain texts from comparison.
+   * Returns false to skip comparison, returns true to include.
+   * Filtered texts will still appear in results with `filtered: true`.
+   * @default () => true
+   *
+   * @example
+   * // Skip texts shorter than 20 characters
+   * filter: (text) => text.length >= 20
+   *
+   * @example
+   * // Skip specific patterns
+   * filter: (text) => !text.startsWith('http://')
+   */
+  filter?: (text: string) => boolean;
 }
 
 /**
@@ -42,10 +57,12 @@ export interface DuplicateMatch {
 export interface DocumentComparison {
   /** Similar paragraph from document 1 */
   fromDoc1: { index: number; text: string };
-  /** Similar paragraph from document 2 */
-  fromDoc2: { index: number; text: string };
-  /** Similarity score for the pair */
+  /** Similar paragraph from document 2 (null if no match found) */
+  fromDoc2: { index: number; text: string } | null;
+  /** Similarity score for the pair (0 if no match or filtered) */
   similarity: number;
+  /** Whether the text was filtered out by the filter function */
+  filtered: boolean;
 }
 
 /**
