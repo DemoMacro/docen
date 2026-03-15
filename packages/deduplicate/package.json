@@ -29,6 +29,7 @@
   "files": [
     "dist"
   ],
+  "type": "module",
   "main": "dist/index.mjs",
   "types": "dist/index.d.mts",
   "exports": {
@@ -47,6 +48,6 @@
   },
   "devDependencies": {
     "@docen/extensions": "workspace:*",
-    "@tiptap/core": "3.20.0"
+    "@tiptap/core": "3.20.1"
   }
 }
