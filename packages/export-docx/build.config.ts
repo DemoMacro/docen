@@ -4,7 +4,9 @@ export default defineBuildConfig({
   entries: [
     {
       entry: ["src/index", "src/docx"],
-      inlineOnly: false,
+      deps: {
+        onlyBundle: false,
+      },
     },
   ],
 });

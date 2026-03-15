@@ -1,5 +1,12 @@
 import { defineBuildConfig } from "@funish/basis/config";
 
 export default defineBuildConfig({
-  entries: ["src/index"],
+  entries: [
+    {
+      entry: ["src/index"],
+      deps: {
+        onlyBundle: false,
+      },
+    },
+  ],
 });

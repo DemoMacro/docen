@@ -4,7 +4,9 @@ export default defineBuildConfig({
   entries: [
     {
       entry: ["src/index", "src/tiptap", "src/types"],
-      inlineOnly: false,
+      deps: {
+        onlyBundle: false,
+      },
     },
   ],
 });

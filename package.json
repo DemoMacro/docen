@@ -30,12 +30,12 @@
     "type": "git",
     "url": "git+https://github.com/DemoMacro/docen.git"
   },
+  "type": "module",
   "scripts": {
     "dev": "pnpm --filter \"./packages/**\" --recursive dev",
     "build": "pnpm --filter \"./packages/**\" --recursive build",
     "lint": "basis lint",
     "fmt": "basis fmt",
-    "check": "basis check",
     "postinstall": "pnpm dev && basis git setup"
   },
   "devDependencies": {
