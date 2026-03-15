@@ -1,5 +1,10 @@
 import { defineBuildConfig } from "@funish/basis/config";
 
 export default defineBuildConfig({
-  entries: ["src/index", "src/tiptap", "src/types"],
+  entries: [
+    {
+      entry: ["src/index", "src/tiptap", "src/types"],
+      inlineOnly: false,
+    },
+  ],
 });

@@ -32,18 +32,18 @@
   },
   "scripts": {
     "dev": "pnpm --filter \"./packages/**\" --recursive dev",
-    "build": "pnpm -r build",
+    "build": "pnpm --filter \"./packages/**\" --recursive build",
     "lint": "basis lint",
     "fmt": "basis fmt",
     "check": "basis check",
     "postinstall": "pnpm dev && basis git setup"
   },
   "devDependencies": {
-    "@funish/basis": "0.2.4",
-    "@types/node": "25.3.3",
-    "oxfmt": "0.36.0",
-    "oxlint": "1.51.0",
-    "oxlint-tsgolint": "0.15.0",
+    "@funish/basis": "0.2.16",
+    "@types/node": "25.5.0",
+    "oxfmt": "0.40.0",
+    "oxlint": "1.55.0",
+    "oxlint-tsgolint": "0.16.0",
     "unbuild": "3.6.1"
   }
 }
