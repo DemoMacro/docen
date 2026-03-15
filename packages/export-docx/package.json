@@ -35,6 +35,7 @@
   "files": [
     "dist"
   ],
+  "type": "module",
   "main": "dist/index.mjs",
   "types": "dist/index.d.mts",
   "exports": {
@@ -53,13 +54,13 @@
     "prepack": "pnpm build"
   },
   "dependencies": {
-    "docx": "9.6.0",
+    "docx": "9.6.1",
     "image-meta": "0.2.2",
     "ofetch": "1.5.1"
   },
   "devDependencies": {
     "@docen/extensions": "workspace:*",
     "@docen/utils": "workspace:*",
-    "@tiptap/core": "3.20.0"
+    "@tiptap/core": "3.20.1"
   }
 }

@@ -36,6 +36,7 @@
   "files": [
     "dist"
   ],
+  "type": "module",
   "main": "dist/index.mjs",
   "types": "dist/index.d.mts",
   "exports": {
@@ -53,7 +54,7 @@
     "@docen/export-docx": "workspace:*",
     "@docen/extensions": "workspace:*",
     "@docen/import-docx": "workspace:*",
-    "@tiptap/html": "3.20.0",
-    "@tiptap/markdown": "3.20.0"
+    "@tiptap/html": "3.20.1",
+    "@tiptap/markdown": "3.20.1"
   }
 }
