@@ -47,6 +47,8 @@ export async function convertTable(
   // Build table options
   let tableOptions: ITableOptions = {
     rows,
+    // Apply table style if configured
+    ...(options?.style?.id && { style: options.style.id }),
     ...options?.run,
   };
 
