@@ -2,7 +2,6 @@ import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync } from 
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseDOCX, generateDOCX } from "docen";
-import { convertMillimetersToTwip } from "docx";
 
 // Get current file directory
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -74,16 +73,17 @@ void (async () => {
           {
             properties: {
               page: {
-                size: {
-                  width: convertMillimetersToTwip(210),
-                  height: convertMillimetersToTwip(297),
-                },
                 margin: {
-                  top: convertMillimetersToTwip(20),
-                  right: convertMillimetersToTwip(20),
-                  bottom: convertMillimetersToTwip(20),
-                  left: convertMillimetersToTwip(20),
+                  top: "2.54cm",
+                  bottom: "2.54cm",
+                  left: "3.18cm",
+                  right: "3.18cm",
+                  header: "1.5cm",
+                  footer: "1.75cm",
                 },
+              },
+              grid: {
+                type: "lines",
               },
             },
             children: [],
@@ -93,29 +93,161 @@ void (async () => {
           default: {
             document: {
               paragraph: {
+                alignment: "left",
                 spacing: {
                   line: 480,
                 },
+                indent: {
+                  firstLine: "1cm",
+                },
               },
               run: {
+                font: "宋体",
+                size: 28,
+              },
+            },
+            heading1: {
+              paragraph: {
+                alignment: "center",
+                spacing: {
+                  line: 480,
+                },
+                indent: {
+                  firstLine: 0,
+                },
+                keepNext: true,
+              },
+              run: {
+                bold: true,
+                size: 36,
+              },
+            },
+            heading2: {
+              paragraph: {
+                alignment: "center",
+                spacing: {
+                  line: 480,
+                },
+                indent: {
+                  firstLine: 0,
+                },
+                keepNext: true,
+              },
+              run: {
+                bold: true,
+                size: 32,
+              },
+            },
+            heading3: {
+              paragraph: {
+                alignment: "center",
+                spacing: {
+                  line: 480,
+                },
+                indent: {
+                  firstLine: 0,
+                },
+                keepNext: true,
+              },
+              run: {
+                bold: true,
+                size: 30,
+              },
+            },
+            heading4: {
+              paragraph: {
+                alignment: "center",
+                spacing: {
+                  line: 480,
+                },
+                indent: {
+                  firstLine: 0,
+                },
+                keepNext: true,
+              },
+              run: {
+                bold: true,
+                size: 28,
+              },
+            },
+            heading5: {
+              paragraph: {
+                alignment: "left",
+                spacing: {
+                  line: 480,
+                },
+                indent: {
+                  firstLine: "1cm",
+                },
+              },
+              run: {
+                bold: true,
+                size: 28,
+              },
+            },
+            heading6: {
+              paragraph: {
+                alignment: "left",
+                spacing: {
+                  line: 480,
+                },
+                indent: {
+                  firstLine: "1cm",
+                },
+              },
+              run: {
+                bold: true,
                 size: 28,
               },
             },
           },
         },
+        image: {
+          style: {
+            id: "Image",
+            name: "Image",
+            uiPriority: 1,
+            semiHidden: false,
+            unhideWhenUsed: true,
+            quickFormat: true,
+            paragraph: {
+              alignment: "center",
+              spacing: {
+                line: 360,
+              },
+              indent: {
+                firstLine: 0,
+              },
+            },
+          },
+        },
         table: {
+          style: {
+            id: "Table",
+            name: "Table",
+            paragraph: {
+              alignment: "center",
+              keepNext: false,
+              spacing: {
+                line: 360,
+              },
+              indent: {
+                firstLine: 0,
+              },
+            },
+            run: {
+              size: 28,
+            },
+          },
           run: {
             width: {
               size: 100,
-              type: "pct",
+              type: "pct", // Percentage width
             },
-            alignment: "center",
-            layout: "autofit",
+            alignment: "center", // Center align tables
+            layout: "autofit", // Fixed layout for auto-width behavior
           },
           cell: {
-            paragraph: {
-              alignment: "center",
-            },
             run: {
               verticalAlign: "center",
             },
