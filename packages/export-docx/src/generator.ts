@@ -261,7 +261,17 @@ export async function convertNode(
   }
 
   // Layer 2: Style Application (apply styleId if configured)
-  const styleId = getStyleIdByNodeType(node.type, options);
+  let styleId = getStyleIdByNodeType(node.type, options);
+
+  // Special case: paragraphs containing only images should use image style
+  if (!styleId && node.type === "paragraph" && node.content) {
+    const hasOnlyImages = node.content.length > 0 &&
+      node.content.every((child: JSONContent) => child.type === "image");
+    if (hasOnlyImages) {
+      styleId = options.image?.style?.id;
+    }
+  }
+
   const styledOptions = applyStyleReference(dataResult, styleId);
 
   // Layer 3: Object Creation (create DOCX instance)
@@ -306,7 +316,12 @@ async function convertNodeData(
         options: options.image?.run,
         handler: options.image?.handler,
       });
-      return { children: [imageRun] };
+      const imageParagraphOptions = { children: [imageRun] };
+
+      // Apply style reference if configured (same as other node types)
+      const styleId = getStyleIdByNodeType("image", options);
+      const styledOptions = applyStyleReference(imageParagraphOptions, styleId);
+      return styledOptions;
 
     case "table":
       return await convertTable(node as TableNode, {
