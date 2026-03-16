@@ -2,7 +2,6 @@ import { readFileSync, writeFileSync, existsSync, readdirSync, rmSync, mkdirSync
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseDOCX, generateDOCX, parseHTML, generateHTML } from "docen";
-import { PageBreak } from "../../packages/export-docx/src/docx";
 import { unzipSync } from "fflate";
 import { fromXml } from "xast-util-from-xml";
 import { convertMillimetersToTwip } from "docx";
@@ -445,12 +444,6 @@ void (async () => {
             },
           },
         },
-        horizontalRule: {
-          paragraph: {
-            border: undefined,
-            children: [new PageBreak()],
-          },
-        },
       });
 
       writeFileSync(docxPath, docxBuffer);
@@ -509,12 +502,6 @@ void (async () => {
                 size: 28,
               },
             },
-          },
-        },
-        horizontalRule: {
-          paragraph: {
-            border: undefined,
-            children: [new PageBreak()],
           },
         },
       });
