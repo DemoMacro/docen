@@ -225,11 +225,15 @@ void (async () => {
           style: {
             id: "Table",
             name: "Table",
+            uiPriority: 2,
+            semiHidden: false,
+            unhideWhenUsed: true,
+            quickFormat: true,
             paragraph: {
               alignment: "center",
               keepNext: false,
               spacing: {
-                line: 360,
+                line: 240, // Single line spacing (1.0)
               },
               indent: {
                 firstLine: 0,
@@ -249,7 +253,7 @@ void (async () => {
           },
           cell: {
             run: {
-              verticalAlign: "center",
+              verticalAlign: "center", // Vertical center alignment
             },
           },
         },
