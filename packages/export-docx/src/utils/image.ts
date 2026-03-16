@@ -125,14 +125,27 @@ export function createFloatingOptions() {
 
 /**
  * Get image width with priority: node attrs > image meta > calculated > default
+ *
+ * Note: maxWidth constraint only applies to inline (non-floating) images.
+ * Floating images maintain their original dimensions.
  */
 export function getImageWidth(
-  node: { attrs?: { width?: number | null } },
+  node: { attrs?: { width?: number | null; floating?: any } },
   imageMeta?: { width?: number; height?: number },
   maxWidth?: number | PositiveUniversalMeasure,
 ): number {
   if (node.attrs?.width !== undefined && node.attrs?.width !== null) {
-    return node.attrs.width;
+    const requestedWidth = node.attrs.width;
+
+    // Only constrain width for inline (non-floating) images
+    if (!node.attrs.floating && maxWidth) {
+      const maxWidthPixels = maxWidth !== undefined ? convertMeasureToPixels(maxWidth) : undefined;
+      if (maxWidthPixels && requestedWidth > maxWidthPixels) {
+        return maxWidthPixels;
+      }
+    }
+
+    return requestedWidth;
   }
 
   const maxWidthPixels = maxWidth !== undefined ? convertMeasureToPixels(maxWidth) : undefined;
@@ -147,15 +160,32 @@ export function getImageWidth(
 
 /**
  * Get image height with priority: node attrs > image meta > calculated > default
+ *
+ * Note: maxWidth constraint only applies to inline (non-floating) images.
+ * Floating images maintain their original dimensions and aspect ratio.
  */
 export function getImageHeight(
-  node: { attrs?: { height?: number | null } },
+  node: { attrs?: { height?: number | null; width?: number | null; floating?: any } },
   width: number,
   imageMeta?: { width?: number; height?: number },
   maxWidth?: number | PositiveUniversalMeasure,
 ): number {
   if (node.attrs?.height !== undefined && node.attrs?.height !== null) {
-    return node.attrs.height;
+    const requestedHeight = node.attrs.height;
+
+    // Only constrain height for inline (non-floating) images when width was also constrained
+    if (!node.attrs.floating && maxWidth && node.attrs?.width) {
+      const maxWidthPixels = maxWidth !== undefined ? convertMeasureToPixels(maxWidth) : undefined;
+      const requestedWidth = node.attrs.width;
+
+      if (maxWidthPixels && requestedWidth > maxWidthPixels) {
+        // Maintain aspect ratio when width is constrained
+        const scaleFactor = maxWidthPixels / requestedWidth;
+        return Math.round(requestedHeight * scaleFactor);
+      }
+    }
+
+    return requestedHeight;
   }
 
   const maxWidthPixels = maxWidth !== undefined ? convertMeasureToPixels(maxWidth) : undefined;
