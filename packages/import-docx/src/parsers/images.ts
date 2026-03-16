@@ -78,6 +78,70 @@ function extractCropRect(srcRect: Element): CropRect | undefined {
 }
 
 /**
+ * Apply crop to image data and update dimensions
+ * Shared logic for both direct (no picGraphic) and synthetic drawing paths
+ */
+async function applyCropToImage(
+  pic: Element,
+  imgInfo: { src: string; width?: number; height?: number },
+  params: { context: ParseContext },
+): Promise<{ src: string; width?: number; height?: number }> {
+  // Check for crop information in pic:spPr
+  const spPr = findChild(pic, "pic:spPr");
+  if (!spPr || !imgInfo.src.startsWith("data:")) {
+    return imgInfo;
+  }
+
+  // Use findDeepChild since srcRect might be nested (e.g., inside a:xfrm)
+  const srcRect = findDeepChild(pic, "a:srcRect");
+  if (!srcRect) {
+    return imgInfo;
+  }
+
+  const crop = extractCropRect(srcRect);
+  if (!crop || (!crop.left && !crop.top && !crop.right && !crop.bottom)) {
+    return imgInfo;
+  }
+
+  try {
+    const [metadata, base64Data] = imgInfo.src.split(",");
+    if (!base64Data) {
+      return imgInfo;
+    }
+
+    const bytes = base64ToUint8Array(base64Data);
+    const croppedData = await cropImageIfNeeded(bytes, crop, {
+      canvasImport: params.context.image?.canvasImport,
+      enabled: params.context.image?.enableImageCrop ?? false,
+    });
+    const croppedBase64 = uint8ArrayToBase64(croppedData);
+
+    // Calculate cropped dimensions
+    const originalWidth = imgInfo.width || 0;
+    const originalHeight = imgInfo.height || 0;
+    const cropLeftPct = (crop.left || 0) / 100000;
+    const cropTopPct = (crop.top || 0) / 100000;
+    const cropRightPct = (crop.right || 0) / 100000;
+    const cropBottomPct = (crop.bottom || 0) / 100000;
+
+    const visibleWidthPct = 1 - cropLeftPct - cropRightPct;
+    const visibleHeightPct = 1 - cropTopPct - cropBottomPct;
+
+    const croppedWidth = Math.round(originalWidth * visibleWidthPct);
+    const croppedHeight = Math.round(originalHeight * visibleHeightPct);
+
+    return {
+      src: `${metadata},${croppedBase64}`,
+      width: croppedWidth,
+      height: croppedHeight,
+    };
+  } catch (error) {
+    console.warn("Grouped image cropping failed, using original image:", error);
+    return imgInfo;
+  }
+}
+
+/**
  * Extract horizontal position (align/offset) from position element
  */
 function extractHorizontalPosition(
@@ -384,38 +448,6 @@ export async function extractImageFromDrawing(
 }
 
 /**
- * Create image node with adjusted dimensions for grouped images
- */
-function createGroupedImage(
-  imgInfo: ImageInfo,
-  groupWidth?: number,
-  groupHeight?: number,
-): ImageNode {
-  if (groupWidth && groupHeight && imgInfo.width && imgInfo.height) {
-    const adjusted = fitToGroup(groupWidth, groupHeight, imgInfo.width, imgInfo.height);
-    return {
-      type: "image",
-      attrs: {
-        src: imgInfo.src,
-        alt: "",
-        width: adjusted.width,
-        height: adjusted.height,
-      },
-    };
-  }
-
-  return {
-    type: "image",
-    attrs: {
-      src: imgInfo.src,
-      alt: "",
-      ...(groupWidth !== undefined && { width: groupWidth }),
-      ...(groupHeight !== undefined && { height: groupHeight }),
-    },
-  };
-}
-
-/**
  * Extract images from a drawing element
  * Handles both single images and grouped images (<wpg:wgp>)
  */
@@ -457,9 +489,10 @@ export async function extractImagesFromDrawing(
       ? [...findDeepChildren(groupSp, "pic:pic"), ...findDeepChildren(groupSp, "pic")]
       : [...findDeepChildren(group, "pic:pic"), ...findDeepChildren(group, "pic")];
 
-    // Extract each picture as a separate image
+    // Extract each picture as a separate image (in original XML order)
     for (const pic of pictures) {
       const picGraphic = findChild(pic, "a:graphic");
+
       if (!picGraphic) {
         // The pic element might have blipFill directly
         const blipFill = findChild(pic, "pic:blipFill") || findDeepChild(pic, "a:blipFill");
@@ -472,7 +505,19 @@ export async function extractImagesFromDrawing(
         const imgInfo = params.context.images.get(rId);
         if (!imgInfo) continue;
 
-        result.push(createGroupedImage(imgInfo, groupWidth, groupHeight));
+        // Apply crop if needed
+        const processedImgInfo = await applyCropToImage(pic, imgInfo, params);
+
+        // For grouped images, use processed image dimensions (original or cropped)
+        result.push({
+          type: "image",
+          attrs: {
+            src: processedImgInfo.src,
+            alt: "",
+            width: processedImgInfo.width,
+            height: processedImgInfo.height,
+          },
+        });
         continue;
       }
 
@@ -487,23 +532,73 @@ export async function extractImagesFromDrawing(
       const image = await extractImageFromDrawing(syntheticDrawing, params);
       if (!image) continue;
 
-      // For grouped images, adjust dimensions based on aspect ratio
-      const rId =
-        syntheticDrawing.children[0]?.type === "element"
-          ? (findDeepChild(syntheticDrawing.children[0] as Element, "a:blip")?.attributes[
-              "r:embed"
-            ] as string)
-          : undefined;
+      // Check for crop information in pic:spPr (for grouped images with graphic)
+      const spPr = findChild(pic, "pic:spPr");
+      const srcRect = spPr ? findDeepChild(pic, "a:srcRect") : undefined;
+      const hasCrop = srcRect && extractCropRect(srcRect);
+      const crop = hasCrop ? extractCropRect(srcRect)! : undefined;
 
-      if (groupWidth && groupHeight && rId) {
-        const imgInfo = params.context.images.get(rId);
-        if (imgInfo?.width && imgInfo?.height) {
-          const adjusted = fitToGroup(groupWidth, groupHeight, imgInfo.width, imgInfo.height);
-          image.attrs!.width = adjusted.width;
-          image.attrs!.height = adjusted.height;
-        } else {
-          image.attrs!.width = groupWidth;
-          image.attrs!.height = groupHeight;
+      if (crop && (crop.left || crop.top || crop.right || crop.bottom) && image.attrs?.src?.startsWith("data:")) {
+        // Apply crop
+        try {
+          const [metadata, base64Data] = image.attrs.src.split(",");
+          if (base64Data) {
+            const bytes = base64ToUint8Array(base64Data);
+            const croppedData = await cropImageIfNeeded(bytes, crop, {
+              canvasImport: params.context.image?.canvasImport,
+              enabled: params.context.image?.enableImageCrop ?? false,
+            });
+            const croppedBase64 = uint8ArrayToBase64(croppedData);
+            image.attrs.src = `${metadata},${croppedBase64}`;
+
+            // Calculate cropped dimensions
+            const rId =
+              syntheticDrawing.children[0]?.type === "element"
+                ? (findDeepChild(syntheticDrawing.children[0] as Element, "a:blip")
+                    ?.attributes["r:embed"] as string)
+                : undefined;
+
+            if (rId) {
+              const imgInfo = params.context.images.get(rId);
+              if (imgInfo?.width && imgInfo?.height) {
+                const cropLeftPct = (crop.left || 0) / 100000;
+                const cropTopPct = (crop.top || 0) / 100000;
+                const cropRightPct = (crop.right || 0) / 100000;
+                const cropBottomPct = (crop.bottom || 0) / 100000;
+
+                const visibleWidthPct = 1 - cropLeftPct - cropRightPct;
+                const visibleHeightPct = 1 - cropTopPct - cropBottomPct;
+
+                const croppedWidth = Math.round(imgInfo.width * visibleWidthPct);
+                const croppedHeight = Math.round(imgInfo.height * visibleHeightPct);
+
+                image.attrs.width = croppedWidth;
+                image.attrs.height = croppedHeight;
+              }
+            }
+          }
+        } catch (error) {
+          console.warn("Grouped image cropping failed, using original image:", error);
+        }
+      } else {
+        // No crop, adjust dimensions based on aspect ratio
+        const rId =
+          syntheticDrawing.children[0]?.type === "element"
+            ? (findDeepChild(syntheticDrawing.children[0] as Element, "a:blip")?.attributes[
+                "r:embed"
+              ] as string)
+            : undefined;
+
+        if (groupWidth && groupHeight && rId) {
+          const imgInfo = params.context.images.get(rId);
+          if (imgInfo?.width && imgInfo?.height) {
+            const adjusted = fitToGroup(groupWidth, groupHeight, imgInfo.width, imgInfo.height);
+            image.attrs!.width = adjusted.width;
+            image.attrs!.height = adjusted.height;
+          } else {
+            image.attrs!.width = groupWidth;
+            image.attrs!.height = groupHeight;
+          }
         }
       }
 
