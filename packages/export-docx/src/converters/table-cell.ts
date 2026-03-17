@@ -91,14 +91,21 @@ export async function convertTableCell(
   }
 
   // Add borders if present
-  const borders = {
-    top: convertBorder(node.attrs?.borderTop),
-    bottom: convertBorder(node.attrs?.borderBottom),
-    left: convertBorder(node.attrs?.borderLeft),
-    right: convertBorder(node.attrs?.borderRight),
-  };
+  const borders: Record<string, { color?: string; size?: number; style?: string; space?: number }> = {};
 
-  if (borders.top || borders.bottom || borders.left || borders.right) {
+  const top = convertBorder(node.attrs?.borderTop);
+  if (top) borders.top = top;
+
+  const bottom = convertBorder(node.attrs?.borderBottom);
+  if (bottom) borders.bottom = bottom;
+
+  const left = convertBorder(node.attrs?.borderLeft);
+  if (left) borders.left = left;
+
+  const right = convertBorder(node.attrs?.borderRight);
+  if (right) borders.right = right;
+
+  if (Object.keys(borders).length > 0) {
     cellOptions.borders = borders;
   }
 
