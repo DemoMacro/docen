@@ -265,8 +265,8 @@ export async function convertNode(
 
   // Special case: paragraphs containing only images should use image style
   if (!styleId && node.type === "paragraph" && node.content) {
-    const hasOnlyImages = node.content.length > 0 &&
-      node.content.every((child: JSONContent) => child.type === "image");
+    const hasOnlyImages =
+      node.content.length > 0 && node.content.every((child: JSONContent) => child.type === "image");
     if (hasOnlyImages) {
       styleId = options.image?.style?.id;
     }

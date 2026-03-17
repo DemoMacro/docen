@@ -3,7 +3,7 @@ import { generateDOCX } from "@docen/export-docx";
 import { parseDOCX } from "@docen/import-docx";
 import type { DocxExportOptions } from "@docen/export-docx";
 import type { JSONContent } from "@docen/extensions/types";
-import { tiptapExtensions } from "@docen/extensions";
+import { Heading, Image, Paragraph } from "@docen/extensions";
 import type { EditorToolbarItem, EditorSuggestionMenuItem } from "@nuxt/ui";
 
 // Editor content - MUST be defined first!
@@ -29,13 +29,7 @@ const builtInExtensions = [
   "underline",
 ];
 
-const extensions = computed(() => {
-  const exts = tiptapExtensions.filter((ext) => {
-    const name = ext.name;
-    return !builtInExtensions.includes(name);
-  });
-  return exts as any;
-});
+const extensions = [Heading, Image, Paragraph];
 
 // Import DOCX
 const isImporting = ref(false);

@@ -538,7 +538,11 @@ export async function extractImagesFromDrawing(
       const hasCrop = srcRect && extractCropRect(srcRect);
       const crop = hasCrop ? extractCropRect(srcRect)! : undefined;
 
-      if (crop && (crop.left || crop.top || crop.right || crop.bottom) && image.attrs?.src?.startsWith("data:")) {
+      if (
+        crop &&
+        (crop.left || crop.top || crop.right || crop.bottom) &&
+        image.attrs?.src?.startsWith("data:")
+      ) {
         // Apply crop
         try {
           const [metadata, base64Data] = image.attrs.src.split(",");
@@ -554,8 +558,9 @@ export async function extractImagesFromDrawing(
             // Calculate cropped dimensions
             const rId =
               syntheticDrawing.children[0]?.type === "element"
-                ? (findDeepChild(syntheticDrawing.children[0] as Element, "a:blip")
-                    ?.attributes["r:embed"] as string)
+                ? (findDeepChild(syntheticDrawing.children[0] as Element, "a:blip")?.attributes[
+                    "r:embed"
+                  ] as string)
                 : undefined;
 
             if (rId) {
