@@ -194,17 +194,27 @@ export async function convertDocument(
     options: DocxExportOptions;
   },
 ): Promise<FileChild[]> {
-  const elements: FileChild[] = [];
-
   if (!node || !Array.isArray(node.content)) {
-    return elements;
+    return [];
   }
 
   // Pre-calculate effective content width once for all images
   const effectiveContentWidth = calculateEffectiveContentWidth(params.options);
 
-  for (const childNode of node.content) {
-    const element = await convertNode(childNode, params.options, effectiveContentWidth);
+  // Process all nodes in parallel - key performance optimization
+  // Paragraphs are independent, so we can process them concurrently
+  const convertedElements = await Promise.all(
+    node.content.map((childNode) =>
+      convertNode(childNode, params.options, effectiveContentWidth)
+    )
+  );
+
+  // Assemble results while preserving order
+  const elements: FileChild[] = [];
+  for (let i = 0; i < convertedElements.length; i++) {
+    const element = convertedElements[i];
+    const childNode = node.content[i];
+
     if (Array.isArray(element)) {
       elements.push(...element);
     } else if (element) {
@@ -254,8 +264,13 @@ export async function convertNode(
     // For arrays, convert each IParagraphOptions to Paragraph
     const styleId = getStyleIdByNodeType(node.type, options);
     return dataResult.map((paragraphOptions: IParagraphOptions): FileChild => {
+      // Optimization: avoid extra object creation when no styleId
+      // If no styleId, use options directly to create Paragraph
+      // If styleId exists, apply it (this creates a new object, but necessary)
+      if (!styleId) {
+        return new Paragraph(paragraphOptions);
+      }
       const styledOptions = applyStyleReference(paragraphOptions, styleId);
-      // We know this won't be a Table since we started with IParagraphOptions
       return new Paragraph(styledOptions);
     });
   }
@@ -270,6 +285,11 @@ export async function convertNode(
     if (hasOnlyImages) {
       styleId = options.image?.style?.id;
     }
+  }
+
+  // Optimization: if no styleId, create object directly without intermediate object
+  if (!styleId) {
+    return createDOCXObject(dataResult);
   }
 
   const styledOptions = applyStyleReference(dataResult, styleId);
