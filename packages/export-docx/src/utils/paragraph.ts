@@ -1,5 +1,6 @@
 import { convertCssLengthToPixels, convertPixelsToTwip, TEXT_ALIGN_MAP } from "@docen/utils";
 import type { ParagraphNode } from "@docen/extensions/types";
+import { convertBorder, convertShading } from "./conversion";
 
 /**
  * Apply paragraph style attributes to options
@@ -49,6 +50,27 @@ export const applyParagraphStyleAttributes = <T extends Record<string, unknown>>
       ...result,
       alignment:
         TEXT_ALIGN_MAP.tiptapToDocx[attrs.textAlign as keyof typeof TEXT_ALIGN_MAP.tiptapToDocx],
+    };
+  }
+
+  // Apply shading (background color)
+  if (attrs.shading) {
+    result = {
+      ...result,
+      shading: convertShading(attrs.shading),
+    };
+  }
+
+  // Apply borders
+  if (attrs.borderTop || attrs.borderBottom || attrs.borderLeft || attrs.borderRight) {
+    result = {
+      ...result,
+      border: {
+        ...(attrs.borderTop && { top: convertBorder(attrs.borderTop) }),
+        ...(attrs.borderBottom && { bottom: convertBorder(attrs.borderBottom) }),
+        ...(attrs.borderLeft && { left: convertBorder(attrs.borderLeft) }),
+        ...(attrs.borderRight && { right: convertBorder(attrs.borderRight) }),
+      },
     };
   }
 

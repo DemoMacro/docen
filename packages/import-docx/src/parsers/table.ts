@@ -1,57 +1,8 @@
 import type { Element } from "xast";
-import type { TableCellBorder } from "@docen/extensions/types";
+import type { Border } from "@docen/extensions/types";
 import { findChild } from "@docen/utils";
 import { convertTwipToPixels } from "@docen/utils";
-
-/**
- * Parse a single border element
- */
-export function parseBorder(borderNode: Element | undefined): {
-  color?: string;
-  width?: number;
-  style?: "solid" | "dashed" | "dotted" | "double" | "none";
-} | null {
-  if (!borderNode) return null;
-
-  const val = borderNode.attributes["w:val"] as string;
-  const size = borderNode.attributes["w:sz"] as string;
-  const color = borderNode.attributes["w:color"] as string;
-
-  // Map DOCX border styles to CSS border styles
-  const styleMap: Record<string, "solid" | "dashed" | "dotted" | "double" | "none"> = {
-    single: "solid",
-    dashed: "dashed",
-    dotted: "dotted",
-    double: "double",
-    none: "none",
-    nil: "none",
-  };
-
-  const border: {
-    color?: string;
-    width?: number;
-    style?: "solid" | "dashed" | "dotted" | "double" | "none";
-  } = {};
-
-  if (color && color !== "auto") {
-    border.color = `#${color}`;
-  }
-
-  if (size) {
-    // DOCX size is in eighth-points
-    // Convert to pixels: 1 eighth-point = 1/8 pt = 1/8 * (4/3) px = 1/6 px ≈ 0.167 px
-    const eighthPoints = parseInt(size);
-    if (!isNaN(eighthPoints)) {
-      border.width = Math.round(eighthPoints / 6);
-    }
-  }
-
-  if (val && styleMap[val]) {
-    border.style = styleMap[val];
-  }
-
-  return Object.keys(border).length > 0 ? border : null;
-}
+import { parseBorder } from "./styles";
 
 /**
  * Get table properties (cell margins)
@@ -158,10 +109,10 @@ export function parseCellProperties(cellNode: Element): {
   colwidth: number[] | null;
   backgroundColor?: string;
   verticalAlign?: string;
-  borderTop?: TableCellBorder;
-  borderBottom?: TableCellBorder;
-  borderLeft?: TableCellBorder;
-  borderRight?: TableCellBorder;
+  borderTop?: Border;
+  borderBottom?: Border;
+  borderLeft?: Border;
+  borderRight?: Border;
 } | null {
   const props: {
     colspan: number;
@@ -169,10 +120,10 @@ export function parseCellProperties(cellNode: Element): {
     colwidth: number[] | null;
     backgroundColor?: string;
     verticalAlign?: string;
-    borderTop?: TableCellBorder;
-    borderBottom?: TableCellBorder;
-    borderLeft?: TableCellBorder;
-    borderRight?: TableCellBorder;
+    borderTop?: Border;
+    borderBottom?: Border;
+    borderLeft?: Border;
+    borderRight?: Border;
   } = {
     colspan: 1,
     rowspan: 1,

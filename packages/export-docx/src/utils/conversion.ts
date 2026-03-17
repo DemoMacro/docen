@@ -1,5 +1,6 @@
 import type { PositiveUniversalMeasure } from "docx";
 import type { DocxExportOptions } from "../options";
+import type { Border, Shading } from "@docen/extensions/types";
 import {
   convertMeasureToInches,
   convertTwipToPixels,
@@ -56,3 +57,75 @@ export function calculateEffectiveContentWidth(options?: DocxExportOptions): num
   const effectiveWidth = pageWidth - marginLeft - marginRight;
   return Math.max(convertTwipToPixels(effectiveWidth), DOCX_DPI);
 }
+
+/**
+ * Convert Border to docx.js format
+ */
+export function convertBorder(border?: Border): {
+  color?: string;
+  size?: number;
+  style?: string;
+  space?: number;
+} | undefined {
+  if (!border) return undefined;
+
+  const docxBorder: {
+    color?: string;
+    size?: number;
+    style?: string;
+    space?: number;
+  } = {};
+
+  if (border.color) {
+    // Remove # prefix for docx.js
+    docxBorder.color = border.color.replace("#", "");
+  }
+
+  if (border.size !== undefined) {
+    // Keep as eighth-points (DOCX native unit)
+    docxBorder.size = border.size;
+  }
+
+  if (border.style) {
+    docxBorder.style = border.style;
+  }
+
+  if (border.space !== undefined) {
+    docxBorder.space = border.space;
+  }
+
+  return Object.keys(docxBorder).length > 0 ? docxBorder : undefined;
+}
+
+/**
+ * Convert Shading to docx.js format
+ */
+export function convertShading(shading?: Shading): {
+  fill?: string;
+  color?: string;
+  val?: string;
+} | undefined {
+  if (!shading || !shading.fill) return undefined;
+
+  const docxShading: {
+    fill?: string;
+    color?: string;
+    val?: string;
+  } = {};
+
+  if (shading.fill) {
+    // Remove # prefix for docx.js
+    docxShading.fill = shading.fill.replace("#", "");
+  }
+
+  if (shading.color) {
+    // Remove # prefix for docx.js
+    docxShading.color = shading.color.replace("#", "");
+  }
+
+  // Default to "clear" for solid fill
+  docxShading.val = shading.type || "clear";
+
+  return docxShading;
+}
+
