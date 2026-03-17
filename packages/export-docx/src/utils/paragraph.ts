@@ -12,67 +12,56 @@ export const applyParagraphStyleAttributes = <T extends Record<string, unknown>>
 ): T => {
   if (!attrs) return options;
 
-  let result = { ...options };
+  // Build result incrementally with single object creation
+  const result: Record<string, unknown> = { ...options };
 
+  // Handle indentation (single object creation)
   if (attrs.indentLeft || attrs.indentRight || attrs.indentFirstLine) {
-    result = {
-      ...result,
-      indent: {
-        ...(attrs.indentLeft && {
-          left: convertPixelsToTwip(convertCssLengthToPixels(attrs.indentLeft)),
-        }),
-        ...(attrs.indentRight && {
-          right: convertPixelsToTwip(convertCssLengthToPixels(attrs.indentRight)),
-        }),
-        ...(attrs.indentFirstLine && {
-          firstLine: convertPixelsToTwip(convertCssLengthToPixels(attrs.indentFirstLine)),
-        }),
-      },
+    result.indent = {
+      ...(attrs.indentLeft && {
+        left: convertPixelsToTwip(convertCssLengthToPixels(attrs.indentLeft)),
+      }),
+      ...(attrs.indentRight && {
+        right: convertPixelsToTwip(convertCssLengthToPixels(attrs.indentRight)),
+      }),
+      ...(attrs.indentFirstLine && {
+        firstLine: convertPixelsToTwip(convertCssLengthToPixels(attrs.indentFirstLine)),
+      }),
     };
   }
 
+  // Handle spacing (single object creation)
   if (attrs.spacingBefore || attrs.spacingAfter) {
-    result = {
-      ...result,
-      spacing: {
-        ...(attrs.spacingBefore && {
-          before: convertPixelsToTwip(convertCssLengthToPixels(attrs.spacingBefore)),
-        }),
-        ...(attrs.spacingAfter && {
-          after: convertPixelsToTwip(convertCssLengthToPixels(attrs.spacingAfter)),
-        }),
-      },
+    result.spacing = {
+      ...(attrs.spacingBefore && {
+        before: convertPixelsToTwip(convertCssLengthToPixels(attrs.spacingBefore)),
+      }),
+      ...(attrs.spacingAfter && {
+        after: convertPixelsToTwip(convertCssLengthToPixels(attrs.spacingAfter)),
+      }),
     };
   }
 
+  // Handle alignment (direct assignment)
   if (attrs.textAlign) {
-    result = {
-      ...result,
-      alignment:
-        TEXT_ALIGN_MAP.tiptapToDocx[attrs.textAlign as keyof typeof TEXT_ALIGN_MAP.tiptapToDocx],
-    };
+    result.alignment =
+      TEXT_ALIGN_MAP.tiptapToDocx[attrs.textAlign as keyof typeof TEXT_ALIGN_MAP.tiptapToDocx];
   }
 
   // Apply shading (background color)
   if (attrs.shading) {
-    result = {
-      ...result,
-      shading: convertShading(attrs.shading),
-    };
+    result.shading = convertShading(attrs.shading);
   }
 
-  // Apply borders
+  // Apply borders (single object creation)
   if (attrs.borderTop || attrs.borderBottom || attrs.borderLeft || attrs.borderRight) {
-    result = {
-      ...result,
-      border: {
-        ...(attrs.borderTop && { top: convertBorder(attrs.borderTop) }),
-        ...(attrs.borderBottom && { bottom: convertBorder(attrs.borderBottom) }),
-        ...(attrs.borderLeft && { left: convertBorder(attrs.borderLeft) }),
-        ...(attrs.borderRight && { right: convertBorder(attrs.borderRight) }),
-      },
+    result.border = {
+      ...(attrs.borderTop && { top: convertBorder(attrs.borderTop) }),
+      ...(attrs.borderBottom && { bottom: convertBorder(attrs.borderBottom) }),
+      ...(attrs.borderLeft && { left: convertBorder(attrs.borderLeft) }),
+      ...(attrs.borderRight && { right: convertBorder(attrs.borderRight) }),
     };
   }
 
-  return result;
+  return result as T;
 };
