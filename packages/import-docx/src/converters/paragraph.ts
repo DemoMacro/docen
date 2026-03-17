@@ -3,74 +3,8 @@ import type { JSONContent } from "@tiptap/core";
 import type { ParseContext } from "../parser";
 import type { StyleInfo } from "../parsers/styles";
 import { extractRuns, extractAlignment } from "./text";
-import { findChild, parseTwipAttr, convertTwipToCssString } from "@docen/utils";
-
-/**
- * Extract paragraph style attributes from DOCX paragraph properties
- */
-function extractParagraphStyles(node: Element): {
-  indentLeft?: string;
-  indentRight?: string;
-  indentFirstLine?: string;
-  spacingBefore?: string;
-  spacingAfter?: string;
-} | null {
-  const pPr = findChild(node, "w:pPr");
-  if (!pPr) return null;
-
-  const result: Record<string, string> = {};
-
-  // Extract indentation from w:ind
-  const ind = findChild(pPr, "w:ind");
-  if (ind) {
-    const left = parseTwipAttr(ind.attributes, "w:left");
-    if (left) {
-      const leftTwip = parseInt(left, 10);
-      result.indentLeft = convertTwipToCssString(leftTwip);
-    }
-
-    const right = parseTwipAttr(ind.attributes, "w:right");
-    if (right) {
-      const rightTwip = parseInt(right, 10);
-      result.indentRight = convertTwipToCssString(rightTwip);
-    }
-
-    const firstLine = parseTwipAttr(ind.attributes, "w:firstLine");
-    if (firstLine) {
-      const firstLineTwip = parseInt(firstLine, 10);
-      result.indentFirstLine = convertTwipToCssString(firstLineTwip);
-    } else {
-      // Hanging indent: first line is LESS indented than other lines
-      // For example: left=480, hanging=480 means first line indent=0, other lines=480
-      // We store the actual first line indent (left - hanging)
-      const hanging = parseTwipAttr(ind.attributes, "w:hanging");
-      if (hanging) {
-        const leftTwip = left ? parseInt(left, 10) : 0;
-        const hangingTwip = parseInt(hanging, 10);
-        const firstLineTwip = leftTwip - hangingTwip;
-        result.indentFirstLine = convertTwipToCssString(firstLineTwip);
-      }
-    }
-  }
-
-  // Extract spacing from w:spacing
-  const spacing = findChild(pPr, "w:spacing");
-  if (spacing) {
-    const before = parseTwipAttr(spacing.attributes, "w:before");
-    if (before) {
-      const beforeTwip = parseInt(before, 10);
-      result.spacingBefore = convertTwipToCssString(beforeTwip);
-    }
-
-    const after = parseTwipAttr(spacing.attributes, "w:after");
-    if (after) {
-      const afterTwip = parseInt(after, 10);
-      result.spacingAfter = convertTwipToCssString(afterTwip);
-    }
-  }
-
-  return Object.keys(result).length ? result : null;
-}
+import { findChild } from "@docen/utils";
+import { extractParagraphStyles } from "../parsers/styles";
 
 /**
  * Convert DOCX paragraph node to TipTap paragraph
@@ -111,7 +45,7 @@ export async function convertParagraph(
 
   const attrs = {
     ...extractAlignment(node),
-    ...extractParagraphStyles(node),
+    ...extractParagraphStyles(node, styleInfo),
   };
 
   // Check if paragraph contains page break
@@ -192,7 +126,7 @@ async function convertHeading(
     type: "heading",
     attrs: {
       level,
-      ...extractParagraphStyles(node),
+      ...extractParagraphStyles(node, styleInfo),
     },
     content: await extractRuns(node, { context: params.context, styleInfo }),
   };

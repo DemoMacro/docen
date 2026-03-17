@@ -63,6 +63,44 @@ export const Paragraph = BaseParagraph.extend({
         renderHTML: (attributes) =>
           attributes.spacingAfter ? { style: `margin-bottom: ${attributes.spacingAfter}` } : {},
       },
+
+      // Shading (background color)
+      // Maps to CSS background-color and DOCX w:shd
+      shading: {
+        default: null,
+        parseHTML: (element) => {
+          const bg = element.style.backgroundColor;
+          if (!bg) return null;
+          const fill = bg.startsWith("#") ? bg : `#${bg}`;
+          return { fill, type: "clear" };
+        },
+        renderHTML: (attributes) => {
+          if (!attributes.shading?.fill) return {};
+          return { style: `background-color: ${attributes.shading.fill}` };
+        },
+      },
+
+      // Borders (not rendered in HTML, only for DOCX)
+      borderTop: {
+        default: null,
+        parseHTML: () => null,
+        renderHTML: () => ({}),
+      },
+      borderBottom: {
+        default: null,
+        parseHTML: () => null,
+        renderHTML: () => ({}),
+      },
+      borderLeft: {
+        default: null,
+        parseHTML: () => null,
+        renderHTML: () => ({}),
+      },
+      borderRight: {
+        default: null,
+        parseHTML: () => null,
+        renderHTML: () => ({}),
+      },
     };
   },
 });

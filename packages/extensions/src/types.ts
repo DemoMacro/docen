@@ -9,6 +9,38 @@ import type {
 // Re-export JSONContent for convenience
 export type { JSONContent };
 
+// ============================================================
+// Border and Shading Types (compatible with docx.js)
+// ============================================================
+
+/**
+ * Border definition (compatible with docx.js BorderOptions)
+ * Used by paragraphs, table cells, and blockquotes
+ */
+export interface Border {
+  /** Border color (hex without #, e.g., "FF0000" or "auto") */
+  color?: string;
+  /** Border size (eighth-points, 1/8 pt) */
+  size?: number;
+  /** Border style */
+  style?: "single" | "dashed" | "dotted" | "double" | "dotDash" | "dotDotDash" | "none";
+  /** Space between border and content (points) */
+  space?: number;
+}
+
+/**
+ * Shading definition (compatible with docx.js ShadingOptions)
+ * Used for paragraph and table cell background colors
+ */
+export interface Shading {
+  /** Fill color (hex without #, e.g., "FF0000") */
+  fill?: string;
+  /** Pattern color (hex without #) */
+  color?: string;
+  /** Shading pattern type (e.g., "clear", "percent-10") */
+  type?: string;
+}
+
 // Floating positioning options for images
 // IFloating requires horizontalPosition and verticalPosition to be required
 // But we make all other properties optional
@@ -76,6 +108,12 @@ export interface ParagraphNode extends JSONContent {
     // Paragraph spacing (CSS values: e.g., "10px", "1rem", "1.5em")
     spacingBefore?: string;
     spacingAfter?: string;
+    // Background and borders
+    shading?: Shading;
+    borderTop?: Border;
+    borderBottom?: Border;
+    borderLeft?: Border;
+    borderRight?: Border;
   };
   content?: Array<TextNode | HardBreakNode | ImageNode>;
 }
@@ -93,6 +131,12 @@ export interface HeadingNode extends JSONContent {
     spacingAfter?: string;
     // Text alignment
     textAlign?: "left" | "right" | "center" | "justify";
+    // Background and borders
+    shading?: Shading;
+    borderTop?: Border;
+    borderBottom?: Border;
+    borderLeft?: Border;
+    borderRight?: Border;
   };
   content?: Array<TextNode | HardBreakNode>;
 }
@@ -148,13 +192,6 @@ export interface TaskItemNode extends JSONContent {
   content?: Array<ParagraphNode>;
 }
 
-// Table cell border definition
-export interface TableCellBorder {
-  color?: string; // "#FF0000"
-  width?: number; // border width in pixels
-  style?: "solid" | "dashed" | "dotted" | "double" | "none";
-}
-
 // Table node types
 export interface TableNode extends JSONContent {
   type: "table";
@@ -182,12 +219,12 @@ export interface TableCellNode extends JSONContent {
     colspan?: number;
     rowspan?: number;
     colwidth?: number[] | null;
-    backgroundColor?: string | null; // "#FF0000"
+    backgroundColor?: string | null;
     verticalAlign?: "top" | "middle" | "bottom" | null;
-    borderTop?: TableCellBorder | null;
-    borderBottom?: TableCellBorder | null;
-    borderLeft?: TableCellBorder | null;
-    borderRight?: TableCellBorder | null;
+    borderTop?: Border;
+    borderBottom?: Border;
+    borderLeft?: Border;
+    borderRight?: Border;
   };
   content?: Array<ParagraphNode>;
 }
@@ -198,12 +235,12 @@ export interface TableHeaderNode extends JSONContent {
     colspan?: number;
     rowspan?: number;
     colwidth?: number[] | null;
-    backgroundColor?: string | null; // "#FF0000"
+    backgroundColor?: string | null;
     verticalAlign?: "top" | "middle" | "bottom" | null;
-    borderTop?: TableCellBorder | null;
-    borderBottom?: TableCellBorder | null;
-    borderLeft?: TableCellBorder | null;
-    borderRight?: TableCellBorder | null;
+    borderTop?: Border;
+    borderBottom?: Border;
+    borderLeft?: Border;
+    borderRight?: Border;
   };
   content?: Array<ParagraphNode>;
 }
