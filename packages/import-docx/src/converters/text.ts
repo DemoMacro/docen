@@ -149,8 +149,9 @@ export function extractMarks(
     // Bold (run can override style)
     const boldEl = findChild(rPr, "w:b");
     if (boldEl) {
-      // Check if explicitly set to false
-      if (boldEl.attributes["w:val"] === "false") {
+      // Check if explicitly set to false/0
+      const val = boldEl.attributes["w:val"];
+      if (val === "0" || val === "false") {
         mergedFormat.bold = false;
       } else {
         mergedFormat.bold = true;
@@ -160,7 +161,8 @@ export function extractMarks(
     // Italic
     const italicEl = findChild(rPr, "w:i");
     if (italicEl) {
-      if (italicEl.attributes["w:val"] === "false") {
+      const val = italicEl.attributes["w:val"];
+      if (val === "0" || val === "false") {
         mergedFormat.italic = false;
       } else {
         mergedFormat.italic = true;
@@ -168,8 +170,13 @@ export function extractMarks(
     }
 
     // Underline
-    if (findChild(rPr, "w:u")) {
-      mergedFormat.underline = true;
+    const underlineEl = findChild(rPr, "w:u");
+    if (underlineEl) {
+      const val = underlineEl.attributes["w:val"];
+      // w:val="none" means no underline, other values or absence means underline
+      if (val !== "none" && val !== "false" && val !== "0") {
+        mergedFormat.underline = true;
+      }
     }
 
     // Strike

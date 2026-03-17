@@ -211,7 +211,11 @@ async function convertList(
   }
 
   const listTypeInfo = params.context.listTypeMap.get(listInfo.numId);
-  const listType = listTypeInfo?.type || "bullet";
+  // If numId is not defined in numbering.xml, treat as normal paragraph
+  if (!listTypeInfo) {
+    return await convertParagraph(startElement, params);
+  }
+  const listType = listTypeInfo.type;
 
   // Collect consecutive list items with same numId
   const items: JSONContent[] = [];
