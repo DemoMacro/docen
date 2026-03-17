@@ -79,23 +79,39 @@ export function parseStylesXml(files: Record<string, Uint8Array>): StyleMap {
       }
 
       // Bold
-      if (findChild(rPr, "w:b")) {
-        charFormat.bold = true;
+      const bold = findChild(rPr, "w:b");
+      if (bold) {
+        const val = bold.attributes["w:val"];
+        if (val !== "0" && val !== "false") {
+          charFormat.bold = true;
+        }
       }
 
       // Italic
-      if (findChild(rPr, "w:i")) {
-        charFormat.italic = true;
+      const italic = findChild(rPr, "w:i");
+      if (italic) {
+        const val = italic.attributes["w:val"];
+        if (val !== "0" && val !== "false") {
+          charFormat.italic = true;
+        }
       }
 
       // Underline
-      if (findChild(rPr, "w:u")) {
-        charFormat.underline = true;
+      const underline = findChild(rPr, "w:u");
+      if (underline) {
+        const val = underline.attributes["w:val"];
+        if (val !== "none" && val !== "false" && val !== "0") {
+          charFormat.underline = true;
+        }
       }
 
       // Strike
-      if (findChild(rPr, "w:strike")) {
-        charFormat.strike = true;
+      const strike = findChild(rPr, "w:strike");
+      if (strike) {
+        const val = strike.attributes["w:val"];
+        if (val !== "0" && val !== "false") {
+          charFormat.strike = true;
+        }
       }
 
       // Font size (half-points)
