@@ -28,6 +28,7 @@
   "files": [
     "dist"
   ],
+  "type": "module",
   "main": "dist/index.mjs",
   "types": "dist/index.d.mts",
   "exports": {
