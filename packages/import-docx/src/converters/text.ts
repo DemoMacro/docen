@@ -180,8 +180,12 @@ export function extractMarks(
     }
 
     // Strike
-    if (findChild(rPr, "w:strike")) {
-      mergedFormat.strike = true;
+    const strikeEl = findChild(rPr, "w:strike");
+    if (strikeEl) {
+      const val = strikeEl.attributes["w:val"];
+      if (val !== "0" && val !== "false") {
+        mergedFormat.strike = true;
+      }
     }
 
     // Text color (run overrides style)
