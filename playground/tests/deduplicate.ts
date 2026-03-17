@@ -335,7 +335,9 @@ function testCompareDocuments() {
   comparisons.forEach((comp, i) => {
     console.log(`\n  Pair ${i + 1} (${(comp.similarity * 100).toFixed(1)}%):`);
     console.log(`    Doc 1 [${comp.fromDoc1.index}]: "${comp.fromDoc1.text}"`);
-    console.log(`    Doc 2 [${comp.fromDoc2.index}]: "${comp.fromDoc2.text}"`);
+    if (comp.fromDoc2) {
+      console.log(`    Doc 2 [${comp.fromDoc2.index}]: "${comp.fromDoc2.text}"`);
+    }
   });
 
   log("\n✅ Test 4 passed!\n", "green");

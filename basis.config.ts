@@ -2,7 +2,7 @@ import { defineBasisConfig } from "@funish/basis/config";
 
 export default defineBasisConfig({
   lint: {
-    config: ["--fix", "--fix-suggestions", "--type-aware"],
+    config: ["--fix", "--fix-suggestions", "--type-aware", "--type-check"],
   },
   fmt: {
     config: ["--write", "."],
