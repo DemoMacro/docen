@@ -56,9 +56,11 @@ void (async () => {
       const json = await parseDOCX(docxBuffer, {
         image: {
           canvasImport: () => import("@napi-rs/canvas"),
-          enableImageCrop: true,
+          crop: true,
         },
-        ignoreEmptyParagraphs: false,
+        paragraph: {
+          ignoreEmpty: false,
+        },
       });
 
       // Save parsed JSON
