@@ -48,6 +48,6 @@
   },
   "devDependencies": {
     "@docen/extensions": "workspace:*",
-    "@tiptap/core": "3.20.0"
+    "@tiptap/core": "3.20.4"
   }
 }

@@ -58,7 +58,7 @@
   "devDependencies": {
     "@docen/extensions": "workspace:*",
     "@docen/utils": "workspace:*",
-    "@tiptap/core": "3.20.0",
+    "@tiptap/core": "3.20.4",
     "@types/xast": "2.0.4"
   },
   "peerDependencies": {
@@ -70,6 +70,6 @@
     }
   },
   "optionalDependencies": {
-    "@napi-rs/canvas": "^0.1.96"
+    "@napi-rs/canvas": "^0.1.97"
   }
 }
