@@ -143,8 +143,16 @@ export function parseCellProperties(cellNode: Element): {
 
   // Check for vMerge (rowspan)
   const vMerge = findChild(tcPr, "w:vMerge");
-  if (vMerge?.attributes["w:val"] === "continue") {
-    props.rowspan = 0;
+  if (vMerge) {
+    const vMergeVal = vMerge.attributes["w:val"] as string | undefined;
+    if (vMergeVal === "continue") {
+      // This cell is merged vertically (hidden)
+      props.rowspan = 0;
+    } else {
+      // vMerge="restart" or vMerge with no value (defaults to "restart")
+      // Explicitly set rowspan to 1 to mark it for calculateRowspan
+      props.rowspan = 1;
+    }
   }
 
   // Check for column width
