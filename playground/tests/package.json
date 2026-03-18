@@ -5,7 +5,7 @@
     "@docen/export-docx": "workspace:*",
     "@docen/extensions": "workspace:*",
     "@docen/import-docx": "workspace:*",
-    "@napi-rs/canvas": "0.1.96",
+    "@napi-rs/canvas": "0.1.97",
     "docen": "workspace:*",
     "fflate": "0.8.2",
     "xast-util-from-xml": "4.0.0"

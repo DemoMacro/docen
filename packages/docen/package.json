@@ -54,8 +54,8 @@
     "@docen/export-docx": "workspace:*",
     "@docen/extensions": "workspace:*",
     "@docen/import-docx": "workspace:*",
-    "@tiptap/core": "3.20.0",
-    "@tiptap/html": "3.20.0",
-    "@tiptap/markdown": "3.20.0"
+    "@tiptap/core": "3.20.4",
+    "@tiptap/html": "3.20.4",
+    "@tiptap/markdown": "3.20.4"
   }
 }
