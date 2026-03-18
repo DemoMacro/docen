@@ -483,19 +483,93 @@ export async function extractImagesFromDrawing(
   const group = findChild(graphicData, "wpg:wgp");
 
   if (group) {
-    // Find all <pic:pic> elements within the group
+    // Find all <pic:pic> and <wps:wsp> elements within the group
     const groupSp = findChild(group, "wpg:grpSp");
     const pictures = groupSp
       ? [...findDeepChildren(groupSp, "pic:pic"), ...findDeepChildren(groupSp, "pic")]
       : [...findDeepChildren(group, "pic:pic"), ...findDeepChildren(group, "pic")];
 
-    // Extract each picture as a separate image (in original XML order)
+    const wspShapes = groupSp
+      ? findDeepChildren(groupSp, "wps:wsp")
+      : findDeepChildren(group, "wps:wsp");
+
+    // First pass: collect all child images and their relative sizes
+    type ChildImageInfo = {
+      pic: Element;
+      picGraphic: Element | null;
+      relativeSize: { cx: number; cy: number } | null;
+      isWsp: boolean;
+    };
+    const childImages: ChildImageInfo[] = [];
+
+    // Process pic:pic elements
     for (const pic of pictures) {
       const picGraphic = findChild(pic, "a:graphic");
 
+      // Extract relative size from pic:spPr/a:xfrm/a:ext
+      let relativeSize: { cx: number; cy: number } | null = null;
+      const spPr = findChild(pic, "pic:spPr");
+      if (spPr) {
+        const xfrm = findChild(spPr, "a:xfrm");
+        if (xfrm) {
+          const ext = findChild(xfrm, "a:ext");
+          if (ext && ext.attributes["cx"] && ext.attributes["cy"]) {
+            relativeSize = {
+              cx: parseInt(ext.attributes["cx"] as string, 10),
+              cy: parseInt(ext.attributes["cy"] as string, 10),
+            };
+          }
+        }
+      }
+
+      childImages.push({ pic, picGraphic, relativeSize, isWsp: false });
+    }
+
+    // Process wps:wsp (Word Processing Shape) elements - they can also contain images
+    for (const wsp of wspShapes) {
+      const wspGraphic = findChild(wsp, "a:graphic");
+
+      // Extract relative size from wps:spPr/a:xfrm/a:ext
+      let relativeSize: { cx: number; cy: number } | null = null;
+      const spPr = findChild(wsp, "wps:spPr");
+      if (spPr) {
+        const xfrm = findChild(spPr, "a:xfrm");
+        if (xfrm) {
+          const ext = findChild(xfrm, "a:ext");
+          if (ext && ext.attributes["cx"] && ext.attributes["cy"]) {
+            relativeSize = {
+              cx: parseInt(ext.attributes["cx"] as string, 10),
+              cy: parseInt(ext.attributes["cy"] as string, 10),
+            };
+          }
+        }
+      }
+
+      childImages.push({ pic: wsp, picGraphic: wspGraphic, relativeSize, isWsp: true });
+    }
+
+    // Calculate total relative sizes for proportional distribution
+    let totalCx = 0;
+    for (const child of childImages) {
+      if (child.relativeSize) {
+        totalCx += child.relativeSize.cx;
+      }
+    }
+
+    // Calculate uniform scale factor to fit all children within group bounds
+    // All children should be scaled by the same factor to maintain relative proportions
+    const scaleFactor = totalCx > 0 && groupWidth ? groupWidth / totalCx : 1;
+
+    // Second pass: extract images with correct proportional dimensions
+    for (const child of childImages) {
+      const { pic, picGraphic, relativeSize, isWsp } = child;
+
       if (!picGraphic) {
-        // The pic element might have blipFill directly
-        const blipFill = findChild(pic, "pic:blipFill") || findDeepChild(pic, "a:blipFill");
+        // Handle elements without a:graphic (direct blipFill)
+        // For pic:pic, use pic:blipFill; for wps:wsp, use wps:blipFill
+        const blipFill = isWsp
+          ? (findChild(pic, "wps:blipFill") || findDeepChild(pic, "a:blipFill"))
+          : (findChild(pic, "pic:blipFill") || findDeepChild(pic, "a:blipFill"));
         if (!blipFill) continue;
 
         const blip = findChild(blipFill, "a:blip") || findDeepChild(blipFill, "a:blip");
@@ -508,14 +582,27 @@ export async function extractImagesFromDrawing(
         // Apply crop if needed
         const processedImgInfo = await applyCropToImage(pic, imgInfo, params);
 
-        // For grouped images, use processed image dimensions (original or cropped)
+        // Calculate proportional dimensions for grouped images
+        let width = processedImgInfo.width;
+        let height = processedImgInfo.height;
+
+        if (groupWidth && groupHeight && relativeSize && totalCx > 0) {
+          // Apply uniform scale factor to maintain relative proportions
+          width = Math.round(relativeSize.cx * scaleFactor);
+          height = Math.round(relativeSize.cy * scaleFactor);
+        } else if (groupWidth && groupHeight) {
+          // Fallback: use group dimensions if no relative size available
+          width = groupWidth;
+          height = groupHeight;
+        }
+
         result.push({
           type: "image",
           attrs: {
             src: processedImgInfo.src,
             alt: "",
-            width: processedImgInfo.width,
-            height: processedImgInfo.height,
+            width,
+            height,
           },
         });
         continue;
@@ -577,8 +664,15 @@ export async function extractImagesFromDrawing(
                 const croppedWidth = Math.round(imgInfo.width * visibleWidthPct);
                 const croppedHeight = Math.round(imgInfo.height * visibleHeightPct);
 
-                image.attrs.width = croppedWidth;
-                image.attrs.height = croppedHeight;
+                // Apply proportional scaling to cropped dimensions
+                if (groupWidth && groupHeight && relativeSize && totalCx > 0) {
+                  // Apply uniform scale factor to maintain relative proportions
+                  image.attrs.width = Math.round(relativeSize.cx * scaleFactor);
+                  image.attrs.height = Math.round(relativeSize.cy * scaleFactor);
+                } else {
+                  image.attrs.width = croppedWidth;
+                  image.attrs.height = croppedHeight;
+                }
               }
             }
           }
@@ -586,24 +680,15 @@ export async function extractImagesFromDrawing(
           console.warn("Grouped image cropping failed, using original image:", error);
         }
       } else {
-        // No crop, adjust dimensions based on aspect ratio
-        const rId =
-          syntheticDrawing.children[0]?.type === "element"
-            ? (findDeepChild(syntheticDrawing.children[0] as Element, "a:blip")?.attributes[
-                "r:embed"
-              ] as string)
-            : undefined;
-
-        if (groupWidth && groupHeight && rId) {
-          const imgInfo = params.context.images.get(rId);
-          if (imgInfo?.width && imgInfo?.height) {
-            const adjusted = fitToGroup(groupWidth, groupHeight, imgInfo.width, imgInfo.height);
-            image.attrs!.width = adjusted.width;
-            image.attrs!.height = adjusted.height;
-          } else {
-            image.attrs!.width = groupWidth;
-            image.attrs!.height = groupHeight;
-          }
+        // No crop, set dimensions based on proportional size within group
+        if (groupWidth && groupHeight && relativeSize && totalCx > 0) {
+          // Apply uniform scale factor to maintain relative proportions
+          image.attrs!.width = Math.round(relativeSize.cx * scaleFactor);
+          image.attrs!.height = Math.round(relativeSize.cy * scaleFactor);
+        } else if (groupWidth && groupHeight) {
+          // Fallback: use group dimensions if no relative size available
+          image.attrs!.width = groupWidth;
+          image.attrs!.height = groupHeight;
         }
       }
 
