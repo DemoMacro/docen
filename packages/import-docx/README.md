@@ -70,11 +70,6 @@ interface DocxImportOptions {
   /** Custom image converter (default: embed as base64) */
   convertImage?: (image: DocxImageInfo) => Promise<DocxImageResult>;
 
-  /** Whether to ignore empty paragraphs (default: false).
-   * Empty paragraphs are those without text content or images.
-   * Paragraphs containing only whitespace or images are not considered empty. */
-  ignoreEmptyParagraphs?: boolean;
-
   /**
    * Dynamic import function for @napi-rs/canvas
    * Required for image cropping in Node.js environment, ignored in browser
@@ -94,7 +89,15 @@ interface DocxImportOptions {
    *
    * @default false
    */
-  enableImageCrop?: boolean;
+  crop?: boolean;
+
+  /** Paragraph processing options */
+  paragraph?: {
+    /** Whether to ignore empty paragraphs (default: false).
+     * Empty paragraphs are those without text content or images.
+     * Paragraphs containing only whitespace or images are not considered empty. */
+    ignoreEmpty?: boolean;
+  };
 }
 ```
 
@@ -231,7 +234,7 @@ const buffer = readFileSync("document.docx");
 
 const content = await parseDOCX(buffer, {
   canvasImport: () => import("@napi-rs/canvas"),
-  enableImageCrop: true, // Enable cropping (default is false)
+  crop: true, // Enable cropping (default is false)
 });
 ```
 
@@ -243,7 +246,7 @@ If you want to explicitly ignore crop information in DOCX and use full images (t
 
 ```typescript
 const content = await parseDOCX(buffer, {
-  enableImageCrop: false,
+  crop: false,
 });
 ```
 
@@ -271,7 +274,7 @@ All colors are imported as hex values (e.g., "#FF0000", "#008000"). Color names 
 - Only embedded images are supported (external image links are not fetched)
 - Image dimensions and title are extracted from DOCX metadata
 - **Image Cropping**: By default, images are imported in full size (crop information is ignored)
-  - To enable cropping, set `enableImageCrop: true` in options
+  - To enable cropping, set `crop: true` in options
   - In browser environments, cropping works natively with Canvas API
   - In Node.js, you must also provide `canvasImport` option with dynamic import of `@napi-rs/canvas`
   - If `@napi-rs/canvas` is not available in Node.js, images will be imported without cropping (graceful degradation)

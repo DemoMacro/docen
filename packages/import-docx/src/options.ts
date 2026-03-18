@@ -13,9 +13,11 @@ export interface DocxImportOptions {
     // Enable or disable image cropping during import
     // When true, images with crop information in DOCX will be cropped
     // When false (default), crop information is ignored and full image is used
-    enableImageCrop?: boolean;
+    crop?: boolean;
   };
 
-  // Whether to ignore empty paragraphs (default: false)
-  ignoreEmptyParagraphs?: boolean;
+  paragraph?: {
+    // Whether to ignore empty paragraphs (default: false)
+    ignoreEmpty?: boolean;
+  };
 }

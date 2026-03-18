@@ -112,7 +112,7 @@ async function applyCropToImage(
     const bytes = base64ToUint8Array(base64Data);
     const croppedData = await cropImageIfNeeded(bytes, crop, {
       canvasImport: params.context.image?.canvasImport,
-      enabled: params.context.image?.enableImageCrop ?? false,
+      enabled: params.context.image?.crop ?? false,
     });
     const croppedBase64 = uint8ArrayToBase64(croppedData);
 
@@ -201,33 +201,6 @@ export function findDrawingElement(run: Element): Element | null {
   const altContent = findChild(run, "mc:AlternateContent");
   const choice = altContent && findChild(altContent, "mc:Choice");
   return choice ? findChild(choice, "w:drawing") : null;
-}
-
-/**
- * Adjust image dimensions to fit within group bounds while preserving aspect ratio
- */
-function fitToGroup(
-  groupWidth: number,
-  groupHeight: number,
-  metaWidth: number,
-  metaHeight: number,
-): { width: number; height: number } {
-  const metaRatio = metaWidth / metaHeight;
-  const groupRatio = groupWidth / groupHeight;
-
-  // If aspect ratios differ significantly, adjust to fit within group bounds
-  if (Math.abs(metaRatio - groupRatio) > 0.1) {
-    if (metaRatio > groupRatio) {
-      // Image is wider: fit to width
-      return { width: groupWidth, height: Math.round(groupWidth / metaRatio) };
-    } else {
-      // Image is taller: fit to height
-      return { width: Math.round(groupHeight * metaRatio), height: groupHeight };
-    }
-  }
-
-  // Aspect ratios match, use group dimensions
-  return { width: groupWidth, height: groupHeight };
 }
 
 /**
@@ -324,7 +297,7 @@ export async function extractImageFromDrawing(
         try {
           const croppedData = await cropImageIfNeeded(bytes, crop, {
             canvasImport: context.image?.canvasImport,
-            enabled: context.image?.enableImageCrop ?? false,
+            enabled: context.image?.crop ?? false,
           });
 
           const croppedBase64 = uint8ArrayToBase64(croppedData);
@@ -637,7 +610,7 @@ export async function extractImagesFromDrawing(
             const bytes = base64ToUint8Array(base64Data);
             const croppedData = await cropImageIfNeeded(bytes, crop, {
               canvasImport: params.context.image?.canvasImport,
-              enabled: params.context.image?.enableImageCrop ?? false,
+              enabled: params.context.image?.crop ?? false,
             });
             const croppedBase64 = uint8ArrayToBase64(croppedData);
             image.attrs.src = `${metadata},${croppedBase64}`;

@@ -117,7 +117,7 @@ async function convertElements(
 
     // Skip empty paragraphs if option is set
     if (
-      params.context.ignoreEmptyParagraphs &&
+      params.context.paragraph?.ignoreEmpty &&
       element.name === "w:p" &&
       isEmptyParagraph(element)
     ) {
