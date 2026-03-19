@@ -368,5 +368,7 @@ export function extractParagraphStyles(
     Object.assign(result, borders);
   }
 
-  return Object.keys(result).length > 0 ? result as ReturnType<typeof extractParagraphStyles> : null;
+  return Object.keys(result).length > 0
+    ? (result as ReturnType<typeof extractParagraphStyles>)
+    : null;
 }

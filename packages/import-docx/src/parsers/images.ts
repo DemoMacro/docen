@@ -541,8 +541,8 @@ export async function extractImagesFromDrawing(
         // Handle elements without a:graphic (direct blipFill)
         // For pic:pic, use pic:blipFill; for wps:wsp, use wps:blipFill
         const blipFill = isWsp
-          ? (findChild(pic, "wps:blipFill") || findDeepChild(pic, "a:blipFill"))
-          : (findChild(pic, "pic:blipFill") || findDeepChild(pic, "a:blipFill"));
+          ? findChild(pic, "wps:blipFill") || findDeepChild(pic, "a:blipFill")
+          : findChild(pic, "pic:blipFill") || findDeepChild(pic, "a:blipFill");
         if (!blipFill) continue;
 
         const blip = findChild(blipFill, "a:blip") || findDeepChild(blipFill, "a:blip");

@@ -204,9 +204,7 @@ export async function convertDocument(
   // Process all nodes in parallel - key performance optimization
   // Paragraphs are independent, so we can process them concurrently
   const convertedElements = await Promise.all(
-    node.content.map((childNode) =>
-      convertNode(childNode, params.options, effectiveContentWidth)
-    )
+    node.content.map((childNode) => convertNode(childNode, params.options, effectiveContentWidth)),
   );
 
   // Assemble results while preserving order
