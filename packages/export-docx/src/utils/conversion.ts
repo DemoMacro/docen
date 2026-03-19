@@ -61,12 +61,14 @@ export function calculateEffectiveContentWidth(options?: DocxExportOptions): num
 /**
  * Convert Border to docx.js format
  */
-export function convertBorder(border?: Border): {
-  color?: string;
-  size?: number;
-  style?: string;
-  space?: number;
-} | undefined {
+export function convertBorder(border?: Border):
+  | {
+      color?: string;
+      size?: number;
+      style?: string;
+      space?: number;
+    }
+  | undefined {
   if (!border) return undefined;
 
   const docxBorder: {
@@ -100,11 +102,13 @@ export function convertBorder(border?: Border): {
 /**
  * Convert Shading to docx.js format
  */
-export function convertShading(shading?: Shading): {
-  fill?: string;
-  color?: string;
-  val?: string;
-} | undefined {
+export function convertShading(shading?: Shading):
+  | {
+      fill?: string;
+      color?: string;
+      val?: string;
+    }
+  | undefined {
   if (!shading || !shading.fill) return undefined;
 
   const docxShading: {
@@ -128,4 +132,3 @@ export function convertShading(shading?: Shading): {
 
   return docxShading;
 }
-

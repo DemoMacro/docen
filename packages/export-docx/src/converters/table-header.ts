@@ -91,7 +91,8 @@ export async function convertTableHeader(
   }
 
   // Add borders if present
-  const borders: Record<string, { color?: string; size?: number; style?: string; space?: number }> = {};
+  const borders: Record<string, { color?: string; size?: number; style?: string; space?: number }> =
+    {};
 
   const top = convertBorder(node.attrs?.borderTop);
   if (top) borders.top = top;

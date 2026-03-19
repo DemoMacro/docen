@@ -13,6 +13,6 @@
     "@iconify-json/lucide": "1.2.98",
     "@nuxt/ui": "4.5.1",
     "nuxt": "4.4.2",
-    "tailwindcss": "4.2.1"
+    "tailwindcss": "4.2.2"
   }
 }
