@@ -18,7 +18,20 @@ export async function convertParagraph(
   const pStyle = pPr && findChild(pPr, "w:pStyle");
   const styleName = pStyle?.attributes["w:val"] as string | undefined;
 
-  // Check if it's a heading
+  // First check for direct outlineLvl setting (higher priority than style-based)
+  if (pPr) {
+    const outlineLvlElement = findChild(pPr, "w:outlineLvl");
+    if (outlineLvlElement?.attributes["w:val"] !== undefined) {
+      const outlineLvl = parseInt(outlineLvlElement.attributes["w:val"] as string, 10);
+      if (outlineLvl >= 0 && outlineLvl <= 5) {
+        const level = (outlineLvl + 1) as 1 | 2 | 3 | 4 | 5 | 6;
+        const styleInfo = styleName && context.styleMap ? context.styleMap.get(styleName) : undefined;
+        return convertHeading(node, params, styleInfo, level);
+      }
+    }
+  }
+
+  // Then check style-based heading detection
   if (styleName && context.styleMap) {
     const styleInfo = context.styleMap.get(styleName);
 
