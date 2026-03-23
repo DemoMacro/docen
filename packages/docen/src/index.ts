@@ -1,7 +1,7 @@
 import {
   generateHTML as generateTiptapHTML,
   generateJSON as generateTiptapJSON,
-} from "@tiptap/html/server";
+} from "@tiptap/html";
 import { tiptapExtensions } from "@docen/extensions";
 import type { JSONContent, Extensions } from "@tiptap/core";
 import type { ParseOptions } from "@tiptap/pm/model";
