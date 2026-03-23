@@ -145,13 +145,14 @@ export function parseCellProperties(cellNode: Element): {
   const vMerge = findChild(tcPr, "w:vMerge");
   if (vMerge) {
     const vMergeVal = vMerge.attributes["w:val"] as string | undefined;
-    if (vMergeVal === "continue") {
-      // This cell is merged vertically (hidden)
-      props.rowspan = 0;
-    } else {
-      // vMerge="restart" or vMerge with no value (defaults to "restart")
+    if (vMergeVal === "restart") {
+      // This cell starts a new vertical merge
       // Explicitly set rowspan to 1 to mark it for calculateRowspan
       props.rowspan = 1;
+    } else {
+      // vMerge="continue" or vMerge with no value (defaults to "continue")
+      // This cell is merged vertically (hidden)
+      props.rowspan = 0;
     }
   }
 

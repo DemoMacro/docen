@@ -127,6 +127,7 @@ function calculateRowspan(params: { rows: Element[]; rowIndex: number; colIndex:
   for (let rowIndex = params.rowIndex + 1; rowIndex < params.rows.length; rowIndex++) {
     const row = params.rows[rowIndex];
     let cellFound = false;
+    let currentColIndex = colIndex; // Reset colIndex for each row
 
     for (const child of row.children) {
       if (child.type !== "element" || child.name !== "w:tc") continue;
@@ -134,7 +135,7 @@ function calculateRowspan(params: { rows: Element[]; rowIndex: number; colIndex:
       const cellProps = parseCellProperties(child);
       const colSpan = cellProps?.colspan || 1;
 
-      if (colIndex >= 0 && colIndex < colSpan) {
+      if (currentColIndex >= 0 && currentColIndex < colSpan) {
         if (cellProps?.rowspan === 0) {
           rowspan++;
           cellFound = true;
@@ -144,7 +145,7 @@ function calculateRowspan(params: { rows: Element[]; rowIndex: number; colIndex:
         break;
       }
 
-      colIndex -= colSpan;
+      currentColIndex -= colSpan;
     }
 
     if (!cellFound) break;
