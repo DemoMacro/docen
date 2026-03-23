@@ -1,6 +1,6 @@
 {
   "name": "@docen/deduplicate",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "description": "Text deduplication utilities for Tiptap/ProseMirror JSON documents using Levenshtein distance",
   "keywords": [
     "deduplication",
