@@ -1,14 +1,16 @@
 {
   "name": "@docen/deduplicate",
-  "version": "0.0.6",
-  "description": "Text deduplication utilities for Tiptap/ProseMirror JSON documents using Levenshtein distance",
+  "version": "0.1.0",
+  "description": "Multi-layer text deduplication using SimHash, N-gram containment, and sentence-sequence LCS for Tiptap/ProseMirror documents",
   "keywords": [
+    "containment",
     "deduplication",
     "docen",
     "document",
-    "levenshtein",
+    "lcs",
     "plagiarism",
     "prosemirror",
+    "simhash",
     "similarity",
     "tiptap"
   ],
@@ -44,10 +46,10 @@
     "prepack": "pnpm build"
   },
   "dependencies": {
-    "fastest-levenshtein": "1.0.16"
+    "@nlptools/distance": "0.0.5"
   },
   "devDependencies": {
     "@docen/extensions": "workspace:*",
-    "@tiptap/core": "3.20.4"
+    "@tiptap/core": "3.22.2"
   }
 }

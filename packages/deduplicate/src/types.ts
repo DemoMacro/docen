@@ -1,45 +1,87 @@
 import type { JSONContent } from "@tiptap/core";
 
-/**
- * Configuration options for deduplication
- */
+export type { JSONContent };
+
+// ---------------------------------------------------------------------------
+// Match classification
+// ---------------------------------------------------------------------------
+
+/** Classification of text similarity relationship. */
+export type MatchKind = "contained" | "similar" | "weakOverlap" | "none";
+
+// ---------------------------------------------------------------------------
+// Configuration
+// ---------------------------------------------------------------------------
+
+/** Sentence splitter function. */
+export type SentenceSplitter = (text: string) => string[];
+
+/** Configuration options for deduplication. */
 export interface DeduplicateOptions {
-  /**
-   * Minimum similarity threshold (0-1).
-   * Paragraphs with similarity >= threshold will be considered duplicates.
-   * @default 0.85
-   */
+  /** Minimum similarity threshold (0-1) for duplicate detection. @default 0.6 */
   threshold?: number;
-  /**
-   * Whether to ignore whitespace differences when comparing
-   * @default true
-   */
-  ignoreWhitespace?: boolean;
-  /**
-   * Whether to ignore case differences when comparing
-   * @default true
-   */
-  ignoreCase?: boolean;
-  /**
-   * Filter function to exclude certain texts from comparison.
-   * Returns false to skip comparison, returns true to include.
-   * Filtered texts will still appear in results with `filtered: true`.
-   * @default () => true
-   *
-   * @example
-   * // Skip texts shorter than 20 characters
-   * filter: (text) => text.length >= 20
-   *
-   * @example
-   * // Skip specific patterns
-   * filter: (text) => !text.startsWith('http://')
-   */
-  filter?: (text: string) => boolean;
+  /** SimHash hamming distance threshold for candidate screening. @default 10 */
+  hammingThreshold?: number;
+  /** Levenshtein similarity threshold for fine-grained verification. @default 0.6 */
+  levenshteinThreshold?: number;
+  /** Minimum sentence length for SimHash fingerprinting and Phase 2 matching. @default 15 */
+  minSentenceLength?: number;
+  /** Custom sentence splitter. @default splitSentences (Chinese & English aware) */
+  splitter?: SentenceSplitter;
 }
 
-/**
- * Represents a duplicate paragraph match found in a document
- */
+// ---------------------------------------------------------------------------
+// Internal types
+// ---------------------------------------------------------------------------
+
+/** Sentence with optional SimHash fingerprint. */
+export interface SentenceInfo {
+  text: string;
+  fingerprint: bigint | null;
+}
+
+/** Paragraph with sentence-level information. */
+export interface ParagraphInfo {
+  text: string;
+  index: number;
+  sentences: SentenceInfo[];
+}
+
+// ---------------------------------------------------------------------------
+// Result types
+// ---------------------------------------------------------------------------
+
+/** Bidirectional coverage between two paragraphs. */
+export interface Coverage {
+  /** Proportion of paragraph A's sentences matched in B (0-1) */
+  covA: number;
+  /** Proportion of paragraph B's sentences matched in A (0-1) */
+  covB: number;
+}
+
+/** Paragraph-level comparison result between two documents. */
+export interface ParagraphComparison {
+  /** Paragraph from document 1 */
+  fromDoc1: { index: number; text: string };
+  /** Best matching paragraph from document 2 (null if no match) */
+  fromDoc2: { index: number; text: string } | null;
+  /** Bidirectional sentence-level coverage */
+  coverage: Coverage;
+  /** Classification of the relationship */
+  matchKind: MatchKind;
+  /** Overall similarity score (max of covA, covB) */
+  similarity: number;
+}
+
+/** Document-level comparison result. */
+export interface DocumentResult {
+  /** Per-paragraph comparison details */
+  paragraphs: ParagraphComparison[];
+  /** Overall document coverage (average of paragraph covA) */
+  coverage: number;
+}
+
+/** Represents a duplicate paragraph match found within a single document. */
 export interface DuplicateMatch {
   /** Index of the first occurrence */
   index: number;
@@ -50,32 +92,3 @@ export interface DuplicateMatch {
   /** Similarity scores for each duplicate */
   similarities: number[];
 }
-
-/**
- * Represents a comparison result between two documents
- */
-export interface DocumentComparison {
-  /** Similar paragraph from document 1 */
-  fromDoc1: { index: number; text: string };
-  /** Similar paragraph from document 2 (null if no match found) */
-  fromDoc2: { index: number; text: string } | null;
-  /** Similarity score for the pair (0 if no match or filtered) */
-  similarity: number;
-  /** Whether the text was filtered out by the filter function */
-  filtered: boolean;
-}
-
-/**
- * Result of finding the most similar text
- */
-export interface MostSimilarResult {
-  /** The most similar text */
-  text: string;
-  /** Index in candidates array */
-  index: number;
-  /** Similarity score */
-  similarity: number;
-}
-
-// Re-export JSONContent for convenience
-export type { JSONContent };
