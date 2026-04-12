@@ -32,12 +32,24 @@ export async function convertTableHeader(
   }
 
   // Convert paragraphs in the header
-  const paragraphOptionsList = await Promise.all(
+  const paragraphResults = await Promise.allSettled(
     (node.content || []).map((p) =>
       convertParagraph(p, {
         options: headerParagraphOptions,
       }),
     ),
+  );
+
+  const errors = paragraphResults
+    .map((r, i) => ({ r, i }))
+    .filter(({ r }) => r.status === "rejected");
+  if (errors.length > 0) {
+    const msgs = errors.map(({ i, r }) => `[header paragraph ${i}]: ${(r as PromiseRejectedResult).reason}`);
+    throw new Error(`Failed to convert table header paragraphs:\n${msgs.join("\n")}`);
+  }
+
+  const paragraphOptionsList = paragraphResults.map(
+    (r) => (r as PromiseFulfilledResult<IParagraphOptions>).value,
   );
 
   // Convert IParagraphOptions[] to Paragraph[] for TableCell children

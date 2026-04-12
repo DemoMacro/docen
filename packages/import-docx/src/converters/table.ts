@@ -29,7 +29,7 @@ export async function convertTable(
   const activeRowspans = new Map<number, number>();
 
   // Convert each row
-  const content = await Promise.all(
+  const rowResults = await Promise.allSettled(
     rows.map((row, rowIndex) =>
       convertTableRow(row, {
         context: params.context,
@@ -39,6 +39,16 @@ export async function convertTable(
       }),
     ),
   );
+
+  const rowErrors = rowResults
+    .map((r, i) => ({ r, i }))
+    .filter(({ r }) => r.status === "rejected");
+  if (rowErrors.length > 0) {
+    const msgs = rowErrors.map(({ i, r }) => `[row ${i}]: ${(r as PromiseRejectedResult).reason}`);
+    throw new Error(`Failed to convert table rows:\n${msgs.join("\n")}`);
+  }
+
+  const content = rowResults.map((r) => (r as PromiseFulfilledResult<JSONContent>).value);
 
   // Parse table properties (including cell margins)
   const tableProps = parseTableProperties(node);
