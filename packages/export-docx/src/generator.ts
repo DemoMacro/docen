@@ -4,6 +4,8 @@ import {
   Paragraph,
   TextRun,
   Packer,
+  PatchType,
+  patchDocument,
   OutputType,
   OutputByType,
   INumberingOptions,
@@ -18,7 +20,7 @@ import {
   IParagraphOptions,
   Table,
 } from "docx";
-import { type DocxExportOptions } from "./options";
+import { type DocxExportOptions, type DocxPatchOptions } from "./options";
 import { calculateEffectiveContentWidth } from "./utils";
 import { convertParagraph } from "./converters/paragraph";
 import { convertHeading } from "./converters/heading";
@@ -186,6 +188,76 @@ export async function generateDOCX<T extends OutputType>(
 }
 
 /**
+ * Patch an existing DOCX template with TipTap content.
+ *
+ * Replaces {{placeholder}} tags in the template with content converted from TipTap JSONContent,
+ * using the same conversion pipeline as generateDOCX.
+ *
+ * @param options - Patch options including template data, patches, and export settings
+ * @returns Promise with patched document in specified format
+ */
+export async function patchDOCX<T extends OutputType>(
+  options: DocxPatchOptions<T>,
+): Promise<OutputByType[T]> {
+  const {
+    template,
+    patches,
+    placeholderDelimiters,
+    keepOriginalStyles,
+    exportOptions,
+    outputType,
+  } = options;
+
+  // Build export options with outputType for the conversion pipeline
+  const fullExportOptions: DocxExportOptions<T> = {
+    ...exportOptions,
+    outputType,
+  };
+
+  // Convert all patches in parallel
+  const patchResults = await Promise.allSettled(
+    Object.entries(patches).map(async ([key, patchContent]) => {
+      const children = await convertDocument(patchContent.content, { options: fullExportOptions });
+
+      const patchType = patchContent.type ?? PatchType.DOCUMENT;
+
+      return [key, { type: patchType, children }] as const;
+    }),
+  );
+
+  // Collect failures and throw with full context
+  const patchErrors = patchResults
+    .map((result, i) => ({ result, key: Object.keys(patches)[i] }))
+    .filter(({ result }) => result.status === "rejected");
+
+  if (patchErrors.length > 0) {
+    const messages = patchErrors.map(
+      ({ key, result }) => `[${key}]: ${(result as PromiseRejectedResult).reason}`,
+    );
+    throw new Error(`Failed to convert patches:\n${messages.join("\n")}`);
+  }
+
+  // Assemble patches object
+  const patchesObject = Object.fromEntries(
+    patchResults.map((r) => (r as PromiseFulfilledResult<[string, unknown]>).value),
+  ) as Record<string, { type: typeof PatchType.PARAGRAPH | typeof PatchType.DOCUMENT; children: readonly FileChild[] }>;
+
+  // Apply patches to template
+  return patchDocument({
+    outputType,
+    data: template,
+    patches: patchesObject,
+    ...(keepOriginalStyles !== undefined && { keepOriginalStyles }),
+    ...(placeholderDelimiters && {
+      placeholderDelimiters: {
+        start: placeholderDelimiters.start ?? "{{",
+        end: placeholderDelimiters.end ?? "}}",
+      },
+    }),
+  }) as Promise<OutputByType[T]>;
+}
+
+/**
  * Convert document content to DOCX elements
  */
 export async function convertDocument(
@@ -203,8 +275,24 @@ export async function convertDocument(
 
   // Process all nodes in parallel - key performance optimization
   // Paragraphs are independent, so we can process them concurrently
-  const convertedElements = await Promise.all(
+  const convertedResults = await Promise.allSettled(
     node.content.map((childNode) => convertNode(childNode, params.options, effectiveContentWidth)),
+  );
+
+  // Collect failures and throw with full context
+  const nodeErrors = convertedResults
+    .map((result, i) => ({ result, index: i, type: node.content?.[i]?.type }))
+    .filter(({ result }) => result.status === "rejected");
+
+  if (nodeErrors.length > 0) {
+    const messages = nodeErrors.map(
+      ({ index, type, result }) => `[index=${index}, type=${type}]: ${(result as PromiseRejectedResult).reason}`,
+    );
+    throw new Error(`Failed to convert document nodes:\n${messages.join("\n")}`);
+  }
+
+  const convertedElements = convertedResults.map(
+    (r) => (r as PromiseFulfilledResult<FileChild | FileChild[] | null>).value,
   );
 
   // Assemble results while preserving order

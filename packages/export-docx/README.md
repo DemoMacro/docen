@@ -20,6 +20,7 @@
 - 😀 **Emoji Support** - Native emoji rendering in documents
 - 🧮 **Mathematical Content** - LaTeX-style formula support
 - ⚙️ **Configurable Options** - Customizable export options for documents, tables, styles, and horizontal rules
+- 📄 **Template Patching** - Patch existing DOCX templates with TipTap content via placeholder replacement
 
 ## Installation
 
@@ -74,6 +75,27 @@ Converts TipTap/ProseMirror content to DOCX format.
 - `options: DocxExportOptions` - Export configuration options
 
 **Returns:** `Promise<OutputByType[T]>` - DOCX file data with type matching the specified outputType
+
+### `patchDOCX(options)`
+
+Patch an existing DOCX template by replacing `{{placeholder}}` tags with TipTap content.
+
+**Parameters:**
+
+- `options: DocxPatchOptions` - Patch configuration options
+
+**Returns:** `Promise<OutputByType[T]>` - Patched document data
+
+**DocxPatchOptions:**
+
+- `template` - Template document data (ArrayBuffer, Buffer, Uint8Array, Blob, or base64 string)
+- `patches` - Object mapping placeholder names to content definitions
+  - `patches[name].type` - `"document"` (default, multi-element) or `"paragraph"` (inline text only)
+  - `patches[name].content` - TipTap JSONContent to convert and inject
+- `placeholderDelimiters` - Custom delimiters (default: `{{` and `}}`)
+- `keepOriginalStyles` - Preserve original formatting of placeholder text (default: `false`)
+- `exportOptions` - Shared export options (image handling, table styling, etc.)
+- `outputType` - Output format (required)
 
 **Available Output Types:**
 
@@ -138,6 +160,39 @@ Converts TipTap/ProseMirror content to DOCX format.
 - **Details/Summary** collapsible sections
 
 ## Examples
+
+### Template Patching
+
+Create a Word template with placeholders like `{{title}}`, `{{body}}`, then patch it:
+
+```typescript
+import { patchDOCX } from "@docen/export-docx";
+import { readFileSync, writeFileSync } from "node:fs";
+
+const result = await patchDOCX({
+  template: readFileSync("contract-template.docx"),
+  outputType: "nodebuffer",
+  patches: {
+    title: {
+      type: "paragraph",
+      content: {
+        type: "doc",
+        content: [{ type: "paragraph", content: [{ type: "text", text: "Service Agreement" }] }],
+      },
+    },
+    body: {
+      // Default type is "document", supports multi-paragraph, tables, images, etc.
+      content: editor.getJSON(),
+    },
+  },
+  exportOptions: {
+    image: { handler: myImageHandler },
+  },
+  keepOriginalStyles: true,
+});
+
+writeFileSync("contract-output.docx", result);
+```
 
 ### Document with Tables and Colspan/Rowspan
 

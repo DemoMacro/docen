@@ -32,12 +32,24 @@ export async function convertTableCell(
   }
 
   // Convert paragraphs in the cell
-  const paragraphOptionsList = await Promise.all(
+  const paragraphResults = await Promise.allSettled(
     (node.content || []).map((p) =>
       convertParagraph(p, {
         options: cellParagraphOptions,
       }),
     ),
+  );
+
+  const errors = paragraphResults
+    .map((r, i) => ({ r, i }))
+    .filter(({ r }) => r.status === "rejected");
+  if (errors.length > 0) {
+    const msgs = errors.map(({ i, r }) => `[cell paragraph ${i}]: ${(r as PromiseRejectedResult).reason}`);
+    throw new Error(`Failed to convert table cell paragraphs:\n${msgs.join("\n")}`);
+  }
+
+  const paragraphOptionsList = paragraphResults.map(
+    (r) => (r as PromiseFulfilledResult<IParagraphOptions>).value,
   );
 
   // Convert IParagraphOptions[] to Paragraph[] for TableCell children

@@ -1,5 +1,6 @@
 import {
   OutputType,
+  PatchType,
   ISectionOptions,
   IImageOptions,
   IPropertiesOptions,
@@ -10,13 +11,11 @@ import {
   ITableOfContentsOptions,
   IParagraphStyleOptions,
 } from "docx";
+import type { JSONContent } from "@tiptap/core";
 import type { DocxImageExportHandler } from "./utils/image";
 
-/**
- * Options for exporting TipTap content to DOCX
- */
 export interface DocxExportOptions<T extends OutputType = OutputType> {
-  // === IPropertiesOptions fields (in order) ===
+  // Document properties
   sections?: ISectionOptions[];
   title?: string;
   subject?: string;
@@ -40,30 +39,20 @@ export interface DocxExportOptions<T extends OutputType = OutputType> {
   fonts?: IPropertiesOptions["fonts"];
   hyphenation?: IPropertiesOptions["hyphenation"];
 
-  // === Specific options ===
   tableOfContents?: {
     title?: string;
     run?: Partial<ITableOfContentsOptions>;
   };
 
   image?: {
-    // Custom image handler to replace default fetch behavior
     handler?: DocxImageExportHandler;
-
-    // Style definition for image paragraphs
     style?: IParagraphStyleOptions;
-
-    // Image-specific run options (global defaults, can be overridden by node.attrs)
     run?: Partial<IImageOptions>;
   };
 
   table?: {
-    // Style definition for table paragraphs
     style?: IParagraphStyleOptions;
-
-    // Table-level options
     run?: Partial<ITableOptions>;
-
     row?: {
       paragraph?: Partial<IParagraphOptions>;
       run?: Partial<ITableRowOptions>;
@@ -79,7 +68,6 @@ export interface DocxExportOptions<T extends OutputType = OutputType> {
   };
 
   code?: {
-    // Style definition for code block paragraphs
     style?: IParagraphStyleOptions;
   };
 
@@ -96,6 +84,21 @@ export interface DocxExportOptions<T extends OutputType = OutputType> {
     paragraph?: Partial<IParagraphOptions>;
   };
 
-  // Export options
+  outputType: T;
+}
+
+export interface DocxPatchContent {
+  /** @default PatchType.DOCUMENT */
+  type?: typeof PatchType.DOCUMENT | typeof PatchType.PARAGRAPH;
+  content: JSONContent;
+}
+
+export interface DocxPatchOptions<T extends OutputType = OutputType> {
+  template: ArrayBuffer | Buffer | Uint8Array | Blob | string;
+  patches: Record<string, DocxPatchContent>;
+  placeholderDelimiters?: { start?: string; end?: string };
+  /** @default false */
+  keepOriginalStyles?: boolean;
+  exportOptions: Omit<DocxExportOptions<T>, "outputType">;
   outputType: T;
 }

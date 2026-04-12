@@ -1,4 +1,4 @@
-import { Table, ITableOptions } from "docx";
+import { Table, TableRow, ITableOptions } from "docx";
 import { TableNode } from "@docen/extensions/types";
 import { convertTableRow } from "./table-row";
 import { DocxExportOptions } from "../options";
@@ -42,7 +42,19 @@ export async function convertTable(
   const { options } = params;
 
   // Convert table rows
-  const rows = await Promise.all((node.content || []).map((row) => convertTableRow(row, params)));
+  const rowResults = await Promise.allSettled(
+    (node.content || []).map((row) => convertTableRow(row, params)),
+  );
+
+  const rowErrors = rowResults
+    .map((r, i) => ({ r, i }))
+    .filter(({ r }) => r.status === "rejected");
+  if (rowErrors.length > 0) {
+    const msgs = rowErrors.map(({ i, r }) => `[row ${i}]: ${(r as PromiseRejectedResult).reason}`);
+    throw new Error(`Failed to convert table rows:\n${msgs.join("\n")}`);
+  }
+
+  const rows = rowResults.map((r) => (r as PromiseFulfilledResult<TableRow>).value);
 
   // Build table options
   let tableOptions: ITableOptions = {

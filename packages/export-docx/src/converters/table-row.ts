@@ -24,7 +24,7 @@ export async function convertTableRow(
   const rowOptions = options?.row;
 
   // Convert table cells and headers
-  const cells = await Promise.all(
+  const cellResults = await Promise.allSettled(
     (node.content || []).map(async (cellNode) => {
       if (cellNode.type === "tableCell") {
         return await convertTableCell(cellNode, params);
@@ -33,6 +33,20 @@ export async function convertTableRow(
       }
       return null;
     }),
+  );
+
+  const cellErrors = cellResults
+    .map((r, i) => ({ r, i, type: node.content?.[i]?.type }))
+    .filter(({ r }) => r.status === "rejected");
+  if (cellErrors.length > 0) {
+    const msgs = cellErrors.map(
+      ({ i, type, r }) => `[cell ${i}, type=${type}]: ${(r as PromiseRejectedResult).reason}`,
+    );
+    throw new Error(`Failed to convert table row cells:\n${msgs.join("\n")}`);
+  }
+
+  const cells = cellResults.map(
+    (r) => (r as PromiseFulfilledResult<TableCell | null>).value,
   );
 
   // Filter out null values
