@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, existsSync, readdirSync, rmSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseDOCX, generateDOCX, parseHTML, generateHTML } from "docen";
+import { parseDOCX, generateDOCX, patchDOCX, parseHTML, generateHTML, type DocxExportOptions } from "docen";
 import { unzipSync } from "fflate";
 import { fromXml } from "xast-util-from-xml";
 import { convertMillimetersToTwip } from "docx";
@@ -365,6 +365,53 @@ interface TestResult {
   error?: string;
 }
 
+// Shared export options
+const baseExportOptions: Omit<DocxExportOptions<"nodebuffer">, "title"> = {
+  outputType: "nodebuffer" as const,
+  styles: {
+    default: {
+      document: {
+        paragraph: {
+          spacing: {
+            line: 480,
+          },
+        },
+        run: {
+          size: 28,
+        },
+      },
+    },
+  },
+  table: {
+    run: {
+      width: {
+        size: 100,
+        type: "pct",
+      },
+      alignment: "center",
+      layout: "autofit",
+    },
+    cell: {
+      paragraph: {
+        alignment: "center",
+      },
+      run: {
+        verticalAlign: "center",
+      },
+    },
+  },
+  code: {
+    style: {
+      id: "Code",
+      run: {
+        font: {
+          name: "Consolas",
+        },
+      },
+    },
+  },
+};
+
 // Process files sequentially
 void (async () => {
   const results: TestResult[] = [];
@@ -381,8 +428,8 @@ void (async () => {
 
       // Generate DOCX
       const docxBuffer = await generateDOCX(originalJSON, {
+        ...baseExportOptions,
         title: docxFile.replace(".docx", ""),
-        outputType: "nodebuffer",
         sections: [
           {
             properties: {
@@ -402,48 +449,6 @@ void (async () => {
             children: [],
           },
         ],
-        styles: {
-          default: {
-            document: {
-              paragraph: {
-                spacing: {
-                  line: 480,
-                },
-              },
-              run: {
-                size: 28,
-              },
-            },
-          },
-        },
-        table: {
-          run: {
-            width: {
-              size: 100,
-              type: "pct",
-            },
-            alignment: "center",
-            layout: "autofit",
-          },
-          cell: {
-            paragraph: {
-              alignment: "center",
-            },
-            run: {
-              verticalAlign: "center",
-            },
-          },
-        },
-        code: {
-          style: {
-            id: "Code",
-            run: {
-              font: {
-                name: "Consolas",
-              },
-            },
-          },
-        },
       });
 
       writeFileSync(docxPath, docxBuffer);
@@ -470,40 +475,8 @@ void (async () => {
       const parsedDocxFile = jsonFile.replace(".json", ".docx");
       const parsedDocxPath = join(parsedDocxDir, parsedDocxFile);
       const parsedDocxBuffer = await generateDOCX(parsedJSON, {
+        ...baseExportOptions,
         title: parsedDocxFile.replace(".docx", ""),
-        outputType: "nodebuffer",
-        table: {
-          run: {
-            width: {
-              size: 100,
-              type: "pct",
-            },
-            alignment: "center",
-            layout: "autofit",
-          },
-          cell: {
-            paragraph: {
-              alignment: "center",
-            },
-            run: {
-              verticalAlign: "center",
-            },
-          },
-        },
-        styles: {
-          default: {
-            document: {
-              paragraph: {
-                spacing: {
-                  line: 480,
-                },
-              },
-              run: {
-                size: 28,
-              },
-            },
-          },
-        },
       });
       writeFileSync(parsedDocxPath, parsedDocxBuffer);
 
@@ -565,6 +538,240 @@ void (async () => {
     });
   } else {
     console.log("\n🎉 All tests passed! Perfect matches!");
+  }
+
+  console.log("\n" + "=".repeat(60));
+
+  // === patchDOCX Template Patching Tests ===
+  const patchDir = join(__dirname, "patch");
+  const patchTemplateDir = join(patchDir, "templates");
+  const patchOutputDir = join(patchDir, "output");
+
+  if (!existsSync(patchTemplateDir)) {
+    mkdirSync(patchTemplateDir, { recursive: true });
+  }
+  if (!existsSync(patchOutputDir)) {
+    mkdirSync(patchOutputDir, { recursive: true });
+  } else {
+    const outputFiles = readdirSync(patchOutputDir);
+    for (const file of outputFiles) {
+      rmSync(join(patchOutputDir, file), { force: true, recursive: true });
+    }
+  }
+
+  console.log("\n" + "=".repeat(60));
+  console.log("Testing patchDOCX template patching...");
+  console.log("=".repeat(60));
+
+  // Create a template DOCX with placeholders using generateDOCX
+  // Each placeholder must be in its own paragraph as a single text run,
+  // because patchDocument matches placeholder text within a single <w:r> run.
+  const templateContent = {
+    type: "doc" as const,
+    content: [
+      {
+        type: "heading" as const,
+        attrs: { level: 1 },
+        content: [{ type: "text" as const, text: "Document Template" }],
+      },
+      { type: "paragraph" as const, content: [] },
+      {
+        type: "paragraph" as const,
+        content: [{ type: "text" as const, text: "{{title}}" }],
+      },
+      { type: "paragraph" as const, content: [] },
+      {
+        type: "paragraph" as const,
+        content: [{ type: "text" as const, text: "{{body}}" }],
+      },
+      { type: "paragraph" as const, content: [] },
+      {
+        type: "paragraph" as const,
+        content: [{ type: "text" as const, text: "{{footer}}" }],
+      },
+    ],
+  };
+
+  const templateBuffer = await generateDOCX(templateContent, {
+    title: "template",
+    outputType: "nodebuffer",
+  });
+  writeFileSync(join(patchTemplateDir, "template.docx"), templateBuffer);
+
+  try {
+    // All patches use DOCUMENT type (default) which replaces the placeholder
+    // paragraph with FileChild[] elements from convertDocument.
+    const titleContent = {
+      type: "doc" as const,
+      content: [
+        {
+          type: "paragraph" as const,
+          content: [{ type: "text" as const, text: "Service Agreement v1.0" }],
+        },
+      ],
+    };
+
+    const bodyContent = {
+      type: "doc" as const,
+      content: [
+        {
+          type: "paragraph" as const,
+          content: [{ type: "text" as const, text: "This is the body content injected via patchDOCX." }],
+        },
+        {
+          type: "paragraph" as const,
+          content: [
+            { type: "text" as const, text: "It supports " },
+            { type: "text" as const, text: "bold", marks: [{ type: "bold" as const }] },
+            { type: "text" as const, text: " text and multiple paragraphs." }],
+        },
+      ],
+    };
+
+    const footerContent = {
+      type: "doc" as const,
+      content: [
+        {
+          type: "paragraph" as const,
+          content: [{ type: "text" as const, text: "Generated by docen patchDOCX" }],
+        },
+      ],
+    };
+
+    const patchedBuffer = await patchDOCX({
+      template: templateBuffer,
+      outputType: "nodebuffer",
+      patches: {
+        title: { content: titleContent },
+        body: { content: bodyContent },
+        footer: { content: footerContent },
+      },
+      exportOptions: {},
+    });
+
+    writeFileSync(join(patchOutputDir, "patched.docx"), patchedBuffer);
+
+    // Verify by parsing the patched document
+    const parsedPatched = await parseDOCX(patchedBuffer);
+    writeFileSync(join(patchOutputDir, "patched-parsed.json"), JSON.stringify(parsedPatched, null, 2));
+
+    const allText = JSON.stringify(parsedPatched);
+    const hasPlaceholders = allText.includes("{{title}}") || allText.includes("{{body}}") || allText.includes("{{footer}}");
+    const hasPatchedContent = allText.includes("Service Agreement") && allText.includes("patchDOCX");
+
+    if (!hasPlaceholders && hasPatchedContent) {
+      console.log("  patchDOCX (document-level patches): PASSED");
+    } else {
+      console.log("  patchDOCX (document-level patches): FAILED");
+      if (hasPlaceholders) console.log("    - Placeholders were not replaced");
+      if (!hasPatchedContent) console.log("    - Patched content not found in output");
+    }
+
+    // Test with table content patch
+    const tableContent = {
+      type: "doc" as const,
+      content: [
+        {
+          type: "table" as const,
+          content: [
+            {
+              type: "tableRow" as const,
+              content: [
+                {
+                  type: "tableHeader" as const,
+                  content: [
+                    {
+                      type: "paragraph" as const,
+                      content: [{ type: "text" as const, text: "Name" }],
+                    },
+                  ],
+                },
+                {
+                  type: "tableHeader" as const,
+                  content: [
+                    {
+                      type: "paragraph" as const,
+                      content: [{ type: "text" as const, text: "Value" }],
+                    },
+                  ],
+                },
+              ],
+            },
+            {
+              type: "tableRow" as const,
+              content: [
+                {
+                  type: "tableCell" as const,
+                  content: [
+                    {
+                      type: "paragraph" as const,
+                      content: [{ type: "text" as const, text: "docen" }],
+                    },
+                  ],
+                },
+                {
+                  type: "tableCell" as const,
+                  content: [
+                    {
+                      type: "paragraph" as const,
+                      content: [{ type: "text" as const, text: "v1.0" }],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+
+    // Create template with table placeholder
+    const tableTemplateContent = {
+      type: "doc" as const,
+      content: [
+        {
+          type: "paragraph" as const,
+          content: [{ type: "text" as const, text: "Data table below:" }],
+        },
+        {
+          type: "paragraph" as const,
+          content: [{ type: "text" as const, text: "{{dataTable}}" }],
+        },
+      ],
+    };
+
+    const tableTemplateBuffer = await generateDOCX(tableTemplateContent, {
+      title: "table-template",
+      outputType: "nodebuffer",
+    });
+    writeFileSync(join(patchTemplateDir, "table-template.docx"), tableTemplateBuffer);
+
+    const tablePatchedBuffer = await patchDOCX({
+      template: tableTemplateBuffer,
+      outputType: "nodebuffer",
+      patches: {
+        dataTable: { content: tableContent },
+      },
+      exportOptions: {},
+    });
+
+    writeFileSync(join(patchOutputDir, "table-patched.docx"), tablePatchedBuffer);
+
+    const parsedTablePatched = await parseDOCX(tablePatchedBuffer);
+    const tablePatchedText = JSON.stringify(parsedTablePatched);
+    const hasTableContent = tablePatchedText.includes("docen") && tablePatchedText.includes("v1.0");
+    const hasTablePlaceholder = tablePatchedText.includes("{{dataTable}}");
+
+    if (!hasTablePlaceholder && hasTableContent) {
+      console.log("  patchDOCX (table content patch): PASSED");
+    } else {
+      console.log("  patchDOCX (table content patch): FAILED");
+      if (hasTablePlaceholder) console.log("    - Placeholder was not replaced");
+      if (!hasTableContent) console.log("    - Table content not found in output");
+    }
+  } catch (error) {
+    console.log("  patchDOCX: FAILED");
+    console.log(`  Error: ${error instanceof Error ? error.message : String(error)}`);
   }
 
   console.log("\n" + "=".repeat(60));

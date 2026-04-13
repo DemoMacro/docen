@@ -1,6 +1,5 @@
 import {
   OutputType,
-  PatchType,
   ISectionOptions,
   IImageOptions,
   IPropertiesOptions,
@@ -26,7 +25,7 @@ export interface DocxExportOptions<T extends OutputType = OutputType> {
   revision?: number;
   externalStyles?: IPropertiesOptions["externalStyles"];
   styles?: IPropertiesOptions["styles"];
-  numbering?: IPropertiesOptions["numbering"];
+  numbering?: IPropertiesOptions["numbering"] | false;
   comments?: IPropertiesOptions["comments"];
   footnotes?: IPropertiesOptions["footnotes"];
   background?: IPropertiesOptions["background"];
@@ -88,8 +87,6 @@ export interface DocxExportOptions<T extends OutputType = OutputType> {
 }
 
 export interface DocxPatchContent {
-  /** @default PatchType.DOCUMENT */
-  type?: typeof PatchType.DOCUMENT | typeof PatchType.PARAGRAPH;
   content: JSONContent;
 }
 

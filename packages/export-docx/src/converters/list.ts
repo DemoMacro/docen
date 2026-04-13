@@ -44,6 +44,7 @@ export async function convertList(
   node: BulletListNode | OrderedListNode,
   params: {
     listType: "bullet" | "ordered";
+    numbering?: boolean;
   },
 ): Promise<IParagraphOptions[]> {
   const { listType } = params;
@@ -68,12 +69,14 @@ export async function convertList(
   for (const item of node.content) {
     if (item.type === "listItem") {
       const paragraphOptions = await convertListItem(item as ListItemNode, {
-        options: {
-          numbering: {
-            reference: numberingReference,
-            level: 0,
-          },
-        },
+        options: params.numbering === false
+          ? undefined
+          : {
+              numbering: {
+                reference: numberingReference,
+                level: 0,
+              },
+            },
       });
       elements.push(paragraphOptions);
     }
