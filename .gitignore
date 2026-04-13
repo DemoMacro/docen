@@ -136,3 +136,4 @@ playground/tests/json-parsed
 playground/tests/html-parsed
 playground/tests/docx-parsed
 playground/tests/docx-structure
+playground/tests/patch

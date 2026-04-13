@@ -86,17 +86,6 @@ Patch an existing DOCX template by replacing `{{placeholder}}` tags with TipTap 
 
 **Returns:** `Promise<OutputByType[T]>` - Patched document data
 
-**DocxPatchOptions:**
-
-- `template` - Template document data (ArrayBuffer, Buffer, Uint8Array, Blob, or base64 string)
-- `patches` - Object mapping placeholder names to content definitions
-  - `patches[name].type` - `"document"` (default, multi-element) or `"paragraph"` (inline text only)
-  - `patches[name].content` - TipTap JSONContent to convert and inject
-- `placeholderDelimiters` - Custom delimiters (default: `{{` and `}}`)
-- `keepOriginalStyles` - Preserve original formatting of placeholder text (default: `false`)
-- `exportOptions` - Shared export options (image handling, table styling, etc.)
-- `outputType` - Output format (required)
-
 **Available Output Types:**
 
 - `"base64"` - Base64 encoded string
@@ -174,14 +163,13 @@ const result = await patchDOCX({
   outputType: "nodebuffer",
   patches: {
     title: {
-      type: "paragraph",
       content: {
         type: "doc",
         content: [{ type: "paragraph", content: [{ type: "text", text: "Service Agreement" }] }],
       },
     },
     body: {
-      // Default type is "document", supports multi-paragraph, tables, images, etc.
+      // Supports multi-paragraph, tables, images, etc.
       content: editor.getJSON(),
     },
   },

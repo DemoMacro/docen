@@ -171,7 +171,7 @@ export async function generateDOCX<T extends OutputType>(
 
     // Styling
     styles: mergedStyles,
-    numbering: numberingOptions,
+    ...(options.numbering !== false && { numbering: numberingOptions }),
 
     // Optional properties - only include if provided
     ...(fonts && fonts.length > 0 && { fonts }),
@@ -209,9 +209,12 @@ export async function patchDOCX<T extends OutputType>(
   } = options;
 
   // Build export options with outputType for the conversion pipeline
+  // numbering: false strips list numbering references, since patchDocument
+  // cannot resolve them without a full Document numbering context
   const fullExportOptions: DocxExportOptions<T> = {
     ...exportOptions,
     outputType,
+    numbering: false,
   };
 
   // Convert all patches in parallel
@@ -219,9 +222,7 @@ export async function patchDOCX<T extends OutputType>(
     Object.entries(patches).map(async ([key, patchContent]) => {
       const children = await convertDocument(patchContent.content, { options: fullExportOptions });
 
-      const patchType = patchContent.type ?? PatchType.DOCUMENT;
-
-      return [key, { type: patchType, children }] as const;
+      return [key, { type: PatchType.DOCUMENT, children }] as const;
     }),
   );
 
@@ -437,11 +438,13 @@ async function convertNodeData(
     case "bulletList":
       return await convertList(node as BulletListNode, {
         listType: "bullet",
+        numbering: options.numbering !== false,
       });
 
     case "orderedList":
       return await convertList(node as OrderedListNode, {
         listType: "ordered",
+        numbering: options.numbering !== false,
       });
 
     case "taskList":
