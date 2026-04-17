@@ -181,4 +181,4 @@ interface DuplicateMatch {
 
 ## License
 
-MIT &copy; [Demo Macro](https://imst.xyz/)
+MIT &copy; [Demo Macro](https://www.demomacro.com/)

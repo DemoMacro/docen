@@ -1,4 +1,4 @@
-import { Table, TableRow, ITableOptions } from "docx";
+import { Table, TableRow, ITableOptions } from "docx-plus";
 import { TableNode } from "@docen/extensions/types";
 import { convertTableRow } from "./table-row";
 import { DocxExportOptions } from "../options";
@@ -46,9 +46,7 @@ export async function convertTable(
     (node.content || []).map((row) => convertTableRow(row, params)),
   );
 
-  const rowErrors = rowResults
-    .map((r, i) => ({ r, i }))
-    .filter(({ r }) => r.status === "rejected");
+  const rowErrors = rowResults.map((r, i) => ({ r, i })).filter(({ r }) => r.status === "rejected");
   if (rowErrors.length > 0) {
     const msgs = rowErrors.map(({ i, r }) => `[row ${i}]: ${(r as PromiseRejectedResult).reason}`);
     throw new Error(`Failed to convert table rows:\n${msgs.join("\n")}`);

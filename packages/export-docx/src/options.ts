@@ -9,7 +9,7 @@ import {
   ITableRowOptions,
   ITableOfContentsOptions,
   IParagraphStyleOptions,
-} from "docx";
+} from "docx-plus";
 import type { JSONContent } from "@tiptap/core";
 import type { DocxImageExportHandler } from "./utils/image";
 

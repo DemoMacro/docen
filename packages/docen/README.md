@@ -322,4 +322,4 @@ All conversions go through TipTap JSON as the intermediate format, ensuring cons
 
 ## License
 
-MIT © [Demo Macro](https://imst.xyz/)
+MIT © [Demo Macro](https://www.demomacro.com/)

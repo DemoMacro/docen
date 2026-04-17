@@ -19,7 +19,7 @@ import {
   IParagraphStyleOptions,
   IParagraphOptions,
   Table,
-} from "docx";
+} from "docx-plus";
 import { type DocxExportOptions, type DocxPatchOptions } from "./options";
 import { calculateEffectiveContentWidth } from "./utils";
 import { convertParagraph } from "./converters/paragraph";
@@ -241,7 +241,10 @@ export async function patchDOCX<T extends OutputType>(
   // Assemble patches object
   const patchesObject = Object.fromEntries(
     patchResults.map((r) => (r as PromiseFulfilledResult<[string, unknown]>).value),
-  ) as Record<string, { type: typeof PatchType.PARAGRAPH | typeof PatchType.DOCUMENT; children: readonly FileChild[] }>;
+  ) as Record<
+    string,
+    { type: typeof PatchType.PARAGRAPH | typeof PatchType.DOCUMENT; children: readonly FileChild[] }
+  >;
 
   // Apply patches to template
   return patchDocument({
@@ -287,7 +290,8 @@ export async function convertDocument(
 
   if (nodeErrors.length > 0) {
     const messages = nodeErrors.map(
-      ({ index, type, result }) => `[index=${index}, type=${type}]: ${(result as PromiseRejectedResult).reason}`,
+      ({ index, type, result }) =>
+        `[index=${index}, type=${type}]: ${(result as PromiseRejectedResult).reason}`,
     );
     throw new Error(`Failed to convert document nodes:\n${messages.join("\n")}`);
   }

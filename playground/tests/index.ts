@@ -1,10 +1,17 @@
 import { readFileSync, writeFileSync, existsSync, readdirSync, rmSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseDOCX, generateDOCX, patchDOCX, parseHTML, generateHTML, type DocxExportOptions } from "docen";
+import {
+  parseDOCX,
+  generateDOCX,
+  patchDOCX,
+  parseHTML,
+  generateHTML,
+  type DocxExportOptions,
+} from "docen";
 import { unzipSync } from "fflate";
 import { fromXml } from "xast-util-from-xml";
-import { convertMillimetersToTwip } from "docx";
+import { convertMillimetersToTwip } from "docx-plus";
 
 // Get current file directory
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -312,7 +319,7 @@ function compareJSON(original: any, parsed: any, path = ""): string[] {
   for (const key of originalKeys) {
     // Special handling for attrs key: if all values in original attrs are null, skip checking
     if (key === "attrs" && typeof original[key] === "object" && original[key] !== null) {
-      const attrsValues = Object.values(original[key] as Record<string, unknown>);
+      const attrsValues = Object.values(original[key]);
       const allNull = attrsValues.every((v) => v === null);
       if (allNull) {
         continue; // Skip checking this attrs object entirely
@@ -616,14 +623,17 @@ void (async () => {
       content: [
         {
           type: "paragraph" as const,
-          content: [{ type: "text" as const, text: "This is the body content injected via patchDOCX." }],
+          content: [
+            { type: "text" as const, text: "This is the body content injected via patchDOCX." },
+          ],
         },
         {
           type: "paragraph" as const,
           content: [
             { type: "text" as const, text: "It supports " },
             { type: "text" as const, text: "bold", marks: [{ type: "bold" as const }] },
-            { type: "text" as const, text: " text and multiple paragraphs." }],
+            { type: "text" as const, text: " text and multiple paragraphs." },
+          ],
         },
       ],
     };
@@ -653,11 +663,18 @@ void (async () => {
 
     // Verify by parsing the patched document
     const parsedPatched = await parseDOCX(patchedBuffer);
-    writeFileSync(join(patchOutputDir, "patched-parsed.json"), JSON.stringify(parsedPatched, null, 2));
+    writeFileSync(
+      join(patchOutputDir, "patched-parsed.json"),
+      JSON.stringify(parsedPatched, null, 2),
+    );
 
     const allText = JSON.stringify(parsedPatched);
-    const hasPlaceholders = allText.includes("{{title}}") || allText.includes("{{body}}") || allText.includes("{{footer}}");
-    const hasPatchedContent = allText.includes("Service Agreement") && allText.includes("patchDOCX");
+    const hasPlaceholders =
+      allText.includes("{{title}}") ||
+      allText.includes("{{body}}") ||
+      allText.includes("{{footer}}");
+    const hasPatchedContent =
+      allText.includes("Service Agreement") && allText.includes("patchDOCX");
 
     if (!hasPlaceholders && hasPatchedContent) {
       console.log("  patchDOCX (document-level patches): PASSED");

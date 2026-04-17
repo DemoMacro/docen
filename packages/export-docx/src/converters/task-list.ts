@@ -1,4 +1,4 @@
-import { type IParagraphOptions } from "docx";
+import { type IParagraphOptions } from "docx-plus";
 import { TaskListNode, TaskItemNode } from "@docen/extensions/types";
 import { convertTaskItem } from "./task-item";
 

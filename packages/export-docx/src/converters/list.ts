@@ -1,5 +1,5 @@
 import { BulletListNode, OrderedListNode, ListItemNode } from "@docen/extensions/types";
-import { type IParagraphOptions } from "docx";
+import { type IParagraphOptions } from "docx-plus";
 import { convertListItem } from "./list-item";
 
 export interface ListOptions {
@@ -69,14 +69,15 @@ export async function convertList(
   for (const item of node.content) {
     if (item.type === "listItem") {
       const paragraphOptions = await convertListItem(item as ListItemNode, {
-        options: params.numbering === false
-          ? undefined
-          : {
-              numbering: {
-                reference: numberingReference,
-                level: 0,
+        options:
+          params.numbering === false
+            ? undefined
+            : {
+                numbering: {
+                  reference: numberingReference,
+                  level: 0,
+                },
               },
-            },
       });
       elements.push(paragraphOptions);
     }

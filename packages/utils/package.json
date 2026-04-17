@@ -1,6 +1,6 @@
 {
   "name": "@docen/utils",
-  "version": "0.0.16",
+  "version": "0.1.0",
   "description": "Shared utility functions for DOCX processing, including unit conversions, color transformations, and XML helpers",
   "keywords": [
     "color",
@@ -19,7 +19,7 @@
   "author": {
     "name": "Demo Macro",
     "email": "abc@imst.xyz",
-    "url": "https://imst.xyz/"
+    "url": "https://www.demomacro.com/"
   },
   "repository": {
     "type": "git",

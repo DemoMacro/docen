@@ -40,9 +40,7 @@ export async function convertTable(
     ),
   );
 
-  const rowErrors = rowResults
-    .map((r, i) => ({ r, i }))
-    .filter(({ r }) => r.status === "rejected");
+  const rowErrors = rowResults.map((r, i) => ({ r, i })).filter(({ r }) => r.status === "rejected");
   if (rowErrors.length > 0) {
     const msgs = rowErrors.map(({ i, r }) => `[row ${i}]: ${(r as PromiseRejectedResult).reason}`);
     throw new Error(`Failed to convert table rows:\n${msgs.join("\n")}`);
