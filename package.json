@@ -24,7 +24,7 @@
   "author": {
     "name": "Demo Macro",
     "email": "abc@imst.xyz",
-    "url": "https://imst.xyz/"
+    "url": "https://www.demomacro.com/"
   },
   "repository": {
     "type": "git",
@@ -34,8 +34,7 @@
   "scripts": {
     "dev": "pnpm --filter \"./packages/**\" -r dev",
     "build": "pnpm --filter \"./packages/**\" -r build",
-    "lint": "basis lint",
-    "fmt": "basis fmt",
+    "check": "basis lint && basis fmt",
     "bump": "pnpm --filter \"./packages/**\" -r exec basis version",
     "prerelease": "pnpm --filter \"./packages/**\" -r exec basis version --prerelease",
     "postinstall": "pnpm dev && basis git setup"

@@ -1,4 +1,4 @@
-import { IParagraphOptions } from "docx";
+import { IParagraphOptions } from "docx-plus";
 import { ListItemNode } from "@docen/extensions/types";
 import { convertParagraph } from "./paragraph";
 

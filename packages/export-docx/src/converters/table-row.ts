@@ -1,4 +1,4 @@
-import { TableRow, TableCell } from "docx";
+import { TableRow, TableCell } from "docx-plus";
 import { TableRowNode } from "@docen/extensions/types";
 import { convertTableCell } from "./table-cell";
 import { convertTableHeader } from "./table-header";
@@ -45,9 +45,7 @@ export async function convertTableRow(
     throw new Error(`Failed to convert table row cells:\n${msgs.join("\n")}`);
   }
 
-  const cells = cellResults.map(
-    (r) => (r as PromiseFulfilledResult<TableCell | null>).value,
-  );
+  const cells = cellResults.map((r) => (r as PromiseFulfilledResult<TableCell | null>).value);
 
   // Filter out null values
   const validCells = cells.filter((cell): cell is TableCell => cell !== undefined);

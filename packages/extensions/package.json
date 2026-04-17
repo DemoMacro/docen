@@ -1,6 +1,6 @@
 {
   "name": "@docen/extensions",
-  "version": "0.0.16",
+  "version": "0.1.0",
   "description": "Collection of TipTap extensions with TypeScript type definitions for Docen",
   "keywords": [
     "docen",
@@ -20,7 +20,7 @@
   "author": {
     "name": "Demo Macro",
     "email": "abc@imst.xyz",
-    "url": "https://imst.xyz/"
+    "url": "https://www.demomacro.com/"
   },
   "repository": {
     "type": "git",
@@ -88,6 +88,6 @@
     "@tiptap/suggestion": "3.20.4"
   },
   "devDependencies": {
-    "docx": "9.6.1"
+    "docx-plus": "0.0.11"
   }
 }

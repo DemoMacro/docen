@@ -4,7 +4,7 @@ import type {
   IImageOptions,
   IHorizontalPositionOptions,
   IVerticalPositionOptions,
-} from "docx";
+} from "docx-plus";
 
 // Re-export JSONContent for convenience
 export type { JSONContent };

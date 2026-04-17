@@ -399,8 +399,9 @@ export async function extractImageFromDrawing(
     if (srgbClr?.attributes["val"]) {
       outline = {
         type: "solidFill",
-        solidFillType: "rgb",
-        value: srgbClr.attributes["val"] as string,
+        color: {
+          value: srgbClr.attributes["val"] as string,
+        },
       };
     }
   }

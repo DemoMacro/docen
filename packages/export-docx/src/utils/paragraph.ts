@@ -6,14 +6,11 @@ import { convertBorder, convertShading } from "./conversion";
  * Apply paragraph style attributes to options
  */
 
-export const applyParagraphStyleAttributes = <T extends Record<string, unknown>>(
-  options: T,
-  attrs?: ParagraphNode["attrs"],
-): T => {
+export const applyParagraphStyleAttributes = <T>(options: T, attrs?: ParagraphNode["attrs"]): T => {
   if (!attrs) return options;
 
   // Build result incrementally with single object creation
-  const result: Record<string, unknown> = { ...options };
+  const result = { ...options } as Record<string, unknown>;
 
   // Handle indentation (single object creation)
   if (attrs.indentLeft || attrs.indentRight || attrs.indentFirstLine) {

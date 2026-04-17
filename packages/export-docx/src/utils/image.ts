@@ -1,4 +1,4 @@
-import type { PositiveUniversalMeasure } from "docx";
+import type { PositiveUniversalMeasure } from "docx-plus";
 import { imageMeta as getImageMetadata, type ImageMeta } from "image-meta";
 import { ofetch } from "ofetch";
 import { convertMeasureToPixels, DOCX_DPI } from "@docen/utils";

@@ -1,4 +1,4 @@
-import { TextRun, type IParagraphOptions } from "docx";
+import { TextRun, type IParagraphOptions } from "docx-plus";
 import { CodeBlockNode, TextNode } from "@docen/extensions/types";
 import { DEFAULT_CODE_FONT } from "../utils";
 import { convertText } from "./text";

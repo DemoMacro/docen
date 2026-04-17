@@ -1,4 +1,4 @@
-import { TableCell, Paragraph, IParagraphOptions } from "docx";
+import { TableCell, Paragraph, IParagraphOptions } from "docx-plus";
 import { TableCellNode } from "@docen/extensions/types";
 import { convertParagraph } from "./paragraph";
 import { convertBorder } from "../utils";
@@ -44,7 +44,9 @@ export async function convertTableCell(
     .map((r, i) => ({ r, i }))
     .filter(({ r }) => r.status === "rejected");
   if (errors.length > 0) {
-    const msgs = errors.map(({ i, r }) => `[cell paragraph ${i}]: ${(r as PromiseRejectedResult).reason}`);
+    const msgs = errors.map(
+      ({ i, r }) => `[cell paragraph ${i}]: ${(r as PromiseRejectedResult).reason}`,
+    );
     throw new Error(`Failed to convert table cell paragraphs:\n${msgs.join("\n")}`);
   }
 

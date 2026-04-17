@@ -1,4 +1,4 @@
-import { HeadingLevel, TextRun, ExternalHyperlink, type IParagraphOptions } from "docx";
+import { HeadingLevel, TextRun, ExternalHyperlink, type IParagraphOptions } from "docx-plus";
 import { HeadingNode } from "@docen/extensions/types";
 import { convertTextNodes } from "./text";
 import { applyParagraphStyleAttributes } from "../utils";

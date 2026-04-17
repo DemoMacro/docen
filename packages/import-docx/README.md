@@ -290,4 +290,4 @@ Contributions are welcome! Please read our [Contributor Covenant](https://www.co
 
 ## License
 
-- [MIT](LICENSE) &copy; [Demo Macro](https://imst.xyz/)
+- [MIT](LICENSE) &copy; [Demo Macro](https://www.demomacro.com/)

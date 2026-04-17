@@ -1,4 +1,4 @@
-import { ImageRun, IImageOptions, PositiveUniversalMeasure } from "docx";
+import { ImageRun, IImageOptions, PositiveUniversalMeasure } from "docx-plus";
 import { ImageNode } from "@docen/extensions/types";
 import {
   getImageTypeFromSrc,
