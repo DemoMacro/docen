@@ -1,5 +1,6 @@
 {
   "type": "module",
+  "private": true,
   "scripts": {
     "build": "nuxt build",
     "dev": "nuxt dev",
@@ -10,8 +11,8 @@
     "@docen/export-docx": "workspace:*",
     "@docen/extensions": "workspace:*",
     "@docen/import-docx": "workspace:*",
-    "@iconify-json/lucide": "1.2.98",
-    "@nuxt/ui": "4.5.1",
+    "@iconify-json/lucide": "1.2.102",
+    "@nuxt/ui": "4.6.1",
     "nuxt": "4.4.2",
     "tailwindcss": "4.2.2"
   }

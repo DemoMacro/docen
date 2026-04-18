@@ -37,10 +37,11 @@
     "check": "basis lint && basis fmt",
     "bump": "pnpm --filter \"./packages/**\" -r exec basis version",
     "prerelease": "pnpm --filter \"./packages/**\" -r exec basis version --prerelease",
+    "publish": "pnpm --filter \"./packages/**\" -r exec basis publish",
     "postinstall": "pnpm dev && basis git setup"
   },
   "devDependencies": {
     "@funish/basis": "0.2.16",
-    "@types/node": "25.5.0"
+    "@types/node": "25.6.0"
   }
 }
