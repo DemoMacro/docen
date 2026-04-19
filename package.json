@@ -41,7 +41,7 @@
     "postinstall": "pnpm dev && basis git setup"
   },
   "devDependencies": {
-    "@funish/basis": "0.2.16",
+    "@funish/basis": "0.2.17",
     "@types/node": "25.6.0"
   }
 }

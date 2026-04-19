@@ -203,10 +203,14 @@ export function parseCellProperties(cellNode: Element): {
     if (bottomBorder) props.borderBottom = bottomBorder;
 
     // Left/right borders (w:left or w:start, w:right or w:end)
-    const leftBorder = parseBorder((findChild(tcBorders, "w:left") || findChild(tcBorders, "w:start")) as Element);
+    const leftBorder = parseBorder(
+      (findChild(tcBorders, "w:left") || findChild(tcBorders, "w:start")) as Element,
+    );
     if (leftBorder) props.borderLeft = leftBorder;
 
-    const rightBorder = parseBorder((findChild(tcBorders, "w:right") || findChild(tcBorders, "w:end")) as Element);
+    const rightBorder = parseBorder(
+      (findChild(tcBorders, "w:right") || findChild(tcBorders, "w:end")) as Element,
+    );
     if (rightBorder) props.borderRight = rightBorder;
   }
 

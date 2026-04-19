@@ -1,6 +1,6 @@
 {
-  "type": "module",
   "private": true,
+  "type": "module",
   "devDependencies": {
     "@docen/deduplicate": "workspace:*",
     "@docen/export-docx": "workspace:*",

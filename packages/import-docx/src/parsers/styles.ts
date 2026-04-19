@@ -312,13 +312,15 @@ export function extractParagraphStyles(
   // Extract indentation
   const ind = findChild(pPr, "w:ind");
   if (ind) {
-    const left = parseTwipAttr(ind.attributes, "w:left") || parseTwipAttr(ind.attributes, "w:start");
+    const left =
+      parseTwipAttr(ind.attributes, "w:left") || parseTwipAttr(ind.attributes, "w:start");
     if (left) {
       const leftTwip = parseInt(left, 10);
       result.indentLeft = convertTwipToCssString(leftTwip);
     }
 
-    const right = parseTwipAttr(ind.attributes, "w:right") || parseTwipAttr(ind.attributes, "w:end");
+    const right =
+      parseTwipAttr(ind.attributes, "w:right") || parseTwipAttr(ind.attributes, "w:end");
     if (right) {
       const rightTwip = parseInt(right, 10);
       result.indentRight = convertTwipToCssString(rightTwip);
