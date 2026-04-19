@@ -66,8 +66,13 @@ export const TEXT_ALIGN_MAP = {
   docxToTipTap: {
     left: "left",
     right: "right",
+    start: "left",
+    end: "right",
     center: "center",
     both: "justify",
+    distribute: "justify",
+    mediumKashida: "justify",
+    thaiDistribute: "justify",
   } as const,
 } as const;
 

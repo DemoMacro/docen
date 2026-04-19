@@ -6,7 +6,8 @@
     "forceConsistentCasingInFileNames": true,
     "moduleResolution": "bundler",
     "strict": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "types": ["node"]
   },
   "exclude": ["playground/nuxt"]
 }
