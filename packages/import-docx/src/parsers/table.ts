@@ -46,7 +46,7 @@ export function parseTableProperties(tableNode: Element): {
   }
 
   // Parse left margin
-  const left = findChild(tblCellMar, "w:left");
+  const left = findChild(tblCellMar, "w:left") || findChild(tblCellMar, "w:start");
   if (left?.attributes["w:w"]) {
     const twentieths = parseInt(left.attributes["w:w"] as string);
     if (!isNaN(twentieths)) {
@@ -55,7 +55,7 @@ export function parseTableProperties(tableNode: Element): {
   }
 
   // Parse right margin
-  const right = findChild(tblCellMar, "w:right");
+  const right = findChild(tblCellMar, "w:right") || findChild(tblCellMar, "w:end");
   if (right?.attributes["w:w"]) {
     const twentieths = parseInt(right.attributes["w:w"] as string);
     if (!isNaN(twentieths)) {
@@ -159,22 +159,38 @@ export function parseCellProperties(cellNode: Element): {
   // Check for column width
   const tcW = findChild(tcPr, "w:tcW");
   if (tcW?.attributes["w:w"]) {
-    const twips = parseInt(tcW.attributes["w:w"] as string);
-    const width = convertTwipToPixels(twips);
-    // DOCX stores single cell width → convert to array format
-    props.colwidth = [width];
+    const wVal = parseInt(tcW.attributes["w:w"] as string);
+    const wType = tcW.attributes["w:type"] as string;
+
+    if (wType === "pct") {
+      // Percentage: value is 1/50 of a percent (e.g., 5000 = 100%)
+      props.colwidth = [Math.round(wVal / 50)];
+    } else if (wType === "auto" || wType === "nil") {
+      // Automatic sizing — don't set explicit width
+    } else {
+      // dxa (twips) or default
+      if (!isNaN(wVal)) {
+        props.colwidth = [convertTwipToPixels(wVal)];
+      }
+    }
   }
 
   // Check for background color
   const shd = findChild(tcPr, "w:shd");
-  if (shd?.attributes["w:fill"]) {
+  if (shd?.attributes["w:fill"] && shd.attributes["w:fill"] !== "auto") {
     props.backgroundColor = `#${shd.attributes["w:fill"]}`;
   }
 
-  // Check for vertical alignment
+  // Check for vertical alignment (map DOCX values to CSS equivalents)
   const vAlign = findChild(tcPr, "w:vAlign");
   if (vAlign?.attributes["w:val"]) {
-    props.verticalAlign = vAlign.attributes["w:val"] as string;
+    const vAlignMap: Record<string, string> = {
+      top: "top",
+      center: "middle",
+      bottom: "bottom",
+      both: "middle",
+    };
+    props.verticalAlign = vAlignMap[vAlign.attributes["w:val"] as string];
   }
 
   // Check for cell borders
@@ -186,10 +202,11 @@ export function parseCellProperties(cellNode: Element): {
     const bottomBorder = parseBorder(findChild(tcBorders, "w:bottom") as Element);
     if (bottomBorder) props.borderBottom = bottomBorder;
 
-    const leftBorder = parseBorder(findChild(tcBorders, "w:left") as Element);
+    // Left/right borders (w:left or w:start, w:right or w:end)
+    const leftBorder = parseBorder((findChild(tcBorders, "w:left") || findChild(tcBorders, "w:start")) as Element);
     if (leftBorder) props.borderLeft = leftBorder;
 
-    const rightBorder = parseBorder(findChild(tcBorders, "w:right") as Element);
+    const rightBorder = parseBorder((findChild(tcBorders, "w:right") || findChild(tcBorders, "w:end")) as Element);
     if (rightBorder) props.borderRight = rightBorder;
   }
 

@@ -50,6 +50,8 @@ export function parseNumberingXml(files: Record<string, Uint8Array>): ListTypeMa
 
     if (numFmt === "bullet") {
       listTypeMap.set(numId, { type: "bullet" });
+    } else if (numFmt === "none") {
+      // numFmt="none" means no visible numbering — skip (convertList will treat as normal paragraph)
     } else {
       listTypeMap.set(numId, {
         type: "ordered",
