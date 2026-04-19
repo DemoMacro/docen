@@ -1,6 +1,6 @@
 {
   "name": "@docen/deduplicate",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Multi-layer text deduplication using SimHash, N-gram containment, and sentence-sequence LCS for Tiptap/ProseMirror documents",
   "keywords": [
     "containment",
