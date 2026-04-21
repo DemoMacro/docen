@@ -17,7 +17,7 @@
 - 🔗 **Links** - Hyperlink extraction with href preservation
 - 💻 **Code Blocks** - Code block detection with language attribute extraction
 - 🌐 **Cross-Platform** - Works in both browser and Node.js environments
-- ✂️ **Image Cropping** - Automatic cropping of images based on DOCX crop metadata
+- ✂️ **Image Cropping** - Crop metadata preservation with optional physical cropping
 - 🧠 **Smart Parsing** - DOCX XML parsing with proper element grouping and structure reconstruction
 - ⚡ **Fast Processing** - Uses fflate for ultra-fast ZIP decompression
 
@@ -67,35 +67,28 @@ Parses a DOCX file and converts it to TipTap/ProseMirror JSON content.
 
 ```typescript
 interface DocxImportOptions {
-  /** Custom image converter (default: embed as base64) */
-  convertImage?: (image: DocxImageInfo) => Promise<DocxImageResult>;
+  image?: {
+    /** Custom image handler (default: embed as base64) */
+    handler?: (info: DocxImageInfo) => Promise<DocxImageResult>;
 
-  /**
-   * Dynamic import function for @napi-rs/canvas
-   * Required for image cropping in Node.js environment, ignored in browser
-   *
-   * @example
-   * import { parseDOCX } from '@docen/import-docx';
-   * const content = await parseDOCX(buffer, {
-   *   canvasImport: () => import('@napi-rs/canvas')
-   * });
-   */
-  canvasImport?: () => Promise<typeof import("@napi-rs/canvas")>;
+    /**
+     * Dynamic import function for @napi-rs/canvas
+     * Required for image cropping in Node.js environment, ignored in browser
+     */
+    canvasImport?: () => Promise<typeof import("@napi-rs/canvas")>;
 
-  /**
-   * Enable or disable image cropping during import
-   * When true, images with crop information in DOCX will be cropped
-   * When false (default), crop information is ignored and full image is used
-   *
-   * @default false
-   */
-  crop?: boolean;
+    /**
+     * Enable or disable physical image cropping during import
+     * When true, images with crop information in DOCX will be physically cropped
+     * When false (default), crop metadata is preserved but full image is used
+     *
+     * @default false
+     */
+    crop?: boolean;
+  };
 
-  /** Paragraph processing options */
   paragraph?: {
-    /** Whether to ignore empty paragraphs (default: false).
-     * Empty paragraphs are those without text content or images.
-     * Paragraphs containing only whitespace or images are not considered empty. */
+    /** Whether to ignore empty paragraphs (default: false) */
     ignoreEmpty?: boolean;
   };
 }
@@ -106,15 +99,16 @@ interface DocxImportOptions {
 The package exports `defaultImageConverter` which embeds images as base64 data URLs:
 
 ```typescript
-import { defaultImageConverter } from "@docen/import-docx";
+import { parseDOCX, defaultImageConverter } from "@docen/import-docx";
 
-// Use in custom converter
 await parseDOCX(buffer, {
-  convertImage: async (image) => {
-    if (shouldUploadToCDN) {
-      return uploadToCDN(image.data);
-    }
-    return defaultImageConverter(image);
+  image: {
+    handler: async (info) => {
+      if (shouldUploadToCDN) {
+        return { src: await uploadToCDN(info.data) };
+      }
+      return defaultImageConverter(info);
+    },
   },
 });
 ```
@@ -197,7 +191,7 @@ Lists utilize the DOCX numbering system:
 import { parseDOCX } from "@docen/import-docx";
 
 const buffer = readFileSync("example.docx");
-const { content } = await parseDOCX(buffer);
+const content = await parseDOCX(buffer);
 
 console.log(JSON.stringify(content, null, 2));
 ```
@@ -233,12 +227,14 @@ import { readFileSync } from "node:fs";
 const buffer = readFileSync("document.docx");
 
 const content = await parseDOCX(buffer, {
-  canvasImport: () => import("@napi-rs/canvas"),
-  crop: true, // Enable cropping (default is false)
+  image: {
+    canvasImport: () => import("@napi-rs/canvas"),
+    crop: true, // Enable physical cropping (default is false)
+  },
 });
 ```
 
-**Note:** By default, image cropping is disabled. Images are imported in full size, ignoring crop information in DOCX.
+**Note:** By default, physical image cropping is disabled. Crop metadata is preserved in the output for round-trip conversion, but the full image data is used.
 
 ### Disable Image Cropping
 
@@ -246,7 +242,9 @@ If you want to explicitly ignore crop information in DOCX and use full images (t
 
 ```typescript
 const content = await parseDOCX(buffer, {
-  crop: false,
+  image: {
+    crop: false,
+  },
 });
 ```
 
@@ -273,10 +271,10 @@ All colors are imported as hex values (e.g., "#FF0000", "#008000"). Color names 
 
 - Only embedded images are supported (external image links are not fetched)
 - Image dimensions and title are extracted from DOCX metadata
-- **Image Cropping**: By default, images are imported in full size (crop information is ignored)
-  - To enable cropping, set `crop: true` in options
+- **Image Cropping**: By default, crop metadata is preserved but images are not physically cropped
+  - To enable physical cropping, set `image.crop: true` in options
   - In browser environments, cropping works natively with Canvas API
-  - In Node.js, you must also provide `canvasImport` option with dynamic import of `@napi-rs/canvas`
+  - In Node.js, you must also provide `image.canvasImport` option with dynamic import of `@napi-rs/canvas`
   - If `@napi-rs/canvas` is not available in Node.js, images will be imported without cropping (graceful degradation)
 - Some DOCX image features (like advanced positioning or text wrapping) have limited support
 
