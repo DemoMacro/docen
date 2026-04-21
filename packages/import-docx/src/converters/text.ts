@@ -218,9 +218,13 @@ export function extractMarks(
       mergedFormat.backgroundColor = fillColor.startsWith("#") ? fillColor : `#${fillColor}`;
     }
 
-    // Highlight
-    if (findChild(rPr, "w:highlight")) {
-      marks.push({ type: "highlight" });
+    // Highlight (w:val contains color name, "none" means no highlight)
+    const highlightEl = findChild(rPr, "w:highlight");
+    if (highlightEl) {
+      const highlightVal = highlightEl.attributes["w:val"] as string;
+      if (highlightVal && highlightVal !== "none") {
+        marks.push({ type: "highlight", attrs: { color: highlightVal } });
+      }
     }
 
     // Subscript/Superscript

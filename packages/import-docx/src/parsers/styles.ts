@@ -137,6 +137,11 @@ export function parseShading(pPr: Element | null): Shading | null {
     shading.fill = fill.startsWith("#") ? fill : `#${fill}`;
   }
 
+  if (shd.attributes["w:color"] && shd.attributes["w:color"] !== "auto") {
+    const color = shd.attributes["w:color"] as string;
+    shading.color = color.startsWith("#") ? color : `#${color}`;
+  }
+
   if (shd.attributes["w:val"]) {
     shading.type = shd.attributes["w:val"] as string;
   }
