@@ -1,10 +1,14 @@
 import { fromXml } from "xast-util-from-xml";
 import { imageMeta } from "image-meta";
 import type { Element } from "xast";
-import type { ImageFloatingOptions, ImageNode, ImageOutlineOptions } from "@docen/extensions/types";
-import type { ImageInfo } from "../types";
+import type {
+  ImageFloatingOptions,
+  ImageNode,
+  ImageOutlineOptions,
+  SourceRectangleOptions,
+} from "@docen/extensions/types";
+import type { DocxImageImportHandler, ImageInfo } from "../types";
 import type { ParseContext } from "../parser";
-import type { CropRect } from "../utils/image";
 import {
   findChild,
   findDeepChild,
@@ -16,6 +20,70 @@ import { uint8ArrayToBase64, base64ToUint8Array } from "../utils/base64";
 import { cropImageIfNeeded } from "../utils/image";
 
 const IMAGE_REL_TYPE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image";
+
+/**
+ * MIME type → short name mapping (derived from [Content_Types].xml)
+ */
+const MIME_TO_SHORT: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/gif": "gif",
+  "image/bmp": "bmp",
+  "image/tiff": "tif",
+  "image/x-emf": "emf",
+  "image/x-wmf": "wmf",
+  "image/x-icon": "ico",
+  "image/svg+xml": "svg",
+};
+
+/**
+ * Parse [Content_Types].xml to build extension → MIME type and extension → short name maps.
+ * Per ISO/IEC 29500-4, the Types element contains Default (extension-based) and
+ * Override (part-name-based) content type declarations.
+ */
+export function parseContentTypes(files: Record<string, Uint8Array>): {
+  extToMime: Map<string, string>;
+  extToShort: Map<string, string>;
+} {
+  const extToMime = new Map<string, string>();
+  const extToShort = new Map<string, string>();
+
+  const ctXml = files["[Content_Types].xml"];
+  if (!ctXml) return { extToMime, extToShort };
+
+  try {
+    const xast = fromXml(new TextDecoder().decode(ctXml));
+    const types = findChild(xast, "Types");
+    if (!types) return { extToMime, extToShort };
+
+    // Collect Default elements: Extension → ContentType
+    for (const def of findDeepChildren(types, "Default")) {
+      const ext = def.attributes.Extension as string | undefined;
+      const contentType = def.attributes.ContentType as string | undefined;
+      if (ext && contentType) {
+        extToMime.set(ext.toLowerCase(), contentType);
+        const short = MIME_TO_SHORT[contentType];
+        if (short) extToShort.set(ext.toLowerCase(), short);
+      }
+    }
+  } catch {
+    // Graceful degradation: fall back to image-meta
+  }
+
+  return { extToMime, extToShort };
+}
+
+/**
+ * Extract short image type name from file path using content type mappings.
+ * Returns undefined if unable to determine.
+ */
+export function getImageTypeFromPath(
+  imagePath: string,
+  extToShort: Map<string, string>,
+): string | undefined {
+  const ext = imagePath.split(".").pop()?.toLowerCase();
+  return ext ? extToShort.get(ext) : undefined;
+}
 
 /**
  * Type guards for valid horizontal/vertical alignment values
@@ -61,7 +129,7 @@ const isValidVerticalRelative = createStringValidator([
 /**
  * Extract crop rectangle from a:srcRect element
  */
-function extractCropRect(srcRect: Element): CropRect | undefined {
+export function extractCropRect(srcRect: Element): SourceRectangleOptions | undefined {
   const left = srcRect.attributes["l"];
   const top = srcRect.attributes["t"];
   const right = srcRect.attributes["r"];
@@ -79,15 +147,16 @@ function extractCropRect(srcRect: Element): CropRect | undefined {
 
 /**
  * Apply crop to image data and update dimensions
- * Shared logic for both direct (no picGraphic) and synthetic drawing paths
+ * Shared logic for grouped images without a:graphic (direct blipFill path)
+ * Always preserves crop metadata in the returned object
  */
 async function applyCropToImage(
   pic: Element,
   imgInfo: { src: string; width?: number; height?: number },
   params: { context: ParseContext },
-): Promise<{ src: string; width?: number; height?: number }> {
+): Promise<{ src: string; width?: number; height?: number; crop?: SourceRectangleOptions }> {
   // Check for crop information in pic:spPr
-  const spPr = findChild(pic, "pic:spPr");
+  const spPr = findChild(pic, "pic:spPr") || findChild(pic, "wps:spPr");
   if (!spPr || !imgInfo.src.startsWith("data:")) {
     return imgInfo;
   }
@@ -103,42 +172,44 @@ async function applyCropToImage(
     return imgInfo;
   }
 
-  try {
-    const [metadata, base64Data] = imgInfo.src.split(",");
-    if (!base64Data) {
-      return imgInfo;
+  // Always preserve crop metadata
+  const result = { ...imgInfo, crop };
+
+  // Only physically crop if the option is enabled
+  if (params.context.image?.crop) {
+    try {
+      const [metadata, base64Data] = imgInfo.src.split(",");
+      if (!base64Data) {
+        return result;
+      }
+
+      const bytes = base64ToUint8Array(base64Data);
+      const croppedData = await cropImageIfNeeded(bytes, crop, {
+        canvasImport: params.context.image?.canvasImport,
+        enabled: true,
+      });
+      const croppedBase64 = uint8ArrayToBase64(croppedData);
+
+      // Calculate cropped dimensions
+      const originalWidth = imgInfo.width || 0;
+      const originalHeight = imgInfo.height || 0;
+      const cropLeftPct = (crop.left || 0) / 100000;
+      const cropTopPct = (crop.top || 0) / 100000;
+      const cropRightPct = (crop.right || 0) / 100000;
+      const cropBottomPct = (crop.bottom || 0) / 100000;
+
+      const visibleWidthPct = 1 - cropLeftPct - cropRightPct;
+      const visibleHeightPct = 1 - cropTopPct - cropBottomPct;
+
+      result.src = `${metadata},${croppedBase64}`;
+      result.width = Math.round(originalWidth * visibleWidthPct);
+      result.height = Math.round(originalHeight * visibleHeightPct);
+    } catch (error) {
+      console.warn("Grouped image cropping failed, using original image:", error);
     }
-
-    const bytes = base64ToUint8Array(base64Data);
-    const croppedData = await cropImageIfNeeded(bytes, crop, {
-      canvasImport: params.context.image?.canvasImport,
-      enabled: params.context.image?.crop ?? false,
-    });
-    const croppedBase64 = uint8ArrayToBase64(croppedData);
-
-    // Calculate cropped dimensions
-    const originalWidth = imgInfo.width || 0;
-    const originalHeight = imgInfo.height || 0;
-    const cropLeftPct = (crop.left || 0) / 100000;
-    const cropTopPct = (crop.top || 0) / 100000;
-    const cropRightPct = (crop.right || 0) / 100000;
-    const cropBottomPct = (crop.bottom || 0) / 100000;
-
-    const visibleWidthPct = 1 - cropLeftPct - cropRightPct;
-    const visibleHeightPct = 1 - cropTopPct - cropBottomPct;
-
-    const croppedWidth = Math.round(originalWidth * visibleWidthPct);
-    const croppedHeight = Math.round(originalHeight * visibleHeightPct);
-
-    return {
-      src: `${metadata},${croppedBase64}`,
-      width: croppedWidth,
-      height: croppedHeight,
-    };
-  } catch (error) {
-    console.warn("Grouped image cropping failed, using original image:", error);
-    return imgInfo;
   }
+
+  return result;
 }
 
 /**
@@ -209,11 +280,14 @@ export function findDrawingElement(run: Element): Element | null {
  */
 export async function extractImages(
   files: Record<string, Uint8Array>,
-  handler?: import("../types").DocxImageImportHandler,
+  handler?: DocxImageImportHandler,
 ): Promise<Map<string, ImageInfo>> {
   const images = new Map<string, ImageInfo>();
   const relsXml = files["word/_rels/document.xml.rels"];
   if (!relsXml) return images;
+
+  // Parse [Content_Types].xml for reliable image type detection
+  const { extToMime, extToShort } = parseContentTypes(files);
 
   const relsXast = fromXml(new TextDecoder().decode(relsXml));
   const relationships = findChild(relsXast, "Relationships");
@@ -226,33 +300,50 @@ export async function extractImages(
       const imageData = files[imagePath];
       if (!imageData) continue;
 
-      // Extract image metadata
+      // Determine image type from [Content_Types].xml first, then fallback to image-meta
+      let imageType = getImageTypeFromPath(imagePath, extToShort);
+      let contentType: string | undefined;
+
+      const ext = imagePath.split(".").pop()?.toLowerCase();
+      if (ext) {
+        contentType = extToMime.get(ext);
+      }
+      if (!imageType && contentType) {
+        imageType = MIME_TO_SHORT[contentType];
+      }
+
+      // Extract image dimensions (image-meta is still needed for width/height)
       let width: number | undefined;
       let height: number | undefined;
-      let imageType = "png"; // default fallback
 
       try {
         const meta = imageMeta(imageData);
         width = meta.width;
         height = meta.height;
-        if (meta.type) imageType = meta.type;
+        // Only use image-meta type as fallback if [Content_Types].xml didn't provide one
+        if (!imageType && meta.type) {
+          imageType = meta.type;
+        }
       } catch {
         // If metadata extraction fails, use defaults
       }
+
+      if (!imageType) imageType = "png";
 
       // Use custom handler or default base64 encoding
       let src: string;
       if (handler) {
         const result = await handler({
           id: rel.attributes.Id as string,
-          contentType: `image/${imageType}`,
+          contentType: contentType || `image/${imageType}`,
           data: imageData,
         });
         src = result.src;
       } else {
         // Default behavior: convert to base64 data URL
         const base64 = uint8ArrayToBase64(imageData);
-        src = `data:image/${imageType};base64,${base64}`;
+        const mime = contentType || `image/${imageType}`;
+        src = `data:${mime};base64,${base64}`;
       }
 
       images.set(rel.attributes.Id as string, {
@@ -285,25 +376,32 @@ export async function extractImageFromDrawing(
 
   let src = imgInfo.src;
 
-  // Extract and apply crop rectangle from a:srcRect (DOCX unit: 1/100000 of percentage)
+  // Extract crop rectangle from a:srcRect (DOCX unit: 1/100000 of percentage)
+  // Always preserve crop metadata in attrs for round-trip
+  let crop: SourceRectangleOptions | undefined;
   const srcRect = findDeepChild(drawing, "a:srcRect");
   if (srcRect) {
-    const crop = extractCropRect(srcRect);
-    if (crop && src.startsWith("data:")) {
-      const [metadata, base64Data] = src.split(",");
-      if (base64Data) {
-        const bytes = base64ToUint8Array(base64Data);
+    const cropRect = extractCropRect(srcRect);
+    if (cropRect && (cropRect.left || cropRect.top || cropRect.right || cropRect.bottom)) {
+      crop = cropRect;
 
-        try {
-          const croppedData = await cropImageIfNeeded(bytes, crop, {
-            canvasImport: context.image?.canvasImport,
-            enabled: context.image?.crop ?? false,
-          });
+      // Physically crop the image data if cropping is enabled
+      if (context.image?.crop && src.startsWith("data:")) {
+        const [metadata, base64Data] = src.split(",");
+        if (base64Data) {
+          const bytes = base64ToUint8Array(base64Data);
 
-          const croppedBase64 = uint8ArrayToBase64(croppedData);
-          src = `${metadata},${croppedBase64}`;
-        } catch (error) {
-          console.warn("Image cropping failed, using original image:", error);
+          try {
+            const croppedData = await cropImageIfNeeded(bytes, cropRect, {
+              canvasImport: context.image?.canvasImport,
+              enabled: true,
+            });
+
+            const croppedBase64 = uint8ArrayToBase64(croppedData);
+            src = `${metadata},${croppedBase64}`;
+          } catch (error) {
+            console.warn("Image cropping failed, using original image:", error);
+          }
         }
       }
     }
@@ -417,6 +515,7 @@ export async function extractImageFromDrawing(
       ...(title && { title }),
       ...(floating && { floating }),
       ...(outline && { outline }),
+      ...(crop && { crop }),
     },
   };
 }
@@ -577,6 +676,7 @@ export async function extractImagesFromDrawing(
             alt: "",
             width,
             height,
+            ...(processedImgInfo.crop && { crop: processedImgInfo.crop }),
           },
         });
         continue;
@@ -593,77 +693,14 @@ export async function extractImagesFromDrawing(
       const image = await extractImageFromDrawing(syntheticDrawing, params);
       if (!image) continue;
 
-      // Check for crop information in pic:spPr (for grouped images with graphic)
-      const spPr = findChild(pic, "pic:spPr");
-      const srcRect = spPr ? findDeepChild(pic, "a:srcRect") : undefined;
-      const hasCrop = srcRect && extractCropRect(srcRect);
-      const crop = hasCrop ? extractCropRect(srcRect)! : undefined;
-
-      if (
-        crop &&
-        (crop.left || crop.top || crop.right || crop.bottom) &&
-        image.attrs?.src?.startsWith("data:")
-      ) {
-        // Apply crop
-        try {
-          const [metadata, base64Data] = image.attrs.src.split(",");
-          if (base64Data) {
-            const bytes = base64ToUint8Array(base64Data);
-            const croppedData = await cropImageIfNeeded(bytes, crop, {
-              canvasImport: params.context.image?.canvasImport,
-              enabled: params.context.image?.crop ?? false,
-            });
-            const croppedBase64 = uint8ArrayToBase64(croppedData);
-            image.attrs.src = `${metadata},${croppedBase64}`;
-
-            // Calculate cropped dimensions
-            const rId =
-              syntheticDrawing.children[0]?.type === "element"
-                ? (findDeepChild(syntheticDrawing.children[0] as Element, "a:blip")?.attributes[
-                    "r:embed"
-                  ] as string)
-                : undefined;
-
-            if (rId) {
-              const imgInfo = params.context.images.get(rId);
-              if (imgInfo?.width && imgInfo?.height) {
-                const cropLeftPct = (crop.left || 0) / 100000;
-                const cropTopPct = (crop.top || 0) / 100000;
-                const cropRightPct = (crop.right || 0) / 100000;
-                const cropBottomPct = (crop.bottom || 0) / 100000;
-
-                const visibleWidthPct = 1 - cropLeftPct - cropRightPct;
-                const visibleHeightPct = 1 - cropTopPct - cropBottomPct;
-
-                const croppedWidth = Math.round(imgInfo.width * visibleWidthPct);
-                const croppedHeight = Math.round(imgInfo.height * visibleHeightPct);
-
-                // Apply proportional scaling to cropped dimensions
-                if (groupWidth && groupHeight && relativeSize && totalCx > 0) {
-                  // Apply uniform scale factor to maintain relative proportions
-                  image.attrs.width = Math.round(relativeSize.cx * scaleFactor);
-                  image.attrs.height = Math.round(relativeSize.cy * scaleFactor);
-                } else {
-                  image.attrs.width = croppedWidth;
-                  image.attrs.height = croppedHeight;
-                }
-              }
-            }
-          }
-        } catch (error) {
-          console.warn("Grouped image cropping failed, using original image:", error);
-        }
-      } else {
-        // No crop, set dimensions based on proportional size within group
-        if (groupWidth && groupHeight && relativeSize && totalCx > 0) {
-          // Apply uniform scale factor to maintain relative proportions
-          image.attrs!.width = Math.round(relativeSize.cx * scaleFactor);
-          image.attrs!.height = Math.round(relativeSize.cy * scaleFactor);
-        } else if (groupWidth && groupHeight) {
-          // Fallback: use group dimensions if no relative size available
-          image.attrs!.width = groupWidth;
-          image.attrs!.height = groupHeight;
-        }
+      // extractImageFromDrawing already handles crop metadata preservation
+      // Only need to set proportional dimensions for grouped images
+      if (groupWidth && groupHeight && relativeSize && totalCx > 0) {
+        image.attrs!.width = Math.round(relativeSize.cx * scaleFactor);
+        image.attrs!.height = Math.round(relativeSize.cy * scaleFactor);
+      } else if (groupWidth && groupHeight) {
+        image.attrs!.width = groupWidth;
+        image.attrs!.height = groupHeight;
       }
 
       result.push(image);

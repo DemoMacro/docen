@@ -7,6 +7,7 @@
  */
 
 import type { Canvas } from "@napi-rs/canvas";
+import type { SourceRectangleOptions } from "@docen/extensions/types";
 
 /**
  * Detect current environment
@@ -152,17 +153,6 @@ export async function createCanvasFactory(
 }
 
 /**
- * Crop rectangle from DOCX a:srcRect attributes
- * Values are in 1/100000 of a percentage (0-100000)
- */
-export interface CropRect {
-  left?: number;
-  top?: number;
-  right?: number;
-  bottom?: number;
-}
-
-/**
  * Crop image options
  */
 export interface CropImageOptions {
@@ -189,7 +179,7 @@ export interface CropImageOptions {
  */
 export async function cropImageIfNeeded(
   imageData: Uint8Array,
-  crop: CropRect | undefined,
+  crop: SourceRectangleOptions | undefined,
   options: CropImageOptions = {},
 ): Promise<Uint8Array> {
   // No crop information, return original

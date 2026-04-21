@@ -54,7 +54,7 @@
     "prepack": "pnpm build"
   },
   "dependencies": {
-    "docx-plus": "0.0.14",
+    "docx-plus": "0.1.2",
     "image-meta": "0.2.2",
     "ofetch": "1.5.1"
   },
