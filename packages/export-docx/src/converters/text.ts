@@ -1,5 +1,5 @@
 import { JSONContent } from "@tiptap/core";
-import { TextRun, ExternalHyperlink, IRunOptions } from "docx-plus";
+import { TextRun, ExternalHyperlink, HighlightColor, IRunOptions } from "docx-plus";
 import { TextNode } from "@docen/extensions/types";
 import { convertColorToHex, DEFAULT_CODE_FONT, HALF_POINTS_PER_PIXEL } from "../utils";
 
@@ -17,7 +17,8 @@ export function convertText(node: TextNode): TextRun | ExternalHyperlink {
   const isSuperscript = node.marks?.some((m) => m.type === "superscript");
   const linkMark = node.marks?.find((m) => m.type === "link");
   const textStyleMark = node.marks?.find((m) => m.type === "textStyle");
-  const hasHighlight = node.marks?.some((m) => m.type === "highlight");
+  const highlightMark = node.marks?.find((m) => m.type === "highlight");
+  const highlightColor = highlightMark?.attrs?.color as string | undefined;
 
   // Handle text color and background color
   const textColor = convertColorToHex(textStyleMark?.attrs?.color);
@@ -56,7 +57,7 @@ export function convertText(node: TextNode): TextRun | ExternalHyperlink {
     superScript: isSuperscript || undefined,
     color: textColor,
     shading: backgroundColor ? { fill: backgroundColor } : undefined,
-    highlight: hasHighlight ? "yellow" : undefined,
+    highlight: highlightColor as (typeof HighlightColor)[keyof typeof HighlightColor] | undefined,
   };
 
   // Return hyperlink if link mark exists
