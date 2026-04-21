@@ -28,15 +28,15 @@ const normalizeMarginToTwip = (
  */
 export function calculateEffectiveContentWidth(options?: DocxExportOptions): number {
   const DEFAULT_PAGE_WIDTH_TWIP = PAGE_DIMENSIONS.A4_WIDTH_TWIP;
-  const DEFAULT_MARGIN_TWIP = PAGE_DIMENSIONS.DEFAULT_MARGIN_TWIP;
+  const DEFAULT_MARGIN_H_TWIP = PAGE_DIMENSIONS.DEFAULT_MARGIN_HORIZONTAL_TWIP;
 
   if (!options?.sections?.length) {
-    return convertTwipToPixels(DEFAULT_PAGE_WIDTH_TWIP - DEFAULT_MARGIN_TWIP * 2);
+    return convertTwipToPixels(DEFAULT_PAGE_WIDTH_TWIP - DEFAULT_MARGIN_H_TWIP * 2);
   }
 
   const firstSection = options.sections[0];
   if (!firstSection.properties?.page) {
-    return convertTwipToPixels(DEFAULT_PAGE_WIDTH_TWIP - DEFAULT_MARGIN_TWIP * 2);
+    return convertTwipToPixels(DEFAULT_PAGE_WIDTH_TWIP - DEFAULT_MARGIN_H_TWIP * 2);
   }
 
   const pageSettings = firstSection.properties.page;
@@ -51,8 +51,8 @@ export function calculateEffectiveContentWidth(options?: DocxExportOptions): num
   }
 
   const marginSettings = pageSettings.margin;
-  const marginLeft = normalizeMarginToTwip(marginSettings?.left, DEFAULT_MARGIN_TWIP);
-  const marginRight = normalizeMarginToTwip(marginSettings?.right, DEFAULT_MARGIN_TWIP);
+  const marginLeft = normalizeMarginToTwip(marginSettings?.left, DEFAULT_MARGIN_H_TWIP);
+  const marginRight = normalizeMarginToTwip(marginSettings?.right, DEFAULT_MARGIN_H_TWIP);
 
   const effectiveWidth = pageWidth - marginLeft - marginRight;
   return Math.max(convertTwipToPixels(effectiveWidth), DOCX_DPI);

@@ -82,6 +82,8 @@ export const TEXT_ALIGN_MAP = {
 export const PAGE_DIMENSIONS = {
   /** A4 width in TWIPs (8.27 inches = 11906 TWIPs) */
   A4_WIDTH_TWIP: 11906,
-  /** Default 1 inch margin in TWIPs */
-  DEFAULT_MARGIN_TWIP: 1440,
+  /** Default vertical margin (top/bottom) in TWIPs (1 inch) */
+  DEFAULT_MARGIN_VERTICAL_TWIP: 1440,
+  /** Default horizontal margin (left/right) in TWIPs (1.25 inches, per OOXML spec) */
+  DEFAULT_MARGIN_HORIZONTAL_TWIP: 1800,
 } as const;

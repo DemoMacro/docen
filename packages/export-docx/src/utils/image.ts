@@ -6,7 +6,7 @@ import { convertMeasureToPixels, DOCX_DPI } from "@docen/utils";
 // Custom image handler for fetching image data
 export type DocxImageExportHandler = (src: string) => Promise<Uint8Array>;
 
-const DEFAULT_MAX_IMAGE_WIDTH_PIXELS = 6.5 * DOCX_DPI; // A4 effective width in pixels
+const DEFAULT_MAX_IMAGE_WIDTH_PIXELS = 5.77 * DOCX_DPI; // A4 effective width (OOXML default margins)
 
 /**
  * DOCX-supported image types (aligned with docx-plus IImageOptions)
