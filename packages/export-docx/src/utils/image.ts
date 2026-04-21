@@ -9,66 +9,53 @@ export type DocxImageExportHandler = (src: string) => Promise<Uint8Array>;
 const DEFAULT_MAX_IMAGE_WIDTH_PIXELS = 6.5 * DOCX_DPI; // A4 effective width in pixels
 
 /**
- * Unified image type mapping
- * Maps file extensions and MIME types to standardized type names and DOCX types
+ * DOCX-supported image types (aligned with docx-plus IImageOptions)
  */
-const IMAGE_TYPE_MAPPING = {
-  // Standard MIME types to internal type names
-  mimeToInternal: {
-    jpg: "jpeg",
-    jpeg: "jpeg",
-    png: "png",
-    gif: "gif",
-    bmp: "bmp",
-    tiff: "tiff",
-  } as const,
-  // Internal type names to DOCX types
-  internalToDocx: {
-    jpeg: "jpg",
-    png: "png",
-    gif: "gif",
-    bmp: "bmp",
-    tiff: "bmp", // Fallback for unsupported formats
-  } as const,
-} as const;
+export type DocxImageType = "jpg" | "png" | "gif" | "bmp" | "tif" | "ico" | "emf" | "wmf" | "svg";
 
 /**
- * Convert image MIME type to DOCX type
+ * Mapping from MIME types / file extensions to DOCX image type strings.
+ * Covers all types supported by docx-plus 0.1.2.
  */
-export function convertToDocxImageType(mimeType?: string): "jpg" | "png" | "gif" | "bmp" {
-  if (!mimeType) return "png";
-  const typeKey = mimeType.toLowerCase();
-  const internalType =
-    IMAGE_TYPE_MAPPING.mimeToInternal[typeKey as keyof typeof IMAGE_TYPE_MAPPING.mimeToInternal] ||
-    "png";
-  return (
-    IMAGE_TYPE_MAPPING.internalToDocx[
-      internalType as keyof typeof IMAGE_TYPE_MAPPING.internalToDocx
-    ] || "png"
-  );
-}
+const EXTENSION_TO_DOCX_TYPE: Record<string, DocxImageType> = {
+  jpg: "jpg",
+  jpeg: "jpg",
+  png: "png",
+  gif: "gif",
+  bmp: "bmp",
+  tif: "tif",
+  tiff: "tif",
+  ico: "ico",
+  emf: "emf",
+  wmf: "wmf",
+  svg: "svg",
+};
+
+const MIME_TO_DOCX_TYPE: Record<string, DocxImageType> = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/gif": "gif",
+  "image/bmp": "bmp",
+  "image/tiff": "tif",
+  "image/x-icon": "ico",
+  "image/x-emf": "emf",
+  "image/x-wmf": "wmf",
+  "image/svg+xml": "svg",
+};
 
 /**
  * Extract image type from URL or base64 data
  */
-export function getImageTypeFromSrc(src: string): "png" | "jpeg" | "gif" | "bmp" | "tiff" {
+export function getImageTypeFromSrc(src: string): DocxImageType {
   if (src.startsWith("data:")) {
-    const match = src.match(/data:image\/(\w+);/);
+    const match = src.match(/data:image\/([\w+-]+);/);
     if (match) {
-      const type = match[1].toLowerCase();
-      return (
-        IMAGE_TYPE_MAPPING.mimeToInternal[type as keyof typeof IMAGE_TYPE_MAPPING.mimeToInternal] ||
-        "png"
-      );
+      return MIME_TO_DOCX_TYPE[match[1].toLowerCase()] || "png";
     }
   } else {
     const extension = src.split(".").pop()?.toLowerCase();
     if (extension) {
-      return (
-        IMAGE_TYPE_MAPPING.mimeToInternal[
-          extension as keyof typeof IMAGE_TYPE_MAPPING.mimeToInternal
-        ] || "png"
-      );
+      return EXTENSION_TO_DOCX_TYPE[extension] || "png";
     }
   }
 

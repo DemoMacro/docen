@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseDOCX, generateDOCX } from "docen";
+import { parseDOCX, generateDOCX, generateHTML } from "docen";
 
 // Get current file directory
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -9,10 +9,11 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const tmpDir = join(__dirname, ".cache");
 const inputDir = join(tmpDir, "input");
 const jsonDir = join(tmpDir, "json");
+const htmlDir = join(tmpDir, "html");
 const outputDir = join(tmpDir, "output");
 
 // Check and create directories if they don't exist
-for (const dir of [tmpDir, inputDir, jsonDir, outputDir]) {
+for (const dir of [tmpDir, inputDir, jsonDir, htmlDir, outputDir]) {
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
   }
@@ -66,6 +67,13 @@ void (async () => {
       // Save parsed JSON
       writeFileSync(jsonPath, JSON.stringify(json, null, 2), "utf-8");
       console.log(`  💾 Saved JSON: ${jsonFile}`);
+
+      // Generate HTML from JSON
+      const htmlFile = docxFile.replace(".docx", ".html");
+      const htmlPath = join(htmlDir, htmlFile);
+      const htmlContent = generateHTML(json);
+      writeFileSync(htmlPath, htmlContent, "utf-8");
+      console.log(`  💾 Saved HTML: ${htmlFile}`);
 
       // Generate DOCX from JSON
       const convertedDocxBuffer = await generateDOCX(json, {
@@ -273,5 +281,6 @@ void (async () => {
   console.log("\n🎉 All files processed!");
   console.log(`📁 Input directory: ${inputDir}`);
   console.log(`📁 JSON directory: ${jsonDir}`);
+  console.log(`📁 HTML directory: ${htmlDir}`);
   console.log(`📁 Output directory: ${outputDir}`);
 })();

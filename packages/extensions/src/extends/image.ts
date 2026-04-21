@@ -1,4 +1,5 @@
 import { Image as BaseImage } from "../tiptap";
+import type { SourceRectangleOptions } from "../types";
 
 /**
  * Custom Image extension based on @tiptap/extension-image
@@ -7,16 +8,37 @@ import { Image as BaseImage } from "../tiptap";
  * - rotation: Image rotation in degrees (rendered as CSS transform)
  * - floating: Image positioning options (stored as data-floating attribute)
  * - outline: Image border/outline options (stored as data-outline attribute)
+ * - crop: Image crop rectangle (resized element + object-fit/position)
  *
  * HTML serialization strategy:
  * - rotation: Mapped to CSS transform: rotate()
  * - floating: Preserved as data-floating JSON attribute (no CSS equivalent)
  * - outline: Preserved as data-outline JSON attribute (no CSS equivalent)
- *
- * Note: floating and outline are DOCX-specific features without direct CSS
- * equivalents. They're preserved in HTML for round-trip conversion but only
- * affect DOCX export/import.
+ * - crop: object-fit: cover + object-position (element size already reflects crop)
  */
+
+/**
+ * Generate crop rendering attributes.
+ * Uses object-fit/position to show the correct portion within the element's
+ * existing dimensions (which already reflect the cropped bounding box from wp:extent).
+ */
+export function renderCropAttrs(crop: SourceRectangleOptions): { style: string } {
+  const leftPct = (crop.left || 0) / 100000;
+  const topPct = (crop.top || 0) / 100000;
+  const rightPct = (crop.right || 0) / 100000;
+  const bottomPct = (crop.bottom || 0) / 100000;
+
+  const visibleWidthPct = 1 - leftPct - rightPct;
+  const visibleHeightPct = 1 - topPct - bottomPct;
+
+  const posX = visibleWidthPct > 0 ? (leftPct / visibleWidthPct) * 100 : 0;
+  const posY = visibleHeightPct > 0 ? (topPct / visibleHeightPct) * 100 : 0;
+
+  return {
+    style: `object-fit:cover;object-position:${posX.toFixed(2)}% ${posY.toFixed(2)}%`,
+  };
+}
+
 export const Image = BaseImage.extend({
   addAttributes() {
     return {
@@ -33,13 +55,11 @@ export const Image = BaseImage.extend({
       // Add rotation attribute (in degrees)
       rotation: {
         default: null,
-        // Parse from CSS transform: rotate(Xdeg)
         parseHTML: (element) => {
           const style = element.getAttribute("style") || "";
           const rotationMatch = style.match(/transform:\s*rotate\(([\d.]+)deg\)/);
           return rotationMatch ? parseFloat(rotationMatch[1]) : null;
         },
-        // Render as CSS transform
         renderHTML: (attributes) => {
           if (!attributes.rotation) return {};
           return {
@@ -51,7 +71,6 @@ export const Image = BaseImage.extend({
       // Add floating attribute for image positioning
       floating: {
         default: null,
-        // Parse from data-floating attribute (JSON string)
         parseHTML: (element) => {
           const dataFloating = element.getAttribute("data-floating");
           if (!dataFloating) return null;
@@ -61,7 +80,6 @@ export const Image = BaseImage.extend({
             return null;
           }
         },
-        // Render as data-floating attribute (JSON string)
         renderHTML: (attributes) => {
           if (!attributes.floating) return {};
           return {
@@ -73,7 +91,6 @@ export const Image = BaseImage.extend({
       // Add outline attribute for image border/outline
       outline: {
         default: null,
-        // Parse from data-outline attribute (JSON string)
         parseHTML: (element) => {
           const dataOutline = element.getAttribute("data-outline");
           if (!dataOutline) return null;
@@ -83,11 +100,33 @@ export const Image = BaseImage.extend({
             return null;
           }
         },
-        // Render as data-outline attribute (JSON string)
         renderHTML: (attributes) => {
           if (!attributes.outline) return {};
           return {
             "data-outline": JSON.stringify(attributes.outline),
+          };
+        },
+      },
+
+      // Add crop attribute for image cropping (DOCX srcRect values)
+      crop: {
+        default: null,
+        parseHTML: (element) => {
+          const dataCrop = element.getAttribute("data-crop");
+          if (!dataCrop) return null;
+          try {
+            return JSON.parse(dataCrop);
+          } catch {
+            return null;
+          }
+        },
+        // object-fit/position for correct portion (element size already reflects crop)
+        renderHTML: (attributes) => {
+          if (!attributes.crop) return {};
+          const cropAttrs = renderCropAttrs(attributes.crop);
+          return {
+            ...cropAttrs,
+            "data-crop": JSON.stringify(attributes.crop),
           };
         },
       },
