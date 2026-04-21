@@ -8,6 +8,18 @@
 
 import type { Canvas } from "@napi-rs/canvas";
 import type { SourceRectangleOptions } from "@docen/extensions/types";
+import type { DocxImageInfo, DocxImageResult } from "../types";
+import { uint8ArrayToBase64 } from "./base64";
+
+/**
+ * Default image handler: embed image as base64 data URL
+ */
+export async function defaultImageConverter(info: DocxImageInfo): Promise<DocxImageResult> {
+  const base64 = uint8ArrayToBase64(info.data);
+  return {
+    src: `data:${info.contentType};base64,${base64}`,
+  };
+}
 
 /**
  * Detect current environment

@@ -17,7 +17,7 @@ import {
   convertEmuStringToPixels,
 } from "@docen/utils";
 import { uint8ArrayToBase64, base64ToUint8Array } from "../utils/base64";
-import { cropImageIfNeeded } from "../utils/image";
+import { cropImageIfNeeded, defaultImageConverter } from "../utils/image";
 
 const IMAGE_REL_TYPE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image";
 
@@ -331,20 +331,13 @@ export async function extractImages(
       if (!imageType) imageType = "png";
 
       // Use custom handler or default base64 encoding
-      let src: string;
-      if (handler) {
-        const result = await handler({
-          id: rel.attributes.Id as string,
-          contentType: contentType || `image/${imageType}`,
-          data: imageData,
-        });
-        src = result.src;
-      } else {
-        // Default behavior: convert to base64 data URL
-        const base64 = uint8ArrayToBase64(imageData);
-        const mime = contentType || `image/${imageType}`;
-        src = `data:${mime};base64,${base64}`;
-      }
+      const imageHandler = handler ?? defaultImageConverter;
+      const result = await imageHandler({
+        id: rel.attributes.Id as string,
+        contentType: contentType || `image/${imageType}`,
+        data: imageData,
+      });
+      const src = result.src;
 
       images.set(rel.attributes.Id as string, {
         src,

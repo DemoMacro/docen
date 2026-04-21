@@ -4,7 +4,7 @@ import {
   getImageTypeFromSrc,
   getImageWidth,
   getImageHeight,
-  getImageDataAndMeta,
+  defaultImageHandler,
   type DocxImageExportHandler,
 } from "../utils";
 import { imageMeta as getImageMetadata, type ImageMeta } from "image-meta";
@@ -32,53 +32,19 @@ export async function convertImage(
   let imageMeta: ImageMeta;
   try {
     const src = node.attrs?.src || "";
+    const handler = params?.handler ?? defaultImageHandler;
+    imageData = await handler(src);
 
-    // Use custom handler if provided
-    if (params?.handler) {
-      imageData = await params.handler(src);
-
-      // Extract metadata from fetched data
-      try {
-        imageMeta = getImageMetadata(imageData);
-      } catch {
-        imageMeta = {
-          type: getImageTypeFromSrc(src),
-          width: undefined,
-          height: undefined,
-          orientation: undefined,
-        };
-      }
-    } else if (src.startsWith("http")) {
-      // Default behavior: fetch HTTP images
-      const result = await getImageDataAndMeta(src);
-      imageData = result.data;
-      imageMeta = result.meta;
-    } else if (src.startsWith("data:")) {
-      // Handle data URLs - extract the base64 part
-      const base64Data = src.split(",")[1];
-
-      if (!base64Data) {
-        throw new Error("Invalid data URL: missing base64 data");
-      }
-
-      // Use TextEncoder to create Uint8Array from base64 (works in both Node and browser)
-      const binaryString = atob(base64Data);
-      const bytes = Uint8Array.from(binaryString, (char) => char.charCodeAt(0));
-      imageData = bytes;
-
-      // Extract metadata from data URL
-      try {
-        imageMeta = getImageMetadata(imageData);
-      } catch {
-        imageMeta = {
-          type: getImageTypeFromSrc(src),
-          width: undefined,
-          height: undefined,
-          orientation: undefined,
-        };
-      }
-    } else {
-      throw new Error(`Unsupported image source format: ${src.substring(0, 20)}...`);
+    // Extract metadata from image data
+    try {
+      imageMeta = getImageMetadata(imageData);
+    } catch {
+      imageMeta = {
+        type: getImageTypeFromSrc(src),
+        width: undefined,
+        height: undefined,
+        orientation: undefined,
+      };
     }
   } catch (error) {
     console.warn(`Failed to process image:`, error);

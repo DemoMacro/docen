@@ -187,7 +187,6 @@ export function getImageHeight(
 
 /**
  * Fetch image data and metadata from HTTP/HTTPS URL
- * (Only for use without custom handler)
  */
 export async function getImageDataAndMeta(
   url: string,
@@ -214,4 +213,28 @@ export async function getImageDataAndMeta(
     console.warn(`Failed to fetch image from ${url}:`, error);
     throw error;
   }
+}
+
+/**
+ * Default image handler: fetch image data from src URL
+ *
+ * Supports HTTP/HTTPS URLs and data URLs.
+ * For data URLs, extracts the base64-encoded payload.
+ */
+export async function defaultImageHandler(src: string): Promise<Uint8Array> {
+  if (src.startsWith("http")) {
+    const { data } = await getImageDataAndMeta(src);
+    return data;
+  }
+
+  if (src.startsWith("data:")) {
+    const base64Data = src.split(",")[1];
+    if (!base64Data) {
+      throw new Error("Invalid data URL: missing base64 data");
+    }
+    const binaryString = atob(base64Data);
+    return Uint8Array.from(binaryString, (char) => char.charCodeAt(0));
+  }
+
+  throw new Error(`Unsupported image source format: ${src.substring(0, 20)}...`);
 }
