@@ -124,5 +124,9 @@ export async function convertTableHeader(
     headerCellOptions.borders = borders;
   }
 
+  if (node.attrs?.textDirection) {
+    headerCellOptions.textDirection = node.attrs.textDirection;
+  }
+
   return new TableCell(headerCellOptions);
 }

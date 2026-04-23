@@ -12,6 +12,7 @@ export function convertText(node: TextNode): TextRun | ExternalHyperlink {
   const isItalic = node.marks?.some((m) => m.type === "italic");
   const isUnderline = node.marks?.some((m) => m.type === "underline");
   const isStrike = node.marks?.some((m) => m.type === "strike");
+  const doubleStrikeMark = node.marks?.find((m) => m.type === "strike" && m.attrs?.doubleStrike);
   const isCode = node.marks?.some((m) => m.type === "code");
   const isSubscript = node.marks?.some((m) => m.type === "subscript");
   const isSuperscript = node.marks?.some((m) => m.type === "superscript");
@@ -44,6 +45,18 @@ export function convertText(node: TextNode): TextRun | ExternalHyperlink {
     fontFamily = textStyleMark.attrs.fontFamily;
   }
 
+  // Handle character spacing (px → twips: px * 15 at 96 DPI)
+  let characterSpacing: number | undefined;
+  if (textStyleMark?.attrs?.letterSpacing) {
+    const spacingStr = textStyleMark.attrs.letterSpacing;
+    if (spacingStr.endsWith("px")) {
+      const px = parseFloat(spacingStr);
+      if (!isNaN(px)) {
+        characterSpacing = Math.round(px * 15);
+      }
+    }
+  }
+
   // Build text run options
   const baseOptions: IRunOptions = {
     text: node.text || "",
@@ -51,6 +64,7 @@ export function convertText(node: TextNode): TextRun | ExternalHyperlink {
     italics: isItalic || undefined,
     underline: isUnderline ? {} : undefined,
     strike: isStrike || undefined,
+    doubleStrike: doubleStrikeMark ? true : undefined,
     font: fontFamily,
     size: fontSize,
     subScript: isSubscript || undefined,
@@ -58,6 +72,8 @@ export function convertText(node: TextNode): TextRun | ExternalHyperlink {
     color: textColor,
     shading: backgroundColor ? { fill: backgroundColor } : undefined,
     highlight: highlightColor as (typeof HighlightColor)[keyof typeof HighlightColor] | undefined,
+    characterSpacing,
+    rightToLeft: textStyleMark?.attrs?.rtl === true || undefined,
   };
 
   // Return hyperlink if link mark exists

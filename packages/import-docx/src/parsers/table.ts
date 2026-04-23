@@ -1,7 +1,6 @@
 import type { Element } from "xast";
 import type { Border } from "@docen/extensions/types";
-import { findChild } from "@docen/utils";
-import { convertTwipToPixels } from "@docen/utils";
+import { findChild, TWIPS_PER_INCH, DOCX_DPI } from "@docen/utils";
 import { parseBorder } from "./styles";
 
 /**
@@ -12,16 +11,49 @@ export function parseTableProperties(tableNode: Element): {
   marginBottom?: number;
   marginLeft?: number;
   marginRight?: number;
+  layout?: "autofit" | "fixed";
+  alignment?: "left" | "center" | "right";
+  cellSpacing?: number;
 } | null {
   const props = {
     marginTop: undefined as number | undefined,
     marginBottom: undefined as number | undefined,
     marginLeft: undefined as number | undefined,
     marginRight: undefined as number | undefined,
+    layout: undefined as "autofit" | "fixed" | undefined,
+    alignment: undefined as "left" | "center" | "right" | undefined,
+    cellSpacing: undefined as number | undefined,
   };
 
   const tblPr = findChild(tableNode, "w:tblPr");
   if (!tblPr) return null;
+
+  // Parse table layout (w:tblLayout)
+  const tblLayout = findChild(tblPr, "w:tblLayout");
+  if (tblLayout?.attributes["w:type"]) {
+    const layoutType = tblLayout.attributes["w:type"] as string;
+    if (layoutType === "autofit" || layoutType === "fixed") {
+      props.layout = layoutType;
+    }
+  }
+
+  // Parse table alignment (w:jc)
+  const jc = findChild(tblPr, "w:jc");
+  if (jc?.attributes["w:val"]) {
+    const jcVal = jc.attributes["w:val"] as string;
+    if (jcVal === "left" || jcVal === "center" || jcVal === "right") {
+      props.alignment = jcVal;
+    }
+  }
+
+  // Parse cell spacing (w:tblCellSpacing)
+  const cellSpacing = findChild(tblPr, "w:tblCellSpacing");
+  if (cellSpacing?.attributes["w:w"]) {
+    const spacingVal = parseInt(cellSpacing.attributes["w:w"] as string);
+    if (!isNaN(spacingVal)) {
+      props.cellSpacing = spacingVal;
+    }
+  }
 
   // Check for table cell margins (w:tblCellMar)
   const tblCellMar = findChild(tblPr, "w:tblCellMar");
@@ -68,7 +100,10 @@ export function parseTableProperties(tableNode: Element): {
     props.marginTop === undefined &&
     props.marginBottom === undefined &&
     props.marginLeft === undefined &&
-    props.marginRight === undefined
+    props.marginRight === undefined &&
+    props.layout === undefined &&
+    props.alignment === undefined &&
+    props.cellSpacing === undefined
   ) {
     return null;
   }
@@ -81,20 +116,33 @@ export function parseTableProperties(tableNode: Element): {
  */
 export function parseRowProperties(rowNode: Element): {
   rowHeight: string | null;
+  header?: boolean;
 } | null {
   const props = {
     rowHeight: null as string | null,
+    rowHeightRule: null as string | null,
+    header: undefined as boolean | undefined,
   };
 
   const trPr = findChild(rowNode, "w:trPr");
   if (!trPr) return props;
 
-  // Check for row height
   const trHeight = findChild(trPr, "w:trHeight");
   if (trHeight?.attributes["w:val"]) {
     const twips = parseInt(trHeight.attributes["w:val"] as string);
-    const pixels = convertTwipToPixels(twips);
-    props.rowHeight = `${pixels}px`;
+    // Preserve full precision (no Math.round) to avoid round-trip drift
+    const pixels = (twips * DOCX_DPI) / TWIPS_PER_INCH;
+    props.rowHeight = `${Math.round(pixels * 10) / 10}px`;
+    // Preserve hRule ("exact" or "atLeast"); OOXML default is "atLeast"
+    const hRule = trHeight.attributes["w:hRule"] as string | undefined;
+    if (hRule) {
+      props.rowHeightRule = hRule;
+    }
+  }
+
+  const tblHeader = findChild(trPr, "w:tblHeader");
+  if (tblHeader) {
+    props.header = true;
   }
 
   return props;
@@ -109,6 +157,8 @@ export function parseCellProperties(cellNode: Element): {
   colwidth: number[] | null;
   backgroundColor?: string;
   verticalAlign?: string;
+  noWrap?: boolean;
+  textDirection?: string;
   borderTop?: Border;
   borderBottom?: Border;
   borderLeft?: Border;
@@ -120,6 +170,8 @@ export function parseCellProperties(cellNode: Element): {
     colwidth: number[] | null;
     backgroundColor?: string;
     verticalAlign?: string;
+    noWrap?: boolean;
+    textDirection?: string;
     borderTop?: Border;
     borderBottom?: Border;
     borderLeft?: Border;
@@ -170,7 +222,9 @@ export function parseCellProperties(cellNode: Element): {
     } else {
       // dxa (twips) or default
       if (!isNaN(wVal)) {
-        props.colwidth = [convertTwipToPixels(wVal)];
+        // Preserve fractional precision to avoid round-trip drift
+        const px = (wVal * DOCX_DPI) / TWIPS_PER_INCH;
+        props.colwidth = [Math.round(px * 10) / 10];
       }
     }
   }
@@ -191,6 +245,24 @@ export function parseCellProperties(cellNode: Element): {
       both: "middle",
     };
     props.verticalAlign = vAlignMap[vAlign.attributes["w:val"] as string];
+  }
+
+  // Check for noWrap
+  const noWrap = findChild(tcPr, "w:noWrap");
+  if (noWrap) {
+    const val = noWrap.attributes["w:val"];
+    if (val !== "0" && val !== "false") {
+      props.noWrap = true;
+    }
+  }
+
+  // Check for text direction
+  const textDir = findChild(tcPr, "w:textDirection");
+  if (textDir?.attributes["w:val"]) {
+    const dirVal = textDir.attributes["w:val"] as string;
+    if (dirVal === "lrTb" || dirVal === "tbRl" || dirVal === "btLr") {
+      props.textDirection = dirVal;
+    }
   }
 
   // Check for cell borders

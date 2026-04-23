@@ -1,4 +1,4 @@
-import { Table, TableRow, ITableOptions } from "docx-plus";
+import { Table, TableRow, ITableOptions, AlignmentType, TableLayoutType } from "docx-plus";
 import { TableNode } from "@docen/extensions/types";
 import { convertTableRow } from "./table-row";
 import { DocxExportOptions } from "../options";
@@ -64,6 +64,39 @@ export async function convertTable(
 
   // Apply table margins
   tableOptions = applyTableMargins(tableOptions, node);
+
+  // Apply table layout
+  if (node.attrs?.layout) {
+    const layoutMap: Record<string, (typeof TableLayoutType)[keyof typeof TableLayoutType]> = {
+      autofit: TableLayoutType.AUTOFIT,
+      fixed: TableLayoutType.FIXED,
+    };
+    const layoutVal = layoutMap[node.attrs.layout];
+    if (layoutVal) {
+      tableOptions = { ...tableOptions, layout: layoutVal };
+    }
+  }
+
+  // Apply table alignment
+  if (node.attrs?.alignment) {
+    const alignMap: Record<string, (typeof AlignmentType)[keyof typeof AlignmentType]> = {
+      left: AlignmentType.LEFT,
+      center: AlignmentType.CENTER,
+      right: AlignmentType.RIGHT,
+    };
+    const alignVal = alignMap[node.attrs.alignment];
+    if (alignVal) {
+      tableOptions = { ...tableOptions, alignment: alignVal };
+    }
+  }
+
+  // Apply cell spacing
+  if (node.attrs?.cellSpacing) {
+    tableOptions = {
+      ...tableOptions,
+      cellSpacing: { value: node.attrs.cellSpacing, type: "dxa" },
+    };
+  }
 
   return new Table(tableOptions);
 }

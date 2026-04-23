@@ -40,3 +40,9 @@ export { FontFamily } from "@tiptap/extension-text-style";
 export { FontSize } from "@tiptap/extension-text-style";
 export { LineHeight } from "@tiptap/extension-text-style";
 export { TextAlign } from "@tiptap/extension-text-align";
+
+// === TipTap Extensions (Dropcursor, Gapcursor, etc.) ===
+export { Dropcursor, Gapcursor, TrailingNode, UndoRedo } from "@tiptap/extensions";
+
+// ListKeymap
+export { ListKeymap } from "@tiptap/extension-list";
