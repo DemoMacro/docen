@@ -47,14 +47,15 @@ export function convertPixelsToTwip(px: number): number {
 /**
  * Convert EMUs to pixels
  * EMU = English Metric Unit (1 inch = 914400 EMUs)
+ * Returns precise value (no rounding) to preserve fidelity for round-trip conversions.
  * @param emu - Value in EMUs
- * @returns Value in pixels
+ * @returns Value in pixels (may be fractional)
  *
  * @example
  * convertEmuToPixels(914400) // returns 96
  */
 export function convertEmuToPixels(emu: number): number {
-  return Math.round(emu / (EMUS_PER_INCH / PIXELS_PER_INCH));
+  return emu / (EMUS_PER_INCH / PIXELS_PER_INCH);
 }
 
 /**
