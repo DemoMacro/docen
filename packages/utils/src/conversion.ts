@@ -127,7 +127,8 @@ export function convertCssLengthToPixels(value: string): number {
   const unit = match[2] || "px";
   const factor = UNIT_TO_PIXELS[unit] ?? 1;
 
-  return Math.round(num * factor);
+  // Preserve fractional precision for accurate round-trip conversions
+  return num * factor;
 }
 
 /**

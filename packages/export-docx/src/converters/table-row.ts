@@ -1,4 +1,4 @@
-import { TableRow, TableCell } from "docx-plus";
+import { TableRow, TableCell, type ITableRowOptions } from "docx-plus";
 import { TableRowNode } from "@docen/extensions/types";
 import { convertTableCell } from "./table-cell";
 import { convertTableHeader } from "./table-header";
@@ -51,28 +51,21 @@ export async function convertTableRow(
   const validCells = cells.filter((cell): cell is TableCell => cell !== undefined);
 
   // Prepare table row options
-  const tableRowOptions: {
-    children: typeof validCells;
-    height?: { rule: "auto" | "atLeast" | "exact"; value: number };
-  } = {
+  const height = (() => {
+    if (!node.attrs?.rowHeight) return undefined;
+    const twips = convertPixelsToTwip(convertCssLengthToPixels(node.attrs.rowHeight));
+    if (twips <= 0) return undefined;
+    const rule = node.attrs.rowHeightRule === "exact" ? "exact" as const : "atLeast" as const;
+    return { rule, value: twips };
+  })();
+
+  const tableRowOptions: ITableRowOptions = {
     children: validCells,
     ...rowOptions,
+    ...(height && { height }),
+    ...(node.attrs?.header && { tableHeader: true }),
   };
 
-  // Add row height if present
-  if (node.attrs?.rowHeight) {
-    const pixels = convertCssLengthToPixels(node.attrs.rowHeight);
-    const twips = convertPixelsToTwip(pixels);
-
-    if (twips > 0) {
-      tableRowOptions.height = {
-        rule: "atLeast", // Use "atLeast" to allow content to expand the row
-        value: twips,
-      };
-    }
-  }
-
-  // Create table row with options
   const row = new TableRow(tableRowOptions);
 
   return row;

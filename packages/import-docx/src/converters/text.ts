@@ -135,9 +135,12 @@ export function extractMarks(
     italic?: boolean;
     underline?: boolean;
     strike?: boolean;
-    fontSize?: number; // Half-points
+    doubleStrike?: boolean;
+    fontSize?: number;
     fontFamily?: string;
     backgroundColor?: string;
+    characterSpacing?: number;
+    rtl?: boolean;
   } = {};
 
   if (styleInfo?.charFormat) {
@@ -185,6 +188,34 @@ export function extractMarks(
       const val = strikeEl.attributes["w:val"];
       if (val !== "0" && val !== "false") {
         mergedFormat.strike = true;
+      }
+    }
+
+    // Double strikethrough (takes precedence over strike)
+    const dstrikeEl = findChild(rPr, "w:dstrike");
+    if (dstrikeEl) {
+      const val = dstrikeEl.attributes["w:val"];
+      if (val !== "0" && val !== "false") {
+        mergedFormat.doubleStrike = true;
+        mergedFormat.strike = false;
+      }
+    }
+
+    // Character spacing (w:spacing in rPr, unit: twips)
+    const spacingEl = findChild(rPr, "w:spacing");
+    if (spacingEl?.attributes["w:val"]) {
+      const spacingVal = parseInt(spacingEl.attributes["w:val"] as string);
+      if (!isNaN(spacingVal)) {
+        mergedFormat.characterSpacing = spacingVal;
+      }
+    }
+
+    // Right-to-left text
+    const rtlEl = findChild(rPr, "w:rtl");
+    if (rtlEl) {
+      const val = rtlEl.attributes["w:val"];
+      if (val !== "0" && val !== "false") {
+        mergedFormat.rtl = true;
       }
     }
 
@@ -256,19 +287,27 @@ export function extractMarks(
     marks.push({ type: "strike" });
   }
 
+  if (mergedFormat.doubleStrike) {
+    marks.push({ type: "strike", attrs: { doubleStrike: true } });
+  }
+
   // Text style (colors, font size, font family, etc.)
   if (
     mergedFormat.color ||
     mergedFormat.backgroundColor ||
     mergedFormat.fontSize ||
-    mergedFormat.fontFamily
+    mergedFormat.fontFamily ||
+    mergedFormat.characterSpacing ||
+    mergedFormat.rtl
   ) {
-    const textStyleAttrs: Record<string, string> = {
+    const textStyleAttrs: Record<string, string | boolean> = {
       color: mergedFormat.color || "",
       backgroundColor: mergedFormat.backgroundColor || "",
       fontSize: "",
       fontFamily: "",
       lineHeight: "",
+      letterSpacing: "",
+      rtl: false,
     };
 
     // Font size (convert half-points to px)
@@ -279,6 +318,15 @@ export function extractMarks(
 
     if (mergedFormat.fontFamily) {
       textStyleAttrs.fontFamily = mergedFormat.fontFamily;
+    }
+
+    if (mergedFormat.characterSpacing) {
+      const px = mergedFormat.characterSpacing / 15;
+      textStyleAttrs.letterSpacing = `${px}px`;
+    }
+
+    if (mergedFormat.rtl) {
+      textStyleAttrs.rtl = true;
     }
 
     marks.push({ type: "textStyle", attrs: textStyleAttrs });

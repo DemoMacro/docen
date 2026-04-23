@@ -124,5 +124,9 @@ export async function convertTableCell(
     cellOptions.borders = borders;
   }
 
+  if (node.attrs?.textDirection) {
+    cellOptions.textDirection = node.attrs.textDirection;
+  }
+
   return new TableCell(cellOptions);
 }

@@ -95,6 +95,9 @@ export interface Mark {
     fontSize?: string;
     fontFamily?: string;
     lineHeight?: string;
+    letterSpacing?: string;
+    doubleStrike?: boolean;
+    rtl?: boolean;
     href?: string;
     target?: string;
     rel?: string;
@@ -213,6 +216,9 @@ export interface TableNode extends JSONContent {
     marginBottom?: number | null;
     marginLeft?: number | null;
     marginRight?: number | null;
+    layout?: "autofit" | "fixed" | null;
+    alignment?: "left" | "center" | "right" | null;
+    cellSpacing?: number | null;
   };
   content?: Array<TableRowNode>;
 }
@@ -221,6 +227,8 @@ export interface TableRowNode extends JSONContent {
   type: "tableRow";
   attrs?: {
     rowHeight?: string | null; // Row height (CSS value: "20px", "1.5em", etc.)
+    rowHeightRule?: "exact" | "atLeast" | null; // DOCX height rule (hRule)
+    header?: boolean | null;
   };
   content?: Array<TableCellNode | TableHeaderNode>;
 }
@@ -233,6 +241,8 @@ export interface TableCellNode extends JSONContent {
     colwidth?: number[] | null;
     backgroundColor?: string | null;
     verticalAlign?: "top" | "middle" | "bottom" | null;
+    noWrap?: boolean | null;
+    textDirection?: "lrTb" | "tbRl" | "btLr" | null;
     borderTop?: Border;
     borderBottom?: Border;
     borderLeft?: Border;
@@ -249,6 +259,8 @@ export interface TableHeaderNode extends JSONContent {
     colwidth?: number[] | null;
     backgroundColor?: string | null;
     verticalAlign?: "top" | "middle" | "bottom" | null;
+    noWrap?: boolean | null;
+    textDirection?: "lrTb" | "tbRl" | "btLr" | null;
     borderTop?: Border;
     borderBottom?: Border;
     borderLeft?: Border;

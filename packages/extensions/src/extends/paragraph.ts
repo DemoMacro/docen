@@ -1,26 +1,11 @@
 import { Paragraph as BaseParagraph } from "../tiptap";
+import { renderBorderCSS } from "../utils";
 
-/**
- * Custom Paragraph extension with DOCX-compatible style attributes
- *
- * Adds support for paragraph-level formatting used in DOCX round-trip conversion:
- * - Indentation: left, right, first line
- * - Spacing: before, after
- *
- * These attributes map to CSS margin properties for HTML rendering
- * and to DOCX paragraph properties for DOCX export/import.
- *
- * Note: Attributes store CSS values as-is (no unit conversion).
- * Conversion happens in export-docx/import-docx packages.
- */
 export const Paragraph = BaseParagraph.extend({
   addAttributes() {
     return {
-      // Inherit all parent attributes
       ...this.parent?.(),
 
-      // Left indentation (CSS value: e.g., "20px", "1.5rem")
-      // Maps to CSS margin-left and DOCX w:ind/@w:left
       indentLeft: {
         default: null,
         parseHTML: (element) => element.style.marginLeft || null,
@@ -28,8 +13,6 @@ export const Paragraph = BaseParagraph.extend({
           attributes.indentLeft ? { style: `margin-left: ${attributes.indentLeft}` } : {},
       },
 
-      // Right indentation (CSS value)
-      // Maps to CSS margin-right and DOCX w:ind/@w:right
       indentRight: {
         default: null,
         parseHTML: (element) => element.style.marginRight || null,
@@ -37,8 +20,6 @@ export const Paragraph = BaseParagraph.extend({
           attributes.indentRight ? { style: `margin-right: ${attributes.indentRight}` } : {},
       },
 
-      // First line indentation (CSS value)
-      // Maps to CSS text-indent and DOCX w:ind/@w:firstLine
       indentFirstLine: {
         default: null,
         parseHTML: (element) => element.style.textIndent || null,
@@ -46,8 +27,6 @@ export const Paragraph = BaseParagraph.extend({
           attributes.indentFirstLine ? { style: `text-indent: ${attributes.indentFirstLine}` } : {},
       },
 
-      // Spacing before paragraph (CSS value)
-      // Maps to CSS margin-top and DOCX w:spacing/@w:before
       spacingBefore: {
         default: null,
         parseHTML: (element) => element.style.marginTop || null,
@@ -55,8 +34,6 @@ export const Paragraph = BaseParagraph.extend({
           attributes.spacingBefore ? { style: `margin-top: ${attributes.spacingBefore}` } : {},
       },
 
-      // Spacing after paragraph (CSS value)
-      // Maps to CSS margin-bottom and DOCX w:spacing/@w:after
       spacingAfter: {
         default: null,
         parseHTML: (element) => element.style.marginBottom || null,
@@ -64,8 +41,6 @@ export const Paragraph = BaseParagraph.extend({
           attributes.spacingAfter ? { style: `margin-bottom: ${attributes.spacingAfter}` } : {},
       },
 
-      // Shading (background color)
-      // Maps to CSS background-color and DOCX w:shd
       shading: {
         default: null,
         parseHTML: (element) => {
@@ -80,26 +55,37 @@ export const Paragraph = BaseParagraph.extend({
         },
       },
 
-      // Borders (not rendered in HTML, only for DOCX)
       borderTop: {
         default: null,
         parseHTML: () => null,
-        renderHTML: () => ({}),
+        renderHTML: (attributes) => {
+          const css = renderBorderCSS(attributes.borderTop);
+          return css ? { style: `border-top: ${css}` } : {};
+        },
       },
       borderBottom: {
         default: null,
         parseHTML: () => null,
-        renderHTML: () => ({}),
+        renderHTML: (attributes) => {
+          const css = renderBorderCSS(attributes.borderBottom);
+          return css ? { style: `border-bottom: ${css}` } : {};
+        },
       },
       borderLeft: {
         default: null,
         parseHTML: () => null,
-        renderHTML: () => ({}),
+        renderHTML: (attributes) => {
+          const css = renderBorderCSS(attributes.borderLeft);
+          return css ? { style: `border-left: ${css}` } : {};
+        },
       },
       borderRight: {
         default: null,
         parseHTML: () => null,
-        renderHTML: () => ({}),
+        renderHTML: (attributes) => {
+          const css = renderBorderCSS(attributes.borderRight);
+          return css ? { style: `border-right: ${css}` } : {};
+        },
       },
     };
   },

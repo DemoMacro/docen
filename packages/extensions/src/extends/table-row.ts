@@ -23,26 +23,22 @@ export const TableRow = BaseTableRow.extend({
       rowHeight: {
         default: null,
         parseHTML: (element) => {
-          // Try to get height from inline style
           const height = element.style.height;
-          if (height) {
-            return height;
-          }
-          // Try to get from height attribute
+          if (height) return height;
           const heightAttr = element.getAttribute("height");
-          if (heightAttr) {
-            return heightAttr;
-          }
+          if (heightAttr) return heightAttr;
           return null;
         },
         renderHTML: (attributes) => {
-          if (!attributes.rowHeight) {
-            return {};
-          }
-          return {
-            style: `height: ${attributes.rowHeight}`,
-          };
+          if (!attributes.rowHeight) return {};
+          return { style: `height: ${attributes.rowHeight}` };
         },
+      },
+
+      header: {
+        default: null,
+        parseHTML: () => null,
+        renderHTML: () => ({}),
       },
     };
   },

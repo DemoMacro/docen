@@ -7,13 +7,16 @@ import type { Border, Shading } from "@docen/extensions/types";
  * Character format information from a style definition
  */
 export interface CharFormat {
-  color?: string; // Hex color with # (e.g., "#FF0000")
+  color?: string;
   bold?: boolean;
   italic?: boolean;
-  fontSize?: number; // Half-points (DOCX unit)
+  fontSize?: number;
   fontFamily?: string;
   underline?: boolean;
   strike?: boolean;
+  doubleStrike?: boolean;
+  characterSpacing?: number;
+  rtl?: boolean;
 }
 
 /**
@@ -266,6 +269,33 @@ export function parseStylesXml(files: Record<string, Uint8Array>): StyleMap {
       const rFonts = findChild(rPr, "w:rFonts");
       if (rFonts?.attributes["w:ascii"]) {
         charFormat.fontFamily = rFonts.attributes["w:ascii"] as string;
+      }
+
+      // Double strikethrough
+      const dstrike = findChild(rPr, "w:dstrike");
+      if (dstrike) {
+        const val = dstrike.attributes["w:val"];
+        if (val !== "0" && val !== "false") {
+          charFormat.doubleStrike = true;
+        }
+      }
+
+      // Character spacing (w:spacing in rPr, unit: twips)
+      const spacing = findChild(rPr, "w:spacing");
+      if (spacing?.attributes["w:val"]) {
+        const val = parseInt(spacing.attributes["w:val"] as string);
+        if (!isNaN(val)) {
+          charFormat.characterSpacing = val;
+        }
+      }
+
+      // Right-to-left text
+      const rtl = findChild(rPr, "w:rtl");
+      if (rtl) {
+        const val = rtl.attributes["w:val"];
+        if (val !== "0" && val !== "false") {
+          charFormat.rtl = true;
+        }
       }
 
       // Only add charFormat if there's at least one property
