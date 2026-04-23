@@ -1,6 +1,6 @@
 {
   "name": "@docen/extensions",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Collection of TipTap extensions with TypeScript type definitions for Docen",
   "keywords": [
     "docen",

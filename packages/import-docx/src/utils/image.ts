@@ -216,6 +216,8 @@ export async function cropImageIfNeeded(
 
     const croppedWidth = Math.round(img.width - left - right);
     const croppedHeight = Math.round(img.height - top - bottom);
+    const preciseWidth = img.width - left - right;
+    const preciseHeight = img.height - top - bottom;
 
     // Validate dimensions
     if (croppedWidth <= 0 || croppedHeight <= 0) {
@@ -230,13 +232,13 @@ export async function cropImageIfNeeded(
       throw new Error("Failed to get 2D context from canvas");
     }
 
-    // Crop and draw
+    // Crop and draw (source rect uses precise floats for accuracy)
     (drawingContext.context as CanvasRenderingContext2D).drawImage(
       img as HTMLImageElement,
       left,
       top,
-      croppedWidth,
-      croppedHeight,
+      preciseWidth,
+      preciseHeight,
       0,
       0,
       croppedWidth,

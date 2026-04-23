@@ -369,10 +369,16 @@ export async function convertNode(
   // Layer 2: Style Application (apply styleId if configured)
   let styleId = getStyleIdByNodeType(node.type, options);
 
-  // Special case: paragraphs containing only images should use image style
+  // Special case: paragraphs containing only images (allowing whitespace/breaks between them) should use image style
   if (!styleId && node.type === "paragraph" && node.content) {
+    const isImageOrInert = (child: JSONContent) =>
+      child.type === "image" ||
+      (child.type === "text" && !child.text?.trim()) ||
+      child.type === "hardBreak";
     const hasOnlyImages =
-      node.content.length > 0 && node.content.every((child: JSONContent) => child.type === "image");
+      node.content.length > 0 &&
+      node.content.every(isImageOrInert) &&
+      node.content.some((child: JSONContent) => child.type === "image");
     if (hasOnlyImages) {
       styleId = options.image?.style?.id;
     }
