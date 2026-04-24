@@ -55,7 +55,7 @@ export async function convertTableRow(
     if (!node.attrs?.rowHeight) return undefined;
     const twips = convertPixelsToTwip(convertCssLengthToPixels(node.attrs.rowHeight));
     if (twips <= 0) return undefined;
-    const rule = node.attrs.rowHeightRule === "exact" ? "exact" as const : "atLeast" as const;
+    const rule = node.attrs.rowHeightRule === "exact" ? ("exact" as const) : ("atLeast" as const);
     return { rule, value: twips };
   })();
 

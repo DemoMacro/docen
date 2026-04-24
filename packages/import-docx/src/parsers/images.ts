@@ -146,6 +146,14 @@ export function extractCropRect(srcRect: Element): SourceRectangleOptions | unde
 }
 
 /**
+ * Extract MIME type from a data URL (e.g., "data:image/jpeg;base64,...")
+ */
+function getContentTypeFromSrc(src: string): string | undefined {
+  const match = src.match(/^data:([^;]+);/);
+  return match?.[1];
+}
+
+/**
  * Apply crop to image data and update dimensions
  * Shared logic for grouped images without a:graphic (direct blipFill path)
  * Always preserves crop metadata in the returned object
@@ -173,7 +181,10 @@ async function applyCropToImage(
   }
 
   // Always preserve crop metadata
-  const result = { ...imgInfo, crop };
+  const result: { src: string; width?: number; height?: number; crop?: SourceRectangleOptions } = {
+    ...imgInfo,
+    crop,
+  };
 
   // Only physically crop if the option is enabled
   if (params.context.image?.crop) {
@@ -187,6 +198,7 @@ async function applyCropToImage(
       const croppedData = await cropImageIfNeeded(bytes, crop, {
         canvasImport: params.context.image?.canvasImport,
         enabled: true,
+        contentType: (imgInfo as ImageInfo).contentType || getContentTypeFromSrc(imgInfo.src),
       });
       const croppedBase64 = uint8ArrayToBase64(croppedData);
 
@@ -201,12 +213,17 @@ async function applyCropToImage(
       const visibleWidthPct = 1 - cropLeftPct - cropRightPct;
       const visibleHeightPct = 1 - cropTopPct - cropBottomPct;
 
-      result.src = `${metadata},${croppedBase64}`;
+      // Rebuild data URL with correct MIME type from contentType option
+      const outputContentType =
+        (imgInfo as ImageInfo).contentType || getContentTypeFromSrc(imgInfo.src);
+      result.src = outputContentType
+        ? `data:${outputContentType};base64,${croppedBase64}`
+        : `${metadata},${croppedBase64}`;
       result.width = Math.round(originalWidth * visibleWidthPct);
       result.height = Math.round(originalHeight * visibleHeightPct);
       // Clear crop metadata: image is already physically cropped,
       // keeping it would cause double-cropping on export
-      result.crop = undefined;
+      delete result.crop;
     } catch (error) {
       console.warn("Grouped image cropping failed, using original image:", error);
     }
@@ -344,6 +361,7 @@ export async function extractImages(
 
       images.set(rel.attributes.Id as string, {
         src,
+        contentType: contentType || `image/${imageType}`,
         width,
         height,
       });
@@ -391,10 +409,15 @@ export async function extractImageFromDrawing(
             const croppedData = await cropImageIfNeeded(bytes, cropRect, {
               canvasImport: context.image?.canvasImport,
               enabled: true,
+              contentType: imgInfo.contentType || getContentTypeFromSrc(src),
             });
 
             const croppedBase64 = uint8ArrayToBase64(croppedData);
-            src = `${metadata},${croppedBase64}`;
+            // Rebuild data URL with correct MIME type
+            const outputContentType = imgInfo.contentType || getContentTypeFromSrc(src);
+            src = outputContentType
+              ? `data:${outputContentType};base64,${croppedBase64}`
+              : `${metadata},${croppedBase64}`;
             // Clear crop metadata: image is already physically cropped,
             // keeping it would cause double-cropping on export
             crop = undefined;

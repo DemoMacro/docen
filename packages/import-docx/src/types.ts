@@ -32,6 +32,7 @@ export type ListTypeMap = Map<string, ListInfo>;
  */
 export interface ImageInfo {
   src: string; // data URL (e.g., "data:image/png;base64,...")
+  contentType?: string; // MIME type (e.g., "image/jpeg")
   width?: number;
   height?: number;
 }
