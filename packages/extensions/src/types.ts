@@ -278,10 +278,10 @@ export interface ImageNode extends JSONContent {
     title?: string | null;
     width?: number | null;
     height?: number | null;
-    rotation?: number; // Image rotation in degrees (non-standard, for DOCX round-trip)
-    floating?: ImageFloatingOptions; // Floating positioning options (non-standard, for DOCX round-trip)
-    outline?: ImageOutlineOptions; // Image border/outline options (non-standard, for DOCX round-trip)
-    crop?: SourceRectangleOptions; // Crop rectangle (non-standard, for DOCX round-trip)
+    rotation?: number; // Image rotation in degrees (CSS transform, for DOCX round-trip)
+    floating?: ImageFloatingOptions; // Floating positioning and text wrapping (CSS float/position, for DOCX round-trip)
+    outline?: ImageOutlineOptions; // Image border/outline options (data attribute, for DOCX round-trip)
+    crop?: SourceRectangleOptions; // Crop rectangle (CSS object-fit/position, for DOCX round-trip)
   };
 }
 

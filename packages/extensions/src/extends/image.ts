@@ -6,15 +6,15 @@ import type { SourceRectangleOptions } from "../types";
  *
  * Adds DOCX-specific attributes for round-trip conversion:
  * - rotation: Image rotation in degrees (rendered as CSS transform)
- * - floating: Image positioning options (stored as data-floating attribute)
+ * - floating: Image positioning and text wrapping (rendered as CSS float/position/z-index)
  * - outline: Image border/outline options (stored as data-outline attribute)
  * - crop: Image crop rectangle (resized element + object-fit/position)
  *
  * HTML serialization strategy:
- * - rotation: Mapped to CSS transform: rotate()
- * - floating: Preserved as data-floating JSON attribute (no CSS equivalent)
+ * - rotation: CSS transform merged into floating/crop renderHTML output
+ * - floating: CSS float/position/z-index/margin + preserved as data-floating JSON attribute
  * - outline: Preserved as data-outline JSON attribute (no CSS equivalent)
- * - crop: object-fit: cover + object-position (element size already reflects crop)
+ * - crop: CSS object-fit/position (merged with floating style when both present)
  */
 
 /**
@@ -46,10 +46,12 @@ export const Image = BaseImage.extend({
       ...this.parent?.(),
 
       // Set display to inline-block for inline images to make text-align work properly
+      // Note: style output moved to floating/crop renderHTML to avoid TipTap
+      // attribute alphabetical merge overriding our CSS
       display: {
         default: null,
         parseHTML: () => (this.options.inline ? "inline-block" : null),
-        renderHTML: () => (this.options.inline ? { style: "display: inline-block" } : {}),
+        renderHTML: () => ({}),
       },
 
       // Add rotation attribute (in degrees)
@@ -60,12 +62,7 @@ export const Image = BaseImage.extend({
           const rotationMatch = style.match(/transform:\s*rotate\(([\d.]+)deg\)/);
           return rotationMatch ? parseFloat(rotationMatch[1]) : null;
         },
-        renderHTML: (attributes) => {
-          if (!attributes.rotation) return {};
-          return {
-            style: `transform: rotate(${attributes.rotation}deg)`,
-          };
-        },
+        renderHTML: () => ({}),
       },
 
       // Add floating attribute for image positioning
@@ -82,8 +79,54 @@ export const Image = BaseImage.extend({
         },
         renderHTML: (attributes) => {
           if (!attributes.floating) return {};
+          const f = attributes.floating;
+          const styles: string[] = [];
+
+          // Merge rotation CSS if present (rotation attr defined before floating,
+          // its style would be overridden by floating's style in TipTap merge)
+          if (attributes.rotation) {
+            styles.push(`transform:rotate(${attributes.rotation}deg)`);
+          }
+
+          // z-index: behindDocument → below text, otherwise above
+          styles.push(f.behindDocument ? "z-index:-1" : "z-index:1");
+
+          // Wrap type → CSS layout
+          const wrapType = (f.wrap as { type?: number } | undefined)?.type ?? 0;
+          if (wrapType === 0) {
+            // NONE: position absolutely
+            styles.push("position:absolute");
+          } else if (wrapType === 1) {
+            // SQUARE: use CSS float
+            const align = f.horizontalPosition?.align;
+            if (align === "left" || align === "inside") styles.push("float:left");
+            else if (align === "right" || align === "outside") styles.push("float:right");
+            else styles.push("float:left");
+          } else if (wrapType === 2) {
+            // TIGHT: float + shape-outside
+            styles.push("float:left");
+            styles.push("shape-outside:margin-box");
+          } else if (wrapType === 3) {
+            // TOP_AND_BOTTOM: block-level
+            styles.push("display:block");
+            styles.push("clear:both");
+          } else {
+            // Default: inline-block
+            styles.push("display:inline-block");
+          }
+
+          // Margins (stored in twips, convert to pt for CSS)
+          const m = f.margins as { top?: number; bottom?: number; left?: number; right?: number } | undefined;
+          if (m) {
+            if (m.top) styles.push(`margin-top:${(m.top * 96 / 1440).toFixed(1)}pt`);
+            if (m.bottom) styles.push(`margin-bottom:${(m.bottom * 96 / 1440).toFixed(1)}pt`);
+            if (m.left) styles.push(`margin-left:${(m.left * 96 / 1440).toFixed(1)}pt`);
+            if (m.right) styles.push(`margin-right:${(m.right * 96 / 1440).toFixed(1)}pt`);
+          }
+
           return {
-            "data-floating": JSON.stringify(attributes.floating),
+            style: styles.join(";"),
+            "data-floating": JSON.stringify(f),
           };
         },
       },

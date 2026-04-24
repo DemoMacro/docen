@@ -455,19 +455,16 @@ export async function extractImageFromDrawing(
   const docPr = findDeepChild(drawing, "wp:docPr");
   const title = docPr?.attributes["title"] as string | undefined;
 
-  // Extract floating positioning
-  const positionH = findDeepChild(drawing, "wp:positionH");
-  const positionV = findDeepChild(drawing, "wp:positionV");
+  // Extract floating positioning and wrap properties from wp:anchor
+  const anchor = findDeepChild(drawing, "wp:anchor");
+  const positionH = anchor ? findChild(anchor, "wp:positionH") : undefined;
+  const positionV = anchor ? findChild(anchor, "wp:positionV") : undefined;
   let floating: ImageFloatingOptions | undefined;
 
-  if (positionH || positionV) {
+  if (anchor) {
+    // Parse horizontal position
     const hPos = positionH ? extractHorizontalPosition(positionH) : undefined;
-    const vPos = positionV ? extractVerticalPosition(positionV) : undefined;
-
-    // Extract and validate relative values
     const hRelative = positionH?.attributes["relativeFrom"];
-    const vRelative = positionV?.attributes["relativeFrom"];
-
     const horizontalRelative =
       typeof hRelative === "string" && isValidHorizontalRelative(hRelative)
         ? (hRelative as
@@ -480,6 +477,10 @@ export async function extractImageFromDrawing(
             | "insideMargin"
             | "outsideMargin")
         : "page";
+
+    // Parse vertical position
+    const vPos = positionV ? extractVerticalPosition(positionV) : undefined;
+    const vRelative = positionV?.attributes["relativeFrom"];
     const verticalRelative =
       typeof vRelative === "string" && isValidVerticalRelative(vRelative)
         ? (vRelative as
@@ -493,6 +494,48 @@ export async function extractImageFromDrawing(
             | "line")
         : "page";
 
+    // Parse anchor-level attributes
+    const anchorAttrs = anchor.attributes;
+    const behindDocument = anchorAttrs["behindDoc"] === "1";
+    const allowOverlap = anchorAttrs["allowOverlap"] === "1";
+    const lockAnchor = anchorAttrs["locked"] === "1";
+    const layoutInCell = anchorAttrs["layoutInCell"] !== "0";
+    const relativeHeight = anchorAttrs["relativeHeight"];
+    const zIndex = relativeHeight ? parseInt(relativeHeight as string) : undefined;
+
+    // Parse wrap type from anchor child elements
+    const wrapSquare = findChild(anchor, "wp:wrapSquare");
+    const wrapTight = findChild(anchor, "wp:wrapTight");
+    const wrapTopAndBottom = findChild(anchor, "wp:wrapTopAndBottom");
+    const wrapNone = findChild(anchor, "wp:wrapNone");
+
+    let wrap: { type: number; side?: string } | undefined;
+    if (wrapSquare) {
+      const side = wrapSquare.attributes["wrapText"] as string | undefined;
+      wrap = { type: 1, ...(side && { side }) };
+    } else if (wrapTight) {
+      wrap = { type: 2 };
+    } else if (wrapTopAndBottom) {
+      wrap = { type: 3 };
+    } else if (wrapNone) {
+      wrap = { type: 0 };
+    } else {
+      wrap = { type: 0 };
+    }
+
+    // Parse margins (distT/B/L/R in twips, stored as-is for docx-plus passthrough)
+    const parseDist = (attr: string | undefined) => {
+      if (!attr) return undefined;
+      const twips = parseInt(attr, 10);
+      if (isNaN(twips) || twips === 0) return undefined;
+      return twips;
+    };
+
+    const marginTop = parseDist(anchorAttrs["distT"] as string | undefined);
+    const marginBottom = parseDist(anchorAttrs["distB"] as string | undefined);
+    const marginLeft = parseDist(anchorAttrs["distL"] as string | undefined);
+    const marginRight = parseDist(anchorAttrs["distR"] as string | undefined);
+
     floating = {
       horizontalPosition: {
         relative: horizontalRelative,
@@ -504,6 +547,20 @@ export async function extractImageFromDrawing(
         ...(vPos?.align && { align: vPos.align }),
         ...(vPos?.offset !== undefined && { offset: vPos.offset }),
       },
+      ...(behindDocument && { behindDocument }),
+      ...(allowOverlap && { allowOverlap }),
+      ...(!lockAnchor && { lockAnchor: false }),
+      ...(!layoutInCell && { layoutInCell: false }),
+      ...(zIndex !== undefined && !isNaN(zIndex) && { zIndex }),
+      ...(wrap && { wrap }),
+      ...((marginTop || marginBottom || marginLeft || marginRight) && {
+        margins: {
+          ...(marginTop && { top: marginTop }),
+          ...(marginBottom && { bottom: marginBottom }),
+          ...(marginLeft && { left: marginLeft }),
+          ...(marginRight && { right: marginRight }),
+        },
+      }),
     };
   }
 
