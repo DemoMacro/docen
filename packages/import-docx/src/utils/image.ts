@@ -179,6 +179,18 @@ export interface CropImageOptions {
    * @default true
    */
   enabled?: boolean;
+
+  /**
+   * Original image MIME type (e.g., "image/jpeg", "image/webp")
+   * Used to output the correct format after cropping
+   */
+  contentType?: string;
+
+  /**
+   * JPEG/WebP output quality (0-1)
+   * @default 0.92
+   */
+  quality?: number;
 }
 
 /**
@@ -245,8 +257,18 @@ export async function cropImageIfNeeded(
       croppedHeight,
     );
 
-    // Convert back to buffer
-    const dataUrl = drawingContext.canvas.toDataURL();
+    // Convert back to buffer, preserving original format when possible
+    const quality = options.quality ?? 0.92;
+    const mime =
+      options.contentType === "image/jpeg"
+        ? "image/jpeg"
+        : options.contentType === "image/webp"
+          ? "image/webp"
+          : "image/png";
+    const dataUrl =
+      mime === "image/png"
+        ? drawingContext.canvas.toDataURL()
+        : drawingContext.canvas.toDataURL(mime, quality);
     const response = await fetch(dataUrl);
     const buffer = await response.arrayBuffer();
 
