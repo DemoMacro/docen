@@ -204,6 +204,9 @@ async function applyCropToImage(
       result.src = `${metadata},${croppedBase64}`;
       result.width = Math.round(originalWidth * visibleWidthPct);
       result.height = Math.round(originalHeight * visibleHeightPct);
+      // Clear crop metadata: image is already physically cropped,
+      // keeping it would cause double-cropping on export
+      result.crop = undefined;
     } catch (error) {
       console.warn("Grouped image cropping failed, using original image:", error);
     }
@@ -392,6 +395,9 @@ export async function extractImageFromDrawing(
 
             const croppedBase64 = uint8ArrayToBase64(croppedData);
             src = `${metadata},${croppedBase64}`;
+            // Clear crop metadata: image is already physically cropped,
+            // keeping it would cause double-cropping on export
+            crop = undefined;
           } catch (error) {
             console.warn("Image cropping failed, using original image:", error);
           }
