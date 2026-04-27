@@ -62,6 +62,15 @@ export async function convertParagraph(
     ...extractParagraphStyles(node, styleInfo),
   };
 
+  // Check if pure page break (must check before general page break handler)
+  if (runs.length === 1 && runs[0].type === "hardBreak") {
+    const run = findChild(node, "w:r");
+    const br = run && findChild(run, "w:br");
+    if (br?.attributes["w:type"] === "page") {
+      return { type: "horizontalRule" };
+    }
+  }
+
   // Check if paragraph contains page break
   const hasPageBreak = checkForPageBreak(node);
   if (hasPageBreak) {
@@ -72,15 +81,6 @@ export async function convertParagraph(
       content: filteredRuns.length ? filteredRuns : undefined,
     };
     return [paragraphNode, { type: "horizontalRule" }];
-  }
-
-  // Check if pure page break
-  if (runs.length === 1 && runs[0].type === "hardBreak") {
-    const run = findChild(node, "w:r");
-    const br = run && findChild(run, "w:br");
-    if (br?.attributes["w:type"] === "page") {
-      return { type: "horizontalRule" };
-    }
   }
 
   // Check if pure image
