@@ -27,6 +27,16 @@ export const Paragraph = BaseParagraph.extend({
           attributes.indentFirstLine ? { style: `text-indent: ${attributes.indentFirstLine}` } : {},
       },
 
+      indentFirstLineChars: {
+        default: null,
+        parseHTML: () => null,
+        renderHTML: (attributes) => {
+          if (attributes.indentFirstLineChars == null) return {};
+          const em = attributes.indentFirstLineChars / 100;
+          return { style: `text-indent: ${em}em` };
+        },
+      },
+
       spacingBefore: {
         default: null,
         parseHTML: (element) => element.style.marginTop || null,

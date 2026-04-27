@@ -4,7 +4,7 @@ import type { ParseContext } from "../parser";
 import type { StyleInfo } from "../parsers/styles";
 import { extractRuns, extractAlignment } from "./text";
 import { findChild } from "@docen/utils";
-import { extractParagraphStyles } from "../parsers/styles";
+import { extractParagraphStyles, resolveStyleInfo } from "../parsers/styles";
 
 /**
  * Convert DOCX paragraph node to TipTap paragraph
@@ -54,7 +54,7 @@ export async function convertParagraph(
     }
   }
 
-  const styleInfo = styleName && context.styleMap ? context.styleMap.get(styleName) : undefined;
+  const styleInfo = context.styleMap ? resolveStyleInfo(context.styleMap, styleName) : undefined;
   const runs = await extractRuns(node, { context, styleInfo: paramStyleInfo || styleInfo });
 
   const attrs = {
