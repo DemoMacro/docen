@@ -25,8 +25,7 @@ export async function convertParagraph(
       const outlineLvl = parseInt(outlineLvlElement.attributes["w:val"] as string, 10);
       if (outlineLvl >= 0 && outlineLvl <= 5) {
         const level = (outlineLvl + 1) as 1 | 2 | 3 | 4 | 5 | 6;
-        const styleInfo =
-          styleName && context.styleMap ? context.styleMap.get(styleName) : undefined;
+        const styleInfo = context.styleMap ? resolveStyleInfo(context.styleMap, styleName) : undefined;
         return convertHeading(node, params, styleInfo, level);
       }
     }
@@ -34,7 +33,7 @@ export async function convertParagraph(
 
   // Then check style-based heading detection
   if (styleName && context.styleMap) {
-    const styleInfo = context.styleMap.get(styleName);
+    const styleInfo = resolveStyleInfo(context.styleMap, styleName);
 
     // Check outlineLvl (reliable heading indicator)
     if (
