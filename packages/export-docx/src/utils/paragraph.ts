@@ -13,7 +13,7 @@ export const applyParagraphStyleAttributes = <T>(options: T, attrs?: ParagraphNo
   const result = { ...options } as Record<string, unknown>;
 
   // Handle indentation (single object creation)
-  if (attrs.indentLeft || attrs.indentRight || attrs.indentFirstLine) {
+  if (attrs.indentLeft || attrs.indentRight || attrs.indentFirstLine || attrs.indentFirstLineChars) {
     result.indent = {
       ...(attrs.indentLeft && {
         left: convertPixelsToTwip(convertCssLengthToPixels(attrs.indentLeft)),
@@ -23,6 +23,9 @@ export const applyParagraphStyleAttributes = <T>(options: T, attrs?: ParagraphNo
       }),
       ...(attrs.indentFirstLine && {
         firstLine: convertPixelsToTwip(convertCssLengthToPixels(attrs.indentFirstLine)),
+      }),
+      ...(attrs.indentFirstLineChars != null && {
+        firstLineChars: attrs.indentFirstLineChars,
       }),
     };
   }

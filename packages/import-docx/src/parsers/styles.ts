@@ -23,6 +23,10 @@ export interface CharFormat {
  * Paragraph format information from a style definition
  */
 export interface ParagraphFormat {
+  indentLeft?: string;
+  indentRight?: string;
+  indentFirstLine?: string;
+  indentFirstLineChars?: number;
   shading?: Shading;
   borderTop?: Border;
   borderBottom?: Border;
@@ -36,6 +40,7 @@ export interface ParagraphFormat {
 export interface StyleInfo {
   styleId: string;
   name?: string;
+  basedOn?: string;
   outlineLvl?: number; // 0-9, where 0 is Heading 1, 1 is Heading 2, etc.
   charFormat?: CharFormat; // Character format from style definition
   paragraphFormat?: ParagraphFormat; // Paragraph format from style definition
@@ -153,6 +158,50 @@ export function parseShading(pPr: Element | null): Shading | null {
 }
 
 /**
+ * Parse w:ind element into indent values
+ * Parses both absolute (w:firstLine in TWIPs) and character-based (w:firstLineChars) indentation
+ */
+function parseIndent(ind: Element): Pick<ParagraphFormat, 'indentLeft' | 'indentRight' | 'indentFirstLine' | 'indentFirstLineChars'> | null {
+  const result: Record<string, unknown> = {};
+
+  const left = parseTwipAttr(ind.attributes, "w:left") || parseTwipAttr(ind.attributes, "w:start");
+  if (left) {
+    result.indentLeft = convertTwipToCssString(parseInt(left, 10));
+  }
+
+  const right = parseTwipAttr(ind.attributes, "w:right") || parseTwipAttr(ind.attributes, "w:end");
+  if (right) {
+    result.indentRight = convertTwipToCssString(parseInt(right, 10));
+  }
+
+  // Character-based first line indent (w:firstLineChars, in hundredths of a character)
+  const firstLineChars = ind.attributes["w:firstLineChars"] as string | undefined;
+  if (firstLineChars) {
+    result.indentFirstLineChars = parseInt(firstLineChars, 10);
+  }
+
+  // Absolute first line indent (w:firstLine, in TWIPs)
+  const firstLine = parseTwipAttr(ind.attributes, "w:firstLine");
+  if (firstLine) {
+    result.indentFirstLine = convertTwipToCssString(parseInt(firstLine, 10));
+  }
+
+  // Hanging indent (negative first line)
+  if (!firstLine && !firstLineChars) {
+    const hanging = parseTwipAttr(ind.attributes, "w:hanging");
+    if (hanging) {
+      const leftTwip = left ? parseInt(left, 10) : 0;
+      const hangingTwip = parseInt(hanging, 10);
+      result.indentFirstLine = convertTwipToCssString(leftTwip - hangingTwip);
+    }
+  }
+
+  return Object.keys(result).length > 0
+    ? (result as Pick<ParagraphFormat, 'indentLeft' | 'indentRight' | 'indentFirstLine' | 'indentFirstLineChars'>)
+    : null;
+}
+
+/**
  * Parse styles.xml to build style map
  * Extracts outlineLvl from paragraph styles to identify headings
  * Extracts character format (color, bold, etc.) from style definitions
@@ -191,12 +240,21 @@ export function parseStylesXml(files: Record<string, Uint8Array>): StyleMap {
         styleInfo.outlineLvl = parseInt(outlineLvl.attributes["w:val"] as string, 10);
       }
 
-      // Extract paragraph format (borders, shading)
+      // Extract basedOn style
+      const basedOn = findChild(pPr, "w:basedOn");
+      if (basedOn?.attributes["w:val"]) {
+        styleInfo.basedOn = basedOn.attributes["w:val"] as string;
+      }
+
+      // Extract paragraph format (indentation, borders, shading)
       const borders = parseBorders(pPr);
       const shading = parseShading(pPr);
+      const ind = findChild(pPr, "w:ind");
+      const indent = ind ? parseIndent(ind) : null;
 
-      if (borders || shading) {
+      if (borders || shading || indent) {
         const paragraphFormat: ParagraphFormat = {};
+        if (indent) Object.assign(paragraphFormat, indent);
         if (borders) Object.assign(paragraphFormat, borders);
         if (shading) paragraphFormat.shading = shading;
 
@@ -305,9 +363,62 @@ export function parseStylesXml(files: Record<string, Uint8Array>): StyleMap {
     }
 
     styleMap.set(styleId, styleInfo);
+
+    // Index default style with empty string key for fallback lookup
+    if (style.attributes["w:default"] === "1") {
+      styleMap.set("", styleInfo);
+    }
   }
 
   return styleMap;
+}
+
+/**
+ * Resolve style info by following basedOn inheritance chain
+ * Merges charFormat and paragraphFormat from parent styles,
+ * child style properties take precedence over parent ones
+ */
+export function resolveStyleInfo(styleMap: StyleMap, styleName?: string): StyleInfo | undefined {
+  const chain: StyleInfo[] = [];
+  let currentName = styleName ?? "";
+  const visited = new Set<string>();
+
+  while (currentName != null) {
+    if (visited.has(currentName)) break;
+    visited.add(currentName);
+
+    const info = styleMap.get(currentName);
+    if (!info) break;
+    chain.push(info);
+    currentName = info.basedOn;
+  }
+
+  if (chain.length === 0) return undefined;
+
+  // Merge from root (chain tail) to leaf (chain head)
+  const merged: StyleInfo = { styleId: styleName ?? chain[0].styleId };
+
+  for (let i = chain.length - 1; i >= 0; i--) {
+    const info = chain[i];
+
+    if (merged.name === undefined) merged.name = info.name;
+    if (merged.outlineLvl === undefined) merged.outlineLvl = info.outlineLvl;
+    if (merged.basedOn === undefined) merged.basedOn = info.basedOn;
+
+    // Child properties override parent properties
+    if (info.charFormat) {
+      merged.charFormat = merged.charFormat
+        ? { ...info.charFormat, ...merged.charFormat }
+        : { ...info.charFormat };
+    }
+    if (info.paragraphFormat) {
+      merged.paragraphFormat = merged.paragraphFormat
+        ? { ...info.paragraphFormat, ...merged.paragraphFormat }
+        : { ...info.paragraphFormat };
+    }
+  }
+
+  return merged;
 }
 
 /**
@@ -321,6 +432,7 @@ export function extractParagraphStyles(
   indentLeft?: string;
   indentRight?: string;
   indentFirstLine?: string;
+  indentFirstLineChars?: number;
   spacingBefore?: string;
   spacingAfter?: string;
   shading?: Shading;
@@ -330,13 +442,15 @@ export function extractParagraphStyles(
   borderRight?: Border;
 } | null {
   const pPr = findChild(node, "w:pPr");
-  if (!pPr) return null;
-
   const result: Record<string, unknown> = {};
 
   // Start with style-based properties (if available)
   if (styleInfo?.paragraphFormat) {
     const pf = styleInfo.paragraphFormat;
+    if (pf.indentLeft) result.indentLeft = pf.indentLeft;
+    if (pf.indentRight) result.indentRight = pf.indentRight;
+    if (pf.indentFirstLine) result.indentFirstLine = pf.indentFirstLine;
+    if (pf.indentFirstLineChars) result.indentFirstLineChars = pf.indentFirstLineChars;
     if (pf.shading) result.shading = pf.shading;
     if (pf.borderTop) result.borderTop = pf.borderTop;
     if (pf.borderBottom) result.borderBottom = pf.borderBottom;
@@ -344,35 +458,19 @@ export function extractParagraphStyles(
     if (pf.borderRight) result.borderRight = pf.borderRight;
   }
 
-  // Extract indentation
+  // If no direct paragraph properties, return style-based properties only
+  if (!pPr) {
+    return Object.keys(result).length > 0
+      ? (result as ReturnType<typeof extractParagraphStyles>)
+      : null;
+  }
+
+  // Extract indentation (direct properties override style-based)
   const ind = findChild(pPr, "w:ind");
   if (ind) {
-    const left =
-      parseTwipAttr(ind.attributes, "w:left") || parseTwipAttr(ind.attributes, "w:start");
-    if (left) {
-      const leftTwip = parseInt(left, 10);
-      result.indentLeft = convertTwipToCssString(leftTwip);
-    }
-
-    const right =
-      parseTwipAttr(ind.attributes, "w:right") || parseTwipAttr(ind.attributes, "w:end");
-    if (right) {
-      const rightTwip = parseInt(right, 10);
-      result.indentRight = convertTwipToCssString(rightTwip);
-    }
-
-    const firstLine = parseTwipAttr(ind.attributes, "w:firstLine");
-    if (firstLine) {
-      const firstLineTwip = parseInt(firstLine, 10);
-      result.indentFirstLine = convertTwipToCssString(firstLineTwip);
-    } else {
-      const hanging = parseTwipAttr(ind.attributes, "w:hanging");
-      if (hanging) {
-        const leftTwip = left ? parseInt(left, 10) : 0;
-        const hangingTwip = parseInt(hanging, 10);
-        const firstLineTwip = leftTwip - hangingTwip;
-        result.indentFirstLine = convertTwipToCssString(firstLineTwip);
-      }
+    const directIndent = parseIndent(ind);
+    if (directIndent) {
+      Object.assign(result, directIndent);
     }
   }
 

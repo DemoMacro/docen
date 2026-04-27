@@ -166,7 +166,7 @@ void (async () => {
             },
             heading4: {
               paragraph: {
-                alignment: "center",
+                alignment: "both",
                 spacing: {
                   line: 480,
                 },
@@ -182,7 +182,7 @@ void (async () => {
             },
             heading5: {
               paragraph: {
-                alignment: "left",
+                alignment: "both",
                 spacing: {
                   line: 480,
                 },
@@ -197,7 +197,7 @@ void (async () => {
             },
             heading6: {
               paragraph: {
-                alignment: "left",
+                alignment: "both",
                 spacing: {
                   line: 480,
                 },

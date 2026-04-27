@@ -120,6 +120,8 @@ export interface ParagraphNode extends JSONContent {
     indentLeft?: string;
     indentRight?: string;
     indentFirstLine?: string;
+    // Character-based first line indent (hundredths of a character, e.g., 200 = 2 chars)
+    indentFirstLineChars?: number;
     // Paragraph spacing (CSS values: e.g., "10px", "1rem", "1.5em")
     spacingBefore?: string;
     spacingAfter?: string;
@@ -141,6 +143,8 @@ export interface HeadingNode extends JSONContent {
     indentLeft?: string;
     indentRight?: string;
     indentFirstLine?: string;
+    // Character-based first line indent (hundredths of a character, e.g., 200 = 2 chars)
+    indentFirstLineChars?: number;
     // Paragraph spacing (CSS values: e.g., "10px", "1rem", "1.5em")
     spacingBefore?: string;
     spacingAfter?: string;
