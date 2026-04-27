@@ -1,6 +1,6 @@
 {
   "name": "docen",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "description": "Universal document format converter providing unified API for seamless transformation between Markdown, HTML, and DOCX formats. Built on TipTap/ProseMirror ecosystem with comprehensive TypeScript support.",
   "keywords": [
     "converter",
