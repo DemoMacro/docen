@@ -28,25 +28,27 @@ export async function convertTable(
 
   const activeRowspans = new Map<number, number>();
 
-  // Convert each row
-  const rowResults = await Promise.allSettled(
-    rows.map((row, rowIndex) =>
-      convertTableRow(row, {
+  // Process rows sequentially to ensure activeRowspans consistency.
+  // activeRowspans tracks which columns are occupied by vertical merges from
+  // previous rows. Concurrent processing (Promise.allSettled) causes race
+  // conditions where a row reads stale activeRowspans values before earlier
+  // rows have finished updating them.
+  const content: JSONContent[] = [];
+  for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+    try {
+      const rowJson = await convertTableRow(rows[rowIndex], {
         context: params.context,
         activeRowspans,
         rows,
         rowIndex,
-      }),
-    ),
-  );
-
-  const rowErrors = rowResults.map((r, i) => ({ r, i })).filter(({ r }) => r.status === "rejected");
-  if (rowErrors.length > 0) {
-    const msgs = rowErrors.map(({ i, r }) => `[row ${i}]: ${(r as PromiseRejectedResult).reason}`);
-    throw new Error(`Failed to convert table rows:\n${msgs.join("\n")}`);
+      });
+      content.push(rowJson);
+    } catch (reason) {
+      throw new Error(
+        `Failed to convert table rows:\n[row ${rowIndex}]: ${reason}`,
+      );
+    }
   }
-
-  const content = rowResults.map((r) => (r as PromiseFulfilledResult<JSONContent>).value);
 
   // Parse table properties (including cell margins)
   const tableProps = parseTableProperties(node);
