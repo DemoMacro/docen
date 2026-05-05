@@ -1,5 +1,5 @@
 import { BulletListNode, OrderedListNode, ListItemNode } from "@docen/extensions/types";
-import { type IParagraphOptions } from "docx-plus";
+import { type IParagraphOptions } from "@office-open/docx";
 import { convertListItem } from "./list-item";
 
 export interface ListOptions {

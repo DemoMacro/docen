@@ -4,7 +4,7 @@ import type {
   IImageOptions,
   IHorizontalPositionOptions,
   IVerticalPositionOptions,
-} from "docx-plus";
+} from "@office-open/docx";
 
 // Re-export JSONContent for convenience
 export type { JSONContent };
@@ -55,7 +55,7 @@ export type ImageOutlineOptions = IImageOptions["outline"];
 /**
  * Crop rectangle (DOCX a:srcRect format).
  * Values are in 1/100000 of a percentage (0-100000).
- * Aligned with docx-plus SourceRectangleOptions.
+ * Aligned with @office-open/docx SourceRectangleOptions.
  */
 export interface SourceRectangleOptions {
   left?: number;

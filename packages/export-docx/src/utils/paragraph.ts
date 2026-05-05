@@ -13,7 +13,12 @@ export const applyParagraphStyleAttributes = <T>(options: T, attrs?: ParagraphNo
   const result = { ...options } as Record<string, unknown>;
 
   // Handle indentation (single object creation)
-  if (attrs.indentLeft || attrs.indentRight || attrs.indentFirstLine || attrs.indentFirstLineChars) {
+  if (
+    attrs.indentLeft ||
+    attrs.indentRight ||
+    attrs.indentFirstLine ||
+    attrs.indentFirstLineChars
+  ) {
     result.indent = {
       ...(attrs.indentLeft && {
         left: convertPixelsToTwip(convertCssLengthToPixels(attrs.indentLeft)),

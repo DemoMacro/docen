@@ -1,4 +1,4 @@
-import type { PositiveUniversalMeasure } from "docx-plus";
+import type { PositiveUniversalMeasure } from "@office-open/docx";
 import { imageMeta as getImageMetadata, type ImageMeta } from "image-meta";
 import { ofetch } from "ofetch";
 import { convertMeasureToPixels, DOCX_DPI } from "@docen/utils";
@@ -9,13 +9,13 @@ export type DocxImageExportHandler = (src: string) => Promise<Uint8Array>;
 const DEFAULT_MAX_IMAGE_WIDTH_PIXELS = 5.77 * DOCX_DPI; // A4 effective width (OOXML default margins)
 
 /**
- * DOCX-supported image types (aligned with docx-plus IImageOptions)
+ * DOCX-supported image types (aligned with @office-open/docx IImageOptions)
  */
 export type DocxImageType = "jpg" | "png" | "gif" | "bmp" | "tif" | "ico" | "emf" | "wmf" | "svg";
 
 /**
  * Mapping from MIME types / file extensions to DOCX image type strings.
- * Covers all types supported by docx-plus 0.1.2.
+ * Covers all types supported by @office-open/docx 0.1.2.
  */
 const EXTENSION_TO_DOCX_TYPE: Record<string, DocxImageType> = {
   jpg: "jpg",

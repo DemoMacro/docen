@@ -1,4 +1,4 @@
-import type { PositiveUniversalMeasure } from "docx-plus";
+import type { PositiveUniversalMeasure } from "@office-open/docx";
 import type { DocxExportOptions } from "../options";
 import type { Border, Shading } from "@docen/extensions/types";
 import {

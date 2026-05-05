@@ -1,4 +1,4 @@
-import { TableRow, TableCell, type ITableRowOptions } from "docx-plus";
+import { TableRow, TableCell, type ITableRowOptions } from "@office-open/docx";
 import { TableRowNode } from "@docen/extensions/types";
 import { convertTableCell } from "./table-cell";
 import { convertTableHeader } from "./table-header";

@@ -6,12 +6,10 @@ import type { JSONContent } from "@tiptap/core";
 export function parseText(text: string): JSONContent {
   return {
     type: "doc",
-    content: text
-      .split("\n")
-      .map((line) => ({
-        type: "paragraph",
-        content: line ? [{ type: "text", text: line }] : [],
-      })),
+    content: text.split("\n").map((line) => ({
+      type: "paragraph",
+      content: line ? [{ type: "text", text: line }] : [],
+    })),
   };
 }
 

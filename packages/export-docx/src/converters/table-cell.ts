@@ -1,4 +1,4 @@
-import { TableCell, Paragraph, IParagraphOptions } from "docx-plus";
+import { TableCell, Paragraph, IParagraphOptions } from "@office-open/docx";
 import { TableCellNode } from "@docen/extensions/types";
 import { convertParagraph } from "./paragraph";
 import { convertBorder } from "../utils";
