@@ -1,4 +1,4 @@
-import { type IParagraphOptions } from "docx-plus";
+import { type IParagraphOptions } from "@office-open/docx";
 import { convertText, convertHardBreak } from "./text";
 import { BlockquoteNode } from "@docen/extensions/types";
 

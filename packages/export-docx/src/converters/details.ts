@@ -1,4 +1,4 @@
-import { TextRun, ExternalHyperlink, type IParagraphOptions } from "docx-plus";
+import { TextRun, ExternalHyperlink, type IParagraphOptions } from "@office-open/docx";
 import { convertTextNodes } from "./text";
 import type { DetailsSummaryNode } from "@docen/extensions/types";
 import type { DocxExportOptions } from "../options";

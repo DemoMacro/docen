@@ -44,9 +44,7 @@ export async function convertTable(
       });
       content.push(rowJson);
     } catch (reason) {
-      throw new Error(
-        `Failed to convert table rows:\n[row ${rowIndex}]: ${reason}`,
-      );
+      throw new Error(`Failed to convert table rows:\n[row ${rowIndex}]: ${String(reason)}`);
     }
   }
 

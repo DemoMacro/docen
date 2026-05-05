@@ -19,7 +19,7 @@ import {
   IParagraphStyleOptions,
   IParagraphOptions,
   Table,
-} from "docx-plus";
+} from "@office-open/docx";
 import { type DocxExportOptions, type DocxPatchOptions } from "./options";
 import { calculateEffectiveContentWidth } from "./utils";
 import { convertParagraph } from "./converters/paragraph";
@@ -241,10 +241,7 @@ export async function patchDOCX<T extends OutputType>(
   // Assemble patches object
   const patchesObject = Object.fromEntries(
     patchResults.map((r) => (r as PromiseFulfilledResult<[string, unknown]>).value),
-  ) as Record<
-    string,
-    { type: typeof PatchType.PARAGRAPH | typeof PatchType.DOCUMENT; children: readonly FileChild[] }
-  >;
+  ) as Record<string, { type: typeof PatchType.DOCUMENT; children: readonly FileChild[] }>;
 
   // Apply patches to template
   return patchDocument({

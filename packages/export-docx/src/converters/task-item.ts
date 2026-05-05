@@ -1,4 +1,4 @@
-import { TextRun, type IParagraphOptions } from "docx-plus";
+import { TextRun, type IParagraphOptions } from "@office-open/docx";
 import { TaskItemNode } from "@docen/extensions/types";
 import { convertText, convertHardBreak } from "./text";
 import { CHECKBOX_SYMBOLS } from "../utils";

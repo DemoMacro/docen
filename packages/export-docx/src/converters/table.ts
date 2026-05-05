@@ -1,4 +1,4 @@
-import { Table, TableRow, ITableOptions, AlignmentType, TableLayoutType } from "docx-plus";
+import { Table, TableRow, ITableOptions, AlignmentType, TableLayoutType } from "@office-open/docx";
 import { TableNode } from "@docen/extensions/types";
 import { convertTableRow } from "./table-row";
 import { DocxExportOptions } from "../options";

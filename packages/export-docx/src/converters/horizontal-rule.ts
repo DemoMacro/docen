@@ -1,4 +1,4 @@
-import { PageBreak, type IParagraphOptions } from "docx-plus";
+import { PageBreak, type IParagraphOptions } from "@office-open/docx";
 import { HorizontalRuleNode } from "@docen/extensions/types";
 import type { DocxExportOptions } from "../options";
 

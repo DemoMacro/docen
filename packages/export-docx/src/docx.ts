@@ -1,1 +1,1 @@
-export * from "docx-plus";
+export * from "@office-open/docx";

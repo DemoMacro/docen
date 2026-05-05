@@ -116,12 +116,14 @@ export const Image = BaseImage.extend({
           }
 
           // Margins (stored in twips, convert to pt for CSS)
-          const m = f.margins as { top?: number; bottom?: number; left?: number; right?: number } | undefined;
+          const m = f.margins as
+            | { top?: number; bottom?: number; left?: number; right?: number }
+            | undefined;
           if (m) {
-            if (m.top) styles.push(`margin-top:${(m.top * 96 / 1440).toFixed(1)}pt`);
-            if (m.bottom) styles.push(`margin-bottom:${(m.bottom * 96 / 1440).toFixed(1)}pt`);
-            if (m.left) styles.push(`margin-left:${(m.left * 96 / 1440).toFixed(1)}pt`);
-            if (m.right) styles.push(`margin-right:${(m.right * 96 / 1440).toFixed(1)}pt`);
+            if (m.top) styles.push(`margin-top:${((m.top * 96) / 1440).toFixed(1)}pt`);
+            if (m.bottom) styles.push(`margin-bottom:${((m.bottom * 96) / 1440).toFixed(1)}pt`);
+            if (m.left) styles.push(`margin-left:${((m.left * 96) / 1440).toFixed(1)}pt`);
+            if (m.right) styles.push(`margin-right:${((m.right * 96) / 1440).toFixed(1)}pt`);
           }
 
           return {

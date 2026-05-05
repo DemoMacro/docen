@@ -11,7 +11,7 @@ import {
 } from "docen";
 import { unzipSync } from "fflate";
 import { fromXml } from "xast-util-from-xml";
-import { convertMillimetersToTwip } from "docx-plus";
+import { convertMillimetersToTwip } from "@office-open/docx";
 
 // Get current file directory
 const __dirname = dirname(fileURLToPath(import.meta.url));

@@ -509,9 +509,16 @@ export async function extractImageFromDrawing(
     const wrapTopAndBottom = findChild(anchor, "wp:wrapTopAndBottom");
     const wrapNone = findChild(anchor, "wp:wrapNone");
 
-    let wrap: { type: number; side?: string } | undefined;
+    let wrap:
+      | { type: 0 | 1 | 2 | 3 | 4; side?: "bothSides" | "left" | "right" | "largest" }
+      | undefined;
     if (wrapSquare) {
-      const side = wrapSquare.attributes["wrapText"] as string | undefined;
+      const side = wrapSquare.attributes["wrapText"] as
+        | "bothSides"
+        | "left"
+        | "right"
+        | "largest"
+        | undefined;
       wrap = { type: 1, ...(side && { side }) };
     } else if (wrapTight) {
       wrap = { type: 2 };
@@ -523,7 +530,7 @@ export async function extractImageFromDrawing(
       wrap = { type: 0 };
     }
 
-    // Parse margins (distT/B/L/R in twips, stored as-is for docx-plus passthrough)
+    // Parse margins (distT/B/L/R in twips, stored as-is for @office-open/docx passthrough)
     const parseDist = (attr: string | undefined) => {
       if (!attr) return undefined;
       const twips = parseInt(attr, 10);

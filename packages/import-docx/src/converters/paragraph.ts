@@ -25,7 +25,9 @@ export async function convertParagraph(
       const outlineLvl = parseInt(outlineLvlElement.attributes["w:val"] as string, 10);
       if (outlineLvl >= 0 && outlineLvl <= 5) {
         const level = (outlineLvl + 1) as 1 | 2 | 3 | 4 | 5 | 6;
-        const styleInfo = context.styleMap ? resolveStyleInfo(context.styleMap, styleName) : undefined;
+        const styleInfo = context.styleMap
+          ? resolveStyleInfo(context.styleMap, styleName)
+          : undefined;
         return convertHeading(node, params, styleInfo, level);
       }
     }

@@ -161,7 +161,12 @@ export function parseShading(pPr: Element | null): Shading | null {
  * Parse w:ind element into indent values
  * Parses both absolute (w:firstLine in TWIPs) and character-based (w:firstLineChars) indentation
  */
-function parseIndent(ind: Element): Pick<ParagraphFormat, 'indentLeft' | 'indentRight' | 'indentFirstLine' | 'indentFirstLineChars'> | null {
+function parseIndent(
+  ind: Element,
+): Pick<
+  ParagraphFormat,
+  "indentLeft" | "indentRight" | "indentFirstLine" | "indentFirstLineChars"
+> | null {
   const result: Record<string, unknown> = {};
 
   const left = parseTwipAttr(ind.attributes, "w:left") || parseTwipAttr(ind.attributes, "w:start");
@@ -197,7 +202,10 @@ function parseIndent(ind: Element): Pick<ParagraphFormat, 'indentLeft' | 'indent
   }
 
   return Object.keys(result).length > 0
-    ? (result as Pick<ParagraphFormat, 'indentLeft' | 'indentRight' | 'indentFirstLine' | 'indentFirstLineChars'>)
+    ? (result as Pick<
+        ParagraphFormat,
+        "indentLeft" | "indentRight" | "indentFirstLine" | "indentFirstLineChars"
+      >)
     : null;
 }
 
@@ -390,6 +398,7 @@ export function resolveStyleInfo(styleMap: StyleMap, styleName?: string): StyleI
     const info = styleMap.get(currentName);
     if (!info) break;
     chain.push(info);
+    if (info.basedOn === undefined) break;
     currentName = info.basedOn;
   }
 
