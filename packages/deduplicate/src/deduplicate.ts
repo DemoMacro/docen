@@ -300,9 +300,13 @@ export function compareDocuments(
     });
   }
 
+  const totalSentences = paras1.reduce((sum, p) => sum + p.sentences.length, 0);
   const coverage =
-    paras1.length > 0
-      ? paragraphComparisons.reduce((sum, pc) => sum + pc.coverage.covA, 0) / paras1.length
+    totalSentences > 0
+      ? paragraphComparisons.reduce(
+          (sum, pc, i) => sum + pc.coverage.covA * paras1[i].sentences.length,
+          0,
+        ) / totalSentences
       : 0;
 
   return { paragraphs: paragraphComparisons, coverage };
