@@ -34,14 +34,16 @@
   "scripts": {
     "dev": "pnpm --filter \"./packages/**\" -r dev",
     "build": "pnpm --filter \"./packages/**\" -r build",
-    "check": "basis lint && basis fmt",
-    "bump": "pnpm --filter \"./packages/**\" -r exec basis version",
-    "prerelease": "pnpm --filter \"./packages/**\" -r exec basis version --prerelease",
+    "check": "vp check --fix",
+    "test": "vp test run",
+    "bench": "vp test bench",
+    "version": "pnpm --filter \"./packages/**\" -r exec basis version",
     "publish": "pnpm --filter \"./packages/**\" -r exec basis publish",
-    "postinstall": "pnpm dev && basis git setup"
+    "postinstall": "pnpm dev && vp config && basis git setup"
   },
   "devDependencies": {
-    "@funish/basis": "0.2.17",
-    "@types/node": "25.6.0"
+    "@funish/basis": "0.3.0",
+    "@types/node": "25.9.3",
+    "vite-plus": "0.1.24"
   }
 }

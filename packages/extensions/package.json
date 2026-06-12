@@ -48,7 +48,7 @@
   },
   "scripts": {
     "dev": "basis build --stub",
-    "build": "basis build",
+    "build": "vp pack",
     "prepack": "pnpm build"
   },
   "dependencies": {
