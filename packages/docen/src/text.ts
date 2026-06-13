@@ -1,4 +1,4 @@
-import type { JSONContent } from "@tiptap/core";
+import type { JSONContent } from "@docen/docx/core";
 
 /**
  * Parse plain text string to TipTap JSON

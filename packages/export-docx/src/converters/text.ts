@@ -1,6 +1,7 @@
-import { JSONContent } from "@tiptap/core";
-import { TextRun, ExternalHyperlink, HighlightColor, IRunOptions } from "@office-open/docx";
 import { TextNode } from "@docen/extensions/types";
+import { TextRun, ExternalHyperlink, HighlightColor, IRunOptions } from "@office-open/docx";
+import { JSONContent } from "@tiptap/core";
+
 import { convertColorToHex, DEFAULT_CODE_FONT, HALF_POINTS_PER_PIXEL } from "../utils";
 
 /**

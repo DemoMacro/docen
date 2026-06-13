@@ -1,7 +1,7 @@
+import { convertMeasureToPixels, DOCX_DPI } from "@docen/utils";
 import type { PositiveUniversalMeasure } from "@office-open/docx";
 import { imageMeta as getImageMetadata, type ImageMeta } from "image-meta";
 import { ofetch } from "ofetch";
-import { convertMeasureToPixels, DOCX_DPI } from "@docen/utils";
 
 // Custom image handler for fetching image data
 export type DocxImageExportHandler = (src: string) => Promise<Uint8Array>;

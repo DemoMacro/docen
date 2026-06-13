@@ -1,7 +1,7 @@
-import { fromXml } from "xast-util-from-xml";
+import type { Border, Shading } from "@docen/extensions/types";
 import { findChild, findDeepChildren, parseTwipAttr, convertTwipToCssString } from "@docen/utils";
 import type { Element } from "xast";
-import type { Border, Shading } from "@docen/extensions/types";
+import { fromXml } from "xast-util-from-xml";
 
 /**
  * Character format information from a style definition

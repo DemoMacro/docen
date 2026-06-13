@@ -1,22 +1,23 @@
-import { fromXml } from "xast-util-from-xml";
-import { unzipSync } from "fflate";
-import type { Root, Element } from "xast";
-import type { JSONContent } from "@tiptap/core";
-import type { DocxImportOptions } from "./options";
-import type { StyleMap } from "./parsers/styles";
-import type { ListTypeMap, ImageInfo } from "./types";
-import { toUint8Array, DataType } from "undio";
 import { findChild, findDeepChildren } from "@docen/utils";
-import { extractImages } from "./parsers/images";
-import { extractHyperlinks } from "./parsers/hyperlinks";
-import { parseNumberingXml } from "./parsers/numbering";
-import { parseStylesXml } from "./parsers/styles";
-import { convertTable } from "./converters/table";
-import { convertParagraph } from "./converters/paragraph";
-import { convertTaskList, isTaskItem } from "./converters/task-list";
+import type { JSONContent } from "@tiptap/core";
+import { unzipSync } from "fflate";
+import { toUint8Array, DataType } from "undio";
+import type { Root, Element } from "xast";
+import { fromXml } from "xast-util-from-xml";
+
 import { isCodeBlock, getCodeBlockLanguage } from "./converters/code-block";
-import { isListItem, getListInfo } from "./converters/list";
 import { isHorizontalRule } from "./converters/horizontal-rule";
+import { isListItem, getListInfo } from "./converters/list";
+import { convertParagraph } from "./converters/paragraph";
+import { convertTable } from "./converters/table";
+import { convertTaskList, isTaskItem } from "./converters/task-list";
+import type { DocxImportOptions } from "./options";
+import { extractHyperlinks } from "./parsers/hyperlinks";
+import { extractImages } from "./parsers/images";
+import { parseNumberingXml } from "./parsers/numbering";
+import type { StyleMap } from "./parsers/styles";
+import { parseStylesXml } from "./parsers/styles";
+import type { ListTypeMap, ImageInfo } from "./types";
 
 /**
  * Parsing context containing all global resources from DOCX file

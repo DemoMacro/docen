@@ -2,17 +2,15 @@ import {
   generateHTML as generateTiptapHTML,
   generateJSON as generateTiptapJSON,
 } from "@tiptap/html";
-import { tiptapExtensions } from "@docen/extensions";
-import type { JSONContent, Extensions } from "@tiptap/core";
 import type { ParseOptions } from "@tiptap/pm/model";
 
-/**
- * Default TipTap extensions used by all converters
- */
-const defaultExtensions: Extensions = tiptapExtensions;
+import type { JSONContent, Extensions } from "../core";
+import { docxExtensions } from "../core";
+
+const defaultExtensions: Extensions = docxExtensions;
 
 /**
- * Parse HTML string to TipTap JSON
+ * Parse HTML string to Tiptap JSON.
  */
 export function parseHTML(
   html: string,
@@ -23,7 +21,7 @@ export function parseHTML(
 }
 
 /**
- * Generate HTML string from TipTap JSON
+ * Generate HTML string from Tiptap JSON.
  */
 export function generateHTML(doc: JSONContent, extensions?: Extensions): string {
   return generateTiptapHTML(doc, extensions ?? defaultExtensions);

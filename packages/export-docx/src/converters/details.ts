@@ -1,7 +1,8 @@
-import { TextRun, ExternalHyperlink, type IParagraphOptions } from "@office-open/docx";
-import { convertTextNodes } from "./text";
 import type { DetailsSummaryNode } from "@docen/extensions/types";
+import { TextRun, ExternalHyperlink, type IParagraphOptions } from "@office-open/docx";
+
 import type { DocxExportOptions } from "../options";
+import { convertTextNodes } from "./text";
 
 /**
  * Convert TipTap detailsSummary node to paragraph options

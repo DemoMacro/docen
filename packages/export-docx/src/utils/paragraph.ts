@@ -1,5 +1,6 @@
-import { convertCssLengthToPixels, convertPixelsToTwip, TEXT_ALIGN_MAP } from "@docen/utils";
 import type { ParagraphNode } from "@docen/extensions/types";
+import { convertCssLengthToPixels, convertPixelsToTwip, TEXT_ALIGN_MAP } from "@docen/utils";
+
 import { convertBorder, convertShading } from "./conversion";
 
 /**

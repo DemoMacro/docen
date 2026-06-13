@@ -1,8 +1,9 @@
-import type { Element } from "xast";
 import type { JSONContent } from "@tiptap/core";
+import type { Element } from "xast";
+
 import type { ParseContext } from "../parser";
-import { convertParagraph } from "./paragraph";
 import { parseTableProperties, parseRowProperties, parseCellProperties } from "../parsers/table";
+import { convertParagraph } from "./paragraph";
 
 /**
  * Check if an element is a table

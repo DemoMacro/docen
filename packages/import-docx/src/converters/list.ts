@@ -1,5 +1,5 @@
-import type { Element } from "xast";
 import { findChild } from "@docen/utils";
+import type { Element } from "xast";
 
 /**
  * Check if a paragraph is a list item

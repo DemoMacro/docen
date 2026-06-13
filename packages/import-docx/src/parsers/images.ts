@@ -1,14 +1,9 @@
-import { fromXml } from "xast-util-from-xml";
-import { imageMeta } from "image-meta";
-import type { Element } from "xast";
 import type {
   ImageFloatingOptions,
   ImageNode,
   ImageOutlineOptions,
   SourceRectangleOptions,
 } from "@docen/extensions/types";
-import type { DocxImageImportHandler, ImageInfo } from "../types";
-import type { ParseContext } from "../parser";
 import {
   findChild,
   findDeepChild,
@@ -16,6 +11,12 @@ import {
   createStringValidator,
   convertEmuStringToPixels,
 } from "@docen/utils";
+import { imageMeta } from "image-meta";
+import type { Element } from "xast";
+import { fromXml } from "xast-util-from-xml";
+
+import type { ParseContext } from "../parser";
+import type { DocxImageImportHandler, ImageInfo } from "../types";
 import { uint8ArrayToBase64, base64ToUint8Array } from "../utils/base64";
 import { cropImageIfNeeded, defaultImageConverter } from "../utils/image";
 

@@ -1,6 +1,7 @@
-import type { Element } from "xast";
 import type { Border } from "@docen/extensions/types";
 import { findChild, TWIPS_PER_INCH, DOCX_DPI } from "@docen/utils";
+import type { Element } from "xast";
+
 import { parseBorder } from "./styles";
 
 /**

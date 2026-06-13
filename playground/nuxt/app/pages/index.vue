@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { generateDOCX } from "@docen/export-docx";
-import { parseDOCX } from "@docen/import-docx";
 import type { DocxExportOptions } from "@docen/export-docx";
-import type { JSONContent } from "@docen/extensions/types";
 import { Heading, Image, Paragraph } from "@docen/extensions";
+import type { JSONContent } from "@docen/extensions/types";
+import { parseDOCX } from "@docen/import-docx";
 import type { EditorToolbarItem, EditorSuggestionMenuItem } from "@nuxt/ui";
 
 // Editor content - MUST be defined first!
@@ -325,7 +325,7 @@ const suggestionItems: EditorSuggestionMenuItem[][] = [
 </script>
 
 <template>
-  <div class="flex flex-col h-screen">
+  <div class="flex h-screen flex-col">
     <!-- Header with Import/Export buttons -->
     <UContainer>
       <UHeader title="Docen">
@@ -357,10 +357,10 @@ const suggestionItems: EditorSuggestionMenuItem[][] = [
         :image="false"
         autofocus
         placeholder="Type / for commands..."
-        class="w-full min-h-37 flex flex-col gap-4"
+        class="flex min-h-37 w-full flex-col gap-4"
       >
         <!-- Fixed Toolbar -->
-        <UEditorToolbar :editor="editor" :items="toolbarItems" class="sm:px-8 overflow-x-auto" />
+        <UEditorToolbar :editor="editor" :items="toolbarItems" class="overflow-x-auto sm:px-8" />
 
         <!-- Drag Handle -->
         <UEditorDragHandle :editor="editor" />

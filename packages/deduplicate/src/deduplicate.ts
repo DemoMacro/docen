@@ -1,3 +1,5 @@
+import { simhash, hammingDistance, levenshteinNormalized, findBestMatch } from "@nlptools/distance";
+
 import type {
   JSONContent,
   DeduplicateOptions,
@@ -10,8 +12,6 @@ import type {
   ParagraphInfo,
   SentenceSplitter,
 } from "./types";
-
-import { simhash, hammingDistance, levenshteinNormalized, findBestMatch } from "@nlptools/distance";
 
 // ---------------------------------------------------------------------------
 // Defaults

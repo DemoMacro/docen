@@ -11,6 +11,7 @@ import {
   IParagraphStyleOptions,
 } from "@office-open/docx";
 import type { JSONContent } from "@tiptap/core";
+
 import type { DocxImageExportHandler } from "./utils/image";
 
 export interface DocxExportOptions<T extends OutputType = OutputType> {
