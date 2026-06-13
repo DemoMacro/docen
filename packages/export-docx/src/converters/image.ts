@@ -1,5 +1,7 @@
-import { ImageRun, IImageOptions, PositiveUniversalMeasure } from "@office-open/docx";
 import { ImageNode } from "@docen/extensions/types";
+import { ImageRun, IImageOptions, PositiveUniversalMeasure } from "@office-open/docx";
+import { imageMeta as getImageMetadata, type ImageMeta } from "image-meta";
+
 import {
   getImageTypeFromSrc,
   getImageWidth,
@@ -7,7 +9,6 @@ import {
   defaultImageHandler,
   type DocxImageExportHandler,
 } from "../utils";
-import { imageMeta as getImageMetadata, type ImageMeta } from "image-meta";
 
 /**
  * Convert TipTap image node to DOCX ImageRun

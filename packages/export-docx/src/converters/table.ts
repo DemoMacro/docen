@@ -1,7 +1,8 @@
-import { Table, TableRow, ITableOptions, AlignmentType, TableLayoutType } from "@office-open/docx";
 import { TableNode } from "@docen/extensions/types";
-import { convertTableRow } from "./table-row";
+import { Table, TableRow, ITableOptions, AlignmentType, TableLayoutType } from "@office-open/docx";
+
 import { DocxExportOptions } from "../options";
+import { convertTableRow } from "./table-row";
 
 /**
  * Apply table margins to table options

@@ -1,5 +1,6 @@
-import { TextRun, type IParagraphOptions } from "@office-open/docx";
 import { CodeBlockNode, TextNode } from "@docen/extensions/types";
+import { TextRun, type IParagraphOptions } from "@office-open/docx";
+
 import { DEFAULT_CODE_FONT } from "../utils";
 import { convertText } from "./text";
 

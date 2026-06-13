@@ -1,9 +1,10 @@
-import { TableRow, TableCell, type ITableRowOptions } from "@office-open/docx";
 import { TableRowNode } from "@docen/extensions/types";
-import { convertTableCell } from "./table-cell";
-import { convertTableHeader } from "./table-header";
+import { TableRow, TableCell, type ITableRowOptions } from "@office-open/docx";
+
 import { DocxExportOptions } from "../options";
 import { convertCssLengthToPixels, convertPixelsToTwip } from "../utils";
+import { convertTableCell } from "./table-cell";
+import { convertTableHeader } from "./table-header";
 
 /**
  * Convert TipTap table row node to DOCX TableRow

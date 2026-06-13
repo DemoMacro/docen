@@ -1,3 +1,15 @@
+import { Extension, type AnyExtension } from "@tiptap/core";
+import { all, createLowlight } from "lowlight";
+
+import { Heading } from "./extends/heading";
+import { Image } from "./extends/image";
+import { Paragraph } from "./extends/paragraph";
+import { Strike } from "./extends/strike";
+import { Table } from "./extends/table";
+import { TableCell } from "./extends/table-cell";
+import { TableHeader } from "./extends/table-header";
+import { TableRow } from "./extends/table-row";
+import { TextStyle } from "./extends/text-style";
 import {
   Document,
   Text,
@@ -36,20 +48,6 @@ import {
   TrailingNode,
   UndoRedo,
 } from "./tiptap";
-
-import { Heading } from "./extends/heading";
-import { Image } from "./extends/image";
-import { Paragraph } from "./extends/paragraph";
-import { TableRow } from "./extends/table-row";
-import { Table } from "./extends/table";
-import { TableCell } from "./extends/table-cell";
-import { TableHeader } from "./extends/table-header";
-import { Strike } from "./extends/strike";
-import { TextStyle } from "./extends/text-style";
-
-import { Extension, type AnyExtension } from "@tiptap/core";
-
-import { all, createLowlight } from "lowlight";
 
 // Nodes
 export const tiptapNodeExtensions: AnyExtension[] = [

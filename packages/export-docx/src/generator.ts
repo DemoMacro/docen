@@ -1,4 +1,17 @@
-import { JSONContent } from "@tiptap/core";
+import type {
+  ParagraphNode,
+  HeadingNode,
+  BlockquoteNode,
+  CodeBlockNode,
+  ImageNode,
+  TableNode,
+  TaskListNode,
+  TaskItemNode,
+  OrderedListNode,
+  BulletListNode,
+  HorizontalRuleNode,
+  DetailsSummaryNode,
+} from "@docen/extensions/types";
 import {
   Document,
   Paragraph,
@@ -20,34 +33,22 @@ import {
   IParagraphOptions,
   Table,
 } from "@office-open/docx";
+import { JSONContent } from "@tiptap/core";
+
+import { convertBlockquote } from "./converters/blockquote";
+import { convertCodeBlock } from "./converters/code-block";
+import { convertDetailsSummary } from "./converters/details";
+import { convertHeading } from "./converters/heading";
+import { convertHorizontalRule } from "./converters/horizontal-rule";
+import { convertImage } from "./converters/image";
+import { convertList } from "./converters/list";
+import { convertParagraph } from "./converters/paragraph";
+import { convertTable } from "./converters/table";
+import { convertTaskItem } from "./converters/task-item";
+import { convertTaskList } from "./converters/task-list";
+import { convertHardBreak } from "./converters/text";
 import { type DocxExportOptions, type DocxPatchOptions } from "./options";
 import { calculateEffectiveContentWidth } from "./utils";
-import { convertParagraph } from "./converters/paragraph";
-import { convertHeading } from "./converters/heading";
-import { convertBlockquote } from "./converters/blockquote";
-import { convertImage } from "./converters/image";
-import { convertTable } from "./converters/table";
-import { convertCodeBlock } from "./converters/code-block";
-import { convertList } from "./converters/list";
-import { convertTaskList } from "./converters/task-list";
-import { convertTaskItem } from "./converters/task-item";
-import { convertHorizontalRule } from "./converters/horizontal-rule";
-import { convertDetailsSummary } from "./converters/details";
-import { convertHardBreak } from "./converters/text";
-import type {
-  ParagraphNode,
-  HeadingNode,
-  BlockquoteNode,
-  CodeBlockNode,
-  ImageNode,
-  TableNode,
-  TaskListNode,
-  TaskItemNode,
-  OrderedListNode,
-  BulletListNode,
-  HorizontalRuleNode,
-  DetailsSummaryNode,
-} from "@docen/extensions/types";
 
 /**
  * Convert TipTap JSONContent to DOCX format

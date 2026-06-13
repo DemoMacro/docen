@@ -1,10 +1,11 @@
-import type { Element } from "xast";
+import { findChild } from "@docen/utils";
 import type { JSONContent } from "@tiptap/core";
+import type { Element } from "xast";
+
 import type { ParseContext } from "../parser";
 import type { StyleInfo } from "../parsers/styles";
-import { extractRuns, extractAlignment } from "./text";
-import { findChild } from "@docen/utils";
 import { extractParagraphStyles, resolveStyleInfo } from "../parsers/styles";
+import { extractRuns, extractAlignment } from "./text";
 
 /**
  * Convert DOCX paragraph node to TipTap paragraph

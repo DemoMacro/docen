@@ -1,5 +1,5 @@
-import type { Element } from "xast";
 import { findChild, DOCX_STYLE_NAMES } from "@docen/utils";
+import type { Element } from "xast";
 
 /**
  * Check if a paragraph is a code block

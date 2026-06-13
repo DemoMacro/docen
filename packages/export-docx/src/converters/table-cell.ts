@@ -1,8 +1,9 @@
-import { TableCell, Paragraph, IParagraphOptions } from "@office-open/docx";
 import { TableCellNode } from "@docen/extensions/types";
-import { convertParagraph } from "./paragraph";
-import { convertBorder } from "../utils";
+import { TableCell, Paragraph, IParagraphOptions } from "@office-open/docx";
+
 import { DocxExportOptions } from "../options";
+import { convertBorder } from "../utils";
+import { convertParagraph } from "./paragraph";
 
 /**
  * Convert TipTap table cell node to DOCX TableCell

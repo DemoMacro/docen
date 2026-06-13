@@ -1,7 +1,8 @@
-import { TextRun, type IParagraphOptions } from "@office-open/docx";
 import { TaskItemNode } from "@docen/extensions/types";
-import { convertText, convertHardBreak } from "./text";
+import { TextRun, type IParagraphOptions } from "@office-open/docx";
+
 import { CHECKBOX_SYMBOLS } from "../utils";
+import { convertText, convertHardBreak } from "./text";
 
 /**
  * Convert TipTap task item node to paragraph options with checkbox

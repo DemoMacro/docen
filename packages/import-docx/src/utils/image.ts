@@ -6,8 +6,9 @@
  * @see https://github.com/unjs/unpdf
  */
 
-import type { Canvas } from "@napi-rs/canvas";
 import type { SourceRectangleOptions } from "@docen/extensions/types";
+import type { Canvas } from "@napi-rs/canvas";
+
 import type { DocxImageInfo, DocxImageResult } from "../types";
 import { uint8ArrayToBase64 } from "./base64";
 

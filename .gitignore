@@ -129,11 +129,6 @@ dist
 .yarn/install-state.gz
 .pnp.*
 
-# playground
-playground/tests/json
-playground/tests/docx
-playground/tests/json-parsed
-playground/tests/html-parsed
-playground/tests/docx-parsed
-playground/tests/docx-structure
-playground/tests/patch
+# tests
+packages/docx/tests/json
+packages/docx/tests/docx

@@ -1,5 +1,3 @@
-import type { PositiveUniversalMeasure } from "@office-open/docx";
-import type { DocxExportOptions } from "../options";
 import type { Border, Shading } from "@docen/extensions/types";
 import {
   convertMeasureToInches,
@@ -8,6 +6,9 @@ import {
   TWIPS_PER_INCH,
   PAGE_DIMENSIONS,
 } from "@docen/utils";
+import type { PositiveUniversalMeasure } from "@office-open/docx";
+
+import type { DocxExportOptions } from "../options";
 
 /**
  * Normalize margin value to TWIPs

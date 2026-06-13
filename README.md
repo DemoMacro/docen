@@ -5,95 +5,52 @@
 ![GitHub](https://img.shields.io/github/license/DemoMacro/docen)
 [![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg)](https://www.contributor-covenant.org/version/2/1/code_of_conduct/)
 
-> Universal document format converter providing seamless transformation between Markdown, HTML, and DOCX formats. Built on TipTap/ProseMirror with comprehensive TypeScript support.
+> Universal document format converter and DOCX editor built on TipTap/ProseMirror, with comprehensive TypeScript support. Convert between Markdown, HTML, and DOCX through a unified Tiptap JSON model.
 
 ## Packages
 
-- **[docen](./packages/docen/README.md)** - Universal document converter with unified API for Markdown, HTML, and DOCX transformations
-- **[@docen/extensions](./packages/extensions/README.md)** - Comprehensive TipTap extension collection with full TypeScript types
-- **[@docen/export-docx](./packages/export-docx/README.md)** - Export TipTap/ProseMirror content to Microsoft Word DOCX format
-- **[@docen/import-docx](./packages/import-docx/README.md)** - Import Microsoft Word DOCX files to TipTap/ProseMirror content
-- **[@docen/deduplicate](./packages/deduplicate/README.md)** - Document deduplication and similarity analysis utilities
+| Package                                  | Version                                          | Description                                                         |
+| ---------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------- |
+| [docen](./packages/docen/README.md)      | ![npm](https://img.shields.io/npm/v/docen)       | Universal converter — unified JSON API for Markdown, HTML, and DOCX |
+| [@docen/docx](./packages/docx/README.md) | ![npm](https://img.shields.io/npm/v/@docen/docx) | Tiptap DOCX editor + converters, powered by @office-open/docx       |
 
 ## Quick Start
 
-### Universal Format Converter (Recommended)
+### Universal Converter (`docen`)
 
-For seamless conversion between Markdown, HTML, and DOCX formats, use the unified `docen` package:
+For seamless conversion between Markdown, HTML, and DOCX through a single unified API:
 
 ```bash
-# Install with npm
-$ npm install docen
-
-# Install with yarn
-$ yarn add docen
-
 # Install with pnpm
 $ pnpm add docen
 ```
 
 ```typescript
-import { parseHTML, generateDOCX, parseMarkdown } from "docen";
+import { parseHTML, generateDOCX, parseMarkdown, generateHTML } from "docen";
 
 // HTML → DOCX
 const doc = parseHTML("<h1>Title</h1><p>Hello World</p>");
-const docx = await generateDOCX(doc, { outputType: "nodebuffer" });
+const docx = await generateDOCX(doc);
 
 // Markdown → HTML
 const doc2 = parseMarkdown("# Title\n\nHello World");
 const html = generateHTML(doc2);
 ```
 
-### Individual Format Packages
+### DOCX Editor (`@docen/docx`)
 
-#### DOCX Export
+A full-featured WYSIWYG DOCX editor with near-lossless round-trip conversion:
 
 ```bash
-$ npm install @docen/export-docx
+$ pnpm add @docen/docx
 ```
 
 ```typescript
-import { generateDOCX } from "@docen/export-docx";
-import { writeFileSync } from "node:fs";
+import { createDocxEditor, parseDOCX, generateDOCX } from "@docen/docx";
 
-const content = {
-  type: "doc",
-  content: [
-    {
-      type: "paragraph",
-      content: [
-        {
-          type: "text",
-          marks: [{ type: "bold" }, { type: "italic" }],
-          text: "Hello, world!",
-        },
-      ],
-    },
-  ],
-};
-
-const docx = await generateDOCX(content, { outputType: "nodebuffer" });
-writeFileSync("document.docx", docx);
-```
-
-#### DOCX Import
-
-```bash
-$ npm install @docen/import-docx
-```
-
-```typescript
-import { parseDOCX } from "@docen/import-docx";
-import { readFileSync } from "node:fs";
-
-// Read DOCX file
-const buffer = readFileSync("document.docx");
-
-// Parse DOCX to TipTap JSON
-const content = await parseDOCX(buffer);
-
-// Use in TipTap editor
-editor.commands.setContent(content);
+const editor = createDocxEditor({ element: document.querySelector("#editor") });
+editor.commands.setContent(parseDOCX(buffer));
+const output = await generateDOCX(editor.getJSON());
 ```
 
 ## Development
@@ -119,35 +76,18 @@ editor.commands.setContent(content);
    pnpm install
    ```
 
-3. **Development mode**:
-
-   ```bash
-   pnpm dev
-   ```
-
-4. **Build all packages**:
+3. **Build all packages**:
 
    ```bash
    pnpm build
    ```
 
-5. **Test locally**:
-
-   ```bash
-   # Link the package globally for testing
-   cd packages/export-docx
-   pnpm link --global
-
-   # Test in your project
-   import { generateDOCX } from '@docen/export-docx';
-   ```
-
 ### Development Commands
 
 ```bash
-pnpm dev            # Development mode with watch
-pnpm build          # Build all packages
-pnpm lint           # Run code formatting and linting
+pnpm build                       # Build all packages
+cd packages/<pkg> && pnpm build  # Build one package
+vp check                         # Lint & format
 ```
 
 ## Contributing
@@ -176,47 +116,25 @@ We welcome contributions! Here's how to get started:
    pnpm install
    ```
 
-5. **Development mode**:
+5. **Build**:
 
    ```bash
-   pnpm dev
-   ```
-
-6. **Test locally**:
-
-   ```bash
-   # Link the package globally for testing
-   cd packages/export-docx
-   pnpm link --global
-
-   # Test your changes
-   import { generateDOCX } from '@docen/export-docx';
+   pnpm build
    ```
 
 ### Development Workflow
 
-1. **Code**: Follow our project standards
-2. **Test**: `pnpm build && <test your extension>`
-3. **Commit**: Use conventional commits (`feat:`, `fix:`, etc.)
+1. **Code**: Follow our project standards (see [CONTRIBUTING.md](./CONTRIBUTING.md))
+2. **Test**: `pnpm build && <verify your changes>`
+3. **Commit**: Use conventional commits (`feat:`, `fix:`, `docs:`, `style:`, `refactor:`, `perf:`, `test:`, `build:`, `ci:`, `chore:`, `revert:`)
 4. **Push**: Push to your fork
 5. **Submit**: Create a Pull Request to upstream repository
-
-## Project Philosophy
-
-This project follows core principles:
-
-1. **TipTap Focus**: Built specifically for TipTap/ProseMirror ecosystem
-2. **Type Safety**: Full TypeScript support with comprehensive types
-3. **Modular Design**: Each converter handles specific content types
-4. **Extensible**: Easy to add new content type converters
-5. **Performance**: Optimized for large documents and batch processing
-6. **User Experience**: Simple API with powerful configuration options
 
 ## Support & Community
 
 - 📫 [Report Issues](https://github.com/DemoMacro/docen/issues)
-- 📚 [Export Documentation](./packages/export-docx/README.md)
-- 📚 [Import Documentation](./packages/import-docx/README.md)
+- 📚 [docen Documentation](./packages/docen/README.md)
+- 📚 [@docen/docx Documentation](./packages/docx/README.md)
 
 ## License
 

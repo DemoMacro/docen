@@ -62,10 +62,10 @@ const markdown = generateMarkdown(doc);
 import { parseDOCX, generateDOCX } from "docen";
 
 // Parse DOCX to TipTap JSON
-const doc = await parseDOCX(buffer);
+const doc = parseDOCX(buffer);
 
 // Generate DOCX from TipTap JSON
-const docxBuffer = await generateDOCX(doc, { outputType: "nodebuffer" });
+const docxBuffer = await generateDOCX(doc); // defaults to a Node.js Buffer
 ```
 
 ### Cross-Format Conversion
@@ -78,7 +78,7 @@ import { parseHTML, generateDOCX } from "docen";
 // HTML → DOCX
 const html = "<h1>Title</h1><p>Content...</p>";
 const doc = parseHTML(html);
-const docx = await generateDOCX(doc, { outputType: "blob" });
+const docx = await generateDOCX(doc, { packer: { type: "blob" } });
 
 // Markdown → HTML
 import { parseMarkdown, generateHTML } from "docen";
@@ -154,39 +154,62 @@ const markdown = generateMarkdown({ type: 'doc', content: [...] });
 
 ### DOCX Functions
 
-#### `parseDOCX(input, options?)`
+#### `parseDOCX(input)`
 
 Parses a DOCX file into TipTap JSON content.
 
 **Parameters:**
 
 - `input: Buffer | ArrayBuffer | Uint8Array | string` - DOCX file data or path
-- `options?: DocxImportOptions` - Optional import configuration
 
-**Returns:** `Promise<JSONContent>` - TipTap document object
+**Returns:** `JSONContent` - TipTap document object
 
 ```typescript
 import { readFileSync } from "node:fs";
 const buffer = readFileSync("document.docx");
-const doc = await parseDOCX(buffer);
+const doc = parseDOCX(buffer);
 ```
 
-#### `generateDOCX(docJson, options)`
+#### `generateDOCX(docJson, options?)`
 
-Generates a DOCX file from TipTap JSON content.
+Generates a DOCX file from TipTap JSON asynchronously. Styling is derived from the TipTap attrs. By default runs `prepareDocument` first — fetching http image URLs and embedding them as data URLs (required: http images are otherwise dropped).
 
 **Parameters:**
 
 - `docJson: JSONContent` - TipTap document object
-- `options: DocxExportOptions` - Export options including outputType
+- `options?: DocxGenerateOptions` - `{ prepare?, packer? }`:
+  - `prepare` (default `true`): `true` runs the default image pre-fetch; `false` skips it; a `PrepareStep[]` runs custom steps.
+  - `packer`: `PackerOptions`; `type` controls the output format (`"nodebuffer"` default → Buffer, `"blob"`, `"arraybuffer"`, …).
 
-**Returns:** `Promise<ArrayBuffer | Uint8Array | Blob | Buffer>` - DOCX data in specified format
+**Returns:** `Promise<Buffer | Blob | ArrayBuffer | Uint8Array | string>` - DOCX data in the requested format
 
 ```typescript
-const buffer = await generateDOCX(doc, {
-  outputType: "nodebuffer",
-  title: "My Document",
-});
+// Default: prepare images, Node.js Buffer
+const buffer = await generateDOCX(doc);
+
+// Skip preparation, Browser Blob
+const blob = await generateDOCX(doc, { prepare: false, packer: { type: "blob" } });
+```
+
+#### `generateDOCXSync(docJson, packerOptions?)`
+
+Synchronous variant — fastest throughput, blocks the event loop. Does **not** run `prepareDocument` (it is async); call `await prepareDocument(doc)` first when http images need embedding.
+
+**Returns:** `Buffer | Blob | ArrayBuffer | Uint8Array | string` - DOCX data in the requested format
+
+```typescript
+const buffer = generateDOCXSync(doc);
+```
+
+#### `generateDOCXStream(docJson, options?)`
+
+Streams the DOCX as a `ReadableStream<Uint8Array>` — for large documents or HTTP responses. Runs `prepareDocument` by default (async).
+
+**Returns:** `Promise<ReadableStream<Uint8Array>>`
+
+```typescript
+const stream = await generateDOCXStream(doc);
+return new Response(stream);
 ```
 
 ## Advanced Usage
@@ -203,53 +226,24 @@ const doc = parseHTML(html, [CustomExtension]);
 const htmlContent = generateHTML(doc, [CustomExtension]);
 ```
 
-### DOCX Export Options
+### DOCX Template Patching
 
-Customize DOCX generation with advanced options:
+Replace `{{placeholders}}` in a DOCX template with TipTap-JSON content:
 
 ```typescript
-const docx = await generateDOCX(doc, {
-  outputType: "blob",
-  title: "Document Title",
-  creator: "Author Name",
-  styles: {
-    default: {
-      document: {
-        paragraph: { spacing: { line: 480 } },
-        run: { size: 28 },
-      },
-    },
+import { patchDOCX, parseHTML, parseMarkdown } from "docen";
+
+const result = await patchDOCX({
+  template: templateBuffer,
+  patches: {
+    title: { content: parseHTML("<h1>Report</h1>") },
+    body: { content: parseMarkdown("## Section\n\nHello **world**.") },
   },
-  image: {
-    maxWidth: 600,
-    handler: customImageHandler,
-  },
-  table: {
-    run: {
-      width: { size: 100, type: "pct" },
-      alignment: "center",
-    },
-  },
+  outputType: "nodebuffer",
 });
 ```
 
-### DOCX Import Options
-
-Control DOCX parsing behavior:
-
-```typescript
-const doc = await parseDOCX(buffer, {
-  ignoreEmptyParagraphs: true,
-  enableImageCrop: true,
-  canvasImport: () => import("@napi-rs/canvas"),
-  image: {
-    handler: async (image) => {
-      // Custom image handling (upload to CDN, etc.)
-      return await uploadToCloud(image.data);
-    },
-  },
-});
-```
+Each patch's `content` is compiled to DOCX (styling derived from attrs) and the first section's children replace the placeholder. `keepOriginalStyles`, `recursive`, and `placeholderDelimiters` mirror the underlying `@office-open/docx` `patchDocument`.
 
 ## Format Conversion Matrix
 
@@ -300,13 +294,11 @@ All conversions go through TipTap JSON as the intermediate format, ensuring cons
 
 ## Under the Hood
 
-`docen` leverages the powerful TipTap/ProseMirror ecosystem:
+`docen` is a thin facade over [`@docen/docx`](../docx), the Tiptap DOCX editor package:
 
-- **@tiptap/html** - HTML parsing and generation
-- **@tiptap/markdown** - Markdown parsing and generation with MarkdownManager
-- **@docen/import-docx** - DOCX parsing with advanced XML processing
-- **@docen/export-docx** - DOCX generation with docx library
-- **@docen/extensions** - Comprehensive TipTap extension collection
+- **@docen/docx** - DOCX / HTML / Markdown converters built on the DocxManager architecture
+- **@office-open/docx** - Native OOXML parse/generate (`parseDocument`, `generateDocument`, `patchDocument`)
+- **@tiptap/html** / **@tiptap/markdown** - HTML and Markdown serialization (via @docen/docx)
 
 ## Comparison with Alternatives
 

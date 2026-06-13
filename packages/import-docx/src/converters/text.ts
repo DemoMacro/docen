@@ -1,12 +1,13 @@
-import type { Element, Text } from "xast";
-import type { ParseContext } from "../parser";
-import type { StyleInfo } from "../parsers/styles";
 import { findChild, TEXT_ALIGN_MAP, PIXELS_PER_HALF_POINT } from "@docen/utils";
+import type { Element, Text } from "xast";
+
+import type { ParseContext } from "../parser";
 import {
   findDrawingElement,
   extractImageFromDrawing,
   extractImagesFromDrawing,
 } from "../parsers/images";
+import type { StyleInfo } from "../parsers/styles";
 
 /**
  * Extract text node from run

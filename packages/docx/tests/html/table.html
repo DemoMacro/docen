@@ -1,0 +1,92 @@
+<!-- Basic table -->
+<table style="border-collapse: collapse">
+  <thead>
+    <tr>
+      <th style="border: 1pt solid #000000">Header 1</th>
+      <th style="border: 1pt solid #000000">Header 2</th>
+      <th style="border: 1pt solid #000000">Header 3</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td style="border: 1pt solid #000000">Cell 1</td>
+      <td style="border: 1pt solid #000000">Cell 2</td>
+      <td style="border: 1pt solid #000000">Cell 3</td>
+    </tr>
+    <tr>
+      <td style="border: 1pt solid #000000"><strong>Bold cell</strong></td>
+      <td style="border: 1pt solid #000000"><em>Italic cell</em></td>
+      <td style="border: 1pt solid #000000">Normal cell</td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- Table with colspan -->
+<table style="border-collapse: collapse">
+  <thead>
+    <tr>
+      <th style="border: 1pt solid #000000" colspan="2">Merged Header</th>
+      <th style="border: 1pt solid #000000">Header 3</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td style="border: 1pt solid #000000">Cell 1</td>
+      <td style="border: 1pt solid #000000">Cell 2</td>
+      <td style="border: 1pt solid #000000">Cell 3</td>
+    </tr>
+    <tr>
+      <td style="border: 1pt solid #000000">Cell 4</td>
+      <td style="border: 1pt solid #000000">Cell 5</td>
+      <td style="border: 1pt solid #000000">Cell 6</td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- Table with rowspan -->
+<table style="border-collapse: collapse">
+  <thead>
+    <tr>
+      <th style="border: 1pt solid #000000">Header 1</th>
+      <th style="border: 1pt solid #000000">Header 2</th>
+      <th style="border: 1pt solid #000000">Header 3</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td style="border: 1pt solid #000000" rowspan="2">Row 1-2</td>
+      <td style="border: 1pt solid #000000">Cell 2</td>
+      <td style="border: 1pt solid #000000">Cell 3</td>
+    </tr>
+    <tr>
+      <td style="border: 1pt solid #000000">Cell 5</td>
+      <td style="border: 1pt solid #000000">Cell 6</td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- Complex table with multiple merges -->
+<table style="border-collapse: collapse">
+  <thead>
+    <tr>
+      <th style="border: 1pt solid #000000">Corner</th>
+      <th style="border: 1pt solid #000000" colspan="2">Group Header</th>
+      <th style="border: 1pt solid #000000">Single</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td style="border: 1pt solid #000000" rowspan="3">Side</td>
+      <td style="border: 1pt solid #000000">A1</td>
+      <td style="border: 1pt solid #000000">B1</td>
+      <td style="border: 1pt solid #000000">C1</td>
+    </tr>
+    <tr>
+      <td style="border: 1pt solid #000000" colspan="2" rowspan="2">Center Block</td>
+      <td style="border: 1pt solid #000000">C2</td>
+    </tr>
+    <tr>
+      <td style="border: 1pt solid #000000">C3</td>
+    </tr>
+  </tbody>
+</table>

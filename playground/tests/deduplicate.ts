@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseHTML } from "docen";
+
 import {
   extractParagraphs,
   calculateSimilarity,
@@ -11,6 +11,7 @@ import {
   splitSentences,
   type JSONContent,
 } from "@docen/deduplicate";
+import { parseHTML } from "docen";
 
 // Get current file directory
 const __dirname = dirname(fileURLToPath(import.meta.url));

@@ -1,10 +1,10 @@
-import { JSONContent } from "@tiptap/core";
 import type {
   IFloating,
   IImageOptions,
   IHorizontalPositionOptions,
   IVerticalPositionOptions,
 } from "@office-open/docx";
+import { JSONContent } from "@tiptap/core";
 
 // Re-export JSONContent for convenience
 export type { JSONContent };

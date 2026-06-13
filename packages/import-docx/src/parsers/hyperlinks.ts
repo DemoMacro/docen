@@ -1,5 +1,5 @@
-import { fromXml } from "xast-util-from-xml";
 import { findChild, findDeepChildren } from "@docen/utils";
+import { fromXml } from "xast-util-from-xml";
 
 const HYPERLINK_REL_TYPE =
   "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink";

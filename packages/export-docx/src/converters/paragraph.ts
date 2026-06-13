@@ -1,10 +1,11 @@
-import { IParagraphOptions, type IImageOptions } from "@office-open/docx";
-import { convertText, convertHardBreak } from "./text";
-import { convertImage } from "./image";
 import { ParagraphNode, ImageNode } from "@docen/extensions/types";
-import { applyParagraphStyleAttributes } from "../utils";
+import { IParagraphOptions, type IImageOptions } from "@office-open/docx";
 import type { PositiveUniversalMeasure } from "@office-open/docx";
+
+import { applyParagraphStyleAttributes } from "../utils";
 import type { DocxImageExportHandler } from "../utils/image";
+import { convertImage } from "./image";
+import { convertText, convertHardBreak } from "./text";
 
 /**
  * Convert TipTap paragraph node to DOCX paragraph options
