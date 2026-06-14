@@ -77,18 +77,16 @@ prepareDocument(json, steps?)           → Promise<void>            // default 
 
 ## Converter Pattern
 
-Converters bridge the two models. `DocxManager` (in `converters/docx.ts`) dispatches to each extension's `renderDocx`/`parseDocx` methods:
+Converters bridge the two models. `DocxManager` (in `converters/docx.ts`) walks the tree and assembles `DocumentOptions`. Extension modules contribute their DOCX expression per scope: single-node extensions export `renderDocx`/`parseDocx` (DocxManager dispatches per node); cross-node/container extensions (blockquote, lists, details, mention, task-item) export helper functions DocxManager orchestrates; simple-constant extensions (page-break, column-break) inline their payload. See CONTRIBUTING.md for the full scope table and helper inventory.
 
 ```typescript
-// DocxManager walks the tree and calls extension methods
+// extensions/paragraph.ts — single-node extension exports renderDocx/parseDocx
+export function renderDocx(node: JSONContent): ParagraphOptions
+export function parseDocx(opts: ParagraphOptions): Record<string, unknown>
+
 const manager = new DocxManager();
 manager.compile(json)    → DocumentOptions  // Tiptap JSON → persistence
 manager.resolve(docOpts) → JSONContent      // persistence → Tiptap JSON
-
-// Each extension exports renderDocx/parseDocx (used by DocxManager)
-// extensions/paragraph.ts
-export function renderDocx(node: JSONContent): ParagraphOptions
-export function parseDocx(opts: ParagraphOptions): Record<string, unknown>
 ```
 
 Standalone functions (`resolveDocument`, `compileDocument`) use a default `DocxManager` instance internally.
@@ -99,7 +97,7 @@ Custom Tiptap extensions extend the base `@tiptap/extension-*` to add DOCX-speci
 
 - **attrs**: Define DOCX properties (shading, borders, indent, spacing, floating, crop, etc.) with `parseHTML` only
 - **renderHTML** (node-level): Compute all CSS styles at once — solves the attribute-level style merge problem
-- **renderDocx/parseDocx**: DOCX serialization (attrs ↔ DocumentOptions properties), exported for `DocxManager`
+- **renderDocx/parseDocx** (single-node extensions only): DOCX serialization (attrs ↔ DocumentOptions properties), exported as module-level functions and referenced from `extend({ renderDocx, parseDocx })`
 
 Mark extensions (text-style, strike) keep attribute-level `renderHTML` since marks have a different rendering mechanism.
 
@@ -114,6 +112,8 @@ export const Paragraph = BaseParagraph.extend({
   parseDocx,   // reference to exported function
 });
 ```
+
+Cross-node and simple-constant extensions use helper functions or inline payloads instead of `renderDocx`/`parseDocx` (see CONTRIBUTING.md).
 
 This enables lossless round-trip through three serialization paths: HTML (ProseMirror DOMSerializer), DOCX (DocxManager), Markdown (MarkdownManager).
 

@@ -93,7 +93,13 @@ export const AlignmentType = {
 
 ## Converter Design Pattern
 
-Converters bridge Tiptap JSON (runtime) and DocumentOptions (persistence). `DocxManager` (in `converters/docx.ts`) walks the tree and dispatches to each extension's `renderDocx`/`parseDocx`:
+Converters bridge Tiptap JSON (runtime) and DocumentOptions (persistence). `DocxManager` (in `converters/docx.ts`) walks the tree and assembles `DocumentOptions`. Extension modules contribute their DOCX expression in one of three ways, depending on scope:
+
+| Scope                      | Extensions                                                         | DOCX contribution                                                                                        |
+| -------------------------- | ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
+| **Single-node**            | paragraph, heading, image, code-block, table\*, text-style, strike | export `renderDocx(node)`/`parseDocx(opts)` — DocxManager dispatches per node                            |
+| **Cross-node / container** | blockquote, ordered-list, task-item, mention, details              | export helpers (`buildOrderedLevels`, `createMention`, …) — DocxManager orchestrates multi-node assembly |
+| **Simple constant**        | page-break, column-break                                           | payload inlined in `DocxManager` (single line, no variance)                                              |
 
 ```typescript
 // DocxManager — central dispatcher
@@ -101,7 +107,7 @@ const manager = new DocxManager();
 manager.compile(json)    → DocumentOptions   // Tiptap JSON → persistence
 manager.resolve(docOpts) → JSONContent       // persistence → Tiptap JSON
 
-// Each extension exports renderDocx/parseDocx
+// Single-node extensions export renderDocx/parseDocx (DocxManager dispatches)
 // extensions/paragraph.ts
 export function renderDocx(node: JSONContent): ParagraphOptions { ... }
 export function parseDocx(opts: ParagraphOptions): Record<string, unknown> { ... }
@@ -134,7 +140,7 @@ Custom Tiptap extensions extend the base `@tiptap/extension-*` to carry DOCX-spe
 
 1. **Adds attrs** with `parseHTML` only (attribute-level rendering is not used for nodes)
 2. **Defines node-level `renderHTML`** to compute all CSS styles at once (avoids style merge conflicts)
-3. **Exports `renderDocx`/`parseDocx`** for DOCX serialization (used by DocxManager)
+3. **Exports `renderDocx`/`parseDocx`** for DOCX serialization (used by DocxManager) — this applies to **single-node** extensions only (see the three-scope table above)
 
 Mark extensions (text-style, strike) keep attribute-level `renderHTML` since marks have a different rendering mechanism.
 
@@ -164,6 +170,8 @@ export const Paragraph = BaseParagraph.extend({
   parseDocx,
 });
 ```
+
+Cross-node extensions (blockquote, ordered-list, task-item, mention, details) carry no `renderDocx`/`parseDocx` — their DOCX expression spans multiple nodes, so they export helper functions (`applyBlockquoteStyle`, `buildOrderedLevels`, `createTaskCheckbox`, `createMention`, details constants) that `DocxManager` calls during tree assembly. Simple-constant extensions (page-break, column-break) inline their one-line DOCX payload directly in `DocxManager`.
 
 ## API Layering
 
