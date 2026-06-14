@@ -32,7 +32,18 @@ import type { JSONContent as TiptapJSONContent } from "@tiptap/core";
 // Layer 1: Re-export @office-open/docx types (persistence model)
 // ============================================================
 
+// The five office-open types used internally for attr derivation (below) are
+// imported once and re-exported by reference — instead of a second
+// `export ... from "@office-open/docx"` — so each type has a single
+// dependency declaration in this file.
 export type { TiptapJSONContent as JSONContent };
+export type {
+  ParagraphPropertiesOptionsBase,
+  RunStylePropertiesOptions,
+  TableOptions,
+  TableRowPropertiesOptionsBase,
+  TableCellOptions,
+};
 
 export type {
   // Document structure
@@ -43,12 +54,10 @@ export type {
   ParagraphOptions,
   ParagraphChild,
   ParagraphPropertiesOptions,
-  ParagraphPropertiesOptionsBase,
   ParagraphStylePropertiesOptions,
   LevelParagraphStylePropertiesOptions,
   // Run
   RunOptions,
-  RunStylePropertiesOptions,
   RunPropertiesOptions,
   ParagraphRunPropertiesOptions,
   // Image
@@ -56,10 +65,7 @@ export type {
   ImageChild,
   MediaTransformation,
   // Table
-  TableOptions,
   TableRowOptions,
-  TableRowPropertiesOptionsBase,
-  TableCellOptions,
   // Indent, spacing, borders, shading
   IndentAttributesProperties,
   SpacingProperties,

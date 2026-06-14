@@ -2,12 +2,14 @@ import type { RunOptions } from "@office-open/docx";
 import type { JSONContent } from "@tiptap/core";
 
 declare module "@tiptap/core" {
-  interface NodeConfig<Options, Storage> {
+  interface NodeConfig<Options = any, Storage = any> {
     /**
-     * DOCX serialization: Tiptap JSON node → DOCX opts.
-     * Each node extension defines this to convert its attrs to DOCX properties.
+     * DOCX serialization: Tiptap JSON node → DOCX opts, or null when the node
+     * cannot be serialized (e.g. an image with no embedded data — DocxManager
+     * then drops it). Each node extension defines this to convert its attrs to
+     * DOCX properties.
      */
-    renderDocx?: (node: JSONContent) => Record<string, unknown>;
+    renderDocx?: (node: JSONContent) => Record<string, unknown> | null;
     /**
      * DOCX deserialization: DOCX opts → Tiptap JSON attrs.
      * Each node extension defines this to convert DOCX properties back to attrs.
@@ -15,7 +17,7 @@ declare module "@tiptap/core" {
     parseDocx?: (opts: Record<string, unknown>) => Record<string, unknown>;
   }
 
-  interface MarkConfig<Options, Storage> {
+  interface MarkConfig<Options = any, Storage = any> {
     /**
      * DOCX serialization: mark attrs → RunOptions properties.
      * Each mark extension defines this to contribute run-level properties.
