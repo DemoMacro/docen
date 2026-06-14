@@ -1,7 +1,2 @@
-export {
-  docxExtensions,
-  tiptapNodeExtensions,
-  tiptapMarkExtensions,
-  StarterKit,
-} from "./extensions";
-export type { StarterKitOptions } from "./extensions";
+export { docxExtensions, tiptapNodeExtensions, tiptapMarkExtensions, DocxKit } from "./extensions";
+export type { DocxKitOptions } from "./extensions";

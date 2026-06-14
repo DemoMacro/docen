@@ -13,14 +13,21 @@ import type {
   TableOptions,
   TableRowOptions,
   TableCellOptions,
+  LevelsOptions,
+  NumberingOptions,
   OutputByType,
   OutputType,
   PackerOptions,
 } from "@office-open/docx";
 
 import type { JSONContent } from "../core";
+import * as blockquoteExt from "../extensions/blockquote";
+import * as codeBlockExt from "../extensions/code-block";
+import * as detailsExt from "../extensions/details";
 import * as headingExt from "../extensions/heading";
 import * as imageExt from "../extensions/image";
+import * as mentionExt from "../extensions/mention";
+import * as orderedListExt from "../extensions/ordered-list";
 // Node renderDocx/parseDocx
 import * as paragraphExt from "../extensions/paragraph";
 // Mark renderDocx/parseDocx
@@ -29,6 +36,7 @@ import * as tableExt from "../extensions/table";
 import * as tableCellExt from "../extensions/table-cell";
 import * as tableHeaderExt from "../extensions/table-header";
 import * as tableRowExt from "../extensions/table-row";
+import * as taskItemExt from "../extensions/task-item";
 import * as textStyleExt from "../extensions/text-style";
 import { prepareDocument, type PrepareStep } from "./prepare";
 
@@ -61,6 +69,24 @@ function mergeTextNodes(nodes: JSONContent[]): JSONContent[] {
   return result;
 }
 
+/**
+ * Encode bytes as base64. Node uses Buffer (fast path); browsers fall back to
+ * chunked `String.fromCharCode` + `btoa`. The chunking matters: spreading a
+ * whole image into `String.fromCharCode(...bytes)` makes every byte a function
+ * argument and overflows the call stack on large images.
+ */
+function bytesToBase64(bytes: Uint8Array): string {
+  if (typeof Buffer !== "undefined") return Buffer.from(bytes).toString("base64");
+  const CHUNK = 0x4000; // 16 KiB — well under the argument/stack limit
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
+
+// ── Blockquote signature ──
+
 // ── DocxManager ──
 
 /**
@@ -70,7 +96,18 @@ function mergeTextNodes(nodes: JSONContent[]): JSONContent[] {
  * DocxManager handles tree walking, child assembly, and dispatching.
  */
 export class DocxManager {
+  // Numbering definitions accumulated during compile (ordered lists). Bullet
+  // lists use office-open's built-in numbering and contribute nothing here.
+  private numberingConfigs: { reference: string; levels: LevelsOptions[] }[] = [];
+  // Per-orderedList instance counter — each list gets its own concrete instance
+  // so independent lists number separately, even when they share an abstractNum
+  // (same start).
+  private orderedInstanceCounter = 0;
+
   compile(json: JSONContent): DocumentOptions {
+    this.numberingConfigs = [];
+    this.orderedInstanceCounter = 0;
+
     const children: SectionChild[] = [];
 
     if (json.content) {
@@ -82,7 +119,12 @@ export class DocxManager {
       }
     }
 
-    return { sections: [{ children }] };
+    return {
+      sections: [{ children }],
+      ...(this.numberingConfigs.length > 0
+        ? { numbering: { config: this.numberingConfigs } as NumberingOptions }
+        : {}),
+    };
   }
 
   resolve(docOpts: DocumentOptions): JSONContent {
@@ -92,12 +134,8 @@ export class DocxManager {
     }
 
     const children = sections[0].children ?? [];
-    const content: JSONContent[] = [];
-
-    for (const child of children) {
-      const node = this.resolveSectionChild(child);
-      if (node) content.push(node);
-    }
+    const numberingLookup = this.buildNumberingLookup(docOpts);
+    const content = this.resolveSectionChildren(children, numberingLookup);
 
     return {
       type: "doc",
@@ -114,16 +152,35 @@ export class DocxManager {
       case "heading":
         return { paragraph: this.compileHeadingNode(node) };
       case "blockquote": {
-        // Flatten blockquote into paragraphs
+        // blockquote → each child paragraph/heading gets a left indent + left
+        // border (DOCX's native blockquote expression; no dedicated element).
+        // Iterate ALL children — the previous `return` inside the loop dropped
+        // every paragraph after the first.
+        const items: SectionChild[] = [];
         for (const child of node.content ?? []) {
-          if (child.type === "paragraph") {
-            return { paragraph: this.compileParagraphNode(child) };
+          if (child.type === "paragraph" || child.type === "heading") {
+            const para =
+              child.type === "heading"
+                ? this.compileHeadingNode(child)
+                : this.compileParagraphNode(child);
+            const paraObj = (
+              typeof para === "string" ? { text: para } : (para as Record<string, unknown>)
+            ) as Record<string, unknown>;
+            blockquoteExt.applyBlockquoteStyle(paraObj);
+            items.push({ paragraph: paraObj as ParagraphOptions });
           }
         }
-        return null;
+        return items.length > 0 ? items : null;
       }
-      case "codeBlock":
-        return { paragraph: this.compileCodeBlock(node) };
+      case "codeBlock": {
+        // codeBlock → paragraph styled "Code" (extension owns style/font).
+        // Children go through the shared inline path (handles `\n`→break +
+        // inline marks), so no special-case child logic lives here.
+        const opts = codeBlockExt.renderDocx(node) as Record<string, unknown>;
+        const childList = this.compileInlineContent(node.content);
+        if (childList.length > 0) opts.children = childList;
+        return { paragraph: this.simplifyParagraph(opts) };
+      }
       case "horizontalRule":
         return {
           paragraph: { thematicBreak: true } as Record<string, unknown> as ParagraphOptions,
@@ -138,7 +195,9 @@ export class DocxManager {
       case "bulletList":
       case "orderedList":
       case "taskList":
-        return this.compileListFromNode(node);
+        return this.compileListFromNode(node, 0);
+      case "details":
+        return this.compileDetailsNode(node);
       default:
         return null;
     }
@@ -156,16 +215,6 @@ export class DocxManager {
     const childList = this.compileInlineContent(node.content);
     if (childList.length > 0) opts.children = childList;
     return this.simplifyParagraph(opts);
-  }
-
-  private compileCodeBlock(node: JSONContent): ParagraphOptions {
-    const text = (node.content ?? []).map((c) => c.text ?? "").join("");
-    const language = node.attrs?.language as string | undefined;
-    return {
-      style: "Code",
-      ...(language ? { run: { font: "Consolas" } } : {}),
-      text,
-    };
   }
 
   /** Simple text optimization: merge plain runs into text field */
@@ -375,28 +424,119 @@ export class DocxManager {
     return cellOpts;
   }
 
-  private compileListFromNode(node: JSONContent): SectionChild[] | null {
+  private compileListFromNode(node: JSONContent, level: number): SectionChild[] | null {
     const items: SectionChild[] = [];
+    const isOrdered = node.type === "orderedList";
+    const isTask = node.type === "taskList";
+
+    // Ordered lists need an abstractNum definition (decimal). The reference is
+    // keyed by `start` so lists with the same start share one definition; each
+    // list still gets a distinct instance (independent counting).
+    let ordered: { reference: string; instance: number } | undefined;
+    if (isOrdered) ordered = this.registerOrderedNumbering(node);
+
     for (const listItem of node.content ?? []) {
       if (listItem.type !== "listItem" && listItem.type !== "taskItem") continue;
+      const checked = Boolean(listItem.attrs?.checked);
+
       for (const child of listItem.content ?? []) {
         if (child.type === "paragraph" || child.type === "heading") {
-          const para = this.compileParagraphNode(child);
-          // simplifyParagraph may return a bare string — wrap to allow property assignment
+          // Preserve heading level (heading → compileHeadingNode, not paragraph).
+          const para =
+            child.type === "heading"
+              ? this.compileHeadingNode(child)
+              : this.compileParagraphNode(child);
           const paraObj =
             typeof para === "string"
               ? ({ text: para } as Record<string, unknown>)
               : (para as Record<string, unknown>);
-          if (node.type === "bulletList") {
-            paraObj.bullet = { level: 0 };
-          } else if (node.type === "orderedList") {
-            paraObj.numbering = { reference: "default-numbering", level: 0 };
+
+          if (ordered) {
+            paraObj.numbering = { reference: ordered.reference, instance: ordered.instance, level };
+          } else {
+            paraObj.bullet = { level };
           }
+
+          if (isTask) this.injectTaskCheckbox(paraObj, checked);
+
           items.push({ paragraph: paraObj as ParagraphOptions });
+        } else if (
+          child.type === "bulletList" ||
+          child.type === "orderedList" ||
+          child.type === "taskList"
+        ) {
+          // Nested list — recurse one level deeper. Nested list paragraphs are
+          // emitted as siblings of this item's paragraph (DOCX flattens lists
+          // to a single paragraph sequence; the `level` field carries depth).
+          const nested = this.compileListFromNode(child, level + 1);
+          if (nested) items.push(...nested);
         }
       }
     }
     return items.length > 0 ? items : null;
+  }
+
+  /**
+   * Register (or reuse) an abstractNum for an ordered list's `start`, and
+   * return a fresh instance so this list counts independently of other lists
+   * that share the same definition.
+   */
+  private registerOrderedNumbering(node: JSONContent): { reference: string; instance: number } {
+    const start = Number(node.attrs?.start ?? 1) || 1;
+    let entry = this.numberingConfigs.find((c) => Number(c.levels[0]?.start ?? 1) === start);
+    if (!entry) {
+      entry = {
+        reference: `${orderedListExt.ORDERED_REFERENCE_PREFIX}-${this.numberingConfigs.length + 1}`,
+        levels: orderedListExt.buildOrderedLevels(start),
+      };
+      this.numberingConfigs.push(entry);
+    }
+    this.orderedInstanceCounter += 1;
+    return { reference: entry.reference, instance: this.orderedInstanceCounter };
+  }
+
+  /**
+   * Prepend an inline checkbox SDT to a task paragraph. The SDT is tagged
+   * "docen-task" so resolve can tell task items apart from ordinary paragraphs
+   * that happen to contain an SDT.
+   */
+  private injectTaskCheckbox(paraObj: Record<string, unknown>, checked: boolean): void {
+    let existing: unknown[] = [];
+    if (Array.isArray(paraObj.children)) {
+      existing = paraObj.children as unknown[];
+    } else if (typeof paraObj.text === "string") {
+      if (paraObj.text) existing = [{ text: paraObj.text }];
+      delete paraObj.text;
+    }
+    paraObj.children = [taskItemExt.createTaskCheckbox(checked), ...existing];
+  }
+
+  /**
+   * details → block-level group-SDT. The summary paragraph is tagged with a
+   * fixed style so resolve can split it back out; content blocks flatten in
+   * after it. (No native collapse in DOCX — structure round-trips, the view
+   * stays expanded.)
+   */
+  private compileDetailsNode(node: JSONContent): SectionChild {
+    const sdtChildren: SectionChild[] = [];
+    for (const child of node.content ?? []) {
+      if (child.type === "detailsSummary") {
+        const inline = this.compileInlineContent(child.content);
+        const summaryPara: Record<string, unknown> = { style: detailsExt.DETAILS_SUMMARY_STYLE };
+        if (inline.length > 0) summaryPara.children = inline;
+        sdtChildren.push({ paragraph: summaryPara as ParagraphOptions });
+      } else if (child.type === "detailsContent") {
+        for (const block of child.content ?? []) {
+          const compiled = this.compileSectionChild(block);
+          if (!compiled) continue;
+          if (Array.isArray(compiled)) sdtChildren.push(...compiled);
+          else sdtChildren.push(compiled);
+        }
+      }
+    }
+    return {
+      sdt: { properties: { tag: detailsExt.DETAILS_TAG, group: true }, children: sdtChildren },
+    } as SectionChild;
   }
 
   // ── Inline content ──
@@ -413,9 +553,24 @@ export class DocxManager {
         case "hardBreak":
           children.push({ break: 1 } as Record<string, unknown> as ParagraphChild);
           break;
+        case "pageBreak":
+          children.push({ pageBreak: true } as Record<string, unknown> as ParagraphChild);
+          break;
+        case "columnBreak":
+          children.push({ columnBreak: true } as Record<string, unknown> as ParagraphChild);
+          break;
         case "image": {
           const imageRun = imageExt.renderDocx(node);
           if (imageRun) children.push(imageRun);
+          break;
+        }
+        case "mention": {
+          children.push(
+            mentionExt.createMention(
+              String(node.attrs?.id ?? ""),
+              String(node.attrs?.label ?? ""),
+            ) as ParagraphChild,
+          );
           break;
         }
       }
@@ -428,10 +583,25 @@ export class DocxManager {
     const text = node.text ?? "";
     if (!text) return;
 
-    const marks = node.marks ?? [];
+    // Split on "\n": OOXML ignores a literal "\n" inside <w:t>, so each newline
+    // becomes a {break:1} run. Shared by paragraphs and code blocks — codeBlock
+    // needs no special-case newline handling.
+    const segments = text.split("\n");
+    for (let i = 0; i < segments.length; i++) {
+      if (i > 0) children.push({ break: 1 } as ParagraphChild);
+      if (segments[i]) this.compileTextRun(segments[i], node.marks, children);
+    }
+  }
+
+  /** Emit a single run for `text` with all inline marks applied. */
+  private compileTextRun(
+    text: string,
+    marks: JSONContent["marks"],
+    children: ParagraphChild[],
+  ): void {
     const runOpts: Record<string, unknown> = { text };
 
-    for (const mark of marks) {
+    for (const mark of marks ?? []) {
       switch (mark.type) {
         case "bold":
           runOpts.bold = true;
@@ -496,11 +666,59 @@ export class DocxManager {
     if ("table" in child) {
       return this.resolveTable(child.table as unknown as Record<string, unknown>);
     }
+    if ("sdt" in child) {
+      const sdt = (child as { sdt: { properties?: { tag?: string }; children?: SectionChild[] } })
+        .sdt;
+      if (sdt.properties?.tag === detailsExt.DETAILS_TAG) {
+        return this.resolveDetailsSdt(sdt);
+      }
+    }
     return null;
+  }
+
+  /**
+   * Resolve a details group-SDT: the summary-style paragraph becomes
+   * detailsSummary, the remaining blocks fold into detailsContent.
+   */
+  private resolveDetailsSdt(sdt: {
+    properties?: { tag?: string };
+    children?: SectionChild[];
+  }): JSONContent {
+    const content: JSONContent[] = [];
+    let summary: JSONContent[] | null = null;
+    for (const child of sdt.children ?? []) {
+      if ("paragraph" in child) {
+        const para = child.paragraph as ParagraphOptions;
+        if (
+          (para as unknown as Record<string, unknown>).style === detailsExt.DETAILS_SUMMARY_STYLE
+        ) {
+          summary = this.resolveInlineContent(para);
+          continue;
+        }
+      }
+      const node = this.resolveSectionChild(child);
+      if (!node) continue;
+      if (Array.isArray(node)) content.push(...node);
+      else content.push(node);
+    }
+    const details: JSONContent = { type: "details", content: [] };
+    if (summary !== null) details.content!.push({ type: "detailsSummary", content: summary });
+    if (content.length > 0) details.content!.push({ type: "detailsContent", content });
+    return details;
   }
 
   private resolveParagraph(opts: string | ParagraphOptions): JSONContent {
     const resolved: ParagraphOptions = typeof opts === "string" ? { text: opts } : opts;
+
+    // horizontalRule: a paragraph reduced to a bottom border (thematicBreak)
+    if (resolved.thematicBreak) {
+      return { type: "horizontalRule" };
+    }
+
+    // codeBlock: paragraphs styled "Code"
+    if (resolved.style === "Code") {
+      return this.resolveCodeBlock(resolved);
+    }
 
     // Detect heading
     const headingLevel = resolved.heading ? HEADING_LEVEL_MAP[resolved.heading] : undefined;
@@ -511,15 +729,8 @@ export class DocxManager {
       ? headingExt.parseDocx(resolved as unknown as Record<string, unknown>)
       : paragraphExt.parseDocx(resolved as unknown as Record<string, unknown>);
 
-    // Handle list items
-    if (resolved.bullet) {
-      return this.resolveListItem(resolved, "bulletList", attrs);
-    }
-    if (resolved.numbering) {
-      return this.resolveListItem(resolved, "orderedList", attrs);
-    }
-
-    // Resolve inline content (recovers paragraph-level `text` when collapsed)
+    // List paragraphs never reach here — resolveSectionChildren intercepts
+    // them upstream and rebuilds the nested list tree.
     const content = this.resolveInlineContent(resolved);
     const cleanAttrsObj = cleanAttrs(attrs);
 
@@ -530,22 +741,248 @@ export class DocxManager {
     return node;
   }
 
-  private resolveListItem(
-    opts: ParagraphOptions,
-    listType: "bulletList" | "orderedList",
-    paraAttrs: Record<string, unknown>,
-  ): JSONContent {
-    const content = this.resolveInlineContent(opts);
-    const cleanAttrsObj = cleanAttrs(paraAttrs);
+  /** reference → level-0 format/start, for classifying numbering paragraphs. */
+  private buildNumberingLookup(
+    docOpts: DocumentOptions,
+  ): Map<string, { format?: string; start?: number }> {
+    const lookup = new Map<string, { format?: string; start?: number }>();
+    const config = (
+      docOpts as { numbering?: { config?: { reference: string; levels: LevelsOptions[] }[] } }
+    ).numbering?.config;
+    if (config) {
+      for (const entry of config) {
+        const lvl0 = entry.levels[0];
+        lookup.set(entry.reference, { format: lvl0?.format, start: lvl0?.start });
+      }
+    }
+    return lookup;
+  }
 
-    const paragraphNode: JSONContent = { type: "paragraph" };
-    if (Object.keys(cleanAttrsObj).length > 0) paragraphNode.attrs = cleanAttrsObj;
-    if (content.length > 0) paragraphNode.content = content;
+  /**
+   * Walk section children, grouping consecutive list paragraphs into nested
+   * Tiptap lists. Non-list children resolve individually. DOCX flattens lists
+   * to a paragraph sequence (depth carried by `level`); this rebuilds the tree.
+   */
+  private resolveSectionChildren(
+    children: SectionChild[],
+    numberingLookup: Map<string, { format?: string; start?: number }>,
+  ): JSONContent[] {
+    const content: JSONContent[] = [];
+    let i = 0;
+    while (i < children.length) {
+      // Bind to a local: TS won't `in`-narrow an indexed read (`children[i]`)
+      // across two accesses, so the narrowing needs a stable binding. The
+      // `typeof` guard also rejects the plain-string paragraph shorthand,
+      // which is never a list item.
+      const child = children[i];
+      const firstPara = "paragraph" in child ? child.paragraph : null;
+      const firstInfo =
+        firstPara && typeof firstPara !== "string"
+          ? this.detectList(firstPara, numberingLookup)
+          : null;
+
+      if (!firstInfo) {
+        const node = this.resolveSectionChild(child);
+        if (node) content.push(node);
+        i++;
+        continue;
+      }
+
+      // Collect the run of consecutive list paragraphs. A non-paragraph or a
+      // plain-text paragraph ends the run — plain text is never a list item.
+      const group: { para: ParagraphOptions; info: ListInfo }[] = [];
+      while (i < children.length) {
+        const member = children[i];
+        if (!("paragraph" in member)) break;
+        const para = member.paragraph;
+        if (typeof para === "string") break;
+        const info = this.detectList(para, numberingLookup);
+        if (!info) break;
+        group.push({ para, info });
+        i++;
+      }
+      content.push(...this.buildListTree(group));
+    }
+    return content;
+  }
+
+  /** Classify a paragraph as a list item, or null if it isn't one. */
+  private detectList(
+    para: ParagraphOptions,
+    lookup: Map<string, { format?: string; start?: number }>,
+  ): ListInfo | null {
+    const p = para as unknown as Record<string, unknown>;
+    const numbering = p.numbering as { reference?: string; level?: number } | undefined;
+    const bullet = p.bullet as { level?: number } | undefined;
+
+    let kind: "bullet" | "ordered";
+    let level: number;
+    let reference: string | undefined;
+    let start: number | undefined;
+
+    if (numbering) {
+      reference = numbering.reference;
+      level = numbering.level ?? 0;
+      const cfg = reference ? lookup.get(reference) : undefined;
+      // A config whose format isn't "bullet" → ordered; otherwise this is the
+      // built-in default-bullet numbering (parse may tag numId=1 as numbering
+      // when its abstractNum resolves), so degrade to bullet.
+      if (cfg && cfg.format && cfg.format !== "bullet") {
+        kind = "ordered";
+        start = cfg.start;
+      } else {
+        kind = "bullet";
+        reference = undefined;
+      }
+    } else if (bullet) {
+      kind = "bullet";
+      level = bullet.level ?? 0;
+    } else {
+      return null;
+    }
+
+    // Task items carry a leading inline checkbox SDT tagged "docen-task".
+    const first = (p.children as unknown[] | undefined)?.[0];
+    const isTask = taskItemExt.isTaskCheckbox(first);
 
     return {
-      type: listType,
-      content: [{ type: "listItem", content: [paragraphNode] }],
+      kind: isTask ? "task" : kind,
+      level,
+      reference,
+      start,
+      checked: taskItemExt.readCheckboxState(first),
     };
+  }
+
+  /**
+   * Rebuild nested Tiptap lists from a flat run of list paragraphs. Stack-based:
+   * each frame is an active list at a given depth; the `key` (level:type:
+   * reference) decides whether a paragraph continues the top list, starts a
+   * nested list, or splits off a new sibling list.
+   */
+  private buildListTree(group: { para: ParagraphOptions; info: ListInfo }[]): JSONContent[] {
+    const topLevel: JSONContent[] = [];
+    const stack: {
+      level: number;
+      key: string;
+      listNode: JSONContent;
+      currentItem: JSONContent;
+    }[] = [];
+
+    for (const { para, info } of group) {
+      const listType =
+        info.kind === "ordered" ? "orderedList" : info.kind === "task" ? "taskList" : "bulletList";
+      const itemType = info.kind === "task" ? "taskItem" : "listItem";
+      const key = `${info.level}:${listType}:${info.reference ?? ""}`;
+
+      // Pop frames that are deeper than this item, or at the same depth but a
+      // different list (level/type/reference change → new list).
+      while (stack.length > 0) {
+        const top = stack[stack.length - 1];
+        if (top.level > info.level || (top.level === info.level && top.key !== key)) {
+          stack.pop();
+          continue;
+        }
+        break;
+      }
+
+      const itemPara = this.resolveListItemParagraph(para, info);
+      const newItem: JSONContent = { type: itemType, content: [itemPara] };
+      if (itemType === "taskItem") newItem.attrs = { checked: info.checked };
+
+      const top = stack[stack.length - 1];
+      if (top && top.level === info.level && top.key === key) {
+        // Same list continues — append a new item.
+        (top.listNode.content as JSONContent[]).push(newItem);
+        top.currentItem = newItem;
+      } else {
+        // New list (top-level or nested under the current item).
+        const newList: JSONContent = { type: listType, content: [newItem] };
+        // Only level-0 ordered lists carry `start`; deeper levels restart at 1.
+        if (
+          listType === "orderedList" &&
+          info.level === 0 &&
+          typeof info.start === "number" &&
+          info.start !== 1
+        ) {
+          newList.attrs = { start: info.start };
+        }
+        if (top) {
+          (top.currentItem.content as JSONContent[]).push(newList);
+        } else {
+          topLevel.push(newList);
+        }
+        stack.push({ level: info.level, key, listNode: newList, currentItem: newItem });
+      }
+    }
+
+    return topLevel;
+  }
+
+  /**
+   * Resolve a list-item paragraph to a Tiptap paragraph/heading node, stripping
+   * the list marker (bullet/numbering) and the leading task checkbox — those
+   * are expressed at the list/item level, not inside the paragraph.
+   */
+  private resolveListItemParagraph(para: ParagraphOptions, info: ListInfo): JSONContent {
+    const resolved = typeof para === "string" ? ({ text: para } as ParagraphOptions) : para;
+    const headingLevel = resolved.heading ? HEADING_LEVEL_MAP[resolved.heading] : undefined;
+    const nodeType = headingLevel ? "heading" : "paragraph";
+
+    const attrs = headingLevel
+      ? headingExt.parseDocx(resolved as unknown as Record<string, unknown>)
+      : paragraphExt.parseDocx(resolved as unknown as Record<string, unknown>);
+
+    // Task: drop the leading checkbox SDT (its state lives in taskItem.attrs).
+    const stripped = info.kind === "task" ? this.stripTaskCheckbox(resolved) : resolved;
+    const content = this.resolveInlineContent(stripped);
+
+    const node: JSONContent = { type: nodeType };
+    const cleanAttrsObj = cleanAttrs(attrs);
+    if (Object.keys(cleanAttrsObj).length > 0) node.attrs = cleanAttrsObj;
+    if (content.length > 0) node.content = content;
+    return node;
+  }
+
+  /** Return a copy of `para` with its leading docen-task checkbox SDT removed. */
+  private stripTaskCheckbox(para: ParagraphOptions): ParagraphOptions {
+    const children = (para as unknown as Record<string, unknown>).children;
+    if (Array.isArray(children) && children.length > 0 && taskItemExt.isTaskCheckbox(children[0])) {
+      return { ...(para as object), children: children.slice(1) } as ParagraphOptions;
+    }
+    return para;
+  }
+
+  private resolveCodeBlock(opts: ParagraphOptions): JSONContent {
+    // Reassemble code: break → "\n" (merged into text), runs keep their marks.
+    const children = opts.children as (ParagraphChild | string)[] | undefined;
+    const content: JSONContent[] = [];
+    if (children) {
+      for (const child of children) {
+        if (typeof child === "string") {
+          if (child) content.push({ type: "text", text: child });
+        } else if (typeof child === "object" && child !== null) {
+          if ("break" in child) {
+            const prev = content[content.length - 1];
+            if (prev && prev.type === "text") prev.text = (prev.text ?? "") + "\n";
+            else content.push({ type: "text", text: "\n" });
+          } else if ("text" in child) {
+            const marks = this.resolveMarks(child as RunOptions);
+            const textNode: JSONContent = {
+              type: "text",
+              text: (child as { text: string }).text,
+            };
+            if (marks) textNode.marks = marks;
+            content.push(textNode);
+          }
+        }
+      }
+    } else if (opts.text) {
+      content.push({ type: "text", text: opts.text });
+    }
+    const node: JSONContent = { type: "codeBlock" };
+    if (content.length > 0) node.content = content;
+    return node;
   }
 
   private resolveTable(tableOpts: Record<string, unknown>): JSONContent {
@@ -673,6 +1110,9 @@ export class DocxManager {
     if ("image" in child) {
       return this.resolveImage(child.image as unknown as Record<string, unknown>);
     }
+    if ("sdt" in child) {
+      return this.resolveInlineSdt(child);
+    }
     if ("hyperlink" in child) {
       return this.resolveHyperlink(
         child.hyperlink as {
@@ -684,15 +1124,28 @@ export class DocxManager {
       );
     }
     if ("pageBreak" in child) {
-      return { type: "paragraph", attrs: { pageBreak: true } };
+      return { type: "pageBreak" };
     }
     if ("columnBreak" in child) {
-      return { type: "hardBreak" };
+      return { type: "columnBreak" };
+    }
+    return null;
+  }
+
+  /** Resolve an inline SDT (mention carrier; other inline SDTs unsupported). */
+  private resolveInlineSdt(child: ParagraphChild): JSONContent | null {
+    if (mentionExt.isMention(child)) {
+      const { id, label } = mentionExt.readMention(child);
+      return { type: "mention", attrs: { id, label } };
     }
     return null;
   }
 
   private resolveRun(opts: RunOptions): JSONContent | null {
+    // Pure break (no text/children) → hardBreak node
+    if (opts.break && opts.text === undefined && !opts.children) {
+      return { type: "hardBreak" };
+    }
     const text = opts.text;
     if (text === undefined && !opts.children) return null;
 
@@ -720,7 +1173,7 @@ export class DocxManager {
     }
     if (opts.subScript) marks.push({ type: "subscript" });
     if (opts.superScript) marks.push({ type: "superscript" });
-    if (opts.highlight) marks.push({ type: "highlight" });
+    if (opts.highlight) marks.push({ type: "highlight", attrs: { color: opts.highlight } });
 
     if (opts.font === "Consolas" || opts.font === "monospace") {
       marks.push({ type: "code" });
@@ -745,17 +1198,13 @@ export class DocxManager {
   private resolveImage(imageOpts: Record<string, unknown>): JSONContent {
     const attrs = imageExt.parseDocx(imageOpts);
 
-    // Image data → data URL
+    // Image data → data URL (chunked base64 — large images overflow the call
+    // stack if spread into String.fromCharCode; see bytesToBase64).
     const data = imageOpts.data as Uint8Array | undefined;
     const type = imageOpts.type as string | undefined;
     if (data && type) {
-      const base64 =
-        typeof btoa !== "undefined"
-          ? btoa(
-              String.fromCharCode(...(data instanceof ArrayBuffer ? new Uint8Array(data) : data)),
-            )
-          : Buffer.from(data).toString("base64");
-      attrs.src = `data:image/${type};base64,${base64}`;
+      const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : data;
+      attrs.src = `data:image/${type};base64,${bytesToBase64(bytes)}`;
     }
 
     return { type: "image", attrs };
@@ -798,6 +1247,16 @@ export class DocxManager {
 
     return null;
   }
+}
+
+// ── List reconstruction ──
+
+interface ListInfo {
+  kind: "bullet" | "ordered" | "task";
+  level: number;
+  reference?: string;
+  start?: number;
+  checked: boolean;
 }
 
 // ── Heading level map ──

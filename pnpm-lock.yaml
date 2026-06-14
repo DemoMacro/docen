@@ -40,8 +40,8 @@ importers:
   packages/docx:
     dependencies:
       '@office-open/docx':
-        specifier: 0.9.2
-        version: 0.9.2
+        specifier: 0.9.6
+        version: 0.9.6
       '@tiptap/core':
         specifier: 3.22.5
         version: 3.22.5(@tiptap/pm@3.22.5)
@@ -1239,20 +1239,20 @@ packages:
   '@office-open/core@0.3.4':
     resolution: {integrity: sha512-KHr5Xw0njKmUbdKkCPHyArtXiDC6/du5FzG5icQve0yZ8y1C6ZlGdhT/c4gih7iy5W4i9j6lrSqt0w7QWtTwLQ==}
 
-  '@office-open/core@0.9.2':
-    resolution: {integrity: sha512-xbtoX6+cbujIkDhWHingfuZJRze26QjUPMFHo9zDy5Q/+LaugNA6QIiCdiJ2VNkJAHYS1yvEG/TnMgbC0hlslA==}
+  '@office-open/core@0.9.6':
+    resolution: {integrity: sha512-PxxlhPA4SQf3ZxKBI4YSG3eMh6OAJCXaoSfWE81kadOQSbzUL2+L3S1YR+aVqzV4Dc3TiEINGRSM3eHWhWelbQ==}
 
   '@office-open/docx@0.3.4':
     resolution: {integrity: sha512-CRsQETRV5Ehqdq15/wHtcDNrruZZltqD7G13YwWMjZgSOCS6NJ5PqLuYHLo72PE9rfOCG2BuusSjjow4xOPxrA==}
 
-  '@office-open/docx@0.9.2':
-    resolution: {integrity: sha512-jEJOwBfMYtAHS3U2ttWQI5r75/Mb1hjLOORY+NG6P80Tky2eZmr125Ttbevxn5OM8VebPdnpUJSEjJ3rdNG7iw==}
+  '@office-open/docx@0.9.6':
+    resolution: {integrity: sha512-Xz1pokbdtaZFcuL5+AcRJJ7Tj8Vpw7JesM0NeIjYaB305bRtgdgFHa8XHojeOCzzUVPlMxXrKS+6tghF0WWYAA==}
 
   '@office-open/xml@0.3.4':
     resolution: {integrity: sha512-o4C42ePYqJlHbIZuVzxrkaTERMNQATrZXVSqeQdZxe4D4L4y1IMX4XrtQvF5uG2mZPI+o6RXoRQdDTSxYADPGw==}
 
-  '@office-open/xml@0.9.2':
-    resolution: {integrity: sha512-lw8BA3f8taqaopiyTMNcIIdnIH0RsBVH07JodmBC2AvPNGIyrzIqZ1uNnAE5Jv2IzQcG5e3Tzdbaz9INF7N/Nw==}
+  '@office-open/xml@0.9.6':
+    resolution: {integrity: sha512-EKTs/POS7DcOPfLllkI4LeAIh0vI7zXNWzSkkitKNB9dCqT+/KSqsWNKG871JzhYHKyLEiL1bblsS69xoGJVwA==}
 
   '@oxc-minify/binding-android-arm-eabi@0.128.0':
     resolution: {integrity: sha512-EwdDhZLRmXxSnfy0v9gdOru7TutM8ItRg1Xv8e2B4boWMnHlFCIH38JfwgQnenbkF8SVTwVJtDCkmwEzN4q3xA==}
@@ -7621,10 +7621,10 @@ snapshots:
       hash.js: 1.1.7
       nanoid: 5.1.9
 
-  '@office-open/core@0.9.2':
+  '@office-open/core@0.9.6':
     dependencies:
       '@noble/hashes': 2.2.0
-      '@office-open/xml': 0.9.2
+      '@office-open/xml': 0.9.6
       fflate: 0.8.3
 
   '@office-open/docx@0.3.4':
@@ -7634,14 +7634,14 @@ snapshots:
       fflate: 0.8.2
       undio: 0.2.0
 
-  '@office-open/docx@0.9.2':
+  '@office-open/docx@0.9.6':
     dependencies:
-      '@office-open/core': 0.9.2
-      '@office-open/xml': 0.9.2
+      '@office-open/core': 0.9.6
+      '@office-open/xml': 0.9.6
 
   '@office-open/xml@0.3.4': {}
 
-  '@office-open/xml@0.9.2': {}
+  '@office-open/xml@0.9.6': {}
 
   '@oxc-minify/binding-android-arm-eabi@0.128.0':
     optional: true

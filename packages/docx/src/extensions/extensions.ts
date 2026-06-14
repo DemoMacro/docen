@@ -1,33 +1,34 @@
 import { all, createLowlight } from "lowlight";
 
 import { Extension, type AnyExtension } from "../core";
+import { Blockquote } from "./blockquote";
+import { CodeBlock } from "./code-block";
+import { ColumnBreak } from "./column-break";
+import { Details, DetailsSummary, DetailsContent } from "./details";
 import { Heading } from "./heading";
 import { Image } from "./image";
+import { Mention } from "./mention";
+import { OrderedList } from "./ordered-list";
+import { PageBreak } from "./page-break";
 import { Paragraph } from "./paragraph";
 import { Strike } from "./strike";
 import { Table } from "./table";
 import { TableCell } from "./table-cell";
 import { TableHeader } from "./table-header";
 import { TableRow } from "./table-row";
+import { TaskItem } from "./task-item";
 import { TextStyle } from "./text-style";
 import {
   Document,
   Text,
-  Blockquote,
   HorizontalRule,
   CodeBlockLowlight,
   BulletList,
-  OrderedList,
   ListItem,
   ListKeymap,
   TaskList,
-  TaskItem,
   HardBreak,
-  Details,
-  DetailsSummary,
-  DetailsContent,
   Emoji,
-  Mention,
   Mathematics,
   Bold,
   Italic,
@@ -50,11 +51,13 @@ export const tiptapNodeExtensions: AnyExtension[] = [
   Paragraph,
   Text,
   HardBreak,
+  PageBreak,
+  ColumnBreak,
   Blockquote,
   OrderedList,
   BulletList,
   ListItem,
-  CodeBlockLowlight.configure({
+  CodeBlock.configure({
     lowlight: createLowlight(all),
   }),
   Details,
@@ -96,8 +99,8 @@ export const tiptapMarkExtensions: AnyExtension[] = [
 // Complete extension set
 export const docxExtensions: AnyExtension[] = [...tiptapNodeExtensions, ...tiptapMarkExtensions];
 
-// StarterKit options type
-export interface StarterKitOptions {
+// DocxKit options type
+export interface DocxKitOptions {
   bold?: Record<string, any> | false;
   blockquote?: Record<string, any> | false;
   bulletList?: Record<string, any> | false;
@@ -122,8 +125,8 @@ export interface StarterKitOptions {
   trailingNode?: Record<string, any> | false;
 }
 
-export const StarterKit = Extension.create<StarterKitOptions>({
-  name: "docenKit",
+export const DocxKit = Extension.create<DocxKitOptions>({
+  name: "docxKit",
 
   addExtensions() {
     const extensions: AnyExtension[] = [];

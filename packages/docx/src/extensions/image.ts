@@ -1,5 +1,4 @@
-import type { JSONContent } from "@tiptap/core";
-
+import type { JSONContent } from "../core";
 import { Image as BaseImage } from "./tiptap";
 
 type CropRect = { left?: number; top?: number; right?: number; bottom?: number };
@@ -268,6 +267,6 @@ export const Image = BaseImage.extend({
     return ["img", attrs] as const;
   },
 
-  renderDocx: renderDocx as (node: JSONContent) => Record<string, unknown>,
-  parseDocx: parseDocx as (opts: Record<string, unknown>) => Record<string, unknown>,
+  renderDocx,
+  parseDocx,
 });
