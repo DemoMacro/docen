@@ -109,27 +109,59 @@ export function parseDocx(imageOpts: Record<string, unknown>): Record<string, un
 
 // ── Node-level renderHTML helpers ──
 
-export function renderCropAttrs(crop: Record<string, unknown> | CropRect): { style: string } {
+/** Dimensions + source needed to size the background image to the extent box. */
+export interface CropRenderContext {
+  width?: number;
+  height?: number;
+  src?: string;
+}
+
+/**
+ * Render crop as background-image styles for byte-accurate four-sided srcRect.
+ *
+ * object-fit:cover scales uniformly, so it only matches single-axis crops; for
+ * two-sided crops it shrinks the whole image and shows too much. background-size
+ * scales each axis independently (W/visibleW × H/visibleH), so the visible
+ * srcRect region always maps exactly onto the extent box. background-position
+ * then shifts the original so the cropped-left/top region falls outside the box.
+ *
+ * Requires a div[role=img] host (see Image.renderHTML) — an <img> cannot
+ * background-crop itself, since its src is always painted in the foreground.
+ */
+export function renderCropAttrs(
+  crop: Record<string, unknown> | CropRect,
+  ctx: CropRenderContext = {},
+): { style: string } {
   const c = crop as CropRect;
   const leftPct = (c.left || 0) / 100000;
   const topPct = (c.top || 0) / 100000;
   const rightPct = (c.right || 0) / 100000;
   const bottomPct = (c.bottom || 0) / 100000;
 
-  // object-position aligns the visible slice inside the cover-scaled image.
-  // The percentage is relative to (container − image), so to push a cropped
-  // side out of view we point at the opposite edge: X = left/(left+right),
-  // Y = top/(top+bottom). A top-only crop (the common case) → Y=100%, bottom
-  // edge aligned, top sliver clipped. (object-fit:cover scales uniformly, so
-  // multi-side crops stay approximate here — a background-image path would be
-  // needed for byte-accurate four-sided srcRect.)
-  const horizCrop = leftPct + rightPct;
-  const vertCrop = topPct + bottomPct;
-  const posX = horizCrop > 0 ? (leftPct / horizCrop) * 100 : 50;
-  const posY = vertCrop > 0 ? (topPct / vertCrop) * 100 : 50;
+  const visibleW = 1 - leftPct - rightPct;
+  const visibleH = 1 - topPct - bottomPct;
 
+  // Original displayed size per axis (independent of the other axis — the key
+  // difference from object-fit:cover). Falls back to the box size when an axis
+  // is uncropped (visible = 1 → same size).
+  const w = ctx.width ?? 0;
+  const h = ctx.height ?? 0;
+  const bgW = visibleW > 0 ? w / visibleW : w;
+  const bgH = visibleH > 0 ? h / visibleH : h;
+
+  // background-position % = (box − image) × pct/100; solving for the image's
+  // leftPct·bgW point at the box's left edge gives pct = left/(left+right).
+  const posX = leftPct + rightPct > 0 ? (leftPct / (leftPct + rightPct)) * 100 : 50;
+  const posY = topPct + bottomPct > 0 ? (topPct / (topPct + bottomPct)) * 100 : 50;
+
+  const src = ctx.src ?? "";
   return {
-    style: `object-fit:cover;object-position:${posX.toFixed(2)}% ${posY.toFixed(2)}%`,
+    style: [
+      `background-image:url(${src})`,
+      `background-size:${bgW.toFixed(2)}px ${bgH.toFixed(2)}px`,
+      `background-position:${posX.toFixed(2)}% ${posY.toFixed(2)}%`,
+      "background-repeat:no-repeat",
+    ].join(";"),
   };
 }
 
@@ -173,11 +205,6 @@ function renderImageStyles(attrs: Record<string, unknown>): string[] {
       if (m.left) styles.push(`margin-left:${((m.left * 96) / 1440).toFixed(1)}pt`);
       if (m.right) styles.push(`margin-right:${((m.right * 96) / 1440).toFixed(1)}pt`);
     }
-  }
-
-  if (attrs.crop) {
-    const cropAttrs = renderCropAttrs(attrs.crop as CropRect);
-    styles.push(cropAttrs.style);
   }
 
   return styles;
@@ -262,17 +289,86 @@ export const Image = BaseImage.extend({
     node: { attrs: Record<string, unknown> };
     HTMLAttributes: Record<string, unknown>;
   }) {
-    const styles = renderImageStyles(node.attrs);
-    const attrs: Record<string, unknown> = { ...HTMLAttributes };
+    const attrs = node.attrs;
 
-    if (styles.length > 0) attrs.style = styles.join(";");
-    if (node.attrs.floating) attrs["data-floating"] = JSON.stringify(node.attrs.floating);
-    if (node.attrs.outline) attrs["data-outline"] = JSON.stringify(node.attrs.outline);
-    if (node.attrs.crop) attrs["data-crop"] = JSON.stringify(node.attrs.crop);
+    // Cropped images render as div[role=img] + background-image so background
+    // -size can scale each axis independently (object-fit:cover is uniform and
+    // only exact for single-axis crops). Non-cropped images stay plain <img>.
+    if (attrs.crop) {
+      const width = attrs.width as number;
+      const height = attrs.height as number;
+      const styles = renderImageStyles(attrs);
+      const crop = renderCropAttrs(attrs.crop as CropRect, {
+        width,
+        height,
+        src: attrs.src as string | undefined,
+      });
+      styles.push(crop.style, `width:${width}px`, `height:${height}px`);
+      const divAttrs: Record<string, unknown> = {
+        "data-image": "crop",
+        role: "img",
+        style: styles.join(";"),
+      };
+      if (attrs.alt) divAttrs["aria-label"] = attrs.alt;
+      if (attrs.title) divAttrs["title"] = attrs.title;
+      if (attrs.floating) divAttrs["data-floating"] = JSON.stringify(attrs.floating);
+      if (attrs.outline) divAttrs["data-outline"] = JSON.stringify(attrs.outline);
+      divAttrs["data-crop"] = JSON.stringify(attrs.crop);
+      return ["div", divAttrs] as const;
+    }
 
-    return ["img", attrs] as const;
+    const htmlAttrs: Record<string, unknown> = { ...HTMLAttributes };
+    const styles = renderImageStyles(attrs);
+    if (styles.length > 0) htmlAttrs.style = styles.join(";");
+    if (attrs.floating) htmlAttrs["data-floating"] = JSON.stringify(attrs.floating);
+    if (attrs.outline) htmlAttrs["data-outline"] = JSON.stringify(attrs.outline);
+    return ["img", htmlAttrs] as const;
+  },
+
+  parseHTML() {
+    return [
+      {
+        tag: "div[data-image=crop]",
+        getAttrs: (el) => parseCropDiv(el as HTMLElement),
+      },
+      { tag: "img[src]" },
+    ];
   },
 
   renderDocx,
   parseDocx,
 });
+
+/**
+ * Reverse-parse a cropped div[role=img] back into image attrs.
+ *
+ * Covers only what the attribute-level parseHTML rules cannot recover from a
+ * div: src (background-image), width/height (inline style extent box), and
+ * alt/title (aria-label/title). rotation/crop/floating/outline are left to
+ * their attribute parseHTML rules, which read the style/data-* the div carries.
+ */
+function parseCropDiv(el: HTMLElement): Record<string, unknown> {
+  const style = el.getAttribute("style") || "";
+  const attrs: Record<string, unknown> = {};
+
+  // src lives in background-image (the div has no <img> src attribute).
+  // Tolerate whitespace around `:` — serializers may emit `background-image: url(..)`.
+  const bgMatch = style.match(/background-image:\s*url\(\s*([^)]+?)\s*\)/);
+  if (bgMatch) {
+    attrs.src = bgMatch[1].replace(/^['"]|['"]$/g, "");
+  }
+
+  // width/height live in the inline style (extent box), not HTML attributes
+  const wMatch = style.match(/(?:^|;)\s*width:\s*([\d.]+)px/);
+  const hMatch = style.match(/(?:^|;)\s*height:\s*([\d.]+)px/);
+  if (wMatch) attrs.width = parseFloat(wMatch[1]);
+  if (hMatch) attrs.height = parseFloat(hMatch[1]);
+
+  // alt/title carry over via aria-label/title (the div has no alt attribute)
+  const ariaLabel = el.getAttribute("aria-label");
+  if (ariaLabel) attrs.alt = ariaLabel;
+  const title = el.getAttribute("title");
+  if (title) attrs.title = title;
+
+  return attrs;
+}
