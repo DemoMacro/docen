@@ -116,11 +116,17 @@ export function renderCropAttrs(crop: Record<string, unknown> | CropRect): { sty
   const rightPct = (c.right || 0) / 100000;
   const bottomPct = (c.bottom || 0) / 100000;
 
-  const visibleWidthPct = 1 - leftPct - rightPct;
-  const visibleHeightPct = 1 - topPct - bottomPct;
-
-  const posX = visibleWidthPct > 0 ? (leftPct / visibleWidthPct) * 100 : 0;
-  const posY = visibleHeightPct > 0 ? (topPct / visibleHeightPct) * 100 : 0;
+  // object-position aligns the visible slice inside the cover-scaled image.
+  // The percentage is relative to (container − image), so to push a cropped
+  // side out of view we point at the opposite edge: X = left/(left+right),
+  // Y = top/(top+bottom). A top-only crop (the common case) → Y=100%, bottom
+  // edge aligned, top sliver clipped. (object-fit:cover scales uniformly, so
+  // multi-side crops stay approximate here — a background-image path would be
+  // needed for byte-accurate four-sided srcRect.)
+  const horizCrop = leftPct + rightPct;
+  const vertCrop = topPct + bottomPct;
+  const posX = horizCrop > 0 ? (leftPct / horizCrop) * 100 : 50;
+  const posY = vertCrop > 0 ? (topPct / vertCrop) * 100 : 50;
 
   return {
     style: `object-fit:cover;object-position:${posX.toFixed(2)}% ${posY.toFixed(2)}%`,
