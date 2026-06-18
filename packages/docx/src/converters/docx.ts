@@ -38,6 +38,7 @@ import * as tableHeaderExt from "../extensions/table-header";
 import * as tableRowExt from "../extensions/table-row";
 import * as taskItemExt from "../extensions/task-item";
 import * as textStyleExt from "../extensions/text-style";
+import { bytesToBase64 } from "./base64";
 import { prepareDocument, type PrepareStep } from "./prepare";
 
 export type { DocumentOptions };
@@ -67,22 +68,6 @@ function mergeTextNodes(nodes: JSONContent[]): JSONContent[] {
     result.push({ ...node });
   }
   return result;
-}
-
-/**
- * Encode bytes as base64. Node uses Buffer (fast path); browsers fall back to
- * chunked `String.fromCharCode` + `btoa`. The chunking matters: spreading a
- * whole image into `String.fromCharCode(...bytes)` makes every byte a function
- * argument and overflows the call stack on large images.
- */
-function bytesToBase64(bytes: Uint8Array): string {
-  if (typeof Buffer !== "undefined") return Buffer.from(bytes).toString("base64");
-  const CHUNK = 0x4000; // 16 KiB — well under the argument/stack limit
-  let binary = "";
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
-  }
-  return btoa(binary);
 }
 
 // ── Blockquote signature ──
@@ -198,6 +183,15 @@ export class DocxManager {
         return this.compileListFromNode(node, 0);
       case "details":
         return this.compileDetailsNode(node);
+      case "passthrough": {
+        // Opaque SectionChild (rawXml/bookmark/toc/textbox/…) round-tripped verbatim.
+        const data = (node.attrs?.data as string) ?? "{}";
+        try {
+          return JSON.parse(data) as SectionChild;
+        } catch {
+          return null;
+        }
+      }
       default:
         return null;
     }
@@ -672,8 +666,18 @@ export class DocxManager {
       if (sdt.properties?.tag === detailsExt.DETAILS_TAG) {
         return this.resolveDetailsSdt(sdt);
       }
+      // Generic SDT (non-details content control) — carry verbatim.
+      return this.resolvePassthrough(child);
     }
-    return null;
+    // rawXml (incl. aggregated TOC field), bookmarkStart/End, toc, textbox,
+    // altChunk, subDoc, customXml — no native Tiptap node. Carry the SectionChild
+    // verbatim so the round-trip is byte-faithful.
+    return this.resolvePassthrough(child);
+  }
+
+  /** Wrap an opaque SectionChild in a passthrough atom (attrs.data = JSON). */
+  private resolvePassthrough(child: SectionChild): JSONContent {
+    return { type: "passthrough", attrs: { data: JSON.stringify(child) } };
   }
 
   /**

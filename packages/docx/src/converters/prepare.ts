@@ -1,4 +1,5 @@
 import type { JSONContent } from "../core";
+import { bytesToBase64 } from "./base64";
 
 // ── Types ──
 
@@ -94,12 +95,7 @@ async function toDataUrl(src: string, handler: ImageFetchHandler): Promise<strin
   };
   const mime = typeMap[ext] ?? "image/png";
 
-  const base64 =
-    typeof btoa !== "undefined"
-      ? btoa(String.fromCharCode(...data))
-      : Buffer.from(data).toString("base64");
-
-  return `data:${mime};base64,${base64}`;
+  return `data:${mime};base64,${bytesToBase64(data)}`;
 }
 
 async function walkImages(node: JSONContent, handler: ImageFetchHandler): Promise<void> {

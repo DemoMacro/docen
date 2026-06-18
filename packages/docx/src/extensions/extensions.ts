@@ -11,6 +11,7 @@ import { Mention } from "./mention";
 import { OrderedList } from "./ordered-list";
 import { PageBreak } from "./page-break";
 import { Paragraph } from "./paragraph";
+import { Passthrough } from "./passthrough";
 import { Strike } from "./strike";
 import { Table } from "./table";
 import { TableCell } from "./table-cell";
@@ -53,6 +54,7 @@ export const tiptapNodeExtensions: AnyExtension[] = [
   HardBreak,
   PageBreak,
   ColumnBreak,
+  Passthrough,
   Blockquote,
   OrderedList,
   BulletList,
@@ -211,6 +213,7 @@ export const DocxKit = Extension.create<DocxKitOptions>({
 export * from "./tiptap";
 export { Heading } from "./heading";
 export { Image } from "./image";
+export { Passthrough } from "./passthrough";
 export { Paragraph } from "./paragraph";
 export { TableRow } from "./table-row";
 export { Table } from "./table";
