@@ -40,8 +40,8 @@ importers:
   packages/docx:
     dependencies:
       '@office-open/docx':
-        specifier: 0.9.8
-        version: 0.9.8
+        specifier: 0.10.0
+        version: 0.10.0
       '@tiptap/core':
         specifier: 3.22.5
         version: 3.22.5(@tiptap/pm@3.22.5)
@@ -1236,23 +1236,23 @@ packages:
   '@nuxtjs/mdc@0.21.1':
     resolution: {integrity: sha512-DIeUD7IahWVUSoZExysxH9dX51Io6hcQYgGJODq0cMTGqaoDD32lRfHBJxYUmy+sUCV1+1hfa2ixspgJgEd2GA==}
 
+  '@office-open/core@0.10.0':
+    resolution: {integrity: sha512-o1AH2LBcUFWS4qhSIQEKm6OvoDh7Rx494IEzQRhfQgqDYNXWBxoPkLqcEaRtX618kcZD3NhM6nlQ6ZX5Tx7jAA==}
+
   '@office-open/core@0.3.4':
     resolution: {integrity: sha512-KHr5Xw0njKmUbdKkCPHyArtXiDC6/du5FzG5icQve0yZ8y1C6ZlGdhT/c4gih7iy5W4i9j6lrSqt0w7QWtTwLQ==}
 
-  '@office-open/core@0.9.8':
-    resolution: {integrity: sha512-xaICuWT49Q3aoizEIktPyxgB4/WqreZ+wJqGlqbbTg+D5QCvwtWnfrME+IHrzi3KKbNN01XMEFRDu8fU7pTo2A==}
+  '@office-open/docx@0.10.0':
+    resolution: {integrity: sha512-XY9zoseRBb740zfvUk7DMVaSfV69OrreIgTeN7VRRhwVKRLIU13h3VKNPrlygwEw/OnYssoPMuQGAI3KNeRuMw==}
 
   '@office-open/docx@0.3.4':
     resolution: {integrity: sha512-CRsQETRV5Ehqdq15/wHtcDNrruZZltqD7G13YwWMjZgSOCS6NJ5PqLuYHLo72PE9rfOCG2BuusSjjow4xOPxrA==}
 
-  '@office-open/docx@0.9.8':
-    resolution: {integrity: sha512-KEWnjlh34If2CMKGTkfgIZNjcPt70dH6fq5tfmKIcUKURm3ayEe+AyhKaQwc8gljsNcl5vm/Woef28TlpBpkrA==}
+  '@office-open/xml@0.10.0':
+    resolution: {integrity: sha512-IB49mLM85/0zmOW0ifOdbi/w2fWmtiTRNiDagrIrWNCR+LwJo4x5CxRQ5UKICtDFLCEjGuGtJEhAN2ERQUrmyw==}
 
   '@office-open/xml@0.3.4':
     resolution: {integrity: sha512-o4C42ePYqJlHbIZuVzxrkaTERMNQATrZXVSqeQdZxe4D4L4y1IMX4XrtQvF5uG2mZPI+o6RXoRQdDTSxYADPGw==}
-
-  '@office-open/xml@0.9.8':
-    resolution: {integrity: sha512-0sQNCqBAlu/9+EguE1/tggFxA32OpURuKNsiTPDs1FKUB7X3zFFIfWwZ1CJ2OkiI9FOAWUFVymUjyOXlyz26+w==}
 
   '@oxc-minify/binding-android-arm-eabi@0.128.0':
     resolution: {integrity: sha512-EwdDhZLRmXxSnfy0v9gdOru7TutM8ItRg1Xv8e2B4boWMnHlFCIH38JfwgQnenbkF8SVTwVJtDCkmwEzN4q3xA==}
@@ -7614,6 +7614,12 @@ snapshots:
       - magicast
       - supports-color
 
+  '@office-open/core@0.10.0':
+    dependencies:
+      '@noble/hashes': 2.2.0
+      '@office-open/xml': 0.10.0
+      fflate: 0.8.3
+
   '@office-open/core@0.3.4':
     dependencies:
       '@office-open/xml': 0.3.4
@@ -7621,11 +7627,10 @@ snapshots:
       hash.js: 1.1.7
       nanoid: 5.1.9
 
-  '@office-open/core@0.9.8':
+  '@office-open/docx@0.10.0':
     dependencies:
-      '@noble/hashes': 2.2.0
-      '@office-open/xml': 0.9.8
-      fflate: 0.8.3
+      '@office-open/core': 0.10.0
+      '@office-open/xml': 0.10.0
 
   '@office-open/docx@0.3.4':
     dependencies:
@@ -7634,14 +7639,9 @@ snapshots:
       fflate: 0.8.2
       undio: 0.2.0
 
-  '@office-open/docx@0.9.8':
-    dependencies:
-      '@office-open/core': 0.9.8
-      '@office-open/xml': 0.9.8
+  '@office-open/xml@0.10.0': {}
 
   '@office-open/xml@0.3.4': {}
-
-  '@office-open/xml@0.9.8': {}
 
   '@oxc-minify/binding-android-arm-eabi@0.128.0':
     optional: true

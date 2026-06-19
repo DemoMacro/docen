@@ -1,4 +1,4 @@
-import { patchDocument, PatchType } from "@office-open/docx";
+import { patchDocument } from "@office-open/docx";
 import type { OutputByType, OutputType, SectionChild } from "@office-open/docx";
 
 import type { JSONContent } from "../core";
@@ -62,10 +62,7 @@ export async function patchDOCX<T extends OutputType>(
     outputType,
   } = options;
 
-  const patchesObject: Record<
-    string,
-    { type: typeof PatchType.DOCUMENT; children: SectionChild[] }
-  > = {};
+  const patchesObject: Record<string, { type: "document"; children: SectionChild[] }> = {};
 
   for (const [key, patchContent] of Object.entries(patches)) {
     if (prepare !== false) {
@@ -73,13 +70,13 @@ export async function patchDOCX<T extends OutputType>(
     }
     const docOpts = compileDocument(patchContent.content);
     const children = (docOpts.sections?.[0]?.children ?? []) as SectionChild[];
-    patchesObject[key] = { type: PatchType.DOCUMENT, children };
+    patchesObject[key] = { type: "document", children };
   }
 
   return patchDocument({
     outputType,
     data: template,
-    patches: patchesObject,
+    placeholders: patchesObject,
     ...(keepOriginalStyles !== undefined && { keepOriginalStyles }),
     ...(recursive !== undefined && { recursive }),
     ...(placeholderDelimiters && {
