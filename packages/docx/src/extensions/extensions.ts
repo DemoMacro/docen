@@ -6,6 +6,7 @@ import { CodeBlock } from "./code-block";
 import { ColumnBreak } from "./column-break";
 import { Details, DetailsSummary, DetailsContent } from "./details";
 import { Document } from "./document";
+import { Emoji } from "./emoji";
 import { Heading } from "./heading";
 import { Image } from "./image";
 import { Mention } from "./mention";
@@ -29,7 +30,6 @@ import {
   ListKeymap,
   TaskList,
   HardBreak,
-  Emoji,
   Mathematics,
   Bold,
   Italic,
@@ -70,6 +70,10 @@ export const tiptapNodeExtensions: AnyExtension[] = [
   Image.configure({
     inline: true,
   }),
+  // NOTE: Mathematics (blockMath/inlineMath) renders via KaTeX in the editor but
+  // has no DOCX conversion yet — DOCX compile drops math content. latex↔OMML
+  // conversion is separate work (office-open has OMML parse/stringify via its
+  // MathInput type, but no latex bridge). Kept registered so the editor works.
   Mathematics,
   Mention,
   Table,
@@ -212,6 +216,7 @@ export const DocxKit = Extension.create<DocxKitOptions>({
 // Export all individual extensions for direct imports
 export * from "./tiptap";
 export { Document } from "./document";
+export { Emoji } from "./emoji";
 export { Heading } from "./heading";
 export { Image } from "./image";
 export { Passthrough } from "./passthrough";

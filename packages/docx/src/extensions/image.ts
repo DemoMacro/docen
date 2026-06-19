@@ -22,6 +22,21 @@ type CropRect = { left?: number; top?: number; right?: number; bottom?: number }
 
 // ── DOCX serialization (module-level, exported for DocxManager) ──
 
+/** Attribute spec for a nested office-open value stored as JSON in a data-* attr. */
+const attrDataJson = (name: string) => ({
+  default: null,
+  rendered: false,
+  parseHTML: (element: HTMLElement) => {
+    const raw = element.getAttribute(name);
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  },
+});
+
 /**
  * Tiptap JSON image node → CoreImageOptions-shaped object.
  *
@@ -69,6 +84,17 @@ export function renderDocx(node: JSONContent): Record<string, unknown> | null {
   if (attrs.floating) imageOpts.floating = attrs.floating;
   if (attrs.crop) imageOpts.srcRect = attrs.crop;
   if (attrs.outline) imageOpts.outline = attrs.outline;
+  // 0.9.7+ fidelity fields (office-open parses + stringifies each verbatim)
+  if (attrs.nonVisualProperties) imageOpts.nonVisualProperties = attrs.nonVisualProperties;
+  if (attrs.effectExtent) transformation.effectExtent = attrs.effectExtent;
+  if (attrs.graphicFrameLocks) imageOpts.graphicFrameLocks = attrs.graphicFrameLocks;
+  if (attrs.blipEffects) imageOpts.blipEffects = attrs.blipEffects;
+  if (attrs.useLocalDpi !== null && attrs.useLocalDpi !== undefined)
+    imageOpts.useLocalDpi = attrs.useLocalDpi;
+  if (attrs.fill) imageOpts.fill = attrs.fill;
+  if (attrs.effects) imageOpts.effects = attrs.effects;
+  if (attrs.tile) imageOpts.tile = attrs.tile;
+  if (attrs.runPropertiesRawXml) imageOpts.runPropertiesRawXml = attrs.runPropertiesRawXml;
 
   return { image: imageOpts };
 }
@@ -103,6 +129,17 @@ export function parseDocx(imageOpts: Record<string, unknown>): Record<string, un
   if (opts.floating) attrs.floating = opts.floating;
   if (opts.srcRect) attrs.crop = opts.srcRect;
   if (opts.outline) attrs.outline = opts.outline;
+  // 0.9.7+ fidelity fields (reverse of renderDocx)
+  if (opts.nonVisualProperties) attrs.nonVisualProperties = opts.nonVisualProperties;
+  const effectExtent = (opts.transformation as Record<string, unknown> | undefined)?.effectExtent;
+  if (effectExtent) attrs.effectExtent = effectExtent;
+  if (opts.graphicFrameLocks) attrs.graphicFrameLocks = opts.graphicFrameLocks;
+  if (opts.blipEffects) attrs.blipEffects = opts.blipEffects;
+  if (opts.useLocalDpi !== undefined) attrs.useLocalDpi = opts.useLocalDpi;
+  if (opts.fill) attrs.fill = opts.fill;
+  if (opts.effects) attrs.effects = opts.effects;
+  if (opts.tile) attrs.tile = opts.tile;
+  if (opts.runPropertiesRawXml) attrs.runPropertiesRawXml = opts.runPropertiesRawXml;
 
   return attrs;
 }
@@ -210,6 +247,33 @@ function renderImageStyles(attrs: Record<string, unknown>): string[] {
   return styles;
 }
 
+/**
+ * Stamp the nested office-open attrs onto an HTML attribute map as JSON
+ * data-* pairs. Shared by the cropped-div and plain-img render branches so the
+ * fidelity fields (floating/outline/nonVisualProperties/…) round-trip through
+ * HTML identically. `crop` is handled separately (crop branch only).
+ */
+const RAW_ATTR_DATA: Array<[string, string]> = [
+  ["floating", "data-floating"],
+  ["outline", "data-outline"],
+  ["nonVisualProperties", "data-non-visual"],
+  ["effectExtent", "data-effect-extent"],
+  ["graphicFrameLocks", "data-graphic-frame-locks"],
+  ["blipEffects", "data-blip-effects"],
+  ["useLocalDpi", "data-use-local-dpi"],
+  ["fill", "data-fill"],
+  ["effects", "data-effects"],
+  ["tile", "data-tile"],
+  ["runPropertiesRawXml", "data-run-properties-raw-xml"],
+];
+
+function attachRawAttrs(target: Record<string, unknown>, attrs: Record<string, unknown>): void {
+  for (const [attr, data] of RAW_ATTR_DATA) {
+    const value = attrs[attr];
+    if (value !== null && value !== undefined) target[data] = JSON.stringify(value);
+  }
+}
+
 // ── Extension ──
 
 export const Image = BaseImage.extend({
@@ -279,6 +343,18 @@ export const Image = BaseImage.extend({
           }
         },
       },
+
+      // 0.9.7+ round-trip fidelity fields. office-open parses + stringifies
+      // each; we carry them verbatim as JSON in data-* attrs.
+      nonVisualProperties: attrDataJson("data-non-visual"), // pic:cNvPr (id/name/descr)
+      effectExtent: attrDataJson("data-effect-extent"), // wp:effectExtent (EMUs)
+      graphicFrameLocks: attrDataJson("data-graphic-frame-locks"),
+      blipEffects: attrDataJson("data-blip-effects"),
+      useLocalDpi: attrDataJson("data-use-local-dpi"), // a14:useLocalDpi
+      fill: attrDataJson("data-fill"),
+      effects: attrDataJson("data-effects"),
+      tile: attrDataJson("data-tile"),
+      runPropertiesRawXml: attrDataJson("data-run-properties-raw-xml"),
     };
   },
 
@@ -311,8 +387,7 @@ export const Image = BaseImage.extend({
       };
       if (attrs.alt) divAttrs["aria-label"] = attrs.alt;
       if (attrs.title) divAttrs["title"] = attrs.title;
-      if (attrs.floating) divAttrs["data-floating"] = JSON.stringify(attrs.floating);
-      if (attrs.outline) divAttrs["data-outline"] = JSON.stringify(attrs.outline);
+      attachRawAttrs(divAttrs, attrs);
       divAttrs["data-crop"] = JSON.stringify(attrs.crop);
       return ["div", divAttrs] as const;
     }
@@ -320,8 +395,7 @@ export const Image = BaseImage.extend({
     const htmlAttrs: Record<string, unknown> = { ...HTMLAttributes };
     const styles = renderImageStyles(attrs);
     if (styles.length > 0) htmlAttrs.style = styles.join(";");
-    if (attrs.floating) htmlAttrs["data-floating"] = JSON.stringify(attrs.floating);
-    if (attrs.outline) htmlAttrs["data-outline"] = JSON.stringify(attrs.outline);
+    attachRawAttrs(htmlAttrs, attrs);
     return ["img", htmlAttrs] as const;
   },
 
