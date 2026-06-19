@@ -40,9 +40,20 @@ const CSS_COLORS: Record<string, string> = {
   tomato: "#FF6347",
 };
 
-/** Normalize a CSS color value to hex (e.g., "red" → "#FF0000", "#ff0000" → "#FF0000"). */
-export function normalizeColorToHex(color: string | undefined): string | undefined {
+/** Normalize a CSS color value to hex (e.g., "red" → "#FF0000", "#ff0000" → "#FF0000").
+ *  Accepts a string (CSS name/hex or bare OOXML hex), or an OOXML ColorOptions
+ *  object ({ val, themeColor, themeTint, themeShade }) as emitted for theme
+ *  colors — the object form resolves to its val fallback (full theme-color
+ *  resolution needs theme.xml, not yet wired). */
+export function normalizeColorToHex(color: unknown): string | undefined {
   if (!color) return undefined;
+  if (typeof color === "object") {
+    const { val } = color as { val?: unknown };
+    return val ? normalizeColorToHex(val) : undefined;
+  }
+  if (typeof color !== "string") return undefined;
+  // OOXML "auto" has no CSS equivalent — skip (leave color unset).
+  if (color === "auto") return undefined;
   if (color.startsWith("#"))
     return color.length === 4
       ? `#${color[1]}${color[1]}${color[2]}${color[2]}${color[3]}${color[3]}`.toUpperCase()
