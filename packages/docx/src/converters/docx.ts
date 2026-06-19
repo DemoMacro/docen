@@ -54,6 +54,50 @@ function cleanAttrs(attrs: Record<string, unknown>): Record<string, unknown> {
   return result;
 }
 
+/**
+ * Core document properties (docProps/core.xml) carried on `doc.attrs.core` for
+ * lossless round-trip. Mirrors @office-open/core's CorePropertiesOptions, which
+ * @office-open/docx's DocumentOptions extends. Inlined here (not imported from
+ * @office-open/core) to keep @docen/docx's dependency surface on @office-open/docx.
+ */
+interface DocxCoreProperties {
+  title?: string;
+  subject?: string;
+  creator?: string;
+  keywords?: string;
+  description?: string;
+  lastModifiedBy?: string;
+  lastPrinted?: string;
+  created?: string;
+  modified?: string;
+  revision?: number;
+}
+
+/** Keys round-tripped between DocumentOptions core properties and `doc.attrs.core`. */
+const CORE_PROPERTY_KEYS: readonly (keyof DocxCoreProperties)[] = [
+  "title",
+  "subject",
+  "creator",
+  "keywords",
+  "description",
+  "lastModifiedBy",
+  "lastPrinted",
+  "created",
+  "modified",
+  "revision",
+];
+
+/** Collect core properties present on DocumentOptions into a plain object. */
+function extractCoreProperties(docOpts: DocumentOptions): DocxCoreProperties | null {
+  const source = docOpts as unknown as Record<string, unknown>;
+  const core: Record<string, unknown> = {};
+  for (const key of CORE_PROPERTY_KEYS) {
+    const value = source[key];
+    if (value !== undefined && value !== null) core[key] = value;
+  }
+  return Object.keys(core).length > 0 ? (core as DocxCoreProperties) : null;
+}
+
 /** Merge consecutive text nodes with same marks */
 function mergeTextNodes(nodes: JSONContent[]): JSONContent[] {
   const result: JSONContent[] = [];
@@ -105,9 +149,11 @@ export class DocxManager {
     }
 
     const styles = (json.attrs?.styles ?? undefined) as DocumentOptions["styles"] | undefined;
+    const core = (json.attrs?.core ?? undefined) as DocxCoreProperties | undefined;
     return {
       sections: [{ children }],
       ...(styles ? { styles } : {}),
+      ...core,
       ...(this.numberingConfigs.length > 0
         ? { numbering: { config: this.numberingConfigs } as NumberingOptions }
         : {}),
@@ -128,12 +174,15 @@ export class DocxManager {
       type: "doc",
       content: content.length > 0 ? content : [{ type: "paragraph" }],
     };
-    // Carry the styles library (styles.xml) through the JSON for lossless
-    // round-trip. office-open generates importedStyles/docDefaultsXml/
-    // latentStylesXml verbatim from this.
-    if (docOpts.styles) {
-      doc.attrs = { styles: docOpts.styles };
-    }
+    // Carry the styles library (styles.xml) and core properties (docProps/
+    // core.xml) through the JSON for lossless round-trip. office-open regenerates
+    // importedStyles/docDefaultsXml/latentStylesXml from `styles`, and writes
+    // `core` back to docProps/core.xml.
+    const attrs: Record<string, unknown> = {};
+    if (docOpts.styles) attrs.styles = docOpts.styles;
+    const core = extractCoreProperties(docOpts);
+    if (core) attrs.core = core;
+    if (Object.keys(attrs).length > 0) doc.attrs = attrs;
     return doc;
   }
 
