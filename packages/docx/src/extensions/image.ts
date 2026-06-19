@@ -1,3 +1,5 @@
+import type { Floating } from "@office-open/docx";
+
 import type { JSONContent } from "../core";
 import { Image as BaseImage } from "./tiptap";
 
@@ -82,7 +84,7 @@ export function renderDocx(node: JSONContent): Record<string, unknown> | null {
 
   // Near-identity pass-through for nested office-open objects
   if (attrs.floating) imageOpts.floating = attrs.floating;
-  if (attrs.crop) imageOpts.srcRect = attrs.crop;
+  if (attrs.crop) imageOpts.sourceRectangle = attrs.crop;
   if (attrs.outline) imageOpts.outline = attrs.outline;
   // 0.9.7+ fidelity fields (office-open parses + stringifies each verbatim)
   if (attrs.nonVisualProperties) imageOpts.nonVisualProperties = attrs.nonVisualProperties;
@@ -127,7 +129,7 @@ export function parseDocx(imageOpts: Record<string, unknown>): Record<string, un
 
   // Near-identity pass-through for nested office-open objects
   if (opts.floating) attrs.floating = opts.floating;
-  if (opts.srcRect) attrs.crop = opts.srcRect;
+  if (opts.sourceRectangle) attrs.crop = opts.sourceRectangle;
   if (opts.outline) attrs.outline = opts.outline;
   // 0.9.7+ fidelity fields (reverse of renderDocx)
   if (opts.nonVisualProperties) attrs.nonVisualProperties = opts.nonVisualProperties;
@@ -211,7 +213,7 @@ function renderImageStyles(attrs: Record<string, unknown>): string[] {
     styles.push(`transform:rotate(${attrs.rotation as number}deg)`);
   }
 
-  const f = attrs.floating as Record<string, unknown> | null;
+  const f = attrs.floating as Floating | null;
   if (f) {
     styles.push(f.behindDocument ? "z-index:-1" : "z-index:1");
 

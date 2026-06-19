@@ -1,7 +1,7 @@
+import { encodeBase64 } from "@office-open/core";
 import { imageMeta } from "image-meta";
 
 import type { JSONContent } from "../core";
-import { bytesToBase64 } from "./base64";
 
 // ── Types ──
 
@@ -114,7 +114,7 @@ async function toDataUrl(src: string, handler: ImageFetchHandler): Promise<strin
   };
   const mime = typeMap[ext] ?? "image/png";
 
-  return `data:${mime};base64,${bytesToBase64(data)}`;
+  return `data:${mime};base64,${encodeBase64(data)}`;
 }
 
 async function walkImages(node: JSONContent, handler: ImageFetchHandler): Promise<void> {

@@ -30,16 +30,13 @@ export function renderDocx(node: JSONContent): Record<string, unknown> {
   return opts;
 }
 
-/** Structural/semantic keys expressed elsewhere (heading ext, list handling, run children). */
-const SKIP_KEYS = new Set([
-  "heading",
-  "bullet",
-  "numbering",
-  "run",
-  "children",
-  "text",
-  "thematicBreak",
-]);
+/**
+ * Structural/semantic keys handled elsewhere (heading ext, list handling, run/text
+ * children). NOTE: `run` is intentionally NOT skipped — ParagraphOptions.run (the
+ * paragraph's default run properties: font/size/color) is kept as an attr for
+ * lossless round-trip (e.g. header/footer paragraphs whose styling lives there).
+ */
+const SKIP_KEYS = new Set(["heading", "bullet", "numbering", "children", "text", "thematicBreak"]);
 
 export function parseDocx(opts: Record<string, unknown>): Record<string, unknown> {
   const resolved = typeof opts === "string" ? { text: opts } : opts;
@@ -89,6 +86,9 @@ export const Paragraph = BaseParagraph.extend({
         parseHTML: (el: HTMLElement) => bordersFromElement(el),
       },
       frame: attrNative(),
+      // Paragraph default run properties (pPr/rPr): font/size/color applied to
+      // every run in the paragraph unless a run's own marks override.
+      run: attrNative(),
 
       // Scalar OOXML paragraph properties (stored verbatim; no CSS equivalent)
       keepNext: attrNative(),
