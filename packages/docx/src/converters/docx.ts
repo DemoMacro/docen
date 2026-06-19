@@ -1388,6 +1388,40 @@ export interface DocxGenerateOptions<T extends OutputType = "nodebuffer"> {
   prepare?: boolean | PrepareStep[];
   /** Packer options; `type` controls the output format (default `"nodebuffer"` → Buffer). */
   packer?: PackerOptions<T>;
+  /**
+   * Document-level options injected into the compiled `DocumentOptions` — core
+   * properties (`title`/`creator`/`description`/…), `styles`/`externalStyles`,
+   * `background`, `features`, `fonts`, etc. Excludes `sections` (always compiled
+   * from the JSON) and `numbering` (collected from ordered-list nodes).
+   *
+   * `styles`/`externalStyles` here take precedence over any `styles` carried on
+   * `json.attrs.styles` (e.g. from a prior `parseDOCX`); the two are mutually
+   * exclusive, so specifying `externalStyles` drops the compiled `styles`.
+   */
+  document?: Omit<Partial<DocumentOptions>, "sections" | "numbering">;
+}
+
+/**
+ * Merge {@link DocxGenerateOptions.document} into the `DocumentOptions`
+ * compiled from Tiptap JSON.
+ *
+ * - `sections`/`numbering`: compile-owned (excluded from `document`, never
+ *   overridden).
+ * - `styles`/`externalStyles`: option wins over `json.attrs.styles`; the two
+ *   are mutually exclusive, so `externalStyles` clears compiled `styles`.
+ * - Everything else (core properties, background, features, …): injected.
+ */
+function applyDocumentOptions(
+  base: DocumentOptions,
+  document?: Omit<Partial<DocumentOptions>, "sections" | "numbering">,
+): DocumentOptions {
+  if (!document) return base;
+  const merged: DocumentOptions = { ...base, ...document };
+  // externalStyles is mutually exclusive with styles — drop compiled styles.
+  if (document.externalStyles !== undefined) {
+    delete (merged as Partial<DocumentOptions>).styles;
+  }
+  return merged;
 }
 
 /**
@@ -1403,11 +1437,11 @@ export async function generateDOCX<T extends OutputType = "nodebuffer">(
   json: JSONContent,
   options?: DocxGenerateOptions<T>,
 ): Promise<OutputByType[T]> {
-  const { prepare = true, packer } = options ?? {};
+  const { prepare = true, packer, document } = options ?? {};
   if (prepare !== false) {
     await prepareDocument(json, prepare === true ? undefined : prepare);
   }
-  return generateDocument(compileDocument(json), packer);
+  return generateDocument(applyDocumentOptions(compileDocument(json), document), packer);
 }
 
 /**
@@ -1415,13 +1449,14 @@ export async function generateDOCX<T extends OutputType = "nodebuffer">(
  *
  * Pipeline: `DocxManager.compile` → `generateDocumentSync`. Does **not** run
  * `prepareDocument` (it is async); call `await prepareDocument(json)` first
- * when http images need embedding.
+ * when http images need embedding. `options.document` is still applied.
  */
 export function generateDOCXSync<T extends OutputType = "nodebuffer">(
   json: JSONContent,
-  packerOptions?: PackerOptions<T>,
+  options?: DocxGenerateOptions<T>,
 ): OutputByType[T] {
-  return generateDocumentSync(compileDocument(json), packerOptions);
+  const { packer, document } = options ?? {};
+  return generateDocumentSync(applyDocumentOptions(compileDocument(json), document), packer);
 }
 
 /**
@@ -1435,11 +1470,11 @@ export async function generateDOCXStream(
   json: JSONContent,
   options?: DocxGenerateOptions,
 ): Promise<ReadableStream<Uint8Array>> {
-  const { prepare = true, packer } = options ?? {};
+  const { prepare = true, packer, document } = options ?? {};
   if (prepare !== false) {
     await prepareDocument(json, prepare === true ? undefined : prepare);
   }
-  return generateDocumentStream(compileDocument(json), packer);
+  return generateDocumentStream(applyDocumentOptions(compileDocument(json), document), packer);
 }
 
 /**
