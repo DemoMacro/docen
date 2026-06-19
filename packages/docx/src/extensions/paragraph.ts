@@ -33,7 +33,6 @@ export function renderDocx(node: JSONContent): Record<string, unknown> {
 /** Structural/semantic keys expressed elsewhere (heading ext, list handling, run children). */
 const SKIP_KEYS = new Set([
   "heading",
-  "style",
   "bullet",
   "numbering",
   "run",

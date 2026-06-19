@@ -104,8 +104,10 @@ export class DocxManager {
       }
     }
 
+    const styles = (json.attrs?.styles ?? undefined) as DocumentOptions["styles"] | undefined;
     return {
       sections: [{ children }],
+      ...(styles ? { styles } : {}),
       ...(this.numberingConfigs.length > 0
         ? { numbering: { config: this.numberingConfigs } as NumberingOptions }
         : {}),
@@ -122,10 +124,17 @@ export class DocxManager {
     const numberingLookup = this.buildNumberingLookup(docOpts);
     const content = this.resolveSectionChildren(children, numberingLookup);
 
-    return {
+    const doc: JSONContent = {
       type: "doc",
       content: content.length > 0 ? content : [{ type: "paragraph" }],
     };
+    // Carry the styles library (styles.xml) through the JSON for lossless
+    // round-trip. office-open generates importedStyles/docDefaultsXml/
+    // latentStylesXml verbatim from this.
+    if (docOpts.styles) {
+      doc.attrs = { styles: docOpts.styles };
+    }
+    return doc;
   }
 
   // ── Compile: Tiptap JSON → DocumentOptions ──
