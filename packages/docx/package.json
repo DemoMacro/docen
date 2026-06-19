@@ -102,6 +102,7 @@
     "@tiptap/markdown": "3.22.5",
     "@tiptap/pm": "3.22.5",
     "@tiptap/suggestion": "3.22.5",
+    "image-meta": "0.2.2",
     "lowlight": "3.3.0"
   }
 }

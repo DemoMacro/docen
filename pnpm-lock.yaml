@@ -156,6 +156,9 @@ importers:
       '@tiptap/suggestion':
         specifier: 3.22.5
         version: 3.22.5(@tiptap/core@3.22.5(@tiptap/pm@3.22.5))(@tiptap/pm@3.22.5)
+      image-meta:
+        specifier: 0.2.2
+        version: 0.2.2
       lowlight:
         specifier: 3.3.0
         version: 3.3.0
