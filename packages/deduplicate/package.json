@@ -49,7 +49,6 @@
     "@nlptools/distance": "0.0.5"
   },
   "devDependencies": {
-    "@docen/extensions": "workspace:*",
     "@tiptap/core": "3.22.5"
   }
 }
