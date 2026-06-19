@@ -209,6 +209,26 @@ export interface ImageAttrs {
   outline: Record<string, unknown> | null;
   crop: Record<string, unknown> | null;
   display: string | null;
+  // 0.9.7+ fidelity fields (office-open native; near-identity passthrough)
+  nonVisualProperties: Record<string, unknown> | null; // pic:cNvPr (id/name/descr)
+  effectExtent: { l: number; t: number; r: number; b: number } | null; // wp:effectExtent EMUs
+  graphicFrameLocks: Record<string, unknown> | null;
+  blipEffects: Record<string, unknown> | null;
+  useLocalDpi: boolean | null; // a14:useLocalDpi
+  fill: Record<string, unknown> | null;
+  effects: Record<string, unknown> | null;
+  tile: Record<string, unknown> | null;
+  runPropertiesRawXml: string | null;
+}
+
+/**
+ * Emoji node attrs.
+ * `name` is the shortcode (base @tiptap/extension-emoji); `emoji` is the
+ * resolved glyph cached for DOCX export (null when only the shortcode is known).
+ */
+export interface EmojiAttrs {
+  name: string | null;
+  emoji: string | null;
 }
 
 /**
@@ -257,7 +277,7 @@ export type Mark =
 export interface ParagraphNode extends TiptapJSONContent {
   type: "paragraph";
   attrs?: ParagraphAttrs;
-  content?: Array<TextNode | HardBreakNode | ImageNode>;
+  content?: Array<TextNode | HardBreakNode | ImageNode | EmojiNode>;
 }
 
 export interface HeadingNode extends TiptapJSONContent {
@@ -341,6 +361,13 @@ export interface TableHeaderNode extends TiptapJSONContent {
 export interface ImageNode extends TiptapJSONContent {
   type: "image";
   attrs?: ImageAttrs;
+}
+
+// -- Emoji node (inline) --
+
+export interface EmojiNode extends TiptapJSONContent {
+  type: "emoji";
+  attrs?: EmojiAttrs;
 }
 
 // -- Details node --

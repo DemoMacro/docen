@@ -576,6 +576,14 @@ export class DocxManager {
           );
           break;
         }
+        case "emoji": {
+          // DOCX has no emoji structure — emit the glyph (or :name: shortcode
+          // fallback) as a plain text run. Resolve degrades back to a text node.
+          const attrs = (node.attrs ?? {}) as { emoji?: string; name?: string };
+          const text = attrs.emoji ?? (attrs.name ? `:${attrs.name}:` : "");
+          if (text) children.push({ text } as Record<string, unknown> as ParagraphChild);
+          break;
+        }
       }
     }
 
@@ -630,6 +638,9 @@ export class DocxManager {
           runOpts.highlight = mark.attrs?.color ?? "yellow";
           break;
         case "code":
+          // rStyle "CodeChar" is the precise round-trip carrier; Consolas is a
+          // visual fallback when styles.xml lacks the CodeChar definition.
+          runOpts.style = "CodeChar";
           runOpts.font = "Consolas";
           break;
         case "textStyle": {
@@ -795,6 +806,22 @@ export class DocxManager {
           : null;
 
       if (!firstInfo) {
+        // Blockquote: consecutive paragraphs carrying the blockquote signature
+        // (left indent + left border). DOCX has no blockquote element, so
+        // compile stamps this signature; rebuild the container here.
+        if (firstPara && typeof firstPara !== "string" && this.detectBlockquote(firstPara)) {
+          const group: ParagraphOptions[] = [];
+          while (i < children.length) {
+            const member = children[i];
+            if (!("paragraph" in member)) break;
+            const para = member.paragraph;
+            if (typeof para === "string" || !this.detectBlockquote(para)) break;
+            group.push(para);
+            i++;
+          }
+          content.push(this.buildBlockquote(group));
+          continue;
+        }
         const node = this.resolveSectionChild(child);
         if (node) content.push(node);
         i++;
@@ -930,6 +957,52 @@ export class DocxManager {
     }
 
     return topLevel;
+  }
+
+  /** Classify a paragraph as a blockquote member by its signature. */
+  private detectBlockquote(para: ParagraphOptions): boolean {
+    const p = para as unknown as Record<string, unknown>;
+    const indent = p.indent as { left?: number } | undefined;
+    const border = p.border as { left?: Record<string, unknown> } | undefined;
+    if (!indent || indent.left !== blockquoteExt.BLOCKQUOTE_INDENT_LEFT) return false;
+    const bl = border?.left;
+    if (!bl) return false;
+    const sig = blockquoteExt.BLOCKQUOTE_BORDER;
+    return (
+      bl.style === sig.style &&
+      bl.size === sig.size &&
+      bl.space === sig.space &&
+      bl.color === sig.color
+    );
+  }
+
+  /**
+   * Rebuild a blockquote node from a run of signature-carrying paragraphs,
+   * stripping the indent/border signature so child paragraphs render clean.
+   */
+  private buildBlockquote(group: ParagraphOptions[]): JSONContent {
+    const content: JSONContent[] = [];
+    for (const para of group) {
+      const node = this.resolveParagraph(para);
+      const attrs = node.attrs as Record<string, unknown> | undefined;
+      if (attrs) {
+        if (attrs.indent) {
+          const indent = { ...(attrs.indent as object) } as Record<string, unknown>;
+          delete indent.left;
+          attrs.indent = Object.keys(indent).length > 0 ? indent : undefined;
+        }
+        if (attrs.border) {
+          const border = { ...(attrs.border as object) } as Record<string, unknown>;
+          delete border.left;
+          attrs.border = Object.keys(border).length > 0 ? border : undefined;
+        }
+        const cleaned = cleanAttrs(attrs);
+        if (Object.keys(cleaned).length > 0) node.attrs = cleaned;
+        else delete node.attrs;
+      }
+      content.push(node);
+    }
+    return { type: "blockquote", content };
   }
 
   /**
@@ -1188,16 +1261,17 @@ export class DocxManager {
     if (opts.superScript) marks.push({ type: "superscript" });
     if (opts.highlight) marks.push({ type: "highlight", attrs: { color: opts.highlight } });
 
-    if (opts.font === "Consolas" || opts.font === "monospace") {
+    if (opts.style === "CodeChar") {
       marks.push({ type: "code" });
     }
 
     const textStyleAttrs = textStyleExt.parseDocx(opts);
     // parseDocx passes RunStylePropertiesOptions through verbatim (size/color/font/
-    // characterSpacing/rightToLeft/…). The `code` mark (Consolas/monospace) is
-    // represented separately above — drop it from text-style attrs to avoid duplication.
-    // color normalization happens in renderHTML via normalizeColorToHex.
-    if (opts.font === "Consolas" || opts.font === "monospace") {
+    // characterSpacing/rightToLeft/…). The `code` mark is carried by rStyle
+    // "CodeChar" (resolved above) and renders Consolas via its own font — drop
+    // that font from text-style attrs to avoid duplication. color normalization
+    // happens in renderHTML via normalizeColorToHex.
+    if (opts.style === "CodeChar") {
       delete textStyleAttrs.font;
     }
 
