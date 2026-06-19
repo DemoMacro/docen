@@ -5,6 +5,7 @@ import { Blockquote } from "./blockquote";
 import { CodeBlock } from "./code-block";
 import { ColumnBreak } from "./column-break";
 import { Details, DetailsSummary, DetailsContent } from "./details";
+import { Document } from "./document";
 import { Heading } from "./heading";
 import { Image } from "./image";
 import { Mention } from "./mention";
@@ -20,7 +21,6 @@ import { TableRow } from "./table-row";
 import { TaskItem } from "./task-item";
 import { TextStyle } from "./text-style";
 import {
-  Document,
   Text,
   HorizontalRule,
   CodeBlockLowlight,
@@ -211,6 +211,7 @@ export const DocxKit = Extension.create<DocxKitOptions>({
 
 // Export all individual extensions for direct imports
 export * from "./tiptap";
+export { Document } from "./document";
 export { Heading } from "./heading";
 export { Image } from "./image";
 export { Passthrough } from "./passthrough";
