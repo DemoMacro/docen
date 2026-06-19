@@ -9,11 +9,13 @@ import { Document } from "./document";
 import { Emoji } from "./emoji";
 import { Heading } from "./heading";
 import { Image } from "./image";
+import { ImageGroup } from "./image-group";
 import { Mention } from "./mention";
 import { OrderedList } from "./ordered-list";
 import { PageBreak } from "./page-break";
 import { Paragraph } from "./paragraph";
 import { Passthrough } from "./passthrough";
+import { SectionBreak } from "./section-break";
 import { Strike } from "./strike";
 import { Table } from "./table";
 import { TableCell } from "./table-cell";
@@ -54,6 +56,7 @@ export const tiptapNodeExtensions: AnyExtension[] = [
   HardBreak,
   PageBreak,
   ColumnBreak,
+  SectionBreak,
   Passthrough,
   Blockquote,
   OrderedList,
@@ -70,6 +73,7 @@ export const tiptapNodeExtensions: AnyExtension[] = [
   Image.configure({
     inline: true,
   }),
+  ImageGroup,
   // NOTE: Mathematics (blockMath/inlineMath) renders via KaTeX in the editor but
   // has no DOCX conversion yet — DOCX compile drops math content. latex↔OMML
   // conversion is separate work (office-open has OMML parse/stringify via its

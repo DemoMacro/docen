@@ -25,6 +25,9 @@ import type {
   TableOptions,
   TableRowPropertiesOptionsBase,
   TableCellOptions,
+  Floating,
+  ImageOptions,
+  SectionPropertiesOptions,
 } from "@office-open/docx";
 import type { JSONContent as TiptapJSONContent } from "@tiptap/core";
 
@@ -50,6 +53,7 @@ export type {
   DocumentOptions,
   SectionOptions,
   SectionChild,
+  SectionPropertiesOptions,
   // Paragraph
   ParagraphOptions,
   ParagraphChild,
@@ -205,19 +209,19 @@ export interface ImageAttrs {
   width: number | null;
   height: number | null;
   rotation: number | null;
-  floating: Record<string, unknown> | null;
-  outline: Record<string, unknown> | null;
-  crop: Record<string, unknown> | null;
+  floating: Floating | null;
+  outline: NonNullable<ImageOptions["outline"]> | null;
+  crop: NonNullable<ImageOptions["sourceRectangle"]> | null;
   display: string | null;
   // 0.9.7+ fidelity fields (office-open native; near-identity passthrough)
-  nonVisualProperties: Record<string, unknown> | null; // pic:cNvPr (id/name/descr)
+  nonVisualProperties: NonNullable<ImageOptions["nonVisualProperties"]> | null; // pic:cNvPr (id/name/descr)
   effectExtent: { l: number; t: number; r: number; b: number } | null; // wp:effectExtent EMUs
-  graphicFrameLocks: Record<string, unknown> | null;
-  blipEffects: Record<string, unknown> | null;
+  graphicFrameLocks: NonNullable<ImageOptions["graphicFrameLocks"]> | null;
+  blipEffects: NonNullable<ImageOptions["blipEffects"]> | null;
   useLocalDpi: boolean | null; // a14:useLocalDpi
-  fill: Record<string, unknown> | null;
-  effects: Record<string, unknown> | null;
-  tile: Record<string, unknown> | null;
+  fill: NonNullable<ImageOptions["fill"]> | null;
+  effects: NonNullable<ImageOptions["effects"]> | null;
+  tile: NonNullable<ImageOptions["tile"]> | null;
   runPropertiesRawXml: string | null;
 }
 
@@ -301,6 +305,26 @@ export interface HorizontalRuleNode extends TiptapJSONContent {
   type: "horizontalRule";
 }
 
+/**
+ * Header/footer slots in Tiptap JSON — each slot is the JSONContent[] produced
+ * by resolving that slot's SectionChild[] (paragraphs/tables/…). Mirrors
+ * SectionOptions.headers/footers in the runtime model.
+ */
+export interface HeaderFooterSlots {
+  default?: TiptapJSONContent[];
+  first?: TiptapJSONContent[];
+  even?: TiptapJSONContent[];
+}
+
+export interface SectionBreakNode extends TiptapJSONContent {
+  type: "sectionBreak";
+  attrs?: {
+    properties: SectionPropertiesOptions | null;
+    headers: HeaderFooterSlots | null;
+    footers: HeaderFooterSlots | null;
+  };
+}
+
 // -- List nodes --
 
 export interface BulletListNode extends TiptapJSONContent {
@@ -363,6 +387,16 @@ export interface ImageNode extends TiptapJSONContent {
   attrs?: ImageAttrs;
 }
 
+/**
+ * Drawing group (wpg) carried as an opaque blob — the full WpgGroupRunOptions
+ * (pictures/shapes/nested groups + transform) round-trips verbatim. The editor
+ * doesn't model the group interior; renderHTML paints the first picture only.
+ */
+export interface ImageGroupNode extends TiptapJSONContent {
+  type: "imageGroup";
+  attrs?: { wpgGroup: Record<string, unknown> | null };
+}
+
 // -- Emoji node (inline) --
 
 export interface EmojiNode extends TiptapJSONContent {
@@ -396,6 +430,7 @@ export type BlockNode =
   | BlockquoteNode
   | CodeBlockNode
   | HorizontalRuleNode
+  | SectionBreakNode
   | BulletListNode
   | OrderedListNode
   | TaskListNode

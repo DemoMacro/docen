@@ -1,3 +1,4 @@
+import { encodeBase64 } from "@office-open/core";
 import {
   generateDocument,
   generateDocumentStream,
@@ -7,6 +8,7 @@ import {
 import type {
   DocumentOptions,
   SectionChild,
+  SectionPropertiesOptions,
   ParagraphOptions,
   ParagraphChild,
   RunOptions,
@@ -38,7 +40,6 @@ import * as tableHeaderExt from "../extensions/table-header";
 import * as tableRowExt from "../extensions/table-row";
 import * as taskItemExt from "../extensions/task-item";
 import * as textStyleExt from "../extensions/text-style";
-import { bytesToBase64 } from "./base64";
 import { prepareDocument, type PrepareStep } from "./prepare";
 
 export type { DocumentOptions };
@@ -87,6 +88,19 @@ const CORE_PROPERTY_KEYS: readonly (keyof DocxCoreProperties)[] = [
   "revision",
 ];
 
+/**
+ * DocumentOptions keys that DocxManager reconstructs (sections/numbering) or
+ * carries in dedicated attrs (styles/background/core). Excluded from the
+ * documentExtras pass-through so they aren't duplicated.
+ */
+const COMPILE_OWNED_KEYS = new Set<string>([
+  "sections",
+  "numbering",
+  "styles",
+  "background",
+  ...CORE_PROPERTY_KEYS,
+]);
+
 /** Collect core properties present on DocumentOptions into a plain object. */
 function extractCoreProperties(docOpts: DocumentOptions): DocxCoreProperties | null {
   const source = docOpts as unknown as Record<string, unknown>;
@@ -96,6 +110,25 @@ function extractCoreProperties(docOpts: DocumentOptions): DocxCoreProperties | n
     if (value !== undefined && value !== null) core[key] = value;
   }
   return Object.keys(core).length > 0 ? (core as DocxCoreProperties) : null;
+}
+
+/**
+ * Header/footer slot shapes for the two sides of the round-trip:
+ * - {@link SectionHeaderFooterGroup} — persistence side (SectionChild[] per
+ *   slot); matches SectionOptions.headers/footers.
+ * - {@link HeaderFooterSlots} — runtime side (JSONContent[] per slot), produced
+ *   by resolveSectionChildren and consumed by compileSectionChild.
+ */
+type SectionHeaderFooterGroup = {
+  default?: SectionChild[];
+  first?: SectionChild[];
+  even?: SectionChild[];
+};
+
+interface HeaderFooterSlots {
+  default?: JSONContent[];
+  first?: JSONContent[];
+  even?: JSONContent[];
 }
 
 /** Merge consecutive text nodes with same marks */
@@ -137,27 +170,120 @@ export class DocxManager {
     this.numberingConfigs = [];
     this.orderedInstanceCounter = 0;
 
-    const children: SectionChild[] = [];
-
+    // Split doc content into sections on sectionBreak nodes. Each sectionBreak
+    // closes a section and carries that section's page layout + headers/footers;
+    // the trailing blocks form the last section, whose layout and headers/footers
+    // ride on doc.attrs.sectionProperties/sectionHeaders/sectionFooters.
+    // No sectionBreak → single section (fully backward compatible).
+    const sections: DocumentOptions["sections"] = [];
+    let currentChildren: SectionChild[] = [];
     if (json.content) {
       for (const node of json.content) {
+        if (node.type === "sectionBreak") {
+          const sectionAttrs = node.attrs ?? {};
+          sections.push(
+            this.buildSection(
+              currentChildren,
+              (sectionAttrs.properties ?? null) as SectionPropertiesOptions | null,
+              this.compileHeaderFooter((sectionAttrs.headers ?? null) as HeaderFooterSlots | null),
+              this.compileHeaderFooter((sectionAttrs.footers ?? null) as HeaderFooterSlots | null),
+            ),
+          );
+          currentChildren = [];
+          continue;
+        }
+        const child = this.compileSectionChild(node);
+        if (!child) continue;
+        if (Array.isArray(child)) currentChildren.push(...child);
+        else currentChildren.push(child);
+      }
+    }
+    const docAttrs = json.attrs ?? {};
+    sections.push(
+      this.buildSection(
+        currentChildren,
+        (docAttrs.sectionProperties ?? null) as SectionPropertiesOptions | null,
+        this.compileHeaderFooter((docAttrs.sectionHeaders ?? null) as HeaderFooterSlots | null),
+        this.compileHeaderFooter((docAttrs.sectionFooters ?? null) as HeaderFooterSlots | null),
+      ),
+    );
+
+    const styles = (docAttrs.styles ?? undefined) as DocumentOptions["styles"] | undefined;
+    const core = (docAttrs.core ?? undefined) as DocxCoreProperties | undefined;
+    const background = (docAttrs.background ?? undefined) as
+      | DocumentOptions["background"]
+      | undefined;
+    const documentExtras = (docAttrs.documentExtras ?? undefined) as
+      | Partial<DocumentOptions>
+      | undefined;
+    return {
+      sections,
+      ...(styles ? { styles } : {}),
+      ...core,
+      ...(background ? { background } : {}),
+      ...documentExtras,
+      ...(this.numberingConfigs.length > 0
+        ? { numbering: { config: this.numberingConfigs } as NumberingOptions }
+        : {}),
+    };
+  }
+
+  /** Assemble a SectionOptions from compiled children + optional layout/headers/footers. */
+  private buildSection(
+    children: SectionChild[],
+    properties: SectionPropertiesOptions | null,
+    headers: SectionHeaderFooterGroup | undefined,
+    footers: SectionHeaderFooterGroup | undefined,
+  ): DocumentOptions["sections"][number] {
+    return {
+      children,
+      ...(properties ? { properties } : {}),
+      ...(headers ? { headers } : {}),
+      ...(footers ? { footers } : {}),
+    };
+  }
+
+  /**
+   * Compile resolved header/footer slots (JSONContent[] per slot) back into
+   * SectionChild[] per slot. Returns undefined when no slot has content.
+   */
+  private compileHeaderFooter(
+    slots: HeaderFooterSlots | null,
+  ): SectionHeaderFooterGroup | undefined {
+    if (!slots) return undefined;
+    const group: SectionHeaderFooterGroup = {};
+    for (const slot of ["default", "first", "even"] as const) {
+      const json = slots[slot];
+      if (!json?.length) continue;
+      const children: SectionChild[] = [];
+      for (const node of json) {
         const child = this.compileSectionChild(node);
         if (!child) continue;
         if (Array.isArray(child)) children.push(...child);
         else children.push(child);
       }
+      if (children.length > 0) group[slot] = children;
     }
+    return Object.keys(group).length > 0 ? group : undefined;
+  }
 
-    const styles = (json.attrs?.styles ?? undefined) as DocumentOptions["styles"] | undefined;
-    const core = (json.attrs?.core ?? undefined) as DocxCoreProperties | undefined;
-    return {
-      sections: [{ children }],
-      ...(styles ? { styles } : {}),
-      ...core,
-      ...(this.numberingConfigs.length > 0
-        ? { numbering: { config: this.numberingConfigs } as NumberingOptions }
-        : {}),
-    };
+  /**
+   * Resolve a section's header/footer group (SectionChild[] per slot) into
+   * Tiptap JSON slots. Returns null when no slot has content.
+   */
+  private resolveHeaderFooter(
+    group: SectionHeaderFooterGroup | undefined,
+    numberingLookup: Map<string, { format?: string; start?: number }>,
+  ): HeaderFooterSlots | null {
+    if (!group) return null;
+    const slots: HeaderFooterSlots = {};
+    for (const slot of ["default", "first", "even"] as const) {
+      const children = group[slot];
+      if (children?.length) {
+        slots[slot] = this.resolveSectionChildren(children, numberingLookup);
+      }
+    }
+    return Object.keys(slots).length > 0 ? slots : null;
   }
 
   resolve(docOpts: DocumentOptions): JSONContent {
@@ -165,10 +291,28 @@ export class DocxManager {
     if (sections.length === 0) {
       return { type: "doc", content: [{ type: "paragraph" }] };
     }
-
-    const children = sections[0].children ?? [];
     const numberingLookup = this.buildNumberingLookup(docOpts);
-    const content = this.resolveSectionChildren(children, numberingLookup);
+
+    // Resolve every section's children into blocks; mark section boundaries with
+    // sectionBreak nodes (each carrying that section's page layout). The last
+    // section has no trailing sectionBreak — its layout rides on doc.attrs.
+    const content: JSONContent[] = [];
+    const lastIndex = sections.length - 1;
+    for (let i = 0; i < sections.length; i++) {
+      const section = sections[i];
+      const sectionContent = this.resolveSectionChildren(section.children ?? [], numberingLookup);
+      content.push(...sectionContent);
+      if (i < lastIndex) {
+        content.push({
+          type: "sectionBreak",
+          attrs: {
+            properties: section.properties ?? null,
+            headers: this.resolveHeaderFooter(section.headers, numberingLookup),
+            footers: this.resolveHeaderFooter(section.footers, numberingLookup),
+          },
+        });
+      }
+    }
 
     const doc: JSONContent = {
       type: "doc",
@@ -180,8 +324,26 @@ export class DocxManager {
     // `core` back to docProps/core.xml.
     const attrs: Record<string, unknown> = {};
     if (docOpts.styles) attrs.styles = docOpts.styles;
+    if (docOpts.background) attrs.background = docOpts.background;
     const core = extractCoreProperties(docOpts);
     if (core) attrs.core = core;
+    const lastSection = sections[lastIndex];
+    if (lastSection.properties) attrs.sectionProperties = lastSection.properties;
+    const lastHeaders = this.resolveHeaderFooter(lastSection.headers, numberingLookup);
+    if (lastHeaders) attrs.sectionHeaders = lastHeaders;
+    const lastFooters = this.resolveHeaderFooter(lastSection.footers, numberingLookup);
+    if (lastFooters) attrs.sectionFooters = lastFooters;
+    // Pass through document-level fields DocxManager doesn't reconstruct
+    // (settings.xml flags like displayBackgroundShape, zoom, fonts, footnotes,
+    // customProperties, …). Word needs displayBackgroundShape to render the
+    // <w:background> element, so losing it makes the page background invisible.
+    const documentExtras: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(docOpts as unknown as Record<string, unknown>)) {
+      if (COMPILE_OWNED_KEYS.has(k)) continue;
+      if (v === undefined || v === null) continue;
+      documentExtras[k] = v;
+    }
+    if (Object.keys(documentExtras).length > 0) attrs.documentExtras = documentExtras;
     if (Object.keys(attrs).length > 0) doc.attrs = attrs;
     return doc;
   }
@@ -614,6 +776,11 @@ export class DocxManager {
         case "image": {
           const imageRun = imageExt.renderDocx(node);
           if (imageRun) children.push(imageRun);
+          break;
+        }
+        case "imageGroup": {
+          const wpgGroup = node.attrs?.wpgGroup;
+          if (wpgGroup) children.push({ wpgGroup } as unknown as ParagraphChild);
           break;
         }
         case "mention": {
@@ -1245,6 +1412,11 @@ export class DocxManager {
     if ("image" in child) {
       return this.resolveImage(child.image as unknown as Record<string, unknown>);
     }
+    if ("wpgGroup" in child) {
+      // Drawing group (wpg): opaque round-trip — full WpgGroupRunOptions rides on
+      // the imageGroup node; the editor doesn't model the group interior.
+      return { type: "imageGroup", attrs: { wpgGroup: child.wpgGroup } };
+    }
     if ("sdt" in child) {
       return this.resolveInlineSdt(child);
     }
@@ -1334,13 +1506,12 @@ export class DocxManager {
   private resolveImage(imageOpts: Record<string, unknown>): JSONContent {
     const attrs = imageExt.parseDocx(imageOpts);
 
-    // Image data → data URL (chunked base64 — large images overflow the call
-    // stack if spread into String.fromCharCode; see bytesToBase64).
+    // Image data → data URL (encodeBase64 handles platform dispatch + stack guard).
     const data = imageOpts.data as Uint8Array | undefined;
     const type = imageOpts.type as string | undefined;
     if (data && type) {
       const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : data;
-      attrs.src = `data:image/${type};base64,${bytesToBase64(bytes)}`;
+      attrs.src = `data:image/${type};base64,${encodeBase64(bytes)}`;
     }
 
     return { type: "image", attrs };
