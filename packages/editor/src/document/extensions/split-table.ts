@@ -1,4 +1,3 @@
-import type { JSONContent } from "@docen/docx/core";
 import { Table } from "@docen/docx/extensions/table";
 import { TableRow } from "@docen/docx/extensions/table-row";
 import type { Node as PmNode } from "@tiptap/pm/model";
@@ -8,13 +7,13 @@ import type { Node as PmNode } from "@tiptap/pm/model";
  *
  * contenteditable cannot visually break a `<tr>`, so a table taller than a page
  * is split into multiple `table` nodes across pages (a physical split). All
- * splits of one original table share a `splitGroup` id; `unwrapPages` merges
- * them back into one table on export, so the split is editor-only and
- * round-trip-transparent. Continuation pages repeat the header rows: the
- * paginator clones each `tableHeader` row and marks the clone `splitClone`;
- * `unwrapPages` drops clones on merge (the original header row keeps
- * `tableHeader` → DOCX `<w:tblHeader/>`, Word repeats it natively on its own
- * pages, so no physical clone is written to DOCX).
+ * splits of one original table share a `splitGroup` id; `unwrapPages` (in
+ * utils/merge.ts) merges them back into one table on export, so the split is
+ * editor-only and round-trip-transparent. Continuation pages repeat the header
+ * rows: the paginator clones each `tableHeader` row and marks the clone
+ * `splitClone`; `unwrapPages` drops clones on merge (the original header row
+ * keeps `tableHeader` → DOCX `<w:tblHeader/>`, Word repeats it natively on its
+ * own pages, so no physical clone is written to DOCX).
  *
  * See CLAUDE.md → Pagination Architecture (C-route) and CONTRIBUTING.md.
  */
@@ -64,37 +63,4 @@ export function cloneHeaderRows(table: PmNode): PmNode[] {
   return headerRowsOf(table).map((row) =>
     row.type.create({ ...row.attrs, splitClone: true }, row.content, row.marks),
   );
-}
-
-/** Merge adjacent table nodes that share a `splitGroup` back into one table:
- *  concatenate rows, drop `splitClone` continuation-header clones, and clear
- *  the editor-only split attrs. Used by `unwrapPages` on export so the split
- *  stays round-trip-transparent (the result is a single table per group). */
-export function mergeSplitTables(blocks: JSONContent[]): JSONContent[] {
-  const merged: JSONContent[] = [];
-  for (const block of blocks) {
-    const last = merged[merged.length - 1];
-    if (
-      block.type === "table" &&
-      last?.type === "table" &&
-      block.attrs?.splitGroup != null &&
-      last.attrs?.splitGroup === block.attrs.splitGroup
-    ) {
-      const keptRows = (block.content ?? []).filter(
-        (r) => r.type === "tableRow" && r.attrs?.splitClone !== true,
-      );
-      last.content = [...(last.content ?? []), ...keptRows];
-    } else {
-      merged.push(block);
-    }
-  }
-  // Clear editor-only split attrs on every table (whole or merged).
-  for (const block of merged) {
-    if (block.type !== "table") continue;
-    if (block.attrs) delete block.attrs.splitGroup;
-    for (const row of block.content ?? []) {
-      if (row.type === "tableRow" && row.attrs) delete row.attrs.splitClone;
-    }
-  }
-  return merged;
 }

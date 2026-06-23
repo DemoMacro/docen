@@ -193,6 +193,13 @@ const findItems = (): string =>
     { text: opt("go-to"), value: "go-to" },
   ]);
 
+const selectItems = (): string =>
+  JSON.stringify([
+    { text: opt("select-all"), value: "all" },
+    { text: opt("select-objects"), value: "objects" },
+    { text: opt("select-similar"), value: "similar" },
+  ]);
+
 const coverItems = (): string =>
   JSON.stringify([
     { text: cmd("page-break"), value: "page-break", event: "page-break" },
@@ -416,7 +423,7 @@ const homePanel = (styles?: StylesOptions | null): string => `
           <docen-ribbon-split-button icon="search" label="${cmd("search")}" event="search" size="large" items='${findItems()}'></docen-ribbon-split-button>
           <div class="rb-col">
             <docen-ribbon-button icon="replace" label="${cmd("replace")}" event="replace" icon-only></docen-ribbon-button>
-            <docen-ribbon-button icon="search" label="${cmd("select")}" event="select" icon-only></docen-ribbon-button>
+            <docen-ribbon-split-button icon="board" label="${cmd("select")}" event="select" icon-only items='${selectItems()}'></docen-ribbon-split-button>
           </div>
         </docen-ribbon-group>
       </docen-ribbon-panel>`;
@@ -536,7 +543,7 @@ const layoutPanel = (): string => `
           <docen-ribbon-split-button icon="orientation" label="${cmd("orientation")}" event="orientation" size="large" items='${orientationItems()}'></docen-ribbon-split-button>
           <docen-ribbon-split-button icon="page-color" label="${cmd("page-size")}" event="page-size" size="large" items='${sizePaperItems()}'></docen-ribbon-split-button>
           <docen-ribbon-split-button icon="multilevel" label="${cmd("columns")}" event="columns" size="large" items='${columnsItems()}'></docen-ribbon-split-button>
-          <docen-ribbon-split-button icon="page-break" label="${cmd("breaks")}" event="breaks" size="large" items='${breaksItems()}'></docen-ribbon-split-button>
+          <docen-ribbon-split-button icon="page-break" label="${cmd("breaks")}" event="page-break" size="large" items='${breaksItems()}'></docen-ribbon-split-button>
           <docen-ribbon-button icon="number-symbol" label="${cmd("line-numbers")}" event="line-numbers" size="large"></docen-ribbon-button>
         </docen-ribbon-group>
 

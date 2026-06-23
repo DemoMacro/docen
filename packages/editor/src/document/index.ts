@@ -10,6 +10,7 @@ import {
 } from "@docen/docx";
 import { Extension, type Editor } from "@docen/docx/core";
 import { TableOfContents } from "@tiptap/extension-table-of-contents";
+import type { Mark } from "@tiptap/pm/model";
 import { EditorState } from "@tiptap/pm/state";
 import {
   findNext,
@@ -27,12 +28,15 @@ import type { OutlineItem } from "../ui/components/workspace/outline";
 import { dispatchRibbonCommand } from "./commands";
 // Side-effect import: registers the ribbon/header translation tables.
 import "./i18n";
-import { PagePlugin, clearMeasureCache, pageStorageOf } from "./pagination";
-import { Page, PageDocument } from "./pagination/page-node";
-import { SplitMarks } from "./pagination/paragraph-split";
-import { SplitTable, SplitTableRow } from "./pagination/table-split";
-import { unwrapPages, wrapPages } from "./pagination/wrap";
+import { PageBreakView } from "./extensions/page-break";
+import { Page, PageDocument } from "./extensions/page-node";
+import { PagePlugin, pageStorageOf } from "./extensions/page-plugin";
+import { SectionBreakMarks } from "./extensions/section-break";
+import { SplitMarks } from "./extensions/split-paragraph";
+import { SplitTable, SplitTableRow } from "./extensions/split-table";
 import { buildRibbonInnerHTML } from "./ribbon-default";
+import { clearMeasureCache } from "./utils/measure";
+import { unwrapPages, wrapPages } from "./utils/wrap";
 
 const TEMPLATE = `
   <style>
@@ -180,45 +184,32 @@ const TEMPLATE = `
       pointer-events: none;
       margin-inline-start: 1px;
     }
-    /* A page break renders as a dashed rule with a centered label (Word). The
-       pageBreak node is an inline span atom; as a block it draws the rule. */
+    /* A page break renders as a Fluent divider with a centered label (Word).
+       The NodeView (PageBreakView) supplies the fluent-divider; it is hidden
+       unless show-marks is on. */
+    .docen-pages [data-type="pageBreak"] { display: block; line-height: 0; }
+    .docen-pages [data-type="pageBreak"] fluent-divider { display: none; }
     :host([show-marks]) .docen-pages [data-type="pageBreak"] {
-      display: block;
-      height: 0;
-      margin: 6px 0;
-      border-top: 1px dashed var(--docen-color-marks, #6e6e6e);
-      position: relative;
+      margin: 8px 0;
+      line-height: normal;
     }
-    :host([show-marks]) .docen-pages [data-type="pageBreak"]::before {
-      content: "分页符";
-      position: absolute;
-      top: -8px;
-      left: 50%;
-      transform: translateX(-50%);
-      padding: 0 8px;
-      background: var(--docen-color-page, #fff);
-      font-size: 11px;
-      color: var(--docen-color-marks, #6e6e6e);
+    :host([show-marks]) .docen-pages [data-type="pageBreak"] fluent-divider {
+      display: flex;
+      font-size: 0.8em;
     }
-    /* A section break is a block atom (div). Invisible unless marks are shown
-       (Word: the section boundary only prints the marker while editing). The
-       node itself triggers pagination; this only draws the marker. */
-    .docen-pages [data-section-break] { height: 0; overflow: visible; }
+    /* A section break renders as a Fluent divider after the section-carrying
+       paragraph (Word: the boundary only shows the marker while editing). The
+       SectionBreakMarks widget supplies the fluent-divider; hidden unless
+       show-marks is on — same mechanism as the page-break marker. */
+    .docen-pages [data-section-break] { line-height: 0; }
+    .docen-pages [data-section-break] fluent-divider { display: none; }
     :host([show-marks]) .docen-pages [data-section-break] {
-      margin: 6px 0;
-      border-top: 1px dashed var(--docen-color-marks, #6e6e6e);
-      position: relative;
+      margin: 8px 0;
+      line-height: normal;
     }
-    :host([show-marks]) .docen-pages [data-section-break]::before {
-      content: "分节符";
-      position: absolute;
-      top: -8px;
-      left: 50%;
-      transform: translateX(-50%);
-      padding: 0 8px;
-      background: var(--docen-color-page, #fff);
-      font-size: 11px;
-      color: var(--docen-color-marks, #6e6e6e);
+    :host([show-marks]) .docen-pages [data-section-break] fluent-divider {
+      display: flex;
+      font-size: 0.8em;
     }
     /* Find highlights (prosemirror-search) — Word's yellow-match / orange-active. */
     .docen-pages .ProseMirror-search-match {
@@ -436,6 +427,9 @@ class DocenDocument extends HTMLElement {
   #blurSelCleanup?: () => void;
   /** Tears down the transaction listener mirroring caret font/size → comboboxes. */
   #fontSyncCleanup?: () => void;
+  // Format Painter captured marks + the pointerup listener that applies them.
+  #painterMarks: readonly Mark[] | null = null;
+  #painterOff?: () => void;
   /** Current zoom level (percent) applied to the canvas via CSS `zoom`. */
   #zoom = 100;
   /** Esc 兜底：浏览器全屏被 Esc 退出后，把 ribbon 还原为「始终显示」。 */
@@ -638,6 +632,93 @@ class DocenDocument extends HTMLElement {
     else if (action === "replace-all") replaceAll(editor.state, editor.view.dispatch);
   };
 
+  /** Paste from the system clipboard as plain text. navigator.clipboard is the
+   *  reliable path; execCommand("paste") is the fallback (often blocked). */
+  async #paste(): Promise<void> {
+    const editor = this.#editor;
+    if (!editor) return;
+    let text: string | null = null;
+    try {
+      text = await navigator.clipboard.readText();
+    } catch {
+      editor.commands.focus();
+      document.execCommand("paste");
+      return;
+    }
+    if (text) editor.chain().focus().insertContent(text).run();
+  }
+
+  /** Editing → Select menu. "all" uses the official selectAll() command (an
+   *  AllSelection that crosses page isolating boundaries); "objects"/"similar"
+   *  are placeholders. */
+  #select(value?: string): void {
+    const editor = this.#editor;
+    if (!editor) return;
+    if ((value ?? "all") !== "all") return;
+    editor.chain().focus().selectAll().run();
+  }
+
+  /** Editing → Find drop-down → Go To: prompt for a page number and move the
+   *  caret to that page, scrolling it into view. */
+  #goToPage(): void {
+    const editor = this.#editor;
+    if (!editor) return;
+    const input = window.prompt(t("ribbon.opt.go-to-prompt", this));
+    if (input == null) return;
+    const page = parseInt(input, 10);
+    if (!Number.isFinite(page) || page < 1) return;
+    let count = 0;
+    let target = -1;
+    editor.state.doc.descendants((node, pos) => {
+      if (node.type.name === "page") {
+        count++;
+        if (count === page) {
+          target = pos + 1;
+          return false;
+        }
+      }
+      return true;
+    });
+    if (target < 0) return;
+    editor.chain().focus().setTextSelection(target).run();
+    editor.view.dispatch(editor.view.state.tr.scrollIntoView());
+  }
+
+  /** Format Painter: on first click, capture the current selection's marks and
+   *  arm a one-shot pointerup listener; the next non-empty selection receives
+   *  those marks and disarms the painter. A second click cancels. */
+  #toggleFormatPainter(): void {
+    if (this.#painterMarks) {
+      this.#stopFormatPainter();
+      return;
+    }
+    const editor = this.#editor;
+    if (!editor || editor.state.selection.empty) return;
+    this.#painterMarks = editor.state.selection.$from.marks();
+    this.toggleAttribute("format-painter", true);
+    const dom = editor.view.dom;
+    const onUp = (): void => {
+      const ed = this.#editor;
+      if (!ed) return;
+      const { from, to, empty } = ed.state.selection;
+      if (!empty && this.#painterMarks) {
+        const tr = ed.state.tr;
+        for (const mark of this.#painterMarks) tr.addMark(from, to, mark);
+        ed.view.dispatch(tr);
+      }
+      this.#stopFormatPainter();
+    };
+    dom.addEventListener("pointerup", onUp, { once: true });
+    this.#painterOff = () => dom.removeEventListener("pointerup", onUp);
+  }
+
+  #stopFormatPainter(): void {
+    this.#painterMarks = null;
+    this.removeAttribute("format-painter");
+    this.#painterOff?.();
+    this.#painterOff = undefined;
+  }
+
   /** Keep the editor selection visible while a ribbon combobox (font-name /
    *  font-size) holds focus. On editor blur, paint a CSS Custom Highlight over
    *  the current selection; on focus, clear it so the browser's native
@@ -808,6 +889,14 @@ class DocenDocument extends HTMLElement {
         // Search (prosemirror-search) — stores the active query and highlights
         // its matches; driven by the nav-pane search box (#onSearch).
         Search,
+        // pageBreak NodeView — renders a Fluent divider with a centered label
+        // while show-marks is on. Schema comes from the engine's PageBreak;
+        // this only overrides the editor rendering.
+        PageBreakView,
+        // sectionBreak widget — a section boundary is paragraph attrs (not a
+        // node), so it has no NodeView; a widget decoration paints the Fluent
+        // divider marker after each section-carrying paragraph.
+        SectionBreakMarks,
       ],
     });
     this.#applyDocStyles();
@@ -961,6 +1050,15 @@ class DocenDocument extends HTMLElement {
     if (navPane) navPane.setAttribute("title", t("pane.navigation"));
     const propsPane = root.querySelector('docen-task-pane[position="end"]');
     if (propsPane) propsPane.setAttribute("title", t("pane.properties"));
+    // Page-break / section-break divider labels live in the editor view
+    // (NodeView / widget decoration), not the ribbon — update them alongside
+    // the chrome so a locale change relabels them.
+    root.querySelectorAll<HTMLElement>("fluent-divider[data-pb]").forEach((d) => {
+      d.textContent = t("ribbon.cmd.page-break");
+    });
+    root.querySelectorAll<HTMLElement>("fluent-divider[data-sb]").forEach((d) => {
+      d.textContent = t("ribbon.cmd.section-break");
+    });
     // Status bar is dynamic (page count / caret page / zoom) — re-stamp it so a
     // locale change re-localizes the text too.
     this.#updateStatus();
@@ -1071,7 +1169,10 @@ class DocenDocument extends HTMLElement {
     }
     // Find (ribbon Home → Editing → Find, or Ctrl+F) → open the nav-pane search.
     if (name === "search") {
-      this.#openSearch();
+      // Find drop-down → Go To jumps to a page; the main button and Find
+      // open the nav-pane search box.
+      if (value === "go-to") this.#goToPage();
+      else this.#openSearch();
       return;
     }
     // Replace (ribbon Home → Editing → Replace, or Ctrl+H) → Find & Replace dialog.
@@ -1122,6 +1223,29 @@ class DocenDocument extends HTMLElement {
     if (name === "show-marks") {
       this.toggleAttribute("show-marks");
       this.#editor?.commands.toggleFormattingMarks();
+      return;
+    }
+    // Clipboard — execCommand copy/cut acts on the editor's DOM selection;
+    // paste reads the system clipboard (contenteditable execCommand paste is
+    // blocked in most browsers).
+    if (name === "copy" || name === "cut") {
+      this.#editor.commands.focus();
+      document.execCommand(name);
+      return;
+    }
+    if (name === "paste") {
+      void this.#paste();
+      return;
+    }
+    // Editing → Select: selectAll() spans every page (bypassing page
+    // isolating); objects/similar are not yet wired.
+    if (name === "select") {
+      this.#select(value);
+      return;
+    }
+    // Format Painter — toggle capture/apply of the current run's marks.
+    if (name === "format-painter") {
+      this.#toggleFormatPainter();
       return;
     }
     dispatchRibbonCommand(this.#editor, name, value);

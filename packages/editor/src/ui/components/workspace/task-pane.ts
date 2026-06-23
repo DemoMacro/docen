@@ -17,6 +17,17 @@ template.innerHTML = `
       overflow: hidden;
       height: 100%;
     }
+    /* Visibility is CSS-driven from our own "open" attribute. An inline
+       fluent-drawer hide() does not actually close the dialog (its
+       display stays flex), so a pane without open — e.g. the Properties
+       pane — renders visible by default and the close button cannot
+       dismiss it. Keying display on :host(:not([open])) makes the
+       attribute the single source of truth: show()/hide() still update
+       the drawer internal state, but the canvas reflow follows the
+       attribute. */
+    :host(:not([open])) fluent-drawer::part(dialog) {
+      display: none;
+    }
     /* Header row: title on the inline-start, close button on the inline-end. */
     .panel-head {
       display: flex;
