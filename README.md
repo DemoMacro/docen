@@ -9,10 +9,11 @@
 
 ## Packages
 
-| Package                                  | Version                                          | Description                                                         |
-| ---------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------- |
-| [docen](./packages/docen/README.md)      | ![npm](https://img.shields.io/npm/v/docen)       | Universal converter — unified JSON API for Markdown, HTML, and DOCX |
-| [@docen/docx](./packages/docx/README.md) | ![npm](https://img.shields.io/npm/v/@docen/docx) | Tiptap DOCX editor + converters, powered by @office-open/docx       |
+| Package                                      | Version                                            | Description                                                            |
+| -------------------------------------------- | -------------------------------------------------- | ---------------------------------------------------------------------- |
+| [docen](./packages/docen/README.md)          | ![npm](https://img.shields.io/npm/v/docen)         | Universal converter — unified JSON API for Markdown, HTML, and DOCX    |
+| [@docen/docx](./packages/docx/README.md)     | ![npm](https://img.shields.io/npm/v/@docen/docx)   | Tiptap DOCX editor + converters, powered by @office-open/docx          |
+| [@docen/editor](./packages/editor/README.md) | ![npm](https://img.shields.io/npm/v/@docen/editor) | Assembly layer — Fluent UI shell + docx engine into `<docen-document>` |
 
 ## Quick Start
 
@@ -51,6 +52,24 @@ import { createDocxEditor, parseDOCX, generateDOCX } from "@docen/docx";
 const editor = createDocxEditor({ element: document.querySelector("#editor") });
 editor.commands.setContent(parseDOCX(buffer));
 const output = await generateDOCX(editor.getJSON());
+```
+
+### Visual Editor (`@docen/editor`)
+
+A turnkey web-component editor (`<docen-document>`) bundling the Fluent UI shell with the `@docen/docx` engine:
+
+```bash
+$ pnpm add @docen/editor
+```
+
+```html
+<docen-document id="doc" filename="Welcome.docx"></docen-document>
+
+<script type="module">
+  import { registerComponents, applyTheme } from "@docen/editor";
+  registerComponents();
+  applyTheme("light");
+</script>
 ```
 
 ## Development
@@ -92,49 +111,14 @@ vp check                         # Lint & format
 
 ## Contributing
 
-We welcome contributions! Here's how to get started:
-
-### Quick Setup
-
-1. **Fork the repository** on GitHub
-2. **Clone your fork**:
-
-   ```bash
-   git clone https://github.com/YOUR_USERNAME/docen.git
-   cd docen
-   ```
-
-3. **Add upstream remote**:
-
-   ```bash
-   git remote add upstream https://github.com/DemoMacro/docen.git
-   ```
-
-4. **Install dependencies**:
-
-   ```bash
-   pnpm install
-   ```
-
-5. **Build**:
-
-   ```bash
-   pnpm build
-   ```
-
-### Development Workflow
-
-1. **Code**: Follow our project standards (see [CONTRIBUTING.md](./CONTRIBUTING.md))
-2. **Test**: `pnpm build && <verify your changes>`
-3. **Commit**: Use conventional commits (`feat:`, `fix:`, `docs:`, `style:`, `refactor:`, `perf:`, `test:`, `build:`, `ci:`, `chore:`, `revert:`)
-4. **Push**: Push to your fork
-5. **Submit**: Create a Pull Request to upstream repository
+We welcome contributions! See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full contribution workflow, coding standards, and PR checklist.
 
 ## Support & Community
 
 - 📫 [Report Issues](https://github.com/DemoMacro/docen/issues)
 - 📚 [docen Documentation](./packages/docen/README.md)
 - 📚 [@docen/docx Documentation](./packages/docx/README.md)
+- 📚 [@docen/editor Documentation](./packages/editor/README.md)
 
 ## License
 

@@ -1,8 +1,8 @@
 /**
- * @docen/editor — assembly layer that wires the Fluent UI layer to @docen/docx
- * into turnkey editor super-components. The UI layer lives in ./ui (formerly
- * the standalone @docen/ui package, now inlined to keep i18n side effects in
- * the same bundle and remove the cross-package tree-shaking hazard).
+ * @docen/editor — assembly layer that bundles the Fluent UI shell with
+ * @docen/docx into turnkey editor super-components. The UI layer lives in ./ui
+ * (inlined so i18n side effects stay in one bundle, with no cross-package
+ * tree-shaking hazard).
  *
  * @module
  */
