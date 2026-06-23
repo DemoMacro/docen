@@ -1,4 +1,5 @@
 import type { Editor } from "@docen/docx/core";
+import type { Node } from "@tiptap/pm/model";
 
 /**
  * Ribbon command event name (kebab-case) → Tiptap command invocation.
@@ -88,6 +89,10 @@ const RIBBON_COMMAND_MAP: Readonly<Record<string, RibbonCommand>> = {
   // History
   undo: (editor) => editor.chain().focus().undo().run(),
   redo: (editor) => editor.chain().focus().redo().run(),
+  // Editing — change case / sort / multilevel list level
+  "change-case": (editor, value) => applyChangeCase(editor, value),
+  sort: (editor) => sortBlocks(editor),
+  "multilevel-list": (editor, value) => applyMultilevel(editor, value),
 };
 
 /** Current font size at the selection (textStyle.size, in points); falls back to
@@ -260,21 +265,114 @@ function applyFontColor(editor: Editor, value?: unknown): void {
 function applyBorder(editor: Editor, value?: string): void {
   const block = formattableBlock(editor);
   if (!block) return;
-  if (value === "none") {
+  // The split button's main click carries no value — default to a bottom
+  // border (Word's initial Borders preset).
+  const side = value ?? "bottom";
+  if (side === "none") {
     editor.chain().focus().updateAttributes(block.type, { border: null }).run();
     return;
   }
   const sides =
-    value === "all" || value === "outside"
+    side === "all" || side === "outside"
       ? BORDER_SIDES
-      : value && (BORDER_SIDES as readonly string[]).includes(value)
-        ? [value]
+      : (BORDER_SIDES as readonly string[]).includes(side)
+        ? [side]
         : null;
   if (!sides) return;
   const current = (block.attrs.border ?? {}) as Record<string, unknown>;
   const border = { ...current };
   for (const side of sides) border[side] = { ...DEFAULT_BORDER };
   editor.chain().focus().updateAttributes(block.type, { border }).run();
+}
+
+/** Transform selected text to the requested case and replace the selection,
+ *  preserving the run's marks. No-op on an empty selection. CJK sentence
+ *  terminators (。！？) are honoured alongside ASCII .!?. */
+function applyChangeCase(editor: Editor, value?: string): void {
+  const { state } = editor;
+  const { from, to, empty } = state.selection;
+  if (empty) return;
+  const text = state.doc.textBetween(from, to, "");
+  if (!text) return;
+  const out = transformCase(text, value);
+  if (out === text) return;
+  const marks = state.selection.$from.marks();
+  editor
+    .chain()
+    .focus()
+    .command(({ tr }) => {
+      tr.replaceWith(from, to, state.schema.text(out, marks));
+      return true;
+    })
+    .run();
+}
+
+function transformCase(text: string, mode?: string): string {
+  switch (mode) {
+    case "lower":
+      return text.toLowerCase();
+    case "upper":
+      return text.toUpperCase();
+    case "capitalize":
+      return text.replace(/\p{L}[\p{L}'-]*/gu, (w) => w.charAt(0).toUpperCase() + w.slice(1));
+    case "toggle":
+      return text.replace(/\p{L}/gu, (c) =>
+        c === c.toUpperCase() ? c.toLowerCase() : c.toUpperCase(),
+      );
+    case "sentence":
+    default:
+      return text.replace(/(^\s*\p{L})|([.!?。！？]\s*\p{L})/gu, (m) => m.toUpperCase());
+  }
+}
+
+/** Sort the sibling blocks covered by the selection in ascending text order
+ *  (locale-aware, numeric). Only same-parent block sequences are reorderable —
+ *  mirroring Word Sort on a paragraph/list range. No-op when already ordered. */
+function sortBlocks(editor: Editor): void {
+  const { state } = editor;
+  const { selection, doc } = state;
+  const { from, to, empty } = selection;
+  if (empty) return;
+  const $from = doc.resolve(from);
+  const $to = doc.resolve(to);
+  if ($from.depth !== $to.depth || $from.depth < 1 || $from.parent !== $to.parent) return;
+  const depth = $from.depth;
+  const parent = $from.parent;
+  const children: Node[] = [];
+  parent.forEach((child: Node) => children.push(child));
+  const startIndex = $from.index(depth);
+  const endIndex = $to.indexAfter(depth);
+  const range = children.slice(startIndex, endIndex);
+  if (range.length < 2) return;
+  const sorted = [...range].sort((a, b) =>
+    a.textContent.trim().localeCompare(b.textContent.trim(), undefined, { numeric: true }),
+  );
+  if (sorted.every((node, i) => node === range[i])) return;
+  let startPos = $from.start(depth);
+  let endPos = startPos;
+  for (const node of range) endPos += node.nodeSize;
+  editor
+    .chain()
+    .focus()
+    .command(({ tr }) => {
+      tr.replaceWith(startPos, endPos, sorted);
+      return true;
+    })
+    .run();
+}
+
+/** Promote/demote the current list item toward a multilevel depth (level-1 =
+ *  top, level-2/3 = sink once/twice). Simplified — assumes a list context and
+ *  is a no-op outside one. */
+function applyMultilevel(editor: Editor, value?: string): void {
+  if (value === "level-1") {
+    editor.chain().focus().liftListItem("listItem").run();
+    return;
+  }
+  const times = value === "level-3" ? 2 : 1;
+  const chain = editor.chain().focus();
+  for (let i = 0; i < times; i++) chain.sinkListItem("listItem");
+  chain.run();
 }
 
 /**

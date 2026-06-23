@@ -301,6 +301,10 @@ export const ribbonEn: DocenTranslation = {
   // --- Options: find / pages / table ---
   "ribbon.opt.find": "Find…",
   "ribbon.opt.go-to": "Go To…",
+  "ribbon.opt.select-all": "Select All",
+  "ribbon.opt.select-objects": "Select Objects",
+  "ribbon.opt.select-similar": "Select Text with Similar Formatting",
+  "ribbon.opt.go-to-prompt": "Enter page number:",
   "ribbon.opt.cover": "Cover Page",
   "ribbon.opt.blank": "Blank Page",
   "ribbon.opt.page-break": "Page Break",
@@ -671,6 +675,10 @@ export const ribbonZhCN: DocenTranslation = {
   // --- 选项：查找 / 页面 / 表格 ---
   "ribbon.opt.find": "查找…",
   "ribbon.opt.go-to": "转到…",
+  "ribbon.opt.select-all": "全选",
+  "ribbon.opt.select-objects": "选择对象",
+  "ribbon.opt.select-similar": "选择格式相似的文本",
+  "ribbon.opt.go-to-prompt": "请输入页码：",
   "ribbon.opt.cover": "封面",
   "ribbon.opt.blank": "空白页",
   "ribbon.opt.page-break": "分页符",

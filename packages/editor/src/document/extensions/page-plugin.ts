@@ -12,9 +12,9 @@ import {
   tableColumnWidths,
   tableWidthOf,
   type PaginationAttrs,
-} from "./measure";
+} from "../utils/measure";
 import { resolvePageSize } from "./page-node";
-import { cloneHeaderRows } from "./table-split";
+import { cloneHeaderRows } from "./split-table";
 
 /** Plugin key marking a re-flow transaction (so the update listener can tell
  *  a user edit from our own regrouping). */

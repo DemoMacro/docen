@@ -18,6 +18,12 @@ template.innerHTML = `
       margin-block-end: 8px;
       font-size: 13px;
     }
+    .check-field {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+    }
   </style>
   <docen-dialog heading="Find and Replace" part="dialog">
     <div class="field">
@@ -29,8 +35,14 @@ template.innerHTML = `
       <fluent-text-input part="replace" type="text"></fluent-text-input>
     </div>
     <div class="options">
-      <fluent-checkbox part="case"><span data-i18n="findReplace.matchCase">Match case</span></fluent-checkbox>
-      <fluent-checkbox part="word"><span data-i18n="findReplace.wholeWord">Whole word</span></fluent-checkbox>
+      <label class="check-field">
+        <fluent-checkbox part="case"></fluent-checkbox>
+        <span data-i18n="findReplace.matchCase">Match case</span>
+      </label>
+      <label class="check-field">
+        <fluent-checkbox part="word"></fluent-checkbox>
+        <span data-i18n="findReplace.wholeWord">Whole word</span>
+      </label>
     </div>
     <fluent-button slot="action" part="find-next" appearance="stealth" data-i18n="findReplace.findNext">Find Next</fluent-button>
     <fluent-button slot="action" part="replace-next" appearance="stealth" data-i18n="findReplace.replace">Replace</fluent-button>

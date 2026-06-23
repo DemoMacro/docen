@@ -1,7 +1,6 @@
 import type { JSONContent } from "@docen/docx/core";
 
-import { mergeSplitParagraphs } from "./paragraph-split";
-import { mergeSplitTables } from "./table-split";
+import { mergeSplitParagraphs, mergeSplitTables } from "./merge";
 
 /**
  * Page ↔ flat document shape conversion.
