@@ -7,6 +7,7 @@ import { ColumnBreak } from "./column-break";
 import { Details, DetailsSummary, DetailsContent } from "./details";
 import { Document } from "./document";
 import { Emoji } from "./emoji";
+import { FormattingMarks } from "./formatting-marks";
 import { Heading } from "./heading";
 import { Image } from "./image";
 import { ImageGroup } from "./image-group";
@@ -106,8 +107,23 @@ export const tiptapMarkExtensions: AnyExtension[] = [
   Underline,
 ];
 
-// Complete extension set
-export const docxExtensions: AnyExtension[] = [...tiptapNodeExtensions, ...tiptapMarkExtensions];
+// Complete extension set. Functional extensions (history, dropcursor, etc.)
+// ship here so editors built from this array — createDocxEditor uses it
+// directly — match what DocxKit's preset would register: UndoRedo (undo/redo
+// commands + Mod-z), Dropcursor (drag-insert caret), Gapcursor (caret at
+// node boundaries), TrailingNode (always-editable trailing paragraph),
+// ListKeymap (list-aware Enter/Tab/Backspace). DocxKit adds the same set via
+// its option guards; Tiptap dedupes by name, so mixing the two is a no-op.
+export const docxExtensions: AnyExtension[] = [
+  ...tiptapNodeExtensions,
+  ...tiptapMarkExtensions,
+  FormattingMarks,
+  UndoRedo,
+  Dropcursor,
+  Gapcursor,
+  TrailingNode,
+  ListKeymap,
+];
 
 // DocxKit options type
 export interface DocxKitOptions {

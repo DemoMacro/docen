@@ -165,37 +165,46 @@ export class DocxManager {
   // so independent lists number separately, even when they share an abstractNum
   // (same start).
   private orderedInstanceCounter = 0;
+  // Styles table (styles.xml) carried through resolve() so a paragraph can
+  // resolve a NUMERIC pStyle whose NAME is a heading (styleId "2" → name
+  // "heading 1") into a heading node. office-open lifts only pStyle literals
+  // that ARE HeadingLevels ("Heading1".."Title"); real DOCX files often use
+  // numeric ids. Set per resolve(); compile never reads it.
+  private resolveStyles: { paragraphStyles?: { id: string; name?: string }[] } | undefined;
 
   compile(json: JSONContent): DocumentOptions {
     this.numberingConfigs = [];
     this.orderedInstanceCounter = 0;
 
-    // Split doc content into sections on sectionBreak nodes. Each sectionBreak
-    // closes a section and carries that section's page layout + headers/footers;
-    // the trailing blocks form the last section, whose layout and headers/footers
-    // ride on doc.attrs.sectionProperties/sectionHeaders/sectionFooters.
-    // No sectionBreak → single section (fully backward compatible).
+    // Split doc content into sections. A non-final section's sectPr attaches to
+    // its LAST paragraph's pPr (OOXML) — that paragraph carries sectionProperties/
+    // sectionHeaders/sectionFooters attrs and closes the section here. The
+    // trailing blocks form the final section, whose sectPr rides on
+    // doc.attrs.sectionProperties/sectionHeaders/sectionFooters (body-level).
+    // No section-carrying paragraph → single section (backward compatible).
     const sections: DocumentOptions["sections"] = [];
     let currentChildren: SectionChild[] = [];
     if (json.content) {
       for (const node of json.content) {
-        if (node.type === "sectionBreak") {
-          const sectionAttrs = node.attrs ?? {};
-          sections.push(
-            this.buildSection(
-              currentChildren,
-              (sectionAttrs.properties ?? null) as SectionPropertiesOptions | null,
-              this.compileHeaderFooter((sectionAttrs.headers ?? null) as HeaderFooterSlots | null),
-              this.compileHeaderFooter((sectionAttrs.footers ?? null) as HeaderFooterSlots | null),
-            ),
-          );
-          currentChildren = [];
-          continue;
-        }
         const child = this.compileSectionChild(node);
-        if (!child) continue;
-        if (Array.isArray(child)) currentChildren.push(...child);
-        else currentChildren.push(child);
+        if (child) {
+          if (Array.isArray(child)) currentChildren.push(...child);
+          else currentChildren.push(child);
+        }
+        if (node.type === "paragraph") {
+          const na = (node.attrs ?? {}) as Record<string, unknown>;
+          if (na.sectionProperties != null) {
+            sections.push(
+              this.buildSection(
+                currentChildren,
+                na.sectionProperties as SectionPropertiesOptions | null,
+                this.compileHeaderFooter((na.sectionHeaders ?? null) as HeaderFooterSlots | null),
+                this.compileHeaderFooter((na.sectionFooters ?? null) as HeaderFooterSlots | null),
+              ),
+            );
+            currentChildren = [];
+          }
+        }
       }
     }
     const docAttrs = json.attrs ?? {};
@@ -287,31 +296,40 @@ export class DocxManager {
   }
 
   resolve(docOpts: DocumentOptions): JSONContent {
+    this.resolveStyles = (docOpts.styles ?? undefined) as
+      | { paragraphStyles?: { id: string; name?: string }[] }
+      | undefined;
     const sections = docOpts.sections ?? [];
     if (sections.length === 0) {
       return { type: "doc", content: [{ type: "paragraph" }] };
     }
     const numberingLookup = this.buildNumberingLookup(docOpts);
 
-    // Resolve every section's children into blocks; mark section boundaries with
-    // sectionBreak nodes (each carrying that section's page layout). The last
-    // section has no trailing sectionBreak — its layout rides on doc.attrs.
+    // Resolve every section's children into blocks. A non-final section's
+    // sectPr attaches to that section's LAST paragraph's pPr (OOXML) — stamp it
+    // on that paragraph's attrs, not a standalone sectionBreak node. The final
+    // section's sectPr rides on doc.attrs (it lives at <w:body>'s end).
     const content: JSONContent[] = [];
     const lastIndex = sections.length - 1;
     for (let i = 0; i < sections.length; i++) {
       const section = sections[i];
       const sectionContent = this.resolveSectionChildren(section.children ?? [], numberingLookup);
-      content.push(...sectionContent);
       if (i < lastIndex) {
-        content.push({
-          type: "sectionBreak",
-          attrs: {
-            properties: section.properties ?? null,
-            headers: this.resolveHeaderFooter(section.headers, numberingLookup),
-            footers: this.resolveHeaderFooter(section.footers, numberingLookup),
-          },
-        });
+        const sectAttrs: Record<string, unknown> = {
+          sectionProperties: section.properties ?? null,
+          sectionHeaders: this.resolveHeaderFooter(section.headers, numberingLookup),
+          sectionFooters: this.resolveHeaderFooter(section.footers, numberingLookup),
+        };
+        const last = sectionContent[sectionContent.length - 1];
+        if (last?.type === "paragraph") {
+          last.attrs = { ...last.attrs, ...sectAttrs };
+        } else {
+          // Section ends on a non-paragraph (table/etc.) — Word still needs the
+          // sectPr on a paragraph, so append an empty one to carry it.
+          sectionContent.push({ type: "paragraph", attrs: sectAttrs });
+        }
       }
+      content.push(...sectionContent);
     }
 
     const doc: JSONContent = {
@@ -960,8 +978,26 @@ export class DocxManager {
       return this.resolveCodeBlock(resolved);
     }
 
-    // Detect heading
-    const headingLevel = resolved.heading ? HEADING_LEVEL_MAP[resolved.heading] : undefined;
+    // Detect heading. office-open lifts a pStyle whose literal IS a HeadingLevel
+    // ("Heading1".."Title") into `resolved.heading`. Real DOCX files often use a
+    // NUMERIC styleId whose NAME is a heading (styleId "2" → name "heading 1");
+    // resolve that name against the styles table so the paragraph becomes a
+    // heading node (the outline/TOC read node type), keeping the original
+    // styleId on the attrs (parseDocx lets `resolved.style` override styleId).
+    let headingLevel = resolved.heading ? HEADING_LEVEL_MAP[resolved.heading] : undefined;
+    if (!headingLevel && resolved.style) {
+      const name = this.styleNameOf(resolved.style);
+      if (name) {
+        const m = /^heading\s+(\d)$/i.exec(name);
+        if (m) {
+          const lvl = Number(m[1]);
+          if (lvl >= 1 && lvl <= 6) headingLevel = lvl as 1 | 2 | 3 | 4 | 5 | 6;
+        } else if (/^title$/i.test(name)) headingLevel = 1;
+      }
+    }
+    if (headingLevel && !resolved.heading) {
+      resolved.heading = `Heading${headingLevel}`;
+    }
     const nodeType = headingLevel ? "heading" : "paragraph";
 
     // Dispatch to extension parseDocx
@@ -979,6 +1015,12 @@ export class DocxManager {
     if (content.length > 0) node.content = content;
 
     return node;
+  }
+
+  /** Look up a paragraph style's NAME from its styleId, via the styles table
+   *  carried on the current resolve(). Returns undefined outside resolve. */
+  private styleNameOf(styleId: string): string | undefined {
+    return this.resolveStyles?.paragraphStyles?.find((p) => p.id === styleId)?.name;
   }
 
   /** reference → level-0 format/start, for classifying numbering paragraphs. */
@@ -1494,6 +1536,9 @@ export class DocxManager {
     // happens in renderHTML via normalizeColorToHex.
     if (opts.style === "CodeChar") {
       delete textStyleAttrs.font;
+      // CodeChar is carried by the `code` mark above; don't also stamp it as a
+      // textStyle styleId (would double-apply the character style on compile).
+      delete textStyleAttrs.styleId;
     }
 
     if (Object.keys(textStyleAttrs).length > 0) {

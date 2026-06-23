@@ -1,0 +1,860 @@
+import type { SectionPropertiesOptions } from "@docen/docx";
+import { Extension, type Editor } from "@docen/docx/core";
+import type { Node as PmNode } from "@tiptap/pm/model";
+import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
+
+import {
+  measureBlockHeight,
+  measureParagraphLines,
+  measureRowHeight,
+  resolveIndentWidth,
+  resolvePaginationAttrs,
+  tableColumnWidths,
+  tableWidthOf,
+  type PaginationAttrs,
+} from "./measure";
+import { resolvePageSize } from "./page-node";
+import { cloneHeaderRows } from "./table-split";
+
+/** Plugin key marking a re-flow transaction (so the update listener can tell
+ *  a user edit from our own regrouping). */
+const flowKey = new PluginKey("pageFlow");
+
+export interface PagePluginOptions {
+  /** Debounce (ms) before re-flowing after an edit. Default 300. */
+  debounceMs?: number;
+}
+
+export interface PagePluginStorage {
+  /** Force a re-flow now (bypasses debounce). The host calls this after an
+   *  import or a page-geometry change, once layout has settled. */
+  repaginate: () => void;
+}
+
+export function pageStorageOf(editor: Editor): PagePluginStorage {
+  return (editor.storage as unknown as { pagePlugin: PagePluginStorage }).pagePlugin;
+}
+
+/** Per-page usable content height (px): the fixed page box's height minus its
+ *  vertical padding. Uses getBoundingClientRect().height (sub-pixel exact), NOT
+ *  clientHeight — clientHeight/offsetHeight round to whole pixels, so the
+ *  page boundary wobbles ±1px between re-flows and the packer never converges
+ *  (visible as table/row flicker). Sub-pixel measurement makes the boundary
+ *  stable. Returns 0 until the page is laid out. */
+function resolvePageContentHeight(editor: Editor): number {
+  const page = editor.view.dom.querySelector<HTMLElement>(".docen-page");
+  if (!page) return 0;
+  const cs = getComputedStyle(page);
+  const padY = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+  return Math.max(0, page.getBoundingClientRect().height - padY);
+}
+
+/** A flattened flow item: a standalone block, or a single table row carrying
+ *  its parent table (so the paginator can regroup rows back into per-page
+ *  table nodes). Tables expand to rows because contenteditable cannot visually
+ *  split a `<tr>` — only whole rows move between pages. */
+/** Per-line geometry for a splittable textblock (from measureParagraphLines).
+ *  `lineBreakOffsets[i]` = PM content offset at end of line i+1. */
+type BlockLines = {
+  lineHeight: number;
+  lineCount: number;
+  lineBreakOffsets: number[];
+  block?: boolean;
+  /** Per-row heights when rows are non-uniform (inline-image rows: each row is
+   *  its tallest image). Present ⇒ trySplitBlock walks these instead of
+   *  `lineHeight × n`. Absent ⇒ uniform text lines (`lineHeight × n` is exact). */
+  lineHeights?: number[];
+};
+
+type FlatItem =
+  | {
+      kind: "block";
+      node: PmNode;
+      height: number;
+      after: number;
+      /** Effective OOXML pagination props (keepLines/keepNext/widowControl/
+       *  pageBreakBefore) — null→OOXML default resolved. */
+      pag: PaginationAttrs;
+      /** Present when the block is splittable mid-paragraph (text lines, or
+       *  inline-image boundaries). Absent ⇒ the block moves whole (keepLines,
+       *  pageBreak atom, section-end paragraph). */
+      lines?: BlockLines;
+    }
+  | { kind: "row"; row: PmNode; height: number; table: PmNode; isClone?: boolean };
+
+/** A block's trailing margin in px: the paragraph's spacing.after (OOXML
+ *  twips → px). Read from attrs (not the DOM) so measurement is deterministic
+ *  across re-flows. */
+function spacingAfterOf(node: PmNode): number {
+  const spacing = (node.attrs as { spacing?: { after?: number | null } | null }).spacing;
+  if (!spacing || spacing.after == null) return 0;
+  return spacing.after * (4 / 3 / 20); // twips → px
+}
+
+/** Page content box + document-grid line pitch, derived deterministically from a
+ *  section's OOXML geometry (twips → px) — NOT the DOM. Each page renders its
+ *  section's inline width/height/padding (page-node renderHTML), so the content
+ *  box is `paper size − margins`; linePitch snaps lines up when the grid type is
+ *  line-snapping (lines/linesAndChars/snapToChars; "default" = no snapping).
+ *  Returns null when geometry is absent (no page size) — caller falls back to a
+ *  DOM measurement. Twip→px matches the rendered box exactly (size/15). */
+function sectionContentDims(
+  sp: unknown,
+): { width: number; height: number; linePitchPx: number | undefined } | null {
+  if (!sp || typeof sp !== "object") return null;
+  const s = sp as SectionPropertiesOptions;
+  const dims = resolvePageSize(s.page?.size);
+  if (!dims) return null;
+  const twipToPx = 4 / 3 / 20; // twip → pt (÷20) → px (×4/3)
+  // Margins mirror page-node renderHTML: it emits padding only when all four
+  // sides are present, else falls back to the CSS default (1in = 1440tw = 96px).
+  // Measure must use the SAME default, or sections whose OOXML <w:pgMar> lacks
+  // the four sides (e.g. only header/footer/gutter) pack against the full paper
+  // height while the page renders with 96px padding — content then overflows the
+  // fixed box and gets clipped instead of reflowing to the next page.
+  const margin = s.page?.margin;
+  const sides = [margin?.top, margin?.right, margin?.bottom, margin?.left];
+  const hasAllSides = sides.every((v): v is number => typeof v === "number");
+  const DEFAULT_MARGIN_TW = 1440;
+  const side = (i: number): number => (hasAllSides ? (sides[i] as number) : DEFAULT_MARGIN_TW);
+  const mTop = side(0);
+  const mRight = side(1);
+  const mBottom = side(2);
+  const mLeft = side(3);
+  const grid = s.grid;
+  const linePitchPx =
+    grid?.linePitch && grid.type !== "default" ? grid.linePitch * twipToPx : undefined;
+  return {
+    width: (dims.width - mLeft - mRight) * twipToPx,
+    height: (dims.height - mTop - mBottom) * twipToPx,
+    linePitchPx,
+  };
+}
+
+/** Flatten every page's blocks (in flow order) into block/row items and measure
+ *  each one's height. Blocks use Pretext (deterministic canvas measurement);
+ *  a table expands to its rows (measured per `<tr>` via DOM, until row-level
+ *  Pretext measurement lands). Continuation-page header clones (`splitClone`
+ *  rows) are skipped so they are re-derived, not doubled, on the next re-flow.
+ *  ProseMirror widgets skipped. */
+function measureFlatItems(editor: Editor): FlatItem[] {
+  const { view, state } = editor;
+  const styles = (state.doc.attrs as { styles?: unknown }).styles;
+  const pageDoms = Array.from(view.dom.children).filter(
+    (el): el is HTMLElement => el instanceof HTMLElement && el.classList.contains("docen-page"),
+  );
+  type Raw = {
+    node: PmNode;
+    dom: HTMLElement | undefined;
+    width: number;
+    linePitchPx: number | undefined;
+  };
+  // Pass 1 — flatten every page's children into one flow, each carrying its
+  // page's content width + document-grid pitch (per-page section geometry) and
+  // its DOM handle. Fall back to the laid-out DOM rect only when no section
+  // geometry is set.
+  const raw: Raw[] = [];
+  let pi = 0;
+  state.doc.forEach((pageNode) => {
+    if (pageNode.type.name !== "page") return;
+    const pageDom = pageDoms[pi++];
+    if (!pageDom) return;
+    const dims = sectionContentDims(pageNode.attrs.sectionProperties);
+    const pageCs = getComputedStyle(pageDom);
+    const pageRect = pageDom.getBoundingClientRect();
+    const padX = (parseFloat(pageCs.paddingLeft) || 0) + (parseFloat(pageCs.paddingRight) || 0);
+    const width = dims?.width ?? Math.max(0, pageRect.width - padX);
+    const childDoms = Array.from(pageDom.children).filter(
+      (el): el is HTMLElement =>
+        el instanceof HTMLElement && !el.classList.contains("ProseMirror-widget"),
+    );
+    let bi = 0;
+    pageNode.forEach((child) => {
+      const dom = childDoms[bi++];
+      if (!dom) return;
+      raw.push({ node: child, dom, width, linePitchPx: dims?.linePitchPx });
+    });
+  });
+  // Pass 2 — CROSS-PAGE logical merge: adjacent (in flow order, possibly across
+  // a page boundary) same-splitGroup paragraphs/headings merge back into the
+  // original whole paragraph BEFORE measuring. This makes re-flow idempotent —
+  // a paragraph split across pages last pass is re-merged and re-split from the
+  // original each pass, so the break can't nest or drift (the head re-splitting
+  // under a fresh id every pass left only orphan tails and never converged).
+  // Tables/leaves never carry splitGroup, so they pass through untouched.
+  const logical: Raw[] = [];
+  for (const r of raw) {
+    const last = logical[logical.length - 1];
+    const group = (r.node.attrs as { splitGroup?: string | null }).splitGroup;
+    const isTextblockLike = r.node.type.name === "paragraph" || r.node.type.name === "heading";
+    if (
+      group != null &&
+      isTextblockLike &&
+      last &&
+      (last.node.type.name === "paragraph" || last.node.type.name === "heading") &&
+      (last.node.attrs as { splitGroup?: string | null }).splitGroup === group
+    ) {
+      const merged = last.node.type.create(
+        last.node.attrs,
+        last.node.content.append(r.node.content),
+        last.node.marks,
+      );
+      logical[logical.length - 1] = { ...last, node: merged };
+    } else {
+      logical.push(r);
+    }
+  }
+  // Pass 3 — measure. Tables expand to rows; text blocks use Pretext at the
+  // paragraph's USABLE width (page width minus its own indent — resolveIndentWidth
+  // mirrors the renderer, else an indented paragraph under-counts lines and
+  // overflows the page, and the split offset lands mid-word); leaves fall back
+  // to DOM height. Continuation header clones (splitClone rows) reserve height
+  // against the next real row, never as their own flow item.
+  const out: FlatItem[] = [];
+  for (const { node: child, dom, width: pageContentWidth, linePitchPx } of logical) {
+    if (child.type.name === "table") {
+      const tableW = tableWidthOf(child, pageContentWidth);
+      const colWidths = tableColumnWidths(child, tableW);
+      let pendingClone = 0;
+      child.forEach((row) => {
+        const rh = measureRowHeight(row, colWidths, { linePitchPx, styles });
+        if (row.attrs.splitClone === true) {
+          pendingClone += rh;
+          return;
+        }
+        out.push({ kind: "row", row, height: rh + pendingClone, table: child });
+        pendingClone = 0;
+      });
+    } else {
+      const after = spacingAfterOf(child);
+      const blockWidth = child.isTextblock
+        ? resolveIndentWidth(child, pageContentWidth, styles)
+        : pageContentWidth;
+      const height = measureBlockHeight(child, blockWidth, {
+        domHeightOf: (n) => (n === child ? dom?.getBoundingClientRect().height : undefined),
+        linePitchPx,
+        styles,
+      });
+      const pag = resolvePaginationAttrs(child);
+      const lines = measureParagraphLines(child, blockWidth, { linePitchPx, styles }) ?? undefined;
+      out.push({ kind: "block", node: child, height: height + after, after, pag, lines });
+    }
+  }
+  return out;
+}
+
+/** Split a textblock at content offset `off` into head + tail, both carrying
+ *  `splitGroup` (so unwrapPages merges them back) and `splitPart` (head/tail).
+ *  attrs are preserved verbatim — spacing stays as the original on both halves;
+ *  the page clips the final paragraph's `after` at layout time, not here, so
+ *  merging restores the paragraph exactly. marks ride along on the text nodes
+ *  (content.cut keeps them). */
+function splitTextblock(
+  node: PmNode,
+  off: number,
+  splitGroup: string,
+): { head: PmNode; tail: PmNode } {
+  const head = node.type.create(
+    { ...node.attrs, splitGroup, splitPart: "head" },
+    node.content.cut(0, off),
+    node.marks,
+  );
+  // The tail is a CONTINUATION of the original paragraph — its first line is a
+  // mid-paragraph line, not a paragraph start — so it must NOT inherit the
+  // first-line indent. Word's paragraph-internal page break leaves the continued
+  // line flush; without this override the tail kept the docDefault
+  // firstLineChars indent and its first line came up 2 chars short. Left/right
+  // indent stays (the whole paragraph shares it); only firstLine is zeroed.
+  const tail = node.type.create(
+    {
+      ...node.attrs,
+      splitGroup,
+      splitPart: "tail",
+      indent: { ...node.attrs.indent, firstLine: 0, firstLineChars: 0 },
+    },
+    node.content.cut(off),
+    node.marks,
+  );
+  return { head, tail };
+}
+
+/** Try to split a block so its first lines fill `remaining` px on the current
+ *  page. Returns head/tail FlatItems, or null when the block must move whole:
+ *  - no `lines` (a container, or a non-textblock leaf), keepLines ON, or a
+ *    single line;
+ *  - widow/orphan can't be satisfied (widowControl ON ⇒ ≥2 lines at each page
+ *    edge; OFF ⇒ ≥1) — Word's widowControl default ON behavior (CSS orphans/
+ *    widows = 2), implemented manually because C-route's physical pages can't
+ *    use CSS fragmentation.
+ *  Head is the page's last item (after clipped ⇒ height = N×lineHeight, no
+ *  after); tail keeps the original `after` for the next page AND its remaining
+ *  row geometry (`lines`), so the packer can split it again the SAME pass — a
+ *  >2-page paragraph then fills every page in one re-flow instead of stranding
+ *  the rest on one oversized clipped page. */
+function trySplitBlock(
+  item: Extract<FlatItem, { kind: "block" }>,
+  remaining: number,
+  splitGroup: string,
+): { head: FlatItem; tail: FlatItem } | null {
+  if (!item.lines || item.pag.keepLines) return null;
+  const { lineHeight, lineCount, lineBreakOffsets, block, lineHeights } = item.lines;
+  if (lineCount <= 1) return null;
+  // widow/orphan applies to TEXT lines (don't strand a single line alone at a
+  // page edge). Inline-image rows (block: true) are self-contained blocks —
+  // each can sit alone on a page (a near-full-page image is one per page), so
+  // they skip widow/orphan (edge 1). Without this, a multi-image paragraph of
+  // near-page-height images couldn't split (n=1 < edge=2 → move whole → clip).
+  const edge = block ? 1 : item.pag.widowControl ? 2 : 1; // orphans + widows
+  // How many leading rows fit in `remaining`, and their actual height. Text
+  // rows are uniform (lineHeight × n); image rows are not (each row is its
+  // tallest image), so walk lineHeights and stop before exceeding remaining.
+  // The first row is always placed even if it alone exceeds remaining — a
+  // single over-tall image row still renders on the page (clipping is the page
+  // box's job); refusing it would move the whole block and strand every later
+  // image on the next page.
+  const headHeightOf = (k: number): number =>
+    lineHeights ? lineHeights.slice(0, k).reduce((s, h) => s + h, 0) : k * lineHeight;
+  let n: number;
+  if (lineHeights) {
+    let acc = 0;
+    n = 0;
+    for (let i = 0; i < lineCount; i++) {
+      const h = lineHeights[i] ?? 0;
+      if (n > 0 && acc + h > remaining) break;
+      acc += h;
+      n++;
+    }
+  } else {
+    n = Math.floor(remaining / lineHeight);
+  }
+  if (n >= lineCount) return null; // whole block fits — shouldn't reach here
+  if (n < edge) return null; // current page can't hold `orphans` lines
+  if (lineCount - n < edge) {
+    // next page would get < `widows` lines → shrink head to give the tail more
+    n = lineCount - edge;
+    if (n < edge) return null; // still can't satisfy orphans → move whole
+  }
+  if (n <= 0) return null;
+  const off = lineBreakOffsets[n - 1];
+  const totalH = lineHeights ? lineHeights.reduce((s, h) => s + h, 0) : lineCount * lineHeight;
+  const { head, tail } = splitTextblock(item.node, off, splitGroup);
+  const headItem: FlatItem = {
+    kind: "block",
+    node: head,
+    height: headHeightOf(n), // page-last ⇒ after clipped
+    after: 0,
+    pag: item.pag,
+  };
+  // The tail keeps the remaining rows' geometry so the packer can split it
+  // again THIS pass — a >2-page paragraph then fills every page in one re-flow,
+  // instead of splitting off only the head and stranding the rest on one
+  // oversized page (clipped). lineBreakOffsets are re-based to the tail's
+  // content (which starts at `off`).
+  const tailLines: BlockLines | undefined = item.lines
+    ? {
+        lineHeight,
+        lineCount: lineCount - n,
+        lineBreakOffsets: lineBreakOffsets.slice(n).map((o) => o - off),
+        block,
+        lineHeights: lineHeights?.slice(n),
+      }
+    : undefined;
+  const tailItem: FlatItem = {
+    kind: "block",
+    node: tail,
+    height: totalH - headHeightOf(n) + item.after,
+    after: item.after,
+    pag: item.pag,
+    lines: tailLines,
+  };
+  return { head: headItem, tail: tailItem };
+}
+
+/** Flat caret units across all pages, in flow order: a standalone block, or a
+ *  single table row. Tables expand to rows because the paginator regroups rows
+ *  (never reorders or edits them), so the flat row index stays stable across a
+ *  re-flow even when a table splits or merges — keeping the caret in place
+ *  where the old top-level-block index broke. Continuation-page header clones
+ *  (splitClone rows) are skipped: they are re-derived each re-flow and never
+ *  hold the caret. */
+function flatCaretUnits(doc: PmNode): Array<{ start: number; end: number }> {
+  const units: Array<{ start: number; end: number }> = [];
+  doc.forEach((pageNode, pageOffset) => {
+    if (pageNode.type.name !== "page") return;
+    pageNode.forEach((child, childOffset) => {
+      const blockStart = pageOffset + 1 + childOffset;
+      if (child.type.name === "table") {
+        child.forEach((row, rowOffset) => {
+          if (row.attrs.splitClone === true) return;
+          const rowStart = blockStart + 1 + rowOffset;
+          units.push({ start: rowStart, end: rowStart + row.nodeSize });
+        });
+      } else {
+        units.push({ start: blockStart, end: blockStart + child.nodeSize });
+      }
+    });
+  });
+  return units;
+}
+
+/** A caret position as (flat unit index, offset within unit) — stable across a
+ *  re-flow: rows/blocks keep their order (only their page grouping and table
+ *  regrouping change), so the index+offset maps straight back. */
+type CaretAnchor = { unitIndex: number; offset: number };
+
+function caretAnchorAt(doc: PmNode, pos: number): CaretAnchor | null {
+  const units = flatCaretUnits(doc);
+  for (let i = 0; i < units.length; i++) {
+    if (pos >= units[i].start && pos < units[i].end) {
+      return { unitIndex: i, offset: pos - units[i].start };
+    }
+  }
+  return null;
+}
+
+function restoreAnchor(doc: PmNode, anchor: CaretAnchor): number | null {
+  const units = flatCaretUnits(doc);
+  const u = units[anchor.unitIndex];
+  if (!u) return null;
+  const pos = Math.min(u.start + anchor.offset, u.end - 1);
+  return Math.max(u.start + 1, pos);
+}
+
+/** Save BOTH ends of the selection so a RANGE selection survives a re-flow.
+ *  Saving only `from` (as saveCaret did) collapsed every range: a debounced
+ *  re-flow landing right after a double/triple-click or a drag-selection
+ *  discarded `to` and restored a bare caret, so selecting text looked like it
+ *  was immediately "cancelled". */
+function saveSelection(
+  doc: PmNode,
+  selection: { from: number; to: number },
+): { from: CaretAnchor | null; to: CaretAnchor | null } | null {
+  // A table CellSelection (multi-cell) can't survive the re-flow: the full-doc
+  // replaceWith maps it unpredictably, and restoreSelection only rebuilds a
+  // TextSelection. Skip save/restore for any non-text selection so a re-flow
+  // never collapses a multi-cell selection to a caret — the "selected, then
+  // immediately cancelled" symptom.
+  if (!(selection instanceof TextSelection)) return null;
+  return {
+    from: caretAnchorAt(doc, selection.from),
+    to: selection.from === selection.to ? null : caretAnchorAt(doc, selection.to),
+  };
+}
+
+function restoreSelection(
+  doc: PmNode,
+  saved: { from: CaretAnchor | null; to: CaretAnchor | null } | null,
+): TextSelection | null {
+  // null saved = a non-text selection (e.g. CellSelection) was skipped in
+  // saveSelection; leave PM's own mapping in place instead of forcing a caret.
+  if (!saved || !saved.from) return null;
+  const from = restoreAnchor(doc, saved.from);
+  if (from == null) return null;
+  if (!saved.to) return TextSelection.create(doc, from);
+  const to = restoreAnchor(doc, saved.to);
+  if (to == null) return TextSelection.create(doc, from);
+  return TextSelection.create(doc, from, Math.max(from, to));
+}
+
+/** Re-flow: regroup flow items (blocks + table rows) into pages so each page's
+ *  content fits its fixed height. Greedy packing — a row never splits (a `<tr>`
+ *  cannot visually break across pages). Dispatches nothing when the regrouping
+ *  already matches the current page structure, which also terminates the
+ *  re-flow → dispatch → update → re-flow cycle. */
+
+/** Position of the FIRST pageBreak atom within a block — a descendant scan, so
+ *  it also catches a break nested inside a list/table container. A top-level
+ *  bulletList is NOT a textblock, so an `isTextblock`-only check missed a break
+ *  at the start of a list item and left e.g. a section heading glued to the
+ *  bottom of the preceding page.
+ *  - "before": the atom is the block's leading inline (imported
+ *    `<w:br w:type="page"/>` before the paragraph text) → the block starts a
+ *    fresh page — Word breaks there, ahead of the text.
+ *  - "after":  the atom is mid/trailing → the block ends a page.
+ *  - null: no pageBreak atom. */
+function pageBreakPosition(node: PmNode): "before" | "after" | null {
+  // An empty paragraph whose only content is the pageBreak atom is the break's
+  // CARRIER — Word renders it at the END of the preceding page (the break fires
+  // there), never at the start of the next. So a text-less paragraph counts as
+  // "after" (forcesPageBreakAfter closes the page after it), otherwise "before"
+  // would strand the empty <p> atop the next page and drag the break mark down.
+  const hasText = (node.textContent ?? "").replace(/\s/g, "").length > 0;
+  let pos: "before" | "after" | null = null;
+  let seenInline = false;
+  node.descendants((n) => {
+    if (pos) return false; // first pageBreak decides; skip the rest
+    if (n.type.name === "pageBreak") {
+      pos = !hasText || seenInline ? "after" : "before";
+      return false;
+    }
+    if (n.isInline) seenInline = true;
+    return true;
+  });
+  return pos;
+}
+
+/** A block that must START a new page: either a leading pageBreak atom
+ *  (`<w:br w:type="page"/>` before its text) OR the OOXML `pageBreakBefore`
+ *  paragraph property (`<w:pageBreakBefore/>`). The paginator closes the
+ *  current page before it. */
+function forcesPageBreakBefore(node: PmNode, pag?: PaginationAttrs): boolean {
+  if (pag?.pageBreakBefore === true) return true;
+  return pageBreakPosition(node) === "before";
+}
+
+/** A block forces a page break AFTER it when it ends a section (a paragraph
+ *  carrying sectionProperties is its section's last paragraph — OOXML sectPr in
+ *  its pPr — so the next block starts a fresh section/page) or when it holds a
+ *  mid/trailing pageBreak atom. */
+function forcesPageBreakAfter(node: PmNode): boolean {
+  if ((node.attrs as { sectionProperties?: unknown }).sectionProperties != null) return true;
+  return pageBreakPosition(node) === "after";
+}
+
+/** Identity key for split-grouping table rows: rows from tables already sharing
+ *  a `splitGroup` (a prior split) regroup by that id; otherwise by node. */
+function tableKeyOf(table: PmNode, ids: Map<PmNode, string>): string {
+  const group = table.attrs.splitGroup as string | null;
+  if (group) return group;
+  let id = ids.get(table);
+  if (!id) {
+    id = `n${ids.size + 1}`;
+    ids.set(table, id);
+  }
+  return id;
+}
+
+/** Build a table node from regrouped rows. Continuation pages (the table
+ *  already placed on a prior page) clone the header rows from the group's
+ *  first segment (`headerSource` — later segments have no header yet); split
+ *  tables carry a `splitGroup` id so unwrapPages merges them back on export. */
+function buildTableNode(
+  schema: PmNode["type"]["schema"],
+  table: PmNode,
+  headerSource: PmNode,
+  rows: PmNode[],
+  isContinuation: boolean,
+  splitGroup: string | null,
+): PmNode {
+  const finalRows =
+    isContinuation && splitGroup ? [...cloneHeaderRows(headerSource), ...rows] : rows;
+  // Always (re)set splitGroup — clear stale ids when a table now fits one page
+  // (it may carry a group id from a prior, larger split).
+  const attrs = { ...table.attrs, splitGroup: splitGroup ?? null };
+  return schema.nodes.table.create(attrs, finalRows);
+}
+
+/** Structural equality of the page sequence (deep, incl. attrs) — gates the
+ *  skip-dispatch that terminates the re-flow cycle. */
+function pagesEqual(doc: PmNode, newPages: PmNode[]): boolean {
+  const current: PmNode[] = [];
+  doc.forEach((pn) => {
+    if (pn.type.name === "page") current.push(pn);
+  });
+  if (current.length !== newPages.length) return false;
+  return current.every((p, i) => p.eq(newPages[i]));
+}
+
+function reflow(editor: Editor): void {
+  const view = editor.view;
+  const state = view.state;
+  // Skip re-flow while a table CellSelection is active: the full-doc rebuild
+  // (replaceWith over the whole doc) can't reliably map a multi-cell selection,
+  // so re-flowing would drop it — the "selected, then immediately cancelled"
+  // symptom. The next pass re-measures once the selection is text again.
+  if (!(state.selection instanceof TextSelection)) return;
+  const schema = state.schema;
+  // DOM-measured page height — the fallback for pages with no section geometry
+  // (default editor before a page setup is applied). Pages carrying their
+  // section's geometry use the deterministic sectionContentDims height, which
+  // matches the page's inline width/height/padding box exactly (so multi-section
+  // docs — e.g. a landscape section — pack against each section's own height).
+  const domFallback = resolvePageContentHeight(editor);
+  const segHeightOf = (section: unknown): number =>
+    sectionContentDims(section)?.height ?? domFallback;
+
+  // Hold off while any image is still decoding: its offsetHeight is 0 / a
+  // placeholder until loaded, so a reflow now packs on stale heights and the
+  // page jumps when the image lands. The capture-phase load listener
+  // (addProseMirrorPlugins) re-schedules once each image is ready, so this
+  // converges to the correct breaks without the intermediate flicker.
+  for (const img of view.dom.querySelectorAll<HTMLImageElement>("img")) {
+    if (!img.complete) return;
+  }
+
+  const items = measureFlatItems(editor);
+  if (items.length === 0) return;
+
+  // Per-item section properties (each page renders its section's geometry).
+  // A paragraph carrying sectionProperties is its section's LAST paragraph
+  // (OOXML sectPr in its pPr) and describes the section ENDING there, so its
+  // section applies to itself and everything BEFORE it — propagate backwards.
+  const docSectionProps =
+    (state.doc.attrs as { sectionProperties?: unknown }).sectionProperties ?? null;
+  const itemSection: unknown[] = [];
+  let sectCursor: unknown = docSectionProps;
+  for (let i = items.length - 1; i >= 0; i--) {
+    const it = items[i];
+    if (it.kind === "block" && it.node.type.name === "paragraph") {
+      const sp = (it.node.attrs as { sectionProperties?: unknown }).sectionProperties;
+      if (sp != null) sectCursor = sp;
+    }
+    itemSection[i] = sectCursor;
+  }
+
+  const ids = new Map<PmNode, string>();
+
+  // Greedy pack into page segments. An item taller than the page takes a page
+  // to itself (a row never splits) rather than loop forever — Word likewise
+  // clips oversized content; warn so it is visible.
+  const segments: { items: FlatItem[]; section: unknown }[] = [];
+  let cur: FlatItem[] = [];
+  let curSection: unknown = itemSection[0] ?? docSectionProps;
+  // Guard: if the first page's height can't be measured yet (no section geometry
+  // AND the DOM not laid out), wait — packing against 0 stacks every block on
+  // its own page. Once geometry is present this is deterministic and > 0.
+  if (segHeightOf(curSection) <= 0) return;
+  let curHeight = segHeightOf(curSection);
+  let acc = 0;
+  const closeSegment = (): void => {
+    if (cur.length > 0) segments.push({ items: cur, section: curSection });
+    cur = [];
+    acc = 0;
+  };
+  // while-loop (not for): a mid-paragraph split inserts the tail back into the
+  // flow as a new item, so the index advances past the head only.
+  let splitSeq = 0;
+  let i = 0;
+  while (i < items.length) {
+    const item = items[i];
+    const pag = item.kind === "block" ? item.pag : undefined;
+    // A block whose pageBreak atom leads (imported break-at-start) OR whose
+    // pageBreakBefore property is set starts a new page — close the current
+    // page before it, matching Word. The curSection/curHeight reset is handled
+    // by the `cur.length === 0` block below.
+    if (item.kind === "block" && cur.length > 0 && forcesPageBreakBefore(item.node, pag)) {
+      closeSegment();
+    }
+    if (cur.length === 0) {
+      curSection = itemSection[i];
+      curHeight = segHeightOf(curSection);
+    }
+    // Core height excludes a block's trailing margin: if it lands as a page's
+    // last item, that margin is clipped at the fixed page bottom (Word clips
+    // the final paragraph's spacing.after the same way), so it must not be the
+    // reason the block overflows to the next page. The full height (incl.
+    // after) still accumulates, since a non-final block's after renders as gap
+    // before the next block and must count toward the page fill.
+    const core = item.kind === "block" ? item.height - item.after : item.height;
+    // Overflow check. `core > curHeight` (the item alone is taller than a page)
+    // applies even on an EMPTY page — otherwise the very first item, when it is a
+    // splittable multi-image paragraph, takes the whole page to itself and never
+    // splits (it never re-enters the `cur.length > 0` branch). The `acc + core`
+    // part only matters once the page already has content. trySplitBlock returns
+    // null for unsplittable blocks (container/keepLines) → they still take a page
+    // to themselves (Word clips oversized content). Rows can't split (a <tr>
+    // can't visually break), so they always fall through.
+    const overflow = cur.length > 0 ? core > curHeight || acc + core > curHeight : core > curHeight;
+    if (overflow) {
+      if (item.kind === "block") {
+        const remaining = cur.length > 0 ? curHeight - acc : curHeight;
+        // Reuse the paragraph's existing splitGroup when it has one: a tail that
+        // re-splits mid-packer keeps its own group, so EVERY piece of the same
+        // original paragraph shares one id. Otherwise head(p0) + a re-split tail's
+        // head'(p1) can't merge back next pass and the doc oscillates between two
+        // splitGroup layouts forever — a >2-page multi-image paragraph never
+        // converged. Mint a new id only for a paragraph with no group yet.
+        const sg =
+          (item.node.attrs as { splitGroup?: string | null }).splitGroup ?? `p${splitSeq++}`;
+        const split = trySplitBlock(item, remaining, sg);
+        if (split) {
+          // If the head's own height exceeds the current page's remaining space
+          // (its first row alone is over-tall — e.g. a near-page-height image
+          // arriving after other content), close the current page FIRST so the
+          // head starts a fresh page instead of overflowing this one. The tail
+          // still spills onto the next page via the closeSegment below.
+          if (cur.length > 0 && split.head.height > remaining) closeSegment();
+          cur.push(split.head);
+          acc += split.head.height;
+          closeSegment();
+          // The tail becomes the next item with the SAME splitGroup + section,
+          // so the next iteration re-packs it on a fresh page. It is re-measured
+          // next re-flow after head+tail merge back into the original paragraph
+          // (idempotent). Splice itemSection too so the tail keeps the section.
+          items.splice(i + 1, 0, split.tail);
+          itemSection.splice(i + 1, 0, itemSection[i]);
+          i++;
+          continue;
+        }
+      }
+      if (cur.length > 0) {
+        closeSegment();
+        curSection = itemSection[i];
+        curHeight = segHeightOf(curSection);
+      }
+    }
+    cur.push(item);
+    acc += item.height;
+    if (item.kind === "row" && item.height > curHeight) {
+      console.warn(
+        "[docen] table row taller than the page content area; clipped (Word would split mid-row, which contenteditable cannot).",
+      );
+    }
+    if (item.kind === "block" && forcesPageBreakAfter(item.node)) {
+      closeSegment();
+    }
+    i++;
+  }
+  closeSegment();
+
+  // Pass 1: tables whose rows land on >1 page get a splitGroup id (for merge
+  // on export and header cloning on continuation pages).
+  const tableSegCount = new Map<string, number>();
+  for (const seg of segments) {
+    const keys = new Set<string>();
+    for (const it of seg.items) if (it.kind === "row") keys.add(tableKeyOf(it.table, ids));
+    for (const k of keys) tableSegCount.set(k, (tableSegCount.get(k) ?? 0) + 1);
+  }
+  let groupSeq = 0;
+  const splitGroupForKey = new Map<string, string>();
+  for (const [key, count] of tableSegCount) {
+    if (count > 1) splitGroupForKey.set(key, `t${groupSeq++}`);
+  }
+
+  // Pass 2: build page nodes. Contiguous same-table rows merge into one table
+  // node per page; continuation pages clone the header rows.
+  const seenTables = new Set<string>();
+  const firstTableOfGroup = new Map<string, PmNode>();
+  const newPages = segments.map((seg) => {
+    const children: PmNode[] = [];
+    let pendingRows: PmNode[] = [];
+    let pendingTable: PmNode | null = null;
+    let pendingKey = "";
+    const flush = (): void => {
+      if (pendingRows.length && pendingTable) {
+        const key = tableKeyOf(pendingTable, ids);
+        const group = splitGroupForKey.get(key) ?? null;
+        const isContinuation = seenTables.has(key);
+        // The group's first segment carries the original header rows; clone
+        // from it on continuation pages (later segments have no header yet).
+        if (group && !firstTableOfGroup.has(group)) firstTableOfGroup.set(group, pendingTable);
+        const headerSource = group ? (firstTableOfGroup.get(group) ?? pendingTable) : pendingTable;
+        seenTables.add(key);
+        children.push(
+          buildTableNode(schema, pendingTable, headerSource, pendingRows, isContinuation, group),
+        );
+      }
+      pendingRows = [];
+      pendingTable = null;
+      pendingKey = "";
+    };
+    for (const item of seg.items) {
+      if (item.kind === "row") {
+        const key = tableKeyOf(item.table, ids);
+        if (key !== pendingKey) {
+          flush();
+          pendingTable = item.table;
+          pendingKey = key;
+        }
+        // Clone rows reserve height (measured above) but are re-cloned by
+        // buildTableNode — don't re-pack them or the header doubles up.
+        if (!item.isClone) pendingRows.push(item.row);
+      } else {
+        flush();
+        children.push(item.node);
+      }
+    }
+    flush();
+    return schema.nodes.page.create({ sectionProperties: seg.section ?? null }, children);
+  });
+
+  if (pagesEqual(state.doc, newPages)) return;
+
+  const savedSel = saveSelection(state.doc, state.selection);
+  const tr = state.tr.replaceWith(0, state.doc.content.size, newPages);
+  const sel = restoreSelection(tr.doc, savedSel);
+  if (sel) tr.setSelection(sel);
+  tr.setMeta(flowKey, { flow: true });
+  tr.setMeta("addToHistory", false);
+  view.dispatch(tr);
+}
+
+/**
+ * PagePlugin — C-route pagination over a single contenteditable.
+ *
+ * The document schema is `doc > page+`; each `page` is a fixed-height box
+ * (`height` + `overflow: hidden`). This plugin regroups blocks across pages so
+ * nothing overflows a page's fixed box: when a page's measured content exceeds
+ * its height, trailing blocks move to the next page (and a new page is added at
+ * the end when needed). Re-flow is debounced (an offline pass, not per
+ * keystroke) and the caret is preserved across regrouping.
+ *
+ * See CLAUDE.md → Pagination Architecture and CONTRIBUTING.md → Pagination
+ * Conventions.
+ */
+export const PagePlugin = Extension.create<PagePluginOptions>({
+  name: "pagePlugin",
+
+  addOptions() {
+    return { debounceMs: 300 };
+  },
+
+  addStorage() {
+    return { repaginate: () => {} };
+  },
+
+  addProseMirrorPlugins() {
+    const editor = this.editor;
+    const debounceMs = this.options.debounceMs ?? 300;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const runRaf = (): void => {
+      requestAnimationFrame(() => {
+        if (!editor.isDestroyed) reflow(editor);
+      });
+    };
+    const schedule = (): void => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(runRaf, debounceMs);
+    };
+
+    // Host hook: re-flow now, once layout has settled (the host awaits fonts/
+    // images and one rAF before calling this after an import or geometry change).
+    pageStorageOf(editor).repaginate = (): void => {
+      if (timer) clearTimeout(timer);
+      runRaf();
+    };
+
+    // Re-flow when an image finishes decoding. `load`/`error` do not bubble, so
+    // we capture at the editor surface — one binding covers every image, even
+    // ones inserted later. reflow() itself holds off while any image is still
+    // loading, so this is what drives convergence past a loading image.
+    const onMediaReady = (e: Event): void => {
+      if (e.target instanceof HTMLImageElement) schedule();
+    };
+
+    return [
+      new Plugin({
+        key: flowKey,
+        view(editorView) {
+          editorView.dom.addEventListener("load", onMediaReady, true);
+          editorView.dom.addEventListener("error", onMediaReady, true);
+          return {
+            update(view, prevState) {
+              // Only re-flow on real doc changes; a no-op or our own flow tr
+              // (doc unchanged after our dispatch converges, or the same-check
+              // inside reflow short-circuits) does not cascade.
+              if (view.state.doc === prevState.doc) return;
+              schedule();
+            },
+            destroy() {
+              editorView.dom.removeEventListener("load", onMediaReady, true);
+              editorView.dom.removeEventListener("error", onMediaReady, true);
+              if (timer) clearTimeout(timer);
+            },
+          };
+        },
+      }),
+    ];
+  },
+});

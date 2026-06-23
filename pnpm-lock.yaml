@@ -160,6 +160,42 @@ importers:
         specifier: 3.3.0
         version: 3.3.0
 
+  packages/editor:
+    dependencies:
+      '@chenglou/pretext':
+        specifier: 0.0.8
+        version: 0.0.8
+      '@docen/docx':
+        specifier: workspace:*
+        version: link:../docx
+      '@fluentui/svg-icons':
+        specifier: 1.1.330
+        version: 1.1.330
+      '@fluentui/tokens':
+        specifier: 1.0.0-alpha.23
+        version: 1.0.0-alpha.23
+      '@fluentui/web-components':
+        specifier: 3.0.0-rc.28
+        version: 3.0.0-rc.28(@microsoft/fast-element@2.10.4)(@microsoft/fast-html@1.0.0-alpha.54(@microsoft/fast-element@2.10.4))(@microsoft/focusgroup-polyfill@1.5.0)
+      '@microsoft/fast-element':
+        specifier: 2.10.4
+        version: 2.10.4
+      '@microsoft/fast-html':
+        specifier: 1.0.0-alpha.54
+        version: 1.0.0-alpha.54(@microsoft/fast-element@2.10.4)
+      '@microsoft/focusgroup-polyfill':
+        specifier: 1.5.0
+        version: 1.5.0
+      '@tiptap/extension-table-of-contents':
+        specifier: 3.22.5
+        version: 3.22.5(@tiptap/core@3.22.5(@tiptap/pm@3.22.5))(@tiptap/pm@3.22.5)
+      '@tiptap/pm':
+        specifier: 3.22.5
+        version: 3.22.5
+      prosemirror-search:
+        specifier: ^1.1.1
+        version: 1.1.1
+
   packages/utils:
     devDependencies:
       '@types/xast':
@@ -211,6 +247,9 @@ packages:
   '@babel/types@8.0.0-rc.6':
     resolution: {integrity: sha512-p7/ABylAYlexb31wtRdIfH9L9A0Z2T/9H6zAqzqndkY2PLkvNNc580wGhp/gGKN4Sp9sQvSkhc6Oga8/O+wTyw==}
     engines: {node: ^22.18.0 || >=24.11.0}
+
+  '@chenglou/pretext@0.0.8':
+    resolution: {integrity: sha512-yqm2GMxnPI7VHcHwe84P8ZF0JK/2d2DMKPqMN+s95jQhwDMYYXKVFVJUMEaVWckQStdsjdLav/0Vu+d9YbtGxA==}
 
   '@emnapi/core@1.10.0':
     resolution: {integrity: sha512-yq6OkJ4p82CAfPl0u9mQebQHKPJkY7WrIuk205cTYnYe+k2Z8YBh11FrbRG/H6ihirqcacOgl2BIO8oyMQLeXw==}
@@ -542,6 +581,23 @@ packages:
     cpu: [x64]
     os: [win32]
 
+  '@fluentui/svg-icons@1.1.330':
+    resolution: {integrity: sha512-yREGomPwVEQ7gVRFSxg1kTBnvH65KvpClekhcN7/uZvmO/PSEFwrBGI+lQC/rqGXvTzISYxk9hYJbN3SHJepFQ==}
+
+  '@fluentui/tokens@1.0.0-alpha.23':
+    resolution: {integrity: sha512-uxrzF9Z+J10naP0pGS7zPmzSkspSS+3OJDmYIK3o1nkntQrgBXq3dBob4xSlTDm5aOQ0kw6EvB9wQgtlyy4eKQ==}
+
+  '@fluentui/web-components@3.0.0-rc.28':
+    resolution: {integrity: sha512-opCxz3MRhfi5OXPSvfLPGFd1FL4B859pjzQIfCAtlftjsKhHOumcTVVSk+y2bWd/DLr5fs5erA0Q7S9Cignj+w==}
+    engines: {node: ^22.0.0 || ^24.0.0}
+    peerDependencies:
+      '@microsoft/fast-element': ^2.0.0
+      '@microsoft/fast-html': ^1.0.0-alpha.53
+      '@microsoft/focusgroup-polyfill': ^1.4.1
+    peerDependenciesMeta:
+      '@microsoft/fast-html':
+        optional: true
+
   '@funish/basis@0.3.0':
     resolution: {integrity: sha512-153AVBoU1NXRfj0WXDsLPh+H9xd6y8C304hR5FGQN4IiAB7CFDGMvl8z5FfpMKYriYTGqc54vWvnOcA+s1MD+A==}
     hasBin: true
@@ -565,6 +621,17 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
+
+  '@microsoft/fast-element@2.10.4':
+    resolution: {integrity: sha512-OkHIlMztq7+PgkRF1LscgBd/MVzMhGrWPkJRDvOEqdqEdZOKocKvaKcUKZubIBz4RpLIrhLD3lOJzCsspk6jXg==}
+
+  '@microsoft/fast-html@1.0.0-alpha.54':
+    resolution: {integrity: sha512-7GWGwaJSWD/nqafn/s1YTqc5CmHbRWwEC1BA/BJHSLrX+UQZGGbCugSQ0ArL4x7goDmB6rWLTPB7UZtqOcu/3g==}
+    peerDependencies:
+      '@microsoft/fast-element': ^2.10.4
+
+  '@microsoft/focusgroup-polyfill@1.5.0':
+    resolution: {integrity: sha512-2tw+AISULD5xhP+wIqUheej5wZbwiuPaqjuCa8A8jLdq2ikklZBIvSDLLa6j7zbDbtV5BXnrYgSuyW1Bj5JA4A==}
 
   '@napi-rs/wasm-runtime@1.1.5':
     resolution: {integrity: sha512-AWPoBRJ9tsnVhor4sjO7rkni+7p+2IAEFj6cx06UgP10jkQHqay/36uRV/bFkgrh18D9vb4cr8Q0Pthskgzy+Q==}
@@ -1229,6 +1296,9 @@ packages:
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
 
+  '@swc/helpers@0.5.23':
+    resolution: {integrity: sha512-5lSsMOTXURePglDfvuAQUqkGek9Hg2kksOYay2m0+XR++b2NWYL/4sWyuvVBIs8oKnJaxkdi9whaL/sqN13afw==}
+
   '@tiptap/core@3.22.5':
     resolution: {integrity: sha512-L1lhWz6ujGny8LduTJ7MBWYhzigwOvfUJUrJ7IzOJSuy3+OAzisdGDD1GV7LEO/hU0Hr2Mkm1wajRIHExvS9HQ==}
     peerDependencies:
@@ -1373,6 +1443,12 @@ packages:
 
   '@tiptap/extension-superscript@3.22.5':
     resolution: {integrity: sha512-Ta9epX6CY9vOQjZAnY/HY7Lo/ixSrRwdDU8yOhkoO9pkYNA/e8l5xhf1T04qnBQ1+QaOZzpLTYlfQJrHzqcJmQ==}
+    peerDependencies:
+      '@tiptap/core': 3.22.5
+      '@tiptap/pm': 3.22.5
+
+  '@tiptap/extension-table-of-contents@3.22.5':
+    resolution: {integrity: sha512-yBwY4zIWsu22o+yW4a65TlDbkWC8GBwjEaUyBTvi56ry+nyq2v7M0vAV8+D/3XsMGYOL0ZRIR/pD/DB2Z78bqg==}
     peerDependencies:
       '@tiptap/core': 3.22.5
       '@tiptap/pm': 3.22.5
@@ -2079,6 +2155,9 @@ packages:
   prosemirror-schema-list@1.5.1:
     resolution: {integrity: sha512-927lFx/uwyQaGwJxLWCZRkjXG0p48KpMj6ueoYiu4JX05GGuGcgzAy62dfiV8eFZftgyBUvLx76RsMe20fJl+Q==}
 
+  prosemirror-search@1.1.1:
+    resolution: {integrity: sha512-1dbxbF1YYlP9mYJnFbfdOb9+RTdFHeZ/GwgEyHD4jg9szA8EVitMCnfXUBYLmFun500FMZBkRvcV0gp5BpLw4Q==}
+
   prosemirror-state@1.4.4:
     resolution: {integrity: sha512-6jiYHH2CIGbCfnxdHbXZ12gySFY/fz/ulZE333G6bPqIZ4F+TXo9ifiR86nAHpWnfoNjOb3o5ESi7J8Uz1jXHw==}
 
@@ -2277,6 +2356,11 @@ packages:
       synckit:
         optional: true
 
+  uuid@10.0.0:
+    resolution: {integrity: sha512-8XkAphELsDnEGrDxUOHB3RGvXz6TeuYSGEZBOjtTtPm2lwhGBjLgOzLHB63IUWfBpNucQjND6d3AOudO+H3RWQ==}
+    deprecated: uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).
+    hasBin: true
+
   vite-plus@0.1.24:
     resolution: {integrity: sha512-b3fr6WtCiEhetjuzW/4KcEMOAMuZxoxZATWaXKmPzOLf1upG+pzKJOFZTb94D6wiPBlwcjxoaUtF7C3uAN+VjQ==}
     engines: {node: ^20.19.0 || >=22.12.0}
@@ -2401,6 +2485,8 @@ snapshots:
     dependencies:
       '@babel/helper-string-parser': 8.0.0-rc.6
       '@babel/helper-validator-identifier': 8.0.0-rc.6
+
+  '@chenglou/pretext@0.0.8': {}
 
   '@emnapi/core@1.10.0':
     dependencies:
@@ -2590,6 +2676,21 @@ snapshots:
   '@esbuild/win32-x64@0.28.0':
     optional: true
 
+  '@fluentui/svg-icons@1.1.330': {}
+
+  '@fluentui/tokens@1.0.0-alpha.23':
+    dependencies:
+      '@swc/helpers': 0.5.23
+
+  '@fluentui/web-components@3.0.0-rc.28(@microsoft/fast-element@2.10.4)(@microsoft/fast-html@1.0.0-alpha.54(@microsoft/fast-element@2.10.4))(@microsoft/focusgroup-polyfill@1.5.0)':
+    dependencies:
+      '@fluentui/tokens': 1.0.0-alpha.23
+      '@microsoft/fast-element': 2.10.4
+      '@microsoft/focusgroup-polyfill': 1.5.0
+      tslib: 2.8.1
+    optionalDependencies:
+      '@microsoft/fast-html': 1.0.0-alpha.54(@microsoft/fast-element@2.10.4)
+
   '@funish/basis@0.3.0(chokidar@5.0.0)(dotenv@17.4.2)(giget@3.2.0)(magicast@0.5.2)(typescript@5.9.3)(unrun@0.2.37)':
     dependencies:
       '@funish/build': 0.2.0(chokidar@5.0.0)(dotenv@17.4.2)(giget@3.2.0)(magicast@0.5.2)(typescript@5.9.3)(unrun@0.2.37)
@@ -2675,6 +2776,14 @@ snapshots:
     dependencies:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
+
+  '@microsoft/fast-element@2.10.4': {}
+
+  '@microsoft/fast-html@1.0.0-alpha.54(@microsoft/fast-element@2.10.4)':
+    dependencies:
+      '@microsoft/fast-element': 2.10.4
+
+  '@microsoft/focusgroup-polyfill@1.5.0': {}
 
   '@napi-rs/wasm-runtime@1.1.5(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)':
     dependencies:
@@ -3044,6 +3153,10 @@ snapshots:
 
   '@standard-schema/spec@1.1.0': {}
 
+  '@swc/helpers@0.5.23':
+    dependencies:
+      tslib: 2.8.1
+
   '@tiptap/core@3.22.5(@tiptap/pm@3.22.5)':
     dependencies:
       '@tiptap/pm': 3.22.5
@@ -3171,6 +3284,12 @@ snapshots:
     dependencies:
       '@tiptap/core': 3.22.5(@tiptap/pm@3.22.5)
       '@tiptap/pm': 3.22.5
+
+  '@tiptap/extension-table-of-contents@3.22.5(@tiptap/core@3.22.5(@tiptap/pm@3.22.5))(@tiptap/pm@3.22.5)':
+    dependencies:
+      '@tiptap/core': 3.22.5(@tiptap/pm@3.22.5)
+      '@tiptap/pm': 3.22.5
+      uuid: 10.0.0
 
   '@tiptap/extension-table@3.22.5(@tiptap/core@3.22.5(@tiptap/pm@3.22.5))(@tiptap/pm@3.22.5)':
     dependencies:
@@ -3830,6 +3949,12 @@ snapshots:
       prosemirror-state: 1.4.4
       prosemirror-transform: 1.12.0
 
+  prosemirror-search@1.1.1:
+    dependencies:
+      prosemirror-model: 1.25.4
+      prosemirror-state: 1.4.4
+      prosemirror-view: 1.41.8
+
   prosemirror-state@1.4.4:
     dependencies:
       prosemirror-model: 1.25.4
@@ -4043,8 +4168,7 @@ snapshots:
       - oxc-resolver
       - vue-tsc
 
-  tslib@2.8.1:
-    optional: true
+  tslib@2.8.1: {}
 
   typescript@5.9.3:
     optional: true
@@ -4064,6 +4188,8 @@ snapshots:
     dependencies:
       rolldown: 1.0.0-rc.17
     optional: true
+
+  uuid@10.0.0: {}
 
   vite-plus@0.1.24(@types/node@25.9.3)(esbuild@0.28.0)(happy-dom@20.8.4)(jiti@2.7.0)(terser@5.46.2)(typescript@5.9.3)(unrun@0.2.37)(vite@7.3.2(@types/node@25.9.3)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.46.2)(yaml@2.8.4))(yaml@2.8.4):
     dependencies:

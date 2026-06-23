@@ -101,7 +101,13 @@ export const Table = BaseTable.extend({
     node,
     HTMLAttributes,
   }: {
-    node: { attrs: Record<string, unknown> };
+    node: {
+      attrs: Record<string, unknown>;
+      firstChild: {
+        childCount: number;
+        child: (i: number) => { attrs: Record<string, unknown> };
+      } | null;
+    };
     HTMLAttributes: Record<string, unknown>;
   }) {
     const a = node.attrs;
@@ -119,17 +125,30 @@ export const Table = BaseTable.extend({
 
     if (a.layout === "fixed") styles.push("table-layout:fixed");
 
+    // Table width: pct → percentage; dxa/numeric → twips; "auto" or no
+    // <w:tblW> → fill the page content area. Word's "auto" tables size to the
+    // text column (full-width unless content is sparse); with no width the
+    // browser would shrink the table to its content, so match Word with 100%.
     if (a.width && typeof a.width === "object") {
       const w = a.width as { size: number | string; type?: string };
-      // pct size is fiftieths-of-a-percent (5000 = 100%); @office-open/docx may
-      // emit it as a "5000%" string — parse to a number first.
       const numSize = typeof w.size === "string" ? parseFloat(w.size) : w.size;
       if (w.type === "pct") {
-        if (!Number.isNaN(numSize)) styles.push(`width:${numSize / 50}%`);
+        if (typeof w.size === "string" && w.size.includes("%")) {
+          // office-open keeps the percentage literal verbatim ("100%" = 100%) —
+          // it is NOT fiftieths-of-a-percent, so do not divide by 50.
+          styles.push(`width:${w.size}`);
+        } else if (!Number.isNaN(numSize)) {
+          // A bare number is fiftieths-of-a-percent (5000 = 100%) per OOXML.
+          styles.push(`width:${numSize / 50}%`);
+        }
+      } else if (w.type === "auto") {
+        styles.push("width:100%");
       } else if (numSize != null) {
         const css = twipToCss(numSize);
         if (css) styles.push(`width:${css}`);
       }
+    } else {
+      styles.push("width:100%");
     }
 
     if (a.indent && typeof a.indent === "object") {
@@ -166,7 +185,53 @@ export const Table = BaseTable.extend({
       }
     }
 
+    // colgroup columns. Collect BOTH the first-row cell colwidths (DOCX
+    // <w:tcW>) and the tblGrid (columnWidths, from <w:tblGrid>).
+    const firstRow = node.firstChild;
+    const cellPx: number[] = [];
+    if (firstRow) {
+      for (let i = 0; i < firstRow.childCount; i++) {
+        const cw = firstRow.child(i).attrs.colwidth as number[] | null | undefined;
+        if (Array.isArray(cw) && cw.length) for (const w of cw) cellPx.push(w || 0);
+        else cellPx.push(0);
+      }
+    }
+    const hasCellWidths = cellPx.some((w) => w > 0);
+    // Prefer tblGrid for the colgroup: it is the table's real column structure
+    // and is IDENTICAL across every split slice, so the colgroup stays stable
+    // as the paginator re-splits the table. A slice's firstRow is a mid-table
+    // row whose tcW colwidths need not match the grid (and are often a 61px
+    // placeholder), and ProseMirror reuses the table DOM across re-flows so a
+    // firstRow-based colgroup drifts — a 0-width column then collapses its text
+    // into one giant over-tall row that overflows the page. Fall back to cell
+    // colwidths only when tblGrid is absent or all-zero.
+    const tblGridPx = ((a.columnWidths as Array<number> | null) ?? []).map((w) =>
+      Math.round((w || 0) / 15),
+    );
+    const hasGrid = tblGridPx.some((w) => w > 0);
+    const gridPx = hasGrid ? tblGridPx : hasCellWidths ? cellPx : tblGridPx;
+
     if (styles.length > 0) attrs.style = styles.join(";");
+    if (gridPx.some((w) => w > 0)) {
+      // Column widths are relative ratios in OOXML: Word scales the grid to
+      // the table width (tblW) or the page text column, never to the raw grid
+      // sum. Emit percentages so the table's CSS width (tblW → pt, or 100% for
+      // "auto") sets the total and columns share it proportionally. Absolute
+      // px would let an oversized grid (e.g. 1063px of columns on a 579px
+      // tblW) blow past the page content area, which the fixed page box then
+      // clips — Word never does.
+      const gridTotal = gridPx.reduce((sum, w) => sum + w, 0);
+      const cols = gridPx.map(
+        (w) =>
+          [
+            "col",
+            { style: `width:${gridTotal > 0 ? ((w / gridTotal) * 100).toFixed(2) : 0}%` },
+          ] as const,
+      );
+      // Wrap the content hole in <tbody>: ProseMirror requires a content hole
+      // (0) to be the SOLE child of its parent, so it can't sit beside colgroup.
+      return ["table", attrs, ["colgroup", {}, ...cols], ["tbody", 0]] as const;
+    }
     return ["table", attrs, 0] as const;
   },
 

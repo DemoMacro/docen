@@ -132,3 +132,6 @@ dist
 # tests
 packages/docx/tests/json
 packages/docx/tests/docx
+
+# Playwright MCP snapshots (tool artifacts, regenerable)
+.playwright-mcp/

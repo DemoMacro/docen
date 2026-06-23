@@ -43,6 +43,11 @@ export function renderDocx(attrs: Record<string, unknown>): Partial<RunOptions> 
   for (const [key, value] of Object.entries(attrs)) {
     if (SKIP_KEYS.has(key)) continue;
     if (value === null || value === undefined) continue;
+    // styleId (attr) → OOXML run `style` (the rStyle / character-style reference).
+    if (key === "styleId") {
+      opts.style = value;
+      continue;
+    }
     // Attrs mirror RunOptions field names (color/font/size/shading/…); CSS
     // conversion happens only in attribute-level renderHTML/parseHTML below.
     opts[key] = value;
@@ -53,6 +58,9 @@ export function renderDocx(attrs: Record<string, unknown>): Partial<RunOptions> 
 export function parseDocx(opts: RunOptions): Record<string, unknown> {
   const resolved = typeof opts === "string" ? { text: opts } : opts;
   const attrs: Record<string, unknown> = {};
+  // OOXML run `style` (rStyle — a character-style reference) → styleId, carried
+  // as an attr so the named character style's CSS applies via class="docx-char-{id}".
+  if (resolved.style) attrs.styleId = resolved.style;
   for (const [key, value] of Object.entries(resolved)) {
     if (SKIP_KEYS.has(key)) continue;
     attrs[key] = value ?? null;
@@ -71,6 +79,22 @@ export const TextStyle = BaseTextStyle.extend({
     return {
       ...this.parent?.(),
 
+      // rStyle reference (e.g. "InternetLink") — the named character style.
+      // renderHTML emits class="docx-char-{styleId}" so the injected document
+      // CSS (generated from styles.xml characterStyles) applies. Round-trips
+      // via OOXML run `style`.
+      styleId: {
+        default: null,
+        parseHTML: (element: HTMLElement) => {
+          const m = (element.getAttribute("class") || "").match(/(?:^|\s)docx-char-(\S+)/);
+          return m ? m[1] : null;
+        },
+        renderHTML: (attributes: Record<string, unknown>) => {
+          const id = attributes.styleId as string | null;
+          return id ? { class: `docx-char-${id}` } : {};
+        },
+      },
+
       // Scalar OOXML run properties with CSS equivalents.
       // Attr values are office-open native (color hex, font name, size in
       // points, shading object); CSS conversion lives in renderHTML/parseHTML.
@@ -79,6 +103,11 @@ export const TextStyle = BaseTextStyle.extend({
         parseHTML: (element: HTMLElement) =>
           normalizeColorToHex(element.style.color || undefined) ?? null,
         renderHTML: (attributes: Record<string, unknown>) => {
+          // "auto"/unset emit no inline color: the text inherits the page
+          // default (color: contrast-color(var(--docen-ink-bg)) on .docen-page),
+          // so default text inverts against the nearest fill like Word. An
+          // explicit hex overrides it.
+          if (attributes.color === "auto") return {};
           const hex = normalizeColorToHex(attributes.color as string | undefined);
           return hex ? { style: `color:${hex}` } : {};
         },
@@ -124,7 +153,9 @@ export const TextStyle = BaseTextStyle.extend({
         parseHTML: (element: HTMLElement) => shadingFromCss(element.style.backgroundColor),
         renderHTML: (attributes: Record<string, unknown>) => {
           const css = shadingToCss(attributes.shading as { fill?: string } | null | undefined);
-          return css ? { style: `background-color:${css}` } : {};
+          // A run fill flips the ink against it (Word "auto"). Declared on the
+          // run's own span so the text inherits the inverted color directly.
+          return css ? { style: `background-color:${css};color:contrast-color(${css})` } : {};
         },
       },
 
