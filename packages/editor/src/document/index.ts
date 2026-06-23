@@ -112,6 +112,17 @@ const TEMPLATE = `
       background-color: var(--docen-color-page, #ffffff);
       box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
       position: relative;
+      /* content-visibility:auto is DISABLED here: it skips layout for off-screen
+         pages, but the paginator measures block/row heights by reading the DOM
+         (measureFlatItems — Pretext covers text blocks; table rows still use
+         getBoundingClientRect). Reading a rect on a cv:auto-skipped page returns
+         a placeholder/0, NOT a forced layout, so reflow measures a different
+         layout every round and never converges — it re-flows ~1.5s/round
+         indefinitely (verified on a 1000+ page doc). Re-enable only once row
+         measurement is deterministic (Pretext) or reflow forces layout while
+         measuring. */
+      /* content-visibility: auto; */
+      /* contain-intrinsic-size: var(--docen-page-width, 210mm) var(--docen-page-min-height, 297mm); */
     }
     /* prosemirror-tables CellSelection tags each selected cell with class
        "selectedCell"; paint it with Word's translucent selection blue so a
@@ -259,6 +270,7 @@ const TEMPLATE = `
     /* Print: drop shadow/gap/marks; each page node is its own printed sheet. */
     @media print {
       .docen-pages .docen-page {
+        content-visibility: visible;
         box-shadow: none;
         margin: 0;
         break-after: page;
@@ -863,7 +875,10 @@ class DocenDocument extends HTMLElement {
     this.#editor = createDocxEditor({
       element: page,
       content: wrapPages(contentAttr ? parseHTML(contentAttr) : undefined),
-      spellcheck: this.getAttribute("spellcheck") !== "false",
+      // Spellcheck defaults OFF — Chromium's spellcheck is a major perf cost on
+      // large documents (ProseMirror community-confirmed). Opt in via the
+      // Review ribbon's spell-check button (spellcheck="true" attribute).
+      spellcheck: this.getAttribute("spellcheck") === "true",
       editable: this.getAttribute("editable") !== "false",
       // PageDocument overrides the doc schema to doc > page+; Page is the
       // fixed-height sheet node; PagePlugin physically reflows blocks across
