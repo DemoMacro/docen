@@ -6,7 +6,6 @@ export default defineConfig({
       "src/index.ts",
       "src/ui/**/*",
       "src/document/**/*",
-      "src/render/**/*",
       "src/workbook.ts",
       "src/presentation.ts",
     ],

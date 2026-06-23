@@ -64,7 +64,7 @@ template.innerHTML = `
  * (bottom). Editor packages slot their engine (Tiptap/LeaferJS/RevoGrid) into
  * the default slot and Office-style side panels into `task-pane-*`.
  *
- * Also the locale provider for @docen/ui: set `lang` to override the page
+ * Also the locale provider for the Fluent components: set `lang` to override the page
  * locale for component-internal strings (see src/i18n/localize.ts).
  * QAT/dialog are extension-batch additions; `status` slot is ready now.
  */

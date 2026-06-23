@@ -1,5 +1,5 @@
 /**
- * Lightweight i18n for @docen/ui component-internal strings — close button
+ * Lightweight i18n for UI component-internal strings — close button
  * titles, empty states, ARIA labels. Business strings (ribbon commands,
  * property labels, outline titles) are translated by the editor package and
  * passed in as plain strings; this module never touches them.
