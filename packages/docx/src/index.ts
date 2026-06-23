@@ -7,6 +7,11 @@
 // Core: @tiptap/core re-exports + DOCX extension registry
 export { docxExtensions, type JSONContent, type AnyExtension } from "./core";
 
+// Re-export the OOXML section-properties type (page size/margin/orientation +
+// document grid) so the editor layer can type section geometry without a direct
+// @office-open/docx dependency.
+export type { SectionPropertiesOptions } from "@office-open/docx";
+
 // Editor factory
 export { createDocxEditor, type DocxEditorOptions } from "./editor";
 
@@ -42,6 +47,16 @@ export { parseHTML, generateHTML } from "./converters/html";
 
 // Converters: Markdown pipeline (Markdown string ↔ Tiptap JSON)
 export { parseMarkdown, generateMarkdown } from "./converters/markdown";
+
+// Converters: styles → CSS (styles.xml model → scoped editor CSS for rendering)
+export {
+  stylesToCss,
+  quickStyles,
+  effectiveRunProps,
+  inlineStyles,
+  type QuickStyleEntry,
+  type StylesOptions,
+} from "./converters/styles";
 
 // Types
 export type * from "./types";

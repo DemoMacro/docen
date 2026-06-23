@@ -27,7 +27,6 @@ import type {
   TableCellOptions,
   Floating,
   ImageOptions,
-  SectionPropertiesOptions,
 } from "@office-open/docx";
 import type { JSONContent as TiptapJSONContent } from "@tiptap/core";
 
@@ -316,15 +315,6 @@ export interface HeaderFooterSlots {
   even?: TiptapJSONContent[];
 }
 
-export interface SectionBreakNode extends TiptapJSONContent {
-  type: "sectionBreak";
-  attrs?: {
-    properties: SectionPropertiesOptions | null;
-    headers: HeaderFooterSlots | null;
-    footers: HeaderFooterSlots | null;
-  };
-}
-
 // -- List nodes --
 
 export interface BulletListNode extends TiptapJSONContent {
@@ -430,7 +420,6 @@ export type BlockNode =
   | BlockquoteNode
   | CodeBlockNode
   | HorizontalRuleNode
-  | SectionBreakNode
   | BulletListNode
   | OrderedListNode
   | TaskListNode

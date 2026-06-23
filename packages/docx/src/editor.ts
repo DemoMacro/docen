@@ -26,9 +26,21 @@ export function createDocxEditor(options: DocxEditorOptions): Editor {
     editable = true,
   } = options;
 
+  // Dedupe: an extra extension overrides any docxExtension of the same name.
+  // The editor layer passes PageDocument (extends Document) to switch the doc
+  // schema to `doc > page+`; without this filter both register name "doc" and
+  // Tiptap warns "Duplicate extension names found: ['doc']".
+  const extraNames = new Set(
+    extraExtensions.map((e) => (e as { name?: string }).name).filter(Boolean),
+  );
+  const extensions = [
+    ...docxExtensions.filter((e) => !extraNames.has((e as { name?: string }).name)),
+    ...extraExtensions,
+  ];
+
   const editor = new Editor({
     element,
-    extensions: [...docxExtensions, ...extraExtensions],
+    extensions,
     content: content ?? { type: "doc", content: [{ type: "paragraph" }] },
     editable,
     editorProps: {

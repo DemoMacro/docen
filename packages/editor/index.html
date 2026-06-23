@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@docen/editor — document demo</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        font-family:
+          "Segoe UI",
+          system-ui,
+          -apple-system,
+          sans-serif;
+        color: #3b3b3b;
+      }
+      docen-document {
+        display: block;
+        height: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <!--
+      The app header (brand + auto-save + save/undo/redo + a doc menu holding
+      Open / Save As / Print, plus a user menu with 中文 / English) is built into
+      the component, so the demo needs no toolbar of its own. The user name,
+      avatar, and filename below are passed as attributes (the avatar attribute
+      takes a URL; omit it for an initial-letter avatar). Switch languages via
+      the user menu (top-right) — the header + ribbon re-render live.
+    -->
+    <docen-document id="doc" user="Demo Macro" filename="Welcome.docx"></docen-document>
+
+    <script type="module">
+      // Import from source (not the package name) so vite treats this as
+      // workspace source, not a pre-bundled dep — same pattern as @docen/ui's
+      // demo importing ./src/index.ts.
+      import { applyTheme, registerComponents } from "./src/index.ts";
+
+      registerComponents();
+      applyTheme("light");
+    </script>
+  </body>
+</html>

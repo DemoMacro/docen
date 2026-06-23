@@ -14,21 +14,34 @@ import { Document as BaseDocument } from "./tiptap";
  *   sectionBreak nodes).
  *
  * None rendered to HTML — phase 2 applies styles via injected CSS.
+ *
+ * Factory form (`createDocument`): the editor layer needs a different top-level
+ * content expression (`doc > page+` for the C-route editing schema) but the SAME
+ * DOCX attrs. Building it via this factory keeps the Document definition in ONE
+ * place (here) — the editor parameterizes only `content`, instead of `.extend`-
+ * overriding this Document and re-stating the attrs. `Document` is the default
+ * flat `doc > block+` shape used by the docx package itself.
  */
 const attrNative = () => ({ default: null, parseHTML: () => null, rendered: false });
 
-export const Document = BaseDocument.extend({
-  addAttributes() {
-    return {
-      ...this.parent?.(),
+export function createDocument(content = "block+") {
+  return BaseDocument.extend({
+    content,
+    addAttributes() {
+      return {
+        ...this.parent?.(),
 
-      styles: attrNative(),
-      core: attrNative(),
-      sectionProperties: attrNative(),
-      sectionHeaders: attrNative(),
-      sectionFooters: attrNative(),
-      background: attrNative(),
-      documentExtras: attrNative(),
-    };
-  },
-});
+        styles: attrNative(),
+        core: attrNative(),
+        sectionProperties: attrNative(),
+        sectionHeaders: attrNative(),
+        sectionFooters: attrNative(),
+        background: attrNative(),
+        documentExtras: attrNative(),
+      };
+    },
+  });
+}
+
+/** Default flat Document (`doc > block+`) — the DOCX round-trip shape. */
+export const Document = createDocument();

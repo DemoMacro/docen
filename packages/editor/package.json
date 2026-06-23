@@ -1,0 +1,79 @@
+{
+  "name": "@docen/editor",
+  "version": "0.1.0",
+  "description": "Assembly layer for docen editors — wires @docen/ui shell to @docen/docx engine into turnkey <docen-document> / <docen-workbook> / <docen-presentation> super-components",
+  "keywords": [
+    "components",
+    "docen",
+    "document",
+    "editor",
+    "office",
+    "pagination",
+    "web-components",
+    "word"
+  ],
+  "homepage": "https://github.com/DemoMacro/docen#readme",
+  "bugs": {
+    "url": "https://github.com/DemoMacro/docen/issues"
+  },
+  "license": "MIT",
+  "author": {
+    "name": "Demo Macro",
+    "email": "abc@imst.xyz",
+    "url": "https://www.demomacro.com/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DemoMacro/docen.git"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "dist/index.mjs",
+  "types": "dist/index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    },
+    "./document": {
+      "types": "./dist/document/index.d.mts",
+      "import": "./dist/document/index.mjs"
+    },
+    "./document/pagination": {
+      "types": "./dist/document/pagination/index.d.mts",
+      "import": "./dist/document/pagination/index.mjs"
+    },
+    "./workbook": {
+      "types": "./dist/workbook.d.mts",
+      "import": "./dist/workbook.mjs"
+    },
+    "./presentation": {
+      "types": "./dist/presentation.d.mts",
+      "import": "./dist/presentation.mjs"
+    },
+    "./render/*": {
+      "types": "./dist/render/*.d.mts",
+      "import": "./dist/render/*.mjs"
+    }
+  },
+  "scripts": {
+    "dev": "basis build --stub",
+    "build": "vp pack",
+    "prepack": "pnpm build"
+  },
+  "dependencies": {
+    "@chenglou/pretext": "0.0.8",
+    "@docen/docx": "workspace:*",
+    "@fluentui/svg-icons": "1.1.330",
+    "@fluentui/tokens": "1.0.0-alpha.23",
+    "@fluentui/web-components": "3.0.0-rc.28",
+    "@microsoft/fast-element": "2.10.4",
+    "@microsoft/fast-html": "1.0.0-alpha.54",
+    "@microsoft/focusgroup-polyfill": "1.5.0",
+    "@tiptap/extension-table-of-contents": "3.22.5",
+    "@tiptap/pm": "3.22.5",
+    "prosemirror-search": "^1.1.1"
+  }
+}

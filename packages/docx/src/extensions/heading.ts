@@ -41,19 +41,33 @@ const HEADING_PARSE_MAP: Record<string, number> = {
   Title: 1,
 };
 
+/** HeadingLevel literals that office-open lifts from a pStyle into `heading`.
+ *  Used to round-trip the literal via styleId (covers "Title", which level 1
+ *  alone would collapse to "Heading1"). */
+const HEADING_STYLE_IDS = new Set(Object.keys(HEADING_PARSE_MAP));
+
+/** Runtime-only attrs the TableOfContents extension injects on each heading
+ *  (`id` / `data-toc-id`). They are regenerated on every load, so never persist
+ *  them to DOCX — skip them in renderDocx. */
+const TOC_RUNTIME_KEYS = new Set(["id", "data-toc-id"]);
+
 // ── DOCX serialization (near-identity: attrs mirror ParagraphPropertiesOptionsBase) ──
 
 export function renderDocx(node: JSONContent): Record<string, unknown> {
   const attrs = (node.attrs ?? {}) as Record<string, unknown>;
   const opts: Record<string, unknown> = {};
 
-  // `level` is an attrs-only field; express it via OOXML `heading`.
+  // Restore the HeadingLevel literal: prefer the stored styleId (round-trips
+  // "Title" correctly) else derive from level. office-open expresses a
+  // HeadingLevel pStyle via `heading`, so we don't also emit `style`.
   const level = attrs.level as number | undefined;
-  if (level) opts.heading = HEADING_COMPILE_MAP[level] ?? "Heading1";
+  const styleId = attrs.styleId as string | undefined;
+  if (styleId && HEADING_STYLE_IDS.has(styleId)) opts.heading = styleId;
+  else if (level) opts.heading = HEADING_COMPILE_MAP[level] ?? "Heading1";
 
-  // Pass remaining attrs through verbatim (skip nulls and the level field).
+  // Pass remaining attrs through verbatim (skip nulls + mapped fields).
   for (const [key, value] of Object.entries(attrs)) {
-    if (key === "level") continue;
+    if (key === "level" || key === "styleId" || TOC_RUNTIME_KEYS.has(key)) continue;
     if (value !== null && value !== undefined) opts[key] = value;
   }
   return opts;
@@ -75,11 +89,16 @@ export function parseDocx(opts: Record<string, unknown>): Record<string, unknown
   const resolved = typeof opts === "string" ? { text: opts } : opts;
   const attrs: Record<string, unknown> = {};
 
-  // Reverse-map OOXML `heading` → Tiptap `level`.
+  // Reverse-map OOXML `heading` → Tiptap `level`. office-open lifts a
+  // HeadingLevel pStyle ("Heading1".."Heading6"/"Title") into `heading`; that
+  // literal IS the pStyle val, so also carry it as styleId for CSS.
   if (resolved.heading) {
     const level = HEADING_PARSE_MAP[resolved.heading as string];
     if (level) attrs.level = level;
+    attrs.styleId = resolved.heading;
   }
+  // An explicit OOXML `style` (non-HeadingLevel pStyle) overrides styleId.
+  if (resolved.style) attrs.styleId = resolved.style;
 
   // Pass remaining opts through (skip structural/semantic keys).
   for (const [key, value] of Object.entries(resolved)) {
@@ -99,6 +118,16 @@ export const Heading = BaseHeading.extend({
   addAttributes() {
     return {
       ...this.parent?.(),
+
+      // pStyle reference (e.g. "Heading1") — same as Paragraph. renderHTML emits
+      // class="docx-style-{styleId}" for the injected document CSS.
+      styleId: {
+        default: null,
+        parseHTML: (el: HTMLElement) => {
+          const m = (el.getAttribute("class") || "").match(/(?:^|\s)docx-style-(\S+)/);
+          return m ? m[1] : null;
+        },
+      },
 
       // Nested office-open objects (parsed from HTML where CSS exists)
       alignment: {
@@ -169,6 +198,8 @@ export const Heading = BaseHeading.extend({
     const styles = renderParagraphStyles(node.attrs);
     const level = (node.attrs?.level as number) ?? 1;
     const attrs = { ...HTMLAttributes };
+    const styleId = node.attrs.styleId as string | null;
+    if (styleId) attrs.class = `docx-style-${styleId}`;
     if (styles.length > 0) attrs.style = styles.join(";");
     return [`h${level}`, attrs, 0] as const;
   },

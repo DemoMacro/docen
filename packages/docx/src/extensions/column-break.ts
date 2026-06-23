@@ -10,8 +10,11 @@ import { Node } from "../core";
  * break losslessly regardless.
  *
  * The DOCX payload (`{ columnBreak: true }`) is inlined in DocxManager — a
- * one-liner with no per-node variance, so an extension helper would be pure
- * ceremony.
+ * one-liner with no per-node variance, so no extension helper for it.
+ *
+ * `setColumnBreak` only inserts the atom (no paragraph split): a column break
+ * does not start a new page, and there is no column layout to reflow yet, so
+ * the node is purely for round-trip fidelity until multi-column lands.
  */
 
 export const ColumnBreak = Node.create({
@@ -21,10 +24,30 @@ export const ColumnBreak = Node.create({
   atom: true,
 
   parseHTML() {
-    return [{ tag: 'br[data-type="columnBreak"]' }];
+    return [{ tag: 'span[data-type="columnBreak"]' }, { tag: 'br[data-type="columnBreak"]' }];
   },
 
   renderHTML() {
-    return ["br", { "data-type": "columnBreak", style: "break-after:column" }];
+    // span (not br) so CSS ::before can paint a formatting-marks label.
+    return ["span", { "data-type": "columnBreak", style: "break-after:column" }];
+  },
+
+  addCommands() {
+    return {
+      setColumnBreak:
+        () =>
+        ({ commands }) =>
+          commands.insertContent({ type: "columnBreak" }),
+    };
   },
 });
+
+declare module "@tiptap/core" {
+  interface Commands<ReturnType> {
+    columnBreak: {
+      /** Insert a column break atom at the cursor (round-trip only until
+       *  multi-column layout lands). */
+      setColumnBreak: () => ReturnType;
+    };
+  }
+}

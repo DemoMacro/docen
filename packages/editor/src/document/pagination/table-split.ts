@@ -1,0 +1,100 @@
+import type { JSONContent } from "@docen/docx/core";
+import { Table } from "@docen/docx/extensions/table";
+import { TableRow } from "@docen/docx/extensions/table-row";
+import type { Node as PmNode } from "@tiptap/pm/model";
+
+/**
+ * Table split support for C-route pagination.
+ *
+ * contenteditable cannot visually break a `<tr>`, so a table taller than a page
+ * is split into multiple `table` nodes across pages (a physical split). All
+ * splits of one original table share a `splitGroup` id; `unwrapPages` merges
+ * them back into one table on export, so the split is editor-only and
+ * round-trip-transparent. Continuation pages repeat the header rows: the
+ * paginator clones each `tableHeader` row and marks the clone `splitClone`;
+ * `unwrapPages` drops clones on merge (the original header row keeps
+ * `tableHeader` → DOCX `<w:tblHeader/>`, Word repeats it natively on its own
+ * pages, so no physical clone is written to DOCX).
+ *
+ * See CLAUDE.md → Pagination Architecture (C-route) and CONTRIBUTING.md.
+ */
+
+/** Whole-table split id shared by all table nodes split from one original.
+ *  null on an un-split (whole) table. Editor-only — cleared on export. */
+export const SplitTable = Table.extend({
+  name: "table",
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      splitGroup: { default: null, parseHTML: () => null, rendered: false },
+    };
+  },
+});
+
+/** Marks a row cloned onto a continuation page as a repeated header (not the
+ *  original header row). Editor-only — dropped on export merge. */
+export const SplitTableRow = TableRow.extend({
+  name: "tableRow",
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      splitClone: { default: false, parseHTML: () => null, rendered: false },
+    };
+  },
+});
+
+/** Header rows of a table: rows repeated on every continuation page. A row is
+ *  a header if the docx `tableHeader` attr is true (set on DOCX import) OR its
+ *  first cell is a `tableHeader` node (<th>, as Tiptap's insertTable produces)
+ *  — both mark the row for DOCX `<w:tblHeader/>` repetition. */
+export function headerRowsOf(table: PmNode): PmNode[] {
+  const rows: PmNode[] = [];
+  table.forEach((row) => {
+    const isHeader =
+      row.attrs.tableHeader === true ||
+      (row.firstChild != null && row.firstChild.type.name === "tableHeader");
+    if (isHeader) rows.push(row);
+  });
+  return rows;
+}
+
+/** Clone a table's header rows for a continuation page, marking each clone
+ *  `splitClone` so the export merge drops it (the original header row stays). */
+export function cloneHeaderRows(table: PmNode): PmNode[] {
+  return headerRowsOf(table).map((row) =>
+    row.type.create({ ...row.attrs, splitClone: true }, row.content, row.marks),
+  );
+}
+
+/** Merge adjacent table nodes that share a `splitGroup` back into one table:
+ *  concatenate rows, drop `splitClone` continuation-header clones, and clear
+ *  the editor-only split attrs. Used by `unwrapPages` on export so the split
+ *  stays round-trip-transparent (the result is a single table per group). */
+export function mergeSplitTables(blocks: JSONContent[]): JSONContent[] {
+  const merged: JSONContent[] = [];
+  for (const block of blocks) {
+    const last = merged[merged.length - 1];
+    if (
+      block.type === "table" &&
+      last?.type === "table" &&
+      block.attrs?.splitGroup != null &&
+      last.attrs?.splitGroup === block.attrs.splitGroup
+    ) {
+      const keptRows = (block.content ?? []).filter(
+        (r) => r.type === "tableRow" && r.attrs?.splitClone !== true,
+      );
+      last.content = [...(last.content ?? []), ...keptRows];
+    } else {
+      merged.push(block);
+    }
+  }
+  // Clear editor-only split attrs on every table (whole or merged).
+  for (const block of merged) {
+    if (block.type !== "table") continue;
+    if (block.attrs) delete block.attrs.splitGroup;
+    for (const row of block.content ?? []) {
+      if (row.type === "tableRow" && row.attrs) delete row.attrs.splitClone;
+    }
+  }
+  return merged;
+}
