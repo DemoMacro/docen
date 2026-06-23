@@ -1,6 +1,6 @@
 {
   "name": "@docen/docx",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "DOCX editor and converter powered by @office-open/docx with Tiptap editing layer, supporting bidirectional conversion between DOCX, HTML, and Markdown",
   "keywords": [
     "converter",

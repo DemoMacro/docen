@@ -3,7 +3,7 @@ import type { Editor } from "@docen/docx/core";
 /**
  * Ribbon command event name (kebab-case) → Tiptap command invocation.
  *
- * Event names align with `@docen/ui`'s `RIBBON_ICONS` keys and the `event`
+ * Event names align with the `RIBBON_ICONS` keys and the `event`
  * attribute set on `<docen-ribbon-button>` / `<docen-ribbon-combobox>`. A few
  * entries (font-name/font-size/style) carry a `value` from comboboxes.
  *

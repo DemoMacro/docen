@@ -9,7 +9,7 @@ import { quickStyles, type StylesOptions } from "@docen/docx";
  * `t("ribbon.*")` (see `./i18n.ts`), so the ribbon re-renders in the active
  * locale. The host `<docen-document>` stamps the returned markup into its
  * `<docen-ribbon>` element and re-runs it on language change. Callers wanting a
- * tailored ribbon compose `@docen/ui` directly instead.
+ * tailored ribbon compose the Fluent shell components directly instead.
  *
  * Layout helpers (`.rb-col` / `.rb-row` / `.rb-vsep`) are injected by the host
  * style — Office groups stack a large button beside rows/columns of small

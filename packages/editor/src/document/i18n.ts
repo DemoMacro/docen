@@ -1,10 +1,10 @@
 /**
  * Ribbon business-string translations for `<docen-document>`.
  *
- * `@docen/ui`'s localize module handles only component-internal strings (close
+ * The component-localize module handles only component-internal strings (close
  * titles, empty states); per its design, business strings — ribbon tab/group
  * names, command labels, menu options — are owned by the editor package and
- * registered here. We reuse `@docen/ui`'s `registerTranslation` / `t` /
+ * registered here. We reuse the localize module's `registerTranslation` / `t` /
  * `observeLang` so the locale resolves from `<html lang>` (set by the host
  * page or the demo's language switch) and the ribbon re-renders on change.
  *

@@ -370,7 +370,7 @@ const MARGINS: Readonly<Record<string, string>> = {
 /**
  * `<docen-document>` — a turnkey DOCX editor super-component.
  *
- * Wires the `@docen/ui` shell (app-header + ribbon + canvas) to the `@docen/docx`
+ * Wires the Fluent UI shell (app-header + ribbon + canvas) to the `@docen/docx`
  * Tiptap engine, with Pretext-driven offline pagination. Drop it in for an
  * editable, paginated Word surface: the app header drives file I/O (open/save)
  * and language switching, ribbon commands route to Tiptap, embedded objects open
