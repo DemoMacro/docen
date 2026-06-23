@@ -196,12 +196,6 @@ importers:
         specifier: ^1.1.1
         version: 1.1.1
 
-  packages/utils:
-    devDependencies:
-      '@types/xast':
-        specifier: 2.0.4
-        version: 2.0.4
-
 packages:
 
   '@algorithm.ts/diff@1.0.4':
@@ -1546,9 +1540,6 @@ packages:
 
   '@types/ws@8.18.1':
     resolution: {integrity: sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg==}
-
-  '@types/xast@2.0.4':
-    resolution: {integrity: sha512-6Q6HWhHXR5EEKcxgF5YBW5XPAAtCi/GgyCWHx6wR7dZTXF5rv2B2fm0hgpSscJqaVDVm6n1DAVbsM8RSM5PlMw==}
 
   '@voidzero-dev/vite-plus-core@0.1.24':
     resolution: {integrity: sha512-iXPGBABnQnrDMx89H6MOCGcTZp+QW+3rY4YMVKdE6ydchSvPk2O3MI2vgaRVfOtWJ2IjnxSnf1n2yjP67ZBRFQ==}
@@ -3388,10 +3379,6 @@ snapshots:
   '@types/ws@8.18.1':
     dependencies:
       '@types/node': 25.9.3
-
-  '@types/xast@2.0.4':
-    dependencies:
-      '@types/unist': 3.0.3
 
   '@voidzero-dev/vite-plus-core@0.1.24(@types/node@25.9.3)(esbuild@0.28.0)(jiti@2.7.0)(terser@5.46.2)(typescript@5.9.3)(unrun@0.2.37)(yaml@2.8.4)':
     dependencies:
