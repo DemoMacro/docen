@@ -6,6 +6,8 @@
 
 > DOCX editor and converter powered by @office-open/docx with Tiptap editing layer, supporting bidirectional conversion between DOCX, HTML, and Markdown.
 
+> Need a ready-made visual editor? [`@docen/editor`](../editor/README.md) wraps this engine in a Fluent UI shell with the turnkey `<docen-document>` super-component.
+
 ## Features
 
 - 📝 **Tiptap Editor** — Full-featured WYSIWYG editor with DOCX-aware extensions
@@ -142,9 +144,6 @@ Standalone Functions (core)
         ↕ used by
 Tiptap Extension Commands (thin wrappers)
   editor.commands.importDocx() / exportDocx()
-        ↕ used by
-@docen/ui (Fluent UI Web Components)
-  <docx-editor> toolbar / ribbon / menus
 ```
 
 - **Runtime model**: Tiptap JSON with DOCX-rich attributes via custom extensions
