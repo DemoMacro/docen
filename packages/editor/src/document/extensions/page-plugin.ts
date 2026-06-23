@@ -536,8 +536,49 @@ function buildTableNode(
   isContinuation: boolean,
   splitGroup: string | null,
 ): PmNode {
-  const finalRows =
-    isContinuation && splitGroup ? [...cloneHeaderRows(headerSource), ...rows] : rows;
+  const cloned = isContinuation && splitGroup ? cloneHeaderRows(headerSource) : [];
+  let finalRows = isContinuation && splitGroup ? [...cloned, ...rows] : rows;
+  if (isContinuation && splitGroup && cloned.length && rows.length) {
+    // Sync the cloned header's cell colwidths to the column widths carried by
+    // the data rows on this continuation page. prosemirror-tables' tableEditing
+    // plugin runs fixTables on every transaction: it derives each column's
+    // width from its cells and, if they disagree, rewrites every cell in that
+    // column to the majority value. The cloned header carries the ORIGINAL
+    // header row's tcW colwidths (e.g. [60]), but the data rows here can carry
+    // different tcW colwidths (e.g. [72]) — DOCX rows have independent tcW —
+    // so fixTables rewrote the clone 60→72 after each re-flow, the next re-flow
+    // rebuilt it back to 60, and pagesEqual never held (the re-flow looped
+    // forever on large multi-section documents). Aligning the clone to the data
+    // rows' column widths makes the column self-consistent, so fixTables leaves
+    // it alone → idempotent re-flow.
+    const colWidths: number[] = [];
+    for (const row of rows) {
+      let col = 0;
+      row.forEach((cell) => {
+        const cs = (cell.attrs.colspan as number) ?? 1;
+        const cw = (cell.attrs.colwidth as number[] | null) ?? [];
+        for (let j = 0; j < cs; j++) {
+          if (cw[j] != null && colWidths[col + j] == null) colWidths[col + j] = cw[j] as number;
+        }
+        col += cs;
+      });
+    }
+    if (colWidths.some((w) => w > 0)) {
+      finalRows = finalRows.map((row) => {
+        if ((row.attrs as { splitClone?: boolean }).splitClone !== true) return row;
+        const cells: PmNode[] = [];
+        let col = 0;
+        row.forEach((cell) => {
+          const cs = (cell.attrs.colspan as number) ?? 1;
+          const cw: number[] = [];
+          for (let j = 0; j < cs; j++) cw.push(colWidths[col + j] ?? 0);
+          cells.push(cell.type.create({ ...cell.attrs, colwidth: cw }, cell.content, cell.marks));
+          col += cs;
+        });
+        return row.type.create(row.attrs, cells, row.marks);
+      });
+    }
+  }
   // Always (re)set splitGroup — clear stale ids when a table now fits one page
   // (it may carry a group id from a prior, larger split).
   const attrs = { ...table.attrs, splitGroup: splitGroup ?? null };
@@ -768,6 +809,12 @@ function reflow(editor: Editor): void {
     return schema.nodes.page.create({ sectionProperties: seg.section ?? null }, children);
   });
 
+  // Idempotence gate: if a re-flow reproduces the current page sequence exactly
+  // (deep, incl. attrs), there is nothing to dispatch — this is what terminates
+  // the re-flow cycle. Continuation-page clone headers must be rebuilt with
+  // column widths self-consistent with their data rows (see buildTableNode), or
+  // prosemirror-tables' fixTables rewrites their colwidth after every dispatch
+  // and this equality never holds (the re-flow loops forever).
   if (pagesEqual(state.doc, newPages)) return;
 
   const savedSel = saveSelection(state.doc, state.selection);
