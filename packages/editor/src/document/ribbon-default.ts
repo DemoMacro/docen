@@ -51,7 +51,7 @@ const FONT_NAMES = [
   "等线",
 ];
 
-// Chinese size names (Word 中文字号) mapped to their point values, largest first
+// Chinese size names (Word's zh font-size names) mapped to point values, largest first
 // (matching the Word zh size picker order).
 const FONT_SIZES_CN: ReadonlyArray<readonly [string, number]> = [
   ["初号", 42],

@@ -390,13 +390,15 @@ export const ribbonEn: DocenTranslation = {
   "search.matches": "matches",
   "search.noResults": "No results",
   "status.page-of": "Page {page} of {total} · {zoom}%",
+  // --- Editor surface ---
+  "editor.placeholder": "Start writing",
 };
 
 export const ribbonZhCN: DocenTranslation = {
   $code: "zh-CN",
   $name: "中文（简体）",
   $dir: "ltr",
-  // --- 选项卡 ---
+  // --- Tabs ---
   "ribbon.tab.home": "开始",
   "ribbon.tab.insert": "插入",
   "ribbon.tab.design": "设计",
@@ -406,13 +408,13 @@ export const ribbonZhCN: DocenTranslation = {
   "ribbon.tab.review": "审阅",
   "ribbon.tab.view": "视图",
   "ribbon.tab.draw": "绘图",
-  // --- 组：开始 ---
+  // --- Groups: Home ---
   "ribbon.group.clipboard": "剪贴板",
   "ribbon.group.font": "字体",
   "ribbon.group.paragraph": "段落",
   "ribbon.group.styles": "样式",
   "ribbon.group.editing": "编辑",
-  // --- 组：插入 ---
+  // --- Groups: Insert ---
   "ribbon.group.pages": "页面",
   "ribbon.group.tables": "表格",
   "ribbon.group.illustrations": "插图",
@@ -420,26 +422,26 @@ export const ribbonZhCN: DocenTranslation = {
   "ribbon.group.header-footer": "页眉和页脚",
   "ribbon.group.text": "文本",
   "ribbon.group.symbols": "符号",
-  // --- 组：设计 ---
+  // --- Groups: Design ---
   "ribbon.group.document-formatting": "文档格式",
   "ribbon.group.page-background": "页面背景",
-  // --- 组：布局 ---
+  // --- Groups: Layout ---
   "ribbon.group.page-setup": "页面设置",
   "ribbon.group.arrange": "排列",
-  // --- 组：引用 ---
+  // --- Groups: References ---
   "ribbon.group.toc": "目录",
   "ribbon.group.footnotes": "脚注",
   "ribbon.group.citations": "题注和书目",
   "ribbon.group.captions": "题注",
   "ribbon.group.index": "索引",
   "ribbon.group.toa": "引文目录",
-  // --- 组：邮件 ---
+  // --- Groups: Mailings ---
   "ribbon.group.create": "创建",
   "ribbon.group.start-merge": "开始邮件合并",
   "ribbon.group.write-fields": "编写和插入域",
   "ribbon.group.preview": "预览结果",
   "ribbon.group.finish": "完成",
-  // --- 组：审阅 ---
+  // --- Groups: Review ---
   "ribbon.group.proofing": "校对",
   "ribbon.group.accessibility": "辅助功能",
   "ribbon.group.language": "语言",
@@ -448,17 +450,17 @@ export const ribbonZhCN: DocenTranslation = {
   "ribbon.group.changes": "更改",
   "ribbon.group.compare": "比较",
   "ribbon.group.protect": "保护",
-  // --- 组：视图 ---
+  // --- Groups: View ---
   "ribbon.group.views": "视图",
   "ribbon.group.show": "显示",
   "ribbon.group.zoom": "缩放",
   "ribbon.group.window": "窗口",
   "ribbon.group.macros": "宏",
-  // --- 组：绘图 ---
+  // --- Groups: Draw ---
   "ribbon.group.pens": "笔",
   "ribbon.group.draw-tools": "工具",
   "ribbon.group.ink-convert": "转换",
-  // --- 命令：开始 ---
+  // --- Commands: Home ---
   "ribbon.cmd.paste": "粘贴",
   "ribbon.cmd.cut": "剪切",
   "ribbon.cmd.copy": "复制",
@@ -492,7 +494,7 @@ export const ribbonZhCN: DocenTranslation = {
   "ribbon.cmd.search": "查找",
   "ribbon.cmd.replace": "替换",
   "ribbon.cmd.select": "选择",
-  // --- 命令：插入 ---
+  // --- Commands: Insert ---
   "ribbon.cmd.page-break": "分页符",
   "ribbon.cmd.section-break": "分节符",
   "ribbon.cmd.insert-table": "表格",
@@ -511,7 +513,7 @@ export const ribbonZhCN: DocenTranslation = {
   "ribbon.cmd.wordart": "艺术字",
   "ribbon.cmd.equation": "公式",
   "ribbon.cmd.symbol": "符号",
-  // --- 命令：设计 ---
+  // --- Commands: Design ---
   "ribbon.cmd.theme": "主题",
   "ribbon.cmd.colors": "颜色",
   "ribbon.cmd.fonts": "字体",
@@ -521,7 +523,7 @@ export const ribbonZhCN: DocenTranslation = {
   "ribbon.cmd.watermark": "水印",
   "ribbon.cmd.page-color": "页面颜色",
   "ribbon.cmd.page-border": "页面边框",
-  // --- 命令：布局 ---
+  // --- Commands: Layout ---
   "ribbon.cmd.margins": "页边距",
   "ribbon.cmd.orientation": "纸张方向",
   "ribbon.cmd.page-size": "纸张大小",
@@ -537,7 +539,7 @@ export const ribbonZhCN: DocenTranslation = {
   "ribbon.cmd.group": "组合",
   "ribbon.cmd.rotate": "旋转",
   "ribbon.cmd.align": "对齐",
-  // --- 命令：引用 ---
+  // --- Commands: References ---
   "ribbon.cmd.toc": "目录",
   "ribbon.cmd.add-text": "添加文字",
   "ribbon.cmd.update-toc": "更新目录",
@@ -554,7 +556,7 @@ export const ribbonZhCN: DocenTranslation = {
   "ribbon.cmd.update-index": "更新索引",
   "ribbon.cmd.mark-citation": "标记引文",
   "ribbon.cmd.insert-toa": "插入引文目录",
-  // --- 命令：邮件 ---
+  // --- Commands: Mailings ---
   "ribbon.cmd.envelopes": "信封",
   "ribbon.cmd.labels": "标签",
   "ribbon.cmd.start-merge": "开始邮件合并",
@@ -568,7 +570,7 @@ export const ribbonZhCN: DocenTranslation = {
   "ribbon.cmd.first-record": "首记录",
   "ribbon.cmd.last-record": "末记录",
   "ribbon.cmd.finish-merge": "完成并合并",
-  // --- 命令：审阅 ---
+  // --- Commands: Review ---
   "ribbon.cmd.spell-check": "拼写和语法",
   "ribbon.cmd.word-count": "字数统计",
   "ribbon.cmd.thesaurus": "同义词库",
@@ -587,7 +589,7 @@ export const ribbonZhCN: DocenTranslation = {
   "ribbon.cmd.combine": "合并",
   "ribbon.cmd.restrict-editing": "限制编辑",
   "ribbon.cmd.protect-document": "保护文档",
-  // --- 命令：视图 ---
+  // --- Commands: View ---
   "ribbon.cmd.print-layout": "页面视图",
   "ribbon.cmd.web-layout": "Web 版式视图",
   "ribbon.cmd.read-mode": "阅读视图",
@@ -603,7 +605,7 @@ export const ribbonZhCN: DocenTranslation = {
   "ribbon.cmd.split-window": "拆分",
   "ribbon.cmd.view-macros": "宏",
   "ribbon.cmd.record-macro": "录制宏",
-  // --- 命令：绘图（手写墨迹）---
+  // --- Commands: Draw (inking) ---
   "ribbon.cmd.draw-pen": "笔",
   "ribbon.cmd.draw-pencil": "铅笔",
   "ribbon.cmd.draw-highlighter": "荧光笔",
@@ -614,11 +616,11 @@ export const ribbonZhCN: DocenTranslation = {
   "ribbon.cmd.ink-to-shape": "将墨迹转换为形状",
   "ribbon.cmd.ink-to-math": "将墨迹转换为数学公式",
   "ribbon.cmd.replay-ink": "重放",
-  // --- 命令：插入插图扩展 ---
+  // --- Commands: Insert illustration extras ---
   "ribbon.cmd.online-picture": "联机图片",
   "ribbon.cmd.icons": "图标",
   "ribbon.cmd.3d-model": "3D 模型",
-  // --- 选项：样式 / 粘贴 / 突出显示 ---
+  // --- Options: styles / paste / highlight ---
   "ribbon.opt.normal": "正文",
   "ribbon.opt.no-spacing": "无间隔",
   "ribbon.opt.heading-1": "标题 1",
@@ -645,13 +647,13 @@ export const ribbonZhCN: DocenTranslation = {
   "ribbon.opt.recent-colors": "最近使用的颜色",
   "ribbon.opt.color-ok": "确定",
   "ribbon.opt.color-back": "返回",
-  // --- 选项：更改大小写 ---
+  // --- Options: change case ---
   "ribbon.opt.sentence-case": "句首字母大写",
   "ribbon.opt.lowercase": "小写",
   "ribbon.opt.uppercase": "大写",
   "ribbon.opt.capitalize": "每个单词首字母大写",
   "ribbon.opt.toggle-case": "切换大小写",
-  // --- 选项：列表 ---
+  // --- Options: lists ---
   "ribbon.opt.bullet": "•  (项目符号)",
   "ribbon.opt.circle": "◦  (圆形)",
   "ribbon.opt.square": "▪  (方形)",
@@ -662,7 +664,7 @@ export const ribbonZhCN: DocenTranslation = {
   "ribbon.opt.level-1": "列表 (1 级)",
   "ribbon.opt.level-2": "列表 (2 级)",
   "ribbon.opt.level-3": "列表 (3 级)",
-  // --- 选项：间距 / 边框 ---
+  // --- Options: spacing / borders ---
   "ribbon.opt.add-before": "在段前添加空格",
   "ribbon.opt.add-after": "在段后添加空格",
   "ribbon.opt.no-border": "无框线",
@@ -672,7 +674,7 @@ export const ribbonZhCN: DocenTranslation = {
   "ribbon.opt.right": "右框线",
   "ribbon.opt.all": "所有框线",
   "ribbon.opt.outside": "外侧框线",
-  // --- 选项：查找 / 页面 / 表格 ---
+  // --- Options: find / pages / table ---
   "ribbon.opt.find": "查找…",
   "ribbon.opt.go-to": "转到…",
   "ribbon.opt.select-all": "全选",
@@ -687,7 +689,7 @@ export const ribbonZhCN: DocenTranslation = {
   "ribbon.opt.convert-text": "文本转换成表格",
   "ribbon.opt.excel": "Excel 电子表格",
   "ribbon.opt.quick-tables": "快速表格",
-  // --- 选项：布局 ---
+  // --- Options: layout ---
   "ribbon.opt.normal-margin": "普通",
   "ribbon.opt.narrow": "窄",
   "ribbon.opt.moderate": "适中",
@@ -720,7 +722,7 @@ export const ribbonZhCN: DocenTranslation = {
   "ribbon.opt.flip-vertical": "垂直翻转",
   "ribbon.opt.flip-horizontal": "水平翻转",
   "ribbon.opt.align-center": "居中对齐",
-  // --- 选项：引用 / 邮件 ---
+  // --- Options: references / mailings ---
   "ribbon.opt.endnote": "插入尾注",
   "ribbon.opt.next-footnote": "下一脚注",
   "ribbon.opt.letters": "信函",
@@ -730,7 +732,7 @@ export const ribbonZhCN: DocenTranslation = {
   "ribbon.opt.edit-docs": "编辑单个文档",
   "ribbon.opt.print-docs": "打印文档",
   "ribbon.opt.send-email": "发送电子邮件",
-  // --- 选项：缩放 ---
+  // --- Options: zoom ---
   "ribbon.opt.200": "200%",
   "ribbon.opt.100": "100%",
   "ribbon.opt.75": "75%",
@@ -740,7 +742,7 @@ export const ribbonZhCN: DocenTranslation = {
   "ribbon.opt.tabs-only": "仅显示选项卡",
   "ribbon.opt.always": "始终显示功能区",
   "ribbon.opt.ribbon-display": "功能区显示选项",
-  // --- 应用顶栏 ---
+  // --- App header ---
   "header.brand": "Docen",
   "header.autosave": "自动保存",
   "header.save": "保存",
@@ -758,12 +760,13 @@ export const ribbonZhCN: DocenTranslation = {
   "header.close": "关闭",
   "header.lang.zh": "中文",
   "header.lang.en": "English",
-  // --- 侧边栏 + 状态栏 ---
+  // --- Side panes + status bar ---
   "pane.navigation": "导航",
   "pane.properties": "属性",
   "search.matches": "个结果",
   "search.noResults": "无结果",
   "status.page-of": "第 {page} 页，共 {total} 页 · {zoom}%",
+  "editor.placeholder": "开始书写…",
 };
 
 // Register on import so the locale is available before the ribbon renders.

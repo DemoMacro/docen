@@ -1,6 +1,6 @@
 import type { DocenTranslation } from "../localize";
 
-/** 简体中文 (Simplified Chinese). Component-internal strings only. */
+/** Simplified Chinese (zh-CN). Component-internal strings only. */
 export const zhCN: DocenTranslation = {
   $code: "zh-CN",
   $name: "中文（简体）",

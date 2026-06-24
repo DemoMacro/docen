@@ -9,7 +9,18 @@ import {
   type StylesOptions,
 } from "@docen/docx";
 import { Extension, type Editor } from "@docen/docx/core";
+import { ListKeymap } from "@tiptap/extension-list";
 import { TableOfContents } from "@tiptap/extension-table-of-contents";
+import {
+  CharacterCount,
+  Dropcursor,
+  Focus,
+  Gapcursor,
+  Placeholder,
+  Selection,
+  TrailingNode,
+  UndoRedo,
+} from "@tiptap/extensions";
 import type { Mark } from "@tiptap/pm/model";
 import { EditorState } from "@tiptap/pm/state";
 import {
@@ -167,13 +178,13 @@ const TEMPLATE = `
       background-repeat: no-repeat;
     }
     /* While focus is in a ribbon combobox dropdown, the editor is blurred and
-       the browser stops painting its selection. Paint a CSS Custom Highlight
-       over the selection so it stays visible — otherwise clicking the font/size
-       box reads as "the selection was cancelled". Registered/cleared on editor
-       blur/focus (see #setupBlurSelection); ignored where the Highlight API is
-       unavailable. */
-    ::highlight(docen-blur-selection) {
-      background: var(--docen-color-selection-blur, rgba(0, 120, 215, 0.35));
+       the browser stops painting its selection. The Tiptap Selection extension
+       stamps a .selection class on the range so it stays visible. Uses the
+       system selection colors (Highlight/HighlightText) to match the browser's
+       native ::selection, including high-contrast and custom OS themes. */
+    .ProseMirror .selection {
+      background: Highlight;
+      color: HighlightText;
     }
     /* Tables — Word inserts tables in the Table Grid style (a single black
        border on every cell). Without this a freshly inserted table is
@@ -380,48 +391,6 @@ const MARGINS: Readonly<Record<string, string>> = {
  * their editors on double-click, and file I/O goes through `parseDOCX`/
  * `generateDOCX`. The header + ribbon re-render on locale change.
  */
-/** CSS Custom Highlight painted over the editor selection while focus is
- *  elsewhere — the ribbon font-name / font-size comboboxes steal focus to open
- *  their dropdowns (fluent-dropdown calls `input.focus()` on click, which no
- *  `preventDefault` on pointer events can stop). Without this, the browser
- *  stops painting the selection the moment the box is clicked, so it looks
- *  "cancelled" even though `state.selection` survives and the chosen font/size
- *  is applied correctly. Browsers without the Highlight API no-op. */
-const BLUR_SELECTION_HIGHLIGHT = "docen-blur-selection";
-
-function paintBlurSelection(editor: Editor, name: string): void {
-  const registry = (
-    CSS as unknown as {
-      highlights?: { set(name: string, highlight: unknown): void; delete(name: string): void };
-    }
-  ).highlights;
-  const HighlightCtor = (
-    globalThis as unknown as {
-      Highlight?: new (...ranges: AbstractRange[]) => unknown;
-    }
-  ).Highlight;
-  if (!registry || !HighlightCtor) return;
-  const { from, to, empty } = editor.state.selection;
-  if (empty) {
-    registry.delete(name);
-    return;
-  }
-  try {
-    const start = editor.view.domAtPos(from);
-    const end = editor.view.domAtPos(to);
-    const range = document.createRange();
-    range.setStart(start.node, start.offset);
-    range.setEnd(end.node, end.offset);
-    registry.set(name, new HighlightCtor(range));
-  } catch {
-    registry.delete(name);
-  }
-}
-
-function clearBlurSelection(name: string): void {
-  (CSS as unknown as { highlights?: { delete(name: string): void } }).highlights?.delete(name);
-}
-
 class DocenDocument extends HTMLElement {
   #editor?: Editor;
   #fileInput?: HTMLInputElement;
@@ -435,8 +404,6 @@ class DocenDocument extends HTMLElement {
    *  serialized tree) so object key order can never cause a spurious mismatch. */
   #outlineSig = "";
   #unobserveLang?: () => void;
-  /** Tears down the blur/focus listeners driving the blur-selection highlight. */
-  #blurSelCleanup?: () => void;
   /** Tears down the transaction listener mirroring caret font/size → comboboxes. */
   #fontSyncCleanup?: () => void;
   // Format Painter captured marks + the pointerup listener that applies them.
@@ -444,7 +411,7 @@ class DocenDocument extends HTMLElement {
   #painterOff?: () => void;
   /** Current zoom level (percent) applied to the canvas via CSS `zoom`. */
   #zoom = 100;
-  /** Esc 兜底：浏览器全屏被 Esc 退出后，把 ribbon 还原为「始终显示」。 */
+  /** Esc fallback: restore the ribbon to "always shown" after the browser leaves fullscreen. */
   readonly #onFullscreenChange = (): void => {
     if (document.fullscreenElement) return;
     const ribbon = this.shadowRoot?.querySelector("docen-ribbon");
@@ -455,9 +422,9 @@ class DocenDocument extends HTMLElement {
     }
   };
 
-  /** Ctrl+= / Ctrl+- / Ctrl+0 缩放、Ctrl+F 查找（Word 行为）。缩放在 ribbon
-   *  combobox 等输入框中忽略（让按键到达输入框）；Ctrl+F 全局生效。preventDefault
-   *  阻止浏览器原生的页面缩放/查找。 */
+  /** Ctrl+= / Ctrl+- / Ctrl+0 zoom, Ctrl+F find (Word behavior). Zoom is
+   *  ignored inside ribbon comboboxes and other inputs (so the keystroke reaches
+   *  them); Ctrl+F is global. preventDefault blocks the browser's native zoom/find. */
   readonly #onZoomKey = (event: KeyboardEvent): void => {
     if (!(event.ctrlKey || event.metaKey)) return;
     // Ctrl+F opens Find, Ctrl+H opens Find & Replace (Word behavior).
@@ -471,7 +438,7 @@ class DocenDocument extends HTMLElement {
       this.#openFindReplace();
       return;
     }
-    // composedPath()[0] 是 shadow 内的真实 target（如 combobox 的 input）。
+    // composedPath()[0] is the real target inside the shadow DOM (e.g. a combobox input).
     const target = event.composedPath()[0] as HTMLElement | null;
     if (target instanceof HTMLElement && target.closest("input, textarea, docen-ribbon-combobox"))
       return;
@@ -731,24 +698,6 @@ class DocenDocument extends HTMLElement {
     this.#painterOff = undefined;
   }
 
-  /** Keep the editor selection visible while a ribbon combobox (font-name /
-   *  font-size) holds focus. On editor blur, paint a CSS Custom Highlight over
-   *  the current selection; on focus, clear it so the browser's native
-   *  selection painting resumes. */
-  #setupBlurSelection(): void {
-    const editor = this.#editor;
-    if (!editor) return;
-    const paint = (): void => paintBlurSelection(editor, BLUR_SELECTION_HIGHLIGHT);
-    const clear = (): void => clearBlurSelection(BLUR_SELECTION_HIGHLIGHT);
-    editor.on("blur", paint);
-    editor.on("focus", clear);
-    this.#blurSelCleanup = (): void => {
-      editor.off("blur", paint);
-      editor.off("focus", clear);
-      clear();
-    };
-  }
-
   /** Mirror the font name / size and paragraph style at the caret into the
    *  ribbon comboboxes — Word behavior: the boxes report the formatting at the
    *  cursor, not a fixed default. Re-runs on every editor transaction (caret
@@ -912,12 +861,20 @@ class DocenDocument extends HTMLElement {
         // node), so it has no NodeView; a widget decoration paints the Fluent
         // divider marker after each section-carrying paragraph.
         SectionBreakMarks,
+        Placeholder.configure({ placeholder: t("editor.placeholder") }),
+        // Editing-behavior set — the engine carries schema only.
+        UndoRedo,
+        Dropcursor,
+        Gapcursor,
+        TrailingNode,
+        ListKeymap,
+        CharacterCount,
+        Focus,
+        Selection,
       ],
     });
     this.#applyDocStyles();
 
-    // Keep the editor selection painted while a ribbon combobox holds focus.
-    this.#setupBlurSelection();
     // Mirror the caret's font/size into the ribbon comboboxes (Word behavior).
     this.#setupFontSync();
     // Stamp the status bar (page count / caret page / zoom) once laid out.
@@ -996,7 +953,6 @@ class DocenDocument extends HTMLElement {
     this.#unobserveLang?.();
     document.removeEventListener("fullscreenchange", this.#onFullscreenChange);
     this.removeEventListener("keydown", this.#onZoomKey);
-    this.#blurSelCleanup?.();
     this.#fontSyncCleanup?.();
     this.#editor?.destroy();
   }

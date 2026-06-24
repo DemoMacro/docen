@@ -30,7 +30,6 @@ import {
   CodeBlockLowlight,
   BulletList,
   ListItem,
-  ListKeymap,
   TaskList,
   HardBreak,
   Mathematics,
@@ -43,10 +42,6 @@ import {
   Subscript,
   Superscript,
   TextAlign,
-  Dropcursor,
-  Gapcursor,
-  TrailingNode,
-  UndoRedo,
 } from "./tiptap";
 
 // Nodes
@@ -107,22 +102,15 @@ export const tiptapMarkExtensions: AnyExtension[] = [
   Underline,
 ];
 
-// Complete extension set. Functional extensions (history, dropcursor, etc.)
-// ship here so editors built from this array — createDocxEditor uses it
-// directly — match what DocxKit's preset would register: UndoRedo (undo/redo
-// commands + Mod-z), Dropcursor (drag-insert caret), Gapcursor (caret at
-// node boundaries), TrailingNode (always-editable trailing paragraph),
-// ListKeymap (list-aware Enter/Tab/Backspace). DocxKit adds the same set via
-// its option guards; Tiptap dedupes by name, so mixing the two is a no-op.
+// DOCX schema + DOCX-specific extensions. Editing-behavior extensions
+// (UndoRedo/Dropcursor/Gapcursor/TrailingNode/ListKeymap/CharacterCount/Focus)
+// live in @docen/editor — the engine stays free of editing-UX concerns.
+// Converters (html/markdown) use this array as schema; those extensions add no
+// schema, so omitting them does not affect conversion.
 export const docxExtensions: AnyExtension[] = [
   ...tiptapNodeExtensions,
   ...tiptapMarkExtensions,
   FormattingMarks,
-  UndoRedo,
-  Dropcursor,
-  Gapcursor,
-  TrailingNode,
-  ListKeymap,
 ];
 
 // DocxKit options type
@@ -133,22 +121,17 @@ export interface DocxKitOptions {
   code?: Record<string, any> | false;
   codeBlock?: Record<string, any> | false;
   document?: false;
-  dropcursor?: Record<string, any> | false;
-  gapcursor?: false;
   hardBreak?: Record<string, any> | false;
   heading?: Record<string, any> | false;
-  undoRedo?: Record<string, any> | false;
   horizontalRule?: Record<string, any> | false;
   italic?: Record<string, any> | false;
   listItem?: Record<string, any> | false;
-  listKeymap?: Record<string, any> | false;
   link?: Record<string, any> | false;
   orderedList?: Record<string, any> | false;
   paragraph?: Record<string, any> | false;
   strike?: Record<string, any> | false;
   text?: false;
   underline?: Record<string, any> | false;
-  trailingNode?: Record<string, any> | false;
 }
 
 export const DocxKit = Extension.create<DocxKitOptions>({
@@ -180,20 +163,11 @@ export const DocxKit = Extension.create<DocxKitOptions>({
     if (this.options.document !== false) {
       extensions.push(Document);
     }
-    if (this.options.dropcursor !== false) {
-      extensions.push(Dropcursor.configure(this.options.dropcursor));
-    }
-    if (this.options.gapcursor !== false) {
-      extensions.push(Gapcursor);
-    }
     if (this.options.hardBreak !== false) {
       extensions.push(HardBreak.configure(this.options.hardBreak));
     }
     if (this.options.heading !== false) {
       extensions.push(Heading.configure(this.options.heading));
-    }
-    if (this.options.undoRedo !== false) {
-      extensions.push(UndoRedo.configure(this.options.undoRedo));
     }
     if (this.options.horizontalRule !== false) {
       extensions.push(HorizontalRule.configure(this.options.horizontalRule));
@@ -203,9 +177,6 @@ export const DocxKit = Extension.create<DocxKitOptions>({
     }
     if (this.options.listItem !== false) {
       extensions.push(ListItem.configure(this.options.listItem));
-    }
-    if (this.options.listKeymap !== false) {
-      extensions.push(ListKeymap.configure(this.options.listKeymap));
     }
     if (this.options.link !== false) {
       extensions.push(Link.configure(this.options.link));
@@ -224,9 +195,6 @@ export const DocxKit = Extension.create<DocxKitOptions>({
     }
     if (this.options.underline !== false) {
       extensions.push(Underline.configure(this.options.underline));
-    }
-    if (this.options.trailingNode !== false) {
-      extensions.push(TrailingNode.configure(this.options.trailingNode));
     }
 
     return extensions;

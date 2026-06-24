@@ -22,6 +22,7 @@
 import type {
   ParagraphPropertiesOptionsBase,
   RunStylePropertiesOptions,
+  SectionPropertiesOptions,
   TableOptions,
   TableRowPropertiesOptionsBase,
   TableCellOptions,
@@ -130,12 +131,21 @@ export type {
 export type AttrNullable<T> = { [K in keyof T]-?: T[K] | null };
 
 /**
- * Paragraph and heading attrs — mirrors ParagraphPropertiesOptionsBase.
+ * Paragraph and heading attrs — mirrors ParagraphPropertiesOptionsBase, plus
+ * engine-only extras the office-open paragraph interface does not carry:
+ * styleId (OOXML pStyle, drives styles.xml CSS) and the section* attrs (OOXML
+ * sectPr lives on a section's last paragraph, so the engine hauls the section
+ * boundary + its header/footer slots on that paragraph).
  *
  * indent/spacing/border/run/frame are nested objects (matching office-open),
  * so one `indent` attr replaces 13 flattened indent attrs.
  */
-export type ParagraphAttrs = AttrNullable<ParagraphPropertiesOptionsBase>;
+export type ParagraphAttrs = AttrNullable<ParagraphPropertiesOptionsBase> & {
+  styleId: string | null;
+  sectionProperties: SectionPropertiesOptions | null;
+  sectionHeaders: HeaderFooterSlots | null;
+  sectionFooters: HeaderFooterSlots | null;
+};
 
 /**
  * Text style mark attrs — mirrors RunStylePropertiesOptions.
@@ -155,7 +165,26 @@ export type TextStyleAttrs = AttrNullable<
     | "subScript"
     | "superScript"
   >
->;
+> & {
+  /** Named character style id (OOXML rStyle). Engine-only extra. */
+  styleId: string | null;
+};
+
+/**
+ * Mention node attrs (official @tiptap/extension-mention).
+ */
+export interface MentionAttrs {
+  id: string | null;
+  label: string | null;
+}
+
+/**
+ * Mathematics node attrs (official @tiptap/extension-mathematics).
+ * Applies to both blockMath (block) and inlineMath (inline).
+ */
+export interface MathAttrs {
+  latex: string;
+}
 
 /**
  * Link mark attrs.
@@ -280,7 +309,7 @@ export type Mark =
 export interface ParagraphNode extends TiptapJSONContent {
   type: "paragraph";
   attrs?: ParagraphAttrs;
-  content?: Array<TextNode | HardBreakNode | ImageNode | EmojiNode>;
+  content?: InlineContent[];
 }
 
 export interface HeadingNode extends TiptapJSONContent {
@@ -324,7 +353,7 @@ export interface BulletListNode extends TiptapJSONContent {
 
 export interface OrderedListNode extends TiptapJSONContent {
   type: "orderedList";
-  attrs?: { start?: number; order?: number; type?: string | null };
+  attrs?: { start?: number | null };
   content?: Array<ListItemNode>;
 }
 
@@ -394,6 +423,42 @@ export interface EmojiNode extends TiptapJSONContent {
   attrs?: EmojiAttrs;
 }
 
+// -- Inline atom nodes: DOCX breaks (page/column) --
+
+export interface PageBreakNode extends TiptapJSONContent {
+  type: "pageBreak";
+}
+
+export interface ColumnBreakNode extends TiptapJSONContent {
+  type: "columnBreak";
+}
+
+// -- Mention node (inline) --
+
+export interface MentionNode extends TiptapJSONContent {
+  type: "mention";
+  attrs?: MentionAttrs;
+}
+
+// -- Mathematics nodes (KaTeX; block + inline) --
+
+export interface InlineMathNode extends TiptapJSONContent {
+  type: "inlineMath";
+  attrs?: MathAttrs;
+}
+
+export interface BlockMathNode extends TiptapJSONContent {
+  type: "blockMath";
+  attrs?: MathAttrs;
+}
+
+// -- Passthrough node (block atom; opaque SectionChild blob) --
+
+export interface PassthroughNode extends TiptapJSONContent {
+  type: "passthrough";
+  attrs?: { data: string };
+}
+
 // -- Details node --
 
 export interface DetailsNode extends TiptapJSONContent {
@@ -413,7 +478,15 @@ export interface DetailsContentNode extends TiptapJSONContent {
 
 // -- Union types --
 
-export type InlineContent = TextNode | HardBreakNode;
+export type InlineContent =
+  | TextNode
+  | HardBreakNode
+  | ImageNode
+  | EmojiNode
+  | PageBreakNode
+  | ColumnBreakNode
+  | MentionNode
+  | InlineMathNode;
 export type BlockNode =
   | ParagraphNode
   | HeadingNode
@@ -424,5 +497,7 @@ export type BlockNode =
   | OrderedListNode
   | TaskListNode
   | TableNode
-  | ImageNode
-  | DetailsNode;
+  | ImageGroupNode
+  | DetailsNode
+  | PassthroughNode
+  | BlockMathNode;

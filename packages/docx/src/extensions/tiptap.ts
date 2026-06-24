@@ -35,9 +35,3 @@ export { TextStyle } from "@tiptap/extension-text-style";
 
 // === Text Style Extensions ===
 export { TextAlign } from "@tiptap/extension-text-align";
-
-// === TipTap Extensions (Dropcursor, Gapcursor, etc.) ===
-export { Dropcursor, Gapcursor, TrailingNode, UndoRedo } from "@tiptap/extensions";
-
-// ListKeymap
-export { ListKeymap } from "@tiptap/extension-list";

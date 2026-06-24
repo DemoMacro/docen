@@ -23,7 +23,7 @@ template.innerHTML = `
       background: var(--docen-color-tab-bg, #f0f0f0);
     }
     .rb-tabs-start { flex: 0 0 auto; }
-    /* Office-style tab-row trailing actions (评论/编辑/共享…): pushed to the
+    /* Office-style tab-row trailing actions (Comment/Edit/Share…): pushed to the
        inline-end. The strip aligns tabs to the bottom (indicator meets the
        panel), so override with align-self:center to vertically center actions. */
     .rb-tabs-end {
