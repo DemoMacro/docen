@@ -72,7 +72,9 @@
     "@microsoft/fast-element": "2.10.4",
     "@microsoft/fast-html": "1.0.0-alpha.54",
     "@microsoft/focusgroup-polyfill": "1.5.0",
+    "@tiptap/extension-list": "3.22.5",
     "@tiptap/extension-table-of-contents": "3.22.5",
+    "@tiptap/extensions": "3.22.5",
     "@tiptap/pm": "3.22.5",
     "prosemirror-search": "^1.1.1"
   }
