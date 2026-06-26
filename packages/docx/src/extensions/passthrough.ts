@@ -34,12 +34,24 @@ export const Passthrough = Node.create({
 
   renderHTML({ node }: { node: { attrs: Record<string, unknown> } }) {
     let label = "DOCX";
+    let key = "";
     try {
       const parsed = JSON.parse((node.attrs.data as string) || "{}") as Record<string, unknown>;
-      const key = Object.keys(parsed)[0];
+      key = Object.keys(parsed)[0] ?? "";
       if (key) label = key;
     } catch {
       /* keep default label */
+    }
+    // bookmarkStart/End are invisible position markers — a Word bookmark anchors
+    // a range and has NO layout box. Render hidden so it occupies no space
+    // (matching Word, where bookmarks are non-printing metadata); measure's
+    // domHeightOf reads the hidden box as 0, so it takes no page space either.
+    // Round-trip is unaffected: attrs.data still carries the SectionChild verbatim.
+    if (key === "bookmarkStart" || key === "bookmarkEnd") {
+      return [
+        "div",
+        { "data-passthrough": label, contenteditable: "false", style: "display:none" },
+      ];
     }
     return [
       "div",

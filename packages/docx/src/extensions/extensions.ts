@@ -10,7 +10,6 @@ import { Emoji } from "./emoji";
 import { FormattingMarks } from "./formatting-marks";
 import { Heading } from "./heading";
 import { Image } from "./image";
-import { ImageGroup } from "./image-group";
 import { Mention } from "./mention";
 import { OrderedList } from "./ordered-list";
 import { PageBreak } from "./page-break";
@@ -43,6 +42,8 @@ import {
   Superscript,
   TextAlign,
 } from "./tiptap";
+import { WpgGroup } from "./wpg-group";
+import { WpsShape } from "./wps-shape";
 
 // Nodes
 export const tiptapNodeExtensions: AnyExtension[] = [
@@ -69,7 +70,8 @@ export const tiptapNodeExtensions: AnyExtension[] = [
   Image.configure({
     inline: true,
   }),
-  ImageGroup,
+  WpgGroup,
+  WpsShape,
   // NOTE: Mathematics (blockMath/inlineMath) renders via KaTeX in the editor but
   // has no DOCX conversion yet — DOCX compile drops math content. latex↔OMML
   // conversion is separate work (office-open has OMML parse/stringify via its
@@ -207,6 +209,8 @@ export { Document } from "./document";
 export { Emoji } from "./emoji";
 export { Heading } from "./heading";
 export { Image } from "./image";
+export { WpgGroup } from "./wpg-group";
+export { WpsShape } from "./wps-shape";
 export { Passthrough } from "./passthrough";
 export { Paragraph } from "./paragraph";
 export { TableRow } from "./table-row";

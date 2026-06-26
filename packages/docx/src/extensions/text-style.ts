@@ -5,7 +5,7 @@ import {
   characterSpacingFromCss,
   characterSpacingToCss,
   normalizeColorToHex,
-  resolveFontName,
+  resolveFontFamilyCss,
   shadingFromCss,
   shadingToCss,
   sizeFromCss,
@@ -127,7 +127,7 @@ export const TextStyle = BaseTextStyle.extend({
         default: null,
         parseHTML: (element: HTMLElement) => element.style.fontFamily || null,
         renderHTML: (attributes: Record<string, unknown>) => {
-          const name = resolveFontName(attributes.font);
+          const name = resolveFontFamilyCss(attributes.font);
           return name ? { style: `font-family:${name}` } : {};
         },
       },

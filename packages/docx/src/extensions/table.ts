@@ -150,6 +150,13 @@ export const Table = BaseTable.extend({
     } else {
       styles.push("width:100%");
     }
+    // Cap dxa tables at the page text column. A tblW in twips can exceed the
+    // content area (Word's table-width vs grid-column-sum mismatch — e.g. a
+    // stray narrow trailing grid column inflates tblW past the text column),
+    // which overflows the fixed page box on the right. max-width:100% shrinks
+    // only over-wide tables; pct/auto/100% widths are already ≤100% so this is
+    // a no-op for them.
+    styles.push("max-width:100%");
 
     if (a.indent && typeof a.indent === "object") {
       const ind = a.indent as { size?: number; type?: string };

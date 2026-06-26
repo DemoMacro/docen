@@ -39,7 +39,7 @@
     "bench": "vp test bench",
     "version": "pnpm --filter \"./packages/**\" -r exec basis version",
     "publish": "pnpm --filter \"./packages/**\" -r exec basis publish",
-    "postinstall": "pnpm dev && vp config && basis git setup"
+    "postinstall": "pnpm build && vp config && basis git setup"
   },
   "devDependencies": {
     "@funish/basis": "0.3.0",

@@ -63,7 +63,7 @@
     "prepack": "pnpm build"
   },
   "dependencies": {
-    "@office-open/docx": "0.10.0",
+    "@office-open/docx": "0.10.2",
     "@tiptap/core": "3.22.5",
     "@tiptap/extension-blockquote": "3.22.5",
     "@tiptap/extension-bold": "3.22.5",
@@ -96,11 +96,11 @@
     "@tiptap/extension-text-align": "3.22.5",
     "@tiptap/extension-text-style": "3.22.5",
     "@tiptap/extension-underline": "3.22.5",
-    "@tiptap/html": "3.22.5",
     "@tiptap/markdown": "3.22.5",
     "@tiptap/pm": "3.22.5",
     "@tiptap/suggestion": "3.22.5",
     "image-meta": "0.2.2",
+    "linkedom": "0.18.12",
     "lowlight": "3.3.0"
   }
 }

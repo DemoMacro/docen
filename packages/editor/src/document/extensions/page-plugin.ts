@@ -472,6 +472,21 @@ function restoreSelection(
  *    fresh page — Word breaks there, ahead of the text.
  *  - "after":  the atom is mid/trailing → the block ends a page.
  *  - null: no pageBreak atom. */
+/** A paragraph holds real content beyond a pageBreak/hardBreak atom: a
+ *  non-whitespace text run or an inline image. The pageBreak-carrier rule
+ *  (core 0, no page space) excludes these — their images/text DO take space, so
+ *  crediting them 0 stranded an image+break paragraph on its page and clipped
+ *  it (pageBreak's atom has no textContent, so a textContent-only check wrongly
+ *  treated an image paragraph as an empty carrier). */
+function hasSubstantialContent(node: PmNode): boolean {
+  let found = false;
+  node.descendants((n) => {
+    if ((n.isText && (n.text ?? "").replace(/\s/g, "").length > 0) || n.type.name === "image")
+      found = true;
+    return !found;
+  });
+  return found;
+}
 function pageBreakPosition(node: PmNode): "before" | "after" | null {
   // An empty paragraph whose only content is the pageBreak atom is the break's
   // CARRIER — Word renders it at the END of the preceding page (the break fires
@@ -686,7 +701,20 @@ function reflow(editor: Editor): void {
     // reason the block overflows to the next page. The full height (incl.
     // after) still accumulates, since a non-final block's after renders as gap
     // before the next block and must count toward the page fill.
-    const core = item.kind === "block" ? item.height - item.after : item.height;
+    // A pageBreak carrier (an empty paragraph whose only content is the break
+    // atom) takes no page space: Word fires the break at the carrier and starts
+    // the next content on a fresh page without the carrier occupying a line.
+    // Counting its empty-line height toward overflow stranded the carrier alone
+    // on its own page, pushing every break's following content one page late.
+    const isBreakCarrier =
+      item.kind === "block" &&
+      !hasSubstantialContent(item.node) &&
+      pageBreakPosition(item.node) === "after";
+    const core = isBreakCarrier
+      ? 0
+      : item.kind === "block"
+        ? item.height - item.after
+        : item.height;
     // Overflow check. `core > curHeight` (the item alone is taller than a page)
     // applies even on an EMPTY page — otherwise the very first item, when it is a
     // splittable multi-image paragraph, takes the whole page to itself and never
