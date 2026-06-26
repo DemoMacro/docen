@@ -240,11 +240,20 @@ const TEMPLATE = `
        attribute; the marks themselves live entirely in CSS. */
     /* Pilcrow ¶ is painted by the FormattingMarks extension as a widget
        decoration — CSS ::after on a ProseMirror-managed <p> does not render. */
+    /* Zero-width inline-block: the mark hugs the last character and never
+       breaks to its own line on a full line. text-indent:0 cancels the
+       inherited paragraph indent (an inline-block is a block container), or
+       the glyph drifts right. */
     .docen-pages .docen-para-mark {
       color: var(--docen-color-marks, #6e6e6e);
       user-select: none;
       pointer-events: none;
       margin-inline-start: 1px;
+      display: inline-block;
+      width: 0;
+      overflow: visible;
+      vertical-align: baseline;
+      text-indent: 0;
     }
     /* A page break renders as a Fluent divider with a centered label (Word).
        The NodeView (PageBreakView) supplies the fluent-divider; it is hidden
