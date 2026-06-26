@@ -1,5 +1,16 @@
-import { createDocument, type SectionPropertiesOptions } from "@docen/docx";
+import {
+  createDocument,
+  resolvePageSize,
+  sectionLinePitchCss,
+  sectionMarginCss,
+  twipsToMm,
+  type SectionPropertiesOptions,
+} from "@docen/docx";
 import { Node } from "@docen/docx/core";
+
+// resolvePageSize moved to the @docen/docx engine; re-exported so page-plugin's
+// existing import (`from "./page-node"`) keeps working without touching it.
+export { resolvePageSize };
 
 /**
  * Page node — a fixed-height paper sheet holding a slice of the document flow.
@@ -18,62 +29,24 @@ import { Node } from "@docen/docx/core";
  * Pagination Conventions.
  */
 
-/** twips → mm (1in = 1440tw = 25.4mm), 2dp. */
-const mm = (twips: number): string => `${((twips / 1440) * 25.4).toFixed(2)}mm`;
-
-/** Resolve a section's printable page dimensions (twips), honoring orientation.
- *  A landscape section commonly stores portrait dimensions (w<h) with
- *  `orientation: "landscape"` — Word renders it landscape, so swap width/height
- *  to make width the larger edge. Exported because BOTH the page's rendered box
- *  (renderHTML) and its measured content box (sectionContentDims in page-plugin)
- *  must agree on orientation, or a page renders one size but is packed against
- *  another and never converges. Returns null when no numeric dimensions. */
-export function resolvePageSize(size: unknown): { width: number; height: number } | null {
-  if (!size || typeof size !== "object") return null;
-  const s = size as { width?: unknown; height?: unknown; orientation?: unknown };
-  const w = typeof s.width === "number" ? s.width : undefined;
-  const h = typeof s.height === "number" ? s.height : undefined;
-  if (w == null || h == null) return null;
-  return s.orientation === "landscape" && w < h ? { width: h, height: w } : { width: w, height: h };
-}
-
-/** Inline geometry styles for a page from its section properties: paper size,
- *  margins (as padding inside the fixed box), and the document-grid line-height
- *  (Word snaps every line up to linePitch; normal paragraphs inherit it).
- *
- *  `SectionPropertiesOptions` is office-open's OOXML type — page.size/margin
- *  values are number|measure unions (parse always yields numbers; we narrow
- *  before arithmetic). grid.type "default" means no line-grid snapping. */
+/** Inline geometry styles for a page from its section properties: paper size
+ *  (the fixed box the paginator measures against), margins (padding), and the
+ *  document-grid line-height (Word snaps every line up to linePitch; normal
+ *  paragraphs inherit it). Delegates unit/geometry mapping to the @docen/docx
+ *  engine (twipsToMm/sectionMarginCss/sectionLinePitchCss) so standalone HTML
+ *  export (generateHTML) renders the same geometry. */
 function pageGeometryStyles(sp: SectionPropertiesOptions | null | undefined): string[] {
   const styles: string[] = [];
   const dims = resolvePageSize(sp?.page?.size);
   if (dims) {
     // Orientation is resolved in resolvePageSize (landscape swaps width/height),
-    // so width/height here are the VISUAL paper edges. Margins are left as-is:
-    // office-open already returns them rotated for a landscape section.
-    if (dims.width > 0) styles.push(`width:${mm(dims.width)}`);
-    if (dims.height > 0) styles.push(`height:${mm(dims.height)}`);
+    // so width/height here are the VISUAL paper edges.
+    if (dims.width > 0) styles.push(`width:${twipsToMm(dims.width)}`);
+    if (dims.height > 0) styles.push(`height:${twipsToMm(dims.height)}`);
   }
-  const margin = sp?.page?.margin;
-  if (margin) {
-    const sides = [margin.top, margin.right, margin.bottom, margin.left];
-    if (sides.every((s): s is number => typeof s === "number")) {
-      styles.push(`padding:${sides.map(mm).join(" ")}`);
-    }
-  }
-  const grid = sp?.grid;
-  // linePitch (twips) snaps lines up when the grid type is line-snapping
-  // (lines/linesAndChars/snapToChars). "default" = no snapping. twips→px = /15.
-  if (grid?.linePitch && grid.type !== "default") {
-    const pitchPx = (grid.linePitch / 15).toFixed(2);
-    // The page's own line-height = one grid line (single spacing for paragraphs
-    // that don't set their own). --docen-line-pitch lets paragraph line-spacing
-    // MULTIPLES resolve relative to the grid (Word w:docGrid), via
-    // calc(var(--docen-line-pitch) * m) in lineSpacingToCss — so "1.5 lines" is
-    // 1.5 × pitch (Word), not 1.5 × fontSize (plain CSS).
-    styles.push(`line-height:${pitchPx}px`);
-    styles.push(`--docen-line-pitch:${pitchPx}px`);
-  }
+  const padding = sectionMarginCss(sp?.page?.margin);
+  if (padding) styles.push(padding);
+  styles.push(...sectionLinePitchCss(sp?.grid));
   return styles;
 }
 

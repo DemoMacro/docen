@@ -5,7 +5,10 @@ import {
   type RichInlineItem,
   type RichInlineCursor,
 } from "@chenglou/pretext/rich-inline";
+import type { TableWidthProperties } from "@office-open/docx";
 import type { Node as PmNode } from "@tiptap/pm/model";
+
+import { clearFontMetricCache, fontNormalRatio } from "./font-metric";
 
 /**
  * Deterministic block measurement via Pretext (canvas measureText + pure
@@ -39,7 +42,7 @@ const PREPARED_CACHE_LIMIT = 4000;
  *  after caching change canvas widths, so old measurements drift). */
 export function clearMeasureCache(): void {
   preparedCache.clear();
-  normalLineHeightCache.clear();
+  clearFontMetricCache();
 }
 
 function getPrepared(items: RichInlineItem[]): PreparedRichInline {
@@ -174,7 +177,6 @@ function resolveSpacing(
  *  measures wider than the generic "serif" fallback, which under-counted wrapped
  *  lines. */
 function defaultRunOf(node: PmNode, styles?: unknown): Partial<RunStyle> {
-  const run = (node.attrs as { run?: Record<string, unknown> | null }).run;
   const t = styleTableOf(styles);
   const styleId = (node.attrs as { styleId?: string | null }).styleId;
   const psRun = t && styleId ? t.paragraphStyles?.find((p) => p.id === styleId)?.run : null;
@@ -187,18 +189,20 @@ function defaultRunOf(node: PmNode, styles?: unknown): Partial<RunStyle> {
   const defPsRun = !styleId ? t?.paragraphStyles?.find((p) => p.default)?.run : null;
   const defRun = t?.default?.document?.run;
   return {
-    size:
-      (run?.size as number | undefined) ?? psRun?.size ?? defPsRun?.size ?? defRun?.size ?? null,
-    font: run?.font ?? psRun?.font ?? defPsRun?.font ?? defRun?.font ?? null,
-    bold:
-      (run?.bold as boolean | undefined) ?? psRun?.bold ?? defPsRun?.bold ?? defRun?.bold ?? false,
-    italic:
-      (run?.italic as boolean | undefined) ??
-      psRun?.italic ??
-      defPsRun?.italic ??
-      defRun?.italic ??
-      false,
-    characterSpacing: (run?.characterSpacing as number | undefined) ?? null,
+    // ¶ glyph rPr (attrs.run) styles ONLY the paragraph mark glyph, NOT run text
+    // (SO 49059600: w:pPr/w:rPr "applies only to the paragraph glyph"). A run
+    // therefore inherits font/size/bold/italic from the paragraph STYLE / doc
+    // default — NEVER the ¶ rPr. Without this, "a run" (run sz absent, ¶ sz=84)
+    // and empty paragraphs inherited ¶ 42pt (inflating line height), and a
+    // ¶ rFonts carrying only an eastAsia hint (no concrete name) fell back to
+    // the serif default (metric 1.44 vs the doc's 微软雅黑 1.32), inflating
+    // every empty line. Empty-paragraph struts still read attrs.run.size
+    // directly via emptyLineHeight (the ¶ glyph is their sole content).
+    size: psRun?.size ?? defPsRun?.size ?? defRun?.size ?? null,
+    font: psRun?.font ?? defPsRun?.font ?? defRun?.font ?? null,
+    bold: psRun?.bold ?? defPsRun?.bold ?? defRun?.bold ?? false,
+    italic: psRun?.italic ?? defPsRun?.italic ?? defRun?.italic ?? false,
+    characterSpacing: null,
   };
 }
 
@@ -218,48 +222,36 @@ function buildFont(spec: FontSpec): string {
   return parts.join(" ");
 }
 
-// ── line-height: canvas font-bounding-box = the browser's "normal" ──
-// getComputedStyle().lineHeight returns "normal" (not a number), and approximating
-// it as fontSize × 1.2 drifts from the real font metrics. canvas measureText's
-// fontBoundingBoxAscent/Descent are exactly the metrics the browser uses for
-// "normal", so the measured line-height matches the rendered one — deterministic
-// and accurate.
-const measureCanvas =
-  typeof document !== "undefined" ? document.createElement("canvas").getContext("2d") : null;
-const normalLineHeightCache = new Map<string, number>();
-
-function normalLineHeightPx(font: string): number {
-  const cached = normalLineHeightCache.get(font);
-  if (cached != null) return cached;
-  let lh = 0;
-  if (measureCanvas) {
-    measureCanvas.font = font;
-    const m = measureCanvas.measureText("Mg");
-    const ascent = (m as TextMetrics).fontBoundingBoxAscent ?? 0;
-    const descent = (m as TextMetrics).fontBoundingBoxDescent ?? 0;
-    lh = ascent + descent;
-  }
-  if (lh <= 0) {
-    const sizeMatch = font.match(/(\d+(?:\.\d+)?)pt/);
-    lh = sizeMatch ? parseFloat(sizeMatch[1]) * PT_TO_PX * 1.2 : 0;
-  }
-  normalLineHeightCache.set(font, lh);
-  return lh;
+// ── line-height: the font's `normal` metric (DOM-measured, incl. line-gap) ──
+// getComputedStyle().lineHeight returns "normal" (not a number), and CSS calc()
+// cannot reference it. fontNormalRatio measures it via a hidden DOM probe
+// (canvas measureText's fontBoundingBox omits the font's line-gap, drifting
+// below the rendered `normal`). The ratio is a fixed property of the font
+// (size-independent), so the paginator stays deterministic across re-flows —
+// only a one-shot DOM probe per (family, bold, italic) on first use.
+/** A run's `normal` line-height in px = ratio × size, mirroring the renderer's
+ *  `var(--docen-font-metric) × 1em`. */
+function normalPxOf(spec: FontSpec): number {
+  const sizePx = spec.size * PT_TO_PX;
+  return (
+    fontNormalRatio({
+      family: resolveFamily(spec.font) ?? DEFAULT_FAMILY,
+      bold: spec.bold,
+      italic: spec.italic,
+    }) * sizePx
+  );
 }
 
 /**
- * Resolve a paragraph's line-height in px from its OOXML spacing. `exact`/
- * `atLeast` → fixed twips→px; `auto`/undefined lineRule → multiple of the
- * font's normal box (line is in 240ths: 240 = single); no spacing.line → the
- * font's normal box. `font` is the canvas font shorthand for the paragraph's
- * dominant run (drives the normal-box measurement).
- *
- * `linePitchPx` applies the section's document grid (w:docGrid): when set,
- * every line snaps UP to that pitch — a normal or loosely-spaced line smaller
- * than the grid grows to it (Chinese docs default linePitch 312tw ≈ 20.8px, so
- * a 12pt normal line renders taller than its font box). `exact`/`atLeast`
- * spacing is an absolute override and ignores the grid, matching Word.
- */
+ * Resolve a paragraph's line-height in px (OOXML ADD model, matching the
+ * renderer's lineSpacingToCss): `exact`/`atLeast` → fixed twips→px (absolute,
+ * ignores the grid); otherwise the font's `normal` metric × multiple, + the
+ * grid's linePitch when snapToGrid is on (OOXML §2.4.13, default true under a
+ * document grid). `normalPx` is the paragraph's single-line metric — the MAX
+ * across its runs (a line box is as tall as its tallest font) — pre-computed
+ * by the caller. `linePitchPx` is the section's document-grid pitch (undefined
+ * when the grid is off). `snapToGrid === false` keeps lines at the raw metric
+ * (header/footer styles); null/true adds the pitch. */
 /** Parse the point size out of a canvas font shorthand ("12pt serif" → 12pt →
  *  16px), for CSS-unitless line-height semantics (line-height: m = m × fontSize). */
 function fontSizePxOf(font: string): number {
@@ -267,38 +259,157 @@ function fontSizePxOf(font: string): number {
   return m ? parseFloat(m[1]) * PT_TO_PX : DEFAULT_SIZE_PT * PT_TO_PX;
 }
 
-export function resolveLineHeight(
-  spacing: { line?: number | null; lineRule?: string | null } | null | undefined,
-  font: string,
-  linePitchPx?: number,
-): number {
-  let lh: number;
-  let isExact = false;
+export function resolveLineHeight({
+  spacing,
+  normalPx,
+  linePitchPx = 0,
+  snapToGrid = null,
+  inTable = false,
+}: {
+  spacing: { line?: number | null; lineRule?: string | null } | null | undefined;
+  normalPx: number;
+  linePitchPx?: number;
+  snapToGrid?: boolean | null;
+  inTable?: boolean;
+}): number {
+  // Per ECMA-376 snapToGrid ("align to document grid"): when snapToGrid is on
+  // (default under a docGrid), every line snaps to the grid — line height = the
+  // font's natural metric + the grid pitch, and the spacing multiple is ABSORBED
+  // by the grid (a 1.5×/double-spaced line still renders at single-grid + pitch,
+  // not multiple×natural). snapToGrid===false applies the multiple×natural.
+  // exact/atLeast are absolute overrides (twips→px) and ignore the grid.
+  // Verified via a Word-generated PDF: single 微软雅黑-Bold 12pt ≈34pt =
+  // natural 15.84 + pitch 17; double a CJK line 16pt ≈38pt (single-grid scale,
+  // not 2×natural+pitch 59pt). Matches lineSpacingToCss (edit==render).
+  // Table cell line height = MAX(natural, grid pitch), NOT natural+pitch. A
+  // single row is floored by trHeight (max(content, trHeight) in
+  // measureRowHeight), so the cell's own line is the pitch (17pt > 9pt natural)
+  // — verified from the Word PDF: a 2-line cell (two stacked lines) ≈34pt =
+  // 2×pitch, not 2×(natural+pitch)=55pt. The earlier ADD inflated multi-line
+  // cells ~2×, pushing tables onto extra pages. Mirrors the font-metric
+  // decoration (max(metric×base, pitch)). edit == render. Precedes exact/atLeast.
+  if (inTable) return Math.max(normalPx, linePitchPx);
+  const pitch = snapToGrid === false ? 0 : linePitchPx;
   if (spacing?.line) {
     const rule = spacing.lineRule;
     if (rule === "exact" || rule === "exactly" || rule === "atLeast") {
-      lh = spacing.line * TWIP_TO_PX;
-      isExact = true;
-    } else {
-      // "auto": a multiple of single spacing. With a document grid (Word
-      // w:docGrid), single = the grid pitch (lines snap to it) — matching the
-      // renderer's calc(var(--docen-line-pitch) * m). Without a grid, single =
-      // the font size (CSS unitless line-height = m × fontSize). The previous
-      // (single = font bounding box) over-estimated Word's single line and
-      // drifted from the rendered height.
-      const single = linePitchPx ?? fontSizePxOf(font);
-      lh = (spacing.line / 240) * single;
+      return spacing.line * TWIP_TO_PX;
     }
-  } else {
-    // No explicit line spacing: single line = the grid pitch (when active, the
-    // page renders it via inherited line-height) else the font's normal box.
-    lh = linePitchPx ?? normalLineHeightPx(font);
+    if (snapToGrid === false) return (spacing.line / 240) * normalPx;
+    return normalPx + pitch;
   }
-  if (linePitchPx && !isExact && lh < linePitchPx) return linePitchPx;
-  return lh;
+  // No explicit spacing: single line = natural + pitch, matching the
+  // renderer's inherited container line-height (metric × 1em + linePitch).
+  return normalPx + pitch;
 }
 
 // ── paragraph measurement ──
+
+/** Collect the paragraph's TEXT-run font specs (for the DOM font-metric probe).
+ *  Hard breaks / images carry no font metric, so only text runs are included;
+ *  an empty paragraph returns the default-run spec (its strut). Shared with the
+ *  per-paragraph --docen-font-metric decoration so measure and render agree on
+ *  the paragraph's dominant font. */
+/** OOXML chooses a run's font by the Unicode range of its text (CJK → eastAsia,
+ *  else ascii); `hint` only disambiguates borderline chars (mainly the ¶ glyph).
+ *  A run font carrying ONLY a hint (e.g. `{hint:"eastAsia"}` with no concrete
+ *  name) inherits the paragraph/doc default font — merge it onto the default as
+ *  a base, never let the hint-only object replace it. Returns the family the
+ *  renderer applies to this run's text, so the measured line-box metric matches
+ *  the rendered one: a CJK run on a 宋体-default doc measures at 宋体's ~1.14, not
+ *  generic serif's ~1.44 (which inflated every CJK table row ~3pt vs Word). */
+const CJK_RANGE = /[ᄀ-ᇿ⺀-鿿ꥠ-꥿가-힯豈-﫿぀-ヿ＀-￯]/;
+function resolveRunFont(runFont: unknown, defFont: unknown, text: string): unknown {
+  if (typeof runFont === "string") return runFont;
+  const base = defFont && typeof defFont === "object" ? (defFont as Record<string, unknown>) : {};
+  const over = runFont && typeof runFont === "object" ? (runFont as Record<string, unknown>) : {};
+  const f: Record<string, unknown> = { ...base, ...over };
+  const fam = (k: string): string | null => (typeof f[k] === "string" ? (f[k] as string) : null);
+  if ((text && CJK_RANGE.test(text)) || f.hint === "eastAsia") {
+    return fam("eastAsia") ?? fam("ascii") ?? fam("hAnsi");
+  }
+  return fam("ascii") ?? fam("hAnsi") ?? fam("eastAsia");
+}
+
+export function collectRunSpecs(para: PmNode, def: Partial<RunStyle>): FontSpec[] {
+  const specs: FontSpec[] = [];
+  const fallback = (): FontSpec => ({
+    size: def.size ?? DEFAULT_SIZE_PT,
+    font: def.font,
+    bold: def.bold ?? false,
+    italic: def.italic ?? false,
+  });
+  para.forEach((child) => {
+    if (child.isText) {
+      const ms = markStyleOf(child.marks as readonly MarkLike[] | undefined);
+      specs.push({
+        size: ms.size ?? def.size ?? DEFAULT_SIZE_PT,
+        font: resolveRunFont(ms.font, def.font, child.text ?? ""),
+        bold: ms.bold ?? def.bold ?? false,
+        italic: ms.italic ?? def.italic ?? false,
+      });
+    }
+  });
+  if (specs.length === 0) specs.push(fallback());
+  return specs;
+}
+
+/** A paragraph's single-line metric (px): the MAX `normal` metric across its
+ *  runs — a line box is as tall as its tallest font (Word). Empty paragraph →
+ *  the default-run strut. */
+function paragraphNormalPx(para: PmNode, def: Partial<RunStyle>): number {
+  const specs = collectRunSpecs(para, def);
+  let max = 0;
+  for (const s of specs) max = Math.max(max, normalPxOf(s));
+  return max;
+}
+
+/** Max `normal` RATIO across the paragraph's runs (size-independent) — for the
+ *  per-paragraph --docen-font-metric decoration. The engine resolves line-height
+ *  as `metric × multiple × line-base`, so this ratio feeds the `metric` factor
+ *  while paragraphMaxSizePt feeds `line-base`. Mirrors paragraphNormalPx in ratio
+ *  form so the renderer can express it as a CSS custom property. */
+export function paragraphMaxRatio(node: PmNode, styles: unknown): number {
+  const def = defaultRunOf(node, styles);
+  const specs = collectRunSpecs(node, def);
+  let max = 0;
+  for (const s of specs) {
+    max = Math.max(
+      max,
+      fontNormalRatio({
+        family: resolveFamily(s.font) ?? DEFAULT_FAMILY,
+        bold: s.bold,
+        italic: s.italic,
+      }),
+    );
+  }
+  return max > 0 ? max : 1.2;
+}
+
+/** Max font SIZE (pt) across the paragraph's runs — feeds the per-paragraph
+ *  --docen-line-base decoration so lineSpacingToCss's
+ *  `calc(metric × multiple × line-base + pitch)` resolves against the line
+ *  box's tallest font, NOT the paragraph's inherited container font-size (which
+ *  under-counts large-font runs: a 42pt heading must scale at 42pt, not 14pt). */
+export function paragraphMaxSizePt(node: PmNode, styles: unknown): number {
+  const def = defaultRunOf(node, styles);
+  const specs = collectRunSpecs(node, def);
+  // The line box scales at the paragraph's tallest ACTUAL run size, not the
+  // inherited default. Flooring at def.size let a 10.5pt table cell render at
+  // Normal's 12pt (over-tall rows). Empty paragraphs (no text runs) keep the
+  // default-run strut.
+  let max: number | null = null;
+  for (const s of specs) {
+    if (s.size != null) max = max === null ? s.size : Math.max(max, s.size);
+  }
+  return max ?? def.size ?? DEFAULT_SIZE_PT;
+}
+
+/** snapToGrid (w:snapToGrid) on the paragraph: null = OOXML default (true when a
+ *  document grid is defined); explicit false drops the grid pitch. */
+function readSnapToGrid(node: PmNode): boolean | null {
+  return (node.attrs as { snapToGrid?: boolean | null }).snapToGrid ?? null;
+}
 
 function collectInlineItems(para: PmNode, def: Partial<RunStyle>): RichInlineItem[] {
   const items: RichInlineItem[] = [];
@@ -313,7 +424,7 @@ function collectInlineItems(para: PmNode, def: Partial<RunStyle>): RichInlineIte
       const ms = markStyleOf(child.marks as readonly MarkLike[] | undefined);
       const spec: FontSpec = {
         size: ms.size ?? def.size ?? DEFAULT_SIZE_PT,
-        font: ms.font ?? def.font,
+        font: resolveRunFont(ms.font, def.font, child.text ?? ""),
         bold: ms.bold ?? def.bold ?? false,
         italic: ms.italic ?? def.italic ?? false,
       };
@@ -352,20 +463,32 @@ function isEmptyTextblock(node: PmNode): boolean {
  *  text (an empty paragraph, or an image row shorter than a text line). Mirrors
  *  renderParagraphStyles: spacing.line wins; else the paragraph-mark run size
  *  (pPr/rPr.sz) renders as `line-height:${size}pt` — an ABSOLUTE value, so
- *  markSize × PT_TO_PX (NOT normalLineHeightPx, whose font-metric box
- *  over-estimates the absolute pt line-height the browser actually produces);
- *  else the section grid pitch or the font's normal box. */
-function emptyLineHeight(
-  node: PmNode,
-  styles: unknown,
-  linePitchPx: number | undefined,
-  font: string,
-): number {
+ *  markSize × PT_TO_PX (the ¶ glyph's line-height is an absolute pt, not a font
+ *  metric); else the font's `normal` metric — the empty ¶ line is the font's
+ *  pure natural metric (no grid pitch; verified vs Word). */
+function emptyLineHeight({
+  node,
+  styles,
+  linePitchPx,
+  normalPx,
+}: {
+  node: PmNode;
+  styles: unknown;
+  linePitchPx: number | undefined;
+  normalPx: number;
+}): number {
   const spacing = resolveSpacing(node, styles);
-  if (spacing?.line) return resolveLineHeight(spacing, font, linePitchPx);
+  // An empty paragraph (¶ glyph only) does NOT receive the grid pitch — Word
+  // renders the ¶ at the font's natural metric (verified: an empty single line
+  // between paragraphs measures ~natural, not natural+pitch).
+  if (spacing?.line) {
+    return resolveLineHeight({ spacing, normalPx, linePitchPx, snapToGrid: false });
+  }
   const markSize = (node.attrs as { run?: { size?: number | null } | null }).run?.size ?? null;
   if (markSize != null) return markSize * PT_TO_PX;
-  return linePitchPx ?? normalLineHeightPx(font);
+  // No spacing, no ¶ glyph size: single line = the font's `normal` metric (no
+  // grid pitch for the empty ¶ line).
+  return resolveLineHeight({ spacing: null, normalPx, linePitchPx, snapToGrid: false });
 }
 
 // CJK kinsoku (line-start/end prohibition) character classes. Pretext's
@@ -444,6 +567,13 @@ function layoutLineOffsets(
 export function measureParagraphHeight(node: PmNode, width: number, ctx?: MeasureContext): number {
   if (!node.isTextblock || width <= 0) return 0;
   const def = defaultRunOf(node, ctx?.styles);
+  const styles = ctx?.styles;
+  const linePitchPx = ctx?.linePitchPx;
+  const snapToGrid = readSnapToGrid(node);
+  const inTable = ctx?.inTable ?? false;
+  // Max `normal` metric across the paragraph's runs (Word: a line box is as
+  // tall as its tallest font).
+  const normalPx = paragraphNormalPx(node, def);
   const items = collectInlineItems(node, def);
   const prepared = getPrepared(items);
   const font =
@@ -454,8 +584,8 @@ export function measureParagraphHeight(node: PmNode, width: number, ctx?: Measur
       bold: false,
       italic: false,
     });
-  const firstLinePx = resolveFirstLineIndentPx(node, ctx?.styles);
-  const strut = emptyLineHeight(node, ctx?.styles, ctx?.linePitchPx, font);
+  const firstLinePx = resolveFirstLineIndentPx(node, styles);
+  const strut = emptyLineHeight({ node, styles, linePitchPx, normalPx });
   // Empty paragraph (no text/image children): its sole content is the ¶ glyph,
   // whose height is the paragraph-mark line height (strut) — NOT a text line.
   if (isEmptyTextblock(node)) return strut;
@@ -475,7 +605,13 @@ export function measureParagraphHeight(node: PmNode, width: number, ctx?: Measur
     // move whole — over-estimate rather than overflow). Precise wrapping needs
     // a unified text+image line breaker (Pretext's flow holds no image atom);
     // out of scope here.
-    const lh = resolveLineHeight(resolveSpacing(node, ctx?.styles), font, ctx?.linePitchPx);
+    const lh = resolveLineHeight({
+      spacing: resolveSpacing(node, styles),
+      normalPx,
+      linePitchPx,
+      snapToGrid,
+      inTable,
+    });
     let imgH = 0;
     node.forEach((child) => {
       if (child.type.name === "image") {
@@ -486,9 +622,15 @@ export function measureParagraphHeight(node: PmNode, width: number, ctx?: Measur
     const lineCount = layoutLineOffsets(prepared, width, firstLinePx, fontSizePxOf(font)).lineCount;
     return Math.max(1, lineCount) * lh + imgH;
   }
-  const lh = resolveLineHeight(resolveSpacing(node, ctx?.styles), font, ctx?.linePitchPx);
-  const lineCount = layoutLineOffsets(prepared, width, firstLinePx, fontSizePxOf(font)).lineCount;
-  return Math.max(1, lineCount) * lh;
+  const lh = resolveLineHeight({
+    spacing: resolveSpacing(node, styles),
+    normalPx,
+    linePitchPx,
+    snapToGrid,
+    inTable,
+  });
+  const lcInfo = layoutLineOffsets(prepared, width, firstLinePx, fontSizePxOf(font));
+  return Math.max(1, lcInfo.lineCount) * lh;
 }
 
 /** True if the paragraph contains an inline image child. Such paragraphs
@@ -564,13 +706,12 @@ export function measureParagraphLines(
   // text+image paragraph returns null (not split — conservative).
   if (hasInlineImage(node)) {
     const def = defaultRunOf(node, ctx?.styles);
-    const font = buildFont({
-      size: def.size ?? DEFAULT_SIZE_PT,
-      font: def.font,
-      bold: false,
-      italic: false,
+    const strut = emptyLineHeight({
+      node,
+      styles: ctx?.styles,
+      linePitchPx: ctx?.linePitchPx,
+      normalPx: paragraphNormalPx(node, def),
     });
-    const strut = emptyLineHeight(node, ctx?.styles, ctx?.linePitchPx, font);
     const layout = layoutImageLines(node, width, strut);
     if (!layout) return null;
     const { lineHeights, lineBreakOffsets } = layout;
@@ -603,7 +744,13 @@ export function measureParagraphLines(
   const font =
     items[0]?.font ??
     buildFont({ size: def.size ?? DEFAULT_SIZE_PT, font: def.font, bold: false, italic: false });
-  const lineHeight = resolveLineHeight(resolveSpacing(node, ctx?.styles), font, ctx?.linePitchPx);
+  const lineHeight = resolveLineHeight({
+    spacing: resolveSpacing(node, ctx?.styles),
+    normalPx: paragraphNormalPx(node, def),
+    linePitchPx: ctx?.linePitchPx,
+    snapToGrid: readSnapToGrid(node),
+    inTable: ctx?.inTable ?? false,
+  });
   const firstLinePx = resolveFirstLineIndentPx(node, ctx?.styles);
   const { lineCount, lineBreakOffsets } = layoutLineOffsets(
     prepared,
@@ -773,6 +920,9 @@ export interface MeasureContext {
    *  paragraph carries no direct attrs — measure must mirror the renderer's
    *  style cascade or rows whose spacing lives in a style measure too short. */
   styles?: unknown;
+  /** True inside a table cell: line height snaps to max(natural, pitch) so the
+   *  row's trHeight atLeast floor — not the line box — governs (matches Word). */
+  inTable?: boolean;
 }
 
 /** Measure any top-level block height in px at `width`. Textblocks use Pretext
@@ -847,26 +997,110 @@ export function tableColumnWidths(table: PmNode, tableWidth: number): number[] {
 }
 
 /** Measure a table row height (px): the tallest cell's stacked block heights at
- *  that cell's column width(s). rowspan cells count fully on their start row
- *  (Word distributes across spans; this over-estimates the start row and
- *  under-estimates the spanned rows, but the measurement is deterministic — no
- *  DOM wobble between re-flows). Cell margins/padding are not yet added. */
+ *  that cell's column width(s), then floored by the row's trHeight (Word
+ *  w:trHeight). rowspan cells count fully on their start row (Word distributes
+ *  across spans; this over-estimates the start row and under-estimates the
+ *  spanned rows, but the measurement is deterministic — no DOM wobble between
+ *  re-flows). Cell margins/padding are not yet added.
+ *
+ *  trHeight: `atLeast` (absent) is a minimum — a row whose cells render shorter
+ *  still reserves trHeight (Word pushes whole short rows to fit). `exact` fixes
+ *  the row at trHeight (content overflows but the row does not grow). Without
+ *  this floor, a compact table measured shorter than its trHeight sum and spilled
+ *  its last row onto the next page even though Word keeps it whole. */
 export function measureRowHeight(
   row: PmNode,
   columnWidths: number[],
   ctx?: MeasureContext,
 ): number {
+  // Cells measure under the table-cell line-height rule (max(natural, pitch))
+  // so the row's trHeight floor governs — fork the ctx once for the whole row.
+  const cellCtx: MeasureContext = { ...ctx, inTable: true };
   let maxHeight = 0;
   let colCursor = 0;
   row.forEach((cell) => {
     const colspan = (cell.attrs as { colspan?: number }).colspan ?? 1;
     const cellWidth = columnWidths.slice(colCursor, colCursor + colspan).reduce((a, b) => a + b, 0);
     colCursor += colspan;
+    // Cell content width minus horizontal insets (w:tcMar/tblCellMar) so wrapped
+    // line counts match the rendered cell — padding shrinks the text box, and
+    // without this the paginator over-estimates a cell's capacity (too few
+    // lines) and the row under-measures.
+    const hm = (
+      cell.attrs as {
+        margins?: { left?: TableWidthProperties; right?: TableWidthProperties } | null;
+      }
+    ).margins;
+    const hMarginPx = hm ? (marginSizeTw(hm.left) + marginSizeTw(hm.right)) * TWIP_TO_PX : 0;
+    const innerW = Math.max(0, cellWidth - hMarginPx);
     let contentH = 0;
     cell.forEach((block) => {
-      contentH += measureBlockHeight(block, Math.max(0, cellWidth), ctx);
+      contentH += measureBlockHeight(block, innerW, cellCtx);
     });
+    // Add the renderer's vertical cell overhead (padding + border) so the
+    // measured row matches the rendered row — without it rows under-measure
+    // and the table's last rows overflow the page bottom (clipped).
+    contentH += cellVerticalOverhead(cell);
     maxHeight = Math.max(maxHeight, contentH);
   });
+  const h = (row.attrs as { height?: { value?: number; rule?: string } | null }).height;
+  if (h && typeof h.value === "number" && h.value > 0) {
+    const px = h.value * TWIP_TO_PX;
+    if (h.rule === "exact") return px;
+    maxHeight = Math.max(maxHeight, px);
+  }
   return maxHeight;
+}
+
+/** Vertical padding + border the renderer adds around a table cell's content
+ *  (edit == render). Without it the paginator under-measures rows and the last
+ *  rows overflow the page bottom (clipped by the page's overflow:hidden).
+ *  - padding: w:tcMar (twips→px); OOXML defaults tcMar top/bottom to 0
+ *    (TableNormal) — the renderer's td is padding-block:0 unless tcMar sets it,
+ *    so measure matches (no invented UA offset; the earlier 2px default inflated
+ *    every CJK table row ~2px vs Word).
+ *  - border: w:tcBorders (w:sz = eighths-of-pt → px); nil/none → 0, an absent
+ *    side inherits the Table-Grid default (1px = the CSS border). Under
+ *    border-collapse:collapse only the MAX of top/bottom adds to the row height
+ *    (adjacent rows share one border). */
+/** A cell margin side's size in twips (w:tcMar / w:tblCellMar
+ *  TableWidthProperties { size, type }), or 0 when absent. Shared by
+ *  cellVerticalOverhead (top/bottom → row height) and measureRowHeight
+ *  (left/right → wrapping-width inset). */
+function marginSizeTw(s?: TableWidthProperties | null): number {
+  return s && typeof s.size === "number" ? s.size : 0;
+}
+
+function cellVerticalOverhead(cell: PmNode): number {
+  // Cell insets (w:tcMar, or the table's tblCellMar pushed by resolveTable):
+  // each side is TableWidthProperties { size (twips), type } — read .size, not
+  // the side object (which coerces to NaN). Only top/bottom grow the row height.
+  const m = (
+    cell.attrs as { margins?: { top?: TableWidthProperties; bottom?: TableWidthProperties } | null }
+  ).margins;
+  const padPx = m ? (marginSizeTw(m.top) + marginSizeTw(m.bottom)) * TWIP_TO_PX : 0;
+  const b = (
+    cell.attrs as {
+      borders?: {
+        top?: { style?: string; size?: number } | null;
+        bottom?: { style?: string; size?: number } | null;
+      } | null;
+    }
+  ).borders;
+  const borderSidePx = (s?: { style?: string; size?: number } | null): number =>
+    s && s.style && s.style !== "nil" && s.style !== "none" && s.size != null
+      ? (s.size / 8) * PT_TO_PX
+      : 0;
+  const gridDefault = 0.75 * PT_TO_PX;
+  // border-collapse:collapse merges adjacent rows' top/bottom borders into one
+  // shared line (thicker wins) — only the MAX adds to the row height. Summing
+  // both double-counted a 1px border as 2px, over-measuring rows ~1px and
+  // pushing CJK tables onto extra pages vs Word.
+  const borderPx = b
+    ? Math.max(
+        b.top ? borderSidePx(b.top) : gridDefault,
+        b.bottom ? borderSidePx(b.bottom) : gridDefault,
+      )
+    : gridDefault;
+  return padPx + borderPx;
 }

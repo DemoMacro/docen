@@ -408,12 +408,23 @@ export interface ImageNode extends TiptapJSONContent {
 
 /**
  * Drawing group (wpg) carried as an opaque blob — the full WpgGroupRunOptions
- * (pictures/shapes/nested groups + transform) round-trips verbatim. The editor
- * doesn't model the group interior; renderHTML paints the first picture only.
+ * (pictures/shapes/nested groups + transform) round-trips verbatim. renderHTML
+ * lays out every child at its transformed position (Word-style group rendering).
  */
-export interface ImageGroupNode extends TiptapJSONContent {
-  type: "imageGroup";
+export interface WpgGroupNode extends TiptapJSONContent {
+  type: "wpgGroup";
   attrs?: { wpgGroup: Record<string, unknown> | null };
+}
+
+/**
+ * Standalone floating text-box shape (wp:anchor > wps:wsp) carried as an opaque
+ * blob — the full WpsShapeRunOptions round-trips verbatim. Unlike the group's
+ * interior wps children, this shape floats on its own anchor and renders via the
+ * shared wps interior renderer.
+ */
+export interface WpsShapeNode extends TiptapJSONContent {
+  type: "wpsShape";
+  attrs?: { wpsShape: Record<string, unknown> | null };
 }
 
 // -- Emoji node (inline) --
@@ -497,7 +508,8 @@ export type BlockNode =
   | OrderedListNode
   | TaskListNode
   | TableNode
-  | ImageGroupNode
+  | WpsShapeNode
+  | WpgGroupNode
   | DetailsNode
   | PassthroughNode
   | BlockMathNode;

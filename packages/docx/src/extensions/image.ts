@@ -1,7 +1,6 @@
-import type { Floating } from "@office-open/docx";
-
 import type { JSONContent } from "../core";
 import { Image as BaseImage } from "./tiptap";
+import { floatAnchorScope, floatingToStyles } from "./utils";
 
 type CropRect = { left?: number; top?: number; right?: number; bottom?: number };
 
@@ -207,46 +206,42 @@ export function renderCropAttrs(
 function renderImageStyles(attrs: Record<string, unknown>): string[] {
   const styles: string[] = [];
 
-  if (attrs.display) styles.push(`display:${attrs.display as string}`);
+  if (attrs.display) {
+    styles.push(`display:${attrs.display as string}`);
+  } else if (!attrs.floating) {
+    // An <img> is an inline-replaced element, but a cropped image renders as a
+    // <div> (default block). Without inline-block it claims its own line in the
+    // paragraph and breaks side-by-side image rows (a centered row of two
+    // images collapses to one-per-line). floating images are placed via
+    // position:absolute/float, where display no longer governs layout.
+    styles.push("display:inline-block");
+  }
 
   if (attrs.rotation) {
     styles.push(`transform:rotate(${attrs.rotation as number}deg)`);
   }
 
-  const f = attrs.floating as Floating | null;
-  if (f) {
-    styles.push(f.behindDocument ? "z-index:-1" : "z-index:1");
-
-    const wrapType = ((f.wrap as Record<string, unknown> | undefined)?.type as number) ?? 0;
-    if (wrapType === 0) {
-      styles.push("position:absolute");
-    } else if (wrapType === 1) {
-      const align = (f.horizontalPosition as Record<string, unknown> | undefined)?.align;
-      if (align === "left" || align === "inside") styles.push("float:left");
-      else if (align === "right" || align === "outside") styles.push("float:right");
-      else styles.push("float:left");
-    } else if (wrapType === 2) {
-      styles.push("float:left");
-      styles.push("shape-outside:margin-box");
-    } else if (wrapType === 3) {
-      styles.push("display:block");
-      styles.push("clear:both");
-    } else {
-      styles.push("display:inline-block");
-    }
-
-    const m = f.margins as
-      | { top?: number; bottom?: number; left?: number; right?: number }
-      | undefined;
-    if (m) {
-      if (m.top) styles.push(`margin-top:${((m.top * 96) / 1440).toFixed(1)}pt`);
-      if (m.bottom) styles.push(`margin-bottom:${((m.bottom * 96) / 1440).toFixed(1)}pt`);
-      if (m.left) styles.push(`margin-left:${((m.left * 96) / 1440).toFixed(1)}pt`);
-      if (m.right) styles.push(`margin-right:${((m.right * 96) / 1440).toFixed(1)}pt`);
-    }
+  if (attrs.floating) {
+    // Floating anchor (wp:anchor) → CSS. Shared with WpgGroup via utils so
+    // anchored images and drawing groups render identically (wrapNone →
+    // position:absolute "in front/behind text"; square/tight → float).
+    styles.push(
+      ...floatingToStyles(
+        attrs.floating,
+        attrs.src as string | undefined,
+        attrs.width as number | undefined,
+      ),
+    );
   }
 
   return styles;
+}
+
+/** Office vector (GDI) formats the browser cannot decode — EMF/WMF render as
+ *  a labeled placeholder (Image.renderHTML) instead of an <img> that decodes
+ *  to naturalWidth 0 (an empty box). */
+function isVectorImage(src: unknown): boolean {
+  return typeof src === "string" && /^data:image\/(?:x-)?(?:emf|wmf)/i.test(src);
 }
 
 /**
@@ -368,6 +363,33 @@ export const Image = BaseImage.extend({
     HTMLAttributes: Record<string, unknown>;
   }) {
     const attrs = node.attrs;
+    // A paragraph-anchored wrapNone image resolves its absolute top/left from
+    // the anchor <p> (data-float-anchor → editor CSS makes the <p> relative);
+    // otherwise it anchors to the page box and floats over the heading/body.
+    const floatAnchor =
+      attrs.floating && floatAnchorScope(attrs.floating) === "paragraph" ? "paragraph" : null;
+
+    // EMF/WMF are Office GDI vector formats the browser cannot decode — the
+    // <img> yields naturalWidth 0 (an empty box). Render a labeled placeholder
+    // that keeps the image's size/floating/rotation so pagination and float
+    // anchoring stay faithful; the real art is preserved in data-vector-src and
+    // the node attrs for DOCX round-trip.
+    if (isVectorImage(attrs.src)) {
+      const styles = renderImageStyles(attrs);
+      if (attrs.width != null) styles.push(`width:${attrs.width as number}px`);
+      if (attrs.height != null) styles.push(`height:${attrs.height as number}px`);
+      const divAttrs: Record<string, unknown> = {
+        "data-image": "vector",
+        role: "img",
+        "data-vector-src": attrs.src as string,
+        style: styles.join(";"),
+      };
+      if (attrs.alt) divAttrs["aria-label"] = attrs.alt;
+      if (attrs.title) divAttrs["title"] = attrs.title;
+      attachRawAttrs(divAttrs, attrs);
+      if (floatAnchor) divAttrs["data-float-anchor"] = floatAnchor;
+      return ["div", divAttrs, "Vector image"] as const;
+    }
 
     // Cropped images render as div[role=img] + background-image so background
     // -size can scale each axis independently (object-fit:cover is uniform and
@@ -391,6 +413,7 @@ export const Image = BaseImage.extend({
       if (attrs.title) divAttrs["title"] = attrs.title;
       attachRawAttrs(divAttrs, attrs);
       divAttrs["data-crop"] = JSON.stringify(attrs.crop);
+      if (floatAnchor) divAttrs["data-float-anchor"] = floatAnchor;
       return ["div", divAttrs] as const;
     }
 
@@ -398,6 +421,7 @@ export const Image = BaseImage.extend({
     const styles = renderImageStyles(attrs);
     if (styles.length > 0) htmlAttrs.style = styles.join(";");
     attachRawAttrs(htmlAttrs, attrs);
+    if (floatAnchor) htmlAttrs["data-float-anchor"] = floatAnchor;
     return ["img", htmlAttrs] as const;
   },
 
@@ -406,6 +430,10 @@ export const Image = BaseImage.extend({
       {
         tag: "div[data-image=crop]",
         getAttrs: (el) => parseCropDiv(el as HTMLElement),
+      },
+      {
+        tag: "div[data-image=vector]",
+        getAttrs: (el) => parseVectorDiv(el as HTMLElement),
       },
       { tag: "img[src]" },
     ];
@@ -446,5 +474,24 @@ function parseCropDiv(el: HTMLElement): Record<string, unknown> {
   const title = el.getAttribute("title");
   if (title) attrs.title = title;
 
+  return attrs;
+}
+
+/** Reverse-parse an EMF/WMF placeholder div back into image attrs: src from
+ *  data-vector-src, extent from the inline width/height, alt/title from
+ *  aria-label/title. Floating/rotation/etc. round-trip via attribute rules. */
+function parseVectorDiv(el: HTMLElement): Record<string, unknown> {
+  const attrs: Record<string, unknown> = {};
+  const src = el.getAttribute("data-vector-src");
+  if (src) attrs.src = src;
+  const style = el.getAttribute("style") || "";
+  const wMatch = style.match(/(?:^|;)\s*width:\s*([\d.]+)px/);
+  const hMatch = style.match(/(?:^|;)\s*height:\s*([\d.]+)px/);
+  if (wMatch) attrs.width = parseFloat(wMatch[1]);
+  if (hMatch) attrs.height = parseFloat(hMatch[1]);
+  const ariaLabel = el.getAttribute("aria-label");
+  if (ariaLabel) attrs.alt = ariaLabel;
+  const title = el.getAttribute("title");
+  if (title) attrs.title = title;
   return attrs;
 }

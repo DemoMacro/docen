@@ -1,95 +1,143 @@
 import { encodeBase64 } from "@office-open/core";
+import { getSchema } from "@tiptap/core";
 import {
-  generateHTML as generateTiptapHTML,
-  generateJSON as generateTiptapJSON,
-} from "@tiptap/html";
-import type { ParseOptions } from "@tiptap/pm/model";
+  DOMParser as ProseMirrorDOMParser,
+  DOMSerializer,
+  Node,
+  type ParseOptions,
+} from "@tiptap/pm/model";
+import { parseHTML as createLinkedomDocument } from "linkedom";
 
-import type { JSONContent, Extensions } from "../core";
+import type { Extensions, JSONContent } from "../core";
 import { docxExtensions } from "../core";
+import { sectionLinePitchCss, sectionMarginCss } from "../extensions/utils";
 
 const defaultExtensions: Extensions = docxExtensions;
 
-interface BackgroundMediaItem {
-  data?: Uint8Array | Record<string, number>;
-  type?: string;
-}
-
-interface BackgroundLike {
+/** Page background — mirrors parseDOCX output (office-open parse.ts): a simple
+ *  color background `{ color, themeColor, … }` or a VML pattern `{ rawXml,
+ *  rawMedia }`. Document-level (CT_DocumentBase), so it is read off `doc.attrs`
+ *  and wraps the whole document. */
+interface DocumentBackground {
   color?: string;
-  rawXml?: string;
-  image?: { data?: BackgroundMediaItem };
-  rawMedia?: BackgroundMediaItem[];
+  rawMedia?: Array<{
+    type?: string;
+    data?: Uint8Array | Record<string, number>;
+  }>;
 }
 
-/**
- * Normalize a media payload to Uint8Array — JSON round-trips byte arrays as
- * plain objects ({0:byte,...}), so rebuild before base64-encoding.
- */
-function toBytes(d: Uint8Array | Record<string, number> | undefined): Uint8Array | null {
-  if (!d) return null;
-  if (d instanceof Uint8Array) return d;
-  return new Uint8Array(Object.values(d));
+/** JSON round-trips byte arrays as plain objects ({0:byte,…}); rebuild here. */
+function toBytes(data: Uint8Array | Record<string, number> | undefined): Uint8Array | null {
+  if (!data) return null;
+  return data instanceof Uint8Array ? data : new Uint8Array(Object.values(data));
 }
 
-/**
- * Build a CSS background style from DocumentBackgroundOptions. VML/rawXml page
- * backgrounds (base fill + pattern image) reduce to a solid color (the w:color
- * base fill) plus a tiled image (rawMedia) — OOXML pattern semantics can't be
- * expressed in CSS, but base color + tile gives a visually close result.
- */
-function extractBackgroundStyle(bg: unknown): string | undefined {
-  if (!bg || typeof bg !== "object") return undefined;
-  const b = bg as BackgroundLike;
-  let color: string | undefined;
-  if (b.color) color = b.color;
-  else if (b.rawXml) {
-    const m = b.rawXml.match(/w:color="([0-9A-Fa-f]{6})"/);
-    if (m) color = m[1];
-  }
-  const media = b.image?.data ?? b.rawMedia?.[0];
-  const bytes = toBytes(media?.data);
+/** Page background → CSS for the root wrapper. Color renders directly; a VML
+ *  pattern's first media item tiles as an image. OOXML patterns have no CSS
+ *  equivalent, so DOCX (not HTML) is the fidelity source. */
+function backgroundToCss(bg: DocumentBackground | undefined): string | undefined {
   const styles: string[] = [];
-  if (color) styles.push(`background-color:#${color}`);
+  if (bg?.color) styles.push(`background-color:#${bg.color}`);
+  const media = bg?.rawMedia?.[0];
+  const bytes = toBytes(media?.data);
   if (bytes) {
-    const type = media?.type ?? "png";
     styles.push(
-      `background-image:url(data:image/${type};base64,${encodeBase64(bytes)})`,
+      `background-image:url(data:image/${media?.type ?? "png"};base64,${encodeBase64(bytes)})`,
       "background-repeat:repeat",
     );
   }
   return styles.length ? styles.join(";") : undefined;
 }
 
-/**
- * Parse HTML string to Tiptap JSON. Reads back the page background base color
- * from a generateHTML wrapper div (pattern image is lost — OOXML patterns have
- * no HTML equivalent; the DOCX round-trip preserves the full background).
- */
-export function parseHTML(
-  html: string,
-  extensions?: Extensions,
-  options?: ParseOptions,
-): JSONContent {
-  const doc = generateTiptapJSON(html, extensions ?? defaultExtensions, options);
-  const m = html.match(/<div style="background-color:#([0-9A-Fa-f]{6})/);
-  if (m) {
-    if (!doc.attrs) doc.attrs = {};
-    (doc.attrs as Record<string, unknown>).background = { color: m[1] };
+/** A section's geometry fields used for CSS (subset of SectionPropertiesOptions). */
+type SectionGeometry = { page?: { margin?: unknown }; grid?: unknown } | null;
+
+/** A run of blocks belonging to one section. OOXML attaches sectPr to a
+ *  section's LAST paragraph; `properties` is that paragraph's sectionProperties
+ *  (or doc.attrs.sectionProperties for the final section). */
+interface JsonSection {
+  properties: SectionGeometry;
+  blocks: JSONContent[];
+}
+
+/** Split flat `doc > block+` into sections by section-carrying paragraphs.
+ *  Mirrors DocxManager's compile-time split (converters/docx.ts): a paragraph
+ *  with `sectionProperties` closes its section; trailing blocks form the final
+ *  section under doc.attrs.sectionProperties. No section-carrying paragraph →
+ *  a single section (backward compatible). */
+function splitJsonSections(doc: JSONContent): JsonSection[] {
+  const sections: JsonSection[] = [];
+  let current: JSONContent[] = [];
+  for (const node of doc.content ?? []) {
+    current.push(node);
+    const sp = (node.attrs as Record<string, unknown> | undefined)
+      ?.sectionProperties as SectionGeometry;
+    if (sp != null) {
+      sections.push({ properties: sp, blocks: current });
+      current = [];
+    }
   }
-  return doc;
+  const tailProps = (doc.attrs as Record<string, unknown> | undefined)
+    ?.sectionProperties as SectionGeometry;
+  sections.push({ properties: tailProps ?? null, blocks: current });
+  return sections;
 }
 
 /**
- * Generate HTML string from Tiptap JSON. Wraps the content in a div carrying
- * the page background (color + pattern image) so the document background is
- * visible — Tiptap's DOMSerializer only serializes content nodes, not doc attrs.
+ * Serialize Tiptap JSON to an HTML string. Renders per-section: each OOXML
+ * section (CT_SectPr) becomes a `<section>` carrying its own page margin
+ * (padding) and a document-grid line-height (the font's `normal` metric —
+ * Word does not add the grid pitch to rendered line height), so paragraph
+ * line-spacing multiples resolve against the section's font, not a fallback.
+ * The document background (CT_DocumentBase, single for the whole doc) wraps all
+ * sections.
+ *
+ * Same ProseMirror DOMSerializer pipeline as @tiptap/html, on a linkedom
+ * document: happy-dom drops calc(var(…)) when re-serializing the style
+ * attribute, so DOCX line-spacing survives only with linkedom.
  */
-export function generateHTML(doc: JSONContent, extensions?: Extensions): string {
-  const html = generateTiptapHTML(doc, extensions ?? defaultExtensions);
-  const style = extractBackgroundStyle(
-    (doc.attrs as Record<string, unknown> | undefined)?.background,
-  );
-  if (style) return `<div style="${style}">${html}</div>`;
-  return html;
+export function generateHTML(doc: JSONContent, extensions: Extensions = defaultExtensions): string {
+  const schema = getSchema(extensions);
+  const { document } = createLinkedomDocument("<!DOCTYPE html><html><body></body></html>");
+
+  const serializer = DOMSerializer.fromSchema(schema);
+  const parts: string[] = [];
+  for (const section of splitJsonSections(doc)) {
+    const sp = section.properties;
+    const styles: string[] = [];
+    const padding = sectionMarginCss(sp?.page?.margin);
+    if (padding) styles.push(padding);
+    styles.push(...sectionLinePitchCss(sp?.grid));
+    const sec = document.createElement("section");
+    if (styles.length) sec.setAttribute("style", styles.join(";"));
+    if (section.blocks.length) {
+      const fragment = Node.fromJSON(schema, {
+        type: "doc",
+        content: section.blocks,
+      }).content;
+      serializer.serializeFragment(fragment, { document }, sec);
+    }
+    parts.push(sec.outerHTML);
+  }
+  const body = parts.join("");
+  const bgCss = backgroundToCss(doc.attrs?.background);
+  return bgCss ? `<div style="${bgCss}">${body}</div>` : body;
+}
+
+/**
+ * Parse an HTML string into Tiptap JSON. Same ProseMirror DOMParser pipeline as
+ * @tiptap/html on a linkedom document. The background wrapper and section
+ * containers are unknown elements (no doc/div/section node in the schema), so
+ * the parser ignores their tags and extracts the content. Section geometry
+ * (linePitch/margins) and the page background are section/doc-level metadata,
+ * not content — they round-trip losslessly via DOCX, not HTML.
+ */
+export function parseHTML(
+  html: string,
+  extensions: Extensions = defaultExtensions,
+  options?: ParseOptions,
+): JSONContent {
+  const schema = getSchema(extensions);
+  const { document } = createLinkedomDocument(`<!DOCTYPE html><html><body>${html}</body></html>`);
+  return ProseMirrorDOMParser.fromSchema(schema).parse(document.body, options).toJSON();
 }

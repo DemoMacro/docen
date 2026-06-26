@@ -171,10 +171,21 @@ export const Paragraph = BaseParagraph.extend({
     node,
     HTMLAttributes,
   }: {
-    node: { attrs: Record<string, unknown> };
+    node: { attrs: Record<string, unknown> } & {
+      forEach?: (cb: (child: { isText?: boolean; type?: { name?: string } }) => void) => void;
+    };
     HTMLAttributes: Record<string, unknown>;
   }) {
-    const styles = renderParagraphStyles(node.attrs);
+    // An empty paragraph (¶ glyph only) has no text/hardBreak/image child; its
+    // spacing.line renders at the font's natural metric (no grid pitch),
+    // matching Word. Mirrors measure.ts isEmptyTextblock. See
+    // renderParagraphStyles `empty`.
+    let hasContent = false;
+    node.forEach?.((child) => {
+      if (child.isText || child.type?.name === "hardBreak" || child.type?.name === "image")
+        hasContent = true;
+    });
+    const styles = renderParagraphStyles(node.attrs, { empty: !hasContent });
     const attrs = { ...HTMLAttributes };
     const styleId = node.attrs.styleId as string | null;
     // class="docx-style-{id}" applies the named style's CSS. A pStyle-less

@@ -4,6 +4,8 @@ import type {
   IndentAttributesProperties,
   ShadingAttributesProperties,
   SpacingProperties,
+  TableCellOptions,
+  TableWidthProperties,
 } from "@office-open/docx";
 
 // ── CSS color helpers ──
@@ -77,6 +79,27 @@ export function resolveFontName(font: unknown): string | null {
   if (typeof font === "object") {
     const f = font as { ascii?: string; hAnsi?: string; eastAsia?: string };
     return f.ascii || f.hAnsi || f.eastAsia || null;
+  }
+  return null;
+}
+
+/** Resolve a font value to a CSS font-family list with an eastAsia fallback.
+ *  Mirrors Word's per-Unicode-range font selection (MS-OE376): Basic Latin uses
+ *  the ascii font, CJK Ideographs use eastAsia. CSS can't split a run by range,
+ *  so list ascii first (it carries Basic Latin glyphs) then eastAsia — the
+ *  browser falls back to eastAsia for CJK chars the ascii font lacks. Without
+ *  this, CJK text renders in the ascii font (e.g. Times) instead of the
+ *  document's CJK font (e.g. SimSun). Use this for font-family rendering;
+ *  resolveFontName (single name) stays for UI/parse. */
+export function resolveFontFamilyCss(font: unknown): string | null {
+  if (!font) return null;
+  if (typeof font === "string") return font;
+  if (typeof font === "object") {
+    const f = font as { ascii?: string; hAnsi?: string; eastAsia?: string };
+    const ascii = f.ascii || f.hAnsi;
+    const ea = f.eastAsia;
+    if (ascii && ea && ascii !== ea) return `"${ascii}","${ea}"`;
+    return ascii || ea || null;
   }
   return null;
 }
@@ -168,20 +191,98 @@ export function shadingFromCss(css: string | null | undefined): ShadingAttribute
 // OOXML spacing.line: 240 = single, 360 = 1.5.
 // lineRule "exact"/"atLeast" → fixed pt; "auto"/undefined → a multiple of single.
 
-export function lineSpacingToCss(spacing: SpacingProperties | null | undefined): string | null {
+export function lineSpacingToCss(
+  spacing: SpacingProperties | null | undefined,
+  snapToGrid: boolean | null = null,
+): string | null {
   if (!spacing?.line) return null;
   const rule = spacing.lineRule;
   if (rule === "exact" || rule === "exactly" || rule === "atLeast") {
-    return `${spacing.line / 20}pt`;
+    return `${Number(spacing.line) / 20}pt`;
   }
-  const multiple = Number((spacing.line / 240).toFixed(2));
-  // A line-spacing MULTIPLE resolves relative to single-line spacing. Word's
-  // single line is the document-grid pitch (w:docGrid) when a grid is active;
-  // the editor's page sets --docen-line-pitch to it. calc(var(..., 1em) * m)
-  // uses that grid pitch inside the editor (so "1.5 lines" = 1.5 × pitch,
-  // matching Word) and falls back to 1em (= fontSize, plain CSS unitless
-  // line-height behavior) in standalone HTML export — unchanged from before.
-  return `calc(var(--docen-line-pitch, 1em) * ${multiple})`;
+  // lineRule "auto": `line` is 240ths of the font's single-line height. The
+  // single-line metric is the font's `line-height: normal` (ascent + descent +
+  // line-gap) — exactly Word's single line. CSS calc() cannot reference
+  // `normal`, so the editor measures it per font and sets --docen-font-metric
+  // (a ratio; 1.2 fallback for static HTML export).
+  // Per ECMA-376 (§17.3.1.87 snapToGrid — "align to document grid"): when
+  // snapToGrid is on (default under a docGrid), every line snaps to the grid —
+  // line height = the font's natural metric + the grid pitch, and the spacing
+  // multiple is ABSORBED (a 1.5×/double line renders at single-grid + pitch, not
+  // multiple×natural). snapToGrid===false (e.g. header/footer) applies the
+  // multiple. Verified via a Word-generated PDF: single 微软雅黑-Bold 12pt ≈34pt =
+  // natural + pitch 17pt; double a CJK line 16pt ≈38pt (single-grid scale).
+  // `1em` resolves against the paragraph's INHERITED font-size (the container
+  // default, e.g. 14pt), under-counting paragraphs whose runs are larger — a
+  // 42pt heading rendered at the line-height of 14pt. A line box is as tall as
+  // its tallest run, so the editor injects --docen-line-base (= the paragraph's
+  // max run size) per paragraph; `1em` fallback covers static HTML export and
+  // any paragraph missing the decoration.
+  if (snapToGrid === false) {
+    const multiple = Number((Number(spacing.line) / 240).toFixed(2));
+    return `calc(var(--docen-font-metric, 1.2) * ${multiple} * var(--docen-line-base, 1em))`;
+  }
+  return `calc(var(--docen-font-metric, 1.2) * var(--docen-line-base, 1em) + var(--docen-line-pitch, 0pt))`;
+}
+
+// ── Section geometry → CSS ──
+// OOXML section properties (CT_SectPr): page size/margin + document grid.
+// The grid is section-level (each section carries its own linePitch), so the
+// line-pitch must be injected per-section, not as a single document-root var.
+
+/** twips → mm (1 in = 1440 tw = 25.4 mm), 2dp string. */
+export function twipsToMm(twips: number): string {
+  return `${((twips / 1440) * 25.4).toFixed(2)}mm`;
+}
+
+/** Resolve a section's printable page dimensions (twips), honoring orientation.
+ *  A landscape section commonly stores portrait dims (w<h) with
+ *  `orientation: "landscape"` — swap width/height so width is the larger edge.
+ *  Returns null when no numeric dimensions. */
+export function resolvePageSize(size: unknown): { width: number; height: number } | null {
+  if (!size || typeof size !== "object") return null;
+  const s = size as { width?: unknown; height?: unknown; orientation?: unknown };
+  const w = typeof s.width === "number" ? s.width : undefined;
+  const h = typeof s.height === "number" ? s.height : undefined;
+  if (w == null || h == null) return null;
+  return s.orientation === "landscape" && w < h ? { width: h, height: w } : { width: w, height: h };
+}
+
+/** Page margin (twips) → CSS padding, or null when not all four sides are
+ *  numeric. Margins are left as-is: office-open returns them already rotated
+ *  for a landscape section. */
+export function sectionMarginCss(margin: unknown): string | null {
+  if (!margin || typeof margin !== "object") return null;
+  const m = margin as {
+    top?: unknown;
+    right?: unknown;
+    bottom?: unknown;
+    left?: unknown;
+  };
+  const sides = [m.top, m.right, m.bottom, m.left];
+  if (!sides.every((s): s is number => typeof s === "number")) return null;
+  return `padding:${sides.map(twipsToMm).join(" ")}`;
+}
+
+/** Document grid linePitch (twips) → container CSS line-height.
+ *  Per ECMA-376 snapToGrid, the grid linePitch is ADDED to each line (single-
+ *  line paragraphs inherit it). So the container line-height (inherited by
+ *  paragraphs without their own spacing) is the font's `normal` metric + the
+ *  grid pitch, set only when the grid type enables line-snapping (not
+ *  "default"). The --docen-line-pitch var carries the pitch so per-paragraph
+ *  lineSpacingToCss can add the same pitch; --docen-font-metric is injected per
+ *  paragraph by the editor; 1.2 is the fallback for static HTML export. */
+export function sectionLinePitchCss(grid: unknown): string[] {
+  if (!grid || typeof grid !== "object") return [];
+  const g = grid as { linePitch?: unknown; type?: unknown };
+  if (g.type === "default" || typeof g.linePitch !== "number" || !g.linePitch) return [];
+  const pitch = `${(g.linePitch / 20).toFixed(2)}pt`;
+  // Container line-height for paragraphs WITHOUT their own spacing: the font's
+  // `normal` metric × 1 (single) + the grid pitch.
+  return [
+    `line-height:calc(var(--docen-font-metric, 1.2) * 1em + ${pitch})`,
+    `--docen-line-pitch:${pitch}`,
+  ];
 }
 
 // ── Font size mapping ──
@@ -234,12 +335,138 @@ export function renderBorderCSS(border: BorderOptions): string | null {
     double: "double",
     dotDash: "dashed",
     dotDotDash: "dotted",
+    dashSmallGap: "dashed",
   };
   const cssStyle = styleMap[border.style || "single"] || "solid";
   // OOXML color "auto" has no CSS equivalent and bare hex needs a "#" prefix —
   // normalize to hex, or omit the color entirely (CSS defaults to currentColor).
   const hex = border.color && border.color !== "auto" ? normalizeColorToHex(border.color) : null;
   return hex ? `${cssStyle} ${size} ${hex}` : `${cssStyle} ${size}`;
+}
+
+// ── Floating (drawing anchor) rendering ──
+
+// EMU conversions: 1px = 9525 EMU, 1pt = 12700 EMU.
+const EMU_PER_PX = 9525;
+const EMU_PER_PT = 12700;
+
+interface FloatingLike {
+  behindDocument?: boolean | null;
+  zIndex?: number | null;
+  wrap?: { type?: number | null; side?: string | null } | null;
+  horizontalPosition?: {
+    offset?: number | null;
+    align?: string | null;
+    relative?: string | null;
+  } | null;
+  verticalPosition?: {
+    offset?: number | null;
+    align?: string | null;
+    relative?: string | null;
+  } | null;
+  margins?: {
+    top?: number | null;
+    bottom?: number | null;
+    left?: number | null;
+    right?: number | null;
+  } | null;
+}
+
+/**
+ * Render a drawing's Floating anchor (wp:anchor) to CSS — shared by Image and
+ * WpgGroup so anchored drawings render consistently:
+ *  - wrapNone (type 0): position:absolute at the EMU offset (text does not flow
+ *    around it — "in front of text" / "behind text"); z-index lifts it above or
+ *    below the text layer per behindDocument.
+ *  - topAndBottom (3): float + clear:both.
+ *  - square/tight/through (1/2/4): with an hPos.offset, float:right pulled to
+ *    the offset via margin-right so text wraps beside it with no overlap;
+ *    otherwise float on the wrap side (tight/through add shape-outside, src).
+ * Wrap margins (wp:distT/B/L/R) are EMU, rendered as pt.
+ */
+export function floatingToStyles(floating: unknown, src?: string, width?: number): string[] {
+  const f = floating as FloatingLike | null | undefined;
+  if (!f) return [];
+  const styles: string[] = [];
+  styles.push(`z-index:${f.behindDocument ? -1 : (f.zIndex ?? 1)}`);
+
+  const wrapType = f.wrap?.type ?? 0;
+  const hOff = f.horizontalPosition?.offset;
+  const vOff = f.verticalPosition?.offset;
+
+  if (wrapType === 0) {
+    // wrapNone: in front of/behind text — text does not flow around it. Anchor
+    // at the EMU offset (without top/left an absolutely-positioned box collapses
+    // to its inline origin); z-index lifts it above/below the text layer.
+    styles.push("position:absolute");
+    if (hOff != null) styles.push(`left:${(hOff / EMU_PER_PX).toFixed(1)}px`);
+    if (vOff != null) styles.push(`top:${(vOff / EMU_PER_PX).toFixed(1)}px`);
+  } else if (wrapType !== 3 && hOff != null && width != null) {
+    // square/tight/through with an explicit offset: the image must float so text
+    // wraps around it — position:absolute would sit on top of the text. The
+    // offset is the image's left edge; float:right + margin-right:
+    // calc(100% - offset - width) pulls the float box left from the right edge
+    // until its left edge lands on the offset, so the image keeps its hPos.offset
+    // AND text wraps beside it with no overlap. vPos.offset → margin-top.
+    const offPx = (hOff / EMU_PER_PX).toFixed(1);
+    styles.push("float:right", `margin-right:calc(100% - ${offPx}px - ${width}px)`);
+    if (vOff != null) styles.push(`margin-top:${(vOff / EMU_PER_PX).toFixed(1)}px`);
+    // Wrap margins (wp:distL/R/T/B, EMU → pt): the minimum gap between the image
+    // and the wrapping text (OOXML default 0.5"/457200 EMU when unset). Text
+    // wraps on the left of a float:right image, so distL widens the float's
+    // margin-box the text wraps against (text right edge = image left − distL)
+    // — without it the text sits flush against the image edge. margin-left
+    // extends the wrap box, not the border-box (still pinned to the offset by
+    // margin-right), so the image keeps its position.
+    const m = f.margins;
+    if (m?.left) styles.push(`margin-left:${(m.left / EMU_PER_PT).toFixed(1)}pt`);
+  } else if (wrapType === 3) {
+    // topAndBottom: float + clear so text sits only above/below the image.
+    styles.push("float:left", "clear:both");
+  } else {
+    // square/tight/through without an offset: float on the wrap side; tight/
+    // through add shape-outside so text follows the image contour (needs src).
+    const side = f.wrap?.side;
+    const floatSide = side === "right" || side === "outside" ? "right" : "left";
+    styles.push(`float:${floatSide}`);
+    if ((wrapType === 2 || wrapType === 4) && src) {
+      styles.push(`shape-outside:url(${src})`);
+    }
+  }
+
+  // Wrap margins (wp:distT/B/L/R, EMU → pt) set the gap between the image and
+  // the wrapping text — only for float modes whose position isn't already
+  // encoded in margin-right (the offset-float above). wrapNone is absolute.
+  const offsetFloat = wrapType !== 0 && wrapType !== 3 && hOff != null && width != null;
+  if (!offsetFloat && wrapType !== 0) {
+    const m = f.margins;
+    if (m) {
+      if (m.top) styles.push(`margin-top:${(m.top / EMU_PER_PT).toFixed(1)}pt`);
+      if (m.bottom) styles.push(`margin-bottom:${(m.bottom / EMU_PER_PT).toFixed(1)}pt`);
+      if (m.left) styles.push(`margin-left:${(m.left / EMU_PER_PT).toFixed(1)}pt`);
+      if (m.right) styles.push(`margin-right:${(m.right / EMU_PER_PT).toFixed(1)}pt`);
+    }
+  }
+  return styles;
+}
+
+/**
+ * Where a wrapNone floating drawing's absolute top/left should resolve from.
+ *
+ * verticalPosition.relative (OOXML vRelativeFrom) defaults to "paragraph"
+ * (also "line"); "page"/"margin"/"column" scope to the page box. The drawing is
+ * position:absolute, so its offsetParent decides the origin: a
+ * paragraph-anchored drawing must sit inside a position:relative <p> (the editor
+ * CSS adds that via p:has([data-float-anchor])), otherwise top/left measure
+ * from the page top and the drawing floats over the heading/body instead of
+ * its own blank paragraph (verified on sample anchored drawing groups). Only
+ * relevant for wrapNone (type 0); the float-based wraps stay inline.
+ */
+export function floatAnchorScope(floating: unknown): "paragraph" | "page" {
+  const f = floating as FloatingLike | null | undefined;
+  const vRel = f?.verticalPosition?.relative;
+  if (vRel === "page" || vRel === "margin" || vRel === "column") return "page";
+  return "paragraph";
 }
 
 // ── Style rendering (consume nested office-open attrs) ──
@@ -250,6 +477,12 @@ interface ParagraphStyleShape {
   spacing?: SpacingProperties | null;
   shading?: ShadingAttributesProperties | null;
   border?: BordersOptions | null;
+  /** snapToGrid (w:snapToGrid): preserved for OOXML round-trip fidelity. Word
+   *  snaps the baseline grid to linePitch (governs lines-per-page) but does NOT
+   *  add linePitch to rendered line height, so this flag no longer affects
+   *  lineSpacingToCss. Defaults to true (omitted = use grid); header/footer
+   *  styles set it false. */
+  snapToGrid?: boolean | null;
   /** Paragraph-mark (¶) run properties (pPr/rPr). Per OOXML (ECMA-376) these
    *  format the ¶ glyph only — never applied to run text (the "a run" bug: a
    *  42pt ¶ marker must not inflate body runs). Only `size` is rendered, as the
@@ -263,7 +496,10 @@ interface ParagraphStyleShape {
  * Shared by Paragraph and Heading extensions for node-level renderHTML.
  * Attrs store office-open native values; mappers here convert to CSS.
  */
-export function renderParagraphStyles(attrs: Record<string, unknown>): string[] {
+export function renderParagraphStyles(
+  attrs: Record<string, unknown>,
+  opts?: { empty?: boolean },
+): string[] {
   const a = attrs as ParagraphStyleShape;
   const styles: string[] = [];
 
@@ -302,7 +538,12 @@ export function renderParagraphStyles(attrs: Record<string, unknown>): string[] 
     if (before) styles.push(`margin-top:${before}`);
     const after = twipToCss(a.spacing.after);
     if (after) styles.push(`margin-bottom:${after}`);
-    const lh = lineSpacingToCss(a.spacing);
+    // An empty paragraph (¶ glyph only) does NOT receive the document-grid
+    // pitch — Word renders the ¶ at the font's natural metric (verified vs a
+    // Word PDF: an empty single line between paragraphs measures ~natural, not
+    // natural+pitch). snapToGrid=false applies the spacing multiple against the
+    // natural metric, mirroring measure.ts emptyLineHeight (edit == render).
+    const lh = lineSpacingToCss(a.spacing, opts?.empty ? false : a.snapToGrid);
     if (lh) styles.push(`line-height:${lh}`);
   }
 
@@ -367,7 +608,7 @@ export function renderRunStyles(attrs: Record<string, unknown>): string[] {
   if (a.strike || a.doubleStrike) deco.push("line-through");
   if (deco.length) styles.push(`text-decoration:${deco.join(" ")}`);
 
-  const font = resolveFontName(a.font);
+  const font = resolveFontFamilyCss(a.font);
   if (font) styles.push(`font-family:${font}`);
   const size = sizeToCss(a.size);
   if (size) styles.push(`font-size:${size}`);
@@ -393,6 +634,11 @@ interface CellStyleShape {
   noWrap?: boolean | null;
   shading?: ShadingAttributesProperties | null;
   verticalAlign?: string | null;
+  borders?: BordersOptions | null;
+  // w:tcMar (or the inherited w:tblCellMar pushed onto the cell by resolveTable)
+  // — office-open TableCellMarginOptions: top/left/bottom/right each a
+  // TableWidthProperties { size (twips), type }.
+  margins?: TableCellOptions["margins"];
 }
 
 /**
@@ -411,6 +657,29 @@ export function renderTableCellStyles(attrs: Record<string, unknown>): string[] 
   if (bg) styles.push(`background-color:${bg}`, `color:contrast-color(${bg})`);
 
   if (a.verticalAlign) styles.push(`vertical-align:${a.verticalAlign}`);
+
+  // Cell insets (w:tcMar; resolveTable pushes the table's tblCellMar default
+  // onto cells that lack their own tcMar): each side → padding (twips→pt).
+  // Without this a row renders at its trHeight floor with zero insets — ~8pt
+  // shorter than Word, which reserves tblCellMar top/bottom around every cell.
+  if (a.margins) {
+    const m = a.margins;
+    const side = (s: TableWidthProperties | null | undefined): string =>
+      s && typeof s.size === "number" ? (twipToCss(s.size) ?? "0pt") : "0pt";
+    styles.push(`padding:${side(m.top)} ${side(m.right)} ${side(m.bottom)} ${side(m.left)}`);
+  }
+
+  // Cell borders (w:tcBorders): each present side → border-<side>. A
+  // "nil"/"none" side emits "none" so it overrides the default Table-Grid
+  // border (Word leaves those cell edges open via w:val="nil").
+  if (a.borders) {
+    const sides = ["top", "right", "bottom", "left"] as const;
+    for (const side of sides) {
+      const b = (a.borders as Record<string, BorderOptions | undefined>)[side];
+      if (!b) continue;
+      styles.push(`border-${side}:${renderBorderCSS(b) ?? "none"}`);
+    }
+  }
 
   return styles;
 }

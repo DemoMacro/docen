@@ -41,11 +41,6 @@ const HEADING_PARSE_MAP: Record<string, number> = {
   Title: 1,
 };
 
-/** HeadingLevel literals that office-open lifts from a pStyle into `heading`.
- *  Used to round-trip the literal via styleId (covers "Title", which level 1
- *  alone would collapse to "Heading1"). */
-const HEADING_STYLE_IDS = new Set(Object.keys(HEADING_PARSE_MAP));
-
 /** Runtime-only attrs the TableOfContents extension injects on each heading
  *  (`id` / `data-toc-id`). They are regenerated on every load, so never persist
  *  them to DOCX — skip them in renderDocx. */
@@ -57,12 +52,15 @@ export function renderDocx(node: JSONContent): Record<string, unknown> {
   const attrs = (node.attrs ?? {}) as Record<string, unknown>;
   const opts: Record<string, unknown> = {};
 
-  // Restore the HeadingLevel literal: prefer the stored styleId (round-trips
-  // "Title" correctly) else derive from level. office-open expresses a
-  // HeadingLevel pStyle via `heading`, so we don't also emit `style`.
+  // Emit the original pStyle val verbatim. The stored styleId IS the source
+  // pStyle ("Heading3" in some docs, or the numeric id "3" common in WPS /
+  // Chinese Word whose styles.xml keeps styleId="3"). Deriving a HeadingLevel
+  // literal from `level` would write pStyle="Heading3" while styles.xml still
+  // carries styleId="3" — a mismatch Word silently drops, losing the heading
+  // level. Fall back to `level` only when no styleId is present.
   const level = attrs.level as number | undefined;
   const styleId = attrs.styleId as string | undefined;
-  if (styleId && HEADING_STYLE_IDS.has(styleId)) opts.heading = styleId;
+  if (styleId) opts.heading = styleId;
   else if (level) opts.heading = HEADING_COMPILE_MAP[level] ?? "Heading1";
 
   // Pass remaining attrs through verbatim (skip nulls + mapped fields).
@@ -192,10 +190,20 @@ export const Heading = BaseHeading.extend({
     node,
     HTMLAttributes,
   }: {
-    node: { attrs: Record<string, unknown> };
+    node: { attrs: Record<string, unknown> } & {
+      forEach?: (cb: (child: { isText?: boolean; type?: { name?: string } }) => void) => void;
+    };
     HTMLAttributes: Record<string, unknown>;
   }) {
-    const styles = renderParagraphStyles(node.attrs);
+    // An empty heading (¶ glyph only) renders spacing.line at the natural
+    // metric (no grid pitch), matching Word — same as Paragraph. Mirrors
+    // measure.ts isEmptyTextblock. See renderParagraphStyles `empty`.
+    let hasContent = false;
+    node.forEach?.((child) => {
+      if (child.isText || child.type?.name === "hardBreak" || child.type?.name === "image")
+        hasContent = true;
+    });
+    const styles = renderParagraphStyles(node.attrs, { empty: !hasContent });
     const level = (node.attrs?.level as number) ?? 1;
     const attrs = { ...HTMLAttributes };
     const styleId = node.attrs.styleId as string | null;

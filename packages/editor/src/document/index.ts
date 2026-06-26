@@ -4,7 +4,9 @@ import {
   generateDOCX,
   parseDOCX,
   parseHTML,
+  resolveFontName,
   stylesToCss,
+  twipsToMm,
   type JSONContent,
   type StylesOptions,
 } from "@docen/docx";
@@ -39,6 +41,7 @@ import type { OutlineItem } from "../ui/components/workspace/outline";
 import { dispatchRibbonCommand } from "./commands";
 // Side-effect import: registers the ribbon/header translation tables.
 import "./i18n";
+import { FontMetricDecoration } from "./extensions/font-metric";
 import { PageBreakView } from "./extensions/page-break";
 import { Page, PageDocument } from "./extensions/page-node";
 import { PagePlugin, pageStorageOf } from "./extensions/page-plugin";
@@ -46,6 +49,7 @@ import { SectionBreakMarks } from "./extensions/section-break";
 import { SplitMarks } from "./extensions/split-paragraph";
 import { SplitTable, SplitTableRow } from "./extensions/split-table";
 import { buildRibbonInnerHTML } from "./ribbon-default";
+import { fontNormalRatio } from "./utils/font-metric";
 import { clearMeasureCache } from "./utils/measure";
 import { unwrapPages, wrapPages } from "./utils/wrap";
 
@@ -135,6 +139,38 @@ const TEMPLATE = `
       /* content-visibility: auto; */
       /* contain-intrinsic-size: var(--docen-page-width, 210mm) var(--docen-page-min-height, 297mm); */
     }
+    /* A wrapNone floating drawing (image / wpg group) anchored to its paragraph
+       (verticalPosition.relative = paragraph, the OOXML default) renders
+       position:absolute. Its offsetParent must be that paragraph, not the page
+       box, or top/left resolve from the page top and the drawing floats over
+       the heading/body text. Making the anchor <p> position:relative pins the
+       drawing to the blank line it belongs on (matches Word: a floating group
+       overlays its own empty paragraph, over the body text below it). */
+    .docen-pages .docen-page p:has([data-float-anchor="paragraph"]) {
+      position: relative;
+    }
+    /* EMF/WMF (Office GDI vector) images can't be decoded by the browser, so
+       Image.renderHTML emits a div[data-image=vector] placeholder carrying the
+       real art in data-vector-src. Paint it as a dashed, hatched, labeled box
+       so the gap reads as "unsupported vector art" instead of a silent empty
+       rectangle. Inline width/height (from the image extent) size the box;
+       inline-block (set in renderImageStyles) keeps it in-flow. */
+    .docen-pages .docen-page [data-image="vector"] {
+      box-sizing: border-box;
+      border: 1px dashed #b8b8b8;
+      background: repeating-linear-gradient(
+        45deg,
+        #f6f6f6,
+        #f6f6f6 9px,
+        #efefef 9px,
+        #efefef 18px
+      );
+      color: #9a9a9a;
+      font-size: 12px;
+      text-align: center;
+      padding-top: 6px;
+      overflow: hidden;
+    }
     /* prosemirror-tables CellSelection tags each selected cell with class
        "selectedCell"; paint it with Word's translucent selection blue so a
        multi-cell selection is actually visible. box-shadow (not
@@ -194,6 +230,10 @@ const TEMPLATE = `
     .docen-pages table td,
     .docen-pages table th {
       border: 1px solid #000;
+      /* OOXML defaults w:tcMar top/bottom to 0 (TableNormal); the UA td padding
+         (1px) would inflate every row ~2px vs Word. Horizontal padding stays at
+         the cell's w:tcMar (set inline by renderTableCellStyles) or 0. */
+      padding-block: 0;
     }
     /* Formatting marks (Show/Hide ¶) — Word shows these only while editing
        (non-printing). The show-marks command flips the host [show-marks]
@@ -836,6 +876,7 @@ class DocenDocument extends HTMLElement {
         PageDocument,
         Page,
         PagePlugin,
+        FontMetricDecoration,
         SplitTable,
         SplitTableRow,
         // Paragraph/heading split support: adds editor-only splitGroup/splitPart
@@ -1467,17 +1508,39 @@ class DocenDocument extends HTMLElement {
     const css = stylesToCss(styles, ".docen-page");
     const root = this.shadowRoot!;
     const existing = root.querySelector("#docen-doc-styles");
-    if (!css) {
+    if (css) {
+      const styleEl = (existing ?? document.createElement("style")) as HTMLStyleElement;
+      styleEl.id = "docen-doc-styles";
+      // Wrap in @layer docxStyles so these named styles beat the reset layer
+      // (layer order, not specificity) yet stay below unlayered inline styles.
+      styleEl.textContent = "@layer docxStyles {\n" + css + "\n}";
+      if (!existing) root.append(styleEl);
+    } else {
       existing?.remove();
-      return;
     }
-    const styleEl = (existing ?? document.createElement("style")) as HTMLStyleElement;
-    styleEl.id = "docen-doc-styles";
-    // Wrap in @layer docxStyles so these named styles beat the reset layer
-    // (layer order, not specificity) yet stay below unlayered inline styles.
-    styleEl.textContent = "@layer docxStyles {\n" + css + "\n}";
-    if (!existing) root.append(styleEl);
+    // Font metric + section geometry apply regardless of named styles — both
+    // read attrs (default font / sectionProperties) that a styles-less document
+    // still carries. The previous early `return` skipped them, leaving
+    // --docen-font-metric and the section's page-size/pitch unset on freshly
+    // loaded (styles-less) documents.
+    this.#applyDefaultFontMetric();
     this.#applySectionGeometry();
+  }
+
+  /** Set a document-wide --docen-font-metric fallback on .docen-pages — the
+   *  default font's `normal` ratio — so the page container's line-height
+   *  (inherited by paragraphs without their own spacing) resolves to a real
+   *  metric instead of the 1.2 fallback. Per-paragraph decorations override
+   *  this for paragraphs that carry their own line-spacing. */
+  #applyDefaultFontMetric(): void {
+    const editor = this.#editor;
+    const pages = this.shadowRoot?.querySelector<HTMLElement>(".docen-pages");
+    if (!editor || !pages) return;
+    const styles = (editor.state.doc.attrs?.styles ?? null) as StylesOptions | null;
+    const { font } = effectiveRunProps(styles, null, {});
+    const family = resolveFontName(font) ?? "serif";
+    const ratio = fontNormalRatio({ family, bold: false, italic: false }).toFixed(4);
+    pages.style.setProperty("--docen-font-metric", ratio);
   }
 
   /** Apply the document's section geometry — page size, orientation, and
@@ -1507,10 +1570,9 @@ class DocenDocument extends HTMLElement {
     // sizes stay in pt (OOXML's unit); pt and mm are BOTH absolute CSS units
     // anchored to the same 96px/in reference pixel, so they render on one
     // consistent pixel grid — mm and pt do NOT need to be unified.
-    const mm = (twips: number): string => `${((twips / 1440) * 25.4).toFixed(2)}mm`;
     if (page.size) {
-      if (page.size.width) canvas.setAttribute("page-width", mm(page.size.width));
-      if (page.size.height) canvas.setAttribute("page-height", mm(page.size.height));
+      if (page.size.width) canvas.setAttribute("page-width", twipsToMm(page.size.width));
+      if (page.size.height) canvas.setAttribute("page-height", twipsToMm(page.size.height));
     }
     // Render page-width × page-height directly. office-open's `orientation`
     // flag is unreliable (it can read "landscape" on portrait dimensions — this
@@ -1520,7 +1582,8 @@ class DocenDocument extends HTMLElement {
     if (page.margin) {
       const m = page.margin;
       const sides = [m.top, m.right, m.bottom, m.left];
-      if (sides.every((s) => s != null)) canvas.setAttribute("margin", sides.map(mm).join(" "));
+      if (sides.every((s) => s != null))
+        canvas.setAttribute("margin", sides.map(twipsToMm).join(" "));
     }
     // Document grid (w:docGrid) is applied PER PAGE: each page node renders its
     // section's linePitch as an inline line-height (page-node renderHTML), so

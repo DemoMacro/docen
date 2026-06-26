@@ -55,6 +55,20 @@ function cleanAttrs(attrs: Record<string, unknown>): Record<string, unknown> {
   return result;
 }
 
+/** True when two cell-margin sets (w:tcMar / w:tblCellMar) match on every side's
+ *  size — used to detect a cell that merely echoes the table's default so its
+ *  redundant tcMar can be dropped for a near-identity round-trip. */
+function sameCellMargins(
+  a: NonNullable<TableCellOptions["margins"]>,
+  b: NonNullable<TableCellOptions["margins"]>,
+): boolean {
+  const sz = (
+    m: NonNullable<TableCellOptions["margins"]>,
+    k: "top" | "right" | "bottom" | "left",
+  ) => m[k]?.size ?? null;
+  return (["top", "right", "bottom", "left"] as const).every((k) => sz(a, k) === sz(b, k));
+}
+
 /**
  * Core document properties (docProps/core.xml) carried on `doc.attrs.core` for
  * lossless round-trip. Mirrors @office-open/core's CorePropertiesOptions, which
@@ -472,6 +486,11 @@ export class DocxManager {
   private compileTableNode(node: JSONContent): TableOptions {
     const opts = tableExt.renderDocx(node) as Record<string, unknown>;
     const colCount = this.getTableColumnCount(node);
+    // Table-level tblCellMar default — passed to compileTableCellNode so it can
+    // drop a cell tcMar that merely echoes it (see resolveTable's push-down).
+    const tableCellMargins = (opts.cellMargin ?? opts.margins ?? null) as NonNullable<
+      TableCellOptions["margins"]
+    > | null;
     const rows: Record<string, unknown>[] = [];
 
     // Track active vertical spans from previous rows
@@ -511,7 +530,7 @@ export class DocxManager {
           spanIdx++;
         } else {
           // Compile and place the actual cell
-          const cell = this.compileTableCellNode(pmCells[cellIdx]);
+          const cell = this.compileTableCellNode(pmCells[cellIdx], tableCellMargins);
           const cs = (cell.columnSpan as number) ?? 1;
           const rs = (cell.rowSpan as number) ?? 1;
 
@@ -631,12 +650,28 @@ export class DocxManager {
     };
   }
 
-  private compileTableCellNode(cellNode: JSONContent): Record<string, unknown> {
+  private compileTableCellNode(
+    cellNode: JSONContent,
+    tableMargins?: NonNullable<TableCellOptions["margins"]> | null,
+  ): Record<string, unknown> {
     const cellOpts = (
       cellNode.type === "tableHeader"
         ? tableHeaderExt.renderDocx(cellNode)
         : tableCellExt.renderDocx(cellNode)
     ) as Record<string, unknown>;
+
+    // Restore the table-level form: resolveTable pushed the table's tblCellMar
+    // default onto cells without their own tcMar. A cell whose margins equal
+    // that default is the inherited one — drop its cell-level tcMar so the
+    // regenerated docx keeps the compact table-level tblCellMar (near-identity
+    // round-trip) instead of duplicating tcMar on every cell.
+    if (
+      tableMargins &&
+      cellOpts.margins &&
+      sameCellMargins(cellOpts.margins as NonNullable<TableCellOptions["margins"]>, tableMargins)
+    ) {
+      delete cellOpts.margins;
+    }
 
     // Cell horizontal alignment (Tiptap base-extension `align` attr) is NOT an
     // OOXML cell property — <w:tcPr> has no horizontal alignment. Push it down to
@@ -796,9 +831,14 @@ export class DocxManager {
           if (imageRun) children.push(imageRun);
           break;
         }
-        case "imageGroup": {
+        case "wpgGroup": {
           const wpgGroup = node.attrs?.wpgGroup;
           if (wpgGroup) children.push({ wpgGroup } as unknown as ParagraphChild);
+          break;
+        }
+        case "wpsShape": {
+          const wpsShape = node.attrs?.wpsShape;
+          if (wpsShape) children.push({ wpsShape } as unknown as ParagraphChild);
           break;
         }
         case "mention": {
@@ -1334,6 +1374,17 @@ export class DocxManager {
     const rows = (tableOpts.rows ?? []) as Record<string, unknown>[];
     const content: JSONContent[] = [];
 
+    // Table-level default cell insets (w:tblCellMar). office-open exposes them
+    // on both `cellMargin` and `margins`; a cell inherits them unless it carries
+    // its own tcMar. Push the default onto cells without tcMar so render
+    // (renderTableCellStyles) and the paginator (cellVerticalOverhead) read ONE
+    // effective source (cell.attrs.margins) instead of each falling back to the
+    // table. compileTableCellNode drops a cell tcMar equal to this default to
+    // keep the regenerated docx in its table-level form (near-identity round-trip).
+    const tableCellMargins = (tableOpts.cellMargin ?? tableOpts.margins ?? null) as NonNullable<
+      TableCellOptions["margins"]
+    > | null;
+
     // DOCX encodes a row span as a `restart` cell followed by N empty `continue`
     // cells; ProseMirror uses one cell with rowspan = N+1. Track open spans per
     // column so each continuation cell increments the owning cell's `rowspan`,
@@ -1373,6 +1424,10 @@ export class DocxManager {
         // OOXML marker so it doesn't round-trip back verbatim.
         delete cellAttrs.verticalMerge;
 
+        // Effective cell margins: a cell's own tcMar wins, else inherit the
+        // table's tblCellMar default (resolved once here for render + measure).
+        if (!cellAttrs.margins && tableCellMargins) cellAttrs.margins = tableCellMargins;
+
         const cellChildren = (cell.children ?? []) as SectionChild[];
         const cellContent: JSONContent[] = [];
         for (const cc of cellChildren) {
@@ -1393,6 +1448,32 @@ export class DocxManager {
 
         cellNodes.push(cellNode);
         colIdx += cellColspan;
+      }
+
+      // OOXML gridAfter (w:gridAfter + widthAfter): N trailing grid columns this
+      // row leaves uncovered. ProseMirror requires every row's cell-span sum to
+      // equal the column count; without explicit trailing cells fixTables fills
+      // the gap — and for a row whose only real cell is a leading gridSpan (e.g.
+      // a header row: 1 cell spanning 2 + gridAfter 1) it inserts the filler
+      // at the START, shoving the real cell right onto narrower columns (wrong
+      // width + off-center). Emit explicit empty trailing cells so real cells
+      // keep their left positions.
+      const gridAfter = (row.gridAfter as number) ?? 0;
+      if (gridAfter > 0) {
+        const trailingType = (row.tableHeader as boolean) ? "tableHeader" : "tableCell";
+        // gridAfter cells are empty trailing grid columns (no content). Give them
+        // nil borders on every side so renderTableCellStyles emits border:none —
+        // otherwise they pick up the Table-Grid default and draw a stray vertical
+        // line at the row's right edge, showing up as an empty cell.
+        const nilBorders = {
+          top: { style: "nil" },
+          right: { style: "nil" },
+          bottom: { style: "nil" },
+          left: { style: "nil" },
+        };
+        for (let c = 0; c < gridAfter; c++)
+          cellNodes.push({ type: trailingType, attrs: { borders: nilBorders } });
+        colIdx += gridAfter;
       }
 
       activeSpans = nextActiveSpans;
@@ -1456,8 +1537,13 @@ export class DocxManager {
     }
     if ("wpgGroup" in child) {
       // Drawing group (wpg): opaque round-trip — full WpgGroupRunOptions rides on
-      // the imageGroup node; the editor doesn't model the group interior.
-      return { type: "imageGroup", attrs: { wpgGroup: child.wpgGroup } };
+      // the wpgGroup node; the editor doesn't model the group interior.
+      return { type: "wpgGroup", attrs: { wpgGroup: child.wpgGroup } };
+    }
+    if ("wpsShape" in child) {
+      // Standalone floating text box (wp:anchor > wps:wsp, NOT inside a wpg
+      // group): opaque round-trip — full WpsShapeRunOptions rides on the node.
+      return { type: "wpsShape", attrs: { wpsShape: child.wpsShape } };
     }
     if ("sdt" in child) {
       return this.resolveInlineSdt(child);
