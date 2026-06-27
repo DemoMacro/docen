@@ -262,6 +262,59 @@ const TEMPLATE = `
       background: Highlight;
       color: HighlightText;
     }
+    /* Placeholder — the Tiptap Placeholder extension only stamps an is-empty
+       class + data-placeholder attribute on empty nodes; this CSS paints the
+       label. :first-child shows it just on the document's first empty paragraph
+       (Word shows the prompt once, at the top); showOnlyCurrent (default) means
+       only the caret's empty node carries the attribute. float + height:0 keep
+       the label in-flow at the paragraph start without consuming layout, so it
+       never pushes real content or skews pagination measurement. */
+    .docen-pages .ProseMirror p.is-empty:first-child::before {
+      content: attr(data-placeholder);
+      color: var(--docen-color-text-3, #8a8a8a);
+      pointer-events: none;
+      float: left;
+      height: 0;
+    }
+    /* Status bar (slotted into docen-workspace's .rb-shell-status, already a
+       flex row). Lay the footer as a left cluster (page count + word count)
+       and a right (zoom %), matching Word's bottom status bar. */
+    footer[slot="status"] {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      width: 100%;
+    }
+    .docen-status-left { display: flex; gap: 14px; }
+    /* Right cluster — Word's zoom control: a minus / plus button flanking a
+       draggable slider, then the percent. The slider is a native range input
+       styled to a Fluent track + accent thumb. */
+    .docen-status-zoom { display: flex; align-items: center; gap: 4px; }
+    .docen-zoom-step {
+      width: 18px; height: 18px; padding: 0;
+      border: 1px solid var(--docen-color-stroke-1, #c7c7c7);
+      border-radius: 3px; background: transparent;
+      color: var(--docen-color-text-1, #242424);
+      font-size: 13px; line-height: 1; cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center;
+    }
+    .docen-zoom-step:hover { background: var(--docen-color-subtle-background-hover, #f5f5f5); }
+    .docen-zoom-slider {
+      -webkit-appearance: none; appearance: none;
+      width: 90px; height: 3px; margin: 0;
+      background: var(--docen-color-stroke-1, #c7c7c7);
+      border-radius: 2px; cursor: pointer;
+    }
+    .docen-zoom-slider::-webkit-slider-thumb {
+      -webkit-appearance: none; appearance: none;
+      width: 11px; height: 11px; border: none; border-radius: 50%;
+      background: var(--docen-color-accent, #0f6cbd); cursor: pointer;
+    }
+    .docen-zoom-slider::-moz-range-thumb {
+      width: 11px; height: 11px; border: none; border-radius: 50%;
+      background: var(--docen-color-accent, #0f6cbd); cursor: pointer;
+    }
+    .docen-zoom-pct { min-width: 38px; text-align: right; }
     /* Tables — Word inserts tables in the Table Grid style (a single black
        border on every cell). Without this a freshly inserted table is
        invisible: the docx table extension emits a border only when the node
@@ -401,7 +454,40 @@ const TEMPLATE = `
     <docen-task-pane slot="task-pane-end" position="end" part="props-pane">
       <docen-properties-panel></docen-properties-panel>
     </docen-task-pane>
-    <footer slot="status" part="status"></footer>
+    <footer slot="status" part="status">
+      <span class="docen-status-left">
+        <span class="docen-status-section"></span>
+        <span class="docen-status-pages"></span>
+        <span class="docen-status-words"></span>
+      </span>
+      <span class="docen-status-zoom">
+        <button
+          type="button"
+          class="docen-zoom-step"
+          data-zoom-step="-1"
+          part="zoom-out"
+          aria-label="Zoom out"
+        >−</button>
+        <input
+          type="range"
+          class="docen-zoom-slider"
+          min="10"
+          max="500"
+          step="1"
+          value="100"
+          part="zoom-slider"
+          aria-label="Zoom level"
+        />
+        <button
+          type="button"
+          class="docen-zoom-step"
+          data-zoom-step="1"
+          part="zoom-in"
+          aria-label="Zoom in"
+        >+</button>
+        <span class="docen-zoom-pct"></span>
+      </span>
+    </footer>
   </docen-workspace>
   <docen-find-replace-dialog></docen-find-replace-dialog>
   <input type="file" id="file-input" accept=".docx" hidden />
@@ -487,6 +573,10 @@ class DocenDocument extends HTMLElement {
   /** Latest TOC anchors, refreshed by TableOfContents.onUpdate; used to resolve
    *  an outline click back to a document position (pos). */
   #anchors: readonly TocAnchor[] = [];
+  /** Cached doc nodeSize + Word-style word count so caret-move transactions
+   *  don't re-walk the whole document (recomputed only when content changes). */
+  #lastDocSize = -1;
+  #lastWords = 0;
   /** Semantic fingerprint of the last outline tree — id/level/title only. `pos`
    *  shifts on every pagination re-flow but never changes what the pane shows,
    *  so it's excluded; the fingerprint is built from per-anchor arrays (not the
@@ -942,6 +1032,7 @@ class DocenDocument extends HTMLElement {
     this.#imageInput = this.shadowRoot!.querySelector<HTMLInputElement>("#image-input")!;
     this.#renderChrome();
     this.#applyChromeVisibility();
+    this.#setupZoomControls();
 
     const page = this.shadowRoot!.querySelector<HTMLDivElement>(".docen-pages");
     if (!page) return;
@@ -995,14 +1086,43 @@ class DocenDocument extends HTMLElement {
         // node), so it has no NodeView; a widget decoration paints the Fluent
         // divider marker after each section-carrying paragraph.
         SectionBreakMarks,
-        Placeholder.configure({ placeholder: t("editor.placeholder") }),
+        Placeholder.configure({
+          // A function (not a string) so the prompt re-reads the active locale
+          // each time the decoration set is rebuilt — a locale switch then
+          // refreshes the placeholder text without recreating the extension.
+          placeholder: () => t("editor.placeholder"),
+          // C-route nests paragraphs inside a non-textblock page node
+          // (doc > page > p). Placeholder's decoration walk returns false at the
+          // page unless includeChildren is set, so the prompt never reaches the
+          // paragraphs — turn it on so the empty first paragraph gets the
+          // is-empty class + data-placeholder attribute our CSS paints.
+          includeChildren: true,
+        }),
         // Editing-behavior set — the engine carries schema only.
         UndoRedo,
         Dropcursor,
         Gapcursor,
         TrailingNode,
         ListKeymap,
-        CharacterCount,
+        CharacterCount.configure({
+          // Word-style count: each CJK character counts as one, non-CJK runs
+          // split on whitespace — matches Word for mixed CJK/Latin (the default
+          // split(' ').length counts a whole CJK paragraph as a single word).
+          wordCounter: (text: string): number => {
+            const cjkRe = /[一-鿿぀-ヿ가-힯]/g;
+            const cjk = (text.match(cjkRe) ?? []).length;
+            const western = text.replace(cjkRe, " ").split(/\s+/).filter(Boolean).length;
+            return cjk + western;
+          },
+          // Count characters by grapheme cluster so emoji / combining marks /
+          // surrogate pairs count as one (default text.length undercounts them).
+          textCounter: (text: string): number => {
+            const seg = new Intl.Segmenter("en", { granularity: "grapheme" });
+            let n = 0;
+            for (const _ of seg.segment(text)) n++;
+            return n;
+          },
+        }),
         Focus,
         Selection,
       ],
@@ -1175,6 +1295,11 @@ class DocenDocument extends HTMLElement {
     // Status bar is dynamic (page count / caret page / zoom) — re-stamp it so a
     // locale change re-localizes the text too.
     this.#updateStatus();
+    // The placeholder prompt comes from a closure over t(); its decoration set
+    // is only rebuilt on a view update, so dispatch a meta-only transaction to
+    // force a rebuild against the now-current locale (empty doc → new prompt).
+    const view = this.#editor?.view;
+    if (view) view.dispatch(view.state.tr.setMeta("docen-i18n", true));
   }
 
   /** Apply the chrome-visibility attributes (toolbar/header/status-bar/panes)
@@ -1327,6 +1452,26 @@ class DocenDocument extends HTMLElement {
     this.#updateStatus();
   }
 
+  /** Wire the status-bar zoom cluster (Word's bottom-right control): dragging
+   *  the slider sets the zoom live, and the minus / plus buttons step by 10%.
+   *  Bound once — the footer is static template DOM, never re-stamped. */
+  #setupZoomControls(): void {
+    const root = this.shadowRoot;
+    if (!root) return;
+    const slider = root.querySelector<HTMLInputElement>(".docen-zoom-slider");
+    if (slider) {
+      slider.addEventListener("input", () => {
+        this.#setZoom(Number(slider.value));
+      });
+    }
+    root.querySelectorAll<HTMLElement>(".docen-zoom-step").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const step = Number(btn.getAttribute("data-zoom-step") ?? "0");
+        this.#setZoom(this.#zoom + step * 10);
+      });
+    });
+  }
+
   /** Resolve a ribbon zoom preset to a percent. Numeric presets ("200", "100",
    *  "75", "50") map directly to that zoom level; "page-width" scales the page
    *  to fill the canvas width (mm → px @96dpi). */
@@ -1340,27 +1485,69 @@ class DocenDocument extends HTMLElement {
     this.#setZoom((canvas.clientWidth / pw) * 100);
   }
 
-  /** Refresh the status bar: "Page X of Y · Z%" — the caret's page over the
-   *  page count, plus the zoom percent. Runs on every transaction (caret moves,
-   *  a re-flow changes the page count) and on zoom / locale change. */
+  /** Refresh the status bar to mirror Word's bottom row: the left cluster is
+   *  the caret's section, then "Page X of Y", then the word count; the right
+   *  cluster is the zoom slider value + percent. Runs on every transaction
+   *  (caret moves, a re-flow changes the page count) and on zoom / locale change.
+   *
+   *  The section number is O(pages): each page node carries its section's
+   *  sectionProperties attrs (one shared reference across a section's pages),
+   *  so the count increments only when that reference changes — no paragraph
+   *  walk. The word count is cached by doc nodeSize so caret moves skip
+   *  re-walking the full document (CharacterCount.words() regexes all text). */
   #updateStatus(): void {
-    const status = this.shadowRoot?.querySelector('footer[slot="status"]');
-    if (!status) return;
+    const root = this.shadowRoot;
+    if (!root) return;
+    const sectionEl = root.querySelector<HTMLElement>(".docen-status-section");
+    const pagesEl = root.querySelector<HTMLElement>(".docen-status-pages");
+    const wordsEl = root.querySelector<HTMLElement>(".docen-status-words");
+    const sliderEl = root.querySelector<HTMLInputElement>(".docen-zoom-slider");
+    const pctEl = root.querySelector<HTMLElement>(".docen-zoom-pct");
     const editor = this.#editor;
     let page = 0;
     let total = 0;
+    let section = 1;
     if (editor) {
       const from = editor.state.selection.from;
+      let prevSp: unknown;
+      let sectionCount = 0;
+      let firstPage = true;
       editor.state.doc.forEach((node, offset) => {
         if (node.type.name !== "page") return;
         total++;
-        if (page === 0 && from > offset && from <= offset + node.nodeSize) page = total;
+        const sp = (node.attrs as { sectionProperties?: unknown }).sectionProperties ?? null;
+        // A section's pages share one sectionProperties reference, so the count
+        // rises only at a real section boundary (or on the very first page).
+        if (firstPage || sp !== prevSp) sectionCount++;
+        firstPage = false;
+        prevSp = sp;
+        if (page === 0 && from > offset && from <= offset + node.nodeSize) {
+          page = total;
+          section = sectionCount;
+        }
       });
     }
-    status.textContent = t("status.page-of")
-      .replace("{page}", String(page || 1))
-      .replace("{total}", String(total || 1))
-      .replace("{zoom}", String(this.#zoom));
+    if (sectionEl) {
+      sectionEl.textContent = t("status.section").replace("{n}", String(section));
+    }
+    if (pagesEl) {
+      pagesEl.textContent = t("status.page-of")
+        .replace("{page}", String(page || 1))
+        .replace("{total}", String(total || 1));
+    }
+    if (wordsEl) {
+      const docSize = editor?.state.doc.nodeSize ?? 0;
+      if (docSize !== this.#lastDocSize) {
+        const cc = editor?.storage.characterCount as { words?: () => number } | undefined;
+        this.#lastWords = cc?.words?.() ?? 0;
+        this.#lastDocSize = docSize;
+      }
+      wordsEl.textContent = t("status.words").replace("{n}", String(this.#lastWords));
+    }
+    // Sync the slider without retriggering its own input handler — only write
+    // when the value drifted (keyboard / ribbon zoom changed it out of band).
+    if (sliderEl && Number(sliderEl.value) !== this.#zoom) sliderEl.value = String(this.#zoom);
+    if (pctEl) pctEl.textContent = `${this.#zoom}%`;
   }
 
   readonly #onCommand = (event: CustomEvent<{ event?: string; value?: string }>): void => {

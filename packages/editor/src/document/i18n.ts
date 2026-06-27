@@ -389,7 +389,9 @@ export const ribbonEn: DocenTranslation = {
   "pane.properties": "Properties",
   "search.matches": "matches",
   "search.noResults": "No results",
-  "status.page-of": "Page {page} of {total} · {zoom}%",
+  "status.section": "Section: {n}",
+  "status.page-of": "Page {page} of {total}",
+  "status.words": "Words: {n}",
   // --- Editor surface ---
   "editor.placeholder": "Start writing",
 };
@@ -765,7 +767,9 @@ export const ribbonZhCN: DocenTranslation = {
   "pane.properties": "属性",
   "search.matches": "个结果",
   "search.noResults": "无结果",
-  "status.page-of": "第 {page} 页，共 {total} 页 · {zoom}%",
+  "status.section": "节: {n}",
+  "status.page-of": "第 {page} 页，共 {total} 页",
+  "status.words": "字数: {n}",
   "editor.placeholder": "开始书写…",
 };
 
