@@ -95,6 +95,10 @@ const RIBBON_COMMAND_MAP: Readonly<Record<string, RibbonCommand>> = {
   "multilevel-list": (editor, value) => applyMultilevel(editor, value),
 };
 
+/** Dispatchable ribbon event names (keys of {@link RIBBON_COMMAND_MAP}).
+ *  `<docen-document>` uses this to grey out unwired skeleton commands. */
+export const WIRED_DISPATCH: ReadonlySet<string> = new Set(Object.keys(RIBBON_COMMAND_MAP));
+
 /** Current font size at the selection (textStyle.size, in points); falls back to
  *  11pt (Word's body default) when the selection has no explicit size. */
 function currentSize(editor: Editor): number {

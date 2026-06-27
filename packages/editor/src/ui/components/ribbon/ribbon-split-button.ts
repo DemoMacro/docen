@@ -102,7 +102,7 @@ template.innerHTML = `
  */
 class DocenRibbonSplitButton extends HTMLElement {
   static get observedAttributes(): string[] {
-    return ["label", "icon", "event", "items", "tooltip", "size", "icon-only"];
+    return ["label", "icon", "event", "items", "tooltip", "size", "icon-only", "disabled"];
   }
 
   readonly #anchorId = `--rb-split-${++seq}`;
@@ -123,6 +123,7 @@ class DocenRibbonSplitButton extends HTMLElement {
     }
     if (name === "items") this.#renderItems();
     if (name === "size") this.#applySize();
+    if (name === "disabled") this.#reflectDisabled();
   }
 
   connectedCallback(): void {
@@ -150,6 +151,7 @@ class DocenRibbonSplitButton extends HTMLElement {
     this.#renderLabel();
     this.#renderItems();
     this.#applySize();
+    this.#reflectDisabled();
     // Split primary is flat by default (subtle); the split's hover border is
     // driven by fluent-menu (see registry). A caller can override via the
     // `appearance` attribute. The caret stays subtle.
@@ -247,7 +249,22 @@ class DocenRibbonSplitButton extends HTMLElement {
     }
   }
 
+  /** Reflect the host `disabled` attribute onto the primary action and the
+   *  caret trigger (mirrors <docen-ribbon-button>); #emitMain/#emitItem also
+   *  bail when disabled, so a greyed split fires nothing. */
+  #reflectDisabled(): void {
+    const disabled = this.hasAttribute("disabled");
+    const apply = (el: Element | null | undefined): void => {
+      if (!el) return;
+      if (disabled) el.setAttribute("disabled", "");
+      else el.removeAttribute("disabled");
+    };
+    apply(this.#primary);
+    apply(this.shadowRoot?.querySelector('[part="caret"]'));
+  }
+
   #emitMain(): void {
+    if (this.hasAttribute("disabled")) return;
     this.dispatchEvent(
       new CustomEvent("command", {
         bubbles: true,
@@ -258,6 +275,7 @@ class DocenRibbonSplitButton extends HTMLElement {
   }
 
   #emitItem(item: RibbonMenuItem): void {
+    if (this.hasAttribute("disabled")) return;
     this.dispatchEvent(
       new CustomEvent("command", {
         bubbles: true,

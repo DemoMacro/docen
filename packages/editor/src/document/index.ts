@@ -38,7 +38,7 @@ import {
 
 import { applyTheme, observeLang, registerComponents, t } from "../ui";
 import type { OutlineItem } from "../ui/components/workspace/outline";
-import { dispatchRibbonCommand } from "./commands";
+import { dispatchRibbonCommand, WIRED_DISPATCH } from "./commands";
 // Side-effect import: registers the ribbon/header translation tables.
 import "./i18n";
 import { FontMetricDecoration } from "./extensions/font-metric";
@@ -48,10 +48,50 @@ import { PagePlugin, pageStorageOf } from "./extensions/page-plugin";
 import { SectionBreakMarks } from "./extensions/section-break";
 import { SplitMarks } from "./extensions/split-paragraph";
 import { SplitTable, SplitTableRow } from "./extensions/split-table";
-import { buildRibbonInnerHTML } from "./ribbon-default";
+import { buildRibbonInnerHTML, RIBBON_TAB_IDS, type RibbonTabId } from "./ribbon-default";
 import { fontNormalRatio } from "./utils/font-metric";
 import { clearMeasureCache } from "./utils/measure";
 import { unwrapPages, wrapPages } from "./utils/wrap";
+
+/** Ribbon commands handled locally in #onCommand/#onChange (not via
+ *  dispatchRibbonCommand). Together with {@link WIRED_DISPATCH} this is the
+ *  "wired" set used to grey out unwired skeleton commands. lang-zh/lang-en are
+ *  header menu items, not ribbon commands, so excluded. */
+const LOCAL_HANDLED: ReadonlySet<string> = new Set([
+  // #onCommand
+  "toggle-navigation",
+  "search",
+  "replace",
+  "page-size",
+  "orientation",
+  "margins",
+  "zoom",
+  "zoom-100",
+  "save",
+  "insert-picture",
+  "show-marks",
+  "copy",
+  "cut",
+  "paste",
+  "select",
+  "format-painter",
+  // #onChange (data-event)
+  "open",
+  "save-as",
+  "print",
+]);
+
+/** Parse a `tabs="home,review"` attribute into a validated whitelist of tab ids;
+ *  undefined when unset/empty/invalid (=> render all tabs). */
+function parseTabs(attr: string | null): readonly RibbonTabId[] | undefined {
+  if (!attr) return undefined;
+  const known = RIBBON_TAB_IDS as readonly string[];
+  const ids = attr
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s): s is RibbonTabId => known.includes(s));
+  return ids.length > 0 ? ids : undefined;
+}
 
 const TEMPLATE = `
   <style>
@@ -460,6 +500,49 @@ class DocenDocument extends HTMLElement {
   #painterOff?: () => void;
   /** Current zoom level (percent) applied to the canvas via CSS `zoom`. */
   #zoom = 100;
+
+  /** Attributes whose runtime changes re-configure the component (chrome
+   *  visibility, ribbon tabs, editable, identity). Without this list, attribute
+   *  changes after connect are silently ignored. */
+  static get observedAttributes(): string[] {
+    return [
+      "toolbar",
+      "tabs",
+      "header",
+      "navigation-pane",
+      "properties-pane",
+      "status-bar",
+      "editable",
+      "filename",
+      "closable",
+      "user",
+      "avatar",
+    ];
+  }
+
+  attributeChangedCallback(name: string, _old: string, value: string): void {
+    switch (name) {
+      case "editable":
+        this.#editor?.setEditable(value !== "false");
+        break;
+      case "filename":
+      case "user":
+      case "avatar":
+      case "closable":
+      case "tabs":
+        // These only change rendered chrome — re-stamp header/ribbon.
+        this.#renderChrome();
+        break;
+      case "toolbar":
+      case "header":
+      case "status-bar":
+      case "navigation-pane":
+      case "properties-pane":
+        this.#applyChromeVisibility();
+        break;
+    }
+  }
+
   /** Esc fallback: restore the ribbon to "always shown" after the browser leaves fullscreen. */
   readonly #onFullscreenChange = (): void => {
     if (document.fullscreenElement) return;
@@ -858,6 +941,7 @@ class DocenDocument extends HTMLElement {
     this.#fileInput = this.shadowRoot!.querySelector<HTMLInputElement>("#file-input")!;
     this.#imageInput = this.shadowRoot!.querySelector<HTMLInputElement>("#image-input")!;
     this.#renderChrome();
+    this.#applyChromeVisibility();
 
     const page = this.shadowRoot!.querySelector<HTMLDivElement>(".docen-pages");
     if (!page) return;
@@ -980,8 +1064,12 @@ class DocenDocument extends HTMLElement {
         }
       });
     }
+    // Emit docen:change on every content change (autosave driver) and docen:ready
+    // once the editor is live — both bubble out so a host can react.
+    this.#editor?.on("transaction", this.#onTransaction);
     document.addEventListener("fullscreenchange", this.#onFullscreenChange);
     this.addEventListener("keydown", this.#onZoomKey);
+    this.dispatchEvent(new CustomEvent("docen:ready", { bubbles: true, composed: true }));
   }
 
   disconnectedCallback(): void {
@@ -1001,6 +1089,7 @@ class DocenDocument extends HTMLElement {
       ?.querySelector("docen-find-replace-dialog")
       ?.removeEventListener("find-replace:action", this.#onFindReplace as EventListener);
     this.#unobserveLang?.();
+    this.#editor?.off("transaction", this.#onTransaction);
     document.removeEventListener("fullscreenchange", this.#onFullscreenChange);
     this.removeEventListener("keydown", this.#onZoomKey);
     this.#fontSyncCleanup?.();
@@ -1049,7 +1138,7 @@ class DocenDocument extends HTMLElement {
                 <fluent-menu-item data-event="lang-en">${t("header.lang.en")}</fluent-menu-item>
               </fluent-menu-list>
             </fluent-menu>
-            <docen-ribbon-button icon="close" label="${t("header.close")}" event="close" icon-only></docen-ribbon-button>
+            ${this.hasAttribute("closable") ? `<docen-ribbon-button icon="close" label="${t("header.close")}" event="close" icon-only></docen-ribbon-button>` : ""}
           </div>`;
   }
 
@@ -1059,7 +1148,10 @@ class DocenDocument extends HTMLElement {
     if (!root) return;
     const styles = this.#editor?.state.doc.attrs?.styles ?? null;
     root.querySelector("docen-app-header")!.innerHTML = this.#renderHeader();
-    root.querySelector("docen-ribbon")!.innerHTML = buildRibbonInnerHTML(styles);
+    root.querySelector("docen-ribbon")!.innerHTML = buildRibbonInnerHTML(styles, {
+      tabs: this.#tabs(),
+    });
+    this.#applyRibbonGreying();
     this.#renderPanes();
   }
 
@@ -1084,6 +1176,97 @@ class DocenDocument extends HTMLElement {
     // locale change re-localizes the text too.
     this.#updateStatus();
   }
+
+  /** Apply the chrome-visibility attributes (toolbar/header/status-bar/panes)
+   *  by toggling the native HTML `hidden` attribute + the task-pane `open`
+   *  property. UI components need no changes — `hidden` is native. */
+  #applyChromeVisibility(): void {
+    const root = this.shadowRoot;
+    if (!root) return;
+    const hide = (selector: string, attr: string): void => {
+      const el = root.querySelector(selector);
+      if (el) (el as HTMLElement).toggleAttribute("hidden", this.getAttribute(attr) === "false");
+    };
+    hide("docen-ribbon", "toolbar");
+    hide("docen-app-header", "header");
+    hide('footer[slot="status"]', "status-bar");
+    this.#applyPane("start", "navigation-pane");
+    this.#applyPane("end", "properties-pane");
+  }
+
+  /** Apply one side pane's attribute: "hidden" removes it, "open"/"closed"
+   *  toggle its `open` state (the task-pane component observes `open`). */
+  #applyPane(side: "start" | "end", attr: string): void {
+    const pane = this.shadowRoot?.querySelector(`docen-task-pane[position="${side}"]`) as
+      | (HTMLElement & { open: boolean })
+      | null;
+    if (!pane) return;
+    const value = this.getAttribute(attr);
+    if (value === "hidden") pane.setAttribute("hidden", "");
+    else {
+      pane.removeAttribute("hidden");
+      if (value === "closed") pane.open = false;
+      else if (value === "open") pane.open = true;
+    }
+  }
+
+  /** Grey out ribbon commands that have no handler (skeleton buttons). Runs
+   *  after every ribbon re-stamp; fresh elements start un-disabled, so this is
+   *  the single place `disabled` is applied. Only controls that support
+   *  `disabled` (button/split-button/toggle-button) are greyed — combobox /
+   *  color-picker lack it and live in wired tabs anyway. */
+  #applyRibbonGreying(): void {
+    const ribbon = this.shadowRoot?.querySelector("docen-ribbon");
+    if (!ribbon) return;
+    const wired = this.#wiredCommands();
+    ribbon
+      .querySelectorAll<HTMLElement>(
+        "docen-ribbon-button[event], docen-ribbon-split-button[event], docen-ribbon-toggle-button[event]",
+      )
+      .forEach((el) => {
+        const event = el.getAttribute("event");
+        if (event && !wired.has(event)) el.setAttribute("disabled", "");
+      });
+  }
+
+  /** The full set of wired command names (dispatch + locally handled). */
+  #wiredCommands(): Set<string> {
+    return new Set<string>([...WIRED_DISPATCH, ...LOCAL_HANDLED]);
+  }
+
+  /** The `tabs` whitelist, or undefined for all tabs. */
+  #tabs(): readonly RibbonTabId[] | undefined {
+    return parseTabs(this.getAttribute("tabs"));
+  }
+
+  /** Dispatch a cancelable event; returns true when a host preventDefaulted it
+   *  (i.e. took over the action). Lets save/open/print/new work out-of-box yet
+   *  stay overridable. */
+  #emitCancelable(
+    name: "docen:save" | "docen:save-as" | "docen:open" | "docen:new" | "docen:print",
+  ): boolean {
+    const event = new CustomEvent(name, { bubbles: true, composed: true, cancelable: true });
+    this.dispatchEvent(event);
+    return event.defaultPrevented;
+  }
+
+  /** The close (×) button asks the host to close the editor — the component
+   *  itself never unmounts (it doesn't know the host's context). Only rendered
+   *  when the host sets `closable`. */
+  #emitRequestClose(): void {
+    this.dispatchEvent(new CustomEvent("docen:request-close", { bubbles: true, composed: true }));
+  }
+
+  /** docen:change — fired on every doc-changing transaction (autosave driver,
+   *  mirroring OnlyOffice's onDocumentStateChange). Selection-only transactions
+   *  are skipped. */
+  readonly #onTransaction = (props: { transaction: { docChanged: boolean } }): void => {
+    if (props.transaction.docChanged) {
+      this.dispatchEvent(
+        new CustomEvent("docen:change", { bubbles: true, composed: true, detail: { dirty: true } }),
+      );
+    }
+  };
 
   /** Toggle a side task pane open/closed (ribbon View → toggle-navigation). */
   #togglePane(side: "start" | "end"): void {
@@ -1188,6 +1371,11 @@ class DocenDocument extends HTMLElement {
       this.#togglePane("start");
       return;
     }
+    // Close (×) — only rendered when `closable`; ask the host to close.
+    if (name === "close") {
+      this.#emitRequestClose();
+      return;
+    }
     // Find (ribbon Home → Editing → Find, or Ctrl+F) → open the nav-pane search.
     if (name === "search") {
       // Find drop-down → Go To jumps to a page; the main button and Find
@@ -1228,9 +1416,10 @@ class DocenDocument extends HTMLElement {
       return;
     }
     if (!this.#editor) return;
-    // "save" is a document action, not a Tiptap command — handle locally.
+    // "save" is a document action, not a Tiptap command — handle locally,
+    // unless the host took over via docen:save (preventDefault).
     if (name === "save") {
-      void this.#saveAs();
+      if (!this.#emitCancelable("docen:save")) void this.#saveAs();
       return;
     }
     // Picture needs a file picker — open it, then insert the chosen image.
@@ -1278,13 +1467,18 @@ class DocenDocument extends HTMLElement {
     if (!name) return;
     switch (name) {
       case "open":
-        this.#fileInput?.click();
+        // Host can take over via docen:open (preventDefault); else open the picker.
+        if (!this.#emitCancelable("docen:open")) this.#fileInput?.click();
         break;
       case "save-as":
-        void this.#saveAs();
+        if (!this.#emitCancelable("docen:save-as")) void this.#saveAs();
         break;
       case "print":
-        this.#print();
+        if (!this.#emitCancelable("docen:print")) this.#print();
+        break;
+      case "new":
+        // No built-in "new" — always hand to the host (docen:new).
+        this.#emitCancelable("docen:new");
         break;
       case "lang-zh":
         document.documentElement.lang = "zh-CN";
@@ -1292,7 +1486,7 @@ class DocenDocument extends HTMLElement {
       case "lang-en":
         document.documentElement.lang = "en";
         break;
-      // new / autosave: skeleton — wired when those features land.
+      // autosave: skeleton — wired when that feature lands.
     }
   };
 

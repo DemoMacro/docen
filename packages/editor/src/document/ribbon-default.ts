@@ -324,32 +324,57 @@ const zoomItems = (): string =>
 /** Default active tab id. */
 export const DEFAULT_RIBBON_TAB = "home";
 
+/** The full ordered set of ribbon tab ids (Home → View). */
+export const RIBBON_TAB_IDS = [
+  "home",
+  "insert",
+  "draw",
+  "design",
+  "layout",
+  "references",
+  "mailings",
+  "review",
+  "view",
+] as const;
+export type RibbonTabId = (typeof RIBBON_TAB_IDS)[number];
+
+/** Options for {@link buildRibbonInnerHTML}. */
+export interface RibbonOptions {
+  /** Whitelist of tab ids to render; omitted/empty = all tabs (back-compat). */
+  tabs?: readonly RibbonTabId[];
+}
+
 /**
  * Build the ribbon's inner markup (tabs + panels, without the wrapping
  * `<docen-ribbon>`) for the currently active locale. Re-call on language change.
  */
-export function buildRibbonInnerHTML(styles?: StylesOptions | null): string {
+export function buildRibbonInnerHTML(
+  styles?: StylesOptions | null,
+  opts: RibbonOptions = {},
+): string {
+  // Whitelist of tabs to render; empty/omitted = all 9 tabs (back-compat).
+  const visible: readonly RibbonTabId[] =
+    opts.tabs && opts.tabs.length > 0 ? opts.tabs : RIBBON_TAB_IDS;
+  const show = (id: RibbonTabId): boolean => visible.includes(id);
+  // The active tab falls back to the first visible tab when the default
+  // ("home") isn't in the whitelist, so fluent-tablist never points activeid
+  // at a missing tab.
+  const activeId = show("home") ? DEFAULT_RIBBON_TAB : visible[0];
+  const tabButton = (id: RibbonTabId): string =>
+    `<docen-ribbon-tab slot="tab" id="${id}">${tab(id)}</docen-ribbon-tab>`;
   return `
-      <fluent-tablist slot="tabs" appearance="transparent" activeid="${DEFAULT_RIBBON_TAB}">
-        <docen-ribbon-tab slot="tab" id="home">${tab("home")}</docen-ribbon-tab>
-        <docen-ribbon-tab slot="tab" id="insert">${tab("insert")}</docen-ribbon-tab>
-        <docen-ribbon-tab slot="tab" id="draw">${tab("draw")}</docen-ribbon-tab>
-        <docen-ribbon-tab slot="tab" id="design">${tab("design")}</docen-ribbon-tab>
-        <docen-ribbon-tab slot="tab" id="layout">${tab("layout")}</docen-ribbon-tab>
-        <docen-ribbon-tab slot="tab" id="references">${tab("references")}</docen-ribbon-tab>
-        <docen-ribbon-tab slot="tab" id="mailings">${tab("mailings")}</docen-ribbon-tab>
-        <docen-ribbon-tab slot="tab" id="review">${tab("review")}</docen-ribbon-tab>
-        <docen-ribbon-tab slot="tab" id="view">${tab("view")}</docen-ribbon-tab>
+      <fluent-tablist slot="tabs" appearance="transparent" activeid="${activeId}">
+        ${visible.map(tabButton).join("\n        ")}
       </fluent-tablist>
-      ${homePanel(styles)}
-      ${insertPanel()}
-      ${drawPanel()}
-      ${designPanel()}
-      ${layoutPanel()}
-      ${referencesPanel()}
-      ${mailingsPanel()}
-      ${reviewPanel()}
-      ${viewPanel()}`;
+      ${show("home") ? homePanel(styles) : ""}
+      ${show("insert") ? insertPanel() : ""}
+      ${show("draw") ? drawPanel() : ""}
+      ${show("design") ? designPanel() : ""}
+      ${show("layout") ? layoutPanel() : ""}
+      ${show("references") ? referencesPanel() : ""}
+      ${show("mailings") ? mailingsPanel() : ""}
+      ${show("review") ? reviewPanel() : ""}
+      ${show("view") ? viewPanel() : ""}`;
 }
 
 // --- Home --------------------------------------------------------------------

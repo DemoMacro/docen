@@ -61,10 +61,28 @@ Open/Save/Print menu, language menu), ribbon, canvas, and panes are all built in
 
 **Attributes**
 
-| Attribute  | Description                                               |
-| ---------- | --------------------------------------------------------- |
-| `user`     | Display name shown in the header                          |
-| `filename` | Document name shown in the header and save dialog default |
+Chrome-visibility and configuration attributes are **reactive** (`observedAttributes`):
+change them at runtime and the component re-renders. `content` and `spellcheck`
+are read once on connect.
+
+| Attribute         | Default    | Description                                                          |
+| ----------------- | ---------- | -------------------------------------------------------------------- |
+| `user`            | —          | Display name shown in the header                                     |
+| `avatar`          | —          | Avatar image URL (omitted → initial-letter avatar)                   |
+| `filename`        | "Document" | Document name shown in the header and save dialog default            |
+| `content`         | —          | Initial document as HTML (parsed once on connect)                    |
+| `editable`        | `true`     | `false` makes the surface read-only                                  |
+| `spellcheck`      | `false`    | `true` enables browser spellcheck (perf cost on large docs)          |
+| `toolbar`         | `true`     | `false` hides the ribbon                                             |
+| `tabs`            | all        | Comma-separated ribbon tab whitelist, e.g. `tabs="home,review,view"` |
+| `header`          | `true`     | `false` hides the app header                                         |
+| `navigation-pane` | `open`     | `open` \| `closed` \| `hidden` — left navigation pane state          |
+| `properties-pane` | `open`     | `open` \| `closed` \| `hidden` — right properties pane state         |
+| `status-bar`      | `true`     | `false` hides the footer status bar                                  |
+| `closable`        | —          | Renders a close (×) button that emits `docen:request-close`          |
+
+Unwired ribbon commands (skeleton buttons) render visually but are greyed out
+(`disabled`) — the ribbon keeps its full Office shape without dead clicks.
 
 **Methods**
 
@@ -83,6 +101,59 @@ class DocenDocument extends HTMLElement {
   getEditor(): Editor | undefined; // the @docen/docx Tiptap Editor
   repaginate(): void;
 }
+```
+
+**Events**
+
+All events bubble and compose out of the shadow DOM — listen on the host
+element. `docen:save` / `:save-as` / `:open` / `:print` are cancelable: call
+`preventDefault()` to take over the action (otherwise the built-in behavior runs).
+
+| Event                 | When                                           | Detail      |
+| --------------------- | ---------------------------------------------- | ----------- |
+| `docen:ready`         | Editor mounted and ready                       | —           |
+| `docen:change`        | Document content changed (autosave driver)     | `{ dirty }` |
+| `docen:request-close` | User clicked × (only rendered with `closable`) | —           |
+| `docen:save`          | Save button — `preventDefault()` to take over  | —           |
+| `docen:save-as`       | Save As menu — `preventDefault()` to take over | —           |
+| `docen:open`          | Open menu — `preventDefault()` to take over    | —           |
+| `docen:new`           | New menu — host-only (no built-in action)      | —           |
+| `docen:print`         | Print menu — `preventDefault()` to take over   | —           |
+
+**Configuration**
+
+The component works out-of-box, but every part of the chrome is toggleable and
+collaborative actions hand off to the host.
+
+```html
+<!-- Read-only, minimal chrome, two tabs -->
+<docen-document
+  editable="false"
+  header="false"
+  status-bar="false"
+  tabs="home,review"
+></docen-document>
+```
+
+```typescript
+const doc = document.querySelector<DocenDocument>("#doc")!;
+
+// Take over save (skip the built-in picker → route to your storage)
+doc.addEventListener("docen:save", (event) => {
+  event.preventDefault();
+  saveToStorage(doc.getJSON());
+});
+
+// The × button only appears with `closable`; the component never unmounts
+// itself — the host decides what "close" means.
+doc.setAttribute("closable", "");
+doc.addEventListener("docen:request-close", () => doc.remove());
+
+// Autosave on change
+doc.addEventListener("docen:change", () => scheduleAutosave());
+
+// Reactive: change tabs at runtime (observedAttributes)
+doc.setAttribute("tabs", "home,insert,view");
 ```
 
 ### UI Bootstrap
