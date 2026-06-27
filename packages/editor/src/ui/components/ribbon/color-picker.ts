@@ -390,9 +390,13 @@ class DocenColorPicker extends HTMLElement {
     this.#reflectIconOnly();
     // Keep the editor's text selection across swatch/button clicks, but let the
     // hex/hue inputs take focus (they need it to accept typing/dragging). Unlike
-    // preventFocusLoss(), this guard excludes <input> targets.
+    // preventFocusLoss(), this guard excludes <input> targets. composedPath()[0]
+    // is the real target — this listener is on the host, so event.target is
+    // retargeted to the host across the shadow boundary, a naive `.closest
+    // ("input")` never matches, and every mousedown (including on the hex field
+    // and the hue slider) got preventDefaulted, breaking both typing + dragging.
     const onMousedown = (event: Event): void => {
-      if ((event.target as HTMLElement | null)?.closest("input")) return;
+      if ((event.composedPath()[0] as HTMLElement | null)?.closest("input")) return;
       event.preventDefault();
     };
     this.addEventListener("mousedown", onMousedown, { capture: true });
