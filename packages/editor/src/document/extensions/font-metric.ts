@@ -36,7 +36,7 @@ function build(doc: PmNode): DecorationSet {
       const parentName = parent?.type.name;
       if (parentName === "tableCell" || parentName === "tableHeader") {
         // Cell line-height = natural metric + grid pitch (NOT max), matching
-        // Word's single-spaced grid cell line (a table cell 9pt ≈ 27.7pt = natural +
+        // Word's single-spaced grid cell line (a 9pt cell ≈ 27.7pt = natural +
         // pitch). Overrides the paragraph's own spacing (exact/atLeast would
         // otherwise shrink the line below the grid). Also size the p to its max
         // run size (--docen-line-base), not the inherited container font-size — a

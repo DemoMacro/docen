@@ -1438,7 +1438,16 @@ export class DocxManager {
         const cellType = isHeader ? "tableHeader" : "tableCell";
         const cellNode: JSONContent = { type: cellType };
         if (Object.keys(cellAttrs).length > 0) cellNode.attrs = cleanAttrs(cellAttrs);
+        // An empty cell still needs content to satisfy the tableCell/tableHeader
+        // `block+` schema. A content-less cell reaches the doc via fromJSON (which
+        // skips validation), but prosemirror-tables' fixTables runs setNodeMarkup
+        // on every table during appendTransaction, and setNodeMarkup re-validates
+        // the node content — throwing "Invalid content for node type tableCell".
+        // That throw aborts the paginator's reflow transaction, so the document
+        // never re-pages (every block piles on page 0). Backfill an empty
+        // paragraph; OOXML likewise requires a <w:p> in every <w:tc>.
         if (cellContent.length > 0) cellNode.content = cellContent;
+        else cellNode.content = [{ type: "paragraph" }];
 
         if (vMerge === "restart") {
           // rowspan is finalized when continuation cells arrive below; register
@@ -1472,7 +1481,11 @@ export class DocxManager {
           left: { style: "nil" },
         };
         for (let c = 0; c < gridAfter; c++)
-          cellNodes.push({ type: trailingType, attrs: { borders: nilBorders } });
+          cellNodes.push({
+            type: trailingType,
+            attrs: { borders: nilBorders },
+            content: [{ type: "paragraph" }],
+          });
         colIdx += gridAfter;
       }
 

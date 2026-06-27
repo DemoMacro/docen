@@ -46,7 +46,9 @@ export function clearMeasureCache(): void {
 }
 
 function getPrepared(items: RichInlineItem[]): PreparedRichInline {
-  const key = items.map((it) => `${it.text}\u0000${it.font}\u0000${it.letterSpacing ?? ""}`).join("");
+  const key = items
+    .map((it) => `${it.text}\u0000${it.font}\u0000${it.letterSpacing ?? ""}`)
+    .join("");
   const cached = preparedCache.get(key);
   if (cached) return cached;
   const prepared = prepareRichInline(items);
@@ -115,8 +117,14 @@ interface StyleTable {
   paragraphStyles?: Array<{
     id?: string;
     default?: boolean;
+    basedOn?: string;
     paragraph?: {
-      spacing?: { line?: number | null; lineRule?: string | null } | null;
+      spacing?: {
+        line?: number | null;
+        lineRule?: string | null;
+        before?: number | null;
+        after?: number | null;
+      } | null;
       indent?: IndentAttrs | null;
     };
     run?: { font?: unknown; size?: number | null; bold?: boolean; italic?: boolean };
@@ -124,7 +132,12 @@ interface StyleTable {
   default?: {
     document?: {
       paragraph?: {
-        spacing?: { line?: number | null; lineRule?: string | null } | null;
+        spacing?: {
+          line?: number | null;
+          lineRule?: string | null;
+          before?: number | null;
+          after?: number | null;
+        } | null;
         indent?: IndentAttrs | null;
       };
       run?: { font?: unknown; size?: number | null; bold?: boolean; italic?: boolean };
@@ -171,6 +184,57 @@ function resolveSpacing(
   return null;
 }
 
+/** A paragraph's spacing.before/after in px (OOXML twips → px), resolved through
+ *  the same direct → style → document-default cascade as line spacing. The
+ *  renderer emits these as the paragraph's margin-top/margin-bottom (paragraph
+ *  decoration), so measure must count them or every paragraph under-measures by
+ *  its before+after. The cascade matters: a table-cell paragraph with empty
+ *  direct attrs still carries its table style's spacing (e.g. before/after=60tw
+ *  → 4px each), which is exactly what inflates each rendered cell by ~8px vs a
+ *  line-only measurement — so a large table measured short of one page and
+ *  overflowed the fixed page box instead of splitting, off by tens of pages. */
+export function paragraphSpacingMargins(
+  node: PmNode,
+  styles: unknown,
+): { beforePx: number; afterPx: number } {
+  const direct = (
+    node.attrs as { spacing?: { before?: number | null; after?: number | null } | null }
+  ).spacing;
+  let before: number | null = direct?.before ?? null;
+  let after: number | null = direct?.after ?? null;
+  if (before == null || after == null) {
+    const t = styleTableOf(styles);
+    if (t) {
+      // Walk the style inheritance chain (w:basedOn): a cell paragraph with
+      // style "TableHeaderText" (no spacing) inherits "TableText" (spacing
+      // 60tw = 4px each), which the renderer resolves the same way — measure
+      // must too, or every table row under-measures by its paragraph's
+      // before+after and a large table spills a page short. A paragraph with NO
+      // styleId starts from the default style (w:default="1", usually Normal);
+      // the document default is the final fallback.
+      const styleId = (node.attrs as { styleId?: string | null }).styleId;
+      const startId = styleId ? styleId : (t.paragraphStyles?.find((p) => p.default)?.id ?? null);
+      let curId: string | null | undefined = startId;
+      const seen = new Set<string>();
+      while (curId && (before == null || after == null) && !seen.has(curId)) {
+        seen.add(curId);
+        const s = t.paragraphStyles?.find((p) => p.id === curId);
+        const sp = s?.paragraph?.spacing;
+        if (before == null && sp?.before != null) before = sp.before;
+        if (after == null && sp?.after != null) after = sp.after;
+        curId = s?.basedOn;
+      }
+      const docSp = t.default?.document?.paragraph?.spacing;
+      if (before == null && docSp?.before != null) before = docSp.before;
+      if (after == null && docSp?.after != null) after = docSp.after;
+    }
+  }
+  return {
+    beforePx: typeof before === "number" ? before * TWIP_TO_PX : 0,
+    afterPx: typeof after === "number" ? after * TWIP_TO_PX : 0,
+  };
+}
+
 /** Paragraph default run properties (pPr/rPr) → run style baseline. Falls back
  *  to the paragraph's style and the document default run when attrs are absent,
  *  so the measured font matches the rendered one — a CJK doc default of 宋体
@@ -192,10 +256,10 @@ function defaultRunOf(node: PmNode, styles?: unknown): Partial<RunStyle> {
     // ¶ glyph rPr (attrs.run) styles ONLY the paragraph mark glyph, NOT run text
     // (SO 49059600: w:pPr/w:rPr "applies only to the paragraph glyph"). A run
     // therefore inherits font/size/bold/italic from the paragraph STYLE / doc
-    // default — NEVER the ¶ rPr. Without this, "a run" (run sz absent, ¶ sz=84)
-    // and empty paragraphs inherited ¶ 42pt (inflating line height), and a
-    // ¶ rFonts carrying only an eastAsia hint (no concrete name) fell back to
-    // the serif default (metric 1.44 vs the doc's 微软雅黑 1.32), inflating
+    // default — NEVER the ¶ rPr. Without this, a run with no own size but a ¶
+    // rPr sz, and empty paragraphs, inherited the ¶ size (inflating line height),
+    // and a ¶ rFonts carrying only an eastAsia hint (no concrete name) fell back
+    // to the serif default (metric 1.44 vs the doc's CJK font 1.32), inflating
     // every empty line. Empty-paragraph struts still read attrs.run.size
     // directly via emptyLineHeight (the ¶ glyph is their sole content).
     size: psRun?.size ?? defPsRun?.size ?? defRun?.size ?? null,
@@ -279,12 +343,12 @@ export function resolveLineHeight({
   // not multiple×natural). snapToGrid===false applies the multiple×natural.
   // exact/atLeast are absolute overrides (twips→px) and ignore the grid.
   // Verified via a Word-generated PDF: single 微软雅黑-Bold 12pt ≈34pt =
-  // natural 15.84 + pitch 17; double a CJK line 16pt ≈38pt (single-grid scale,
+  // natural 15.84 + pitch 17; a double-spaced 16pt CJK line ≈38pt (single-grid scale,
   // not 2×natural+pitch 59pt). Matches lineSpacingToCss (edit==render).
   // Table cell line height = MAX(natural, grid pitch), NOT natural+pitch. A
   // single row is floored by trHeight (max(content, trHeight) in
   // measureRowHeight), so the cell's own line is the pitch (17pt > 9pt natural)
-  // — verified from the Word PDF: a 2-line cell (two stacked lines) ≈34pt =
+  // — verified from a Word PDF: a 2-line table cell ≈34pt =
   // 2×pitch, not 2×(natural+pitch)=55pt. The earlier ADD inflated multi-line
   // cells ~2×, pushing tables onto extra pages. Mirrors the font-metric
   // decoration (max(metric×base, pitch)). edit == render. Precedes exact/atLeast.
@@ -832,9 +896,14 @@ export function resolvePaginationAttrs(node: PmNode): PaginationAttrs {
     widowControl?: boolean | null;
     pageBreakBefore?: boolean | null;
   };
+  const isHeading = node.type.name === "heading";
   return {
     keepLines: a.keepLines === true,
-    keepNext: a.keepNext === true,
+    // Word's heading styles default to keepNext=true (a heading never orphans
+    // at a page bottom — it stays with the following paragraph). The OOXML attr
+    // reads null when the style's default applies, so a heading with no explicit
+    // keepNext still keeps; a non-heading only keeps when explicitly set.
+    keepNext: isHeading ? a.keepNext !== false : a.keepNext === true,
     widowControl: a.widowControl !== false,
     pageBreakBefore: a.pageBreakBefore === true,
   };
@@ -1034,9 +1103,24 @@ export function measureRowHeight(
     const hMarginPx = hm ? (marginSizeTw(hm.left) + marginSizeTw(hm.right)) * TWIP_TO_PX : 0;
     const innerW = Math.max(0, cellWidth - hMarginPx);
     let contentH = 0;
+    let prevAfter = 0;
+    let firstBlock = true;
     cell.forEach((block) => {
-      contentH += measureBlockHeight(block, innerW, cellCtx);
+      const lineH = measureBlockHeight(block, innerW, cellCtx);
+      // Paragraph spacing.before/after renders as margin-top/bottom. The cell is
+      // a BFC: adjacent paragraphs inside still collapse vertically (max of the
+      // previous after and the current before), but the first before and the
+      // last after are NOT collapsed against the cell border — the cell eats
+      // both, so a single-paragraph cell reserves before+after. Without this
+      // every table row under-measured by its paragraph's before+after and a
+      // 41-row table spilled a page short (overflowed instead of splitting).
+      const { beforePx, afterPx } = paragraphSpacingMargins(block, ctx?.styles);
+      contentH += firstBlock ? beforePx : Math.max(prevAfter, beforePx);
+      contentH += lineH;
+      prevAfter = afterPx;
+      firstBlock = false;
     });
+    contentH += prevAfter; // last paragraph's after — the cell eats it
     // Add the renderer's vertical cell overhead (padding + border) so the
     // measured row matches the rendered row — without it rows under-measure
     // and the table's last rows overflow the page bottom (clipped).

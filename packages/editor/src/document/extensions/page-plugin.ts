@@ -7,6 +7,7 @@ import {
   measureBlockHeight,
   measureParagraphLines,
   measureRowHeight,
+  paragraphSpacingMargins,
   resolveIndentWidth,
   resolvePaginationAttrs,
   tableColumnWidths,
@@ -82,15 +83,6 @@ type FlatItem =
     }
   | { kind: "row"; row: PmNode; height: number; table: PmNode; isClone?: boolean };
 
-/** A block's trailing margin in px: the paragraph's spacing.after (OOXML
- *  twips → px). Read from attrs (not the DOM) so measurement is deterministic
- *  across re-flows. */
-function spacingAfterOf(node: PmNode): number {
-  const spacing = (node.attrs as { spacing?: { after?: number | null } | null }).spacing;
-  if (!spacing || spacing.after == null) return 0;
-  return spacing.after * (4 / 3 / 20); // twips → px
-}
-
 /** Page content box + document-grid line pitch, derived deterministically from a
  *  section's OOXML geometry (twips → px) — NOT the DOM. Each page renders its
  *  section's inline width/height/padding (page-node renderHTML), so the content
@@ -122,8 +114,14 @@ function sectionContentDims(
   const mBottom = side(2);
   const mLeft = side(3);
   const grid = s.grid;
+  // OOXML: docGrid @type omitted or "default" = NO grid — lines do NOT snap to
+  // @linePitch (Word renders at the font's natural metric). Only
+  // lines/linesAndChars/snapToChars snap. @type is absent on many Western docs
+  // which still carry a @linePitch; treating absent as "snap" added 18pt/line
+  // and inflated pagination ~60%. Must mirror
+  // sectionLinePitchCss (render) so measure == render.
   const linePitchPx =
-    grid?.linePitch && grid.type !== "default" ? grid.linePitch * twipToPx : undefined;
+    grid?.linePitch && grid.type && grid.type !== "default" ? grid.linePitch * twipToPx : undefined;
   return {
     width: (dims.width - mLeft - mRight) * twipToPx,
     height: (dims.height - mTop - mBottom) * twipToPx,
@@ -226,7 +224,7 @@ function measureFlatItems(editor: Editor): FlatItem[] {
         pendingClone = 0;
       });
     } else {
-      const after = spacingAfterOf(child);
+      const after = paragraphSpacingMargins(child, styles).afterPx;
       const blockWidth = child.isTextblock
         ? resolveIndentWidth(child, pageContentWidth, styles)
         : pageContentWidth;
@@ -295,6 +293,7 @@ function trySplitBlock(
   item: Extract<FlatItem, { kind: "block" }>,
   remaining: number,
   splitGroup: string,
+  keepNext = false,
 ): { head: FlatItem; tail: FlatItem } | null {
   if (!item.lines || item.pag.keepLines) return null;
   const { lineHeight, lineCount, lineBreakOffsets, block, lineHeights } = item.lines;
@@ -304,7 +303,10 @@ function trySplitBlock(
   // each can sit alone on a page (a near-full-page image is one per page), so
   // they skip widow/orphan (edge 1). Without this, a multi-image paragraph of
   // near-page-height images couldn't split (n=1 < edge=2 → move whole → clip).
-  const edge = block ? 1 : item.pag.widowControl ? 2 : 1; // orphans + widows
+  // keepNext: this paragraph follows a keepNext heading (Word's heading default),
+  // so it must stay on the heading's page — relax the orphan rule to 1 line so
+  // the heading isn't stranded alone (e.g. a section heading + its body).
+  const edge = block ? 1 : keepNext ? 1 : item.pag.widowControl ? 2 : 1; // orphans + widows
   // How many leading rows fit in `remaining`, and their actual height. Text
   // rows are uniform (lineHeight × n); image rows are not (each row is its
   // tallest image), so walk lineHeights and stop before exceeding remaining.
@@ -735,7 +737,13 @@ function reflow(editor: Editor): void {
         // converged. Mint a new id only for a paragraph with no group yet.
         const sg =
           (item.node.attrs as { splitGroup?: string | null }).splitGroup ?? `p${splitSeq++}`;
-        const split = trySplitBlock(item, remaining, sg);
+        // keepNext: the previous item is a keepNext heading (Word's heading
+        // default) → this paragraph must stay on the heading's page; pass it so
+        // trySplitBlock relaxes the orphan rule and splits instead of moving the
+        // whole paragraph off the heading's page.
+        const prev = cur.length > 0 ? cur[cur.length - 1] : null;
+        const prevKeepNext = prev?.kind === "block" && prev.pag.keepNext;
+        const split = trySplitBlock(item, remaining, sg, prevKeepNext);
         if (split) {
           // If the head's own height exceeds the current page's remaining space
           // (its first row alone is over-tall — e.g. a near-page-height image

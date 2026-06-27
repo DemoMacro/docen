@@ -211,7 +211,7 @@ export function lineSpacingToCss(
   // multiple is ABSORBED (a 1.5×/double line renders at single-grid + pitch, not
   // multiple×natural). snapToGrid===false (e.g. header/footer) applies the
   // multiple. Verified via a Word-generated PDF: single 微软雅黑-Bold 12pt ≈34pt =
-  // natural + pitch 17pt; double a CJK line 16pt ≈38pt (single-grid scale).
+  // natural + pitch 17pt; a double-spaced 16pt CJK line ≈38pt (single-grid scale).
   // `1em` resolves against the paragraph's INHERITED font-size (the container
   // default, e.g. 14pt), under-counting paragraphs whose runs are larger — a
   // 42pt heading rendered at the line-height of 14pt. A line box is as tall as
@@ -275,7 +275,11 @@ export function sectionMarginCss(margin: unknown): string | null {
 export function sectionLinePitchCss(grid: unknown): string[] {
   if (!grid || typeof grid !== "object") return [];
   const g = grid as { linePitch?: unknown; type?: unknown };
-  if (g.type === "default" || typeof g.linePitch !== "number" || !g.linePitch) return [];
+  // OOXML: docGrid @type omitted or "default" = NO grid (lines do not snap to
+  // @linePitch). @type is absent on many Western docs that still carry a
+  // @linePitch; treating absent as snapping added 18pt to every line and
+  // inflated pagination ~60%.
+  if (!g.type || g.type === "default" || typeof g.linePitch !== "number" || !g.linePitch) return [];
   const pitch = `${(g.linePitch / 20).toFixed(2)}pt`;
   // Container line-height for paragraphs WITHOUT their own spacing: the font's
   // `normal` metric × 1 (single) + the grid pitch.
@@ -484,8 +488,8 @@ interface ParagraphStyleShape {
    *  styles set it false. */
   snapToGrid?: boolean | null;
   /** Paragraph-mark (¶) run properties (pPr/rPr). Per OOXML (ECMA-376) these
-   *  format the ¶ glyph only — never applied to run text (the "a run" bug: a
-   *  42pt ¶ marker must not inflate body runs). Only `size` is rendered, as the
+   *  format the ¶ glyph only — never applied to run text (a large ¶ marker
+   *  must not inflate body runs). Only `size` is rendered, as the
    *  paragraph's line-height: the ¶ glyph is a physical character whose
    *  font-size sets the paragraph's (esp. empty) line height in Word. */
   run?: { size?: number | null } | null;
@@ -527,7 +531,7 @@ export function renderParagraphStyles(
   // height — this is why an empty paragraph still occupies a line in Word (its
   // sole content is the ¶ glyph). Only `size` is rendered: the ¶ glyph is
   // invisible, so font/color/bold have no visual effect and must NOT become the
-  // paragraph's font-size (that would leak onto every run — the "a run" bug).
+  // paragraph's font-size (that would leak onto every run).
   // Placed BEFORE spacing so an explicit spacing/line rule overrides it (Word:
   // an explicit line rule wins over the ¶-glyph single-line height).
   const markLineHeight = a.run?.size != null ? sizeToCss(a.run.size) : null;
