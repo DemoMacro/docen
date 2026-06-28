@@ -46,6 +46,7 @@ import { dispatchRibbonCommand, WIRED_DISPATCH } from "./commands";
 import "./i18n";
 import { FontMetricDecoration } from "./extensions/font-metric";
 import { ImageCap } from "./extensions/image-cap";
+import { DocenKeymap } from "./extensions/keymap";
 import { PageBreakView } from "./extensions/page-break";
 import { Page, PageDocument } from "./extensions/page-node";
 import { PagePlugin, pageStorageOf } from "./extensions/page-plugin";
@@ -1157,6 +1158,9 @@ class DocenDocument extends HTMLElement {
         // while show-marks is on. Schema comes from the engine's PageBreak;
         // this only overrides the editor rendering.
         PageBreakView,
+        // Centralized MS Office editing keymap (Ctrl+Enter page break, etc.) —
+        // see extensions/keymap.ts. Outranks HardBreak via priority.
+        DocenKeymap,
         // sectionBreak widget — a section boundary is paragraph attrs (not a
         // node), so it has no NodeView; a widget decoration paints the Fluent
         // divider marker after each section-carrying paragraph.
