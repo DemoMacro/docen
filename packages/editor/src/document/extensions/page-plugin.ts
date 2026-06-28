@@ -1,4 +1,4 @@
-import type { SectionPropertiesOptions } from "@docen/docx";
+import { sectionMarginDefaults, type SectionPropertiesOptions } from "@docen/docx";
 import { Extension, type Editor } from "@docen/docx/core";
 import type { Node as PmNode } from "@tiptap/pm/model";
 import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
@@ -33,7 +33,7 @@ export interface PagePluginStorage {
 }
 
 export function pageStorageOf(editor: Editor): PagePluginStorage {
-  return (editor.storage as unknown as { pagePlugin: PagePluginStorage }).pagePlugin;
+  return (editor.storage as unknown as { docenPagePlugin: PagePluginStorage }).docenPagePlugin;
 }
 
 /** Per-page usable content height (px): the fixed page box's height minus its
@@ -88,31 +88,32 @@ type FlatItem =
  *  section's inline width/height/padding (page-node renderHTML), so the content
  *  box is `paper size − margins`; linePitch snaps lines up when the grid type is
  *  line-snapping (lines/linesAndChars/snapToChars; "default" = no snapping).
- *  Returns null when geometry is absent (no page size) — caller falls back to a
- *  DOM measurement. Twip→px matches the rendered box exactly (size/15). */
-function sectionContentDims(
-  sp: unknown,
-): { width: number; height: number; linePitchPx: number | undefined } | null {
-  if (!sp || typeof sp !== "object") return null;
-  const s = sp as SectionPropertiesOptions;
+ *  Absent geometry falls back to the engine's section-geometry defaults
+ *  (@office-open/docx sectionPageSizeDefaults/sectionMarginDefaults — the same
+ *  values the engine fills into an empty sectPr), so a blank doc with no sectPr
+ *  still measures A4 + MS Office zh-CN "Normal" margins instead of dropping to
+ *  a divergent DOM default. Twip→px matches the rendered box exactly (size/15). */
+export function sectionContentDims(sp: unknown): {
+  width: number;
+  height: number;
+  linePitchPx: number | undefined;
+} {
+  const s = (sp && typeof sp === "object" ? sp : {}) as SectionPropertiesOptions;
   const dims = resolvePageSize(s.page?.size);
-  if (!dims) return null;
   const twipToPx = 4 / 3 / 20; // twip → pt (÷20) → px (×4/3)
-  // Margins mirror page-node renderHTML: it emits padding only when all four
-  // sides are present, else falls back to the CSS default (1in = 1440tw = 96px).
-  // Measure must use the SAME default, or sections whose OOXML <w:pgMar> lacks
-  // the four sides (e.g. only header/footer/gutter) pack against the full paper
-  // height while the page renders with 96px padding — content then overflows the
-  // fixed box and gets clipped instead of reflowing to the next page.
+  // Margins mirror page-node renderHTML's sectionMarginCss: each side falls back
+  // to the engine default (@office-open/docx sectionMarginDefaults) when absent,
+  // so measure == render even for a section whose <w:pgMar> omits sides (or a
+  // blank doc with no sectPr at all — page size also falls back to the engine
+  // default inside resolvePageSize, so a blank doc measures A4 + MS Office
+  // zh-CN "Normal" margins like the engine fills into an empty sectPr).
   const margin = s.page?.margin;
-  const sides = [margin?.top, margin?.right, margin?.bottom, margin?.left];
-  const hasAllSides = sides.every((v): v is number => typeof v === "number");
-  const DEFAULT_MARGIN_TW = 1440;
-  const side = (i: number): number => (hasAllSides ? (sides[i] as number) : DEFAULT_MARGIN_TW);
-  const mTop = side(0);
-  const mRight = side(1);
-  const mBottom = side(2);
-  const mLeft = side(3);
+  const def = sectionMarginDefaults;
+  const num = (v: unknown, d: number): number => (typeof v === "number" ? v : d);
+  const mTop = num(margin?.top, def.TOP);
+  const mRight = num(margin?.right, def.RIGHT);
+  const mBottom = num(margin?.bottom, def.BOTTOM);
+  const mLeft = num(margin?.left, def.LEFT);
   const grid = s.grid;
   // OOXML: docGrid @type omitted or "default" = NO grid — lines do NOT snap to
   // @linePitch (Word renders at the font's natural metric). Only
@@ -876,7 +877,7 @@ function reflow(editor: Editor): void {
  * Conventions.
  */
 export const PagePlugin = Extension.create<PagePluginOptions>({
-  name: "pagePlugin",
+  name: "docenPagePlugin",
 
   addOptions() {
     return { debounceMs: 300 };

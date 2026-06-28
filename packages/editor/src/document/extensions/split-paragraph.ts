@@ -30,7 +30,7 @@ import { Extension } from "@docen/docx/core";
  *  heading for the paginator. Registered as an Extension (global attrs), not as
  *  node overrides — see the module doc above for why. */
 export const SplitMarks = Extension.create({
-  name: "splitMarks",
+  name: "docenSplitMarks",
   addGlobalAttributes() {
     return [
       {

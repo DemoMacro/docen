@@ -1,3 +1,4 @@
+import { sectionMarginDefaults, sectionPageSizeDefaults } from "@office-open/docx";
 import type {
   BorderOptions,
   BordersOptions,
@@ -238,29 +239,41 @@ export function twipsToMm(twips: number): string {
 /** Resolve a section's printable page dimensions (twips), honoring orientation.
  *  A landscape section commonly stores portrait dims (w<h) with
  *  `orientation: "landscape"` — swap width/height so width is the larger edge.
- *  Returns null when no numeric dimensions. */
-export function resolvePageSize(size: unknown): { width: number; height: number } | null {
-  if (!size || typeof size !== "object") return null;
+ *  Falls back to the engine's default page size (@office-open/docx
+ *  `sectionPageSizeDefaults` = A4) when the size is absent or non-numeric — the
+ *  engine's `stringifySectionPropertiesXml` fills an empty sectPr the same way,
+ *  so edit-time geometry matches render/measure/generate/export. */
+export function resolvePageSize(size: unknown): { width: number; height: number } {
+  const fallback = { width: sectionPageSizeDefaults.WIDTH, height: sectionPageSizeDefaults.HEIGHT };
+  if (!size || typeof size !== "object") return fallback;
   const s = size as { width?: unknown; height?: unknown; orientation?: unknown };
   const w = typeof s.width === "number" ? s.width : undefined;
   const h = typeof s.height === "number" ? s.height : undefined;
-  if (w == null || h == null) return null;
+  if (w == null || h == null) return fallback;
   return s.orientation === "landscape" && w < h ? { width: h, height: w } : { width: w, height: h };
 }
 
-/** Page margin (twips) → CSS padding, or null when not all four sides are
- *  numeric. Margins are left as-is: office-open returns them already rotated
- *  for a landscape section. */
-export function sectionMarginCss(margin: unknown): string | null {
-  if (!margin || typeof margin !== "object") return null;
-  const m = margin as {
+/** Page margin (twips) → CSS padding. Sides absent or non-numeric fall back to
+ *  the engine's default margins (@office-open/docx `sectionMarginDefaults`:
+ *  top/bottom 1440tw, left/right 1800tw — MS Office zh-CN "Normal"), matching
+ *  the page-size fallback above and the engine's empty-sectPr behavior. Margins
+ *  are left as-is: office-open returns them already rotated for a landscape
+ *  section. */
+export function sectionMarginCss(margin: unknown): string {
+  const def = sectionMarginDefaults;
+  const m = (margin && typeof margin === "object" ? margin : {}) as {
     top?: unknown;
     right?: unknown;
     bottom?: unknown;
     left?: unknown;
   };
-  const sides = [m.top, m.right, m.bottom, m.left];
-  if (!sides.every((s): s is number => typeof s === "number")) return null;
+  const num = (v: unknown, d: number): number => (typeof v === "number" ? v : d);
+  const sides = [
+    num(m.top, def.TOP),
+    num(m.right, def.RIGHT),
+    num(m.bottom, def.BOTTOM),
+    num(m.left, def.LEFT),
+  ];
   return `padding:${sides.map(twipsToMm).join(" ")}`;
 }
 

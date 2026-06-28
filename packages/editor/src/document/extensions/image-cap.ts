@@ -1,0 +1,313 @@
+import { Extension } from "@docen/docx/core";
+import type { Node as PmNode } from "@tiptap/pm/model";
+import { Plugin, PluginKey } from "@tiptap/pm/state";
+import type { EditorView } from "@tiptap/pm/view";
+import { imageMeta } from "image-meta";
+
+import { sectionContentDims } from "./page-plugin";
+
+const key = new PluginKey("docenImageCap");
+
+/** Decode a `data:image/...;base64,...` URL to bytes; null if not a data URL.
+ *  Mirrors @docen/docx prepare.ts — the editor resolves docx via dist at runtime
+ *  (no converter import), so the tiny decoder is duplicated here. */
+function decodeDataUrl(src: string | undefined): Uint8Array | null {
+  if (!src) return null;
+  const match = src.match(/^data:image\/[\w.+-]+;base64,(.+)$/);
+  if (!match) return null;
+  const binary = atob(match[1]);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+/** Natural pixel dimensions of a data-URL image, read synchronously from the file
+ *  header (no load/decode round-trip). Returns null for http(s):// URLs (can't be
+ *  sync-decoded) or unreadable bytes — the CSS max-width fallback constrains
+ *  those. */
+function naturalSize(src: string | undefined): { width: number; height: number } | null {
+  const bytes = decodeDataUrl(src);
+  if (!bytes) return null;
+  try {
+    const meta = imageMeta(bytes);
+    if (typeof meta.width === "number" && typeof meta.height === "number") {
+      return { width: meta.width, height: meta.height };
+    }
+  } catch {
+    // Unreadable or unsupported image — leave to the CSS fallback.
+  }
+  return null;
+}
+
+/** The section geometry governing the image at `pos`. OOXML sectPr rides a
+ *  section's LAST paragraph (paragraph.attrs.sectionProperties) and governs it
+ *  + everything before it; doc.attrs.sectionProperties is the final section.
+ *  Prefers the enclosing page's stamped section (reflow copies that source onto
+ *  each page); falls back to scanning the section-ending paragraph when the page
+ *  isn't stamped yet — reflow rebuilds page.sp from this source, so it can be
+ *  briefly null right after a setContent/paste, and this fallback reads the
+ *  same source reflow will, instead of dropping to the DOM default. */
+function sectionAt(doc: PmNode, pos: number): unknown {
+  const $pos = doc.resolve(pos);
+  for (let d = $pos.depth; d > 0; d--) {
+    const node = $pos.node(d);
+    if (node.type.name === "page") {
+      const sp = (node.attrs as { sectionProperties?: unknown }).sectionProperties;
+      if (sp) return sp;
+    }
+  }
+  // Fallback: the first section-ending paragraph at/after the image's paragraph
+  // (its sectPr ends the section the image is in).
+  let paraPos = pos;
+  for (let d = $pos.depth; d > 0; d--) {
+    if ($pos.node(d).type.name === "paragraph") {
+      paraPos = $pos.before(d);
+      break;
+    }
+  }
+  let section = (doc.attrs as { sectionProperties?: unknown }).sectionProperties ?? null;
+  let done = false;
+  doc.descendants((node, nodePos) => {
+    if (done || nodePos < paraPos) return true;
+    if (node.type.name === "paragraph") {
+      const sp = (node.attrs as { sectionProperties?: unknown }).sectionProperties;
+      if (sp != null) {
+        section = sp;
+        done = true;
+        return false;
+      }
+    }
+    return true;
+  });
+  return section;
+}
+
+/** Pick the first image file on a paste/drop data transfer, else null. */
+function pickImageFile(dt: DataTransfer | null): File | null {
+  if (!dt) return null;
+  return Array.from(dt.files ?? []).find((f) => f.type.startsWith("image/")) ?? null;
+}
+
+/** Read an image file as a data URL and insert an image node at `pos` (or the
+ *  caret when `pos` is null). data URL — not the browser's default blob: URL —
+ *  because a blob: URL can't be sync-decoded (no width cap below) and can't be
+ *  exported (blob: URLs don't base64-encode into DOCX). */
+function readAndInsert(view: EditorView, file: File, pos: number | null): void {
+  const reader = new FileReader();
+  reader.onload = () => {
+    const src = reader.result;
+    if (typeof src !== "string") return;
+    const { state, dispatch } = view;
+    const node = state.schema.nodes.image.create({ src });
+    dispatch(pos != null ? state.tr.insert(pos, node) : state.tr.replaceSelectionWith(node));
+  };
+  reader.readAsDataURL(file);
+}
+
+/** Usable content width of the first rendered page (px), read from the DOM.
+ *  Fallback for documents whose pages carry no sectionProperties (e.g. a blank
+ *  editor before a page setup is applied): the page box still renders at a CSS
+ *  default paper size + margin, so the content box is measurable without OOXML
+ *  geometry. Page geometry is stable across edits, so reading it from the
+ *  pre-update DOM inside appendTransaction is fine. */
+function domContentWidth(view: EditorView | null): number | null {
+  if (!view) return null;
+  const page = view.dom.querySelector(".docen-page");
+  if (!(page instanceof HTMLElement)) return null;
+  const cs = getComputedStyle(page);
+  const w = page.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+  return w > 0 ? w : null;
+}
+
+/** Fetch an http(s) image and read it as a data URL (so it can be sync-decoded
+ *  for the cap below and embedded into DOCX on export). Returns null on
+ *  network/CORS failure — the image keeps its http URL (CSS-only fallback). */
+async function fetchToDataUrl(url: string): Promise<string | null> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    return await new Promise<string | null>((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : null);
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
+    });
+  } catch {
+    return null;
+  }
+}
+
+/** Stamp `patch` onto every image node whose `src` matches, in one transaction.
+ *  No-op when none match or the view is gone. */
+function markupMatchingSrc(view: EditorView, src: string, patch: Record<string, unknown>): void {
+  if (view.isDestroyed) return;
+  const { state, dispatch } = view;
+  let tr = state.tr;
+  let hit = false;
+  state.doc.descendants((node, pos) => {
+    if (node.type.name === "image" && node.attrs.src === src) {
+      tr = tr.setNodeMarkup(pos, null, { ...node.attrs, ...patch });
+      hit = true;
+    }
+    return true;
+  });
+  if (hit) dispatch(tr);
+}
+
+/** Natural pixel dimensions of the in-DOM <img> with `src`, awaited on load.
+ *  Used when fetch is blocked (CORS): an <img> loads cross-origin freely — only
+ *  fetch/canvas are CORS-gated — so the natural size is still readable even
+ *  though the bytes can't be fetched for embedding. */
+function domNaturalSize(
+  view: EditorView,
+  src: string,
+): Promise<{ width: number; height: number } | null> {
+  return new Promise((resolve) => {
+    const img = Array.from(view.dom.querySelectorAll<HTMLImageElement>("img")).find(
+      (i) => i.getAttribute("src") === src,
+    );
+    if (!img) return resolve(null);
+    const read = () =>
+      img.naturalWidth > 0 && img.naturalHeight > 0
+        ? resolve({ width: img.naturalWidth, height: img.naturalHeight })
+        : resolve(null);
+    if (img.complete && img.naturalWidth > 0) return read();
+    img.addEventListener("load", read, { once: true });
+    img.addEventListener("error", () => resolve(null), { once: true });
+  });
+}
+
+/** Inline an http(s) image. On a successful fetch, swap in the data URL so
+ *  appendTransaction can cap it (via imageMeta) and renderDocx can embed it. On
+ *  fetch failure (CORS/network) the bytes can't be embedded — but the <img>
+ *  still loads cross-origin, so its natural dimensions are stamped onto the node
+ *  and appendTransaction caps the width to the content area (the src stays http
+ *  and is dropped on export). Word inlines pasted web images the same way. */
+async function embedHttpImage(view: EditorView, src: string, fetching: Set<string>): Promise<void> {
+  try {
+    const dataUrl = await fetchToDataUrl(src);
+    if (dataUrl) {
+      markupMatchingSrc(view, src, { src: dataUrl });
+      return;
+    }
+    if (view.isDestroyed) return;
+    const natural = await domNaturalSize(view, src);
+    if (natural) markupMatchingSrc(view, src, { width: natural.width, height: natural.height });
+  } finally {
+    fetching.delete(src);
+  }
+}
+
+/**
+ * Word-style image width capping. MS Office scales an inline image DOWN to the
+ * section content width (page width − margins) when it is wider, and otherwise
+ * leaves it at its real size (never upscales) — and the cap is a real dimension
+ * change (exported DOCX carries the capped size, not just a visual constraint).
+ *
+ * Implemented as an `appendTransaction` plugin so it covers every entry path
+ * (insert button, paste, drop) through one transaction intercept. Idempotent:
+ * once capped, `width === contentW` so the next pass finds nothing to change and
+ * returns null (no append loop). Section geometry gives the exact content width;
+ * when it is absent (blank doc, before a page setup) the rendered page box is
+ * measured instead. While an http image's fetch is still in flight its width is
+ * unknown, so this pass skips it (the CSS constrains it meanwhile); once fetch
+ * resolves — to a data URL, or to the DOM natural size on a CORS failure — the
+ * width is stamped and capped here too, so it never falls back to a fixed
+ * default wider than the page.
+ */
+export const ImageCap = Extension.create({
+  name: "docenImageCap",
+  addProseMirrorPlugins() {
+    // Captured by the appendTransaction closure so it can read the live page
+    // DOM for the content-width fallback (section geometry may be absent).
+    let editorView: EditorView | null = null;
+    // http(s) image URLs currently being fetched → data URL, deduped so a
+    // re-flow doesn't kick off a second fetch for the same URL.
+    const fetching = new Set<string>();
+    return [
+      new Plugin({
+        key,
+        view(v) {
+          editorView = v;
+          return {
+            update(view, prevState) {
+              if (view.state.doc === prevState.doc) return;
+              // Inline any http(s) image: fetch → data URL so it can be capped
+              // and exported (a remote URL alone can't be sync-decoded or
+              // embedded into DOCX). Word inlines pasted web images too.
+              view.state.doc.descendants((node) => {
+                if (node.type.name !== "image") return true;
+                const src = node.attrs.src;
+                if (typeof src !== "string" || !/^https?:/.test(src)) return true;
+                if (fetching.has(src)) return true;
+                fetching.add(src);
+                void embedHttpImage(view, src, fetching);
+                return true;
+              });
+            },
+          };
+        },
+        props: {
+          // Intercept pasted/dropped image FILES: read them as data URLs and
+          // insert, instead of letting the browser insert a blob: URL (which
+          // skips the cap below and can't be exported). Returns true to claim
+          // the event so the default blob: insert is suppressed.
+          handlePaste: (view, event: ClipboardEvent) => {
+            const file = pickImageFile(event.clipboardData);
+            if (!file) return false;
+            readAndInsert(view, file, null);
+            return true;
+          },
+          handleDrop: (view, event: DragEvent) => {
+            const file = pickImageFile(event.dataTransfer);
+            if (!file) return false;
+            const pos = view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos ?? null;
+            readAndInsert(view, file, pos);
+            return true;
+          },
+        },
+        appendTransaction: (trs, _oldState, newState) => {
+          // Only react to document-changing transactions (skip selection-only).
+          if (!trs.some((tr) => tr.docChanged)) return null;
+          const doc = newState.doc;
+          const tr = newState.tr;
+          let changed = false;
+
+          doc.descendants((node, pos) => {
+            if (node.type.name !== "image") return true;
+            const attrs = node.attrs as {
+              src?: string;
+              width?: number | null;
+              height?: number | null;
+            };
+            const natural = naturalSize(attrs.src);
+            const displayW = attrs.width ?? natural?.width;
+            if (displayW == null || displayW <= 0) return true;
+
+            // Section content width from OOXML geometry; fall back to the
+            // rendered page's content box when geometry is absent (blank doc).
+            const contentW =
+              sectionContentDims(sectionAt(doc, pos))?.width ?? domContentWidth(editorView);
+            if (!contentW || contentW <= 0) return true;
+            if (displayW <= contentW) return true; // within bounds — never upscale
+
+            const scale = contentW / displayW;
+            const baseH = attrs.height ?? natural?.height;
+            tr.setNodeMarkup(pos, null, {
+              ...attrs,
+              width: contentW,
+              height: baseH != null ? Math.round(baseH * scale) : null,
+            });
+            changed = true;
+            return true;
+          });
+
+          if (!changed) return null;
+          tr.setMeta(key, true);
+          return tr;
+        },
+      }),
+    ];
+  },
+});

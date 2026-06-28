@@ -11,6 +11,15 @@ export { docxExtensions, type JSONContent, type AnyExtension } from "./core";
 // document grid) so the editor layer can type section geometry without a direct
 // @office-open/docx dependency.
 export type { SectionPropertiesOptions } from "@office-open/docx";
+// Re-export the engine's section-geometry defaults (MS Office zh-CN "Normal":
+// A4 + top/bottom 1440tw, left/right 1800tw) so editor-side geometry fallbacks
+// — content-width for image capping, page measurement — reuse the SAME defaults
+// the engine uses to fill an empty sectPr, instead of hardcoding divergent ones.
+export { sectionMarginDefaults, sectionPageSizeDefaults } from "@office-open/docx";
+// Re-export the engine's length conversion (mm → twips) so the editor layer can
+// build OOXML page geometry from mm presets without a direct @office-open/core
+// dependency. (@office-open/docx does not re-export this from core.)
+export { convertMillimetersToTwip } from "@office-open/core";
 
 // Editor factory
 export { createDocxEditor, type DocxEditorOptions } from "./editor";

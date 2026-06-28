@@ -76,6 +76,7 @@
     "@tiptap/extension-table-of-contents": "3.22.5",
     "@tiptap/extensions": "3.22.5",
     "@tiptap/pm": "3.22.5",
-    "prosemirror-search": "^1.1.1"
+    "image-meta": "0.2.2",
+    "prosemirror-search": "1.1.1"
   }
 }

@@ -1,13 +1,16 @@
 import {
+  convertMillimetersToTwip,
   createDocxEditor,
   effectiveRunProps,
   generateDOCX,
   parseDOCX,
   parseHTML,
   resolveFontName,
+  sectionPageSizeDefaults,
   stylesToCss,
   twipsToMm,
   type JSONContent,
+  type SectionPropertiesOptions,
   type StylesOptions,
 } from "@docen/docx";
 import { Extension, type Editor } from "@docen/docx/core";
@@ -42,6 +45,7 @@ import { dispatchRibbonCommand, WIRED_DISPATCH } from "./commands";
 // Side-effect import: registers the ribbon/header translation tables.
 import "./i18n";
 import { FontMetricDecoration } from "./extensions/font-metric";
+import { ImageCap } from "./extensions/image-cap";
 import { PageBreakView } from "./extensions/page-break";
 import { Page, PageDocument } from "./extensions/page-node";
 import { PagePlugin, pageStorageOf } from "./extensions/page-plugin";
@@ -188,6 +192,19 @@ const TEMPLATE = `
        overlays its own empty paragraph, over the body text below it). */
     .docen-pages .docen-page p:has([data-float-anchor="paragraph"]) {
       position: relative;
+    }
+    /* Images cap to the section content width the way Word caps them: a wider
+       image scales DOWN to fit, never upscales. The ImageCap extension sets the
+       real width on data-URL images it can sync-decode; this rule is the visual
+       fallback for what it skips (http(s) URLs, docs without section geometry)
+       so nothing overflows the fixed page box. crop images render an enlarged
+       inner <img>, so opt them out or the cap collapses the crop geometry. */
+    .docen-pages .docen-page img {
+      max-width: 100%;
+      height: auto;
+    }
+    .docen-pages .docen-page span[data-image="crop"] > img {
+      max-width: none;
     }
     /* EMF/WMF (Office GDI vector) images can't be decoded by the browser, so
        Image.renderHTML emits a div[data-image=vector] placeholder carrying the
@@ -548,13 +565,59 @@ const PAPER_SIZES: Readonly<Record<string, readonly [number, number]>> = {
 };
 
 /** MS Office margin presets (mm, CSS padding list for the page content box:
- *  one value = uniform; two = top/bottom then left/right). */
+ *  one value = uniform; two = top/bottom then left/right). `normal` matches the
+ *  engine default (@office-open/docx sectionMarginDefaults: top/bottom 25.4mm,
+ *  left/right 31.75mm = MS Office zh-CN "Normal") so the canvas fallback and the
+ *  document-model sectionProperties agree. */
 const MARGINS: Readonly<Record<string, string>> = {
-  normal: "25.4mm",
+  normal: "25.4mm 31.75mm",
   narrow: "12.7mm",
   moderate: "25.4mm 19.05mm",
   wide: "25.4mm 50.8mm",
 };
+
+/** Parse a CSS padding list (mm, 1–4 values) into OOXML page margins (twips),
+ *  via the engine's convertMillimetersToTwip (mm → twips). */
+function marginTwipsFromCss(css: string): {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+} {
+  const mm = css.split(/\s+/).map((s) => parseFloat(s));
+  const [t, r, b, l] =
+    mm.length === 1
+      ? [mm[0], mm[0], mm[0], mm[0]]
+      : mm.length === 2
+        ? [mm[0], mm[1], mm[0], mm[1]]
+        : [mm[0], mm[1], mm[2] ?? mm[1], mm[3] ?? mm[1]];
+  return {
+    top: convertMillimetersToTwip(t),
+    right: convertMillimetersToTwip(r),
+    bottom: convertMillimetersToTwip(b),
+    left: convertMillimetersToTwip(l),
+  };
+}
+
+/** Deep-merge a sectionProperties patch (page.size / page.margin) into a base,
+ *  preserving sides/dims the patch omits — so e.g. changing only the margins
+ *  keeps the page size. Reuses the engine's SectionPropertiesOptions type. */
+function mergeSectionProperties(
+  base: SectionPropertiesOptions | null | undefined,
+  patch: SectionPropertiesOptions,
+): SectionPropertiesOptions {
+  const bp = base?.page;
+  const pp = patch.page;
+  return {
+    ...base,
+    page: {
+      ...bp,
+      ...pp,
+      size: { ...bp?.size, ...pp?.size },
+      margin: { ...bp?.margin, ...pp?.margin },
+    },
+  };
+}
 
 /**
  * `<docen-document>` — a turnkey DOCX editor super-component.
@@ -1059,6 +1122,10 @@ class DocenDocument extends HTMLElement {
       extensions: [
         PageDocument,
         Page,
+        // ImageCap scales over-wide images down to the section content width
+        // (Word behavior) and runs before PagePlugin so the reflow measures the
+        // capped dimensions, not the pre-cap overflow.
+        ImageCap,
         PagePlugin,
         FontMetricDecoration,
         SplitTable,
@@ -1402,8 +1469,10 @@ class DocenDocument extends HTMLElement {
   }
 
   /** Apply a paper-size preset (a4/letter/…) to the canvas as raw mm, then
-   *  re-paginate. The canvas takes only page-width/page-height; presets live
-   *  here (PAPER_SIZES). */
+   *  re-paginate. Also writes the size into the document-model sectionProperties
+   *  (Word stores page setup in the sectPr) so render/measure/image-cap/export
+   *  share one geometry source; the canvas attrs are now the rendering fallback
+   *  + the zoom surface's page-width source. */
   #setPageSize(value?: string): void {
     const canvas = this.shadowRoot?.querySelector("docen-canvas");
     const size = value ? PAPER_SIZES[value] : undefined;
@@ -1411,28 +1480,102 @@ class DocenDocument extends HTMLElement {
       canvas.setAttribute("page-width", String(size[0]));
       canvas.setAttribute("page-height", String(size[1]));
     }
+    if (size) {
+      this.#updateSectionGeometry({
+        page: {
+          size: {
+            width: convertMillimetersToTwip(size[0]),
+            height: convertMillimetersToTwip(size[1]),
+          },
+        },
+      });
+    }
     this.#refreshGeometry();
   }
 
   /** Apply orientation (portrait/landscape) to the canvas, then re-paginate.
    *  portrait clears the attribute (the canvas default); landscape sets it and
-   *  the canvas swaps width/min-height via :host([orientation]). */
+   *  the canvas swaps width/min-height via :host([orientation]). Also writes
+   *  orientation onto page.size, deep-merged with the current (or engine-default)
+   *  size so resolvePageSize can swap edges for landscape. */
   #setOrientation(value?: string): void {
     const canvas = this.shadowRoot?.querySelector("docen-canvas");
     if (canvas && value) {
       if (value === "landscape") canvas.setAttribute("orientation", "landscape");
       else canvas.removeAttribute("orientation");
     }
+    if (value) {
+      const cur = (
+        this.#editor?.state.doc.attrs as { sectionProperties?: SectionPropertiesOptions }
+      )?.sectionProperties?.page?.size;
+      const size =
+        cur && typeof cur.width === "number" && typeof cur.height === "number"
+          ? cur
+          : { width: sectionPageSizeDefaults.WIDTH, height: sectionPageSizeDefaults.HEIGHT };
+      this.#updateSectionGeometry({
+        page: { size: { ...size, orientation: value as "portrait" | "landscape" } },
+      });
+    }
     this.#refreshGeometry();
   }
 
   /** Apply a margin preset (normal/narrow/…) to the canvas as a CSS padding
-   *  list, then re-paginate. Presets live here (MARGINS); the canvas takes the
-   *  raw length list. */
+   *  list, then re-paginate. Also writes the margins into the document-model
+   *  sectionProperties so a page-setup change actually re-caps images and
+   *  re-renders (the canvas CSS alone wouldn't, once a sectPr is inlined). */
   #setMargins(value?: string): void {
     const canvas = this.shadowRoot?.querySelector("docen-canvas");
     if (canvas && value && MARGINS[value]) canvas.setAttribute("margin", MARGINS[value]);
+    if (value && MARGINS[value]) {
+      this.#updateSectionGeometry({ page: { margin: marginTwipsFromCss(MARGINS[value]) } });
+    }
     this.#refreshGeometry();
+  }
+
+  /** Deep-merge a sectionProperties patch into the CURRENT section's sectPr and
+   *  dispatch it — Word's "this section" semantics. The current section is the
+   *  one holding the caret: its sectPr rides on its last paragraph (the first
+   *  section-carrying paragraph at/after the caret), or, when the caret is in the
+   *  final section, on doc.attrs.sectionProperties (the body-level sectPr).
+   *  Reflow re-stamps each page's geometry from its section's sectPr, so an edit
+   *  only affects the caret's section — multi-section docs keep per-section page
+   *  setups, and render/measure/image-cap/export all see the change. */
+  #updateSectionGeometry(patch: SectionPropertiesOptions): void {
+    const editor = this.#editor;
+    if (!editor) return;
+    const { doc, tr } = editor.state;
+    const from = editor.state.selection.from;
+    // First section-carrying paragraph at/after the caret = the current
+    // section's last paragraph (OOXML: its sectPr ends that section).
+    let targetPos: number | null = null;
+    doc.descendants((node, nodePos) => {
+      if (targetPos != null || nodePos < from) return true;
+      if (
+        node.type.name === "paragraph" &&
+        (node.attrs as { sectionProperties?: unknown }).sectionProperties != null
+      ) {
+        targetPos = nodePos;
+        return false;
+      }
+      return true;
+    });
+    if (targetPos != null) {
+      const node = doc.nodeAt(targetPos);
+      if (node) {
+        const cur = (node.attrs as { sectionProperties?: SectionPropertiesOptions })
+          .sectionProperties;
+        tr.setNodeMarkup(targetPos, undefined, {
+          ...node.attrs,
+          sectionProperties: mergeSectionProperties(cur, patch),
+        });
+      }
+    } else {
+      // Caret in the final section (no section-carrying paragraph at/after it) —
+      // its sectPr is body-level (doc.attrs.sectionProperties).
+      const cur = (doc.attrs as { sectionProperties?: SectionPropertiesOptions }).sectionProperties;
+      tr.setDocAttribute("sectionProperties", mergeSectionProperties(cur, patch));
+    }
+    editor.view.dispatch(tr);
   }
 
   /** Re-paginate after a page-size / orientation / margin change. RAF so the

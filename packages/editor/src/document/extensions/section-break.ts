@@ -53,7 +53,7 @@ function buildSectionBreakDecos(doc: Node): DecorationSet {
  * traversal ran on every caret move even in documents with no section breaks.
  */
 export const SectionBreakMarks = Extension.create({
-  name: "sectionBreakMarks",
+  name: "docenSectionBreakMarks",
 
   addProseMirrorPlugins() {
     return [
