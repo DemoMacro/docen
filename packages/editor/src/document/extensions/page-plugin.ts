@@ -2,6 +2,7 @@ import { sectionMarginDefaults, type SectionPropertiesOptions } from "@docen/doc
 import { Extension, type Editor } from "@docen/docx/core";
 import type { Node as PmNode } from "@tiptap/pm/model";
 import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
+import type { EditorView } from "@tiptap/pm/view";
 
 import {
   measureBlockHeight,
@@ -614,7 +615,34 @@ function pagesEqual(doc: PmNode, newPages: PmNode[]): boolean {
   return current.every((p, i) => p.eq(newPages[i]));
 }
 
-function reflow(editor: Editor): void {
+/** Nearest scrollable ancestor of the editor surface (the docen-canvas). */
+function scrollContainerOf(view: EditorView): HTMLElement | null {
+  let el: HTMLElement | null = view.dom.parentElement;
+  while (el) {
+    if (el.clientHeight > 0 && el.scrollHeight > el.clientHeight) {
+      const overflowY = getComputedStyle(el).overflowY;
+      if (overflowY === "auto" || overflowY === "scroll") return el;
+    }
+    el = el.parentElement;
+  }
+  return null;
+}
+
+/** After an editor-driven reflow, scroll the caret to the TOP of the viewport
+ *  when it has left the visible area (Word-style page follow). No-op while the
+ *  caret stays in view, so normal typing doesn't fight the user's scroll. */
+function scrollCaretToTop(view: EditorView): void {
+  const scroller = scrollContainerOf(view);
+  if (!scroller) return;
+  const margin = 64;
+  const caretTop = view.coordsAtPos(view.state.selection.head).top;
+  const rect = scroller.getBoundingClientRect();
+  if (caretTop < rect.top + margin || caretTop > rect.bottom - margin) {
+    scroller.scrollTop += caretTop - rect.top - margin;
+  }
+}
+
+function reflow(editor: Editor, scroll = false): void {
   const view = editor.view;
   const state = view.state;
   // Skip re-flow while a table CellSelection is active: the full-doc rebuild
@@ -861,6 +889,11 @@ function reflow(editor: Editor): void {
   tr.setMeta(flowKey, { flow: true });
   tr.setMeta("addToHistory", false);
   view.dispatch(tr);
+  // Follow the caret (editor-driven reflows only — see pendingScroll). A reflow
+  // can move the caret's block to a new page; scroll it to the TOP of the
+  // viewport (ProseMirror's scrollIntoView parks the caret at the bottom edge,
+  // which reads wrong for a page jump). No-op if the caret is still in view.
+  if (scroll) scrollCaretToTop(editor.view);
 }
 
 /**
@@ -891,13 +924,20 @@ export const PagePlugin = Extension.create<PagePluginOptions>({
     const editor = this.editor;
     const debounceMs = this.options.debounceMs ?? 300;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    // Whether the pending reflow should scroll the caret back into view. OR'd
+    // across every schedule() inside a debounce window, so a reflow triggered by
+    // both an edit and a late image decode still follows the caret.
+    let pendingScroll = false;
 
     const runRaf = (): void => {
       requestAnimationFrame(() => {
-        if (!editor.isDestroyed) reflow(editor);
+        const scroll = pendingScroll;
+        pendingScroll = false;
+        if (!editor.isDestroyed) reflow(editor, scroll);
       });
     };
-    const schedule = (): void => {
+    const schedule = (followCaret = false): void => {
+      pendingScroll = pendingScroll || followCaret;
       if (timer) clearTimeout(timer);
       timer = setTimeout(runRaf, debounceMs);
     };
@@ -929,7 +969,7 @@ export const PagePlugin = Extension.create<PagePluginOptions>({
               // (doc unchanged after our dispatch converges, or the same-check
               // inside reflow short-circuits) does not cascade.
               if (view.state.doc === prevState.doc) return;
-              schedule();
+              schedule(true);
             },
             destroy() {
               editorView.dom.removeEventListener("load", onMediaReady, true);
