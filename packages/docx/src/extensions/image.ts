@@ -154,24 +154,22 @@ export function parseDocx(imageOpts: Record<string, unknown>): Record<string, un
 
 // ── Node-level renderHTML helpers ──
 
-/** Dimensions + source needed to size the background image to the extent box. */
+/** Extent-box dimensions needed to size the inner <img> for a cropped image. */
 export interface CropRenderContext {
   width?: number;
   height?: number;
-  src?: string;
 }
 
 /**
- * Render crop as background-image styles for byte-accurate four-sided srcRect.
+ * Render crop as the inner <img> style for byte-accurate four-sided srcRect.
  *
- * object-fit:cover scales uniformly, so it only matches single-axis crops; for
- * two-sided crops it shrinks the whole image and shows too much. background-size
- * scales each axis independently (W/visibleW × H/visibleH), so the visible
- * srcRect region always maps exactly onto the extent box. background-position
- * then shifts the original so the cropped-left/top region falls outside the box.
- *
- * Requires a div[role=img] host (see Image.renderHTML) — an <img> cannot
- * background-crop itself, since its src is always painted in the foreground.
+ * object-fit:cover scales uniformly, so it only matches single-axis crops.
+ * Instead the inner <img> is sized to the un-cropped display size per axis
+ * (imgW = W/visibleW, imgH = H/visibleH) and translated so the visible srcRect
+ * region maps exactly onto the extent box; the outer box clips (overflow:hidden)
+ * the cropped-out left/top region. Mathematically equivalent to a
+ * background-size/background-position crop, but keeps a real <img> (alt,
+ * accessibility, semantics, drag-to-save).
  */
 export function renderCropAttrs(
   crop: Record<string, unknown> | CropRect,
@@ -186,26 +184,26 @@ export function renderCropAttrs(
   const visibleW = 1 - leftPct - rightPct;
   const visibleH = 1 - topPct - bottomPct;
 
-  // Original displayed size per axis (independent of the other axis — the key
+  // Inner <img> display size per axis (independent of the other axis — the key
   // difference from object-fit:cover). Falls back to the box size when an axis
   // is uncropped (visible = 1 → same size).
   const w = ctx.width ?? 0;
   const h = ctx.height ?? 0;
-  const bgW = visibleW > 0 ? w / visibleW : w;
-  const bgH = visibleH > 0 ? h / visibleH : h;
+  const imgW = visibleW > 0 ? w / visibleW : w;
+  const imgH = visibleH > 0 ? h / visibleH : h;
 
-  // background-position % = (box − image) × pct/100; solving for the image's
-  // leftPct·bgW point at the box's left edge gives pct = left/(left+right).
-  const posX = leftPct + rightPct > 0 ? (leftPct / (leftPct + rightPct)) * 100 : 50;
-  const posY = topPct + bottomPct > 0 ? (topPct / (topPct + bottomPct)) * 100 : 50;
+  // Shift the image so the visible region's top-left lands at the box's
+  // top-left: translate by the cropped-left/top amount (pct × display size).
+  const offX = -(leftPct * imgW);
+  const offY = -(topPct * imgH);
 
-  const src = ctx.src ?? "";
   return {
     style: [
-      `background-image:url(${src})`,
-      `background-size:${bgW.toFixed(2)}px ${bgH.toFixed(2)}px`,
-      `background-position:${posX.toFixed(2)}% ${posY.toFixed(2)}%`,
-      "background-repeat:no-repeat",
+      "display:block",
+      `width:${imgW.toFixed(2)}px`,
+      `height:${imgH.toFixed(2)}px`,
+      `transform:translate(${offX.toFixed(2)}px,${offY.toFixed(2)}px)`,
+      "transform-origin:0 0",
     ].join(";"),
   };
 }
@@ -216,10 +214,10 @@ function renderImageStyles(attrs: Record<string, unknown>): string[] {
   if (attrs.display) {
     styles.push(`display:${attrs.display as string}`);
   } else if (!attrs.floating) {
-    // An <img> is an inline-replaced element, but a cropped image renders as a
-    // <div> (default block). Without inline-block it claims its own line in the
-    // paragraph and breaks side-by-side image rows (a centered row of two
-    // images collapses to one-per-line). floating images are placed via
+    // Cropped images render as a <span> box and vector images as a <div> — both
+    // are block-level by default, so without inline-block a box claims its own
+    // line and breaks side-by-side image rows (a centered row of two images
+    // collapses to one-per-line). floating images are placed via
     // position:absolute/float, where display no longer governs layout.
     styles.push("display:inline-block");
   }
@@ -398,30 +396,31 @@ export const Image = BaseImage.extend({
       return ["div", divAttrs, "Vector image"] as const;
     }
 
-    // Cropped images render as div[role=img] + background-image so background
-    // -size can scale each axis independently (object-fit:cover is uniform and
-    // only exact for single-axis crops). Non-cropped images stay plain <img>.
+    // Cropped images render as a span[extent-box] (overflow:hidden + placement)
+    // wrapping a real <img>. The <img> is sized per axis and translated so the
+    // visible srcRect region maps onto the box (object-fit:cover is uniform and
+    // only exact for single-axis crops); the box clips the cropped-out region.
+    // Keeping a real <img> (vs a background-image div) preserves alt/accessibility.
     if (attrs.crop) {
       const width = attrs.width as number;
       const height = attrs.height as number;
-      const styles = renderImageStyles(attrs);
-      const crop = renderCropAttrs(attrs.crop as CropRect, {
-        width,
-        height,
-        src: attrs.src as string | undefined,
-      });
-      styles.push(crop.style, `width:${width}px`, `height:${height}px`);
-      const divAttrs: Record<string, unknown> = {
+      const boxStyles = renderImageStyles(attrs);
+      boxStyles.push("overflow:hidden", `width:${width}px`, `height:${height}px`);
+      const crop = renderCropAttrs(attrs.crop as CropRect, { width, height });
+      const boxAttrs: Record<string, unknown> = {
         "data-image": "crop",
-        role: "img",
-        style: styles.join(";"),
+        style: boxStyles.join(";"),
       };
-      if (attrs.alt) divAttrs["aria-label"] = attrs.alt;
-      if (attrs.title) divAttrs["title"] = attrs.title;
-      attachRawAttrs(divAttrs, attrs);
-      divAttrs["data-crop"] = JSON.stringify(attrs.crop);
-      if (floatAnchor) divAttrs["data-float-anchor"] = floatAnchor;
-      return ["div", divAttrs] as const;
+      attachRawAttrs(boxAttrs, attrs);
+      boxAttrs["data-crop"] = JSON.stringify(attrs.crop);
+      if (floatAnchor) boxAttrs["data-float-anchor"] = floatAnchor;
+      const imgAttrs: Record<string, unknown> = {
+        src: attrs.src as string,
+        style: crop.style,
+      };
+      if (attrs.alt) imgAttrs.alt = attrs.alt;
+      if (attrs.title) imgAttrs.title = attrs.title;
+      return ["span", boxAttrs, ["img", imgAttrs]] as const;
     }
 
     const htmlAttrs: Record<string, unknown> = { ...HTMLAttributes };
@@ -435,7 +434,7 @@ export const Image = BaseImage.extend({
   parseHTML() {
     return [
       {
-        tag: "div[data-image=crop]",
+        tag: "span[data-image=crop]",
         getAttrs: (el) => parseCropDiv(el as HTMLElement),
       },
       {
@@ -451,35 +450,34 @@ export const Image = BaseImage.extend({
 });
 
 /**
- * Reverse-parse a cropped div[role=img] back into image attrs.
+ * Reverse-parse a cropped span[extent-box] back into image attrs.
  *
- * Covers only what the attribute-level parseHTML rules cannot recover from a
- * div: src (background-image), width/height (inline style extent box), and
- * alt/title (aria-label/title). rotation/crop/floating/outline are left to
- * their attribute parseHTML rules, which read the style/data-* the div carries.
+ * src/alt/title live on the inner <img>; width/height on the outer box inline
+ * style (the extent box, not the img's un-cropped display size).
+ * rotation/crop/floating/outline are left to their attribute parseHTML rules,
+ * which read the style/data-* the box carries.
  */
 function parseCropDiv(el: HTMLElement): Record<string, unknown> {
-  const style = el.getAttribute("style") || "";
   const attrs: Record<string, unknown> = {};
 
-  // src lives in background-image (the div has no <img> src attribute).
-  // Tolerate whitespace around `:` — serializers may emit `background-image: url(..)`.
-  const bgMatch = style.match(/background-image:\s*url\(\s*([^)]+?)\s*\)/);
-  if (bgMatch) {
-    attrs.src = bgMatch[1].replace(/^['"]|['"]$/g, "");
+  // src/alt/title live on the inner <img> (the box carries none of them).
+  const img = el.querySelector("img");
+  if (img) {
+    const src = img.getAttribute("src");
+    if (src) attrs.src = src;
+    const alt = img.getAttribute("alt");
+    if (alt) attrs.alt = alt;
+    const title = img.getAttribute("title");
+    if (title) attrs.title = title;
   }
 
-  // width/height live in the inline style (extent box), not HTML attributes
+  // width/height live in the box inline style (extent), not the <img> (which
+  // carries the larger un-cropped display size + transform).
+  const style = el.getAttribute("style") || "";
   const wMatch = style.match(/(?:^|;)\s*width:\s*([\d.]+)px/);
   const hMatch = style.match(/(?:^|;)\s*height:\s*([\d.]+)px/);
   if (wMatch) attrs.width = parseFloat(wMatch[1]);
   if (hMatch) attrs.height = parseFloat(hMatch[1]);
-
-  // alt/title carry over via aria-label/title (the div has no alt attribute)
-  const ariaLabel = el.getAttribute("aria-label");
-  if (ariaLabel) attrs.alt = ariaLabel;
-  const title = el.getAttribute("title");
-  if (title) attrs.title = title;
 
   return attrs;
 }
