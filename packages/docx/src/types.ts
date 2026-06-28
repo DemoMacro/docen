@@ -252,13 +252,11 @@ export interface ImageAttrs {
 }
 
 /**
- * Emoji node attrs.
- * `name` is the shortcode (base @tiptap/extension-emoji); `emoji` is the
- * resolved glyph cached for DOCX export (null when only the shortcode is known).
+ * Emoji node attrs. `name` is the shortcode (base @tiptap/extension-emoji); the
+ * glyph is resolved from the emoji dataset at DOCX-compile time.
  */
 export interface EmojiAttrs {
   name: string | null;
-  emoji: string | null;
 }
 
 /**

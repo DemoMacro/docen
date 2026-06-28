@@ -21,6 +21,7 @@ import type {
   OutputType,
   PackerOptions,
 } from "@office-open/docx";
+import { emojis, shortcodeToEmoji } from "@tiptap/extension-emoji";
 
 import type { JSONContent } from "../core";
 import * as blockquoteExt from "../extensions/blockquote";
@@ -851,10 +852,14 @@ export class DocxManager {
           break;
         }
         case "emoji": {
-          // DOCX has no emoji structure — emit the glyph (or :name: shortcode
-          // fallback) as a plain text run. Resolve degrades back to a text node.
-          const attrs = (node.attrs ?? {}) as { emoji?: string; name?: string };
-          const text = attrs.emoji ?? (attrs.name ? `:${attrs.name}:` : "");
+          // DOCX has no emoji structure — emit the glyph as a plain text run,
+          // resolving it from the same emoji dataset base renders from (compile
+          // is headless, so the shortcode name must be looked up explicitly).
+          // Falls back to the :name: shortcode if the dataset has no match;
+          // resolve degrades DOCX text back to a plain text node.
+          const name = String(node.attrs?.name ?? "");
+          const glyph = name ? shortcodeToEmoji(name, emojis)?.emoji : undefined;
+          const text = glyph ?? (name ? `:${name}:` : "");
           if (text) children.push({ text } as Record<string, unknown> as ParagraphChild);
           break;
         }

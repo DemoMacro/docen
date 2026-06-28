@@ -6,7 +6,6 @@ import { CodeBlock } from "./code-block";
 import { ColumnBreak } from "./column-break";
 import { Details, DetailsSummary, DetailsContent } from "./details";
 import { Document } from "./document";
-import { Emoji } from "./emoji";
 import { FormattingMarks } from "./formatting-marks";
 import { Heading } from "./heading";
 import { Image } from "./image";
@@ -41,6 +40,7 @@ import {
   Subscript,
   Superscript,
   TextAlign,
+  Emoji,
 } from "./tiptap";
 import { WpgGroup } from "./wpg-group";
 import { WpsShape } from "./wps-shape";
@@ -206,7 +206,6 @@ export const DocxKit = Extension.create<DocxKitOptions>({
 // Export all individual extensions for direct imports
 export * from "./tiptap";
 export { Document } from "./document";
-export { Emoji } from "./emoji";
 export { Heading } from "./heading";
 export { Image } from "./image";
 export { WpgGroup } from "./wpg-group";
