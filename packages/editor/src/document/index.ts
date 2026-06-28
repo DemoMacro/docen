@@ -241,8 +241,9 @@ const TEMPLATE = `
        just outside a content-box corner and the two 23px legs reach into the
        margin. Drawn on a ::before that covers the whole page (inset: 0) and
        carries the page margin as its own padding, so its content-box == the
-       page's content box — that is the origin the negative background-position
-       offsets from, landing each leg in the margin gutter (not over text). The
+       page's content box — that is the origin the background-position
+       offsets are measured from (negative for the top legs, positive for the
+       bottom), landing each leg in the margin gutter (not over text). The
        ::before is used (not the page node's own background) because a
        ProseMirror-managed node does not paint its own background-image, but its
        pseudo-element does. */
@@ -264,8 +265,8 @@ const TEMPLATE = `
       background-position:
         -24px -2px, -2px -24px,
         calc(100% + 24px) -2px, calc(100% + 2px) -24px,
-        -24px 100%, -2px 100%,
-        calc(100% + 24px) 100%, calc(100% + 2px) 100%;
+        -24px calc(100% + 2px), -2px calc(100% + 24px),
+        calc(100% + 24px) calc(100% + 2px), calc(100% + 2px) calc(100% + 24px);
       background-size: 23px 1px, 1px 23px, 23px 1px, 1px 23px, 23px 1px, 1px 23px, 23px 1px, 1px 23px;
       background-origin: content-box;
       background-repeat: no-repeat;
