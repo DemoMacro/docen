@@ -301,6 +301,35 @@ export const Image = BaseImage.extend({
         },
       },
 
+      // width/height: capture from the HTML attribute (default) OR inline style
+      // (px). External HTML — especially pasted from Word/web — usually sizes
+      // images via style="width:..px" rather than a width=".." attribute, so
+      // reading the style keeps sizing through HTML→JSON parsing.
+      width: {
+        parseHTML: (element: HTMLElement) => {
+          const attr = element.getAttribute("width");
+          if (attr != null) {
+            const n = parseFloat(attr);
+            if (!Number.isNaN(n)) return n;
+          }
+          const style = element.getAttribute("style") || "";
+          const m = style.match(/(?:^|;)\s*width:\s*([\d.]+)px/);
+          return m ? parseFloat(m[1]) : null;
+        },
+      },
+      height: {
+        parseHTML: (element: HTMLElement) => {
+          const attr = element.getAttribute("height");
+          if (attr != null) {
+            const n = parseFloat(attr);
+            if (!Number.isNaN(n)) return n;
+          }
+          const style = element.getAttribute("style") || "";
+          const m = style.match(/(?:^|;)\s*height:\s*([\d.]+)px/);
+          return m ? parseFloat(m[1]) : null;
+        },
+      },
+
       // Nested office-open Floating (JSON in data-floating; CSS rendered)
       floating: {
         default: null,
