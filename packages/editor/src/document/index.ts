@@ -271,6 +271,13 @@ const TEMPLATE = `
       background-origin: content-box;
       background-repeat: no-repeat;
     }
+    /* Grey the "Auto-save" label to match its disabled switch (skeleton
+       feature), so the label + switch read as one unavailable control, like
+       ribbon skeleton buttons. Lifts automatically once the switch loses
+       disabled. */
+    .autosave-label:has(+ fluent-switch[disabled]) {
+      color: var(--docen-color-text-3, #8a8a8a);
+    }
     /* While focus is in a ribbon combobox dropdown, the editor is blurred and
        the browser stops painting its selection. The Tiptap Selection extension
        stamps a .selection class on the range so it stays visible. Uses the
@@ -1303,7 +1310,10 @@ class DocenDocument extends HTMLElement {
           <div slot="start" style="display:flex;align-items:center;gap:4px">
             <span style="font-weight:600;font-size:13px;padding-inline:6px">${t("header.brand")}</span>
             <span class="autosave-label">${autosave}</span>
-            <fluent-switch data-event="autosave" checked aria-label="${autosave}"></fluent-switch>
+            <!-- auto-save is skeleton-only — disabled (greyed, non-interactive)
+                 until the feature is wired; the autosave case in onChange is a
+                 no-op. Remove disabled (and re-add checked) when it lands. -->
+            <fluent-switch data-event="autosave" disabled aria-label="${autosave}"></fluent-switch>
             <docen-ribbon-button icon="save" label="${t("header.save")}" event="save" icon-only></docen-ribbon-button>
             <docen-ribbon-button icon="undo" label="${t("header.undo")}" event="undo" icon-only></docen-ribbon-button>
             <docen-ribbon-button icon="redo" label="${t("header.redo")}" event="redo" icon-only></docen-ribbon-button>
