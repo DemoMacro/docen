@@ -37,8 +37,8 @@ importers:
   packages/docx:
     dependencies:
       '@office-open/docx':
-        specifier: 0.10.2
-        version: 0.10.2
+        specifier: 0.10.5
+        version: 0.10.5
       '@tiptap/core':
         specifier: 3.22.5
         version: 3.22.5(@tiptap/pm@3.22.5)
@@ -640,14 +640,14 @@ packages:
     resolution: {integrity: sha512-IYqDGiTXab6FniAgnSdZwgWbomxpy9FtYvLKs7wCUs2a8RkITG+DFGO1DM9cr+E3/RgADRpFjrKVaJ1z6sjtEg==}
     engines: {node: '>= 20.19.0'}
 
-  '@office-open/core@0.10.2':
-    resolution: {integrity: sha512-hn6quoFQANR2nTwqYLTR1lKeyQmG65FifYrmt9fSGEkeP4AJrweS6WBXFLN5P67wvLeBwi+ZJU8/ml5jFhRV2A==}
+  '@office-open/core@0.10.5':
+    resolution: {integrity: sha512-vTODs2uoeEba5kJCu+13x/psQ13tlzJMsfQlfuMwmCk/r/8b3t1RQIV0ta39tDBDGsrx8Bp78BMgf9X02e01+A==}
 
-  '@office-open/docx@0.10.2':
-    resolution: {integrity: sha512-10x0vYbIhWHdumHdnfbpPDOpUfUhoh5rltO+jBB2XdJTPTWKkrXlLhBTP8rFbD3BW/yheNQEb0M7CqsIViY7KQ==}
+  '@office-open/docx@0.10.5':
+    resolution: {integrity: sha512-zjeRgm/S9NATydj2TZSaDV+/HZzLLHkIo9tPbDjNbnDeN04hMnlIBas13iWCYt8HMmAfRg/uuOLnw6moxvOQoA==}
 
-  '@office-open/xml@0.10.2':
-    resolution: {integrity: sha512-lO0TKbDqdTo62YXobod+0XJHs54yiULXH2rGHL8atudtXTGWKx02awoO4Jth0M1eqWa+v+eC9F9tH5zdFiVAvw==}
+  '@office-open/xml@0.10.5':
+    resolution: {integrity: sha512-0Xm+od1AvkPLikWTPXXg9PGOE/DkPpPUgE0R6uYzspDApIKGmAIqpF8WXkX7bl7jaPj9Wck8JFqigMlIn2kxug==}
 
   '@oxc-project/runtime@0.133.0':
     resolution: {integrity: sha512-PkvjA1Lq5++V5S1E6Patr92ZVcieE6EalDr1VJTqv4BnjZdOUC4W3p8k1wMXSd5/2aFP4b/A6N5sg2Bkzcr9vQ==}
@@ -2842,18 +2842,18 @@ snapshots:
 
   '@noble/hashes@2.2.0': {}
 
-  '@office-open/core@0.10.2':
+  '@office-open/core@0.10.5':
     dependencies:
       '@noble/hashes': 2.2.0
-      '@office-open/xml': 0.10.2
+      '@office-open/xml': 0.10.5
       fflate: 0.8.3
 
-  '@office-open/docx@0.10.2':
+  '@office-open/docx@0.10.5':
     dependencies:
-      '@office-open/core': 0.10.2
-      '@office-open/xml': 0.10.2
+      '@office-open/core': 0.10.5
+      '@office-open/xml': 0.10.5
 
-  '@office-open/xml@0.10.2': {}
+  '@office-open/xml@0.10.5': {}
 
   '@oxc-project/runtime@0.133.0': {}
 

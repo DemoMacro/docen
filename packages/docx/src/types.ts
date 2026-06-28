@@ -66,7 +66,6 @@ export type {
   ParagraphRunPropertiesOptions,
   // Image
   ImageOptions,
-  ImageChild,
   MediaTransformation,
   // Table
   TableRowOptions,
@@ -104,7 +103,6 @@ export type {
   Floating,
   ExternalHyperlinkOptions,
   InternalHyperlinkOptions,
-  MathChild,
   MathInput,
   // Underline, highlight
   HighlightColor,

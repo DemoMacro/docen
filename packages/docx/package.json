@@ -63,7 +63,7 @@
     "prepack": "pnpm build"
   },
   "dependencies": {
-    "@office-open/docx": "0.10.2",
+    "@office-open/docx": "0.10.5",
     "@tiptap/core": "3.22.5",
     "@tiptap/extension-blockquote": "3.22.5",
     "@tiptap/extension-bold": "3.22.5",

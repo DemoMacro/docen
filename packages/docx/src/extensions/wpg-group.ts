@@ -1,4 +1,4 @@
-import { encodeBase64 } from "@office-open/core";
+import { convertEmuToPixels, encodeBase64 } from "@office-open/core";
 import type { DOMOutputSpec } from "@tiptap/pm/model";
 
 import { Node } from "../core";
@@ -112,9 +112,12 @@ function outlineToCss(outline: Outline | undefined): string | undefined {
  *  carry a ChildTransformation whose pixels/emus give the size. */
 function groupExtent(group: WpgGroup): { w: number; h: number } {
   const t = group.transformation;
+  // office-open 0.10.4+ parses wp:extent as EMU verbatim (was pixels); convert
+  // the top-level size to px so the group renders in pixel space (matching the
+  // child transforms, which still carry both pixels and EMUs).
   return {
-    w: t?.width ?? t?.pixels?.x ?? 0,
-    h: t?.height ?? t?.pixels?.y ?? 0,
+    w: t?.width != null ? convertEmuToPixels(t.width) : (t?.pixels?.x ?? 0),
+    h: t?.height != null ? convertEmuToPixels(t.height) : (t?.pixels?.y ?? 0),
   };
 }
 

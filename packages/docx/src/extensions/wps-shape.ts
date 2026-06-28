@@ -1,3 +1,4 @@
+import { convertEmuToPixels } from "@office-open/core";
 import type { DOMOutputSpec } from "@tiptap/pm/model";
 
 import { Node } from "../core";
@@ -58,8 +59,9 @@ export const WpsShape = Node.create({
     HTMLAttributes: Record<string, unknown>;
   }) {
     const ws = (node.attrs.wpsShape as WpsShapeData | null) ?? {};
-    const w = ws.transformation?.width ?? 0;
-    const h = ws.transformation?.height ?? 0;
+    // office-open 0.10.4+ parses extent as EMU verbatim (was pixels); convert to px.
+    const w = ws.transformation?.width != null ? convertEmuToPixels(ws.transformation.width) : 0;
+    const h = ws.transformation?.height != null ? convertEmuToPixels(ws.transformation.height) : 0;
     // box-sizing:border-box so the shape's width/height is its outer box
     // (matching Word's extent), not content-box (which adds padding on top).
     const sizeStyle = `width:${w}px;height:${h}px;box-sizing:border-box`;

@@ -1,3 +1,5 @@
+import { convertEmuToPixels } from "@office-open/core";
+
 import type { JSONContent } from "../core";
 import { Image as BaseImage } from "./tiptap";
 import { floatAnchorScope, floatingToStyles } from "./utils";
@@ -70,7 +72,9 @@ export function renderDocx(node: JSONContent): Record<string, unknown> | null {
   // rotation is an optional editor attr carried via transformation.rotation.
   const width = (attrs.width as number | undefined) ?? 600;
   const height = (attrs.height as number | undefined) ?? 400;
-  const transformation: Record<string, unknown> = { width, height };
+  // office-open 0.10.4+ treats a numeric transformation size as EMU (was px);
+  // emit UniversalMeasure so the px value is interpreted correctly on generate.
+  const transformation: Record<string, unknown> = { width: `${width}px`, height: `${height}px` };
   const rotation = attrs.rotation as number | undefined;
   if (rotation != null) transformation.rotation = rotation;
   imageOpts.transformation = transformation;
@@ -114,8 +118,11 @@ export function parseDocx(imageOpts: Record<string, unknown>): Record<string, un
   // transformation → width/height/rotation (structural Tiptap attrs)
   const transformation = opts.transformation as Record<string, unknown> | undefined;
   if (transformation) {
-    if (typeof transformation.width === "number") attrs.width = transformation.width;
-    if (typeof transformation.height === "number") attrs.height = transformation.height;
+    // office-open 0.10.4+ parses wp:extent as EMU verbatim (was px); convert to px.
+    if (typeof transformation.width === "number")
+      attrs.width = convertEmuToPixels(transformation.width);
+    if (typeof transformation.height === "number")
+      attrs.height = convertEmuToPixels(transformation.height);
     if (typeof transformation.rotation === "number") attrs.rotation = transformation.rotation;
   }
 
