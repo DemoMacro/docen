@@ -1910,15 +1910,12 @@ class DocenDocument extends HTMLElement {
     window.print();
   }
 
-  /** Load a .docx file into the editor and adopt its name as the filename. */
-  async openDOCX(file: File): Promise<void> {
-    this.openDOCXFromBuffer(await file.arrayBuffer());
-    this.setAttribute("filename", file.name);
-    this.#renderChrome();
-  }
-
-  /** Load a DOCX from an ArrayBuffer or Uint8Array (parseDOCX is synchronous). */
-  openDOCXFromBuffer(buffer: ArrayBuffer | Uint8Array): void {
+  /** Load a .docx into the editor from a File or a buffer (ArrayBuffer /
+   *  Uint8Array). A File also adopts its name as the filename; a bare buffer
+   *  carries no name. parseDOCX is synchronous, but this is async so a File's
+   *  bytes can be awaited. */
+  async openDOCX(input: File | ArrayBuffer | Uint8Array): Promise<void> {
+    const buffer = input instanceof File ? await input.arrayBuffer() : input;
     const json = parseDOCX(buffer);
     const editor = this.#editor;
     if (!editor) return;
@@ -1930,6 +1927,10 @@ class DocenDocument extends HTMLElement {
     // measuring in the same frame reads half-laid-out blocks and the breaks
     // come out wrong (the first page overflows, so the pages look uneven).
     this.#repaginateAfterLoad(editor);
+    if (input instanceof File) {
+      this.setAttribute("filename", input.name);
+      this.#renderChrome();
+    }
   }
 
   /** Re-paginate after loading a document, once its layout has settled.

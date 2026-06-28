@@ -47,8 +47,7 @@ Open and save DOCX imperatively:
 ```typescript
 const doc = document.querySelector<DocenDocument>("#doc")!;
 
-await doc.openDOCX(file); // open from a File
-doc.openDOCXFromBuffer(arrayBuffer); // ...or from an ArrayBuffer/Uint8Array
+await doc.openDOCX(file); // File | ArrayBuffer | Uint8Array
 const output = await doc.saveDOCX(); // → Uint8Array
 ```
 
@@ -88,17 +87,19 @@ Unwired ribbon commands (skeleton buttons) render visually but are greyed out
 
 ```typescript
 class DocenDocument extends HTMLElement {
-  // File I/O
-  openDOCX(file: File): Promise<void>;
-  openDOCXFromBuffer(buffer: ArrayBuffer | Uint8Array): void;
+  // DOCX I/O
+  openDOCX(input: File | ArrayBuffer | Uint8Array): Promise<void>;
   saveDOCX(): Promise<Uint8Array>;
 
-  // Tiptap JSON (the runtime model)
+  // Runtime model — flat Tiptap JSON (doc > block+). The editor stores pages
+  // internally (C-route pagination); getJSON/setJSON unwrap/wrap them so the
+  // public model stays page-free (pages must not leak into DOCX export). For
+  // Tiptap's own getHTML / getText / setContent / chain, use getEditor().
   getJSON(): JSONContent;
   setJSON(json: JSONContent): void;
 
-  // Underlying engine + pagination
-  getEditor(): Editor | undefined; // the @docen/docx Tiptap Editor
+  // The underlying @docen/docx Tiptap Editor — the full Tiptap API surface.
+  getEditor(): Editor | undefined;
   repaginate(): void;
 }
 ```
