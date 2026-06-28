@@ -1,6 +1,6 @@
 {
   "name": "@docen/editor",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Assembly layer for docen editors — bundles a Fluent UI shell with the @docen/docx engine into turnkey <docen-document> / <docen-workbook> / <docen-presentation> super-components",
   "keywords": [
     "components",
@@ -66,16 +66,16 @@
   "dependencies": {
     "@chenglou/pretext": "0.0.8",
     "@docen/docx": "workspace:*",
-    "@fluentui/svg-icons": "1.1.330",
+    "@fluentui/svg-icons": "1.1.331",
     "@fluentui/tokens": "1.0.0-alpha.23",
     "@fluentui/web-components": "3.0.0-rc.28",
-    "@microsoft/fast-element": "2.10.4",
-    "@microsoft/fast-html": "1.0.0-alpha.54",
+    "@microsoft/fast-element": "2.10.5",
+    "@microsoft/fast-html": "1.0.0-alpha.55",
     "@microsoft/focusgroup-polyfill": "1.5.0",
-    "@tiptap/extension-list": "3.22.5",
-    "@tiptap/extension-table-of-contents": "3.22.5",
-    "@tiptap/extensions": "3.22.5",
-    "@tiptap/pm": "3.22.5",
+    "@tiptap/extension-list": "3.27.1",
+    "@tiptap/extension-table-of-contents": "3.27.1",
+    "@tiptap/extensions": "3.27.1",
+    "@tiptap/pm": "3.27.1",
     "image-meta": "0.2.2",
     "prosemirror-search": "1.1.1"
   }
