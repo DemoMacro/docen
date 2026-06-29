@@ -154,12 +154,41 @@ export function indexParagraphStyles(styles: StylesOptions): Map<string, StyleEn
   return byId;
 }
 
+/** Whether `v` is a plain object — an OOXML property group (spacing/indent/
+ *  border/shading/font) that merges key by key — as opposed to an array
+ *  (tabStops) or scalar, which replace. */
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+/** Deep-merge `source` into `target` (mutates target) per the OOXML `basedOn`
+ *  model: nested property groups merge key by key (a child's spacing.before
+ *  merges with, not replaces, the parent's spacing.line); arrays and scalars
+ *  replace. Nullish source values are skipped so an unset child key doesn't
+ *  clobber an inherited value. */
+function deepMergeInto(
+  target: Record<string, unknown>,
+  source: Record<string, unknown>,
+): Record<string, unknown> {
+  for (const [key, srcVal] of Object.entries(source)) {
+    if (srcVal === null || srcVal === undefined) continue;
+    const tgtVal = target[key];
+    target[key] =
+      isPlainObject(srcVal) && isPlainObject(tgtVal)
+        ? deepMergeInto({ ...tgtVal }, srcVal)
+        : isPlainObject(srcVal)
+          ? { ...srcVal }
+          : srcVal;
+  }
+  return target;
+}
+
 /** Merge a paragraph style's run/paragraph properties with its `basedOn` chain
- *  (root first, child overrides per-property) — the OOXML inheritance model. A
- *  flat property-level merge: a child property overrides the parent's; an unset
- *  property is inherited. Shared by stylesToCss (rendering) and
- *  effectiveRunProps (the caret resolver) so the gallery box and the rendered
- *  page resolve identical values. */
+ *  (root first, child overrides per-property) — the OOXML inheritance model.
+ *  Nested property groups (spacing/indent/border/font) merge key by key; arrays
+ *  and scalars replace. Shared by stylesToCss (rendering) and effectiveRunProps
+ *  (the caret resolver) so the gallery box and the rendered page resolve
+ *  identical values. */
 function mergeStyleChain(
   byId: Map<string, StyleEntry>,
   styleId: string | null | undefined,
@@ -180,8 +209,8 @@ function mergeStyleChain(
     // StyleEntry is a paragraph|character union; paragraph props live only on
     // the paragraph side, so access via a loose record.
     const s = style as unknown as Record<string, unknown>;
-    if (s.run) Object.assign(run, s.run);
-    if (s.paragraph) Object.assign(paragraph, s.paragraph);
+    if (s.run) deepMergeInto(run, s.run as Record<string, unknown>);
+    if (s.paragraph) deepMergeInto(paragraph, s.paragraph as Record<string, unknown>);
   }
   return { run, paragraph };
 }
