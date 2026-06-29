@@ -1,6 +1,7 @@
 import type { RunOptions } from "@office-open/docx";
 
 import { Strike as BaseStrike } from "./tiptap";
+import { attrNative } from "./utils";
 
 /**
  * Strike mark extension with nested office-open attrs.
@@ -37,10 +38,6 @@ export function renderDocx(attrs: Record<string, unknown>): Partial<RunOptions> 
 export function parseDocx(runOpts: RunOptions): Record<string, unknown> {
   return { doubleStrike: runOpts.doubleStrike ?? null };
 }
-
-// ── Attr that stores an office-open native value (not parsed from HTML) ──
-
-const attrNative = () => ({ default: null, parseHTML: () => null, rendered: false });
 
 // ── Extension ──
 

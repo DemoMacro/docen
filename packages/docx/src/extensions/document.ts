@@ -1,4 +1,5 @@
 import { Document as BaseDocument } from "./tiptap";
+import { attrNative } from "./utils";
 
 /**
  * Document extension carrying DOCX document-level data through the Tiptap JSON
@@ -22,7 +23,6 @@ import { Document as BaseDocument } from "./tiptap";
  * overriding this Document and re-stating the attrs. `Document` is the default
  * flat `doc > block+` shape used by the docx package itself.
  */
-const attrNative = () => ({ default: null, parseHTML: () => null, rendered: false });
 
 export function createDocument(content = "block+") {
   return BaseDocument.extend({

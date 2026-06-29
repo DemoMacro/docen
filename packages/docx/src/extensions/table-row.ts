@@ -2,7 +2,7 @@ import type { TableRowPropertiesOptionsBase } from "@office-open/docx";
 import type { JSONContent } from "@tiptap/core";
 
 import { TableRow as BaseTableRow } from "./tiptap";
-import { cssToTwip } from "./utils";
+import { attrNative, cssToTwip } from "./utils";
 
 /**
  * Table row extension with nested office-open attrs.
@@ -38,10 +38,6 @@ export function parseDocx(opts: Record<string, unknown>): Record<string, unknown
   }
   return attrs;
 }
-
-// ── Attr that stores an office-open native value (not parsed from HTML) ──
-
-const attrNative = () => ({ default: null, parseHTML: () => null, rendered: false });
 
 // ── Extension ──
 

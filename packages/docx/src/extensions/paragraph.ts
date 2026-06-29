@@ -2,6 +2,7 @@ import type { JSONContent } from "@tiptap/core";
 
 import { Paragraph as BaseParagraph } from "./tiptap";
 import {
+  attrNative,
   renderParagraphStyles,
   alignmentFromElement,
   indentFromElement,
@@ -70,10 +71,6 @@ export function parseDocx(opts: Record<string, unknown>): Record<string, unknown
   }
   return attrs;
 }
-
-// ── Attr that stores an office-open native value (not parsed from HTML) ──
-
-const attrNative = () => ({ default: null, parseHTML: () => null, rendered: false });
 
 // ── Extension ──
 

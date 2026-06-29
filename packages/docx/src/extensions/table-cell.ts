@@ -1,7 +1,7 @@
 import type { JSONContent } from "@tiptap/core";
 
 import { TableCell as BaseTableCell } from "./tiptap";
-import { bordersFromElement, renderTableCellStyles, shadingFromElement } from "./utils";
+import { attrNative, bordersFromElement, renderTableCellStyles, shadingFromElement } from "./utils";
 
 /**
  * Table cell extension with nested office-open attrs.
@@ -24,10 +24,11 @@ export function renderDocx(node: JSONContent): Record<string, unknown> {
   const attrs = (node.attrs ?? {}) as Record<string, unknown>;
   const opts: Record<string, unknown> = {};
 
-  // Tiptap structural names → OOXML structural fields.
-  const colspan = attrs.colspan as number | undefined;
+  // Tiptap structural names → OOXML structural fields. Narrow by typeof so a
+  // non-numeric span (malformed JSON) can't leak through as a string columnSpan.
+  const colspan = typeof attrs.colspan === "number" ? attrs.colspan : undefined;
   if (colspan && colspan > 1) opts.columnSpan = colspan;
-  const rowspan = attrs.rowspan as number | undefined;
+  const rowspan = typeof attrs.rowspan === "number" ? attrs.rowspan : undefined;
   if (rowspan && rowspan > 1) opts.rowSpan = rowspan;
   const colwidth = attrs.colwidth as number[] | null | undefined;
   // Width spans every column the cell occupies (colwidth has one entry per
@@ -66,10 +67,6 @@ export function parseDocx(opts: Record<string, unknown>): Record<string, unknown
   }
   return attrs;
 }
-
-// ── Attr that stores an office-open native value (not parsed from HTML) ──
-
-const attrNative = () => ({ default: null, parseHTML: () => null, rendered: false });
 
 // ── Extension ──
 

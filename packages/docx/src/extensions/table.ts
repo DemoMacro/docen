@@ -3,6 +3,7 @@ import type { JSONContent } from "@tiptap/core";
 
 import { Table as BaseTable } from "./tiptap";
 import {
+  attrNative,
   alignmentFromElement,
   alignmentToCss,
   bordersFromElement,
@@ -44,10 +45,6 @@ export function parseDocx(opts: Record<string, unknown>): Record<string, unknown
   }
   return attrs;
 }
-
-// ── Attr that stores an office-open native value (not parsed from HTML) ──
-
-const attrNative = () => ({ default: null, parseHTML: () => null, rendered: false });
 
 // ── Extension ──
 

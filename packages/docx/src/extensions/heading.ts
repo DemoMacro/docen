@@ -2,6 +2,7 @@ import type { JSONContent } from "@tiptap/core";
 
 import { Heading as BaseHeading } from "./tiptap";
 import {
+  attrNative,
   renderParagraphStyles,
   alignmentFromElement,
   indentFromElement,
@@ -64,7 +65,9 @@ export function renderDocx(node: JSONContent): Record<string, unknown> {
   // literal from `level` would write pStyle="Heading3" while styles.xml still
   // carries styleId="3" — a mismatch Word silently drops, losing the heading
   // level. Fall back to `level` only when no styleId is present.
-  const level = attrs.level as number | undefined;
+  // Narrow by typeof, not `as number`: a stray string level (e.g. "7" from
+  // malformed JSON) would otherwise index HEADING_COMPILE_MAP as a string.
+  const level = typeof attrs.level === "number" ? attrs.level : undefined;
   const styleId = attrs.styleId as string | undefined;
   if (styleId) opts.heading = styleId;
   else if (level) opts.heading = HEADING_COMPILE_MAP[level] ?? "Heading1";
@@ -112,10 +115,6 @@ export function parseDocx(opts: Record<string, unknown>): Record<string, unknown
   return attrs;
 }
 
-// ── Attr that stores an office-open native value (not parsed from HTML) ──
-
-const attrNative = () => ({ default: null, parseHTML: () => null, rendered: false });
-
 // ── Extension ──
 
 export const Heading = BaseHeading.extend({
@@ -132,9 +131,12 @@ export const Heading = BaseHeading.extend({
     return [
       {
         tag: "h6[data-heading-level]",
-        getAttrs: (el) => ({
-          level: Number((el as HTMLElement).getAttribute("data-heading-level")),
-        }),
+        getAttrs: (el) => {
+          const level = Number((el as HTMLElement).getAttribute("data-heading-level"));
+          // Missing/empty/non-integer attr falls back to 6 (a plain <h6>);
+          // returning NaN/0 would violate the 1-9 union and corrupt the node.
+          return { level: Number.isInteger(level) && level >= 1 && level <= 9 ? level : 6 };
+        },
       },
       ...[1, 2, 3, 4, 5, 6].map((level) => ({ tag: `h${level}`, attrs: { level } })),
     ];

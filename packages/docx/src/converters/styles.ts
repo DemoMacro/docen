@@ -143,7 +143,18 @@ export function stylesToCss(styles: StylesOptions | null | undefined, scope: str
  *  (key → pStyle id via pStyleIdFromKey). `document` is docDefaults, not a
  *  named style, so it is excluded. A built-in that also appears in
  *  paragraphStyles is deduped by id (paragraphStyles wins on insertion order). */
+// Cache the style index by the styles object reference. A document's styles
+// model is stable for its lifetime (set on load, unchanged across edits), yet
+// indexParagraphStyles is called per-paragraph (detectHeadingLevel during
+// resolve), per-transaction (effectiveRunProps at the caret), and per-render
+// (stylesToCss/inlineStyles). The WeakMap memo turns all of those into O(1)
+// lookups after the first build and frees the entry when the styles object is
+// GC'd. Callers treat the result as read-only (mergeStyleChain only .get()s).
+const styleIndexCache = new WeakMap<StylesOptions, Map<string, StyleEntry>>();
+
 export function indexParagraphStyles(styles: StylesOptions): Map<string, StyleEntry> {
+  const cached = styleIndexCache.get(styles);
+  if (cached) return cached;
   const byId = new Map<string, StyleEntry>();
   for (const ps of styles.paragraphStyles ?? []) byId.set(ps.id, ps);
   const defaults = styles.default as unknown as Record<string, StyleEntry | undefined>;
@@ -151,6 +162,7 @@ export function indexParagraphStyles(styles: StylesOptions): Map<string, StyleEn
     if (key === "document" || !style) continue;
     byId.set(pStyleIdFromKey(key), style);
   }
+  styleIndexCache.set(styles, byId);
   return byId;
 }
 

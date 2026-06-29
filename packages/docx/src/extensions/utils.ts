@@ -9,6 +9,14 @@ import type {
   TableWidthProperties,
 } from "@office-open/docx";
 
+// ── Tiptap attr factory ──
+
+/** Factory for a Tiptap attr that carries an office-open native value: never
+ *  parsed from HTML nor rendered to it, defaulting to null (ProseMirror stores
+ *  every declared attr). Shared by every extension carrying OOXML attrs
+ *  (paragraph/heading/table/table-cell/…). */
+export const attrNative = () => ({ default: null, parseHTML: () => null, rendered: false });
+
 // ── CSS color helpers ──
 
 /** Common CSS named colors → hex */

@@ -2,6 +2,7 @@ import type { RunOptions } from "@office-open/docx";
 
 import { TextStyle as BaseTextStyle } from "./tiptap";
 import {
+  attrNative,
   characterSpacingFromCss,
   characterSpacingToCss,
   normalizeColorToHex,
@@ -67,10 +68,6 @@ export function parseDocx(opts: RunOptions): Record<string, unknown> {
   }
   return attrs;
 }
-
-// ── Attr that stores an office-open native value (no CSS equivalent) ──
-
-const attrNative = () => ({ default: null, parseHTML: () => null, rendered: false });
 
 // ── Extension ──
 
