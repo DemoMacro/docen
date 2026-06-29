@@ -21,6 +21,7 @@ import type {
   OutputType,
   PackerOptions,
   StylesOptions,
+  TableOfContentsOptions,
 } from "@office-open/docx";
 import { emojis, shortcodeToEmoji } from "@tiptap/extension-emoji";
 
@@ -436,6 +437,17 @@ export class DocxManager {
         return this.compileListFromNode(node, 0);
       case "details":
         return this.compileDetailsNode(node);
+      case "tocField": {
+        const options = (node.attrs?.options as TableOfContentsOptions | undefined) ?? {};
+        const entries: SectionChild[] = [];
+        for (const child of node.content ?? []) {
+          const compiled = this.compileSectionChild(child);
+          if (!compiled) continue;
+          if (Array.isArray(compiled)) entries.push(...compiled);
+          else entries.push(compiled);
+        }
+        return { toc: { ...options, entries } };
+      }
       case "passthrough": {
         // Opaque SectionChild (rawXml/bookmark/toc/textbox/…) round-tripped verbatim.
         const data = (node.attrs?.data as string) ?? "{}";
@@ -968,15 +980,45 @@ export class DocxManager {
       // Generic SDT (non-details content control) — carry verbatim.
       return this.resolvePassthrough(child);
     }
-    // rawXml (incl. aggregated TOC field), bookmarkStart/End, toc, textbox,
-    // altChunk, subDoc, customXml — no native Tiptap node. Carry the SectionChild
-    // verbatim so the round-trip is byte-faithful.
+    if ("toc" in child) {
+      return this.resolveToc(child.toc);
+    }
+    // rawXml (incl. aggregated TOC field), bookmarkStart/End, textbox, altChunk,
+    // subDoc, customXml — no native Tiptap node. Carry the SectionChild verbatim
+    // so the round-trip is byte-faithful.
     return this.resolvePassthrough(child);
   }
 
   /** Wrap an opaque SectionChild in a passthrough atom (attrs.data = JSON). */
   private resolvePassthrough(child: SectionChild): JSONContent {
     return { type: "passthrough", attrs: { data: JSON.stringify(child) } };
+  }
+
+  /**
+   * Resolve a table of contents into an editable `tableOfContents` container:
+   * `attrs.options` carries the field switches, `content` is the entry
+   * paragraphs. Each entry's inner HYPERLINK field has content-less runs that
+   * office-open parses as `null`; resolving the entries through
+   * `resolveSectionChild` → `resolveParagraphChildren` drops those nulls, so the
+   * TOC no longer reaches the generate path as an opaque blob of nulls (the
+   * `stringifyRunInline(null).break` crash). When `entries` is absent/empty
+   * (a fresh, unrendered TOC), keep the node valid for `content: "block+"` with
+   * a placeholder empty paragraph.
+   */
+  private resolveToc(toc: TableOfContentsOptions & { alias?: string }): JSONContent {
+    const { entries, ...options } = toc;
+    const content: JSONContent[] = [];
+    for (const entry of entries ?? []) {
+      const node = this.resolveSectionChild(entry);
+      if (!node) continue;
+      if (Array.isArray(node)) content.push(...node);
+      else content.push(node);
+    }
+    if (content.length === 0) content.push({ type: "paragraph" });
+    const node: JSONContent = { type: "tocField", content };
+    const cleanOptions = cleanAttrs(options as Record<string, unknown>);
+    if (Object.keys(cleanOptions).length > 0) node.attrs = { options: cleanOptions };
+    return node;
   }
 
   /**

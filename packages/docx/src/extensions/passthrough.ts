@@ -2,7 +2,7 @@ import { Node } from "../core";
 
 /**
  * Passthrough — block atom carrying an opaque {@link SectionChild} that has
- * no native Tiptap representation (rawXml, bookmarkStart/End, toc, textbox,
+ * no native Tiptap representation (rawXml, bookmarkStart/End, textbox,
  * altChunk, subDoc, customXml).
  *
  * The full SectionChild is stored as JSON in `attrs.data` so the DOCX→JSON→DOCX

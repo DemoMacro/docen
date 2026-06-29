@@ -473,6 +473,18 @@ export interface DetailsNode extends TiptapJSONContent {
   content?: Array<DetailsSummaryNode | DetailsContentNode>;
 }
 
+/**
+ * TOC field node (`tocField`) — a block container whose `content` is the
+ * editable TOC entry paragraphs. `attrs.options` carries the TOC field switches
+ * (hyperlink, headingStyleRange, …). Named `tocField` (not `tableOfContents`)
+ * to avoid the @tiptap/extension-table-of-contents name. See TocField extension.
+ */
+export interface TocFieldNode extends TiptapJSONContent {
+  type: "tocField";
+  attrs?: { options: Record<string, unknown> | null };
+  content?: Array<BlockNode>;
+}
+
 export interface DetailsSummaryNode extends TiptapJSONContent {
   type: "detailsSummary";
   content?: Array<TextNode | HardBreakNode>;
@@ -507,5 +519,6 @@ export type BlockNode =
   | WpsShapeNode
   | WpgGroupNode
   | DetailsNode
+  | TocFieldNode
   | PassthroughNode
   | BlockMathNode;

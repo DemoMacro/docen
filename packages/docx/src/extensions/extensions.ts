@@ -42,6 +42,7 @@ import {
   TextAlign,
   Emoji,
 } from "./tiptap";
+import { TocField } from "./toc-field";
 import { WpgGroup } from "./wpg-group";
 import { WpsShape } from "./wps-shape";
 
@@ -55,6 +56,7 @@ export const tiptapNodeExtensions: AnyExtension[] = [
   ColumnBreak,
   SectionBreak,
   Passthrough,
+  TocField,
   Blockquote,
   OrderedList,
   BulletList,
@@ -211,6 +213,7 @@ export { Image } from "./image";
 export { WpgGroup } from "./wpg-group";
 export { WpsShape } from "./wps-shape";
 export { Passthrough } from "./passthrough";
+export { TocField } from "./toc-field";
 export { Paragraph } from "./paragraph";
 export { TableRow } from "./table-row";
 export { Table } from "./table";
