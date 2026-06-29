@@ -13,7 +13,7 @@ export type { StylesOptions };
  *  BaseCharacterStyleOptions (both extend the internal StyleOptions, carrying
  *  name/uiPriority/quickFormat). Derived from the public StylesOptions — not
  *  imported — because StyleOptions is not a public export of @office-open/docx. */
-type StyleEntry =
+export type StyleEntry =
   | NonNullable<StylesOptions["paragraphStyles"]>[number]
   | NonNullable<StylesOptions["characterStyles"]>[number];
 
@@ -143,7 +143,7 @@ export function stylesToCss(styles: StylesOptions | null | undefined, scope: str
  *  (key → pStyle id via pStyleIdFromKey). `document` is docDefaults, not a
  *  named style, so it is excluded. A built-in that also appears in
  *  paragraphStyles is deduped by id (paragraphStyles wins on insertion order). */
-function indexParagraphStyles(styles: StylesOptions): Map<string, StyleEntry> {
+export function indexParagraphStyles(styles: StylesOptions): Map<string, StyleEntry> {
   const byId = new Map<string, StyleEntry>();
   for (const ps of styles.paragraphStyles ?? []) byId.set(ps.id, ps);
   const defaults = styles.default as unknown as Record<string, StyleEntry | undefined>;

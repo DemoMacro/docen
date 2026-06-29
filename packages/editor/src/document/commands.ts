@@ -108,13 +108,16 @@ function currentSize(editor: Editor): number {
 
 /** HeadingLevel literals office-open lifts into `paragraph.heading` (pStyle
  *  val → Tiptap level). Title shares level 1 with Heading1. */
-const HEADING_LEVEL_BY_STYLE: Readonly<Record<string, 1 | 2 | 3 | 4 | 5 | 6>> = {
+const HEADING_LEVEL_BY_STYLE: Readonly<Record<string, 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9>> = {
   Heading1: 1,
   Heading2: 2,
   Heading3: 3,
   Heading4: 4,
   Heading5: 5,
   Heading6: 6,
+  Heading7: 7,
+  Heading8: 8,
+  Heading9: 9,
   Title: 1,
 };
 
@@ -136,7 +139,15 @@ function applyStyle(editor: Editor, value?: string): void {
   }
   const level = HEADING_LEVEL_BY_STYLE[styleId];
   if (level) {
-    editor.chain().focus().setHeading({ level }).updateAttributes("heading", { styleId }).run();
+    // setNode bypasses setHeading's options.levels gate — Tiptap's Level type
+    // caps at 1-6, so levels 7-9 are valid on the schema attr but setHeading
+    // would reject them. The block becomes a heading carrying styleId.
+    editor
+      .chain()
+      .focus()
+      .setNode("heading", { level })
+      .updateAttributes("heading", { styleId })
+      .run();
     return;
   }
   editor.chain().focus().setParagraph().updateAttributes("paragraph", { styleId }).run();

@@ -21,7 +21,7 @@ import {
  * renderHTML via utils mappers.
  */
 
-// HeadingLevel literals: "Heading1".."Heading6", "Title".
+// HeadingLevel literals: "Heading1".."Heading9", "Title".
 const HEADING_COMPILE_MAP: Record<number, string> = {
   1: "Heading1",
   2: "Heading2",
@@ -29,6 +29,9 @@ const HEADING_COMPILE_MAP: Record<number, string> = {
   4: "Heading4",
   5: "Heading5",
   6: "Heading6",
+  7: "Heading7",
+  8: "Heading8",
+  9: "Heading9",
 };
 
 const HEADING_PARSE_MAP: Record<string, number> = {
@@ -38,6 +41,9 @@ const HEADING_PARSE_MAP: Record<string, number> = {
   Heading4: 4,
   Heading5: 5,
   Heading6: 6,
+  Heading7: 7,
+  Heading8: 8,
+  Heading9: 9,
   Title: 1,
 };
 
@@ -88,7 +94,7 @@ export function parseDocx(opts: Record<string, unknown>): Record<string, unknown
   const attrs: Record<string, unknown> = {};
 
   // Reverse-map OOXML `heading` → Tiptap `level`. office-open lifts a
-  // HeadingLevel pStyle ("Heading1".."Heading6"/"Title") into `heading`; that
+  // HeadingLevel pStyle ("Heading1".."Heading9"/"Title") into `heading`; that
   // literal IS the pStyle val, so also carry it as styleId for CSS.
   if (resolved.heading) {
     const level = HEADING_PARSE_MAP[resolved.heading as string];
@@ -113,6 +119,26 @@ const attrNative = () => ({ default: null, parseHTML: () => null, rendered: fals
 // ── Extension ──
 
 export const Heading = BaseHeading.extend({
+  // Levels 1-9: DOCX carries Heading1-Heading9 (office-open built-in styles).
+  // HTML has only h1-h6, so 7-9 render as <h6 data-heading-level="N"> (see
+  // renderHTML/parseHTML) and round-trip via styleId / HEADING_*_MAP. The
+  // schema's `level` attr is unvalidated, so 7-9 are valid; setHeading gates on
+  // options.levels (Tiptap's Level type caps at 1-6), so applyStyle uses
+  // setNode for 7-9 rather than widening options.levels (which the type forbids).
+  // Override parseHTML so 7-9 (rendered as <h6 data-heading-level>) parse back
+  // to their real level; the data-heading-level rule runs before the native
+  // h6 rule so a plain <h6> still maps to level 6.
+  parseHTML() {
+    return [
+      {
+        tag: "h6[data-heading-level]",
+        getAttrs: (el) => ({
+          level: Number((el as HTMLElement).getAttribute("data-heading-level")),
+        }),
+      },
+      ...[1, 2, 3, 4, 5, 6].map((level) => ({ tag: `h${level}`, attrs: { level } })),
+    ];
+  },
   addAttributes() {
     return {
       ...this.parent?.(),
@@ -209,7 +235,12 @@ export const Heading = BaseHeading.extend({
     const styleId = node.attrs.styleId as string | null;
     if (styleId) attrs.class = `docx-style-${styleId}`;
     if (styles.length > 0) attrs.style = styles.join(";");
-    return [`h${level}`, attrs, 0] as const;
+    // HTML has no h7-h9: levels 7-9 render as <h6> carrying the real level in
+    // data-heading-level (parseHTML reads it back). The visual style still comes
+    // from the document's Heading7-9 style via the docx-style-{styleId} class.
+    const tag = level >= 1 && level <= 6 ? `h${level}` : "h6";
+    if (level >= 7) attrs["data-heading-level"] = String(level);
+    return [tag, attrs, 0] as const;
   },
 
   renderDocx,

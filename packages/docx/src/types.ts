@@ -310,7 +310,7 @@ export interface ParagraphNode extends TiptapJSONContent {
 
 export interface HeadingNode extends TiptapJSONContent {
   type: "heading";
-  attrs: { level: 1 | 2 | 3 | 4 | 5 | 6 } & ParagraphAttrs;
+  attrs: { level: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 } & ParagraphAttrs;
   content?: Array<TextNode | HardBreakNode>;
 }
 

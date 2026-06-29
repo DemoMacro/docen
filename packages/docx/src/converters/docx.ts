@@ -20,6 +20,7 @@ import type {
   OutputByType,
   OutputType,
   PackerOptions,
+  StylesOptions,
 } from "@office-open/docx";
 import { emojis, shortcodeToEmoji } from "@tiptap/extension-emoji";
 
@@ -42,6 +43,7 @@ import * as tableRowExt from "../extensions/table-row";
 import * as taskItemExt from "../extensions/task-item";
 import * as textStyleExt from "../extensions/text-style";
 import { prepareDocument, type PrepareStep } from "./prepare";
+import { indexParagraphStyles } from "./styles";
 
 export type { DocumentOptions };
 
@@ -185,7 +187,7 @@ export class DocxManager {
   // "heading 1") into a heading node. office-open lifts only pStyle literals
   // that ARE HeadingLevels ("Heading1".."Title"); real DOCX files often use
   // numeric ids. Set per resolve(); compile never reads it.
-  private resolveStyles: { paragraphStyles?: { id: string; name?: string }[] } | undefined;
+  private resolveStyles: StylesOptions | undefined;
 
   compile(json: JSONContent): DocumentOptions {
     this.numberingConfigs = [];
@@ -311,9 +313,7 @@ export class DocxManager {
   }
 
   resolve(docOpts: DocumentOptions): JSONContent {
-    this.resolveStyles = (docOpts.styles ?? undefined) as
-      | { paragraphStyles?: { id: string; name?: string }[] }
-      | undefined;
+    this.resolveStyles = docOpts.styles ?? undefined;
     const sections = docOpts.sections ?? [];
     if (sections.length === 0) {
       return { type: "doc", content: [{ type: "paragraph" }] };
@@ -1023,32 +1023,22 @@ export class DocxManager {
       return this.resolveCodeBlock(resolved);
     }
 
-    // Detect heading. office-open lifts a pStyle whose literal IS a HeadingLevel
-    // ("Heading1".."Title") into `resolved.heading`. Real DOCX files often use a
-    // NUMERIC styleId whose NAME is a heading (styleId "2" → name "heading 1");
-    // resolve that name against the styles table so the paragraph becomes a
-    // heading node (the outline/TOC read node type), keeping the original
-    // styleId on the attrs (parseDocx lets `resolved.style` override styleId).
-    let headingLevel = resolved.heading ? HEADING_LEVEL_MAP[resolved.heading] : undefined;
-    if (!headingLevel && resolved.style) {
-      const name = this.styleNameOf(resolved.style);
-      if (name) {
-        const m = /^heading\s+(\d)$/i.exec(name);
-        if (m) {
-          const lvl = Number(m[1]);
-          if (lvl >= 1 && lvl <= 6) headingLevel = lvl as 1 | 2 | 3 | 4 | 5 | 6;
-        } else if (/^title$/i.test(name)) headingLevel = 1;
-      }
-    }
-    if (headingLevel && !resolved.heading) {
-      resolved.heading = `Heading${headingLevel}`;
-    }
+    // Detect heading: office-open's lifted `heading` literal, an explicit
+    // outlineLevel, or a pStyle that names a heading style (directly, by
+    // localized name, or via basedOn). See detectHeadingLevel for the order.
+    const headingLevel = this.detectHeadingLevel(resolved);
     const nodeType = headingLevel ? "heading" : "paragraph";
 
     // Dispatch to extension parseDocx
     const attrs = headingLevel
       ? headingExt.parseDocx(resolved as unknown as Record<string, unknown>)
       : paragraphExt.parseDocx(resolved as unknown as Record<string, unknown>);
+
+    // Heading7-9, numeric styleIds, and basedOn/outlineLevel-derived levels
+    // aren't HeadingLevel literals, so parseDocx can't always derive `level`
+    // from resolved.heading/style — stamp it from the detected headingLevel. The
+    // real pStyle still rides on attrs.styleId (parseDocx carries resolved.style).
+    if (headingLevel && attrs.level == null) attrs.level = headingLevel;
 
     // List paragraphs never reach here — resolveSectionChildren intercepts
     // them upstream and rebuilds the nested list tree.
@@ -1062,10 +1052,41 @@ export class DocxManager {
     return node;
   }
 
-  /** Look up a paragraph style's NAME from its styleId, via the styles table
-   *  carried on the current resolve(). Returns undefined outside resolve. */
-  private styleNameOf(styleId: string): string | undefined {
-    return this.resolveStyles?.paragraphStyles?.find((p) => p.id === styleId)?.name;
+  /** Heading level (1-9) for a paragraph, or undefined when it isn't a heading.
+   *  DOCX marks a heading several ways, checked in priority order:
+   *  1. office-open lifts a HeadingLevel pStyle ("Heading1".."Title") into `heading`.
+   *  2. An explicit `outlineLevel` (0-8 → 1-9) — Word's outline/TOC key off this
+   *     even without a heading pStyle; the Heading1-9 styles carry outlineLvl 0-8.
+   *  3. A pStyle that names a heading style: directly ("Heading7", which stays on
+   *     `style` because office-open's HeadingLevel type caps at 6), by localized
+   *     NAME ("heading 1"/"标题 1"), or via the `basedOn` chain (a custom style
+   *     "MyTitle" basedOn="Heading1"). `heading` and `style` carry the same pStyle.
+   *  `outlineLevel` is read loosely — office-open's public type omits the field
+   *  even though it round-trips (w:outlineLvl) at runtime. */
+  private detectHeadingLevel(resolved: ParagraphOptions): number | undefined {
+    if (resolved.heading) {
+      const lvl = HEADING_LEVEL_MAP[resolved.heading];
+      if (lvl) return lvl;
+    }
+    const outline = (resolved as { outlineLevel?: number }).outlineLevel;
+    if (typeof outline === "number" && outline >= 0 && outline <= 8) {
+      return (outline + 1) as 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
+    }
+    const styleId = resolved.style;
+    if (!styleId || !this.resolveStyles) return undefined;
+    const byId = indexParagraphStyles(this.resolveStyles);
+    const visited = new Set<string>();
+    let curId: string | undefined = styleId;
+    while (curId && !visited.has(curId)) {
+      visited.add(curId);
+      if (HEADING_LEVEL_MAP[curId]) return HEADING_LEVEL_MAP[curId];
+      const style = byId.get(curId);
+      if (!style) break;
+      const lvl = headingLevelFromName(style.name);
+      if (lvl) return lvl;
+      curId = style.basedOn ?? undefined;
+    }
+    return undefined;
   }
 
   /** reference → level-0 format/start, for classifying numbering paragraphs. */
@@ -1315,12 +1336,14 @@ export class DocxManager {
    */
   private resolveListItemParagraph(para: ParagraphOptions, info: ListInfo): JSONContent {
     const resolved = typeof para === "string" ? ({ text: para } as ParagraphOptions) : para;
-    const headingLevel = resolved.heading ? HEADING_LEVEL_MAP[resolved.heading] : undefined;
+    const headingLevel = this.detectHeadingLevel(resolved);
     const nodeType = headingLevel ? "heading" : "paragraph";
 
     const attrs = headingLevel
       ? headingExt.parseDocx(resolved as unknown as Record<string, unknown>)
       : paragraphExt.parseDocx(resolved as unknown as Record<string, unknown>);
+    // See resolveParagraph: derived levels aren't always literals, so stamp level.
+    if (headingLevel && attrs.level == null) attrs.level = headingLevel;
 
     // Task: drop the leading checkbox SDT (its state lives in taskItem.attrs).
     const stripped = info.kind === "task" ? this.stripTaskCheckbox(resolved) : resolved;
@@ -1717,15 +1740,31 @@ interface ListInfo {
 
 // ── Heading level map ──
 
-const HEADING_LEVEL_MAP: Record<string, 1 | 2 | 3 | 4 | 5 | 6> = {
+const HEADING_LEVEL_MAP: Record<string, 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9> = {
   Heading1: 1,
   Heading2: 2,
   Heading3: 3,
   Heading4: 4,
   Heading5: 5,
   Heading6: 6,
+  Heading7: 7,
+  Heading8: 8,
+  Heading9: 9,
   Title: 1,
 };
+
+/** Heading level (1-9) from a localized style NAME: "heading 1"/"标题 1" → 1,
+ *  "title" → 1. office-open's built-in names are English ("heading 1"), but
+ *  zh-CN Word labels the same styles "标题 1"; both map to the same level. */
+function headingLevelFromName(name: string | undefined): number | undefined {
+  if (!name) return undefined;
+  const m = /^heading\s+(\d)$/i.exec(name) ?? /^标题\s*(\d)$/.exec(name);
+  if (m) {
+    const lvl = Number(m[1]);
+    if (lvl >= 1 && lvl <= 9) return lvl as 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
+  }
+  return /^title$/i.test(name) ? 1 : undefined;
+}
 
 // ── Standalone functions (backward compat) ──
 
