@@ -61,6 +61,16 @@ class DocenDialog extends HTMLElement {
 
   #dialog?: FluentDialog;
   #titleEl?: HTMLElement;
+  #nativeDialog?: HTMLElement;
+  #backdropRaf = 0;
+  readonly #toggleHandler = (event: Event): void => {
+    if ((event as FluentToggleEvent).detail?.newState === "closed") {
+      if (this.hasAttribute("open")) this.removeAttribute("open");
+    }
+  };
+  readonly #backdropHandler = (event: Event): void => {
+    if (event.target === this.#nativeDialog) event.stopImmediatePropagation();
+  };
 
   attributeChangedCallback(name: string): void {
     if (name === "heading") this.#applyHeading();
@@ -75,11 +85,7 @@ class DocenDialog extends HTMLElement {
     this.#titleEl = this.shadowRoot!.querySelector<HTMLElement>('[part="title"]') ?? undefined;
     // ESC / backdrop close the fluent-dialog directly; sync our `open` attr so
     // state stays consistent. fluent emits `toggle` with newState.
-    this.#dialog.addEventListener("toggle", (event) => {
-      if ((event as FluentToggleEvent).detail?.newState === "closed") {
-        if (this.hasAttribute("open")) this.removeAttribute("open");
-      }
-    });
+    this.#dialog.addEventListener("toggle", this.#toggleHandler);
     // Office dialogs don't light-dismiss on backdrop click. fluent-dialog's
     // clickHandler hides when the click lands on the native <dialog> itself
     // (the backdrop region); intercept those in capture phase so only ESC, the
@@ -89,20 +95,21 @@ class DocenDialog extends HTMLElement {
     this.#applyOpen();
   }
 
+  disconnectedCallback(): void {
+    cancelAnimationFrame(this.#backdropRaf);
+    this.#dialog?.removeEventListener("toggle", this.#toggleHandler);
+    this.#nativeDialog?.removeEventListener("click", this.#backdropHandler, true);
+  }
+
   #disableBackdropDismiss(): void {
     const apply = (): void => {
       const native = this.#dialog?.shadowRoot?.querySelector("dialog");
       if (!native) {
-        requestAnimationFrame(apply);
+        this.#backdropRaf = requestAnimationFrame(apply);
         return;
       }
-      native.addEventListener(
-        "click",
-        (event: Event) => {
-          if (event.target === native) event.stopImmediatePropagation();
-        },
-        true,
-      );
+      this.#nativeDialog = native;
+      native.addEventListener("click", this.#backdropHandler, true);
     };
     apply();
   }

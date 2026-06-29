@@ -76,6 +76,7 @@ class DocenNavigationPane extends HTMLElement {
   }
 
   #tabs?: HTMLElement;
+  #tabObserver?: MutationObserver;
   #unsubscribe?: () => void;
 
   attributeChangedCallback(name: string, _old: string, next: string): void {
@@ -114,7 +115,7 @@ class DocenNavigationPane extends HTMLElement {
     });
     // fluent-tablist updates `activeid` on click; mirror it to host[tab] and
     // emit. (Its change-event detail is unreliable across versions.)
-    new MutationObserver(() => {
+    this.#tabObserver = new MutationObserver(() => {
       const id = this.#tabs?.getAttribute("activeid") ?? "";
       const tab = id.replace(/^nav-/, "") || "headings";
       if (this.getAttribute("tab") !== tab) {
@@ -127,12 +128,14 @@ class DocenNavigationPane extends HTMLElement {
           }),
         );
       }
-    }).observe(this.#tabs, { attributes: true, attributeFilter: ["activeid"] });
+    });
+    this.#tabObserver.observe(this.#tabs, { attributes: true, attributeFilter: ["activeid"] });
     this.#applyI18n();
     this.#unsubscribe = observeLang(() => this.#applyI18n());
   }
 
   disconnectedCallback(): void {
+    this.#tabObserver?.disconnect();
     this.#unsubscribe?.();
   }
 

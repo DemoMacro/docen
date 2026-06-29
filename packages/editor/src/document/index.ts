@@ -664,6 +664,15 @@ class DocenDocument extends HTMLElement {
   #painterOff?: () => void;
   /** Current zoom level (percent) applied to the canvas via CSS `zoom`. */
   #zoom = 100;
+  /** Debounce timer for the nav-pane search result list — the list rebuilds only
+   *  after the user pauses typing (the query dispatches immediately, so Enter /
+   *  find-next stays in sync with the last keystroke). */
+  #searchTimer?: ReturnType<typeof setTimeout>;
+  /** Cached page bounds for the status bar, recomputed only on a doc change so a
+   *  caret move (selection-only transaction) reuses them instead of re-walking
+   *  every page node each keystroke. */
+  #statusDoc?: unknown;
+  #pageBounds?: ReadonlyArray<{ offset: number; size: number; section: number }>;
 
   /** Attributes whose runtime changes re-configure the component (chrome
    *  visibility, ribbon tabs, editable, identity). Without this list, attribute
@@ -804,7 +813,26 @@ class DocenDocument extends HTMLElement {
     if (!editor) return;
     const query = new SearchQuery({ search: event.detail?.query ?? "", caseSensitive: false });
     editor.view.dispatch(setSearchState(editor.state.tr, query));
-    this.#updateSearchResults();
+    // Debounce the result-list rebuild (O(matches) DOM nodes per keystroke); the
+    // query already dispatched above, so find-next reads the live search state.
+    clearTimeout(this.#searchTimer);
+    this.#searchTimer = setTimeout(() => this.#updateSearchResults(), 120);
+  };
+
+  /** ribbon-mode-change → drive browser fullscreen + status-bar hide.
+   *  auto-hide = Full Screen (Office); any other mode exits it. Named so it can
+   *  be removed on disconnect (an anonymous listener would leak on reconnect). */
+  readonly #onRibbonModeChange = (event: Event): void => {
+    const workspace = this.shadowRoot?.querySelector("docen-workspace");
+    if (!workspace) return;
+    const mode = (event as CustomEvent<{ mode: string }>).detail.mode;
+    if (mode === "auto-hide") {
+      void this.requestFullscreen?.().catch(() => {});
+      workspace.setAttribute("data-fullscreen", "");
+    } else {
+      if (document.fullscreenElement) void document.exitFullscreen?.().catch(() => {});
+      workspace.removeAttribute("data-fullscreen");
+    }
   };
 
   /** navigation:find → jump to the next/previous match (prosemirror-search). */
@@ -1276,19 +1304,7 @@ class DocenDocument extends HTMLElement {
     // Ribbon Display Options → drive browser fullscreen + status-bar hide.
     // auto-hide = Full Screen (Office); any other mode exits it.
     const ribbon = this.shadowRoot!.querySelector("docen-ribbon");
-    const workspace = this.shadowRoot!.querySelector("docen-workspace");
-    if (ribbon && workspace) {
-      ribbon.addEventListener("ribbon-mode-change", (event) => {
-        const mode = (event as CustomEvent<{ mode: string }>).detail.mode;
-        if (mode === "auto-hide") {
-          void this.requestFullscreen?.().catch(() => {});
-          workspace.setAttribute("data-fullscreen", "");
-        } else {
-          if (document.fullscreenElement) void document.exitFullscreen?.().catch(() => {});
-          workspace.removeAttribute("data-fullscreen");
-        }
-      });
-    }
+    ribbon?.addEventListener("ribbon-mode-change", this.#onRibbonModeChange);
     // Emit docen:change on every content change (autosave driver) and docen:ready
     // once the editor is live — both bubble out so a host can react.
     this.#editor?.on("transaction", this.#onTransaction);
@@ -1317,6 +1333,10 @@ class DocenDocument extends HTMLElement {
     this.#editor?.off("transaction", this.#onTransaction);
     document.removeEventListener("fullscreenchange", this.#onFullscreenChange);
     this.removeEventListener("keydown", this.#onZoomKey);
+    this.shadowRoot
+      ?.querySelector("docen-ribbon")
+      ?.removeEventListener("ribbon-mode-change", this.#onRibbonModeChange);
+    clearTimeout(this.#searchTimer);
     this.#fontSyncCleanup?.();
     this.#editor?.destroy();
   }
@@ -1793,24 +1813,39 @@ class DocenDocument extends HTMLElement {
     let total = 0;
     let section = 1;
     if (editor) {
+      const doc = editor.state.doc;
       const from = editor.state.selection.from;
-      let prevSp: unknown;
-      let sectionCount = 0;
-      let firstPage = true;
-      editor.state.doc.forEach((node, offset) => {
-        if (node.type.name !== "page") return;
-        total++;
-        const sp = (node.attrs as { sectionProperties?: unknown }).sectionProperties ?? null;
-        // A section's pages share one sectionProperties reference, so the count
-        // rises only at a real section boundary (or on the very first page).
-        if (firstPage || sp !== prevSp) sectionCount++;
-        firstPage = false;
-        prevSp = sp;
-        if (page === 0 && from > offset && from <= offset + node.nodeSize) {
-          page = total;
-          section = sectionCount;
+      // Cache page bounds across selection-only transactions (caret moves);
+      // recompute only when the doc changed. Avoids a full doc.forEach + per-page
+      // attrs read on every keystroke/caret move on large multi-page documents.
+      if (doc !== this.#statusDoc) {
+        const bounds: { offset: number; size: number; section: number }[] = [];
+        let prevSp: unknown;
+        let sectionCount = 0;
+        let firstPage = true;
+        doc.forEach((node, offset) => {
+          if (node.type.name !== "page") return;
+          const sp = (node.attrs as { sectionProperties?: unknown }).sectionProperties ?? null;
+          // A section's pages share one sectionProperties reference, so the count
+          // rises only at a real section boundary (or on the very first page).
+          if (firstPage || sp !== prevSp) sectionCount++;
+          firstPage = false;
+          prevSp = sp;
+          bounds.push({ offset, size: node.nodeSize, section: sectionCount });
+        });
+        this.#pageBounds = bounds;
+        this.#statusDoc = doc;
+      }
+      const bounds = this.#pageBounds!;
+      total = bounds.length;
+      for (let i = 0; i < bounds.length; i++) {
+        const b = bounds[i];
+        if (from > b.offset && from <= b.offset + b.size) {
+          page = i + 1;
+          section = b.section;
+          break;
         }
-      });
+      }
     }
     if (sectionEl) {
       sectionEl.textContent = t("status.section").replace("{n}", String(section));

@@ -75,6 +75,7 @@ class DocenFindReplaceDialog extends HTMLElement {
   }
 
   #dialog?: DialogEl;
+  #dialogObserver?: MutationObserver;
   #unsubscribe?: () => void;
 
   attributeChangedCallback(name: string): void {
@@ -118,17 +119,19 @@ class DocenFindReplaceDialog extends HTMLElement {
     root.querySelector("[part='cancel']")?.addEventListener("click", () => this.hide());
     // ESC / ✕ inside the inner docen-dialog drop its `open` attr — mirror that
     // here so our state stays consistent.
-    new MutationObserver(() => {
+    this.#dialogObserver = new MutationObserver(() => {
       if (this.#dialog && !this.#dialog.hasAttribute("open") && this.hasAttribute("open")) {
         this.removeAttribute("open");
       }
-    }).observe(this.#dialog!, { attributes: true, attributeFilter: ["open"] });
+    });
+    this.#dialogObserver.observe(this.#dialog!, { attributes: true, attributeFilter: ["open"] });
     this.#applyOpen();
     this.#applyI18n();
     this.#unsubscribe = observeLang(() => this.#applyI18n());
   }
 
   disconnectedCallback(): void {
+    this.#dialogObserver?.disconnect();
     this.#unsubscribe?.();
   }
 

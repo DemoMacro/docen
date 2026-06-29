@@ -76,6 +76,11 @@ class DocenTaskPane extends HTMLElement {
   #drawer?: FluentDrawer;
   #titleEl?: HTMLElement;
   #closeBtn?: HTMLElement;
+  #blankCloseDialog?: HTMLElement;
+  readonly #blankCloseHandler = (event: Event): void => {
+    if (event.target === this.#blankCloseDialog) event.stopImmediatePropagation();
+  };
+  #lockRaf = 0;
   #unsubscribe?: () => void;
 
   attributeChangedCallback(name: string): void {
@@ -114,6 +119,8 @@ class DocenTaskPane extends HTMLElement {
   }
 
   disconnectedCallback(): void {
+    cancelAnimationFrame(this.#lockRaf);
+    this.#blankCloseDialog?.removeEventListener("click", this.#blankCloseHandler, true);
     this.#unsubscribe?.();
   }
 
@@ -169,19 +176,16 @@ class DocenTaskPane extends HTMLElement {
   // (Fluent's clickHandler treats the dialog as a backdrop). Block those so
   // only the header close button dismisses the pane.
   #lockBlankClose(): void {
-    const bind = (): boolean => {
+    const bind = (): void => {
       const dialog = this.#drawer?.dialog;
-      if (!dialog) return false;
-      dialog.addEventListener(
-        "click",
-        (event: Event) => {
-          if (event.target === dialog) event.stopImmediatePropagation();
-        },
-        true,
-      );
-      return true;
+      if (!dialog) {
+        this.#lockRaf = requestAnimationFrame(bind);
+        return;
+      }
+      this.#blankCloseDialog = dialog;
+      dialog.addEventListener("click", this.#blankCloseHandler, true);
     };
-    if (!bind()) requestAnimationFrame(bind);
+    bind();
   }
 
   #applyI18n(): void {

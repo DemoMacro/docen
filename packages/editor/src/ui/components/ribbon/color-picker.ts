@@ -328,6 +328,7 @@ class DocenColorPicker extends HTMLElement {
   #fwdCleanup?: () => void;
   #focusCleanup?: () => void;
   #obsLang?: () => void;
+  #endSvDrag?: () => void;
   #hsv: [number, number, number] = [0, 100, 100];
   #pendingHex = "000000";
 
@@ -438,6 +439,11 @@ class DocenColorPicker extends HTMLElement {
   }
 
   disconnectedCallback(): void {
+    // Release an in-flight SV drag: its document-level listeners would
+    // otherwise keep firing #updateSvFromPointer (getBoundingClientRect on a
+    // detached #sv) after the picker is gone, and never unbind without a
+    // pointerup/pointercancel.
+    this.#endSvDrag?.();
     this.#fwdCleanup?.();
     this.#focusCleanup?.();
     this.#obsLang?.();
@@ -515,12 +521,16 @@ class DocenColorPicker extends HTMLElement {
     if (!this.#sv) return;
     event.preventDefault();
     const move = (ev: PointerEvent): void => this.#updateSvFromPointer(ev);
-    const up = (): void => {
+    const end = (): void => {
       document.removeEventListener("pointermove", move);
-      document.removeEventListener("pointerup", up);
+      document.removeEventListener("pointerup", end);
+      document.removeEventListener("pointercancel", end);
+      this.#endSvDrag = undefined;
     };
+    this.#endSvDrag = end;
     document.addEventListener("pointermove", move);
-    document.addEventListener("pointerup", up);
+    document.addEventListener("pointerup", end);
+    document.addEventListener("pointercancel", end);
     this.#updateSvFromPointer(event);
   }
 

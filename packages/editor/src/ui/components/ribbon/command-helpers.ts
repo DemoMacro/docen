@@ -37,9 +37,25 @@ export function createIconSlot(slotName = "start"): HTMLSpanElement {
   return span;
 }
 
+// Cache a parsed <template> per icon string so repeated renders clone instead
+// of re-running the HTML parser on the same static SVG markup (a ribbon mount
+// parses ~100 icons; cloning a cached template skips the parser entirely).
+const iconTemplates = new Map<string, HTMLTemplateElement>();
+
 /** Inject the named Office icon svg into a slot (empty when unknown). */
 export function renderIcon(slot: HTMLElement, name: string): void {
-  slot.innerHTML = ribbonIcon(name) ?? "";
+  const svg = ribbonIcon(name);
+  if (!svg) {
+    slot.replaceChildren();
+    return;
+  }
+  let template = iconTemplates.get(svg);
+  if (!template) {
+    template = document.createElement("template");
+    template.innerHTML = svg;
+    iconTemplates.set(svg, template);
+  }
+  slot.replaceChildren(template.content.cloneNode(true));
 }
 
 /** Set a slot's text (or clear it when empty). */
