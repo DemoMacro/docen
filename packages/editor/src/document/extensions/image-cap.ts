@@ -21,22 +21,36 @@ function decodeDataUrl(src: string | undefined): Uint8Array | null {
   return bytes;
 }
 
+// Cache decoded natural sizes by src: appendTransaction runs on every docChanged
+// transaction, and a large imported DOCX can carry dozens of embedded data URLs —
+// re-running atob + imageMeta per image per keystroke is O(images × bytes)/tx.
+// The src is the sole decode input and never changes for a given image, so it
+// keys the result (null is cached too: non-data URLs / unreadable bytes never
+// become decodable).
+const naturalSizeCache = new Map<string, { width: number; height: number } | null>();
+
 /** Natural pixel dimensions of a data-URL image, read synchronously from the file
  *  header (no load/decode round-trip). Returns null for http(s):// URLs (can't be
  *  sync-decoded) or unreadable bytes — the CSS max-width fallback constrains
  *  those. */
 function naturalSize(src: string | undefined): { width: number; height: number } | null {
+  if (!src) return null;
+  const cached = naturalSizeCache.get(src);
+  if (cached !== undefined) return cached;
   const bytes = decodeDataUrl(src);
-  if (!bytes) return null;
-  try {
-    const meta = imageMeta(bytes);
-    if (typeof meta.width === "number" && typeof meta.height === "number") {
-      return { width: meta.width, height: meta.height };
+  let result: { width: number; height: number } | null = null;
+  if (bytes) {
+    try {
+      const meta = imageMeta(bytes);
+      if (typeof meta.width === "number" && typeof meta.height === "number") {
+        result = { width: meta.width, height: meta.height };
+      }
+    } catch {
+      // Unreadable or unsupported image — leave to the CSS fallback.
     }
-  } catch {
-    // Unreadable or unsupported image — leave to the CSS fallback.
   }
-  return null;
+  naturalSizeCache.set(src, result);
+  return result;
 }
 
 /** The section geometry governing the image at `pos`. OOXML sectPr rides a
@@ -193,7 +207,20 @@ async function embedHttpImage(view: EditorView, src: string, fetching: Set<strin
     }
     if (view.isDestroyed) return;
     const natural = await domNaturalSize(view, src);
-    if (natural) markupMatchingSrc(view, src, { width: natural.width, height: natural.height });
+    if (natural) {
+      // A CORS-blocked web image (manually pasted) can't be sync-decoded, so cap
+      // it here from the DOM-read natural size — appendTransaction skips any
+      // image that already carries a width, so this is its only cap pass.
+      const contentW =
+        sectionContentDims(
+          (view.state.doc.attrs as { sectionProperties?: unknown }).sectionProperties,
+        )?.width ?? domContentWidth(view);
+      const scaled =
+        contentW && contentW > 0 && natural.width > contentW
+          ? { width: contentW, height: Math.round(natural.height * (contentW / natural.width)) }
+          : { width: natural.width, height: natural.height };
+      markupMatchingSrc(view, src, scaled);
+    }
   } finally {
     fetching.delete(src);
   }
@@ -205,16 +232,19 @@ async function embedHttpImage(view: EditorView, src: string, fetching: Set<strin
  * leaves it at its real size (never upscales) — and the cap is a real dimension
  * change (exported DOCX carries the capped size, not just a visual constraint).
  *
- * Implemented as an `appendTransaction` plugin so it covers every entry path
- * (insert button, paste, drop) through one transaction intercept. Idempotent:
- * once capped, `width === contentW` so the next pass finds nothing to change and
- * returns null (no append loop). Section geometry gives the exact content width;
- * when it is absent (blank doc, before a page setup) the rendered page box is
- * measured instead. While an http image's fetch is still in flight its width is
- * unknown, so this pass skips it (the CSS constrains it meanwhile); once fetch
- * resolves — to a data URL, or to the DOM natural size on a CORS failure — the
- * width is stamped and capped here too, so it never falls back to a fixed
- * default wider than the page.
+ * Scope: ONLY manually inserted images (ribbon Insert, paste, drop) — these
+ * enter with `src` and no width, so appendTransaction caps them. Images loaded
+ * from a DOCX (`openDOCX`/`parseDOCX`) carry their source `wp:extent` as width
+ * and are left untouched (capping them would distort the source document's
+ * sizing); the page's CSS max-width keeps any oversized import on the page
+ * visually without changing its stored dimensions.
+ *
+ * Implemented as an `appendTransaction` plugin (idempotent: once capped,
+ * `width === contentW`, so the next pass skips it). Section geometry gives the
+ * exact content width; when absent (blank doc, before a page setup) the rendered
+ * page box is measured instead. An http image is inlined first (fetch → data
+ * URL, or DOM natural size on a CORS failure); the data-URL path is capped
+ * here, the CORS-failure path is capped in embedHttpImage from the DOM size.
  */
 export const ImageCap = Extension.create({
   name: "docenImageCap",
@@ -281,8 +311,18 @@ export const ImageCap = Extension.create({
               width?: number | null;
               height?: number | null;
             };
+            // Only cap images with NO explicit width — i.e. manually
+            // pasted/dropped/inserted images (readAndInsert and #onImageChange
+            // create them with src only). Imported images carry their source
+            // extent as width (parseDocx: wp:extent → px); re-capping those
+            // would distort the source document's image sizing, so they stay at
+            // their real size (the page's CSS max-width keeps them on the page
+            // visually). An already-capped manual image keeps width == contentW,
+            // so it's skipped too (idempotent). A CORS-blocked web image is
+            // capped in embedHttpImage, where its width is stamped.
+            if (attrs.width != null) return true;
             const natural = naturalSize(attrs.src);
-            const displayW = attrs.width ?? natural?.width;
+            const displayW = natural?.width;
             if (displayW == null || displayW <= 0) return true;
 
             // Section content width from OOXML geometry; fall back to the

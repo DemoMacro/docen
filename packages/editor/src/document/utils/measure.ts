@@ -555,19 +555,14 @@ function emptyLineHeight({
   return resolveLineHeight({ spacing: null, normalPx, linePitchPx, snapToGrid: false });
 }
 
-// CJK kinsoku (line-start/end prohibition) character classes. Pretext's
-// Caveats state it supports only `line-break: auto` (no kinsoku strictness),
-// but browsers apply kinsoku to CJK by default: an opening bracket at line end
-// (（《「" is pushed to the next line, and a closing punct at line start
-// (。，)》 is pulled back to the previous line — both add a line vs Pretext's
-// pure width breaking. Paragraphs with 《》"" therefore measured ~1 line short,
-// the paginator over-packed the page, and content overflowed the page box. A
-// deterministic kinsoku post-pass over Pretext's width-accurate breaks aligns
-// with the browser (same input → same output, so convergence is preserved).
-// Forbidden at line end (opening brackets / opening quotes):
-const _PROHIBIT_TRAILING_RE = /[([{<（［｛〈《「『【〔〖〘〚“‘‟‛]/;
-// Forbidden at line start (closing brackets + 、。，．；：！？… + closing quotes):
-const _PROHIBIT_LEADING_RE = /[)\]}>.,;:!?）］｝〉》」』】〗〙〛、。，．；：！？…‥·”’]/;
+// NOTE: browsers apply CJK kinsoku (line-start/end prohibition) by default — an
+// opening bracket at line end or a closing punct at line start moves to the
+// next/previous line, adding a line vs Pretext's pure width breaking. Pretext
+// exposes no kinsoku, and a deterministic post-pass was never wired up here, so
+// a CJK-punctuation paragraph can measure ~1 line short. This is a known
+// fidelity limit, not a correctness bug — the paginator converges on the
+// measured count. (The `_oneCharWidthPx` param of layoutLineOffsets is reserved
+// for a future kinsoku pass.)
 
 /** Lay out a prepared paragraph line by line: the FIRST line at
  *  `width − firstLinePx` and later lines at `width` — mirroring CSS text-indent
@@ -579,8 +574,8 @@ const _PROHIBIT_LEADING_RE = /[)\]}>.,;:!?）］｝〉》」』】〗〙〛、�
  *  PM inline child (text: 1 char = 1 offset; hardBreak: "\n" = 1 offset), so
  *  accumulating fragment text lengths == accumulating PM content offsets.
  *
- *  `oneCharWidthPx` (1-char width of the dominant font size) peeks the next
- *  line's first grapheme for leading kinsoku. */
+ *  `_oneCharWidthPx` is reserved for a future kinsoku post-pass (see the note
+ *  above) and is currently unused. */
 function layoutLineOffsets(
   prepared: PreparedRichInline,
   width: number,
@@ -594,26 +589,12 @@ function layoutLineOffsets(
   let first = true;
   while (true) {
     const mw = first ? Math.max(0, width - firstLinePx) : width;
-    let range = layoutNextRichInlineLineRange(prepared, mw, cursor);
+    const range = layoutNextRichInlineLineRange(prepared, mw, cursor);
     if (!range) break;
-    let line = materializeRichInlineLineRange(prepared, range);
-    let text = "";
+    const line = materializeRichInlineLineRange(prepared, range);
     let chars = 0;
-    for (const frag of line.fragments) {
-      text += frag.text;
-      chars += frag.text.length;
-    }
-    // Trailing kinsoku: the line ends on an opening bracket/quote (forbidden at
-    // line end) → shrink the wrap width and re-break until the end char is
-    // legal, pushing the opening punct to the next line (mirrors the browser).
-    // Shrinking the width avoids retreating across a segment boundary — CJK
-    // runs are often one grapheme per segment, so graphemeIndex is 0 at line
-    // ends and a cursor retreat can't move back within the segment.
+    for (const frag of line.fragments) chars += frag.text.length;
     const endCursor: RichInlineCursor = range.end;
-    // Leading kinsoku: the next line would start with a closing punct (forbidden
-    // at line start) → pull it into this line (the browser moves a line-start
-    // closing punct back to the previous line's end). Peek the next line's
-    // first grapheme with a 1-char width.
     cursor = endCursor;
     pmOff += chars;
     lineBreakOffsets.push(pmOff);
@@ -654,13 +635,15 @@ export function measureParagraphHeight(node: PmNode, width: number, ctx?: Measur
   // whose height is the paragraph-mark line height (strut) — NOT a text line.
   if (isEmptyTextblock(node)) return strut;
   // Image-only paragraph: lay out images by content width (mirrors renderHTML
-  // — each inline image occupies attrs.width × attrs.height px; multiple images
-  // share a line until their combined width exceeds the content width, then
-  // wrap). Each row's height is its tallest image but never below the strut (a
-  // row of small images still occupies a full text line — the line-box minimum
-  // from font-size/line-height). Total = sum of per-row heights. Previously
-  // each image was credited its own line, over-counting side-by-side images by
-  // multiples — the paginator packed them on one page and clipped the rest.
+  // — each inline image occupies its display width × height, clamped to the
+  // content width like the renderer's `img { max-width: 100%; height: auto }`;
+  // multiple images share a line until their combined width exceeds the content
+  // width, then wrap). Each row's height is its tallest image but never below
+  // the strut (a row of small images still occupies a full text line — the
+  // line-box minimum from font-size/line-height). Total = sum of per-row
+  // heights. Previously each image was credited its own line, over-counting
+  // side-by-side images by multiples — the paginator packed them on one page
+  // and clipped the rest.
   if (hasInlineImage(node)) {
     const layout = layoutImageLines(node, width, strut);
     if (layout) return layout.lineHeights.reduce((s, h) => s + h, 0);
@@ -854,8 +837,18 @@ function layoutImageLines(
       imgCount++;
       const w = (child.attrs as { width?: number }).width;
       const h = (child.attrs as { height?: number }).height;
-      const iw = typeof w === "number" && w > 0 ? w : 0;
-      const ih = typeof h === "number" && h > 0 ? h : 0;
+      let iw = typeof w === "number" && w > 0 ? w : 0;
+      let ih = typeof h === "number" && h > 0 ? h : 0;
+      // The renderer clamps a wide image with `img { max-width: 100%; height:
+      // auto }` so an oversized import never overflows the page. Mirror that
+      // here: an image wider than the content width is credited the content
+      // width and a height scaled by the same factor, else the row is
+      // over-counted and the page breaks early. image-cap leaves an import's
+      // source extent untouched (for fidelity), so this clamp must live here.
+      if (iw > width) {
+        ih = ih > 0 ? Math.round(ih * (width / iw)) : 0;
+        iw = width;
+      }
       // Current row already has content and adding this image overflows → flush
       // the row and start a new one.
       if (lineW > 0 && lineW + iw > width) {
