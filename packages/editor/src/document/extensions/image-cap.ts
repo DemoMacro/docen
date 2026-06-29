@@ -169,6 +169,20 @@ function markupMatchingSrc(view: EditorView, src: string, patch: Record<string, 
   if (hit) dispatch(tr);
 }
 
+/** Scale (width, height) DOWN to `contentW`, never upscale — mirroring MS
+ *  Office's image cap: a wider image takes the content width and a height
+ *  scaled by the same factor. The single cap arithmetic shared by the
+ *  appendTransaction pass and embedHttpImage's CORS fallback. */
+function capSize(
+  width: number,
+  height: number | null,
+  contentW: number,
+): { width: number; height: number | null } {
+  if (width <= contentW) return { width, height };
+  const scale = contentW / width;
+  return { width: contentW, height: height != null ? Math.round(height * scale) : null };
+}
+
 /** Natural pixel dimensions of the in-DOM <img> with `src`, awaited on load.
  *  Used when fetch is blocked (CORS): an <img> loads cross-origin freely — only
  *  fetch/canvas are CORS-gated — so the natural size is still readable even
@@ -215,11 +229,13 @@ async function embedHttpImage(view: EditorView, src: string, fetching: Set<strin
         sectionContentDims(
           (view.state.doc.attrs as { sectionProperties?: unknown }).sectionProperties,
         )?.width ?? domContentWidth(view);
-      const scaled =
-        contentW && contentW > 0 && natural.width > contentW
-          ? { width: contentW, height: Math.round(natural.height * (contentW / natural.width)) }
-          : { width: natural.width, height: natural.height };
-      markupMatchingSrc(view, src, scaled);
+      markupMatchingSrc(
+        view,
+        src,
+        contentW && contentW > 0
+          ? capSize(natural.width, natural.height, contentW)
+          : { width: natural.width, height: natural.height },
+      );
     }
   } finally {
     fetching.delete(src);
@@ -304,6 +320,10 @@ export const ImageCap = Extension.create({
           const tr = newState.tr;
           let changed = false;
 
+          // The DOM content-width fallback (querySelector + getComputedStyle) is
+          // the same for every image when section geometry is absent, so read it
+          // once before the walk instead of per image.
+          const fallbackW = domContentWidth(editorView);
           doc.descendants((node, pos) => {
             if (node.type.name !== "image") return true;
             const attrs = node.attrs as {
@@ -327,18 +347,12 @@ export const ImageCap = Extension.create({
 
             // Section content width from OOXML geometry; fall back to the
             // rendered page's content box when geometry is absent (blank doc).
-            const contentW =
-              sectionContentDims(sectionAt(doc, pos))?.width ?? domContentWidth(editorView);
+            const contentW = sectionContentDims(sectionAt(doc, pos))?.width ?? fallbackW;
             if (!contentW || contentW <= 0) return true;
             if (displayW <= contentW) return true; // within bounds — never upscale
 
-            const scale = contentW / displayW;
-            const baseH = attrs.height ?? natural?.height;
-            tr.setNodeMarkup(pos, null, {
-              ...attrs,
-              width: contentW,
-              height: baseH != null ? Math.round(baseH * scale) : null,
-            });
+            const capped = capSize(displayW, attrs.height ?? natural?.height ?? null, contentW);
+            tr.setNodeMarkup(pos, null, { ...attrs, width: capped.width, height: capped.height });
             changed = true;
             return true;
           });

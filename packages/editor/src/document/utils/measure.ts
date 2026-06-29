@@ -316,13 +316,6 @@ function normalPxOf(spec: FontSpec): number {
  * by the caller. `linePitchPx` is the section's document-grid pitch (undefined
  * when the grid is off). `snapToGrid === false` keeps lines at the raw metric
  * (header/footer styles); null/true adds the pitch. */
-/** Parse the point size out of a canvas font shorthand ("12pt serif" → 12pt →
- *  16px), for CSS-unitless line-height semantics (line-height: m = m × fontSize). */
-function fontSizePxOf(font: string): number {
-  const m = font.match(/(\d+(?:\.\d+)?)pt/);
-  return m ? parseFloat(m[1]) * PT_TO_PX : DEFAULT_SIZE_PT * PT_TO_PX;
-}
-
 export function resolveLineHeight({
   spacing,
   normalPx,
@@ -561,8 +554,7 @@ function emptyLineHeight({
 // exposes no kinsoku, and a deterministic post-pass was never wired up here, so
 // a CJK-punctuation paragraph can measure ~1 line short. This is a known
 // fidelity limit, not a correctness bug — the paginator converges on the
-// measured count. (The `_oneCharWidthPx` param of layoutLineOffsets is reserved
-// for a future kinsoku pass.)
+// measured count.
 
 /** Lay out a prepared paragraph line by line: the FIRST line at
  *  `width − firstLinePx` and later lines at `width` — mirroring CSS text-indent
@@ -572,15 +564,11 @@ function emptyLineHeight({
  *  which under-counted the first line's capacity; layoutNextRichInlineLineRange
  *  lets us shrink only line 1. Offset mapping: each Pretext item is 1:1 with a
  *  PM inline child (text: 1 char = 1 offset; hardBreak: "\n" = 1 offset), so
- *  accumulating fragment text lengths == accumulating PM content offsets.
- *
- *  `_oneCharWidthPx` is reserved for a future kinsoku post-pass (see the note
- *  above) and is currently unused. */
+ *  accumulating fragment text lengths == accumulating PM content offsets. */
 function layoutLineOffsets(
   prepared: PreparedRichInline,
   width: number,
   firstLinePx: number,
-  _oneCharWidthPx: number,
 ): { lineCount: number; lineBreakOffsets: number[] } {
   const lineBreakOffsets: number[] = [];
   let pmOff = 0;
@@ -621,14 +609,6 @@ export function measureParagraphHeight(node: PmNode, width: number, ctx?: Measur
   const normalPx = paragraphNormalPx(node, def);
   const items = collectInlineItems(node, def);
   const prepared = getPrepared(items);
-  const font =
-    items[0]?.font ??
-    buildFont({
-      size: def.size ?? DEFAULT_SIZE_PT,
-      font: def.font,
-      bold: false,
-      italic: false,
-    });
   const firstLinePx = resolveFirstLineIndentPx(node, styles);
   const strut = emptyLineHeight({ node, styles, linePitchPx, normalPx });
   // Empty paragraph (no text/image children): its sole content is the ¶ glyph,
@@ -666,7 +646,7 @@ export function measureParagraphHeight(node: PmNode, width: number, ctx?: Measur
         imgH += typeof h === "number" && h > 0 ? Math.max(h, strut) : strut;
       }
     });
-    const lineCount = layoutLineOffsets(prepared, width, firstLinePx, fontSizePxOf(font)).lineCount;
+    const lineCount = layoutLineOffsets(prepared, width, firstLinePx).lineCount;
     return Math.max(1, lineCount) * lh + imgH;
   }
   const lh = resolveLineHeight({
@@ -676,7 +656,7 @@ export function measureParagraphHeight(node: PmNode, width: number, ctx?: Measur
     snapToGrid,
     inTable,
   });
-  const lcInfo = layoutLineOffsets(prepared, width, firstLinePx, fontSizePxOf(font));
+  const lcInfo = layoutLineOffsets(prepared, width, firstLinePx);
   return Math.max(1, lcInfo.lineCount) * lh;
 }
 
@@ -788,9 +768,6 @@ export function measureParagraphLines(
   const def = defaultRunOf(node, ctx?.styles);
   const items = collectInlineItems(node, def);
   const prepared = getPrepared(items);
-  const font =
-    items[0]?.font ??
-    buildFont({ size: def.size ?? DEFAULT_SIZE_PT, font: def.font, bold: false, italic: false });
   const lineHeight = resolveLineHeight({
     spacing: resolveSpacing(node, ctx?.styles),
     normalPx: paragraphNormalPx(node, def),
@@ -799,12 +776,7 @@ export function measureParagraphLines(
     inTable: ctx?.inTable ?? false,
   });
   const firstLinePx = resolveFirstLineIndentPx(node, ctx?.styles);
-  const { lineCount, lineBreakOffsets } = layoutLineOffsets(
-    prepared,
-    width,
-    firstLinePx,
-    fontSizePxOf(font),
-  );
+  const { lineCount, lineBreakOffsets } = layoutLineOffsets(prepared, width, firstLinePx);
   return { lineHeight, lineCount, lineBreakOffsets };
 }
 
