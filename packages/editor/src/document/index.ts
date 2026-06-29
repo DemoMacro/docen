@@ -6,6 +6,7 @@ import {
   parseDOCX,
   parseHTML,
   resolveFontName,
+  sectionMarginDefaults,
   sectionPageSizeDefaults,
   stylesToCss,
   twipsToMm,
@@ -679,6 +680,9 @@ class DocenDocument extends HTMLElement {
       "closable",
       "user",
       "avatar",
+      // Declarative page setup + named styles (JSON) — see #readInitAttrs.
+      "section-properties",
+      "styles",
     ];
   }
 
@@ -701,6 +705,12 @@ class DocenDocument extends HTMLElement {
       case "navigation-pane":
       case "properties-pane":
         this.#applyChromeVisibility();
+        break;
+      case "section-properties":
+        this.#applySectionPropertiesAttr();
+        break;
+      case "styles":
+        this.#applyStylesAttr();
         break;
     }
   }
@@ -1117,9 +1127,17 @@ class DocenDocument extends HTMLElement {
     // page node never enters DOCX — wrapPages/unwrapPages bridge it at the
     // editor layer, so DOCX round-trip stays transparent.
     const contentAttr = this.getAttribute("content");
+    // Declarative section-properties / styles (JSON) seed doc-level attrs so a
+    // host can bootstrap page setup + named styles without openDOCX/setJSON.
+    const initAttrs = this.#readInitAttrs();
+    const baseDoc = wrapPages(contentAttr ? parseHTML(contentAttr) : undefined);
+    const initialDoc =
+      Object.keys(initAttrs).length > 0
+        ? { ...baseDoc, attrs: { ...baseDoc.attrs, ...initAttrs } }
+        : baseDoc;
     this.#editor = createDocxEditor({
       element: page,
-      content: wrapPages(contentAttr ? parseHTML(contentAttr) : undefined),
+      content: initialDoc,
       // Spellcheck defaults OFF — Chromium's spellcheck is a major perf cost on
       // large documents (ProseMirror community-confirmed). Opt in via the
       // Review ribbon's spell-check button (spellcheck="true" attribute).
@@ -1215,8 +1233,14 @@ class DocenDocument extends HTMLElement {
 
     // Default page setup (Word defaults): A4 portrait + Normal margins. The
     // canvas already defaults to 210×297; apply the margin preset so the
-    // content box matches Word and pagination measures correctly.
-    this.#setMargins("normal");
+    // content box matches Word and pagination measures correctly. Skip when the
+    // host declared `section-properties` — that already seeded
+    // doc.attrs.sectionProperties via the initial doc, so just sync the canvas.
+    if (this.hasAttribute("section-properties")) {
+      this.#syncCanvasFromSection();
+    } else {
+      this.#setMargins("normal");
+    }
 
     // command = ribbon buttons; change = menu items + auto-save switch. Listen
     // on the shadow root so non-composed Fluent events (menu-item "change")
@@ -1600,6 +1624,88 @@ class DocenDocument extends HTMLElement {
     requestAnimationFrame(() => {
       if (this.#editor) pageStorageOf(this.#editor).repaginate();
     });
+  }
+
+  /** Parse the declarative `section-properties` / `styles` attributes (JSON).
+   *  Lets a host bootstrap page setup + named styles without openDOCX/setJSON.
+   *  Malformed JSON is ignored (warned) so a typo never breaks the editor. */
+  #readInitAttrs(): {
+    sectionProperties?: SectionPropertiesOptions;
+    styles?: StylesOptions;
+  } {
+    const out: { sectionProperties?: SectionPropertiesOptions; styles?: StylesOptions } = {};
+    const sp = this.getAttribute("section-properties");
+    if (sp) {
+      try {
+        out.sectionProperties = JSON.parse(sp) as SectionPropertiesOptions;
+      } catch {
+        console.warn("[docen-document] invalid section-properties JSON — ignored");
+      }
+    }
+    const st = this.getAttribute("styles");
+    if (st) {
+      try {
+        out.styles = JSON.parse(st) as StylesOptions;
+      } catch {
+        console.warn("[docen-document] invalid styles JSON — ignored");
+      }
+    }
+    return out;
+  }
+
+  /** Mirror doc.attrs.sectionProperties onto the canvas attributes (page-width /
+   *  page-height / margin / orientation) so zoom-to-page-width and the CSS
+   *  fallback stay in sync, then re-paginate. Sides absent in the model fall
+   *  back to the engine default margins. */
+  #syncCanvasFromSection(): void {
+    const editor = this.#editor;
+    if (!editor) return;
+    const sp = (editor.state.doc.attrs as { sectionProperties?: SectionPropertiesOptions })
+      .sectionProperties;
+    const page = sp?.page;
+    const canvas = this.shadowRoot?.querySelector("docen-canvas");
+    if (canvas && page) {
+      const size = page.size;
+      if (size && typeof size.width === "number" && typeof size.height === "number") {
+        canvas.setAttribute("page-width", twipsToMm(size.width));
+        canvas.setAttribute("page-height", twipsToMm(size.height));
+      }
+      if (size?.orientation === "landscape") canvas.setAttribute("orientation", "landscape");
+      else canvas.removeAttribute("orientation");
+      const m = page.margin;
+      const def = sectionMarginDefaults;
+      const mm = (v: unknown, d: number): string => twipsToMm(typeof v === "number" ? v : d);
+      canvas.setAttribute(
+        "margin",
+        `${mm(m?.top, def.TOP)} ${mm(m?.right, def.RIGHT)} ${mm(m?.bottom, def.BOTTOM)} ${mm(m?.left, def.LEFT)}`,
+      );
+    }
+    this.#refreshGeometry();
+  }
+
+  /** Runtime `section-properties` change: deep-merge into the body section's
+   *  sectPr (a default doc is single-section) and re-sync the canvas. */
+  #applySectionPropertiesAttr(): void {
+    const editor = this.#editor;
+    if (!editor) return;
+    const parsed = this.#readInitAttrs().sectionProperties;
+    if (!parsed) return;
+    const cur = (editor.state.doc.attrs as { sectionProperties?: SectionPropertiesOptions })
+      .sectionProperties;
+    editor.view.dispatch(
+      editor.state.tr.setDocAttribute("sectionProperties", mergeSectionProperties(cur, parsed)),
+    );
+    this.#syncCanvasFromSection();
+  }
+
+  /** Runtime `styles` change: replace doc.attrs.styles and re-inject the CSS. */
+  #applyStylesAttr(): void {
+    const editor = this.#editor;
+    if (!editor) return;
+    const parsed = this.#readInitAttrs().styles;
+    if (parsed === undefined) return;
+    editor.view.dispatch(editor.state.tr.setDocAttribute("styles", parsed));
+    this.#applyDocStyles();
   }
 
   /** Apply a zoom level (percent, clamped 10–500) to the canvas and refresh the
