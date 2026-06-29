@@ -81,6 +81,7 @@ const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   "paste",
   "select",
   "format-painter",
+  "edit-mode",
   // #onChange (data-event)
   "open",
   "save-as",
@@ -690,6 +691,7 @@ class DocenDocument extends HTMLElement {
     switch (name) {
       case "editable":
         this.#editor?.setEditable(value !== "false");
+        this.#syncEditModeMenu();
         break;
       case "filename":
       case "user":
@@ -1378,6 +1380,7 @@ class DocenDocument extends HTMLElement {
       tabs: this.#tabs(),
     });
     this.#applyRibbonGreying();
+    this.#syncEditModeMenu();
     this.#renderPanes();
   }
 
@@ -1458,6 +1461,24 @@ class DocenDocument extends HTMLElement {
         const event = el.getAttribute("event");
         if (event && !wired.has(event)) el.setAttribute("disabled", "");
       });
+  }
+
+  /** Re-stamp the tab-row "Editing" menu so its label + checked item match the
+   *  editor's live editable state (initial render, after a switch, and on
+   *  locale change — #renderChrome re-stamps the ribbon, so this runs after
+   *  #applyRibbonGreying to override the static default items). */
+  #syncEditModeMenu(): void {
+    const menu = this.shadowRoot?.querySelector('docen-ribbon-menu[event="edit-mode"]');
+    if (!menu) return;
+    const editable = this.#editor?.isEditable ?? true;
+    menu.setAttribute("label", t(editable ? "ribbon.opt.editing" : "ribbon.opt.viewing"));
+    menu.setAttribute(
+      "items",
+      JSON.stringify([
+        { text: t("ribbon.opt.editing"), event: "edit-mode", value: "edit", checked: editable },
+        { text: t("ribbon.opt.viewing"), event: "edit-mode", value: "view", checked: !editable },
+      ]),
+    );
   }
 
   /** The full set of wired command names (dispatch + locally handled). */
@@ -1867,6 +1888,13 @@ class DocenDocument extends HTMLElement {
       return;
     }
     if (!this.#editor) return;
+    // Edit / View mode — toggle the editor's editable state (tab-row "Editing"
+    // menu); then re-stamp the menu so its label + checked item follow.
+    if (name === "edit-mode") {
+      this.#editor.setEditable(value !== "view");
+      this.#syncEditModeMenu();
+      return;
+    }
     // "save" is a document action, not a Tiptap command — handle locally,
     // unless the host took over via docen:save (preventDefault).
     if (name === "save") {

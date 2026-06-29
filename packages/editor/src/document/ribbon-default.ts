@@ -122,6 +122,16 @@ const pasteItems = (): string =>
     { text: opt("keep-text-only"), value: "keep-text-only" },
   ]);
 
+// Edit / View mode pick — the tab-row "Editing" trailing action. Default is
+// Edit checked; the host (#syncEditModeMenu in document/index.ts) rewrites the
+// label + checked state to match the live editable state, so this is only the
+// initial stamp.
+const editItems = (): string =>
+  JSON.stringify([
+    { text: opt("editing"), event: "edit-mode", value: "edit", checked: true },
+    { text: opt("viewing"), event: "edit-mode", value: "view" },
+  ]);
+
 const highlightItems = (): string =>
   JSON.stringify([
     { text: opt("no-color"), value: "none" },
@@ -374,7 +384,10 @@ export function buildRibbonInnerHTML(
       ${show("references") ? referencesPanel() : ""}
       ${show("mailings") ? mailingsPanel() : ""}
       ${show("review") ? reviewPanel() : ""}
-      ${show("view") ? viewPanel() : ""}`;
+      ${show("view") ? viewPanel() : ""}
+      <docen-ribbon-button slot="actions" icon="comment" label="${cmd("comment")}" event="comment"></docen-ribbon-button>
+      <docen-ribbon-menu slot="actions" icon="edit" label="${cmd("editing")}" event="edit-mode" items='${editItems()}'></docen-ribbon-menu>
+      <docen-ribbon-button slot="actions" icon="share" label="${cmd("share")}" event="share"></docen-ribbon-button>`;
 }
 
 // --- Home --------------------------------------------------------------------

@@ -366,6 +366,11 @@ export const ribbonEn: DocenTranslation = {
   "ribbon.opt.tabs-only": "Show Tabs Only",
   "ribbon.opt.always": "Show Tabs and Commands",
   "ribbon.opt.ribbon-display": "Ribbon Display Options",
+  // --- Tab-row trailing actions (Comment/Edit/Share) ---
+  "ribbon.cmd.editing": "Editing",
+  "ribbon.cmd.share": "Share",
+  "ribbon.opt.editing": "Editing",
+  "ribbon.opt.viewing": "Viewing",
   // --- App header ---
   "header.brand": "Docen",
   "header.autosave": "Auto-save",
@@ -744,6 +749,11 @@ export const ribbonZhCN: DocenTranslation = {
   "ribbon.opt.tabs-only": "仅显示选项卡",
   "ribbon.opt.always": "始终显示功能区",
   "ribbon.opt.ribbon-display": "功能区显示选项",
+  // --- Tab 行右侧 trailing actions（批注/编辑/共享）---
+  "ribbon.cmd.editing": "编辑",
+  "ribbon.cmd.share": "共享",
+  "ribbon.opt.editing": "编辑",
+  "ribbon.opt.viewing": "查看",
   // --- App header ---
   "header.brand": "Docen",
   "header.autosave": "自动保存",
