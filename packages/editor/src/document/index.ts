@@ -16,7 +16,6 @@ import {
 } from "@docen/docx";
 import { Extension, type Editor } from "@docen/docx/core";
 import { ListKeymap } from "@tiptap/extension-list";
-import { TableOfContents } from "@tiptap/extension-table-of-contents";
 import {
   CharacterCount,
   Dropcursor,
@@ -48,6 +47,7 @@ import "./i18n";
 import { FontMetricDecoration } from "./extensions/font-metric";
 import { ImageCap } from "./extensions/image-cap";
 import { DocenKeymap } from "./extensions/keymap";
+import { Outline, type OutlineAnchor } from "./extensions/outline";
 import { PageBreakView } from "./extensions/page-break";
 import { Page, PageDocument } from "./extensions/page-node";
 import { PagePlugin, pageStorageOf } from "./extensions/page-plugin";
@@ -521,19 +521,9 @@ const TEMPLATE = `
   <input type="file" id="file-input" accept=".docx" hidden />
   <input type="file" id="image-input" accept="image/*" hidden />`;
 
-/** A TOC anchor as emitted by the TableOfContents extension — the subset of
- *  fields we consume (id for selection, pos for jump, textContent + level for
- *  the outline tree). */
-interface TocAnchor {
-  id: string;
-  pos: number;
-  textContent: string;
-  originalLevel: number;
-}
-
-/** Build a nested OutlineItem tree from the flat TOC anchor list: each heading
- *  nests under the nearest preceding heading with a smaller level. */
-function buildOutlineTree(anchors: readonly TocAnchor[]): OutlineItem[] {
+/** Build a nested OutlineItem tree from the flat outline anchor list: each
+ *  heading nests under the nearest preceding heading with a smaller level. */
+function buildOutlineTree(anchors: readonly OutlineAnchor[]): OutlineItem[] {
   type Node = { id: string; title: string; level: number; children?: Node[] };
   const roots: Node[] = [];
   const stack: Node[] = [];
@@ -646,7 +636,7 @@ class DocenDocument extends HTMLElement {
   #imageInput?: HTMLInputElement;
   /** Latest TOC anchors, refreshed by TableOfContents.onUpdate; used to resolve
    *  an outline click back to a document position (pos). */
-  #anchors: readonly TocAnchor[] = [];
+  #anchors: readonly OutlineAnchor[] = [];
   /** Cached doc nodeSize + Word-style word count so caret-move transactions
    *  don't re-walk the whole document (recomputed only when content changes). */
   #lastDocSize = -1;
@@ -770,15 +760,9 @@ class DocenDocument extends HTMLElement {
     }
   };
 
-  /** The scroll container for the editor — <docen-canvas> (overflow:auto).
-   *  TableOfContents uses it to track which heading is active on scroll. */
-  #scrollParent(): HTMLElement | Window {
-    return this.shadowRoot?.querySelector("docen-canvas") ?? window;
-  }
-
-  /** TableOfContents.onUpdate → <docen-outline>. Cache the anchors (so an
+  /** Outline.onUpdate → <docen-outline>. Cache the anchors (so an
    *  outline click resolves to a position) and rebuild the nested tree. */
-  #renderOutline(anchors: readonly TocAnchor[]): void {
+  #renderOutline(anchors: readonly OutlineAnchor[]): void {
     this.#anchors = anchors;
     const outline = this.shadowRoot?.querySelector("docen-outline");
     if (!outline) return;
@@ -1192,12 +1176,12 @@ class DocenDocument extends HTMLElement {
         // line boundary (head on the current page, tail on the next). Both
         // halves share the splitGroup id; unwrapPages merges them on export.
         SplitMarks,
-        // TableOfContents injects id/data-toc-id on each heading and reports the
-        // anchor list via onUpdate → <docen-outline>. scrollParent is the canvas
-        // (our scroll surface), not the window.
-        TableOfContents.configure({
-          scrollParent: () => this.#scrollParent(),
-          onUpdate: (anchors) => this.#renderOutline(anchors as TocAnchor[]),
+        // Outline: a read-only heading walk that reports the anchor list to
+        // <docen-outline> (see the Outline extension above — it replaces
+        // @tiptap/extension-table-of-contents, whose setNodeMarkup aborted the
+        // reflow on large docs).
+        Outline.configure({
+          onUpdate: (anchors) => this.#renderOutline(anchors),
         }),
         // Search (prosemirror-search) — stores the active query and highlights
         // its matches; driven by the nav-pane search box (#onSearch).
@@ -2102,6 +2086,13 @@ class DocenDocument extends HTMLElement {
     const json = parseDOCX(buffer);
     const editor = this.#editor;
     if (!editor) return;
+    // Inject the styles CSS BEFORE rendering so the first paint carries the
+    // document's real fonts/sizes (see setJSON for the rationale).
+    this.#injectDocStyles((json.attrs as { styles?: StylesOptions } | undefined)?.styles);
+    // Set filename before #applyDocStyles so its single #renderChrome reflects
+    // both the Styles gallery and the filename header — previously this was a
+    // second #renderChrome call duplicating the one inside #applyDocStyles.
+    if (input instanceof File) this.setAttribute("filename", input.name);
     // Replace the whole doc node (content + doc-level attrs) — see #loadDoc.
     this.#loadDoc(editor, wrapPages(json));
     this.#applyDocStyles();
@@ -2110,10 +2101,6 @@ class DocenDocument extends HTMLElement {
     // measuring in the same frame reads half-laid-out blocks and the breaks
     // come out wrong (the first page overflows, so the pages look uneven).
     this.#repaginateAfterLoad(editor);
-    if (input instanceof File) {
-      this.setAttribute("filename", input.name);
-      this.#renderChrome();
-    }
   }
 
   /** Re-paginate after loading a document, once its layout has settled.
@@ -2129,19 +2116,15 @@ class DocenDocument extends HTMLElement {
       if (this.#editor === editor && !editor.isDestroyed) pageStorageOf(editor).repaginate();
     };
     requestAnimationFrame(run);
+    // Second pass once fonts are ready: fonts loading after the first pass
+    // change canvas measureText widths, so the Pretext prepare cache (keyed on
+    // text+font+letterSpacing) is stale — clear it before re-measuring with the
+    // real fonts. Images no longer gate this pass: image paragraphs measure from
+    // node.attrs (not the <img> DOM), so a still-loading image can't change page
+    // breaks — awaiting it only stalled the second pass (a large doc's many
+    // images stalled it near-indefinitely).
     const fonts = document.fonts?.ready ?? Promise.resolve();
-    const imgs = Array.from(editor.view.dom.querySelectorAll<HTMLImageElement>("img"));
-    const imgReady = (img: HTMLImageElement): Promise<void> =>
-      img.complete
-        ? Promise.resolve()
-        : new Promise((resolve) => {
-            img.addEventListener("load", () => resolve(), { once: true });
-            img.addEventListener("error", () => resolve(), { once: true });
-          });
-    void Promise.all([fonts, ...imgs.map(imgReady)]).then(() => {
-      // Fonts loading after the first pass change canvas measureText widths,
-      // so the Pretext prepare cache (keyed on text+font+letterSpacing) is now
-      // stale — clear it before the second pass re-measures with the real fonts.
+    void fonts.then(() => {
       clearMeasureCache();
       requestAnimationFrame(run);
     });
@@ -2164,12 +2147,22 @@ class DocenDocument extends HTMLElement {
 
   /** Replace the document with Tiptap JSON. */
   setJSON(json: JSONContent): void {
+    const editor = this.#editor;
+    if (!editor) return;
+    // Inject the styles CSS BEFORE rendering so the first paint already carries
+    // the document's real fonts/sizes — without this, a large doc's synchronous
+    // load + image decode can defer the <style> repaint and the page renders
+    // unstyled. Read styles from the incoming JSON (editor.state is still the
+    // old doc here; wrapPages preserves doc-level attrs).
+    this.#injectDocStyles((json.attrs as { styles?: StylesOptions } | undefined)?.styles);
     // Wrap on the way in — external callers pass flat doc > block+. Tiptap's
     // setContent only swaps content (it drops doc-level attrs like styles/core),
     // so replace the whole doc node via a fresh EditorState to preserve them.
-    const editor = this.#editor;
-    if (editor) this.#loadDoc(editor, wrapPages(json));
+    this.#loadDoc(editor, wrapPages(json));
     this.#applyDocStyles();
+    // Paginate once layout has settled — parity with openDOCX (setContent renders
+    // synchronously, but the browser commits layout on the next frame).
+    this.#repaginateAfterLoad(editor);
   }
 
   /** Replace the whole doc node (content + doc-level attrs) via a fresh
@@ -2216,15 +2209,15 @@ class DocenDocument extends HTMLElement {
   /** Inject the document's named styles (styles.xml) as scoped CSS so imported
    *  headings/body text render with their real font/size/color instead of the
    *  browser default. Called after every content load (create / import / setJSON). */
-  #applyDocStyles(): void {
-    const editor = this.#editor;
-    if (!editor) return;
-    const styles = editor.state.doc.attrs?.styles;
-    // Re-stamp the ribbon so the Styles gallery reflects the loaded document's
-    // style library (named + custom paragraph styles) — see styleItems().
-    this.#renderChrome();
+  /** Inject the document's named-styles CSS (styles.xml → scoped <style>) into
+   *  the shadow root. Idempotent — reuses the #docen-doc-styles element across
+   *  calls. Called BOTH before #loadDoc (by openDOCX/setJSON, so the first paint
+   *  is already styled) and inside #applyDocStyles (refresh after doc attrs
+   *  settle). Split out so loaders can inject before rendering. */
+  #injectDocStyles(styles: StylesOptions | null | undefined): void {
+    const root = this.shadowRoot;
+    if (!root) return;
     const css = stylesToCss(styles, ".docen-page");
-    const root = this.shadowRoot!;
     const existing = root.querySelector("#docen-doc-styles");
     if (css) {
       const styleEl = (existing ?? document.createElement("style")) as HTMLStyleElement;
@@ -2236,11 +2229,23 @@ class DocenDocument extends HTMLElement {
     } else {
       existing?.remove();
     }
+  }
+
+  /** Apply the loaded document's styles + chrome + geometry. Called after every
+   *  content load (create / import / setJSON). The styles <style> is also
+   *  injected BEFORE #loadDoc by the loaders (first paint styled); this refreshes
+   *  it from the now-settled doc attrs, re-stamps the ribbon (Styles gallery),
+   *  and applies font-metric + section geometry. */
+  #applyDocStyles(): void {
+    const editor = this.#editor;
+    if (!editor) return;
+    this.#injectDocStyles(editor.state.doc.attrs?.styles);
+    // Re-stamp the ribbon so the Styles gallery reflects the loaded document's
+    // style library (named + custom paragraph styles) — see styleItems().
+    this.#renderChrome();
     // Font metric + section geometry apply regardless of named styles — both
     // read attrs (default font / sectionProperties) that a styles-less document
-    // still carries. The previous early `return` skipped them, leaving
-    // --docen-font-metric and the section's page-size/pitch unset on freshly
-    // loaded (styles-less) documents.
+    // still carries.
     this.#applyDefaultFontMetric();
     this.#applySectionGeometry();
   }

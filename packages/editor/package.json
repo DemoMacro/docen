@@ -73,7 +73,6 @@
     "@microsoft/fast-html": "1.0.0-alpha.55",
     "@microsoft/focusgroup-polyfill": "1.5.0",
     "@tiptap/extension-list": "3.27.1",
-    "@tiptap/extension-table-of-contents": "3.27.1",
     "@tiptap/extensions": "3.27.1",
     "@tiptap/pm": "3.27.1",
     "image-meta": "0.2.2",

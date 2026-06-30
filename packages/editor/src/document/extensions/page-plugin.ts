@@ -660,15 +660,11 @@ function reflow(editor: Editor, scroll = false): void {
   const segHeightOf = (section: unknown): number =>
     sectionContentDims(section)?.height ?? domFallback;
 
-  // Hold off while any image is still decoding: its offsetHeight is 0 / a
-  // placeholder until loaded, so a reflow now packs on stale heights and the
-  // page jumps when the image lands. The capture-phase load listener
-  // (addProseMirrorPlugins) re-schedules once each image is ready, so this
-  // converges to the correct breaks without the intermediate flicker.
-  for (const img of view.dom.querySelectorAll<HTMLImageElement>("img")) {
-    if (!img.complete) return;
-  }
-
+  // Image decode no longer gates re-flow: pagination measures image paragraphs
+  // from node.attrs (clamped to the content width), NOT the live <img> DOM, so
+  // a decoding image lands in the exact box already reserved — no height drift,
+  // no page jump. (Sized images' loads are layout no-ops; unsized images still
+  // converge via onMediaReady in addProseMirrorPlugins.)
   const items = measureFlatItems(editor);
   if (items.length === 0) return;
 
@@ -949,12 +945,19 @@ export const PagePlugin = Extension.create<PagePluginOptions>({
       runRaf();
     };
 
-    // Re-flow when an image finishes decoding. `load`/`error` do not bubble, so
-    // we capture at the editor surface — one binding covers every image, even
-    // ones inserted later. reflow() itself holds off while any image is still
-    // loading, so this is what drives convergence past a loading image.
+    // Re-flow when an UNSIZED image finishes decoding. `load`/`error` do not
+    // bubble, so we capture at the editor surface — one binding covers every
+    // image, even ones inserted later. A sized image (carrying width/height
+    // HTML attrs) decodes into its already-reserved box, so its load/error
+    // can't change layout — skip it. Only unsized images (pasted/manual, whose
+    // box is unknown until decoded) drive convergence past a loading image.
     const onMediaReady = (e: Event): void => {
-      if (e.target instanceof HTMLImageElement) schedule();
+      const img = e.target;
+      if (!(img instanceof HTMLImageElement)) return;
+      // img.width/height mirror the HTML width/height attrs renderHTML emits;
+      // 0 means no size reserved → layout depends on the decoded image.
+      if (img.width || img.height) return;
+      schedule();
     };
 
     return [
