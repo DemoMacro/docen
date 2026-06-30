@@ -183,26 +183,26 @@ function capSize(
   return { width: contentW, height: height != null ? Math.round(height * scale) : null };
 }
 
-/** Natural pixel dimensions of the in-DOM <img> with `src`, awaited on load.
- *  Used when fetch is blocked (CORS): an <img> loads cross-origin freely — only
- *  fetch/canvas are CORS-gated — so the natural size is still readable even
- *  though the bytes can't be fetched for embedding. */
-function domNaturalSize(
-  view: EditorView,
-  src: string,
-): Promise<{ width: number; height: number } | null> {
+/** Natural pixel dimensions of the image at `src`. Used when fetch is blocked
+ *  (CORS): an <img> loads cross-origin freely — only fetch/canvas are
+ *  CORS-gated — so the natural size is still readable even though the bytes
+ *  can't be fetched for embedding.
+ *
+ *  Probes via a standalone `new Image()`, NOT the rendered <img>: the rendered
+ *  image carries `loading="lazy"` (image.ts renderHTML), which defers
+ *  off-screen loads, so its load event may never fire and an await on it would
+ *  hang — deadlocking the embed throttle (inFlight never decrements). A
+ *  JS-created Image is outside the render tree, so lazy never applies and
+ *  load/error always fire regardless of viewport proximity. */
+function domNaturalSize(src: string): Promise<{ width: number; height: number } | null> {
   return new Promise((resolve) => {
-    const img = Array.from(view.dom.querySelectorAll<HTMLImageElement>("img")).find(
-      (i) => i.getAttribute("src") === src,
-    );
-    if (!img) return resolve(null);
-    const read = () =>
-      img.naturalWidth > 0 && img.naturalHeight > 0
-        ? resolve({ width: img.naturalWidth, height: img.naturalHeight })
+    const probe = new Image();
+    probe.onload = () =>
+      probe.naturalWidth > 0 && probe.naturalHeight > 0
+        ? resolve({ width: probe.naturalWidth, height: probe.naturalHeight })
         : resolve(null);
-    if (img.complete && img.naturalWidth > 0) return read();
-    img.addEventListener("load", read, { once: true });
-    img.addEventListener("error", () => resolve(null), { once: true });
+    probe.onerror = () => resolve(null);
+    probe.src = src;
   });
 }
 
@@ -220,7 +220,7 @@ async function embedHttpImage(view: EditorView, src: string, fetching: Set<strin
       return;
     }
     if (view.isDestroyed) return;
-    const natural = await domNaturalSize(view, src);
+    const natural = await domNaturalSize(src);
     if (natural) {
       // A CORS-blocked web image (manually pasted) can't be sync-decoded, so cap
       // it here from the DOM-read natural size — appendTransaction skips any
@@ -271,6 +271,25 @@ export const ImageCap = Extension.create({
     // http(s) image URLs currently being fetched → data URL, deduped so a
     // re-flow doesn't kick off a second fetch for the same URL.
     const fetching = new Set<string>();
+    // Concurrency throttle: a doc with many large http images would otherwise
+    // fire one fetch per image at once — a network storm plus piled-up base64
+    // transcoding (FileReader.readAsDataURL) on the main thread. Pending URLs
+    // queue and drain at most MAX_CONCURRENT at a time.
+    const queue: string[] = [];
+    let inFlight = 0;
+    const MAX_CONCURRENT = 4;
+    const drain = (): void => {
+      const view = editorView;
+      if (!view || view.isDestroyed) return;
+      while (inFlight < MAX_CONCURRENT && queue.length > 0) {
+        const src = queue.shift() as string;
+        inFlight++;
+        void embedHttpImage(view, src, fetching).finally(() => {
+          inFlight--;
+          drain();
+        });
+      }
+    };
     return [
       new Plugin({
         key,
@@ -282,15 +301,17 @@ export const ImageCap = Extension.create({
               // Inline any http(s) image: fetch → data URL so it can be capped
               // and exported (a remote URL alone can't be sync-decoded or
               // embedded into DOCX). Word inlines pasted web images too.
+              // Queued + drained by drain() to bound concurrent fetches.
               view.state.doc.descendants((node) => {
                 if (node.type.name !== "image") return true;
                 const src = node.attrs.src;
                 if (typeof src !== "string" || !/^https?:/.test(src)) return true;
                 if (fetching.has(src)) return true;
                 fetching.add(src);
-                void embedHttpImage(view, src, fetching);
+                queue.push(src);
                 return true;
               });
+              drain();
             },
           };
         },

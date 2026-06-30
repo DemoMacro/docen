@@ -249,6 +249,17 @@ function isVectorImage(src: unknown): boolean {
   return typeof src === "string" && /^data:image\/(?:x-)?(?:emf|wmf)/i.test(src);
 }
 
+/** Remote http(s) images are lazy-loaded + async-decoded in renderHTML; data
+ *  URLs (the imported-DOCX majority) have no network to defer, so they stay
+ *  eager — and their load event, awaited by the editor's cap path, is not
+ *  delayed by `loading="lazy"`. */
+function isRemoteImage(src: unknown): boolean {
+  return typeof src === "string" && /^https?:/.test(src);
+}
+
+/** Render attrs applied only to remote images (see isRemoteImage). */
+const REMOTE_IMG_ATTRS: Record<string, unknown> = { loading: "lazy", decoding: "async" };
+
 /**
  * Stamp the nested office-open attrs onto an HTML attribute map as JSON
  * data-* pairs. Shared by the cropped-div and plain-img render branches so the
@@ -446,13 +457,17 @@ export const Image = BaseImage.extend({
       const imgAttrs: Record<string, unknown> = {
         src: attrs.src as string,
         style: crop.style,
+        ...(isRemoteImage(attrs.src) ? REMOTE_IMG_ATTRS : {}),
       };
       if (attrs.alt) imgAttrs.alt = attrs.alt;
       if (attrs.title) imgAttrs.title = attrs.title;
       return ["span", boxAttrs, ["img", imgAttrs]] as const;
     }
 
-    const htmlAttrs: Record<string, unknown> = { ...HTMLAttributes };
+    const htmlAttrs: Record<string, unknown> = {
+      ...HTMLAttributes,
+      ...(isRemoteImage(attrs.src) ? REMOTE_IMG_ATTRS : {}),
+    };
     const styles = renderImageStyles(attrs);
     if (styles.length > 0) htmlAttrs.style = styles.join(";");
     attachRawAttrs(htmlAttrs, attrs);
