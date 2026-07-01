@@ -98,7 +98,7 @@ Parses an HTML string into TipTap JSON content.
 **Parameters:**
 
 - `html: string` - HTML string to parse
-- `extensions?: Extensions` - Optional TipTap extensions (defaults to @docen/extensions)
+- `extensions?: Extensions` - Optional TipTap extensions (defaults to @docen/docx's docxExtensions)
 - `options?: ParseOptions` - Optional ProseMirror parse options
 
 **Returns:** `JSONContent` - TipTap document object

@@ -64,21 +64,23 @@ Chrome-visibility and configuration attributes are **reactive** (`observedAttrib
 change them at runtime and the component re-renders. `content` and `spellcheck`
 are read once on connect.
 
-| Attribute         | Default    | Description                                                          |
-| ----------------- | ---------- | -------------------------------------------------------------------- |
-| `user`            | —          | Display name shown in the header                                     |
-| `avatar`          | —          | Avatar image URL (omitted → initial-letter avatar)                   |
-| `filename`        | "Document" | Document name shown in the header and save dialog default            |
-| `content`         | —          | Initial document as HTML (parsed once on connect)                    |
-| `editable`        | `true`     | `false` makes the surface read-only                                  |
-| `spellcheck`      | `false`    | `true` enables browser spellcheck (perf cost on large docs)          |
-| `toolbar`         | `true`     | `false` hides the ribbon                                             |
-| `tabs`            | all        | Comma-separated ribbon tab whitelist, e.g. `tabs="home,review,view"` |
-| `header`          | `true`     | `false` hides the app header                                         |
-| `navigation-pane` | `open`     | `open` \| `closed` \| `hidden` — left navigation pane state          |
-| `properties-pane` | `open`     | `open` \| `closed` \| `hidden` — right properties pane state         |
-| `status-bar`      | `true`     | `false` hides the footer status bar                                  |
-| `closable`        | —          | Renders a close (×) button that emits `docen:request-close`          |
+| Attribute            | Default    | Description                                                          |
+| -------------------- | ---------- | -------------------------------------------------------------------- |
+| `user`               | —          | Display name shown in the header                                     |
+| `avatar`             | —          | Avatar image URL (omitted → initial-letter avatar)                   |
+| `filename`           | "Document" | Document name shown in the header and save dialog default            |
+| `content`            | —          | Initial document as HTML (parsed once on connect)                    |
+| `editable`           | `true`     | `false` makes the surface read-only                                  |
+| `spellcheck`         | `false`    | `true` enables browser spellcheck (perf cost on large docs)          |
+| `toolbar`            | `true`     | `false` hides the ribbon                                             |
+| `tabs`               | all        | Comma-separated ribbon tab whitelist, e.g. `tabs="home,review,view"` |
+| `header`             | `true`     | `false` hides the app header                                         |
+| `navigation-pane`    | `open`     | `open` \| `closed` \| `hidden` — left navigation pane state          |
+| `properties-pane`    | `open`     | `open` \| `closed` \| `hidden` — right properties pane state         |
+| `status-bar`         | `true`     | `false` hides the footer status bar                                  |
+| `closable`           | —          | Renders a close (×) button that emits `docen:request-close`          |
+| `section-properties` | —          | JSON section page setup (size, margins, orientation); reactive       |
+| `styles`             | —          | JSON named styles; reactive                                          |
 
 Unwired ribbon commands (skeleton buttons) render visually but are greyed out
 (`disabled`) — the ribbon keeps its full Office shape without dead clicks.
