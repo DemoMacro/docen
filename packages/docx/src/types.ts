@@ -442,6 +442,12 @@ export interface ColumnBreakNode extends TiptapJSONContent {
   type: "columnBreak";
 }
 
+// -- Inline atom: DOCX tab character (`<w:tab/>`) — leader/dot-leader marker --
+
+export interface TabNode extends TiptapJSONContent {
+  type: "tab";
+}
+
 // -- Mention node (inline) --
 
 export interface MentionNode extends TiptapJSONContent {
@@ -513,6 +519,7 @@ export type InlineContent =
   | EmojiNode
   | PageBreakNode
   | ColumnBreakNode
+  | TabNode
   | MentionNode
   | InlineMathNode
   | InlinePassthroughNode;

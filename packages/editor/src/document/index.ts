@@ -6,6 +6,7 @@ import {
   parseDOCX,
   parseHTML,
   resolveFontName,
+  scrollCaretToTop,
   sectionMarginDefaults,
   sectionPageSizeDefaults,
   stylesToCss,
@@ -205,6 +206,37 @@ const TEMPLATE = `
        overlays its own empty paragraph, over the body text below it). */
     .docen-pages .docen-page p:has([data-float-anchor="paragraph"]) {
       position: relative;
+    }
+    /* A paragraph with a leader tab-stop (class docx-tab-leader, set by
+       Paragraph.renderHTML from attrs.tabStops) renders a dotted leader between
+       the title and page number — MS Word's TOC "....." connector. The tab atom
+       (span.docx-tab) flexes to fill the gap and paints the dots; the page
+       number sits at the right edge. The paragraph stays single-line (TOC entries
+       never wrap), so flex keeps the measured line height intact. */
+    .docen-pages .docen-page p.docx-tab-leader {
+      display: flex;
+      align-items: baseline;
+    }
+    .docen-pages .docen-page p.docx-tab-leader .docx-tab {
+      flex: 1;
+      margin: 0 0.3em;
+      border-bottom: 1px dotted currentColor;
+      opacity: 0.5;
+    }
+    /* Hyperlinks render via the Link mark (<a href>), but their color / underline
+       / cursor come from the run's own rPr (textStyle mark) — NOT the browser's
+       default blue / underline / pointer. Reset the UA anchor styling so the
+       OOXML run color is the sole source of truth: a TOC entry's runs carry no
+       Hyperlink rStyle, so they keep the paragraph style's color (black); a
+       styled hyperlink run carries its own color/underline. Word hyperlinks are
+       static, so suppress visited/hover/active color shifts too. */
+    .docen-pages .docen-page a,
+    .docen-pages .docen-page a:visited,
+    .docen-pages .docen-page a:hover,
+    .docen-pages .docen-page a:active {
+      color: inherit;
+      text-decoration: inherit;
+      cursor: inherit;
     }
     /* Images cap to the section content width the way Word caps them: a wider
        image scales DOWN to fit, never upscales. The ImageCap extension sets the
@@ -798,7 +830,7 @@ class DocenDocument extends HTMLElement {
     const anchor = this.#anchors.find((a) => a.id === id);
     if (!anchor) return;
     editor.chain().focus().setTextSelection(anchor.pos).run();
-    editor.view.dispatch(editor.view.state.tr.scrollIntoView());
+    scrollCaretToTop(editor.view);
   };
 
   /** navigation:search → set the active query; matches highlight live. */
@@ -891,7 +923,7 @@ class DocenDocument extends HTMLElement {
     const to = Number(item.dataset.to);
     if (!Number.isFinite(from) || !Number.isFinite(to)) return;
     editor.chain().focus().setTextSelection({ from, to }).run();
-    editor.view.dispatch(editor.view.state.tr.scrollIntoView());
+    scrollCaretToTop(editor.view);
   };
 
   /** Ctrl+F → open the nav pane and focus its search box (Word behavior). */
@@ -988,7 +1020,7 @@ class DocenDocument extends HTMLElement {
     });
     if (target < 0) return;
     editor.chain().focus().setTextSelection(target).run();
-    editor.view.dispatch(editor.view.state.tr.scrollIntoView());
+    scrollCaretToTop(editor.view);
   }
 
   /** Format Painter: on first click, capture the current selection's marks and

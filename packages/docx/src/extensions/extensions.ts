@@ -2,6 +2,7 @@ import { all, createLowlight } from "lowlight";
 
 import { Extension, type AnyExtension } from "../core";
 import { Blockquote } from "./blockquote";
+import { BulletList } from "./bullet-list";
 import { CodeBlock } from "./code-block";
 import { ColumnBreak } from "./column-break";
 import { Details, DetailsSummary, DetailsContent } from "./details";
@@ -9,6 +10,7 @@ import { Document } from "./document";
 import { FormattingMarks } from "./formatting-marks";
 import { Heading } from "./heading";
 import { Image } from "./image";
+import { Link } from "./link";
 import { Mention } from "./mention";
 import { OrderedList } from "./ordered-list";
 import { PageBreak } from "./page-break";
@@ -16,6 +18,7 @@ import { Paragraph } from "./paragraph";
 import { Passthrough, InlinePassthrough } from "./passthrough";
 import { SectionBreak } from "./section-break";
 import { Strike } from "./strike";
+import { Tab } from "./tab";
 import { Table } from "./table";
 import { TableCell } from "./table-cell";
 import { TableHeader } from "./table-header";
@@ -26,7 +29,6 @@ import {
   Text,
   HorizontalRule,
   CodeBlockLowlight,
-  BulletList,
   ListItem,
   TaskList,
   HardBreak,
@@ -35,7 +37,6 @@ import {
   Italic,
   Underline,
   Code,
-  Link,
   Highlight,
   Subscript,
   Superscript,
@@ -54,6 +55,7 @@ export const tiptapNodeExtensions: AnyExtension[] = [
   HardBreak,
   PageBreak,
   ColumnBreak,
+  Tab,
   SectionBreak,
   Passthrough,
   InlinePassthrough,
@@ -206,20 +208,58 @@ export const DocxKit = Extension.create<DocxKitOptions>({
   },
 });
 
-// Export all individual extensions for direct imports
-export * from "./tiptap";
-export { Document } from "./document";
+// Export all individual extensions for direct imports from @docen/docx.
+// tiptap.ts aggregates upstream extensions as the base-class import point for the
+// local extensions; re-export them explicitly here (no `export *`) so the public
+// surface is visible. Customized extensions export their local version.
+export {
+  Text,
+  HorizontalRule,
+  CodeBlockLowlight,
+  ListItem,
+  TaskList,
+  HardBreak,
+  Mathematics,
+  Bold,
+  Italic,
+  Underline,
+  Code,
+  Highlight,
+  Subscript,
+  Superscript,
+  TextAlign,
+  Emoji,
+} from "./tiptap";
+export { Document, createDocument } from "./document";
+export { Paragraph } from "./paragraph";
 export { Heading } from "./heading";
+export { Blockquote } from "./blockquote";
+export { BulletList } from "./bullet-list";
+export { OrderedList } from "./ordered-list";
+export { CodeBlock } from "./code-block";
+export { ColumnBreak } from "./column-break";
+export { SectionBreak } from "./section-break";
+export { Details, DetailsSummary, DetailsContent } from "./details";
+export { TaskItem } from "./task-item";
+export { Mention } from "./mention";
+export { Table } from "./table";
+export { TableRow } from "./table-row";
+export { TableCell } from "./table-cell";
+export { TableHeader } from "./table-header";
 export { Image } from "./image";
-export { WpgGroup } from "./wpg-group";
+export { Link } from "./link";
+export { Strike } from "./strike";
+export { TextStyle } from "./text-style";
+export { FormattingMarks } from "./formatting-marks";
+export { PageBreak } from "./page-break";
+export {
+  WpgGroup,
+  wpsShapeStyles,
+  type WpsShapeStyles,
+  type WpsShapeStandalone,
+} from "./wpg-group";
 export { WpsShape } from "./wps-shape";
 export { Passthrough, InlinePassthrough } from "./passthrough";
 export { TocField } from "./toc-field";
-export { Paragraph } from "./paragraph";
-export { TableRow } from "./table-row";
-export { Table } from "./table";
-export { TableCell } from "./table-cell";
-export { TableHeader } from "./table-header";
-export { Strike } from "./strike";
-export { TextStyle } from "./text-style";
-export { TextAlign } from "@tiptap/extension-text-align";
+export { Tab } from "./tab";
+export { scrollCaretToTop, scrollContainerOf } from "./scroll";

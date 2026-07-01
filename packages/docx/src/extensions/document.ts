@@ -38,6 +38,10 @@ export function createDocument(content = "block+") {
         sectionFooters: attrNative(),
         background: attrNative(),
         documentExtras: attrNative(),
+        // Source numbering.config (abstractNum definitions) carried verbatim so
+        // list markers (glyph/font/indent) round-trip; compile merges it with
+        // any regenerated ordered-list definitions.
+        numbering: attrNative(),
       };
     },
   });

@@ -27,6 +27,19 @@ import {
 // compile; they must NOT leak into ParagraphOptions.
 const SECTION_ATTR_KEYS = new Set(["sectionProperties", "sectionHeaders", "sectionFooters"]);
 
+/**
+ * Whether a paragraph's tabStops include a leader (dot/underscore/hyphen/…), e.g.
+ * a TOC entry's right tab. Signals dot-leader layout to the editor CSS.
+ */
+function hasLeaderTabStop(tabStops: unknown): boolean {
+  if (!Array.isArray(tabStops)) return false;
+  return tabStops.some((t) => {
+    if (!t || typeof t !== "object") return false;
+    const leader = (t as { leader?: unknown }).leader;
+    return typeof leader === "string" && leader !== "none" && leader.length > 0;
+  });
+}
+
 export function renderDocx(node: JSONContent): Record<string, unknown> {
   const attrs = (node.attrs ?? {}) as Record<string, unknown>;
   const opts: Record<string, unknown> = {};
@@ -190,6 +203,13 @@ export const Paragraph = BaseParagraph.extend({
     // no pStyle = default style), so mark it `docx-default` — stylesToCss emits
     // the default style's rule under that selector too.
     attrs.class = styleId ? `docx-style-${styleId}` : "docx-default";
+    // A tab-stop with a leader (e.g. a TOC's right + dot) signals dot-leader
+    // layout: mark the paragraph so the editor CSS renders the dotted leader
+    // between the title and page number. tabStops stays rendered:false (hand-read,
+    // like styleId above).
+    if (hasLeaderTabStop(node.attrs.tabStops)) {
+      attrs.class += " docx-tab-leader";
+    }
     if (styles.length > 0) attrs.style = styles.join(";");
     return ["p", attrs, 0] as const;
   },

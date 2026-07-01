@@ -243,14 +243,28 @@ export class DocxManager {
     const documentExtras = (docAttrs.documentExtras ?? undefined) as
       | Partial<DocumentOptions>
       | undefined;
+    // Merge source numbering definitions (custom bullet/number markers) with
+    // any regenerated ordered-list definitions; drop originals shadowed by a
+    // regenerated reference to avoid duplicates.
+    const origNumberingConfig =
+      (
+        docAttrs.numbering as
+          | { config?: { reference: string; levels: LevelsOptions[] }[] }
+          | undefined
+      )?.config ?? [];
+    const regeneratedRefs = new Set(this.numberingConfigs.map((c) => c.reference));
+    const numberingConfig = [
+      ...origNumberingConfig.filter((c) => !regeneratedRefs.has(c.reference)),
+      ...this.numberingConfigs,
+    ];
     return {
       sections,
       ...(styles ? { styles } : {}),
       ...core,
       ...(background ? { background } : {}),
       ...documentExtras,
-      ...(this.numberingConfigs.length > 0
-        ? { numbering: { config: this.numberingConfigs } as NumberingOptions }
+      ...(numberingConfig.length > 0
+        ? { numbering: { config: numberingConfig } as NumberingOptions }
         : {}),
     };
   }
@@ -359,6 +373,9 @@ export class DocxManager {
     const attrs: Record<string, unknown> = {};
     if (docOpts.styles) attrs.styles = docOpts.styles;
     if (docOpts.background) attrs.background = docOpts.background;
+    // Source numbering definitions (abstractNum) carried verbatim so list
+    // markers round-trip; compile merges these with regenerated ordered defs.
+    if (docOpts.numbering) attrs.numbering = docOpts.numbering;
     const core = extractCoreProperties(docOpts);
     if (core) attrs.core = core;
     const lastSection = sections[lastIndex];
@@ -712,8 +729,9 @@ export class DocxManager {
     // Ordered lists need an abstractNum definition (decimal). The reference is
     // keyed by `start` so lists with the same start share one definition; each
     // list still gets a distinct instance (independent counting).
+    const numbering = node.attrs?.numbering as string | undefined;
     let ordered: { reference: string; instance: number } | undefined;
-    if (isOrdered) ordered = this.registerOrderedNumbering(node);
+    if (isOrdered && !numbering) ordered = this.registerOrderedNumbering(node);
 
     for (const listItem of node.content ?? []) {
       if (listItem.type !== "listItem" && listItem.type !== "taskItem") continue;
@@ -731,7 +749,9 @@ export class DocxManager {
               ? ({ text: para } as Record<string, unknown>)
               : (para as Record<string, unknown>);
 
-          if (ordered) {
+          if (numbering) {
+            paraObj.numbering = { reference: numbering, level };
+          } else if (ordered) {
             paraObj.numbering = { reference: ordered.reference, instance: ordered.instance, level };
           } else {
             paraObj.bullet = { level };
@@ -838,6 +858,9 @@ export class DocxManager {
           break;
         case "columnBreak":
           children.push({ columnBreak: true } as Record<string, unknown> as ParagraphChild);
+          break;
+        case "tab":
+          children.push({ tab: true } as Record<string, unknown> as ParagraphChild);
           break;
         case "inlinePassthrough": {
           // Opaque inline ParagraphChild (bookmark/range markers, …) carried
@@ -1266,7 +1289,9 @@ export class DocxManager {
         start = cfg.start;
       } else {
         kind = "bullet";
-        reference = undefined;
+        // Keep the source reference: a custom bullet abstractNum (e.g. a
+        // Wingdings glyph) needs its original definition to round-trip the
+        // marker; buildListTree carries it on the list node for compile.
       }
     } else if (bullet) {
       kind = "bullet";
@@ -1332,6 +1357,7 @@ export class DocxManager {
       } else {
         // New list (top-level or nested under the current item).
         const newList: JSONContent = { type: listType, content: [newItem] };
+        const listAttrs: Record<string, unknown> = {};
         // Only level-0 ordered lists carry `start`; deeper levels restart at 1.
         if (
           listType === "orderedList" &&
@@ -1339,8 +1365,11 @@ export class DocxManager {
           typeof info.start === "number" &&
           info.start !== 1
         ) {
-          newList.attrs = { start: info.start };
+          listAttrs.start = info.start;
         }
+        // Carry the source abstractNum reference so the marker round-trips.
+        if (info.reference) listAttrs.numbering = info.reference;
+        if (Object.keys(listAttrs).length > 0) newList.attrs = listAttrs;
         if (top) {
           (top.currentItem.content as JSONContent[]).push(newList);
         } else {
@@ -1640,6 +1669,14 @@ export class DocxManager {
   }
 
   private resolveParagraphChild(child: ParagraphChild): JSONContent | JSONContent[] | null {
+    // `<w:r><w:tab/></w:r>` → office-open ParagraphChild `{ tab: true }` (a pure
+    // tab run, e.g. between a TOC entry's title and page number). Turn it into a
+    // `tab` inline atom so the leader can render; otherwise it fell through to
+    // inlinePassthrough (hidden, no leader) and mergeTextNodes collapsed the
+    // adjacent title/page-number text together.
+    if ("tab" in child) {
+      return { type: "tab" };
+    }
     if ("text" in child || "children" in child || "break" in child) {
       return this.resolveRun(child as RunOptions);
     }
@@ -1769,10 +1806,13 @@ export class DocxManager {
           } else if ("break" in c) {
             flushText();
             nodes.push({ type: "hardBreak" });
+          } else if ("tab" in c) {
+            flushText();
+            nodes.push({ type: "tab" });
           }
           // {lastRenderedPageBreak} is a Word render hint — drop (office-open
-          // does not emit it on output). tab/noBreakHyphen/date fields/separator/
-          // pgNum are unsupported inline elements, dropped for now.
+          // does not emit it on output). noBreakHyphen/date fields/separator/pgNum
+          // are unsupported inline elements, dropped for now.
         }
       }
       flushText();
@@ -1863,7 +1903,10 @@ export class DocxManager {
               type: "link",
               attrs: {
                 href,
-                target: "_blank",
+                // Internal anchor (#bookmark, e.g. TOC entry jumps) must stay in
+                // the current window so the in-page jump resolves; only external
+                // links open a new tab.
+                target: href.startsWith("#") ? null : "_blank",
                 rel: "noopener noreferrer nofollow",
                 class: null,
                 title: hyperlink.tooltip ?? null,

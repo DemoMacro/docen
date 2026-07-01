@@ -1,8 +1,11 @@
-import { sectionMarginDefaults, type SectionPropertiesOptions } from "@docen/docx";
+import {
+  sectionMarginDefaults,
+  scrollCaretToTop,
+  type SectionPropertiesOptions,
+} from "@docen/docx";
 import { Extension, type Editor } from "@docen/docx/core";
 import type { Node as PmNode } from "@tiptap/pm/model";
 import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
-import type { EditorView } from "@tiptap/pm/view";
 
 import {
   measureBlockHeight,
@@ -613,33 +616,6 @@ function pagesEqual(doc: PmNode, newPages: PmNode[]): boolean {
   });
   if (current.length !== newPages.length) return false;
   return current.every((p, i) => p.eq(newPages[i]));
-}
-
-/** Nearest scrollable ancestor of the editor surface (the docen-canvas). */
-function scrollContainerOf(view: EditorView): HTMLElement | null {
-  let el: HTMLElement | null = view.dom.parentElement;
-  while (el) {
-    if (el.clientHeight > 0 && el.scrollHeight > el.clientHeight) {
-      const overflowY = getComputedStyle(el).overflowY;
-      if (overflowY === "auto" || overflowY === "scroll") return el;
-    }
-    el = el.parentElement;
-  }
-  return null;
-}
-
-/** After an editor-driven reflow, scroll the caret to the TOP of the viewport
- *  when it has left the visible area (Word-style page follow). No-op while the
- *  caret stays in view, so normal typing doesn't fight the user's scroll. */
-function scrollCaretToTop(view: EditorView): void {
-  const scroller = scrollContainerOf(view);
-  if (!scroller) return;
-  const margin = 64;
-  const caretTop = view.coordsAtPos(view.state.selection.head).top;
-  const rect = scroller.getBoundingClientRect();
-  if (caretTop < rect.top + margin || caretTop > rect.bottom - margin) {
-    scroller.scrollTop += caretTop - rect.top - margin;
-  }
 }
 
 function reflow(editor: Editor, scroll = false): void {

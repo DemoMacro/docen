@@ -96,13 +96,31 @@ export const InlinePassthrough = Node.create({
   },
 
   renderHTML({ node }: { node: { attrs: Record<string, unknown> } }) {
-    return [
-      "span",
-      {
-        "data-inline-passthrough": (node.attrs.data as string) || "{}",
-        contenteditable: "false",
-        style: "display:none",
-      },
-    ];
+    const data = (node.attrs.data as string) || "{}";
+    let bookmarkName: string | undefined;
+    // A bookmarkStart carries a name — expose it as the element id so anchor
+    // links (#name, e.g. a TOC entry jumping to its heading) resolve to it.
+    try {
+      const parsed = JSON.parse(data) as { bookmarkStart?: { name?: string } };
+      bookmarkName = parsed.bookmarkStart?.name;
+    } catch {
+      /* malformed data — no bookmark name */
+    }
+    const attrs: Record<string, string> = {
+      "data-inline-passthrough": data,
+      contenteditable: "false",
+    };
+    if (bookmarkName) {
+      // Keep the anchor in-flow at zero size (not display:none) so it has a
+      // layout box — ProseMirror's coordsAtPos/scrollIntoView can then resolve
+      // the anchor position when a TOC link follows it. Other inline
+      // passthrough children (bookmarkEnd, comment ranges, proofErr, …) carry
+      // no anchor and stay display:none.
+      attrs.id = bookmarkName;
+      attrs.style = "display:inline-block;width:0;height:0;overflow:hidden;vertical-align:baseline";
+    } else {
+      attrs.style = "display:none";
+    }
+    return ["span", attrs];
   },
 });

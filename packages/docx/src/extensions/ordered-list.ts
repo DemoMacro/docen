@@ -37,5 +37,15 @@ export function buildOrderedLevels(start: number): LevelsOptions[] {
 }
 
 // DocxManager builds the abstractNum via buildOrderedLevels and tracks each
-// list's start/instance itself; the extension carries no DOCX attrs of its own.
-export { OrderedListBase as OrderedList };
+// list's start/instance itself. The extension also carries `numbering` —
+// the source abstractNum reference (when the list came from parseDOCX) — so the
+// round-trip reuses the original numbering definition instead of regenerating
+// the default; DOCX-only (not rendered to HTML), null for editor-created lists.
+export const OrderedList = OrderedListBase.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      numbering: { default: null, rendered: false },
+    };
+  },
+});
