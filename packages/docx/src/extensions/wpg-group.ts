@@ -59,6 +59,9 @@ interface WpsBodyProperties {
   bIns?: number;
   // text direction (a:bodyPr vert): horz default; vert/vert270/eaVert → vertical
   vert?: string;
+  // vertical anchor (a:bodyPr anchor): "t" | "ctr" | "b" — where the text block
+  // sits vertically inside the shape (top/center/bottom).
+  anchor?: string;
 }
 export interface WpsData {
   fill?: Fill;
@@ -214,6 +217,43 @@ export function renderWpsText(children: unknown): Spec[] {
   });
 }
 
+/** Inner style of a wps text-box: fill + outline + textbox insets (padding).
+ *  Lives on the contentDOM (the editable interior). Never carries rotation or
+ *  writing-mode — those go on the outer positioning wrapper (see
+ *  wpsRotationVert), because transform/writing-mode on an editable region
+ *  distort the caret rect and break CJK IME composition. */
+export function wpsInnerStyle(data: WpsData): string {
+  const parts: string[] = [];
+  const fill = fillToCss(data.fill);
+  if (fill) parts.push(`background-color:${fill}`);
+  const outline = outlineToCss(data.outline);
+  if (outline) parts.push(outline);
+  // textbox insets (bodyProperties lIns/tIns/rIns/bIns, EMU → px) keep the text
+  // inside the shape's padding, matching Word's text-box insets.
+  const bp = data.bodyProperties;
+  if (bp) {
+    const ins = (v: number | undefined) => (v != null ? `${(v / EMU_PER_PX).toFixed(1)}px` : "0px");
+    parts.push(`padding:${ins(bp.tIns)} ${ins(bp.rIns)} ${ins(bp.bIns)} ${ins(bp.lIns)}`);
+  }
+  return parts.join(";");
+}
+
+/** Rotation + writing-mode (text direction) for a wps shape. Lives on the
+ *  positioning wrapper OUTSIDE the contentDOM. `rotationOverride` covers a
+ *  group child whose rotation comes from the group transform, not bodyPr. */
+export function wpsRotationVert(data: WpsData, rotationOverride?: number): string {
+  const parts: string[] = [];
+  const rotation = rotationOverride ?? data.bodyProperties?.rotation;
+  if (rotation) parts.push(`transform:rotate(${rotation}deg)`);
+  // text direction (bodyPr vert): vert/eaVert/mongolianVert → vertical-rl,
+  // vert270 → vertical-lr, so CJK vertical text boxes render top-to-bottom.
+  const vert = data.bodyProperties?.vert;
+  if (vert && vert !== "horz") {
+    parts.push(`writing-mode:${vert === "vert270" ? "vertical-lr" : "vertical-rl"}`);
+  }
+  return parts.join(";");
+}
+
 /**
  * Render a wps shape's interior (fill/outline/insets/rotation/writing-mode + text
  * body) as a positioned div. Shared by the wpg group's inline wps children and
@@ -222,35 +262,87 @@ export function renderWpsText(children: unknown): Spec[] {
  * carries the placement — absolute group coords for a group child, the floating
  * anchor CSS for a standalone shape. `opts.rotation` overrides bodyPr rotation
  * (a group child's rotation may come from the group transform, not bodyPr).
+ *
+ * The wpg path merges placement + interior into ONE div (an atom has no
+ * contentDOM, so rotation/writing-mode on the element is safe — no caret inside).
+ * The editable wpsShape node instead splits these across two elements via
+ * wpsShapeStyles (outer = position+rotation+vert, inner = contentDOM).
  */
 export function renderWpsInterior(
   data: WpsData,
   positionStyle: string,
   opts?: { rotation?: number; attrs?: Record<string, string> },
 ): Spec {
-  const styles = [positionStyle];
-  const fill = fillToCss(data.fill);
-  if (fill) styles.push(`background-color:${fill}`);
-  const outline = outlineToCss(data.outline);
-  if (outline) styles.push(outline);
-  // textbox insets (bodyProperties lIns/tIns/rIns/bIns, EMU → px) keep the text
-  // inside the shape's padding, matching Word's text-box insets.
-  const bp = data.bodyProperties;
-  if (bp) {
-    const ins = (v: number | undefined) => (v != null ? `${(v / EMU_PER_PX).toFixed(1)}px` : "0px");
-    styles.push(`padding:${ins(bp.tIns)} ${ins(bp.rIns)} ${ins(bp.bIns)} ${ins(bp.lIns)}`);
-  }
-  const rotation = opts?.rotation ?? bp?.rotation;
-  if (rotation) styles.push(`transform:rotate(${rotation}deg)`);
-  // text direction (bodyPr vert): vert/eaVert/mongolianVert → vertical-rl,
-  // vert270 → vertical-lr, so CJK vertical text boxes render top-to-bottom.
-  const vert = bp?.vert;
-  if (vert && vert !== "horz") {
-    styles.push(`writing-mode:${vert === "vert270" ? "vertical-lr" : "vertical-rl"}`);
-  }
-  const attrs: Record<string, unknown> = { style: styles.join(";") };
+  const inner = wpsInnerStyle(data);
+  const rotVert = wpsRotationVert(data, opts?.rotation);
+  const style = [positionStyle, inner, rotVert].filter(Boolean).join(";");
+  const attrs: Record<string, unknown> = { style };
   if (opts?.attrs) Object.assign(attrs, opts.attrs);
   return ["div", attrs, ...renderWpsText(data.children)];
+}
+
+/** Shape data subset carrying its own extent + floating anchor (a standalone
+ *  wpsShape, not a wpg group child). */
+export interface WpsShapeStandalone extends WpsData {
+  transformation?: { width?: number; height?: number };
+  floating?: unknown;
+}
+
+export interface WpsShapeStyles {
+  /** outer wrapper (dom): floating/inline placement + size + rotation + writing-mode. */
+  outer: string;
+  /** inner contentDOM: box-sizing + fill + outline + textbox insets (padding). */
+  inner: string;
+  /** true when the floating anchor resolves against the anchor paragraph
+   *  (vRelative "paragraph") — the editor marks the anchor <p> relative. */
+  paragraphAnchor: boolean;
+}
+
+/** Two-element style split for an editable standalone wpsShape: `outer` for the
+ *  positioning wrapper (dom), `inner` for the contentDOM. rotation/writing-mode
+ *  stay on `outer` so the editable interior has a clean caret/IME rect. The
+ *  geometry (EMU extent → px, floating anchor CSS) is computed here so the
+ *  editor's NodeView and generateHTML render identically without re-deriving
+ *  the engine's EMU/floating math. */
+export function wpsShapeStyles(ws: WpsShapeStandalone): WpsShapeStyles {
+  // office-open 0.10.4+ parses extent as EMU verbatim (was pixels); convert to px.
+  const w = ws.transformation?.width != null ? convertEmuToPixels(ws.transformation.width) : 0;
+  const h = ws.transformation?.height != null ? convertEmuToPixels(ws.transformation.height) : 0;
+  // box-sizing:border-box so the shape's width/height is its outer box
+  // (matching Word's extent), not content-box (which adds padding on top).
+  // overflow:hidden clips text past the fixed extent (Word's noAutoFit default).
+  const sizeStyle = `width:${w}px;height:${h}px;box-sizing:border-box;overflow:hidden`;
+  const rotVert = wpsRotationVert(ws);
+  let outer: string;
+  let paragraphAnchor = false;
+  if (ws.floating) {
+    // A floating text box (wp:anchor wrapNone) overlays its anchor paragraph
+    // instead of claiming a line in the flow — same anchor CSS as images and
+    // wpg groups (position:absolute at the EMU offset).
+    outer = [
+      ...floatingToStyles(ws.floating, undefined, ws.transformation?.width),
+      sizeStyle,
+      rotVert,
+    ]
+      .filter(Boolean)
+      .join(";");
+    paragraphAnchor = floatAnchorScope(ws.floating) === "paragraph";
+  } else {
+    // An inline wps (rare — no wp:anchor) flows with the text as an inline block.
+    outer = [`display:inline-block;vertical-align:middle`, sizeStyle, rotVert]
+      .filter(Boolean)
+      .join(";");
+  }
+  // Vertical anchor (bodyPr anchor: t/ctr/b) — Word positions the text block at
+  // the box's top/middle/bottom. flex column + justify-content reproduces it on
+  // the contentDOM; flex lives on the container, not the editable text, so the
+  // caret/IME rect is unaffected. height:100% fills the outer box so justify
+  // has the full extent to distribute against (otherwise the contentDOM
+  // shrinks to its text height and anchor has no room to push within).
+  const anchor = ws.bodyProperties?.anchor;
+  const justify = anchor === "ctr" ? "center" : anchor === "b" ? "flex-end" : "flex-start";
+  const inner = `box-sizing:border-box;display:flex;flex-direction:column;justify-content:${justify};height:100%;${wpsInnerStyle(ws)}`;
+  return { outer, inner, paragraphAnchor };
 }
 
 /** Render a wpg group (top-level or nested) as a positioned container.

@@ -54,6 +54,7 @@ import { PagePlugin, pageStorageOf } from "./extensions/page-plugin";
 import { SectionBreakMarks } from "./extensions/section-break";
 import { SplitMarks } from "./extensions/split-paragraph";
 import { SplitTable, SplitTableRow } from "./extensions/split-table";
+import { WpsShapeView } from "./extensions/wps-shape-view";
 import { buildRibbonInnerHTML, RIBBON_TAB_IDS, type RibbonTabId } from "./ribbon-default";
 import { fontNormalRatio } from "./utils/font-metric";
 import { clearMeasureCache } from "./utils/measure";
@@ -1199,6 +1200,10 @@ class DocenDocument extends HTMLElement {
         // while show-marks is on. Schema comes from the engine's PageBreak;
         // this only overrides the editor rendering.
         PageBreakView,
+        // wpsShape NodeView — renders the editable floating text box as two
+        // elements (outer placement/rotation, inner contentDOM) so the text
+        // body is editable. Schema comes from the engine's WpsShape.
+        WpsShapeView,
         // Centralized MS Office editing keymap (Ctrl+Enter page break, etc.) —
         // see extensions/keymap.ts. Outranks HardBreak via priority.
         DocenKeymap,

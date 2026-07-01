@@ -1,26 +1,18 @@
-import { convertEmuToPixels } from "@office-open/core";
 import type { DOMOutputSpec } from "@tiptap/pm/model";
 
 import { Node } from "../core";
-import { floatAnchorScope, floatingToStyles } from "./utils";
-import { renderWpsInterior, type WpsData } from "./wpg-group";
+import { wpsShapeStyles, type WpsShapeStandalone } from "./wpg-group";
 
 /**
- * wpsShape — inline atom carrying a standalone DOCX text-box shape
- * (wp:anchor > wps:wsp > wps:txbx; NOT inside a wpg group) as an opaque blob.
- * Mirrors the office-open `WpsShapeRunOptions` / ParagraphChild `wpsShape` field
- * verbatim in attrs.wpsShape. Unlike a group's interior wps children (laid out in
- * the group's coordinate space), this shape floats on its own anchor — placement
- * comes from `floating` (rendered via floatingToStyles), while its body
- * (fill/outline/insets/text) reuses the group's renderWpsInterior so the two
- * renderers stay identical.
+ * wpsShape — inline node carrying a standalone DOCX text-box shape
+ * (wp:anchor > wps:wsp > wps:txbx; NOT inside a wpg group). The shape geometry
+ * + styling (transformation/floating/fill/outline/bodyProperties) ride on
+ * attrs.wpsShape; the editable text body is PM content (block+), one paragraph
+ * per office-open ParagraphOptions. Unlike a group's interior wps children
+ * (laid out in the group's coordinate space), this shape floats on its own
+ * anchor. The engine node has no NodeView (UI-free); the editor layer extends
+ * it with a two-element NodeView (outer placement/rotation, inner contentDOM).
  */
-
-/** wpsShape data (WpsShapeRunOptions subset used for rendering). */
-interface WpsShapeData extends WpsData {
-  transformation?: { width?: number; height?: number };
-  floating?: unknown;
-}
 
 const attrWpsShape = () => ({
   default: null,
@@ -40,7 +32,13 @@ export const WpsShape = Node.create({
   name: "wpsShape",
   group: "inline",
   inline: true,
-  atom: true,
+  // Editable text body (was atom). content:"block+" holds the textbox's
+  // paragraph(s); isolating stops Backspace at the start from merging the first
+  // paragraph back into the anchor paragraph; defining keeps the node when the
+  // body is fully selected+replaced.
+  content: "block+",
+  isolating: true,
+  defining: true,
 
   addAttributes() {
     return {
@@ -49,7 +47,16 @@ export const WpsShape = Node.create({
   },
 
   parseHTML() {
-    return [{ tag: "div[data-wps-shape]" }];
+    return [
+      {
+        tag: "div[data-wps-shape]",
+        // The editable body lives in the inner <div> (the contentDOM); parse it
+        // from there (querySelector "div" = the first child div) instead of the
+        // outer positioning wrapper, so paragraphs resolve as content rather
+        // than getting hoisted out of the inline node.
+        contentElement: "div",
+      },
+    ];
   },
 
   renderHTML({
@@ -58,35 +65,16 @@ export const WpsShape = Node.create({
     node: { attrs: Record<string, unknown> };
     HTMLAttributes: Record<string, unknown>;
   }) {
-    const ws = (node.attrs.wpsShape as WpsShapeData | null) ?? {};
-    // office-open 0.10.4+ parses extent as EMU verbatim (was pixels); convert to px.
-    const w = ws.transformation?.width != null ? convertEmuToPixels(ws.transformation.width) : 0;
-    const h = ws.transformation?.height != null ? convertEmuToPixels(ws.transformation.height) : 0;
-    // box-sizing:border-box so the shape's width/height is its outer box
-    // (matching Word's extent), not content-box (which adds padding on top).
-    const sizeStyle = `width:${w}px;height:${h}px;box-sizing:border-box`;
-    if (ws.floating) {
-      // A floating text box (wp:anchor wrapNone) overlays its anchor paragraph
-      // instead of claiming a line in the flow — same anchor CSS as images and
-      // wpg groups (position:absolute at the EMU offset). A paragraph-anchored
-      // box (vRelative "paragraph") resolves its top/left from the anchor <p>
-      // (data-float-anchor → editor CSS makes the <p> relative); otherwise it
-      // anchors to the page box and floats over the body.
-      const pos = [
-        ...floatingToStyles(ws.floating, undefined, ws.transformation?.width),
-        sizeStyle,
-      ].join(";");
-      // Serialize the shape model so generateHTML→parseHTML round-trips it
-      // (parseHTML JSON.parses data-wps-shape; "" would throw and drop it).
-      const attrs: Record<string, string> = { "data-wps-shape": JSON.stringify(ws) };
-      if (floatAnchorScope(ws.floating) === "paragraph") {
-        attrs["data-float-anchor"] = "paragraph";
-      }
-      return renderWpsInterior(ws, pos, { attrs }) as unknown as DOMOutputSpec;
-    }
-    // An inline wps (rare — no wp:anchor) flows with the text as an inline block.
-    return renderWpsInterior(ws, `display:inline-block;vertical-align:middle;${sizeStyle}`, {
-      attrs: { "data-wps-shape": JSON.stringify(ws) },
-    }) as unknown as DOMOutputSpec;
+    const ws = (node.attrs.wpsShape as WpsShapeStandalone | null) ?? {};
+    const { outer, inner, paragraphAnchor } = wpsShapeStyles(ws);
+    // Serialize the shape geometry so generateHTML→parseHTML round-trips it
+    // (parseHTML JSON.parses data-wps-shape; "" would throw and drop it). The
+    // text body is NOT serialized here — it round-trips as PM content.
+    const attrs: Record<string, string> = {
+      "data-wps-shape": JSON.stringify(ws),
+      style: outer,
+    };
+    if (paragraphAnchor) attrs["data-float-anchor"] = "paragraph";
+    return ["div", attrs, ["div", { style: inner }, 0]] as unknown as DOMOutputSpec;
   },
 });

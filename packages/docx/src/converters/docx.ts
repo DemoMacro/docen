@@ -850,8 +850,24 @@ export class DocxManager {
           break;
         }
         case "wpsShape": {
-          const wpsShape = node.attrs?.wpsShape;
-          if (wpsShape) children.push({ wpsShape } as unknown as ParagraphChild);
+          // Editable text body: compile each content paragraph back to a
+          // ParagraphOptions and reattach under wpsShape.children. Mirrors the
+          // tocField compile (compileSectionChild → unwrap .paragraph).
+          const geometry = (node.attrs?.wpsShape ?? {}) as Record<string, unknown>;
+          const body: (ParagraphOptions | string)[] = [];
+          for (const child of node.content ?? []) {
+            const compiled = this.compileSectionChild(child);
+            if (!compiled) continue;
+            const items = Array.isArray(compiled) ? compiled : [compiled];
+            for (const it of items) {
+              if (it && typeof it === "object" && "paragraph" in (it as object)) {
+                body.push((it as { paragraph: ParagraphOptions | string }).paragraph);
+              }
+            }
+          }
+          children.push({
+            wpsShape: { ...geometry, children: body },
+          } as unknown as ParagraphChild);
           break;
         }
         case "mention": {
@@ -1625,8 +1641,50 @@ export class DocxManager {
     }
     if ("wpsShape" in child) {
       // Standalone floating text box (wp:anchor > wps:wsp, NOT inside a wpg
-      // group): opaque round-trip — full WpsShapeRunOptions rides on the node.
-      return { type: "wpsShape", attrs: { wpsShape: child.wpsShape } };
+      // group). The shape's text body (children: (ParagraphOptions | string)[])
+      // becomes PM content (one node per paragraph); geometry/styling ride on
+      // attrs.wpsShape. Mirrors resolveToc: split body → content, keep the rest.
+      const ws = child.wpsShape;
+      const content: JSONContent[] = [];
+      if (ws?.children) {
+        for (const para of ws.children) {
+          if (typeof para !== "object" || para === null) {
+            const node = this.resolveParagraph(para);
+            if (node) content.push(node);
+            continue;
+          }
+          // DrawingML defRPr (para.run) is the default run-properties for the
+          // box's runs, NOT the OOXML ¶-mark rPr. Merge it into each run
+          // (matching the prior atom renderWpsText: {...para.run, ...r}), then
+          // drop it from the paragraph (run: undefined): paragraph.ts renders
+          // attrs.run.size as ¶-mark line-height (renderParagraphStyles
+          // markLineHeight), which would override the box's grid line-height —
+          // but defRPr is a run default, not a ¶ mark. PDF measures 27.5pt
+          // (the body grid); dropping defRPr lets the paragraph inherit it.
+          // Round-trip safe — runs carry the full rPr, so compile emits
+          // per-run rPr and Word renders identically.
+          const defRPr = (para.run as Record<string, unknown> | undefined) ?? {};
+          const children = Array.isArray(para.children)
+            ? para.children.map((c) =>
+                typeof c !== "object" || c === null
+                  ? { ...defRPr, text: c as string }
+                  : { ...defRPr, ...(c as object) },
+              )
+            : undefined;
+          const node = this.resolveParagraph({
+            ...para,
+            run: undefined,
+            ...(children ? { children } : {}),
+          });
+          if (node) content.push(node);
+        }
+      }
+      if (content.length === 0) content.push({ type: "paragraph" });
+      const { children: _omit, ...geometry } = ws ?? {};
+      const node: JSONContent = { type: "wpsShape", content };
+      const cleanGeometry = cleanAttrs(geometry as Record<string, unknown>);
+      if (Object.keys(cleanGeometry).length > 0) node.attrs = { wpsShape: cleanGeometry };
+      return node;
     }
     if ("sdt" in child) {
       return this.resolveInlineSdt(child);

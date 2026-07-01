@@ -413,14 +413,16 @@ export interface WpgGroupNode extends TiptapJSONContent {
 }
 
 /**
- * Standalone floating text-box shape (wp:anchor > wps:wsp) carried as an opaque
- * blob — the full WpsShapeRunOptions round-trips verbatim. Unlike the group's
- * interior wps children, this shape floats on its own anchor and renders via the
- * shared wps interior renderer.
+ * Standalone floating text-box shape (wp:anchor > wps:wsp). The shape geometry
+ * + styling (transformation/floating/fill/outline/bodyProperties) ride on
+ * attrs.wpsShape; the editable text body is PM content (one ParagraphNode per
+ * office-open ParagraphOptions). Unlike a group's interior wps children, this
+ * shape floats on its own anchor and is editable via its NodeView contentDOM.
  */
 export interface WpsShapeNode extends TiptapJSONContent {
   type: "wpsShape";
   attrs?: { wpsShape: Record<string, unknown> | null };
+  content?: Array<ParagraphNode>;
 }
 
 // -- Emoji node (inline) --
