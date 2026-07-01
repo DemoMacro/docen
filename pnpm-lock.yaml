@@ -37,11 +37,11 @@ importers:
   packages/docx:
     dependencies:
       '@office-open/core':
-        specifier: 0.10.9
-        version: 0.10.9
+        specifier: 0.10.11
+        version: 0.10.11
       '@office-open/docx':
-        specifier: 0.10.9
-        version: 0.10.9
+        specifier: 0.10.11
+        version: 0.10.11
       '@tiptap/core':
         specifier: 3.27.1
         version: 3.27.1(@tiptap/pm@3.27.1)
@@ -672,14 +672,14 @@ packages:
     resolution: {integrity: sha512-IYqDGiTXab6FniAgnSdZwgWbomxpy9FtYvLKs7wCUs2a8RkITG+DFGO1DM9cr+E3/RgADRpFjrKVaJ1z6sjtEg==}
     engines: {node: '>= 20.19.0'}
 
-  '@office-open/core@0.10.9':
-    resolution: {integrity: sha512-wVrH864VWrtXOZ7jdfaO2NIki5r77gZ1k8uf1tS2dpt93C7CxDTG7Rzf9RbEwdp+QgQ77c5IG3mg+1T7YABaWQ==}
+  '@office-open/core@0.10.11':
+    resolution: {integrity: sha512-yn7gj6a1jKJ51QscTfBvjYt8nfwHW3Tp5dviYqDabz1PUY1VOKtDmzAufkpuOBgGeTauvfU/g8CeFGnIstfW3g==}
 
-  '@office-open/docx@0.10.9':
-    resolution: {integrity: sha512-ZwLuKylWroTZiCFpfRRy7XKPKJNASgCoQasnNvuxwTzTpqc6AmMQb8C2DK6CzehKZ94IbazOJglQj9OhK/t9bg==}
+  '@office-open/docx@0.10.11':
+    resolution: {integrity: sha512-RD8Xox/1IyAxrfxiy578YDwQP7o41C/3zGBmEXOeWuKIxqIEI//bJbrzeHKOaf/oRVSMG9ocnjp+gMGCpoX7BQ==}
 
-  '@office-open/xml@0.10.9':
-    resolution: {integrity: sha512-WkFPsxv6IumBPHu5hv0VbLYDaULkbopVf4JMskzxYMTk03Veq9k0zXaWwlsgU+I3eX27DGHJBq5G/56jItl55A==}
+  '@office-open/xml@0.10.11':
+    resolution: {integrity: sha512-7SrUFlcy1V/llhvqVKHiPm1+9BmSlOk8ijqhbKanvEwfAv5iiGCXR/vWfmE1jcti4d8Ezvbk5C3UYSOCOJalhg==}
 
   '@oxc-project/runtime@0.136.0':
     resolution: {integrity: sha512-u0EutjK5y6NHJkl5jNJCs8zbup1z6A/UEWgajrYzqcEU3UX05HjqybhMQOLhSM0eKGISyM6WfSMMuklYSmH2wA==}
@@ -1904,8 +1904,8 @@ packages:
     resolution: {integrity: sha512-TWrgLOFUQTH994YUyl1yT4uyavY5nNB5muff+RtWaqNVCAK408b5ZnnbNAUEWLTCpum9w6arT70i1XdQ4UeOPA==}
     engines: {node: '>=0.12'}
 
-  es-module-lexer@2.1.0:
-    resolution: {integrity: sha512-n27zTYMjYu1aj4MjCWzSP7G9r75utsaoc8m61weK+W8JMBGGQybd43GstCXZ3WNmSFtGT9wi59qQTW6mhTR5LQ==}
+  es-module-lexer@2.2.0:
+    resolution: {integrity: sha512-3lGxdTXCLfe1MYfTz1y2ksAAUM4NAOP6rPEjxGJVKO7TZ5+tvHCaQWGpC4Y3IXvW3ece0Cz1cIP4FWBxOnGCTQ==}
 
   esbuild@0.27.7:
     resolution: {integrity: sha512-IxpibTjyVnmrIQo5aqNpCgoACA/dTKLTlhMHihVHhdkxKyPO1uBBthumT0rdHmcsk9uMonIWS0m4FljWzILh3w==}
@@ -3016,18 +3016,18 @@ snapshots:
 
   '@noble/hashes@2.2.0': {}
 
-  '@office-open/core@0.10.9':
+  '@office-open/core@0.10.11':
     dependencies:
       '@noble/hashes': 2.2.0
-      '@office-open/xml': 0.10.9
+      '@office-open/xml': 0.10.11
       fflate: 0.8.3
 
-  '@office-open/docx@0.10.9':
+  '@office-open/docx@0.10.11':
     dependencies:
-      '@office-open/core': 0.10.9
-      '@office-open/xml': 0.10.9
+      '@office-open/core': 0.10.11
+      '@office-open/xml': 0.10.11
 
-  '@office-open/xml@0.10.9': {}
+  '@office-open/xml@0.10.11': {}
 
   '@oxc-project/runtime@0.136.0': {}
 
@@ -3852,7 +3852,7 @@ snapshots:
 
   entities@7.0.1: {}
 
-  es-module-lexer@2.1.0: {}
+  es-module-lexer@2.2.0: {}
 
   esbuild@0.27.7:
     optionalDependencies:
@@ -4614,7 +4614,7 @@ snapshots:
       '@vitest/snapshot': 4.1.9
       '@vitest/spy': 4.1.9
       '@vitest/utils': 4.1.9
-      es-module-lexer: 2.1.0
+      es-module-lexer: 2.2.0
       expect-type: 1.4.0
       magic-string: 0.30.21
       obug: 2.1.3

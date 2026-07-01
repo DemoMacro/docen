@@ -1717,7 +1717,7 @@ export class DocxManager {
     return null;
   }
 
-  private resolveRun(opts: RunOptions): JSONContent | null {
+  private resolveRun(opts: RunOptions): JSONContent | JSONContent[] | null {
     // Pure break (no text/children) → hardBreak node
     if (opts.break && opts.text === undefined && !opts.children) {
       return { type: "hardBreak" };
@@ -1725,13 +1725,49 @@ export class DocxManager {
     const text = opts.text;
     if (text === undefined && !opts.children) return null;
 
-    if (opts.children && !text) {
-      const parts: string[] = [];
+    // office-open 0.10.11+ may nest a run's inline elements under run.children
+    // (empty run elements like tab/date/lastRenderedPageBreak, or mixed breaks).
+    // Walk the children so pageBreak/columnBreak/hardBreak atoms are still
+    // yielded; text fragments join into one text node carrying the run's marks.
+    if (opts.children) {
+      const marks = this.resolveMarks(opts);
+      const nodes: JSONContent[] = [];
+      let parts: string[] = [];
+      const flushText = () => {
+        if (parts.length > 0) {
+          const node: JSONContent = { type: "text", text: parts.join("") };
+          if (marks) node.marks = marks;
+          nodes.push(node);
+          parts = [];
+        }
+      };
       for (const c of opts.children) {
-        if (typeof c === "string") parts.push(c);
+        if (typeof c === "string") {
+          parts.push(c);
+        } else if (c && typeof c === "object") {
+          if ("pageBreak" in c) {
+            flushText();
+            nodes.push({ type: "pageBreak" });
+          } else if ("columnBreak" in c) {
+            flushText();
+            nodes.push({ type: "columnBreak" });
+          } else if ("break" in c) {
+            flushText();
+            nodes.push({ type: "hardBreak" });
+          }
+          // {lastRenderedPageBreak} is a Word render hint — drop (office-open
+          // does not emit it on output). tab/noBreakHyphen/date fields/separator/
+          // pgNum are unsupported inline elements, dropped for now.
+        }
       }
-      if (parts.length === 0) return null;
-      return { type: "text", text: parts.join(""), marks: this.resolveMarks(opts) };
+      flushText();
+      if (text !== undefined) {
+        // A run may carry opts.text alongside children (rare); fold it in.
+        const node: JSONContent = { type: "text", text, marks };
+        nodes.push(node);
+      }
+      if (nodes.length === 0) return null;
+      return nodes.length === 1 ? nodes[0] : nodes;
     }
 
     return { type: "text", text: text ?? "", marks: this.resolveMarks(opts) };
