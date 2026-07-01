@@ -65,3 +65,44 @@ export const Passthrough = Node.create({
     ];
   },
 });
+
+/**
+ * InlinePassthrough — inline atom carrying an opaque inline ParagraphChild that
+ * has no native Tiptap representation (bookmarkStart/End, comment range markers,
+ * proofErr, track-change markers, …). The full ParagraphChild rides in
+ * `attrs.data` as JSON so DOCX→JSON→DOCX round-trips byte-faithful; the atom is
+ * zero-width (bookmark/range markers carry no layout box), matching Word's
+ * non-printing metadata. Mirrors the block-level Passthrough for inline children.
+ */
+export const InlinePassthrough = Node.create({
+  name: "inlinePassthrough",
+  group: "inline",
+  inline: true,
+  atom: true,
+
+  addAttributes() {
+    return {
+      data: {
+        default: "{}",
+        rendered: false,
+        parseHTML: (element: HTMLElement) =>
+          element.getAttribute("data-inline-passthrough") ?? "{}",
+      },
+    };
+  },
+
+  parseHTML() {
+    return [{ tag: "span[data-inline-passthrough]" }];
+  },
+
+  renderHTML({ node }: { node: { attrs: Record<string, unknown> } }) {
+    return [
+      "span",
+      {
+        "data-inline-passthrough": (node.attrs.data as string) || "{}",
+        contenteditable: "false",
+        style: "display:none",
+      },
+    ];
+  },
+});

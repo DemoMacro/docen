@@ -13,7 +13,7 @@ import { Mention } from "./mention";
 import { OrderedList } from "./ordered-list";
 import { PageBreak } from "./page-break";
 import { Paragraph } from "./paragraph";
-import { Passthrough } from "./passthrough";
+import { Passthrough, InlinePassthrough } from "./passthrough";
 import { SectionBreak } from "./section-break";
 import { Strike } from "./strike";
 import { Table } from "./table";
@@ -56,6 +56,7 @@ export const tiptapNodeExtensions: AnyExtension[] = [
   ColumnBreak,
   SectionBreak,
   Passthrough,
+  InlinePassthrough,
   TocField,
   Blockquote,
   OrderedList,
@@ -212,7 +213,7 @@ export { Heading } from "./heading";
 export { Image } from "./image";
 export { WpgGroup } from "./wpg-group";
 export { WpsShape } from "./wps-shape";
-export { Passthrough } from "./passthrough";
+export { Passthrough, InlinePassthrough } from "./passthrough";
 export { TocField } from "./toc-field";
 export { Paragraph } from "./paragraph";
 export { TableRow } from "./table-row";

@@ -468,6 +468,13 @@ export interface PassthroughNode extends TiptapJSONContent {
   attrs?: { data: string };
 }
 
+// -- InlinePassthrough node (inline atom; opaque inline ParagraphChild blob) --
+
+export interface InlinePassthroughNode extends TiptapJSONContent {
+  type: "inlinePassthrough";
+  attrs?: { data: string };
+}
+
 // -- Details node --
 
 export interface DetailsNode extends TiptapJSONContent {
@@ -507,7 +514,8 @@ export type InlineContent =
   | PageBreakNode
   | ColumnBreakNode
   | MentionNode
-  | InlineMathNode;
+  | InlineMathNode
+  | InlinePassthroughNode;
 export type BlockNode =
   | ParagraphNode
   | HeadingNode

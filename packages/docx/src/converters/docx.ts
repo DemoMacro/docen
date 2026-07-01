@@ -839,6 +839,18 @@ export class DocxManager {
         case "columnBreak":
           children.push({ columnBreak: true } as Record<string, unknown> as ParagraphChild);
           break;
+        case "inlinePassthrough": {
+          // Opaque inline ParagraphChild (bookmark/range markers, …) carried
+          // verbatim — reverse of resolveParagraphChild's fallback.
+          const data = (node.attrs?.data as string) ?? "{}";
+          try {
+            const parsed = JSON.parse(data) as ParagraphChild;
+            if (parsed) children.push(parsed);
+          } catch {
+            /* malformed JSON — drop */
+          }
+          break;
+        }
         case "image": {
           const imageRun = imageExt.renderDocx(node);
           if (imageRun) children.push(imageRun);
@@ -1705,7 +1717,10 @@ export class DocxManager {
     if ("columnBreak" in child) {
       return { type: "columnBreak" };
     }
-    return null;
+    // Unrecognized inline child (bookmark/range markers, proofErr, track-change
+    // markers, …) — carry verbatim via inlinePassthrough so the round-trip stays
+    // byte-faithful (mirrors block-level resolvePassthrough).
+    return { type: "inlinePassthrough", attrs: { data: JSON.stringify(child) } };
   }
 
   /** Resolve an inline SDT (mention carrier; other inline SDTs unsupported). */
