@@ -45,7 +45,7 @@ import { dispatchRibbonCommand, WIRED_DISPATCH } from "./commands";
 // Side-effect import: registers the ribbon/header translation tables.
 import "./i18n";
 import { FontMetricDecoration } from "./extensions/font-metric";
-import { ImageCap } from "./extensions/image-cap";
+import { clearImageCapCache, ImageCap } from "./extensions/image-cap";
 import { DocenKeymap } from "./extensions/keymap";
 import { Outline, type OutlineAnchor } from "./extensions/outline";
 import { PageBreakView } from "./extensions/page-break";
@@ -58,6 +58,15 @@ import { buildRibbonInnerHTML, RIBBON_TAB_IDS, type RibbonTabId } from "./ribbon
 import { fontNormalRatio } from "./utils/font-metric";
 import { clearMeasureCache } from "./utils/measure";
 import { unwrapPages, wrapPages } from "./utils/wrap";
+
+/** Escape a host-supplied string for safe interpolation into innerHTML. The
+ *  `filename` attribute comes from a user-selected File.name at openDOCX, which
+ *  can contain markup — without escaping it flows into #renderHeader's template
+ *  and executes. */
+const escapeHtml = (s: string): string =>
+  s.replace(/[&<>"']/g, (c) =>
+    c === "&" ? "&amp;" : c === "<" ? "&lt;" : c === ">" ? "&gt;" : c === '"' ? "&quot;" : "&#39;",
+  );
 
 /** Ribbon commands handled locally in #onCommand/#onChange (not via
  *  dispatchRibbonCommand). Together with {@link WIRED_DISPATCH} this is the
@@ -1335,7 +1344,7 @@ class DocenDocument extends HTMLElement {
     const filename = this.getAttribute("filename") ?? t("header.doc-name");
     const initial = user.trim().charAt(0).toUpperCase();
     const avatarMarkup = avatar
-      ? `<img class="avatar avatar-img" src="${avatar}" alt="" />`
+      ? `<img class="avatar avatar-img" src="${escapeHtml(avatar)}" alt="" />`
       : initial
         ? `<span class="avatar">${initial}</span>`
         : "";
@@ -1352,7 +1361,7 @@ class DocenDocument extends HTMLElement {
             <docen-ribbon-button icon="undo" label="${t("header.undo")}" event="undo" icon-only></docen-ribbon-button>
             <docen-ribbon-button icon="redo" label="${t("header.redo")}" event="redo" icon-only></docen-ribbon-button>
             <fluent-menu>
-              <fluent-menu-button slot="trigger" appearance="subtle">${filename}</fluent-menu-button>
+              <fluent-menu-button slot="trigger" appearance="subtle">${escapeHtml(filename)}</fluent-menu-button>
               <fluent-menu-list>
                 <fluent-menu-item data-event="new">${t("header.new")}</fluent-menu-item>
                 <fluent-menu-item data-event="open">${t("header.open")}</fluent-menu-item>
@@ -2173,6 +2182,9 @@ class DocenDocument extends HTMLElement {
    *  block's attrs, a no-op visually) to trigger them: TableOfContents injects
    *  heading ids + fires onUpdate, PagePlugin schedules a re-flow. */
   #loadDoc(editor: Editor, doc: JSONContent): void {
+    // Reset per-document image caches so a prior doc's decoded sizes / failed
+    // fetches neither leak nor suppress a legit re-fetch in the new document.
+    clearImageCapCache();
     editor.view.updateState(
       EditorState.create({ doc: editor.schema.nodeFromJSON(doc), plugins: editor.state.plugins }),
     );

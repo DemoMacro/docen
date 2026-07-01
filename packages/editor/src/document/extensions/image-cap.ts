@@ -29,6 +29,19 @@ function decodeDataUrl(src: string | undefined): Uint8Array | null {
 // become decodable).
 const naturalSizeCache = new Map<string, { width: number; height: number } | null>();
 
+// http(s) srcs whose embed fetch already failed (CORS/network). Cached so a
+// docChanged transaction doesn't re-fetch on every keystroke — the src stays
+// http after a failure, so the walk would otherwise re-queue it each edit.
+const failedImageSrcs = new Set<string>();
+
+/** Clear the natural-size + failed-src caches. Call on document load so caches
+ *  from a prior document neither grow unbounded nor suppress a legitimate
+ *  re-fetch of a src that failed under a transient (network/CORS) state. */
+export function clearImageCapCache(): void {
+  naturalSizeCache.clear();
+  failedImageSrcs.clear();
+}
+
 /** Natural pixel dimensions of a data-URL image, read synchronously from the file
  *  header (no load/decode round-trip). Returns null for http(s):// URLs (can't be
  *  sync-decoded) or unreadable bytes — the CSS max-width fallback constrains
@@ -219,6 +232,9 @@ async function embedHttpImage(view: EditorView, src: string, fetching: Set<strin
       markupMatchingSrc(view, src, { src: dataUrl });
       return;
     }
+    // fetch failed (CORS/network): the src stays http — remember it so the next
+    // docChanged walk doesn't re-fetch on every keystroke (retry storm).
+    failedImageSrcs.add(src);
     if (view.isDestroyed) return;
     const natural = await domNaturalSize(src);
     if (natural) {
@@ -306,7 +322,7 @@ export const ImageCap = Extension.create({
                 if (node.type.name !== "image") return true;
                 const src = node.attrs.src;
                 if (typeof src !== "string" || !/^https?:/.test(src)) return true;
-                if (fetching.has(src)) return true;
+                if (fetching.has(src) || failedImageSrcs.has(src)) return true;
                 fetching.add(src);
                 queue.push(src);
                 return true;

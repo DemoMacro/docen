@@ -277,7 +277,10 @@ function renderGroup(
     .map((c) => renderChild(c, chOff, scaleX, scaleY))
     .filter((c) => Array.isArray(c) && (c as unknown[]).length > 0);
 
-  const attrs: Record<string, unknown> = { "data-wpg-group": "", style };
+  // Serialize the full group model so generateHTML→parseHTML round-trips it
+  // (parseHTML does JSON.parse(data-wpg-group); an empty string would throw and
+  // drop children/offsets/extent/floating/grpSpPr on every HTML round-trip).
+  const attrs: Record<string, unknown> = { "data-wpg-group": JSON.stringify(group), style };
   if (extraAttrs) Object.assign(attrs, extraAttrs);
   return ["span", attrs, ...children] as Spec;
 }

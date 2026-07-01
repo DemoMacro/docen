@@ -76,7 +76,9 @@ export const WpsShape = Node.create({
         ...floatingToStyles(ws.floating, undefined, ws.transformation?.width),
         sizeStyle,
       ].join(";");
-      const attrs: Record<string, string> = { "data-wps-shape": "" };
+      // Serialize the shape model so generateHTML→parseHTML round-trips it
+      // (parseHTML JSON.parses data-wps-shape; "" would throw and drop it).
+      const attrs: Record<string, string> = { "data-wps-shape": JSON.stringify(ws) };
       if (floatAnchorScope(ws.floating) === "paragraph") {
         attrs["data-float-anchor"] = "paragraph";
       }
@@ -84,7 +86,7 @@ export const WpsShape = Node.create({
     }
     // An inline wps (rare — no wp:anchor) flows with the text as an inline block.
     return renderWpsInterior(ws, `display:inline-block;vertical-align:middle;${sizeStyle}`, {
-      attrs: { "data-wps-shape": "" },
+      attrs: { "data-wps-shape": JSON.stringify(ws) },
     }) as unknown as DOMOutputSpec;
   },
 });

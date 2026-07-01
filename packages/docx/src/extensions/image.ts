@@ -70,8 +70,10 @@ export function renderDocx(node: JSONContent): Record<string, unknown> | null {
   // transformation: width/height are required by OOXML MediaTransformation —
   // default when absent (editor/prepare step normally supplies real dimensions).
   // rotation is an optional editor attr carried via transformation.rotation.
-  const width = (attrs.width as number | undefined) ?? 600;
-  const height = (attrs.height as number | undefined) ?? 400;
+  // Guard against NaN/non-finite reaching OOXML as `${width}px` (an invalid
+  // UniversalMeasure that corrupts the document). Falls back to the default.
+  const width = Number.isFinite(attrs.width as number) ? (attrs.width as number) : 600;
+  const height = Number.isFinite(attrs.height as number) ? (attrs.height as number) : 400;
   // office-open 0.10.4+ treats a numeric transformation size as EMU (was px);
   // emit UniversalMeasure so the px value is interpreted correctly on generate.
   const transformation: Record<string, unknown> = { width: `${width}px`, height: `${height}px` };

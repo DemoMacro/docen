@@ -102,18 +102,17 @@ export async function prepareDocument(
 
 async function toDataUrl(src: string, handler: ImageFetchHandler): Promise<string> {
   const data = await handler(src);
-  const ext = src.split(".").pop()?.toLowerCase() ?? "png";
-  const typeMap: Record<string, string> = {
-    jpg: "image/jpeg",
-    jpeg: "image/jpeg",
-    png: "image/png",
-    gif: "image/gif",
-    bmp: "image/bmp",
-    svg: "image/svg+xml",
-    webp: "image/webp",
-  };
-  const mime = typeMap[ext] ?? "image/png";
-
+  // Infer MIME from the image header bytes (imageMeta reads magic bytes), not
+  // the URL extension — extensions are unreliable for CDN/authenticated/redirect
+  // URLs (`img.png?token=`, `/avatar`, no extension) and would mislabel a real
+  // JPEG as PNG, corrupting the embedded blip and breaking re-import.
+  let mime = "image/png";
+  try {
+    const type = imageMeta(data).type;
+    if (type) mime = type === "jpg" ? "image/jpeg" : `image/${type}`;
+  } catch {
+    // Unreadable/unknown header — leave the PNG fallback.
+  }
   return `data:${mime};base64,${encodeBase64(data)}`;
 }
 
