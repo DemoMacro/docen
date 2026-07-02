@@ -238,6 +238,18 @@ const TEMPLATE = `
       text-decoration: inherit;
       cursor: inherit;
     }
+    /* Track Changes (w:ins/w:del) — the Insertion/Deletion marks wrap the
+       revised text. Word renders inserted text colored + underlined and
+       deleted text colored + strikethrough (the text stays visible until
+       accept/reject). Colors follow Word's default palette. */
+    .docen-pages .docen-page .docen-insertion {
+      color: #2e7d32;
+      text-decoration: underline;
+    }
+    .docen-pages .docen-page .docen-deletion {
+      color: #c62828;
+      text-decoration: line-through;
+    }
     /* Images cap to the section content width the way Word caps them: a wider
        image scales DOWN to fit, never upscales. The ImageCap extension sets the
        real width on data-URL images it can sync-decode; this rule is the visual

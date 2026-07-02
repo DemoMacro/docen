@@ -44,6 +44,7 @@ import {
   Emoji,
 } from "./tiptap";
 import { TocField } from "./toc-field";
+import { Insertion, Deletion } from "./track-change";
 import { WpgGroup } from "./wpg-group";
 import { WpsShape } from "./wps-shape";
 
@@ -99,7 +100,9 @@ export const tiptapNodeExtensions: AnyExtension[] = [
 export const tiptapMarkExtensions: AnyExtension[] = [
   Bold,
   Code,
+  Deletion,
   Highlight,
+  Insertion,
   Italic,
   Link,
   Strike,
@@ -250,6 +253,7 @@ export { Image } from "./image";
 export { Link } from "./link";
 export { Strike } from "./strike";
 export { TextStyle } from "./text-style";
+export { Insertion, Deletion } from "./track-change";
 export { FormattingMarks } from "./formatting-marks";
 export { PageBreak } from "./page-break";
 export {

@@ -288,6 +288,15 @@ export interface HardBreakNode {
 
 // -- Mark types --
 
+/** OOXML track-change metadata (w:ins / w:del). Mirrors office-open's
+ *  ChangedAttributesProperties: `id` is the w:id (number), `author`/`date` are
+ *  the revision author and timestamp. */
+export interface TrackChangeAttrs {
+  id: number | null;
+  author: string | null;
+  date: string | null;
+}
+
 export type Mark =
   | { type: "bold" }
   | { type: "italic" }
@@ -298,7 +307,9 @@ export type Mark =
   | { type: "superscript" }
   | { type: "highlight"; attrs?: { color?: string } }
   | { type: "textStyle"; attrs?: TextStyleAttrs }
-  | { type: "link"; attrs?: LinkAttrs };
+  | { type: "link"; attrs?: LinkAttrs }
+  | { type: "insertion"; attrs?: TrackChangeAttrs }
+  | { type: "deletion"; attrs?: TrackChangeAttrs };
 
 // -- Block nodes --
 

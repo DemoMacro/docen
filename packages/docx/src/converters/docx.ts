@@ -1106,10 +1106,41 @@ export class DocxManager {
           }
           break;
         }
+        case "insertion":
+        case "deletion":
+          // Wrap the run back into a w:ins/w:del container — the reverse of
+          // resolveTrackedChange. compileTrackedChangeRun returns the typed
+          // ParagraphChild branch, so no cast is needed here. office-open's
+          // stringifyDeletedRun emits <w:delText> for deletion children.
+          children.push(this.compileTrackedChangeRun(mark.type, mark.attrs, text, runOpts));
+          return;
       }
     }
 
     children.push(runOpts as RunOptions);
+  }
+
+  /**
+   * Wrap a run back into a w:ins/w:del container — the reverse of
+   * resolveTrackedChange. A literal-key ternary (`{insertion: body}` /
+   * `{deletion: body}`) lets TS narrow to the ParagraphChild branch without a
+   * cast, and `typeof` guards read `attrs` type-safely (no `as number/string`).
+   * stringifyDeletedRun emits `<w:delText>` automatically for deletion children.
+   */
+  private compileTrackedChangeRun(
+    type: "insertion" | "deletion",
+    attrs: Record<string, unknown> | undefined,
+    text: string,
+    runOpts: Record<string, unknown>,
+  ): ParagraphChild {
+    const { text: _, ...runWithoutText } = runOpts;
+    const trackChildren: (RunOptions | string)[] = [];
+    if (text) trackChildren.push({ ...runWithoutText, text } as RunOptions);
+    const id = typeof attrs?.id === "number" ? attrs.id : 0;
+    const author = typeof attrs?.author === "string" ? attrs.author : "";
+    const date = typeof attrs?.date === "string" ? attrs.date : "";
+    const body = { id, author, date, children: trackChildren };
+    return type === "insertion" ? { insertion: body } : { deletion: body };
   }
 
   // ── Resolve: DocumentOptions → Tiptap JSON ──
@@ -1897,6 +1928,28 @@ export class DocxManager {
         },
       );
     }
+    if ("insertion" in child) {
+      return this.resolveTrackedChange(
+        child.insertion as {
+          id?: number;
+          author?: string;
+          date?: string;
+          children?: (RunOptions | string)[];
+        },
+        "insertion",
+      );
+    }
+    if ("deletion" in child) {
+      return this.resolveTrackedChange(
+        child.deletion as {
+          id?: number;
+          author?: string;
+          date?: string;
+          children?: (RunOptions | string)[];
+        },
+        "deletion",
+      );
+    }
     if ("pageBreak" in child) {
       return { type: "pageBreak" };
     }
@@ -2068,6 +2121,36 @@ export class DocxManager {
     }
 
     return null;
+  }
+
+  /** Resolve a track-change container (w:ins/w:del) into text nodes carrying an
+   *  insertion/deletion mark. Mirrors resolveHyperlink: recurse into the
+   *  container's child runs, merge adjacent text, and stamp every text node
+   *  with the revision mark (id/author/date) alongside any existing rPr marks
+   *  (bold, …). Returns null for an empty container. */
+  private resolveTrackedChange(
+    opts: { id?: number; author?: string; date?: string; children?: (RunOptions | string)[] },
+    type: "insertion" | "deletion",
+  ): JSONContent[] | null {
+    const content = this.resolveParagraphChildren(
+      (opts.children ?? []).map((c) => c as ParagraphChild),
+    );
+    if (content.length === 0) return null;
+    const merged = mergeTextNodes(content);
+    const mark = {
+      type,
+      attrs: {
+        id: opts.id ?? null,
+        author: opts.author ?? null,
+        date: opts.date ?? null,
+      },
+    };
+    for (const node of merged) {
+      if (node.type === "text") {
+        node.marks = [...(node.marks ?? []), mark];
+      }
+    }
+    return merged;
   }
 }
 
