@@ -43,6 +43,7 @@ import * as tableHeaderExt from "../extensions/table-header";
 import * as tableRowExt from "../extensions/table-row";
 import * as taskItemExt from "../extensions/task-item";
 import * as textStyleExt from "../extensions/text-style";
+import { alignmentFromCss } from "../extensions/utils";
 import { prepareDocument, type PrepareStep } from "./prepare";
 import { indexParagraphStyles } from "./styles";
 
@@ -189,6 +190,12 @@ export class DocxManager {
   // that ARE HeadingLevels ("Heading1".."Title"); real DOCX files often use
   // numeric ids. Set per resolve(); compile never reads it.
   private resolveStyles: StylesOptions | undefined;
+  // Reference → level-0 format/start, for classifying numbering paragraphs as
+  // bullet vs ordered. Built once from docOpts and shared by every resolve path
+  // that walks a block stream — section children, header/footer, and table cell
+  // children (a cell is just another SectionChild[] stream). Set per resolve();
+  // compile never reads it.
+  private resolveNumberingLookup: Map<string, { format?: string; start?: number }> | undefined;
 
   compile(json: JSONContent): DocumentOptions {
     this.numberingConfigs = [];
@@ -314,14 +321,13 @@ export class DocxManager {
    */
   private resolveHeaderFooter(
     group: SectionHeaderFooterGroup | undefined,
-    numberingLookup: Map<string, { format?: string; start?: number }>,
   ): HeaderFooterSlots | null {
     if (!group) return null;
     const slots: HeaderFooterSlots = {};
     for (const slot of ["default", "first", "even"] as const) {
       const children = group[slot];
       if (children?.length) {
-        slots[slot] = this.resolveSectionChildren(children, numberingLookup);
+        slots[slot] = this.resolveSectionChildren(children);
       }
     }
     return Object.keys(slots).length > 0 ? slots : null;
@@ -333,7 +339,7 @@ export class DocxManager {
     if (sections.length === 0) {
       return { type: "doc", content: [{ type: "paragraph" }] };
     }
-    const numberingLookup = this.buildNumberingLookup(docOpts);
+    this.resolveNumberingLookup = this.buildNumberingLookup(docOpts);
 
     // Resolve every section's children into blocks. A non-final section's
     // sectPr attaches to that section's LAST paragraph's pPr (OOXML) — stamp it
@@ -343,12 +349,12 @@ export class DocxManager {
     const lastIndex = sections.length - 1;
     for (let i = 0; i < sections.length; i++) {
       const section = sections[i];
-      const sectionContent = this.resolveSectionChildren(section.children ?? [], numberingLookup);
+      const sectionContent = this.resolveSectionChildren(section.children ?? []);
       if (i < lastIndex) {
         const sectAttrs: Record<string, unknown> = {
           sectionProperties: section.properties ?? null,
-          sectionHeaders: this.resolveHeaderFooter(section.headers, numberingLookup),
-          sectionFooters: this.resolveHeaderFooter(section.footers, numberingLookup),
+          sectionHeaders: this.resolveHeaderFooter(section.headers),
+          sectionFooters: this.resolveHeaderFooter(section.footers),
         };
         const last = sectionContent[sectionContent.length - 1];
         if (last?.type === "paragraph") {
@@ -380,9 +386,9 @@ export class DocxManager {
     if (core) attrs.core = core;
     const lastSection = sections[lastIndex];
     if (lastSection.properties) attrs.sectionProperties = lastSection.properties;
-    const lastHeaders = this.resolveHeaderFooter(lastSection.headers, numberingLookup);
+    const lastHeaders = this.resolveHeaderFooter(lastSection.headers);
     if (lastHeaders) attrs.sectionHeaders = lastHeaders;
-    const lastFooters = this.resolveHeaderFooter(lastSection.footers, numberingLookup);
+    const lastFooters = this.resolveHeaderFooter(lastSection.footers);
     if (lastFooters) attrs.sectionFooters = lastFooters;
     // Pass through document-level fields DocxManager doesn't reconstruct
     // (settings.xml flags like displayBackgroundShape, zoom, fonts, footnotes,
@@ -727,14 +733,33 @@ export class DocxManager {
     // OOXML cell property — <w:tcPr> has no horizontal alignment. Push it down to
     // each contained paragraph's `alignment` (the OOXML <w:jc>), unless a paragraph
     // already specifies its own alignment.
-    const cellAlign = (cellNode.attrs?.align as string | undefined) ?? null;
+    // `attrs.align` is a CSS text-align value (left/center/right/justify). Map it
+    // to an OOXML AlignmentType (justify → "both") for the paragraph <w:jc>.
+    const cellAlign = alignmentFromCss((cellNode.attrs?.align as string | undefined) ?? null) as
+      | ParagraphOptions["alignment"]
+      | null;
 
+    // A cell may contain ANY block (nested table/list/blockquote/codeBlock/…),
+    // not just paragraphs. Route each child through the shared block compiler so
+    // a nested list or table survives the round-trip — previously every child
+    // was forced through compileParagraphNode, silently dropping non-paragraph
+    // blocks into an empty paragraph.
     const cellChildren: SectionChild[] = [];
-    for (const paraNode of cellNode.content ?? []) {
-      const para = this.compileParagraphNode(paraNode);
-      const paraObj = (typeof para === "string" ? { text: para } : para) as Record<string, unknown>;
-      if (cellAlign && !paraObj.alignment) paraObj.alignment = cellAlign;
-      cellChildren.push({ paragraph: paraObj });
+    const pushChild = (child: SectionChild) => {
+      // Push the cell's `align` down to each paragraph's <w:jc> (see above).
+      if (cellAlign && typeof child === "object" && child !== null && "paragraph" in child) {
+        const p = child.paragraph;
+        if (typeof p === "string") child.paragraph = { text: p, alignment: cellAlign };
+        else if (p && typeof p === "object" && !(p as Record<string, unknown>).alignment)
+          (p as Record<string, unknown>).alignment = cellAlign;
+      }
+      cellChildren.push(child);
+    };
+    for (const childNode of cellNode.content ?? []) {
+      const compiled = this.compileSectionChild(childNode);
+      if (compiled == null) continue;
+      if (Array.isArray(compiled)) compiled.forEach(pushChild);
+      else pushChild(compiled);
     }
     if (cellChildren.length > 0) cellOpts.children = cellChildren;
 
@@ -1220,14 +1245,13 @@ export class DocxManager {
   }
 
   /**
-   * Walk section children, grouping consecutive list paragraphs into nested
-   * Tiptap lists. Non-list children resolve individually. DOCX flattens lists
-   * to a paragraph sequence (depth carried by `level`); this rebuilds the tree.
+   * Walk a SectionChild[] block stream — a section's body, a header/footer
+   * slot, or a table cell's children (a cell is just another block stream) —
+   * grouping consecutive list paragraphs into nested Tiptap lists. Non-list
+   * children resolve individually. DOCX flattens lists to a paragraph sequence
+   * (depth carried by `level`); this rebuilds the tree.
    */
-  private resolveSectionChildren(
-    children: SectionChild[],
-    numberingLookup: Map<string, { format?: string; start?: number }>,
-  ): JSONContent[] {
+  private resolveSectionChildren(children: SectionChild[]): JSONContent[] {
     const content: JSONContent[] = [];
     let i = 0;
     while (i < children.length) {
@@ -1238,9 +1262,7 @@ export class DocxManager {
       const child = children[i];
       const firstPara = "paragraph" in child ? child.paragraph : null;
       const firstInfo =
-        firstPara && typeof firstPara !== "string"
-          ? this.detectList(firstPara, numberingLookup)
-          : null;
+        firstPara && typeof firstPara !== "string" ? this.detectList(firstPara) : null;
 
       if (!firstInfo) {
         // Blockquote: consecutive paragraphs carrying the blockquote signature
@@ -1273,7 +1295,7 @@ export class DocxManager {
         if (!("paragraph" in member)) break;
         const para = member.paragraph;
         if (typeof para === "string") break;
-        const info = this.detectList(para, numberingLookup);
+        const info = this.detectList(para);
         if (!info) break;
         group.push({ para, info });
         i++;
@@ -1284,10 +1306,7 @@ export class DocxManager {
   }
 
   /** Classify a paragraph as a list item, or null if it isn't one. */
-  private detectList(
-    para: ParagraphOptions,
-    lookup: Map<string, { format?: string; start?: number }>,
-  ): ListInfo | null {
+  private detectList(para: ParagraphOptions): ListInfo | null {
     const p = para as unknown as Record<string, unknown>;
     const numbering = p.numbering as { reference?: string; level?: number } | undefined;
     const bullet = p.bullet as { level?: number } | undefined;
@@ -1300,7 +1319,7 @@ export class DocxManager {
     if (numbering) {
       reference = numbering.reference;
       level = numbering.level ?? 0;
-      const cfg = reference ? lookup.get(reference) : undefined;
+      const cfg = reference ? this.resolveNumberingLookup?.get(reference) : undefined;
       // A config whose format isn't "bullet" → ordered; otherwise this is the
       // built-in default-bullet numbering (parse may tag numId=1 as numbering
       // when its abstractNum resolves), so degrade to bullet.
@@ -1540,6 +1559,14 @@ export class DocxManager {
 
     for (const row of rows) {
       const rowAttrs = tableRowExt.parseDocx(row as Partial<TableRowOptions>);
+      // gridAfter/widthAfter are rebuilt as trailing placeholder cells below
+      // (PM requires every row's cell-span sum to equal the column count, so a
+      // gridAfter row needs explicit empty cells or fixTables inserts the filler
+      // at the START). Drop them from rowAttrs so compile doesn't re-emit
+      // row.gridAfter on top of those cells — that double-counts and the row
+      // widens by N columns every docx→json→docx round-trip.
+      delete rowAttrs.gridAfter;
+      delete rowAttrs.widthAfter;
       const cells = (row.cells ?? []) as Record<string, unknown>[];
       const cellNodes: JSONContent[] = [];
       const nextActiveSpans = new Map<number, JSONContent>();
@@ -1575,12 +1602,12 @@ export class DocxManager {
         // table's tblCellMar default (resolved once here for render + measure).
         if (!cellAttrs.margins && tableCellMargins) cellAttrs.margins = tableCellMargins;
 
+        // A cell is just another SectionChild[] block stream — same as a
+        // section body or a header/footer slot — so resolve it through the same
+        // path. That regroups consecutive numbering/bullet paragraphs into list
+        // nodes and keeps nested tables/lists structurally intact on import.
         const cellChildren = (cell.children ?? []) as SectionChild[];
-        const cellContent: JSONContent[] = [];
-        for (const cc of cellChildren) {
-          const resolved = this.resolveSectionChild(cc);
-          if (resolved) cellContent.push(resolved);
-        }
+        const cellContent: JSONContent[] = this.resolveSectionChildren(cellChildren);
 
         const cellType = isHeader ? "tableHeader" : "tableCell";
         const cellNode: JSONContent = { type: cellType };
