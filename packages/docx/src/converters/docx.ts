@@ -15,6 +15,7 @@ import type {
   TableOptions,
   TableRowOptions,
   TableCellOptions,
+  BorderOptions,
   LevelsOptions,
   NumberingOptions,
   OutputByType,
@@ -72,6 +73,31 @@ function sameCellMargins(
     k: "top" | "right" | "bottom" | "left",
   ) => m[k]?.size ?? null;
   return (["top", "right", "bottom", "left"] as const).every((k) => sz(a, k) === sz(b, k));
+}
+
+/** True when two single-side borders match on style/size/color — used to detect
+ *  a cell side that merely echoes the table's insideHorizontal/insideVertical
+ *  so it can be dropped for a near-identity round-trip (resolveTable pushes
+ *  those table-level grid lines onto cell sides lacking their own tcBorder). */
+function sameBorder(a: BorderOptions | undefined, b: BorderOptions | undefined): boolean {
+  if (!a || !b) return false;
+  return a.style === b.style && a.size === b.size && a.color === b.color;
+}
+
+/** True when a tblBorders object carries no REAL edge — every side is absent,
+ *  none, or nil. office-open fills table.borders with all-`none` when the
+ *  table's own <w:tblPr> defines no <w:tblBorders>, so this detects "the table
+ *  has no borders of its own" to decide whether a referenced table style's
+ *  borders should fill the gap. */
+function allBordersNone(borders: unknown): boolean {
+  if (!borders || typeof borders !== "object") return true;
+  const b = borders as Record<string, BorderOptions | undefined>;
+  return (["top", "bottom", "left", "right", "insideHorizontal", "insideVertical"] as const).every(
+    (k) => {
+      const v = b[k];
+      return !v || v.style === "none" || v.style === "nil";
+    },
+  );
 }
 
 /**
@@ -527,6 +553,14 @@ export class DocxManager {
     const tableCellMargins = (opts.cellMargin ?? opts.margins ?? null) as NonNullable<
       TableCellOptions["margins"]
     > | null;
+    // Table-level insideH/V — passed to compileTableCellNode so it can drop a
+    // cell side that merely echoes them (resolveTable pushed them onto cells).
+    const tableBorders = (opts.borders ?? null) as {
+      insideHorizontal?: BorderOptions;
+      insideVertical?: BorderOptions;
+    } | null;
+    const insideH = tableBorders?.insideHorizontal ?? null;
+    const insideV = tableBorders?.insideVertical ?? null;
     const rows: Record<string, unknown>[] = [];
 
     // Track active vertical spans from previous rows. `borders` carries the
@@ -581,7 +615,12 @@ export class DocxManager {
           spanIdx++;
         } else {
           // Compile and place the actual cell
-          const cell = this.compileTableCellNode(pmCells[cellIdx], tableCellMargins);
+          const cell = this.compileTableCellNode(
+            pmCells[cellIdx],
+            tableCellMargins,
+            insideH,
+            insideV,
+          );
           const cs = (cell.columnSpan as number) ?? 1;
           const rs = (cell.rowSpan as number) ?? 1;
 
@@ -709,6 +748,8 @@ export class DocxManager {
   private compileTableCellNode(
     cellNode: JSONContent,
     tableMargins?: NonNullable<TableCellOptions["margins"]> | null,
+    insideH?: BorderOptions | null,
+    insideV?: BorderOptions | null,
   ): Record<string, unknown> {
     const cellOpts = (
       cellNode.type === "tableHeader"
@@ -727,6 +768,19 @@ export class DocxManager {
       sameCellMargins(cellOpts.margins as NonNullable<TableCellOptions["margins"]>, tableMargins)
     ) {
       delete cellOpts.margins;
+    }
+
+    // Restore the table-level form: resolveTable pushed the table's insideH/V
+    // onto cell sides lacking their own tcBorder. A side equal to the table's
+    // insideH/V is the inherited one — drop it so the regenerated docx keeps
+    // tblBorders.insideH/V instead of duplicating as tcBorders on every cell.
+    if ((insideH || insideV) && cellOpts.borders) {
+      const b = cellOpts.borders as Record<string, BorderOptions | undefined>;
+      if (insideH && sameBorder(b.top, insideH)) delete b.top;
+      if (insideH && sameBorder(b.bottom, insideH)) delete b.bottom;
+      if (insideV && sameBorder(b.left, insideV)) delete b.left;
+      if (insideV && sameBorder(b.right, insideV)) delete b.right;
+      if (Object.keys(b).length === 0) delete cellOpts.borders;
     }
 
     // Cell horizontal alignment (Tiptap base-extension `align` attr) is NOT an
@@ -1535,10 +1589,70 @@ export class DocxManager {
     return node;
   }
 
+  /** Resolve a table style's effective table-level properties (tblBorders,
+   *  tblCellMar) by walking its basedOn chain (root first, child overrides).
+   *  office-open's parseDocument does NOT merge the referenced <w:tblStyle> into
+   *  table.borders/cellMargin — they reflect only the table's own <w:tblPr> — so
+   *  a "Table Grid" table (borders defined in the style) needs this to render
+   *  its grid. Returns empty when the style is absent or unknown. */
+  private resolveTableStyleProps(styleId: string | null | undefined): {
+    borders?: Record<string, BorderOptions>;
+    cellMargin?: NonNullable<TableCellOptions["margins"]>;
+  } {
+    if (!styleId || !this.resolveStyles?.tableStyles) return {};
+    const tableStyles = this.resolveStyles.tableStyles as unknown as Array<{
+      id?: string;
+      basedOn?: string;
+      table?: {
+        borders?: Record<string, BorderOptions>;
+        cellMargin?: NonNullable<TableCellOptions["margins"]>;
+      } | null;
+    }>;
+    const byId = new Map(tableStyles.map((t) => [t.id ?? "", t]));
+    const chain: typeof tableStyles = [];
+    const visited = new Set<string>();
+    let cur: string | undefined = styleId ?? undefined;
+    while (cur && !visited.has(cur)) {
+      visited.add(cur);
+      const s = byId.get(cur);
+      if (!s) break;
+      chain.unshift(s); // root first → children override below
+      cur = s.basedOn;
+    }
+    let borders: Record<string, BorderOptions> | undefined;
+    let cellMargin: NonNullable<TableCellOptions["margins"]> | undefined;
+    for (const s of chain) {
+      const t = s.table;
+      if (!t) continue;
+      if (t.borders) borders = t.borders;
+      if (t.cellMargin) cellMargin = t.cellMargin;
+    }
+    const out: {
+      borders?: Record<string, BorderOptions>;
+      cellMargin?: NonNullable<TableCellOptions["margins"]>;
+    } = {};
+    if (borders) out.borders = borders;
+    if (cellMargin) out.cellMargin = cellMargin;
+    return out;
+  }
+
   private resolveTable(tableOpts: Record<string, unknown>): JSONContent {
     const attrs = tableExt.parseDocx(tableOpts);
     const rows = (tableOpts.rows ?? []) as Record<string, unknown>[];
     const content: JSONContent[] = [];
+
+    // Pull the referenced table style's tblBorders/tblCellMar in: office-open
+    // leaves table.borders/cellMargin reflecting only the table's own tblPr, so
+    // a "Table Grid" table (borders defined in the style) would render no grid
+    // without this. The table's own real borders win; the style fills the gap
+    // when the table's are all none/nil.
+    const styleProps = this.resolveTableStyleProps((tableOpts.style as string | undefined) ?? null);
+    if (styleProps.borders && allBordersNone(tableOpts.borders)) {
+      tableOpts = { ...tableOpts, borders: styleProps.borders };
+    }
+    if (styleProps.cellMargin && tableOpts.cellMargin == null && tableOpts.margins == null) {
+      tableOpts = { ...tableOpts, cellMargin: styleProps.cellMargin };
+    }
 
     // Table-level default cell insets (w:tblCellMar). office-open exposes them
     // on both `cellMargin` and `margins`; a cell inherits them unless it carries
@@ -1550,6 +1664,24 @@ export class DocxManager {
     const tableCellMargins = (tableOpts.cellMargin ?? tableOpts.margins ?? null) as NonNullable<
       TableCellOptions["margins"]
     > | null;
+    // Table-level inside grid lines (tblBorders.insideHorizontal/insideVertical).
+    // In CSS border-collapse the interior grid belongs to cells, not the <table>
+    // element, so a REAL insideH/V is pushed onto cell sides lacking their own
+    // tcBorder (below). none/nil is skipped — a table that merely LACKS inner
+    // grid lines must not have `border:none` stamped on every cell, or it would
+    // suppress the editor's Table-Grid fallback default for borderless tables.
+    // Edge cells' outer sides overlap the table's own border under
+    // border-collapse (thicker wins), matching OOXML outer-vs-inner semantics.
+    const tableBorders = (tableOpts.borders ?? null) as {
+      insideHorizontal?: BorderOptions;
+      insideVertical?: BorderOptions;
+    } | null;
+    const realBorder = (bd: unknown): BorderOptions | null => {
+      const b = bd as BorderOptions | null | undefined;
+      return b && b.style && b.style !== "none" && b.style !== "nil" ? b : null;
+    };
+    const insideH = realBorder(tableBorders?.insideHorizontal);
+    const insideV = realBorder(tableBorders?.insideVertical);
 
     // DOCX encodes a row span as a `restart` cell followed by N empty `continue`
     // cells; ProseMirror uses one cell with rowspan = N+1. Track open spans per
@@ -1601,6 +1733,20 @@ export class DocxManager {
         // Effective cell margins: a cell's own tcMar wins, else inherit the
         // table's tblCellMar default (resolved once here for render + measure).
         if (!cellAttrs.margins && tableCellMargins) cellAttrs.margins = tableCellMargins;
+
+        // Effective cell borders: a cell's own tcBorder per side wins, else
+        // inherit the table's inside grid lines (insideH on top/bottom, insideV
+        // on left/right) so the interior grid renders under border-collapse.
+        // compileTableCellNode drops a side equal to the table's insideH/V to
+        // keep the round-trip near-identity.
+        if (insideH || insideV) {
+          if (!cellAttrs.borders) cellAttrs.borders = {};
+          const b = cellAttrs.borders as Record<string, BorderOptions | undefined>;
+          if (insideH && !b.top) b.top = insideH;
+          if (insideH && !b.bottom) b.bottom = insideH;
+          if (insideV && !b.left) b.left = insideV;
+          if (insideV && !b.right) b.right = insideV;
+        }
 
         // A cell is just another SectionChild[] block stream — same as a
         // section body or a header/footer slot — so resolve it through the same
