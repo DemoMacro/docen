@@ -12,8 +12,6 @@ import type { Extensions, JSONContent } from "../core";
 import { docxExtensions } from "../core";
 import { sectionLinePitchCss, sectionMarginCss } from "../extensions/utils";
 
-const defaultExtensions: Extensions = docxExtensions;
-
 /** Page background — mirrors parseDOCX output (office-open parse.ts): a simple
  *  color background `{ color, themeColor, … }` or a VML pattern `{ rawXml,
  *  rawMedia }`. Document-level (CT_DocumentBase), so it is read off `doc.attrs`
@@ -96,7 +94,7 @@ function splitJsonSections(doc: JSONContent): JsonSection[] {
  * document: happy-dom drops calc(var(…)) when re-serializing the style
  * attribute, so DOCX line-spacing survives only with linkedom.
  */
-export function generateHTML(doc: JSONContent, extensions: Extensions = defaultExtensions): string {
+export function generateHTML(doc: JSONContent, extensions: Extensions = docxExtensions): string {
   const schema = getSchema(extensions);
   const { document } = createLinkedomDocument("<!DOCTYPE html><html><body></body></html>");
 
@@ -134,7 +132,7 @@ export function generateHTML(doc: JSONContent, extensions: Extensions = defaultE
  */
 export function parseHTML(
   html: string,
-  extensions: Extensions = defaultExtensions,
+  extensions: Extensions = docxExtensions,
   options?: ParseOptions,
 ): JSONContent {
   const schema = getSchema(extensions);
