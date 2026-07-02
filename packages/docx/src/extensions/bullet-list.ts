@@ -1,4 +1,4 @@
-import { BulletList as BulletListBase } from "./tiptap";
+import { BulletList as BulletListBase } from "@tiptap/extension-bullet-list";
 
 /**
  * BulletList — carries the source DOCX abstractNum reference (when the list came

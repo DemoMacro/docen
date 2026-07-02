@@ -1,5 +1,6 @@
+import { CodeBlockLowlight } from "@tiptap/extension-code-block-lowlight";
+
 import type { JSONContent } from "../core";
-import { CodeBlockLowlight } from "./tiptap";
 
 /**
  * CodeBlock extension — CodeBlockLowlight with a DOCX renderDocx.

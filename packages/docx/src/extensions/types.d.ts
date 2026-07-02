@@ -19,14 +19,15 @@ declare module "@tiptap/core" {
 
   interface MarkConfig<Options = any, Storage = any> {
     /**
-     * DOCX serialization: mark attrs → RunOptions properties.
-     * Each mark extension defines this to contribute run-level properties.
+     * DOCX serialization: mark attrs → run-level properties (merged into the
+     * run's options). Each mark extension defines this to contribute rPr fields.
      */
-    renderDocx?: (attrs: Record<string, unknown>) => Partial<RunOptions>;
+    renderDocx?: (attrs: Record<string, unknown>) => Record<string, unknown>;
     /**
-     * DOCX deserialization: RunOptions → mark attrs.
-     * Each mark extension defines this to extract its attrs from run properties.
+     * DOCX deserialization: RunOptions → mark attrs, or null when the run does
+     * not carry this mark (DocxManager then skips emitting it). Each mark
+     * extension defines this to extract its attrs from run properties.
      */
-    parseDocx?: (opts: RunOptions) => Record<string, unknown>;
+    parseDocx?: (opts: RunOptions) => Record<string, unknown> | null;
   }
 }

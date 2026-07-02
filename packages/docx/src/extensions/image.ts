@@ -1,7 +1,7 @@
 import { convertEmuToPixels } from "@office-open/core";
+import { Image as BaseImage } from "@tiptap/extension-image";
 
 import type { JSONContent } from "../core";
-import { Image as BaseImage } from "./tiptap";
 import { floatAnchorScope, floatingToStyles } from "./utils";
 
 type CropRect = { left?: number; top?: number; right?: number; bottom?: number };

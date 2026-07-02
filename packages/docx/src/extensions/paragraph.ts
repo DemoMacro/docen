@@ -1,6 +1,6 @@
 import type { JSONContent } from "@tiptap/core";
+import { Paragraph as BaseParagraph } from "@tiptap/extension-paragraph";
 
-import { Paragraph as BaseParagraph } from "./tiptap";
 import {
   attrNative,
   renderParagraphStyles,

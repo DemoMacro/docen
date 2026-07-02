@@ -1,6 +1,6 @@
 import type { JSONContent } from "@tiptap/core";
+import { Heading as BaseHeading } from "@tiptap/extension-heading";
 
-import { Heading as BaseHeading } from "./tiptap";
 import {
   attrNative,
   renderParagraphStyles,

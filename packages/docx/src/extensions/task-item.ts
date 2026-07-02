@@ -1,4 +1,4 @@
-import { TaskItem as TaskItemBase } from "./tiptap";
+import { TaskItem as TaskItemBase } from "@tiptap/extension-task-item";
 
 /**
  * TaskItem extension — owns the DOCX expression of a task-list checkbox.

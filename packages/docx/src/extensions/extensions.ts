@@ -1,3 +1,12 @@
+import { CodeBlockLowlight } from "@tiptap/extension-code-block-lowlight";
+import { Emoji } from "@tiptap/extension-emoji";
+import { HardBreak } from "@tiptap/extension-hard-break";
+import { HorizontalRule } from "@tiptap/extension-horizontal-rule";
+import { ListItem } from "@tiptap/extension-list-item";
+import { Mathematics } from "@tiptap/extension-mathematics";
+import { TaskList } from "@tiptap/extension-task-list";
+import { Text } from "@tiptap/extension-text";
+import { TextAlign } from "@tiptap/extension-text-align";
 import { all, createLowlight } from "lowlight";
 
 import { Extension, type AnyExtension } from "../core";
@@ -11,6 +20,7 @@ import { FormattingMarks } from "./formatting-marks";
 import { Heading } from "./heading";
 import { Image } from "./image";
 import { Link } from "./link";
+import { Bold, Code, Highlight, Italic, Subscript, Superscript, Underline } from "./marks";
 import { Mention } from "./mention";
 import { OrderedList } from "./ordered-list";
 import { PageBreak } from "./page-break";
@@ -25,24 +35,6 @@ import { TableHeader } from "./table-header";
 import { TableRow } from "./table-row";
 import { TaskItem } from "./task-item";
 import { TextStyle } from "./text-style";
-import {
-  Text,
-  HorizontalRule,
-  CodeBlockLowlight,
-  ListItem,
-  TaskList,
-  HardBreak,
-  Mathematics,
-  Bold,
-  Italic,
-  Underline,
-  Code,
-  Highlight,
-  Subscript,
-  Superscript,
-  TextAlign,
-  Emoji,
-} from "./tiptap";
 import { TocField } from "./toc-field";
 import { Insertion, Deletion } from "./track-change";
 import { WpgGroup } from "./wpg-group";
@@ -212,27 +204,19 @@ export const DocxKit = Extension.create<DocxKitOptions>({
 });
 
 // Export all individual extensions for direct imports from @docen/docx.
-// tiptap.ts aggregates upstream extensions as the base-class import point for the
-// local extensions; re-export them explicitly here (no `export *`) so the public
-// surface is visible. Customized extensions export their local version.
-export {
-  Text,
-  HorizontalRule,
-  CodeBlockLowlight,
-  ListItem,
-  TaskList,
-  HardBreak,
-  Mathematics,
-  Bold,
-  Italic,
-  Underline,
-  Code,
-  Highlight,
-  Subscript,
-  Superscript,
-  TextAlign,
-  Emoji,
-} from "./tiptap";
+// Re-export explicitly (no `export *`) so the public surface is visible.
+// Customized extensions export their local version; upstream-only ones re-export
+// from @tiptap/* directly, base marks (with DOCX hooks) from ./marks.
+export { CodeBlockLowlight } from "@tiptap/extension-code-block-lowlight";
+export { Emoji } from "@tiptap/extension-emoji";
+export { HardBreak } from "@tiptap/extension-hard-break";
+export { HorizontalRule } from "@tiptap/extension-horizontal-rule";
+export { ListItem } from "@tiptap/extension-list-item";
+export { Mathematics } from "@tiptap/extension-mathematics";
+export { TaskList } from "@tiptap/extension-task-list";
+export { Text } from "@tiptap/extension-text";
+export { TextAlign } from "@tiptap/extension-text-align";
+export { Bold, Code, Highlight, Italic, Subscript, Superscript, Underline } from "./marks";
 export { Document, createDocument } from "./document";
 export { Paragraph } from "./paragraph";
 export { Heading } from "./heading";

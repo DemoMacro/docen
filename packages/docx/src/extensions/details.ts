@@ -2,7 +2,7 @@ import {
   Details as DetailsBase,
   DetailsSummary as DetailsSummaryBase,
   DetailsContent as DetailsContentBase,
-} from "./tiptap";
+} from "@tiptap/extension-details";
 
 /**
  * Details extension — owns the DOCX expression of a collapsible details block.

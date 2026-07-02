@@ -1,4 +1,4 @@
-import { Blockquote as BlockquoteBase } from "./tiptap";
+import { Blockquote as BlockquoteBase } from "@tiptap/extension-blockquote";
 
 /**
  * Blockquote extension — owns the DOCX expression of a blockquote.

@@ -1,6 +1,6 @@
 import type { JSONContent } from "@tiptap/core";
+import { TableHeader as BaseTableHeader } from "@tiptap/extension-table";
 
-import { TableHeader as BaseTableHeader } from "./tiptap";
 import { attrNative, bordersFromElement, renderTableCellStyles, shadingFromElement } from "./utils";
 
 /**

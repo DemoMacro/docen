@@ -1,4 +1,4 @@
-import { Mention as MentionBase } from "./tiptap";
+import { Mention as MentionBase } from "@tiptap/extension-mention";
 
 /**
  * Mention extension — owns the DOCX expression of an inline mention.

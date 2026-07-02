@@ -1,7 +1,7 @@
 import type { TableRowPropertiesOptionsBase } from "@office-open/docx";
 import type { JSONContent } from "@tiptap/core";
+import { TableRow as BaseTableRow } from "@tiptap/extension-table";
 
-import { TableRow as BaseTableRow } from "./tiptap";
 import { attrNative, cssToTwip } from "./utils";
 
 /**

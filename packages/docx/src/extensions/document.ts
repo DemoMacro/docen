@@ -1,4 +1,5 @@
-import { Document as BaseDocument } from "./tiptap";
+import { Document as BaseDocument } from "@tiptap/extension-document";
+
 import { attrNative } from "./utils";
 
 /**

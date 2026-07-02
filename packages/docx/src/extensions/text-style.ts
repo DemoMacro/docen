@@ -1,6 +1,6 @@
 import type { RunOptions } from "@office-open/docx";
+import { TextStyle as BaseTextStyle } from "@tiptap/extension-text-style";
 
-import { TextStyle as BaseTextStyle } from "./tiptap";
 import {
   attrNative,
   characterSpacingFromCss,
@@ -22,8 +22,6 @@ import {
  * CSS conversion happens only in attribute-level renderHTML/parseHTML.
  */
 
-// ── DOCX serialization (near-identity: attrs mirror RunStylePropertiesOptions) ──
-
 /** Structural/semantic keys expressed elsewhere (run children/text, style name). */
 const SKIP_KEYS = new Set([
   "children",
@@ -38,38 +36,6 @@ const SKIP_KEYS = new Set([
   "subScript",
   "superScript",
 ]);
-
-export function renderDocx(attrs: Record<string, unknown>): Partial<RunOptions> {
-  const opts: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(attrs)) {
-    if (SKIP_KEYS.has(key)) continue;
-    if (value === null || value === undefined) continue;
-    // styleId (attr) → OOXML run `style` (the rStyle / character-style reference).
-    if (key === "styleId") {
-      opts.style = value;
-      continue;
-    }
-    // Attrs mirror RunOptions field names (color/font/size/shading/…); CSS
-    // conversion happens only in attribute-level renderHTML/parseHTML below.
-    opts[key] = value;
-  }
-  return opts as Partial<RunOptions>;
-}
-
-export function parseDocx(opts: RunOptions): Record<string, unknown> {
-  const resolved = typeof opts === "string" ? { text: opts } : opts;
-  const attrs: Record<string, unknown> = {};
-  // OOXML run `style` (rStyle — a character-style reference) → styleId, carried
-  // as an attr so the named character style's CSS applies via class="docx-char-{id}".
-  if (resolved.style) attrs.styleId = resolved.style;
-  for (const [key, value] of Object.entries(resolved)) {
-    if (SKIP_KEYS.has(key)) continue;
-    attrs[key] = value ?? null;
-  }
-  return attrs;
-}
-
-// ── Extension ──
 
 export const TextStyle = BaseTextStyle.extend({
   addAttributes() {
@@ -191,6 +157,34 @@ export const TextStyle = BaseTextStyle.extend({
     };
   },
 
-  renderDocx,
-  parseDocx,
+  // Near-identity: attrs mirror RunStylePropertiesOptions. styleId (attr) ↔
+  // OOXML run `style` (rStyle). CSS conversion happens only in attribute-level
+  // renderHTML/parseHTML above.
+  renderDocx: (attrs: Record<string, unknown>): Partial<RunOptions> => {
+    const opts: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(attrs)) {
+      if (SKIP_KEYS.has(key)) continue;
+      if (value === null || value === undefined) continue;
+      // styleId (attr) → OOXML run `style` (the rStyle / character-style reference).
+      if (key === "styleId") {
+        opts.style = value;
+        continue;
+      }
+      opts[key] = value;
+    }
+    return opts as Partial<RunOptions>;
+  },
+  parseDocx: (opts: RunOptions): Record<string, unknown> | null => {
+    const resolved = typeof opts === "string" ? { text: opts } : opts;
+    const attrs: Record<string, unknown> = {};
+    // rStyle "CodeChar" belongs to the `code` mark — skip its styleId and the
+    // Consolas fallback font so they aren't double-applied on compile.
+    if (resolved.style && resolved.style !== "CodeChar") attrs.styleId = resolved.style;
+    for (const [key, value] of Object.entries(resolved)) {
+      if (SKIP_KEYS.has(key)) continue;
+      if (resolved.style === "CodeChar" && key === "font") continue;
+      attrs[key] = value ?? null;
+    }
+    return Object.keys(attrs).length ? attrs : null;
+  },
 });

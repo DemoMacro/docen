@@ -1,7 +1,6 @@
 import type { LevelsOptions } from "@office-open/docx";
 import { LevelFormat } from "@office-open/docx";
-
-import { OrderedList as OrderedListBase } from "./tiptap";
+import { OrderedList as OrderedListBase } from "@tiptap/extension-ordered-list";
 
 /**
  * OrderedList extension — owns the DOCX expression of an ordered list.

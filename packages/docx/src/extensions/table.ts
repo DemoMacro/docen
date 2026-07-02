@@ -1,7 +1,7 @@
 import type { TableOptions } from "@office-open/docx";
 import type { JSONContent } from "@tiptap/core";
+import { Table as BaseTable } from "@tiptap/extension-table";
 
-import { Table as BaseTable } from "./tiptap";
 import {
   attrNative,
   alignmentFromElement,

@@ -13,7 +13,6 @@ import type {
   ParagraphChild,
   RunOptions,
   TableOptions,
-  TableRowOptions,
   TableCellOptions,
   BorderOptions,
   LevelsOptions,
@@ -24,26 +23,16 @@ import type {
   StylesOptions,
   TableOfContentsOptions,
 } from "@office-open/docx";
+import { flattenExtensions, getExtensionField, getSchema } from "@tiptap/core";
 import { emojis, shortcodeToEmoji } from "@tiptap/extension-emoji";
 
-import type { JSONContent } from "../core";
+import type { Extensions, JSONContent } from "../core";
+import { docxExtensions } from "../core";
 import * as blockquoteExt from "../extensions/blockquote";
-import * as codeBlockExt from "../extensions/code-block";
 import * as detailsExt from "../extensions/details";
-import * as headingExt from "../extensions/heading";
-import * as imageExt from "../extensions/image";
 import * as mentionExt from "../extensions/mention";
 import * as orderedListExt from "../extensions/ordered-list";
-// Node renderDocx/parseDocx
-import * as paragraphExt from "../extensions/paragraph";
-// Mark renderDocx/parseDocx
-import * as strikeExt from "../extensions/strike";
-import * as tableExt from "../extensions/table";
-import * as tableCellExt from "../extensions/table-cell";
-import * as tableHeaderExt from "../extensions/table-header";
-import * as tableRowExt from "../extensions/table-row";
 import * as taskItemExt from "../extensions/task-item";
-import * as textStyleExt from "../extensions/text-style";
 import { alignmentFromCss } from "../extensions/utils";
 import { prepareDocument, type PrepareStep } from "./prepare";
 import { indexParagraphStyles, mergeTableStyleProps } from "./styles";
@@ -222,6 +211,58 @@ export class DocxManager {
   // children (a cell is just another SectionChild[] stream). Set per resolve();
   // compile never reads it.
   private resolveNumberingLookup: Map<string, { format?: string; start?: number }> | undefined;
+  // DOCX conversion hooks collected via reflection from the extension list.
+  // Each mark/node extension declares renderDocx/parseDocx as config fields;
+  // the constructor reads them with getExtensionField so user-supplied
+  // extensions plug in without a fork. Container marks (link/insertion/
+  // deletion) wrap runs and are handled directly in compile/resolve, not
+  // through these maps. Node hooks cover attrs↔opts only — children assembly
+  // (inline content, table rows/cells, list tree, details SDT) stays in
+  // DocxManager's compile*/resolve* dispatch.
+  private markRender = new Map<
+    string,
+    (attrs: Record<string, unknown>) => Record<string, unknown>
+  >();
+  private markParse: Array<{
+    name: string;
+    parse: (opts: RunOptions) => Record<string, unknown> | null;
+  }> = [];
+  private nodeRender = new Map<string, (node: JSONContent) => Record<string, unknown> | null>();
+  private nodeParse = new Map<string, (opts: Record<string, unknown>) => Record<string, unknown>>();
+
+  constructor(extensions: Extensions = docxExtensions) {
+    const schema = getSchema(extensions);
+    for (const ext of flattenExtensions(extensions)) {
+      const name = ext.name;
+      if (!name) continue;
+      if (schema.marks[name]) {
+        const render = getExtensionField(ext, "renderDocx") as
+          | ((attrs: Record<string, unknown>) => Record<string, unknown>)
+          | undefined;
+        const parse = getExtensionField(ext, "parseDocx") as
+          | ((opts: RunOptions) => Record<string, unknown> | null)
+          | undefined;
+        if (render) this.markRender.set(name, render);
+        if (parse) this.markParse.push({ name, parse });
+      } else if (schema.nodes[name]) {
+        const render = getExtensionField(ext, "renderDocx") as
+          | ((node: JSONContent) => Record<string, unknown> | null)
+          | undefined;
+        const parse = getExtensionField(ext, "parseDocx") as
+          | ((opts: Record<string, unknown>) => Record<string, unknown>)
+          | undefined;
+        if (render) this.nodeRender.set(name, render);
+        if (parse) this.nodeParse.set(name, parse);
+      }
+    }
+  }
+
+  /** Reflective node renderDocx lookup: the node's DOCX opts, or {} when the
+   *  node type has no renderDocx hook (degrades to a plain paragraph). node.type
+   *  is optional on JSONContent — an absent type simply misses the map. */
+  private renderNodeOpts(node: JSONContent): Record<string, unknown> {
+    return this.nodeRender.get(node.type ?? "")?.(node) ?? {};
+  }
 
   compile(json: JSONContent): DocumentOptions {
     this.numberingConfigs = [];
@@ -464,7 +505,7 @@ export class DocxManager {
         // codeBlock → paragraph styled "Code" (extension owns style/font).
         // Children go through the shared inline path (handles `\n`→break +
         // inline marks), so no special-case child logic lives here.
-        const opts = codeBlockExt.renderDocx(node) as Record<string, unknown>;
+        const opts = this.renderNodeOpts(node);
         const childList = this.compileInlineContent(node.content);
         if (childList.length > 0) opts.children = childList;
         return { paragraph: this.simplifyParagraph(opts) };
@@ -476,7 +517,7 @@ export class DocxManager {
       case "table":
         return { table: this.compileTableNode(node) };
       case "image": {
-        const imageRun = imageExt.renderDocx(node);
+        const imageRun = this.nodeRender.get(node.type)?.(node) ?? null;
         if (!imageRun) return null;
         return { paragraph: { children: [imageRun] } };
       }
@@ -512,14 +553,14 @@ export class DocxManager {
   }
 
   private compileParagraphNode(node: JSONContent): ParagraphOptions {
-    const opts = paragraphExt.renderDocx(node) as Record<string, unknown>;
+    const opts = this.renderNodeOpts(node);
     const childList = this.compileInlineContent(node.content);
     if (childList.length > 0) opts.children = childList;
     return this.simplifyParagraph(opts);
   }
 
   private compileHeadingNode(node: JSONContent): ParagraphOptions {
-    const opts = headingExt.renderDocx(node) as Record<string, unknown>;
+    const opts = this.renderNodeOpts(node);
     const childList = this.compileInlineContent(node.content);
     if (childList.length > 0) opts.children = childList;
     return this.simplifyParagraph(opts);
@@ -546,7 +587,7 @@ export class DocxManager {
   }
 
   private compileTableNode(node: JSONContent): TableOptions {
-    const opts = tableExt.renderDocx(node) as Record<string, unknown>;
+    const opts = this.renderNodeOpts(node);
     const colCount = this.getTableColumnCount(node);
     // Table-level tblCellMar default — passed to compileTableCellNode so it can
     // drop a cell tcMar that merely echoes it (see resolveTable's push-down).
@@ -581,7 +622,7 @@ export class DocxManager {
     for (const rowNode of node.content ?? []) {
       if (rowNode.type !== "tableRow") continue;
 
-      const rowOpts = tableRowExt.renderDocx(rowNode) as Record<string, unknown>;
+      const rowOpts = this.nodeRender.get(rowNode.type)?.(rowNode) ?? {};
       const pmCells = (rowNode.content ?? []).filter(
         (c) => c.type === "tableCell" || c.type === "tableHeader",
       );
@@ -751,11 +792,7 @@ export class DocxManager {
     insideH?: BorderOptions | null,
     insideV?: BorderOptions | null,
   ): Record<string, unknown> {
-    const cellOpts = (
-      cellNode.type === "tableHeader"
-        ? tableHeaderExt.renderDocx(cellNode)
-        : tableCellExt.renderDocx(cellNode)
-    ) as Record<string, unknown>;
+    const cellOpts = this.renderNodeOpts(cellNode);
 
     // Restore the table-level form: resolveTable pushed the table's tblCellMar
     // default onto cells without their own tcMar. A cell whose margins equal
@@ -974,7 +1011,7 @@ export class DocxManager {
           break;
         }
         case "image": {
-          const imageRun = imageExt.renderDocx(node);
+          const imageRun = this.nodeRender.get(node.type)?.(node) ?? null;
           if (imageRun) children.push(imageRun);
           break;
         }
@@ -1054,41 +1091,9 @@ export class DocxManager {
     const runOpts: Record<string, unknown> = { text };
 
     for (const mark of marks ?? []) {
+      // Container marks wrap the run (early return) rather than overlay rPr —
+      // they assemble child runs and are handled directly here.
       switch (mark.type) {
-        case "bold":
-          runOpts.bold = true;
-          break;
-        case "italic":
-          runOpts.italic = true;
-          break;
-        case "underline":
-          runOpts.underline = { type: "single" };
-          break;
-        case "strike": {
-          const strikeProps = strikeExt.renderDocx((mark.attrs ?? {}) as Record<string, unknown>);
-          Object.assign(runOpts, strikeProps);
-          break;
-        }
-        case "subscript":
-          runOpts.subScript = true;
-          break;
-        case "superscript":
-          runOpts.superScript = true;
-          break;
-        case "highlight":
-          runOpts.highlight = mark.attrs?.color ?? "yellow";
-          break;
-        case "code":
-          // rStyle "CodeChar" is the precise round-trip carrier; Consolas is a
-          // visual fallback when styles.xml lacks the CodeChar definition.
-          runOpts.style = "CodeChar";
-          runOpts.font = "Consolas";
-          break;
-        case "textStyle": {
-          const tsProps = textStyleExt.renderDocx((mark.attrs ?? {}) as Record<string, unknown>);
-          Object.assign(runOpts, tsProps);
-          break;
-        }
         case "link": {
           const href = mark.attrs?.href as string | undefined;
           if (href) {
@@ -1115,6 +1120,9 @@ export class DocxManager {
           children.push(this.compileTrackedChangeRun(mark.type, mark.attrs, text, runOpts));
           return;
       }
+      // rPr overlay marks — each extension's renderDocx contributes run props.
+      const render = this.markRender.get(mark.type);
+      if (render) Object.assign(runOpts, render((mark.attrs ?? {}) as Record<string, unknown>));
     }
 
     children.push(runOpts as RunOptions);
@@ -1252,10 +1260,9 @@ export class DocxManager {
     const headingLevel = this.detectHeadingLevel(resolved);
     const nodeType = headingLevel ? "heading" : "paragraph";
 
-    // Dispatch to extension parseDocx
-    const attrs = headingLevel
-      ? headingExt.parseDocx(resolved as unknown as Record<string, unknown>)
-      : paragraphExt.parseDocx(resolved as unknown as Record<string, unknown>);
+    // Dispatch to extension parseDocx (reflective: heading/paragraph share nodeType).
+    const attrs =
+      this.nodeParse.get(nodeType)?.(resolved as unknown as Record<string, unknown>) ?? {};
 
     // Heading7-9, numeric styleIds, and basedOn/outlineLevel-derived levels
     // aren't HeadingLevel literals, so parseDocx can't always derive `level`
@@ -1562,9 +1569,8 @@ export class DocxManager {
     const headingLevel = this.detectHeadingLevel(resolved);
     const nodeType = headingLevel ? "heading" : "paragraph";
 
-    const attrs = headingLevel
-      ? headingExt.parseDocx(resolved as unknown as Record<string, unknown>)
-      : paragraphExt.parseDocx(resolved as unknown as Record<string, unknown>);
+    const attrs =
+      this.nodeParse.get(nodeType)?.(resolved as unknown as Record<string, unknown>) ?? {};
     // See resolveParagraph: derived levels aren't always literals, so stamp level.
     if (headingLevel && attrs.level == null) attrs.level = headingLevel;
 
@@ -1621,7 +1627,7 @@ export class DocxManager {
   }
 
   private resolveTable(tableOpts: Record<string, unknown>): JSONContent {
-    const attrs = tableExt.parseDocx(tableOpts);
+    const attrs = this.nodeParse.get("table")?.(tableOpts) ?? {};
     const rows = (tableOpts.rows ?? []) as Record<string, unknown>[];
     const content: JSONContent[] = [];
 
@@ -1677,7 +1683,8 @@ export class DocxManager {
     let activeSpans = new Map<number, JSONContent>();
 
     for (const row of rows) {
-      const rowAttrs = tableRowExt.parseDocx(row as Partial<TableRowOptions>);
+      const rowAttrs =
+        this.nodeParse.get("tableRow")?.(row as unknown as Record<string, unknown>) ?? {};
       // gridAfter/widthAfter are rebuilt as trailing placeholder cells below
       // (PM requires every row's cell-span sum to equal the column count, so a
       // gridAfter row needs explicit empty cells or fixTables inserts the filler
@@ -1709,9 +1716,10 @@ export class DocxManager {
         }
 
         const isHeader = row.tableHeader as boolean;
-        const cellAttrs = isHeader
-          ? tableHeaderExt.parseDocx(cell as Partial<TableCellOptions>)
-          : tableCellExt.parseDocx(cell as Partial<TableCellOptions>);
+        const cellAttrs =
+          this.nodeParse.get(isHeader ? "tableHeader" : "tableCell")?.(
+            cell as unknown as Record<string, unknown>,
+          ) ?? {};
 
         // `rowspan` (recovered below) drives compile-time vMerge — drop the
         // OOXML marker so it doesn't round-trip back verbatim.
@@ -2033,43 +2041,21 @@ export class DocxManager {
   private resolveMarks(opts: RunOptions): JSONContent["marks"] {
     const marks: NonNullable<JSONContent["marks"]> = [];
 
-    if (opts.bold) marks.push({ type: "bold" });
-    if (opts.italic) marks.push({ type: "italic" });
-    if (opts.underline) marks.push({ type: "underline" });
-    if (opts.strike) {
-      const strikeAttrs = strikeExt.parseDocx(opts);
-      marks.push({ type: "strike", attrs: { doubleStrike: strikeAttrs.doubleStrike ?? null } });
-    }
-    if (opts.subScript) marks.push({ type: "subscript" });
-    if (opts.superScript) marks.push({ type: "superscript" });
-    if (opts.highlight) marks.push({ type: "highlight", attrs: { color: opts.highlight } });
-
-    if (opts.style === "CodeChar") {
-      marks.push({ type: "code" });
-    }
-
-    const textStyleAttrs = textStyleExt.parseDocx(opts);
-    // parseDocx passes RunStylePropertiesOptions through verbatim (size/color/font/
-    // characterSpacing/rightToLeft/…). The `code` mark is carried by rStyle
-    // "CodeChar" (resolved above) and renders Consolas via its own font — drop
-    // that font from text-style attrs to avoid duplication. color normalization
-    // happens in renderHTML via normalizeColorToHex.
-    if (opts.style === "CodeChar") {
-      delete textStyleAttrs.font;
-      // CodeChar is carried by the `code` mark above; don't also stamp it as a
-      // textStyle styleId (would double-apply the character style on compile).
-      delete textStyleAttrs.styleId;
-    }
-
-    if (Object.keys(textStyleAttrs).length > 0) {
-      marks.push({ type: "textStyle", attrs: textStyleAttrs });
+    // Each mark extension's parseDocx returns its attrs, or null when the run
+    // does not carry the mark. The code/textStyle coupling (rStyle "CodeChar"
+    // belongs to `code`; Consolas font and the styleId are skipped inside
+    // textStyle.parseDocx) is handled within those extensions.
+    for (const { name, parse } of this.markParse) {
+      const attrs = parse(opts);
+      if (attrs === null) continue;
+      marks.push(Object.keys(attrs).length ? { type: name, attrs } : { type: name });
     }
 
     return marks.length > 0 ? marks : undefined;
   }
 
   private resolveImage(imageOpts: Record<string, unknown>): JSONContent {
-    const attrs = imageExt.parseDocx(imageOpts);
+    const attrs = this.nodeParse.get("image")?.(imageOpts) ?? {};
 
     // Image data → data URL (encodeBase64 handles platform dispatch + stack guard).
     const data = imageOpts.data as Uint8Array | undefined;
@@ -2194,7 +2180,14 @@ function headingLevelFromName(name: string | undefined): number | undefined {
 
 // ── Standalone functions (backward compat) ──
 
-const defaultManager = new DocxManager();
+const defaultManager = new DocxManager(docxExtensions);
+
+/** Resolve a DocxManager for a conversion call: the shared default singleton
+ *  when no extensions are given, or a fresh instance bound to custom extensions
+ *  so user-supplied marks/nodes plug into compile/resolve without a fork. */
+function getDocxManager(extensions?: Extensions): DocxManager {
+  return extensions ? new DocxManager(extensions) : defaultManager;
+}
 
 /**
  * Parse a DOCX file into Tiptap JSON (runtime model).
@@ -2202,8 +2195,11 @@ const defaultManager = new DocxManager();
  * Combines @office-open/docx's `parseDocument` (DOCX binary → DocumentOptions)
  * with `DocxManager.resolve` (DocumentOptions → Tiptap JSON).
  */
-export function parseDOCX(data: Parameters<typeof parseDocument>[0]): JSONContent {
-  return defaultManager.resolve(parseDocument(data));
+export function parseDOCX(
+  data: Parameters<typeof parseDocument>[0],
+  extensions?: Extensions,
+): JSONContent {
+  return getDocxManager(extensions).resolve(parseDocument(data));
 }
 
 /**
@@ -2233,6 +2229,12 @@ export interface DocxGenerateOptions<T extends OutputType = "nodebuffer"> {
    * exclusive, so specifying `externalStyles` drops the compiled `styles`.
    */
   document?: Omit<Partial<DocumentOptions>, "sections" | "numbering">;
+  /**
+   * Extension list used to build the conversion registry (default:
+   * `docxExtensions`). Pass `[...docxExtensions, MyMark]` to plug a custom
+   * mark/node into compile/resolve via its renderDocx/parseDocx hooks.
+   */
+  extensions?: Extensions;
 }
 
 /**
@@ -2271,11 +2273,14 @@ export async function generateDOCX<T extends OutputType = "nodebuffer">(
   json: JSONContent,
   options?: DocxGenerateOptions<T>,
 ): Promise<OutputByType[T]> {
-  const { prepare = true, packer, document } = options ?? {};
+  const { prepare = true, packer, document, extensions } = options ?? {};
   if (prepare !== false) {
     await prepareDocument(json, prepare === true ? undefined : prepare);
   }
-  return generateDocument(applyDocumentOptions(compileDocument(json), document), packer);
+  return generateDocument(
+    applyDocumentOptions(compileDocument(json, extensions), document),
+    packer,
+  );
 }
 
 /**
@@ -2289,8 +2294,11 @@ export function generateDOCXSync<T extends OutputType = "nodebuffer">(
   json: JSONContent,
   options?: DocxGenerateOptions<T>,
 ): OutputByType[T] {
-  const { packer, document } = options ?? {};
-  return generateDocumentSync(applyDocumentOptions(compileDocument(json), document), packer);
+  const { packer, document, extensions } = options ?? {};
+  return generateDocumentSync(
+    applyDocumentOptions(compileDocument(json, extensions), document),
+    packer,
+  );
 }
 
 /**
@@ -2304,23 +2312,26 @@ export async function generateDOCXStream(
   json: JSONContent,
   options?: DocxGenerateOptions,
 ): Promise<ReadableStream<Uint8Array>> {
-  const { prepare = true, packer, document } = options ?? {};
+  const { prepare = true, packer, document, extensions } = options ?? {};
   if (prepare !== false) {
     await prepareDocument(json, prepare === true ? undefined : prepare);
   }
-  return generateDocumentStream(applyDocumentOptions(compileDocument(json), document), packer);
+  return generateDocumentStream(
+    applyDocumentOptions(compileDocument(json, extensions), document),
+    packer,
+  );
 }
 
 /**
  * Convert DocumentOptions (persistence model) to Tiptap JSON (runtime model).
  */
-export function resolveDocument(docOpts: DocumentOptions): JSONContent {
-  return defaultManager.resolve(docOpts);
+export function resolveDocument(docOpts: DocumentOptions, extensions?: Extensions): JSONContent {
+  return getDocxManager(extensions).resolve(docOpts);
 }
 
 /**
  * Convert Tiptap JSON (runtime model) to DocumentOptions (persistence model).
  */
-export function compileDocument(json: JSONContent): DocumentOptions {
-  return defaultManager.compile(json);
+export function compileDocument(json: JSONContent, extensions?: Extensions): DocumentOptions {
+  return getDocxManager(extensions).compile(json);
 }
