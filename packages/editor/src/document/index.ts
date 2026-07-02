@@ -185,17 +185,17 @@ const TEMPLATE = `
       background-color: var(--docen-color-page, #ffffff);
       box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
       position: relative;
-      /* content-visibility:auto is DISABLED here: it skips layout for off-screen
-         pages, but the paginator measures block/row heights by reading the DOM
-         (measureFlatItems — Pretext covers text blocks; table rows still use
-         getBoundingClientRect). Reading a rect on a cv:auto-skipped page returns
-         a placeholder/0, NOT a forced layout, so reflow measures a different
-         layout every round and never converges — it re-flows ~1.5s/round
-         indefinitely (verified on a 1000+ page doc). Re-enable only once row
-         measurement is deterministic (Pretext) or reflow forces layout while
-         measuring. */
-      /* content-visibility: auto; */
-      /* contain-intrinsic-size: var(--docen-page-width, 210mm) var(--docen-page-min-height, 297mm); */
+      /* content-visibility:auto skips layout/paint for off-screen pages — the
+         main scroll/load perf win for large (1000+ page) docs. Safe now because
+         the paginator no longer reads page DOM for its overflow basis: reflow
+         packs against sectionContentDims(section).height (deterministic,
+         per-section), and block/row heights are Pretext/model-based (domHeightOf
+         only hits hidden passthrough leaves = 0). The page is a fixed-height
+         sheet, so per-page contain-intrinsic-size (page-node renderHTML) equals
+         the real box and the skipped-page rect matches the laid-out rect → reflow
+         still converges. Print forces visible (@media print below); find-in-page,
+         selection, and IME keep working — DOM nodes stay, only layout is skipped. */
+      content-visibility: auto;
     }
     /* A wrapNone floating drawing (image / wpg group) anchored to its paragraph
        (verticalPosition.relative = paragraph, the OOXML default) renders

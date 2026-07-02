@@ -43,6 +43,13 @@ function pageGeometryStyles(sp: SectionPropertiesOptions | null | undefined): st
     // so width/height here are the VISUAL paper edges.
     if (dims.width > 0) styles.push(`width:${twipsToMm(dims.width)}`);
     if (dims.height > 0) styles.push(`height:${twipsToMm(dims.height)}`);
+    // Placeholder size while content-visibility:auto skips an off-screen page's
+    // layout/paint. The page is a fixed-height sheet, so this equals the real
+    // box; per-page (not a global CSS var) so a landscape section reserves its
+    // own size and the skipped-page rect matches the laid-out rect (reflow
+    // converges — it packs against sectionContentDims, never this placeholder).
+    if (dims.width > 0 && dims.height > 0)
+      styles.push(`contain-intrinsic-size:${twipsToMm(dims.width)} ${twipsToMm(dims.height)}`);
   }
   const padding = sectionMarginCss(sp?.page?.margin);
   if (padding) styles.push(padding);
