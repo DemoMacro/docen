@@ -46,7 +46,7 @@ import * as taskItemExt from "../extensions/task-item";
 import * as textStyleExt from "../extensions/text-style";
 import { alignmentFromCss } from "../extensions/utils";
 import { prepareDocument, type PrepareStep } from "./prepare";
-import { indexParagraphStyles } from "./styles";
+import { indexParagraphStyles, mergeTableStyleProps } from "./styles";
 
 export type { DocumentOptions };
 
@@ -1589,53 +1589,6 @@ export class DocxManager {
     return node;
   }
 
-  /** Resolve a table style's effective table-level properties (tblBorders,
-   *  tblCellMar) by walking its basedOn chain (root first, child overrides).
-   *  office-open's parseDocument does NOT merge the referenced <w:tblStyle> into
-   *  table.borders/cellMargin — they reflect only the table's own <w:tblPr> — so
-   *  a "Table Grid" table (borders defined in the style) needs this to render
-   *  its grid. Returns empty when the style is absent or unknown. */
-  private resolveTableStyleProps(styleId: string | null | undefined): {
-    borders?: Record<string, BorderOptions>;
-    cellMargin?: NonNullable<TableCellOptions["margins"]>;
-  } {
-    if (!styleId || !this.resolveStyles?.tableStyles) return {};
-    const tableStyles = this.resolveStyles.tableStyles as unknown as Array<{
-      id?: string;
-      basedOn?: string;
-      table?: {
-        borders?: Record<string, BorderOptions>;
-        cellMargin?: NonNullable<TableCellOptions["margins"]>;
-      } | null;
-    }>;
-    const byId = new Map(tableStyles.map((t) => [t.id ?? "", t]));
-    const chain: typeof tableStyles = [];
-    const visited = new Set<string>();
-    let cur: string | undefined = styleId ?? undefined;
-    while (cur && !visited.has(cur)) {
-      visited.add(cur);
-      const s = byId.get(cur);
-      if (!s) break;
-      chain.unshift(s); // root first → children override below
-      cur = s.basedOn;
-    }
-    let borders: Record<string, BorderOptions> | undefined;
-    let cellMargin: NonNullable<TableCellOptions["margins"]> | undefined;
-    for (const s of chain) {
-      const t = s.table;
-      if (!t) continue;
-      if (t.borders) borders = t.borders;
-      if (t.cellMargin) cellMargin = t.cellMargin;
-    }
-    const out: {
-      borders?: Record<string, BorderOptions>;
-      cellMargin?: NonNullable<TableCellOptions["margins"]>;
-    } = {};
-    if (borders) out.borders = borders;
-    if (cellMargin) out.cellMargin = cellMargin;
-    return out;
-  }
-
   private resolveTable(tableOpts: Record<string, unknown>): JSONContent {
     const attrs = tableExt.parseDocx(tableOpts);
     const rows = (tableOpts.rows ?? []) as Record<string, unknown>[];
@@ -1646,7 +1599,10 @@ export class DocxManager {
     // a "Table Grid" table (borders defined in the style) would render no grid
     // without this. The table's own real borders win; the style fills the gap
     // when the table's are all none/nil.
-    const styleProps = this.resolveTableStyleProps((tableOpts.style as string | undefined) ?? null);
+    const styleProps = mergeTableStyleProps(
+      this.resolveStyles?.tableStyles,
+      (tableOpts.style as string | undefined) ?? null,
+    );
     if (styleProps.borders && allBordersNone(tableOpts.borders)) {
       tableOpts = { ...tableOpts, borders: styleProps.borders };
     }

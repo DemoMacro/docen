@@ -227,6 +227,51 @@ function mergeStyleChain(
   return { run, paragraph };
 }
 
+/** Resolve a table style's effective table-level properties (tblBorders,
+ *  tblCellMar) by walking its basedOn chain (root first, child overrides) —
+ *  the table-style counterpart of mergeStyleChain. office-open's parseDocument
+ *  does NOT merge the referenced <w:tblStyle> into table.borders/cellMargin
+ *  (they reflect only the table's own <w:tblPr>), so a "Table Grid" table whose
+ *  borders live in the style needs this to render its grid. Returns empty when
+ *  the style is absent or unknown. */
+export function mergeTableStyleProps(
+  tableStyles: unknown,
+  styleId: string | null | undefined,
+): { borders?: Record<string, unknown>; cellMargin?: Record<string, unknown> } {
+  if (!styleId || !tableStyles) return {};
+  const styles = tableStyles as Array<{
+    id?: string;
+    basedOn?: string;
+    table?: {
+      borders?: Record<string, unknown>;
+      cellMargin?: Record<string, unknown>;
+    } | null;
+  }>;
+  const byId = new Map(styles.map((t) => [t.id ?? "", t]));
+  const chain: typeof styles = [];
+  const visited = new Set<string>();
+  let cur: string | undefined = styleId ?? undefined;
+  while (cur && !visited.has(cur)) {
+    visited.add(cur);
+    const s = byId.get(cur);
+    if (!s) break;
+    chain.unshift(s); // root first → children override below
+    cur = s.basedOn;
+  }
+  let borders: Record<string, unknown> | undefined;
+  let cellMargin: Record<string, unknown> | undefined;
+  for (const s of chain) {
+    const t = s.table;
+    if (!t) continue;
+    if (t.borders) borders = t.borders;
+    if (t.cellMargin) cellMargin = t.cellMargin;
+  }
+  const out: { borders?: Record<string, unknown>; cellMargin?: Record<string, unknown> } = {};
+  if (borders) out.borders = borders;
+  if (cellMargin) out.cellMargin = cellMargin;
+  return out;
+}
+
 // ── Quick Styles gallery selection ──────────────────────────────────────────
 
 /** A gallery-ready paragraph-style entry for the Styles combobox. */
@@ -357,9 +402,12 @@ function indexCharacterRunStyles(styles: StylesOptions): Map<string, Record<stri
   return byId;
 }
 
-/** Resolve one node's style inheritance: a paragraph/heading absorbs its
+/** Resolve one node's style inheritance. A paragraph/heading absorbs its
  *  styleId's basedOn chain (paragraph properties + the default `run`); a
- *  textStyle mark absorbs its character style's run. Explicit attrs/marks
+ *  textStyle mark absorbs its character style's run. Other nodes (table,
+ *  tableRow, tableCell, image, …) are NOT baked here — they only recurse into
+ *  `content`, so a cell's paragraphs still get baked (see inlineStyles for why
+ *  tables and docDefaults are intentionally out of scope). Explicit attrs/marks
  *  override the inherited values; styleId is preserved. Pure JSON — no DOM, no
  *  marks pushed onto text. */
 function resolveNode(
@@ -391,20 +439,33 @@ function resolveNode(
 }
 
 /**
- * Inline a document's styles into each node's attrs — a self-contained
- * JSONContent that round-trips and renders without the styles context. A
- * paragraph/heading absorbs its styleId's `basedOn` chain (paragraph properties
- * + the paragraph's default `run`); a textStyle mark absorbs its character
- * style's run. Explicit attrs/marks always override the inherited values;
- * styleId is preserved (the semantic reference is kept). The style definitions
- * themselves are untouched — only properties are copied onto nodes.
+ * Bake a document's named styles into each node's attrs so a snippet of
+ * JSONContent can be lifted into ANOTHER document (DB storage → extract →
+ * recombine) without its source styles.xml. The use case is fragment
+ * recombination, not editor rendering — the editor never calls this (it
+ * renders via stylesToCss global CSS); this is an offline util for
+ * self-contained JSON.
  *
+ * Baking is intentionally PARTIAL:
+ *  - A paragraph/heading or textStyle mark WITH a styleId absorbs its basedOn
+ *    chain, so a "Heading 1" stays styled across documents even when the
+ *    target lacks that style. styleId is kept as the semantic reference; the
+ *    baked props are the rendering fallback.
+ *  - A node WITHOUT a styleId (body text, a default table) is LEFT AS-IS so it
+ *    follows the TARGET document's body style after recombination. Baking
+ *    docDefaults here would freeze font/size onto every body paragraph and
+ *    defeat "change one body style to restyle them all".
+ *  - Tables are NOT baked here: resolveTable already merged the table style
+ *    (borders/cellMargin) and pushed insideH/V onto cells at parse time, so a
+ *    table's JSON is already self-contained. stylesToCss cannot render the
+ *    interior grid (CSS border-collapse puts it on cells), so that bake MUST
+ *    stay in resolveDocument — moving it here would regress the editor.
+ *
+ * Explicit attrs/marks always override the baked values; the style definitions
+ * themselves are untouched. Pure JSON — no DOM, no marks pushed onto text.
  * Styles default to the document's own `attrs.styles` (the round-tripped
- * styles.xml model carried on the doc node), so `inlineStyles(doc)` needs no
- * second argument; pass `styles` explicitly to override. Use cases:
- * cross-document paste (the snippet carries its styling) and self-contained
- * export. The editor still renders via global styles — this only merges JSON
- * properties.
+ * styles.xml model on the doc node), so `inlineStyles(doc)` needs no second
+ * argument; pass `styles` to override.
  */
 export function inlineStyles(json: JSONContent, styles?: StylesOptions | null): JSONContent {
   // Prefer explicitly passed styles; fall back to the document's own attrs.styles
