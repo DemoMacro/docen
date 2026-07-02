@@ -523,8 +523,20 @@ export class DocxManager {
     > | null;
     const rows: Record<string, unknown>[] = [];
 
-    // Track active vertical spans from previous rows
-    let activeSpans: { colStart: number; colspan: number; remainingRows: number }[] = [];
+    // Track active vertical spans from previous rows. `borders` carries the
+    // restart cell's tcBorders so a rebuilt continuation cell (vMerge continue)
+    // re-emits them: Word draws the last continuation's bottom as the merged
+    // region's bottom edge and each continuation's left/right as column
+    // separators. Without it the region's borders collapse to the table-level
+    // default (often "none") after a docx→json→docx round-trip — the merged
+    // cells then render with missing borders.
+    type ActiveSpan = {
+      colStart: number;
+      colspan: number;
+      remainingRows: number;
+      borders?: unknown;
+    };
+    let activeSpans: ActiveSpan[] = [];
 
     for (const rowNode of node.content ?? []) {
       if (rowNode.type !== "tableRow") continue;
@@ -536,7 +548,7 @@ export class DocxManager {
 
       // Snapshot spans from previous rows for this row
       const currentSpans = [...activeSpans].sort((a, b) => a.colStart - b.colStart);
-      const newSpans: { colStart: number; colspan: number; remainingRows: number }[] = [];
+      const newSpans: ActiveSpan[] = [];
       const compiledCells: Record<string, unknown>[] = [];
 
       let colIdx = 0;
@@ -554,6 +566,9 @@ export class DocxManager {
           compiledCells.push({
             verticalMerge: "continue",
             columnSpan: span.colspan,
+            // Inherit the restart cell's tcBorders so the merged region keeps
+            // its edges (see ActiveSpan above).
+            ...(span.borders ? { borders: span.borders } : {}),
             children: [{ paragraph: "" }],
           });
           colIdx += span.colspan;
@@ -567,7 +582,12 @@ export class DocxManager {
           if (rs > 1) {
             delete cell.rowSpan;
             cell.verticalMerge = "restart";
-            newSpans.push({ colStart: colIdx, colspan: cs, remainingRows: rs - 1 });
+            newSpans.push({
+              colStart: colIdx,
+              colspan: cs,
+              remainingRows: rs - 1,
+              borders: cell.borders,
+            });
           }
 
           compiledCells.push(cell);
