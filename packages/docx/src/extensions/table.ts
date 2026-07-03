@@ -16,6 +16,7 @@ import {
   bordersFromElement,
   shadingFromElement,
   shadingToCss,
+  tableFloatToCss,
   twipToCss,
   renderBorderCSS,
 } from "./utils";
@@ -328,13 +329,22 @@ export const Table = BaseTable.extend({
     const attrs = { ...HTMLAttributes };
     const styles: string[] = [];
 
-    const align = alignmentToCss(a.alignment as string | null | undefined);
-    if (align === "center") {
-      styles.push("margin-left:auto", "margin-right:auto");
-    } else if (align === "right") {
-      styles.push("margin-left:auto", "margin-right:0");
-    } else if (align) {
-      styles.push("margin-left:0", "margin-right:auto");
+    // A floating table (w:tblpPr) renders as CSS float + margins. When float is
+    // active it owns the table's margins and width, so the alignment margins and
+    // the default 100% width stand down below. When float degrades to [] (page/
+    // margin anchor, or center/inside/outside), the table renders as a normal
+    // block and alignment/width apply as before.
+    const floatStyles = tableFloatToCss(a.float);
+
+    if (floatStyles.length === 0) {
+      const align = alignmentToCss(a.alignment as string | null | undefined);
+      if (align === "center") {
+        styles.push("margin-left:auto", "margin-right:auto");
+      } else if (align === "right") {
+        styles.push("margin-left:auto", "margin-right:0");
+      } else if (align) {
+        styles.push("margin-left:0", "margin-right:auto");
+      }
     }
 
     if (a.layout === "fixed") styles.push("table-layout:fixed");
@@ -356,13 +366,13 @@ export const Table = BaseTable.extend({
           styles.push(`width:${numSize / 50}%`);
         }
       } else if (w.type === "auto") {
-        styles.push("width:100%");
+        styles.push(floatStyles.length ? "width:auto" : "width:100%");
       } else if (numSize != null) {
         const css = twipToCss(numSize);
         if (css) styles.push(`width:${css}`);
       }
     } else {
-      styles.push("width:100%");
+      styles.push(floatStyles.length ? "width:auto" : "width:100%");
     }
     // Cap dxa tables at the page text column. A tblW in twips can exceed the
     // content area (Word's table-width vs grid-column-sum mismatch — e.g. a
@@ -431,6 +441,10 @@ export const Table = BaseTable.extend({
     );
     const hasGrid = tblGridPx.some((w) => w > 0);
     const gridPx = hasGrid ? tblGridPx : hasCellWidths ? cellPx : tblGridPx;
+
+    // Float styles last so they win any same-property duel with the alignment
+    // margins above (which only run on the floatStyles.length === 0 path).
+    for (const s of floatStyles) styles.push(s);
 
     if (styles.length > 0) attrs.style = styles.join(";");
     if (gridPx.some((w) => w > 0)) {

@@ -6,6 +6,7 @@ import type {
   ShadingAttributesProperties,
   SpacingProperties,
   TableCellOptions,
+  TableFloatOptions,
   TableWidthProperties,
 } from "@office-open/docx";
 
@@ -420,11 +421,19 @@ export function floatingToStyles(floating: unknown, src?: string, width?: number
   const vOff = f.verticalPosition?.offset;
 
   if (wrapType === 0) {
-    // wrapNone: in front of/behind text — text does not flow around it. Anchor
-    // at the EMU offset (without top/left an absolutely-positioned box collapses
-    // to its inline origin); z-index lifts it above/below the text layer.
+    // wrapNone: in front of/behind text — text does not flow around it. Pin to
+    // the page box (.docen-page is position:relative) at the EMU offset, or at
+    // the alignment when there is no offset: align center → left:50% +
+    // translateX so a page/margin-anchored drawing centers instead of collapsing
+    // to its inline origin. z-index lifts it above/below the text layer.
     styles.push("position:absolute");
-    if (hOff != null) styles.push(`left:${(hOff / EMU_PER_PX).toFixed(1)}px`);
+    if (hOff != null) {
+      styles.push(`left:${(hOff / EMU_PER_PX).toFixed(1)}px`);
+    } else {
+      const hAlign = f.horizontalPosition?.align;
+      if (hAlign === "center") styles.push("left:50%", "transform:translateX(-50%)");
+      else if (hAlign === "right") styles.push("right:0");
+    }
     if (vOff != null) styles.push(`top:${(vOff / EMU_PER_PX).toFixed(1)}px`);
   } else if (wrapType !== 3 && hOff != null && width != null) {
     // square/tight/through with an explicit offset: the image must float so text
@@ -492,6 +501,96 @@ export function floatAnchorScope(floating: unknown): "paragraph" | "page" {
   const vRel = f?.verticalPosition?.relative;
   if (vRel === "page" || vRel === "margin" || vRel === "column") return "page";
   return "paragraph";
+}
+
+// ── Floating table (w:tblpPr) rendering ──
+
+/**
+ * Render a table's float anchor (w:tblpPr → TableFloatOptions) to CSS.
+ *
+ * Unlike a drawing's Floating (wp:anchor, EMU offsets, wrap types), a floating
+ * table carries no wrap type — Word's "text wrapping" around a table is plain
+ * CSS float with margins. Twips (not EMU) throughout: tblpX/Y and the fromText
+ * gaps are dxa.
+ *
+ * Two render modes:
+ *  - text-anchored wrap (horizontalAnchor=text) → CSS float + margins, so body
+ *    text flows beside the table. tblpX → margin on the float side; fromText →
+ *    the opposite side + top/bottom (mirrors floatingToStyles so the offset and
+ *    the wrap gap never compete for the same margin edge).
+ *  - page/margin anchor → position:absolute pinned to the page box, floating at
+ *    the offset/alignment like Word's page-anchored table. .docen-page is
+ *    position:relative and its padding box is the physical page (no border), so
+ *    top:0/left:0 matches OOXML's page origin; symmetric page padding makes
+ *    left:50% the content-box center too, so a margin anchor centers alike.
+ *  - text-anchored center/inside/outside have no CSS float equivalent (and
+ *    inside/outside need odd/even pages the editor lacks) → degraded to [].
+ *    attrs still round-trip byte-faithful via renderDocx/parseDocx passthrough.
+ *  - overlap (neverOverlap) has no CSS float equivalent; ignored.
+ */
+export function tableFloatToCss(float: unknown): string[] {
+  const f = float as TableFloatOptions | null | undefined;
+  if (!f) return [];
+
+  const hAnchorPage = f.horizontalAnchor === "page" || f.horizontalAnchor === "margin";
+  const vAnchorPage = f.verticalAnchor === "page" || f.verticalAnchor === "margin";
+
+  // page/margin anchor → position:absolute within the page box (see JSDoc). The
+  // table detaches from the text flow and floats at the offset/alignment.
+  if (hAnchorPage || vAnchorPage) {
+    const styles: string[] = ["position:absolute"];
+    if (vAnchorPage && f.absoluteVerticalPosition != null) {
+      const top = twipToCss(f.absoluteVerticalPosition);
+      if (top) styles.push(`top:${top}`);
+    }
+    if (hAnchorPage) {
+      const side = f.relativeHorizontalPosition;
+      if (f.absoluteHorizontalPosition != null) {
+        const left = twipToCss(f.absoluteHorizontalPosition);
+        if (left) styles.push(`left:${left}`);
+      } else if (side === "center") {
+        styles.push("left:50%", "transform:translateX(-50%)");
+      } else if (side === "right") {
+        styles.push("right:0");
+      } else {
+        styles.push("left:0"); // left/inside/outside → best-effort left edge
+      }
+    }
+    return styles;
+  }
+
+  // text-anchored wrap — center/inside/outside have no CSS float equivalent
+  // (inside/outside also need odd/even pages the editor lacks).
+  const side = f.relativeHorizontalPosition;
+  if (side === "center" || side === "inside" || side === "outside") return [];
+
+  const floatRight = side === "right";
+  const styles: string[] = [floatRight ? "float:right" : "float:left"];
+
+  // Absolute horizontal offset (tblpX, twips) — on the float side. Usually only
+  // set for left floats (right floats use tblpXSpec=right with no tblpX).
+  if (f.absoluteHorizontalPosition != null) {
+    const off = twipToCss(f.absoluteHorizontalPosition);
+    if (off) styles.push(floatRight ? `margin-right:${off}` : `margin-left:${off}`);
+  }
+
+  // fromText gaps (twips) — opposite the float side + top/bottom, so they never
+  // clash with the offset margin above.
+  const gapSide = floatRight ? f.leftFromText : f.rightFromText;
+  if (gapSide != null) {
+    const m = twipToCss(gapSide);
+    if (m) styles.push(floatRight ? `margin-left:${m}` : `margin-right:${m}`);
+  }
+  if (f.topFromText != null) {
+    const m = twipToCss(f.topFromText);
+    if (m) styles.push(`margin-top:${m}`);
+  }
+  if (f.bottomFromText != null) {
+    const m = twipToCss(f.bottomFromText);
+    if (m) styles.push(`margin-bottom:${m}`);
+  }
+
+  return styles;
 }
 
 // ── Style rendering (consume nested office-open attrs) ──
