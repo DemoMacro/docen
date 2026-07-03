@@ -26,6 +26,7 @@ Prerequisites: Node.js 18+, pnpm 9+.
 
 ```
 packages/
+  docen/    docen          (all-in-one aggregate entry — re-exports @docen/docx + @docen/editor)
   editor/   @docen/editor  (assembly: Fluent UI shell + @docen/docx → <docen-document>; owns pagination)
   docx/     @docen/docx    (Tiptap DOCX editor + converters + custom extensions)
 ```

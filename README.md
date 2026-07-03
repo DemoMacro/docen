@@ -9,11 +9,11 @@
 
 ## Packages
 
-| Package                                      | Version                                            | Description                                                            |
-| -------------------------------------------- | -------------------------------------------------- | ---------------------------------------------------------------------- |
-| [docen](./packages/docen/README.md)          | ![npm](https://img.shields.io/npm/v/docen)         | Universal converter — unified JSON API for Markdown, HTML, and DOCX    |
-| [@docen/docx](./packages/docx/README.md)     | ![npm](https://img.shields.io/npm/v/@docen/docx)   | Tiptap DOCX editor + converters, powered by @office-open/docx          |
-| [@docen/editor](./packages/editor/README.md) | ![npm](https://img.shields.io/npm/v/@docen/editor) | Assembly layer — Fluent UI shell + docx engine into `<docen-document>` |
+| Package                                      | Version                                            | Description                                                                              |
+| -------------------------------------------- | -------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| [docen](./packages/docen/README.md)          | ![npm](https://img.shields.io/npm/v/docen)         | All-in-one — headless Markdown/HTML/DOCX conversion + the full `<docen-document>` editor |
+| [@docen/editor](./packages/editor/README.md) | ![npm](https://img.shields.io/npm/v/@docen/editor) | Assembly layer — Fluent UI shell + docx engine into `<docen-document>`                   |
+| [@docen/docx](./packages/docx/README.md)     | ![npm](https://img.shields.io/npm/v/@docen/docx)   | Tiptap DOCX editor + converters, powered by @office-open/docx                            |
 
 ## Quick Start
 
@@ -37,6 +37,8 @@ const docx = await generateDOCX(doc);
 const doc2 = parseMarkdown("# Title\n\nHello World");
 const html = generateHTML(doc2);
 ```
+
+> 💡 The `docen` package also bundles the full engine and editor — `import { createDocxEditor } from "docen/docx"` or `import { DocenDocument } from "docen/editor"` — so one dependency covers headless conversion, the engine, and the web component.
 
 ### DOCX Editor (`@docen/docx`)
 
@@ -117,8 +119,8 @@ We welcome contributions! See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full 
 
 - 📫 [Report Issues](https://github.com/DemoMacro/docen/issues)
 - 📚 [docen Documentation](./packages/docen/README.md)
-- 📚 [@docen/docx Documentation](./packages/docx/README.md)
 - 📚 [@docen/editor Documentation](./packages/editor/README.md)
+- 📚 [@docen/docx Documentation](./packages/docx/README.md)
 
 ## License
 

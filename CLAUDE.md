@@ -6,10 +6,10 @@ You are a senior TypeScript developer working on **docen**.
 
 **docen** is a monorepo for online Office editors.
 
+- **`docen`** — all-in-one aggregate entry: re-exports `@docen/docx` (converters/engine, via `docen/docx`) and `@docen/editor` (`<docen-document>` via `docen/editor`). One dependency covers both headless conversion and the full editor; the root entry stays side-effect-free so converter-only imports remain tree-shakable.
 - **`@docen/editor`** — assembly layer: bundles a Fluent UI shell (ribbon, workspace, panes) with the `@docen/docx` Tiptap engine into turnkey web-component super-components like `<docen-document>`; owns C-route pagination.
 - **`@docen/docx`** — the engine: Tiptap DOCX editor + converters + custom extensions. No UI.
 - **`@office-open/*`** — OOXML parse/generate APIs (external).
-- **`docen`** — universal converter (Markdown/HTML/DOCX).
 
 `pptx` (LeaferJS) and `xlsx` (RevoGrid) are planned future editors — not yet implemented (`packages/editor/src/` has `presentation.ts`/`workbook.ts` stubs).
 

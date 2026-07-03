@@ -1,23 +1,28 @@
 {
   "name": "docen",
   "version": "0.3.5",
-  "description": "Universal document format converter providing unified API for seamless transformation between Markdown, HTML, and DOCX formats. Built on TipTap/ProseMirror ecosystem with comprehensive TypeScript support.",
+  "description": "Universal document toolkit — one package for headless Markdown/HTML/DOCX conversion AND the full docen web-component editor. Re-exports @docen/docx (converters + engine) and @docen/editor (<docen-document>).",
   "keywords": [
+    "components",
     "converter",
     "docen",
     "document",
     "docx",
+    "editor",
     "format-conversion",
     "html",
     "markdown",
     "microsoft-word",
     "office",
+    "pagination",
     "prosemirror",
     "rich-text",
     "tiptap",
     "typescript",
     "unified-api",
-    "word"
+    "web-components",
+    "word",
+    "wysiwyg"
   ],
   "homepage": "https://github.com/DemoMacro/docen#readme",
   "bugs": {
@@ -37,12 +42,23 @@
     "dist"
   ],
   "type": "module",
+  "sideEffects": [
+    "./dist/editor.mjs"
+  ],
   "main": "dist/index.mjs",
   "types": "dist/index.d.mts",
   "exports": {
     ".": {
       "types": "./dist/index.d.mts",
       "import": "./dist/index.mjs"
+    },
+    "./docx": {
+      "types": "./dist/docx.d.mts",
+      "import": "./dist/docx.mjs"
+    },
+    "./editor": {
+      "types": "./dist/editor.d.mts",
+      "import": "./dist/editor.mjs"
     }
   },
   "scripts": {
@@ -51,6 +67,7 @@
     "prepack": "pnpm build"
   },
   "dependencies": {
-    "@docen/docx": "workspace:*"
+    "@docen/docx": "workspace:*",
+    "@docen/editor": "workspace:*"
   }
 }

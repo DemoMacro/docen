@@ -4,13 +4,13 @@
 ![npm downloads](https://img.shields.io/npm/dw/docen)
 ![npm license](https://img.shields.io/npm/l/docen)
 
-> Universal document format converter providing unified API for seamless transformation between Markdown, HTML, and DOCX formats.
+> Universal document toolkit — one package for headless Markdown/HTML/DOCX conversion AND the full `<docen-document>` web-component editor (via the `docen/editor` subpath).
 
 ## Features
 
 - 🔄 **Universal Format Support** - Seamless conversion between Markdown, HTML, and DOCX
 - 🎯 **Unified API** - Consistent, intuitive interface across all format conversions
-- 📦 **All-in-One Package** - Single dependency for all your document conversion needs
+- 📦 **All-in-One Package** - Single dependency for both headless conversion AND the full `<docen-document>` editor (via `docen/editor`)
 - 🔧 **Built on TipTap** - Powered by the robust TipTap/ProseMirror ecosystem
 - 💪 **TypeScript-First** - Full type safety with comprehensive TypeScript support
 - ⚡ **Zero Configuration** - Works out of the box with smart defaults
@@ -86,6 +86,22 @@ const md = "# Title\n\nContent...";
 const doc2 = parseMarkdown(md);
 const htmlContent = generateHTML(doc2);
 ```
+
+### Full Editor (via `docen/editor`)
+
+The same `docen` package also re-exports the turnkey web-component editor. Import from the `docen/editor` subpath to register `<docen-document>` and apply a theme:
+
+```html
+<docen-document id="doc" filename="Welcome.docx"></docen-document>
+
+<script type="module">
+  import { registerComponents, applyTheme } from "docen/editor";
+  registerComponents();
+  applyTheme("light");
+</script>
+```
+
+> The editor lives on a subpath so that pure-converter imports (`import { parseDOCX } from "docen"`) stay tree-shakable and never pull in the Fluent UI shell.
 
 ## API Reference
 
@@ -294,9 +310,10 @@ All conversions go through TipTap JSON as the intermediate format, ensuring cons
 
 ## Under the Hood
 
-`docen` is a thin facade over [`@docen/docx`](../docx), the Tiptap DOCX editor package:
+`docen` ships three entry points: the **root** re-exports the high-level converters; **`docen/docx`** exposes the full engine (`createDocxEditor`, `docxExtensions`, resolve/compile/prepare, styles); **`docen/editor`** exposes the `<docen-document>` web component. It builds on:
 
-- **@docen/docx** - DOCX / HTML / Markdown converters built on the DocxManager architecture
+- **@docen/docx** - DOCX / HTML / Markdown converters built on the DocxManager architecture (full surface via `docen/docx`)
+- **@docen/editor** - Fluent UI shell + docx engine → `<docen-document>` (exposed via the `docen/editor` subpath)
 - **@office-open/docx** - Native OOXML parse/generate (`parseDocument`, `generateDocument`, `patchDocument`)
 - **@tiptap/html** / **@tiptap/markdown** - HTML and Markdown serialization (via @docen/docx)
 

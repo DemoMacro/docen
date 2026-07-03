@@ -33,6 +33,9 @@ importers:
       '@docen/docx':
         specifier: workspace:*
         version: link:../docx
+      '@docen/editor':
+        specifier: workspace:*
+        version: link:../editor
 
   packages/docx:
     dependencies:

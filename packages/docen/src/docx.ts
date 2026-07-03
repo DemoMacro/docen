@@ -1,14 +1,9 @@
-// DOCX pipeline re-exported from @docen/docx.
+// `docen/docx` subpath — full facade over @docen/docx, the Tiptap DOCX engine.
 //
-// parseDOCX / generateDOCX are high-level JSONContent ↔ DOCX binary converters
-// (mirroring parseHTML/generateHTML). generateDOCX defaults to running
-// prepareDocument (http image embedding) and carries outputType as its generic T
-// via `packer.type`; generateDOCXSync / generateDOCXStream cover sync + streaming.
-export {
-  generateDOCX,
-  generateDOCXStream,
-  generateDOCXSync,
-  parseDOCX,
-  patchDOCX,
-} from "@docen/docx";
-export type { DocxGenerateOptions, DocxPatchContent, DocxPatchOptions } from "@docen/docx";
+// Re-exports everything: the high-level converters (parseDOCX/generateDOCX,
+// parseHTML/generateHTML, parseMarkdown/generateMarkdown), the editor factory
+// (createDocxEditor, docxExtensions), the model bridge (resolveDocument /
+// compileDocument / prepareDocument), and styles (stylesToCss). Exposed on a
+// subpath so the capability layout is symmetric with `docen/editor`; the
+// package root re-exports only the high-level converters for convenience.
+export * from "@docen/docx";
