@@ -1,6 +1,7 @@
 import { Plugin, TextSelection } from "@tiptap/pm/state";
 
 import { Node } from "../core";
+import type { ParseInlineRule } from "./types";
 
 /**
  * PageBreak — inline atom node for DOCX page breaks (`<w:br w:type="page"/>`).
@@ -22,6 +23,12 @@ import { Node } from "../core";
  * Word's Ctrl+Enter behavior).
  */
 
+// DOCX `<w:br w:type="page"/>` → office-open ParagraphChild `{ pageBreak: true }`.
+export const parseDocxInline: ParseInlineRule = {
+  match: (child) => "pageBreak" in child,
+  convert: () => ({ type: "pageBreak" }),
+};
+
 export const PageBreak = Node.create({
   name: "pageBreak",
   inline: true,
@@ -39,6 +46,8 @@ export const PageBreak = Node.create({
     // pseudo-element). The DOCX payload stays <w:br w:type="page"/>.
     return ["span", { "data-type": "pageBreak", style: "break-after:page" }];
   },
+
+  parseDocxInline,
 
   addProseMirrorPlugins() {
     // The C-route paginator forces a new page after a paragraph CONTAINING a

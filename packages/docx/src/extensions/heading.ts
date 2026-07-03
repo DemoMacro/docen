@@ -1,6 +1,9 @@
+import type { ParagraphOptions, StylesOptions } from "@office-open/docx";
 import type { JSONContent } from "@tiptap/core";
 import { Heading as BaseHeading } from "@tiptap/extension-heading";
 
+import { buildTextBlock, indexParagraphStyles } from "../converters/styles";
+import type { ParseParagraphRule } from "./types";
 import {
   attrNative,
   renderParagraphStyles,
@@ -46,6 +49,74 @@ const HEADING_PARSE_MAP: Record<string, number> = {
   Heading8: 8,
   Heading9: 9,
   Title: 1,
+};
+
+/** Heading level (1-9) from a localized style NAME: "heading 1"/"标题 1" → 1,
+ *  "title" → 1. office-open's built-in names are English ("heading 1"), but
+ *  zh-CN Word labels the same styles "标题 1"; both map to the same level. */
+function headingLevelFromName(name: string | undefined): number | undefined {
+  if (!name) return undefined;
+  const m = /^heading\s+(\d)$/i.exec(name) ?? /^标题\s*(\d)$/.exec(name);
+  if (m) {
+    const lvl = Number(m[1]);
+    if (lvl >= 1 && lvl <= 9) return lvl;
+  }
+  return /^title$/i.test(name) ? 1 : undefined;
+}
+
+/** Heading level (1-9) for a paragraph, or undefined when it isn't a heading.
+ *  DOCX marks a heading several ways, checked in priority order:
+ *  1. office-open lifts a HeadingLevel pStyle ("Heading1".."Title") into `heading`.
+ *  2. An explicit `outlineLevel` (0-8 → 1-9) — Word's outline/TOC key off this
+ *     even without a heading pStyle; the Heading1-9 styles carry outlineLvl 0-8.
+ *  3. A pStyle that names a heading style: directly ("Heading7", which stays on
+ *     `style` because office-open's HeadingLevel type caps at 6), by localized
+ *     NAME ("heading 1"/"标题 1"), or via the `basedOn` chain (a custom style
+ *     "MyTitle" basedOn="Heading1"). `heading` and `style` carry the same pStyle.
+ *  `outlineLevel` is read loosely — office-open's public type omits the field
+ *  even though it round-trips (w:outlineLvl) at runtime. Pure (no `this`):
+ *  resolved + the document styles snapshot are all it reads. */
+export function detectHeadingLevel(
+  resolved: ParagraphOptions,
+  styles: StylesOptions | undefined,
+): number | undefined {
+  if (resolved.heading) {
+    const lvl = HEADING_PARSE_MAP[resolved.heading];
+    if (lvl) return lvl;
+  }
+  const outline = (resolved as { outlineLevel?: number }).outlineLevel;
+  if (typeof outline === "number" && outline >= 0 && outline <= 8) {
+    return outline + 1;
+  }
+  const styleId = resolved.style;
+  if (!styleId || !styles) return undefined;
+  const byId = indexParagraphStyles(styles);
+  const visited = new Set<string>();
+  let curId: string | undefined = styleId;
+  while (curId && !visited.has(curId)) {
+    visited.add(curId);
+    if (HEADING_PARSE_MAP[curId]) return HEADING_PARSE_MAP[curId];
+    const style = byId.get(curId);
+    if (!style) break;
+    const lvl = headingLevelFromName(style.name);
+    if (lvl) return lvl;
+    curId = style.basedOn ?? undefined;
+  }
+  return undefined;
+}
+
+// DOCX heading paragraph → heading node. detectHeadingLevel covers office-open's
+// lifted `heading` literal, an explicit outlineLevel, or a pStyle naming a
+// heading style (directly, by localized name, or via basedOn). The real pStyle
+// still rides on attrs.styleId (heading parseDocx carries resolved.style);
+// buildTextBlock stamps the detected level when parseDocx couldn't derive it.
+export const parseDocxParagraph: ParseParagraphRule = {
+  match: (para, ctx) => detectHeadingLevel(para, ctx.styles) != null,
+  convert: (para, ctx) => {
+    const level = detectHeadingLevel(para, ctx.styles);
+    if (!level) return null;
+    return buildTextBlock("heading", para, ctx, level);
+  },
 };
 
 /** Runtime-only attrs the TableOfContents extension injects on each heading
@@ -247,4 +318,5 @@ export const Heading = BaseHeading.extend({
 
   renderDocx,
   parseDocx,
+  parseDocxParagraph,
 });

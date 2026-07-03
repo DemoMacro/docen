@@ -1,7 +1,11 @@
+import type { ParagraphChild, RunOptions } from "@office-open/docx";
 import { Link as LinkBase, type LinkOptions } from "@tiptap/extension-link";
 import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
 
+import { mergeTextNodes } from "../converters/styles";
+import type { JSONContent } from "../core";
 import { scrollCaretToTop } from "./scroll";
+import type { ParseInlineRule, ResolveContext } from "./types";
 
 /**
  * Link — overrides {@link LinkBase}'s click behavior to match MS Word: a plain
@@ -55,7 +59,70 @@ function docxLinkClickHandler(): Plugin {
   });
 }
 
+/** ParagraphChild `{ hyperlink: {...} }` → text[] carrying a link mark. Mirrors
+ *  the old DocxManager.resolveHyperlink: recurse the container's runs via ctx,
+ *  merge adjacent text, then stamp every text node with the link mark. Returns
+ *  null for an empty container or a missing href. */
+function resolveHyperlink(
+  hyperlink: {
+    link?: string;
+    anchor?: string;
+    tooltip?: string;
+    children?: (RunOptions | string)[];
+  },
+  ctx: ResolveContext,
+): JSONContent | null {
+  const href = hyperlink.link ?? (hyperlink.anchor ? `#${hyperlink.anchor}` : "");
+  if (!href) return null;
+  const content = ctx.resolveInlineChildren(
+    (hyperlink.children ?? []).map((c) => c as ParagraphChild),
+  );
+  if (content.length === 0) return null;
+  const merged = mergeTextNodes(content);
+  for (const node of merged) {
+    if (node.type === "text") {
+      node.marks = [
+        ...(node.marks ?? []),
+        {
+          type: "link",
+          attrs: {
+            href,
+            // Internal anchor (#bookmark, e.g. a TOC entry jump) stays in-window
+            // so the in-page scroll resolves; only external links open a tab.
+            target: href.startsWith("#") ? null : "_blank",
+            rel: "noopener noreferrer nofollow",
+            class: null,
+            title: hyperlink.tooltip ?? null,
+          },
+        },
+      ];
+    }
+  }
+  return merged;
+}
+
+// DOCX hyperlink run → office-open ParagraphChild `{ hyperlink: {...} }`.
+export const parseDocxInline: ParseInlineRule = {
+  match: (child) => "hyperlink" in child,
+  convert: (child, ctx) =>
+    resolveHyperlink(
+      (
+        child as {
+          hyperlink: {
+            link?: string;
+            anchor?: string;
+            tooltip?: string;
+            children?: (RunOptions | string)[];
+          };
+        }
+      ).hyperlink,
+      ctx,
+    ),
+};
+
 export const Link = LinkBase.extend({
+  parseDocxInline,
+
   addOptions(): LinkOptions {
     // Disable the upstream plain-click window.open (openOnClick); a plain click
     // now places the caret (Word), and docxLinkClickHandler follows on Ctrl+Click.

@@ -1,5 +1,7 @@
 import { Mention as MentionBase } from "@tiptap/extension-mention";
 
+import type { ParseInlineRule } from "./types";
+
 /**
  * Mention extension — owns the DOCX expression of an inline mention.
  *
@@ -42,6 +44,18 @@ export function readMention(child: unknown): { id: string; label: string } {
   return { id, label };
 }
 
-// DocxManager builds/parses mention SDTs via createMention/readMention above;
-// the extension itself carries no DOCX attrs of its own.
-export { MentionBase as Mention };
+// DOCX inline text-SDT carrying a mention (CT_SdtRun) → office-open
+// ParagraphChild `{ sdt: { properties: { tag } } }`. isMention guards the tag so
+// a non-mention inline SDT falls through to the dispatcher's drop fallback.
+export const parseDocxInline: ParseInlineRule = {
+  match: (child) => isMention(child),
+  convert: (child) => {
+    const { id, label } = readMention(child);
+    return { type: "mention", attrs: { id, label } };
+  },
+};
+
+// DocxManager builds mention SDTs via createMention/readMention above; the
+// extension itself carries no DOCX attrs, but declares the inline parse rule so
+// resolve is reflective.
+export const Mention = MentionBase.extend({ parseDocxInline });

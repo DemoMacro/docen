@@ -1,4 +1,5 @@
 import { Node } from "../core";
+import type { ParseInlineRule } from "./types";
 
 /**
  * ColumnBreak — inline atom node for DOCX column breaks (`<w:br w:type="column"/>`).
@@ -9,13 +10,16 @@ import { Node } from "../core";
  * layout (paged.js multi-column) is a future concern; the node preserves the
  * break losslessly regardless.
  *
- * The DOCX payload (`{ columnBreak: true }`) is inlined in DocxManager — a
- * one-liner with no per-node variance, so no extension helper for it.
- *
  * `setColumnBreak` only inserts the atom (no paragraph split): a column break
  * does not start a new page, and there is no column layout to reflow yet, so
  * the node is purely for round-trip fidelity until multi-column lands.
  */
+
+// DOCX `<w:br w:type="column"/>` → office-open ParagraphChild `{ columnBreak: true }`.
+export const parseDocxInline: ParseInlineRule = {
+  match: (child) => "columnBreak" in child,
+  convert: () => ({ type: "columnBreak" }),
+};
 
 export const ColumnBreak = Node.create({
   name: "columnBreak",
@@ -31,6 +35,8 @@ export const ColumnBreak = Node.create({
     // span (not br) so CSS ::before can paint a formatting-marks label.
     return ["span", { "data-type": "columnBreak", style: "break-after:column" }];
   },
+
+  parseDocxInline,
 
   addCommands() {
     return {

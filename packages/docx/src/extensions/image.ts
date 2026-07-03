@@ -1,7 +1,8 @@
-import { convertEmuToPixels } from "@office-open/core";
+import { convertEmuToPixels, encodeBase64 } from "@office-open/core";
 import { Image as BaseImage } from "@tiptap/extension-image";
 
 import type { JSONContent } from "../core";
+import type { ParseInlineRule, ResolveContext } from "./types";
 import { floatAnchorScope, floatingToStyles } from "./utils";
 
 type CropRect = { left?: number; top?: number; right?: number; bottom?: number };
@@ -153,6 +154,27 @@ export function parseDocx(imageOpts: Record<string, unknown>): Record<string, un
 
   return attrs;
 }
+
+/** ParagraphChild `{ image: ImageOptions }` → image node. Mirrors the old
+ *  DocxManager.resolveImage: reflective attrs parse, then rebuild the data URL
+ *  from the embedded bytes (encodeBase64 handles platform dispatch + stack
+ *  guard). */
+function resolveImage(imageOpts: Record<string, unknown>, ctx: ResolveContext): JSONContent {
+  const attrs = ctx.parseNodeAttrs("image", imageOpts);
+  const data = imageOpts.data as Uint8Array | undefined;
+  const type = imageOpts.type as string | undefined;
+  if (data && type) {
+    const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : data;
+    attrs.src = `data:image/${type};base64,${encodeBase64(bytes)}`;
+  }
+  return { type: "image", attrs };
+}
+
+// DOCX image run → office-open ParagraphChild `{ image: ImageOptions }`.
+export const parseDocxInline: ParseInlineRule = {
+  match: (child) => "image" in child,
+  convert: (child, ctx) => resolveImage((child as { image: Record<string, unknown> }).image, ctx),
+};
 
 // ── Node-level renderHTML helpers ──
 
@@ -493,6 +515,7 @@ export const Image = BaseImage.extend({
 
   renderDocx,
   parseDocx,
+  parseDocxInline,
 });
 
 /**

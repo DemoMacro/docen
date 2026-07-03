@@ -20,6 +20,7 @@ import { FormattingMarks } from "./formatting-marks";
 import { Heading } from "./heading";
 import { Image } from "./image";
 import { Link } from "./link";
+import { ListAggregator } from "./list-aggregator";
 import { Bold, Code, Highlight, Italic, Subscript, Superscript, Underline } from "./marks";
 import { Mention } from "./mention";
 import { OrderedList } from "./ordered-list";
@@ -113,6 +114,10 @@ export const docxExtensions: AnyExtension[] = [
   ...tiptapNodeExtensions,
   ...tiptapMarkExtensions,
   FormattingMarks,
+  // Plain Extensions adding no schema — ListAggregator owns the DOCX → Tiptap
+  // list-tree rebuild (declares parseDocxAggregator). Registered so DocxManager
+  // collects its rule; it never reaches the ProseMirror schema.
+  ListAggregator,
 ];
 
 // DocxKit options type

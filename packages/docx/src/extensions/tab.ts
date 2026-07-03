@@ -1,4 +1,5 @@
 import { Node } from "../core";
+import type { ParseInlineRule } from "./types";
 
 /**
  * Tab — an inline atom representing a DOCX `<w:r><w:tab/></w:r>` tab character.
@@ -12,6 +13,15 @@ import { Node } from "../core";
  * marks where a tab leader (e.g. a TOC's dotted leader) renders. compile turns it
  * back into `{ tab: true }`.
  */
+
+// `<w:r><w:tab/></w:r>` → office-open ParagraphChild `{ tab: true }`. Turned into
+// this atom so the tab is not lost (mergeTextNodes would otherwise collapse a
+// TOC entry's title and page number together).
+export const parseDocxInline: ParseInlineRule = {
+  match: (child) => "tab" in child,
+  convert: () => ({ type: "tab" }),
+};
+
 export const Tab = Node.create({
   name: "tab",
   group: "inline",
@@ -25,4 +35,6 @@ export const Tab = Node.create({
   renderHTML() {
     return ["span", { class: "docx-tab", contenteditable: "false" }];
   },
+
+  parseDocxInline,
 });

@@ -1,6 +1,7 @@
-import type { StylesOptions } from "@office-open/docx";
+import type { BorderOptions, ParagraphOptions, StylesOptions } from "@office-open/docx";
 import type { JSONContent } from "@tiptap/core";
 
+import type { ResolveContext } from "../extensions/types";
 import { renderParagraphStyles, renderRunStyles, resolveFontName } from "../extensions/utils";
 
 // Re-export the public styles model type so consumers (the editor's Styles
@@ -475,4 +476,72 @@ export function inlineStyles(json: JSONContent, styles?: StylesOptions | null): 
     ((json.attrs as Record<string, unknown> | undefined)?.styles as StylesOptions | undefined);
   if (!docStyles) return json;
   return resolveNode(json, indexParagraphStyles(docStyles), indexCharacterRunStyles(docStyles));
+}
+
+// ── Attr/border helpers (shared by resolve + compile) ────────────────────────
+
+/** Remove keys with null/undefined values. */
+export function cleanAttrs(attrs: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(attrs)) {
+    if (value !== null && value !== undefined) result[key] = value;
+  }
+  return result;
+}
+
+/** Build a text-block node (paragraph/heading) from a resolved ParagraphOptions:
+ *  reflective attrs parse, optional heading-level stamp, inline content, and
+ *  null-stripped attrs. Shared by resolveParagraph's heading rule + plain
+ *  fallback (and the list-item paragraph path) so the build stays DRY.
+ *  `contentPara` overrides the content source — a list item strips its task
+ *  checkbox before resolving content, but attrs still come from the original. */
+export function buildTextBlock(
+  type: string,
+  resolved: ParagraphOptions,
+  ctx: ResolveContext,
+  level?: number,
+  contentPara?: ParagraphOptions,
+): JSONContent {
+  const attrs = ctx.parseNodeAttrs(type, resolved as unknown as Record<string, unknown>);
+  if (level != null && attrs.level == null) attrs.level = level;
+  const content = ctx.resolveInlineContent(contentPara ?? resolved);
+  const cleaned = cleanAttrs(attrs);
+  const node: JSONContent = { type };
+  if (Object.keys(cleaned).length > 0) node.attrs = cleaned;
+  if (content.length > 0) node.content = content;
+  return node;
+}
+
+/** True when a tblBorders object carries no REAL edge — every side is absent,
+ *  none, or nil. office-open fills table.borders with all-`none` when the
+ *  table's own <w:tblPr> defines no <w:tblBorders>, so this detects "the table
+ *  has no borders of its own" to decide whether a referenced table style's
+ *  borders should fill the gap. */
+export function allBordersNone(borders: unknown): boolean {
+  if (!borders || typeof borders !== "object") return true;
+  const b = borders as Record<string, BorderOptions | undefined>;
+  return (["top", "bottom", "left", "right", "insideHorizontal", "insideVertical"] as const).every(
+    (k) => {
+      const v = b[k];
+      return !v || v.style === "none" || v.style === "nil";
+    },
+  );
+}
+
+/** Merge consecutive text nodes with the same marks. Used by inline container
+ *  resolution (hyperlink, track-change) so a link/revision range spanning
+ *  multiple runs becomes a single text node carrying the container mark. */
+export function mergeTextNodes(nodes: JSONContent[]): JSONContent[] {
+  const result: JSONContent[] = [];
+  for (const node of nodes) {
+    if (node.type === "text" && result.length > 0 && result[result.length - 1].type === "text") {
+      const prev = result[result.length - 1];
+      if (JSON.stringify(prev.marks) === JSON.stringify(node.marks)) {
+        prev.text = (prev.text ?? "") + (node.text ?? "");
+        continue;
+      }
+    }
+    result.push({ ...node });
+  }
+  return result;
 }

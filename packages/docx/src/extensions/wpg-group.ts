@@ -2,6 +2,7 @@ import { convertEmuToPixels, encodeBase64 } from "@office-open/core";
 import type { DOMOutputSpec } from "@tiptap/pm/model";
 
 import { Node } from "../core";
+import type { ParseInlineRule } from "./types";
 import { floatAnchorScope, floatingToStyles, normalizeColorToHex, renderRunStyles } from "./utils";
 
 /**
@@ -391,6 +392,16 @@ const attrWpgGroup = () => ({
   },
 });
 
+// DOCX drawing group (wpg) → opaque atom: full WpgGroupRunOptions rides on
+// attrs.wpgGroup (the editor doesn't model the group interior).
+export const parseDocxInline: ParseInlineRule = {
+  match: (child) => "wpgGroup" in child,
+  convert: (child) => ({
+    type: "wpgGroup",
+    attrs: { wpgGroup: (child as { wpgGroup: unknown }).wpgGroup },
+  }),
+};
+
 export const WpgGroup = Node.create({
   name: "wpgGroup",
   group: "inline",
@@ -436,4 +447,6 @@ export const WpgGroup = Node.create({
     }
     return renderGroup(wpg, w, h) as unknown as DOMOutputSpec;
   },
+
+  parseDocxInline,
 });

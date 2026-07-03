@@ -1,4 +1,3 @@
-import { encodeBase64 } from "@office-open/core";
 import {
   generateDocument,
   generateDocumentStream,
@@ -33,22 +32,20 @@ import * as detailsExt from "../extensions/details";
 import * as mentionExt from "../extensions/mention";
 import * as orderedListExt from "../extensions/ordered-list";
 import * as taskItemExt from "../extensions/task-item";
+import type {
+  ParseAggregatorRule,
+  ParseBlockRule,
+  ParseInlineRule,
+  ParseParagraphRule,
+  ResolveContext,
+} from "../extensions/types";
 import { alignmentFromCss } from "../extensions/utils";
 import { prepareDocument, type PrepareStep } from "./prepare";
-import { indexParagraphStyles, mergeTableStyleProps } from "./styles";
+import { buildTextBlock } from "./styles";
 
 export type { DocumentOptions };
 
 // ── Helpers ──
-
-/** Remove keys with null/undefined values */
-function cleanAttrs(attrs: Record<string, unknown>): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(attrs)) {
-    if (value !== null && value !== undefined) result[key] = value;
-  }
-  return result;
-}
 
 /** True when two cell-margin sets (w:tcMar / w:tblCellMar) match on every side's
  *  size — used to detect a cell that merely echoes the table's default so its
@@ -71,22 +68,6 @@ function sameCellMargins(
 function sameBorder(a: BorderOptions | undefined, b: BorderOptions | undefined): boolean {
   if (!a || !b) return false;
   return a.style === b.style && a.size === b.size && a.color === b.color;
-}
-
-/** True when a tblBorders object carries no REAL edge — every side is absent,
- *  none, or nil. office-open fills table.borders with all-`none` when the
- *  table's own <w:tblPr> defines no <w:tblBorders>, so this detects "the table
- *  has no borders of its own" to decide whether a referenced table style's
- *  borders should fill the gap. */
-function allBordersNone(borders: unknown): boolean {
-  if (!borders || typeof borders !== "object") return true;
-  const b = borders as Record<string, BorderOptions | undefined>;
-  return (["top", "bottom", "left", "right", "insideHorizontal", "insideVertical"] as const).every(
-    (k) => {
-      const v = b[k];
-      return !v || v.style === "none" || v.style === "nil";
-    },
-  );
 }
 
 /**
@@ -165,22 +146,6 @@ interface HeaderFooterSlots {
   even?: JSONContent[];
 }
 
-/** Merge consecutive text nodes with same marks */
-function mergeTextNodes(nodes: JSONContent[]): JSONContent[] {
-  const result: JSONContent[] = [];
-  for (const node of nodes) {
-    if (node.type === "text" && result.length > 0 && result[result.length - 1].type === "text") {
-      const prev = result[result.length - 1];
-      if (JSON.stringify(prev.marks) === JSON.stringify(node.marks)) {
-        prev.text = (prev.text ?? "") + (node.text ?? "");
-        continue;
-      }
-    }
-    result.push({ ...node });
-  }
-  return result;
-}
-
 // ── Blockquote signature ──
 
 // ── DocxManager ──
@@ -216,9 +181,10 @@ export class DocxManager {
   // the constructor reads them with getExtensionField so user-supplied
   // extensions plug in without a fork. Container marks (link/insertion/
   // deletion) wrap runs and are handled directly in compile/resolve, not
-  // through these maps. Node hooks cover attrs↔opts only — children assembly
-  // (inline content, table rows/cells, list tree, details SDT) stays in
-  // DocxManager's compile*/resolve* dispatch.
+  // through these maps. Node hooks cover attrs↔opts only; block-level children
+  // assembly (table rows/cells, details SDT, TOC entries) is owned by each
+  // block extension's parseDocxBlock rule (blockRules below); inline content,
+  // the list tree, and the compile-side tree walk stay in DocxManager.
   private markRender = new Map<
     string,
     (attrs: Record<string, unknown>) => Record<string, unknown>
@@ -229,6 +195,26 @@ export class DocxManager {
   }> = [];
   private nodeRender = new Map<string, (node: JSONContent) => Record<string, unknown> | null>();
   private nodeParse = new Map<string, (opts: Record<string, unknown>) => Record<string, unknown>>();
+  // Declarative block parse rules collected via reflection (mirrors markParse).
+  // Each block node extension declares parseDocxBlock; resolveSectionChild walks
+  // them in docxExtensions order before the paragraph/passthrough fallbacks.
+  private blockRules: Array<{ name: string; rule: ParseBlockRule }> = [];
+  // Declarative inline parse rules collected via reflection (mirrors blockRules).
+  // Each inline node/mark extension declares parseDocxInline; resolveParagraphChild
+  // walks them in docxExtensions order before the run/sdt/passthrough fallbacks.
+  private inlineRules: Array<{ name: string; rule: ParseInlineRule }> = [];
+  // Declarative paragraph parse rules collected via reflection (mirrors
+  // blockRules). Each paragraph node extension declares parseDocxParagraph;
+  // resolveParagraph walks them before the plain-paragraph fallback.
+  private paragraphRules: Array<{ name: string; rule: ParseParagraphRule }> = [];
+  // Declarative aggregator rules collected via reflection (mirrors blockRules).
+  // Each list/blockquote extension declares parseDocxAggregator;
+  // resolveSectionChildren runs the generic group-by-predicate loop and hands a
+  // run of paragraphs to the matching rule's build.
+  private aggregatorRules: Array<{ name: string; rule: ParseAggregatorRule }> = [];
+  // Per-resolve façade over the recursive resolve entry points + read-only
+  // styles, handed to every block/inline rule. Built at the start of resolve().
+  private resolveCtx: ResolveContext | undefined;
 
   constructor(extensions: Extensions = docxExtensions) {
     const schema = getSchema(extensions);
@@ -253,7 +239,24 @@ export class DocxManager {
           | undefined;
         if (render) this.nodeRender.set(name, render);
         if (parse) this.nodeParse.set(name, parse);
+        const blockRule = getExtensionField(ext, "parseDocxBlock") as ParseBlockRule | undefined;
+        if (blockRule) this.blockRules.push({ name, rule: blockRule });
+        const paraRule = getExtensionField(ext, "parseDocxParagraph") as
+          | ParseParagraphRule
+          | undefined;
+        if (paraRule) this.paragraphRules.push({ name, rule: paraRule });
       }
+      // parseDocxInline is collected for both nodes and marks — inline shapes
+      // include mark containers (hyperlink/insertion/deletion) that yield text[].
+      const inlineRule = getExtensionField(ext, "parseDocxInline") as ParseInlineRule | undefined;
+      if (inlineRule) this.inlineRules.push({ name, rule: inlineRule });
+      // parseDocxAggregator is collected for nodes (blockquote) and plain
+      // Extensions (listAggregator) alike — both declare the {belongs, build}
+      // pair that resolveSectionChildren's group loop dispatches to.
+      const aggregator = getExtensionField(ext, "parseDocxAggregator") as
+        | ParseAggregatorRule
+        | undefined;
+      if (aggregator) this.aggregatorRules.push({ name, rule: aggregator });
     }
   }
 
@@ -407,6 +410,21 @@ export class DocxManager {
       return { type: "doc", content: [{ type: "paragraph" }] };
     }
     this.resolveNumberingLookup = this.buildNumberingLookup(docOpts);
+    // Per-resolve façade handed to block parse rules. Arrow closures capture
+    // `this`; `styles` is a read-only snapshot of the instance field set above
+    // (stable for this resolve's lifetime).
+    const styles = this.resolveStyles;
+    this.resolveCtx = {
+      resolveBlockStream: (children) => this.resolveSectionChildren(children),
+      resolveBlock: (child) => this.resolveSectionChild(child),
+      resolveInlineContent: (para) => this.resolveInlineContent(para),
+      resolveInlineChildren: (children) => this.resolveParagraphChildren(children),
+      resolveParagraph: (para) => this.resolveParagraph(para),
+      parseNodeAttrs: (type, opts) => this.nodeParse.get(type)?.(opts) ?? {},
+      resolveMarks: (opts) => this.resolveMarks(opts),
+      styles,
+      numberingLookup: this.resolveNumberingLookup,
+    };
 
     // Resolve every section's children into blocks. A non-final section's
     // sectPr attaches to that section's LAST paragraph's pPr (OOXML) — stamp it
@@ -1154,27 +1172,26 @@ export class DocxManager {
   // ── Resolve: DocumentOptions → Tiptap JSON ──
 
   private resolveSectionChild(child: SectionChild): JSONContent | null {
+    // Declarative block dispatch: each block extension's parseDocxBlock rule
+    // (collected in docxExtensions order) gets a chance to recognize the shape.
+    // table/details/toc own their shapes here; a non-matching or null-converting
+    // rule falls through. The shapes are mutually exclusive (different
+    // SectionChild keys), so order among them is irrelevant in practice.
+    const ctx = this.resolveCtx!;
+    for (const { rule } of this.blockRules) {
+      if (rule.match(child, ctx)) {
+        const node = rule.convert(child, ctx);
+        if (node) return node;
+      }
+    }
+    // paragraph is not a block rule — it is dispatched to by the section-children
+    // flow aggregator (list/blockquote) and the paragraph subtype resolver.
     if ("paragraph" in child) {
       return this.resolveParagraph(child.paragraph);
     }
-    if ("table" in child) {
-      return this.resolveTable(child.table as unknown as Record<string, unknown>);
-    }
-    if ("sdt" in child) {
-      const sdt = (child as { sdt: { properties?: { tag?: string }; children?: SectionChild[] } })
-        .sdt;
-      if (sdt.properties?.tag === detailsExt.DETAILS_TAG) {
-        return this.resolveDetailsSdt(sdt);
-      }
-      // Generic SDT (non-details content control) — carry verbatim.
-      return this.resolvePassthrough(child);
-    }
-    if ("toc" in child) {
-      return this.resolveToc(child.toc);
-    }
-    // rawXml (incl. aggregated TOC field), bookmarkStart/End, textbox, altChunk,
-    // subDoc, customXml — no native Tiptap node. Carry the SectionChild verbatim
-    // so the round-trip is byte-faithful.
+    // rawXml (incl. aggregated TOC field), generic SDT, bookmarkStart/End,
+    // textbox, altChunk, subDoc, customXml — no native Tiptap node. Carry the
+    // SectionChild verbatim so the round-trip is byte-faithful.
     return this.resolvePassthrough(child);
   }
 
@@ -1183,140 +1200,30 @@ export class DocxManager {
     return { type: "passthrough", attrs: { data: JSON.stringify(child) } };
   }
 
-  /**
-   * Resolve a table of contents into an editable `tableOfContents` container:
-   * `attrs.options` carries the field switches, `content` is the entry
-   * paragraphs. Each entry's inner HYPERLINK field has content-less runs that
-   * office-open parses as `null`; resolving the entries through
-   * `resolveSectionChild` → `resolveParagraphChildren` drops those nulls, so the
-   * TOC no longer reaches the generate path as an opaque blob of nulls (the
-   * `stringifyRunInline(null).break` crash). When `entries` is absent/empty
-   * (a fresh, unrendered TOC), keep the node valid for `content: "block+"` with
-   * a placeholder empty paragraph.
-   */
-  private resolveToc(toc: TableOfContentsOptions & { alias?: string }): JSONContent {
-    const { entries, ...options } = toc;
-    const content: JSONContent[] = [];
-    for (const entry of entries ?? []) {
-      const node = this.resolveSectionChild(entry);
-      if (!node) continue;
-      if (Array.isArray(node)) content.push(...node);
-      else content.push(node);
-    }
-    if (content.length === 0) content.push({ type: "paragraph" });
-    const node: JSONContent = { type: "tocField", content };
-    const cleanOptions = cleanAttrs(options as Record<string, unknown>);
-    if (Object.keys(cleanOptions).length > 0) node.attrs = { options: cleanOptions };
-    return node;
-  }
-
-  /**
-   * Resolve a details group-SDT: the summary-style paragraph becomes
-   * detailsSummary, the remaining blocks fold into detailsContent.
-   */
-  private resolveDetailsSdt(sdt: {
-    properties?: { tag?: string };
-    children?: SectionChild[];
-  }): JSONContent {
-    const content: JSONContent[] = [];
-    let summary: JSONContent[] | null = null;
-    for (const child of sdt.children ?? []) {
-      if ("paragraph" in child) {
-        const para = child.paragraph as ParagraphOptions;
-        if (
-          (para as unknown as Record<string, unknown>).style === detailsExt.DETAILS_SUMMARY_STYLE
-        ) {
-          summary = this.resolveInlineContent(para);
-          continue;
-        }
-      }
-      const node = this.resolveSectionChild(child);
-      if (!node) continue;
-      if (Array.isArray(node)) content.push(...node);
-      else content.push(node);
-    }
-    const details: JSONContent = { type: "details", content: [] };
-    if (summary !== null) details.content!.push({ type: "detailsSummary", content: summary });
-    if (content.length > 0) details.content!.push({ type: "detailsContent", content });
-    return details;
-  }
-
   private resolveParagraph(opts: string | ParagraphOptions): JSONContent {
     const resolved: ParagraphOptions = typeof opts === "string" ? { text: opts } : opts;
 
-    // horizontalRule: a paragraph reduced to a bottom border (thematicBreak)
+    // horizontalRule: a paragraph reduced to a bottom border (thematicBreak). No
+    // owning extension — stays in the manager.
     if (resolved.thematicBreak) {
       return { type: "horizontalRule" };
     }
 
-    // codeBlock: paragraphs styled "Code"
-    if (resolved.style === "Code") {
-      return this.resolveCodeBlock(resolved);
+    // Declarative paragraph dispatch: each paragraph node extension's
+    // parseDocxParagraph rule (heading/codeBlock, collected in docxExtensions
+    // order) gets a chance to claim the paragraph; a non-matching or null-
+    // converting rule falls through. List paragraphs never reach here —
+    // resolveSectionChildren intercepts them upstream and rebuilds the list tree.
+    const ctx = this.resolveCtx!;
+    for (const { rule } of this.paragraphRules) {
+      if (rule.match(resolved, ctx)) {
+        const node = rule.convert(resolved, ctx);
+        if (node) return node;
+      }
     }
 
-    // Detect heading: office-open's lifted `heading` literal, an explicit
-    // outlineLevel, or a pStyle that names a heading style (directly, by
-    // localized name, or via basedOn). See detectHeadingLevel for the order.
-    const headingLevel = this.detectHeadingLevel(resolved);
-    const nodeType = headingLevel ? "heading" : "paragraph";
-
-    // Dispatch to extension parseDocx (reflective: heading/paragraph share nodeType).
-    const attrs =
-      this.nodeParse.get(nodeType)?.(resolved as unknown as Record<string, unknown>) ?? {};
-
-    // Heading7-9, numeric styleIds, and basedOn/outlineLevel-derived levels
-    // aren't HeadingLevel literals, so parseDocx can't always derive `level`
-    // from resolved.heading/style — stamp it from the detected headingLevel. The
-    // real pStyle still rides on attrs.styleId (parseDocx carries resolved.style).
-    if (headingLevel && attrs.level == null) attrs.level = headingLevel;
-
-    // List paragraphs never reach here — resolveSectionChildren intercepts
-    // them upstream and rebuilds the nested list tree.
-    const content = this.resolveInlineContent(resolved);
-    const cleanAttrsObj = cleanAttrs(attrs);
-
-    const node: JSONContent = { type: nodeType };
-    if (Object.keys(cleanAttrsObj).length > 0) node.attrs = cleanAttrsObj;
-    if (content.length > 0) node.content = content;
-
-    return node;
-  }
-
-  /** Heading level (1-9) for a paragraph, or undefined when it isn't a heading.
-   *  DOCX marks a heading several ways, checked in priority order:
-   *  1. office-open lifts a HeadingLevel pStyle ("Heading1".."Title") into `heading`.
-   *  2. An explicit `outlineLevel` (0-8 → 1-9) — Word's outline/TOC key off this
-   *     even without a heading pStyle; the Heading1-9 styles carry outlineLvl 0-8.
-   *  3. A pStyle that names a heading style: directly ("Heading7", which stays on
-   *     `style` because office-open's HeadingLevel type caps at 6), by localized
-   *     NAME ("heading 1"/"标题 1"), or via the `basedOn` chain (a custom style
-   *     "MyTitle" basedOn="Heading1"). `heading` and `style` carry the same pStyle.
-   *  `outlineLevel` is read loosely — office-open's public type omits the field
-   *  even though it round-trips (w:outlineLvl) at runtime. */
-  private detectHeadingLevel(resolved: ParagraphOptions): number | undefined {
-    if (resolved.heading) {
-      const lvl = HEADING_LEVEL_MAP[resolved.heading];
-      if (lvl) return lvl;
-    }
-    const outline = (resolved as { outlineLevel?: number }).outlineLevel;
-    if (typeof outline === "number" && outline >= 0 && outline <= 8) {
-      return (outline + 1) as 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
-    }
-    const styleId = resolved.style;
-    if (!styleId || !this.resolveStyles) return undefined;
-    const byId = indexParagraphStyles(this.resolveStyles);
-    const visited = new Set<string>();
-    let curId: string | undefined = styleId;
-    while (curId && !visited.has(curId)) {
-      visited.add(curId);
-      if (HEADING_LEVEL_MAP[curId]) return HEADING_LEVEL_MAP[curId];
-      const style = byId.get(curId);
-      if (!style) break;
-      const lvl = headingLevelFromName(style.name);
-      if (lvl) return lvl;
-      curId = style.basedOn ?? undefined;
-    }
-    return undefined;
+    // Plain paragraph fallback: reflective attrs parse + inline content.
+    return buildTextBlock("paragraph", resolved, ctx);
   }
 
   /** reference → level-0 format/start, for classifying numbering paragraphs. */
@@ -1338,486 +1245,47 @@ export class DocxManager {
 
   /**
    * Walk a SectionChild[] block stream — a section's body, a header/footer
-   * slot, or a table cell's children (a cell is just another block stream) —
-   * grouping consecutive list paragraphs into nested Tiptap lists. Non-list
-   * children resolve individually. DOCX flattens lists to a paragraph sequence
-   * (depth carried by `level`); this rebuilds the tree.
+   * slot, or a table cell's children (a cell is just another block stream). An
+   * aggregator rule (list/blockquote) claims consecutive paragraphs sharing its
+   * predicate and rebuilds them as a composite; everything else resolves
+   * individually via resolveSectionChild. The manager owns only the generic
+   * group-by loop — the predicate (belongs) + builder (build) come from each
+   * rule, so a custom composite plugs in by declaring parseDocxAggregator.
    */
   private resolveSectionChildren(children: SectionChild[]): JSONContent[] {
+    const ctx = this.resolveCtx!;
     const content: JSONContent[] = [];
     let i = 0;
     while (i < children.length) {
-      // Bind to a local: TS won't `in`-narrow an indexed read (`children[i]`)
-      // across two accesses, so the narrowing needs a stable binding. The
-      // `typeof` guard also rejects the plain-string paragraph shorthand,
-      // which is never a list item.
       const child = children[i];
       const firstPara = "paragraph" in child ? child.paragraph : null;
-      const firstInfo =
-        firstPara && typeof firstPara !== "string" ? this.detectList(firstPara) : null;
 
-      if (!firstInfo) {
-        // Blockquote: consecutive paragraphs carrying the blockquote signature
-        // (left indent + left border). DOCX has no blockquote element, so
-        // compile stamps this signature; rebuild the container here.
-        if (firstPara && typeof firstPara !== "string" && this.detectBlockquote(firstPara)) {
+      // Try each aggregator's predicate on the first paragraph of a potential
+      // run. The first rule whose `belongs` holds claims the whole run; rules
+      // are mutually exclusive in practice (list numbering/bullet vs the
+      // blockquote indent+border signature), so order among them is irrelevant.
+      if (firstPara && typeof firstPara !== "string") {
+        const rule = this.aggregatorRules.find((r) => r.rule.belongs(firstPara, ctx));
+        if (rule) {
           const group: ParagraphOptions[] = [];
           while (i < children.length) {
             const member = children[i];
             if (!("paragraph" in member)) break;
             const para = member.paragraph;
-            if (typeof para === "string" || !this.detectBlockquote(para)) break;
+            if (typeof para === "string" || !rule.rule.belongs(para, ctx)) break;
             group.push(para);
             i++;
           }
-          content.push(this.buildBlockquote(group));
+          content.push(...rule.rule.build(group, ctx));
           continue;
         }
-        const node = this.resolveSectionChild(child);
-        if (node) content.push(node);
-        i++;
-        continue;
       }
 
-      // Collect the run of consecutive list paragraphs. A non-paragraph or a
-      // plain-text paragraph ends the run — plain text is never a list item.
-      const group: { para: ParagraphOptions; info: ListInfo }[] = [];
-      while (i < children.length) {
-        const member = children[i];
-        if (!("paragraph" in member)) break;
-        const para = member.paragraph;
-        if (typeof para === "string") break;
-        const info = this.detectList(para);
-        if (!info) break;
-        group.push({ para, info });
-        i++;
-      }
-      content.push(...this.buildListTree(group));
+      const node = this.resolveSectionChild(child);
+      if (node) content.push(node);
+      i++;
     }
     return content;
-  }
-
-  /** Classify a paragraph as a list item, or null if it isn't one. */
-  private detectList(para: ParagraphOptions): ListInfo | null {
-    const p = para as unknown as Record<string, unknown>;
-    const numbering = p.numbering as { reference?: string; level?: number } | undefined;
-    const bullet = p.bullet as { level?: number } | undefined;
-
-    let kind: "bullet" | "ordered";
-    let level: number;
-    let reference: string | undefined;
-    let start: number | undefined;
-
-    if (numbering) {
-      reference = numbering.reference;
-      level = numbering.level ?? 0;
-      const cfg = reference ? this.resolveNumberingLookup?.get(reference) : undefined;
-      // A config whose format isn't "bullet" → ordered; otherwise this is the
-      // built-in default-bullet numbering (parse may tag numId=1 as numbering
-      // when its abstractNum resolves), so degrade to bullet.
-      if (cfg && cfg.format && cfg.format !== "bullet") {
-        kind = "ordered";
-        start = cfg.start;
-      } else {
-        kind = "bullet";
-        // Keep the source reference: a custom bullet abstractNum (e.g. a
-        // Wingdings glyph) needs its original definition to round-trip the
-        // marker; buildListTree carries it on the list node for compile.
-      }
-    } else if (bullet) {
-      kind = "bullet";
-      level = bullet.level ?? 0;
-    } else {
-      return null;
-    }
-
-    // Task items carry a leading inline checkbox SDT tagged "docen-task".
-    const first = (p.children as unknown[] | undefined)?.[0];
-    const isTask = taskItemExt.isTaskCheckbox(first);
-
-    return {
-      kind: isTask ? "task" : kind,
-      level,
-      reference,
-      start,
-      checked: taskItemExt.readCheckboxState(first),
-    };
-  }
-
-  /**
-   * Rebuild nested Tiptap lists from a flat run of list paragraphs. Stack-based:
-   * each frame is an active list at a given depth; the `key` (level:type:
-   * reference) decides whether a paragraph continues the top list, starts a
-   * nested list, or splits off a new sibling list.
-   */
-  private buildListTree(group: { para: ParagraphOptions; info: ListInfo }[]): JSONContent[] {
-    const topLevel: JSONContent[] = [];
-    const stack: {
-      level: number;
-      key: string;
-      listNode: JSONContent;
-      currentItem: JSONContent;
-    }[] = [];
-
-    for (const { para, info } of group) {
-      const listType =
-        info.kind === "ordered" ? "orderedList" : info.kind === "task" ? "taskList" : "bulletList";
-      const itemType = info.kind === "task" ? "taskItem" : "listItem";
-      const key = `${info.level}:${listType}:${info.reference ?? ""}`;
-
-      // Pop frames that are deeper than this item, or at the same depth but a
-      // different list (level/type/reference change → new list).
-      while (stack.length > 0) {
-        const top = stack[stack.length - 1];
-        if (top.level > info.level || (top.level === info.level && top.key !== key)) {
-          stack.pop();
-          continue;
-        }
-        break;
-      }
-
-      const itemPara = this.resolveListItemParagraph(para, info);
-      const newItem: JSONContent = { type: itemType, content: [itemPara] };
-      if (itemType === "taskItem") newItem.attrs = { checked: info.checked };
-
-      const top = stack[stack.length - 1];
-      if (top && top.level === info.level && top.key === key) {
-        // Same list continues — append a new item.
-        (top.listNode.content as JSONContent[]).push(newItem);
-        top.currentItem = newItem;
-      } else {
-        // New list (top-level or nested under the current item).
-        const newList: JSONContent = { type: listType, content: [newItem] };
-        const listAttrs: Record<string, unknown> = {};
-        // Only level-0 ordered lists carry `start`; deeper levels restart at 1.
-        if (
-          listType === "orderedList" &&
-          info.level === 0 &&
-          typeof info.start === "number" &&
-          info.start !== 1
-        ) {
-          listAttrs.start = info.start;
-        }
-        // Carry the source abstractNum reference so the marker round-trips.
-        if (info.reference) listAttrs.numbering = info.reference;
-        if (Object.keys(listAttrs).length > 0) newList.attrs = listAttrs;
-        if (top) {
-          (top.currentItem.content as JSONContent[]).push(newList);
-        } else {
-          topLevel.push(newList);
-        }
-        stack.push({ level: info.level, key, listNode: newList, currentItem: newItem });
-      }
-    }
-
-    return topLevel;
-  }
-
-  /** Classify a paragraph as a blockquote member by its signature. */
-  private detectBlockquote(para: ParagraphOptions): boolean {
-    const p = para as unknown as Record<string, unknown>;
-    const indent = p.indent as { left?: number } | undefined;
-    const border = p.border as { left?: Record<string, unknown> } | undefined;
-    if (!indent || indent.left !== blockquoteExt.BLOCKQUOTE_INDENT_LEFT) return false;
-    const bl = border?.left;
-    if (!bl) return false;
-    const sig = blockquoteExt.BLOCKQUOTE_BORDER;
-    return (
-      bl.style === sig.style &&
-      bl.size === sig.size &&
-      bl.space === sig.space &&
-      bl.color === sig.color
-    );
-  }
-
-  /**
-   * Rebuild a blockquote node from a run of signature-carrying paragraphs,
-   * stripping the indent/border signature so child paragraphs render clean.
-   */
-  private buildBlockquote(group: ParagraphOptions[]): JSONContent {
-    const content: JSONContent[] = [];
-    for (const para of group) {
-      const node = this.resolveParagraph(para);
-      const attrs = node.attrs as Record<string, unknown> | undefined;
-      if (attrs) {
-        if (attrs.indent) {
-          const indent = { ...(attrs.indent as object) } as Record<string, unknown>;
-          delete indent.left;
-          attrs.indent = Object.keys(indent).length > 0 ? indent : undefined;
-        }
-        if (attrs.border) {
-          const border = { ...(attrs.border as object) } as Record<string, unknown>;
-          delete border.left;
-          attrs.border = Object.keys(border).length > 0 ? border : undefined;
-        }
-        const cleaned = cleanAttrs(attrs);
-        if (Object.keys(cleaned).length > 0) node.attrs = cleaned;
-        else delete node.attrs;
-      }
-      content.push(node);
-    }
-    return { type: "blockquote", content };
-  }
-
-  /**
-   * Resolve a list-item paragraph to a Tiptap paragraph/heading node, stripping
-   * the list marker (bullet/numbering) and the leading task checkbox — those
-   * are expressed at the list/item level, not inside the paragraph.
-   */
-  private resolveListItemParagraph(para: ParagraphOptions, info: ListInfo): JSONContent {
-    const resolved = typeof para === "string" ? ({ text: para } as ParagraphOptions) : para;
-    const headingLevel = this.detectHeadingLevel(resolved);
-    const nodeType = headingLevel ? "heading" : "paragraph";
-
-    const attrs =
-      this.nodeParse.get(nodeType)?.(resolved as unknown as Record<string, unknown>) ?? {};
-    // See resolveParagraph: derived levels aren't always literals, so stamp level.
-    if (headingLevel && attrs.level == null) attrs.level = headingLevel;
-
-    // Task: drop the leading checkbox SDT (its state lives in taskItem.attrs).
-    const stripped = info.kind === "task" ? this.stripTaskCheckbox(resolved) : resolved;
-    const content = this.resolveInlineContent(stripped);
-
-    const node: JSONContent = { type: nodeType };
-    const cleanAttrsObj = cleanAttrs(attrs);
-    if (Object.keys(cleanAttrsObj).length > 0) node.attrs = cleanAttrsObj;
-    if (content.length > 0) node.content = content;
-    return node;
-  }
-
-  /** Return a copy of `para` with its leading docen-task checkbox SDT removed. */
-  private stripTaskCheckbox(para: ParagraphOptions): ParagraphOptions {
-    const children = (para as unknown as Record<string, unknown>).children;
-    if (Array.isArray(children) && children.length > 0 && taskItemExt.isTaskCheckbox(children[0])) {
-      return { ...(para as object), children: children.slice(1) } as ParagraphOptions;
-    }
-    return para;
-  }
-
-  private resolveCodeBlock(opts: ParagraphOptions): JSONContent {
-    // Reassemble code: break → "\n" (merged into text), runs keep their marks.
-    const children = opts.children as (ParagraphChild | string)[] | undefined;
-    const content: JSONContent[] = [];
-    if (children) {
-      for (const child of children) {
-        if (typeof child === "string") {
-          if (child) content.push({ type: "text", text: child });
-        } else if (typeof child === "object" && child !== null) {
-          if ("break" in child) {
-            const prev = content[content.length - 1];
-            if (prev && prev.type === "text") prev.text = (prev.text ?? "") + "\n";
-            else content.push({ type: "text", text: "\n" });
-          } else if ("text" in child) {
-            const marks = this.resolveMarks(child as RunOptions);
-            const textNode: JSONContent = {
-              type: "text",
-              text: (child as { text: string }).text,
-            };
-            if (marks) textNode.marks = marks;
-            content.push(textNode);
-          }
-        }
-      }
-    } else if (opts.text) {
-      content.push({ type: "text", text: opts.text });
-    }
-    const node: JSONContent = { type: "codeBlock" };
-    if (content.length > 0) node.content = content;
-    return node;
-  }
-
-  private resolveTable(tableOpts: Record<string, unknown>): JSONContent {
-    const attrs = this.nodeParse.get("table")?.(tableOpts) ?? {};
-    const rows = (tableOpts.rows ?? []) as Record<string, unknown>[];
-    const content: JSONContent[] = [];
-
-    // Pull the referenced table style's tblBorders/tblCellMar in: office-open
-    // leaves table.borders/cellMargin reflecting only the table's own tblPr, so
-    // a "Table Grid" table (borders defined in the style) would render no grid
-    // without this. The table's own real borders win; the style fills the gap
-    // when the table's are all none/nil.
-    const styleProps = mergeTableStyleProps(
-      this.resolveStyles?.tableStyles,
-      (tableOpts.style as string | undefined) ?? null,
-    );
-    if (styleProps.borders && allBordersNone(tableOpts.borders)) {
-      tableOpts = { ...tableOpts, borders: styleProps.borders };
-    }
-    if (styleProps.cellMargin && tableOpts.cellMargin == null && tableOpts.margins == null) {
-      tableOpts = { ...tableOpts, cellMargin: styleProps.cellMargin };
-    }
-
-    // Table-level default cell insets (w:tblCellMar). office-open exposes them
-    // on both `cellMargin` and `margins`; a cell inherits them unless it carries
-    // its own tcMar. Push the default onto cells without tcMar so render
-    // (renderTableCellStyles) and the paginator (cellVerticalOverhead) read ONE
-    // effective source (cell.attrs.margins) instead of each falling back to the
-    // table. compileTableCellNode drops a cell tcMar equal to this default to
-    // keep the regenerated docx in its table-level form (near-identity round-trip).
-    const tableCellMargins = (tableOpts.cellMargin ?? tableOpts.margins ?? null) as NonNullable<
-      TableCellOptions["margins"]
-    > | null;
-    // Table-level inside grid lines (tblBorders.insideHorizontal/insideVertical).
-    // In CSS border-collapse the interior grid belongs to cells, not the <table>
-    // element, so a REAL insideH/V is pushed onto cell sides lacking their own
-    // tcBorder (below). none/nil is skipped — a table that merely LACKS inner
-    // grid lines must not have `border:none` stamped on every cell, or it would
-    // suppress the editor's Table-Grid fallback default for borderless tables.
-    // Edge cells' outer sides overlap the table's own border under
-    // border-collapse (thicker wins), matching OOXML outer-vs-inner semantics.
-    const tableBorders = (tableOpts.borders ?? null) as {
-      insideHorizontal?: BorderOptions;
-      insideVertical?: BorderOptions;
-    } | null;
-    const realBorder = (bd: unknown): BorderOptions | null => {
-      const b = bd as BorderOptions | null | undefined;
-      return b && b.style && b.style !== "none" && b.style !== "nil" ? b : null;
-    };
-    const insideH = realBorder(tableBorders?.insideHorizontal);
-    const insideV = realBorder(tableBorders?.insideVertical);
-
-    // DOCX encodes a row span as a `restart` cell followed by N empty `continue`
-    // cells; ProseMirror uses one cell with rowspan = N+1. Track open spans per
-    // column so each continuation cell increments the owning cell's `rowspan`,
-    // which compileTableNode reads back to rebuild the continuation cells.
-    let activeSpans = new Map<number, JSONContent>();
-
-    for (const row of rows) {
-      const rowAttrs =
-        this.nodeParse.get("tableRow")?.(row as unknown as Record<string, unknown>) ?? {};
-      // gridAfter/widthAfter are rebuilt as trailing placeholder cells below
-      // (PM requires every row's cell-span sum to equal the column count, so a
-      // gridAfter row needs explicit empty cells or fixTables inserts the filler
-      // at the START). Drop them from rowAttrs so compile doesn't re-emit
-      // row.gridAfter on top of those cells — that double-counts and the row
-      // widens by N columns every docx→json→docx round-trip.
-      delete rowAttrs.gridAfter;
-      delete rowAttrs.widthAfter;
-      const cells = (row.cells ?? []) as Record<string, unknown>[];
-      const cellNodes: JSONContent[] = [];
-      const nextActiveSpans = new Map<number, JSONContent>();
-      let colIdx = 0;
-
-      for (const cell of cells) {
-        const cellColspan = (cell.columnSpan as number) ?? 1;
-        const vMerge = cell.verticalMerge as string | undefined;
-
-        if (vMerge === "continue") {
-          // Column owned by a cell above — bump its rowspan and carry the span
-          // forward so further continuation cells keep counting.
-          const owner = activeSpans.get(colIdx);
-          if (owner) {
-            const ownerAttrs = (owner.attrs ??= {});
-            ownerAttrs.rowspan = ((ownerAttrs.rowspan as number) ?? 1) + 1;
-            for (let c = colIdx; c < colIdx + cellColspan; c++) nextActiveSpans.set(c, owner);
-          }
-          colIdx += cellColspan;
-          continue;
-        }
-
-        const isHeader = row.tableHeader as boolean;
-        const cellAttrs =
-          this.nodeParse.get(isHeader ? "tableHeader" : "tableCell")?.(
-            cell as unknown as Record<string, unknown>,
-          ) ?? {};
-
-        // `rowspan` (recovered below) drives compile-time vMerge — drop the
-        // OOXML marker so it doesn't round-trip back verbatim.
-        delete cellAttrs.verticalMerge;
-
-        // Effective cell margins: a cell's own tcMar wins, else inherit the
-        // table's tblCellMar default (resolved once here for render + measure).
-        if (!cellAttrs.margins && tableCellMargins) cellAttrs.margins = tableCellMargins;
-
-        // Effective cell borders: a cell's own tcBorder per side wins, else
-        // inherit the table's inside grid lines (insideH on top/bottom, insideV
-        // on left/right) so the interior grid renders under border-collapse.
-        // compileTableCellNode drops a side equal to the table's insideH/V to
-        // keep the round-trip near-identity.
-        if (insideH || insideV) {
-          if (!cellAttrs.borders) cellAttrs.borders = {};
-          const b = cellAttrs.borders as Record<string, BorderOptions | undefined>;
-          if (insideH && !b.top) b.top = insideH;
-          if (insideH && !b.bottom) b.bottom = insideH;
-          if (insideV && !b.left) b.left = insideV;
-          if (insideV && !b.right) b.right = insideV;
-        }
-
-        // A cell is just another SectionChild[] block stream — same as a
-        // section body or a header/footer slot — so resolve it through the same
-        // path. That regroups consecutive numbering/bullet paragraphs into list
-        // nodes and keeps nested tables/lists structurally intact on import.
-        const cellChildren = (cell.children ?? []) as SectionChild[];
-        const cellContent: JSONContent[] = this.resolveSectionChildren(cellChildren);
-
-        const cellType = isHeader ? "tableHeader" : "tableCell";
-        const cellNode: JSONContent = { type: cellType };
-        if (Object.keys(cellAttrs).length > 0) cellNode.attrs = cleanAttrs(cellAttrs);
-        // An empty cell still needs content to satisfy the tableCell/tableHeader
-        // `block+` schema. A content-less cell reaches the doc via fromJSON (which
-        // skips validation), but prosemirror-tables' fixTables runs setNodeMarkup
-        // on every table during appendTransaction, and setNodeMarkup re-validates
-        // the node content — throwing "Invalid content for node type tableCell".
-        // That throw aborts the paginator's reflow transaction, so the document
-        // never re-pages (every block piles on page 0). Backfill an empty
-        // paragraph; OOXML likewise requires a <w:p> in every <w:tc>.
-        if (cellContent.length > 0) cellNode.content = cellContent;
-        else cellNode.content = [{ type: "paragraph" }];
-
-        if (vMerge === "restart") {
-          // rowspan is finalized when continuation cells arrive below; register
-          // the node so they can find and increment it.
-          for (let c = colIdx; c < colIdx + cellColspan; c++) nextActiveSpans.set(c, cellNode);
-        }
-
-        cellNodes.push(cellNode);
-        colIdx += cellColspan;
-      }
-
-      // OOXML gridAfter (w:gridAfter + widthAfter): N trailing grid columns this
-      // row leaves uncovered. ProseMirror requires every row's cell-span sum to
-      // equal the column count; without explicit trailing cells fixTables fills
-      // the gap — and for a row whose only real cell is a leading gridSpan (e.g.
-      // a header row: 1 cell spanning 2 + gridAfter 1) it inserts the filler
-      // at the START, shoving the real cell right onto narrower columns (wrong
-      // width + off-center). Emit explicit empty trailing cells so real cells
-      // keep their left positions.
-      const gridAfter = (row.gridAfter as number) ?? 0;
-      if (gridAfter > 0) {
-        const trailingType = (row.tableHeader as boolean) ? "tableHeader" : "tableCell";
-        // gridAfter cells are empty trailing grid columns (no content). Give them
-        // nil borders on every side so renderTableCellStyles emits border:none —
-        // otherwise they pick up the Table-Grid default and draw a stray vertical
-        // line at the row's right edge, showing up as an empty cell.
-        const nilBorders = {
-          top: { style: "nil" },
-          right: { style: "nil" },
-          bottom: { style: "nil" },
-          left: { style: "nil" },
-        };
-        for (let c = 0; c < gridAfter; c++)
-          cellNodes.push({
-            type: trailingType,
-            attrs: { borders: nilBorders },
-            content: [{ type: "paragraph" }],
-          });
-        colIdx += gridAfter;
-      }
-
-      activeSpans = nextActiveSpans;
-
-      const rowNode: JSONContent = { type: "tableRow" };
-      if (Object.keys(rowAttrs).length > 0) rowNode.attrs = cleanAttrs(rowAttrs);
-      if (cellNodes.length > 0) rowNode.content = cellNodes;
-
-      content.push(rowNode);
-    }
-
-    const node: JSONContent = { type: "table" };
-    if (Object.keys(attrs).length > 0) node.attrs = cleanAttrs(attrs);
-    if (content.length > 0) node.content = content;
-
-    return node;
   }
 
   // ── Inline content resolution ──
@@ -1857,126 +1325,31 @@ export class DocxManager {
   }
 
   private resolveParagraphChild(child: ParagraphChild): JSONContent | JSONContent[] | null {
-    // `<w:r><w:tab/></w:r>` → office-open ParagraphChild `{ tab: true }` (a pure
-    // tab run, e.g. between a TOC entry's title and page number). Turn it into a
-    // `tab` inline atom so the leader can render; otherwise it fell through to
-    // inlinePassthrough (hidden, no leader) and mergeTextNodes collapsed the
-    // adjacent title/page-number text together.
-    if ("tab" in child) {
-      return { type: "tab" };
+    // Declarative inline dispatch: each inline node/mark extension's
+    // parseDocxInline rule (collected in docxExtensions order) gets a chance to
+    // recognize the shape. tab/image/wpgGroup/wpsShape/mention/hyperlink/
+    // insertion/deletion/pageBreak/columnBreak own their shapes here; a
+    // non-matching or null-converting rule falls through. The shapes are mutually
+    // exclusive (different ParagraphChild keys), so order among them is
+    // irrelevant in practice.
+    const ctx = this.resolveCtx!;
+    for (const { rule } of this.inlineRules) {
+      if (rule.match(child, ctx)) {
+        const node = rule.convert(child, ctx);
+        if (node) return node;
+      }
     }
+    // run catch-all: a plain run (text/children/break). Left in the manager — it
+    // is the fallback every non-owned shape reaches, not an owned shape itself.
     if ("text" in child || "children" in child || "break" in child) {
       return this.resolveRun(child as RunOptions);
     }
-    if ("image" in child) {
-      return this.resolveImage(child.image as unknown as Record<string, unknown>);
-    }
-    if ("wpgGroup" in child) {
-      // Drawing group (wpg): opaque round-trip — full WpgGroupRunOptions rides on
-      // the wpgGroup node; the editor doesn't model the group interior.
-      return { type: "wpgGroup", attrs: { wpgGroup: child.wpgGroup } };
-    }
-    if ("wpsShape" in child) {
-      // Standalone floating text box (wp:anchor > wps:wsp, NOT inside a wpg
-      // group). The shape's text body (children: (ParagraphOptions | string)[])
-      // becomes PM content (one node per paragraph); geometry/styling ride on
-      // attrs.wpsShape. Mirrors resolveToc: split body → content, keep the rest.
-      const ws = child.wpsShape;
-      const content: JSONContent[] = [];
-      if (ws?.children) {
-        for (const para of ws.children) {
-          if (typeof para !== "object" || para === null) {
-            const node = this.resolveParagraph(para);
-            if (node) content.push(node);
-            continue;
-          }
-          // DrawingML defRPr (para.run) is the default run-properties for the
-          // box's runs, NOT the OOXML ¶-mark rPr. Merge it into each run
-          // (matching the prior atom renderWpsText: {...para.run, ...r}), then
-          // drop it from the paragraph (run: undefined): paragraph.ts renders
-          // attrs.run.size as ¶-mark line-height (renderParagraphStyles
-          // markLineHeight), which would override the box's grid line-height —
-          // but defRPr is a run default, not a ¶ mark. PDF measures 27.5pt
-          // (the body grid); dropping defRPr lets the paragraph inherit it.
-          // Round-trip safe — runs carry the full rPr, so compile emits
-          // per-run rPr and Word renders identically.
-          const defRPr = (para.run as Record<string, unknown> | undefined) ?? {};
-          const children = Array.isArray(para.children)
-            ? para.children.map((c) =>
-                typeof c !== "object" || c === null
-                  ? { ...defRPr, text: c as string }
-                  : { ...defRPr, ...(c as object) },
-              )
-            : undefined;
-          const node = this.resolveParagraph({
-            ...para,
-            run: undefined,
-            ...(children ? { children } : {}),
-          });
-          if (node) content.push(node);
-        }
-      }
-      if (content.length === 0) content.push({ type: "paragraph" });
-      const { children: _omit, ...geometry } = ws ?? {};
-      const node: JSONContent = { type: "wpsShape", content };
-      const cleanGeometry = cleanAttrs(geometry as Record<string, unknown>);
-      if (Object.keys(cleanGeometry).length > 0) node.attrs = { wpsShape: cleanGeometry };
-      return node;
-    }
-    if ("sdt" in child) {
-      return this.resolveInlineSdt(child);
-    }
-    if ("hyperlink" in child) {
-      return this.resolveHyperlink(
-        child.hyperlink as {
-          link?: string;
-          anchor?: string;
-          tooltip?: string;
-          children?: (RunOptions | string)[];
-        },
-      );
-    }
-    if ("insertion" in child) {
-      return this.resolveTrackedChange(
-        child.insertion as {
-          id?: number;
-          author?: string;
-          date?: string;
-          children?: (RunOptions | string)[];
-        },
-        "insertion",
-      );
-    }
-    if ("deletion" in child) {
-      return this.resolveTrackedChange(
-        child.deletion as {
-          id?: number;
-          author?: string;
-          date?: string;
-          children?: (RunOptions | string)[];
-        },
-        "deletion",
-      );
-    }
-    if ("pageBreak" in child) {
-      return { type: "pageBreak" };
-    }
-    if ("columnBreak" in child) {
-      return { type: "columnBreak" };
-    }
-    // Unrecognized inline child (bookmark/range markers, proofErr, track-change
-    // markers, …) — carry verbatim via inlinePassthrough so the round-trip stays
-    // byte-faithful (mirrors block-level resolvePassthrough).
+    // Any remaining inline shape (a non-mention inline SDT, bookmark/range
+    // markers, proofErr, …) carries verbatim via inlinePassthrough so the
+    // round-trip stays byte-faithful — mirrors block resolvePassthrough, which
+    // keeps every unrecognized SectionChild instead of dropping it. A non-mention
+    // inline SDT used to be dropped here; carrying it restores the symmetry.
     return { type: "inlinePassthrough", attrs: { data: JSON.stringify(child) } };
-  }
-
-  /** Resolve an inline SDT (mention carrier; other inline SDTs unsupported). */
-  private resolveInlineSdt(child: ParagraphChild): JSONContent | null {
-    if (mentionExt.isMention(child)) {
-      const { id, label } = mentionExt.readMention(child);
-      return { type: "mention", attrs: { id, label } };
-    }
-    return null;
   }
 
   private resolveRun(opts: RunOptions): JSONContent | JSONContent[] | null {
@@ -2007,18 +1380,31 @@ export class DocxManager {
         if (typeof c === "string") {
           parts.push(c);
         } else if (c && typeof c === "object") {
-          if ("pageBreak" in c) {
-            flushText();
-            nodes.push({ type: "pageBreak" });
-          } else if ("columnBreak" in c) {
-            flushText();
-            nodes.push({ type: "columnBreak" });
-          } else if ("break" in c) {
+          // Reflective: reuse the inlineRules dispatch (same as top-level
+          // ParagraphChild) so tab/pageBreak/columnBreak — and any custom
+          // inline atom — are recognized here too. This replaces a parallel
+          // if-in chain that duplicated those rules and dropped shapes that
+          // lacked a hardcoded branch (e.g. a custom inline node nested in a
+          // run was silently lost).
+          const ctx = this.resolveCtx!;
+          let handled = false;
+          for (const { rule } of this.inlineRules) {
+            if (rule.match(c as ParagraphChild, ctx)) {
+              const node = rule.convert(c as ParagraphChild, ctx);
+              if (node) {
+                flushText();
+                nodes.push(...(Array.isArray(node) ? node : [node]));
+                handled = true;
+                break;
+              }
+            }
+          }
+          if (handled) continue;
+          // hardBreak: a bare `<w:br/>` inside run.children — no owning inline
+          // rule (HardBreak declares no parseDocxInline), stays a manager case.
+          if ("break" in c) {
             flushText();
             nodes.push({ type: "hardBreak" });
-          } else if ("tab" in c) {
-            flushText();
-            nodes.push({ type: "tab" });
           }
           // {lastRenderedPageBreak} is a Word render hint — drop (office-open
           // does not emit it on output). noBreakHyphen/date fields/separator/pgNum
@@ -2053,129 +1439,6 @@ export class DocxManager {
 
     return marks.length > 0 ? marks : undefined;
   }
-
-  private resolveImage(imageOpts: Record<string, unknown>): JSONContent {
-    const attrs = this.nodeParse.get("image")?.(imageOpts) ?? {};
-
-    // Image data → data URL (encodeBase64 handles platform dispatch + stack guard).
-    const data = imageOpts.data as Uint8Array | undefined;
-    const type = imageOpts.type as string | undefined;
-    if (data && type) {
-      const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : data;
-      attrs.src = `data:image/${type};base64,${encodeBase64(bytes)}`;
-    }
-
-    return { type: "image", attrs };
-  }
-
-  private resolveHyperlink(hyperlink: {
-    link?: string;
-    anchor?: string;
-    tooltip?: string;
-    children?: (RunOptions | string)[];
-  }): JSONContent | null {
-    const href = hyperlink.link ?? (hyperlink.anchor ? `#${hyperlink.anchor}` : "");
-    if (!href) return null;
-
-    const content = this.resolveParagraphChildren(
-      (hyperlink.children ?? []).map((c) => c as ParagraphChild),
-    );
-
-    if (content.length > 0) {
-      const merged = mergeTextNodes(content);
-      for (const node of merged) {
-        if (node.type === "text") {
-          node.marks = [
-            ...(node.marks ?? []),
-            {
-              type: "link",
-              attrs: {
-                href,
-                // Internal anchor (#bookmark, e.g. TOC entry jumps) must stay in
-                // the current window so the in-page jump resolves; only external
-                // links open a new tab.
-                target: href.startsWith("#") ? null : "_blank",
-                rel: "noopener noreferrer nofollow",
-                class: null,
-                title: hyperlink.tooltip ?? null,
-              },
-            },
-          ];
-        }
-      }
-      return merged;
-    }
-
-    return null;
-  }
-
-  /** Resolve a track-change container (w:ins/w:del) into text nodes carrying an
-   *  insertion/deletion mark. Mirrors resolveHyperlink: recurse into the
-   *  container's child runs, merge adjacent text, and stamp every text node
-   *  with the revision mark (id/author/date) alongside any existing rPr marks
-   *  (bold, …). Returns null for an empty container. */
-  private resolveTrackedChange(
-    opts: { id?: number; author?: string; date?: string; children?: (RunOptions | string)[] },
-    type: "insertion" | "deletion",
-  ): JSONContent[] | null {
-    const content = this.resolveParagraphChildren(
-      (opts.children ?? []).map((c) => c as ParagraphChild),
-    );
-    if (content.length === 0) return null;
-    const merged = mergeTextNodes(content);
-    const mark = {
-      type,
-      attrs: {
-        id: opts.id ?? null,
-        author: opts.author ?? null,
-        date: opts.date ?? null,
-      },
-    };
-    for (const node of merged) {
-      if (node.type === "text") {
-        node.marks = [...(node.marks ?? []), mark];
-      }
-    }
-    return merged;
-  }
-}
-
-// ── List reconstruction ──
-
-interface ListInfo {
-  kind: "bullet" | "ordered" | "task";
-  level: number;
-  reference?: string;
-  start?: number;
-  checked: boolean;
-}
-
-// ── Heading level map ──
-
-const HEADING_LEVEL_MAP: Record<string, 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9> = {
-  Heading1: 1,
-  Heading2: 2,
-  Heading3: 3,
-  Heading4: 4,
-  Heading5: 5,
-  Heading6: 6,
-  Heading7: 7,
-  Heading8: 8,
-  Heading9: 9,
-  Title: 1,
-};
-
-/** Heading level (1-9) from a localized style NAME: "heading 1"/"标题 1" → 1,
- *  "title" → 1. office-open's built-in names are English ("heading 1"), but
- *  zh-CN Word labels the same styles "标题 1"; both map to the same level. */
-function headingLevelFromName(name: string | undefined): number | undefined {
-  if (!name) return undefined;
-  const m = /^heading\s+(\d)$/i.exec(name) ?? /^标题\s*(\d)$/.exec(name);
-  if (m) {
-    const lvl = Number(m[1]);
-    if (lvl >= 1 && lvl <= 9) return lvl as 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
-  }
-  return /^title$/i.test(name) ? 1 : undefined;
 }
 
 // ── Standalone functions (backward compat) ──

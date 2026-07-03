@@ -1,4 +1,9 @@
+import type { ParagraphChild, RunOptions } from "@office-open/docx";
+
+import { mergeTextNodes } from "../converters/styles";
+import type { JSONContent } from "../core";
 import { Mark } from "../core";
+import type { ParseInlineRule, ResolveContext } from "./types";
 
 /**
  * Track Changes marks (Word revision tracking).
@@ -14,9 +19,9 @@ import { Mark } from "../core";
  *  - `deletion`  — text marked for removal (Word renders colored + strikethrough;
  *    the text stays visible until the change is accepted/rejected)
  *
- * Container-level, NOT rPr-level: like `link`, these wrap child runs, so they
- * are bridged directly in DocxManager (resolveParagraphChild →
- * resolveTrackedChange; compileTextRun → push `{insertion|deletion:{...}}`).
+ * Container-level, NOT rPr-level: like `link`, these wrap child runs, so resolve
+ * is declared via parseDocxInline (resolveTrackedChange) and compile via
+ * compileTrackedChangeRun (compileTextRun pushes `{insertion|deletion:{...}}`).
  * They do NOT use the renderDocx/parseDocx mark hook — that is for rPr-level
  * marks like strike/bold. The attrs (id/author/date) are round-tripped via
  * resolve/compile and kept out of HTML (`rendered:false`): HTML paste loses
@@ -44,6 +49,60 @@ const trackChangeAttrs = () => ({
   date: { default: null, rendered: false },
 });
 
+/** ParagraphChild `{ insertion|deletion: {...} }` → text[] carrying the mark.
+ *  Mirrors the old DocxManager.resolveTrackedChange: recurse the container's
+ *  runs via ctx, merge adjacent text, then stamp every text node with the
+ *  revision mark alongside any existing rPr marks. Returns null for an empty
+ *  container. */
+function resolveTrackedChange(
+  opts: {
+    id?: number;
+    author?: string;
+    date?: string;
+    children?: (RunOptions | string)[];
+  },
+  type: "insertion" | "deletion",
+  ctx: ResolveContext,
+): JSONContent[] | null {
+  const content = ctx.resolveInlineChildren((opts.children ?? []).map((c) => c as ParagraphChild));
+  if (content.length === 0) return null;
+  const merged = mergeTextNodes(content);
+  const mark = {
+    type,
+    attrs: {
+      id: opts.id ?? null,
+      author: opts.author ?? null,
+      date: opts.date ?? null,
+    },
+  };
+  for (const node of merged) {
+    if (node.type === "text") {
+      node.marks = [...(node.marks ?? []), mark];
+    }
+  }
+  return merged;
+}
+
+// DOCX `<w:ins>` run → office-open ParagraphChild `{ insertion: {...} }`.
+const insertionRule: ParseInlineRule = {
+  match: (child) => "insertion" in child,
+  convert: (child, ctx) =>
+    resolveTrackedChange(
+      (
+        child as {
+          insertion: {
+            id?: number;
+            author?: string;
+            date?: string;
+            children?: (RunOptions | string)[];
+          };
+        }
+      ).insertion,
+      "insertion",
+      ctx,
+    ),
+};
+
 export const Insertion = Mark.create({
   name: "insertion",
   // Read-only render for now: a caret inside a revision range must not extend
@@ -63,7 +122,29 @@ export const Insertion = Mark.create({
     // HTML — no other mark matches <ins>, so the bare tag is safe.
     return [{ tag: "ins.docen-insertion" }, { tag: "ins" }];
   },
+
+  parseDocxInline: insertionRule,
 });
+
+// DOCX `<w:del>` run → office-open ParagraphChild `{ deletion: {...} }`.
+const deletionRule: ParseInlineRule = {
+  match: (child) => "deletion" in child,
+  convert: (child, ctx) =>
+    resolveTrackedChange(
+      (
+        child as {
+          deletion: {
+            id?: number;
+            author?: string;
+            date?: string;
+            children?: (RunOptions | string)[];
+          };
+        }
+      ).deletion,
+      "deletion",
+      ctx,
+    ),
+};
 
 export const Deletion = Mark.create({
   name: "deletion",
@@ -82,4 +163,6 @@ export const Deletion = Mark.create({
     // round-trip runs through resolve/compile, not this parseHTML.
     return [{ tag: "del.docen-deletion" }];
   },
+
+  parseDocxInline: deletionRule,
 });
