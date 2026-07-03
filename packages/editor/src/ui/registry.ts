@@ -1,12 +1,18 @@
 import {
-  accordionDefinition,
-  accordionItemDefinition,
+  Accordion,
+  AccordionDefinition,
+  AccordionItem,
+  AccordionItemDefinition,
   Button,
   ButtonStyles,
   ButtonTemplate,
+  Checkbox,
   CheckboxDefinition,
+  Dialog,
+  DialogBody,
   DialogBodyDefinition,
   DialogDefinition,
+  Divider,
   DividerDefinition,
   Dropdown,
   DropdownStyles,
@@ -15,9 +21,11 @@ import {
   DropdownOptionStyles,
   DropdownOptionTemplate,
   Drawer,
+  DrawerBody,
   DrawerBodyDefinition,
   DrawerStyles,
   DrawerTemplate,
+  Field,
   FieldDefinition,
   FluentDesignSystem,
   Menu,
@@ -27,26 +35,41 @@ import {
   MenuItem,
   MenuItemStyles,
   MenuItemTemplate,
+  MenuList,
+  MenuListDefinition,
   MenuStyles,
   MenuTemplate,
+  Listbox,
   ListboxDefinition,
-  MenuListDefinition,
+  Switch,
   SwitchDefinition,
   Tab,
   TabStyles,
   TabTemplate,
+  Tablist,
   TablistDefinition,
+  Radio,
   RadioDefinition,
+  RadioGroup,
   RadioGroupDefinition,
+  TextInput,
   TextInputDefinition,
+  Tree,
   TreeDefinition,
+  TreeItem,
   TreeItemDefinition,
   ToggleButton,
   ToggleButtonStyles,
   ToggleButtonTemplate,
+  Tooltip,
   TooltipDefinition,
 } from "@fluentui/web-components";
-import { FASTElementDefinition, css } from "@microsoft/fast-element";
+import {
+  FASTElementDefinition,
+  css,
+  type Constructable,
+  type PartialFASTElementDefinition,
+} from "@microsoft/fast-element";
 
 import "./components"; // side-effect: registers docen-* custom elements
 import { injectOfficeTokens } from "./tokens";
@@ -87,13 +110,30 @@ class TabWithSyncedText extends Tab {
 }
 
 /**
+ * Composes a Fluent component (or a docen override) and defines it in the
+ * Fluent registry. fast-element 3.0 made `FASTElementDefinition.compose()`
+ * async (it returns a `Promise`), so each registration is awaited. Fluent
+ * exports its `*Definition` objects as untyped `PartialFASTElementDefinition`
+ * (no type parameter), and the template generic is invariant, so the partial
+ * is cast to the type's parameter before composing.
+ */
+async function defineElement<T extends Constructable<HTMLElement>>(
+  type: T,
+  def: PartialFASTElementDefinition,
+): Promise<void> {
+  (await FASTElementDefinition.compose(type, def as PartialFASTElementDefinition<T>)).define(
+    FluentDesignSystem.registry,
+  );
+}
+
+/**
  * Register the Fluent UI components docen wraps, plus a docen-named alias of
  * `fluent-tab` (`docen-ribbon-tab`). Call once at app bootstrap.
  *
  * `docen-ribbon-tab` is the fluent `Tab` implementation (same template/styles,
  * native indicator) registered under a docen name — not a hand-rolled tab.
  */
-export function registerComponents(): void {
+export async function registerComponents(): Promise<void> {
   if (registered) return;
   registered = true;
   // Fluent UI's Tablist calls `rootNode.getElementById(...)` in setTabs/
@@ -115,12 +155,11 @@ export function registerComponents(): void {
   // and add a column-gap so an icon (start slot) and its label have breathing
   // room. Pinned to subtle/transparent (the ribbon appearances); `.control`-like
   // internals expose no `part`, so the override is merged at registration.
-  FASTElementDefinition.compose(Button, {
+  await defineElement(Button, {
     name: "fluent-button",
     template: ButtonTemplate,
     styles: css`
-      ${ButtonStyles}
-      :host {
+      ${ButtonStyles}: host {
         column-gap: 6px;
       }
       :host([appearance="subtle"]),
@@ -129,14 +168,14 @@ export function registerComponents(): void {
         min-width: 0;
       }
     `,
-  }).define(FluentDesignSystem.registry);
-  CheckboxDefinition.define(FluentDesignSystem.registry);
-  DividerDefinition.define(FluentDesignSystem.registry);
+  });
+  await defineElement(Checkbox, CheckboxDefinition);
+  await defineElement(Divider, DividerDefinition);
   // fluent-dropdown: the built-in `.control { min-width: 160px }` forces every
   // combobox at least 160px wide. The control exposes no `part`, so the override
   // is merged into the composed styles at registration (css`` can interpolate
   // the original ElementStyles) — lets the combobox shrink to a font-size width.
-  FASTElementDefinition.compose(Dropdown, {
+  await defineElement(Dropdown, {
     name: "fluent-dropdown",
     template: DropdownTemplate,
     styles: css`
@@ -144,17 +183,16 @@ export function registerComponents(): void {
         min-width: 0;
       }
     `,
-  }).define(FluentDesignSystem.registry);
+  });
   // fluent-option: the short (font-size) combobox centers its options; every
   // combobox hides the selected checkmark. The checkmark lives in the option's
   // own shadow (no part), so the overrides are composed at registration and
   // pinned to data-center (center + hide) / data-no-checkmark (hide only).
-  FASTElementDefinition.compose(DropdownOption, {
+  await defineElement(DropdownOption, {
     name: "fluent-option",
     template: DropdownOptionTemplate,
     styles: css`
-      ${DropdownOptionStyles}
-      :host([data-center]) {
+      ${DropdownOptionStyles}: host([data-center]) {
         display: flex;
         justify-content: center;
         align-items: center;
@@ -173,12 +211,12 @@ export function registerComponents(): void {
         display: none;
       }
     `,
-  }).define(FluentDesignSystem.registry);
+  });
   // fluent-menu-button: the end-slot caret keeps a --icon-spacing inline-start
   // margin meant to separate it from a label. icon-only (the split caret) has
   // no label, so under justify-content:center that lone margin pushes the
   // glyph off-center — drop it for icon-only so the caret sits centered.
-  FASTElementDefinition.compose(MenuButton, {
+  await defineElement(MenuButton, {
     name: "fluent-menu-button",
     template: MenuButtonTemplate,
     styles: css`
@@ -188,18 +226,17 @@ export function registerComponents(): void {
         margin-inline-start: 0;
       }
     `,
-  }).define(FluentDesignSystem.registry);
+  });
   // fluent-menu: a large split stacks its primary over a caret bar
   // (data-vertical). The built-in split is horizontal; the column override is
   // pinned to data-vertical so ordinary menus/splits are untouched. Fluent also
   // paints a split divider on the primary's inline-end edge regardless of
   // appearance — clear it so a subtle split is fully flat until hover.
-  FASTElementDefinition.compose(Menu, {
+  await defineElement(Menu, {
     name: "fluent-menu",
     template: MenuTemplate,
     styles: css`
-      ${MenuStyles}
-      :host([data-vertical][split]) {
+      ${MenuStyles}: host([data-vertical][split]) {
         flex-direction: column;
       }
       /* Fluent paints a split divider on the primary's inline-end (and clears
@@ -227,7 +264,7 @@ export function registerComponents(): void {
         border-block-end-color: transparent;
       }
     `,
-  }).define(FluentDesignSystem.registry);
+  });
   // fluent-menu-item: a plain-text item (no start icon -> data-indent stays 0)
   // lands its content in the 20px indicator track (calc(--indent + 1) = col 1).
   // That track is fixed-width, so the content can't stretch the item — a long
@@ -236,7 +273,7 @@ export function registerComponents(): void {
   // stretches the item (and the popover) to fit. A radio item carries a
   // checkmark on col 1, so its content starts at col 2 (next rule). Items with
   // a start icon keep Fluent's default (data-indent 1/2 -> col 2/3, icon-then-text).
-  FASTElementDefinition.compose(MenuItem, {
+  await defineElement(MenuItem, {
     name: "fluent-menu-item",
     template: MenuItemTemplate,
     styles: css`
@@ -253,8 +290,8 @@ export function registerComponents(): void {
         grid-column: 2 / -1;
       }
     `,
-  }).define(FluentDesignSystem.registry);
-  MenuListDefinition.define(FluentDesignSystem.registry);
+  });
+  await defineElement(MenuList, MenuListDefinition);
   // fluent-drawer (type=inline = side-by-side, pushes content — Office sidebar
   // style) + fluent-tree/fluent-tree-item for the outline panel.
   // fluent-drawer: inline drawers are content-pushing sidebars. The built-in
@@ -263,52 +300,50 @@ export function registerComponents(): void {
   // past the already-collapsed host — reads as the pane swelling then
   // vanishing. Inline panes should open/close instantly, so drop the
   // transition for inline.
-  FASTElementDefinition.compose(Drawer, {
+  await defineElement(Drawer, {
     name: "fluent-drawer",
     template: DrawerTemplate,
     styles: css`
-      ${DrawerStyles}
-      :host([type="inline"]) dialog {
+      ${DrawerStyles}: host([type="inline"]) dialog {
         transition: none;
       }
     `,
-  }).define(FluentDesignSystem.registry);
-  DrawerBodyDefinition.define(FluentDesignSystem.registry);
+  });
+  await defineElement(DrawerBody, DrawerBodyDefinition);
   // fluent-dialog (type=modal = native <dialog> showModal → backdrop + ESC) +
   // fluent-dialog-body (title / content / action regions) for <docen-dialog>.
-  DialogDefinition.define(FluentDesignSystem.registry);
-  DialogBodyDefinition.define(FluentDesignSystem.registry);
-  TreeDefinition.define(FluentDesignSystem.registry);
-  TreeItemDefinition.define(FluentDesignSystem.registry);
+  await defineElement(Dialog, DialogDefinition);
+  await defineElement(DialogBody, DialogBodyDefinition);
+  await defineElement(Tree, TreeDefinition);
+  await defineElement(TreeItem, TreeItemDefinition);
   // fluent-accordion / fluent-accordion-item: collapsible sections for the
   // properties panel (radio groups, label+input rows).
-  accordionDefinition.define(FluentDesignSystem.registry);
-  accordionItemDefinition.define(FluentDesignSystem.registry);
+  await defineElement(Accordion, AccordionDefinition);
+  await defineElement(AccordionItem, AccordionItemDefinition);
   // fluent-radio / fluent-radio-group: single-choice rows in the properties panel.
-  RadioDefinition.define(FluentDesignSystem.registry);
-  RadioGroupDefinition.define(FluentDesignSystem.registry);
+  await defineElement(Radio, RadioDefinition);
+  await defineElement(RadioGroup, RadioGroupDefinition);
   // fluent-field: wraps each radio with its label (label-position="after" =
   // radio on the start, text on the end) — the radio itself renders no text.
-  FieldDefinition.define(FluentDesignSystem.registry);
-  SwitchDefinition.define(FluentDesignSystem.registry);
+  await defineElement(Field, FieldDefinition);
+  await defineElement(Switch, SwitchDefinition);
   // fluent-tab: use TabWithSyncedText so the width placeholder re-syncs when
   // the tab's text changes (see TabWithSyncedText) — tabs shrink to their
   // text, including after a locale switch Fluent's one-shot set misses.
-  FASTElementDefinition.compose(TabWithSyncedText, {
+  await defineElement(TabWithSyncedText, {
     name: "fluent-tab",
     template: TabTemplate,
     styles: TabStyles,
-  }).define(FluentDesignSystem.registry);
-  ListboxDefinition.define(FluentDesignSystem.registry);
-  TablistDefinition.define(FluentDesignSystem.registry);
-  TextInputDefinition.define(FluentDesignSystem.registry);
+  });
+  await defineElement(Listbox, ListboxDefinition);
+  await defineElement(Tablist, TablistDefinition);
+  await defineElement(TextInput, TextInputDefinition);
   // fluent-toggle-button: same padding/min-width/gap tightening as the button.
-  FASTElementDefinition.compose(ToggleButton, {
+  await defineElement(ToggleButton, {
     name: "fluent-toggle-button",
     template: ToggleButtonTemplate,
     styles: css`
-      ${ToggleButtonStyles}
-      :host {
+      ${ToggleButtonStyles}: host {
         column-gap: 6px;
       }
       :host([appearance="subtle"]),
@@ -317,14 +352,14 @@ export function registerComponents(): void {
         min-width: 0;
       }
     `,
-  }).define(FluentDesignSystem.registry);
-  TooltipDefinition.define(FluentDesignSystem.registry);
+  });
+  await defineElement(Tooltip, TooltipDefinition);
   // docen alias of fluent Tab — fluent's Tab implementation (same template/
   // styles, native indicator) under a docen name. Mirrors how fluent builds
   // TabDefinition.
-  FASTElementDefinition.compose(TabWithSyncedText, {
+  await defineElement(TabWithSyncedText, {
     name: "docen-ribbon-tab",
     template: TabTemplate,
     styles: TabStyles,
-  }).define(FluentDesignSystem.registry);
+  });
 }

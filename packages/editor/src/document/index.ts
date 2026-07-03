@@ -740,6 +740,14 @@ class DocenDocument extends HTMLElement {
     ];
   }
 
+  /** The underlying Tiptap Editor (undefined before connect / after disconnect).
+   *  Exposed so a host (the @docen/vue adapter, or any parent element) can drive
+   *  commands programmatically — setContent / getJSON / chain / ... — without
+   *  routing through the ribbon. */
+  get editor(): Editor | undefined {
+    return this.#editor;
+  }
+
   attributeChangedCallback(name: string, _old: string, value: string): void {
     switch (name) {
       case "editable":
@@ -1175,7 +1183,7 @@ class DocenDocument extends HTMLElement {
     if (!this.shadowRoot) {
       this.attachShadow({ mode: "open" }).innerHTML = TEMPLATE;
     }
-    registerComponents();
+    await registerComponents();
     applyTheme("light");
 
     this.#fileInput = this.shadowRoot!.querySelector<HTMLInputElement>("#file-input")!;
