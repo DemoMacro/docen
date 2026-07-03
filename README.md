@@ -12,6 +12,7 @@
 | Package                                      | Version                                            | Description                                                                              |
 | -------------------------------------------- | -------------------------------------------------- | ---------------------------------------------------------------------------------------- |
 | [docen](./packages/docen/README.md)          | ![npm](https://img.shields.io/npm/v/docen)         | All-in-one — headless Markdown/HTML/DOCX conversion + the full `<docen-document>` editor |
+| [@docen/vue](./packages/vue/README.md)       | ![npm](https://img.shields.io/npm/v/@docen/vue)    | Vue 3 adapter — `<DocenDocument>` component (v-model + v-slot editor)                    |
 | [@docen/editor](./packages/editor/README.md) | ![npm](https://img.shields.io/npm/v/@docen/editor) | Assembly layer — Fluent UI shell + docx engine into `<docen-document>`                   |
 | [@docen/docx](./packages/docx/README.md)     | ![npm](https://img.shields.io/npm/v/@docen/docx)   | Tiptap DOCX editor + converters, powered by @office-open/docx                            |
 
@@ -74,6 +75,35 @@ $ pnpm add @docen/editor
 </script>
 ```
 
+### Vue (`@docen/vue`)
+
+A typed `<DocenDocument>` component — `v-model` for content, a `v-slot="{ editor }"` scope, and a template-ref expose — for Vue 3:
+
+```bash
+$ pnpm add @docen/vue
+```
+
+```vue
+<script setup lang="ts">
+import { ref } from "vue";
+import { DocenDocument } from "@docen/vue";
+import { parseDOCX } from "@docen/docx";
+
+// v-model keeps content in sync; the template ref exposes the Tiptap editor.
+const content = ref("<p>Hello</p>");
+const editorRef = ref();
+
+async function open(file: File) {
+  const json = await parseDOCX(await file.arrayBuffer());
+  editorRef.value?.editor?.commands.setContent(json);
+}
+</script>
+
+<template>
+  <DocenDocument ref="editorRef" v-model="content" filename="Welcome.docx" editable />
+</template>
+```
+
 ## Development
 
 ### Prerequisites
@@ -119,6 +149,7 @@ We welcome contributions! See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full 
 
 - 📫 [Report Issues](https://github.com/DemoMacro/docen/issues)
 - 📚 [docen Documentation](./packages/docen/README.md)
+- 📚 [@docen/vue Documentation](./packages/vue/README.md)
 - 📚 [@docen/editor Documentation](./packages/editor/README.md)
 - 📚 [@docen/docx Documentation](./packages/docx/README.md)
 

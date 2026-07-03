@@ -1,0 +1,55 @@
+{
+  "name": "@docen/vue",
+  "version": "0.3.5",
+  "description": "Vue 3 adapter for @docen/editor — typed <DocenDocument> component (v-model content, v-slot editor, ref expose)",
+  "keywords": [
+    "docen",
+    "docx",
+    "editor",
+    "tiptap",
+    "vue",
+    "web-components"
+  ],
+  "homepage": "https://github.com/DemoMacro/docen#readme",
+  "bugs": {
+    "url": "https://github.com/DemoMacro/docen/issues"
+  },
+  "license": "MIT",
+  "author": {
+    "name": "Demo Macro",
+    "email": "abc@imst.xyz",
+    "url": "https://www.demomacro.com/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DemoMacro/docen.git"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "dist/index.mjs",
+  "types": "dist/index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    }
+  },
+  "scripts": {
+    "dev": "basis build --stub",
+    "build": "vp pack",
+    "prepack": "pnpm build"
+  },
+  "dependencies": {
+    "@docen/editor": "workspace:*"
+  },
+  "devDependencies": {
+    "@docen/docx": "workspace:*",
+    "@vitejs/plugin-vue": "6.0.7",
+    "vue": "3.5.39"
+  },
+  "peerDependencies": {
+    "vue": ">=3.3.0"
+  }
+}

@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@docen/vue — document demo</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        font-family:
+          "Segoe UI",
+          system-ui,
+          -apple-system,
+          sans-serif;
+        color: #3b3b3b;
+      }
+      #app {
+        height: 100%;
+      }
+      docen-document {
+        display: block;
+        height: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <!--
+      Same setup as the @docen/editor demo, but the <docen-document> web
+      component is mounted through the Vue <DocenDocument> wrapper. The SFC is
+      compiled on the fly by @vitejs/plugin-vue (vite.config.ts).
+    -->
+    <div id="app"></div>
+
+    <script type="module">
+      import { createApp } from "vue";
+      import App from "./index.vue";
+      createApp(App).mount("#app");
+    </script>
+  </body>
+</html>
