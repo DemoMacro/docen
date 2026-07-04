@@ -104,11 +104,20 @@ const styles = css`
     z-index: 5;
     height: 3px;
     overflow: hidden;
-    transition: height 0.12s ease;
+    /* Collapse to a 3px transparent sliver. opacity (not overflow) hides the
+       whole subtree: the active-tab indicator is position:fixed, so overflow:
+       hidden can't clip it and it would otherwise bleed out of the sliver as a
+       stray blue bar. opacity:0 still leaves the sliver hit-testable, so the
+       :hover below still fires. */
+    opacity: 0;
+    transition:
+      height 0.12s ease,
+      opacity 0.12s ease;
   }
   :host([data-ribbon-mode="auto-hide"]:hover) {
     height: auto;
     overflow: visible;
+    opacity: 1;
     background: var(--docen-color-bg, #fff);
     border-bottom: 1px solid var(--docen-color-divider, #e2e2e2);
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.12);
@@ -188,6 +197,12 @@ class DocenRibbon extends FASTElement {
   #unobserveLang?: () => void;
   #boundTablist?: HTMLElement | null;
   #boundTabs = new WeakSet<HTMLElement>();
+  /** True while #updateCheck syncs the `checked` attributes. fluent-menu-item
+   *  emits `change` from its `checkedChanged` whenever `checked` flips — including
+   *  when WE toggle it here. Without this guard, unchecking the previously-active
+   *  item re-fires its `change` listener (#setMode) and reverts the just-set mode,
+   *  so every non-"always" selection bounces back to always (feedback loop). */
+  #syncing = false;
 
   get currentMode(): string {
     return this.ribbonMode ?? "always";
@@ -309,7 +324,10 @@ class DocenRibbon extends FASTElement {
       // stretches the popover to fit instead of being clipped at the col-2 track.
       item.setAttribute("data-mode", mode);
       item.textContent = t(key);
-      item.addEventListener("change", () => this.#setMode(mode));
+      item.addEventListener("change", () => {
+        if (this.#syncing) return;
+        this.#setMode(mode);
+      });
       list.append(item);
     }
     this.#updateCheck();
@@ -325,12 +343,16 @@ class DocenRibbon extends FASTElement {
   }
 
   #updateCheck(): void {
+    // Guard the synchronous emit chain toggleAttribute → checkedChanged →
+    // $emit('change') → our listener. See #syncing.
+    this.#syncing = true;
     const current = this.currentMode;
     this.doList?.querySelectorAll<HTMLElement>("fluent-menu-item").forEach((item) => {
       // fluent-menu-item renders its own checkmark for role="menuitemradio"
       // when the `checked` attribute is set — no custom ::before needed.
       item.toggleAttribute("checked", item.getAttribute("data-mode") === current);
     });
+    this.#syncing = false;
   }
 }
 
