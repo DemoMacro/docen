@@ -811,6 +811,14 @@ function layoutImageLines(
       const h = (child.attrs as { height?: number }).height;
       let iw = typeof w === "number" && w > 0 ? w : 0;
       let ih = typeof h === "number" && h > 0 ? h : 0;
+      // 无尺寸图（attrs 无 width/height，如未精化的 http 图）占位：与
+      // image.ts renderHTML 的 CSS（width:100% + aspect-ratio:4/3）一致，
+      // 避免分页用 strut（0 高）导致几百张离屏 lazy 图全堆少数页。fetch 完
+      // image-cap 精化设实际尺寸后 attrs 有值，此分支跳过。
+      if (iw === 0 && ih === 0) {
+        iw = width;
+        ih = Math.round(width * 0.75);
+      }
       // The renderer clamps a wide image with `img { max-width: 100%; height:
       // auto }` so an oversized import never overflows the page. Mirror that
       // here: an image wider than the content width is credited the content

@@ -897,8 +897,8 @@ export const PagePlugin = Extension.create<PagePluginOptions>({
     const debounceMs = this.options.debounceMs ?? 300;
     let timer: ReturnType<typeof setTimeout> | undefined;
     // Whether the pending reflow should scroll the caret back into view. OR'd
-    // across every schedule() inside a debounce window, so a reflow triggered by
-    // both an edit and a late image decode still follows the caret.
+    // across every schedule() inside a debounce window, so multiple edits in a
+    // window still follow the caret.
     let pendingScroll = false;
 
     const runRaf = (): void => {
@@ -921,27 +921,10 @@ export const PagePlugin = Extension.create<PagePluginOptions>({
       runRaf();
     };
 
-    // Re-flow when an UNSIZED image finishes decoding. `load`/`error` do not
-    // bubble, so we capture at the editor surface — one binding covers every
-    // image, even ones inserted later. A sized image (carrying width/height
-    // HTML attrs) decodes into its already-reserved box, so its load/error
-    // can't change layout — skip it. Only unsized images (pasted/manual, whose
-    // box is unknown until decoded) drive convergence past a loading image.
-    const onMediaReady = (e: Event): void => {
-      const img = e.target;
-      if (!(img instanceof HTMLImageElement)) return;
-      // img.width/height mirror the HTML width/height attrs renderHTML emits;
-      // 0 means no size reserved → layout depends on the decoded image.
-      if (img.width || img.height) return;
-      schedule();
-    };
-
     return [
       new Plugin({
         key: flowKey,
-        view(editorView) {
-          editorView.dom.addEventListener("load", onMediaReady, true);
-          editorView.dom.addEventListener("error", onMediaReady, true);
+        view() {
           return {
             update(view, prevState) {
               // Only re-flow on real doc changes; a no-op or our own flow tr
@@ -965,8 +948,6 @@ export const PagePlugin = Extension.create<PagePluginOptions>({
               schedule(true);
             },
             destroy() {
-              editorView.dom.removeEventListener("load", onMediaReady, true);
-              editorView.dom.removeEventListener("error", onMediaReady, true);
               if (timer) clearTimeout(timer);
             },
           };

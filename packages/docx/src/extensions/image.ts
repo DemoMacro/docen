@@ -493,6 +493,13 @@ export const Image = BaseImage.extend({
       ...(isRemoteImage(attrs.src) ? REMOTE_IMG_ATTRS : {}),
     };
     const styles = renderImageStyles(attrs);
+    // 无尺寸图（attrs 无 width/height，如未精化的 http 图）占位：CSS 预留盒，
+    // 让浏览器在 decode 前布局就确定，避免加载/滚动 lazy load 触发 reflow。
+    // 4:3 比例与 measure.layoutImageLines 的默认占位一致（edit == render）。
+    // fetch 完 image-cap 设实际 attrs.width/height 后，此分支跳过。
+    if (attrs.width == null && attrs.height == null) {
+      styles.push("width:100%", "aspect-ratio:4/3");
+    }
     if (styles.length > 0) htmlAttrs.style = styles.join(";");
     attachRawAttrs(htmlAttrs, attrs);
     if (floatAnchor) htmlAttrs["data-float-anchor"] = floatAnchor;

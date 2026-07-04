@@ -166,15 +166,23 @@ async function fetchToDataUrl(url: string): Promise<string | null> {
 }
 
 /** Stamp `patch` onto every image node whose `src` matches, in one transaction.
- *  No-op when none match or the view is gone. */
-function markupMatchingSrc(view: EditorView, src: string, patch: Record<string, unknown>): void {
+ *  `patch` may be a function of the node's current attrs, so per-node decisions
+ *  (e.g. skip sizing when the node already carries explicit dimensions) are
+ *  made against the live attrs at each match. No-op when none match or the view
+ *  is gone. */
+function markupMatchingSrc(
+  view: EditorView,
+  src: string,
+  patch: Record<string, unknown> | ((attrs: Record<string, unknown>) => Record<string, unknown>),
+): void {
   if (view.isDestroyed) return;
   const { state, dispatch } = view;
   let tr = state.tr;
   let hit = false;
   state.doc.descendants((node, pos) => {
     if (node.type.name === "image" && node.attrs.src === src) {
-      tr = tr.setNodeMarkup(pos, null, { ...node.attrs, ...patch });
+      const p = typeof patch === "function" ? patch(node.attrs as Record<string, unknown>) : patch;
+      tr = tr.setNodeMarkup(pos, null, { ...node.attrs, ...p });
       hit = true;
     }
     return true;
@@ -229,7 +237,25 @@ async function embedHttpImage(view: EditorView, src: string, fetching: Set<strin
   try {
     const dataUrl = await fetchToDataUrl(src);
     if (dataUrl) {
-      markupMatchingSrc(view, src, { src: dataUrl });
+      // Per-node decision: a node that already carries explicit dimensions
+      // (docx extent / HTML width-height / manual sizing) keeps them — only
+      // src is inlined (for export). A node with no width (unsized http image,
+      // laid out via the measure/renderHTML 4:3 placeholder) is refined to the
+      // data URL's real dimensions now, in one reflow. This keeps pagination
+      // stable for sized images while letting unsized ones converge.
+      const natural = naturalSize(dataUrl);
+      const contentW =
+        sectionContentDims(
+          (view.state.doc.attrs as { sectionProperties?: unknown }).sectionProperties,
+        )?.width ?? domContentWidth(view);
+      markupMatchingSrc(view, src, (attrs) => {
+        if (attrs.width != null) return { src: dataUrl };
+        if (!natural) return { src: dataUrl };
+        if (contentW && natural.width > contentW) {
+          return { src: dataUrl, ...capSize(natural.width, natural.height, contentW) };
+        }
+        return { src: dataUrl, width: natural.width, height: natural.height };
+      });
       return;
     }
     // fetch failed (CORS/network): the src stays http — remember it so the next
@@ -378,6 +404,10 @@ export const ImageCap = Extension.create({
             // so it's skipped too (idempotent). A CORS-blocked web image is
             // capped in embedHttpImage, where its width is stamped.
             if (attrs.width != null) return true;
+            // 无 width 的图：dataUrl 图（手动粘贴文件）用 imageMeta 同步读尺寸 cap；
+            // http 图无法同步读（naturalSize 返回 null），跳过——其占位由
+            // measure.layoutImageLines + image.ts renderHTML 的 CSS（width:100% +
+            // aspect-ratio:4/3）双层兜底，fetch 完由 embedHttpImage 精化设实际尺寸。
             const natural = naturalSize(attrs.src);
             const displayW = natural?.width;
             if (displayW == null || displayW <= 0) return true;
