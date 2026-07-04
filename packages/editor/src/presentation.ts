@@ -1,5 +1,5 @@
 /**
- * `<docen-presentation>` — PPTX editor super-component (stub).
+ * `<docen-presentation>` — PPTX editor element (stub).
  *
  * Placeholder for the future LeaferJS-based presentation. Signature mirrors
  * `<docen-document>` so the public API is stable when the engine lands.

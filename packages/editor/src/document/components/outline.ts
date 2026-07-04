@@ -8,7 +8,7 @@ import {
   ref,
 } from "@microsoft/fast-element";
 
-import { observeLang, t } from "../../i18n/localize";
+import { observeLang, t } from "../../ui/i18n/localize";
 
 /** A single outline (TOC) entry. `children` nest recursively. */
 export interface OutlineItem {

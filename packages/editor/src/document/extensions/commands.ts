@@ -66,9 +66,6 @@ declare module "@tiptap/core" {
       "insert-table": () => ReturnType;
       link: (href?: string) => ReturnType;
       style: (styleId?: string) => ReturnType;
-      // History
-      undo: () => ReturnType;
-      redo: () => ReturnType;
       // Editing
       "change-case": (mode?: string) => ReturnType;
       sort: () => ReturnType;
@@ -469,16 +466,6 @@ export const DocumentCommands = Extension.create({
           }
           return chain().setParagraph().updateAttributes("paragraph", { styleId: id }).run();
         },
-
-      // ── History ──
-      undo:
-        () =>
-        ({ commands }) =>
-          commands.undo(),
-      redo:
-        () =>
-        ({ commands }) =>
-          commands.redo(),
 
       // ── Editing — change case / sort / multilevel list level ──
       // Transform selected text to the requested case and replace the

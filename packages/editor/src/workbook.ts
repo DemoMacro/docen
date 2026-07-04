@@ -1,5 +1,5 @@
 /**
- * `<docen-workbook>` — XLSX editor super-component (stub).
+ * `<docen-workbook>` — XLSX editor element (stub).
  *
  * Placeholder for the future RevoGrid-based workbook. Signature mirrors
  * `<docen-document>` so the public API is stable when the engine lands.

@@ -19,6 +19,7 @@ import {
   type StylesOptions,
 } from "@docen/docx";
 import type { Editor } from "@docen/docx/core";
+import { attr, css, customElement, html } from "@microsoft/fast-element";
 import type { Mark } from "@tiptap/pm/model";
 import { EditorState } from "@tiptap/pm/state";
 import {
@@ -40,8 +41,13 @@ import {
   t,
   type DocenAddin,
 } from "../ui";
-import type { OutlineItem } from "../ui/components/workspace/outline";
+// Side-effect: register the document-specific UI components moved out of the
+// shared ui/ barrel — <docen-format-pane> (properties fallback) and
+// <docen-outline> (navigation Headings tab).
+import "./components/format-pane";
+import "./components/outline";
 import { createDefaultAddin } from "./addin";
+import type { OutlineItem } from "./components/outline";
 import { WIRED_DISPATCH } from "./extensions/commands";
 // Side-effect import: registers the ribbon/header translation tables.
 import "./i18n";
@@ -61,6 +67,22 @@ const escapeHtml = (s: string): string =>
   s.replace(/[&<>"']/g, (c) =>
     c === "&" ? "&amp;" : c === "<" ? "&lt;" : c === ">" ? "&gt;" : c === '"' ? "&quot;" : "&#39;",
   );
+
+/** Detect a document's format from its filename + MIME for open(). Extension
+ *  first (the picker filters on it), MIME as a fallback for platforms that fill
+ *  it in. Throws on an unrecognized type so the caller surfaces the error
+ *  rather than silently parsing garbage. */
+function detectOpenFormat(file: File): "docx" | "markdown" | "html" {
+  const name = file.name.toLowerCase();
+  if (name.endsWith(".docx")) return "docx";
+  if (name.endsWith(".md") || name.endsWith(".markdown")) return "markdown";
+  if (name.endsWith(".html") || name.endsWith(".htm")) return "html";
+  const type = file.type;
+  if (type.includes("wordprocessingml.document")) return "docx";
+  if (type === "text/markdown") return "markdown";
+  if (type === "text/html") return "html";
+  throw new Error(`Unsupported file type: ${file.name || type || "(unknown)"}`);
+}
 
 /** Per-format metadata for #saveAs: the picker description, the MIME anchoring
  *  its accept filter, and the extension stamped on the suggested name. The MIME
@@ -109,35 +131,71 @@ const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   "print",
 ]);
 
-const TEMPLATE = `
-  <style>
-    /* Cascade layers — declared ONCE up front so layer ORDER (not specificity)
+const documentStyles = css`
+  /* Cascade layers — declared ONCE up front so layer ORDER (not specificity)
        governs priority below. reset strips UA defaults; docxStyles holds the
        document's named styles (styles.xml). Both lose to unlayered rules (page
        geometry, crop marks, inline OOXML styles). */
-    @layer reset, docxStyles;
-    :host { display: flex; flex-direction: column; height: 100%; }
-    /* Office ribbon group layout helpers — a large button beside stacked rows of
+  @layer reset, docxStyles;
+  :host {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
+  /* Office ribbon group layout helpers — a large button beside stacked rows of
        small icon-only buttons. Applied to light-DOM wrappers in the ribbon. */
-    .rb-col { display: flex; flex-direction: column; gap: 2px; }
-    .rb-row { display: flex; flex-direction: row; align-items: center; gap: 2px; flex-wrap: wrap; }
-    /* Small icon-only buttons as a 3-row column-flow grid: buttons stack into
+  .rb-col {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .rb-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 2px;
+    flex-wrap: wrap;
+  }
+  /* Small icon-only buttons as a 3-row column-flow grid: buttons stack into
        columns of ≤3 (Word's compact group layout), not a flat single row. */
-    .rb-grid { display: grid; grid-template-rows: repeat(3, auto); grid-auto-flow: column; gap: 2px; align-content: start; }
-    .rb-vsep { width: 1px; align-self: stretch; background: var(--docen-color-divider, #e1e1e1); margin: 0 2px; }
-    .avatar {
-      display: inline-flex; align-items: center; justify-content: center;
-      width: 20px; height: 20px; border-radius: 50%;
-      background: var(--docen-color-brand, #0078d4); color: #fff;
-      font-size: 10px; font-weight: 600; margin-inline-end: 4px;
-    }
-    .avatar-img { object-fit: cover; background: none; }
-    /* The editor wrapper (.docen-pages) hosts the Tiptap .ProseMirror, which
+  .rb-grid {
+    display: grid;
+    grid-template-rows: repeat(3, auto);
+    grid-auto-flow: column;
+    gap: 2px;
+    align-content: start;
+  }
+  .rb-vsep {
+    width: 1px;
+    align-self: stretch;
+    background: var(--docen-color-divider, #e1e1e1);
+    margin: 0 2px;
+  }
+  .avatar {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--docen-color-brand, #0078d4);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 600;
+    margin-inline-end: 4px;
+  }
+  .avatar-img {
+    object-fit: cover;
+    background: none;
+  }
+  /* The editor wrapper (.docen-pages) hosts the Tiptap .ProseMirror, which
        renders one .docen-page NODE per page. The wrapper just centers the
        flow; each page node is its own fixed paper sheet (C-route — see
        CLAUDE.md). */
-    .docen-pages .ProseMirror { padding: 0; }
-    /* CSS reset inside the editor surface — strip the browser's UA defaults so
+  .docen-pages .ProseMirror {
+    padding: 0;
+  }
+  /* CSS reset inside the editor surface — strip the browser's UA defaults so
        OOXML properties (inline styles + named styles in the docxStyles layer)
        are the SOLE source of truth. The UA stylesheet gives <p>/<h1-6> a 1em
        margin, resets heading font-size/weight, pads <ul>/<ol>, etc. — all of
@@ -147,43 +205,55 @@ const TEMPLATE = `
        real fix for the Heading bold/centering bug (the old specificity juggling
        is gone). Table borders and list markers are handled in their own rules
        below. */
-    @layer reset {
-      .docen-pages .ProseMirror p,
-      .docen-pages .ProseMirror h1, .docen-pages .ProseMirror h2,
-      .docen-pages .ProseMirror h3, .docen-pages .ProseMirror h4,
-      .docen-pages .ProseMirror h5, .docen-pages .ProseMirror h6,
-      .docen-pages .ProseMirror blockquote, .docen-pages .ProseMirror figure,
-      .docen-pages .ProseMirror pre,
-      .docen-pages .ProseMirror ul, .docen-pages .ProseMirror ol {
-        margin: 0; padding: 0;
-      }
-      /* Clear the UA heading defaults (2em font-size, bold weight) so headings
+  @layer reset {
+    .docen-pages .ProseMirror p,
+    .docen-pages .ProseMirror h1,
+    .docen-pages .ProseMirror h2,
+    .docen-pages .ProseMirror h3,
+    .docen-pages .ProseMirror h4,
+    .docen-pages .ProseMirror h5,
+    .docen-pages .ProseMirror h6,
+    .docen-pages .ProseMirror blockquote,
+    .docen-pages .ProseMirror figure,
+    .docen-pages .ProseMirror pre,
+    .docen-pages .ProseMirror ul,
+    .docen-pages .ProseMirror ol {
+      margin: 0;
+      padding: 0;
+    }
+    /* Clear the UA heading defaults (2em font-size, bold weight) so headings
          take the doc default unless a named style overrides — same reset layer,
          so a .docx-style-Heading* font-size/font-weight always wins. */
-      .docen-page h1, .docen-page h2,
-      .docen-page h3, .docen-page h4,
-      .docen-page h5, .docen-page h6 {
-        font-size: inherit; font-weight: inherit;
-      }
+    .docen-page h1,
+    .docen-page h2,
+    .docen-page h3,
+    .docen-page h4,
+    .docen-page h5,
+    .docen-page h6 {
+      font-size: inherit;
+      font-weight: inherit;
     }
-    /* .ProseMirror's default focus outline paints a black border on every
+  }
+  /* .ProseMirror's default focus outline paints a black border on every
        click — drop it (the caret + selection still mark focus). */
-    .docen-pages .ProseMirror:focus { outline: none; }
-    /* Each page node = a fixed paper sheet. 'height' (NOT min-height) +
+  .docen-pages .ProseMirror:focus {
+    outline: none;
+  }
+  /* Each page node = a fixed paper sheet. 'height' (NOT min-height) +
        overflow: hidden forces overflow into the next page instead of
        stretching the sheet — the C-route invariant. Geometry comes from
        <docen-document-area> CSS vars inherited through the shadow boundary. */
-    .docen-pages .docen-page {
-      width: var(--docen-page-width, 210mm);
-      height: var(--docen-page-min-height, 297mm);
-      overflow: hidden;
-      box-sizing: border-box;
-      padding: var(--docen-page-margin, 25.4mm);
-      margin: 0 auto var(--docen-page-gap, 24px);
-      background-color: var(--docen-color-page, #ffffff);
-      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
-      position: relative;
-      /* content-visibility:auto skips layout/paint for off-screen pages — the
+  .docen-pages .docen-page {
+    width: var(--docen-page-width, 210mm);
+    height: var(--docen-page-min-height, 297mm);
+    overflow: hidden;
+    box-sizing: border-box;
+    padding: var(--docen-page-margin, 25.4mm);
+    margin: 0 auto var(--docen-page-gap, 24px);
+    background-color: var(--docen-color-page, #ffffff);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+    position: relative;
+    /* content-visibility:auto skips layout/paint for off-screen pages — the
          main scroll/load perf win for large (1000+ page) docs. Safe now because
          the paginator no longer reads page DOM for its overflow basis: reflow
          packs against sectionContentDims(section).height (deterministic,
@@ -193,105 +263,99 @@ const TEMPLATE = `
          the real box and the skipped-page rect matches the laid-out rect → reflow
          still converges. Print forces visible (@media print below); find-in-page,
          selection, and IME keep working — DOM nodes stay, only layout is skipped. */
-      content-visibility: auto;
-    }
-    /* A wrapNone floating drawing (image / wpg group) anchored to its paragraph
+    content-visibility: auto;
+  }
+  /* A wrapNone floating drawing (image / wpg group) anchored to its paragraph
        (verticalPosition.relative = paragraph, the OOXML default) renders
        position:absolute. Its offsetParent must be that paragraph, not the page
        box, or top/left resolve from the page top and the drawing floats over
        the heading/body text. Making the anchor <p> position:relative pins the
        drawing to the blank line it belongs on (matches Word: a floating group
        overlays its own empty paragraph, over the body text below it). */
-    .docen-pages .docen-page p:has([data-float-anchor="paragraph"]) {
-      position: relative;
-    }
-    /* A paragraph with a leader tab-stop (class docx-tab-leader, set by
+  .docen-pages .docen-page p:has([data-float-anchor="paragraph"]) {
+    position: relative;
+  }
+  /* A paragraph with a leader tab-stop (class docx-tab-leader, set by
        Paragraph.renderHTML from attrs.tabStops) renders a dotted leader between
        the title and page number — MS Word's TOC "....." connector. The tab atom
        (span.docx-tab) flexes to fill the gap and paints the dots; the page
        number sits at the right edge. The paragraph stays single-line (TOC entries
        never wrap), so flex keeps the measured line height intact. */
-    .docen-pages .docen-page p.docx-tab-leader {
-      display: flex;
-      align-items: baseline;
-    }
-    .docen-pages .docen-page p.docx-tab-leader .docx-tab {
-      flex: 1;
-      margin: 0 0.3em;
-      border-bottom: 1px dotted currentColor;
-      opacity: 0.5;
-    }
-    /* Hyperlinks render via the Link mark (<a href>), but their color / underline
+  .docen-pages .docen-page p.docx-tab-leader {
+    display: flex;
+    align-items: baseline;
+  }
+  .docen-pages .docen-page p.docx-tab-leader .docx-tab {
+    flex: 1;
+    margin: 0 0.3em;
+    border-bottom: 1px dotted currentColor;
+    opacity: 0.5;
+  }
+  /* Hyperlinks render via the Link mark (<a href>), but their color / underline
        / cursor come from the run's own rPr (textStyle mark) — NOT the browser's
        default blue / underline / pointer. Reset the UA anchor styling so the
        OOXML run color is the sole source of truth: a TOC entry's runs carry no
        Hyperlink rStyle, so they keep the paragraph style's color (black); a
        styled hyperlink run carries its own color/underline. Word hyperlinks are
        static, so suppress visited/hover/active color shifts too. */
-    .docen-pages .docen-page a,
-    .docen-pages .docen-page a:visited,
-    .docen-pages .docen-page a:hover,
-    .docen-pages .docen-page a:active {
-      color: inherit;
-      text-decoration: inherit;
-      cursor: inherit;
-    }
-    /* Track Changes (w:ins/w:del) — the Insertion/Deletion marks wrap the
+  .docen-pages .docen-page a,
+  .docen-pages .docen-page a:visited,
+  .docen-pages .docen-page a:hover,
+  .docen-pages .docen-page a:active {
+    color: inherit;
+    text-decoration: inherit;
+    cursor: inherit;
+  }
+  /* Track Changes (w:ins/w:del) — the Insertion/Deletion marks wrap the
        revised text. Word renders inserted text colored + underlined and
        deleted text colored + strikethrough (the text stays visible until
        accept/reject). Colors follow Word's default palette. */
-    .docen-pages .docen-page .docen-insertion {
-      color: #2e7d32;
-      text-decoration: underline;
-    }
-    .docen-pages .docen-page .docen-deletion {
-      color: #c62828;
-      text-decoration: line-through;
-    }
-    /* Images cap to the section content width the way Word caps them: a wider
+  .docen-pages .docen-page .docen-insertion {
+    color: #2e7d32;
+    text-decoration: underline;
+  }
+  .docen-pages .docen-page .docen-deletion {
+    color: #c62828;
+    text-decoration: line-through;
+  }
+  /* Images cap to the section content width the way Word caps them: a wider
        image scales DOWN to fit, never upscales. The ImageCap extension sets the
        real width on data-URL images it can sync-decode; this rule is the visual
        fallback for what it skips (http(s) URLs, docs without section geometry)
        so nothing overflows the fixed page box. crop images render an enlarged
        inner <img>, so opt them out or the cap collapses the crop geometry. */
-    .docen-pages .docen-page img {
-      max-width: 100%;
-      height: auto;
-    }
-    .docen-pages .docen-page span[data-image="crop"] > img {
-      max-width: none;
-    }
-    /* EMF/WMF (Office GDI vector) images can't be decoded by the browser, so
+  .docen-pages .docen-page img {
+    max-width: 100%;
+    height: auto;
+  }
+  .docen-pages .docen-page span[data-image="crop"] > img {
+    max-width: none;
+  }
+  /* EMF/WMF (Office GDI vector) images can't be decoded by the browser, so
        Image.renderHTML emits a div[data-image=vector] placeholder carrying the
        real art in data-vector-src. Paint it as a dashed, hatched, labeled box
        so the gap reads as "unsupported vector art" instead of a silent empty
        rectangle. Inline width/height (from the image extent) size the box;
        inline-block (set in renderImageStyles) keeps it in-flow. */
-    .docen-pages .docen-page [data-image="vector"] {
-      box-sizing: border-box;
-      border: 1px dashed #b8b8b8;
-      background: repeating-linear-gradient(
-        45deg,
-        #f6f6f6,
-        #f6f6f6 9px,
-        #efefef 9px,
-        #efefef 18px
-      );
-      color: #9a9a9a;
-      font-size: 12px;
-      text-align: center;
-      padding-top: 6px;
-      overflow: hidden;
-    }
-    /* prosemirror-tables CellSelection tags each selected cell with class
+  .docen-pages .docen-page [data-image="vector"] {
+    box-sizing: border-box;
+    border: 1px dashed #b8b8b8;
+    background: repeating-linear-gradient(45deg, #f6f6f6, #f6f6f6 9px, #efefef 9px, #efefef 18px);
+    color: #9a9a9a;
+    font-size: 12px;
+    text-align: center;
+    padding-top: 6px;
+    overflow: hidden;
+  }
+  /* prosemirror-tables CellSelection tags each selected cell with class
        "selectedCell"; paint it with Word's translucent selection blue so a
        multi-cell selection is actually visible. box-shadow (not
        background-color) overlays a cell's own fill without being beaten by
        the cell's inline background-color. */
-    .ProseMirror .selectedCell {
-      box-shadow: inset 0 0 0 9999px rgba(0, 120, 215, 0.18);
-    }
-    /* Crop marks — four L-brackets OUTSIDE the content box, in the page-margin
+  .ProseMirror .selectedCell {
+    box-shadow: inset 0 0 0 9999px rgba(0, 120, 215, 0.18);
+  }
+  /* Crop marks — four L-brackets OUTSIDE the content box, in the page-margin
        gutter, each L's corner pointing AT the editable area: the vertex sits
        just outside a content-box corner and the two 23px legs reach into the
        margin. Drawn on a ::before that covers the whole page (inset: 0) and
@@ -302,196 +366,223 @@ const TEMPLATE = `
        ::before is used (not the page node's own background) because a
        ProseMirror-managed node does not paint its own background-image, but its
        pseudo-element does. */
-    .docen-pages .docen-page::before {
-      content: "";
-      position: absolute;
-      inset: 0;
-      padding: var(--docen-page-margin, 25.4mm);
-      pointer-events: none;
-      background-image:
-        linear-gradient(var(--docen-color-crop, #c0c0c0), var(--docen-color-crop, #c0c0c0)),
-        linear-gradient(var(--docen-color-crop, #c0c0c0), var(--docen-color-crop, #c0c0c0)),
-        linear-gradient(var(--docen-color-crop, #c0c0c0), var(--docen-color-crop, #c0c0c0)),
-        linear-gradient(var(--docen-color-crop, #c0c0c0), var(--docen-color-crop, #c0c0c0)),
-        linear-gradient(var(--docen-color-crop, #c0c0c0), var(--docen-color-crop, #c0c0c0)),
-        linear-gradient(var(--docen-color-crop, #c0c0c0), var(--docen-color-crop, #c0c0c0)),
-        linear-gradient(var(--docen-color-crop, #c0c0c0), var(--docen-color-crop, #c0c0c0)),
-        linear-gradient(var(--docen-color-crop, #c0c0c0), var(--docen-color-crop, #c0c0c0));
-      background-position:
-        -24px -2px, -2px -24px,
-        calc(100% + 24px) -2px, calc(100% + 2px) -24px,
-        -24px calc(100% + 2px), -2px calc(100% + 24px),
-        calc(100% + 24px) calc(100% + 2px), calc(100% + 2px) calc(100% + 24px);
-      background-size: 23px 1px, 1px 23px, 23px 1px, 1px 23px, 23px 1px, 1px 23px, 23px 1px, 1px 23px;
-      background-origin: content-box;
-      background-repeat: no-repeat;
-    }
-    /* Grey the "Auto-save" label to match its disabled switch (skeleton
+  .docen-pages .docen-page::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    padding: var(--docen-page-margin, 25.4mm);
+    pointer-events: none;
+    background-image:
+      linear-gradient(var(--docen-color-crop, #c0c0c0), var(--docen-color-crop, #c0c0c0)),
+      linear-gradient(var(--docen-color-crop, #c0c0c0), var(--docen-color-crop, #c0c0c0)),
+      linear-gradient(var(--docen-color-crop, #c0c0c0), var(--docen-color-crop, #c0c0c0)),
+      linear-gradient(var(--docen-color-crop, #c0c0c0), var(--docen-color-crop, #c0c0c0)),
+      linear-gradient(var(--docen-color-crop, #c0c0c0), var(--docen-color-crop, #c0c0c0)),
+      linear-gradient(var(--docen-color-crop, #c0c0c0), var(--docen-color-crop, #c0c0c0)),
+      linear-gradient(var(--docen-color-crop, #c0c0c0), var(--docen-color-crop, #c0c0c0)),
+      linear-gradient(var(--docen-color-crop, #c0c0c0), var(--docen-color-crop, #c0c0c0));
+    background-position:
+      -24px -2px,
+      -2px -24px,
+      calc(100% + 24px) -2px,
+      calc(100% + 2px) -24px,
+      -24px calc(100% + 2px),
+      -2px calc(100% + 24px),
+      calc(100% + 24px) calc(100% + 2px),
+      calc(100% + 2px) calc(100% + 24px);
+    background-size:
+      23px 1px,
+      1px 23px,
+      23px 1px,
+      1px 23px,
+      23px 1px,
+      1px 23px,
+      23px 1px,
+      1px 23px;
+    background-origin: content-box;
+    background-repeat: no-repeat;
+  }
+  /* Grey the "Auto-save" label to match its disabled switch (skeleton
        feature), so the label + switch read as one unavailable control, like
        ribbon skeleton buttons. Lifts automatically once the switch loses
        disabled. */
-    .autosave-label:has(+ fluent-switch[disabled]) {
-      color: var(--docen-color-text-3, #8a8a8a);
-    }
-    /* While focus is in a ribbon combobox dropdown, the editor is blurred and
+  .autosave-label:has(+ fluent-switch[disabled]) {
+    color: var(--docen-color-text-3, #8a8a8a);
+  }
+  /* While focus is in a ribbon combobox dropdown, the editor is blurred and
        the browser stops painting its selection. The Tiptap Selection extension
        stamps a .selection class on the range so it stays visible. Uses the
        system selection colors (Highlight/HighlightText) to match the browser's
        native ::selection, including high-contrast and custom OS themes. */
-    .ProseMirror .selection {
-      background: Highlight;
-      color: HighlightText;
-    }
-    /* Placeholder — the Tiptap Placeholder extension only stamps an is-empty
+  .ProseMirror .selection {
+    background: Highlight;
+    color: HighlightText;
+  }
+  /* Placeholder — the Tiptap Placeholder extension only stamps an is-empty
        class + data-placeholder attribute on empty nodes; this CSS paints the
        label. :first-child shows it just on the document's first empty paragraph
        (Word shows the prompt once, at the top); showOnlyCurrent (default) means
        only the caret's empty node carries the attribute. float + height:0 keep
        the label in-flow at the paragraph start without consuming layout, so it
        never pushes real content or skews pagination measurement. */
-    .docen-pages .ProseMirror p.is-empty:first-child::before {
-      content: attr(data-placeholder);
-      color: var(--docen-color-text-3, #8a8a8a);
-      pointer-events: none;
-      float: left;
-      height: 0;
-    }
-    /* Tables — Word inserts tables in the Table Grid style (a single black
+  .docen-pages .ProseMirror p.is-empty:first-child::before {
+    content: attr(data-placeholder);
+    color: var(--docen-color-text-3, #8a8a8a);
+    pointer-events: none;
+    float: left;
+    height: 0;
+  }
+  /* Tables — Word inserts tables in the Table Grid style (a single black
        border on every cell). Without this a freshly inserted table is
        invisible: the docx table extension emits a border only when the node
        carries border attrs, and insertTable creates none. */
-    .docen-pages table { border-collapse: collapse; }
-    .docen-pages table td,
-    .docen-pages table th {
-      border: 1px solid #000;
-      /* OOXML defaults w:tcMar top/bottom to 0 (TableNormal); the UA td padding
+  .docen-pages table {
+    border-collapse: collapse;
+  }
+  .docen-pages table td,
+  .docen-pages table th {
+    border: 1px solid #000;
+    /* OOXML defaults w:tcMar top/bottom to 0 (TableNormal); the UA td padding
          (1px) would inflate every row ~2px vs Word. Horizontal padding stays at
          the cell's w:tcMar (set inline by renderTableCellStyles) or 0. */
-      padding-block: 0;
-    }
-    /* Formatting marks (Show/Hide ¶) — Word shows these only while editing
+    padding-block: 0;
+  }
+  /* Formatting marks (Show/Hide ¶) — Word shows these only while editing
        (non-printing). The show-marks command flips the host [show-marks]
        attribute; the marks themselves live entirely in CSS. */
-    /* Pilcrow ¶ is painted by the FormattingMarks extension as a widget
+  /* Pilcrow ¶ is painted by the FormattingMarks extension as a widget
        decoration — CSS ::after on a ProseMirror-managed <p> does not render. */
-    /* Zero-width inline-block: the mark hugs the last character and never
+  /* Zero-width inline-block: the mark hugs the last character and never
        breaks to its own line on a full line. text-indent:0 cancels the
        inherited paragraph indent (an inline-block is a block container), or
        the glyph drifts right. */
-    .docen-pages .docen-para-mark {
-      color: var(--docen-color-marks, #6e6e6e);
-      user-select: none;
-      pointer-events: none;
-      margin-inline-start: 1px;
-      display: inline-block;
-      width: 0;
-      overflow: visible;
-      vertical-align: baseline;
-      text-indent: 0;
-    }
-    /* A page break renders as a Fluent divider with a centered label (Word).
+  .docen-pages .docen-para-mark {
+    color: var(--docen-color-marks, #6e6e6e);
+    user-select: none;
+    pointer-events: none;
+    margin-inline-start: 1px;
+    display: inline-block;
+    width: 0;
+    overflow: visible;
+    vertical-align: baseline;
+    text-indent: 0;
+  }
+  /* A page break renders as a Fluent divider with a centered label (Word).
        The NodeView (PageBreakView) supplies the fluent-divider; it is hidden
        unless show-marks is on. */
-    .docen-pages [data-type="pageBreak"] { display: block; line-height: 0; }
-    .docen-pages [data-type="pageBreak"] fluent-divider { display: none; }
-    :host([show-marks]) .docen-pages [data-type="pageBreak"] {
-      margin: 8px 0;
-      line-height: normal;
-    }
-    :host([show-marks]) .docen-pages [data-type="pageBreak"] fluent-divider {
-      display: flex;
-      font-size: 0.8em;
-    }
-    /* A section break renders as a Fluent divider after the section-carrying
+  .docen-pages [data-type="pageBreak"] {
+    display: block;
+    line-height: 0;
+  }
+  .docen-pages [data-type="pageBreak"] fluent-divider {
+    display: none;
+  }
+  :host([show-marks]) .docen-pages [data-type="pageBreak"] {
+    margin: 8px 0;
+    line-height: normal;
+  }
+  :host([show-marks]) .docen-pages [data-type="pageBreak"] fluent-divider {
+    display: flex;
+    font-size: 0.8em;
+  }
+  /* A section break renders as a Fluent divider after the section-carrying
        paragraph (Word: the boundary only shows the marker while editing). The
        SectionBreakMarks widget supplies the fluent-divider; hidden unless
        show-marks is on — same mechanism as the page-break marker. */
-    .docen-pages [data-section-break] { line-height: 0; }
-    .docen-pages [data-section-break] fluent-divider { display: none; }
-    :host([show-marks]) .docen-pages [data-section-break] {
-      margin: 8px 0;
-      line-height: normal;
-    }
-    :host([show-marks]) .docen-pages [data-section-break] fluent-divider {
-      display: flex;
-      font-size: 0.8em;
-    }
-    /* Find highlights (prosemirror-search) — Word's yellow-match / orange-active. */
-    .docen-pages .ProseMirror-search-match {
-      background: rgba(255, 235, 59, 0.55);
-    }
-    .docen-pages .ProseMirror-active-search-match {
-      background: rgba(255, 145, 0, 0.75);
-    }
-    /* Find Results — Word-style match list: each hit rendered with surrounding
+  .docen-pages [data-section-break] {
+    line-height: 0;
+  }
+  .docen-pages [data-section-break] fluent-divider {
+    display: none;
+  }
+  :host([show-marks]) .docen-pages [data-section-break] {
+    margin: 8px 0;
+    line-height: normal;
+  }
+  :host([show-marks]) .docen-pages [data-section-break] fluent-divider {
+    display: flex;
+    font-size: 0.8em;
+  }
+  /* Find highlights (prosemirror-search) — Word's yellow-match / orange-active. */
+  .docen-pages .ProseMirror-search-match {
+    background: rgba(255, 235, 59, 0.55);
+  }
+  .docen-pages .ProseMirror-active-search-match {
+    background: rgba(255, 145, 0, 0.75);
+  }
+  /* Find Results — Office-style match list: each hit rendered with surrounding
        context and a data-from/to for click-to-jump. Padding keeps items off the
        pane edge (the previous "N matches" text butted right against it). */
-    .search-results {
-      padding: 6px 8px;
-      box-sizing: border-box;
-    }
-    .search-results .result-count {
-      font-size: 12px;
-      color: var(--docen-color-marks, #6e6e6e);
-      padding: 2px 4px 8px;
-    }
-    .search-results .result-item {
-      display: block;
-      width: 100%;
-      text-align: start;
-      border: none;
-      background: transparent;
-      padding: 5px 8px;
-      margin-block-end: 2px;
-      border-radius: 4px;
-      font-family: inherit;
-      font-size: 12px;
-      line-height: 1.45;
-      color: #3b3b3b;
-      cursor: pointer;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .search-results .result-item:hover {
-      background: var(--docen-color-hover, rgba(0, 0, 0, 0.06));
-    }
-    .search-results .result-item mark {
-      background: rgba(255, 235, 59, 0.85);
-      color: inherit;
-      font-weight: 600;
-    }
-    /* Print: drop shadow/gap/marks; each page node is its own printed sheet. */
-    @media print {
-      /* @page margin:0 lets the fixed-height page node (297mm) fill the sheet.
+  .search-results {
+    padding: 6px 8px;
+    box-sizing: border-box;
+  }
+  .search-results .result-count {
+    font-size: 12px;
+    color: var(--docen-color-marks, #6e6e6e);
+    padding: 2px 4px 8px;
+  }
+  .search-results .result-item {
+    display: block;
+    width: 100%;
+    text-align: start;
+    border: none;
+    background: transparent;
+    padding: 5px 8px;
+    margin-block-end: 2px;
+    border-radius: 4px;
+    font-family: inherit;
+    font-size: 12px;
+    line-height: 1.45;
+    color: #3b3b3b;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .search-results .result-item:hover {
+    background: var(--docen-color-hover, rgba(0, 0, 0, 0.06));
+  }
+  .search-results .result-item mark {
+    background: rgba(255, 235, 59, 0.85);
+    color: inherit;
+    font-weight: 600;
+  }
+  /* Print: drop shadow/gap/marks; each page node is its own printed sheet. */
+  @media print {
+    /* @page margin:0 lets the fixed-height page node (297mm) fill the sheet.
          The browser's default ~10mm page margin would otherwise make the page
          taller than the printable area and push it onto a second sheet. The
          page node's own padding (25.4mm) is the document margin, so @page needs
          no margin. size stays auto so non-A4 documents still fit. */
-      @page {
-        margin: 0;
-      }
-      .docen-pages .docen-page {
-        content-visibility: visible;
-        box-shadow: none;
-        margin: 0;
-        break-after: page;
-      }
-      /* No trailing blank sheet after the last page. */
-      .docen-pages .docen-page:last-child {
-        break-after: auto;
-      }
-      .docen-pages .docen-page::before { display: none; }
-      /* Formatting marks + search highlights never print (editing-only). */
-      .docen-pages .docen-para-mark,
-      .docen-pages [data-type="pageBreak"],
-      .docen-pages [data-section-break],
-      .docen-pages .ProseMirror-search-match,
-      .docen-pages .ProseMirror-active-search-match {
-        display: none !important;
-      }
+    @page {
+      margin: 0;
     }
-  </style>
+    .docen-pages .docen-page {
+      content-visibility: visible;
+      box-shadow: none;
+      margin: 0;
+      break-after: page;
+    }
+    /* No trailing blank sheet after the last page. */
+    .docen-pages .docen-page:last-child {
+      break-after: auto;
+    }
+    .docen-pages .docen-page::before {
+      display: none;
+    }
+    /* Formatting marks + search highlights never print (editing-only). */
+    .docen-pages .docen-para-mark,
+    .docen-pages [data-type="pageBreak"],
+    .docen-pages [data-section-break],
+    .docen-pages .ProseMirror-search-match,
+    .docen-pages .ProseMirror-active-search-match {
+      display: none !important;
+    }
+  }
+`;
+
+const documentTemplate = html`
   <docen-workspace>
     <docen-title-bar slot="header" part="header"></docen-title-bar>
     <docen-ribbon slot="ribbon" part="ribbon"></docen-ribbon>
@@ -505,14 +596,17 @@ const TEMPLATE = `
       <div class="docen-pages" part="page"></div>
     </docen-document-area>
     <docen-task-pane slot="task-pane-end" position="end" part="props-pane">
-      <docen-format-pane></docen-format-pane>
+      <slot name="properties">
+        <docen-format-pane></docen-format-pane>
+      </slot>
     </docen-task-pane>
     <docen-status-bar slot="status" part="status"></docen-status-bar>
   </docen-workspace>
   <docen-options-dialog part="options"></docen-options-dialog>
   <docen-find-replace-dialog></docen-find-replace-dialog>
-  <input type="file" id="file-input" accept=".docx" hidden />
-  <input type="file" id="image-input" accept="image/*" hidden />`;
+  <input type="file" id="file-input" accept=".docx,.md,.markdown,.html,.htm" hidden />
+  <input type="file" id="image-input" accept="image/*" hidden />
+`;
 
 /** Build a nested OutlineItem tree from the flat outline anchor list: each
  *  heading nests under the nearest preceding heading with a smaller level. */
@@ -616,18 +710,46 @@ function mergeSectionProperties(
  * their editors on double-click, and file I/O goes through `parseDOCX`/
  * `generateDOCX`. The title bar + ribbon re-render on locale change.
  */
+
+/**
+ * Task pane identifiers, mirroring the Office `<TaskpaneId>` concept. The host
+ * ships two built-in panes: `navigation` (start/left) and `properties` (end/right).
+ */
+export type TaskPaneId = "navigation" | "properties";
+
+/**
+ * Visibility mode values, matching `Office.VisibilityMode` (`taskpane` | `hidden`).
+ * Carried on {@link docen:taskpane-visibility-change} event details.
+ */
+export type VisibilityMode = "taskpane" | "hidden";
+
+/** Maps a public {@link TaskPaneId} to the slot position its pane renders in. */
+const TASKPANE_POSITION: Record<TaskPaneId, "start" | "end"> = {
+  navigation: "start",
+  properties: "end",
+};
+
+@customElement({ name: "docen-document", template: documentTemplate, styles: documentStyles })
 class DocenDocument extends AddinHost<Editor> {
+  // ── Reactive attributes (@attr) — the former observedAttributes, re-implemented
+  //  as FAST fields. No `reflect` (attribute → property stays one-way). addinsAttr
+  //  (attribute "addins") dodges AddinHost.addinsChanged and the `addins` getter.
+  @attr editable?: string;
+  @attr filename?: string;
+  @attr user?: string;
+  @attr avatar?: string;
+  @attr({ attribute: "section-properties" }) sectionProperties?: string;
+  @attr styles?: string;
+  @attr({ attribute: "addins" }) addinsAttr?: string;
+  @attr theme?: string;
+
   #editor?: Editor;
   #fileInput?: HTMLInputElement;
   #imageInput?: HTMLInputElement;
-  /** Which format the next file-picker selection should be parsed as — set by
-   *  the matching Open menu item before #fileInput.click(), so #onFileChange
-   *  can dispatch to openDOCX/openMarkdown/openHTML. */
-  #pendingOpen: "docx" | "markdown" | "html" = "docx";
   /** Latest TOC anchors, refreshed by TableOfContents.onUpdate; used to resolve
    *  an outline click back to a document position (pos). */
   #anchors: readonly OutlineAnchor[] = [];
-  /** Cached doc nodeSize + Word-style word count so caret-move transactions
+  /** Cached doc nodeSize + Office-style word count so caret-move transactions
    *  don't re-walk the whole document (recomputed only when content changes). */
   #lastDocSize = -1;
   #lastWords = 0;
@@ -654,27 +776,6 @@ class DocenDocument extends AddinHost<Editor> {
   #statusDoc?: unknown;
   #pageBounds?: ReadonlyArray<{ offset: number; size: number; section: number }>;
 
-  /** Attributes whose runtime changes re-configure the component (chrome
-   *  visibility, ribbon tabs, editable, identity). Without this list, attribute
-   *  changes after connect are silently ignored. */
-  static get observedAttributes(): string[] {
-    return [
-      "editable",
-      "filename",
-      "user",
-      "avatar",
-      // Declarative page setup + named styles (JSON) — see #readInitAttrs.
-      "section-properties",
-      "styles",
-      // External add-ins (JSON: ribbon/task-pane data contributions — functions
-      // can't cross the attribute boundary, so command/pane-render stay in JS).
-      "addins",
-      // UI theme — "light" (default) | "dark"; drives applyTheme. Reactive so a
-      // host can switch theme at runtime.
-      "theme",
-    ];
-  }
-
   /** The underlying Tiptap Editor (undefined before connect / after disconnect).
    *  Exposed so a host (the @docen/vue adapter, or any parent element) can drive
    *  commands programmatically — setContent / getJSON / chain / ... — without
@@ -697,31 +798,41 @@ class DocenDocument extends AddinHost<Editor> {
     }
   }
 
-  attributeChangedCallback(name: string, _old: string, value: string): void {
-    switch (name) {
-      case "editable":
-        this.#editor?.setEditable(value !== "false");
-        this.#syncEditModeMenu();
-        break;
-      case "filename":
-      case "user":
-      case "avatar":
-        // These only change rendered chrome — re-stamp header/ribbon.
-        this.#renderChrome();
-        break;
-      case "section-properties":
-        this.#applySectionPropertiesAttr();
-        break;
-      case "styles":
-        this.#applyStylesAttr();
-        break;
-      case "addins":
-        this.#applyAddinsAttr();
-        break;
-      case "theme":
-        this.#applyThemeAttr(value);
-        break;
-    }
+  // ── @attr change callbacks — re-route to the private handlers the old
+  //  attributeChangedCallback switch invoked (zero business-logic change). FAST
+  //  also fires these during initial attribute hydration; every handler is
+  //  guarded (editor/shadowRoot check) so an early fire is a no-op.
+  editableChanged(): void {
+    this.#editor?.setEditable(this.editable !== "false");
+    this.#syncEditModeMenu();
+  }
+
+  filenameChanged(): void {
+    this.#renderChrome();
+  }
+
+  userChanged(): void {
+    this.#renderChrome();
+  }
+
+  avatarChanged(): void {
+    this.#renderChrome();
+  }
+
+  sectionPropertiesChanged(): void {
+    this.#applySectionPropertiesAttr();
+  }
+
+  stylesChanged(): void {
+    this.#applyStylesAttr();
+  }
+
+  addinsAttrChanged(): void {
+    this.#applyAddinsAttr();
+  }
+
+  themeChanged(): void {
+    this.#applyThemeAttr(this.theme ?? "");
   }
 
   /** Esc fallback: restore the ribbon to "always shown" after the browser leaves fullscreen. */
@@ -733,6 +844,12 @@ class DocenDocument extends AddinHost<Editor> {
       ribbon.removeAttribute("data-ribbon-mode");
       workspace?.removeAttribute("data-fullscreen");
     }
+  };
+
+  /** Status-bar zoom slider → apply the new zoom level. Named (not inline) so it
+   *  can be removed on disconnect. */
+  readonly #onZoomChange = (event: CustomEvent<{ zoom: number }>): void => {
+    this.#setZoom(event.detail.zoom);
   };
 
   /** Ctrl+= / Ctrl+- / Ctrl+0 zoom, Ctrl+F find (Word behavior). Zoom is
@@ -1126,19 +1243,25 @@ class DocenDocument extends AddinHost<Editor> {
   }
 
   async connectedCallback(): Promise<void> {
-    if (!this.shadowRoot) {
-      this.attachShadow({ mode: "open" }).innerHTML = TEMPLATE;
-    }
+    super.connectedCallback();
     await registerComponents();
     applyTheme(this.getAttribute("theme") === "dark" ? "dark" : "light");
 
     this.#fileInput = this.shadowRoot!.querySelector<HTMLInputElement>("#file-input")!;
     this.#imageInput = this.shadowRoot!.querySelector<HTMLInputElement>("#image-input")!;
     this.#renderChrome();
+    // Once attributes: initial task-pane visibility (Office `setStartupBehavior`
+    // equivalent). Absent → closed; present → open. Read once on connect —
+    // runtime toggles go through showTaskpane/hideTaskpane.
+    this.#setTaskpane("navigation", this.hasAttribute("navigation-pane"));
+    this.#setTaskpane("properties", this.hasAttribute("properties-pane"));
+    // Once attribute: initial zoom level (percent). Runtime zoom goes through
+    // setZoom / the status-bar slider / Ctrl+ -/=/0.
+    const initialZoom = this.getAttribute("zoom");
+    if (initialZoom) this.#setZoom(Number(initialZoom) || 100);
     this.shadowRoot
       ?.querySelector<HTMLElement>("docen-status-bar")
-      ?.addEventListener("zoom:change", ((e: CustomEvent<{ zoom: number }>) =>
-        this.#setZoom(e.detail.zoom)) as EventListener);
+      ?.addEventListener("zoom:change", this.#onZoomChange as EventListener);
 
     const page = this.shadowRoot!.querySelector<HTMLDivElement>(".docen-pages");
     if (!page) return;
@@ -1266,6 +1389,15 @@ class DocenDocument extends AddinHost<Editor> {
     this.shadowRoot
       ?.querySelector("docen-find-replace-dialog")
       ?.removeEventListener("find-replace:action", this.#onFindReplace as EventListener);
+    this.shadowRoot
+      ?.querySelector("docen-options-dialog")
+      ?.removeEventListener("options:ok", this.#onOptionsOk as EventListener);
+    this.shadowRoot
+      ?.querySelector("docen-status-bar")
+      ?.removeEventListener("lang:change", this.#onLangChange as EventListener);
+    this.shadowRoot
+      ?.querySelector("docen-status-bar")
+      ?.removeEventListener("zoom:change", this.#onZoomChange as EventListener);
     this.#unobserveLang?.();
     this.#editor?.off("transaction", this.#onTransaction);
     document.removeEventListener("fullscreenchange", this.#onFullscreenChange);
@@ -1276,6 +1408,7 @@ class DocenDocument extends AddinHost<Editor> {
     clearTimeout(this.#searchTimer);
     this.#fontSyncCleanup?.();
     this.#editor?.destroy();
+    super.disconnectedCallback();
   }
 
   /** App header markup — i18n labels plus the host-supplied `user` / `filename`
@@ -1310,8 +1443,6 @@ class DocenDocument extends AddinHost<Editor> {
                 <fluent-menu-item data-event="new">${t("header.new")}</fluent-menu-item>
                 <fluent-divider role="separator" aria-orientation="horizontal" orientation="horizontal"></fluent-divider>
                 <fluent-menu-item data-event="open">${t("header.open")}</fluent-menu-item>
-                <fluent-menu-item data-event="open-markdown">${t("header.open-markdown")}</fluent-menu-item>
-                <fluent-menu-item data-event="open-html">${t("header.open-html")}</fluent-menu-item>
                 <fluent-divider role="separator" aria-orientation="horizontal" orientation="horizontal"></fluent-divider>
                 <fluent-menu-item data-event="save-as">${t("header.save-as")}</fluent-menu-item>
                 <fluent-menu-item data-event="save-as-markdown">${t("header.save-as-markdown")}</fluent-menu-item>
@@ -1331,9 +1462,14 @@ class DocenDocument extends AddinHost<Editor> {
   /** Stamp the header + ribbon markup for the active locale (re-run on lang change). */
   #renderChrome(): void {
     const root = this.shadowRoot;
-    if (!root) return;
+    // FAST fires @attr change callbacks during element upgrade, BEFORE the
+    // template is stamped (connectedCallback runs after) — the shadowRoot
+    // exists but is empty, so the title-bar query is null. Bail until stamped;
+    // connectedCallback's explicit call does the first render.
+    const titleBar = root?.querySelector("docen-title-bar");
+    if (!root || !titleBar) return;
     const styles = this.#editor?.state.doc.attrs?.styles ?? null;
-    root.querySelector("docen-title-bar")!.innerHTML = this.#renderHeader();
+    titleBar.innerHTML = this.#renderHeader();
     // Built-in tabs (Home/Insert/… with the live style gallery) come from
     // ribbonTabs; external add-ins layer their own tabs on top via
     // mergeRibbonSchema. The default add-in contributes no ribbon, so without
@@ -1497,12 +1633,9 @@ class DocenDocument extends AddinHost<Editor> {
     }
   };
 
-  /** Toggle a side task pane open/closed (ribbon View → toggle-navigation). */
-  #togglePane(side: "start" | "end"): void {
-    const pane = this.shadowRoot?.querySelector(`docen-task-pane[position="${side}"]`) as
-      | (HTMLElement & { open: boolean })
-      | null;
-    if (pane) pane.open = !pane.open;
+  /** Toggle a task pane open/closed (ribbon View → toggle-navigation). */
+  #togglePane(id: TaskPaneId): void {
+    this.#setTaskpane(id, !this.getTaskpaneState(id));
   }
 
   /** Apply a paper-size preset (a4/letter/…) to the canvas as raw mm, then
@@ -1707,11 +1840,23 @@ class DocenDocument extends AddinHost<Editor> {
   }
 
   /** Apply a zoom level (percent, clamped 10–500) to the canvas and refresh the
-   *  status bar. CSS `zoom` rescales the pages and reflows the scroll surface. */
+   *  status bar. CSS `zoom` rescales the pages and reflows the scroll surface.
+   *  Idempotent (no-op on no change) and dispatches `docen:zoom-change` on a
+   *  real flip — so the host, status-bar slider, and external listeners stay in
+   *  sync through one funnel (Office `Office.Document.zoom.set` equivalent). */
   #setZoom(pct: number): void {
-    this.#zoom = Math.max(10, Math.min(500, Math.round(pct)));
+    const next = Math.max(10, Math.min(500, Math.round(pct)));
+    if (next === this.#zoom) return;
+    this.#zoom = next;
     this.shadowRoot?.querySelector("docen-document-area")?.setAttribute("zoom", String(this.#zoom));
     this.#updateStatus();
+    this.dispatchEvent(
+      new CustomEvent("docen:zoom-change", {
+        bubbles: true,
+        composed: true,
+        detail: { zoom: this.#zoom },
+      }),
+    );
   }
 
   /** Resolve a ribbon zoom preset to a percent. Numeric presets ("200", "100",
@@ -1803,7 +1948,7 @@ class DocenDocument extends AddinHost<Editor> {
     if (typeof name !== "string") return;
     // UI chrome actions are handled locally and need no Tiptap editor.
     if (name === "toggle-navigation") {
-      this.#togglePane("start");
+      this.#togglePane("navigation");
       return;
     }
     // Find (ribbon Home → Editing → Find, or Ctrl+F) → open the nav-pane search.
@@ -1868,8 +2013,7 @@ class DocenDocument extends AddinHost<Editor> {
     // widget decoration; the host [show-marks] attr drives the page-break
     // divider CSS.
     if (name === "show-marks") {
-      this.toggleAttribute("show-marks");
-      this.#editor?.commands.toggleFormattingMarks();
+      this.setShowMarks(!this.getShowMarks());
       return;
     }
     // Clipboard — execCommand copy/cut acts on the editor's DOM selection;
@@ -1917,17 +2061,8 @@ class DocenDocument extends AddinHost<Editor> {
     switch (name) {
       case "open":
         // Host can take over via docen:open (preventDefault); else open the
-        // picker scoped to .docx.
-        if (!this.#emitCancelable("docen:open", { format: "docx" }))
-          this.#pickFile(".docx", "docx");
-        break;
-      case "open-markdown":
-        if (!this.#emitCancelable("docen:open", { format: "markdown" }))
-          this.#pickFile(".md,.markdown", "markdown");
-        break;
-      case "open-html":
-        if (!this.#emitCancelable("docen:open", { format: "html" }))
-          this.#pickFile(".html,.htm", "html");
+        // picker — #onFileChange auto-detects docx/md/html from the extension.
+        if (!this.#emitCancelable("docen:open")) this.#pickFile();
         break;
       case "save-as":
         if (!this.#emitCancelable("docen:save-as", { format: "docx" })) void this.#saveAs("docx");
@@ -1972,14 +2107,11 @@ class DocenDocument extends AddinHost<Editor> {
     }
   };
 
-  /** Open the OS file picker scoped to one format. The accept filter plus the
-   *  #pendingOpen flag together route the chosen file to the right parser in
-   *  #onFileChange. */
-  #pickFile(accept: string, format: "docx" | "markdown" | "html"): void {
-    if (!this.#fileInput) return;
-    this.#pendingOpen = format;
-    this.#fileInput.accept = accept;
-    this.#fileInput.click();
+  /** Open the OS file picker. The accept filter on the input element covers
+   *  .docx/.md/.markdown/.html/.htm; #onFileChange routes the chosen file by
+   *  extension via open(). */
+  #pickFile(): void {
+    this.#fileInput?.click();
   }
 
   readonly #onFileChange = (event: Event): void => {
@@ -1988,9 +2120,7 @@ class DocenDocument extends AddinHost<Editor> {
     // Reset so picking the same file twice still fires `change`.
     input.value = "";
     if (!file) return;
-    if (this.#pendingOpen === "markdown") void this.openMarkdown(file);
-    else if (this.#pendingOpen === "html") void this.openHTML(file);
-    else void this.openDOCX(file);
+    void this.open(file);
   };
 
   /** Insert the picked image as a data URL. Width/height are left unset — the
@@ -2114,6 +2244,19 @@ class DocenDocument extends AddinHost<Editor> {
     // measuring in the same frame reads half-laid-out blocks and the breaks
     // come out wrong (the first page overflows, so the pages look uneven).
     this.#repaginateAfterLoad(editor);
+  }
+
+  /** Load a file into the editor, auto-detecting its format from the extension
+   *  (.docx → DOCX, .md/.markdown → Markdown, .html/.htm → HTML). This is the
+   *  single entry point the filename-menu "Open…" uses; openDOCX/openMarkdown/
+   *  openHTML remain for when the caller already knows the format (e.g. loading
+   *  a server-fetched docx buffer that has no filename). Throws on an
+   *  unrecognized extension. */
+  async open(file: File): Promise<void> {
+    const format = detectOpenFormat(file);
+    if (format === "docx") return this.openDOCX(file);
+    if (format === "markdown") return this.openMarkdown(file);
+    return this.openHTML(file);
   }
 
   /** Load a .docx into the editor from a File or a buffer (ArrayBuffer /
@@ -2377,8 +2520,85 @@ class DocenDocument extends AddinHost<Editor> {
   repaginate(): void {
     if (this.#editor) pageStorageOf(this.#editor).repaginate();
   }
-}
 
-customElements.define("docen-document", DocenDocument);
+  // ── Task pane visibility (Office.addin.showAsTaskpane / hide equivalent) ──
+
+  /** Show a task pane. No-op if already open. */
+  showTaskpane(id: TaskPaneId): void {
+    this.#setTaskpane(id, true);
+  }
+
+  /** Hide a task pane. No-op if already closed. */
+  hideTaskpane(id: TaskPaneId): void {
+    this.#setTaskpane(id, false);
+  }
+
+  /** Whether a task pane is currently open. */
+  getTaskpaneState(id: TaskPaneId): boolean {
+    return !!this.#paneEl(id)?.open;
+  }
+
+  #paneEl(id: TaskPaneId): (HTMLElement & { open: boolean }) | null {
+    const pos = TASKPANE_POSITION[id];
+    return this.shadowRoot?.querySelector(`docen-task-pane[position="${pos}"]`) as
+      | (HTMLElement & { open: boolean })
+      | null;
+  }
+
+  /** Apply a visibility state and dispatch `docen:taskpane-visibility-change`
+   *  when it flips. The detail carries `visibilityMode: "taskpane"|"hidden"` to
+   *  mirror `Office.VisibilityMode`. Idempotent — no event when state is unchanged. */
+  #setTaskpane(id: TaskPaneId, open: boolean): void {
+    const pane = this.#paneEl(id);
+    if (!pane || pane.open === open) return;
+    pane.open = open;
+    this.dispatchEvent(
+      new CustomEvent("docen:taskpane-visibility-change", {
+        bubbles: true,
+        composed: true,
+        detail: { id, visibilityMode: (open ? "taskpane" : "hidden") as VisibilityMode },
+      }),
+    );
+  }
+
+  // ── Zoom (method + event + getter; once `zoom` attr seeds #zoom) ──
+
+  /** Apply a zoom level (percent, clamped 10–500). Idempotent; dispatches
+   *  `docen:zoom-change` on a real change (mirrors `Office.Document.zoom.set`). */
+  setZoom(pct: number): void {
+    this.#setZoom(pct);
+  }
+
+  /** Current zoom level (percent). */
+  getZoom(): number {
+    return this.#zoom;
+  }
+
+  // ── Formatting marks (method + event; boolean `show-marks` attribute) ──
+
+  /** Toggle editing/formatting marks on or off. Idempotent; dispatches
+   *  `docen:marks-change`. The boolean `show-marks` attribute is the source of
+   *  truth — CSS `:host([show-marks])` drives the page/section-break markers —
+   *  so it's toggled directly. (`@attr({mode:"boolean"})` does not reflect
+   *  property→attribute in fast-element 3.x, so a method beats a reactive attr
+   *  here; see docen-ui-state-attribute-strategy.) */
+  setShowMarks(on: boolean): void {
+    if (this.hasAttribute("show-marks") === on) return;
+    this.toggleAttribute("show-marks", on);
+    this.#editor?.commands.toggleFormattingMarks();
+    this.dispatchEvent(
+      new CustomEvent("docen:marks-change", {
+        bubbles: true,
+        composed: true,
+        detail: { showMarks: on },
+      }),
+    );
+  }
+
+  /** Whether editing/formatting marks are currently shown. */
+  getShowMarks(): boolean {
+    return this.hasAttribute("show-marks");
+  }
+}
 
 export default DocenDocument;

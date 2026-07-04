@@ -1,3 +1,5 @@
+import { FASTElement } from "@microsoft/fast-element";
+
 import type { DocenAddin, DocenHost, RibbonTab } from "./types";
 
 /**
@@ -43,7 +45,7 @@ export function mergeRibbonSchema<THost extends DocenHost>(
  * `DocenAddin<this>` lets each addin's commands/panes receive the concrete host
  * subtype, so a `DocumentAddin` command can call `DocumentHost`-specific methods.
  */
-export class AddinHost<TEditor = unknown> extends HTMLElement implements DocenHost<TEditor> {
+export class AddinHost<TEditor = unknown> extends FASTElement implements DocenHost<TEditor> {
   #addins: DocenAddin<this>[] = [];
 
   /** Registered add-ins, in registration order. */

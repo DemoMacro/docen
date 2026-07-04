@@ -47,7 +47,7 @@ const Search = Extension.create({
   },
 });
 
-/** Word-style word count: each CJK character counts as one, non-CJK runs split
+/** Office-style word count: each CJK character counts as one, non-CJK runs split
  *  on whitespace — matches Word for mixed CJK/Latin (the default split(' ').length
  *  counts a whole CJK paragraph as a single word). */
 const wordCounter = (text: string): number => {

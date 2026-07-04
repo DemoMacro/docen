@@ -948,6 +948,20 @@ export const PagePlugin = Extension.create<PagePluginOptions>({
               // (doc unchanged after our dispatch converges, or the same-check
               // inside reflow short-circuits) does not cascade.
               if (view.state.doc === prevState.doc) return;
+              // Follow the caret immediately — don't wait for the debounced
+              // reflow. ProseMirror's scrollIntoView (run by deleteSelection and
+              // similar) parks the caret at the viewport edge; a select-all
+              // delete that leaves the caret at the doc end otherwise keeps the
+              // viewport at the bottom for ~1s until reflow corrects it.
+              // scrollCaretToTop is a no-op when the caret is in view, so this
+              // never fights normal typing.
+              // Defer past ProseMirror's scrollIntoView (it runs AFTER plugin
+              // view.update, so a synchronous scroll here gets overwritten):
+              // deleteSelection leaves the caret at the doc end and PM parks it
+              // at the viewport bottom; correct it on the next frame so the
+              // viewport never sits at the bottom waiting for the debounced
+              // reflow. scrollCaretToTop is a no-op when the caret is in view.
+              requestAnimationFrame(() => scrollCaretToTop(view));
               schedule(true);
             },
             destroy() {

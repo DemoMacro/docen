@@ -43,7 +43,7 @@ function docxLinkClickHandler(): Plugin {
               const { state } = view;
               view.dispatch(state.tr.setSelection(TextSelection.create(state.doc, p)));
               // PM's scrollIntoView parks the caret at the bottom edge; scroll it
-              // to the top instead (Word-style page follow), matching outline and
+              // to the top instead (Office-style page follow), matching outline and
               // search-result jumps in the editor.
               scrollCaretToTop(view);
               view.focus();

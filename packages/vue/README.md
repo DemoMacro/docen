@@ -70,6 +70,11 @@ Mirror the `<docen-document>` attributes. Pass `undefined` to leave an attribute
 | `sectionProperties` | object  | `section-properties` | JSON page setup (size/margin/orientation) |
 | `styles`            | object  | `styles`             | JSON named-styles model                   |
 | `addins`            | array   | `addins`             | JSON external add-ins (ribbon/task-pane)  |
+| `theme`             | string  | `theme`              | `"light" \| "dark"`; reactive             |
+| `navigationPane`    | boolean | `navigation-pane`    | Initial nav-pane visibility (once)        |
+| `propertiesPane`    | boolean | `properties-pane`    | Initial properties-pane visibility (once) |
+| `zoom`              | number  | `zoom`               | Initial zoom percent (once)               |
+| `showMarks`         | boolean | `show-marks`         | Initial marks visibility (once)           |
 
 ## Events
 
@@ -77,6 +82,7 @@ Re-emitted from the web component's `docen:*` events:
 
 - `update:modelValue` — editor content changed (drives v-model)
 - `@change`, `@save`, `@save-as`, `@open`, `@new`, `@print`
+- `@zoom-change`, `@taskpane-visibility-change`, `@marks-change` — UI state events; `detail` mirrors the web component's `docen:*` events (`{ zoom }`, `{ id, visibilityMode }`, `{ showMarks }`)
 
 ## Template ref
 

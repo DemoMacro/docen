@@ -1,14 +1,18 @@
 {
   "name": "@docen/vue",
-  "version": "0.3.5",
+  "version": "0.4.0",
   "description": "Vue 3 adapter for @docen/editor — typed <DocenDocument> component (v-model content, v-slot editor, ref expose)",
   "keywords": [
+    "adapter",
     "docen",
     "docx",
     "editor",
+    "rich-text",
     "tiptap",
+    "v-model",
     "vue",
-    "web-components"
+    "web-components",
+    "wysiwyg"
   ],
   "homepage": "https://github.com/DemoMacro/docen#readme",
   "bugs": {

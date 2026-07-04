@@ -259,7 +259,7 @@ async function embedHttpImage(view: EditorView, src: string, fetching: Set<strin
 }
 
 /**
- * Word-style image width capping. MS Office scales an inline image DOWN to the
+ * Office-style image width capping. MS Office scales an inline image DOWN to the
  * section content width (page width − margins) when it is wider, and otherwise
  * leaves it at its real size (never upscales) — and the cap is a real dimension
  * change (exported DOCX carries the capped size, not just a visual constraint).

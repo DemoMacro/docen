@@ -103,7 +103,7 @@ interface CheckEl extends HTMLElement {
 }
 
 /**
- * `<docen-find-replace-dialog open>` — a Word-style Find & Replace modal built
+ * `<docen-find-replace-dialog open>` — a Office-style Find & Replace modal built
  * on `<docen-dialog>`. Two text fields (Find what / Replace with), Match case /
  * Whole word checkboxes, and Find Next / Replace / Replace All / Cancel
  * actions. Every input change or action emits `find-replace:action` with the

@@ -1,16 +1,22 @@
 {
   "name": "@docen/editor",
-  "version": "0.3.5",
-  "description": "Assembly layer for docen editors — bundles a Fluent UI shell with the @docen/docx engine into turnkey <docen-document> / <docen-workbook> / <docen-presentation> super-components",
+  "version": "0.4.0",
+  "description": "Assembly layer for docen editors — bundles a Fluent UI host (ribbon, panes, status bar) with the @docen/docx engine into turnkey <docen-document> web components, with Office.js-style add-ins and Office-style pagination",
   "keywords": [
+    "add-ins",
     "components",
     "docen",
     "document",
     "editor",
+    "fluent-ui",
     "office",
+    "office-js",
     "pagination",
+    "ribbon",
+    "task-pane",
     "web-components",
-    "word"
+    "word",
+    "wysiwyg"
   ],
   "homepage": "https://github.com/DemoMacro/docen#readme",
   "bugs": {
@@ -75,9 +81,5 @@
     "@tiptap/pm": "3.27.1",
     "image-meta": "0.2.2",
     "prosemirror-search": "1.1.1"
-  },
-  "devDependencies": {
-    "@swc/core": "1.15.43",
-    "unplugin-swc": "1.5.9"
   }
 }

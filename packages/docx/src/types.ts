@@ -416,7 +416,7 @@ export interface ImageNode extends TiptapJSONContent {
 /**
  * Drawing group (wpg) carried as an opaque blob — the full WpgGroupRunOptions
  * (pictures/shapes/nested groups + transform) round-trips verbatim. renderHTML
- * lays out every child at its transformed position (Word-style group rendering).
+ * lays out every child at its transformed position (Office-style group rendering).
  */
 export interface WpgGroupNode extends TiptapJSONContent {
   type: "wpgGroup";

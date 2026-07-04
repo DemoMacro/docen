@@ -82,7 +82,7 @@ const template = html<DocenNavigationPane>`
 `;
 
 /**
- * `<docen-navigation-pane tab="headings">` — a Word-style Navigation Pane: a
+ * `<docen-navigation-pane tab="headings">` — a Office-style Navigation Pane: a
  * search box, a Headings / Pages / Results tablist, and three named slots
  * (`headings` / `pages` / `results`) for each tab's content. Only the active
  * tab's slot is visible (CSS keyed on `host[tab]`; default Headings). Typing in
