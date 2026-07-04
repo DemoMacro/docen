@@ -15,18 +15,7 @@ import {
   type SectionPropertiesOptions,
   type StylesOptions,
 } from "@docen/docx";
-import { Extension, type Editor } from "@docen/docx/core";
-import { ListKeymap } from "@tiptap/extension-list";
-import {
-  CharacterCount,
-  Dropcursor,
-  Focus,
-  Gapcursor,
-  Placeholder,
-  Selection,
-  TrailingNode,
-  UndoRedo,
-} from "@tiptap/extensions";
+import type { Editor } from "@docen/docx/core";
 import type { Mark } from "@tiptap/pm/model";
 import { EditorState } from "@tiptap/pm/state";
 import {
@@ -35,28 +24,28 @@ import {
   getMatchHighlights,
   replaceAll,
   replaceNext,
-  search,
   setSearchState,
   SearchQuery,
 } from "prosemirror-search";
 
-import { applyTheme, observeLang, registerComponents, t } from "../ui";
+import {
+  AddinHost,
+  applyTheme,
+  mergeRibbonSchema,
+  observeLang,
+  registerComponents,
+  t,
+  type DocenAddin,
+} from "../ui";
 import type { OutlineItem } from "../ui/components/workspace/outline";
-import { dispatchRibbonCommand, WIRED_DISPATCH } from "./commands";
+import { createDefaultAddin } from "./addin";
+import { WIRED_DISPATCH } from "./extensions/commands";
 // Side-effect import: registers the ribbon/header translation tables.
 import "./i18n";
-import { FontMetricDecoration } from "./extensions/font-metric";
-import { clearImageCapCache, ImageCap } from "./extensions/image-cap";
-import { DocenKeymap } from "./extensions/keymap";
-import { Outline, type OutlineAnchor } from "./extensions/outline";
-import { PageBreakView } from "./extensions/page-break";
-import { Page, PageDocument } from "./extensions/page-node";
-import { PagePlugin, pageStorageOf } from "./extensions/page-plugin";
-import { SectionBreakMarks } from "./extensions/section-break";
-import { SplitMarks } from "./extensions/split-paragraph";
-import { SplitTable, SplitTableRow } from "./extensions/split-table";
-import { WpsShapeView } from "./extensions/wps-shape-view";
-import { buildRibbonInnerHTML, RIBBON_TAB_IDS, type RibbonTabId } from "./ribbon-default";
+import { clearImageCapCache } from "./extensions/image-cap";
+import type { OutlineAnchor } from "./extensions/outline";
+import { pageStorageOf } from "./extensions/page-plugin";
+import { renderRibbonFromSchema, ribbonActions, ribbonTabs } from "./ribbon";
 import { fontNormalRatio } from "./utils/font-metric";
 import { clearMeasureCache } from "./utils/measure";
 import { unwrapPages, wrapPages } from "./utils/wrap";
@@ -70,8 +59,9 @@ const escapeHtml = (s: string): string =>
     c === "&" ? "&amp;" : c === "<" ? "&lt;" : c === ">" ? "&gt;" : c === '"' ? "&quot;" : "&#39;",
   );
 
-/** Ribbon commands handled locally in #onCommand/#onChange (not via
- *  dispatchRibbonCommand). Together with {@link WIRED_DISPATCH} this is the
+/** Commands handled locally in #onCommand/#onChange (not routed to
+ *  editor.commands — they read/write host state the editor can't reach, e.g.
+ *  navigation/find/zoom). Together with {@link WIRED_DISPATCH} this is the
  *  "wired" set used to grey out unwired skeleton commands. lang-zh/lang-en are
  *  header menu items, not ribbon commands, so excluded. */
 const LOCAL_HANDLED: ReadonlySet<string> = new Set([
@@ -98,18 +88,6 @@ const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   "save-as",
   "print",
 ]);
-
-/** Parse a `tabs="home,review"` attribute into a validated whitelist of tab ids;
- *  undefined when unset/empty/invalid (=> render all tabs). */
-function parseTabs(attr: string | null): readonly RibbonTabId[] | undefined {
-  if (!attr) return undefined;
-  const known = RIBBON_TAB_IDS as readonly string[];
-  const ids = attr
-    .split(",")
-    .map((s) => s.trim())
-    .filter((s): s is RibbonTabId => known.includes(s));
-  return ids.length > 0 ? ids : undefined;
-}
 
 const TEMPLATE = `
   <style>
@@ -174,7 +152,7 @@ const TEMPLATE = `
     /* Each page node = a fixed paper sheet. 'height' (NOT min-height) +
        overflow: hidden forces overflow into the next page instead of
        stretching the sheet — the C-route invariant. Geometry comes from
-       <docen-canvas> CSS vars inherited through the shadow boundary. */
+       <docen-document-area> CSS vars inherited through the shadow boundary. */
     .docen-pages .docen-page {
       width: var(--docen-page-width, 210mm);
       height: var(--docen-page-min-height, 297mm);
@@ -358,45 +336,6 @@ const TEMPLATE = `
       float: left;
       height: 0;
     }
-    /* Status bar (slotted into docen-workspace's .rb-shell-status, already a
-       flex row). Lay the footer as a left cluster (page count + word count)
-       and a right (zoom %), matching Word's bottom status bar. */
-    footer[slot="status"] {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      width: 100%;
-    }
-    .docen-status-left { display: flex; gap: 14px; }
-    /* Right cluster — Word's zoom control: a minus / plus button flanking a
-       draggable slider, then the percent. The slider is a native range input
-       styled to a Fluent track + accent thumb. */
-    .docen-status-zoom { display: flex; align-items: center; gap: 4px; }
-    .docen-zoom-step {
-      width: 18px; height: 18px; padding: 0;
-      border: 1px solid var(--docen-color-stroke-1, #c7c7c7);
-      border-radius: 3px; background: transparent;
-      color: var(--docen-color-text-1, #242424);
-      font-size: 13px; line-height: 1; cursor: pointer;
-      display: inline-flex; align-items: center; justify-content: center;
-    }
-    .docen-zoom-step:hover { background: var(--docen-color-subtle-background-hover, #f5f5f5); }
-    .docen-zoom-slider {
-      -webkit-appearance: none; appearance: none;
-      width: 90px; height: 3px; margin: 0;
-      background: var(--docen-color-stroke-1, #c7c7c7);
-      border-radius: 2px; cursor: pointer;
-    }
-    .docen-zoom-slider::-webkit-slider-thumb {
-      -webkit-appearance: none; appearance: none;
-      width: 11px; height: 11px; border: none; border-radius: 50%;
-      background: var(--docen-color-accent, #0f6cbd); cursor: pointer;
-    }
-    .docen-zoom-slider::-moz-range-thumb {
-      width: 11px; height: 11px; border: none; border-radius: 50%;
-      background: var(--docen-color-accent, #0f6cbd); cursor: pointer;
-    }
-    .docen-zoom-pct { min-width: 38px; text-align: right; }
     /* Tables — Word inserts tables in the Table Grid style (a single black
        border on every cell). Without this a freshly inserted table is
        invisible: the docx table extension emits a border only when the node
@@ -504,11 +443,23 @@ const TEMPLATE = `
     }
     /* Print: drop shadow/gap/marks; each page node is its own printed sheet. */
     @media print {
+      /* @page margin:0 lets the fixed-height page node (297mm) fill the sheet.
+         The browser's default ~10mm page margin would otherwise make the page
+         taller than the printable area and push it onto a second sheet. The
+         page node's own padding (25.4mm) is the document margin, so @page needs
+         no margin. size stays auto so non-A4 documents still fit. */
+      @page {
+        margin: 0;
+      }
       .docen-pages .docen-page {
         content-visibility: visible;
         box-shadow: none;
         margin: 0;
         break-after: page;
+      }
+      /* No trailing blank sheet after the last page. */
+      .docen-pages .docen-page:last-child {
+        break-after: auto;
       }
       .docen-pages .docen-page::before { display: none; }
       /* Formatting marks + search highlights never print (editing-only). */
@@ -522,54 +473,21 @@ const TEMPLATE = `
     }
   </style>
   <docen-workspace>
-    <docen-app-header slot="header" part="header"></docen-app-header>
+    <docen-title-bar slot="header" part="header"></docen-title-bar>
     <docen-ribbon slot="ribbon" part="ribbon"></docen-ribbon>
-    <docen-task-pane slot="task-pane-start" position="start" open part="nav-pane">
+    <docen-task-pane slot="task-pane-start" position="start" part="nav-pane">
       <docen-navigation-pane>
         <docen-outline slot="headings"></docen-outline>
         <div class="search-results" slot="results" part="search-results"></div>
       </docen-navigation-pane>
     </docen-task-pane>
-    <docen-canvas>
+    <docen-document-area>
       <div class="docen-pages" part="page"></div>
-    </docen-canvas>
+    </docen-document-area>
     <docen-task-pane slot="task-pane-end" position="end" part="props-pane">
-      <docen-properties-panel></docen-properties-panel>
+      <docen-format-pane></docen-format-pane>
     </docen-task-pane>
-    <footer slot="status" part="status">
-      <span class="docen-status-left">
-        <span class="docen-status-section"></span>
-        <span class="docen-status-pages"></span>
-        <span class="docen-status-words"></span>
-      </span>
-      <span class="docen-status-zoom">
-        <button
-          type="button"
-          class="docen-zoom-step"
-          data-zoom-step="-1"
-          part="zoom-out"
-          aria-label="Zoom out"
-        >−</button>
-        <input
-          type="range"
-          class="docen-zoom-slider"
-          min="10"
-          max="500"
-          step="1"
-          value="100"
-          part="zoom-slider"
-          aria-label="Zoom level"
-        />
-        <button
-          type="button"
-          class="docen-zoom-step"
-          data-zoom-step="1"
-          part="zoom-in"
-          aria-label="Zoom in"
-        >+</button>
-        <span class="docen-zoom-pct"></span>
-      </span>
-    </footer>
+    <docen-status-bar slot="status" part="status"></docen-status-bar>
   </docen-workspace>
   <docen-find-replace-dialog></docen-find-replace-dialog>
   <input type="file" id="file-input" accept=".docx" hidden />
@@ -596,15 +514,8 @@ function buildOutlineTree(anchors: readonly OutlineAnchor[]): OutlineItem[] {
  *  the editor. It stores the active SearchQuery and highlights its matches
  *  (classes ProseMirror-search-match / -active-search-match); the host drives
  *  it via setSearchState and the findNext / findPrev commands. */
-const Search = Extension.create({
-  name: "docenSearch",
-  addProseMirrorPlugins() {
-    return [search()];
-  },
-});
-
 /** MS Office standard paper sizes (mm, portrait width × height). Page-setup
- *  presets resolve to raw mm here; <docen-canvas> takes only raw page-width /
+ *  presets resolve to raw mm here; <docen-document-area> takes only raw page-width /
  *  page-height, so presets stay in this document layer, not the UI component. */
 const PAPER_SIZES: Readonly<Record<string, readonly [number, number]>> = {
   letter: [215.9, 279.4],
@@ -675,16 +586,16 @@ function mergeSectionProperties(
 }
 
 /**
- * `<docen-document>` — a turnkey DOCX editor super-component.
+ * `<docen-document>` — a turnkey DOCX editor web component.
  *
- * Wires the Fluent UI shell (app-header + ribbon + canvas) to the `@docen/docx`
+ * Wires the Fluent UI host (title-bar + ribbon + document-area) to the `@docen/docx`
  * Tiptap engine, with Pretext-driven offline pagination. Drop it in for an
- * editable, paginated Word surface: the app header drives file I/O (open/save)
+ * editable, paginated Word surface: the title bar drives file I/O (open/save)
  * and language switching, ribbon commands route to Tiptap, embedded objects open
  * their editors on double-click, and file I/O goes through `parseDOCX`/
- * `generateDOCX`. The header + ribbon re-render on locale change.
+ * `generateDOCX`. The title bar + ribbon re-render on locale change.
  */
-class DocenDocument extends HTMLElement {
+class DocenDocument extends AddinHost<Editor> {
   #editor?: Editor;
   #fileInput?: HTMLInputElement;
   #imageInput?: HTMLInputElement;
@@ -723,20 +634,16 @@ class DocenDocument extends HTMLElement {
    *  changes after connect are silently ignored. */
   static get observedAttributes(): string[] {
     return [
-      "toolbar",
-      "tabs",
-      "header",
-      "navigation-pane",
-      "properties-pane",
-      "status-bar",
       "editable",
       "filename",
-      "closable",
       "user",
       "avatar",
       // Declarative page setup + named styles (JSON) — see #readInitAttrs.
       "section-properties",
       "styles",
+      // External add-ins (JSON: ribbon/task-pane data contributions — functions
+      // can't cross the attribute boundary, so command/pane-render stay in JS).
+      "addins",
     ];
   }
 
@@ -748,6 +655,20 @@ class DocenDocument extends HTMLElement {
     return this.#editor;
   }
 
+  /** DocenHost surface — bridge the editor-agnostic `unknown` content contract
+   *  to the typed {@link getJSON} / {@link setJSON} API. Addins (and any
+   *  DocenHost consumer) read/write content through here without knowing the
+   *  runtime is Tiptap JSON. */
+  getContent(): unknown {
+    return this.getJSON();
+  }
+
+  setContent(content: unknown): void {
+    if (content && typeof content === "object") {
+      this.setJSON(content as JSONContent);
+    }
+  }
+
   attributeChangedCallback(name: string, _old: string, value: string): void {
     switch (name) {
       case "editable":
@@ -757,23 +678,17 @@ class DocenDocument extends HTMLElement {
       case "filename":
       case "user":
       case "avatar":
-      case "closable":
-      case "tabs":
         // These only change rendered chrome — re-stamp header/ribbon.
         this.#renderChrome();
-        break;
-      case "toolbar":
-      case "header":
-      case "status-bar":
-      case "navigation-pane":
-      case "properties-pane":
-        this.#applyChromeVisibility();
         break;
       case "section-properties":
         this.#applySectionPropertiesAttr();
         break;
       case "styles":
         this.#applyStylesAttr();
+        break;
+      case "addins":
+        this.#applyAddinsAttr();
         break;
     }
   }
@@ -1189,8 +1104,10 @@ class DocenDocument extends HTMLElement {
     this.#fileInput = this.shadowRoot!.querySelector<HTMLInputElement>("#file-input")!;
     this.#imageInput = this.shadowRoot!.querySelector<HTMLInputElement>("#image-input")!;
     this.#renderChrome();
-    this.#applyChromeVisibility();
-    this.#setupZoomControls();
+    this.shadowRoot
+      ?.querySelector<HTMLElement>("docen-status-bar")
+      ?.addEventListener("zoom:change", ((e: CustomEvent<{ zoom: number }>) =>
+        this.#setZoom(e.detail.zoom)) as EventListener);
 
     const page = this.shadowRoot!.querySelector<HTMLDivElement>(".docen-pages");
     if (!page) return;
@@ -1211,6 +1128,18 @@ class DocenDocument extends HTMLElement {
       Object.keys(initAttrs).length > 0
         ? { ...baseDoc, attrs: { ...baseDoc.attrs, ...initAttrs } }
         : baseDoc;
+    // The default document add-in contributes the engine extensions + every
+    // wired ribbon command. Registered before the editor mounts so its
+    // extensions seed the schema. Ribbon events route straight to the engine
+    // via DocumentCommands (editor.chain().<event>), not addin.commands.
+    const defaultAddin = createDefaultAddin({
+      onOutlineUpdate: (anchors) => this.#renderOutline(anchors),
+    });
+    this.addAddin(defaultAddin);
+    // Declarative external add-ins (JSON `addins` attribute) register after the
+    // default so their ribbon tabs append to the built-ins via mergeRibbonSchema.
+    this.#applyAddinsAttr();
+
     this.#editor = createDocxEditor({
       element: page,
       content: initialDoc,
@@ -1219,90 +1148,8 @@ class DocenDocument extends HTMLElement {
       // Review ribbon's spell-check button (spellcheck="true" attribute).
       spellcheck: this.getAttribute("spellcheck") === "true",
       editable: this.getAttribute("editable") !== "false",
-      // PageDocument overrides the doc schema to doc > page+; Page is the
-      // fixed-height sheet node; PagePlugin physically reflows blocks across
-      // pages so nothing overflows a sheet (C-route — see CLAUDE.md).
-      extensions: [
-        PageDocument,
-        Page,
-        // ImageCap scales over-wide images down to the section content width
-        // (Word behavior) and runs before PagePlugin so the reflow measures the
-        // capped dimensions, not the pre-cap overflow.
-        ImageCap,
-        PagePlugin,
-        FontMetricDecoration,
-        SplitTable,
-        SplitTableRow,
-        // Paragraph/heading split support: adds editor-only splitGroup/splitPart
-        // attrs so the paginator can split a tall paragraph across pages at a
-        // line boundary (head on the current page, tail on the next). Both
-        // halves share the splitGroup id; unwrapPages merges them on export.
-        SplitMarks,
-        // Outline: a read-only heading walk that reports the anchor list to
-        // <docen-outline> (see the Outline extension above — it replaces
-        // @tiptap/extension-table-of-contents, whose setNodeMarkup aborted the
-        // reflow on large docs).
-        Outline.configure({
-          onUpdate: (anchors) => this.#renderOutline(anchors),
-        }),
-        // Search (prosemirror-search) — stores the active query and highlights
-        // its matches; driven by the nav-pane search box (#onSearch).
-        Search,
-        // pageBreak NodeView — renders a Fluent divider with a centered label
-        // while show-marks is on. Schema comes from the engine's PageBreak;
-        // this only overrides the editor rendering.
-        PageBreakView,
-        // wpsShape NodeView — renders the editable floating text box as two
-        // elements (outer placement/rotation, inner contentDOM) so the text
-        // body is editable. Schema comes from the engine's WpsShape.
-        WpsShapeView,
-        // Centralized MS Office editing keymap (Ctrl+Enter page break, etc.) —
-        // see extensions/keymap.ts. Outranks HardBreak via priority.
-        DocenKeymap,
-        // sectionBreak widget — a section boundary is paragraph attrs (not a
-        // node), so it has no NodeView; a widget decoration paints the Fluent
-        // divider marker after each section-carrying paragraph.
-        SectionBreakMarks,
-        Placeholder.configure({
-          // A function (not a string) so the prompt re-reads the active locale
-          // each time the decoration set is rebuilt — a locale switch then
-          // refreshes the placeholder text without recreating the extension.
-          placeholder: () => t("editor.placeholder"),
-          // C-route nests paragraphs inside a non-textblock page node
-          // (doc > page > p). Placeholder's decoration walk returns false at the
-          // page unless includeChildren is set, so the prompt never reaches the
-          // paragraphs — turn it on so the empty first paragraph gets the
-          // is-empty class + data-placeholder attribute our CSS paints.
-          includeChildren: true,
-        }),
-        // Editing-behavior set — the engine carries schema only.
-        UndoRedo,
-        Dropcursor,
-        Gapcursor,
-        TrailingNode,
-        ListKeymap,
-        CharacterCount.configure({
-          // Word-style count: each CJK character counts as one, non-CJK runs
-          // split on whitespace — matches Word for mixed CJK/Latin (the default
-          // split(' ').length counts a whole CJK paragraph as a single word).
-          wordCounter: (text: string): number => {
-            const cjkRe = /[一-鿿぀-ヿ가-힯]/g;
-            const cjk = (text.match(cjkRe) ?? []).length;
-            const western = text.replace(cjkRe, " ").split(/\s+/).filter(Boolean).length;
-            return cjk + western;
-          },
-          // Count characters by grapheme cluster so emoji / combining marks /
-          // surrogate pairs count as one (default text.length undercounts them).
-          textCounter: (text: string): number => {
-            const seg = new Intl.Segmenter("en", { granularity: "grapheme" });
-            let n = 0;
-            for (const _ of seg.segment(text)) n++;
-            return n;
-          },
-        }),
-        Focus,
-        Selection,
-      ],
+      // Engine extensions come from the default add-in (see addin.ts).
+      extensions: [...(defaultAddin.extensions ?? [])],
     });
     this.#applyDocStyles();
 
@@ -1436,7 +1283,6 @@ class DocenDocument extends HTMLElement {
                 <fluent-menu-item data-event="lang-en">${t("header.lang.en")}</fluent-menu-item>
               </fluent-menu-list>
             </fluent-menu>
-            ${this.hasAttribute("closable") ? `<docen-ribbon-button icon="close" label="${t("header.close")}" event="close" icon-only></docen-ribbon-button>` : ""}
           </div>`;
   }
 
@@ -1445,13 +1291,26 @@ class DocenDocument extends HTMLElement {
     const root = this.shadowRoot;
     if (!root) return;
     const styles = this.#editor?.state.doc.attrs?.styles ?? null;
-    root.querySelector("docen-app-header")!.innerHTML = this.#renderHeader();
-    root.querySelector("docen-ribbon")!.innerHTML = buildRibbonInnerHTML(styles, {
-      tabs: this.#tabs(),
-    });
+    root.querySelector("docen-title-bar")!.innerHTML = this.#renderHeader();
+    // Built-in tabs (Home/Insert/… with the live style gallery) come from
+    // ribbonTabs; external add-ins layer their own tabs on top via
+    // mergeRibbonSchema. The default add-in contributes no ribbon, so without
+    // extra add-ins this is just the built-in set.
+    const tabs = [...ribbonTabs(styles), ...mergeRibbonSchema(this.addins)];
+    root
+      .querySelector("docen-ribbon")!
+      .replaceChildren(renderRibbonFromSchema(tabs, ribbonActions()));
     this.#applyRibbonGreying();
     this.#syncEditModeMenu();
     this.#renderPanes();
+  }
+
+  /** Addin registry changed (add-in registered/removed) — re-stamp the ribbon
+   *  so an external add-in's ribbon contribution appears. The default add-in
+   *  contributes no ribbon, so this is a no-op for it; only extra add-ins add
+   *  tabs. */
+  protected addinsChanged(): void {
+    this.#renderChrome();
   }
 
   /** Stamp pane titles + status text for the active locale (re-run on lang change). */
@@ -1481,37 +1340,45 @@ class DocenDocument extends HTMLElement {
     if (view) view.dispatch(view.state.tr.setMeta("docen-i18n", true));
   }
 
-  /** Apply the chrome-visibility attributes (toolbar/header/status-bar/panes)
-   *  by toggling the native HTML `hidden` attribute + the task-pane `open`
-   *  property. UI components need no changes — `hidden` is native. */
-  #applyChromeVisibility(): void {
-    const root = this.shadowRoot;
-    if (!root) return;
-    const hide = (selector: string, attr: string): void => {
-      const el = root.querySelector(selector);
-      if (el) (el as HTMLElement).toggleAttribute("hidden", this.getAttribute(attr) === "false");
-    };
-    hide("docen-ribbon", "toolbar");
-    hide("docen-app-header", "header");
-    hide('footer[slot="status"]', "status-bar");
-    this.#applyPane("start", "navigation-pane");
-    this.#applyPane("end", "properties-pane");
-  }
+  /** Add-in ids currently registered from the `addins` attribute. Tracked so
+   *  editing the attribute at runtime removes add-ins that fell out (addAddin
+   *  alone is idempotent on add but can't detect a deletion). */
+  #addinAttrIds = new Set<string>();
 
-  /** Apply one side pane's attribute: "hidden" removes it, "open"/"closed"
-   *  toggle its `open` state (the task-pane component observes `open`). */
-  #applyPane(side: "start" | "end", attr: string): void {
-    const pane = this.shadowRoot?.querySelector(`docen-task-pane[position="${side}"]`) as
-      | (HTMLElement & { open: boolean })
-      | null;
-    if (!pane) return;
-    const value = this.getAttribute(attr);
-    if (value === "hidden") pane.setAttribute("hidden", "");
-    else {
-      pane.removeAttribute("hidden");
-      if (value === "closed") pane.open = false;
-      else if (value === "open") pane.open = true;
+  /** Sync external add-ins with the `addins` JSON attribute: register new ids,
+   *  remove ids no longer present. JSON can't carry functions, so only ribbon
+   *  data contributions cross this boundary; command handlers stay in JS
+   *  (addAddin with a full object). */
+  #applyAddinsAttr(): void {
+    const raw = this.getAttribute("addins");
+    const next = new Set<string>();
+    if (raw) {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        return;
+      }
+      if (Array.isArray(parsed)) {
+        for (const item of parsed) {
+          if (
+            item &&
+            typeof item === "object" &&
+            typeof (item as { id?: unknown }).id === "string"
+          ) {
+            const id = (item as { id: string }).id;
+            next.add(id);
+            if (!this.#addinAttrIds.has(id)) this.addAddin(item as DocenAddin<this>);
+          }
+        }
+      }
     }
+    // Remove add-ins that fell out of the attribute (covers editing it to drop
+    // a tab at runtime, or removing the attribute entirely).
+    for (const id of this.#addinAttrIds) {
+      if (!next.has(id)) this.removeAddin(id);
+    }
+    this.#addinAttrIds = next;
   }
 
   /** Grey out ribbon commands that have no handler (skeleton buttons). Runs
@@ -1556,11 +1423,6 @@ class DocenDocument extends HTMLElement {
     return new Set<string>([...WIRED_DISPATCH, ...LOCAL_HANDLED]);
   }
 
-  /** The `tabs` whitelist, or undefined for all tabs. */
-  #tabs(): readonly RibbonTabId[] | undefined {
-    return parseTabs(this.getAttribute("tabs"));
-  }
-
   /** Dispatch a cancelable event; returns true when a host preventDefaulted it
    *  (i.e. took over the action). Lets save/open/print/new work out-of-box yet
    *  stay overridable. */
@@ -1570,13 +1432,6 @@ class DocenDocument extends HTMLElement {
     const event = new CustomEvent(name, { bubbles: true, composed: true, cancelable: true });
     this.dispatchEvent(event);
     return event.defaultPrevented;
-  }
-
-  /** The close (×) button asks the host to close the editor — the component
-   *  itself never unmounts (it doesn't know the host's context). Only rendered
-   *  when the host sets `closable`. */
-  #emitRequestClose(): void {
-    this.dispatchEvent(new CustomEvent("docen:request-close", { bubbles: true, composed: true }));
   }
 
   /** docen:change — fired on every doc-changing transaction (autosave driver,
@@ -1604,7 +1459,7 @@ class DocenDocument extends HTMLElement {
    *  share one geometry source; the canvas attrs are now the rendering fallback
    *  + the zoom surface's page-width source. */
   #setPageSize(value?: string): void {
-    const canvas = this.shadowRoot?.querySelector("docen-canvas");
+    const canvas = this.shadowRoot?.querySelector("docen-document-area");
     const size = value ? PAPER_SIZES[value] : undefined;
     if (canvas && size) {
       canvas.setAttribute("page-width", String(size[0]));
@@ -1629,7 +1484,7 @@ class DocenDocument extends HTMLElement {
    *  orientation onto page.size, deep-merged with the current (or engine-default)
    *  size so resolvePageSize can swap edges for landscape. */
   #setOrientation(value?: string): void {
-    const canvas = this.shadowRoot?.querySelector("docen-canvas");
+    const canvas = this.shadowRoot?.querySelector("docen-document-area");
     if (canvas && value) {
       if (value === "landscape") canvas.setAttribute("orientation", "landscape");
       else canvas.removeAttribute("orientation");
@@ -1654,7 +1509,7 @@ class DocenDocument extends HTMLElement {
    *  sectionProperties so a page-setup change actually re-caps images and
    *  re-renders (the canvas CSS alone wouldn't, once a sectPr is inlined). */
   #setMargins(value?: string): void {
-    const canvas = this.shadowRoot?.querySelector("docen-canvas");
+    const canvas = this.shadowRoot?.querySelector("docen-document-area");
     if (canvas && value && MARGINS[value]) canvas.setAttribute("margin", MARGINS[value]);
     if (value && MARGINS[value]) {
       this.#updateSectionGeometry({ page: { margin: marginTwipsFromCss(MARGINS[value]) } });
@@ -1754,7 +1609,7 @@ class DocenDocument extends HTMLElement {
     const sp = (editor.state.doc.attrs as { sectionProperties?: SectionPropertiesOptions })
       .sectionProperties;
     const page = sp?.page;
-    const canvas = this.shadowRoot?.querySelector("docen-canvas");
+    const canvas = this.shadowRoot?.querySelector("docen-document-area");
     if (canvas && page) {
       const size = page.size;
       if (size && typeof size.width === "number" && typeof size.height === "number") {
@@ -1803,28 +1658,8 @@ class DocenDocument extends HTMLElement {
    *  status bar. CSS `zoom` rescales the pages and reflows the scroll surface. */
   #setZoom(pct: number): void {
     this.#zoom = Math.max(10, Math.min(500, Math.round(pct)));
-    this.shadowRoot?.querySelector("docen-canvas")?.setAttribute("zoom", String(this.#zoom));
+    this.shadowRoot?.querySelector("docen-document-area")?.setAttribute("zoom", String(this.#zoom));
     this.#updateStatus();
-  }
-
-  /** Wire the status-bar zoom cluster (Word's bottom-right control): dragging
-   *  the slider sets the zoom live, and the minus / plus buttons step by 10%.
-   *  Bound once — the footer is static template DOM, never re-stamped. */
-  #setupZoomControls(): void {
-    const root = this.shadowRoot;
-    if (!root) return;
-    const slider = root.querySelector<HTMLInputElement>(".docen-zoom-slider");
-    if (slider) {
-      slider.addEventListener("input", () => {
-        this.#setZoom(Number(slider.value));
-      });
-    }
-    root.querySelectorAll<HTMLElement>(".docen-zoom-step").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const step = Number(btn.getAttribute("data-zoom-step") ?? "0");
-        this.#setZoom(this.#zoom + step * 10);
-      });
-    });
   }
 
   /** Resolve a ribbon zoom preset to a percent. Numeric presets ("200", "100",
@@ -1833,7 +1668,7 @@ class DocenDocument extends HTMLElement {
   #zoomPreset(preset: string): void {
     if (/^\d+$/.test(preset)) return this.#setZoom(Number(preset));
     if (preset !== "page-width") return;
-    const canvas = this.shadowRoot?.querySelector("docen-canvas");
+    const canvas = this.shadowRoot?.querySelector("docen-document-area");
     if (!canvas) return;
     const MM2PX = 96 / 25.4;
     const pw = parseFloat(canvas.getAttribute("page-width") ?? "210") * MM2PX;
@@ -1853,11 +1688,7 @@ class DocenDocument extends HTMLElement {
   #updateStatus(): void {
     const root = this.shadowRoot;
     if (!root) return;
-    const sectionEl = root.querySelector<HTMLElement>(".docen-status-section");
-    const pagesEl = root.querySelector<HTMLElement>(".docen-status-pages");
-    const wordsEl = root.querySelector<HTMLElement>(".docen-status-words");
-    const sliderEl = root.querySelector<HTMLInputElement>(".docen-zoom-slider");
-    const pctEl = root.querySelector<HTMLElement>(".docen-zoom-pct");
+    const bar = root.querySelector<HTMLElement>("docen-status-bar");
     const editor = this.#editor;
     let page = 0;
     let total = 0;
@@ -1897,27 +1728,22 @@ class DocenDocument extends HTMLElement {
         }
       }
     }
-    if (sectionEl) {
-      sectionEl.textContent = t("status.section").replace("{n}", String(section));
+    // Word count is cached by doc nodeSize so caret moves skip re-walking the
+    // full document (CharacterCount.words() regexes all text).
+    const docSize = editor?.state.doc.nodeSize ?? 0;
+    if (docSize !== this.#lastDocSize) {
+      const cc = editor?.storage.characterCount as { words?: () => number } | undefined;
+      this.#lastWords = cc?.words?.() ?? 0;
+      this.#lastDocSize = docSize;
     }
-    if (pagesEl) {
-      pagesEl.textContent = t("status.page-of")
-        .replace("{page}", String(page || 1))
-        .replace("{total}", String(total || 1));
+    // Push the numeric state to <docen-status-bar>; it localizes + renders.
+    if (bar) {
+      bar.setAttribute("section", String(section));
+      bar.setAttribute("page", String(page || 1));
+      bar.setAttribute("total", String(total || 1));
+      bar.setAttribute("words", String(this.#lastWords));
+      bar.setAttribute("zoom", String(this.#zoom));
     }
-    if (wordsEl) {
-      const docSize = editor?.state.doc.nodeSize ?? 0;
-      if (docSize !== this.#lastDocSize) {
-        const cc = editor?.storage.characterCount as { words?: () => number } | undefined;
-        this.#lastWords = cc?.words?.() ?? 0;
-        this.#lastDocSize = docSize;
-      }
-      wordsEl.textContent = t("status.words").replace("{n}", String(this.#lastWords));
-    }
-    // Sync the slider without retriggering its own input handler — only write
-    // when the value drifted (keyboard / ribbon zoom changed it out of band).
-    if (sliderEl && Number(sliderEl.value) !== this.#zoom) sliderEl.value = String(this.#zoom);
-    if (pctEl) pctEl.textContent = `${this.#zoom}%`;
   }
 
   readonly #onCommand = (event: CustomEvent<{ event?: string; value?: string }>): void => {
@@ -1926,11 +1752,6 @@ class DocenDocument extends HTMLElement {
     // UI chrome actions are handled locally and need no Tiptap editor.
     if (name === "toggle-navigation") {
       this.#togglePane("start");
-      return;
-    }
-    // Close (×) — only rendered when `closable`; ask the host to close.
-    if (name === "close") {
-      this.#emitRequestClose();
       return;
     }
     // Find (ribbon Home → Editing → Find, or Ctrl+F) → open the nav-pane search.
@@ -2022,7 +1843,19 @@ class DocenDocument extends HTMLElement {
       this.#toggleFormatPainter();
       return;
     }
-    dispatchRibbonCommand(this.#editor, name, value);
+    // DocumentCommands registers every ribbon event as a native Tiptap command, so
+    // route the event straight to editor.chain().focus().<event>(value).run() —
+    // no RIBBON_COMMAND_MAP / dispatchRibbonCommand / addin.commands layer. A
+    // user add-in overrides a command by contributing a Tiptap extension whose
+    // addCommands redefines the same name (Tiptap's native override mechanism).
+    const editor = this.#editor;
+    if (!editor) return;
+    const chain = editor.chain().focus() as unknown as Record<
+      string,
+      (value?: string) => { run: () => void }
+    >;
+    const cmd = chain[name];
+    if (typeof cmd === "function") cmd(value).run();
   };
 
   /** Menu items and the auto-save switch carry their action in `data-event`. */
@@ -2343,7 +2176,7 @@ class DocenDocument extends HTMLElement {
    *  canvas flips width/height for landscape via :host([orientation]). */
   #applySectionGeometry(): void {
     const editor = this.#editor;
-    const canvas = this.shadowRoot?.querySelector("docen-canvas");
+    const canvas = this.shadowRoot?.querySelector("docen-document-area");
     if (!editor || !canvas) return;
     const sp = (editor.state.doc.attrs as Record<string, unknown> | undefined)
       ?.sectionProperties as

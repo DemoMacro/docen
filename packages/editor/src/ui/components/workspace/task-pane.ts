@@ -1,53 +1,81 @@
+import {
+  FASTElement,
+  attr,
+  css,
+  customElement,
+  html,
+  observable,
+  ref,
+} from "@microsoft/fast-element";
+
 import { observeLang, t } from "../../i18n/localize";
 
-const template = document.createElement("template");
-template.innerHTML = `
-  <style>
-    :host { display: block; height: 100%; box-sizing: border-box; }
-    /* Drawer-wide small text so the pane reads as a compact side rail, not
-       body copy. */
-    fluent-drawer { font-size: 12px; }
-    /* fluent-drawer's <dialog> is the pane's bounding box. Make it a flex
-       column so the header stays fixed and the slotted body (outline tree)
-       fills the remaining height and scrolls internally instead of growing past
-       the editor (a 7888px outline overflowed the 551px pane before this). */
-    fluent-drawer::part(dialog) {
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-      height: 100%;
-    }
-    /* Visibility is CSS-driven from our own "open" attribute. An inline
-       fluent-drawer hide() does not actually close the dialog (its
-       display stays flex), so a pane without open — e.g. the Properties
-       pane — renders visible by default and the close button cannot
-       dismiss it. Keying display on :host(:not([open])) makes the
-       attribute the single source of truth: show()/hide() still update
-       the drawer internal state, but the canvas reflow follows the
-       attribute. */
-    :host(:not([open])) fluent-drawer::part(dialog) {
-      display: none;
-    }
-    /* Header row: title on the inline-start, close button on the inline-end. */
-    .panel-head {
-      display: flex;
-      flex: 0 0 auto;
-      align-items: center;
-      justify-content: space-between;
-      padding: 6px 4px 6px 16px;
-      border-bottom: 1px solid var(--docen-color-divider, #e2e2e2);
-    }
-    .panel-head span { font-size: 13px; font-weight: 600; }
-    .panel-close { min-width: 28px; height: 28px; padding: 0; }
-    .panel-close[hidden] { display: none; }
-  </style>
-  <fluent-drawer part="drawer" type="inline" size="small">
+const styles = css`
+  :host {
+    display: block;
+    height: 100%;
+    box-sizing: border-box;
+  }
+  /* Drawer-wide small text so the pane reads as a compact side rail, not
+     body copy. */
+  fluent-drawer {
+    font-size: 12px;
+  }
+  /* fluent-drawer's <dialog> is the pane's bounding box. Make it a flex
+     column so the header stays fixed and the slotted body (outline tree)
+     fills the remaining height and scrolls internally instead of growing past
+     the editor (a 7888px outline overflowed the 551px pane before this). */
+  fluent-drawer::part(dialog) {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    height: 100%;
+  }
+  /* Visibility is CSS-driven from our own "open" attribute. An inline
+     fluent-drawer hide() does not actually close the dialog (its
+     display stays flex), so a pane without open — e.g. the Properties
+     pane — renders visible by default and the close button cannot
+     dismiss it. Keying display on :host(:not([open])) makes the
+     attribute the single source of truth: show()/hide() still update
+     the drawer internal state, but the canvas reflow follows the
+     attribute. */
+  :host(:not([open])) fluent-drawer::part(dialog) {
+    display: none;
+  }
+  /* Header row: title on the inline-start, close button on the inline-end. */
+  .panel-head {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 4px 6px 16px;
+    border-bottom: 1px solid var(--docen-color-divider, #e2e2e2);
+  }
+  .panel-head span {
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .panel-close {
+    min-width: 28px;
+    height: 28px;
+    padding: 0;
+  }
+  .panel-close[hidden] {
+    display: none;
+  }
+`;
+
+const template = html<DocenTaskPane>`
+  <fluent-drawer part="drawer" type="inline" size="small" ${ref("drawer")}>
     <div class="panel-head" part="head">
-      <span part="title"></span>
-      <fluent-button class="panel-close" part="close" appearance="subtle">✕</fluent-button>
+      <span part="title" ${ref("titleEl")}></span>
+      <fluent-button class="panel-close" part="close" appearance="subtle" ${ref("closeBtn")}
+        >✕</fluent-button
+      >
     </div>
     <slot></slot>
-  </fluent-drawer>`;
+  </fluent-drawer>
+`;
 
 /** Structural subset of fluent-drawer the pane forwards to. */
 interface FluentDrawer extends HTMLElement {
@@ -68,14 +96,18 @@ interface FluentDrawer extends HTMLElement {
  * The close button tooltip is localized (`taskPane.close`); set the
  * workspace's `lang` to override the page locale.
  */
-class DocenTaskPane extends HTMLElement {
-  static get observedAttributes(): string[] {
-    return ["position", "title", "open", "closable"];
-  }
+@customElement({ name: "docen-task-pane", template, styles })
+class DocenTaskPane extends FASTElement {
+  // `title` would collide with HTMLElement.title — map the attribute to a
+  // dedicated property (the attribute stays "title" for callers).
+  @attr({ attribute: "title" }) paneTitle?: string;
+  @attr position?: string;
+  @attr({ mode: "boolean" }) open?: boolean;
+  @attr closable?: string;
 
-  #drawer?: FluentDrawer;
-  #titleEl?: HTMLElement;
-  #closeBtn?: HTMLElement;
+  @observable drawer?: FluentDrawer;
+  @observable titleEl?: HTMLElement;
+  @observable closeBtn?: HTMLElement;
   #blankCloseDialog?: HTMLElement;
   readonly #blankCloseHandler = (event: Event): void => {
     if (event.target === this.#blankCloseDialog) event.stopImmediatePropagation();
@@ -83,35 +115,25 @@ class DocenTaskPane extends HTMLElement {
   #lockRaf = 0;
   #unsubscribe?: () => void;
 
-  attributeChangedCallback(name: string): void {
-    switch (name) {
-      case "position":
-        this.#applyPosition();
-        break;
-      case "title":
-        this.#applyTitle();
-        break;
-      case "open":
-        this.#applyOpen();
-        break;
-      case "closable":
-        this.#applyClosable();
-        break;
-    }
+  paneTitleChanged(): void {
+    this.#applyTitle();
+  }
+  positionChanged(): void {
+    this.#applyPosition();
+  }
+  openChanged(): void {
+    this.#applyOpen();
+  }
+  closableChanged(): void {
+    this.#applyClosable();
   }
 
   connectedCallback(): void {
-    if (!this.shadowRoot) {
-      this.attachShadow({ mode: "open" }).append(template.content.cloneNode(true));
-    }
-    const root = this.shadowRoot!;
-    this.#drawer = root.querySelector("fluent-drawer") as FluentDrawer;
-    this.#titleEl = root.querySelector('[part="title"]')!;
-    this.#closeBtn = root.querySelector('[part="close"]')!;
+    super.connectedCallback();
     this.#applyPosition();
     this.#applyTitle();
     this.#applyClosable();
-    this.#closeBtn?.addEventListener("click", () => this.hide());
+    this.closeBtn?.addEventListener("click", () => this.hide());
     this.#lockBlankClose();
     this.#applyOpen();
     this.#applyI18n();
@@ -122,20 +144,12 @@ class DocenTaskPane extends HTMLElement {
     cancelAnimationFrame(this.#lockRaf);
     this.#blankCloseDialog?.removeEventListener("click", this.#blankCloseHandler, true);
     this.#unsubscribe?.();
-  }
-
-  get open(): boolean {
-    return this.hasAttribute("open");
-  }
-
-  set open(value: boolean) {
-    this.toggleAttribute("open", value);
+    super.disconnectedCallback();
   }
 
   show(): void {
     this.open = true;
   }
-
   hide(): void {
     this.open = false;
   }
@@ -143,7 +157,7 @@ class DocenTaskPane extends HTMLElement {
   // Sync the `open` attribute to fluent-drawer's show/hide. The drawer may not
   // be upgraded on first connect, so retry once it is.
   #applyOpen(): void {
-    const drawer = this.#drawer;
+    const drawer = this.drawer;
     if (!drawer || typeof drawer.show !== "function") {
       if (drawer) requestAnimationFrame(() => this.#applyOpen());
       return;
@@ -159,17 +173,16 @@ class DocenTaskPane extends HTMLElement {
   }
 
   #applyPosition(): void {
-    const position = this.getAttribute("position") ?? "start";
-    this.#drawer?.setAttribute("position", position);
+    this.drawer?.setAttribute("position", this.position ?? "start");
   }
 
   #applyTitle(): void {
-    if (this.#titleEl) this.#titleEl.textContent = this.getAttribute("title") ?? "";
+    if (this.titleEl) this.titleEl.textContent = this.paneTitle ?? "";
   }
 
   #applyClosable(): void {
-    const closable = this.getAttribute("closable") !== "false";
-    this.#closeBtn?.toggleAttribute("hidden", !closable);
+    const closable = this.closable !== "false";
+    this.closeBtn?.toggleAttribute("hidden", !closable);
   }
 
   // Inline drawers also close when a click lands on the <dialog> itself
@@ -177,7 +190,7 @@ class DocenTaskPane extends HTMLElement {
   // only the header close button dismisses the pane.
   #lockBlankClose(): void {
     const bind = (): void => {
-      const dialog = this.#drawer?.dialog;
+      const dialog = this.drawer?.dialog;
       if (!dialog) {
         this.#lockRaf = requestAnimationFrame(bind);
         return;
@@ -189,10 +202,8 @@ class DocenTaskPane extends HTMLElement {
   }
 
   #applyI18n(): void {
-    if (this.#closeBtn) this.#closeBtn.setAttribute("title", t("taskPane.close", this));
+    this.closeBtn?.setAttribute("title", t("taskPane.close", this));
   }
 }
-
-customElements.define("docen-task-pane", DocenTaskPane);
 
 export default DocenTaskPane;

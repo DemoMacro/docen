@@ -13,7 +13,7 @@
 | -------------------------------------------- | -------------------------------------------------- | ---------------------------------------------------------------------------------------- |
 | [docen](./packages/docen/README.md)          | ![npm](https://img.shields.io/npm/v/docen)         | All-in-one — headless Markdown/HTML/DOCX conversion + the full `<docen-document>` editor |
 | [@docen/vue](./packages/vue/README.md)       | ![npm](https://img.shields.io/npm/v/@docen/vue)    | Vue 3 adapter — `<DocenDocument>` component (v-model + v-slot editor)                    |
-| [@docen/editor](./packages/editor/README.md) | ![npm](https://img.shields.io/npm/v/@docen/editor) | Assembly layer — Fluent UI shell + docx engine into `<docen-document>`                   |
+| [@docen/editor](./packages/editor/README.md) | ![npm](https://img.shields.io/npm/v/@docen/editor) | Assembly layer — Fluent UI host + docx engine into `<docen-document>`                    |
 | [@docen/docx](./packages/docx/README.md)     | ![npm](https://img.shields.io/npm/v/@docen/docx)   | Tiptap DOCX editor + converters, powered by @office-open/docx                            |
 
 ## Quick Start
@@ -59,7 +59,7 @@ const output = await generateDOCX(editor.getJSON());
 
 ### Visual Editor (`@docen/editor`)
 
-A turnkey web-component editor (`<docen-document>`) bundling the Fluent UI shell with the `@docen/docx` engine:
+A turnkey web-component editor (`<docen-document>`) bundling the Fluent UI host with the `@docen/docx` engine:
 
 ```bash
 $ pnpm add @docen/editor

@@ -27,28 +27,16 @@ export const DocenDocument = defineComponent({
     filename: { type: String, default: undefined },
     editable: { type: Boolean, default: undefined },
     spellcheck: { type: Boolean, default: undefined },
-    toolbar: { type: Boolean, default: undefined },
-    header: { type: Boolean, default: undefined },
-    statusBar: { type: Boolean, default: undefined },
-    navigationPane: { type: String, default: undefined },
-    propertiesPane: { type: String, default: undefined },
-    tabs: { type: String, default: undefined },
-    closable: { type: Boolean, default: undefined },
     user: { type: String, default: undefined },
     avatar: { type: String, default: undefined },
     sectionProperties: { type: Object as PropType<SectionPropertiesOptions>, default: undefined },
     styles: { type: Object as PropType<StylesOptions>, default: undefined },
+    /** External add-ins (ribbon/task-pane data contributions). Functions can't
+     *  cross the attribute boundary — register command/pane-render add-ins via
+     *  the template ref's getElement().addAddin() instead. */
+    addins: { type: Array as PropType<unknown[]>, default: undefined },
   },
-  emits: [
-    "update:modelValue",
-    "change",
-    "save",
-    "save-as",
-    "open",
-    "new",
-    "print",
-    "request-close",
-  ],
+  emits: ["update:modelValue", "change", "save", "save-as", "open", "new", "print"],
   setup(props, { emit, expose, slots }) {
     const el = ref<DocenEl | null>(null);
     /** The underlying Tiptap editor (undefined until docen:ready). Exposed on
@@ -66,18 +54,12 @@ export const DocenDocument = defineComponent({
       if (props.filename != null) a.filename = props.filename;
       if (props.editable != null) a.editable = props.editable ? "true" : "false";
       if (props.spellcheck != null) a.spellcheck = props.spellcheck ? "true" : "false";
-      if (props.toolbar != null) a.toolbar = props.toolbar ? "true" : "false";
-      if (props.header != null) a.header = props.header ? "true" : "false";
-      if (props.statusBar != null) a["status-bar"] = props.statusBar ? "true" : "false";
-      if (props.navigationPane != null) a["navigation-pane"] = props.navigationPane;
-      if (props.propertiesPane != null) a["properties-pane"] = props.propertiesPane;
-      if (props.tabs != null) a.tabs = props.tabs;
-      if (props.closable != null) a.closable = props.closable ? "true" : "false";
       if (props.user != null) a.user = props.user;
       if (props.avatar != null) a.avatar = props.avatar;
       if (props.sectionProperties != null)
         a["section-properties"] = JSON.stringify(props.sectionProperties);
       if (props.styles != null) a.styles = JSON.stringify(props.styles);
+      if (props.addins != null) a.addins = JSON.stringify(props.addins);
       return a;
     });
 
@@ -108,7 +90,6 @@ export const DocenDocument = defineComponent({
     const onOpen = (e: Event): void => emit("open", (e as CustomEvent).detail);
     const onNew = (e: Event): void => emit("new", (e as CustomEvent).detail);
     const onPrint = (e: Event): void => emit("print", (e as CustomEvent).detail);
-    const onRequestClose = (e: Event): void => emit("request-close", (e as CustomEvent).detail);
 
     expose({
       editor,
@@ -128,7 +109,6 @@ export const DocenDocument = defineComponent({
         onDocenOpen: onOpen,
         onDocenPrint: onPrint,
         onDocenReady: onReady,
-        onDocenRequestClose: onRequestClose,
         onDocenSave: onSave,
         onDocenSaveAs: onSaveAs,
       }),

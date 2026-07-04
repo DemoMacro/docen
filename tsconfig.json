@@ -7,6 +7,7 @@
     "moduleResolution": "bundler",
     "strict": true,
     "skipLibCheck": true,
+    "experimentalDecorators": true,
     "types": ["node"]
   },
   "exclude": ["playground/nuxt"]

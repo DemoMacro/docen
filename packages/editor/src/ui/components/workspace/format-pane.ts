@@ -1,3 +1,13 @@
+import {
+  FASTElement,
+  attr,
+  css,
+  customElement,
+  html,
+  observable,
+  ref,
+} from "@microsoft/fast-element";
+
 import { observeLang, t } from "../../i18n/localize";
 
 /** A selectable option for a `radio` field. */
@@ -28,96 +38,115 @@ export interface PropertyGroup {
   readonly expanded?: boolean;
 }
 
-const template = document.createElement("template");
-template.innerHTML = `
-  <style>
-    :host { display: block; font-size: 12px; }
-    fluent-accordion,
-    fluent-accordion-item { max-width: 100%; width: 100%; }
-    fluent-accordion-item::part(heading) { font-size: 12px; font-weight: 600; }
-    fluent-accordion-item::part(content) {
-      padding-inline-start: 28px;
-      padding-inline-end: 6px;
-    }
-    /* A row is "label on the inline-start, control on the inline-end" —
-       space-between pins the label left and the control right without the
-       control stretching. */
-    .field-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-      padding: 4px 0;
-    }
-    .field-row label,
-    .field-label { font-size: 12px; color: #666; }
-    .field-label { display: block; padding: 4px 0; }
-    .field-row fluent-text-input { flex: 0 0 auto; width: 88px; }
-    .color-swatch {
-      flex: 0 0 auto;
-      width: 56px;
-      height: 24px;
-      border: 1px solid #d0d0d0;
-      border-radius: 4px;
-      padding: 2px;
-      background: #fff;
-      cursor: pointer;
-    }
-    .empty { font-size: 12px; color: #666; padding: 12px 8px; margin: 0; }
-  </style>
-  <div part="body"></div>`;
+const styles = css`
+  :host {
+    display: block;
+    font-size: 12px;
+  }
+  fluent-accordion,
+  fluent-accordion-item {
+    max-width: 100%;
+    width: 100%;
+  }
+  fluent-accordion-item::part(heading) {
+    font-size: 12px;
+    font-weight: 600;
+  }
+  fluent-accordion-item::part(content) {
+    padding-inline-start: 28px;
+    padding-inline-end: 6px;
+  }
+  /* A row is "label on the inline-start, control on the inline-end" —
+     space-between pins the label left and the control right without the
+     control stretching. */
+  .field-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 4px 0;
+  }
+  .field-row label,
+  .field-label {
+    font-size: 12px;
+    color: #666;
+  }
+  .field-label {
+    display: block;
+    padding: 4px 0;
+  }
+  .field-row fluent-text-input {
+    flex: 0 0 auto;
+    width: 88px;
+  }
+  .color-swatch {
+    flex: 0 0 auto;
+    width: 56px;
+    height: 24px;
+    border: 1px solid #d0d0d0;
+    border-radius: 4px;
+    padding: 2px;
+    background: #fff;
+    cursor: pointer;
+  }
+  .empty {
+    font-size: 12px;
+    color: #666;
+    padding: 12px 8px;
+    margin: 0;
+  }
+`;
+
+const template = html<DocenFormatPane>`<div part="body" ${ref("body")}></div>`;
 
 /**
- * `<docen-properties-panel groups='[{title, fields:[…]}]'>` — an Office-style
- * properties/format pane: a Fluent accordion where each group holds typed
- * fields (`radio` / `number` / `color`). Editing a field emits
- * `property:change` with `{ key, value }`. Field labels and option text are
- * business strings (translated by the editor package); only the empty state
- * is localized here.
+ * `<docen-format-pane groups='[{title, fields:[…]}]'>` — an Office-style format
+ * pane: a Fluent accordion where each group holds typed fields (`radio` /
+ * `number` / `color`). Editing a field emits `property:change` with
+ * `{ key, value }`. Field labels and option text are business strings
+ * (translated by the editor package); only the empty state is localized here.
  */
-class DocenPropertiesPanel extends HTMLElement {
-  static get observedAttributes(): string[] {
-    return ["groups"];
-  }
-
-  #body?: HTMLElement;
+@customElement({ name: "docen-format-pane", template, styles })
+class DocenFormatPane extends FASTElement {
+  @attr groups?: string;
+  @observable body?: HTMLElement;
   #unsubscribe?: () => void;
 
-  attributeChangedCallback(name: string): void {
-    if (name === "groups") this.#render();
+  groupsChanged(): void {
+    this.#render();
   }
 
   connectedCallback(): void {
-    if (!this.shadowRoot) {
-      this.attachShadow({ mode: "open" }).append(template.content.cloneNode(true));
-    }
-    this.#body = this.shadowRoot!.querySelector("[part='body']")!;
+    super.connectedCallback();
     this.#render();
     // Only the empty-state string is component-internal; field/option labels
     // are business strings, so update just the empty line on lang change.
     this.#unsubscribe = observeLang(() => {
-      const empty = this.#body?.querySelector(".empty");
+      const empty = this.body?.querySelector(".empty");
       if (empty) empty.textContent = t("properties.empty", this);
     });
   }
 
   disconnectedCallback(): void {
     this.#unsubscribe?.();
+    super.disconnectedCallback();
   }
 
-  get groups(): PropertyGroup[] {
+  // The JSON `groups` attribute parsed; bad JSON → empty (no render).
+  get parsedGroups(): PropertyGroup[] {
     try {
-      return JSON.parse(this.getAttribute("groups") ?? "[]") as PropertyGroup[];
+      return JSON.parse(this.groups ?? "[]") as PropertyGroup[];
     } catch {
       return [];
     }
   }
 
   #render(): void {
-    const body = this.#body;
+    const body = this.body;
     if (!body) return;
     body.replaceChildren();
-    if (this.groups.length === 0) {
+    const groups = this.parsedGroups;
+    if (groups.length === 0) {
       const empty = document.createElement("p");
       empty.className = "empty";
       empty.textContent = t("properties.empty", this);
@@ -126,7 +155,7 @@ class DocenPropertiesPanel extends HTMLElement {
     }
     const accordion = document.createElement("fluent-accordion");
     accordion.setAttribute("expand-mode", "multi");
-    for (const group of this.groups) {
+    for (const group of groups) {
       accordion.append(this.#renderGroup(group));
     }
     body.append(accordion);
@@ -219,6 +248,4 @@ class DocenPropertiesPanel extends HTMLElement {
   }
 }
 
-customElements.define("docen-properties-panel", DocenPropertiesPanel);
-
-export default DocenPropertiesPanel;
+export default DocenFormatPane;

@@ -28,11 +28,11 @@ Prerequisites: Node.js 18+, pnpm 9+.
 packages/
   docen/    docen          (all-in-one aggregate entry — re-exports @docen/docx + @docen/editor)
   vue/      @docen/vue     (Vue 3 adapter — <DocenDocument> component: v-model + v-slot editor)
-  editor/   @docen/editor  (assembly: Fluent UI shell + @docen/docx → <docen-document>; owns pagination)
+  editor/   @docen/editor  (multi-editor host + add-ins: Fluent UI surfaces + @docen/docx → <docen-document>; owns pagination)
   docx/     @docen/docx    (Tiptap DOCX editor + converters + custom extensions)
 ```
 
-- **@docen/editor** — assembly layer: Fluent UI shell (under `src/ui/`) + docx engine.
+- **@docen/editor** — multi-editor host + add-ins: Fluent UI surfaces (under `src/ui/`) + docx engine.
 - **@docen/docx** — engine + converters, no UI.
 
 See CLAUDE.md → Package Layout for the file-level tree.

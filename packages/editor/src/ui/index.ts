@@ -1,3 +1,6 @@
+export * from "./addin/types";
+export * from "./addin/host";
+export * from "./addin/define";
 export { applyTheme } from "./theme";
 export type { ThemeMode } from "./theme";
 export { registerComponents } from "./registry";

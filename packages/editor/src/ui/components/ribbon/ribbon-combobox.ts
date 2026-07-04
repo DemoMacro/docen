@@ -1,3 +1,13 @@
+import {
+  FASTElement,
+  attr,
+  css,
+  customElement,
+  html,
+  observable,
+  ref,
+} from "@microsoft/fast-element";
+
 export interface RibbonOption {
   text: string;
   value?: string;
@@ -9,19 +19,42 @@ export interface RibbonOption {
 // dropdown, matching `position-anchor` on the listbox).
 let seq = 0;
 
-const template = document.createElement("template");
-template.innerHTML = `
-  <style>
-    :host { display: inline-flex; width: 120px; }
-    :host([size="short"]) { width: 112px; }
-    :host([size="long"]) { width: 200px; }
-    fluent-dropdown { width: 100%; min-width: 0; }
-    input { width: 100%; box-sizing: border-box; }
-  </style>
-  <fluent-dropdown type="combobox" appearance="outline" part="dropdown">
-    <fluent-listbox part="listbox" popover="manual" tabindex="-1"></fluent-listbox>
-    <input slot="control" role="combobox" aria-haspopup="listbox" type="combobox" part="input" size="1" style="width:100%;box-sizing:border-box" />
-  </fluent-dropdown>`;
+const styles = css`
+  :host {
+    display: inline-flex;
+    width: 120px;
+  }
+  :host([size="short"]) {
+    width: 112px;
+  }
+  :host([size="long"]) {
+    width: 200px;
+  }
+  fluent-dropdown {
+    width: 100%;
+    min-width: 0;
+  }
+  input {
+    width: 100%;
+    box-sizing: border-box;
+  }
+`;
+
+const template = html<DocenRibbonCombobox>`
+  <fluent-dropdown type="combobox" appearance="outline" part="dropdown" ${ref("dd")}>
+    <fluent-listbox part="listbox" popover="manual" tabindex="-1" ${ref("lb")}></fluent-listbox>
+    <input
+      slot="control"
+      role="combobox"
+      aria-haspopup="listbox"
+      type="combobox"
+      part="input"
+      size="1"
+      style="width:100%;box-sizing:border-box"
+      ${ref("input")}
+    />
+  </fluent-dropdown>
+`;
 
 /**
  * `<docen-ribbon-combobox value="Calibri" event="font" size="short" items='[{...}]'>`
@@ -33,39 +66,60 @@ template.innerHTML = `
  * with `{ event, value }`. All visuals/interaction (filtering, keyboard, list
  * positioning) are Fluent's.
  */
-class DocenRibbonCombobox extends HTMLElement {
-  static get observedAttributes(): string[] {
-    return ["value", "items", "event", "size", "source"];
+@customElement({ name: "docen-ribbon-combobox", template, styles })
+class DocenRibbonCombobox extends FASTElement {
+  // `value` attribute maps to `hostValue` so the `get value()` below can keep
+  // reading Fluent's live control text (the seeded <input> is dropped once
+  // Fluent renders its own control).
+  @attr({ attribute: "value" }) hostValue?: string;
+  @attr items?: string;
+  @attr event?: string;
+  @attr size?: string;
+  @attr source?: string;
+
+  @observable dd?: HTMLElement;
+  @observable lb?: HTMLElement;
+  @observable input?: HTMLInputElement;
+
+  // Avoid `id` — it clashes with HTMLElement.id. The popoverId is the listbox's
+  // id (for aria-controls); popoverAnchor is the matching CSS anchor name.
+  readonly popoverId = `rb-cb-${++seq}`;
+  readonly popoverAnchor = `--${this.popoverId}`;
+
+  get parsedItems(): RibbonOption[] {
+    try {
+      return JSON.parse(this.items ?? "[]") as RibbonOption[];
+    } catch {
+      return [];
+    }
+  }
+  /** Fluent renders its own control input (insertControl drops the seeded
+   *  one); read its current text rather than the detached original. */
+  get value(): string {
+    const control = (this.dd as unknown as { control?: HTMLInputElement } | undefined)?.control;
+    return control?.value ?? this.input?.value ?? "";
   }
 
-  readonly #id = `rb-cb-${++seq}`;
-  readonly #anchor = `--${this.#id}`;
-  #dd?: HTMLElement;
-  #lb?: HTMLElement;
-  #input?: HTMLInputElement;
-
-  attributeChangedCallback(name: string): void {
-    if (!this.shadowRoot) return;
-    if (name === "items") this.#renderItems();
-    if (name === "value") this.#syncValue();
+  itemsChanged(): void {
+    this.renderItems();
+  }
+  hostValueChanged(): void {
+    this.syncValue();
   }
 
   connectedCallback(): void {
-    if (!this.shadowRoot) {
-      this.attachShadow({ mode: "open" }).append(template.content.cloneNode(true));
-    }
-    this.#dd = this.shadowRoot!.querySelector("fluent-dropdown")!;
-    this.#lb = this.shadowRoot!.querySelector("fluent-listbox")!;
-    this.#input = this.shadowRoot!.querySelector("input")!;
+    super.connectedCallback();
     // Anchor the listbox popover to this dropdown (CSS Anchor Positioning).
-    this.#lb.id = this.#id;
-    this.#input.setAttribute("aria-controls", this.#id);
-    this.#dd.style.anchorName = this.#anchor;
-    this.#lb.style.positionAnchor = this.#anchor;
-    this.#renderItems();
-    this.#syncValue();
-    this.#dd.addEventListener("change", () => this.#emit());
-    if (this.getAttribute("source") === "local-fonts") void this.#loadLocalFonts();
+    if (this.lb) {
+      this.lb.id = this.popoverId;
+      this.lb.style.positionAnchor = this.popoverAnchor;
+    }
+    if (this.input) this.input.setAttribute("aria-controls", this.popoverId);
+    if (this.dd) this.dd.style.anchorName = this.popoverAnchor;
+    this.renderItems();
+    this.syncValue();
+    this.dd?.addEventListener("change", () => this.emit());
+    if (this.source === "local-fonts") void this.loadLocalFonts();
   }
 
   /**
@@ -74,7 +128,7 @@ class DocenRibbonCombobox extends HTMLElement {
    * fallback list with the host's real font families (de-duplicated). No-op on
    * unsupported browsers or denied permission — the fallback list stays.
    */
-  async #loadLocalFonts(): Promise<void> {
+  private async loadLocalFonts(): Promise<void> {
     const query = (
       window as unknown as {
         queryLocalFonts?: () => Promise<ReadonlyArray<{ family: string }> | undefined>;
@@ -98,55 +152,36 @@ class DocenRibbonCombobox extends HTMLElement {
     }
   }
 
-  get items(): RibbonOption[] {
-    try {
-      return JSON.parse(this.getAttribute("items") ?? "[]") as RibbonOption[];
-    } catch {
-      return [];
-    }
-  }
-
-  get event(): string {
-    return this.getAttribute("event") ?? "";
-  }
-
-  get value(): string {
-    // fluent renders its own control input (insertControl drops the seeded
-    // one); read its current text rather than the detached original.
-    const control = (this.#dd as unknown as { control?: HTMLInputElement } | undefined)?.control;
-    return control?.value ?? this.#input?.value ?? "";
-  }
-
-  #renderItems(): void {
-    if (!this.#lb) return;
+  private renderItems(): void {
+    if (!this.lb) return;
     // short (font-size) options center; every option hides the selected
     // checkmark (data-center implies it, the font box uses data-no-checkmark).
-    const center = this.getAttribute("size") === "short";
-    this.#lb.replaceChildren();
-    for (const item of this.items) {
+    const center = this.size === "short";
+    this.lb.replaceChildren();
+    for (const item of this.parsedItems) {
       const option = document.createElement("fluent-option");
       if (center) option.setAttribute("data-center", "");
       else option.setAttribute("data-no-checkmark", "");
       option.textContent = item.text;
       if (item.value) option.setAttribute("value", item.value);
       if (item.disabled) option.setAttribute("disabled", "");
-      this.#lb.append(option);
+      this.lb.append(option);
     }
   }
 
-  #syncValue(): void {
-    if (!this.#lb || !this.#dd) return;
+  private syncValue(): void {
+    if (!this.lb || !this.dd) return;
     // Capture in a const so the `apply` closure below holds the narrowed type
-    // (TS won't keep the `!this.#lb` narrowing across the function boundary).
-    const lb = this.#lb;
-    const hostValue = this.getAttribute("value") ?? "";
+    // (TS won't keep the `!this.lb` narrowing across the function boundary).
+    const lb = this.lb;
+    const hostValue = this.hostValue ?? "";
     // fluent-dropdown's connectedCallback enqueues insertControl(), which drops
     // the seeded <input> and renders its own (value bound to an internal
     // observable, initially ""). selectOption() both marks the option selected
     // and writes its displayValue to that control input — so the box shows the
     // default and opens with the right row highlighted. Defer until insertControl
     // (control) and slotchange (this.listbox) have both settled.
-    const dd = this.#dd as unknown as {
+    const dd = this.dd as unknown as {
       listbox?: unknown;
       control?: HTMLInputElement;
       selectOption(i: number): void;
@@ -179,17 +214,15 @@ class DocenRibbonCombobox extends HTMLElement {
     requestAnimationFrame(apply);
   }
 
-  #emit(): void {
+  private emit(): void {
     this.dispatchEvent(
       new CustomEvent("command", {
         bubbles: true,
         composed: true,
-        detail: { event: this.event, value: this.value, source: this },
+        detail: { event: this.event ?? "", value: this.value, source: this },
       }),
     );
   }
 }
-
-customElements.define("docen-ribbon-combobox", DocenRibbonCombobox);
 
 export default DocenRibbonCombobox;

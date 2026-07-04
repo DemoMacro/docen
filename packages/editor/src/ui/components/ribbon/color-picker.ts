@@ -1,12 +1,15 @@
-import { observeLang, t } from "../../i18n/localize";
 import {
-  COMMAND_HOST_STYLE,
-  TOOLTIP_PART,
-  createIconSlot,
-  forwardAttributes,
-  renderIcon,
-  renderLabel,
-} from "./command-helpers";
+  FASTElement,
+  attr,
+  css,
+  customElement,
+  html,
+  observable,
+  ref,
+} from "@microsoft/fast-element";
+
+import { observeLang, t } from "../../i18n/localize";
+import { COMMAND_HOST_STYLE, renderIcon } from "./command-helpers";
 
 // ── Office 2013-2022 default theme palette ──
 // 10 columns × 6 rows, matching Word/WPS's color grid. Each column is an OOXML
@@ -146,148 +149,288 @@ function hexToRgb(hex: string): [number, number, number] | null {
 // primary button, not the viewport corner.
 let seq = 0;
 
-const template = document.createElement("template");
-template.innerHTML = `
-  <style>
-    ${COMMAND_HOST_STYLE}
-    /* Split layout: primary (icon + color stripe) hugging a narrow caret that
-       opens the palette — Office's compact color split button. */
-    :host { display: inline-flex; align-items: stretch; }
-    fluent-button#target { min-height: 26px; }
-    .rb-label { font-size: 12px; }
-    /* The glyph stacks over a color stripe showing the last-used color —
-       .rb-icon is repurposed as a flex column (COMMAND_HOST_STYLE makes it
-       display:contents for the bare-icon case; our later rule wins). */
-    fluent-button#target .rb-icon {
-      display: flex; flex-direction: column; align-items: center;
-    }
-    .rb-color-bar {
-      width: 16px; height: 3px; margin-top: 1px;
-      border: 1px solid rgba(0, 0, 0, 0.3); background: #000;
-    }
-    button.cp-caret {
-      appearance: none; -webkit-appearance: none;
-      border: none; background: transparent; cursor: pointer;
-      min-width: 12px; width: 12px; padding: 0; margin-inline-start: 1px;
-      display: inline-flex; align-items: center; justify-content: center;
-      border-radius: 2px; color: inherit;
-    }
-    button.cp-caret::after {
-      content: ""; display: block;
-      border-left: 3px solid transparent; border-right: 3px solid transparent;
-      border-top: 4px solid currentColor;
-    }
-    button.cp-caret:hover { background: var(--docen-color-hover, rgba(0, 0, 0, 0.06)); }
-    .color-grid {
-      popover: auto;
-      background: var(--docen-color-bg, #fff);
-      border: 1px solid var(--docen-color-divider, #c7c7c7);
-      border-radius: 4px; padding: 8px;
-      box-shadow: 0 2px 12px rgba(0, 0, 0, 0.18);
-      margin: 0; min-width: 188px;
-      position-anchor: var(--cp-anchor);
-      inset-block-start: anchor(bottom);
-      inset-inline-start: anchor(self-start);
-      inset-inline-end: auto;
-    }
-    .cp-section { font-size: 11px; color: #666; margin: 6px 2px 2px; }
-    .cp-section:first-of-type { margin-top: 0; }
-    .cp-none, .cp-more {
-      display: block; width: 100%; box-sizing: border-box;
-      padding: 4px 6px; margin: 0 0 4px;
-      border: 1px solid var(--docen-color-divider, #c7c7c7); background: #fff;
-      cursor: pointer; font-size: 12px; text-align: start; border-radius: 3px;
-    }
-    .cp-more { margin: 4px 0 0; }
-    .cp-none:hover, .cp-more:hover { background: var(--docen-color-hover, rgba(0, 0, 0, 0.06)); }
-    .cp-swatches { display: grid; grid-template-columns: repeat(10, 16px); gap: 2px; }
-    .cp-swatch {
-      width: 16px; height: 16px; padding: 0; cursor: pointer;
-      border: 1px solid rgba(0, 0, 0, 0.25); border-radius: 2px;
-    }
-    .cp-swatch:hover { outline: 1.5px solid #333; outline-offset: 0; }
-    .cp-hidden { display: none; }
-    /* Custom color view — opened by "More Colors", lives inside the same
-       anchored popover so it never jumps to the viewport corner (the native
-       <input type=color> picker did). */
-    .cp-sv {
-      width: 172px; height: 110px; position: relative; cursor: crosshair;
-      border: 1px solid var(--docen-color-divider, #c7c7c7); border-radius: 3px;
-      background-color: hsl(var(--cp-hue, 0), 100%, 50%);
-      background-image:
-        linear-gradient(to top, #000, transparent),
-        linear-gradient(to right, #fff, transparent);
-      touch-action: none;
-    }
-    .cp-sv-cursor {
-      position: absolute; width: 10px; height: 10px;
-      border: 1.5px solid #fff; border-radius: 50%;
-      box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
-      transform: translate(-50%, -50%); pointer-events: none;
-    }
-    .cp-hue {
-      -webkit-appearance: none; appearance: none;
-      width: 172px; height: 10px; margin: 6px 0 0; padding: 0;
-      background: linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00);
-      border: 1px solid var(--docen-color-divider, #c7c7c7); border-radius: 5px;
-    }
-    .cp-hue::-webkit-slider-thumb {
-      -webkit-appearance: none; width: 12px; height: 14px;
-      background: #fff; border: 1px solid #333; border-radius: 2px; cursor: pointer;
-    }
-    .cp-hue::-moz-range-thumb {
-      width: 12px; height: 14px; background: #fff;
-      border: 1px solid #333; border-radius: 2px; cursor: pointer;
-    }
-    .cp-cust-row { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
-    .cp-cust-swatch {
-      width: 26px; height: 24px; flex-shrink: 0;
-      border: 1px solid var(--docen-color-divider, #c7c7c7); border-radius: 3px;
-    }
-    .cp-hex {
-      flex: 1; min-width: 0; padding: 3px 6px; font-size: 12px;
-      border: 1px solid var(--docen-color-divider, #c7c7c7); border-radius: 3px;
-      font-family: monospace; text-transform: uppercase;
-    }
-    .cp-cust-actions { display: flex; gap: 6px; margin-top: 6px; }
-    .cp-back, .cp-apply {
-      flex: 1; padding: 4px 6px; font-size: 12px; cursor: pointer;
-      border: 1px solid var(--docen-color-divider, #c7c7c7); border-radius: 3px; background: #fff;
-    }
-    .cp-apply {
-      background: var(--docen-color-accent, #0078d4); color: #fff; border-color: transparent;
-    }
-    .cp-back:hover { background: var(--docen-color-hover, rgba(0, 0, 0, 0.06)); }
-  </style>
-  <fluent-button id="target" part="button">
-    <span class="rb-label"></span>
+const styles = css`
+  ${COMMAND_HOST_STYLE}
+  /* Split layout: primary (icon + color stripe) hugging a narrow caret that
+     opens the palette — Office's compact color split button. */
+  fluent-button#target {
+    min-height: 26px;
+  }
+  :host {
+    display: inline-flex;
+    align-items: stretch;
+  }
+  .rb-label {
+    font-size: 12px;
+  }
+  /* The glyph stacks over a color stripe showing the last-used color —
+     .rb-icon is repurposed as a flex column (COMMAND_HOST_STYLE makes it
+     display:contents for the bare-icon case; our later rule wins). */
+  fluent-button#target .rb-icon {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  .rb-color-bar {
+    width: 16px;
+    height: 3px;
+    margin-top: 1px;
+    border: 1px solid rgba(0, 0, 0, 0.3);
+    background: #000;
+  }
+  button.cp-caret {
+    appearance: none;
+    -webkit-appearance: none;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    min-width: 12px;
+    width: 12px;
+    padding: 0;
+    margin-inline-start: 1px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 2px;
+    color: inherit;
+  }
+  button.cp-caret::after {
+    content: "";
+    display: block;
+    border-left: 3px solid transparent;
+    border-right: 3px solid transparent;
+    border-top: 4px solid currentColor;
+  }
+  button.cp-caret:hover {
+    background: var(--docen-color-hover, rgba(0, 0, 0, 0.06));
+  }
+  .color-grid {
+    popover: auto;
+    background: var(--docen-color-bg, #fff);
+    border: 1px solid var(--docen-color-divider, #c7c7c7);
+    border-radius: 4px;
+    padding: 8px;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.18);
+    margin: 0;
+    min-width: 188px;
+    position-anchor: var(--cp-anchor);
+    inset-block-start: anchor(bottom);
+    inset-inline-start: anchor(self-start);
+    inset-inline-end: auto;
+  }
+  .cp-section {
+    font-size: 11px;
+    color: #666;
+    margin: 6px 2px 2px;
+  }
+  .cp-section:first-of-type {
+    margin-top: 0;
+  }
+  .cp-none,
+  .cp-more {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 4px 6px;
+    margin: 0 0 4px;
+    border: 1px solid var(--docen-color-divider, #c7c7c7);
+    background: #fff;
+    cursor: pointer;
+    font-size: 12px;
+    text-align: start;
+    border-radius: 3px;
+  }
+  .cp-more {
+    margin: 4px 0 0;
+  }
+  .cp-none:hover,
+  .cp-more:hover {
+    background: var(--docen-color-hover, rgba(0, 0, 0, 0.06));
+  }
+  .cp-swatches {
+    display: grid;
+    grid-template-columns: repeat(10, 16px);
+    gap: 2px;
+  }
+  .cp-swatch {
+    width: 16px;
+    height: 16px;
+    padding: 0;
+    cursor: pointer;
+    border: 1px solid rgba(0, 0, 0, 0.25);
+    border-radius: 2px;
+  }
+  .cp-swatch:hover {
+    outline: 1.5px solid #333;
+    outline-offset: 0;
+  }
+  .cp-hidden {
+    display: none;
+  }
+  /* Custom color view — opened by "More Colors", lives inside the same
+     anchored popover so it never jumps to the viewport corner (the native
+     <input type=color> picker did). */
+  .cp-sv {
+    width: 172px;
+    height: 110px;
+    position: relative;
+    cursor: crosshair;
+    border: 1px solid var(--docen-color-divider, #c7c7c7);
+    border-radius: 3px;
+    background-color: hsl(var(--cp-hue, 0), 100%, 50%);
+    background-image:
+      linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, transparent);
+    touch-action: none;
+  }
+  .cp-sv-cursor {
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    border: 1.5px solid #fff;
+    border-radius: 50%;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+  }
+  .cp-hue {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 172px;
+    height: 10px;
+    margin: 6px 0 0;
+    padding: 0;
+    background: linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00);
+    border: 1px solid var(--docen-color-divider, #c7c7c7);
+    border-radius: 5px;
+  }
+  .cp-hue::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 12px;
+    height: 14px;
+    background: #fff;
+    border: 1px solid #333;
+    border-radius: 2px;
+    cursor: pointer;
+  }
+  .cp-hue::-moz-range-thumb {
+    width: 12px;
+    height: 14px;
+    background: #fff;
+    border: 1px solid #333;
+    border-radius: 2px;
+    cursor: pointer;
+  }
+  .cp-cust-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+  }
+  .cp-cust-swatch {
+    width: 26px;
+    height: 24px;
+    flex-shrink: 0;
+    border: 1px solid var(--docen-color-divider, #c7c7c7);
+    border-radius: 3px;
+  }
+  .cp-hex {
+    flex: 1;
+    min-width: 0;
+    padding: 3px 6px;
+    font-size: 12px;
+    border: 1px solid var(--docen-color-divider, #c7c7c7);
+    border-radius: 3px;
+    font-family: monospace;
+    text-transform: uppercase;
+  }
+  .cp-cust-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 6px;
+  }
+  .cp-back,
+  .cp-apply {
+    flex: 1;
+    padding: 4px 6px;
+    font-size: 12px;
+    cursor: pointer;
+    border: 1px solid var(--docen-color-divider, #c7c7c7);
+    border-radius: 3px;
+    background: #fff;
+  }
+  .cp-apply {
+    background: var(--docen-color-accent, #0078d4);
+    color: #fff;
+    border-color: transparent;
+  }
+  .cp-back:hover {
+    background: var(--docen-color-hover, rgba(0, 0, 0, 0.06));
+  }
+`;
+
+const template = html<DocenColorPicker>`
+  <fluent-button
+    id="target"
+    part="button"
+    appearance="subtle"
+    ?icon-only="${(x) => x.iconOnly}"
+    ${ref("btn")}
+  >
+    <span class="rb-icon" ${ref("iconSlot")}></span>
+    <span class="rb-label">${(x) => x.visibleLabel}</span>
   </fluent-button>
-  <button type="button" class="cp-caret" part="caret"></button>
-  <div popover="auto" part="grid" class="color-grid">
-    <div class="cp-picker">
-      <button type="button" class="cp-none" part="none"></button>
+  <button type="button" class="cp-caret" part="caret" ${ref("caret")}></button>
+  <div popover="auto" part="grid" class="color-grid" ${ref("grid")}>
+    <div class="cp-picker" ${ref("picker")}>
+      <button type="button" class="cp-none" part="none" ${ref("noneBtn")}></button>
       <div class="cp-section" data-i18n="theme-colors"></div>
-      <div class="cp-swatches" part="theme"></div>
+      <div class="cp-swatches" part="theme" ${ref("themeEl")}></div>
       <div class="cp-section" data-i18n="standard-colors"></div>
-      <div class="cp-swatches" part="standard"></div>
-      <div class="cp-section" data-i18n="recent-colors" part="recent-label"></div>
-      <div class="cp-swatches cp-hidden" part="recent"></div>
-      <button type="button" class="cp-more" part="more"></button>
+      <div class="cp-swatches" part="standard" ${ref("standardEl")}></div>
+      <div
+        class="cp-section"
+        data-i18n="recent-colors"
+        part="recent-label"
+        ${ref("recentLabel")}
+      ></div>
+      <div class="cp-swatches cp-hidden" part="recent" ${ref("recentEl")}></div>
+      <button type="button" class="cp-more" part="more" ${ref("moreBtn")}></button>
     </div>
-    <div class="cp-custom cp-hidden">
-      <div class="cp-sv"><div class="cp-sv-cursor"></div></div>
-      <input type="range" class="cp-hue" min="0" max="360" step="1" value="0" aria-label="Hue">
+    <div class="cp-custom cp-hidden" ${ref("customEl")}>
+      <div class="cp-sv" ${ref("sv")}>
+        <div class="cp-sv-cursor"></div>
+      </div>
+      <input
+        type="range"
+        class="cp-hue"
+        min="0"
+        max="360"
+        step="1"
+        value="0"
+        aria-label="Hue"
+        ${ref("hue")}
+      />
       <div class="cp-cust-row">
-        <span class="cp-cust-swatch"></span>
-        <input type="text" class="cp-hex" maxlength="7" spellcheck="false" aria-label="Hex color">
+        <span class="cp-cust-swatch" ${ref("custSwatch")}></span>
+        <input
+          type="text"
+          class="cp-hex"
+          maxlength="7"
+          spellcheck="false"
+          aria-label="Hex color"
+          ${ref("hex")}
+        />
       </div>
       <div class="cp-cust-actions">
-        <button type="button" class="cp-back" part="back"></button>
-        <button type="button" class="cp-apply" part="apply"></button>
+        <button type="button" class="cp-back" part="back" ${ref("backBtn")}></button>
+        <button type="button" class="cp-apply" part="apply" ${ref("applyBtn")}></button>
       </div>
     </div>
   </div>
-  ${TOOLTIP_PART}`;
+  <fluent-tooltip anchor="target" positioning="top" ${ref("tooltipEl")}>
+    <span class="rb-tip">${(x) => x.tooltipText}</span>
+  </fluent-tooltip>
+`;
 
 /**
  * `<docen-color-picker icon="font-color" event="font-color" default-color="000000">`
@@ -300,102 +443,88 @@ template.innerHTML = `
  * at the viewport corner). Selecting a color emits `command { event, value }`
  * where value is an upper-hex color or "none" (clear).
  */
-class DocenColorPicker extends HTMLElement {
-  static get observedAttributes(): string[] {
-    return ["label", "icon", "event", "tooltip", "icon-only", "default-color"];
-  }
+@customElement({ name: "docen-color-picker", template, styles })
+class DocenColorPicker extends FASTElement {
+  @attr label?: string;
+  @attr icon?: string;
+  @attr event?: string;
+  @attr tooltip?: string;
+  @attr({ attribute: "default-color" }) defaultColor?: string;
+  @attr({ attribute: "icon-only", mode: "boolean" }) iconOnly?: boolean;
 
-  readonly #anchorId = `--cp-${++seq}`;
-  #btn?: HTMLElement;
-  #caret?: HTMLElement;
-  #grid?: HTMLElement;
-  #picker?: HTMLElement;
-  #custom?: HTMLElement;
-  #theme?: HTMLElement;
-  #standard?: HTMLElement;
-  #recent?: HTMLElement;
-  #recentLabel?: HTMLElement;
-  #noneBtn?: HTMLElement;
-  #moreBtn?: HTMLElement;
-  #sv?: HTMLElement;
-  #hue?: HTMLInputElement;
-  #hex?: HTMLInputElement;
-  #custSwatch?: HTMLElement;
-  #applyBtn?: HTMLElement;
-  #backBtn?: HTMLElement;
-  #icon?: HTMLSpanElement;
+  @observable btn?: HTMLElement;
+  @observable caret?: HTMLElement;
+  @observable grid?: HTMLElement;
+  @observable picker?: HTMLElement;
+  @observable customEl?: HTMLElement;
+  @observable themeEl?: HTMLElement;
+  @observable standardEl?: HTMLElement;
+  @observable recentEl?: HTMLElement;
+  @observable recentLabel?: HTMLElement;
+  @observable noneBtn?: HTMLElement;
+  @observable moreBtn?: HTMLElement;
+  @observable sv?: HTMLElement;
+  @observable hue?: HTMLInputElement;
+  @observable hex?: HTMLInputElement;
+  @observable custSwatch?: HTMLElement;
+  @observable applyBtn?: HTMLElement;
+  @observable backBtn?: HTMLElement;
+  @observable iconSlot?: HTMLSpanElement;
+  @observable tooltipEl?: HTMLElement;
+
+  readonly anchorId = `--cp-${++seq}`;
   #bar?: HTMLElement;
-  #fwdCleanup?: () => void;
   #focusCleanup?: () => void;
   #obsLang?: () => void;
   #endSvDrag?: () => void;
   #hsv: [number, number, number] = [0, 100, 100];
   #pendingHex = "000000";
 
-  attributeChangedCallback(name: string): void {
-    if (!this.shadowRoot) return;
-    if (name === "icon") this.#renderIcon();
-    if (name === "label" || name === "tooltip") this.#renderLabel();
-    if (name === "default-color") this.#refreshBar();
-    if (name === "icon-only") {
-      this.#renderLabel();
-      this.#syncIconSlot();
-      this.#reflectIconOnly();
-    }
+  /** Command key (falls back to label) for the per-feature color memory. */
+  get eventName(): string {
+    return this.event || this.label || "";
+  }
+  /** Icon-only hides the visible label (it still feeds the tooltip). */
+  get visibleLabel(): string {
+    return this.iconOnly ? "" : (this.label ?? "");
+  }
+  get tooltipText(): string {
+    return this.tooltip || this.label || "";
   }
 
+  iconChanged(): void {
+    this.#renderIcon();
+  }
+  iconOnlyChanged(): void {
+    this.#syncIconSlot();
+  }
+  defaultColorChanged(): void {
+    this.#refreshBar();
+  }
+  // label/tooltip are template-bound (.rb-label/.rb-tip) — no changed callback.
+
   connectedCallback(): void {
-    if (!this.shadowRoot) {
-      this.attachShadow({ mode: "open" }).append(template.content.cloneNode(true));
-    }
-    const root = this.shadowRoot!;
-    this.#btn = root.querySelector("#target") as HTMLElement;
-    this.#caret = root.querySelector(".cp-caret") as HTMLElement;
-    this.#grid = root.querySelector(".color-grid") as HTMLElement;
-    this.#picker = root.querySelector(".cp-picker") as HTMLElement;
-    this.#custom = root.querySelector(".cp-custom") as HTMLElement;
-    this.#theme = root.querySelector('[part="theme"]') as HTMLElement;
-    this.#standard = root.querySelector('[part="standard"]') as HTMLElement;
-    this.#recent = root.querySelector('[part="recent"]') as HTMLElement;
-    this.#recentLabel = root.querySelector('[part="recent-label"]') as HTMLElement;
-    this.#noneBtn = root.querySelector(".cp-none") as HTMLElement;
-    this.#moreBtn = root.querySelector(".cp-more") as HTMLElement;
-    this.#sv = root.querySelector(".cp-sv") as HTMLElement;
-    this.#hue = root.querySelector(".cp-hue") as HTMLInputElement;
-    this.#hex = root.querySelector(".cp-hex") as HTMLInputElement;
-    this.#custSwatch = root.querySelector(".cp-cust-swatch") as HTMLElement;
-    this.#applyBtn = root.querySelector(".cp-apply") as HTMLElement;
-    this.#backBtn = root.querySelector(".cp-back") as HTMLElement;
+    super.connectedCallback();
     // Anchor the popover to THIS instance's primary button (same-shadow) —
     // anchoring the host crosses the shadow boundary and the browser strands
     // the popover at the viewport corner.
-    this.#btn.style.anchorName = this.#anchorId;
-    this.#grid.style.setProperty("--cp-anchor", this.#anchorId);
-    const tooltip = root.querySelector("fluent-tooltip") as HTMLElement | null;
-    if (tooltip) tooltip.style.positionAnchor = this.#anchorId;
+    if (this.btn) this.btn.style.anchorName = this.anchorId;
+    if (this.grid) this.grid.style.setProperty("--cp-anchor", this.anchorId);
+    if (this.tooltipEl) this.tooltipEl.style.positionAnchor = this.anchorId;
     // .rb-icon holds the glyph AND the color stripe beneath it.
     this.#bar = document.createElement("span");
     this.#bar.className = "rb-color-bar";
-    this.#icon = createIconSlot(this.hasAttribute("icon-only") ? "" : "start");
-    this.#btn.prepend(this.#icon);
     this.#syncIconSlot();
     this.#renderIcon();
-    this.#renderLabel();
     this.#renderPalette();
     this.#refreshBar();
-    this.#fwdCleanup = forwardAttributes(this, this.#btn, { appearance: "subtle" });
-    // Reflect icon-only onto the wrapped fluent-button so Fluent applies its
-    // compact icon-only layout (tighter min-width, centered content) — matches
-    // <docen-ribbon-button>. Without it the primary renders at the labelled
-    // width and the glyph sits off-center.
-    this.#reflectIconOnly();
     // Keep the editor's text selection across swatch/button clicks, but let the
     // hex/hue inputs take focus (they need it to accept typing/dragging). Unlike
-    // preventFocusLoss(), this guard excludes <input> targets. composedPath()[0]
-    // is the real target — this listener is on the host, so event.target is
-    // retargeted to the host across the shadow boundary, a naive `.closest
-    // ("input")` never matches, and every mousedown (including on the hex field
-    // and the hue slider) got preventDefaulted, breaking both typing + dragging.
+    // a blanket preventDefault, this guard excludes <input> targets.
+    // composedPath()[0] is the real target — this listener is on the host, so
+    // event.target is retargeted to the host across the shadow boundary, a naive
+    // `.closest("input")` never matches, and every mousedown (including on the
+    // hex field and the hue slider) got preventDefaulted, breaking both.
     const onMousedown = (event: Event): void => {
       if ((event.composedPath()[0] as HTMLElement | null)?.closest("input")) return;
       event.preventDefault();
@@ -404,36 +533,36 @@ class DocenColorPicker extends HTMLElement {
     this.#focusCleanup = () =>
       this.removeEventListener("mousedown", onMousedown, { capture: true });
     // Primary click re-applies the last-used color (Office split behavior).
-    this.#btn.addEventListener("click", (event) => {
+    this.btn?.addEventListener("click", (event) => {
       event.stopPropagation();
       this.#applyLast();
     });
     // Caret opens the palette (popover=auto handles light-dismiss on outside click).
-    this.#caret.addEventListener("click", (event) => {
+    this.caret?.addEventListener("click", (event) => {
       event.stopPropagation();
       this.#open();
     });
-    this.#noneBtn.addEventListener("click", () => {
+    this.noneBtn?.addEventListener("click", () => {
       this.#hide();
       this.#emit("none");
     });
-    this.#moreBtn.addEventListener("click", () => this.#showCustom());
-    this.#applyBtn.addEventListener("click", () => {
+    this.moreBtn?.addEventListener("click", () => this.#showCustom());
+    this.applyBtn?.addEventListener("click", () => {
       this.#showPicker();
       this.#hide();
       this.#pick(this.#pendingHex);
     });
-    this.#backBtn.addEventListener("click", () => this.#showPicker());
-    this.#hue.addEventListener("input", () => {
-      this.#hsv[0] = Number(this.#hue!.value) || 0;
+    this.backBtn?.addEventListener("click", () => this.#showPicker());
+    this.hue?.addEventListener("input", () => {
+      this.#hsv[0] = Number(this.hue?.value) || 0;
       this.#syncCustom();
     });
-    this.#hex.addEventListener("change", () => {
-      const rgb = hexToRgb(this.#hex!.value);
+    this.hex?.addEventListener("change", () => {
+      const rgb = hexToRgb(this.hex?.value ?? "");
       if (rgb) this.#hsv = rgbToHsv(rgb[0], rgb[1], rgb[2]);
       this.#syncCustom();
     });
-    this.#sv.addEventListener("pointerdown", (event) => this.#onSvPointerDown(event));
+    this.sv?.addEventListener("pointerdown", (event) => this.#onSvPointerDown(event));
     this.#applyI18n();
     this.#obsLang = observeLang(() => this.#applyI18n());
   }
@@ -444,56 +573,52 @@ class DocenColorPicker extends HTMLElement {
     // detached #sv) after the picker is gone, and never unbind without a
     // pointerup/pointercancel.
     this.#endSvDrag?.();
-    this.#fwdCleanup?.();
     this.#focusCleanup?.();
     this.#obsLang?.();
-  }
-
-  get event(): string {
-    return this.getAttribute("event") ?? this.getAttribute("label") ?? "";
+    super.disconnectedCallback();
   }
 
   /** Upper-hex default color for the primary action before any pick (font →
    *  black, shading → yellow); overridable via the `default-color` attribute. */
-  #defaultColor(): string {
-    const raw = this.getAttribute("default-color") ?? "";
+  #defaultHex(): string {
+    const raw = this.defaultColor ?? "";
     return raw.replace(/^#/, "").toUpperCase() || "000000";
   }
 
   #applyLast(): void {
-    const value = lastColor.get(this.event) ?? this.#defaultColor();
-    rememberColor(this.event, value);
+    const value = lastColor.get(this.eventName) ?? this.#defaultHex();
+    rememberColor(this.eventName, value);
     this.#refreshBar();
     this.#emit(value);
   }
 
   #pick(value: ColorValue): void {
-    rememberColor(this.event, value);
+    rememberColor(this.eventName, value);
     this.#refreshBar();
     this.#emit(value);
   }
 
   #open(): void {
-    const grid = this.#grid as unknown as { showPopover?(): void } | null;
-    if (!grid || this.#grid!.matches(":popover-open")) return;
+    const grid = this.grid as unknown as { showPopover?(): void } | null;
+    if (!grid || this.grid?.matches(":popover-open")) return;
     this.#showPicker();
     this.#renderPalette();
     grid.showPopover?.();
   }
 
   #hide(): void {
-    (this.#grid as unknown as { hidePopover?(): void } | null)?.hidePopover?.();
+    (this.grid as unknown as { hidePopover?(): void } | null)?.hidePopover?.();
   }
 
   #showPicker(): void {
-    this.#custom?.classList.add("cp-hidden");
-    this.#picker?.classList.remove("cp-hidden");
+    this.customEl?.classList.add("cp-hidden");
+    this.picker?.classList.remove("cp-hidden");
   }
 
   #showCustom(): void {
-    this.#picker?.classList.add("cp-hidden");
-    this.#custom?.classList.remove("cp-hidden");
-    const hex = valOf(lastColor.get(this.event)) ?? this.#defaultColor();
+    this.picker?.classList.add("cp-hidden");
+    this.customEl?.classList.remove("cp-hidden");
+    const hex = valOf(lastColor.get(this.eventName)) ?? this.#defaultHex();
     const rgb = hexToRgb(hex) ?? [0, 0, 0];
     this.#hsv = rgbToHsv(rgb[0], rgb[1], rgb[2]);
     this.#syncCustom();
@@ -503,22 +628,22 @@ class DocenColorPicker extends HTMLElement {
    *  field (unless the user is typing in it), preview swatch, pending value. */
   #syncCustom(): void {
     const [h, s, v] = this.#hsv;
-    if (this.#sv) this.#sv.style.setProperty("--cp-hue", String(h));
-    const cursor = this.#sv?.querySelector(".cp-sv-cursor") as HTMLElement | null;
+    if (this.sv) this.sv.style.setProperty("--cp-hue", String(h));
+    const cursor = this.sv?.querySelector(".cp-sv-cursor") as HTMLElement | null;
     if (cursor) {
       cursor.style.left = `${s}%`;
       cursor.style.top = `${100 - v}%`;
     }
-    if (this.#hue) this.#hue.value = String(Math.round(h));
+    if (this.hue) this.hue.value = String(Math.round(h));
     const [r, g, b] = hsvToRgb(h, s, v);
     const hex = rgbToHex(r, g, b);
-    if (this.#hex && document.activeElement !== this.#hex) this.#hex.value = `#${hex}`;
-    if (this.#custSwatch) this.#custSwatch.style.background = `#${hex}`;
+    if (this.hex && document.activeElement !== this.hex) this.hex.value = `#${hex}`;
+    if (this.custSwatch) this.custSwatch.style.background = `#${hex}`;
     this.#pendingHex = hex;
   }
 
   #onSvPointerDown(event: PointerEvent): void {
-    if (!this.#sv) return;
+    if (!this.sv) return;
     event.preventDefault();
     const move = (ev: PointerEvent): void => this.#updateSvFromPointer(ev);
     const end = (): void => {
@@ -535,8 +660,8 @@ class DocenColorPicker extends HTMLElement {
   }
 
   #updateSvFromPointer(event: PointerEvent): void {
-    if (!this.#sv) return;
-    const rect = this.#sv.getBoundingClientRect();
+    if (!this.sv) return;
+    const rect = this.sv.getBoundingClientRect();
     const x = Math.max(0, Math.min(rect.width, event.clientX - rect.left));
     const y = Math.max(0, Math.min(rect.height, event.clientY - rect.top));
     this.#hsv[1] = (x / rect.width) * 100; // saturation
@@ -545,17 +670,16 @@ class DocenColorPicker extends HTMLElement {
   }
 
   #refreshBar(): void {
-    if (this.#bar) {
-      const hex = valOf(lastColor.get(this.event)) ?? this.#defaultColor();
-      this.#bar.style.background = `#${hex}`;
-    }
+    if (!this.#bar) return;
+    const hex = valOf(lastColor.get(this.eventName)) ?? this.#defaultHex();
+    this.#bar.style.background = `#${hex}`;
   }
 
   #renderPalette(): void {
-    if (!this.#theme || !this.#standard || !this.#recent || !this.#recentLabel) return;
-    this.#theme.replaceChildren();
-    this.#standard.replaceChildren();
-    this.#recent.replaceChildren();
+    if (!this.themeEl || !this.standardEl || !this.recentEl || !this.recentLabel) return;
+    this.themeEl.replaceChildren();
+    this.standardEl.replaceChildren();
+    this.recentEl.replaceChildren();
     // Theme grid is row-major to match Word's layout (6 rows × 10 columns).
     // Each swatch emits a theme-semantic object (themeColor + tint/shade + val).
     for (let row = 0; row < 6; row++) {
@@ -567,19 +691,19 @@ class DocenColorPicker extends HTMLElement {
             : row === 3
               ? { themeColor: col.themeColor, val }
               : { themeColor: col.themeColor, val, themeShade: THEME_SHADES[row - 4] };
-        this.#theme.append(this.#themeSwatch(value));
+        this.themeEl.append(this.#themeSwatch(value));
       }
     }
-    for (const hex of STANDARD_COLORS) this.#standard.append(this.#hexSwatch(hex));
-    const recent = recentOf(this.event);
+    for (const hex of STANDARD_COLORS) this.standardEl.append(this.#hexSwatch(hex));
+    const recent = recentOf(this.eventName);
     for (const value of recent) {
-      this.#recent.append(
+      this.recentEl.append(
         typeof value === "string" ? this.#hexSwatch(value) : this.#themeSwatch(value),
       );
     }
     const empty = recent.length === 0;
-    this.#recent.classList.toggle("cp-hidden", empty);
-    this.#recentLabel.classList.toggle("cp-hidden", empty);
+    this.recentEl.classList.toggle("cp-hidden", empty);
+    this.recentLabel.classList.toggle("cp-hidden", empty);
   }
 
   /** A bare-hex swatch (standard/recent/custom colors) — emits the hex string. */
@@ -617,44 +741,25 @@ class DocenColorPicker extends HTMLElement {
   }
 
   #syncIconSlot(): void {
-    if (this.#icon) this.#icon.slot = this.hasAttribute("icon-only") ? "" : "start";
-  }
-
-  /** Mirror the host's `icon-only` onto the wrapped fluent-button (Fluent's own
-   *  attribute, not forwarded by forwardAttributes) so it switches to its
-   *  compact centered-glyph layout. */
-  #reflectIconOnly(): void {
-    if (!this.#btn) return;
-    if (this.hasAttribute("icon-only")) this.#btn.setAttribute("icon-only", "");
-    else this.#btn.removeAttribute("icon-only");
+    if (this.iconSlot) this.iconSlot.slot = this.iconOnly ? "" : "start";
   }
 
   #renderIcon(): void {
-    if (!this.#icon) return;
-    renderIcon(this.#icon, this.getAttribute("icon") ?? "");
-    // renderIcon clears .rb-icon via innerHTML, so re-append the stripe after.
-    if (this.#bar) this.#icon.append(this.#bar);
-  }
-
-  #renderLabel(): void {
-    const visible = this.hasAttribute("icon-only") ? "" : (this.getAttribute("label") ?? "");
-    renderLabel(this.shadowRoot!.querySelector(".rb-label")!, visible);
-    renderLabel(this.shadowRoot!.querySelector(".rb-tip")!, this.#tipText());
+    if (!this.iconSlot) return;
+    renderIcon(this.iconSlot, this.icon ?? "");
+    // renderIcon clears .rb-icon via replaceChildren, so re-append the stripe.
+    if (this.#bar) this.iconSlot.append(this.#bar);
   }
 
   #applyI18n(): void {
-    if (this.#noneBtn) this.#noneBtn.textContent = t("ribbon.opt.no-color", this);
-    if (this.#moreBtn) this.#moreBtn.textContent = t("ribbon.opt.more-colors", this);
-    if (this.#applyBtn) this.#applyBtn.textContent = t("ribbon.opt.color-ok", this);
-    if (this.#backBtn) this.#backBtn.textContent = t("ribbon.opt.color-back", this);
-    this.shadowRoot!.querySelectorAll<HTMLElement>("[data-i18n]").forEach((el) => {
+    if (this.noneBtn) this.noneBtn.textContent = t("ribbon.opt.no-color", this);
+    if (this.moreBtn) this.moreBtn.textContent = t("ribbon.opt.more-colors", this);
+    if (this.applyBtn) this.applyBtn.textContent = t("ribbon.opt.color-ok", this);
+    if (this.backBtn) this.backBtn.textContent = t("ribbon.opt.color-back", this);
+    this.shadowRoot?.querySelectorAll<HTMLElement>("[data-i18n]").forEach((el) => {
       el.textContent = t("ribbon.opt." + (el.dataset.i18n ?? ""), this);
     });
-    if (this.#caret) this.#caret.setAttribute("aria-label", t("ribbon.opt.more-colors", this));
-  }
-
-  #tipText(): string {
-    return this.getAttribute("tooltip") ?? this.getAttribute("label") ?? "";
+    if (this.caret) this.caret.setAttribute("aria-label", t("ribbon.opt.more-colors", this));
   }
 
   #emit(value?: ColorValue): void {
@@ -662,12 +767,10 @@ class DocenColorPicker extends HTMLElement {
       new CustomEvent("command", {
         bubbles: true,
         composed: true,
-        detail: { event: this.event, value, source: this },
+        detail: { event: this.eventName, value, source: this },
       }),
     );
   }
 }
-
-customElements.define("docen-color-picker", DocenColorPicker);
 
 export default DocenColorPicker;

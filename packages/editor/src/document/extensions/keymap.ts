@@ -1,13 +1,12 @@
 import { Extension } from "@docen/docx/core";
 
-import { dispatchRibbonCommand } from "../commands";
-
 /**
  * Centralized Tiptap keymap for docen EDITING shortcuts (MS Office-aligned).
  *
- * Each shortcut dispatches its mapped ribbon command (../commands), so a
- * shortcut and its ribbon button share ONE command definition — no duplicate
- * wiring. Add entries to {@link KEYBOARD_SHORTCUTS} to bind more.
+ * Each shortcut dispatches its mapped command directly on `editor.commands`
+ * — every command name IS a native Tiptap command (see ./commands), so a
+ * shortcut and its ribbon button share ONE definition with no bridge. Add
+ * entries to {@link KEYBOARD_SHORTCUTS} to bind more.
  *
  * ── Scope — two layers, by necessity ──
  *
@@ -40,7 +39,12 @@ export const DocenKeymap = Extension.create({
     return Object.fromEntries(
       Object.entries(KEYBOARD_SHORTCUTS).map(([key, event]) => [
         key,
-        () => dispatchRibbonCommand(this.editor, event),
+        () => {
+          const cmd = (
+            this.editor.commands as unknown as Record<string, (() => boolean) | undefined>
+          )[event];
+          return typeof cmd === "function" ? cmd() : false;
+        },
       ]),
     );
   },

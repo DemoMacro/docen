@@ -1,0 +1,164 @@
+/**
+ * Office.js-style add-in model for docen editor hosts.
+ *
+ * A {@link DocenHost} (e.g. `<docen-document>`) owns the editing surface; every
+ * surrounding UI surface — ribbon tabs, task panes, commands — is *contributed*
+ * by a {@link DocenAddin}. The host merges contributions and routes commands,
+ * so a host ships with a default addin (editor essentials) and users plug in
+ * more (citations, mail-merge, …) without touching host internals.
+ *
+ * Names mirror the Office.js manifest: ribbon `Tab > Group > Control > Action`,
+ * `ExtensionPoint`-style contributions, `<Host>` = the host application.
+ * (learn.microsoft.com — Office Add-ins manifest overview)
+ */
+
+// ── Ribbon schema (Tab > Group > Control) ────────────────────────────────────
+
+/** Ribbon control size — `large` is a tall labelled button (Word's large
+ *  control); `small` is an icon-only button stacked in a group row/column. */
+export type RibbonControlSize = "small" | "large";
+
+/** A single menu/combobox option. `value` is the data carried by the command;
+ *  `event` lets an option dispatch a different command than its control's. */
+export interface RibbonMenuItem {
+  text: string;
+  value?: string;
+  event?: string;
+  checked?: boolean;
+  disabled?: boolean;
+}
+
+/** Fields shared by every ribbon control. `event` is the kebab-case command
+ *  name the control dispatches on activation. */
+export interface RibbonControlBase {
+  id?: string;
+  /** Docen icon key (see the RIBBON_ICONS map). */
+  icon?: string;
+  label?: string;
+  event?: string;
+  disabled?: boolean;
+  size?: RibbonControlSize;
+  /** Render the icon only (label surfaces in a tooltip). */
+  iconOnly?: boolean;
+}
+
+export interface RibbonButton extends RibbonControlBase {
+  type: "button";
+}
+
+export interface RibbonMenu extends RibbonControlBase {
+  type: "menu";
+  items: RibbonMenuItem[];
+}
+
+/** A button with a default action plus a dropdown of alternatives — Word's
+ *  split button (e.g. Paste / Paste Special). */
+export interface RibbonSplit extends RibbonControlBase {
+  type: "split";
+  items: RibbonMenuItem[];
+}
+
+export interface RibbonCombobox extends RibbonControlBase {
+  type: "combobox";
+  value?: string;
+  items?: RibbonMenuItem[];
+  /** Special source: backfill options from the Local Font Access API. */
+  source?: "local-fonts";
+  /** `short` = the narrow font-size combobox; otherwise full width. */
+  comboboxSize?: "short" | "normal";
+}
+
+/** A swatch popover + "More Colors" picker (font color / paragraph shading). */
+export interface RibbonColorPicker extends RibbonControlBase {
+  type: "color-picker";
+  defaultColor?: string;
+}
+
+/** A vertical separator between controls in a row. */
+export interface RibbonSeparator {
+  type: "separator";
+}
+
+export type RibbonControl =
+  | RibbonButton
+  | RibbonMenu
+  | RibbonSplit
+  | RibbonCombobox
+  | RibbonColorPicker
+  | RibbonSeparator;
+
+/** A layout wrapper. Office stacks a large button beside rows/columns of small
+ *  buttons; docen expresses that with explicit column/row/grid groups (the
+ *  rb-col / rb-row / rb-grid classes the ribbon container renders). */
+export interface RibbonLayout {
+  type: "layout";
+  layout: "column" | "row" | "grid";
+  controls: readonly RibbonControlOrLayout[];
+}
+
+/** A control or a layout wrapper — a group's `controls` is a tree of these. */
+export type RibbonControlOrLayout = RibbonControl | RibbonLayout;
+
+export interface RibbonGroup {
+  id: string;
+  label: string;
+  /** Optional launcher id (opens a dialog or pane). */
+  launcher?: string;
+  controls: readonly RibbonControlOrLayout[];
+}
+
+export interface RibbonTab {
+  id: string;
+  label: string;
+  groups: RibbonGroup[];
+}
+
+// ── Contributions (what an addin gives the host) ─────────────────────────────
+
+/** Ribbon contribution — Office.js `ExtensionPoint > CustomTab|OfficeTab`.
+ *  Target an existing tab id (home/insert/…) to append groups, or a fresh id to
+ *  create a new tab. */
+export interface RibbonContribution {
+  /** Target tab id. Existing id → append groups; new id → create a tab. */
+  tab: string;
+  /** Label used when creating a new tab (ignored once the tab exists). */
+  tabLabel?: string;
+  groups: RibbonGroup[];
+}
+
+/** Task pane contribution — Office.js `ShowTaskpane` action. `start` is the
+ *  navigation side (left in LTR); `end` is the format/properties side (right). */
+export interface TaskPaneContribution<THost extends DocenHost = DocenHost> {
+  id: string;
+  title: string;
+  position: "start" | "end";
+  icon?: string;
+  /** Build the pane's content element. Omitted = the host fills the pane itself
+   *  (e.g. the built-in outline/search navigation). */
+  render?: (host: THost) => HTMLElement | null;
+  defaultOpen?: boolean;
+}
+
+// ── Host + Addin contracts ───────────────────────────────────────────────────
+
+/** A docen editor host — the `<Host>` in Office.js terms (Word/Excel/PowerPoint
+ *  → docen Document/Presentation/Workbook). Owns the editing surface; addins
+ *  contribute the surrounding UI. */
+export interface DocenHost<TEditor = unknown> {
+  readonly element: HTMLElement;
+  readonly editor: TEditor | undefined;
+  getContent(): unknown;
+  setContent(content: unknown): void;
+  /** Route `type` to the first addin that declares it. Returns whether handled. */
+  dispatchCommand(type: string, value?: string): boolean;
+}
+
+/** An Office.js-style addin. Every field is optional except `id` — an addin may
+ *  contribute only ribbon tabs, only a task pane, or only commands. */
+export interface DocenAddin<THost extends DocenHost = DocenHost> {
+  readonly id: string;
+  readonly name?: string;
+  readonly ribbon?: readonly RibbonContribution[];
+  readonly taskPanes?: readonly TaskPaneContribution<THost>[];
+  readonly commands?: Readonly<Record<string, (host: THost, value?: string) => void>>;
+}

@@ -70,12 +70,14 @@
     "@fluentui/tokens": "1.0.0-alpha.23",
     "@fluentui/web-components": "3.0.0",
     "@microsoft/fast-element": "3.0.1",
-    "@microsoft/fast-html": "1.0.0-alpha.55",
-    "@microsoft/focusgroup-polyfill": "1.5.0",
     "@tiptap/extension-list": "3.27.1",
     "@tiptap/extensions": "3.27.1",
     "@tiptap/pm": "3.27.1",
     "image-meta": "0.2.2",
     "prosemirror-search": "1.1.1"
+  },
+  "devDependencies": {
+    "@swc/core": "1.15.43",
+    "unplugin-swc": "1.5.9"
   }
 }

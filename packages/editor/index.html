@@ -16,10 +16,6 @@
           sans-serif;
         color: #3b3b3b;
       }
-      docen-document {
-        display: block;
-        height: 100%;
-      }
     </style>
   </head>
   <body>
@@ -40,6 +36,31 @@
 
       await registerComponents();
       applyTheme("light");
+
+      // Example: an external add-in contributes a "Citations" ribbon tab. The
+      // host merges it onto the built-in tabs (mergeRibbonSchema) — a consumer
+      // plugs in tabs/groups/controls without touching host internals. The
+      // button reuses the engine's native `bold` command, so clicking it bolds
+      // the selection like any built-in control.
+      document.getElementById("doc")?.addAddin({
+        id: "citations",
+        name: "Citations",
+        ribbon: [
+          {
+            tab: "citations",
+            tabLabel: "Citations",
+            groups: [
+              {
+                id: "citations-tools",
+                label: "Tools",
+                controls: [
+                  { type: "button", id: "cite", icon: "info", label: "Cite", event: "bold" },
+                ],
+              },
+            ],
+          },
+        ],
+      });
     </script>
   </body>
 </html>

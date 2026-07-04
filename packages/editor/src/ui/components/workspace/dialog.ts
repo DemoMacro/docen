@@ -1,23 +1,37 @@
-const template = document.createElement("template");
-template.innerHTML = `
-  <style>
-    :host { display: contents; }
-    fluent-dialog-body { width: 100%; }
-    /* fluent-dialog-body only lays the footer out as a right-aligned row once
-       the dialog-body itself is ≥480px wide (@container). A compact dialog
-       never reaches that, leaving OK/Cancel stacked vertically — force the
-       row here so the action footer is always right-aligned. */
-    fluent-dialog-body::part(actions) {
-      flex-direction: row;
-      justify-content: flex-end;
-      align-items: center;
-      gap: 8px;
-      padding-block-start: var(--spacingVerticalXL, 20px);
-    }
-  </style>
-  <fluent-dialog type="modal" part="dialog">
+import {
+  FASTElement,
+  attr,
+  css,
+  customElement,
+  html,
+  observable,
+  ref,
+} from "@microsoft/fast-element";
+
+const styles = css`
+  :host {
+    display: contents;
+  }
+  fluent-dialog-body {
+    width: 100%;
+  }
+  /* fluent-dialog-body only lays the footer out as a right-aligned row once
+     the dialog-body itself is ≥480px wide (@container). A compact dialog
+     never reaches that, leaving OK/Cancel stacked vertically — force the
+     row here so the action footer is always right-aligned. */
+  fluent-dialog-body::part(actions) {
+    flex-direction: row;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 8px;
+    padding-block-start: var(--spacingVerticalXL, 20px);
+  }
+`;
+
+const template = html<DocenDialog>`
+  <fluent-dialog type="modal" part="dialog" ${ref("dialog")}>
     <fluent-dialog-body part="body">
-      <h2 slot="title" part="title"></h2>
+      <h2 slot="title" part="title" ${ref("titleEl")}></h2>
       <slot name="title-action" slot="title-action"></slot>
       <fluent-button
         slot="close"
@@ -27,14 +41,25 @@ template.innerHTML = `
         icon-only
         aria-label="Close"
       >
-        <svg fill="currentColor" aria-hidden="true" width="20" height="20" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
-          <path d="m4.09 4.22.06-.07a.5.5 0 0 1 .63-.06l.07.06L10 9.29l5.15-5.14a.5.5 0 0 1 .63-.06l.07.06c.18.17.2.44.06.63l-.06.07L10.71 10l5.14 5.15c.18.17.2.44.06.63l-.06.07a.5.5 0 0 1-.63.06l-.07-.06L10 10.71l-5.15 5.14a.5.5 0 0 1-.63.06l-.07-.06a.5.5 0 0 1-.06-.63l.06-.07L9.29 10 4.15 4.85a.5.5 0 0 1-.06-.63l.06-.07-.06.07Z" fill="currentColor" />
+        <svg
+          fill="currentColor"
+          aria-hidden="true"
+          width="20"
+          height="20"
+          viewBox="0 0 20 20"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <path
+            d="m4.09 4.22.06-.07a.5.5 0 0 1 .63-.06l.07.06L10 9.29l5.15-5.14a.5.5 0 0 1 .63-.06l.07.06c.18.17.2.44.06.63l-.06.07L10.71 10l5.14 5.15c.18.17.2.44.06.63l-.06.07a.5.5 0 0 1-.63.06l-.07-.06L10 10.71l-5.15 5.14a.5.5 0 0 1-.63.06l-.07-.06a.5.5 0 0 1-.06-.63l.06-.07L9.29 10 4.15 4.85a.5.5 0 0 1-.06-.63l.06-.07-.06.07Z"
+            fill="currentColor"
+          />
         </svg>
       </fluent-button>
       <slot></slot>
       <slot name="action" slot="action"></slot>
     </fluent-dialog-body>
-  </fluent-dialog>`;
+  </fluent-dialog>
+`;
 
 /** Structural subset of fluent-dialog the dialog forwards to. */
 interface FluentDialog extends HTMLElement {
@@ -54,38 +79,36 @@ interface FluentToggleEvent extends Event {
  * `hide()` drive the underlying fluent-dialog (modal: showModal → backdrop +
  * ESC). This is a content-agnostic container — it owns no business fields.
  */
-class DocenDialog extends HTMLElement {
-  static get observedAttributes(): string[] {
-    return ["heading", "open"];
-  }
+@customElement({ name: "docen-dialog", template, styles })
+class DocenDialog extends FASTElement {
+  @attr heading?: string;
+  @attr({ mode: "boolean" }) open?: boolean;
 
-  #dialog?: FluentDialog;
-  #titleEl?: HTMLElement;
+  @observable dialog?: FluentDialog;
+  @observable titleEl?: HTMLElement;
   #nativeDialog?: HTMLElement;
   #backdropRaf = 0;
   readonly #toggleHandler = (event: Event): void => {
     if ((event as FluentToggleEvent).detail?.newState === "closed") {
-      if (this.hasAttribute("open")) this.removeAttribute("open");
+      if (this.open) this.open = false;
     }
   };
   readonly #backdropHandler = (event: Event): void => {
     if (event.target === this.#nativeDialog) event.stopImmediatePropagation();
   };
 
-  attributeChangedCallback(name: string): void {
-    if (name === "heading") this.#applyHeading();
-    if (name === "open") this.#applyOpen();
+  headingChanged(): void {
+    this.#applyHeading();
+  }
+  openChanged(): void {
+    this.#applyOpen();
   }
 
   connectedCallback(): void {
-    if (!this.shadowRoot) {
-      this.attachShadow({ mode: "open" }).append(template.content.cloneNode(true));
-    }
-    this.#dialog = this.shadowRoot!.querySelector("fluent-dialog") as FluentDialog;
-    this.#titleEl = this.shadowRoot!.querySelector<HTMLElement>('[part="title"]') ?? undefined;
+    super.connectedCallback();
     // ESC / backdrop close the fluent-dialog directly; sync our `open` attr so
     // state stays consistent. fluent emits `toggle` with newState.
-    this.#dialog.addEventListener("toggle", this.#toggleHandler);
+    this.dialog?.addEventListener("toggle", this.#toggleHandler);
     // Office dialogs don't light-dismiss on backdrop click. fluent-dialog's
     // clickHandler hides when the click lands on the native <dialog> itself
     // (the backdrop region); intercept those in capture phase so only ESC, the
@@ -97,29 +120,9 @@ class DocenDialog extends HTMLElement {
 
   disconnectedCallback(): void {
     cancelAnimationFrame(this.#backdropRaf);
-    this.#dialog?.removeEventListener("toggle", this.#toggleHandler);
+    this.dialog?.removeEventListener("toggle", this.#toggleHandler);
     this.#nativeDialog?.removeEventListener("click", this.#backdropHandler, true);
-  }
-
-  #disableBackdropDismiss(): void {
-    const apply = (): void => {
-      const native = this.#dialog?.shadowRoot?.querySelector("dialog");
-      if (!native) {
-        this.#backdropRaf = requestAnimationFrame(apply);
-        return;
-      }
-      this.#nativeDialog = native;
-      native.addEventListener("click", this.#backdropHandler, true);
-    };
-    apply();
-  }
-
-  get open(): boolean {
-    return this.hasAttribute("open");
-  }
-
-  set open(value: boolean) {
-    this.toggleAttribute("open", value);
+    super.disconnectedCallback();
   }
 
   show(): void {
@@ -130,12 +133,27 @@ class DocenDialog extends HTMLElement {
     this.open = false;
   }
 
-  #applyHeading(): void {
-    if (this.#titleEl) this.#titleEl.textContent = this.getAttribute("heading") ?? "";
+  #disableBackdropDismiss(): void {
+    const apply = (): void => {
+      const native = this.dialog?.shadowRoot?.querySelector("dialog");
+      if (!native) {
+        this.#backdropRaf = requestAnimationFrame(apply);
+        return;
+      }
+      this.#nativeDialog = native;
+      native.addEventListener("click", this.#backdropHandler, true);
+    };
+    apply();
   }
 
+  #applyHeading(): void {
+    if (this.titleEl) this.titleEl.textContent = this.heading ?? "";
+  }
+
+  // Sync the `open` attribute to fluent-dialog's show/hide. The dialog may not
+  // be upgraded on first connect, so retry once it is.
   #applyOpen(): void {
-    const dialog = this.#dialog;
+    const dialog = this.dialog;
     if (!dialog || typeof dialog.show !== "function") {
       if (dialog) requestAnimationFrame(() => this.#applyOpen());
       return;
@@ -147,7 +165,5 @@ class DocenDialog extends HTMLElement {
     else dialog.hide();
   }
 }
-
-customElements.define("docen-dialog", DocenDialog);
 
 export default DocenDialog;

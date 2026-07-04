@@ -1,3 +1,13 @@
+import {
+  FASTElement,
+  attr,
+  css,
+  customElement,
+  html,
+  observable,
+  ref,
+} from "@microsoft/fast-element";
+
 import { observeLang, t } from "../../i18n/localize";
 
 /** A single outline (TOC) entry. `children` nest recursively. */
@@ -14,32 +24,42 @@ export interface OutlineItem {
   readonly children?: readonly OutlineItem[];
 }
 
-const template = document.createElement("template");
-template.innerHTML = `
-  <style>
-    :host { display: block; font-size: 12px; }
-    fluent-tree { padding: 8px; box-sizing: border-box; }
-    /* fluent-tree-item's ::part(content) is a flex item with min-width:auto, so
-       a long label stretches it past the pane (visible overflow). min-width:0
-       lifts the no-shrink floor and the width cap bounds it to the pane; the
-       label inside then truncates instead of overflowing. */
-    fluent-tree-item::part(content) {
-      min-width: 0;
-      max-width: 100%;
-      overflow: hidden;
-    }
-    /* The label sits as a flex item inside ::part(content); min-width:0 lets it
-       shrink below its text, and the full text is reachable via the item title. */
-    .outline-label {
-      flex: 1 1 auto;
-      min-width: 0;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    .empty { font-size: 12px; color: #666; padding: 12px 8px; margin: 0; }
-  </style>
-  <div part="body"></div>`;
+const styles = css`
+  :host {
+    display: block;
+    font-size: 12px;
+  }
+  fluent-tree {
+    padding: 8px;
+    box-sizing: border-box;
+  }
+  /* fluent-tree-item's ::part(content) is a flex item with min-width:auto, so
+     a long label stretches it past the pane (visible overflow). min-width:0
+     lifts the no-shrink floor and the width cap bounds it to the pane; the
+     label inside then truncates instead of overflowing. */
+  fluent-tree-item::part(content) {
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+  }
+  /* The label sits as a flex item inside ::part(content); min-width:0 lets it
+     shrink below its text, and the full text is reachable via the item title. */
+  .outline-label {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .empty {
+    font-size: 12px;
+    color: #666;
+    padding: 12px 8px;
+    margin: 0;
+  }
+`;
+
+const template = html<DocenOutline>`<div part="body" ${ref("body")}></div>`;
 
 /**
  * `<docen-outline items='[{id, title, children:[…]}]'>` — an Office-style
@@ -49,47 +69,45 @@ template.innerHTML = `
  * builds the outline and translates them); only the empty state is localized
  * here. Items default to expanded.
  */
-class DocenOutline extends HTMLElement {
-  static get observedAttributes(): string[] {
-    return ["items"];
-  }
-
-  #body?: HTMLElement;
+@customElement({ name: "docen-outline", template, styles })
+class DocenOutline extends FASTElement {
+  @attr items?: string;
+  @observable body?: HTMLElement;
   #unsubscribe?: () => void;
 
-  attributeChangedCallback(name: string): void {
-    if (name === "items") this.#render();
+  itemsChanged(): void {
+    this.#render();
   }
 
   connectedCallback(): void {
-    if (!this.shadowRoot) {
-      this.attachShadow({ mode: "open" }).append(template.content.cloneNode(true));
-    }
-    this.#body = this.shadowRoot!.querySelector("[part='body']")!;
+    super.connectedCallback();
     this.#render();
     this.#unsubscribe = observeLang(() => {
-      const empty = this.#body?.querySelector(".empty");
+      const empty = this.body?.querySelector(".empty");
       if (empty) empty.textContent = t("outline.empty", this);
     });
   }
 
   disconnectedCallback(): void {
     this.#unsubscribe?.();
+    super.disconnectedCallback();
   }
 
-  get items(): OutlineItem[] {
+  // The JSON `items` attribute parsed to entries; bad JSON → empty (no render).
+  get parsedItems(): OutlineItem[] {
     try {
-      return JSON.parse(this.getAttribute("items") ?? "[]") as OutlineItem[];
+      return JSON.parse(this.items ?? "[]") as OutlineItem[];
     } catch {
       return [];
     }
   }
 
   #render(): void {
-    const body = this.#body;
+    const body = this.body;
     if (!body) return;
     body.replaceChildren();
-    if (this.items.length === 0) {
+    const items = this.parsedItems;
+    if (items.length === 0) {
       const empty = document.createElement("p");
       empty.className = "empty";
       empty.textContent = t("outline.empty", this);
@@ -97,7 +115,7 @@ class DocenOutline extends HTMLElement {
       return;
     }
     const tree = document.createElement("fluent-tree");
-    for (const item of this.items) {
+    for (const item of items) {
       tree.append(this.#renderItem(item));
     }
     // Event delegation: one listener on the tree resolves to the innermost
@@ -144,7 +162,5 @@ class DocenOutline extends HTMLElement {
     );
   }
 }
-
-customElements.define("docen-outline", DocenOutline);
 
 export default DocenOutline;

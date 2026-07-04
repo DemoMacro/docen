@@ -66,23 +66,17 @@ Mirror the `<docen-document>` attributes. Pass `undefined` to leave an attribute
 | `filename`          | string  | `filename`           |                                           |
 | `editable`          | boolean | `editable`           |                                           |
 | `spellcheck`        | boolean | `spellcheck`         |                                           |
-| `toolbar`           | boolean | `toolbar`            | Show/hide the ribbon                      |
-| `header`            | boolean | `header`             | Show/hide the app header                  |
-| `statusBar`         | boolean | `status-bar`         | Show/hide the status bar                  |
-| `navigationPane`    | string  | `navigation-pane`    | `open` / `closed` / `hidden`              |
-| `propertiesPane`    | string  | `properties-pane`    | `open` / `closed` / `hidden`              |
-| `tabs`              | string  | `tabs`               | Comma list, e.g. `"home,review"`          |
-| `closable`          | boolean | `closable`           | Render the close (×) button               |
 | `user` / `avatar`   | string  | `user` / `avatar`    | Identity in the header                    |
 | `sectionProperties` | object  | `section-properties` | JSON page setup (size/margin/orientation) |
 | `styles`            | object  | `styles`             | JSON named-styles model                   |
+| `addins`            | array   | `addins`             | JSON external add-ins (ribbon/task-pane)  |
 
 ## Events
 
 Re-emitted from the web component's `docen:*` events:
 
 - `update:modelValue` — editor content changed (drives v-model)
-- `@change`, `@save`, `@save-as`, `@open`, `@new`, `@print`, `@request-close`
+- `@change`, `@save`, `@save-as`, `@open`, `@new`, `@print`
 
 ## Template ref
 

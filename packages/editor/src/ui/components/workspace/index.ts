@@ -1,9 +1,10 @@
-export { default as DocenAppHeader } from "./app-header";
+export { default as DocenTitleBar } from "./title-bar";
 export { default as DocenDialog } from "./dialog";
 export { default as DocenWorkspace } from "./workspace";
-export { default as DocenCanvas } from "./canvas";
+export { default as DocenDocumentArea } from "./document-area";
 export { default as DocenTaskPane } from "./task-pane";
-export { default as DocenPropertiesPanel } from "./properties-panel";
+export { default as DocenFormatPane } from "./format-pane";
 export { default as DocenOutline } from "./outline";
 export { default as DocenNavigationPane } from "./navigation-pane";
 export { default as DocenFindReplaceDialog } from "./find-replace-dialog";
+export { default as DocenStatusBar } from "./status-bar";

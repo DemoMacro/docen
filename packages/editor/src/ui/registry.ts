@@ -159,9 +159,12 @@ export async function registerComponents(): Promise<void> {
     name: "fluent-button",
     template: ButtonTemplate,
     styles: css`
-      ${ButtonStyles}: host {
-        column-gap: 6px;
-      }
+      ${ButtonStyles}
+      ${css`
+        :host {
+          column-gap: 6px;
+        }
+      `}
       :host([appearance="subtle"]),
       :host([appearance="transparent"]) {
         padding-inline: 6px;
@@ -192,13 +195,16 @@ export async function registerComponents(): Promise<void> {
     name: "fluent-option",
     template: DropdownOptionTemplate,
     styles: css`
-      ${DropdownOptionStyles}: host([data-center]) {
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        padding-inline: 0;
-        width: 100%;
-      }
+      ${DropdownOptionStyles}
+      ${css`
+        :host([data-center]) {
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          padding-inline: 0;
+          width: 100%;
+        }
+      `}
       :host([data-center]) slot[name="checked-indicator"],
       :host([data-center]) slot[name="start"],
       :host([data-center]) .description {
@@ -236,9 +242,12 @@ export async function registerComponents(): Promise<void> {
     name: "fluent-menu",
     template: MenuTemplate,
     styles: css`
-      ${MenuStyles}: host([data-vertical][split]) {
-        flex-direction: column;
-      }
+      ${MenuStyles}
+      ${css`
+        :host([data-vertical][split]) {
+          flex-direction: column;
+        }
+      `}
       /* Fluent paints a split divider on the primary's inline-end (and clears
          the trigger's inline-start) regardless of appearance; clear both so a
          subtle split is fully flat by default. */
@@ -304,9 +313,12 @@ export async function registerComponents(): Promise<void> {
     name: "fluent-drawer",
     template: DrawerTemplate,
     styles: css`
-      ${DrawerStyles}: host([type="inline"]) dialog {
-        transition: none;
-      }
+      ${DrawerStyles}
+      ${css`
+        :host([type="inline"]) dialog {
+          transition: none;
+        }
+      `}
     `,
   });
   await defineElement(DrawerBody, DrawerBodyDefinition);
