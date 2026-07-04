@@ -91,6 +91,11 @@ class DocenDocument extends HTMLElement {
   // DOCX I/O
   openDOCX(input: File | ArrayBuffer | Uint8Array): Promise<void>;
   saveDOCX(): Promise<Uint8Array>;
+  // Markdown / HTML I/O — text formats take a File or string, return a string
+  openMarkdown(input: File | string): Promise<void>;
+  openHTML(input: File | string): Promise<void>;
+  saveMarkdown(): string;
+  saveHTML(): string;
 
   // Runtime model — flat Tiptap JSON (doc > block+). The editor stores pages
   // internally (C-route pagination); getJSON/setJSON unwrap/wrap them so the
@@ -110,16 +115,18 @@ class DocenDocument extends HTMLElement {
 All events bubble and compose out of the shadow DOM — listen on the host
 element. `docen:save` / `:save-as` / `:open` / `:print` are cancelable: call
 `preventDefault()` to take over the action (otherwise the built-in behavior runs).
+`docen:open` / `:save-as` carry `{ format }` (`"docx" | "markdown" | "html"`) —
+which Open/Save-As variant the user picked.
 
-| Event           | When                                           | Detail      |
-| --------------- | ---------------------------------------------- | ----------- |
-| `docen:ready`   | Editor mounted and ready                       | —           |
-| `docen:change`  | Document content changed (autosave driver)     | `{ dirty }` |
-| `docen:save`    | Save button — `preventDefault()` to take over  | —           |
-| `docen:save-as` | Save As menu — `preventDefault()` to take over | —           |
-| `docen:open`    | Open menu — `preventDefault()` to take over    | —           |
-| `docen:new`     | New menu — host-only (no built-in action)      | —           |
-| `docen:print`   | Print menu — `preventDefault()` to take over   | —           |
+| Event           | When                                           | Detail       |
+| --------------- | ---------------------------------------------- | ------------ |
+| `docen:ready`   | Editor mounted and ready                       | —            |
+| `docen:change`  | Document content changed (autosave driver)     | `{ dirty }`  |
+| `docen:save`    | Save button — `preventDefault()` to take over  | —            |
+| `docen:save-as` | Save As menu — `preventDefault()` to take over | `{ format }` |
+| `docen:open`    | Open menu — `preventDefault()` to take over    | `{ format }` |
+| `docen:new`     | New menu — host-only (no built-in action)      | —            |
+| `docen:print`   | Print menu — `preventDefault()` to take over   | —            |
 
 **Configuration**
 
