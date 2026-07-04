@@ -8,7 +8,7 @@ import {
   ref,
 } from "@microsoft/fast-element";
 
-import { observeLang, t } from "../../i18n/localize";
+import { observeLang, resolveLang, t } from "../../i18n/localize";
 
 const styles = css`
   :host {
@@ -80,6 +80,12 @@ const styles = css`
     min-width: 38px;
     text-align: right;
   }
+  /* Language indicator — sat after the word count. Plain text matching the
+     surrounding status copy; a click flips zh-CN ↔ en. */
+  .lang-text {
+    cursor: pointer;
+    padding-inline: 2px;
+  }
 `;
 
 const template = html<DocenStatusBar>`
@@ -87,6 +93,7 @@ const template = html<DocenStatusBar>`
     <span class="section" ${ref("sectionEl")}></span>
     <span class="pages" ${ref("pagesEl")}></span>
     <span class="words" ${ref("wordsEl")}></span>
+    <span class="lang-text" ${ref("langBtn")}></span>
   </span>
   <span class="zoom">
     <button type="button" class="step" ${ref("outBtn")} aria-label="Zoom out">−</button>
@@ -127,6 +134,7 @@ class DocenStatusBar extends FASTElement {
   @observable pctEl?: HTMLElement;
   @observable outBtn?: HTMLButtonElement;
   @observable inBtn?: HTMLButtonElement;
+  @observable langBtn?: HTMLElement;
   #unsubscribe?: () => void;
 
   sectionChanged(): void {
@@ -152,7 +160,12 @@ class DocenStatusBar extends FASTElement {
     this.slider?.addEventListener("input", () => this.#emit(Number(this.slider?.value ?? 100)));
     this.outBtn?.addEventListener("click", () => this.#emit(Number(this.zoom ?? 100) - 10));
     this.inBtn?.addEventListener("click", () => this.#emit(Number(this.zoom ?? 100) + 10));
-    this.#unsubscribe = observeLang(() => this.#renderAll());
+    this.langBtn?.addEventListener("click", () => this.#toggleLang());
+    this.#unsubscribe = observeLang(() => {
+      this.#renderAll();
+      this.#renderLang();
+    });
+    this.#renderLang();
   }
 
   disconnectedCallback(): void {
@@ -175,6 +188,23 @@ class DocenStatusBar extends FASTElement {
     this.#renderPages();
     this.#renderWords();
     this.#renderZoom();
+  }
+
+  #renderLang(): void {
+    if (!this.langBtn) return;
+    const isZh = resolveLang().startsWith("zh");
+    this.langBtn.textContent = isZh ? t("header.lang.zh") : t("header.lang.en");
+  }
+
+  #toggleLang(): void {
+    const next = resolveLang().startsWith("zh") ? "en" : "zh-CN";
+    this.#emitLang(next);
+  }
+
+  #emitLang(lang: string): void {
+    this.dispatchEvent(
+      new CustomEvent("lang:change", { bubbles: true, composed: true, detail: { lang } }),
+    );
   }
 
   #renderSection(): void {

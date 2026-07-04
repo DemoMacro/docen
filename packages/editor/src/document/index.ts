@@ -489,6 +489,7 @@ const TEMPLATE = `
     </docen-task-pane>
     <docen-status-bar slot="status" part="status"></docen-status-bar>
   </docen-workspace>
+  <docen-options-dialog part="options"></docen-options-dialog>
   <docen-find-replace-dialog></docen-find-replace-dialog>
   <input type="file" id="file-input" accept=".docx" hidden />
   <input type="file" id="image-input" accept="image/*" hidden />`;
@@ -644,6 +645,9 @@ class DocenDocument extends AddinHost<Editor> {
       // External add-ins (JSON: ribbon/task-pane data contributions — functions
       // can't cross the attribute boundary, so command/pane-render stay in JS).
       "addins",
+      // UI theme — "light" (default) | "dark"; drives applyTheme. Reactive so a
+      // host can switch theme at runtime.
+      "theme",
     ];
   }
 
@@ -689,6 +693,9 @@ class DocenDocument extends AddinHost<Editor> {
         break;
       case "addins":
         this.#applyAddinsAttr();
+        break;
+      case "theme":
+        this.#applyThemeAttr(value);
         break;
     }
   }
@@ -1099,7 +1106,7 @@ class DocenDocument extends AddinHost<Editor> {
       this.attachShadow({ mode: "open" }).innerHTML = TEMPLATE;
     }
     await registerComponents();
-    applyTheme("light");
+    applyTheme(this.getAttribute("theme") === "dark" ? "dark" : "light");
 
     this.#fileInput = this.shadowRoot!.querySelector<HTMLInputElement>("#file-input")!;
     this.#imageInput = this.shadowRoot!.querySelector<HTMLInputElement>("#image-input")!;
@@ -1194,6 +1201,15 @@ class DocenDocument extends AddinHost<Editor> {
       "find-replace:action",
       this.#onFindReplace as EventListener,
     );
+    // Options dialog — ok; status-bar language indicator — lang:change.
+    this.shadowRoot!.querySelector("docen-options-dialog")?.addEventListener(
+      "options:ok",
+      this.#onOptionsOk as EventListener,
+    );
+    this.shadowRoot!.querySelector("docen-status-bar")?.addEventListener(
+      "lang:change",
+      this.#onLangChange as EventListener,
+    );
 
     // Re-render header + ribbon when the page locale (<html lang>) changes.
     this.#unobserveLang = observeLang(() => this.#renderChrome());
@@ -1271,18 +1287,13 @@ class DocenDocument extends AddinHost<Editor> {
                 <fluent-menu-item data-event="open">${t("header.open")}</fluent-menu-item>
                 <fluent-menu-item data-event="save-as">${t("header.save-as")}</fluent-menu-item>
                 <fluent-menu-item data-event="print">${t("header.print")}</fluent-menu-item>
+                <fluent-menu-item data-event="options">${t("header.options")}</fluent-menu-item>
               </fluent-menu-list>
             </fluent-menu>
           </div>
           <fluent-text-input slot="search" placeholder="${t("header.search")}"></fluent-text-input>
           <div slot="end" style="display:flex;align-items:center;gap:4px">
-            <fluent-menu>
-              <fluent-menu-button slot="trigger" appearance="subtle">${avatarMarkup}${user}</fluent-menu-button>
-              <fluent-menu-list>
-                <fluent-menu-item data-event="lang-zh">${t("header.lang.zh")}</fluent-menu-item>
-                <fluent-menu-item data-event="lang-en">${t("header.lang.en")}</fluent-menu-item>
-              </fluent-menu-list>
-            </fluent-menu>
+            <span style="display:inline-flex;align-items:center;gap:6px;padding-inline:6px">${avatarMarkup}${escapeHtml(user)}</span>
           </div>`;
   }
 
@@ -1297,9 +1308,8 @@ class DocenDocument extends AddinHost<Editor> {
     // mergeRibbonSchema. The default add-in contributes no ribbon, so without
     // extra add-ins this is just the built-in set.
     const tabs = [...ribbonTabs(styles), ...mergeRibbonSchema(this.addins)];
-    root
-      .querySelector("docen-ribbon")!
-      .replaceChildren(renderRibbonFromSchema(tabs, ribbonActions()));
+    const ribbonEl = root.querySelector("docen-ribbon")!;
+    ribbonEl.replaceChildren(renderRibbonFromSchema(tabs, ribbonActions()));
     this.#applyRibbonGreying();
     this.#syncEditModeMenu();
     this.#renderPanes();
@@ -1379,6 +1389,11 @@ class DocenDocument extends AddinHost<Editor> {
       if (!next.has(id)) this.removeAddin(id);
     }
     this.#addinAttrIds = next;
+  }
+
+  /** Apply the `theme` attribute: switch the Fluent theme (light/dark). */
+  #applyThemeAttr(value: string): void {
+    applyTheme(value === "dark" ? "dark" : "light");
   }
 
   /** Grey out ribbon commands that have no handler (skeleton buttons). Runs
@@ -1877,13 +1892,29 @@ class DocenDocument extends AddinHost<Editor> {
         // No built-in "new" — always hand to the host (docen:new).
         this.#emitCancelable("docen:new");
         break;
-      case "lang-zh":
-        document.documentElement.lang = "zh-CN";
+      case "options": {
+        // Filename menu → open the Options dialog (UI language).
+        const optionsEl = this.shadowRoot?.querySelector("docen-options-dialog");
+        if (optionsEl) {
+          optionsEl.setAttribute("locale", document.documentElement.lang || "zh-CN");
+          (optionsEl as unknown as { show?: () => void }).show?.();
+        }
         break;
-      case "lang-en":
-        document.documentElement.lang = "en";
-        break;
+      }
       // autosave: skeleton — wired when that feature lands.
+    }
+  };
+
+  readonly #onLangChange = (event: Event): void => {
+    const lang = (event as CustomEvent<{ lang: string }>).detail?.lang;
+    if (lang) document.documentElement.lang = lang;
+  };
+
+  /** Options dialog 确定 — commit the UI language. */
+  readonly #onOptionsOk = (event: Event): void => {
+    const lang = (event as CustomEvent<{ lang?: string }>).detail?.lang;
+    if (lang && document.documentElement.lang !== lang) {
+      document.documentElement.lang = lang;
     }
   };
 

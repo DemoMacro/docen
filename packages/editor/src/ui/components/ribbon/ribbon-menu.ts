@@ -8,7 +8,7 @@ import {
   ref,
 } from "@microsoft/fast-element";
 
-import { COMMAND_HOST_STYLE, renderIcon } from "./command-helpers";
+import { COMMAND_HOST_STYLE, renderIcon, suppressTooltipWhileMenuOpen } from "./command-helpers";
 
 export interface RibbonMenuItem {
   text: string;
@@ -82,6 +82,8 @@ class DocenRibbonMenu extends FASTElement {
 
   readonly anchorId = `--rb-menu-${++seq}`;
 
+  #tooltipDisposer?: () => void;
+
   get tooltipText(): string {
     return this.tooltip || this.label || "";
   }
@@ -110,10 +112,13 @@ class DocenRibbonMenu extends FASTElement {
     // contenteditable — a blur/refocus race otherwise closes the popover right
     // after it opens (the "click several times before it appears" symptom).
     this.trigger?.addEventListener("mousedown", this.onMousedown, { capture: true });
+    this.#tooltipDisposer = suppressTooltipWhileMenuOpen(this.tooltipEl, this.list);
   }
 
   disconnectedCallback(): void {
     this.trigger?.removeEventListener("mousedown", this.onMousedown, { capture: true });
+    this.#tooltipDisposer?.();
+    this.#tooltipDisposer = undefined;
     super.disconnectedCallback();
   }
 

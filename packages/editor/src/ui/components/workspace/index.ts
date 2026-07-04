@@ -8,3 +8,4 @@ export { default as DocenOutline } from "./outline";
 export { default as DocenNavigationPane } from "./navigation-pane";
 export { default as DocenFindReplaceDialog } from "./find-replace-dialog";
 export { default as DocenStatusBar } from "./status-bar";
+export { default as DocenOptionsDialog } from "./options-dialog";

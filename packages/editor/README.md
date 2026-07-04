@@ -13,7 +13,8 @@
 - 🧩 **Turnkey `<docen-document>`** — One custom element bundles the Fluent UI host (title bar, ribbon, document area, status bar, panes, find/replace) with the @docen/docx engine
 - 📄 **Word-style pagination** — C-route: fixed-height page boxes with physical overflow reflow, keeping edit == render in a single contenteditable
 - 🎨 **Fluent UI surfaces** — Ribbon (buttons, split/toggle buttons, combobox, galleries, color picker), workspace, task/navigation/format panes, context menu
-- 🌐 **i18n** — Built-in Chinese (zh-CN) and English (en); switch live from the user menu
+- 🌐 **i18n** — Built-in Chinese (zh-CN) and English (en); switch live from the status bar (click the language text)
+- 🌓 **Light/dark theme** — Fluent design tokens drive the chrome; switch via the `theme` attribute
 - 🔄 **DOCX round-trip** — Open/save `.docx` through the underlying @docen/docx engine
 - 🔌 **Add-ins** — Plug in ribbon tabs, task panes, and commands without touching host internals
 
@@ -57,7 +58,8 @@ const output = await doc.saveDOCX(); // → Uint8Array
 ### Web component: `<docen-document>`
 
 A turnkey WYSIWYG document editor. The title bar (brand, auto-save, save/undo/redo,
-Open/Save/Print menu, language menu), ribbon, document area, and panes are all built in.
+filename menu), ribbon, document area,
+status bar (page/word count, language indicator, zoom), and panes are all built in.
 
 **Attributes**
 
@@ -77,6 +79,7 @@ extend it via add-ins rather than toggling attributes.
 | `section-properties` | —          | JSON section page setup (size, margins, orientation); reactive      |
 | `styles`             | —          | JSON named styles; reactive                                         |
 | `addins`             | —          | JSON array of external add-ins (ribbon/task-pane data); see Add-ins |
+| `theme`              | `light`    | `"light" \| "dark"`; drives the Fluent theme                        |
 
 Unwired ribbon commands (skeleton buttons) render visually but are greyed out
 (`disabled`) — the ribbon keeps its full Office shape without dead clicks.

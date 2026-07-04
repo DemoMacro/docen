@@ -42,3 +42,49 @@ export function renderIcon(slot: HTMLElement, name: string): void {
   }
   slot.replaceChildren(template.content.cloneNode(true));
 }
+
+/** A popover-capable element (fluent-tooltip) — showPopover/hidePopover are the
+ *  native Popover API on HTMLElement; typed optional so this file compiles even
+ *  where the TS DOM lib hasn't declared them yet. */
+type PopoverElement = HTMLElement & { showPopover?: () => void; hidePopover?: () => void };
+
+/**
+ * Keep a ribbon command's tooltip from dismissing its own menu.
+ *
+ * fluent-tooltip's showTooltip schedules showPopover() on a ~250ms timer; if the
+ * click lands inside that window the menu opens first and the tooltip's delayed
+ * showPopover fires after it. The tooltip and the menu-list are both auto
+ * popovers, so the re-shown tooltip light-dismisses the menu via auto-popover
+ * mutual exclusion — the "menu appears then instantly vanishes" flicker
+ * (intermittent: only when hover precedes the click by <250ms).
+ *
+ * While the menu is open, no-op the tooltip's showPopover (blocks the pending
+ * delayed show) and hidePopover it on open (clears one already shown, bypassing
+ * fluent-tooltip's :hover guard, which otherwise keeps it up). Returns a
+ * disposer to call in disconnectedCallback.
+ */
+export function suppressTooltipWhileMenuOpen(
+  tooltip: PopoverElement | undefined,
+  menuList: HTMLElement | undefined,
+): () => void {
+  if (!tooltip || !menuList) return () => {};
+  let menuOpen = false;
+  const origShow = tooltip.showPopover?.bind(tooltip);
+  if (origShow) {
+    tooltip.showPopover = () => {
+      if (menuOpen) return;
+      origShow();
+    };
+  }
+  const onToggle = (event: Event): void => {
+    menuOpen = (event as ToggleEvent).newState === "open";
+    if (menuOpen) tooltip.hidePopover?.();
+  };
+  menuList.addEventListener("toggle", onToggle as EventListener);
+  return () => {
+    menuList.removeEventListener("toggle", onToggle as EventListener);
+    // Drop the instance override so tooltip.showPopover resolves back to the
+    // native HTMLElement prototype method.
+    delete (tooltip as { showPopover?: () => void }).showPopover;
+  };
+}

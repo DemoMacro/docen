@@ -382,6 +382,7 @@ export const ribbonEn: DocenTranslation = {
   "header.open": "Open…",
   "header.save-as": "Save As…",
   "header.print": "Print",
+  "header.options": "Options",
   "header.rename": "Rename",
   "header.open-location": "Open location",
   "header.version-history": "Version history",
@@ -399,6 +400,13 @@ export const ribbonEn: DocenTranslation = {
   "status.words": "Words: {n}",
   // --- Editor surface ---
   "editor.placeholder": "Start writing",
+  // --- Options dialog ---
+  "options.title": "Options",
+  "options.ok": "OK",
+  "options.cancel": "Cancel",
+  "options.language": "Language",
+  "options.lang.zh": "Chinese (Simplified)",
+  "options.lang.en": "English",
 };
 
 export const ribbonZhCN: DocenTranslation = {
@@ -765,6 +773,7 @@ export const ribbonZhCN: DocenTranslation = {
   "header.open": "打开…",
   "header.save-as": "另存为…",
   "header.print": "打印",
+  "header.options": "选项",
   "header.rename": "重命名",
   "header.open-location": "打开位置",
   "header.version-history": "版本历史",
@@ -781,6 +790,13 @@ export const ribbonZhCN: DocenTranslation = {
   "status.page-of": "第 {page} 页，共 {total} 页",
   "status.words": "字数: {n}",
   "editor.placeholder": "开始书写…",
+  // --- 选项对话框 ---
+  "options.title": "选项",
+  "options.ok": "确定",
+  "options.cancel": "取消",
+  "options.language": "语言",
+  "options.lang.zh": "中文（简体）",
+  "options.lang.en": "英语",
 };
 
 // Register on import so the locale is available before the ribbon renders.

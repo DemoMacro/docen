@@ -8,7 +8,7 @@ import {
   ref,
 } from "@microsoft/fast-element";
 
-import { COMMAND_HOST_STYLE, renderIcon } from "./command-helpers";
+import { COMMAND_HOST_STYLE, renderIcon, suppressTooltipWhileMenuOpen } from "./command-helpers";
 import type { RibbonMenuItem } from "./ribbon-menu";
 
 // Per-instance CSS anchor name so each split's dropdown aligns to its own
@@ -146,6 +146,8 @@ class DocenRibbonSplitButton extends FASTElement {
 
   readonly anchorId = `--rb-split-${++seq}`;
 
+  #tooltipDisposer?: () => void;
+
   get eventName(): string {
     return this.event || this.label || "";
   }
@@ -189,11 +191,14 @@ class DocenRibbonSplitButton extends FASTElement {
     // Keep the editor's selection when the primary action is clicked — the
     // caret dropdown still opens normally (only the primary is guarded).
     this.primary?.addEventListener("mousedown", this.onMousedown, { capture: true });
+    this.#tooltipDisposer = suppressTooltipWhileMenuOpen(this.tooltipEl, this.list);
   }
 
   disconnectedCallback(): void {
     this.primary?.removeEventListener("click", this.onPrimaryClick);
     this.primary?.removeEventListener("mousedown", this.onMousedown, { capture: true });
+    this.#tooltipDisposer?.();
+    this.#tooltipDisposer = undefined;
     super.disconnectedCallback();
   }
 
