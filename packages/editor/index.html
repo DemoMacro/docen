@@ -37,29 +37,31 @@
       await registerComponents();
       applyTheme("light");
 
-      // Example: an external add-in contributes a "Citations" ribbon tab. The
-      // host merges it onto the built-in tabs (mergeRibbonSchema) — a consumer
-      // plugs in tabs/groups/controls without touching host internals. The
-      // button reuses the engine's native `bold` command, so clicking it bolds
-      // the selection like any built-in control.
+      // Example: an external add-in contributes an "About" ribbon tab. The host
+      // merges it onto the built-in tabs (mergeRibbonSchema) — a consumer plugs
+      // in tabs/groups/controls without touching host internals. The "Help"
+      // button's `open-help` event isn't a Tiptap command, so the host routes
+      // it to this addin's `commands` map (non-Tiptap action) — clicking it
+      // opens the project's GitHub repository.
       document.getElementById("doc")?.addAddin({
-        id: "citations",
-        name: "Citations",
+        id: "about",
+        name: "About",
         ribbon: [
           {
-            tab: "citations",
-            tabLabel: "Citations",
+            tab: "about",
+            tabLabel: "About",
             groups: [
               {
-                id: "citations-tools",
-                label: "Tools",
-                controls: [
-                  { type: "button", id: "cite", icon: "info", label: "Cite", event: "bold" },
-                ],
+                id: "about-help",
+                label: "Help",
+                controls: [{ type: "button", id: "help", label: "Help", event: "open-help" }],
               },
             ],
           },
         ],
+        commands: {
+          "open-help": () => window.open("https://github.com/DemoMacro/docen", "_blank"),
+        },
       });
     </script>
   </body>

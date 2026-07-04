@@ -7,6 +7,8 @@
 
 > Universal document format converter and DOCX editor built on TipTap/ProseMirror, with comprehensive TypeScript support. Convert between Markdown, HTML, and DOCX through a unified Tiptap JSON model.
 
+![Docen Editor](./assets/editor-demo.png)
+
 ## Packages
 
 | Package                                      | Version                                            | Description                                                                              |

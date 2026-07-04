@@ -1600,9 +1600,17 @@ class DocenDocument extends AddinHost<Editor> {
     );
   }
 
-  /** The full set of wired command names (dispatch + locally handled). */
+  /** The full set of wired command names (Tiptap dispatch + locally handled +
+   *  addin commands). External add-ins register non-Tiptap actions (e.g. open a
+   *  URL) via `commands`; their keys count as wired so {@link #applyRibbonGreying}
+   *  doesn't disable the controls that dispatch them. */
   #wiredCommands(): Set<string> {
-    return new Set<string>([...WIRED_DISPATCH, ...LOCAL_HANDLED]);
+    const wired = new Set<string>([...WIRED_DISPATCH, ...LOCAL_HANDLED]);
+    for (const addin of this.addins) {
+      if (!addin.commands) continue;
+      for (const key of Object.keys(addin.commands)) wired.add(key);
+    }
+    return wired;
   }
 
   /** Dispatch a cancelable event; returns true when a host preventDefaulted it
@@ -2039,19 +2047,26 @@ class DocenDocument extends AddinHost<Editor> {
       this.#toggleFormatPainter();
       return;
     }
-    // DocumentCommands registers every ribbon event as a native Tiptap command, so
-    // route the event straight to editor.chain().focus().<event>(value).run() —
-    // no RIBBON_COMMAND_MAP / dispatchRibbonCommand / addin.commands layer. A
-    // user add-in overrides a command by contributing a Tiptap extension whose
+    // Built-in commands route to editor.chain().focus().<event>(value).run() —
+    // DocumentCommands registers every ribbon event as a native Tiptap command.
+    // A user add-in overrides one by contributing a Tiptap extension whose
     // addCommands redefines the same name (Tiptap's native override mechanism).
     const editor = this.#editor;
-    if (!editor) return;
-    const chain = editor.chain().focus() as unknown as Record<
-      string,
-      (value?: string) => { run: () => void }
-    >;
-    const cmd = chain[name];
-    if (typeof cmd === "function") cmd(value).run();
+    if (editor) {
+      const chain = editor.chain().focus() as unknown as Record<
+        string,
+        (value?: string) => { run: () => void }
+      >;
+      const cmd = chain[name];
+      if (typeof cmd === "function") {
+        cmd(value).run();
+        return;
+      }
+    }
+    // Not a Tiptap command — route to the first add-in that declares it. This
+    // covers non-Tiptap actions contributed by external add-ins (e.g. a Help
+    // button that opens a URL) that Tiptap can't express.
+    this.dispatchCommand(name, value);
   };
 
   /** Menu items and the auto-save switch carry their action in `data-event`. */
