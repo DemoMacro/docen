@@ -1,24 +1,27 @@
-import { simhash, hammingDistance, levenshteinNormalized, findBestMatch } from "@nlptools/distance";
+import { hammingDistance, levenshteinNormalized, simhash } from "@nlptools/distance";
 
 import type {
-  JSONContent,
-  DeduplicateOptions,
-  MatchKind,
   Coverage,
-  ParagraphComparison,
-  DocumentResult,
+  DeduplicateOptions,
+  DocumentComparison,
   DuplicateMatch,
-  SentenceInfo,
+  JSONContent,
+  LocalMatch,
+  LocalMatchConfig,
+  MatchKind,
+  ParagraphComparison,
   ParagraphInfo,
+  SentenceInfo,
   SentenceSplitter,
 } from "./types";
+import { DEFAULT_K, DEFAULT_W, winnowLocalMatches, type Fragment } from "./winnowing";
 
 // ---------------------------------------------------------------------------
 // Defaults
 // ---------------------------------------------------------------------------
 
 const DEFAULT_HAMMING_THRESHOLD = 10;
-const DEFAULT_THRESHOLD = 0.6;
+const DEFAULT_SIMILARITY_THRESHOLD = 0.6;
 const DEFAULT_MIN_SENTENCE_LENGTH = 15;
 
 // ---------------------------------------------------------------------------
@@ -26,7 +29,7 @@ const DEFAULT_MIN_SENTENCE_LENGTH = 15;
 // ---------------------------------------------------------------------------
 
 /** Extracts plain text from a Tiptap/ProseMirror JSON node. */
-export function extractTextFromNode(node: JSONContent): string {
+function extractTextFromNode(node: JSONContent): string {
   if (!node) return "";
   if (node.type === "text" && node.text) return node.text;
   if (node.content && Array.isArray(node.content)) {
@@ -84,7 +87,7 @@ export function extractParagraphs(doc: JSONContent): string[] {
 }
 
 /** Splits text into sentences. Chinese-aware. */
-export function splitSentences(text: string): string[] {
+function splitSentences(text: string): string[] {
   return text
     .split(/(?<=[。！？；\n.!?;])/g)
     .map((s) => s.trim())
@@ -95,19 +98,33 @@ export function splitSentences(text: string): string[] {
 // Fingerprinting
 // ---------------------------------------------------------------------------
 
-/** Generates a SimHash fingerprint for a sentence. Returns null for short sentences. */
-export function fingerprintSentence(
-  sentence: string,
-  minLen = DEFAULT_MIN_SENTENCE_LENGTH,
-): bigint | null {
-  if (sentence.length < minLen) return null;
+/** Builds a SimHash fingerprint from character trigrams, skipping text shorter
+ *  than `minLen`. Shared by sentence- and paragraph-level fingerprinting so the
+ *  feature extraction stays in one place. Uses @nlptools/distance's simhash. */
+function simhashTrigrams(text: string, minLen: number): bigint | null {
+  if (text.length < minLen) return null;
   const n = 3;
   const features: string[] = [];
-  for (let i = 0; i <= sentence.length - n; i++) {
-    features.push(sentence.slice(i, i + n));
+  for (let i = 0; i <= text.length - n; i++) {
+    features.push(text.slice(i, i + n));
   }
   if (features.length === 0) return null;
   return simhash(features);
+}
+
+/** Generates a SimHash fingerprint for a sentence. Returns null for short sentences. */
+function fingerprintSentence(
+  sentence: string,
+  minLen = DEFAULT_MIN_SENTENCE_LENGTH,
+): bigint | null {
+  return simhashTrigrams(sentence, minLen);
+}
+
+/** Generates a SimHash fingerprint for a whole paragraph (trigram-based), used
+ *  for O(1) paragraph-pair prescreening before the expensive sentence-level
+ *  matching. Returns null for short paragraphs. */
+function fingerprintParagraph(text: string, minLen = DEFAULT_MIN_SENTENCE_LENGTH): bigint | null {
+  return simhashTrigrams(text, minLen);
 }
 
 // ---------------------------------------------------------------------------
@@ -115,7 +132,7 @@ export function fingerprintSentence(
 // ---------------------------------------------------------------------------
 
 /** Builds paragraph info with sentence-level SimHash fingerprints. */
-export function buildParagraphInfo(
+function buildParagraphInfo(
   text: string,
   index: number,
   splitter: SentenceSplitter = splitSentences,
@@ -126,7 +143,58 @@ export function buildParagraphInfo(
     text: s,
     fingerprint: fingerprintSentence(s, minSentenceLength),
   }));
-  return { text, index, sentences };
+  return {
+    text,
+    index,
+    sentences,
+    fingerprint: fingerprintParagraph(text, minSentenceLength),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Paragraph-pair prescreening
+// ---------------------------------------------------------------------------
+
+/** Cheap O(1) paragraph-pair prescreen using @nlptools/distance's
+ *  hammingDistance. Skips the expensive sentence-level matching when both
+ *  paragraphs carry fingerprints and their SimHash distance exceeds the
+ *  threshold. Short paragraphs (null fingerprint) bypass prescreening and fall
+ *  through to sentence-level comparison. */
+function isParagraphCandidate(
+  fpA: bigint | null,
+  fpB: bigint | null,
+  hammingThreshold: number,
+): boolean {
+  if (fpA === null || fpB === null) return true;
+  return hammingDistance(fpA, fpB) <= hammingThreshold;
+}
+
+// ---------------------------------------------------------------------------
+// Local-match (Winnowing) integration
+// ---------------------------------------------------------------------------
+
+/** Resolves the localMatch option into concrete parameters, or null when
+ *  disabled. Tri-state: omitted/true → defaults, false → off, object → tuned. */
+function resolveLocalMatchConfig(
+  option: boolean | LocalMatchConfig | undefined,
+): { k: number; w: number; minMatch: number } | null {
+  if (option === false) return null;
+  if (option === undefined || option === true) {
+    return { k: DEFAULT_K, w: DEFAULT_W, minMatch: DEFAULT_K + DEFAULT_W - 1 };
+  }
+  const k = option.kgramLength ?? DEFAULT_K;
+  const w = option.windowSize ?? DEFAULT_W;
+  const minMatch = option.minMatchLength ?? k + w - 1;
+  return { k, w, minMatch };
+}
+
+/** Wraps a paragraph-pair fragment (no paragraphIndex) into a public LocalMatch. */
+function toLocalMatch(frag: Fragment, paraA: number, paraB: number): LocalMatch {
+  return {
+    fromDoc1: { paragraphIndex: paraA, start: frag.startA, end: frag.endA, text: frag.text },
+    fromDoc2: { paragraphIndex: paraB, start: frag.startB, end: frag.endB, text: frag.text },
+    length: frag.length,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -143,7 +211,7 @@ export function buildParagraphInfo(
  *
  * No containment fallback — if no sentence-level match is found, coverage is 0.
  */
-export function sentenceCoverage(
+function sentenceCoverage(
   paraA: ParagraphInfo,
   paraB: ParagraphInfo,
   hammingThreshold: number,
@@ -152,7 +220,7 @@ export function sentenceCoverage(
 ): Coverage {
   const sA = paraA.sentences;
   const sB = paraB.sentences;
-  if (sA.length === 0 || sB.length === 0) return { covA: 0, covB: 0 };
+  if (sA.length === 0 || sB.length === 0) return { coverageA: 0, coverageB: 0 };
 
   const matchedB = new Int32Array(sA.length).fill(-1);
   const usedB = new Uint8Array(sB.length);
@@ -194,12 +262,12 @@ export function sentenceCoverage(
   }
 
   const totalMatchCount = matchedB.filter((v) => v >= 0).length;
-  if (totalMatchCount === 0) return { covA: 0, covB: 0 };
+  if (totalMatchCount === 0) return { coverageA: 0, coverageB: 0 };
 
   const matchedInB = new Set(matchedB.filter((v) => v >= 0));
   return {
-    covA: totalMatchCount / sA.length,
-    covB: matchedInB.size / sB.length,
+    coverageA: totalMatchCount / sA.length,
+    coverageB: matchedInB.size / sB.length,
   };
 }
 
@@ -207,13 +275,19 @@ export function sentenceCoverage(
 // Match classification
 // ---------------------------------------------------------------------------
 
-/** Classifies coverage into match kind. */
-export function classifyCoverage(covA: number, covB: number): MatchKind {
-  const maxCov = Math.max(covA, covB);
-  const minCov = Math.min(covA, covB);
+/** Classifies coverage into match kind. `similarityThreshold` is the noise
+ *  floor for partial — defaults to 0.3, but compareDocuments passes the user's
+ *  threshold so the "max >= threshold" contract holds even when it is < 0.3. */
+function classifyCoverage(
+  coverageA: number,
+  coverageB: number,
+  similarityThreshold = 0.3,
+): MatchKind {
+  const maxCov = Math.max(coverageA, coverageB);
+  const minCov = Math.min(coverageA, coverageB);
   if (maxCov >= 0.8) return "contained";
   if (minCov >= 0.6) return "similar";
-  if (maxCov >= 0.3) return "weakOverlap";
+  if (maxCov >= similarityThreshold) return "partial";
   return "none";
 }
 
@@ -241,14 +315,15 @@ export function compareDocuments(
   doc1: JSONContent,
   doc2: JSONContent,
   options: DeduplicateOptions = {},
-): DocumentResult {
+): DocumentComparison {
   const {
-    threshold = DEFAULT_THRESHOLD,
+    similarityThreshold = DEFAULT_SIMILARITY_THRESHOLD,
     hammingThreshold = DEFAULT_HAMMING_THRESHOLD,
-    levenshteinThreshold = DEFAULT_THRESHOLD,
+    levenshteinThreshold = DEFAULT_SIMILARITY_THRESHOLD,
     minSentenceLength = DEFAULT_MIN_SENTENCE_LENGTH,
     splitter = splitSentences,
   } = options;
+  const localMatchCfg = resolveLocalMatchConfig(options.localMatch);
 
   const rawParas1 = extractParagraphs(doc1);
   const rawParas2 = extractParagraphs(doc2);
@@ -264,31 +339,50 @@ export function compareDocuments(
 
   for (const p1 of paras1) {
     let bestMatch: ParagraphInfo | null = null;
-    let bestCoverage: Coverage = { covA: 0, covB: 0 };
+    let bestCoverage: Coverage = { coverageA: 0, coverageB: 0 };
+    // Verbatim fragments gathered across ALL candidate p2 — a copied fragment
+    // can sit in a paragraph that isn't the sentence-coverage best match.
+    const verbatimMatches: LocalMatch[] = [];
 
     for (const p2 of paras2) {
-      const coverage = sentenceCoverage(
-        p1,
-        p2,
-        hammingThreshold,
-        levenshteinThreshold,
-        minFragmentLength,
-      );
-      // Select best match: prioritize higher covA, break ties with covB
+      // Sentence matching is gated by SimHash prescreen (skips O(s²) for far
+      // pairs); Winnowing always runs, since a verbatim copy can sit inside a
+      // SimHash-distant pair that sentence matching would skip entirely.
+      const coverage = isParagraphCandidate(p1.fingerprint, p2.fingerprint, hammingThreshold)
+        ? sentenceCoverage(p1, p2, hammingThreshold, levenshteinThreshold, minFragmentLength)
+        : { coverageA: 0, coverageB: 0 };
+      if (localMatchCfg) {
+        const frags = winnowLocalMatches(
+          p1.text,
+          p2.text,
+          localMatchCfg.k,
+          localMatchCfg.w,
+          localMatchCfg.minMatch,
+        );
+        for (const frag of frags) verbatimMatches.push(toLocalMatch(frag, p1.index, p2.index));
+      }
+      // Select best match: prioritize higher coverageA, break ties with coverageB
       if (
-        coverage.covA > bestCoverage.covA ||
-        (coverage.covA === bestCoverage.covA &&
-          coverage.covA > 0 &&
-          coverage.covB > bestCoverage.covB)
+        coverage.coverageA > bestCoverage.coverageA ||
+        (coverage.coverageA === bestCoverage.coverageA &&
+          coverage.coverageA > 0 &&
+          coverage.coverageB > bestCoverage.coverageB)
       ) {
         bestMatch = p2;
         bestCoverage = coverage;
       }
     }
 
-    const similarity = Math.max(bestCoverage.covA, bestCoverage.covB);
-    const matchKind =
-      similarity < threshold ? "none" : classifyCoverage(bestCoverage.covA, bestCoverage.covB);
+    const similarity = Math.max(bestCoverage.coverageA, bestCoverage.coverageB);
+    // Winnowing upgrade: verbatim fragments surface copied substrings even when
+    // whole-paragraph similarity is below the noise floor (the "a hundred-char
+    // paragraph with a dozen copied characters" case SimHash dilutes).
+    const matchKind: MatchKind =
+      similarity < similarityThreshold
+        ? verbatimMatches.length > 0
+          ? "partial"
+          : "none"
+        : classifyCoverage(bestCoverage.coverageA, bestCoverage.coverageB, similarityThreshold);
 
     paragraphComparisons.push({
       fromDoc1: { index: p1.index, text: p1.text },
@@ -297,6 +391,7 @@ export function compareDocuments(
       coverage: bestCoverage,
       matchKind,
       similarity,
+      verbatimMatches,
     });
   }
 
@@ -304,7 +399,7 @@ export function compareDocuments(
   const coverage =
     totalSentences > 0
       ? paragraphComparisons.reduce(
-          (sum, pc, i) => sum + pc.coverage.covA * paras1[i].sentences.length,
+          (sum, pc, i) => sum + pc.coverage.coverageA * paras1[i].sentences.length,
           0,
         ) / totalSentences
       : 0;
@@ -320,12 +415,13 @@ export function findDuplicates(
   options: DeduplicateOptions = {},
 ): DuplicateMatch[] {
   const {
-    threshold = DEFAULT_THRESHOLD,
+    similarityThreshold = DEFAULT_SIMILARITY_THRESHOLD,
     hammingThreshold = DEFAULT_HAMMING_THRESHOLD,
-    levenshteinThreshold = DEFAULT_THRESHOLD,
+    levenshteinThreshold = DEFAULT_SIMILARITY_THRESHOLD,
     minSentenceLength = DEFAULT_MIN_SENTENCE_LENGTH,
     splitter = splitSentences,
   } = options;
+  const localMatchCfg = resolveLocalMatchConfig(options.localMatch);
 
   const rawParagraphs = extractParagraphs(doc);
   const paras = rawParagraphs.map((text, i) =>
@@ -340,21 +436,44 @@ export function findDuplicates(
     if (processed.has(i)) continue;
 
     const duplicateIndices: number[] = [];
-    const similarities: number[] = [];
+    const similarityScores: number[] = [];
+    const verbatimMatches: LocalMatch[] = [];
 
     for (let j = i + 1; j < paras.length; j++) {
       if (processed.has(j)) continue;
-      const coverage = sentenceCoverage(
-        paras[i],
-        paras[j],
+      // Sentence matching is gated by SimHash prescreen (skips O(s²) for far
+      // pairs); Winnowing always runs so verbatim copies inside SimHash-distant
+      // pairs are still caught.
+      const coverage = isParagraphCandidate(
+        paras[i].fingerprint,
+        paras[j].fingerprint,
         hammingThreshold,
-        levenshteinThreshold,
-        minFragmentLength,
-      );
-      const maxCov = Math.max(coverage.covA, coverage.covB);
-      if (maxCov >= threshold) {
+      )
+        ? sentenceCoverage(
+            paras[i],
+            paras[j],
+            hammingThreshold,
+            levenshteinThreshold,
+            minFragmentLength,
+          )
+        : { coverageA: 0, coverageB: 0 };
+      const frags = localMatchCfg
+        ? winnowLocalMatches(
+            paras[i].text,
+            paras[j].text,
+            localMatchCfg.k,
+            localMatchCfg.w,
+            localMatchCfg.minMatch,
+          )
+        : [];
+      const maxCov = Math.max(coverage.coverageA, coverage.coverageB);
+      // A pair counts as duplicate when sentence-level similarity clears the
+      // threshold OR a verbatim fragment survives (Winnowing — copied text
+      // inside otherwise-different paragraphs).
+      if (maxCov >= similarityThreshold || frags.length > 0) {
         duplicateIndices.push(j);
-        similarities.push(maxCov);
+        similarityScores.push(maxCov);
+        for (const frag of frags) verbatimMatches.push(toLocalMatch(frag, i, j));
         processed.add(j);
       }
     }
@@ -363,8 +482,9 @@ export function findDuplicates(
       matches.push({
         index: i,
         text: rawParagraphs[i],
-        duplicates: duplicateIndices,
-        similarities,
+        duplicateIndices,
+        similarityScores,
+        verbatimMatches,
       });
       processed.add(i);
     }
@@ -372,9 +492,3 @@ export function findDuplicates(
 
   return matches;
 }
-
-// ---------------------------------------------------------------------------
-// Re-exports
-// ---------------------------------------------------------------------------
-
-export { findBestMatch };

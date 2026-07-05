@@ -7,7 +7,7 @@ export type { JSONContent };
 // ---------------------------------------------------------------------------
 
 /** Classification of text similarity relationship. */
-export type MatchKind = "contained" | "similar" | "weakOverlap" | "none";
+export type MatchKind = "contained" | "similar" | "partial" | "none";
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -16,10 +16,20 @@ export type MatchKind = "contained" | "similar" | "weakOverlap" | "none";
 /** Sentence splitter function. */
 export type SentenceSplitter = (text: string) => string[];
 
+/** Tuning for verbatim local-match (Winnowing). */
+export interface LocalMatchConfig {
+  /** k-gram length — noise floor; matches shorter than this are invisible. @default 10 */
+  kgramLength?: number;
+  /** Winnowing window size; guarantee threshold t = kgramLength + windowSize - 1. @default 6 */
+  windowSize?: number;
+  /** Minimum reported fragment length. @default kgramLength + windowSize - 1 (the guarantee threshold) */
+  minMatchLength?: number;
+}
+
 /** Configuration options for deduplication. */
 export interface DeduplicateOptions {
-  /** Minimum similarity threshold (0-1) for duplicate detection. @default 0.6 */
-  threshold?: number;
+  /** Minimum similarity (0-1) for duplicate detection. @default 0.6 */
+  similarityThreshold?: number;
   /** SimHash hamming distance threshold for candidate screening. @default 10 */
   hammingThreshold?: number;
   /** Levenshtein similarity threshold for fine-grained verification. @default 0.6 */
@@ -28,6 +38,15 @@ export interface DeduplicateOptions {
   minSentenceLength?: number;
   /** Custom sentence splitter. @default splitSentences (Chinese & English aware) */
   splitter?: SentenceSplitter;
+  /**
+   * Verbatim local-match (Winnowing) — catches copied fragments inside
+   * dissimilar text that whole-paragraph SimHash dilutes (the "a hundred-char
+   * paragraph with a dozen copied characters" case). Pass `false` to disable,
+   * or a {@link LocalMatchConfig} to tune; default enabled (k=10, w=6 ⇒ 15-char
+   * guarantee).
+   * @default true
+   */
+  localMatch?: boolean | LocalMatchConfig;
 }
 
 // ---------------------------------------------------------------------------
@@ -45,6 +64,8 @@ export interface ParagraphInfo {
   text: string;
   index: number;
   sentences: SentenceInfo[];
+  /** Paragraph-level SimHash for O(1) pair prescreening. Null if too short. */
+  fingerprint: bigint | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -53,10 +74,10 @@ export interface ParagraphInfo {
 
 /** Bidirectional coverage between two paragraphs. */
 export interface Coverage {
-  /** Proportion of paragraph A's sentences matched in B (0-1) */
-  covA: number;
-  /** Proportion of paragraph B's sentences matched in A (0-1) */
-  covB: number;
+  /** Proportion of document 1's sentences matched in document 2 (0-1) */
+  coverageA: number;
+  /** Proportion of document 2's sentences matched in document 1 (0-1) */
+  coverageB: number;
 }
 
 /** Paragraph-level comparison result between two documents. */
@@ -69,15 +90,20 @@ export interface ParagraphComparison {
   coverage: Coverage;
   /** Classification of the relationship */
   matchKind: MatchKind;
-  /** Overall similarity score (max of covA, covB) */
+  /** Overall similarity score (max of coverageA, coverageB) */
   similarity: number;
+  /** Verbatim overlap fragments (Winnowing) located in both paragraphs. Empty
+   *  when none found or local-match disabled. Present whenever a copied
+   *  substring of `kgramLength + windowSize − 1`+ chars survives inside an
+   *  otherwise-dissimilar pair, even if sentence-level coverage is 0. */
+  verbatimMatches: LocalMatch[];
 }
 
 /** Document-level comparison result. */
-export interface DocumentResult {
+export interface DocumentComparison {
   /** Per-paragraph comparison details */
   paragraphs: ParagraphComparison[];
-  /** Overall document coverage (average of paragraph covA) */
+  /** Overall document coverage (weighted average of paragraph coverageA) */
   coverage: number;
 }
 
@@ -88,7 +114,37 @@ export interface DuplicateMatch {
   /** The paragraph text */
   text: string;
   /** Indices of all duplicate occurrences */
-  duplicates: number[];
-  /** Similarity scores for each duplicate */
-  similarities: number[];
+  duplicateIndices: number[];
+  /** Similarity score for each duplicate (parallel to duplicateIndices) */
+  similarityScores: number[];
+  /** All verbatim overlap fragments (Winnowing) between this paragraph and its
+   *  duplicates. Empty when none found or local-match disabled. */
+  verbatimMatches: LocalMatch[];
+}
+
+// ---------------------------------------------------------------------------
+// Local match (Winnowing) — public result types. The fingerprint and engine
+// internals live in winnowing.ts; only the located-fragment results are public.
+// ---------------------------------------------------------------------------
+
+/** A located text fragment within a source document. */
+export interface TextSpan {
+  /** Paragraph index in the source document. */
+  paragraphIndex: number;
+  /** Char offset where the match starts within the paragraph. */
+  start: number;
+  /** Char offset where the match ends (exclusive). */
+  end: number;
+  /** The matched substring. */
+  text: string;
+}
+
+/** A verbatim overlap between two documents (length >= minMatchLength). */
+export interface LocalMatch {
+  /** Match location in document 1. */
+  fromDoc1: TextSpan;
+  /** Match location in document 2. */
+  fromDoc2: TextSpan;
+  /** Length of the matched substring (characters). */
+  length: number;
 }
