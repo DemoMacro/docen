@@ -94,6 +94,9 @@ export const DocenDocument = defineComponent({
      *  every label re-resolves. Internal changes (status-bar cycle, Options
      *  OK) surface via `lang-change`. */
     lang: { type: String, default: undefined },
+    /** Debounce (ms) for the modelValue emit on editor change. 0 = emit
+     *  synchronously on each change (suitable for tests). @default 300 */
+    debounce: { type: Number, default: 300 },
   },
   emits: [
     "update:modelValue",
@@ -153,7 +156,11 @@ export const DocenDocument = defineComponent({
     // modelValue, the watch sees the same reference and skips re-injecting.
     const lastEmitted = shallowRef<JSONContent | undefined>(undefined);
     let emitTimer: ReturnType<typeof setTimeout> | undefined;
-    const EMIT_DEBOUNCE_MS = 300;
+    // True while applying a modelValue ourselves (onReady seed + watch setJSON)
+    // — suppresses the change→emit round-trip so the parent's initial reference
+    // isn't replaced and our own injection doesn't echo back. Cleared after the
+    // pagination reflow that follows a load settles (a couple of frames).
+    let suppressEmit = false;
 
     watch(
       () => props.modelValue,
@@ -207,24 +214,39 @@ export const DocenDocument = defineComponent({
       const host = el.value;
       editor.value = host?.editor;
       // Seed initial content via setJSON (not the content attribute) so a
-      // modelValue carrying doc.attrs.styles is applied properly.
-      if (props.modelValue != null) host?.setJSON?.(props.modelValue);
+      // modelValue carrying doc.attrs.styles is applied properly. Suppress the
+      // follow-on change emit — the parent passed this content, no need to emit
+      // it back and replace the parent's initial reference. rAF×2 covers the
+      // pagination reflow that follows a load (dispatched on subsequent frames).
+      if (props.modelValue != null) {
+        suppressEmit = true;
+        host?.setJSON?.(props.modelValue);
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => {
+            suppressEmit = false;
+          }),
+        );
+      }
     }
 
     function onChange(e: Event): void {
       emit("change", (e as CustomEvent).detail);
+      if (suppressEmit) return; // our own injection — don't echo back to parent
       // Debounce getJSON: a DOCX import triggers many docen:change events as
       // pagination reflows; one getJSON per quiet window instead of one per
       // transaction (getJSON is O(n) on large docs).
-      clearTimeout(emitTimer);
-      emitTimer = setTimeout(() => {
+      const emitJSON = (): void => {
         const host = el.value;
         const json = host?.getJSON?.();
         if (!json) return;
         const raw = markRaw(json) as JSONContent;
         lastEmitted.value = raw;
         emit("update:modelValue", raw);
-      }, EMIT_DEBOUNCE_MS);
+      };
+      clearTimeout(emitTimer);
+      if (props.debounce <= 0)
+        emitJSON(); // synchronous (tests)
+      else emitTimer = setTimeout(emitJSON, props.debounce);
     }
 
     onBeforeUnmount(() => clearTimeout(emitTimer));

@@ -88,16 +88,18 @@ $ pnpm add @docen/vue
 ```vue
 <script setup lang="ts">
 import { ref } from "vue";
+import type { JSONContent } from "@docen/docx";
 import { DocenDocument } from "@docen/vue";
 import { parseDOCX } from "@docen/docx";
 
-// v-model keeps content in sync; the template ref exposes the Tiptap editor.
-const content = ref("<p>Hello</p>");
+// v-model carries Tiptap JSON; the template ref exposes the Tiptap editor
+// plus a getJSON/setJSON pair.
+const content = ref<JSONContent>({ type: "doc", content: [{ type: "paragraph" }] });
 const editorRef = ref();
 
 async function open(file: File) {
   const json = await parseDOCX(await file.arrayBuffer());
-  editorRef.value?.editor?.commands.setContent(json);
+  editorRef.value?.setJSON(json); // preserves doc.attrs.styles
 }
 </script>
 

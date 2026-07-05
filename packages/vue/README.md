@@ -21,16 +21,20 @@ pnpm add @docen/vue
 ```vue
 <script setup lang="ts">
 import { ref } from "vue";
+import type { JSONContent } from "@docen/docx";
 import { DocenDocument } from "@docen/vue";
 import { parseDOCX } from "@docen/docx";
 
-// v-model keeps content in sync; the template ref exposes the Tiptap editor.
-const content = ref("<p>Hello</p>");
+// v-model carries Tiptap JSON (page nodes unwrapped); the template ref
+// exposes the Tiptap editor plus a getJSON/setJSON pair.
+const content = ref<JSONContent>({ type: "doc", content: [{ type: "paragraph" }] });
 const editorRef = ref();
 
 async function open(file: File) {
   const json = await parseDOCX(await file.arrayBuffer());
-  editorRef.value?.editor?.commands.setContent(json);
+  // setJSON routes through the host loader so doc.attrs.styles survive —
+  // editor.commands.setContent would drop them.
+  editorRef.value?.setJSON(json);
 }
 </script>
 
@@ -49,33 +53,34 @@ Reaching the editor without a ref — via the default slot scope:
 
 ## v-model
 
-`v-model` binds the document content as HTML:
+`v-model` binds the document content as Tiptap JSON (page nodes unwrapped — the public model is a flat `doc > block+`; the editor repackages it into C-route pages internally):
 
-- Setting `modelValue` calls `editor.commands.setContent(html)` (skipped when the editor already holds that HTML).
-- Every editor change emits `update:modelValue` with `editor.getHTML()`.
+- Setting `modelValue` calls `host.setJSON(json)`, which routes through the host's loader (a fresh `EditorState`) so document-level attrs (`styles`, `core`, `sectionProperties`) survive — `editor.commands.setContent` would drop them. The set is skipped when `modelValue` is the same reference the adapter just emitted (round-trip echo break).
+- Every editor change emits `update:modelValue` with `host.getJSON()`, debounced by the `debounce` prop (default 300 ms; 0 = synchronous). A DOCX import triggers many change events as pagination reflows — one `getJSON` per quiet window instead of one per transaction.
 
-The initial value also seeds the editor on connect (via the `content` attribute).
+The initial `modelValue` seeds the editor on `docen:ready` via `host.setJSON` (not the `content` attribute, which would re-serialize a large string and lose doc-level attrs).
 
 ## Props
 
 Mirror the `<docen-document>` attributes. Pass `undefined` to leave an attribute unset (the web component's default applies).
 
-| Prop                | Type    | Attribute            | Notes                                     |
-| ------------------- | ------- | -------------------- | ----------------------------------------- |
-| `modelValue`        | string  | `content` (v-model)  | Document HTML; two-way                    |
-| `filename`          | string  | `filename`           |                                           |
-| `editable`          | boolean | `editable`           |                                           |
-| `spellcheck`        | boolean | `spellcheck`         |                                           |
-| `user` / `avatar`   | string  | `user` / `avatar`    | Identity in the header                    |
-| `sectionProperties` | object  | `section-properties` | JSON page setup (size/margin/orientation) |
-| `styles`            | object  | `styles`             | JSON named-styles model                   |
-| `addins`            | array   | `addins`             | JSON external add-ins (ribbon/task-pane)  |
-| `theme`             | string  | `theme`              | Fluent built-in key; reactive             |
-| `navigationPane`    | boolean | `navigation-pane`    | Initial nav-pane visibility (once)        |
-| `propertiesPane`    | boolean | `properties-pane`    | Initial properties-pane visibility (once) |
-| `zoom`              | number  | `zoom`               | Initial zoom percent (once)               |
-| `showMarks`         | boolean | `show-marks`         | Initial marks visibility (once)           |
-| `lang`              | string  | `lang`               | BCP-47 UI locale; per-instance, reactive  |
+| Prop                | Type    | Attribute            | Notes                                       |
+| ------------------- | ------- | -------------------- | ------------------------------------------- |
+| `modelValue`        | object  | — (setJSON)          | Tiptap JSON (page nodes unwrapped); two-way |
+| `debounce`          | number  | —                    | Emit debounce ms (default 300; 0 = sync)    |
+| `filename`          | string  | `filename`           |                                             |
+| `editable`          | boolean | `editable`           |                                             |
+| `spellcheck`        | boolean | `spellcheck`         |                                             |
+| `user` / `avatar`   | string  | `user` / `avatar`    | Identity in the header                      |
+| `sectionProperties` | object  | `section-properties` | JSON page setup (size/margin/orientation)   |
+| `styles`            | object  | `styles`             | JSON named-styles model                     |
+| `addins`            | array   | `addins`             | JSON external add-ins (ribbon/task-pane)    |
+| `theme`             | string  | `theme`              | Fluent built-in key; reactive               |
+| `navigationPane`    | boolean | `navigation-pane`    | Initial nav-pane visibility (once)          |
+| `propertiesPane`    | boolean | `properties-pane`    | Initial properties-pane visibility (once)   |
+| `zoom`              | number  | `zoom`               | Initial zoom percent (once)                 |
+| `showMarks`         | boolean | `show-marks`         | Initial marks visibility (once)             |
+| `lang`              | string  | `lang`               | BCP-47 UI locale; per-instance, reactive    |
 
 ## Events
 
@@ -89,7 +94,7 @@ Re-emitted from the web component's `docen:*` events:
 
 ## Template ref
 
-The ref exposes `{ editor, getElement(), getDisplayLanguage() }`, where `editor` is the Tiptap `Editor` (undefined until the editor is live) and `getDisplayLanguage()` returns the current UI locale (`Office.context.displayLanguage` equivalent).
+The ref exposes `{ editor, getElement(), getDisplayLanguage(), getJSON(), setJSON(json) }`, where `editor` is the Tiptap `Editor` (undefined until the editor is live). `getJSON()/setJSON()` mirror the host's page-unwrapping loaders; `getDisplayLanguage()` returns the current UI locale (`Office.context.displayLanguage` equivalent).
 
 ## Internationalization
 

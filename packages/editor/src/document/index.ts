@@ -20,8 +20,8 @@ import {
 } from "@docen/docx";
 import type { Editor } from "@docen/docx/core";
 import { attr, css, customElement, html } from "@microsoft/fast-element";
-import type { Mark } from "@tiptap/pm/model";
-import { EditorState } from "@tiptap/pm/state";
+import type { Mark, Node } from "@tiptap/pm/model";
+import { EditorState, type Transaction } from "@tiptap/pm/state";
 import {
   findNext,
   findPrev,
@@ -60,7 +60,7 @@ import {
   getMiniToolbar,
 } from "./extensions/mini-toolbar";
 import type { OutlineAnchor } from "./extensions/outline";
-import { pageStorageOf } from "./extensions/page-plugin";
+import { flowKey, pageStorageOf } from "./extensions/page-plugin";
 import { renderRibbonFromSchema, ribbonActions, ribbonTabs } from "./ribbon";
 import { fontNormalRatio } from "./utils/font-metric";
 import { clearMeasureCache } from "./utils/measure";
@@ -780,6 +780,16 @@ class DocenDocument extends AddinHost<Editor> {
    *  every page node each keystroke. */
   #statusDoc?: unknown;
   #pageBounds?: ReadonlyArray<{ offset: number; size: number; section: number }>;
+  /** Cached unwrapped JSON (host.getJSON result). Invalidated on every user/doc
+   *  change; recomputed lazily. Saves the double O(n) walk (editor.getJSON +
+   *  unwrapPages) on every save/autosave/getJSON call. Reflow transactions
+   *  (flowKey meta) don't invalidate — they re-pack page nodes only, so the
+   *  unwrapped flat doc is unchanged. */
+  #cachedJSON?: JSONContent;
+  #jsonDirty = true;
+  /** Memoized stylesToCss output keyed by the styles object reference, so a
+   *  repeated setJSON/open with the same styles skips regenerating the CSS. */
+  #stylesCssCache = new WeakMap<StylesOptions, string>();
 
   /** The underlying Tiptap Editor (undefined before connect / after disconnect).
    *  Exposed so a host (the @docen/vue adapter, or any parent element) can drive
@@ -1702,8 +1712,16 @@ class DocenDocument extends AddinHost<Editor> {
   /** docen:change — fired on every doc-changing transaction (autosave driver,
    *  mirroring OnlyOffice's onDocumentStateChange). Selection-only transactions
    *  are skipped. */
-  readonly #onTransaction = (props: { transaction: { docChanged: boolean } }): void => {
-    if (props.transaction.docChanged) {
+  readonly #onTransaction = (props: { editor: Editor; transaction: Transaction }): void => {
+    // Pagination reflow carries the flowKey meta — a physical re-pack of
+    // content into editor-only page nodes. host.getJSON unwraps pages, so the
+    // flat doc is unchanged: don't emit docen:change or invalidate the JSON
+    // cache for it. Without this a load (many reflow dispatches) starves
+    // consumers with no-op events. ProseMirror convention: a plugin tags its
+    // own transactions via its PluginKey meta.
+    const tr = props.transaction;
+    if (tr.docChanged && !tr.getMeta(flowKey)) {
+      this.#jsonDirty = true;
       this.dispatchEvent(
         new CustomEvent("docen:change", { bubbles: true, composed: true, detail: { dirty: true } }),
       );
@@ -2441,28 +2459,32 @@ class DocenDocument extends AddinHost<Editor> {
 
   /** Serialize the current document to a DOCX buffer. */
   async saveDOCX(): Promise<Uint8Array> {
-    const json = unwrapPages(this.#editor!.getJSON() as JSONContent);
-    const buffer = await generateDOCX(json);
+    const buffer = await generateDOCX(this.getJSON());
     return buffer as unknown as Uint8Array;
   }
 
   /** Serialize the current document to a Markdown string. */
   saveMarkdown(): string {
-    return generateMarkdown(unwrapPages(this.#editor!.getJSON() as JSONContent));
+    return generateMarkdown(this.getJSON());
   }
 
   /** Serialize the current document to an HTML body fragment (no
    *  <html>/<!DOCTYPE> wrapper — #saveAs wraps it for a standalone file). */
   saveHTML(): string {
-    return generateHTML(unwrapPages(this.#editor!.getJSON() as JSONContent));
+    return generateHTML(this.getJSON());
   }
 
-  /** Current document as Tiptap JSON. */
+  /** Current document as Tiptap JSON. Cached — recomputed only after a doc
+   *  change (see #onTransaction). Page nodes are unwrapped so external
+   *  consumers see flat doc > block+ (page nodes are editor-only). */
   getJSON(): JSONContent {
-    // Unwrap page nodes — external consumers see flat doc > block+ (page
-    // nodes are editor-only; transparent in the public API).
     const editor = this.#editor;
-    return editor ? unwrapPages(editor.getJSON()) : ({} as JSONContent);
+    if (!editor) return {} as JSONContent;
+    if (this.#jsonDirty || this.#cachedJSON === undefined) {
+      this.#cachedJSON = unwrapPages(editor.getJSON());
+      this.#jsonDirty = false;
+    }
+    return this.#cachedJSON;
   }
 
   /** Replace the document with Tiptap JSON. */
@@ -2496,6 +2518,8 @@ class DocenDocument extends AddinHost<Editor> {
     // Reset per-document image caches so a prior doc's decoded sizes / failed
     // fetches neither leak nor suppress a legit re-fetch in the new document.
     clearImageCapCache();
+    // New document — invalidate the unwrapped-JSON cache.
+    this.#jsonDirty = true;
     editor.view.updateState(
       EditorState.create({ doc: editor.schema.nodeFromJSON(doc), plugins: editor.state.plugins }),
     );
@@ -2510,23 +2534,30 @@ class DocenDocument extends AddinHost<Editor> {
     // its attrs, which is how the first heading lost its styleId (and with it
     // its Heading1 bold/centering) on load.
     const state = editor.state;
-    // Collect leaf blocks; the last one (deepest, rightmost) is the re-stamp
-    // target. A const array (mutated, not reassigned) keeps TS's control-flow
-    // analysis happy — a `let` reassigned inside the callback reads as `never`
-    // outside it (TS can't see the callback runs synchronously).
-    const leaves: { pos: number; attrs: Record<string, unknown> }[] = [];
-    state.doc.nodesBetween(0, state.doc.content.size, (node, pos) => {
+    // Last textblock/leaf block (deepest, rightmost) for the re-stamp — found
+    // by descending the rightmost-child chain (O(depth)) instead of a full
+    // nodesBetween scan (O(n)).
+    const last = this.#lastMarkupTarget(state.doc);
+    if (last) {
+      editor.view.dispatch(state.tr.setNodeMarkup(last.pos, undefined, last.attrs));
+    }
+  }
+
+  /** Last textblock/leaf block (deepest, rightmost) for the #loadDoc re-stamp
+   *  hack — the re-stamp target that sidesteps the page node's `isolating`
+   *  boundary. nodesBetween is O(n) but runs only on load (setJSON/openDOCX),
+   *  not per edit, so the walk cost is amortized over the load itself. */
+  #lastMarkupTarget(doc: Node): { pos: number; attrs: Record<string, unknown> } | null {
+    let last: { pos: number; attrs: Record<string, unknown> } | null = null;
+    doc.nodesBetween(0, doc.content.size, (node, pos) => {
       if (node.isText) return;
       if (node.isTextblock || node.isLeaf) {
-        leaves.push({ pos, attrs: node.attrs as Record<string, unknown> });
+        last = { pos, attrs: node.attrs as Record<string, unknown> };
       }
       // Don't descend into textblocks (their text isn't a markup target).
       return node.isTextblock ? false : undefined;
     });
-    const last = leaves[leaves.length - 1];
-    if (last) {
-      editor.view.dispatch(state.tr.setNodeMarkup(last.pos, undefined, last.attrs));
-    }
+    return last;
   }
 
   /** Inject the document's named styles (styles.xml) as scoped CSS so imported
@@ -2540,7 +2571,13 @@ class DocenDocument extends AddinHost<Editor> {
   #injectDocStyles(styles: StylesOptions | null | undefined): void {
     const root = this.shadowRoot;
     if (!root) return;
-    const css = stylesToCss(styles, ".docen-page");
+    // Memo on the styles object reference — repeated loads with the same
+    // styles (the common case) skip regenerating the CSS string.
+    let css: string | undefined = styles ? this.#stylesCssCache.get(styles) : undefined;
+    if (css === undefined) {
+      css = stylesToCss(styles, ".docen-page");
+      if (styles) this.#stylesCssCache.set(styles, css);
+    }
     const existing = root.querySelector("#docen-doc-styles");
     if (css) {
       const styleEl = (existing ?? document.createElement("style")) as HTMLStyleElement;

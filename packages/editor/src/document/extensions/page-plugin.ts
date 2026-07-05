@@ -22,8 +22,11 @@ import { resolvePageSize } from "./page-node";
 import { cloneHeaderRows } from "./split-table";
 
 /** Plugin key marking a re-flow transaction (so the update listener can tell
- *  a user edit from our own regrouping). */
-const flowKey = new PluginKey("pageFlow");
+ *  a user edit from our own regrouping). Exported so the host's change emitter
+ *  can skip reflow transactions — they re-pack content into editor-only page
+ *  nodes, so the flat doc (host.getJSON) is unchanged. ProseMirror convention:
+ *  a plugin tags its own transactions via its PluginKey meta. */
+export const flowKey = new PluginKey("pageFlow");
 
 export interface PagePluginOptions {
   /** Debounce (ms) before re-flowing after an edit. Default 300. */
