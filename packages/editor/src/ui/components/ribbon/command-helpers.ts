@@ -88,3 +88,39 @@ export function suppressTooltipWhileMenuOpen(
     delete (tooltip as { showPopover?: () => void }).showPopover;
   };
 }
+
+/** A menu item's renderable shape (the shared subset of every ribbon/context
+ *  menu item type — command routing fields stay on the caller's own type). */
+interface MenuItemLike {
+  text: string;
+  checked?: boolean;
+  disabled?: boolean;
+}
+
+/** Append `items` as `<fluent-menu-item>`s into `list`, replacing its children.
+ *  A `change` on any item routes to `onSelect(item)`. `checked` items render as
+ *  `role="menuitemradio"` with Fluent's own checkmark; plain items stay
+ *  `menuitem`. Every item gets `data-indent="0"` so a plain-text label spans the
+ *  full row — without it Fluent pins the content to the fixed-width indicator
+ *  track and clips long labels (see the registry's fluent-menu-item override). */
+export function appendMenuItems<T extends MenuItemLike>(
+  list: HTMLElement,
+  items: readonly T[],
+  onSelect: (item: T) => void,
+): void {
+  list.replaceChildren();
+  for (const item of items) {
+    const menuItem = document.createElement("fluent-menu-item");
+    if (item.checked) {
+      menuItem.setAttribute("role", "menuitemradio");
+      menuItem.setAttribute("checked", "");
+    } else {
+      menuItem.setAttribute("role", "menuitem");
+    }
+    menuItem.setAttribute("data-indent", "0");
+    menuItem.textContent = item.text;
+    if (item.disabled) menuItem.setAttribute("disabled", "");
+    menuItem.addEventListener("change", () => onSelect(item));
+    list.append(menuItem);
+  }
+}

@@ -8,7 +8,12 @@ import {
   ref,
 } from "@microsoft/fast-element";
 
-import { COMMAND_HOST_STYLE, renderIcon, suppressTooltipWhileMenuOpen } from "./command-helpers";
+import {
+  COMMAND_HOST_STYLE,
+  appendMenuItems,
+  renderIcon,
+  suppressTooltipWhileMenuOpen,
+} from "./command-helpers";
 
 export interface RibbonMenuItem {
   text: string;
@@ -139,24 +144,7 @@ class DocenRibbonMenu extends FASTElement {
   }
 
   private renderItems(): void {
-    if (!this.list) return;
-    this.list.replaceChildren();
-    for (const item of this.parsedItems) {
-      const menuItem = document.createElement("fluent-menu-item");
-      // A checked item is a mutually-exclusive mode pick (Edit/View) —
-      // role="menuitemradio" + the `checked` attr renders Fluent's own
-      // checkmark (no custom ::before). Plain items stay role="menuitem".
-      if (item.checked) {
-        menuItem.setAttribute("role", "menuitemradio");
-        menuItem.setAttribute("checked", "");
-      } else {
-        menuItem.setAttribute("role", "menuitem");
-      }
-      menuItem.textContent = item.text;
-      if (item.disabled) menuItem.setAttribute("disabled", "");
-      menuItem.addEventListener("change", () => this.emit(item));
-      this.list.append(menuItem);
-    }
+    if (this.list) appendMenuItems(this.list, this.parsedItems, (item) => this.emit(item));
   }
 
   private emit(item: RibbonMenuItem): void {

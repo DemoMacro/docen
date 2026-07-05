@@ -8,7 +8,12 @@ import {
   ref,
 } from "@microsoft/fast-element";
 
-import { COMMAND_HOST_STYLE, renderIcon, suppressTooltipWhileMenuOpen } from "./command-helpers";
+import {
+  COMMAND_HOST_STYLE,
+  appendMenuItems,
+  renderIcon,
+  suppressTooltipWhileMenuOpen,
+} from "./command-helpers";
 import type { RibbonMenuItem } from "./ribbon-menu";
 
 // Per-instance CSS anchor name so each split's dropdown aligns to its own
@@ -236,18 +241,7 @@ class DocenRibbonSplitButton extends FASTElement {
   }
 
   private renderItems(): void {
-    if (!this.list) return;
-    this.list.replaceChildren();
-    for (const item of this.parsedItems) {
-      const menuItem = document.createElement("fluent-menu-item");
-      menuItem.setAttribute("role", "menuitem");
-      menuItem.setAttribute("data-indent", "0");
-      menuItem.setAttribute("data-fg-ati", "0");
-      menuItem.textContent = item.text;
-      if (item.disabled) menuItem.setAttribute("disabled", "");
-      menuItem.addEventListener("change", () => this.emitItem(item));
-      this.list.append(menuItem);
-    }
+    if (this.list) appendMenuItems(this.list, this.parsedItems, (item) => this.emitItem(item));
   }
 
   private readonly onPrimaryClick = (event: Event): void => {

@@ -6,9 +6,16 @@ import {
   html,
   observable,
   ref,
+  repeat,
 } from "@microsoft/fast-element";
 
 import { availableLanguages, observeLang, resolveLang, t } from "../../i18n/localize";
+import type { LanguageOption } from "../../i18n/localize";
+
+// Per-instance CSS anchor name so the dropdown's listbox popover floats under
+// its own control — without it, Fluent's default strands the popover at the
+// viewport corner (same race as <docen-ribbon-combobox>).
+let seq = 0;
 
 const styles = css`
   :host {
@@ -19,33 +26,64 @@ const styles = css`
   }
   .opt-body {
     padding: 8px 4px 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
   }
   .opt-heading {
     font-weight: 600;
-    margin-block-end: 8px;
   }
-  /* Native <select> — dependency-free and accessible; Office's language picker
-     is a plain dropdown too. Styled against the docen token palette so it
-     tracks light/dark along with the rest of the shell. */
-  .opt-lang-select {
+  fluent-dropdown {
     width: 100%;
-    padding: 6px 8px;
-    border: 1px solid var(--docen-color-stroke-1, #c7c7c7);
-    border-radius: 4px;
-    background: var(--docen-color-background-1, #fff);
-    color: var(--docen-color-text-1, #242424);
-    font-size: 13px;
-    font-family: inherit;
-    cursor: pointer;
+    min-width: 0;
   }
+  input {
+    width: 100%;
+    box-sizing: border-box;
+  }
+`;
+
+const optionTemplate = html<LanguageOption, DocenOptionsDialog>`
+  <fluent-option value="${(o) => o.languageTag}">${(o) => o.$name ?? o.languageTag}</fluent-option>
 `;
 
 const template = html<DocenOptionsDialog>`
   <docen-dialog ${ref("dialogEl")}>
-    <div class="opt-body" ${ref("contentEl")}></div>
+    <div class="opt-body">
+      <div class="opt-heading" ${ref("headingEl")}></div>
+      <fluent-dropdown
+        type="combobox"
+        appearance="outline"
+        part="dropdown"
+        ${ref("dropdown")}
+        @change="${(x) => x.onLangChange()}"
+      >
+        <fluent-listbox popover="manual" tabindex="-1" part="listbox" ${ref("listbox")}>
+          ${repeat((x) => x.languages, optionTemplate)}
+        </fluent-listbox>
+        <input
+          slot="control"
+          role="combobox"
+          aria-haspopup="listbox"
+          type="combobox"
+          part="input"
+          size="1"
+          style="width:100%;box-sizing:border-box"
+          ${ref("input")}
+        />
+      </fluent-dropdown>
+    </div>
     <div slot="action" class="opt-actions">
-      <fluent-button appearance="stealth" ${ref("cancelBtn")}></fluent-button>
-      <fluent-button appearance="accent" ${ref("okBtn")}></fluent-button>
+      <fluent-button
+        appearance="stealth"
+        ${ref("cancelBtn")}
+        @click="${(x) => x.hide()}"
+      ></fluent-button>
+      <fluent-button
+        appearance="accent"
+        ${ref("okBtn")}
+        @click="${(x) => x.onOk()}"
+      ></fluent-button>
     </div>
   </docen-dialog>
 `;
@@ -59,9 +97,10 @@ const template = html<DocenOptionsDialog>`
  * for `options:ok { lang }` (确定). Cancel / Esc just close. State commits
  * atomically on OK (Office behavior — not live).
  *
- * The language list is data-driven: {@link availableLanguages} reads every
- * registered tag, so a new locale added via `registerTranslation` (or an
- * add-in's `localizationInfo`) appears here with no further wiring.
+ * The picker is a `<fluent-dropdown type="combobox">` — typeable, so a long
+ * locale list can be searched — over {@link availableLanguages}, so a new locale
+ * added via `registerTranslation` (or an add-in's `localizationInfo`) appears
+ * here with no further wiring.
  */
 @customElement({ name: "docen-options-dialog", template, styles })
 class DocenOptionsDialog extends FASTElement {
@@ -70,20 +109,33 @@ class DocenOptionsDialog extends FASTElement {
   @attr locale?: string;
 
   @observable dialogEl?: HTMLElement & { heading?: string; show(): void; hide(): void };
-  @observable contentEl?: HTMLElement;
+  @observable headingEl?: HTMLElement;
+  @observable dropdown?: HTMLElement;
+  @observable listbox?: HTMLElement;
+  @observable input?: HTMLInputElement;
   @observable okBtn?: HTMLElement;
   @observable cancelBtn?: HTMLElement;
+  /** Pickable locales — refreshed when a locale is registered at runtime. */
+  @observable languages: readonly LanguageOption[] = availableLanguages();
+
+  readonly popoverId = `opt-lang-${++seq}`;
+  readonly popoverAnchor = `--${this.popoverId}`;
+
   #unobserveLang?: () => void;
   #langLocal = "";
 
   connectedCallback(): void {
     super.connectedCallback();
-    this.#renderLanguage();
     this.#applyLabels();
-    this.okBtn?.addEventListener("click", this.#onOk);
-    this.cancelBtn?.addEventListener("click", this.#onCancel);
+    // CSS Anchor Positioning: pin the listbox popover to this dropdown.
+    if (this.listbox) {
+      this.listbox.id = this.popoverId;
+      this.listbox.style.positionAnchor = this.popoverAnchor;
+    }
+    if (this.input) this.input.setAttribute("aria-controls", this.popoverId);
+    if (this.dropdown) this.dropdown.style.anchorName = this.popoverAnchor;
     this.#unobserveLang = observeLang(() => {
-      this.#renderLanguage();
+      this.languages = availableLanguages();
       this.#applyLabels();
     });
   }
@@ -91,14 +143,12 @@ class DocenOptionsDialog extends FASTElement {
   disconnectedCallback(): void {
     this.#unobserveLang?.();
     this.#unobserveLang = undefined;
-    this.okBtn?.removeEventListener("click", this.#onOk);
-    this.cancelBtn?.removeEventListener("click", this.#onCancel);
     super.disconnectedCallback();
   }
 
   show(): void {
     this.#langLocal = this.locale ?? resolveLang(this);
-    this.#renderLanguage();
+    this.#syncSelection();
     this.dialogEl?.show();
   }
 
@@ -106,7 +156,7 @@ class DocenOptionsDialog extends FASTElement {
     this.dialogEl?.hide();
   }
 
-  readonly #onOk = (): void => {
+  readonly onOk = (): void => {
     this.dispatchEvent(
       new CustomEvent("options:ok", {
         bubbles: true,
@@ -117,41 +167,47 @@ class DocenOptionsDialog extends FASTElement {
     this.hide();
   };
 
-  readonly #onCancel = (): void => {
-    this.hide();
-  };
+  onLangChange(): void {
+    const value = (this.dropdown as unknown as { value: string | null })?.value;
+    if (value) this.#langLocal = value;
+  }
 
   #applyLabels(): void {
     if (this.dialogEl) this.dialogEl.heading = t("options.title", this);
+    if (this.headingEl) this.headingEl.textContent = t("options.language", this);
     if (this.okBtn) this.okBtn.textContent = t("options.ok", this);
     if (this.cancelBtn) this.cancelBtn.textContent = t("options.cancel", this);
   }
 
-  #renderLanguage(): void {
-    if (!this.contentEl) return;
-    this.contentEl.replaceChildren();
-    const heading = document.createElement("div");
-    heading.className = "opt-heading";
-    heading.textContent = t("options.language", this);
-    this.contentEl.append(heading);
-    // Pick the selected option from the live `#langLocal` (set by show()) or
-    // the host's current locale — so the dialog opens pointing at the right row
-    // even before the user touches it.
-    const current = this.#langLocal || this.locale || resolveLang(this);
-    const select = document.createElement("select");
-    select.className = "opt-lang-select";
-    select.setAttribute("aria-label", t("options.language", this));
-    for (const l of availableLanguages()) {
-      const option = document.createElement("option");
-      option.value = l.languageTag;
-      option.textContent = l.$name ?? l.languageTag;
-      if (l.languageTag === current) option.selected = true;
-      select.append(option);
-    }
-    select.addEventListener("change", () => {
-      this.#langLocal = select.value;
-    });
-    this.contentEl.append(select);
+  /** Select the option matching #langLocal once the combobox's control +
+   *  listbox are both ready. fluent-dropdown's connectedCallback enqueues
+   *  insertControl() (drops the seeded <input>, renders its own bound to an
+   *  internal observable) and the listbox slots async, so selectOption() —
+   *  which both marks the option selected and writes its text to the control —
+   *  must wait. Mirrors <docen-ribbon-combobox>'s syncValue. */
+  #syncSelection(): void {
+    const dd = this.dropdown as unknown as {
+      listbox?: unknown;
+      control?: HTMLInputElement;
+      selectOption(i: number): void;
+    };
+    const lb = this.listbox;
+    if (!lb) return;
+    let tries = 0;
+    const apply = (): void => {
+      if (!this.isConnected || tries++ > 10) return;
+      if (!dd.listbox || !dd.control) {
+        requestAnimationFrame(apply);
+        return;
+      }
+      const opts = lb.querySelectorAll("fluent-option");
+      let idx = -1;
+      opts.forEach((opt, i) => {
+        if (opt.getAttribute("value") === this.#langLocal) idx = i;
+      });
+      if (idx >= 0) dd.selectOption(idx);
+    };
+    requestAnimationFrame(apply);
   }
 }
 

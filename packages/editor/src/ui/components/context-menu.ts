@@ -1,3 +1,4 @@
+import { appendMenuItems } from "./ribbon/command-helpers";
 import type { RibbonMenuItem } from "./ribbon/ribbon-menu";
 
 const template = document.createElement("template");
@@ -70,17 +71,8 @@ class DocenContextMenu extends HTMLElement {
   }
 
   #renderItems(): void {
-    const list = this.shadowRoot?.querySelector("fluent-menu-list");
-    if (!list) return;
-    list.replaceChildren();
-    for (const item of this.items) {
-      const menuItem = document.createElement("fluent-menu-item");
-      menuItem.setAttribute("role", "menuitem");
-      menuItem.textContent = item.text;
-      if (item.disabled) menuItem.setAttribute("disabled", "");
-      menuItem.addEventListener("change", () => this.#emit(item));
-      list.append(menuItem);
-    }
+    const list = this.shadowRoot?.querySelector<HTMLElement>("fluent-menu-list");
+    if (list) appendMenuItems(list, this.items, (item) => this.#emit(item));
   }
 
   #emit(item: RibbonMenuItem): void {
