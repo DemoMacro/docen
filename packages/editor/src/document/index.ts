@@ -856,6 +856,19 @@ class DocenDocument extends AddinHost<Editor> {
    *  ignored inside ribbon comboboxes and other inputs (so the keystroke reaches
    *  them); Ctrl+F is global. preventDefault blocks the browser's native zoom/find. */
   readonly #onZoomKey = (event: KeyboardEvent): void => {
+    // Alt+Q focuses the command search (Office's "Tell me what you want to
+    // do" shortcut). Handled before the Ctrl/Meta gate below.
+    if (
+      event.altKey &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      (event.key === "q" || event.key === "Q")
+    ) {
+      event.preventDefault();
+      const search = this.shadowRoot?.querySelector("docen-command-search") as HTMLElement | null;
+      search?.focus();
+      return;
+    }
     if (!(event.ctrlKey || event.metaKey)) return;
     // Ctrl+F opens Find, Ctrl+H opens Find & Replace (Word behavior).
     if (event.key === "f" || event.key === "F") {
@@ -1453,7 +1466,7 @@ class DocenDocument extends AddinHost<Editor> {
               </fluent-menu-list>
             </fluent-menu>
           </div>
-          <fluent-text-input slot="search" placeholder="${t("header.search")}"></fluent-text-input>
+          <docen-command-search slot="search"></docen-command-search>
           <div slot="end" style="display:flex;align-items:center;gap:4px">
             <span style="display:inline-flex;align-items:center;gap:6px;padding-inline:6px">${avatarMarkup}${escapeHtml(user)}</span>
           </div>`;
@@ -1477,6 +1490,13 @@ class DocenDocument extends AddinHost<Editor> {
     const tabs = [...ribbonTabs(styles), ...mergeRibbonSchema(this.addins)];
     const ribbonEl = root.querySelector("docen-ribbon")!;
     ribbonEl.replaceChildren(renderRibbonFromSchema(tabs, ribbonActions()));
+    // Feed the full ribbon schema (built-in tabs + addin contributions) to the
+    // command search so it can flatten and index every command. Re-runs on
+    // lang/addin change since #renderChrome is the single chrome re-stamp.
+    const searchEl = root.querySelector("docen-command-search") as
+      | (HTMLElement & { setTabs(tabs: readonly unknown[]): void })
+      | null;
+    searchEl?.setTabs(tabs);
     this.#applyRibbonGreying();
     this.#syncEditModeMenu();
     this.#renderPanes();
