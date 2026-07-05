@@ -42,7 +42,7 @@ const duplicates = findDuplicates(document, { similarityThreshold: 0.85 });
 
 ### `extractParagraphs(doc)`
 
-Extracts all paragraph/heading text from a Tiptap JSON document. Consecutive paragraph nodes are merged when the first does not end with sentence-ending punctuation.
+Extracts all paragraph/heading text from a Tiptap JSON document. Consecutive paragraph nodes are merged when the first does not end with sentence-ending punctuation. DOCX text-box content (`wpsShape` / `wpgGroup`) is pulled out as standalone paragraphs — a text box's body never merges into its host paragraph.
 
 ```typescript
 import { extractParagraphs } from "@docen/deduplicate";

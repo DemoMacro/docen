@@ -38,12 +38,103 @@ function extractTextFromNode(node: JSONContent): string {
   return "";
 }
 
+// ---------------------------------------------------------------------------
+// Drawing nodes — DOCX text boxes (wpsShape) and drawing groups (wpgGroup) are
+// inline nodes whose text body must be pulled out as standalone paragraphs
+// rather than merged into the host paragraph. Hard-coded against @docen/docx
+// node shapes; this package does not depend on @docen/docx.
+// ---------------------------------------------------------------------------
+
+/** wpsShape: standalone text box (inline, content is block+ — paragraphs).
+ *  wpgGroup: drawing group (atom — full model lives in attrs.wpgGroup). */
+type DrawingNodeType = "wpsShape" | "wpgGroup";
+
+function isDrawingNode(
+  node: JSONContent | undefined | null,
+): node is JSONContent & { type: DrawingNodeType } {
+  return node?.type === "wpsShape" || node?.type === "wpgGroup";
+}
+
+/** Text of a node's inline children, skipping drawing nodes — their text is
+ *  collected separately so a text box's content stays a standalone paragraph
+ *  and never bleeds into its host. */
+function directText(node: JSONContent | undefined | null): string {
+  if (!node) return "";
+  if (node.type === "text" && node.text) return node.text;
+  if (isDrawingNode(node)) return "";
+  if (Array.isArray(node.content)) return node.content.map(directText).join("");
+  return "";
+}
+
+/** office-open ParagraphOptions → plain text. A run is `{ text: "..." }` or a
+ *  bare string; non-text run fields (style, break) contribute nothing. */
+function paragraphOptionsText(para: unknown): string {
+  if (typeof para === "string") return para;
+  if (!para || typeof para !== "object") return "";
+  const children = (para as { children?: unknown }).children;
+  if (!Array.isArray(children)) return "";
+  return children
+    .map((run) => {
+      if (typeof run === "string") return run;
+      const text = (run as { text?: unknown } | null)?.text;
+      return typeof text === "string" ? text : "";
+    })
+    .join("");
+}
+
+/** Extracts text-box paragraphs from a wpg group's children JSON
+ *  (`attrs.wpgGroup.children`). Each child is a wps shape
+ *  (`{ type: "wps", data: { children: ParagraphOptions[] } }`) or a nested wpg
+ *  (`{ type: "wpg", children: [...] }`); pic children carry no text. */
+function extractWpgChildrenText(children: unknown, out: string[]): void {
+  if (!Array.isArray(children)) return;
+  for (const child of children) {
+    if (!child || typeof child !== "object") continue;
+    const c = child as { type?: string; data?: { children?: unknown[] }; children?: unknown[] };
+    if (c.type === "wpg") {
+      extractWpgChildrenText(c.children, out);
+    } else if (c.type === "wps" && Array.isArray(c.data?.children)) {
+      for (const para of c.data!.children) {
+        const text = paragraphOptionsText(para);
+        if (text.trim()) out.push(text);
+      }
+    }
+  }
+}
+
+/** Walks a node's descendants collecting text-box paragraphs from any
+ *  wpsShape (text body is PM `content`) or wpgGroup (text body is attrs JSON).
+ *  Each located paragraph is pushed as a standalone entry. */
+function collectTextBoxText(node: JSONContent, out: string[]): void {
+  if (!node) return;
+  if (node.type === "wpsShape") {
+    if (Array.isArray(node.content)) {
+      for (const para of node.content) {
+        const text = directText(para);
+        if (text.trim()) out.push(text);
+      }
+    }
+    return;
+  }
+  if (node.type === "wpgGroup") {
+    const groupChildren = (node.attrs?.wpgGroup as { children?: unknown } | undefined)?.children;
+    extractWpgChildrenText(groupChildren, out);
+    return;
+  }
+  if (Array.isArray(node.content)) {
+    for (const child of node.content) collectTextBoxText(child, out);
+  }
+}
+
 /**
  * Extracts all paragraph/heading text from a Tiptap JSON document.
  *
  * Consecutive `paragraph` nodes are merged when the first does not end
  * with sentence-ending punctuation (。！？.!?). This handles cases where
  * DOCX parsers split one logical paragraph into multiple nodes.
+ *
+ * DOCX text-box content (wpsShape/wpgGroup) is extracted as standalone
+ * paragraphs — a text box's body never merges into its host paragraph.
  */
 export function extractParagraphs(doc: JSONContent): string[] {
   const paragraphs: string[] = [];
@@ -55,7 +146,9 @@ export function extractParagraphs(doc: JSONContent): string[] {
       if (!child) continue;
 
       if (child.type === "paragraph") {
-        const text = extractTextFromNode(child);
+        const text = directText(child);
+        const textBoxes: string[] = [];
+        collectTextBoxText(child, textBoxes);
         if (text && text.trim().length > 0) {
           if (pending && !SENTENCE_END.test(pending.trim())) {
             pending += text;
@@ -63,6 +156,14 @@ export function extractParagraphs(doc: JSONContent): string[] {
             if (pending) paragraphs.push(pending);
             pending = text;
           }
+        }
+        // Text-box content stands alone — flush pending first so it never
+        // merges with the host paragraph's accumulated text.
+        for (const tb of textBoxes) {
+          if (!tb.trim()) continue;
+          if (pending) paragraphs.push(pending);
+          pending = "";
+          paragraphs.push(tb);
         }
       } else if (child.type === "heading") {
         if (pending) paragraphs.push(pending);

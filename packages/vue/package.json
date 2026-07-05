@@ -1,6 +1,6 @@
 {
   "name": "@docen/vue",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "Vue 3 adapter for @docen/editor — typed <DocenDocument> component (v-model content, v-slot editor, ref expose)",
   "keywords": [
     "adapter",
