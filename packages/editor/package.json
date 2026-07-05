@@ -76,6 +76,7 @@
     "@fluentui/tokens": "1.0.0-alpha.23",
     "@fluentui/web-components": "3.0.0",
     "@microsoft/fast-element": "3.0.1",
+    "@tiptap/extension-bubble-menu": "3.27.1",
     "@tiptap/extension-list": "3.27.1",
     "@tiptap/extensions": "3.27.1",
     "@tiptap/pm": "3.27.1",

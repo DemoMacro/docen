@@ -1,6 +1,6 @@
 import { FASTElement } from "@microsoft/fast-element";
 
-import type { DocenAddin, DocenHost, RibbonTab } from "./types";
+import type { BubbleButton, DocenAddin, DocenHost, RibbonTab } from "./types";
 
 /**
  * Pure merge of every addin's ribbon contributions into the tab order.
@@ -31,6 +31,24 @@ export function mergeRibbonSchema<THost extends DocenHost>(
     }
   }
   return tabs;
+}
+
+/**
+ * Pure merge of every addin's bubble-menu buttons into a flat list, in
+ * addin-registration then contribution order. Unlike ribbon (tab/group
+ * structure) the bubble is a single flat row, so this is a flatten — an addin
+ * that wants its own variant of a default button just contributes another
+ * entry (both appear). Exported separately so the merge is testable without a
+ * live HTMLElement.
+ */
+export function mergeBubbleMenu<THost extends DocenHost>(
+  addins: readonly DocenAddin<THost>[],
+): BubbleButton[] {
+  const buttons: BubbleButton[] = [];
+  for (const addin of addins) {
+    if (addin.bubbleMenu) buttons.push(...addin.bubbleMenu);
+  }
+  return buttons;
 }
 
 /**
@@ -94,6 +112,13 @@ export class AddinHost<TEditor = unknown> extends FASTElement implements DocenHo
   /** The merged ribbon schema — every addin ribbon contribution, in order. */
   mergedRibbonSchema(): RibbonTab[] {
     return mergeRibbonSchema(this.#addins);
+  }
+
+  /** The merged bubble-menu buttons — every addin bubble contribution, in
+   *  order. The host combines these with built-in defaults at editor boot
+   *  (mirror of `ribbonTabs` + `mergedRibbonSchema` for the ribbon). */
+  mergedBubbleMenu(): BubbleButton[] {
+    return mergeBubbleMenu(this.#addins);
   }
 
   /** Route `type` to the first registered addin that declares it. Returns

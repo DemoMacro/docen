@@ -126,6 +126,22 @@ export interface RibbonContribution {
   groups: RibbonGroup[];
 }
 
+/** Selection floating-toolbar button — a flat action on the bubble menu. `event`
+ *  is the command name the host routes to `editor.commands.<event>`; `label` is
+ *  an i18n key resolved at render time (e.g. "ribbon.cmd.bold"); `activeMark`
+ *  drives aria-pressed (omit for non-toggle actions like clear-format). */
+export interface BubbleButton {
+  id?: string;
+  /** Docen icon key (see the RIBBON_ICONS map). */
+  icon: string;
+  /** Command name (editor.commands.<event>). */
+  event: string;
+  /** Tooltip i18n key (resolved at render time), e.g. "ribbon.cmd.bold". */
+  label?: string;
+  /** Mark name for the pressed state; omit for non-toggle actions. */
+  activeMark?: string;
+}
+
 /** Task pane contribution — Office.js `ShowTaskpane` action. `start` is the
  *  navigation side (left in LTR); `end` is the format/properties side (right). */
 export interface TaskPaneContribution<THost extends DocenHost = DocenHost> {
@@ -159,6 +175,12 @@ export interface DocenAddin<THost extends DocenHost = DocenHost> {
   readonly id: string;
   readonly name?: string;
   readonly ribbon?: readonly RibbonContribution[];
+  /** Selection floating-toolbar buttons (mini toolbar). Office.js keeps the
+   *  mini toolbar internal; docen opens it as an addin surface, symmetric to
+   *  `ribbon`. Merged with built-in defaults (`defaultBubbleButtons()` +
+   *  `mergeBubbleMenu`); runtime `addAddin` re-merges immediately (the bar's
+   *  buttons are `@observable`), so contributions appear without re-mounting. */
+  readonly bubbleMenu?: readonly BubbleButton[];
   readonly taskPanes?: readonly TaskPaneContribution<THost>[];
   readonly commands?: Readonly<Record<string, (host: THost, value?: string) => void>>;
 }

@@ -48,6 +48,7 @@ import "./components/format-pane";
 import "./components/outline";
 import { createDefaultAddin } from "./addin";
 import type { OutlineItem } from "./components/outline";
+import { DocenBubbleMenu, defaultBubbleButtons, getBubbleBar } from "./extensions/bubble-menu";
 import { WIRED_DISPATCH } from "./extensions/commands";
 // Side-effect import: registers the ribbon/header translation tables.
 import "./i18n";
@@ -1307,6 +1308,13 @@ class DocenDocument extends AddinHost<Editor> {
     // default so their ribbon tabs append to the built-ins via mergeRibbonSchema.
     this.#applyAddinsAttr();
 
+    // Bubble-menu buttons: built-in defaults + addin contributions, merged at
+    // boot — symmetric to `ribbonTabs(styles) + mergeRibbonSchema(addins)` in
+    // #renderChrome. The bar extension stays OUT of defaultAddin.extensions
+    // (the host owns the merge, like the ribbon), so it's configured here with
+    // the assembled list. Runtime `addAddin({ bubbleMenu })` re-merges in
+    // addinsChanged (the bar's buttons are @observable), no re-mount needed.
+    const bubbleButtons = [...defaultBubbleButtons(), ...this.mergedBubbleMenu()];
     this.#editor = createDocxEditor({
       element: page,
       content: initialDoc,
@@ -1315,8 +1323,12 @@ class DocenDocument extends AddinHost<Editor> {
       // Review ribbon's spell-check button (spellcheck="true" attribute).
       spellcheck: this.getAttribute("spellcheck") === "true",
       editable: this.getAttribute("editable") !== "false",
-      // Engine extensions come from the default add-in (see addin.ts).
-      extensions: [...(defaultAddin.extensions ?? [])],
+      // Engine extensions come from the default add-in (see addin.ts); the
+      // bubble-menu extension is layered on with the host-merged buttons.
+      extensions: [
+        ...(defaultAddin.extensions ?? []),
+        DocenBubbleMenu.configure({ commands: bubbleButtons }),
+      ],
     });
     this.#applyDocStyles();
 
@@ -1508,6 +1520,15 @@ class DocenDocument extends AddinHost<Editor> {
    *  tabs. */
   protected addinsChanged(): void {
     this.#renderChrome();
+    // Re-merge the bubble-menu buttons so a runtime addAddin's `bubbleMenu`
+    // takes effect immediately — symmetric to the ribbon re-render above. The
+    // bar's `commands` is @observable, so re-assignment re-renders the row and
+    // re-injects icons without rebuilding the BubbleMenu plugin. No-op before
+    // the editor boots (bar is null until addProseMirrorPlugins runs).
+    const bar = getBubbleBar();
+    if (bar) {
+      bar.commands = [...defaultBubbleButtons(), ...this.mergedBubbleMenu()];
+    }
   }
 
   /** Stamp pane titles + status text for the active locale (re-run on lang change). */

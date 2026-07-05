@@ -68,6 +68,24 @@
           "open-help": () => window.open("https://github.com/DemoMacro/docen", "_blank"),
         },
       });
+
+      // Example: an external add-in contributes a bubble-menu button (the
+      // selection floating toolbar). The host merges it onto the built-in
+      // buttons (mergeBubbleMenu) — and re-merges at runtime since addAddin
+      // runs after boot (the bar's buttons are @observable, so no re-mount
+      // needed). The "highlight" event routes to editor.commands.highlight,
+      // exactly like a ribbon button.
+      document.getElementById("doc")?.addAddin({
+        id: "bubble-demo",
+        bubbleMenu: [
+          {
+            icon: "highlight",
+            event: "highlight",
+            label: "ribbon.cmd.highlight",
+            activeMark: "highlight",
+          },
+        ],
+      });
     </script>
   </body>
 </html>
