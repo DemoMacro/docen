@@ -1,3 +1,5 @@
+import type { DocenTranslation } from "../i18n";
+
 /**
  * Office.js-style add-in model for docen editor hosts.
  *
@@ -21,6 +23,8 @@ export type RibbonControlSize = "small" | "large";
 /** A single menu/combobox option. `value` is the data carried by the command;
  *  `event` lets an option dispatch a different command than its control's. */
 export interface RibbonMenuItem {
+  /** Display text — an i18n key resolved via `t()` at render time (a plain
+   *  string also works; `t()` returns it unchanged if no key matches). */
   text: string;
   value?: string;
   event?: string;
@@ -34,6 +38,8 @@ export interface RibbonControlBase {
   id?: string;
   /** Docen icon key (see the RIBBON_ICONS map). */
   icon?: string;
+  /** Label — an i18n key resolved via `t()` at render time (a plain string
+   *  also works). */
   label?: string;
   event?: string;
   disabled?: boolean;
@@ -101,6 +107,7 @@ export type RibbonControlOrLayout = RibbonControl | RibbonLayout;
 
 export interface RibbonGroup {
   id: string;
+  /** Group heading — an i18n key resolved via `t()` at render time. */
   label: string;
   /** Optional launcher id (opens a dialog or pane). */
   launcher?: string;
@@ -109,6 +116,7 @@ export interface RibbonGroup {
 
 export interface RibbonTab {
   id: string;
+  /** Tab heading — an i18n key resolved via `t()` at render time. */
   label: string;
   groups: RibbonGroup[];
 }
@@ -121,16 +129,18 @@ export interface RibbonTab {
 export interface RibbonContribution {
   /** Target tab id. Existing id → append groups; new id → create a tab. */
   tab: string;
-  /** Label used when creating a new tab (ignored once the tab exists). */
-  tabLabel?: string;
+  /** Tab heading (i18n key) for a newly created tab — ignored when targeting
+   *  an existing tab. */
+  label?: string;
   groups: RibbonGroup[];
 }
 
-/** Selection floating-toolbar button — a flat action on the bubble menu. `event`
- *  is the command name the host routes to `editor.commands.<event>`; `label` is
- *  an i18n key resolved at render time (e.g. "ribbon.cmd.bold"); `activeMark`
- *  drives aria-pressed (omit for non-toggle actions like clear-format). */
-export interface BubbleButton {
+/** Mini-toolbar button — a flat action on the selection floating toolbar (the
+ *  Word "mini toolbar"). `event` is the command name the host routes to
+ *  `editor.commands.<event>`; `label` is an i18n key resolved at render time
+ *  (e.g. "ribbon.cmd.bold"); `activeMark` drives aria-pressed (omit for
+ *  non-toggle actions like clear-format). */
+export interface MiniToolbarButton {
   id?: string;
   /** Docen icon key (see the RIBBON_ICONS map). */
   icon: string;
@@ -174,13 +184,20 @@ export interface DocenHost<TEditor = unknown> {
 export interface DocenAddin<THost extends DocenHost = DocenHost> {
   readonly id: string;
   readonly name?: string;
+  /** Per-locale translation tables this addin contributes. The host registers
+   *  them on `addAddin` (merged into the global table, so built-in keys and
+   *  other addins' keys coexist). Pure data, so the `addins` JSON attribute
+   *  carries them too. Office.js parallel: manifest `localizationInfo` +
+   *  per-locale JSON. */
+  readonly translations?: readonly DocenTranslation[];
   readonly ribbon?: readonly RibbonContribution[];
-  /** Selection floating-toolbar buttons (mini toolbar). Office.js keeps the
-   *  mini toolbar internal; docen opens it as an addin surface, symmetric to
-   *  `ribbon`. Merged with built-in defaults (`defaultBubbleButtons()` +
-   *  `mergeBubbleMenu`); runtime `addAddin` re-merges immediately (the bar's
-   *  buttons are `@observable`), so contributions appear without re-mounting. */
-  readonly bubbleMenu?: readonly BubbleButton[];
+  /** Mini-toolbar buttons (the selection floating toolbar — the Word "mini
+   *  toolbar"). Office.js keeps it internal; docen opens it as an addin
+   *  surface, symmetric to `ribbon`. Merged with built-in defaults
+   *  (`defaultMiniToolbarButtons()` + `mergeMiniToolbar`); runtime `addAddin`
+   *  re-merges immediately (the bar's buttons are `@observable`), so
+   *  contributions appear without re-mounting. */
+  readonly miniToolbar?: readonly MiniToolbarButton[];
   readonly taskPanes?: readonly TaskPaneContribution<THost>[];
   readonly commands?: Readonly<Record<string, (host: THost, value?: string) => void>>;
 }

@@ -1,13 +1,14 @@
 import { FASTElement } from "@microsoft/fast-element";
 
-import type { BubbleButton, DocenAddin, DocenHost, RibbonTab } from "./types";
+import { registerTranslation } from "../i18n";
+import type { DocenAddin, DocenHost, MiniToolbarButton, RibbonTab } from "./types";
 
 /**
  * Pure merge of every addin's ribbon contributions into the tab order.
  *
  * Tabs appear in addin-registration order, then contribution order. A
  * contribution targeting an existing tab id appends its groups to that tab
- * (`tabLabel` is ignored once the tab exists); a fresh id creates a new tab.
+ * (`label` is ignored once the tab exists); a fresh id creates a new tab.
  * Exported separately so the merge is testable without a live HTMLElement.
  */
 export function mergeRibbonSchema<THost extends DocenHost>(
@@ -21,7 +22,7 @@ export function mergeRibbonSchema<THost extends DocenHost>(
       if (!tab) {
         tab = {
           id: contribution.tab,
-          label: contribution.tabLabel ?? contribution.tab,
+          label: contribution.label ?? contribution.tab,
           groups: [],
         };
         index.set(contribution.tab, tab);
@@ -34,19 +35,19 @@ export function mergeRibbonSchema<THost extends DocenHost>(
 }
 
 /**
- * Pure merge of every addin's bubble-menu buttons into a flat list, in
+ * Pure merge of every addin's mini-toolbar buttons into a flat list, in
  * addin-registration then contribution order. Unlike ribbon (tab/group
- * structure) the bubble is a single flat row, so this is a flatten — an addin
- * that wants its own variant of a default button just contributes another
- * entry (both appear). Exported separately so the merge is testable without a
- * live HTMLElement.
+ * structure) the mini toolbar is a single flat row, so this is a flatten — an
+ * addin that wants its own variant of a default button just contributes
+ * another entry (both appear). Exported separately so the merge is testable
+ * without a live HTMLElement.
  */
-export function mergeBubbleMenu<THost extends DocenHost>(
+export function mergeMiniToolbar<THost extends DocenHost>(
   addins: readonly DocenAddin<THost>[],
-): BubbleButton[] {
-  const buttons: BubbleButton[] = [];
+): MiniToolbarButton[] {
+  const buttons: MiniToolbarButton[] = [];
   for (const addin of addins) {
-    if (addin.bubbleMenu) buttons.push(...addin.bubbleMenu);
+    if (addin.miniToolbar) buttons.push(...addin.miniToolbar);
   }
   return buttons;
 }
@@ -96,6 +97,9 @@ export class AddinHost<TEditor = unknown> extends FASTElement implements DocenHo
   /** Register an add-in (idempotent on `addin.id`). Triggers {@link addinsChanged}. */
   addAddin(addin: DocenAddin<this>): void {
     if (this.#addins.some((existing) => existing.id === addin.id)) return;
+    // Register the addin's translation tables before its UI renders — merged
+    // into the global table, so its label keys resolve on the next t() call.
+    addin.translations?.forEach(registerTranslation);
     this.#addins = [...this.#addins, addin];
     this.addinsChanged();
   }
@@ -114,11 +118,11 @@ export class AddinHost<TEditor = unknown> extends FASTElement implements DocenHo
     return mergeRibbonSchema(this.#addins);
   }
 
-  /** The merged bubble-menu buttons — every addin bubble contribution, in
-   *  order. The host combines these with built-in defaults at editor boot
+  /** The merged mini-toolbar buttons — every addin mini-toolbar contribution,
+   *  in order. The host combines these with built-in defaults at editor boot
    *  (mirror of `ribbonTabs` + `mergedRibbonSchema` for the ribbon). */
-  mergedBubbleMenu(): BubbleButton[] {
-    return mergeBubbleMenu(this.#addins);
+  mergedMiniToolbar(): MiniToolbarButton[] {
+    return mergeMiniToolbar(this.#addins);
   }
 
   /** Route `type` to the first registered addin that declares it. Returns

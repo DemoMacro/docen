@@ -19,9 +19,9 @@ import type {
  * (Home/Insert/Draw/Design/Layout/References/Mailings/Review/View) with the
  * canonical groups and primary commands.
  *
- * `ribbonTabs()` builds the RibbonTab schema (resolving every visible string
- * through `t("ribbon.*")`, so it re-renders in the active locale);
- * `renderRibbonFromSchema()` consumes that tree to build the ribbon DOM. The
+ * `ribbonTabs()` builds the RibbonTab schema with i18n keys (not translated
+ * strings); `renderRibbonFromSchema()` consumes that tree and resolves every
+ * label via `t("ribbon.*")` when building the ribbon DOM. The
  * host stamps the result into its `<docen-ribbon>` and re-runs it on language
  * change. Callers wanting a tailored ribbon merge their own tabs/groups into
  * the schema before render.
@@ -39,10 +39,14 @@ import { resolveLang, t } from "../ui";
 
 // --- i18n shortcuts (ribbon.* keys, resolved at call time) -------------------
 
-const tab = (id: string): string => t(`ribbon.tab.${id}`);
-const grp = (id: string): string => t(`ribbon.group.${id}`);
-const cmd = (event: string): string => t(`ribbon.cmd.${event}`);
-const opt = (value: string): string => t(`ribbon.opt.${value}`);
+// Ribbon i18n keys — the schema stores keys (not translated strings); the
+// render pass (renderRibbonFromSchema) resolves them via t(). t() returns the
+// key itself when no translation is registered, so an addin may also pass a
+// plain display string as a label (escape hatch).
+const tab = (id: string): string => `ribbon.tab.${id}`;
+const grp = (id: string): string => `ribbon.group.${id}`;
+const cmd = (event: string): string => `ribbon.cmd.${event}`;
+const opt = (value: string): string => `ribbon.opt.${value}`;
 
 // --- Option sets (menu/combobox items) ---------------------------------------
 // Font names and point sizes are data, not UI copy — kept untranslated.
@@ -393,11 +397,11 @@ export function renderRibbonFromSchema(
   const activeId = tabs[0]?.id ?? "";
   if (activeId) tablist.setAttribute("activeid", activeId);
   for (const tab of tabs) {
-    const t = document.createElement("docen-ribbon-tab");
-    t.setAttribute("slot", "tab");
-    t.id = tab.id;
-    t.textContent = tab.label;
-    tablist.append(t);
+    const tabEl = document.createElement("docen-ribbon-tab");
+    tabEl.setAttribute("slot", "tab");
+    tabEl.id = tab.id;
+    tabEl.textContent = t(tab.label);
+    tablist.append(tabEl);
   }
   frag.append(tablist);
 
@@ -418,7 +422,7 @@ export function renderRibbonFromSchema(
 
 function buildGroup(g: RibbonGroup): HTMLElement {
   const el = document.createElement("docen-ribbon-group");
-  el.setAttribute("label", g.label);
+  el.setAttribute("label", t(g.label));
   if (g.launcher) el.setAttribute("launcher", g.launcher);
   for (const c of g.controls) el.append(buildControlOrLayout(c));
   return el;
@@ -449,12 +453,17 @@ function applyBase(
   },
 ): void {
   if (c.icon) el.setAttribute("icon", c.icon);
-  if (c.label) el.setAttribute("label", c.label);
+  if (c.label) el.setAttribute("label", t(c.label));
   if (c.event) el.setAttribute("event", c.event);
   if (c.iconOnly) el.setAttribute("icon-only", "");
   if (c.size === "large") el.setAttribute("size", "large");
   if (c.disabled) el.setAttribute("disabled", "");
 }
+
+/** Resolve each item's `text` i18n key to the active locale — the schema stores
+ *  keys, the render pass is the single translate point (mirrors label). */
+const translateItems = (items: readonly RibbonMenuItem[]): RibbonMenuItem[] =>
+  items.map((it) => ({ ...it, text: it.text ? t(it.text) : it.text }));
 
 function buildControl(c: RibbonControl): HTMLElement {
   switch (c.type) {
@@ -471,20 +480,20 @@ function buildControl(c: RibbonControl): HTMLElement {
     case "menu": {
       const el = document.createElement("docen-ribbon-menu");
       applyBase(el, c);
-      el.setAttribute("items", JSON.stringify(c.items ?? []));
+      el.setAttribute("items", JSON.stringify(translateItems(c.items ?? [])));
       return el;
     }
     case "split": {
       const el = document.createElement("docen-ribbon-split-button");
       applyBase(el, c);
-      el.setAttribute("items", JSON.stringify(c.items ?? []));
+      el.setAttribute("items", JSON.stringify(translateItems(c.items ?? [])));
       return el;
     }
     case "combobox": {
       const el = document.createElement("docen-ribbon-combobox");
       applyBase(el, c);
       if (c.value != null) el.setAttribute("value", c.value);
-      el.setAttribute("items", JSON.stringify(c.items ?? []));
+      el.setAttribute("items", JSON.stringify(translateItems(c.items ?? [])));
       if (c.source) el.setAttribute("source", c.source);
       if (c.comboboxSize === "short") el.setAttribute("size", "short");
       return el;
@@ -499,9 +508,9 @@ function buildControl(c: RibbonControl): HTMLElement {
 }
 
 // --- Data-driven ribbon (RibbonTab tree) -------------------------------------
-// The 9 tabs expressed as data; renderRibbonFromSchema consumes this tree to
-// build the ribbon DOM. i18n (t("ribbon.*")) resolves at call time, so
-// re-calling on a locale change re-localizes the labels.
+// The 9 tabs expressed as data (i18n keys, not translated strings);
+// renderRibbonFromSchema consumes this tree to build the ribbon DOM and
+// resolves the keys via t() — so re-rendering on a locale change re-localizes.
 
 /** Parse a legacy items JSON string (the form the *Panel helpers emit) into
  *  RibbonMenuItem data for the data-driven ribbon. */

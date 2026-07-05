@@ -43,25 +43,41 @@
       applyTheme("light");
 
       // Example: an external add-in contributes an "About" ribbon tab. The host
-      // merges it onto the built-in tabs (mergeRibbonSchema) — a consumer plugs
-      // in tabs/groups/controls without touching host internals. The "Help"
-      // button's `open-help` event isn't a Tiptap command, so the host routes
-      // it to this addin's `commands` map (non-Tiptap action) — clicking it
-      // opens the project's GitHub repository.
+      // merges it onto the built-in tabs (mergeRibbonSchema) — labels are i18n
+      // keys, and the addin ships its own `translations`, which the host
+      // registers on addAddin (merged with the built-in ribbon.* keys) so the
+      // tab/group/button localize on every locale switch. The "Help" button's
+      // `open-help` event isn't a Tiptap command, so the host routes it to this
+      // addin's `commands` map — clicking it opens the project's GitHub repo.
       document.getElementById("doc")?.addAddin({
         id: "about",
-        name: "About",
         ribbon: [
           {
             tab: "about",
-            tabLabel: "About",
+            label: "about.tab",
             groups: [
               {
                 id: "about-help",
-                label: "Help",
-                controls: [{ type: "button", id: "help", label: "Help", event: "open-help" }],
+                label: "about.group.help",
+                controls: [
+                  { type: "button", id: "help", label: "about.cmd.help", event: "open-help" },
+                ],
               },
             ],
+          },
+        ],
+        translations: [
+          {
+            $code: "en",
+            "about.tab": "About",
+            "about.group.help": "Help",
+            "about.cmd.help": "Help",
+          },
+          {
+            $code: "zh-CN",
+            "about.tab": "关于",
+            "about.group.help": "帮助",
+            "about.cmd.help": "帮助",
           },
         ],
         commands: {
@@ -69,15 +85,15 @@
         },
       });
 
-      // Example: an external add-in contributes a bubble-menu button (the
+      // Example: an external add-in contributes a mini-toolbar button (the
       // selection floating toolbar). The host merges it onto the built-in
-      // buttons (mergeBubbleMenu) — and re-merges at runtime since addAddin
+      // buttons (mergeMiniToolbar) — and re-merges at runtime since addAddin
       // runs after boot (the bar's buttons are @observable, so no re-mount
       // needed). The "highlight" event routes to editor.commands.highlight,
       // exactly like a ribbon button.
       document.getElementById("doc")?.addAddin({
-        id: "bubble-demo",
-        bubbleMenu: [
+        id: "mini-toolbar-demo",
+        miniToolbar: [
           {
             icon: "highlight",
             event: "highlight",

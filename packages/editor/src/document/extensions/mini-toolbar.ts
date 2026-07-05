@@ -7,16 +7,16 @@ import {
 } from "@tiptap/extension-bubble-menu";
 import { NodeSelection, PluginKey } from "prosemirror-state";
 
-import type { BubbleButton } from "../../ui";
+import type { MiniToolbarButton } from "../../ui";
 import { renderIcon } from "../../ui/components/ribbon/command-helpers";
 import { observeLang, t } from "../../ui/i18n/localize";
 
-/** The built-in bubble-menu buttons (Bold/Italic/Underline/Strike/Link/Clear).
+/** The built-in mini-toolbar buttons (Bold/Italic/Underline/Strike/Link/Clear).
  *  Returned by a function (mirrors `ribbonTabs()`) so the host combines them
- *  with addin-contributed buttons at boot — `[...defaultBubbleButtons(),
- *  ...host.mergedBubbleMenu()]`. `label` is an i18n key resolved at render
+ *  with addin-contributed buttons at boot — `[...defaultMiniToolbarButtons(),
+ *  ...host.mergedMiniToolbar()]`. `label` is an i18n key resolved at render
  *  time, so a locale switch re-renders without the host re-configuring. */
-export function defaultBubbleButtons(): readonly BubbleButton[] {
+export function defaultMiniToolbarButtons(): readonly MiniToolbarButton[] {
   return [
     { event: "bold", icon: "bold", label: "ribbon.cmd.bold", activeMark: "bold" },
     { event: "italic", icon: "italic", label: "ribbon.cmd.italic", activeMark: "italic" },
@@ -80,27 +80,25 @@ const styles = css`
   }
 `;
 
-const template = html<DocenBubbleMenuBar>`
+const template = html<DocenMiniToolbarBar>`
   ${repeat(
-    (x: DocenBubbleMenuBar) => x.commands,
-    html<BubbleButton>`
+    (x: DocenMiniToolbarBar) => x.commands,
+    html<MiniToolbarButton>`
       <fluent-button
-        id="${(cmd: BubbleButton) => cmd.event}"
+        id="${(cmd: MiniToolbarButton) => cmd.event}"
         appearance="subtle"
-        data-cmd="${(cmd: BubbleButton) => cmd.event}"
+        data-cmd="${(cmd: MiniToolbarButton) => cmd.event}"
       >
         <span class="rb-icon"></span>
       </fluent-button>
-      <fluent-tooltip
-        anchor="${(cmd: BubbleButton) => cmd.event}"
-        positioning="top"
-      ></fluent-tooltip>
+      <fluent-tooltip anchor="${(cmd: MiniToolbarButton) => cmd.event}" positioning="top">
+      </fluent-tooltip>
     `,
   )}
 `;
 
 /**
- * `<docen-bubble-menu>` — the toolbar element Tiptap's BubbleMenu positions
+ * `<docen-mini-toolbar>` — the toolbar element Tiptap's BubbleMenu positions
  * above the selection. Each button dispatches a `command` CustomEvent exactly
  * like a ribbon button, so the host's `#onCommand` routes it to
  * `editor.chain().focus()[event].run()` (no editor reference held here — the
@@ -108,13 +106,13 @@ const template = html<DocenBubbleMenuBar>`
  * host so a `commands` re-render (locale switch) doesn't lose bindings, and
  * icons are re-injected in `commandsChanged`.
  */
-@customElement({ name: "docen-bubble-menu", template, styles })
-class DocenBubbleMenuBar extends FASTElement {
+@customElement({ name: "docen-mini-toolbar", template, styles })
+class DocenMiniToolbarBar extends FASTElement {
   /** The button list, set by the extension from `options.commands` (the host's
-   *  merge of `defaultBubbleButtons()` + `mergedBubbleMenu()`). Empty until the
+   *  merge of `defaultMiniToolbarButtons()` + `mergedMiniToolbar()`). Empty until the
    *  extension assigns it in `addProseMirrorPlugins` — the bar is hidden by
    *  `:host(:not([data-placed]))` until then, so the empty state never shows. */
-  @observable commands: readonly BubbleButton[] = [];
+  @observable commands: readonly MiniToolbarButton[] = [];
 
   /** Set by the extension in addProseMirrorPlugins — the bar needs editor
    *  access to mirror editor.isActive into aria-pressed, including on its
@@ -191,8 +189,8 @@ class DocenBubbleMenuBar extends FASTElement {
    *  replaceChildren, so re-runs (e.g. after a locale-driven template
    *  re-render) don't accumulate svgs. The svg slightly widens each button, so
    *  after injecting we dispatch an `updatePosition` meta: BubbleMenuView's
-   *  transactionHandler (reachable because the extension shares BUBBLE_KEY with
-   *  the plugin) re-runs computePosition against the final width. The first
+   *  transactionHandler (reachable because the extension shares the plugin key
+   *  with the plugin) re-runs computePosition against the final width. The first
    *  computePosition (run synchronously in show(), before this microtask) may
    *  measure the pre-icon width; this dispatch corrects it before paint. */
   #injectIcons(): void {
@@ -204,7 +202,7 @@ class DocenBubbleMenuBar extends FASTElement {
       if (slot) renderIcon(slot, cmd.icon);
     });
     const view = this.editor?.view;
-    view?.dispatch(view.state.tr.setMeta(BUBBLE_KEY, "updatePosition"));
+    view?.dispatch(view.state.tr.setMeta(MINI_TOOLBAR_KEY, "updatePosition"));
   }
 
   /** Translate each button's aria-label + tooltip for the active locale.
@@ -228,18 +226,18 @@ class DocenBubbleMenuBar extends FASTElement {
 }
 
 /** mousedown preventDefault (capture) keeps the contenteditable selection
- *  alive while the user clicks a bubble button — same trick as the ribbon. */
+ *  alive while the user clicks a mini-toolbar button — same trick as the ribbon. */
 const onMousedown = (event: Event): void => event.preventDefault();
 
 /** The BubbleMenu plugin key. Passed to the extension as `pluginKey` (a
  *  PluginKey instance, not a string) so BubbleMenuView holds this same instance
- *  and `transactionHandler` reads meta set with it — `tr.setMeta(BUBBLE_KEY,
+ *  and `transactionHandler` reads meta set with it — `tr.setMeta(MINI_TOOLBAR_KEY,
  *  "updatePosition")` reaches the handler and re-runs computePosition
- *  immediately (no updateDelay debounce). Two `new PluginKey("docenBubbleMenu")`
+ *  immediately (no updateDelay debounce). Two `new PluginKey("docenMiniToolbar")`
  *  would resolve to different keys ("…$" vs "…$1" — ProseMirror appends a
  *  counter in createKey), so the instance must be shared between the extension
  *  config and any code dispatching meta. */
-const BUBBLE_KEY = new PluginKey("docenBubbleMenu");
+const MINI_TOOLBAR_KEY = new PluginKey("docenMiniToolbar");
 
 // Created lazily in addProseMirrorPlugins, not at module top-level. The
 // @customElement decorator runs as part of the class declaration, but a
@@ -247,42 +245,42 @@ const BUBBLE_KEY = new PluginKey("docenBubbleMenu");
 // declaration executes (module evaluation order vs. class TDZ), yielding an
 // HTMLUnknownElement that misses syncActive — and the extension would hold
 // that wrong reference. By the time the editor loads the extension the class
-// is guaranteed registered, so createElement returns a real DocenBubbleMenuBar.
-let bubbleBar: DocenBubbleMenuBar | null = null;
-const ensureBubbleBar = (): DocenBubbleMenuBar => {
-  if (!bubbleBar) {
-    bubbleBar = document.createElement("docen-bubble-menu") as DocenBubbleMenuBar;
+// is guaranteed registered, so createElement returns a real DocenMiniToolbarBar.
+let miniToolbar: DocenMiniToolbarBar | null = null;
+const ensureMiniToolbar = (): DocenMiniToolbarBar => {
+  if (!miniToolbar) {
+    miniToolbar = document.createElement("docen-mini-toolbar") as DocenMiniToolbarBar;
   }
-  return bubbleBar;
+  return miniToolbar;
 };
 
-/** The singleton bubble bar element — null until the extension first creates
+/** The singleton mini-toolbar element — null until the extension first creates
  *  it in `addProseMirrorPlugins`. Exported so the host can re-merge buttons at
  *  runtime (`addinsChanged`) without rebuilding the BubbleMenu plugin: the
  *  bar's `commands` is `@observable`, so a re-assignment re-renders the row
  *  and re-injects icons. Symmetric to ribbon's runtime re-render. */
-export function getBubbleBar(): DocenBubbleMenuBar | null {
-  return bubbleBar;
+export function getMiniToolbar(): DocenMiniToolbarBar | null {
+  return miniToolbar;
 }
 
 /** Extension options — {@link BubbleMenuOptions} (plugin config) plus `commands`,
- *  the merged button list the host assembles from `defaultBubbleButtons()` +
- *  `mergedBubbleMenu()` at boot. */
-type DocenBubbleMenuOptions = BubbleMenuOptions & {
-  commands: readonly BubbleButton[];
+ *  the merged button list the host assembles from `defaultMiniToolbarButtons()` +
+ *  `mergedMiniToolbar()` at boot. */
+type DocenMiniToolbarOptions = BubbleMenuOptions & {
+  commands: readonly MiniToolbarButton[];
 };
 
 /** A floating format toolbar on the selection — Tiptap BubbleMenu wrapped so
  *  each button dispatches a `command` event the host already routes, and
  *  aria-pressed syncs with editor.isActive. The host configures `commands`
- *  (built-in defaults via `defaultBubbleButtons()` + addin contributions via
- *  `mergeBubbleMenu`), symmetric to the ribbon's `ribbonTabs()` +
+ *  (built-in defaults via `defaultMiniToolbarButtons()` + addin contributions via
+ *  `mergeMiniToolbar`), symmetric to the ribbon's `ribbonTabs()` +
  *  `mergeRibbonSchema`. */
-export const DocenBubbleMenu = BubbleMenu.extend<DocenBubbleMenuOptions>({
-  addOptions(): DocenBubbleMenuOptions {
+export const DocenMiniToolbar = BubbleMenu.extend<DocenMiniToolbarOptions>({
+  addOptions(): DocenMiniToolbarOptions {
     return {
       element: null,
-      pluginKey: BUBBLE_KEY,
+      pluginKey: MINI_TOOLBAR_KEY,
       shouldShow: ({ editor, view, from, to }) => {
         if (!editor.isEditable || from === to) return false;
         if (view.state.selection instanceof NodeSelection) return false;
@@ -294,14 +292,14 @@ export const DocenBubbleMenu = BubbleMenu.extend<DocenBubbleMenuOptions>({
         offset: 8,
         // show() clears the placed flag (re-entering the hidden-until-positioned
         // state); updatePosition's then-callback sets it once the bar is placed.
-        onShow: () => bubbleBar?.removeAttribute("data-placed"),
-        onUpdate: () => bubbleBar?.setAttribute("data-placed", ""),
+        onShow: () => miniToolbar?.removeAttribute("data-placed"),
+        onUpdate: () => miniToolbar?.setAttribute("data-placed", ""),
       },
-      commands: [] as readonly BubbleButton[],
+      commands: [] as readonly MiniToolbarButton[],
     };
   },
   addProseMirrorPlugins() {
-    const bar = ensureBubbleBar();
+    const bar = ensureMiniToolbar();
     bar.editor = this.editor;
     bar.commands = this.options.commands;
     // Pre-warm: connect the bar now so fluent-button upgrades + icon injection
@@ -331,6 +329,6 @@ export const DocenBubbleMenu = BubbleMenu.extend<DocenBubbleMenuOptions>({
     ];
   },
   onTransaction() {
-    bubbleBar?.syncActive();
+    miniToolbar?.syncActive();
   },
 });

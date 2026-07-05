@@ -48,11 +48,15 @@ import "./components/format-pane";
 import "./components/outline";
 import { createDefaultAddin } from "./addin";
 import type { OutlineItem } from "./components/outline";
-import { DocenBubbleMenu, defaultBubbleButtons, getBubbleBar } from "./extensions/bubble-menu";
 import { WIRED_DISPATCH } from "./extensions/commands";
+import { clearImageCapCache } from "./extensions/image-cap";
 // Side-effect import: registers the ribbon/header translation tables.
 import "./i18n";
-import { clearImageCapCache } from "./extensions/image-cap";
+import {
+  DocenMiniToolbar,
+  defaultMiniToolbarButtons,
+  getMiniToolbar,
+} from "./extensions/mini-toolbar";
 import type { OutlineAnchor } from "./extensions/outline";
 import { pageStorageOf } from "./extensions/page-plugin";
 import { renderRibbonFromSchema, ribbonActions, ribbonTabs } from "./ribbon";
@@ -1294,13 +1298,13 @@ class DocenDocument extends AddinHost<Editor> {
     // default so their ribbon tabs append to the built-ins via mergeRibbonSchema.
     this.#applyAddinsAttr();
 
-    // Bubble-menu buttons: built-in defaults + addin contributions, merged at
+    // Mini-toolbar buttons: built-in defaults + addin contributions, merged at
     // boot — symmetric to `ribbonTabs(styles) + mergeRibbonSchema(addins)` in
     // #renderChrome. The bar extension stays OUT of defaultAddin.extensions
     // (the host owns the merge, like the ribbon), so it's configured here with
-    // the assembled list. Runtime `addAddin({ bubbleMenu })` re-merges in
+    // the assembled list. Runtime `addAddin({ miniToolbar })` re-merges in
     // addinsChanged (the bar's buttons are @observable), no re-mount needed.
-    const bubbleButtons = [...defaultBubbleButtons(), ...this.mergedBubbleMenu()];
+    const miniToolbarButtons = [...defaultMiniToolbarButtons(), ...this.mergedMiniToolbar()];
     this.#editor = createDocxEditor({
       element: page,
       content: initialDoc,
@@ -1310,10 +1314,10 @@ class DocenDocument extends AddinHost<Editor> {
       spellcheck: this.getAttribute("spellcheck") === "true",
       editable: this.getAttribute("editable") !== "false",
       // Engine extensions come from the default add-in (see addin.ts); the
-      // bubble-menu extension is layered on with the host-merged buttons.
+      // mini-toolbar extension is layered on with the host-merged buttons.
       extensions: [
         ...(defaultAddin.extensions ?? []),
-        DocenBubbleMenu.configure({ commands: bubbleButtons }),
+        DocenMiniToolbar.configure({ commands: miniToolbarButtons }),
       ],
     });
     this.#applyDocStyles();
@@ -1506,14 +1510,14 @@ class DocenDocument extends AddinHost<Editor> {
    *  tabs. */
   protected addinsChanged(): void {
     this.#renderChrome();
-    // Re-merge the bubble-menu buttons so a runtime addAddin's `bubbleMenu`
+    // Re-merge the mini-toolbar buttons so a runtime addAddin's `miniToolbar`
     // takes effect immediately — symmetric to the ribbon re-render above. The
     // bar's `commands` is @observable, so re-assignment re-renders the row and
     // re-injects icons without rebuilding the BubbleMenu plugin. No-op before
     // the editor boots (bar is null until addProseMirrorPlugins runs).
-    const bar = getBubbleBar();
+    const bar = getMiniToolbar();
     if (bar) {
-      bar.commands = [...defaultBubbleButtons(), ...this.mergedBubbleMenu()];
+      bar.commands = [...defaultMiniToolbarButtons(), ...this.mergedMiniToolbar()];
     }
   }
 

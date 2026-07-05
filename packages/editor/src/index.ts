@@ -14,9 +14,10 @@ export { default as DocenWorkbook } from "./workbook";
 
 // Re-export the UI bootstrap so demos/consumers import everything from one
 // entry — matches importing ./src/index.ts directly.
-export { applyTheme, registerComponents } from "./ui";
+export { applyTheme, registerComponents, registerTranslation, observeLang, t } from "./ui";
 
 // Public types for add-in authors and host consumers.
 export type { TaskPaneId, VisibilityMode } from "./document";
 export type { AddinHost } from "./ui/addin/host";
 export type { DocenHost, DocenAddin, RibbonTab } from "./ui/addin/types";
+export type { DocenTranslation } from "./ui";

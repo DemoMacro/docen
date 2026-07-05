@@ -222,7 +222,7 @@ only ribbon tabs flow through the `addins` attribute right now.
 ```html
 <!-- Declarative: a "Citations" ribbon tab -->
 <docen-document
-  addins='[{"id":"citations","ribbon":[{"tab":"citations","tabLabel":"Citations","groups":[{"id":"tools","label":"Tools","controls":[{"type":"button","id":"cite","label":"Cite","event":"bold"}]}]}]}]'
+  addins='[{"id":"citations","ribbon":[{"tab":"citations","label":"Citations","groups":[{"id":"tools","label":"Tools","controls":[{"type":"button","id":"cite","label":"Cite","event":"bold"}]}]}]}]'
 ></docen-document>
 ```
 
@@ -234,7 +234,7 @@ doc.addAddin({
   ribbon: [
     {
       tab: "citations",
-      tabLabel: "Citations",
+      label: "Citations",
       groups: [
         {
           id: "tools",
