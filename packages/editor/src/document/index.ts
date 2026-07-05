@@ -39,6 +39,7 @@ import {
   notifyLocaleChange,
   observeLang,
   registerComponents,
+  resolveTheme,
   t,
   type DocenAddin,
 } from "../ui";
@@ -212,6 +213,13 @@ const documentStyles = css`
        is gone). Table borders and list markers are handled in their own rules
        below. */
   @layer reset {
+    /* Default body ink follows the theme so dark/HC pages stay legible —
+         Word's Dark Mode inverts auto-colored text the same way. DOCX inline
+         colors and named styles (.docx-style-* in the docxStyles layer) override
+         this per-run, so explicit run colors are preserved. */
+    .docen-pages .ProseMirror {
+      color: var(--colorNeutralForeground1, #242424);
+    }
     .docen-pages .ProseMirror p,
     .docen-pages .ProseMirror h1,
     .docen-pages .ProseMirror h2,
@@ -1261,7 +1269,7 @@ class DocenDocument extends AddinHost<Editor> {
     this.#langObserver.observe(this, { attributes: true, attributeFilter: ["lang"] });
     this.#syncLang();
     await registerComponents();
-    applyTheme(this.getAttribute("theme") === "dark" ? "dark" : "light");
+    applyTheme(resolveTheme(this.getAttribute("theme")));
 
     this.#fileInput = this.shadowRoot!.querySelector<HTMLInputElement>("#file-input")!;
     this.#imageInput = this.shadowRoot!.querySelector<HTMLInputElement>("#image-input")!;
@@ -1608,9 +1616,10 @@ class DocenDocument extends AddinHost<Editor> {
     this.#addinAttrIds = next;
   }
 
-  /** Apply the `theme` attribute: switch the Fluent theme (light/dark). */
+  /** Apply the `theme` attribute: switch the Fluent theme
+   *  (light/dark/high-contrast/teams-*). */
   #applyThemeAttr(value: string): void {
-    applyTheme(value === "dark" ? "dark" : "light");
+    applyTheme(resolveTheme(value));
   }
 
   /** Grey out ribbon commands that have no handler (skeleton buttons). Runs
@@ -2157,10 +2166,11 @@ class DocenDocument extends AddinHost<Editor> {
         this.#emitCancelable("docen:new");
         break;
       case "options": {
-        // Filename menu → open the Options dialog (UI language).
+        // Filename menu → open the Options dialog (UI language + theme).
         const optionsEl = this.shadowRoot?.querySelector("docen-options-dialog");
         if (optionsEl) {
           optionsEl.setAttribute("locale", this.lang || document.documentElement.lang || "zh-CN");
+          optionsEl.setAttribute("theme", this.theme ?? "light");
           (optionsEl as unknown as { show?: () => void }).show?.();
         }
         break;
@@ -2192,12 +2202,16 @@ class DocenDocument extends AddinHost<Editor> {
     }
   };
 
-  /** Options dialog 确定 — commit the UI language. */
+  /** Options dialog 确定 — commit the UI language + theme. */
   readonly #onOptionsOk = (event: Event): void => {
-    const lang = (event as CustomEvent<{ lang?: string }>).detail?.lang;
+    const { lang, theme } = (event as CustomEvent<{ lang?: string; theme?: string }>).detail ?? {};
     if (lang && this.getAttribute("lang") !== lang) {
       this.setAttribute("lang", lang);
       this.#emitLangChange(lang);
+    }
+    if (theme && this.getAttribute("theme") !== theme) {
+      this.setAttribute("theme", theme);
+      this.#emitThemeChange(theme);
     }
   };
 
@@ -2208,6 +2222,16 @@ class DocenDocument extends AddinHost<Editor> {
   #emitLangChange(lang: string): void {
     this.dispatchEvent(
       new CustomEvent("docen:lang-change", { bubbles: true, composed: true, detail: { lang } }),
+    );
+  }
+
+  /** Notify external listeners (framework wrappers like @docen/vue) when the
+   *  theme changes from inside the host — Options OK. External `theme` writes
+   *  (e.g. a Vue prop) set the attribute directly and don't route through
+   *  here, so there's no echo cycle. */
+  #emitThemeChange(theme: string): void {
+    this.dispatchEvent(
+      new CustomEvent("docen:theme-change", { bubbles: true, composed: true, detail: { theme } }),
     );
   }
 

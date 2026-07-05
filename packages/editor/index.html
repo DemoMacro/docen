@@ -37,10 +37,50 @@
     <script type="module">
       // Import from source (not the package name) so vite treats this as
       // workspace source, not a pre-bundled dep.
-      import { applyTheme, registerComponents, registerTranslation } from "./src/index.ts";
+      import {
+        applyTheme,
+        createLightTheme,
+        registerComponents,
+        registerTheme,
+        registerTranslation,
+      } from "./src/index.ts";
 
       await registerComponents();
       applyTheme("light");
+
+      // Example: register a custom brand theme. registerTheme(themeId, theme)
+      // stores a Fluent Theme under "contoso"; the Options dialog's Theme
+      // dropdown picks it up automatically (labels come from the theme.<id>
+      // i18n key — registered below for each locale). The Theme is built with
+      // @fluentui/tokens' createLightTheme(brand): a BrandVariants ramp from 10
+      // (darkest) to 160 (lightest). Try it: Options → Theme → "Contoso Green".
+      const contosoGreen = {
+        10: "#052506",
+        20: "#0a3909",
+        30: "#0f4d0d",
+        40: "#14610c",
+        50: "#1a750b",
+        60: "#1f8a0a",
+        70: "#259e08",
+        80: "#2ab207",
+        90: "#43c322",
+        100: "#62d340",
+        110: "#75d450",
+        120: "#93de6b",
+        130: "#a8e380",
+        140: "#b8e896",
+        150: "#c9eda9",
+        160: "#dff3c5",
+      };
+      registerTheme("contoso", createLightTheme(contosoGreen));
+      registerTranslation({
+        languageTag: "en",
+        translations: { "theme.contoso": "Contoso Green" },
+      });
+      registerTranslation({
+        languageTag: "zh-CN",
+        translations: { "theme.contoso": "Contoso 绿" },
+      });
 
       // Example: register a third locale (French). registerTranslation merges
       // into the built-in en/zh-CN tables, so the status-bar language cycle,
@@ -85,6 +125,7 @@
           "status.page-of": "Page {page} sur {total}",
           "status.words": "{n} mots",
           "status.section": "Section {n}",
+          "theme.contoso": "Contoso Vert",
         },
       });
 

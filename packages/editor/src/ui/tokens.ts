@@ -39,12 +39,13 @@ export const OFFICE_TOKENS_CSS = `
   --docen-color-brand: var(--colorBrandBackground, #0078d4);
   --docen-color-accent: var(--colorBrandBackground, #0f6cbd);
 
-  /* Page paper + editing marks are document annotations, not chrome — they
-     stay a fixed ink tone regardless of the UI theme (Word keeps a white page
-     in dark mode by default). */
-  --docen-color-page: #ffffff;
-  --docen-color-crop: #adadad;
-  --docen-color-marks: #767676;
+  /* Page paper — reuse Fluent's neutral background so the sheet follows the
+     active theme (white in light, dark in dark/high-contrast), like Word's
+     "Use system colors" page. Crop / editing marks follow the theme's
+     secondary foreground (Word's marks recolor in Dark Mode the same way). */
+  --docen-color-page: var(--colorNeutralBackground1, #ffffff);
+  --docen-color-crop: var(--colorNeutralForeground3, #adadad);
+  --docen-color-marks: var(--colorNeutralForeground3, #767676);
 }` as const;
 
 const STYLE_ID = "docen-office-tokens";

@@ -70,7 +70,7 @@ Mirror the `<docen-document>` attributes. Pass `undefined` to leave an attribute
 | `sectionProperties` | object  | `section-properties` | JSON page setup (size/margin/orientation) |
 | `styles`            | object  | `styles`             | JSON named-styles model                   |
 | `addins`            | array   | `addins`             | JSON external add-ins (ribbon/task-pane)  |
-| `theme`             | string  | `theme`              | `"light" \| "dark"`; reactive             |
+| `theme`             | string  | `theme`              | Fluent built-in key; reactive             |
 | `navigationPane`    | boolean | `navigation-pane`    | Initial nav-pane visibility (once)        |
 | `propertiesPane`    | boolean | `properties-pane`    | Initial properties-pane visibility (once) |
 | `zoom`              | number  | `zoom`               | Initial zoom percent (once)               |
@@ -85,6 +85,7 @@ Re-emitted from the web component's `docen:*` events:
 - `@change`, `@save`, `@save-as`, `@open`, `@new`, `@print`
 - `@zoom-change`, `@taskpane-visibility-change`, `@marks-change` — UI state events; `detail` mirrors the web component's `docen:*` events (`{ zoom }`, `{ id, visibilityMode }`, `{ showMarks }`)
 - `@lang-change` — locale changed inside the host (status-bar cycle / Options OK); `detail: { lang }`
+- `@theme-change` — theme changed inside the host (Options OK); `detail: { theme }`
 
 ## Template ref
 
@@ -124,6 +125,35 @@ const lang = ref("en");
 
 Re-registering a tag merges, so an add-in can extend a built-in locale with its
 own keys. `availableLanguages()` lists every registered tag.
+
+## Theming
+
+`<docen-document>` ships 8 Fluent built-in themes. Bind with `:theme` +
+`@theme-change` (mirrors `:lang` / `@lang-change`):
+
+```vue
+<script setup lang="ts">
+import { ref } from "vue";
+import { DocenDocument } from "@docen/vue";
+
+const theme = ref("light");
+</script>
+
+<template>
+  <DocenDocument :theme="theme" @theme-change="theme = $event.theme" />
+</template>
+```
+
+Keys: `light`, `dark`, `high-contrast`, `teams-light`, `teams-dark`,
+`teams-high-contrast`, `teams-light-v21`, `teams-dark-v21`. In dark / high
+contrast the page paper and body ink both follow the theme (Word Dark Mode
+behavior); documents still print with their original colors.
+
+Register a custom brand theme with `registerTheme(id, createLightTheme(brand))`
+from `@docen/editor` — `brand` is a full 16-step `BrandVariants` ramp (10 darkest
+→ 160 lightest; missing shades make `createLightTheme` emit `undefined` tokens
+that crash `setGlobalTheme`) — then set `:theme="id"`. The built-in set is
+iterated via `builtinThemes.keys()`.
 
 ## Why a separate package?
 

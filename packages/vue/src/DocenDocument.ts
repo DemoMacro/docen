@@ -83,6 +83,7 @@ export const DocenDocument = defineComponent({
     "taskpane-visibility-change",
     "marks-change",
     "lang-change",
+    "theme-change",
   ],
   setup(props, { emit, expose, slots }) {
     const el = ref<DocenEl | null>(null);
@@ -189,6 +190,7 @@ export const DocenDocument = defineComponent({
       emit("taskpane-visibility-change", (e as CustomEvent).detail);
     const onMarksChange = (e: Event): void => emit("marks-change", (e as CustomEvent).detail);
     const onLangChange = (e: Event): void => emit("lang-change", (e as CustomEvent).detail);
+    const onThemeChange = (e: Event): void => emit("theme-change", (e as CustomEvent).detail);
 
     expose({
       editor,
@@ -205,17 +207,24 @@ export const DocenDocument = defineComponent({
       h("docen-document", {
         ref: el,
         ...attrs.value,
-        onDocenChange: onChange,
-        onDocenNew: onNew,
-        onDocenOpen: onOpen,
-        onDocenPrint: onPrint,
-        onDocenReady: onReady,
-        onDocenSave: onSave,
-        onDocenSaveAs: onSaveAs,
-        onDocenZoomChange: onZoomChange,
-        onDocenTaskpaneVisibilityChange: onTaskpaneVisibilityChange,
-        onDocenMarksChange: onMarksChange,
-        onDocenLangChange: onLangChange,
+        // Host events are colon-namespaced (docen:change — Office.js style).
+        // Vue's onXxx identifier hyphenates to "docen-change" (no colon) and
+        // silently misses the host's "docen:change", so the keys must be string
+        // literals preserving the colon: parseName("onDocen:change") runs
+        // hyphenate("Docen:change") → "docen:change" (colon kept, no uppercase
+        // left to hyphenate). See Vue runtime-dom events.ts parseName.
+        "onDocen:change": onChange,
+        "onDocen:new": onNew,
+        "onDocen:open": onOpen,
+        "onDocen:print": onPrint,
+        "onDocen:ready": onReady,
+        "onDocen:save": onSave,
+        "onDocen:save-as": onSaveAs,
+        "onDocen:zoom-change": onZoomChange,
+        "onDocen:taskpane-visibility-change": onTaskpaneVisibilityChange,
+        "onDocen:marks-change": onMarksChange,
+        "onDocen:lang-change": onLangChange,
+        "onDocen:theme-change": onThemeChange,
       }),
     ];
   },

@@ -409,6 +409,15 @@ export const ribbonEn: AdditionalLanguage = {
     "options.language": "Language",
     "options.lang.zh": "Chinese (Simplified)",
     "options.lang.en": "English",
+    "options.theme": "Theme",
+    "theme.light": "Light",
+    "theme.dark": "Dark",
+    "theme.high-contrast": "High Contrast",
+    "theme.teams-light": "Teams Light",
+    "theme.teams-dark": "Teams Dark",
+    "theme.teams-high-contrast": "Teams High Contrast",
+    "theme.teams-light-v21": "Teams V21 Light",
+    "theme.teams-dark-v21": "Teams V21 Dark",
   },
 };
 
@@ -803,6 +812,15 @@ export const ribbonZhCN: AdditionalLanguage = {
     "options.language": "语言",
     "options.lang.zh": "中文（简体）",
     "options.lang.en": "英语",
+    "options.theme": "主题",
+    "theme.light": "浅色",
+    "theme.dark": "深色",
+    "theme.high-contrast": "高对比度",
+    "theme.teams-light": "Teams 浅色",
+    "theme.teams-dark": "Teams 深色",
+    "theme.teams-high-contrast": "Teams 高对比度",
+    "theme.teams-light-v21": "Teams V21 浅色",
+    "theme.teams-dark-v21": "Teams V21 深色",
   },
 };
 
