@@ -2186,7 +2186,10 @@ class DocenDocument extends AddinHost<Editor> {
     const lang = (event as CustomEvent<{ lang: string }>).detail?.lang;
     // Set on the host (not <html lang>) so locale is per-instance; the
     // #langObserver forwards to the workspace and notifies observers.
-    if (lang) this.setAttribute("lang", lang);
+    if (lang) {
+      this.setAttribute("lang", lang);
+      this.#emitLangChange(lang);
+    }
   };
 
   /** Options dialog 确定 — commit the UI language. */
@@ -2194,8 +2197,19 @@ class DocenDocument extends AddinHost<Editor> {
     const lang = (event as CustomEvent<{ lang?: string }>).detail?.lang;
     if (lang && this.getAttribute("lang") !== lang) {
       this.setAttribute("lang", lang);
+      this.#emitLangChange(lang);
     }
   };
+
+  /** Notify external listeners (framework wrappers like @docen/vue) when the
+   *  locale changes from inside the host — status-bar toggle or Options OK.
+   *  External `lang` writes (e.g. a Vue prop) set the attribute directly and
+   *  don't route through here, so there's no echo cycle. */
+  #emitLangChange(lang: string): void {
+    this.dispatchEvent(
+      new CustomEvent("docen:lang-change", { bubbles: true, composed: true, detail: { lang } }),
+    );
+  }
 
   /** Open the OS file picker. The accept filter on the input element covers
    *  .docx/.md/.markdown/.html/.htm; #onFileChange routes the chosen file by

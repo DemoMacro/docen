@@ -9,6 +9,8 @@ type TaskPaneId = "navigation" | "properties";
 
 type DocenEl = HTMLElement & {
   editor?: Editor;
+  // Office.context.displayLanguage equivalent — read-only current locale.
+  displayLanguage?: string;
   showTaskpane?: (id: TaskPaneId) => void;
   hideTaskpane?: (id: TaskPaneId) => void;
   getTaskpaneState?: (id: TaskPaneId) => boolean;
@@ -63,6 +65,11 @@ export const DocenDocument = defineComponent({
     /** Initial editing-marks visibility. Reflected as `show-marks` on mount;
      *  runtime changes route through `setShowMarks`. Track via `marks-change`. */
     showMarks: { type: Boolean, default: undefined },
+    /** UI locale (BCP-47 tag, e.g. "zh-CN" / "en" / "fr"). Reflected to the
+     *  reactive `lang` attribute; the host forwards it to the workspace so
+     *  every label re-resolves. Internal changes (status-bar cycle, Options
+     *  OK) surface via `lang-change`. */
+    lang: { type: String, default: undefined },
   },
   emits: [
     "update:modelValue",
@@ -75,6 +82,7 @@ export const DocenDocument = defineComponent({
     "zoom-change",
     "taskpane-visibility-change",
     "marks-change",
+    "lang-change",
   ],
   setup(props, { emit, expose, slots }) {
     const el = ref<DocenEl | null>(null);
@@ -106,6 +114,7 @@ export const DocenDocument = defineComponent({
         a["properties-pane"] = props.propertiesPane ? "true" : "false";
       if (props.zoom != null) a.zoom = String(props.zoom);
       if (props.showMarks != null) a["show-marks"] = props.showMarks ? "true" : "false";
+      if (props.lang != null) a.lang = props.lang;
       return a;
     });
 
@@ -179,10 +188,13 @@ export const DocenDocument = defineComponent({
     const onTaskpaneVisibilityChange = (e: Event): void =>
       emit("taskpane-visibility-change", (e as CustomEvent).detail);
     const onMarksChange = (e: Event): void => emit("marks-change", (e as CustomEvent).detail);
+    const onLangChange = (e: Event): void => emit("lang-change", (e as CustomEvent).detail);
 
     expose({
       editor,
       getElement: (): HTMLElement | null => el.value,
+      /** Current UI locale (Office.context.displayLanguage equivalent). */
+      getDisplayLanguage: (): string | undefined => el.value?.displayLanguage,
     });
 
     return () => [
@@ -203,6 +215,7 @@ export const DocenDocument = defineComponent({
         onDocenZoomChange: onZoomChange,
         onDocenTaskpaneVisibilityChange: onTaskpaneVisibilityChange,
         onDocenMarksChange: onMarksChange,
+        onDocenLangChange: onLangChange,
       }),
     ];
   },

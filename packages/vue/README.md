@@ -75,6 +75,7 @@ Mirror the `<docen-document>` attributes. Pass `undefined` to leave an attribute
 | `propertiesPane`    | boolean | `properties-pane`    | Initial properties-pane visibility (once) |
 | `zoom`              | number  | `zoom`               | Initial zoom percent (once)               |
 | `showMarks`         | boolean | `show-marks`         | Initial marks visibility (once)           |
+| `lang`              | string  | `lang`               | BCP-47 UI locale; per-instance, reactive  |
 
 ## Events
 
@@ -83,10 +84,46 @@ Re-emitted from the web component's `docen:*` events:
 - `update:modelValue` — editor content changed (drives v-model)
 - `@change`, `@save`, `@save-as`, `@open`, `@new`, `@print`
 - `@zoom-change`, `@taskpane-visibility-change`, `@marks-change` — UI state events; `detail` mirrors the web component's `docen:*` events (`{ zoom }`, `{ id, visibilityMode }`, `{ showMarks }`)
+- `@lang-change` — locale changed inside the host (status-bar cycle / Options OK); `detail: { lang }`
 
 ## Template ref
 
-The ref exposes `{ editor, getElement() }`, where `editor` is the Tiptap `Editor` (undefined until the editor is live).
+The ref exposes `{ editor, getElement(), getDisplayLanguage() }`, where `editor` is the Tiptap `Editor` (undefined until the editor is live) and `getDisplayLanguage()` returns the current UI locale (`Office.context.displayLanguage` equivalent).
+
+## Internationalization
+
+The adapter re-exports the i18n API from `@docen/editor`, so a Vue app registers
+locales from the same entry. The host ships with English (`en`, default) and
+Chinese (`zh-CN`); add more by registering a translation table:
+
+```typescript
+import { registerTranslation } from "@docen/vue";
+
+registerTranslation({
+  languageTag: "fr",
+  $name: "Français",
+  translations: { "ribbon.tab.home": "Accueil" /* … */ },
+});
+```
+
+Bind the locale with `:lang` + `@lang-change` — the host forwards the attribute
+to its workspace and every label re-resolves live:
+
+```vue
+<script setup lang="ts">
+import { ref } from "vue";
+import { DocenDocument } from "@docen/vue";
+
+const lang = ref("en");
+</script>
+
+<template>
+  <DocenDocument :lang="lang" @lang-change="lang = $event.lang" />
+</template>
+```
+
+Re-registering a tag merges, so an add-in can extend a built-in locale with its
+own keys. `availableLanguages()` lists every registered tag.
 
 ## Why a separate package?
 

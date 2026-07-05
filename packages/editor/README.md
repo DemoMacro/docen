@@ -13,7 +13,7 @@
 - 🧩 **Turnkey `<docen-document>`** — One custom element bundles the Fluent UI host (title bar, ribbon, document area, status bar, panes, find/replace) with the @docen/docx engine
 - 📄 **Office-style pagination** — C-route: fixed-height page boxes with physical overflow reflow, keeping edit == render in a single contenteditable
 - 🎨 **Fluent UI surfaces** — Ribbon (buttons, split/toggle buttons, combobox, galleries, color picker), workspace, task/navigation/format panes, context menu
-- 🌐 **i18n** — Built-in Chinese (zh-CN) and English (en); switch live from the status bar (click the language text)
+- 🌐 **i18n** — Built-in Chinese (zh-CN) and English (en); add more via `registerTranslation` / `localizationInfo`. Switch live from the status bar (cycles every registered locale) or the Options dialog
 - 🌓 **Light/dark theme** — Fluent design tokens drive the chrome; switch via the `theme` attribute
 - 🔄 **DOCX round-trip** — Open/save `.docx` through the underlying @docen/docx engine
 - 🔌 **Add-ins** — Plug in ribbon tabs, task panes, and commands without touching host internals
@@ -91,6 +91,7 @@ via add-ins rather than toggling attributes.
 | `properties-pane`    | —          | `true` opens the properties (right) pane on connect (once)             |
 | `zoom`               | `100`      | Initial zoom percent (once); runtime via `setZoom`                     |
 | `show-marks`         | `false`    | `true` shows page/section-break markers (once); runtime `setShowMarks` |
+| `lang`               | —          | BCP-47 UI locale (`"zh-CN"` / `"en"` / …); per-instance, reactive      |
 
 Unwired ribbon commands (skeleton buttons) render visually but are greyed out
 (`disabled`) — the ribbon keeps its full Office shape without dead clicks.
@@ -138,6 +139,9 @@ class DocenDocument extends HTMLElement {
   // Add-in registry — register/unregister ribbon + command contributions.
   addAddin(addin: DocenAddin): void;
   removeAddin(id: string): void;
+
+  // Office.context.displayLanguage equivalent — read-only current UI locale.
+  readonly displayLanguage: string;
 }
 ```
 
@@ -163,6 +167,7 @@ detail.)
 | `docen:taskpane-visibility-change` | A task pane opened/closed (method or pane ✕)   | `{ id, visibilityMode }` |
 | `docen:zoom-change`                | Zoom changed (button / slider / `setZoom`)     | `{ zoom }`               |
 | `docen:marks-change`               | Formatting marks toggled                       | `{ showMarks }`          |
+| `docen:lang-change`                | Locale changed (status-bar cycle / Options OK) | `{ lang }`               |
 
 **Slots**
 
@@ -253,6 +258,48 @@ Ribbon control `event` names route to the engine's native Tiptap commands
 (`editor.chain().focus().<event>(value).run()`), so a built-in name like `bold`
 works directly. Override a command by contributing a Tiptap extension whose
 `addCommands` redefines the same name.
+
+### Internationalization
+
+The host ships with English (`en`, default) and Chinese (`zh-CN`). Every label
+runs through a single `t(key)` lookup, and the locale resolves **per-instance**
+from `<docen-document lang>` (forwarded to the internal workspace) — set the
+attribute and the ribbon, header, status bar, and Options dialog re-localize
+live, with no dependency on `<html lang>`. The status-bar language pill cycles
+every registered locale; the Options dialog renders a `<select>` of the same
+list.
+
+Add a locale by registering its translation table — the Options dropdown and
+the status-bar cycle pick it up with no further wiring:
+
+```typescript
+import { registerTranslation } from "@docen/editor";
+
+registerTranslation({
+  languageTag: "fr",
+  $name: "Français",
+  translations: { "ribbon.tab.home": "Accueil" /* … */ },
+});
+```
+
+Re-registering a tag **merges** (later wins on key conflicts), so an add-in can
+extend a built-in locale with its own keys without clobbering the base. The
+Office.js manifest shape is supported too — pass `localizationInfo` on an
+add-in and the host registers it on `addAddin`:
+
+```typescript
+doc.addAddin({
+  id: "about",
+  localizationInfo: {
+    defaultLanguageTag: "en",
+    additionalLanguages: [{ languageTag: "zh-CN", translations: { "about.tab": "关于" } }],
+  },
+  // …ribbon, commands…
+});
+```
+
+`availableLanguages()` lists every registered tag (for custom pickers); the
+read-only `displayLanguage` getter mirrors `Office.context.displayLanguage`.
 
 ### UI Bootstrap
 

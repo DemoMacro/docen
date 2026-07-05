@@ -11,3 +11,10 @@ export { DocenDocument } from "./DocenDocument";
 
 // Re-export the web-component bootstrap so a Vue app imports everything from one entry.
 export { applyTheme, registerComponents } from "@docen/editor";
+
+// Re-export the i18n API so a Vue app registers locales from the same entry —
+// mirrors the @docen/editor public surface (registerTranslation merges into
+// the built-in en/zh-CN tables; availableLanguages drives the Options dropdown
+// and the status-bar language cycle).
+export { availableLanguages, registerLocalization, registerTranslation, t } from "@docen/editor";
+export type { AdditionalLanguage, LanguageOption, LocalizationInfo } from "@docen/editor";
