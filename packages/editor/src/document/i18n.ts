@@ -401,8 +401,6 @@ export const ribbonEn: DocenTranslation = {
   "status.section": "Section: {n}",
   "status.page-of": "Page {page} of {total}",
   "status.words": "Words: {n}",
-  // --- Editor surface ---
-  "editor.placeholder": "Start writing",
   // --- Options dialog ---
   "options.title": "Options",
   "options.ok": "OK",
@@ -795,7 +793,6 @@ export const ribbonZhCN: DocenTranslation = {
   "status.section": "节: {n}",
   "status.page-of": "第 {page} 页，共 {total} 页",
   "status.words": "字数: {n}",
-  "editor.placeholder": "开始书写…",
   // --- 选项对话框 ---
   "options.title": "选项",
   "options.ok": "确定",

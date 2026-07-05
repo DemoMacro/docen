@@ -5,14 +5,13 @@ import {
   Dropcursor,
   Focus,
   Gapcursor,
-  Placeholder,
   Selection,
   TrailingNode,
   UndoRedo,
 } from "@tiptap/extensions";
 import { search } from "prosemirror-search";
 
-import { t, type DocenAddin, type DocenHost } from "../ui";
+import { type DocenAddin, type DocenHost } from "../ui";
 import { DocumentCommands } from "./extensions/commands";
 import { FontMetricDecoration } from "./extensions/font-metric";
 import { ImageCap } from "./extensions/image-cap";
@@ -105,15 +104,6 @@ export function createDocumentExtensions(opts: {
     // node), so a widget decoration paints the Fluent divider after each
     // section-carrying paragraph.
     SectionBreakMarks,
-    Placeholder.configure({
-      // A function (not a string) so the prompt re-reads the active locale each
-      // time the decoration set is rebuilt — a locale switch refreshes the text.
-      placeholder: () => t("editor.placeholder"),
-      // C-route nests paragraphs inside a non-textblock page node (doc > page >
-      // p). Placeholder's walk returns false at the page unless includeChildren
-      // is set, so the prompt never reaches the paragraphs.
-      includeChildren: true,
-    }),
     // Editing-behavior set — the engine carries schema only.
     UndoRedo,
     Dropcursor,

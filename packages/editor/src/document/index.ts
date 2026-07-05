@@ -419,20 +419,6 @@ const documentStyles = css`
     background: Highlight;
     color: HighlightText;
   }
-  /* Placeholder — the Tiptap Placeholder extension only stamps an is-empty
-       class + data-placeholder attribute on empty nodes; this CSS paints the
-       label. :first-child shows it just on the document's first empty paragraph
-       (Word shows the prompt once, at the top); showOnlyCurrent (default) means
-       only the caret's empty node carries the attribute. float + height:0 keep
-       the label in-flow at the paragraph start without consuming layout, so it
-       never pushes real content or skews pagination measurement. */
-  .docen-pages .ProseMirror p.is-empty:first-child::before {
-    content: attr(data-placeholder);
-    color: var(--docen-color-text-3, #8a8a8a);
-    pointer-events: none;
-    float: left;
-    height: 0;
-  }
   /* Tables — Word inserts tables in the Table Grid style (a single black
        border on every cell). Without this a freshly inserted table is
        invisible: the docx table extension emits a border only when the node
@@ -1551,11 +1537,6 @@ class DocenDocument extends AddinHost<Editor> {
     // Status bar is dynamic (page count / caret page / zoom) — re-stamp it so a
     // locale change re-localizes the text too.
     this.#updateStatus();
-    // The placeholder prompt comes from a closure over t(); its decoration set
-    // is only rebuilt on a view update, so dispatch a meta-only transaction to
-    // force a rebuild against the now-current locale (empty doc → new prompt).
-    const view = this.#editor?.view;
-    if (view) view.dispatch(view.state.tr.setMeta("docen-i18n", true));
   }
 
   /** Add-in ids currently registered from the `addins` attribute. Tracked so
