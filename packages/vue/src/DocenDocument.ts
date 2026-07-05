@@ -1,7 +1,16 @@
-import type { SectionPropertiesOptions, StylesOptions } from "@docen/docx";
+import type { JSONContent, SectionPropertiesOptions, StylesOptions } from "@docen/docx";
 import type { Editor } from "@docen/docx/core";
 import type { PropType } from "vue";
-import { computed, defineComponent, h, ref, shallowRef, watch } from "vue";
+import {
+  computed,
+  defineComponent,
+  h,
+  markRaw,
+  onBeforeUnmount,
+  ref,
+  shallowRef,
+  watch,
+} from "vue";
 // Side-effect: registers the <docen-document> custom element on first import.
 import "@docen/editor";
 
@@ -11,6 +20,11 @@ type DocenEl = HTMLElement & {
   editor?: Editor;
   // Office.context.displayLanguage equivalent — read-only current locale.
   displayLanguage?: string;
+  // DocenHost content surface — getJSON unwraps page nodes (external consumers
+  // see flat doc > block+); setJSON wraps pages and preserves doc-level attrs
+  // (styles/core/sectionProperties) that editor.commands.setContent drops.
+  setJSON?: (json: JSONContent) => void;
+  getJSON?: () => JSONContent;
   showTaskpane?: (id: TaskPaneId) => void;
   hideTaskpane?: (id: TaskPaneId) => void;
   getTaskpaneState?: (id: TaskPaneId) => boolean;
@@ -21,13 +35,21 @@ type DocenEl = HTMLElement & {
 };
 
 /**
- * Vue 3 wrapper around the <docen-document> web component, shaped after Nuxt
- * UI's UEditor adapter:
- *   - `v-model` for content (HTML) — two-way: modelValue → editor.setContent,
- *     docen:change → editor.getHTML → update:modelValue (with an echo guard).
+ * Vue 3 wrapper around the <docen-document> web component:
+ *   - `v-model` for content (Tiptap JSON) — two-way: modelValue → host.setJSON
+ *     (preserves doc.attrs.styles that editor.commands.setContent drops),
+ *     docen:change → host.getJSON → update:modelValue (debounced; echo-broken
+ *     by reference equality so the round-trip doesn't re-inject).
  *   - `v-slot="{ editor }"` exposes the underlying Tiptap editor (undefined
  *     until docen:ready) so a parent can render ad-hoc UI alongside the editor.
- *   - a template ref exposes `{ editor, getElement() }`.
+ *   - a template ref exposes `{ editor, getElement(), getJSON(), setJSON() }`.
+ *
+ * Why JSON not HTML: HTML round-trips (getHTML/setContent) drop DOCX-rich attrs
+ * (styles/sectionProperties) and serialize O(n) per change; JSON carries the
+ * full runtime model and injects via host.setJSON which keeps doc-level attrs.
+ * The editor change → emit path is debounced (300 ms) so a large DOCX import
+ * (many pagination-reflow change events) produces one getJSON, not one per
+ * transaction.
  *
  * Only @docen/editor is a runtime dependency; @docen/docx types are imported
  * for prop typing only.
@@ -35,8 +57,10 @@ type DocenEl = HTMLElement & {
 export const DocenDocument = defineComponent({
   name: "DocenDocument",
   props: {
-    /** Content (HTML) — two-way via v-model. Also seeds the editor on connect. */
-    modelValue: { type: String, default: undefined },
+    /** Content (Tiptap JSON, page nodes unwrapped) — two-way via v-model.
+     *  Seeded through host.setJSON on ready; emitted as host.getJSON()
+     *  (debounced) on editor change. */
+    modelValue: { type: Object as PropType<JSONContent>, default: undefined },
     filename: { type: String, default: undefined },
     editable: { type: Boolean, default: undefined },
     spellcheck: { type: Boolean, default: undefined },
@@ -98,7 +122,10 @@ export const DocenDocument = defineComponent({
     // own default.
     const attrs = computed<Record<string, string>>(() => {
       const a: Record<string, string> = {};
-      if (props.modelValue != null) a.content = props.modelValue;
+      // modelValue is NOT reflected to the `content` attribute — it is injected
+      // through host.setJSON (see onReady + the modelValue watch below), which
+      // preserves doc.attrs.styles and avoids re-serializing a large string
+      // attribute on every change.
       if (props.filename != null) a.filename = props.filename;
       if (props.editable != null) a.editable = props.editable ? "true" : "false";
       if (props.spellcheck != null) a.spellcheck = props.spellcheck ? "true" : "false";
@@ -119,15 +146,21 @@ export const DocenDocument = defineComponent({
       return a;
     });
 
-    // v-model: external modelValue → editor.setContent. The getHTML() equality
-    // check breaks the feedback loop — onChange emits the editor's own HTML back
-    // as modelValue, so the watch sees html === getHTML() and skips setContent.
+    // v-model JSON: external modelValue → host.setJSON. host.setJSON routes
+    // through #loadDoc (fresh EditorState) so doc-level attrs (styles/core/
+    // sectionProperties) survive — editor.commands.setContent would drop them.
+    // lastEmitted breaks the round-trip echo: onChange emits getJSON() back as
+    // modelValue, the watch sees the same reference and skips re-injecting.
+    const lastEmitted = shallowRef<JSONContent | undefined>(undefined);
+    let emitTimer: ReturnType<typeof setTimeout> | undefined;
+    const EMIT_DEBOUNCE_MS = 300;
+
     watch(
       () => props.modelValue,
-      (html) => {
-        if (html == null) return;
-        const ed = editor.value;
-        if (ed && ed.getHTML() !== html) ed.commands.setContent(html);
+      (json) => {
+        if (json == null || json === lastEmitted.value) return;
+        const host = el.value;
+        if (host?.editor) host.setJSON?.(json);
       },
     );
 
@@ -171,14 +204,30 @@ export const DocenDocument = defineComponent({
     );
 
     function onReady(): void {
-      editor.value = el.value?.editor;
+      const host = el.value;
+      editor.value = host?.editor;
+      // Seed initial content via setJSON (not the content attribute) so a
+      // modelValue carrying doc.attrs.styles is applied properly.
+      if (props.modelValue != null) host?.setJSON?.(props.modelValue);
     }
 
     function onChange(e: Event): void {
       emit("change", (e as CustomEvent).detail);
-      const ed = editor.value;
-      if (ed) emit("update:modelValue", ed.getHTML());
+      // Debounce getJSON: a DOCX import triggers many docen:change events as
+      // pagination reflows; one getJSON per quiet window instead of one per
+      // transaction (getJSON is O(n) on large docs).
+      clearTimeout(emitTimer);
+      emitTimer = setTimeout(() => {
+        const host = el.value;
+        const json = host?.getJSON?.();
+        if (!json) return;
+        const raw = markRaw(json) as JSONContent;
+        lastEmitted.value = raw;
+        emit("update:modelValue", raw);
+      }, EMIT_DEBOUNCE_MS);
     }
+
+    onBeforeUnmount(() => clearTimeout(emitTimer));
 
     const onSave = (e: Event): void => emit("save", (e as CustomEvent).detail);
     const onSaveAs = (e: Event): void => emit("save-as", (e as CustomEvent).detail);
@@ -197,6 +246,13 @@ export const DocenDocument = defineComponent({
       getElement: (): HTMLElement | null => el.value,
       /** Current UI locale (Office.context.displayLanguage equivalent). */
       getDisplayLanguage: (): string | undefined => el.value?.displayLanguage,
+      /** Read the document as Tiptap JSON (page nodes unwrapped). */
+      getJSON: (): JSONContent | undefined => el.value?.getJSON?.(),
+      /** Replace the document from Tiptap JSON (routes through #loadDoc, so
+       *  doc.attrs.styles/core are preserved). */
+      setJSON: (json: JSONContent): void => {
+        el.value?.setJSON?.(json);
+      },
     });
 
     return () => [
