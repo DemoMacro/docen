@@ -85,6 +85,11 @@ export interface RibbonSeparator {
   type: "separator";
 }
 
+/** A discriminated union of every ribbon control kind. The `type` discriminator
+ *  uses kebab-case (Web Component convention) and maps to Office.js manifest
+ *  control kinds: `Button`→"button", `Menu`→"menu", `SplitButton`→"split",
+ *  `ComboBox`→"combobox". `RibbonColorPicker` / `RibbonSeparator` are docen
+ *  additions with no manifest counterpart. */
 export type RibbonControl =
   | RibbonButton
   | RibbonMenu

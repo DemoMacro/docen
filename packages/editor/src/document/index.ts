@@ -2637,7 +2637,9 @@ class DocenDocument extends AddinHost<Editor> {
     this.#setTaskpane(id, false);
   }
 
-  /** Whether a task pane is currently open. */
+  /** Whether a task pane is currently open. Returns a boolean for convenience
+   *  (callers want open/closed); the `docen:taskpane-visibility-change` event
+   *  detail carries the string `VisibilityMode` to mirror `Office.VisibilityMode`. */
   getTaskpaneState(id: TaskPaneId): boolean {
     return !!this.#paneEl(id)?.open;
   }

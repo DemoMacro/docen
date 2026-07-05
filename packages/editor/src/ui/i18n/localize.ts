@@ -40,7 +40,13 @@ export interface AdditionalLanguage {
 /** A localization manifest — Office.js `localizationInfo`. `defaultLanguageTag`
  *  is the fallback locale (localeChain's last link); `additionalLanguages` are
  *  the per-language tables. Office.js references external files; docen inlines
- *  the tables as {@link AdditionalLanguage.translations}. */
+ *  the tables as {@link AdditionalLanguage.translations}.
+ *
+ *  docen extension: `additionalLanguages` may include an entry for the default
+ *  language itself. Office.js keeps default-language strings in the manifest
+ *  file, but a docen addin is a plain JS object with no equivalent, so it
+ *  contributes its default-locale keys through `additionalLanguages` like any
+ *  other language. */
 export interface LocalizationInfo {
   /** Fallback locale used when neither `<docen-workspace lang>` nor `<html lang>`
    *  yields a hit, and as localeChain's terminal fallback (Office.js
