@@ -8,12 +8,7 @@ import {
   ref,
 } from "@microsoft/fast-element";
 
-import { observeLang, t } from "../../i18n/localize";
-
-const LANGS = [
-  { id: "zh-CN", key: "options.lang.zh" },
-  { id: "en", key: "options.lang.en" },
-] as const;
+import { availableLanguages, observeLang, resolveLang, t } from "../../i18n/localize";
 
 const styles = css`
   :host {
@@ -28,6 +23,20 @@ const styles = css`
   .opt-heading {
     font-weight: 600;
     margin-block-end: 8px;
+  }
+  /* Native <select> — dependency-free and accessible; Office's language picker
+     is a plain dropdown too. Styled against the docen token palette so it
+     tracks light/dark along with the rest of the shell. */
+  .opt-lang-select {
+    width: 100%;
+    padding: 6px 8px;
+    border: 1px solid var(--docen-color-stroke-1, #c7c7c7);
+    border-radius: 4px;
+    background: var(--docen-color-background-1, #fff);
+    color: var(--docen-color-text-1, #242424);
+    font-size: 13px;
+    font-family: inherit;
+    cursor: pointer;
   }
 `;
 
@@ -50,9 +59,9 @@ const template = html<DocenOptionsDialog>`
  * for `options:ok { lang }` (确定). Cancel / Esc just close. State commits
  * atomically on OK (Office behavior — not live).
  *
- * Note: `fluent-radio` renders no text of its own (see registry.ts), so each
- * radio is wrapped in a `fluent-field` with a slotted `<label>` — the same
- * pattern the properties panel uses.
+ * The language list is data-driven: {@link availableLanguages} reads every
+ * registered tag, so a new locale added via `registerTranslation` (or an
+ * add-in's `localizationInfo`) appears here with no further wiring.
  */
 @customElement({ name: "docen-options-dialog", template, styles })
 class DocenOptionsDialog extends FASTElement {
@@ -65,7 +74,7 @@ class DocenOptionsDialog extends FASTElement {
   @observable okBtn?: HTMLElement;
   @observable cancelBtn?: HTMLElement;
   #unobserveLang?: () => void;
-  #langLocal = "zh-CN";
+  #langLocal = "";
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -88,7 +97,7 @@ class DocenOptionsDialog extends FASTElement {
   }
 
   show(): void {
-    this.#langLocal = this.locale ?? "zh-CN";
+    this.#langLocal = this.locale ?? resolveLang(this);
     this.#renderLanguage();
     this.dialogEl?.show();
   }
@@ -113,9 +122,9 @@ class DocenOptionsDialog extends FASTElement {
   };
 
   #applyLabels(): void {
-    if (this.dialogEl) this.dialogEl.heading = t("options.title");
-    if (this.okBtn) this.okBtn.textContent = t("options.ok");
-    if (this.cancelBtn) this.cancelBtn.textContent = t("options.cancel");
+    if (this.dialogEl) this.dialogEl.heading = t("options.title", this);
+    if (this.okBtn) this.okBtn.textContent = t("options.ok", this);
+    if (this.cancelBtn) this.cancelBtn.textContent = t("options.cancel", this);
   }
 
   #renderLanguage(): void {
@@ -123,36 +132,26 @@ class DocenOptionsDialog extends FASTElement {
     this.contentEl.replaceChildren();
     const heading = document.createElement("div");
     heading.className = "opt-heading";
-    heading.textContent = t("options.language");
+    heading.textContent = t("options.language", this);
     this.contentEl.append(heading);
-    const group = document.createElement("fluent-radio-group");
-    group.setAttribute("name", "opt-lang");
-    group.setAttribute("orientation", "vertical");
-    for (const l of LANGS) {
-      const id = `opt-lang-${l.id}`;
-      const fieldEl = document.createElement("fluent-field");
-      fieldEl.setAttribute("label-position", "after");
-      const label = document.createElement("label");
-      label.slot = "label";
-      label.htmlFor = id;
-      label.id = `${id}--label`;
-      label.textContent = t(l.key);
-      const radio = document.createElement("fluent-radio") as HTMLElement & {
-        value: string;
-      };
-      radio.slot = "input";
-      radio.id = id;
-      radio.setAttribute("name", "opt-lang");
-      radio.value = l.id;
-      radio.setAttribute("aria-labelledby", `${id}--label`);
-      if (l.id === this.#langLocal) radio.setAttribute("checked", "");
-      radio.addEventListener("change", () => {
-        this.#langLocal = l.id;
-      });
-      fieldEl.append(label, radio);
-      group.append(fieldEl);
+    // Pick the selected option from the live `#langLocal` (set by show()) or
+    // the host's current locale — so the dialog opens pointing at the right row
+    // even before the user touches it.
+    const current = this.#langLocal || this.locale || resolveLang(this);
+    const select = document.createElement("select");
+    select.className = "opt-lang-select";
+    select.setAttribute("aria-label", t("options.language", this));
+    for (const l of availableLanguages()) {
+      const option = document.createElement("option");
+      option.value = l.languageTag;
+      option.textContent = l.$name ?? l.languageTag;
+      if (l.languageTag === current) option.selected = true;
+      select.append(option);
     }
-    this.contentEl.append(group);
+    select.addEventListener("change", () => {
+      this.#langLocal = select.value;
+    });
+    this.contentEl.append(select);
   }
 }
 

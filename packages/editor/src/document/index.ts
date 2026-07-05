@@ -36,6 +36,7 @@ import {
   AddinHost,
   applyTheme,
   mergeRibbonSchema,
+  notifyLocaleChange,
   observeLang,
   registerComponents,
   t,
@@ -750,6 +751,11 @@ class DocenDocument extends AddinHost<Editor> {
    *  serialized tree) so object key order can never cause a spurious mismatch. */
   #outlineSig = "";
   #unobserveLang?: () => void;
+  /** Watches the host's `lang` attribute and forwards it to the internal
+   *  <docen-workspace> + notifies locale observers. MutationObserver because
+   *  @attr `lang` clashes with HTMLElement.lang (TS2416); manual
+   *  observedAttributes would break FASTElement's @attr dispatch. */
+  #langObserver?: MutationObserver;
   /** Tears down the transaction listener mirroring caret font/size → comboboxes. */
   #fontSyncCleanup?: () => void;
   // Format Painter captured marks + the pointerup listener that applies them.
@@ -1248,6 +1254,12 @@ class DocenDocument extends AddinHost<Editor> {
 
   async connectedCallback(): Promise<void> {
     super.connectedCallback();
+    // Forward this host's `lang` attribute to the internal <docen-workspace>
+    // so resolveLang (scoped to docen-workspace) honors <docen-document lang>,
+    // not just <html lang>. See #syncLang for why MutationObserver, not @attr.
+    this.#langObserver = new MutationObserver(() => this.#syncLang());
+    this.#langObserver.observe(this, { attributes: true, attributeFilter: ["lang"] });
+    this.#syncLang();
     await registerComponents();
     applyTheme(this.getAttribute("theme") === "dark" ? "dark" : "light");
 
@@ -1389,6 +1401,7 @@ class DocenDocument extends AddinHost<Editor> {
   }
 
   disconnectedCallback(): void {
+    this.#langObserver?.disconnect();
     this.shadowRoot?.removeEventListener("command", this.#onCommand as EventListener);
     this.shadowRoot?.removeEventListener("change", this.#onChange as EventListener);
     this.#fileInput?.removeEventListener("change", this.#onFileChange);
@@ -1433,38 +1446,38 @@ class DocenDocument extends AddinHost<Editor> {
   #renderHeader(): string {
     const user = this.getAttribute("user") ?? "";
     const avatar = this.getAttribute("avatar") ?? "";
-    const filename = this.getAttribute("filename") ?? t("header.doc-name");
+    const filename = this.getAttribute("filename") ?? t("header.doc-name", this);
     const initial = user.trim().charAt(0).toUpperCase();
     const avatarMarkup = avatar
       ? `<img class="avatar avatar-img" src="${escapeHtml(avatar)}" alt="" />`
       : initial
         ? `<span class="avatar">${initial}</span>`
         : "";
-    const autosave = t("header.autosave");
+    const autosave = t("header.autosave", this);
     return `
           <div slot="start" style="display:flex;align-items:center;gap:4px">
-            <span style="font-weight:600;font-size:13px;padding-inline:6px">${t("header.brand")}</span>
+            <span style="font-weight:600;font-size:13px;padding-inline:6px">${t("header.brand", this)}</span>
             <span class="autosave-label">${autosave}</span>
             <!-- auto-save is skeleton-only — disabled (greyed, non-interactive)
                  until the feature is wired; the autosave case in onChange is a
                  no-op. Remove disabled (and re-add checked) when it lands. -->
             <fluent-switch data-event="autosave" disabled aria-label="${autosave}"></fluent-switch>
-            <docen-ribbon-button icon="save" label="${t("header.save")}" event="save" icon-only></docen-ribbon-button>
-            <docen-ribbon-button icon="undo" label="${t("header.undo")}" event="undo" icon-only></docen-ribbon-button>
-            <docen-ribbon-button icon="redo" label="${t("header.redo")}" event="redo" icon-only></docen-ribbon-button>
+            <docen-ribbon-button icon="save" label="${t("header.save", this)}" event="save" icon-only></docen-ribbon-button>
+            <docen-ribbon-button icon="undo" label="${t("header.undo", this)}" event="undo" icon-only></docen-ribbon-button>
+            <docen-ribbon-button icon="redo" label="${t("header.redo", this)}" event="redo" icon-only></docen-ribbon-button>
             <fluent-menu>
               <fluent-menu-button slot="trigger" appearance="subtle">${escapeHtml(filename)}</fluent-menu-button>
               <fluent-menu-list>
-                <fluent-menu-item data-event="new">${t("header.new")}</fluent-menu-item>
+                <fluent-menu-item data-event="new">${t("header.new", this)}</fluent-menu-item>
                 <fluent-divider role="separator" aria-orientation="horizontal" orientation="horizontal"></fluent-divider>
-                <fluent-menu-item data-event="open">${t("header.open")}</fluent-menu-item>
+                <fluent-menu-item data-event="open">${t("header.open", this)}</fluent-menu-item>
                 <fluent-divider role="separator" aria-orientation="horizontal" orientation="horizontal"></fluent-divider>
-                <fluent-menu-item data-event="save-as">${t("header.save-as")}</fluent-menu-item>
-                <fluent-menu-item data-event="save-as-markdown">${t("header.save-as-markdown")}</fluent-menu-item>
-                <fluent-menu-item data-event="save-as-html">${t("header.save-as-html")}</fluent-menu-item>
+                <fluent-menu-item data-event="save-as">${t("header.save-as", this)}</fluent-menu-item>
+                <fluent-menu-item data-event="save-as-markdown">${t("header.save-as-markdown", this)}</fluent-menu-item>
+                <fluent-menu-item data-event="save-as-html">${t("header.save-as-html", this)}</fluent-menu-item>
                 <fluent-divider role="separator" aria-orientation="horizontal" orientation="horizontal"></fluent-divider>
-                <fluent-menu-item data-event="print">${t("header.print")}</fluent-menu-item>
-                <fluent-menu-item data-event="options">${t("header.options")}</fluent-menu-item>
+                <fluent-menu-item data-event="print">${t("header.print", this)}</fluent-menu-item>
+                <fluent-menu-item data-event="options">${t("header.options", this)}</fluent-menu-item>
               </fluent-menu-list>
             </fluent-menu>
           </div>
@@ -1491,7 +1504,18 @@ class DocenDocument extends AddinHost<Editor> {
     // extra add-ins this is just the built-in set.
     const tabs = [...ribbonTabs(styles), ...mergeRibbonSchema(this.addins)];
     const ribbonEl = root.querySelector("docen-ribbon")!;
-    ribbonEl.replaceChildren(renderRibbonFromSchema(tabs, ribbonActions()));
+    // Pass the workspace as the i18n scope so labels resolve against
+    // `<docen-workspace lang>` (forwarded from `<docen-document lang>`)
+    // rather than `<html lang>`. `closest()` can't reach the workspace from
+    // inside this fragment (shadow boundary + not yet inserted), so the
+    // workspace element must be handed in explicitly.
+    ribbonEl.replaceChildren(
+      renderRibbonFromSchema(
+        tabs,
+        ribbonActions(),
+        root.querySelector("docen-workspace") ?? document.documentElement,
+      ),
+    );
     // Feed the full ribbon schema (built-in tabs + addin contributions) to the
     // command search so it can flatten and index every command. Re-runs on
     // lang/addin change since #renderChrome is the single chrome re-stamp.
@@ -1526,17 +1550,17 @@ class DocenDocument extends AddinHost<Editor> {
     const root = this.shadowRoot;
     if (!root) return;
     const navPane = root.querySelector('docen-task-pane[position="start"]');
-    if (navPane) navPane.setAttribute("title", t("pane.navigation"));
+    if (navPane) navPane.setAttribute("title", t("pane.navigation", this));
     const propsPane = root.querySelector('docen-task-pane[position="end"]');
-    if (propsPane) propsPane.setAttribute("title", t("pane.properties"));
+    if (propsPane) propsPane.setAttribute("title", t("pane.properties", this));
     // Page-break / section-break divider labels live in the editor view
     // (NodeView / widget decoration), not the ribbon — update them alongside
     // the chrome so a locale change relabels them.
     root.querySelectorAll<HTMLElement>("fluent-divider[data-pb]").forEach((d) => {
-      d.textContent = t("ribbon.cmd.page-break");
+      d.textContent = t("ribbon.cmd.page-break", this);
     });
     root.querySelectorAll<HTMLElement>("fluent-divider[data-sb]").forEach((d) => {
-      d.textContent = t("ribbon.cmd.section-break");
+      d.textContent = t("ribbon.cmd.section-break", this);
     });
     // Status bar is dynamic (page count / caret page / zoom) — re-stamp it so a
     // locale change re-localizes the text too.
@@ -1616,12 +1640,22 @@ class DocenDocument extends AddinHost<Editor> {
     const menu = this.shadowRoot?.querySelector('docen-ribbon-menu[event="edit-mode"]');
     if (!menu) return;
     const editable = this.#editor?.isEditable ?? true;
-    menu.setAttribute("label", t(editable ? "ribbon.opt.editing" : "ribbon.opt.viewing"));
+    menu.setAttribute("label", t(editable ? "ribbon.opt.editing" : "ribbon.opt.viewing", this));
     menu.setAttribute(
       "items",
       JSON.stringify([
-        { text: t("ribbon.opt.editing"), event: "edit-mode", value: "edit", checked: editable },
-        { text: t("ribbon.opt.viewing"), event: "edit-mode", value: "view", checked: !editable },
+        {
+          text: t("ribbon.opt.editing", this),
+          event: "edit-mode",
+          value: "edit",
+          checked: editable,
+        },
+        {
+          text: t("ribbon.opt.viewing", this),
+          event: "edit-mode",
+          value: "view",
+          checked: !editable,
+        },
       ]),
     );
   }
@@ -2126,7 +2160,7 @@ class DocenDocument extends AddinHost<Editor> {
         // Filename menu → open the Options dialog (UI language).
         const optionsEl = this.shadowRoot?.querySelector("docen-options-dialog");
         if (optionsEl) {
-          optionsEl.setAttribute("locale", document.documentElement.lang || "zh-CN");
+          optionsEl.setAttribute("locale", this.lang || document.documentElement.lang || "zh-CN");
           (optionsEl as unknown as { show?: () => void }).show?.();
         }
         break;
@@ -2135,16 +2169,31 @@ class DocenDocument extends AddinHost<Editor> {
     }
   };
 
+  /** Forward this host's `lang` attribute to the internal <docen-workspace>
+   *  and notify locale observers. Called on connect and whenever `lang`
+   *  mutates (via #langObserver). The workspace is the resolveLang scope, so
+   *  forwarding is what makes <docen-document lang> reach child components
+   *  across the shadow boundary. */
+  #syncLang(): void {
+    const workspace = this.shadowRoot?.querySelector("docen-workspace");
+    const lang = this.lang;
+    if (lang) workspace?.setAttribute("lang", lang);
+    else workspace?.removeAttribute("lang");
+    notifyLocaleChange();
+  }
+
   readonly #onLangChange = (event: Event): void => {
     const lang = (event as CustomEvent<{ lang: string }>).detail?.lang;
-    if (lang) document.documentElement.lang = lang;
+    // Set on the host (not <html lang>) so locale is per-instance; the
+    // #langObserver forwards to the workspace and notifies observers.
+    if (lang) this.setAttribute("lang", lang);
   };
 
   /** Options dialog 确定 — commit the UI language. */
   readonly #onOptionsOk = (event: Event): void => {
     const lang = (event as CustomEvent<{ lang?: string }>).detail?.lang;
-    if (lang && document.documentElement.lang !== lang) {
-      document.documentElement.lang = lang;
+    if (lang && this.getAttribute("lang") !== lang) {
+      this.setAttribute("lang", lang);
     }
   };
 
@@ -2200,7 +2249,7 @@ class DocenDocument extends AddinHost<Editor> {
     const blob = new Blob([data as BlobPart], { type: cfg.mime });
     // Re-stamp the extension so a .docx opened then saved as Markdown does not
     // keep its .docx name.
-    const baseName = (this.getAttribute("filename")?.trim() || t("header.doc-name")).replace(
+    const baseName = (this.getAttribute("filename")?.trim() || t("header.doc-name", this)).replace(
       /\.(docx|md|markdown|htm|html|txt)$/i,
       "",
     );
@@ -2249,7 +2298,7 @@ class DocenDocument extends AddinHost<Editor> {
   /** Wrap a generated HTML body fragment in a full document so a saved .html
    *  file renders standalone — generateHTML returns <section> fragments only. */
   #wrapHtmlDocument(body: string): string {
-    const title = (this.getAttribute("filename")?.trim() || t("header.doc-name")).replace(
+    const title = (this.getAttribute("filename")?.trim() || t("header.doc-name", this)).replace(
       /\.[^.]+$/,
       "",
     );

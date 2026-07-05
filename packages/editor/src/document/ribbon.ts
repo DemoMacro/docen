@@ -388,6 +388,7 @@ export interface RibbonOptions {
 export function renderRibbonFromSchema(
   tabs: readonly RibbonTab[],
   actions: readonly RibbonControl[] = [],
+  scope: Element = document.documentElement,
 ): DocumentFragment {
   const frag = document.createDocumentFragment();
 
@@ -400,7 +401,7 @@ export function renderRibbonFromSchema(
     const tabEl = document.createElement("docen-ribbon-tab");
     tabEl.setAttribute("slot", "tab");
     tabEl.id = tab.id;
-    tabEl.textContent = t(tab.label);
+    tabEl.textContent = t(tab.label, scope);
     tablist.append(tabEl);
   }
   frag.append(tablist);
@@ -408,34 +409,34 @@ export function renderRibbonFromSchema(
   for (const tab of tabs) {
     const panel = document.createElement("docen-ribbon-panel");
     panel.setAttribute("value", tab.id);
-    for (const g of tab.groups) panel.append(buildGroup(g));
+    for (const g of tab.groups) panel.append(buildGroup(g, scope));
     frag.append(panel);
   }
 
   for (const c of actions) {
-    const el = buildControl(c);
+    const el = buildControl(c, scope);
     el.setAttribute("slot", "actions");
     frag.append(el);
   }
   return frag;
 }
 
-function buildGroup(g: RibbonGroup): HTMLElement {
+function buildGroup(g: RibbonGroup, scope: Element): HTMLElement {
   const el = document.createElement("docen-ribbon-group");
-  el.setAttribute("label", t(g.label));
+  el.setAttribute("label", t(g.label, scope));
   if (g.launcher) el.setAttribute("launcher", g.launcher);
-  for (const c of g.controls) el.append(buildControlOrLayout(c));
+  for (const c of g.controls) el.append(buildControlOrLayout(c, scope));
   return el;
 }
 
-function buildControlOrLayout(c: RibbonControlOrLayout): HTMLElement {
-  return c.type === "layout" ? buildLayout(c) : buildControl(c);
+function buildControlOrLayout(c: RibbonControlOrLayout, scope: Element): HTMLElement {
+  return c.type === "layout" ? buildLayout(c, scope) : buildControl(c, scope);
 }
 
-function buildLayout(l: RibbonLayout): HTMLElement {
+function buildLayout(l: RibbonLayout, scope: Element): HTMLElement {
   const el = document.createElement("div");
   el.className = l.layout === "column" ? "rb-col" : l.layout === "row" ? "rb-row" : "rb-grid";
-  for (const c of l.controls) el.append(buildControlOrLayout(c));
+  for (const c of l.controls) el.append(buildControlOrLayout(c, scope));
   return el;
 }
 
@@ -451,9 +452,10 @@ function applyBase(
     size?: "small" | "large";
     disabled?: boolean;
   },
+  scope: Element,
 ): void {
   if (c.icon) el.setAttribute("icon", c.icon);
-  if (c.label) el.setAttribute("label", t(c.label));
+  if (c.label) el.setAttribute("label", t(c.label, scope));
   if (c.event) el.setAttribute("event", c.event);
   if (c.iconOnly) el.setAttribute("icon-only", "");
   if (c.size === "large") el.setAttribute("size", "large");
@@ -462,10 +464,10 @@ function applyBase(
 
 /** Resolve each item's `text` i18n key to the active locale — the schema stores
  *  keys, the render pass is the single translate point (mirrors label). */
-const translateItems = (items: readonly RibbonMenuItem[]): RibbonMenuItem[] =>
-  items.map((it) => ({ ...it, text: it.text ? t(it.text) : it.text }));
+const translateItems = (items: readonly RibbonMenuItem[], scope: Element): RibbonMenuItem[] =>
+  items.map((it) => ({ ...it, text: it.text ? t(it.text, scope) : it.text }));
 
-function buildControl(c: RibbonControl): HTMLElement {
+function buildControl(c: RibbonControl, scope: Element): HTMLElement {
   switch (c.type) {
     case "separator": {
       const el = document.createElement("span");
@@ -474,33 +476,33 @@ function buildControl(c: RibbonControl): HTMLElement {
     }
     case "button": {
       const el = document.createElement("docen-ribbon-button");
-      applyBase(el, c);
+      applyBase(el, c, scope);
       return el;
     }
     case "menu": {
       const el = document.createElement("docen-ribbon-menu");
-      applyBase(el, c);
-      el.setAttribute("items", JSON.stringify(translateItems(c.items ?? [])));
+      applyBase(el, c, scope);
+      el.setAttribute("items", JSON.stringify(translateItems(c.items ?? [], scope)));
       return el;
     }
     case "split": {
       const el = document.createElement("docen-ribbon-split-button");
-      applyBase(el, c);
-      el.setAttribute("items", JSON.stringify(translateItems(c.items ?? [])));
+      applyBase(el, c, scope);
+      el.setAttribute("items", JSON.stringify(translateItems(c.items ?? [], scope)));
       return el;
     }
     case "combobox": {
       const el = document.createElement("docen-ribbon-combobox");
-      applyBase(el, c);
+      applyBase(el, c, scope);
       if (c.value != null) el.setAttribute("value", c.value);
-      el.setAttribute("items", JSON.stringify(translateItems(c.items ?? [])));
+      el.setAttribute("items", JSON.stringify(translateItems(c.items ?? [], scope)));
       if (c.source) el.setAttribute("source", c.source);
       if (c.comboboxSize === "short") el.setAttribute("size", "short");
       return el;
     }
     case "color-picker": {
       const el = document.createElement("docen-color-picker");
-      applyBase(el, c);
+      applyBase(el, c, scope);
       if (c.defaultColor) el.setAttribute("default-color", c.defaultColor);
       return el;
     }

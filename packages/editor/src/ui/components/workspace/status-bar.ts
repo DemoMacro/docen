@@ -8,7 +8,7 @@ import {
   ref,
 } from "@microsoft/fast-element";
 
-import { observeLang, resolveLang, t } from "../../i18n/localize";
+import { availableLanguages, observeLang, resolveLang, t } from "../../i18n/localize";
 
 const styles = css`
   :host {
@@ -81,7 +81,7 @@ const styles = css`
     text-align: right;
   }
   /* Language indicator — sat after the word count. Plain text matching the
-     surrounding status copy; a click flips zh-CN ↔ en. */
+     surrounding status copy; a click cycles through every registered locale. */
   .lang-text {
     cursor: pointer;
     padding-inline: 2px;
@@ -192,13 +192,25 @@ class DocenStatusBar extends FASTElement {
 
   #renderLang(): void {
     if (!this.langBtn) return;
-    const isZh = resolveLang().startsWith("zh");
-    this.langBtn.textContent = isZh ? t("header.lang.zh") : t("header.lang.en");
+    // Show the current locale's display name — every registered language
+    // exposes `$name` via availableLanguages(), so this tracks new locales
+    // automatically (no per-language branch needed).
+    const current = resolveLang(this);
+    const found = availableLanguages().find((l) => l.languageTag === current);
+    this.langBtn.textContent = found?.$name ?? current;
   }
 
   #toggleLang(): void {
-    const next = resolveLang().startsWith("zh") ? "en" : "zh-CN";
-    this.#emitLang(next);
+    // Cycle through every registered language (en → zh-CN → fr → en …),
+    // not a hard-coded zh ↔ en flip. New locales register via
+    // registerTranslation / addin.localizationInfo and join the rotation
+    // with no change here.
+    const langs = availableLanguages();
+    if (langs.length < 2) return;
+    const current = resolveLang(this);
+    const idx = langs.findIndex((l) => l.languageTag === current);
+    const next = langs[(idx + 1) % langs.length];
+    this.#emitLang(next.languageTag);
   }
 
   #emitLang(lang: string): void {
@@ -209,7 +221,7 @@ class DocenStatusBar extends FASTElement {
 
   #renderSection(): void {
     if (this.sectionEl)
-      this.sectionEl.textContent = t("status.section").replace(
+      this.sectionEl.textContent = t("status.section", this).replace(
         "{n}",
         String(Number(this.section ?? 1)),
       );
@@ -217,14 +229,17 @@ class DocenStatusBar extends FASTElement {
 
   #renderPages(): void {
     if (this.pagesEl)
-      this.pagesEl.textContent = t("status.page-of")
+      this.pagesEl.textContent = t("status.page-of", this)
         .replace("{page}", String(Number(this.page || 1)))
         .replace("{total}", String(Number(this.total || 1)));
   }
 
   #renderWords(): void {
     if (this.wordsEl)
-      this.wordsEl.textContent = t("status.words").replace("{n}", String(Number(this.words ?? 0)));
+      this.wordsEl.textContent = t("status.words", this).replace(
+        "{n}",
+        String(Number(this.words ?? 0)),
+      );
   }
 
   #renderZoom(): void {

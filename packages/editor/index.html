@@ -37,16 +37,64 @@
     <script type="module">
       // Import from source (not the package name) so vite treats this as
       // workspace source, not a pre-bundled dep.
-      import { applyTheme, registerComponents } from "./src/index.ts";
+      import { applyTheme, registerComponents, registerTranslation } from "./src/index.ts";
 
       await registerComponents();
       applyTheme("light");
 
+      // Example: register a third locale (French). registerTranslation merges
+      // into the built-in en/zh-CN tables, so the status-bar language cycle,
+      // the Options dropdown, and every ribbon/header/status key pick up the
+      // new locale with no further wiring — only the keys translated below
+      // resolve to French; the rest fall back through the locale chain to the
+      // default language (en). Try it: click the language pill in the status
+      // bar (bottom-right) to rotate en → zh-CN → Français → en.
+      registerTranslation({
+        languageTag: "fr",
+        $name: "Français",
+        translations: {
+          // Ribbon tabs
+          "ribbon.tab.home": "Accueil",
+          "ribbon.tab.insert": "Insertion",
+          "ribbon.tab.draw": "Dessin",
+          "ribbon.tab.design": "Conception",
+          "ribbon.tab.layout": "Mise en page",
+          "ribbon.tab.references": "Références",
+          "ribbon.tab.mailings": "Publipostage",
+          "ribbon.tab.review": "Révision",
+          "ribbon.tab.view": "Affichage",
+          // Header / file menu
+          "header.autosave": "Enregistrement automatique",
+          "header.save": "Enregistrer",
+          "header.undo": "Annuler",
+          "header.redo": "Rétablir",
+          "header.new": "Nouveau",
+          "header.open": "Ouvrir…",
+          "header.save-as": "Enregistrer sous…",
+          "header.save-as-markdown": "Enregistrer au format Markdown…",
+          "header.save-as-html": "Enregistrer au format HTML…",
+          "header.print": "Imprimer",
+          "header.options": "Options",
+          "header.doc-name": "Document",
+          // Options dialog
+          "options.title": "Options",
+          "options.ok": "OK",
+          "options.cancel": "Annuler",
+          "options.language": "Langue",
+          // Status bar
+          "status.page-of": "Page {page} sur {total}",
+          "status.words": "{n} mots",
+          "status.section": "Section {n}",
+        },
+      });
+
       // Example: an external add-in contributes an "About" ribbon tab. The host
       // merges it onto the built-in tabs (mergeRibbonSchema) — labels are i18n
-      // keys, and the addin ships its own `translations`, which the host
-      // registers on addAddin (merged with the built-in ribbon.* keys) so the
-      // tab/group/button localize on every locale switch. The "Help" button's
+      // keys, and the addin ships its own `localizationInfo` (Office.js
+      // manifest shape — `defaultLanguageTag` + `additionalLanguages[]`),
+      // which the host registers on addAddin (merged with the built-in
+      // ribbon.* keys) so the tab/group/button localize on every locale
+      // switch. The "Help" button's
       // `open-help` event isn't a Tiptap command, so the host routes it to this
       // addin's `commands` map — clicking it opens the project's GitHub repo.
       document.getElementById("doc")?.addAddin({
@@ -66,20 +114,27 @@
             ],
           },
         ],
-        translations: [
-          {
-            $code: "en",
-            "about.tab": "About",
-            "about.group.help": "Help",
-            "about.cmd.help": "Help",
-          },
-          {
-            $code: "zh-CN",
-            "about.tab": "关于",
-            "about.group.help": "帮助",
-            "about.cmd.help": "帮助",
-          },
-        ],
+        localizationInfo: {
+          defaultLanguageTag: "en",
+          additionalLanguages: [
+            {
+              languageTag: "en",
+              translations: {
+                "about.tab": "About",
+                "about.group.help": "Help",
+                "about.cmd.help": "Help",
+              },
+            },
+            {
+              languageTag: "zh-CN",
+              translations: {
+                "about.tab": "关于",
+                "about.group.help": "帮助",
+                "about.cmd.help": "帮助",
+              },
+            },
+          ],
+        },
         commands: {
           "open-help": () => window.open("https://github.com/DemoMacro/docen", "_blank"),
         },

@@ -1,4 +1,4 @@
-import type { DocenTranslation } from "../i18n";
+import type { LocalizationInfo } from "../i18n";
 
 /**
  * Office.js-style add-in model for docen editor hosts.
@@ -173,6 +173,11 @@ export interface TaskPaneContribution<THost extends DocenHost = DocenHost> {
 export interface DocenHost<TEditor = unknown> {
   readonly element: HTMLElement;
   readonly editor: TEditor | undefined;
+  /** The host's UI locale (Office.js `Office.context.displayLanguage`),
+   *  derived from the `lang` attribute (set by the consumer or the status-bar
+   *  language toggle), falling back to `<html lang>` then "en". Read-only —
+   *  addins consume it; the locale is set by the host/consumer, not addins. */
+  readonly displayLanguage: string;
   getContent(): unknown;
   setContent(content: unknown): void;
   /** Route `type` to the first addin that declares it. Returns whether handled. */
@@ -184,12 +189,13 @@ export interface DocenHost<TEditor = unknown> {
 export interface DocenAddin<THost extends DocenHost = DocenHost> {
   readonly id: string;
   readonly name?: string;
-  /** Per-locale translation tables this addin contributes. The host registers
-   *  them on `addAddin` (merged into the global table, so built-in keys and
-   *  other addins' keys coexist). Pure data, so the `addins` JSON attribute
-   *  carries them too. Office.js parallel: manifest `localizationInfo` +
-   *  per-locale JSON. */
-  readonly translations?: readonly DocenTranslation[];
+  /** Localization manifest this addin contributes (Office.js manifest
+   *  `localizationInfo`). The host registers it on `addAddin` via
+   *  `registerLocalization` — `defaultLanguageTag` becomes the fallback locale,
+   *  `additionalLanguages` merge into the global table alongside built-in keys
+   *  and other addins' keys. Pure data, so the `addins` JSON attribute carries
+   *  it across the JSON boundary too. */
+  readonly localizationInfo?: LocalizationInfo;
   readonly ribbon?: readonly RibbonContribution[];
   /** Mini-toolbar buttons (the selection floating toolbar — the Word "mini
    *  toolbar"). Office.js keeps it internal; docen opens it as an addin

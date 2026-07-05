@@ -4,37 +4,61 @@
  * property labels, outline titles) are translated by the editor package and
  * passed in as plain strings; this module never touches them.
  *
- * Modelled on Shoelace's localize: register translations, resolve the locale
- * from the nearest `<docen-workspace lang>` (falling back to `<html lang>`),
- * and re-render on language change. Vanilla HTMLElement — no framework dep.
+ * Modelled on Shoelace's localize, with types aligned to the Office.js
+ * unified manifest (`localizationInfo`): register translations, resolve the
+ * locale from the nearest `<docen-workspace lang>` (falling back to
+ * `<html lang>`), and re-render on language change. Vanilla HTMLElement — no
+ * framework dep.
+ *
+ * Office.js parallel: manifest `localizationInfo` (container: `defaultLanguageTag`
+ * + `additionalLanguages[]`) references an external JSON file per language;
+ * docen inlines the same key→value table as `AdditionalLanguage.translations`.
+ * `Office.context.displayLanguage` is exposed on the host as
+ * {@link DocenHost.displayLanguage} (read-only).
  *
  * Why not i18next / @formatjs: the built-in string surface is tiny (a handful
  * of labels), so a registry + `<html lang>` observer is enough. The editor
  * package is free to use any i18n solution for business strings.
  */
 
-/** A single locale's translation table. `$code` is the BCP-47 tag. */
-export interface DocenTranslation {
-  /** BCP-47 language tag, e.g. "zh-CN". */
-  readonly $code: string;
+/** A single language's translation entry — Office.js manifest
+ *  `additionalLanguages[]` element, with `file` inlined as `translations`
+ *  (Office.js references an external JSON file; docen inlines the same
+ *  key→value table). `$name`/`$dir` are docen extensions (Office.js file
+ *  content is pure key→value). */
+export interface AdditionalLanguage {
+  /** BCP-47 language tag, e.g. "zh-CN" (Office.js `languageTag`). */
+  readonly languageTag: string;
+  /** The translation table (Office.js `file` content, inlined). */
+  readonly translations: Readonly<Record<string, string>>;
   /** Display name (informational), e.g. "中文（简体）". */
   readonly $name?: string;
   /** Text direction. Defaults to "ltr". */
   readonly $dir?: "ltr" | "rtl";
-  readonly [key: string]: string | undefined;
+}
+
+/** A localization manifest — Office.js `localizationInfo`. `defaultLanguageTag`
+ *  is the fallback locale (localeChain's last link); `additionalLanguages` are
+ *  the per-language tables. Office.js references external files; docen inlines
+ *  the tables as {@link AdditionalLanguage.translations}. */
+export interface LocalizationInfo {
+  /** Fallback locale used when neither `<docen-workspace lang>` nor `<html lang>`
+   *  yields a hit, and as localeChain's terminal fallback (Office.js
+   *  `defaultLanguageTag`). */
+  readonly defaultLanguageTag: string;
+  readonly additionalLanguages: readonly AdditionalLanguage[];
 }
 
 // Seed the built-in component locales (nav/properties/outline empty states…)
 // inline at module load. `t()` callers import this module directly, so the seed
 // must live here; inlining (vs importing ./locales/*) avoids a dev-server
 // module-instance issue where the imported locale object resolved empty.
-const translations = new Map<string, DocenTranslation>([
+// Translations and metadata ($name/$dir) are split into two maps so the lookup
+// path stays a plain Record<string,string> (no $-prefixed keys mixed in).
+const translations = new Map<string, Record<string, string>>([
   [
     "en",
     {
-      $code: "en",
-      $name: "English",
-      $dir: "ltr",
       "taskPane.close": "Close panel",
       "outline.empty": "No outline entries",
       "properties.empty": "No properties",
@@ -56,9 +80,6 @@ const translations = new Map<string, DocenTranslation>([
   [
     "zh-CN",
     {
-      $code: "zh-CN",
-      $name: "中文（简体）",
-      $dir: "ltr",
       "taskPane.close": "关闭面板",
       "outline.empty": "暂无大纲条目",
       "properties.empty": "暂无属性",
@@ -78,41 +99,109 @@ const translations = new Map<string, DocenTranslation>([
     },
   ],
 ]);
+const metadata = new Map<string, { readonly $name?: string; readonly $dir?: "ltr" | "rtl" }>([
+  ["en", { $name: "English", $dir: "ltr" }],
+  ["zh-CN", { $name: "中文（简体）", $dir: "ltr" }],
+]);
+/** The fallback locale (localeChain's terminal link). The built-in default is
+ *  "en"; `registerLocalization` updates it from `LocalizationInfo.defaultLanguageTag`. */
+let defaultLanguageTag = "en";
+
 const listeners = new Set<() => void>();
 let htmlObserver: MutationObserver | null = null;
 
 /**
- * Register a translation table, **merging** into any existing table for the
- * same `$code`. Component-internal defaults (nav/properties/outline empty
- * states) are seeded inline in this module; the editor package registers
- * business strings (ribbon/header/pane) under the same codes. A flat set()
- * would let one source clobber the other and drop its keys — merging keeps
- * both. Later registrations win on key conflicts.
+ * Register a single language's translation table, **merging** into any
+ * existing table for the same `languageTag`. Component-internal defaults
+ * (nav/properties/outline empty states) are seeded inline in this module; the
+ * editor package registers business strings (ribbon/header/pane) under the
+ * same tags. A flat assignment would let one source clobber the other and drop
+ * its keys — merging keeps both. Later registrations win on key conflicts.
  */
-export function registerTranslation(translation: DocenTranslation): void {
-  const code = translation.$code;
-  const existing = translations.get(code);
-  translations.set(code, existing ? { ...existing, ...translation } : translation);
-  notify();
+export function registerTranslation(entry: AdditionalLanguage): void {
+  const tag = entry.languageTag;
+  const existing = translations.get(tag);
+  translations.set(tag, { ...existing, ...entry.translations });
+  const metaExisting = metadata.get(tag);
+  metadata.set(tag, {
+    $name: entry.$name ?? metaExisting?.$name,
+    $dir: entry.$dir ?? metaExisting?.$dir,
+  });
+  notifyLocaleChange();
 }
 
 /**
- * Resolve the effective locale for an element: the nearest
- * `<docen-workspace lang>` wins, otherwise `<html lang>`, otherwise "en".
+ * Register a localization manifest (Office.js `localizationInfo`): adopt its
+ * `defaultLanguageTag` as the fallback locale, then register every additional
+ * language. Addins pass their `localizationInfo` here; the host calls this on
+ * `addAddin`. Equivalent to N `registerTranslation` calls plus the fallback update.
+ */
+export function registerLocalization(info: LocalizationInfo): void {
+  if (info.defaultLanguageTag) defaultLanguageTag = info.defaultLanguageTag;
+  info.additionalLanguages.forEach(registerTranslation);
+}
+
+/** A registered language surfaced as a picker option — `languageTag` plus the
+ *  optional display name. Languages with no registered `$name` fall back to
+ *  their tag in the UI. */
+export interface LanguageOption {
+  readonly languageTag: string;
+  readonly $name?: string;
+}
+
+/**
+ * List every registered language for the options language picker. Built-in
+ * seeds (`en` / `zh-CN`) and any addin-registered tags appear; a new language
+ * lands here automatically once {@link registerTranslation} (or an addin's
+ * `localizationInfo`) registers it — that is the supported way to add a locale.
+ * The default language sorts first, the rest alphabetically by tag.
+ */
+export function availableLanguages(): readonly LanguageOption[] {
+  return [...translations.keys()]
+    .map((languageTag) => ({ languageTag, $name: metadata.get(languageTag)?.$name }))
+    .sort((a, b) => {
+      if (a.languageTag === defaultLanguageTag) return -1;
+      if (b.languageTag === defaultLanguageTag) return 1;
+      return a.languageTag.localeCompare(b.languageTag);
+    });
+}
+
+/**
+ * Resolve the effective locale for an element. The element's own `lang`
+ * attribute wins (`<docen-document lang>` / `<docen-workspace lang>` /
+ * `<html lang>`) — `closest()` can't reach the workspace from the host
+ * element or inside its shadow root, so the element's own `lang` is the
+ * bridge from `<docen-document lang>` down to the i18n lookup. Otherwise
+ * the nearest ancestor `<docen-workspace lang>` (for elements inside a
+ * workspace's light-DOM subtree). If the element lives directly in a shadow
+ * root whose host carries `lang` (e.g. an options dialog placed in
+ * `<docen-document>`'s shadow rather than slotted into the workspace), the
+ * shadow host's `lang` is read — `closest()` stops at the shadow boundary.
+ * Finally `<html lang>`, then {@link defaultLanguageTag} (manifest
+ * `defaultLanguageTag`, "en" by default).
+ *
  * Scoped to the known workspace host (not any `[lang]` ancestor) so a
  * workspace can override the page locale — this sidesteps Shoelace's
  * "lang must be on the component itself or <html>" limitation.
  */
 export function resolveLang(el: Element | null = document.documentElement): string {
+  const ownLang = el?.getAttribute("lang");
+  if (ownLang) return ownLang;
   const host = el?.closest("docen-workspace");
-  return host?.getAttribute("lang") || document.documentElement.lang || "en";
+  if (host?.hasAttribute("lang")) return host.getAttribute("lang")!;
+  const root = el?.getRootNode();
+  if (root instanceof ShadowRoot) {
+    const hostLang = (root.host as Element | null)?.getAttribute("lang");
+    if (hostLang) return hostLang;
+  }
+  return document.documentElement.lang || defaultLanguageTag;
 }
 
 /** Resolve text direction for an element's locale ("ltr" by default). */
 export function resolveDir(el: Element | null = document.documentElement): "ltr" | "rtl" {
   const lang = resolveLang(el);
   for (const code of localeChain(lang)) {
-    const dir = translations.get(code)?.$dir;
+    const dir = metadata.get(code)?.$dir;
     if (dir) return dir;
   }
   return "ltr";
@@ -120,7 +209,8 @@ export function resolveDir(el: Element | null = document.documentElement): "ltr"
 
 /**
  * Translate a key for an element's locale, falling back through the locale
- * chain (e.g. "zh-CN" → "zh" → "en"). Returns the key itself if missing.
+ * chain (e.g. "zh-CN" → "zh" → `defaultLanguageTag`). Returns the key itself
+ * if missing.
  */
 export function t(key: string, el?: Element | null): string {
   const lang = resolveLang(el);
@@ -131,18 +221,20 @@ export function t(key: string, el?: Element | null): string {
   return key;
 }
 
-/** BCP-47 fallback chain: exact → language family → "en". */
+/** BCP-47 fallback chain: exact → language family → `defaultLanguageTag`. */
 function localeChain(lang: string): string[] {
   const chain = [lang];
   const dash = lang.indexOf("-");
   if (dash > 0) chain.push(lang.slice(0, dash));
-  if (!chain.includes("en")) chain.push("en");
+  if (!chain.includes(defaultLanguageTag)) chain.push(defaultLanguageTag);
   return chain;
 }
 
 /**
  * Subscribe to locale or translation changes (e.g. to re-render a component).
- * Triggers on `<html lang>` mutation and on `registerTranslation`.
+ * Triggers on `<html lang>` mutation, on `registerTranslation`, and on
+ * {@link notifyLocaleChange} (which a host that drives locale through its own
+ * `lang` attribute calls after forwarding it to the workspace).
  * Returns an unsubscribe function.
  */
 export function observeLang(listener: () => void): () => void {
@@ -155,13 +247,20 @@ export function observeLang(listener: () => void): () => void {
 
 function ensureHtmlObserver(): void {
   if (htmlObserver || typeof MutationObserver === "undefined") return;
-  htmlObserver = new MutationObserver(notify);
+  htmlObserver = new MutationObserver(notifyLocaleChange);
   htmlObserver.observe(document.documentElement, {
     attributes: true,
     attributeFilter: ["lang"],
   });
 }
 
-function notify(): void {
+/**
+ * Fire every {@link observeLang} listener. Call this after a non-`<html lang>`
+ * locale source changes — e.g. `<docen-document>` forwarding its `lang`
+ * attribute to the internal `<docen-workspace>` — so observers re-render
+ * even though the `MutationObserver` on `documentElement.lang` didn't fire.
+ * Also called internally by `registerTranslation` and the html-lang observer.
+ */
+export function notifyLocaleChange(): void {
   for (const listener of listeners) listener();
 }

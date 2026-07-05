@@ -1,6 +1,6 @@
 import { FASTElement } from "@microsoft/fast-element";
 
-import { registerTranslation } from "../i18n";
+import { registerLocalization } from "../i18n";
 import type { DocenAddin, DocenHost, MiniToolbarButton, RibbonTab } from "./types";
 
 /**
@@ -84,6 +84,15 @@ export class AddinHost<TEditor = unknown> extends FASTElement implements DocenHo
     return undefined;
   }
 
+  /** The host's UI locale (Office.js `Office.context.displayLanguage`).
+   *  Mirrors {@link resolveLang}: `lang` attribute > `<html lang>` > "en".
+   *  `this.lang` is `HTMLElement.lang` (reflects the `lang` attribute), so a
+   *  consumer setting `<docen-document lang="…">` — or the host forwarding the
+   *  status-bar toggle to its own `lang` — takes effect here immediately. */
+  get displayLanguage(): string {
+    return this.lang || document.documentElement.lang || "en";
+  }
+
   getContent(): unknown {
     return undefined;
   }
@@ -97,9 +106,10 @@ export class AddinHost<TEditor = unknown> extends FASTElement implements DocenHo
   /** Register an add-in (idempotent on `addin.id`). Triggers {@link addinsChanged}. */
   addAddin(addin: DocenAddin<this>): void {
     if (this.#addins.some((existing) => existing.id === addin.id)) return;
-    // Register the addin's translation tables before its UI renders — merged
-    // into the global table, so its label keys resolve on the next t() call.
-    addin.translations?.forEach(registerTranslation);
+    // Register the addin's localization manifest before its UI renders —
+    // defaultLanguageTag becomes the fallback, additionalLanguages merge into
+    // the global table so its label keys resolve on the next t() call.
+    if (addin.localizationInfo) registerLocalization(addin.localizationInfo);
     this.#addins = [...this.#addins, addin];
     this.addinsChanged();
   }
