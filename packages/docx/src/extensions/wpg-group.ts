@@ -1,4 +1,19 @@
-import { convertEmuToPixels, encodeBase64 } from "@office-open/core";
+import {
+  convertEmuToPixels,
+  convertEmuToPoints,
+  convertUniversalMeasureToEmu,
+  convertUniversalMeasureToPt,
+  encodeBase64,
+} from "@office-open/core";
+import type { FillOptions, OutlineOptions, SolidFillOptions } from "@office-open/core";
+import type {
+  ChildOffset,
+  GroupChildMediaData,
+  ParagraphOptions,
+  WpgGroupRunOptions,
+  WpsShapeCoreOptions,
+  WpsShapeRunOptions,
+} from "@office-open/docx";
 import type { DOMOutputSpec } from "@tiptap/pm/model";
 
 import { Node } from "../core";
@@ -17,118 +32,82 @@ import { floatAnchorScope, floatingToStyles, normalizeColorToHex, renderRunStyle
  * it (e.g. a row of colored decoration bars), instead of a single picture.
  */
 
-const EMU_PER_PT = 12700;
-const EMU_PER_PX = 9525;
-
-// ── opaque group model (attrs.wpgGroup is JSON, typed loosely) ──
-
-interface PointEmu {
-  x: number;
-  y: number;
+/** number is EMU; a string is a UniversalMeasure ("1pt"/"0.5in"/…). → px. */
+function measureToPx(v: number | string | undefined): number {
+  if (v == null) return 0;
+  const emu = typeof v === "number" ? v : convertUniversalMeasureToEmu(v);
+  return convertEmuToPixels(emu);
+}
+/** number is EMU; a string is a UniversalMeasure. → pt (for border widths). */
+function measureToPt(v: number | string | undefined, fallback = 0): number {
+  if (typeof v === "number") return convertEmuToPoints(v);
+  if (typeof v === "string") return convertUniversalMeasureToPt(v);
+  return fallback;
 }
 
-interface ChildTransformation {
-  pixels?: PointEmu; // width/height (child coord space, EMU/9525)
-  emus?: PointEmu; // width/height (child coord space, EMU)
-  offset?: { emus?: PointEmu; pixels?: PointEmu };
-  rotation?: number;
-}
+// ── types reused from @office-open (no hand-written duplicates) ──
+//
+// Shape/group model types come straight from office-open:
+//   WpsShapeRunOptions  — standalone wps text box (wp:anchor > wps:wsp)
+//   WpsShapeCoreOptions — wps interior (also a group's wps child .data)
+//   WpgGroupRunOptions  — wpg drawing group (CT_WordprocessingGroup)
+//   GroupChildMediaData — a group child (wps | wpg | pic media-type union)
+//   BodyPropertiesOptions — a:bodyPr (wrap/spAutoFit/vert/anchor/insets/…)
+// Fill/outline (FillOptions/OutlineOptions) are discriminated unions; the helpers
+// below narrow them to the solid branch docen renders.
 
-interface FillColor {
-  value?: string;
-}
-
-interface Fill {
-  type?: string; // "solid" | "none" | "noFill" | …
-  color?: FillColor;
-}
-
-interface Outline {
-  type?: string; // "solidFill" | "noFill" | "none" | …
-  color?: FillColor;
-  width?: number; // EMU
-  dash?: string;
-}
-
-/** wps shape data (WpsShapeCoreOptions subset used for rendering). */
-interface WpsBodyProperties {
-  rotation?: number;
-  // textbox insets (EMU): left/top/right/bottom inner padding
-  lIns?: number;
-  tIns?: number;
-  rIns?: number;
-  bIns?: number;
-  // text direction (a:bodyPr vert): horz default; vert/vert270/eaVert → vertical
-  vert?: string;
-  // vertical anchor (a:bodyPr anchor): "t" | "ctr" | "b" — where the text block
-  // sits vertically inside the shape (top/center/bottom).
-  anchor?: string;
-}
-export interface WpsData {
-  fill?: Fill;
-  outline?: Outline;
-  bodyProperties?: WpsBodyProperties & Record<string, unknown>;
-  // text-body paragraphs (office-open ParagraphOptions[]) — the text a text-box
-  // shape carries; omitted by non-text shapes.
-  children?: unknown[];
-}
-
-interface GroupChild {
-  // "wps" | "wpg" | a pic media type ("jpg"/"png"/…). office-open tags pic
-  // children by their image media type rather than a literal "pic".
-  type?: string;
-  // wps → WpsData; pic → raw image bytes (Uint8Array); wpg → none (uses children).
-  data?: unknown;
-  transformation?: ChildTransformation;
-  children?: GroupChild[];
-  childOffset?: PointEmu;
-  childExtent?: { cx: number; cy: number };
-}
-
-interface WpgGroup {
-  children?: GroupChild[];
-  transformation?: { width?: number; height?: number } & ChildTransformation;
-  childOffset?: PointEmu;
-  childExtent?: { cx: number; cy: number };
-  // office-open Floating anchor (wp:anchor) — verbatim; rendered via
-  // floatingToStyles so an anchored group floats over text instead of flowing.
-  floating?: unknown;
-}
+/** A standalone wps text-box shape (the editable wpsShape node's payload). */
+export type WpsShapeStandalone = WpsShapeRunOptions;
+/** wps interior data (fill/outline/bodyProperties/text body). */
+export type WpsData = WpsShapeCoreOptions;
 
 type Spec = ReadonlyArray<unknown>;
 
-/** Solid fill → CSS color (noFill/none/gradient → undefined). */
-function fillToCss(fill: Fill | undefined): string | undefined {
-  if (!fill || fill.type !== "solid") return undefined;
-  return normalizeColorToHex(fill.color?.value);
+/** SolidFillOptions union → its `.value` when that is a plain hex string (sRgb).
+ *  Scheme/system/preset colors carry theme ids docen can't resolve to hex, so
+ *  they fall through to the caller's default. */
+function solidColorValue(color: SolidFillOptions | undefined): string | undefined {
+  const v = (color as { value?: unknown } | undefined)?.value;
+  return typeof v === "string" ? v : undefined;
 }
 
-/** Shape outline → CSS border (EMU width → pt). noFill → undefined. */
-function outlineToCss(outline: Outline | undefined): string | undefined {
-  if (!outline || outline.type === "noFill" || outline.type === "none") return undefined;
-  const color = normalizeColorToHex(outline.color?.value) ?? "black";
-  const width = outline.width != null ? `${outline.width / EMU_PER_PT}pt` : "0.75pt";
+/** Solid fill → CSS color (noFill/none/gradient/pattern → undefined). FillOptions
+ *  is `string | { type: "solid" | "none" | … }`; docen renders only solid (a bare
+ *  hex string or the solid branch). */
+function fillToCss(fill: FillOptions | undefined): string | undefined {
+  if (!fill) return undefined;
+  if (typeof fill === "string") return normalizeColorToHex(fill);
+  if (fill.type !== "solid") return undefined;
+  const color = fill.color; // string | SolidFillOptions
+  const hex = typeof color === "string" ? color : solidColorValue(color);
+  return normalizeColorToHex(hex);
+}
+
+/** Shape outline → CSS border (EMU width → pt). noFill → undefined.
+ *  OutlineOptions = OutlineAttributes & OutlineFillProperties; OutlineFillProperties
+ *  type is "noFill" | "solidFill" | "gradFill" | "pattFill". */
+function outlineToCss(outline: OutlineOptions | undefined): string | undefined {
+  if (!outline || outline.type === "noFill") return undefined;
+  const color = normalizeColorToHex(solidColorValue(outline.color)) ?? "black";
+  const width = `${measureToPt(outline.width, 0.75)}pt`;
   const style = outline.dash === "sysDot" || outline.dash === "sysDash" ? "dashed" : "solid";
   return `border:${width} ${style} ${color}`;
 }
 
-/** Group extent in px: top-level groups carry {width,height}; nested wpg children
- *  carry a ChildTransformation whose pixels/emus give the size. */
-function groupExtent(group: WpgGroup): { w: number; h: number } {
+/** Group extent in px: office-open 0.10.4+ parses wp:extent as EMU verbatim on
+ *  MediaTransformation.width/height; convert to px (matching child transforms). */
+function groupExtent(group: WpgGroupRunOptions): { w: number; h: number } {
   const t = group.transformation;
-  // office-open 0.10.4+ parses wp:extent as EMU verbatim (was pixels); convert
-  // the top-level size to px so the group renders in pixel space (matching the
-  // child transforms, which still carry both pixels and EMUs).
   return {
-    w: t?.width != null ? convertEmuToPixels(t.width) : (t?.pixels?.x ?? 0),
-    h: t?.height != null ? convertEmuToPixels(t.height) : (t?.pixels?.y ?? 0),
+    w: t && typeof t.width === "number" ? convertEmuToPixels(t.width) : 0,
+    h: t && typeof t.height === "number" ? convertEmuToPixels(t.height) : 0,
   };
 }
 
 /** Child coord (EMU, group's chOff/chExt space) → group-local px. */
 function childBox(
-  child: GroupChild,
-  chOff: PointEmu,
+  child: GroupChildMediaData,
+  chOff: ChildOffset,
   scaleX: number,
   scaleY: number,
 ): { x: number; y: number; w: number; h: number } {
@@ -154,7 +133,12 @@ function picSrc(mediaType: string, data: unknown): string | null {
   return `data:image/${mediaType};base64,${encodeBase64(bytes)}`;
 }
 
-function renderChild(child: GroupChild, chOff: PointEmu, scaleX: number, scaleY: number): Spec {
+function renderChild(
+  child: GroupChildMediaData,
+  chOff: ChildOffset,
+  scaleX: number,
+  scaleY: number,
+): Spec {
   const box = childBox(child, chOff, scaleX, scaleY);
   // box-sizing:border-box so a shape's width/height is its outer box (matching
   // Word's extent), not content-box (which adds border+padding on top, growing
@@ -172,7 +156,7 @@ function renderChild(child: GroupChild, chOff: PointEmu, scaleX: number, scaleY:
     // wps shape: a colored rect (office-open default geometry is rect; a present
     // customGeometry would need an SVG node view for path fidelity). A text-box
     // shape also carries body paragraphs (children) rendered as inline text.
-    const data = (child.data ?? {}) as WpsData;
+    const data = (child.data ?? {}) as WpsShapeCoreOptions;
     // rotation may come from the group transform rather than the shape's bodyPr.
     const rotation = data.bodyProperties?.rotation ?? child.transformation?.rotation;
     return renderWpsInterior(data, base, { rotation, attrs: { "data-wpg-wps": "" } });
@@ -187,26 +171,20 @@ function renderChild(child: GroupChild, chOff: PointEmu, scaleX: number, scaleY:
   return [];
 }
 
-interface WpsRunShape {
-  text?: string;
-  [key: string]: unknown;
-}
-interface WpsParaShape {
-  alignment?: string | null;
-  run?: Record<string, unknown>;
-  children?: Array<WpsRunShape | string>;
-}
-
 /** wps text-body paragraphs (office-open ParagraphOptions[]) → inline HTML runs
  *  so a text-box shape shows its text. Each paragraph's run defaults merge with
  *  each text run; renderRunStyles converts font/color/size/… to CSS. Advanced run
  *  props (shadow w14RawXml, kern) are carried in attrs but not rendered. */
-export function renderWpsText(children: unknown): Spec[] {
+export function renderWpsText(
+  children: readonly (ParagraphOptions | string)[] | undefined,
+): Spec[] {
   if (!Array.isArray(children)) return [];
-  return (children as WpsParaShape[]).map((para): Spec => {
+  return children.map((para): Spec => {
     if (typeof para === "string") return ["p", { style: "margin:0" }, para];
     const defaultRun = para.run ?? {};
-    const runs = (para.children ?? []).map((r): Spec | string => {
+    const runs = (
+      (para.children as readonly (string | ({ text?: string } & Record<string, unknown>))[]) ?? []
+    ).map((r): Spec | string => {
       if (typeof r === "string") return r;
       const merged = { ...defaultRun, ...r };
       const css = renderRunStyles(merged as Record<string, unknown>);
@@ -223,7 +201,7 @@ export function renderWpsText(children: unknown): Spec[] {
  *  writing-mode — those go on the outer positioning wrapper (see
  *  wpsRotationVert), because transform/writing-mode on an editable region
  *  distort the caret rect and break CJK IME composition. */
-export function wpsInnerStyle(data: WpsData): string {
+export function wpsInnerStyle(data: WpsShapeCoreOptions): string {
   const parts: string[] = [];
   const fill = fillToCss(data.fill);
   if (fill) parts.push(`background-color:${fill}`);
@@ -233,7 +211,8 @@ export function wpsInnerStyle(data: WpsData): string {
   // inside the shape's padding, matching Word's text-box insets.
   const bp = data.bodyProperties;
   if (bp) {
-    const ins = (v: number | undefined) => (v != null ? `${(v / EMU_PER_PX).toFixed(1)}px` : "0px");
+    // lIns/tIns/rIns/bIns: EMU numbers (or UniversalMeasure strings) → px.
+    const ins = (v: number | string | undefined) => `${measureToPx(v).toFixed(1)}px`;
     parts.push(`padding:${ins(bp.tIns)} ${ins(bp.rIns)} ${ins(bp.bIns)} ${ins(bp.lIns)}`);
   }
   return parts.join(";");
@@ -242,7 +221,7 @@ export function wpsInnerStyle(data: WpsData): string {
 /** Rotation + writing-mode (text direction) for a wps shape. Lives on the
  *  positioning wrapper OUTSIDE the contentDOM. `rotationOverride` covers a
  *  group child whose rotation comes from the group transform, not bodyPr. */
-export function wpsRotationVert(data: WpsData, rotationOverride?: number): string {
+export function wpsRotationVert(data: WpsShapeCoreOptions, rotationOverride?: number): string {
   const parts: string[] = [];
   const rotation = rotationOverride ?? data.bodyProperties?.rotation;
   if (rotation) parts.push(`transform:rotate(${rotation}deg)`);
@@ -270,7 +249,7 @@ export function wpsRotationVert(data: WpsData, rotationOverride?: number): strin
  * wpsShapeStyles (outer = position+rotation+vert, inner = contentDOM).
  */
 export function renderWpsInterior(
-  data: WpsData,
+  data: WpsShapeCoreOptions,
   positionStyle: string,
   opts?: { rotation?: number; attrs?: Record<string, string> },
 ): Spec {
@@ -282,49 +261,35 @@ export function renderWpsInterior(
   return ["div", attrs, ...renderWpsText(data.children)];
 }
 
-/** Shape data subset carrying its own extent + floating anchor (a standalone
- *  wpsShape, not a wpg group child). */
-export interface WpsShapeStandalone extends WpsData {
-  transformation?: { width?: number; height?: number };
-  floating?: unknown;
-}
-
-export interface WpsShapeStyles {
-  /** outer wrapper (dom): floating/inline placement + size + rotation + writing-mode. */
-  outer: string;
-  /** inner contentDOM: box-sizing + fill + outline + textbox insets (padding). */
-  inner: string;
-  /** true when the floating anchor resolves against the anchor paragraph
-   *  (vRelative "paragraph") — the editor marks the anchor <p> relative. */
-  paragraphAnchor: boolean;
-}
-
 /** Two-element style split for an editable standalone wpsShape: `outer` for the
  *  positioning wrapper (dom), `inner` for the contentDOM. rotation/writing-mode
  *  stay on `outer` so the editable interior has a clean caret/IME rect. The
  *  geometry (EMU extent → px, floating anchor CSS) is computed here so the
  *  editor's NodeView and generateHTML render identically without re-deriving
  *  the engine's EMU/floating math. */
-export function wpsShapeStyles(ws: WpsShapeStandalone): WpsShapeStyles {
-  // office-open 0.10.4+ parses extent as EMU verbatim (was pixels); convert to px.
-  const w = ws.transformation?.width != null ? convertEmuToPixels(ws.transformation.width) : 0;
-  const h = ws.transformation?.height != null ? convertEmuToPixels(ws.transformation.height) : 0;
-  // box-sizing:border-box so the shape's width/height is its outer box
-  // (matching Word's extent), not content-box (which adds padding on top).
-  // overflow:hidden clips text past the fixed extent (Word's noAutoFit default).
-  const sizeStyle = `width:${w}px;height:${h}px;box-sizing:border-box;overflow:hidden`;
+export function wpsShapeStyles(ws: WpsShapeRunOptions): WpsShapeStyles {
+  const tw = ws.transformation?.width;
+  const th = ws.transformation?.height;
+  const w = typeof tw === "number" ? convertEmuToPixels(tw) : 0;
+  const h = typeof th === "number" ? convertEmuToPixels(th) : 0;
+  // bodyPr@wrap="none": text never wraps and the shape grows to the text width
+  // (Word renders the text box one line wide). Fixed extent width + overflow:
+  // hidden would wrap it (extent 192px can't fit a 24pt one-liner) — so drop the
+  // fixed width (max-content shrinks to the text) and force nowrap. wrap="square"
+  // (default) keeps the extent width and clips overflow (Word's noAutoFit default).
+  const noWrap = ws.bodyProperties?.wrap === "none";
+  const sizeStyle = noWrap
+    ? `width:max-content;height:${h}px;box-sizing:border-box;white-space:nowrap`
+    : `width:${w}px;height:${h}px;box-sizing:border-box;overflow:hidden`;
   const rotVert = wpsRotationVert(ws);
+  const widthNum = typeof tw === "number" ? tw : undefined;
   let outer: string;
   let paragraphAnchor = false;
   if (ws.floating) {
     // A floating text box (wp:anchor wrapNone) overlays its anchor paragraph
     // instead of claiming a line in the flow — same anchor CSS as images and
     // wpg groups (position:absolute at the EMU offset).
-    outer = [
-      ...floatingToStyles(ws.floating, undefined, ws.transformation?.width),
-      sizeStyle,
-      rotVert,
-    ]
+    outer = [...floatingToStyles(ws.floating, undefined, widthNum), sizeStyle, rotVert]
       .filter(Boolean)
       .join(";");
     paragraphAnchor = floatAnchorScope(ws.floating) === "paragraph";
@@ -346,13 +311,27 @@ export function wpsShapeStyles(ws: WpsShapeStandalone): WpsShapeStyles {
   return { outer, inner, paragraphAnchor };
 }
 
+export interface WpsShapeStyles {
+  /** outer wrapper (dom): floating/inline placement + size + rotation + writing-mode. */
+  outer: string;
+  /** inner contentDOM: box-sizing + fill + outline + textbox insets (padding). */
+  inner: string;
+  /** true when the floating anchor resolves against the anchor paragraph
+   *  (vRelative "paragraph") — the editor marks the anchor <p> relative. */
+  paragraphAnchor: boolean;
+}
+
 /** Render a wpg group (top-level or nested) as a positioned container.
  *  actualW/H are the group's real pixel size — top-level groups read them from
  *  transformation.width/height; nested groups receive the box their parent
  *  transform mapped them to. containerStyle (when set) carries the absolute
  *  placement for a nested group; otherwise the group is an inline-block. */
 function renderGroup(
-  group: WpgGroup,
+  group: {
+    children?: GroupChildMediaData[];
+    childOffset?: ChildOffset;
+    childExtent?: { cx: number; cy: number };
+  },
   actualW: number,
   actualH: number,
   containerStyle?: string,
@@ -424,15 +403,17 @@ export const WpgGroup = Node.create({
     node: { attrs: Record<string, unknown> };
     HTMLAttributes: Record<string, unknown>;
   }) {
-    const wpg = (node.attrs.wpgGroup as WpgGroup | null) ?? {};
+    const wpg = (node.attrs.wpgGroup as WpgGroupRunOptions | null) ?? ({} as WpgGroupRunOptions);
     const { w, h } = groupExtent(wpg);
+    const tw = wpg.transformation?.width;
+    const widthNum = typeof tw === "number" ? tw : undefined;
     // A floating group (wp:anchor) overlays its anchor paragraph instead of
     // claiming a line in the flow — render it with the same anchor CSS as
     // images (position:absolute for wrapNone "in front/behind text"), so the
     // group floats over the text below instead of pushing it down.
     if (wpg.floating) {
       const containerStyle = [
-        ...floatingToStyles(wpg.floating, undefined, w),
+        ...floatingToStyles(wpg.floating, undefined, widthNum),
         `width:${w}px`,
         `height:${h}px`,
       ].join(";");

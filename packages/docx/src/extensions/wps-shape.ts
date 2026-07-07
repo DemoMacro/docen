@@ -124,7 +124,7 @@ export const WpsShape = Node.create({
     node: { attrs: Record<string, unknown> };
     HTMLAttributes: Record<string, unknown>;
   }) {
-    const ws = (node.attrs.wpsShape as WpsShapeStandalone | null) ?? {};
+    const ws = (node.attrs.wpsShape ?? {}) as WpsShapeStandalone;
     const { outer, inner, paragraphAnchor } = wpsShapeStyles(ws);
     // Serialize the shape geometry so generateHTML→parseHTML round-trips it
     // (parseHTML JSON.parses data-wps-shape; "" would throw and drop it). The
