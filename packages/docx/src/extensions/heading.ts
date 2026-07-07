@@ -4,25 +4,20 @@ import { Heading as BaseHeading } from "@tiptap/extension-heading";
 
 import { buildTextBlock, indexParagraphStyles } from "../converters/styles";
 import type { ParseParagraphRule } from "./types";
-import {
-  attrNative,
-  renderParagraphStyles,
-  alignmentFromElement,
-  indentFromElement,
-  spacingFromElement,
-  bordersFromElement,
-  shadingFromElement,
-} from "./utils";
+import { docxParagraphAttrs, renderTextBlock, SECTION_ATTR_KEYS } from "./utils";
 
 /**
- * Heading extension with nested office-open attrs (mirrors Paragraph).
+ * Heading extension — a paragraph with an outline level.
  *
- * Attrs mirror ParagraphPropertiesOptionsBase (alignment/indent/spacing/border/
- * shading/frame as nested objects + scalar OOXML properties) plus the inherited
- * Tiptap `level` (1-6, rendered: false). DOCX round-trip is near-identity:
- * renderDocx/parseDocx pass attrs through and only map `level` ↔ OOXML
- * `heading` (HeadingLevel literal). CSS conversion happens solely in
- * renderHTML via utils mappers.
+ * In OOXML a heading IS a paragraph: a <w:p> whose pPr carries pStyle="Heading1"
+ * (or an outlineLvl), and a sectPr (when present) lives in that same <w:p>'s pPr.
+ * This node therefore shares Paragraph's office-open attrs via docxParagraphAttrs
+ * and adds only Tiptap's inherited `level` (1-9) plus the level↔HeadingLevel
+ * mapping.
+ *
+ * DOCX round-trip is near-identity: renderDocx/parseDocx pass attrs through and
+ * only map `level` ↔ OOXML `heading` (HeadingLevel literal). CSS conversion
+ * happens solely in renderHTML via utils mappers.
  */
 
 // HeadingLevel literals: "Heading1".."Heading9", "Title".
@@ -143,9 +138,13 @@ export function renderDocx(node: JSONContent): Record<string, unknown> {
   if (styleId) opts.heading = styleId;
   else if (level) opts.heading = HEADING_COMPILE_MAP[level] ?? "Heading1";
 
-  // Pass remaining attrs through verbatim (skip nulls + mapped fields).
+  // Pass remaining attrs through verbatim (skip nulls + mapped fields). Section
+  // attrs (sectionProperties/Headers/Footers) are editor-only — DocxManager
+  // closes a section off them in compile, so they must NOT reach ParagraphOptions
+  // (a heading can be a section's last paragraph, same as a plain paragraph).
   for (const [key, value] of Object.entries(attrs)) {
     if (key === "level" || key === "styleId" || TOC_RUNTIME_KEYS.has(key)) continue;
+    if (SECTION_ATTR_KEYS.has(key)) continue;
     if (value !== null && value !== undefined) opts[key] = value;
   }
   return opts;
@@ -212,77 +211,11 @@ export const Heading = BaseHeading.extend({
       ...[1, 2, 3, 4, 5, 6].map((level) => ({ tag: `h${level}`, attrs: { level } })),
     ];
   },
+  // A heading is a paragraph in OOXML, so it shares Paragraph's office-open attrs
+  // via docxParagraphAttrs — only `level` differs, and this.parent (BaseHeading)
+  // provides it.
   addAttributes() {
-    return {
-      ...this.parent?.(),
-
-      // pStyle reference (e.g. "Heading1") — same as Paragraph. renderHTML emits
-      // class="docx-style-{styleId}" for the injected document CSS.
-      styleId: {
-        default: null,
-        parseHTML: (el: HTMLElement) => {
-          const m = (el.getAttribute("class") || "").match(/(?:^|\s)docx-style-(\S+)/);
-          return m ? m[1] : null;
-        },
-      },
-
-      // Nested office-open objects (parsed from HTML where CSS exists)
-      alignment: {
-        default: null,
-        rendered: false,
-        parseHTML: (el: HTMLElement) => alignmentFromElement(el),
-      },
-      indent: {
-        default: null,
-        rendered: false,
-        parseHTML: (el: HTMLElement) => indentFromElement(el),
-      },
-      spacing: {
-        default: null,
-        rendered: false,
-        parseHTML: (el: HTMLElement) => spacingFromElement(el),
-      },
-      shading: {
-        default: null,
-        rendered: false,
-        parseHTML: (el: HTMLElement) => shadingFromElement(el),
-      },
-      border: {
-        default: null,
-        rendered: false,
-        parseHTML: (el: HTMLElement) => bordersFromElement(el),
-      },
-      frame: attrNative(),
-
-      // Scalar OOXML paragraph properties (stored verbatim; no CSS equivalent)
-      keepNext: attrNative(),
-      keepLines: attrNative(),
-      pageBreakBefore: attrNative(),
-      widowControl: attrNative(),
-      contextualSpacing: attrNative(),
-      bidirectional: attrNative(),
-      outlineLevel: attrNative(),
-      textDirection: attrNative(),
-      textAlignment: attrNative(),
-      suppressLineNumbers: attrNative(),
-      wordWrap: attrNative(),
-      overflowPunctuation: attrNative(),
-      autoSpaceEastAsianText: attrNative(),
-      suppressOverlap: attrNative(),
-      suppressAutoHyphens: attrNative(),
-      adjustRightInd: attrNative(),
-      snapToGrid: attrNative(),
-      mirrorIndents: attrNative(),
-      kinsoku: attrNative(),
-      topLinePunct: attrNative(),
-      autoSpaceDE: attrNative(),
-      textboxTightWrap: attrNative(),
-      rightTabStop: attrNative(),
-      leftTabStop: attrNative(),
-      divId: attrNative(),
-      tabStops: attrNative(),
-      cnfStyle: attrNative(),
-    };
+    return { ...this.parent?.(), ...docxParagraphAttrs() };
   },
 
   renderHTML({
@@ -294,26 +227,11 @@ export const Heading = BaseHeading.extend({
     };
     HTMLAttributes: Record<string, unknown>;
   }) {
-    // An empty heading (¶ glyph only) renders spacing.line at the natural
-    // metric (no grid pitch), matching Word — same as Paragraph. Mirrors
-    // measure.ts isEmptyTextblock. See renderParagraphStyles `empty`.
-    let hasContent = false;
-    node.forEach?.((child) => {
-      if (child.isText || child.type?.name === "hardBreak" || child.type?.name === "image")
-        hasContent = true;
-    });
-    const styles = renderParagraphStyles(node.attrs, { empty: !hasContent });
     const level = (node.attrs?.level as number) ?? 1;
-    const attrs = { ...HTMLAttributes };
-    const styleId = node.attrs.styleId as string | null;
-    if (styleId) attrs.class = `docx-style-${styleId}`;
-    if (styles.length > 0) attrs.style = styles.join(";");
     // HTML has no h7-h9: levels 7-9 render as <h6> carrying the real level in
-    // data-heading-level (parseHTML reads it back). The visual style still comes
-    // from the document's Heading7-9 style via the docx-style-{styleId} class.
+    // data-heading-level (parseHTML reads it back). renderTextBlock stamps it.
     const tag = level >= 1 && level <= 6 ? `h${level}` : "h6";
-    if (level >= 7) attrs["data-heading-level"] = String(level);
-    return [tag, attrs, 0] as const;
+    return renderTextBlock(node, HTMLAttributes, tag, level);
   },
 
   renderDocx,

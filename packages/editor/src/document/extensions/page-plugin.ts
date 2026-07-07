@@ -702,7 +702,12 @@ function reflow(editor: Editor, scroll = false): void {
   let sectCursor: unknown = docSectionProps;
   for (let i = items.length - 1; i >= 0; i--) {
     const it = items[i];
-    if (it.kind === "block" && it.node.type.name === "paragraph") {
+    // A heading can be a section's last paragraph too (heading IS a paragraph in
+    // OOXML) — read its sectionProperties the same way.
+    if (
+      it.kind === "block" &&
+      (it.node.type.name === "paragraph" || it.node.type.name === "heading")
+    ) {
       const sp = (it.node.attrs as { sectionProperties?: unknown }).sectionProperties;
       if (sp != null) sectCursor = sp;
     }

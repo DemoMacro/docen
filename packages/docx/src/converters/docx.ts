@@ -286,7 +286,10 @@ export class DocxManager {
           if (Array.isArray(child)) currentChildren.push(...child);
           else currentChildren.push(child);
         }
-        if (node.type === "paragraph") {
+        // A heading is a paragraph in OOXML, so it can carry a section's sectPr
+        // too (a heading as a section's last paragraph — e.g. a chapter title
+        // before a section break). Treat both as section-carrying.
+        if (node.type === "paragraph" || node.type === "heading") {
           const na = (node.attrs ?? {}) as Record<string, unknown>;
           if (na.sectionProperties != null) {
             sections.push(
@@ -442,10 +445,13 @@ export class DocxManager {
           sectionFooters: this.resolveHeaderFooter(section.footers),
         };
         const last = sectionContent[sectionContent.length - 1];
-        if (last?.type === "paragraph") {
+        // A heading can be a section's last paragraph too (heading IS a paragraph
+        // in OOXML) — stamp sectPr on it directly instead of appending a stray
+        // empty paragraph after it.
+        if (last?.type === "paragraph" || last?.type === "heading") {
           last.attrs = { ...last.attrs, ...sectAttrs };
         } else {
-          // Section ends on a non-paragraph (table/etc.) — Word still needs the
+          // Section ends on a non-textblock (table/etc.) — Word still needs the
           // sectPr on a paragraph, so append an empty one to carry it.
           sectionContent.push({ type: "paragraph", attrs: sectAttrs });
         }

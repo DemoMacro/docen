@@ -1,15 +1,7 @@
 import type { JSONContent } from "@tiptap/core";
 import { Paragraph as BaseParagraph } from "@tiptap/extension-paragraph";
 
-import {
-  attrNative,
-  renderParagraphStyles,
-  alignmentFromElement,
-  indentFromElement,
-  spacingFromElement,
-  bordersFromElement,
-  shadingFromElement,
-} from "./utils";
+import { docxParagraphAttrs, renderTextBlock, SECTION_ATTR_KEYS } from "./utils";
 
 /**
  * Paragraph extension with nested office-open attrs.
@@ -17,28 +9,11 @@ import {
  * Attrs mirror ParagraphPropertiesOptionsBase (alignment/indent/spacing/border/
  * shading/frame as nested objects + scalar OOXML properties). DOCX round-trip is
  * near-identity: renderDocx/parseDocx pass attrs through; CSS conversion happens
- * only in renderHTML via utils mappers.
+ * only in renderHTML via utils mappers. Heading shares the same attrs (a heading
+ * is a paragraph in OOXML) — see docxParagraphAttrs.
  */
 
 // ── DOCX serialization (near-identity: attrs mirror ParagraphPropertiesOptionsBase) ──
-
-// Editor-only attrs that mark a paragraph as a section's last paragraph (its pPr
-// holds the OOXML sectPr). DocxManager peels them off to close a section in
-// compile; they must NOT leak into ParagraphOptions.
-const SECTION_ATTR_KEYS = new Set(["sectionProperties", "sectionHeaders", "sectionFooters"]);
-
-/**
- * Whether a paragraph's tabStops include a leader (dot/underscore/hyphen/…), e.g.
- * a TOC entry's right tab. Signals dot-leader layout to the editor CSS.
- */
-function hasLeaderTabStop(tabStops: unknown): boolean {
-  if (!Array.isArray(tabStops)) return false;
-  return tabStops.some((t) => {
-    if (!t || typeof t !== "object") return false;
-    const leader = (t as { leader?: unknown }).leader;
-    return typeof leader === "string" && leader !== "none" && leader.length > 0;
-  });
-}
 
 export function renderDocx(node: JSONContent): Record<string, unknown> {
   const attrs = (node.attrs ?? {}) as Record<string, unknown>;
@@ -88,93 +63,11 @@ export function parseDocx(opts: Record<string, unknown>): Record<string, unknown
 // ── Extension ──
 
 export const Paragraph = BaseParagraph.extend({
+  // A heading is a paragraph in OOXML (a <w:p> with pStyle="Heading1"), so
+  // Paragraph and Heading share the SAME office-open paragraph attrs via
+  // docxParagraphAttrs — only Heading adds `level`. See utils.
   addAttributes() {
-    return {
-      ...this.parent?.(),
-
-      // pStyle reference (e.g. "Heading1", "Title", "Normal") — the named
-      // paragraph style. renderHTML emits class="docx-style-{styleId}" so the
-      // injected document CSS (generated from styles.xml) applies. Round-trips
-      // via OOXML `style`.
-      styleId: {
-        default: null,
-        parseHTML: (el: HTMLElement) => {
-          const m = (el.getAttribute("class") || "").match(/(?:^|\s)docx-style-(\S+)/);
-          return m ? m[1] : null;
-        },
-      },
-
-      // Nested office-open objects (parsed from HTML where CSS exists)
-      alignment: {
-        default: null,
-        rendered: false,
-        parseHTML: (el: HTMLElement) => alignmentFromElement(el),
-      },
-      indent: {
-        default: null,
-        rendered: false,
-        parseHTML: (el: HTMLElement) => indentFromElement(el),
-      },
-      spacing: {
-        default: null,
-        rendered: false,
-        parseHTML: (el: HTMLElement) => spacingFromElement(el),
-      },
-      shading: {
-        default: null,
-        rendered: false,
-        parseHTML: (el: HTMLElement) => shadingFromElement(el),
-      },
-      border: {
-        default: null,
-        rendered: false,
-        parseHTML: (el: HTMLElement) => bordersFromElement(el),
-      },
-      frame: attrNative(),
-      // Paragraph-mark run properties (pPr/rPr): per OOXML (ECMA-376) these
-      // format ONLY the ¶ glyph — never applied to the paragraph's runs. Carried
-      // verbatim for lossless DOCX round-trip (renderDocx emits opts.run); NOT
-      // rendered to CSS. Run font/size/color come from the run's own marks or
-      // the named-style / docDefaults CSS (stylesToCss).
-      run: attrNative(),
-
-      // Section properties carried on a section's LAST paragraph (OOXML sectPr
-      // lives in that paragraph's pPr). DocxManager uses these to split/merge
-      // sections in compile/resolve; they never render and never reach
-      // ParagraphOptions (renderDocx skips them).
-      sectionProperties: attrNative(),
-      sectionHeaders: attrNative(),
-      sectionFooters: attrNative(),
-
-      // Scalar OOXML paragraph properties (stored verbatim; no CSS equivalent)
-      keepNext: attrNative(),
-      keepLines: attrNative(),
-      pageBreakBefore: attrNative(),
-      widowControl: attrNative(),
-      contextualSpacing: attrNative(),
-      bidirectional: attrNative(),
-      outlineLevel: attrNative(),
-      textDirection: attrNative(),
-      textAlignment: attrNative(),
-      suppressLineNumbers: attrNative(),
-      wordWrap: attrNative(),
-      overflowPunctuation: attrNative(),
-      autoSpaceEastAsianText: attrNative(),
-      suppressOverlap: attrNative(),
-      suppressAutoHyphens: attrNative(),
-      adjustRightInd: attrNative(),
-      snapToGrid: attrNative(),
-      mirrorIndents: attrNative(),
-      kinsoku: attrNative(),
-      topLinePunct: attrNative(),
-      autoSpaceDE: attrNative(),
-      textboxTightWrap: attrNative(),
-      rightTabStop: attrNative(),
-      leftTabStop: attrNative(),
-      divId: attrNative(),
-      tabStops: attrNative(),
-      cnfStyle: attrNative(),
-    };
+    return { ...this.parent?.(), ...docxParagraphAttrs() };
   },
 
   renderHTML({
@@ -186,32 +79,7 @@ export const Paragraph = BaseParagraph.extend({
     };
     HTMLAttributes: Record<string, unknown>;
   }) {
-    // An empty paragraph (¶ glyph only) has no text/hardBreak/image child; its
-    // spacing.line renders at the font's natural metric (no grid pitch),
-    // matching Word. Mirrors measure.ts isEmptyTextblock. See
-    // renderParagraphStyles `empty`.
-    let hasContent = false;
-    node.forEach?.((child) => {
-      if (child.isText || child.type?.name === "hardBreak" || child.type?.name === "image")
-        hasContent = true;
-    });
-    const styles = renderParagraphStyles(node.attrs, { empty: !hasContent });
-    const attrs = { ...HTMLAttributes };
-    const styleId = node.attrs.styleId as string | null;
-    // class="docx-style-{id}" applies the named style's CSS. A pStyle-less
-    // paragraph renders as the document's default paragraph style (OOXML:
-    // no pStyle = default style), so mark it `docx-default` — stylesToCss emits
-    // the default style's rule under that selector too.
-    attrs.class = styleId ? `docx-style-${styleId}` : "docx-default";
-    // A tab-stop with a leader (e.g. a TOC's right + dot) signals dot-leader
-    // layout: mark the paragraph so the editor CSS renders the dotted leader
-    // between the title and page number. tabStops stays rendered:false (hand-read,
-    // like styleId above).
-    if (hasLeaderTabStop(node.attrs.tabStops)) {
-      attrs.class += " docx-tab-leader";
-    }
-    if (styles.length > 0) attrs.style = styles.join(";");
-    return ["p", attrs, 0] as const;
+    return renderTextBlock(node, HTMLAttributes, "p");
   },
 
   renderDocx,

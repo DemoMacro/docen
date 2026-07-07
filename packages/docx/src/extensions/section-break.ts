@@ -54,7 +54,9 @@ export const SectionBreak = Extension.create({
           if (!dispatch) return true;
           const { $from } = tr.selection;
           const para = $from.parent;
-          if (para.type.name !== "paragraph") return false;
+          // A heading is a paragraph in OOXML — allow a section break on a
+          // heading too (e.g. a chapter title that ends its section).
+          if (para.type.name !== "paragraph" && para.type.name !== "heading") return false;
           const paraPos = $from.before($from.depth);
           // 1. Current paragraph becomes its section's last paragraph.
           tr.setNodeMarkup(paraPos, undefined, {
