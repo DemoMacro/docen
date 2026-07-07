@@ -41,10 +41,15 @@ export const OFFICE_TOKENS_CSS = `
 
   /* Page paper — reuse Fluent's neutral background so the sheet follows the
      active theme (white in light, dark in dark/high-contrast), like Word's
-     "Use system colors" page. Crop / editing marks follow the theme's
-     secondary foreground (Word's marks recolor in Dark Mode the same way). */
+     "Use system colors" page. Crop marks use the LIGHTEST neutral-foreground
+     shade (Disabled, #bdbdbd light / its dark counterpart) — the four corner
+     brackets are faint guide marks outside the content box, so a mid foreground
+     (#616161, Foreground3) reads too dark/heavy; the lightest foreground shade
+     matches Word's near-invisible crop lines and still recolors in dark mode.
+     Editing marks (¶) keep the secondary foreground (Foreground3) so they stay
+     more legible than the crop brackets. */
   --docen-color-page: var(--colorNeutralBackground1, #ffffff);
-  --docen-color-crop: var(--colorNeutralForeground3, #adadad);
+  --docen-color-crop: var(--colorNeutralForegroundDisabled, #adadad);
   --docen-color-marks: var(--colorNeutralForeground3, #767676);
 }` as const;
 
