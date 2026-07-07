@@ -556,6 +556,73 @@ function emptyLineHeight({
 // fidelity limit, not a correctness bug — the paginator converges on the
 // measured count.
 
+/** A square/tight floating image (CSS float:left/right) occupies flow space
+ *  expressed as a vertical band relative to the page content top: text whose
+ *  line overlaps the band wraps beside it (available width = full − zone.width).
+ *  Used by layoutLineOffsets so a paragraph measured under a float credits each
+ *  line only the width the renderer gives it — otherwise it under-counts wrapped
+ *  lines and the page overflows after reflow. wrapNone (position:absolute) and
+ *  page/margin anchors are excluded: they sit outside the text flow. */
+export interface FloatZone {
+  width: number; // image width + L/R wrap margins (px)
+  top: number; // page-content-relative top Y
+  bottom: number; // top + image height
+}
+
+// 1 px = 9525 EMU (914400 EMU/inch ÷ 96 px/inch). Drawing offsets/margins are EMU.
+const EMU_PER_PX = 9525;
+
+/** Usable text width for a line occupying [y, y2]: full width minus the widest
+ *  float zone overlapping it (CSS float — text wraps beside the image). */
+function widthAtY(
+  y: number,
+  y2: number,
+  fullWidth: number,
+  zones: readonly FloatZone[] | undefined,
+): number {
+  if (!zones || zones.length === 0) return fullWidth;
+  let reduce = 0;
+  for (const z of zones) {
+    if (z.bottom > y && z.top < y2) reduce = Math.max(reduce, z.width);
+  }
+  return Math.max(0, fullWidth - reduce);
+}
+
+/** Float zones a paragraph contributes (its square/tight/topAndBottom floating
+ *  images, wp:anchor with float:left/right). wrapNone (type 0, position:absolute)
+ *  and page/margin/column anchors are skipped — they don't ride the paragraph's
+ *  text flow. Each zone's top = `startY` + the image's vertical offset (margin-top,
+ *  EMU→px); width = image width + L/R wrap margins (the float's wrap box). Used by
+ *  measureFlatItems to track active floats across a page so later paragraphs the
+ *  image overhangs measure with the reduced width (text-wrap fidelity). */
+export function paragraphFloatZonesOf(node: PmNode, startY: number): FloatZone[] {
+  const zones: FloatZone[] = [];
+  node.forEach((child) => {
+    if (child.type.name !== "image") return;
+    const fl = (child.attrs as { floating?: unknown }).floating as
+      | {
+          wrap?: { type?: number | null } | null;
+          verticalPosition?: { relative?: string | null; offset?: number | null } | null;
+          margins?: { left?: number | null; right?: number | null } | null;
+        }
+      | null
+      | undefined;
+    if (!fl) return;
+    if ((fl.wrap?.type ?? 0) === 0) return; // wrapNone: absolute, outside flow
+    const vRel = fl.verticalPosition?.relative;
+    if (vRel === "page" || vRel === "margin" || vRel === "column") return; // page-box anchor
+    const w = (child.attrs as { width?: number }).width;
+    const h = (child.attrs as { height?: number }).height;
+    if (typeof w !== "number" || typeof h !== "number" || w <= 0 || h <= 0) return;
+    const emuPx = (e: number | null | undefined): number =>
+      typeof e === "number" && e > 0 ? e / EMU_PER_PX : 0;
+    const width = w + emuPx(fl.margins?.left) + emuPx(fl.margins?.right);
+    const top = startY + emuPx(fl.verticalPosition?.offset);
+    zones.push({ width, top, bottom: top + h });
+  });
+  return zones;
+}
+
 /** Lay out a prepared paragraph line by line: the FIRST line at
  *  `width − firstLinePx` and later lines at `width` — mirroring CSS text-indent
  *  (only the first line is indented). Returns the line count and the PM content
@@ -569,14 +636,26 @@ function layoutLineOffsets(
   prepared: PreparedRichInline,
   width: number,
   firstLinePx: number,
+  zones?: readonly FloatZone[],
+  startY?: number,
+  lh?: number,
 ): { lineCount: number; lineBreakOffsets: number[] } {
   const lineBreakOffsets: number[] = [];
   let pmOff = 0;
   let lineCount = 0;
   let cursor: RichInlineCursor | undefined;
   let first = true;
+  // When float zones are present, each line's usable width shrinks by any zone
+  // overlapping it (CSS float text-wrap), measured line by line via Pretext's
+  // per-line width. Without this a paragraph beside a float under-counts lines
+  // and the page overflows after reflow.
+  const haveZones =
+    !!zones && zones.length > 0 && startY != null && typeof lh === "number" && lh > 0;
   while (true) {
-    const mw = first ? Math.max(0, width - firstLinePx) : width;
+    const baseW = haveZones
+      ? widthAtY(startY! + lineCount * lh!, startY! + (lineCount + 1) * lh!, width, zones)
+      : width;
+    const mw = first ? Math.max(0, baseW - firstLinePx) : baseW;
     const range = layoutNextRichInlineLineRange(prepared, mw, cursor);
     if (!range) break;
     const line = materializeRichInlineLineRange(prepared, range);
@@ -656,7 +735,7 @@ export function measureParagraphHeight(node: PmNode, width: number, ctx?: Measur
     snapToGrid,
     inTable,
   });
-  const lcInfo = layoutLineOffsets(prepared, width, firstLinePx);
+  const lcInfo = layoutLineOffsets(prepared, width, firstLinePx, ctx?.floatZones, ctx?.startY, lh);
   return Math.max(1, lcInfo.lineCount) * lh;
 }
 
@@ -776,7 +855,14 @@ export function measureParagraphLines(
     inTable: ctx?.inTable ?? false,
   });
   const firstLinePx = resolveFirstLineIndentPx(node, ctx?.styles);
-  const { lineCount, lineBreakOffsets } = layoutLineOffsets(prepared, width, firstLinePx);
+  const { lineCount, lineBreakOffsets } = layoutLineOffsets(
+    prepared,
+    width,
+    firstLinePx,
+    ctx?.floatZones,
+    ctx?.startY,
+    lineHeight,
+  );
   return { lineHeight, lineCount, lineBreakOffsets };
 }
 
@@ -965,6 +1051,14 @@ export interface MeasureContext {
   /** True inside a table cell: line height snaps to max(natural, pitch) so the
    *  row's trHeight atLeast floor — not the line box — governs (matches Word). */
   inTable?: boolean;
+  /** Active float zones (page-content-relative Y): square/tight float images
+   *  reduce each overlapping line's usable width (text wraps beside them). An
+   *  empty/absent list ⇒ measure at full width (no float influence). Table
+   *  cells clear this (a cell's width is its column, not the page flow). */
+  floatZones?: readonly FloatZone[];
+  /** This block's top Y within the page content box — used with floatZones to
+   *  derive each line's Y for the per-line width reduction. */
+  startY?: number;
 }
 
 /** Measure any top-level block height in px at `width`. Textblocks use Pretext
@@ -1057,7 +1151,12 @@ export function measureRowHeight(
 ): number {
   // Cells measure under the table-cell line-height rule (max(natural, pitch))
   // so the row's trHeight floor governs — fork the ctx once for the whole row.
-  const cellCtx: MeasureContext = { ...ctx, inTable: true };
+  const cellCtx: MeasureContext = {
+    ...ctx,
+    inTable: true,
+    floatZones: undefined,
+    startY: undefined,
+  };
   let maxHeight = 0;
   let colCursor = 0;
   row.forEach((cell) => {

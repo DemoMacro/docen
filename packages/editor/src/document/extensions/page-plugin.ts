@@ -11,11 +11,13 @@ import {
   measureBlockHeight,
   measureParagraphLines,
   measureRowHeight,
+  paragraphFloatZonesOf,
   paragraphSpacingMargins,
   resolveIndentWidth,
   resolvePaginationAttrs,
   tableColumnWidths,
   tableWidthOf,
+  type FloatZone,
   type PaginationAttrs,
 } from "../utils/measure";
 import { resolvePageSize } from "./page-node";
@@ -154,6 +156,7 @@ function measureFlatItems(editor: Editor): FlatItem[] {
     dom: HTMLElement | undefined;
     width: number;
     linePitchPx: number | undefined;
+    pageIndex: number;
   };
   // Pass 1 — flatten every page's children into one flow, each carrying its
   // page's content width + document-grid pitch (per-page section geometry) and
@@ -163,7 +166,8 @@ function measureFlatItems(editor: Editor): FlatItem[] {
   let pi = 0;
   state.doc.forEach((pageNode) => {
     if (pageNode.type.name !== "page") return;
-    const pageDom = pageDoms[pi++];
+    const curPi = pi++;
+    const pageDom = pageDoms[curPi];
     if (!pageDom) return;
     const dims = sectionContentDims(pageNode.attrs.sectionProperties);
     const pageCs = getComputedStyle(pageDom);
@@ -178,7 +182,7 @@ function measureFlatItems(editor: Editor): FlatItem[] {
     pageNode.forEach((child) => {
       const dom = childDoms[bi++];
       if (!dom) return;
-      raw.push({ node: child, dom, width, linePitchPx: dims?.linePitchPx });
+      raw.push({ node: child, dom, width, linePitchPx: dims?.linePitchPx, pageIndex: curPi });
     });
   });
   // Pass 2 — CROSS-PAGE logical merge: adjacent (in flow order, possibly across
@@ -217,11 +221,26 @@ function measureFlatItems(editor: Editor): FlatItem[] {
   // to DOM height. Continuation header clones (splitClone rows) reserve height
   // against the next real row, never as their own flow item.
   const out: FlatItem[] = [];
-  for (const { node: child, dom, width: pageContentWidth, linePitchPx } of logical) {
+  // Active float zones (page-content-relative) + accumulated Y, reset per page.
+  // A square/tight float image rides its anchor paragraph's flow and overhangs
+  // later paragraphs; tracking its band lets those paragraphs measure with the
+  // reduced width (text wraps beside the image) — without this they under-count
+  // wrapped lines and the page overflows after reflow.
+  let activeFloats: FloatZone[] = [];
+  let accY = 0;
+  let curPi = -1;
+  for (const { node: child, dom, width: pageContentWidth, linePitchPx, pageIndex } of logical) {
+    if (pageIndex !== curPi) {
+      curPi = pageIndex;
+      activeFloats = [];
+      accY = 0;
+    }
+    const blockTop = accY;
     if (child.type.name === "table") {
       const tableW = tableWidthOf(child, pageContentWidth);
       const colWidths = tableColumnWidths(child, tableW);
       let pendingClone = 0;
+      let tableH = 0;
       child.forEach((row) => {
         const rh = measureRowHeight(row, colWidths, { linePitchPx, styles });
         if (row.attrs.splitClone === true) {
@@ -229,20 +248,41 @@ function measureFlatItems(editor: Editor): FlatItem[] {
           return;
         }
         out.push({ kind: "row", row, height: rh + pendingClone, table: child });
+        tableH += rh + pendingClone;
         pendingClone = 0;
       });
+      accY += tableH;
     } else {
       const after = paragraphSpacingMargins(child, styles).afterPx;
       const blockWidth = child.isTextblock
         ? resolveIndentWidth(child, pageContentWidth, styles)
         : pageContentWidth;
-      const height = measureBlockHeight(child, blockWidth, {
-        domHeightOf: (n) => (n === child ? dom?.getBoundingClientRect().height : undefined),
+      // The block's own float images join the active set BEFORE measuring: the
+      // block's text wraps around its own float (the image shares its lines),
+      // and subsequent blocks the image overhangs must see it too. Push at
+      // blockTop so the band aligns with this block's first line.
+      if (child.isTextblock) {
+        for (const z of paragraphFloatZonesOf(child, blockTop)) activeFloats.push(z);
+      }
+      // floatZones + startY: this block's lines shed width to any active float
+      // overlapping them (CSS float text-wrap), measured per line via Pretext.
+      const ctx = {
+        domHeightOf: (n: PmNode) => (n === child ? dom?.getBoundingClientRect().height : undefined),
         linePitchPx,
         styles,
-      });
+        floatZones: activeFloats,
+        startY: blockTop,
+      };
+      // Textblock height MUST stay Pretext (model-only) — never read the DOM
+      // here. A textblock's DOM height wobbles across layout passes (sub-pixel
+      // font hinting) and collapses to ~0 on off-screen pages (content-visibility:
+      // auto); preferring it makes boundary blocks flip pages every re-flow pass
+      // (A↔B oscillation, visible as the page contents flickering up/down). This
+      // is the same invariant measureBlockHeight enforces — see its doc comment.
+      const height = measureBlockHeight(child, blockWidth, ctx);
       const pag = resolvePaginationAttrs(child);
-      const lines = measureParagraphLines(child, blockWidth, { linePitchPx, styles }) ?? undefined;
+      const lines = measureParagraphLines(child, blockWidth, ctx) ?? undefined;
+      accY += height + after;
       out.push({ kind: "block", node: child, height: height + after, after, pag, lines });
     }
   }
@@ -636,6 +676,11 @@ function reflow(editor: Editor, scroll = false): void {
   // matches the page's inline width/height/padding box exactly (so multi-section
   // docs — e.g. a landscape section — pack against each section's own height).
   const domFallback = resolvePageContentHeight(editor);
+  // Sub-pixel safety: Pretext's canvas measurement can drift a couple px below
+  // the browser's layout (font hinting, CJK kinsoku); over many blocks/page that
+  // accumulates past the fixed page box. Closing the page a hair early keeps the
+  // marginal block for the next page instead of clipping it.
+  const OVERFLOW_SAFETY_PX = 2;
   const segHeightOf = (section: unknown): number =>
     sectionContentDims(section)?.height ?? domFallback;
 
@@ -729,10 +774,13 @@ function reflow(editor: Editor, scroll = false): void {
     // null for unsplittable blocks (container/keepLines) → they still take a page
     // to themselves (Word clips oversized content). Rows can't split (a <tr>
     // can't visually break), so they always fall through.
-    const overflow = cur.length > 0 ? core > curHeight || acc + core > curHeight : core > curHeight;
+    const overflow =
+      cur.length > 0
+        ? core > curHeight || acc + core > curHeight - OVERFLOW_SAFETY_PX
+        : core > curHeight;
     if (overflow) {
       if (item.kind === "block") {
-        const remaining = cur.length > 0 ? curHeight - acc : curHeight;
+        const remaining = cur.length > 0 ? curHeight - acc - OVERFLOW_SAFETY_PX : curHeight;
         // Reuse the paragraph's existing splitGroup when it has one: a tail that
         // re-splits mid-packer keeps its own group, so EVERY piece of the same
         // original paragraph shares one id. Otherwise head(p0) + a re-split tail's
@@ -934,21 +982,18 @@ export const PagePlugin = Extension.create<PagePluginOptions>({
               // (doc unchanged after our dispatch converges, or the same-check
               // inside reflow short-circuits) does not cascade.
               if (view.state.doc === prevState.doc) return;
-              // Follow the caret immediately — don't wait for the debounced
-              // reflow. ProseMirror's scrollIntoView (run by deleteSelection and
-              // similar) parks the caret at the viewport edge; a select-all
-              // delete that leaves the caret at the doc end otherwise keeps the
-              // viewport at the bottom for ~1s until reflow corrects it.
-              // scrollCaretToTop is a no-op when the caret is in view, so this
-              // never fights normal typing.
-              // Defer past ProseMirror's scrollIntoView (it runs AFTER plugin
-              // view.update, so a synchronous scroll here gets overwritten):
-              // deleteSelection leaves the caret at the doc end and PM parks it
-              // at the viewport bottom; correct it on the next frame so the
-              // viewport never sits at the bottom waiting for the debounced
-              // reflow. scrollCaretToTop is a no-op when the caret is in view.
-              requestAnimationFrame(() => scrollCaretToTop(view));
-              schedule(true);
+              // Follow the caret only when the selection actually moved (a user
+              // edit). Programmatic doc changes (image load embedding a data URL,
+              // import) keep the caret put — scrolling back to it then fights the
+              // user's scroll position: a large doc loaded with the caret on
+              // page 1 snaps back to page 1 on every image-load transaction while
+              // the user scrolls. scrollCaretToTop is a no-op when the caret is
+              // in view, so this never fights normal typing. Defer past PM's
+              // scrollIntoView (it runs AFTER plugin view.update, so a
+              // synchronous scroll here gets overwritten).
+              const caretMoved = view.state.selection.head !== prevState.selection.head;
+              if (caretMoved) requestAnimationFrame(() => scrollCaretToTop(view));
+              schedule(caretMoved);
             },
             destroy() {
               if (timer) clearTimeout(timer);
