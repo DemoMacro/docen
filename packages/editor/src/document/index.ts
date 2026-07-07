@@ -790,6 +790,15 @@ class DocenDocument extends AddinHost<Editor> {
   /** Memoized stylesToCss output keyed by the styles object reference, so a
    *  repeated setJSON/open with the same styles skips regenerating the CSS. */
   #stylesCssCache = new WeakMap<StylesOptions, string>();
+  /** The adoptedStyleSheet carrying the docxStyles @layer (named-styles CSS), or
+   *  null when none is injected. Tracked across #injectDocStyles calls so a
+   *  repeated load replaces its contents in place rather than stacking sheets.
+   *  Uses adoptedStyleSheets (NOT a <style> element) so docxStyles shares the
+   *  SAME cascade-layer stack as the reset layer — see #injectDocStyles. */
+  #docStylesSheet: CSSStyleSheet | null = null;
+  /** Last CSS string synced into #docStylesSheet; an unchanged injection (same
+   *  styles object → memoized CSS) skips replaceSync. */
+  #docStylesCss?: string;
 
   /** The underlying Tiptap Editor (undefined before connect / after disconnect).
    *  Exposed so a host (the @docen/vue adapter, or any parent element) can drive
@@ -2560,14 +2569,21 @@ class DocenDocument extends AddinHost<Editor> {
     return last;
   }
 
-  /** Inject the document's named styles (styles.xml) as scoped CSS so imported
-   *  headings/body text render with their real font/size/color instead of the
-   *  browser default. Called after every content load (create / import / setJSON). */
-  /** Inject the document's named-styles CSS (styles.xml → scoped <style>) into
-   *  the shadow root. Idempotent — reuses the #docen-doc-styles element across
-   *  calls. Called BOTH before #loadDoc (by openDOCX/setJSON, so the first paint
-   *  is already styled) and inside #applyDocStyles (refresh after doc attrs
-   *  settle). Split out so loaders can inject before rendering. */
+  /** Inject the document's named-styles CSS (styles.xml → scoped CSS) as an
+   *  adoptedStyleSheet carrying the docxStyles @layer. Idempotent — reuses the
+   *  #docStylesSheet across calls (replaceSync in place). Called BOTH before
+   *  #loadDoc (by openDOCX/setJSON, so the first paint is already styled) and
+   *  inside #applyDocStyles (refresh after doc attrs settle).
+   *
+   *  adoptedStyleSheets (NOT a <style> element): a shadow root does NOT merge a
+   *  <style> element's @layer into the adoptedStyleSheets @layer stack. The
+   *  reset layer lives in an adopted sheet, so a <style>-borne docxStyles layer
+   *  was ordered BELOW it — reset's `.docen-page h4 { font-weight: inherit }`
+   *  beat docxStyles' `.docx-style-4 { font-weight: bold }` despite `@layer
+   *  reset, docxStyles`, dropping heading bold (while color/font-size on the
+   *  same rule still won, since reset doesn't set them). Sharing the
+   *  adoptedStyleSheets mechanism puts both layers in one stack so the declared
+   *  order holds. */
   #injectDocStyles(styles: StylesOptions | null | undefined): void {
     const root = this.shadowRoot;
     if (!root) return;
@@ -2578,16 +2594,27 @@ class DocenDocument extends AddinHost<Editor> {
       css = stylesToCss(styles, ".docen-page");
       if (styles) this.#stylesCssCache.set(styles, css);
     }
-    const existing = root.querySelector("#docen-doc-styles");
     if (css) {
-      const styleEl = (existing ?? document.createElement("style")) as HTMLStyleElement;
-      styleEl.id = "docen-doc-styles";
       // Wrap in @layer docxStyles so these named styles beat the reset layer
       // (layer order, not specificity) yet stay below unlayered inline styles.
-      styleEl.textContent = "@layer docxStyles {\n" + css + "\n}";
-      if (!existing) root.append(styleEl);
-    } else {
-      existing?.remove();
+      const wrapped = "@layer docxStyles {\n" + css + "\n}";
+      const sheets = root.adoptedStyleSheets;
+      if (this.#docStylesSheet && sheets.includes(this.#docStylesSheet)) {
+        if (this.#docStylesCss !== wrapped) {
+          this.#docStylesSheet.replaceSync(wrapped);
+          this.#docStylesCss = wrapped;
+        }
+      } else {
+        const sheet = new CSSStyleSheet();
+        sheet.replaceSync(wrapped);
+        this.#docStylesSheet = sheet;
+        this.#docStylesCss = wrapped;
+        root.adoptedStyleSheets = [...sheets, sheet];
+      }
+    } else if (this.#docStylesSheet) {
+      root.adoptedStyleSheets = root.adoptedStyleSheets.filter((s) => s !== this.#docStylesSheet);
+      this.#docStylesSheet = null;
+      this.#docStylesCss = undefined;
     }
   }
 
