@@ -1,9 +1,6 @@
 import { Table } from "@docen/docx/extensions/table";
 import { TableRow } from "@docen/docx/extensions/table-row";
-import { tableFloatToCss } from "@docen/docx/extensions/utils";
-import { TableView } from "@tiptap/extension-table";
 import type { Node as PmNode } from "@tiptap/pm/model";
-import type { EditorView } from "@tiptap/pm/view";
 
 /**
  * Table split support for C-route pagination.
@@ -21,39 +18,11 @@ import type { EditorView } from "@tiptap/pm/view";
  * See CLAUDE.md → Pagination Architecture (C-route) and CONTRIBUTING.md.
  */
 
-/** TableView variant that applies a floating table's w:tblpPr anchor (page/
- *  margin anchor → position:absolute) to the wrapper div. The base TableView
- *  rebuilds the <table> from addAttributes fields and never runs the docx
- *  node-level renderHTML, so renderHTML's computed style (float/border/width)
- *  never reaches the editor view. This re-applies the float positioning — the
- *  only table-level style that pins a table to the page box — onto the wrapper
- *  div, which the base view leaves without inline style, so it never clashes
- *  with updateColumns' table.style.width. */
-class FloatTableView extends TableView {
-  constructor(
-    node: PmNode,
-    cellMinWidth: number,
-    view?: EditorView,
-    HTMLAttributes?: Record<string, unknown>,
-  ) {
-    super(node, cellMinWidth, view, HTMLAttributes);
-    this.applyFloat(node);
-  }
-
-  update(node: PmNode): boolean {
-    const ok = super.update(node);
-    if (ok) this.applyFloat(node);
-    return ok;
-  }
-
-  private applyFloat(node: PmNode): void {
-    const css = tableFloatToCss(node.attrs.float);
-    this.dom.style.cssText = css.length ? css.join(";") : "";
-  }
-}
-
 /** Whole-table split id shared by all table nodes split from one original.
- *  null on an un-split (whole) table. Editor-only — cleared on export. */
+ *  null on an un-split (whole) table. Editor-only — cleared on export. Adds
+ *  only the splitGroup attr; the NodeView is inherited from docx Table
+ *  (DocenTableView), which applies tblW width, table-layout, and the float
+ *  anchor — so split-table no longer needs its own. */
 export const SplitTable = Table.extend({
   name: "table",
   addAttributes() {
@@ -61,10 +30,6 @@ export const SplitTable = Table.extend({
       ...this.parent?.(),
       splitGroup: { default: null, parseHTML: () => null, rendered: false },
     };
-  },
-  addNodeView() {
-    return ({ node, view, HTMLAttributes }) =>
-      new FloatTableView(node, this.options.cellMinWidth, view, HTMLAttributes);
   },
 });
 

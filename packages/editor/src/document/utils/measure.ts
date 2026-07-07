@@ -995,7 +995,7 @@ export function measureBlockHeight(node: PmNode, width: number, ctx?: MeasureCon
 /** Table content width (px) from its OOXML width attr: pct → % of
  *  pageContentWidth; auto/none → fill the text column; dxa → twips→px. */
 export function tableWidthOf(table: PmNode, pageContentWidth: number): number {
-  const w = (table.attrs as { width?: { size: number | string; type?: string } | null }).width;
+  const w = (table.attrs as { width?: TableWidthProperties | null }).width;
   if (!w) return pageContentWidth;
   const num = typeof w.size === "string" ? parseFloat(w.size) : w.size;
   if (w.type === "pct") {

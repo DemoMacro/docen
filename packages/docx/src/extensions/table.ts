@@ -3,9 +3,16 @@ import type {
   SectionChild,
   TableCellOptions,
   TableOptions,
+  TableWidthProperties,
 } from "@office-open/docx";
 import type { JSONContent } from "@tiptap/core";
-import { Table as BaseTable } from "@tiptap/extension-table";
+import {
+  Table as BaseTable,
+  TableView,
+  type TableOptions as TiptapTableOptions,
+} from "@tiptap/extension-table";
+import type { Node } from "@tiptap/pm/model";
+import type { EditorView } from "@tiptap/pm/view";
 
 import { allBordersNone, cleanAttrs, mergeTableStyleProps } from "../converters/styles";
 import type { ParseBlockRule, ResolveContext } from "./types";
@@ -264,9 +271,127 @@ function resolveTable(tableOpts: Record<string, unknown>, ctx: ResolveContext): 
   return node;
 }
 
+// ── Table NodeView: apply tblW (attrs.width) and layout to the <table> ──
+
+/**
+ * Table NodeView that applies the OOXML table width (tblW → attrs.width) and
+ * layout to the <table> element, overriding prosemirror-tables' TableView.
+ *
+ * The stock TableView sizes the table from the colgroup (sum of cell colwidth
+ * or cellMinWidth) via `updateColumns`, ignoring tblW entirely — so a freshly
+ * inserted table renders at 75px (3 × cellMinWidth 25) instead of filling the
+ * page text column, and an autofit ("fit") DOCX table renders at its tcW sum
+ * instead of its tblW. This subclass overwrites the width `updateColumns` set,
+ * reusing renderHTML's table-width logic (pct → %, dxa → pt, auto/none → 100%);
+ * `updateColumns`' min-width is kept as a floor, and `table-layout: fixed` is
+ * applied for fixed-layout tables.
+ */
+class DocenTableView extends TableView {
+  constructor(
+    node: Node,
+    cellMinWidth: number,
+    view: EditorView,
+    HTMLAttributes?: Record<string, any>,
+  ) {
+    super(node, cellMinWidth, view, HTMLAttributes);
+    this.applyTableBox(node);
+  }
+
+  update(node: Node): boolean {
+    const ok = super.update(node);
+    if (ok) this.applyTableBox(node);
+    return ok;
+  }
+
+  /** Re-apply the table-level styles the base TableView drops: the float
+   *  anchor (w:tblpPr → CSS float / position:absolute) on the wrapper div, and
+   *  the tblW-derived width + table-layout on the <table> (overwriting the
+   *  colgroup-sum width updateColumns sets). */
+  private applyTableBox(node: Node): void {
+    const a = (node.attrs ?? {}) as Record<string, unknown>;
+    // Float anchor pins the table to the page box; apply it to the wrapper div
+    // (updateColumns only touches <table>, leaving the wrapper unstyled).
+    const floatStyles = tableFloatToCss(a.float);
+    this.dom.style.cssText = floatStyles.length ? floatStyles.join(";") : "";
+    const isFloat = floatStyles.length > 0;
+
+    const table = this.table;
+
+    // table-layout (fixed/autofit). updateColumns leaves it untouched.
+    table.style.tableLayout = a.layout === "fixed" ? "fixed" : "";
+
+    // Overwrite the width updateColumns derived from the colgroup with the
+    // tblW-derived value (matches renderHTML's table-width logic).
+    let width = "";
+    const w = a.width as TableWidthProperties | null | undefined;
+    if (w && typeof w === "object") {
+      const numSize = typeof w.size === "string" ? parseFloat(w.size) : w.size;
+      if (w.type === "pct") {
+        // office-open keeps a literal "%" verbatim ("100%" = 100%); a bare
+        // number is fiftieths-of-a-percent (5000 = 100%) per OOXML.
+        if (typeof w.size === "string" && w.size.includes("%")) width = w.size;
+        else if (!Number.isNaN(numSize)) width = `${numSize / 50}%`;
+      } else if (w.type === "auto") {
+        width = isFloat ? "auto" : "100%";
+      } else if (numSize != null) {
+        const css = twipToCss(numSize);
+        if (css) width = css;
+      }
+    } else {
+      width = isFloat ? "auto" : "100%";
+    }
+    if (width) table.style.width = width;
+    table.style.maxWidth = "100%";
+
+    this.scaleColgroup(node);
+  }
+
+  /** Rewrite the colgroup as percentages of the column-width sum. The stock
+   *  updateColumns emits px <col> widths; under table-layout:fixed a px column
+   *  sum larger than the table width forces the table to widen to that sum
+   *  (ignoring width:100%), so a DOCX grid whose tcW total exceeds the page
+   *  text column overflows. Word scales the grid to tblW keeping the ratios;
+   *  percentage <col> does the same under any table width. */
+  private scaleColgroup(node: Node): void {
+    const firstRow = node.firstChild;
+    const cellPx: number[] = [];
+    if (firstRow) {
+      for (let i = 0; i < firstRow.childCount; i++) {
+        const cw = firstRow.child(i).attrs.colwidth as number[] | null | undefined;
+        if (Array.isArray(cw) && cw.length) for (const w of cw) cellPx.push(w || 0);
+        else cellPx.push(0);
+      }
+    }
+    const hasCell = cellPx.some((w) => w > 0);
+    const tblGridPx = ((node.attrs as { columnWidths?: number[] | null }).columnWidths ?? []).map(
+      (w) => Math.round((w || 0) / 15),
+    );
+    const hasGrid = tblGridPx.some((w) => w > 0);
+    const gridPx = hasGrid ? tblGridPx : hasCell ? cellPx : tblGridPx;
+    if (!gridPx.some((w) => w > 0)) return;
+
+    const total = gridPx.reduce((s, w) => s + w, 0);
+    if (total <= 0) return;
+
+    const cols = this.colgroup.children;
+    for (let i = 0; i < cols.length && i < gridPx.length; i++) {
+      const col = cols[i] as HTMLElement;
+      col.style.width = `${((gridPx[i] / total) * 100).toFixed(2)}%`;
+      col.style.minWidth = "";
+    }
+  }
+}
+
 // ── Extension ──
 
 export const Table = BaseTable.extend({
+  addOptions(): TiptapTableOptions {
+    // Override the stock TableView NodeView (sizes the table from the colgroup,
+    // ignoring tblW) with DocenTableView, which re-applies attrs.width + layout.
+    // `this.parent?.()` is `TiptapTableOptions | undefined`; spreading widens
+    // its fields to optional, so cast back (matches link.ts' addOptions).
+    return { ...this.parent?.(), View: DocenTableView } as TiptapTableOptions;
+  },
   addAttributes() {
     return {
       ...this.parent?.(),
@@ -354,7 +479,7 @@ export const Table = BaseTable.extend({
     // text column (full-width unless content is sparse); with no width the
     // browser would shrink the table to its content, so match Word with 100%.
     if (a.width && typeof a.width === "object") {
-      const w = a.width as { size: number | string; type?: string };
+      const w = a.width as TableWidthProperties;
       const numSize = typeof w.size === "string" ? parseFloat(w.size) : w.size;
       if (w.type === "pct") {
         if (typeof w.size === "string" && w.size.includes("%")) {
@@ -383,8 +508,8 @@ export const Table = BaseTable.extend({
     styles.push("max-width:100%");
 
     if (a.indent && typeof a.indent === "object") {
-      const ind = a.indent as { size?: number; type?: string };
-      if (ind.size != null) {
+      const ind = a.indent as TableWidthProperties;
+      if (typeof ind.size === "number") {
         const css = twipToCss(ind.size);
         if (css) styles.push(`margin-left:${css}`);
       }
