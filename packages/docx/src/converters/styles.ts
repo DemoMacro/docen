@@ -93,8 +93,14 @@ export function stylesToCss(styles: StylesOptions | null | undefined, scope: str
   //    inherited single pitch. Named styles (.docx-style-*, specificity 0,2,0)
   //    outrank these (0,1,1) and keep their own spacing, matching OOXML.
   const doc = styles.default?.document;
+  // docDefaults carries the doc's eastAsia language (rPrDefault/lang @eastAsia);
+  // forward it so *Theme fonts resolve to the right CJK font (等线/游ゴシック/…).
+  const docEastAsia =
+    (doc?.run as { language?: { eastAsia?: string } } | undefined)?.language?.eastAsia ?? "zh-CN";
   if (doc) {
-    const runDecls = doc.run ? renderRunStyles(doc.run as Record<string, unknown>) : [];
+    const runDecls = doc.run
+      ? renderRunStyles(doc.run as Record<string, unknown>, docEastAsia)
+      : [];
     if (runDecls.length && scope) rules.push(`${scope} { ${runDecls.join(";")} }`);
     const paraDecls = doc.paragraph
       ? renderParagraphStyles(doc.paragraph as Record<string, unknown>)
@@ -118,7 +124,7 @@ export function stylesToCss(styles: StylesOptions | null | undefined, scope: str
   for (const id of byId.keys()) {
     const { run, paragraph } = mergeStyleChain(byId, id);
     const decls: string[] = [];
-    if (Object.keys(run).length) decls.push(...renderRunStyles(run));
+    if (Object.keys(run).length) decls.push(...renderRunStyles(run, docEastAsia));
     if (Object.keys(paragraph).length) decls.push(...renderParagraphStyles(paragraph));
     if (!decls.length) continue;
     const selector =
@@ -131,7 +137,7 @@ export function stylesToCss(styles: StylesOptions | null | undefined, scope: str
   // Named character styles.
   for (const cs of styles.characterStyles ?? []) {
     const decls: string[] = [];
-    if (cs.run) decls.push(...renderRunStyles(cs.run as Record<string, unknown>));
+    if (cs.run) decls.push(...renderRunStyles(cs.run as Record<string, unknown>, docEastAsia));
     if (decls.length)
       rules.push(`${within}.docx-char-${escapeClass(cs.id)} { ${decls.join(";")} }`);
   }

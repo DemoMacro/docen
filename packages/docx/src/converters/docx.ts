@@ -1604,3 +1604,30 @@ export function resolveDocument(docOpts: DocumentOptions, extensions?: Extension
 export function compileDocument(json: JSONContent, extensions?: Extensions): DocumentOptions {
   return getDocxManager(extensions).compile(json);
 }
+
+/**
+ * Fill in office-open's ECMA-376 schema defaults that a hand-built JSON lacks.
+ *
+ * A document constructed by hand (not via {@link parseDOCX}) carries no
+ * `doc.attrs.styles` (docDefaults: body font/size/spacing + the built-in style
+ * table) and no `doc.attrs.sectionProperties` (page size, margins, docGrid
+ * linePitch). Those are injected only by office-open's `parseDocument`, which a
+ * hand-built doc bypasses — so without them the editor has no body font, no
+ * page geometry, and no document grid for snapToGrid to pitch against, and
+ * rendering/pagination drift.
+ *
+ * Harvests the defaults by round-tripping an EMPTY document through office-open
+ * (`generateDOCXSync` → `parseDOCX`) and shallow-merging the resulting
+ * `doc.attrs` UNDER the input's. Only document-level attrs are touched —
+ * content nodes (paragraphs/runs/marks) pass through verbatim, avoiding the
+ * mark pollution a full-content round-trip would cause (a paragraph's default
+ * run props leak onto its text as a textStyle mark). Keys already set on
+ * `json.attrs` win, so a doc that already carries its own styles/section
+ * properties (e.g. from `parseDOCX` or a prior `getJSON`) is left unchanged.
+ */
+export function normalizeDocument(json: JSONContent, extensions?: Extensions): JSONContent {
+  const defaults = parseDOCX(generateDOCXSync({ type: "doc", content: [] }, { extensions }));
+  const baseAttrs = (defaults.attrs ?? {}) as Record<string, unknown>;
+  const userAttrs = (json.attrs ?? {}) as Record<string, unknown>;
+  return { ...json, attrs: { ...baseAttrs, ...userAttrs } };
+}

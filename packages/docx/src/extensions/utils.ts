@@ -227,15 +227,59 @@ export function normalizeColorToHex(color: unknown): string | undefined {
   return hex ?? undefined;
 }
 
-/** Resolve a font value (string or OOXML rFonts { ascii, eastAsia, hAnsi, cs }) to a CSS family name. */
-export function resolveFontName(font: unknown): string | null {
+// Office default theme1.xml font tokens → concrete font names. office-open does
+// not parse the theme part, so a run's rFonts *Theme attributes survive as the
+// literal tokens "minorHAnsi"/"minorEastAsia"/…; map them to the Office default
+// theme fonts here (Calibri/等线 on a stock zh-CN template). Documents carrying
+// a custom theme fall back to these defaults — rare, and still better than the
+// browser's Segoe UI fallback. The CJK eastAsia font varies by the document's
+// eastAsia language; zh-CN (等线) is the default, covering the common case.
+const THEME_LATIN_FONTS: Record<string, string> = {
+  minorHAnsi: "Calibri",
+  majorHAnsi: "Calibri Light",
+  minorBidi: "Arial",
+  majorBidi: "Arial",
+};
+const THEME_EAST_ASIA_FONTS: Record<string, Record<string, string>> = {
+  "zh-CN": { minorEastAsia: "等线", majorEastAsia: "等线 Light" },
+  "zh-TW": { minorEastAsia: "新細明體", majorEastAsia: "微軟正黑體" },
+  "ja-JP": { minorEastAsia: "游ゴシック", majorEastAsia: "游ゴシック Light" },
+  "ko-KR": { minorEastAsia: "맑은 고딕", majorEastAsia: "맑은 고딕" },
+};
+
+/** Resolve a run's rFonts — literal ascii/eastAsia/hAnsi OR *Theme tokens — to
+ *  the concrete { ascii, eastAsia } pair used by both font-family renderers.
+ *  *Theme tokens map to the Office default theme fonts (office-open leaves them
+ *  unresolved). `eastAsiaLang` picks the CJK font for *eastAsiaTheme (zh-CN
+ *  default). Returns null only when the value is empty/non-font. */
+function resolveRFonts(
+  font: unknown,
+  eastAsiaLang = "zh-CN",
+): { ascii: string | null; eastAsia: string | null } | null {
   if (!font) return null;
-  if (typeof font === "string") return font;
-  if (typeof font === "object") {
-    const f = font as { ascii?: string; hAnsi?: string; eastAsia?: string };
-    return f.ascii || f.hAnsi || f.eastAsia || null;
-  }
-  return null;
+  if (typeof font === "string") return { ascii: font, eastAsia: null };
+  if (typeof font !== "object") return null;
+  const f = font as {
+    ascii?: string;
+    hAnsi?: string;
+    eastAsia?: string;
+    asciiTheme?: string;
+    hAnsiTheme?: string;
+    eastAsiaTheme?: string;
+  };
+  const eaMap = THEME_EAST_ASIA_FONTS[eastAsiaLang] ?? THEME_EAST_ASIA_FONTS["zh-CN"];
+  const ascii =
+    f.ascii ?? THEME_LATIN_FONTS[f.asciiTheme ?? ""] ?? THEME_LATIN_FONTS[f.hAnsiTheme ?? ""];
+  const hAnsi = f.hAnsi ?? THEME_LATIN_FONTS[f.hAnsiTheme ?? ""] ?? ascii;
+  const eastAsia = f.eastAsia ?? eaMap[f.eastAsiaTheme ?? ""];
+  return { ascii: ascii ?? hAnsi ?? null, eastAsia: eastAsia ?? null };
+}
+
+/** Resolve a font value (string or OOXML rFonts, incl. *Theme tokens) to a
+ *  single CSS family name (ascii/hAnsi/eastAsia). */
+export function resolveFontName(font: unknown, eastAsiaLang = "zh-CN"): string | null {
+  const r = resolveRFonts(font, eastAsiaLang);
+  return r?.ascii ?? r?.eastAsia ?? null;
 }
 
 /** Resolve a font value to a CSS font-family list with an eastAsia fallback.
@@ -244,19 +288,15 @@ export function resolveFontName(font: unknown): string | null {
  *  so list ascii first (it carries Basic Latin glyphs) then eastAsia — the
  *  browser falls back to eastAsia for CJK chars the ascii font lacks. Without
  *  this, CJK text renders in the ascii font (e.g. Times) instead of the
- *  document's CJK font (e.g. SimSun). Use this for font-family rendering;
+ *  document's CJK font (e.g. 等线). Use this for font-family rendering;
  *  resolveFontName (single name) stays for UI/parse. */
-export function resolveFontFamilyCss(font: unknown): string | null {
-  if (!font) return null;
-  if (typeof font === "string") return font;
-  if (typeof font === "object") {
-    const f = font as { ascii?: string; hAnsi?: string; eastAsia?: string };
-    const ascii = f.ascii || f.hAnsi;
-    const ea = f.eastAsia;
-    if (ascii && ea && ascii !== ea) return `"${ascii}","${ea}"`;
-    return ascii || ea || null;
-  }
-  return null;
+export function resolveFontFamilyCss(font: unknown, eastAsiaLang = "zh-CN"): string | null {
+  const r = resolveRFonts(font, eastAsiaLang);
+  if (!r) return null;
+  const ascii = r.ascii;
+  const ea = r.eastAsia;
+  if (ascii && ea && ascii !== ea) return `"${ascii}","${ea}"`;
+  return ascii || ea || null;
 }
 
 // ── Unit conversion helpers ──
@@ -357,27 +397,24 @@ export function lineSpacingToCss(
   }
   // lineRule "auto": `line` is 240ths of the font's single-line height. The
   // single-line metric is the font's `line-height: normal` (ascent + descent +
-  // line-gap) — exactly Word's single line. CSS calc() cannot reference
-  // `normal`, so the editor measures it per font and sets --docen-font-metric
-  // (a ratio; 1.2 fallback for static HTML export).
+  // line-gap). CSS calc() cannot reference `normal`, so the editor measures it
+  // per font and sets --docen-font-metric (a ratio; 1.2 fallback for static HTML
+  // export).
   // Per ECMA-376 (§17.3.1.87 snapToGrid — "align to document grid"): when
-  // snapToGrid is on (default under a docGrid), every line snaps to the grid —
-  // line height = the font's natural metric + the grid pitch, and the spacing
-  // multiple is ABSORBED (a 1.5×/double line renders at single-grid + pitch, not
-  // multiple×natural). snapToGrid===false (e.g. header/footer) applies the
-  // multiple. Verified via a Word-generated PDF: single 微软雅黑-Bold 12pt ≈34pt =
-  // natural + pitch 17pt; a double-spaced 16pt CJK line ≈38pt (single-grid scale).
-  // `1em` resolves against the paragraph's INHERITED font-size (the container
-  // default, e.g. 14pt), under-counting paragraphs whose runs are larger — a
-  // 42pt heading rendered at the line-height of 14pt. A line box is as tall as
-  // its tallest run, so the editor injects --docen-line-base (= the paragraph's
-  // max run size) per paragraph; `1em` fallback covers static HTML export and
-  // any paragraph missing the decoration.
+  // snapToGrid is on (default under a docGrid), each line aligns to a grid row —
+  // line height = MAX(font natural metric, grid pitch). The pitch is the grid's
+  // per-line MINIMUM; a shorter natural line snaps up to the pitch. The spacing
+  // multiple is ABSORBED; snapToGrid===false (e.g. header/footer) applies the
+  // multiple x natural. Verified via Word PDFs (pymupdf): 11pt body ~= linePitch
+  // 15.6 (MAX, not ceil(1.3x normal / pitch) — that wrongly pushes a single body
+  // line to 2 rows). Mirrors measure.ts resolveLineHeight (edit == render).
+  // --docen-line-base (= the paragraph's max run size) replaces the inherited 1em
+  // so a 42pt heading isn't measured at 14pt; `1em` fallback covers static HTML.
   if (snapToGrid === false) {
     const multiple = Number((Number(spacing.line) / 240).toFixed(2));
     return `calc(var(--docen-font-metric, 1.2) * ${multiple} * var(--docen-line-base, 1em))`;
   }
-  return `calc(var(--docen-font-metric, 1.2) * var(--docen-line-base, 1em) + var(--docen-line-pitch, 0pt))`;
+  return `calc(max(var(--docen-font-metric, 1.2) * var(--docen-line-base, 1em), var(--docen-line-pitch, 0pt)))`;
 }
 
 // ── Section geometry → CSS ──
@@ -432,26 +469,25 @@ export function sectionMarginCss(margin: unknown): string {
 }
 
 /** Document grid linePitch (twips) → container CSS line-height.
- *  Per ECMA-376 snapToGrid, the grid linePitch is ADDED to each line (single-
- *  line paragraphs inherit it). So the container line-height (inherited by
- *  paragraphs without their own spacing) is the font's `normal` metric + the
- *  grid pitch, set only when the grid type enables line-snapping (not
- *  "default"). The --docen-line-pitch var carries the pitch so per-paragraph
- *  lineSpacingToCss can add the same pitch; --docen-font-metric is injected per
- *  paragraph by the editor; 1.2 is the fallback for static HTML export. */
+ *  Per ECMA-376 snapToGrid, each line aligns to a grid row: line height =
+ *  MAX(font `normal` metric, grid pitch). The container line-height (inherited
+ *  by paragraphs without their own spacing) is set only when the grid type
+ *  enables line-snapping (not "default"). The --docen-line-pitch var carries
+ *  the pitch so per-paragraph lineSpacingToCss applies the same MAX;
+ *  --docen-font-metric is injected per paragraph by the editor; 1.2 is the
+ *  fallback for static HTML export. */
 export function sectionLinePitchCss(grid: unknown): string[] {
   if (!grid || typeof grid !== "object") return [];
   const g = grid as { linePitch?: unknown; type?: unknown };
   // OOXML: docGrid @type omitted or "default" = NO grid (lines do not snap to
   // @linePitch). @type is absent on many Western docs that still carry a
-  // @linePitch; treating absent as snapping added 18pt to every line and
-  // inflated pagination ~60%.
+  // @linePitch; treating absent as snapping inflated body text ~1.85×.
   if (!g.type || g.type === "default" || typeof g.linePitch !== "number" || !g.linePitch) return [];
   const pitch = `${(g.linePitch / 20).toFixed(2)}pt`;
-  // Container line-height for paragraphs WITHOUT their own spacing: the font's
-  // `normal` metric × 1 (single) + the grid pitch.
+  // Container line-height for paragraphs WITHOUT their own spacing: align to the
+  // grid row (max of the font's `normal` metric x 1 and the pitch).
   return [
-    `line-height:calc(var(--docen-font-metric, 1.2) * 1em + ${pitch})`,
+    `line-height:calc(max(var(--docen-font-metric, 1.2) * 1em, ${pitch}))`,
     `--docen-line-pitch:${pitch}`,
   ];
 }
@@ -746,11 +782,13 @@ interface ParagraphStyleShape {
   spacing?: SpacingProperties | null;
   shading?: ShadingAttributesProperties | null;
   border?: BordersOptions | null;
-  /** snapToGrid (w:snapToGrid): preserved for OOXML round-trip fidelity. Word
-   *  snaps the baseline grid to linePitch (governs lines-per-page) but does NOT
-   *  add linePitch to rendered line height, so this flag no longer affects
-   *  lineSpacingToCss. Defaults to true (omitted = use grid); header/footer
-   *  styles set it false. */
+  /** snapToGrid (w:snapToGrid @w:val): per ECMA-376 §17.3.1.87, whether the
+   *  section's docGrid linePitch is ADDED to each line in this paragraph. True
+   *  (the default under a document grid) → natural metric + linePitch (the
+   *  spacing multiple is absorbed by the grid); false → natural metric × the
+   *  spacing multiple. Header/footer styles set it false. Drives
+   *  lineSpacingToCss (render) and measure.ts resolveLineHeight (pagination)
+   *  alike (edit == render). */
   snapToGrid?: boolean | null;
   /** Paragraph-mark (¶) run properties (pPr/rPr). Per OOXML (ECMA-376) these
    *  format the ¶ glyph only — never applied to run text (a large ¶ marker
@@ -862,8 +900,9 @@ interface RunStyleShape {
 /**
  * Compute run-level CSS (font/size/color/weight/…) from office-open run attrs.
  * Shared by text-style marks and the styles→CSS generator (stylesToCss).
- */
-export function renderRunStyles(attrs: Record<string, unknown>): string[] {
+ * `eastAsiaLang` is forwarded to resolveFontFamilyCss so *Theme tokens resolve
+ * to the document's CJK font (passed by stylesToCss; defaults to zh-CN). */
+export function renderRunStyles(attrs: Record<string, unknown>, eastAsiaLang = "zh-CN"): string[] {
   const a = attrs as RunStyleShape;
   const styles: string[] = [];
 
@@ -877,7 +916,7 @@ export function renderRunStyles(attrs: Record<string, unknown>): string[] {
   if (a.strike || a.doubleStrike) deco.push("line-through");
   if (deco.length) styles.push(`text-decoration:${deco.join(" ")}`);
 
-  const font = resolveFontFamilyCss(a.font);
+  const font = resolveFontFamilyCss(a.font, eastAsiaLang);
   if (font) styles.push(`font-family:${font}`);
   const size = sizeToCss(a.size);
   if (size) styles.push(`font-size:${size}`);

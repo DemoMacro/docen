@@ -275,6 +275,10 @@ interface FontSpec {
   font: unknown;
   bold: boolean;
   italic: boolean;
+  // Whether the run's text is CJK. docGrid type=lines is a CJK grid — Word
+  // snaps line height by the CJK font's single, so the line metric is
+  // CJK-dominant (a Latin run alongside CJK must not inflate the grid row).
+  isCjk: boolean;
 }
 
 function buildFont(spec: FontSpec): string {
@@ -307,15 +311,18 @@ function normalPxOf(spec: FontSpec): number {
 }
 
 /**
- * Resolve a paragraph's line-height in px (OOXML ADD model, matching the
- * renderer's lineSpacingToCss): `exact`/`atLeast` → fixed twips→px (absolute,
- * ignores the grid); otherwise the font's `normal` metric × multiple, + the
- * grid's linePitch when snapToGrid is on (OOXML §2.4.13, default true under a
- * document grid). `normalPx` is the paragraph's single-line metric — the MAX
- * across its runs (a line box is as tall as its tallest font) — pre-computed
- * by the caller. `linePitchPx` is the section's document-grid pitch (undefined
- * when the grid is off). `snapToGrid === false` keeps lines at the raw metric
- * (header/footer styles); null/true adds the pitch. */
+ * Resolve a paragraph's line-height in px (OOXML grid-align model, matching the
+ * renderer's lineSpacingToCss): `exact`/`atLeast` -> fixed twips->px (absolute,
+ * ignores the grid; table cells are exempt -- the grid governs, trHeight floors
+ * the row). snapToGrid on (pitch > 0) -> each line aligns to a grid row: line
+ * height = MAX(font natural metric, grid pitch). The pitch is the per-line
+ * MINIMUM; a shorter natural snaps up to the pitch, a taller one keeps its
+ * natural height. The spacing multiple is ABSORBED (a 1.5x/double line renders
+ * at the single grid row); snapToGrid===false applies the multiple x natural.
+ * Verified via Word PDFs (pymupdf): 11pt body ~= linePitch (MAX, not the earlier
+ * natural+pitch ADD model that inflated body ~1.85x, and not a ceil/single model
+ * -- ceil(1.3x normal / pitch) wrongly pushes a single body line to 2 rows).
+ * `normalPx` is the paragraph's CJK-dominant single-line metric (paragraphNormalPx). */
 export function resolveLineHeight({
   spacing,
   normalPx,
@@ -329,35 +336,20 @@ export function resolveLineHeight({
   snapToGrid?: boolean | null;
   inTable?: boolean;
 }): number {
-  // Per ECMA-376 snapToGrid ("align to document grid"): when snapToGrid is on
-  // (default under a docGrid), every line snaps to the grid — line height = the
-  // font's natural metric + the grid pitch, and the spacing multiple is ABSORBED
-  // by the grid (a 1.5×/double-spaced line still renders at single-grid + pitch,
-  // not multiple×natural). snapToGrid===false applies the multiple×natural.
-  // exact/atLeast are absolute overrides (twips→px) and ignore the grid.
-  // Verified via a Word-generated PDF: single 微软雅黑-Bold 12pt ≈34pt =
-  // natural 15.84 + pitch 17; a double-spaced 16pt CJK line ≈38pt (single-grid scale,
-  // not 2×natural+pitch 59pt). Matches lineSpacingToCss (edit==render).
-  // Table cell line height = MAX(natural, grid pitch), NOT natural+pitch. A
-  // single row is floored by trHeight (max(content, trHeight) in
-  // measureRowHeight), so the cell's own line is the pitch (17pt > 9pt natural)
-  // — verified from a Word PDF: a 2-line table cell ≈34pt =
-  // 2×pitch, not 2×(natural+pitch)=55pt. The earlier ADD inflated multi-line
-  // cells ~2×, pushing tables onto extra pages. Mirrors the font-metric
-  // decoration (max(metric×base, pitch)). edit == render. Precedes exact/atLeast.
-  if (inTable) return Math.max(normalPx, linePitchPx);
-  const pitch = snapToGrid === false ? 0 : linePitchPx;
-  if (spacing?.line) {
+  // exact/atLeast: absolute override, ignore the grid. Table cells are exempt
+  // (the document grid governs the cell line; trHeight floors the row).
+  if (!inTable && spacing?.line) {
     const rule = spacing.lineRule;
     if (rule === "exact" || rule === "exactly" || rule === "atLeast") {
       return spacing.line * TWIP_TO_PX;
     }
-    if (snapToGrid === false) return (spacing.line / 240) * normalPx;
-    return normalPx + pitch;
   }
-  // No explicit spacing: single line = natural + pitch, matching the
-  // renderer's inherited container line-height (metric × 1em + linePitch).
-  return normalPx + pitch;
+  const pitch = snapToGrid === false ? 0 : linePitchPx;
+  // snapToGrid on (pitch > 0): align to the grid row (MAX of natural and pitch).
+  if (pitch > 0) return Math.max(normalPx, pitch);
+  // snapToGrid off / no grid: spacing multiple x natural (default single).
+  if (spacing?.line) return (spacing.line / 240) * normalPx;
+  return normalPx;
 }
 
 // ── paragraph measurement ──
@@ -395,15 +387,18 @@ export function collectRunSpecs(para: PmNode, def: Partial<RunStyle>): FontSpec[
     font: def.font,
     bold: def.bold ?? false,
     italic: def.italic ?? false,
+    isCjk: false,
   });
   para.forEach((child) => {
     if (child.isText) {
       const ms = markStyleOf(child.marks as readonly MarkLike[] | undefined);
+      const text = child.text ?? "";
       specs.push({
         size: ms.size ?? def.size ?? DEFAULT_SIZE_PT,
-        font: resolveRunFont(ms.font, def.font, child.text ?? ""),
+        font: resolveRunFont(ms.font, def.font, text),
         bold: ms.bold ?? def.bold ?? false,
         italic: ms.italic ?? def.italic ?? false,
+        isCjk: CJK_RANGE.test(text),
       });
     }
   });
@@ -411,35 +406,42 @@ export function collectRunSpecs(para: PmNode, def: Partial<RunStyle>): FontSpec[
   return specs;
 }
 
-/** A paragraph's single-line metric (px): the MAX `normal` metric across its
- *  runs — a line box is as tall as its tallest font (Word). Empty paragraph →
- *  the default-run strut. */
+/** A paragraph's single-line metric (px) for snapToGrid: the MAX `normal` across
+ *  its CJK runs (docGrid type=lines is a CJK grid — Word snaps by the CJK font's
+ *  single; a Calibri run alongside CJK must not inflate the grid row). Falls back
+ *  to the all-run max for pure-Latin paragraphs. Empty paragraph → default strut. */
 function paragraphNormalPx(para: PmNode, def: Partial<RunStyle>): number {
   const specs = collectRunSpecs(para, def);
-  let max = 0;
-  for (const s of specs) max = Math.max(max, normalPxOf(s));
-  return max;
+  let cjkMax = 0;
+  let allMax = 0;
+  for (const s of specs) {
+    const px = normalPxOf(s);
+    allMax = Math.max(allMax, px);
+    if (s.isCjk) cjkMax = Math.max(cjkMax, px);
+  }
+  return cjkMax > 0 ? cjkMax : allMax;
 }
 
-/** Max `normal` RATIO across the paragraph's runs (size-independent) — for the
- *  per-paragraph --docen-font-metric decoration. The engine resolves line-height
- *  as `metric × multiple × line-base`, so this ratio feeds the `metric` factor
- *  while paragraphMaxSizePt feeds `line-base`. Mirrors paragraphNormalPx in ratio
- *  form so the renderer can express it as a CSS custom property. */
+/** Max `normal` RATIO across the paragraph's CJK runs (size-independent) — for
+ *  the per-paragraph --docen-font-metric decoration. CJK-dominant (mirrors
+ *  paragraphNormalPx): docGrid type=lines snaps by the CJK font, so a Latin run
+ *  (e.g. Calibri) alongside CJK must not inflate the metric. Falls back to the
+ *  all-run max for pure-Latin paragraphs. */
 export function paragraphMaxRatio(node: PmNode, styles: unknown): number {
   const def = defaultRunOf(node, styles);
   const specs = collectRunSpecs(node, def);
-  let max = 0;
+  let cjkMax = 0;
+  let allMax = 0;
   for (const s of specs) {
-    max = Math.max(
-      max,
-      fontNormalRatio({
-        family: resolveFamily(s.font) ?? DEFAULT_FAMILY,
-        bold: s.bold,
-        italic: s.italic,
-      }),
-    );
+    const r = fontNormalRatio({
+      family: resolveFamily(s.font) ?? DEFAULT_FAMILY,
+      bold: s.bold,
+      italic: s.italic,
+    });
+    allMax = Math.max(allMax, r);
+    if (s.isCjk) cjkMax = Math.max(cjkMax, r);
   }
+  const max = cjkMax > 0 ? cjkMax : allMax;
   return max > 0 ? max : 1.2;
 }
 
@@ -475,15 +477,18 @@ function collectInlineItems(para: PmNode, def: Partial<RunStyle>): RichInlineIte
     font: def.font,
     bold: def.bold ?? false,
     italic: def.italic ?? false,
+    isCjk: false,
   });
   para.forEach((child) => {
     if (child.isText) {
       const ms = markStyleOf(child.marks as readonly MarkLike[] | undefined);
+      const text = child.text ?? "";
       const spec: FontSpec = {
         size: ms.size ?? def.size ?? DEFAULT_SIZE_PT,
-        font: resolveRunFont(ms.font, def.font, child.text ?? ""),
+        font: resolveRunFont(ms.font, def.font, text),
         bold: ms.bold ?? def.bold ?? false,
         italic: ms.italic ?? def.italic ?? false,
+        isCjk: CJK_RANGE.test(text),
       };
       const characterSpacing = ms.characterSpacing ?? def.characterSpacing ?? null;
       items.push({

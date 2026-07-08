@@ -5,6 +5,7 @@ import {
   generateDOCX,
   generateHTML,
   generateMarkdown,
+  normalizeDocument,
   parseDOCX,
   parseHTML,
   parseMarkdown,
@@ -1321,10 +1322,20 @@ class DocenDocument extends AddinHost<Editor> {
     // host can bootstrap page setup + named styles without openDOCX/setJSON.
     const initAttrs = this.#readInitAttrs();
     const baseDoc = wrapPages(contentAttr ? parseHTML(contentAttr) : undefined);
-    const initialDoc =
+    const seeded =
       Object.keys(initAttrs).length > 0
         ? { ...baseDoc, attrs: { ...baseDoc.attrs, ...initAttrs } }
         : baseDoc;
+    // Fill office-open's document-level defaults (the built-in style library +
+    // page geometry + docGrid linePitch) so a freshly mounted document matches
+    // what export produces. A hand-built initial doc (no section-properties/
+    // styles attribute) otherwise mounts with an empty style gallery and no
+    // document grid for snapToGrid to pitch against. Host-declared initAttrs
+    // win — normalizeDocument shallow-merges user attrs over the defaults.
+    const initialDoc =
+      (seeded.attrs as { sectionProperties?: unknown } | undefined)?.sectionProperties == null
+        ? normalizeDocument(seeded)
+        : seeded;
     // The default document add-in contributes the engine extensions + every
     // wired ribbon command. Registered before the editor mounts so its
     // extensions seed the schema. Ribbon events route straight to the engine
@@ -2500,6 +2511,16 @@ class DocenDocument extends AddinHost<Editor> {
   setJSON(json: JSONContent): void {
     const editor = this.#editor;
     if (!editor) return;
+    // A hand-built JSON (not from parseDOCX) lacks office-open's document-level
+    // schema defaults — doc.attrs.styles (docDefaults body font/size/spacing)
+    // and doc.attrs.sectionProperties (page size/margins/docGrid linePitch).
+    // Without them the editor has no body font, no page geometry, and no grid
+    // for snapToGrid to pitch against. Normalize once on the way in; a doc that
+    // already carries sectionProperties (a parseDOCX/getJSON round-trip) is a
+    // no-op (normalizeDocument shallow-merges user attrs over defaults).
+    if (!(json.attrs as { sectionProperties?: unknown } | undefined)?.sectionProperties) {
+      json = normalizeDocument(json);
+    }
     // Inject the styles CSS BEFORE rendering so the first paint already carries
     // the document's real fonts/sizes — without this, a large doc's synchronous
     // load + image decode can defer the <style> repaint and the page renders

@@ -8,11 +8,13 @@ import { paragraphMaxRatio, paragraphMaxSizePt } from "../utils/measure";
 const key = new PluginKey<DecorationSet>("docenFontMetric");
 
 /** Per-paragraph line-height vars: each paragraph/heading gets two inline CSS
- *  custom properties — --docen-font-metric (MAX `normal` ratio across runs) and
- *  --docen-line-base (MAX run size, pt). lineSpacingToCss resolves line-height
- *  as `calc(metric × m × line-base)`, so the line box scales at the paragraph's
- *  dominant font SIZE — matching Word's line-box rule (a line is as
- *  tall as its tallest font), fixing the bug where a 42pt heading rendered at
+ *  custom properties — --docen-font-metric (CJK-dominant MAX `normal` ratio:
+ *  docGrid type=lines is a CJK grid, so the metric follows the CJK run, not a
+ *  Latin run alongside it) and --docen-line-base (MAX run size, pt).
+ *  lineSpacingToCss resolves line-height as `calc(metric × m × line-base)`, so
+ *  the line box scales at the paragraph's dominant font SIZE — matching Word's
+ *  line-box rule (a line is as tall as its tallest font), fixing the bug where
+ *  a 42pt heading rendered at
  *  the line-height of the inherited 14pt container. ProseMirror APPENDS a node
  *  decoration's `style` to the node's renderHTML style (viewdesc.ts
  *  patchAttributes: `dom.style.cssText +=`), so this coexists with the
@@ -27,21 +29,18 @@ function build(doc: PmNode): DecorationSet {
       const ratio = paragraphMaxRatio(node, styles).toFixed(4);
       const size = paragraphMaxSizePt(node, styles);
       const parts = [`--docen-font-metric:${ratio}`, `--docen-line-base:${size}pt`];
-      // Table cell: snap each line to the grid (max of the font's natural metric
-      // vs the grid pitch) so the row's trHeight atLeast floor — not the line
-      // box — governs (Word renders a single-spaced grid row at trHeight).
-      // Overrides the paragraph's ADD line-height (ProseMirror appends a node
+      // Table cell: align each line to the grid row (max of the font's natural
+      // metric vs the grid pitch) so the row's trHeight atLeast floor — not the
+      // line box — governs (Word renders a single-spaced grid row at trHeight).
+      // Overrides the paragraph's line-height (ProseMirror appends a node
       // decoration's style, so the later line-height wins); mirrors measure.ts
-      // resolveLineHeight(inTable) for edit == render.
+      // resolveLineHeight(inTable) — the same MAX model as body text (edit == render).
       const parentName = parent?.type.name;
       if (parentName === "tableCell" || parentName === "tableHeader") {
-        // Cell line-height = natural metric + grid pitch (NOT max), matching
-        // Word's single-spaced grid cell line (a 9pt cell ≈ 27.7pt = natural +
-        // pitch). Overrides the paragraph's own spacing (exact/atLeast would
-        // otherwise shrink the line below the grid). Also size the p to its max
-        // run size (--docen-line-base), not the inherited container font-size — a
-        // smaller run inside an inherited 12pt cell p leaves a 12pt strut whose
-        // baseline alignment makes the line-box ~2px taller than measured.
+        // Cell line-height = MAX(natural metric, grid pitch). Also size the p to
+        // its max run size (--docen-line-base), not the inherited container
+        // font-size — a smaller run inside an inherited 12pt cell p leaves a 12pt
+        // strut whose baseline alignment makes the line-box ~2px taller than measured.
         parts.push(
           "line-height:calc(max(var(--docen-font-metric) * var(--docen-line-base), var(--docen-line-pitch, 0pt)))",
           "font-size:var(--docen-line-base, 1em)",

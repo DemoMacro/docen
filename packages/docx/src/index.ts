@@ -35,6 +35,7 @@ export {
   generateDOCXStream,
   resolveDocument,
   compileDocument,
+  normalizeDocument,
   DocxManager,
   type DocxGenerateOptions,
 } from "./converters/docx";
