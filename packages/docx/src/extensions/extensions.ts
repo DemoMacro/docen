@@ -224,7 +224,7 @@ export { TextAlign } from "@tiptap/extension-text-align";
 export { Bold, Code, Highlight, Italic, Subscript, Superscript, Underline } from "./marks";
 export { Document, createDocument } from "./document";
 export { Paragraph } from "./paragraph";
-export { Heading } from "./heading";
+export { Heading, detectHeadingLevel } from "./heading";
 export { Blockquote } from "./blockquote";
 export { BulletList } from "./bullet-list";
 export { OrderedList } from "./ordered-list";

@@ -1,4 +1,4 @@
-import type { ParagraphOptions, StylesOptions } from "@office-open/docx";
+import type { StylesOptions } from "@office-open/docx";
 import type { JSONContent } from "@tiptap/core";
 import { Heading as BaseHeading } from "@tiptap/extension-heading";
 
@@ -68,18 +68,20 @@ function headingLevelFromName(name: string | undefined): number | undefined {
  *     `style` because office-open's HeadingLevel type caps at 6), by localized
  *     NAME ("heading 1"/"标题 1"), or via the `basedOn` chain (a custom style
  *     "MyTitle" basedOn="Heading1"). `heading` and `style` carry the same pStyle.
- *  `outlineLevel` is read loosely — office-open's public type omits the field
- *  even though it round-trips (w:outlineLvl) at runtime. Pure (no `this`):
+ *  `resolved` accepts a full office-open ParagraphOptions (parse/compile) OR a
+ *  PM-node attrs subset — the editor outline walks PM nodes whose styleId /
+ *  outlineLevel mark a heading without being a `type: "heading"` node (a
+ *  paragraph the user styled as "Heading 1" at runtime). Pure (no `this`):
  *  resolved + the document styles snapshot are all it reads. */
 export function detectHeadingLevel(
-  resolved: ParagraphOptions,
+  resolved: { heading?: string; style?: string; outlineLevel?: number },
   styles: StylesOptions | undefined,
 ): number | undefined {
   if (resolved.heading) {
     const lvl = HEADING_PARSE_MAP[resolved.heading];
     if (lvl) return lvl;
   }
-  const outline = (resolved as { outlineLevel?: number }).outlineLevel;
+  const outline = resolved.outlineLevel;
   if (typeof outline === "number" && outline >= 0 && outline <= 8) {
     return outline + 1;
   }

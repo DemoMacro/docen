@@ -1,3 +1,4 @@
+import { detectHeadingLevel, type StylesOptions } from "@docen/docx";
 import { Extension } from "@docen/docx/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 
@@ -38,13 +39,32 @@ export const Outline = Extension.create<{ onUpdate: (anchors: readonly OutlineAn
           const emit = (): void => {
             const anchors: OutlineAnchor[] = [];
             let idx = 0;
+            // Styles snapshot once per emit: detectHeadingLevel indexes it for
+            // styleId-based detection (HeadingN / localized name / basedOn chain),
+            // so re-indexing per paragraph is O(n·m) on large docs.
+            const styles = (view.state.doc.attrs as { styles?: StylesOptions }).styles;
             view.state.doc.descendants((node, pos) => {
-              if (node.type.name === "heading" && node.textContent.length > 0) {
+              // A heading node carries its level directly; a paragraph the user
+              // styled as a heading at runtime (styleId / outlineLevel, no
+              // `type: "heading"`) is detected via detectHeadingLevel.
+              const level =
+                node.type.name === "heading"
+                  ? ((node.attrs.level as number) ?? 1)
+                  : node.type.name === "paragraph"
+                    ? detectHeadingLevel(
+                        {
+                          style: (node.attrs.styleId as string) || undefined,
+                          outlineLevel: node.attrs.outlineLevel as number | undefined,
+                        },
+                        styles,
+                      )
+                    : undefined;
+              if (level != null && node.textContent.length > 0) {
                 anchors.push({
                   id: "h" + idx,
                   pos,
                   textContent: node.textContent,
-                  originalLevel: (node.attrs.level as number) ?? 1,
+                  originalLevel: level,
                 });
                 idx++;
                 return false;

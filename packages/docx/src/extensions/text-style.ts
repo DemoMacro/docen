@@ -37,6 +37,46 @@ const SKIP_KEYS = new Set([
   "superScript",
 ]);
 
+/** Scalar OOXML run properties with no CSS equivalent — stored verbatim via
+ *  attrNative (default null, renderDocx/parseDocx pass through). Listed once and
+ *  spread into TextStyle's attribute set so adding a run prop is a one-line edit. */
+const NATIVE_RUN_ATTRS = [
+  "underline",
+  "emphasisMark",
+  "highlight",
+  "smallCaps",
+  "allCaps",
+  "kern",
+  "position",
+  "effect",
+  "noProof",
+  "sizeComplexScript",
+  "highlightComplexScript",
+  "boldComplexScript",
+  "italicComplexScript",
+  "doubleStrike",
+  "emboss",
+  "imprint",
+  "revision",
+  "language",
+  "border",
+  "snapToGrid",
+  "vanish",
+  "specVanish",
+  "scale",
+  "math",
+  "outline",
+  "shadow",
+  "webHidden",
+  "fitText",
+  "complexScript",
+  "eastAsianLayout",
+  "contentPartRId",
+] as const;
+
+const nativeRunAttrs = (): Record<string, ReturnType<typeof attrNative>> =>
+  Object.fromEntries(NATIVE_RUN_ATTRS.map((key) => [key, attrNative()]));
+
 export const TextStyle = BaseTextStyle.extend({
   addAttributes() {
     return {
@@ -122,38 +162,7 @@ export const TextStyle = BaseTextStyle.extend({
         },
       },
 
-      // Scalar OOXML run properties with no CSS equivalent (stored verbatim)
-      underline: attrNative(),
-      emphasisMark: attrNative(),
-      highlight: attrNative(),
-      smallCaps: attrNative(),
-      allCaps: attrNative(),
-      kern: attrNative(),
-      position: attrNative(),
-      effect: attrNative(),
-      noProof: attrNative(),
-      sizeComplexScript: attrNative(),
-      highlightComplexScript: attrNative(),
-      boldComplexScript: attrNative(),
-      italicComplexScript: attrNative(),
-      doubleStrike: attrNative(),
-      emboss: attrNative(),
-      imprint: attrNative(),
-      revision: attrNative(),
-      language: attrNative(),
-      border: attrNative(),
-      snapToGrid: attrNative(),
-      vanish: attrNative(),
-      specVanish: attrNative(),
-      scale: attrNative(),
-      math: attrNative(),
-      outline: attrNative(),
-      shadow: attrNative(),
-      webHidden: attrNative(),
-      fitText: attrNative(),
-      complexScript: attrNative(),
-      eastAsianLayout: attrNative(),
-      contentPartRId: attrNative(),
+      ...nativeRunAttrs(),
     };
   },
 
