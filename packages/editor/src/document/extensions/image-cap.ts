@@ -404,19 +404,45 @@ export const ImageCap = Extension.create({
             // so it's skipped too (idempotent). A CORS-blocked web image is
             // capped in embedHttpImage, where its width is stamped.
             if (attrs.width != null) return true;
-            // 无 width 的图：dataUrl 图（手动粘贴文件）用 imageMeta 同步读尺寸 cap；
-            // http 图无法同步读（naturalSize 返回 null），跳过——其占位由
-            // measure.layoutImageLines + image.ts renderHTML 的 CSS（width:100% +
-            // aspect-ratio:4/3）双层兜底，fetch 完由 embedHttpImage 精化设实际尺寸。
+            // Unsized images (manual paste/insert — readAndInsert sets src only):
+            // data-URL images are sync-read via imageMeta and capped; http images
+            // can't be sync-read (naturalSize returns null) — refined async by embedHttpImage.
             const natural = naturalSize(attrs.src);
             const displayW = natural?.width;
-            if (displayW == null || displayW <= 0) return true;
-
             // Section content width from OOXML geometry; fall back to the
             // rendered page's content box when geometry is absent (blank doc).
             const contentW = sectionContentDims(sectionAt(doc, pos))?.width ?? fallbackW;
+            if (displayW == null || displayW <= 0) {
+              // Unreadable size: skip http images (embedHttpImage refines them async
+              // — a placeholder here would make its "already has width" branch swap
+              // only src and skip the real size). A corrupt data URL (imageMeta can't
+              // read it) has no async refiner, so fall back to contentW × 0.75 (4:3,
+              // matching the editor CSS placeholder + measure placeholder) so edit,
+              // measure and export all agree on the same size.
+              if (typeof attrs.src === "string" && /^https?:\/\//.test(attrs.src)) return true;
+              if (!contentW || contentW <= 0) return true;
+              tr.setNodeMarkup(pos, null, {
+                ...attrs,
+                width: contentW,
+                height: Math.round(contentW * 0.75),
+              });
+              changed = true;
+              return true;
+            }
             if (!contentW || contentW <= 0) return true;
-            if (displayW <= contentW) return true; // within bounds — never upscale
+            if (displayW <= contentW) {
+              // Within bounds — keep natural size (never upscale), but stamp it so
+              // the editor <img> doesn't fall back to width:100% (which would
+              // upscale) and export matches display. Mirrors embedHttpImage's
+              // small-image branch (edit == render == export).
+              tr.setNodeMarkup(pos, null, {
+                ...attrs,
+                width: displayW,
+                height: attrs.height ?? natural?.height ?? null,
+              });
+              changed = true;
+              return true;
+            }
 
             const capped = capSize(displayW, attrs.height ?? natural?.height ?? null, contentW);
             tr.setNodeMarkup(pos, null, { ...attrs, width: capped.width, height: capped.height });

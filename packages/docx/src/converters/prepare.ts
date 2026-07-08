@@ -60,7 +60,7 @@ export function prepareImages(handler: ImageFetchHandler = fetchImageHandler): P
  * Only images lacking `width` or `height` are probed — the DOCX round-trip path
  * already carries `transformation.width/height`, so this mainly serves images
  * entering via HTML/Markdown (which carry no intrinsic size). Images whose
- * metadata can't be read are left untouched; `renderDocx` falls back to 600×400
+ * metadata can't be read are left untouched; `renderDocx` falls back to 400×300
  * (see extensions/image.ts).
  */
 export function prepareImageSizes(): PrepareStep {

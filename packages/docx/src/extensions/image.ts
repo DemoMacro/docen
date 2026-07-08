@@ -73,8 +73,8 @@ export function renderDocx(node: JSONContent): Record<string, unknown> | null {
   // rotation is an optional editor attr carried via transformation.rotation.
   // Guard against NaN/non-finite reaching OOXML as `${width}px` (an invalid
   // UniversalMeasure that corrupts the document). Falls back to the default.
-  const width = Number.isFinite(attrs.width as number) ? (attrs.width as number) : 600;
-  const height = Number.isFinite(attrs.height as number) ? (attrs.height as number) : 400;
+  const width = Number.isFinite(attrs.width as number) ? (attrs.width as number) : 400;
+  const height = Number.isFinite(attrs.height as number) ? (attrs.height as number) : 300;
   // office-open 0.10.4+ treats a numeric transformation size as EMU (was px);
   // emit UniversalMeasure so the px value is interpreted correctly on generate.
   const transformation: Record<string, unknown> = { width: `${width}px`, height: `${height}px` };
