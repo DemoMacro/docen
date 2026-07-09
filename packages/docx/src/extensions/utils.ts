@@ -131,25 +131,16 @@ export function docxParagraphAttrs() {
 }
 
 /** Shared renderHTML for Paragraph (`tag="p"`) and Heading (`tag="h{level}"`):
- *  empty-textblock natural metric, style CSS, docx-default/docx-style class, and
- *  tab-leader. `level` (Heading only, 7-9) stamps data-heading-level so levels
- *  past h6 round-trip via a <h6> proxy (parseHTML reads it back). */
+ *  style CSS, docx-default/docx-style class, and tab-leader. `level` (Heading
+ *  only, 7-9) stamps data-heading-level so levels past h6 round-trip via a <h6>
+ *  proxy (parseHTML reads it back). */
 export function renderTextBlock(
-  node: { attrs: Record<string, unknown> } & {
-    forEach?: (cb: (child: { isText?: boolean; type?: { name?: string } }) => void) => void;
-  },
+  node: { attrs: Record<string, unknown> },
   HTMLAttributes: Record<string, unknown>,
   tag: string,
   level?: number,
 ): DOMOutputSpec {
-  // An empty textblock (¶ glyph only) renders spacing.line at the natural
-  // metric (no grid pitch), matching Word. Mirrors measure.ts isEmptyTextblock.
-  let hasContent = false;
-  node.forEach?.((child) => {
-    if (child.isText || child.type?.name === "hardBreak" || child.type?.name === "image")
-      hasContent = true;
-  });
-  const styles = renderParagraphStyles(node.attrs, { empty: !hasContent });
+  const styles = renderParagraphStyles(node.attrs);
   const attrs: Record<string, unknown> = { ...HTMLAttributes };
   const styleId = node.attrs.styleId as string | null;
   // class="docx-style-{id}" applies the named style's CSS. A pStyle-less
@@ -386,35 +377,28 @@ export function shadingFromCss(css: string | null | undefined): ShadingAttribute
 // OOXML spacing.line: 240 = single, 360 = 1.5.
 // lineRule "exact"/"atLeast" → fixed pt; "auto"/undefined → a multiple of single.
 
-export function lineSpacingToCss(
-  spacing: SpacingProperties | null | undefined,
-  snapToGrid: boolean | null = null,
-): string | null {
+export function lineSpacingToCss(spacing: SpacingProperties | null | undefined): string | null {
   if (!spacing?.line) return null;
   const rule = spacing.lineRule;
   if (rule === "exact" || rule === "exactly" || rule === "atLeast") {
     return `${Number(spacing.line) / 20}pt`;
   }
-  // lineRule "auto": `line` is 240ths of the font's single-line height. The
-  // single-line metric is the font's `line-height: normal` (ascent + descent +
-  // line-gap). CSS calc() cannot reference `normal`, so the editor measures it
-  // per font and sets --docen-font-metric (a ratio; 1.2 fallback for static HTML
-  // export).
-  // Per ECMA-376 (§17.3.1.87 snapToGrid — "align to document grid"): when
-  // snapToGrid is on (default under a docGrid), each line aligns to a grid row —
-  // line height = MAX(font natural metric, grid pitch). The pitch is the grid's
-  // per-line MINIMUM; a shorter natural line snaps up to the pitch. The spacing
-  // multiple is ABSORBED; snapToGrid===false (e.g. header/footer) applies the
-  // multiple x natural. Verified via Word PDFs (pymupdf): 11pt body ~= linePitch
-  // 15.6 (MAX, not ceil(1.3x normal / pitch) — that wrongly pushes a single body
-  // line to 2 rows). Mirrors measure.ts resolveLineHeight (edit == render).
-  // --docen-line-base (= the paragraph's max run size) replaces the inherited 1em
-  // so a 42pt heading isn't measured at 14pt; `1em` fallback covers static HTML.
-  if (snapToGrid === false) {
-    const multiple = Number((Number(spacing.line) / 240).toFixed(2));
-    return `calc(var(--docen-font-metric, 1.2) * ${multiple} * var(--docen-line-base, 1em))`;
-  }
-  return `calc(max(var(--docen-font-metric, 1.2) * var(--docen-line-base, 1em), var(--docen-line-pitch, 0pt)))`;
+  // lineRule "auto": `line` is 240ths of the font's single-line height
+  // (ECMA-376 ST_LineSpacingRule). The single-line metric is the font's
+  // `line-height: normal` (ascent + descent + line-gap); CSS calc() cannot
+  // reference `normal`, so the editor measures it per font and sets
+  // --docen-font-metric (a ratio; 1.2 fallback for static HTML export).
+  // An explicit spacing.line multiple takes PRECEDENCE over the document grid
+  // (snapToGrid): a paragraph that sets line spacing renders at multiple×natural,
+  // the grid pitch does NOT snap it (ECMA-376: explicit line spacing overrides
+  // the grid, same as exact/snapToGrid=false; verified vs Word). The grid max
+  // applies only when NO spacing.line is set — handled by the container's
+  // --docen-line-pitch (see sectionLinePitchCss) + the font-metric decoration.
+  // Mirrors measure.ts resolveLineHeight (edit == render). --docen-line-base (=
+  // the paragraph's max run size) replaces inherited 1em so a large heading
+  // scales at its own size; `1em` fallback covers static HTML.
+  const multiple = Number((Number(spacing.line) / 240).toFixed(2));
+  return `calc(var(--docen-font-metric, 1.2) * ${multiple} * var(--docen-line-base, 1em))`;
 }
 
 // ── Section geometry → CSS ──
@@ -470,10 +454,11 @@ export function sectionMarginCss(margin: unknown): string {
 
 /** Document grid linePitch (twips) → container CSS line-height.
  *  Per ECMA-376 snapToGrid, each line aligns to a grid row: line height =
- *  MAX(font `normal` metric, grid pitch). The container line-height (inherited
- *  by paragraphs without their own spacing) is set only when the grid type
- *  enables line-snapping (not "default"). The --docen-line-pitch var carries
- *  the pitch so per-paragraph lineSpacingToCss applies the same MAX;
+ *  MAX(font `normal` metric, grid pitch). The container line-height is inherited
+ *  only by paragraphs WITHOUT their own spacing.line (a paragraph that sets
+ *  spacing.line overrides the grid — see lineSpacingToCss). Set only when the
+ *  grid type enables line-snapping (not "default"). The --docen-line-pitch var
+ *  carries the pitch for the font-metric decoration's CJK round(up) snap;
  *  --docen-font-metric is injected per paragraph by the editor; 1.2 is the
  *  fallback for static HTML export. */
 export function sectionLinePitchCss(grid: unknown): string[] {
@@ -803,10 +788,7 @@ interface ParagraphStyleShape {
  * Shared by Paragraph and Heading extensions for node-level renderHTML.
  * Attrs store office-open native values; mappers here convert to CSS.
  */
-export function renderParagraphStyles(
-  attrs: Record<string, unknown>,
-  opts?: { empty?: boolean },
-): string[] {
+export function renderParagraphStyles(attrs: Record<string, unknown>): string[] {
   const a = attrs as ParagraphStyleShape;
   const styles: string[] = [];
 
@@ -845,12 +827,12 @@ export function renderParagraphStyles(
     if (before) styles.push(`margin-top:${before}`);
     const after = twipToCss(a.spacing.after);
     if (after) styles.push(`margin-bottom:${after}`);
-    // An empty paragraph (¶ glyph only) does NOT receive the document-grid
-    // pitch — Word renders the ¶ at the font's natural metric (verified vs a
-    // Word PDF: an empty single line between paragraphs measures ~natural, not
-    // natural+pitch). snapToGrid=false applies the spacing multiple against the
-    // natural metric, mirroring measure.ts emptyLineHeight (edit == render).
-    const lh = lineSpacingToCss(a.spacing, opts?.empty ? false : a.snapToGrid);
+    // A paragraph's spacing.line (auto multiple / exact / atLeast) always
+    // governs its line height when set — it overrides the document grid
+    // (lineSpacingToCss). An empty paragraph (¶ glyph only) likewise follows its
+    // spacing; with no spacing the ¶ glyph size (markLineHeight above) or the
+    // container's grid pitch applies. Mirrors measure.ts emptyLineHeight.
+    const lh = lineSpacingToCss(a.spacing);
     if (lh) styles.push(`line-height:${lh}`);
   }
 

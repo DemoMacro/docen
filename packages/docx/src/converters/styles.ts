@@ -185,7 +185,7 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
  *  merges with, not replaces, the parent's spacing.line); arrays and scalars
  *  replace. Nullish source values are skipped so an unset child key doesn't
  *  clobber an inherited value. */
-function deepMergeInto(
+export function deepMergeInto(
   target: Record<string, unknown>,
   source: Record<string, unknown>,
 ): Record<string, unknown> {
@@ -208,7 +208,7 @@ function deepMergeInto(
  *  and scalars replace. Shared by stylesToCss (rendering) and effectiveRunProps
  *  (the caret resolver) so the gallery box and the rendered page resolve
  *  identical values. */
-function mergeStyleChain(
+export function mergeStyleChain(
   byId: Map<string, StyleEntry>,
   styleId: string | null | undefined,
 ): { run: Record<string, unknown>; paragraph: Record<string, unknown> } {

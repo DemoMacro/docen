@@ -3,7 +3,12 @@ import type { Node as PmNode } from "@tiptap/pm/model";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 
-import { paragraphMaxRatio, paragraphMaxSizePt } from "../utils/measure";
+import {
+  paragraphHasCjk,
+  paragraphMaxRatio,
+  paragraphMaxSizePt,
+  resolveSpacing,
+} from "../utils/measure";
 
 const key = new PluginKey<DecorationSet>("docenFontMetric");
 
@@ -29,21 +34,37 @@ function build(doc: PmNode): DecorationSet {
       const ratio = paragraphMaxRatio(node, styles).toFixed(4);
       const size = paragraphMaxSizePt(node, styles);
       const parts = [`--docen-font-metric:${ratio}`, `--docen-line-base:${size}pt`];
-      // Table cell: align each line to the grid row (max of the font's natural
-      // metric vs the grid pitch) so the row's trHeight atLeast floor — not the
-      // line box — governs (Word renders a single-spaced grid row at trHeight).
-      // Overrides the paragraph's line-height (ProseMirror appends a node
-      // decoration's style, so the later line-height wins); mirrors measure.ts
-      // resolveLineHeight(inTable) — the same MAX model as body text (edit == render).
       const parentName = parent?.type.name;
-      if (parentName === "tableCell" || parentName === "tableHeader") {
-        // Cell line-height = MAX(natural metric, grid pitch). Also size the p to
-        // its max run size (--docen-line-base), not the inherited container
-        // font-size — a smaller run inside an inherited 12pt cell p leaves a 12pt
-        // strut whose baseline alignment makes the line-box ~2px taller than measured.
+      const inTable = parentName === "tableCell" || parentName === "tableHeader";
+      const attrs = node.attrs as {
+        snapToGrid?: boolean | null;
+        spacing?: { lineRule?: string | null } | null;
+      };
+      if (inTable) {
+        // Cell line-height = MAX(natural metric, grid pitch) so the row's
+        // trHeight atLeast floor — not the line box — governs. Also size the p
+        // to its max run (--docen-line-base), not the inherited container
+        // font-size. Mirrors measure.ts resolveLineHeight(inTable); overrides the
+        // paragraph's line-height (ProseMirror appends a node decoration's style).
         parts.push(
           "line-height:calc(max(var(--docen-font-metric) * var(--docen-line-base), var(--docen-line-pitch, 0pt)))",
           "font-size:var(--docen-line-base, 1em)",
+        );
+      } else if (
+        paragraphHasCjk(node, styles) &&
+        attrs.snapToGrid !== false &&
+        resolveSpacing(node, styles)?.line == null
+      ) {
+        // CJK-dominant body with NO explicit line spacing: snap UP to a whole
+        // pitch multiple (CSS round(up)). docGrid type=lines is a CJK grid — CJK
+        // chars align to it (ceil to a whole row); Latin body keeps the section
+        // container's MAX from lineSpacingToCss. A paragraph WITH spacing.line
+        // (auto/exact/atLeast) is excluded — it overrides the grid and renders at
+        // its own line height (multiple×natural / fixed), so no ceil here.
+        // pitch=0 (no grid) -> round(up, A, 0)=A, a no-op. Overrides the
+        // container's line-height (appended node-deco style).
+        parts.push(
+          "line-height:calc(round(up, var(--docen-font-metric) * var(--docen-line-base), var(--docen-line-pitch, 0pt)))",
         );
       }
       decos.push(Decoration.node(pos, pos + node.nodeSize, { style: parts.join(";") }));
