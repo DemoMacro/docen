@@ -214,12 +214,29 @@ class DocenRibbonCombobox extends FASTElement {
     requestAnimationFrame(apply);
   }
 
+  /** The `value` of the option whose display text matches the control's text.
+   *  Styles-gallery options carry the pStyle id as `value` but show the style
+   *  name, so the command must receive the id: a styleId set to a display name
+   *  matches no entry in styles.xml. Falls back to the raw text when no option
+   *  matches (a hand-typed font name, or text-only galleries like fonts). */
+  private selectedValue(): string {
+    const display = this.value;
+    const opts = this.lb?.querySelectorAll("fluent-option") ?? [];
+    for (const opt of opts) {
+      if ((opt.textContent ?? "").trim() === display) {
+        const v = opt.getAttribute("value");
+        if (v !== null) return v;
+      }
+    }
+    return display;
+  }
+
   private emit(): void {
     this.dispatchEvent(
       new CustomEvent("command", {
         bubbles: true,
         composed: true,
-        detail: { event: this.event ?? "", value: this.value, source: this },
+        detail: { event: this.event ?? "", value: this.selectedValue(), source: this },
       }),
     );
   }
