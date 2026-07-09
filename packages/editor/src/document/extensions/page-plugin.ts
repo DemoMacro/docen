@@ -148,6 +148,18 @@ export function sectionContentDims(sp: unknown): {
 function measureFlatItems(editor: Editor): FlatItem[] {
   const { view, state } = editor;
   const styles = (state.doc.attrs as { styles?: unknown }).styles;
+  // A page's sectionProperties are filled by the reflow that created it (each
+  // page renders its section's geometry). On the FIRST reflow after load the doc
+  // is a single placeholder page whose sectionProperties are absent — the OOXML
+  // sectPr rides on the section's last paragraph / doc.attrs, not the page — so
+  // measuring that page read pitch=undefined and fell back to the font-natural
+  // metric, under-counting every row. The next pass then re-measured with the
+  // real grid pitch (pages now carry it), so row heights changed between passes
+  // (28→32px) and pagination oscillated, drifting a row onto the next page vs
+  // Word. Fall back to the document-level section so the first pass measures
+  // with the real grid pitch; single-section docs converge in one pass.
+  const docSectionProperties =
+    (state.doc.attrs as { sectionProperties?: unknown }).sectionProperties ?? null;
   const pageDoms = Array.from(view.dom.children).filter(
     (el): el is HTMLElement => el instanceof HTMLElement && el.classList.contains("docen-page"),
   );
@@ -169,7 +181,7 @@ function measureFlatItems(editor: Editor): FlatItem[] {
     const curPi = pi++;
     const pageDom = pageDoms[curPi];
     if (!pageDom) return;
-    const dims = sectionContentDims(pageNode.attrs.sectionProperties);
+    const dims = sectionContentDims(pageNode.attrs.sectionProperties ?? docSectionProperties);
     const pageCs = getComputedStyle(pageDom);
     const pageRect = pageDom.getBoundingClientRect();
     const padX = (parseFloat(pageCs.paddingLeft) || 0) + (parseFloat(pageCs.paddingRight) || 0);
@@ -589,6 +601,119 @@ function tableKeyOf(table: PmNode, ids: Map<PmNode, string>): string {
   return id;
 }
 
+/** Column map of a sequence of rows: for each row, the grid column each
+ *  present cell starts at, after skipping columns covered by a rowspan from an
+ *  earlier row in the sequence. A vMerge-continue row resolves to ONE content
+ *  cell plus an owner rowspan above it; this maps that cell to its column.
+ *  Equivalent to prosemirror-tables' TableMap, kept local to avoid the dep. */
+function mapRows(
+  rows: PmNode[],
+): Map<PmNode, Array<{ cell: PmNode; colStart: number; colspan: number }>> {
+  const result = new Map<PmNode, Array<{ cell: PmNode; colStart: number; colspan: number }>>();
+  const coveredUntil = new Map<number, number>(); // col -> row index covered up to (exclusive)
+  let ri = 0;
+  for (const row of rows) {
+    const positions: Array<{ cell: PmNode; colStart: number; colspan: number }> = [];
+    let col = 0;
+    row.forEach((cell) => {
+      const cs = (cell.attrs.colspan as number) ?? 1;
+      const rs = (cell.attrs.rowspan as number) ?? 1;
+      while ((coveredUntil.get(col) ?? 0) > ri) col++;
+      positions.push({ cell, colStart: col, colspan: cs });
+      if (rs > 1) for (let c = col; c < col + cs; c++) coveredUntil.set(c, ri + rs);
+      col += cs;
+    });
+    result.set(row, positions);
+    ri++;
+  }
+  return result;
+}
+
+function rowCellColumns(
+  table: PmNode,
+): Map<PmNode, Array<{ cell: PmNode; colStart: number; colspan: number }>> {
+  const rows: PmNode[] = [];
+  table.forEach((row) => rows.push(row));
+  return mapRows(rows);
+}
+
+/** Grid column count of a table (furthest column reached by any row's cells). */
+function tableColumnCount(table: PmNode): number {
+  let max = 0;
+  for (const positions of rowCellColumns(table).values()) {
+    for (const { colStart, colspan } of positions) {
+      const end = colStart + colspan;
+      if (end > max) max = end;
+    }
+  }
+  return max;
+}
+
+/** Per-column width (px) from the table's first row, used to give placeholder
+ *  cells a colwidth matching their column so fixTables sees a self-consistent
+ *  table and does not rewrite/pad it. */
+function columnWidthsOf(table: PmNode, columnCount: number): number[] {
+  const widths: number[] = Array.from({ length: columnCount }, () => 0);
+  const firstRow = table.firstChild;
+  if (!firstRow) return widths;
+  let col = 0;
+  firstRow.forEach((cell) => {
+    const cs = (cell.attrs.colspan as number) ?? 1;
+    const cw = (cell.attrs.colwidth as number[] | null) ?? [];
+    for (let j = 0; j < cs && col < columnCount; j++) widths[col++] = cw[j] ?? 0;
+  });
+  return widths;
+}
+
+/** Rebuild continuation-page data rows that lost their rowspan anchor when the
+ *  table split across pages. A vMerge-continue row resolves to one content
+ *  cell; the merged columns were held by a rowspan owner. If that owner ALSO
+ *  landed on this continuation page (a restart row earlier in `rows`, e.g.
+ *  covering the next continue row), ProseMirror already places the content cell
+ *  past the owner's rowspan — leave it. Only rows whose owner stayed on the
+ *  PRIOR page have no rowspan covering their merged columns here, so the
+ *  content cell collapses to column 0 and fixTables pads empty cells at the END
+ *  (shifting column-3 content into column 1). For those rows, pad placeholder
+ *  cells in front to restore the content cell to its source-table column.
+ *  Comparing the continuation's own column map (clone header + these rows)
+ *  against the source's tells the two cases apart: a content cell whose
+ *  continuation column is already at/after its source column is covered by an
+ *  on-page owner. Idempotent — a row rebuilt on a prior pass is met again at
+ *  full width, and one absent from the source (source is itself a split
+ *  segment next pass) is left as-is. */
+function rebuildContinuationDataRows(
+  rows: PmNode[],
+  clonedHeader: PmNode[],
+  source: PmNode,
+  schema: PmNode["type"]["schema"],
+): PmNode[] {
+  const columnCount = tableColumnCount(source);
+  if (!columnCount) return rows;
+  const sourceMap = rowCellColumns(source);
+  const continuationMap = mapRows([...clonedHeader, ...rows]);
+  const colWidths = columnWidthsOf(source, columnCount);
+  const cellType = schema.nodes.tableCell;
+  const paraType = schema.nodes.paragraph;
+  const makePlaceholder = (col: number): PmNode => {
+    const attrs = colWidths[col] > 0 ? { colwidth: [colWidths[col]] } : {};
+    return cellType.create(attrs, paraType.create());
+  };
+  return rows.map((row) => {
+    let span = 0;
+    row.forEach((c) => {
+      span += (c.attrs.colspan as number) ?? 1;
+    });
+    if (span >= columnCount) return row;
+    const srcPos = sourceMap.get(row)?.[0]?.colStart ?? 0;
+    const contPos = continuationMap.get(row)?.[0]?.colStart ?? 0;
+    if (contPos >= srcPos) return row; // owner is on this page — ProseMirror already placed it
+    const cells: PmNode[] = [];
+    for (let col = contPos; col < srcPos; col++) cells.push(makePlaceholder(col));
+    row.forEach((c) => cells.push(c));
+    return row.type.create(row.attrs, cells, row.marks);
+  });
+}
+
 /** Build a table node from regrouped rows. Continuation pages (the table
  *  already placed on a prior page) clone the header rows from the group's
  *  first segment (`headerSource` — later segments have no header yet); split
@@ -602,8 +727,12 @@ function buildTableNode(
   splitGroup: string | null,
 ): PmNode {
   const cloned = isContinuation && splitGroup ? cloneHeaderRows(headerSource) : [];
-  let finalRows = isContinuation && splitGroup ? [...cloned, ...rows] : rows;
-  if (isContinuation && splitGroup && cloned.length && rows.length) {
+  const dataRows =
+    isContinuation && splitGroup
+      ? rebuildContinuationDataRows(rows, cloned, headerSource, schema)
+      : rows;
+  let finalRows = isContinuation && splitGroup ? [...cloned, ...dataRows] : dataRows;
+  if (isContinuation && splitGroup && cloned.length && dataRows.length) {
     // Sync the cloned header's cell colwidths to the column widths carried by
     // the data rows on this continuation page. prosemirror-tables' tableEditing
     // plugin runs fixTables on every transaction: it derives each column's
@@ -617,7 +746,7 @@ function buildTableNode(
     // rows' column widths makes the column self-consistent, so fixTables leaves
     // it alone → idempotent re-flow.
     const colWidths: number[] = [];
-    for (const row of rows) {
+    for (const row of dataRows) {
       let col = 0;
       row.forEach((cell) => {
         const cs = (cell.attrs.colspan as number) ?? 1;

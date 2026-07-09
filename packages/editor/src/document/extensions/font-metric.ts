@@ -1,3 +1,4 @@
+import { lineSpacingToCss } from "@docen/docx";
 import { Extension } from "@docen/docx/core";
 import type { Node as PmNode } from "@tiptap/pm/model";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
@@ -16,7 +17,7 @@ const key = new PluginKey<DecorationSet>("docenFontMetric");
  *  custom properties — --docen-font-metric (CJK-dominant MAX `normal` ratio:
  *  docGrid type=lines is a CJK grid, so the metric follows the CJK run, not a
  *  Latin run alongside it) and --docen-line-base (MAX run size, pt).
- *  lineSpacingToCss resolves line-height as `calc(metric × m × line-base)`, so
+ *  lineSpacingToCss resolves line-height as `m × (linePitch | metric×line-base)`, so
  *  the line box scales at the paragraph's dominant font SIZE — matching Word's
  *  line-box rule (a line is as tall as its tallest font), fixing the bug where
  *  a 42pt heading rendered at
@@ -41,13 +42,19 @@ function build(doc: PmNode): DecorationSet {
         spacing?: { lineRule?: string | null } | null;
       };
       if (inTable) {
-        // Cell line-height = MAX(natural metric, grid pitch) so the row's
-        // trHeight atLeast floor — not the line box — governs. Also size the p
-        // to its max run (--docen-line-base), not the inherited container
-        // font-size. Mirrors measure.ts resolveLineHeight(inTable); overrides the
-        // paragraph's line-height (ProseMirror appends a node decoration's style).
+        // A cell's spacing.line (exact/atLeast/auto) applies — ECMA-376 docGrid
+        // exempts only its own pitch snap from table cells (adjustLineHeightInTable),
+        // not the paragraph's spacing.line. Only a cell with NO spacing.line
+        // defaults to MAX(natural metric, grid pitch) so trHeight's atLeast floor
+        // governs. Also size the p to its max run (--docen-line-base), not the
+        // inherited container font-size. Mirrors measure.ts resolveLineHeight;
+        // overrides the paragraph's line-height (ProseMirror appends a node
+        // decoration's style).
+        const cellLh = lineSpacingToCss(resolveSpacing(node, styles));
         parts.push(
-          "line-height:calc(max(var(--docen-font-metric) * var(--docen-line-base), var(--docen-line-pitch, 0pt)))",
+          cellLh
+            ? `line-height:${cellLh}`
+            : "line-height:calc(max(var(--docen-font-metric) * var(--docen-line-base), var(--docen-line-pitch, 0pt)))",
           "font-size:var(--docen-line-base, 1em)",
         );
       } else if (

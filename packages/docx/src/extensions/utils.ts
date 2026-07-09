@@ -383,22 +383,23 @@ export function lineSpacingToCss(spacing: SpacingProperties | null | undefined):
   if (rule === "exact" || rule === "exactly" || rule === "atLeast") {
     return `${Number(spacing.line) / 20}pt`;
   }
-  // lineRule "auto": `line` is 240ths of the font's single-line height
-  // (ECMA-376 ST_LineSpacingRule). The single-line metric is the font's
-  // `line-height: normal` (ascent + descent + line-gap); CSS calc() cannot
-  // reference `normal`, so the editor measures it per font and sets
-  // --docen-font-metric (a ratio; 1.2 fallback for static HTML export).
-  // An explicit spacing.line multiple takes PRECEDENCE over the document grid
-  // (snapToGrid): a paragraph that sets line spacing renders at multiple×natural,
-  // the grid pitch does NOT snap it (ECMA-376: explicit line spacing overrides
-  // the grid, same as exact/snapToGrid=false; verified vs Word). The grid max
-  // applies only when NO spacing.line is set — handled by the container's
-  // --docen-line-pitch (see sectionLinePitchCss) + the font-metric decoration.
-  // Mirrors measure.ts resolveLineHeight (edit == render). --docen-line-base (=
-  // the paragraph's max run size) replaces inherited 1em so a large heading
-  // scales at its own size; `1em` fallback covers static HTML.
+  // lineRule "auto": `line` is 240ths of a SINGLE LINE height (ECMA-376
+  // ST_LineSpacingRule / §2.3.1.33). Per docGrid (§2.6.2.4), linePitch "defines
+  // the pitch for each line ... such that the desired number of single spaced
+  // lines ... fits" — i.e. when a document grid is defined, linePitch IS the
+  // single-line height; without a grid, the single line is the font's `normal`
+  // metric. So auto = multiple × (linePitch | font-natural). Verified vs Word:
+  // a 1.5× line (line=360) on a CJK body with a grid renders at 1.5×linePitch,
+  // not 1.5×font-natural. spacing.line applies to ALL paragraphs incl. table
+  // cells (docGrid exempts only its own pitch snap from cells via
+  // adjustLineHeightInTable, never spacing.line) — see measure.ts
+  // resolveLineHeight. --docen-line-pitch is injected by sectionLinePitchCss only
+  // for grid type≠default; absent → fall back to --docen-font-metric ×
+  // --docen-line-base (1.2/1em fallbacks for static HTML export). --docen-line-base
+  // (= the paragraph's max run size) replaces inherited 1em so a large heading
+  // scales at its own size.
   const multiple = Number((Number(spacing.line) / 240).toFixed(2));
-  return `calc(var(--docen-font-metric, 1.2) * ${multiple} * var(--docen-line-base, 1em))`;
+  return `calc(${multiple} * var(--docen-line-pitch, var(--docen-font-metric, 1.2) * var(--docen-line-base, 1em)))`;
 }
 
 // ── Section geometry → CSS ──

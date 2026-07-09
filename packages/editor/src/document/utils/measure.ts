@@ -11,7 +11,7 @@ import {
   mergeStyleChain,
   type StylesOptions,
 } from "@docen/docx";
-import type { TableWidthProperties } from "@office-open/docx";
+import type { SpacingProperties, TableWidthProperties } from "@office-open/docx";
 import type { Node as PmNode } from "@tiptap/pm/model";
 
 import { clearFontMetricCache, fontNormalRatio } from "./font-metric";
@@ -125,12 +125,7 @@ interface StyleTable {
     default?: boolean;
     basedOn?: string;
     paragraph?: {
-      spacing?: {
-        line?: number | null;
-        lineRule?: string | null;
-        before?: number | null;
-        after?: number | null;
-      } | null;
+      spacing?: SpacingProperties | null;
       indent?: IndentAttrs | null;
     };
     run?: { font?: unknown; size?: number | null; bold?: boolean; italic?: boolean };
@@ -138,12 +133,7 @@ interface StyleTable {
   default?: {
     document?: {
       paragraph?: {
-        spacing?: {
-          line?: number | null;
-          lineRule?: string | null;
-          before?: number | null;
-          after?: number | null;
-        } | null;
+        spacing?: SpacingProperties | null;
         indent?: IndentAttrs | null;
       };
       run?: { font?: unknown; size?: number | null; bold?: boolean; italic?: boolean };
@@ -197,15 +187,8 @@ function styleChainOf(
  *  line-spacing lives in their style (e.g. line=360 on a "Table" style → 1.5×
  *  grid pitch = 31.2px) measured at the bare grid pitch (20.8px), so table rows
  *  measured ~1.5× too short and the paginator never split them. */
-export function resolveSpacing(
-  node: PmNode,
-  styles: unknown,
-): { line?: number | null; lineRule?: string | null } | null {
-  const direct = (
-    node.attrs as {
-      spacing?: { line?: number | null; lineRule?: string | null } | null;
-    }
-  ).spacing;
+export function resolveSpacing(node: PmNode, styles: unknown): SpacingProperties | null {
+  const direct = (node.attrs as { spacing?: SpacingProperties | null }).spacing;
   if (direct && direct.line != null) return direct;
   // Style chain via the renderer's mergeStyleChain (direct style + its basedOn
   // ancestors, e.g. Heading1 → Normal) — same source as stylesToCss, so measure
@@ -214,9 +197,7 @@ export function resolveSpacing(
   // basedOn ancestor's spacing.line (e.g. a heading whose line spacing lives on
   // Normal) → measured too tall/short vs the rendered page.
   const styleId = (node.attrs as { styleId?: string | null }).styleId;
-  const sp = styleChainOf(styles, styleId)?.paragraph?.spacing as
-    | { line?: number | null; lineRule?: string | null }
-    | undefined;
+  const sp = styleChainOf(styles, styleId)?.paragraph?.spacing as SpacingProperties | undefined;
   if (sp && sp.line != null) return sp;
   // docDefaults is the base layer under every named style (the renderer emits it
   // on p/h1-6); mergeStyleChain covers only the named-style chain, so fall back
@@ -240,11 +221,9 @@ export function paragraphSpacingMargins(
   node: PmNode,
   styles: unknown,
 ): { beforePx: number; afterPx: number } {
-  const direct = (
-    node.attrs as { spacing?: { before?: number | null; after?: number | null } | null }
-  ).spacing;
-  let before: number | null = direct?.before ?? null;
-  let after: number | null = direct?.after ?? null;
+  const direct = (node.attrs as { spacing?: SpacingProperties | null }).spacing;
+  let before: number | null = direct?.before != null ? Number(direct.before) : null;
+  let after: number | null = direct?.after != null ? Number(direct.after) : null;
   if (before == null || after == null) {
     // Style chain via the renderer's mergeStyleChain (direct style + basedOn
     // ancestors; a styleId-less paragraph → default style). A cell paragraph
@@ -252,17 +231,15 @@ export function paragraphSpacingMargins(
     // 60tw = 4px each) — the renderer resolves the same chain, so measure must
     // too, or every table row under-measures by its paragraph's before+after.
     const styleId = (node.attrs as { styleId?: string | null }).styleId;
-    const sp = styleChainOf(styles, styleId)?.paragraph?.spacing as
-      | { before?: number | null; after?: number | null }
-      | undefined;
-    if (before == null && sp?.before != null) before = sp.before;
-    if (after == null && sp?.after != null) after = sp.after;
+    const sp = styleChainOf(styles, styleId)?.paragraph?.spacing as SpacingProperties | undefined;
+    if (before == null && sp?.before != null) before = Number(sp.before);
+    if (after == null && sp?.after != null) after = Number(sp.after);
     // docDefaults is the base layer under every named style (renderer emits it
     // on p/h1-6); mergeStyleChain covers only the named-style chain.
     const t = styleTableOf(styles);
     const docSp = t?.default?.document?.paragraph?.spacing;
-    if (before == null && docSp?.before != null) before = docSp.before;
-    if (after == null && docSp?.after != null) after = docSp.after;
+    if (before == null && docSp?.before != null) before = Number(docSp.before);
+    if (after == null && docSp?.after != null) after = Number(docSp.after);
   }
   return {
     beforePx: typeof before === "number" ? before * TWIP_TO_PX : 0,
@@ -348,22 +325,25 @@ function normalPxOf(spec: FontSpec): number {
 
 /**
  * Resolve a paragraph's line-height in px (OOXML model, ECMA-376):
- *  1. `exact`/`atLeast` -> fixed twips->px (absolute, ignores the grid; table
- *     cells are exempt -- the grid governs, trHeight floors the row).
- *  2. `spacing.line` `auto` -> multiple (line/240) × natural. An EXPLICIT line
- *     spacing takes PRECEDENCE over the document grid: a paragraph that sets
- *     spacing.line renders at multiple×natural, the grid does NOT snap it
- *     (ECMA-376: explicit line spacing overrides the grid, same as exact).
+ *  1. `spacing.line` (exact/atLeast/auto) applies to ALL paragraphs, INCLUDING
+ *     table cells — ECMA-376 docGrid exempts only its own linePitch snap from
+ *     table cells (via adjustLineHeightInTable §2.15.3.1), never the paragraph's
+ *     spacing.line. exact/atLeast -> fixed twips->px; auto -> multiple (line/240)
+ *     × single-line height.
+ *  2. The auto "single-line height" = docGrid linePitch when a grid is defined
+ *     (docGrid §2.6.2.4: linePitch "defines the pitch for each line ... such
+ *     that the desired number of single spaced lines ... fits"), else the font's
+ *     natural metric. Verified vs Word: a 1.5× line on a CJK cell with a grid
+ *     renders at 1.5×linePitch, not 1.5×natural.
  *  3. No spacing.line + snapToGrid on (pitch > 0):
- *     - table cell -> MAX(natural, pitch) (trHeight floors the row separately)
+ *     - table cell -> MAX(natural, pitch) (cell exempts pitch snap, but the row
+ *       never goes below a grid row; trHeight floors separately)
  *     - CJK-dominant body -> CEIL(natural / pitch) * pitch (snap UP to a whole
  *       grid row; docGrid type=lines is a CJK grid, CJK chars align to it)
  *     - Latin-dominant body -> MAX(natural, pitch) (Latin chars don't snap)
  *  4. No spacing.line + snapToGrid off / no grid -> natural.
- * Verified vs Word: a body doc with pPrDefault spacing.line renders at
- * multiple×natural (not grid-snapped); a body doc with no spacing + snapToGrid
- * renders CJK at a whole-pitch multiple. `normalPx` + `hasCjk` come from
- * paragraphNormalPx (CJK-dominant metric + CJK-presence flag). */
+ * `normalPx` + `hasCjk` come from paragraphNormalPx (CJK-dominant metric +
+ * CJK-presence flag). Mirrors the renderer's lineSpacingToCss (edit == render). */
 export function resolveLineHeight({
   spacing,
   normalPx,
@@ -372,25 +352,26 @@ export function resolveLineHeight({
   inTable = false,
   hasCjk = false,
 }: {
-  spacing: { line?: number | null; lineRule?: string | null } | null | undefined;
+  spacing: SpacingProperties | null | undefined;
   normalPx: number;
   linePitchPx?: number;
   snapToGrid?: boolean | null;
   inTable?: boolean;
   hasCjk?: boolean;
 }): number {
-  // Table cells are exempt from explicit line spacing here (the grid + trHeight
-  // floor govern the row); body text consumes spacing.line below.
-  if (!inTable && spacing?.line) {
+  // spacing.line applies to every paragraph incl. table cells (docGrid exempts
+  // only its own pitch snap from cells, never spacing.line).
+  if (spacing?.line) {
     const rule = spacing.lineRule;
     if (rule === "exact" || rule === "exactly" || rule === "atLeast") {
-      return spacing.line * TWIP_TO_PX;
+      return Number(spacing.line) * TWIP_TO_PX;
     }
-    // auto: line is 240ths of single line height. Explicit spacing.line wins
-    // over the grid (step 2) — no ceil, no max, just multiple × natural.
-    return (spacing.line / 240) * normalPx;
+    // auto: line is 240ths of a SINGLE LINE height — the docGrid linePitch when
+    // a grid is defined, else the font natural. Verified vs Word.
+    const singleLinePx = linePitchPx > 0 ? linePitchPx : normalPx;
+    return (Number(spacing.line) / 240) * singleLinePx;
   }
-  // No explicit line spacing (or table cell): snap to the document grid.
+  // No spacing.line: snap to the document grid.
   const pitch = snapToGrid === false ? 0 : linePitchPx;
   if (pitch > 0) {
     if (inTable) return Math.max(normalPx, pitch);

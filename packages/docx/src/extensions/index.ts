@@ -6,5 +6,6 @@ export {
   resolveFontName,
   sectionMarginCss,
   sectionLinePitchCss,
+  lineSpacingToCss,
   twipsToMm,
 } from "./utils";
