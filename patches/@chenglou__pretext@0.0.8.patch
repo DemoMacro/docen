@@ -1,0 +1,64 @@
+diff --git a/dist/analysis.js b/dist/analysis.js
+index a38a3bb767a59854d1dd74ce12544981d02cdcea..fb312e895f8c174934b8dedaafa5e60d85e4be2b 100644
+--- a/dist/analysis.js
++++ b/dist/analysis.js
+@@ -90,6 +90,26 @@ export function isCJK(s) {
+     }
+     return false;
+ }
++// docen-local: identify fullwidth CJK punctuation for advance compression (match DOM/Word text-spacing)
++export function isFullWidthCJKPunct(ch) {
++    if (ch.length !== 1)
++        return false;
++    const cp = ch.charCodeAt(0);
++    if (cp === 0x3000)
++        return false;
++    if (cp >= 0x3001 && cp <= 0x303F)
++        return true;
++    if (cp >= 0xFF01 && cp <= 0xFF60) {
++        if (cp >= 0xFF10 && cp <= 0xFF19)
++            return false;
++        if (cp >= 0xFF21 && cp <= 0xFF3A)
++            return false;
++        if (cp >= 0xFF41 && cp <= 0xFF5A)
++            return false;
++        return true;
++    }
++    return false;
++}
+ function endsWithLineStartProhibitedText(text) {
+     const last = getLastCodePoint(text);
+     return last !== null && (kinsokuStart.has(last) || leftStickyPunctuation.has(last));
+diff --git a/dist/layout.js b/dist/layout.js
+index 957e2f04ee268f4a93bfc4b4d53f237c864c04a4..cd2c5e58404b1b1b0e56040fb6ab3c0644561564 100644
+--- a/dist/layout.js
++++ b/dist/layout.js
+@@ -32,7 +32,7 @@
+ //
+ // Based on Sebastian Markbage's text-layout research (github.com/chenglou/text-layout).
+ import { computeSegmentLevels } from './bidi.js';
+-import { analyzeText, canContinueKeepAllTextRun, clearAnalysisCaches, endsWithClosingQuote, isCJK, isNumericRunSegment, kinsokuEnd, kinsokuStart, leftStickyPunctuation, setAnalysisLocale, } from './analysis.js';
++import { analyzeText, canContinueKeepAllTextRun, clearAnalysisCaches, endsWithClosingQuote, isCJK, isFullWidthCJKPunct, isNumericRunSegment, kinsokuEnd, kinsokuStart, leftStickyPunctuation, setAnalysisLocale, } from './analysis.js';
+ import { clearMeasurementCaches, getCorrectedSegmentWidth, getSegmentBreakableFitAdvances, getEngineProfile, getFontMeasurementState, getSegmentMetrics, textMayContainEmoji, } from './measurement.js';
+ import { countPreparedLines, measurePreparedLineGeometry, normalizePreparedLineStart, stepPreparedLineGeometryFromChunk, walkPreparedLinesRaw, } from './line-break.js';
+ import { buildLineTextFromRange, clearLineTextCaches, getLineTextCache, } from './line-text.js';
+@@ -267,7 +267,18 @@ function measureAnalysis(analysis, font, includeSegments, wordBreak, letterSpaci
+         const spacingGraphemeCount = hasLetterSpacing
+             ? countRenderedSpacingGraphemes(text, kind)
+             : 0;
+-        const width = addInternalLetterSpacing(getCorrectedSegmentWidth(text, textMetrics, emojiCorrection), spacingGraphemeCount, letterSpacing);
++        let width = addInternalLetterSpacing(getCorrectedSegmentWidth(text, textMetrics, emojiCorrection), spacingGraphemeCount, letterSpacing);
++        // docen-local: compress fullwidth CJK punctuation to match DOM/Word text-spacing (edit==render)
++        if (isCJK(text)) {
++            let _punctReduction = 0;
++            for (const _ch of text) {
++                if (isFullWidthCJKPunct(_ch)) {
++                    _punctReduction += getCorrectedSegmentWidth(_ch, getSegmentMetrics(_ch, cache), emojiCorrection) * 0.5;
++                }
++            }
++            if (_punctReduction > 0)
++                width -= _punctReduction;
++        }
+         const baseLineEndFitAdvance = kind === 'space' || kind === 'preserved-space' || kind === 'zero-width-break'
+             ? 0
+             : width;
