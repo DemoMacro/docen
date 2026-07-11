@@ -49,6 +49,6 @@
     "@nlptools/distance": "0.0.8"
   },
   "devDependencies": {
-    "@tiptap/core": "3.27.1"
+    "@tiptap/core": "3.27.3"
   }
 }

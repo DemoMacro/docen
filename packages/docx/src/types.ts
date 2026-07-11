@@ -70,11 +70,11 @@ export type {
   // Table
   TableRowOptions,
   // Indent, spacing, borders, shading
-  IndentAttributesProperties,
+  IndentProperties,
   SpacingProperties,
   BordersOptions,
   BorderOptions,
-  ShadingAttributesProperties,
+  ShadingProperties,
   // Table structural types (reused in attr interfaces)
   TableBordersOptions,
   TableCellBordersOptions,
@@ -87,7 +87,7 @@ export type {
   WidthType,
   Margins,
   // Run structural types (reused in attr interfaces)
-  FontAttributesProperties,
+  FontProperties,
   EmphasisMarkType,
   UnderlineType,
   // Alignment, heading, tab stops, line rule
@@ -289,7 +289,7 @@ export interface HardBreakNode {
 // -- Mark types --
 
 /** OOXML track-change metadata (w:ins / w:del). Mirrors office-open's
- *  ChangedAttributesProperties: `id` is the w:id (number), `author`/`date` are
+ *  ChangedProperties: `id` is the w:id (number), `author`/`date` are
  *  the revision author and timestamp. */
 export interface TrackChangeAttrs {
   id: number | null;

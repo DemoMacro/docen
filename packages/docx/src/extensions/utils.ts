@@ -2,8 +2,8 @@ import { sectionMarginDefaults, sectionPageSizeDefaults } from "@office-open/doc
 import type {
   BorderOptions,
   BordersOptions,
-  IndentAttributesProperties,
-  ShadingAttributesProperties,
+  IndentProperties,
+  ShadingProperties,
   SpacingProperties,
   TableCellOptions,
   TableFloatOptions,
@@ -360,15 +360,13 @@ export function alignmentFromCss(css: string | null | undefined): string | null 
 // ── Shading mapping ──
 
 /** Shading.fill → CSS background-color hex. */
-export function shadingToCss(
-  shading: ShadingAttributesProperties | null | undefined,
-): string | null {
+export function shadingToCss(shading: ShadingProperties | null | undefined): string | null {
   if (!shading?.fill) return null;
   return normalizeColorToHex(shading.fill) ?? null;
 }
 
-/** CSS background-color → ShadingAttributesProperties (fill normalized to hex). */
-export function shadingFromCss(css: string | null | undefined): ShadingAttributesProperties | null {
+/** CSS background-color → ShadingProperties (fill normalized to hex). */
+export function shadingFromCss(css: string | null | undefined): ShadingProperties | null {
   const hex = normalizeColorToHex(css ?? undefined);
   return hex ? { fill: hex, type: "clear" } : null;
 }
@@ -764,9 +762,9 @@ export function tableFloatToCss(float: unknown): string[] {
 
 interface ParagraphStyleShape {
   alignment?: string | null;
-  indent?: IndentAttributesProperties | null;
+  indent?: IndentProperties | null;
   spacing?: SpacingProperties | null;
-  shading?: ShadingAttributesProperties | null;
+  shading?: ShadingProperties | null;
   border?: BordersOptions | null;
   /** snapToGrid (w:snapToGrid @w:val): per ECMA-376 §17.3.1.87, whether the
    *  section's docGrid linePitch is ADDED to each line in this paragraph. True
@@ -923,7 +921,7 @@ export function renderRunStyles(attrs: Record<string, unknown>, eastAsiaLang = "
 
 interface CellStyleShape {
   noWrap?: boolean | null;
-  shading?: ShadingAttributesProperties | null;
+  shading?: ShadingProperties | null;
   verticalAlign?: string | null;
   borders?: BordersOptions | null;
   // w:tcMar (or the inherited w:tblCellMar pushed onto the cell by resolveTable)
@@ -984,8 +982,8 @@ export function alignmentFromElement(el: HTMLElement): string | null {
 }
 
 /** Parse margin-left/right + text-indent → OOXML indent (twips). */
-export function indentFromElement(el: HTMLElement): IndentAttributesProperties | null {
-  const indent: IndentAttributesProperties = {};
+export function indentFromElement(el: HTMLElement): IndentProperties | null {
+  const indent: IndentProperties = {};
   const left = cssToTwip(el.style.marginLeft);
   if (left) indent.left = left;
   const right = cssToTwip(el.style.marginRight);
@@ -1058,6 +1056,6 @@ export function bordersFromElement(el: HTMLElement): BordersOptions | null {
 }
 
 /** Parse background-color → OOXML shading. */
-export function shadingFromElement(el: HTMLElement): ShadingAttributesProperties | null {
+export function shadingFromElement(el: HTMLElement): ShadingProperties | null {
   return shadingFromCss(el.style.backgroundColor || null);
 }

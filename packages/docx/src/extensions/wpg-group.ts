@@ -1,11 +1,11 @@
+import { encodeBase64 } from "@office-open/core";
+import type { FillOptions, OutlineOptions, SolidFillOptions } from "@office-open/core/drawingml";
 import {
   convertEmuToPixels,
   convertEmuToPoints,
   convertUniversalMeasureToEmu,
   convertUniversalMeasureToPt,
-  encodeBase64,
-} from "@office-open/core";
-import type { FillOptions, OutlineOptions, SolidFillOptions } from "@office-open/core";
+} from "@office-open/core/util";
 import type {
   ChildOffset,
   GroupChildMediaData,

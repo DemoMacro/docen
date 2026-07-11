@@ -72,14 +72,14 @@
   "dependencies": {
     "@chenglou/pretext": "0.0.8",
     "@docen/docx": "workspace:*",
-    "@fluentui/svg-icons": "1.1.331",
+    "@fluentui/svg-icons": "1.1.333",
     "@fluentui/tokens": "1.0.0-alpha.23",
-    "@fluentui/web-components": "3.0.0",
+    "@fluentui/web-components": "3.0.1",
     "@microsoft/fast-element": "3.0.1",
-    "@tiptap/extension-bubble-menu": "3.27.1",
-    "@tiptap/extension-list": "3.27.1",
-    "@tiptap/extensions": "3.27.1",
-    "@tiptap/pm": "3.27.1",
+    "@tiptap/extension-bubble-menu": "3.27.3",
+    "@tiptap/extension-list": "3.27.3",
+    "@tiptap/extensions": "3.27.3",
+    "@tiptap/pm": "3.27.3",
     "image-meta": "0.2.2",
     "prosemirror-search": "1.1.1"
   }

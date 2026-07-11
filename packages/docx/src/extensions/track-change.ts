@@ -40,7 +40,7 @@ import type { ParseInlineRule, ResolveContext } from "./types";
  * of scope (office-open parses inline w:ins/w:del only).
  */
 
-// office-open ChangedAttributesProperties: { id:number; author:string; date:string }.
+// office-open ChangedProperties: { id:number; author:string; date:string }.
 // `id` is a number on the OOXML side and is kept verbatim. All three are
 // metadata — not rendered to HTML (the tag/class already identifies the mark).
 const trackChangeAttrs = () => ({

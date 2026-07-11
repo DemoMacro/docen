@@ -18,8 +18,9 @@ export type { SectionPropertiesOptions } from "@office-open/docx";
 export { sectionMarginDefaults, sectionPageSizeDefaults } from "@office-open/docx";
 // Re-export the engine's length conversion (mm → twips) so the editor layer can
 // build OOXML page geometry from mm presets without a direct @office-open/core
-// dependency. (@office-open/docx does not re-export this from core.)
-export { convertMillimetersToTwip } from "@office-open/core";
+// dependency. (@office-open/docx does not re-export this from core.) Sourced from
+// the `util` subpath so bundlers can tree-shake the rest of core.
+export { convertMillimetersToTwip } from "@office-open/core/util";
 
 // Editor factory
 export { createDocxEditor, type DocxEditorOptions } from "./editor";

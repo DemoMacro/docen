@@ -1,4 +1,5 @@
-import { convertEmuToPixels, encodeBase64 } from "@office-open/core";
+import { encodeBase64 } from "@office-open/core";
+import { convertEmuToPixels } from "@office-open/core/util";
 import { Image as BaseImage } from "@tiptap/extension-image";
 
 import type { JSONContent } from "../core";

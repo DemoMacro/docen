@@ -330,7 +330,7 @@ export const DocumentCommands = Extension.create({
             .run();
         },
       // Paragraph shading: "none" clears; a theme pick stores a themeFill-bound
-      // ShadingAttributesProperties; a bare hex stores fill directly.
+      // ShadingProperties; a bare hex stores fill directly.
       shading:
         (value) =>
         ({ state, chain }) => {
