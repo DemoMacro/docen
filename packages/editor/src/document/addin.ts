@@ -21,6 +21,7 @@ import { Outline, type OutlineAnchor } from "./extensions/outline";
 import { PageBreakView } from "./extensions/page-break";
 import { Page, PageDocument } from "./extensions/page-node";
 import { PagePlugin } from "./extensions/page-plugin";
+import { PunctCompressionDecoration } from "./extensions/punct-compression";
 import { SectionBreakMarks } from "./extensions/section-break";
 import { SplitMarks } from "./extensions/split-paragraph";
 import { SplitTable, SplitTableRow } from "./extensions/split-table";
@@ -81,6 +82,7 @@ export function createDocumentExtensions(opts: {
     ImageCap,
     PagePlugin,
     FontMetricDecoration,
+    PunctCompressionDecoration,
     SplitTable,
     SplitTableRow,
     // Paragraph/heading split support: editor-only splitGroup/splitPart attrs

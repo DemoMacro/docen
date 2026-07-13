@@ -6,7 +6,7 @@ settings:
 
 patchedDependencies:
   '@chenglou/pretext@0.0.8':
-    hash: 4527fc2a8a7d3943e8de7c1b9ced1208c9e71c0beb2895e07284be85c9169848
+    hash: 08d4f53aa6ffb88ca14f2e71621b434a116ff4dae0171e80df230ac3283e5c60
     path: patches/@chenglou__pretext@0.0.8.patch
 
 importers:
@@ -178,7 +178,7 @@ importers:
     dependencies:
       '@chenglou/pretext':
         specifier: 0.0.8
-        version: 0.0.8(patch_hash=4527fc2a8a7d3943e8de7c1b9ced1208c9e71c0beb2895e07284be85c9169848)
+        version: 0.0.8(patch_hash=08d4f53aa6ffb88ca14f2e71621b434a116ff4dae0171e80df230ac3283e5c60)
       '@docen/core':
         specifier: workspace:*
         version: link:../core
@@ -3030,7 +3030,7 @@ snapshots:
 
   '@blazediff/core@1.9.1': {}
 
-  '@chenglou/pretext@0.0.8(patch_hash=4527fc2a8a7d3943e8de7c1b9ced1208c9e71c0beb2895e07284be85c9169848)': {}
+  '@chenglou/pretext@0.0.8(patch_hash=08d4f53aa6ffb88ca14f2e71621b434a116ff4dae0171e80df230ac3283e5c60)': {}
 
   '@emnapi/core@1.10.0':
     dependencies:

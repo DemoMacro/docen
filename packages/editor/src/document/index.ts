@@ -290,6 +290,19 @@ const documentStyles = css`
   .docen-pages .docen-page p:has([data-float-anchor="paragraph"]) {
     position: relative;
   }
+  /* CJK punctuation compression (edit == render with the Pretext measure patch).
+     A fullwidth closing mark sits ink in the lower-left of the em box — remove
+     the trailing half-bearing via margin-inline-end so the next glyph pulls
+     left. An opening mark sits ink on the right — remove the leading
+     half-bearing via margin-inline-start. The -0.5em matches Pretext's
+     fontSize/2 subtraction (punctTrimCorrection), so the rendered line width
+     equals the measured width and pagination stays in sync. */
+  .docen-pages .docen-punct-close {
+    margin-inline-end: -0.5em;
+  }
+  .docen-pages .docen-punct-open {
+    margin-inline-start: -0.5em;
+  }
   /* A paragraph with a leader tab-stop (class docx-tab-leader, set by
        Paragraph.renderHTML from attrs.tabStops) renders a dotted leader between
        the title and page number — MS Word's TOC "....." connector. The tab atom
