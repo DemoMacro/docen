@@ -8,6 +8,7 @@ import type { Node as PmNode } from "@tiptap/pm/model";
 import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
 
 import {
+  type CellMargins,
   measureBlockHeight,
   measureParagraphLines,
   measureRowHeight,
@@ -251,10 +252,14 @@ function measureFlatItems(editor: Editor): FlatItem[] {
     if (child.type.name === "table") {
       const tableW = tableWidthOf(child, pageContentWidth);
       const colWidths = tableColumnWidths(child, tableW);
+      // Table-level cell insets (w:tblCellMar): threaded into the measure ctx so
+      // a cell lacking its own tcMar inherits the table default (mirrors the
+      // renderer). See effectiveCellMargins in measure.ts.
+      const tableCellMargins = (child.attrs as { margins?: CellMargins | null }).margins ?? null;
       let pendingClone = 0;
       let tableH = 0;
       child.forEach((row) => {
-        const rh = measureRowHeight(row, colWidths, { linePitchPx, styles });
+        const rh = measureRowHeight(row, colWidths, { linePitchPx, styles, tableCellMargins });
         if (row.attrs.splitClone === true) {
           pendingClone += rh;
           return;

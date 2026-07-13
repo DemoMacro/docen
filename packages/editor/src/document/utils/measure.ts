@@ -1109,6 +1109,11 @@ export interface MeasureContext {
   /** This block's top Y within the page content box — used with floatZones to
    *  derive each line's Y for the per-line width reduction. */
   startY?: number;
+  /** Table-level cell insets (table.attrs.margins, the w:tblCellMar default).
+   *  Passed to measureRowHeight so a cell lacking its own tcMar inherits the
+   *  table default — the same effective source the renderer reads. Without it a
+   *  reflow-split clone with transiently-missing margins under-measures. */
+  tableCellMargins?: CellMargins | null;
 }
 
 /** Measure any top-level block height in px at `width`. Textblocks use Pretext
@@ -1143,7 +1148,14 @@ export function tableWidthOf(table: PmNode, pageContentWidth: number): number {
   if (!w) return pageContentWidth;
   const num = typeof w.size === "string" ? parseFloat(w.size) : w.size;
   if (w.type === "pct") {
-    const pct = typeof w.size === "string" && w.size.includes("%") ? parseFloat(w.size) : num / 50;
+    // office-open normalizes OOXML fiftieths (0-5000) to a percentage number
+    // (0-100) on parse, so a numeric size IS the percentage — dividing by 50
+    // here (the pre-normalization assumption) collapses a 99.96% table to ~2%
+    // width, shrinking every column and inflating measured row heights, which
+    // then forces whole tables to the next page despite ample room. A string
+    // like "100%" is already literal. Mirrors the pct handling in
+    // @docen/docx table renderHTML / DocenTableView.
+    const pct = typeof w.size === "string" && w.size.includes("%") ? parseFloat(w.size) : num;
     return (pageContentWidth * pct) / 100;
   }
   if (w.type === "auto") return pageContentWidth;
@@ -1213,17 +1225,27 @@ export function measureRowHeight(
     const colspan = (cell.attrs as { colspan?: number }).colspan ?? 1;
     const cellWidth = columnWidths.slice(colCursor, colCursor + colspan).reduce((a, b) => a + b, 0);
     colCursor += colspan;
-    // Cell content width minus horizontal insets (w:tcMar/tblCellMar) so wrapped
-    // line counts match the rendered cell — padding shrinks the text box, and
-    // without this the paginator over-estimates a cell's capacity (too few
-    // lines) and the row under-measures.
-    const hm = (
-      cell.attrs as {
-        margins?: { left?: TableWidthProperties; right?: TableWidthProperties } | null;
-      }
-    ).margins;
-    const hMarginPx = hm ? (marginSizeTw(hm.left) + marginSizeTw(hm.right)) * TWIP_TO_PX : 0;
-    const innerW = Math.max(0, cellWidth - hMarginPx);
+    // Effective cell insets: a cell's own tcMar wins, else inherit the table's
+    // tblCellMar (table.attrs.margins, threaded via ctx) — mirroring the
+    // renderer, which inherits tblCellMar (resolveTable pushes it onto cells at
+    // parse). A cell cloned during a reflow split can transiently lack its own
+    // margins; without this fallback measure reads zero insets, over-estimates
+    // innerW, and under-counts wrapped lines (a narrow cell can measure ~half
+    // its rendered line count), packing too many rows per page until the table
+    // overflows the page bottom. Per-side: a present side wins, else table's.
+    const cellMargins = effectiveCellMargins(cell, ctx?.tableCellMargins);
+    const hMarginPx =
+      (marginSizeTw(cellMargins.left) + marginSizeTw(cellMargins.right)) * TWIP_TO_PX;
+    // Subtract the cell's left+right borders: under border-collapse the grid
+    // column width is the cell's BORDER box, so the text wraps at cellWidth −
+    // padding − borders. Omitting borders left innerW ~1.3px wider than the
+    // rendered content box — enough, in a narrow CJK column, for Pretext to
+    // fit a second char on boundary lines and under-count by several lines/row,
+    // cumulating into page-bottom overflow. Mirrors the DOM content box exactly.
+    const b = (cell.attrs as { borders?: { left?: BorderEdge; right?: BorderEdge } | null })
+      .borders;
+    const hBorderPx = borderEdgePx(b?.left) + borderEdgePx(b?.right);
+    const innerW = Math.max(0, cellWidth - hMarginPx - hBorderPx);
     let contentH = 0;
     let prevAfter = 0;
     let firstBlock = true;
@@ -1246,7 +1268,7 @@ export function measureRowHeight(
     // Add the renderer's vertical cell overhead (padding + border) so the
     // measured row matches the rendered row — without it rows under-measure
     // and the table's last rows overflow the page bottom (clipped).
-    contentH += cellVerticalOverhead(cell);
+    contentH += cellVerticalOverhead(cell, cellMargins);
     maxHeight = Math.max(maxHeight, contentH);
   });
   const h = (row.attrs as { height?: { value?: number; rule?: string } | null }).height;
@@ -1273,40 +1295,77 @@ export function measureRowHeight(
  *  TableWidthProperties { size, type }), or 0 when absent. Shared by
  *  cellVerticalOverhead (top/bottom → row height) and measureRowHeight
  *  (left/right → wrapping-width inset). */
+/** Per-side cell insets (w:tcMar), each a TableWidthProperties { size (twips),
+ *  type }. Same shape on a cell (cell.attrs.margins) and a table
+ *  (table.attrs.margins — the w:tblCellMar default cells inherit). */
+export type CellMargins = {
+  top?: TableWidthProperties | null;
+  bottom?: TableWidthProperties | null;
+  left?: TableWidthProperties | null;
+  right?: TableWidthProperties | null;
+};
+
+/** Effective cell insets: a cell's own tcMar wins per side, else the table's
+ *  tblCellMar (table.attrs.margins) — mirroring resolveTable's parse-time push
+ *  and renderTableCellStyles' inheritance. A cell cloned during a reflow split
+ *  can transiently lack margins; resolving here keeps measure == render for the
+ *  cell's inner width even then. Returns a shape (sides may be absent —
+ *  marginSizeTw reads .size as 0). */
+function effectiveCellMargins(cell: PmNode, tableMargins?: CellMargins | null): CellMargins {
+  const c = (cell.attrs as { margins?: CellMargins | null }).margins ?? null;
+  if (!tableMargins) return c ?? {};
+  if (!c) return tableMargins;
+  return {
+    top: c.top ?? tableMargins.top ?? null,
+    bottom: c.bottom ?? tableMargins.bottom ?? null,
+    left: c.left ?? tableMargins.left ?? null,
+    right: c.right ?? tableMargins.right ?? null,
+  };
+}
+
 function marginSizeTw(s?: TableWidthProperties | null): number {
   return s && typeof s.size === "number" ? s.size : 0;
 }
 
-function cellVerticalOverhead(cell: PmNode): number {
+function cellVerticalOverhead(cell: PmNode, margins?: CellMargins | null): number {
   // Cell insets (w:tcMar, or the table's tblCellMar pushed by resolveTable):
   // each side is TableWidthProperties { size (twips), type } — read .size, not
   // the side object (which coerces to NaN). Only top/bottom grow the row height.
-  const m = (
-    cell.attrs as { margins?: { top?: TableWidthProperties; bottom?: TableWidthProperties } | null }
-  ).margins;
-  const padPx = m ? (marginSizeTw(m.top) + marginSizeTw(m.bottom)) * TWIP_TO_PX : 0;
+  // `margins` is the already-resolved effective set (cell ?? table) from the
+  // caller; falling back to cell.attrs.margins keeps other call sites working.
+  const m = margins ?? (cell.attrs as { margins?: CellMargins | null }).margins ?? null;
+  const padPx = (marginSizeTw(m?.top) + marginSizeTw(m?.bottom)) * TWIP_TO_PX;
   const b = (
     cell.attrs as {
       borders?: {
-        top?: { style?: string; size?: number } | null;
-        bottom?: { style?: string; size?: number } | null;
+        top?: BorderEdge;
+        bottom?: BorderEdge;
+        left?: BorderEdge;
+        right?: BorderEdge;
       } | null;
     }
   ).borders;
-  const borderSidePx = (s?: { style?: string; size?: number } | null): number =>
-    s && s.style && s.style !== "nil" && s.style !== "none" && s.size != null
-      ? (s.size / 8) * PT_TO_PX
-      : 0;
-  const gridDefault = 0.75 * PT_TO_PX;
   // border-collapse:collapse merges adjacent rows' top/bottom borders into one
   // shared line (thicker wins) — only the MAX adds to the row height. Summing
   // both double-counted a 1px border as 2px, over-measuring rows ~1px and
   // pushing CJK tables onto extra pages vs Word.
-  const borderPx = b
-    ? Math.max(
-        b.top ? borderSidePx(b.top) : gridDefault,
-        b.bottom ? borderSidePx(b.bottom) : gridDefault,
-      )
-    : gridDefault;
+  const borderPx = Math.max(borderEdgePx(b?.top), borderEdgePx(b?.bottom));
   return padPx + borderPx;
+}
+
+/** A cell border edge: { style, size (eighths of a point) } — OOXML's w:sz. */
+type BorderEdge = { style?: string; size?: number } | null | undefined;
+
+// The "Table Grid" fallback the renderer stamps on cells whose OOXML left a
+// side open (`.docen-pages table td { border: 1px solid }`): 0.75pt = 1px.
+const TABLE_GRID_BORDER_PX = 0.75 * PT_TO_PX;
+
+/** One border edge's rendered width (px). An explicit real border (size in
+ *  eighths-of-pt, style not nil/none) wins; an absent/nil side falls back to
+ *  the Table-Grid default the renderer applies. Mirrors renderBorderCSS so
+ *  measure == render for cell content boxes. */
+function borderEdgePx(s: BorderEdge): number {
+  if (s && s.style && s.style !== "nil" && s.style !== "none" && s.size != null)
+    return (s.size / 8) * PT_TO_PX;
+  return TABLE_GRID_BORDER_PX;
 }
