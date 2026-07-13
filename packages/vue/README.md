@@ -84,17 +84,62 @@ Mirror the `<docen-document>` attributes. Pass `undefined` to leave an attribute
 
 ## Events
 
-Re-emitted from the web component's `docen:*` events:
+Re-emitted from the web component's `docen:*` events. Host events forward the
+**native `CustomEvent`** — read the payload from `e.detail`:
 
-- `update:modelValue` — editor content changed (drives v-model)
-- `@change`, `@save`, `@save-as`, `@open`, `@new`, `@print`
-- `@zoom-change`, `@taskpane-visibility-change`, `@marks-change` — UI state events; `detail` mirrors the web component's `docen:*` events (`{ zoom }`, `{ id, visibilityMode }`, `{ showMarks }`)
-- `@lang-change` — locale changed inside the host (status-bar cycle / Options OK); `detail: { lang }`
-- `@theme-change` — theme changed inside the host (Options OK); `detail: { theme }`
+- `update:modelValue` — editor content changed (drives v-model; Tiptap JSON)
+- `@change` — `e.detail: { dirty: true }`; fires on every content-changing transaction (selection-only tx skipped). Lightweight notification only — for the actual content use `v-model` (`update:modelValue` is debounced); don't call `getJSON()` in this handler on large docs (it's O(n)).
+- `@zoom-change` (`{ zoom }`), `@taskpane-visibility-change` (`{ id, visibilityMode }`), `@marks-change` (`{ showMarks }`)
+- `@lang-change` (`{ lang }`), `@theme-change` (`{ theme }`)
+
+### Taking over save / open / print
+
+`@save`, `@save-as`, `@open`, `@new`, `@print` are **cancelable**: call
+`e.preventDefault()` to suppress the host's built-in action (save → native DOCX
+save-as dialog, open → file picker, print → browser print) and take over:
+
+```vue
+<script setup lang="ts">
+import type { DocenSaveEvent } from "@docen/vue";
+
+async function onSave(e: DocenSaveEvent) {
+  e.preventDefault(); // stop the host's built-in save-as dialog
+  // ...persist to your backend instead
+}
+</script>
+
+<template>
+  <DocenDocument @save="onSave" />
+</template>
+```
 
 ## Template ref
 
-The ref exposes `{ editor, getElement(), getDisplayLanguage(), getJSON(), setJSON(json) }`, where `editor` is the Tiptap `Editor` (undefined until the editor is live). `getJSON()/setJSON()` mirror the host's page-unwrapping loaders; `getDisplayLanguage()` returns the current UI locale (`Office.context.displayLanguage` equivalent).
+The ref exposes `{ editor, getElement(), getDisplayLanguage(), getJSON(), setJSON(json), addAddin(addin) }`, where `editor` is the Tiptap `Editor` (undefined until the editor is live). `getJSON()/setJSON()` mirror the host's page-unwrapping loaders; `getDisplayLanguage()` returns the current UI locale (`Office.context.displayLanguage` equivalent).
+
+`addAddin(addin)` registers an Office.js-style add-in at runtime (commands / task-pane / ribbon / mini-toolbar). Use it for add-ins carrying functions — the `addins` prop only accepts JSON-serializable data (attribute values are strings), so command handlers and pane render functions must register through the ref. Wait for the host to be live (the exposed `editor` is non-undefined) before calling:
+
+```vue
+<script setup lang="ts">
+import { ref, watch } from "vue";
+import { DocenDocument, type DocenAddin } from "@docen/vue";
+
+const docRef = ref();
+const myAddin: DocenAddin = {
+  id: "my-addin",
+  commands: { "my-action": () => alert("run") },
+};
+// addAddin needs the host live — `editor` is undefined until docen:ready.
+watch(
+  () => docRef.value?.editor,
+  (ed) => ed && docRef.value?.addAddin(myAddin),
+);
+</script>
+
+<template>
+  <DocenDocument ref="docRef" />
+</template>
+```
 
 ## Internationalization
 
@@ -163,6 +208,18 @@ iterated via `builtinThemes.keys()`.
 ## Why a separate package?
 
 The adapter imports `@docen/editor`, which registers the `<docen-document>` custom element as a side effect. Isolating that in `@docen/vue` (peer-depending on `vue`) keeps non-Vue consumers of `@docen/editor` unaffected, and keeps Vue out of the framework-neutral core.
+
+### SSR (Nuxt)
+
+That side effect runs `customElements.define(...)` at module load. Node has no `customElements` global, so a server bundle that evaluates `import "@docen/vue"` throws a `ReferenceError`. `<ClientOnly>` only guards **rendering**, not module evaluation — use one of:
+
+- render the page client-only: `definePageMeta({ ssr: false })`, or name the component `*.client.vue`;
+- or load the adapter dynamically inside the client tree:
+
+```ts
+import { defineAsyncComponent } from "vue";
+const DocenDocument = defineAsyncComponent(() => import("@docen/vue").then((m) => m.DocenDocument));
+```
 
 ## License
 

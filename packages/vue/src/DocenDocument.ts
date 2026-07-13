@@ -1,5 +1,6 @@
 import type { JSONContent, SectionPropertiesOptions, StylesOptions } from "@docen/docx";
 import type { Editor } from "@docen/docx/core";
+import type { DocenAddin, VisibilityMode } from "@docen/editor";
 import type { PropType } from "vue";
 import {
   computed,
@@ -32,7 +33,25 @@ type DocenEl = HTMLElement & {
   getZoom?: () => number;
   setShowMarks?: (on: boolean) => void;
   getShowMarks?: () => boolean;
+  // Runtime add-in registration (commands/task-pane/ribbon/mini-toolbar). Add-ins
+  // carrying functions can't cross the attribute boundary — register them here,
+  // not through the `addins` prop (which only accepts JSON-serializable data).
+  addAddin?: (addin: DocenAddin) => void;
 };
+
+/**
+ * Host action events the adapter forwards as the **native `CustomEvent`** (not
+ * just `e.detail`) so a consumer can call `preventDefault()` to take over the
+ * host's built-in action. Without `preventDefault` the host proceeds with its
+ * default — save/save-as → native file dialog, open → file picker, print →
+ * browser print. The payload stays on `e.detail` (undefined for save/open/new/
+ * print; `{ format }` for save-as).
+ */
+export type DocenSaveEvent = CustomEvent;
+export type DocenSaveAsEvent = CustomEvent<{ format?: "docx" | "markdown" | "html" }>;
+export type DocenOpenEvent = CustomEvent;
+export type DocenNewEvent = CustomEvent;
+export type DocenPrintEvent = CustomEvent;
 
 /**
  * Vue 3 wrapper around the <docen-document> web component:
@@ -98,20 +117,25 @@ export const DocenDocument = defineComponent({
      *  synchronously on each change (suitable for tests). @default 300 */
     debounce: { type: Number, default: 300 },
   },
-  emits: [
-    "update:modelValue",
-    "change",
-    "save",
-    "save-as",
-    "open",
-    "new",
-    "print",
-    "zoom-change",
-    "taskpane-visibility-change",
-    "marks-change",
-    "lang-change",
-    "theme-change",
-  ],
+  emits: {
+    "update:modelValue": (_json: JSONContent) => true,
+    // Host docen:* events forward the native CustomEvent — read `e.detail` for
+    // the payload; call `e.preventDefault()` on the cancelable actions (save,
+    // save-as, open, new, print) to suppress the host's built-in dialog.
+    change: (_e: CustomEvent<{ dirty: true }>) => true,
+    save: (_e: DocenSaveEvent) => true,
+    "save-as": (_e: DocenSaveAsEvent) => true,
+    open: (_e: DocenOpenEvent) => true,
+    new: (_e: DocenNewEvent) => true,
+    print: (_e: DocenPrintEvent) => true,
+    "zoom-change": (_e: CustomEvent<{ zoom: number }>) => true,
+    "taskpane-visibility-change": (
+      _e: CustomEvent<{ id: TaskPaneId; visibilityMode: VisibilityMode }>,
+    ) => true,
+    "marks-change": (_e: CustomEvent<{ showMarks: boolean }>) => true,
+    "lang-change": (_e: CustomEvent<{ lang: string }>) => true,
+    "theme-change": (_e: CustomEvent<{ theme: string }>) => true,
+  },
   setup(props, { emit, expose, slots }) {
     const el = ref<DocenEl | null>(null);
     /** The underlying Tiptap editor (undefined until docen:ready). Exposed on
@@ -230,7 +254,7 @@ export const DocenDocument = defineComponent({
     }
 
     function onChange(e: Event): void {
-      emit("change", (e as CustomEvent).detail);
+      emit("change", e as CustomEvent<{ dirty: true }>);
       if (suppressEmit) return; // our own injection — don't echo back to parent
       // Debounce getJSON: a DOCX import triggers many docen:change events as
       // pagination reflows; one getJSON per quiet window instead of one per
@@ -251,17 +275,26 @@ export const DocenDocument = defineComponent({
 
     onBeforeUnmount(() => clearTimeout(emitTimer));
 
-    const onSave = (e: Event): void => emit("save", (e as CustomEvent).detail);
-    const onSaveAs = (e: Event): void => emit("save-as", (e as CustomEvent).detail);
-    const onOpen = (e: Event): void => emit("open", (e as CustomEvent).detail);
-    const onNew = (e: Event): void => emit("new", (e as CustomEvent).detail);
-    const onPrint = (e: Event): void => emit("print", (e as CustomEvent).detail);
-    const onZoomChange = (e: Event): void => emit("zoom-change", (e as CustomEvent).detail);
+    // Forward the native CustomEvent (not e.detail) so a consumer can call
+    // preventDefault() on the cancelable actions to take over the host default.
+    const onSave = (e: Event): void => emit("save", e as DocenSaveEvent);
+    const onSaveAs = (e: Event): void => emit("save-as", e as DocenSaveAsEvent);
+    const onOpen = (e: Event): void => emit("open", e as DocenOpenEvent);
+    const onNew = (e: Event): void => emit("new", e as DocenNewEvent);
+    const onPrint = (e: Event): void => emit("print", e as DocenPrintEvent);
+    const onZoomChange = (e: Event): void =>
+      emit("zoom-change", e as CustomEvent<{ zoom: number }>);
     const onTaskpaneVisibilityChange = (e: Event): void =>
-      emit("taskpane-visibility-change", (e as CustomEvent).detail);
-    const onMarksChange = (e: Event): void => emit("marks-change", (e as CustomEvent).detail);
-    const onLangChange = (e: Event): void => emit("lang-change", (e as CustomEvent).detail);
-    const onThemeChange = (e: Event): void => emit("theme-change", (e as CustomEvent).detail);
+      emit(
+        "taskpane-visibility-change",
+        e as CustomEvent<{ id: TaskPaneId; visibilityMode: VisibilityMode }>,
+      );
+    const onMarksChange = (e: Event): void =>
+      emit("marks-change", e as CustomEvent<{ showMarks: boolean }>);
+    const onLangChange = (e: Event): void =>
+      emit("lang-change", e as CustomEvent<{ lang: string }>);
+    const onThemeChange = (e: Event): void =>
+      emit("theme-change", e as CustomEvent<{ theme: string }>);
 
     expose({
       editor,
@@ -274,6 +307,12 @@ export const DocenDocument = defineComponent({
        *  doc.attrs.styles/core are preserved). */
       setJSON: (json: JSONContent): void => {
         el.value?.setJSON?.(json);
+      },
+      /** Register an add-in (commands/task-pane/ribbon/mini-toolbar). Add-ins
+       *  carrying functions must register here — functions can't survive the
+       *  `addins` attribute serialization. */
+      addAddin: (addin: DocenAddin): void => {
+        el.value?.addAddin?.(addin);
       },
     });
 

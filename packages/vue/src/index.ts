@@ -8,6 +8,16 @@
 // (chain), and its converters are framework-neutral, so import them directly
 // from "@docen/docx" rather than through this adapter.
 export { DocenDocument } from "./DocenDocument";
+// Cancelable host-action event types — consumers type @save/@open/@print
+// handlers with these and call e.preventDefault() to take over the host's
+// built-in save/open/print dialog. See DocenDocument emits.
+export type {
+  DocenSaveEvent,
+  DocenSaveAsEvent,
+  DocenOpenEvent,
+  DocenNewEvent,
+  DocenPrintEvent,
+} from "./DocenDocument";
 
 // Re-export the web-component bootstrap so a Vue app imports everything from one entry.
 export { applyTheme, registerComponents } from "@docen/editor";
@@ -18,3 +28,7 @@ export { applyTheme, registerComponents } from "@docen/editor";
 // and the status-bar language cycle).
 export { availableLanguages, registerLocalization, registerTranslation, t } from "@docen/editor";
 export type { AdditionalLanguage, LanguageOption, LocalizationInfo } from "@docen/editor";
+
+// Add-in type for the template-ref addAddin() method (runtime registration of
+// command/pane/ribbon add-ins that can't cross the `addins` attribute boundary).
+export type { DocenAddin } from "@docen/editor";
