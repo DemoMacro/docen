@@ -135,12 +135,26 @@ export function docxParagraphAttrs() {
  *  only, 7-9) stamps data-heading-level so levels past h6 round-trip via a <h6>
  *  proxy (parseHTML reads it back). */
 export function renderTextBlock(
-  node: { attrs: Record<string, unknown> },
+  node: {
+    attrs: Record<string, unknown>;
+    forEach?: (cb: (child: { isText?: boolean; type?: { name: string } }) => void) => void;
+  },
   HTMLAttributes: Record<string, unknown>,
   tag: string,
   level?: number,
 ): DOMOutputSpec {
-  const styles = renderParagraphStyles(node.attrs);
+  // Empty textblock (no text/hardBreak/image children — only the ¶ glyph, per
+  // measure.ts isEmptyTextblock): the ¶ glyph's font-size (attrs.run.size) sets
+  // the line height. A text paragraph's line height is driven by spacing.line /
+  // grid / the runs' natural metric — the ¶ glyph size is an invisible mark and
+  // must not compress a line that holds real text (it broke edit == render:
+  // measure used grid/natural, the DOM used the ¶ size).
+  let hasContent = false;
+  node.forEach?.((child) => {
+    if (child.isText || child.type?.name === "hardBreak" || child.type?.name === "image")
+      hasContent = true;
+  });
+  const styles = renderParagraphStyles(node.attrs, !hasContent);
   const attrs: Record<string, unknown> = { ...HTMLAttributes };
   const styleId = node.attrs.styleId as string | null;
   // class="docx-style-{id}" applies the named style's CSS. A pStyle-less
@@ -826,7 +840,7 @@ interface ParagraphStyleShape {
  * Shared by Paragraph and Heading extensions for node-level renderHTML.
  * Attrs store office-open native values; mappers here convert to CSS.
  */
-export function renderParagraphStyles(attrs: Record<string, unknown>): string[] {
+export function renderParagraphStyles(attrs: Record<string, unknown>, isEmpty = false): string[] {
   const a = attrs as ParagraphStyleShape;
   const styles: string[] = [];
 
@@ -849,15 +863,22 @@ export function renderParagraphStyles(attrs: Record<string, unknown>): string[] 
     }
   }
 
-  // Paragraph-mark (¶) glyph font-size → line-height. Per OOXML (ECMA-376) the
-  // ¶ glyph is a physical character whose font-size sets the paragraph's line
-  // height — this is why an empty paragraph still occupies a line in Word (its
-  // sole content is the ¶ glyph). Only `size` is rendered: the ¶ glyph is
-  // invisible, so font/color/bold have no visual effect and must NOT become the
-  // paragraph's font-size (that would leak onto every run).
-  // Placed BEFORE spacing so an explicit spacing/line rule overrides it (Word:
-  // an explicit line rule wins over the ¶-glyph single-line height).
-  const markLineHeight = a.run?.size != null ? sizeToCss(a.run.size) : null;
+  // Paragraph-mark (¶) glyph font-size → line-height, but ONLY for an empty
+  // paragraph (¶ glyph only — no text/hardBreak/image children). Per OOXML
+  // (ECMA-376) the ¶ glyph is a physical character whose font-size sets an
+  // empty paragraph's single line height (its sole content is the ¶ glyph);
+  // only `size` is rendered (the glyph is invisible, so font/color/bold have no
+  // visual effect and must NOT become the paragraph's font-size). A paragraph
+  // that carries text renders its line height from spacing.line / the document
+  // grid / the text runs' natural metric — applying the ¶ size there compressed
+  // the line below the text font-size (an invisible mark must not govern a line
+  // holding real text). Mirrors measure.ts emptyLineHeight, likewise called
+  // only for isEmptyTextblock paragraphs. `isEmpty` comes from renderTextBlock
+  // (the only caller that knows the node's content); stylesheets (stylesToCss)
+  // pass no content → default false, so a named style's ¶ size never leaks into
+  // every paragraph that uses it. Placed BEFORE spacing so an explicit
+  // spacing/line rule overrides it.
+  const markLineHeight = isEmpty && a.run?.size != null ? sizeToCss(a.run.size) : null;
   if (markLineHeight) styles.push(`line-height:${markLineHeight}`);
 
   if (a.spacing) {
