@@ -327,10 +327,10 @@ class DocenTableView extends TableView {
     if (w && typeof w === "object") {
       const numSize = typeof w.size === "string" ? parseFloat(w.size) : w.size;
       if (w.type === "pct") {
-        // office-open keeps a literal "%" verbatim ("100%" = 100%); a bare
-        // number is fiftieths-of-a-percent (5000 = 100%) per OOXML.
+        // office-open normalizes pct to a percentage number (0-100) via
+        // widthFiftiethsToPct on parse; a literal "%" string is kept verbatim.
         if (typeof w.size === "string" && w.size.includes("%")) width = w.size;
-        else if (!Number.isNaN(numSize)) width = `${numSize / 50}%`;
+        else if (!Number.isNaN(numSize)) width = `${numSize}%`;
       } else if (w.type === "auto") {
         width = isFloat ? "auto" : "100%";
       } else if (numSize != null) {
@@ -487,8 +487,10 @@ export const Table = BaseTable.extend({
           // it is NOT fiftieths-of-a-percent, so do not divide by 50.
           styles.push(`width:${w.size}`);
         } else if (!Number.isNaN(numSize)) {
-          // A bare number is fiftieths-of-a-percent (5000 = 100%) per OOXML.
-          styles.push(`width:${numSize / 50}%`);
+          // office-open normalizes pct to a percentage number (0-100) via
+          // widthFiftiethsToPct (fiftieths / 50) on parse — 99.96 ≈ 100%. Use
+          // it directly; dividing by 50 again collapses the table to a sliver.
+          styles.push(`width:${numSize}%`);
         }
       } else if (w.type === "auto") {
         styles.push(floatStyles.length ? "width:auto" : "width:100%");
