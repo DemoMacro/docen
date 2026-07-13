@@ -359,6 +359,20 @@ const documentStyles = css`
   .docen-pages .docen-page span[data-image="crop"] > img {
     max-width: none;
   }
+  /* Image-dominant paragraph: drop the line-height strut. An inline-block image
+     inherits the paragraph's line-height and the browser paints a ~2× leading
+     band above+below the image that Word does not — measureParagraphHeight
+     counts each image row as max(image, strut), so the DOM must match or the
+     rendered image overflows the page space the paginator reserved. The
+     ImageView NodeView marks its wrapper span data-img-dominant when the image
+     is taller than a text line; small inline icons keep the strut (measure =
+     strut = DOM, no drift). !important overrides the paragraph's inline
+     line-height (spacing.line → line-height calc) — safe because a marked row
+     is image-only (no text line for spacing.line to size), and measure's strut
+     never dominates a taller image. */
+  .docen-pages p:has([data-img-dominant]) {
+    line-height: 0 !important;
+  }
   /* EMF/WMF (Office GDI vector) images can't be decoded by the browser, so
        Image.renderHTML emits a div[data-image=vector] placeholder carrying the
        real art in data-vector-src. Paint it as a dashed, hatched, labeled box

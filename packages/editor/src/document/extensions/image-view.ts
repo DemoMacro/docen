@@ -142,6 +142,32 @@ export const ImageView = Image.extend({
       // change between drags takes effect without rebinding listeners.
       setupFloatingDrag(dom, editorEl, () => (current.attrs as ImageAttrs).floating);
 
+      // Mark the wrapper span when the image dominates its row (taller than a
+      // text line). An inline-block image inherits the paragraph line-height,
+      // which the browser paints as a ~2× leading band above+below the image —
+      // Word has no such band, and measureParagraphHeight counts each image row
+      // as max(image, strut), so the DOM must match or the rendered image
+      // overflows the page space the paginator reserved. CSS on .docen-pages
+      // drops line-height:0 on a paragraph whose image is dominant; small inline
+      // icons (shorter than a text line) keep the strut (measure = strut = DOM).
+      // Deferred a frame so parentElement resolves after ProseMirror inserts the
+      // NodeView — measure/reflow read the model, not this attribute, so the
+      // timing never affects pagination.
+      const syncImageDominant = (): void => {
+        const para = dom.parentElement;
+        if (!para) return;
+        const strut = parseFloat(getComputedStyle(para).lineHeight);
+        // strut reads 0 once the paragraph is already marked dominant (the CSS
+        // line-height:0 rule applies). Re-checking imgH > strut against that 0
+        // would strip the mark on every re-sync (focus/selection/reflow) — a
+        // circular dependency that re-introduces the strut and sinks the image.
+        // Early-return preserves a mark set under the paragraph's natural strut.
+        if (strut <= 0) return;
+        const imgH = (current.attrs.height as number) ?? 0;
+        dom.toggleAttribute("data-img-dominant", imgH > strut);
+      };
+      requestAnimationFrame(syncImageDominant);
+
       return {
         dom,
         // atom — no editable content inside the image.
@@ -162,6 +188,7 @@ export const ImageView = Image.extend({
           const newAttrs = updated.attrs as Record<string, unknown>;
           editorEl.attrs = JSON.stringify(toImageInput(updated.attrs as ImageAttrs));
           applyFloatingStyles(dom, newAttrs);
+          syncImageDominant();
           return true;
         },
         // Control which events ProseMirror sees vs. LeaferJS handles.
