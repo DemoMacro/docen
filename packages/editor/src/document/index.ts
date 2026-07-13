@@ -2569,7 +2569,14 @@ class DocenDocument extends AddinHost<Editor> {
     // nodesBetween scan (O(n)).
     const last = this.#lastMarkupTarget(state.doc);
     if (last) {
-      editor.view.dispatch(state.tr.setNodeMarkup(last.pos, undefined, last.attrs));
+      // addToHistory:false — this re-stamp is an intentional no-op (same node,
+      // same attrs) whose sole purpose is to fire appendTransaction (updateState
+      // bypasses it). Left in history, it plants a no-op undo entry at the stack
+      // bottom (undo returns true but changes nothing); excluding it keeps the
+      // undo stack clean after load.
+      editor.view.dispatch(
+        state.tr.setNodeMarkup(last.pos, undefined, last.attrs).setMeta("addToHistory", false),
+      );
     }
   }
 
