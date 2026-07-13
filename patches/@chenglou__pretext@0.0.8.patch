@@ -1,64 +1,212 @@
-diff --git a/dist/analysis.js b/dist/analysis.js
-index a38a3bb767a59854d1dd74ce12544981d02cdcea..fb312e895f8c174934b8dedaafa5e60d85e4be2b 100644
---- a/dist/analysis.js
-+++ b/dist/analysis.js
-@@ -90,6 +90,26 @@ export function isCJK(s) {
-     }
-     return false;
- }
-+// docen-local: identify fullwidth CJK punctuation for advance compression (match DOM/Word text-spacing)
-+export function isFullWidthCJKPunct(ch) {
-+    if (ch.length !== 1)
-+        return false;
-+    const cp = ch.charCodeAt(0);
-+    if (cp === 0x3000)
-+        return false;
-+    if (cp >= 0x3001 && cp <= 0x303F)
-+        return true;
-+    if (cp >= 0xFF01 && cp <= 0xFF60) {
-+        if (cp >= 0xFF10 && cp <= 0xFF19)
-+            return false;
-+        if (cp >= 0xFF21 && cp <= 0xFF3A)
-+            return false;
-+        if (cp >= 0xFF41 && cp <= 0xFF5A)
-+            return false;
-+        return true;
-+    }
-+    return false;
-+}
- function endsWithLineStartProhibitedText(text) {
-     const last = getLastCodePoint(text);
-     return last !== null && (kinsokuStart.has(last) || leftStickyPunctuation.has(last));
 diff --git a/dist/layout.js b/dist/layout.js
-index 957e2f04ee268f4a93bfc4b4d53f237c864c04a4..cd2c5e58404b1b1b0e56040fb6ab3c0644561564 100644
+index 957e2f04ee268f4a93bfc4b4d53f237c864c04a4..2d4355c3097fc61b7f5450a19e1b14eb1fa7e6bc 100644
 --- a/dist/layout.js
 +++ b/dist/layout.js
-@@ -32,7 +32,7 @@
- //
- // Based on Sebastian Markbage's text-layout research (github.com/chenglou/text-layout).
- import { computeSegmentLevels } from './bidi.js';
--import { analyzeText, canContinueKeepAllTextRun, clearAnalysisCaches, endsWithClosingQuote, isCJK, isNumericRunSegment, kinsokuEnd, kinsokuStart, leftStickyPunctuation, setAnalysisLocale, } from './analysis.js';
-+import { analyzeText, canContinueKeepAllTextRun, clearAnalysisCaches, endsWithClosingQuote, isCJK, isFullWidthCJKPunct, isNumericRunSegment, kinsokuEnd, kinsokuStart, leftStickyPunctuation, setAnalysisLocale, } from './analysis.js';
- import { clearMeasurementCaches, getCorrectedSegmentWidth, getSegmentBreakableFitAdvances, getEngineProfile, getFontMeasurementState, getSegmentMetrics, textMayContainEmoji, } from './measurement.js';
- import { countPreparedLines, measurePreparedLineGeometry, normalizePreparedLineStart, stepPreparedLineGeometryFromChunk, walkPreparedLinesRaw, } from './line-break.js';
- import { buildLineTextFromRange, clearLineTextCaches, getLineTextCache, } from './line-text.js';
-@@ -267,7 +267,18 @@ function measureAnalysis(analysis, font, includeSegments, wordBreak, letterSpaci
+@@ -227,10 +227,10 @@ function addInternalLetterSpacing(width, graphemeCount, letterSpacing) {
+ }
+ function measureAnalysis(analysis, font, includeSegments, wordBreak, letterSpacing) {
+     const engineProfile = getEngineProfile();
+-    const { cache, emojiCorrection } = getFontMeasurementState(font, textMayContainEmoji(analysis.normalized));
+-    const discretionaryHyphenWidth = getCorrectedSegmentWidth('-', getSegmentMetrics('-', cache), emojiCorrection) +
++    const { cache, emojiCorrection, cjkCorrection } = getFontMeasurementState(font, textMayContainEmoji(analysis.normalized), isCJK(analysis.normalized));
++    const discretionaryHyphenWidth = getCorrectedSegmentWidth('-', getSegmentMetrics('-', cache), emojiCorrection, cjkCorrection) +
+         (letterSpacing === 0 ? 0 : letterSpacing * 2);
+-    const spaceWidth = getCorrectedSegmentWidth(' ', getSegmentMetrics(' ', cache), emojiCorrection);
++    const spaceWidth = getCorrectedSegmentWidth(' ', getSegmentMetrics(' ', cache), emojiCorrection, cjkCorrection);
+     const tabStopAdvance = spaceWidth * 8;
+     const hasLetterSpacing = letterSpacing !== 0;
+     if (analysis.len === 0)
+@@ -267,7 +267,7 @@ function measureAnalysis(analysis, font, includeSegments, wordBreak, letterSpaci
          const spacingGraphemeCount = hasLetterSpacing
              ? countRenderedSpacingGraphemes(text, kind)
              : 0;
 -        const width = addInternalLetterSpacing(getCorrectedSegmentWidth(text, textMetrics, emojiCorrection), spacingGraphemeCount, letterSpacing);
-+        let width = addInternalLetterSpacing(getCorrectedSegmentWidth(text, textMetrics, emojiCorrection), spacingGraphemeCount, letterSpacing);
-+        // docen-local: compress fullwidth CJK punctuation to match DOM/Word text-spacing (edit==render)
-+        if (isCJK(text)) {
-+            let _punctReduction = 0;
-+            for (const _ch of text) {
-+                if (isFullWidthCJKPunct(_ch)) {
-+                    _punctReduction += getCorrectedSegmentWidth(_ch, getSegmentMetrics(_ch, cache), emojiCorrection) * 0.5;
-+                }
-+            }
-+            if (_punctReduction > 0)
-+                width -= _punctReduction;
-+        }
++        const width = addInternalLetterSpacing(getCorrectedSegmentWidth(text, textMetrics, emojiCorrection, cjkCorrection), spacingGraphemeCount, letterSpacing);
          const baseLineEndFitAdvance = kind === 'space' || kind === 'preserved-space' || kind === 'zero-width-break'
              ? 0
              : width;
+@@ -288,7 +288,7 @@ function measureAnalysis(analysis, font, includeSegments, wordBreak, letterSpaci
+             else if (engineProfile.preferPrefixWidthsForBreakableRuns) {
+                 fitMode = 'segment-prefixes';
+             }
+-            const fitAdvances = getSegmentBreakableFitAdvances(text, textMetrics, cache, emojiCorrection, fitMode);
++            const fitAdvances = getSegmentBreakableFitAdvances(text, textMetrics, cache, emojiCorrection, cjkCorrection, fitMode);
+             const preferredBreaks = fitAdvances === null || wordBreak === 'keep-all'
+                 ? null
+                 : getBreakablePreferredBreaks(text);
+diff --git a/dist/measurement.js b/dist/measurement.js
+index fb9cb6816a715afa21e9b54feb90f3b5e78dff08..378768da299e7c36e18183e9fd446d58aa9d589d 100644
+--- a/dist/measurement.js
++++ b/dist/measurement.js
+@@ -8,9 +8,16 @@ let cachedEngineProfile = null;
+ // pair-context model and keep the public behavior linear.
+ const MAX_PREFIX_FIT_GRAPHEMES = 96;
+ const emojiPresentationRe = /\p{Emoji_Presentation}/u;
+-const maybeEmojiRe = /[\p{Emoji_Presentation}\p{Extended_Pictographic}\p{Regional_Indicator}\uFE0F\u20E3]/u;
++const maybeEmojiRe = /[\p{Emoji_Presentation}\p{Extended_Pictographic}\p{Regional_Indicator}\u{FE0F}\u{20E3}]/u;
+ let sharedGraphemeSegmenter = null;
+ const emojiCorrectionCache = new Map();
++// docen-local: canvas measureText rounds fullwidth CJK advances UP to the next
++// integer pixel, so at a fractional font-size (e.g. 11pt = 14.67px) every CJK
++// glyph over-measures by ceil(fs) - fs (~0.33px/char at 11pt), inflating wrapped
++// line counts vs the DOM render and breaking edit==render. Auto-detected per
++// font via one hidden-span DOM read, mirroring the emoji correction above.
++// Integer font sizes have no rounding (delta 0), so the gate skips them.
++const cjkCorrectionCache = new Map();
+ export function getMeasureContext() {
+     if (measureContext !== null)
+         return measureContext;
+@@ -90,7 +97,7 @@ function getSharedGraphemeSegmenter() {
+     return sharedGraphemeSegmenter;
+ }
+ function isEmojiGrapheme(g) {
+-    return emojiPresentationRe.test(g) || g.includes('\uFE0F');
++    return emojiPresentationRe.test(g) || g.includes('\u{FE0F}');
+ }
+ export function textMayContainEmoji(text) {
+     return maybeEmojiRe.test(text);
+@@ -122,6 +129,40 @@ function getEmojiCorrection(font, fontSize) {
+     emojiCorrectionCache.set(font, correction);
+     return correction;
+ }
++// docen-local: per-font CJK canvas->DOM advance correction. Canvas measureText
++// snaps a fullwidth CJK advance up to an integer px; the DOM renders it at the
++// fractional font-size. At 11pt (14.67px) that is ~0.33px/glyph — enough, over a
++// paragraph, to flip wrapped line counts vs the rendered cell/box. We probe one
++// CJK glyph ('消') via canvas and a hidden DOM span and cache the delta per font,
++// then subtract count * delta in getCorrectedSegmentWidth. Threshold 0.01 — the
++// delta is sub-pixel, far below emoji's multi-px inflation, and 0 at integer
++// font-sizes (no rounding), which the canvasW > fontSize gate already skips.
++function getCjkCorrection(font, fontSize) {
++    let correction = cjkCorrectionCache.get(font);
++    if (correction !== undefined)
++        return correction;
++    const ctx = getMeasureContext();
++    ctx.font = font;
++    const canvasW = ctx.measureText('消').width;
++    correction = 0;
++    if (canvasW > fontSize + 0.01 &&
++        typeof document !== 'undefined' &&
++        document.body !== null) {
++        const span = document.createElement('span');
++        span.style.font = font;
++        span.style.display = 'inline-block';
++        span.style.visibility = 'hidden';
++        span.style.position = 'absolute';
++        span.textContent = '消';
++        document.body.appendChild(span);
++        const domW = span.getBoundingClientRect().width;
++        document.body.removeChild(span);
++        if (canvasW - domW > 0.01)
++            correction = canvasW - domW;
++    }
++    cjkCorrectionCache.set(font, correction);
++    return correction;
++}
+ function countEmojiGraphemes(text) {
+     let count = 0;
+     const graphemeSegmenter = getSharedGraphemeSegmenter();
+@@ -131,18 +172,41 @@ function countEmojiGraphemes(text) {
+     }
+     return count;
+ }
++// docen-local: count CJK graphemes for the per-glyph advance correction above.
++function countCjkGraphemes(text) {
++    let count = 0;
++    const graphemeSegmenter = getSharedGraphemeSegmenter();
++    for (const g of graphemeSegmenter.segment(text)) {
++        if (isCJK(g.segment))
++            count++;
++    }
++    return count;
++}
+ function getEmojiCount(seg, metrics) {
+     if (metrics.emojiCount === undefined) {
+         metrics.emojiCount = countEmojiGraphemes(seg);
+     }
+     return metrics.emojiCount;
+ }
+-export function getCorrectedSegmentWidth(seg, metrics, emojiCorrection) {
+-    if (emojiCorrection === 0)
+-        return metrics.width;
+-    return metrics.width - getEmojiCount(seg, metrics) * emojiCorrection;
++// docen-local: lazily cache the CJK grapheme count on the segment metrics; pure
++// Latin segments (containsCJK false) short-circuit to 0 with no segmentation.
++function getCjkCount(seg, metrics) {
++    if (!metrics.containsCJK)
++        return 0;
++    if (metrics.cjkCount === undefined)
++        metrics.cjkCount = countCjkGraphemes(seg);
++    return metrics.cjkCount;
++}
++export function getCorrectedSegmentWidth(seg, metrics, emojiCorrection, cjkCorrection = 0) {
++    let width = metrics.width;
++    if (emojiCorrection !== 0)
++        width -= getEmojiCount(seg, metrics) * emojiCorrection;
++    // docen-local: subtract the canvas->DOM rounding delta for every CJK glyph.
++    if (cjkCorrection !== 0)
++        width -= getCjkCount(seg, metrics) * cjkCorrection;
++    return width;
+ }
+-export function getSegmentBreakableFitAdvances(seg, metrics, cache, emojiCorrection, mode) {
++export function getSegmentBreakableFitAdvances(seg, metrics, cache, emojiCorrection, cjkCorrection, mode) {
+     if (metrics.breakableFitAdvances !== undefined && metrics.breakableFitMode === mode) {
+         return metrics.breakableFitAdvances;
+     }
+@@ -160,7 +224,7 @@ export function getSegmentBreakableFitAdvances(seg, metrics, cache, emojiCorrect
+         const advances = [];
+         for (const grapheme of graphemes) {
+             const graphemeMetrics = getSegmentMetrics(grapheme, cache);
+-            advances.push(getCorrectedSegmentWidth(grapheme, graphemeMetrics, emojiCorrection));
++            advances.push(getCorrectedSegmentWidth(grapheme, graphemeMetrics, emojiCorrection, cjkCorrection));
+         }
+         metrics.breakableFitAdvances = advances;
+         return metrics.breakableFitAdvances;
+@@ -171,14 +235,14 @@ export function getSegmentBreakableFitAdvances(seg, metrics, cache, emojiCorrect
+         let previousWidth = 0;
+         for (const grapheme of graphemes) {
+             const graphemeMetrics = getSegmentMetrics(grapheme, cache);
+-            const currentWidth = getCorrectedSegmentWidth(grapheme, graphemeMetrics, emojiCorrection);
++            const currentWidth = getCorrectedSegmentWidth(grapheme, graphemeMetrics, emojiCorrection, cjkCorrection);
+             if (previousGrapheme === null) {
+                 advances.push(currentWidth);
+             }
+             else {
+                 const pair = previousGrapheme + grapheme;
+                 const pairMetrics = getSegmentMetrics(pair, cache);
+-                advances.push(getCorrectedSegmentWidth(pair, pairMetrics, emojiCorrection) - previousWidth);
++                advances.push(getCorrectedSegmentWidth(pair, pairMetrics, emojiCorrection, cjkCorrection) - previousWidth);
+             }
+             previousGrapheme = grapheme;
+             previousWidth = currentWidth;
+@@ -192,23 +256,27 @@ export function getSegmentBreakableFitAdvances(seg, metrics, cache, emojiCorrect
+     for (const grapheme of graphemes) {
+         prefix += grapheme;
+         const prefixMetrics = getSegmentMetrics(prefix, cache);
+-        const nextPrefixWidth = getCorrectedSegmentWidth(prefix, prefixMetrics, emojiCorrection);
++        const nextPrefixWidth = getCorrectedSegmentWidth(prefix, prefixMetrics, emojiCorrection, cjkCorrection);
+         advances.push(nextPrefixWidth - prefixWidth);
+         prefixWidth = nextPrefixWidth;
+     }
+     metrics.breakableFitAdvances = advances;
+     return metrics.breakableFitAdvances;
+ }
+-export function getFontMeasurementState(font, needsEmojiCorrection) {
++export function getFontMeasurementState(font, needsEmojiCorrection, needsCjkCorrection) {
+     const ctx = getMeasureContext();
+     ctx.font = font;
+     const cache = getSegmentMetricCache(font);
+     const fontSize = parseFontSize(font);
+     const emojiCorrection = needsEmojiCorrection ? getEmojiCorrection(font, fontSize) : 0;
+-    return { cache, fontSize, emojiCorrection };
++    // docen-local: only probe the CJK delta when the run actually contains CJK,
++    // so Latin-only fonts never pay for the hidden-span DOM read.
++    const cjkCorrection = needsCjkCorrection ? getCjkCorrection(font, fontSize) : 0;
++    return { cache, fontSize, emojiCorrection, cjkCorrection };
+ }
+ export function clearMeasurementCaches() {
+     segmentMetricCaches.clear();
+     emojiCorrectionCache.clear();
++    cjkCorrectionCache.clear();
+     sharedGraphemeSegmenter = null;
+ }
