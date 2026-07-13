@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>@docen/editor — document demo</title>
+    <title>@docen/editor — demos</title>
     <style>
       html,
       body {
@@ -16,188 +16,43 @@
           sans-serif;
         color: #3b3b3b;
       }
+      /* Full-height flex column: tablist (auto) + stage (fills the rest). */
+      #app {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+      }
+      #app fluent-tablist {
+        flex-shrink: 0;
+      }
+      #app main {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+      }
+      /* Demo helpers (shared by image + document demos). */
+      .demo-row {
+        display: flex;
+        gap: 8px;
+        padding: 16px;
+        flex-wrap: wrap;
+        flex-shrink: 0;
+      }
+      .demo-readout {
+        padding: 0 16px;
+        font-size: 13px;
+        color: #666;
+        flex-shrink: 0;
+      }
+      /* The document component fills the remaining stage height. */
+      .demo-doc {
+        flex: 1;
+        min-height: 0;
+      }
     </style>
   </head>
   <body>
-    <!--
-      The app header (brand + auto-save + save/undo/redo + a doc menu holding
-      Open / Save As / Print, plus a user menu with 中文 / English) is built into
-      the component, so the demo needs no toolbar of its own. The user name,
-      avatar, and filename below are passed as attributes (the avatar attribute
-      takes a URL; omit it for an initial-letter avatar). Switch languages via
-      the user menu (top-right) — the header + ribbon re-render live.
-    -->
-    <docen-document
-      id="doc"
-      user="Demo Macro"
-      filename="Welcome.docx"
-      navigation-pane
-    ></docen-document>
-
-    <script type="module">
-      // Import from source (not the package name) so vite treats this as
-      // workspace source, not a pre-bundled dep.
-      import {
-        applyTheme,
-        createLightTheme,
-        registerComponents,
-        registerTheme,
-        registerTranslation,
-      } from "./src/index.ts";
-
-      await registerComponents();
-      applyTheme("light");
-
-      // Example: register a custom brand theme. registerTheme(themeId, theme)
-      // stores a Fluent Theme under "contoso"; the Options dialog's Theme
-      // dropdown picks it up automatically (labels come from the theme.<id>
-      // i18n key — registered below for each locale). The Theme is built with
-      // @fluentui/tokens' createLightTheme(brand): a BrandVariants ramp from 10
-      // (darkest) to 160 (lightest). Try it: Options → Theme → "Contoso Green".
-      const contosoGreen = {
-        10: "#052506",
-        20: "#0a3909",
-        30: "#0f4d0d",
-        40: "#14610c",
-        50: "#1a750b",
-        60: "#1f8a0a",
-        70: "#259e08",
-        80: "#2ab207",
-        90: "#43c322",
-        100: "#62d340",
-        110: "#75d450",
-        120: "#93de6b",
-        130: "#a8e380",
-        140: "#b8e896",
-        150: "#c9eda9",
-        160: "#dff3c5",
-      };
-      registerTheme("contoso", createLightTheme(contosoGreen));
-      registerTranslation({
-        languageTag: "en",
-        translations: { "theme.contoso": "Contoso Green" },
-      });
-      registerTranslation({
-        languageTag: "zh-CN",
-        translations: { "theme.contoso": "Contoso 绿" },
-      });
-
-      // Example: register a third locale (French). registerTranslation merges
-      // into the built-in en/zh-CN tables, so the status-bar language cycle,
-      // the Options dropdown, and every ribbon/header/status key pick up the
-      // new locale with no further wiring — only the keys translated below
-      // resolve to French; the rest fall back through the locale chain to the
-      // default language (en). Try it: click the language pill in the status
-      // bar (bottom-right) to rotate en → zh-CN → Français → en.
-      registerTranslation({
-        languageTag: "fr",
-        $name: "Français",
-        translations: {
-          // Ribbon tabs
-          "ribbon.tab.home": "Accueil",
-          "ribbon.tab.insert": "Insertion",
-          "ribbon.tab.draw": "Dessin",
-          "ribbon.tab.design": "Conception",
-          "ribbon.tab.layout": "Mise en page",
-          "ribbon.tab.references": "Références",
-          "ribbon.tab.mailings": "Publipostage",
-          "ribbon.tab.review": "Révision",
-          "ribbon.tab.view": "Affichage",
-          // Header / file menu
-          "header.autosave": "Enregistrement automatique",
-          "header.save": "Enregistrer",
-          "header.undo": "Annuler",
-          "header.redo": "Rétablir",
-          "header.new": "Nouveau",
-          "header.open": "Ouvrir…",
-          "header.save-as": "Enregistrer sous…",
-          "header.save-as-markdown": "Enregistrer au format Markdown…",
-          "header.save-as-html": "Enregistrer au format HTML…",
-          "header.print": "Imprimer",
-          "header.options": "Options",
-          "header.doc-name": "Document",
-          // Options dialog
-          "options.title": "Options",
-          "options.ok": "OK",
-          "options.cancel": "Annuler",
-          "options.language": "Langue",
-          // Status bar
-          "status.page-of": "Page {page} sur {total}",
-          "status.words": "{n} mots",
-          "status.section": "Section {n}",
-          "theme.contoso": "Contoso Vert",
-        },
-      });
-
-      // Example: an external add-in contributes an "About" ribbon tab. The host
-      // merges it onto the built-in tabs (mergeRibbonSchema) — labels are i18n
-      // keys, and the addin ships its own `localizationInfo` (Office.js
-      // manifest shape — `defaultLanguageTag` + `additionalLanguages[]`),
-      // which the host registers on addAddin (merged with the built-in
-      // ribbon.* keys) so the tab/group/button localize on every locale
-      // switch. The "Help" button's
-      // `open-help` event isn't a Tiptap command, so the host routes it to this
-      // addin's `commands` map — clicking it opens the project's GitHub repo.
-      document.getElementById("doc")?.addAddin({
-        id: "about",
-        ribbon: [
-          {
-            tab: "about",
-            label: "about.tab",
-            groups: [
-              {
-                id: "about-help",
-                label: "about.group.help",
-                controls: [
-                  { type: "button", id: "help", label: "about.cmd.help", event: "open-help" },
-                ],
-              },
-            ],
-          },
-        ],
-        localizationInfo: {
-          defaultLanguageTag: "en",
-          additionalLanguages: [
-            {
-              languageTag: "en",
-              translations: {
-                "about.tab": "About",
-                "about.group.help": "Help",
-                "about.cmd.help": "Help",
-              },
-            },
-            {
-              languageTag: "zh-CN",
-              translations: {
-                "about.tab": "关于",
-                "about.group.help": "帮助",
-                "about.cmd.help": "帮助",
-              },
-            },
-          ],
-        },
-        commands: {
-          "open-help": () => window.open("https://github.com/DemoMacro/docen", "_blank"),
-        },
-      });
-
-      // Example: an external add-in contributes a mini-toolbar button (the
-      // selection floating toolbar). The host merges it onto the built-in
-      // buttons (mergeMiniToolbar) — and re-merges at runtime since addAddin
-      // runs after boot (the bar's buttons are @observable, so no re-mount
-      // needed). The "highlight" event routes to editor.commands.highlight,
-      // exactly like a ribbon button.
-      document.getElementById("doc")?.addAddin({
-        id: "mini-toolbar-demo",
-        miniToolbar: [
-          {
-            icon: "highlight",
-            event: "highlight",
-            label: "ribbon.cmd.highlight",
-            activeMark: "highlight",
-          },
-        ],
-      });
-    </script>
+    <script type="module" src="/demo/main.ts"></script>
   </body>
 </html>

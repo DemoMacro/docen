@@ -15,6 +15,7 @@ import { type DocenAddin, type DocenHost } from "../ui";
 import { DocumentCommands } from "./extensions/commands";
 import { FontMetricDecoration } from "./extensions/font-metric";
 import { ImageCap } from "./extensions/image-cap";
+import { ImageView } from "./extensions/image-view";
 import { DocenKeymap } from "./extensions/keymap";
 import { Outline, type OutlineAnchor } from "./extensions/outline";
 import { PageBreakView } from "./extensions/page-break";
@@ -97,6 +98,11 @@ export function createDocumentExtensions(opts: {
     // wpsShape NodeView — editable floating text box as two elements (outer
     // placement/rotation, inner contentDOM). Schema from the engine's WpsShape.
     WpsShapeView,
+    // image NodeView — mounts <docen-image> (always editable inline, Office
+    // model: click → resize/rotate handles + floating toolbar in place).
+    // Schema/fidelity from the engine's Image; SSR/read-mode still falls back
+    // to the engine's renderHTML (LeaferJS-free).
+    ImageView,
     // Centralized MS Office editing keymap (Ctrl+Enter page break, etc.) —
     // see extensions/keymap.ts. Outranks HardBreak via priority.
     DocenKeymap,

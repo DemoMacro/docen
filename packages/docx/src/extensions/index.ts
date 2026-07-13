@@ -8,4 +8,9 @@ export {
   sectionLinePitchCss,
   lineSpacingToCss,
   twipsToMm,
+  floatAnchorScope,
+  floatingToStyles,
 } from "./utils";
+// Image style helpers, shared by the editor's image NodeView so the editing
+// surface applies the same floating CSS as renderHTML (edit == render == export).
+export { renderImageStyles } from "./image";

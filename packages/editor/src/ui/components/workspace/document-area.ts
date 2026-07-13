@@ -101,6 +101,20 @@ class DocenDocumentArea extends FASTElement {
         .split(/\s+/)
         .map((v) => (/^\d+(\.\d+)?$/.test(v) ? `${v}mm` : v));
       this.style.setProperty("--docen-page-margin", sides.join(" "));
+      // Expose per-side margins as individual CSS lengths for floating drawings:
+      // a wrapNone image with relativeFrom="margin" needs its posOffset measured
+      // from the margin-box origin (= content-box top-left), but CSS
+      // position:absolute left/top:0 is the padding-box edge (= page edge), so
+      // the renderer adds these vars via calc() to shift into margin space.
+      const [a = "0", b = a, c = a, d = b] = sides;
+      const top = a,
+        right = b,
+        bottom = c,
+        left = d;
+      this.style.setProperty("--docen-page-margin-top", top);
+      this.style.setProperty("--docen-page-margin-right", right);
+      this.style.setProperty("--docen-page-margin-bottom", bottom);
+      this.style.setProperty("--docen-page-margin-left", left);
     }
     // Zoom (percent) — CSS `zoom` rescales the pages and reflows the scroll
     // surface (Chromium-native). "150" → 1.5; absent clears it (100%).

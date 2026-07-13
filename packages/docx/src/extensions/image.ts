@@ -233,7 +233,7 @@ export function renderCropAttrs(
   };
 }
 
-function renderImageStyles(attrs: Record<string, unknown>): string[] {
+export function renderImageStyles(attrs: Record<string, unknown>, marginOrigin = false): string[] {
   const styles: string[] = [];
 
   if (attrs.display) {
@@ -260,6 +260,7 @@ function renderImageStyles(attrs: Record<string, unknown>): string[] {
         attrs.floating,
         attrs.src as string | undefined,
         attrs.width as number | undefined,
+        marginOrigin,
       ),
     );
   }
@@ -494,10 +495,11 @@ export const Image = BaseImage.extend({
       ...(isRemoteImage(attrs.src) ? REMOTE_IMG_ATTRS : {}),
     };
     const styles = renderImageStyles(attrs);
-    // 无尺寸图（attrs 无 width/height，如未精化的 http 图）占位：CSS 预留盒，
-    // 让浏览器在 decode 前布局就确定，避免加载/滚动 lazy load 触发 reflow。
-    // 4:3 比例与 measure.layoutImageLines 的默认占位一致（edit == render）。
-    // fetch 完 image-cap 设实际 attrs.width/height 后，此分支跳过。
+    // Unsized image placeholder (no width/height, e.g. an un-refined http
+    // image): reserve a CSS box so layout settles before decode, avoiding
+    // reflow on lazy-load. The 4:3 ratio matches measure.layoutImageLines'
+    // default placeholder (edit == render). Once image-cap stamps the real
+    // width/height this branch is skipped.
     if (attrs.width == null && attrs.height == null) {
       styles.push("width:100%", "aspect-ratio:4/3");
     }

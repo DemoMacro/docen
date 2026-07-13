@@ -8,6 +8,8 @@ import {
   ButtonTemplate,
   Checkbox,
   CheckboxDefinition,
+  CompoundButton,
+  CompoundButtonDefinition,
   Dialog,
   DialogBody,
   DialogBodyDefinition,
@@ -173,6 +175,7 @@ export async function registerComponents(): Promise<void> {
     `,
   });
   await defineElement(Checkbox, CheckboxDefinition);
+  await defineElement(CompoundButton, CompoundButtonDefinition);
   await defineElement(Divider, DividerDefinition);
   // fluent-dropdown: the built-in `.control { min-width: 160px }` forces every
   // combobox at least 160px wide. The control exposes no `part`, so the override

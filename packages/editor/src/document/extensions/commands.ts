@@ -1,5 +1,7 @@
+import type { ImageAttrs } from "@docen/docx";
 import { Extension } from "@docen/docx/core";
 import type { EditorState } from "@tiptap/pm/state";
+import { NodeSelection } from "@tiptap/pm/state";
 
 /**
  * Document editor commands (Office.js-style "add-in commands") as native
@@ -70,6 +72,9 @@ declare module "@tiptap/core" {
       "change-case": (mode?: string) => ReturnType;
       sort: () => ReturnType;
       "multilevel-list": (level?: string) => ReturnType;
+      // Picture — names align to Office.js InlinePicture (delete / left / top).
+      "delete-picture": () => ReturnType;
+      "position-picture": (value?: string) => ReturnType;
     };
   }
 }
@@ -117,6 +122,8 @@ export const WIRED_DISPATCH: ReadonlySet<string> = new Set([
   "change-case",
   "sort",
   "multilevel-list",
+  "delete-picture",
+  "position-picture",
 ]);
 
 // ── Pure helpers (take EditorState, return data; never touch the chain) ──
@@ -532,6 +539,50 @@ export const DocumentCommands = Extension.create({
           const times = level === "level-3" ? 2 : 1;
           for (let i = 0; i < times; i++) c.sinkListItem("listItem");
           return c.run();
+        },
+      // Delete the currently selected image node (mirrors Office.js
+      // InlinePicture.delete()). Only fires on an image NodeSelection.
+      "delete-picture":
+        () =>
+        ({ state, commands }) => {
+          const sel = state.selection;
+          if (!(sel instanceof NodeSelection) || sel.node.type.name !== "image") return false;
+          return commands.deleteSelection();
+        },
+      // Reposition a floating (wp:anchor wrapNone) image by writing new EMU
+      // offsets into its floating attrs. value is JSON {hOffset, vOffset}.
+      // The host image NodeView dispatches this on drag end.
+      "position-picture":
+        (value?) =>
+        ({ state, tr }) => {
+          if (!value) return false;
+          const sel = state.selection;
+          if (!(sel instanceof NodeSelection) || sel.node.type.name !== "image") return false;
+          let parsed: { hOffset?: number; vOffset?: number };
+          try {
+            parsed = JSON.parse(value);
+          } catch {
+            return false;
+          }
+          const old = sel.node.attrs as ImageAttrs;
+          if (!old.floating) return false;
+          // align and offset are mutually exclusive in OOXML — writing offset
+          // must clear align, or the serializer ignores the offset. Preserve
+          // relative (default would otherwise become "page").
+          const h = old.floating.horizontalPosition;
+          const v = old.floating.verticalPosition;
+          tr.setNodeMarkup(sel.from, undefined, {
+            ...old,
+            floating: {
+              ...old.floating,
+              horizontalPosition: { relative: h.relative, offset: parsed.hOffset ?? h.offset },
+              verticalPosition: { relative: v.relative, offset: parsed.vOffset ?? v.offset },
+            },
+          });
+          // Suppress scrollIntoView — for a position drag the user is already
+          // looking at the image and a scroll jump would feel jumpy.
+          tr.setMeta("scrollIntoView", false);
+          return true;
         },
     };
   },

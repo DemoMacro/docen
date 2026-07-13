@@ -40,6 +40,7 @@
   "type": "module",
   "scripts": {
     "dev": "pnpm --filter \"./packages/**\" -r dev",
+    "demo": "pnpm --filter @docen/editor demo",
     "build": "pnpm --filter \"./packages/**\" -r build",
     "check": "vp check --fix",
     "test": "vp test run",

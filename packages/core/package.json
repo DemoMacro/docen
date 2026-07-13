@@ -1,0 +1,71 @@
+{
+  "name": "@docen/core",
+  "version": "0.5.1",
+  "description": "Pure rendering layer mapping OOXML drawing data (image/shape/chart/smartart) to LeaferJS/ECharts elements, shared across docx/pptx/xlsx editors",
+  "keywords": [
+    "canvas",
+    "chart",
+    "docen",
+    "drawingml",
+    "echarts",
+    "graphics",
+    "image",
+    "leaferjs",
+    "office",
+    "ooxml",
+    "render",
+    "shape",
+    "smartart"
+  ],
+  "homepage": "https://github.com/DemoMacro/docen#readme",
+  "bugs": {
+    "url": "https://github.com/DemoMacro/docen/issues"
+  },
+  "license": "MIT",
+  "author": {
+    "name": "Demo Macro",
+    "email": "abc@imst.xyz",
+    "url": "https://www.demomacro.com/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DemoMacro/docen.git"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "dist/index.mjs",
+  "types": "dist/index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    },
+    "./image": {
+      "types": "./dist/image.d.mts",
+      "import": "./dist/image.mjs"
+    },
+    "./geometry": {
+      "types": "./dist/geometry.d.mts",
+      "import": "./dist/geometry.mjs"
+    },
+    "./style": {
+      "types": "./dist/style.d.mts",
+      "import": "./dist/style.mjs"
+    },
+    "./export": {
+      "types": "./dist/export.d.mts",
+      "import": "./dist/export.mjs"
+    }
+  },
+  "scripts": {
+    "dev": "basis build --stub",
+    "build": "vp pack",
+    "prepack": "pnpm build"
+  },
+  "dependencies": {
+    "@office-open/core": "0.10.13",
+    "leafer-ui": "2.2.0"
+  }
+}

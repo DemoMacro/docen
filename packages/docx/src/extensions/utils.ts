@@ -386,9 +386,9 @@ export function lineSpacingToCss(spacing: SpacingProperties | null | undefined):
   // the pitch for each line ... such that the desired number of single spaced
   // lines ... fits" — i.e. when a document grid is defined, linePitch IS the
   // single-line height; without a grid, the single line is the font's `normal`
-  // metric. So auto = multiple × (linePitch | font-natural). Verified vs Word:
-  // a 1.5× line (line=360) on a CJK body with a grid renders at 1.5×linePitch,
-  // not 1.5×font-natural. spacing.line applies to ALL paragraphs incl. table
+  // metric. So auto = multiple × (linePitch | font-natural). A 1.5× line on a
+  // CJK body with a grid renders at 1.5×linePitch, not 1.5×font-natural.
+  // spacing.line applies to ALL paragraphs incl. table
   // cells (docGrid exempts only its own pitch snap from cells via
   // adjustLineHeightInTable, never spacing.line) — see measure.ts
   // resolveLineHeight. --docen-line-pitch is injected by sectionLinePitchCss only
@@ -575,7 +575,12 @@ interface FloatingLike {
  *    otherwise float on the wrap side (tight/through add shape-outside, src).
  * Wrap margins (wp:distT/B/L/R) are EMU, rendered as pt.
  */
-export function floatingToStyles(floating: unknown, src?: string, width?: number): string[] {
+export function floatingToStyles(
+  floating: unknown,
+  src?: string,
+  width?: number,
+  marginOrigin = false,
+): string[] {
   const f = floating as FloatingLike | null | undefined;
   if (!f) return [];
   const styles: string[] = [];
@@ -591,15 +596,49 @@ export function floatingToStyles(floating: unknown, src?: string, width?: number
     // the alignment when there is no offset: align center → left:50% +
     // translateX so a page/margin-anchored drawing centers instead of collapsing
     // to its inline origin. z-index lifts it above/below the text layer.
+    //
+    // Coordinate origin: CSS position:absolute left/top:0 is the offsetParent's
+    // padding-box edge (= page edge for .docen-page, which has no border).
+    // OOXML posOffset relativeFrom="page" shares this origin → direct px.
+    // relativeFrom="margin" originates at the margin-box (= content-box top-left
+    // = page edge + page padding), so add the page-margin via calc() with CSS
+    // vars exposed by docen-document-area. paragraph/line/column are anchored to
+    // a <p> (position:relative, no padding) → direct px.
+    const hRel = f.horizontalPosition?.relative;
+    const vRel = f.verticalPosition?.relative;
+    const hMargin = hRel === "margin" || hRel === "insideMargin" || hRel === "outsideMargin";
+    const vMargin = vRel === "margin" || vRel === "insideMargin" || vRel === "outsideMargin";
     styles.push("position:absolute");
     if (hOff != null) {
-      styles.push(`left:${(hOff / EMU_PER_PX).toFixed(1)}px`);
+      const offPx = (hOff / EMU_PER_PX).toFixed(4);
+      // leftMargin/rightMargin are horizontal page-edge anchors (not margin-box),
+      // so they don't need compensation — only plain "margin" / insideMargin /
+      // outsideMargin originate at the margin-box. The margin-box compensation
+      // uses a CSS var set by the editor's document-area; pass marginOrigin=true
+      // only from the editor NodeView. generateHTML/SSR callers leave it false so
+      // the output is host-agnostic (no dependency on an editor CSS var that
+      // doesn't exist outside <docen-document>) — a margin-anchored drawing then
+      // falls back to the page-edge offset, the closest host-neutral approximation.
+      styles.push(
+        hMargin && marginOrigin
+          ? `left:calc(var(--docen-page-margin-left, 0px) + ${offPx}px)`
+          : `left:${offPx}px`,
+      );
     } else {
       const hAlign = f.horizontalPosition?.align;
       if (hAlign === "center") styles.push("left:50%", "transform:translateX(-50%)");
       else if (hAlign === "right") styles.push("right:0");
     }
-    if (vOff != null) styles.push(`top:${(vOff / EMU_PER_PX).toFixed(1)}px`);
+    if (vOff != null) {
+      const offPx = (vOff / EMU_PER_PX).toFixed(4);
+      // topMargin/bottomMargin are vertical page-edge anchors — no compensation.
+      // marginOrigin gates the CSS-var compensation (see the hOff branch above).
+      styles.push(
+        vMargin && marginOrigin
+          ? `top:calc(var(--docen-page-margin-top, 0px) + ${offPx}px)`
+          : `top:${offPx}px`,
+      );
+    }
   } else if (wrapType !== 3 && hOff != null && width != null) {
     // square/tight/through with an explicit offset: the image must float so text
     // wraps around it — position:absolute would sit on top of the text. The
@@ -658,8 +697,8 @@ export function floatingToStyles(floating: unknown, src?: string, width?: number
  * paragraph-anchored drawing must sit inside a position:relative <p> (the editor
  * CSS adds that via p:has([data-float-anchor])), otherwise top/left measure
  * from the page top and the drawing floats over the heading/body instead of
- * its own blank paragraph (verified on sample anchored drawing groups). Only
- * relevant for wrapNone (type 0); the float-based wraps stay inline.
+ * its own blank paragraph. Only relevant for wrapNone (type 0); the float-
+ * based wraps stay inline.
  */
 export function floatAnchorScope(floating: unknown): "paragraph" | "page" {
   const f = floating as FloatingLike | null | undefined;
@@ -911,7 +950,6 @@ export function renderRunStyles(attrs: Record<string, unknown>, eastAsiaLang = "
   if (spacing) styles.push(`letter-spacing:${spacing}`);
   if (a.highlight) {
     const hl = normalizeColorToHex(typeof a.highlight === "string" ? a.highlight : null);
-    // A highlight is a run-local background, so it also becomes the ink-bg.
     // A highlight is a run-local background, so it also flips the ink.
     if (hl) styles.push(`background-color:${hl}`, `color:contrast-color(${hl})`);
   }

@@ -66,11 +66,13 @@
   },
   "scripts": {
     "dev": "basis build --stub",
+    "demo": "vite",
     "build": "vp pack",
     "prepack": "pnpm build"
   },
   "dependencies": {
     "@chenglou/pretext": "0.0.8",
+    "@docen/core": "workspace:*",
     "@docen/docx": "workspace:*",
     "@fluentui/svg-icons": "1.1.333",
     "@fluentui/tokens": "1.0.0-alpha.23",
@@ -81,6 +83,8 @@
     "@tiptap/extensions": "3.27.3",
     "@tiptap/pm": "3.27.3",
     "image-meta": "0.2.2",
+    "leafer-editor": "2.2.0",
+    "leafer-ui": "2.2.0",
     "prosemirror-search": "1.1.1"
   }
 }
