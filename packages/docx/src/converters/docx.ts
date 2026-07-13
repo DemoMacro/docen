@@ -626,6 +626,14 @@ export class DocxManager {
     } | null;
     const insideH = tableBorders?.insideHorizontal ?? null;
     const insideV = tableBorders?.insideVertical ?? null;
+    // Compute tblGrid column widths up front so each cell's tcW can be derived
+    // from the grid columns it spans. ProseMirror cells carry no OOXML width
+    // (only px colwidth), so without this the regenerated tcW collapses to the
+    // library default and autofit tables with short content render as a sliver.
+    const { columnWidths, tableWidth } =
+      colCount > 0
+        ? this.computeColumnWidths(node, colCount, opts)
+        : { columnWidths: [] as number[], tableWidth: { size: 0, type: "dxa" } };
     const rows: Record<string, unknown>[] = [];
 
     // Track active vertical spans from previous rows. `borders` carries the
@@ -668,9 +676,13 @@ export class DocxManager {
         if (colIdx >= nextSpanCol) {
           // Insert vMerge continuation cell at this column
           const span = currentSpans[spanIdx];
+          const contWidth = this.sumGridSpan(columnWidths, span.colStart, span.colspan);
           compiledCells.push({
             verticalMerge: "continue",
             columnSpan: span.colspan,
+            // tcW = grid columns the continuation spans — matches the restart
+            // cell and keeps the merged region's width consistent.
+            ...(contWidth > 0 ? { width: { size: contWidth, type: "dxa" } } : {}),
             // Inherit the restart cell's tcBorders so the merged region keeps
             // its edges (see ActiveSpan above).
             ...(span.borders ? { borders: span.borders } : {}),
@@ -679,12 +691,15 @@ export class DocxManager {
           colIdx += span.colspan;
           spanIdx++;
         } else {
-          // Compile and place the actual cell
+          // Compile and place the actual cell. Pass columnWidths + colIdx so
+          // the cell's tcW can be derived from the grid columns it spans.
           const cell = this.compileTableCellNode(
             pmCells[cellIdx],
             tableCellMargins,
             insideH,
             insideV,
+            columnWidths,
+            colIdx,
           );
           const cs = (cell.columnSpan as number) ?? 1;
           const rs = (cell.rowSpan as number) ?? 1;
@@ -716,9 +731,7 @@ export class DocxManager {
 
     opts.rows = rows;
 
-    // Compute tblGrid column widths and table width
     if (colCount > 0) {
-      const { columnWidths, tableWidth } = this.computeColumnWidths(node, colCount, opts);
       opts.columnWidths = columnWidths;
       if (!opts.width) opts.width = tableWidth;
       if (!opts.layout) opts.layout = "autofit";
@@ -740,6 +753,16 @@ export class DocxManager {
       return count;
     }
     return 0;
+  }
+
+  /** Sum the tblGrid widths covered by a cell starting at `start` and spanning
+   *  `span` grid columns — the OOXML tcW for that cell. */
+  private sumGridSpan(columnWidths: number[], start: number, span: number): number {
+    let sum = 0;
+    for (let i = start; i < start + span && i < columnWidths.length; i++) {
+      sum += columnWidths[i] ?? 0;
+    }
+    return sum;
   }
 
   /**
@@ -815,6 +838,8 @@ export class DocxManager {
     tableMargins?: NonNullable<TableCellOptions["margins"]> | null,
     insideH?: BorderOptions | null,
     insideV?: BorderOptions | null,
+    columnWidths?: number[] | null,
+    colIdx?: number,
   ): Record<string, unknown> {
     const cellOpts = this.renderNodeOpts(cellNode);
 
@@ -877,6 +902,18 @@ export class DocxManager {
       else pushChild(compiled);
     }
     if (cellChildren.length > 0) cellOpts.children = cellChildren;
+
+    // tcW = sum of the tblGrid columns the cell spans. Overwrite the
+    // colwidth-derived width from renderDocx (a lossy twips→px→twips detour
+    // that goes badly wrong when colwidth didn't round-trip cleanly — e.g. the
+    // [2] px sliver from a degraded import) — tblGrid carries the authoritative
+    // column widths, and this is what keeps autofit tables with short content
+    // from collapsing to a sliver.
+    if (columnWidths && columnWidths.length > 0 && colIdx != null) {
+      const span = (cellNode.attrs?.colspan as number) ?? 1;
+      const tw = this.sumGridSpan(columnWidths, colIdx, span);
+      if (tw > 0) cellOpts.width = { size: tw, type: "dxa" };
+    }
 
     return cellOpts;
   }

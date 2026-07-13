@@ -55,8 +55,15 @@ export function parseDocx(opts: Record<string, unknown>): Record<string, unknown
   if (resolved.columnSpan != null) attrs.colspan = resolved.columnSpan;
   if (resolved.rowSpan != null) attrs.rowspan = resolved.rowSpan;
   if (resolved.width) {
-    const twips = (resolved.width as { size: number }).size ?? 0;
-    if (twips) attrs.colwidth = [Math.round(twips / 15)];
+    const w = resolved.width as { size: number; type?: string };
+    // Only dxa (twips) maps to a px colwidth without table context. office-open
+    // normalizes many tcW to pct (e.g. 24.84 = 24.84%), which has no px value
+    // here — treating that 24.84 as twips gave a 2 px sliver (round(24.84/15)).
+    // pct/auto/nil are skipped; the table's tblGrid (columnWidths) drives column
+    // sizing and compileTableCellNode derives tcW from it on the generate side.
+    if (w.type === "dxa" && typeof w.size === "number" && w.size > 0) {
+      attrs.colwidth = [Math.round(w.size / 15)];
+    }
   }
 
   // Remaining OOXML-native opts passed through (skip structural/semantic keys).
