@@ -1585,9 +1585,12 @@ class DocenDocument extends AddinHost<Editor> {
     // command search so it can flatten and index every command. Re-runs on
     // lang/addin change since #renderChrome is the single chrome re-stamp.
     const searchEl = root.querySelector("docen-command-search") as
-      | (HTMLElement & { setTabs(tabs: readonly unknown[]): void })
+      | (HTMLElement & { setTabs(tabs: readonly unknown[], scope: Element | null): void })
       | null;
-    searchEl?.setTabs(tabs);
+    // Pass the workspace as the i18n scope so command labels resolve against
+    // `<docen-workspace lang>` (forwarded from `<docen-document lang>`) — the
+    // same scope the ribbon uses just above.
+    searchEl?.setTabs(tabs, root.querySelector("docen-workspace"));
     this.#applyRibbonGreying();
     this.#syncEditModeMenu();
     this.#renderPanes();

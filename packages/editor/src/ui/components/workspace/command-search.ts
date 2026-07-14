@@ -19,8 +19,12 @@ const MAX_RESULTS = 12;
 /** Flatten `Tab > Group > Control(+Layout)` into a flat command list.
  *  Menu/split items expand to their own entries (each carries its own event or
  *  inherits the control's). Deduped by event+value — the same command may have
- *  several ribbon entries. `separator` and disabled nodes are skipped. */
-function flattenCommands(tabs: readonly RibbonTab[]): CommandItem[] {
+ *  several ribbon entries. `separator` and disabled nodes are skipped.
+ *
+ *  Labels and tab names in the ribbon schema are i18n KEYS (ribbon.tab.* /
+ *  ribbon.cmd.* / ribbon.opt.*); they are translated for `scope`'s locale so
+ *  the list shows localized text. Re-run on lang change (see observeLang). */
+function flattenCommands(tabs: readonly RibbonTab[], scope: Element | null): CommandItem[] {
   const out: CommandItem[] = [];
   const seen = new Set<string>();
   const push = (item: CommandItem): void => {
@@ -31,6 +35,7 @@ function flattenCommands(tabs: readonly RibbonTab[]): CommandItem[] {
     out.push(item);
   };
   const walk = (nodes: readonly RibbonControlOrLayout[], tab: string): void => {
+    const tabLabel = t(tab, scope);
     for (const node of nodes) {
       if (node.type === "layout") {
         walk(node.controls, tab);
@@ -38,14 +43,20 @@ function flattenCommands(tabs: readonly RibbonTab[]): CommandItem[] {
       }
       if (node.type === "separator") continue;
       if (node.label && node.event && !node.disabled) {
-        push({ label: node.label, event: node.event, tab, icon: node.icon });
+        push({ label: t(node.label, scope), event: node.event, tab: tabLabel, icon: node.icon });
       }
       if ((node.type === "menu" || node.type === "split") && node.items) {
         for (const it of node.items) {
           if (it.disabled) continue;
           const ev = it.event ?? node.event;
           if (it.text && ev) {
-            push({ label: it.text, event: ev, value: it.value, tab, icon: node.icon });
+            push({
+              label: t(it.text, scope),
+              event: ev,
+              value: it.value,
+              tab: tabLabel,
+              icon: node.icon,
+            });
           }
         }
       }
@@ -168,10 +179,15 @@ class DocenCommandSearch extends FASTElement {
   #activeIndex = -1;
   #unsubscribe?: () => void;
 
-  /** Host pushes the merged ribbon schema (built-in + addin tabs). Re-runs the
-   *  active filter so a schema change mid-typing stays consistent. */
-  setTabs(tabs: readonly RibbonTab[]): void {
-    this.#commands = flattenCommands(tabs);
+  /** Host pushes the merged ribbon schema (built-in + addin tabs), with the
+   *  i18n scope the labels resolve against — the workspace, so `<docen-workspace
+   *  lang>` drives the locale (same scope the ribbon uses; passing it explicitly
+   *  avoids relying on `this.closest('docen-workspace')` which is null for a
+   *  transient moment while the host re-stamps the title-bar). The host re-calls
+   *  this on lang change, so the list re-translates with the new locale.
+   *  Re-runs the active filter so a schema change mid-typing stays consistent. */
+  setTabs(tabs: readonly RibbonTab[], scope: Element | null = this): void {
+    this.#commands = flattenCommands(tabs, scope);
     if (this.#isOpen()) this.#runFilter(this.#query());
   }
 
