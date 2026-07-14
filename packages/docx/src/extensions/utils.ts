@@ -147,10 +147,13 @@ export function renderTextBlock(
   // must not compress a line that holds real text (it broke edit == render:
   // measure used grid/natural, the DOM used the ¶ size).
   let hasContent = false;
-  node.forEach((child) => {
-    if (child.isText || child.type.name === "hardBreak" || child.type.name === "image")
+  for (let i = 0; i < node.childCount; i++) {
+    const child = node.child(i);
+    if (child.isText || child.type.name === "hardBreak" || child.type.name === "image") {
       hasContent = true;
-  });
+      break;
+    }
+  }
   const styles = renderParagraphStyles(node.attrs, !hasContent);
   const attrs: Record<string, unknown> = { ...HTMLAttributes };
   const styleId = node.attrs.styleId as string | null;

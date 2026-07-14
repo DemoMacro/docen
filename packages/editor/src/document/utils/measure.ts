@@ -552,13 +552,13 @@ function collectInlineItems(para: PmNode, def: Partial<RunStyle>): RichInlineIte
  *  children) — its sole content is the ¶ glyph. Such a paragraph's height is
  *  the paragraph-mark line height (see emptyLineHeight), not a text line. */
 function isEmptyTextblock(node: PmNode): boolean {
-  let hasContent = false;
-  node.forEach((child) => {
+  for (let i = 0; i < node.childCount; i++) {
+    const child = node.child(i);
     if (child.isText || child.type.name === "hardBreak" || child.type.name === "image") {
-      hasContent = true;
+      return false;
     }
-  });
-  return !hasContent;
+  }
+  return true;
 }
 
 /** Height of a paragraph's strut line — the line-box minimum when there is no
