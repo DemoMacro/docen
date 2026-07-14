@@ -867,6 +867,38 @@ function reflow(editor: Editor, scroll = false): void {
     cur = [];
     acc = 0;
   };
+  /** Pop cur's trailing run of keepNext blocks so they follow the block that's
+   *  leaving this page onto the next one. MS Office keepNext: a keepNext
+   *  paragraph stays with the following paragraph, so when that paragraph
+   *  moves to the next page the keepNext run moves with it (a heading no
+   *  longer strands alone at the page bottom). Returns [] when the run is
+   *  empty, or when it spans all of cur — a keepNext chain that already fills
+   *  the page has nothing before it to leave behind, and carrying it would
+   *  re-overflow the next page and loop; per the spec a chain too tall for a
+   *  page starts that page and flows on (this bound is also the loop guard). */
+  const carryKeepNextChain = (): FlatItem[] => {
+    let chainLen = 0;
+    while (chainLen < cur.length) {
+      const last = cur[cur.length - 1 - chainLen];
+      if (last.kind === "block" && last.pag.keepNext) chainLen++;
+      else break;
+    }
+    if (chainLen === 0 || chainLen >= cur.length) return [];
+    return cur.splice(cur.length - chainLen, chainLen);
+  };
+  /** Close the current page, carrying its trailing keepNext run onto a fresh
+   *  page under `section` so those blocks stay with the block that triggered
+   *  the break. */
+  const closeSegmentCarrying = (section: unknown): void => {
+    const carried = carryKeepNextChain();
+    const carriedAcc = carried.reduce((s, c) => s + c.height, 0);
+    acc -= carriedAcc;
+    closeSegment();
+    curSection = section;
+    curHeight = segHeightOf(curSection);
+    for (const c of carried) cur.push(c);
+    acc = carriedAcc;
+  };
   // while-loop (not for): a mid-paragraph split inserts the tail back into the
   // flow as a new item, so the index advances past the head only.
   let splitSeq = 0;
@@ -941,7 +973,7 @@ function reflow(editor: Editor, scroll = false): void {
           // arriving after other content), close the current page FIRST so the
           // head starts a fresh page instead of overflowing this one. The tail
           // still spills onto the next page via the closeSegment below.
-          if (cur.length > 0 && split.head.height > remaining) closeSegment();
+          if (cur.length > 0 && split.head.height > remaining) closeSegmentCarrying(itemSection[i]);
           cur.push(split.head);
           acc += split.head.height;
           closeSegment();
@@ -956,9 +988,7 @@ function reflow(editor: Editor, scroll = false): void {
         }
       }
       if (cur.length > 0) {
-        closeSegment();
-        curSection = itemSection[i];
-        curHeight = segHeightOf(curSection);
+        closeSegmentCarrying(itemSection[i]);
       }
     }
     cur.push(item);
