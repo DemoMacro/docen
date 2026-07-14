@@ -3,6 +3,8 @@ import type { Node as PmNode } from "@tiptap/pm/model";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 
+import { getEditedBlocksRange } from "./font-metric";
+
 const key = new PluginKey<DecorationSet>("docenPunctCompression");
 
 /**
@@ -18,17 +20,19 @@ const key = new PluginKey<DecorationSet>("docenPunctCompression");
  * enable CSS text-spacing-trim, so fonts whose OpenType halt/chws features would
  * otherwise do this stay on the same one geometric rule regardless of font.
  *
- * Mirrors FontMetricDecoration: full rebuild on docChanged, cached set reused
- * for caret/selection moves (no doc change). content-visibility:auto skips
- * layout/paint for off-screen pages, so the decoration spans there cost no
- * layout — only the JS build walk (O(chars)) runs, debounced with the reflow.
+ * Mirrors FontMetricDecoration: incremental rebuild on docChanged — only the
+ * edited blocks are rescanned, the rest map to their new positions; the cached
+ * set is reused for caret/selection moves (no doc change). content-visibility:
+ * auto skips layout/paint for off-screen pages, so the decoration spans there
+ * cost no layout — only the JS build walk (now O(edited chars) instead of
+ * O(whole doc)) runs, debounced with the reflow.
  */
-const CLOSING = new Set("、。，．：；？！）〉》」』】〕〗〙〛｝");
+const CLOSING = new Set("、。，．：；？！）〉》」』】〕〗〛｝");
 const OPENING = new Set("（〈《「『【〔〖〘〚｛");
 
-function build(doc: PmNode): DecorationSet {
+function buildDecos(doc: PmNode, from: number, to: number): Decoration[] {
   const decos: Decoration[] = [];
-  doc.nodesBetween(0, doc.content.size, (node, pos) => {
+  doc.nodesBetween(from, to, (node, pos) => {
     if (node.isText && node.text) {
       const text = node.text;
       for (let i = 0; i < text.length; i++) {
@@ -43,7 +47,7 @@ function build(doc: PmNode): DecorationSet {
     }
     return true;
   });
-  return DecorationSet.create(doc, decos);
+  return decos;
 }
 
 export const PunctCompressionDecoration = Extension.create({
@@ -53,8 +57,16 @@ export const PunctCompressionDecoration = Extension.create({
       new Plugin({
         key,
         state: {
-          init: (_, state) => build(state.doc),
-          apply: (tr, old) => (tr.docChanged ? build(tr.doc) : old),
+          init: (_, state) =>
+            DecorationSet.create(state.doc, buildDecos(state.doc, 0, state.doc.content.size)),
+          apply: (tr, oldSet, oldState, newState) => {
+            if (!tr.docChanged) return oldSet;
+            const range = getEditedBlocksRange(oldState.doc, newState.doc);
+            if (!range) return oldSet.map(tr.mapping, newState.doc);
+            let set = oldSet.map(tr.mapping, newState.doc);
+            set = set.remove(set.find(range[0], range[1]));
+            return set.add(newState.doc, buildDecos(newState.doc, range[0], range[1]));
+          },
         },
         props: {
           decorations: (state) => key.getState(state),

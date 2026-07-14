@@ -13,6 +13,26 @@ import {
 
 const key = new PluginKey<DecorationSet>("docenFontMetric");
 
+/** Smallest block-level range covering every content change between two docs
+ *  — the bounds findDiffStart/findDiffEnd report, expanded to whole top-level
+ *  blocks so an incremental decoration rebuild covers the full edited
+ *  paragraph(s) without leaving stale spans at the edges. Returns undefined
+ *  when the docs have no content difference. Shared with PunctCompression. */
+export function getEditedBlocksRange(
+  oldDoc: PmNode,
+  newDoc: PmNode,
+  depth = 1,
+): [number, number] | undefined {
+  const from = oldDoc.content.findDiffStart(newDoc.content);
+  const diffEnd = oldDoc.content.findDiffEnd(newDoc.content);
+  if (from === null || !diffEnd) return undefined;
+  let start = newDoc.resolve(from);
+  if (start.depth < depth) start = newDoc.resolve(Math.min(from + 1, newDoc.nodeSize - 2));
+  let end = newDoc.resolve(diffEnd.b);
+  if (end.depth < depth) end = newDoc.resolve(Math.max(diffEnd.b - 1, 0));
+  return [start.before(depth), end.after(depth)];
+}
+
 /** Per-paragraph line-height vars: each paragraph/heading gets two inline CSS
  *  custom properties — --docen-font-metric (CJK-dominant MAX `normal` ratio:
  *  docGrid type=lines is a CJK grid, so the metric follows the CJK run, not a
@@ -27,10 +47,10 @@ const key = new PluginKey<DecorationSet>("docenFontMetric");
  *  paragraph's own line-height/margin inline styles. Recomputed only on
  *  docChanged (caret moves reuse the cached set), so large documents don't
  *  re-probe per keystroke. */
-function build(doc: PmNode): DecorationSet {
+function buildDecos(doc: PmNode, from: number, to: number): Decoration[] {
   const styles = (doc.attrs as { styles?: unknown } | null)?.styles;
   const decos: Decoration[] = [];
-  doc.descendants((node, pos, parent) => {
+  doc.nodesBetween(from, to, (node, pos, parent) => {
     if (node.type.name === "paragraph" || node.type.name === "heading") {
       const ratio = paragraphMaxRatio(node, styles).toFixed(4);
       const size = paragraphMaxSizePt(node, styles);
@@ -79,7 +99,7 @@ function build(doc: PmNode): DecorationSet {
     }
     return true;
   });
-  return DecorationSet.create(doc, decos);
+  return decos;
 }
 
 /** Injects --docen-font-metric on every paragraph/heading (the dominant font's
@@ -93,8 +113,27 @@ export const FontMetricDecoration = Extension.create({
       new Plugin({
         key,
         state: {
-          init: (_, state) => build(state.doc),
-          apply: (tr, old) => (tr.docChanged ? build(tr.doc) : old),
+          init: (_, state) =>
+            DecorationSet.create(state.doc, buildDecos(state.doc, 0, state.doc.content.size)),
+          apply: (tr, oldSet, oldState, newState) => {
+            if (!tr.docChanged) return oldSet;
+            // A style-model change (gallery edit, setDoc) rewrites every
+            // paragraph's metric — full rebuild. Otherwise rebuild only the
+            // edited blocks; the rest map to their new positions.
+            if (
+              (oldState.doc.attrs as { styles?: unknown }).styles !==
+              (newState.doc.attrs as { styles?: unknown }).styles
+            )
+              return DecorationSet.create(
+                newState.doc,
+                buildDecos(newState.doc, 0, newState.doc.content.size),
+              );
+            const range = getEditedBlocksRange(oldState.doc, newState.doc);
+            if (!range) return oldSet.map(tr.mapping, newState.doc);
+            let set = oldSet.map(tr.mapping, newState.doc);
+            set = set.remove(set.find(range[0], range[1]));
+            return set.add(newState.doc, buildDecos(newState.doc, range[0], range[1]));
+          },
         },
         props: {
           decorations: (state) => key.getState(state),
