@@ -1,6 +1,7 @@
 import type { StylesOptions } from "@office-open/docx";
 import type { JSONContent } from "@tiptap/core";
 import { Heading as BaseHeading } from "@tiptap/extension-heading";
+import type { Node } from "@tiptap/pm/model";
 
 import { buildTextBlock, indexParagraphStyles } from "../converters/styles";
 import type { ParseParagraphRule } from "./types";
@@ -220,15 +221,7 @@ export const Heading = BaseHeading.extend({
     return { ...this.parent?.(), ...docxParagraphAttrs() };
   },
 
-  renderHTML({
-    node,
-    HTMLAttributes,
-  }: {
-    node: { attrs: Record<string, unknown> } & {
-      forEach?: (cb: (child: { isText?: boolean; type?: { name?: string } }) => void) => void;
-    };
-    HTMLAttributes: Record<string, unknown>;
-  }) {
+  renderHTML({ node, HTMLAttributes }: { node: Node; HTMLAttributes: Record<string, unknown> }) {
     const level = (node.attrs?.level as number) ?? 1;
     // HTML has no h7-h9: levels 7-9 render as <h6> carrying the real level in
     // data-heading-level (parseHTML reads it back). renderTextBlock stamps it.

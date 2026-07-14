@@ -1,5 +1,6 @@
 import type { JSONContent } from "@tiptap/core";
 import { Paragraph as BaseParagraph } from "@tiptap/extension-paragraph";
+import type { Node } from "@tiptap/pm/model";
 
 import { docxParagraphAttrs, renderTextBlock, SECTION_ATTR_KEYS } from "./utils";
 
@@ -70,15 +71,7 @@ export const Paragraph = BaseParagraph.extend({
     return { ...this.parent?.(), ...docxParagraphAttrs() };
   },
 
-  renderHTML({
-    node,
-    HTMLAttributes,
-  }: {
-    node: { attrs: Record<string, unknown> } & {
-      forEach?: (cb: (child: { isText?: boolean; type?: { name?: string } }) => void) => void;
-    };
-    HTMLAttributes: Record<string, unknown>;
-  }) {
+  renderHTML({ node, HTMLAttributes }: { node: Node; HTMLAttributes: Record<string, unknown> }) {
     return renderTextBlock(node, HTMLAttributes, "p");
   },
 

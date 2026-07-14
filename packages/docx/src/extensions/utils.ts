@@ -9,7 +9,7 @@ import type {
   TableFloatOptions,
   TableWidthProperties,
 } from "@office-open/docx";
-import type { DOMOutputSpec } from "@tiptap/pm/model";
+import type { DOMOutputSpec, Node } from "@tiptap/pm/model";
 
 // ── Tiptap attr factory ──
 
@@ -135,10 +135,7 @@ export function docxParagraphAttrs() {
  *  only, 7-9) stamps data-heading-level so levels past h6 round-trip via a <h6>
  *  proxy (parseHTML reads it back). */
 export function renderTextBlock(
-  node: {
-    attrs: Record<string, unknown>;
-    forEach?: (cb: (child: { isText?: boolean; type?: { name: string } }) => void) => void;
-  },
+  node: Node,
   HTMLAttributes: Record<string, unknown>,
   tag: string,
   level?: number,
@@ -150,8 +147,8 @@ export function renderTextBlock(
   // must not compress a line that holds real text (it broke edit == render:
   // measure used grid/natural, the DOM used the ¶ size).
   let hasContent = false;
-  node.forEach?.((child) => {
-    if (child.isText || child.type?.name === "hardBreak" || child.type?.name === "image")
+  node.forEach((child) => {
+    if (child.isText || child.type.name === "hardBreak" || child.type.name === "image")
       hasContent = true;
   });
   const styles = renderParagraphStyles(node.attrs, !hasContent);
