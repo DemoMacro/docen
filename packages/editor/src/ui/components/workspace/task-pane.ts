@@ -168,8 +168,22 @@ class DocenTaskPane extends FASTElement {
     // always falsy, making the close branch dead code: the pane's `open`
     // attribute flipped but the dialog stayed open — "state changed, pane
     // didn't actually close".)
-    if (this.open) drawer.show();
-    else drawer.hide();
+    if (this.open) {
+      drawer.show();
+      // drawer.show() enqueues dialog.show() (FAST microtask Updates), whose
+      // focus restoral lands on the dialog's first focusable — the header close
+      // button — so the pane opens with a spurious focus ring on ✕. Blur it
+      // once the enqueued show has run (rAF fires after that microtask). Only
+      // blur when autofocus actually hit the close button, so a user-driven
+      // focus is never taken; the button stays Tab-reachable.
+      requestAnimationFrame(() => {
+        if (this.closeBtn && this.shadowRoot?.activeElement === this.closeBtn) {
+          this.closeBtn.blur();
+        }
+      });
+    } else {
+      drawer.hide();
+    }
   }
 
   #applyPosition(): void {

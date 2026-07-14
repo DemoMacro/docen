@@ -108,6 +108,10 @@ class DocenNavigationPane extends FASTElement {
     const searchInput = this.searchInput;
     searchInput?.addEventListener("input", (event: Event) => {
       const query = (event.target as HTMLInputElement).value;
+      // Typing switches to the Results tab — matches surface there (Office's
+      // Navigation Pane does the same). setAttribute drives tabChanged →
+      // #syncTabs → activeid + the CSS slot gate.
+      if (query) this.setAttribute("tab", "results");
       this.dispatchEvent(
         new CustomEvent("navigation:search", {
           bubbles: true,
