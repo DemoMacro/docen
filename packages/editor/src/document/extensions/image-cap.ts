@@ -383,10 +383,16 @@ export const ImageCap = Extension.create({
           const tr = newState.tr;
           let changed = false;
 
-          // The DOM content-width fallback (querySelector + getComputedStyle) is
-          // the same for every image when section geometry is absent, so read it
-          // once before the walk instead of per image.
-          const fallbackW = domContentWidth(editorView);
+          // The DOM content-width fallback (querySelector + getComputedStyle,
+          // which can force layout) is the same for every image when section
+          // geometry is absent. Read it lazily — only once the walk actually
+          // hits an uncapped image — so pure-text edits (no images) never
+          // touch the DOM per keystroke.
+          let fallbackW: number | null | undefined;
+          const getFallbackW = (): number | null => {
+            if (fallbackW !== undefined) return fallbackW;
+            return (fallbackW = domContentWidth(editorView));
+          };
           doc.descendants((node, pos) => {
             if (node.type.name !== "image") return true;
             const attrs = node.attrs as {
@@ -411,7 +417,7 @@ export const ImageCap = Extension.create({
             const displayW = natural?.width;
             // Section content width from OOXML geometry; fall back to the
             // rendered page's content box when geometry is absent (blank doc).
-            const contentW = sectionContentDims(sectionAt(doc, pos))?.width ?? fallbackW;
+            const contentW = sectionContentDims(sectionAt(doc, pos))?.width ?? getFallbackW();
             if (displayW == null || displayW <= 0) {
               // Unreadable size: skip http images (embedHttpImage refines them async
               // — a placeholder here would make its "already has width" branch swap
