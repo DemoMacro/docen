@@ -1230,8 +1230,17 @@ class DocenDocument extends AddinHost<Editor> {
   #syncFontControls(): void {
     const editor = this.#editor;
     if (!editor) return;
-    const fontDisplay = this.#effectiveFontAt(editor);
-    const sizeDisplay = this.#effectiveSizeAt(editor);
+    // Resolve font + size in one pass through the style inheritance chain
+    // (direct run props → paragraph style → basedOn → document defaults) — the
+    // old #effectiveFontAt/#effectiveSizeAt each called effectiveRunProps,
+    // walking the chain twice per transaction.
+    const { font, size } = effectiveRunProps(
+      this.#docStyles(editor),
+      this.#currentStyleId(editor),
+      editor.getAttributes("textStyle"),
+    );
+    const fontDisplay = font ?? "";
+    const sizeDisplay = size != null ? String(size) : "";
     const fontCb = this.shadowRoot?.querySelector<HTMLElement>(
       'docen-ribbon-combobox[event="font-name"]',
     );
@@ -1244,31 +1253,6 @@ class DocenDocument extends AddinHost<Editor> {
     if (sizeCb && sizeCb.getAttribute("value") !== sizeDisplay) {
       sizeCb.setAttribute("value", sizeDisplay);
     }
-  }
-
-  /** The font name at the caret, resolved through the style inheritance chain
-   *  (direct run props → paragraph style → basedOn → document defaults) in the
-   *  document's own units — no px conversion. */
-  #effectiveFontAt(editor: Editor): string {
-    const direct = editor.getAttributes("textStyle");
-    const { font } = effectiveRunProps(
-      this.#docStyles(editor),
-      this.#currentStyleId(editor),
-      direct,
-    );
-    return font ?? "";
-  }
-
-  /** The font size at the caret in points (Word's unit), resolved through the
-   *  style inheritance chain — no px conversion. */
-  #effectiveSizeAt(editor: Editor): string {
-    const direct = editor.getAttributes("textStyle");
-    const { size } = effectiveRunProps(
-      this.#docStyles(editor),
-      this.#currentStyleId(editor),
-      direct,
-    );
-    return size != null ? String(size) : "";
   }
 
   /** The loaded document's styles model (doc.attrs.styles), or null. */
