@@ -59,24 +59,28 @@ function buildDecos(doc: PmNode, from: number, to: number): Decoration[] {
       const inTable = parentName === "tableCell" || parentName === "tableHeader";
       const attrs = node.attrs as {
         snapToGrid?: boolean | null;
-        spacing?: { lineRule?: string | null } | null;
+        spacing?: { line?: number | null; lineRule?: string | null } | null;
       };
       if (inTable) {
-        // A cell's spacing.line (exact/atLeast/auto) applies — ECMA-376 docGrid
-        // exempts only its own pitch snap from table cells (adjustLineHeightInTable),
-        // not the paragraph's spacing.line. Only a cell with NO spacing.line
-        // defaults to MAX(natural metric, grid pitch) so trHeight's atLeast floor
-        // governs. Also size the p to its max run (--docen-line-base), not the
-        // inherited container font-size. Mirrors measure.ts resolveLineHeight;
-        // overrides the paragraph's line-height (ProseMirror appends a node
-        // decoration's style).
-        const cellLh = lineSpacingToCss(resolveSpacing(node, styles));
-        parts.push(
-          cellLh
-            ? `line-height:${cellLh}`
-            : "line-height:calc(max(var(--docen-font-metric) * var(--docen-line-base), var(--docen-line-pitch, 0pt)))",
-          "font-size:var(--docen-line-base, 1em)",
-        );
+        // Size the <p> to its max run (--docen-line-base), not the inherited
+        // container font-size. line-height is emitted ONLY when the paragraph
+        // has no direct spacing.line — renderParagraphStyles reads direct attrs
+        // alone, so a style-chain spacing.line (measure's resolveSpacing walks
+        // basedOn) needs this decoration to keep the DOM matching measure. A
+        // direct spacing.line is already emitted by renderHTML; re-emitting it
+        // here made PM's patchAttributes removeProperty('line-height') wipe the
+        // renderHTML value whenever this decoration was incrementally rebuilt
+        // out (table-split reflow clones cells the decoration set can't map),
+        // so cell paragraphs lost their 1.5× and fell back to the 2× grid.
+        if (attrs.spacing?.line == null) {
+          const cellLh = lineSpacingToCss(resolveSpacing(node, styles));
+          parts.push(
+            cellLh
+              ? `line-height:${cellLh}`
+              : "line-height:calc(max(var(--docen-font-metric) * var(--docen-line-base), var(--docen-line-pitch, 0pt)))",
+          );
+        }
+        parts.push("font-size:var(--docen-line-base, 1em)");
       } else if (
         paragraphHasCjk(node, styles) &&
         attrs.snapToGrid !== false &&
@@ -120,10 +124,17 @@ export const FontMetricDecoration = Extension.create({
             // A style-model change (gallery edit, setDoc) rewrites every
             // paragraph's metric — full rebuild. Otherwise rebuild only the
             // edited blocks; the rest map to their new positions.
-            if (
+            const stylesChanged =
               (oldState.doc.attrs as { styles?: unknown }).styles !==
-              (newState.doc.attrs as { styles?: unknown }).styles
-            )
+              (newState.doc.attrs as { styles?: unknown }).styles;
+            // Pagination reflow splits/merges pages (top-level child count
+            // changes). Decoration mapping can't follow a cell cloned across a
+            // page split, and the edited-block range may not span every cloned
+            // cell — so rebuild fully, or those cells lose their line-height
+            // decoration (a style-chain spacing.line that renderHTML can't see)
+            // and fall back to the 2× grid.
+            const pageCountChanged = oldState.doc.childCount !== newState.doc.childCount;
+            if (stylesChanged || pageCountChanged)
               return DecorationSet.create(
                 newState.doc,
                 buildDecos(newState.doc, 0, newState.doc.content.size),
