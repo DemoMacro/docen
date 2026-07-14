@@ -327,6 +327,17 @@ export const Image = BaseImage.extend({
         parseHTML: () => (this.options.inline ? "inline-block" : null),
       },
 
+      // Editor-only loading state for an unsized http image (image-cap stamps
+      // loading/error/timeout). A transient runtime state — never present in
+      // imported HTML/JSON — so no parseHTML rule and not round-tripped. Drives
+      // the renderHTML placeholder branch (data-image=placeholder) alongside the
+      // vector branch, so a loading/failed/timed-out image keeps a sized,
+      // labeled placeholder instead of an empty box (stable measure, no reflow).
+      loadState: {
+        default: null,
+        rendered: false,
+      },
+
       // Editor display + DOCX transformation.rotation (degrees)
       rotation: {
         default: null,
@@ -440,26 +451,43 @@ export const Image = BaseImage.extend({
     const floatAnchor =
       attrs.floating && floatAnchorScope(attrs.floating) === "paragraph" ? "paragraph" : null;
 
-    // EMF/WMF are Office GDI vector formats the browser cannot decode — the
-    // <img> yields naturalWidth 0 (an empty box). Render a labeled placeholder
-    // that keeps the image's size/floating/rotation so pagination and float
-    // anchoring stay faithful; the real art is preserved in data-vector-src and
-    // the node attrs for DOCX round-trip.
-    if (isVectorImage(attrs.src)) {
+    // Placeholder branch: a vector image (EMF/WMF — Office GDI formats the
+    // browser cannot decode, <img> yields naturalWidth 0) OR an unsized http
+    // image in a transient load state (loading/error/timeout, stamped by the
+    // editor's image-cap). Render a labeled div that keeps the image's
+    // size/floating/rotation so pagination and float anchoring stay faithful.
+    // For vector the real art is preserved in data-vector-src + node attrs for
+    // DOCX round-trip; for a load-state placeholder the src stays in the model
+    // attrs (the div renders no real image — measure reads the stamped width/
+    // height, not the DOM).
+    const loadState = (attrs.loadState as string | null) ?? null;
+    const isVector = isVectorImage(attrs.src);
+    if (isVector || loadState) {
       const styles = renderImageStyles(attrs);
       if (attrs.width != null) styles.push(`width:${attrs.width as number}px`);
       if (attrs.height != null) styles.push(`height:${attrs.height as number}px`);
       const divAttrs: Record<string, unknown> = {
-        "data-image": "vector",
+        "data-image": isVector ? "vector" : "placeholder",
         role: "img",
-        "data-vector-src": attrs.src as string,
         style: styles.join(";"),
       };
+      if (isVector) {
+        divAttrs["data-vector-src"] = attrs.src as string;
+      } else {
+        divAttrs["data-load-state"] = loadState;
+      }
       if (attrs.alt) divAttrs["aria-label"] = attrs.alt;
       if (attrs.title) divAttrs["title"] = attrs.title;
       attachRawAttrs(divAttrs, attrs);
       if (floatAnchor) divAttrs["data-float-anchor"] = floatAnchor;
-      return ["div", divAttrs, "Vector image"] as const;
+      const label = isVector
+        ? "Vector image"
+        : loadState === "error"
+          ? "Image failed to load"
+          : loadState === "timeout"
+            ? "Image load timed out"
+            : "Loading…";
+      return ["div", divAttrs, label] as const;
     }
 
     // Cropped images render as a span[extent-box] (overflow:hidden + placement)

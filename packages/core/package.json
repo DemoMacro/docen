@@ -1,6 +1,6 @@
 {
   "name": "@docen/core",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "Pure rendering layer mapping OOXML drawing data (image/shape/chart/smartart) to LeaferJS/ECharts elements, shared across docx/pptx/xlsx editors",
   "keywords": [
     "canvas",

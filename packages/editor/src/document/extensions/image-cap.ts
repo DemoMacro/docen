@@ -1,4 +1,5 @@
 import { Extension } from "@docen/docx/core";
+import { encodeBase64 } from "@office-open/core";
 import type { Node as PmNode } from "@tiptap/pm/model";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import type { EditorView } from "@tiptap/pm/view";
@@ -147,33 +148,71 @@ function domContentWidth(view: EditorView | null): number | null {
 }
 
 /** Fetch an http(s) image and read it as a data URL (so it can be sync-decoded
- *  for the cap below and embedded into DOCX on export). Returns null on
- *  network/CORS failure — the image keeps its http URL (CSS-only fallback). */
-async function fetchToDataUrl(url: string): Promise<string | null> {
-  try {
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    const blob = await res.blob();
-    return await new Promise<string | null>((resolve) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : null);
-      reader.onerror = () => resolve(null);
-      reader.readAsDataURL(blob);
+ *  for the cap below and embedded into DOCX on export). MIME is inferred from
+ *  the image header bytes (imageMeta), not the URL extension — CDN/auth/token
+ *  URLs (`img.png?token=`, `/avatar`) would otherwise mislabel a JPEG as PNG
+ *  and corrupt the embedded blip. Returns `{ dataUrl, timedOut }`: dataUrl null
+ *  on network/CORS failure or timeout; timedOut distinguishes the two so the
+ *  caller stamps a `timeout` vs `error` placeholder. A custom handler
+ *  (proxy/auth) has no abort hook, so its timeout is a Promise.race. */
+async function fetchToDataUrl(
+  url: string,
+  handler: ((url: string) => Promise<Uint8Array>) | undefined,
+  timeoutMs: number,
+): Promise<{ dataUrl: string | null; timedOut: boolean }> {
+  let bytes: Uint8Array | null;
+  if (handler) {
+    let timedOut = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<null>((resolve) => {
+      timer = setTimeout(() => {
+        timedOut = true;
+        resolve(null);
+      }, timeoutMs);
     });
-  } catch {
-    return null;
+    try {
+      bytes = await Promise.race([handler(url).catch(() => null), timeout]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+    if (!bytes) return { dataUrl: null, timedOut };
+  } else {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, { signal: controller.signal });
+      if (!res.ok) return { dataUrl: null, timedOut: false };
+      bytes = new Uint8Array(await res.arrayBuffer());
+    } catch (error) {
+      const timedOut = error instanceof DOMException && error.name === "AbortError";
+      return { dataUrl: null, timedOut };
+    } finally {
+      clearTimeout(timer);
+    }
   }
+  let mime = "image/png";
+  try {
+    const type = imageMeta(bytes).type;
+    if (type) mime = type === "jpg" ? "image/jpeg" : `image/${type}`;
+  } catch {
+    // Unreadable/unknown header — leave the PNG fallback.
+  }
+  return { dataUrl: `data:${mime};base64,${encodeBase64(bytes)}`, timedOut: false };
 }
 
 /** Stamp `patch` onto every image node whose `src` matches, in one transaction.
  *  `patch` may be a function of the node's current attrs, so per-node decisions
- *  (e.g. skip sizing when the node already carries explicit dimensions) are
- *  made against the live attrs at each match. No-op when none match or the view
- *  is gone. */
+ *  (e.g. skip sizing when the node already carries explicit dimensions, or skip
+ *  a node whose load state shouldn't change) are made against the live attrs at
+ *  each match. A function may return null/`{}` to skip that node (no markup, no
+ *  reflow) — used by embedHttpImage's failure branch to leave a sized image
+ *  untouched. No-op when none match or the view is gone. */
 function markupMatchingSrc(
   view: EditorView,
   src: string,
-  patch: Record<string, unknown> | ((attrs: Record<string, unknown>) => Record<string, unknown>),
+  patch:
+    | Record<string, unknown>
+    | ((attrs: Record<string, unknown>) => Record<string, unknown> | null),
 ): void {
   if (view.isDestroyed) return;
   const { state, dispatch } = view;
@@ -182,8 +221,10 @@ function markupMatchingSrc(
   state.doc.descendants((node, pos) => {
     if (node.type.name === "image" && node.attrs.src === src) {
       const p = typeof patch === "function" ? patch(node.attrs as Record<string, unknown>) : patch;
-      tr = tr.setNodeMarkup(pos, null, { ...node.attrs, ...p });
-      hit = true;
+      if (p && Object.keys(p).length > 0) {
+        tr = tr.setNodeMarkup(pos, null, { ...node.attrs, ...p });
+        hit = true;
+      }
     }
     return true;
   });
@@ -214,71 +255,112 @@ function capSize(
  *  off-screen loads, so its load event may never fire and an await on it would
  *  hang — deadlocking the embed throttle (inFlight never decrements). A
  *  JS-created Image is outside the render tree, so lazy never applies and
- *  load/error always fire regardless of viewport proximity. */
-function domNaturalSize(src: string): Promise<{ width: number; height: number } | null> {
+ *  load/error always fire regardless of viewport proximity. A `timeoutMs` race
+ *  caps a slow/hung probe so it can't hold an inFlight slot forever (a
+ *  slow-loading web image would otherwise park the promise indefinitely). */
+function domNaturalSize(
+  src: string,
+  timeoutMs: number,
+): Promise<{ width: number; height: number } | null> {
   return new Promise((resolve) => {
     const probe = new Image();
+    let done = false;
+    const finish = (result: { width: number; height: number } | null): void => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+    const timer = setTimeout(() => {
+      probe.onload = null;
+      probe.onerror = null;
+      probe.src = "";
+      finish(null);
+    }, timeoutMs);
     probe.onload = () =>
-      probe.naturalWidth > 0 && probe.naturalHeight > 0
-        ? resolve({ width: probe.naturalWidth, height: probe.naturalHeight })
-        : resolve(null);
-    probe.onerror = () => resolve(null);
+      finish(
+        probe.naturalWidth > 0 && probe.naturalHeight > 0
+          ? { width: probe.naturalWidth, height: probe.naturalHeight }
+          : null,
+      );
+    probe.onerror = () => finish(null);
     probe.src = src;
   });
 }
 
 /** Inline an http(s) image. On a successful fetch, swap in the data URL so
  *  appendTransaction can cap it (via imageMeta) and renderDocx can embed it. On
- *  fetch failure (CORS/network) the bytes can't be embedded — but the <img>
- *  still loads cross-origin, so its natural dimensions are stamped onto the node
- *  and appendTransaction caps the width to the content area (the src stays http
- *  and is dropped on export). Word inlines pasted web images the same way. */
-async function embedHttpImage(view: EditorView, src: string, fetching: Set<string>): Promise<void> {
+ *  fetch failure/timeout (CORS/network) the bytes can't be embedded — but the
+ *  <img> still loads cross-origin, so its natural dimensions may still be
+ *  readable for the cap. Word inlines pasted web images the same way.
+ *
+ *  Only UNSIZED http images (width == null, stamped loadState=loading by
+ *  appendTransaction) go through the placeholder state machine: loading →
+ *  (loaded | error | timeout), each stamp settling a size so measure converges
+ *  in one reflow instead of once per fetch. A SIZED http image is left alone on
+ *  both success (its width is already correct — swap src only) and failure
+ *  (layout settled, no placeholder) — zero placeholder interference, per the
+ *  "judge by size, not by protocol" rule. */
+async function embedHttpImage(
+  view: EditorView,
+  src: string,
+  fetching: Set<string>,
+  opts: {
+    handler: ((url: string) => Promise<Uint8Array>) | undefined;
+    fetchTimeoutMs: number;
+    probeTimeoutMs: number;
+  },
+): Promise<void> {
   try {
-    const dataUrl = await fetchToDataUrl(src);
+    const { dataUrl, timedOut } = await fetchToDataUrl(src, opts.handler, opts.fetchTimeoutMs);
     if (dataUrl) {
-      // Per-node decision: a node that already carries explicit dimensions
-      // (docx extent / HTML width-height / manual sizing) keeps them — only
-      // src is inlined (for export). A node with no width (unsized http image,
-      // laid out via the measure/renderHTML 4:3 placeholder) is refined to the
-      // data URL's real dimensions now, in one reflow. This keeps pagination
-      // stable for sized images while letting unsized ones converge.
       const natural = naturalSize(dataUrl);
       const contentW =
         sectionContentDims(
           (view.state.doc.attrs as { sectionProperties?: unknown }).sectionProperties,
         )?.width ?? domContentWidth(view);
       markupMatchingSrc(view, src, (attrs) => {
-        if (attrs.width != null) return { src: dataUrl };
-        if (!natural) return { src: dataUrl };
+        const a = attrs as { loadState?: string | null };
+        // A sized non-placeholder node keeps its width — swap src only (measure
+        // and export already have the size). A loading placeholder (or any
+        // unsized node) refines to the data URL's real dimensions and clears
+        // the placeholder state.
+        if (attrs.width != null && a.loadState !== "loading") return { src: dataUrl };
+        if (!natural) return { src: dataUrl, loadState: null };
         if (contentW && natural.width > contentW) {
-          return { src: dataUrl, ...capSize(natural.width, natural.height, contentW) };
+          return {
+            src: dataUrl,
+            loadState: null,
+            ...capSize(natural.width, natural.height, contentW),
+          };
         }
-        return { src: dataUrl, width: natural.width, height: natural.height };
+        return { src: dataUrl, loadState: null, width: natural.width, height: natural.height };
       });
       return;
     }
-    // fetch failed (CORS/network): the src stays http — remember it so the next
+    // fetch failed or timed out: the src stays http. Remember it so the next
     // docChanged walk doesn't re-fetch on every keystroke (retry storm).
     failedImageSrcs.add(src);
     if (view.isDestroyed) return;
-    const natural = await domNaturalSize(src);
-    if (natural) {
-      // A CORS-blocked web image (manually pasted) can't be sync-decoded, so cap
-      // it here from the DOM-read natural size — appendTransaction skips any
-      // image that already carries a width, so this is its only cap pass.
+    const nextState = timedOut ? "timeout" : "error";
+    // Only a loading placeholder needs an error/timeout stamp — a sized image's
+    // layout is already settled, so leave it (the <img> shows its own broken
+    // icon). The placeholder keeps a settled size (natural if readable, else
+    // the 4:3 width appendTransaction already stamped) so measure doesn't
+    // reflow.
+    const natural = await domNaturalSize(src, opts.probeTimeoutMs);
+    markupMatchingSrc(view, src, (attrs) => {
+      const a = attrs as { loadState?: string | null };
+      if (a.loadState !== "loading") return null;
+      if (!natural) return { loadState: nextState };
       const contentW =
         sectionContentDims(
           (view.state.doc.attrs as { sectionProperties?: unknown }).sectionProperties,
         )?.width ?? domContentWidth(view);
-      markupMatchingSrc(
-        view,
-        src,
-        contentW && contentW > 0
-          ? capSize(natural.width, natural.height, contentW)
-          : { width: natural.width, height: natural.height },
-      );
-    }
+      return contentW && contentW > 0
+        ? { loadState: nextState, ...capSize(natural.width, natural.height, contentW) }
+        : { loadState: nextState, width: natural.width, height: natural.height };
+    });
   } finally {
     fetching.delete(src);
   }
@@ -306,7 +388,25 @@ async function embedHttpImage(view: EditorView, src: string, fetching: Set<strin
  */
 export const ImageCap = Extension.create({
   name: "docenImageCap",
+  addOptions() {
+    return {
+      // Concurrent http-image fetches. 6 suits HTTP/2 CDNs (multi-plexed, no
+      // per-host ceiling) while bounding main-thread base64 transcoding; 4 was
+      // conservative for HTTP/1.1's 6-connections-per-host limit. Override via
+      // ImageCap.configure({ maxConcurrent }).
+      maxConcurrent: 6,
+      // Custom fetch handler (proxy/auth/cache), same shape as prepareImages'
+      // ImageFetchHandler — lets a CORS-blocked source be rerouted. undefined →
+      // global fetch with an AbortController timeout. Exposing this to consumers
+      // (<docen-document> attr → addin) is a follow-up; the option is wired now.
+      fetchHandler: undefined as ((url: string) => Promise<Uint8Array>) | undefined,
+      fetchTimeoutMs: 30_000,
+      probeTimeoutMs: 10_000,
+    };
+  },
   addProseMirrorPlugins() {
+    const { maxConcurrent, fetchHandler, fetchTimeoutMs, probeTimeoutMs } = this.options;
+    const embedOpts = { handler: fetchHandler, fetchTimeoutMs, probeTimeoutMs };
     // Captured by the appendTransaction closure so it can read the live page
     // DOM for the content-width fallback (section geometry may be absent).
     let editorView: EditorView | null = null;
@@ -315,18 +415,17 @@ export const ImageCap = Extension.create({
     const fetching = new Set<string>();
     // Concurrency throttle: a doc with many large http images would otherwise
     // fire one fetch per image at once — a network storm plus piled-up base64
-    // transcoding (FileReader.readAsDataURL) on the main thread. Pending URLs
-    // queue and drain at most MAX_CONCURRENT at a time.
+    // transcoding on the main thread. Pending URLs queue and drain at most
+    // maxConcurrent at a time.
     const queue: string[] = [];
     let inFlight = 0;
-    const MAX_CONCURRENT = 4;
     const drain = (): void => {
       const view = editorView;
       if (!view || view.isDestroyed) return;
-      while (inFlight < MAX_CONCURRENT && queue.length > 0) {
+      while (inFlight < maxConcurrent && queue.length > 0) {
         const src = queue.shift() as string;
         inFlight++;
-        void embedHttpImage(view, src, fetching).finally(() => {
+        void embedHttpImage(view, src, fetching, embedOpts).finally(() => {
           inFlight--;
           drain();
         });
@@ -419,18 +518,24 @@ export const ImageCap = Extension.create({
             // rendered page's content box when geometry is absent (blank doc).
             const contentW = sectionContentDims(sectionAt(doc, pos))?.width ?? getFallbackW();
             if (displayW == null || displayW <= 0) {
-              // Unreadable size: skip http images (embedHttpImage refines them async
-              // — a placeholder here would make its "already has width" branch swap
-              // only src and skip the real size). A corrupt data URL (imageMeta can't
-              // read it) has no async refiner, so fall back to contentW × 0.75 (4:3,
-              // matching the editor CSS placeholder + measure placeholder) so edit,
-              // measure and export all agree on the same size.
-              if (typeof attrs.src === "string" && /^https?:\/\//.test(attrs.src)) return true;
+              // Unreadable size. A corrupt data URL (imageMeta can't read it)
+              // has no async refiner → fall back to contentW × 0.75 (4:3,
+              // matching the editor CSS placeholder + measure.placeholder) so
+              // edit/measure/export agree. An http image gets the SAME 4:3 box
+              // PLUS loadState=loading: a settled placeholder size lets measure
+              // converge without reflowing once per fetch, and embedHttpImage
+              // clears/flips loadState and refines to the real size when the
+              // fetch resolves (success/error/timeout). embedHttpImage's
+              // "already has width → swap src only" branch recognizes
+              // loadState=loading and overrides the size, so stamping a
+              // placeholder width here does NOT strand the image at 4:3.
               if (!contentW || contentW <= 0) return true;
+              const isHttp = typeof attrs.src === "string" && /^https?:\/\//.test(attrs.src);
               tr.setNodeMarkup(pos, null, {
                 ...attrs,
                 width: contentW,
                 height: Math.round(contentW * 0.75),
+                ...(isHttp ? { loadState: "loading" } : {}),
               });
               changed = true;
               return true;

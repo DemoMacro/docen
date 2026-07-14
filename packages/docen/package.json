@@ -1,6 +1,6 @@
 {
   "name": "docen",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "Universal document toolkit — one package for headless Markdown/HTML/DOCX conversion AND the full docen web-component editor. Re-exports @docen/docx (converters + engine) and @docen/editor (<docen-document>).",
   "keywords": [
     "components",

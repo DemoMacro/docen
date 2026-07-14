@@ -1,6 +1,6 @@
 {
   "name": "@docen/editor",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "Assembly layer for docen editors — bundles a Fluent UI host (ribbon, panes, status bar) with the @docen/docx engine into turnkey <docen-document> web components, with Office.js-style add-ins and Office-style pagination",
   "keywords": [
     "add-ins",
