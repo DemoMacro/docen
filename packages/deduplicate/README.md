@@ -112,7 +112,7 @@ for (const pc of result.paragraphs) {
 }
 ```
 
-Pass `localMatch: false` to disable, or `{ kgramLength, windowSize, minMatchLength }` to tune. The default `kgramLength=10, windowSize=6` gives a 15-char guarantee (`t = kgramLength + windowSize − 1`): any shared substring of 15+ characters within a paragraph pair is reported.
+Pass `localMatch: false` to disable, or `{ kgramLength, windowSize, minMatchLength }` to tune. The default `kgramLength=10, windowSize=4` gives a 13-char guarantee (`t = kgramLength + windowSize − 1`), aligning with the Chinese academic plagiarism-check industry standard — CNKI (知网), Wanfang (万方), VIP (维普), and PaperPass all flag 13 consecutive matching characters as a duplicate: any shared substring of 13+ characters within a paragraph pair is reported.
 
 ## Options
 
@@ -129,7 +129,7 @@ interface DeduplicateOptions {
   /** Custom sentence splitter (Chinese & English aware by default). */
   splitter?: (text: string) => string[];
   /** Verbatim local-match (Winnowing). `false` disables; an object tunes
-   *  { kgramLength, windowSize, minMatchLength }. @default enabled (k=10, w=6 ⇒ 15-char guarantee) */
+   *  { kgramLength, windowSize, minMatchLength }. @default enabled (k=10, w=4 ⇒ 13-char guarantee, aligning with the CNKI/Wanfang/VIP 13-character industry standard) */
   localMatch?: boolean | LocalMatchConfig;
 }
 ```
@@ -187,7 +187,9 @@ interface LocalMatch {
 5. **No containment fallback** — eliminates false positives from n-gram coincidence
 6. **Noise floor** controlled by `similarityThreshold` — matches below this are classified as "none"
 
-7. **Verbatim local match (Winnowing)** — alongside sentence matching, each candidate pair runs k-gram fingerprints (windowed-min selection) matched by hash; a collision seeds a char-by-char `extendSeed` walk that recovers the full copied fragment of any length. Fragments ≥ `minMatchLength` land in `verbatimMatches` and upgrade an otherwise-`none` pair to `partial`. This is built into `compareDocuments` / `findDuplicates` — no separate function to choose. Guarantee (Schleimer et al. 2003): any shared substring of `t = kgramLength + windowSize − 1` chars yields ≥1 fragment. Built on `@nlptools/distance`'s `ngrams` + `fnv1a`; only the windowed-min selection and seed-extend are docen's own.
+7. **Verbatim local match (Winnowing)** — alongside sentence matching, each paragraph is fingerprinted once (k-gram windowed-min selection) and the pair loop matches fingerprints by hash; a collision seeds a char-by-char `extendSeed` walk that recovers the full copied fragment of any length. Fragments ≥ `minMatchLength` land in `verbatimMatches` and upgrade an otherwise-`none` pair to `partial`. This is built into `compareDocuments` / `findDuplicates` — no separate function to choose. Guarantee (Schleimer et al. 2003): any shared substring of `t = kgramLength + windowSize − 1` chars yields ≥1 fragment. Fingerprints are precomputed once per paragraph and reused across the O(P²) pair loop (O(P) winnows, not O(P²)). Built on `@nlptools/distance`'s `ngrams` + `fnv1a`; only the windowed-min selection and seed-extend are docen's own.
+
+   The 13-char guarantee aligns with the Chinese academic plagiarism-check industry standard: CNKI (知网), Wanfang (万方), VIP (维普), and PaperPass all flag 13 consecutive matching characters as a duplicate. The 10-char k-gram sits just below as the noise floor; `minMatchLength` defaults to `kgramLength + windowSize − 1 = 13`, so only 13+ char spans are reported. (Schleimer et al.'s `k≈50` for whole-document English prose optimizes for precision over a large corpus; docen's per-paragraph CJK role calls for the shorter, industry-aligned threshold.)
 
 ## License
 

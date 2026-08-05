@@ -59,6 +59,14 @@ export interface SentenceInfo {
   fingerprint: bigint | null;
 }
 
+/** Winnowing fingerprint: a selected k-gram hash at its source position.
+ *  Shared between winnowing.ts (produces) and ParagraphInfo (caches) so the
+ *  O(P²) pair loop reuses fingerprints instead of recomputing per pair. */
+export interface Fingerprint {
+  hash: number;
+  pos: number;
+}
+
 /** Paragraph with sentence-level information. */
 export interface ParagraphInfo {
   text: string;
@@ -66,6 +74,11 @@ export interface ParagraphInfo {
   sentences: SentenceInfo[];
   /** Paragraph-level SimHash for O(1) pair prescreening. Null if too short. */
   fingerprint: bigint | null;
+  /** Winnowing fingerprints (k-gram windowed-min), precomputed once per
+   *  paragraph when local-match is enabled so the pair loop reuses them
+   *  instead of recomputing per pair (O(P) winnows, not O(P²)). Undefined when
+   *  local-match is off or the text yields no fingerprints. */
+  winnowFp?: Fingerprint[];
 }
 
 // ---------------------------------------------------------------------------

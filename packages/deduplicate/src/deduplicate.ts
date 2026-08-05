@@ -14,7 +14,13 @@ import type {
   SentenceInfo,
   SentenceSplitter,
 } from "./types";
-import { DEFAULT_K, DEFAULT_W, winnowLocalMatches, type Fragment } from "./winnowing";
+import {
+  DEFAULT_K,
+  DEFAULT_W,
+  winnowFingerprints,
+  winnowLocalMatchesFromFingerprints,
+  type Fragment,
+} from "./winnowing";
 
 // ---------------------------------------------------------------------------
 // Defaults
@@ -436,6 +442,17 @@ export function compareDocuments(
   );
   const minFragmentLength = Math.max(2, Math.floor(minSentenceLength / 4));
 
+  // Precompute Winnowing fingerprints once per paragraph (not per pair). The
+  // pair loop below is O(P₁×P₂); without this each pair would re-run
+  // winnowFingerprints on both texts, making the winnow step O(P²·|text|)
+  // instead of O(P·|text|) + O(P²) cheap hash lookups.
+  if (localMatchCfg) {
+    for (const p of paras1)
+      p.winnowFp = winnowFingerprints(p.text, localMatchCfg.k, localMatchCfg.w);
+    for (const p of paras2)
+      p.winnowFp = winnowFingerprints(p.text, localMatchCfg.k, localMatchCfg.w);
+  }
+
   const paragraphComparisons: ParagraphComparison[] = [];
 
   for (const p1 of paras1) {
@@ -452,12 +469,13 @@ export function compareDocuments(
       const coverage = isParagraphCandidate(p1.fingerprint, p2.fingerprint, hammingThreshold)
         ? sentenceCoverage(p1, p2, hammingThreshold, levenshteinThreshold, minFragmentLength)
         : { coverageA: 0, coverageB: 0 };
-      if (localMatchCfg) {
-        const frags = winnowLocalMatches(
+      if (localMatchCfg && p1.winnowFp && p2.winnowFp) {
+        const frags = winnowLocalMatchesFromFingerprints(
+          p1.winnowFp,
+          p2.winnowFp,
           p1.text,
           p2.text,
           localMatchCfg.k,
-          localMatchCfg.w,
           localMatchCfg.minMatch,
         );
         for (const frag of frags) verbatimMatches.push(toLocalMatch(frag, p1.index, p2.index));
@@ -530,6 +548,13 @@ export function findDuplicates(
   );
   const minFragmentLength = Math.max(2, Math.floor(minSentenceLength / 4));
 
+  // Precompute Winnowing fingerprints once per paragraph (not per pair) — see
+  // compareDocuments for the O(P) vs O(P²) rationale.
+  if (localMatchCfg) {
+    for (const p of paras)
+      p.winnowFp = winnowFingerprints(p.text, localMatchCfg.k, localMatchCfg.w);
+  }
+
   const matches: DuplicateMatch[] = [];
   const processed = new Set<number>();
 
@@ -558,15 +583,17 @@ export function findDuplicates(
             minFragmentLength,
           )
         : { coverageA: 0, coverageB: 0 };
-      const frags = localMatchCfg
-        ? winnowLocalMatches(
-            paras[i].text,
-            paras[j].text,
-            localMatchCfg.k,
-            localMatchCfg.w,
-            localMatchCfg.minMatch,
-          )
-        : [];
+      const frags =
+        localMatchCfg && paras[i].winnowFp && paras[j].winnowFp
+          ? winnowLocalMatchesFromFingerprints(
+              paras[i].winnowFp!,
+              paras[j].winnowFp!,
+              paras[i].text,
+              paras[j].text,
+              localMatchCfg.k,
+              localMatchCfg.minMatch,
+            )
+          : [];
       const maxCov = Math.max(coverage.coverageA, coverage.coverageB);
       // A pair counts as duplicate when sentence-level similarity clears the
       // threshold OR a verbatim fragment survives (Winnowing — copied text

@@ -1,22 +1,30 @@
 import { fnv1a, ngrams } from "@nlptools/distance";
 
+import type { Fingerprint } from "./types";
+
 // ---------------------------------------------------------------------------
 // Winnowing (Schlemer et al. 2003) — verbatim local-match engine. Internal:
-// compareDocuments / findDuplicates call winnowLocalMatches per paragraph pair;
+// compareDocuments / findDuplicates precompute fingerprints once per paragraph
+// (ParagraphInfo.winnowFp) and pair them via winnowLocalMatchesFromFingerprints;
 // nothing here is part of the public API.
 // ---------------------------------------------------------------------------
 
-/** Defaults — k=10, w=6 ⇒ guarantee threshold t = k + w - 1 = 15. Tuned for
- *  CJK: 10-char k-gram is a stable noise floor, w=6 keeps the fingerprint
- *  density ~1 per 3 chars while guaranteeing any ≥15-char shared substring
- *  surfaces at least one matching fingerprint. */
+/** Defaults — k=10, w=4 ⇒ guarantee threshold t = k + w - 1 = 13.
+ *
+ *  The 13-char guarantee aligns with the Chinese academic plagiarism-check
+ *  industry standard: CNKI (知网), Wanfang (万方), VIP (维普), and PaperPass all
+ *  flag "13 consecutive matching characters" as a duplicate. docen's Winnowing
+ *  layer catches verbatim copies *inside* an otherwise-dissimilar paragraph
+ *  that whole-paragraph SimHash dilutes, so the guarantee hugs that industry
+ *  floor — any shared substring of 13+ chars within a paragraph pair is
+ *  reported. The 10-char k-gram stays below it as the noise floor (sub-10-char
+ *  runs don't even seed); minMatchLength defaults to t=13, so only 13+ char
+ *  spans are reported, matching the industry rule precisely. (Schleimer et
+ *  al.'s k≈50 for whole-document English prose optimizes for precision over a
+ *  large corpus; docen's per-paragraph CJK role calls for the shorter,
+ *  industry-aligned threshold.) */
 export const DEFAULT_K = 10;
-export const DEFAULT_W = 6;
-
-interface Fingerprint {
-  hash: number;
-  pos: number;
-}
+export const DEFAULT_W = 4;
 
 /** A verbatim overlap between two texts (paragraph-pair level; paraIndex is
  *  filled by the caller when wrapping into the public LocalMatch). */
@@ -40,7 +48,7 @@ export interface Fragment {
  * selection is docen's own — the library ships the parts but not the winnow
  * step itself.
  */
-function winnowFingerprints(text: string, k = DEFAULT_K, w = DEFAULT_W): Fingerprint[] {
+export function winnowFingerprints(text: string, k = DEFAULT_K, w = DEFAULT_W): Fingerprint[] {
   if (k < 1) throw new Error(`winnowFingerprints: k must be >= 1, got ${k}`);
   if (w < 1) throw new Error(`winnowFingerprints: w must be >= 1, got ${w}`);
   const grams = ngrams(text, k);
@@ -60,16 +68,23 @@ function winnowFingerprints(text: string, k = DEFAULT_K, w = DEFAULT_W): Fingerp
  */
 function winnowSelect(hashes: { hash: number; pos: number }[], w: number): Fingerprint[] {
   const fingerprints: Fingerprint[] = [];
+  // Monotonic deque of sliding-window-minimum candidates, stored as object
+  // references with a head index. push/pop act on the tail (O(1)); advancing
+  // the head index evicts off-window entries (O(1)) — no Array.shift(), which
+  // is O(queue length) and would make the loop O(n·w). Entries before `head`
+  // stay in the array (lazy) but are never read; the array is per-call and
+  // short-lived, so the slack is harmless.
   const deque: { hash: number; pos: number }[] = [];
+  let head = 0;
   let lastPos = -1;
   for (let i = 0; i < hashes.length; i++) {
-    while (deque.length > 0 && deque[deque.length - 1].hash > hashes[i].hash) {
+    while (deque.length > head && deque[deque.length - 1].hash > hashes[i].hash) {
       deque.pop();
     }
     deque.push(hashes[i]);
-    while (deque[0].pos <= i - w) deque.shift();
+    while (deque[head].pos <= i - w) head++;
     if (i >= w - 1) {
-      const min = deque[0];
+      const min = deque[head];
       if (min.pos !== lastPos) {
         fingerprints.push({ hash: min.hash, pos: min.pos });
         lastPos = min.pos;
@@ -107,25 +122,28 @@ function extendSeed(
 }
 
 /**
- * Finds verbatim local overlaps between two paragraphs (the "find copied
- * fragments inside dissimilar text" case whole-paragraph SimHash dilutes).
+ * Finds verbatim local overlaps between two paragraphs from precomputed
+ * fingerprints (the "find copied fragments inside dissimilar text" case
+ * whole-paragraph SimHash dilutes). Callers pairing many paragraphs should
+ * precompute fingerprints once per paragraph ({@link winnowFingerprints}) and
+ * reuse them here — fingerprinting every pair is O(P²) winnows, this turns it
+ * into O(P) winnows + O(P²) cheap hash lookups.
  *
- * Pipeline: winnow each text once → match fingerprints by hash (a collision is
- * a k-gram seed known identical in both) → `extendSeed` walks each seed out to
- * its full verbatim extent → dedupe (seeds in one fragment extend to the same
- * span). The Winnowing guarantee ⇒ any shared substring of `k + w − 1` chars
- * yields ≥1 fragment. Returns fragments without paragraph indices; the caller
- * wraps them into public LocalMatch records.
+ * Pipeline: match fingerprints by hash (a collision is a k-gram seed known
+ * identical in both) → `extendSeed` walks each seed out to its full verbatim
+ * extent → dedupe (seeds in one fragment extend to the same span). The
+ * Winnowing guarantee ⇒ any shared substring of `k + w − 1` chars yields ≥1
+ * fragment. Returns fragments without paragraph indices; the caller wraps them
+ * into public LocalMatch records.
  */
-export function winnowLocalMatches(
+export function winnowLocalMatchesFromFingerprints(
+  fpA: Fingerprint[],
+  fpB: Fingerprint[],
   textA: string,
   textB: string,
-  k = DEFAULT_K,
-  w = DEFAULT_W,
-  minMatch = k + w - 1,
+  k: number,
+  minMatch: number,
 ): Fragment[] {
-  const fpA = winnowFingerprints(textA, k, w);
-  const fpB = winnowFingerprints(textB, k, w);
   if (fpA.length === 0 || fpB.length === 0) return [];
 
   const aIndex = new Map<number, number[]>();
@@ -155,4 +173,21 @@ export function winnowLocalMatches(
   }
 
   return fragments;
+}
+
+/** Convenience wrapper: fingerprints both texts on the fly, then delegates to
+ *  {@link winnowLocalMatchesFromFingerprints}. Use for one-off pairs; for
+ *  repeated pairing (one paragraph vs. many), precompute fingerprints with
+ *  {@link winnowFingerprints} and call the From-Fingerprints form to avoid
+ *  recomputation. */
+export function winnowLocalMatches(
+  textA: string,
+  textB: string,
+  k = DEFAULT_K,
+  w = DEFAULT_W,
+  minMatch = k + w - 1,
+): Fragment[] {
+  const fpA = winnowFingerprints(textA, k, w);
+  const fpB = winnowFingerprints(textB, k, w);
+  return winnowLocalMatchesFromFingerprints(fpA, fpB, textA, textB, k, minMatch);
 }
