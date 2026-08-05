@@ -947,15 +947,29 @@ export function renderRunStyles(attrs: Record<string, unknown>, eastAsiaLang = "
   const a = attrs as RunStyleShape;
   const styles: string[] = [];
 
-  if (a.bold) styles.push("font-weight:bold");
-  if (a.italic) styles.push("font-style:italic");
-  if (a.smallCaps) styles.push("font-variant:small-caps");
-  if (a.allCaps) styles.push("text-transform:uppercase");
+  // Three-state OOXML booleans (true/false/null). true applies the property;
+  // false explicitly cancels an inherited one via inline CSS — the cascade
+  // overrides the stylesheet from stylesToCss (e.g. a run cancelling an
+  // inherited heading bold). null/undefined inherits.
+  if (a.bold === true) styles.push("font-weight:bold");
+  else if (a.bold === false) styles.push("font-weight:normal");
+  if (a.italic === true) styles.push("font-style:italic");
+  else if (a.italic === false) styles.push("font-style:normal");
+  if (a.smallCaps === true) styles.push("font-variant:small-caps");
+  else if (a.smallCaps === false) styles.push("font-variant:normal");
+  if (a.allCaps === true) styles.push("text-transform:uppercase");
+  else if (a.allCaps === false) styles.push("text-transform:none");
 
+  // text-decoration is a CSS shorthand — an inline value replaces the
+  // stylesheet's, so emit it whenever the run carries any explicit decoration
+  // state (even all-false) to cancel an inherited underline/line-through.
   const deco: string[] = [];
-  if (a.underline) deco.push("underline");
-  if (a.strike || a.doubleStrike) deco.push("line-through");
+  const u = a.underline as { type?: string } | null | undefined;
+  if (u?.type && u.type !== "none") deco.push("underline");
+  if (a.strike === true || a.doubleStrike === true) deco.push("line-through");
   if (deco.length) styles.push(`text-decoration:${deco.join(" ")}`);
+  else if (u != null || a.strike != null || a.doubleStrike != null)
+    styles.push("text-decoration:none");
 
   const font = resolveFontFamilyCss(a.font, eastAsiaLang);
   if (font) styles.push(`font-family:${font}`);

@@ -12,6 +12,11 @@ import { Subscript as BaseSubscript } from "@tiptap/extension-subscript";
 import { Superscript as BaseSuperscript } from "@tiptap/extension-superscript";
 import { Underline as BaseUnderline } from "@tiptap/extension-underline";
 
+// Each mark surfaces only the "true" state for editor interaction (toolbar
+// toggle, <strong>/<em>). The full three-state round-trip (true/false/null) is
+// owned by TextStyle's matching attr, so an inherited bold/italic cancelled by
+// <w:b w:val="0"/> / <w:i w:val="0"/> round-trips as TextStyle.bold=false (and
+// renders font-weight:normal via CSS cascade) without a mark here.
 export const Bold = BaseBold.extend({
   renderDocx: () => ({ bold: true }),
   parseDocx: (opts: RunOptions) => (opts.bold ? {} : null),

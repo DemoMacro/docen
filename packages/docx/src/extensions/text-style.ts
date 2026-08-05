@@ -16,9 +16,12 @@ import {
 /**
  * TextStyle mark with office-open attrs.
  *
- * Attrs mirror RunStylePropertiesOptions (bold/italic/strike/subScript/
- * superScript handled by dedicated marks and therefore omitted). DOCX
- * round-trip is near-identity: renderDocx/parseDocx pass attrs through;
+ * Attrs mirror RunStylePropertiesOptions. bold/italic/strike/doubleStrike are
+ * three-state booleans (true/false/null) carried here for lossless round-trip
+ * and CSS cascade; the dedicated Bold/Italic/Strike marks only surface the
+ * "true" state for editor interaction (<strong>/<em>/<s>). subScript/
+ * superScript (OOXML vertAlign enum, no false state) stay on dedicated marks.
+ * DOCX round-trip is near-identity: renderDocx/parseDocx pass attrs through;
  * CSS conversion happens only in attribute-level renderHTML/parseHTML.
  */
 
@@ -28,11 +31,12 @@ const SKIP_KEYS = new Set([
   "text",
   "style",
   "break",
-  // Expressed by dedicated marks — must not pollute textStyle attrs:
-  "bold",
-  "italic",
-  "strike",
-  "doubleStrike",
+  // subScript/superScript are OOXML vertAlign enums with no "false" state, so
+  // they stay on dedicated marks. bold/italic/strike/doubleStrike are
+  // three-state booleans (true/false/null) — they ride NATIVE_RUN_ATTRS so the
+  // "false" state (e.g. <w:b w:val="0"/> cancelling an inherited bold) both
+  // round-trips and feeds the CSS cascade; their dedicated marks only surface
+  // "true" for editor interaction.
   "subScript",
   "superScript",
 ]);
@@ -41,6 +45,11 @@ const SKIP_KEYS = new Set([
  *  attrNative (default null, renderDocx/parseDocx pass through). Listed once and
  *  spread into TextStyle's attribute set so adding a run prop is a one-line edit. */
 const NATIVE_RUN_ATTRS = [
+  // Three-state booleans (true/false/null) that have no dedicated mark — ride
+  // TextStyle for round-trip + stylesToCss cascade. bold/italic are defined
+  // separately below with attribute-level renderHTML so their "false" state
+  // cancels an inherited bold/italic on the run (CSS cascade).
+  "strike",
   "underline",
   "emphasisMark",
   "highlight",
@@ -160,6 +169,23 @@ export const TextStyle = BaseTextStyle.extend({
           // run's own span so the text inherits the inverted color directly.
           return css ? { style: `background-color:${css};color:contrast-color(${css})` } : {};
         },
+      },
+
+      // bold/italic are three-state. The dedicated Bold/Italic marks surface
+      // "true" as <strong>/<em>; TextStyle carries the full state for round-trip,
+      // and "false" emits an inline normal so a run cancelling an inherited
+      // bold/italic (e.g. <w:b w:val="0"/> inside a bold style) renders un-bold
+      // via CSS cascade (inline overrides the stylesToCss stylesheet). "true"
+      // emits nothing here to avoid duplicating <strong>/<em>.
+      bold: {
+        default: null,
+        renderHTML: (attrs: Record<string, unknown>) =>
+          attrs.bold === false ? { style: "font-weight:normal" } : {},
+      },
+      italic: {
+        default: null,
+        renderHTML: (attrs: Record<string, unknown>) =>
+          attrs.italic === false ? { style: "font-style:normal" } : {},
       },
 
       ...nativeRunAttrs(),
