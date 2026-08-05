@@ -1,5 +1,7 @@
 packages:
   - packages/**
   - "!**/test/**"
+allowBuilds:
+  esbuild: true
 patchedDependencies:
   "@chenglou/pretext@0.0.8": patches/@chenglou__pretext@0.0.8.patch
