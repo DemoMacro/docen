@@ -244,9 +244,7 @@ doc.addAddin({
         {
           id: "tools",
           label: "Tools",
-          controls: [
-            /* … */
-          ],
+          controls: [/* … */],
         },
       ],
     },
