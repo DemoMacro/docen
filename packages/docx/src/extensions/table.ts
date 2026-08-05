@@ -518,10 +518,12 @@ export const Table = BaseTable.extend({
     }
 
     if (a.cellSpacing && typeof a.cellSpacing === "object") {
-      // TableCellSpacingProperties: { value, type }
-      const cs = a.cellSpacing as { value?: number };
-      if (cs.value != null) {
-        const css = twipToCss(cs.value);
+      // TableWidthProperties: { size, type } — office-open's cellSpacingStr reads
+      // opts.size (comments-BKbOd_pv.mjs:7451). The previous `cs.value` read never
+      // matched, so <w:tblCellSpacing> was silently dropped from the editor render.
+      const cs = a.cellSpacing as { size?: number; type?: string };
+      if (cs.size != null) {
+        const css = twipToCss(cs.size);
         if (css) styles.push(`border-spacing:${css}`);
       }
     }
