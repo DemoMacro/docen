@@ -427,16 +427,28 @@ function resolveNode(
   const type = node.type;
   if ((type === "paragraph" || type === "heading") && attrs?.styleId) {
     const { paragraph, run } = mergeStyleChain(paraById, attrs.styleId as string);
-    // resolved chain as the base; explicit attrs (incl. attrs.run) override.
-    const mergedRun = { ...run, ...(attrs.run as Record<string, unknown>) };
-    out.attrs = { ...paragraph, ...attrs, run: mergedRun };
+    // Baked chain is the base; explicit attrs override per-property. Use
+    // deepMergeInto (not object spread) so a node's schema null defaults
+    // (spacing:null, indent:null, …) don't clobber the baked values, and a
+    // partial override (attrs.spacing.before) merges key by key instead of
+    // replacing the whole group. Nullish attrs drop out — the baked value (or
+    // nothing) remains, so no dead nulls linger on the baked node.
+    const mergedAttrs = deepMergeInto({ ...paragraph }, attrs);
+    mergedAttrs.run = deepMergeInto(
+      { ...run },
+      (attrs.run as Record<string, unknown> | null | undefined) ?? {},
+    );
+    out.attrs = mergedAttrs;
   }
   if (node.marks) {
     out.marks = node.marks.map((m) => {
       if (m.type !== "textStyle") return m;
       const sid = (m.attrs as Record<string, unknown> | undefined)?.styleId as string | undefined;
       const crun = sid ? charRunById.get(sid) : undefined;
-      return crun ? { ...m, attrs: { ...crun, ...m.attrs } } : m;
+      // deepMergeInto (not spread) so the mark's schema null defaults don't
+      // clobber the baked character-style run (e.g. italic:null wiping the
+      // style's italic:true); explicit attrs still override per-property.
+      return crun ? { ...m, attrs: deepMergeInto({ ...crun }, m.attrs ?? {}) } : m;
     });
   }
   if (node.content) {
