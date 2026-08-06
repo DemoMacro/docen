@@ -149,7 +149,8 @@ function renderChild(
     // Nested group: recurse with the box the parent transform mapped it to —
     // a nested group's own transformation is in child-coordinate space (small
     // pixels/emus), so its real size is the parent's mapped box, not its own.
-    return renderGroup(child, box.w, box.h, base);
+    const t = groupChildTransform(child.transformation);
+    return renderGroup(child, box.w, box.h, t ? `${base};${t}` : base);
   }
 
   if (child.type === "wps") {
@@ -157,12 +158,12 @@ function renderChild(
     // customGeometry would need an SVG node view for path fidelity). A text-box
     // shape also carries body paragraphs (children) rendered as inline text.
     const data = (child.data ?? {}) as WpsShapeCoreOptions;
-    // rotation/flip may come from the group transform rather than the shape's
-    // own bodyPr — prefer bodyPr, fall back to the group-child transformation.
-    // Both store rotation as ST_Angle (1/60000 deg) and flip as {horizontal,
-    // vertical} (MediaTransformation/MediaDataTransformation shape).
+    // Group-child transformation (MediaDataTransformation) stores rotation as
+    // raw ST_Angle; convert to CSS degrees. Prefer the shape transform
+    // (spPr/a:xfrm), fall back to bodyPr@rot (rare body-only rotation).
     const ct = child.transformation;
-    const rotation = data.bodyProperties?.rotation ?? ct?.rotation;
+    const rawRot = ct?.rotation ?? data.bodyProperties?.rotation;
+    const rotation = typeof rawRot === "number" ? rawRot / 60_000 : undefined;
     const flipRaw = ct?.flip;
     const flip = flipRaw
       ? { horizontal: flipRaw.horizontal, vertical: flipRaw.vertical }
@@ -173,7 +174,10 @@ function renderChild(
   // pic: child.type is the media type (jpg/png/…), child.data is the raw bytes.
   if (child.type) {
     const src = picSrc(child.type, child.data);
-    if (src) return ["img", { src, alt: "", style: base }];
+    if (src) {
+      const t = groupChildTransform(child.transformation);
+      return ["img", { src, alt: "", style: t ? `${base};${t}` : base }];
+    }
   }
 
   return [];
@@ -226,28 +230,48 @@ export function wpsInnerStyle(data: WpsShapeCoreOptions): string {
   return parts.join(";");
 }
 
+/** Build a CSS transform list from flip + rotation. `rotationDegrees` is already
+ *  in CSS degrees (caller converts ST_Angle). OOXML a:xfrm applies flip THEN
+ *  rotate (the drawingml spec: flip mirrors "before rotation is applied"); a CSS
+ *  transform list applies right-to-left, so `rotate() scaleX() scaleY()` runs the
+ *  scales first (= flip) then rotate — matching the OOXML order. Returns "" when
+ *  there is nothing to transform. */
+function flipRotateTransform(
+  rotationDegrees?: number,
+  flip?: { horizontal?: boolean; vertical?: boolean },
+): string {
+  const transforms: string[] = [];
+  if (rotationDegrees) transforms.push(`rotate(${rotationDegrees}deg)`);
+  if (flip?.horizontal) transforms.push("scaleX(-1)");
+  if (flip?.vertical) transforms.push("scaleY(-1)");
+  return transforms.length > 0 ? `transform:${transforms.join(" ")}` : "";
+}
+
+/** CSS transform for a group-child transformation (MediaDataTransformation:
+ *  rotation is raw ST_Angle 1/60000 deg; flip is {horizontal, vertical}). */
+function groupChildTransform(
+  ct: { rotation?: number; flip?: { horizontal?: boolean; vertical?: boolean } } | undefined,
+): string {
+  if (!ct) return "";
+  const rotation = typeof ct.rotation === "number" ? ct.rotation / 60_000 : undefined;
+  return flipRotateTransform(rotation, ct.flip);
+}
+
 /** Rotation + flip + writing-mode (text direction) for a wps shape. Lives on
- *  the positioning wrapper OUTSIDE the contentDOM. `rotationOverride`/`flipOverride`
- *  cover a group child whose transform comes from the group's a:xfrm, not bodyPr. */
+ *  the positioning wrapper OUTSIDE the contentDOM. `rotationDegrees`/`flipOverride`
+ *  cover a group child whose transform comes from the group's a:xfrm, not bodyPr.
+ *  rotationDegrees is already CSS degrees — callers convert ST_Angle (the wire
+ *  unit on bodyPr@rot and group-child MediaDataTransformation) since the source
+ *  differs by node: standalone ws.transformation is MediaTransformation degrees,
+ *  while group-child ct.rotation stays raw ST_Angle. */
 export function wpsRotationVert(
   data: WpsShapeCoreOptions,
-  rotationOverride?: number,
+  rotationDegrees?: number,
   flipOverride?: { horizontal?: boolean; vertical?: boolean },
 ): string {
   const parts: string[] = [];
-  // OOXML a:xfrm applies flip THEN rotate; a CSS transform list applies
-  // right-to-left, so `rotate() scaleX() scaleY()` runs the scales first
-  // (= flip) then rotate — matching the OOXML order.
-  // rot is ST_Angle (1/60000 deg) on both bodyPr@rot and a:xfrm@rot (via
-  // transform2DDesc) — convert to CSS degrees so 270° (rot=16200000) renders
-  // as rotate(270deg), not rotate(16200000deg) which collapses to 0.
-  const rawRot = rotationOverride ?? data.bodyProperties?.rotation;
-  const rotation = typeof rawRot === "number" ? rawRot / 60_000 : undefined;
-  const transforms: string[] = [];
-  if (rotation) transforms.push(`rotate(${rotation}deg)`);
-  if (flipOverride?.horizontal) transforms.push("scaleX(-1)");
-  if (flipOverride?.vertical) transforms.push("scaleY(-1)");
-  if (transforms.length > 0) parts.push(`transform:${transforms.join(" ")}`);
+  const t = flipRotateTransform(rotationDegrees, flipOverride);
+  if (t) parts.push(t);
   // text direction (bodyPr vert): vert/eaVert/mongolianVert → vertical-rl,
   // vert270 → vertical-lr, so CJK vertical text boxes render top-to-bottom.
   const vert = data.bodyProperties?.vert;
@@ -308,14 +332,16 @@ export function wpsShapeStyles(ws: WpsShapeRunOptions): WpsShapeStyles {
   const sizeStyle = noWrap
     ? `width:max-content;height:${h}px;box-sizing:border-box;white-space:nowrap`
     : `width:${w}px;height:${h}px;box-sizing:border-box;overflow:hidden`;
-  // Standalone wpsShape flip comes from its a:xfrm transformation.flip object
-  // ({horizontal, vertical}). rotation still reads bodyProperties.rotation only
-  // (bodyPr@rot, ST_Angle); ws.transformation.rotation is MediaTransformation
-  // degrees and would mix units with the /60000 path — left out of scope rather
-  // than risk a double-convert.
-  const flipRaw = ws.transformation?.flip;
+  // Standalone wpsShape shape rotation + flip come from its a:xfrm
+  // (ws.transformation: MediaTransformation — rotation already in degrees,
+  // flip as {horizontal, vertical}). bodyPr@rot (bodyProperties.rotation) is a
+  // rare body-only rotation kept as ST_Angle, so convert on the fallback.
+  const tf = ws.transformation;
+  const flipRaw = tf?.flip;
   const flip = flipRaw ? { horizontal: flipRaw.horizontal, vertical: flipRaw.vertical } : undefined;
-  const rotVert = wpsRotationVert(ws, undefined, flip);
+  const bodyRot = ws.bodyProperties?.rotation;
+  const rotation = tf?.rotation ?? (typeof bodyRot === "number" ? bodyRot / 60_000 : undefined);
+  const rotVert = wpsRotationVert(ws, rotation, flip);
   const widthNum = typeof tw === "number" ? tw : undefined;
   let outer: string;
   let paragraphAnchor = false;
