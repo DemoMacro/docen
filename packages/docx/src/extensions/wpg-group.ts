@@ -157,9 +157,17 @@ function renderChild(
     // customGeometry would need an SVG node view for path fidelity). A text-box
     // shape also carries body paragraphs (children) rendered as inline text.
     const data = (child.data ?? {}) as WpsShapeCoreOptions;
-    // rotation may come from the group transform rather than the shape's bodyPr.
-    const rotation = data.bodyProperties?.rotation ?? child.transformation?.rotation;
-    return renderWpsInterior(data, base, { rotation, attrs: { "data-wpg-wps": "" } });
+    // rotation/flip may come from the group transform rather than the shape's
+    // own bodyPr — prefer bodyPr, fall back to the group-child transformation.
+    // Both store rotation as ST_Angle (1/60000 deg) and flip as {horizontal,
+    // vertical} (MediaTransformation/MediaDataTransformation shape).
+    const ct = child.transformation;
+    const rotation = data.bodyProperties?.rotation ?? ct?.rotation;
+    const flipRaw = ct?.flip;
+    const flip = flipRaw
+      ? { horizontal: flipRaw.horizontal, vertical: flipRaw.vertical }
+      : undefined;
+    return renderWpsInterior(data, base, { rotation, flip, attrs: { "data-wpg-wps": "" } });
   }
 
   // pic: child.type is the media type (jpg/png/…), child.data is the raw bytes.
@@ -218,13 +226,28 @@ export function wpsInnerStyle(data: WpsShapeCoreOptions): string {
   return parts.join(";");
 }
 
-/** Rotation + writing-mode (text direction) for a wps shape. Lives on the
- *  positioning wrapper OUTSIDE the contentDOM. `rotationOverride` covers a
- *  group child whose rotation comes from the group transform, not bodyPr. */
-export function wpsRotationVert(data: WpsShapeCoreOptions, rotationOverride?: number): string {
+/** Rotation + flip + writing-mode (text direction) for a wps shape. Lives on
+ *  the positioning wrapper OUTSIDE the contentDOM. `rotationOverride`/`flipOverride`
+ *  cover a group child whose transform comes from the group's a:xfrm, not bodyPr. */
+export function wpsRotationVert(
+  data: WpsShapeCoreOptions,
+  rotationOverride?: number,
+  flipOverride?: { horizontal?: boolean; vertical?: boolean },
+): string {
   const parts: string[] = [];
-  const rotation = rotationOverride ?? data.bodyProperties?.rotation;
-  if (rotation) parts.push(`transform:rotate(${rotation}deg)`);
+  // OOXML a:xfrm applies flip THEN rotate; a CSS transform list applies
+  // right-to-left, so `rotate() scaleX() scaleY()` runs the scales first
+  // (= flip) then rotate — matching the OOXML order.
+  // rot is ST_Angle (1/60000 deg) on both bodyPr@rot and a:xfrm@rot (via
+  // transform2DDesc) — convert to CSS degrees so 270° (rot=16200000) renders
+  // as rotate(270deg), not rotate(16200000deg) which collapses to 0.
+  const rawRot = rotationOverride ?? data.bodyProperties?.rotation;
+  const rotation = typeof rawRot === "number" ? rawRot / 60_000 : undefined;
+  const transforms: string[] = [];
+  if (rotation) transforms.push(`rotate(${rotation}deg)`);
+  if (flipOverride?.horizontal) transforms.push("scaleX(-1)");
+  if (flipOverride?.vertical) transforms.push("scaleY(-1)");
+  if (transforms.length > 0) parts.push(`transform:${transforms.join(" ")}`);
   // text direction (bodyPr vert): vert/eaVert/mongolianVert → vertical-rl,
   // vert270 → vertical-lr, so CJK vertical text boxes render top-to-bottom.
   const vert = data.bodyProperties?.vert;
@@ -251,10 +274,14 @@ export function wpsRotationVert(data: WpsShapeCoreOptions, rotationOverride?: nu
 export function renderWpsInterior(
   data: WpsShapeCoreOptions,
   positionStyle: string,
-  opts?: { rotation?: number; attrs?: Record<string, string> },
+  opts?: {
+    rotation?: number;
+    flip?: { horizontal?: boolean; vertical?: boolean };
+    attrs?: Record<string, string>;
+  },
 ): Spec {
   const inner = wpsInnerStyle(data);
-  const rotVert = wpsRotationVert(data, opts?.rotation);
+  const rotVert = wpsRotationVert(data, opts?.rotation, opts?.flip);
   const style = [positionStyle, inner, rotVert].filter(Boolean).join(";");
   const attrs: Record<string, unknown> = { style };
   if (opts?.attrs) Object.assign(attrs, opts.attrs);
@@ -281,7 +308,14 @@ export function wpsShapeStyles(ws: WpsShapeRunOptions): WpsShapeStyles {
   const sizeStyle = noWrap
     ? `width:max-content;height:${h}px;box-sizing:border-box;white-space:nowrap`
     : `width:${w}px;height:${h}px;box-sizing:border-box;overflow:hidden`;
-  const rotVert = wpsRotationVert(ws);
+  // Standalone wpsShape flip comes from its a:xfrm transformation.flip object
+  // ({horizontal, vertical}). rotation still reads bodyProperties.rotation only
+  // (bodyPr@rot, ST_Angle); ws.transformation.rotation is MediaTransformation
+  // degrees and would mix units with the /60000 path — left out of scope rather
+  // than risk a double-convert.
+  const flipRaw = ws.transformation?.flip;
+  const flip = flipRaw ? { horizontal: flipRaw.horizontal, vertical: flipRaw.vertical } : undefined;
+  const rotVert = wpsRotationVert(ws, undefined, flip);
   const widthNum = typeof tw === "number" ? tw : undefined;
   let outer: string;
   let paragraphAnchor = false;

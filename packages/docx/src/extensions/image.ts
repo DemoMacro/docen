@@ -16,6 +16,9 @@ type CropRect = { left?: number; top?: number; right?: number; bottom?: number }
  *    image commands work).
  *  - rotation: editor display only (CSS transform) but also carried through DOCX
  *    via transformation.rotation (MediaTransformation.rotation).
+ *  - flipH/flipV: editor display (CSS scaleX/scaleY) + DOCX round-trip via
+ *    transformation.flipHorizontal/flipVertical (a:xfrm@flipH/flipV). Three-state
+ *    (null/true/false) — an explicit false emits flipH="0" byte-faithfully.
  *  - floating/outline: nested office-open objects (Floating / OutlineOptions).
  *  - crop: nested office-open SourceRectangleOptions (srcRect).
  *  - display: editor-only display hint, no OOXML equivalent.
@@ -81,6 +84,19 @@ export function renderDocx(node: JSONContent): Record<string, unknown> | null {
   const transformation: Record<string, unknown> = { width: `${width}px`, height: `${height}px` };
   const rotation = attrs.rotation as number | undefined;
   if (rotation != null) transformation.rotation = rotation;
+  // flip: office-open MediaTransformation.flip is {horizontal, vertical} (mapped
+  // to a:xfrm flipH/flipV by createTransformation). Three-state per axis: null =
+  // omit, true/false both emit (office-open keeps an explicit flipH="0" — byte-
+  // faithful round-trip needs the false case). Build the object only when at
+  // least one axis is set.
+  const flipHSet = attrs.flipH !== null && attrs.flipH !== undefined;
+  const flipVSet = attrs.flipV !== null && attrs.flipV !== undefined;
+  if (flipHSet || flipVSet) {
+    transformation.flip = {
+      ...(flipHSet ? { horizontal: attrs.flipH as boolean } : {}),
+      ...(flipVSet ? { vertical: attrs.flipV as boolean } : {}),
+    };
+  }
   imageOpts.transformation = transformation;
 
   // altText: alt → name, title → description (DocPropertiesOptions)
@@ -128,6 +144,13 @@ export function parseDocx(imageOpts: Record<string, unknown>): Record<string, un
     if (typeof transformation.height === "number")
       attrs.height = convertEmuToPixels(transformation.height);
     if (typeof transformation.rotation === "number") attrs.rotation = transformation.rotation;
+    // office-open MediaTransformation.flip is {horizontal, vertical}; carry both
+    // true and false through per axis (false is meaningful: flipH="0").
+    const flip = transformation.flip as { horizontal?: boolean; vertical?: boolean } | undefined;
+    if (flip) {
+      if (flip.horizontal !== undefined) attrs.flipH = flip.horizontal;
+      if (flip.vertical !== undefined) attrs.flipV = flip.vertical;
+    }
   }
 
   // altText → alt/title
@@ -247,9 +270,15 @@ export function renderImageStyles(attrs: Record<string, unknown>, marginOrigin =
     styles.push("display:inline-block");
   }
 
-  if (attrs.rotation) {
-    styles.push(`transform:rotate(${attrs.rotation as number}deg)`);
-  }
+  // OOXML a:xfrm applies flip THEN rotate; a CSS transform list applies
+  // right-to-left, so `rotate() scaleX() scaleY()` runs the scales first
+  // (= flip) then rotate — matching the OOXML order. Both flips compose
+  // commutatively, so their relative order in the list doesn't matter.
+  const transforms: string[] = [];
+  if (attrs.rotation) transforms.push(`rotate(${attrs.rotation as number}deg)`);
+  if (attrs.flipH) transforms.push("scaleX(-1)");
+  if (attrs.flipV) transforms.push("scaleY(-1)");
+  if (transforms.length > 0) styles.push(`transform:${transforms.join(" ")}`);
 
   if (attrs.floating) {
     // Floating anchor (wp:anchor) → CSS. Shared with WpgGroup via utils so
@@ -346,6 +375,29 @@ export const Image = BaseImage.extend({
           const style = element.getAttribute("style") || "";
           const match = style.match(/transform:\s*rotate\(([\d.]+)deg\)/);
           return match ? parseFloat(match[1]) : null;
+        },
+      },
+
+      // DOCX transformation.flipHorizontal/flipVertical (a:xfrm@flipH/flipV).
+      // Three-state: null = omit (default), true/false = emit flipH="1"/"0".
+      // office-open keeps the explicit false, so byte-faithful round-trip needs
+      // null vs false distinct (rotation has no such case — it's a number).
+      flipH: {
+        default: null,
+        rendered: false,
+        parseHTML: (element: HTMLElement) => {
+          const style = element.getAttribute("style") || "";
+          // Only match scaleX(-1) inside a transform list (not a translate or
+          // matrix that happens to contain -1); anchored on the scale token.
+          return /(^|[\s(])scaleX\(-1\)/.test(style) || null;
+        },
+      },
+      flipV: {
+        default: null,
+        rendered: false,
+        parseHTML: (element: HTMLElement) => {
+          const style = element.getAttribute("style") || "";
+          return /(^|[\s(])scaleY\(-1\)/.test(style) || null;
         },
       },
 
