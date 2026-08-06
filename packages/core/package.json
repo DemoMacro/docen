@@ -65,7 +65,7 @@
     "prepack": "pnpm build"
   },
   "dependencies": {
-    "@office-open/core": "0.10.14",
+    "@office-open/core": "0.10.15",
     "leafer-ui": "2.2.9"
   }
 }
