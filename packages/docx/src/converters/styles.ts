@@ -208,13 +208,32 @@ export function deepMergeInto(
  *  and scalars replace. Shared by stylesToCss (rendering) and effectiveRunProps
  *  (the caret resolver) so the gallery box and the rendered page resolve
  *  identical values. */
+// Memoize mergeStyleChain per (byId, styleId). byId is itself memoized by
+// indexParagraphStyles (one Map per StylesOptions object), so this WeakMap
+// frees the cache when the styles object is GC'd. The same styleId is resolved
+// for every paragraph/run that carries it (thousands of calls on a large doc,
+// only dozens of distinct ids) — the chain walk + deepMergeInto is repeated
+// work. Callers treat the result as read-only (stylesToCss/effectiveRunProps
+// only read fields; resolveNode spreads `{...paragraph}` before merging its own
+// attrs), so a shared cached value is safe.
+const styleChainCache = new WeakMap<
+  Map<string, StyleEntry>,
+  Map<string, { run: Record<string, unknown>; paragraph: Record<string, unknown> }>
+>();
+
 export function mergeStyleChain(
   byId: Map<string, StyleEntry>,
   styleId: string | null | undefined,
 ): { run: Record<string, unknown>; paragraph: Record<string, unknown> } {
+  if (!styleId) return { run: {}, paragraph: {} };
+  const perId = styleChainCache.get(byId);
+  if (perId) {
+    const cached = perId.get(styleId);
+    if (cached) return cached;
+  }
   const chain: StyleEntry[] = [];
   const visited = new Set<string>();
-  let curId = styleId || undefined;
+  let curId: string | undefined = styleId;
   while (curId && !visited.has(curId)) {
     visited.add(curId);
     const style = byId.get(curId);
@@ -231,7 +250,13 @@ export function mergeStyleChain(
     if (s.run) deepMergeInto(run, s.run as Record<string, unknown>);
     if (s.paragraph) deepMergeInto(paragraph, s.paragraph as Record<string, unknown>);
   }
-  return { run, paragraph };
+  const result = { run, paragraph };
+  const bucket =
+    perId ??
+    new Map<string, { run: Record<string, unknown>; paragraph: Record<string, unknown> }>();
+  if (!perId) styleChainCache.set(byId, bucket);
+  bucket.set(styleId, result);
+  return result;
 }
 
 /** Resolve a table style's effective table-level properties (tblBorders,
