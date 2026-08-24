@@ -109,7 +109,7 @@ export function sectionContentDims(sp: unknown): {
   linePitchPx: number | undefined;
 } {
   const s = (sp && typeof sp === "object" ? sp : {}) as SectionPropertiesOptions;
-  const dims = resolvePageSize(s.page?.size);
+  const dims = resolvePageSize(s.pageSize);
   const twipToPx = 4 / 3 / 20; // twip → pt (÷20) → px (×4/3)
   // Margins mirror page-node renderHTML's sectionMarginCss: each side falls back
   // to the engine default (@office-open/docx sectionMarginDefaults) when absent,
@@ -117,7 +117,9 @@ export function sectionContentDims(sp: unknown): {
   // blank doc with no sectPr at all — page size also falls back to the engine
   // default inside resolvePageSize, so a blank doc measures A4 + MS Office
   // zh-CN "Normal" margins like the engine fills into an empty sectPr).
-  const margin = s.page?.margin;
+  // pageMargin carries `| false` (explicit removal) — `?.` alone won't
+  // narrow it away.
+  const margin = s.pageMargin || undefined;
   const def = sectionMarginDefaults;
   const num = (v: unknown, d: number): number => (typeof v === "number" ? v : d);
   const mTop = num(margin?.top, def.TOP);
@@ -132,7 +134,9 @@ export function sectionContentDims(sp: unknown): {
   // and inflated pagination ~60%. Must mirror
   // sectionLinePitchCss (render) so measure == render.
   const linePitchPx =
-    grid?.linePitch && grid.type && grid.type !== "default" ? grid.linePitch * twipToPx : undefined;
+    grid && grid.linePitch && grid.type && grid.type !== "default"
+      ? grid.linePitch * twipToPx
+      : undefined;
   return {
     width: (dims.width - mLeft - mRight) * twipToPx,
     height: (dims.height - mTop - mBottom) * twipToPx,

@@ -37,7 +37,7 @@ export { resolvePageSize };
  *  export (generateHTML) renders the same geometry. */
 function pageGeometryStyles(sp: SectionPropertiesOptions | null | undefined): string[] {
   const styles: string[] = [];
-  const dims = resolvePageSize(sp?.page?.size);
+  const dims = resolvePageSize(sp?.pageSize);
   if (dims) {
     // Orientation is resolved in resolvePageSize (landscape swaps width/height),
     // so width/height here are the VISUAL paper edges.
@@ -51,7 +51,7 @@ function pageGeometryStyles(sp: SectionPropertiesOptions | null | undefined): st
     if (dims.width > 0 && dims.height > 0)
       styles.push(`contain-intrinsic-size:${twipsToMm(dims.width)} ${twipsToMm(dims.height)}`);
   }
-  const padding = sectionMarginCss(sp?.page?.margin);
+  const padding = sectionMarginCss(sp?.pageMargin);
   if (padding) styles.push(padding);
   styles.push(...sectionLinePitchCss(sp?.grid));
   return styles;

@@ -715,16 +715,15 @@ function mergeSectionProperties(
   base: SectionPropertiesOptions | null | undefined,
   patch: SectionPropertiesOptions,
 ): SectionPropertiesOptions {
-  const bp = base?.page;
-  const pp = patch.page;
+  const mergeGroup = <T extends object>(
+    b: T | false | undefined,
+    p: T | false | undefined,
+  ): T | false | undefined =>
+    p === undefined ? b : p === false || b === undefined || b === false ? p : { ...b, ...p };
   return {
     ...base,
-    page: {
-      ...bp,
-      ...pp,
-      size: { ...bp?.size, ...pp?.size },
-      margin: { ...bp?.margin, ...pp?.margin },
-    },
+    pageSize: mergeGroup(base?.pageSize, patch.pageSize),
+    pageMargin: mergeGroup(base?.pageMargin, patch.pageMargin),
   };
 }
 
@@ -1781,11 +1780,9 @@ class DocenDocument extends AddinHost<Editor> {
     }
     if (size) {
       this.#updateSectionGeometry({
-        page: {
-          size: {
-            width: convertMillimetersToTwip(size[0]),
-            height: convertMillimetersToTwip(size[1]),
-          },
+        pageSize: {
+          width: convertMillimetersToTwip(size[0]),
+          height: convertMillimetersToTwip(size[1]),
         },
       });
     }
@@ -1806,13 +1803,13 @@ class DocenDocument extends AddinHost<Editor> {
     if (value) {
       const cur = (
         this.#editor?.state.doc.attrs as { sectionProperties?: SectionPropertiesOptions }
-      )?.sectionProperties?.page?.size;
+      )?.sectionProperties?.pageSize;
       const size =
         cur && typeof cur.width === "number" && typeof cur.height === "number"
           ? cur
           : { width: sectionPageSizeDefaults.WIDTH, height: sectionPageSizeDefaults.HEIGHT };
       this.#updateSectionGeometry({
-        page: { size: { ...size, orientation: value as "portrait" | "landscape" } },
+        pageSize: { ...size, orientation: value as "portrait" | "landscape" },
       });
     }
     this.#refreshGeometry();
@@ -1826,7 +1823,7 @@ class DocenDocument extends AddinHost<Editor> {
     const canvas = this.shadowRoot?.querySelector("docen-document-area");
     if (canvas && value && MARGINS[value]) canvas.setAttribute("margin", MARGINS[value]);
     if (value && MARGINS[value]) {
-      this.#updateSectionGeometry({ page: { margin: marginTwipsFromCss(MARGINS[value]) } });
+      this.#updateSectionGeometry({ pageMargin: marginTwipsFromCss(MARGINS[value]) });
     }
     this.#refreshGeometry();
   }
@@ -1922,17 +1919,19 @@ class DocenDocument extends AddinHost<Editor> {
     if (!editor) return;
     const sp = (editor.state.doc.attrs as { sectionProperties?: SectionPropertiesOptions })
       .sectionProperties;
-    const page = sp?.page;
+    const pageSize = sp?.pageSize;
+    const margin = sp?.pageMargin;
     const canvas = this.shadowRoot?.querySelector("docen-document-area");
-    if (canvas && page) {
-      const size = page.size;
+    if (canvas && (pageSize || margin)) {
+      const size = pageSize;
       if (size && typeof size.width === "number" && typeof size.height === "number") {
         canvas.setAttribute("page-width", twipsToMm(size.width));
         canvas.setAttribute("page-height", twipsToMm(size.height));
       }
-      if (size?.orientation === "landscape") canvas.setAttribute("orientation", "landscape");
+      const so = size || undefined;
+      if (so?.orientation === "landscape") canvas.setAttribute("orientation", "landscape");
       else canvas.removeAttribute("orientation");
-      const m = page.margin;
+      const m = margin || undefined;
       const def = sectionMarginDefaults;
       const mm = (v: unknown, d: number): string => twipsToMm(typeof v === "number" ? v : d);
       canvas.setAttribute(
@@ -2708,31 +2707,28 @@ class DocenDocument extends AddinHost<Editor> {
     const sp = (editor.state.doc.attrs as Record<string, unknown> | undefined)
       ?.sectionProperties as
       | {
-          page?: {
-            size?: { width?: number; height?: number; orientation?: string };
-            margin?: { top?: number; right?: number; bottom?: number; left?: number };
-          };
+          pageSize?: { width?: number; height?: number; orientation?: string };
+          pageMargin?: { top?: number; right?: number; bottom?: number; left?: number };
           grid?: { linePitch?: number; type?: string } | null;
         }
       | undefined;
-    const page = sp?.page;
-    if (!page) return;
+    const size = sp?.pageSize;
+    const margin = sp?.pageMargin;
+    if (!size && !margin) return;
     // Page geometry in millimeters — the paper's natural unit (docx stores page
     // size/margins in twips; 1in = 1440tw = 25.4mm maps cleanly to mm). Font
     // sizes stay in pt (OOXML's unit); pt and mm are BOTH absolute CSS units
     // anchored to the same 96px/in reference pixel, so they render on one
     // consistent pixel grid — mm and pt do NOT need to be unified.
-    if (page.size) {
-      if (page.size.width) canvas.setAttribute("page-width", twipsToMm(page.size.width));
-      if (page.size.height) canvas.setAttribute("page-height", twipsToMm(page.size.height));
-    }
+    if (size?.width) canvas.setAttribute("page-width", twipsToMm(size.width));
+    if (size?.height) canvas.setAttribute("page-height", twipsToMm(size.height));
     // Render page-width × page-height directly. office-open's `orientation`
     // flag is unreliable (it can read "landscape" on portrait dimensions — this
     // very file is A4 portrait), so clear any prior landscape swap and let the
     // physical width/height decide the orientation.
     canvas.removeAttribute("orientation");
-    if (page.margin) {
-      const m = page.margin;
+    if (margin) {
+      const m = margin;
       const sides = [m.top, m.right, m.bottom, m.left];
       if (sides.every((s) => s != null))
         canvas.setAttribute("margin", sides.map(twipsToMm).join(" "));

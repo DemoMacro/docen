@@ -363,7 +363,7 @@ export function resolveLineHeight({
   // only its own pitch snap from cells, never spacing.line).
   if (spacing?.line) {
     const rule = spacing.lineRule;
-    if (rule === "exact" || rule === "exactly" || rule === "atLeast") {
+    if (rule === "exact" || rule === "atLeast") {
       return Number(spacing.line) * TWIP_TO_PX;
     }
     // auto: line is 240ths of a SINGLE LINE height — the docGrid linePitch when
@@ -1147,7 +1147,7 @@ export function tableWidthOf(table: PmNode, pageContentWidth: number): number {
   const w = (table.attrs as { width?: TableWidthProperties | null }).width;
   if (!w) return pageContentWidth;
   const num = typeof w.size === "string" ? parseFloat(w.size) : w.size;
-  if (w.type === "pct") {
+  if (w.type === "percent") {
     // office-open normalizes OOXML fiftieths (0-5000) to a percentage number
     // (0-100) on parse, so a numeric size IS the percentage — dividing by 50
     // here (the pre-normalization assumption) collapses a 99.96% table to ~2%

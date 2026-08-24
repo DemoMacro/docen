@@ -310,7 +310,7 @@ const setupFloatingDrag = (
     | {
         horizontalPosition: { relative?: string };
         verticalPosition: { relative?: string };
-        wrap?: { type?: number };
+        wrap?: { type?: string };
       }
     | null
     | undefined,
