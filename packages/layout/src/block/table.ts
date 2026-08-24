@@ -1,0 +1,140 @@
+// Table layout — w:tbl ≡ a:tbl share this geometry. Ported from the editor's
+// measureRowHeight: a row is its tallest cell; a cell's content stacks with
+// collapsing paragraph margins inside its insets; trHeight floors (atLeast)
+// or fixes (exact) the row.
+//
+// Known boundary (inherited from measure.ts, deliberate for P1): a rowspan
+// cell's full content counts on its START row — Word distributes across the
+// span. Start-row over-estimate + spanned-row under-estimate is deterministic
+// (no re-flow wobble); mid-row page splitting lands with flow/ in P2.
+
+import type {
+  LayoutBlockContext,
+  LayoutBorderEdge,
+  LayoutCellInsets,
+  LayoutTable,
+} from "../layout-doc";
+import type { LaidOutTable } from "../layout-result";
+import type { TextMeasurer } from "../text/measure";
+import { stackBlocks } from "./block";
+
+/** Lay out a table at its container's content width. */
+export function layoutTable(
+  table: LayoutTable,
+  containerWidth: number,
+  ctx: LayoutBlockContext | undefined,
+  measurer: TextMeasurer,
+): LaidOutTable {
+  const widthPx = tableWidthOf(table, containerWidth);
+  const columnWidths = tableColumnWidths(table, widthPx);
+
+  let heightPx = 0;
+  const rows = table.rows.map((row) => {
+    // Cells measure under the table-cell line-height rule (max(natural,
+    // pitch)) so trHeight governs; floats never bend a cell's width.
+    const cellCtx: LayoutBlockContext = {
+      ...ctx,
+      inTable: true,
+      floatZones: undefined,
+      startY: undefined,
+    };
+    let rowHeight = 0;
+    let colCursor = 0;
+    const cells = row.cells.map((cell) => {
+      const colspan = cell.colspan ?? 1;
+      let cellWidth = 0;
+      for (let i = 0; i < colspan && colCursor + i < columnWidths.length; i++) {
+        cellWidth += columnWidths[colCursor + i];
+      }
+      colCursor += colspan;
+
+      const insets = mergeInsets(cell.insets, table.cellInsets);
+      const hInsetPx = (insets.left ?? 0) + (insets.right ?? 0);
+      // Under border-collapse the column width is the cell's BORDER box, so
+      // text wraps at cellWidth − insets − side borders.
+      const hBorderPx = borderEdgePx(cell.borders?.left) + borderEdgePx(cell.borders?.right);
+      const innerWidthPx = Math.max(0, cellWidth - hInsetPx - hBorderPx);
+
+      const stacked = stackBlocks(cell.blocks, innerWidthPx, cellCtx, measurer);
+      // Vertical overhead: top+bottom insets, plus only the MAX of the
+      // top/bottom borders (adjacent rows share one line under collapse).
+      const vOverheadPx =
+        (insets.top ?? 0) +
+        (insets.bottom ?? 0) +
+        Math.max(borderEdgePx(cell.borders?.top), borderEdgePx(cell.borders?.bottom));
+
+      const cellHeightPx = stacked.heightPx + vOverheadPx;
+      if (cellHeightPx > rowHeight) rowHeight = cellHeightPx;
+      return { colspan, insets, borders: cell.borders, innerWidthPx, stack: stacked.stack };
+    });
+
+    const tr = row.height;
+    if (tr && tr.px > 0) {
+      rowHeight = tr.rule === "exact" ? tr.px : Math.max(rowHeight, tr.px);
+    }
+    heightPx += rowHeight;
+    return { heightPx: rowHeight, cells };
+  });
+
+  return { kind: "table", widthPx, columnWidthsPx: columnWidths, heightPx, rows };
+}
+
+/** Table content width: pct → percent of the container; px → as-is; absent →
+ *  auto (fill the text column). */
+function tableWidthOf(table: LayoutTable, containerWidth: number): number {
+  if (!table.width) return containerWidth;
+  if (table.width.type === "percent") return (containerWidth * table.width.percent) / 100;
+  return table.width.px;
+}
+
+/** Per-column content widths, scaled proportionally to the effective table
+ *  width (Word scales the grid to tblW, never to the raw sum). The grid comes
+ *  from tblGrid, else the first row's cell widths — the grid is preferred
+ *  because it is identical across page-split slices of the same table, so
+ *  column widths (and row heights) stay stable across re-flows. */
+function tableColumnWidths(table: LayoutTable, tableWidth: number): number[] {
+  const grid: number[] = [];
+  if (table.columnWidthsPx && table.columnWidthsPx.length > 0) {
+    grid.push(...table.columnWidthsPx);
+  } else {
+    const firstRow = table.rows[0];
+    if (firstRow) {
+      for (const cell of firstRow.cells) {
+        const colspan = cell.colspan ?? 1;
+        if (cell.widthPx != null && cell.widthPx > 0) {
+          for (let i = 0; i < colspan; i++) grid.push(cell.widthPx / colspan);
+        } else {
+          for (let i = 0; i < colspan; i++) grid.push(0);
+        }
+      }
+    }
+  }
+  if (grid.length === 0) return [];
+  const total = grid.reduce((a, b) => a + b, 0) || 1;
+  return grid.map((w) => (w / total) * tableWidth);
+}
+
+/** A cell's own inset wins per side, else the table's default. */
+function mergeInsets(
+  cell: LayoutCellInsets | undefined,
+  tableInsets: LayoutCellInsets | undefined,
+): LayoutCellInsets {
+  if (!tableInsets) return cell ?? {};
+  if (!cell) return tableInsets;
+  return {
+    top: cell.top ?? tableInsets.top,
+    right: cell.right ?? tableInsets.right,
+    bottom: cell.bottom ?? tableInsets.bottom,
+    left: cell.left ?? tableInsets.left,
+  };
+}
+
+/** One border edge's width; nil/none/absent sides carry none. The visual
+ *  default border is a renderer decision the adapter injects — the engine
+ *  measures only declared edges. */
+function borderEdgePx(edge: LayoutBorderEdge | undefined): number {
+  if (edge && edge.style && edge.style !== "nil" && edge.style !== "none" && edge.px != null) {
+    return edge.px;
+  }
+  return 0;
+}

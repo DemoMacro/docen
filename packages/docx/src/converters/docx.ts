@@ -15,7 +15,6 @@ import type {
   TableCellOptions,
   BorderOptions,
   LevelsOptions,
-  NumberingOptions,
   OutputByType,
   OutputType,
   PackerOptions,
@@ -329,9 +328,9 @@ export class DocxManager {
     const origNumberingConfig =
       (
         docAttrs.numbering as
-          | { config?: { reference: string; levels: LevelsOptions[] }[] }
+          | { abstractNumberings?: { reference: string; levels: LevelsOptions[] }[] }
           | undefined
-      )?.config ?? [];
+      )?.abstractNumberings ?? [];
     const regeneratedRefs = new Set(this.numberingConfigs.map((c) => c.reference));
     const numberingConfig = [
       ...origNumberingConfig.filter((c) => !regeneratedRefs.has(c.reference)),
@@ -343,9 +342,7 @@ export class DocxManager {
       ...core,
       ...(background ? { background } : {}),
       ...documentExtras,
-      ...(numberingConfig.length > 0
-        ? { numbering: { config: numberingConfig } as NumberingOptions }
-        : {}),
+      ...(numberingConfig.length > 0 ? { numbering: { abstractNumberings: numberingConfig } } : {}),
     };
   }
 
@@ -1163,7 +1160,7 @@ export class DocxManager {
             if (text) linkChildren.push({ ...runWithoutText, text } as RunOptions);
             children.push({
               hyperlink: {
-                link: href.startsWith("#") ? undefined : href,
+                url: href.startsWith("#") ? undefined : href,
                 anchor: href.startsWith("#") ? href.slice(1) : undefined,
                 children: linkChildren,
               },
@@ -1526,13 +1523,12 @@ export interface DocxGenerateOptions<T extends OutputType = "nodebuffer"> {
   packer?: PackerOptions<T>;
   /**
    * Document-level options injected into the compiled `DocumentOptions` — core
-   * properties (`title`/`creator`/`description`/…), `styles`/`externalStyles`,
-   * `background`, `features`, `fonts`, etc. Excludes `sections` (always compiled
-   * from the JSON) and `numbering` (collected from ordered-list nodes).
+   * properties (`title`/`creator`/`description`/…), `styles`, `background`,
+   * `features`, `fonts`, etc. Excludes `sections` (always compiled from the
+   * JSON) and `numbering` (collected from ordered-list nodes).
    *
-   * `styles`/`externalStyles` here take precedence over any `styles` carried on
-   * `json.attrs.styles` (e.g. from a prior `parseDOCX`); the two are mutually
-   * exclusive, so specifying `externalStyles` drops the compiled `styles`.
+   * `styles` here takes precedence over any `styles` carried on
+   * `json.attrs.styles` (e.g. from a prior `parseDOCX`).
    */
   document?: Omit<Partial<DocumentOptions>, "sections" | "numbering">;
   /**
@@ -1549,8 +1545,7 @@ export interface DocxGenerateOptions<T extends OutputType = "nodebuffer"> {
  *
  * - `sections`/`numbering`: compile-owned (excluded from `document`, never
  *   overridden).
- * - `styles`/`externalStyles`: option wins over `json.attrs.styles`; the two
- *   are mutually exclusive, so `externalStyles` clears compiled `styles`.
+ * - `styles`: option wins over `json.attrs.styles`.
  * - Everything else (core properties, background, features, …): injected.
  */
 function applyDocumentOptions(
@@ -1558,12 +1553,7 @@ function applyDocumentOptions(
   document?: Omit<Partial<DocumentOptions>, "sections" | "numbering">,
 ): DocumentOptions {
   if (!document) return base;
-  const merged: DocumentOptions = { ...base, ...document };
-  // externalStyles is mutually exclusive with styles — drop compiled styles.
-  if (document.externalStyles !== undefined) {
-    delete (merged as Partial<DocumentOptions>).styles;
-  }
-  return merged;
+  return { ...base, ...document };
 }
 
 /**

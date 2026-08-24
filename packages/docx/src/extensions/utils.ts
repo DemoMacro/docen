@@ -392,7 +392,7 @@ export function shadingFromCss(css: string | null | undefined): ShadingPropertie
 export function lineSpacingToCss(spacing: SpacingProperties | null | undefined): string | null {
   if (!spacing?.line) return null;
   const rule = spacing.lineRule;
-  if (rule === "exact" || rule === "exactly" || rule === "atLeast") {
+  if (rule === "exact" || rule === "atLeast") {
     return `${Number(spacing.line) / 20}pt`;
   }
   // lineRule "auto": `line` is 240ths of a SINGLE LINE height (ECMA-376

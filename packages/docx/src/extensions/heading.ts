@@ -3,7 +3,8 @@ import type { JSONContent } from "@tiptap/core";
 import { Heading as BaseHeading } from "@tiptap/extension-heading";
 import type { Node } from "@tiptap/pm/model";
 
-import { buildTextBlock, indexParagraphStyles } from "../converters/styles";
+import { buildTextBlock } from "../converters/styles";
+import { indexParagraphStyles } from "../style-cascade";
 import type { ParseParagraphRule } from "./types";
 import { docxParagraphAttrs, renderTextBlock, SECTION_ATTR_KEYS } from "./utils";
 

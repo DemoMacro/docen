@@ -7,6 +7,7 @@
  */
 import { applyTheme, registerComponents } from "@docen/editor";
 
+import { mountCanvasDemo } from "./canvas";
 import { mountDocumentDemo } from "./document";
 import { mountImageDemo } from "./image";
 
@@ -28,6 +29,7 @@ void registerComponents().then(() => {
   const tabs: { id: string; label: string }[] = [
     { id: "document", label: "Document" },
     { id: "image", label: "Image" },
+    { id: "canvas", label: "Canvas" },
   ];
   for (const tab of tabs) {
     const el = document.createElement("fluent-tab");
@@ -41,12 +43,13 @@ void registerComponents().then(() => {
   app.append(nav, stage);
   document.body.append(app);
 
-  type Route = "document" | "image";
+  type Route = "document" | "image" | "canvas";
   let current: Route = "document";
 
   const render = (route: Route): void => {
     stage.replaceChildren();
     if (route === "document") mountDocumentDemo(stage);
+    else if (route === "canvas") mountCanvasDemo(stage);
     else mountImageDemo(stage);
   };
 

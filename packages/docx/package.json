@@ -49,6 +49,10 @@
       "types": "./dist/editor.d.mts",
       "import": "./dist/editor.mjs"
     },
+    "./layout": {
+      "types": "./dist/layout/index.d.mts",
+      "import": "./dist/layout/index.mjs"
+    },
     "./converters/*": {
       "types": "./dist/converters/*.d.mts",
       "import": "./dist/converters/*.mjs"

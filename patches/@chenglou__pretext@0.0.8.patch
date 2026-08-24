@@ -258,3 +258,31 @@ index fb9cb6816a715afa21e9b54feb90f3b5e78dff08..1d5733748af4301d772b54758be31bbe
 +    cjkCorrectionCache.clear();
      sharedGraphemeSegmenter = null;
  }
+diff --git a/dist/rich-inline.js b/dist/rich-inline.js
+index 61a9c7641ae359a0aa21a3e89d430dfa7885b288..d7fcb9ccd9642a7ef57bbfd6393ba1199bdbd958 100644
+--- a/dist/rich-inline.js
++++ b/dist/rich-inline.js
+@@ -62,6 +62,23 @@ export function prepareRichInline(items) {
+             .replace(LEADING_COLLAPSIBLE_BOUNDARY_RE, '')
+             .replace(TRAILING_COLLAPSIBLE_BOUNDARY_RE, '');
+         if (trimmedText.length === 0) {
++            // docen-local: an empty-text atom (extraWidth only, e.g. an inline image) survives whitespace trimming as a zero-text atomic item. break:'never' keeps it unbreakable; the empty prepared carries no glyphs and materializes as ''.
++            if ((item.extraWidth ?? 0) > 0) {
++                const atomicItem = {
++                    break: 'never',
++                    endGraphemeIndex: 0,
++                    endSegmentIndex: 0,
++                    extraWidth: item.extraWidth,
++                    gapBefore: pendingGapWidth > 0 ? pendingGapWidth : 0,
++                    naturalWidth: 0,
++                    prepared: prepareWithSegments('', item.font),
++                    sourceItemIndex: index,
++                };
++                preparedItems.push(atomicItem);
++                itemsBySourceItemIndex[index] = atomicItem;
++                pendingGapWidth = 0;
++                continue;
++            }
+             if (COLLAPSIBLE_BOUNDARY_RE.test(item.text) && pendingGapWidth === 0) {
+                 pendingGapWidth = getCollapsedSpaceWidth(item.font, letterSpacing, collapsedSpaceWidthCache);
+             }

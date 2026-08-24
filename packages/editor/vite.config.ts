@@ -32,6 +32,10 @@ export default defineConfig({
       "@docen/core/style": fileURLToPath(new URL("../core/src/style.ts", import.meta.url)),
       "@docen/core/export": fileURLToPath(new URL("../core/src/export.ts", import.meta.url)),
       "@docen/core": fileURLToPath(new URL("../core/src/index.ts", import.meta.url)),
+      // The layout engine serves from source too: the canvas demo imports it
+      // directly, and @docen/docx's dist (not aliased) bare-imports it from
+      // its layout/ subpath — this alias resolves both without pre-bundling.
+      "@docen/layout": fileURLToPath(new URL("../layout/src/index.ts", import.meta.url)),
       "@docen/editor": fileURLToPath(new URL("./src/index.ts", import.meta.url)),
     },
   },

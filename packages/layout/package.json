@@ -1,0 +1,51 @@
+{
+  "name": "@docen/layout",
+  "version": "0.5.5",
+  "description": "Pure TypeScript layout engine for docen — text line breaking (UAX #14 + CJK kinsoku), OOXML paragraph/table block layout, and flow/fixed/grid strategies with zero DOM dependencies",
+  "keywords": [
+    "cjk",
+    "docen",
+    "kinsoku",
+    "layout",
+    "line-breaking",
+    "office",
+    "ooxml",
+    "pagination",
+    "text-measurement",
+    "uax14"
+  ],
+  "homepage": "https://github.com/DemoMacro/docen#readme",
+  "bugs": {
+    "url": "https://github.com/DemoMacro/docen/issues"
+  },
+  "license": "MIT",
+  "author": {
+    "name": "Demo Macro",
+    "email": "abc@imst.xyz",
+    "url": "https://www.demomacro.com/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DemoMacro/docen.git"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "dist/index.mjs",
+  "types": "dist/index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    }
+  },
+  "scripts": {
+    "dev": "basis build --stub",
+    "build": "vp pack",
+    "prepack": "pnpm build"
+  },
+  "dependencies": {
+    "@chenglou/pretext": "0.0.8"
+  }
+}

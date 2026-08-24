@@ -6,7 +6,7 @@ settings:
 
 patchedDependencies:
   '@chenglou/pretext@0.0.8':
-    hash: 08d4f53aa6ffb88ca14f2e71621b434a116ff4dae0171e80df230ac3283e5c60
+    hash: c2562503ef3c9d3b1ce4fa153a59dd4ed6f5bd8019b70c92d47c1f6c0eb9c20d
     path: patches/@chenglou__pretext@0.0.8.patch
 
 importers:
@@ -178,7 +178,7 @@ importers:
     dependencies:
       '@chenglou/pretext':
         specifier: 0.0.8
-        version: 0.0.8(patch_hash=08d4f53aa6ffb88ca14f2e71621b434a116ff4dae0171e80df230ac3283e5c60)
+        version: 0.0.8(patch_hash=c2562503ef3c9d3b1ce4fa153a59dd4ed6f5bd8019b70c92d47c1f6c0eb9c20d)
       '@docen/core':
         specifier: workspace:*
         version: link:../core
@@ -221,6 +221,12 @@ importers:
       prosemirror-search:
         specifier: 1.1.1
         version: 1.1.1
+
+  packages/layout:
+    dependencies:
+      '@chenglou/pretext':
+        specifier: 0.0.8
+        version: 0.0.8(patch_hash=c2562503ef3c9d3b1ce4fa153a59dd4ed6f5bd8019b70c92d47c1f6c0eb9c20d)
 
   packages/vue:
     dependencies:
@@ -3154,7 +3160,7 @@ snapshots:
 
   '@blazediff/core@1.9.1': {}
 
-  '@chenglou/pretext@0.0.8(patch_hash=08d4f53aa6ffb88ca14f2e71621b434a116ff4dae0171e80df230ac3283e5c60)': {}
+  '@chenglou/pretext@0.0.8(patch_hash=c2562503ef3c9d3b1ce4fa153a59dd4ed6f5bd8019b70c92d47c1f6c0eb9c20d)': {}
 
   '@emnapi/core@1.10.0':
     dependencies:

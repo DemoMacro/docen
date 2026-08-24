@@ -1,0 +1,642 @@
+// The docx adapter — projects office-open's DocumentOptions into
+// @docen/layout's LayoutDoc. The PERSISTENCE model is the projection source
+// (not the editor's Tiptap JSON subset): every body shape office-open can
+// round-trip reaches the layout engine, and shapes the adapter cannot lay out
+// yet (toc, sdt, textbox, altChunk, customXml, rawXml) become placeholder
+// boxes instead of silently vanishing. Callers chain
+// Tiptap JSON --compileDocument--> DocumentOptions --this--> LayoutDoc.
+//
+// Zero-DOM discipline is inherited from @docen/layout — this module is
+// Node-safe (headless export) by construction.
+
+import {
+  ptToPx,
+  twipToPx,
+  emuToPx,
+  type LayoutBlock,
+  type LayoutBorderEdge,
+  type LayoutCellInsets,
+  type LayoutInline,
+  type LayoutLineHeight,
+  type LayoutParagraph,
+  type LayoutParagraphBorderEdge,
+  type LayoutSpacing,
+  type LayoutTabStop,
+  type LayoutTable,
+  type LayoutTableWidth,
+  type LayoutTextStyle,
+} from "@docen/layout";
+import type {
+  DocumentOptions,
+  ParagraphOptions,
+  SectionChild,
+  StylesOptions,
+  TableCellOptions,
+  TableOptions,
+} from "@office-open/docx";
+
+import { resolvePageSize } from "../extensions/utils";
+import { defaultParagraphStyleId, indexParagraphStyles, mergeStyleChain } from "../style-cascade";
+
+// The paragraph leg of SectionChild is `string | ParagraphOptions` (shorthand
+// or full options); null appears at runtime (empty paragraph legs from
+// parse/compile), so the projection accepts it defensively.
+type BodyParagraph = string | ParagraphOptions | null;
+type LayoutCell = LayoutTable["rows"][number]["cells"][number];
+
+// ── loose-shape guards ──
+
+type Rec = Record<string, unknown>;
+
+/** Options unions are structurally loose at their edges (optional everything,
+ *  per-side sub-objects); this guard narrows unknown/union picks to a record so
+ *  the rest of the module reads fields without per-site casts. */
+function isRecord(v: unknown): v is Rec {
+  return !!v && typeof v === "object";
+}
+
+const num = (v: unknown): number | undefined => (typeof v === "number" ? v : undefined);
+
+const str = (v: unknown): string | undefined => (typeof v === "string" && v ? v : undefined);
+
+/** Estimated height of one placeholder box: three default body lines. */
+const PLACEHOLDER_PX = 3 * 16;
+
+// ── universal-measure parsing (number = native unit, string = UM) ──
+
+const UM_IN_TWIPS = { pt: 20, pc: 240, in: 1440, mm: 1440 / 25.4, cm: 1440 / 2.54, px: 15 };
+const UM_RE = /^(-?[\d.]+)(pt|pc|in|mm|cm|px)$/;
+
+/** A measure field to twips: number passes through (native), UM resolves. */
+function measureTwip(v: unknown): number | undefined {
+  const n = num(v);
+  if (n != null) return n;
+  if (typeof v !== "string") return undefined;
+  const m = UM_RE.exec(v);
+  return m ? Number(m[1]) * UM_IN_TWIPS[m[2] as keyof typeof UM_IN_TWIPS] : undefined;
+}
+
+/** A measure field whose native unit is EMU (drawing extents): number passes,
+ *  UM resolves (px at 96 dpi). */
+function measureEmu(v: unknown): number | undefined {
+  const n = num(v);
+  if (n != null) return n;
+  if (typeof v !== "string") return undefined;
+  const tw = measureTwip(v);
+  return tw != null ? (tw / 1440) * 914400 : undefined;
+}
+
+// ── picture media (renderer passthrough) ──
+
+const MIME_BY_TYPE: Record<string, string> = {
+  jpg: "image/jpeg",
+  png: "image/png",
+  gif: "image/gif",
+  bmp: "image/bmp",
+  tif: "image/tiff",
+  ico: "image/x-icon",
+  svg: "image/svg+xml",
+};
+
+/** PictureOptions (type + data) → a data URL the painter can load. Absent
+ *  bytes (linked-only) or undecodable input yields undefined — the renderer
+ *  draws an empty frame. */
+function pictureSrc(pic: Rec): string | undefined {
+  if (typeof pic.type !== "string") return undefined;
+  const mime = MIME_BY_TYPE[pic.type];
+  if (!mime) return undefined;
+  const { data } = pic;
+  if (typeof data === "string") {
+    return data.startsWith("data:") ? data : `data:${mime};base64,${data}`;
+  }
+  if (data instanceof Uint8Array) {
+    // Chunked binary → base64 (btoa is universal: browsers and Node ≥ 16).
+    let bin = "";
+    for (let i = 0; i < data.length; i += 0x8000) {
+      bin += String.fromCharCode(...data.subarray(i, i + 0x8000));
+    }
+    return `data:${mime};base64,${btoa(bin)}`;
+  }
+  return undefined;
+}
+
+// ── style cascade (direct pPr → style chain → docDefaults) ──
+
+/** `default.document` — the docDefaults object (run directly on it, paragraph
+ *  props nested one level down under `paragraph`). */
+function docDefaultsOf(styles: StylesOptions | undefined): Rec {
+  const doc = styles?.default?.document;
+  return isRecord(doc) ? doc : {};
+}
+
+/** w:jc (AlignmentType, ST_Jc) → the engine's alignment semantics. The
+ *  kashida/thai/numericTab variants (Arabic elongation, Thai word-break
+ *  justification, list tab alignment) have no faithful canvas algorithm —
+ *  they fall back to the left default until one lands. */
+const ALIGN_TO_LAYOUT = {
+  left: "left",
+  start: "left",
+  right: "right",
+  end: "right",
+  center: "center",
+  both: "both",
+  distribute: "distribute",
+} as const;
+
+/** The merged {run, paragraph} for a style id — the same mergeStyleChain the
+ *  DOM route's stylesToCss resolves, so both renderings share one cascade.
+ *  A style-less paragraph resolves to the default paragraph style (usually
+ *  Normal); docDefaults sits UNDER the chain, not in it. */
+function styleChainOf(styles: StylesOptions | undefined, styleId: string | null | undefined) {
+  if (!styles) return { run: {}, paragraph: {} };
+  return mergeStyleChain(indexParagraphStyles(styles), styleId || defaultParagraphStyleId(styles));
+}
+
+const pick = (layers: Rec[], key: string): unknown => {
+  for (const layer of layers) if (layer[key] != null) return layer[key];
+  return undefined;
+};
+
+/** The cascaded w:jc value → the engine's alignment (undefined → left). */
+function alignOf(jc: unknown): LayoutParagraph["align"] {
+  if (typeof jc !== "string") return undefined;
+  return jc in ALIGN_TO_LAYOUT ? ALIGN_TO_LAYOUT[jc as keyof typeof ALIGN_TO_LAYOUT] : undefined;
+}
+
+// ── run/style resolution ──
+
+/** OOXML font: string or rFonts {ascii, hAnsi, eastAsia} → engine slots. */
+type FontAttr = string | Rec | null | undefined;
+
+/** An unknown font pick → the FontAttr domain (string or rFonts record). */
+function fontAttr(v: unknown): FontAttr {
+  return isRecord(v) || typeof v === "string" ? v : undefined;
+}
+
+function toFamily(font: FontAttr, def: FontAttr): LayoutTextStyle["family"] {
+  const f = font ?? def;
+  if (typeof f === "string") return f;
+  const latin = str(f?.ascii) ?? str(f?.hAnsi);
+  const eastAsia = str(f?.eastAsia);
+  return latin || eastAsia ? { latin, eastAsia } : {};
+}
+
+interface RunStyle {
+  sizePt?: number;
+  font?: FontAttr;
+  characterSpacingTw?: number;
+  bold?: boolean;
+  italic?: boolean;
+}
+
+/** rPr (a run's own, or the ¶-mark/paragraph default) → resolved fields. */
+function runStyleOf(rPr: Rec): RunStyle {
+  return {
+    sizePt: num(rPr.size),
+    font: fontAttr(rPr.font),
+    characterSpacingTw: measureTwip(rPr.characterSpacing),
+    bold: rPr.bold === true ? true : undefined,
+    italic: rPr.italic === true ? true : undefined,
+  };
+}
+
+// ── numbering (list) resolution ──
+
+/** One numbering level's layout-relevant fields (w:lvl). */
+interface NumberingLevel {
+  format: string;
+  text: string;
+  leftTw?: number;
+  hangingTw?: number;
+}
+
+/** reference → levels indexed by w:lvl/@w:ilvl. Bullet levels render today;
+ *  numbered formats (decimal…) need a document-order counter — a registered
+ *  gap (the projection is a pure per-paragraph walk today). */
+type NumberingIndex = Map<string, NumberingLevel[]>;
+
+function indexNumberings(numbering: unknown): NumberingIndex {
+  const index: NumberingIndex = new Map();
+  if (!isRecord(numbering) || !Array.isArray(numbering.abstractNumberings)) return index;
+  for (const abs of numbering.abstractNumberings) {
+    if (!isRecord(abs)) continue;
+    const reference = str(abs.reference);
+    const levels: NumberingLevel[] = [];
+    if (reference && Array.isArray(abs.levels)) {
+      for (const lvl of abs.levels) {
+        if (!isRecord(lvl)) continue;
+        const ind: Rec =
+          isRecord(lvl.paragraph) && isRecord(lvl.paragraph.indent) ? lvl.paragraph.indent : {};
+        levels[num(lvl.level) ?? 0] = {
+          format: typeof lvl.format === "string" ? lvl.format : "bullet",
+          text: typeof lvl.text === "string" ? lvl.text : "",
+          leftTw: measureTwip(ind.left),
+          hangingTw: measureTwip(ind.hanging),
+        };
+      }
+      index.set(reference, levels);
+    }
+  }
+  return index;
+}
+
+/** Per-document projection context, resolved once and threaded down. */
+interface ProjectContext {
+  styles: StylesOptions | undefined;
+  numberings: NumberingIndex;
+}
+
+// ── paragraph projection ──
+
+function toLineHeight(line: number | undefined, rule: unknown): LayoutLineHeight | undefined {
+  if (line == null) return undefined;
+  if (rule === "exact") return { rule: "exact", px: twipToPx(line) };
+  if (rule === "atLeast") return { rule: "atLeast", px: twipToPx(line) };
+  return { rule: "multiple", factor: line / 240 };
+}
+
+function projectParagraph(p: BodyParagraph, ctx: ProjectContext): LayoutParagraph {
+  const pPr: Rec = isRecord(p) ? p : {};
+  const styleId = str(pPr.style) ?? str(pPr.heading);
+  const chain = styleChainOf(ctx.styles, styleId);
+  const chainPPr: Rec = chain.paragraph;
+  const chainRPr: Rec = chain.run;
+  const docDefaults = docDefaultsOf(ctx.styles);
+  const docPPr: Rec = isRecord(docDefaults.paragraph) ? docDefaults.paragraph : {};
+  const docRPr: Rec = isRecord(docDefaults.run) ? docDefaults.run : {};
+
+  // ¶-mark strut: direct rPr, else style chain run over docDefaults.
+  const markRun: Rec = isRecord(pPr.run) ? pPr.run : {};
+  const markSize = num(markRun.size);
+  const markSizePt = markSize ?? num(chainRPr.size) ?? num(docRPr.size) ?? 12;
+  const defFont: FontAttr = fontAttr(chainRPr.font) ?? fontAttr(docRPr.font) ?? null;
+  const defaultTextStyle: LayoutTextStyle = {
+    family: toFamily(null, defFont),
+    sizePx: ptToPx(markSizePt),
+    bold: chainRPr.bold === true || docRPr.bold === true || undefined,
+    italic: chainRPr.italic === true || docRPr.italic === true || undefined,
+  };
+
+  // Spacing/indent cascade: direct attr wins per-field, else chain, else docDefaults.
+  const direct: Rec = isRecord(pPr.spacing) ? pPr.spacing : {};
+  const styleSp: Rec = isRecord(chainPPr.spacing) ? chainPPr.spacing : {};
+  const docSp: Rec = isRecord(docPPr.spacing) ? docPPr.spacing : {};
+  const spacing: LayoutSpacing = {
+    beforePx: twipToPx(measureTwip(pick([direct, styleSp, docSp], "before")) ?? 0),
+    afterPx: twipToPx(measureTwip(pick([direct, styleSp, docSp], "after")) ?? 0),
+    lineHeight: toLineHeight(
+      measureTwip(pick([direct, styleSp, docSp], "line")),
+      pick([direct, styleSp, docSp], "lineRule"),
+    ),
+  };
+
+  const dInd: Rec = isRecord(pPr.indent) ? pPr.indent : {};
+  const sInd: Rec = isRecord(chainPPr.indent) ? chainPPr.indent : {};
+  const docInd: Rec = isRecord(docPPr.indent) ? docPPr.indent : {};
+  const ind = (key: string): unknown => pick([dInd, sInd, docInd], key);
+
+  // Numbering: the paragraph's own numPr wins, else the style chain's. The
+  // level's indent fills gaps the paragraph left unset (Word: direct w:ind
+  // overrides w:lvl's); a bullet level also prepends its glyph + a tab hop to
+  // the body-text start.
+  const numRef: Rec | null = isRecord(pPr.numbering)
+    ? pPr.numbering
+    : isRecord(chainPPr.numbering)
+      ? chainPPr.numbering
+      : null;
+  const level = (() => {
+    if (!numRef) return undefined;
+    const reference = str(numRef.reference);
+    if (!reference) return undefined;
+    return ctx.numberings.get(reference)?.[num(numRef.level) ?? 0];
+  })();
+
+  let leftTw = measureTwip(ind("left"));
+  if (leftTw == null && level?.leftTw != null) leftTw = level.leftTw;
+  const firstLineTw = measureTwip(ind("firstLine"));
+  const firstLineChars = num(ind("firstLineChars"));
+  const indent = {
+    leftPx: leftTw != null ? twipToPx(leftTw) || undefined : undefined,
+    rightPx: twipToPx(measureTwip(ind("right")) ?? 0) || undefined,
+    firstLinePx:
+      firstLineTw != null
+        ? Math.max(0, twipToPx(firstLineTw))
+        : firstLineChars != null && firstLineChars > 0
+          ? (firstLineChars / 100) * defaultTextStyle.sizePx
+          : level?.hangingTw != null && level.hangingTw > 0
+            ? -twipToPx(level.hangingTw)
+            : undefined,
+  };
+
+  // Tab stops: twips from the content-box left edge → px from the TEXT-box
+  // edge (the engine measures x from the left indent). "decimal" renders as
+  // left for now; the exotic bar/clear/end kinds carry no box.
+  const tabStops: LayoutTabStop[] | undefined = Array.isArray(pPr.tabStops)
+    ? pPr.tabStops.flatMap((ts) => {
+        if (!isRecord(ts)) return [];
+        const positionPx = measureTwip(ts.position);
+        if (positionPx == null) return [];
+        const type =
+          ts.type === "right" ? "right" : ts.type === "center" ? "center" : ("left" as const);
+        return [{ positionPx: twipToPx(positionPx) - (indent.leftPx ?? 0), type }];
+      })
+    : undefined;
+
+  // Paragraph borders (w:pBdr): direct, else the style chain's.
+  const bRec: Rec = isRecord(pPr.border)
+    ? pPr.border
+    : isRecord(chainPPr.border)
+      ? chainPPr.border
+      : {};
+  const borderEdge = (v: unknown): LayoutParagraphBorderEdge | undefined => {
+    if (!isRecord(v)) return undefined;
+    const size = num(v.size);
+    const space = num(v.space);
+    return {
+      style: typeof v.style === "string" ? v.style : undefined,
+      px: size != null ? (size / 8) * ptToPx(1) : undefined,
+      spacePx: space != null ? ptToPx(space) : undefined,
+    };
+  };
+  const borders = {
+    top: borderEdge(bRec.top),
+    right: borderEdge(bRec.right),
+    bottom: borderEdge(bRec.bottom),
+    left: borderEdge(bRec.left),
+  };
+
+  const bulletInline: LayoutInline[] =
+    level && level.format === "bullet" && level.text
+      ? [
+          { kind: "text", text: level.text, style: defaultTextStyle },
+          { kind: "tab", toPx: 0 },
+        ]
+      : [];
+
+  // `p?.` not `p.`: compiled/parsed documents can carry `paragraph: null`
+  // (an empty paragraph leg) even though the public type says otherwise.
+  const runs: readonly unknown[] =
+    typeof p === "string" ? [p] : (p?.children ?? (p?.text != null ? [p.text] : []));
+  return {
+    kind: "paragraph",
+    inline: bulletInline.length
+      ? bulletInline.concat(projectRuns(runs, chainRPr, docRPr, defaultTextStyle))
+      : projectRuns(runs, chainRPr, docRPr, defaultTextStyle),
+    spacing,
+    indent,
+    tabStops: tabStops && tabStops.length > 0 ? tabStops : undefined,
+    borders: borders.top || borders.right || borders.bottom || borders.left ? borders : undefined,
+    markSizePx: markSize != null ? ptToPx(markSize) : undefined,
+    defaultTextStyle,
+    snapToGrid: typeof pPr.snapToGrid === "boolean" ? pPr.snapToGrid : null,
+    align: alignOf(pick([pPr, chainPPr, docPPr], "alignment")),
+    keepLines: pPr.keepLines === true || chainPPr.keepLines === true,
+    keepNext: pPr.keepNext === true || chainPPr.keepNext === true,
+    widowControl: pick([pPr, chainPPr], "widowControl") !== false,
+    pageBreakBefore: pPr.pageBreakBefore === true || chainPPr.pageBreakBefore === true,
+  };
+}
+
+/** Inline content: text runs (rPr resolved over the paragraph default), hard
+ *  breaks, and pictures (paragraph-child or run-child slot) as atoms. The
+ *  members arrive as unknown — the ParagraphChild union is wide and its
+ *  runtime shapes are looser still (compile pushes `{text, …rPr}` run forms),
+ *  so each leg is validated rather than trusted.
+ *  Known-but-unprojected inline atoms (tab, chart, math, fields, hyperlinks)
+ *  carry no box yet — they render as absence, a registered gap to close type
+ *  by type. */
+function projectRuns(
+  runs: readonly unknown[],
+  chainRPr: Rec,
+  docRPr: Rec,
+  defRun: LayoutTextStyle,
+): LayoutInline[] {
+  const out: LayoutInline[] = [];
+  const pushText = (text: string, rPr: Rec): void => {
+    if (!text) return;
+    const own = runStyleOf(rPr);
+    const font: FontAttr = own.font ?? fontAttr(chainRPr.font) ?? fontAttr(docRPr.font) ?? null;
+    out.push({
+      kind: "text",
+      text,
+      style: {
+        family: font != null ? toFamily(own.font, font) : defRun.family,
+        sizePx: ptToPx(own.sizePt ?? num(chainRPr.size) ?? num(docRPr.size) ?? 12),
+        bold: own.bold ?? defRun.bold,
+        italic: own.italic ?? defRun.italic,
+        letterSpacingPx:
+          own.characterSpacingTw != null ? twipToPx(own.characterSpacingTw) : undefined,
+      },
+    });
+  };
+  const pushPicture = (pic: Rec): void => {
+    const tr = isRecord(pic.transformation) ? pic.transformation : {};
+    const w = measureEmu(tr.width);
+    const h = measureEmu(tr.height);
+    if (w != null && h != null) {
+      out.push({
+        kind: "picture",
+        widthPx: emuToPx(w),
+        heightPx: emuToPx(h),
+        src: pictureSrc(pic),
+      });
+    }
+  };
+  for (const child of runs) {
+    if (typeof child === "string") {
+      pushText(child, {});
+      continue;
+    }
+    if (!isRecord(child)) continue;
+    if (typeof child.text === "string") pushText(child.text, child);
+    if (child.break != null) out.push({ kind: "break" });
+    if (child.tab != null) out.push({ kind: "tab" });
+    if (isRecord(child.picture)) pushPicture(child.picture);
+    if (Array.isArray(child.children)) {
+      for (const inner of child.children) {
+        if (typeof inner === "string") {
+          pushText(inner, child);
+        } else if (isRecord(inner)) {
+          if (typeof inner.text === "string") pushText(inner.text, inner);
+          else if (inner.break != null) out.push({ kind: "break" });
+          else if (inner.tab != null) out.push({ kind: "tab" });
+          else if (isRecord(inner.picture)) pushPicture(inner.picture);
+        }
+      }
+    }
+  }
+  return out;
+}
+
+// ── table projection ──
+
+function toTableWidth(w: unknown): LayoutTableWidth | undefined {
+  if (!isRecord(w)) return undefined;
+  if (w.type === "auto" || w.type === "nil") return undefined;
+  if (w.type === "percent") {
+    const size = w.size;
+    const pct =
+      typeof size === "string" && size.endsWith("%") ? Number(size.slice(0, -1)) : num(size);
+    if (pct != null && Number.isFinite(pct)) return { type: "percent", percent: pct };
+    return undefined;
+  }
+  const tw = measureTwip(w.size);
+  return tw != null && tw > 0 ? { type: "px", px: twipToPx(tw) } : undefined;
+}
+
+function toCellInsets(m: unknown): LayoutCellInsets | undefined {
+  if (!isRecord(m)) return undefined;
+  const side = (v: unknown): number | undefined => {
+    const size = isRecord(v) ? measureTwip(v.size) : undefined;
+    return size != null ? twipToPx(size) : undefined;
+  };
+  const insets = {
+    top: side(m.top),
+    right: side(m.right),
+    bottom: side(m.bottom),
+    left: side(m.left),
+  };
+  return insets.top != null || insets.right != null || insets.bottom != null || insets.left != null
+    ? insets
+    : undefined;
+}
+
+type CellBorders = NonNullable<LayoutCell["borders"]>;
+
+function toBorders(b: unknown): CellBorders | undefined {
+  if (!isRecord(b)) return undefined;
+  const edge = (v: unknown): LayoutBorderEdge | undefined => {
+    if (!isRecord(v)) return undefined;
+    const size = num(v.size);
+    return {
+      style: typeof v.style === "string" ? v.style : undefined,
+      px: size != null ? (size / 8) * ptToPx(1) : undefined,
+    };
+  };
+  const out = {
+    top: edge(b.top),
+    right: edge(b.right),
+    bottom: edge(b.bottom),
+    left: edge(b.left),
+  };
+  return out.top || out.right || out.bottom || out.left ? out : undefined;
+}
+
+function projectCell(c: TableCellOptions, ctx: ProjectContext): LayoutCell {
+  return {
+    colspan: c.columnSpan,
+    rowspan: c.rowSpan,
+    insets: toCellInsets(c.margins),
+    borders: toBorders(c.borders),
+    blocks: c.children
+      .map((child) => projectChild(child, ctx))
+      .filter((b): b is LayoutBlock => b !== null),
+  };
+}
+
+function projectTable(t: TableOptions, ctx: ProjectContext): LayoutTable {
+  const rows: LayoutTable["rows"] = [];
+  for (const row of t.rows ?? []) {
+    // sdt/customXml row wrappers have no cells of their own — a later gap.
+    if (!("cells" in row)) continue;
+    const trHeight: Rec = isRecord(row.height) ? row.height : {};
+    const heightValue = measureTwip(trHeight.value);
+    const height =
+      heightValue != null && heightValue > 0
+        ? {
+            rule: trHeight.rule === "exact" ? ("exact" as const) : ("atLeast" as const),
+            px: twipToPx(heightValue),
+          }
+        : undefined;
+    rows.push({
+      cells: (row.cells ?? [])
+        .filter((cell): cell is TableCellOptions => "children" in cell)
+        .map((cell) => projectCell(cell, ctx)),
+      height,
+    });
+  }
+
+  const columnWidthsPx = t.columnWidths?.map((w) => twipToPx(measureTwip(w) ?? 0));
+  return {
+    kind: "table",
+    width: toTableWidth(t.width),
+    columnWidthsPx: columnWidthsPx && columnWidthsPx.length > 0 ? columnWidthsPx : undefined,
+    cellInsets: toCellInsets(t.margins),
+    rows,
+  };
+}
+
+// ── section-child dispatch ──
+
+/** One body child → layout block. Unprojectable shapes become placeholder
+ *  boxes; zero-height markers (bookmarks) vanish — both OOXML-faithful. */
+function projectChild(child: SectionChild, ctx: ProjectContext): LayoutBlock | null {
+  if ("paragraph" in child) return projectParagraph(child.paragraph, ctx);
+  if ("table" in child) return projectTable(child.table, ctx);
+  if ("bookmarkStart" in child || "bookmarkEnd" in child) return null;
+  // toc, sdt, textbox, altChunk, customXml, rawXml → a labeled box.
+  const label = Object.keys(child)[0];
+  return { kind: "placeholder", heightPx: PLACEHOLDER_PX, label };
+}
+
+// ── section flow geometry ──
+
+/** The flow box a section defines, in px: paper size minus margins
+ *  (orientation already resolved by resolvePageSize) and the docGrid pitch. */
+export interface ProjectedFlowBox {
+  pageWidthPx: number;
+  pageHeightPx: number;
+  contentWidthPx: number;
+  contentHeightPx: number;
+  /** Content-box origin within the page (margin left/top) — where the flow's
+   *  (0,0) sits on paper; the painter anchors page content here. */
+  contentLeftPx: number;
+  contentTopPx: number;
+  linePitchPx?: number;
+}
+
+export function projectFlowBox(properties: unknown): ProjectedFlowBox {
+  const sp: Rec = isRecord(properties) ? properties : {};
+  const { width, height } = resolvePageSize(sp.pageSize);
+  const m: Rec = isRecord(sp.pageMargin) ? sp.pageMargin : {};
+  const side = (v: unknown, d: number): number => twipToPx(measureTwip(v) ?? d);
+  const top = side(m.top, 1440);
+  const bottom = side(m.bottom, 1440);
+  const left = side(m.left, 1800);
+  const right = side(m.right, 1800);
+  const grid: Rec = isRecord(sp.grid) ? sp.grid : {};
+  const pitchTw = measureTwip(grid.linePitch);
+  const linePitchPx =
+    grid.type && grid.type !== "default" && pitchTw && pitchTw > 0 ? twipToPx(pitchTw) : undefined;
+  return {
+    pageWidthPx: twipToPx(width),
+    pageHeightPx: twipToPx(height),
+    contentWidthPx: twipToPx(width) - left - right,
+    contentHeightPx: twipToPx(height) - top - bottom,
+    contentLeftPx: left,
+    contentTopPx: top,
+    linePitchPx,
+  };
+}
+
+/** Project a full DocumentOptions into the engine's input: the FIRST section's
+ *  body and flow box (multi-section flow — later sectPrs arrive as body-level
+ *  section breaks — is a later milestone; sections beyond the first are
+ *  concatenated into the first's flow). */
+export function projectDocumentOptions(doc: DocumentOptions): {
+  blocks: LayoutBlock[];
+  flow: ProjectedFlowBox;
+} {
+  const ctx: ProjectContext = { styles: doc.styles, numberings: indexNumberings(doc.numbering) };
+  const blocks: LayoutBlock[] = [];
+  for (const section of doc.sections ?? []) {
+    for (const child of section.children ?? []) {
+      const block = projectChild(child, ctx);
+      if (block) blocks.push(block);
+    }
+  }
+  return {
+    blocks,
+    flow: projectFlowBox(doc.sections?.[0]?.properties),
+  };
+}

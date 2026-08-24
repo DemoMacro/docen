@@ -62,11 +62,11 @@ export const Highlight = BaseHighlight.extend({
 });
 
 export const Subscript = BaseSubscript.extend({
-  renderDocx: () => ({ subScript: true }),
-  parseDocx: (opts: RunOptions) => (opts.subScript ? {} : null),
+  renderDocx: () => ({ verticalAlign: "subscript" }),
+  parseDocx: (opts: RunOptions) => (opts.verticalAlign === "subscript" ? {} : null),
 });
 
 export const Superscript = BaseSuperscript.extend({
-  renderDocx: () => ({ superScript: true }),
-  parseDocx: (opts: RunOptions) => (opts.superScript ? {} : null),
+  renderDocx: () => ({ verticalAlign: "superscript" }),
+  parseDocx: (opts: RunOptions) => (opts.verticalAlign === "superscript" ? {} : null),
 });

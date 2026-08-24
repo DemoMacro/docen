@@ -6,6 +6,7 @@ export default defineConfig({
       "src/index.ts",
       "src/core.ts",
       "src/editor.ts",
+      "src/layout/index.ts",
       "src/converters/**/*",
       "src/extensions/**/*",
       // Co-located vitest specs (*.spec.ts) live under src/ for name parity with

@@ -65,21 +65,23 @@ export {
   quickStyles,
   effectiveRunProps,
   inlineStyles,
-  // Style-inheritance primitives shared by the editor's paginator (measure.ts)
-  // so pagination measures the SAME effective paragraph properties the renderer
-  // emits: a paragraph whose direct attrs are empty still inherits its style's
-  // (and its style's basedOn chain's) spacing/indent/run. Without these, measure
-  // walked only the direct style → doc-default (skipping basedOn ancestors) and
-  // diverged from stylesToCss (which deep-merges the whole chain) → edit≠render
-  // page counts on docs with multi-level styles (e.g. Heading1 basedOn Normal).
+  type QuickStyleEntry,
+  type StylesOptions,
+} from "./converters/styles";
+
+// Style-inheritance primitives (styles.xml model → resolved cascade), shared
+// by the layout projection, the CSS route, and the editor's paginator
+// (measure.ts) so all of them resolve the SAME effective properties: a
+// paragraph whose direct attrs are empty still inherits its style's (and its
+// basedOn chain's) spacing/indent/run.
+export {
   indexParagraphStyles,
   defaultParagraphStyleId,
   mergeStyleChain,
   deepMergeInto,
+  mergeTableStyleProps,
   type StyleEntry,
-  type QuickStyleEntry,
-  type StylesOptions,
-} from "./converters/styles";
+} from "./style-cascade";
 
 // Types
 export type * from "./types";

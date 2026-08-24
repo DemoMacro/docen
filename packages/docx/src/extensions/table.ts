@@ -14,7 +14,8 @@ import {
 import type { Node } from "@tiptap/pm/model";
 import type { EditorView } from "@tiptap/pm/view";
 
-import { allBordersNone, cleanAttrs, mergeTableStyleProps } from "../converters/styles";
+import { allBordersNone, cleanAttrs } from "../converters/styles";
+import { mergeTableStyleProps } from "../style-cascade";
 import type { ParseBlockRule, ResolveContext } from "./types";
 import {
   attrNative,
@@ -326,7 +327,7 @@ class DocenTableView extends TableView {
     const w = a.width as TableWidthProperties | null | undefined;
     if (w && typeof w === "object") {
       const numSize = typeof w.size === "string" ? parseFloat(w.size) : w.size;
-      if (w.type === "pct") {
+      if (w.type === "percent") {
         // office-open normalizes pct to a percentage number (0-100) via
         // widthFiftiethsToPct on parse; a literal "%" string is kept verbatim.
         if (typeof w.size === "string" && w.size.includes("%")) width = w.size;
@@ -481,7 +482,7 @@ export const Table = BaseTable.extend({
     if (a.width && typeof a.width === "object") {
       const w = a.width as TableWidthProperties;
       const numSize = typeof w.size === "string" ? parseFloat(w.size) : w.size;
-      if (w.type === "pct") {
+      if (w.type === "percent") {
         if (typeof w.size === "string" && w.size.includes("%")) {
           // office-open keeps the percentage literal verbatim ("100%" = 100%) —
           // it is NOT fiftieths-of-a-percent, so do not divide by 50.
