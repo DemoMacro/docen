@@ -9,6 +9,7 @@ import {
   type FlowItem,
   type LaidOutBlock,
   type LaidOutParagraph,
+  type LaidOutStackItem,
   type LaidOutTable,
   type LayoutInline,
   type LayoutTextStyle,
@@ -17,14 +18,30 @@ import { Image as LeaferImage, Rect, Text, type IGroup } from "leafer-ui";
 
 import type { CanvasStageContext } from "./stage";
 
+/** The paint context for one page — the stage context plus the page's own
+ *  identity (page-number fields resolve against it). */
+export interface PaintContext extends CanvasStageContext {
+  pageIndex: number;
+  pageCount: number;
+}
+
 /** Paint one page's flow items (block + page-content y). */
-export function paintScene(
-  tree: IGroup,
-  items: readonly FlowItem[],
-  ctx: CanvasStageContext,
-): void {
+export function paintScene(tree: IGroup, items: readonly FlowItem[], ctx: PaintContext): void {
   for (const item of items) {
     paintBlock(tree, item.block, ctx.flow.contentLeftPx, ctx.flow.contentTopPx + item.yPx, ctx);
+  }
+}
+
+/** Paint a pre-laid header/footer stack at its page position. */
+export function paintFurnitureStack(
+  tree: IGroup,
+  stack: readonly LaidOutStackItem[],
+  x: number,
+  y: number,
+  ctx: PaintContext,
+): void {
+  for (const item of stack) {
+    paintBlock(tree, item.block, x, y + item.yPx, ctx);
   }
 }
 
@@ -33,7 +50,7 @@ function paintBlock(
   block: LaidOutBlock,
   x: number,
   y: number,
-  ctx: CanvasStageContext,
+  ctx: PaintContext,
 ): void {
   switch (block.kind) {
     case "paragraph":
@@ -60,7 +77,7 @@ function paintParagraph(
   para: LaidOutParagraph,
   x: number,
   y: number,
-  ctx: CanvasStageContext,
+  ctx: PaintContext,
 ): void {
   // w:pBdr horizontal rules (the "Education" underline shape): between the
   // text and `spacePx` below it, spanning the wrapping width.
@@ -111,6 +128,14 @@ function paintParagraph(
           ctx.metrics.normalRatio({ family, bold: inline.style.bold === true });
         const pad = Math.max(0, (line.heightPx - boxPx) / 2);
         const intervalPx = justified ? rights[itemIndex] - item.xPx : undefined;
+        // A page-number field paints its live value; the measured `text` was
+        // only a placeholder.
+        const label =
+          inline.field === "page"
+            ? String(ctx.pageIndex + 1)
+            : inline.field === "numPages"
+              ? String(ctx.pageCount)
+              : item.text;
         tree.add(
           new Text({
             x: lineX + item.xPx,
@@ -124,7 +149,7 @@ function paintParagraph(
             textWrap: justified ? "none" : undefined,
             textAlign: justified ? "both-letter" : undefined,
             height: Math.max(1, line.heightPx),
-            text: item.text,
+            text: label,
             fill: "#1b1b1b",
             fontFamily: family,
             fontSize: inline.style.sizePx,
@@ -170,7 +195,7 @@ function paintTable(
   table: LaidOutTable,
   x: number,
   y: number,
-  ctx: CanvasStageContext,
+  ctx: PaintContext,
 ): void {
   let rowY = y;
   for (const row of table.rows) {

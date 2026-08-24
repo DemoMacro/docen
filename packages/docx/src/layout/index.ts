@@ -1,1 +1,6 @@
-export { projectDocumentOptions, projectFlowBox, type ProjectedFlowBox } from "./project";
+export {
+  projectDocumentOptions,
+  projectFlowBox,
+  type ProjectedFlowBox,
+  type ProjectedPageFurniture,
+} from "./project";

@@ -238,6 +238,61 @@ describe("projectDocumentOptions blocks", () => {
   });
 });
 
+describe("projectDocumentOptions fields and furniture", () => {
+  it("projects PAGE/NUMPAGES fields as dynamic atoms and other fields as cached text", () => {
+    const { blocks } = projectDocumentOptions(
+      doc([
+        {
+          paragraph: {
+            children: [
+              { complexField: { instruction: "PAGE \\* MERGEFORMAT", result: "1" } },
+              { complexField: { instruction: "NUMPAGES", result: "9" } },
+              { simpleField: { instruction: "CREATEDATE", cachedValue: "2024-01-01" } },
+            ],
+          },
+        },
+      ]),
+    );
+    const para = blocks[0];
+    if (para?.kind !== "paragraph") throw new Error("expected paragraph");
+    const [page, numPages, created] = para.inline;
+    // `text` is only a measuring placeholder — the painter swaps the live
+    // number in per page; the cached "1"/"9" must NOT leak into the layout.
+    expect(page).toMatchObject({ kind: "text", text: "0", field: "page" });
+    expect(numPages).toMatchObject({ kind: "text", text: "0", field: "numPages" });
+    expect(created).toMatchObject({ kind: "text", text: "2024-01-01" });
+  });
+
+  it("projects the first section's header/footer slots with placement flags", () => {
+    const { furniture } = projectDocumentOptions({
+      styles,
+      settings: { evenAndOddHeaders: true },
+      sections: [
+        {
+          children: [],
+          headers: { default: [{ paragraph: { children: ["head"] } }] },
+          footers: { even: [{ paragraph: { children: ["foot"] } }] },
+          properties: {
+            titlePage: true,
+            pageMargin: { header: 900, footer: 850 },
+          },
+        },
+      ],
+    });
+    expect(furniture.header).toHaveLength(1);
+    expect(furniture.header?.[0]).toMatchObject({ kind: "paragraph" });
+    expect(furniture.evenFooter).toHaveLength(1);
+    // Slots the document does not define stay undefined (paint-time fallback).
+    expect(furniture.firstHeader).toBeUndefined();
+    expect(furniture.evenHeader).toBeUndefined();
+    expect(furniture.footer).toBeUndefined();
+    expect(furniture.titlePage).toBe(true);
+    expect(furniture.evenAndOddHeaders).toBe(true);
+    expect(furniture.headerDistancePx).toBeCloseTo(900 / 15, 5);
+    expect(furniture.footerDistancePx).toBeCloseTo(850 / 15, 5);
+  });
+});
+
 describe("projectFlowBox", () => {
   it("derives the content box from A4 paper and margins", () => {
     const flow = projectFlowBox({

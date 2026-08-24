@@ -62,9 +62,11 @@ export const mountCanvasDemo = (stage: HTMLElement): void => {
     const picked = file.files?.[0];
     if (!picked) return;
     void picked.arrayBuffer().then((buffer) => {
-      const { blocks, flow } = projectDocumentOptions(compileDocument(parseDOCX(buffer)));
+      const { blocks, flow, furniture } = projectDocumentOptions(
+        compileDocument(parseDOCX(buffer)),
+      );
       const pages = layoutFlow(blocks, flow, measurer);
-      canvas ??= new CanvasStage(stageHost, { metrics: browserFontMetrics, flow });
+      canvas ??= new CanvasStage(stageHost, { metrics: browserFontMetrics, flow, furniture });
       canvas.sync(pages, flow);
       status.textContent = `${picked.name} — ${pages.length} page${pages.length === 1 ? "" : "s"}`;
     });

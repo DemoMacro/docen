@@ -1,4 +1,4 @@
-import type { ProjectedFlowBox } from "@docen/docx/layout";
+import type { ProjectedFlowBox, ProjectedPageFurniture } from "@docen/docx/layout";
 /**
  * Canvas stage — the page layer of the canvas document component.
  *
@@ -13,10 +13,11 @@ import type { ProjectedFlowBox } from "@docen/docx/layout";
  * owns and injects its own page styles; it wires into <docen-document> only
  * after the editing milestones (M-R2+) land.
  */
-import type { FlowPage, FontMetrics } from "@docen/layout";
+import type { FlowPage, FontMetrics, LaidOutStackItem } from "@docen/layout";
+import { stackBlocks, TextMeasurer } from "@docen/layout";
 import { App } from "leafer-ui";
 
-import { paintScene } from "./scene";
+import { paintFurnitureStack, paintScene, type PaintContext } from "./scene";
 
 const PAGE_GAP = 24;
 
@@ -24,6 +25,8 @@ const PAGE_GAP = 24;
 export interface CanvasStageContext {
   metrics: FontMetrics;
   flow: ProjectedFlowBox;
+  /** Headers/footers to paint on every page (absent = none). */
+  furniture?: ProjectedPageFurniture;
 }
 
 export class CanvasStage {
@@ -31,6 +34,9 @@ export class CanvasStage {
   private readonly slots: { el: HTMLElement; app: App | null }[] = [];
   private readonly io: IntersectionObserver;
   private pages: FlowPage[] = [];
+  /** Header/footer stacks per furniture slot, laid out once per sync at the
+   *  content width (furniture never reflows across pages). */
+  private furnitureStacks: Map<readonly LaidOutStackItem[], number> = new Map();
 
   constructor(
     stage: HTMLElement,
@@ -77,6 +83,7 @@ export class CanvasStage {
   sync(pages: FlowPage[], flow: ProjectedFlowBox): void {
     this.pages = pages;
     this.ctx.flow = flow;
+    this.layoutFurniture();
     const w = Math.ceil(flow.pageWidthPx);
     const h = Math.ceil(flow.pageHeightPx);
 
@@ -139,12 +146,68 @@ export class CanvasStage {
     this.repaint(app, this.slots.indexOf(slot));
   }
 
+  /** Lay each furniture slot out once (width = the content box, the same grid
+   *  context as body blocks) and remember each stack's height for the footer's
+   *  bottom-edge placement. */
+  private layoutFurniture(): void {
+    this.furnitureStacks = new Map();
+    const f = this.ctx.furniture;
+    if (!f) return;
+    const measurer = new TextMeasurer(this.ctx.metrics);
+    const ctx = this.ctx.flow.linePitchPx ? { linePitchPx: this.ctx.flow.linePitchPx } : undefined;
+    const lay = (blocks: typeof f.header): readonly LaidOutStackItem[] | undefined => {
+      if (!blocks) return undefined;
+      const laid = stackBlocks(blocks, this.ctx.flow.contentWidthPx, ctx, measurer);
+      this.furnitureStacks.set(laid.stack, laid.heightPx);
+      return laid.stack;
+    };
+    this.headerStacks = [lay(f.header), lay(f.firstHeader), lay(f.evenHeader)];
+    this.footerStacks = [lay(f.footer), lay(f.firstFooter), lay(f.evenFooter)];
+  }
+
+  /** Per-slot header/footer stacks [default, first, even] — an undefined slot
+   *  falls back to default at pick time (OOXML). */
+  private headerStacks: (readonly LaidOutStackItem[] | undefined)[] = [];
+  private footerStacks: (readonly LaidOutStackItem[] | undefined)[] = [];
+
+  /** Which slot a page uses: first (titlePage) on page 1, even on even pages
+   *  when the document asks for different even/odd headers, else default. */
+  private slotOf(index: number): number {
+    const f = this.ctx.furniture;
+    if (index === 0 && f?.titlePage) return 1;
+    if ((index + 1) % 2 === 0 && f?.evenAndOddHeaders) return 2;
+    return 0;
+  }
+
   private repaint(app: App, index: number): void {
     // app.tree is an ILeafer (extends IGroup) — clear/add come with it.
     const tree = app.tree;
     if (!tree) return;
     tree.clear();
-    paintScene(tree, this.pages[index]?.items ?? [], this.ctx);
+    const ctx: PaintContext = {
+      ...this.ctx,
+      pageIndex: index,
+      pageCount: this.pages.length,
+    };
+    const { flow } = this.ctx;
+    const slot = this.slotOf(index);
+    const header = this.headerStacks[slot] ?? this.headerStacks[0];
+    if (header) {
+      paintFurnitureStack(
+        tree,
+        header,
+        flow.contentLeftPx,
+        this.ctx.furniture?.headerDistancePx ?? 48,
+        ctx,
+      );
+    }
+    const footer = this.footerStacks[slot] ?? this.footerStacks[0];
+    if (footer) {
+      const height = this.furnitureStacks.get(footer) ?? 0;
+      const bottom = flow.pageHeightPx - (this.ctx.furniture?.footerDistancePx ?? 48);
+      paintFurnitureStack(tree, footer, flow.contentLeftPx, bottom - height, ctx);
+    }
+    paintScene(tree, this.pages[index]?.items ?? [], ctx);
     // Render eagerly: Leafer's change-driven scheduling stalls when the App
     // was created while its view was offscreen (an IO callback during mount)
     // and never picks the page back up.

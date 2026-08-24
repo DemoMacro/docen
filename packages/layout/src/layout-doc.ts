@@ -34,7 +34,11 @@ export interface LayoutTextStyle {
  *  `toPx` (a numbering bullet's hop to the body text), the paragraph's
  *  `tabStops`, or the default grid (720 twips). */
 export type LayoutInline =
-  | { kind: "text"; text: string; style: LayoutTextStyle }
+  /** A `field` marker makes the text a dynamic page-number atom (w:fldSimple /
+   *  complexField PAGE / NUMPAGES): the value only exists after pagination, so
+   *  `text` is a single-digit placeholder for measuring and the painter swaps
+   *  in the real page number. */
+  | { kind: "text"; text: string; style: LayoutTextStyle; field?: "page" | "numPages" }
   | { kind: "break" }
   | { kind: "tab"; toPx?: number }
   | { kind: "picture"; widthPx: number; heightPx: number; src?: string };

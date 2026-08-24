@@ -412,22 +412,38 @@ function projectRuns(
   defRun: LayoutTextStyle,
 ): LayoutInline[] {
   const out: LayoutInline[] = [];
-  const pushText = (text: string, rPr: Rec): void => {
-    if (!text) return;
+  const textStyleOf = (rPr: Rec): LayoutTextStyle => {
     const own = runStyleOf(rPr);
     const font: FontAttr = own.font ?? fontAttr(chainRPr.font) ?? fontAttr(docRPr.font) ?? null;
-    out.push({
-      kind: "text",
-      text,
-      style: {
-        family: font != null ? toFamily(own.font, font) : defRun.family,
-        sizePx: ptToPx(own.sizePt ?? num(chainRPr.size) ?? num(docRPr.size) ?? 12),
-        bold: own.bold ?? defRun.bold,
-        italic: own.italic ?? defRun.italic,
-        letterSpacingPx:
-          own.characterSpacingTw != null ? twipToPx(own.characterSpacingTw) : undefined,
-      },
-    });
+    return {
+      family: font != null ? toFamily(own.font, font) : defRun.family,
+      sizePx: ptToPx(own.sizePt ?? num(chainRPr.size) ?? num(docRPr.size) ?? 12),
+      bold: own.bold ?? defRun.bold,
+      italic: own.italic ?? defRun.italic,
+      letterSpacingPx:
+        own.characterSpacingTw != null ? twipToPx(own.characterSpacingTw) : undefined,
+    };
+  };
+  const pushText = (text: string, rPr: Rec): void => {
+    if (!text) return;
+    out.push({ kind: "text", text, style: textStyleOf(rPr) });
+  };
+  /** A field (w:fldSimple / complexField): PAGE/NUMPAGES become dynamic atoms
+   *  (the painter resolves the number per page — `text` is a measuring
+   *  placeholder); anything else renders its cached result as static text. */
+  const pushField = (field: Rec, rPr: Rec): void => {
+    const instr =
+      typeof field.instruction === "string" ? field.instruction.trim().toUpperCase() : "";
+    const cached =
+      typeof field.result === "string" ? field.result : (field.cachedValue as string | undefined);
+    const style = textStyleOf(rPr);
+    if (instr.startsWith("PAGE") && !instr.startsWith("PAGES")) {
+      out.push({ kind: "text", text: "0", style, field: "page" });
+    } else if (instr.startsWith("NUMPAGES")) {
+      out.push({ kind: "text", text: "0", style, field: "numPages" });
+    } else if (cached) {
+      pushText(cached, rPr);
+    }
   };
   const pushPicture = (pic: Rec): void => {
     const tr = isRecord(pic.transformation) ? pic.transformation : {};
@@ -452,6 +468,8 @@ function projectRuns(
     if (child.break != null) out.push({ kind: "break" });
     if (child.tab != null) out.push({ kind: "tab" });
     if (isRecord(child.picture)) pushPicture(child.picture);
+    if (isRecord(child.complexField)) pushField(child.complexField, child);
+    if (isRecord(child.simpleField)) pushField(child.simpleField, child);
     if (Array.isArray(child.children)) {
       for (const inner of child.children) {
         if (typeof inner === "string") {
@@ -461,6 +479,8 @@ function projectRuns(
           else if (inner.break != null) out.push({ kind: "break" });
           else if (inner.tab != null) out.push({ kind: "tab" });
           else if (isRecord(inner.picture)) pushPicture(inner.picture);
+          else if (isRecord(inner.complexField)) pushField(inner.complexField, inner);
+          else if (isRecord(inner.simpleField)) pushField(inner.simpleField, inner);
         }
       }
     }
@@ -619,6 +639,57 @@ export function projectFlowBox(properties: unknown): ProjectedFlowBox {
   };
 }
 
+/** Page furniture (headers/footers) projected for painting: the block lists
+ *  per slot (already projected like body blocks — the stage lays them out once
+ *  at the content width) plus the placement flags read at paint time.
+ *  `headerDistancePx`/`footerDistancePx` are w:pgMar's @w:header/@w:footer
+ *  (page edge to the header/footer box; 720 twips = Word's default). */
+export interface ProjectedPageFurniture {
+  header?: LayoutBlock[];
+  firstHeader?: LayoutBlock[];
+  evenHeader?: LayoutBlock[];
+  footer?: LayoutBlock[];
+  firstFooter?: LayoutBlock[];
+  evenFooter?: LayoutBlock[];
+  /** w:titlePg — page 1 uses the `first` slots instead of `default`. */
+  titlePage: boolean;
+  /** settings' w:evenAndOddHeaders — even pages use the `even` slots. */
+  evenAndOddHeaders: boolean;
+  headerDistancePx: number;
+  footerDistancePx: number;
+}
+
+/** Project the first section's headers/footers. An absent slot stays
+ *  undefined (the painter falls back per OOXML: page 1 without titlePage and
+ *  even pages without evenAndOddHeaders both use `default`). */
+function projectPageFurniture(doc: DocumentOptions): ProjectedPageFurniture {
+  const section = doc.sections?.[0];
+  const ctx: ProjectContext = { styles: doc.styles, numberings: indexNumberings(doc.numbering) };
+  const projectSlots = (side: unknown): LayoutBlock[] | undefined => {
+    if (!Array.isArray(side)) return undefined;
+    const blocks: LayoutBlock[] = [];
+    for (const child of side) {
+      const block = projectChild(child, ctx);
+      if (block) blocks.push(block);
+    }
+    return blocks.length > 0 ? blocks : undefined;
+  };
+  const props: Rec = isRecord(section?.properties) ? section.properties : {};
+  const margin: Rec = isRecord(props.pageMargin) ? props.pageMargin : {};
+  return {
+    header: projectSlots(section?.headers?.default),
+    firstHeader: projectSlots(section?.headers?.first),
+    evenHeader: projectSlots(section?.headers?.even),
+    footer: projectSlots(section?.footers?.default),
+    firstFooter: projectSlots(section?.footers?.first),
+    evenFooter: projectSlots(section?.footers?.even),
+    titlePage: props.titlePage === true,
+    evenAndOddHeaders: doc.settings?.evenAndOddHeaders === true,
+    headerDistancePx: twipToPx(measureTwip(margin.header) ?? 720),
+    footerDistancePx: twipToPx(measureTwip(margin.footer) ?? 720),
+  };
+}
+
 /** Project a full DocumentOptions into the engine's input: the FIRST section's
  *  body and flow box (multi-section flow — later sectPrs arrive as body-level
  *  section breaks — is a later milestone; sections beyond the first are
@@ -626,6 +697,7 @@ export function projectFlowBox(properties: unknown): ProjectedFlowBox {
 export function projectDocumentOptions(doc: DocumentOptions): {
   blocks: LayoutBlock[];
   flow: ProjectedFlowBox;
+  furniture: ProjectedPageFurniture;
 } {
   const ctx: ProjectContext = { styles: doc.styles, numberings: indexNumberings(doc.numbering) };
   const blocks: LayoutBlock[] = [];
@@ -638,5 +710,6 @@ export function projectDocumentOptions(doc: DocumentOptions): {
   return {
     blocks,
     flow: projectFlowBox(doc.sections?.[0]?.properties),
+    furniture: projectPageFurniture(doc),
   };
 }
