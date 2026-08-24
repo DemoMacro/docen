@@ -1,5 +1,5 @@
 import { encodeBase64 } from "@office-open/core";
-import type { FillOptions, OutlineOptions, SolidFillOptions } from "@office-open/core/drawingml";
+import type { FillOptions, OutlineOptions, SolidFillOptions } from "@office-open/core/drawing";
 import {
   convertEmuToPixels,
   convertEmuToPoints,
@@ -10,9 +10,10 @@ import type {
   ChildOffset,
   GroupChildMediaData,
   ParagraphOptions,
-  WpgGroupRunOptions,
-  WpsShapeCoreOptions,
-  WpsShapeRunOptions,
+  GroupOptions,
+  ShapeCoreOptions,
+  ShapeOptions,
+  ShapeTextBoxChild,
 } from "@office-open/docx";
 import type { DOMOutputSpec } from "@tiptap/pm/model";
 
@@ -22,7 +23,7 @@ import { floatAnchorScope, floatingToStyles, normalizeColorToHex, renderRunStyle
 
 /**
  * wpgGroup — inline atom carrying a DOCX drawing group (wpg: wordprocessingGroup)
- * as an opaque blob. Mirrors the office-open `WpgGroupRunOptions` / ParagraphChild
+ * as an opaque blob. Mirrors the office-open `GroupOptions` / ParagraphChild
  * `wpgGroup` field verbatim in attrs.wpgGroup, so the node name and attr stay
  * aligned with the OOXML concept (CT_WordprocessingGroup).
  *
@@ -48,25 +49,27 @@ function measureToPt(v: number | string | undefined, fallback = 0): number {
 // ── types reused from @office-open (no hand-written duplicates) ──
 //
 // Shape/group model types come straight from office-open:
-//   WpsShapeRunOptions  — standalone wps text box (wp:anchor > wps:wsp)
-//   WpsShapeCoreOptions — wps interior (also a group's wps child .data)
-//   WpgGroupRunOptions  — wpg drawing group (CT_WordprocessingGroup)
+//   ShapeOptions    — standalone wps text box (wp:anchor > wps:wsp)
+//   ShapeCoreOptions — wps interior (also a group's wps child .data)
+//   GroupOptions    — wpg drawing group (CT_WordprocessingGroup)
 //   GroupChildMediaData — a group child (wps | wpg | pic media-type union)
 //   BodyPropertiesOptions — a:bodyPr (wrap/spAutoFit/vert/anchor/insets/…)
 // Fill/outline (FillOptions/OutlineOptions) are discriminated unions; the helpers
 // below narrow them to the solid branch docen renders.
 
 /** A standalone wps text-box shape (the editable wpsShape node's payload). */
-export type WpsShapeStandalone = WpsShapeRunOptions;
+export type WpsShapeStandalone = ShapeOptions;
 /** wps interior data (fill/outline/bodyProperties/text body). */
-export type WpsData = WpsShapeCoreOptions;
+export type WpsData = ShapeCoreOptions;
 
 type Spec = ReadonlyArray<unknown>;
 
-/** SolidFillOptions union → its `.value` when that is a plain hex string (sRgb).
- *  Scheme/system/preset colors carry theme ids docen can't resolve to hex, so
- *  they fall through to the caller's default. */
-function solidColorValue(color: SolidFillOptions | undefined): string | undefined {
+/** Fill color union (bare sRGB hex string or SolidFillOptions member) → its
+ *  `.value` when that is a plain hex string (sRgb). Scheme/system/preset colors
+ *  carry theme ids docen can't resolve to hex, so they fall through to the
+ *  caller's default. */
+function solidColorValue(color: string | SolidFillOptions | undefined): string | undefined {
+  if (typeof color === "string") return color;
   const v = (color as { value?: unknown } | undefined)?.value;
   return typeof v === "string" ? v : undefined;
 }
@@ -78,9 +81,7 @@ function fillToCss(fill: FillOptions | undefined): string | undefined {
   if (!fill) return undefined;
   if (typeof fill === "string") return normalizeColorToHex(fill);
   if (fill.type !== "solid") return undefined;
-  const color = fill.color; // string | SolidFillOptions
-  const hex = typeof color === "string" ? color : solidColorValue(color);
-  return normalizeColorToHex(hex);
+  return normalizeColorToHex(solidColorValue(fill.color));
 }
 
 /** Shape outline → CSS border (EMU width → pt). noFill → undefined.
@@ -96,7 +97,7 @@ function outlineToCss(outline: OutlineOptions | undefined): string | undefined {
 
 /** Group extent in px: office-open 0.10.4+ parses wp:extent as EMU verbatim on
  *  MediaTransformation.width/height; convert to px (matching child transforms). */
-function groupExtent(group: WpgGroupRunOptions): { w: number; h: number } {
+function groupExtent(group: GroupOptions): { w: number; h: number } {
   const t = group.transformation;
   return {
     w: t && typeof t.width === "number" ? convertEmuToPixels(t.width) : 0,
@@ -157,7 +158,7 @@ function renderChild(
     // wps shape: a colored rect (office-open default geometry is rect; a present
     // customGeometry would need an SVG node view for path fidelity). A text-box
     // shape also carries body paragraphs (children) rendered as inline text.
-    const data = (child.data ?? {}) as WpsShapeCoreOptions;
+    const data = (child.data ?? {}) as ShapeCoreOptions;
     // Group-child transformation (MediaDataTransformation) stores rotation as
     // raw ST_Angle; convert to CSS degrees. Prefer the shape transform
     // (spPr/a:xfrm), fall back to bodyPr@rot (rare body-only rotation).
@@ -171,8 +172,9 @@ function renderChild(
     return renderWpsInterior(data, base, { rotation, flip, attrs: { "data-wpg-wps": "" } });
   }
 
-  // pic: child.type is the media type (jpg/png/…), child.data is the raw bytes.
-  if (child.type) {
+  // pic: child.type is the media type (jpg/png/…). Only picture children carry
+  // raw bytes — chart/contentPart children reference parts via ids instead.
+  if ("data" in child) {
     const src = picSrc(child.type, child.data);
     if (src) {
       const t = groupChildTransform(child.transformation);
@@ -187,12 +189,14 @@ function renderChild(
  *  so a text-box shape shows its text. Each paragraph's run defaults merge with
  *  each text run; renderRunStyles converts font/color/size/… to CSS. Advanced run
  *  props (shadow w14RawXml, kern) are carried in attrs but not rendered. */
-export function renderWpsText(
-  children: readonly (ParagraphOptions | string)[] | undefined,
-): Spec[] {
+export function renderWpsText(children: readonly ShapeTextBoxChild[] | undefined): Spec[] {
   if (!Array.isArray(children)) return [];
-  return children.map((para): Spec => {
-    if (typeof para === "string") return ["p", { style: "margin:0" }, para];
+  return children.map((child): Spec => {
+    if (typeof child === "string") return ["p", { style: "margin:0" }, child];
+    // SectionChild variants (nested tables etc.) have no paragraph fields —
+    // reading them as ParagraphOptions yields undefined throughout and renders
+    // an empty paragraph.
+    const para = child as ParagraphOptions;
     const defaultRun = para.run ?? {};
     const runs = (
       (para.children as readonly (string | ({ text?: string } & Record<string, unknown>))[]) ?? []
@@ -213,7 +217,7 @@ export function renderWpsText(
  *  writing-mode — those go on the outer positioning wrapper (see
  *  wpsRotationVert), because transform/writing-mode on an editable region
  *  distort the caret rect and break CJK IME composition. */
-export function wpsInnerStyle(data: WpsShapeCoreOptions): string {
+export function wpsInnerStyle(data: ShapeCoreOptions): string {
   const parts: string[] = [];
   const fill = fillToCss(data.fill);
   if (fill) parts.push(`background-color:${fill}`);
@@ -265,18 +269,19 @@ function groupChildTransform(
  *  differs by node: standalone ws.transformation is MediaTransformation degrees,
  *  while group-child ct.rotation stays raw ST_Angle. */
 export function wpsRotationVert(
-  data: WpsShapeCoreOptions,
+  data: ShapeCoreOptions,
   rotationDegrees?: number,
   flipOverride?: { horizontal?: boolean; vertical?: boolean },
 ): string {
   const parts: string[] = [];
   const t = flipRotateTransform(rotationDegrees, flipOverride);
   if (t) parts.push(t);
-  // text direction (bodyPr vert): vert/eaVert/mongolianVert → vertical-rl,
-  // vert270 → vertical-lr, so CJK vertical text boxes render top-to-bottom.
-  const vert = data.bodyProperties?.vert;
-  if (vert && vert !== "horz") {
-    parts.push(`writing-mode:${vert === "vert270" ? "vertical-lr" : "vertical-rl"}`);
+  // text direction (bodyPr vertical): vertical/eastAsianVertical/mongolianVertical
+  // → vertical-rl, vertical270 → vertical-lr, so CJK vertical text boxes render
+  // top-to-bottom.
+  const vertical = data.bodyProperties?.vertical;
+  if (vertical && vertical !== "horizontal") {
+    parts.push(`writing-mode:${vertical === "vertical270" ? "vertical-lr" : "vertical-rl"}`);
   }
   return parts.join(";");
 }
@@ -296,7 +301,7 @@ export function wpsRotationVert(
  * wpsShapeStyles (outer = position+rotation+vert, inner = contentDOM).
  */
 export function renderWpsInterior(
-  data: WpsShapeCoreOptions,
+  data: ShapeCoreOptions,
   positionStyle: string,
   opts?: {
     rotation?: number;
@@ -318,7 +323,7 @@ export function renderWpsInterior(
  *  geometry (EMU extent → px, floating anchor CSS) is computed here so the
  *  editor's NodeView and generateHTML render identically without re-deriving
  *  the engine's EMU/floating math. */
-export function wpsShapeStyles(ws: WpsShapeRunOptions): WpsShapeStyles {
+export function wpsShapeStyles(ws: ShapeOptions): WpsShapeStyles {
   const tw = ws.transformation?.width;
   const th = ws.transformation?.height;
   const w = typeof tw === "number" ? convertEmuToPixels(tw) : 0;
@@ -366,7 +371,7 @@ export function wpsShapeStyles(ws: WpsShapeRunOptions): WpsShapeStyles {
   // has the full extent to distribute against (otherwise the contentDOM
   // shrinks to its text height and anchor has no room to push within).
   const anchor = ws.bodyProperties?.anchor;
-  const justify = anchor === "ctr" ? "center" : anchor === "b" ? "flex-end" : "flex-start";
+  const justify = anchor === "center" ? "center" : anchor === "bottom" ? "flex-end" : "flex-start";
   const inner = `box-sizing:border-box;display:flex;flex-direction:column;justify-content:${justify};height:100%;${wpsInnerStyle(ws)}`;
   return { outer, inner, paragraphAnchor };
 }
@@ -431,7 +436,7 @@ const attrWpgGroup = () => ({
   },
 });
 
-// DOCX drawing group (wpg) → opaque atom: full WpgGroupRunOptions rides on
+// DOCX drawing group (wpg) → opaque atom: full GroupOptions rides on
 // attrs.wpgGroup (the editor doesn't model the group interior).
 export const parseDocxInline: ParseInlineRule = {
   match: (child) => "wpgGroup" in child,
@@ -463,7 +468,7 @@ export const WpgGroup = Node.create({
     node: { attrs: Record<string, unknown> };
     HTMLAttributes: Record<string, unknown>;
   }) {
-    const wpg = (node.attrs.wpgGroup as WpgGroupRunOptions | null) ?? ({} as WpgGroupRunOptions);
+    const wpg = (node.attrs.wpgGroup as GroupOptions | null) ?? ({} as GroupOptions);
     const { w, h } = groupExtent(wpg);
     const tw = wpg.transformation?.width;
     const widthNum = typeof tw === "number" ? tw : undefined;

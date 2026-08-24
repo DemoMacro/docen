@@ -14,12 +14,7 @@
  * @module
  */
 
-import type {
-  FillOptions,
-  OutlineOptions,
-  PresetDash,
-  SolidFillOptions,
-} from "@office-open/core/drawingml";
+import type { FillOptions, OutlineOptions, SolidFillOptions } from "@office-open/core/drawing";
 import { convertEmuToPixels } from "@office-open/core/util";
 
 /** A small CSS-named-color table so OOXML bare hex / named colors resolve to
@@ -81,8 +76,9 @@ export const normalizeColorToHex = (color: unknown): string | undefined => {
   return CSS_COLORS[color.toLowerCase()] ?? undefined;
 };
 
-/** Extract a hex color from a SolidFillOptions union member (rgb/scheme/hsl/…). */
-const solidColorValue = (color: SolidFillOptions | undefined): string | undefined => {
+/** Extract a hex color from a fill color union — a bare sRGB hex string or a
+ *  SolidFillOptions member (rgb/scheme/hsl/…). */
+const solidColorValue = (color: string | SolidFillOptions | undefined): string | undefined => {
   if (!color) return undefined;
   if (typeof color === "string") return color;
   const obj = color as { value?: string; val?: string };
@@ -95,7 +91,7 @@ export const renderFill = (fill: FillOptions | null | undefined): string | undef
   if (!fill) return undefined;
   if (typeof fill === "string") return normalizeColorToHex(fill);
   if (fill.type !== "solid") return undefined;
-  const color = typeof fill.color === "string" ? fill.color : solidColorValue(fill.color);
+  const color = solidColorValue(fill.color);
   return normalizeColorToHex(color);
 };
 
@@ -128,7 +124,7 @@ export const renderOutline = (
   // in @office-open/core/util, same one geometry.ts emuToPx proxies).
   const emu = typeof outline.width === "number" ? outline.width : 9525;
   const strokeWidth = Math.max(0.5, convertEmuToPixels(emu));
-  const dash = outline.dash as (typeof PresetDash)[keyof typeof PresetDash] | undefined;
+  const dash = outline.dash;
   // Collapse OOXML dash presets to a Canvas dash array. Solid (the common case)
   // leaves dashPattern unset so LeaferJS draws a continuous line.
   let dashPattern: number[] | undefined;

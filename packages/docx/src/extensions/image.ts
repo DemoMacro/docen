@@ -23,7 +23,7 @@ type CropRect = { left?: number; top?: number; right?: number; bottom?: number }
  *  - crop: nested office-open SourceRectangleOptions (srcRect).
  *  - display: editor-only display hint, no OOXML equivalent.
  *
- * DOCX round-trip is near-identity: renderDocx packs attrs into CoreImageOptions;
+ * DOCX round-trip is near-identity: renderDocx packs attrs into CorePictureOptions;
  * parseDocx unpacks them back. src is a data URL ↔ { type, data } base64.
  * Node-level renderHTML solves the style merge problem (rotation + floating).
  */
@@ -46,9 +46,9 @@ const attrDataJson = (name: string) => ({
 });
 
 /**
- * Tiptap JSON image node → CoreImageOptions-shaped object.
+ * Tiptap JSON image node → CorePictureOptions-shaped object.
  *
- * Returns `{ image: ImageOptions }` (structural wrapper) or null when no
+ * Returns `{ picture: PictureOptions }` (structural wrapper) or null when no
  * embedded image data is available (external URLs need pre-fetching).
  * rotation is carried via transformation.rotation (not dropped).
  */
@@ -119,13 +119,13 @@ export function renderDocx(node: JSONContent): Record<string, unknown> | null {
   if (attrs.fill) imageOpts.fill = attrs.fill;
   if (attrs.effects) imageOpts.effects = attrs.effects;
   if (attrs.tile) imageOpts.tile = attrs.tile;
-  if (attrs.runPropertiesRawXml) imageOpts.runPropertiesRawXml = attrs.runPropertiesRawXml;
+  if (attrs.runProperties) imageOpts.runProperties = attrs.runProperties;
 
-  return { image: imageOpts };
+  return { picture: imageOpts };
 }
 
 /**
- * ImageOptions-shaped object → Tiptap attrs.
+ * PictureOptions-shaped object → Tiptap attrs.
  *
  * Near-identity unpack: transformation → width/height/rotation, altText → alt/title,
  * floating/srcRect(→crop)/outline passed through verbatim. src is reconstructed by
@@ -174,12 +174,12 @@ export function parseDocx(imageOpts: Record<string, unknown>): Record<string, un
   if (opts.fill) attrs.fill = opts.fill;
   if (opts.effects) attrs.effects = opts.effects;
   if (opts.tile) attrs.tile = opts.tile;
-  if (opts.runPropertiesRawXml) attrs.runPropertiesRawXml = opts.runPropertiesRawXml;
+  if (opts.runProperties) attrs.runProperties = opts.runProperties;
 
   return attrs;
 }
 
-/** ParagraphChild `{ image: ImageOptions }` → image node. Mirrors the old
+/** ParagraphChild `{ picture: PictureOptions }` → image node. Mirrors the old
  *  DocxManager.resolveImage: reflective attrs parse, then rebuild the data URL
  *  from the embedded bytes (encodeBase64 handles platform dispatch + stack
  *  guard). */
@@ -194,10 +194,11 @@ function resolveImage(imageOpts: Record<string, unknown>, ctx: ResolveContext): 
   return { type: "image", attrs };
 }
 
-// DOCX image run → office-open ParagraphChild `{ image: ImageOptions }`.
+// DOCX image run → office-open ParagraphChild `{ picture: PictureOptions }`.
 export const parseDocxInline: ParseInlineRule = {
-  match: (child) => "image" in child,
-  convert: (child, ctx) => resolveImage((child as { image: Record<string, unknown> }).image, ctx),
+  match: (child) => "picture" in child,
+  convert: (child, ctx) =>
+    resolveImage((child as { picture: Record<string, unknown> }).picture, ctx),
 };
 
 // ── Node-level renderHTML helpers ──
@@ -332,7 +333,7 @@ const RAW_ATTR_DATA: Array<[string, string]> = [
   ["fill", "data-fill"],
   ["effects", "data-effects"],
   ["tile", "data-tile"],
-  ["runPropertiesRawXml", "data-run-properties-raw-xml"],
+  ["runProperties", "data-run-properties"],
 ];
 
 function attachRawAttrs(target: Record<string, unknown>, attrs: Record<string, unknown>): void {
@@ -485,7 +486,7 @@ export const Image = BaseImage.extend({
       fill: attrDataJson("data-fill"),
       effects: attrDataJson("data-effects"),
       tile: attrDataJson("data-tile"),
-      runPropertiesRawXml: attrDataJson("data-run-properties-raw-xml"),
+      runProperties: attrDataJson("data-run-properties"),
     };
   },
 

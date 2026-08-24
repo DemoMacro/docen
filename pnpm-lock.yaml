@@ -26,8 +26,8 @@ importers:
   packages/core:
     dependencies:
       '@office-open/core':
-        specifier: 0.10.15
-        version: 0.10.15
+        specifier: 0.12.3
+        version: 0.12.3
       leafer-ui:
         specifier: 2.2.9
         version: 2.2.9
@@ -54,11 +54,11 @@ importers:
   packages/docx:
     dependencies:
       '@office-open/core':
-        specifier: 0.10.15
-        version: 0.10.15
+        specifier: 0.12.3
+        version: 0.12.3
       '@office-open/docx':
-        specifier: 0.10.15
-        version: 0.10.15
+        specifier: 0.12.3
+        version: 0.12.3
       '@tiptap/core':
         specifier: 3.29.2
         version: 3.29.2(@tiptap/pm@3.29.2)
@@ -937,18 +937,18 @@ packages:
   '@nlptools/distance@0.0.8':
     resolution: {integrity: sha512-brClkVhkFpcx3UsQSIMhdJMhBvIsTtJnzG7yPWbZxviy/Q2LwspW85nckWkHEJoFwlHF0Sfuq41qa6ivjo9qyA==}
 
-  '@noble/hashes@2.2.0':
-    resolution: {integrity: sha512-IYqDGiTXab6FniAgnSdZwgWbomxpy9FtYvLKs7wCUs2a8RkITG+DFGO1DM9cr+E3/RgADRpFjrKVaJ1z6sjtEg==}
+  '@noble/hashes@2.3.0':
+    resolution: {integrity: sha512-oN+QwyX7VSHotibwubG3kpzbwKrfnyR6OOO+3Nk/53ADL7FmgHHz4TgrbaYKvvOw09u6QTx0oiH1cNCIOuN0CQ==}
     engines: {node: '>= 20.19.0'}
 
-  '@office-open/core@0.10.15':
-    resolution: {integrity: sha512-Ncu8jaKIXpAu5VgFFBYSqiw4fwj8EzeLs9xiS6aHpIryDXwVbCB62V7UuMbJ/XEVwiHyVpkvi1dXxT1OwnKLoA==}
+  '@office-open/core@0.12.3':
+    resolution: {integrity: sha512-l9xKclHZsGAUO9KTQlRzVJoua0EnfDVB8cPcurxajSFvoXLPVG5IfW2et9OWznb+E4kNGAH8sSLhFeYqqmkLoQ==}
 
-  '@office-open/docx@0.10.15':
-    resolution: {integrity: sha512-ivsPTzJ9uJQ7U1R7Gey2YXYtEaI5LcKwPTfueTI1vjnmIL87x9Q4ewFqgrUIi2H6BfDzbGiSJudGUqYSUFpEjA==}
+  '@office-open/docx@0.12.3':
+    resolution: {integrity: sha512-UpugP1cS4OER9cA8Dlgow+aoYLDuCbssan4jZfCKJijqHl/mwclUau0mU1cX8fQYaWOStLRhTzrDnKnSk1KKEQ==}
 
-  '@office-open/xml@0.10.15':
-    resolution: {integrity: sha512-0MHNoJXZQ2f6azI6wNTa6/1n7Y6NQuWUdXInEHarCJ0YcTNHNUrj6UEMgvesdvQ5VmGSjYzGC/P/BL6xaIYLaQ==}
+  '@office-open/xml@0.12.3':
+    resolution: {integrity: sha512-WhJWH8qiuFtN15t97caRZ/zVgIwAniEBZmZc3mmwrkhLezbLALfNqbB8lRgBe0HZ8eYABzQGZN8UwbgOQgxxbw==}
 
   '@oxc-project/runtime@0.142.0':
     resolution: {integrity: sha512-Dv3jRrcXFdvUBUEljUu9kusrEo9G0iiqZFZNg3yCg+mkET4DD4S2Ow6Q6shFWDJwPidSa980d6YVXBlErUGADw==}
@@ -3852,20 +3852,20 @@ snapshots:
       '@algorithm.ts/lcs': 4.0.6
       fastest-levenshtein: 1.0.16
 
-  '@noble/hashes@2.2.0': {}
+  '@noble/hashes@2.3.0': {}
 
-  '@office-open/core@0.10.15':
+  '@office-open/core@0.12.3':
     dependencies:
-      '@noble/hashes': 2.2.0
-      '@office-open/xml': 0.10.15
+      '@noble/hashes': 2.3.0
+      '@office-open/xml': 0.12.3
       fflate: 0.8.3
 
-  '@office-open/docx@0.10.15':
+  '@office-open/docx@0.12.3':
     dependencies:
-      '@office-open/core': 0.10.15
-      '@office-open/xml': 0.10.15
+      '@office-open/core': 0.12.3
+      '@office-open/xml': 0.12.3
 
-  '@office-open/xml@0.10.15': {}
+  '@office-open/xml@0.12.3': {}
 
   '@oxc-project/runtime@0.142.0': {}
 

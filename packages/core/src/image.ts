@@ -16,7 +16,7 @@
  * @module
  */
 
-import type { OutlineOptions, SourceRectangleOptions } from "@office-open/core/drawingml";
+import type { OutlineOptions, SourceRectangleOptions } from "@office-open/core/drawing";
 import type { IImageInputData, IUI } from "leafer-ui";
 
 import { clampDimension, cropFractions } from "./geometry";

@@ -27,7 +27,7 @@ import type {
   TableRowPropertiesOptionsBase,
   TableCellOptions,
   Floating,
-  ImageOptions,
+  PictureOptions,
 } from "@office-open/docx";
 import type { JSONContent as TiptapJSONContent } from "@tiptap/core";
 
@@ -64,8 +64,8 @@ export type {
   RunOptions,
   RunPropertiesOptions,
   ParagraphRunPropertiesOptions,
-  // Image
-  ImageOptions,
+  // Picture
+  PictureOptions,
   MediaTransformation,
   // Table
   TableRowOptions,
@@ -236,19 +236,19 @@ export interface ImageAttrs {
   height: number | null;
   rotation: number | null;
   floating: Floating | null;
-  outline: NonNullable<ImageOptions["outline"]> | null;
-  crop: NonNullable<ImageOptions["sourceRectangle"]> | null;
+  outline: NonNullable<PictureOptions["outline"]> | null;
+  crop: NonNullable<PictureOptions["sourceRectangle"]> | null;
   display: string | null;
   // 0.9.7+ fidelity fields (office-open native; near-identity passthrough)
-  nonVisualProperties: NonNullable<ImageOptions["nonVisualProperties"]> | null; // pic:cNvPr (id/name/descr)
+  nonVisualProperties: NonNullable<PictureOptions["nonVisualProperties"]> | null; // pic:cNvPr (id/name/descr)
   effectExtent: { l: number; t: number; r: number; b: number } | null; // wp:effectExtent EMUs
-  graphicFrameLocks: NonNullable<ImageOptions["graphicFrameLocks"]> | null;
-  blipEffects: NonNullable<ImageOptions["blipEffects"]> | null;
+  graphicFrameLocks: NonNullable<PictureOptions["graphicFrameLocks"]> | null;
+  blipEffects: NonNullable<PictureOptions["blipEffects"]> | null;
   useLocalDpi: boolean | null; // a14:useLocalDpi
-  fill: NonNullable<ImageOptions["fill"]> | null;
-  effects: NonNullable<ImageOptions["effects"]> | null;
-  tile: NonNullable<ImageOptions["tile"]> | null;
-  runPropertiesRawXml: string | null;
+  fill: NonNullable<PictureOptions["fill"]> | null;
+  effects: NonNullable<PictureOptions["effects"]> | null;
+  tile: NonNullable<PictureOptions["tile"]> | null;
+  runProperties: NonNullable<PictureOptions["runProperties"]> | null;
 }
 
 /**

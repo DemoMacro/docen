@@ -63,8 +63,8 @@
     "prepack": "pnpm build"
   },
   "dependencies": {
-    "@office-open/core": "0.10.15",
-    "@office-open/docx": "0.10.15",
+    "@office-open/core": "0.12.3",
+    "@office-open/docx": "0.12.3",
     "@tiptap/core": "3.29.2",
     "@tiptap/extension-blockquote": "3.29.2",
     "@tiptap/extension-bold": "3.29.2",
