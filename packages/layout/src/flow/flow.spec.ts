@@ -75,6 +75,18 @@ describe("layoutFlow", () => {
     expect(tail.heightPx).toBe(80);
   });
 
+  it("keeps the first-line indent on the head page only when a paragraph splits", () => {
+    // A 6-line first-line-indented paragraph over a 100px page: the indent
+    // rides on the paragraph's first LINE, so the split tail's leading line
+    // (mid-paragraph) must carry none — Word does not re-indent page 2.
+    const pages = flow([para(6, { indent: { firstLinePx: 24 } })], 100);
+    const [head] = paras(pages)[0];
+    const [tail] = paras(pages)[1];
+    expect(head.lines[0].firstLineIndentPx).toBe(24);
+    for (const line of head.lines.slice(1)) expect(line.firstLineIndentPx).toBeUndefined();
+    for (const line of tail.lines) expect(line.firstLineIndentPx).toBeUndefined();
+  });
+
   it("collapses spacing between blocks and contains page-edge margins", () => {
     const withMargins = (before: number, after: number): LayoutParagraph =>
       para(1, {

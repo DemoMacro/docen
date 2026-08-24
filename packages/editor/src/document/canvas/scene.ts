@@ -80,12 +80,12 @@ function paintParagraph(
       }),
     );
   }
-  for (const [lineIndex, line] of para.lines.entries()) {
+  for (const line of para.lines) {
     const lineY = y + line.yPx;
-    // Line x origin: the left indent, plus the first line's own indent —
-    // item xPx starts at the line's content start (hanging indents go left).
-    const lineX =
-      x + (para.indent?.leftPx ?? 0) + (lineIndex === 0 ? (para.indent?.firstLinePx ?? 0) : 0);
+    // Line x origin: the left indent (every line) plus THIS line's own
+    // first-line indent — a split tail's leading line carries none (it is
+    // mid-paragraph), so the flag lives on the line, not the line index.
+    const lineX = x + (para.indent?.leftPx ?? 0) + (line.firstLineIndentPx ?? 0);
     // A justified line stretches each text item to the next item's x (the
     // last one to the line's content width): Leafer's textAlign "both-letter"
     // spreads the slack as uniform letter spacing inside that interval —

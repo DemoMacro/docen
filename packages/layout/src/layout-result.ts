@@ -37,6 +37,11 @@ export type LaidOutLineItem = LaidOutTextItem | LaidOutPictureItem;
 export interface LaidOutLine {
   yPx: number;
   heightPx: number;
+  /** This line's own first-line indent (w:ind/@w:firstLine, negative for a
+   *  hanging indent) — set on the paragraph's FIRST line only, so a split
+   * tail's leading line (mid-paragraph, mid-page) carries none. The painter
+   * offsets by it instead of guessing from the line index. */
+  firstLineIndentPx?: number;
   /** The source inline the line's content ends at — a coarse split-point
    *  marker for page breaking. */
   endInlineIndex: number;

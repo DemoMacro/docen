@@ -288,6 +288,9 @@ function stackHeight(items: readonly LaidOutStackItem[]): number {
   return last.yPx + last.block.heightPx + after;
 }
 
+/** Re-derive a split tail's line y offsets. The first-line indent needs no
+ *  handling here: it lives on the line (`firstLineIndentPx`), and a tail's
+ *  leading line is mid-paragraph (slice(k), k ≥ 1), so it carries none. */
 function rebaseLines(lines: readonly LaidOutLine[]): LaidOutLine[] {
   let y = 0;
   return lines.map((line) => {

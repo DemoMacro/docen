@@ -115,6 +115,7 @@ export function layoutParagraph(
     lines.push({
       yPx: heightPx,
       heightPx: line.heightPx,
+      firstLineIndentPx: i === 0 ? para.indent?.firstLinePx : undefined,
       endInlineIndex: line.endInlineIndex,
       items: line.items,
       maxWidthPx: justifyGapPx[i] !== undefined ? line.maxWidthPx : undefined,
