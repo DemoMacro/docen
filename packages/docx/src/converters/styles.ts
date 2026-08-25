@@ -259,8 +259,8 @@ function resolveNode(
   const out: JSONContent = { ...node };
   const attrs = node.attrs as Record<string, unknown> | undefined;
   const type = node.type;
-  if ((type === "paragraph" || type === "heading") && attrs?.styleId) {
-    const { paragraph, run } = mergeStyleChain(paraById, attrs.styleId as string);
+  if (type === "paragraph" && attrs?.style) {
+    const { paragraph, run } = mergeStyleChain(paraById, attrs.style as string);
     // Baked chain is the base; explicit attrs override per-property. Use
     // deepMergeInto (not object spread) so a node's schema null defaults
     // (spacing:null, indent:null, …) don't clobber the baked values, and a
@@ -277,7 +277,7 @@ function resolveNode(
   if (node.marks) {
     out.marks = node.marks.map((m) => {
       if (m.type !== "textStyle") return m;
-      const sid = (m.attrs as Record<string, unknown> | undefined)?.styleId as string | undefined;
+      const sid = (m.attrs as Record<string, unknown> | undefined)?.style as string | undefined;
       const crun = sid ? charRunById.get(sid) : undefined;
       // deepMergeInto (not spread) so the mark's schema null defaults don't
       // clobber the baked character-style run (e.g. italic:null wiping the
@@ -341,21 +341,18 @@ export function cleanAttrs(attrs: Record<string, unknown>): Record<string, unkno
   return result;
 }
 
-/** Build a text-block node (paragraph/heading) from a resolved ParagraphOptions:
- *  reflective attrs parse, optional heading-level stamp, inline content, and
- *  null-stripped attrs. Shared by resolveParagraph's heading rule + plain
- *  fallback (and the list-item paragraph path) so the build stays DRY.
+/** Build a paragraph node from a resolved ParagraphOptions: reflective attrs
+ *  parse, inline content, and null-stripped attrs. Shared by resolveParagraph's
+ *  plain fallback and the list-item paragraph path so the build stays DRY.
  *  `contentPara` overrides the content source — a list item strips its task
  *  checkbox before resolving content, but attrs still come from the original. */
 export function buildTextBlock(
   type: string,
   resolved: ParagraphOptions,
   ctx: ResolveContext,
-  level?: number,
   contentPara?: ParagraphOptions,
 ): JSONContent {
   const attrs = ctx.parseNodeAttrs(type, resolved as unknown as Record<string, unknown>);
-  if (level != null && attrs.level == null) attrs.level = level;
   const content = ctx.resolveInlineContent(contentPara ?? resolved);
   const cleaned = cleanAttrs(attrs);
   const node: JSONContent = { type };

@@ -125,7 +125,7 @@ const FALLBACK_STYLE_ITEMS = (): string =>
  *  named paragraph styles (Normal + any custom) first, then the built-in named
  *  styles nested under `default` (title/heading1-9). Display text is the style's
  *  own `name` from the model (falling back to its id); the value is the pStyle
- *  id, which round-trips via the Paragraph/Heading `styleId` attr. */
+ *  id, which round-trips via the paragraph `style` attr. */
 const styleItems = (styles?: StylesOptions | null): string => {
   // quickStyles() returns the document's quickFormat paragraph styles (Word's
   // Quick Styles gallery behavior), ordered by uiPriority. The value is the

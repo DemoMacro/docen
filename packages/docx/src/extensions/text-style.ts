@@ -1,4 +1,8 @@
-import type { RunOptions, RunStylePropertiesOptions } from "@office-open/docx";
+import type {
+  RunOptions,
+  RunPropertiesOptions,
+  RunStylePropertiesOptions,
+} from "@office-open/docx";
 import { TextStyle as BaseTextStyle } from "@tiptap/extension-text-style";
 
 import {
@@ -26,11 +30,10 @@ import {
  * CSS conversion happens only in attribute-level renderHTML/parseHTML.
  */
 
-/** Structural/semantic keys expressed elsewhere (run children/text, style name). */
+/** Structural/semantic keys expressed elsewhere (run children/text/break). */
 const SKIP_KEYS = new Set([
   "children",
   "text",
-  "style",
   "break",
   // subScript/superScript are OOXML vertAlign enums with no "false" state, so
   // they stay on dedicated marks. bold/italic/strike/doubleStrike are
@@ -43,15 +46,15 @@ const SKIP_KEYS = new Set([
 ]);
 
 /** RunStylePropertiesOptions keys NOT mirrored as TextStyle attrs: run
- *  children/text/break live on inline nodes, style is renamed to the styleId
- *  attr (it feeds the docx-char-* CSS class). verticalAlign stays an attr for
+ *  children/text/break live on inline nodes. verticalAlign stays an attr for
  *  round-trip (an explicit "baseline" cancels an inherited sub/superscript);
  *  its subscript/superscript values additionally surface on the dedicated
  *  Subscript/Superscript marks for editor interaction. */
-type RunKeyElsewhere = "children" | "text" | "style" | "break";
+type RunKeyElsewhere = "children" | "text" | "break";
 
-/** Attr keys layered on top of the office-open mirror: the style rename. */
-type RunAttrKey = Exclude<keyof RunStylePropertiesOptions, RunKeyElsewhere> | "styleId";
+/** The full run attr key set — keyof RunPropertiesOptions verbatim (the
+ *  rStyle reference `style` lives there, not on RunStylePropertiesOptions). */
+type RunAttrKey = keyof RunPropertiesOptions;
 
 /** Scalar OOXML run properties with no CSS equivalent — stored verbatim via
  *  attrNative (default null, renderDocx/parseDocx pass through). Spread into
@@ -101,22 +104,21 @@ const NATIVE_RUN_ATTRS = {
   verticalAlign: attrNative(),
 };
 
-/** The full run attr mirror — styleId + CSS-handled keys + verbatim natives,
+/** The full run attr mirror — CSS-handled keys + verbatim natives,
  *  satisfies-guarded against keyof RunStylePropertiesOptions (same contract as
  *  docxParagraphAttrs in utils.ts). */
 const docxRunAttrs = {
   // rStyle reference (e.g. "InternetLink") — the named character style.
-  // renderHTML emits class="docx-char-{styleId}" so the injected document
-  // CSS (generated from styles.xml characterStyles) applies. Round-trips
-  // via OOXML run `style`.
-  styleId: {
+  // renderHTML emits class="docx-char-{style}" so the injected document
+  // CSS (generated from styles.xml characterStyles) applies.
+  style: {
     default: null,
     parseHTML: (element: HTMLElement) => {
       const m = (element.getAttribute("class") || "").match(/(?:^|\s)docx-char-(\S+)/);
       return m ? m[1] : null;
     },
     renderHTML: (attributes: Record<string, unknown>) => {
-      const id = attributes.styleId as string | null;
+      const id = attributes.style as string | null;
       return id ? { class: `docx-char-${id}` } : {};
     },
   },
@@ -211,19 +213,13 @@ export const TextStyle = BaseTextStyle.extend({
     };
   },
 
-  // Near-identity: attrs mirror RunStylePropertiesOptions. styleId (attr) ↔
-  // OOXML run `style` (rStyle). CSS conversion happens only in attribute-level
-  // renderHTML/parseHTML above.
+  // Near-identity: attrs mirror RunStylePropertiesOptions (rStyle included).
+  // CSS conversion happens only in attribute-level renderHTML/parseHTML above.
   renderDocx: (attrs: Record<string, unknown>): Partial<RunOptions> => {
     const opts: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(attrs)) {
       if (SKIP_KEYS.has(key)) continue;
       if (value === null || value === undefined) continue;
-      // styleId (attr) → OOXML run `style` (the rStyle / character-style reference).
-      if (key === "styleId") {
-        opts.style = value;
-        continue;
-      }
       opts[key] = value;
     }
     return opts as Partial<RunOptions>;
@@ -231,12 +227,11 @@ export const TextStyle = BaseTextStyle.extend({
   parseDocx: (opts: RunOptions): Record<string, unknown> | null => {
     const resolved = typeof opts === "string" ? { text: opts } : opts;
     const attrs: Record<string, unknown> = {};
-    // rStyle "CodeChar" belongs to the `code` mark — skip its styleId and the
+    // rStyle "CodeChar" belongs to the `code` mark — skip its style and the
     // Consolas fallback font so they aren't double-applied on compile.
-    if (resolved.style && resolved.style !== "CodeChar") attrs.styleId = resolved.style;
     for (const [key, value] of Object.entries(resolved)) {
       if (SKIP_KEYS.has(key)) continue;
-      if (resolved.style === "CodeChar" && key === "font") continue;
+      if (resolved.style === "CodeChar" && (key === "style" || key === "font")) continue;
       attrs[key] = value ?? null;
     }
     return Object.keys(attrs).length ? attrs : null;

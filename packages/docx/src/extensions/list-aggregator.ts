@@ -3,7 +3,6 @@ import type { ParagraphOptions } from "@office-open/docx";
 import { buildTextBlock } from "../converters/styles";
 import type { JSONContent } from "../core";
 import { Extension } from "../core";
-import { detectHeadingLevel } from "./heading";
 import * as taskItemExt from "./task-item";
 import type { ParseAggregatorRule, ResolveContext } from "./types";
 
@@ -79,22 +78,20 @@ function detectList(para: ParagraphOptions, ctx: ResolveContext): ListInfo | nul
   };
 }
 
-/** Resolve a list-item paragraph to a Tiptap paragraph/heading node, stripping
- *  the list marker (bullet/numbering) and the leading task checkbox — those are
- *  expressed at the list/item level, not inside the paragraph. */
+/** Resolve a list-item paragraph to a Tiptap paragraph node, stripping the
+ *  leading task checkbox — its state is expressed at the item level, not inside
+ *  the paragraph. */
 function resolveListItemParagraph(
   para: ParagraphOptions,
   info: ListInfo,
   ctx: ResolveContext,
 ): JSONContent {
   const resolved = typeof para === "string" ? ({ text: para } as ParagraphOptions) : para;
-  const headingLevel = detectHeadingLevel(resolved, ctx.styles);
-  const nodeType = headingLevel ? "heading" : "paragraph";
   // Task: drop the leading checkbox SDT (its state lives in taskItem.attrs).
   // attrs still come from the original `resolved`; only the content source is
   // the stripped paragraph (buildTextBlock's contentPara override).
   const stripped = info.kind === "task" ? stripTaskCheckbox(resolved) : resolved;
-  return buildTextBlock(nodeType, resolved, ctx, headingLevel, stripped);
+  return buildTextBlock("paragraph", resolved, ctx, stripped);
 }
 
 /** Return a copy of `para` with its leading docen-task checkbox SDT removed. */

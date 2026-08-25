@@ -1,6 +1,5 @@
 import { detectHeadingLevel, type StylesOptions } from "@docen/docx";
-import { Extension } from "@docen/docx/core";
-import { Plugin, PluginKey } from "@tiptap/pm/state";
+import { Extension, type Editor } from "@docen/docx/core";
 
 /** A heading anchor for the navigation outline. `id` is a stable heading-order
  *  index (so the outline's signature dedups without rebuilding the tree on
@@ -14,73 +13,60 @@ export interface OutlineAnchor {
   originalLevel: number;
 }
 
+/** Collect heading anchors: a heading IS a paragraph, so the walk resolves each
+ *  paragraph's level via detectHeadingLevel — the lifted HeadingLevel attr, an
+ *  explicit outlineLevel, or a pStyle naming a heading style (directly /
+ *  localized name / basedOn chain). Read-only: no setNodeMarkup means no
+ *  content re-validation (the official TOC extension's injected ids
+ *  re-validate and can abort the reflow transaction on list-rich docs);
+ *  outline clicks jump by `pos`, so ids aren't needed. `id` is a heading-order
+ *  index, stable across re-flows (which only repaginate, never reorder). */
+function collectAnchors(editor: Editor): OutlineAnchor[] {
+  const anchors: OutlineAnchor[] = [];
+  let idx = 0;
+  // Styles snapshot once per walk: detectHeadingLevel indexes it for
+  // style-based detection, so re-indexing per paragraph is O(n·m) otherwise.
+  const styles = (editor.state.doc.attrs as { styles?: StylesOptions }).styles;
+  editor.state.doc.descendants((node, pos) => {
+    if (node.type.name !== "paragraph") return true;
+    const level = detectHeadingLevel(
+      {
+        heading: (node.attrs.heading as string) || undefined,
+        style: (node.attrs.style as string) || undefined,
+        outlineLevel: node.attrs.outlineLevel as number | undefined,
+      },
+      styles,
+    );
+    if (level != null && node.textContent.length > 0) {
+      anchors.push({
+        id: "h" + idx,
+        pos,
+        textContent: node.textContent,
+        originalLevel: level,
+      });
+      idx++;
+      return false;
+    }
+    return true;
+  });
+  return anchors;
+}
+
 /**
  * Read-only navigation-outline generator (replaces @tiptap/extension-table-of-
- * contents).
- *
- * Walks the doc for headings on every doc change and emits the anchor list via
- * `onUpdate`. Crucially it does NO `setNodeMarkup`, so no content re-validation:
- * the official extension's appendTransaction calls setNodeMarkup to inject
- * id/data-toc-id on each heading, and on large / list-rich docs that
- * re-validation throws "Invalid content for node listItem" — aborting the
- * paginator's reflow transaction so the whole document piles on page 1. Outline
- * clicks jump by `pos`, so the injected ids aren't needed; a read-only walk
- * suffices. The `id` is a heading-order index, stable across re-flows (which
- * only repaginate, never reorder headings).
+ * contents). Emits the anchor list via `onUpdate` on create and on every doc
+ * change. Lifecycle-driven, NOT a plugin view: the canvas route runs a
+ * viewless editor (element: null) whose plugins are registered by hand —
+ * plugin views never install, so a Plugin({ view }) factory would never run.
  */
 export const Outline = Extension.create<{ onUpdate: (anchors: readonly OutlineAnchor[]) => void }>({
-  name: "docenOutline",
-  addProseMirrorPlugins() {
-    const { onUpdate } = this.options;
-    return [
-      new Plugin({
-        key: new PluginKey("docenOutline"),
-        view(view) {
-          const emit = (): void => {
-            const anchors: OutlineAnchor[] = [];
-            let idx = 0;
-            // Styles snapshot once per emit: detectHeadingLevel indexes it for
-            // styleId-based detection (HeadingN / localized name / basedOn chain),
-            // so re-indexing per paragraph is O(n·m) on large docs.
-            const styles = (view.state.doc.attrs as { styles?: StylesOptions }).styles;
-            view.state.doc.descendants((node, pos) => {
-              // A heading node carries its level directly; a paragraph the user
-              // styled as a heading at runtime (styleId / outlineLevel, no
-              // `type: "heading"`) is detected via detectHeadingLevel.
-              const level =
-                node.type.name === "heading"
-                  ? ((node.attrs.level as number) ?? 1)
-                  : node.type.name === "paragraph"
-                    ? detectHeadingLevel(
-                        {
-                          style: (node.attrs.styleId as string) || undefined,
-                          outlineLevel: node.attrs.outlineLevel as number | undefined,
-                        },
-                        styles,
-                      )
-                    : undefined;
-              if (level != null && node.textContent.length > 0) {
-                anchors.push({
-                  id: "h" + idx,
-                  pos,
-                  textContent: node.textContent,
-                  originalLevel: level,
-                });
-                idx++;
-                return false;
-              }
-              return true;
-            });
-            onUpdate(anchors);
-          };
-          emit();
-          return {
-            update(v, prevState) {
-              if (v.state.doc !== prevState.doc) emit();
-            },
-          };
-        },
-      }),
-    ];
+  name: "docxOutline",
+  onCreate() {
+    this.options.onUpdate(collectAnchors(this.editor));
+  },
+  onTransaction({ transaction }) {
+    if (transaction.docChanged) {
+      this.options.onUpdate(collectAnchors(this.editor));
+    }
   },
 });

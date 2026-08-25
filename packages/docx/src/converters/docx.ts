@@ -166,11 +166,11 @@ export class DocxManager {
   // so independent lists number separately, even when they share an abstractNum
   // (same start).
   private orderedInstanceCounter = 0;
-  // Styles table (styles.xml) carried through resolve() so a paragraph can
-  // resolve a NUMERIC pStyle whose NAME is a heading (styleId "2" → name
-  // "heading 1") into a heading node. office-open lifts only pStyle literals
-  // that ARE HeadingLevels ("Heading1".."Title"); real DOCX files often use
-  // numeric ids. Set per resolve(); compile never reads it.
+  // Styles table (styles.xml) carried through resolve() so consumers can
+  // resolve a NUMERIC pStyle whose NAME is a heading (style "2" → name
+  // "heading 1") — office-open lifts only pStyle literals that ARE
+  // HeadingLevels ("Heading1".."Title"); real DOCX files often use numeric
+  // ids. Set per resolve(); compile never reads it.
   private resolveStyles: StylesOptions | undefined;
   // Reference → level-0 format/start, for classifying numbering paragraphs as
   // bullet vs ordered. Built once from docOpts and shared by every resolve path
@@ -288,10 +288,7 @@ export class DocxManager {
           if (Array.isArray(child)) currentChildren.push(...child);
           else currentChildren.push(child);
         }
-        // A heading is a paragraph in OOXML, so it can carry a section's sectPr
-        // too (a heading as a section's last paragraph — e.g. a chapter title
-        // before a section break). Treat both as section-carrying.
-        if (node.type === "paragraph" || node.type === "heading") {
+        if (node.type === "paragraph") {
           const na = (node.attrs ?? {}) as Record<string, unknown>;
           if (na.sectionProperties != null) {
             sections.push(
@@ -445,10 +442,9 @@ export class DocxManager {
           sectionFooters: this.resolveHeaderFooter(section.footers),
         };
         const last = sectionContent[sectionContent.length - 1];
-        // A heading can be a section's last paragraph too (heading IS a paragraph
-        // in OOXML) — stamp sectPr on it directly instead of appending a stray
-        // empty paragraph after it.
-        if (last?.type === "paragraph" || last?.type === "heading") {
+        // Stamp sectPr on the section's last paragraph directly (a heading is
+        // a paragraph too — same node) instead of appending a stray empty one.
+        if (last?.type === "paragraph") {
           last.attrs = { ...last.attrs, ...sectAttrs };
         } else {
           // Section ends on a non-textblock (table/etc.) — Word still needs the
@@ -502,20 +498,15 @@ export class DocxManager {
     switch (node.type) {
       case "paragraph":
         return { paragraph: this.compileParagraphNode(node) };
-      case "heading":
-        return { paragraph: this.compileHeadingNode(node) };
       case "blockquote": {
-        // blockquote → each child paragraph/heading gets a left indent + left
-        // border (DOCX's native blockquote expression; no dedicated element).
-        // Iterate ALL children — the previous `return` inside the loop dropped
-        // every paragraph after the first.
+        // blockquote → each child paragraph gets a left indent + left border
+        // (DOCX's native blockquote expression; no dedicated element). Iterate
+        // ALL children — the previous `return` inside the loop dropped every
+        // paragraph after the first.
         const items: SectionChild[] = [];
         for (const child of node.content ?? []) {
-          if (child.type === "paragraph" || child.type === "heading") {
-            const para =
-              child.type === "heading"
-                ? this.compileHeadingNode(child)
-                : this.compileParagraphNode(child);
+          if (child.type === "paragraph") {
+            const para = this.compileParagraphNode(child);
             const paraObj = (
               typeof para === "string" ? { text: para } : (para as Record<string, unknown>)
             ) as Record<string, unknown>;
@@ -577,13 +568,6 @@ export class DocxManager {
   }
 
   private compileParagraphNode(node: JSONContent): ParagraphOptions {
-    const opts = this.renderNodeOpts(node);
-    const childList = this.compileInlineContent(node.content);
-    if (childList.length > 0) opts.children = childList;
-    return this.simplifyParagraph(opts);
-  }
-
-  private compileHeadingNode(node: JSONContent): ParagraphOptions {
     const opts = this.renderNodeOpts(node);
     const childList = this.compileInlineContent(node.content);
     if (childList.length > 0) opts.children = childList;
@@ -935,12 +919,8 @@ export class DocxManager {
       const checked = Boolean(listItem.attrs?.checked);
 
       for (const child of listItem.content ?? []) {
-        if (child.type === "paragraph" || child.type === "heading") {
-          // Preserve heading level (heading → compileHeadingNode, not paragraph).
-          const para =
-            child.type === "heading"
-              ? this.compileHeadingNode(child)
-              : this.compileParagraphNode(child);
+        if (child.type === "paragraph") {
+          const para = this.compileParagraphNode(child);
           const paraObj =
             typeof para === "string"
               ? ({ text: para } as Record<string, unknown>)
@@ -1255,9 +1235,9 @@ export class DocxManager {
     }
 
     // Declarative paragraph dispatch: each paragraph node extension's
-    // parseDocxParagraph rule (heading/codeBlock, collected in docxExtensions
-    // order) gets a chance to claim the paragraph; a non-matching or null-
-    // converting rule falls through. List paragraphs never reach here —
+    // parseDocxParagraph rule (codeBlock, collected in docxExtensions order)
+    // gets a chance to claim the paragraph; a non-matching or null-converting
+    // rule falls through. List paragraphs never reach here —
     // resolveSectionChildren intercepts them upstream and rebuilds the list tree.
     const ctx = this.resolveCtx!;
     for (const { rule } of this.paragraphRules) {

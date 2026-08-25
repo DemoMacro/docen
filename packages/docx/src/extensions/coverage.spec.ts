@@ -433,6 +433,26 @@ describe("real-XML round-trip (generateDocument → parseDocument)", () => {
     return compileDocument(json, docxExtensions).sections[0].children;
   }
 
+  it("heading paragraph survives real XML as a paragraph with heading attr", () => {
+    const binary = generateDocumentSync({
+      sections: [
+        { children: [{ paragraph: { heading: "Heading2", children: [{ text: "chapter" }] } }] },
+      ],
+    });
+    const json = resolveDocument(parseDocument(new Uint8Array(binary as Buffer)), docxExtensions);
+    const block = json.content?.[0] as { type: string; attrs?: { heading?: string } };
+    expect(block.type).toBe("paragraph");
+    expect(block.attrs?.heading).toBe("Heading2");
+    const compiled = compileDocument(json, docxExtensions).sections[0].children;
+    const para = compiled[0] as {
+      paragraph: { heading?: string; children?: { text?: string }[] };
+    };
+    // The heading stays a paragraph node (a heading IS a paragraph); the
+    // HeadingLevel pStyle rides on the `heading` attr through both legs.
+    expect(para.paragraph.heading).toBe("Heading2");
+    expect(para.paragraph.children?.[0]?.text).toBe("chapter");
+  });
+
   it("hyperlink survives real XML with the editable link route", () => {
     const compiled = throughXml([
       {

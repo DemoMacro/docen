@@ -128,8 +128,7 @@ export const WIRED_DISPATCH: ReadonlySet<string> = new Set([
 
 // ── Pure helpers (take EditorState, return data; never touch the chain) ──
 
-/** HeadingLevel literals office-open lifts into `paragraph.heading` (pStyle
- *  val → Tiptap level). Title shares level 1 with Heading1. */
+/** HeadingLevel literals the style gallery recognizes as headings. */
 const HEADING_LEVEL_BY_STYLE: Readonly<Record<string, 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9>> = {
   Heading1: 1,
   Heading2: 2,
@@ -164,13 +163,13 @@ function lineMultipleToOoxml(mult: number): number {
 }
 
 /** The current selection's block node, but only if it carries the office-open
- *  paragraph attrs (paragraph or heading); null otherwise (e.g. inside a list
- *  item or table cell the block differs). */
+ *  paragraph attrs; null otherwise (e.g. inside a list item or table cell the
+ *  block differs). */
 function formattableBlock(
   state: EditorState,
 ): { type: string; attrs: Record<string, unknown> } | null {
   const { parent } = state.selection.$from;
-  return parent.type.name === "paragraph" || parent.type.name === "heading"
+  return parent.type.name === "paragraph"
     ? { type: parent.type.name, attrs: (parent.attrs ?? {}) as Record<string, unknown> }
     : null;
 }
@@ -449,29 +448,22 @@ export const DocumentCommands = Extension.create({
         },
 
       // ── Style gallery (combobox-driven): value picks the block style ──
-      // A HeadingLevel id switches the block to a heading and stamps styleId;
-      // everything else becomes a paragraph carrying styleId so the injected
-      // document CSS applies. setNode bypasses setHeading's options.levels gate
-      // — Tiptap's Level type caps at 1-6, so levels 7-9 are valid on the schema
-      // attr but setHeading would reject them.
+      // A HeadingLevel id stamps the paragraph's `heading` attr (a heading IS
+      // a paragraph); everything else carries `style` so the injected document
+      // CSS applies. The paragraph keeps `style` clear when a HeadingLevel
+      // applies — office-open's single pStyle writer prefers `style`, so both
+      // set would mask the heading.
       style:
         (styleId) =>
         ({ chain }) => {
           const id = (styleId ?? "").trim();
-          if (!id || id === "Normal") {
-            return chain()
-              .setParagraph()
-              .updateAttributes("paragraph", { styleId: id || null })
-              .run();
+          if (HEADING_LEVEL_BY_STYLE[id]) {
+            return chain().updateAttributes("paragraph", { heading: id, style: null }).run();
           }
-          const level = HEADING_LEVEL_BY_STYLE[id];
-          if (level) {
-            return chain()
-              .setNode("heading", { level })
-              .updateAttributes("heading", { styleId: id })
-              .run();
-          }
-          return chain().setParagraph().updateAttributes("paragraph", { styleId: id }).run();
+          return chain()
+            .setParagraph()
+            .updateAttributes("paragraph", { style: id || null, heading: null })
+            .run();
         },
 
       // ── Editing — change case / sort / multilevel list level ──

@@ -17,7 +17,6 @@ import { ColumnBreak } from "./column-break";
 import { Details, DetailsSummary, DetailsContent } from "./details";
 import { Document } from "./document";
 import { FormattingMarks } from "./formatting-marks";
-import { Heading } from "./heading";
 import { Image } from "./image";
 import { Link } from "./link";
 import { ListAggregator } from "./list-aggregator";
@@ -83,9 +82,8 @@ export const tiptapNodeExtensions: AnyExtension[] = [
   TableHeader,
   TaskList,
   TaskItem,
-  Heading,
   TextAlign.configure({
-    types: ["heading", "paragraph"],
+    types: ["paragraph"],
   }),
 ];
 
@@ -129,7 +127,6 @@ export interface DocxKitOptions {
   codeBlock?: Record<string, any> | false;
   document?: false;
   hardBreak?: Record<string, any> | false;
-  heading?: Record<string, any> | false;
   horizontalRule?: Record<string, any> | false;
   italic?: Record<string, any> | false;
   listItem?: Record<string, any> | false;
@@ -172,9 +169,6 @@ export const DocxKit = Extension.create<DocxKitOptions>({
     }
     if (this.options.hardBreak !== false) {
       extensions.push(HardBreak.configure(this.options.hardBreak));
-    }
-    if (this.options.heading !== false) {
-      extensions.push(Heading.configure(this.options.heading));
     }
     if (this.options.horizontalRule !== false) {
       extensions.push(HorizontalRule.configure(this.options.horizontalRule));
@@ -224,7 +218,7 @@ export { TextAlign } from "@tiptap/extension-text-align";
 export { Bold, Code, Highlight, Italic, Subscript, Superscript, Underline } from "./marks";
 export { Document, createDocument } from "./document";
 export { Paragraph } from "./paragraph";
-export { Heading, detectHeadingLevel } from "./heading";
+export { detectHeadingLevel } from "./paragraph";
 export { Blockquote } from "./blockquote";
 export { BulletList } from "./bullet-list";
 export { OrderedList } from "./ordered-list";

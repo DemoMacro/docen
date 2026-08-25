@@ -21,6 +21,7 @@
 
 import type {
   ParagraphPropertiesOptionsBase,
+  RunPropertiesOptions,
   RunStylePropertiesOptions,
   SectionPropertiesOptions,
   TableOptions,
@@ -128,32 +129,28 @@ export type {
  */
 export type AttrNullable<T> = { [K in keyof T]-?: T[K] | null };
 
-/**
- * Paragraph and heading attrs — mirrors ParagraphPropertiesOptionsBase, plus
- * engine-only extras the office-open paragraph interface does not carry:
- * styleId (OOXML pStyle, drives styles.xml CSS) and the section* attrs (OOXML
- * sectPr lives on a section's last paragraph, so the engine hauls the section
- * boundary + its header/footer slots on that paragraph).
+/** Paragraph attrs — mirrors ParagraphPropertiesOptionsBase verbatim
+ *  (heading/style/bullet/numbering/thematicBreak included: a heading IS a
+ *  paragraph), plus engine-only section* extras (OOXML sectPr lives on a
+ *  section's last paragraph, so the engine hauls the section boundary + its
+ *  header/footer slots on that paragraph).
  *
  * indent/spacing/border/run/frame are nested objects (matching office-open),
  * so one `indent` attr replaces 13 flattened indent attrs.
  */
 export type ParagraphAttrs = AttrNullable<ParagraphPropertiesOptionsBase> & {
-  styleId: string | null;
   sectionProperties: SectionPropertiesOptions | null;
   sectionHeaders: HeaderFooterSlots | null;
   sectionFooters: HeaderFooterSlots | null;
 };
 
-/**
- * Text style mark attrs — mirrors RunStylePropertiesOptions.
- *
- * Omits properties handled by dedicated marks (bold, italic, strike,
- * doubleStrike, subScript, superScript). `size` is in POINTS.
+/** Text style mark attrs — mirrors RunPropertiesOptions (rStyle `style`
+ *  included). Omits properties handled by dedicated marks (bold, italic,
+ *  strike, doubleStrike, subScript, superScript). `size` is in POINTS.
  */
 export type TextStyleAttrs = AttrNullable<
   Omit<
-    RunStylePropertiesOptions,
+    RunPropertiesOptions,
     | "bold"
     | "boldComplexScript"
     | "italic"
@@ -163,10 +160,7 @@ export type TextStyleAttrs = AttrNullable<
     | "subScript"
     | "superScript"
   >
-> & {
-  /** Named character style id (OOXML rStyle). Engine-only extra. */
-  styleId: string | null;
-};
+>;
 
 /**
  * Mention node attrs (official @tiptap/extension-mention).

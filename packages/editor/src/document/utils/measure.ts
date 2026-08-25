@@ -153,7 +153,7 @@ function styleTableOf(styles: unknown): StyleTable | null {
  *  `.docx-default` class. docDefaults is NOT in this chain (the renderer emits
  *  it as a separate base rule on p/h1-6); each resolver falls back to it last.
  *
- *  Cached per (styles, styleId): a document's styles model is stable for its
+ *  Cached per (styles, style id): a document's styles model is stable for its
  *  lifetime, and resolveSpacing + resolveIndentAttrs + defaultRunOf all need
  *  the chain for ONE paragraph — without the cache each re-flow re-walked the
  *  basedOn chain 3× per paragraph. */
@@ -196,7 +196,7 @@ export function resolveSpacing(node: PmNode, styles: unknown): SpacingProperties
   // (Normal). Previously this read only the single direct style, missing a
   // basedOn ancestor's spacing.line (e.g. a heading whose line spacing lives on
   // Normal) → measured too tall/short vs the rendered page.
-  const styleId = (node.attrs as { styleId?: string | null }).styleId;
+  const styleId = (node.attrs as { style?: string | null }).style;
   const sp = styleChainOf(styles, styleId)?.paragraph?.spacing as SpacingProperties | undefined;
   if (sp && sp.line != null) return sp;
   // docDefaults is the base layer under every named style (the renderer emits it
@@ -230,7 +230,7 @@ export function paragraphSpacingMargins(
     // with style "TableHeaderText" (no spacing) inherits "TableText" (spacing
     // 60tw = 4px each) — the renderer resolves the same chain, so measure must
     // too, or every table row under-measures by its paragraph's before+after.
-    const styleId = (node.attrs as { styleId?: string | null }).styleId;
+    const styleId = (node.attrs as { style?: string | null }).style;
     const sp = styleChainOf(styles, styleId)?.paragraph?.spacing as SpacingProperties | undefined;
     if (before == null && sp?.before != null) before = Number(sp.before);
     if (after == null && sp?.after != null) after = Number(sp.after);
@@ -257,7 +257,7 @@ function defaultRunOf(node: PmNode, styles?: unknown): Partial<RunStyle> {
   // ancestors; a styleId-less paragraph → default style Normal). Same source as
   // stylesToCss so the measured font matches the rendered one — a CJK doc
   // default of 宋体 measures wider than the generic "serif" fallback.
-  const styleId = (node.attrs as { styleId?: string | null }).styleId;
+  const styleId = (node.attrs as { style?: string | null }).style;
   const run = styleChainOf(styles, styleId)?.run as
     | {
         size?: number | null;
@@ -1037,7 +1037,7 @@ function resolveIndentAttrs(node: PmNode, styles: unknown): IndentAttrs | null {
   // Style chain via the renderer's mergeStyleChain (direct style + basedOn
   // ancestors); a styleId-less paragraph → default style. Same source as
   // stylesToCss so measure == render.
-  const styleId = (node.attrs as { styleId?: string | null }).styleId;
+  const styleId = (node.attrs as { style?: string | null }).style;
   const indent = styleChainOf(styles, styleId)?.paragraph?.indent as IndentAttrs | undefined;
   if (indent) return indent;
   const t = styleTableOf(styles);

@@ -862,33 +862,27 @@ class DocenDocument extends AddinHost<Editor> {
     return (editor.state.doc.attrs?.styles as StylesOptions | undefined) ?? null;
   }
 
-  /** The paragraph-style id at the caret (HeadingLevel literal for headings,
-   *  pStyle id for paragraphs). */
+  /** The paragraph-style id at the caret (the HeadingLevel literal carried on
+   *  `heading` for heading paragraphs, the pStyle id on `style` otherwise). */
   #currentStyleId(editor: Editor): string | null {
-    const h = editor.getAttributes("heading") as { styleId?: unknown };
-    const p = editor.getAttributes("paragraph") as { styleId?: unknown };
-    if (typeof h?.styleId === "string" && h.styleId) return h.styleId;
-    if (typeof p?.styleId === "string" && p.styleId) return p.styleId;
+    const attrs = editor.getAttributes("paragraph") as {
+      heading?: unknown;
+      style?: unknown;
+    };
+    if (typeof attrs.heading === "string" && attrs.heading) return attrs.heading;
+    if (typeof attrs.style === "string" && attrs.style) return attrs.style;
     return null;
   }
 
   /** Mirror the paragraph style at the caret into the Styles gallery combobox —
-   *  its value is the current paragraph's styleId (the HeadingLevel literal for
-   *  headings, the pStyle id for paragraphs, or "Normal" when the paragraph
-   *  carries none). The combobox matches the value against its gallery items to
-   *  show the style's display name. */
+   *  its value is the current paragraph's style id (the HeadingLevel literal
+   *  carried on `heading` for heading paragraphs, the pStyle id on `style`
+   *  otherwise, or "Normal" when the paragraph carries none). The combobox
+   *  matches the value against its gallery items to show the style's name. */
   #syncStyleControl(): void {
     const editor = this.editor;
     if (!editor) return;
-    const headingAttrs = editor.getAttributes("heading") as { styleId?: unknown };
-    const paraAttrs = editor.getAttributes("paragraph") as { styleId?: unknown };
-    const styleId =
-      typeof headingAttrs?.styleId === "string" && headingAttrs.styleId
-        ? headingAttrs.styleId
-        : typeof paraAttrs?.styleId === "string" && paraAttrs.styleId
-          ? paraAttrs.styleId
-          : "";
-    const value = styleId || "Normal";
+    const value = this.#currentStyleId(editor) || "Normal";
     const cb = this.shadowRoot?.querySelector<HTMLElement>('docen-ribbon-combobox[event="style"]');
     if (cb && cb.getAttribute("value") !== value) cb.setAttribute("value", value);
   }

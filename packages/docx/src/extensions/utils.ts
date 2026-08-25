@@ -17,28 +17,27 @@ import type { DOMOutputSpec, Node } from "@tiptap/pm/model";
 /** Factory for a Tiptap attr that carries an office-open native value: never
  *  parsed from HTML nor rendered to it, defaulting to null (ProseMirror stores
  *  every declared attr). Shared by every extension carrying OOXML attrs
- *  (paragraph/heading/table/table-cell/…). */
+ *  (paragraph/table/table-cell/…). */
 export const attrNative = () => ({ default: null, parseHTML: () => null, rendered: false });
 
-// ── Shared paragraph/heading attr factory + renderHTML helper ──
+// ── Shared paragraph attr factory + renderHTML helper ──
 //
 // In OOXML a heading IS a paragraph — a <w:p> carrying <w:pStyle val="Heading1">
 // in its pPr; sectPr (when present) lives in that same <w:p>'s pPr. office-open
 // models this faithfully: `heading` is a field on ParagraphPropertiesOptionsBase,
 // not a separate type (see @office-open/docx parts/paragraph/properties.ts).
-// docen splits the two into Tiptap `paragraph` and `heading` nodes, but they
-// share the SAME paragraph properties — only `level` differs (Heading's base
-// extension adds it). This factory + helper let both nodes carry identical
-// attrs/render so a heading keeps ¶-mark rPr (run), can host a section's sectPr
-// (sectionProperties), and gets the default-style CSS class — none of which a
-// hand-written copy kept.
+// The single `paragraph` node mirrors that model directly: heading/style/bullet/
+// numbering/thematicBreak are attrs like every other paragraph property, and
+// consumers derive the heading level via detectHeadingLevel (paragraph.ts). The
+// renderTextBlock helper keeps the textblock render pipeline shared — ¶-mark
+// rPr (run), a section's sectPr (sectionProperties), and the default-style CSS
+// class all live on the one node.
 
 /** Editor-only attrs marking a textblock as a section's last paragraph (its pPr
  *  holds the OOXML sectPr). DocxManager peels them off to close a section in
- *  compile; they must NOT leak into ParagraphOptions. Shared by paragraph and
- *  heading — a heading can be a section's last paragraph too. Typed as plain
- *  strings for .has(string) call sites; the keys stay pinned to the attr table
- *  via ParagraphAttrKey below. */
+ *  compile; they must NOT leak into ParagraphOptions. Typed as plain strings
+ *  for .has(string) call sites; the keys stay pinned to the attr table via
+ *  ParagraphAttrKey below. */
 const SECTION_CLOSE_KEYS = ["sectionProperties", "sectionHeaders", "sectionFooters"] as const;
 export const SECTION_ATTR_KEYS = new Set<string>(SECTION_CLOSE_KEYS);
 
@@ -50,20 +49,14 @@ export const SECTION_ATTR_KEYS = new Set<string>(SECTION_CLOSE_KEYS);
 // office-open field without one fails the build) and rejects attr keys that
 // exist nowhere in office-open (typos, retired fields).
 
-/** ParagraphPropertiesOptionsBase keys that live elsewhere instead of a
- *  mirrored attr: heading/thematicBreak on the Tiptap heading node's own
- *  identity, style renamed to the styleId attr (it feeds the docx-style-*
- *  CSS class), bullet/numbering on the list extensions' own attrs. */
-type ParagraphKeyElsewhere = "heading" | "style" | "bullet" | "numbering" | "thematicBreak";
+/** Attr keys layered on top of the office-open mirror: the section-close
+ *  markers (SECTION_ATTR_KEYS). Every other office-open paragraph property —
+ *  including heading/style/bullet/numbering/thematicBreak, once owned by the
+ *  deleted heading/list nodes — is mirrored verbatim. */
+type EditorParagraphAttrKey = (typeof SECTION_CLOSE_KEYS)[number];
 
-/** Attr keys layered on top of the office-open mirror: the style rename plus
- *  the section-close markers (SECTION_ATTR_KEYS). */
-type EditorParagraphAttrKey = "styleId" | (typeof SECTION_CLOSE_KEYS)[number];
-
-/** The full attr key set the paragraph/heading nodes declare. */
-type ParagraphAttrKey =
-  | EditorParagraphAttrKey
-  | Exclude<keyof ParagraphPropertiesOptionsBase, ParagraphKeyElsewhere>;
+/** The full attr key set the paragraph node declares. */
+type ParagraphAttrKey = EditorParagraphAttrKey | keyof ParagraphPropertiesOptionsBase;
 
 /** The attr spec shape every mirror table uses (attrNative plus keys with a
  *  CSS parseHTML/renderHTML pair). Shared by the paragraph/table-family/run
@@ -87,22 +80,31 @@ export function hasLeaderTabStop(tabStops: unknown): boolean {
 }
 
 /** Shared office-open paragraph attrs — ParagraphPropertiesOptionsBase mirror.
- *  Returned by BOTH Paragraph.addAttributes and Heading.addAttributes so the two
- *  nodes carry identical paragraph properties (a heading is a paragraph in
- *  OOXML). Callers spread `...this.parent?.()` first to keep their own base
- *  attrs (Heading's `level`). The satisfies guard pins the key set to
- *  ParagraphAttrKey — see the mirror contract above. */
+ *  The paragraph node declares the whole table (a heading is a paragraph in
+ *  OOXML — its HeadingLevel pStyle rides on the `heading` attr). The satisfies
+ *  guard pins the key set to ParagraphAttrKey — see the mirror contract above. */
 export function docxParagraphAttrs() {
   return {
     // pStyle reference (e.g. "Heading1", "Normal"). renderHTML emits
-    // class="docx-style-{styleId}" for the injected document CSS.
-    styleId: {
+    // class="docx-style-{style}" for the injected document CSS.
+    style: {
       default: null,
       parseHTML: (el: HTMLElement) => {
         const m = (el.getAttribute("class") || "").match(/(?:^|\s)docx-style-(\S+)/);
         return m ? m[1] : null;
       },
     },
+    // HeadingLevel pStyle literal ("Heading1".."Heading9"/"Title") — what
+    // office-open lifts a Heading pStyle into. `style` wins on stringify
+    // (office-open: style ?? heading), matching Word's single-pStyle rule.
+    heading: attrNative(),
+    // Bullet list marker {level} — the flat list model (R2).
+    bullet: attrNative(),
+    // Numbered list reference {reference, instance, level} — the flat list
+    // model (R2).
+    numbering: attrNative(),
+    // <w:thematicBreak/> marker (a paragraph reduced to a horizontal rule).
+    thematicBreak: attrNative(),
     // Nested office-open objects (parsed from HTML where CSS exists).
     alignment: {
       default: null,
@@ -229,10 +231,10 @@ export function docxTableCellAttrs() {
   } satisfies Record<TableCellAttrKey, DocxAttrSpec>;
 }
 
-/** Shared renderHTML for Paragraph (`tag="p"`) and Heading (`tag="h{level}"`):
- *  style CSS, docx-default/docx-style class, and tab-leader. `level` (Heading
- *  only, 7-9) stamps data-heading-level so levels past h6 round-trip via a <h6>
- *  proxy (parseHTML reads it back). */
+/** Shared renderHTML for the paragraph textblock: style CSS,
+ *  docx-default/docx-style class, and tab-leader. `level` (a heading
+ *  paragraph's derived level, 7-9) stamps data-heading-level so levels past h6
+ *  round-trip via a <h6> proxy (parseHTML reads it back). */
 export function renderTextBlock(
   node: Node,
   HTMLAttributes: Record<string, unknown>,
@@ -255,7 +257,7 @@ export function renderTextBlock(
   }
   const styles = renderParagraphStyles(node.attrs, !hasContent);
   const attrs: Record<string, unknown> = { ...HTMLAttributes };
-  const styleId = node.attrs.styleId as string | null;
+  const styleId = node.attrs.style as string | null;
   // class="docx-style-{id}" applies the named style's CSS. A pStyle-less
   // paragraph renders as the document's default paragraph style (OOXML: no
   // pStyle = default style), so mark it `docx-default` — stylesToCss emits the
