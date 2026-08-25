@@ -55,6 +55,10 @@ export interface PackedLine {
   /** The resolver's `naturalPx` input (max text natural height, 0 when the
    *  line has no text) — mirrored for the painter's half-leading math. */
   naturalPx: number;
+  /** The advance of the closing punctuation hanging past this line's right
+   *  edge (w:overflowPunct) — 0/undefined when the line ends flush. The hang
+   *  never counts against justification or center/right slack. */
+  hangPx?: number;
 }
 
 export interface PackLinesOptions {
@@ -78,6 +82,36 @@ export interface PackLinesOptions {
 
 /** Word's defaultTabStop: 720 twips = 0.5 inch = 48 px at 96 dpi. */
 const DEFAULT_TAB_PX = 48;
+
+/** Fullwidth CJK closing punctuation (the kinsoku "cannot start a line"
+ *  class). Word's w:overflowPunct — on by default — lets a trailing run of
+ *  these hang past the line's right edge instead of pushing the break back,
+ *  verified against the reference PDF: a line ending 、reports x1end one
+ *  full advance beyond the right margin. */
+const CLOSING_PUNCT = new Set([
+  "、",
+  "。",
+  "，",
+  "．",
+  "：",
+  "；",
+  "？",
+  "！",
+  "）",
+  "〉",
+  "》",
+  "」",
+  "』",
+  "】",
+  "〕",
+  "〗",
+  "〙",
+  "〛",
+  "｝",
+  "…",
+  "”",
+  "’",
+]);
 
 /** Prepared flows cache — prepare is the expensive pass (segment + measure);
  *  line queries are pure arithmetic. Keyed by the full item sequence. */
@@ -268,6 +302,47 @@ function tabAdvance(
   return w > 0 ? w : Math.max(0, (Math.floor(absX / DEFAULT_TAB_PX) + 1) * DEFAULT_TAB_PX - absX);
 }
 
+/** One-off advance measurements for hanging closers, keyed by char+font. */
+const closerAdvanceCache = new Map<string, number>();
+
+/** The advance of a single grapheme in its run's font (pretext measures with
+ *  canvas measureText; a one-item prepared line is the public handle). */
+function advanceOfGrapheme(ch: string, font: string, letterSpacing?: number): number {
+  const key = `${ch}\x00${font}\x00${letterSpacing ?? 0}`;
+  let w = closerAdvanceCache.get(key);
+  if (w === undefined) {
+    const prepared = prepareRichInline([{ text: ch, font, letterSpacing }]);
+    w = measureRichInlineStats(prepared, 1e9).maxLineWidth;
+    closerAdvanceCache.set(key, w);
+  }
+  return w;
+}
+
+/** Word's w:overflowPunct probe: what a break at `range`'s end leaves for the
+ *  next line, as `{ leadPx, closerPx, closer }` — the closer's advance plus
+ *  the advance of the (kinsoku-pushed) glyphs that would precede it. The next
+ *  line is queried at minimal width: forced progress yields its opening run
+ *  (a closer that cannot start a line comes along, pulled, with whatever was
+ *  pushed back before it). Returns undefined when the next line would not
+ *  end in a hanging closer. */
+function overflowPunctAfter(
+  group: FlowGroup,
+  range: { width: number; end: RichInlineCursor },
+): { leadPx: number; closerPx: number } | undefined {
+  const probe = layoutNextRichInlineLineRange(group.prepared, 1, range.end);
+  if (!probe) return undefined;
+  const fragments = materializeRichInlineLineRange(group.prepared, probe).fragments;
+  const text = fragments.map((f) => f.text).join("");
+  const chars = [...text];
+  const closer = chars[chars.length - 1];
+  if (closer == null || !CLOSING_PUNCT.has(closer)) return undefined;
+  const lastFrag = fragments[fragments.length - 1];
+  const src = group.items[lastFrag.itemIndex];
+  if (!src) return undefined;
+  const closerPx = advanceOfGrapheme(closer, src.font, src.letterSpacing);
+  return { leadPx: Math.max(0, probe.width - closerPx), closerPx };
+}
+
 /** Pack a paragraph's inline content into lines. Always returns at least one
  *  line when content exists; an empty inline array returns no lines (the
  *  paragraph module supplies the strut height for that case). */
@@ -298,6 +373,7 @@ export function packLines(inline: LayoutInline[], opts: PackLinesOptions): Packe
     let hasText = false;
     let endInlineIndex = 0;
     let brokeMidGroup = false;
+    let hangPx = 0;
 
     for (let g = 0; g < groups.length; g++) {
       const group = groups[g];
@@ -306,11 +382,35 @@ export function packLines(inline: LayoutInline[], opts: PackLinesOptions): Packe
       // its tab or end the line again).
       let finishedThisLine = false;
       if (!done[g]) {
-        const range = layoutNextRichInlineLineRange(
-          group.prepared,
-          Math.max(1, maxWidth - xLine),
-          cursors[g],
-        );
+        const query = Math.max(1, maxWidth - xLine);
+        let range = layoutNextRichInlineLineRange(group.prepared, query, cursors[g]);
+        // w:overflowPunct (Word default): when the glyphs the break pushes to
+        // the next line END in a closing punctuation and the non-closer part
+        // fits this line's slack, grant the closer's advance so it joins this
+        // line and hangs past the right edge. Greedy fit is monotone in
+        // width, so the re-query's break sits at or past the closer — but a
+        // narrow glyph after it could still sneak in, so the hang is kept
+        // only when the re-queried line really ends with a closer.
+        if (range && range.end.itemIndex < group.items.length) {
+          const hang = overflowPunctAfter(group, range);
+          if (hang && hang.leadPx <= query - range.width + 0.01) {
+            const re = layoutNextRichInlineLineRange(
+              group.prepared,
+              query + hang.closerPx,
+              cursors[g],
+            );
+            if (re) {
+              const reText = materializeRichInlineLineRange(group.prepared, re)
+                .fragments.map((f) => f.text)
+                .join("");
+              const last = [...reText].pop();
+              if (last != null && CLOSING_PUNCT.has(last)) {
+                range = re;
+                hangPx = hang.closerPx;
+              }
+            }
+          }
+        }
         if (range) {
           const line = materializeRichInlineLineRange(group.prepared, range);
           let xFrag = xLine;
@@ -381,6 +481,7 @@ export function packLines(inline: LayoutInline[], opts: PackLinesOptions): Packe
       maxWidthPx: maxWidth,
       heightPx: height,
       naturalPx,
+      hangPx: hangPx > 0 ? hangPx : undefined,
     });
     y += height;
     lineIndex++;

@@ -101,7 +101,10 @@ export function layoutParagraph(
       const items = line.items;
       if (items.length === 0) continue;
       const last = items[items.length - 1];
-      const contentEnd = last.xPx + last.widthPx - trailingHang(items, para.inline, measurer);
+      const contentEnd =
+        last.xPx +
+        last.widthPx -
+        Math.max(trailingHang(items, para.inline, measurer), line.hangPx ?? 0);
       const slack = line.maxWidthPx - contentEnd;
       if (slack <= 0) continue;
       const shift = para.align === "center" ? slack / 2 : slack;
@@ -127,6 +130,7 @@ export function layoutParagraph(
       items: line.items,
       maxWidthPx: justifyGapPx[i] !== undefined ? line.maxWidthPx : undefined,
       justifyGapPx: justifyGapPx[i],
+      hangPx: line.hangPx,
     });
     heightPx += line.heightPx;
   }
@@ -163,10 +167,10 @@ function trailingHang(
 }
 
 /** Stretch one wrapped line to its packed width: the slack after the last
- *  item's content (trailing whitespace hangs past the right edge — excluded)
- *  spread evenly over the inter-character gaps. Re-spaces every item's x in
- *  place and returns the per-gap stretch (0 when there is nothing to
- *  spread). */
+ *  item's content (trailing whitespace AND an overflow-punct hang — both
+ *  reach past the right edge, both excluded) spread evenly over the
+ *  inter-character gaps. Re-spaces every item's x in place and returns the
+ *  per-gap stretch (0 when there is nothing to spread). */
 function justifyLine(
   line: PackedLine,
   inline: readonly LayoutInline[],
@@ -174,7 +178,7 @@ function justifyLine(
 ): number {
   const items = line.items;
   const last = items[items.length - 1];
-  const hang = trailingHang(items, inline, measurer);
+  const hang = Math.max(trailingHang(items, inline, measurer), line.hangPx ?? 0);
   let graphemes = 0;
   for (const it of items) graphemes += it.kind === "text" ? [...it.text].length : 1;
   const delta = Math.max(

@@ -56,6 +56,22 @@ describe("packLines", () => {
     expect(lines.map(textsOf)).toEqual(["中文测试中", "文后续"]);
   });
 
+  it("hangs a trailing closing punctuation past the right edge", () => {
+    // 6 CJK = 96px; at 88px the fit takes 5 chars and the 6th (、) would start
+    // the next line — forbidden (kinsoku), so without overflowPunct the break
+    // pushes back to 4 chars. w:overflowPunct (Word default) instead lets the
+    // closer join line 0 and hang: 5 chars + 、 beyond the edge.
+    const lines = pack([text("中文测试字、下一行", cjk)], 88);
+    expect(textsOf(lines[0])).toBe("中文测试字、");
+    expect(lines[0].hangPx).toBeCloseTo(16, 5);
+    expect(textsOf(lines[1])).toBe("下一行");
+    // A non-punct tail must not hang: the same width without a closer keeps
+    // the plain kinsoku push-back.
+    const plain = pack([text("中文测试字再下", cjk)], 88);
+    expect(textsOf(plain[0])).toBe("中文测试字");
+    expect(plain[0].hangPx).toBeUndefined();
+  });
+
   it("shrinks only the first line by the first-line indent", () => {
     // "abcd ab" = 32+4+16 = 52px; line 0 at 72−28.8 = 43.2px fits "abcd" only.
     const lines = pack([text("abcd ab")], 72, { firstLineIndentPx: 28.8 });

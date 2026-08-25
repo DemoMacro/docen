@@ -149,7 +149,11 @@ function paintParagraph(
     const justified = line.justifyGapPx != null;
     const rights: number[] = [];
     if (justified) {
-      let nextLeft = line.maxWidthPx ?? 0;
+      // The last item's stretch target extends past the content width by the
+      // overflow-punct hang: the full glyphs fill the width (both-letter
+      // spacing covers the wider interval), and the closer lands in the
+      // margin at ~its natural advance — Word's justified hang.
+      let nextLeft = (line.maxWidthPx ?? 0) + (line.hangPx ?? 0);
       for (let i = line.items.length - 1; i >= 0; i--) {
         rights[i] = nextLeft;
         nextLeft = line.items[i].xPx;
