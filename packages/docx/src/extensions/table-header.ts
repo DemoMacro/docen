@@ -1,7 +1,7 @@
 import type { JSONContent } from "@tiptap/core";
 import { TableHeader as BaseTableHeader } from "@tiptap/extension-table";
 
-import { attrNative, bordersFromElement, renderTableCellStyles, shadingFromElement } from "./utils";
+import { docxTableCellAttrs, renderTableCellStyles } from "./utils";
 
 /**
  * Table header extension with nested office-open attrs (mirrors TableCell).
@@ -82,39 +82,8 @@ export const TableHeader = BaseTableHeader.extend({
   addAttributes() {
     return {
       ...this.parent?.(),
-
-      // Nested office-open objects (parsed from HTML where CSS exists)
-      shading: {
-        default: null,
-        rendered: false,
-        parseHTML: (el: HTMLElement) => shadingFromElement(el),
-      },
-      borders: {
-        default: null,
-        rendered: false,
-        parseHTML: (el: HTMLElement) => bordersFromElement(el),
-      },
-      verticalAlign: {
-        default: null,
-        rendered: false,
-        parseHTML: (el: HTMLElement) => el.style.verticalAlign || null,
-      },
-
-      // Scalar OOXML cell properties (stored verbatim; no CSS equivalent)
-      textDirection: attrNative(),
-      width: attrNative(),
-      margins: attrNative(),
-      noWrap: {
-        default: null,
-        rendered: false,
-        parseHTML: (el: HTMLElement) => (el.style.whiteSpace === "nowrap" ? true : null),
-      },
-      verticalMerge: attrNative(),
-      horizontalMerge: attrNative(),
-      fitText: attrNative(),
-      hideMark: attrNative(),
-      headers: attrNative(),
-      cnfStyle: attrNative(),
+      // A header cell is a cell — same office-open attr mirror (shared factory).
+      ...docxTableCellAttrs(),
     };
   },
 

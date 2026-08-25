@@ -1,8 +1,8 @@
-import type { TableRowPropertiesOptionsBase } from "@office-open/docx";
+import type { TableRowPropertiesOptions } from "@office-open/docx";
 import type { JSONContent } from "@tiptap/core";
 import { TableRow as BaseTableRow } from "@tiptap/extension-table";
 
-import { attrNative, cssToTwip } from "./utils";
+import { attrNative, cssToTwip, type DocxAttrSpec } from "./utils";
 
 /**
  * Table row extension with nested office-open attrs.
@@ -20,7 +20,7 @@ import { attrNative, cssToTwip } from "./utils";
 /** Structural keys filled by DocxManager (compileTableNode). */
 const SKIP_KEYS = new Set(["cells"]);
 
-export function renderDocx(node: JSONContent): Partial<TableRowPropertiesOptionsBase> {
+export function renderDocx(node: JSONContent): Partial<TableRowPropertiesOptions> {
   const attrs = (node.attrs ?? {}) as Record<string, unknown>;
   const opts: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(attrs)) {
@@ -41,34 +41,48 @@ export function parseDocx(opts: Record<string, unknown>): Record<string, unknown
 
 // ── Extension ──
 
+/** The attr key set the tableRow node declares — the full
+ *  TableRowPropertiesOptions (Base + row-level track-change markers). The
+ *  satisfies guard turns keyof drift into a compile error (same contract as
+ *  docxParagraphAttrs in utils.ts). */
+const docxTableRowAttrs = {
+  // height: nested { value (twips), rule (HeightRule) } — parsed from CSS where possible
+  height: {
+    default: null,
+    rendered: false,
+    parseHTML: (el: HTMLElement) => {
+      const css = el.style.height || el.getAttribute("height") || "";
+      const twips = cssToTwip(css);
+      return twips != null ? { value: twips, rule: "atLeast" } : null;
+    },
+  },
+
+  // Scalar OOXML row properties (stored verbatim; no CSS equivalent)
+  cantSplit: attrNative(),
+  tableHeader: attrNative(),
+  hidden: attrNative(),
+  divId: attrNative(),
+  // NOTE gridAfter/widthAfter: declared for round-trip fidelity, but
+  // resolveTable deletes them when it rebuilds the trailing placeholder cells
+  // they describe (an equivalent rewrite — see table.ts resolveTable).
+  gridBefore: attrNative(),
+  gridAfter: attrNative(),
+  rowAlignment: attrNative(),
+  cnfStyle: attrNative(),
+  cellSpacing: attrNative(),
+  widthBefore: attrNative(),
+  widthAfter: attrNative(),
+  // Row-level track-change markers (w:ins/w:del/w:trPrChange).
+  insertion: attrNative(),
+  deletion: attrNative(),
+  revision: attrNative(),
+} satisfies Record<keyof TableRowPropertiesOptions, DocxAttrSpec>;
+
 export const TableRow = BaseTableRow.extend({
   addAttributes() {
     return {
       ...this.parent?.(),
-
-      // height: nested { value (twips), rule (HeightRule) } — parsed from CSS where possible
-      height: {
-        default: null,
-        rendered: false,
-        parseHTML: (el: HTMLElement) => {
-          const css = el.style.height || el.getAttribute("height") || "";
-          const twips = cssToTwip(css);
-          return twips != null ? { value: twips, rule: "atLeast" } : null;
-        },
-      },
-
-      // Scalar OOXML row properties (stored verbatim; no CSS equivalent)
-      cantSplit: attrNative(),
-      tableHeader: attrNative(),
-      hidden: attrNative(),
-      divId: attrNative(),
-      gridBefore: attrNative(),
-      gridAfter: attrNative(),
-      rowAlignment: attrNative(),
-      cnfStyle: attrNative(),
-      cellSpacing: attrNative(),
-      widthBefore: attrNative(),
-      widthAfter: attrNative(),
+      ...docxTableRowAttrs,
     };
   },
 

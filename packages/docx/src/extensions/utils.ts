@@ -65,11 +65,13 @@ type ParagraphAttrKey =
   | EditorParagraphAttrKey
   | Exclude<keyof ParagraphPropertiesOptionsBase, ParagraphKeyElsewhere>;
 
-/** The attr spec shapes the mirror table uses (attrNative plus the five keys
- *  with a CSS parseHTML). */
-type ParagraphAttrSpec = {
+/** The attr spec shape every mirror table uses (attrNative plus keys with a
+ *  CSS parseHTML/renderHTML pair). Shared by the paragraph/table-family/run
+ *  satisfies guards. */
+export type DocxAttrSpec = {
   default: unknown;
   parseHTML?: (el: HTMLElement) => unknown;
+  renderHTML?: (attributes: Record<string, unknown>) => Record<string, unknown>;
   rendered?: boolean;
 };
 
@@ -167,7 +169,64 @@ export function docxParagraphAttrs() {
     emptyProperties: attrNative(),
     // Mirror contract: every office-open paragraph property + editor key
     // declared, nothing else (see ParagraphAttrKey).
-  } satisfies Record<ParagraphAttrKey, ParagraphAttrSpec>;
+  } satisfies Record<ParagraphAttrKey, DocxAttrSpec>;
+}
+
+/** TableCellOptions keys expressed via Tiptap structural names
+ *  (columnSpan → colspan, rowSpan → rowspan), rebuilt by DocxManager
+ *  (children), or sdt-cell-only markers — not mirrored as office-open-native
+ *  attrs. */
+type CellKeyElsewhere = "columnSpan" | "rowSpan" | "children" | "text" | "cellProperties";
+
+/** The full attr key set the tableCell/tableHeader nodes declare. */
+type TableCellAttrKey = Exclude<keyof TableCellOptions, CellKeyElsewhere>;
+
+/** Shared office-open table-cell attrs — TableCellPropertiesOptions mirror.
+ *  Returned by BOTH TableCell.addAttributes and TableHeader.addAttributes (a
+ *  header cell is a cell; they carried duplicate hand-written tables before).
+ *  The satisfies guard pins the key set to TableCellAttrKey — same mirror
+ *  contract as docxParagraphAttrs. */
+export function docxTableCellAttrs() {
+  return {
+    // Nested office-open objects (parsed from HTML where CSS exists)
+    shading: {
+      default: null,
+      rendered: false,
+      parseHTML: (el: HTMLElement) => shadingFromElement(el),
+    },
+    borders: {
+      default: null,
+      rendered: false,
+      parseHTML: (el: HTMLElement) => bordersFromElement(el),
+    },
+    verticalAlign: {
+      default: null,
+      rendered: false,
+      parseHTML: (el: HTMLElement) => el.style.verticalAlign || null,
+    },
+
+    // Scalar OOXML cell properties (stored verbatim; no CSS equivalent)
+    textDirection: attrNative(),
+    width: attrNative(),
+    margins: attrNative(),
+    noWrap: {
+      default: null,
+      rendered: false,
+      parseHTML: (el: HTMLElement) => (el.style.whiteSpace === "nowrap" ? true : null),
+    },
+    verticalMerge: attrNative(),
+    horizontalMerge: attrNative(),
+    fitText: attrNative(),
+    hideMark: attrNative(),
+    headers: attrNative(),
+    cnfStyle: attrNative(),
+    // Row/cell-level track-change markers (w:ins/w:del on the tcPr/trPr side).
+    insertion: attrNative(),
+    deletion: attrNative(),
+    cellMerge: attrNative(),
+    revision: attrNative(),
+    // Mirror contract: every office-open cell property declared, nothing else.
+  } satisfies Record<TableCellAttrKey, DocxAttrSpec>;
 }
 
 /** Shared renderHTML for Paragraph (`tag="p"`) and Heading (`tag="h{level}"`):

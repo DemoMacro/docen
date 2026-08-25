@@ -3,6 +3,7 @@ import type {
   SectionChild,
   TableCellOptions,
   TableOptions,
+  TablePropertiesOptions,
   TableWidthProperties,
 } from "@office-open/docx";
 import type { JSONContent } from "@tiptap/core";
@@ -22,6 +23,7 @@ import {
   alignmentFromElement,
   alignmentToCss,
   bordersFromElement,
+  type DocxAttrSpec,
   shadingFromElement,
   shadingToCss,
   tableFloatToCss,
@@ -40,8 +42,75 @@ import {
 
 // ── DOCX serialization (near-identity: attrs mirror TableOptions minus rows) ──
 
-/** Structural key rebuilt by DocxManager (compileTableNode walks the row nodes). */
+/** Structural keys not mirrored as attrs: `rows` is rebuilt by DocxManager
+ *  (compileTableNode walks the row nodes); `columnWidthsRevision` (a tblGrid
+ *  change revision) is skipped at parse too — the editor's tblGrid edits are
+ *  new revisions, not replays of the old one. Keep in sync with SKIP_KEYS
+ *  below (SKIP = never enters opts; these = never enter attrs). */
 const SKIP_KEYS = new Set(["rows", "columnWidthsRevision"]);
+
+/** The attr key set the table node declares — every TablePropertiesOptions key
+ *  (TableOptions' own properties incl. revision) plus the tblGrid widths.
+ *  Excluded: `rows` (rebuilt by DocxManager), `columnWidthsRevision` (skipped
+ *  at parse too), and the core base's 6 band flags — docx models those in
+ *  `tableLook` (w:tblLook); they are stringify-only authoring shorthand and
+ *  parse never emits them as top-level keys (descriptor.ts tableLookForEmit). */
+type TableAttrKey = Exclude<
+  keyof TablePropertiesOptions | keyof TableOptions,
+  | "rows"
+  | "columnWidthsRevision"
+  | "firstRow"
+  | "lastRow"
+  | "firstCol"
+  | "lastCol"
+  | "bandRow"
+  | "bandCol"
+>;
+
+/** office-open table attr mirror, satisfies-guarded against keyof drift (same
+ *  contract as docxParagraphAttrs in utils.ts). */
+const docxTableAttrs = {
+  // Nested office-open objects (parsed from HTML where CSS exists)
+  width: attrNative(),
+  // tblGrid (<w:tblGrid>) — exact twips per column; kept on the table so DOCX
+  // round-trips losslessly instead of being split into per-cell colwidth.
+  columnWidths: attrNative(),
+  indent: attrNative(),
+  margins: attrNative(),
+  float: attrNative(),
+  borders: {
+    default: null,
+    rendered: false,
+    parseHTML: (el: HTMLElement) => bordersFromElement(el),
+  },
+  shading: {
+    default: null,
+    rendered: false,
+    parseHTML: (el: HTMLElement) => shadingFromElement(el),
+  },
+
+  // Scalar OOXML table properties
+  alignment: {
+    default: null,
+    rendered: false,
+    parseHTML: (el: HTMLElement) => alignmentFromElement(el),
+  },
+  layout: {
+    default: null,
+    rendered: false,
+    parseHTML: (el: HTMLElement) => (el.style.tableLayout === "fixed" ? "fixed" : null),
+  },
+  style: attrNative(),
+  visuallyRightToLeft: attrNative(),
+  tableLook: attrNative(),
+  cellSpacing: attrNative(),
+  styleRowBandSize: attrNative(),
+  styleColBandSize: attrNative(),
+  caption: attrNative(),
+  description: attrNative(),
+  // Table-level property revision (w:tblPrChange).
+  revision: attrNative(),
+} satisfies Record<TableAttrKey, DocxAttrSpec>;
 
 export function renderDocx(node: JSONContent): Partial<TableOptions> {
   const attrs = (node.attrs ?? {}) as Record<string, unknown>;
@@ -396,45 +465,7 @@ export const Table = BaseTable.extend({
   addAttributes() {
     return {
       ...this.parent?.(),
-
-      // Nested office-open objects (parsed from HTML where CSS exists)
-      width: attrNative(),
-      // tblGrid (<w:tblGrid>) — exact twips per column; kept on the table so DOCX
-      // round-trips losslessly instead of being split into per-cell colwidth.
-      columnWidths: attrNative(),
-      indent: attrNative(),
-      margins: attrNative(),
-      float: attrNative(),
-      borders: {
-        default: null,
-        rendered: false,
-        parseHTML: (el: HTMLElement) => bordersFromElement(el),
-      },
-      shading: {
-        default: null,
-        rendered: false,
-        parseHTML: (el: HTMLElement) => shadingFromElement(el),
-      },
-
-      // Scalar OOXML table properties
-      alignment: {
-        default: null,
-        rendered: false,
-        parseHTML: (el: HTMLElement) => alignmentFromElement(el),
-      },
-      layout: {
-        default: null,
-        rendered: false,
-        parseHTML: (el: HTMLElement) => (el.style.tableLayout === "fixed" ? "fixed" : null),
-      },
-      style: attrNative(),
-      visuallyRightToLeft: attrNative(),
-      tableLook: attrNative(),
-      cellSpacing: attrNative(),
-      styleRowBandSize: attrNative(),
-      styleColBandSize: attrNative(),
-      caption: attrNative(),
-      description: attrNative(),
+      ...docxTableAttrs,
     };
   },
 
