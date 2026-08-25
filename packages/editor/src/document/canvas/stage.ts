@@ -101,10 +101,13 @@ export class CanvasStage {
     this.dprMedia.addEventListener("change", this.dprChange);
   }
 
-  /** Lay out page slots for a flow result and repaint visible pages. */
-  sync(pages: FlowPage[], flow: ProjectedFlowBox): void {
+  /** Lay out page slots for a flow result and repaint visible pages. The
+   *  stage is built once and lives across documents — every sync must
+   *  refresh the context (an opened file's headers/footers arrive here). */
+  sync(pages: FlowPage[], flow: ProjectedFlowBox, furniture?: ProjectedPageFurniture): void {
     this.pages = pages;
     this.ctx.flow = flow;
+    if (furniture !== undefined) this.ctx.furniture = furniture;
     this.layoutFurniture();
     const w = Math.ceil(flow.pageWidthPx);
     const h = Math.ceil(flow.pageHeightPx);

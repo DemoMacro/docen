@@ -1035,7 +1035,7 @@ class DocenDocument extends AddinHost<Editor> {
       flow,
       furniture,
     });
-    this.#stage.sync(pages, flow);
+    this.#stage.sync(pages, flow, furniture);
     this.#bridge?.updatePages(pages, flow);
     this.#updateStatus();
   }
