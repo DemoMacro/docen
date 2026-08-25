@@ -12,9 +12,13 @@
 
 import { docxExtensions, type JSONContent } from "@docen/docx";
 import { Editor } from "@docen/docx/core";
+import type { FlowPage } from "@docen/layout";
 import { UndoRedo } from "@tiptap/extensions";
 import { joinBackward, joinForward, splitBlock } from "@tiptap/pm/commands";
 import { history } from "@tiptap/pm/history";
+import { TextSelection } from "@tiptap/pm/state";
+
+import { CaretMap } from "./caret-map";
 
 /** A grapheme-boundary segmenter shared by the delete translations — surrogate
  *  pairs, combining marks, and emoji must delete as one user-perceived
@@ -45,10 +49,19 @@ export interface EditBridgeOptions {
   /** raf-merged document callback — one per frame at most, with the fresh
    *  editor JSON for the full re-flow (compile → project → layout → paint). */
   onDoc: (json: JSONContent) => void;
+  /** The positioned page frame for a page index (the caret overlay mounts
+   *  inside it, page-local). Absent pages report null. */
+  pageHost?: (page: number) => HTMLElement | null;
 }
 
 export interface EditBridge {
   editor: Editor;
+  /** Feed each render's flow result — rebuilds the pixel↔position map and
+   *  re-places the caret against the fresh geometry. */
+  updatePages(
+    pages: readonly FlowPage[],
+    flow: { contentLeftPx: number; contentTopPx: number },
+  ): void;
   destroy(): void;
 }
 
@@ -100,12 +113,96 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
   ta.setAttribute("autocorrect", "off");
   ta.spellcheck = false;
 
+  // The caret overlay — a thin div mounted inside the current page's frame
+  // (page-relative positioning for free), blinked via the Web Animations API.
+  const caret = document.createElement("div");
+  Object.assign(caret.style, {
+    position: "absolute",
+    width: "2px",
+    background: "#000",
+    pointerEvents: "none",
+    zIndex: "5",
+    display: "none",
+  } satisfies Partial<CSSStyleDeclaration>);
+  opts.host.append(caret);
+  let blink: Animation | null = null;
+
+  // The pixel↔position geometry, rebuilt from every render's flow result.
+  // Between a transaction and its re-render it is one frame stale — caretRect
+  // tolerates out-of-range positions by hiding until the fresh map lands.
+  let map: CaretMap | null = null;
+  let pageCount = 0;
+  let lastCaretPos = -1;
+
+  const restartBlink = (): void => {
+    blink?.cancel();
+    blink = caret.animate([{ opacity: 1 }, { opacity: 0 }], {
+      duration: 1000,
+      iterations: Infinity,
+      direction: "alternate",
+      easing: "steps(1,end)",
+    });
+  };
+
+  const placeCaret = (): void => {
+    if (!map?.valid) {
+      caret.style.display = "none";
+      return;
+    }
+    const pos = editor.state.selection.from;
+    const rect = map.caretRect(pos);
+    const frame = rect ? (opts.pageHost?.(rect.page) ?? null) : null;
+    if (!rect || !frame) {
+      caret.style.display = "none";
+      return;
+    }
+    if (frame !== caret.parentElement) frame.append(caret);
+    caret.style.display = "block";
+    caret.style.left = `${rect.xPx}px`;
+    caret.style.top = `${rect.yPx}px`;
+    caret.style.height = `${rect.heightPx}px`;
+    // Keep the textarea anchored at the caret so the IME candidate window
+    // opens at the typing point.
+    const hostRect = opts.host.getBoundingClientRect();
+    const frameRect = frame.getBoundingClientRect();
+    ta.style.left = `${frameRect.left - hostRect.left + rect.xPx}px`;
+    ta.style.top = `${frameRect.top - hostRect.top + rect.yPx}px`;
+    if (pos !== lastCaretPos) {
+      lastCaretPos = pos;
+      restartBlink();
+    }
+  };
+  editor.on("selectionUpdate", placeCaret);
+
   const takeFocus = (event: MouseEvent): void => {
     // preventDefault keeps the click from blurring on mousedown; the caret
-    // placement from pixel coordinates is the caret milestone's job.
+    // placement below is the real focus move.
     event.preventDefault();
-    ta.style.left = `${event.offsetX}px`;
-    ta.style.top = `${event.offsetY}px`;
+    if (map?.valid) {
+      // offsetX/Y are target-relative (the hit may be a frame, a canvas view,
+      // …); resolve the page-local point through each frame's rect instead.
+      const hostRect = opts.host.getBoundingClientRect();
+      const x = event.clientX - hostRect.left;
+      const y = event.clientY - hostRect.top;
+      for (let p = 0; p < pageCount; p++) {
+        const frame = opts.pageHost?.(p);
+        if (!frame) continue;
+        const r = frame.getBoundingClientRect();
+        const lx = x - (r.left - hostRect.left);
+        const ly = y - (r.top - hostRect.top);
+        if (lx < 0 || ly < 0 || lx >= r.width || ly >= r.height) continue;
+        const pos = map.posAtPoint(p, lx, ly);
+        if (pos != null) {
+          editor.commands.command(({ state, dispatch }) => {
+            // The cast bridges the dual PM d.ts identity (same runtime
+            // instance — see the module's command casts).
+            dispatch?.(state.tr.setSelection(TextSelection.create(state.doc, pos) as never));
+            return true;
+          });
+        }
+        break;
+      }
+    }
     ta.focus();
     ta.value = "";
   };
@@ -191,6 +288,53 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     ta.value = "";
   };
 
+  /** Horizontal caret movement — one grapheme inside the block (atoms step a
+   *  whole node), the nearest text position past the block's edge. */
+  const moveH = (dir: -1 | 1): void => {
+    editor.commands.command(({ state, dispatch }) => {
+      const { $from } = state.selection;
+      const offset = $from.parentOffset;
+      const size = $from.parent.content.size;
+      if (dir < 0 && offset > 0) {
+        // textBetween maps the content offset to text units, skipping atoms.
+        const cut = lastGraphemeUnits($from.parent.textBetween(0, offset)) || 1;
+        dispatch?.(
+          state.tr.setSelection(TextSelection.create(state.doc, $from.pos - cut) as never),
+        );
+        return true;
+      }
+      if (dir > 0 && offset < size) {
+        const cut = firstGraphemeUnits($from.parent.textBetween(offset, size)) || 1;
+        dispatch?.(
+          state.tr.setSelection(TextSelection.create(state.doc, $from.pos + cut) as never),
+        );
+        return true;
+      }
+      const edge = dir < 0 ? $from.before() : $from.after();
+      if (edge < 0 || edge > state.doc.content.size) return false;
+      const $near = TextSelection.near(state.doc.resolve(edge), dir);
+      if ($near.from === $from.pos) return false;
+      dispatch?.(state.tr.setSelection($near as never));
+      return true;
+    });
+  };
+
+  /** Home/End — the line's boundaries off the caret map (the only place the
+   *  wrap geometry lives); unmapped falls back to the block's boundaries. */
+  const lineEdge = (toEnd: boolean): void => {
+    editor.commands.command(({ state, dispatch }) => {
+      const { $from } = state.selection;
+      const pos = toEnd ? $from.end() : $from.start();
+      const edges = map?.valid ? map.lineEdges($from.pos) : null;
+      dispatch?.(
+        state.tr.setSelection(
+          TextSelection.create(state.doc, edges ? (toEnd ? edges.end : edges.home) : pos) as never,
+        ),
+      );
+      return true;
+    });
+  };
+
   const onKeyDown = (event: KeyboardEvent): void => {
     if (event.ctrlKey || event.metaKey) {
       const key = event.key.toLowerCase();
@@ -202,6 +346,35 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
         event.preventDefault();
         editor.commands.redo();
       }
+      return;
+    }
+    switch (event.key) {
+      case "ArrowLeft":
+        if (!event.shiftKey) {
+          event.preventDefault();
+          moveH(-1);
+        }
+        break;
+      case "ArrowRight":
+        if (!event.shiftKey) {
+          event.preventDefault();
+          moveH(1);
+        }
+        break;
+      case "Home":
+        if (!event.shiftKey) {
+          event.preventDefault();
+          lineEdge(false);
+        }
+        break;
+      case "End":
+        if (!event.shiftKey) {
+          event.preventDefault();
+          lineEdge(true);
+        }
+        break;
+      default:
+        break;
     }
   };
 
@@ -230,11 +403,19 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
 
   return {
     editor,
+    updatePages(pages, flow): void {
+      map = new CaretMap(pages, editor.state.doc, flow);
+      pageCount = pages.length;
+      placeCaret();
+    },
     destroy(): void {
       if (raf) cancelAnimationFrame(raf);
+      blink?.cancel();
+      editor.off("selectionUpdate", placeCaret);
       editor.destroy();
       opts.host.removeEventListener("mousedown", takeFocus);
       ta.remove();
+      caret.remove();
     },
   };
 }

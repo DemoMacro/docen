@@ -12,8 +12,8 @@
  * 宋体, the same engine on both sides, so measure == render by construction.
  */
 import { compileDocument, parseDOCX, type JSONContent } from "@docen/docx";
-import { projectDocumentOptions } from "@docen/docx/layout";
-import { browserFontMetrics, TextMeasurer, layoutFlow } from "@docen/layout";
+import { projectDocumentOptions, type ProjectedFlowBox } from "@docen/docx/layout";
+import { browserFontMetrics, TextMeasurer, layoutFlow, type FlowPage } from "@docen/layout";
 
 import { mountEditBridge, type EditBridge } from "../src/document/canvas/edit-bridge";
 import { CanvasStage } from "../src/document/canvas/stage";
@@ -74,17 +74,40 @@ export const mountCanvasDemo = (stage: HTMLElement): void => {
       const json = parseDOCX(buffer);
       // The render entry both sides share: the initial paint and every edited
       // transaction flow through the same full pipeline.
+      let lastPages: FlowPage[] = [];
+      let lastFlow: ProjectedFlowBox | undefined;
       const render = (doc: JSONContent): void => {
         const { blocks, flow, furniture } = projectDocumentOptions(compileDocument(doc));
         const pages = layoutFlow(blocks, flow, measurer);
+        lastPages = pages;
+        lastFlow = flow;
         canvas ??= new CanvasStage(stageHost, { metrics: browserFontMetrics, flow, furniture });
         canvas.sync(pages, flow);
+        // The fresh geometry re-arms the bridge's pixel↔position map.
+        bridge?.updatePages(pages, flow);
         status.textContent = `${picked.name} — ${pages.length} page${pages.length === 1 ? "" : "s"}`;
       };
       render(json);
-      bridge = mountEditBridge({ host: stageHost, content: json, onDoc: render });
+      bridge = mountEditBridge({
+        host: stageHost,
+        content: json,
+        onDoc: render,
+        pageHost: (page) => canvas?.slotAt(page)?.parentElement ?? null,
+      });
+      // The initial render ran before the bridge existed — feed it now.
+      if (lastFlow) bridge.updatePages(lastPages, lastFlow);
       // Debug handle for interactive verification (demo-only).
-      Object.assign(window, { docenCanvasDebug: { bridge } });
+      Object.assign(window, {
+        docenCanvasDebug: {
+          bridge,
+          get pages() {
+            return lastPages;
+          },
+          get flow() {
+            return lastFlow;
+          },
+        },
+      });
     });
   });
 };
