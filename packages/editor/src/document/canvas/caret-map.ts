@@ -12,6 +12,7 @@ import {
   type FlowPage,
   type LaidOutLine,
   type LaidOutParagraph,
+  leaferWordIndices,
 } from "@docen/layout";
 import type { Node as PmNode } from "@tiptap/pm/model";
 
@@ -59,22 +60,32 @@ interface ParaEntry {
 const measureCanvas: HTMLCanvasElement | null =
   typeof document !== "undefined" ? document.createElement("canvas") : null;
 
-/** Natural advance of `text`'s first `chars` code units in `font` — per-grapheme
- *  sums (sub-pixel approximation of the kerned run; caret placement only). */
-function naturalAdvance(text: string, chars: number, font: string): number {
+const SEGMENTER = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+/** Per-grapheme advance widths of a text in a font — measured once, reused
+ *  across every caret query against the same item (drag-select rescans its
+ *  line on every mousemove; per-grapheme sums approximate the kerned run,
+ *  caret placement only). */
+const widthCache = new Map<string, number[]>();
+
+function graphemeWidths(text: string, font: string): number[] {
+  const key = `${font}\u0000${text}`;
+  const cached = widthCache.get(key);
+  if (cached) return cached;
   const ctx = measureCanvas?.getContext("2d");
-  if (!ctx) return 0;
+  if (!ctx) return [];
   ctx.font = font;
+  const widths: number[] = [];
+  for (const { segment } of SEGMENTER.segment(text)) widths.push(ctx.measureText(segment).width);
+  if (widthCache.size >= 4000) widthCache.clear();
+  widthCache.set(key, widths);
+  return widths;
+}
+
+/** Sum of the first `n` grapheme widths. */
+function prefixWidth(widths: number[], n: number): number {
   let w = 0;
-  let used = 0;
-  for (const { segment } of new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(
-    text,
-  )) {
-    if (used >= chars) break;
-    const take = Math.min(segment.length, chars - used);
-    w += ctx.measureText(take === segment.length ? segment : segment.slice(0, take)).width;
-    used += take;
-  }
+  for (let i = 0; i < n && i < widths.length; i++) w += widths[i]!;
   return w;
 }
 
@@ -231,7 +242,7 @@ export class CaretMap {
 
   /** A click's page-local coordinates → the nearest doc position. */
   posAtPoint(page: number, x: number, y: number): number | null {
-    let best: { entry: LineEntry; dist: number } | null = null;
+    let best: { entry: LineEntry; dist: number; xDist: number } | null = null;
     for (const entry of this.lines) {
       if (entry.page !== page) continue;
       const within = y >= entry.yPx && y <= entry.yPx + entry.line.heightPx;
@@ -239,7 +250,15 @@ export class CaretMap {
         ? 0
         : Math.min(Math.abs(y - entry.yPx), Math.abs(y - (entry.yPx + entry.line.heightPx)));
       if (dist > 40) continue;
-      if (!best || dist < best.dist) best = { entry, dist };
+      // Table columns share one y band — x proximity breaks the tie, else
+      // every click in the row lands on the first cell's paragraph.
+      const items = entry.line.items;
+      const last = items[items.length - 1];
+      const right = entry.xPx + (last ? last.xPx + last.widthPx : 0);
+      const xDist = x < entry.xPx ? entry.xPx - x : x > right ? x - right : 0;
+      if (!best || dist < best.dist || (dist === best.dist && xDist < best.xDist)) {
+        best = { entry, dist, xDist };
+      }
     }
     if (!best) return null;
     return this.posInLine(best.entry, x);
@@ -262,6 +281,39 @@ export class CaretMap {
     return this.posOfChar(located.entry, target.startChar + col);
   }
 
+  /** The vertical caret box of a line — anchored where the painter actually
+   *  draws: Leafer's Text defaults to a 150% lineHeight, which puts the
+   *  alphabetic baseline at 1.1 × fontSize below the element top (itself at
+   *  the grid-centered pad). Sizing to the runs' ink box keeps the highlight
+   *  hugging the glyphs; the font-box model floated a ~0.3em gap above them. */
+  private bandOf(line: LineEntry): { yPx: number; heightPx: number } {
+    const pad = line.line.grid ? Math.max(0, (line.line.heightPx - line.line.naturalPx) / 2) : 0;
+    const ctx = measureCanvas?.getContext("2d");
+    if (!ctx) return { yPx: line.yPx + pad, heightPx: Math.max(line.line.naturalPx, 2) };
+    let top = Infinity;
+    let bottom = -Infinity;
+    for (const item of line.line.items) {
+      if (item.kind !== "text") continue;
+      const inline = line.para.inline[item.inlineIndex];
+      if (inline?.kind !== "text") continue;
+      const font = cssFontOf(
+        inline.style,
+        familyOfSlot(inline.style.family, /[一-鿿぀-ヿ가-힯]/.test(item.text[0] ?? "")),
+      );
+      ctx.font = font;
+      const baseline = line.yPx + pad + 1.1 * inline.style.sizePx;
+      // The item's own ink box (first graphemes carry its script's shape); the
+      // deepest run's descent and highest run's ascent bound the highlight.
+      const metrics = ctx.measureText([...item.text].slice(0, 8).join(""));
+      top = Math.min(top, baseline - metrics.actualBoundingBoxAscent);
+      bottom = Math.max(bottom, baseline + metrics.actualBoundingBoxDescent);
+    }
+    if (!Number.isFinite(top)) {
+      return { yPx: line.yPx + pad, heightPx: Math.max(line.line.naturalPx, 2) };
+    }
+    return { yPx: top, heightPx: Math.max(bottom - top, 2) };
+  }
+
   /** The selection rectangles for a range — one per crossed line, in the
    *  caret's geometry (same grid pad and text height). */
   selectionRects(from: number, to: number): SelectionRect[] {
@@ -276,15 +328,13 @@ export class CaretMap {
         if (line.endChar <= offA || line.startChar >= offB) continue;
         const fromOff = Math.max(offA, line.startChar);
         const toOff = Math.min(offB, line.endChar);
-        const pad = line.line.grid
-          ? Math.max(0, (line.line.heightPx - line.line.naturalPx) / 2)
-          : 0;
+        const band = this.bandOf(line);
         rects.push({
           page: line.page,
           xPx: this.xOfChar(line, fromOff),
-          yPx: line.yPx + pad,
+          yPx: band.yPx,
           widthPx: Math.max(this.xOfChar(line, toOff) - this.xOfChar(line, fromOff), 2),
-          heightPx: Math.max(line.line.naturalPx, 2),
+          heightPx: band.heightPx,
         });
       }
     }
@@ -303,7 +353,7 @@ export class CaretMap {
       if (!bestOffset || dist < bestOffset.dist) bestOffset = { pos, dist };
     };
     push(entry.xPx, this.posOfChar(entry.owner, char));
-    for (const item of line.items) {
+    for (const [itemIndex, item] of line.items.entries()) {
       if (item.kind !== "text") continue;
       const inline = entry.para.inline[item.inlineIndex];
       if (inline?.kind !== "text") continue;
@@ -311,38 +361,55 @@ export class CaretMap {
         inline.style,
         familyOfSlot(inline.style.family, /[一-鿿぀-ヿ가-힯]/.test(item.text[0] ?? "")),
       );
-      const graphemes = [...item.text];
-      const interval = this.intervalOf(entry, item.xPx, item.widthPx);
-      for (let g = 0; g < graphemes.length; g++) {
+      const widths = graphemeWidths(item.text, font);
+      let prefix = 0;
+      for (let g = 0; g < widths.length; g++) {
         char++;
-        const prefix = interval.scale(naturalAdvance(item.text, codeUnitsOf(graphemes, g), font));
-        push(entry.xPx + item.xPx + prefix, this.posOfChar(entry.owner, char));
+        push(this.xInItem(entry, itemIndex, g, prefix, widths), this.posOfChar(entry.owner, char));
+        prefix += widths[g]!;
       }
     }
     // Empty lines push nothing — fall back to the line-start position.
     return bestOffset?.pos ?? this.posOfChar(entry.owner, entry.endChar);
   }
 
-  /** The justify-stretch scale of one item — the painter's interval math: the
-   *  last item stretches to maxWidth(+hang), each earlier one to the next
-   *  item's x, and natural advances scale proportionally inside. */
-  private intervalOf(
+  /** The x of one grapheme inside an item — the exact distribution the
+   *  painter's justified Text applies: CJK items advance each grapheme by a
+   *  uniform share of the stretch interval (Leafer "both-letter"), Latin
+   *  items shift each word by its word index × the per-gap share ("both-
+   *  justify"). The layout's item widths are pretext's compressed measures —
+   *  scaling plain prefixes by them (the old proportional model) drifted up
+   *  to a full punctuation run mid-line. */
+  private xInItem(
     entry: LineEntry,
-    xPx: number,
-    widthPx: number,
-  ): { scale: (w: number) => number } {
+    itemIndex: number,
+    graphemeIndex: number,
+    plainPrefix: number,
+    widths: number[],
+  ): number {
+    const item = entry.line.items[itemIndex]!;
+    const base = entry.xPx + item.xPx + plainPrefix;
     const { line } = entry;
-    if (line.justifyGapPx == null || widthPx <= 0) return { scale: (w) => w };
-    const rights: number[] = [];
-    let nextLeft = (line.maxWidthPx ?? 0) + (line.hangPx ?? 0);
-    for (let i = line.items.length - 1; i >= 0; i--) {
-      rights[i] = nextLeft;
-      nextLeft = line.items[i].xPx;
+    if (line.justifyGapPx == null || item.kind !== "text") return base;
+    // The painter's interval math: the last item stretches to maxWidth(+hang),
+    // each earlier one to the next item's post-justify x.
+    let intervalEnd = (line.maxWidthPx ?? 0) + (line.hangPx ?? 0);
+    for (let i = line.items.length - 1; i > itemIndex; i--) intervalEnd = line.items[i]!.xPx;
+    const interval = intervalEnd - item.xPx;
+    const count = widths.length;
+    if (count <= 1) return base;
+    let natural = 0;
+    for (const w of widths) natural += w;
+    if (/[一-鿿぀-ヿ가-힯]/.test(item.text)) {
+      // The line-end offset (index == count) sits right after the last glyph —
+      // no further gap follows it (the painter's last word absorbs none).
+      return base + Math.min(graphemeIndex, count - 1) * ((interval - natural) / (count - 1));
     }
-    const idx = line.items.findIndex((it) => it.xPx === xPx);
-    const intervalEnd = idx >= 0 ? rights[idx] : xPx + widthPx;
-    const factor = (intervalEnd - xPx) / widthPx;
-    return { scale: (w) => w * factor };
+    // Word gaps: a grapheme's shift is its Leafer word index × gap.
+    const indices = leaferWordIndices(item.text);
+    const words = (indices[count - 1] ?? 0) + 1;
+    if (words <= 1) return base;
+    return base + ((indices[graphemeIndex] ?? 0) * (interval - natural)) / (words - 1);
   }
 
   /** Collapsed-char offset → doc position (walk the textblock's children). */
@@ -372,9 +439,14 @@ export class CaretMap {
     );
     if (!entry) return null;
     const offset = this.charOfPos(entry, pos);
+    // A non-empty line's end offset belongs to that line (clicking past the
+    // last glyph must place the caret at THIS line's end, not roll into the
+    // next line's coordinate space); an empty line hands its offset to the
+    // next one.
     const line =
-      entry.lines.find((l) => offset >= l.startChar && offset < l.endChar) ??
-      entry.lines[entry.lines.length - 1];
+      entry.lines.find(
+        (l) => offset >= l.startChar && offset <= l.endChar && l.endChar > l.startChar,
+      ) ?? entry.lines[entry.lines.length - 1];
     return line ? { entry, offset, line } : null;
   }
 
@@ -383,14 +455,14 @@ export class CaretMap {
     const located = this.locate(pos);
     if (!located) return null;
     const { offset, line } = located;
-    const pad = line.line.grid ? Math.max(0, (line.line.heightPx - line.line.naturalPx) / 2) : 0;
+    const band = this.bandOf(line);
     return {
       // The line's page — a split paragraph's ParaEntry.page stays at its
       // first block's page, the caret belongs where the line actually lays.
       page: line.page,
       xPx: this.xOfChar(line, offset),
-      yPx: line.yPx + pad,
-      heightPx: Math.max(line.line.naturalPx, 2),
+      yPx: band.yPx,
+      heightPx: band.heightPx,
     };
   }
 
@@ -442,7 +514,7 @@ export class CaretMap {
   /** Collapsed-char offset → page-local x within its line. */
   private xOfChar(line: LineEntry, offset: number): number {
     let char = line.startChar;
-    for (const item of line.line.items) {
+    for (const [itemIndex, item] of line.line.items.entries()) {
       if (item.kind !== "text") continue;
       const graphemes = [...item.text];
       if (offset <= char + graphemes.length) {
@@ -452,20 +524,18 @@ export class CaretMap {
           inline.style,
           familyOfSlot(inline.style.family, /[一-鿿぀-ヿ가-힯]/.test(item.text[0] ?? "")),
         );
-        const prefix = naturalAdvance(item.text, codeUnitsOf(graphemes, offset - char), font);
-        const interval = this.intervalOf(line, item.xPx, item.widthPx);
-        return line.xPx + item.xPx + interval.scale(prefix);
+        const widths = graphemeWidths(item.text, font);
+        return this.xInItem(
+          line,
+          itemIndex,
+          offset - char,
+          prefixWidth(widths, offset - char),
+          widths,
+        );
       }
       char += graphemes.length;
     }
     const last = line.line.items[line.line.items.length - 1];
     return line.xPx + (last ? last.xPx + last.widthPx : 0);
   }
-}
-
-/** Code-unit length of the first `n` graphemes. */
-function codeUnitsOf(graphemes: string[], n: number): number {
-  let units = 0;
-  for (let i = 0; i < n && i < graphemes.length; i++) units += graphemes[i].length;
-  return units;
 }

@@ -1111,6 +1111,14 @@ function toCellInsets(m: unknown): LayoutCellInsets | undefined {
     : undefined;
 }
 
+/** Word's application default when neither the table nor its style declares
+ *  w:tblCellMar: 108 twips left/right, 0 top/bottom. Without it cells wrap at
+ *  the full column width and their text paints over the borders. */
+const WORD_DEFAULT_CELL_INSETS: LayoutCellInsets = {
+  left: twipToPx(108),
+  right: twipToPx(108),
+};
+
 type CellBorders = NonNullable<LayoutCell["borders"]>;
 
 /** One w:tcBorders/w:tblBorders edge → px + color (nil/none survive as declared
@@ -1215,7 +1223,7 @@ function projectTable(t: TableOptions, ctx: ProjectContext): LayoutTable {
     kind: "table",
     width: toTableWidth(t.width),
     columnWidthsPx: columnWidthsPx && columnWidthsPx.length > 0 ? columnWidthsPx : undefined,
-    cellInsets: toCellInsets(t.margins),
+    cellInsets: toCellInsets(t.margins) ?? WORD_DEFAULT_CELL_INSETS,
     borders: toTableBorders(t.borders, styleTable),
     rows,
   };

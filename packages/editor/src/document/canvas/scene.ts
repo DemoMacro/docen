@@ -184,7 +184,14 @@ function paintParagraph(
             // (height 0 is skipped by Leafer).
             width: intervalPx,
             textWrap: justified ? "none" : undefined,
-            textAlign: justified ? "both-letter" : undefined,
+            // CJK items spread per glyph (both-letter); Latin items spread
+            // per word gap (both-justify — Leafer's word mode, Word's Latin
+            // justification). "both" keeps the single-row Text justifiable.
+            textAlign: justified
+              ? /[一-鿿぀-ヿ가-힯]/.test(item.text)
+                ? "both-letter"
+                : "both-justify"
+              : undefined,
             height: Math.max(1, line.heightPx),
             text: label,
             fill: inline.style.color ? `#${inline.style.color}` : "#1b1b1b",

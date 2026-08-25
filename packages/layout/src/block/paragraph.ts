@@ -168,9 +168,11 @@ function trailingHang(
 
 /** Stretch one wrapped line to its packed width: the slack after the last
  *  item's content (trailing whitespace AND an overflow-punct hang — both
- *  reach past the right edge, both excluded) spread evenly over the
- *  inter-character gaps. Re-spaces every item's x in place and returns the
- *  per-gap stretch (0 when there is nothing to spread). */
+ *  reach past the right edge, both excluded) spread over justify units —
+ *  CJK items stretch per inter-grapheme gap (Word's CJK justification),
+ *  Latin items per word gap (spaces absorb the slack; letter-spreading
+ *  English is the letter-mode tell-tale). Re-spaces every item's x in place
+ *  and returns the per-unit stretch (0 when there is nothing to spread). */
 function justifyLine(
   line: PackedLine,
   inline: readonly LayoutInline[],
@@ -179,20 +181,52 @@ function justifyLine(
   const items = line.items;
   const last = items[items.length - 1];
   const hang = Math.max(trailingHang(items, inline, measurer), line.hangPx ?? 0);
-  let graphemes = 0;
-  for (const it of items) graphemes += it.kind === "text" ? [...it.text].length : 1;
-  const delta = Math.max(
-    0,
-    (line.maxWidthPx - (last.xPx + last.widthPx - hang)) / Math.max(1, graphemes - 1),
-  );
+  const itemUnits = items.map((it) => {
+    if (it.kind !== "text") return 1;
+    if (CJK_ITEM.test(it.text)) return [...it.text].length - 1;
+    const indices = leaferWordIndices(it.text);
+    return indices[indices.length - 1] ?? 0;
+  });
+  let units = 0;
+  for (const u of itemUnits) units += Math.max(u, 0);
+  const delta =
+    units > 0 ? Math.max(0, line.maxWidthPx - (last.xPx + last.widthPx - hang)) / units : 0;
   if (delta === 0) return 0;
   let before = 0;
-  for (const it of items) {
+  items.forEach((it, i) => {
     it.xPx += delta * before;
-    before += it.kind === "text" ? [...it.text].length : 1;
-  }
+    before += itemUnits[i]!;
+  });
   return delta;
 }
+
+/** Items stretch per grapheme when they hold any CJK glyph (the painter's
+ *  "both-letter" trigger — keep the two in lockstep). */
+const CJK_ITEM = /[一-鿿぀-ヿ가-힯]/;
+
+/** Leafer's word split (its justify denominator): a space or one of its
+ *  break chars, or a CJK glyph, stands alone as one word; other runs
+ *  coalesce. Maps each grapheme to its word index — the count is the last
+ *  index + 1, and a grapheme's justify shift is its index × the per-gap
+ *  stretch (the painter's "both-justify" Text applies exactly this). */
+export function leaferWordIndices(text: string): number[] {
+  const indices: number[] = [];
+  let word = -1;
+  let inRun = false;
+  for (const ch of text) {
+    if (ch === " " || LEAFER_BREAK_CHARS.has(ch) || CJK_ITEM.test(ch)) {
+      word++;
+      inRun = false;
+    } else {
+      if (!inRun) word++;
+      inRun = true;
+    }
+    indices.push(word);
+  }
+  return indices;
+}
+
+const LEAFER_BREAK_CHARS = new Set(["-", "—", "／", "～", "｜", "┆", "·"]);
 
 /** A spacing.line spec against a line's natural height. */
 function resolveLine(spec: LayoutLineHeight, naturalPx: number, pitch: number): number {

@@ -88,7 +88,9 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
   // history, keymaps, outline, search … all read their plugin's state.
   for (const plugin of editor.extensionManager.plugins) editor.registerPlugin(plugin);
 
-  // One relayout per frame regardless of keystroke bursts.
+  // One relayout per frame regardless of keystroke bursts — content changes
+  // only; selection-only transactions (drag-select, caret moves) skip the
+  // full re-flow, their placement rides the synchronous selectionUpdate.
   let raf = 0;
   const schedule = (): void => {
     if (raf) return;
@@ -97,7 +99,9 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       opts.onDoc(editor.getJSON());
     });
   };
-  editor.on("transaction", schedule);
+  editor.on("transaction", ({ transaction }) => {
+    if (transaction.docChanged) schedule();
+  });
 
   // The invisible input surface. Kept at 1px and positioned on click so the
   // IME candidate window anchors near the interaction point (true caret-point
