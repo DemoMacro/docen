@@ -3,6 +3,7 @@ import type {
   BorderOptions,
   BordersOptions,
   IndentProperties,
+  ParagraphPropertiesOptionsBase,
   ShadingProperties,
   SpacingProperties,
   TableCellOptions,
@@ -35,8 +36,42 @@ export const attrNative = () => ({ default: null, parseHTML: () => null, rendere
 /** Editor-only attrs marking a textblock as a section's last paragraph (its pPr
  *  holds the OOXML sectPr). DocxManager peels them off to close a section in
  *  compile; they must NOT leak into ParagraphOptions. Shared by paragraph and
- *  heading — a heading can be a section's last paragraph too. */
-export const SECTION_ATTR_KEYS = new Set(["sectionProperties", "sectionHeaders", "sectionFooters"]);
+ *  heading — a heading can be a section's last paragraph too. Typed as plain
+ *  strings for .has(string) call sites; the keys stay pinned to the attr table
+ *  via ParagraphAttrKey below. */
+const SECTION_CLOSE_KEYS = ["sectionProperties", "sectionHeaders", "sectionFooters"] as const;
+export const SECTION_ATTR_KEYS = new Set<string>(SECTION_CLOSE_KEYS);
+
+// ── Paragraph attr mirror contract ──
+//
+// The attr table is a hand-written mirror of ParagraphPropertiesOptionsBase.
+// Types keep the mirror from drifting: `satisfies Record<ParagraphAttrKey, …>`
+// requires EVERY office-open paragraph property to have an attr (a new
+// office-open field without one fails the build) and rejects attr keys that
+// exist nowhere in office-open (typos, retired fields).
+
+/** ParagraphPropertiesOptionsBase keys that live elsewhere instead of a
+ *  mirrored attr: heading/thematicBreak on the Tiptap heading node's own
+ *  identity, style renamed to the styleId attr (it feeds the docx-style-*
+ *  CSS class), bullet/numbering on the list extensions' own attrs. */
+type ParagraphKeyElsewhere = "heading" | "style" | "bullet" | "numbering" | "thematicBreak";
+
+/** Attr keys layered on top of the office-open mirror: the style rename plus
+ *  the section-close markers (SECTION_ATTR_KEYS). */
+type EditorParagraphAttrKey = "styleId" | (typeof SECTION_CLOSE_KEYS)[number];
+
+/** The full attr key set the paragraph/heading nodes declare. */
+type ParagraphAttrKey =
+  | EditorParagraphAttrKey
+  | Exclude<keyof ParagraphPropertiesOptionsBase, ParagraphKeyElsewhere>;
+
+/** The attr spec shapes the mirror table uses (attrNative plus the five keys
+ *  with a CSS parseHTML). */
+type ParagraphAttrSpec = {
+  default: unknown;
+  parseHTML?: (el: HTMLElement) => unknown;
+  rendered?: boolean;
+};
 
 /** Whether a textblock's tabStops include a leader (dot/underscore/hyphen/…),
  *  e.g. a TOC entry's right tab. Signals dot-leader layout to the editor CSS. */
@@ -53,7 +88,8 @@ export function hasLeaderTabStop(tabStops: unknown): boolean {
  *  Returned by BOTH Paragraph.addAttributes and Heading.addAttributes so the two
  *  nodes carry identical paragraph properties (a heading is a paragraph in
  *  OOXML). Callers spread `...this.parent?.()` first to keep their own base
- *  attrs (Heading's `level`). */
+ *  attrs (Heading's `level`). The satisfies guard pins the key set to
+ *  ParagraphAttrKey — see the mirror contract above. */
 export function docxParagraphAttrs() {
   return {
     // pStyle reference (e.g. "Heading1", "Normal"). renderHTML emits
@@ -127,7 +163,11 @@ export function docxParagraphAttrs() {
     divId: attrNative(),
     tabStops: attrNative(),
     cnfStyle: attrNative(),
-  };
+    // Round-trip marker for a bare <w:pPr/> (element presence is fidelity).
+    emptyProperties: attrNative(),
+    // Mirror contract: every office-open paragraph property + editor key
+    // declared, nothing else (see ParagraphAttrKey).
+  } satisfies Record<ParagraphAttrKey, ParagraphAttrSpec>;
 }
 
 /** Shared renderHTML for Paragraph (`tag="p"`) and Heading (`tag="h{level}"`):
