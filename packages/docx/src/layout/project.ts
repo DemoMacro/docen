@@ -187,16 +187,27 @@ interface RunStyle {
   characterSpacingTw?: number;
   bold?: boolean;
   italic?: boolean;
+  color?: string;
+  underline?: boolean;
+  strikethrough?: boolean;
 }
 
 /** rPr (a run's own, or the ¶-mark/paragraph default) → resolved fields. */
 function runStyleOf(rPr: Rec): RunStyle {
+  const underline = isRecord(rPr.underline)
+    ? rPr.underline.type !== "none"
+      ? true
+      : undefined
+    : undefined;
   return {
     sizePt: num(rPr.size),
     font: fontAttr(rPr.font),
     characterSpacingTw: measureTwip(rPr.characterSpacing),
     bold: rPr.bold === true ? true : undefined,
     italic: rPr.italic === true ? true : undefined,
+    color: typeof rPr.color === "string" && rPr.color !== "auto" ? rPr.color : undefined,
+    underline,
+    strikethrough: rPr.strike === true || rPr.doubleStrike === true ? true : undefined,
   };
 }
 
@@ -420,6 +431,9 @@ function projectRuns(
       sizePx: ptToPx(own.sizePt ?? num(chainRPr.size) ?? num(docRPr.size) ?? 12),
       bold: own.bold ?? defRun.bold,
       italic: own.italic ?? defRun.italic,
+      color: own.color ?? defRun.color,
+      underline: own.underline ?? defRun.underline,
+      strikethrough: own.strikethrough ?? defRun.strikethrough,
       letterSpacingPx:
         own.characterSpacingTw != null ? twipToPx(own.characterSpacingTw) : undefined,
     };

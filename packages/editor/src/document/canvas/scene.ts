@@ -152,7 +152,15 @@ function paintParagraph(
             textAlign: justified ? "both-letter" : undefined,
             height: Math.max(1, line.heightPx),
             text: label,
-            fill: "#1b1b1b",
+            fill: inline.style.color ? `#${inline.style.color}` : "#1b1b1b",
+            textDecoration:
+              inline.style.underline && inline.style.strikethrough
+                ? "under-delete"
+                : inline.style.underline
+                  ? "under"
+                  : inline.style.strikethrough
+                    ? "delete"
+                    : undefined,
             fontFamily: family,
             fontSize: inline.style.sizePx,
             fontWeight: inline.style.bold ? "700" : "400",

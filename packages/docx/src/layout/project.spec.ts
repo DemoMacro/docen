@@ -158,6 +158,34 @@ describe("projectDocumentOptions style cascade", () => {
     });
   });
 
+  it("projects run color and underline/strike decorations", () => {
+    const { blocks } = projectDocumentOptions(
+      doc([
+        {
+          paragraph: {
+            children: [
+              { text: "link", color: "0563C1", underline: { type: "single" } },
+              { text: "plain" },
+              { text: "cut", strike: true },
+              { text: "none", color: "auto", underline: { type: "none" } },
+            ],
+          },
+        },
+      ]),
+    );
+    const para = blocks[0];
+    if (para?.kind !== "paragraph") throw new Error("expected paragraph");
+    const [link, plain, cut, none] = para.inline.map((i) => (i.kind === "text" ? i.style : null));
+    expect(link?.color).toBe("0563C1");
+    expect(link?.underline).toBe(true);
+    expect(plain?.color).toBeUndefined();
+    expect(plain?.underline).toBeUndefined();
+    expect(cut?.strikethrough).toBe(true);
+    // "auto" color and underline type none carry no decoration.
+    expect(none?.color).toBeUndefined();
+    expect(none?.underline).toBeUndefined();
+  });
+
   it("converts exact/atLeast line rules and twip indents to px", () => {
     const { blocks } = projectDocumentOptions(
       doc([

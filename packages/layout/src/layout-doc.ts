@@ -22,6 +22,12 @@ export interface LayoutTextStyle {
   sizePx: number;
   bold?: boolean;
   italic?: boolean;
+  /** Text color, hex RRGGBB (w:color; absent/auto → the renderer's ink). */
+  color?: string;
+  /** Underlined (w:u, any non-none pattern). */
+  underline?: boolean;
+  /** Struck through (w:strike / w:dstrike). */
+  strikethrough?: boolean;
   /** Extra per-character spacing in px (OOXML w:spacing resolved). */
   letterSpacingPx?: number;
 }
