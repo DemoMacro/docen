@@ -3,7 +3,7 @@ import { BULLET_GLYPHS, nextOrderedReference, ORDERED_FORMATS } from "@docen/doc
 import { Extension } from "@docen/docx/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import type { EditorState } from "@tiptap/pm/state";
-import { NodeSelection } from "@tiptap/pm/state";
+import { NodeSelection, TextSelection } from "@tiptap/pm/state";
 
 /**
  * Document editor commands (Office.js-style "add-in commands") as native
@@ -334,35 +334,35 @@ export const DocumentCommands = Extension.create({
       bold:
         () =>
         ({ commands }) =>
-          commands.toggleBold(),
+          commands.toggleMark("bold"),
       italic:
         () =>
         ({ commands }) =>
-          commands.toggleItalic(),
+          commands.toggleMark("italic"),
       underline:
         () =>
         ({ commands }) =>
-          commands.toggleUnderline(),
+          commands.toggleMark("underline"),
       strike:
         () =>
         ({ commands }) =>
-          commands.toggleStrike(),
+          commands.toggleMark("strike"),
       subscript:
         () =>
         ({ commands }) =>
-          commands.toggleSubscript(),
+          commands.toggleMark("subscript"),
       superscript:
         () =>
         ({ commands }) =>
-          commands.toggleSuperscript(),
+          commands.toggleMark("superscript"),
       highlight:
         () =>
         ({ commands }) =>
-          commands.toggleHighlight(),
+          commands.toggleMark("highlight"),
       code:
         () =>
         ({ commands }) =>
-          commands.toggleCode(),
+          commands.toggleMark("code"),
       "clear-format":
         () =>
         ({ chain }) =>
@@ -390,19 +390,19 @@ export const DocumentCommands = Extension.create({
       "align-left":
         () =>
         ({ commands }) =>
-          commands.setTextAlign("left"),
+          commands.updateAttributes("paragraph", { alignment: "left" }),
       "align-center":
         () =>
         ({ commands }) =>
-          commands.setTextAlign("center"),
+          commands.updateAttributes("paragraph", { alignment: "center" }),
       "align-right":
         () =>
         ({ commands }) =>
-          commands.setTextAlign("right"),
+          commands.updateAttributes("paragraph", { alignment: "right" }),
       justify:
         () =>
         ({ commands }) =>
-          commands.setTextAlign("justify"),
+          commands.updateAttributes("paragraph", { alignment: "both" }),
 
       // ── Indent / spacing / shading / border — stamp office-open block attrs ──
       // Increase/decrease left indent by Word's 0.5" step.
@@ -546,11 +546,30 @@ export const DocumentCommands = Extension.create({
         () =>
         ({ commands }) =>
           commands.setSectionBreak(),
-      // Insert a 3×3 table (Word's default Insert > Table preset).
+      // Insert a 3×3 table (Word's default Insert > Table preset). The header
+      // row is the row-level tblHeader attr (w:tblHeader) — no header-cell
+      // node type exists; every cell is a plain tableCell.
       "insert-table":
         () =>
-        ({ commands }) =>
-          commands.insertTable({ rows: 3, cols: 3, withHeaderRow: true }),
+        ({ state, dispatch }) => {
+          const { table, tableRow, tableCell, paragraph } = state.schema.nodes;
+          const cell = tableCell.createAndFill(null, [paragraph.create()]);
+          if (!cell) return false;
+          // The shape is structurally valid by construction (3 cells in a
+          // "tableCell+" row), so the fill can only fail on a schema drift.
+          const mkRow = (header: boolean): PMNode =>
+            tableRow.createAndFill(header ? { tableHeader: true } : null, [cell, cell, cell])!;
+          const node = table.createAndFill(null, [mkRow(true), mkRow(false), mkRow(false)]);
+          if (!node) return false;
+          if (dispatch) {
+            const pos = state.selection.from;
+            const tr = state.tr.replaceSelectionWith(node);
+            // Caret lands in the first cell, ready to type (Word behavior).
+            tr.setSelection(TextSelection.near(tr.doc.resolve(pos + 2)));
+            dispatch(tr.scrollIntoView());
+          }
+          return true;
+        },
       // Wrap the selection in a link (empty selection → link around the URL text).
       link:
         (href) =>
@@ -574,7 +593,6 @@ export const DocumentCommands = Extension.create({
             return chain().updateAttributes("paragraph", { heading: id, style: null }).run();
           }
           return chain()
-            .setParagraph()
             .updateAttributes("paragraph", { style: id || null, heading: null })
             .run();
         },

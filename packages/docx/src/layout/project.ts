@@ -1192,7 +1192,7 @@ function toTableBorders(direct: unknown, styleTable: unknown): LayoutTable["bord
     : undefined;
 }
 
-function projectCell(c: TableCellOptions, ctx: ProjectContext): LayoutCell {
+function projectCell(c: TableCellOptions, ctx: ProjectContext, rowspan?: number): LayoutCell {
   const shd = isRecord(c.shading) ? c.shading : undefined;
   const fill =
     shd && typeof shd.fill === "string" && shd.fill !== "auto" && shd.type !== "nil"
@@ -1200,7 +1200,7 @@ function projectCell(c: TableCellOptions, ctx: ProjectContext): LayoutCell {
       : undefined;
   return {
     colspan: c.columnSpan,
-    rowspan: c.rowSpan,
+    rowspan: rowspan ?? 1,
     insets: toCellInsets(c.margins),
     borders: toBorders(c.borders),
     fill,
@@ -1210,11 +1210,49 @@ function projectCell(c: TableCellOptions, ctx: ProjectContext): LayoutCell {
   };
 }
 
+/** Expand OOXML vertical merges into the layout's rowspan shape — the single
+ *  projection point where the two models meet. A `restart` cell absorbs every
+ *  `continue` cell below it in the same grid columns: the continuation rows
+ *  drop those cells (OOXML gives them just an empty <w:p>/) and the restart's
+ *  rowspan counts them. Returns the merged-cell rowspan per restart cell. */
+function collectRowSpans(rows: { cells: unknown[] }[]): Map<TableCellOptions, number> {
+  const spans = new Map<TableCellOptions, number>();
+  // Grid column → the restart cell currently absorbing continuations below.
+  const open = new Map<number, TableCellOptions>();
+  for (const row of rows) {
+    let col = 0;
+    for (const raw of row.cells) {
+      if (!isRecord(raw) || !("children" in raw)) continue;
+      const cell = raw as unknown as TableCellOptions;
+      const span = cell.columnSpan ?? 1;
+      if (cell.verticalMerge === "continue") {
+        const owner = open.get(col);
+        if (owner) spans.set(owner, (spans.get(owner) ?? 1) + 1);
+      } else if (cell.verticalMerge === "restart") {
+        spans.set(cell, 1);
+        for (let c = col; c < col + span; c++) open.set(c, cell);
+        col += span;
+        continue;
+      } else {
+        for (let c = col; c < col + span; c++) open.delete(c);
+        col += span;
+        continue;
+      }
+      col += span;
+    }
+  }
+  return spans;
+}
+
 function projectTable(t: TableOptions, ctx: ProjectContext): LayoutTable {
+  // Only cell rows project; vMerge continuation cells fold into their restart.
+  const cellRows = (t.rows ?? []).filter(
+    (row): row is Extract<(typeof t.rows)[number], { cells: unknown[] }> =>
+      "cells" in row && Array.isArray(row.cells),
+  );
+  const rowSpans = collectRowSpans(cellRows);
   const rows: LayoutTable["rows"] = [];
-  for (const row of t.rows ?? []) {
-    // sdt/customXml row wrappers have no cells of their own — a later gap.
-    if (!("cells" in row)) continue;
+  for (const row of cellRows) {
     const trHeight: Rec = isRecord(row.height) ? row.height : {};
     const heightValue = measureTwip(trHeight.value);
     const height =
@@ -1225,9 +1263,10 @@ function projectTable(t: TableOptions, ctx: ProjectContext): LayoutTable {
           }
         : undefined;
     rows.push({
-      cells: (row.cells ?? [])
+      cells: row.cells
         .filter((cell): cell is TableCellOptions => "children" in cell)
-        .map((cell) => projectCell(cell, ctx)),
+        .filter((cell) => cell.verticalMerge !== "continue")
+        .map((cell) => projectCell(cell, ctx, rowSpans.get(cell))),
       height,
     });
   }

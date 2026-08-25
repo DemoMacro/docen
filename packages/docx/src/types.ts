@@ -13,8 +13,7 @@
  *   so DOCX round-trip is lossless by construction
  *   NOTE: `size` is in POINTS (new office-open convention), not half-points
  * - CSS conversion happens only in renderHTML via utils mappers
- * - Keep Tiptap structural names where base extensions require them
- *   (colspan, rowspan, colwidth, src, alt, level)
+ * - Keep structural names only where no OOXML counterpart exists (src, alt)
  *
  * @module
  */
@@ -201,21 +200,11 @@ export type TableAttrs = AttrNullable<Omit<TableOptions, "rows">>;
 export type TableRowAttrs = AttrNullable<TableRowPropertiesOptionsBase>;
 
 /**
- * Table cell / header attrs — mirrors TableCellOptions.
- *
- * colspan/rowspan/colwidth kept as Tiptap structural names (base extension
- * dependent); office-open columnSpan/rowSpan are mapped in renderDocx.
+ * Table cell attrs — mirrors TableCellOptions directly (the OOXML grid shape
+ * is the PM shape; vMerge expands into rowspan only at the layout projection
+ * point).
  */
-export type TableCellAttrs = AttrNullable<
-  Omit<TableCellOptions, "children" | "columnSpan" | "rowSpan">
-> & {
-  /** Horizontal span (Tiptap base name; maps to office-open columnSpan). */
-  colspan: number;
-  /** Vertical span (Tiptap base name; maps to office-open rowSpan). */
-  rowspan: number;
-  /** Column width in pixels per cell (Tiptap base name). */
-  colwidth: number[] | null;
-};
+export type TableCellAttrs = AttrNullable<Omit<TableCellOptions, "children" | "rowSpan">>;
 
 /**
  * Image attrs.
@@ -350,17 +339,11 @@ export interface TableNode extends TiptapJSONContent {
 export interface TableRowNode extends TiptapJSONContent {
   type: "tableRow";
   attrs?: TableRowAttrs;
-  content?: Array<TableCellNode | TableHeaderNode>;
+  content?: Array<TableCellNode>;
 }
 
 export interface TableCellNode extends TiptapJSONContent {
   type: "tableCell";
-  attrs?: TableCellAttrs;
-  content?: Array<ParagraphNode>;
-}
-
-export interface TableHeaderNode extends TiptapJSONContent {
-  type: "tableHeader";
   attrs?: TableCellAttrs;
   content?: Array<ParagraphNode>;
 }

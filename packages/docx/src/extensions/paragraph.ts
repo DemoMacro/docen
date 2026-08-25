@@ -1,7 +1,7 @@
 import type { ParagraphOptions, StylesOptions } from "@office-open/docx";
+import { Node as TiptapNode, type Node } from "@tiptap/core";
 import type { JSONContent, MarkdownRendererHelpers, RenderContext } from "@tiptap/core";
-import { Paragraph as BaseParagraph } from "@tiptap/extension-paragraph";
-import type { Node } from "@tiptap/pm/model";
+import type { Node as PMNode } from "@tiptap/pm/model";
 
 import { indexParagraphStyles } from "../style-cascade";
 import { HTML_ORDERED_TEMP } from "./list-numbering";
@@ -149,12 +149,15 @@ export function parseDocx(opts: ParagraphOptions | string): Record<string, unkno
 
 // ── Extension ──
 
-export const Paragraph = BaseParagraph.extend({
+export const Paragraph = TiptapNode.create({
+  name: "paragraph",
+  group: "block",
+  content: "inline*",
   // A heading is a paragraph in OOXML (a <w:p> with pStyle="Heading1"), so the
   // paragraph node carries the full office-open mirror — heading/style/bullet/
   // numbering/thematicBreak included. See utils.
   addAttributes() {
-    return { ...this.parent?.(), ...docxParagraphAttrs() };
+    return docxParagraphAttrs();
   },
 
   // HTML round-trip: h1-h6 parse back with a lifted HeadingLevel `heading`
@@ -170,7 +173,7 @@ export const Paragraph = BaseParagraph.extend({
     return [
       {
         tag: "li",
-        getAttrs: (el) => {
+        getAttrs: (el: HTMLElement) => {
           let depth = 0;
           let nearest: string | null = null;
           for (let p = el.parentElement; p; p = p.parentElement) {
@@ -189,7 +192,7 @@ export const Paragraph = BaseParagraph.extend({
       },
       {
         tag: "h6[data-heading-level]",
-        getAttrs: (el) => {
+        getAttrs: (el: HTMLElement) => {
           const level = Number((el as HTMLElement).getAttribute("data-heading-level"));
           return {
             heading:
@@ -205,7 +208,7 @@ export const Paragraph = BaseParagraph.extend({
     ];
   },
 
-  renderHTML({ node, HTMLAttributes }: { node: Node; HTMLAttributes: Record<string, unknown> }) {
+  renderHTML({ node, HTMLAttributes }: { node: PMNode; HTMLAttributes: Record<string, unknown> }) {
     // renderHTML has no access to the document styles, so the tag decision
     // covers the lifted `heading` attr and an explicit outlineLevel only; a
     // numeric pStyle id resolved through styles.xml (WPS/zh-CN Word) falls

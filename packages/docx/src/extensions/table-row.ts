@@ -1,11 +1,12 @@
 import type { TableRowOptions, TableRowPropertiesOptions } from "@office-open/docx";
 import type { JSONContent } from "@tiptap/core";
-import { TableRow as BaseTableRow } from "@tiptap/extension-table";
+import { Node } from "@tiptap/core";
 
 import { attrNative, cssToTwip, type DocxAttrSpec } from "./utils";
 
 /**
- * Table row extension with nested office-open attrs.
+ * Table row node with nested office-open attrs — fully custom (no upstream
+ * table extension).
  *
  * Attrs mirror TableRowPropertiesOptionsBase (cantSplit/tableHeader/hidden as
  * booleans; height as a nested { value, rule } object; cellSpacing as a native
@@ -78,12 +79,16 @@ const docxTableRowAttrs = {
   revision: attrNative(),
 } satisfies Record<keyof TableRowPropertiesOptions, DocxAttrSpec>;
 
-export const TableRow = BaseTableRow.extend({
+export const TableRow = Node.create({
+  name: "tableRow",
+  content: "tableCell+",
+
   addAttributes() {
-    return {
-      ...this.parent?.(),
-      ...docxTableRowAttrs,
-    };
+    return docxTableRowAttrs;
+  },
+
+  parseHTML() {
+    return [{ tag: "tr" }];
   },
 
   renderHTML({

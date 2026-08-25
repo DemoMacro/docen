@@ -183,7 +183,11 @@ function justifyLine(
   const hang = Math.max(trailingHang(items, inline, measurer), line.hangPx ?? 0);
   const itemUnits = items.map((it) => {
     if (it.kind !== "text") return 1;
-    if (CJK_ITEM.test(it.text)) return [...it.text].length - 1;
+    if (CJK_ITEM.test(it.text)) {
+      let points = 0;
+      for (const _ of it.text) points++;
+      return points - 1;
+    }
     const indices = leaferWordIndices(it.text);
     return indices[indices.length - 1] ?? 0;
   });

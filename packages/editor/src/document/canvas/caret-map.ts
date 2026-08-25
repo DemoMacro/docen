@@ -222,7 +222,10 @@ export class CaretMap {
         (para.indent?.leftPx ?? 0) +
         (first && lineIndex === 0 ? (para.indent?.firstLinePx ?? 0) : 0);
       let chars = 0;
-      for (const item of line.items) if (item.kind === "text") chars += [...item.text].length;
+      for (const item of line.items) {
+        // for...of iterates code points, same as the spread it replaces.
+        if (item.kind === "text") for (const _ of item.text) chars++;
+      }
       const lineEntry: LineEntry = {
         page: entry.page,
         para,
@@ -304,7 +307,7 @@ export class CaretMap {
       const baseline = line.yPx + pad + 1.1 * inline.style.sizePx;
       // The item's own ink box (first graphemes carry its script's shape); the
       // deepest run's descent and highest run's ascent bound the highlight.
-      const metrics = ctx.measureText([...item.text].slice(0, 8).join(""));
+      const metrics = ctx.measureText(Array.from(item.text).slice(0, 8).join(""));
       top = Math.min(top, baseline - metrics.actualBoundingBoxAscent);
       bottom = Math.max(bottom, baseline + metrics.actualBoundingBoxDescent);
     }

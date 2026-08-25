@@ -93,7 +93,8 @@ function regroupLists(parent: HTMLElement, document: Document): void {
   const top = () => stack[stack.length - 1];
   const listTag = (kind: string) => (kind === "ordered" ? "ol" : "ul");
 
-  for (const node of [...parent.childNodes]) {
+  // Array.from snapshots the NodeList — regrouping moves nodes out of parent.
+  for (const node of Array.from(parent.childNodes)) {
     const p = node as HTMLElement;
     const kind = p.getAttribute?.("data-list");
     if (!kind) {

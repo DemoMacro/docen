@@ -174,18 +174,16 @@ export function docxParagraphAttrs() {
   } satisfies Record<ParagraphAttrKey, DocxAttrSpec>;
 }
 
-/** TableCellOptions keys expressed via Tiptap structural names
- *  (columnSpan → colspan, rowSpan → rowspan), rebuilt by DocxManager
- *  (children), or sdt-cell-only markers — not mirrored as office-open-native
- *  attrs. */
-type CellKeyElsewhere = "columnSpan" | "rowSpan" | "children" | "text" | "cellProperties";
+/** TableCellOptions keys owned elsewhere: `rowSpan` is office-open's
+ *  authoring sugar (verticalMerge is the round-tripped truth), `children` is
+ *  rebuilt by DocxManager, and `text`/`cellProperties` are sdt-cell-only
+ *  markers — not mirrored as office-open-native attrs. */
+type CellKeyElsewhere = "rowSpan" | "children" | "text" | "cellProperties";
 
-/** The full attr key set the tableCell/tableHeader nodes declare. */
+/** The full attr key set the tableCell node declares. */
 type TableCellAttrKey = Exclude<keyof TableCellOptions, CellKeyElsewhere>;
 
 /** Shared office-open table-cell attrs — TableCellPropertiesOptions mirror.
- *  Returned by BOTH TableCell.addAttributes and TableHeader.addAttributes (a
- *  header cell is a cell; they carried duplicate hand-written tables before).
  *  The satisfies guard pins the key set to TableCellAttrKey — same mirror
  *  contract as docxParagraphAttrs. */
 export function docxTableCellAttrs() {
@@ -210,6 +208,7 @@ export function docxTableCellAttrs() {
     // Scalar OOXML cell properties (stored verbatim; no CSS equivalent)
     textDirection: attrNative(),
     width: attrNative(),
+    columnSpan: attrNative(),
     margins: attrNative(),
     noWrap: {
       default: null,

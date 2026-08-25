@@ -622,97 +622,32 @@ export class DocxManager {
         : { columnWidths: [] as number[], tableWidth: { size: 0, type: "twips" } };
     const rows: Record<string, unknown>[] = [];
 
-    // Track active vertical spans from previous rows. `borders` carries the
-    // restart cell's tcBorders so a rebuilt continuation cell (vMerge continue)
-    // re-emits them: Word draws the last continuation's bottom as the merged
-    // region's bottom edge and each continuation's left/right as column
-    // separators. Without it the region's borders collapse to the table-level
-    // default (often "none") after a docx→json→docx round-trip — the merged
-    // cells then render with missing borders.
-    type ActiveSpan = {
-      colStart: number;
-      colspan: number;
-      remainingRows: number;
-      borders?: unknown;
-    };
-    let activeSpans: ActiveSpan[] = [];
-
+    // Cell attrs already mirror TableCellOptions (columnSpan/verticalMerge/
+    // width included), so rows/cells pass straight through — no vMerge
+    // interleave or rowspan rebuild. A cell's tcW is still derived from the
+    // tblGrid columns it spans when it carries no width of its own.
     for (const rowNode of node.content ?? []) {
       if (rowNode.type !== "tableRow") continue;
 
       const rowOpts = this.nodeRender.get(rowNode.type)?.(rowNode) ?? {};
-      const pmCells = (rowNode.content ?? []).filter(
-        (c) => c.type === "tableCell" || c.type === "tableHeader",
-      );
-
-      // Snapshot spans from previous rows for this row
-      const currentSpans = [...activeSpans].sort((a, b) => a.colStart - b.colStart);
-      const newSpans: ActiveSpan[] = [];
       const compiledCells: Record<string, unknown>[] = [];
-
       let colIdx = 0;
-      let cellIdx = 0;
-      let spanIdx = 0;
-
-      // Interleave vMerge continuation cells with actual cells
-      while (spanIdx < currentSpans.length || cellIdx < pmCells.length) {
-        const nextSpanCol =
-          spanIdx < currentSpans.length ? currentSpans[spanIdx].colStart : Infinity;
-
-        if (colIdx >= nextSpanCol) {
-          // Insert vMerge continuation cell at this column
-          const span = currentSpans[spanIdx];
-          const contWidth = this.sumGridSpan(columnWidths, span.colStart, span.colspan);
-          compiledCells.push({
-            verticalMerge: "continue",
-            columnSpan: span.colspan,
-            // tcW = grid columns the continuation spans — matches the restart
-            // cell and keeps the merged region's width consistent.
-            ...(contWidth > 0 ? { width: { size: contWidth, type: "twips" } } : {}),
-            // Inherit the restart cell's tcBorders so the merged region keeps
-            // its edges (see ActiveSpan above).
-            ...(span.borders ? { borders: span.borders } : {}),
-            children: [{ paragraph: "" }],
-          });
-          colIdx += span.colspan;
-          spanIdx++;
-        } else {
-          // Compile and place the actual cell. Pass columnWidths + colIdx so
-          // the cell's tcW can be derived from the grid columns it spans.
-          const cell = this.compileTableCellNode(
-            pmCells[cellIdx],
+      for (const cellNode of rowNode.content ?? []) {
+        if (cellNode.type !== "tableCell") continue;
+        compiledCells.push(
+          this.compileTableCellNode(
+            cellNode,
             tableCellMargins,
             insideH,
             insideV,
             columnWidths,
             colIdx,
-          );
-          const cs = (cell.columnSpan as number) ?? 1;
-          const rs = (cell.rowSpan as number) ?? 1;
-
-          if (rs > 1) {
-            delete cell.rowSpan;
-            cell.verticalMerge = "restart";
-            newSpans.push({
-              colStart: colIdx,
-              colspan: cs,
-              remainingRows: rs - 1,
-              borders: cell.borders,
-            });
-          }
-
-          compiledCells.push(cell);
-          colIdx += cs;
-          cellIdx++;
-        }
+          ),
+        );
+        colIdx += (cellNode.attrs?.columnSpan as number) ?? 1;
       }
-
       rowOpts.cells = compiledCells;
       rows.push(rowOpts);
-
-      // Update active spans for the next row
-      for (const span of currentSpans) span.remainingRows--;
-      activeSpans = [...currentSpans.filter((s) => s.remainingRows > 0), ...newSpans];
     }
 
     opts.rows = rows;
@@ -732,7 +667,7 @@ export class DocxManager {
       if (rowNode.type !== "tableRow") continue;
       let count = 0;
       for (const cell of rowNode.content ?? []) {
-        if (cell.type === "tableCell" || cell.type === "tableHeader") {
+        if (cell.type === "tableCell") {
           count += (cell.attrs?.colspan as number) ?? 1;
         }
       }
@@ -782,7 +717,7 @@ export class DocxManager {
       if (rowNode.type !== "tableRow") continue;
       let colIdx = 0;
       for (const cell of rowNode.content ?? []) {
-        if (cell.type !== "tableCell" && cell.type !== "tableHeader") continue;
+        if (cell.type !== "tableCell") continue;
         const colspan = (cell.attrs?.colspan as number) ?? 1;
         const colwidth = cell.attrs?.colwidth as number[] | null;
         if (colwidth) {

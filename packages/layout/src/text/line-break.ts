@@ -403,7 +403,9 @@ export function packLines(inline: LayoutInline[], opts: PackLinesOptions): Packe
               const reText = materializeRichInlineLineRange(group.prepared, re)
                 .fragments.map((f) => f.text)
                 .join("");
-              const last = [...reText].pop();
+              // Last code point (for...of iterates code points).
+              let last: string | undefined;
+              for (const ch of reText) last = ch;
               if (last != null && CLOSING_PUNCT.has(last)) {
                 range = re;
                 hangPx = hang.closerPx;

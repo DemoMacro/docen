@@ -35,11 +35,11 @@ export const KEYBOARD_SHORTCUTS: Readonly<Record<string, string>> = {
   "Mod-Enter": "page-break",
   "Mod-Shift-Enter": "column-break",
   // Character formatting (Word's Ctrl+B/I/U; strike follows the Tiptap
-  // convention). Every name is a native command of the bundled mark extensions.
-  "Mod-B": "toggleBold",
-  "Mod-I": "toggleItalic",
-  "Mod-U": "toggleUnderline",
-  "Mod-Shift-X": "toggleStrike",
+  // convention). Names are the documentCommands wrappers (toggleMark based).
+  "Mod-B": "bold",
+  "Mod-I": "italic",
+  "Mod-U": "underline",
+  "Mod-Shift-X": "strike",
 };
 
 export const DocenKeymap = Extension.create({

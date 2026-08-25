@@ -1,46 +1,28 @@
 import type { TableCellOptions } from "@office-open/docx";
 import type { JSONContent } from "@tiptap/core";
-import { TableCell as BaseTableCell } from "@tiptap/extension-table";
+import { Node } from "@tiptap/core";
 
 import { docxTableCellAttrs, renderTableCellStyles } from "./utils";
 
 /**
- * Table cell extension with nested office-open attrs.
- *
- * Attrs mirror TableCellPropertiesOptionsBase (shading/margins/borders/width as
- * nested objects + scalar OOXML properties) plus the inherited Tiptap structural
- * names colspan/rowspan/colwidth/align (rendered: false for the OOXML-named ones).
- * DOCX round-trip is near-identity: renderDocx/parseDocx pass OOXML-native attrs
- * through and only map the Tiptap structural names colspan/rowspan/colwidth to
- * OOXML columnSpan/rowSpan/width. CSS conversion happens solely in renderHTML via
+ * Table cell node with nested office-open attrs — fully custom (no upstream
+ * table extension): attrs mirror TableCellOptions directly
+ * (columnSpan/verticalMerge/width and every TableCellPropertiesOptions key),
+ * so the OOXML grid shape IS the PM shape. renderDocx/parseDocx are plain
+ * pass-throughs (no vMerge↔rowspan rebuild, no px colwidth↔twip conversion);
+ * the layout engine expands verticalMerge into rowspan at the single
+ * projection point. CSS conversion happens solely in renderHTML via
  * utils.renderTableCellStyles (consuming nested shading/verticalAlign/noWrap).
  */
 
 // ── DOCX serialization (near-identity) ──
 
-/** Tiptap structural attrs expressed via OOXML structural fields, not passed through. */
-const SKIP_KEYS = new Set(["colspan", "rowspan", "colwidth", "children"]);
+/** Structural keys DocxManager owns; everything else passes through. */
+const SKIP_KEYS = new Set(["children"]);
 
 export function renderDocx(node: JSONContent): Record<string, unknown> {
   const attrs = (node.attrs ?? {}) as Record<string, unknown>;
   const opts: Record<string, unknown> = {};
-
-  // Tiptap structural names → OOXML structural fields. Narrow by typeof so a
-  // non-numeric span (malformed JSON) can't leak through as a string columnSpan.
-  const colspan = typeof attrs.colspan === "number" ? attrs.colspan : undefined;
-  if (colspan && colspan > 1) opts.columnSpan = colspan;
-  const rowspan = typeof attrs.rowspan === "number" ? attrs.rowspan : undefined;
-  if (rowspan && rowspan > 1) opts.rowSpan = rowspan;
-  const colwidth = attrs.colwidth as number[] | null | undefined;
-  // Width spans every column the cell occupies (colwidth has one entry per
-  // spanned column), so sum them — using only colwidth[0] under-sizes cells
-  // with colspan > 1.
-  if (colwidth && colwidth.length > 0) {
-    const totalPx = colwidth.reduce((sum, w) => sum + (w || 0), 0);
-    if (totalPx > 0) opts.width = { size: totalPx * 15, type: "twips" };
-  }
-
-  // Remaining OOXML-native attrs passed through verbatim (drop nulls).
   for (const [key, value] of Object.entries(attrs)) {
     if (SKIP_KEYS.has(key)) continue;
     if (value !== null && value !== undefined) opts[key] = value;
@@ -49,28 +31,9 @@ export function renderDocx(node: JSONContent): Record<string, unknown> {
 }
 
 export function parseDocx(opts: TableCellOptions): Record<string, unknown> {
-  const resolved = opts;
   const attrs: Record<string, unknown> = {};
-
-  // OOXML structural fields → Tiptap structural names (default 1 for spans).
-  if (resolved.columnSpan != null) attrs.colspan = resolved.columnSpan;
-  if (resolved.rowSpan != null) attrs.rowspan = resolved.rowSpan;
-  if (resolved.width) {
-    const w = resolved.width;
-    // Only twips (w:type="dxa") maps to a px colwidth without table context.
-    // office-open normalizes many tcW to percent (e.g. 24.84 = 24.84%), which
-    // has no px value here — treating that 24.84 as twips gave a 2 px sliver
-    // (round(24.84/15)). percent/auto/nil are skipped; the table's tblGrid
-    // (columnWidths) drives column sizing and compileTableCellNode derives tcW
-    // from it on the generate side.
-    if (w.type === "twips" && typeof w.size === "number" && w.size > 0) {
-      attrs.colwidth = [Math.round(w.size / 15)];
-    }
-  }
-
-  // Remaining OOXML-native opts passed through (skip structural/semantic keys).
-  for (const [key, value] of Object.entries(resolved)) {
-    if (key === "columnSpan" || key === "rowSpan" || key === "width" || key === "children")
+  for (const [key, value] of Object.entries(opts)) {
+    if (key === "rowSpan" || key === "children" || key === "text" || key === "cellProperties")
       continue;
     attrs[key] = value ?? null;
   }
@@ -79,12 +42,33 @@ export function parseDocx(opts: TableCellOptions): Record<string, unknown> {
 
 // ── Extension ──
 
-export const TableCell = BaseTableCell.extend({
+export const TableCell = Node.create({
+  name: "tableCell",
+  // A cell is a SectionChild[] block stream (like a section body or a
+  // header/footer slot): paragraphs, nested tables, lists — isolating so
+  // selections never straddle the cell boundary.
+  content: "block+",
+  isolating: true,
+
   addAttributes() {
-    return {
-      ...this.parent?.(),
-      ...docxTableCellAttrs(),
-    };
+    return docxTableCellAttrs();
+  },
+
+  parseHTML() {
+    return [
+      {
+        tag: "td",
+        // The HTML colspan surfaces as the OOXML columnSpan. An HTML rowspan
+        // (the expanded form) has no single-cell vMerge equivalent — dropped.
+        getAttrs: (el) => {
+          const span = Number((el as HTMLElement).getAttribute("colspan"));
+          return Number.isInteger(span) && span > 1 ? { columnSpan: span } : {};
+        },
+      },
+      // A <th> is a header cell — Word models header-ness as the ROW's
+      // tblHeader, so both tags resolve to the same node.
+      { tag: "th" },
+    ];
   },
 
   renderHTML({
@@ -96,6 +80,9 @@ export const TableCell = BaseTableCell.extend({
   }) {
     const styles = renderTableCellStyles(node.attrs);
     const attrs = { ...HTMLAttributes };
+    // The OOXML column span surfaces as the HTML colspan the browser needs.
+    const span = typeof node.attrs.columnSpan === "number" ? node.attrs.columnSpan : undefined;
+    if (span && span > 1) attrs.colspan = String(span);
     if (styles.length > 0) attrs.style = styles.join(";");
     return ["td", attrs, 0] as const;
   },

@@ -1,10 +1,8 @@
+import { Node as TiptapNode } from "@tiptap/core";
 import { CodeBlockLowlight } from "@tiptap/extension-code-block-lowlight";
 import { Emoji } from "@tiptap/extension-emoji";
-import { HardBreak } from "@tiptap/extension-hard-break";
 import { HorizontalRule } from "@tiptap/extension-horizontal-rule";
 import { Mathematics } from "@tiptap/extension-mathematics";
-import { Text } from "@tiptap/extension-text";
-import { TextAlign } from "@tiptap/extension-text-align";
 import { all, createLowlight } from "lowlight";
 
 import { Extension, type AnyExtension } from "../core";
@@ -16,17 +14,15 @@ import { Document } from "./document";
 import { FormattingMarks } from "./formatting-marks";
 import { Image } from "./image";
 import { Link } from "./link";
-import { Bold, Code, Highlight, Italic, Subscript, Superscript, Underline } from "./marks";
+import { Bold, Code, Highlight, Italic, Strike, Subscript, Superscript, Underline } from "./marks";
 import { Mention } from "./mention";
 import { PageBreak } from "./page-break";
 import { Paragraph } from "./paragraph";
 import { Passthrough, InlinePassthrough } from "./passthrough";
 import { SectionBreak } from "./section-break";
-import { Strike } from "./strike";
 import { Tab } from "./tab";
 import { Table } from "./table";
 import { TableCell } from "./table-cell";
-import { TableHeader } from "./table-header";
 import { TableRow } from "./table-row";
 import { TextStyle } from "./text-style";
 import { TocField } from "./toc-field";
@@ -35,6 +31,26 @@ import { WpgGroup } from "./wpg-group";
 import { WpsShape } from "./wps-shape";
 
 // Nodes
+/** The inline text atom — plain `Node.create` (the upstream extension added
+ *  nothing we use). */
+const Text = TiptapNode.create({ name: "text", group: "inline" });
+
+/** Hard line break (<w:br/>) — `Node.create` inline atom. The upstream
+ *  extension's keymap/input rules never fire in the viewless canvas route
+ *  (typing goes through the textarea bridge). */
+const HardBreak = TiptapNode.create({
+  name: "hardBreak",
+  inline: true,
+  group: "inline",
+  selectable: false,
+  parseHTML() {
+    return [{ tag: "br" }];
+  },
+  renderHTML() {
+    return ["br"] as const;
+  },
+});
+
 export const tiptapNodeExtensions: AnyExtension[] = [
   Document,
   Paragraph,
@@ -70,10 +86,6 @@ export const tiptapNodeExtensions: AnyExtension[] = [
   Table,
   TableRow,
   TableCell,
-  TableHeader,
-  TextAlign.configure({
-    types: ["paragraph"],
-  }),
 ];
 
 // Marks
@@ -127,7 +139,7 @@ export const DocxKit = Extension.create<DocxKitOptions>({
     const extensions: AnyExtension[] = [];
 
     if (this.options.bold !== false) {
-      extensions.push(Bold.configure(this.options.bold));
+      extensions.push(Bold);
     }
     if (this.options.blockquote !== false) {
       extensions.push(Blockquote.configure(this.options.blockquote));
@@ -147,13 +159,13 @@ export const DocxKit = Extension.create<DocxKitOptions>({
       extensions.push(Document);
     }
     if (this.options.hardBreak !== false) {
-      extensions.push(HardBreak.configure(this.options.hardBreak));
+      extensions.push(HardBreak);
     }
     if (this.options.horizontalRule !== false) {
       extensions.push(HorizontalRule.configure(this.options.horizontalRule));
     }
     if (this.options.italic !== false) {
-      extensions.push(Italic.configure(this.options.italic));
+      extensions.push(Italic);
     }
     if (this.options.link !== false) {
       extensions.push(Link.configure(this.options.link));
@@ -162,7 +174,7 @@ export const DocxKit = Extension.create<DocxKitOptions>({
       extensions.push(Paragraph.configure(this.options.paragraph));
     }
     if (this.options.strike !== false) {
-      extensions.push(Strike.configure(this.options.strike));
+      extensions.push(Strike);
     }
     if (this.options.text !== false) {
       extensions.push(Text);
@@ -181,12 +193,9 @@ export const DocxKit = Extension.create<DocxKitOptions>({
 // from @tiptap/* directly, base marks (with DOCX hooks) from ./marks.
 export { CodeBlockLowlight } from "@tiptap/extension-code-block-lowlight";
 export { Emoji } from "@tiptap/extension-emoji";
-export { HardBreak } from "@tiptap/extension-hard-break";
 export { HorizontalRule } from "@tiptap/extension-horizontal-rule";
 export { Mathematics } from "@tiptap/extension-mathematics";
-export { Text } from "@tiptap/extension-text";
-export { TextAlign } from "@tiptap/extension-text-align";
-export { Bold, Code, Highlight, Italic, Subscript, Superscript, Underline } from "./marks";
+export { Bold, Code, Highlight, Italic, Strike, Subscript, Superscript, Underline } from "./marks";
 export { Document, createDocument } from "./document";
 export { Paragraph } from "./paragraph";
 export { detectHeadingLevel } from "./paragraph";
@@ -208,10 +217,8 @@ export { Mention } from "./mention";
 export { Table } from "./table";
 export { TableRow } from "./table-row";
 export { TableCell } from "./table-cell";
-export { TableHeader } from "./table-header";
 export { Image } from "./image";
 export { Link } from "./link";
-export { Strike } from "./strike";
 export { TextStyle } from "./text-style";
 export { Insertion, Deletion } from "./track-change";
 export { FormattingMarks } from "./formatting-marks";

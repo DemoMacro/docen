@@ -1,5 +1,5 @@
 import type { JSONContent, MarkdownRendererHelpers } from "@tiptap/core";
-import { Document as BaseDocument } from "@tiptap/extension-document";
+import { Node } from "@tiptap/core";
 
 import { attrNative } from "./utils";
 
@@ -27,12 +27,11 @@ import { attrNative } from "./utils";
  */
 
 export function createDocument(content = "block+") {
-  return BaseDocument.extend({
+  return Node.create({
+    name: "doc",
     content,
     addAttributes() {
       return {
-        ...this.parent?.(),
-
         styles: attrNative(),
         core: attrNative(),
         sectionProperties: attrNative(),

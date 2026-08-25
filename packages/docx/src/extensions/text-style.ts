@@ -3,7 +3,7 @@ import type {
   RunPropertiesOptions,
   RunStylePropertiesOptions,
 } from "@office-open/docx";
-import { TextStyle as BaseTextStyle } from "@tiptap/extension-text-style";
+import { Mark } from "@tiptap/core";
 
 import {
   attrNative,
@@ -205,12 +205,19 @@ const docxRunAttrs = {
   ...NATIVE_RUN_ATTRS,
 } satisfies Record<RunAttrKey, DocxAttrSpec>;
 
-export const TextStyle = BaseTextStyle.extend({
+export const TextStyle = Mark.create({
+  name: "textStyle",
+  // A run's properties ride this mark as attrs (the OOXML rPr carrier —
+  // spans with no property never emit it: parseDocx returns null).
   addAttributes() {
-    return {
-      ...this.parent?.(),
-      ...docxRunAttrs,
-    };
+    return docxRunAttrs;
+  },
+
+  parseHTML() {
+    return [{ tag: "span" }];
+  },
+  renderHTML() {
+    return ["span", null, 0] as const;
   },
 
   // Near-identity: attrs mirror RunStylePropertiesOptions (rStyle included).

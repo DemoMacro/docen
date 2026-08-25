@@ -7,13 +7,7 @@ import type {
   TableWidthProperties,
 } from "@office-open/docx";
 import type { JSONContent } from "@tiptap/core";
-import {
-  Table as BaseTable,
-  TableView,
-  type TableOptions as TiptapTableOptions,
-} from "@tiptap/extension-table";
-import type { Node } from "@tiptap/pm/model";
-import type { EditorView } from "@tiptap/pm/view";
+import { Node } from "@tiptap/core";
 
 import { allBordersNone, cleanAttrs } from "../converters/styles";
 import { mergeTableStyleProps } from "../style-cascade";
@@ -32,7 +26,8 @@ import {
 } from "./utils";
 
 /**
- * Table extension with nested office-open attrs.
+ * Table node with nested office-open attrs — fully custom (no upstream table
+ * extension).
  *
  * Attrs mirror TableOptions (width/float/layout/borders/alignment/margins/indent/
  * cellSpacing/tableLook/columnWidths/etc.). DOCX round-trip is near-identity:
@@ -134,12 +129,12 @@ export function parseDocx(opts: TableOptions): Record<string, unknown> {
 // ── Block parse rule (resolve: SectionChild → table node) ──
 
 /**
- * Declarative block parse rule: recognize a table SectionChild and rebuild it
- * as a Tiptap table node (rows/cells with colspan/rowspan recovered, the table
- * style's tblBorders/tblCellMar merged in, insideH/V grid lines pushed onto
- * cells, gridAfter as trailing nil-bordered cells). DocxManager dispatches
- * every SectionChild through this rule before the paragraph/passthrough
- * fallbacks. */
+ * Declarative block parse rule: recognize a table SectionChild and resolve it
+ * as a Tiptap table node (cell attrs pass through verbatim — columnSpan/
+ * verticalMerge/width included; the table style's tblBorders/tblCellMar merged
+ * in, insideH/V grid lines pushed onto cells, gridAfter as trailing
+ * nil-bordered cells). DocxManager dispatches every SectionChild through this
+ * rule before the paragraph/passthrough fallbacks. */
 export const parseDocxBlock: ParseBlockRule<Extract<SectionChild, { table: TableOptions }>> = {
   match: (child): child is Extract<SectionChild, { table: TableOptions }> => "table" in child,
   convert: (child, ctx) => resolveTable(child.table, ctx),
@@ -193,12 +188,6 @@ function resolveTable(tableOpts: TableOptions, ctx: ResolveContext): JSONContent
   const insideH = realBorder(tableBorders?.insideHorizontal);
   const insideV = realBorder(tableBorders?.insideVertical);
 
-  // DOCX encodes a row span as a `restart` cell followed by N empty `continue`
-  // cells; ProseMirror uses one cell with rowspan = N+1. Track open spans per
-  // column so each continuation cell increments the owning cell's `rowspan`,
-  // which compileTableNode reads back to rebuild the continuation cells.
-  let activeSpans = new Map<number, JSONContent>();
-
   for (const row of rows) {
     const rowAttrs = ctx.parseNodeAttrs("tableRow", row as unknown as Record<string, unknown>);
     // gridAfter/widthAfter are rebuilt as trailing placeholder cells below
@@ -211,35 +200,12 @@ function resolveTable(tableOpts: TableOptions, ctx: ResolveContext): JSONContent
     delete rowAttrs.widthAfter;
     const cells = (row.cells ?? []) as unknown as Record<string, unknown>[];
     const cellNodes: JSONContent[] = [];
-    const nextActiveSpans = new Map<number, JSONContent>();
-    let colIdx = 0;
 
+    // A `continue` cell (vMerge) is a real node — attrs pass through verbatim
+    // (verticalMerge: "continue"); the layout engine folds it into the restart
+    // cell's rowspan at the single projection point.
     for (const cell of cells) {
-      const cellColspan = (cell.columnSpan as number) ?? 1;
-      const vMerge = cell.verticalMerge as string | undefined;
-
-      if (vMerge === "continue") {
-        // Column owned by a cell above — bump its rowspan and carry the span
-        // forward so further continuation cells keep counting.
-        const owner = activeSpans.get(colIdx);
-        if (owner) {
-          const ownerAttrs = (owner.attrs ??= {});
-          ownerAttrs.rowspan = ((ownerAttrs.rowspan as number) ?? 1) + 1;
-          for (let c = colIdx; c < colIdx + cellColspan; c++) nextActiveSpans.set(c, owner);
-        }
-        colIdx += cellColspan;
-        continue;
-      }
-
-      const isHeader = row.tableHeader as boolean;
-      const cellAttrs = ctx.parseNodeAttrs(
-        isHeader ? "tableHeader" : "tableCell",
-        cell as unknown as Record<string, unknown>,
-      );
-
-      // `rowspan` (recovered below) drives compile-time vMerge — drop the
-      // OOXML marker so it doesn't round-trip back verbatim.
-      delete cellAttrs.verticalMerge;
+      const cellAttrs = ctx.parseNodeAttrs("tableCell", cell as unknown as Record<string, unknown>);
 
       // Effective cell margins: a cell's own tcMar wins, else inherit the
       // table's tblCellMar default (resolved once here for render + measure).
@@ -266,8 +232,7 @@ function resolveTable(tableOpts: TableOptions, ctx: ResolveContext): JSONContent
       const cellChildren = (cell.children ?? []) as SectionChild[];
       const cellContent: JSONContent[] = ctx.resolveBlockStream(cellChildren);
 
-      const cellType = isHeader ? "tableHeader" : "tableCell";
-      const cellNode: JSONContent = { type: cellType };
+      const cellNode: JSONContent = { type: "tableCell" };
       if (Object.keys(cellAttrs).length > 0) cellNode.attrs = cleanAttrs(cellAttrs);
       // An empty cell still needs content to satisfy the tableCell/tableHeader
       // `block+` schema. A content-less cell reaches the doc via fromJSON (which
@@ -280,14 +245,7 @@ function resolveTable(tableOpts: TableOptions, ctx: ResolveContext): JSONContent
       if (cellContent.length > 0) cellNode.content = cellContent;
       else cellNode.content = [{ type: "paragraph" }];
 
-      if (vMerge === "restart") {
-        // rowspan is finalized when continuation cells arrive below; register
-        // the node so they can find and increment it.
-        for (let c = colIdx; c < colIdx + cellColspan; c++) nextActiveSpans.set(c, cellNode);
-      }
-
       cellNodes.push(cellNode);
-      colIdx += cellColspan;
     }
 
     // OOXML gridAfter (w:gridAfter + widthAfter): N trailing grid columns this
@@ -300,7 +258,6 @@ function resolveTable(tableOpts: TableOptions, ctx: ResolveContext): JSONContent
     // keep their left positions.
     const gridAfter = (row.gridAfter as number) ?? 0;
     if (gridAfter > 0) {
-      const trailingType = (row.tableHeader as boolean) ? "tableHeader" : "tableCell";
       // gridAfter cells are empty trailing grid columns (no content). Give them
       // nil borders on every side so renderTableCellStyles emits border:none —
       // otherwise they pick up the Table-Grid default and draw a stray vertical
@@ -313,14 +270,11 @@ function resolveTable(tableOpts: TableOptions, ctx: ResolveContext): JSONContent
       };
       for (let c = 0; c < gridAfter; c++)
         cellNodes.push({
-          type: trailingType,
+          type: "tableCell",
           attrs: { borders: nilBorders },
           content: [{ type: "paragraph" }],
         });
-      colIdx += gridAfter;
     }
-
-    activeSpans = nextActiveSpans;
 
     const rowNode: JSONContent = { type: "tableRow" };
     if (Object.keys(rowAttrs).length > 0) rowNode.attrs = cleanAttrs(rowAttrs);
@@ -336,145 +290,26 @@ function resolveTable(tableOpts: TableOptions, ctx: ResolveContext): JSONContent
   return node;
 }
 
-// ── Table NodeView: apply tblW (attrs.width) and layout to the <table> ──
-
-/**
- * Table NodeView that applies the OOXML table width (tblW → attrs.width) and
- * layout to the <table> element, overriding prosemirror-tables' TableView.
- *
- * The stock TableView sizes the table from the colgroup (sum of cell colwidth
- * or cellMinWidth) via `updateColumns`, ignoring tblW entirely — so a freshly
- * inserted table renders at 75px (3 × cellMinWidth 25) instead of filling the
- * page text column, and an autofit ("fit") DOCX table renders at its tcW sum
- * instead of its tblW. This subclass overwrites the width `updateColumns` set,
- * reusing renderHTML's table-width logic (pct → %, dxa → pt, auto/none → 100%);
- * `updateColumns`' min-width is kept as a floor, and `table-layout: fixed` is
- * applied for fixed-layout tables.
- */
-class DocenTableView extends TableView {
-  constructor(
-    node: Node,
-    cellMinWidth: number,
-    view: EditorView,
-    HTMLAttributes?: Record<string, any>,
-  ) {
-    super(node, cellMinWidth, view, HTMLAttributes);
-    this.applyTableBox(node);
-  }
-
-  update(node: Node): boolean {
-    const ok = super.update(node);
-    if (ok) this.applyTableBox(node);
-    return ok;
-  }
-
-  /** Re-apply the table-level styles the base TableView drops: the float
-   *  anchor (w:tblpPr → CSS float / position:absolute) on the wrapper div, and
-   *  the tblW-derived width + table-layout on the <table> (overwriting the
-   *  colgroup-sum width updateColumns sets). */
-  private applyTableBox(node: Node): void {
-    const a = (node.attrs ?? {}) as Record<string, unknown>;
-    // Float anchor pins the table to the page box; apply it to the wrapper div
-    // (updateColumns only touches <table>, leaving the wrapper unstyled).
-    const floatStyles = tableFloatToCss(a.float);
-    this.dom.style.cssText = floatStyles.length ? floatStyles.join(";") : "";
-    const isFloat = floatStyles.length > 0;
-
-    const table = this.table;
-
-    // table-layout (fixed/autofit). updateColumns leaves it untouched.
-    table.style.tableLayout = a.layout === "fixed" ? "fixed" : "";
-
-    // Overwrite the width updateColumns derived from the colgroup with the
-    // tblW-derived value (matches renderHTML's table-width logic).
-    let width = "";
-    const w = a.width as TableWidthProperties | null | undefined;
-    if (w && typeof w === "object") {
-      const numSize = typeof w.size === "string" ? parseFloat(w.size) : w.size;
-      if (w.type === "percent") {
-        // office-open normalizes pct to a percentage number (0-100) via
-        // widthFiftiethsToPct on parse; a literal "%" string is kept verbatim.
-        if (typeof w.size === "string" && w.size.includes("%")) width = w.size;
-        else if (!Number.isNaN(numSize)) width = `${numSize}%`;
-      } else if (w.type === "auto") {
-        width = isFloat ? "auto" : "100%";
-      } else if (numSize != null) {
-        const css = twipToCss(numSize);
-        if (css) width = css;
-      }
-    } else {
-      width = isFloat ? "auto" : "100%";
-    }
-    if (width) table.style.width = width;
-    table.style.maxWidth = "100%";
-
-    this.scaleColgroup(node);
-  }
-
-  /** Rewrite the colgroup as percentages of the column-width sum. The stock
-   *  updateColumns emits px <col> widths; under table-layout:fixed a px column
-   *  sum larger than the table width forces the table to widen to that sum
-   *  (ignoring width:100%), so a DOCX grid whose tcW total exceeds the page
-   *  text column overflows. Word scales the grid to tblW keeping the ratios;
-   *  percentage <col> does the same under any table width. */
-  private scaleColgroup(node: Node): void {
-    const firstRow = node.firstChild;
-    const cellPx: number[] = [];
-    if (firstRow) {
-      for (let i = 0; i < firstRow.childCount; i++) {
-        const cw = firstRow.child(i).attrs.colwidth as number[] | null | undefined;
-        if (Array.isArray(cw) && cw.length) for (const w of cw) cellPx.push(w || 0);
-        else cellPx.push(0);
-      }
-    }
-    const hasCell = cellPx.some((w) => w > 0);
-    const tblGridPx = ((node.attrs as { columnWidths?: number[] | null }).columnWidths ?? []).map(
-      (w) => Math.round((w || 0) / 15),
-    );
-    const hasGrid = tblGridPx.some((w) => w > 0);
-    const gridPx = hasGrid ? tblGridPx : hasCell ? cellPx : tblGridPx;
-    if (!gridPx.some((w) => w > 0)) return;
-
-    const total = gridPx.reduce((s, w) => s + w, 0);
-    if (total <= 0) return;
-
-    const cols = this.colgroup.children;
-    for (let i = 0; i < cols.length && i < gridPx.length; i++) {
-      const col = cols[i] as HTMLElement;
-      col.style.width = `${((gridPx[i] / total) * 100).toFixed(2)}%`;
-      col.style.minWidth = "";
-    }
-  }
-}
-
 // ── Extension ──
 
-export const Table = BaseTable.extend({
-  addOptions(): TiptapTableOptions {
-    // Override the stock TableView NodeView (sizes the table from the colgroup,
-    // ignoring tblW) with DocenTableView, which re-applies attrs.width + layout.
-    // `this.parent?.()` is `TiptapTableOptions | undefined`; spreading widens
-    // its fields to optional, so cast back (matches link.ts' addOptions).
-    return { ...this.parent?.(), View: DocenTableView } as TiptapTableOptions;
-  },
+export const Table = Node.create({
+  name: "table",
+  group: "block",
+  content: "tableRow+",
+
   addAttributes() {
-    return {
-      ...this.parent?.(),
-      ...docxTableAttrs,
-    };
+    return docxTableAttrs;
+  },
+
+  parseHTML() {
+    return [{ tag: "table" }];
   },
 
   renderHTML({
     node,
     HTMLAttributes,
   }: {
-    node: {
-      attrs: Record<string, unknown>;
-      firstChild: {
-        childCount: number;
-        child: (i: number) => { attrs: Record<string, unknown> };
-      } | null;
-    };
+    node: { attrs: Record<string, unknown> };
     HTMLAttributes: Record<string, unknown>;
   }) {
     const a = node.attrs;
@@ -572,31 +407,11 @@ export const Table = BaseTable.extend({
       }
     }
 
-    // colgroup columns. Collect BOTH the first-row cell colwidths (DOCX
-    // <w:tcW>) and the tblGrid (columnWidths, from <w:tblGrid>).
-    const firstRow = node.firstChild;
-    const cellPx: number[] = [];
-    if (firstRow) {
-      for (let i = 0; i < firstRow.childCount; i++) {
-        const cw = firstRow.child(i).attrs.colwidth as number[] | null | undefined;
-        if (Array.isArray(cw) && cw.length) for (const w of cw) cellPx.push(w || 0);
-        else cellPx.push(0);
-      }
-    }
-    const hasCellWidths = cellPx.some((w) => w > 0);
-    // Prefer tblGrid for the colgroup: it is the table's real column structure
-    // and is IDENTICAL across every split slice, so the colgroup stays stable
-    // as the paginator re-splits the table. A slice's firstRow is a mid-table
-    // row whose tcW colwidths need not match the grid (and are often a 61px
-    // placeholder), and ProseMirror reuses the table DOM across re-flows so a
-    // firstRow-based colgroup drifts — a 0-width column then collapses its text
-    // into one giant over-tall row that overflows the page. Fall back to cell
-    // colwidths only when tblGrid is absent or all-zero.
-    const tblGridPx = ((a.columnWidths as Array<number> | null) ?? []).map((w) =>
+    // colgroup columns from the tblGrid (columnWidths) — the table's real
+    // column structure.
+    const gridPx = ((a.columnWidths as Array<number> | null) ?? []).map((w) =>
       Math.round((w || 0) / 15),
     );
-    const hasGrid = tblGridPx.some((w) => w > 0);
-    const gridPx = hasGrid ? tblGridPx : hasCellWidths ? cellPx : tblGridPx;
 
     // Float styles last so they win any same-property duel with the alignment
     // margins above (which only run on the floatStyles.length === 0 path).
