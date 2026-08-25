@@ -352,8 +352,11 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
   };
 
   const onBeforeInput = (event: InputEvent): void => {
-    event.preventDefault();
+    // During composition the browser owns the textarea's text (IME preview,
+    // candidate navigation). Preventing insertCompositionText breaks that
+    // management — the final text is taken from ta.value on compositionend.
     if (composing) return;
+    event.preventDefault();
     switch (event.inputType) {
       case "insertText":
         if (event.data) insertText(event.data);
@@ -425,6 +428,9 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
   };
 
   const onKeyDown = (event: KeyboardEvent): void => {
+    // The IME owns the keyboard during composition (candidate navigation,
+    // commit keys) — our caret moves would cancel it mid-word.
+    if (composing) return;
     if (event.ctrlKey || event.metaKey) {
       const key = event.key.toLowerCase();
       if (key === "z") {
