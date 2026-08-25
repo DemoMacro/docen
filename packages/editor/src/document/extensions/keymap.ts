@@ -22,14 +22,24 @@ import { Extension } from "@docen/docx/core";
  *   • Ctrl/Cmd + H       → open Find & Replace
  *
  * Per-extension defaults (bold=Mod-B, italic=Mod-I, HardBreak Mod/Shift-Enter,
- * the ListKeymap) stay with their owning extensions by Tiptap convention.
+ * the ListKeymap) stay with their owning extensions by Tiptap convention —
+ * but ONLY a real EditorView dispatches those. The canvas route is viewless,
+ * so the canvas input bridge (edit-bridge.ts) matches the SAME table in its
+ * own keydown handler; keep every editing shortcut here so the two
+ * consumers cannot drift.
  */
-const KEYBOARD_SHORTCUTS: Readonly<Record<string, string>> = {
+export const KEYBOARD_SHORTCUTS: Readonly<Record<string, string>> = {
   // Ctrl+Enter → page break, Ctrl+Shift+Enter → column break (Word). Shift+Enter
   // (soft line break) stays on @tiptap/extension-hard-break's default. High
   // priority: HardBreak also maps Mod-Enter (to a soft break), and these must win.
   "Mod-Enter": "page-break",
   "Mod-Shift-Enter": "column-break",
+  // Character formatting (Word's Ctrl+B/I/U; strike follows the Tiptap
+  // convention). Every name is a native command of the bundled mark extensions.
+  "Mod-B": "toggleBold",
+  "Mod-I": "toggleItalic",
+  "Mod-U": "toggleUnderline",
+  "Mod-Shift-X": "toggleStrike",
 };
 
 export const DocenKeymap = Extension.create({

@@ -17,6 +17,7 @@ import { UndoRedo } from "@tiptap/extensions";
 import { joinBackward, joinForward, splitBlock } from "@tiptap/pm/commands";
 import { TextSelection } from "@tiptap/pm/state";
 
+import { KEYBOARD_SHORTCUTS } from "../extensions/keymap";
 import { CaretMap } from "./caret-map";
 
 /** A grapheme-boundary segmenter shared by the delete translations — surrogate
@@ -441,9 +442,21 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
         event.preventDefault();
         if (event.shiftKey) editor.commands.redo();
         else editor.commands.undo();
-      } else if (key === "y") {
+        return;
+      }
+      if (key === "y") {
         event.preventDefault();
         editor.commands.redo();
+        return;
+      }
+      // Viewless editors have no EditorView, so nothing dispatches Tiptap's
+      // per-extension keyboard shortcuts — match the shared table here (the
+      // DocenKeymap extension serves the same table on a DOM route).
+      const combo = `Mod${event.shiftKey ? "-Shift" : ""}-${key.toUpperCase()}`;
+      const command = KEYBOARD_SHORTCUTS[combo];
+      if (command) {
+        event.preventDefault();
+        (editor.commands as unknown as Record<string, (() => boolean) | undefined>)[command]?.();
       }
       return;
     }
