@@ -205,8 +205,12 @@ function paintParagraph(
                     : undefined,
             fontFamily: family,
             fontSize: inline.style.sizePx,
-            fontWeight: inline.style.bold ? "700" : "400",
-            fontStyle: inline.style.italic ? "italic" : "normal",
+            // Numbers only: Leafer's fontWeight setter treats strings as named
+            // weights ("bold"/"thin"…) and silently maps unknown strings to 400,
+            // so a string "700" would lose bold. Italic is the `italic` boolean
+            // property — there is no fontStyle.
+            fontWeight: inline.style.bold ? 700 : 400,
+            italic: inline.style.italic,
             letterSpacing: inline.style.letterSpacingPx
               ? { type: "px", value: inline.style.letterSpacingPx }
               : undefined,
