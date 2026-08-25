@@ -29,7 +29,7 @@ export function layoutTable(
   const columnWidths = tableColumnWidths(table, widthPx);
 
   let heightPx = 0;
-  const rows = table.rows.map((row) => {
+  const rows = table.rows.map((row, rowIndex) => {
     // Cells measure under the table-cell line-height rule (max(natural,
     // pitch)) so trHeight governs; floats never bend a cell's width.
     const cellCtx: LayoutBlockContext = {
@@ -46,14 +46,33 @@ export function layoutTable(
       for (let i = 0; i < colspan && colCursor + i < columnWidths.length; i++) {
         cellWidth += columnWidths[colCursor + i];
       }
+      // A cell's missing border side falls back to the table-level default —
+      // the grid rim (first/last row/column) takes the outer edges, interior
+      // boundaries the inside ones (CT_TblBorders semantics).
+      const firstCol = colCursor === 0;
+      const lastCol = colCursor + colspan >= columnWidths.length;
       colCursor += colspan;
 
       const insets = mergeInsets(cell.insets, table.cellInsets);
       const hInsetPx = (insets.left ?? 0) + (insets.right ?? 0);
       // Under border-collapse the column width is the cell's BORDER box, so
       // text wraps at cellWidth − insets − side borders.
-      const hBorderPx = borderEdgePx(cell.borders?.left) + borderEdgePx(cell.borders?.right);
-      const innerWidthPx = Math.max(0, cellWidth - hInsetPx - hBorderPx);
+      const leftEdge =
+        cell.borders?.left ?? (firstCol ? table.borders?.left : table.borders?.insideVertical);
+      const rightEdge =
+        cell.borders?.right ?? (lastCol ? table.borders?.right : table.borders?.insideVertical);
+      const topEdge =
+        cell.borders?.top ??
+        (rowIndex === 0 ? table.borders?.top : table.borders?.insideHorizontal);
+      const bottomEdge =
+        cell.borders?.bottom ??
+        (rowIndex === table.rows.length - 1
+          ? table.borders?.bottom
+          : table.borders?.insideHorizontal);
+      const innerWidthPx = Math.max(
+        0,
+        cellWidth - hInsetPx - borderEdgePx(leftEdge) - borderEdgePx(rightEdge),
+      );
 
       const stacked = stackBlocks(cell.blocks, innerWidthPx, cellCtx, measurer);
       // Vertical overhead: top+bottom insets, plus only the MAX of the
@@ -61,11 +80,19 @@ export function layoutTable(
       const vOverheadPx =
         (insets.top ?? 0) +
         (insets.bottom ?? 0) +
-        Math.max(borderEdgePx(cell.borders?.top), borderEdgePx(cell.borders?.bottom));
+        Math.max(borderEdgePx(topEdge), borderEdgePx(bottomEdge));
 
       const cellHeightPx = stacked.heightPx + vOverheadPx;
       if (cellHeightPx > rowHeight) rowHeight = cellHeightPx;
-      return { colspan, insets, borders: cell.borders, innerWidthPx, stack: stacked.stack };
+      return {
+        colspan,
+        rowspan: cell.rowspan ?? 1,
+        insets,
+        borders: cell.borders,
+        fill: cell.fill,
+        innerWidthPx,
+        stack: stacked.stack,
+      };
     });
 
     const tr = row.height;
@@ -76,7 +103,14 @@ export function layoutTable(
     return { heightPx: rowHeight, cells };
   });
 
-  return { kind: "table", widthPx, columnWidthsPx: columnWidths, heightPx, rows };
+  return {
+    kind: "table",
+    widthPx,
+    columnWidthsPx: columnWidths,
+    heightPx,
+    borders: table.borders,
+    rows,
+  };
 }
 
 /** Table content width: pct → percent of the container; px → as-is; absent →

@@ -523,31 +523,72 @@ function toCellInsets(m: unknown): LayoutCellInsets | undefined {
 
 type CellBorders = NonNullable<LayoutCell["borders"]>;
 
+/** One w:tcBorders/w:tblBorders edge → px + color (nil/none survive as declared
+ *  zero-weight edges; the conflict resolver skips them). */
+function toBorderEdge(v: unknown): LayoutBorderEdge | undefined {
+  if (!isRecord(v)) return undefined;
+  const size = num(v.size);
+  const color = typeof v.color === "string" && v.color !== "auto" ? v.color : undefined;
+  return {
+    style: typeof v.style === "string" ? v.style : undefined,
+    px: size != null ? (size / 8) * ptToPx(1) : undefined,
+    color,
+  };
+}
+
 function toBorders(b: unknown): CellBorders | undefined {
   if (!isRecord(b)) return undefined;
-  const edge = (v: unknown): LayoutBorderEdge | undefined => {
-    if (!isRecord(v)) return undefined;
-    const size = num(v.size);
-    return {
-      style: typeof v.style === "string" ? v.style : undefined,
-      px: size != null ? (size / 8) * ptToPx(1) : undefined,
-    };
-  };
   const out = {
-    top: edge(b.top),
-    right: edge(b.right),
-    bottom: edge(b.bottom),
-    left: edge(b.left),
+    top: toBorderEdge(b.top),
+    right: toBorderEdge(b.right),
+    bottom: toBorderEdge(b.bottom),
+    left: toBorderEdge(b.left),
   };
   return out.top || out.right || out.bottom || out.left ? out : undefined;
 }
 
+/** w:tblBorders → the engine's table-level defaults, merging the direct
+ *  tblPr borders over the table style's per side. */
+function toTableBorders(direct: unknown, styleTable: unknown): LayoutTable["borders"] | undefined {
+  const d = isRecord(direct) ? direct : undefined;
+  const s = isRecord(styleTable)
+    ? isRecord(styleTable.borders)
+      ? styleTable.borders
+      : undefined
+    : undefined;
+  if (!d && !s) return undefined;
+  const edge = (side: string): LayoutBorderEdge | undefined =>
+    toBorderEdge(d?.[side]) ?? toBorderEdge(s?.[side]);
+  const out = {
+    top: edge("top"),
+    bottom: edge("bottom"),
+    left: edge("left"),
+    right: edge("right"),
+    insideHorizontal: edge("insideHorizontal"),
+    insideVertical: edge("insideVertical"),
+  };
+  return out.top ||
+    out.bottom ||
+    out.left ||
+    out.right ||
+    out.insideHorizontal ||
+    out.insideVertical
+    ? out
+    : undefined;
+}
+
 function projectCell(c: TableCellOptions, ctx: ProjectContext): LayoutCell {
+  const shd = isRecord(c.shading) ? c.shading : undefined;
+  const fill =
+    shd && typeof shd.fill === "string" && shd.fill !== "auto" && shd.type !== "nil"
+      ? shd.fill
+      : undefined;
   return {
     colspan: c.columnSpan,
     rowspan: c.rowSpan,
     insets: toCellInsets(c.margins),
     borders: toBorders(c.borders),
+    fill,
     blocks: c.children
       .map((child) => projectChild(child, ctx))
       .filter((b): b is LayoutBlock => b !== null),
@@ -577,11 +618,15 @@ function projectTable(t: TableOptions, ctx: ProjectContext): LayoutTable {
   }
 
   const columnWidthsPx = t.columnWidths?.map((w) => twipToPx(measureTwip(w) ?? 0));
+  const styleTable = t.style
+    ? ctx.styles?.tableStyles?.find((st) => st.id === t.style)?.table
+    : undefined;
   return {
     kind: "table",
     width: toTableWidth(t.width),
     columnWidthsPx: columnWidthsPx && columnWidthsPx.length > 0 ? columnWidthsPx : undefined,
     cellInsets: toCellInsets(t.margins),
+    borders: toTableBorders(t.borders, styleTable),
     rows,
   };
 }

@@ -10,6 +10,7 @@ import type {
   LayoutIndent,
   LayoutInline,
   LayoutParagraphBorderEdge,
+  LayoutTableBorders,
 } from "./layout-doc";
 
 export interface LaidOutTextItem {
@@ -87,6 +88,8 @@ export interface LaidOutStackItem {
 
 export interface LaidOutCell {
   colspan: number;
+  /** Grid rows the cell spans (w:vMerge gridSpan resolved by the adapter). */
+  rowspan: number;
   /** Effective insets used (cell's own ?? table default, per side). */
   insets: LayoutCellInsets;
   /** Declared border edges, mirrored from the input for the renderer (the
@@ -97,6 +100,8 @@ export interface LaidOutCell {
     bottom?: LayoutBorderEdge;
     left?: LayoutBorderEdge;
   };
+  /** Cell shading (hex RRGGBB), mirrored for the renderer. */
+  fill?: string;
   /** Sum of the spanned columns' widths minus insets/borders — the width the
    *  cell's blocks wrapped at. */
   innerWidthPx: number;
@@ -113,6 +118,9 @@ export interface LaidOutTable {
   widthPx: number;
   columnWidthsPx: number[];
   heightPx: number;
+  /** Table-level border defaults, mirrored for the renderer (a cell's missing
+   *  edge falls back to these per side). */
+  borders?: LayoutTableBorders;
   rows: LaidOutRow[];
 }
 

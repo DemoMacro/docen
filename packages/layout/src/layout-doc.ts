@@ -134,6 +134,19 @@ export interface LayoutCellInsets {
 export interface LayoutBorderEdge {
   style?: string; // "nil"/"none" → no width
   px?: number; // resolved from w:sz (eighths of a point)
+  /** Hex RRGGBB (OOXML w:color); absent/auto → the renderer's ink default. */
+  color?: string;
+}
+
+/** CT_TblBorders: the table-level edges a cell's own w:tcBorders side falls
+ *  back to — outer edges for the grid's rim, inside edges for shared lines. */
+export interface LayoutTableBorders {
+  top?: LayoutBorderEdge;
+  bottom?: LayoutBorderEdge;
+  left?: LayoutBorderEdge;
+  right?: LayoutBorderEdge;
+  insideHorizontal?: LayoutBorderEdge;
+  insideVertical?: LayoutBorderEdge;
 }
 
 export interface LayoutTableCell {
@@ -143,6 +156,8 @@ export interface LayoutTableCell {
   widthPx?: number;
   insets?: LayoutCellInsets;
   borders?: Partial<Record<"top" | "right" | "bottom" | "left", LayoutBorderEdge>>;
+  /** Cell shading (w:shd @w:fill), hex RRGGBB. */
+  fill?: string;
   blocks: LayoutBlock[];
 }
 
@@ -167,6 +182,9 @@ export interface LayoutTable {
   /** Table-level default insets (w:tblCellMar) a cell without its own w:tcMar
    *  inherits, per side. */
   cellInsets?: LayoutCellInsets;
+  /** Table-level border defaults (w:tblBorders, style chain resolved):
+   *  the renderer falls a cell's missing edge back to these per side. */
+  borders?: LayoutTableBorders;
   rows: LayoutTableRow[];
 }
 

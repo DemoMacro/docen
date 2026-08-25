@@ -221,6 +221,69 @@ describe("projectDocumentOptions blocks", () => {
     expect(para.inline[0]).toMatchObject({ kind: "text", text: "c" });
   });
 
+  it("projects cell border colors, shading fills, and table-level borders", () => {
+    const stylesWithTable: StylesOptions = {
+      ...styles,
+      tableStyles: [
+        {
+          id: "TableGrid",
+          table: {
+            borders: {
+              top: { style: "single", color: "000000", size: 4 },
+              insideHorizontal: { style: "single", color: "000000", size: 4 },
+              insideVertical: { style: "single", color: "000000", size: 4 },
+            },
+          },
+        },
+      ],
+    };
+    const { blocks } = projectDocumentOptions({
+      styles: stylesWithTable,
+      sections: [
+        {
+          children: [
+            {
+              table: {
+                style: "TableGrid",
+                borders: { bottom: { style: "double", color: "FF0000", size: 4 } },
+                rows: [
+                  {
+                    cells: [
+                      {
+                        borders: { top: { style: "single", color: "00FF00", size: 8 } },
+                        shading: { type: "clear", fill: "D9D9D9" },
+                        children: [{ paragraph: { children: ["c"] } }],
+                      },
+                    ],
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    });
+    const table = blocks[0];
+    if (table?.kind !== "table") throw new Error("expected table");
+    // Cell edge: color rides along; style-chain inside edges and the direct
+    // bottom merge per side into the table-level defaults.
+    const cell = table.rows[0].cells[0];
+    expect(cell.borders?.top).toEqual({ style: "single", px: (8 / 8) * (4 / 3), color: "00FF00" });
+    expect(cell.fill).toBe("D9D9D9");
+    expect(table.borders?.top).toEqual({ style: "single", px: (4 / 8) * (4 / 3), color: "000000" });
+    expect(table.borders?.bottom).toEqual({
+      style: "double",
+      px: (4 / 8) * (4 / 3),
+      color: "FF0000",
+    });
+    expect(table.borders?.insideVertical).toEqual({
+      style: "single",
+      px: (4 / 8) * (4 / 3),
+      color: "000000",
+    });
+    expect(table.borders?.left).toBeUndefined();
+  });
+
   it("turns unprojectable body shapes into labeled placeholders and drops bookmarks", () => {
     const { blocks } = projectDocumentOptions(
       doc([
