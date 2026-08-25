@@ -413,21 +413,29 @@ function projectParagraph(p: BodyParagraph, ctx: ProjectContext): LayoutParagrap
   const levels = numReference ? ctx.numberings.get(numReference) : undefined;
   const level = levels?.[numLevelIndex];
 
-  let leftTw = measureTwip(ind("left"));
-  if (leftTw == null && level?.leftTw != null) leftTw = level.leftTw;
-  const firstLineTw = measureTwip(ind("firstLine"));
-  const firstLineChars = num(ind("firstLineChars"));
+  // Indent cascade: direct w:ind > the numbering level's w:ind > style chain
+  // > docDefaults. The level beating the style is Word's rule — applying a
+  // list re-indents styled paragraphs (ListParagraph's 720tw must not pin
+  // every level to level 0's indent).
+  let leftTw = measureTwip(dInd.left) ?? level?.leftTw ?? measureTwip(pick([sInd, docInd], "left"));
+  const firstLinePx = (() => {
+    const directTw = measureTwip(dInd.firstLine);
+    if (directTw != null) return Math.max(0, twipToPx(directTw));
+    const directChars = num(dInd.firstLineChars);
+    if (directChars != null && directChars > 0) {
+      return (directChars / 100) * defaultTextStyle.sizePx;
+    }
+    if (level?.hangingTw != null && level.hangingTw > 0) return -twipToPx(level.hangingTw);
+    const styleTw = measureTwip(pick([sInd, docInd], "firstLine"));
+    if (styleTw != null) return Math.max(0, twipToPx(styleTw));
+    const styleChars = num(pick([sInd, docInd], "firstLineChars"));
+    if (styleChars != null && styleChars > 0) return (styleChars / 100) * defaultTextStyle.sizePx;
+    return undefined;
+  })();
   const indent = {
     leftPx: leftTw != null ? twipToPx(leftTw) || undefined : undefined,
     rightPx: twipToPx(measureTwip(ind("right")) ?? 0) || undefined,
-    firstLinePx:
-      firstLineTw != null
-        ? Math.max(0, twipToPx(firstLineTw))
-        : firstLineChars != null && firstLineChars > 0
-          ? (firstLineChars / 100) * defaultTextStyle.sizePx
-          : level?.hangingTw != null && level.hangingTw > 0
-            ? -twipToPx(level.hangingTw)
-            : undefined,
+    firstLinePx,
   };
 
   // Tab stops: twips from the content-box left edge → px from the TEXT-box
