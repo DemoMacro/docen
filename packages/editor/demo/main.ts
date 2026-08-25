@@ -1,6 +1,7 @@
 /**
  * Editor demo entry — registers Fluent components + theme, then routes between
- * the Document and Image demos via fluent-tablist.
+ * the demos via fluent-tablist. The Document tab is the canvas route (the
+ * DOM contenteditable route is gone).
  *
  * Layout is a full-height flex column (declared in index.html): the tablist is
  * a fixed-height header, the stage fills the rest.
@@ -8,15 +9,12 @@
 import { applyTheme, registerComponents } from "@docen/editor";
 
 import { mountCanvasDemo } from "./canvas";
-import { mountDocumentDemo } from "./document";
 import { mountImageDemo } from "./image";
 
 // registerComponents is async (it dynamically imports + defines the web
 // components). Chain via .then — not top-level await, so this file stays
-// tsc-clean under the repo tsconfig — and only build the UI once <docen-document>
-// is upgraded. Otherwise mountDocumentDemo creates one before the custom element
-// is defined, and doc.addAddin(...) throws (the element is still an unknown
-// HTMLElement lacking AddinHost's methods). `void` marks the floating promise.
+// tsc-clean under the repo tsconfig — the Image demo needs <docen-image>
+// defined before it mounts. `void` marks the floating promise.
 void registerComponents().then(() => {
   applyTheme("light");
 
@@ -29,7 +27,6 @@ void registerComponents().then(() => {
   const tabs: { id: string; label: string }[] = [
     { id: "document", label: "Document" },
     { id: "image", label: "Image" },
-    { id: "canvas", label: "Canvas" },
   ];
   for (const tab of tabs) {
     const el = document.createElement("fluent-tab");
@@ -43,13 +40,12 @@ void registerComponents().then(() => {
   app.append(nav, stage);
   document.body.append(app);
 
-  type Route = "document" | "image" | "canvas";
+  type Route = "document" | "image";
   let current: Route = "document";
 
   const render = (route: Route): void => {
     stage.replaceChildren();
-    if (route === "document") mountDocumentDemo(stage);
-    else if (route === "canvas") mountCanvasDemo(stage);
+    if (route === "document") mountCanvasDemo(stage);
     else mountImageDemo(stage);
   };
 
