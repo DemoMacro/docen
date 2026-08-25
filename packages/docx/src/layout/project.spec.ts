@@ -186,6 +186,48 @@ describe("projectDocumentOptions style cascade", () => {
     expect(none?.underline).toBeUndefined();
   });
 
+  it("numbers list markers in document order with per-format composition", () => {
+    const numbered = (reference: string, level = 0): SectionChild => ({
+      paragraph: { numbering: { reference, level }, children: ["x"] },
+    });
+    const { blocks } = projectDocumentOptions({
+      styles,
+      numbering: {
+        abstractNumberings: [
+          {
+            reference: "L",
+            levels: [
+              { level: 0, format: "decimal", text: "%1." },
+              { level: 1, format: "lowerLetter", text: "%2)" },
+              { level: 2, format: "chineseCounting", text: "%3、" },
+            ],
+          },
+          { reference: "R", levels: [{ level: 0, format: "upperRoman", text: "(%1)" }] },
+        ],
+      },
+      sections: [
+        {
+          children: [
+            numbered("L"),
+            numbered("L", 1),
+            numbered("L", 2),
+            numbered("L", 1),
+            // A deeper level re-entered resets nothing above it; a new
+            // reference counts independently.
+            numbered("R"),
+            numbered("L"),
+          ],
+        },
+      ],
+    });
+    const markers = blocks.map((b) => {
+      if (b?.kind !== "paragraph") throw new Error("expected paragraph");
+      const first = b.inline[0];
+      return first?.kind === "text" ? first.text : null;
+    });
+    expect(markers).toEqual(["1.", "a)", "一、", "b)", "(I)", "2."]);
+  });
+
   it("converts exact/atLeast line rules and twip indents to px", () => {
     const { blocks } = projectDocumentOptions(
       doc([

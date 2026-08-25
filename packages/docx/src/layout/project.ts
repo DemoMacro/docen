@@ -255,6 +255,99 @@ function indexNumberings(numbering: unknown): NumberingIndex {
 interface ProjectContext {
   styles: StylesOptions | undefined;
   numberings: NumberingIndex;
+  /** Live list counters per numbering reference (level → count), advanced in
+   *  document order as numbered paragraphs project. */
+  listCounters: Map<string, number[]>;
+}
+
+// ── list-number formats (w:numFmt) ──
+
+const CJK_DIGITS = ["零", "一", "二", "三", "四", "五", "六", "七", "八", "九"];
+const CJK_UNITS = ["", "十", "百", "千"];
+
+/** chineseCounting composition (零 fill between non-zero groups; the 10-19
+ *  range drops the leading 一). */
+function chineseNumeral(n: number): string {
+  if (n < 1 || n > 9999) return String(n);
+  const digits: number[] = [];
+  for (let rest = n; rest > 0; rest = Math.floor(rest / 10)) digits.unshift(rest % 10);
+  let out = "";
+  let zeroPending = false;
+  digits.forEach((d, i) => {
+    const unit = CJK_UNITS[digits.length - 1 - i];
+    if (d === 0) {
+      if (out) zeroPending = true;
+      return;
+    }
+    if (zeroPending) {
+      out += CJK_DIGITS[0];
+      zeroPending = false;
+    }
+    // 10-19 is 十X, not 一十X.
+    if (!(d === 1 && unit === "十" && digits.length === 2)) out += CJK_DIGITS[d];
+    out += unit;
+  });
+  return out;
+}
+
+const ROMAN_PAIRS: [number, string][] = [
+  [1000, "M"],
+  [900, "CM"],
+  [500, "D"],
+  [400, "CD"],
+  [100, "C"],
+  [90, "XC"],
+  [50, "L"],
+  [40, "XL"],
+  [10, "X"],
+  [9, "IX"],
+  [5, "V"],
+  [4, "IV"],
+  [1, "I"],
+];
+
+function romanNumeral(n: number, upper: boolean): string {
+  let rest = n;
+  let out = "";
+  for (const [value, glyph] of ROMAN_PAIRS) {
+    while (rest >= value) {
+      out += glyph;
+      rest -= value;
+    }
+  }
+  return upper ? out : out.toLowerCase();
+}
+
+/** 1→a…26→z, 27→aa (spreadsheet-style, Word's letter numbering). */
+function letterNumeral(n: number, upper: boolean): string {
+  let out = "";
+  let rest = n;
+  while (rest > 0) {
+    rest--;
+    out = String.fromCharCode(97 + (rest % 26)) + out;
+    rest = Math.floor(rest / 26);
+  }
+  return upper ? out.toUpperCase() : out;
+}
+
+/** One level's counter under its w:numFmt. Unsupported formats render decimal. */
+function formatListNumber(format: string, n: number): string {
+  switch (format) {
+    case "lowerLetter":
+      return letterNumeral(n, false);
+    case "upperLetter":
+      return letterNumeral(n, true);
+    case "lowerRoman":
+      return romanNumeral(n, false);
+    case "upperRoman":
+      return romanNumeral(n, true);
+    case "chineseCounting":
+    case "chineseLegalSimplified":
+    case "japaneseCounting":
+      return chineseNumeral(n);
+    default:
+      return String(n);
+  }
 }
 
 // ── paragraph projection ──
@@ -308,19 +401,17 @@ function projectParagraph(p: BodyParagraph, ctx: ProjectContext): LayoutParagrap
 
   // Numbering: the paragraph's own numPr wins, else the style chain's. The
   // level's indent fills gaps the paragraph left unset (Word: direct w:ind
-  // overrides w:lvl's); a bullet level also prepends its glyph + a tab hop to
-  // the body-text start.
+  // overrides w:lvl's); the level's marker (bullet glyph or its live counter)
+  // prepends + a tab hop to the body-text start.
   const numRef: Rec | null = isRecord(pPr.numbering)
     ? pPr.numbering
     : isRecord(chainPPr.numbering)
       ? chainPPr.numbering
       : null;
-  const level = (() => {
-    if (!numRef) return undefined;
-    const reference = str(numRef.reference);
-    if (!reference) return undefined;
-    return ctx.numberings.get(reference)?.[num(numRef.level) ?? 0];
-  })();
+  const numReference = numRef ? str(numRef.reference) : undefined;
+  const numLevelIndex = num(numRef?.level) ?? 0;
+  const levels = numReference ? ctx.numberings.get(numReference) : undefined;
+  const level = levels?.[numLevelIndex];
 
   let leftTw = measureTwip(ind("left"));
   if (leftTw == null && level?.leftTw != null) leftTw = level.leftTw;
@@ -376,13 +467,35 @@ function projectParagraph(p: BodyParagraph, ctx: ProjectContext): LayoutParagrap
     left: borderEdge(bRec.left),
   };
 
-  const bulletInline: LayoutInline[] =
-    level && level.format === "bullet" && level.text
-      ? [
-          { kind: "text", text: level.text, style: defaultTextStyle },
-          { kind: "tab", toPx: 0 },
-        ]
-      : [];
+  // The list marker: a bullet emits its glyph; a numbered level advances its
+  // counter (resetting deeper levels) and substitutes %k in w:lvlText with the
+  // formatted counter of level k-1 — "%1.%2" at level 1 → "2.3".
+  const markerInline: LayoutInline[] = (() => {
+    if (!level) return [];
+    if (level.format === "bullet") {
+      return level.text
+        ? [
+            { kind: "text", text: level.text, style: defaultTextStyle },
+            { kind: "tab", toPx: 0 },
+          ]
+        : [];
+    }
+    if (level.format === "none") return [];
+    if (!numReference) return [];
+    const counters = ctx.listCounters.get(numReference) ?? [];
+    ctx.listCounters.set(numReference, counters);
+    counters[numLevelIndex] = (counters[numLevelIndex] ?? 0) + 1;
+    counters.length = numLevelIndex + 1;
+    const marker = (level.text ?? "%1.").replace(/%([1-9])/g, (_, k: string) => {
+      const idx = Number(k) - 1;
+      const lvl = levels?.[idx];
+      return formatListNumber(lvl?.format ?? level.format, counters[idx] ?? 1);
+    });
+    return [
+      { kind: "text", text: marker, style: defaultTextStyle },
+      { kind: "tab", toPx: 0 },
+    ];
+  })();
 
   // `p?.` not `p.`: compiled/parsed documents can carry `paragraph: null`
   // (an empty paragraph leg) even though the public type says otherwise.
@@ -390,8 +503,8 @@ function projectParagraph(p: BodyParagraph, ctx: ProjectContext): LayoutParagrap
     typeof p === "string" ? [p] : (p?.children ?? (p?.text != null ? [p.text] : []));
   return {
     kind: "paragraph",
-    inline: bulletInline.length
-      ? bulletInline.concat(projectRuns(runs, chainRPr, docRPr, defaultTextStyle))
+    inline: markerInline.length
+      ? markerInline.concat(projectRuns(runs, chainRPr, docRPr, defaultTextStyle))
       : projectRuns(runs, chainRPr, docRPr, defaultTextStyle),
     spacing,
     indent,
@@ -723,7 +836,11 @@ export interface ProjectedPageFurniture {
  *  even pages without evenAndOddHeaders both use `default`). */
 function projectPageFurniture(doc: DocumentOptions): ProjectedPageFurniture {
   const section = doc.sections?.[0];
-  const ctx: ProjectContext = { styles: doc.styles, numberings: indexNumberings(doc.numbering) };
+  const ctx: ProjectContext = {
+    styles: doc.styles,
+    numberings: indexNumberings(doc.numbering),
+    listCounters: new Map(),
+  };
   const projectSlots = (side: unknown): LayoutBlock[] | undefined => {
     if (!Array.isArray(side)) return undefined;
     const blocks: LayoutBlock[] = [];
@@ -758,7 +875,11 @@ export function projectDocumentOptions(doc: DocumentOptions): {
   flow: ProjectedFlowBox;
   furniture: ProjectedPageFurniture;
 } {
-  const ctx: ProjectContext = { styles: doc.styles, numberings: indexNumberings(doc.numbering) };
+  const ctx: ProjectContext = {
+    styles: doc.styles,
+    numberings: indexNumberings(doc.numbering),
+    listCounters: new Map(),
+  };
   const blocks: LayoutBlock[] = [];
   for (const section of doc.sections ?? []) {
     for (const child of section.children ?? []) {
