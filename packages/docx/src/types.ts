@@ -235,14 +235,6 @@ export interface ImageAttrs {
 }
 
 /**
- * Emoji node attrs. `name` is the shortcode (base @tiptap/extension-emoji); the
- * glyph is resolved from the emoji dataset at DOCX-compile time.
- */
-export interface EmojiAttrs {
-  name: string | null;
-}
-
-/**
  * Strike mark attrs.
  */
 export interface StrikeAttrs {
@@ -302,19 +294,10 @@ export interface ParagraphNode extends TiptapJSONContent {
   content?: InlineContent[];
 }
 
-export interface BlockquoteNode extends TiptapJSONContent {
-  type: "blockquote";
-  content?: Array<ParagraphNode>;
-}
-
 export interface CodeBlockNode extends TiptapJSONContent {
   type: "codeBlock";
   attrs?: { language?: string };
   content?: Array<TextNode>;
-}
-
-export interface HorizontalRuleNode extends TiptapJSONContent {
-  type: "horizontalRule";
 }
 
 /**
@@ -378,13 +361,6 @@ export interface WpsShapeNode extends TiptapJSONContent {
   content?: Array<ParagraphNode>;
 }
 
-// -- Emoji node (inline) --
-
-export interface EmojiNode extends TiptapJSONContent {
-  type: "emoji";
-  attrs?: EmojiAttrs;
-}
-
 // -- Inline atom nodes: DOCX breaks (page/column) --
 
 export interface PageBreakNode extends TiptapJSONContent {
@@ -434,13 +410,6 @@ export interface InlinePassthroughNode extends TiptapJSONContent {
   attrs?: { data: string };
 }
 
-// -- Details node --
-
-export interface DetailsNode extends TiptapJSONContent {
-  type: "details";
-  content?: Array<DetailsSummaryNode | DetailsContentNode>;
-}
-
 /**
  * TOC field node (`tocField`) — a block container whose `content` is the
  * editable TOC entry paragraphs. `attrs.options` carries the TOC field switches
@@ -453,23 +422,12 @@ export interface TocFieldNode extends TiptapJSONContent {
   content?: Array<BlockNode>;
 }
 
-export interface DetailsSummaryNode extends TiptapJSONContent {
-  type: "detailsSummary";
-  content?: Array<TextNode | HardBreakNode>;
-}
-
-export interface DetailsContentNode extends TiptapJSONContent {
-  type: "detailsContent";
-  content?: Array<BlockNode>;
-}
-
 // -- Union types --
 
 export type InlineContent =
   | TextNode
   | HardBreakNode
   | ImageNode
-  | EmojiNode
   | PageBreakNode
   | ColumnBreakNode
   | TabNode
@@ -478,13 +436,10 @@ export type InlineContent =
   | InlinePassthroughNode;
 export type BlockNode =
   | ParagraphNode
-  | BlockquoteNode
   | CodeBlockNode
-  | HorizontalRuleNode
   | TableNode
   | WpsShapeNode
   | WpgGroupNode
-  | DetailsNode
   | TocFieldNode
   | PassthroughNode
   | BlockMathNode;

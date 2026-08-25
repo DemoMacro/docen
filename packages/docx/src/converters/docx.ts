@@ -22,22 +22,17 @@ import type {
   TableOfContentsOptions,
 } from "@office-open/docx";
 import { flattenExtensions, getExtensionField, getSchema } from "@tiptap/core";
-import { emojis, shortcodeToEmoji } from "@tiptap/extension-emoji";
 
 import type { Extensions, JSONContent } from "../core";
 import { docxExtensions } from "../core";
-import * as blockquoteExt from "../extensions/blockquote";
-import * as detailsExt from "../extensions/details";
 import { buildListLevels, isGeneratedListReference } from "../extensions/list-numbering";
 import * as mentionExt from "../extensions/mention";
 import type {
-  ParseAggregatorRule,
   ParseBlockRule,
   ParseInlineRule,
   ParseParagraphRule,
   ResolveContext,
 } from "../extensions/types";
-import { alignmentFromCss } from "../extensions/utils";
 import { prepareDocument, type PrepareStep } from "./prepare";
 import { buildTextBlock } from "./styles";
 
@@ -147,8 +142,6 @@ interface HeaderFooterSlots {
   even?: JSONContent[];
 }
 
-// ── Blockquote signature ──
-
 // ── DocxManager ──
 
 /**
@@ -179,7 +172,7 @@ export class DocxManager {
   // extensions plug in without a fork. Container marks (link/insertion/
   // deletion) wrap runs and are handled directly in compile/resolve, not
   // through these maps. Node hooks cover attrs↔opts only; block-level children
-  // assembly (table rows/cells, details SDT, TOC entries) is owned by each
+  // assembly (table rows/cells, TOC entries) is owned by each
   // block extension's parseDocxBlock rule (blockRules below); inline content
   // and the compile-side tree walk stay in DocxManager.
   private markRender = new Map<
@@ -204,11 +197,6 @@ export class DocxManager {
   // blockRules). Each paragraph node extension declares parseDocxParagraph;
   // resolveParagraph walks them before the plain-paragraph fallback.
   private paragraphRules: Array<{ name: string; rule: ParseParagraphRule }> = [];
-  // Declarative aggregator rules collected via reflection (mirrors blockRules).
-  // A blockquote-style extension declares parseDocxAggregator;
-  // resolveSectionChildren runs the generic group-by-predicate loop and hands a
-  // run of paragraphs to the matching rule's build.
-  private aggregatorRules: Array<{ name: string; rule: ParseAggregatorRule }> = [];
   // Per-resolve façade over the recursive resolve entry points + read-only
   // styles, handed to every block/inline rule. Built at the start of resolve().
   private resolveCtx: ResolveContext | undefined;
@@ -247,13 +235,6 @@ export class DocxManager {
       // include mark containers (hyperlink/insertion/deletion) that yield text[].
       const inlineRule = getExtensionField(ext, "parseDocxInline") as ParseInlineRule | undefined;
       if (inlineRule) this.inlineRules.push({ name, rule: inlineRule });
-      // parseDocxAggregator is collected for nodes (blockquote) and plain
-      // Extensions alike — both declare the {belongs, build} pair that
-      // resolveSectionChildren's group loop dispatches to.
-      const aggregator = getExtensionField(ext, "parseDocxAggregator") as
-        | ParseAggregatorRule
-        | undefined;
-      if (aggregator) this.aggregatorRules.push({ name, rule: aggregator });
     }
   }
 
@@ -500,24 +481,6 @@ export class DocxManager {
     switch (node.type) {
       case "paragraph":
         return { paragraph: this.compileParagraphNode(node) };
-      case "blockquote": {
-        // blockquote → each child paragraph gets a left indent + left border
-        // (DOCX's native blockquote expression; no dedicated element). Iterate
-        // ALL children — the previous `return` inside the loop dropped every
-        // paragraph after the first.
-        const items: SectionChild[] = [];
-        for (const child of node.content ?? []) {
-          if (child.type === "paragraph") {
-            const para = this.compileParagraphNode(child);
-            const paraObj = (
-              typeof para === "string" ? { text: para } : (para as Record<string, unknown>)
-            ) as Record<string, unknown>;
-            blockquoteExt.applyBlockquoteStyle(paraObj);
-            items.push({ paragraph: paraObj as ParagraphOptions });
-          }
-        }
-        return items.length > 0 ? items : null;
-      }
       case "codeBlock": {
         // codeBlock → paragraph styled "Code" (extension owns style/font).
         // Children go through the shared inline path (handles `\n`→break +
@@ -527,10 +490,6 @@ export class DocxManager {
         if (childList.length > 0) opts.children = childList;
         return { paragraph: this.simplifyParagraph(opts) };
       }
-      case "horizontalRule":
-        return {
-          paragraph: { thematicBreak: true } as Record<string, unknown> as ParagraphOptions,
-        };
       case "table":
         return { table: this.compileTableNode(node) };
       case "image": {
@@ -538,8 +497,6 @@ export class DocxManager {
         if (!imageRun) return null;
         return { paragraph: { children: [imageRun] } };
       }
-      case "details":
-        return this.compileDetailsNode(node);
       case "tocField": {
         const options = (node.attrs?.options as TableOfContentsOptions | undefined) ?? {};
         const entries: SectionChild[] = [];
@@ -790,81 +747,29 @@ export class DocxManager {
       if (Object.keys(b).length === 0) delete cellOpts.borders;
     }
 
-    // Cell horizontal alignment (Tiptap base-extension `align` attr) is NOT an
-    // OOXML cell property — <w:tcPr> has no horizontal alignment. Push it down to
-    // each contained paragraph's `alignment` (the OOXML <w:jc>), unless a paragraph
-    // already specifies its own alignment.
-    // `attrs.align` is a CSS text-align value (left/center/right/justify). Map it
-    // to an OOXML AlignmentType (justify → "both") for the paragraph <w:jc>.
-    const cellAlign = alignmentFromCss((cellNode.attrs?.align as string | undefined) ?? null) as
-      | ParagraphOptions["alignment"]
-      | null;
-
-    // A cell may contain ANY block (nested table/list/blockquote/codeBlock/…),
-    // not just paragraphs. Route each child through the shared block compiler so
-    // a nested list or table survives the round-trip — previously every child
-    // was forced through compileParagraphNode, silently dropping non-paragraph
-    // blocks into an empty paragraph.
+    // A cell may contain ANY block (nested table/list/codeBlock/…), not just
+    // paragraphs. Route each child through the shared block compiler so a
+    // nested list or table survives the round-trip.
     const cellChildren: SectionChild[] = [];
-    const pushChild = (child: SectionChild) => {
-      // Push the cell's `align` down to each paragraph's <w:jc> (see above).
-      if (cellAlign && typeof child === "object" && child !== null && "paragraph" in child) {
-        const p = child.paragraph;
-        if (typeof p === "string") child.paragraph = { text: p, alignment: cellAlign };
-        else if (p && typeof p === "object" && !(p as Record<string, unknown>).alignment)
-          (p as Record<string, unknown>).alignment = cellAlign;
-      }
-      cellChildren.push(child);
-    };
     for (const childNode of cellNode.content ?? []) {
       const compiled = this.compileSectionChild(childNode);
       if (compiled == null) continue;
-      if (Array.isArray(compiled)) compiled.forEach(pushChild);
-      else pushChild(compiled);
+      if (Array.isArray(compiled)) cellChildren.push(...compiled);
+      else cellChildren.push(compiled);
     }
     if (cellChildren.length > 0) cellOpts.children = cellChildren;
 
-    // tcW = sum of the tblGrid columns the cell spans. Overwrite the
-    // colwidth-derived width from renderDocx (a lossy twips→px→twips detour
-    // that goes badly wrong when colwidth didn't round-trip cleanly — e.g. the
-    // [2] px sliver from a degraded import) — tblGrid carries the authoritative
-    // column widths, and this is what keeps autofit tables with short content
-    // from collapsing to a sliver.
+    // tcW = sum of the tblGrid columns the cell spans. tblGrid carries the
+    // authoritative column widths — recomputing from it keeps autofit tables
+    // with short content from collapsing to a sliver when the parsed tcW
+    // disagrees.
     if (columnWidths && columnWidths.length > 0 && colIdx != null) {
-      const span = (cellNode.attrs?.colspan as number) ?? 1;
+      const span = (cellNode.attrs?.columnSpan as number) ?? 1;
       const tw = this.sumGridSpan(columnWidths, colIdx, span);
       if (tw > 0) cellOpts.width = { size: tw, type: "twips" };
     }
 
     return cellOpts;
-  }
-
-  /**
-   * details → block-level group-SDT. The summary paragraph is tagged with a
-   * fixed style so resolve can split it back out; content blocks flatten in
-   * after it. (No native collapse in DOCX — structure round-trips, the view
-   * stays expanded.)
-   */
-  private compileDetailsNode(node: JSONContent): SectionChild {
-    const sdtChildren: SectionChild[] = [];
-    for (const child of node.content ?? []) {
-      if (child.type === "detailsSummary") {
-        const inline = this.compileInlineContent(child.content);
-        const summaryPara: Record<string, unknown> = { style: detailsExt.DETAILS_SUMMARY_STYLE };
-        if (inline.length > 0) summaryPara.children = inline;
-        sdtChildren.push({ paragraph: summaryPara as ParagraphOptions });
-      } else if (child.type === "detailsContent") {
-        for (const block of child.content ?? []) {
-          const compiled = this.compileSectionChild(block);
-          if (!compiled) continue;
-          if (Array.isArray(compiled)) sdtChildren.push(...compiled);
-          else sdtChildren.push(compiled);
-        }
-      }
-    }
-    return {
-      sdt: { properties: { tag: detailsExt.DETAILS_TAG, group: true }, children: sdtChildren },
-    } as SectionChild;
   }
 
   // ── Inline content ──
@@ -940,18 +845,6 @@ export class DocxManager {
               String(node.attrs?.label ?? ""),
             ) as ParagraphChild,
           );
-          break;
-        }
-        case "emoji": {
-          // DOCX has no emoji structure — emit the glyph as a plain text run,
-          // resolving it from the same emoji dataset base renders from (compile
-          // is headless, so the shortcode name must be looked up explicitly).
-          // Falls back to the :name: shortcode if the dataset has no match;
-          // resolve degrades DOCX text back to a plain text node.
-          const name = String(node.attrs?.name ?? "");
-          const glyph = name ? shortcodeToEmoji(name, emojis)?.emoji : undefined;
-          const text = glyph ?? (name ? `:${name}:` : "");
-          if (text) children.push({ text } as Record<string, unknown> as ParagraphChild);
           break;
         }
       }
@@ -1050,7 +943,7 @@ export class DocxManager {
   private resolveSectionChild(child: SectionChild): JSONContent | null {
     // Declarative block dispatch: each block extension's parseDocxBlock rule
     // (collected in docxExtensions order) gets a chance to recognize the shape.
-    // table/details/toc own their shapes here; a non-matching or null-converting
+    // table/toc own their shapes here; a non-matching or null-converting
     // rule falls through. The shapes are mutually exclusive (different
     // SectionChild keys), so order among them is irrelevant in practice.
     const ctx = this.resolveCtx!;
@@ -1060,8 +953,8 @@ export class DocxManager {
         if (node) return node;
       }
     }
-    // paragraph is not a block rule — it is dispatched to by the section-children
-    // flow aggregator (blockquote) and the paragraph subtype resolver.
+    // paragraph is not a block rule — the paragraph subtype resolver and the
+    // plain-paragraph fallback own it.
     if ("paragraph" in child) {
       return this.resolveParagraph(child.paragraph);
     }
@@ -1078,12 +971,6 @@ export class DocxManager {
 
   private resolveParagraph(opts: string | ParagraphOptions): JSONContent {
     const resolved: ParagraphOptions = typeof opts === "string" ? { text: opts } : opts;
-
-    // horizontalRule: a paragraph reduced to a bottom border (thematicBreak). No
-    // owning extension — stays in the manager.
-    if (resolved.thematicBreak) {
-      return { type: "horizontalRule" };
-    }
 
     // Declarative paragraph dispatch: each paragraph node extension's
     // parseDocxParagraph rule (codeBlock, collected in docxExtensions order)
@@ -1104,45 +991,15 @@ export class DocxManager {
 
   /**
    * Walk a SectionChild[] block stream — a section's body, a header/footer
-   * slot, or a table cell's children (a cell is just another block stream). An
-   * aggregator rule (blockquote) claims consecutive paragraphs sharing its
-   * predicate and rebuilds them as a composite; everything else resolves
-   * individually via resolveSectionChild. The manager owns only the generic
-   * group-by loop — the predicate (belongs) + builder (build) come from each
-   * rule, so a custom composite plugs in by declaring parseDocxAggregator.
+   * slot, or a table cell's children (a cell is just another block stream).
    */
   private resolveSectionChildren(children: SectionChild[]): JSONContent[] {
-    const ctx = this.resolveCtx!;
     const content: JSONContent[] = [];
-    let i = 0;
-    while (i < children.length) {
-      const child = children[i];
-      const firstPara = "paragraph" in child ? child.paragraph : null;
-
-      // Try each aggregator's predicate on the first paragraph of a potential
-      // run. The first rule whose `belongs` holds claims the whole run; rules
-      // are mutually exclusive in practice (list numbering/bullet vs the
-      // blockquote indent+border signature), so order among them is irrelevant.
-      if (firstPara && typeof firstPara !== "string") {
-        const rule = this.aggregatorRules.find((r) => r.rule.belongs(firstPara, ctx));
-        if (rule) {
-          const group: ParagraphOptions[] = [];
-          while (i < children.length) {
-            const member = children[i];
-            if (!("paragraph" in member)) break;
-            const para = member.paragraph;
-            if (typeof para === "string" || !rule.rule.belongs(para, ctx)) break;
-            group.push(para);
-            i++;
-          }
-          content.push(...rule.rule.build(group, ctx));
-          continue;
-        }
-      }
-
+    for (const child of children) {
       const node = this.resolveSectionChild(child);
-      if (node) content.push(node);
-      i++;
+      if (!node) continue;
+      if (Array.isArray(node)) content.push(...node);
+      else content.push(node);
     }
     return content;
   }

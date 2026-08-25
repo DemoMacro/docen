@@ -9,7 +9,6 @@ import {
   RUN_CHILDREN_DROPPED,
   SECTION_CHILD_DISPOSITIONS,
 } from "./coverage";
-import { DETAILS_SUMMARY_STYLE, DETAILS_TAG } from "./details";
 
 /**
  * Round-trip proof of the coverage registry: coverage.ts claims a disposition
@@ -70,13 +69,7 @@ const SECTION_FIXTURES: Record<keyof typeof SECTION_CHILD_DISPOSITIONS, () => Se
     toc: { captionLabel: "Table", entries: [{ paragraph: { text: "entry" } }] },
   }),
   sdt: () => ({
-    sdt: {
-      properties: { tag: DETAILS_TAG, group: true },
-      children: [
-        { paragraph: { style: DETAILS_SUMMARY_STYLE, children: [{ text: "sum" }] } },
-        { paragraph: { text: "body" } },
-      ],
-    },
+    sdt: { properties: { tag: "other" }, children: [{ paragraph: { text: "x" } }] },
   }),
   textbox: () => ({
     textbox: { text: "box", children: [{ paragraph: { text: "in-box" } }] },
@@ -137,16 +130,6 @@ const SECTION_EDITABLE: SectionEditable = {
       expect(toc.entries[0].paragraph).toBe("entry");
     },
   },
-  sdt: {
-    node: "details",
-    probe: (compiled) => {
-      const sdt = (compiled[0] as { sdt: { properties: { tag?: string }; children: unknown[] } })
-        .sdt;
-      expect(sdt.properties.tag).toBe(DETAILS_TAG);
-      expect(JSON.stringify(compiled)).toContain("sum");
-      expect(JSON.stringify(compiled)).toContain("body");
-    },
-  },
 };
 
 describe("SectionChild dispositions", () => {
@@ -165,15 +148,6 @@ describe("SectionChild dispositions", () => {
       }
     });
   }
-
-  it("non-details block SDT falls through to the passthrough atom", () => {
-    const fixture: SectionChild = {
-      sdt: { properties: { tag: "other" }, children: [{ paragraph: { text: "x" } }] },
-    };
-    const { json, compiled } = roundTrip([fixture]);
-    expect(collectTypes(json).has("passthrough")).toBe(true);
-    expect(compiled).toEqual([fixture]);
-  });
 });
 
 // ── ParagraphChild (inline level) ──

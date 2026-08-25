@@ -169,8 +169,13 @@ export const Paragraph = TiptapNode.create({
   // items carry the html-ordered placeholder reference — parseHTML
   // (converters/html.ts) rewrites each consecutive run to a fresh
   // docen-ordered-* reference so independent lists number separately.
+  // A <hr> maps to a thematic-break paragraph (OOXML has no HR element).
   parseHTML() {
     return [
+      {
+        tag: "hr",
+        getAttrs: () => ({ thematicBreak: true }),
+      },
       {
         tag: "li",
         getAttrs: (el: HTMLElement) => {
@@ -234,11 +239,18 @@ export const Paragraph = TiptapNode.create({
   renderDocx,
   parseDocx,
 
-  // Markdown serialization: a heading paragraph renders as "#{level} text";
+  // Markdown serialization: a heading paragraph renders as "#{level} text"; a
+  // thematic-break paragraph as "---"; a blockquote-styled paragraph gets the
+  // "> " prefix (Word's quote = the built-in IntenseQuote paragraph style);
   // everything else keeps the upstream paragraph semantics (empty paragraphs
   // emit the &nbsp; empty-paragraph marker between consecutive empties).
   renderMarkdown: (node: JSONContent, h: MarkdownRendererHelpers, ctx: RenderContext): string => {
-    const attrs = (node.attrs ?? {}) as { heading?: string | null };
+    const attrs = (node.attrs ?? {}) as {
+      heading?: string | null;
+      style?: string | null;
+      thematicBreak?: boolean | null;
+    };
+    if (attrs.thematicBreak) return "---";
     const level = attrs.heading ? HEADING_PARSE_MAP[attrs.heading] : undefined;
     const content = h.renderChildren(Array.isArray(node.content) ? node.content : []);
     if (level) return `${"#".repeat(level)} ${content}`;
@@ -248,6 +260,6 @@ export const Paragraph = TiptapNode.create({
         prev?.type === "paragraph" && (!prev.content || prev.content.length === 0);
       return prevIsEmptyParagraph ? "&nbsp;" : "";
     }
-    return content;
+    return attrs.style === "IntenseQuote" ? `> ${content}` : content;
   },
 });

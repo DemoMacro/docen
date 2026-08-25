@@ -45,27 +45,12 @@ declare module "@tiptap/core" {
     parseDocxInline?: ParseInlineRule;
     /**
      * Declarative paragraph parse rule: recognize a paragraph subtype this node
-     * owns (heading/codeBlock) and convert it to a JSONContent node. DocxManager
-     * walks every extension's rule during resolve before the plain-paragraph
-     * fallback, so a custom paragraph subtype plugs in by declaring this instead
-     * of forking DocxManager. thematicBreak (→ horizontalRule) stays in the
-     * manager — it has no owning extension.
+     * owns (codeBlock) and convert it to a JSONContent node. DocxManager walks
+     * every extension's rule during resolve before the plain-paragraph
+     * fallback, so a custom paragraph subtype plugs in by declaring this
+     * instead of forking DocxManager.
      */
     parseDocxParagraph?: ParseParagraphRule;
-    /**
-     * Declarative aggregator: claims consecutive paragraphs that belong to a
-     * composite structure (a list tree, a blockquote) and rebuilds them as
-     * nested JSONContent. DocxManager keeps a generic group-by-predicate loop;
-     * the rule contributes the predicate (belongs) + the builder (build). A
-     * custom composite plugs in by declaring this instead of forking DocxManager.
-     */
-    parseDocxAggregator?: ParseAggregatorRule;
-  }
-
-  interface ExtensionConfig<Options = any, Storage = any> {
-    /** Declarative aggregator on a plain Extension (e.g. a list-tree rebuilder
-     *  that spans bullet/ordered/task lists). See NodeConfig.parseDocxAggregator. */
-    parseDocxAggregator?: ParseAggregatorRule;
   }
 
   interface MarkConfig<Options = any, Storage = any> {
@@ -92,16 +77,15 @@ declare module "@tiptap/core" {
 /**
  * Per-resolve façade handed to parse rules: read-only views over the
  * DocumentOptions being resolved plus recursive entry points back into
- * DocxManager — a table cell, a TOC entry, and a details body are themselves
- * SectionChild[] block streams. Rule bodies must stay pure: getExtensionField
- * binds no `this`, so a rule cannot read extension options/storage and reaches
- * the manager only through this context.
+ * DocxManager — a table cell and a TOC entry are themselves SectionChild[]
+ * block streams. Rule bodies must stay pure: getExtensionField binds no `this`,
+ * so a rule cannot read extension options/storage and reaches the manager only
+ * through this context.
  */
 export interface ResolveContext {
-  /** Walk a SectionChild[] block stream (a cell's children, a TOC's entries, a
-   *  details body). */
+  /** Walk a SectionChild[] block stream (a cell's children, a TOC's entries). */
   resolveBlockStream(children: SectionChild[]): JSONContent[];
-  /** Resolve one SectionChild (a TOC entry, a details body block). */
+  /** Resolve one SectionChild (a TOC entry). */
   resolveBlock(child: SectionChild): JSONContent | null;
   /** Resolve a paragraph's inline content (handles the bare-string/{text}
    *  fallback office-open collapses a plain paragraph to). */
@@ -111,9 +95,9 @@ export interface ResolveContext {
   resolveInlineChildren(children: (ParagraphChild | string)[]): JSONContent[];
   /** Resolve a paragraph (a wpsShape text-box body block). */
   resolveParagraph(para: ParagraphOptions | string): JSONContent;
-  /** Reflective node attrs parse (table/tableRow/tableHeader/tableCell/…) —
-   *  reuses the nodeParse registry so a block rule shares the attrs extraction
-   *  the inline/compile paths use. */
+  /** Reflective node attrs parse (table/tableRow/tableCell/…) — reuses the
+   *  nodeParse registry so a block rule shares the attrs extraction the
+   *  inline/compile paths use. */
   parseNodeAttrs(type: string, opts: object): Record<string, unknown>;
   /** Resolve run-level marks (bold/italic/…) for a RunOptions — used by
    *  code-block's resolveCodeBlock to recover inline marks on each run. */
@@ -149,13 +133,4 @@ export interface ParseInlineRule<TBranch extends ParagraphChild = ParagraphChild
 export interface ParseParagraphRule {
   match(para: ParagraphOptions, ctx: ResolveContext): boolean;
   convert(para: ParagraphOptions, ctx: ResolveContext): JSONContent | null;
-}
-
-/** A declarative aggregator rule. `belongs` is the predicate grouping
- *  consecutive paragraphs into one composite; `build` turns the group into
- *  JSONContent[] (e.g. a nested list tree, a blockquote). The manager runs the
- *  generic group-by loop — the rule owns only the predicate + builder. */
-export interface ParseAggregatorRule {
-  belongs(para: ParagraphOptions, ctx: ResolveContext): boolean;
-  build(group: ParagraphOptions[], ctx: ResolveContext): JSONContent[];
 }

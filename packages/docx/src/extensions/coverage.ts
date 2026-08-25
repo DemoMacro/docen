@@ -58,7 +58,7 @@ export const SECTION_CHILD_DISPOSITIONS = {
   table: { editable: "Table.parseDocxBlock" },
   toc: { editable: "tocField node (entries editable, field switches opaque)" },
   textbox: { passthrough: "block Passthrough atom" },
-  sdt: { editable: "Details.parseDocxBlock (group SDT); other block SDTs → Passthrough" },
+  sdt: { passthrough: "block Passthrough atom" },
   altChunk: { passthrough: "block Passthrough atom" },
   customXml: { passthrough: "block Passthrough atom" },
   bookmarkStart: { passthrough: "block Passthrough atom" },

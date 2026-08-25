@@ -1,7 +1,7 @@
 import { encodeBase64 } from "@office-open/core";
 import { convertEmuToPixels } from "@office-open/core/util";
 import type { ParagraphChild, PictureOptions } from "@office-open/docx";
-import { Image as BaseImage } from "@tiptap/extension-image";
+import { Node } from "@tiptap/core";
 
 import type { JSONContent } from "../core";
 import type { ParseInlineRule, ResolveContext } from "./types";
@@ -348,16 +348,34 @@ function attachRawAttrs(target: Record<string, unknown>, attrs: Record<string, u
 
 // ── Extension ──
 
-export const Image = BaseImage.extend({
+/** Fully custom image node (no upstream extension): an inline atom carrying
+ *  src/alt/title plus the office-open mirror below. */
+export const Image = Node.create({
+  name: "image",
+  inline: true,
+  group: "inline",
+  draggable: true,
+
   addAttributes() {
     return {
-      ...this.parent?.(),
+      src: {
+        default: null,
+        parseHTML: (element: HTMLElement) => element.getAttribute("src"),
+      },
+      alt: {
+        default: null,
+        parseHTML: (element: HTMLElement) => element.getAttribute("alt"),
+      },
+      title: {
+        default: null,
+        parseHTML: (element: HTMLElement) => element.getAttribute("title"),
+      },
 
       // Editor-only display hint (no OOXML equivalent; not round-tripped)
       display: {
         default: null,
         rendered: false,
-        parseHTML: () => (this.options.inline ? "inline-block" : null),
+        parseHTML: () => "inline-block",
       },
 
       // Editor-only loading state for an unsized http image (image-cap stamps

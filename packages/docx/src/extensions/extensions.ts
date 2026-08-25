@@ -1,15 +1,10 @@
 import { Node as TiptapNode } from "@tiptap/core";
-import { CodeBlockLowlight } from "@tiptap/extension-code-block-lowlight";
-import { Emoji } from "@tiptap/extension-emoji";
-import { HorizontalRule } from "@tiptap/extension-horizontal-rule";
 import { Mathematics } from "@tiptap/extension-mathematics";
 import { all, createLowlight } from "lowlight";
 
-import { Extension, type AnyExtension } from "../core";
-import { Blockquote } from "./blockquote";
+import type { AnyExtension } from "../core";
 import { CodeBlock } from "./code-block";
 import { ColumnBreak } from "./column-break";
-import { Details, DetailsSummary, DetailsContent } from "./details";
 import { Document } from "./document";
 import { FormattingMarks } from "./formatting-marks";
 import { Image } from "./image";
@@ -63,18 +58,10 @@ export const tiptapNodeExtensions: AnyExtension[] = [
   Passthrough,
   InlinePassthrough,
   TocField,
-  Blockquote,
   CodeBlock.configure({
     lowlight: createLowlight(all),
   }),
-  Details,
-  DetailsSummary,
-  DetailsContent,
-  Emoji,
-  HorizontalRule,
-  Image.configure({
-    inline: true,
-  }),
+  Image,
   WpgGroup,
   WpsShape,
   // NOTE: Mathematics (blockMath/inlineMath) renders via KaTeX in the editor but
@@ -115,85 +102,10 @@ export const docxExtensions: AnyExtension[] = [
   FormattingMarks,
 ];
 
-// DocxKit options type
-export interface DocxKitOptions {
-  bold?: Record<string, any> | false;
-  blockquote?: Record<string, any> | false;
-  code?: Record<string, any> | false;
-  codeBlock?: Record<string, any> | false;
-  document?: false;
-  hardBreak?: Record<string, any> | false;
-  horizontalRule?: Record<string, any> | false;
-  italic?: Record<string, any> | false;
-  link?: Record<string, any> | false;
-  paragraph?: Record<string, any> | false;
-  strike?: Record<string, any> | false;
-  text?: false;
-  underline?: Record<string, any> | false;
-}
-
-export const DocxKit = Extension.create<DocxKitOptions>({
-  name: "docxKit",
-
-  addExtensions() {
-    const extensions: AnyExtension[] = [];
-
-    if (this.options.bold !== false) {
-      extensions.push(Bold);
-    }
-    if (this.options.blockquote !== false) {
-      extensions.push(Blockquote.configure(this.options.blockquote));
-    }
-    if (this.options.code !== false) {
-      extensions.push(Code.configure(this.options.code));
-    }
-    if (this.options.codeBlock !== false) {
-      extensions.push(
-        CodeBlockLowlight.configure({
-          lowlight: createLowlight(all),
-          ...this.options.codeBlock,
-        }),
-      );
-    }
-    if (this.options.document !== false) {
-      extensions.push(Document);
-    }
-    if (this.options.hardBreak !== false) {
-      extensions.push(HardBreak);
-    }
-    if (this.options.horizontalRule !== false) {
-      extensions.push(HorizontalRule.configure(this.options.horizontalRule));
-    }
-    if (this.options.italic !== false) {
-      extensions.push(Italic);
-    }
-    if (this.options.link !== false) {
-      extensions.push(Link.configure(this.options.link));
-    }
-    if (this.options.paragraph !== false) {
-      extensions.push(Paragraph.configure(this.options.paragraph));
-    }
-    if (this.options.strike !== false) {
-      extensions.push(Strike);
-    }
-    if (this.options.text !== false) {
-      extensions.push(Text);
-    }
-    if (this.options.underline !== false) {
-      extensions.push(Underline.configure(this.options.underline));
-    }
-
-    return extensions;
-  },
-});
-
 // Export all individual extensions for direct imports from @docen/docx.
 // Re-export explicitly (no `export *`) so the public surface is visible.
 // Customized extensions export their local version; upstream-only ones re-export
 // from @tiptap/* directly, base marks (with DOCX hooks) from ./marks.
-export { CodeBlockLowlight } from "@tiptap/extension-code-block-lowlight";
-export { Emoji } from "@tiptap/extension-emoji";
-export { HorizontalRule } from "@tiptap/extension-horizontal-rule";
 export { Mathematics } from "@tiptap/extension-mathematics";
 export { Bold, Code, Highlight, Italic, Strike, Subscript, Superscript, Underline } from "./marks";
 export { Document, createDocument } from "./document";
@@ -208,11 +120,9 @@ export {
   ORDERED_REFERENCE_PREFIX,
   nextOrderedReference,
 } from "./list-numbering";
-export { Blockquote } from "./blockquote";
 export { CodeBlock } from "./code-block";
 export { ColumnBreak } from "./column-break";
 export { SectionBreak } from "./section-break";
-export { Details, DetailsSummary, DetailsContent } from "./details";
 export { Mention } from "./mention";
 export { Table } from "./table";
 export { TableRow } from "./table-row";

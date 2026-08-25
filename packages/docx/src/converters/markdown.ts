@@ -56,8 +56,43 @@ const ListTokenBridge = Extension.create({
   },
 });
 
+/**
+ * Bridge for marked "hr" tokens: OOXML has no HR element — a thematic break is
+ * a paragraph whose `thematicBreak` attr is set (rendered as a bottom-border
+ * paragraph in DOCX).
+ */
+const HrTokenBridge = Extension.create({
+  name: "hrTokenBridge",
+  markdownTokenName: "hr",
+  parseMarkdown: () => ({ type: "paragraph", attrs: { thematicBreak: true } }),
+});
+
+/**
+ * Bridge for marked "blockquote" tokens: a quote paragraph carries Word's
+ * built-in "IntenseQuote" style instead of a wrapper node. Each inner block
+ * token resolves through the shared helpers, then gets the style stamped.
+ */
+const BlockquoteTokenBridge = Extension.create({
+  name: "blockquoteTokenBridge",
+  markdownTokenName: "blockquote",
+  parseMarkdown: (token: MarkdownToken, h: MarkdownParseHelpers): JSONContent[] => {
+    const out: JSONContent[] = [];
+    for (const node of h.parseChildren(token.tokens ?? [])) {
+      out.push({ ...node, attrs: { ...node.attrs, style: "IntenseQuote" } });
+    }
+    return out;
+  },
+});
+
 const markdownManager = new MarkdownManager({
-  extensions: [...docxExtensions, HeadingTokenBridge, ListTokenBridge, Markdown],
+  extensions: [
+    ...docxExtensions,
+    HeadingTokenBridge,
+    ListTokenBridge,
+    HrTokenBridge,
+    BlockquoteTokenBridge,
+    Markdown,
+  ],
 });
 
 /**

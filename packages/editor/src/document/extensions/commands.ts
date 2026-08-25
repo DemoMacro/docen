@@ -525,14 +525,26 @@ export const DocumentCommands = Extension.create({
             "ordered",
             variant && ORDERED_FORMATS[variant] ? variant : "decimal",
           ),
+      // Quote: stamp/clear Word's built-in IntenseQuote paragraph style (a
+      // blockquote is a styled paragraph in OOXML, not a wrapper node).
       blockquote:
         () =>
-        ({ commands }) =>
-          commands.toggleBlockquote(),
+        ({ state, chain }) => {
+          const block = formattableBlock(state);
+          if (!block) return false;
+          const quoted = block.attrs.style === "IntenseQuote";
+          return chain()
+            .updateAttributes(block.type, { style: quoted ? null : "IntenseQuote" })
+            .run();
+        },
+      // OOXML has no HR element — a horizontal rule is a thematic-break
+      // paragraph (rendered with a bottom border).
       "horizontal-rule":
         () =>
-        ({ commands }) =>
-          commands.setHorizontalRule(),
+        ({ chain }) =>
+          chain()
+            .insertContent({ type: "paragraph", attrs: { thematicBreak: true } })
+            .run(),
       // setPageBreak splits the paragraph so the paginator reflows the tail.
       "page-break":
         () =>
