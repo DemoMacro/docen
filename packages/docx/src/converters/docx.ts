@@ -1162,6 +1162,8 @@ export class DocxManager {
               hyperlink: {
                 url: href.startsWith("#") ? undefined : href,
                 anchor: href.startsWith("#") ? href.slice(1) : undefined,
+                // resolveHyperlink parks w:tooltip on the mark's title attr.
+                tooltip: (mark.attrs?.title as string | null | undefined) ?? undefined,
                 children: linkChildren,
               },
             });

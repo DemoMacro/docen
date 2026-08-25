@@ -65,14 +65,14 @@ function docxLinkClickHandler(): Plugin {
  *  null for an empty container or a missing href. */
 function resolveHyperlink(
   hyperlink: {
-    link?: string;
+    url?: string;
     anchor?: string;
     tooltip?: string;
     children?: (RunOptions | string)[];
   },
   ctx: ResolveContext,
 ): JSONContent | null {
-  const href = hyperlink.link ?? (hyperlink.anchor ? `#${hyperlink.anchor}` : "");
+  const href = hyperlink.url ?? (hyperlink.anchor ? `#${hyperlink.anchor}` : "");
   if (!href) return null;
   const content = ctx.resolveInlineChildren(
     (hyperlink.children ?? []).map((c) => c as ParagraphChild),
@@ -109,7 +109,7 @@ export const parseDocxInline: ParseInlineRule = {
       (
         child as {
           hyperlink: {
-            link?: string;
+            url?: string;
             anchor?: string;
             tooltip?: string;
             children?: (RunOptions | string)[];
