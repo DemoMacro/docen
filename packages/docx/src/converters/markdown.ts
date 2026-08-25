@@ -57,6 +57,18 @@ const ListTokenBridge = Extension.create({
 });
 
 /**
+ * Bridge for marked "code" tokens: a code block is a paragraph styled "Code"
+ * in DOCX (no dedicated element). The token's text keeps its newlines — the
+ * paragraph compiler splits them into <w:br/> runs.
+ */
+const CodeTokenBridge = Extension.create({
+  name: "codeTokenBridge",
+  markdownTokenName: "code",
+  parseMarkdown: (token: MarkdownToken, h: MarkdownParseHelpers) =>
+    h.createNode("paragraph", { style: "Code" }, [h.createTextNode(token.text ?? "")]),
+});
+
+/**
  * Bridge for marked "hr" tokens: OOXML has no HR element — a thematic break is
  * a paragraph whose `thematicBreak` attr is set (rendered as a bottom-border
  * paragraph in DOCX).
@@ -89,6 +101,7 @@ const markdownManager = new MarkdownManager({
     ...docxExtensions,
     HeadingTokenBridge,
     ListTokenBridge,
+    CodeTokenBridge,
     HrTokenBridge,
     BlockquoteTokenBridge,
     Markdown,

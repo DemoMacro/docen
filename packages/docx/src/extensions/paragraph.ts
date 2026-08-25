@@ -176,6 +176,11 @@ export const Paragraph = TiptapNode.create({
         tag: "hr",
         getAttrs: () => ({ thematicBreak: true }),
       },
+      // A code block is a "Code"-styled paragraph (no dedicated OOXML
+      // element). The inner <code> keeps the Code character mark;
+      // preserveWhitespace keeps code newlines (the DOM parser collapses
+      // them to spaces by default).
+      { tag: "pre", attrs: { style: "Code" }, preserveWhitespace: "full" },
       {
         tag: "li",
         getAttrs: (el: HTMLElement) => {
@@ -241,9 +246,10 @@ export const Paragraph = TiptapNode.create({
 
   // Markdown serialization: a heading paragraph renders as "#{level} text"; a
   // thematic-break paragraph as "---"; a blockquote-styled paragraph gets the
-  // "> " prefix (Word's quote = the built-in IntenseQuote paragraph style);
-  // everything else keeps the upstream paragraph semantics (empty paragraphs
-  // emit the &nbsp; empty-paragraph marker between consecutive empties).
+  // "> " prefix (Word's quote = the built-in IntenseQuote paragraph style); a
+  // "Code"-styled paragraph renders as a fenced code block; everything else
+  // keeps the upstream paragraph semantics (empty paragraphs emit the &nbsp;
+  // empty-paragraph marker between consecutive empties).
   renderMarkdown: (node: JSONContent, h: MarkdownRendererHelpers, ctx: RenderContext): string => {
     const attrs = (node.attrs ?? {}) as {
       heading?: string | null;
@@ -260,6 +266,7 @@ export const Paragraph = TiptapNode.create({
         prev?.type === "paragraph" && (!prev.content || prev.content.length === 0);
       return prevIsEmptyParagraph ? "&nbsp;" : "";
     }
+    if (attrs.style === "Code") return `\`\`\`\n${content}\n\`\`\``;
     return attrs.style === "IntenseQuote" ? `> ${content}` : content;
   },
 });

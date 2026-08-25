@@ -70,15 +70,10 @@
     "@office-open/core": "0.12.3",
     "@office-open/docx": "0.12.3",
     "@tiptap/core": "3.29.2",
-    "@tiptap/extension-code-block-lowlight": "3.29.2",
     "@tiptap/extension-link": "3.29.2",
-    "@tiptap/extension-mathematics": "3.29.2",
-    "@tiptap/extension-mention": "3.29.2",
     "@tiptap/markdown": "3.29.2",
     "@tiptap/pm": "3.29.2",
-    "@tiptap/suggestion": "3.29.2",
     "image-meta": "0.2.2",
-    "linkedom": "0.18.13",
-    "lowlight": "3.3.0"
+    "linkedom": "0.18.13"
   }
 }

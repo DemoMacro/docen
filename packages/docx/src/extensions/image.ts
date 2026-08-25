@@ -10,7 +10,8 @@ import { floatAnchorScope, floatingToStyles } from "./utils";
 /** The picture ParagraphChild branch office-open parses a drawing run into. */
 type PictureBranch = Extract<ParagraphChild, { picture: PictureOptions }>;
 
-type CropRect = { left?: number; top?: number; right?: number; bottom?: number };
+/** a:srcRect percentages (office-open SourceRectangleOptions), 0-100000 per side. */
+type CropRect = NonNullable<PictureOptions["sourceRectangle"]>;
 
 /**
  * Custom Image extension with node-level renderHTML + renderDocx/parseDocx.
@@ -223,11 +224,8 @@ export interface CropRenderContext {
  * background-size/background-position crop, but keeps a real <img> (alt,
  * accessibility, semantics, drag-to-save).
  */
-export function renderCropAttrs(
-  crop: Record<string, unknown> | CropRect,
-  ctx: CropRenderContext = {},
-): { style: string } {
-  const c = crop as CropRect;
+export function renderCropAttrs(crop: CropRect, ctx: CropRenderContext = {}): { style: string } {
+  const c = crop;
   const leftPct = (c.left || 0) / 100000;
   const topPct = (c.top || 0) / 100000;
   const rightPct = (c.right || 0) / 100000;

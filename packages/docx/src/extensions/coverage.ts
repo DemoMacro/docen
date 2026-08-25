@@ -4,15 +4,11 @@ import type { ParagraphChild, RunOptions, SectionChild } from "@office-open/docx
  * Concept-coverage disposition tables — the explicit registry of how EVERY
  * office-open document-model branch is handled by the Tiptap layer.
  *
- * Two directions are covered:
- *  - resolve (office-open → Tiptap): every SectionChild / ParagraphChild branch
- *    is claimed by an editable node, carried verbatim through a passthrough
- *    atom, or dropped for a logged reason.
- *  - compile (Tiptap → office-open): editor-only nodes that do NOT map back.
- *    Known losses, registered here so they are decisions, not accidents:
- *      • `mathematics` — KaTeX latex has no OMML bridge (an office-open
- *        MathInput tree is not derivable from latex); compile silently skips it.
- *      • `codeBlock.language` — the Code style has no language slot.
+ * Covered direction (resolve, office-open → Tiptap): every SectionChild /
+ * ParagraphChild branch is claimed by an editable node, carried verbatim
+ * through a passthrough atom, or dropped for a logged reason. Every node now
+ * maps back on compile (paragraph attrs mirror ParagraphPropertiesOptions
+ * verbatim), so there is no compile-loss table.
  *
  * The satisfies guards make the registry complete by construction: a new
  * office-open union branch widens the tag type, a missing entry fails the

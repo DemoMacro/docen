@@ -162,22 +162,6 @@ export type TextStyleAttrs = AttrNullable<
 >;
 
 /**
- * Mention node attrs (official @tiptap/extension-mention).
- */
-export interface MentionAttrs {
-  id: string | null;
-  label: string | null;
-}
-
-/**
- * Mathematics node attrs (official @tiptap/extension-mathematics).
- * Applies to both blockMath (block) and inlineMath (inline).
- */
-export interface MathAttrs {
-  latex: string;
-}
-
-/**
  * Link mark attrs.
  */
 export interface LinkAttrs {
@@ -294,12 +278,6 @@ export interface ParagraphNode extends TiptapJSONContent {
   content?: InlineContent[];
 }
 
-export interface CodeBlockNode extends TiptapJSONContent {
-  type: "codeBlock";
-  attrs?: { language?: string };
-  content?: Array<TextNode>;
-}
-
 /**
  * Header/footer slots in Tiptap JSON — each slot is the JSONContent[] produced
  * by resolving that slot's SectionChild[] (paragraphs/tables/…). Mirrors
@@ -377,25 +355,6 @@ export interface TabNode extends TiptapJSONContent {
   type: "tab";
 }
 
-// -- Mention node (inline) --
-
-export interface MentionNode extends TiptapJSONContent {
-  type: "mention";
-  attrs?: MentionAttrs;
-}
-
-// -- Mathematics nodes (KaTeX; block + inline) --
-
-export interface InlineMathNode extends TiptapJSONContent {
-  type: "inlineMath";
-  attrs?: MathAttrs;
-}
-
-export interface BlockMathNode extends TiptapJSONContent {
-  type: "blockMath";
-  attrs?: MathAttrs;
-}
-
 // -- Passthrough node (block atom; opaque SectionChild blob) --
 
 export interface PassthroughNode extends TiptapJSONContent {
@@ -431,15 +390,11 @@ export type InlineContent =
   | PageBreakNode
   | ColumnBreakNode
   | TabNode
-  | MentionNode
-  | InlineMathNode
   | InlinePassthroughNode;
 export type BlockNode =
   | ParagraphNode
-  | CodeBlockNode
   | TableNode
   | WpsShapeNode
   | WpgGroupNode
   | TocFieldNode
-  | PassthroughNode
-  | BlockMathNode;
+  | PassthroughNode;

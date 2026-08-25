@@ -1,16 +1,12 @@
 import { Node as TiptapNode } from "@tiptap/core";
-import { Mathematics } from "@tiptap/extension-mathematics";
-import { all, createLowlight } from "lowlight";
 
 import type { AnyExtension } from "../core";
-import { CodeBlock } from "./code-block";
 import { ColumnBreak } from "./column-break";
 import { Document } from "./document";
 import { FormattingMarks } from "./formatting-marks";
 import { Image } from "./image";
 import { Link } from "./link";
 import { Bold, Code, Highlight, Italic, Strike, Subscript, Superscript, Underline } from "./marks";
-import { Mention } from "./mention";
 import { PageBreak } from "./page-break";
 import { Paragraph } from "./paragraph";
 import { Passthrough, InlinePassthrough } from "./passthrough";
@@ -58,18 +54,9 @@ export const tiptapNodeExtensions: AnyExtension[] = [
   Passthrough,
   InlinePassthrough,
   TocField,
-  CodeBlock.configure({
-    lowlight: createLowlight(all),
-  }),
   Image,
   WpgGroup,
   WpsShape,
-  // NOTE: Mathematics (blockMath/inlineMath) renders via KaTeX in the editor but
-  // has no DOCX conversion yet — DOCX compile drops math content. latex↔OMML
-  // conversion is separate work (office-open has OMML parse/stringify via its
-  // MathInput type, but no latex bridge). Kept registered so the editor works.
-  Mathematics,
-  Mention,
   Table,
   TableRow,
   TableCell,
@@ -106,7 +93,6 @@ export const docxExtensions: AnyExtension[] = [
 // Re-export explicitly (no `export *`) so the public surface is visible.
 // Customized extensions export their local version; upstream-only ones re-export
 // from @tiptap/* directly, base marks (with DOCX hooks) from ./marks.
-export { Mathematics } from "@tiptap/extension-mathematics";
 export { Bold, Code, Highlight, Italic, Strike, Subscript, Superscript, Underline } from "./marks";
 export { Document, createDocument } from "./document";
 export { Paragraph } from "./paragraph";
@@ -120,10 +106,8 @@ export {
   ORDERED_REFERENCE_PREFIX,
   nextOrderedReference,
 } from "./list-numbering";
-export { CodeBlock } from "./code-block";
 export { ColumnBreak } from "./column-break";
 export { SectionBreak } from "./section-break";
-export { Mention } from "./mention";
 export { Table } from "./table";
 export { TableRow } from "./table-row";
 export { TableCell } from "./table-cell";

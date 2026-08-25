@@ -43,14 +43,6 @@ declare module "@tiptap/core" {
      * nodes carrying the mark).
      */
     parseDocxInline?: ParseInlineRule;
-    /**
-     * Declarative paragraph parse rule: recognize a paragraph subtype this node
-     * owns (codeBlock) and convert it to a JSONContent node. DocxManager walks
-     * every extension's rule during resolve before the plain-paragraph
-     * fallback, so a custom paragraph subtype plugs in by declaring this
-     * instead of forking DocxManager.
-     */
-    parseDocxParagraph?: ParseParagraphRule;
   }
 
   interface MarkConfig<Options = any, Storage = any> {
@@ -99,11 +91,9 @@ export interface ResolveContext {
    *  nodeParse registry so a block rule shares the attrs extraction the
    *  inline/compile paths use. */
   parseNodeAttrs(type: string, opts: object): Record<string, unknown>;
-  /** Resolve run-level marks (bold/italic/…) for a RunOptions — used by
-   *  code-block's resolveCodeBlock to recover inline marks on each run. */
+  /** Resolve run-level marks (bold/italic/…) for a RunOptions. */
   resolveMarks(opts: RunOptions): JSONContent["marks"];
-  /** The document's styles.xml model. Table rules read tableStyles; paragraph
-   *  rules (Phase 2) will read paragraphStyles. */
+  /** The document's styles.xml model. Table rules read tableStyles. */
   readonly styles: StylesOptions | undefined;
 }
 
@@ -125,12 +115,4 @@ export interface ParseBlockRule<TBranch extends SectionChild = SectionChild> {
 export interface ParseInlineRule<TBranch extends ParagraphChild = ParagraphChild> {
   match(child: ParagraphChild, ctx: ResolveContext): child is TBranch;
   convert(child: TBranch, ctx: ResolveContext): JSONContent | JSONContent[] | null;
-}
-
-/** A declarative paragraph parse rule. `match` identifies the paragraph
- *  subtype; `convert` builds the JSONContent node (null falls through to the
- *  next rule, then the plain-paragraph fallback). */
-export interface ParseParagraphRule {
-  match(para: ParagraphOptions, ctx: ResolveContext): boolean;
-  convert(para: ParagraphOptions, ctx: ResolveContext): JSONContent | null;
 }

@@ -26,13 +26,7 @@ import { flattenExtensions, getExtensionField, getSchema } from "@tiptap/core";
 import type { Extensions, JSONContent } from "../core";
 import { docxExtensions } from "../core";
 import { buildListLevels, isGeneratedListReference } from "../extensions/list-numbering";
-import * as mentionExt from "../extensions/mention";
-import type {
-  ParseBlockRule,
-  ParseInlineRule,
-  ParseParagraphRule,
-  ResolveContext,
-} from "../extensions/types";
+import type { ParseBlockRule, ParseInlineRule, ResolveContext } from "../extensions/types";
 import { prepareDocument, type PrepareStep } from "./prepare";
 import { buildTextBlock } from "./styles";
 
@@ -193,10 +187,6 @@ export class DocxManager {
   // Each inline node/mark extension declares parseDocxInline; resolveParagraphChild
   // walks them in docxExtensions order before the run/sdt/passthrough fallbacks.
   private inlineRules: Array<{ name: string; rule: ParseInlineRule }> = [];
-  // Declarative paragraph parse rules collected via reflection (mirrors
-  // blockRules). Each paragraph node extension declares parseDocxParagraph;
-  // resolveParagraph walks them before the plain-paragraph fallback.
-  private paragraphRules: Array<{ name: string; rule: ParseParagraphRule }> = [];
   // Per-resolve façade over the recursive resolve entry points + read-only
   // styles, handed to every block/inline rule. Built at the start of resolve().
   private resolveCtx: ResolveContext | undefined;
@@ -226,10 +216,6 @@ export class DocxManager {
         if (parse) this.nodeParse.set(name, parse);
         const blockRule = getExtensionField(ext, "parseDocxBlock") as ParseBlockRule | undefined;
         if (blockRule) this.blockRules.push({ name, rule: blockRule });
-        const paraRule = getExtensionField(ext, "parseDocxParagraph") as
-          | ParseParagraphRule
-          | undefined;
-        if (paraRule) this.paragraphRules.push({ name, rule: paraRule });
       }
       // parseDocxInline is collected for both nodes and marks — inline shapes
       // include mark containers (hyperlink/insertion/deletion) that yield text[].
@@ -481,15 +467,6 @@ export class DocxManager {
     switch (node.type) {
       case "paragraph":
         return { paragraph: this.compileParagraphNode(node) };
-      case "codeBlock": {
-        // codeBlock → paragraph styled "Code" (extension owns style/font).
-        // Children go through the shared inline path (handles `\n`→break +
-        // inline marks), so no special-case child logic lives here.
-        const opts = this.renderNodeOpts(node);
-        const childList = this.compileInlineContent(node.content);
-        if (childList.length > 0) opts.children = childList;
-        return { paragraph: this.simplifyParagraph(opts) };
-      }
       case "table":
         return { table: this.compileTableNode(node) };
       case "image": {
@@ -747,7 +724,7 @@ export class DocxManager {
       if (Object.keys(b).length === 0) delete cellOpts.borders;
     }
 
-    // A cell may contain ANY block (nested table/list/codeBlock/…), not just
+    // A cell may contain ANY block (nested table/list/…), not just
     // paragraphs. Route each child through the shared block compiler so a
     // nested list or table survives the round-trip.
     const cellChildren: SectionChild[] = [];
@@ -836,15 +813,6 @@ export class DocxManager {
           children.push({
             wpsShape: { ...geometry, children: body },
           } as unknown as ParagraphChild);
-          break;
-        }
-        case "mention": {
-          children.push(
-            mentionExt.createMention(
-              String(node.attrs?.id ?? ""),
-              String(node.attrs?.label ?? ""),
-            ) as ParagraphChild,
-          );
           break;
         }
       }
@@ -972,21 +940,9 @@ export class DocxManager {
   private resolveParagraph(opts: string | ParagraphOptions): JSONContent {
     const resolved: ParagraphOptions = typeof opts === "string" ? { text: opts } : opts;
 
-    // Declarative paragraph dispatch: each paragraph node extension's
-    // parseDocxParagraph rule (codeBlock, collected in docxExtensions order)
-    // gets a chance to claim the paragraph; a non-matching or null-converting
-    // rule falls through. List paragraphs reach the fallback like any other —
-    // their bullet/numbering attrs mirror ParagraphPropertiesOptionsBase.
-    const ctx = this.resolveCtx!;
-    for (const { rule } of this.paragraphRules) {
-      if (rule.match(resolved, ctx)) {
-        const node = rule.convert(resolved, ctx);
-        if (node) return node;
-      }
-    }
-
-    // Plain paragraph fallback: reflective attrs parse + inline content.
-    return buildTextBlock("paragraph", resolved, ctx);
+    // Plain paragraph: reflective attrs parse + inline content. A paragraph
+    // subtype (heading/code) is just attrs on this node.
+    return buildTextBlock("paragraph", resolved, this.resolveCtx!);
   }
 
   /**
@@ -1043,7 +999,7 @@ export class DocxManager {
   private resolveParagraphChild(child: ParagraphChild): JSONContent | JSONContent[] | null {
     // Declarative inline dispatch: each inline node/mark extension's
     // parseDocxInline rule (collected in docxExtensions order) gets a chance to
-    // recognize the shape. tab/image/wpgGroup/wpsShape/mention/hyperlink/
+    // recognize the shape. tab/image/wpgGroup/wpsShape/hyperlink/
     // insertion/deletion/pageBreak/columnBreak own their shapes here; a
     // non-matching or null-converting rule falls through. The shapes are mutually
     // exclusive (different ParagraphChild keys), so order among them is
@@ -1060,10 +1016,10 @@ export class DocxManager {
     if ("text" in child || "children" in child || "break" in child) {
       return this.resolveRun(child as RunOptions);
     }
-    // Any remaining inline shape (a non-mention inline SDT, bookmark/range
+    // Any remaining inline shape (an inline SDT, bookmark/range
     // markers, proofErr, …) carries verbatim via inlinePassthrough so the
     // round-trip stays byte-faithful — mirrors block resolvePassthrough, which
-    // keeps every unrecognized SectionChild instead of dropping it. A non-mention
+    // keeps every unrecognized SectionChild instead of dropping it. An
     // inline SDT used to be dropped here; carrying it restores the symmetry.
     return { type: "inlinePassthrough", attrs: { data: JSON.stringify(child) } };
   }
