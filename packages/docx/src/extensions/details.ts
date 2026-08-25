@@ -36,21 +36,16 @@ export const DETAILS_SUMMARY_STYLE = "DocenDetailsSummary";
  * and rebuild it as a details node (summary + content). DocxManager dispatches
  * every SectionChild through this rule before the paragraph/passthrough
  * fallbacks; a non-details SDT falls through to passthrough. */
-export const parseDocxBlock: ParseBlockRule = {
-  match: (child) =>
-    "sdt" in child &&
-    (child as { sdt?: { properties?: { tag?: string } } }).sdt?.properties?.tag === DETAILS_TAG,
-  convert: (child, ctx) =>
-    resolveDetailsSdt(
-      (child as { sdt: { properties?: { tag?: string }; children?: SectionChild[] } }).sdt,
-      ctx,
-    ),
+export const parseDocxBlock: ParseBlockRule<Extract<SectionChild, { sdt: unknown }>> = {
+  match: (child): child is Extract<SectionChild, { sdt: unknown }> =>
+    "sdt" in child && child.sdt.properties.tag === DETAILS_TAG,
+  convert: (child, ctx) => resolveDetailsSdt(child.sdt, ctx),
 };
 
 /** Resolve a details group-SDT: the summary-style paragraph becomes
  *  detailsSummary, the remaining blocks fold into detailsContent. */
 function resolveDetailsSdt(
-  sdt: { properties?: { tag?: string }; children?: SectionChild[] },
+  sdt: Extract<SectionChild, { sdt: unknown }>["sdt"],
   ctx: ResolveContext,
 ): JSONContent {
   const content: JSONContent[] = [];

@@ -1,3 +1,5 @@
+import type { ParagraphChild } from "@office-open/docx";
+
 import { Node } from "../core";
 import type { ParseInlineRule } from "./types";
 
@@ -16,8 +18,8 @@ import type { ParseInlineRule } from "./types";
  */
 
 // DOCX `<w:br w:type="column"/>` → office-open ParagraphChild `{ columnBreak: true }`.
-export const parseDocxInline: ParseInlineRule = {
-  match: (child) => "columnBreak" in child,
+export const parseDocxInline: ParseInlineRule<Extract<ParagraphChild, { columnBreak: true }>> = {
+  match: (child): child is Extract<ParagraphChild, { columnBreak: true }> => "columnBreak" in child,
   convert: () => ({ type: "columnBreak" }),
 };
 

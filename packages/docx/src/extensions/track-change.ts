@@ -1,4 +1,4 @@
-import type { ParagraphChild, RunOptions } from "@office-open/docx";
+import type { ParagraphChild } from "@office-open/docx";
 
 import { mergeTextNodes } from "../converters/styles";
 import type { JSONContent } from "../core";
@@ -49,22 +49,25 @@ const trackChangeAttrs = () => ({
   date: { default: null, rendered: false },
 });
 
+/** office-open's w:ins / w:del ParagraphChild branches, derived from the union
+ *  (ChangedProperties & { children: TrackChangeChild[] } is not exported). */
+type InsertionBranch = Extract<ParagraphChild, { insertion: unknown }>;
+type DeletionBranch = Extract<ParagraphChild, { deletion: unknown }>;
+
 /** ParagraphChild `{ insertion|deletion: {...} }` → text[] carrying the mark.
  *  Mirrors the old DocxManager.resolveTrackedChange: recurse the container's
  *  runs via ctx, merge adjacent text, then stamp every text node with the
  *  revision mark alongside any existing rPr marks. Returns null for an empty
  *  container. */
 function resolveTrackedChange(
-  opts: {
-    id?: number;
-    author?: string;
-    date?: string;
-    children?: (RunOptions | string)[];
-  },
+  opts: InsertionBranch["insertion"] | DeletionBranch["deletion"],
   type: "insertion" | "deletion",
   ctx: ResolveContext,
 ): JSONContent[] | null {
-  const content = ctx.resolveInlineChildren((opts.children ?? []).map((c) => c as ParagraphChild));
+  // Track-change children (runs, strings, comment markers) are all valid
+  // inline input — the ParagraphChild union admits every TrackChangeChild
+  // shape as itself or its fallback member.
+  const content = ctx.resolveInlineChildren(opts.children ?? []);
   if (content.length === 0) return null;
   const merged = mergeTextNodes(content);
   const mark = {
@@ -84,23 +87,9 @@ function resolveTrackedChange(
 }
 
 // DOCX `<w:ins>` run → office-open ParagraphChild `{ insertion: {...} }`.
-const insertionRule: ParseInlineRule = {
-  match: (child) => "insertion" in child,
-  convert: (child, ctx) =>
-    resolveTrackedChange(
-      (
-        child as {
-          insertion: {
-            id?: number;
-            author?: string;
-            date?: string;
-            children?: (RunOptions | string)[];
-          };
-        }
-      ).insertion,
-      "insertion",
-      ctx,
-    ),
+const insertionRule: ParseInlineRule<InsertionBranch> = {
+  match: (child): child is InsertionBranch => "insertion" in child,
+  convert: (child, ctx) => resolveTrackedChange(child.insertion, "insertion", ctx),
 };
 
 export const Insertion = Mark.create({
@@ -127,23 +116,9 @@ export const Insertion = Mark.create({
 });
 
 // DOCX `<w:del>` run → office-open ParagraphChild `{ deletion: {...} }`.
-const deletionRule: ParseInlineRule = {
-  match: (child) => "deletion" in child,
-  convert: (child, ctx) =>
-    resolveTrackedChange(
-      (
-        child as {
-          deletion: {
-            id?: number;
-            author?: string;
-            date?: string;
-            children?: (RunOptions | string)[];
-          };
-        }
-      ).deletion,
-      "deletion",
-      ctx,
-    ),
+const deletionRule: ParseInlineRule<DeletionBranch> = {
+  match: (child): child is DeletionBranch => "deletion" in child,
+  convert: (child, ctx) => resolveTrackedChange(child.deletion, "deletion", ctx),
 };
 
 export const Deletion = Mark.create({

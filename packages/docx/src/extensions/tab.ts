@@ -1,3 +1,5 @@
+import type { ParagraphChild } from "@office-open/docx";
+
 import { Node } from "../core";
 import type { ParseInlineRule } from "./types";
 
@@ -16,9 +18,11 @@ import type { ParseInlineRule } from "./types";
 
 // `<w:r><w:tab/></w:r>` → office-open ParagraphChild `{ tab: true }`. Turned into
 // this atom so the tab is not lost (mergeTextNodes would otherwise collapse a
-// TOC entry's title and page number together).
+// TOC entry's title and page number together). The `{tab}` shape exists only as
+// a run child, not a standalone ParagraphChild branch, so the predicate claims
+// the full union — convert ignores the payload anyway.
 export const parseDocxInline: ParseInlineRule = {
-  match: (child) => "tab" in child,
+  match: (child): child is ParagraphChild => "tab" in child,
   convert: () => ({ type: "tab" }),
 };
 

@@ -1,3 +1,4 @@
+import type { ParagraphOptions } from "@office-open/docx";
 import type { JSONContent } from "@tiptap/core";
 import { Paragraph as BaseParagraph } from "@tiptap/extension-paragraph";
 import type { Node } from "@tiptap/pm/model";
@@ -48,8 +49,8 @@ const SKIP_KEYS = new Set([
   "thematicBreak",
 ]);
 
-export function parseDocx(opts: Record<string, unknown>): Record<string, unknown> {
-  const resolved = typeof opts === "string" ? { text: opts } : opts;
+export function parseDocx(opts: ParagraphOptions | string): Record<string, unknown> {
+  const resolved: ParagraphOptions = typeof opts === "string" ? { text: opts } : opts;
   const attrs: Record<string, unknown> = {};
   // OOXML `style` (the paragraph's pStyle reference, e.g. "Heading1") → styleId,
   // carried as an attr so the named style's CSS applies via class="docx-style-{id}".

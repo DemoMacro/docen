@@ -1,4 +1,4 @@
-import type { TableOfContentsOptions } from "@office-open/docx";
+import type { SectionChild, TableOfContentsOptions } from "@office-open/docx";
 import type { JSONContent } from "@tiptap/core";
 
 import { cleanAttrs } from "../converters/styles";
@@ -36,10 +36,9 @@ import { attrNative } from "./utils";
  * Declarative block parse rule: recognize a table of contents SectionChild and
  * rebuild it as an editable `tocField` container. DocxManager dispatches every
  * SectionChild through this rule before the paragraph/passthrough fallbacks. */
-export const parseDocxBlock: ParseBlockRule = {
-  match: (child) => "toc" in child,
-  convert: (child, ctx) =>
-    resolveToc((child as { toc: TableOfContentsOptions & { alias?: string } }).toc, ctx),
+export const parseDocxBlock: ParseBlockRule<Extract<SectionChild, { toc: unknown }>> = {
+  match: (child): child is Extract<SectionChild, { toc: unknown }> => "toc" in child,
+  convert: (child, ctx) => resolveToc(child.toc, ctx),
 };
 
 /** Resolve a table of contents into an editable `tocField` container:
@@ -50,7 +49,7 @@ export const parseDocxBlock: ParseBlockRule = {
  *  crash). When `entries` is absent/empty (a fresh, unrendered TOC), keep the
  *  node valid for `content: "block+"` with a placeholder empty paragraph. */
 function resolveToc(
-  toc: TableOfContentsOptions & { alias?: string },
+  toc: Extract<SectionChild, { toc: unknown }>["toc"],
   ctx: ResolveContext,
 ): JSONContent {
   const { entries, ...options } = toc;

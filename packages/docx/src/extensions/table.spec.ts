@@ -109,7 +109,7 @@ describe("table float round-trip", () => {
       bottomFromText: 200,
       overlap: "neverOverlap",
     };
-    const back = parseDocx(renderDocx({ type: "table", attrs: { float } }));
+    const back = parseDocx({ rows: [], ...renderDocx({ type: "table", attrs: { float } }) });
     expect(back.float).toEqual(float);
   });
 });

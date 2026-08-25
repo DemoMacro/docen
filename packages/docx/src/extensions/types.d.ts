@@ -19,8 +19,10 @@ declare module "@tiptap/core" {
     /**
      * DOCX deserialization: DOCX opts → Tiptap JSON attrs.
      * Each node extension defines this to convert DOCX properties back to attrs.
+     * Parameter is `object` so implementations declare the precise office-open
+     * options type (PictureOptions, TableOptions, …) instead of a Record cast.
      */
-    parseDocx?: (opts: Record<string, unknown>) => Record<string, unknown>;
+    parseDocx?(opts: object): Record<string, unknown>;
     /**
      * Declarative block parse rule: recognize a SectionChild shape this node
      * owns and convert it to a JSONContent node. DocxManager walks every
@@ -112,7 +114,7 @@ export interface ResolveContext {
   /** Reflective node attrs parse (table/tableRow/tableHeader/tableCell/…) —
    *  reuses the nodeParse registry so a block rule shares the attrs extraction
    *  the inline/compile paths use. */
-  parseNodeAttrs(type: string, opts: Record<string, unknown>): Record<string, unknown>;
+  parseNodeAttrs(type: string, opts: object): Record<string, unknown>;
   /** Resolve run-level marks (bold/italic/…) for a RunOptions — used by
    *  code-block's resolveCodeBlock to recover inline marks on each run. */
   resolveMarks(opts: RunOptions): JSONContent["marks"];
@@ -124,20 +126,24 @@ export interface ResolveContext {
   readonly numberingLookup: Map<string, { format?: string; start?: number }> | undefined;
 }
 
-/** A declarative block parse rule. `match` identifies the SectionChild shape
- *  this node owns; `convert` builds the JSONContent node (null falls through to
- *  the next rule). */
-export interface ParseBlockRule {
-  match(child: SectionChild, ctx: ResolveContext): boolean;
-  convert(child: SectionChild, ctx: ResolveContext): JSONContent | null;
+/** A declarative block parse rule. `match` is a type predicate identifying
+ *  the SectionChild branch this node owns — a positive match narrows `child`
+ *  for `convert`, which builds the JSONContent node (null falls through to the
+ *  next rule). Parameterize with the precise branch (Extract<SectionChild,
+ *  {tag: …}>) so convert reads fields without casts. Method syntax keeps a
+ *  parameterized rule assignable to the unparameterized registry slot. */
+export interface ParseBlockRule<TBranch extends SectionChild = SectionChild> {
+  match(child: SectionChild, ctx: ResolveContext): child is TBranch;
+  convert(child: TBranch, ctx: ResolveContext): JSONContent | null;
 }
 
-/** A declarative inline parse rule. `match` identifies the ParagraphChild
- *  shape; `convert` builds inline content — a node, an array (hyperlink/
- *  track-change yield text[]), or null to fall through to the next rule. */
-export interface ParseInlineRule {
-  match(child: ParagraphChild, ctx: ResolveContext): boolean;
-  convert(child: ParagraphChild, ctx: ResolveContext): JSONContent | JSONContent[] | null;
+/** A declarative inline parse rule. `match` is a type predicate identifying
+ *  the ParagraphChild branch; `convert` builds inline content — a node, an
+ *  array (hyperlink/track-change yield text[]), or null to fall through to the
+ *  next rule. See ParseBlockRule for the narrowing contract. */
+export interface ParseInlineRule<TBranch extends ParagraphChild = ParagraphChild> {
+  match(child: ParagraphChild, ctx: ResolveContext): child is TBranch;
+  convert(child: TBranch, ctx: ResolveContext): JSONContent | JSONContent[] | null;
 }
 
 /** A declarative paragraph parse rule. `match` identifies the paragraph

@@ -1,3 +1,4 @@
+import type { ParagraphChild, SdtRunOptions } from "@office-open/docx";
 import { Mention as MentionBase } from "@tiptap/extension-mention";
 
 import type { ParseInlineRule } from "./types";
@@ -25,30 +26,30 @@ export function createMention(id: string, label: string): Record<string, unknown
   };
 }
 
+/** The inline-SDT ParagraphChild branch a mention rides in. */
+type MentionBranch = Extract<ParagraphChild, { sdt: SdtRunOptions }>;
+
 /** True if an inline SDT child carries a mention. */
-export function isMention(child: unknown): boolean {
-  if (typeof child !== "object" || child === null || !("sdt" in child)) return false;
-  const tag = (child as { sdt?: { properties?: { tag?: string } } }).sdt?.properties?.tag;
-  return tag === MENTION_TAG;
+export function isMention(child: ParagraphChild): boolean {
+  return "sdt" in child && child.sdt.properties.tag === MENTION_TAG;
 }
 
 /** Read a mention SDT → `{ id, label }`. */
-export function readMention(child: unknown): { id: string; label: string } {
-  const sdt = (child as { sdt?: { properties?: { alias?: string }; children?: unknown[] } }).sdt;
-  const id = sdt?.properties?.alias ?? "";
+export function readMention(child: MentionBranch): { id: string; label: string } {
+  const sdt = child.sdt;
+  const id = sdt.properties.alias ?? "";
   let label = "";
-  const first = sdt?.children?.[0];
+  const first = sdt.children?.[0];
   if (typeof first === "string") label = first;
-  else if (first && typeof first === "object" && "text" in first)
-    label = String((first as { text?: string }).text ?? "");
+  else if (first && typeof first === "object" && "text" in first) label = String(first.text ?? "");
   return { id, label };
 }
 
 // DOCX inline text-SDT carrying a mention (CT_SdtRun) → office-open
 // ParagraphChild `{ sdt: { properties: { tag } } }`. isMention guards the tag so
 // a non-mention inline SDT falls through to the dispatcher's drop fallback.
-export const parseDocxInline: ParseInlineRule = {
-  match: (child) => isMention(child),
+export const parseDocxInline: ParseInlineRule<MentionBranch> = {
+  match: (child): child is MentionBranch => isMention(child),
   convert: (child) => {
     const { id, label } = readMention(child);
     return { type: "mention", attrs: { id, label } };

@@ -1,10 +1,14 @@
 import { encodeBase64 } from "@office-open/core";
 import { convertEmuToPixels } from "@office-open/core/util";
+import type { ParagraphChild, PictureOptions } from "@office-open/docx";
 import { Image as BaseImage } from "@tiptap/extension-image";
 
 import type { JSONContent } from "../core";
 import type { ParseInlineRule, ResolveContext } from "./types";
 import { floatAnchorScope, floatingToStyles } from "./utils";
+
+/** The picture ParagraphChild branch office-open parses a drawing run into. */
+type PictureBranch = Extract<ParagraphChild, { picture: PictureOptions }>;
 
 type CropRect = { left?: number; top?: number; right?: number; bottom?: number };
 
@@ -131,12 +135,11 @@ export function renderDocx(node: JSONContent): Record<string, unknown> | null {
  * floating/srcRect(→crop)/outline passed through verbatim. src is reconstructed by
  * DocxManager from the image data bytes (kept out of parseDocx).
  */
-export function parseDocx(imageOpts: Record<string, unknown>): Record<string, unknown> {
-  const opts = imageOpts ?? {};
+export function parseDocx(picture: PictureOptions): Record<string, unknown> {
   const attrs: Record<string, unknown> = {};
 
   // transformation → width/height/rotation (structural Tiptap attrs)
-  const transformation = opts.transformation as Record<string, unknown> | undefined;
+  const { transformation } = picture;
   if (transformation) {
     // office-open 0.10.4+ parses wp:extent as EMU verbatim (was px); convert to px.
     if (typeof transformation.width === "number")
@@ -146,7 +149,7 @@ export function parseDocx(imageOpts: Record<string, unknown>): Record<string, un
     if (typeof transformation.rotation === "number") attrs.rotation = transformation.rotation;
     // office-open MediaTransformation.flip is {horizontal, vertical}; carry both
     // true and false through per axis (false is meaningful: flipH="0").
-    const flip = transformation.flip as { horizontal?: boolean; vertical?: boolean } | undefined;
+    const { flip } = transformation;
     if (flip) {
       if (flip.horizontal !== undefined) attrs.flipH = flip.horizontal;
       if (flip.vertical !== undefined) attrs.flipV = flip.vertical;
@@ -154,27 +157,26 @@ export function parseDocx(imageOpts: Record<string, unknown>): Record<string, un
   }
 
   // altText → alt/title
-  const altText = opts.altText as Record<string, unknown> | undefined;
+  const { altText } = picture;
   if (altText) {
     if (altText.name) attrs.alt = altText.name;
     if (altText.description) attrs.title = altText.description;
   }
 
   // Near-identity pass-through for nested office-open objects
-  if (opts.floating) attrs.floating = opts.floating;
-  if (opts.sourceRectangle) attrs.crop = opts.sourceRectangle;
-  if (opts.outline) attrs.outline = opts.outline;
+  if (picture.floating) attrs.floating = picture.floating;
+  if (picture.sourceRectangle) attrs.crop = picture.sourceRectangle;
+  if (picture.outline) attrs.outline = picture.outline;
   // 0.9.7+ fidelity fields (reverse of renderDocx)
-  if (opts.nonVisualProperties) attrs.nonVisualProperties = opts.nonVisualProperties;
-  const effectExtent = (opts.transformation as Record<string, unknown> | undefined)?.effectExtent;
-  if (effectExtent) attrs.effectExtent = effectExtent;
-  if (opts.graphicFrameLocks) attrs.graphicFrameLocks = opts.graphicFrameLocks;
-  if (opts.blipEffects) attrs.blipEffects = opts.blipEffects;
-  if (opts.useLocalDpi !== undefined) attrs.useLocalDpi = opts.useLocalDpi;
-  if (opts.fill) attrs.fill = opts.fill;
-  if (opts.effects) attrs.effects = opts.effects;
-  if (opts.tile) attrs.tile = opts.tile;
-  if (opts.runProperties) attrs.runProperties = opts.runProperties;
+  if (picture.nonVisualProperties) attrs.nonVisualProperties = picture.nonVisualProperties;
+  if (transformation?.effectExtent) attrs.effectExtent = transformation.effectExtent;
+  if (picture.graphicFrameLocks) attrs.graphicFrameLocks = picture.graphicFrameLocks;
+  if (picture.blipEffects) attrs.blipEffects = picture.blipEffects;
+  if (picture.useLocalDpi !== undefined) attrs.useLocalDpi = picture.useLocalDpi;
+  if (picture.fill) attrs.fill = picture.fill;
+  if (picture.effects) attrs.effects = picture.effects;
+  if (picture.tile) attrs.tile = picture.tile;
+  if (picture.runProperties) attrs.runProperties = picture.runProperties;
 
   return attrs;
 }
@@ -183,22 +185,23 @@ export function parseDocx(imageOpts: Record<string, unknown>): Record<string, un
  *  DocxManager.resolveImage: reflective attrs parse, then rebuild the data URL
  *  from the embedded bytes (encodeBase64 handles platform dispatch + stack
  *  guard). */
-function resolveImage(imageOpts: Record<string, unknown>, ctx: ResolveContext): JSONContent {
-  const attrs = ctx.parseNodeAttrs("image", imageOpts);
-  const data = imageOpts.data as Uint8Array | undefined;
-  const type = imageOpts.type as string | undefined;
-  if (data && type) {
-    const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : data;
+function resolveImage(picture: PictureOptions, ctx: ResolveContext): JSONContent {
+  const attrs = ctx.parseNodeAttrs("image", picture);
+  const { data, type } = picture;
+  // office-open parse always yields bytes; guard the other DataType members
+  // (string/ArrayBuffer) so the data URL is built from Uint8Array only.
+  const bytes =
+    data instanceof Uint8Array ? data : data instanceof ArrayBuffer ? new Uint8Array(data) : null;
+  if (bytes && type) {
     attrs.src = `data:image/${type};base64,${encodeBase64(bytes)}`;
   }
   return { type: "image", attrs };
 }
 
 // DOCX image run → office-open ParagraphChild `{ picture: PictureOptions }`.
-export const parseDocxInline: ParseInlineRule = {
-  match: (child) => "picture" in child,
-  convert: (child, ctx) =>
-    resolveImage((child as { picture: Record<string, unknown> }).picture, ctx),
+export const parseDocxInline: ParseInlineRule<PictureBranch> = {
+  match: (child): child is PictureBranch => "picture" in child,
+  convert: (child, ctx) => resolveImage(child.picture, ctx),
 };
 
 // ── Node-level renderHTML helpers ──

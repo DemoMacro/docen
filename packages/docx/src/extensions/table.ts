@@ -122,7 +122,7 @@ export function renderDocx(node: JSONContent): Partial<TableOptions> {
   return opts;
 }
 
-export function parseDocx(opts: Record<string, unknown>): Record<string, unknown> {
+export function parseDocx(opts: TableOptions): Record<string, unknown> {
   const attrs: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(opts)) {
     if (SKIP_KEYS.has(key)) continue;
@@ -140,33 +140,33 @@ export function parseDocx(opts: Record<string, unknown>): Record<string, unknown
  * cells, gridAfter as trailing nil-bordered cells). DocxManager dispatches
  * every SectionChild through this rule before the paragraph/passthrough
  * fallbacks. */
-export const parseDocxBlock: ParseBlockRule = {
-  match: (child) => "table" in child,
-  convert: (child, ctx) =>
-    resolveTable((child as unknown as { table: Record<string, unknown> }).table, ctx),
+export const parseDocxBlock: ParseBlockRule<Extract<SectionChild, { table: TableOptions }>> = {
+  match: (child): child is Extract<SectionChild, { table: TableOptions }> => "table" in child,
+  convert: (child, ctx) => resolveTable(child.table, ctx),
 };
 
 /** Resolve a table SectionChild into a Tiptap table node. A cell is itself a
  *  SectionChild[] block stream, resolved recursively via ctx. */
-function resolveTable(tableOpts: Record<string, unknown>, ctx: ResolveContext): JSONContent {
+function resolveTable(tableOpts: TableOptions, ctx: ResolveContext): JSONContent {
   const attrs = ctx.parseNodeAttrs("table", tableOpts);
-  const rows = (tableOpts.rows ?? []) as Record<string, unknown>[];
   const content: JSONContent[] = [];
 
+  // The walk below reads rows/cells reflectively (attrs parse + span
+  // bookkeeping) and treats the sdt/customXml/marker row variants the same as
+  // cell rows, so it views them as attribute records.
+  const rows = tableOpts.rows as unknown as Record<string, unknown>[];
+
   // Pull the referenced table style's tblBorders/tblCellMar in: office-open
-  // leaves table.borders/cellMargin reflecting only the table's own tblPr, so
+  // leaves table.borders/margins reflecting only the table's own tblPr, so
   // a "Table Grid" table (borders defined in the style) would render no grid
   // without this. The table's own real borders win; the style fills the gap
   // when the table's are all none/nil.
-  const styleProps = mergeTableStyleProps(
-    ctx.styles?.tableStyles,
-    (tableOpts.style as string | undefined) ?? null,
-  );
+  const styleProps = mergeTableStyleProps(ctx.styles?.tableStyles, tableOpts.style ?? null);
   if (styleProps.borders && allBordersNone(tableOpts.borders)) {
     tableOpts = { ...tableOpts, borders: styleProps.borders };
   }
-  if (styleProps.cellMargin && tableOpts.cellMargin == null && tableOpts.margins == null) {
-    tableOpts = { ...tableOpts, cellMargin: styleProps.cellMargin };
+  if (styleProps.margins && tableOpts.margins == null) {
+    tableOpts = { ...tableOpts, margins: styleProps.margins };
   }
 
   // Table-level default cell insets (w:tblCellMar). office-open exposes them
@@ -176,9 +176,7 @@ function resolveTable(tableOpts: Record<string, unknown>, ctx: ResolveContext): 
   // effective source (cell.attrs.margins) instead of each falling back to the
   // table. compileTableCellNode drops a cell tcMar equal to this default to
   // keep the regenerated docx in its table-level form (near-identity round-trip).
-  const tableCellMargins = (tableOpts.cellMargin ?? tableOpts.margins ?? null) as NonNullable<
-    TableCellOptions["margins"]
-  > | null;
+  const tableCellMargins = tableOpts.margins ?? null;
   // Table-level inside grid lines (tblBorders.insideHorizontal/insideVertical).
   // In CSS border-collapse the interior grid belongs to cells, not the <table>
   // element, so a REAL insideH/V is pushed onto cell sides lacking their own
@@ -187,10 +185,7 @@ function resolveTable(tableOpts: Record<string, unknown>, ctx: ResolveContext): 
   // suppress the editor's Table-Grid fallback default for borderless tables.
   // Edge cells' outer sides overlap the table's own border under
   // border-collapse (thicker wins), matching OOXML outer-vs-inner semantics.
-  const tableBorders = (tableOpts.borders ?? null) as {
-    insideHorizontal?: BorderOptions;
-    insideVertical?: BorderOptions;
-  } | null;
+  const tableBorders = tableOpts.borders ?? null;
   const realBorder = (bd: unknown): BorderOptions | null => {
     const b = bd as BorderOptions | null | undefined;
     return b && b.style && b.style !== "none" && b.style !== "nil" ? b : null;
@@ -214,7 +209,7 @@ function resolveTable(tableOpts: Record<string, unknown>, ctx: ResolveContext): 
     // widens by N columns every docx→json→docx round-trip.
     delete rowAttrs.gridAfter;
     delete rowAttrs.widthAfter;
-    const cells = (row.cells ?? []) as Record<string, unknown>[];
+    const cells = (row.cells ?? []) as unknown as Record<string, unknown>[];
     const cellNodes: JSONContent[] = [];
     const nextActiveSpans = new Map<number, JSONContent>();
     let colIdx = 0;

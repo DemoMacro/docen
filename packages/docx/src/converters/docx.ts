@@ -196,7 +196,7 @@ export class DocxManager {
     parse: (opts: RunOptions) => Record<string, unknown> | null;
   }> = [];
   private nodeRender = new Map<string, (node: JSONContent) => Record<string, unknown> | null>();
-  private nodeParse = new Map<string, (opts: Record<string, unknown>) => Record<string, unknown>>();
+  private nodeParse = new Map<string, (opts: object) => Record<string, unknown>>();
   // Declarative block parse rules collected via reflection (mirrors markParse).
   // Each block node extension declares parseDocxBlock; resolveSectionChild walks
   // them in docxExtensions order before the paragraph/passthrough fallbacks.
@@ -237,7 +237,7 @@ export class DocxManager {
           | ((node: JSONContent) => Record<string, unknown> | null)
           | undefined;
         const parse = getExtensionField(ext, "parseDocx") as
-          | ((opts: Record<string, unknown>) => Record<string, unknown>)
+          | ((opts: object) => Record<string, unknown>)
           | undefined;
         if (render) this.nodeRender.set(name, render);
         if (parse) this.nodeParse.set(name, parse);
@@ -633,7 +633,7 @@ export class DocxManager {
     const { columnWidths, tableWidth } =
       colCount > 0
         ? this.computeColumnWidths(node, colCount, opts)
-        : { columnWidths: [] as number[], tableWidth: { size: 0, type: "dxa" } };
+        : { columnWidths: [] as number[], tableWidth: { size: 0, type: "twips" } };
     const rows: Record<string, unknown>[] = [];
 
     // Track active vertical spans from previous rows. `borders` carries the
@@ -682,7 +682,7 @@ export class DocxManager {
             columnSpan: span.colspan,
             // tcW = grid columns the continuation spans — matches the restart
             // cell and keeps the merged region's width consistent.
-            ...(contWidth > 0 ? { width: { size: contWidth, type: "dxa" } } : {}),
+            ...(contWidth > 0 ? { width: { size: contWidth, type: "twips" } } : {}),
             // Inherit the restart cell's tcBorders so the merged region keeps
             // its edges (see ActiveSpan above).
             ...(span.borders ? { borders: span.borders } : {}),
@@ -786,7 +786,7 @@ export class DocxManager {
         filled.push(filled[filled.length - 1] ?? Math.floor(DEFAULT_CONTENT_TWIPS / colCount));
       }
       const total = filled.reduce((a, b) => a + b, 0);
-      return { columnWidths: filled, tableWidth: { size: total, type: "dxa" } };
+      return { columnWidths: filled, tableWidth: { size: total, type: "twips" } };
     }
 
     const widths: (number | null)[] = Array.from({ length: colCount }, () => null);
@@ -829,7 +829,7 @@ export class DocxManager {
 
     return {
       columnWidths: filled,
-      tableWidth: { size: total, type: "dxa" },
+      tableWidth: { size: total, type: "twips" },
     };
   }
 
@@ -912,7 +912,7 @@ export class DocxManager {
     if (columnWidths && columnWidths.length > 0 && colIdx != null) {
       const span = (cellNode.attrs?.colspan as number) ?? 1;
       const tw = this.sumGridSpan(columnWidths, colIdx, span);
-      if (tw > 0) cellOpts.width = { size: tw, type: "dxa" };
+      if (tw > 0) cellOpts.width = { size: tw, type: "twips" };
     }
 
     return cellOpts;

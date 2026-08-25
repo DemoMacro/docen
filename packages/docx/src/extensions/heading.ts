@@ -1,4 +1,4 @@
-import type { StylesOptions } from "@office-open/docx";
+import type { ParagraphOptions, StylesOptions } from "@office-open/docx";
 import type { JSONContent } from "@tiptap/core";
 import { Heading as BaseHeading } from "@tiptap/extension-heading";
 import type { Node } from "@tiptap/pm/model";
@@ -166,15 +166,15 @@ const SKIP_KEYS = new Set([
   "thematicBreak",
 ]);
 
-export function parseDocx(opts: Record<string, unknown>): Record<string, unknown> {
-  const resolved = typeof opts === "string" ? { text: opts } : opts;
+export function parseDocx(opts: ParagraphOptions | string): Record<string, unknown> {
+  const resolved: ParagraphOptions = typeof opts === "string" ? { text: opts } : opts;
   const attrs: Record<string, unknown> = {};
 
   // Reverse-map OOXML `heading` → Tiptap `level`. office-open lifts a
   // HeadingLevel pStyle ("Heading1".."Heading9"/"Title") into `heading`; that
   // literal IS the pStyle val, so also carry it as styleId for CSS.
   if (resolved.heading) {
-    const level = HEADING_PARSE_MAP[resolved.heading as string];
+    const level = HEADING_PARSE_MAP[resolved.heading];
     if (level) attrs.level = level;
     attrs.styleId = resolved.heading;
   }

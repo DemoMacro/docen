@@ -1,4 +1,4 @@
-import type { TableRowPropertiesOptions } from "@office-open/docx";
+import type { TableRowOptions, TableRowPropertiesOptions } from "@office-open/docx";
 import type { JSONContent } from "@tiptap/core";
 import { TableRow as BaseTableRow } from "@tiptap/extension-table";
 
@@ -30,7 +30,7 @@ export function renderDocx(node: JSONContent): Partial<TableRowPropertiesOptions
   return opts;
 }
 
-export function parseDocx(opts: Record<string, unknown>): Record<string, unknown> {
+export function parseDocx(opts: TableRowOptions): Record<string, unknown> {
   const attrs: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(opts)) {
     if (SKIP_KEYS.has(key)) continue;

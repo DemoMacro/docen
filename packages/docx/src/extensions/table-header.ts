@@ -1,3 +1,4 @@
+import type { TableCellOptions } from "@office-open/docx";
 import type { JSONContent } from "@tiptap/core";
 import { TableHeader as BaseTableHeader } from "@tiptap/extension-table";
 
@@ -35,7 +36,7 @@ export function renderDocx(node: JSONContent): Record<string, unknown> {
   // with colspan > 1.
   if (colwidth && colwidth.length > 0) {
     const totalPx = colwidth.reduce((sum, w) => sum + (w || 0), 0);
-    if (totalPx > 0) opts.width = { size: totalPx * 15, type: "dxa" };
+    if (totalPx > 0) opts.width = { size: totalPx * 15, type: "twips" };
   }
 
   // Remaining OOXML-native attrs passed through verbatim (drop nulls).
@@ -46,23 +47,18 @@ export function renderDocx(node: JSONContent): Record<string, unknown> {
   return opts;
 }
 
-export function parseDocx(opts: Record<string, unknown>): Record<string, unknown> {
-  const resolved = typeof opts === "string" ? { text: opts } : opts;
+export function parseDocx(opts: TableCellOptions): Record<string, unknown> {
+  const resolved = opts;
   const attrs: Record<string, unknown> = {};
 
   // OOXML structural fields → Tiptap structural names (default 1 for spans).
   if (resolved.columnSpan != null) attrs.colspan = resolved.columnSpan;
   if (resolved.rowSpan != null) attrs.rowspan = resolved.rowSpan;
   if (resolved.width) {
-    const w = resolved.width as { size: number; type?: string };
-    // Only dxa (twips) maps to a px colwidth without table context. office-open
-    // normalizes many tcW to pct (e.g. 24.84 = 24.84%), which has no px value
-    // here — treating that 24.84 as twips gave a 2 px sliver (round(24.84/15)).
-    // pct/auto/nil are skipped; the table's tblGrid drives column sizing and
-    // compileTableCellNode derives tcW from it on the generate side. Mirrors the
-    // table-cell.ts guard (commit 2958529) — tableHeader routes through the same
-    // width but had no type guard.
-    if (w.type === "dxa" && typeof w.size === "number" && w.size > 0) {
+    const w = resolved.width;
+    // Only twips (w:type="dxa") maps to a px colwidth without table context
+    // (see table-cell.ts for the full rationale).
+    if (w.type === "twips" && typeof w.size === "number" && w.size > 0) {
       attrs.colwidth = [Math.round(w.size / 15)];
     }
   }

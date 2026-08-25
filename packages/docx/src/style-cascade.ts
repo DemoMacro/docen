@@ -4,7 +4,11 @@
 // caret/gallery resolvers all share these primitives, so one cascade runs
 // everywhere.
 
-import type { StylesOptions } from "@office-open/docx";
+import type { StylesOptions, TableBordersOptions, TableOptions } from "@office-open/docx";
+
+/** Table-level cell margins (w:tblCellMar) — TableCellMarginOptions is not
+ *  exported, derive it from the field that carries it. */
+type TableCellMargins = NonNullable<TableOptions["margins"]>;
 
 /** A named style entry as office-open models it: BaseParagraphStyleOptions or
  *  BaseCharacterStyleOptions (both extend the internal StyleOptions, carrying
@@ -164,20 +168,12 @@ export function mergeStyleChain(
  *  borders live in the style needs this to render its grid. Returns empty when
  *  the style is absent or unknown. */
 export function mergeTableStyleProps(
-  tableStyles: unknown,
+  tableStyles: StylesOptions["tableStyles"],
   styleId: string | null | undefined,
-): { borders?: Record<string, unknown>; cellMargin?: Record<string, unknown> } {
+): { borders?: TableBordersOptions; margins?: TableCellMargins } {
   if (!styleId || !tableStyles) return {};
-  const styles = tableStyles as Array<{
-    id?: string;
-    basedOn?: string;
-    table?: {
-      borders?: Record<string, unknown>;
-      cellMargin?: Record<string, unknown>;
-    } | null;
-  }>;
-  const byId = new Map(styles.map((t) => [t.id ?? "", t]));
-  const chain: typeof styles = [];
+  const byId = new Map(tableStyles.map((t) => [t.id, t]));
+  const chain: NonNullable<StylesOptions["tableStyles"]> = [];
   const visited = new Set<string>();
   let cur: string | undefined = styleId ?? undefined;
   while (cur && !visited.has(cur)) {
@@ -187,16 +183,16 @@ export function mergeTableStyleProps(
     chain.unshift(s); // root first → children override below
     cur = s.basedOn;
   }
-  let borders: Record<string, unknown> | undefined;
-  let cellMargin: Record<string, unknown> | undefined;
+  let borders: TableBordersOptions | undefined;
+  let margins: TableCellMargins | undefined;
   for (const s of chain) {
     const t = s.table;
     if (!t) continue;
     if (t.borders) borders = t.borders;
-    if (t.cellMargin) cellMargin = t.cellMargin;
+    if (t.margins) margins = t.margins;
   }
-  const out: { borders?: Record<string, unknown>; cellMargin?: Record<string, unknown> } = {};
+  const out: { borders?: TableBordersOptions; margins?: TableCellMargins } = {};
   if (borders) out.borders = borders;
-  if (cellMargin) out.cellMargin = cellMargin;
+  if (margins) out.margins = margins;
   return out;
 }

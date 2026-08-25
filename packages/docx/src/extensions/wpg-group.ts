@@ -11,6 +11,7 @@ import type {
   GroupChildMediaData,
   ParagraphOptions,
   GroupOptions,
+  ParagraphChild,
   ShapeCoreOptions,
   ShapeOptions,
   ShapeTextBoxChild,
@@ -438,13 +439,15 @@ const attrWpgGroup = () => ({
 
 // DOCX drawing group (wpg) → opaque atom: full GroupOptions rides on
 // attrs.wpgGroup (the editor doesn't model the group interior).
-export const parseDocxInline: ParseInlineRule = {
-  match: (child) => "wpgGroup" in child,
-  convert: (child) => ({
-    type: "wpgGroup",
-    attrs: { wpgGroup: (child as { wpgGroup: unknown }).wpgGroup },
-  }),
-};
+export const parseDocxInline: ParseInlineRule<Extract<ParagraphChild, { wpgGroup: GroupOptions }>> =
+  {
+    match: (child): child is Extract<ParagraphChild, { wpgGroup: GroupOptions }> =>
+      "wpgGroup" in child,
+    convert: (child) => ({
+      type: "wpgGroup",
+      attrs: { wpgGroup: child.wpgGroup },
+    }),
+  };
 
 export const WpgGroup = Node.create({
   name: "wpgGroup",

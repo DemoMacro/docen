@@ -1,4 +1,9 @@
-import type { ParagraphOptions } from "@office-open/docx";
+import type {
+  ParagraphChild,
+  ParagraphOptions,
+  SectionChild,
+  ShapeOptions,
+} from "@office-open/docx";
 import type { DOMOutputSpec } from "@tiptap/pm/model";
 
 import { cleanAttrs } from "../converters/styles";
@@ -17,6 +22,27 @@ import { wpsShapeStyles, type WpsShapeStandalone } from "./wpg-group";
  * anchor. The engine node has no NodeView (UI-free); the editor layer extends
  * it with a two-element NodeView (outer placement/rotation, inner contentDOM).
  */
+
+/** The standalone text-box shape ParagraphChild branch. */
+type WpsBranch = Extract<ParagraphChild, { wpsShape: ShapeOptions }>;
+
+/** Block tag keys — a ShapeTextBoxChild that is not a paragraph carries one of
+ *  these (a nested block branch); a ParagraphOptions carries none. */
+const BLOCK_TAGS = [
+  "paragraph",
+  "table",
+  "toc",
+  "textbox",
+  "sdt",
+  "altChunk",
+  "customXml",
+  "bookmarkStart",
+  "bookmarkEnd",
+  "rawXml",
+] as const;
+
+const isBlockBranch = (child: object): child is SectionChild =>
+  BLOCK_TAGS.some((tag) => tag in child);
 
 const attrWpsShape = () => ({
   default: null,
@@ -37,18 +63,24 @@ const attrWpsShape = () => ({
  *  content (one node per paragraph); geometry/styling ride on attrs.wpsShape.
  *  Each paragraph's defRPr (para.run) is merged into its runs then dropped — it
  *  is the box's default run-properties, not the ¶-mark rPr (see inline note). */
-function resolveWpsShape(
-  ws: { children?: (ParagraphOptions | string)[] } & Record<string, unknown>,
-  ctx: ResolveContext,
-): JSONContent {
+function resolveWpsShape(ws: WpsBranch["wpsShape"], ctx: ResolveContext): JSONContent {
   const content: JSONContent[] = [];
   if (ws?.children) {
-    for (const para of ws.children) {
-      if (typeof para !== "object" || para === null) {
-        const node = ctx.resolveParagraph(para);
+    for (const child of ws.children) {
+      if (typeof child !== "object" || child === null) {
+        const node = ctx.resolveParagraph(child);
         if (node) content.push(node);
         continue;
       }
+      // A text-box body is paragraphs; a stray nested block branch resolves
+      // through the block stream instead of being forced through the
+      // paragraph path.
+      if (isBlockBranch(child)) {
+        const node = ctx.resolveBlock(child);
+        if (node) content.push(node);
+        continue;
+      }
+      const para: ParagraphOptions = child;
       // DrawingML defRPr (para.run) is the default run-properties for the box's
       // runs, NOT the OOXML ¶-mark rPr. Merge it into each run (matching the
       // prior atom renderWpsText: {...para.run, ...r}), then drop it from the
@@ -56,12 +88,10 @@ function resolveWpsShape(
       // ¶-mark line-height, which would override the box's grid line-height —
       // but defRPr is a run default, not a ¶ mark. Round-trip safe — runs carry
       // the full rPr, so compile emits per-run rPr and Word renders identically.
-      const defRPr = (para.run as Record<string, unknown> | undefined) ?? {};
+      const defRPr = para.run ?? {};
       const children = Array.isArray(para.children)
         ? para.children.map((c) =>
-            typeof c !== "object" || c === null
-              ? { ...defRPr, text: c as string }
-              : { ...defRPr, ...(c as object) },
+            typeof c !== "object" || c === null ? { ...defRPr, text: c } : { ...defRPr, ...c },
           )
         : undefined;
       const node = ctx.resolveParagraph({
@@ -75,16 +105,15 @@ function resolveWpsShape(
   if (content.length === 0) content.push({ type: "paragraph" });
   const { children: _omit, ...geometry } = ws ?? {};
   const node: JSONContent = { type: "wpsShape", content };
-  const cleanGeometry = cleanAttrs(geometry as Record<string, unknown>);
+  const cleanGeometry = cleanAttrs(geometry);
   if (Object.keys(cleanGeometry).length > 0) node.attrs = { wpsShape: cleanGeometry };
   return node;
 }
 
 // DOCX standalone text-box shape → office-open ParagraphChild `{ wpsShape }`.
-export const parseDocxInline: ParseInlineRule = {
-  match: (child) => "wpsShape" in child,
-  convert: (child, ctx) =>
-    resolveWpsShape((child as { wpsShape: Record<string, unknown> }).wpsShape, ctx),
+export const parseDocxInline: ParseInlineRule<WpsBranch> = {
+  match: (child): child is WpsBranch => "wpsShape" in child,
+  convert: (child, ctx) => resolveWpsShape(child.wpsShape, ctx),
 };
 
 export const WpsShape = Node.create({

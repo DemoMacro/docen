@@ -1,3 +1,4 @@
+import type { ParagraphChild } from "@office-open/docx";
 import { Plugin, TextSelection } from "@tiptap/pm/state";
 
 import { Node } from "../core";
@@ -24,8 +25,8 @@ import type { ParseInlineRule } from "./types";
  */
 
 // DOCX `<w:br w:type="page"/>` → office-open ParagraphChild `{ pageBreak: true }`.
-export const parseDocxInline: ParseInlineRule = {
-  match: (child) => "pageBreak" in child,
+export const parseDocxInline: ParseInlineRule<Extract<ParagraphChild, { pageBreak: true }>> = {
+  match: (child): child is Extract<ParagraphChild, { pageBreak: true }> => "pageBreak" in child,
   convert: () => ({ type: "pageBreak" }),
 };
 
