@@ -17,7 +17,7 @@ const key = new PluginKey<DecorationSet>("docenFontMetric");
  *  — the bounds findDiffStart/findDiffEnd report, expanded to whole top-level
  *  blocks so an incremental decoration rebuild covers the full edited
  *  paragraph(s) without leaving stale spans at the edges. Returns undefined
- *  when the docs have no content difference. Shared with PunctCompression. */
+ *  when the docs have no content difference. */
 export function getEditedBlocksRange(
   oldDoc: PmNode,
   newDoc: PmNode,
