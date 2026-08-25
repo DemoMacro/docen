@@ -1655,6 +1655,11 @@ export function compileDocument(json: JSONContent, extensions?: Extensions): Doc
 export function normalizeDocument(json: JSONContent, extensions?: Extensions): JSONContent {
   const defaults = parseDOCX(generateDOCXSync({ type: "doc", content: [] }, { extensions }));
   const baseAttrs = (defaults.attrs ?? {}) as Record<string, unknown>;
-  const userAttrs = (json.attrs ?? {}) as Record<string, unknown>;
+  // A hand-built doc (e.g. parseHTML output) carries attrs keys with null
+  // values (schema defaults) — those are "lacking", not overrides, so they
+  // must not shadow the harvested defaults.
+  const userAttrs = Object.fromEntries(
+    Object.entries((json.attrs ?? {}) as Record<string, unknown>).filter(([, v]) => v != null),
+  );
   return { ...json, attrs: { ...baseAttrs, ...userAttrs } };
 }
