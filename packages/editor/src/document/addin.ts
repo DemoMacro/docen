@@ -1,5 +1,4 @@
 import { Extension, type AnyExtension, type Editor } from "@docen/docx/core";
-import { ListKeymap } from "@tiptap/extension-list";
 import { CharacterCount, TrailingNode } from "@tiptap/extensions";
 import { search } from "prosemirror-search";
 
@@ -62,7 +61,6 @@ export function createDocumentExtensions(opts: {
     Outline.configure({ onUpdate: opts.onOutlineUpdate }),
     Search,
     TrailingNode,
-    ListKeymap,
     CharacterCount.configure({ wordCounter, textCounter }),
     // Ribbon commands as native Tiptap commands (editor.commands.<event>), so
     // #onCommand routes event → editor.commands[event](value) with no mapping

@@ -4,6 +4,7 @@ import { Paragraph as BaseParagraph } from "@tiptap/extension-paragraph";
 import type { Node } from "@tiptap/pm/model";
 
 import { indexParagraphStyles } from "../style-cascade";
+import { HTML_ORDERED_TEMP } from "./list-numbering";
 import { docxParagraphAttrs, renderTextBlock, SECTION_ATTR_KEYS } from "./utils";
 
 /**
@@ -159,8 +160,33 @@ export const Paragraph = BaseParagraph.extend({
   // HTML round-trip: h1-h6 parse back with a lifted HeadingLevel `heading`
   // attr; a <h6 data-heading-level="N"> proxy restores levels 7-9. The proxy
   // rule runs before the native h6 rule so a plain <h6> maps to level 6.
+  // A <li> maps to a flat list paragraph: nesting depth = ancestor ul/ol
+  // count, and the NEAREST list element decides bullet vs ordered (an <ol>
+  // wrapping a nested <ul> marks that sublist's items as bullets). Ordered
+  // items carry the html-ordered placeholder reference — parseHTML
+  // (converters/html.ts) rewrites each consecutive run to a fresh
+  // docen-ordered-* reference so independent lists number separately.
   parseHTML() {
     return [
+      {
+        tag: "li",
+        getAttrs: (el) => {
+          let depth = 0;
+          let nearest: string | null = null;
+          for (let p = el.parentElement; p; p = p.parentElement) {
+            const tag = p.tagName.toUpperCase();
+            if (tag === "UL" || tag === "OL") {
+              depth++;
+              nearest ??= tag;
+            }
+          }
+          // The nearest list is depth 1 → nesting level 0.
+          const level = Math.max(0, depth - 1);
+          return nearest === "OL"
+            ? { numbering: { reference: HTML_ORDERED_TEMP, level } }
+            : { bullet: { level } };
+        },
+      },
       {
         tag: "h6[data-heading-level]",
         getAttrs: (el) => {
@@ -187,7 +213,19 @@ export const Paragraph = BaseParagraph.extend({
     const { tag, level } = headingTag(
       node.attrs as { heading?: string; style?: string; outlineLevel?: number },
     );
-    return renderTextBlock(node, HTMLAttributes, tag, level);
+    // A list paragraph marks itself (kind + depth) so generateHTML can regroup
+    // consecutive list paragraphs into nested ul/ol lists — parseHTML's <li>
+    // rule reads the grouping back.
+    const attrs = node.attrs as { bullet?: { level?: number } | null; numbering?: unknown };
+    const withList = { ...HTMLAttributes };
+    if (attrs.bullet) {
+      withList["data-list"] = "bullet";
+      withList["data-list-level"] = String(attrs.bullet.level ?? 0);
+    } else if (attrs.numbering) {
+      withList["data-list"] = "ordered";
+      withList["data-list-level"] = String((attrs.numbering as { level?: number }).level ?? 0);
+    }
+    return renderTextBlock(node, withList, tag, level);
   },
 
   renderDocx,

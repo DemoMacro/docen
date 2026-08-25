@@ -28,9 +28,8 @@ import type { Extensions, JSONContent } from "../core";
 import { docxExtensions } from "../core";
 import * as blockquoteExt from "../extensions/blockquote";
 import * as detailsExt from "../extensions/details";
+import { buildListLevels, isGeneratedListReference } from "../extensions/list-numbering";
 import * as mentionExt from "../extensions/mention";
-import * as orderedListExt from "../extensions/ordered-list";
-import * as taskItemExt from "../extensions/task-item";
 import type {
   ParseAggregatorRule,
   ParseBlockRule,
@@ -159,25 +158,21 @@ interface HeaderFooterSlots {
  * DocxManager handles tree walking, child assembly, and dispatching.
  */
 export class DocxManager {
-  // Numbering definitions accumulated during compile (ordered lists). Bullet
-  // lists use office-open's built-in numbering and contribute nothing here.
+  // Numbering definitions registered during compile for editor-created lists
+  // (a `docen-bullet`/`docen-ordered-*` reference no source definition covers).
+  // Round-tripped references (`list_<numId>`) carry their definitions in the
+  // source numbering and never land here.
   private numberingConfigs: { reference: string; levels: LevelsOptions[] }[] = [];
-  // Per-orderedList instance counter — each list gets its own concrete instance
-  // so independent lists number separately, even when they share an abstractNum
-  // (same start).
-  private orderedInstanceCounter = 0;
+  // Generated list references seen on list paragraphs during this compile —
+  // each gets a definition in numberingConfigs unless the source numbering
+  // already defines it.
+  private usedListReferences = new Set<string>();
   // Styles table (styles.xml) carried through resolve() so consumers can
   // resolve a NUMERIC pStyle whose NAME is a heading (style "2" → name
   // "heading 1") — office-open lifts only pStyle literals that ARE
   // HeadingLevels ("Heading1".."Title"); real DOCX files often use numeric
   // ids. Set per resolve(); compile never reads it.
   private resolveStyles: StylesOptions | undefined;
-  // Reference → level-0 format/start, for classifying numbering paragraphs as
-  // bullet vs ordered. Built once from docOpts and shared by every resolve path
-  // that walks a block stream — section children, header/footer, and table cell
-  // children (a cell is just another SectionChild[] stream). Set per resolve();
-  // compile never reads it.
-  private resolveNumberingLookup: Map<string, { format?: string; start?: number }> | undefined;
   // DOCX conversion hooks collected via reflection from the extension list.
   // Each mark/node extension declares renderDocx/parseDocx as config fields;
   // the constructor reads them with getExtensionField so user-supplied
@@ -185,8 +180,8 @@ export class DocxManager {
   // deletion) wrap runs and are handled directly in compile/resolve, not
   // through these maps. Node hooks cover attrs↔opts only; block-level children
   // assembly (table rows/cells, details SDT, TOC entries) is owned by each
-  // block extension's parseDocxBlock rule (blockRules below); inline content,
-  // the list tree, and the compile-side tree walk stay in DocxManager.
+  // block extension's parseDocxBlock rule (blockRules below); inline content
+  // and the compile-side tree walk stay in DocxManager.
   private markRender = new Map<
     string,
     (attrs: Record<string, unknown>) => Record<string, unknown>
@@ -210,7 +205,7 @@ export class DocxManager {
   // resolveParagraph walks them before the plain-paragraph fallback.
   private paragraphRules: Array<{ name: string; rule: ParseParagraphRule }> = [];
   // Declarative aggregator rules collected via reflection (mirrors blockRules).
-  // Each list/blockquote extension declares parseDocxAggregator;
+  // A blockquote-style extension declares parseDocxAggregator;
   // resolveSectionChildren runs the generic group-by-predicate loop and hands a
   // run of paragraphs to the matching rule's build.
   private aggregatorRules: Array<{ name: string; rule: ParseAggregatorRule }> = [];
@@ -253,8 +248,8 @@ export class DocxManager {
       const inlineRule = getExtensionField(ext, "parseDocxInline") as ParseInlineRule | undefined;
       if (inlineRule) this.inlineRules.push({ name, rule: inlineRule });
       // parseDocxAggregator is collected for nodes (blockquote) and plain
-      // Extensions (listAggregator) alike — both declare the {belongs, build}
-      // pair that resolveSectionChildren's group loop dispatches to.
+      // Extensions alike — both declare the {belongs, build} pair that
+      // resolveSectionChildren's group loop dispatches to.
       const aggregator = getExtensionField(ext, "parseDocxAggregator") as
         | ParseAggregatorRule
         | undefined;
@@ -271,7 +266,7 @@ export class DocxManager {
 
   compile(json: JSONContent): DocumentOptions {
     this.numberingConfigs = [];
-    this.orderedInstanceCounter = 0;
+    this.usedListReferences = new Set();
 
     // Split doc content into sections. A non-final section's sectPr attaches to
     // its LAST paragraph's pPr (OOXML) — that paragraph carries sectionProperties/
@@ -331,6 +326,15 @@ export class DocxManager {
           | { abstractNumberings?: { reference: string; levels: LevelsOptions[] }[] }
           | undefined
       )?.abstractNumberings ?? [];
+    // Register a generated reference's definition unless the source numbering
+    // already carries one (an editor-created list re-toggling a round-tripped
+    // reference must not shadow the original marker definition).
+    for (const reference of this.usedListReferences) {
+      if (!isGeneratedListReference(reference)) continue;
+      if (origNumberingConfig.some((c) => c.reference === reference)) continue;
+      const levels = buildListLevels(reference);
+      if (levels) this.numberingConfigs.push({ reference, levels });
+    }
     const regeneratedRefs = new Set(this.numberingConfigs.map((c) => c.reference));
     const numberingConfig = [
       ...origNumberingConfig.filter((c) => !regeneratedRefs.has(c.reference)),
@@ -409,7 +413,6 @@ export class DocxManager {
     if (sections.length === 0) {
       return { type: "doc", content: [{ type: "paragraph" }] };
     }
-    this.resolveNumberingLookup = this.buildNumberingLookup(docOpts);
     // Per-resolve façade handed to block parse rules. Arrow closures capture
     // `this`; `styles` is a read-only snapshot of the instance field set above
     // (stable for this resolve's lifetime).
@@ -423,7 +426,6 @@ export class DocxManager {
       parseNodeAttrs: (type, opts) => this.nodeParse.get(type)?.(opts) ?? {},
       resolveMarks: (opts) => this.resolveMarks(opts),
       styles,
-      numberingLookup: this.resolveNumberingLookup,
     };
 
     // Resolve every section's children into blocks. A non-final section's
@@ -536,10 +538,6 @@ export class DocxManager {
         if (!imageRun) return null;
         return { paragraph: { children: [imageRun] } };
       }
-      case "bulletList":
-      case "orderedList":
-      case "taskList":
-        return this.compileListFromNode(node, 0);
       case "details":
         return this.compileDetailsNode(node);
       case "tocField": {
@@ -568,6 +566,10 @@ export class DocxManager {
   }
 
   private compileParagraphNode(node: JSONContent): ParagraphOptions {
+    // A list paragraph references its numbering definition by attr — collect
+    // the reference so compile registers a generated definition for it.
+    const numRef = (node.attrs?.numbering as { reference?: string } | null | undefined)?.reference;
+    if (typeof numRef === "string" && numRef) this.usedListReferences.add(numRef);
     const opts = this.renderNodeOpts(node);
     const childList = this.compileInlineContent(node.content);
     if (childList.length > 0) opts.children = childList;
@@ -902,92 +904,6 @@ export class DocxManager {
     return cellOpts;
   }
 
-  private compileListFromNode(node: JSONContent, level: number): SectionChild[] | null {
-    const items: SectionChild[] = [];
-    const isOrdered = node.type === "orderedList";
-    const isTask = node.type === "taskList";
-
-    // Ordered lists need an abstractNum definition (decimal). The reference is
-    // keyed by `start` so lists with the same start share one definition; each
-    // list still gets a distinct instance (independent counting).
-    const numbering = node.attrs?.numbering as string | undefined;
-    let ordered: { reference: string; instance: number } | undefined;
-    if (isOrdered && !numbering) ordered = this.registerOrderedNumbering(node);
-
-    for (const listItem of node.content ?? []) {
-      if (listItem.type !== "listItem" && listItem.type !== "taskItem") continue;
-      const checked = Boolean(listItem.attrs?.checked);
-
-      for (const child of listItem.content ?? []) {
-        if (child.type === "paragraph") {
-          const para = this.compileParagraphNode(child);
-          const paraObj =
-            typeof para === "string"
-              ? ({ text: para } as Record<string, unknown>)
-              : (para as Record<string, unknown>);
-
-          if (numbering) {
-            paraObj.numbering = { reference: numbering, level };
-          } else if (ordered) {
-            paraObj.numbering = { reference: ordered.reference, instance: ordered.instance, level };
-          } else {
-            paraObj.bullet = { level };
-          }
-
-          if (isTask) this.injectTaskCheckbox(paraObj, checked);
-
-          items.push({ paragraph: paraObj as ParagraphOptions });
-        } else if (
-          child.type === "bulletList" ||
-          child.type === "orderedList" ||
-          child.type === "taskList"
-        ) {
-          // Nested list — recurse one level deeper. Nested list paragraphs are
-          // emitted as siblings of this item's paragraph (DOCX flattens lists
-          // to a single paragraph sequence; the `level` field carries depth).
-          const nested = this.compileListFromNode(child, level + 1);
-          if (nested) items.push(...nested);
-        }
-      }
-    }
-    return items.length > 0 ? items : null;
-  }
-
-  /**
-   * Register (or reuse) an abstractNum for an ordered list's `start`, and
-   * return a fresh instance so this list counts independently of other lists
-   * that share the same definition.
-   */
-  private registerOrderedNumbering(node: JSONContent): { reference: string; instance: number } {
-    const start = Number(node.attrs?.start ?? 1) || 1;
-    let entry = this.numberingConfigs.find((c) => Number(c.levels[0]?.start ?? 1) === start);
-    if (!entry) {
-      entry = {
-        reference: `${orderedListExt.ORDERED_REFERENCE_PREFIX}-${this.numberingConfigs.length + 1}`,
-        levels: orderedListExt.buildOrderedLevels(start),
-      };
-      this.numberingConfigs.push(entry);
-    }
-    this.orderedInstanceCounter += 1;
-    return { reference: entry.reference, instance: this.orderedInstanceCounter };
-  }
-
-  /**
-   * Prepend an inline checkbox SDT to a task paragraph. The SDT is tagged
-   * "docen-task" so resolve can tell task items apart from ordinary paragraphs
-   * that happen to contain an SDT.
-   */
-  private injectTaskCheckbox(paraObj: Record<string, unknown>, checked: boolean): void {
-    let existing: unknown[] = [];
-    if (Array.isArray(paraObj.children)) {
-      existing = paraObj.children as unknown[];
-    } else if (typeof paraObj.text === "string") {
-      if (paraObj.text) existing = [{ text: paraObj.text }];
-      delete paraObj.text;
-    }
-    paraObj.children = [taskItemExt.createTaskCheckbox(checked), ...existing];
-  }
-
   /**
    * details → block-level group-SDT. The summary paragraph is tagged with a
    * fixed style so resolve can split it back out; content blocks flatten in
@@ -1210,7 +1126,7 @@ export class DocxManager {
       }
     }
     // paragraph is not a block rule — it is dispatched to by the section-children
-    // flow aggregator (list/blockquote) and the paragraph subtype resolver.
+    // flow aggregator (blockquote) and the paragraph subtype resolver.
     if ("paragraph" in child) {
       return this.resolveParagraph(child.paragraph);
     }
@@ -1237,8 +1153,8 @@ export class DocxManager {
     // Declarative paragraph dispatch: each paragraph node extension's
     // parseDocxParagraph rule (codeBlock, collected in docxExtensions order)
     // gets a chance to claim the paragraph; a non-matching or null-converting
-    // rule falls through. List paragraphs never reach here —
-    // resolveSectionChildren intercepts them upstream and rebuilds the list tree.
+    // rule falls through. List paragraphs reach the fallback like any other —
+    // their bullet/numbering attrs mirror ParagraphPropertiesOptionsBase.
     const ctx = this.resolveCtx!;
     for (const { rule } of this.paragraphRules) {
       if (rule.match(resolved, ctx)) {
@@ -1251,27 +1167,10 @@ export class DocxManager {
     return buildTextBlock("paragraph", resolved, ctx);
   }
 
-  /** reference → level-0 format/start, for classifying numbering paragraphs. */
-  private buildNumberingLookup(
-    docOpts: DocumentOptions,
-  ): Map<string, { format?: string; start?: number }> {
-    const lookup = new Map<string, { format?: string; start?: number }>();
-    const config = (
-      docOpts as { numbering?: { config?: { reference: string; levels: LevelsOptions[] }[] } }
-    ).numbering?.config;
-    if (config) {
-      for (const entry of config) {
-        const lvl0 = entry.levels[0];
-        lookup.set(entry.reference, { format: lvl0?.format, start: lvl0?.start });
-      }
-    }
-    return lookup;
-  }
-
   /**
    * Walk a SectionChild[] block stream — a section's body, a header/footer
    * slot, or a table cell's children (a cell is just another block stream). An
-   * aggregator rule (list/blockquote) claims consecutive paragraphs sharing its
+   * aggregator rule (blockquote) claims consecutive paragraphs sharing its
    * predicate and rebuilds them as a composite; everything else resolves
    * individually via resolveSectionChild. The manager owns only the generic
    * group-by loop — the predicate (belongs) + builder (build) come from each

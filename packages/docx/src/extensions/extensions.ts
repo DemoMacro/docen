@@ -2,16 +2,13 @@ import { CodeBlockLowlight } from "@tiptap/extension-code-block-lowlight";
 import { Emoji } from "@tiptap/extension-emoji";
 import { HardBreak } from "@tiptap/extension-hard-break";
 import { HorizontalRule } from "@tiptap/extension-horizontal-rule";
-import { ListItem } from "@tiptap/extension-list-item";
 import { Mathematics } from "@tiptap/extension-mathematics";
-import { TaskList } from "@tiptap/extension-task-list";
 import { Text } from "@tiptap/extension-text";
 import { TextAlign } from "@tiptap/extension-text-align";
 import { all, createLowlight } from "lowlight";
 
 import { Extension, type AnyExtension } from "../core";
 import { Blockquote } from "./blockquote";
-import { BulletList } from "./bullet-list";
 import { CodeBlock } from "./code-block";
 import { ColumnBreak } from "./column-break";
 import { Details, DetailsSummary, DetailsContent } from "./details";
@@ -19,10 +16,8 @@ import { Document } from "./document";
 import { FormattingMarks } from "./formatting-marks";
 import { Image } from "./image";
 import { Link } from "./link";
-import { ListAggregator } from "./list-aggregator";
 import { Bold, Code, Highlight, Italic, Subscript, Superscript, Underline } from "./marks";
 import { Mention } from "./mention";
-import { OrderedList } from "./ordered-list";
 import { PageBreak } from "./page-break";
 import { Paragraph } from "./paragraph";
 import { Passthrough, InlinePassthrough } from "./passthrough";
@@ -33,7 +28,6 @@ import { Table } from "./table";
 import { TableCell } from "./table-cell";
 import { TableHeader } from "./table-header";
 import { TableRow } from "./table-row";
-import { TaskItem } from "./task-item";
 import { TextStyle } from "./text-style";
 import { TocField } from "./toc-field";
 import { Insertion, Deletion } from "./track-change";
@@ -54,9 +48,6 @@ export const tiptapNodeExtensions: AnyExtension[] = [
   InlinePassthrough,
   TocField,
   Blockquote,
-  OrderedList,
-  BulletList,
-  ListItem,
   CodeBlock.configure({
     lowlight: createLowlight(all),
   }),
@@ -80,8 +71,6 @@ export const tiptapNodeExtensions: AnyExtension[] = [
   TableRow,
   TableCell,
   TableHeader,
-  TaskList,
-  TaskItem,
   TextAlign.configure({
     types: ["paragraph"],
   }),
@@ -112,26 +101,19 @@ export const docxExtensions: AnyExtension[] = [
   ...tiptapNodeExtensions,
   ...tiptapMarkExtensions,
   FormattingMarks,
-  // Plain Extensions adding no schema — ListAggregator owns the DOCX → Tiptap
-  // list-tree rebuild (declares parseDocxAggregator). Registered so DocxManager
-  // collects its rule; it never reaches the ProseMirror schema.
-  ListAggregator,
 ];
 
 // DocxKit options type
 export interface DocxKitOptions {
   bold?: Record<string, any> | false;
   blockquote?: Record<string, any> | false;
-  bulletList?: Record<string, any> | false;
   code?: Record<string, any> | false;
   codeBlock?: Record<string, any> | false;
   document?: false;
   hardBreak?: Record<string, any> | false;
   horizontalRule?: Record<string, any> | false;
   italic?: Record<string, any> | false;
-  listItem?: Record<string, any> | false;
   link?: Record<string, any> | false;
-  orderedList?: Record<string, any> | false;
   paragraph?: Record<string, any> | false;
   strike?: Record<string, any> | false;
   text?: false;
@@ -149,9 +131,6 @@ export const DocxKit = Extension.create<DocxKitOptions>({
     }
     if (this.options.blockquote !== false) {
       extensions.push(Blockquote.configure(this.options.blockquote));
-    }
-    if (this.options.bulletList !== false) {
-      extensions.push(BulletList.configure(this.options.bulletList));
     }
     if (this.options.code !== false) {
       extensions.push(Code.configure(this.options.code));
@@ -176,14 +155,8 @@ export const DocxKit = Extension.create<DocxKitOptions>({
     if (this.options.italic !== false) {
       extensions.push(Italic.configure(this.options.italic));
     }
-    if (this.options.listItem !== false) {
-      extensions.push(ListItem.configure(this.options.listItem));
-    }
     if (this.options.link !== false) {
       extensions.push(Link.configure(this.options.link));
-    }
-    if (this.options.orderedList !== false) {
-      extensions.push(OrderedList.configure(this.options.orderedList));
     }
     if (this.options.paragraph !== false) {
       extensions.push(Paragraph.configure(this.options.paragraph));
@@ -210,23 +183,27 @@ export { CodeBlockLowlight } from "@tiptap/extension-code-block-lowlight";
 export { Emoji } from "@tiptap/extension-emoji";
 export { HardBreak } from "@tiptap/extension-hard-break";
 export { HorizontalRule } from "@tiptap/extension-horizontal-rule";
-export { ListItem } from "@tiptap/extension-list-item";
 export { Mathematics } from "@tiptap/extension-mathematics";
-export { TaskList } from "@tiptap/extension-task-list";
 export { Text } from "@tiptap/extension-text";
 export { TextAlign } from "@tiptap/extension-text-align";
 export { Bold, Code, Highlight, Italic, Subscript, Superscript, Underline } from "./marks";
 export { Document, createDocument } from "./document";
 export { Paragraph } from "./paragraph";
 export { detectHeadingLevel } from "./paragraph";
+// Flat list model: generated numbering references + level builders shared by
+// compile (definition registration) and the editor list commands.
+export {
+  BULLET_GLYPHS,
+  BULLET_REFERENCE,
+  ORDERED_FORMATS,
+  ORDERED_REFERENCE_PREFIX,
+  nextOrderedReference,
+} from "./list-numbering";
 export { Blockquote } from "./blockquote";
-export { BulletList } from "./bullet-list";
-export { OrderedList } from "./ordered-list";
 export { CodeBlock } from "./code-block";
 export { ColumnBreak } from "./column-break";
 export { SectionBreak } from "./section-break";
 export { Details, DetailsSummary, DetailsContent } from "./details";
-export { TaskItem } from "./task-item";
 export { Mention } from "./mention";
 export { Table } from "./table";
 export { TableRow } from "./table-row";

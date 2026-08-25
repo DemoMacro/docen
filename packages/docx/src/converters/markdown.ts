@@ -3,6 +3,7 @@ import { MarkdownManager, Markdown } from "@tiptap/markdown";
 
 import { Extension, type JSONContent } from "../core";
 import { docxExtensions } from "../core";
+import { assignOrderedReferences, HTML_ORDERED_TEMP } from "../extensions/list-numbering";
 import { HEADING_COMPILE_MAP } from "../extensions/paragraph";
 
 /**
@@ -23,15 +24,47 @@ const HeadingTokenBridge = Extension.create({
     ),
 });
 
+/**
+ * Bridge for marked "list" tokens: the schema has no list nodes (a list item
+ * is a paragraph with bullet/numbering attrs), so the tree is flattened —
+ * each item's text block becomes one list paragraph, nested lists recurse one
+ * level deeper. Ordered items carry the html-ordered placeholder reference;
+ * parseMarkdown rewrites each run to a fresh generated reference.
+ */
+const ListTokenBridge = Extension.create({
+  name: "listTokenBridge",
+  markdownTokenName: "list",
+  parseMarkdown: (token: MarkdownToken, h: MarkdownParseHelpers) => {
+    const out: JSONContent[] = [];
+    const walk = (list: MarkdownToken, level: number): void => {
+      for (const item of list.items ?? []) {
+        const blocks = (item.tokens ?? []) as MarkdownToken[];
+        const text = blocks.find((b) => b.type === "text" || b.type === "paragraph");
+        if (text) {
+          const attrs = list.ordered
+            ? { numbering: { reference: HTML_ORDERED_TEMP, level } }
+            : { bullet: { level } };
+          out.push(h.createNode("paragraph", attrs, h.parseInline(text.tokens ?? [])));
+        }
+        for (const block of blocks) {
+          if (block.type === "list") walk(block, level + 1);
+        }
+      }
+    };
+    walk(token, 0);
+    return out;
+  },
+});
+
 const markdownManager = new MarkdownManager({
-  extensions: [...docxExtensions, HeadingTokenBridge, Markdown],
+  extensions: [...docxExtensions, HeadingTokenBridge, ListTokenBridge, Markdown],
 });
 
 /**
  * Parse Markdown string to Tiptap JSON.
  */
 export function parseMarkdown(markdown: string): JSONContent {
-  return markdownManager.parse(markdown);
+  return assignOrderedReferences(markdownManager.parse(markdown));
 }
 
 /**

@@ -367,10 +367,44 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
         if (event.data) insertText(event.data);
         break;
       // Chrome reports textarea Enter as insertLineBreak; keep both mapped to
-      // a paragraph split (Shift+Enter variants included for now).
+      // a paragraph split (Shift+Enter variants included for now). PM's
+      // splitBlock drops attrs — a list paragraph would lose its
+      // bullet/numbering on every Enter — so the split re-applies the
+      // paragraph's attrs (minus the section-close markers, which belong to
+      // the paragraph closing the section). An EMPTY list paragraph exits the
+      // list instead (Word: Enter on an empty item ends the list).
       case "insertParagraph":
       case "insertLineBreak":
-        editor.commands.command(({ state, dispatch }) => splitBlock(state as never, dispatch));
+        editor.commands.command(({ state, dispatch }) => {
+          const { $from, empty } = state.selection;
+          const parent = $from.parent;
+          if (parent.type.name !== "paragraph") {
+            return splitBlock(state as never, dispatch);
+          }
+          const attrs = parent.attrs as Record<string, unknown>;
+          const isList = attrs.bullet != null || attrs.numbering != null;
+          if (isList && empty && parent.content.size === 0) {
+            dispatch?.(
+              state.tr.setNodeMarkup($from.before(), undefined, {
+                ...attrs,
+                bullet: null,
+                numbering: null,
+              }),
+            );
+            return true;
+          }
+          if (dispatch) {
+            const tr = state.tr;
+            if (!empty) tr.deleteSelection();
+            const carried = { ...attrs };
+            delete carried.sectionProperties;
+            delete carried.sectionHeaders;
+            delete carried.sectionFooters;
+            tr.split(tr.mapping.map($from.pos), 1, [{ type: parent.type, attrs: carried }]);
+            dispatch(tr.scrollIntoView());
+          }
+          return true;
+        });
         break;
       case "deleteContentBackward":
       case "deleteWordBackward":
@@ -487,6 +521,47 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
         event.preventDefault();
         apply(edgeTarget(editor.state, head(), true), extend);
         break;
+      // Tab / Shift+Tab on list paragraphs adjusts the nesting level (Word);
+      // the browser keeps its default Tab behavior everywhere else. One
+      // transaction for the whole selection (a single undo step).
+      case "Tab": {
+        const { from, to } = editor.state.selection;
+        const patches: { pos: number; patch: Record<string, unknown> }[] = [];
+        editor.state.doc.nodesBetween(from, to, (node, pos) => {
+          if (node.type.name !== "paragraph") return true;
+          const attrs = node.attrs as Record<string, unknown>;
+          const bullet = attrs.bullet as { level?: number } | null | undefined;
+          const numbering = attrs.numbering as
+            | { reference?: string; level?: number }
+            | null
+            | undefined;
+          if (!bullet && !numbering) return true;
+          const delta = event.shiftKey ? -1 : 1;
+          const level = Math.min(8, Math.max(0, (bullet?.level ?? numbering?.level ?? 0) + delta));
+          patches.push({
+            pos,
+            patch: bullet ? { bullet: { level } } : { numbering: { ...numbering, level } },
+          });
+          return true;
+        });
+        if (patches.length > 0) {
+          event.preventDefault();
+          editor.commands.command(({ state, dispatch }) => {
+            const tr = state.tr;
+            for (const { pos, patch } of patches) {
+              const live = tr.doc.nodeAt(pos);
+              if (!live || live.type.name !== "paragraph") continue;
+              tr.setNodeMarkup(pos, undefined, {
+                ...(live.attrs as Record<string, unknown>),
+                ...patch,
+              });
+            }
+            dispatch?.(tr.scrollIntoView());
+            return true;
+          });
+        }
+        break;
+      }
       default:
         break;
     }

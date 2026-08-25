@@ -1,5 +1,7 @@
 import type { ImageAttrs } from "@docen/docx";
+import { BULLET_GLYPHS, nextOrderedReference, ORDERED_FORMATS } from "@docen/docx";
 import { Extension } from "@docen/docx/core";
+import type { Node as PMNode } from "@tiptap/pm/model";
 import type { EditorState } from "@tiptap/pm/state";
 import { NodeSelection } from "@tiptap/pm/state";
 
@@ -57,9 +59,8 @@ declare module "@tiptap/core" {
       "font-color": (value?: unknown) => ReturnType;
       border: (side?: string) => ReturnType;
       // Lists / blocks
-      "bullet-list": () => ReturnType;
-      "ordered-list": () => ReturnType;
-      "task-list": () => ReturnType;
+      "bullet-list": (variant?: string) => ReturnType;
+      "ordered-list": (variant?: string) => ReturnType;
       blockquote: () => ReturnType;
       "horizontal-rule": () => ReturnType;
       "page-break": () => ReturnType;
@@ -108,7 +109,6 @@ export const WIRED_DISPATCH: ReadonlySet<string> = new Set([
   "border",
   "bullet-list",
   "ordered-list",
-  "task-list",
   "blockquote",
   "horizontal-rule",
   "page-break",
@@ -172,6 +172,115 @@ function formattableBlock(
   return parent.type.name === "paragraph"
     ? { type: parent.type.name, attrs: (parent.attrs ?? {}) as Record<string, unknown> }
     : null;
+}
+
+// ── Flat list helpers (a list paragraph carries bullet/numbering attrs) ──
+
+/** A paragraph's list state: which list kind it belongs to, which marker
+ *  variant ("bullet"/"circle"/… / "decimal"/"lower-alpha"/…/"source" for a
+ *  round-tripped reference), its numbering reference (null for the built-in
+ *  bullet sugar), and its nesting level. kind null = not a list paragraph. */
+interface ListState {
+  kind: "bullet" | "ordered" | null;
+  variant: string;
+  reference: string | null;
+  level: number;
+}
+
+function listStateOf(attrs: Record<string, unknown>): ListState {
+  const base = { kind: null, variant: "", reference: null, level: 0 } as ListState;
+  const bullet = attrs.bullet as { level?: number } | null | undefined;
+  if (bullet) return { ...base, kind: "bullet", variant: "bullet", level: bullet.level ?? 0 };
+  const reference = (attrs.numbering as { reference?: string } | null | undefined)?.reference;
+  if (typeof reference !== "string" || !reference) return base;
+  const level = (attrs.numbering as { level?: number }).level ?? 0;
+  if (reference.startsWith("docen-bullet")) {
+    return {
+      kind: "bullet",
+      variant: reference === "docen-bullet" ? "bullet" : reference.slice("docen-bullet-".length),
+      reference,
+      level,
+    };
+  }
+  const m = /^docen-ordered(?:-([a-z-]+))?-\d+$/.exec(reference);
+  if (m) {
+    return { kind: "ordered", variant: m[1] ?? "decimal", reference, level };
+  }
+  // A round-tripped reference (list_<numId>) — treated as an ordered-style
+  // list so the toggles can clear it or restyle it.
+  return { kind: "ordered", variant: "source", reference, level };
+}
+
+/** The paragraphs the selection covers, with their positions. */
+function selectedParagraphs(state: EditorState): { pos: number; node: PMNode }[] {
+  const { from, to } = state.selection;
+  const out: { pos: number; node: PMNode }[] = [];
+  state.doc.nodesBetween(from, to, (node, pos) => {
+    if (node.type.name === "paragraph") out.push({ pos, node });
+    return true;
+  });
+  return out;
+}
+
+/** Every numbering reference the doc's list paragraphs carry — feeds the
+ *  fresh-reference allocator so a new list never collides with an existing
+ *  one's numbering. */
+function collectListReferences(doc: PMNode): string[] {
+  const refs: string[] = [];
+  doc.descendants((node) => {
+    if (node.type.name !== "paragraph") return true;
+    const ref = listStateOf(node.attrs as Record<string, unknown>).reference;
+    if (ref) refs.push(ref);
+    return false;
+  });
+  return refs;
+}
+
+/** Toggle the selected paragraphs' list: apply the requested kind/variant
+ *  (clearing the other attr — Word's bullet/numbering mutual exclusion),
+ *  keep each paragraph's nesting level, or clear the list when every selected
+ *  paragraph already carries exactly that kind+variant. */
+function toggleList(
+  state: EditorState,
+  tr: { setNodeMarkup: (pos: number, type: undefined, attrs: Record<string, unknown>) => unknown },
+  kind: "bullet" | "ordered",
+  variant: string,
+): boolean {
+  const blocks = selectedParagraphs(state);
+  if (blocks.length === 0) return false;
+  const active = blocks.every(({ node }) => {
+    const cur = listStateOf(node.attrs as Record<string, unknown>);
+    return cur.kind === kind && cur.variant === variant;
+  });
+  let orderedRef: string | null = null;
+  if (!active && kind === "ordered") {
+    orderedRef = nextOrderedReference(
+      collectListReferences(state.doc),
+      (state.doc.attrs as { numbering?: unknown }).numbering,
+      variant === "decimal" ? undefined : variant,
+    );
+  }
+  for (const { pos, node } of blocks) {
+    const attrs = node.attrs as Record<string, unknown>;
+    const level = listStateOf(attrs).level;
+    if (active) {
+      tr.setNodeMarkup(pos, undefined, { ...attrs, bullet: null, numbering: null });
+    } else if (kind === "bullet" && variant === "bullet") {
+      // The default bullet rides the built-in sugar (numId 1).
+      tr.setNodeMarkup(pos, undefined, { ...attrs, bullet: { level }, numbering: null });
+    } else {
+      const reference =
+        kind === "ordered"
+          ? orderedRef!
+          : `docen-bullet${variant === "bullet" ? "" : `-${variant}`}`;
+      tr.setNodeMarkup(pos, undefined, {
+        ...attrs,
+        bullet: null,
+        numbering: { reference, level },
+      });
+    }
+  }
+  return true;
 }
 
 /** Current font size at the selection (textStyle.size, in points); falls back
@@ -400,18 +509,22 @@ export const DocumentCommands = Extension.create({
         },
 
       // ── Lists / blocks ──
+      // Flat list toggles: stamp/clear the selected paragraphs' list attrs.
+      // The ribbon dropdown's variant picks the marker (●/○/■, decimal/alpha/
+      // roman); clicking the current variant clears the list (Word).
       "bullet-list":
-        () =>
-        ({ commands }) =>
-          commands.toggleBulletList(),
+        (variant) =>
+        ({ state, tr }) =>
+          toggleList(state, tr, "bullet", variant && BULLET_GLYPHS[variant] ? variant : "bullet"),
       "ordered-list":
-        () =>
-        ({ commands }) =>
-          commands.toggleOrderedList(),
-      "task-list":
-        () =>
-        ({ commands }) =>
-          commands.toggleTaskList(),
+        (variant) =>
+        ({ state, tr }) =>
+          toggleList(
+            state,
+            tr,
+            "ordered",
+            variant && ORDERED_FORMATS[variant] ? variant : "decimal",
+          ),
       blockquote:
         () =>
         ({ commands }) =>
@@ -521,16 +634,26 @@ export const DocumentCommands = Extension.create({
             })
             .run();
         },
-      // Promote/demote the current list item toward a multilevel depth
-      // (level-1 = top, level-2/3 = sink once/twice). No-op outside a list.
+      // Promote/demote the selected list paragraphs to a fixed multilevel
+      // depth (level-1 = top, level-2/3 = one/two in), keeping each
+      // paragraph's list kind and reference. No-op on non-list paragraphs.
       "multilevel-list":
         (level) =>
-        ({ chain }) => {
-          if (level === "level-1") return chain().liftListItem("listItem").run();
-          const c = chain();
-          const times = level === "level-3" ? 2 : 1;
-          for (let i = 0; i < times; i++) c.sinkListItem("listItem");
-          return c.run();
+        ({ state, tr }) => {
+          const target = level === "level-1" ? 0 : level === "level-3" ? 2 : 1;
+          let touched = false;
+          for (const { pos, node } of selectedParagraphs(state)) {
+            const attrs = node.attrs as Record<string, unknown>;
+            const cur = listStateOf(attrs);
+            if (!cur.kind) continue;
+            const patch =
+              cur.kind === "bullet" && cur.variant === "bullet"
+                ? { bullet: { level: target }, numbering: null }
+                : { bullet: null, numbering: { reference: cur.reference, level: target } };
+            tr.setNodeMarkup(pos, undefined, { ...attrs, ...patch });
+            touched = true;
+          }
+          return touched;
         },
       // Delete the currently selected image node (mirrors Office.js
       // InlinePicture.delete()). Only fires on an image NodeSelection.

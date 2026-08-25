@@ -99,7 +99,7 @@ declare module "@tiptap/core" {
  */
 export interface ResolveContext {
   /** Walk a SectionChild[] block stream (a cell's children, a TOC's entries, a
-   *  details body) — regroups consecutive numbering paragraphs into lists. */
+   *  details body). */
   resolveBlockStream(children: SectionChild[]): JSONContent[];
   /** Resolve one SectionChild (a TOC entry, a details body block). */
   resolveBlock(child: SectionChild): JSONContent | null;
@@ -121,9 +121,6 @@ export interface ResolveContext {
   /** The document's styles.xml model. Table rules read tableStyles; paragraph
    *  rules (Phase 2) will read paragraphStyles. */
   readonly styles: StylesOptions | undefined;
-  /** Numbering reference → level-0 format/start, for classifying list paragraphs
-   *  (bullet vs ordered, start value). Read by the list aggregator. */
-  readonly numberingLookup: Map<string, { format?: string; start?: number }> | undefined;
 }
 
 /** A declarative block parse rule. `match` is a type predicate identifying

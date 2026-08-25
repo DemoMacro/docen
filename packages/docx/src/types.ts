@@ -313,12 +313,6 @@ export interface ParagraphNode extends TiptapJSONContent {
   content?: InlineContent[];
 }
 
-export interface HeadingNode extends TiptapJSONContent {
-  type: "heading";
-  attrs: { level: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 } & ParagraphAttrs;
-  content?: Array<TextNode | HardBreakNode>;
-}
-
 export interface BlockquoteNode extends TiptapJSONContent {
   type: "blockquote";
   content?: Array<ParagraphNode>;
@@ -343,35 +337,6 @@ export interface HeaderFooterSlots {
   default?: TiptapJSONContent[];
   first?: TiptapJSONContent[];
   even?: TiptapJSONContent[];
-}
-
-// -- List nodes --
-
-export interface BulletListNode extends TiptapJSONContent {
-  type: "bulletList";
-  content?: Array<ListItemNode>;
-}
-
-export interface OrderedListNode extends TiptapJSONContent {
-  type: "orderedList";
-  attrs?: { start?: number | null };
-  content?: Array<ListItemNode>;
-}
-
-export interface TaskListNode extends TiptapJSONContent {
-  type: "taskList";
-  content?: Array<TaskItemNode>;
-}
-
-export interface ListItemNode extends TiptapJSONContent {
-  type: "listItem";
-  content?: Array<ParagraphNode>;
-}
-
-export interface TaskItemNode extends TiptapJSONContent {
-  type: "taskItem";
-  attrs?: { checked?: boolean };
-  content?: Array<ParagraphNode>;
 }
 
 // -- Table nodes --
@@ -530,13 +495,9 @@ export type InlineContent =
   | InlinePassthroughNode;
 export type BlockNode =
   | ParagraphNode
-  | HeadingNode
   | BlockquoteNode
   | CodeBlockNode
   | HorizontalRuleNode
-  | BulletListNode
-  | OrderedListNode
-  | TaskListNode
   | TableNode
   | WpsShapeNode
   | WpgGroupNode

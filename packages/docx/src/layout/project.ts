@@ -279,6 +279,19 @@ interface NumberingLevel {
  *  gap (the projection is a pure per-paragraph walk today). */
 type NumberingIndex = Map<string, NumberingLevel[]>;
 
+/** The built-in bullet list's glyphs and indentation (office-open's
+ *  DEFAULT_BULLET_LEVELS, numId 1): a `bullet {level}` paragraph — the sugar
+ *  office-open's parser emits for an unresolvable w:numPr, and what a fresh
+ *  hand-authored list carries — resolves against this table when no explicit
+ *  numbering definition covers it. */
+const BUILTIN_BULLET_GLYPHS = ["●", "○", "■", "●", "○", "■", "●", "●", "●"];
+const BUILTIN_BULLET_LEVEL = (level: number): NumberingLevel => ({
+  format: "bullet",
+  text: BUILTIN_BULLET_GLYPHS[Math.min(Math.max(level, 0), 8)],
+  leftTw: 720 * (Math.min(Math.max(level, 0), 8) + 1),
+  hangingTw: 360,
+});
+
 function indexNumberings(numbering: unknown): NumberingIndex {
   const index: NumberingIndex = new Map();
   if (!isRecord(numbering) || !Array.isArray(numbering.abstractNumberings)) return index;
@@ -455,7 +468,8 @@ function projectParagraph(p: BodyParagraph, ctx: ProjectContext): LayoutParagrap
   // Numbering: the paragraph's own numPr wins, else the style chain's. The
   // level's indent fills gaps the paragraph left unset (Word: direct w:ind
   // overrides w:lvl's); the level's marker (bullet glyph or its live counter)
-  // prepends + a tab hop to the body-text start.
+  // prepends + a tab hop to the body-text start. A `bullet {level}` paragraph
+  // (no numbering definition) resolves against the built-in bullet table.
   const numRef: Rec | null = isRecord(pPr.numbering)
     ? pPr.numbering
     : isRecord(chainPPr.numbering)
@@ -464,7 +478,10 @@ function projectParagraph(p: BodyParagraph, ctx: ProjectContext): LayoutParagrap
   const numReference = numRef ? str(numRef.reference) : undefined;
   const numLevelIndex = num(numRef?.level) ?? 0;
   const levels = numReference ? ctx.numberings.get(numReference) : undefined;
-  const level = levels?.[numLevelIndex];
+  const bulletLevel = isRecord(pPr.bullet) ? (num(pPr.bullet.level) ?? 0) : undefined;
+  const level =
+    levels?.[numLevelIndex] ??
+    (bulletLevel != null && !numRef ? BUILTIN_BULLET_LEVEL(bulletLevel) : undefined);
 
   // Indent cascade: direct w:ind > the numbering level's w:ind > style chain
   // > docDefaults. The level beating the style is Word's rule — applying a

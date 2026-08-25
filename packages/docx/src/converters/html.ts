@@ -10,6 +10,7 @@ import { parseHTML as createLinkedomDocument } from "linkedom";
 
 import type { Extensions, JSONContent } from "../core";
 import { docxExtensions } from "../core";
+import { assignOrderedReferences } from "../extensions/list-numbering";
 import { sectionLinePitchCss, sectionMarginCss } from "../extensions/utils";
 
 /** Page background — mirrors parseDOCX output (office-open parse.ts): a simple
@@ -81,6 +82,54 @@ function splitJsonSections(doc: JSONContent): JsonSection[] {
   return sections;
 }
 
+/** Regroup consecutive list paragraphs (serialized as <p data-list …>) into
+ *  nested ul/ol lists — the HTML shape every consumer expects. Flat depth
+ *  (data-list-level) drives nesting: each level deeper nests inside the
+ *  previous item's <li>; a shallower level pops back out. A non-list sibling
+ *  ends the group. Mutates `parent` in place. */
+function regroupLists(parent: HTMLElement, document: Document): void {
+  // Open lists; entry i is the list element at depth i.
+  const stack: { el: HTMLElement; kind: string }[] = [];
+  const top = () => stack[stack.length - 1];
+  const listTag = (kind: string) => (kind === "ordered" ? "ol" : "ul");
+
+  for (const node of [...parent.childNodes]) {
+    const p = node as HTMLElement;
+    const kind = p.getAttribute?.("data-list");
+    if (!kind) {
+      stack.length = 0;
+      continue;
+    }
+    const level = Number(p.getAttribute("data-list-level") ?? 0) || 0;
+    while (stack.length > level + 1) stack.pop();
+    // Open lists down to the paragraph's depth — each nests inside the
+    // previous item's <li>. A kind flip at the current depth closes the top
+    // list and opens a sibling of the new kind under the same host. A
+    // top-level list inserts at the paragraph's own position so later
+    // siblings keep their order.
+    while (stack.length < level + 1) {
+      const host = top()?.el.lastElementChild ?? top()?.el;
+      const list = document.createElement(listTag(kind));
+      if (host) host.appendChild(list);
+      else parent.insertBefore(list, p);
+      stack.push({ el: list, kind });
+    }
+    if (top().kind !== kind) {
+      stack.pop();
+      const host = top()?.el.lastElementChild ?? top()?.el;
+      const list = document.createElement(listTag(kind));
+      if (host) host.appendChild(list);
+      else parent.insertBefore(list, p);
+      stack.push({ el: list, kind });
+    }
+    p.removeAttribute("data-list");
+    p.removeAttribute("data-list-level");
+    const li = document.createElement("li");
+    li.appendChild(p);
+    top().el.appendChild(li);
+  }
+}
+
 /**
  * Serialize Tiptap JSON to an HTML string. Renders per-section: each OOXML
  * section (CT_SectPr) becomes a `<section>` carrying its own page margin
@@ -114,6 +163,7 @@ export function generateHTML(doc: JSONContent, extensions: Extensions = docxExte
         content: section.blocks,
       }).content;
       serializer.serializeFragment(fragment, { document }, sec);
+      regroupLists(sec, document);
     }
     parts.push(sec.outerHTML);
   }
@@ -137,5 +187,8 @@ export function parseHTML(
 ): JSONContent {
   const schema = getSchema(extensions);
   const { document } = createLinkedomDocument(`<!DOCTYPE html><html><body>${html}</body></html>`);
-  return ProseMirrorDOMParser.fromSchema(schema).parse(document.body, options).toJSON();
+  const json = ProseMirrorDOMParser.fromSchema(schema).parse(document.body, options).toJSON();
+  // <li> items carry the html-ordered placeholder — rewrite each run to a
+  // fresh generated reference (see list-numbering).
+  return assignOrderedReferences(json);
 }
