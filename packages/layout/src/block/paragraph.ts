@@ -136,6 +136,7 @@ export function layoutParagraph(
     widowControl: para.widowControl,
     borders: para.borders,
     indent: para.indent,
+    drawings: para.drawings,
   };
 }
 

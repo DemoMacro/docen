@@ -16,6 +16,8 @@ import {
   type LayoutBlock,
   type LayoutBorderEdge,
   type LayoutCellInsets,
+  type LayoutDrawing,
+  type LayoutDrawingMember,
   type LayoutInline,
   type LayoutLineHeight,
   type LayoutParagraph,
@@ -509,11 +511,13 @@ function projectParagraph(p: BodyParagraph, ctx: ProjectContext): LayoutParagrap
   // (an empty paragraph leg) even though the public type says otherwise.
   const runs: readonly unknown[] =
     typeof p === "string" ? [p] : (p?.children ?? (p?.text != null ? [p.text] : []));
+  const drawings = projectDrawings(runs, ctx);
   return {
     kind: "paragraph",
     inline: markerInline.length
       ? markerInline.concat(projectRuns(runs, chainRPr, docRPr, defaultTextStyle))
       : projectRuns(runs, chainRPr, docRPr, defaultTextStyle),
+    drawings: drawings.length > 0 ? drawings : undefined,
     spacing,
     indent,
     tabStops: tabStops && tabStops.length > 0 ? tabStops : undefined,
@@ -527,6 +531,145 @@ function projectParagraph(p: BodyParagraph, ctx: ProjectContext): LayoutParagrap
     widowControl: pick([pPr, chainPPr], "widowControl") !== false,
     pageBreakBefore: pPr.pageBreakBefore === true || chainPPr.pageBreakBefore === true,
   };
+}
+
+// ── floating drawings (wpg group runs) ──
+
+/** DrawingML text-inset defaults (a:bodyPr), EMU. */
+const BODY_INSET_EMU = { left: 91440, right: 91440, top: 45720, bottom: 45720 };
+
+/** Solid fill (FillOptions union) → hex; every other variant (none/gradient/
+ *  picture) carries no paintable flat color → undefined. */
+function solidFillOf(fill: unknown): string | undefined {
+  return isRecord(fill) && fill.type === "solid" ? str(fill.color) : undefined;
+}
+
+/** OutlineOptions → a stroke spec; noFill/absent → undefined. The width is
+ *  EMU, the color may sit under `color.value` (round-trip shape) or be a bare
+ *  hex string. */
+function outlineOf(outline: unknown): { px: number; color?: string } | undefined {
+  if (!isRecord(outline) || outline.type === "noFill") return undefined;
+  const widthEmu = num(outline.width);
+  if (widthEmu == null) return undefined;
+  const colorRec = isRecord(outline.color) ? outline.color : {};
+  return { px: emuToPx(widthEmu), color: str(colorRec.value) ?? str(outline.color) };
+}
+
+/** One wpg group run (GroupOptions) → a LayoutDrawing anchored to its
+ *  paragraph. Members carry the group's child coordinate space (chOff/chExt)
+ *  already resolved into px-in-box. A wps child whose `data` is not a record
+ *  is skipped — the published 0.12.3 parse stringified nested shape data, so
+ *  those members render as absence rather than corrupt geometry. */
+function projectDrawing(group: Rec, ctx: ProjectContext): LayoutDrawing | undefined {
+  const tr = isRecord(group.transformation) ? group.transformation : {};
+  const extW = num(tr.width);
+  const extH = num(tr.height);
+  if (extW == null || extH == null || extW <= 0 || extH <= 0) return undefined;
+
+  // wp:anchor offsets: column/paragraph-relative (page/margin relatives land
+  // on the same axis for now — a header decoration anchors at the content
+  // edge either way).
+  const floating = isRecord(group.floating) ? group.floating : {};
+  const hPos = isRecord(floating.horizontalPosition) ? floating.horizontalPosition : {};
+  const vPos = isRecord(floating.verticalPosition) ? floating.verticalPosition : {};
+
+  // Child coordinate space: chOff/chExt → the group's EMU box. A missing
+  // chExt means the children already live in the group's own units (1:1).
+  const chOffX = num(isRecord(group.childOffset) ? group.childOffset.x : undefined) ?? 0;
+  const chOffY = num(isRecord(group.childOffset) ? group.childOffset.y : undefined) ?? 0;
+  const chExt = isRecord(group.childExtent) ? group.childExtent : {};
+  const sx = num(chExt.cx) ? extW / (chExt.cx as number) : 1;
+  const sy = num(chExt.cy) ? extH / (chExt.cy as number) : 1;
+
+  const members: LayoutDrawingMember[] = [];
+  for (const child of Array.isArray(group.children) ? group.children : []) {
+    if (!isRecord(child)) continue;
+    const t = isRecord(child.transformation) ? child.transformation : {};
+    const offEmu = isRecord(t.offset) && isRecord(t.offset.emus) ? t.offset.emus : undefined;
+    const sizeEmu = isRecord(t.emus) ? t.emus : {};
+    if (offEmu == null) continue;
+    const x = emuToPx(((num(offEmu.x) ?? 0) - chOffX) * sx);
+    const y = emuToPx(((num(offEmu.y) ?? 0) - chOffY) * sy);
+    const width = emuToPx((num(sizeEmu.x) ?? 0) * sx);
+    const height = emuToPx((num(sizeEmu.y) ?? 0) * sy);
+    if (child.type === "wps") {
+      const data = isRecord(child.data) ? child.data : undefined;
+      if (!data) continue;
+      const fill = solidFillOf(data.fill);
+      const line = outlineOf(data.outline);
+      const preset = isRecord(data.presetGeometry) ? str(data.presetGeometry.preset) : undefined;
+      // A shape with txbx content is a text box: its paragraphs project as
+      // blocks (full style cascade) for the renderer to stack in the box. An
+      // empty children array is a shape without text, not an empty box.
+      if (Array.isArray(data.children) && data.children.length > 0) {
+        const bodyPr = isRecord(data.bodyProperties) ? data.bodyProperties : {};
+        const ins = (v: unknown, fallback: number): number =>
+          num(v) != null ? emuToPx(num(v) as number) : emuToPx(fallback);
+        members.push({
+          kind: "textBox",
+          x,
+          y,
+          width,
+          height,
+          insets: {
+            left: ins(bodyPr.lIns, BODY_INSET_EMU.left),
+            top: ins(bodyPr.tIns, BODY_INSET_EMU.top),
+            right: ins(bodyPr.rIns, BODY_INSET_EMU.right),
+            bottom: ins(bodyPr.bIns, BODY_INSET_EMU.bottom),
+          },
+          // VerticalAnchor is already full-word ("top"/"center"/"bottom");
+          // justify/distribute stretch to the box — treated as top until then.
+          anchor: bodyPr.anchor === "center" || bodyPr.anchor === "bottom" ? bodyPr.anchor : "top",
+          blocks: data.children.flatMap((p) => {
+            const block = projectParagraph(p as BodyParagraph, ctx);
+            return block ? [block] : [];
+          }),
+        });
+        continue;
+      }
+      if (preset == null) continue; // custom geometry — no canvas path yet
+      members.push({ kind: "shape", x, y, width, height, preset, fill, line });
+    } else {
+      const flip = isRecord(t.flip) ? t.flip : undefined;
+      members.push({
+        kind: "picture",
+        x,
+        y,
+        width,
+        height,
+        src: pictureSrc(child),
+        flipH: flip?.horizontal === true || undefined,
+        flipV: flip?.vertical === true || undefined,
+      });
+    }
+  }
+  return {
+    x: emuToPx(num(hPos.offset) ?? 0),
+    y: emuToPx(num(vPos.offset) ?? 0),
+    width: emuToPx(extW),
+    height: emuToPx(extH),
+    members,
+  };
+}
+
+/** Collect the wpg group runs of one paragraph (top level and one nested run
+ *  level — a drawing rides its own w:r). */
+function projectDrawings(runs: readonly unknown[], ctx: ProjectContext): LayoutDrawing[] {
+  const out: LayoutDrawing[] = [];
+  for (const run of runs) {
+    if (!isRecord(run)) continue;
+    const groups: unknown[] = [];
+    if (isRecord(run.wpgGroup)) groups.push(run.wpgGroup);
+    if (Array.isArray(run.children)) {
+      for (const inner of run.children)
+        if (isRecord(inner) && isRecord(inner.wpgGroup)) groups.push(inner.wpgGroup);
+    }
+    for (const g of groups) {
+      const d = projectDrawing(g as Rec, ctx);
+      if (d) out.push(d);
+    }
+  }
+  return out;
 }
 
 /** Inline content: text runs (rPr resolved over the paragraph default), hard

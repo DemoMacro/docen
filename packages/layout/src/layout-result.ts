@@ -7,6 +7,7 @@
 import type {
   LayoutBorderEdge,
   LayoutCellInsets,
+  LayoutDrawing,
   LayoutIndent,
   LayoutInline,
   LayoutParagraphBorderEdge,
@@ -77,6 +78,9 @@ export interface LaidOutParagraph {
   /** Indents mirrored from the input — the painter offsets each line's origin
    *  (left on every line, firstLine additionally on line 0; hanging < 0). */
   indent?: LayoutIndent;
+  /** Floating drawings anchored to this paragraph, mirrored for the painter
+   *  (the flow gives them no height). */
+  drawings?: LayoutDrawing[];
 }
 
 /** One stacked block with its content-box offset inside the stack (collapsed

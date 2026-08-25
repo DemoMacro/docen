@@ -6,6 +6,8 @@
  */
 import {
   isCjkCodeUnit,
+  stackBlocks,
+  TextMeasurer,
   type FlowItem,
   type LaidOutBlock,
   type LaidOutCell,
@@ -13,10 +15,11 @@ import {
   type LaidOutStackItem,
   type LaidOutTable,
   type LayoutBorderEdge,
+  type LayoutDrawing,
   type LayoutInline,
   type LayoutTextStyle,
 } from "@docen/layout";
-import { Image as LeaferImage, Line, Rect, Text, type IGroup } from "leafer-ui";
+import { Ellipse, Image as LeaferImage, Line, Rect, Text, type IGroup } from "leafer-ui";
 
 import type { CanvasStageContext } from "./stage";
 
@@ -195,6 +198,104 @@ function paintParagraph(
             }),
           );
         }
+      }
+    }
+  }
+  // Floating drawings anchored to this paragraph: painted at their box
+  // offset over the text (wrap none — the flow reserved them no height).
+  for (const drawing of para.drawings ?? []) {
+    paintDrawing(tree, drawing, x, y, ctx);
+  }
+}
+
+/** One floating drawing: members absolutely positioned in the drawing's box,
+ *  itself offset from the anchor paragraph's top-left. A text box stacks its
+ *  own paragraphs inside its insets (the same stackBlocks the header/footer
+ *  furniture uses). */
+function paintDrawing(
+  tree: IGroup,
+  drawing: LayoutDrawing,
+  x: number,
+  y: number,
+  ctx: PaintContext,
+): void {
+  for (const m of drawing.members) {
+    const mx = x + drawing.x + m.x;
+    const my = y + drawing.y + m.y;
+    if (m.kind === "picture") {
+      if (m.src) {
+        tree.add(
+          new LeaferImage({
+            url: m.src,
+            x: mx,
+            y: my,
+            width: m.width,
+            height: m.height,
+            // Mirrors flip around the element's (x,y) origin: shifting the
+            // origin to the far edge first makes the reflection cover the
+            // original box exactly.
+            ...(m.flipH ? { x: mx + m.width, scaleX: -1 } : {}),
+            ...(m.flipV ? { y: my + m.height, scaleY: -1 } : {}),
+          }),
+        );
+      } else {
+        tree.add(
+          new Rect({
+            x: mx,
+            y: my,
+            width: m.width,
+            height: m.height,
+            fill: "#f3f3f3",
+            stroke: "#c4c4c4",
+            strokeWidth: 1,
+          }),
+        );
+      }
+    } else if (m.kind === "shape") {
+      const fill = m.fill ? `#${m.fill}` : undefined;
+      const stroke = m.line ? (m.line.color ? `#${m.line.color}` : "#000000") : undefined;
+      const strokeWidth = m.line?.px;
+      if (m.preset === "ellipse") {
+        tree.add(
+          new Ellipse({
+            x: mx,
+            y: my,
+            width: m.width,
+            height: m.height,
+            fill,
+            stroke,
+            strokeWidth,
+          }),
+        );
+      } else {
+        // rect/roundRect and every box-like preset; unknown presets skip —
+        // an honest absence beats a wrong geometry.
+        if (m.preset !== "rect" && m.preset !== "roundRect") continue;
+        tree.add(
+          new Rect({
+            x: mx,
+            y: my,
+            width: m.width,
+            height: m.height,
+            fill,
+            stroke,
+            strokeWidth,
+            cornerRadius: m.preset === "roundRect" ? Math.min(m.width, m.height) / 6 : undefined,
+          }),
+        );
+      }
+    } else {
+      const measurer = new TextMeasurer(ctx.metrics);
+      const left = m.insets?.left ?? 0;
+      const inner = Math.max(0, m.width - left - (m.insets?.right ?? 0));
+      const laid = stackBlocks(m.blocks, inner, undefined, measurer);
+      let oy = my + (m.insets?.top ?? 0);
+      if (m.anchor !== "top") {
+        const slack = m.height - (m.insets?.top ?? 0) - (m.insets?.bottom ?? 0) - laid.heightPx;
+        oy += m.anchor === "center" ? Math.max(0, slack / 2) : Math.max(0, slack);
+      }
+      for (const item of laid.stack) {
+        paintBlock(tree, item.block, mx + left, oy + item.yPx, ctx);
       }
     }
   }

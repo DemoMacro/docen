@@ -49,6 +49,69 @@ export type LayoutInline =
   | { kind: "tab"; toPx?: number }
   | { kind: "picture"; widthPx: number; heightPx: number; src?: string };
 
+// ── floating drawings (anchored shape groups) ──
+
+/** One absolutely-positioned member of a floating drawing. Coordinates and
+ *  sizes are px in the drawing's own box (top-left corner the origin) — the
+ *  adapter already resolved the group's child coordinate space (chOff/chExt
+ *  scaling). */
+export type LayoutDrawingMember =
+  | {
+      kind: "picture";
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      /** Renderer media source (data URL); absent → an empty frame. */
+      src?: string;
+      /** Mirrored content flips (a:xfrm @flipH/@flipV). */
+      flipH?: boolean;
+      flipV?: boolean;
+    }
+  | {
+      kind: "shape";
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      /** Preset geometry (a:prstGeom @prst). The renderer maps the presets it
+       *  knows and skips the rest; custom geometry stays unprojected. */
+      preset?: string;
+      /** Solid fill, hex RRGGBB; absent → no fill. */
+      fill?: string;
+      /** Outline stroke: width in px + hex color (absent color → ink). */
+      line?: { px: number; color?: string };
+    }
+  | {
+      kind: "textBox";
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      /** Text insets px (wps:bodyPr lIns/tIns/rIns/bIns, DrawingML defaults
+       *  applied by the adapter). */
+      insets?: { left?: number; top?: number; right?: number; bottom?: number };
+      /** Vertical anchoring (bodyPr @anchor). */
+      anchor?: "top" | "center" | "bottom";
+      /** The box's content as projected blocks — the renderer stacks them
+       *  inside the box (the flow never sees them; the drawing wraps none). */
+      blocks: LayoutBlock[];
+    };
+
+/** A floating shape group (wpg:wgp under a wp:anchor, wrap none): a drawing
+ *  box anchored to its paragraph, members absolutely positioned inside. The
+ *  flow gives the anchor paragraph no extra height — Word floats the group
+ *  over the text. */
+export interface LayoutDrawing {
+  /** Box offset from the anchor paragraph's top-left (wp:anchor offsets,
+   *  relativeFrom column/paragraph resolved by the adapter), px. */
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  members: LayoutDrawingMember[];
+}
+
 // ── blocks ──
 
 /** OOXML w:spacing/@w:line + @w:lineRule, unit-resolved by the adapter. */
@@ -123,6 +186,9 @@ export interface LayoutParagraph {
   keepNext?: boolean;
   widowControl?: boolean;
   pageBreakBefore?: boolean;
+  /** Floating drawings anchored to this paragraph (wp:anchor wraps none):
+   *  painted at their box offset; the flow itself ignores them. */
+  drawings?: LayoutDrawing[];
 }
 
 /** Cell insets in px: per-cell w:tcMar, or the table's w:tblCellMar default

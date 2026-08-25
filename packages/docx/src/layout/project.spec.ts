@@ -426,6 +426,152 @@ describe("projectDocumentOptions fields and furniture", () => {
   });
 });
 
+describe("projectDocumentOptions drawings", () => {
+  it("projects a wpg group into an anchored drawing with resolved child space", () => {
+    const px = (emu: number): number => emu / 9525;
+    const { blocks } = projectDocumentOptions(
+      doc([
+        {
+          paragraph: {
+            children: [
+              {
+                wpgGroup: {
+                  children: [
+                    {
+                      type: "png",
+                      fileName: "image1.png",
+                      data: new Uint8Array([105, 105]), // "ii" → base64 "aWk="
+                      transformation: {
+                        pixels: { x: 50, y: 10 },
+                        emus: { x: 500000, y: 100000 },
+                        offset: { pixels: { x: 0, y: 0 }, emus: { x: 200000, y: 60000 } },
+                        flip: { horizontal: true },
+                      },
+                    },
+                    {
+                      type: "wps",
+                      transformation: {
+                        pixels: { x: 10, y: 2 },
+                        emus: { x: 100000, y: 20000 },
+                        offset: { pixels: { x: 0, y: 0 }, emus: { x: 300000, y: 0 } },
+                      },
+                      data: {
+                        presetGeometry: { preset: "rect" },
+                        fill: { type: "solid", color: "FF0000" },
+                        outline: { width: 12700, color: { value: "0000FF" } },
+                        children: [],
+                      },
+                    },
+                    {
+                      type: "wps",
+                      transformation: {
+                        pixels: { x: 10, y: 2 },
+                        emus: { x: 100000, y: 20000 },
+                        offset: { pixels: { x: 0, y: 0 }, emus: { x: 300000, y: 0 } },
+                      },
+                      // Custom geometry carries no canvas path — no member.
+                      data: {
+                        customGeometry: { pathList: [] },
+                        fill: { type: "none" },
+                        children: [],
+                      },
+                    },
+                    {
+                      type: "wps",
+                      transformation: {
+                        pixels: { x: 10, y: 2 },
+                        emus: { x: 100000, y: 20000 },
+                        offset: { pixels: { x: 0, y: 0 }, emus: { x: 300000, y: 0 } },
+                      },
+                      // Published 0.12.3 parse bug: nested shape data stringified.
+                      data: "[object Object]" as unknown as { children: never[] },
+                    },
+                  ],
+                  transformation: { width: 1905000, height: 1905000 },
+                  childOffset: { x: 100000, y: 50000 },
+                  childExtent: { cx: 1000000, cy: 200000 },
+                  floating: {
+                    horizontalPosition: { relative: "column", offset: 47625 },
+                    verticalPosition: { relative: "paragraph", offset: 95250 },
+                  },
+                },
+              },
+            ],
+          },
+        },
+      ]),
+    );
+    const para = blocks[0];
+    if (para?.kind !== "paragraph") throw new Error("expected paragraph");
+    const drawing = para.drawings?.[0];
+    if (!drawing) throw new Error("expected a drawing");
+    // Group box: anchor offsets + extent, EMU → px.
+    expect(drawing.x).toBeCloseTo(px(47625), 5);
+    expect(drawing.y).toBeCloseTo(px(95250), 5);
+    expect(drawing.width).toBeCloseTo(px(1905000), 5);
+    // Child space resolved: sx = 1905000/1000000, sy = 1905000/200000.
+    const [pic, shape] = drawing.members;
+    if (pic?.kind !== "picture") throw new Error("expected picture member");
+    expect(pic.x).toBeCloseTo(px((200000 - 100000) * 1.905), 5);
+    expect(pic.y).toBeCloseTo(px((60000 - 50000) * 9.525), 5);
+    expect(pic.width).toBeCloseTo(px(500000 * 1.905), 5);
+    expect(pic.src).toBe("data:image/png;base64,aWk=");
+    expect(pic.flipH).toBe(true);
+    if (shape?.kind !== "shape") throw new Error("expected shape member");
+    expect(shape.preset).toBe("rect");
+    expect(shape.fill).toBe("FF0000");
+    expect(shape.line).toEqual({ px: px(12700), color: "0000FF" });
+    // customGeometry and stringified data members are skipped, not corrupted.
+    expect(drawing.members).toHaveLength(2);
+  });
+
+  it("projects a wps text-box child's paragraphs through the style cascade", () => {
+    const { blocks } = projectDocumentOptions(
+      doc([
+        {
+          paragraph: {
+            children: [
+              {
+                wpgGroup: {
+                  children: [
+                    {
+                      type: "wps",
+                      transformation: {
+                        pixels: { x: 100, y: 10 },
+                        emus: { x: 952500, y: 95250 },
+                        offset: { pixels: { x: 0, y: 0 }, emus: { x: 0, y: 0 } },
+                      },
+                      data: {
+                        presetGeometry: { preset: "rect" },
+                        fill: { type: "none" },
+                        bodyProperties: { lIns: 0, tIns: 0, rIns: 0, bIns: 0, anchor: "center" },
+                        children: [{ alignment: "right", children: [{ text: "XX项目" }] }],
+                      },
+                    },
+                  ],
+                  transformation: { width: 952500, height: 190500 },
+                },
+              },
+            ],
+          },
+        },
+      ]),
+    );
+    const para = blocks[0];
+    if (para?.kind !== "paragraph") throw new Error("expected paragraph");
+    const box = para.drawings?.[0]?.members[0];
+    if (box?.kind !== "textBox") throw new Error("expected textBox member");
+    expect(box.anchor).toBe("center");
+    expect(box.insets).toEqual({ left: 0, top: 0, right: 0, bottom: 0 });
+    // No chOff/chExt: children live in the group's own units (1:1).
+    expect(box.width).toBeCloseTo(952500 / 9525, 5);
+    const inner = box.blocks[0];
+    if (inner?.kind !== "paragraph") throw new Error("expected projected paragraph");
+    expect(inner.align).toBe("right");
+    expect(inner.inline[0]).toMatchObject({ kind: "text", text: "XX项目" });
+  });
+});
+
 describe("projectFlowBox", () => {
   it("derives the content box from A4 paper and margins", () => {
     const flow = projectFlowBox({
