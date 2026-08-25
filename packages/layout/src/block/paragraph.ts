@@ -74,6 +74,7 @@ export function layoutParagraph(
       endInlineIndex: 0,
       maxWidthPx: usable,
       heightPx: strutPx,
+      naturalPx: strutNatural,
     });
   }
 
@@ -110,11 +111,17 @@ export function layoutParagraph(
 
   const lines: LaidOutLine[] = [];
   let heightPx = 0;
+  // Grid lattice: only the body flow (ctx.onGrid) centers grid-height lines;
+  // exact/atLeast spacing overrides the grid's height and with it the centering.
+  const gridLine =
+    pitch > 0 && ctx?.onGrid === true && spec?.rule !== "exact" && spec?.rule !== "atLeast";
   for (let i = 0; i < packed.length; i++) {
     const line = packed[i];
     lines.push({
       yPx: heightPx,
       heightPx: line.heightPx,
+      naturalPx: line.naturalPx,
+      grid: gridLine || undefined,
       firstLineIndentPx: i === 0 ? para.indent?.firstLinePx : undefined,
       endInlineIndex: line.endInlineIndex,
       items: line.items,

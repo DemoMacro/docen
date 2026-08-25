@@ -1,9 +1,12 @@
 import type {
   DocumentOptions,
+  GroupChildMediaData,
+  HorizontalPositionOptions,
   ParagraphStyleOptions,
   SectionChild,
   SectionPropertiesOptions,
   StylesOptions,
+  VerticalPositionOptions,
 } from "@office-open/docx";
 import { describe, expect, it } from "vitest";
 
@@ -505,9 +508,9 @@ describe("projectDocumentOptions drawings", () => {
     if (para?.kind !== "paragraph") throw new Error("expected paragraph");
     const drawing = para.drawings?.[0];
     if (!drawing) throw new Error("expected a drawing");
-    // Group box: anchor offsets + extent, EMU → px.
-    expect(drawing.x).toBeCloseTo(px(47625), 5);
-    expect(drawing.y).toBeCloseTo(px(95250), 5);
+    // Anchor: column/paragraph relatives carry the EMU offsets as px.
+    expect(drawing.anchor.horizontal).toEqual({ relative: "column", offsetPx: px(47625) });
+    expect(drawing.anchor.vertical).toEqual({ relative: "paragraph", offsetPx: px(95250) });
     expect(drawing.width).toBeCloseTo(px(1905000), 5);
     // Child space resolved: sx = 1905000/1000000, sy = 1905000/200000.
     const [pic, shape] = drawing.members;
@@ -523,6 +526,65 @@ describe("projectDocumentOptions drawings", () => {
     expect(shape.line).toEqual({ px: px(12700), color: "0000FF" });
     // customGeometry and stringified data members are skipped, not corrupted.
     expect(drawing.members).toHaveLength(2);
+  });
+
+  it("mirrors members of a flipH nested group within that group's box", () => {
+    const { blocks } = projectDocumentOptions(
+      doc([
+        {
+          paragraph: {
+            children: [
+              {
+                wpgGroup: {
+                  children: [
+                    {
+                      type: "wpg",
+                      transformation: {
+                        pixels: { x: 0, y: 0 },
+                        emus: { x: 500000, y: 100000 },
+                        offset: {
+                          pixels: { x: 0, y: 0 },
+                          emus: { x: 200000, y: 0 },
+                        },
+                        flip: { horizontal: true },
+                      },
+                      childOffset: { x: 0, y: 0 },
+                      childExtent: { cx: 500000, cy: 100000 },
+                      children: [
+                        {
+                          type: "wps",
+                          transformation: {
+                            pixels: { x: 0, y: 0 },
+                            emus: { x: 250000, y: 100000 },
+                            offset: { pixels: { x: 0, y: 0 }, emus: { x: 0, y: 0 } },
+                          },
+                          data: {
+                            presetGeometry: { preset: "rect" },
+                            fill: { type: "none" },
+                            children: [],
+                          },
+                        },
+                      ],
+                    },
+                  ],
+                  transformation: { width: 1905000, height: 190500 },
+                  childOffset: { x: 100000, y: 0 },
+                  childExtent: { cx: 1000000, cy: 100000 },
+                },
+              },
+            ],
+          },
+        },
+      ]),
+    );
+    const para = blocks[0];
+    if (para?.kind !== "paragraph") throw new Error("expected paragraph");
+    const member = para.drawings?.[0]?.members[0];
+    if (member?.kind !== "shape") throw new Error("expected shape member");
+    // Nested box: x = (200000-100000)×1.905 EMU = 20px, width = 100px. The
+    // child's unmirrored [20,70) span reflects to [70,120) inside that box.
+    expect(member.x).toBeCloseTo(70, 5);
+    expect(member.width).toBeCloseTo(50, 5);
   });
 
   it("projects a wps text-box child's paragraphs through the style cascade", () => {
@@ -569,6 +631,268 @@ describe("projectDocumentOptions drawings", () => {
     if (inner?.kind !== "paragraph") throw new Error("expected projected paragraph");
     expect(inner.align).toBe("right");
     expect(inner.inline[0]).toMatchObject({ kind: "text", text: "XX项目" });
+  });
+
+  it("maps every relativeFrom axis and the align/percent position forms", () => {
+    const anchorOf = (h: HorizontalPositionOptions, v: VerticalPositionOptions) => {
+      const { blocks } = projectDocumentOptions(
+        doc([
+          {
+            paragraph: {
+              children: [
+                {
+                  wpgGroup: {
+                    children: [],
+                    transformation: { width: 9525, height: 9525 },
+                    floating: { horizontalPosition: h, verticalPosition: v },
+                  },
+                },
+              ],
+            },
+          },
+        ]),
+      );
+      const para = blocks[0];
+      if (para?.kind !== "paragraph") throw new Error("expected paragraph");
+      return para.drawings?.[0]?.anchor;
+    };
+    // margin collapses onto the column axis; align rides along verbatim.
+    expect(
+      anchorOf({ relative: "margin", align: "center" }, { relative: "margin", align: "bottom" }),
+    ).toEqual({
+      horizontal: { relative: "column", align: "center" },
+      vertical: { relative: "topMargin", align: "bottom" },
+    });
+    // page axis + percentOffset (thousandths of the reference extent).
+    expect(
+      anchorOf({ relative: "page", percentOffset: 50000 }, { relative: "page", offset: 9144 }),
+    ).toEqual({
+      horizontal: { relative: "page", percent: 50 },
+      vertical: { relative: "page", offsetPx: 9144 / 9525 },
+    });
+    // Edge relatives + line→paragraph collapse.
+    expect(anchorOf({ relative: "outsideMargin" }, { relative: "line" })).toEqual({
+      horizontal: { relative: "rightMargin", offsetPx: 0 },
+      vertical: { relative: "paragraph", offsetPx: 0 },
+    });
+  });
+
+  it("flattens nested wpg groups through the composed child-space mapping", () => {
+    const { blocks } = projectDocumentOptions(
+      doc([
+        {
+          paragraph: {
+            children: [
+              {
+                wpgGroup: {
+                  children: [
+                    {
+                      type: "wpg",
+                      transformation: {
+                        pixels: { x: 50, y: 10 },
+                        emus: { x: 476250, y: 95250 },
+                        offset: { pixels: { x: 0, y: 0 }, emus: { x: 190500, y: 0 } },
+                      },
+                      childOffset: { x: 100000, y: 0 },
+                      childExtent: { cx: 238125, cy: 95250 },
+                      children: [
+                        {
+                          type: "wps",
+                          transformation: {
+                            pixels: { x: 50, y: 10 },
+                            emus: { x: 238125, y: 95250 },
+                            offset: { pixels: { x: 0, y: 0 }, emus: { x: 100000, y: 0 } },
+                          },
+                          data: {
+                            presetGeometry: { preset: "line" },
+                            outline: {
+                              width: 9525,
+                              type: "solidFill",
+                              color: { value: "C00000" },
+                              dash: "sysDash",
+                            },
+                            children: [],
+                          },
+                        },
+                      ],
+                    },
+                  ],
+                  transformation: { width: 952500, height: 95250 },
+                  childOffset: { x: 0, y: 0 },
+                  childExtent: { cx: 952500, cy: 95250 },
+                },
+              },
+            ],
+          },
+        },
+      ]),
+    );
+    const para = blocks[0];
+    if (para?.kind !== "paragraph") throw new Error("expected paragraph");
+    const [member] = para.drawings?.[0]?.members ?? [];
+    // The nested line lands at its composed position: outer 20px + inner 0.
+    if (member?.kind !== "path") throw new Error("expected path member");
+    expect(member.x).toBeCloseTo(20, 5);
+    expect(member.y).toBe(0);
+    expect(member.width).toBeCloseTo(50, 5);
+    expect(member.height).toBeCloseTo(10, 5);
+    expect(member.d).toBe("M 0 0 L 50 10");
+    expect(member.line).toMatchObject({ px: 1, color: "C00000", dash: "sysDash" });
+  });
+
+  it("projects custom geometry into a scaled SVG path member", () => {
+    const { blocks } = projectDocumentOptions(
+      doc([
+        {
+          paragraph: {
+            children: [
+              {
+                wpgGroup: {
+                  children: [
+                    {
+                      type: "wps",
+                      transformation: {
+                        pixels: { x: 100, y: 5 },
+                        emus: { x: 952500, y: 47625 },
+                        offset: { pixels: { x: 0, y: 0 }, emus: { x: 0, y: 0 } },
+                      },
+                      data: {
+                        customGeometry: {
+                          pathList: [
+                            {
+                              w: 100,
+                              h: 50,
+                              commands: [
+                                { command: "moveTo", point: { x: "0", y: "25" } },
+                                {
+                                  command: "cubicBezTo",
+                                  points: [
+                                    { x: "10", y: "0" },
+                                    { x: "20", y: "50" },
+                                    { x: "30", y: "25" },
+                                  ],
+                                },
+                                { command: "lineTo", point: { x: "100", y: "25" } },
+                                { command: "close" },
+                              ],
+                            },
+                          ],
+                        },
+                        fill: { type: "none" },
+                        outline: {
+                          width: 15875,
+                          type: "solidFill",
+                          color: { value: "7D181C" },
+                          cap: "round",
+                          join: "round",
+                        },
+                        children: [],
+                      },
+                    },
+                  ],
+                  transformation: { width: 952500, height: 47625 },
+                },
+              },
+            ],
+          },
+        },
+      ]),
+    );
+    const para = blocks[0];
+    if (para?.kind !== "paragraph") throw new Error("expected paragraph");
+    const [member] = para.drawings?.[0]?.members ?? [];
+    if (member?.kind !== "path") throw new Error("expected path member");
+    // Path space 100×50 → box 100×5 px: y coordinates scale ×0.1.
+    expect(member.d).toBe("M 0 2.5 C 10 0 20 5 30 2.5 L 100 2.5 Z");
+    expect(member.line).toEqual({ px: 15875 / 9525, color: "7D181C", cap: "round", join: "round" });
+  });
+
+  it("resolves object-shaped colors, srcRect crops, and broken svg gradients", () => {
+    const svg =
+      '<svg xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="wps{x}@#db8c90@#7d181c">' +
+      '<stop offset="0" stop-color="#db8c90"/><stop offset="1" stop-color="#7d181c"/>' +
+      "</linearGradient></defs>" +
+      '<path fill="url(#wps{x}@#db8c90@#7d181c)" d="M0 0"/></svg>';
+    const { blocks } = projectDocumentOptions(
+      doc([
+        {
+          paragraph: {
+            children: [
+              {
+                wpgGroup: {
+                  children: [
+                    {
+                      // The parsed svg entry carries its bytes at the top
+                      // level (createPictureData spread) — SvgMediaData's
+                      // declared shape has not caught up, hence the cast.
+                      type: "svg",
+                      fileName: "band.svg",
+                      data: new TextEncoder().encode(svg),
+                      transformation: {
+                        pixels: { x: 10, y: 1 },
+                        emus: { x: 95250, y: 9525 },
+                        offset: { pixels: { x: 0, y: 0 }, emus: { x: 0, y: 0 } },
+                      },
+                    } as unknown as GroupChildMediaData,
+                    {
+                      type: "png",
+                      fileName: "stripes.png",
+                      data: new Uint8Array([105]),
+                      transformation: {
+                        pixels: { x: 10, y: 1 },
+                        emus: { x: 95250, y: 9525 },
+                        offset: { pixels: { x: 0, y: 0 }, emus: { x: 0, y: 0 } },
+                      },
+                      sourceRectangle: { left: 12632, top: 34824, bottom: 36285 },
+                    },
+                    {
+                      type: "wps",
+                      transformation: {
+                        pixels: { x: 10, y: 1 },
+                        emus: { x: 95250, y: 9525 },
+                        offset: { pixels: { x: 0, y: 0 }, emus: { x: 0, y: 0 } },
+                      },
+                      data: {
+                        presetGeometry: { preset: "rect" },
+                        fill: { type: "solid", color: { value: "7D181C" } },
+                        children: [
+                          {
+                            children: [
+                              {
+                                text: "XX项目",
+                                color: { val: "FFFFFF", themeColor: "background1" },
+                              },
+                            ],
+                          },
+                        ],
+                      },
+                    },
+                  ],
+                  transformation: { width: 952500, height: 95250 },
+                },
+              },
+            ],
+          },
+        },
+      ]),
+    );
+    const para = blocks[0];
+    if (para?.kind !== "paragraph") throw new Error("expected paragraph");
+    const [band, stripes, box] = para.drawings?.[0]?.members ?? [];
+    if (band?.kind !== "picture" || typeof band.src !== "string") {
+      throw new Error("expected picture member");
+    }
+    // The WPS gradient (stop average #ac5256) flattens; the def drops.
+    const decoded = atob(band.src.split(",")[1] ?? "");
+    expect(decoded).toContain("#ac5256");
+    expect(decoded).not.toContain("linearGradient");
+    if (stripes?.kind !== "picture") throw new Error("expected stripes member");
+    expect(stripes.crop).toEqual({ left: 0.12632, top: 0.34824, right: 0, bottom: 0.36285 });
+    if (box?.kind !== "textBox") throw new Error("expected textBox member");
+    expect(box.blocks[0]).toMatchObject({
+      kind: "paragraph",
+      inline: [{ kind: "text", style: { color: "FFFFFF" } }],
+    });
   });
 });
 

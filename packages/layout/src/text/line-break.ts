@@ -52,6 +52,9 @@ export interface PackedLine {
   /** Resolved height (resolver, floored by pictures on the line and — when
    *  the line has no text — by the paragraph strut). */
   heightPx: number;
+  /** The resolver's `naturalPx` input (max text natural height, 0 when the
+   *  line has no text) — mirrored for the painter's half-leading math. */
+  naturalPx: number;
 }
 
 export interface PackLinesOptions {
@@ -377,6 +380,7 @@ export function packLines(inline: LayoutInline[], opts: PackLinesOptions): Packe
       endInlineIndex,
       maxWidthPx: maxWidth,
       heightPx: height,
+      naturalPx,
     });
     y += height;
     lineIndex++;

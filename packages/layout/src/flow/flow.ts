@@ -66,7 +66,7 @@ class Flow {
   ) {}
 
   private get ctx(): LayoutBlockContext {
-    return { linePitchPx: this.opts.linePitchPx };
+    return { linePitchPx: this.opts.linePitchPx, onGrid: true };
   }
 
   private remaining(): number {

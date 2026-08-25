@@ -69,6 +69,35 @@ describe("layoutParagraph line-height semantics", () => {
     if (out.kind === "paragraph") expect(out.heightPx).toBeCloseTo(37.5, 4);
   });
 
+  it("flags grid lines only for the body flow (onGrid) and non-overriding spacing", () => {
+    const spec = { lineHeight: { rule: "multiple" as const, factor: 2 }, beforePx: 0, afterPx: 0 };
+    const body = layoutBlock(
+      para({ spacing: spec }),
+      500,
+      { linePitchPx: 25, onGrid: true },
+      measurer,
+    );
+    if (body.kind === "paragraph") {
+      expect(body.lines[0].grid).toBe(true);
+      expect(body.lines[0].naturalPx).toBeGreaterThan(0);
+    }
+    // Furniture/text-box stacks pass the pitch without onGrid: heights still
+    // scale, but the line never carries the lattice-placement flag.
+    const stack = layoutBlock(para({ spacing: spec }), 500, { linePitchPx: 25 }, measurer);
+    if (stack.kind === "paragraph") {
+      expect(stack.heightPx).toBeCloseTo(50, 4);
+      expect(stack.lines[0].grid).toBeUndefined();
+    }
+    // exact/atLeast own the height outright — never a grid line.
+    const exact = layoutBlock(
+      para({ spacing: { lineHeight: { rule: "exact", px: 40 }, beforePx: 0, afterPx: 0 } }),
+      500,
+      { linePitchPx: 25, onGrid: true },
+      measurer,
+    );
+    if (exact.kind === "paragraph") expect(exact.lines[0].grid).toBeUndefined();
+  });
+
   it("snaps a CJK line up to a whole pitch multiple, Latin to max(natural, pitch)", () => {
     const pitch = Math.ceil(NOTO_NATURAL) + 3; // CJK natural < pitch < 2×pitch
     const cjkStyle = { family: { latin: "Inter", eastAsia: "Noto Sans SC" }, sizePx: 16 };

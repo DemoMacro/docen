@@ -39,6 +39,12 @@ export type LaidOutLineItem = LaidOutTextItem | LaidOutPictureItem;
 export interface LaidOutLine {
   yPx: number;
   heightPx: number;
+  /** The line's max text natural height (0 when no text) — the half-leading
+   *  reference when a grid span centers its content. */
+  naturalPx: number;
+  /** The height is docGrid-derived in the body flow: Word centers the natural
+   *  box in the span; non-grid slack sinks below the text instead. */
+  grid?: boolean;
   /** This line's own first-line indent (w:ind/@w:firstLine, negative for a
    *  hanging indent) — set on the paragraph's FIRST line only, so a split
    * tail's leading line (mid-paragraph, mid-page) carries none. The painter

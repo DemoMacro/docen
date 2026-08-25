@@ -67,6 +67,9 @@ export type LayoutDrawingMember =
       /** Mirrored content flips (a:xfrm @flipH/@flipV). */
       flipH?: boolean;
       flipV?: boolean;
+      /** Source rectangle crop (a:srcRect) as fractions of the image edge
+       *  (0-1, each side inward); the painted region is the remainder. */
+      crop?: { left: number; top: number; right: number; bottom: number };
     }
   | {
       kind: "shape";
@@ -81,6 +84,26 @@ export type LayoutDrawingMember =
       fill?: string;
       /** Outline stroke: width in px + hex color (absent color → ink). */
       line?: { px: number; color?: string };
+    }
+  | {
+      kind: "path";
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      /** SVG path data in box coordinates (0,0 … width,height) — the adapter
+       *  scaled the geometry's own space (custGeom path w/h) into the box. */
+      d: string;
+      /** Solid fill, hex RRGGBB; absent → no fill. */
+      fill?: string;
+      /** Outline stroke (a:ln): width px + hex color + cap/join/dash. */
+      line?: {
+        px: number;
+        color?: string;
+        cap?: "round" | "square" | "flat";
+        join?: "round" | "bevel" | "miter";
+        dash?: string;
+      };
     }
   | {
       kind: "textBox";
@@ -98,18 +121,46 @@ export type LayoutDrawingMember =
       blocks: LayoutBlock[];
     };
 
-/** A floating shape group (wpg:wgp under a wp:anchor, wrap none): a drawing
- *  box anchored to its paragraph, members absolutely positioned inside. The
- *  flow gives the anchor paragraph no extra height — Word floats the group
- *  over the text. */
+/** A floating shape group (wpg:wgp under a wp:anchor): a drawing box anchored
+ *  to its paragraph, members absolutely positioned inside. The flow gives the
+ *  anchor paragraph no extra height — the anchor's `relative` axes resolve to
+ *  page geometry at paint time (the painter owns the page box).
+ *
+ *  Word's eight relativeFrom values collapse onto these four semantic axes
+ *  per side; the axes the adapter cannot resolve yet (character/line anchor
+ *  points, inside/outside under mirrored margins) land on their nearest
+ *  axis, a registered gap. */
+export interface LayoutDrawingAnchor {
+  horizontal: {
+    /** column = the content box; leftMargin/rightMargin = its edges; page =
+     *  the page box. margin/insideMargin → column, character → column,
+     *  outsideMargin → rightMargin (unmirrored). */
+    relative: "column" | "leftMargin" | "rightMargin" | "page";
+    /** px from the reference box's left edge (posOffset), or a fraction of
+     *  the reference box's width (percentOffset / 1000). Exclusive with align. */
+    offsetPx?: number;
+    percent?: number;
+    /** Alignment inside the reference box (inside→left, outside→right). */
+    align?: "left" | "center" | "right";
+  };
+  vertical: {
+    /** paragraph = the anchor paragraph's top; topMargin/bottomMargin = the
+     *  content box's edges; page = the page box. margin/insideMargin →
+     *  topMargin, line → paragraph, outsideMargin → bottomMargin. */
+    relative: "paragraph" | "topMargin" | "bottomMargin" | "page";
+    offsetPx?: number;
+    percent?: number;
+    align?: "top" | "center" | "bottom";
+  };
+}
+
 export interface LayoutDrawing {
-  /** Box offset from the anchor paragraph's top-left (wp:anchor offsets,
-   *  relativeFrom column/paragraph resolved by the adapter), px. */
-  x: number;
-  y: number;
+  anchor: LayoutDrawingAnchor;
   width: number;
   height: number;
   members: LayoutDrawingMember[];
+  /** w:behindDoc — painted under the text layer (text strokes stay visible). */
+  behind?: boolean;
 }
 
 // ── blocks ──
@@ -309,6 +360,11 @@ export interface LayoutBlockContext {
    *  grid. CJK lines ceil to a whole pitch multiple; Latin lines floor at
    *  max(natural, pitch); table cells floor at max(natural, pitch). */
   linePitchPx?: number;
+  /** True only for the main body flow: its grid-height lines center the
+   *  natural text box in the span (the docGrid lattice). Header/footer and
+   *  text-box stacks scale heights by the pitch but place text at the line
+   *  top — Word keeps the lattice to the body (verified vs Word). */
+  onGrid?: boolean;
   /** True inside a table cell: the grid snap floors instead of ceils (the
    *  row's trHeight governs, not the line box). Cells also clear float
    *  zones — a cell's width is its column, not the page flow. */

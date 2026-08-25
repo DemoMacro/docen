@@ -16,12 +16,37 @@ import {
   type LaidOutTable,
   type LayoutBorderEdge,
   type LayoutDrawing,
+  type LayoutDrawingMember,
   type LayoutInline,
   type LayoutTextStyle,
 } from "@docen/layout";
-import { Ellipse, Image as LeaferImage, Line, Rect, Text, type IGroup } from "leafer-ui";
+import {
+  Ellipse,
+  Image as LeaferImage,
+  Line,
+  Path as LeaferPath,
+  Rect,
+  Text,
+  type IGroup,
+} from "leafer-ui";
 
 import type { CanvasStageContext } from "./stage";
+
+/** OOXML prstDash tokens → dash patterns in px (line-width units, the host's
+ *  preset line styles); unlisted tokens render solid. */
+const PRSTDASH_PATTERN: Record<string, number[]> = {
+  dot: [1, 3],
+  sysDot: [1, 1],
+  dash: [4, 3],
+  sysDash: [4, 2],
+  dashDot: [4, 3, 1, 3],
+  sysDashDot: [4, 2, 1, 2],
+  dashDotDot: [4, 3, 1, 3, 1, 3],
+  sysDashDotDot: [4, 2, 1, 2, 1, 2],
+  lgDash: [12, 3],
+  lgDashDot: [12, 3, 1, 3],
+  lgDashDotDot: [12, 3, 1, 3, 1, 3],
+};
 
 /** The paint context for one page — the stage context plus the page's own
  *  identity (page-number fields resolve against it). */
@@ -84,6 +109,10 @@ function paintParagraph(
   y: number,
   ctx: PaintContext,
 ): void {
+  // behindDoc drawings first — everything below sits on top of them.
+  for (const drawing of para.drawings ?? []) {
+    if (drawing.behind) paintDrawing(tree, drawing, x, y, ctx);
+  }
   // w:pBdr horizontal rules (the "Education" underline shape): between the
   // text and `spacePx` below it, spanning the wrapping width.
   for (const side of ["top", "bottom"] as const) {
@@ -104,6 +133,11 @@ function paintParagraph(
   }
   for (const line of para.lines) {
     const lineY = y + line.yPx;
+    // In-line vertical placement: a docGrid body line centers its natural box
+    // in the grid span (half-leading); every other regime (multiple without a
+    // grid, atLeast, text boxes, headers/footers) anchors the text at the line
+    // top and sinks the slack below. Both verified against the reference PDF.
+    const pad = line.grid ? Math.max(0, (line.heightPx - line.naturalPx) / 2) : 0;
     // Line x origin: the left indent (every line) plus THIS line's own
     // first-line indent — a split tail's leading line carries none (it is
     // mid-paragraph), so the flag lives on the line, not the line index.
@@ -125,13 +159,7 @@ function paintParagraph(
       const inline: LayoutInline | undefined = para.inline[item.inlineIndex];
       if (!inline) continue;
       if (item.kind === "text" && inline.kind === "text") {
-        // Half-leading: center the font's natural box in the line box (the
-        // CSS/DOM model), so baselines line up with the DOM route.
         const family = familyOf(inline.style, item.text);
-        const boxPx =
-          inline.style.sizePx *
-          ctx.metrics.normalRatio({ family, bold: inline.style.bold === true });
-        const pad = Math.max(0, (line.heightPx - boxPx) / 2);
         const intervalPx = justified ? rights[itemIndex] - item.xPx : undefined;
         // A page-number field paints its live value; the measured `text` was
         // only a placeholder.
@@ -179,7 +207,7 @@ function paintParagraph(
             new LeaferImage({
               url: inline.src,
               x: lineX + item.xPx,
-              y: lineY,
+              y: lineY + pad,
               width: item.widthPx,
               height: item.heightPx,
             }),
@@ -201,17 +229,18 @@ function paintParagraph(
       }
     }
   }
-  // Floating drawings anchored to this paragraph: painted at their box
-  // offset over the text (wrap none — the flow reserved them no height).
+  // Floating drawings anchored to this paragraph: wrap-none boxes painted
+  // over the text — the flow reserved them no height. (behindDoc ones went
+  // first, above.)
   for (const drawing of para.drawings ?? []) {
-    paintDrawing(tree, drawing, x, y, ctx);
+    if (!drawing.behind) paintDrawing(tree, drawing, x, y, ctx);
   }
 }
 
 /** One floating drawing: members absolutely positioned in the drawing's box,
- *  itself offset from the anchor paragraph's top-left. A text box stacks its
- *  own paragraphs inside its insets (the same stackBlocks the header/footer
- *  furniture uses). */
+ *  itself placed by the anchor spec against the page geometry. A text box
+ *  stacks its own paragraphs inside its insets (the same stackBlocks the
+ *  header/footer furniture uses). */
 function paintDrawing(
   tree: IGroup,
   drawing: LayoutDrawing,
@@ -219,11 +248,50 @@ function paintDrawing(
   y: number,
   ctx: PaintContext,
 ): void {
+  const { flow } = ctx;
+  // The reference box each axis resolves against: the content box (column /
+  // topMargin), the page box, an edge (leftMargin/rightMargin/bottomMargin),
+  // or — vertically — the anchor paragraph's own top (extent 0: offsets and
+  // align both hang off the edge itself).
+  const hBox =
+    drawing.anchor.horizontal.relative === "page"
+      ? { left: 0, width: flow.pageWidthPx }
+      : drawing.anchor.horizontal.relative === "rightMargin"
+        ? { left: flow.contentLeftPx + flow.contentWidthPx, width: 0 }
+        : drawing.anchor.horizontal.relative === "leftMargin"
+          ? { left: flow.contentLeftPx, width: 0 }
+          : { left: flow.contentLeftPx, width: flow.contentWidthPx };
+  const vBox =
+    drawing.anchor.vertical.relative === "page"
+      ? { top: 0, height: flow.pageHeightPx }
+      : drawing.anchor.vertical.relative === "paragraph"
+        ? { top: y, height: 0 }
+        : drawing.anchor.vertical.relative === "bottomMargin"
+          ? { top: flow.contentTopPx + flow.contentHeightPx, height: 0 }
+          : { top: flow.contentTopPx, height: flow.contentHeightPx };
+  // Axis position: align inside the reference box, else the offset (px, or a
+  // fraction of the reference extent) from its leading edge.
+  const axisPos = (
+    spec: { offsetPx?: number; percent?: number; align?: string },
+    base: number,
+    extent: number,
+    size: number,
+  ): number => {
+    if (spec.align === "center") return base + (extent - size) / 2;
+    if (spec.align === "right" || spec.align === "bottom") return base + extent - size;
+    if (spec.align) return base; // left / top
+    if (spec.percent != null) return base + spec.percent * extent;
+    return base + (spec.offsetPx ?? 0);
+  };
+  const boxX = axisPos(drawing.anchor.horizontal, hBox.left, hBox.width, drawing.width);
+  const boxY = axisPos(drawing.anchor.vertical, vBox.top, vBox.height, drawing.height);
   for (const m of drawing.members) {
-    const mx = x + drawing.x + m.x;
-    const my = y + drawing.y + m.y;
+    const mx = boxX + m.x;
+    const my = boxY + m.y;
     if (m.kind === "picture") {
-      if (m.src) {
+      if (m.src && m.crop) {
+        addCroppedImage(tree, m, mx, my);
+      } else if (m.src) {
         tree.add(
           new LeaferImage({
             url: m.src,
@@ -251,6 +319,26 @@ function paintDrawing(
           }),
         );
       }
+    } else if (m.kind === "path") {
+      tree.add(
+        new LeaferPath({
+          x: mx,
+          y: my,
+          width: m.width,
+          height: m.height,
+          // Leafer's Path takes SVG path data under `path` (its `data` holds
+          // the parsed command array — a string there paints nothing).
+          path: m.d,
+          fill: m.fill ? `#${m.fill}` : undefined,
+          stroke: m.line ? (m.line.color ? `#${m.line.color}` : "#000000") : undefined,
+          strokeWidth: m.line?.px,
+          strokeCap:
+            m.line?.cap === "round" ? "round" : m.line?.cap === "square" ? "square" : undefined,
+          strokeJoin:
+            m.line?.join === "round" ? "round" : m.line?.join === "bevel" ? "bevel" : undefined,
+          dashPattern: m.line?.dash ? PRSTDASH_PATTERN[m.line.dash] : undefined,
+        }),
+      );
     } else if (m.kind === "shape") {
       const fill = m.fill ? `#${m.fill}` : undefined;
       const stroke = m.line ? (m.line.color ? `#${m.line.color}` : "#000000") : undefined;
@@ -299,6 +387,40 @@ function paintDrawing(
       }
     }
   }
+}
+
+/** A cropped picture (a:srcRect): Leafer paints whole sources only, so the
+ *  sub-region renders through an offscreen canvas copy, added when decoded
+ *  (the stage re-paints on the next sync regardless). */
+function addCroppedImage(
+  tree: IGroup,
+  m: Extract<LayoutDrawingMember, { kind: "picture" }>,
+  mx: number,
+  my: number,
+): void {
+  const el = new Image();
+  el.onload = () => {
+    const sx = Math.round(m.crop!.left * el.naturalWidth);
+    const sy = Math.round(m.crop!.top * el.naturalHeight);
+    const sw = Math.max(1, el.naturalWidth - sx - Math.round(m.crop!.right * el.naturalWidth));
+    const sh = Math.max(1, el.naturalHeight - sy - Math.round(m.crop!.bottom * el.naturalHeight));
+    const canvas = document.createElement("canvas");
+    canvas.width = sw;
+    canvas.height = sh;
+    canvas.getContext("2d")?.drawImage(el, sx, sy, sw, sh, 0, 0, sw, sh);
+    tree.add(
+      new LeaferImage({
+        url: canvas.toDataURL("image/png"),
+        x: mx,
+        y: my,
+        width: m.width,
+        height: m.height,
+        ...(m.flipH ? { x: mx + m.width, scaleX: -1 } : {}),
+        ...(m.flipV ? { y: my + m.height, scaleY: -1 } : {}),
+      }),
+    );
+  };
+  el.src = m.src!;
 }
 
 function paintTable(

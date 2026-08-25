@@ -17,6 +17,7 @@ import {
   type LayoutBorderEdge,
   type LayoutCellInsets,
   type LayoutDrawing,
+  type LayoutDrawingAnchor,
   type LayoutDrawingMember,
   type LayoutInline,
   type LayoutLineHeight,
@@ -100,6 +101,51 @@ const MIME_BY_TYPE: Record<string, string> = {
   svg: "image/svg+xml",
 };
 
+/** WPS-authored svgBlip art names its gradients with NCName-invalid ids
+ *  (`wps{guid}@#c1@#c2`): a strict CSS parser cannot resolve those paint
+ *  references, and the host renderer falls back to the average of the
+ *  gradient's stop colors. Mirror that fallback so WPS-exported art matches
+ *  MS Office output; well-formed gradients (valid ids) pass through. */
+function flattenBrokenSvgGradients(svg: string): string {
+  const averages = new Map<string, string>();
+  for (const m of svg.matchAll(
+    /<linearGradient\b[^>]*\bid="([^"]+)"[^>]*>([\s\S]*?)<\/linearGradient>/g,
+  )) {
+    const [whole, id, body] = m;
+    if (!/[{}@#]/.test(id)) continue;
+    const stops = [...body.matchAll(/stop-color\s*[:=]\s*"?#([0-9a-fA-F]{6})"?/g)].map((s) => s[1]);
+    if (stops.length === 0) continue;
+    const sum = [0, 0, 0];
+    for (const h of stops) {
+      sum[0] += parseInt(h.slice(0, 2), 16);
+      sum[1] += parseInt(h.slice(2, 4), 16);
+      sum[2] += parseInt(h.slice(4, 6), 16);
+    }
+    averages.set(
+      id,
+      `#${sum
+        .map((v) =>
+          Math.round(v / stops.length)
+            .toString(16)
+            .padStart(2, "0"),
+        )
+        .join("")}`,
+    );
+    svg = svg.replace(whole, "");
+  }
+  for (const [id, color] of averages) svg = svg.split(`url(#${id})`).join(color);
+  return svg;
+}
+
+/** Bytes → base64 (btoa is universal: browsers and Node ≥ 16). */
+function base64Of(bytes: Uint8Array): string {
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(bin);
+}
+
 /** PictureOptions (type + data) → a data URL the painter can load. Absent
  *  bytes (linked-only) or undecodable input yields undefined — the renderer
  *  draws an empty frame. */
@@ -112,12 +158,11 @@ function pictureSrc(pic: Rec): string | undefined {
     return data.startsWith("data:") ? data : `data:${mime};base64,${data}`;
   }
   if (data instanceof Uint8Array) {
-    // Chunked binary → base64 (btoa is universal: browsers and Node ≥ 16).
-    let bin = "";
-    for (let i = 0; i < data.length; i += 0x8000) {
-      bin += String.fromCharCode(...data.subarray(i, i + 0x8000));
+    if (mime === "image/svg+xml") {
+      const flat = flattenBrokenSvgGradients(new TextDecoder().decode(data));
+      return `data:${mime};base64,${base64Of(new TextEncoder().encode(flat))}`;
     }
-    return `data:${mime};base64,${btoa(bin)}`;
+    return `data:${mime};base64,${base64Of(data)}`;
   }
   return undefined;
 }
@@ -207,7 +252,7 @@ function runStyleOf(rPr: Rec): RunStyle {
     characterSpacingTw: measureTwip(rPr.characterSpacing),
     bold: rPr.bold === true ? true : undefined,
     italic: rPr.italic === true ? true : undefined,
-    color: typeof rPr.color === "string" && rPr.color !== "auto" ? rPr.color : undefined,
+    color: colorOf(rPr.color),
     underline,
     strikethrough: rPr.strike === true || rPr.doubleStrike === true ? true : undefined,
   };
@@ -538,60 +583,235 @@ function projectParagraph(p: BodyParagraph, ctx: ProjectContext): LayoutParagrap
 /** DrawingML text-inset defaults (a:bodyPr), EMU. */
 const BODY_INSET_EMU = { left: 91440, right: 91440, top: 45720, bottom: 45720 };
 
+/** A color field: bare hex string, or the round-trip object shape
+ *  (`{value}` on outline/fill colors, `{val, themeColor}` on run colors — the
+ *  parse emits both key spellings). Theme-only colors resolve later. */
+function colorOf(v: unknown): string | undefined {
+  if (typeof v === "string") return v === "auto" ? undefined : v;
+  if (isRecord(v)) return str(v.value) ?? str(v.val);
+  return undefined;
+}
+
 /** Solid fill (FillOptions union) → hex; every other variant (none/gradient/
  *  picture) carries no paintable flat color → undefined. */
 function solidFillOf(fill: unknown): string | undefined {
-  return isRecord(fill) && fill.type === "solid" ? str(fill.color) : undefined;
+  return isRecord(fill) && fill.type === "solid" ? colorOf(fill.color) : undefined;
 }
 
-/** OutlineOptions → a stroke spec; noFill/absent → undefined. The width is
- *  EMU, the color may sit under `color.value` (round-trip shape) or be a bare
- *  hex string. */
-function outlineOf(outline: unknown): { px: number; color?: string } | undefined {
+/** Outline stroke (a:ln): px width + color + the line-dressing tokens the
+ *  painter maps (cap/join full-word, dash the OOXML prstDash token). */
+function outlineOf(outline: unknown):
+  | {
+      px: number;
+      color?: string;
+      cap?: "round" | "square" | "flat";
+      join?: "round" | "bevel" | "miter";
+      dash?: string;
+    }
+  | undefined {
   if (!isRecord(outline) || outline.type === "noFill") return undefined;
   const widthEmu = num(outline.width);
   if (widthEmu == null) return undefined;
-  const colorRec = isRecord(outline.color) ? outline.color : {};
-  return { px: emuToPx(widthEmu), color: str(colorRec.value) ?? str(outline.color) };
+  const cap =
+    outline.cap === "round" || outline.cap === "square" || outline.cap === "flat"
+      ? outline.cap
+      : undefined;
+  const join =
+    outline.join === "round" || outline.join === "bevel" || outline.join === "miter"
+      ? outline.join
+      : undefined;
+  return {
+    px: emuToPx(widthEmu),
+    color: colorOf(outline.color),
+    cap,
+    join,
+    dash: str(outline.dash),
+  };
 }
 
-/** One wpg group run (GroupOptions) → a LayoutDrawing anchored to its
- *  paragraph. Members carry the group's child coordinate space (chOff/chExt)
- *  already resolved into px-in-box. A wps child whose `data` is not a record
- *  is skipped — the published 0.12.3 parse stringified nested shape data, so
- *  those members render as absence rather than corrupt geometry. */
-function projectDrawing(group: Rec, ctx: ProjectContext): LayoutDrawing | undefined {
-  const tr = isRecord(group.transformation) ? group.transformation : {};
-  const extW = num(tr.width);
-  const extH = num(tr.height);
-  if (extW == null || extH == null || extW <= 0 || extH <= 0) return undefined;
+/** Word's eight ST_RelativeHorizontalPosition values → the four semantic
+ *  axes the painter resolves (margin/insideMargin/character → column,
+ *  outsideMargin → rightMargin — the unmirrored reading). */
+const H_RELATIVE: Record<string, LayoutDrawingAnchor["horizontal"]["relative"]> = {
+  column: "column",
+  margin: "column",
+  insideMargin: "column",
+  character: "column",
+  leftMargin: "leftMargin",
+  rightMargin: "rightMargin",
+  outsideMargin: "rightMargin",
+  page: "page",
+};
 
-  // wp:anchor offsets: column/paragraph-relative (page/margin relatives land
-  // on the same axis for now — a header decoration anchors at the content
-  // edge either way).
-  const floating = isRecord(group.floating) ? group.floating : {};
-  const hPos = isRecord(floating.horizontalPosition) ? floating.horizontalPosition : {};
-  const vPos = isRecord(floating.verticalPosition) ? floating.verticalPosition : {};
+/** ST_RelativeVerticalPosition → four axes (margin/insideMargin → topMargin,
+ *  line → paragraph, outsideMargin → bottomMargin). */
+const V_RELATIVE: Record<string, LayoutDrawingAnchor["vertical"]["relative"]> = {
+  paragraph: "paragraph",
+  line: "paragraph",
+  margin: "topMargin",
+  insideMargin: "topMargin",
+  topMargin: "topMargin",
+  bottomMargin: "bottomMargin",
+  outsideMargin: "bottomMargin",
+  page: "page",
+};
 
-  // Child coordinate space: chOff/chExt → the group's EMU box. A missing
-  // chExt means the children already live in the group's own units (1:1).
-  const chOffX = num(isRecord(group.childOffset) ? group.childOffset.x : undefined) ?? 0;
-  const chOffY = num(isRecord(group.childOffset) ? group.childOffset.y : undefined) ?? 0;
-  const chExt = isRecord(group.childExtent) ? group.childExtent : {};
-  const sx = num(chExt.cx) ? extW / (chExt.cx as number) : 1;
-  const sy = num(chExt.cy) ? extH / (chExt.cy as number) : 1;
+/** One position axis (align > posOffset > percentOffset) → the anchor spec;
+ *  an empty position collapses to offset 0 on the fallback axis. */
+function anchorAxis<R extends string, A extends string>(
+  pos: Rec,
+  relativeTable: Record<string, R>,
+  fallback: R,
+  alignTable: Record<string, A>,
+): { relative: R; offsetPx?: number; percent?: number; align?: A } {
+  const relative = relativeTable[str(pos.relative) ?? ""] ?? fallback;
+  const align = alignTable[str(pos.align) ?? ""];
+  if (align) return { relative, align };
+  const offsetEmu = measureEmu(pos.offset);
+  if (offsetEmu != null) return { relative, offsetPx: emuToPx(offsetEmu) };
+  const pct = num(pos.percentOffset);
+  if (pct != null) return { relative, percent: pct / 1000 };
+  return { relative, offsetPx: 0 };
+}
 
-  const members: LayoutDrawingMember[] = [];
+/** a:custGeom path coordinates arrive as strings (guide-resolved literals). */
+function coord(v: unknown): number {
+  const n = typeof v === "string" ? Number(v) : num(v);
+  return n != null && Number.isFinite(n) ? n : 0;
+}
+
+/** a:custGeom pathLst → SVG path data scaled from the path's own space
+ *  (path @w/@h) into the member box. moveTo/lineTo/quadBezTo/cubicBezTo/close
+ *  convert directly; arcTo (elliptical-by-angle) is a registered gap — the
+ *  command drops until a canvas arc mapping lands. */
+function customGeometryPath(cg: Rec, width: number, height: number): string | undefined {
+  const paths = Array.isArray(cg.pathList) ? cg.pathList : [];
+  const parts: string[] = [];
+  const r2 = (v: number): number => Math.round(v * 100) / 100;
+  for (const p of paths) {
+    if (!isRecord(p)) continue;
+    const pw = num(p.w);
+    const ph = num(p.h);
+    const sx = pw ? width / pw : 1;
+    const sy = ph ? height / ph : 1;
+    const x = (v: unknown): number => r2(coord(v) * sx);
+    const y = (v: unknown): number => r2(coord(v) * sy);
+    for (const cmd of Array.isArray(p.commands) ? p.commands : []) {
+      if (!isRecord(cmd)) continue;
+      const kind = str(cmd.command);
+      if (kind === "moveTo" && isRecord(cmd.point)) {
+        parts.push(`M ${x(cmd.point.x)} ${y(cmd.point.y)}`);
+      } else if (kind === "lineTo" && isRecord(cmd.point)) {
+        parts.push(`L ${x(cmd.point.x)} ${y(cmd.point.y)}`);
+      } else if (kind === "cubicBezTo" && Array.isArray(cmd.points) && cmd.points.length === 3) {
+        const [c1, c2, c3] = cmd.points;
+        if (isRecord(c1) && isRecord(c2) && isRecord(c3)) {
+          parts.push(`C ${x(c1.x)} ${y(c1.y)} ${x(c2.x)} ${y(c2.y)} ${x(c3.x)} ${y(c3.y)}`);
+        }
+      } else if (kind === "quadBezTo" && Array.isArray(cmd.points) && cmd.points.length === 2) {
+        const [c, e] = cmd.points;
+        if (isRecord(c) && isRecord(e)) {
+          parts.push(`Q ${x(c.x)} ${y(c.y)} ${x(e.x)} ${y(e.y)}`);
+        }
+      } else if (kind === "close") {
+        parts.push("Z");
+      }
+    }
+  }
+  return parts.length > 0 ? parts.join(" ") : undefined;
+}
+
+/** px-per-EMU for a group's child space: the box's px extent over chExt — or
+ *  over the group's own EMU extent when chExt is absent (children share its
+ *  units); no extent at all degrades to the plain EMU→px factor. */
+function childScale(boxPx: number, chExt: unknown, extEmu: unknown): number {
+  const cx = num(chExt);
+  if (cx) return boxPx / cx;
+  const ext = num(extEmu);
+  if (ext) return boxPx / ext;
+  return emuToPx(1);
+}
+
+/** A flip on a group mirrors every descendant's box within that group's own
+ *  box. Nested flips stack, so the recursion carries the list and applies
+ *  each mirror outermost-first to the member's final box. */
+interface GroupMirror {
+  h: boolean;
+  v: boolean;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** One group level's child-space → drawing-box-px mapping, threaded through
+ *  the recursion: a member at child-space EMU `off` lands at
+ *  `origin + (off - chOff) * scale` px; a nested group composes its own
+ *  chOff/chExt on top (origin = its own box position, scale = its box extent
+ *  over its chExt). */
+function walkGroup(
+  group: Rec,
+  originX: number,
+  originY: number,
+  scaleX: number,
+  scaleY: number,
+  chOffX: number,
+  chOffY: number,
+  out: LayoutDrawingMember[],
+  ctx: ProjectContext,
+  mirrors?: readonly GroupMirror[],
+): void {
   for (const child of Array.isArray(group.children) ? group.children : []) {
     if (!isRecord(child)) continue;
     const t = isRecord(child.transformation) ? child.transformation : {};
     const offEmu = isRecord(t.offset) && isRecord(t.offset.emus) ? t.offset.emus : undefined;
     const sizeEmu = isRecord(t.emus) ? t.emus : {};
     if (offEmu == null) continue;
-    const x = emuToPx(((num(offEmu.x) ?? 0) - chOffX) * sx);
-    const y = emuToPx(((num(offEmu.y) ?? 0) - chOffY) * sy);
-    const width = emuToPx((num(sizeEmu.x) ?? 0) * sx);
-    const height = emuToPx((num(sizeEmu.y) ?? 0) * sy);
+    let x = originX + ((num(offEmu.x) ?? 0) - chOffX) * scaleX;
+    let y = originY + ((num(offEmu.y) ?? 0) - chOffY) * scaleY;
+    const width = (num(sizeEmu.x) ?? 0) * scaleX;
+    const height = (num(sizeEmu.y) ?? 0) * scaleY;
+    for (const m of mirrors ?? []) {
+      if (m.h) x = 2 * m.x + m.width - x - width;
+      if (m.v) y = 2 * m.y + m.height - y - height;
+    }
+
+    // Nested wpg group: flatten in place — its members land in this drawing's
+    // box through the composed mapping (Word renders the group tree unrolled).
+    const innerChOff = isRecord(child.childOffset) ? child.childOffset : {};
+    const innerChExt = isRecord(child.childExtent) ? child.childExtent : {};
+    if (
+      (child.type === "wpg" || !isRecord(child.data)) &&
+      Array.isArray(child.children) &&
+      isRecord(child.childOffset)
+    ) {
+      const flip = isRecord(t.flip) ? t.flip : {};
+      const own: GroupMirror | undefined =
+        flip.horizontal === true || flip.vertical === true
+          ? {
+              h: flip.horizontal === true,
+              v: flip.vertical === true,
+              x,
+              y,
+              width,
+              height,
+            }
+          : undefined;
+      walkGroup(
+        child,
+        x,
+        y,
+        childScale(width, innerChExt.cx, sizeEmu.x),
+        childScale(height, innerChExt.cy, sizeEmu.y),
+        num(innerChOff.x) ?? 0,
+        num(innerChOff.y) ?? 0,
+        out,
+        ctx,
+        own ? [...(mirrors ?? []), own] : mirrors,
+      );
+      continue;
+    }
+
     if (child.type === "wps") {
       const data = isRecord(child.data) ? child.data : undefined;
       if (!data) continue;
@@ -605,7 +825,7 @@ function projectDrawing(group: Rec, ctx: ProjectContext): LayoutDrawing | undefi
         const bodyPr = isRecord(data.bodyProperties) ? data.bodyProperties : {};
         const ins = (v: unknown, fallback: number): number =>
           num(v) != null ? emuToPx(num(v) as number) : emuToPx(fallback);
-        members.push({
+        out.push({
           kind: "textBox",
           x,
           y,
@@ -627,11 +847,47 @@ function projectDrawing(group: Rec, ctx: ProjectContext): LayoutDrawing | undefi
         });
         continue;
       }
-      if (preset == null) continue; // custom geometry — no canvas path yet
-      members.push({ kind: "shape", x, y, width, height, preset, fill, line });
+      // Straight connector (a straight line across its box) and custom
+      // geometry both project to path members; the box-like presets stay
+      // shape members.
+      if (preset === "line") {
+        out.push({
+          kind: "path",
+          x,
+          y,
+          width,
+          height,
+          d: `M 0 0 L ${Math.round(width * 100) / 100} ${Math.round(height * 100) / 100}`,
+          fill,
+          line,
+        });
+        continue;
+      }
+      if (preset == null) {
+        const cg = isRecord(data.customGeometry) ? data.customGeometry : undefined;
+        const d = cg ? customGeometryPath(cg, width, height) : undefined;
+        if (d) out.push({ kind: "path", x, y, width, height, d, fill, line });
+        continue;
+      }
+      out.push({ kind: "shape", x, y, width, height, preset, fill, line });
     } else {
       const flip = isRecord(t.flip) ? t.flip : undefined;
-      members.push({
+      // a:srcRect crops the source image inward per side (1000ths of a
+      // percent); the painter paints the remaining region into the box.
+      const sr = isRecord(child.sourceRectangle) ? child.sourceRectangle : undefined;
+      const pct = (v: unknown): number | undefined => {
+        const n = num(v);
+        return n != null && n > 0 ? n / 100000 : undefined;
+      };
+      const crop = sr
+        ? {
+            left: pct(sr.left) ?? 0,
+            top: pct(sr.top) ?? 0,
+            right: pct(sr.right) ?? 0,
+            bottom: pct(sr.bottom) ?? 0,
+          }
+        : undefined;
+      out.push({
         kind: "picture",
         x,
         y,
@@ -640,16 +896,64 @@ function projectDrawing(group: Rec, ctx: ProjectContext): LayoutDrawing | undefi
         src: pictureSrc(child),
         flipH: flip?.horizontal === true || undefined,
         flipV: flip?.vertical === true || undefined,
+        crop:
+          crop && (crop.left > 0 || crop.top > 0 || crop.right > 0 || crop.bottom > 0)
+            ? crop
+            : undefined,
       });
     }
   }
-  return {
-    x: emuToPx(num(hPos.offset) ?? 0),
-    y: emuToPx(num(vPos.offset) ?? 0),
-    width: emuToPx(extW),
-    height: emuToPx(extH),
-    members,
+}
+
+/** One wpg group run (GroupOptions) → a LayoutDrawing anchored to its
+ *  paragraph. Members carry the group's child coordinate space (chOff/chExt)
+ *  already resolved into px-in-box, nested groups flattened. A wps child
+ *  whose `data` is not a record is skipped — the published 0.12.3 parse
+ *  stringified nested shape data, so those members render as absence rather
+ *  than corrupt geometry. */
+function projectDrawing(group: Rec, ctx: ProjectContext): LayoutDrawing | undefined {
+  const tr = isRecord(group.transformation) ? group.transformation : {};
+  const extW = num(tr.width);
+  const extH = num(tr.height);
+  if (extW == null || extH == null || extW <= 0 || extH <= 0) return undefined;
+
+  // wp:anchor positioning — every relativeFrom axis plus the offset/align
+  // choice; the painter owns the page geometry each axis resolves against.
+  const floating = isRecord(group.floating) ? group.floating : {};
+  const anchor: LayoutDrawingAnchor = {
+    horizontal: anchorAxis(
+      isRecord(floating.horizontalPosition) ? floating.horizontalPosition : {},
+      H_RELATIVE,
+      "column" as const,
+      { left: "left", inside: "left", center: "center", right: "right", outside: "right" },
+    ),
+    vertical: anchorAxis(
+      isRecord(floating.verticalPosition) ? floating.verticalPosition : {},
+      V_RELATIVE,
+      "paragraph" as const,
+      { top: "top", inside: "top", center: "center", bottom: "bottom", outside: "bottom" },
+    ),
   };
+  const behind = floating.behindDocument === true || undefined;
+
+  // Child coordinate space: chOff/chExt → the group's EMU box. A missing
+  // chExt means the children already live in the group's own units (1:1).
+  const chOffX = num(isRecord(group.childOffset) ? group.childOffset.x : undefined) ?? 0;
+  const chOffY = num(isRecord(group.childOffset) ? group.childOffset.y : undefined) ?? 0;
+  const chExt = isRecord(group.childExtent) ? group.childExtent : {};
+  const members: LayoutDrawingMember[] = [];
+  walkGroup(
+    group,
+    0,
+    0,
+    childScale(emuToPx(extW), chExt.cx, extW),
+    childScale(emuToPx(extH), chExt.cy, extH),
+    chOffX,
+    chOffY,
+    members,
+    ctx,
+  );
+  return { anchor, width: emuToPx(extW), height: emuToPx(extH), members, behind };
 }
 
 /** Collect the wpg group runs of one paragraph (top level and one nested run
