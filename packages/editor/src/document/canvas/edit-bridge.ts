@@ -144,13 +144,46 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     });
   };
 
+  /** The selection highlight — one translucent div per crossed line, rebuilt
+   *  on every placement (selections span few lines; rebuild beats diffing). */
+  const selectionLayer: HTMLDivElement[] = [];
+  const placeSelection = (): void => {
+    for (const el of selectionLayer) el.remove();
+    selectionLayer.length = 0;
+    const { from, to } = editor.state.selection;
+    if (from === to || !map?.valid) return;
+    for (const r of map.selectionRects(from, to)) {
+      const frame = opts.pageHost?.(r.page);
+      if (!frame) continue;
+      const el = document.createElement("div");
+      Object.assign(el.style, {
+        position: "absolute",
+        background: "rgba(0,120,215,.25)",
+        pointerEvents: "none",
+        zIndex: "4",
+        left: `${r.xPx}px`,
+        top: `${r.yPx}px`,
+        width: `${r.widthPx}px`,
+        height: `${r.heightPx}px`,
+      } satisfies Partial<CSSStyleDeclaration>);
+      frame.append(el);
+      selectionLayer.push(el);
+    }
+  };
+
   const placeCaret = (): void => {
+    placeSelection();
     if (!map?.valid) {
       caret.style.display = "none";
       return;
     }
-    const pos = editor.state.selection.from;
-    const rect = map.caretRect(pos);
+    const { from, to } = editor.state.selection;
+    if (from !== to) {
+      // A selection replaces the caret (Word hides it too).
+      caret.style.display = "none";
+      return;
+    }
+    const rect = map.caretRect(from);
     const frame = rect ? (opts.pageHost?.(rect.page) ?? null) : null;
     if (!rect || !frame) {
       caret.style.display = "none";
@@ -167,41 +200,87 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     const frameRect = frame.getBoundingClientRect();
     ta.style.left = `${frameRect.left - hostRect.left + rect.xPx}px`;
     ta.style.top = `${frameRect.top - hostRect.top + rect.yPx}px`;
-    if (pos !== lastCaretPos) {
-      lastCaretPos = pos;
+    if (from !== lastCaretPos) {
+      lastCaretPos = from;
       restartBlink();
     }
   };
   editor.on("selectionUpdate", placeCaret);
 
+  /** A viewport point → the hit page and its page-local coordinates. */
+  const hitPage = (
+    clientX: number,
+    clientY: number,
+  ): { page: number; lx: number; ly: number } | null => {
+    if (!map?.valid) return null;
+    const hostRect = opts.host.getBoundingClientRect();
+    const x = clientX - hostRect.left;
+    const y = clientY - hostRect.top;
+    for (let p = 0; p < pageCount; p++) {
+      const frame = opts.pageHost?.(p);
+      if (!frame) continue;
+      const r = frame.getBoundingClientRect();
+      const lx = x - (r.left - hostRect.left);
+      const ly = y - (r.top - hostRect.top);
+      if (lx >= 0 && ly >= 0 && lx < r.width && ly < r.height) return { page: p, lx, ly };
+    }
+    return null;
+  };
+
+  const setSel = (pos: number, anchor?: number): void => {
+    editor.commands.command(({ state, dispatch }) => {
+      // The cast bridges the dual PM d.ts identity (same runtime
+      // instance — see the module's command casts). create takes
+      // (anchor, head) — the anchor leads.
+      dispatch?.(
+        state.tr.setSelection(TextSelection.create(state.doc, anchor ?? pos, pos) as never),
+      );
+      return true;
+    });
+  };
+
+  const posAtClient = (clientX: number, clientY: number): number | null => {
+    const hit = hitPage(clientX, clientY);
+    return hit ? map!.posAtPoint(hit.page, hit.lx, hit.ly) : null;
+  };
+
+  // Mouse selection: mousedown anchors, moves extend, mouseup settles. The
+  // 3px threshold keeps a plain click from flashing a degenerate selection.
+  let dragAnchor: number | null = null;
+  let dragMoved = false;
+  let dragStart: { x: number; y: number } | null = null;
+
+  const onMouseMove = (event: MouseEvent): void => {
+    if (dragAnchor == null) return;
+    if (
+      !dragMoved &&
+      dragStart &&
+      Math.hypot(event.clientX - dragStart.x, event.clientY - dragStart.y) < 3
+    ) {
+      return;
+    }
+    dragMoved = true;
+    const head = posAtClient(event.clientX, event.clientY);
+    if (head != null) setSel(head, dragAnchor);
+  };
+  const onMouseUp = (): void => {
+    dragAnchor = null;
+    dragMoved = false;
+    dragStart = null;
+  };
+  opts.host.addEventListener("mousemove", onMouseMove);
+  document.addEventListener("mouseup", onMouseUp);
+
   const takeFocus = (event: MouseEvent): void => {
     // preventDefault keeps the click from blurring on mousedown; the caret
     // placement below is the real focus move.
     event.preventDefault();
-    if (map?.valid) {
-      // offsetX/Y are target-relative (the hit may be a frame, a canvas view,
-      // …); resolve the page-local point through each frame's rect instead.
-      const hostRect = opts.host.getBoundingClientRect();
-      const x = event.clientX - hostRect.left;
-      const y = event.clientY - hostRect.top;
-      for (let p = 0; p < pageCount; p++) {
-        const frame = opts.pageHost?.(p);
-        if (!frame) continue;
-        const r = frame.getBoundingClientRect();
-        const lx = x - (r.left - hostRect.left);
-        const ly = y - (r.top - hostRect.top);
-        if (lx < 0 || ly < 0 || lx >= r.width || ly >= r.height) continue;
-        const pos = map.posAtPoint(p, lx, ly);
-        if (pos != null) {
-          editor.commands.command(({ state, dispatch }) => {
-            // The cast bridges the dual PM d.ts identity (same runtime
-            // instance — see the module's command casts).
-            dispatch?.(state.tr.setSelection(TextSelection.create(state.doc, pos) as never));
-            return true;
-          });
-        }
-        break;
-      }
+    const pos = posAtClient(event.clientX, event.clientY);
+    if (pos != null) {
+      setSel(pos);
+      dragAnchor = pos;
+      dragStart = { x: event.clientX, y: event.clientY };
+      dragMoved = false;
     }
     ta.focus();
     ta.value = "";
@@ -288,51 +367,50 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     ta.value = "";
   };
 
-  /** Horizontal caret movement — one grapheme inside the block (atoms step a
-   *  whole node), the nearest text position past the block's edge. */
-  const moveH = (dir: -1 | 1): void => {
-    editor.commands.command(({ state, dispatch }) => {
-      const { $from } = state.selection;
-      const offset = $from.parentOffset;
-      const size = $from.parent.content.size;
-      if (dir < 0 && offset > 0) {
-        // textBetween maps the content offset to text units, skipping atoms.
-        const cut = lastGraphemeUnits($from.parent.textBetween(0, offset)) || 1;
-        dispatch?.(
-          state.tr.setSelection(TextSelection.create(state.doc, $from.pos - cut) as never),
-        );
-        return true;
-      }
-      if (dir > 0 && offset < size) {
-        const cut = firstGraphemeUnits($from.parent.textBetween(offset, size)) || 1;
-        dispatch?.(
-          state.tr.setSelection(TextSelection.create(state.doc, $from.pos + cut) as never),
-        );
-        return true;
-      }
-      const edge = dir < 0 ? $from.before() : $from.after();
-      if (edge < 0 || edge > state.doc.content.size) return false;
-      const $near = TextSelection.near(state.doc.resolve(edge), dir);
-      if ($near.from === $from.pos) return false;
-      dispatch?.(state.tr.setSelection($near as never));
-      return true;
-    });
+  /** One step horizontally from a position — a grapheme inside the block
+   *  (atoms step a whole node), the nearest text position past its edge. */
+  const hStep = (state: Editor["state"], pos: number, dir: -1 | 1): number | null => {
+    const $from = state.doc.resolve(pos);
+    const offset = $from.parentOffset;
+    const size = $from.parent.content.size;
+    if (dir < 0 && offset > 0) {
+      // textBetween maps the content offset to text units, skipping atoms.
+      const cut = lastGraphemeUnits($from.parent.textBetween(0, offset)) || 1;
+      return pos - cut;
+    }
+    if (dir > 0 && offset < size) {
+      const cut = firstGraphemeUnits($from.parent.textBetween(offset, size)) || 1;
+      return pos + cut;
+    }
+    const edge = dir < 0 ? $from.before() : $from.after();
+    if (edge < 0 || edge > state.doc.content.size) return null;
+    const $near = TextSelection.near(state.doc.resolve(edge), dir);
+    return $near.from === pos ? null : $near.from;
   };
 
-  /** Home/End — the line's boundaries off the caret map (the only place the
-   *  wrap geometry lives); unmapped falls back to the block's boundaries. */
-  const lineEdge = (toEnd: boolean): void => {
-    editor.commands.command(({ state, dispatch }) => {
-      const { $from } = state.selection;
-      const pos = toEnd ? $from.end() : $from.start();
-      const edges = map?.valid ? map.lineEdges($from.pos) : null;
-      dispatch?.(
-        state.tr.setSelection(
-          TextSelection.create(state.doc, edges ? (toEnd ? edges.end : edges.home) : pos) as never,
-        ),
-      );
-      return true;
-    });
+  /** A line's boundary position off the caret map (the only place the wrap
+   *  geometry lives); unmapped falls back to the block's boundaries. */
+  const edgeTarget = (state: Editor["state"], pos: number, toEnd: boolean): number => {
+    const $from = state.doc.resolve(pos);
+    const edges = map?.valid ? map.lineEdges(pos) : null;
+    if (edges) return toEnd ? edges.end : edges.home;
+    return toEnd ? $from.end() : $from.start();
+  };
+
+  /** One line up/down at the goal column (null at the paragraph's edge). */
+  const vStep = (pos: number, dir: -1 | 1): number | null => {
+    return map?.valid ? map.posVertical(pos, dir) : null;
+  };
+
+  /** Move the caret to a target — or extend the selection to it (the anchor
+   *  holds, the head moves). */
+  const apply = (target: number | null, extend: boolean): void => {
+    if (target == null) return;
+    if (extend) {
+      setSel(target, editor.state.selection.anchor);
+    } else {
+      setSel(target);
+    }
   };
 
   const onKeyDown = (event: KeyboardEvent): void => {
@@ -348,30 +426,32 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       }
       return;
     }
+    const extend = event.shiftKey;
+    const head = () => editor.state.selection.head;
     switch (event.key) {
       case "ArrowLeft":
-        if (!event.shiftKey) {
-          event.preventDefault();
-          moveH(-1);
-        }
+        event.preventDefault();
+        apply(hStep(editor.state, head(), -1), extend);
         break;
       case "ArrowRight":
-        if (!event.shiftKey) {
-          event.preventDefault();
-          moveH(1);
-        }
+        event.preventDefault();
+        apply(hStep(editor.state, head(), 1), extend);
+        break;
+      case "ArrowUp":
+        event.preventDefault();
+        apply(vStep(head(), -1), extend);
+        break;
+      case "ArrowDown":
+        event.preventDefault();
+        apply(vStep(head(), 1), extend);
         break;
       case "Home":
-        if (!event.shiftKey) {
-          event.preventDefault();
-          lineEdge(false);
-        }
+        event.preventDefault();
+        apply(edgeTarget(editor.state, head(), false), extend);
         break;
       case "End":
-        if (!event.shiftKey) {
-          event.preventDefault();
-          lineEdge(true);
-        }
+        event.preventDefault();
+        apply(edgeTarget(editor.state, head(), true), extend);
         break;
       default:
         break;
@@ -394,11 +474,36 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     if (text) insertText(text);
   };
 
+  const selectionText = (): string | null => {
+    const { from, to } = editor.state.selection;
+    return from === to ? null : editor.state.doc.textBetween(from, to, "\n");
+  };
+
+  const onCopy = (event: ClipboardEvent): void => {
+    const text = selectionText();
+    if (text == null) return;
+    event.preventDefault();
+    event.clipboardData?.setData("text/plain", text);
+  };
+
+  const onCut = (event: ClipboardEvent): void => {
+    const text = selectionText();
+    if (text == null) return;
+    event.preventDefault();
+    event.clipboardData?.setData("text/plain", text);
+    editor.commands.command(({ state, dispatch }) => {
+      dispatch?.(state.tr.deleteSelection());
+      return true;
+    });
+  };
+
   ta.addEventListener("beforeinput", onBeforeInput);
   ta.addEventListener("keydown", onKeyDown);
   ta.addEventListener("compositionstart", onCompositionStart);
   ta.addEventListener("compositionend", onCompositionEnd);
   ta.addEventListener("paste", onPaste);
+  ta.addEventListener("copy", onCopy);
+  ta.addEventListener("cut", onCut);
   opts.host.append(ta);
 
   return {
@@ -414,6 +519,9 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       editor.off("selectionUpdate", placeCaret);
       editor.destroy();
       opts.host.removeEventListener("mousedown", takeFocus);
+      opts.host.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+      for (const el of selectionLayer) el.remove();
       ta.remove();
       caret.remove();
     },

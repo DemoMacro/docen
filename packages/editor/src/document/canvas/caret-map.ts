@@ -245,6 +245,52 @@ export class CaretMap {
     return this.posInLine(best.entry, x);
   }
 
+  /** The position one line above/below a position's line, at the same
+   *  character column (clamped to the target line's length — the Word goal
+   *  column; a pixel target would drift across differently stretched
+   *  justified lines). Null at the paragraph's vertical edge. */
+  posVertical(pos: number, dir: -1 | 1): number | null {
+    const located = this.locate(pos);
+    if (!located) return null;
+    const lines = located.entry.lines;
+    const target = lines[lines.indexOf(located.line) + dir];
+    if (!target) return null;
+    const col = Math.min(
+      located.offset - located.line.startChar,
+      target.endChar - target.startChar,
+    );
+    return this.posOfChar(located.entry, target.startChar + col);
+  }
+
+  /** The selection rectangles for a range — one per crossed line, in the
+   *  caret's geometry (same grid pad and text height). */
+  selectionRects(from: number, to: number): SelectionRect[] {
+    const rects: SelectionRect[] = [];
+    for (const entry of this.paras) {
+      const start = Math.max(from, entry.innerPos);
+      const end = Math.min(to, entry.innerPos + entry.node.content.size);
+      if (start >= end) continue;
+      const offA = this.charOfPos(entry, start);
+      const offB = this.charOfPos(entry, end);
+      for (const line of entry.lines) {
+        if (line.endChar <= offA || line.startChar >= offB) continue;
+        const fromOff = Math.max(offA, line.startChar);
+        const toOff = Math.min(offB, line.endChar);
+        const pad = line.line.grid
+          ? Math.max(0, (line.line.heightPx - line.line.naturalPx) / 2)
+          : 0;
+        rects.push({
+          page: line.page,
+          xPx: this.xOfChar(line, fromOff),
+          yPx: line.yPx + pad,
+          widthPx: Math.max(this.xOfChar(line, toOff) - this.xOfChar(line, fromOff), 2),
+          heightPx: Math.max(line.line.naturalPx, 2),
+        });
+      }
+    }
+    return rects;
+  }
+
   /** The x-resolved position within one line (round to the nearest boundary). */
   private posInLine(entry: LineEntry, x: number): number | null {
     const { line } = entry;
