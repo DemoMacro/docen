@@ -105,7 +105,10 @@ const CORE_PROPERTY_KEYS: readonly (keyof DocxCoreProperties)[] = [
 /**
  * DocumentOptions keys that DocxManager reconstructs (sections/numbering) or
  * carries in dedicated attrs (styles/background/core). Excluded from the
- * documentExtras pass-through so they aren't duplicated.
+ * documentExtras pass-through so they aren't duplicated. The satisfies guard
+ * pins every listed key to a real DocumentOptions field — renaming or
+ * inventing one fails the build (documentExtras stays an open set: its value
+ * is auto-compat with new top-level office-open keys).
  */
 const COMPILE_OWNED_KEYS = new Set<string>([
   "sections",
@@ -113,7 +116,7 @@ const COMPILE_OWNED_KEYS = new Set<string>([
   "styles",
   "background",
   ...CORE_PROPERTY_KEYS,
-]);
+] satisfies (keyof DocumentOptions & string)[]);
 
 /** Collect core properties present on DocumentOptions into a plain object. */
 function extractCoreProperties(docOpts: DocumentOptions): DocxCoreProperties | null {
