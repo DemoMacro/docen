@@ -1,6 +1,7 @@
 import {
+  compileDocument,
   convertMillimetersToTwip,
-  createDocxEditor,
+  docxExtensions,
   effectiveRunProps,
   generateDOCX,
   generateHTML,
@@ -9,20 +10,17 @@ import {
   parseDOCX,
   parseHTML,
   parseMarkdown,
-  resolveFontName,
-  scrollCaretToTop,
-  sectionMarginDefaults,
   sectionPageSizeDefaults,
-  stylesToCss,
-  twipsToMm,
   type JSONContent,
   type SectionPropertiesOptions,
   type StylesOptions,
 } from "@docen/docx";
 import type { Editor } from "@docen/docx/core";
+import { projectDocumentOptions, type ProjectedFlowBox } from "@docen/docx/layout";
+import { browserFontMetrics, layoutFlow, TextMeasurer, type FlowPage } from "@docen/layout";
 import { attr, css, customElement, html } from "@microsoft/fast-element";
-import type { Mark, Node } from "@tiptap/pm/model";
-import { EditorState, type Transaction } from "@tiptap/pm/state";
+import type { Mark } from "@tiptap/pm/model";
+import { EditorState, TextSelection, type Transaction } from "@tiptap/pm/state";
 import {
   findNext,
   findPrev,
@@ -44,28 +42,19 @@ import {
   t,
   type DocenAddin,
 } from "../ui";
+import { createDefaultAddin } from "./addin";
+import { mountEditBridge, type EditBridge } from "./canvas/edit-bridge";
 // Side-effect: register the document-specific UI components moved out of the
 // shared ui/ barrel — <docen-format-pane> (properties fallback) and
 // <docen-outline> (navigation Headings tab).
 import "./components/format-pane";
 import "./components/outline";
-import { createDefaultAddin } from "./addin";
+import { CanvasStage } from "./canvas/stage";
 import type { OutlineItem } from "./components/outline";
 import { WIRED_DISPATCH } from "./extensions/commands";
-import { clearImageCapCache } from "./extensions/image-cap";
 // Side-effect import: registers the ribbon/header translation tables.
 import "./i18n";
-import {
-  DocenMiniToolbar,
-  defaultMiniToolbarButtons,
-  getMiniToolbar,
-} from "./extensions/mini-toolbar";
-import type { OutlineAnchor } from "./extensions/outline";
-import { flowKey, pageStorageOf } from "./extensions/page-plugin";
 import { renderRibbonFromSchema, ribbonActions, ribbonTabs } from "./ribbon";
-import { fontNormalRatio } from "./utils/font-metric";
-import { clearMeasureCache } from "./utils/measure";
-import { unwrapPages, wrapPages } from "./utils/wrap";
 
 /** Escape a host-supplied string for safe interpolation into innerHTML. The
  *  `filename` attribute comes from a user-selected File.name at openDOCX, which
@@ -140,11 +129,6 @@ const LOCAL_HANDLED: ReadonlySet<string> = new Set([
 ]);
 
 const documentStyles = css`
-  /* Cascade layers — declared ONCE up front so layer ORDER (not specificity)
-       governs priority below. reset strips UA defaults; docxStyles holds the
-       document's named styles (styles.xml). Both lose to unlayered rules (page
-       geometry, crop marks, inline OOXML styles). */
-  @layer reset, docxStyles;
   :host {
     display: flex;
     flex-direction: column;
@@ -196,240 +180,16 @@ const documentStyles = css`
     object-fit: cover;
     background: none;
   }
-  /* The editor wrapper (.docen-pages) hosts the Tiptap .ProseMirror, which
-       renders one .docen-page NODE per page. The wrapper just centers the
-       flow; each page node is its own fixed paper sheet (C-route — see
-       CLAUDE.md). */
-  .docen-pages .ProseMirror {
-    padding: 0;
-  }
-  /* CSS reset inside the editor surface — strip the browser's UA defaults so
-       OOXML properties (inline styles + named styles in the docxStyles layer)
-       are the SOLE source of truth. The UA stylesheet gives <p>/<h1-6> a 1em
-       margin, resets heading font-size/weight, pads <ul>/<ol>, etc. — all of
-       which corrupt pagination (a one-page cover spills to two). These rules
-       live in @layer reset, declared BEFORE docxStyles, so the document's named
-       styles (.docx-style-*) ALWAYS win regardless of specificity — that is the
-       real fix for the Heading bold/centering bug (the old specificity juggling
-       is gone). Table borders and list markers are handled in their own rules
-       below. */
-  @layer reset {
-    /* Default body ink follows the theme so dark/HC pages stay legible —
-         Word's Dark Mode inverts auto-colored text the same way. DOCX inline
-         colors and named styles (.docx-style-* in the docxStyles layer) override
-         this per-run, so explicit run colors are preserved. */
-    .docen-pages .ProseMirror {
-      color: var(--colorNeutralForeground1, #242424);
-    }
-    .docen-pages .ProseMirror p,
-    .docen-pages .ProseMirror h1,
-    .docen-pages .ProseMirror h2,
-    .docen-pages .ProseMirror h3,
-    .docen-pages .ProseMirror h4,
-    .docen-pages .ProseMirror h5,
-    .docen-pages .ProseMirror h6,
-    .docen-pages .ProseMirror blockquote,
-    .docen-pages .ProseMirror figure,
-    .docen-pages .ProseMirror pre,
-    .docen-pages .ProseMirror ul,
-    .docen-pages .ProseMirror ol {
-      margin: 0;
-      padding: 0;
-    }
-    /* Clear the UA heading defaults (2em font-size, bold weight) so headings
-         take the doc default unless a named style overrides — same reset layer,
-         so a .docx-style-Heading* font-size/font-weight always wins. */
-    .docen-page h1,
-    .docen-page h2,
-    .docen-page h3,
-    .docen-page h4,
-    .docen-page h5,
-    .docen-page h6 {
-      font-size: inherit;
-      font-weight: inherit;
-    }
-  }
-  /* .ProseMirror's default focus outline paints a black border on every
-       click — drop it (the caret + selection still mark focus). */
-  .docen-pages .ProseMirror:focus {
-    outline: none;
-  }
-  /* Each page node = a fixed paper sheet. 'height' (NOT min-height) +
-       overflow: hidden forces overflow into the next page instead of
-       stretching the sheet — the C-route invariant. Geometry comes from
-       <docen-document-area> CSS vars inherited through the shadow boundary. */
-  .docen-pages .docen-page {
-    width: var(--docen-page-width, 210mm);
-    height: var(--docen-page-min-height, 297mm);
-    overflow: hidden;
-    box-sizing: border-box;
-    padding: var(--docen-page-margin, 25.4mm);
-    margin: 0 auto var(--docen-page-gap, 24px);
-    background-color: var(--docen-color-page, #ffffff);
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+  /* The canvas surface — the scroll container sits one level up (the
+       document-area); this wrapper just anchors the edit bridge's textarea and
+       caret overlays (position:relative). cursor:text is the editing surface's
+       I-beam, like Word's page area. */
+  .docen-canvas {
     position: relative;
-    /* content-visibility:auto skips layout/paint for off-screen pages — the
-         main scroll/load perf win for large (1000+ page) docs. Safe now because
-         the paginator no longer reads page DOM for its overflow basis: reflow
-         packs against sectionContentDims(section).height (deterministic,
-         per-section), and block/row heights are Pretext/model-based (domHeightOf
-         only hits hidden passthrough leaves = 0). The page is a fixed-height
-         sheet, so per-page contain-intrinsic-size (page-node renderHTML) equals
-         the real box and the skipped-page rect matches the laid-out rect → reflow
-         still converges. Print forces visible (@media print below); find-in-page,
-         selection, and IME keep working — DOM nodes stay, only layout is skipped. */
-    content-visibility: auto;
-  }
-  /* A wrapNone floating drawing (image / wpg group) anchored to its paragraph
-       (verticalPosition.relative = paragraph, the OOXML default) renders
-       position:absolute. Its offsetParent must be that paragraph, not the page
-       box, or top/left resolve from the page top and the drawing floats over
-       the heading/body text. Making the anchor <p> position:relative pins the
-       drawing to the blank line it belongs on (matches Word: a floating group
-       overlays its own empty paragraph, over the body text below it). */
-  .docen-pages .docen-page p:has([data-float-anchor="paragraph"]) {
-    position: relative;
-  }
-  /* A paragraph with a leader tab-stop (class docx-tab-leader, set by
-       Paragraph.renderHTML from attrs.tabStops) renders a dotted leader between
-       the title and page number — MS Word's TOC "....." connector. The tab atom
-       (span.docx-tab) flexes to fill the gap and paints the dots; the page
-       number sits at the right edge. The paragraph stays single-line (TOC entries
-       never wrap), so flex keeps the measured line height intact. */
-  .docen-pages .docen-page p.docx-tab-leader {
-    display: flex;
-    align-items: baseline;
-  }
-  .docen-pages .docen-page p.docx-tab-leader .docx-tab {
-    flex: 1;
-    margin: 0 0.3em;
-    border-bottom: 1px dotted currentColor;
-    opacity: 0.5;
-  }
-  /* Hyperlinks render via the Link mark (<a href>), but their color / underline
-       / cursor come from the run's own rPr (textStyle mark) — NOT the browser's
-       default blue / underline / pointer. Reset the UA anchor styling so the
-       OOXML run color is the sole source of truth: a TOC entry's runs carry no
-       Hyperlink rStyle, so they keep the paragraph style's color (black); a
-       styled hyperlink run carries its own color/underline. Word hyperlinks are
-       static, so suppress visited/hover/active color shifts too. */
-  .docen-pages .docen-page a,
-  .docen-pages .docen-page a:visited,
-  .docen-pages .docen-page a:hover,
-  .docen-pages .docen-page a:active {
-    color: inherit;
-    text-decoration: inherit;
-    cursor: inherit;
-  }
-  /* Track Changes (w:ins/w:del) — the Insertion/Deletion marks wrap the
-       revised text. Word renders inserted text colored + underlined and
-       deleted text colored + strikethrough (the text stays visible until
-       accept/reject). Colors follow Word's default palette. */
-  .docen-pages .docen-page .docen-insertion {
-    color: #2e7d32;
-    text-decoration: underline;
-  }
-  .docen-pages .docen-page .docen-deletion {
-    color: #c62828;
-    text-decoration: line-through;
-  }
-  /* Images cap to the section content width the way Word caps them: a wider
-       image scales DOWN to fit, never upscales. The ImageCap extension sets the
-       real width on data-URL images it can sync-decode; this rule is the visual
-       fallback for what it skips (http(s) URLs, docs without section geometry)
-       so nothing overflows the fixed page box. crop images render an enlarged
-       inner <img>, so opt them out or the cap collapses the crop geometry. */
-  .docen-pages .docen-page img {
-    max-width: 100%;
-    height: auto;
-  }
-  .docen-pages .docen-page span[data-image="crop"] > img {
-    max-width: none;
-  }
-  /* Image-dominant paragraph: drop the line-height strut. An inline-block image
-     inherits the paragraph's line-height and the browser paints a ~2× leading
-     band above+below the image that Word does not — measureParagraphHeight
-     counts each image row as max(image, strut), so the DOM must match or the
-     rendered image overflows the page space the paginator reserved. The
-     ImageView NodeView marks its wrapper span data-img-dominant when the image
-     is taller than a text line; small inline icons keep the strut (measure =
-     strut = DOM, no drift). !important overrides the paragraph's inline
-     line-height (spacing.line → line-height calc) — safe because a marked row
-     is image-only (no text line for spacing.line to size), and measure's strut
-     never dominates a taller image. */
-  .docen-pages p:has([data-img-dominant]) {
-    line-height: 0 !important;
-  }
-  /* EMF/WMF (Office GDI vector) images can't be decoded by the browser, so
-       Image.renderHTML emits a div[data-image=vector] placeholder carrying the
-       real art in data-vector-src. Paint it as a dashed, hatched, labeled box
-       so the gap reads as "unsupported vector art" instead of a silent empty
-       rectangle. Inline width/height (from the image extent) size the box;
-       inline-block (set in renderImageStyles) keeps it in-flow. */
-  .docen-pages .docen-page [data-image="vector"] {
-    box-sizing: border-box;
-    border: 1px dashed #b8b8b8;
-    background: repeating-linear-gradient(45deg, #f6f6f6, #f6f6f6 9px, #efefef 9px, #efefef 18px);
-    color: #9a9a9a;
-    font-size: 12px;
-    text-align: center;
-    padding-top: 6px;
-    overflow: hidden;
-  }
-  /* prosemirror-tables CellSelection tags each selected cell with class
-       "selectedCell"; paint it with Word's translucent selection blue so a
-       multi-cell selection is actually visible. box-shadow (not
-       background-color) overlays a cell's own fill without being beaten by
-       the cell's inline background-color. */
-  .ProseMirror .selectedCell {
-    box-shadow: inset 0 0 0 9999px rgba(0, 120, 215, 0.18);
-  }
-  /* Crop marks — four L-brackets OUTSIDE the content box, in the page-margin
-       gutter, each L's corner pointing AT the editable area: the vertex sits
-       just outside a content-box corner and the two 23px legs reach into the
-       margin. Drawn on a ::before that covers the whole page (inset: 0) and
-       carries the page margin as its own padding, so its content-box == the
-       page's content box — that is the origin the background-position
-       offsets are measured from (negative for the top legs, positive for the
-       bottom), landing each leg in the margin gutter (not over text). The
-       ::before is used (not the page node's own background) because a
-       ProseMirror-managed node does not paint its own background-image, but its
-       pseudo-element does. */
-  .docen-pages .docen-page::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    padding: var(--docen-page-margin, 25.4mm);
-    pointer-events: none;
-    background-image:
-      linear-gradient(var(--docen-color-crop, #c0c0c0), var(--docen-color-crop, #c0c0c0)),
-      linear-gradient(var(--docen-color-crop, #c0c0c0), var(--docen-color-crop, #c0c0c0)),
-      linear-gradient(var(--docen-color-crop, #c0c0c0), var(--docen-color-crop, #c0c0c0)),
-      linear-gradient(var(--docen-color-crop, #c0c0c0), var(--docen-color-crop, #c0c0c0)),
-      linear-gradient(var(--docen-color-crop, #c0c0c0), var(--docen-color-crop, #c0c0c0)),
-      linear-gradient(var(--docen-color-crop, #c0c0c0), var(--docen-color-crop, #c0c0c0)),
-      linear-gradient(var(--docen-color-crop, #c0c0c0), var(--docen-color-crop, #c0c0c0)),
-      linear-gradient(var(--docen-color-crop, #c0c0c0), var(--docen-color-crop, #c0c0c0));
-    background-position:
-      -24px -2px,
-      -2px -24px,
-      calc(100% + 24px) -2px,
-      calc(100% + 2px) -24px,
-      -24px calc(100% + 2px),
-      -2px calc(100% + 24px),
-      calc(100% + 24px) calc(100% + 2px),
-      calc(100% + 2px) calc(100% + 24px);
-    background-size:
-      23px 1px,
-      1px 23px,
-      23px 1px,
-      1px 23px,
-      23px 1px,
-      1px 23px,
-      23px 1px,
-      1px 23px;
-    background-origin: content-box;
-    background-repeat: no-repeat;
+    width: fit-content;
+    margin: 0 auto;
+    padding: 32px 0;
+    cursor: text;
   }
   /* Grey the "Auto-save" label to match its disabled switch (skeleton
        feature), so the label + switch read as one unavailable control, like
@@ -437,93 +197,6 @@ const documentStyles = css`
        disabled. */
   .autosave-label:has(+ fluent-switch[disabled]) {
     color: var(--docen-color-text-3, #8a8a8a);
-  }
-  /* While focus is in a ribbon combobox dropdown, the editor is blurred and
-       the browser stops painting its selection. The Tiptap Selection extension
-       stamps a .selection class on the range so it stays visible. Uses the
-       system selection colors (Highlight/HighlightText) to match the browser's
-       native ::selection, including high-contrast and custom OS themes. */
-  .ProseMirror .selection {
-    background: Highlight;
-    color: HighlightText;
-  }
-  /* Tables — Word inserts tables in the Table Grid style (a single black
-       border on every cell). Without this a freshly inserted table is
-       invisible: the docx table extension emits a border only when the node
-       carries border attrs, and insertTable creates none. */
-  .docen-pages table {
-    border-collapse: collapse;
-  }
-  .docen-pages table td,
-  .docen-pages table th {
-    border: 1px solid #000;
-    /* OOXML defaults w:tcMar top/bottom to 0 (TableNormal); the UA td padding
-         (1px) would inflate every row ~2px vs Word. Horizontal padding stays at
-         the cell's w:tcMar (set inline by renderTableCellStyles) or 0. */
-    padding-block: 0;
-  }
-  /* Formatting marks (Show/Hide ¶) — Word shows these only while editing
-       (non-printing). The show-marks command flips the host [show-marks]
-       attribute; the marks themselves live entirely in CSS. */
-  /* Pilcrow ¶ is painted by the FormattingMarks extension as a widget
-       decoration — CSS ::after on a ProseMirror-managed <p> does not render. */
-  /* Zero-width inline-block: the mark hugs the last character and never
-       breaks to its own line on a full line. text-indent:0 cancels the
-       inherited paragraph indent (an inline-block is a block container), or
-       the glyph drifts right. */
-  .docen-pages .docen-para-mark {
-    color: var(--docen-color-marks, #6e6e6e);
-    user-select: none;
-    pointer-events: none;
-    margin-inline-start: 1px;
-    display: inline-block;
-    width: 0;
-    overflow: visible;
-    vertical-align: baseline;
-    text-indent: 0;
-  }
-  /* A page break renders as a Fluent divider with a centered label (Word).
-       The NodeView (PageBreakView) supplies the fluent-divider; it is hidden
-       unless show-marks is on. */
-  .docen-pages [data-type="pageBreak"] {
-    display: block;
-    line-height: 0;
-  }
-  .docen-pages [data-type="pageBreak"] fluent-divider {
-    display: none;
-  }
-  :host([show-marks]) .docen-pages [data-type="pageBreak"] {
-    margin: 8px 0;
-    line-height: normal;
-  }
-  :host([show-marks]) .docen-pages [data-type="pageBreak"] fluent-divider {
-    display: flex;
-    font-size: 0.8em;
-  }
-  /* A section break renders as a Fluent divider after the section-carrying
-       paragraph (Word: the boundary only shows the marker while editing). The
-       SectionBreakMarks widget supplies the fluent-divider; hidden unless
-       show-marks is on — same mechanism as the page-break marker. */
-  .docen-pages [data-section-break] {
-    line-height: 0;
-  }
-  .docen-pages [data-section-break] fluent-divider {
-    display: none;
-  }
-  :host([show-marks]) .docen-pages [data-section-break] {
-    margin: 8px 0;
-    line-height: normal;
-  }
-  :host([show-marks]) .docen-pages [data-section-break] fluent-divider {
-    display: flex;
-    font-size: 0.8em;
-  }
-  /* Find highlights (prosemirror-search) — Word's yellow-match / orange-active. */
-  .docen-pages .ProseMirror-search-match {
-    background: rgba(255, 235, 59, 0.55);
-  }
-  .docen-pages .ProseMirror-active-search-match {
-    background: rgba(255, 145, 0, 0.75);
   }
   /* Find Results — Office-style match list: each hit rendered with surrounding
        context and a data-from/to for click-to-jump. Padding keeps items off the
@@ -563,38 +236,6 @@ const documentStyles = css`
     color: inherit;
     font-weight: 600;
   }
-  /* Print: drop shadow/gap/marks; each page node is its own printed sheet. */
-  @media print {
-    /* @page margin:0 lets the fixed-height page node (297mm) fill the sheet.
-         The browser's default ~10mm page margin would otherwise make the page
-         taller than the printable area and push it onto a second sheet. The
-         page node's own padding (25.4mm) is the document margin, so @page needs
-         no margin. size stays auto so non-A4 documents still fit. */
-    @page {
-      margin: 0;
-    }
-    .docen-pages .docen-page {
-      content-visibility: visible;
-      box-shadow: none;
-      margin: 0;
-      break-after: page;
-    }
-    /* No trailing blank sheet after the last page. */
-    .docen-pages .docen-page:last-child {
-      break-after: auto;
-    }
-    .docen-pages .docen-page::before {
-      display: none;
-    }
-    /* Formatting marks + search highlights never print (editing-only). */
-    .docen-pages .docen-para-mark,
-    .docen-pages [data-type="pageBreak"],
-    .docen-pages [data-section-break],
-    .docen-pages .ProseMirror-search-match,
-    .docen-pages .ProseMirror-active-search-match {
-      display: none !important;
-    }
-  }
 `;
 
 const documentTemplate = html`
@@ -608,7 +249,7 @@ const documentTemplate = html`
       </docen-navigation-pane>
     </docen-task-pane>
     <docen-document-area>
-      <div class="docen-pages" part="page"></div>
+      <div class="docen-canvas" part="page"></div>
     </docen-document-area>
     <docen-task-pane slot="task-pane-end" position="end" part="props-pane">
       <slot name="properties">
@@ -625,7 +266,9 @@ const documentTemplate = html`
 
 /** Build a nested OutlineItem tree from the flat outline anchor list: each
  *  heading nests under the nearest preceding heading with a smaller level. */
-function buildOutlineTree(anchors: readonly OutlineAnchor[]): OutlineItem[] {
+function buildOutlineTree(
+  anchors: readonly { id: string; textContent: string; originalLevel: number }[],
+): OutlineItem[] {
   type Node = { id: string; title: string; level: number; children?: Node[] };
   const roots: Node[] = [];
   const stack: Node[] = [];
@@ -640,10 +283,6 @@ function buildOutlineTree(anchors: readonly OutlineAnchor[]): OutlineItem[] {
   return roots as OutlineItem[];
 }
 
-/** prosemirror-search's plugin, wrapped as a Tiptap extension so it loads with
- *  the editor. It stores the active SearchQuery and highlights its matches
- *  (classes ProseMirror-search-match / -active-search-match); the host drives
- *  it via setSearchState and the findNext / findPrev commands. */
 /** MS Office standard paper sizes (mm, portrait width × height). Page-setup
  *  presets resolve to raw mm here; <docen-document-area> takes only raw page-width /
  *  page-height, so presets stay in this document layer, not the UI component. */
@@ -660,11 +299,9 @@ const PAPER_SIZES: Readonly<Record<string, readonly [number, number]>> = {
   b5: [182, 257],
 };
 
-/** MS Office margin presets (mm, CSS padding list for the page content box:
- *  one value = uniform; two = top/bottom then left/right). `normal` matches the
- *  engine default (@office-open/docx sectionMarginDefaults: top/bottom 25.4mm,
- *  left/right 31.75mm = MS Office zh-CN "Normal") so the canvas fallback and the
- *  document-model sectionProperties agree. */
+/** MS Office margin presets (mm). `normal` matches the engine default
+ *  (@office-open/docx sectionMarginDefaults: top/bottom 25.4mm, left/right
+ *  31.75mm = MS Office zh-CN "Normal"). */
 const MARGINS: Readonly<Record<string, string>> = {
   normal: "25.4mm 31.75mm",
   narrow: "12.7mm",
@@ -717,12 +354,13 @@ function mergeSectionProperties(
 /**
  * `<docen-document>` — a turnkey DOCX editor web component.
  *
- * Wires the Fluent UI host (title-bar + ribbon + document-area) to the `@docen/docx`
- * Tiptap engine, with Pretext-driven offline pagination. Drop it in for an
- * editable, paginated Word surface: the title bar drives file I/O (open/save)
- * and language switching, ribbon commands route to Tiptap, embedded objects open
- * their editors on double-click, and file I/O goes through `parseDOCX`/
- * `generateDOCX`. The title bar + ribbon re-render on locale change.
+ * Wires the Fluent UI host (title-bar + ribbon + document-area) to the canvas
+ * route: a viewless Tiptap engine (the single source of truth for content and
+ * commands) driving the layout pipeline (compile → project → layout → LeaferJS
+ * paint) on every transaction. The title bar drives file I/O (open/save) and
+ * language switching, ribbon commands route to the engine, and file I/O goes
+ * through `parseDOCX`/`generateDOCX`. The title bar + ribbon re-render on
+ * locale change.
  */
 
 /**
@@ -745,9 +383,9 @@ const TASKPANE_POSITION: Record<TaskPaneId, "start" | "end"> = {
 
 @customElement({ name: "docen-document", template: documentTemplate, styles: documentStyles })
 class DocenDocument extends AddinHost<Editor> {
-  // ── Reactive attributes (@attr) — the former observedAttributes, re-implemented
-  //  as FAST fields. No `reflect` (attribute → property stays one-way). addinsAttr
-  //  (attribute "addins") dodges AddinHost.addinsChanged and the `addins` getter.
+  // ── Reactive attributes (@attr) — no `reflect` (attribute → property stays
+  //  one-way). addinsAttr (attribute "addins") dodges AddinHost.addinsChanged
+  //  and the `addins` getter.
   @attr editable?: string;
   @attr filename?: string;
   @attr user?: string;
@@ -757,19 +395,24 @@ class DocenDocument extends AddinHost<Editor> {
   @attr({ attribute: "addins" }) addinsAttr?: string;
   @attr theme?: string;
 
-  #editor?: Editor;
+  #bridge?: EditBridge;
+  #stage?: CanvasStage;
+  #stageHost?: HTMLElement;
+  #measurer = new TextMeasurer(browserFontMetrics);
+  #pages: readonly FlowPage[] = [];
+  #flow?: ProjectedFlowBox;
   #fileInput?: HTMLInputElement;
   #imageInput?: HTMLInputElement;
-  /** Latest TOC anchors, refreshed by TableOfContents.onUpdate; used to resolve
+  /** Latest TOC anchors, refreshed by the Outline extension; used to resolve
    *  an outline click back to a document position (pos). */
-  #anchors: readonly OutlineAnchor[] = [];
+  #anchors: readonly { id: string; pos: number; textContent: string; originalLevel: number }[] = [];
   /** Cached doc nodeSize + Office-style word count so caret-move transactions
    *  don't re-walk the whole document (recomputed only when content changes). */
   #lastDocSize = -1;
   #lastWords = 0;
   /** Semantic fingerprint of the last outline tree — id/level/title only. `pos`
-   *  shifts on every pagination re-flow but never changes what the pane shows,
-   *  so it's excluded; the fingerprint is built from per-anchor arrays (not the
+   *  shifts on every re-render but never changes what the pane shows, so it's
+   *  excluded; the fingerprint is built from per-anchor arrays (not the
    *  serialized tree) so object key order can never cause a spurious mismatch. */
   #outlineSig = "";
   #unobserveLang?: () => void;
@@ -783,43 +426,24 @@ class DocenDocument extends AddinHost<Editor> {
   // Format Painter captured marks + the pointerup listener that applies them.
   #painterMarks: readonly Mark[] | null = null;
   #painterOff?: () => void;
-  /** Current zoom level (percent) applied to the canvas via CSS `zoom`. */
+  /** Current zoom level (percent) applied via the document-area's zoom attr. */
   #zoom = 100;
   /** Debounce timer for the nav-pane search result list — the list rebuilds only
    *  after the user pauses typing (the query dispatches immediately, so Enter /
    *  find-next stays in sync with the last keystroke). */
   #searchTimer?: ReturnType<typeof setTimeout>;
-  /** Cached page bounds for the status bar, recomputed only on a doc change so a
-   *  caret move (selection-only transaction) reuses them instead of re-walking
-   *  every page node each keystroke. */
-  #statusDoc?: unknown;
-  #pageBounds?: ReadonlyArray<{ offset: number; size: number; section: number }>;
   /** Cached unwrapped JSON (host.getJSON result). Invalidated on every user/doc
-   *  change; recomputed lazily. Saves the double O(n) walk (editor.getJSON +
-   *  unwrapPages) on every save/autosave/getJSON call. Reflow transactions
-   *  (flowKey meta) don't invalidate — they re-pack page nodes only, so the
-   *  unwrapped flat doc is unchanged. */
+   *  change; recomputed lazily. Saves the editor.getJSON walk on every
+   *  save/autosave/getJSON call. */
   #cachedJSON?: JSONContent;
   #jsonDirty = true;
-  /** Memoized stylesToCss output keyed by the styles object reference, so a
-   *  repeated setJSON/open with the same styles skips regenerating the CSS. */
-  #stylesCssCache = new WeakMap<StylesOptions, string>();
-  /** The adoptedStyleSheet carrying the docxStyles @layer (named-styles CSS), or
-   *  null when none is injected. Tracked across #injectDocStyles calls so a
-   *  repeated load replaces its contents in place rather than stacking sheets.
-   *  Uses adoptedStyleSheets (NOT a <style> element) so docxStyles shares the
-   *  SAME cascade-layer stack as the reset layer — see #injectDocStyles. */
-  #docStylesSheet: CSSStyleSheet | null = null;
-  /** Last CSS string synced into #docStylesSheet; an unchanged injection (same
-   *  styles object → memoized CSS) skips replaceSync. */
-  #docStylesCss?: string;
 
   /** The underlying Tiptap Editor (undefined before connect / after disconnect).
    *  Exposed so a host (the @docen/vue adapter, or any parent element) can drive
    *  commands programmatically — setContent / getJSON / chain / ... — without
    *  routing through the ribbon. */
   get editor(): Editor | undefined {
-    return this.#editor;
+    return this.#bridge?.editor;
   }
 
   /** DocenHost surface — bridge the editor-agnostic `unknown` content contract
@@ -836,12 +460,10 @@ class DocenDocument extends AddinHost<Editor> {
     }
   }
 
-  // ── @attr change callbacks — re-route to the private handlers the old
-  //  attributeChangedCallback switch invoked (zero business-logic change). FAST
-  //  also fires these during initial attribute hydration; every handler is
-  //  guarded (editor/shadowRoot check) so an early fire is a no-op.
+  // ── @attr change callbacks — every handler is guarded (bridge/shadowRoot
+  //  check) so an early fire during FAST's attribute hydration is a no-op.
   editableChanged(): void {
-    this.#editor?.setEditable(this.editable !== "false");
+    this.#bridge?.editor.setEditable(this.editable !== "false");
     this.#syncEditModeMenu();
   }
 
@@ -877,11 +499,7 @@ class DocenDocument extends AddinHost<Editor> {
   readonly #onFullscreenChange = (): void => {
     if (document.fullscreenElement) return;
     const ribbon = this.shadowRoot?.querySelector("docen-ribbon");
-    const workspace = this.shadowRoot?.querySelector("docen-workspace");
-    if (ribbon?.getAttribute("data-ribbon-mode") === "auto-hide") {
-      ribbon.removeAttribute("data-ribbon-mode");
-      workspace?.removeAttribute("data-fullscreen");
-    }
+    if (ribbon) ribbon.setAttribute("mode", "always-shown");
   };
 
   /** Status-bar zoom slider → apply the new zoom level. Named (not inline) so it
@@ -938,16 +556,18 @@ class DocenDocument extends AddinHost<Editor> {
 
   /** Outline.onUpdate → <docen-outline>. Cache the anchors (so an
    *  outline click resolves to a position) and rebuild the nested tree. */
-  #renderOutline(anchors: readonly OutlineAnchor[]): void {
+  #renderOutline(
+    anchors: readonly { id: string; pos: number; textContent: string; originalLevel: number }[],
+  ): void {
     this.#anchors = anchors;
     const outline = this.shadowRoot?.querySelector("docen-outline");
     if (!outline) return;
     // Fingerprint only what the pane shows (id/level/title). `pos` moves on
-    // every pagination re-flow but never changes the outline, so excluding it
-    // avoids rebuilding — and flickering — the fluent-tree each pass. Built
-    // from per-anchor arrays rather than the serialized tree, so object key
-    // order is irrelevant (no dependency on buildOutlineTree's literal field
-    // order, unlike a plain JSON.stringify(tree) comparison).
+    // every re-render but never changes the outline, so excluding it avoids
+    // rebuilding — and flickering — the fluent tree each pass. Built from
+    // per-anchor arrays rather than the serialized tree, so object key order
+    // is irrelevant (no dependency on buildOutlineTree's literal field order,
+    // unlike a plain JSON.stringify(tree) comparison).
     const sig = anchors
       .map((a) => JSON.stringify([a.id, a.originalLevel, a.textContent]))
       .join("\n");
@@ -959,17 +579,17 @@ class DocenDocument extends AddinHost<Editor> {
   /** Outline click → select the heading at its position and scroll it into view. */
   readonly #onOutlineSelect = (event: CustomEvent<{ id?: string }>): void => {
     const id = event.detail?.id;
-    const editor = this.#editor;
-    if (!id || !editor) return;
+    const bridge = this.#bridge;
+    if (!id || !bridge) return;
     const anchor = this.#anchors.find((a) => a.id === id);
     if (!anchor) return;
-    editor.chain().focus().setTextSelection(anchor.pos).run();
-    scrollCaretToTop(editor.view);
+    this.#setTextSelection(anchor.pos);
+    bridge.scrollIntoView(anchor.pos);
   };
 
   /** navigation:search → set the active query; matches highlight live. */
   readonly #onSearch = (event: CustomEvent<{ query?: string }>): void => {
-    const editor = this.#editor;
+    const editor = this.editor;
     if (!editor) return;
     const query = new SearchQuery({ search: event.detail?.query ?? "", caseSensitive: false });
     editor.view.dispatch(setSearchState(editor.state.tr, query));
@@ -997,7 +617,7 @@ class DocenDocument extends AddinHost<Editor> {
 
   /** navigation:find → jump to the next/previous match (prosemirror-search). */
   readonly #onFind = (event: CustomEvent<{ direction: "next" | "prev" }>): void => {
-    const editor = this.#editor;
+    const editor = this.editor;
     if (!editor) return;
     (event.detail.direction === "prev" ? findPrev : findNext)(editor.state, editor.view.dispatch);
   };
@@ -1006,7 +626,7 @@ class DocenDocument extends AddinHost<Editor> {
    *  surrounding context and a data-from/to for click-to-jump (Word's Results
    *  pane lists every match with context, not just a count). */
   #updateSearchResults(): void {
-    const editor = this.#editor;
+    const editor = this.editor;
     const slot = this.shadowRoot?.querySelector(".search-results");
     if (!slot) return;
     const decos = editor ? getMatchHighlights(editor.state).find() : [];
@@ -1049,15 +669,15 @@ class DocenDocument extends AddinHost<Editor> {
 
   /** Click a Results entry → select that match range and scroll it into view. */
   readonly #onSearchResultClick = (event: Event): void => {
-    const editor = this.#editor;
-    if (!editor) return;
+    const bridge = this.#bridge;
+    if (!bridge) return;
     const item = (event.target as HTMLElement | null)?.closest(".result-item");
     if (!(item instanceof HTMLElement)) return;
     const from = Number(item.dataset.from);
     const to = Number(item.dataset.to);
     if (!Number.isFinite(from) || !Number.isFinite(to)) return;
-    editor.chain().focus().setTextSelection({ from, to }).run();
-    scrollCaretToTop(editor.view);
+    this.#setTextSelection(from, to);
+    bridge.scrollIntoView(from);
   };
 
   /** Ctrl+F → open the nav pane and focus its search box (Word behavior). */
@@ -1095,7 +715,7 @@ class DocenDocument extends AddinHost<Editor> {
       wholeWord: boolean;
     }>,
   ): void => {
-    const editor = this.#editor;
+    const editor = this.editor;
     if (!editor) return;
     const { action, find, replace, caseSensitive, wholeWord } = event.detail ?? {};
     const query = new SearchQuery({ search: find, replace, caseSensitive, wholeWord });
@@ -1105,56 +725,57 @@ class DocenDocument extends AddinHost<Editor> {
     else if (action === "replace-all") replaceAll(editor.state, editor.view.dispatch);
   };
 
+  /** Set a text selection (or a range) on the viewless editor. Same runtime
+   *  PM instance — the cast bridges the dual d.ts identity between this
+   *  package's @tiptap/pm and the engine's. */
+  #setTextSelection(from: number, to?: number): void {
+    const editor = this.editor;
+    if (!editor) return;
+    const sel = TextSelection.create(editor.state.doc, from, to);
+    editor.view.dispatch(editor.state.tr.setSelection(sel as never));
+    this.#bridge?.focus();
+  }
+
   /** Paste from the system clipboard as plain text. navigator.clipboard is the
    *  reliable path; execCommand("paste") is the fallback (often blocked). */
   async #paste(): Promise<void> {
-    const editor = this.#editor;
+    const editor = this.editor;
     if (!editor) return;
     let text: string | null = null;
     try {
       text = await navigator.clipboard.readText();
     } catch {
-      editor.commands.focus();
-      document.execCommand("paste");
       return;
     }
-    if (text) editor.chain().focus().insertContent(text).run();
+    if (text) {
+      this.#bridge?.focus();
+      editor.commands.insertContent(text);
+    }
   }
 
-  /** Editing → Select menu. "all" uses the official selectAll() command (an
-   *  AllSelection that crosses page isolating boundaries); "objects"/"similar"
-   *  are placeholders. */
+  /** Editing → Select menu. "all" uses the official selectAll() command;
+   *  "objects"/"similar" are placeholders. */
   #select(value?: string): void {
-    const editor = this.#editor;
+    const editor = this.editor;
     if (!editor) return;
     if ((value ?? "all") !== "all") return;
-    editor.chain().focus().selectAll().run();
+    this.#bridge?.focus();
+    editor.commands.selectAll();
   }
 
   /** Editing → Find drop-down → Go To: prompt for a page number and move the
    *  caret to that page, scrolling it into view. */
   #goToPage(): void {
-    const editor = this.#editor;
-    if (!editor) return;
+    const bridge = this.#bridge;
+    if (!bridge) return;
     const input = window.prompt(t("ribbon.opt.go-to-prompt", this));
     if (input == null) return;
     const page = parseInt(input, 10);
-    if (!Number.isFinite(page) || page < 1) return;
-    let count = 0;
-    let target = -1;
-    editor.state.doc.descendants((node, pos) => {
-      if (node.type.name === "page") {
-        count++;
-        if (count === page) {
-          target = pos + 1;
-          return false;
-        }
-      }
-      return true;
-    });
-    if (target < 0) return;
-    editor.chain().focus().setTextSelection(target).run();
-    scrollCaretToTop(editor.view);
+    if (!Number.isFinite(page) || page < 1 || page > this.#pages.length) return;
+    const pos = bridge.firstPosOfPage(page - 1);
+    if (pos == null) return;
+    this.#setTextSelection(pos);
+    bridge.scrollIntoView(pos);
   }
 
   /** Format Painter: on first click, capture the current selection's marks and
@@ -1165,13 +786,12 @@ class DocenDocument extends AddinHost<Editor> {
       this.#stopFormatPainter();
       return;
     }
-    const editor = this.#editor;
+    const editor = this.editor;
     if (!editor || editor.state.selection.empty) return;
     this.#painterMarks = editor.state.selection.$from.marks();
     this.toggleAttribute("format-painter", true);
-    const dom = editor.view.dom;
     const onUp = (): void => {
-      const ed = this.#editor;
+      const ed = this.editor;
       if (!ed) return;
       const { from, to, empty } = ed.state.selection;
       if (!empty && this.#painterMarks) {
@@ -1181,8 +801,8 @@ class DocenDocument extends AddinHost<Editor> {
       }
       this.#stopFormatPainter();
     };
-    dom.addEventListener("pointerup", onUp, { once: true });
-    this.#painterOff = () => dom.removeEventListener("pointerup", onUp);
+    this.addEventListener("pointerup", onUp, { once: true });
+    this.#painterOff = () => this.removeEventListener("pointerup", onUp);
   }
 
   #stopFormatPainter(): void {
@@ -1195,11 +815,9 @@ class DocenDocument extends AddinHost<Editor> {
   /** Mirror the font name / size and paragraph style at the caret into the
    *  ribbon comboboxes — Word behavior: the boxes report the formatting at the
    *  cursor, not a fixed default. Re-runs on every editor transaction (caret
-   *  moves, marks change). Font/size read the browser-resolved computed style
-   *  so the full style inheritance chain (direct run props → paragraph-style →
-   *  document defaults) is reflected. */
+   *  moves, marks change). */
   #setupFontSync(): void {
-    const editor = this.#editor;
+    const editor = this.editor;
     if (!editor) return;
     const sync = (): void => {
       this.#syncFontControls();
@@ -1214,12 +832,10 @@ class DocenDocument extends AddinHost<Editor> {
   }
 
   #syncFontControls(): void {
-    const editor = this.#editor;
+    const editor = this.editor;
     if (!editor) return;
     // Resolve font + size in one pass through the style inheritance chain
-    // (direct run props → paragraph style → basedOn → document defaults) — the
-    // old #effectiveFontAt/#effectiveSizeAt each called effectiveRunProps,
-    // walking the chain twice per transaction.
+    // (direct run props → paragraph style → basedOn → document defaults).
     const { font, size } = effectiveRunProps(
       this.#docStyles(editor),
       this.#currentStyleId(editor),
@@ -1262,7 +878,7 @@ class DocenDocument extends AddinHost<Editor> {
    *  carries none). The combobox matches the value against its gallery items to
    *  show the style's display name. */
   #syncStyleControl(): void {
-    const editor = this.#editor;
+    const editor = this.editor;
     if (!editor) return;
     const headingAttrs = editor.getAttributes("heading") as { styleId?: unknown };
     const paraAttrs = editor.getAttributes("paragraph") as { styleId?: unknown };
@@ -1304,31 +920,26 @@ class DocenDocument extends AddinHost<Editor> {
       ?.querySelector<HTMLElement>("docen-status-bar")
       ?.addEventListener("zoom:change", this.#onZoomChange as EventListener);
 
-    const page = this.shadowRoot!.querySelector<HTMLDivElement>(".docen-pages");
-    if (!page) return;
+    this.#stageHost = this.shadowRoot!.querySelector<HTMLElement>(".docen-canvas") ?? undefined;
+    if (!this.#stageHost) return;
 
-    // Fonts must be loaded before pagination measures, else Pretext drifts
-    // from the browser's actual line layout (see rendering-engine-choices).
+    // Fonts must be loaded before the pipeline measures, else the layout
+    // drifts from the browser's actual font metrics.
     await document.fonts?.ready;
 
-    // Wrap the initial content into doc > page+ (the editing schema). The
-    // page node never enters DOCX — wrapPages/unwrapPages bridge it at the
-    // editor layer, so DOCX round-trip stays transparent.
     const contentAttr = this.getAttribute("content");
     // Declarative section-properties / styles (JSON) seed doc-level attrs so a
     // host can bootstrap page setup + named styles without openDOCX/setJSON.
     const initAttrs = this.#readInitAttrs();
-    const baseDoc = wrapPages(contentAttr ? parseHTML(contentAttr) : undefined);
+    const baseDoc = contentAttr ? parseHTML(contentAttr) : ({} as JSONContent);
     const seeded =
       Object.keys(initAttrs).length > 0
         ? { ...baseDoc, attrs: { ...baseDoc.attrs, ...initAttrs } }
         : baseDoc;
     // Fill office-open's document-level defaults (the built-in style library +
     // page geometry + docGrid linePitch) so a freshly mounted document matches
-    // what export produces. A hand-built initial doc (no section-properties/
-    // styles attribute) otherwise mounts with an empty style gallery and no
-    // document grid for snapToGrid to pitch against. Host-declared initAttrs
-    // win — normalizeDocument shallow-merges user attrs over the defaults.
+    // what export produces. Host-declared initAttrs win — normalizeDocument
+    // shallow-merges user attrs over the defaults.
     const initialDoc =
       (seeded.attrs as { sectionProperties?: unknown } | undefined)?.sectionProperties == null
         ? normalizeDocument(seeded)
@@ -1336,7 +947,7 @@ class DocenDocument extends AddinHost<Editor> {
     // The default document add-in contributes the engine extensions + every
     // wired ribbon command. Registered before the editor mounts so its
     // extensions seed the schema. Ribbon events route straight to the engine
-    // via DocumentCommands (editor.chain().<event>), not addin.commands.
+    // (editor.commands.<event>), not addin.commands.
     const defaultAddin = createDefaultAddin({
       onOutlineUpdate: (anchors) => this.#renderOutline(anchors),
     });
@@ -1345,45 +956,20 @@ class DocenDocument extends AddinHost<Editor> {
     // default so their ribbon tabs append to the built-ins via mergeRibbonSchema.
     this.#applyAddinsAttr();
 
-    // Mini-toolbar buttons: built-in defaults + addin contributions, merged at
-    // boot — symmetric to `ribbonTabs(styles) + mergeRibbonSchema(addins)` in
-    // #renderChrome. The bar extension stays OUT of defaultAddin.extensions
-    // (the host owns the merge, like the ribbon), so it's configured here with
-    // the assembled list. Runtime `addAddin({ miniToolbar })` re-merges in
-    // addinsChanged (the bar's buttons are @observable), no re-mount needed.
-    const miniToolbarButtons = [...defaultMiniToolbarButtons(), ...this.mergedMiniToolbar()];
-    this.#editor = createDocxEditor({
-      element: page,
+    this.#bridge = mountEditBridge({
+      host: this.#stageHost,
       content: initialDoc,
-      // Spellcheck defaults OFF — Chromium's spellcheck is a major perf cost on
-      // large documents (ProseMirror community-confirmed). Opt in via the
-      // Review ribbon's spell-check button (spellcheck="true" attribute).
-      spellcheck: this.getAttribute("spellcheck") === "true",
-      editable: this.getAttribute("editable") !== "false",
-      // Engine extensions come from the default add-in (see addin.ts); the
-      // mini-toolbar extension is layered on with the host-merged buttons.
-      extensions: [
-        ...(defaultAddin.extensions ?? []),
-        DocenMiniToolbar.configure({ commands: miniToolbarButtons }),
-      ],
+      onDoc: (json) => this.#renderDoc(json),
+      pageHost: (page) => this.#stage?.slotAt(page)?.parentElement ?? null,
+      extensions: [...docxExtensions, ...(defaultAddin.extensions ?? [])],
     });
-    this.#applyDocStyles();
+    if (this.getAttribute("editable") === "false") this.#bridge.editor.setEditable(false);
+    // First paint + caret map feed (transactions re-render via the bridge's
+    // raf-merged onDoc from here on).
+    this.#renderDoc(initialDoc);
 
     // Mirror the caret's font/size into the ribbon comboboxes (Word behavior).
     this.#setupFontSync();
-    // Stamp the status bar (page count / caret page / zoom) once laid out.
-    this.#updateStatus();
-
-    // Default page setup (Word defaults): A4 portrait + Normal margins. The
-    // canvas already defaults to 210×297; apply the margin preset so the
-    // content box matches Word and pagination measures correctly. Skip when the
-    // host declared `section-properties` — that already seeded
-    // doc.attrs.sectionProperties via the initial doc, so just sync the canvas.
-    if (this.hasAttribute("section-properties")) {
-      this.#syncCanvasFromSection();
-    } else {
-      this.#setMargins("normal");
-    }
 
     // command = ribbon buttons; change = menu items + auto-save switch. Listen
     // on the shadow root so non-composed Fluent events (menu-item "change")
@@ -1429,10 +1015,29 @@ class DocenDocument extends AddinHost<Editor> {
     ribbon?.addEventListener("ribbon-mode-change", this.#onRibbonModeChange);
     // Emit docen:change on every content change (autosave driver) and docen:ready
     // once the editor is live — both bubble out so a host can react.
-    this.#editor?.on("transaction", this.#onTransaction);
+    this.editor?.on("transaction", this.#onTransaction);
     document.addEventListener("fullscreenchange", this.#onFullscreenChange);
     this.addEventListener("keydown", this.#onZoomKey);
     this.dispatchEvent(new CustomEvent("docen:ready", { bubbles: true, composed: true }));
+  }
+
+  /** The canvas pipeline — the single render entry the bridge's transactions
+   *  and the loaders share: compile → project → layout → paint, then re-arm
+   *  the caret map against the fresh geometry. */
+  #renderDoc(doc: JSONContent): void {
+    if (!this.#stageHost) return;
+    const { blocks, flow, furniture } = projectDocumentOptions(compileDocument(doc));
+    const pages = layoutFlow(blocks, flow, this.#measurer);
+    this.#pages = pages;
+    this.#flow = flow;
+    this.#stage ??= new CanvasStage(this.#stageHost, {
+      metrics: browserFontMetrics,
+      flow,
+      furniture,
+    });
+    this.#stage.sync(pages, flow);
+    this.#bridge?.updatePages(pages, flow);
+    this.#updateStatus();
   }
 
   disconnectedCallback(): void {
@@ -1459,25 +1064,25 @@ class DocenDocument extends AddinHost<Editor> {
       ?.querySelector("docen-status-bar")
       ?.removeEventListener("lang:change", this.#onLangChange as EventListener);
     this.shadowRoot
-      ?.querySelector("docen-status-bar")
+      ?.querySelector<HTMLElement>("docen-status-bar")
       ?.removeEventListener("zoom:change", this.#onZoomChange as EventListener);
-    this.#unobserveLang?.();
-    this.#editor?.off("transaction", this.#onTransaction);
+    this.editor?.off("transaction", this.#onTransaction);
     document.removeEventListener("fullscreenchange", this.#onFullscreenChange);
     this.removeEventListener("keydown", this.#onZoomKey);
     this.shadowRoot
       ?.querySelector("docen-ribbon")
       ?.removeEventListener("ribbon-mode-change", this.#onRibbonModeChange);
-    clearTimeout(this.#searchTimer);
     this.#fontSyncCleanup?.();
-    this.#editor?.destroy();
+    this.#fontSyncCleanup = undefined;
+    this.#stopFormatPainter();
+    clearTimeout(this.#searchTimer);
+    this.#bridge?.destroy();
+    this.#bridge = undefined;
+    this.#stage?.destroy();
+    this.#stage = undefined;
     super.disconnectedCallback();
   }
 
-  /** App header markup — i18n labels plus the host-supplied `user` / `filename`
-   *  (not translated: identity and the file name come from the app via
-   *  attributes, not the locale table). The auto-save label sits to the left of
-   *  its toggle (Word layout), so the switch carries only an aria-label. */
   #renderHeader(): string {
     const user = this.getAttribute("user") ?? "";
     const avatar = this.getAttribute("avatar") ?? "";
@@ -1531,7 +1136,7 @@ class DocenDocument extends AddinHost<Editor> {
     // connectedCallback's explicit call does the first render.
     const titleBar = root?.querySelector("docen-title-bar");
     if (!root || !titleBar) return;
-    const styles = this.#editor?.state.doc.attrs?.styles ?? null;
+    const styles = this.editor?.state.doc.attrs?.styles ?? null;
     titleBar.innerHTML = this.#renderHeader();
     // Built-in tabs (Home/Insert/… with the live style gallery) come from
     // ribbonTabs; external add-ins layer their own tabs on top via
@@ -1572,15 +1177,6 @@ class DocenDocument extends AddinHost<Editor> {
    *  tabs. */
   protected addinsChanged(): void {
     this.#renderChrome();
-    // Re-merge the mini-toolbar buttons so a runtime addAddin's `miniToolbar`
-    // takes effect immediately — symmetric to the ribbon re-render above. The
-    // bar's `commands` is @observable, so re-assignment re-renders the row and
-    // re-injects icons without rebuilding the BubbleMenu plugin. No-op before
-    // the editor boots (bar is null until addProseMirrorPlugins runs).
-    const bar = getMiniToolbar();
-    if (bar) {
-      bar.commands = [...defaultMiniToolbarButtons(), ...this.mergedMiniToolbar()];
-    }
   }
 
   /** Stamp pane titles + status text for the active locale (re-run on lang change). */
@@ -1591,15 +1187,6 @@ class DocenDocument extends AddinHost<Editor> {
     if (navPane) navPane.setAttribute("title", t("pane.navigation", this));
     const propsPane = root.querySelector('docen-task-pane[position="end"]');
     if (propsPane) propsPane.setAttribute("title", t("pane.properties", this));
-    // Page-break / section-break divider labels live in the editor view
-    // (NodeView / widget decoration), not the ribbon — update them alongside
-    // the chrome so a locale change relabels them.
-    root.querySelectorAll<HTMLElement>("fluent-divider[data-pb]").forEach((d) => {
-      d.textContent = t("ribbon.cmd.page-break", this);
-    });
-    root.querySelectorAll<HTMLElement>("fluent-divider[data-sb]").forEach((d) => {
-      d.textContent = t("ribbon.cmd.section-break", this);
-    });
     // Status bar is dynamic (page count / caret page / zoom) — re-stamp it so a
     // locale change re-localizes the text too.
     this.#updateStatus();
@@ -1678,7 +1265,7 @@ class DocenDocument extends AddinHost<Editor> {
   #syncEditModeMenu(): void {
     const menu = this.shadowRoot?.querySelector('docen-ribbon-menu[event="edit-mode"]');
     if (!menu) return;
-    const editable = this.#editor?.isEditable ?? true;
+    const editable = this.editor?.isEditable ?? true;
     menu.setAttribute("label", t(editable ? "ribbon.opt.editing" : "ribbon.opt.viewing", this));
     menu.setAttribute(
       "items",
@@ -1732,15 +1319,8 @@ class DocenDocument extends AddinHost<Editor> {
   /** docen:change — fired on every doc-changing transaction (autosave driver,
    *  mirroring OnlyOffice's onDocumentStateChange). Selection-only transactions
    *  are skipped. */
-  readonly #onTransaction = (props: { editor: Editor; transaction: Transaction }): void => {
-    // Pagination reflow carries the flowKey meta — a physical re-pack of
-    // content into editor-only page nodes. host.getJSON unwraps pages, so the
-    // flat doc is unchanged: don't emit docen:change or invalidate the JSON
-    // cache for it. Without this a load (many reflow dispatches) starves
-    // consumers with no-op events. ProseMirror convention: a plugin tags its
-    // own transactions via its PluginKey meta.
-    const tr = props.transaction;
-    if (tr.docChanged && !tr.getMeta(flowKey)) {
+  readonly #onTransaction = (props: { transaction: Transaction }): void => {
+    if (props.transaction.docChanged) {
       this.#jsonDirty = true;
       this.dispatchEvent(
         new CustomEvent("docen:change", { bubbles: true, composed: true, detail: { dirty: true } }),
@@ -1753,18 +1333,12 @@ class DocenDocument extends AddinHost<Editor> {
     this.#setTaskpane(id, !this.getTaskpaneState(id));
   }
 
-  /** Apply a paper-size preset (a4/letter/…) to the canvas as raw mm, then
-   *  re-paginate. Also writes the size into the document-model sectionProperties
-   *  (Word stores page setup in the sectPr) so render/measure/image-cap/export
-   *  share one geometry source; the canvas attrs are now the rendering fallback
-   *  + the zoom surface's page-width source. */
+  /** Apply a paper-size preset (a4/letter/…) — writes the size into the
+   *  document-model sectionProperties (Word stores page setup in the sectPr)
+   *  so layout/export share one geometry source; the dispatched transaction
+   *  re-renders the canvas through the bridge. */
   #setPageSize(value?: string): void {
-    const canvas = this.shadowRoot?.querySelector("docen-document-area");
     const size = value ? PAPER_SIZES[value] : undefined;
-    if (canvas && size) {
-      canvas.setAttribute("page-width", String(size[0]));
-      canvas.setAttribute("page-height", String(size[1]));
-    }
     if (size) {
       this.#updateSectionGeometry({
         pageSize: {
@@ -1773,46 +1347,32 @@ class DocenDocument extends AddinHost<Editor> {
         },
       });
     }
-    this.#refreshGeometry();
   }
 
-  /** Apply orientation (portrait/landscape) to the canvas, then re-paginate.
-   *  portrait clears the attribute (the canvas default); landscape sets it and
-   *  the canvas swaps width/min-height via :host([orientation]). Also writes
-   *  orientation onto page.size, deep-merged with the current (or engine-default)
-   *  size so resolvePageSize can swap edges for landscape. */
+  /** Apply orientation (portrait/landscape) — writes orientation onto
+   *  page.size, deep-merged with the current (or engine-default) size so the
+   *  projection can swap edges for landscape. */
   #setOrientation(value?: string): void {
-    const canvas = this.shadowRoot?.querySelector("docen-document-area");
-    if (canvas && value) {
-      if (value === "landscape") canvas.setAttribute("orientation", "landscape");
-      else canvas.removeAttribute("orientation");
-    }
-    if (value) {
-      const cur = (
-        this.#editor?.state.doc.attrs as { sectionProperties?: SectionPropertiesOptions }
-      )?.sectionProperties?.pageSize;
-      const size =
-        cur && typeof cur.width === "number" && typeof cur.height === "number"
-          ? cur
-          : { width: sectionPageSizeDefaults.WIDTH, height: sectionPageSizeDefaults.HEIGHT };
-      this.#updateSectionGeometry({
-        pageSize: { ...size, orientation: value as "portrait" | "landscape" },
-      });
-    }
-    this.#refreshGeometry();
+    if (!value) return;
+    const cur = (
+      this.editor?.state.doc.attrs as { sectionProperties?: SectionPropertiesOptions } | undefined
+    )?.sectionProperties?.pageSize;
+    const size =
+      cur && typeof cur.width === "number" && typeof cur.height === "number"
+        ? cur
+        : { width: sectionPageSizeDefaults.WIDTH, height: sectionPageSizeDefaults.HEIGHT };
+    this.#updateSectionGeometry({
+      pageSize: { ...size, orientation: value as "portrait" | "landscape" },
+    });
   }
 
-  /** Apply a margin preset (normal/narrow/…) to the canvas as a CSS padding
-   *  list, then re-paginate. Also writes the margins into the document-model
-   *  sectionProperties so a page-setup change actually re-caps images and
-   *  re-renders (the canvas CSS alone wouldn't, once a sectPr is inlined). */
+  /** Apply a margin preset (normal/narrow/…) — writes the margins into the
+   *  document-model sectionProperties so a page-setup change actually
+   *  re-lays-out (the transaction re-renders the canvas). */
   #setMargins(value?: string): void {
-    const canvas = this.shadowRoot?.querySelector("docen-document-area");
-    if (canvas && value && MARGINS[value]) canvas.setAttribute("margin", MARGINS[value]);
     if (value && MARGINS[value]) {
       this.#updateSectionGeometry({ pageMargin: marginTwipsFromCss(MARGINS[value]) });
     }
-    this.#refreshGeometry();
   }
 
   /** Deep-merge a sectionProperties patch into the CURRENT section's sectPr and
@@ -1820,11 +1380,9 @@ class DocenDocument extends AddinHost<Editor> {
    *  one holding the caret: its sectPr rides on its last paragraph (the first
    *  section-carrying paragraph at/after the caret), or, when the caret is in the
    *  final section, on doc.attrs.sectionProperties (the body-level sectPr).
-   *  Reflow re-stamps each page's geometry from its section's sectPr, so an edit
-   *  only affects the caret's section — multi-section docs keep per-section page
-   *  setups, and render/measure/image-cap/export all see the change. */
+   *  The dispatched transaction re-renders every page of the canvas. */
   #updateSectionGeometry(patch: SectionPropertiesOptions): void {
-    const editor = this.#editor;
+    const editor = this.editor;
     if (!editor) return;
     const { doc, tr } = editor.state;
     const from = editor.state.selection.from;
@@ -1861,15 +1419,6 @@ class DocenDocument extends AddinHost<Editor> {
     editor.view.dispatch(tr);
   }
 
-  /** Re-paginate after a page-size / orientation / margin change. RAF so the
-   *  new canvas geometry applies first; PagePlugin re-reads the page height
-   *  from the DOM and re-solves the breaks. */
-  #refreshGeometry(): void {
-    requestAnimationFrame(() => {
-      if (this.#editor) pageStorageOf(this.#editor).repaginate();
-    });
-  }
-
   /** Parse the declarative `section-properties` / `styles` attributes (JSON).
    *  Lets a host bootstrap page setup + named styles without openDOCX/setJSON.
    *  Malformed JSON is ignored (warned) so a typo never breaks the editor. */
@@ -1897,42 +1446,11 @@ class DocenDocument extends AddinHost<Editor> {
     return out;
   }
 
-  /** Mirror doc.attrs.sectionProperties onto the canvas attributes (page-width /
-   *  page-height / margin / orientation) so zoom-to-page-width and the CSS
-   *  fallback stay in sync, then re-paginate. Sides absent in the model fall
-   *  back to the engine default margins. */
-  #syncCanvasFromSection(): void {
-    const editor = this.#editor;
-    if (!editor) return;
-    const sp = (editor.state.doc.attrs as { sectionProperties?: SectionPropertiesOptions })
-      .sectionProperties;
-    const pageSize = sp?.pageSize;
-    const margin = sp?.pageMargin;
-    const canvas = this.shadowRoot?.querySelector("docen-document-area");
-    if (canvas && (pageSize || margin)) {
-      const size = pageSize;
-      if (size && typeof size.width === "number" && typeof size.height === "number") {
-        canvas.setAttribute("page-width", twipsToMm(size.width));
-        canvas.setAttribute("page-height", twipsToMm(size.height));
-      }
-      const so = size || undefined;
-      if (so?.orientation === "landscape") canvas.setAttribute("orientation", "landscape");
-      else canvas.removeAttribute("orientation");
-      const m = margin || undefined;
-      const def = sectionMarginDefaults;
-      const mm = (v: unknown, d: number): string => twipsToMm(typeof v === "number" ? v : d);
-      canvas.setAttribute(
-        "margin",
-        `${mm(m?.top, def.TOP)} ${mm(m?.right, def.RIGHT)} ${mm(m?.bottom, def.BOTTOM)} ${mm(m?.left, def.LEFT)}`,
-      );
-    }
-    this.#refreshGeometry();
-  }
-
   /** Runtime `section-properties` change: deep-merge into the body section's
-   *  sectPr (a default doc is single-section) and re-sync the canvas. */
+   *  sectPr (a default doc is single-section); the dispatched transaction
+   *  re-renders the canvas with the new geometry. */
   #applySectionPropertiesAttr(): void {
-    const editor = this.#editor;
+    const editor = this.editor;
     if (!editor) return;
     const parsed = this.#readInitAttrs().sectionProperties;
     if (!parsed) return;
@@ -1941,24 +1459,25 @@ class DocenDocument extends AddinHost<Editor> {
     editor.view.dispatch(
       editor.state.tr.setDocAttribute("sectionProperties", mergeSectionProperties(cur, parsed)),
     );
-    this.#syncCanvasFromSection();
   }
 
-  /** Runtime `styles` change: replace doc.attrs.styles and re-inject the CSS. */
+  /** Runtime `styles` change: replace doc.attrs.styles (the style library
+   *  re-renders through the layout pipeline and the Styles gallery). */
   #applyStylesAttr(): void {
-    const editor = this.#editor;
+    const editor = this.editor;
     if (!editor) return;
     const parsed = this.#readInitAttrs().styles;
     if (parsed === undefined) return;
     editor.view.dispatch(editor.state.tr.setDocAttribute("styles", parsed));
-    this.#applyDocStyles();
+    this.#renderChrome();
   }
 
-  /** Apply a zoom level (percent, clamped 10–500) to the canvas and refresh the
-   *  status bar. CSS `zoom` rescales the pages and reflows the scroll surface.
-   *  Idempotent (no-op on no change) and dispatches `docen:zoom-change` on a
-   *  real flip — so the host, status-bar slider, and external listeners stay in
-   *  sync through one funnel (Office `Office.Document.zoom.set` equivalent). */
+  /** Apply a zoom level (percent, clamped 10–500) to the document area and
+   *  refresh the status bar. CSS `zoom` rescales the canvas and reflows the
+   *  scroll surface. Idempotent (no-op on no change) and dispatches
+   *  `docen:zoom-change` on a real flip — so the host, status-bar slider, and
+   *  external listeners stay in sync through one funnel (Office
+   *  `Office.Document.zoom.set` equivalent). */
   #setZoom(pct: number): void {
     const next = Math.max(10, Math.min(500, Math.round(pct)));
     if (next === this.#zoom) return;
@@ -1976,70 +1495,31 @@ class DocenDocument extends AddinHost<Editor> {
 
   /** Resolve a ribbon zoom preset to a percent. Numeric presets ("200", "100",
    *  "75", "50") map directly to that zoom level; "page-width" scales the page
-   *  to fill the canvas width (mm → px @96dpi). */
+   *  to fill the document-area width (layout px at 100%). */
   #zoomPreset(preset: string): void {
     if (/^\d+$/.test(preset)) return this.#setZoom(Number(preset));
     if (preset !== "page-width") return;
-    const canvas = this.shadowRoot?.querySelector("docen-document-area");
-    if (!canvas) return;
-    const MM2PX = 96 / 25.4;
-    const pw = parseFloat(canvas.getAttribute("page-width") ?? "210") * MM2PX;
-    this.#setZoom((canvas.clientWidth / pw) * 100);
+    const area = this.shadowRoot?.querySelector("docen-document-area");
+    if (!area || !this.#flow) return;
+    this.#setZoom((area.clientWidth / this.#flow.pageWidthPx) * 100);
   }
 
   /** Refresh the status bar to mirror Word's bottom row: the left cluster is
    *  the caret's section, then "Page X of Y", then the word count; the right
    *  cluster is the zoom slider value + percent. Runs on every transaction
-   *  (caret moves, a re-flow changes the page count) and on zoom / locale change.
-   *
-   *  The section number is O(pages): each page node carries its section's
-   *  sectionProperties attrs (one shared reference across a section's pages),
-   *  so the count increments only when that reference changes — no paragraph
-   *  walk. The word count is cached by doc nodeSize so caret moves skip
-   *  re-walking the full document (CharacterCount.words() regexes all text). */
+   *  (caret moves, a re-render changes the page count) and on zoom / locale
+   *  change. The word count is cached by doc nodeSize so caret moves skip
+   *  re-walking the full document. */
   #updateStatus(): void {
     const root = this.shadowRoot;
     if (!root) return;
     const bar = root.querySelector<HTMLElement>("docen-status-bar");
-    const editor = this.#editor;
-    let page = 0;
-    let total = 0;
-    let section = 1;
-    if (editor) {
-      const doc = editor.state.doc;
-      const from = editor.state.selection.from;
-      // Cache page bounds across selection-only transactions (caret moves);
-      // recompute only when the doc changed. Avoids a full doc.forEach + per-page
-      // attrs read on every keystroke/caret move on large multi-page documents.
-      if (doc !== this.#statusDoc) {
-        const bounds: { offset: number; size: number; section: number }[] = [];
-        let prevSp: unknown;
-        let sectionCount = 0;
-        let firstPage = true;
-        doc.forEach((node, offset) => {
-          if (node.type.name !== "page") return;
-          const sp = (node.attrs as { sectionProperties?: unknown }).sectionProperties ?? null;
-          // A section's pages share one sectionProperties reference, so the count
-          // rises only at a real section boundary (or on the very first page).
-          if (firstPage || sp !== prevSp) sectionCount++;
-          firstPage = false;
-          prevSp = sp;
-          bounds.push({ offset, size: node.nodeSize, section: sectionCount });
-        });
-        this.#pageBounds = bounds;
-        this.#statusDoc = doc;
-      }
-      const bounds = this.#pageBounds!;
-      total = bounds.length;
-      for (let i = 0; i < bounds.length; i++) {
-        const b = bounds[i];
-        if (from > b.offset && from <= b.offset + b.size) {
-          page = i + 1;
-          section = b.section;
-          break;
-        }
-      }
-    }
+    const editor = this.editor;
+    const page = editor ? (this.#bridge?.pageOf(editor.state.selection.from) ?? -1) + 1 : 0;
+    const total = this.#pages.length;
+    // Section count: the projection flows a single section for now; a
+    // multi-section document reports its body section.
+    const section = 1;
     // Word count is cached by doc nodeSize so caret moves skip re-walking the
     // full document (CharacterCount.words() regexes all text).
     const docSize = editor?.state.doc.nodeSize ?? 0;
@@ -2079,8 +1559,7 @@ class DocenDocument extends AddinHost<Editor> {
       this.#openFindReplace();
       return;
     }
-    // Page setup actions are handled locally (they change the canvas/page, not
-    // the Tiptap doc) and need no editor command.
+    // Page setup actions write sectionProperties; the transaction re-renders.
     if (name === "page-size") {
       this.#setPageSize(value);
       return;
@@ -2105,11 +1584,12 @@ class DocenDocument extends AddinHost<Editor> {
       else this.#setZoom(100);
       return;
     }
-    if (!this.#editor) return;
+    const editor = this.editor;
+    if (!editor) return;
     // Edit / View mode — toggle the editor's editable state (tab-row "Editing"
     // menu); then re-stamp the menu so its label + checked item follow.
     if (name === "edit-mode") {
-      this.#editor.setEditable(value !== "view");
+      editor.setEditable(value !== "view");
       this.#syncEditModeMenu();
       return;
     }
@@ -2124,27 +1604,23 @@ class DocenDocument extends AddinHost<Editor> {
       this.#imageInput?.click();
       return;
     }
-    // Formatting marks toggle — FormattingMarks paints the paragraph mark via a
-    // widget decoration; the host [show-marks] attr drives the page-break
-    // divider CSS.
+    // Formatting marks toggle — canvas-side marks are a later milestone; the
+    // host [show-marks] attribute stays the source of truth.
     if (name === "show-marks") {
       this.setShowMarks(!this.getShowMarks());
       return;
     }
-    // Clipboard — execCommand copy/cut acts on the editor's DOM selection;
-    // paste reads the system clipboard (contenteditable execCommand paste is
-    // blocked in most browsers).
+    // Clipboard — the selection is canvas-rendered (no DOM editor selection),
+    // so copy/cut read the doc range and write the clipboard directly.
     if (name === "copy" || name === "cut") {
-      this.#editor.commands.focus();
-      document.execCommand(name);
+      void this.#copySelection(name === "cut");
       return;
     }
     if (name === "paste") {
       void this.#paste();
       return;
     }
-    // Editing → Select: selectAll() spans every page (bypassing page
-    // isolating); objects/similar are not yet wired.
+    // Editing → Select: selectAll() spans the whole document.
     if (name === "select") {
       this.#select(value);
       return;
@@ -2154,27 +1630,39 @@ class DocenDocument extends AddinHost<Editor> {
       this.#toggleFormatPainter();
       return;
     }
-    // Built-in commands route to editor.chain().focus().<event>(value).run() —
+    // Built-in commands route to editor.commands.<event>(value) —
     // DocumentCommands registers every ribbon event as a native Tiptap command.
     // A user add-in overrides one by contributing a Tiptap extension whose
     // addCommands redefines the same name (Tiptap's native override mechanism).
-    const editor = this.#editor;
-    if (editor) {
-      const chain = editor.chain().focus() as unknown as Record<
-        string,
-        (value?: string) => { run: () => void }
-      >;
-      const cmd = chain[name];
-      if (typeof cmd === "function") {
-        cmd(value).run();
-        return;
-      }
+    const commands = editor.commands as unknown as Record<string, (value?: string) => unknown>;
+    const cmd = commands[name];
+    if (typeof cmd === "function") {
+      cmd(value);
+      return;
     }
     // Not a Tiptap command — route to the first add-in that declares it. This
     // covers non-Tiptap actions contributed by external add-ins (e.g. a Help
     // button that opens a URL) that Tiptap can't express.
     this.dispatchCommand(name, value);
   };
+
+  /** Copy/cut the current selection to the system clipboard as plain text;
+   *  cut also deletes the range. */
+  async #copySelection(cut: boolean): Promise<void> {
+    const editor = this.editor;
+    if (!editor) return;
+    const { from, to } = editor.state.selection;
+    if (from === to) return;
+    const text = editor.state.doc.textBetween(from, to, "\n");
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // Clipboard write may be denied (permissions/policy) — still cut.
+    }
+    if (cut) {
+      editor.view.dispatch(editor.state.tr.deleteSelection());
+    }
+  }
 
   /** Menu items and the auto-save switch carry their action in `data-event`. */
   readonly #onChange = (event: Event): void => {
@@ -2290,7 +1778,8 @@ class DocenDocument extends AddinHost<Editor> {
   };
 
   /** Insert the picked image as a data URL. Width/height are left unset — the
-   *  browser shows natural size, and prepareImages fills them on DOCX export. */
+   *  canvas renders the natural size, and prepareImages fills them on DOCX
+   *  export. */
   readonly #onImageChange = (event: Event): void => {
     const input = event.target as HTMLInputElement;
     const file = input.files?.[0];
@@ -2298,11 +1787,8 @@ class DocenDocument extends AddinHost<Editor> {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (): void => {
-      this.#editor
-        ?.chain()
-        .focus()
-        .insertContent({ type: "image", attrs: { src: reader.result } })
-        .run();
+      this.#bridge?.focus();
+      this.editor?.commands.insertContent({ type: "image", attrs: { src: reader.result } });
     };
     reader.readAsDataURL(file);
   };
@@ -2381,35 +1867,17 @@ class DocenDocument extends AddinHost<Editor> {
     return `<!DOCTYPE html><html lang="${escapeHtml(document.documentElement.lang || "en")}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(title)}</title></head><body>${body}</body></html>`;
   }
 
-  /** Print the document: window.print() — the @media print rules in this
-   *  template, the workspace, and the canvas hide the chrome and render only
-   *  the page content. */
+  /** Print the document: window.print(). */
   #print(): void {
     window.print();
   }
 
-  /** Common load path for openDOCX/openMarkdown/openHTML: inject the doc styles,
-   *  adopt a filename, replace the whole doc node, then re-paginate once layout
-   *  has settled. Markdown/HTML carry no doc-level styles, so `json.attrs` has
-   *  none and #injectDocStyles clears the CSS. */
+  /** Common load path for openDOCX/openMarkdown/openHTML: adopt a filename,
+   *  replace the whole doc node. The #loadDoc wake-up transaction re-renders
+   *  the canvas through the bridge. */
   #applyOpenedJSON(json: JSONContent, filename?: string): void {
-    const editor = this.#editor;
-    if (!editor) return;
-    // Inject the styles CSS BEFORE rendering so the first paint carries the
-    // document's real fonts/sizes (see setJSON for the rationale).
-    this.#injectDocStyles((json.attrs as { styles?: StylesOptions } | undefined)?.styles);
-    // Set filename before #applyDocStyles so its single #renderChrome reflects
-    // both the Styles gallery and the filename header — previously this was a
-    // second #renderChrome call duplicating the one inside #applyDocStyles.
     if (filename) this.setAttribute("filename", filename);
-    // Replace the whole doc node (content + doc-level attrs) — see #loadDoc.
-    this.#loadDoc(editor, wrapPages(json));
-    this.#applyDocStyles();
-    // Paginate once the new document has laid out. setContent renders the DOM
-    // synchronously, but the browser commits layout on the NEXT frame —
-    // measuring in the same frame reads half-laid-out blocks and the breaks
-    // come out wrong (the first page overflows, so the pages look uneven).
-    this.#repaginateAfterLoad(editor);
+    this.#loadDoc(json);
   }
 
   /** Load a file into the editor, auto-detecting its format from the extension
@@ -2450,33 +1918,6 @@ class DocenDocument extends AddinHost<Editor> {
     this.#applyOpenedJSON(parseHTML(text), typeof input === "string" ? undefined : input.name);
   }
 
-  /** Re-paginate after loading a document, once its layout has settled.
-   *
-   *  Two passes: the first rAF runs as soon as the browser has committed layout
-   *  for the just-set content (correct for text and tables — the common case,
-   *  and fast enough to read as "instant"). Fonts and images load after that
-   *  frame and change block heights, so a second pass re-measures once they're
-   *  ready. No debounce: an import must paginate within a frame, not after
-   *  300ms — the old deferred pass lingered on stale seams for seconds. */
-  #repaginateAfterLoad(editor: Editor): void {
-    const run = (): void => {
-      if (this.#editor === editor && !editor.isDestroyed) pageStorageOf(editor).repaginate();
-    };
-    requestAnimationFrame(run);
-    // Second pass once fonts are ready: fonts loading after the first pass
-    // change canvas measureText widths, so the Pretext prepare cache (keyed on
-    // text+font+letterSpacing) is stale — clear it before re-measuring with the
-    // real fonts. Images no longer gate this pass: image paragraphs measure from
-    // node.attrs (not the <img> DOM), so a still-loading image can't change page
-    // breaks — awaiting it only stalled the second pass (a large doc's many
-    // images stalled it near-indefinitely).
-    const fonts = document.fonts?.ready ?? Promise.resolve();
-    void fonts.then(() => {
-      clearMeasureCache();
-      requestAnimationFrame(run);
-    });
-  }
-
   /** Serialize the current document to a DOCX buffer. */
   async saveDOCX(): Promise<Uint8Array> {
     const buffer = await generateDOCX(this.getJSON());
@@ -2495,13 +1936,12 @@ class DocenDocument extends AddinHost<Editor> {
   }
 
   /** Current document as Tiptap JSON. Cached — recomputed only after a doc
-   *  change (see #onTransaction). Page nodes are unwrapped so external
-   *  consumers see flat doc > block+ (page nodes are editor-only). */
+   *  change (see #onTransaction). */
   getJSON(): JSONContent {
-    const editor = this.#editor;
+    const editor = this.editor;
     if (!editor) return {} as JSONContent;
     if (this.#jsonDirty || this.#cachedJSON === undefined) {
-      this.#cachedJSON = unwrapPages(editor.getJSON());
+      this.#cachedJSON = editor.getJSON();
       this.#jsonDirty = false;
     }
     return this.#cachedJSON;
@@ -2509,32 +1949,18 @@ class DocenDocument extends AddinHost<Editor> {
 
   /** Replace the document with Tiptap JSON. */
   setJSON(json: JSONContent): void {
-    const editor = this.#editor;
-    if (!editor) return;
     // A hand-built JSON (not from parseDOCX) lacks office-open's document-level
     // schema defaults — doc.attrs.styles (docDefaults body font/size/spacing)
     // and doc.attrs.sectionProperties (page size/margins/docGrid linePitch).
-    // Without them the editor has no body font, no page geometry, and no grid
+    // Without them the document has no body font, no page geometry, and no grid
     // for snapToGrid to pitch against. Normalize once on the way in; a doc that
     // already carries sectionProperties (a parseDOCX/getJSON round-trip) is a
     // no-op (normalizeDocument shallow-merges user attrs over defaults).
     if (!(json.attrs as { sectionProperties?: unknown } | undefined)?.sectionProperties) {
       json = normalizeDocument(json);
     }
-    // Inject the styles CSS BEFORE rendering so the first paint already carries
-    // the document's real fonts/sizes — without this, a large doc's synchronous
-    // load + image decode can defer the <style> repaint and the page renders
-    // unstyled. Read styles from the incoming JSON (editor.state is still the
-    // old doc here; wrapPages preserves doc-level attrs).
-    this.#injectDocStyles((json.attrs as { styles?: StylesOptions } | undefined)?.styles);
-    // Wrap on the way in — external callers pass flat doc > block+. Tiptap's
-    // setContent only swaps content (it drops doc-level attrs like styles/core),
-    // so replace the whole doc node via a fresh EditorState to preserve them.
-    this.#loadDoc(editor, wrapPages(json));
-    this.#applyDocStyles();
-    // Paginate once layout has settled — parity with openDOCX (setContent renders
-    // synchronously, but the browser commits layout on the next frame).
-    this.#repaginateAfterLoad(editor);
+    this.#loadDoc(json);
+    this.#renderChrome();
   }
 
   /** Replace the whole doc node (content + doc-level attrs) via a fresh
@@ -2542,27 +1968,22 @@ class DocenDocument extends AddinHost<Editor> {
    *  attrs; this carries them (styles/core/sectionProperties). updateState
    *  bypasses appendTransaction/onTransaction, so extensions that react to doc
    *  changes wouldn't wake — dispatch a docChanged tr (re-stamp the first
-   *  block's attrs, a no-op visually) to trigger them: TableOfContents injects
-   *  heading ids + fires onUpdate, PagePlugin schedules a re-flow. */
-  #loadDoc(editor: Editor, doc: JSONContent): void {
-    // Reset per-document image caches so a prior doc's decoded sizes / failed
-    // fetches neither leak nor suppress a legit re-fetch in the new document.
-    clearImageCapCache();
-    // New document — invalidate the unwrapped-JSON cache.
+   *  block's attrs, a no-op visually) to trigger them: Outline re-reports the
+   *  anchor list, and the bridge's raf-merged onDoc re-renders the canvas. */
+  #loadDoc(doc: JSONContent): void {
+    const editor = this.editor;
+    if (!editor) return;
+    // New document — invalidate the JSON cache.
     this.#jsonDirty = true;
     editor.view.updateState(
       EditorState.create({ doc: editor.schema.nodeFromJSON(doc), plugins: editor.state.plugins }),
     );
-    if (editor.isDestroyed) return;
+    // NOTE: no isDestroyed guard — the viewless editor's `isDestroyed` getter
+    // defaults to true (it reads editorView, which element:null never sets).
     // updateState bypasses appendTransaction, so extensions that react to doc
-    // changes wouldn't wake. Dispatch a docChanged tr to fire them: TableOfContents
-    // injects heading ids + emits onUpdate, PagePlugin schedules a re-flow. The
-    // tr re-stamps the LAST leaf block's OWN attrs — a true no-op (same node,
-    // same attrs) — so nothing is clobbered. Targeting the last leaf (not pos 1)
-    // sidesteps the page node's `isolating` boundary entirely: the old
-    // setNodeMarkup(1) resolved INTO the page's first child and could overwrite
-    // its attrs, which is how the first heading lost its styleId (and with it
-    // its Heading1 bold/centering) on load.
+    // changes wouldn't wake. Dispatch a docChanged tr to fire them. The tr
+    // re-stamps the LAST leaf block's OWN attrs — a true no-op (same node,
+    // same attrs) — so nothing is clobbered.
     const state = editor.state;
     // Last textblock/leaf block (deepest, rightmost) for the re-stamp — found
     // by descending the rightmost-child chain (O(depth)) instead of a full
@@ -2577,14 +1998,20 @@ class DocenDocument extends AddinHost<Editor> {
       editor.view.dispatch(
         state.tr.setNodeMarkup(last.pos, undefined, last.attrs).setMeta("addToHistory", false),
       );
+    } else {
+      // An empty document has no markup target — render directly.
+      this.#renderDoc(editor.getJSON());
     }
   }
 
   /** Last textblock/leaf block (deepest, rightmost) for the #loadDoc re-stamp
-   *  hack — the re-stamp target that sidesteps the page node's `isolating`
-   *  boundary. nodesBetween is O(n) but runs only on load (setJSON/openDOCX),
-   *  not per edit, so the walk cost is amortized over the load itself. */
-  #lastMarkupTarget(doc: Node): { pos: number; attrs: Record<string, unknown> } | null {
+   *  hack — the re-stamp target that fires the extension wake-up. Runs only on
+   *  load (setJSON/openDOCX), not per edit, so the walk cost is amortized over
+   *  the load itself. */
+  #lastMarkupTarget(doc: import("@tiptap/pm/model").Node): {
+    pos: number;
+    attrs: Record<string, unknown>;
+  } | null {
     let last: { pos: number; attrs: Record<string, unknown> } | null = null;
     doc.nodesBetween(0, doc.content.size, (node, pos) => {
       if (node.isText) return;
@@ -2597,145 +2024,15 @@ class DocenDocument extends AddinHost<Editor> {
     return last;
   }
 
-  /** Inject the document's named-styles CSS (styles.xml → scoped CSS) as an
-   *  adoptedStyleSheet carrying the docxStyles @layer. Idempotent — reuses the
-   *  #docStylesSheet across calls (replaceSync in place). Called BOTH before
-   *  #loadDoc (by openDOCX/setJSON, so the first paint is already styled) and
-   *  inside #applyDocStyles (refresh after doc attrs settle).
-   *
-   *  adoptedStyleSheets (NOT a <style> element): a shadow root does NOT merge a
-   *  <style> element's @layer into the adoptedStyleSheets @layer stack. The
-   *  reset layer lives in an adopted sheet, so a <style>-borne docxStyles layer
-   *  was ordered BELOW it — reset's `.docen-page h4 { font-weight: inherit }`
-   *  beat docxStyles' `.docx-style-4 { font-weight: bold }` despite `@layer
-   *  reset, docxStyles`, dropping heading bold (while color/font-size on the
-   *  same rule still won, since reset doesn't set them). Sharing the
-   *  adoptedStyleSheets mechanism puts both layers in one stack so the declared
-   *  order holds. */
-  #injectDocStyles(styles: StylesOptions | null | undefined): void {
-    const root = this.shadowRoot;
-    if (!root) return;
-    // Memo on the styles object reference — repeated loads with the same
-    // styles (the common case) skip regenerating the CSS string.
-    let css: string | undefined = styles ? this.#stylesCssCache.get(styles) : undefined;
-    if (css === undefined) {
-      css = stylesToCss(styles, ".docen-page");
-      if (styles) this.#stylesCssCache.set(styles, css);
-    }
-    if (css) {
-      // Wrap in @layer docxStyles so these named styles beat the reset layer
-      // (layer order, not specificity) yet stay below unlayered inline styles.
-      const wrapped = "@layer docxStyles {\n" + css + "\n}";
-      const sheets = root.adoptedStyleSheets;
-      if (this.#docStylesSheet && sheets.includes(this.#docStylesSheet)) {
-        if (this.#docStylesCss !== wrapped) {
-          this.#docStylesSheet.replaceSync(wrapped);
-          this.#docStylesCss = wrapped;
-        }
-      } else {
-        const sheet = new CSSStyleSheet();
-        sheet.replaceSync(wrapped);
-        this.#docStylesSheet = sheet;
-        this.#docStylesCss = wrapped;
-        root.adoptedStyleSheets = [...sheets, sheet];
-      }
-    } else if (this.#docStylesSheet) {
-      root.adoptedStyleSheets = root.adoptedStyleSheets.filter((s) => s !== this.#docStylesSheet);
-      this.#docStylesSheet = null;
-      this.#docStylesCss = undefined;
-    }
-  }
-
-  /** Apply the loaded document's styles + chrome + geometry. Called after every
-   *  content load (create / import / setJSON). The styles <style> is also
-   *  injected BEFORE #loadDoc by the loaders (first paint styled); this refreshes
-   *  it from the now-settled doc attrs, re-stamps the ribbon (Styles gallery),
-   *  and applies font-metric + section geometry. */
-  #applyDocStyles(): void {
-    const editor = this.#editor;
-    if (!editor) return;
-    this.#injectDocStyles(editor.state.doc.attrs?.styles);
-    // Re-stamp the ribbon so the Styles gallery reflects the loaded document's
-    // style library (named + custom paragraph styles) — see styleItems().
-    this.#renderChrome();
-    // Font metric + section geometry apply regardless of named styles — both
-    // read attrs (default font / sectionProperties) that a styles-less document
-    // still carries.
-    this.#applyDefaultFontMetric();
-    this.#applySectionGeometry();
-  }
-
-  /** Set a document-wide --docen-font-metric fallback on .docen-pages — the
-   *  default font's `normal` ratio — so the page container's line-height
-   *  (inherited by paragraphs without their own spacing) resolves to a real
-   *  metric instead of the 1.2 fallback. Per-paragraph decorations override
-   *  this for paragraphs that carry their own line-spacing. */
-  #applyDefaultFontMetric(): void {
-    const editor = this.#editor;
-    const pages = this.shadowRoot?.querySelector<HTMLElement>(".docen-pages");
-    if (!editor || !pages) return;
-    const styles = (editor.state.doc.attrs?.styles ?? null) as StylesOptions | null;
-    const { font } = effectiveRunProps(styles, null, {});
-    const family = resolveFontName(font) ?? "serif";
-    const ratio = fontNormalRatio({ family, bold: false, italic: false }).toFixed(4);
-    pages.style.setProperty("--docen-font-metric", ratio);
-  }
-
-  /** Apply the document's section geometry — page size, orientation, and
-   *  margins from `sectionProperties` (twips) — to the canvas, then
-   *  re-paginate. Without this an imported document renders on the default
-   *  A4 portrait + Normal margins instead of its real page setup, so the page
-   *  count and breaks drift far from Word. twips → mm (1in = 1440tw = 25.4mm);
-   *  canvas flips width/height for landscape via :host([orientation]). */
-  #applySectionGeometry(): void {
-    const editor = this.#editor;
-    const canvas = this.shadowRoot?.querySelector("docen-document-area");
-    if (!editor || !canvas) return;
-    const sp = (editor.state.doc.attrs as Record<string, unknown> | undefined)
-      ?.sectionProperties as
-      | {
-          pageSize?: { width?: number; height?: number; orientation?: string };
-          pageMargin?: { top?: number; right?: number; bottom?: number; left?: number };
-          grid?: { linePitch?: number; type?: string } | null;
-        }
-      | undefined;
-    const size = sp?.pageSize;
-    const margin = sp?.pageMargin;
-    if (!size && !margin) return;
-    // Page geometry in millimeters — the paper's natural unit (docx stores page
-    // size/margins in twips; 1in = 1440tw = 25.4mm maps cleanly to mm). Font
-    // sizes stay in pt (OOXML's unit); pt and mm are BOTH absolute CSS units
-    // anchored to the same 96px/in reference pixel, so they render on one
-    // consistent pixel grid — mm and pt do NOT need to be unified.
-    if (size?.width) canvas.setAttribute("page-width", twipsToMm(size.width));
-    if (size?.height) canvas.setAttribute("page-height", twipsToMm(size.height));
-    // Render page-width × page-height directly. office-open's `orientation`
-    // flag is unreliable (it can read "landscape" on portrait dimensions — this
-    // very file is A4 portrait), so clear any prior landscape swap and let the
-    // physical width/height decide the orientation.
-    canvas.removeAttribute("orientation");
-    if (margin) {
-      const m = margin;
-      const sides = [m.top, m.right, m.bottom, m.left];
-      if (sides.every((s) => s != null))
-        canvas.setAttribute("margin", sides.map(twipsToMm).join(" "));
-    }
-    // Document grid (w:docGrid) is applied PER PAGE: each page node renders its
-    // section's linePitch as an inline line-height (page-node renderHTML), so
-    // multi-section docs with different grids each render correctly. Nothing to
-    // inject globally here — the per-page inline style cascades to the page's
-    // paragraphs (line-height is inherited).
-    this.#refreshGeometry();
-  }
-
   /** The underlying Tiptap editor (for advanced, direct control). */
   getEditor(): Editor | undefined {
-    return this.#editor;
+    return this.editor;
   }
 
-  /** Force a pagination re-measure now (bypasses the debounce). */
+  /** Force a full canvas re-render now. */
   repaginate(): void {
-    if (this.#editor) pageStorageOf(this.#editor).repaginate();
+    const editor = this.editor;
+    if (editor) this.#renderDoc(editor.getJSON());
   }
 
   // ── Task pane visibility (Office.addin.showAsTaskpane / hide equivalent) ──
@@ -2797,14 +2094,11 @@ class DocenDocument extends AddinHost<Editor> {
 
   /** Toggle editing/formatting marks on or off. Idempotent; dispatches
    *  `docen:marks-change`. The boolean `show-marks` attribute is the source of
-   *  truth — CSS `:host([show-marks])` drives the page/section-break markers —
-   *  so it's toggled directly. (`@attr({mode:"boolean"})` does not reflect
-   *  property→attribute in fast-element 3.x, so a method beats a reactive attr
-   *  here; see docen-ui-state-attribute-strategy.) */
+   *  truth. Canvas-side mark rendering (¶ pilcrows, break dividers) is a later
+   *  milestone — the attribute + event contract holds either way. */
   setShowMarks(on: boolean): void {
     if (this.hasAttribute("show-marks") === on) return;
     this.toggleAttribute("show-marks", on);
-    this.#editor?.commands.toggleFormattingMarks();
     this.dispatchEvent(
       new CustomEvent("docen:marks-change", {
         bubbles: true,

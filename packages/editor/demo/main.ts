@@ -1,14 +1,16 @@
 /**
  * Editor demo entry — registers Fluent components + theme, then routes between
- * the demos via fluent-tablist. The Document tab is the canvas route (the
- * DOM contenteditable route is gone).
+ * the demos via fluent-tablist. The Document tab mounts the full
+ * `<docen-document>` component (canvas route: chrome + LeaferJS pages + the
+ * viewless editing bridge).
  *
  * Layout is a full-height flex column (declared in index.html): the tablist is
  * a fixed-height header, the stage fills the rest.
  */
-import { applyTheme, registerComponents } from "@docen/editor";
+// The DocenDocument binding exists for its side effect: evaluating the module
+// defines the <docen-document> custom element (the @customElement decorator).
+import { applyTheme, DocenDocument, registerComponents } from "@docen/editor";
 
-import { mountCanvasDemo } from "./canvas";
 import { mountImageDemo } from "./image";
 
 // registerComponents is async (it dynamically imports + defines the web
@@ -45,8 +47,18 @@ void registerComponents().then(() => {
 
   const render = (route: Route): void => {
     stage.replaceChildren();
-    if (route === "document") mountCanvasDemo(stage);
-    else mountImageDemo(stage);
+    if (route === "document") {
+      const el = document.createElement("docen-document");
+      el.className = "demo-doc";
+      el.setAttribute("filename", "Demo.docx");
+      el.setAttribute(
+        "content",
+        "<h1>Canvas Document</h1><p>The docen-document component renders on canvas: click to place the caret, type to edit, and every transaction re-flows the pages.</p><p>Use the ribbon to format, the file menu to open a .docx, and Ctrl+F to search.</p>",
+      );
+      stage.append(el);
+    } else {
+      mountImageDemo(stage);
+    }
   };
 
   nav.addEventListener("change", (event: Event) => {

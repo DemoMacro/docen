@@ -1,30 +1,11 @@
 import { Extension, type AnyExtension, type Editor } from "@docen/docx/core";
 import { ListKeymap } from "@tiptap/extension-list";
-import {
-  CharacterCount,
-  Dropcursor,
-  Focus,
-  Gapcursor,
-  Selection,
-  TrailingNode,
-  UndoRedo,
-} from "@tiptap/extensions";
+import { CharacterCount, TrailingNode } from "@tiptap/extensions";
 import { search } from "prosemirror-search";
 
 import { type DocenAddin, type DocenHost } from "../ui";
 import { DocumentCommands } from "./extensions/commands";
-import { FontMetricDecoration } from "./extensions/font-metric";
-import { ImageCap } from "./extensions/image-cap";
-import { ImageView } from "./extensions/image-view";
-import { DocenKeymap } from "./extensions/keymap";
 import { Outline, type OutlineAnchor } from "./extensions/outline";
-import { PageBreakView } from "./extensions/page-break";
-import { Page, PageDocument } from "./extensions/page-node";
-import { PagePlugin } from "./extensions/page-plugin";
-import { SectionBreakMarks } from "./extensions/section-break";
-import { SplitMarks } from "./extensions/split-paragraph";
-import { SplitTable, SplitTableRow } from "./extensions/split-table";
-import { WpsShapeView } from "./extensions/wps-shape-view";
 
 /** A `<docen-document>` host: a {@link DocenHost} carrying a Tiptap `Editor`. */
 export type DocumentHost = DocenHost<Editor>;
@@ -66,62 +47,26 @@ const textCounter = (text: string): number => {
   return n;
 };
 
-/** Build the default document engine extensions. Outline reports the heading
- *  anchor list to `<docen-outline>`, so the factory takes that callback rather
- *  than capturing `this` — keeping the extensions host-agnostic and reusable. */
+/** Build the default document engine extensions for the canvas route —
+ *  state-based only (no view plugins: the canvas paints, the viewless editor
+ *  edits). Outline reports the heading anchor list to `<docen-outline>`, so
+ *  the factory takes that callback rather than capturing `this`. UndoRedo is
+ *  layered by the edit bridge itself (it also registers the plugins a
+ *  viewless editor skips). */
 export function createDocumentExtensions(opts: {
   onOutlineUpdate: (anchors: readonly OutlineAnchor[]) => void;
 }): readonly AnyExtension[] {
   return [
-    PageDocument,
-    Page,
-    // ImageCap scales over-wide images to the section content width (Word
-    // behavior) and runs before PagePlugin so the reflow measures the capped
-    // dimensions, not the pre-cap overflow.
-    ImageCap,
-    PagePlugin,
-    FontMetricDecoration,
-    SplitTable,
-    SplitTableRow,
-    // Paragraph/heading split support: editor-only splitGroup/splitPart attrs
-    // so the paginator can split a tall paragraph across pages at a line
-    // boundary. Both halves share the splitGroup id; unwrapPages merges them.
-    SplitMarks,
     // Outline: a read-only heading walk that reports the anchor list to
-    // <docen-outline> (replaces @tiptap/extension-table-of-contents, whose
-    // setNodeMarkup aborted the reflow on large docs).
+    // <docen-outline>.
     Outline.configure({ onUpdate: opts.onOutlineUpdate }),
     Search,
-    // pageBreak NodeView — Fluent divider with a centered label while
-    // show-marks is on. Schema comes from the engine's PageBreak.
-    PageBreakView,
-    // wpsShape NodeView — editable floating text box as two elements (outer
-    // placement/rotation, inner contentDOM). Schema from the engine's WpsShape.
-    WpsShapeView,
-    // image NodeView — mounts <docen-image> (always editable inline, Office
-    // model: click → resize/rotate handles + floating toolbar in place).
-    // Schema/fidelity from the engine's Image; SSR/read-mode still falls back
-    // to the engine's renderHTML (LeaferJS-free).
-    ImageView,
-    // Centralized MS Office editing keymap (Ctrl+Enter page break, etc.) —
-    // see extensions/keymap.ts. Outranks HardBreak via priority.
-    DocenKeymap,
-    // sectionBreak widget — a section boundary is paragraph attrs (not a
-    // node), so a widget decoration paints the Fluent divider after each
-    // section-carrying paragraph.
-    SectionBreakMarks,
-    // Editing-behavior set — the engine carries schema only.
-    UndoRedo,
-    Dropcursor,
-    Gapcursor,
     TrailingNode,
     ListKeymap,
     CharacterCount.configure({ wordCounter, textCounter }),
-    Focus,
-    Selection,
     // Ribbon commands as native Tiptap commands (editor.commands.<event>), so
-    // #onCommand routes event → editor.chain().focus()[event](value).run() with
-    // no mapping layer. Includes editor.can() for precise ribbon greying.
+    // #onCommand routes event → editor.commands[event](value) with no mapping
+    // layer. Includes editor.can() for precise ribbon greying.
     DocumentCommands,
   ];
 }

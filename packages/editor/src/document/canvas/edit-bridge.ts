@@ -15,7 +15,6 @@ import { Editor } from "@docen/docx/core";
 import type { FlowPage } from "@docen/layout";
 import { UndoRedo } from "@tiptap/extensions";
 import { joinBackward, joinForward, splitBlock } from "@tiptap/pm/commands";
-import { history } from "@tiptap/pm/history";
 import { TextSelection } from "@tiptap/pm/state";
 
 import { CaretMap } from "./caret-map";
@@ -52,6 +51,9 @@ export interface EditBridgeOptions {
   /** The positioned page frame for a page index (the caret overlay mounts
    *  inside it, page-local). Absent pages report null. */
   pageHost?: (page: number) => HTMLElement | null;
+  /** Engine extensions for the viewless editor (defaults to the docx schema
+   *  set). The host layers its own (commands, outline, search, …) here. */
+  extensions?: Editor["extensionManager"]["extensions"];
 }
 
 export interface EditBridge {
@@ -62,20 +64,29 @@ export interface EditBridge {
     pages: readonly FlowPage[],
     flow: { contentLeftPx: number; contentTopPx: number },
   ): void;
+  /** Scroll the page holding a doc position into view (null when unmappable). */
+  scrollIntoView(pos: number): void;
+  /** The page index a doc position renders on (null when unmappable). */
+  pageOf(pos: number): number | null;
+  /** The first doc position rendered on a page (null when unmappable). */
+  firstPosOfPage(page: number): number | null;
+  /** Move keyboard focus to the bridge's input surface (the editing focus —
+   *  there is no DOM editor to focus). */
+  focus(): void;
   destroy(): void;
 }
 
 export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
   const editor = new Editor({
     element: null,
-    extensions: [...docxExtensions, UndoRedo],
+    extensions: [...(opts.extensions ?? docxExtensions), UndoRedo],
     content: opts.content as never,
   });
   // element:null skips mount(), and with it plugin installation — the state
-  // comes up schema-only (EditorState.create with no plugins), so the UndoRedo
-  // extension's history plugin never lands. Register it by hand; its commands
-  // (undo/redo) read this plugin's state.
-  editor.registerPlugin(history());
+  // comes up schema-only (EditorState.create with no plugins). Register the
+  // extension manager's full, priority-sorted plugin list by hand: undo
+  // history, keymaps, outline, search … all read their plugin's state.
+  for (const plugin of editor.extensionManager.plugins) editor.registerPlugin(plugin);
 
   // One relayout per frame regardless of keystroke bursts.
   let raf = 0;
@@ -512,6 +523,22 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       map = new CaretMap(pages, editor.state.doc, flow);
       pageCount = pages.length;
       placeCaret();
+    },
+    scrollIntoView(pos): void {
+      const rect = map?.valid ? map.caretRect(pos) : null;
+      if (!rect) return;
+      opts.pageHost?.(rect.page)?.scrollIntoView({ block: "start", behavior: "auto" });
+    },
+    /** The page index a doc position renders on (null when unmappable). */
+    pageOf(pos): number | null {
+      return map?.valid ? (map.caretRect(pos)?.page ?? null) : null;
+    },
+    /** The first doc position rendered on a page (null when unmappable). */
+    firstPosOfPage(page: number): number | null {
+      return map?.valid ? map.firstPosOfPage(page) : null;
+    },
+    focus(): void {
+      ta.focus();
     },
     destroy(): void {
       if (raf) cancelAnimationFrame(raf);

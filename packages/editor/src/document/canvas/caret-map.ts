@@ -404,6 +404,13 @@ export class CaretMap {
     };
   }
 
+  /** The first doc position rendered on a page (null when the page has no
+   *  text lines). */
+  firstPosOfPage(page: number): number | null {
+    const line = this.lines.find((l) => l.page === page);
+    return line ? this.posOfChar(line.owner, line.startChar) : null;
+  }
+
   /** Doc position → collapsed-char offset in its paragraph. */
   private charOfPos(entry: ParaEntry, pos: number): number {
     let char = 0;
