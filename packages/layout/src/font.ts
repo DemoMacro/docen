@@ -62,7 +62,11 @@ export const browserFontMetrics: FontMetrics = {
     const parts: string[] = [];
     if (request.italic) parts.push("italic");
     if (request.bold) parts.push("bold");
-    parts.push(`${PROBE_SIZE_PX}px`, request.family);
+    // Empty family → the generic fallback cssFontOf draws with ("serif"), so
+    // the metric probes the same face — a bare "100px" font shorthand is
+    // invalid CSS and silently no-ops, leaving the probe at the inherited
+    // body font (a garbage ratio that collapses every line box).
+    parts.push(`${PROBE_SIZE_PX}px`, request.family || "serif");
     let ratio = FALLBACK_RATIO;
     // A detached span reports height 0 — it must be in the layout tree.
     document.body.append(node);
