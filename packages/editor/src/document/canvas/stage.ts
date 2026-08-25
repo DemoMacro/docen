@@ -77,6 +77,28 @@ export class CanvasStage {
       // direction so fast scrolls rarely meet a blank page.
       { root: stage.parentElement, rootMargin: "0px 0px 150% 0px" },
     );
+    // Leafer samples devicePixelRatio at App creation and misses the zoom /
+    // cross-monitor change, leaving the canvas CSS-stretched (blurry text and
+    // bitmaps). Watch the ratio and rebuild every live App at the new one —
+    // a full repaint per page, rare and cheap.
+    this.watchPixelRatio();
+  }
+
+  private dprMedia: MediaQueryList | null = null;
+  private readonly dprChange = () => {
+    this.watchPixelRatio();
+    for (const slot of this.slots) {
+      if (!slot.app) continue;
+      slot.app.destroy();
+      slot.app = null;
+      this.ensure(slot);
+    }
+  };
+
+  private watchPixelRatio(): void {
+    this.dprMedia?.removeEventListener("change", this.dprChange);
+    this.dprMedia = matchMedia(`(resolution: ${devicePixelRatio}dppx)`);
+    this.dprMedia.addEventListener("change", this.dprChange);
   }
 
   /** Lay out page slots for a flow result and repaint visible pages. */
@@ -124,6 +146,7 @@ export class CanvasStage {
 
   destroy(): void {
     this.io.disconnect();
+    this.dprMedia?.removeEventListener("change", this.dprChange);
     for (const slot of this.slots) slot.app?.destroy();
     this.shell.remove();
   }
