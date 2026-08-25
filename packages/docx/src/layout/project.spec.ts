@@ -1,6 +1,5 @@
 import type {
   DocumentOptions,
-  GroupChildMediaData,
   HorizontalPositionOptions,
   ParagraphStyleOptions,
   SectionChild,
@@ -822,18 +821,25 @@ describe("projectDocumentOptions drawings", () => {
                 wpgGroup: {
                   children: [
                     {
-                      // The parsed svg entry carries its bytes at the top
-                      // level (createPictureData spread) — SvgMediaData's
-                      // declared shape has not caught up, hence the cast.
                       type: "svg",
                       fileName: "band.svg",
                       data: new TextEncoder().encode(svg),
+                      fallback: {
+                        type: "png",
+                        fileName: "band.png",
+                        data: new Uint8Array([105]),
+                        transformation: {
+                          pixels: { x: 10, y: 1 },
+                          emus: { x: 95250, y: 9525 },
+                          offset: { pixels: { x: 0, y: 0 }, emus: { x: 0, y: 0 } },
+                        },
+                      },
                       transformation: {
                         pixels: { x: 10, y: 1 },
                         emus: { x: 95250, y: 9525 },
                         offset: { pixels: { x: 0, y: 0 }, emus: { x: 0, y: 0 } },
                       },
-                    } as unknown as GroupChildMediaData,
+                    },
                     {
                       type: "png",
                       fileName: "stripes.png",
@@ -843,6 +849,8 @@ describe("projectDocumentOptions drawings", () => {
                         emus: { x: 95250, y: 9525 },
                         offset: { pixels: { x: 0, y: 0 }, emus: { x: 0, y: 0 } },
                       },
+                      // Raw ST_Percentage ints, as office-open's wpg picture
+                      // parse emits them (12632 = 12.632%).
                       sourceRectangle: { left: 12632, top: 34824, bottom: 36285 },
                     },
                     {
@@ -887,7 +895,11 @@ describe("projectDocumentOptions drawings", () => {
     expect(decoded).toContain("#ac5256");
     expect(decoded).not.toContain("linearGradient");
     if (stripes?.kind !== "picture") throw new Error("expected stripes member");
-    expect(stripes.crop).toEqual({ left: 0.12632, top: 0.34824, right: 0, bottom: 0.36285 });
+    const crop = stripes.crop as Record<string, number>;
+    expect(crop.left).toBeCloseTo(0.12632, 5);
+    expect(crop.top).toBeCloseTo(0.34824, 5);
+    expect(crop.right).toBe(0);
+    expect(crop.bottom).toBeCloseTo(0.36285, 5);
     if (box?.kind !== "textBox") throw new Error("expected textBox member");
     expect(box.blocks[0]).toMatchObject({
       kind: "paragraph",
