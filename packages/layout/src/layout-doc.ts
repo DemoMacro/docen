@@ -289,6 +289,8 @@ export interface LayoutTableCell {
   borders?: Partial<Record<"top" | "right" | "bottom" | "left", LayoutBorderEdge>>;
   /** Cell shading (w:shd @w:fill), hex RRGGBB. */
   fill?: string;
+  /** w:vAlign — the content's placement when the row is taller than it. */
+  verticalAlign?: "top" | "center" | "bottom";
   blocks: LayoutBlock[];
 }
 
@@ -307,6 +309,9 @@ export interface LayoutTable {
   kind: "table";
   /** Absent width = auto: fill the containing flow width. */
   width?: LayoutTableWidth;
+  /** w:tblPr/w:jc — the table box's placement inside the flow column. A table
+   *  wider than the column centers into the margins (negative offset). */
+  align?: "left" | "center" | "right";
   /** tblGrid column widths in px, scaled proportionally to the effective
    *  table width (Word scales the grid to tblW, never to the raw sum). */
   columnWidthsPx?: number[];

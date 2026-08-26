@@ -14,7 +14,7 @@ import type {
   LayoutCellInsets,
   LayoutTable,
 } from "../layout-doc";
-import type { LaidOutTable } from "../layout-result";
+import type { LaidOutCell, LaidOutTable } from "../layout-result";
 import type { TextMeasurer } from "../text/measure";
 import { stackBlocks } from "./block";
 
@@ -40,7 +40,9 @@ export function layoutTable(
     };
     let rowHeight = 0;
     let colCursor = 0;
-    const cells = row.cells.map((cell) => {
+    // (cell total height, for the vAlign slack pass after the row height settles)
+    const totals: number[] = [];
+    const cells: LaidOutCell[] = row.cells.map((cell) => {
       const colspan = cell.colspan ?? 1;
       let cellWidth = 0;
       for (let i = 0; i < colspan && colCursor + i < columnWidths.length; i++) {
@@ -83,6 +85,7 @@ export function layoutTable(
         Math.max(borderEdgePx(topEdge), borderEdgePx(bottomEdge));
 
       const cellHeightPx = stacked.heightPx + vOverheadPx;
+      totals.push(cellHeightPx);
       if (cellHeightPx > rowHeight) rowHeight = cellHeightPx;
       return {
         colspan,
@@ -99,6 +102,16 @@ export function layoutTable(
     if (tr && tr.px > 0) {
       rowHeight = tr.rule === "exact" ? tr.px : Math.max(rowHeight, tr.px);
     }
+    // w:vAlign: place the content in the row's slack (read back from the
+    // source cells — the laid-out cell carries only the resolved offset). A
+    // vertically merged cell keeps its content on the start row (the
+    // span-distribution boundary above), so only single-row cells shift.
+    cells.forEach((cell, i) => {
+      const slack = rowHeight - (totals[i] ?? 0);
+      const va = row.cells[i]?.verticalAlign;
+      if (slack <= 0 || (cell.rowspan ?? 1) > 1) return;
+      cell.contentOffsetYPx = va === "center" ? slack / 2 : va === "bottom" ? slack : undefined;
+    });
     heightPx += rowHeight;
     return { heightPx: rowHeight, cells };
   });
@@ -107,6 +120,15 @@ export function layoutTable(
     kind: "table",
     widthPx,
     columnWidthsPx: columnWidths,
+    // w:jc: the table box's placement in the flow column — center/right
+    // against the column width, which goes negative for a table wider than
+    // the column (Word centers those into the margins).
+    offsetXPx:
+      table.align === "center"
+        ? (containerWidth - widthPx) / 2
+        : table.align === "right"
+          ? containerWidth - widthPx
+          : undefined,
     heightPx,
     borders: table.borders,
     rows,

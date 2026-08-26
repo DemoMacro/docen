@@ -131,6 +131,9 @@ export interface LaidOutCell {
   /** Sum of the spanned columns' widths minus insets/borders — the width the
    *  cell's blocks wrapped at. */
   innerWidthPx: number;
+  /** w:vAlign offset inside the row (the slack above the content when the row
+   *  is taller — center/bottom placement). */
+  contentOffsetYPx?: number;
   stack: LaidOutStackItem[];
 }
 
@@ -143,6 +146,9 @@ export interface LaidOutTable {
   kind: "table";
   widthPx: number;
   columnWidthsPx: number[];
+  /** w:jc offset from the flow column's left edge (negative when a wider
+   *  table centers into the margins). */
+  offsetXPx?: number;
   heightPx: number;
   /** Table-level border defaults, mirrored for the renderer (a cell's missing
    *  edge falls back to these per side). */

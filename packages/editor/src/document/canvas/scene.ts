@@ -290,22 +290,23 @@ function paintTabLeader(
       points: [x1, y, x2, y],
       stroke: color,
       strokeWidth: style.widthPx,
-      strokeLinecap: style.cap,
-      dash: style.dash,
+      dashPattern: style.dash,
     }),
   );
 }
 
-/** Per-leader dash patterns: [on, off] in px against the stroke width. */
+/** Per-leader dash patterns: [on, off] in px. A sub-pixel `on` value would
+ *  round to zero in Leafer's dash pass and paint nothing, so every leader
+ *  uses a positive on-width (Word's dots render as tiny squares anyway). */
 const TAB_LEADER_STYLES: Record<
   NonNullable<Extract<LaidOutLineItem, { kind: "tab" }>["leader"]>,
-  { dash?: number[]; widthPx: number; cap: "round" | "butt"; underside?: boolean }
+  { dash?: number[]; widthPx: number; underside?: boolean }
 > = {
-  dot: { dash: [0.1, 3.6], widthPx: 1.3, cap: "round" },
-  heavy: { dash: [0.1, 3.6], widthPx: 2.2, cap: "round" },
-  middleDot: { dash: [1.2, 3.4], widthPx: 1.6, cap: "round" },
-  hyphen: { dash: [3, 2.5], widthPx: 1, cap: "butt" },
-  underscore: { widthPx: 1, cap: "butt", underside: true },
+  dot: { dash: [1.2, 2.7], widthPx: 1.2 },
+  heavy: { dash: [2.2, 1.7], widthPx: 2.2 },
+  middleDot: { dash: [1.6, 2.3], widthPx: 1.6 },
+  hyphen: { dash: [3, 2.5], widthPx: 1 },
+  underscore: { widthPx: 1, underside: true },
 };
 
 /** One floating drawing: members absolutely positioned in the drawing's box,
@@ -501,6 +502,8 @@ function paintTable(
   y: number,
   ctx: PaintContext,
 ): void {
+  // w:jc: the whole grid (borders included) shifts as one box.
+  x += table.offsetXPx ?? 0;
   const cols = table.columnWidthsPx;
   const nRows = table.rows.length;
   const nCols = cols.length;
@@ -540,7 +543,7 @@ function paintTable(
         for (let dc = 0; dc < spanW; dc++) occ[r + dr][col + dc] = cell;
       }
       const contentX = x + colX[col] + (cell.insets.left ?? 0);
-      const contentY = y + rowY[r] + (cell.insets.top ?? 0);
+      const contentY = y + rowY[r] + (cell.insets.top ?? 0) + (cell.contentOffsetYPx ?? 0);
       for (const stacked of cell.stack) {
         paintBlock(tree, stacked.block, contentX, contentY + stacked.yPx, ctx);
       }
@@ -559,16 +562,37 @@ function paintTable(
     const above = b > 0 ? occ[b - 1][c] : undefined;
     const below = b < nRows ? occ[b][c] : undefined;
     if (above && above === below) return undefined;
-    const def = b === 0 ? tb?.top : b === nRows ? tb?.bottom : tb?.insideHorizontal;
-    return heaviest(above?.borders?.bottom, heaviest(below?.borders?.top, def));
+    // An explicitly declared cell edge (w:tcBorders, nil included) suppresses
+    // the table-level default — Word resolves tcBorders over tblBorders
+    // outright; only cells silent on the edge fall back to the grid default.
+    const aboveEdge = above?.borders?.bottom;
+    const belowEdge = below?.borders?.top;
+    const def =
+      aboveEdge || belowEdge
+        ? undefined
+        : b === 0
+          ? tb?.top
+          : b === nRows
+            ? tb?.bottom
+            : tb?.insideHorizontal;
+    return heaviest(aboveEdge, heaviest(belowEdge, def));
   };
   /** A vertical boundary (column edge `b`) at row `r`. */
   const pickV = (b: number, r: number): LayoutBorderEdge | undefined => {
     const left = b > 0 ? occ[r][b - 1] : undefined;
     const right = b < nCols ? occ[r][b] : undefined;
     if (left && left === right) return undefined;
-    const def = b === 0 ? tb?.left : b === nCols ? tb?.right : tb?.insideVertical;
-    return heaviest(left?.borders?.right, heaviest(right?.borders?.left, def));
+    const leftEdge = left?.borders?.right;
+    const rightEdge = right?.borders?.left;
+    const def =
+      leftEdge || rightEdge
+        ? undefined
+        : b === 0
+          ? tb?.left
+          : b === nCols
+            ? tb?.right
+            : tb?.insideVertical;
+    return heaviest(leftEdge, heaviest(rightEdge, def));
   };
   // Contiguous boundary slots with an identical winner merge into one stroke.
   for (let b = 0; b <= nRows; b++) {

@@ -1359,6 +1359,8 @@ function projectCell(c: TableCellOptions, ctx: ProjectContext, rowspan?: number)
     insets: toCellInsets(c.margins),
     borders: toBorders(c.borders),
     fill,
+    verticalAlign:
+      c.verticalAlign === "center" || c.verticalAlign === "bottom" ? c.verticalAlign : undefined,
     blocks: c.children
       .map((child) => projectChild(child, ctx))
       .filter((b): b is LayoutBlock => b !== null),
@@ -1433,6 +1435,7 @@ function projectTable(t: TableOptions, ctx: ProjectContext): LayoutTable {
   return {
     kind: "table",
     width: toTableWidth(t.width),
+    align: t.alignment === "center" ? "center" : t.alignment === "right" ? "right" : undefined,
     columnWidthsPx: columnWidthsPx && columnWidthsPx.length > 0 ? columnWidthsPx : undefined,
     cellInsets: toCellInsets(t.margins) ?? WORD_DEFAULT_CELL_INSETS,
     borders: toTableBorders(t.borders, styleTable),
