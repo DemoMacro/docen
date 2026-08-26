@@ -96,6 +96,32 @@ describe("flat table grid", () => {
     expect(rows[1].content[0].attrs?.verticalMerge).toBe("continue");
   });
 
+  it("counts grid columns from columnSpan (a spanning cell covers its columns)", () => {
+    const doc = {
+      type: "doc",
+      content: [
+        {
+          type: "table",
+          attrs: { columnWidths: [2000, 3000, 4000] },
+          content: [
+            {
+              type: "tableRow",
+              content: [
+                { type: "tableCell", attrs: { columnSpan: 2 }, content: [{ type: "paragraph" }] },
+                { type: "tableCell", content: [{ type: "paragraph" }] },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const bytes = generateDocumentSync(compileDocument(doc as never));
+    const parsed = parseDOCX(bytes);
+    const table = parsed.content?.[0];
+    // A 2+1 first row spans 3 grid columns — the tblGrid must keep all three.
+    expect(((table?.attrs?.columnWidths as number[]) ?? []).length).toBe(3);
+  });
+
   it("expands vMerge into rowspan at the single projection point", () => {
     const { blocks } = projectDocumentOptions({
       sections: [

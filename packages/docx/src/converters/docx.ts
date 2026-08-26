@@ -57,6 +57,13 @@ function sameBorder(a: BorderOptions | undefined, b: BorderOptions | undefined):
   return a.style === b.style && a.size === b.size && a.color === b.color;
 }
 
+/** Push one item or a spread of items onto target — block/inline parse results
+ *  and section-child compiles legitimately return either shape. */
+function pushAll<T>(target: T[], item: T | T[]): void {
+  if (Array.isArray(item)) target.push(...item);
+  else target.push(item);
+}
+
 /**
  * Core document properties (docProps/core.xml) carried on `doc.attrs.core` for
  * lossless round-trip. Mirrors @office-open/core's CorePropertiesOptions, which
@@ -108,6 +115,8 @@ const COMPILE_OWNED_KEYS = new Set<string>([
 
 /** Collect core properties present on DocumentOptions into a plain object. */
 function extractCoreProperties(docOpts: DocumentOptions): DocxCoreProperties | null {
+  // Double cast: DocumentOptions (no index signature) is not comparable
+  // to Record<string, unknown> in a single assertion.
   const source = docOpts as unknown as Record<string, unknown>;
   const core: Record<string, unknown> = {};
   for (const key of CORE_PROPERTY_KEYS) {
@@ -246,10 +255,7 @@ export class DocxManager {
     if (json.content) {
       for (const node of json.content) {
         const child = this.compileSectionChild(node);
-        if (child) {
-          if (Array.isArray(child)) currentChildren.push(...child);
-          else currentChildren.push(child);
-        }
+        if (child) pushAll(currentChildren, child);
         if (node.type === "paragraph") {
           const na = (node.attrs ?? {}) as Record<string, unknown>;
           if (na.sectionProperties != null) {
@@ -348,8 +354,7 @@ export class DocxManager {
       for (const node of json) {
         const child = this.compileSectionChild(node);
         if (!child) continue;
-        if (Array.isArray(child)) children.push(...child);
-        else children.push(child);
+        pushAll(children, child);
       }
       if (children.length > 0) group[slot] = children;
     }
@@ -480,8 +485,7 @@ export class DocxManager {
         for (const child of node.content ?? []) {
           const compiled = this.compileSectionChild(child);
           if (!compiled) continue;
-          if (Array.isArray(compiled)) entries.push(...compiled);
-          else entries.push(compiled);
+          pushAll(entries, compiled);
         }
         return { toc: { ...options, entries } };
       }
@@ -499,7 +503,7 @@ export class DocxManager {
     }
   }
 
-  private compileParagraphNode(node: JSONContent): ParagraphOptions {
+  private compileParagraphNode(node: JSONContent): ParagraphOptions | string {
     // A list paragraph references its numbering definition by attr — collect
     // the reference so compile registers a generated definition for it.
     const numRef = (node.attrs?.numbering as { reference?: string } | null | undefined)?.reference;
@@ -510,8 +514,10 @@ export class DocxManager {
     return this.simplifyParagraph(opts);
   }
 
-  /** Simple text optimization: merge plain runs into text field */
-  private simplifyParagraph(opts: Record<string, unknown>): ParagraphOptions {
+  /** Simple text optimization: merge plain runs into the text field (a
+   *  children-less paragraph with no other properties collapses to a plain
+   *  string — SectionChild.paragraph accepts both). */
+  private simplifyParagraph(opts: Record<string, unknown>): ParagraphOptions | string {
     const children = opts.children as ParagraphChild[] | undefined;
     if (!children || children.length === 0) return opts as ParagraphOptions;
 
@@ -522,9 +528,8 @@ export class DocxManager {
     if (allSimpleText) {
       const combined = children.map((c) => (c as { text: string }).text).join("");
       delete opts.children;
-      if (combined && Object.keys(opts).length === 0)
-        return combined as unknown as ParagraphOptions;
-      if (combined) (opts as Record<string, unknown>).text = combined;
+      if (combined && Object.keys(opts).length === 0) return combined;
+      if (combined) opts.text = combined;
     }
 
     return opts as ParagraphOptions;
@@ -547,12 +552,12 @@ export class DocxManager {
     const insideH = tableBorders?.insideHorizontal ?? null;
     const insideV = tableBorders?.insideVertical ?? null;
     // Compute tblGrid column widths up front so each cell's tcW can be derived
-    // from the grid columns it spans. ProseMirror cells carry no OOXML width
-    // (only px colwidth), so without this the regenerated tcW collapses to the
-    // library default and autofit tables with short content render as a sliver.
+    // from the grid columns it spans. A cell without its own width attr would
+    // otherwise collapse to the library default and autofit tables with short
+    // content render as a sliver.
     const { columnWidths, tableWidth } =
       colCount > 0
-        ? this.computeColumnWidths(node, colCount, opts)
+        ? this.computeColumnWidths(node, colCount)
         : { columnWidths: [] as number[], tableWidth: { size: 0, type: "twips" } };
     const rows: Record<string, unknown>[] = [];
 
@@ -592,17 +597,19 @@ export class DocxManager {
       if (!opts.layout) opts.layout = "autofit";
     }
 
+    // Double cast: TableOptions requires `rows`, which opts gains only at
+    // runtime from the loop above.
     return opts as unknown as TableOptions;
   }
 
-  /** Count grid columns from the first table row (summing colspan). */
+  /** Count grid columns from the first table row (summing columnSpan). */
   private getTableColumnCount(tableNode: JSONContent): number {
     for (const rowNode of tableNode.content ?? []) {
       if (rowNode.type !== "tableRow") continue;
       let count = 0;
       for (const cell of rowNode.content ?? []) {
         if (cell.type === "tableCell") {
-          count += (cell.attrs?.colspan as number) ?? 1;
+          count += (cell.attrs?.columnSpan as number) ?? 1;
         }
       }
       return count;
@@ -621,19 +628,17 @@ export class DocxManager {
   }
 
   /**
-   * Compute tblGrid column widths (twips) from first-row cell colwidth attrs.
-   * Returns columnWidths array and the appropriate tableWidth.
+   * Compute tblGrid column widths (twips). The table's columnWidths attr
+   * (tblGrid from a DOCX round-trip or insert-table) carries exact twips;
+   * without it columns split the A4 content width evenly and the table
+   * takes 100% width.
    */
   private computeColumnWidths(
     tableNode: JSONContent,
     colCount: number,
-    _opts: Record<string, unknown>,
   ): { columnWidths: number[]; tableWidth: { size: number; type: string } } {
     const DEFAULT_CONTENT_TWIPS = 9026; // A4 with 1-inch margins (~15.9cm)
 
-    // Prefer the table's columnWidths attr (tblGrid from DOCX round-trip): it
-    // carries exact twips, avoiding the lossy twips→px→twips detour through
-    // per-cell colwidth.
     const tableColWidths = tableNode.attrs?.columnWidths as number[] | null | undefined;
     if (tableColWidths && tableColWidths.length > 0) {
       const filled = tableColWidths.slice(0, colCount);
@@ -644,47 +649,11 @@ export class DocxManager {
       return { columnWidths: filled, tableWidth: { size: total, type: "twips" } };
     }
 
-    const widths: (number | null)[] = Array.from({ length: colCount }, () => null);
-
-    // Collect explicit px widths from the first row's cells
-    for (const rowNode of tableNode.content ?? []) {
-      if (rowNode.type !== "tableRow") continue;
-      let colIdx = 0;
-      for (const cell of rowNode.content ?? []) {
-        if (cell.type !== "tableCell") continue;
-        const colspan = (cell.attrs?.colspan as number) ?? 1;
-        const colwidth = cell.attrs?.colwidth as number[] | null;
-        if (colwidth) {
-          for (let i = 0; i < colspan && colIdx + i < colCount; i++) {
-            const px = colwidth[i] ?? colwidth[0];
-            if (px) widths[colIdx + i] = px * 15; // px → twips (96 DPI)
-          }
-        }
-        colIdx += colspan;
-      }
-      break; // first row only
-    }
-
-    const hasExplicit = widths.some((w) => w !== null);
-
-    if (!hasExplicit) {
-      // No explicit widths → equal distribution, percentage table width
-      const equal = Math.floor(DEFAULT_CONTENT_TWIPS / colCount);
-      return {
-        columnWidths: Array(colCount).fill(equal),
-        tableWidth: { size: 5000, type: "pct" }, // 100%
-      };
-    }
-
-    // Fill gaps with the average of explicit widths
-    const explicit = widths.filter((w): w is number => w !== null);
-    const avg = Math.floor(explicit.reduce((a, b) => a + b, 0) / explicit.length);
-    const filled = widths.map((w) => w ?? avg);
-    const total = filled.reduce((a, b) => a + b, 0);
-
+    // No explicit widths → equal distribution, percentage table width
+    const equal = Math.floor(DEFAULT_CONTENT_TWIPS / colCount);
     return {
-      columnWidths: filled,
-      tableWidth: { size: total, type: "twips" },
+      columnWidths: Array(colCount).fill(equal),
+      tableWidth: { size: 5000, type: "pct" }, // 100%
     };
   }
 
@@ -731,8 +700,7 @@ export class DocxManager {
     for (const childNode of cellNode.content ?? []) {
       const compiled = this.compileSectionChild(childNode);
       if (compiled == null) continue;
-      if (Array.isArray(compiled)) cellChildren.push(...compiled);
-      else cellChildren.push(compiled);
+      pushAll(cellChildren, compiled);
     }
     if (cellChildren.length > 0) cellOpts.children = cellChildren;
 
@@ -761,15 +729,18 @@ export class DocxManager {
           this.compileTextNode(node, children);
           break;
         case "hardBreak":
-          children.push({ break: 1 } as Record<string, unknown> as ParagraphChild);
+          children.push({ break: 1 });
           break;
         case "pageBreak":
-          children.push({ pageBreak: true } as Record<string, unknown> as ParagraphChild);
+          children.push({ pageBreak: true });
           break;
         case "columnBreak":
-          children.push({ columnBreak: true } as Record<string, unknown> as ParagraphChild);
+          children.push({ columnBreak: true });
           break;
         case "tab":
+          // office-open emits <w:tab/> from a top-level tab:true run, but its
+          // ParagraphChild union doesn't list the top-level shape — double
+          // assertion bridges the .d.ts gap.
           children.push({ tab: true } as Record<string, unknown> as ParagraphChild);
           break;
         case "inlinePassthrough": {
@@ -790,6 +761,8 @@ export class DocxManager {
           break;
         }
         case "wpgGroup": {
+          // Same .d.ts gap as tab:true above — office-open consumes a wpgGroup
+          // run but lists the branch only in TrackChangeChild, not here.
           const wpgGroup = node.attrs?.wpgGroup;
           if (wpgGroup) children.push({ wpgGroup } as unknown as ParagraphChild);
           break;
@@ -798,6 +771,7 @@ export class DocxManager {
           // Editable text body: compile each content paragraph back to a
           // ParagraphOptions and reattach under wpsShape.children. Mirrors the
           // tocField compile (compileSectionChild → unwrap .paragraph).
+          // Same .d.ts gap as tab:true above for the ParagraphChild union.
           const geometry = (node.attrs?.wpsShape ?? {}) as Record<string, unknown>;
           const body: (ParagraphOptions | string)[] = [];
           for (const child of node.content ?? []) {
@@ -830,7 +804,7 @@ export class DocxManager {
     // needs no special-case newline handling.
     const segments = text.split("\n");
     for (let i = 0; i < segments.length; i++) {
-      if (i > 0) children.push({ break: 1 } as ParagraphChild);
+      if (i > 0) children.push({ break: 1 });
       if (segments[i]) this.compileTextRun(segments[i], node.marks, children);
     }
   }
@@ -954,8 +928,7 @@ export class DocxManager {
     for (const child of children) {
       const node = this.resolveSectionChild(child);
       if (!node) continue;
-      if (Array.isArray(node)) content.push(...node);
-      else content.push(node);
+      pushAll(content, node);
     }
     return content;
   }
@@ -990,7 +963,7 @@ export class DocxManager {
       }
       if (typeof child === "object" && child !== null) {
         const resolved = this.resolveParagraphChild(child);
-        if (resolved) nodes.push(...(Array.isArray(resolved) ? resolved : [resolved]));
+        if (resolved) pushAll(nodes, resolved);
       }
     }
     return nodes;
@@ -1065,7 +1038,7 @@ export class DocxManager {
               const node = rule.convert(c as ParagraphChild, ctx);
               if (node) {
                 flushText();
-                nodes.push(...(Array.isArray(node) ? node : [node]));
+                pushAll(nodes, node);
                 handled = true;
                 break;
               }
