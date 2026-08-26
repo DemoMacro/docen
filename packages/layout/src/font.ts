@@ -2,8 +2,10 @@
 // lives inside pretext (canvas measureText against the browser's own font
 // stack — the exact engine that later paints the text, so measure == render
 // by construction; fonts are never registered or bundled here). What the
-// engine still needs per face is the `line-height: normal` ratio — Word's
-// "single line height" the OOXML ADD line-spacing model multiplies.
+// engine still needs per face is Word's "single line height" ratio — the
+// OOXML ADD line-spacing model's multiplier.
+
+import { WORD_FONT_METRICS, wordLineRatio } from "./font-metrics-data";
 
 /** A request for one face's metric. `family` is a resolved CSS-style family
  *  name — OOXML script-slot resolution (eastAsia vs ascii) has already picked
@@ -18,17 +20,23 @@ export interface FontRequest {
  *  across layout passes (same input → same output — the determinism the
  *  paginator depends on). */
 export interface FontMetrics {
-  /** `line-height: normal` as a ratio of font size: (ascent + descent + line
-   *  gap) / em. */
+  /** Word's single-line-height ratio for a face: winAscent + winDescent +
+   *  2 × round(0.15 × (A + D)) over upem. Faces tabulated in
+   *  font-metrics-data resolve to Word's exact number; the browser probe
+   *  approximates the rest with CSS `line-height: normal`. */
   normalRatio(request: FontRequest): number;
 }
 
 // ── browser implementation (a hidden DOM span probe) ──
-// TextMetrics.fontBoundingBoxAscent/Descent cover only the glyph boundary box
-// and OMIT the font's line-gap, drifting below the rendered `normal`; a
-// hidden span with `line-height: normal` measures the full metric the browser
-// actually renders. No DOM (SSR/Node tests) → the 1.2 fallback — width
-// measurement still works there via an injected canvas (see spec setup).
+// A face tabulated in font-metrics-data returns Word's formula value before
+// any probing. Untabulated faces fall back to a span probe: CSS
+// `line-height: normal` there is the browser's own metric (close to, but not
+// Word's number, and browser-dependent). TextMetrics
+// fontBoundingBoxAscent/Descent cover only the glyph boundary box and OMIT
+// the font's line-gap, drifting below the rendered `normal`; the span
+// measures the full metric the browser actually renders. No DOM (SSR/Node
+// tests) → the 1.2 fallback — width measurement still works there via an
+// injected canvas (see spec setup).
 
 const FALLBACK_RATIO = 1.2;
 /** Fixed probe size: ratio = measuredHeight / PROBE_SIZE_PX stays
@@ -48,15 +56,21 @@ function ensureProbe(): HTMLSpanElement | null {
   return probe;
 }
 
-/** The browser's own `normal` metric for a face, probed once per
- *  (family, bold, italic) — zero font registration: the family name resolves
- *  through the browser's font stack (system 宋体, installed Inter, …), the
- *  same resolution painting uses. */
+/** Word's single-line ratio for tabulated faces, else the browser's own
+ *  `normal` metric — one value per (family, bold, italic), zero font
+ *  registration: the family name resolves through the browser's font stack
+ *  (system 宋体, installed Inter, …), the same resolution painting uses. */
 export const browserFontMetrics: FontMetrics = {
   normalRatio(request) {
     const key = `${request.family}|${request.bold ? "b" : ""}|${request.italic ? "i" : ""}`;
     const cached = ratioCache.get(key);
     if (cached != null) return cached;
+    const word = WORD_FONT_METRICS[request.family.trim().toLowerCase()];
+    if (word) {
+      const ratio = wordLineRatio(word);
+      ratioCache.set(key, ratio);
+      return ratio;
+    }
     const node = ensureProbe();
     if (!node) return FALLBACK_RATIO;
     const parts: string[] = [];
