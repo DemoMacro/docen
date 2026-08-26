@@ -44,6 +44,7 @@ import type {
 
 import { resolvePageSize } from "../extensions/utils";
 import { defaultParagraphStyleId, indexParagraphStyles, mergeStyleChain } from "../style-cascade";
+import { wmfDibFallback } from "./wmf-dib";
 
 // The paragraph leg of SectionChild is `string | ParagraphOptions` (shorthand
 // or full options); null appears at runtime (empty paragraph legs from
@@ -161,14 +162,19 @@ function base64Of(bytes: Uint8Array): string {
 }
 
 /** PictureOptions (type + data) → a data URL the painter can load. Absent
- *  bytes (linked-only) or undecodable input (WMF/EMF metafiles — browsers
- *  have no GDI rasterizer) yields undefined — the renderer draws an empty
- *  frame. */
+ *  bytes (linked-only) yields undefined — the renderer draws an empty frame.
+ *  Metafile types with no raster MIME (emf/wmf — browsers have no GDI
+ *  rasterizer) fall back to the embedded DIB (see wmf-dib.ts). */
 function pictureSrc(pic: { type?: unknown; data?: unknown }): string | undefined {
   if (typeof pic.type !== "string") return undefined;
   const mime = MIME_BY_TYPE[pic.type];
-  if (!mime) return undefined;
   const { data } = pic;
+  if (!mime) {
+    if (typeof data === "string" || data instanceof Uint8Array) {
+      return metafileFallback(pic.type, data);
+    }
+    return undefined;
+  }
   if (typeof data === "string") {
     return data.startsWith("data:") ? data : `data:${mime};base64,${data}`;
   }
@@ -180,6 +186,45 @@ function pictureSrc(pic: { type?: unknown; data?: unknown }): string | undefined
     return `data:${mime};base64,${base64Of(data)}`;
   }
   return undefined;
+}
+
+/** Metafile fallback cache: project reruns on every editor transaction, and
+ *  re-scanning megabyte WMFs each pass is pure waste. Keyed by a cheap
+ *  fingerprint (type + length + head bytes) so freshly parsed — freshly
+ *  re-allocated — data still hits. Insertion-ordered Map doubles as the
+ *  eviction queue; a miss on a full map drops the oldest entry. */
+const metafileFallbackCache = new Map<string, string | undefined>();
+
+function metafileFallback(type: string, data: string | Uint8Array): string | undefined {
+  const head = typeof data === "string" ? data.slice(0, 24) : hexOf(data.subarray(0, 18));
+  const key = `${type}:${data.length}:${head}`;
+  if (metafileFallbackCache.has(key)) return metafileFallbackCache.get(key);
+  let src: string | undefined;
+  const bytes = typeof data === "string" ? base64ToBytes(data) : data;
+  if (bytes) src = wmfDibFallback(bytes);
+  metafileFallbackCache.set(key, src);
+  if (metafileFallbackCache.size > 64) {
+    const oldest = metafileFallbackCache.keys().next().value;
+    if (oldest !== undefined) metafileFallbackCache.delete(oldest);
+  }
+  return src;
+}
+
+function hexOf(bytes: Uint8Array): string {
+  let hex = "";
+  for (const b of bytes) hex += b.toString(16).padStart(2, "0");
+  return hex;
+}
+
+function base64ToBytes(b64: string): Uint8Array | undefined {
+  try {
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+  } catch {
+    return undefined;
+  }
 }
 
 // ── style cascade (direct pPr → style chain → docDefaults) ──
@@ -657,7 +702,9 @@ function solidFillOf(fill: unknown): string | undefined {
 }
 
 /** Outline stroke (a:ln): px width + color + the line-dressing tokens the
- *  painter maps (cap/join full-word, dash the OOXML prstDash token). */
+ *  painter maps (cap/join full-word, dash the OOXML prstDash token). A
+ *  gradient stroke flattens to its middle stop's color — the painter strokes
+ *  flat colors, and a line's gradient averages visually to its middle. */
 function outlineOf(outline: unknown):
   | {
       px: number;
@@ -680,11 +727,27 @@ function outlineOf(outline: unknown):
       : undefined;
   return {
     px: emuToPx(widthEmu),
-    color: colorOf(outline.color),
+    color: colorOf(outline.color) ?? midStopOf(outline.gradientFill),
     cap,
     join,
     dash: str(outline.dash),
   };
+}
+
+/** The gradient stop closest to the middle position — the flattest honest
+ *  color for a gradient the painter cannot stroke. */
+function midStopOf(gradient: unknown): string | undefined {
+  const stops = isRecord(gradient) && Array.isArray(gradient.stops) ? gradient.stops : undefined;
+  if (!stops) return undefined;
+  let best: { pos: number; color: string } | undefined;
+  for (const stop of stops) {
+    if (!isRecord(stop)) continue;
+    const pos = num(stop.position);
+    const color = colorOf(stop.color);
+    if (pos == null || color == null) continue;
+    if (!best || Math.abs(pos - 50) < Math.abs(best.pos - 50)) best = { pos, color };
+  }
+  return best?.color;
 }
 
 /** Word's eight ST_RelativeHorizontalPosition values → the four semantic
