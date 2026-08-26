@@ -682,17 +682,18 @@ const V_RELATIVE: Record<string, LayoutDrawingAnchor["vertical"]["relative"]> = 
 /** One position axis (align > posOffset > percentOffset) → the anchor spec;
  *  an empty position collapses to offset 0 on the fallback axis. */
 function anchorAxis<R extends string, A extends string>(
-  pos: HorizontalPositionOptions | VerticalPositionOptions,
+  pos: unknown,
   relativeTable: Record<string, R>,
   fallback: R,
   alignTable: Record<string, A>,
 ): { relative: R; offsetPx?: number; percent?: number; align?: A } {
-  const relative = relativeTable[str(pos.relative) ?? ""] ?? fallback;
-  const align = alignTable[str(pos.align) ?? ""];
+  const axis = isRecord(pos) ? pos : {};
+  const relative = relativeTable[str(axis.relative) ?? ""] ?? fallback;
+  const align = alignTable[str(axis.align) ?? ""];
   if (align) return { relative, align };
-  const offsetEmu = measureEmu(pos.offset);
+  const offsetEmu = measureEmu(axis.offset);
   if (offsetEmu != null) return { relative, offsetPx: emuToPx(offsetEmu) };
-  const pct = num(pos.percentOffset);
+  const pct = num(axis.percentOffset);
   if (pct != null) return { relative, percent: pct / 1000 };
   return { relative, offsetPx: 0 };
 }
@@ -769,6 +770,80 @@ interface GroupMirror {
   height: number;
 }
 
+/** One wps shape (group child data or a standalone WpsShapeOptions run) → a
+ *  drawing member at `x,y` sized `width×height`. A shape with txbx content
+ *  is a text box: its paragraphs project as blocks (full style cascade) for
+ *  the renderer to stack in the box. An empty children array is a shape
+ *  without text, not an empty box. */
+function wpsMemberOf(
+  data: unknown,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  ctx: ProjectContext,
+): LayoutDrawingMember | null {
+  if (!isRecord(data)) return null;
+  const fill = solidFillOf(data.fill);
+  const line = outlineOf(data.outline);
+  const preset = isRecord(data.presetGeometry) ? str(data.presetGeometry.preset) : undefined;
+  const children = Array.isArray(data.children) ? data.children : [];
+  if (children.length > 0) {
+    const bodyPr = isRecord(data.bodyProperties) ? data.bodyProperties : {};
+    // Insets are EMU or universal measure; BODY_INSET_EMU is the Word
+    // default applied whenever the side is absent.
+    const ins = (v: unknown, fallback: number): number => {
+      const emu = measureEmu(v);
+      return emu != null ? emuToPx(emu) : emuToPx(fallback);
+    };
+    const blocks: LayoutParagraph[] = [];
+    for (const p of children) {
+      const block = projectParagraph(p as BodyParagraph, ctx);
+      if (block) blocks.push(block);
+    }
+    return {
+      kind: "textBox",
+      x,
+      y,
+      width,
+      height,
+      insets: {
+        left: ins(bodyPr.lIns, BODY_INSET_EMU.left),
+        top: ins(bodyPr.tIns, BODY_INSET_EMU.top),
+        right: ins(bodyPr.rIns, BODY_INSET_EMU.right),
+        bottom: ins(bodyPr.bIns, BODY_INSET_EMU.bottom),
+      },
+      // VerticalAnchor is already full-word ("top"/"center"/"bottom");
+      // justify/distribute stretch to the box — treated as top until then.
+      anchor: bodyPr.anchor === "center" || bodyPr.anchor === "bottom" ? bodyPr.anchor : "top",
+      blocks,
+    };
+  }
+  // Straight connector (a straight line across its box) and custom
+  // geometry both project to path members; the box-like presets stay
+  // shape members.
+  if (preset === "line") {
+    return {
+      kind: "path",
+      x,
+      y,
+      width,
+      height,
+      d: `M 0 0 L ${Math.round(width * 100) / 100} ${Math.round(height * 100) / 100}`,
+      fill,
+      line,
+    };
+  }
+  if (preset == null) {
+    const d = data.customGeometry
+      ? customGeometryPath(data.customGeometry as CustomGeometryOptions, width, height)
+      : undefined;
+    if (d) return { kind: "path", x, y, width, height, d, fill, line };
+    return null;
+  }
+  return { kind: "shape", x, y, width, height, preset, fill, line };
+}
+
 /** One group level's child-space → drawing-box-px mapping, threaded through
  *  the recursion: a member at child-space EMU `off` lands at
  *  `origin + (off - chOff) * scale` px; a nested group composes its own
@@ -834,67 +909,8 @@ function walkGroup(
       // Published 0.12.3 parse bug stringified nested shape data — a
       // non-object data skips the member (absence over corrupt geometry).
       if (child.data == null || typeof child.data !== "object") continue;
-      const data = child.data;
-      const fill = solidFillOf(data.fill);
-      const line = outlineOf(data.outline);
-      const preset = data.presetGeometry?.preset;
-      // A shape with txbx content is a text box: its paragraphs project as
-      // blocks (full style cascade) for the renderer to stack in the box. An
-      // empty children array is a shape without text, not an empty box.
-      if (data.children.length > 0) {
-        const bodyPr = data.bodyProperties ?? {};
-        // Insets are EMU or universal measure; BODY_INSET_EMU is the Word
-        // default applied whenever the side is absent.
-        const ins = (v: number | string | undefined, fallback: number): number => {
-          const emu = measureEmu(v);
-          return emu != null ? emuToPx(emu) : emuToPx(fallback);
-        };
-        out.push({
-          kind: "textBox",
-          x,
-          y,
-          width,
-          height,
-          insets: {
-            left: ins(bodyPr.lIns, BODY_INSET_EMU.left),
-            top: ins(bodyPr.tIns, BODY_INSET_EMU.top),
-            right: ins(bodyPr.rIns, BODY_INSET_EMU.right),
-            bottom: ins(bodyPr.bIns, BODY_INSET_EMU.bottom),
-          },
-          // VerticalAnchor is already full-word ("top"/"center"/"bottom");
-          // justify/distribute stretch to the box — treated as top until then.
-          anchor: bodyPr.anchor === "center" || bodyPr.anchor === "bottom" ? bodyPr.anchor : "top",
-          blocks: data.children.flatMap((p) => {
-            const block = projectParagraph(p as BodyParagraph, ctx);
-            return block ? [block] : [];
-          }),
-        });
-        continue;
-      }
-      // Straight connector (a straight line across its box) and custom
-      // geometry both project to path members; the box-like presets stay
-      // shape members.
-      if (preset === "line") {
-        out.push({
-          kind: "path",
-          x,
-          y,
-          width,
-          height,
-          d: `M 0 0 L ${Math.round(width * 100) / 100} ${Math.round(height * 100) / 100}`,
-          fill,
-          line,
-        });
-        continue;
-      }
-      if (preset == null) {
-        const d = data.customGeometry
-          ? customGeometryPath(data.customGeometry, width, height)
-          : undefined;
-        if (d) out.push({ kind: "path", x, y, width, height, d, fill, line });
-        continue;
-      }
-      out.push({ kind: "shape", x, y, width, height, preset, fill, line });
+      const member = wpsMemberOf(child.data, x, y, width, height, ctx);
+      if (member) out.push(member);
     } else {
       // Everything else is treated as a picture member: real media children
       // carry bytes; chart/contentPart children have none and pictureSrc
@@ -942,27 +958,7 @@ function projectDrawing(group: GroupOptions, ctx: ProjectContext): LayoutDrawing
   const extW = measureEmu(group.transformation.width);
   const extH = measureEmu(group.transformation.height);
   if (extW == null || extH == null || extW <= 0 || extH <= 0) return undefined;
-
-  // wp:anchor positioning — every relativeFrom axis plus the offset/align
-  // choice; the painter owns the page geometry each axis resolves against.
-  const floating = group.floating ?? { horizontalPosition: {}, verticalPosition: {} };
-  const anchor: LayoutDrawingAnchor = {
-    horizontal: anchorAxis(floating.horizontalPosition, H_RELATIVE, "column" as const, {
-      left: "left",
-      inside: "left",
-      center: "center",
-      right: "right",
-      outside: "right",
-    }),
-    vertical: anchorAxis(floating.verticalPosition, V_RELATIVE, "paragraph" as const, {
-      top: "top",
-      inside: "top",
-      center: "center",
-      bottom: "bottom",
-      outside: "bottom",
-    }),
-  };
-  const behind = floating.behindDocument === true || undefined;
+  const { anchor, behind } = drawingAnchorOf(group.floating);
 
   // Child coordinate space: chOff/chExt → the group's EMU box. A missing
   // chExt means the children already live in the group's own units (1:1).
@@ -981,21 +977,99 @@ function projectDrawing(group: GroupOptions, ctx: ProjectContext): LayoutDrawing
   return { anchor, width: emuToPx(extW), height: emuToPx(extH), members, behind };
 }
 
-/** Collect the wpg group runs of one paragraph (top level and one nested run
- *  level — a drawing rides its own w:r). */
+/** wp:anchor positioning shared by every floating drawing kind (group, wps
+ *  shape, picture) — every relativeFrom axis plus the offset/align choice;
+ *  the painter owns the page geometry each axis resolves against. */
+function drawingAnchorOf(floating: unknown): {
+  anchor: LayoutDrawingAnchor;
+  behind: boolean | undefined;
+} {
+  const f = isRecord(floating) ? floating : {};
+  const anchor: LayoutDrawingAnchor = {
+    horizontal: anchorAxis(f.horizontalPosition, H_RELATIVE, "column" as const, {
+      left: "left",
+      inside: "left",
+      center: "center",
+      right: "right",
+      outside: "right",
+    }),
+    vertical: anchorAxis(f.verticalPosition, V_RELATIVE, "paragraph" as const, {
+      top: "top",
+      inside: "top",
+      center: "center",
+      bottom: "bottom",
+      outside: "bottom",
+    }),
+  };
+  return { anchor, behind: f.behindDocument === true || undefined };
+}
+
+/** A standalone floating picture run (wp:anchor pic:pic, PictureOptions):
+ *  one drawing whose single member is the image filling its own box. */
+function projectFloatingPicture(pic: Rec): LayoutDrawing | undefined {
+  const tr = isRecord(pic.transformation) ? pic.transformation : {};
+  const w = measureEmu(tr.width);
+  const h = measureEmu(tr.height);
+  if (w == null || h == null || w <= 0 || h <= 0) return undefined;
+  const { anchor, behind } = drawingAnchorOf(pic.floating);
+  const width = emuToPx(w);
+  const height = emuToPx(h);
+  return {
+    anchor,
+    width,
+    height,
+    behind,
+    members: [
+      {
+        kind: "picture",
+        x: 0,
+        y: 0,
+        width,
+        height,
+        src: pictureSrc(pic as { type?: unknown; data?: unknown }),
+      },
+    ],
+  };
+}
+
+/** A standalone floating wps shape run (WpsShapeOptions): the same member
+ *  projection a wps child inside a wpg group gets, anchored to the
+ *  paragraph in its own one-member drawing. */
+function projectWpsShapeRun(wps: Rec, ctx: ProjectContext): LayoutDrawing | undefined {
+  const tr = isRecord(wps.transformation) ? wps.transformation : {};
+  const w = measureEmu(tr.width);
+  const h = measureEmu(tr.height);
+  if (w == null || h == null || w <= 0 || h <= 0) return undefined;
+  const member = wpsMemberOf(wps, 0, 0, emuToPx(w), emuToPx(h), ctx);
+  if (!member) return undefined;
+  const { anchor, behind } = drawingAnchorOf(wps.floating);
+  return { anchor, width: emuToPx(w), height: emuToPx(h), members: [member], behind };
+}
+
+/** Collect the anchored drawing runs of one paragraph (top level and one
+ *  nested run level — a drawing rides its own w:r): wpg groups, wps shapes,
+ *  and floating pictures. Non-floating pictures stay inline atoms. */
 function projectDrawings(runs: readonly unknown[], ctx: ProjectContext): LayoutDrawing[] {
   const out: LayoutDrawing[] = [];
+  const each = (run: Rec): void => {
+    if (isRecord(run.wpgGroup)) {
+      const d = projectDrawing(run.wpgGroup as unknown as GroupOptions, ctx);
+      if (d) out.push(d);
+    }
+    if (isRecord(run.wpsShape)) {
+      const d = projectWpsShapeRun(run.wpsShape, ctx);
+      if (d) out.push(d);
+    }
+    if (isRecord(run.picture) && isRecord(run.picture.floating)) {
+      const d = projectFloatingPicture(run.picture);
+      if (d) out.push(d);
+    }
+  };
   for (const run of runs) {
     if (!isRecord(run)) continue;
-    const groups: unknown[] = [];
-    if (isRecord(run.wpgGroup)) groups.push(run.wpgGroup);
+    each(run);
     if (Array.isArray(run.children)) {
-      for (const inner of run.children)
-        if (isRecord(inner) && isRecord(inner.wpgGroup)) groups.push(inner.wpgGroup);
-    }
-    for (const g of groups) {
-      const d = projectDrawing(g as GroupOptions, ctx);
-      if (d) out.push(d);
+      for (const inner of run.children) if (isRecord(inner)) each(inner);
     }
   }
   return out;
@@ -1053,6 +1127,9 @@ function projectRuns(
     }
   };
   const pushPicture = (pic: Rec): void => {
+    // A floating picture is an anchored drawing (projectDrawings), not an
+    // inline atom — projecting it here too would double-render it.
+    if (isRecord(pic.floating)) return;
     const tr = isRecord(pic.transformation) ? pic.transformation : {};
     const w = measureEmu(tr.width);
     const h = measureEmu(tr.height);
@@ -1289,13 +1366,49 @@ function projectTable(t: TableOptions, ctx: ProjectContext): LayoutTable {
 
 /** One body child → layout block. Unprojectable shapes become placeholder
  *  boxes; zero-height markers (bookmarks) vanish — both OOXML-faithful. */
-function projectChild(child: SectionChild, ctx: ProjectContext): LayoutBlock | null {
-  if ("paragraph" in child) return projectParagraph(child.paragraph, ctx);
+function projectChild(
+  child: SectionChild,
+  ctx: ProjectContext,
+): LayoutBlock | LayoutBlock[] | null {
+  if ("paragraph" in child) return projectParagraphBlocks(child.paragraph, ctx);
   if ("table" in child) return projectTable(child.table, ctx);
   if ("bookmarkStart" in child || "bookmarkEnd" in child) return null;
   // toc, sdt, textbox, altChunk, customXml, rawXml → a labeled box.
   const label = Object.keys(child)[0];
   return { kind: "placeholder", heightPx: PLACEHOLDER_PX, label };
+}
+
+/** A run-level page break (w:br type=page) splits its paragraph: the flow
+ *  engine consumes pageBreak blocks, so the paragraph is re-emitted around
+ *  each break with its properties intact (Word keeps the paragraph running
+ *  onto the next page). */
+function projectParagraphBlocks(
+  p: BodyParagraph,
+  ctx: ProjectContext,
+): LayoutBlock | LayoutBlock[] {
+  const runs: readonly unknown[] =
+    typeof p === "string" ? [p] : (p?.children ?? (p?.text != null ? [p.text] : []));
+  if (!runs.some((run) => isRecord(run) && run.pageBreak === true)) {
+    return projectParagraph(p, ctx);
+  }
+  const out: LayoutBlock[] = [];
+  let chunk: unknown[] = [];
+  const flush = (): void => {
+    out.push(
+      projectParagraph({ ...(isRecord(p) ? p : {}), children: chunk } as BodyParagraph, ctx),
+    );
+    chunk = [];
+  };
+  for (const run of runs) {
+    if (isRecord(run) && run.pageBreak === true) {
+      flush();
+      out.push({ kind: "pageBreak" });
+    } else {
+      chunk.push(run);
+    }
+  }
+  flush();
+  return out;
 }
 
 // ── section flow geometry ──
@@ -1373,7 +1486,8 @@ function projectPageFurniture(doc: DocumentOptions): ProjectedPageFurniture {
     const blocks: LayoutBlock[] = [];
     for (const child of side) {
       const block = projectChild(child, ctx);
-      if (block) blocks.push(block);
+      if (Array.isArray(block)) blocks.push(...block);
+      else if (block) blocks.push(block);
     }
     return blocks.length > 0 ? blocks : undefined;
   };
@@ -1411,7 +1525,8 @@ export function projectDocumentOptions(doc: DocumentOptions): {
   for (const section of doc.sections ?? []) {
     for (const child of section.children ?? []) {
       const block = projectChild(child, ctx);
-      if (block) blocks.push(block);
+      if (Array.isArray(block)) blocks.push(...block);
+      else if (block) blocks.push(block);
     }
   }
   return {

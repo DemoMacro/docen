@@ -251,6 +251,42 @@ describe("projectDocumentOptions style cascade", () => {
 });
 
 describe("projectDocumentOptions blocks", () => {
+  it("splits a paragraph at run-level page breaks into pageBreak blocks", () => {
+    const { blocks } = projectDocumentOptions(
+      doc([
+        {
+          paragraph: {
+            children: ["before", { pageBreak: true }, "after", { pageBreak: true }],
+          },
+        },
+      ]),
+    );
+    expect(blocks.map((b) => b.kind)).toEqual([
+      "paragraph",
+      "pageBreak",
+      "paragraph",
+      "pageBreak",
+      "paragraph",
+    ]);
+    // Each leg keeps its text; the trailing empty leg is the break's own
+    // paragraph remainder (Word keeps the paragraph mark after the break).
+    const texts = blocks.map((b) =>
+      b.kind === "paragraph"
+        ? b.inline.map((i) => (i.kind === "text" ? i.text : "?")).join("")
+        : "-",
+    );
+    expect(texts).toEqual(["before", "-", "after", "-", ""]);
+  });
+
+  it("keeps a pageBreakBefore paragraph as one block", () => {
+    const { blocks } = projectDocumentOptions(
+      doc([{ paragraph: { children: ["x"], pageBreakBefore: true } }]),
+    );
+    expect(blocks).toHaveLength(1);
+    if (blocks[0]?.kind !== "paragraph") throw new Error("expected paragraph");
+    expect(blocks[0].pageBreakBefore).toBe(true);
+  });
+
   it("projects tables with converted geometry and threaded styles", () => {
     const { blocks } = projectDocumentOptions(
       doc([
