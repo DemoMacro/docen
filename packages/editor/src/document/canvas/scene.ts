@@ -583,7 +583,9 @@ function drawEdge(
   horizontal: boolean,
   edge: LayoutBorderEdge,
 ): void {
-  const px = Math.max(edge.px ?? 1, 0.5);
+  // Word's screen rendering lifts hairlines to a full pixel at 100% zoom —
+  // a sub-pixel stroke here would render as a faint half-transparent line.
+  const px = Math.max(edge.px ?? 1, 1);
   const color = edge.color ? `#${edge.color}` : "#000000";
   const style = edge.style ?? "single";
   const dash = DASH_PATTERN[style];
