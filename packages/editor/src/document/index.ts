@@ -788,7 +788,11 @@ class DocenDocument extends AddinHost<Editor> {
     }
     const editor = this.editor;
     if (!editor || editor.state.selection.empty) return;
-    this.#painterMarks = editor.state.selection.$from.marks();
+    // Probe one character into the selection: $from sits on the boundary,
+    // and ResolvedPos.marks() reads the character BEFORE the position — the
+    // first selected character's marks (e.g. bold stamped on [from,to))
+    // would be lost.
+    this.#painterMarks = editor.state.doc.resolve(editor.state.selection.from + 1).marks();
     this.toggleAttribute("format-painter", true);
     const onUp = (): void => {
       const ed = this.editor;
