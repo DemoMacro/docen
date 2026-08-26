@@ -11,6 +11,7 @@ import {
   type FlowItem,
   type LaidOutBlock,
   type LaidOutCell,
+  type LaidOutLineItem,
   type LaidOutParagraph,
   type LaidOutStackItem,
   type LaidOutTable,
@@ -241,6 +242,21 @@ function paintParagraph(
             }),
           );
         }
+      } else if (item.kind === "tab" && inline.kind === "tab") {
+        if (item.leader && item.widthPx > 1) {
+          // Leader fill across the tab's advance (a TOC's dot row). The glyph
+          // metrics come from the line's text — the tab atom carries no style.
+          let sizePx = 0;
+          let color = "#1b1b1b";
+          for (const other of line.items) {
+            const src = para.inline[other.inlineIndex];
+            if (src?.kind === "text" && src.style.sizePx > sizePx) {
+              sizePx = src.style.sizePx;
+              color = src.style.color ? `#${src.style.color}` : color;
+            }
+          }
+          if (sizePx > 0) paintTabLeader(tree, item, lineX, lineY, pad, sizePx, color);
+        }
       }
     }
   }
@@ -251,6 +267,46 @@ function paintParagraph(
     if (!drawing.behind) paintDrawing(tree, drawing, x, y, ctx);
   }
 }
+
+/** w:leader fill across a tab's interval: dots/hyphens/underscores drawn on
+ *  the text baseline (a hair below it for the underscore, Word's placement). */
+function paintTabLeader(
+  tree: IGroup,
+  item: Extract<LaidOutLineItem, { kind: "tab" }>,
+  lineX: number,
+  lineY: number,
+  pad: number,
+  sizePx: number,
+  color: string,
+): void {
+  const style = item.leader ? TAB_LEADER_STYLES[item.leader] : undefined;
+  if (!style) return;
+  const x1 = lineX + item.xPx;
+  const x2 = x1 + item.widthPx;
+  if (x2 - x1 < 2) return;
+  const y = lineY + pad + sizePx * (style.underside ? 0.9 : 0.82);
+  tree.add(
+    new Line({
+      points: [x1, y, x2, y],
+      stroke: color,
+      strokeWidth: style.widthPx,
+      strokeLinecap: style.cap,
+      dash: style.dash,
+    }),
+  );
+}
+
+/** Per-leader dash patterns: [on, off] in px against the stroke width. */
+const TAB_LEADER_STYLES: Record<
+  NonNullable<Extract<LaidOutLineItem, { kind: "tab" }>["leader"]>,
+  { dash?: number[]; widthPx: number; cap: "round" | "butt"; underside?: boolean }
+> = {
+  dot: { dash: [0.1, 3.6], widthPx: 1.3, cap: "round" },
+  heavy: { dash: [0.1, 3.6], widthPx: 2.2, cap: "round" },
+  middleDot: { dash: [1.2, 3.4], widthPx: 1.6, cap: "round" },
+  hyphen: { dash: [3, 2.5], widthPx: 1, cap: "butt" },
+  underscore: { widthPx: 1, cap: "butt", underside: true },
+};
 
 /** One floating drawing: members absolutely positioned in the drawing's box,
  *  itself placed by the anchor spec against the page geometry. A text box

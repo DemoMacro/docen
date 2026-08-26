@@ -162,18 +162,27 @@ describe("packLines", () => {
   it("right-aligns the run after a right tab stop", () => {
     // "ab" = 16px; a right stop at 100 with 16px following → tab lands at 84.
     const lines = pack([text("ab"), { kind: "tab" }, text("cd")], 200, {
-      tabStops: [{ positionPx: 100, type: "right" }],
+      tabStops: [{ positionPx: 100, type: "right", leader: "dot" }],
     });
     expect(lines).toHaveLength(1);
     const items = lines[0].items;
     expect(items[items.length - 1].xPx).toBe(84);
     expect(items[items.length - 1].xPx + items[items.length - 1].widthPx).toBe(100);
+    // The tab item spans [16, 84) and carries the stop's leader.
+    expect(items[1]).toMatchObject({ kind: "tab", xPx: 16, widthPx: 68, leader: "dot" });
   });
 
   it("continues the same line across a tab group boundary", () => {
     const lines = pack([text("ab"), { kind: "tab" }, text("cd")], 200);
     expect(lines).toHaveLength(1);
-    expect(lines[0].items.map((i) => (i.kind === "text" ? i.text : ""))).toEqual(["ab", "cd"]);
+    // The tab itself becomes an item (its advance interval) between the two
+    // text items — no explicit stop, so it carries no leader.
+    expect(lines[0].items.map((i) => (i.kind === "text" ? i.text : i.kind))).toEqual([
+      "ab",
+      "tab",
+      "cd",
+    ]);
+    expect(lines[0].items[1]).toMatchObject({ kind: "tab", xPx: 16, leader: undefined });
   });
 
   it("returns no lines for empty inline content", () => {

@@ -25,7 +25,7 @@ import {
   type RichInlineItem,
 } from "@chenglou/pretext/rich-inline";
 
-import type { LayoutFloatZone, LayoutInline } from "../layout-doc";
+import type { LayoutFloatZone, LayoutInline, LayoutTabStop } from "../layout-doc";
 import type { LaidOutLineItem } from "../layout-result";
 import { cssFontOf, familyOfSlot, type TextMeasurer } from "./measure";
 
@@ -77,7 +77,7 @@ export interface PackLinesOptions {
   /** Explicit tab stops, px from the content-box left edge (w:tabs). Tabs past
    *  the last stop (or with no stops) advance over the default grid — 720
    *  twips, Word's defaultTabStop. */
-  tabStops?: { positionPx: number; type: "left" | "center" | "right" }[];
+  tabStops?: LayoutTabStop[];
 }
 
 /** Word's defaultTabStop: 720 twips = 0.5 inch = 48 px at 96 dpi. */
@@ -253,7 +253,7 @@ function maxWidthAt(opts: PackLinesOptions, lineIndex: number, y: number): numbe
  *  the walk sits `lineBasePx` into the paragraph's text box (the first line's
  *  indent), and stops are measured from the text box. */
 interface TabContext {
-  stops?: { positionPx: number; type: "left" | "center" | "right" }[];
+  stops?: LayoutTabStop[];
   lineBasePx: number;
   /** This line's usable width: a stop past it clamps to the right edge
    *  (Word: an out-of-margin stop still right-aligns at the margin). */
@@ -275,22 +275,25 @@ function nextStopPast(tabs: TabContext, absX: number): number {
  *  target (a numbering bullet's hop), the next stop, or the default grid. A
  *  RIGHT stop aligns the FOLLOWING text's right edge at the stop, so the tab
  *  itself yields by `followingPx`; when that would cross behind the cursor the
- *  tab degenerates to the default-grid hop (progress, never negative). */
+ *  tab degenerates to the default-grid hop (progress, never negative). The
+ *  matched explicit stop's leader rides along for the painter; a default-grid
+ *  hop (no stop) carries none. */
 function tabAdvance(
   tab: { toPx?: number },
   xRaw: number,
   tabs: TabContext,
   followingPx: number,
-): number {
+): { advancePx: number; leader?: LayoutTabStop["leader"] } {
   const absX = xRaw + tabs.lineBasePx;
-  if (tab.toPx != null) return Math.max(0, tab.toPx - absX);
+  if (tab.toPx != null) return { advancePx: Math.max(0, tab.toPx - absX) };
   // A stop past this line's usable width clamps to the right edge (Word: an
   // out-of-margin stop still right-aligns at the margin). maxWidth is measured
   // from the line's content start; stops from the text box — convert, clamp,
   // convert back.
   const stop =
     Math.min(nextStopPast(tabs, absX) - tabs.lineBasePx, tabs.maxWidthPx) + tabs.lineBasePx;
-  const type = tabs.stops?.find((s) => s.positionPx === stop)?.type ?? "left";
+  const matched = tabs.stops?.find((s) => s.positionPx === stop);
+  const type = matched?.type ?? "left";
   const w =
     type === "right"
       ? stop - absX - followingPx
@@ -299,7 +302,9 @@ function tabAdvance(
         : stop - absX;
   // A right/center stop the following text cannot reach falls back to the
   // default grid's next slot (the text starts past the stop — progress).
-  return w > 0 ? w : Math.max(0, (Math.floor(absX / DEFAULT_TAB_PX) + 1) * DEFAULT_TAB_PX - absX);
+  const advancePx =
+    w > 0 ? w : Math.max(0, (Math.floor(absX / DEFAULT_TAB_PX) + 1) * DEFAULT_TAB_PX - absX);
+  return { advancePx, leader: matched?.leader };
 }
 
 /** One-off advance measurements for hanging closers, keyed by char+font. */
@@ -463,7 +468,17 @@ export function packLines(inline: LayoutInline[], opts: PackLinesOptions): Packe
       // jumps and the line continues; a hard break ends the line.
       if (finishedThisLine && !brokeMidGroup) {
         if (group.tab) {
-          xLine += tabAdvance(group.tab, xLine, tabs, group.followingPx);
+          const { advancePx, leader } = tabAdvance(group.tab, xLine, tabs, group.followingPx);
+          // The tab's interval becomes an item so the painter can fill it with
+          // the stop's leader (dot leaders in a TOC).
+          lineItems.push({
+            kind: "tab",
+            inlineIndex: group.closerIndex,
+            xPx: xLine,
+            widthPx: advancePx,
+            leader,
+          });
+          xLine += advancePx;
           endInlineIndex = group.closerIndex;
         } else if (group.hardBreak) {
           endInlineIndex = group.closerIndex;

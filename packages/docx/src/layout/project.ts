@@ -66,6 +66,16 @@ const num = (v: unknown): number | undefined => (typeof v === "number" ? v : und
 
 const str = (v: unknown): string | undefined => (typeof v === "string" && v ? v : undefined);
 
+/** The five predefined XML entities (numeric refs stay rare in field text). */
+function unescapeXml(v: string): string {
+  return v
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&");
+}
+
 /** Estimated height of one placeholder box: three default body lines. */
 const PLACEHOLDER_PX = 3 * 16;
 
@@ -535,7 +545,15 @@ function projectParagraph(p: BodyParagraph, ctx: ProjectContext): LayoutParagrap
         if (positionPx == null) return [];
         const type =
           ts.type === "right" ? "right" : ts.type === "center" ? "center" : ("left" as const);
-        return [{ positionPx: twipToPx(positionPx) - (indent.leftPx ?? 0), type }];
+        const leader =
+          ts.leader === "dot" ||
+          ts.leader === "heavy" ||
+          ts.leader === "hyphen" ||
+          ts.leader === "middleDot" ||
+          ts.leader === "underscore"
+            ? ts.leader
+            : undefined;
+        return [{ positionPx: twipToPx(positionPx) - (indent.leftPx ?? 0), type, leader }];
       })
     : undefined;
 
@@ -1140,7 +1158,10 @@ function projectRuns(
   };
   /** A field (w:fldSimple / complexField): PAGE/NUMPAGES become dynamic atoms
    *  (the painter resolves the number per page — `text` is a measuring
-   *  placeholder); anything else renders its cached result as static text. */
+   *  placeholder); anything else renders its cached result. A structured
+   *  result (resultRunsXml — present when the result runs hold anything but
+   *  plain text, e.g. a TOC hyperlink's tab + nested PAGEREF) is re-hydrated
+   *  item by item; only then does the flat `result` string stand in. */
   const pushField = (field: Rec, rPr: Rec): void => {
     const instr =
       typeof field.instruction === "string" ? field.instruction.trim().toUpperCase() : "";
@@ -1151,8 +1172,36 @@ function projectRuns(
       out.push({ kind: "text", text: "0", style, field: "page" });
     } else if (instr.startsWith("NUMPAGES")) {
       out.push({ kind: "text", text: "0", style, field: "numPages" });
+    } else if (typeof field.resultRunsXml === "string") {
+      pushFieldResultRuns(field.resultRunsXml, rPr);
     } else if (cached) {
       pushText(cached, rPr);
+    }
+  };
+  /** Walk a complex field's verbatim result-run XML: text runs become text,
+   *  w:tab atoms become tab jumps, and a nested field (a TOC entry's PAGEREF)
+   *  contributes its separated result — instruction runs are skipped. */
+  const pushFieldResultRuns = (xml: string, rPr: Rec): void => {
+    // Stack of nested fields, each "instr" until its separate, then "result".
+    const stack: ("instr" | "result")[] = [];
+    const tokens =
+      xml.match(/<w:(fldChar|instrText|tab|t)\b[^>]*(?:\/>|>([\s\S]*?)<\/w:\1>)/g) ?? [];
+    for (const tk of tokens) {
+      if (tk.startsWith("<w:fldChar")) {
+        const type = /w:fldCharType="(\w+)"/.exec(tk)?.[1];
+        if (type === "begin") stack.push("instr");
+        else if (type === "separate" && stack.length > 0) stack[stack.length - 1] = "result";
+        else if (type === "end") stack.pop();
+      } else if (tk.startsWith("<w:instrText")) {
+        continue;
+      } else if (stack[stack.length - 1] === "instr") {
+        continue;
+      } else if (tk.startsWith("<w:tab")) {
+        out.push({ kind: "tab" });
+      } else {
+        const text = unescapeXml(/>([\s\S]*?)<\/w:t>$/.exec(tk)?.[1] ?? "");
+        pushText(text, rPr);
+      }
     }
   };
   const pushPicture = (pic: Rec): void => {

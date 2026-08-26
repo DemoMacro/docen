@@ -34,7 +34,18 @@ export interface LaidOutPictureItem {
   heightPx: number;
 }
 
-export type LaidOutLineItem = LaidOutTextItem | LaidOutPictureItem;
+export interface LaidOutTabItem {
+  kind: "tab";
+  inlineIndex: number;
+  /** The tab's advance interval: from the preceding content's end to the
+   *  following content's start (a right stop lands the next run's right edge
+   *  at the stop). The painter draws the leader fill across it. */
+  xPx: number;
+  widthPx: number;
+  leader?: "dot" | "heavy" | "hyphen" | "middleDot" | "underscore";
+}
+
+export type LaidOutLineItem = LaidOutTextItem | LaidOutPictureItem | LaidOutTabItem;
 
 export interface LaidOutLine {
   yPx: number;

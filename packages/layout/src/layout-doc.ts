@@ -201,6 +201,8 @@ export interface LayoutIndent {
 export interface LayoutTabStop {
   positionPx: number;
   type: "left" | "center" | "right";
+  /** w:leader — the fill drawn across the tab's advance ("none" dropped). */
+  leader?: "dot" | "heavy" | "hyphen" | "middleDot" | "underscore";
 }
 
 /** One w:pBdr edge: a border line drawn beside the paragraph. */
