@@ -44,6 +44,7 @@ import type {
 
 import { resolvePageSize } from "../extensions/utils";
 import { defaultParagraphStyleId, indexParagraphStyles, mergeStyleChain } from "../style-cascade";
+import { wmfMembers } from "./wmf";
 import { wmfDibFallback } from "./wmf-dib";
 
 // The paragraph leg of SectionChild is `string | ParagraphOptions` (shorthand
@@ -188,26 +189,64 @@ function pictureSrc(pic: { type?: unknown; data?: unknown }): string | undefined
   return undefined;
 }
 
-/** Metafile fallback cache: project reruns on every editor transaction, and
+/** Metafile caches: project reruns on every editor transaction, and
  *  re-scanning megabyte WMFs each pass is pure waste. Keyed by a cheap
  *  fingerprint (type + length + head bytes) so freshly parsed — freshly
  *  re-allocated — data still hits. Insertion-ordered Map doubles as the
  *  eviction queue; a miss on a full map drops the oldest entry. */
-const metafileFallbackCache = new Map<string, string | undefined>();
+function memoByFingerprint<V>(limit: number): (key: string, make: () => V) => V {
+  const map = new Map<string, V>();
+  return (key, make) => {
+    if (map.has(key)) return map.get(key) as V;
+    const value = make();
+    map.set(key, value);
+    if (map.size > limit) {
+      const oldest = map.keys().next().value;
+      if (oldest !== undefined) map.delete(oldest);
+    }
+    return value;
+  };
+}
+
+const dibFallbackOf = memoByFingerprint<string | undefined>(64);
+const wmfMembersOf = memoByFingerprint<LayoutDrawingMember[] | undefined>(128);
 
 function metafileFallback(type: string, data: string | Uint8Array): string | undefined {
   const head = typeof data === "string" ? data.slice(0, 24) : hexOf(data.subarray(0, 18));
-  const key = `${type}:${data.length}:${head}`;
-  if (metafileFallbackCache.has(key)) return metafileFallbackCache.get(key);
-  let src: string | undefined;
-  const bytes = typeof data === "string" ? base64ToBytes(data) : data;
-  if (bytes) src = wmfDibFallback(bytes);
-  metafileFallbackCache.set(key, src);
-  if (metafileFallbackCache.size > 64) {
-    const oldest = metafileFallbackCache.keys().next().value;
-    if (oldest !== undefined) metafileFallbackCache.delete(oldest);
-  }
-  return src;
+  return dibFallbackOf(`${type}:${data.length}:${head}`, () => {
+    const bytes = typeof data === "string" ? base64ToBytes(data) : data;
+    return bytes ? wmfDibFallback(bytes) : undefined;
+  });
+}
+
+/** A metafile picture's vector replay (wmf.ts), cached per fingerprint+box:
+ *  the members scale with the box, so the size rides the key. Raster types
+ *  (a real MIME) return undefined — they paint through `src` directly.
+ *  Mask-layer files (SRCPAINT/SRCAND blts, no SRCCOPY) replay text and
+ *  strokes but not their photo — the flat DIB backdrop carries it under
+ *  the members (see wmf-dib.ts for the extraction). */
+function metafileMembers(
+  pic: { type?: unknown; data?: unknown },
+  boxW: number,
+  boxH: number,
+): LayoutDrawingMember[] | undefined {
+  if (typeof pic.type !== "string" || MIME_BY_TYPE[pic.type]) return undefined;
+  const { data } = pic;
+  if (typeof data !== "string" && !(data instanceof Uint8Array)) return undefined;
+  const head = typeof data === "string" ? data.slice(0, 24) : hexOf(data.subarray(0, 18));
+  const key = `${pic.type}:${data.length}:${head}:${Math.round(boxW)}x${Math.round(boxH)}`;
+  return wmfMembersOf(key, () => {
+    const bytes = typeof data === "string" ? base64ToBytes(data) : data;
+    const replay = bytes ? wmfMembers(bytes, boxW, boxH) : undefined;
+    if (!replay) return undefined;
+    if (!replay.some((m) => m.kind === "picture")) {
+      const backdrop = metafileFallback(pic.type as string, data);
+      if (backdrop) {
+        replay.unshift({ kind: "picture", x: 0, y: 0, width: boxW, height: boxH, src: backdrop });
+      }
+    }
+    return replay;
+  });
 }
 
 function hexOf(bytes: Uint8Array): string {
@@ -949,6 +988,26 @@ function wpsMemberOf(
  *  over its chExt). Children are the office-open GroupChildMediaData union —
  *  the same contract stringify consumes, so field/token drift fails here at
  *  compile time. */
+/** a:srcRect crops the source image inward per side, as fractions. office-
+ *  open's picture parse (readSourceRectangle) emits the RAW ST_Percentage
+ *  int (100000 = 100%), despite SourceRectangleOptions documenting integer
+ *  percent — flip to /100 when that contract breach is fixed upstream. */
+function cropOf(
+  pic: unknown,
+): { left: number; top: number; right: number; bottom: number } | undefined {
+  const sr = isRecord(pic) && isRecord(pic.sourceRectangle) ? pic.sourceRectangle : undefined;
+  if (!sr) return undefined;
+  const pct = (v: unknown): number | undefined =>
+    typeof v === "number" && v > 0 ? v / 100000 : undefined;
+  const crop = {
+    left: pct(sr.left) ?? 0,
+    top: pct(sr.top) ?? 0,
+    right: pct(sr.right) ?? 0,
+    bottom: pct(sr.bottom) ?? 0,
+  };
+  return crop.left > 0 || crop.top > 0 || crop.right > 0 || crop.bottom > 0 ? crop : undefined;
+}
+
 function walkGroup(
   group: { children: readonly GroupChildMediaData[] },
   originX: number,
@@ -1012,36 +1071,25 @@ function walkGroup(
     } else {
       // Everything else is treated as a picture member: real media children
       // carry bytes; chart/contentPart children have none and pictureSrc
-      // yields undefined — the painter's empty-frame placeholder.
-      // a:srcRect crops the source image inward per side. office-open's wpg
-      // picture parse (readSourceRectangle) emits the RAW ST_Percentage int
-      // (100000 = 100%), despite SourceRectangleOptions documenting integer
-      // percent — flip to /100 when that contract breach is fixed upstream.
-      const sr = "sourceRectangle" in child ? child.sourceRectangle : undefined;
-      const pct = (v: number | undefined): number | undefined =>
-        v != null && v > 0 ? v / 100000 : undefined;
-      const crop = sr
-        ? {
-            left: pct(sr.left) ?? 0,
-            top: pct(sr.top) ?? 0,
-            right: pct(sr.right) ?? 0,
-            bottom: pct(sr.bottom) ?? 0,
-          }
-        : undefined;
-      out.push({
-        kind: "picture",
-        x,
-        y,
-        width,
-        height,
-        src: pictureSrc(child),
-        flipH: t.flip?.horizontal === true || undefined,
-        flipV: t.flip?.vertical === true || undefined,
-        crop:
-          crop && (crop.left > 0 || crop.top > 0 || crop.right > 0 || crop.bottom > 0)
-            ? crop
-            : undefined,
-      });
+      // yields undefined — the painter's empty-frame placeholder. A metafile
+      // child expands into its vector replay instead, offset by the child
+      // box (replay members are box-relative).
+      const replay = metafileMembers(child, width, height);
+      if (replay) {
+        out.push(...replay.map((m) => ({ ...m, x: m.x + x, y: m.y + y })));
+      } else {
+        out.push({
+          kind: "picture",
+          x,
+          y,
+          width,
+          height,
+          src: pictureSrc(child),
+          flipH: t.flip?.horizontal === true || undefined,
+          flipV: t.flip?.vertical === true || undefined,
+          crop: cropOf(child),
+        });
+      }
     }
   }
 }
@@ -1130,7 +1178,9 @@ function projectFloatingPicture(pic: Rec): LayoutDrawing | undefined {
     height,
     wrap,
     behind,
-    members: [
+    // A metafile picture expands into its vector replay; anything else stays
+    // one flat member (crop applies to the flat source only).
+    members: metafileMembers(pic, width, height) ?? [
       {
         kind: "picture",
         x: 0,
@@ -1138,6 +1188,7 @@ function projectFloatingPicture(pic: Rec): LayoutDrawing | undefined {
         width,
         height,
         src: pictureSrc(pic as { type?: unknown; data?: unknown }),
+        crop: cropOf(pic),
       },
     ],
   };
@@ -1275,11 +1326,17 @@ function projectRuns(
     const w = measureEmu(tr.width);
     const h = measureEmu(tr.height);
     if (w != null && h != null) {
+      const widthPx = emuToPx(w);
+      const heightPx = emuToPx(h);
+      // The metafile replay (WMF vector layers) is the main battlefield for
+      // inline pictures — the flat DIB src only fills in when replay fails.
+      const members = metafileMembers(pic, widthPx, heightPx);
       out.push({
         kind: "picture",
-        widthPx: emuToPx(w),
-        heightPx: emuToPx(h),
-        src: pictureSrc(pic),
+        widthPx,
+        heightPx,
+        src: members ? undefined : pictureSrc(pic),
+        members,
       });
     }
   };

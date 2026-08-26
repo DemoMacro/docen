@@ -47,7 +47,15 @@ export type LayoutInline =
   | { kind: "text"; text: string; style: LayoutTextStyle; field?: "page" | "numPages" }
   | { kind: "break" }
   | { kind: "tab"; toPx?: number }
-  | { kind: "picture"; widthPx: number; heightPx: number; src?: string };
+  | {
+      kind: "picture";
+      widthPx: number;
+      heightPx: number;
+      src?: string /** Vector replay members (a WMF/EMF metafile source): when present, the
+       * renderer paints these instead of loading `src` — same renderer-only
+       * passthrough contract; the engine never reads beyond widthPx/heightPx. */;
+      members?: LayoutDrawingMember[];
+    };
 
 // ── floating drawings (anchored shape groups) ──
 
@@ -94,6 +102,8 @@ export type LayoutDrawingMember =
       /** SVG path data in box coordinates (0,0 … width,height) — the adapter
        *  scaled the geometry's own space (custGeom path w/h) into the box. */
       d: string;
+      /** Fill rule for self-intersecting outlines (wmf SetPolyFillMode). */
+      fillRule?: "evenodd" | "nonzero";
       /** Solid fill, hex RRGGBB; absent → no fill. */
       fill?: string;
       /** Outline stroke (a:ln): width px + hex color + cap/join/dash. */

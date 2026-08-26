@@ -1,51 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { wmfDibFallback } from "./wmf-dib";
-
-/** Uncompressed top-down DIB (BITMAPINFOHEADER + zeroed pixels). */
-function dib(w: number, h: number, bpp: number): Uint8Array {
-  const row = Math.ceil((w * bpp) / 8 / 4) * 4; // rows are 4-byte aligned
-  const buf = new Uint8Array(40 + row * h);
-  const v = new DataView(buf.buffer);
-  v.setUint32(0, 40, true);
-  v.setInt32(4, w, true);
-  v.setInt32(8, h, true);
-  v.setUint16(12, 1, true);
-  v.setUint16(14, bpp, true);
-  return buf;
-}
-
-/** Placeable WMF: aldus magic + standard header + the given records. */
-function wmfWithRecords(records: { fn: number; params: Uint8Array }[]): Uint8Array {
-  const placeable = new Uint8Array(22);
-  new DataView(placeable.buffer).setUint32(0, 0x9ac6cdd7, true);
-  const header = new Uint8Array(18);
-  new DataView(header.buffer).setUint16(0, 1, true); // memory metafile
-  new DataView(header.buffer).setUint16(2, 9, true); // header size in words
-  const body = records.map((rec) => {
-    const buf = new Uint8Array(6 + rec.params.length);
-    new DataView(buf.buffer).setUint32(0, buf.length / 2, true); // size in words
-    new DataView(buf.buffer).setUint16(4, rec.fn, true);
-    buf.set(rec.params, 6);
-    return buf;
-  });
-  const total = [placeable, header, ...body].reduce((n, p) => n + p.length, 0);
-  const out = new Uint8Array(total);
-  let off = 0;
-  for (const part of [placeable, header, ...body]) {
-    out.set(part, off);
-    off += part.length;
-  }
-  return out;
-}
-
-function decodedBmp(src: string | undefined): Uint8Array {
-  expect(src).toBeDefined();
-  const bin = atob(src!.slice("data:image/bmp;base64,".length));
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return bytes;
-}
+import { decodedBmp, dib, wmfWithRecords } from "./wmf-test-util";
 
 describe("wmfDibFallback", () => {
   it("reframes a stretch-DIB blit record as a BMP data URL", () => {

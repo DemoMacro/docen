@@ -1,12 +1,12 @@
 // Placeable-WMF fallback: browsers cannot rasterize GDI metafiles, so a
 // metafile picture renders as an empty frame. Most business-document WMFs
 // (Office's ".emf" exports included — the magic here is the WMF placeable
-// header) carry their main visual as one big DIB blit record; re-framing
+// header) carry their main visual as one big DIB blt record; re-framing
 // that DIB as a BMP data URL recovers the dominant imagery without a
-// metafile player. Vector overlays (text, strokes) stay lost — a partial
-// picture beats a gray box.
+// metafile player. Vector overlays replay through wmf.ts when members are
+// wanted; this is the flat single-image path.
 
-/** Extract the largest blit-record DIB as a BMP data URL, or undefined when
+/** Extract the largest blt-record DIB as a BMP data URL, or undefined when
  *  the bytes are not a placeable WMF or hold no usable DIB. */
 export function wmfDibFallback(bytes: Uint8Array): string | undefined {
   if (bytes.length < 22 + 18 + 8) return undefined;
@@ -22,9 +22,9 @@ export function wmfDibFallback(bytes: Uint8Array): string | undefined {
     if (sizeWords < 3) break;
     const recordEnd = off + sizeWords * 2;
     if (recordEnd > bytes.length) break;
-    // The DIB-carrying blts: DIBBITBLT (fn 0x41), STRETCHDIB (0x40),
-    // DIBSTRETCHBLT (0x43) — the full record word varies with the parameter
-    // size, so match the low byte.
+    // The DIB-carrying blts: META_DIBSTRETCHBLT (0x0B41), META_DIBBITBLT
+    // (0x0940), META_STRETCHDIB (0x0F43) — the full record word varies with
+    // the parameter size, so match the low byte.
     const dib = bltDibAt(view, off, recordEnd, fn & 0xff);
     if (dib && (!best || dib.length > best.length)) best = dib;
     off = recordEnd;
@@ -38,7 +38,7 @@ export function wmfDibFallback(bytes: Uint8Array): string | undefined {
  *  record end. Validated down to the forms a BMP consumer can take raw:
  *  uncompressed 8/24/32bpp with a real extent. DIBs past 12MB are skipped —
  *  a memory guard for degenerate metafiles, well above any real photo blit. */
-function bltDibAt(
+export function bltDibAt(
   view: DataView,
   recordStart: number,
   recordEnd: number,
@@ -68,7 +68,7 @@ function bltDibAt(
  *  14-byte BITMAPFILEHEADER; the pixel data and palette pass through raw. The
  *  pixel offset must skip the palette (biClrUsed entries, or 2^bpp, for
  *  palettized depths) — decoders honor it literally. */
-function bmpDataUrl(bytes: Uint8Array, dibStart: number, dibLength: number): string {
+export function bmpDataUrl(bytes: Uint8Array, dibStart: number, dibLength: number): string {
   const dibView = new DataView(bytes.buffer, bytes.byteOffset + dibStart, dibLength);
   const bpp = dibView.getUint16(14, true);
   const clrUsed = dibView.getUint32(32, true);

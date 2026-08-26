@@ -218,7 +218,11 @@ function paintParagraph(
           }),
         );
       } else if (item.kind === "picture" && inline.kind === "picture") {
-        if (inline.src) {
+        if (inline.members) {
+          // A metafile source replayed into members (WMF vector layers): the
+          // structured scene paints in place of the flat image.
+          paintMembers(tree, inline.members, lineX + item.xPx, lineY + pad, ctx);
+        } else if (inline.src) {
           tree.add(
             new LeaferImage({
               url: inline.src,
@@ -357,7 +361,21 @@ function paintDrawing(
   };
   const boxX = axisPos(drawing.anchor.horizontal, hBox.left, hBox.width, drawing.width);
   const boxY = axisPos(drawing.anchor.vertical, vBox.top, vBox.height, drawing.height);
-  for (const m of drawing.members) {
+  paintMembers(tree, drawing.members, boxX, boxY, ctx);
+}
+
+/** The members of a drawing box (or of an inline picture's metafile replay),
+ *  each positioned at its own offset inside the box origin. Shared by the
+ *  anchored-drawing and the inline-picture paths — the member shapes are the
+ *  same; only the box origin differs. */
+function paintMembers(
+  tree: IGroup,
+  members: readonly LayoutDrawingMember[],
+  boxX: number,
+  boxY: number,
+  ctx: PaintContext,
+): void {
+  for (const m of members) {
     const mx = boxX + m.x;
     const my = boxY + m.y;
     if (m.kind === "picture") {
@@ -409,6 +427,8 @@ function paintDrawing(
           strokeJoin:
             m.line?.join === "round" ? "round" : m.line?.join === "bevel" ? "bevel" : undefined,
           dashPattern: m.line?.dash ? PRSTDASH_PATTERN[m.line.dash] : undefined,
+          // Leafer spells the SVG fill-rule attribute `windingRule`.
+          windingRule: m.fillRule,
         }),
       );
     } else if (m.kind === "shape") {
