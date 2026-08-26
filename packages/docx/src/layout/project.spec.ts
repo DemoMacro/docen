@@ -325,21 +325,25 @@ describe("projectDocumentOptions blocks", () => {
         },
       ]),
     );
-    expect(blocks.map((b) => b.kind)).toEqual([
-      "paragraph",
-      "pageBreak",
-      "paragraph",
-      "pageBreak",
-      "paragraph",
-    ]);
-    // Each leg keeps its text; the trailing empty leg is the break's own
-    // paragraph remainder (Word keeps the paragraph mark after the break).
+    expect(blocks.map((b) => b.kind)).toEqual(["paragraph", "pageBreak", "paragraph", "pageBreak"]);
+    // Each non-empty leg keeps its text. No empty tail paragraph: the
+    // paragraph mark rides on the break's own line in Word ("———break———¶"),
+    // so a trailing break must not open a blank row on the next page.
     const texts = blocks.map((b) =>
       b.kind === "paragraph"
         ? b.inline.map((i) => (i.kind === "text" ? i.text : "?")).join("")
         : "-",
     );
-    expect(texts).toEqual(["before", "-", "after", "-", ""]);
+    expect(texts).toEqual(["before", "-", "after", "-"]);
+  });
+
+  it("drops the empty legs a break-only paragraph would produce", () => {
+    const { blocks } = projectDocumentOptions(
+      doc([{ paragraph: { children: [{ pageBreak: true }] } }]),
+    );
+    // Word renders the break row (break mark + paragraph mark together) on
+    // the page the break closes — the next page starts clean, no blank row.
+    expect(blocks.map((b) => b.kind)).toEqual(["pageBreak"]);
   });
 
   it("keeps a pageBreakBefore paragraph as one block", () => {

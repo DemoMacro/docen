@@ -1431,7 +1431,10 @@ function projectToc(toc: unknown, ctx: ProjectContext): LayoutBlock | LayoutBloc
 /** A run-level page break (w:br type=page) splits its paragraph: the flow
  *  engine consumes pageBreak blocks, so the paragraph is re-emitted around
  *  each break with its properties intact (Word keeps the paragraph running
- *  onto the next page). */
+ *  onto the next page). An empty chunk flushes to nothing: the paragraph
+ *  mark rides on the break's own line (Word shows "———page break———¶" as
+ *  one row), so a trailing break must not leave an empty paragraph behind
+ *  on the next page. */
 function projectParagraphBlocks(
   p: BodyParagraph,
   ctx: ProjectContext,
@@ -1444,6 +1447,7 @@ function projectParagraphBlocks(
   const out: LayoutBlock[] = [];
   let chunk: unknown[] = [];
   const flush = (): void => {
+    if (chunk.length === 0) return;
     out.push(
       projectParagraph({ ...(isRecord(p) ? p : {}), children: chunk } as BodyParagraph, ctx),
     );
