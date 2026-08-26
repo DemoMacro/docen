@@ -407,6 +407,35 @@ describe("projectDocumentOptions blocks", () => {
     expect(blocks[1]).toEqual({ kind: "placeholder", heightPx: 48, label: "toc" });
     expect(blocks[2]).toMatchObject({ kind: "paragraph" });
   });
+
+  it("projects rendered TOC entries as real paragraphs", () => {
+    const { blocks } = projectDocumentOptions(
+      doc([
+        {
+          toc: {
+            entries: [
+              {
+                paragraph: {
+                  style: "10",
+                  tabStops: [{ position: 8504, type: "right", leader: "dot" }],
+                  children: [
+                    { complexField: { instruction: " HYPERLINK \\l _Toc1 ", result: "一、总则1" } },
+                  ],
+                },
+              },
+              { paragraph: { children: ["二、范围"] } },
+            ],
+          },
+        },
+      ]),
+    );
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0]).toMatchObject({ kind: "paragraph" });
+    // The HYPERLINK field projects its cached result as static text.
+    expect(JSON.stringify(blocks[0])).toContain("一、总则1");
+    expect(blocks[1]).toMatchObject({ kind: "paragraph" });
+    expect(JSON.stringify(blocks[1])).toContain("二、范围");
+  });
 });
 
 describe("projectDocumentOptions fields and furniture", () => {

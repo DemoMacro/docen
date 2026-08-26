@@ -153,8 +153,9 @@ function base64Of(bytes: Uint8Array): string {
 }
 
 /** PictureOptions (type + data) → a data URL the painter can load. Absent
- *  bytes (linked-only) or undecodable input yields undefined — the renderer
- *  draws an empty frame. */
+ *  bytes (linked-only) or undecodable input (WMF/EMF metafiles — browsers
+ *  have no GDI rasterizer) yields undefined — the renderer draws an empty
+ *  frame. */
 function pictureSrc(pic: { type?: unknown; data?: unknown }): string | undefined {
   if (typeof pic.type !== "string") return undefined;
   const mime = MIME_BY_TYPE[pic.type];
@@ -1372,10 +1373,31 @@ function projectChild(
 ): LayoutBlock | LayoutBlock[] | null {
   if ("paragraph" in child) return projectParagraphBlocks(child.paragraph, ctx);
   if ("table" in child) return projectTable(child.table, ctx);
+  if ("toc" in child) return projectToc(child.toc, ctx);
   if ("bookmarkStart" in child || "bookmarkEnd" in child) return null;
-  // toc, sdt, textbox, altChunk, customXml, rawXml → a labeled box.
+  // sdt, textbox, altChunk, customXml, rawXml → a labeled box.
   const label = Object.keys(child)[0];
   return { kind: "placeholder", heightPx: PLACEHOLDER_PX, label };
+}
+
+/** A rendered TOC is plain paragraphs (TOC1-9 styles, tab + page number) —
+ *  Word lays entries out exactly so. Each entry's paragraph carries its own
+ *  style/tab stops, and the HYPERLINK fields project as their cached result
+ *  text, so the entries flow as real blocks with real line heights. An
+ *  unexpanded field (no entries) stays a placeholder — Word shows a field
+ *  result there, not blank space. */
+function projectToc(toc: unknown, ctx: ProjectContext): LayoutBlock | LayoutBlock[] | null {
+  if (!isRecord(toc) || !Array.isArray(toc.entries) || toc.entries.length === 0) {
+    return { kind: "placeholder", heightPx: PLACEHOLDER_PX, label: "toc" };
+  }
+  const blocks: LayoutBlock[] = [];
+  for (const entry of toc.entries) {
+    if (!isRecord(entry) || !isRecord(entry.paragraph)) continue;
+    blocks.push(projectParagraph(entry.paragraph as BodyParagraph, ctx));
+  }
+  return blocks.length > 0
+    ? blocks
+    : { kind: "placeholder", heightPx: PLACEHOLDER_PX, label: "toc" };
 }
 
 /** A run-level page break (w:br type=page) splits its paragraph: the flow
