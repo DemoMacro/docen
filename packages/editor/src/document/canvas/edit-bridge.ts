@@ -16,6 +16,7 @@ import type { FlowPage } from "@docen/layout";
 import { UndoRedo } from "@tiptap/extensions";
 import { joinBackward, joinForward, splitBlock } from "@tiptap/pm/commands";
 import { TextSelection } from "@tiptap/pm/state";
+import { getMatchHighlights } from "prosemirror-search";
 
 import { KEYBOARD_SHORTCUTS } from "../extensions/keymap";
 import { CaretMap } from "./caret-map";
@@ -101,7 +102,11 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     });
   };
   editor.on("transaction", ({ transaction }) => {
+    // Content changes ride the re-flow (updatePages re-places). Everything
+    // else that still moves pixels — search-state metas, selection metas —
+    // re-places synchronously; idempotent with the selectionUpdate path.
     if (transaction.docChanged) schedule();
+    else placeCaret();
   });
 
   // The invisible input surface. Kept at 1px and positioned on click so the
@@ -187,8 +192,45 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     }
   };
 
+  /** Search-match highlights — the same overlay pattern as the selection
+   *  layer: prosemirror-search owns the matches (PM decorations), and each
+   *  match range becomes one translucent div per crossed line. The active
+   *  match — findNext/replaceNext select it, so it is the match overlapping
+   *  the selection — gets the deeper tint. zIndex 3 keeps every match under
+   *  the selection (4) and caret (5); an empty query matches nothing, so the
+   *  layer is simply empty. */
+  const searchLayer: HTMLDivElement[] = [];
+  const placeSearch = (): void => {
+    for (const el of searchLayer) el.remove();
+    searchLayer.length = 0;
+    if (!map?.valid) return;
+    const sel = editor.state.selection;
+    for (const deco of getMatchHighlights(editor.state).find()) {
+      const { from, to } = deco as { from: number; to: number };
+      const active = from <= sel.to && sel.from <= to;
+      for (const r of map.selectionRects(from, to)) {
+        const frame = opts.pageHost?.(r.page);
+        if (!frame) continue;
+        const el = document.createElement("div");
+        Object.assign(el.style, {
+          position: "absolute",
+          background: active ? "rgba(255,141,35,.7)" : "rgba(255,213,79,.45)",
+          pointerEvents: "none",
+          zIndex: "3",
+          left: `${r.xPx}px`,
+          top: `${r.yPx}px`,
+          width: `${r.widthPx}px`,
+          height: `${r.heightPx}px`,
+        } satisfies Partial<CSSStyleDeclaration>);
+        frame.append(el);
+        searchLayer.push(el);
+      }
+    }
+  };
+
   const placeCaret = (): void => {
     placeSelection();
+    placeSearch();
     if (!map?.valid) {
       caret.style.display = "none";
       return;
@@ -647,6 +689,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       opts.host.removeEventListener("mousemove", onMouseMove);
       document.removeEventListener("mouseup", onMouseUp);
       for (const el of selectionLayer) el.remove();
+      for (const el of searchLayer) el.remove();
       ta.remove();
       caret.remove();
     },
