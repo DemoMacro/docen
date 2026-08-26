@@ -225,12 +225,15 @@ function fontAttr(v: unknown): FontAttr {
   return isRecord(v) || typeof v === "string" ? v : undefined;
 }
 
-function toFamily(font: FontAttr, def: FontAttr): LayoutTextStyle["family"] {
+/** Resolve a font pick against its fallback: a record with no usable slot
+ *  (an empty rFonts shell from a round-tripped run) counts as unspecified,
+ *  so the chain's face survives instead of shadowing it with empty slots. */
+function toFamily(font: FontAttr, def: FontAttr): LayoutTextStyle["family"] | undefined {
   const f = font ?? def;
-  if (typeof f === "string") return f;
+  if (typeof f === "string") return f || undefined;
   const latin = str(f?.ascii) ?? str(f?.hAnsi);
   const eastAsia = str(f?.eastAsia);
-  return latin || eastAsia ? { latin, eastAsia } : {};
+  return latin || eastAsia ? { latin, eastAsia } : undefined;
 }
 
 interface RunStyle {
@@ -450,7 +453,7 @@ function projectParagraph(p: BodyParagraph, ctx: ProjectContext): LayoutParagrap
   // exactly as bold/italic already did.
   const chainDefRun = runStyleOf({ ...docRPr, ...chainRPr });
   const defaultTextStyle: LayoutTextStyle = {
-    family: toFamily(null, defFont),
+    family: toFamily(null, defFont) ?? {},
     sizePx: ptToPx(markSizePt),
     bold: chainDefRun.bold,
     italic: chainDefRun.italic,
@@ -1119,9 +1122,8 @@ function projectRuns(
   const out: LayoutInline[] = [];
   const textStyleOf = (rPr: Rec): LayoutTextStyle => {
     const own = runStyleOf(rPr);
-    const font: FontAttr = own.font ?? fontAttr(chainRPr.font) ?? fontAttr(docRPr.font) ?? null;
     return {
-      family: font != null ? toFamily(own.font, font) : defRun.family,
+      family: toFamily(own.font, fontAttr(chainRPr.font) ?? fontAttr(docRPr.font)) ?? defRun.family,
       sizePx: ptToPx(own.sizePt ?? num(chainRPr.size) ?? num(docRPr.size) ?? 12),
       bold: own.bold ?? defRun.bold,
       italic: own.italic ?? defRun.italic,

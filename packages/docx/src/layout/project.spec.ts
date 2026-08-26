@@ -78,7 +78,7 @@ describe("projectDocumentOptions style cascade", () => {
           id: "Toc3",
           basedOn: "Normal",
           run: { bold: true, color: "C00000" },
-        } as (typeof styles.paragraphStyles)[number],
+        } as NonNullable<typeof styles.paragraphStyles>[number],
       ],
     };
     const { blocks } = projectDocumentOptions({
@@ -107,6 +107,29 @@ describe("projectDocumentOptions style cascade", () => {
       // A direct w:b val=0 on the run still beats the style chain.
       expect(text && text.kind === "text" ? text.style.bold : undefined).toBe(false);
     }
+  });
+
+  it("keeps the chain font when a run carries an empty font shell", () => {
+    // A round-tripped run can carry an rFonts object with no usable slot;
+    // that shell must not shadow the style chain's face (it used to resolve
+    // to empty slots and the painter fell to its fallback font).
+    const { blocks } = projectDocumentOptions(
+      doc([
+        {
+          paragraph: {
+            children: [{ text: "x", font: {} as unknown as never }],
+          },
+        },
+      ]),
+    );
+    const para = blocks[0];
+    expect(para?.kind).toBe("paragraph");
+    if (para?.kind !== "paragraph") return;
+    const text = para.inline.find((i) => i.kind === "text");
+    expect(text && text.kind === "text" ? text.style.family : undefined).toEqual({
+      latin: "Times",
+      eastAsia: "SimSun",
+    });
   });
 
   it("direct attrs win and basedOn ancestors fill gaps (Heading1 → Normal)", () => {
