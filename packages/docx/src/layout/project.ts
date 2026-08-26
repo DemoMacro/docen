@@ -34,14 +34,12 @@ import type {
   DocumentOptions,
   GroupChildMediaData,
   GroupOptions,
-  HorizontalPositionOptions,
   MediaDataTransformation,
   ParagraphOptions,
   SectionChild,
   StylesOptions,
   TableCellOptions,
   TableOptions,
-  VerticalPositionOptions,
 } from "@office-open/docx";
 
 import { resolvePageSize } from "../extensions/utils";
@@ -246,22 +244,27 @@ interface RunStyle {
   strikethrough?: boolean;
 }
 
-/** rPr (a run's own, or the ¶-mark/paragraph default) → resolved fields. */
+/** rPr (a run's own, or the ¶-mark/paragraph default) → resolved fields.
+ *  Toggle fields stay three-state: an explicit `w:b w:val="0"` resolves to
+ *  false so it BEATS an inherited style bold — folding it to undefined would
+ *  let the style chain's bold bleed through (Word: direct > style > doc). */
 function runStyleOf(rPr: Rec): RunStyle {
-  const underline = isRecord(rPr.underline)
-    ? rPr.underline.type !== "none"
-      ? true
-      : undefined
-    : undefined;
+  const underline = isRecord(rPr.underline) ? rPr.underline.type !== "none" : undefined;
+  const tri = (v: unknown): boolean | undefined => (v === undefined ? undefined : v === true);
   return {
     sizePt: num(rPr.size),
     font: fontAttr(rPr.font),
     characterSpacingTw: measureTwip(rPr.characterSpacing),
-    bold: rPr.bold === true ? true : undefined,
-    italic: rPr.italic === true ? true : undefined,
+    bold: tri(rPr.bold),
+    italic: tri(rPr.italic),
     color: colorOf(rPr.color),
     underline,
-    strikethrough: rPr.strike === true || rPr.doubleStrike === true ? true : undefined,
+    strikethrough:
+      rPr.strike === true || rPr.doubleStrike === true
+        ? true
+        : rPr.strike === false && rPr.doubleStrike === false
+          ? false
+          : undefined,
   };
 }
 
@@ -441,11 +444,21 @@ function projectParagraph(p: BodyParagraph, ctx: ProjectContext): LayoutParagrap
   const markSize = num(markRun.size);
   const markSizePt = markSize ?? num(chainRPr.size) ?? num(docRPr.size) ?? 12;
   const defFont: FontAttr = fontAttr(chainRPr.font) ?? fontAttr(docRPr.font) ?? null;
+  // The paragraph's default run style — every field cascades from the style
+  // chain over docDefaults (Word's effective-rPr resolution), so a style's
+  // color/underline/strikethrough reach runs that carry no rPr of their own,
+  // exactly as bold/italic already did.
+  const chainDefRun = runStyleOf({ ...docRPr, ...chainRPr });
   const defaultTextStyle: LayoutTextStyle = {
     family: toFamily(null, defFont),
     sizePx: ptToPx(markSizePt),
-    bold: chainRPr.bold === true || docRPr.bold === true || undefined,
-    italic: chainRPr.italic === true || docRPr.italic === true || undefined,
+    bold: chainDefRun.bold,
+    italic: chainDefRun.italic,
+    color: chainDefRun.color,
+    underline: chainDefRun.underline,
+    strikethrough: chainDefRun.strikethrough,
+    letterSpacingPx:
+      chainDefRun.characterSpacingTw != null ? twipToPx(chainDefRun.characterSpacingTw) : undefined,
   };
 
   // Spacing/indent cascade: direct attr wins per-field, else chain, else docDefaults.
@@ -1103,7 +1116,7 @@ function projectRuns(
       underline: own.underline ?? defRun.underline,
       strikethrough: own.strikethrough ?? defRun.strikethrough,
       letterSpacingPx:
-        own.characterSpacingTw != null ? twipToPx(own.characterSpacingTw) : undefined,
+        own.characterSpacingTw != null ? twipToPx(own.characterSpacingTw) : defRun.letterSpacingPx,
     };
   };
   const pushText = (text: string, rPr: Rec): void => {

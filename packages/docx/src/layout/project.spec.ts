@@ -69,6 +69,46 @@ describe("projectDocumentOptions style cascade", () => {
     expect(para.defaultTextStyle?.family).toEqual({ latin: "Times", eastAsia: "SimSun" });
   });
 
+  it("cascades every run field from the style chain to bare runs", () => {
+    const withColor: StylesOptions = {
+      ...styles,
+      paragraphStyles: [
+        ...styles.paragraphStyles!,
+        {
+          id: "Toc3",
+          basedOn: "Normal",
+          run: { bold: true, color: "C00000" },
+        } as (typeof styles.paragraphStyles)[number],
+      ],
+    };
+    const { blocks } = projectDocumentOptions({
+      styles: withColor,
+      sections: [
+        {
+          children: [
+            { paragraph: { style: "Toc3", children: ["entry"] } },
+            { paragraph: { style: "Toc3", children: [{ text: "off", bold: false }] } },
+          ],
+        },
+      ],
+    });
+    const bare = blocks[0];
+    expect(bare?.kind).toBe("paragraph");
+    if (bare?.kind === "paragraph") {
+      const text = bare.inline.find((i) => i.kind === "text");
+      // A run with no rPr of its own inherits the style's bold AND color.
+      expect(text && text.kind === "text" ? text.style.bold : undefined).toBe(true);
+      expect(text && text.kind === "text" ? text.style.color : undefined).toBe("C00000");
+    }
+    const off = blocks[1];
+    expect(off?.kind).toBe("paragraph");
+    if (off?.kind === "paragraph") {
+      const text = off.inline.find((i) => i.kind === "text");
+      // A direct w:b val=0 on the run still beats the style chain.
+      expect(text && text.kind === "text" ? text.style.bold : undefined).toBe(false);
+    }
+  });
+
   it("direct attrs win and basedOn ancestors fill gaps (Heading1 → Normal)", () => {
     const { blocks } = projectDocumentOptions(
       doc([
@@ -183,9 +223,10 @@ describe("projectDocumentOptions style cascade", () => {
     expect(plain?.color).toBeUndefined();
     expect(plain?.underline).toBeUndefined();
     expect(cut?.strikethrough).toBe(true);
-    // "auto" color and underline type none carry no decoration.
+    // "auto" color carries no decoration; underline type none is an explicit
+    // off (false) that also beats any inherited style underline.
     expect(none?.color).toBeUndefined();
-    expect(none?.underline).toBeUndefined();
+    expect(none?.underline).toBe(false);
   });
 
   it("numbers list markers in document order with per-format composition", () => {
