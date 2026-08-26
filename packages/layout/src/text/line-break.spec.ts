@@ -125,6 +125,15 @@ describe("packLines", () => {
     expect(lines[0].heightPx).toBe(30);
   });
 
+  it("counts a picture as the line's natural height", () => {
+    // A picture-only line's natural box is the picture itself: the painter's
+    // docGrid centering pads (heightPx - naturalPx) / 2, so a text-sized
+    // natural would sink the picture by half its height on grid pages.
+    const lines = pack([{ kind: "picture", widthPx: 10, heightPx: 40 }], 100);
+    expect(lines[0].heightPx).toBe(40);
+    expect(lines[0].naturalPx).toBe(40);
+  });
+
   it("reduces line width through an active float zone", () => {
     // Full "aaaa bbbb" = 68px; a 32px zone at the first line's top leaves 36.
     const lines = pack([text("aaaa bbbb cccc dddd")], 68.5, {

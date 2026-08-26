@@ -477,6 +477,11 @@ export function packLines(inline: LayoutInline[], opts: PackLinesOptions): Packe
     let height = opts.lineHeight({ naturalPx, hasCjk });
     if (!hasText && opts.strutPx != null && opts.strutPx > height) height = opts.strutPx;
     if (tallestPicturePx > height) height = tallestPicturePx;
+    // A picture is line content: its height is part of the line's natural
+    // box. Without this, a docGrid line carrying only a picture reports a
+    // text-sized natural, and the painter's grid centering sinks the picture
+    // by half its height instead of pinning it to the line top.
+    if (tallestPicturePx > naturalPx) naturalPx = tallestPicturePx;
 
     lines.push({
       items: lineItems,

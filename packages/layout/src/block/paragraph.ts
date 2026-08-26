@@ -61,7 +61,9 @@ export function layoutParagraph(
     tabStops: para.tabStops,
     strutPx,
     lineHeight: ({ naturalPx, hasCjk }) =>
-      spec ? resolveLine(spec, naturalPx, pitch) : snapLine(naturalPx, hasCjk, pitch, inTable),
+      spec
+        ? resolveLine(spec, naturalPx, pitch, hasCjk)
+        : snapLine(naturalPx, hasCjk, pitch, inTable),
     startY: ctx?.startY,
     // A cell's width is its column, not the page flow — floats never bend it.
     floatZones: inTable ? undefined : ctx?.floatZones,
@@ -233,11 +235,24 @@ export function leaferWordIndices(text: string): number[] {
 const LEAFER_BREAK_CHARS = new Set(["-", "—", "／", "～", "｜", "┆", "·"]);
 
 /** A spacing.line spec against a line's natural height. */
-function resolveLine(spec: LayoutLineHeight, naturalPx: number, pitch: number): number {
+function resolveLine(
+  spec: LayoutLineHeight,
+  naturalPx: number,
+  pitch: number,
+  hasCjk = false,
+): number {
   if (spec.rule === "exact") return spec.px;
   if (spec.rule === "atLeast") return Math.max(naturalPx, spec.px);
   // multiple: 240ths of a single line — the grid pitch when defined, else the
-  // font natural (verified vs Word).
+  // font natural (verified vs Word). On a grid, a CJK line's spec'd height
+  // never falls below the line's natural height and snaps up to whole rows:
+  // a face taller than its grid rows (Microsoft YaHei runs ~1.7em while a
+  // 340-twip pitch is ~1.2em of a 14pt line) takes the rows it needs. Latin
+  // lines are exempt from the lattice.
+  if (pitch > 0 && hasCjk) {
+    const specH = spec.factor * pitch;
+    return Math.ceil(Math.max(specH, naturalPx) / pitch) * pitch;
+  }
   const single = pitch > 0 ? pitch : naturalPx;
   return spec.factor * single;
 }
