@@ -40,7 +40,9 @@ function collectAnchors(editor: Editor): OutlineAnchor[] {
     if (level != null && node.textContent.length > 0) {
       anchors.push({
         id: "h" + idx,
-        pos,
+        // Inside the paragraph — descendants' pos is the node's start, one
+        // shy of the content; caretRect rejects block-boundary positions.
+        pos: pos + 1,
         textContent: node.textContent,
         originalLevel: level,
       });
