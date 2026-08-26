@@ -77,28 +77,94 @@ export class CanvasStage {
       // direction so fast scrolls rarely meet a blank page.
       { root: stage.parentElement, rootMargin: "0px 0px 150% 0px" },
     );
-    // Leafer samples devicePixelRatio at App creation and misses the zoom /
-    // cross-monitor change, leaving the canvas CSS-stretched (blurry text and
-    // bitmaps). Watch the ratio and rebuild every live App at the new one —
-    // a full repaint per page, rare and cheap.
+    // Leafer samples devicePixelRatio at App creation and misses a cross-
+    // monitor / browser-zoom change, leaving the canvas CSS-stretched (blurry
+    // text and bitmaps). Watch the ratio and re-render every live App at the
+    // new one — rare and cheap.
     this.watchPixelRatio();
   }
 
   private dprMedia: MediaQueryList | null = null;
+  /** Current zoom level (percent). The zoom IS the layout: slots are sized to
+   *  the scaled page directly (no CSS zoom anywhere) so each canvas bitmaps
+   *  at exactly its on-screen pixel size. */
+  private zoomPercent = 100;
+
   private readonly dprChange = () => {
     this.watchPixelRatio();
-    for (const slot of this.slots) {
-      if (!slot.app) continue;
-      slot.app.destroy();
-      slot.app = null;
-      this.ensure(slot);
-    }
+    this.applyZoom();
   };
 
   private watchPixelRatio(): void {
     this.dprMedia?.removeEventListener("change", this.dprChange);
     this.dprMedia = matchMedia(`(resolution: ${devicePixelRatio}dppx)`);
     this.dprMedia.addEventListener("change", this.dprChange);
+  }
+
+  private get factor(): number {
+    return this.zoomPercent / 100;
+  }
+
+  /** The zoom scale as the edit overlays need it (semantic px → screen px). */
+  scale(): number {
+    return this.factor;
+  }
+
+  /** The current zoom level (percent). */
+  get zoom(): number {
+    return this.zoomPercent;
+  }
+
+  /** A page's on-screen CSS size at the current zoom, snapped so the bitmap
+   *  (css × pixelRatio) covers whole device pixels — the canvas then composites
+   *  1:1 with no resampling, which is what keeps text sharp at EVERY zoom
+   *  level (fractional scales like 110% otherwise resample and blur). */
+  private pageCss(px: number): number {
+    return Math.round(px * this.factor * devicePixelRatio) / devicePixelRatio;
+  }
+
+  /** Bitmap-width cap: A4 at 500% on a 2× screen would be a ~360MB bitmap per
+   *  live page. Past the cap the canvas re-upsamples (soft) instead of
+   *  exhausting memory. */
+  private static readonly BITMAP_CAP = 3600;
+
+  private renderPixelRatio(): number {
+    const w = this.ctx.flow.pageWidthPx * this.factor;
+    return Math.min(devicePixelRatio, CanvasStage.BITMAP_CAP / Math.max(w, 1));
+  }
+
+  /** Zoom change → resize every slot to the scaled page and re-render its
+   *  canvas at the matching resolution. `app.resize` re-uses the App (no
+   *  destroy/create churn while dragging the zoom slider); `tree.scale`
+   *  keeps all paint coordinates in unzoomed page px. */
+  setZoom(pct: number): void {
+    if (pct === this.zoomPercent) return;
+    this.zoomPercent = pct;
+    this.applyZoom();
+  }
+
+  private applyZoom(): void {
+    if (this.slots.length === 0) return;
+    const w = this.pageCss(this.ctx.flow.pageWidthPx);
+    const h = this.pageCss(this.ctx.flow.pageHeightPx);
+    const pixelRatio = this.renderPixelRatio();
+    for (const [index, slot] of this.slots.entries()) {
+      this.sizeSlot(slot, w, h);
+      if (slot.app) {
+        slot.app.resize({ width: w, height: h, pixelRatio });
+        this.repaint(slot.app, index);
+      }
+    }
+  }
+
+  private sizeSlot(slot: { el: HTMLElement; app: App | null }, w: number, h: number): void {
+    const frame = slot.el.parentElement;
+    if (frame) {
+      frame.style.width = `${w}px`;
+      frame.style.height = `${h}px`;
+    }
+    slot.el.style.width = `${w}px`;
+    slot.el.style.height = `${h}px`;
   }
 
   /** Lay out page slots for a flow result and repaint visible pages. The
@@ -109,8 +175,8 @@ export class CanvasStage {
     this.ctx.flow = flow;
     if (furniture !== undefined) this.ctx.furniture = furniture;
     this.layoutFurniture();
-    const w = Math.ceil(flow.pageWidthPx);
-    const h = Math.ceil(flow.pageHeightPx);
+    const w = this.pageCss(flow.pageWidthPx);
+    const h = this.pageCss(flow.pageHeightPx);
 
     while (this.slots.length < pages.length) {
       const frame = document.createElement("div");
@@ -131,6 +197,9 @@ export class CanvasStage {
       this.slots.push({ el, app: null });
       this.io.observe(el);
     }
+    // A zoom applied between syncs (initial attr → first sync) re-sizes
+    // already-created slots too.
+    for (const slot of this.slots) this.sizeSlot(slot, w, h);
     while (this.slots.length > pages.length) {
       const slot = this.slots.pop()!;
       this.io.unobserve(slot.el);
@@ -159,6 +228,9 @@ export class CanvasStage {
     const app = new App({
       view: slot.el,
       fill: "transparent",
+      // Explicit DPR (Leafer's default samples it at creation anyway) so the
+      // value stays consistent across app.resize calls.
+      pixelRatio: this.renderPixelRatio(),
       editor: { moveable: false },
       // The document surface is MS Office-shaped: scrolling belongs to the
       // outer DOM container, never to the canvas. `leafer-editor` (imported by
@@ -209,6 +281,9 @@ export class CanvasStage {
     // app.tree is an ILeafer (extends IGroup) — clear/add come with it.
     const tree = app.tree;
     if (!tree) return;
+    // The canvas is laid out at the zoomed size; all paint coordinates below
+    // stay in unzoomed page px and this scale maps them onto the bitmap.
+    tree.scale = this.factor;
     tree.clear();
     const ctx: PaintContext = {
       ...this.ctx,

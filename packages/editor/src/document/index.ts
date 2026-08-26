@@ -426,7 +426,7 @@ class DocenDocument extends AddinHost<Editor> {
   // Format Painter captured marks + the pointerup listener that applies them.
   #painterMarks: readonly Mark[] | null = null;
   #painterOff?: () => void;
-  /** Current zoom level (percent) applied via the document-area's zoom attr. */
+  /** Current zoom level (percent) applied by the page stage's slot sizing. */
   #zoom = 100;
   /** Debounce timer for the nav-pane search result list — the list rebuilds only
    *  after the user pauses typing (the query dispatches immediately, so Enter /
@@ -960,6 +960,7 @@ class DocenDocument extends AddinHost<Editor> {
       onDoc: (json) => this.#renderDoc(json),
       pageHost: (page) => this.#stage?.slotAt(page)?.parentElement ?? null,
       extensions: [...docxExtensions, ...(defaultAddin.extensions ?? [])],
+      scale: () => this.#stage?.scale() ?? 1,
     });
     if (this.getAttribute("editable") === "false") this.#bridge.editor.setEditable(false);
     // First paint + caret map feed (transactions re-render via the bridge's
@@ -1033,6 +1034,9 @@ class DocenDocument extends AddinHost<Editor> {
       flow,
       furniture,
     });
+    // A `zoom` attribute parsed before the stage existed only recorded the
+    // level here — push it in before the first sync sizes the slots.
+    if (this.#stage.zoom !== this.#zoom) this.#stage.setZoom(this.#zoom);
     this.#stage.sync(pages, flow, furniture);
     this.#bridge?.updatePages(pages, flow);
     this.#updateStatus();
@@ -1470,9 +1474,10 @@ class DocenDocument extends AddinHost<Editor> {
     this.#renderChrome();
   }
 
-  /** Apply a zoom level (percent, clamped 10–500) to the document area and
-   *  refresh the status bar. CSS `zoom` rescales the canvas and reflows the
-   *  scroll surface. Idempotent (no-op on no change) and dispatches
+  /** Apply a zoom level (percent, clamped 10–500) to the page stage and
+   *  refresh the status bar. The stage sizes its slots to the scaled page
+   *  directly (no CSS zoom — bitmaps stay 1:1 with screen pixels at every
+   *  level). Idempotent (no-op on no change) and dispatches
    *  `docen:zoom-change` on a real flip — so the host, status-bar slider, and
    *  external listeners stay in sync through one funnel (Office
    *  `Office.Document.zoom.set` equivalent). */
@@ -1480,7 +1485,9 @@ class DocenDocument extends AddinHost<Editor> {
     const next = Math.max(10, Math.min(500, Math.round(pct)));
     if (next === this.#zoom) return;
     this.#zoom = next;
-    this.shadowRoot?.querySelector("docen-document-area")?.setAttribute("zoom", String(this.#zoom));
+    this.#stage?.setZoom(next);
+    // The frames resized under the overlays — re-place them at the new scale.
+    this.#bridge?.replaceOverlays();
     this.#updateStatus();
     this.dispatchEvent(
       new CustomEvent("docen:zoom-change", {

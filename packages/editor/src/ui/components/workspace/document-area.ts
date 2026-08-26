@@ -56,7 +56,6 @@ class DocenDocumentArea extends FASTElement {
   @attr({ attribute: "page-height" }) pageHeight?: string;
   @attr margin?: string;
   @attr orientation?: string;
-  @attr zoom?: string;
 
   pageWidthChanged(): void {
     this.#applyPage();
@@ -68,9 +67,6 @@ class DocenDocumentArea extends FASTElement {
     this.#applyPage();
   }
   orientationChanged(): void {
-    this.#applyPage();
-  }
-  zoomChanged(): void {
     this.#applyPage();
   }
 
@@ -116,9 +112,6 @@ class DocenDocumentArea extends FASTElement {
       this.style.setProperty("--docen-page-margin-bottom", bottom);
       this.style.setProperty("--docen-page-margin-left", left);
     }
-    // Zoom (percent) — CSS `zoom` rescales the pages and reflows the scroll
-    // surface (Chromium-native). "150" → 1.5; absent clears it (100%).
-    this.style.zoom = this.zoom ? String(Math.max(10, parseFloat(this.zoom)) / 100) : "";
   }
 }
 

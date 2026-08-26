@@ -56,6 +56,10 @@ export interface EditBridgeOptions {
   /** Engine extensions for the viewless editor (defaults to the docx schema
    *  set). The host layers its own (commands, outline, search, …) here. */
   extensions?: Editor["extensionManager"]["extensions"];
+  /** The stage's zoom factor (semantic page px → screen px). Overlays are
+   *  written in screen px inside zoom-sized frames; hit-testing converts the
+   *  other way. Defaults to 1 (unzoomed). */
+  scale?: () => number;
 }
 
 export interface EditBridge {
@@ -75,6 +79,10 @@ export interface EditBridge {
   /** Move keyboard focus to the bridge's input surface (the editing focus —
    *  there is no DOM editor to focus). */
   focus(): void;
+  /** Re-place the caret/selection/search overlays against the current
+   *  geometry — needed when the zoom rescales the frames without a
+   *  selection transaction. */
+  replaceOverlays(): void;
   destroy(): void;
 }
 
@@ -173,6 +181,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     selectionLayer.length = 0;
     const { from, to } = editor.state.selection;
     if (from === to || !map?.valid) return;
+    const s = opts.scale?.() ?? 1;
     for (const r of map.selectionRects(from, to)) {
       const frame = opts.pageHost?.(r.page);
       if (!frame) continue;
@@ -182,10 +191,10 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
         background: "rgba(0,120,215,.25)",
         pointerEvents: "none",
         zIndex: "4",
-        left: `${r.xPx}px`,
-        top: `${r.yPx}px`,
-        width: `${r.widthPx}px`,
-        height: `${r.heightPx}px`,
+        left: `${r.xPx * s}px`,
+        top: `${r.yPx * s}px`,
+        width: `${r.widthPx * s}px`,
+        height: `${r.heightPx * s}px`,
       } satisfies Partial<CSSStyleDeclaration>);
       frame.append(el);
       selectionLayer.push(el);
@@ -205,6 +214,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     searchLayer.length = 0;
     if (!map?.valid) return;
     const sel = editor.state.selection;
+    const s = opts.scale?.() ?? 1;
     for (const deco of getMatchHighlights(editor.state).find()) {
       const { from, to } = deco as { from: number; to: number };
       const active = from <= sel.to && sel.from <= to;
@@ -217,10 +227,10 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
           background: active ? "rgba(255,141,35,.7)" : "rgba(255,213,79,.45)",
           pointerEvents: "none",
           zIndex: "3",
-          left: `${r.xPx}px`,
-          top: `${r.yPx}px`,
-          width: `${r.widthPx}px`,
-          height: `${r.heightPx}px`,
+          left: `${r.xPx * s}px`,
+          top: `${r.yPx * s}px`,
+          width: `${r.widthPx * s}px`,
+          height: `${r.heightPx * s}px`,
         } satisfies Partial<CSSStyleDeclaration>);
         frame.append(el);
         searchLayer.push(el);
@@ -249,15 +259,16 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     }
     if (frame !== caret.parentElement) frame.append(caret);
     caret.style.display = "block";
-    caret.style.left = `${rect.xPx}px`;
-    caret.style.top = `${rect.yPx}px`;
-    caret.style.height = `${rect.heightPx}px`;
+    const s = opts.scale?.() ?? 1;
+    caret.style.left = `${rect.xPx * s}px`;
+    caret.style.top = `${rect.yPx * s}px`;
+    caret.style.height = `${rect.heightPx * s}px`;
     // Keep the textarea anchored at the caret so the IME candidate window
     // opens at the typing point.
     const hostRect = opts.host.getBoundingClientRect();
     const frameRect = frame.getBoundingClientRect();
-    ta.style.left = `${frameRect.left - hostRect.left + rect.xPx}px`;
-    ta.style.top = `${frameRect.top - hostRect.top + rect.yPx}px`;
+    ta.style.left = `${frameRect.left - hostRect.left + rect.xPx * s}px`;
+    ta.style.top = `${frameRect.top - hostRect.top + rect.yPx * s}px`;
     if (from !== lastCaretPos) {
       lastCaretPos = from;
       restartBlink();
@@ -265,7 +276,8 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
   };
   editor.on("selectionUpdate", placeCaret);
 
-  /** A viewport point → the hit page and its page-local coordinates. */
+  /** A viewport point → the hit page and its page-local coordinates (in
+   *  semantic page px — the caret map knows nothing of the zoom). */
   const hitPage = (
     clientX: number,
     clientY: number,
@@ -280,7 +292,10 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       const r = frame.getBoundingClientRect();
       const lx = x - (r.left - hostRect.left);
       const ly = y - (r.top - hostRect.top);
-      if (lx >= 0 && ly >= 0 && lx < r.width && ly < r.height) return { page: p, lx, ly };
+      if (lx >= 0 && ly >= 0 && lx < r.width && ly < r.height) {
+        const s = opts.scale?.() ?? 1;
+        return { page: p, lx: lx / s, ly: ly / s };
+      }
     }
     return null;
   };
@@ -679,6 +694,9 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     },
     focus(): void {
       ta.focus();
+    },
+    replaceOverlays(): void {
+      placeCaret();
     },
     destroy(): void {
       if (raf) cancelAnimationFrame(raf);
