@@ -7,9 +7,9 @@
  * Layout is a full-height flex column (declared in index.html): the tablist is
  * a fixed-height header, the stage fills the rest.
  */
-// The DocenDocument binding exists for its side effect: evaluating the module
-// defines the <docen-document> custom element (the @customElement decorator).
-import { applyTheme, DocenDocument, registerComponents } from "@docen/editor";
+// Any named import from @docen/editor evaluates the module, which defines
+// the <docen-document> custom element (the @customElement decorator).
+import { applyTheme, registerComponents } from "@docen/editor";
 
 import { mountImageDemo } from "./image";
 

@@ -333,8 +333,9 @@ function overflowPunctAfter(
   if (!probe) return undefined;
   const fragments = materializeRichInlineLineRange(group.prepared, probe).fragments;
   const text = fragments.map((f) => f.text).join("");
-  const chars = [...text];
-  const closer = chars[chars.length - 1];
+  // CLOSING_PUNCT is all-BMP, so the last UTF-16 unit is the whole closer;
+  // an astral tail cannot be in the set and falls to the undefined path.
+  const closer = text.at(-1);
   if (closer == null || !CLOSING_PUNCT.has(closer)) return undefined;
   const lastFrag = fragments[fragments.length - 1];
   const src = group.items[lastFrag.itemIndex];

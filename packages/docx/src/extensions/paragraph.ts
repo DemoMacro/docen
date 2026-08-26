@@ -1,5 +1,5 @@
 import type { ParagraphOptions, StylesOptions } from "@office-open/docx";
-import { Node as TiptapNode, type Node } from "@tiptap/core";
+import { Node as TiptapNode } from "@tiptap/core";
 import type { JSONContent, MarkdownRendererHelpers, RenderContext } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 

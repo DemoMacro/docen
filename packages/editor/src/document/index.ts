@@ -1044,6 +1044,8 @@ class DocenDocument extends AddinHost<Editor> {
 
   disconnectedCallback(): void {
     this.#langObserver?.disconnect();
+    this.#unobserveLang?.();
+    this.#unobserveLang = undefined;
     this.shadowRoot?.removeEventListener("command", this.#onCommand as EventListener);
     this.shadowRoot?.removeEventListener("change", this.#onChange as EventListener);
     this.#fileInput?.removeEventListener("change", this.#onFileChange);

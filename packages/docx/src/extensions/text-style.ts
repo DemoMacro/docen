@@ -1,8 +1,4 @@
-import type {
-  RunOptions,
-  RunPropertiesOptions,
-  RunStylePropertiesOptions,
-} from "@office-open/docx";
+import type { RunOptions, RunPropertiesOptions } from "@office-open/docx";
 import { Mark } from "@tiptap/core";
 
 import {
@@ -50,7 +46,6 @@ const SKIP_KEYS = new Set([
  *  round-trip (an explicit "baseline" cancels an inherited sub/superscript);
  *  its subscript/superscript values additionally surface on the dedicated
  *  Subscript/Superscript marks for editor interaction. */
-type RunKeyElsewhere = "children" | "text" | "break";
 
 /** The full run attr key set — keyof RunPropertiesOptions verbatim (the
  *  rStyle reference `style` lives there, not on RunStylePropertiesOptions). */

@@ -1,4 +1,4 @@
-import type { SectionChild, TableOfContentsOptions } from "@office-open/docx";
+import type { SectionChild } from "@office-open/docx";
 import type { JSONContent } from "@tiptap/core";
 
 import { cleanAttrs } from "../converters/styles";

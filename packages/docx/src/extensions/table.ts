@@ -1,7 +1,6 @@
 import type {
   BorderOptions,
   SectionChild,
-  TableCellOptions,
   TableOptions,
   TablePropertiesOptions,
   TableWidthProperties,

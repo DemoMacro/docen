@@ -3,14 +3,14 @@ import { describe, expect, it } from "vitest";
 
 import { compileDocument, parseDOCX } from "../converters/docx";
 import { projectDocumentOptions } from "../layout/project";
-import { parseDocxBlock, parseDocx, renderDocx } from "./table";
+import { parseDocxBlock } from "./table";
 import { parseDocx as parseCellDocx, renderDocx as renderCellDocx } from "./table-cell";
 import type { ResolveContext } from "./types";
 
 const ctx = {
   parseNodeAttrs: (_kind: string, opts: unknown) => opts,
   resolveBlockStream: (children: unknown[]) =>
-    (children as { paragraph: unknown }[]).map((c) => ({ type: "paragraph", content: [] })),
+    (children as { paragraph: unknown }[]).map(() => ({ type: "paragraph", content: [] })),
   styles: undefined,
 } as unknown as ResolveContext;
 
