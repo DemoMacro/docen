@@ -159,6 +159,11 @@ export interface LayoutDrawing {
   width: number;
   height: number;
   members: LayoutDrawingMember[];
+  /** w:wrap — how text flows around the box. Absent (wrapNone) paints over
+   *  or under the text without affecting the flow; "square"/"tight" shrink
+   *  the lines the box overlaps (tight reduces to square's rectangle — a
+   *  contour pass is a registered gap); "topAndBottom" clears the band. */
+  wrap?: "square" | "tight" | "topAndBottom";
   /** w:behindDoc — painted under the text layer (text strokes stay visible). */
   behind?: boolean;
 }
@@ -237,8 +242,9 @@ export interface LayoutParagraph {
   keepNext?: boolean;
   widowControl?: boolean;
   pageBreakBefore?: boolean;
-  /** Floating drawings anchored to this paragraph (wp:anchor wraps none):
-   *  painted at their box offset; the flow itself ignores them. */
+  /** Floating drawings anchored to this paragraph: wrap-none boxes paint at
+   *  their offset; a `wrap` on the drawing also registers a float zone the
+   *  flow shrinks lines around (or a cleared band for topAndBottom). */
   drawings?: LayoutDrawing[];
 }
 

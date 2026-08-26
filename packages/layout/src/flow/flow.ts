@@ -18,7 +18,7 @@
 //   max — one vertical-margin model shared with table cells.
 
 import { layoutBlock } from "../block/block";
-import type { LayoutBlock, LayoutBlockContext } from "../layout-doc";
+import type { LayoutBlock, LayoutBlockContext, LayoutFloatZone } from "../layout-doc";
 import type { LaidOutBlock, LaidOutLine, LaidOutStackItem, LaidOutTable } from "../layout-result";
 import type { TextMeasurer } from "../text/measure";
 
@@ -59,6 +59,16 @@ class Flow {
   private y = 0;
   private prevAfter = 0;
   private firstOnPage = true;
+  /** Partial-overlap float zones (wrap square/tight): lines inside the band
+   *  wrap beside the box. Registered when the anchor paragraph commits, so
+   *  the anchor paragraph itself lays out un-wrapped (a registered gap — its
+   *  own first lines only dodge when a preceding zone exists). */
+  private readonly zones: LayoutFloatZone[] = [];
+  /** Full-width cleared bands (wrap topAndBottom, or a square box covering
+   *  the whole column): no text inside; blocks split at the band top and
+   *  resume below it. Both lists are page-local — floats never cross a page
+   *  boundary (Word anchors the box to the page its paragraph lands on). */
+  private readonly bands: LayoutFloatZone[] = [];
 
   constructor(
     private readonly opts: FlowOptions,
@@ -66,11 +76,38 @@ class Flow {
   ) {}
 
   private get ctx(): LayoutBlockContext {
-    return { linePitchPx: this.opts.linePitchPx, onGrid: true };
+    return {
+      linePitchPx: this.opts.linePitchPx,
+      onGrid: true,
+      floatZones: this.zones.length > 0 ? this.zones : undefined,
+      startY: this.y,
+    };
   }
 
   private remaining(): number {
     return this.opts.contentHeightPx - this.y;
+  }
+
+  /** The nearest cleared-band top above `this.y`, or Infinity — the ceiling
+   *  the current block must not cross (its overflow lines continue below
+   *  the band). */
+  private bandCeiling(): number {
+    let top = Infinity;
+    for (const b of this.bands) if (b.topPx > this.y + 0.01 && b.topPx < top) top = b.topPx;
+    return top;
+  }
+
+  /** Drop `this.y` below the band it sits inside (a block that ended within
+   *  a band) and below the nearest upcoming band (nothing fit above it). */
+  private dodgeBands(): boolean {
+    let moved = false;
+    for (const b of this.bands) {
+      if (this.y < b.bottomPx && this.y >= b.topPx - 0.01) {
+        this.y = b.bottomPx;
+        moved = true;
+      }
+    }
+    return moved;
   }
 
   /** Seal the current page's items and start a fresh page. */
@@ -79,6 +116,8 @@ class Flow {
     this.y = 0;
     this.prevAfter = 0;
     this.firstOnPage = true;
+    this.zones.length = 0;
+    this.bands.length = 0;
   }
 
   finish(): FlowPage[] {
@@ -98,15 +137,23 @@ class Flow {
 
     const laid = layoutBlock(block, this.opts.contentWidthPx, this.ctx, this.measurer);
     if (this.tryPlace(laid)) return;
+    // Blocked by a band rather than the page bottom: resume below the band.
+    if (this.dodgeBands()) {
+      this.pushLaid(laid);
+      return;
+    }
     // Nothing fit here: blocks placed before this one with keepNext move
     // along (a heading stays with the paragraph that follows it). The pulled
     // blocks precede this one — re-place them first, then this block.
     const pulled = this.pullKeepNext();
     this.newPage();
     for (const kept of pulled) this.pushLaid(kept);
-    if (!this.tryPlace(laid)) {
+    // Re-lay on the fresh page: float zones are page-local, so the lines
+    // laid against the old page's zones/y are stale here.
+    const fresh = layoutBlock(block, this.opts.contentWidthPx, this.ctx, this.measurer);
+    if (!this.tryPlace(fresh)) {
       // Cannot fit even a full empty page — place whole and overflow.
-      this.commit(laid, marginBefore(laid, this.prevAfter, this.firstOnPage));
+      this.commit(fresh, marginBefore(fresh, this.prevAfter, this.firstOnPage));
     }
   }
 
@@ -120,14 +167,21 @@ class Flow {
 
   /** Try to place `laid` on the current page; on overflow, split at a legal
    *  boundary that fits (even on an empty page — a block taller than the page
-   *  still fills it). Returns true when anything was placed. */
+   *  still fills it). The room is the smaller of the page bottom and the
+   *  nearest cleared band top — lines resume below the band. Returns true
+   *  when anything was placed. */
   private tryPlace(laid: LaidOutBlock): boolean {
+    // Never place inside a cleared band — drop below it first (whether this
+    // is a fresh push, a split tail, or a re-placed keepNext block).
+    this.dodgeBands();
     const before = marginBefore(laid, this.prevAfter, this.firstOnPage);
-    if (before + laid.heightPx <= this.remaining()) {
+    // Both spans are relative to this.y: the page bottom and the band top.
+    const room = Math.min(this.remaining(), this.bandCeiling() - this.y) - before;
+    if (before + laid.heightPx <= room) {
       this.commit(laid, before);
       return true;
     }
-    const k = this.sliceFitting(laid, this.remaining() - before);
+    const k = this.sliceFitting(laid, room);
     if (k > 0) {
       const [head, tail] = splitLaid(laid, k);
       this.commit(head, before);
@@ -138,10 +192,35 @@ class Flow {
   }
 
   private commit(laid: LaidOutBlock, before: number): void {
-    this.items.push({ yPx: this.y + before, block: laid });
+    const yPx = this.y + before;
+    this.items.push({ yPx, block: laid });
     this.y += before + laid.heightPx;
     this.prevAfter = laid.kind === "paragraph" ? laid.afterPx : 0;
     this.firstOnPage = false;
+    if (laid.kind === "paragraph") this.registerFloats(laid, yPx);
+  }
+
+  /** Turn the anchor paragraph's wrapped drawings into flow effects: a
+   *  paragraph-anchored box offset into the column either shrinks the lines
+   *  it overlaps (a zone) or clears its whole band (topAndBottom / a box
+   *  covering the full column width). Margin/page-anchored and aligned
+   *  boxes stay painter-only (registered gaps). */
+  private registerFloats(laid: Extract<LaidOutBlock, { kind: "paragraph" }>, yPx: number): void {
+    for (const d of laid.drawings ?? []) {
+      if (!d.wrap) continue;
+      const { horizontal: h, vertical: v } = d.anchor;
+      if (v.relative !== "paragraph" || h.relative !== "column") continue;
+      const topPx = yPx + (v.offsetPx ?? 0);
+      const x0 = h.offsetPx ?? 0;
+      const overlap = Math.min(x0 + d.width, this.opts.contentWidthPx) - Math.max(x0, 0);
+      if (overlap <= 0) continue;
+      const zone: LayoutFloatZone = { widthPx: overlap, topPx, bottomPx: topPx + d.height };
+      if (d.wrap === "topAndBottom" || overlap >= this.opts.contentWidthPx - 1) {
+        this.bands.push(zone);
+      } else {
+        this.zones.push(zone);
+      }
+    }
   }
 
   /** Detach the trailing run of placed keepNext blocks (cascades through the
@@ -239,7 +318,15 @@ function splitLaid(laid: LaidOutBlock, k: number): [LaidOutBlock, LaidOutBlock] 
       const tailLines = rebaseLines(laid.lines.slice(k));
       return [
         { ...laid, lines: headLines, heightPx: sumLines(headLines) },
-        { ...laid, lines: tailLines, heightPx: sumLines(tailLines), beforePx: 0 },
+        // The tail drops the drawings: a float paints and registers its zone
+        // on the page of its anchor paragraph (the head), never twice.
+        {
+          ...laid,
+          lines: tailLines,
+          heightPx: sumLines(tailLines),
+          beforePx: 0,
+          drawings: undefined,
+        },
       ];
     }
     case "table": {

@@ -972,7 +972,7 @@ function projectDrawing(group: GroupOptions, ctx: ProjectContext): LayoutDrawing
   const extW = measureEmu(group.transformation.width);
   const extH = measureEmu(group.transformation.height);
   if (extW == null || extH == null || extW <= 0 || extH <= 0) return undefined;
-  const { anchor, behind } = drawingAnchorOf(group.floating);
+  const { anchor, wrap, behind } = drawingAnchorOf(group.floating);
 
   // Child coordinate space: chOff/chExt → the group's EMU box. A missing
   // chExt means the children already live in the group's own units (1:1).
@@ -988,14 +988,17 @@ function projectDrawing(group: GroupOptions, ctx: ProjectContext): LayoutDrawing
     members,
     ctx,
   );
-  return { anchor, width: emuToPx(extW), height: emuToPx(extH), members, behind };
+  return { anchor, width: emuToPx(extW), height: emuToPx(extH), members, wrap, behind };
 }
 
 /** wp:anchor positioning shared by every floating drawing kind (group, wps
  *  shape, picture) — every relativeFrom axis plus the offset/align choice;
- *  the painter owns the page geometry each axis resolves against. */
+ *  the painter owns the page geometry each axis resolves against. Wrap modes
+ *  that keep the box out of the text flow (none, through's transparent
+ *  interior) map to undefined. */
 function drawingAnchorOf(floating: unknown): {
   anchor: LayoutDrawingAnchor;
+  wrap: "square" | "tight" | "topAndBottom" | undefined;
   behind: boolean | undefined;
 } {
   const f = isRecord(floating) ? floating : {};
@@ -1015,7 +1018,16 @@ function drawingAnchorOf(floating: unknown): {
       outside: "bottom",
     }),
   };
-  return { anchor, behind: f.behindDocument === true || undefined };
+  const wrapType = isRecord(f.wrap) ? f.wrap.type : undefined;
+  const wrap =
+    wrapType === "square" || wrapType === "through"
+      ? ("square" as const)
+      : wrapType === "tight"
+        ? ("tight" as const)
+        : wrapType === "topAndBottom"
+          ? ("topAndBottom" as const)
+          : undefined;
+  return { anchor, wrap, behind: f.behindDocument === true || undefined };
 }
 
 /** A standalone floating picture run (wp:anchor pic:pic, PictureOptions):
@@ -1025,13 +1037,14 @@ function projectFloatingPicture(pic: Rec): LayoutDrawing | undefined {
   const w = measureEmu(tr.width);
   const h = measureEmu(tr.height);
   if (w == null || h == null || w <= 0 || h <= 0) return undefined;
-  const { anchor, behind } = drawingAnchorOf(pic.floating);
+  const { anchor, wrap, behind } = drawingAnchorOf(pic.floating);
   const width = emuToPx(w);
   const height = emuToPx(h);
   return {
     anchor,
     width,
     height,
+    wrap,
     behind,
     members: [
       {
@@ -1056,8 +1069,8 @@ function projectWpsShapeRun(wps: Rec, ctx: ProjectContext): LayoutDrawing | unde
   if (w == null || h == null || w <= 0 || h <= 0) return undefined;
   const member = wpsMemberOf(wps, 0, 0, emuToPx(w), emuToPx(h), ctx);
   if (!member) return undefined;
-  const { anchor, behind } = drawingAnchorOf(wps.floating);
-  return { anchor, width: emuToPx(w), height: emuToPx(h), members: [member], behind };
+  const { anchor, wrap, behind } = drawingAnchorOf(wps.floating);
+  return { anchor, width: emuToPx(w), height: emuToPx(h), members: [member], wrap, behind };
 }
 
 /** Collect the anchored drawing runs of one paragraph (top level and one

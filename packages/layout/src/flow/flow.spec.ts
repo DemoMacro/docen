@@ -230,3 +230,123 @@ describe("layoutFlow", () => {
     expect(pages[0].items).toHaveLength(1);
   });
 });
+
+/** A floating drawing box on a paragraph: column-anchored at (x, y) with the
+ *  given wrap mode — the members stay empty, the flow only reads geometry. */
+const drawing = (
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  wrap: "square" | "tight" | "topAndBottom" | undefined,
+): NonNullable<LayoutParagraph["drawings"]>[number] => ({
+  anchor: {
+    horizontal: { relative: "column", offsetPx: x },
+    vertical: { relative: "paragraph", offsetPx: y },
+  },
+  width,
+  height,
+  members: [],
+  wrap,
+});
+
+/** A wrapping-text paragraph: one long run of latin atoms (8px each under
+ *  the fake metrics) so the line count follows the usable width. */
+const wrapPara = (chars: number, extra: Partial<LayoutParagraph> = {}): LayoutParagraph => ({
+  kind: "paragraph",
+  inline: [{ kind: "text", text: "x".repeat(chars), style: latin }],
+  spacing: exact20,
+  defaultTextStyle: latin,
+  widowControl: false,
+  ...extra,
+});
+
+describe("layoutFlow float wraps", () => {
+  it("shrinks the lines a square drawing overlaps (text wraps beside it)", () => {
+    // 24 atoms = 192px: one line at the full 300px width, two beside a
+    // 200px box (100px usable = 12 atoms per line).
+    const pages = flow(
+      [wrapPara(24, { drawings: [drawing(0, 0, 200, 40, "square")] }), wrapPara(24)],
+      300,
+    );
+    const [, body] = paras(pages)[0];
+    expect(body.lines).toHaveLength(2);
+    expect(body.heightPx).toBe(40);
+  });
+
+  it("leaves the anchor paragraph's own lines unwrapped", () => {
+    // Zones register at the anchor paragraph's commit, so its own 24 atoms
+    // stay one full-width line — the wrap starts with the next paragraph.
+    const pages = flow([wrapPara(24, { drawings: [drawing(0, 0, 200, 40, "square")] })], 300);
+    const [anchor] = paras(pages)[0];
+    expect(anchor.lines).toHaveLength(1);
+  });
+
+  it("clears the band of a topAndBottom drawing (next block resumes below)", () => {
+    // Anchor line at y 0-20; the band [20, 70] pushes the next paragraph
+    // from y 20 down to y 70.
+    const pages = flow(
+      [para(1, { drawings: [drawing(0, 20, 200, 50, "topAndBottom")] }), para(1)],
+      300,
+    );
+    expect(pages).toHaveLength(1);
+    expect(pages[0].items[1].yPx).toBe(70);
+  });
+
+  it("treats a square box covering the whole column width as a cleared band", () => {
+    const pages = flow(
+      [para(1, { drawings: [drawing(-100, 0, 500, 40, "square")] }), para(1)],
+      300,
+    );
+    expect(pages[0].items[1].yPx).toBe(40);
+  });
+
+  it("splits a long paragraph at a band top and resumes below the band", () => {
+    // Page 300px: a 2-line paragraph (y 0-40), an anchor line at y 40 whose
+    // drawing clears the band [100, 140] (offset 60 from its top — the band
+    // opens below the anchor line), then a 5-line paragraph starting at
+    // y 60: two lines fit above the band (60-100), the remaining three
+    // resume at 140.
+    const pages = flow(
+      [para(2), para(1, { drawings: [drawing(0, 60, 500, 40, "topAndBottom")] }), para(5)],
+      300,
+    );
+    expect(pages).toHaveLength(1);
+    const laid = paras(pages)[0];
+    expect(laid).toHaveLength(4);
+    expect(laid[2].lines).toHaveLength(2);
+    expect(laid[2].heightPx).toBe(40);
+    expect(pages[0].items[3].yPx).toBe(140);
+    expect(laid[3].lines).toHaveLength(3);
+  });
+
+  it("keeps a wrapNone drawing out of the flow entirely", () => {
+    const pages = flow(
+      [para(1, { drawings: [drawing(0, 0, 200, 40, undefined)] }), wrapPara(24)],
+      300,
+    );
+    expect(pages[0].items[1].yPx).toBe(20);
+    expect(paras(pages)[0][1].lines).toHaveLength(1);
+  });
+
+  it("forgets float zones at a page break (floats never cross pages)", () => {
+    // The anchor paragraph sits at the page bottom (y 80-100) and its zone
+    // [80, 160] reaches past the page edge; the wrapping paragraph lands on
+    // page 2 with the full width back.
+    const pages = flow(
+      [para(4), wrapPara(24, { drawings: [drawing(0, 0, 200, 80, "square")] }), wrapPara(24)],
+      100,
+    );
+    expect(pages).toHaveLength(2);
+    expect(paras(pages)[1][0].lines).toHaveLength(1);
+  });
+
+  it("drops a split tail's drawings (the float paints on its anchor page)", () => {
+    // The anchor paragraph splits 4+1 across an 80px page: the head keeps
+    // the drawing, the page-2 tail paints nothing.
+    const pages = flow([para(5, { drawings: [drawing(0, 0, 200, 40, "square")] })], 80);
+    const [head, tail] = [paras(pages)[0][0], paras(pages)[1][0]];
+    expect(head.drawings).toHaveLength(1);
+    expect(tail.drawings).toBeUndefined();
+  });
+});
