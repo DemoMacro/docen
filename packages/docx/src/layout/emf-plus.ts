@@ -464,9 +464,11 @@ function carrierDrafts(emf: Uint8Array, basis: Xform | undefined, depth: number)
     }
     eo += size;
   }
-  // Every draft coordinate passes through this effective transform first; a
-  // nested level folds its parent's image-to-parallelogram basis here.
-  const effOf = (xf: Xform): Xform => (basis ? combine(basis, xf) : xf);
+  // Every draft coordinate passes through this effective transform first. A
+  // nested level applies its own world FIRST (record space → nested device)
+  // and THEN the parent's image-to-parallelogram basis (device → placed box):
+  // combine is "left first", so the order here must be (xf, basis).
+  const effOf = (xf: Xform): Xform => (basis ? combine(xf, basis) : xf);
 
   const pv = new DataView(plus.buffer);
   const objects = new Map<number, unknown>();
@@ -618,8 +620,9 @@ function carrierDrafts(emf: Uint8Array, basis: Xform | undefined, depth: number)
 }
 
 /** One metafile-typed EmfPlusImage drawn onto a destination parallelogram:
- *  map the nested EMF's device rectangle onto the mapped corners, then play
- *  the nested carrier with that mapping as its basis. */
+ *  like the bitmap arm, the record's source rectangle selects a sub-region
+ *  of the nested metafile's device space — that sub-domain maps onto the
+ *  corners and the nested replay runs under it as its basis. */
 function drawNestedImage(
   nested: Uint8Array,
   view: DataView,
@@ -634,6 +637,11 @@ function drawNestedImage(
   const end = Math.min(view.byteLength, d + rs);
   const pts = d + 32;
   if (pts + 12 > end || view.getUint32(d + 28, true) !== 3) return;
+  const srcX = view.getFloat32(d + 12, true);
+  const srcY = view.getFloat32(d + 16, true);
+  const srcW = view.getFloat32(d + 20, true);
+  const srcH = view.getFloat32(d + 24, true);
+  if (!Number.isFinite(srcW) || !Number.isFinite(srcH) || srcW <= 0 || srcH <= 0) return;
   const compressed = (flags & 0x4000) !== 0;
   const read = (i: number): [number, number] => {
     const p = pts + i * (compressed ? 4 : 8);
@@ -642,30 +650,17 @@ function drawNestedImage(
       : [view.getFloat32(p, true), view.getFloat32(p + 4, true)];
   };
   const corners = [read(0), read(1), read(2)].map(([x, y]) => xformPoint(outerEff, x, y));
-  const b = emfDeviceRect(nested);
-  if (!b || b.w <= 0 || b.h <= 0) return;
   const [p0, p1, p2] = corners;
-  // Affine taking nested device coords onto the drawn parallelogram.
+  // Affine taking the source sub-domain onto the drawn parallelogram.
   const basis: Xform = {
-    m11: (p1[0] - p0[0]) / b.w,
-    m21: (p1[1] - p0[1]) / b.w,
-    m12: (p2[0] - p0[0]) / b.h,
-    m22: (p2[1] - p0[1]) / b.h,
-    dx: p0[0],
-    dy: p0[1],
+    m11: (p1[0] - p0[0]) / srcW,
+    m21: (p1[1] - p0[1]) / srcW,
+    m12: (p2[0] - p0[0]) / srcH,
+    m22: (p2[1] - p0[1]) / srcH,
+    dx: p0[0] - srcX * ((p1[0] - p0[0]) / srcW),
+    dy: p0[1] - srcY * ((p2[1] - p0[1]) / srcH),
   };
   drafts.push(...carrierDrafts(nested, basis, depth + 1));
-}
-
-/** rclBounds of a raw EMF's first EMR_HEADER ([+8..24] RECT ints). */
-function emfDeviceRect(emf: Uint8Array): { w: number; h: number } | undefined {
-  if (emf.length < 26) return undefined;
-  const v = new DataView(emf.buffer, emf.byteOffset, emf.byteLength);
-  const l = v.getInt32(8, true);
-  const t = v.getInt32(12, true);
-  const r = v.getInt32(16, true);
-  const bo = v.getInt32(20, true);
-  return { w: r - l, h: bo - t };
 }
 
 function pushPath(
