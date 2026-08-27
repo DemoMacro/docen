@@ -127,6 +127,8 @@ interface PicDraft {
   w: number;
   h: number;
   src: string;
+  /** Source-rectangle crop, fractions of each image edge (DrawImagePoints). */
+  crop?: { l: number; t: number; r: number; b: number };
 }
 
 /** A GDI-side ExtTextOutW run, kept in the same world coordinate space as
@@ -164,9 +166,6 @@ interface PenInfo {
 interface PathInfo {
   cmds: PathCmds;
 }
-interface ImageInfo {
-  src: string;
-}
 
 function decodeObject(
   payload: Uint8Array,
@@ -174,16 +173,25 @@ function decodeObject(
 ): BrushInfo | PenInfo | PathInfo | ImageInfo | undefined {
   const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
   const end = payload.length;
-  if (end < 16) return undefined;
+  // Payloads start [TotalObjectSize][Version] with type fields at +8; a
+  // re-assembled chunk run keeps the exporter's [chunkDataSize][objectTotal]
+  // prefix in front of the stamp — locate the stamp to find the field origin.
+  let base = 8;
+  if (
+    view.getUint32(4, true) !== GDIPLUS_VERSION &&
+    end >= 16 &&
+    view.getUint32(8, true) === GDIPLUS_VERSION
+  )
+    base = 12;
   switch (type) {
     case OBJ_BRUSH: {
-      const brushType = view.getUint32(8, true);
-      if (brushType === 0) return { solid: argbHex(view.getUint32(12, true)) };
+      const brushType = view.getUint32(base, true);
+      if (brushType === 0) return { solid: argbHex(view.getUint32(base + 4, true)) };
       // PathGradient brushes take their declared center color as the flat
       // approximation — the member protocol paints solids only, so a bounded
       // scan for the first bright opaque word stands in until gradient fills
       // become a member-level concept.
-      for (let p = 12; p < Math.min(end - 3, 152); p += 4) {
+      for (let p = base + 4; p < Math.min(end - 3, base + 144); p += 4) {
         const c = view.getUint32(p, true);
         if (c >>> 24 !== 0xff) continue;
         const rgb = c & 0xffffff;
@@ -193,9 +201,9 @@ function decodeObject(
       return undefined;
     }
     case OBJ_PEN: {
-      const width = view.getFloat32(16, true);
+      const width = view.getFloat32(base + 8, true);
       let color: string | undefined;
-      for (let p = 20; p + 12 <= end; p += 4) {
+      for (let p = base + 12; p + 12 <= end; p += 4) {
         // The pen embeds its own solid-color brush block.
         if (view.getUint32(p, true) === GDIPLUS_VERSION && view.getUint32(p + 4, true) === 0) {
           color = argbHex(view.getUint32(p + 8, true));
@@ -205,9 +213,9 @@ function decodeObject(
       return { width, color };
     }
     case OBJ_PATH:
-      return decodePath(payload, view, end);
+      return decodePath(payload, view, end, base);
     case OBJ_IMAGE:
-      return decodeImage(payload, view, end);
+      return decodeImage(payload, view, end, base);
     default:
       return undefined;
   }
@@ -216,17 +224,23 @@ function decodeObject(
 /** GDI+ path persistence: pointCount, pointFormat, points, then one type
  *  byte per point. Type bits 0-2 carry the kind (start/line/bezier); bit 7
  *  marks the end of a closed figure. */
-function decodePath(payload: Uint8Array, view: DataView, end: number): PathInfo | undefined {
-  if (end < 20) return undefined;
-  const count = view.getUint32(8, true);
+function decodePath(
+  payload: Uint8Array,
+  view: DataView,
+  end: number,
+  base: number,
+): PathInfo | undefined {
+  if (end < base + 12) return undefined;
+  const count = view.getUint32(base, true);
   // Bit 14 (0x4000) switches PathPoints to int16 pairs. Other PathPointFlags
   // bits (e.g. the relative/RLE encoding the spec describes) are never emitted
   // by real GDI+ writers — corpus census: every non-zero-flag object decoded
   // by this single bit and nothing else.
-  const compressed = (view.getUint32(12, true) & 0x4000) !== 0;
+  const compressed = (view.getUint32(base + 4, true) & 0x4000) !== 0;
   if (!count || count > 100_000) return undefined;
   const step = compressed ? 4 : 8;
-  const typesAt = 16 + count * step;
+  const pointsAt = base + 8;
+  const typesAt = pointsAt + count * step;
   if (typesAt + count > end) return undefined;
   const cmds: PathCmds = [];
   let cx = 0,
@@ -237,7 +251,7 @@ function decodePath(payload: Uint8Array, view: DataView, end: number): PathInfo 
   let started = false;
   let bezierTail: Array<[number, number]> = [];
   for (let i = 0; i < count; i++) {
-    const p = 16 + i * step;
+    const p = pointsAt + i * step;
     cx = compressed ? view.getInt16(p, true) : view.getFloat32(p, true);
     cy = compressed ? view.getInt16(p + 2, true) : view.getFloat32(p + 4, true);
     const pt: [number, number] = [cx, cy];
@@ -272,12 +286,66 @@ function prevFlat(cmds: PathCmds): number[] {
   return [0, 0];
 }
 
-function decodeImage(payload: Uint8Array, view: DataView, end: number): ImageInfo | undefined {
+/** Natural pixel size of an embedded encoding, for normalizing DrawImagePoints'
+ *  source rectangles into crop fractions: PNG IHDR / JPEG SOFn headers. */
+function encodedSize(bytes: Uint8Array): { w: number; h: number } | undefined {
+  // Signature bytes are byte-order-agnostic here; IHDR dimensions are BE.
+  if (bytes.length >= 24 && view32(bytes, 0) === 0x89504e47) {
+    return { w: view32(bytes, 16), h: view32(bytes, 20) };
+  }
+  if (bytes.length > 9 && bytes[0] === 0xff && bytes[1] === 0xd8) {
+    for (let p = 2; p + 9 < bytes.length;) {
+      if (bytes[p] !== 0xff) break;
+      const marker = bytes[p + 1];
+      const len = (bytes[p + 2] << 8) | bytes[p + 3];
+      if (
+        marker >= 0xc0 &&
+        marker <= 0xcf &&
+        marker !== 0xc4 &&
+        marker !== 0xc8 &&
+        marker !== 0xcc
+      ) {
+        return { w: (bytes[p + 7] << 8) | bytes[p + 8], h: (bytes[p + 5] << 8) | bytes[p + 6] };
+      }
+      p += 2 + len;
+    }
+  }
+  return undefined;
+}
+
+function view32(b: Uint8Array, at: number): number {
+  return new DataView(b.buffer, b.byteOffset + at, 4).getUint32(0, false);
+}
+
+interface ImageInfo {
+  /** Bitmap encodings carry a data URL; metafile-typed images carry the raw
+   *  nested EMF bytes instead (DrawImagePoints replays them as vectors). */
+  src?: string;
+  emfBytes?: Uint8Array;
+  /** Natural pixel size of the encoding; drives DrawImagePoints src-rect crops. */
+  w?: number;
+  h?: number;
+}
+
+function decodeImage(
+  payload: Uint8Array,
+  view: DataView,
+  end: number,
+  base: number,
+): ImageInfo | undefined {
+  // ImageType word at `base`: 1 bitmap / 2 metafile. The metafile arm carries
+  // a GDI+ metafile header followed by a complete EMF — replayed recursively
+  // as vectors so text and shapes inside stay crisp at any scale.
+  if (view.getUint32(base, true) === 2) {
+    const start = nestedEmfStart(payload, end, base + 4);
+    if (start >= 0) return { emfBytes: payload.subarray(start, end) };
+    return undefined;
+  }
   // Bitmap-typed images embed their original encoding; splice it straight
   // into a data URL instead of re-decoding pixels. The format's own end
   // marker bounds the slice — assembly prefixes and trailing run metadata
   // must not leak into the data URL.
-  for (let p = 12; p + 8 <= end; p++) {
+  for (let p = base; p + 8 <= end; p++) {
     if (view.getUint32(p, true) === 0x474e5089 && view.getUint32(p + 4, true) === 0x0a1a0a0d) {
       let stop = end;
       for (let q = p; q + 8 <= end; q++) {
@@ -286,10 +354,12 @@ function decodeImage(payload: Uint8Array, view: DataView, end: number): ImageInf
           break;
         }
       }
-      return { src: `data:image/png;base64,${base64(payload.subarray(p, stop))}` };
+      const bytes = payload.subarray(p, stop);
+      const size = encodedSize(bytes);
+      return { src: `data:image/png;base64,${base64(bytes)}`, ...size };
     }
   }
-  for (let p = 12; p + 3 <= end; p++) {
+  for (let p = base; p + 3 <= end; p++) {
     if (payload[p] === 0xff && payload[p + 1] === 0xd8 && payload[p + 2] === 0xff) {
       let stop = -1;
       for (let q = end - 2; q >= p; q--) {
@@ -298,12 +368,32 @@ function decodeImage(payload: Uint8Array, view: DataView, end: number): ImageInf
           break;
         }
       }
-      return {
-        src: `data:image/jpeg;base64,${base64(payload.subarray(p, stop > 0 ? stop : end))}`,
-      };
+      const bytes = payload.subarray(p, stop > 0 ? stop : end);
+      const size = encodedSize(bytes);
+      return { src: `data:image/jpeg;base64,${base64(bytes)}`, ...size };
     }
   }
   return undefined;
+}
+
+/** Offset of the nested EMF inside a metafile ImageData blob: after the GDI+
+ *  header words, the stream opens with an EMR_HEADER whose record chain must
+ *  validate through to EOF — candidate dwords that fail the walk are header
+ *  fields that merely LOOK like type=1 records. */
+function nestedEmfStart(payload: Uint8Array, end: number, from: number): number {
+  const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+  for (let cand = from; cand + 108 <= end; cand += 4) {
+    if (view.getUint32(cand, true) !== 1) continue;
+    let off = cand;
+    let steps = 0;
+    while (off + 8 <= end && steps++ < 10_000) {
+      const size = view.getUint32(off + 4, true);
+      if (size < 8 || off + size > end) break;
+      if (view.getUint32(off, true) === 14) return cand; // reached EOF
+      off += size;
+    }
+  }
+  return -1;
 }
 
 function base64(b: Uint8Array): string {
@@ -336,9 +426,23 @@ export function emfPlusMembers(
 ): LayoutDrawingMember[] | undefined {
   const emf = embeddedEmfStream(bytes);
   if (!emf) return undefined;
+  const drafts = carrierDrafts(emf, undefined, 0);
+  if (!drafts.length) return undefined;
+  return finalize(drafts, boxW, boxH);
+}
 
+/** Nested-metafile recursion guard — a self-referencing or malformed blob
+ *  must not spin through unbounded container levels. */
+const MAX_NESTING = 3;
+
+/** All drawable drafts of a raw carrier EMF: its concatenated EMF+ comment
+ *  stream replayed with `basis` pre-applied on top of every world transform,
+ *  plus the GDI-side text chain. `basis` carries nested DrawImagePoints
+ *  parallelograms: the parent maps the image rect onto it and the child plays
+ *  under that mapping. */
+function carrierDrafts(emf: Uint8Array, basis: Xform | undefined, depth: number): Draft[] {
   // Concatenate every EMR_GDICOMMENT "EMF+" payload into one record stream.
-  const ev = new DataView(emf.buffer);
+  const ev = new DataView(emf.buffer, emf.byteOffset, emf.byteLength);
   let plusLen = 0;
   for (let eo = 0; eo + 8 <= emf.length;) {
     const type = ev.getUint32(eo, true);
@@ -347,7 +451,7 @@ export function emfPlusMembers(
     if (type === 70 && ev.getUint32(eo + 12, true) === 0x2b464d45) plusLen += size - 16;
     eo += size;
   }
-  if (!plusLen) return undefined;
+  if (!plusLen) return [];
   const plus = new Uint8Array(plusLen);
   let pw = 0;
   for (let eo = 0; eo + 8 <= emf.length;) {
@@ -360,6 +464,9 @@ export function emfPlusMembers(
     }
     eo += size;
   }
+  // Every draft coordinate passes through this effective transform first; a
+  // nested level folds its parent's image-to-parallelogram basis here.
+  const effOf = (xf: Xform): Xform => (basis ? combine(basis, xf) : xf);
 
   const pv = new DataView(plus.buffer);
   const objects = new Map<number, unknown>();
@@ -458,14 +565,14 @@ export function emfPlusMembers(
         installOpenRuns();
         const path = objects.get(objectId) as PathInfo | undefined;
         if (path?.cmds && lastBrush?.solid)
-          pushPath(drafts, path.cmds, xf, { fill: lastBrush.solid });
+          pushPath(drafts, path.cmds, effOf(xf), { fill: lastBrush.solid });
         break;
       }
       case PLUS_DRAW_PATH: {
         installOpenRuns();
         const path = objects.get(objectId) as PathInfo | undefined;
         if (path?.cmds && lastPen?.color) {
-          pushPath(drafts, path.cmds, xf, {
+          pushPath(drafts, path.cmds, effOf(xf), {
             strokeColor: lastPen.color,
             strokeWidth: lastPen.width,
           });
@@ -476,13 +583,14 @@ export function emfPlusMembers(
         installOpenRuns();
         const n = pv.getUint32(d, true);
         if (!n || n > 10_000 || d + 4 + n * 16 > d + rs - 8) break;
+        const eff = effOf(xf);
         for (let i = 0; i < n; i++) {
           const rx = pv.getFloat32(d + 4 + i * 16, true);
           const ry = pv.getFloat32(d + 8 + i * 16, true);
           const rw = pv.getFloat32(d + 12 + i * 16, true);
           const rh = pv.getFloat32(d + 16 + i * 16, true);
-          const [x, y] = xformPoint(xf, rx, ry);
-          const [x2, y2] = xformPoint(xf, rx + rw, ry + rh);
+          const [x, y] = xformPoint(eff, rx, ry);
+          const [x2, y2] = xformPoint(eff, rx + rw, ry + rh);
           pushRect(drafts, x, y, x2 - x, y2 - y, lastBrush?.solid);
         }
         break;
@@ -490,7 +598,12 @@ export function emfPlusMembers(
       case PLUS_DRAW_IMAGE_POINTS: {
         installOpenRuns();
         const img = objects.get(objectId) as ImageInfo | undefined;
-        if (img?.src) drawImagePoints(pv, plus, d, rs, flags, xf, img.src, drafts);
+        if (!img) break;
+        if (img.emfBytes) {
+          drawNestedImage(img.emfBytes, pv, d, rs, flags, effOf(xf), depth, drafts);
+        } else if (img.src) {
+          drawImagePoints(pv, plus, d, rs, flags, effOf(xf), img, drafts);
+        }
         break;
       }
       default:
@@ -500,9 +613,59 @@ export function emfPlusMembers(
   }
   // Dual-mode carriers keep the real text on the GDI side; merge those runs
   // in before deciding whether anything rendered at all.
-  drafts.push(...gdiTextDrafts(emf));
-  if (!drafts.length) return undefined;
-  return finalize(drafts, boxW, boxH);
+  drafts.push(...gdiTextDrafts(emf, effOf));
+  return drafts;
+}
+
+/** One metafile-typed EmfPlusImage drawn onto a destination parallelogram:
+ *  map the nested EMF's device rectangle onto the mapped corners, then play
+ *  the nested carrier with that mapping as its basis. */
+function drawNestedImage(
+  nested: Uint8Array,
+  view: DataView,
+  d: number,
+  rs: number,
+  flags: number,
+  outerEff: Xform,
+  depth: number,
+  drafts: Draft[],
+): void {
+  if (depth >= MAX_NESTING) return;
+  const end = Math.min(view.byteLength, d + rs);
+  const pts = d + 32;
+  if (pts + 12 > end || view.getUint32(d + 28, true) !== 3) return;
+  const compressed = (flags & 0x4000) !== 0;
+  const read = (i: number): [number, number] => {
+    const p = pts + i * (compressed ? 4 : 8);
+    return compressed
+      ? [view.getInt16(p, true), view.getInt16(p + 2, true)]
+      : [view.getFloat32(p, true), view.getFloat32(p + 4, true)];
+  };
+  const corners = [read(0), read(1), read(2)].map(([x, y]) => xformPoint(outerEff, x, y));
+  const b = emfDeviceRect(nested);
+  if (!b || b.w <= 0 || b.h <= 0) return;
+  const [p0, p1, p2] = corners;
+  // Affine taking nested device coords onto the drawn parallelogram.
+  const basis: Xform = {
+    m11: (p1[0] - p0[0]) / b.w,
+    m21: (p1[1] - p0[1]) / b.w,
+    m12: (p2[0] - p0[0]) / b.h,
+    m22: (p2[1] - p0[1]) / b.h,
+    dx: p0[0],
+    dy: p0[1],
+  };
+  drafts.push(...carrierDrafts(nested, basis, depth + 1));
+}
+
+/** rclBounds of a raw EMF's first EMR_HEADER ([+8..24] RECT ints). */
+function emfDeviceRect(emf: Uint8Array): { w: number; h: number } | undefined {
+  if (emf.length < 26) return undefined;
+  const v = new DataView(emf.buffer, emf.byteOffset, emf.byteLength);
+  const l = v.getInt32(8, true);
+  const t = v.getInt32(12, true);
+  const r = v.getInt32(16, true);
+  const bo = v.getInt32(20, true);
+  return { w: r - l, h: bo - t };
 }
 
 function pushPath(
@@ -559,15 +722,21 @@ function drawImagePoints(
   rs: number,
   flags: number,
   xf: Xform,
-  src: string,
+  img: ImageInfo,
   drafts: Draft[],
 ): void {
-  // Destination parallelogram: after a 28-byte metadata head, a word count
-  // followed by three points — compressed int16 pairs under the P flag,
-  // float32 pairs otherwise.
+  // Payload layout (corpus-verified against the [MS-EMFPLUS] field table):
+  // [attrsId u32][srcUnit u32][reserved u32][SrcRect RectF][count u32][points].
+  // The source rectangle is ALWAYS present and selects a sub-region of the
+  // bitmap — Office sprite-sheets entire pages of art into one image object,
+  // so ignoring it smears the sheet over every destination box.
   const end = Math.min(buf.length, d + rs);
   const pts = d + 32;
   if (pts + 12 > end || view.getUint32(d + 28, true) !== 3) return;
+  const srcX = view.getFloat32(d + 12, true);
+  const srcY = view.getFloat32(d + 16, true);
+  const srcW = view.getFloat32(d + 20, true);
+  const srcH = view.getFloat32(d + 24, true);
   const compressed = (flags & 0x4000) !== 0;
   const read = (i: number): [number, number] => {
     const p = pts + i * (compressed ? 4 : 8);
@@ -583,7 +752,22 @@ function drawImagePoints(
   const w = Math.max(...xs) - minX,
     h = Math.max(...ys) - minY;
   if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return;
-  drafts.push({ kind: "pic", x: minX, y: minY, w, h, src });
+  if (!Number.isFinite(srcW) || !Number.isFinite(srcH) || srcW <= 0 || srcH <= 0) return;
+  let crop: PicDraft["crop"] | undefined =
+    img.w && img.h
+      ? {
+          l: srcX / img.w,
+          t: srcY / img.h,
+          r: Math.max(0, 1 - (srcX + srcW) / img.w),
+          b: Math.max(0, 1 - (srcY + srcH) / img.h),
+        }
+      : undefined;
+  // A rect that still covers the whole bitmap must not engage the renderer's
+  // offscreen-copy path — exporters emit degenerate full-cover rects freely.
+  if (crop && !(crop.l > 0.001 || crop.t > 0.001 || crop.r > 0.001 || crop.b > 0.001)) {
+    crop = undefined;
+  }
+  drafts.push({ kind: "pic", x: minX, y: minY, w, h, src: img.src!, ...(crop ? { crop } : {}) });
 }
 
 // ── GDI-side text ──
@@ -635,8 +819,9 @@ function readCarrierXform(view: DataView, at: number): Xform {
  *  placement comes from the carrier's live world transform, which folds every
  *  domain onto the EMF's device rectangle (rclBounds) shared with the EMF+
  *  output. Fonts are object-table based (CreateFontIndirectW defines a slot,
- *  SelectObject activates it); color rides on SetTextColor's COLORREF. */
-function gdiTextDrafts(emf: Uint8Array): TextDraft[] {
+ *  SelectObject activates it); color rides on SetTextColor's COLORREF.
+ *  `effOf` folds a parent nesting basis into that transform (nested carriers). */
+function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): TextDraft[] {
   const view = new DataView(emf.buffer, emf.byteOffset);
   const drafts: TextDraft[] = [];
   const fonts = new Map<number, GdiFont>();
@@ -735,11 +920,13 @@ function gdiTextDrafts(emf: Uint8Array): TextDraft[] {
         if (text.trim()) {
           const font = fonts.get(selected);
           // Logical draw origin → carrier device space through the live world
-          // transform; glyph metrics scale with its uniform factor.
+          // transform (folded with any nesting basis); glyph metrics scale with
+          // its uniform factor.
+          const eff = effOf ? effOf(xf) : xf;
           const x = view.getInt32(eo + EXT_REF_X, true);
           const yBaseline = view.getInt32(eo + EXT_REF_Y, true);
           const height =
-            Math.abs(font?.height ?? 100) * ((Math.abs(xf.m11) + Math.abs(xf.m22)) / 2);
+            Math.abs(font?.height ?? 100) * ((Math.abs(eff.m11) + Math.abs(eff.m22)) / 2);
           // Baseline origin → box top by a typical CJK ascent (same calibration
           // as the WMF player); advance falls back to per-char estimates because
           // the trail Dx run is not worth parsing for outline-position accuracy.
@@ -747,8 +934,8 @@ function gdiTextDrafts(emf: Uint8Array): TextDraft[] {
           for (const ch of text) advance += height * (ch.charCodeAt(0) > 0xff ? 1 : 0.55);
           drafts.push({
             kind: "text",
-            x: x * xf.m11 + yBaseline * xf.m21 + xf.dx,
-            y: x * xf.m12 + yBaseline * xf.m22 + xf.dy - height * 0.8,
+            x: x * eff.m11 + yBaseline * eff.m21 + eff.dx,
+            y: x * eff.m12 + yBaseline * eff.m22 + eff.dy - height * 0.8,
             w: advance + 2,
             h: height * 1.35,
             text,
@@ -858,6 +1045,16 @@ function finalize(drafts: Draft[], boxW: number, boxH: number): LayoutDrawingMem
         width: dr.w * sX,
         height: dr.h * sY,
         src: dr.src,
+        ...(dr.crop
+          ? {
+              crop: {
+                left: Math.max(0, Math.min(1, dr.crop.l)),
+                top: Math.max(0, Math.min(1, dr.crop.t)),
+                right: Math.max(0, Math.min(1, dr.crop.r)),
+                bottom: Math.max(0, Math.min(1, dr.crop.b)),
+              },
+            }
+          : {}),
       });
       continue;
     }

@@ -100,10 +100,23 @@ function attrsObject(slot: number): Uint8Array {
   return epRecord(OBJECT, slot | (8 << 8), body); // type 8 = image attributes
 }
 
-/** DrawImagePoints for one destination rectangle (i16 parallelogram). */
-function drawRect(slot: number, x: number, y: number, w: number, h: number): Uint8Array {
+/** DrawImagePoints for one destination rectangle (i16 parallelogram).
+ *  Body layout: [attrsId][srcUnit][rsvd][SrcRect RectF][count][points]. */
+function drawRect(
+  slot: number,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  src = { x: 0, y: 0, w: 100, h: 100 },
+): Uint8Array {
   const body = new Uint8Array(44);
   const v = new DataView(body.buffer);
+  v.setUint32(4, 2, true); // srcUnit: UnitPixel
+  v.setFloat32(12, src.x, true);
+  v.setFloat32(16, src.y, true);
+  v.setFloat32(20, src.w, true);
+  v.setFloat32(24, src.h, true);
   v.setUint32(28, 3, true); // parallelogram point count
   [
     [x, y],
@@ -148,6 +161,8 @@ describe("emfPlusMembers", () => {
     const drawAt = (ox: number, oy: number): Uint8Array => {
       const body = new Uint8Array(44);
       const v = new DataView(body.buffer);
+      v.setFloat32(20, 200, true); // srcRect: full 200×200 image
+      v.setFloat32(24, 200, true);
       v.setUint32(28, 3, true); // parallelogram point count
       [
         [88, 92],
@@ -238,6 +253,247 @@ describe("emfPlusMembers", () => {
       epEof(),
     ]);
     expect(emfPlusMembers(wmf, 605, 240)).toBeUndefined();
+  });
+
+  // Real exporters sprite whole art pages into one bitmap object and slice
+  // regions out of it through the record's always-present SrcRect ([MS-EMFPLUS]
+  // EmfPlusDrawImagePoints); the destination parallelogram receives only that
+  // slice.
+  describe("source rectangles", () => {
+    /** PNG bytes with a real IHDR carrying w×h. */
+    function pngWithSize(w: number, h: number): Uint8Array {
+      const buf = new Uint8Array(8 + 8 + 13 + 4 + 12);
+      const v = new DataView(buf.buffer);
+      buf.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0);
+      v.setUint32(8, 13, true);
+      buf.set(new TextEncoder().encode("IHDR"), 12);
+      v.setUint32(16, w, false);
+      v.setUint32(20, h, false);
+      const iend = buf.length - 12;
+      v.setUint32(iend + 4, 0x444e4549, false);
+      buf.set([0xae, 0x42, 0x60, 0x82], iend + 8);
+      return buf;
+    }
+
+    function drawSlice(src: { x: number; y: number; w: number; h: number }): Uint8Array {
+      const body = new Uint8Array(44);
+      const v = new DataView(body.buffer);
+      v.setFloat32(12, src.x, true);
+      v.setFloat32(16, src.y, true);
+      v.setFloat32(20, src.w, true);
+      v.setFloat32(24, src.h, true);
+      v.setUint32(28, 3, true);
+      [
+        [10, 10],
+        [40, 10],
+        [10, 35],
+      ].forEach(([px, py], i) => {
+        v.setInt16(32 + i * 4, px, true);
+        v.setInt16(34 + i * 4, py, true);
+      });
+      return epRecord(DRAW_IMAGE_POINTS, 0x4000 | 0, body);
+    }
+
+    it("crops a partial source rectangle into picture-member fractions", () => {
+      const wmf = emfPlusWmf([
+        epHeader(),
+        setWorld(1, 0, 0),
+        imageObject(0, pngWithSize(100, 50)),
+        drawSlice({ x: 25, y: 10, w: 50, h: 20 }),
+        epEof(),
+      ]);
+      const members = emfPlusMembers(wmf, 300, 250);
+      expect(members).toBeDefined();
+      const pic = members!.find((m) => m.kind === "picture");
+      if (pic?.kind !== "picture") return;
+      // crop fractions are literal against the natural size; the box is the
+      // normalized destination rect (30×25 of a 30×25-draft union → full box).
+      expect(pic.crop).toEqual({ left: 0.25, top: 0.2, right: 0.25, bottom: 0.4 });
+      expect(pic.width).toBeCloseTo(300, 0);
+      expect(pic.height).toBeCloseTo(250, 0);
+    });
+
+    it("treats a full-image source rectangle as uncropped", () => {
+      const wmf = emfPlusWmf([
+        epHeader(),
+        setWorld(1, 0, 0),
+        imageObject(0, pngWithSize(80, 80)),
+        drawSlice({ x: 0, y: 0, w: 80, h: 80 }),
+        epEof(),
+      ]);
+      const members = emfPlusMembers(wmf, 200, 200);
+      expect(members).toBeDefined();
+      const pic = members!.find((m) => m.kind === "picture");
+      if (pic?.kind !== "picture") return;
+      expect(pic.crop).toBeUndefined();
+    });
+
+    it("skips a record whose source rectangle is empty", () => {
+      const wmf = emfPlusWmf([
+        epHeader(),
+        setWorld(1, 0, 0),
+        imageObject(0, pngWithSize(80, 80)),
+        drawSlice({ x: 5, y: 5, w: 0, h: 20 }),
+        epEof(),
+      ]);
+      expect(emfPlusMembers(wmf, 200, 200)).toBeUndefined();
+    });
+  });
+
+  // Office embeds vector badges/diamonds as metafile-typed image objects —
+  // each DrawImagePoints destination maps the nested EMF's full device rect,
+  // and the replayed vectors must land through that mapping.
+  describe("nested metafile images", () => {
+    /** Raw EMF opening with a genuine EMR_HEADER (bounds needed for the
+     *  nesting basis) wrapping one "EMF+" comment, closed by EMR_EOF. */
+    function nestedCarrier(bw: number, bh: number, plus: Uint8Array[]): Uint8Array {
+      const head = new Uint8Array(108);
+      const hv = new DataView(head.buffer);
+      hv.setUint32(0, 1, true); // EMR_HEADER
+      hv.setUint32(4, 108, true);
+      hv.setInt32(16, bw, true); // rclBounds.right
+      hv.setInt32(20, bh, true); // rclBounds.bottom
+      const eof = new Uint8Array(20);
+      new DataView(eof.buffer).setUint32(0, 14, true); // EMR_EOF
+      new DataView(eof.buffer).setUint32(4, eof.length, true);
+      const parts = [head, emrEmfPlusComment(plus), eof];
+      const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+      let off = 0;
+      for (const p of parts) {
+        out.set(p, off);
+        off += p.length;
+      }
+      return out;
+    }
+
+    /** Image object typed metafile ([+8]=2) whose encoding is a raw EMF at
+     *  [+16], found by the header→EOF chain walk. */
+    function metaImageObject(slot: number, emf: Uint8Array): Uint8Array {
+      const body = new Uint8Array(16 + emf.length);
+      const v = new DataView(body.buffer);
+      v.setUint32(0, body.length, true);
+      v.setUint32(4, VERSION, true);
+      v.setUint32(8, 2, true); // image type: metafile
+      v.setUint32(12, 4, true); // embedded format: EMF
+      body.set(emf, 16);
+      return epRecord(OBJECT, slot | (5 << 8), body);
+    }
+
+    it("replays nested carriers mapped onto the destination parallelogram", () => {
+      // Nested triangle at device coords (10,20)-(35,40) inside a 200×200
+      // frame, drawn into the outer rect (10,10)-(110,110): the affine folds
+      // by half, so vertices land at (15,20)/(35,20)/(25,40) — which a lone
+      // draft normalizes across the full display box.
+      const inner = nestedCarrier(200, 200, [
+        epHeader(),
+        setWorld(1, 0, 0),
+        brushObject(5, 0xffcc0000),
+        pathObject(6, [
+          [10, 20],
+          [50, 20],
+          [30, 60],
+        ]),
+        epRecord(FILL_PATH, 6, new Uint8Array(4)),
+        epEof(),
+      ]);
+      const wmf = emfPlusWmf([
+        epHeader(),
+        setWorld(1, 0, 0),
+        metaImageObject(0, inner),
+        drawRect(0, 10, 10, 100, 100),
+        epEof(),
+      ]);
+      const members = emfPlusMembers(wmf, 200, 200);
+      expect(members).toBeDefined();
+      const p = members!.find((m) => m.kind === "path");
+      if (p?.kind !== "path") return;
+      // Mapped vertices fill the box exactly — no picture stand-in appeared.
+      expect(p.fill).toBe("cc0000");
+      expect(p.d).toBe("M0 0L200 0L100 200");
+      expect(members!.some((m) => m.kind === "picture")).toBe(false);
+    });
+
+    it("type-finds exporter double-header metafiles split across chunks", () => {
+      // Real exporters send giant metafile images as same-slot runs whose
+      // first record keeps an extra [chunkDataSize][objectTotal] pair in front
+      // of the version stamp — type fields sit at +12 there, not +8.
+      const inner = nestedCarrier(100, 100, [
+        epHeader(),
+        setWorld(1, 0, 0),
+        brushObject(5, 0xff1050a0),
+        pathObject(6, [
+          [0, 0],
+          [80, 0],
+          [40, 70],
+        ]),
+        epRecord(FILL_PATH, 6, new Uint8Array(4)),
+        epEof(),
+      ]);
+      const typed = new Uint8Array(12 + inner.length);
+      const tv = new DataView(typed.buffer);
+      tv.setUint32(0, typed.length, true); // object total
+      tv.setUint32(4, 2, true); // image type: metafile
+      tv.setUint32(8, 4, true); // embedded format: EMF
+      typed.set(inner, 12);
+      const SPLIT = 90;
+      const recFirst = new Uint8Array(8 + typed.length);
+      const rv = new DataView(recFirst.buffer);
+      rv.setUint32(0, recFirst.length, true); // chunk data size
+      rv.setUint32(4, VERSION, true); // stamp lives at +8 on these payloads
+      recFirst.set(typed.subarray(4), 8);
+      void SPLIT;
+      const wmf = emfPlusWmf([
+        epHeader(),
+        setWorld(1, 0, 0),
+        epRecord(OBJECT, 7 | (5 << 8), recFirst),
+        drawRect(7, 0, 0, 300, 300),
+        epEof(),
+      ]);
+      const members = emfPlusMembers(wmf, 300, 300);
+      expect(members).toBeDefined();
+      const p = members!.find((m) => m.kind === "path");
+      if (p?.kind !== "path") return;
+      expect(p.fill).toBe("1050a0");
+      // The nested triangle fills its whole destination box after mapping.
+      expect(p.width).toBe(300);
+    });
+
+    it("places nested carriers through the live world transform", () => {
+      // Badge-like flow in real files: a SET_WORLD_TRANSFORM positions each
+      // DrawImagePoints call inside the page; the nested replay must land at
+      // that placed rectangle, not at raw logical coordinates.
+      const inner = nestedCarrier(100, 100, [
+        epHeader(),
+        setWorld(1, 0, 0),
+        brushObject(5, 0xff202020),
+        pathObject(6, [
+          [0, 0],
+          [100, 0],
+          [50, 100],
+        ]),
+        epRecord(FILL_PATH, 6, new Uint8Array(4)),
+        epEof(),
+      ]);
+      const wmf = emfPlusWmf([
+        epHeader(),
+        // Second call for contrast, translated right by half the box.
+        setWorld(0.5, 150, 150),
+        metaImageObject(2, inner),
+        drawRect(2, 0, 0, 200, 200),
+        setWorld(0.5, 450, 450),
+        metaImageObject(3, inner),
+        drawRect(3, 0, 0, 200, 200),
+        epEof(),
+      ]);
+      const members = emfPlusMembers(wmf, 900, 900);
+      expect(members).toBeDefined();
+      const paths = members!.filter((m) => m.kind === "path");
+      expect(paths.length).toBe(2);
+      // Path members carry absolute geometry in `d` (their x/y is always the
+      // member box origin) — compare the first M point's y.
+      const startAt = (d: string): number => Number(d.split(/[^-\d.]+/)[1]);
+      expect(startAt(paths[1]!.d)).toBeGreaterThan(startAt(paths[0]!.d));
+    });
   });
 
   // Path objects whose point format flags come straight from corpus files
