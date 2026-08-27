@@ -1270,14 +1270,24 @@ function projectDrawings(runs: readonly unknown[], ctx: ProjectContext): LayoutD
   return out;
 }
 
+/** Word display presets merged UNDER a container's runs (explicit run props
+ *  win per field): hyperlinks take the Hyperlink character style look
+ *  (blue underline), tracked insertions underline and tracked deletions
+ *  strike in the first author's revision red — Word's "By author" palette
+ *  starts at red, and a single default author sees red for every revision. */
+const HYPERLINK_DISPLAY = { underline: { type: "single" }, color: "0563C1" } as const;
+const INSERTION_DISPLAY = { underline: { type: "single" }, color: "FF0000" } as const;
+const DELETION_DISPLAY = { strike: true, color: "FF0000" } as const;
+
 /** Inline content: text runs (rPr resolved over the paragraph default), hard
- *  breaks, and pictures (paragraph-child or run-child slot) as atoms. The
- *  members arrive as unknown — the ParagraphChild union is wide and its
- *  runtime shapes are looser still (compile pushes `{text, …rPr}` run forms),
- *  so each leg is validated rather than trusted.
- *  Known-but-unprojected inline atoms (tab, chart, math, fields, hyperlinks)
- *  carry no box yet — they render as absence, a registered gap to close type
- *  by type. */
+ *  breaks, pictures (paragraph-child or run-child slot), and the container
+ *  children (hyperlink / insertion / deletion — their runs project with the
+ *  Word display preset above) as atoms. The members arrive as unknown — the
+ *  ParagraphChild union is wide and its runtime shapes are looser still
+ *  (compile pushes `{text, …rPr}` run forms), so each leg is validated rather
+ *  than trusted.
+ *  Known-but-unprojected inline atoms (tab, chart, math, fields) carry no box
+ *  yet — they render as absence, a registered gap to close type by type. */
 function projectRuns(
   runs: readonly unknown[],
   chainRPr: Rec,
@@ -1373,33 +1383,36 @@ function projectRuns(
       });
     }
   };
-  for (const child of runs) {
-    if (typeof child === "string") {
-      pushText(child, {});
-      continue;
-    }
-    if (!isRecord(child)) continue;
-    if (typeof child.text === "string") pushText(child.text, child);
-    if (child.break != null) out.push({ kind: "break" });
-    if (child.tab != null) out.push({ kind: "tab" });
-    if (isRecord(child.picture)) pushPicture(child.picture);
-    if (isRecord(child.complexField)) pushField(child.complexField, child);
-    if (isRecord(child.simpleField)) pushField(child.simpleField, child);
-    if (Array.isArray(child.children)) {
-      for (const inner of child.children) {
-        if (typeof inner === "string") {
-          pushText(inner, child);
-        } else if (isRecord(inner)) {
-          if (typeof inner.text === "string") pushText(inner.text, inner);
-          else if (inner.break != null) out.push({ kind: "break" });
-          else if (inner.tab != null) out.push({ kind: "tab" });
-          else if (isRecord(inner.picture)) pushPicture(inner.picture);
-          else if (isRecord(inner.complexField)) pushField(inner.complexField, inner);
-          else if (isRecord(inner.simpleField)) pushField(inner.simpleField, inner);
-        }
+  /** One nesting level's walk. `preset` carries the enclosing containers'
+   *  display fields (outermost first, an inner leg overrides) merged under
+   *  each run's own rPr — explicit run props always win per field. */
+  const pushRuns = (items: readonly unknown[], preset: Rec): void => {
+    for (const child of items) {
+      if (typeof child === "string") {
+        pushText(child, preset);
+        continue;
       }
+      if (!isRecord(child)) continue;
+      const rPr: Rec = { ...preset, ...child };
+      if (typeof child.text === "string") pushText(child.text, rPr);
+      if (child.break != null) out.push({ kind: "break" });
+      if (child.tab != null) out.push({ kind: "tab" });
+      if (isRecord(child.picture)) pushPicture(child.picture);
+      if (isRecord(child.complexField)) pushField(child.complexField, rPr);
+      if (isRecord(child.simpleField)) pushField(child.simpleField, rPr);
+      if (isRecord(child.hyperlink) && Array.isArray(child.hyperlink.children)) {
+        pushRuns(child.hyperlink.children, { ...preset, ...HYPERLINK_DISPLAY });
+      }
+      if (isRecord(child.insertion) && Array.isArray(child.insertion.children)) {
+        pushRuns(child.insertion.children, { ...preset, ...INSERTION_DISPLAY });
+      }
+      if (isRecord(child.deletion) && Array.isArray(child.deletion.children)) {
+        pushRuns(child.deletion.children, { ...preset, ...DELETION_DISPLAY });
+      }
+      if (Array.isArray(child.children)) pushRuns(child.children, preset);
     }
-  }
+  };
+  pushRuns(runs, {});
   return out;
 }
 

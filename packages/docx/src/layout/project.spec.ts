@@ -1,3 +1,4 @@
+import type { LayoutBlock } from "@docen/layout";
 import type {
   DocumentOptions,
   HorizontalPositionOptions,
@@ -1057,5 +1058,94 @@ describe("projectFlowBox", () => {
     const flow = projectFlowBox(undefined);
     expect(flow.pageWidthPx).toBeCloseTo(11906 / 15, 5);
     expect(flow.contentWidthPx).toBeCloseTo((11906 - 3600) / 15, 5);
+  });
+});
+
+describe("projectDocumentOptions inline containers", () => {
+  const paraOf = (children: SectionChild[]): LayoutBlock[] =>
+    projectDocumentOptions(doc(children)).blocks;
+
+  it("projects hyperlink containers as their runs with the Hyperlink look", () => {
+    const blocks = paraOf([
+      {
+        paragraph: {
+          children: [
+            {
+              hyperlink: {
+                url: "https://example.com",
+                children: [{ text: "linked", bold: true }, " and "],
+              },
+            },
+            { text: "plain" },
+          ],
+        },
+      },
+    ]);
+    const para = blocks[0];
+    if (para?.kind !== "paragraph") throw new Error("expected paragraph");
+    const [linked, , plain] = para.inline;
+    // The run's own bold wins; color/underline come from Word's Hyperlink style.
+    expect(linked).toMatchObject({
+      kind: "text",
+      text: "linked",
+      style: { bold: true, underline: true, color: "0563C1" },
+    });
+    expect(plain).toMatchObject({ kind: "text", text: "plain", style: { underline: undefined } });
+  });
+
+  it("projects tracked insertions/deletions with Word's revision display", () => {
+    const blocks = paraOf([
+      {
+        paragraph: {
+          children: [
+            {
+              insertion: { id: 1, author: "A", date: "2026-01-01T00:00:00Z", children: ["added"] },
+            },
+            { text: " kept " },
+            { deletion: { id: 2, author: "A", date: "2026-01-01T00:00:00Z", children: ["gone"] } },
+          ],
+        },
+      },
+    ]);
+    const para = blocks[0];
+    if (para?.kind !== "paragraph") throw new Error("expected paragraph");
+    const [added, kept, gone] = para.inline;
+    // First-author red: insertions underline, deletions strike (Word defaults).
+    expect(added).toMatchObject({
+      kind: "text",
+      text: "added",
+      style: { underline: true, strikethrough: undefined, color: "FF0000" },
+    });
+    expect(kept).toMatchObject({ kind: "text", text: " kept ", style: { color: undefined } });
+    expect(gone).toMatchObject({
+      kind: "text",
+      text: "gone",
+      style: { underline: undefined, strikethrough: true, color: "FF0000" },
+    });
+  });
+
+  it("lets a run's explicit props beat the container preset", () => {
+    const blocks = paraOf([
+      {
+        paragraph: {
+          children: [
+            {
+              deletion: {
+                id: 3,
+                author: "A",
+                date: "2026-01-01T00:00:00Z",
+                children: [{ text: "red-strike", color: "008000" }],
+              },
+            },
+          ],
+        },
+      },
+    ]);
+    const para = blocks[0];
+    if (para?.kind !== "paragraph") throw new Error("expected paragraph");
+    expect(para.inline[0]).toMatchObject({
+      kind: "text",
+      style: { strikethrough: true, color: "008000" },
+    });
   });
 });
