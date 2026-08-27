@@ -129,7 +129,24 @@ interface PicDraft {
   src: string;
 }
 
-type Draft = PathDraft | PicDraft;
+/** A GDI-side ExtTextOutW run, kept in the same world coordinate space as
+ *  the EMF+ drafts so finalize maps everything through one normalization.
+ *  Dual-mode files carry real text as GDI records — their EmfPlusDrawString
+ *  counterparts are zero-data stubs. */
+interface TextDraft {
+  kind: "text";
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  text: string;
+  family: string;
+  sizeWorld: number;
+  color?: string;
+  bold?: boolean;
+}
+
+type Draft = PathDraft | PicDraft | TextDraft;
 
 // ── object decoding ──
 // An object's payload starts at its TotalObjectSize word ([0..3]), then the
@@ -481,6 +498,9 @@ export function emfPlusMembers(
     }
     po += rs;
   }
+  // Dual-mode carriers keep the real text on the GDI side; merge those runs
+  // in before deciding whether anything rendered at all.
+  drafts.push(...gdiTextDrafts(emf));
   if (!drafts.length) return undefined;
   return finalize(drafts, boxW, boxH);
 }
@@ -566,30 +586,233 @@ function drawImagePoints(
   drafts.push({ kind: "pic", x: minX, y: minY, w, h, src });
 }
 
-/** Scale drafts from EMF world coordinates into the display box and shape the
- *  renderer-facing members. Independent axis scales preserve relative layout;
- *  label proportions ride along because text arrives as outlines. */
+// ── GDI-side text ──
+
+// Carrier EMR codes consumed while replaying the text chain ([MS-EMF]
+// RecordType values).
+const EMR_SAVEDC = 33;
+const EMR_RESTOREDC = 34;
+const EMR_SET_WORLD_TRANSFORM = 35;
+const EMR_MODIFY_WORLD_TRANSFORM = 36;
+const EMR_SELECT_OBJECT = 37;
+const EMR_DELETE_OBJECT = 40;
+const EMR_SETTEXTCOLOR = 24;
+const EMR_EXT_CREATE_FONT = 82;
+const EMR_EXT_TEXT_OUT_A = 83;
+const EMR_EXT_TEXT_OUT_W = 84;
+
+/** EmrText offsets inside EMR_EXTTEXTOUTW (relative to the record start):
+ *  bounds[16], graphicsMode, ex/eyScale, then Reference xy, Chars, offString,
+ *  Options (+ an optional rect). The string lives at offString, relative to
+ *  the record start. */
+const EXT_REF_X = 36;
+const EXT_REF_Y = 40;
+const EXT_CHARS = 44;
+const EXT_OFF_STRING = 48;
+
+interface GdiFont {
+  height: number;
+  weight: number;
+  face?: string;
+}
+
+/** Raw EMR-world XFORM: six floats directly behind the record header (the
+ *  byte-length prefix seen on EMF+ payloads does not appear here). */
+function readCarrierXform(view: DataView, at: number): Xform {
+  return {
+    m11: view.getFloat32(at, true),
+    m12: view.getFloat32(at + 4, true),
+    m21: view.getFloat32(at + 8, true),
+    m22: view.getFloat32(at + 12, true),
+    dx: view.getFloat32(at + 16, true),
+    dy: view.getFloat32(at + 20, true),
+  };
+}
+
+/** Replay only the text chain of the carrier's GDI records and project it into
+ *  the same display space the EMF+ drafts occupy. Dual-mode files keep their
+ *  real text as ExtTextOutW runs drawn in arbitrary logical scales; each run's
+ *  placement comes from the carrier's live world transform, which folds every
+ *  domain onto the EMF's device rectangle (rclBounds) shared with the EMF+
+ *  output. Fonts are object-table based (CreateFontIndirectW defines a slot,
+ *  SelectObject activates it); color rides on SetTextColor's COLORREF. */
+function gdiTextDrafts(emf: Uint8Array): TextDraft[] {
+  const view = new DataView(emf.buffer, emf.byteOffset);
+  const drafts: TextDraft[] = [];
+  const fonts = new Map<number, GdiFont>();
+  let selected = -1;
+  let xf: Xform = { ...IDENTITY };
+  let textColor: string | undefined;
+  // SaveDC snapshots the full drawing state we track.
+  const states: Array<{ xf: Xform; selected: number; textColor?: string }> = [];
+  for (let eo = 0; eo + 8 <= emf.length;) {
+    const type = view.getUint32(eo, true);
+    const size = view.getUint32(eo + 4, true);
+    if (size < 8 || eo + size > emf.length) break;
+    switch (type) {
+      case EMR_EXT_CREATE_FONT: {
+        // EXTCREATEFONTINDIRECTW: object index dword + LOGFONTW whose face
+        // name is UTF-16LE at byte 28 of the LOGFONT.
+        const slot = view.getUint32(eo + 8, true);
+        const base = eo + 12;
+        let face = "";
+        for (let c = 0; c < 32 && base + 28 + c * 2 + 1 < eo + size; c++) {
+          const ch = view.getUint16(base + 28 + c * 2, true);
+          if (!ch) break;
+          face += String.fromCharCode(ch);
+        }
+        fonts.set(slot, {
+          height: view.getInt32(base, true),
+          weight: view.getUint32(base + 16, true),
+          face,
+        });
+        break;
+      }
+      case EMR_SELECT_OBJECT: {
+        // Stock objects carry a flag bit; real slots reference our table.
+        const raw = view.getUint32(eo + 8, true);
+        if (!(raw & 0x80000000) && fonts.has(raw)) selected = raw;
+        break;
+      }
+      case EMR_DELETE_OBJECT:
+        fonts.delete(view.getUint32(eo + 8, true));
+        break;
+      case EMR_SETTEXTCOLOR: {
+        // COLORREF (0x00bbggrr); high-flag words reference the system palette
+        // — skip those and keep the last true RGB.
+        const ref = view.getUint32(eo + 8, true);
+        if (ref <= 0xffffff) textColor = rgbHex(ref);
+        break;
+      }
+      case EMR_SAVEDC:
+        states.push({ xf, selected, textColor });
+        break;
+      case EMR_RESTOREDC: {
+        const st = states.pop();
+        if (st) {
+          ({ xf, selected, textColor } = st);
+        }
+        break;
+      }
+      case EMR_SET_WORLD_TRANSFORM:
+        xf = readCarrierXform(view, eo + 8);
+        break;
+      case EMR_MODIFY_WORLD_TRANSFORM: {
+        const next = readCarrierXform(view, eo + 8);
+        const mode = view.getUint32(eo + 32, true);
+        // ModifyWorldTransformMode: 1 resets to identity, 2/3 multiply naming
+        // the operand side, 4 (MWT_SET — the corpus norm) overwrites outright.
+        xf =
+          mode === 1
+            ? { ...IDENTITY }
+            : mode === 2
+              ? combine(next, xf)
+              : mode === 3
+                ? combine(xf, next)
+                : next;
+        break;
+      }
+      case EMR_EXT_TEXT_OUT_W:
+      case EMR_EXT_TEXT_OUT_A: {
+        // UTF-16 / one-byte-per-char strings; only W appears in the corpus,
+        // both decode cheaply.
+        const chars = view.getUint32(eo + EXT_CHARS, true);
+        const offString = view.getUint32(eo + EXT_OFF_STRING, true);
+        if (!chars || chars > 4096) break;
+        const strAt = eo + offString;
+        const strEnd = strAt + chars * (type === EMR_EXT_TEXT_OUT_W ? 2 : 1);
+        if (strEnd > eo + size) break;
+        let text = "";
+        if (type === EMR_EXT_TEXT_OUT_W) {
+          for (let c = 0; c < chars; c++)
+            text += String.fromCharCode(view.getUint16(strAt + c * 2, true));
+        } else {
+          const gbk = new TextDecoder("gbk");
+          text = gbk.decode(emf.subarray(strAt, strEnd));
+        }
+        // The walk loop has no update clause — never `continue` past the
+        // switch below or a single record spins forever.
+        if (text.trim()) {
+          const font = fonts.get(selected);
+          // Logical draw origin → carrier device space through the live world
+          // transform; glyph metrics scale with its uniform factor.
+          const x = view.getInt32(eo + EXT_REF_X, true);
+          const yBaseline = view.getInt32(eo + EXT_REF_Y, true);
+          const height =
+            Math.abs(font?.height ?? 100) * ((Math.abs(xf.m11) + Math.abs(xf.m22)) / 2);
+          // Baseline origin → box top by a typical CJK ascent (same calibration
+          // as the WMF player); advance falls back to per-char estimates because
+          // the trail Dx run is not worth parsing for outline-position accuracy.
+          let advance = 0;
+          for (const ch of text) advance += height * (ch.charCodeAt(0) > 0xff ? 1 : 0.55);
+          drafts.push({
+            kind: "text",
+            x: x * xf.m11 + yBaseline * xf.m21 + xf.dx,
+            y: x * xf.m12 + yBaseline * xf.m22 + xf.dy - height * 0.8,
+            w: advance + 2,
+            h: height * 1.35,
+            text,
+            family: font?.face ?? "",
+            sizeWorld: height,
+            ...(textColor ? { color: textColor } : {}),
+            ...(font && font.weight >= 550 ? { bold: true } : {}),
+          });
+        }
+        break;
+      }
+      default:
+        break;
+    }
+    eo += size;
+  }
+  return drafts;
+}
+
+function rgbHex(colorref: number): string {
+  const r = colorref & 0xff;
+  const g = (colorref >> 8) & 0xff;
+  const b = (colorref >> 16) & 0xff;
+  return `${((r << 16) | (g << 8) | b).toString(16).padStart(6, "0")}`;
+}
+
+/** Whether a draft joins the union bounding box that drives the final
+ *  normalization. After carrier world-transform projection all drafts share
+ *  one device space, so text participates like any other content.
+ *  Zero-area strokes join nothing: they render as hairlines at best yet can
+ *  drag the box to a far corner. */
+function participatesInBox(dr: Draft): boolean {
+  if (dr.kind === "path") {
+    const b = boxOf(dr);
+    return b.x1 - b.x0 > 1 && b.y1 - b.y0 > 1;
+  }
+  return true;
+}
+
+/** Scale drafts from EMF device coordinates into the display box and shape
+ *  the renderer-facing members. Independent axis scales preserve relative
+ *  layout; label proportions ride along because text arrives as outlines. */
 function finalize(drafts: Draft[], boxW: number, boxH: number): LayoutDrawingMember[] | undefined {
   let minX = Infinity,
     minY = Infinity,
     maxX = -Infinity,
     maxY = -Infinity;
   for (const dr of drafts) {
-    if (dr.kind === "pic") {
-      minX = Math.min(minX, dr.x);
-      minY = Math.min(minY, dr.y);
-      maxX = Math.max(maxX, dr.x + dr.w);
-      maxY = Math.max(maxY, dr.y + dr.h);
+    if (!participatesInBox(dr)) continue;
+    if (dr.kind === "path") {
+      for (const [, nums] of dr.cmds) {
+        for (let i = 0; i + 1 < nums.length; i += 2) {
+          minX = Math.min(minX, nums[i]);
+          maxX = Math.max(maxX, nums[i]);
+          minY = Math.min(minY, nums[i + 1]);
+          maxY = Math.max(maxY, nums[i + 1]);
+        }
+      }
       continue;
     }
-    for (const [, nums] of dr.cmds) {
-      for (let i = 0; i + 1 < nums.length; i += 2) {
-        minX = Math.min(minX, nums[i]);
-        maxX = Math.max(maxX, nums[i]);
-        minY = Math.min(minY, nums[i + 1]);
-        maxY = Math.max(maxY, nums[i + 1]);
-      }
-    }
+    minX = Math.min(minX, dr.x);
+    minY = Math.min(minY, dr.y);
+    maxX = Math.max(maxX, dr.x + dr.w);
+    maxY = Math.max(maxY, dr.y + dr.h);
   }
   const bw = maxX - minX,
     bh = maxY - minY;
@@ -600,6 +823,33 @@ function finalize(drafts: Draft[], boxW: number, boxH: number): LayoutDrawingMem
   const Y = (y: number) => (y - minY) * sY;
   const members: LayoutDrawingMember[] = [];
   for (const dr of drafts) {
+    if (dr.kind === "text") {
+      members.push({
+        kind: "textBox",
+        x: X(dr.x),
+        y: Y(dr.y),
+        width: dr.w * sX,
+        height: dr.h * sY,
+        blocks: [
+          {
+            kind: "paragraph",
+            inline: [
+              {
+                kind: "text",
+                text: dr.text,
+                style: {
+                  family: dr.family,
+                  sizePx: dr.sizeWorld * sY,
+                  ...(dr.color ? { color: dr.color } : {}),
+                  ...(dr.bold ? { bold: true } : {}),
+                },
+              },
+            ],
+          },
+        ],
+      });
+      continue;
+    }
     if (dr.kind === "pic") {
       members.push({
         kind: "picture",
@@ -647,4 +897,24 @@ function finalize(drafts: Draft[], boxW: number, boxH: number): LayoutDrawingMem
 
 function round1(n: number): string {
   return String(Math.round(n * 10) / 10);
+}
+
+/** World-space bounding box of one draft (diagnostics hook shape). */
+function boxOf(dr: Draft): { x0: number; y0: number; x1: number; y1: number } {
+  if (dr.kind !== "path") {
+    return { x0: dr.x, y0: dr.y, x1: dr.x + dr.w, y1: dr.y + dr.h };
+  }
+  let x0 = Infinity,
+    y0 = Infinity,
+    x1 = -Infinity,
+    y1 = -Infinity;
+  for (const [, nums] of dr.cmds) {
+    for (let i = 0; i + 1 < nums.length; i += 2) {
+      x0 = Math.min(x0, nums[i]);
+      x1 = Math.max(x1, nums[i]);
+      y0 = Math.min(y0, nums[i + 1]);
+      y1 = Math.max(y1, nums[i + 1]);
+    }
+  }
+  return { x0, y0, x1, y1 };
 }

@@ -125,7 +125,7 @@ export function epRecord(type: number, flags: number, body: Uint8Array): Uint8Ar
 }
 
 /** An EMR wrapping a GDI comment whose private data is an "EMF+" stream. */
-function emrEmfPlusComment(plusRecords: Uint8Array[]): Uint8Array {
+export function emrEmfPlusComment(plusRecords: Uint8Array[]): Uint8Array {
   const plusLen = plusRecords.reduce((n, r) => n + r.length, 0);
   const buf = new Uint8Array(16 + plusLen);
   const v = new DataView(buf.buffer);
@@ -141,8 +141,8 @@ function emrEmfPlusComment(plusRecords: Uint8Array[]): Uint8Array {
   return buf;
 }
 
-/** Minimal EMF carrier: header-sized dummy record then the comment(s). */
-function emfCarrier(comments: Uint8Array[]): Uint8Array {
+/** Minimal EMF carrier: header-sized dummy record then the given raw EMR(s). */
+export function emfCarrier(comments: Uint8Array[]): Uint8Array {
   const head = new Uint8Array(100);
   new DataView(head.buffer).setUint32(0, 1, true); // EMR_HEADER
   new DataView(head.buffer).setUint32(4, head.length, true);

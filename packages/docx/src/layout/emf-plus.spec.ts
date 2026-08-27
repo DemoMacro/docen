@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 
 import { embeddedEmfStream, emfPlusMembers } from "./emf-plus";
-import { emfPlusWmf, epRecord } from "./wmf-test-util";
+import { dualModeWmf, emfCarrier, emfPlusWmf, emrEmfPlusComment, epRecord } from "./wmf-test-util";
 
 // EmfPlus record codes used by the fixtures.
 const HEADER = 0x4001;
@@ -337,6 +337,244 @@ describe("emfPlusMembers", () => {
         epEof(),
       ]);
       expect(emfPlusMembers(wmf, 200, 100)).toBeUndefined();
+    });
+  });
+
+  // Dual-mode carriers keep the real text on the GDI side (their EmfPlus
+  // DrawString twins are zero-data stubs), so the player must read it back
+  // from plain EMR records.
+  describe("carrier-side GDI text", () => {
+    /** Raw EMR wrapper: type, size, payload. */
+    function emr(type: number, payload: Uint8Array): Uint8Array {
+      const buf = new Uint8Array(8 + payload.length);
+      new DataView(buf.buffer).setUint32(0, type, true);
+      new DataView(buf.buffer).setUint32(4, buf.length, true);
+      buf.set(payload, 8);
+      return buf;
+    }
+
+    function utf16le(s: string): Uint8Array {
+      const buf = new Uint8Array(s.length * 2);
+      const v = new DataView(buf.buffer);
+      s.split("").forEach((ch, i) => v.setUint16(i * 2, ch.charCodeAt(0), true));
+      return buf;
+    }
+
+    function extcreatefont(slot: number, height: number, weight: number, face: string): Uint8Array {
+      // ihFont dword + LOGFONTW (faceName is UTF-16LE at byte 28).
+      const buf = new Uint8Array(4 + 92);
+      const v = new DataView(buf.buffer);
+      v.setUint32(0, slot, true); // object index
+      v.setInt32(4, -height, true); // lfHeight (negative = char height)
+      v.setUint32(20, weight, true); // lfWeight
+      buf.set(utf16le(face), 4 + 28);
+      return emr(82, buf);
+    }
+
+    function selectfont(slot: number): Uint8Array {
+      const buf = new Uint8Array(4);
+      new DataView(buf.buffer).setUint32(0, slot, true);
+      return emr(37, buf);
+    }
+
+    function worldTransform(scale: number, dx: number, dy: number): Uint8Array {
+      // EMR_SETWORLDTRANSFORM: six floats directly behind the header.
+      const buf = new Uint8Array(24);
+      const v = new DataView(buf.buffer);
+      v.setFloat32(0, scale, true);
+      v.setFloat32(4, 0, true);
+      v.setFloat32(8, 0, true);
+      v.setFloat32(12, scale, true);
+      v.setFloat32(16, dx, true);
+      v.setFloat32(20, dy, true);
+      return emr(35, buf);
+    }
+
+    function settextcolor(argbHexRgb: string): Uint8Array {
+      const r = parseInt(argbHexRgb.slice(0, 2), 16);
+      const g = parseInt(argbHexRgb.slice(2, 4), 16);
+      const b = parseInt(argbHexRgb.slice(4, 6), 16);
+      const buf = new Uint8Array(4);
+      new DataView(buf.buffer).setUint32(0, (b << 16) | (g << 8) | r, true); // COLORREF
+      return emr(24, buf);
+    }
+
+    function exttextoutw(text: string, x: number, y: number): Uint8Array {
+      const bytes = utf16le(text);
+      const chars = text.length; // UTF-16 code units, per the Chars field
+      // Payload after the EMR header: bounds[16], graphicsMode, exScale,
+      // eyScale, then the EmrText block (reference xy, chars, offString,
+      // options). The parser reads at record-relative offsets — these land
+      // there via the shared 8-byte header.
+      const head = new Uint8Array(48);
+      const v = new DataView(head.buffer);
+      v.setUint32(28, x, true); // reference x
+      v.setUint32(32, y, true); // reference y (baseline)
+      v.setUint32(36, chars, true);
+      v.setUint32(40, 56, true); // offString, relative to the record start
+      v.setUint32(44, 0, true); // options
+      return emr(84, joinBuffers(head, bytes));
+    }
+
+    function joinBuffers(...parts: Uint8Array[]): Uint8Array {
+      const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+      let off = 0;
+      for (const p of parts) {
+        out.set(p, off);
+        off += p.length;
+      }
+      return out;
+    }
+
+    /** Carrier with an "EMF+" comment (plus records) alongside raw GDI EMRs
+     *  and given text records — the real dual-mode layering. */
+    function carrierWithText(gdi: Uint8Array[], plus: Uint8Array[]): Uint8Array {
+      return dualModeWmf(emfCarrier([emrEmfPlusComment(plus), ...gdi]));
+    }
+
+    it("reads ExtTextOutW runs as styled textBox members", () => {
+      // A zero-drawing EMF+ stream (header + EOF only) with the text on the
+      // carrier side — the sprite shape.
+      const wmf = carrierWithText(
+        [
+          extcreatefont(3, 24, 400, "微软雅黑"),
+          selectfont(3),
+          settextcolor("404040"),
+          exttextoutw("示例里程碑文案", 9270, 45240),
+        ],
+        [epHeader(), epEof()],
+      );
+      const members = emfPlusMembers(wmf, 400, 300);
+      expect(members).toBeDefined();
+      const box = members!.find((m) => m.kind === "textBox");
+      if (box?.kind !== "textBox") return;
+      expect(box.blocks[0]).toMatchObject({
+        kind: "paragraph",
+        inline: [
+          {
+            kind: "text",
+            text: "示例里程碑文案",
+            style: { family: "微软雅黑", color: "404040" },
+          },
+        ],
+      });
+      const para = box.blocks[0];
+      if (para.kind !== "paragraph") return;
+      const run = para.inline[0];
+      if (run.kind !== "text") return;
+      expect(run.style.sizePx ?? 0).toBeGreaterThan(0);
+    });
+
+    it("keeps walking past whitespace-only text runs", () => {
+      // A blank run must not stall the record walk: the loop advances only
+      // at its tail, so any skip has to route through the advance.
+      const wmf = carrierWithText(
+        [
+          extcreatefont(3, 24, 400, "微软雅黑"),
+          selectfont(3),
+          settextcolor("404040"),
+          exttextoutw(" ", 1000, 40000),
+          exttextoutw("示例里程碑文案", 9270, 45240),
+        ],
+        [epHeader(), epEof()],
+      );
+      const members = emfPlusMembers(wmf, 400, 300);
+      expect(members).toBeDefined();
+      const texts = members!.filter((m) => m.kind === "textBox");
+      expect(texts).toHaveLength(1);
+      const para = texts[0].blocks[0];
+      if (para.kind !== "paragraph") return;
+      const run = para.inline[0];
+      if (run.kind !== "text") return;
+      expect(run.text).toBe("示例里程碑文案");
+    });
+
+    it("maps logical draw origins into carrier device space via the world transform", () => {
+      // Corpus shape: each run sits in an arbitrary logical
+      // scale and a world transform folds it onto the EMF's device rectangle.
+      const pngMagic = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+      const wmf = carrierWithText(
+        [
+          extcreatefont(2, 285, 0, "宋体"),
+          selectfont(2),
+          settextcolor("262626"),
+          worldTransform(1 / 15, -1064.4, -1286.6),
+          // Logical (18330, 23520) → device ≈ (158, 281).
+          exttextoutw("一二三四五六七八九十甲乙", 18330, 23520),
+        ],
+        [
+          epHeader(),
+          setWorld(1, 0, 0),
+          imageObject(0, pngMagic),
+          drawRect(0, 0, 0, 580, 876),
+          epEof(),
+        ],
+      );
+      const members = emfPlusMembers(wmf, 580, 876);
+      expect(members).toBeDefined();
+      const box = members!.find((m) => m.kind === "textBox");
+      if (box?.kind !== "textBox") return;
+      const para = box.blocks[0];
+      if (para.kind !== "paragraph") return;
+      const run = para.inline[0];
+      if (run.kind !== "text") return;
+      expect(run.text).toBe("一二三四五六七八九十甲乙");
+      // Device-space placement: inside the EMF bounds, scaled glyph metrics.
+      expect(box.x).toBeGreaterThan(140);
+      expect(box.x).toBeLessThan(180);
+      expect(box.y).toBeGreaterThan(260);
+      expect(box.y).toBeLessThan(300);
+      // Advance uses transformed glyph size (285 → 19px/char).
+      expect(box.width).toBeGreaterThan(220);
+      expect(box.width).toBeLessThan(240);
+    });
+
+    it("activates fonts through SelectObject rather than creation order", () => {
+      // Two created fonts; the *selected* one wins even though the other was
+      // created later — GDI object-table semantics.
+      const wmf = carrierWithText(
+        [
+          extcreatefont(1, 30, 700, "方正大黑简体"),
+          extcreatefont(2, 18, 400, "宋体"),
+          selectfont(1),
+          settextcolor("333333"),
+          exttextoutw("示例标题文字", 500, 500),
+        ],
+        [epHeader(), epEof()],
+      );
+      const members = emfPlusMembers(wmf, 600, 120);
+      expect(members).toBeDefined();
+      const box = members!.find((m) => m.kind === "textBox");
+      if (box?.kind !== "textBox") return;
+      const para = box.blocks[0];
+      if (para.kind !== "paragraph") return;
+      const run = para.inline[0];
+      if (run.kind !== "text") return;
+      expect(run.style.family).toBe("方正大黑简体");
+    });
+
+    it("merges carrier text with same-stream EMF+ pictures", () => {
+      const pngMagic = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+      const wmf = carrierWithText(
+        [
+          extcreatefont(1, 18, 700, "SimSun"),
+          selectfont(1),
+          settextcolor("1a1a1a"),
+          exttextoutw("示例章节名", 2000, 30000),
+        ],
+        [
+          epHeader(),
+          setWorld(1, 0, 0),
+          imageObject(0, pngMagic),
+          drawRect(0, 500, 45000, 6000, 4000),
+          epEof(),
+        ],
+      );
+      const members = emfPlusMembers(wmf, 400, 300);
+      expect(members).toBeDefined();
+      const kinds = new Set(members!.map((m) => m.kind));
+      expect(kinds.has("picture")).toBe(true);
+      expect(kinds.has("textBox")).toBe(true);
     });
   });
 });
