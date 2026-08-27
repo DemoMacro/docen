@@ -124,6 +124,12 @@ export const WIRED_DISPATCH: ReadonlySet<string> = new Set([
   "multilevel-list",
   "delete-picture",
   "position-picture",
+  // Review tab revision tracking (the docenTrackChanges extension).
+  "track-changes",
+  "accept-change",
+  "reject-change",
+  "previous-change",
+  "next-change",
 ]);
 
 // ── Pure helpers (take EditorState, return data; never touch the chain) ──

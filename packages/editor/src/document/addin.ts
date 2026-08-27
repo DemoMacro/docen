@@ -5,6 +5,7 @@ import { search } from "prosemirror-search";
 import { type DocenAddin, type DocenHost } from "../ui";
 import { DocumentCommands } from "./extensions/commands";
 import { Outline, type OutlineAnchor } from "./extensions/outline";
+import { TrackChanges } from "./extensions/track-changes";
 
 /** A `<docen-document>` host: a {@link DocenHost} carrying a Tiptap `Editor`. */
 export type DocumentHost = DocenHost<Editor>;
@@ -62,6 +63,9 @@ export function createDocumentExtensions(opts: {
     Search,
     TrailingNode,
     CharacterCount.configure({ wordCounter, textCounter }),
+    // Review tab revision tracking: the toggle + live edit marking, and the
+    // accept/reject/navigation commands the ribbon buttons dispatch.
+    TrackChanges,
     // Ribbon commands as native Tiptap commands (editor.commands.<event>), so
     // #onCommand routes event → editor.commands[event](value) with no mapping
     // layer. Includes editor.can() for precise ribbon greying.
