@@ -317,30 +317,76 @@ export class CaretMap {
     return { yPx: top, heightPx: Math.max(bottom - top, 2) };
   }
 
-  /** The selection rectangles for a range — one per crossed line, in the
-   *  caret's geometry (same grid pad and text height). */
+  /** The selection rectangles for a range — Word's highlight model: every
+   *  fully crossed line spans to the wrap's right edge (not the last glyph),
+   *  the end line stops at the selection's last boundary, heights are the
+   *  full line box (contiguous down the paragraph, covering the pitch gap),
+   *  and a paragraph's trailing spacing highlights when the next paragraph is
+   *  selected too. Empty paragraphs show a caret-width block. */
   selectionRects(from: number, to: number): SelectionRect[] {
     const rects: SelectionRect[] = [];
-    for (const entry of this.paras) {
+    this.paras.forEach((entry, paraIndex) => {
       const start = Math.max(from, entry.innerPos);
       const end = Math.min(to, entry.innerPos + entry.node.content.size);
-      if (start >= end) continue;
+      // An empty paragraph's position range is degenerate ([innerPos,
+      // innerPos]) — it is selected whenever the range crosses that position.
+      const emptyBlock = entry.node.content.size === 0;
+      if (start > end || (start === end && !(emptyBlock && from <= entry.innerPos))) return;
       const offA = this.charOfPos(entry, start);
       const offB = this.charOfPos(entry, end);
-      for (const line of entry.lines) {
-        if (line.endChar <= offA || line.startChar >= offB) continue;
+      const next = this.paras[paraIndex + 1];
+      const nextSelected =
+        next !== undefined &&
+        Math.max(from, next.innerPos) < Math.min(to, next.innerPos + next.node.content.size);
+      for (const [li, line] of entry.lines.entries()) {
+        const empty = line.startChar === line.endChar;
+        if (
+          empty
+            ? offA > line.startChar || offB < line.startChar
+            : line.endChar <= offA || line.startChar >= offB
+        ) {
+          continue;
+        }
+        // Line-box geometry (the layout's own pitch) keeps multi-line
+        // highlights contiguous — the caret's ink band would fragment them.
+        const nextLine = entry.lines[li + 1];
+        const bottom = nextLine
+          ? nextLine.yPx
+          : nextSelected && next?.lines[0] && next.lines[0].page === line.page
+            ? // The paragraph gap (after+before spacing) belongs to the
+              // selection once the next paragraph is in it too.
+              next.lines[0].yPx
+            : line.yPx + line.line.heightPx;
+        if (empty) {
+          rects.push({
+            page: line.page,
+            xPx: line.xPx,
+            yPx: line.yPx,
+            widthPx: Math.min(8, line.line.maxWidthPx ?? 8),
+            heightPx: bottom - line.yPx,
+          });
+          continue;
+        }
         const fromOff = Math.max(offA, line.startChar);
-        const toOff = Math.min(offB, line.endChar);
-        const band = this.bandOf(line);
+        // A line's highlight reaches the wrap edge when the selection passes
+        // its end — but the document's final boundary stops at the last glyph
+        // (Word: Ctrl+A's last line is not stretched).
+        const endPos = this.posOfChar(entry, line.endChar);
+        const coversEnd =
+          offB > line.endChar || (offB === line.endChar && (to === endPos || nextSelected));
+        const left = fromOff === line.startChar ? line.xPx : this.xOfChar(line, fromOff);
+        const right = coversEnd
+          ? line.xPx + (line.line.maxWidthPx ?? 0) + (line.line.hangPx ?? 0)
+          : this.xOfChar(line, Math.min(offB, line.endChar));
         rects.push({
           page: line.page,
-          xPx: this.xOfChar(line, fromOff),
-          yPx: band.yPx,
-          widthPx: Math.max(this.xOfChar(line, toOff) - this.xOfChar(line, fromOff), 2),
-          heightPx: band.heightPx,
+          xPx: left,
+          yPx: line.yPx,
+          widthPx: Math.max(right - left, 2),
+          heightPx: bottom - line.yPx,
         });
       }
-    }
+    });
     return rects;
   }
 
@@ -367,11 +413,18 @@ export class CaretMap {
       const widths = graphemeWidths(item.text, font);
       let prefix = 0;
       for (let g = 0; g < widths.length; g++) {
-        char++;
+        // xInItem(g) is the g-th grapheme's LEFT edge — the boundary with
+        // exactly `g` collapsed chars before it. Push it against the
+        // pre-increment char; pairing it with char+1 shifted every boundary
+        // one position right and clicks landed a full character off.
         push(this.xInItem(entry, itemIndex, g, prefix, widths), this.posOfChar(entry.owner, char));
         prefix += widths[g]!;
+        char++;
       }
     }
+    // The line-end edge: clicking past the last glyph lands here (Word's
+    // line-end click puts the caret at this line's end).
+    push(this.xOfChar(entry, entry.endChar), this.posOfChar(entry.owner, char));
     // Empty lines push nothing — fall back to the line-start position.
     return bestOffset?.pos ?? this.posOfChar(entry.owner, entry.endChar);
   }
@@ -393,7 +446,17 @@ export class CaretMap {
     const item = entry.line.items[itemIndex]!;
     const base = entry.xPx + item.xPx + plainPrefix;
     const { line } = entry;
-    if (line.justifyGapPx == null || item.kind !== "text") return base;
+    if (item.kind !== "text") return base;
+    // The boundary past the item's last glyph: a natural item ends at its
+    // advance sum; a justified item stretches to its interval's end (the
+    // painter fills the width — see paintLine's justified rights[]).
+    if (graphemeIndex >= widths.length) {
+      if (line.justifyGapPx == null) return base;
+      let intervalEnd = (line.maxWidthPx ?? 0) + (line.hangPx ?? 0);
+      for (let i = line.items.length - 1; i > itemIndex; i--) intervalEnd = line.items[i]!.xPx;
+      return entry.xPx + intervalEnd;
+    }
+    if (line.justifyGapPx == null) return base;
     // The painter's interval math: the last item stretches to maxWidth(+hang),
     // each earlier one to the next item's post-justify x.
     let intervalEnd = (line.maxWidthPx ?? 0) + (line.hangPx ?? 0);
@@ -404,9 +467,7 @@ export class CaretMap {
     let natural = 0;
     for (const w of widths) natural += w;
     if (/[一-鿿぀-ヿ가-힯]/.test(item.text)) {
-      // The line-end offset (index == count) sits right after the last glyph —
-      // no further gap follows it (the painter's last word absorbs none).
-      return base + Math.min(graphemeIndex, count - 1) * ((interval - natural) / (count - 1));
+      return base + graphemeIndex * ((interval - natural) / (count - 1));
     }
     // Word gaps: a grapheme's shift is its Leafer word index × gap.
     const indices = leaferWordIndices(item.text);

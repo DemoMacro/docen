@@ -130,7 +130,10 @@ export function layoutParagraph(
       firstLineIndentPx: i === 0 ? para.indent?.firstLinePx : undefined,
       endInlineIndex: line.endInlineIndex,
       items: line.items,
-      maxWidthPx: justifyGapPx[i] !== undefined ? line.maxWidthPx : undefined,
+      // Carried on every line (not just justified ones) — the wrap width is
+      // the selection highlight's right edge (Word highlights to the wrap
+      // edge, not the last glyph) and hit-testing's line-end boundary.
+      maxWidthPx: line.maxWidthPx,
       justifyGapPx: justifyGapPx[i],
       hangPx: line.hangPx,
     });
