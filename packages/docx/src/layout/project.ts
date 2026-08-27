@@ -749,6 +749,16 @@ function solidFillOf(fill: unknown): string | undefined {
   return isRecord(fill) && fill.type === "solid" ? colorOf(fill.color) : undefined;
 }
 
+/** Solid-fill opacity from the color's alpha transform (integer percent,
+ *  0-100). The flat-color painter can only fade a whole fill, so modulate/
+ *  offset stacks collapse to the base alpha; anything else passes opaque. */
+function fillOpacityOf(fill: unknown): number | undefined {
+  if (!isRecord(fill) || fill.type !== "solid") return undefined;
+  const c = fill.color;
+  const a = isRecord(c) && isRecord(c.transforms) ? num(c.transforms.alpha) : undefined;
+  return a != null && a < 100 ? Math.max(0, Math.min(1, a / 100)) : undefined;
+}
+
 /** Outline stroke (a:ln): px width + color + the line-dressing tokens the
  *  painter maps (cap/join full-word, dash the OOXML prstDash token). A
  *  gradient stroke flattens to its middle stop's color — the painter strokes
@@ -987,7 +997,18 @@ function wpsMemberOf(
     if (d) return { kind: "path", x, y, width, height, d, fill, line };
     return null;
   }
-  return { kind: "shape", x, y, width, height, preset, fill, line };
+  const opacity = fillOpacityOf(data.fill);
+  return {
+    kind: "shape",
+    x,
+    y,
+    width,
+    height,
+    preset,
+    fill,
+    ...(opacity != null ? { opacity } : {}),
+    line,
+  };
 }
 
 /** One group level's child-space → drawing-box-px mapping, threaded through

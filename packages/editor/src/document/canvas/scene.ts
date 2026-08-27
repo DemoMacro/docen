@@ -50,10 +50,15 @@ const PRSTDASH_PATTERN: Record<string, number[]> = {
 };
 
 /** The paint context for one page — the stage context plus the page's own
- *  identity (page-number fields resolve against it). */
+ *  identity (page-number fields resolve against it) and which of Word's two
+ *  text-underlapping layers is being composed right now (the stage paints a
+ *  page twice: once for behind-doc floats, once for everything else with
+ *  header/footer furniture between them — Word renders footer furniture and
+ *  the body over those floats, so furniture must not sit under them). */
 export interface PaintContext extends CanvasStageContext {
   pageIndex: number;
   pageCount: number;
+  layer: "behind" | "body";
 }
 
 /** Paint one page's flow items (block + page-content y). */
@@ -87,18 +92,19 @@ function paintBlock(
     case "paragraph":
       paintParagraph(tree, block, x, y, ctx);
       return;
+    // Only paragraphs can carry drawings; the behind pass therefore skips
+    // every other block so nothing paints twice.
     case "table":
-      paintTable(tree, block, x, y, ctx);
+    case "placeholder":
+    case "pageBreak":
+      if (ctx.layer === "behind") return;
+      if (block.kind === "table") paintTable(tree, block, x, y, ctx);
+      else if (block.kind === "placeholder") paintPlaceholder(tree, block, x, y);
       return;
     case "group":
       for (const child of block.children) {
         paintBlock(tree, child.block, x, y + child.yPx, ctx);
       }
-      return;
-    case "placeholder":
-      paintPlaceholder(tree, block, x, y);
-      return;
-    case "pageBreak":
       return;
   }
 }
@@ -110,9 +116,14 @@ function paintParagraph(
   y: number,
   ctx: PaintContext,
 ): void {
-  // behindDoc drawings first — everything below sits on top of them.
-  for (const drawing of para.drawings ?? []) {
-    if (drawing.behind) paintDrawing(tree, drawing, x, y, ctx);
+  // The stage composes a page in two passes; this one paints only its own
+  // layer's drawings. Behind-doc floats land beneath the furniture pass.
+  const behind = ctx.layer === "behind";
+  if (behind) {
+    for (const drawing of para.drawings ?? []) {
+      if (drawing.behind) paintDrawing(tree, drawing, x, y, ctx);
+    }
+    return;
   }
   // w:pBdr horizontal rules (the "Education" underline shape): between the
   // text and `spacePx` below it, spanning the wrapping width.
@@ -432,7 +443,11 @@ function paintMembers(
         }),
       );
     } else if (m.kind === "shape") {
-      const fill = m.fill ? `#${m.fill}` : undefined;
+      const fill = m.fill
+        ? m.opacity != null
+          ? rgbaOf(m.fill, m.opacity)
+          : `#${m.fill}`
+        : undefined;
       const stroke = m.line ? (m.line.color ? `#${m.line.color}` : "#000000") : undefined;
       const strokeWidth = m.line?.px;
       if (m.preset === "ellipse") {
@@ -479,6 +494,14 @@ function paintMembers(
       }
     }
   }
+}
+
+/** Hex RRGGBB + opacity 0-1 → a CSS rgba color (Leafer parses CSS strings;
+ *  the alpha must ride on the fill, not element opacity, so a stroke on the
+ *  same shape stays opaque). */
+function rgbaOf(hex: string, opacity: number): string {
+  const n = parseInt(hex, 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${opacity})`;
 }
 
 /** A cropped picture (a:srcRect): Leafer paints whole sources only, so the

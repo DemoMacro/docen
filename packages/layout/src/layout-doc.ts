@@ -90,6 +90,9 @@ export type LayoutDrawingMember =
       preset?: string;
       /** Solid fill, hex RRGGBB; absent → no fill. */
       fill?: string;
+      /** Fill opacity 0-1 (the solid color's a:alpha percent ÷ 100);
+       *  absent → fully opaque. Fades the fill only, never the stroke. */
+      opacity?: number;
       /** Outline stroke: width in px + hex color (absent color → ink). */
       line?: { px: number; color?: string };
     }

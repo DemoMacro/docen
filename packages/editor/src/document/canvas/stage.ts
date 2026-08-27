@@ -289,9 +289,21 @@ export class CanvasStage {
       ...this.ctx,
       pageIndex: index,
       pageCount: this.pages.length,
+      layer: "behind",
     };
     const { flow } = this.ctx;
     const slot = this.slotOf(index);
+    // Word's stacking: behind-text floats sit under everything from the text
+    // layer — footer furniture included (a full-bleed backdrop never covers
+    // the page number). Paint the behind pass first, then furniture + the
+    // body pass on top; in-front floats close the sequence inside the body
+    // pass's paragraphs.
+    const items = this.pages[index]?.items ?? [];
+    ctx.layer = "behind";
+    paintScene(tree, items, ctx);
+    // The furniture pass paints like the body (its paragraphs' text must not
+    // hit the behind pass's drawings-only early return).
+    ctx.layer = "body";
     const header = this.headerStacks[slot] ?? this.headerStacks[0];
     if (header) {
       paintFurnitureStack(
@@ -308,7 +320,7 @@ export class CanvasStage {
       const bottom = flow.pageHeightPx - (this.ctx.furniture?.footerDistancePx ?? 48);
       paintFurnitureStack(tree, footer, flow.contentLeftPx, bottom - height, ctx);
     }
-    paintScene(tree, this.pages[index]?.items ?? [], ctx);
+    paintScene(tree, items, ctx);
     // Render eagerly: Leafer's change-driven scheduling stalls when the App
     // was created while its view was offscreen (an IO callback during mount)
     // and never picks the page back up.
