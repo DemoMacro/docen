@@ -17,7 +17,13 @@ import {
 } from "@docen/docx";
 import type { Editor } from "@docen/docx/core";
 import { projectDocumentOptions, type ProjectedFlowBox } from "@docen/docx/layout";
-import { browserFontMetrics, layoutFlow, TextMeasurer, type FlowPage } from "@docen/layout";
+import {
+  browserFontMetrics,
+  layoutFlow,
+  TextMeasurer,
+  twipToPx,
+  type FlowPage,
+} from "@docen/layout";
 import { attr, css, customElement, html } from "@microsoft/fast-element";
 import type { Mark } from "@tiptap/pm/model";
 import { EditorState, TextSelection, type Transaction } from "@tiptap/pm/state";
@@ -122,6 +128,10 @@ const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   "select",
   "format-painter",
   "edit-mode",
+  // TOC insert/update — dispatch with the bridge's pageOf (page numbers live
+  // in the canvas caret map, which editor.commands can't reach).
+  "toc",
+  "update-toc",
   // #onChange (data-event)
   "open",
   "save-as",
@@ -1615,6 +1625,29 @@ class DocenDocument extends AddinHost<Editor> {
     // host [show-marks] attribute stays the source of truth.
     if (name === "show-marks") {
       this.setShowMarks(!this.getShowMarks());
+      return;
+    }
+    // TOC insert/update — commands take the bridge's pageOf (entry page
+    // numbers come from the canvas caret map; 0-based → Word's 1-based) and
+    // the content-width tab stop. Inserting repaginates, so insert re-runs
+    // the update once the fresh layout lands (Word's insert-then-update-
+    // fields behavior).
+    if (name === "toc" || name === "update-toc") {
+      const pageOf = (pos: number): number | null => {
+        const page = this.#bridge?.pageOf(pos);
+        return typeof page === "number" ? page + 1 : null;
+      };
+      const tabPositionTw = this.#flow
+        ? Math.round(this.#flow.contentWidthPx / twipToPx(1))
+        : undefined;
+      const ran = editor.commands[name](pageOf, tabPositionTw);
+      if (name === "toc" && ran) {
+        // Frame N re-flows (the bridge's raf-merged onDoc), frame N+1 the
+        // caret map carries the post-insert pagination.
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => editor.commands["update-toc"](pageOf, tabPositionTw)),
+        );
+      }
       return;
     }
     // Clipboard — the selection is canvas-rendered (no DOM editor selection),

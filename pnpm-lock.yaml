@@ -89,6 +89,9 @@ importers:
       '@docen/docx':
         specifier: workspace:*
         version: link:../docx
+      '@docen/layout':
+        specifier: workspace:*
+        version: link:../layout
       '@fluentui/svg-icons':
         specifier: 1.1.334
         version: 1.1.334

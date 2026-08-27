@@ -74,6 +74,7 @@
     "@chenglou/pretext": "0.0.8",
     "@docen/core": "workspace:*",
     "@docen/docx": "workspace:*",
+    "@docen/layout": "workspace:*",
     "@fluentui/svg-icons": "1.1.334",
     "@fluentui/tokens": "1.0.0-alpha.23",
     "@fluentui/web-components": "3.0.3",
