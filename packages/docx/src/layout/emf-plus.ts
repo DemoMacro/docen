@@ -202,7 +202,11 @@ function decodeObject(
 function decodePath(payload: Uint8Array, view: DataView, end: number): PathInfo | undefined {
   if (end < 20) return undefined;
   const count = view.getUint32(8, true);
-  const compressed = (view.getUint32(12, true) & 0x2000) !== 0;
+  // Bit 14 (0x4000) switches PathPoints to int16 pairs. Other PathPointFlags
+  // bits (e.g. the relative/RLE encoding the spec describes) are never emitted
+  // by real GDI+ writers — corpus census: every non-zero-flag object decoded
+  // by this single bit and nothing else.
+  const compressed = (view.getUint32(12, true) & 0x4000) !== 0;
   if (!count || count > 100_000) return undefined;
   const step = compressed ? 4 : 8;
   const typesAt = 16 + count * step;
@@ -210,6 +214,10 @@ function decodePath(payload: Uint8Array, view: DataView, end: number): PathInfo 
   const cmds: PathCmds = [];
   let cx = 0,
     cy = 0;
+  // A serialized path may open mid-figure (padded stream) — geometry before
+  // the first start-type point has no anchor and would serialize as a `d`
+  // beginning with L/C, which browsers drop wholesale.
+  let started = false;
   let bezierTail: Array<[number, number]> = [];
   for (let i = 0; i < count; i++) {
     const p = 16 + i * step;
@@ -217,6 +225,7 @@ function decodePath(payload: Uint8Array, view: DataView, end: number): PathInfo 
     cy = compressed ? view.getInt16(p + 2, true) : view.getFloat32(p + 4, true);
     const pt: [number, number] = [cx, cy];
     const t = payload[typesAt + i] & 0x07;
+    if (t !== 0 && !started) continue;
     if (t === 3) {
       // A cubic consists of this point plus two more control points applied
       // to the running position.
@@ -227,8 +236,10 @@ function decodePath(payload: Uint8Array, view: DataView, end: number): PathInfo 
       }
       continue;
     }
-    if (t === 0) cmds.push(["M", pt]);
-    else cmds.push(["L", pt]);
+    if (t === 0) {
+      started = true;
+      cmds.push(["M", pt]);
+    } else cmds.push(["L", pt]);
     if (payload[typesAt + i] & 0x80) cmds.push(["Z", []]);
   }
   return cmds.length >= 2 ? { cmds } : undefined;

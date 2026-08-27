@@ -239,4 +239,104 @@ describe("emfPlusMembers", () => {
     ]);
     expect(emfPlusMembers(wmf, 605, 240)).toBeUndefined();
   });
+
+  // Path objects whose point format flags come straight from corpus files
+  // (word/media of a real dual-mode document).
+  describe("path point formats", () => {
+    /** Path object body with explicit format word and int16 point pairs. */
+    function rawPath(
+      pts: Array<[number, number]>,
+      fmt: number,
+      i16: boolean,
+      types?: number[],
+    ): Uint8Array {
+      const step = i16 ? 4 : 8;
+      const tb = types ?? pts.map((_, i) => (i === 0 ? 0x00 : 0x01));
+      const body = new Uint8Array(16 + pts.length * step + tb.length);
+      const v = new DataView(body.buffer);
+      v.setUint32(0, body.length, true); // TotalObjectSize
+      v.setUint32(4, VERSION, true);
+      v.setUint32(8, pts.length, true); // PathPointCount
+      v.setUint32(12, fmt, true); // PathPointFlags
+      pts.forEach(([x, y], i) => {
+        if (i16) {
+          v.setInt16(16 + i * 4, x, true);
+          v.setInt16(18 + i * 4, y, true);
+        } else {
+          v.setFloat32(16 + i * 8, x, true);
+          v.setFloat32(20 + i * 8, y, true);
+        }
+      });
+      body.set(tb, 16 + pts.length * step);
+      return epRecord(OBJECT, 6 | (3 << 8), body);
+    }
+
+    it("reads int16 pairs under the 0x4000 compression bit", () => {
+      const rect: Array<[number, number]> = [
+        [10, 10],
+        [110, 10],
+        [110, 60],
+        [10, 60],
+      ];
+      const wmf = emfPlusWmf([
+        epHeader(),
+        setWorld(1, 0, 0),
+        brushObject(5, 0xff38761d),
+        rawPath(rect, 0x4000, true, [0x00, 0x01, 0x01, 0x81]),
+        epRecord(FILL_PATH, 6, new Uint8Array(4)),
+        epEof(),
+      ]);
+      const members = emfPlusMembers(wmf, 200, 100);
+      expect(members).toBeDefined();
+      const p = members!.find((m) => m.kind === "path");
+      expect(p).toBeDefined(); // compressed readback must produce geometry
+      if (p?.kind !== "path") return;
+      expect(p.fill).toBe("38761d");
+      expect(p.d.startsWith("M")).toBe(true);
+      expect(p.d).toContain("Z"); // closed figure made it through
+    });
+
+    it("decodes float pairs when only the 0x2000 flag bit is set", () => {
+      // Corpus census: every real object carrying just this bit stores float
+      // pairs — the bit is NOT the compression switch.
+      const rect: Array<[number, number]> = [
+        [10, 10],
+        [110, 10],
+        [110, 60],
+        [10, 60],
+      ];
+      const wmf = emfPlusWmf([
+        epHeader(),
+        setWorld(1, 0, 0),
+        brushObject(5, 0xff38761d),
+        rawPath(rect, 0x2000, false),
+        epRecord(FILL_PATH, 6, new Uint8Array(4)),
+        epEof(),
+      ]);
+      const members = emfPlusMembers(wmf, 200, 100);
+      expect(members).toBeDefined();
+      const p = members!.find((m) => m.kind === "path");
+      expect(p).toBeDefined(); // float pairs must survive the flag
+      if (p?.kind !== "path") return;
+      expect(p.d.startsWith("M")).toBe(true);
+    });
+
+    it("drops geometry that never reaches a start-type point", () => {
+      const rect: Array<[number, number]> = [
+        [10, 10],
+        [110, 10],
+        [110, 60],
+        [10, 60],
+      ];
+      const wmf = emfPlusWmf([
+        epHeader(),
+        setWorld(1, 0, 0),
+        brushObject(5, 0xff38761d),
+        rawPath(rect, 0, false, [0x01, 0x01, 0x01, 0x01]),
+        epRecord(FILL_PATH, 6, new Uint8Array(4)),
+        epEof(),
+      ]);
+      expect(emfPlusMembers(wmf, 200, 100)).toBeUndefined();
+    });
+  });
 });
