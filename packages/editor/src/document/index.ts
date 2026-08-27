@@ -48,7 +48,7 @@ import {
   t,
   type DocenAddin,
 } from "../ui";
-import { createDefaultAddin } from "./addin";
+import { createDefaultAddin, textCounter } from "./addin";
 import { mountEditBridge, type EditBridge } from "./canvas/edit-bridge";
 // Side-effect: register the document-specific UI components moved out of the
 // shared ui/ barrel — <docen-format-pane> (properties fallback) and
@@ -128,6 +128,7 @@ const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   "select",
   "format-painter",
   "edit-mode",
+  "word-count",
   // TOC insert/update — dispatch with the bridge's pageOf (page numbers live
   // in the canvas caret map, which editor.commands can't reach).
   "toc",
@@ -269,6 +270,7 @@ const documentTemplate = html`
     <docen-status-bar slot="status" part="status"></docen-status-bar>
   </docen-workspace>
   <docen-options-dialog part="options"></docen-options-dialog>
+  <docen-word-count-dialog part="word-count"></docen-word-count-dialog>
   <docen-find-replace-dialog></docen-find-replace-dialog>
   <input type="file" id="file-input" accept=".docx,.md,.markdown,.html,.htm" hidden />
   <input type="file" id="image-input" accept="image/*" hidden />
@@ -1555,6 +1557,39 @@ class DocenDocument extends AddinHost<Editor> {
     }
   }
 
+  /** Word Count (Review tab) — compute the document statistics (the status
+   *  bar's words source + grapheme character counts + layout line total) and
+   *  hand them to the dialog as one JSON attribute. */
+  #showWordCount(): void {
+    const editor = this.editor;
+    const dialog = this.shadowRoot?.querySelector("docen-word-count-dialog") as
+      | (HTMLElement & { stats?: string; show(): void })
+      | undefined;
+    if (!editor || !dialog) return;
+    const cc = editor.storage.characterCount as { words?: () => number } | undefined;
+    const text = editor.state.doc.textContent;
+    let paragraphs = 0;
+    editor.state.doc.descendants((node) => {
+      if (node.type.name === "paragraph") paragraphs++;
+      return true;
+    });
+    let lines = 0;
+    for (const page of this.#pages) {
+      for (const item of page.items) {
+        if (item.block.kind === "paragraph") lines += item.block.lines.length;
+      }
+    }
+    dialog.stats = JSON.stringify({
+      pages: this.#pages.length,
+      words: cc?.words?.() ?? 0,
+      charsWithSpaces: textCounter(text),
+      charsNoSpaces: textCounter(text.replace(/\s+/g, "")),
+      paragraphs,
+      lines,
+    });
+    dialog.show();
+  }
+
   readonly #onCommand = (event: CustomEvent<{ event?: string; value?: string }>): void => {
     const { event: name, value } = event.detail ?? {};
     if (typeof name !== "string") return;
@@ -1574,6 +1609,11 @@ class DocenDocument extends AddinHost<Editor> {
     // Replace (ribbon Home → Editing → Replace, or Ctrl+H) → Find & Replace dialog.
     if (name === "replace") {
       this.#openFindReplace();
+      return;
+    }
+    // Word Count (ribbon Review → Proofing) → the statistics dialog.
+    if (name === "word-count") {
+      this.#showWordCount();
       return;
     }
     // Page setup actions write sectionProperties; the transaction re-renders.

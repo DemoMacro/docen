@@ -32,7 +32,7 @@ const Search = Extension.create({
 /** Office-style word count: each CJK character counts as one, non-CJK runs split
  *  on whitespace — matches Word for mixed CJK/Latin (the default split(' ').length
  *  counts a whole CJK paragraph as a single word). */
-const wordCounter = (text: string): number => {
+export const wordCounter = (text: string): number => {
   const cjkRe = /[一-鿿぀-ヿ가-힯]/g;
   const cjk = (text.match(cjkRe) ?? []).length;
   const western = text.replace(cjkRe, " ").split(/\s+/).filter(Boolean).length;
@@ -41,7 +41,7 @@ const wordCounter = (text: string): number => {
 
 /** Count characters by grapheme cluster so emoji / combining marks / surrogate
  *  pairs count as one (default text.length undercounts them). */
-const textCounter = (text: string): number => {
+export const textCounter = (text: string): number => {
   const seg = new Intl.Segmenter("en", { granularity: "grapheme" });
   let n = 0;
   for (const _ of seg.segment(text)) n++;
