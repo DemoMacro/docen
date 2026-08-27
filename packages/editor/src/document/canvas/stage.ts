@@ -1,4 +1,8 @@
-import type { ProjectedFlowBox, ProjectedPageFurniture } from "@docen/docx/layout";
+import type {
+  ProjectedFlowBox,
+  ProjectedPageBackground,
+  ProjectedPageFurniture,
+} from "@docen/docx/layout";
 /**
  * Canvas stage — the page layer of the canvas document component.
  *
@@ -27,6 +31,8 @@ export interface CanvasStageContext {
   flow: ProjectedFlowBox;
   /** Headers/footers to paint on every page (absent = none). */
   furniture?: ProjectedPageFurniture;
+  /** Page background (w:background — base color + optional pattern tile). */
+  background?: ProjectedPageBackground;
 }
 
 export class CanvasStage {
@@ -162,18 +168,42 @@ export class CanvasStage {
     if (frame) {
       frame.style.width = `${w}px`;
       frame.style.height = `${h}px`;
+      this.applyBackground(frame);
     }
     slot.el.style.width = `${w}px`;
     slot.el.style.height = `${h}px`;
   }
 
+  /** Stamp the frame's w:background — base color plus the pattern tile sized
+   *  to the current zoom (CSS background scales with the page, so the pattern
+   *  reads identically at every level). */
+  private applyBackground(frame: HTMLElement): void {
+    const bg = this.ctx.background;
+    frame.style.backgroundColor = bg?.color ?? "#ffffff";
+    if (bg?.tileSrc && bg.tilePx) {
+      const size = Math.max(1, Math.round(bg.tilePx * this.factor));
+      frame.style.backgroundImage = `url(${bg.tileSrc})`;
+      frame.style.backgroundSize = `${size}px ${size}px`;
+    } else {
+      frame.style.backgroundImage = "none";
+    }
+  }
+
   /** Lay out page slots for a flow result and repaint visible pages. The
    *  stage is built once and lives across documents — every sync must
    *  refresh the context (an opened file's headers/footers arrive here). */
-  sync(pages: FlowPage[], flow: ProjectedFlowBox, furniture?: ProjectedPageFurniture): void {
+  sync(
+    pages: FlowPage[],
+    flow: ProjectedFlowBox,
+    furniture?: ProjectedPageFurniture,
+    background?: ProjectedPageBackground,
+  ): void {
     this.pages = pages;
     this.ctx.flow = flow;
     if (furniture !== undefined) this.ctx.furniture = furniture;
+    // A pure derived value (recomputed per render) — always overwritten so a
+    // document without a background clears the previous one's tile.
+    this.ctx.background = background;
     this.layoutFurniture();
     const w = this.pageCss(flow.pageWidthPx);
     const h = this.pageCss(flow.pageHeightPx);
@@ -185,7 +215,6 @@ export class CanvasStage {
         width: `${w}px`,
         height: `${h}px`,
         marginBottom: `${PAGE_GAP}px`,
-        backgroundColor: "#ffffff",
         boxShadow: "0 1px 3px rgba(0,0,0,.2), 0 4px 12px rgba(0,0,0,.08)",
       } satisfies Partial<CSSStyleDeclaration>);
       // Pristine inner div the App takes over as its view.
@@ -244,18 +273,18 @@ export class CanvasStage {
     this.repaint(app, this.slots.indexOf(slot));
   }
 
-  /** Lay each furniture slot out once (width = the content box, the same grid
-   *  context as body blocks) and remember each stack's height for the footer's
-   *  bottom-edge placement. */
+  /** Lay each furniture slot out once (width = the content box) and remember
+   *  each stack's height for the footer's bottom-edge placement. No grid
+   *  context: Word snaps header/footer paragraphs to their natural line
+   *  height — the body docGrid does not apply to the furniture story. */
   private layoutFurniture(): void {
     this.furnitureStacks = new Map();
     const f = this.ctx.furniture;
     if (!f) return;
     const measurer = new TextMeasurer(this.ctx.metrics);
-    const ctx = this.ctx.flow.linePitchPx ? { linePitchPx: this.ctx.flow.linePitchPx } : undefined;
     const lay = (blocks: typeof f.header): readonly LaidOutStackItem[] | undefined => {
       if (!blocks) return undefined;
-      const laid = stackBlocks(blocks, this.ctx.flow.contentWidthPx, ctx, measurer);
+      const laid = stackBlocks(blocks, this.ctx.flow.contentWidthPx, undefined, measurer);
       this.furnitureStacks.set(laid.stack, laid.heightPx);
       return laid.stack;
     };

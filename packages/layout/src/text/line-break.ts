@@ -377,6 +377,9 @@ export function packLines(inline: LayoutInline[], opts: PackLinesOptions): Packe
     let hasCjk = false;
     let tallestPicturePx = 0;
     let hasText = false;
+    // Whether any closing atom was placed this pass — an intentional blank
+    // line always comes from one (a hard break); see the phantom guard below.
+    let closedAtom = false;
     let endInlineIndex = 0;
     let brokeMidGroup = false;
     let hangPx = 0;
@@ -480,8 +483,10 @@ export function packLines(inline: LayoutInline[], opts: PackLinesOptions): Packe
           });
           xLine += advancePx;
           endInlineIndex = group.closerIndex;
+          closedAtom = true;
         } else if (group.hardBreak) {
           endInlineIndex = group.closerIndex;
+          closedAtom = true;
           break;
         }
       }
@@ -497,6 +502,17 @@ export function packLines(inline: LayoutInline[], opts: PackLinesOptions): Packe
     // text-sized natural, and the painter's grid centering sinks the picture
     // by half its height instead of pinning it to the line top.
     if (tallestPicturePx > naturalPx) naturalPx = tallestPicturePx;
+
+    // An exhausted stream re-enters the packing loop once more before every
+    // cursor reports done; that pass places nothing (the resolver emits an
+    // empty range for the trailing run) and must not become a line — a
+    // phantom blank row under every short centered title. A deliberate
+    // blank line closes its own hard-break/tab atom first, so `closedAtom`
+    // keeps those while suppressing only the artifact.
+    if (lineItems.length === 0 && lines.length > 0 && !closedAtom) {
+      lineIndex++;
+      continue;
+    }
 
     lines.push({
       items: lineItems,

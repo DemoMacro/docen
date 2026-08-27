@@ -118,6 +118,8 @@ interface PathDraft {
   fill?: string;
   strokeWidth?: number;
   strokeColor?: string;
+  /** Preset dash token — threaded to the member's line.dash verbatim. */
+  dash?: string;
 }
 
 interface PicDraft {
@@ -162,6 +164,23 @@ interface BrushInfo {
 interface PenInfo {
   width: number;
   color?: string;
+  /** GDI+ DashStyle preset token (a prstDash value) — the pen's line style. */
+  dash?: string;
+}
+
+/** GDI+ DashStyle enum values → prstDash tokens (the member protocol's dash
+ *  vocabulary); Solid stays absent. */
+const DASH_STYLE_TOKENS = ["", "", "sysDash", "sysDot", "sysDashDot", "sysDashDotDot"];
+
+/** Custom DashStyle (5) carries a repeat array in pen-width units; the corpus
+ *  emits exactly the two stock shapes ([3,1] Dash, [1,1] Dot), so only those
+ *  map to tokens — anything else falls back to solid rather than inventing a
+ *  pattern the renderer has no verified sample for. */
+function dashTokenFor(dashes: number[]): string | undefined {
+  const key = dashes.map((n) => Math.round(n)).join(",");
+  if (key === "3,1") return "sysDash";
+  if (key === "1,1") return "sysDot";
+  return undefined;
 }
 interface PathInfo {
   cmds: PathCmds;
@@ -201,16 +220,54 @@ function decodeObject(
       return undefined;
     }
     case OBJ_PEN: {
-      const width = view.getFloat32(base + 8, true);
+      // EmfPlusPen layout (corpus-verified): BrushId u32, PenDataFlags u32,
+      // Unit u32, Width REAL — the trailing brush blob carries the color.
+      const flags = view.getUint32(base + 4, true);
+      const width = view.getFloat32(base + 12, true);
+      let cursor = base + 16;
+      // OptionalData fields consumed in ascending PenDataFlags bit order
+      // ([MS-EMFPLUS] §2.2.2.28): transform(6 REALs), start/end cap, join,
+      // miter limit, dash style DWORD, dashed-line cap, dashed-line offset
+      // REAL, then the length-prefixed dash array; caps/compound arrays and
+      // non-center/alignment words beyond that are skipped unparsed.
+      if (flags & 0x0001) cursor += 24;
+      if (flags & 0x0002) cursor += 4;
+      if (flags & 0x0004) cursor += 4;
+      if (flags & 0x0008) cursor += 4;
+      if (flags & 0x0010) cursor += 4;
+      let style: number | undefined;
+      if (flags & 0x0020) {
+        style = view.getUint32(cursor, true);
+        cursor += 4;
+      }
+      if (flags & 0x0040) cursor += 4;
+      if (flags & 0x0080) cursor += 4;
+      let dashes: number[] | undefined;
+      if (flags & 0x0100) {
+        const n = view.getUint32(cursor, true);
+        if (n > 0 && n <= 16 && cursor + 4 + n * 4 <= end) {
+          dashes = [];
+          for (let i = 0; i < n; i++) dashes.push(view.getFloat32(cursor + 4 + i * 4, true));
+        }
+        cursor += 4 + Math.min(n ?? 0, 16) * 4;
+      }
+      if (flags & 0x0200) cursor += 4;
+      if (flags & 0x0400) {
+        const n = view.getUint32(cursor, true);
+        cursor += 4 + Math.min(n, 64) * 4;
+      }
+      const dash =
+        dashes != null ? dashTokenFor(dashes) : DASH_STYLE_TOKENS[style ?? 0] || undefined;
       let color: string | undefined;
-      for (let p = base + 12; p + 12 <= end; p += 4) {
-        // The pen embeds its own solid-color brush block.
-        if (view.getUint32(p, true) === GDIPLUS_VERSION && view.getUint32(p + 4, true) === 0) {
+      // The pen's own brush follows all optional fields ([totalSize][version]
+      // stamped), then one byte-size word + a zero word before the ARGB.
+      for (let p = cursor; p + 12 <= end; p += 4) {
+        if ((view.getUint32(p, true) & 0xffff0000) === (GDIPLUS_VERSION & 0xffff0000)) {
           color = argbHex(view.getUint32(p + 8, true));
           break;
         }
       }
-      return { width, color };
+      return { width, ...(dash ? { dash } : {}), color };
     }
     case OBJ_PATH:
       return decodePath(payload, view, end, base);
@@ -432,7 +489,20 @@ export function emfPlusMembers(
   if (!emf) return undefined;
   const drafts = carrierDrafts(emf, undefined, 0);
   if (!drafts.length) return undefined;
-  return finalize(drafts, boxW, boxH);
+  // The carrier's declared device frame (EMR_HEADER rclBounds, [MS-EMF] §2.3.4.1)
+  // anchors the display mapping.
+  let frame: { x: number; y: number; w: number; h: number } | undefined;
+  if (emf.length >= 24) {
+    const v = new DataView(emf.buffer, emf.byteOffset, emf.byteLength);
+    if (v.getUint32(0, true) === 1 && v.getUint32(4, true) >= 88) {
+      const l = v.getInt32(8, true),
+        t = v.getInt32(12, true),
+        r = v.getInt32(16, true),
+        b = v.getInt32(20, true);
+      if (r > l && b > t) frame = { x: l, y: t, w: r - l, h: b - t };
+    }
+  }
+  return finalize(drafts, boxW, boxH, frame);
 }
 
 /** Nested-metafile recursion guard — a self-referencing or malformed blob
@@ -570,17 +640,25 @@ function carrierDrafts(emf: Uint8Array, basis: Xform | undefined, depth: number)
       case PLUS_FILL_PATH: {
         installOpenRuns();
         const path = objects.get(objectId) as PathInfo | undefined;
-        if (path?.cmds && lastBrush?.solid)
-          pushPath(drafts, path.cmds, effOf(xf), { fill: lastBrush.solid });
+        // ColorEmphasis flag (0x8000): the record carries its own solid color
+        // inline ([u32][ARGB] behind the header) instead of the last-defined
+        // brush — corpus census shows every inlined color is opaque ARGB.
+        const fill = flags & 0x8000 ? argbHex(pv.getUint32(d + 4, true)) : lastBrush?.solid;
+        if (path?.cmds && fill) pushPath(drafts, path.cmds, effOf(xf), { fill });
         break;
       }
       case PLUS_DRAW_PATH: {
         installOpenRuns();
         const path = objects.get(objectId) as PathInfo | undefined;
         if (path?.cmds && lastPen?.color) {
-          pushPath(drafts, path.cmds, effOf(xf), {
+          // A World-unit pen's width rides its world transform like text does
+          // (the same average-axis factor gdiTextDrafts applies to lfHeight).
+          const eff = effOf(xf);
+          const scale = (Math.abs(eff.m11) + Math.abs(eff.m22)) / 2;
+          pushPath(drafts, path.cmds, eff, {
             strokeColor: lastPen.color,
-            strokeWidth: lastPen.width,
+            strokeWidth: lastPen.width * scale,
+            ...(lastPen.dash ? { dash: lastPen.dash } : {}),
           });
         }
         break;
@@ -687,7 +765,7 @@ function pushPath(
   drafts: Draft[],
   rawCmds: PathCmds,
   xf: Xform,
-  paint: { fill?: string; strokeColor?: string; strokeWidth?: number },
+  paint: { fill?: string; strokeColor?: string; strokeWidth?: number; dash?: string },
 ): void {
   const transformed: PathCmds = rawCmds.map(([op, nums]) => {
     if (op === "Z") return [op, nums];
@@ -703,7 +781,11 @@ function pushPath(
     cmds: transformed,
     ...(paint.fill ? { fill: paint.fill } : {}),
     ...(paint.strokeColor && paint.strokeWidth != null
-      ? { strokeColor: paint.strokeColor, strokeWidth: paint.strokeWidth }
+      ? {
+          strokeColor: paint.strokeColor,
+          strokeWidth: paint.strokeWidth,
+          ...(paint.dash ? { dash: paint.dash } : {}),
+        }
       : {}),
   });
 }
@@ -1001,36 +1083,52 @@ function participatesInBox(dr: Draft): boolean {
 }
 
 /** Scale drafts from EMF device coordinates into the display box and shape
- *  the renderer-facing members. Independent axis scales preserve relative
- *  layout; label proportions ride along because text arrives as outlines. */
-function finalize(drafts: Draft[], boxW: number, boxH: number): LayoutDrawingMember[] | undefined {
-  let minX = Infinity,
-    minY = Infinity,
-    maxX = -Infinity,
-    maxY = -Infinity;
-  for (const dr of drafts) {
-    if (!participatesInBox(dr)) continue;
-    if (dr.kind === "path") {
-      for (const [, nums] of dr.cmds) {
-        for (let i = 0; i + 1 < nums.length; i += 2) {
-          minX = Math.min(minX, nums[i]);
-          maxX = Math.max(maxX, nums[i]);
-          minY = Math.min(minY, nums[i + 1]);
-          maxY = Math.max(maxY, nums[i + 1]);
+ *  the renderer-facing members. Word maps the EMF's declared device frame
+ *  (EMR_HEADER rclBounds) onto the extent independently per axis — content
+ *  below the frame's bottom edge (deliberate whitespace bands) stays inside
+ *  the box instead of stretching everything above it. When the frame is
+ *  unavailable or degenerate, the union bounding box stands in. */
+function finalize(
+  drafts: Draft[],
+  boxW: number,
+  boxH: number,
+  frame?: { x: number; y: number; w: number; h: number },
+): LayoutDrawingMember[] | undefined {
+  let minX: number, minY: number, sX: number, sY: number;
+  if (frame && frame.w > 0 && frame.h > 0) {
+    minX = frame.x;
+    minY = frame.y;
+    sX = boxW / frame.w;
+    sY = boxH / frame.h;
+  } else {
+    let x0 = Infinity,
+      y0 = Infinity,
+      x1 = -Infinity,
+      y1 = -Infinity;
+    for (const dr of drafts) {
+      if (!participatesInBox(dr)) continue;
+      if (dr.kind === "path") {
+        for (const [, nums] of dr.cmds) {
+          for (let i = 0; i + 1 < nums.length; i += 2) {
+            x0 = Math.min(x0, nums[i]);
+            x1 = Math.max(x1, nums[i]);
+            y0 = Math.min(y0, nums[i + 1]);
+            y1 = Math.max(y1, nums[i + 1]);
+          }
         }
+        continue;
       }
-      continue;
+      x0 = Math.min(x0, dr.x);
+      y0 = Math.min(y0, dr.y);
+      x1 = Math.max(x1, dr.x + dr.w);
+      y1 = Math.max(y1, dr.y + dr.h);
     }
-    minX = Math.min(minX, dr.x);
-    minY = Math.min(minY, dr.y);
-    maxX = Math.max(maxX, dr.x + dr.w);
-    maxY = Math.max(maxY, dr.y + dr.h);
+    minX = x0;
+    minY = y0;
+    if (!(x1 - x0 > 0 && y1 - y0 > 0)) return undefined;
+    sX = boxW / (x1 - x0);
+    sY = boxH / (y1 - y0);
   }
-  const bw = maxX - minX,
-    bh = maxY - minY;
-  if (!(bw > 0 && bh > 0)) return undefined;
-  const sX = boxW / bw,
-    sY = boxH / bh;
   const X = (x: number) => (x - minX) * sX;
   const Y = (y: number) => (y - minY) * sY;
   const members: LayoutDrawingMember[] = [];
@@ -1110,7 +1208,9 @@ function finalize(drafts: Draft[], boxW: number, boxH: number): LayoutDrawingMem
       d: parts.join(""),
       ...(dr.fill ? { fill: dr.fill, fillRule: "evenodd" as const } : {}),
       ...(dr.strokeColor && strokeWidth
-        ? { line: { px: strokeWidth, color: dr.strokeColor } }
+        ? {
+            line: { px: strokeWidth, color: dr.strokeColor, ...(dr.dash ? { dash: dr.dash } : {}) },
+          }
         : {}),
     });
     if (members.length > MEMBERS_CAP) return undefined;

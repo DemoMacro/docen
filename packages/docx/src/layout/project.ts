@@ -972,6 +972,9 @@ function wpsMemberOf(
       // VerticalAnchor is already full-word ("top"/"center"/"bottom");
       // justify/distribute stretch to the box — treated as top until then.
       anchor: bodyPr.anchor === "center" || bodyPr.anchor === "bottom" ? bodyPr.anchor : "top",
+      // a:spAutoFit: Word draws the box shrunk to its text — the declared
+      // extent's height is stale and must not drive vertical centering.
+      ...(bodyPr.spAutoFit === true ? { autoFit: true } : {}),
       blocks,
     };
   }
@@ -1763,6 +1766,82 @@ function projectPageFurniture(doc: DocumentOptions): ProjectedPageFurniture {
   };
 }
 
+/** Page background projected for painting (w:background): the solid page
+ *  color plus — when the round-tripped VML fill is a pattern — the tile
+ *  bitmap. The v:fill's 1bpp hatch tile recolors in place (its palette IS the
+ *  paint: bit-1 ink takes w:color, bit-0 paper takes the fill's color2),
+ *  which is how Word paints the element; the reference render matches the
+ *  tile at 4× its natural pixel size (8px → 32px), smoothed by the browser's
+ *  bilinear image scaling. */
+export interface ProjectedPageBackground {
+  /** w:background @w:color — the page base under the tile. */
+  color?: string;
+  /** Pattern tile: full BMP file (palette already remapped) as a data URL. */
+  tileSrc?: string;
+  /** On-page tile size in px at 100% zoom. */
+  tilePx?: number;
+}
+
+/** A pattern tile reads correctly at 4× the tile's pixel size; smaller
+ *  looks like a checkerboard, larger smears the texture away. */
+const TILE_SCALE = 4;
+
+function projectPageBackground(doc: DocumentOptions): ProjectedPageBackground | undefined {
+  const bg = doc.background as
+    | {
+        color?: string;
+        rawXml?: string;
+        rawMedia?: Array<{ fileName?: string; type?: string; data?: Uint8Array }>;
+      }
+    | undefined;
+  if (!bg) return undefined;
+  const raw = bg.rawXml ?? "";
+  const hexOf = (m: RegExpMatchArray | null): string | undefined =>
+    m ? m[1].toUpperCase() : undefined;
+  const color = hexOf(raw.match(/<w:background[^>]*\sw:color="([0-9A-Fa-f]{6})"/));
+  const out: ProjectedPageBackground = color ? { color } : {};
+  const fill = raw.match(/<v:fill[^>]*type="pattern"[^>]*>/);
+  const rid = fill?.[0].match(/\sr:id="\{?([^"}]+)\}?"/)?.[1];
+  const media =
+    (rid ? bg.rawMedia?.find((m) => m.fileName === rid) : undefined) ??
+    bg.rawMedia?.find((m) => m.type === "bmp");
+  const data = media?.data;
+  if (!fill || !data) return Object.keys(out).length > 0 ? out : undefined;
+  if (
+    data.length < 62 ||
+    data[0] !== 0x42 ||
+    data[1] !== 0x4d // "BM" — a complete BMP file
+  ) {
+    return out;
+  }
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  const headerSize = view.getUint32(14, true);
+  const bpp = view.getUint16(28, true);
+  const clrUsed = view.getUint32(46, true) || (bpp <= 8 ? 1 << bpp : 0);
+  const paletteAt = 14 + headerSize;
+  if (bpp !== 1 || clrUsed !== 2 || paletteAt + 8 > data.length) return out;
+  // Rewrite the 2-entry palette: entry 0 (bit 0) the fill's paper color,
+  // entry 1 (bit 1) the page's ink color — pixel data passes untouched.
+  const setEntry = (at: number, hex: string): void => {
+    data[at] = parseInt(hex.slice(4, 6), 16);
+    data[at + 1] = parseInt(hex.slice(2, 4), 16);
+    data[at + 2] = parseInt(hex.slice(0, 2), 16);
+    data[at + 3] = 0;
+  };
+  setEntry(paletteAt, hexOf(fill[0].match(/\scolor2="#?([0-9A-Fa-f]{6})"/)) ?? "FFFFFF");
+  setEntry(paletteAt + 4, color ?? "000000");
+  let bin = "";
+  const CHUNK = 0x8000;
+  for (let i = 0; i < data.length; i += CHUNK) {
+    bin += String.fromCharCode(...data.subarray(i, i + CHUNK));
+  }
+  return {
+    ...out,
+    tileSrc: `data:image/bmp;base64,${btoa(bin)}`,
+    tilePx: view.getInt32(18, true) * TILE_SCALE,
+  };
+}
+
 /** Project a full DocumentOptions into the engine's input: the FIRST section's
  *  body and flow box (multi-section flow — later sectPrs arrive as body-level
  *  section breaks — is a later milestone; sections beyond the first are
@@ -1771,6 +1850,7 @@ export function projectDocumentOptions(doc: DocumentOptions): {
   blocks: LayoutBlock[];
   flow: ProjectedFlowBox;
   furniture: ProjectedPageFurniture;
+  background?: ProjectedPageBackground;
 } {
   const ctx: ProjectContext = {
     styles: doc.styles,
@@ -1789,5 +1869,6 @@ export function projectDocumentOptions(doc: DocumentOptions): {
     blocks,
     flow: projectFlowBox(doc.sections?.[0]?.properties),
     furniture: projectPageFurniture(doc),
+    background: projectPageBackground(doc),
   };
 }

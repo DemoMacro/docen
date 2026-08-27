@@ -1025,7 +1025,7 @@ class DocenDocument extends AddinHost<Editor> {
    *  the caret map against the fresh geometry. */
   #renderDoc(doc: JSONContent): void {
     if (!this.#stageHost) return;
-    const { blocks, flow, furniture } = projectDocumentOptions(compileDocument(doc));
+    const { blocks, flow, furniture, background } = projectDocumentOptions(compileDocument(doc));
     const pages = layoutFlow(blocks, flow, this.#measurer);
     this.#pages = pages;
     this.#flow = flow;
@@ -1037,7 +1037,7 @@ class DocenDocument extends AddinHost<Editor> {
     // A `zoom` attribute parsed before the stage existed only recorded the
     // level here — push it in before the first sync sizes the slots.
     if (this.#stage.zoom !== this.#zoom) this.#stage.setZoom(this.#zoom);
-    this.#stage.sync(pages, flow, furniture);
+    this.#stage.sync(pages, flow, furniture, background);
     this.#bridge?.updatePages(pages, flow);
     this.#updateStatus();
   }

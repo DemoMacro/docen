@@ -418,7 +418,12 @@ function paintMembers(
           path: m.d,
           fill: m.fill ? `#${m.fill}` : undefined,
           stroke: m.line ? (m.line.color ? `#${m.line.color}` : "#000000") : undefined,
-          strokeWidth: m.line?.px,
+          // A dashed hairline disappears entirely: the antialiased 1 px stroke
+          // fades under the dash gaps and nothing survives. Hold a 1.5 px
+          // floor on dashed strokes so the pattern renders; solid lines keep
+          // their true width (fading is invisible there).
+          strokeWidth:
+            m.line?.px != null ? (m.line.dash ? Math.max(m.line.px, 1.5) : m.line.px) : undefined,
           strokeCap:
             m.line?.cap === "round" ? "round" : m.line?.cap === "square" ? "square" : undefined,
           strokeJoin:
@@ -476,7 +481,13 @@ function paintMembers(
       const laid = stackBlocks(m.blocks, inner, undefined, measurer);
       let oy = my + (m.insets?.top ?? 0);
       if (m.anchor !== "top") {
-        const slack = m.height - (m.insets?.top ?? 0) - (m.insets?.bottom ?? 0) - laid.heightPx;
+        // spAutoFit shrinks the drawn box to the text, so slack resolves
+        // against the fitted height — an oversized declared extent (stale
+        // cy from a template) must not push the text down/center the box.
+        const boxH = m.autoFit
+          ? (m.insets?.top ?? 0) + laid.heightPx + (m.insets?.bottom ?? 0)
+          : m.height;
+        const slack = boxH - (m.insets?.top ?? 0) - (m.insets?.bottom ?? 0) - laid.heightPx;
         oy += m.anchor === "center" ? Math.max(0, slack / 2) : Math.max(0, slack);
       }
       for (const item of laid.stack) {
