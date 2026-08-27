@@ -108,3 +108,102 @@ export function decodedBmp(src: string | undefined): Uint8Array {
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
   return bytes;
 }
+
+// ── dual-mode (EMF+-carrying) fixtures ──
+// A placeable WMF whose META_ESCAPE/MFCOMMENT chunks embed a complete EMF of
+// EMR_GDICOMMENT "EMF+" payloads; the player must reassemble both layers.
+
+/** One EmfPlus record: type/flags header plus raw body. */
+export function epRecord(type: number, flags: number, body: Uint8Array): Uint8Array {
+  const buf = new Uint8Array(8 + body.length);
+  const v = new DataView(buf.buffer);
+  v.setUint16(0, type, true);
+  v.setUint16(2, flags, true);
+  v.setUint32(4, buf.length, true);
+  buf.set(body, 8);
+  return buf;
+}
+
+/** An EMR wrapping a GDI comment whose private data is an "EMF+" stream. */
+function emrEmfPlusComment(plusRecords: Uint8Array[]): Uint8Array {
+  const plusLen = plusRecords.reduce((n, r) => n + r.length, 0);
+  const buf = new Uint8Array(16 + plusLen);
+  const v = new DataView(buf.buffer);
+  v.setUint32(0, 70, true); // EMR_GDICOMMENT
+  v.setUint32(4, buf.length, true);
+  v.setUint32(8, plusLen + 4, true); // DataSize
+  v.setUint32(12, 0x2b464d45, true); // "EMF+" signature
+  let off = 16;
+  for (const r of plusRecords) {
+    buf.set(r, off);
+    off += r.length;
+  }
+  return buf;
+}
+
+/** Minimal EMF carrier: header-sized dummy record then the comment(s). */
+function emfCarrier(comments: Uint8Array[]): Uint8Array {
+  const head = new Uint8Array(100);
+  new DataView(head.buffer).setUint32(0, 1, true); // EMR_HEADER
+  new DataView(head.buffer).setUint32(4, head.length, true);
+  const eof = new Uint8Array(20);
+  new DataView(eof.buffer).setUint32(0, 14, true); // EMR_EOF
+  new DataView(eof.buffer).setUint32(4, eof.length, true);
+  const parts = [head, ...comments, eof];
+  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+  let off = 0;
+  for (const p of parts) {
+    out.set(p, off);
+    off += p.length;
+  }
+  return out;
+}
+
+/** Wrap one EMF into WMFC escape chunks over a bare placeable WMF. Chunk
+ *  headers carry the reassembly fields the real exporter writes; the player
+ *  reads only the magic and the declared byte count. */
+export function dualModeWmf(emf: Uint8Array, chunkSize = 8192): Uint8Array {
+  const chunks: Uint8Array[] = [];
+  for (let o = 0; o < emf.length || o === 0; o += chunkSize)
+    chunks.push(emf.subarray(o, Math.min(o + chunkSize, emf.length)));
+  // escape data: magic(4) + chunk header(34) + slice
+  const records = chunks.map((c) => {
+    // escape data: magic + 30-byte chunk header (34 total), then the slice
+    const data = new Uint8Array(34 + c.length);
+    new DataView(data.buffer).setUint32(0, 0x43464d57, true); // "WMFC"
+    const v = new DataView(data.buffer);
+    v.setUint16(18, chunks.length, true); // [+18] total chunks
+    v.setUint16(22, c.length, true); // [+22] chunk payload length
+    data.set(c, 34);
+    // WMF records are word-sized; an odd tail is padded by the zero fill.
+    const rec = new Uint8Array((10 + data.length + 1) & ~1);
+    const rv = new DataView(rec.buffer);
+    rv.setUint32(0, rec.length / 2, true); // sizeWords
+    rv.setUint16(4, 0x0626, true); // META_ESCAPE
+    rv.setUint16(6, 0x0626, true); // MFCOMMENT
+    rv.setUint16(8, data.length, true); // byte count
+    rec.set(data, 10);
+    return rec;
+  });
+  const placeable = new Uint8Array(40); // placeable block + WMF header
+  const pv = new DataView(placeable.buffer);
+  pv.setUint32(0, 0x9ac6cdd7, true);
+  pv.setInt16(6, 0, true);
+  pv.setInt16(8, 0, true);
+  pv.setInt16(10, 605, true);
+  pv.setInt16(12, 240, true);
+  pv.setUint16(14, 1440, true);
+  const total = [placeable, ...records].reduce((n, p) => n + p.length, 0);
+  const out = new Uint8Array(total);
+  let off = 0;
+  for (const p of [placeable, ...records]) {
+    out.set(p, off);
+    off += p.length;
+  }
+  return out;
+}
+
+/** Dual-mode WMF carrying the given EmfPlus records inside one comment. */
+export function emfPlusWmf(plusRecords: Uint8Array[], chunkSize?: number): Uint8Array {
+  return dualModeWmf(emfCarrier([emrEmfPlusComment(plusRecords)]), chunkSize);
+}

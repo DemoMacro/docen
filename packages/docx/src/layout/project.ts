@@ -44,6 +44,7 @@ import type {
 
 import { resolvePageSize } from "../extensions/utils";
 import { defaultParagraphStyleId, indexParagraphStyles, mergeStyleChain } from "../style-cascade";
+import { emfPlusMembers } from "./emf-plus";
 import { wmfMembers } from "./wmf";
 import { wmfDibFallback } from "./wmf-dib";
 
@@ -224,7 +225,11 @@ function metafileFallback(type: string, data: string | Uint8Array): string | und
  *  (a real MIME) return undefined — they paint through `src` directly.
  *  Mask-layer files (SRCPAINT/SRCAND blts, no SRCCOPY) replay text and
  *  strokes but not their photo — the flat DIB backdrop carries it under
- *  the members (see wmf-dib.ts for the extraction). */
+ *  the members (see wmf-dib.ts for the extraction).
+ *
+ * Dual-mode files carry their real art as an embedded GDI+ stream
+ * (emf-plus.ts); that replay wins when present and already includes every
+ * raster it draws, so no DIB backdrop is layered beneath it. */
 function metafileMembers(
   pic: { type?: unknown; data?: unknown },
   boxW: number,
@@ -237,6 +242,10 @@ function metafileMembers(
   const key = `${pic.type}:${data.length}:${head}:${Math.round(boxW)}x${Math.round(boxH)}`;
   return wmfMembersOf(key, () => {
     const bytes = typeof data === "string" ? base64ToBytes(data) : data;
+    if (bytes) {
+      const plus = emfPlusMembers(bytes, boxW, boxH);
+      if (plus) return plus;
+    }
     const replay = bytes ? wmfMembers(bytes, boxW, boxH) : undefined;
     if (!replay) return undefined;
     if (!replay.some((m) => m.kind === "picture")) {
