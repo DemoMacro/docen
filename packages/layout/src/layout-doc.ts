@@ -129,6 +129,10 @@ export type LayoutDrawingMember =
       insets?: { left?: number; top?: number; right?: number; bottom?: number };
       /** Vertical anchoring (bodyPr @anchor). */
       anchor?: "top" | "center" | "bottom";
+      /** Paint the runs as one unwrapped line at the box origin — metafile
+       *  text (GDI ExtTextOut / EMF+ DrawString) draws the string as-is and
+       *  never word-wraps, so the width re-fit must not re-break it. */
+      nowrap?: boolean;
       /** The box's content as projected blocks — the renderer stacks them
        *  inside the box (the flow never sees them; the drawing wraps none). */
       blocks: LayoutBlock[];

@@ -185,49 +185,48 @@ function paintParagraph(
             : inline.field === "numPages"
               ? String(ctx.pageCount)
               : item.text;
-        tree.add(
-          new Text({
-            x: lineX + item.xPx,
-            y: lineY + pad,
-            // width ONLY on justified items (their stretch interval): a width
-            // on every line would let Leafer wrap the slice again with its
-            // own metrics (a phantom second line). textWrap "none" keeps the
-            // interval from wrapping; height keeps the element paintable
-            // (height 0 is skipped by Leafer).
-            width: intervalPx,
-            textWrap: justified ? "none" : undefined,
-            // CJK items spread per glyph (both-letter); Latin items spread
-            // per word gap (both-justify — Leafer's word mode, Word's Latin
-            // justification). "both" keeps the single-row Text justifiable.
-            textAlign: justified
-              ? /[一-鿿぀-ヿ가-힯]/.test(item.text)
-                ? "both-letter"
-                : "both-justify"
-              : undefined,
-            height: Math.max(1, line.heightPx),
-            text: label,
-            fill: inline.style.color ? `#${inline.style.color}` : "#1b1b1b",
-            textDecoration:
-              inline.style.underline && inline.style.strikethrough
-                ? "under-delete"
-                : inline.style.underline
-                  ? "under"
-                  : inline.style.strikethrough
-                    ? "delete"
-                    : undefined,
-            fontFamily: family,
-            fontSize: inline.style.sizePx,
-            // Numbers only: Leafer's fontWeight setter treats strings as named
-            // weights ("bold"/"thin"…) and silently maps unknown strings to 400,
-            // so a string "700" would lose bold. Italic is the `italic` boolean
-            // property — there is no fontStyle.
-            fontWeight: inline.style.bold ? 700 : 400,
-            italic: inline.style.italic,
-            letterSpacing: inline.style.letterSpacingPx
-              ? { type: "px", value: inline.style.letterSpacingPx }
-              : undefined,
-          }),
-        );
+        const textEl = new Text({
+          x: lineX + item.xPx,
+          y: lineY + pad,
+          // width ONLY on justified items (their stretch interval): a width
+          // on every line would let Leafer wrap the slice again with its
+          // own metrics (a phantom second line). textWrap "none" keeps the
+          // interval from wrapping; height keeps the element paintable
+          // (height 0 is skipped by Leafer).
+          width: intervalPx,
+          textWrap: justified ? "none" : undefined,
+          // CJK items spread per glyph (both-letter); Latin items spread
+          // per word gap (both-justify — Leafer's word mode, Word's Latin
+          // justification). "both" keeps the single-row Text justifiable.
+          textAlign: justified
+            ? /[一-鿿぀-ヿ가-힯]/.test(item.text)
+              ? "both-letter"
+              : "both-justify"
+            : undefined,
+          height: Math.max(1, line.heightPx),
+          text: label,
+          fill: inline.style.color ? `#${inline.style.color}` : "#1b1b1b",
+          textDecoration:
+            inline.style.underline && inline.style.strikethrough
+              ? "under-delete"
+              : inline.style.underline
+                ? "under"
+                : inline.style.strikethrough
+                  ? "delete"
+                  : undefined,
+          fontFamily: family,
+          fontSize: inline.style.sizePx,
+          // Numbers only: Leafer's fontWeight setter treats strings as named
+          // weights ("bold"/"thin"…) and silently maps unknown strings to 400,
+          // so a string "700" would lose bold. Italic is the `italic` boolean
+          // property — there is no fontStyle.
+          fontWeight: inline.style.bold ? 700 : 400,
+          italic: inline.style.italic,
+          letterSpacing: inline.style.letterSpacingPx
+            ? { type: "px", value: inline.style.letterSpacingPx }
+            : undefined,
+        });
+        tree.add(textEl);
       } else if (item.kind === "picture" && inline.kind === "picture") {
         if (inline.members) {
           // A metafile source replayed into members (WMF vector layers): the
@@ -393,20 +392,7 @@ function paintMembers(
       if (m.src && m.crop) {
         addCroppedImage(tree, m, mx, my);
       } else if (m.src) {
-        tree.add(
-          new LeaferImage({
-            url: m.src,
-            x: mx,
-            y: my,
-            width: m.width,
-            height: m.height,
-            // Mirrors flip around the element's (x,y) origin: shifting the
-            // origin to the far edge first makes the reflection cover the
-            // original box exactly.
-            ...(m.flipH ? { x: mx + m.width, scaleX: -1 } : {}),
-            ...(m.flipV ? { y: my + m.height, scaleY: -1 } : {}),
-          }),
-        );
+        addPlainImage(tree, m, mx, my);
       } else {
         tree.add(
           new Rect({
@@ -482,7 +468,11 @@ function paintMembers(
     } else {
       const measurer = new TextMeasurer(ctx.metrics);
       const left = m.insets?.left ?? 0;
-      const inner = Math.max(0, m.width - left - (m.insets?.right ?? 0));
+      // Metafile runs carry nowrap: GDI draws the string as-is, so the width
+      // re-fit must not re-break it into phantom lines.
+      const inner = m.nowrap
+        ? Number.POSITIVE_INFINITY
+        : Math.max(0, m.width - left - (m.insets?.right ?? 0));
       const laid = stackBlocks(m.blocks, inner, undefined, measurer);
       let oy = my + (m.insets?.top ?? 0);
       if (m.anchor !== "top") {
@@ -504,15 +494,56 @@ function rgbaOf(hex: string, opacity: number): string {
   return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${opacity})`;
 }
 
+/** An uncropped picture. The element must join the tree only once its encoding
+ *  is decoded (the stage renders eagerly right after paint — Leafer's
+ *  change-driven re-render stalls afterwards, so an Image added before its
+ *  url has a bitmap would be force-rendered empty and never picked back up).
+ *  A transparent placeholder holds the paint-order slot meanwhile: the async
+ *  insert must not land on top of members painted after this one, or z-order
+ *  would follow decode completion instead of record order (labels would sink
+ *  under their plates). */
+function addPlainImage(
+  tree: IGroup,
+  m: Extract<LayoutDrawingMember, { kind: "picture" }>,
+  mx: number,
+  my: number,
+): void {
+  const slot = new Rect({ x: mx, y: my, width: m.width, height: m.height });
+  tree.add(slot);
+  const el = new Image();
+  el.onload = () => {
+    tree.addAfter(
+      new LeaferImage({
+        url: m.src!,
+        x: mx,
+        y: my,
+        width: m.width,
+        height: m.height,
+        // Mirrors flip around the element's (x,y) origin: shifting the
+        // origin to the far edge first makes the reflection cover the
+        // original box exactly.
+        ...(m.flipH ? { x: mx + m.width, scaleX: -1 } : {}),
+        ...(m.flipV ? { y: my + m.height, scaleY: -1 } : {}),
+      }),
+      slot,
+    );
+    tree.remove(slot);
+  };
+  el.src = m.src!;
+}
+
 /** A cropped picture (a:srcRect): Leafer paints whole sources only, so the
- *  sub-region renders through an offscreen canvas copy, added when decoded
- *  (the stage re-paints on the next sync regardless). */
+ *  sub-region renders through an offscreen canvas copy, added when decoded —
+ *  into the paint-order slot a placeholder kept open for it (see
+ *  addPlainImage; the stage re-paints on the next sync regardless). */
 function addCroppedImage(
   tree: IGroup,
   m: Extract<LayoutDrawingMember, { kind: "picture" }>,
   mx: number,
   my: number,
 ): void {
+  const slot = new Rect({ x: mx, y: my, width: m.width, height: m.height });
+  tree.add(slot);
   const el = new Image();
   el.onload = () => {
     const sx = Math.round(m.crop!.left * el.naturalWidth);
@@ -523,7 +554,7 @@ function addCroppedImage(
     canvas.width = sw;
     canvas.height = sh;
     canvas.getContext("2d")?.drawImage(el, sx, sy, sw, sh, 0, 0, sw, sh);
-    tree.add(
+    tree.addAfter(
       new LeaferImage({
         url: canvas.toDataURL("image/png"),
         x: mx,
@@ -533,7 +564,9 @@ function addCroppedImage(
         ...(m.flipH ? { x: mx + m.width, scaleX: -1 } : {}),
         ...(m.flipV ? { y: my + m.height, scaleY: -1 } : {}),
       }),
+      slot,
     );
+    tree.remove(slot);
   };
   el.src = m.src!;
 }

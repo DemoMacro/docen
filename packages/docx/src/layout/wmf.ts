@@ -13,6 +13,7 @@
 
 import type { LayoutDrawingMember } from "@docen/layout";
 
+import { GDI_CELL_PER_EM } from "./emf-plus";
 import { bltDibAt, bmpDataUrl } from "./wmf-dib";
 
 const CREATE_PEN = 0x02fa;
@@ -467,7 +468,9 @@ function pushTextMember(
   const font = st.font;
   if (!font) return;
   const text = gbkDecoder.decode(bytes.subarray(q, q + count));
-  const sizePx = Math.abs(font.height) * sy();
+  // GDI lfHeight: negative = em height, positive = cell height (em + internal
+  // leading ≈ 1.297 em for the corpus's CJK fonts) — glyphs render at the em.
+  const sizePx = (font.height < 0 ? -font.height : font.height / GDI_CELL_PER_EM) * sy();
   if (!text || sizePx <= 0) return;
   // Advance sum over the dx entries — one per byte; a double-byte char's
   // trail entry is a 0 spacer, so a plain sum is exact. Absent or zero dx
@@ -489,6 +492,7 @@ function pushTextMember(
     y: origin.y - sizePx * 0.8,
     width: Math.ceil(advancePx) + 2,
     height: Math.ceil(sizePx * 1.35),
+    nowrap: true,
     blocks: [
       {
         kind: "paragraph",

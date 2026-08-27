@@ -409,6 +409,10 @@ function base64(b: Uint8Array): string {
 
 const MEMBERS_CAP = 4000;
 
+/** CJK cell-height / em ratio for positive GDI lfHeight values (SimSun's OS/2
+ *  winAscent+winDescent). Shared with the WMF player's font sizing. */
+export const GDI_CELL_PER_EM = 1.2969;
+
 /**
  * Replay a dual-mode WMF's embedded EMF+ stream into drawing members sized to
  * the display box. Returns undefined when there is nothing to replay: no
@@ -613,9 +617,25 @@ function carrierDrafts(emf: Uint8Array, basis: Xform | undefined, depth: number)
     }
     po += rs;
   }
-  // Dual-mode carriers keep the real text on the GDI side; merge those runs
-  // in before deciding whether anything rendered at all.
-  drafts.push(...gdiTextDrafts(emf, effOf));
+  // Dual-mode carriers repeat their text across the two layers (GDI is the
+  // renderer's fallback): a GDI run matching an EMF+ string at the same spot
+  // would paint twice, while the GDI side also carries runs the EMF+ layer
+  // never drew (its DrawString output is partial on corpus files). Merge only
+  // the runs the EMF+ layer lacks — same string within a run-height of the
+  // same spot (the two layers' y conventions differ by up to a line).
+  const plusTexts = drafts.filter((dr) => dr.kind === "text");
+  const gdi = gdiTextDrafts(emf, effOf);
+  drafts.push(
+    ...gdi.filter(
+      (g) =>
+        !plusTexts.some(
+          (p) =>
+            p.text === g.text &&
+            Math.abs(p.x - g.x) <= Math.max(g.w, p.w) &&
+            Math.abs(p.y - g.y) <= Math.max(g.h, p.h) * 2,
+        ),
+    ),
+  );
   return drafts;
 }
 
@@ -916,12 +936,22 @@ function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): TextDraft
           const font = fonts.get(selected);
           // Logical draw origin → carrier device space through the live world
           // transform (folded with any nesting basis); glyph metrics scale with
-          // its uniform factor.
+          // its uniform factor. GDI lfHeight semantics: negative = character
+          // em height, positive = cell height (em + internal leading). Glyphs
+          // render at the em, so a positive height shrinks by the CJK
+          // cell/em ratio — the corpus draws with SimSun/雅黑, whose OS/2
+          // winAscent+winDescent ≈ 1.297 em; files without a font record draw
+          // stock text at the same cell-scale magnitude.
           const eff = effOf ? effOf(xf) : xf;
           const x = view.getInt32(eo + EXT_REF_X, true);
           const yBaseline = view.getInt32(eo + EXT_REF_Y, true);
           const height =
-            Math.abs(font?.height ?? 100) * ((Math.abs(eff.m11) + Math.abs(eff.m22)) / 2);
+            (font
+              ? font.height < 0
+                ? -font.height
+                : font.height / GDI_CELL_PER_EM
+              : 100 / GDI_CELL_PER_EM) *
+            ((Math.abs(eff.m11) + Math.abs(eff.m22)) / 2);
           // Baseline origin → box top by a typical CJK ascent (same calibration
           // as the WMF player); advance falls back to per-char estimates because
           // the trail Dx run is not worth parsing for outline-position accuracy.
@@ -1012,6 +1042,7 @@ function finalize(drafts: Draft[], boxW: number, boxH: number): LayoutDrawingMem
         y: Y(dr.y),
         width: dr.w * sX,
         height: dr.h * sY,
+        nowrap: true,
         blocks: [
           {
             kind: "paragraph",
