@@ -132,8 +132,10 @@ interface PicDraft {
 type Draft = PathDraft | PicDraft;
 
 // ── object decoding ──
-// EmfPlusObject carries TotalObjectSize at payload [+8], the shared version
-// stamp at [+12], and per-type fields from [+16].
+// An object's payload starts at its TotalObjectSize word ([0..3]), then the
+// shared version stamp ([4..7]); per-type fields begin at [+8]. Large images
+// span multiple consecutive EmfPlusObject records — the caller assembles the
+// full byte set first.
 
 interface BrushInfo {
   solid?: string;
@@ -150,23 +152,21 @@ interface ImageInfo {
 }
 
 function decodeObject(
-  view: DataView,
-  po: number,
-  rs: number,
-  buf: Uint8Array,
+  payload: Uint8Array,
+  type: number,
 ): BrushInfo | PenInfo | PathInfo | ImageInfo | undefined {
-  const type = (view.getUint16(po + 2, true) >> 8) & 0x7f;
-  const end = po + rs;
-  if (po + 24 > end) return undefined;
+  const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+  const end = payload.length;
+  if (end < 16) return undefined;
   switch (type) {
     case OBJ_BRUSH: {
-      const brushType = view.getUint32(po + 16, true);
-      if (brushType === 0) return { solid: argbHex(view.getUint32(po + 20, true)) };
+      const brushType = view.getUint32(8, true);
+      if (brushType === 0) return { solid: argbHex(view.getUint32(12, true)) };
       // PathGradient brushes take their declared center color as the flat
       // approximation — the member protocol paints solids only, so a bounded
       // scan for the first bright opaque word stands in until gradient fills
       // become a member-level concept.
-      for (let p = po + 20; p < Math.min(end - 4, po + 160); p += 4) {
+      for (let p = 12; p < Math.min(end - 3, 152); p += 4) {
         const c = view.getUint32(p, true);
         if (c >>> 24 !== 0xff) continue;
         const rgb = c & 0xffffff;
@@ -176,9 +176,9 @@ function decodeObject(
       return undefined;
     }
     case OBJ_PEN: {
-      const width = view.getFloat32(po + 24, true);
+      const width = view.getFloat32(16, true);
       let color: string | undefined;
-      for (let p = po + 28; p + 12 <= end; p += 4) {
+      for (let p = 20; p + 12 <= end; p += 4) {
         // The pen embeds its own solid-color brush block.
         if (view.getUint32(p, true) === GDIPLUS_VERSION && view.getUint32(p + 4, true) === 0) {
           color = argbHex(view.getUint32(p + 8, true));
@@ -188,9 +188,9 @@ function decodeObject(
       return { width, color };
     }
     case OBJ_PATH:
-      return decodePath(view, po, end, buf);
+      return decodePath(payload, view, end);
     case OBJ_IMAGE:
-      return decodeImage(view, po, end, buf);
+      return decodeImage(payload, view, end);
     default:
       return undefined;
   }
@@ -199,29 +199,24 @@ function decodeObject(
 /** GDI+ path persistence: pointCount, pointFormat, points, then one type
  *  byte per point. Type bits 0-2 carry the kind (start/line/bezier); bit 7
  *  marks the end of a closed figure. */
-function decodePath(
-  view: DataView,
-  po: number,
-  end: number,
-  buf: Uint8Array,
-): PathInfo | undefined {
-  if (po + 28 > end) return undefined;
-  const count = view.getUint32(po + 16, true);
-  const compressed = (view.getUint32(po + 20, true) & 0x2000) !== 0;
+function decodePath(payload: Uint8Array, view: DataView, end: number): PathInfo | undefined {
+  if (end < 20) return undefined;
+  const count = view.getUint32(8, true);
+  const compressed = (view.getUint32(12, true) & 0x2000) !== 0;
   if (!count || count > 100_000) return undefined;
   const step = compressed ? 4 : 8;
-  const typesAt = po + 24 + count * step;
+  const typesAt = 16 + count * step;
   if (typesAt + count > end) return undefined;
   const cmds: PathCmds = [];
   let cx = 0,
     cy = 0;
   let bezierTail: Array<[number, number]> = [];
   for (let i = 0; i < count; i++) {
-    const p = po + 24 + i * step;
+    const p = 16 + i * step;
     cx = compressed ? view.getInt16(p, true) : view.getFloat32(p, true);
     cy = compressed ? view.getInt16(p + 2, true) : view.getFloat32(p + 4, true);
     const pt: [number, number] = [cx, cy];
-    const t = buf[typesAt + i] & 0x07;
+    const t = payload[typesAt + i] & 0x07;
     if (t === 3) {
       // A cubic consists of this point plus two more control points applied
       // to the running position.
@@ -234,7 +229,7 @@ function decodePath(
     }
     if (t === 0) cmds.push(["M", pt]);
     else cmds.push(["L", pt]);
-    if (buf[typesAt + i] & 0x80) cmds.push(["Z", []]);
+    if (payload[typesAt + i] & 0x80) cmds.push(["Z", []]);
   }
   return cmds.length >= 2 ? { cmds } : undefined;
 }
@@ -249,22 +244,35 @@ function prevFlat(cmds: PathCmds): number[] {
   return [0, 0];
 }
 
-function decodeImage(
-  view: DataView,
-  po: number,
-  end: number,
-  buf: Uint8Array,
-): ImageInfo | undefined {
+function decodeImage(payload: Uint8Array, view: DataView, end: number): ImageInfo | undefined {
   // Bitmap-typed images embed their original encoding; splice it straight
-  // into a data URL instead of re-decoding pixels.
-  for (let p = po + 20; p + 8 <= end; p++) {
+  // into a data URL instead of re-decoding pixels. The format's own end
+  // marker bounds the slice — assembly prefixes and trailing run metadata
+  // must not leak into the data URL.
+  for (let p = 12; p + 8 <= end; p++) {
     if (view.getUint32(p, true) === 0x474e5089 && view.getUint32(p + 4, true) === 0x0a1a0a0d) {
-      return { src: `data:image/png;base64,${base64(buf.subarray(p, end))}` };
+      let stop = end;
+      for (let q = p; q + 8 <= end; q++) {
+        if (view.getUint32(q, true) === 0x444e4549 && view.getUint32(q + 4, true) === 0x826042ae) {
+          stop = q + 8;
+          break;
+        }
+      }
+      return { src: `data:image/png;base64,${base64(payload.subarray(p, stop))}` };
     }
   }
-  for (let p = po + 20; p + 3 <= end; p++) {
-    if (buf[p] === 0xff && buf[p + 1] === 0xd8 && buf[p + 2] === 0xff) {
-      return { src: `data:image/jpeg;base64,${base64(buf.subarray(p, end))}` };
+  for (let p = 12; p + 3 <= end; p++) {
+    if (payload[p] === 0xff && payload[p + 1] === 0xd8 && payload[p + 2] === 0xff) {
+      let stop = -1;
+      for (let q = end - 2; q >= p; q--) {
+        if (payload[q] === 0xff && payload[q + 1] === 0xd9) {
+          stop = q + 2;
+          break;
+        }
+      }
+      return {
+        src: `data:image/jpeg;base64,${base64(payload.subarray(p, stop > 0 ? stop : end))}`,
+      };
     }
   }
   return undefined;
@@ -333,21 +341,73 @@ export function emfPlusMembers(
   let lastBrush: BrushInfo | undefined;
   let lastPen: PenInfo | undefined;
 
+  // Object payloads are [chunkDataSize u32][versionStamp-or-bytes]: complete
+  // definitions start with the GDI+ version stamp, continuation chunks carry
+  // raw object bytes with no stamp. Giant images arrive as same-slot record
+  // runs whose chunk flag keeps saying "continued" even on the last chunk,
+  // and several different-slot definitions may sit open at once before one
+  // consuming draw. Open runs therefore live in a per-slot table and install
+  // when a consuming record arrives.
+  type OpenRun = { type: number; parts: Uint8Array[] };
+  const openRuns = new Map<number, OpenRun>();
+  const installRun = (slot: number, run: OpenRun): void => {
+    let payload = run.parts[0];
+    if (run.parts.length > 1) {
+      const total = run.parts.reduce((n, p) => n + p.length, 0);
+      const all = new Uint8Array(total);
+      let at = 0;
+      for (const part of run.parts) {
+        all.set(part, at);
+        at += part.length;
+      }
+      payload = all;
+    }
+    installObject(objects, slot, decodeObject(payload, run.type));
+  };
+  const installOpenRuns = (): void => {
+    if (!openRuns.size) return;
+    for (const [slot, run] of openRuns) installRun(slot, run);
+    openRuns.clear();
+  };
+  const installObject = (
+    table: Map<number, unknown>,
+    slot: number,
+    obj: BrushInfo | PenInfo | PathInfo | ImageInfo | undefined,
+  ): void => {
+    if (!obj) return;
+    if ("solid" in obj) lastBrush = obj;
+    else if ("width" in obj) lastPen = obj;
+    table.set(slot, obj);
+  };
+
   for (let po = 0; po + 8 <= plus.length;) {
     const rt = pv.getUint16(po, true);
     const flags = pv.getUint16(po + 2, true);
     const rs = pv.getUint32(po + 4, true);
-    if (rs < 8 || po + rs > plus.length) break;
-    if (rt === PLUS_END_OF_FILE) break;
+    if (rs < 8 || po + rs > plus.length) {
+      installOpenRuns();
+      break;
+    }
+    if (rt === PLUS_END_OF_FILE) {
+      installOpenRuns();
+      break;
+    }
     const d = po + 8;
     const objectId = flags & 0xff;
     switch (rt) {
       case PLUS_OBJECT: {
-        const obj = decodeObject(pv, po, rs, plus);
-        if (!obj) break;
-        if ("solid" in obj) lastBrush = obj;
-        else if ("width" in obj) lastPen = obj;
-        objects.set(objectId, obj);
+        const complete =
+          (pv.getUint32(d + 4, true) & 0xffff0000) === (GDIPLUS_VERSION & 0xffff0000);
+        const run = openRuns.get(objectId);
+        if (run && !complete) {
+          // Continuation chunk — same two-word header as the opening record
+          // ([chunk size][object total]) followed by raw object bytes.
+          run.parts.push(plus.subarray(d + 8, po + rs));
+          break;
+        }
+        if (run) installRun(objectId, run); // fresh same-slot definition
+        openRuns.delete(objectId);
+        openRuns.set(objectId, { type: (flags >> 8) & 0x7f, parts: [plus.subarray(d, po + rs)] });
         break;
       }
       case PLUS_SAVE:
@@ -367,12 +427,14 @@ export function emfPlusMembers(
         xf = combine(xf, readXform(pv, d));
         break;
       case PLUS_FILL_PATH: {
+        installOpenRuns();
         const path = objects.get(objectId) as PathInfo | undefined;
         if (path?.cmds && lastBrush?.solid)
           pushPath(drafts, path.cmds, xf, { fill: lastBrush.solid });
         break;
       }
       case PLUS_DRAW_PATH: {
+        installOpenRuns();
         const path = objects.get(objectId) as PathInfo | undefined;
         if (path?.cmds && lastPen?.color) {
           pushPath(drafts, path.cmds, xf, {
@@ -383,6 +445,7 @@ export function emfPlusMembers(
         break;
       }
       case PLUS_FILL_RECTS: {
+        installOpenRuns();
         const n = pv.getUint32(d, true);
         if (!n || n > 10_000 || d + 4 + n * 16 > d + rs - 8) break;
         for (let i = 0; i < n; i++) {
@@ -397,6 +460,7 @@ export function emfPlusMembers(
         break;
       }
       case PLUS_DRAW_IMAGE_POINTS: {
+        installOpenRuns();
         const img = objects.get(objectId) as ImageInfo | undefined;
         if (img?.src) drawImagePoints(pv, plus, d, rs, flags, xf, img.src, drafts);
         break;

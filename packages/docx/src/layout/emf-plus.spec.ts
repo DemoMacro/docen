@@ -91,6 +91,31 @@ describe("embeddedEmfStream", () => {
   });
 });
 
+/** ImageAttributes definition: complete object (stamped) but undecodable. */
+function attrsObject(slot: number): Uint8Array {
+  const body = new Uint8Array(12);
+  const v = new DataView(body.buffer);
+  v.setUint32(0, body.length, true); // chunk size
+  v.setUint32(4, VERSION, true);
+  return epRecord(OBJECT, slot | (8 << 8), body); // type 8 = image attributes
+}
+
+/** DrawImagePoints for one destination rectangle (i16 parallelogram). */
+function drawRect(slot: number, x: number, y: number, w: number, h: number): Uint8Array {
+  const body = new Uint8Array(44);
+  const v = new DataView(body.buffer);
+  v.setUint32(28, 3, true); // parallelogram point count
+  [
+    [x, y],
+    [x + w, y],
+    [x, y + h],
+  ].forEach(([px, py], i) => {
+    v.setInt16(32 + i * 4, px, true);
+    v.setInt16(34 + i * 4, py, true);
+  });
+  return epRecord(DRAW_IMAGE_POINTS, 0x4000 | slot, body);
+}
+
 describe("emfPlusMembers", () => {
   it("replays a filled path into a member scaled to the box", () => {
     const wmf = emfPlusWmf([
@@ -165,6 +190,42 @@ describe("emfPlusMembers", () => {
   it("returns undefined when no record draws anything", () => {
     const wmf = emfPlusWmf([epHeader(), epEof()]);
     expect(emfPlusMembers(wmf, 100, 100)).toBeUndefined();
+  });
+
+  it("reassembles a giant image from continued same-slot records", () => {
+    // Real exporters split one image across same-slot records (each chunk
+    // opening with its own size word), interleave foreign-slot definitions,
+    // and draw right after the last chunk.
+    const pngHead = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x11]);
+    const pngTail = new Uint8Array([0x22, 0x33, 0x44]);
+    const cont = 0x8000; // chunks carry it even on the last one
+    const first = new Uint8Array(12 + pngHead.length);
+    const fv = new DataView(first.buffer);
+    fv.setUint32(0, first.length, true); // chunk size incl. shared header
+    fv.setUint32(4, VERSION, true);
+    fv.setUint32(8, 1, true); // image type: bitmap
+    first.set(pngHead, 12);
+    const tail = new Uint8Array(8 + pngTail.length);
+    const tv = new DataView(tail.buffer);
+    tv.setUint32(0, tail.length, true); // own chunk size
+    tv.setUint32(4, 93004, true); // repeated object total (ignored)
+    tail.set(pngTail, 8);
+
+    const wmf = emfPlusWmf([
+      epHeader(),
+      setWorld(1, 0, 0),
+      epRecord(OBJECT, 1 | (5 << 8) | cont, first),
+      attrsObject(2), // interleaved mid-run foreign definition
+      epRecord(OBJECT, 1 | (5 << 8) | cont, tail),
+      drawRect(1, 10, 20, 30, 40),
+      epEof(),
+    ]);
+    const members = emfPlusMembers(wmf, 605, 240);
+    expect(members).toBeDefined();
+    const pic = members!.find((m) => m.kind === "picture");
+    if (pic?.kind !== "picture" || !pic.src?.startsWith("data:image/png;base64,")) return;
+    const joined = Buffer.from(pic.src.slice("data:image/png;base64,".length), "base64");
+    expect(joined.equals(Buffer.concat([pngHead, pngTail]))).toBe(true);
   });
 
   it("ignores an image-point record whose declared count exceeds its bytes", () => {
