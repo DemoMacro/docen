@@ -267,6 +267,21 @@ function decodeObject(
           break;
         }
       }
+      if (!color) {
+        // Gradient-brush pens carry no solid stamp in the scanned shape: their
+        // blob is a LinearGradient whose visible color lives in the preset
+        // ramp behind the [flags][wrap][rect] prefix — alpha ramps from fully
+        // transparent up to the opaque end that dominates the rendered stroke
+        // (its interior 0xff000000 words are header fields, not the color).
+        // Take the last fully-opaque word as the flat approximation; the
+        // strict alpha test keeps the 0xdb-alpha version stamp out.
+        for (let p = end - 4; p >= cursor; p -= 4) {
+          if (view.getUint32(p, true) >>> 24 === 0xff) {
+            color = argbHex(view.getUint32(p, true));
+            break;
+          }
+        }
+      }
       return { width, ...(dash ? { dash } : {}), color };
     }
     case OBJ_PATH:
@@ -315,11 +330,12 @@ function decodePath(
     const t = payload[typesAt + i] & 0x07;
     if (t !== 0 && !started) continue;
     if (t === 3) {
-      // A cubic consists of this point plus two more control points applied
-      // to the running position.
+      // A GDI+ bezier triplet is [control1, control2, end] — the segment opens
+      // at the running position, so the serialized cubic is exactly these
+      // three pairs (an SVG "C" with a leading anchor would be malformed).
       bezierTail.push(pt);
       if (bezierTail.length === 3) {
-        cmds.push(["C", [...prevFlat(cmds), ...bezierTail.flat()]]);
+        cmds.push(["C", bezierTail.flat()]);
         bezierTail = [];
       }
       continue;
@@ -331,16 +347,6 @@ function decodePath(
     if (payload[typesAt + i] & 0x80) cmds.push(["Z", []]);
   }
   return cmds.length >= 2 ? { cmds } : undefined;
-}
-
-/** The first coordinate pair of a pending cubic is the last plotted position
- *  (an implicit control anchor); failing that, zero — degenerate streams only. */
-function prevFlat(cmds: PathCmds): number[] {
-  for (let i = cmds.length - 1; i >= 0; i--) {
-    const nums = cmds[i][1];
-    if (nums.length >= 2) return [nums[nums.length - 2], nums[nums.length - 1]];
-  }
-  return [0, 0];
 }
 
 /** Natural pixel size of an embedded encoding, for normalizing DrawImagePoints'
@@ -489,16 +495,20 @@ export function emfPlusMembers(
   if (!emf) return undefined;
   const drafts = carrierDrafts(emf, undefined, 0);
   if (!drafts.length) return undefined;
-  // The carrier's declared device frame (EMR_HEADER rclBounds, [MS-EMF] §2.3.4.1)
-  // anchors the display mapping.
+  // The carrier's physical frame (EMR_HEADER rclFrame, [MS-EMF] §2.3.4.2)
+  // anchors the display mapping, converted to EMF+ device px at 96 dpi — the
+  // reference resolution these clipboard metafiles declare their extent at.
+  // rclBounds is only an ink hint in a device basis that synthetic carriers
+  // leave inconsistent with the frame; stretching bounds onto the extent
+  // distorts the art Word renders at the frame's near-1:1 scale.
   let frame: { x: number; y: number; w: number; h: number } | undefined;
-  if (emf.length >= 24) {
+  if (emf.length >= 40) {
     const v = new DataView(emf.buffer, emf.byteOffset, emf.byteLength);
     if (v.getUint32(0, true) === 1 && v.getUint32(4, true) >= 88) {
-      const l = v.getInt32(8, true),
-        t = v.getInt32(12, true),
-        r = v.getInt32(16, true),
-        b = v.getInt32(20, true);
+      const l = (v.getInt32(24, true) * 96) / 2540,
+        t = (v.getInt32(28, true) * 96) / 2540,
+        r = (v.getInt32(32, true) * 96) / 2540,
+        b = (v.getInt32(36, true) * 96) / 2540;
       if (r > l && b > t) frame = { x: l, y: t, w: r - l, h: b - t };
     }
   }
@@ -1083,11 +1093,11 @@ function participatesInBox(dr: Draft): boolean {
 }
 
 /** Scale drafts from EMF device coordinates into the display box and shape
- *  the renderer-facing members. Word maps the EMF's declared device frame
- *  (EMR_HEADER rclBounds) onto the extent independently per axis — content
- *  below the frame's bottom edge (deliberate whitespace bands) stays inside
- *  the box instead of stretching everything above it. When the frame is
- *  unavailable or degenerate, the union bounding box stands in. */
+ *  the renderer-facing members. Word maps the EMF's declared physical frame
+ *  (EMR_HEADER rclFrame at 96 dpi) onto the extent independently per axis —
+ *  content past the frame edges stays inside the box instead of stretching
+ *  everything above it. When the frame is unavailable or degenerate, the
+ *  union bounding box stands in. */
 function finalize(
   drafts: Draft[],
   boxW: number,
