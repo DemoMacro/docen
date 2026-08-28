@@ -662,9 +662,9 @@ function carrierDrafts(emf: Uint8Array, basis: Xform | undefined, depth: number)
         const path = objects.get(objectId) as PathInfo | undefined;
         if (path?.cmds && lastPen?.color) {
           // A World-unit pen's width rides its world transform like text does
-          // (the same average-axis factor gdiTextDrafts applies to lfHeight).
+          // (the same rotation-safe column-norm factor gdiTextDrafts applies).
           const eff = effOf(xf);
-          const scale = (Math.abs(eff.m11) + Math.abs(eff.m22)) / 2;
+          const scale = Math.max(Math.hypot(eff.m11, eff.m21), Math.hypot(eff.m12, eff.m22));
           pushPath(drafts, path.cmds, eff, {
             strokeColor: lastPen.color,
             strokeWidth: lastPen.width * scale,
@@ -675,17 +675,24 @@ function carrierDrafts(emf: Uint8Array, basis: Xform | undefined, depth: number)
       }
       case PLUS_FILL_RECTS: {
         installOpenRuns();
-        const n = pv.getUint32(d, true);
-        if (!n || n > 10_000 || d + 4 + n * 16 > d + rs - 8) break;
+        // Same corpus conventions as FillPath above: the WMF-embedded record
+        // prepends a payload-size u32 (the OBJECT chunkDataSize header), so an
+        // inlined ColorEmphasis ARGB sits at d+4 and the rect list follows.
+        // 0x4000 marks compressed EmfPlusRectS rects (int16, 8 bytes).
+        const fill = flags & 0x8000 ? argbHex(pv.getUint32(d + 4, true)) : lastBrush?.solid;
+        const n = pv.getUint32(d + 8, true);
+        const step = flags & 0x4000 ? 8 : 16;
+        if (!n || n > 10_000 || d + 12 + n * step > d + rs) break;
         const eff = effOf(xf);
         for (let i = 0; i < n; i++) {
-          const rx = pv.getFloat32(d + 4 + i * 16, true);
-          const ry = pv.getFloat32(d + 8 + i * 16, true);
-          const rw = pv.getFloat32(d + 12 + i * 16, true);
-          const rh = pv.getFloat32(d + 16 + i * 16, true);
+          const base = d + 12 + i * step;
+          const rx = step === 8 ? pv.getInt16(base, true) : pv.getFloat32(base, true);
+          const ry = step === 8 ? pv.getInt16(base + 2, true) : pv.getFloat32(base + 4, true);
+          const rw = step === 8 ? pv.getInt16(base + 4, true) : pv.getFloat32(base + 8, true);
+          const rh = step === 8 ? pv.getInt16(base + 6, true) : pv.getFloat32(base + 12, true);
           const [x, y] = xformPoint(eff, rx, ry);
           const [x2, y2] = xformPoint(eff, rx + rw, ry + rh);
-          pushRect(drafts, x, y, x2 - x, y2 - y, lastBrush?.solid);
+          pushRect(drafts, x, y, x2 - x, y2 - y, fill);
         }
         break;
       }
@@ -710,19 +717,20 @@ function carrierDrafts(emf: Uint8Array, basis: Xform | undefined, depth: number)
   // would paint twice, while the GDI side also carries runs the EMF+ layer
   // never drew (its DrawString output is partial on corpus files). Merge only
   // the runs the EMF+ layer lacks — same string within a run-height of the
-  // same spot (the two layers' y conventions differ by up to a line).
+  // same spot (the two layers' y conventions differ by up to a line). The GDI
+  // side's strokes (polyline underlines) join unconditionally.
   const plusTexts = drafts.filter((dr) => dr.kind === "text");
   const gdi = gdiTextDrafts(emf, effOf);
   drafts.push(
-    ...gdi.filter(
-      (g) =>
-        !plusTexts.some(
-          (p) =>
-            p.text === g.text &&
-            Math.abs(p.x - g.x) <= Math.max(g.w, p.w) &&
-            Math.abs(p.y - g.y) <= Math.max(g.h, p.h) * 2,
-        ),
-    ),
+    ...gdi.filter((g) => {
+      if (g.kind !== "text") return true;
+      return !plusTexts.some(
+        (p) =>
+          p.text === g.text &&
+          Math.abs(p.x - g.x) <= Math.max(g.w, p.w) &&
+          Math.abs(p.y - g.y) <= Math.max(g.h, p.h) * 2,
+      );
+    }),
   );
   return drafts;
 }
@@ -886,12 +894,15 @@ const EMR_RESTOREDC = 34;
 const EMR_SET_WORLD_TRANSFORM = 35;
 const EMR_MODIFY_WORLD_TRANSFORM = 36;
 const EMR_SELECT_OBJECT = 37;
+const EMR_CREATE_PEN = 38;
 const EMR_DELETE_OBJECT = 40;
 const EMR_SETTEXTCOLOR = 24;
 const EMR_SETTEXTALIGN = 22;
 const EMR_EXT_CREATE_FONT = 82;
 const EMR_EXT_TEXT_OUT_A = 83;
 const EMR_EXT_TEXT_OUT_W = 84;
+const EMR_POLYLINE16 = 87;
+const EMR_EXT_CREATE_PEN = 95;
 
 /** EmrText offsets inside EMR_EXTTEXTOUTW (relative to the record start):
  *  bounds[16], graphicsMode, ex/eyScale, then Reference xy, Chars, offString,
@@ -929,18 +940,35 @@ function readCarrierXform(view: DataView, at: number): Xform {
  *  output. Fonts are object-table based (CreateFontIndirectW defines a slot,
  *  SelectObject activates it); color rides on SetTextColor's COLORREF.
  *  `effOf` folds a parent nesting basis into that transform (nested carriers). */
-function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): TextDraft[] {
+/** Replay the carrier's GDI records into the same display space the EMF+ drafts
+ *  occupy: its text chain (ExtTextOutW runs, the dual-layer's real text) plus
+ *  its polyline strokes (the row underlines of list pages — no EMF+ equivalent
+ *  exists for them). Each run's placement comes from the carrier's live world
+ *  transform, which folds every domain onto the EMF's device rectangle
+ *  (rclBounds) shared with the EMF+ output. Fonts and pens are object-table
+ *  based (CreateFontIndirectW/CreatePen define a slot, SelectObject activates
+ *  it); text color rides on SetTextColor's COLORREF, stroke color on the pen.
+ *  `effOf` folds a parent nesting basis into that transform (nested carriers). */
+function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): Draft[] {
   const view = new DataView(emf.buffer, emf.byteOffset);
-  const drafts: TextDraft[] = [];
+  const drafts: Draft[] = [];
   const fonts = new Map<number, GdiFont>();
+  const pens = new Map<number, { color: string; width: number }>();
   let selected = -1;
+  let selectedPen = -1;
   let xf: Xform = { ...IDENTITY };
   let textColor: string | undefined;
   // SetTextAlign flags; the GDI device default is TA_TOP (0) — the reference y
   // is the cell top, not the baseline (misreading it sinks every text box).
   let textAlign = 0;
   // SaveDC snapshots the full drawing state we track.
-  const states: Array<{ xf: Xform; selected: number; textColor?: string; textAlign: number }> = [];
+  const states: Array<{
+    xf: Xform;
+    selected: number;
+    selectedPen: number;
+    textColor?: string;
+    textAlign: number;
+  }> = [];
   for (let eo = 0; eo + 8 <= emf.length;) {
     const type = view.getUint32(eo, true);
     const size = view.getUint32(eo + 4, true);
@@ -965,14 +993,57 @@ function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): TextDraft
         break;
       }
       case EMR_SELECT_OBJECT: {
-        // Stock objects carry a flag bit; real slots reference our table.
+        // Stock objects carry a flag bit; real slots reference our tables.
         const raw = view.getUint32(eo + 8, true);
-        if (!(raw & 0x80000000) && fonts.has(raw)) selected = raw;
+        if (!(raw & 0x80000000)) {
+          if (fonts.has(raw)) selected = raw;
+          if (pens.has(raw)) selectedPen = raw;
+        }
         break;
       }
-      case EMR_DELETE_OBJECT:
-        fonts.delete(view.getUint32(eo + 8, true));
+      case EMR_DELETE_OBJECT: {
+        const slot = view.getUint32(eo + 8, true);
+        fonts.delete(slot);
+        pens.delete(slot);
         break;
+      }
+      case EMR_CREATE_PEN: {
+        // CREATEPEN: [ihPen][LOGPEN style u32][width POINT ×2][COLORREF].
+        const color = rgbHex(view.getUint32(eo + 24, true));
+        pens.set(view.getUint32(eo + 8, true), { color, width: view.getUint32(eo + 16, true) });
+        break;
+      }
+      case EMR_EXT_CREATE_PEN: {
+        // EXTCREATEPEN: [ihPen][offBmi][cbBmi][offBits][cbBits] then the
+        // EXTLOGPEN: [style][width][brushStyle][COLORREF][hatch][entries…].
+        pens.set(view.getUint32(eo + 8, true), {
+          color: rgbHex(view.getUint32(eo + 40, true)),
+          width: view.getUint32(eo + 32, true),
+        });
+        break;
+      }
+      case EMR_POLYLINE16: {
+        // [bounds 4×i32][count u32][points int16 pairs] — the carrier draws its
+        // list-row underlines as these two-point strokes.
+        const pen = pens.get(selectedPen);
+        if (!pen) break;
+        const count = view.getUint32(eo + 24, true);
+        if (!count || count > 10_000 || eo + 28 + count * 4 > eo + size) break;
+        const eff = effOf ? effOf(xf) : xf;
+        const cmds: PathCmds = [];
+        for (let i = 0; i < count; i++) {
+          const x = view.getInt16(eo + 28 + i * 4, true);
+          const y = view.getInt16(eo + 28 + i * 4 + 2, true);
+          cmds.push([i === 0 ? "M" : "L", [x, y]]);
+        }
+        // The pen width rides the world transform like text does.
+        const scale = Math.max(Math.hypot(eff.m11, eff.m21), Math.hypot(eff.m12, eff.m22));
+        pushPath(drafts, cmds, eff, {
+          strokeColor: pen.color,
+          strokeWidth: Math.max(pen.width * scale, 1),
+        });
+        break;
+      }
       case EMR_SETTEXTCOLOR: {
         // COLORREF (0x00bbggrr); high-flag words reference the system palette
         // — skip those and keep the last true RGB.
@@ -984,12 +1055,12 @@ function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): TextDraft
         textAlign = view.getUint32(eo + 8, true);
         break;
       case EMR_SAVEDC:
-        states.push({ xf, selected, textColor, textAlign });
+        states.push({ xf, selected, selectedPen, textColor, textAlign });
         break;
       case EMR_RESTOREDC: {
         const st = states.pop();
         if (st) {
-          ({ xf, selected, textColor, textAlign } = st);
+          ({ xf, selected, selectedPen, textColor, textAlign } = st);
         }
         break;
       }
@@ -1044,13 +1115,16 @@ function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): TextDraft
           const eff = effOf ? effOf(xf) : xf;
           const x = view.getInt32(eo + EXT_REF_X, true);
           const yBaseline = view.getInt32(eo + EXT_REF_Y, true);
+          // Column norms survive rotated world transforms: a 90°-rotated
+          // (vertical banner) transform zeroes |m11|+|m22|, which used to
+          // collapse those runs to height 0 — invisible on the page.
+          const glyphScale = Math.max(Math.hypot(eff.m11, eff.m21), Math.hypot(eff.m12, eff.m22));
           const height =
             (font
               ? font.height < 0
                 ? -font.height
                 : font.height / GDI_CELL_PER_EM
-              : 100 / GDI_CELL_PER_EM) *
-            ((Math.abs(eff.m11) + Math.abs(eff.m22)) / 2);
+              : 100 / GDI_CELL_PER_EM) * glyphScale;
           // SetTextAlign semantics for the reference y (same calibration as the
           // WMF player): TA_BASELINE hoists by the typical CJK ascent, TA_BOTTOM
           // by the full em, and the device default TA_TOP already names the cell

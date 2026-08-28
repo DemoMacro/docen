@@ -10,6 +10,7 @@ import { dualModeWmf, emfCarrier, emfPlusWmf, emrEmfPlusComment, epRecord } from
 // EmfPlus record codes used by the fixtures.
 const HEADER = 0x4001;
 const OBJECT = 0x4008;
+const FILL_RECTS = 0x400a;
 const FILL_PATH = 0x4014;
 const DRAW_IMAGE_POINTS = 0x401b;
 const SET_WORLD_TRANSFORM = 0x402a;
@@ -831,6 +832,131 @@ describe("emfPlusMembers", () => {
       const kinds = new Set(members!.map((m) => m.kind));
       expect(kinds.has("picture")).toBe(true);
       expect(kinds.has("textBox")).toBe(true);
+    });
+  });
+
+  describe("EmfPlusFillRects", () => {
+    /** FillRects record in the WMF-embedded form: the OBJECT chunkDataSize
+     *  word repeats in front ([+0]), then the inlined emphasis ARGB when
+     *  flagged, the rect count, and the rects (float RectF or int16 RectS). */
+    function fillRects(flags: number, argb: number, rects: number[][]): Uint8Array {
+      const compressed = (flags & 0x4000) !== 0;
+      const body = new Uint8Array(12 + rects.length * (compressed ? 8 : 16));
+      const v = new DataView(body.buffer);
+      v.setUint32(0, body.length, true);
+      v.setUint32(4, argb, true);
+      v.setUint32(8, rects.length, true);
+      rects.forEach(([x, y, w, h], i) => {
+        const at = 12 + i * (compressed ? 8 : 16);
+        if (compressed) {
+          v.setInt16(at, x, true);
+          v.setInt16(at + 2, y, true);
+          v.setInt16(at + 4, w, true);
+          v.setInt16(at + 6, h, true);
+        } else {
+          v.setFloat32(at, x, true);
+          v.setFloat32(at + 4, y, true);
+          v.setFloat32(at + 8, w, true);
+          v.setFloat32(at + 12, h, true);
+        }
+      });
+      return epRecord(FILL_RECTS, flags, body);
+    }
+
+    it("takes an inlined ColorEmphasis ARGB over float rects", () => {
+      const wmf = emfPlusWmf([
+        epHeader(),
+        setWorld(1, 0, 0),
+        fillRects(0x8000, 0xff6d2934, [[10, 20, 80, 40]]),
+        epEof(),
+      ]);
+      const members = emfPlusMembers(wmf, 400, 300);
+      expect(members).toBeDefined();
+      const p = members!.find((m) => m.kind === "path");
+      if (p?.kind !== "path") return;
+      // The lone rect fills the display box exactly after normalization.
+      expect(p.fill).toBe("6d2934");
+      expect(p.d).toBe("M0 0L400 0L400 300L0 300Z");
+    });
+
+    it("fills compressed int16 rects from the last brush", () => {
+      const wmf = emfPlusWmf([
+        epHeader(),
+        setWorld(1, 0, 0),
+        brushObject(5, 0xffe8989a),
+        fillRects(0x4000, 0, [
+          [0, 0, 50, 100],
+          [50, 0, 50, 100],
+        ]),
+        epEof(),
+      ]);
+      const members = emfPlusMembers(wmf, 100, 100);
+      expect(members).toBeDefined();
+      const paths = members!.filter((m) => m.kind === "path");
+      expect(paths).toHaveLength(2);
+      expect(paths[0]).toMatchObject({ fill: "e8989a", d: "M0 0L50 0L50 100L0 100Z" });
+      expect(paths[1]).toMatchObject({ fill: "e8989a", d: "M50 0L100 0L100 100L50 100Z" });
+    });
+
+    it("draws nothing without a brush and without an inlined color", () => {
+      const wmf = emfPlusWmf([
+        epHeader(),
+        setWorld(1, 0, 0),
+        fillRects(0, 0, [[10, 10, 50, 50]]),
+        epEof(),
+      ]);
+      expect(emfPlusMembers(wmf, 400, 300)).toBeUndefined();
+    });
+  });
+
+  describe("carrier-side GDI strokes", () => {
+    /** Raw EMR wrapper (same shape as the text describe's). */
+    function emr(type: number, payload: Uint8Array): Uint8Array {
+      const buf = new Uint8Array(8 + payload.length);
+      const v = new DataView(buf.buffer);
+      v.setUint32(0, type, true);
+      v.setUint32(4, buf.length, true);
+      buf.set(payload, 8);
+      return buf;
+    }
+
+    it("replays ExtCreatePen + Polyline16 as stroked paths", () => {
+      // The list-page underline pattern: a solid pen (COLORREF 0x001e1c7c →
+      // #7c1c1e) strokes a polyline on the carrier side while the EMF+ layer
+      // draws nothing — the merge must let these strokes through.
+      const pen = new Uint8Array(40);
+      const pv = new DataView(pen.buffer);
+      pv.setUint32(0, 2, true); // pen slot
+      pv.setUint32(20, 0, true); // PS_SOLID
+      pv.setUint32(24, 32, true); // width
+      pv.setUint32(32, 0x001e1c7c, true); // COLORREF
+      const poly = new Uint8Array(32);
+      const lv = new DataView(poly.buffer);
+      lv.setUint32(16, 3, true); // point count
+      [
+        [0, 0],
+        [100, 0],
+        [100, 100],
+      ].forEach(([x, y], i) => {
+        lv.setInt16(20 + i * 4, x, true);
+        lv.setInt16(20 + i * 4 + 2, y, true);
+      });
+      const select = new Uint8Array(4);
+      new DataView(select.buffer).setUint32(0, 2, true);
+      const wmf = dualModeWmf(
+        emfCarrier([
+          emrEmfPlusComment([epHeader(), epEof()]),
+          emr(95, pen),
+          emr(37, select),
+          emr(87, poly),
+        ]),
+      );
+      const members = emfPlusMembers(wmf, 100, 100);
+      expect(members).toBeDefined();
+      const p = members!.find((m) => m.kind === "path");
+      if (p?.kind !== "path") return;
+      expect(p.line).toMatchObject({ color: "7c1c1e", px: 32 });
+      expect(p.d).toBe("M0 0L100 0L100 100");
     });
   });
 });
