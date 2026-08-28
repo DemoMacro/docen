@@ -182,6 +182,25 @@ describe("CaretMap selection rectangles", () => {
     expect(rects).toHaveLength(2);
     expect(rects[1]).toMatchObject({ xPx: 0, widthPx: 8, heightPx: 20 });
   });
+
+  it("highlights a render-only line across its full width (TOC entry)", () => {
+    // A TOC entry paints from its cached options while the PM paragraph stays
+    // empty: the zip pairs them as-is, so no PM position maps into the line.
+    // The selection crossing the paragraph must still highlight the line the
+    // reader sees — not drop it (the old char-intersection test did).
+    const { editor, doc } = buildDoc(["ab", ""]);
+    const map = new CaretMap(
+      pageOf([
+        fakePara([{ text: "ab", xPx: 0, yPx: 0, maxWidthPx: 100 }]),
+        fakePara([{ text: "一、示例条目", xPx: 0, yPx: 0, maxWidthPx: 100 }]),
+      ]) as never,
+      doc,
+      () => ({ contentLeftPx: 0, contentTopPx: 0 }),
+    );
+    const rects = map.selectionRects(0, doc.content.size);
+    expect(rects).toHaveLength(2);
+    expect(rects[1]).toMatchObject({ xPx: 0, yPx: 50, widthPx: 100, heightPx: 20 });
+  });
 });
 
 describe("CaretMap tolerant zip", () => {

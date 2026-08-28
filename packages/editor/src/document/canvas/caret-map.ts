@@ -373,11 +373,13 @@ export class CaretMap {
         Math.max(from, next.innerPos) < Math.min(to, next.innerPos + next.node.content.size);
       for (const [li, line] of entry.lines.entries()) {
         const empty = line.startChar === line.endChar;
-        if (
-          empty
-            ? offA > line.startChar || offB < line.startChar
-            : line.endChar <= offA || line.startChar >= offB
-        ) {
+        // A line the PM side maps no chars into (offA === offB) belongs to a
+        // paragraph painted from cached options over an empty field paragraph
+        // (a TOC entry): there is nothing to intersect — the selection
+        // crossing the paragraph highlights the whole painted line below.
+        if (empty) {
+          if (offA > line.startChar || offB < line.startChar) continue;
+        } else if (offA !== offB && (line.endChar <= offA || line.startChar >= offB)) {
           continue;
         }
         // Line-box geometry (the layout's own pitch) keeps multi-line
@@ -396,6 +398,16 @@ export class CaretMap {
             xPx: line.xPx,
             yPx: line.yPx,
             widthPx: Math.min(8, line.line.maxWidthPx ?? 8),
+            heightPx: bottom - line.yPx,
+          });
+          continue;
+        }
+        if (offA === offB) {
+          rects.push({
+            page: line.page,
+            xPx: line.xPx,
+            yPx: line.yPx,
+            widthPx: Math.max(line.line.maxWidthPx ?? 0, 2),
             heightPx: bottom - line.yPx,
           });
           continue;
