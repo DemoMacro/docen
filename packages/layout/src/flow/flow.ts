@@ -34,11 +34,25 @@ export interface FlowPage {
   items: FlowItem[];
 }
 
+/** Furniture-driven body insets for one page slot (px, measured from the
+ *  content box edges): a tall header pushes the body down (topPx), a tall
+ *  footer pushes it up (bottomPx) — Word's overflow rule, each page by its
+ *  own slot's stack. The page pattern repeats: page 0 uses `first` when
+ *  present, odd indexes use `even`, everything else `default`. */
+export interface FlowPageInsets {
+  first?: { topPx: number; bottomPx: number };
+  even?: { topPx: number; bottomPx: number };
+  default?: { topPx: number; bottomPx: number };
+}
+
 export interface FlowOptions {
   contentWidthPx: number;
   contentHeightPx: number;
   /** Section document-grid pitch (threads into every block layout). */
   linePitchPx?: number;
+  /** Per-slot body insets from the header/footer stacks (absent = margins
+   *  rule everywhere). */
+  pageInsets?: FlowPageInsets;
 }
 
 /** Lay a block flow into pages. Always returns at least one page (an empty
@@ -59,6 +73,8 @@ class Flow {
   private y = 0;
   private prevAfter = 0;
   private firstOnPage = true;
+  /** Zero-based index of the page being filled — picks the slot's insets. */
+  private pageIndex = 0;
   /** Partial-overlap float zones (wrap square/tight): lines inside the band
    *  wrap beside the box. Registered when the anchor paragraph commits, so
    *  the anchor paragraph itself lays out un-wrapped (a registered gap — its
@@ -73,7 +89,24 @@ class Flow {
   constructor(
     private readonly opts: FlowOptions,
     private readonly measurer: TextMeasurer,
-  ) {}
+  ) {
+    // The body starts below the header's push (first page / default slot).
+    this.y = this.insets().topPx;
+  }
+
+  /** The current page's furniture insets (first page → `first`, odd →
+   *  `even`, else `default`; missing slots fall back to `default`). */
+  private insets(): { topPx: number; bottomPx: number } {
+    const pi = this.opts.pageInsets;
+    if (!pi) return { topPx: 0, bottomPx: 0 };
+    const slot =
+      this.pageIndex === 0 && pi.first
+        ? pi.first
+        : this.pageIndex % 2 === 1 && pi.even
+          ? pi.even
+          : pi.default;
+    return { topPx: slot?.topPx ?? 0, bottomPx: slot?.bottomPx ?? 0 };
+  }
 
   private get ctx(): LayoutBlockContext {
     return {
@@ -85,7 +118,7 @@ class Flow {
   }
 
   private remaining(): number {
-    return this.opts.contentHeightPx - this.y;
+    return this.opts.contentHeightPx - this.insets().bottomPx - this.y;
   }
 
   /** The nearest cleared-band top above `this.y`, or Infinity — the ceiling
@@ -113,7 +146,8 @@ class Flow {
   /** Seal the current page's items and start a fresh page. */
   private newPage(): void {
     if (this.items.length > 0) this.pages.push({ items: this.items.splice(0) });
-    this.y = 0;
+    this.pageIndex++;
+    this.y = this.insets().topPx;
     this.prevAfter = 0;
     this.firstOnPage = true;
     this.zones.length = 0;

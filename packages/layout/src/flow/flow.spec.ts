@@ -168,6 +168,46 @@ describe("layoutFlow", () => {
     expect(pages[1].items).toHaveLength(1);
   });
 
+  it("pushes the body down and shrinks the room under a tall header (pageInsets)", () => {
+    // 100px content box; a 30px header push leaves 70px of room: three 20px
+    // paragraphs fit, the fourth moves on.
+    const insets = { default: { topPx: 30, bottomPx: 0 } };
+    const parasIn = [para(1), para(1), para(1), para(1)];
+    const pages = layoutFlow(
+      parasIn,
+      { contentWidthPx: 300, contentHeightPx: 100, pageInsets: insets },
+      measurer,
+    );
+    expect(pages).toHaveLength(2);
+    expect(pages[0].items[0].yPx).toBe(30);
+    expect(pages[0].items).toHaveLength(3);
+    expect(pages[1].items[0].yPx).toBe(30);
+  });
+
+  it("pushes the body up from the bottom under a tall footer (pageInsets)", () => {
+    // 30px footer push: room 70px — three 20px paragraphs fit, four don't.
+    const insets = { default: { topPx: 0, bottomPx: 30 } };
+    const pages = layoutFlow(
+      [para(1), para(1), para(1), para(1)],
+      { contentWidthPx: 300, contentHeightPx: 100, pageInsets: insets },
+      measurer,
+    );
+    expect(pages).toHaveLength(2);
+    expect(pages[0].items[0].yPx).toBe(0);
+    expect(pages[0].items).toHaveLength(3);
+  });
+
+  it("applies first-page insets to page 1 only (title page push)", () => {
+    const insets = { default: { topPx: 0, bottomPx: 0 }, first: { topPx: 30, bottomPx: 0 } };
+    const pages = layoutFlow(
+      [para(1), para(1), para(1), para(1), para(1)],
+      { contentWidthPx: 300, contentHeightPx: 100, pageInsets: insets },
+      measurer,
+    );
+    expect(pages[0].items[0].yPx).toBe(30);
+    expect(pages[1].items[0].yPx).toBe(0);
+  });
+
   it("honors pageBreakBefore", () => {
     const pages = flow([para(1), para(1, { pageBreakBefore: true })], 300);
     expect(pages).toHaveLength(2);

@@ -16,13 +16,19 @@ import {
   type StylesOptions,
 } from "@docen/docx";
 import type { Editor } from "@docen/docx/core";
-import { projectDocumentOptions, type ProjectedFlowBox } from "@docen/docx/layout";
+import {
+  projectDocumentOptions,
+  type ProjectedFlowBox,
+  type ProjectedPageFurniture,
+} from "@docen/docx/layout";
 import {
   browserFontMetrics,
   layoutFlow,
+  stackBlocks,
   TextMeasurer,
   twipToPx,
   type FlowPage,
+  type FlowPageInsets,
 } from "@docen/layout";
 import { attr, css, customElement, html } from "@microsoft/fast-element";
 import type { Mark } from "@tiptap/pm/model";
@@ -1113,8 +1119,9 @@ class DocenDocument extends AddinHost<Editor> {
   }
 
   /** A story keystroke's render path: patch the slot into a copy of the doc
-   *  JSON, re-project the furniture (the body flow never re-lays) and hand
-   *  the fresh stack back to the bridge's story map. */
+   *  JSON and re-run the full pipeline — the body re-flows because the
+   *  header/footer it edits pushes on it (Word: typing in a header moves the
+   *  body live). The fresh furniture stack goes back to the story's map. */
   #renderStoryFurniture(kind: StoryKind, slot: StorySlot, json: JSONContent[]): void {
     const bridge = this.#bridge;
     const stage = this.#stage;
@@ -1126,10 +1133,14 @@ class DocenDocument extends AddinHost<Editor> {
     const attrs = { ...((raw.attrs as Record<string, unknown>) ?? {}) };
     const key = this.#slotsKeyOf(kind);
     attrs[key] = { ...(attrs[key] as object | undefined), [slot]: json };
-    const { furniture, background } = projectDocumentOptions(
+    const { blocks, flow, furniture, background } = projectDocumentOptions(
       compileDocument({ ...raw, attrs } as JSONContent),
     );
-    stage.syncFurniture(furniture, background);
+    const pageInsets = this.#pageInsets(flow, furniture);
+    const pages = layoutFlow(blocks, pageInsets ? { ...flow, pageInsets } : flow, this.#measurer);
+    this.#pages = pages;
+    stage.sync(pages, flow, furniture, background);
+    bridge.updatePages(pages, flow);
     const band = stage.furnitureBand(kind, this.#storyPage);
     bridge.updateStoryMap(
       band ? stage.furnitureStack(kind, this.#storyPage) : null,
@@ -1189,13 +1200,60 @@ class DocenDocument extends AddinHost<Editor> {
     if (dirty) this.#persistStory(kind, slot, json);
   }
 
+  /** Word's furniture overflow rule: a header taller than the top margin
+   *  pushes the body down, a taller footer pushes it up — each page by its
+   *  own slot's stack (the first page by the first slot when titlePage asks
+   *  for one, even pages by the even slot). Slots without their own content
+   *  fall back to the default stack (OOXML reference semantics), matching
+   *  the stage's paint fallback. */
+  #pageInsets(
+    flow: ProjectedFlowBox,
+    furniture: ProjectedPageFurniture | undefined,
+  ): FlowPageInsets | undefined {
+    if (!furniture) return undefined;
+    const topMargin = flow.contentTopPx;
+    const bottomMargin = flow.pageHeightPx - flow.contentTopPx - flow.contentHeightPx;
+    const headerDistance = furniture.headerDistancePx ?? 48;
+    const footerDistance = furniture.footerDistancePx ?? 48;
+    const height = (blocks: ProjectedPageFurniture["header"]): number | undefined =>
+      blocks
+        ? stackBlocks(blocks, flow.contentWidthPx, undefined, this.#measurer).heightPx
+        : undefined;
+    const inset = (headerPx: number | undefined, footerPx: number | undefined) => {
+      const top = Math.max(0, headerDistance + (headerPx ?? 0) - topMargin);
+      const bottom = Math.max(0, footerDistance + (footerPx ?? 0) - bottomMargin);
+      return top > 0 || bottom > 0
+        ? { topPx: Math.round(top), bottomPx: Math.round(bottom) }
+        : undefined;
+    };
+    const def = inset(height(furniture.header), height(furniture.footer));
+    if (!def) return undefined;
+    const out: FlowPageInsets = { default: def };
+    if (furniture.titlePage) {
+      out.first =
+        inset(
+          height(furniture.firstHeader) ?? height(furniture.header),
+          height(furniture.firstFooter) ?? height(furniture.footer),
+        ) ?? undefined;
+    }
+    if (furniture.evenAndOddHeaders) {
+      out.even =
+        inset(
+          height(furniture.evenHeader) ?? height(furniture.header),
+          height(furniture.evenFooter) ?? height(furniture.footer),
+        ) ?? undefined;
+    }
+    return out;
+  }
+
   /** The canvas pipeline — the single render entry the bridge's transactions
    *  and the loaders share: compile → project → layout → paint, then re-arm
    *  the caret map against the fresh geometry. */
   #renderDoc(doc: JSONContent): void {
     if (!this.#stageHost) return;
     const { blocks, flow, furniture, background } = projectDocumentOptions(compileDocument(doc));
-    const pages = layoutFlow(blocks, flow, this.#measurer);
+    const pageInsets = this.#pageInsets(flow, furniture);
+    const pages = layoutFlow(blocks, pageInsets ? { ...flow, pageInsets } : flow, this.#measurer);
     this.#pages = pages;
     this.#flow = flow;
     this.#stage ??= new CanvasStage(this.#stageHost, {
