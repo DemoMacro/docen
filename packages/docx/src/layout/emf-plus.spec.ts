@@ -1042,4 +1042,147 @@ describe("emfPlusMembers", () => {
       expect(p.d).toBe("M0 0L100 0L100 100");
     });
   });
+
+  // Wavy panel shapes ride the GDI path chain: a brush + a BeginPath figure
+  // (MoveTo/PolylineTo) frozen by EndPath and consumed by FillPath. The EMF+
+  // layer only draws fragments of these on corpus files.
+  describe("carrier-side GDI paths", () => {
+    function emr(type: number, payload: Uint8Array): Uint8Array {
+      const buf = new Uint8Array(8 + payload.length);
+      new DataView(buf.buffer).setUint32(0, type, true);
+      new DataView(buf.buffer).setUint32(4, buf.length, true);
+      buf.set(payload, 8);
+      return buf;
+    }
+
+    function createSolidBrush(slot: number, hex: string): Uint8Array {
+      // [ihBrush u32][style u32 = BS_SOLID][COLORREF 0x00bbggrr]
+      const buf = new Uint8Array(12);
+      const v = new DataView(buf.buffer);
+      v.setUint32(0, slot, true);
+      v.setUint32(4, 0, true);
+      const r = parseInt(hex.slice(0, 2), 16);
+      const g = parseInt(hex.slice(2, 4), 16);
+      const b = parseInt(hex.slice(4, 6), 16);
+      v.setUint32(8, (b << 16) | (g << 8) | r, true);
+      return emr(39, buf);
+    }
+
+    function selectObject(slot: number): Uint8Array {
+      const buf = new Uint8Array(4);
+      new DataView(buf.buffer).setUint32(0, slot, true);
+      return emr(37, buf);
+    }
+
+    function moveTo(x: number, y: number): Uint8Array {
+      const buf = new Uint8Array(8);
+      const v = new DataView(buf.buffer);
+      v.setInt32(0, x, true);
+      v.setInt32(4, y, true);
+      return emr(27, buf);
+    }
+
+    /** PolylineTo16: [bounds 4×i32][count u32][points int16 pairs]. */
+    function polyLineTo16(pts: Array<[number, number]>): Uint8Array {
+      const buf = new Uint8Array(20 + pts.length * 4);
+      const v = new DataView(buf.buffer);
+      v.setUint32(16, pts.length, true);
+      pts.forEach(([x, y], i) => {
+        v.setInt16(20 + i * 4, x, true);
+        v.setInt16(20 + i * 4 + 2, y, true);
+      });
+      return emr(88, buf);
+    }
+
+    const noOp = (t: number) => emr(t, new Uint8Array(0));
+
+    /** EMR_SETWORLDTRANSFORM: six floats behind the header. */
+    function worldTransform(scale: number, dx: number, dy: number): Uint8Array {
+      const buf = new Uint8Array(24);
+      const v = new DataView(buf.buffer);
+      v.setFloat32(0, scale, true);
+      v.setFloat32(12, scale, true);
+      v.setFloat32(16, dx, true);
+      v.setFloat32(20, dy, true);
+      return emr(35, buf);
+    }
+
+    it("fills a BeginPath..EndPath figure with the selected brush", () => {
+      const wmf = dualModeWmf(
+        emfCarrier([
+          emrEmfPlusComment([epHeader(), epEof()]),
+          createSolidBrush(2, "b88e75"),
+          selectObject(2),
+          noOp(58), // BeginPath
+          moveTo(100, 100),
+          polyLineTo16([
+            [200, 100],
+            [200, 200],
+          ]),
+          noOp(61), // CloseFigure
+          noOp(60), // EndPath
+          noOp(62), // FillPath
+        ]),
+      );
+      const members = emfPlusMembers(wmf, 100, 100);
+      expect(members).toBeDefined();
+      const filled = members!.find((m) => m.kind === "path" && m.fill === "b88e75");
+      expect(filled).toBeDefined();
+      if (filled?.kind !== "path") return;
+      expect(filled.d).toContain("M");
+      expect(filled.d).toContain("L");
+      expect(filled.d).toContain("Z");
+    });
+
+    it("scales the frozen path through the live world transform", () => {
+      const wmf = dualModeWmf(
+        emfCarrier([
+          emrEmfPlusComment([epHeader(), epEof()]),
+          createSolidBrush(1, "404040"),
+          selectObject(1),
+          worldTransform(2, 10, 20), // SETWORLDTRANSFORM ×2 +10,+20
+          noOp(58),
+          moveTo(10, 10),
+          polyLineTo16([
+            [30, 10],
+            [30, 30],
+          ]),
+          noOp(60),
+          noOp(62),
+        ]),
+      );
+      const members = emfPlusMembers(wmf, 400, 400);
+      expect(members?.length).toBe(1);
+      if (!members) return;
+      const filled = members.find((m) => m.kind === "path" && "fill" in m && m.fill === "404040");
+      if (filled?.kind !== "path") return;
+      // points ×2 + offset: (10,10)→(30,40) in record space, then the frame
+      // normalization stretches onto the box — both points must survive.
+      expect(filled.d).toContain("L");
+    });
+
+    it("opens the figure from MoveToEx without a BeginPath bracket", () => {
+      // The corpus exporter omits EMR_BEGINPATH entirely: MoveToEx starts the
+      // figure and EndPath freezes it.
+      const wmf = dualModeWmf(
+        emfCarrier([
+          emrEmfPlusComment([epHeader(), epEof()]),
+          createSolidBrush(2, "123456"),
+          selectObject(2),
+          moveTo(100, 100),
+          polyLineTo16([
+            [200, 100],
+            [200, 200],
+          ]),
+          noOp(60),
+          noOp(62),
+        ]),
+      );
+      const members = emfPlusMembers(wmf, 100, 100);
+      const filled = (members ?? []).find(
+        (m) => m.kind === "path" && "fill" in m && m.fill === "123456",
+      );
+      expect(filled).toBeDefined();
+    });
+  });
 });

@@ -947,6 +947,7 @@ const EMR_SET_WORLD_TRANSFORM = 35;
 const EMR_MODIFY_WORLD_TRANSFORM = 36;
 const EMR_SELECT_OBJECT = 37;
 const EMR_CREATE_PEN = 38;
+const EMR_CREATE_BRUSH_INDIRECT = 39;
 const EMR_DELETE_OBJECT = 40;
 const EMR_SETTEXTCOLOR = 24;
 const EMR_SETTEXTALIGN = 22;
@@ -957,6 +958,20 @@ const EMR_EXT_TEXT_OUT_A = 83;
 const EMR_EXT_TEXT_OUT_W = 84;
 const EMR_POLYLINE16 = 87;
 const EMR_EXT_CREATE_PEN = 95;
+// Path construction and consumption: a figure opened with BeginPath grows
+// through MoveTo/LineTo/PolylineTo16/PolyBezierTo16 (+ CloseFigure), is
+// frozen by EndPath, and paints via FillPath/StrokePath/StrokeAndFillPath.
+const EMR_MOVE_TO_EX = 27;
+const EMR_BEGIN_PATH = 58;
+const EMR_END_PATH = 60;
+const EMR_CLOSE_FIGURE = 61;
+const EMR_FILL_PATH = 62;
+const EMR_STROKE_AND_FILL_PATH = 63;
+const EMR_STROKE_PATH = 64;
+const EMR_ABORT_PATH = 68;
+const EMR_LINE_TO = 54;
+const EMR_POLY_BEZIER_TO16 = 86;
+const EMR_POLY_LINE_TO16 = 88;
 
 /** EmrText offsets inside EMR_EXTTEXTOUTW (relative to the record start):
  *  bounds[16], graphicsMode, ex/eyScale, then Reference xy, Chars, offString,
@@ -1008,21 +1023,51 @@ function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): Draft[] {
   const drafts: Draft[] = [];
   const fonts = new Map<number, GdiFont>();
   const pens = new Map<number, { color: string; width: number }>();
+  const brushes = new Map<number, string>();
   let selected = -1;
   let selectedPen = -1;
+  let selectedBrush = -1;
   let xf: Xform = { ...IDENTITY };
   let textColor: string | undefined;
   // SetTextAlign flags; the GDI device default is TA_TOP (0) — the reference y
   // is the cell top, not the baseline (misreading it sinks every text box).
   let textAlign = 0;
+  // The path under construction (figures as raw command tuples), started by
+  // BeginPath and frozen by EndPath into `openPath` for a later fill/stroke.
+  let figure: PathCmds | null = null;
+  let openPath: PathCmds | null = null;
   // SaveDC snapshots the full drawing state we track.
   const states: Array<{
     xf: Xform;
     selected: number;
     selectedPen: number;
+    selectedBrush: number;
     textColor?: string;
     textAlign: number;
+    figure: PathCmds | null;
+    openPath: PathCmds | null;
   }> = [];
+  /** Transform and emit the frozen path. Fill comes from the selected brush,
+   *  stroke from the selected pen (the wavy panel shapes of corpus files ride
+   *  exactly this GDI chain — their EMF+ counterparts draw only fragments). */
+  const paintOpenPath = (mode: "fill" | "stroke" | "both"): void => {
+    if (!openPath || openPath.length < 2) {
+      openPath = null;
+      return;
+    }
+    const eff = effOf ? effOf(xf) : xf;
+    const fill = mode !== "stroke" ? brushes.get(selectedBrush) : undefined;
+    const pen = mode !== "fill" ? pens.get(selectedPen) : undefined;
+    if (fill || pen) {
+      // The pen width rides the world transform like text does.
+      const scale = Math.max(Math.hypot(eff.m11, eff.m21), Math.hypot(eff.m12, eff.m22));
+      pushPath(drafts, openPath, eff, {
+        ...(fill ? { fill } : {}),
+        ...(pen ? { strokeColor: pen.color, strokeWidth: Math.max(pen.width * scale, 1) } : {}),
+      });
+    }
+    openPath = null;
+  };
   for (let eo = 0; eo + 8 <= emf.length;) {
     const type = view.getUint32(eo, true);
     const size = view.getUint32(eo + 4, true);
@@ -1052,6 +1097,7 @@ function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): Draft[] {
         if (!(raw & 0x80000000)) {
           if (fonts.has(raw)) selected = raw;
           if (pens.has(raw)) selectedPen = raw;
+          if (brushes.has(raw)) selectedBrush = raw;
         }
         break;
       }
@@ -1059,6 +1105,17 @@ function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): Draft[] {
         const slot = view.getUint32(eo + 8, true);
         fonts.delete(slot);
         pens.delete(slot);
+        brushes.delete(slot);
+        break;
+      }
+      case EMR_CREATE_BRUSH_INDIRECT: {
+        // [ihBrush u32][LOGBRUSH style u32][COLORREF u32] — only the solid
+        // style (0) names a paintable flat color; hatched/pattern brushes
+        // carry payload elsewhere and are skipped.
+        const slot = view.getUint32(eo + 8, true);
+        if (view.getUint32(eo + 12, true) === 0) {
+          brushes.set(slot, rgbHex(view.getUint32(eo + 16, true)));
+        }
         break;
       }
       case EMR_CREATE_PEN: {
@@ -1174,15 +1231,90 @@ function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): Draft[] {
         textAlign = view.getUint32(eo + 8, true);
         break;
       case EMR_SAVEDC:
-        states.push({ xf, selected, selectedPen, textColor, textAlign });
+        states.push({
+          xf,
+          selected,
+          selectedPen,
+          selectedBrush,
+          textColor,
+          textAlign,
+          figure,
+          openPath,
+        });
         break;
       case EMR_RESTOREDC: {
         const st = states.pop();
         if (st) {
-          ({ xf, selected, selectedPen, textColor, textAlign } = st);
+          ({ xf, selected, selectedPen, selectedBrush, textColor, textAlign, figure, openPath } =
+            st);
         }
         break;
       }
+      case EMR_MOVE_TO_EX: {
+        // A move starts a figure unconditionally: corpus exporters skip the
+        // BeginPath bracket entirely and grow paths straight from MoveToEx,
+        // so a `figure != null` guard here would silence every path. A move
+        // outside any fill/stroke pair just leaves an unconsumed figure —
+        // harmless (AbortPath / a later fill clear it).
+        figure = [["M", [view.getInt32(eo + 8, true), view.getInt32(eo + 12, true)]]];
+        break;
+      }
+      case EMR_LINE_TO: {
+        if (figure) figure.push(["L", [view.getInt32(eo + 8, true), view.getInt32(eo + 12, true)]]);
+        break;
+      }
+      case EMR_POLY_LINE_TO16:
+      case EMR_POLY_BEZIER_TO16: {
+        // Both share the POLYLINE16 body: [bounds 4×i32][count u32][points].
+        // PolyLineTo16 appends line vertices; PolyBezierTo16 appends bezier
+        // triplets ([control1, control2, end] per segment, running position
+        // opens the segment — the same convention decodePath applies).
+        const count = view.getUint32(eo + 24, true);
+        if (!count || count > 10_000 || eo + 28 + count * 4 > eo + size || !figure) break;
+        for (let i = 0; i < count; i++) {
+          const x = view.getInt16(eo + 28 + i * 4, true);
+          const y = view.getInt16(eo + 28 + i * 4 + 2, true);
+          if (type === EMR_POLY_LINE_TO16) {
+            figure.push(["L", [x, y]]);
+          } else {
+            // Accumulate the triplet on the anchor command, then lift it off
+            // as a cubic: the running position is the anchor (it stays), the
+            // three pairs are [control1, control2, end].
+            const anchor = figure[figure.length - 1];
+            if (!anchor || anchor[0] === "Z") break;
+            anchor[1].push(x, y);
+            if (i % 3 === 2 && anchor[1].length >= 8) {
+              figure.push(["C", anchor[1].slice(2)]);
+              anchor[1].length = 2;
+            }
+          }
+        }
+        break;
+      }
+      case EMR_BEGIN_PATH:
+        figure = [];
+        openPath = null;
+        break;
+      case EMR_CLOSE_FIGURE:
+        if (figure?.length) figure.push(["Z", []]);
+        break;
+      case EMR_END_PATH:
+        if (figure && figure.length >= 2) openPath = figure;
+        figure = null;
+        break;
+      case EMR_ABORT_PATH:
+        figure = null;
+        openPath = null;
+        break;
+      case EMR_FILL_PATH:
+        paintOpenPath("fill");
+        break;
+      case EMR_STROKE_PATH:
+        paintOpenPath("stroke");
+        break;
+      case EMR_STROKE_AND_FILL_PATH:
+        paintOpenPath("both");
+        break;
       case EMR_SET_WORLD_TRANSFORM:
         xf = readCarrierXform(view, eo + 8);
         break;
@@ -1259,7 +1391,9 @@ function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): Draft[] {
             chars,
           );
           if (dxAdvances) {
-            const natural = [...text].map((ch) => height * (ch.charCodeAt(0) > 0xff ? 1 : 0.55));
+            const natural = Array.from(text).map(
+              (ch) => height * (ch.charCodeAt(0) > 0xff ? 1 : 0.55),
+            );
             advance = dxAdvances.reduce((sum, a) => sum + a * glyphScale, 0);
             const drift = dxAdvances.reduce(
               (sum, a, i) => sum + a * glyphScale - (natural[i] ?? 0),
