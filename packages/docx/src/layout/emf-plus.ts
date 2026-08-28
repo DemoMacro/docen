@@ -8,6 +8,8 @@
 
 import type { LayoutDrawingMember } from "@docen/layout";
 
+import { bmpDataUrl } from "./wmf-dib";
+
 const PLACEABLE_MAGIC = 0x9ac6cdd7;
 const META_ESCAPE = 0x0626;
 const WMFC_MAGIC = 0x43464d57; // "WMFC"
@@ -50,6 +52,7 @@ export function embeddedEmfStream(bytes: Uint8Array): Uint8Array | undefined {
 const PLUS_END_OF_FILE = 0x4002;
 const PLUS_OBJECT = 0x4008;
 const PLUS_FILL_RECTS = 0x400a;
+const PLUS_DRAW_LINES = 0x400d;
 const PLUS_FILL_PATH = 0x4014;
 const PLUS_DRAW_PATH = 0x4015;
 const PLUS_DRAW_IMAGE_POINTS = 0x401b;
@@ -104,9 +107,19 @@ function readXform(view: DataView, at: number): Xform {
   };
 }
 
-/** ARGB word (0xAARRGGBB) → opaque hex RRGGBB; undefined when transparent. */
+/** ARGB word (0xAARRGGBB) → hex RRGGBB composited over the white page;
+ *  undefined when fully transparent. Metafiles wash whole-page tints at
+ *  near-zero alpha (a 10/255 red wash rendered opaque covers the art under
+ *  it), so partial alpha pre-blends with white instead of riding along. */
 function argbHex(word: number): string | undefined {
-  return word >>> 24 === 0 ? undefined : ((word & 0xffffff) | 0x1000000).toString(16).slice(1);
+  const a = word >>> 24;
+  if (a === 0) return undefined;
+  const rgb = word & 0xffffff;
+  if (a >= 0xfa) return (rgb | 0x1000000).toString(16).slice(1);
+  const mix = (c: number) => Math.round((c * a + 255 * (255 - a)) / 255);
+  return [mix(rgb >> 16), mix((rgb >> 8) & 0xff), mix(rgb & 0xff)]
+    .map((c) => c.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 // A sub-path as raw command tuples; "M" starts, "L"/"C" continue, "Z" closes.
@@ -148,6 +161,15 @@ interface TextDraft {
   sizeWorld: number;
   color?: string;
   bold?: boolean;
+  /** Extra per-character advance from the trail Dx run, device px — GDI
+   *  tracked text (letter-spaced labels) reports wider advances than the
+   *  glyphs are wide; the member threads the difference into the run style. */
+  letterSpacingWorld?: number;
+  /** Clockwise screen angle of the text-direction column, degrees — a
+   *  rotated world transform means vertical text (plan-box columns); the
+   *  member carries it so the paint rotates instead of laying the run
+   *  horizontally across neighboring columns. */
+  rotation?: number;
 }
 
 type Draft = PathDraft | PicDraft | TextDraft;
@@ -696,6 +718,36 @@ function carrierDrafts(emf: Uint8Array, basis: Xform | undefined, depth: number)
         }
         break;
       }
+      case PLUS_DRAW_LINES: {
+        installOpenRuns();
+        // Corpus conventions as above: the WMF-embedded record prepends its
+        // payload-size u32, so the point count sits at d+4 and the polyline
+        // points follow (0x8000 = compressed PointS int16 pairs, else float
+        // PointF). The stroke comes from the object-table pen the record's
+        // ObjectId selects — the list-page underlines ride these records.
+        const pen = objects.get(objectId) as PenInfo | undefined;
+        const color = pen?.color ?? lastPen?.color;
+        if (!color) break;
+        const n = pv.getUint32(d + 4, true);
+        const compressed = (flags & 0x8000) !== 0;
+        const step = compressed ? 4 : 8;
+        if (!n || n > 10_000 || d + 8 + n * step > d + rs) break;
+        const eff = effOf(xf);
+        const cmds: PathCmds = [];
+        for (let i = 0; i < n; i++) {
+          const p = d + 8 + i * step;
+          const px = compressed ? pv.getInt16(p, true) : pv.getFloat32(p, true);
+          const py = compressed ? pv.getInt16(p + 2, true) : pv.getFloat32(p + 4, true);
+          cmds.push([i === 0 ? "M" : "L", [px, py]]);
+        }
+        const scale = Math.max(Math.hypot(eff.m11, eff.m21), Math.hypot(eff.m12, eff.m22));
+        pushPath(drafts, cmds, eff, {
+          strokeColor: color,
+          strokeWidth: Math.max((pen?.width ?? 1) * scale, 1),
+          ...(pen?.dash ? { dash: pen.dash } : {}),
+        });
+        break;
+      }
       case PLUS_DRAW_IMAGE_POINTS: {
         installOpenRuns();
         const img = objects.get(objectId) as ImageInfo | undefined;
@@ -898,6 +950,8 @@ const EMR_CREATE_PEN = 38;
 const EMR_DELETE_OBJECT = 40;
 const EMR_SETTEXTCOLOR = 24;
 const EMR_SETTEXTALIGN = 22;
+const EMR_STRETCHDIBITS = 44;
+const EMR_BITBLT = 76;
 const EMR_EXT_CREATE_FONT = 82;
 const EMR_EXT_TEXT_OUT_A = 83;
 const EMR_EXT_TEXT_OUT_W = 84;
@@ -1044,6 +1098,71 @@ function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): Draft[] {
         });
         break;
       }
+      case EMR_STRETCHDIBITS:
+      case EMR_BITBLT: {
+        // The carrier's own photo blits join the replay as pictures: dual-mode
+        // files keep their photos here when the EMF+ layer references image
+        // slots that are never defined (its draw is then a no-op). The two
+        // record shapes agree on the leading fields — dest rect @24..36 and
+        // the BITMAPINFO at @48..64 — so one body reads both. SRCAND halves
+        // of masked blit pairs skip: the AND mask whitens those pixels only
+        // for the SRCPAINT pass to refill, invisible over the white page.
+        const rop =
+          type === EMR_STRETCHDIBITS
+            ? view.getUint32(eo + 68, true)
+            : view.getUint32(eo + 44, true);
+        if (rop === 0x008800c6) break;
+        const copy = rop % 0x1000000;
+        if (copy !== 0x0020 && copy !== 0x0086) break; // SRCCOPY / SRCPAINT
+        const offBmi = view.getUint32(eo + 48, true);
+        const cbBmi = view.getUint32(eo + 52, true);
+        const offBits = view.getUint32(eo + 56, true);
+        const cbBits = view.getUint32(eo + 60, true);
+        if (!cbBmi || cbBmi > 1_000_000 || !cbBits || cbBits > 12_000_000) break;
+        if (offBmi < 8 || offBits < offBmi + cbBmi || eo + offBits + cbBits > eo + size) break;
+        const bmiW = view.getInt32(eo + offBmi + 4, true);
+        const bmiH = Math.abs(view.getInt32(eo + offBmi + 8, true));
+        const dx = view.getInt32(eo + 24, true);
+        const dy = view.getInt32(eo + 28, true);
+        const dw = view.getUint32(eo + 32, true);
+        const dh = view.getUint32(eo + 36, true);
+        const sx =
+          type === EMR_STRETCHDIBITS ? view.getInt32(eo + 32, true) : view.getInt32(eo + 64, true);
+        const sy =
+          type === EMR_STRETCHDIBITS ? view.getInt32(eo + 36, true) : view.getInt32(eo + 68, true);
+        let crop: PicDraft["crop"];
+        if (
+          bmiW > 0 &&
+          bmiH > 0 &&
+          dw > 0 &&
+          dh > 0 &&
+          (sx > 0 || sy > 0 || sx + dw < bmiW || sy + dh < bmiH)
+        ) {
+          crop = {
+            l: Math.max(0, sx / bmiW),
+            t: Math.max(0, sy / bmiH),
+            r: Math.max(0, 1 - (sx + dw) / bmiW),
+            b: Math.max(0, 1 - (sy + dh) / bmiH),
+          };
+          if (!(crop.l > 0.001 || crop.t > 0.001 || crop.r > 0.001 || crop.b > 0.001))
+            crop = undefined;
+        }
+        const eff = effOf ? effOf(xf) : xf;
+        const [px, py] = xformPoint(eff, dx, dy);
+        const [px2] = xformPoint(eff, dx + dw, dy);
+        const [, py2] = xformPoint(eff, dx, dy + dh);
+        if (px2 - px <= 0 || py2 - py <= 0) break;
+        drafts.push({
+          kind: "pic",
+          x: px,
+          y: py,
+          w: px2 - px,
+          h: py2 - py,
+          src: bmpDataUrl(emf, eo + offBmi, cbBmi + cbBits),
+          ...(crop ? { crop } : {}),
+        });
+        break;
+      }
       case EMR_SETTEXTCOLOR: {
         // COLORREF (0x00bbggrr); high-flag words reference the system palette
         // — skip those and keep the last true RGB.
@@ -1128,12 +1247,33 @@ function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): Draft[] {
           // SetTextAlign semantics for the reference y (same calibration as the
           // WMF player): TA_BASELINE hoists by the typical CJK ascent, TA_BOTTOM
           // by the full em, and the device default TA_TOP already names the cell
-          // top — hoisting there sank every box by 0.8 em. Advance falls back to
-          // per-char estimates because the trail Dx run is not worth parsing for
-          // outline-position accuracy.
+          // top — hoisting there sank every box by 0.8 em. Advance prefers the
+          // trail Dx run (GDI's own per-char advances — tracked labels report
+          // wider steps than the glyphs are wide, and the difference is the
+          // letter spacing); per-char estimates stand in when it is absent.
           let advance = 0;
-          for (const ch of text) advance += height * (ch.charCodeAt(0) > 0xff ? 1 : 0.55);
+          let spacing: number | undefined;
+          const dxAdvances = readDxAdvances(
+            view,
+            strAt + chars * (type === EMR_EXT_TEXT_OUT_W ? 2 : 1),
+            chars,
+          );
+          if (dxAdvances) {
+            const natural = [...text].map((ch) => height * (ch.charCodeAt(0) > 0xff ? 1 : 0.55));
+            advance = dxAdvances.reduce((sum, a) => sum + a * glyphScale, 0);
+            const drift = dxAdvances.reduce(
+              (sum, a, i) => sum + a * glyphScale - (natural[i] ?? 0),
+              0,
+            );
+            if (Math.abs(drift) > 0.3 * dxAdvances.length) spacing = drift / dxAdvances.length;
+          } else {
+            for (const ch of text) advance += height * (ch.charCodeAt(0) > 0xff ? 1 : 0.55);
+          }
           const refY = x * eff.m12 + yBaseline * eff.m22 + eff.dy;
+          // The text-direction column (m11,m12) names the screen angle the
+          // run extends along: 0° horizontal, ±90° vertical (plan-box
+          // columns). Unrotated runs stay unmarked.
+          const angle = (Math.atan2(eff.m12, eff.m11) * 180) / Math.PI;
           drafts.push({
             kind: "text",
             x: x * eff.m11 + yBaseline * eff.m21 + eff.dx,
@@ -1148,8 +1288,13 @@ function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): Draft[] {
             text,
             family: font?.face ?? "",
             sizeWorld: height,
+            ...(spacing ? { letterSpacingWorld: spacing } : {}),
+            ...(Math.abs(angle) > 0.5 ? { rotation: angle } : {}),
             ...(textColor ? { color: textColor } : {}),
-            ...(font && font.weight >= 550 ? { bold: true } : {}),
+            // GDI face matching splits at FW_BOLD (700): a 681-weight request
+            // (corpus norm for 微软雅黑) still resolves to the regular face,
+            // and bolding it sinks the label look of the source rendering.
+            ...(font && font.weight >= 700 ? { bold: true } : {}),
           });
         }
         break;
@@ -1167,6 +1312,34 @@ function rgbHex(colorref: number): string {
   const g = (colorref >> 8) & 0xff;
   const b = (colorref >> 16) & 0xff;
   return `${((r << 16) | (g << 8) | b).toString(16).padStart(6, "0")}`;
+}
+
+/** Char advances from the trail Dx run of an ExtTextOut record, in record
+ *  logical units. Corpus exporters emit them as pseudo-PDY pairs
+ *  ([advance, 0] per char), sometimes with one leading straggler word in
+ *  front of the first pair; the pair offset that makes every second word
+ *  zero wins. No Dx run or no clean pairing → undefined (width falls back
+ *  to the per-char estimate). */
+function readDxAdvances(view: DataView, at: number, chars: number): number[] | undefined {
+  const n = Math.min(chars, 4096);
+  if (n < 1) return undefined;
+  const word = (i: number): number | undefined =>
+    at + i * 2 + 2 <= view.byteLength ? view.getInt16(at + i * 2, true) : undefined;
+  for (const off of [0, 1]) {
+    const adv: number[] = [];
+    let clean = true;
+    for (let i = 0; i < n; i++) {
+      const a = word(off + i * 2);
+      const u = word(off + i * 2 + 1);
+      if (a == null || u == null || u !== 0 || a <= 0) {
+        clean = false;
+        break;
+      }
+      adv.push(a);
+    }
+    if (clean) return adv;
+  }
+  return undefined;
 }
 
 /** Whether a draft joins the union bounding box that drives the final
@@ -1241,6 +1414,7 @@ function finalize(
         width: dr.w * sX,
         height: dr.h * sY,
         nowrap: true,
+        ...(dr.rotation ? { rotation: dr.rotation } : {}),
         blocks: [
           {
             kind: "paragraph",
@@ -1253,6 +1427,7 @@ function finalize(
                   sizePx: dr.sizeWorld * sY,
                   ...(dr.color ? { color: dr.color } : {}),
                   ...(dr.bold ? { bold: true } : {}),
+                  ...(dr.letterSpacingWorld ? { letterSpacingPx: dr.letterSpacingWorld * sX } : {}),
                 },
               },
             ],

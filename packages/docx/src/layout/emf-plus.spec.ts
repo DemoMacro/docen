@@ -656,7 +656,7 @@ describe("emfPlusMembers", () => {
       return emr(24, buf);
     }
 
-    function exttextoutw(text: string, x: number, y: number): Uint8Array {
+    function exttextoutw(text: string, x: number, y: number, dx?: Int16Array): Uint8Array {
       const bytes = utf16le(text);
       const chars = text.length; // UTF-16 code units, per the Chars field
       // Payload after the EMR header: bounds[16], graphicsMode, exScale,
@@ -670,7 +670,12 @@ describe("emfPlusMembers", () => {
       v.setUint32(36, chars, true);
       v.setUint32(40, 56, true); // offString, relative to the record start
       v.setUint32(44, 0, true); // options
-      return emr(84, joinBuffers(head, bytes));
+      const parts: Uint8Array[] = [head, bytes];
+      if (dx) {
+        const trail = new Uint8Array(dx.buffer, dx.byteOffset, dx.length * 2);
+        parts.push(trail);
+      }
+      return emr(84, joinBuffers(...parts));
     }
 
     function joinBuffers(...parts: Uint8Array[]): Uint8Array {
@@ -720,6 +725,84 @@ describe("emfPlusMembers", () => {
       const run = para.inline[0];
       if (run.kind !== "text") return;
       expect(run.style.sizePx ?? 0).toBeGreaterThan(0);
+    });
+
+    it("threads Dx-run tracking into width and letter spacing", () => {
+      // A tracked run: Dx advances above the natural 240 em — the difference
+      // is real letter spacing, and the total advance is the Dx sum rather
+      // than the per-char estimate.
+      const wmf = carrierWithText(
+        [
+          extcreatefont(1, 24, 681, "微软雅黑"),
+          selectfont(1),
+          settextcolor("ffffff"),
+          exttextoutw(
+            "示例跟踪文案",
+            1000,
+            40000,
+            new Int16Array([340, 0, 360, 0, 340, 0, 360, 0, 340, 0, 240, 0]),
+          ),
+        ],
+        [epHeader(), epEof()],
+      );
+      const members = emfPlusMembers(wmf, 600, 300);
+      expect(members).toBeDefined();
+      const box = members!.find((m) => m.kind === "textBox");
+      if (box?.kind !== "textBox") return;
+      // Weight 681 < FW_BOLD: GDI face matching keeps the regular face.
+      const para = box.blocks[0];
+      if (para.kind !== "paragraph") return;
+      const run = para.inline[0];
+      if (run.kind !== "text") return;
+      expect(run.style.bold).toBeUndefined();
+      expect(run.style.letterSpacingPx ?? 0).toBeGreaterThan(5);
+      // Width = Σ advances × scale (≈ 33px/char at this box scale), not the
+      // estimate (24px/char).
+      expect(box.width).toBeGreaterThan(160);
+    });
+
+    it("keeps a 700-weight run bold with untracked advances", () => {
+      const wmf = carrierWithText(
+        [extcreatefont(1, 24, 700, "宋体"), selectfont(1), exttextoutw("示例文字", 1000, 40000)],
+        [epHeader(), epEof()],
+      );
+      const members = emfPlusMembers(wmf, 400, 300);
+      expect(members).toBeDefined();
+      const box = members!.find((m) => m.kind === "textBox");
+      if (box?.kind !== "textBox") return;
+      const para = box.blocks[0];
+      if (para.kind !== "paragraph") return;
+      const run = para.inline[0];
+      if (run.kind !== "text") return;
+      expect(run.style.bold).toBe(true);
+      expect(run.style.letterSpacingPx).toBeUndefined();
+    });
+
+    it("marks runs under a rotated world transform with the screen angle", () => {
+      // Vertical plan-box columns: a 90°-rotated GDI world transform lays the
+      // run down a column — the member must carry the rotation so the paint
+      // rotates it instead of drawing it horizontally across the neighbors.
+      const setworld = (m: number[]): Uint8Array => {
+        const body = new Uint8Array(24);
+        const v = new DataView(body.buffer);
+        m.forEach((n, i) => v.setFloat32(i * 4, n, true));
+        return emr(35, body);
+      };
+      const wmf = carrierWithText(
+        [
+          setworld([0, 0.07, -0.07, 0, 31580, -1287]),
+          extcreatefont(1, 24, 400, "SimSun"),
+          selectfont(1),
+          settextcolor("1a1a1a"),
+          exttextoutw("示例竖排文字", 21015, 470415),
+        ],
+        [epHeader(), epEof()],
+      );
+      const members = emfPlusMembers(wmf, 400, 300);
+      expect(members).toBeDefined();
+      const box = members!.find((m) => m.kind === "textBox");
+      if (box?.kind !== "textBox") return;
+      expect(box.rotation).toBeCloseTo(90, 0);
     });
 
     it("keeps walking past whitespace-only text runs", () => {
