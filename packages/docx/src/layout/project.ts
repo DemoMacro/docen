@@ -435,6 +435,10 @@ interface ProjectContext {
   /** Live list counters per numbering reference (level → count), advanced in
    *  document order as numbered paragraphs project. */
   listCounters: Map<string, number[]>;
+  /** Comment ranges open at the current document position (w:commentRangeStart
+   *  opened, w:commentRangeEnd not yet seen) — ranges span paragraphs, so the
+   *  set lives across the projection walk and every text atom inside tints. */
+  openComments: Set<number>;
 }
 
 // ── list-number formats (w:numFmt) ──
@@ -712,8 +716,8 @@ function projectParagraph(p: BodyParagraph, ctx: ProjectContext): LayoutParagrap
   return {
     kind: "paragraph",
     inline: markerInline.length
-      ? markerInline.concat(projectRuns(runs, chainRPr, docRPr, defaultTextStyle))
-      : projectRuns(runs, chainRPr, docRPr, defaultTextStyle),
+      ? markerInline.concat(projectRuns(runs, chainRPr, docRPr, defaultTextStyle, ctx.openComments))
+      : projectRuns(runs, chainRPr, docRPr, defaultTextStyle, ctx.openComments),
     drawings: drawings.length > 0 ? drawings : undefined,
     spacing,
     indent,
@@ -1300,6 +1304,7 @@ function projectRuns(
   chainRPr: Rec,
   docRPr: Rec,
   defRun: LayoutTextStyle,
+  openComments?: Set<number>,
 ): LayoutInline[] {
   const out: LayoutInline[] = [];
   const textStyleOf = (rPr: Rec): LayoutTextStyle => {
@@ -1318,7 +1323,9 @@ function projectRuns(
   };
   const pushText = (text: string, rPr: Rec): void => {
     if (!text) return;
-    out.push({ kind: "text", text, style: textStyleOf(rPr) });
+    const commentIds =
+      openComments && openComments.size > 0 ? [...openComments].sort((a, b) => a - b) : undefined;
+    out.push({ kind: "text", text, style: textStyleOf(rPr), commentIds });
   };
   /** A field (w:fldSimple / complexField): PAGE/NUMPAGES become dynamic atoms
    *  (the painter resolves the number per page — `text` is a measuring
@@ -1400,6 +1407,13 @@ function projectRuns(
         continue;
       }
       if (!isRecord(child)) continue;
+      // Comment range markers are zero-width: a start opens tinting for every
+      // text atom after it, an end closes it. The set lives across paragraphs
+      // (the caller's walk), matching Word's range semantics.
+      if (isRecord(child.commentRangeStart) && num(child.commentRangeStart.id) != null)
+        openComments?.add(num(child.commentRangeStart.id)!);
+      if (isRecord(child.commentRangeEnd) && num(child.commentRangeEnd.id) != null)
+        openComments?.delete(num(child.commentRangeEnd.id)!);
       const rPr: Rec = { ...preset, ...child };
       if (typeof child.text === "string") pushText(child.text, rPr);
       if (child.break != null) out.push({ kind: "break" });
@@ -1761,6 +1775,7 @@ function projectPageFurniture(
     styles: doc.styles,
     numberings: indexNumberings(doc.numbering),
     listCounters: new Map(),
+    openComments: new Set(),
   };
   const projectSlots = (side: unknown): LayoutBlock[] | undefined => {
     if (!Array.isArray(side)) return undefined;
@@ -1887,6 +1902,7 @@ export function projectDocumentOptions(doc: DocumentOptions): {
     styles: doc.styles,
     numberings: indexNumberings(doc.numbering),
     listCounters: new Map(),
+    openComments: new Set(),
   };
   const sections: ProjectedSection[] = (doc.sections ?? []).map((section) => {
     const blocks: LayoutBlock[] = [];

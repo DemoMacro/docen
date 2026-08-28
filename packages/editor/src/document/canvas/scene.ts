@@ -188,6 +188,20 @@ function paintParagraph(
       if (item.kind === "text" && inline.kind === "text") {
         const family = familyOf(inline.style, item.text);
         const intervalPx = justified ? rights[itemIndex] - item.xPx : undefined;
+        // Comment range tint (w:commentRangeStart..End): a translucent box
+        // under the item's glyphs, Word's light-amber reviewer tint. Painted
+        // before the text so the glyphs stay on top.
+        if (inline.commentIds?.length) {
+          tree.add(
+            new Rect({
+              x: lineX + item.xPx,
+              y: lineY + pad,
+              width: intervalPx ?? item.widthPx,
+              height: Math.max(1, line.naturalPx || line.heightPx),
+              fill: "rgba(255, 222, 89, 0.45)",
+            }),
+          );
+        }
         // A page-number field paints its live value; the measured `text` was
         // only a placeholder.
         const label =

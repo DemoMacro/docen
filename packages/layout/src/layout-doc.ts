@@ -44,7 +44,16 @@ export type LayoutInline =
    *  complexField PAGE / NUMPAGES): the value only exists after pagination, so
    *  `text` is a single-digit placeholder for measuring and the painter swaps
    *  in the real page number. */
-  | { kind: "text"; text: string; style: LayoutTextStyle; field?: "page" | "numPages" }
+  | {
+      kind: "text";
+      text: string;
+      style: LayoutTextStyle;
+      field?: "page" | "numPages";
+      /** Ids of the comments whose range covers this atom (w:commentRangeStart
+       *  /commentRangeEnd): the painter tints the text's box (sorted, unique).
+       *  Pure paint metadata — measuring and wrapping ignore it. */
+      commentIds?: number[];
+    }
   | { kind: "break" }
   | { kind: "tab"; toPx?: number }
   | {

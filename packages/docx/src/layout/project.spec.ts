@@ -1148,3 +1148,84 @@ describe("projectDocumentOptions inline containers", () => {
     });
   });
 });
+
+describe("projectDocumentOptions comment ranges", () => {
+  const textsOf = (blocks: LayoutBlock[]): { text: string; commentIds?: number[] }[] => {
+    const out: { text: string; commentIds?: number[] }[] = [];
+    for (const b of blocks) {
+      if (b.kind !== "paragraph") continue;
+      for (const i of b.inline)
+        if (i.kind === "text") out.push({ text: i.text, commentIds: i.commentIds });
+    }
+    return out;
+  };
+
+  it("tints only the atoms inside the comment range", () => {
+    const { blocks } = oneSection(
+      doc([
+        {
+          paragraph: {
+            children: [
+              { text: "before " },
+              { commentRangeStart: { id: 7 } },
+              { text: "marked" },
+              { commentRangeEnd: { id: 7 } },
+              { commentReference: 7 },
+              { text: " after" },
+            ],
+          },
+        },
+      ]),
+    );
+    expect(textsOf(blocks)).toEqual([
+      { text: "before " },
+      { text: "marked", commentIds: [7] },
+      { text: " after" },
+    ]);
+  });
+
+  it("keeps a range open across paragraphs until its end marker", () => {
+    const { blocks } = oneSection(
+      doc([
+        { paragraph: { children: [{ commentRangeStart: { id: 2 } }, { text: "head " }] } },
+        { paragraph: { children: [{ text: "middle" }] } },
+        {
+          paragraph: {
+            children: [{ text: " tail" }, { commentRangeEnd: { id: 2 } }, { text: " done" }],
+          },
+        },
+      ]),
+    );
+    expect(textsOf(blocks)).toEqual([
+      { text: "head ", commentIds: [2] },
+      { text: "middle", commentIds: [2] },
+      { text: " tail", commentIds: [2] },
+      { text: " done" },
+    ]);
+  });
+
+  it("sorts nested range ids and closes them independently", () => {
+    const { blocks } = oneSection(
+      doc([
+        {
+          paragraph: {
+            children: [
+              { commentRangeStart: { id: 9 } },
+              { text: "a" },
+              { commentRangeStart: { id: 4 } },
+              { text: "b" },
+              { commentRangeEnd: { id: 9 } },
+              { text: "c" },
+              { commentRangeEnd: { id: 4 } },
+            ],
+          },
+        },
+      ]),
+    );
+    expect(textsOf(blocks)).toEqual([
+      { text: "a", commentIds: [9] },
+      { text: "b", commentIds: [4, 9] },
+      { text: "c", commentIds: [4] },
+    ]);
+  });
+});
