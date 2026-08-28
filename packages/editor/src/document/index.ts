@@ -149,6 +149,10 @@ const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   "header",
   "footer",
   "page-number",
+  // Symbol opens its grid dialog (insertion arrives via symbol:insert);
+  // Bookmark prompts for a name and wraps the selection.
+  "symbol",
+  "bookmark",
   // #onChange (data-event)
   "open",
   "save-as",
@@ -287,6 +291,7 @@ const documentTemplate = html`
   </docen-workspace>
   <docen-options-dialog part="options"></docen-options-dialog>
   <docen-word-count-dialog part="word-count"></docen-word-count-dialog>
+  <docen-symbol-dialog part="symbol"></docen-symbol-dialog>
   <docen-find-replace-dialog></docen-find-replace-dialog>
   <input type="file" id="file-input" accept=".docx,.md,.markdown,.html,.htm" hidden />
   <input type="file" id="image-input" accept="image/*" hidden />
@@ -1065,6 +1070,11 @@ class DocenDocument extends AddinHost<Editor> {
       "lang:change",
       this.#onLangChange as EventListener,
     );
+    // Symbol dialog — insert the picked character at the caret.
+    this.shadowRoot!.querySelector("docen-symbol-dialog")?.addEventListener(
+      "symbol:insert",
+      this.#onSymbolInsert as EventListener,
+    );
 
     // Re-render header + ribbon when the page locale (<html lang>) changes.
     this.#unobserveLang = observeLang(() => this.#renderChrome());
@@ -1381,6 +1391,9 @@ class DocenDocument extends AddinHost<Editor> {
     this.shadowRoot
       ?.querySelector("docen-status-bar")
       ?.removeEventListener("lang:change", this.#onLangChange as EventListener);
+    this.shadowRoot
+      ?.querySelector("docen-symbol-dialog")
+      ?.removeEventListener("symbol:insert", this.#onSymbolInsert as EventListener);
     this.shadowRoot
       ?.querySelector<HTMLElement>("docen-status-bar")
       ?.removeEventListener("zoom:change", this.#onZoomChange as EventListener);
@@ -1971,6 +1984,68 @@ class DocenDocument extends AddinHost<Editor> {
     dialog.show();
   }
 
+  /** Symbol dialog Insert → drop the picked character at the caret (the
+   *  dialog stays open, Word-style, so several symbols can go in a row). */
+  readonly #onSymbolInsert = (event: CustomEvent<{ char?: string }>): void => {
+    const char = event.detail?.char;
+    if (!char) return;
+    this.#bridge?.focus();
+    this.editor?.commands.insertContent(char);
+  };
+
+  /** The next free bookmark id — one past the highest id already carried by
+   *  any bookmarkStart/bookmarkEnd passthrough in the document (OOXML marks
+   *  pairs by a document-unique integer). */
+  #nextBookmarkId(): number {
+    let max = -1;
+    const scan = (node: JSONContent): void => {
+      for (const child of node.content ?? []) {
+        if (child.type === "inlinePassthrough" || child.type === "passthrough") {
+          try {
+            const data = JSON.parse(String(child.attrs?.data ?? "{}")) as {
+              bookmarkStart?: { id?: number };
+              bookmarkEnd?: { id?: number };
+            };
+            for (const id of [data.bookmarkStart?.id, data.bookmarkEnd?.id]) {
+              if (typeof id === "number" && id > max) max = id;
+            }
+          } catch {
+            // opaque verbatim blobs without bookmark data — skip
+          }
+        }
+        scan(child);
+      }
+    };
+    scan(this.editor!.getJSON());
+    return max + 1;
+  }
+
+  /** Insert Bookmark — prompt for a name (Word's rules: starts with a letter
+   *  or CJK char, no spaces), then wrap the selection with a
+   *  bookmarkStart/bookmarkEnd passthrough pair in one transaction (the start
+   *  goes before `from`, the end after `to` — +1 shifts past the start atom
+   *  the first step added). Round-trips verbatim through DOCX. */
+  #insertBookmark(): void {
+    const editor = this.editor;
+    if (!editor) return;
+    const name = window.prompt(t("bookmark.prompt", this))?.trim();
+    if (name == null) return;
+    if (!/^[A-Za-z一-鿿぀-ヿ][^\s]*$/.test(name) || name.length > 40) {
+      window.alert(t("bookmark.invalid", this));
+      return;
+    }
+    const id = this.#nextBookmarkId();
+    const seed = (data: object): JSONContent =>
+      ({
+        type: "inlinePassthrough",
+        attrs: { data: JSON.stringify(data) },
+      }) as JSONContent;
+    const { from, to } = editor.state.selection;
+    const start = editor.schema.nodeFromJSON(seed({ bookmarkStart: { id, name } }));
+    const end = editor.schema.nodeFromJSON(seed({ bookmarkEnd: { id } }));
+    editor.view.dispatch(editor.state.tr.insert(from, start).insert(to + 1, end));
+  }
+
   readonly #onCommand = (event: CustomEvent<{ event?: string; value?: string }>): void => {
     const { event: name, value } = event.detail ?? {};
     if (typeof name !== "string") return;
@@ -2102,6 +2177,18 @@ class DocenDocument extends AddinHost<Editor> {
       if (page != null) {
         this.#bridge?.enterStory(value === "top" ? "header" : "footer", page, seed);
       }
+      return;
+    }
+    // Symbol — open the character grid dialog; the insertion arrives via the
+    // dialog's symbol:insert event (it stays open for several inserts).
+    if (name === "symbol") {
+      (this.shadowRoot?.querySelector("docen-symbol-dialog") as { show(): void } | null)?.show();
+      return;
+    }
+    // Bookmark — prompt for a name and wrap the selection with a
+    // bookmarkStart/bookmarkEnd pair (Word's Insert → Bookmark).
+    if (name === "bookmark") {
+      this.#insertBookmark();
       return;
     }
     // Clipboard — the selection is canvas-rendered (no DOM editor selection),
