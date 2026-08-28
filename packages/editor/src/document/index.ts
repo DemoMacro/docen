@@ -159,10 +159,12 @@ const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   "link",
   // New Comment anchors the selection with a Word comment (range markers +
   // a documentExtras.comments entry); Edit/Delete operate on the comment
-  // covering the selection.
+  // covering the selection, Previous/Next step through the ranges.
   "new-comment",
   "edit-comment",
   "delete-comment",
+  "previous-comment",
+  "next-comment",
   // Text Box / Shapes insert a standalone wps shape run (Shapes reads the
   // gallery preset from the split item's value).
   "text-box",
@@ -2244,6 +2246,40 @@ class DocenDocument extends AddinHost<Editor> {
     editor.view.dispatch(tr);
   }
 
+  /** Review → Previous/Next Comment: select the range of the comment before
+   *  or after the selection (document order); no further comment in that
+   *  direction is a no-op. */
+  #jumpComment(direction: "previous" | "next"): void {
+    const editor = this.editor;
+    if (!editor) return;
+    const ranges: { from: number; to: number }[] = [];
+    const openStarts = new Map<number, number>();
+    editor.state.doc.descendants((child, pos) => {
+      const marker = DocenDocument.commentMarkerOf(child);
+      if (!marker) return;
+      if (marker.kind === "start") openStarts.set(marker.id, pos + child.nodeSize);
+      else if (marker.kind === "end") {
+        const start = openStarts.get(marker.id);
+        if (start != null) ranges.push({ from: start, to: pos });
+      }
+    });
+    ranges.sort((a, b) => a.from - b.from);
+    const { from } = editor.state.selection;
+    const target =
+      direction === "next"
+        ? ranges.find((r) => r.from > from)
+        : ranges.findLast((r) => r.from < from);
+    if (!target) return;
+    editor.view.dispatch(
+      editor.state.tr.setSelection(
+        new TextSelection(
+          editor.state.doc.resolve(target.from),
+          editor.state.doc.resolve(target.to),
+        ),
+      ),
+    );
+  }
+
   /** Review → New Comment: anchor the selection the way Word does — a
    *  commentRangeStart/commentRangeEnd passthrough pair around it with a
    *  commentReference after — and append the structured content to
@@ -2486,6 +2522,14 @@ class DocenDocument extends AddinHost<Editor> {
     }
     if (name === "delete-comment") {
       this.#deleteComment();
+      return;
+    }
+    if (name === "previous-comment") {
+      this.#jumpComment("previous");
+      return;
+    }
+    if (name === "next-comment") {
+      this.#jumpComment("next");
       return;
     }
     // Text Box / Shapes — insert a floating wps shape run (Shapes reads its
