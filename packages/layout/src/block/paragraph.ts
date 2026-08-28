@@ -22,6 +22,7 @@
 
 import type {
   LayoutBlockContext,
+  LayoutFloatZone,
   LayoutInline,
   LayoutLineHeight,
   LayoutParagraph,
@@ -54,6 +55,25 @@ export function layoutParagraph(
 
   const usable = Math.max(0, width - (para.indent?.leftPx ?? 0) - (para.indent?.rightPx ?? 0));
 
+  // The anchor paragraph wraps beside its own square floats: the drawings'
+  // offsets are paragraph-relative by definition, so their zones feed the
+  // packer in paragraph-relative Y (the flow's absolute zones cover every
+  // later paragraph). Full-column boxes and topAndBottom clears are bands —
+  // the packer cannot skip a mid-paragraph band, so they stay flow-only.
+  const selfZones: LayoutFloatZone[] = [];
+  if (!inTable) {
+    for (const d of para.drawings ?? []) {
+      if (d.wrap == null || d.wrap === "topAndBottom") continue;
+      const { horizontal: h, vertical: v } = d.anchor;
+      if (v.relative !== "paragraph" || h.relative !== "column") continue;
+      const topPx = Math.max(0, v.offsetPx ?? 0);
+      const x0 = h.offsetPx ?? 0;
+      const overlap = Math.min(x0 + d.width, width) - Math.max(x0, 0);
+      if (overlap <= 0 || overlap >= width - 1) continue;
+      selfZones.push({ widthPx: overlap, topPx, bottomPx: topPx + d.height });
+    }
+  }
+
   const packed = packLines(para.inline, {
     measurer,
     width: usable,
@@ -67,6 +87,7 @@ export function layoutParagraph(
     startY: ctx?.startY,
     // A cell's width is its column, not the page flow — floats never bend it.
     floatZones: inTable ? undefined : ctx?.floatZones,
+    selfZones: selfZones.length > 0 ? selfZones : undefined,
   });
 
   // An empty paragraph still occupies one strut line (the ¶ glyph's).

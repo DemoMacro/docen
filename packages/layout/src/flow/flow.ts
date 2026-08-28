@@ -117,9 +117,9 @@ class Flow {
   /** Zero-based index of the page being filled — picks the slot's insets. */
   private pageIndex = 0;
   /** Partial-overlap float zones (wrap square/tight): lines inside the band
-   *  wrap beside the box. Registered when the anchor paragraph commits, so
-   *  the anchor paragraph itself lays out un-wrapped (a registered gap — its
-   *  own first lines only dodge when a preceding zone exists). */
+   *  wrap beside the box. Registered when the anchor paragraph commits — the
+   *  anchor paragraph's own lines wrap via the paragraph module's self-zones,
+   *  these cover every later paragraph on the page. */
   private readonly zones: LayoutFloatZone[] = [];
   /** Full-width cleared bands (wrap topAndBottom, or a square box covering
    *  the whole column): no text inside; blocks split at the band top and

@@ -74,6 +74,10 @@ export interface PackLinesOptions {
   /** Paragraph top Y in flow coordinates — pairs with floatZones. */
   startY?: number;
   floatZones?: readonly LayoutFloatZone[];
+  /** The paragraph's own wrapped drawings as zones in PARAGRAPH-relative Y
+   *  (top 0 = the first line's top): the anchor paragraph wraps beside its
+   *  own floats, while `floatZones` (absolute) cover every other paragraph. */
+  selfZones?: readonly LayoutFloatZone[];
   /** Explicit tab stops, px from the content-box left edge (w:tabs). Tabs past
    *  the last stop (or with no stops) advance over the default grid — 720
    *  twips, Word's defaultTabStop. */
@@ -231,18 +235,34 @@ function buildGroups(inline: LayoutInline[], measurer: TextMeasurer): FlowGroup[
   return groups;
 }
 
-/** The width available to line `lineIndex` whose top sits at `y`: the content
- *  width (minus the first-line indent on line 0) reduced by the widest float
- *  zone overlapping the line's top (text wraps beside the float). */
-function maxWidthAt(opts: PackLinesOptions, lineIndex: number, y: number): number {
+/** The width available to line `lineIndex` whose box spans `[y, y+bottom)`
+ *  (flow Y, for the absolute zones) / `[yPara, yPara+bottom)` (paragraph-
+ *  relative Y, for the anchor's own zones): the content width (minus the
+ *  first-line indent on line 0) reduced by the widest zone the box overlaps
+ *  (text wraps beside the float). The real line height isn't known until the
+ *  line packs, so the box bottom uses the resolver's floor — a zone top
+ *  inside `[y, y+floor)` always overlaps the real line box, so the check
+ *  never over-reduces. */
+function maxWidthAt(
+  opts: PackLinesOptions,
+  lineIndex: number,
+  y: number,
+  yPara: number,
+  bottomPx: number,
+): number {
   let w = opts.width;
   if (lineIndex === 0 && opts.firstLineIndentPx) w -= opts.firstLineIndentPx;
   if (opts.floatZones && opts.floatZones.length > 0 && opts.startY != null) {
     let reduce = 0;
     for (const z of opts.floatZones) {
-      // Top-point check: a zone counts for the line it overlaps at its top.
-      // A zone starting mid-line is picked up by the next line.
-      if (z.bottomPx > y && z.topPx <= y) reduce = Math.max(reduce, z.widthPx);
+      if (z.bottomPx > y && z.topPx < y + bottomPx) reduce = Math.max(reduce, z.widthPx);
+    }
+    w -= reduce;
+  }
+  if (opts.selfZones && opts.selfZones.length > 0) {
+    let reduce = 0;
+    for (const z of opts.selfZones) {
+      if (z.bottomPx > yPara && z.topPx < yPara + bottomPx) reduce = Math.max(reduce, z.widthPx);
     }
     w -= reduce;
   }
@@ -362,9 +382,13 @@ export function packLines(inline: LayoutInline[], opts: PackLinesOptions): Packe
   const lines: PackedLine[] = [];
   let lineIndex = 0;
   let y = opts.startY ?? 0;
+  let yPara = 0;
+  // Zone-overlap floor: every line box is at least this tall (the resolver's
+  // base, floored by the strut), so zone tops within reach count as overlaps.
+  const zoneFloorPx = Math.max(opts.lineHeight({ naturalPx: 0, hasCjk: false }), opts.strutPx ?? 0);
 
   while (done.some((d) => !d)) {
-    const maxWidth = maxWidthAt(opts, lineIndex, y);
+    const maxWidth = maxWidthAt(opts, lineIndex, y, yPara, zoneFloorPx);
     const tabs: TabContext = {
       stops: opts.tabStops,
       lineBasePx: lineIndex === 0 ? (opts.firstLineIndentPx ?? 0) : 0,
@@ -523,6 +547,7 @@ export function packLines(inline: LayoutInline[], opts: PackLinesOptions): Packe
       hangPx: hangPx > 0 ? hangPx : undefined,
     });
     y += height;
+    yPara += height;
     lineIndex++;
   }
   return lines;

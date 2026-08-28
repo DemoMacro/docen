@@ -304,9 +304,11 @@ const wrapPara = (chars: number, extra: Partial<LayoutParagraph> = {}): LayoutPa
 describe("layoutFlow float wraps", () => {
   it("shrinks the lines a square drawing overlaps (text wraps beside it)", () => {
     // 24 atoms = 192px: one line at the full 300px width, two beside a
-    // 200px box (100px usable = 12 atoms per line).
+    // 200px box (100px usable = 12 atoms per line). The drawing is 60px tall
+    // so its zone reaches the second paragraph's first line (the anchor's
+    // own two lines already end at y 40).
     const pages = flow(
-      [wrapPara(24, { drawings: [drawing(0, 0, 200, 40, "square")] }), wrapPara(24)],
+      [wrapPara(24, { drawings: [drawing(0, 0, 200, 60, "square")] }), wrapPara(24)],
       300,
     );
     const [, body] = paras(pages)[0];
@@ -314,12 +316,47 @@ describe("layoutFlow float wraps", () => {
     expect(body.heightPx).toBe(40);
   });
 
-  it("leaves the anchor paragraph's own lines unwrapped", () => {
-    // Zones register at the anchor paragraph's commit, so its own 24 atoms
-    // stay one full-width line — the wrap starts with the next paragraph.
+  it("wraps the anchor paragraph's own lines beside its square float", () => {
+    // The drawings' offsets are paragraph-relative, so the anchor wraps its
+    // own 24 atoms beside the 200px box — two 12-atom lines, not one.
     const pages = flow([wrapPara(24, { drawings: [drawing(0, 0, 200, 40, "square")] })], 300);
     const [anchor] = paras(pages)[0];
-    expect(anchor.lines).toHaveLength(1);
+    expect(anchor.lines).toHaveLength(2);
+    expect(anchor.heightPx).toBe(40);
+  });
+
+  it("keeps a float below the anchor paragraph's first lines out of them", () => {
+    // The box starts 60px into the paragraph: three full-width lines (37
+    // atoms each, exact 20px rows) pack above it, the fourth line — whose
+    // top reaches the box — wraps beside it (100px = 12 atoms).
+    const pages = flow([wrapPara(112, { drawings: [drawing(0, 60, 200, 60, "square")] })], 300);
+    const [anchor] = paras(pages)[0];
+    expect(anchor.lines).toHaveLength(4);
+    expect(anchor.lines[2]!.maxWidthPx).toBe(300);
+    expect(anchor.lines[3]!.maxWidthPx).toBe(100);
+  });
+
+  it("wraps a later line a zone's top opens INSIDE of (box overlaps the line box)", () => {
+    // The box starts at y 30 — inside the NEXT paragraph's first line
+    // (20-40). The line box overlaps the box, so that line already wraps
+    // beside it (12-atom rows); a top-of-line-only check would let the text
+    // run straight under the float.
+    const pages = flow(
+      [para(1, { drawings: [drawing(0, 30, 200, 60, "square")] }), wrapPara(24)],
+      300,
+    );
+    const [, body] = paras(pages)[0];
+    expect(body.lines).toHaveLength(2);
+    expect(body.lines[0]!.maxWidthPx).toBe(100);
+  });
+
+  it("wraps the anchor's first line when its float starts inside that line", () => {
+    // Same mid-line start, self-zone flavor: the box hangs 10px into the
+    // anchor's own first line, so line 1 already packs beside it.
+    const pages = flow([wrapPara(24, { drawings: [drawing(0, 10, 200, 40, "square")] })], 300);
+    const [anchor] = paras(pages)[0];
+    expect(anchor.lines).toHaveLength(2);
+    expect(anchor.lines[0]!.maxWidthPx).toBe(100);
   });
 
   it("clears the band of a topAndBottom drawing (next block resumes below)", () => {

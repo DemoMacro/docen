@@ -277,8 +277,9 @@ export interface LayoutParagraph {
   widowControl?: boolean;
   pageBreakBefore?: boolean;
   /** Floating drawings anchored to this paragraph: wrap-none boxes paint at
-   *  their offset; a `wrap` on the drawing also registers a float zone the
-   *  flow shrinks lines around (or a cleared band for topAndBottom). */
+   *  their offset; a `wrap` on the drawing also shrinks the anchor
+   *  paragraph's own lines around the box and registers a float zone the
+   *  flow applies to later paragraphs (or a cleared band for topAndBottom). */
   drawings?: LayoutDrawing[];
 }
 
