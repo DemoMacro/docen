@@ -888,6 +888,7 @@ const EMR_MODIFY_WORLD_TRANSFORM = 36;
 const EMR_SELECT_OBJECT = 37;
 const EMR_DELETE_OBJECT = 40;
 const EMR_SETTEXTCOLOR = 24;
+const EMR_SETTEXTALIGN = 22;
 const EMR_EXT_CREATE_FONT = 82;
 const EMR_EXT_TEXT_OUT_A = 83;
 const EMR_EXT_TEXT_OUT_W = 84;
@@ -935,8 +936,11 @@ function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): TextDraft
   let selected = -1;
   let xf: Xform = { ...IDENTITY };
   let textColor: string | undefined;
+  // SetTextAlign flags; the GDI device default is TA_TOP (0) — the reference y
+  // is the cell top, not the baseline (misreading it sinks every text box).
+  let textAlign = 0;
   // SaveDC snapshots the full drawing state we track.
-  const states: Array<{ xf: Xform; selected: number; textColor?: string }> = [];
+  const states: Array<{ xf: Xform; selected: number; textColor?: string; textAlign: number }> = [];
   for (let eo = 0; eo + 8 <= emf.length;) {
     const type = view.getUint32(eo, true);
     const size = view.getUint32(eo + 4, true);
@@ -976,13 +980,16 @@ function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): TextDraft
         if (ref <= 0xffffff) textColor = rgbHex(ref);
         break;
       }
+      case EMR_SETTEXTALIGN:
+        textAlign = view.getUint32(eo + 8, true);
+        break;
       case EMR_SAVEDC:
-        states.push({ xf, selected, textColor });
+        states.push({ xf, selected, textColor, textAlign });
         break;
       case EMR_RESTOREDC: {
         const st = states.pop();
         if (st) {
-          ({ xf, selected, textColor } = st);
+          ({ xf, selected, textColor, textAlign } = st);
         }
         break;
       }
@@ -1044,15 +1051,24 @@ function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): TextDraft
                 : font.height / GDI_CELL_PER_EM
               : 100 / GDI_CELL_PER_EM) *
             ((Math.abs(eff.m11) + Math.abs(eff.m22)) / 2);
-          // Baseline origin → box top by a typical CJK ascent (same calibration
-          // as the WMF player); advance falls back to per-char estimates because
-          // the trail Dx run is not worth parsing for outline-position accuracy.
+          // SetTextAlign semantics for the reference y (same calibration as the
+          // WMF player): TA_BASELINE hoists by the typical CJK ascent, TA_BOTTOM
+          // by the full em, and the device default TA_TOP already names the cell
+          // top — hoisting there sank every box by 0.8 em. Advance falls back to
+          // per-char estimates because the trail Dx run is not worth parsing for
+          // outline-position accuracy.
           let advance = 0;
           for (const ch of text) advance += height * (ch.charCodeAt(0) > 0xff ? 1 : 0.55);
+          const refY = x * eff.m12 + yBaseline * eff.m22 + eff.dy;
           drafts.push({
             kind: "text",
             x: x * eff.m11 + yBaseline * eff.m21 + eff.dx,
-            y: x * eff.m12 + yBaseline * eff.m22 + eff.dy - height * 0.8,
+            y:
+              (textAlign & 0x18) === 0x18
+                ? refY - height * 0.8
+                : (textAlign & 0x18) === 0x08
+                  ? refY - height
+                  : refY,
             w: advance + 2,
             h: height * 1.35,
             text,

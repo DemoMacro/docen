@@ -197,6 +197,7 @@ describe("wmfMembers", () => {
         { fn: 0x02fb, params: logfont({ height: -20, weight: 700, face: "微软雅黑" }) },
         select(0),
         { fn: 0x0209, params: u32(RED) },
+        { fn: 0x012e, params: words(24) }, // TA_BASELINE — the reference y is the baseline
         extTextOut(50, 100, gbkText, { dx }),
       ]),
       200,
@@ -212,6 +213,21 @@ describe("wmfMembers", () => {
     expect(style.sizePx).toBe(20);
     expect(style.color).toBe("ff0000");
     expect(style.bold).toBe(true);
+  });
+
+  it("treats the device-default TA_TOP reference y as the cell top (no hoist)", () => {
+    const members = wmfMembers(
+      wmfWithRecords([
+        { fn: 0x02fb, params: logfont({ height: -20, face: "微软雅黑" }) },
+        select(0),
+        // No SetTextAlign — GDI's default TA_TOP: the y names the box top.
+        extTextOut(50, 100, gbk("示例文本"), {}),
+      ]),
+      200,
+      100,
+    )!;
+    const m = members[0] as Extract<LayoutDrawingMember, { kind: "textBox" }>;
+    expect(m.y).toBe(50);
   });
 
   it("skips the ETO_OPAQUE rect without shifting the string", () => {

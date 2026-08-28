@@ -26,6 +26,7 @@ const DELETE_OBJECT = 0x01f0;
 const SAVE_DC = 0x001e;
 const RESTORE_DC = 0x0127;
 const SET_TEXT_COLOR = 0x0209;
+const SET_TEXT_ALIGN = 0x012e;
 const SET_POLY_FILL_MODE = 0x0106;
 const SET_WINDOW_ORG = 0x020b;
 const SET_WINDOW_EXT = 0x020c;
@@ -57,6 +58,9 @@ interface DcState {
   brush: Extract<GdiObject, { kind: "brush" }> | null;
   font: Extract<GdiObject, { kind: "font" }> | null;
   textColor: number;
+  /** SetTextAlign flags; the GDI device default is TA_TOP (the reference y is
+   *  the cell top, not the baseline — misreading it sinks every text box). */
+  textAlign: number;
   fillRule: "evenodd" | "nonzero";
   orgX: number;
   orgY: number;
@@ -87,6 +91,7 @@ export function wmfMembers(
     brush: null,
     font: null,
     textColor: 0,
+    textAlign: 0,
     fillRule: "evenodd",
     orgX: view.getInt16(6, true),
     orgY: view.getInt16(8, true),
@@ -210,6 +215,10 @@ export function wmfMembers(
       }
       case SET_TEXT_COLOR: {
         if (end - p >= 4) st.textColor = view.getUint32(p, true) & 0xffffff;
+        break;
+      }
+      case SET_TEXT_ALIGN: {
+        if (end - p >= 2) st.textAlign = view.getUint16(p, true);
         break;
       }
       case SET_POLY_FILL_MODE: {
@@ -483,13 +492,21 @@ function pushTextMember(
   if (advancePx <= 0) {
     for (const ch of text) advancePx += sizePx * (ch.charCodeAt(0) > 0xff ? 1 : 0.55);
   }
-  // TA_BASELINE: the record's y is the text baseline, not the box top —
-  // hoist by the typical CJK ascent. Approximate; visual calibration refines.
+  // SetTextAlign semantics for the record's reference y: TA_BASELINE hoists by
+  // the typical CJK ascent (approximate; visual calibration refines), TA_BOTTOM
+  // by the full em, and the device default TA_TOP already names the cell top —
+  // hoisting there sank every box by 0.8 em.
+  const vertical = st.textAlign & 0x18;
   const origin = box(x, y);
   members.push({
     kind: "textBox",
     x: origin.x,
-    y: origin.y - sizePx * 0.8,
+    y:
+      vertical === 0x18
+        ? origin.y - sizePx * 0.8
+        : vertical === 0x08
+          ? origin.y - sizePx
+          : origin.y,
     width: Math.ceil(advancePx) + 2,
     height: Math.ceil(sizePx * 1.35),
     nowrap: true,
