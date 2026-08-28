@@ -1933,7 +1933,14 @@ function projectPageBackground(doc: DocumentOptions): ProjectedPageBackground | 
   const raw = bg.rawXml ?? "";
   const hexOf = (m: RegExpMatchArray | null): string | undefined =>
     m ? m[1].toUpperCase() : undefined;
-  const color = hexOf(raw.match(/<w:background[^>]*\sw:color="([0-9A-Fa-f]{6})"/));
+  // The structured color is the primary source (a plain w:background @w:color
+  // parses there and never round-trips a rawXml); the verbatim XML arm is the
+  // pattern-fill fallback.
+  const structured =
+    typeof bg.color === "string" && bg.color !== "auto"
+      ? bg.color.replace("#", "").toUpperCase()
+      : undefined;
+  const color = structured ?? hexOf(raw.match(/<w:background[^>]*\sw:color="([0-9A-Fa-f]{6})"/));
   const out: ProjectedPageBackground = color ? { color } : {};
   const fill = raw.match(/<v:fill[^>]*type="pattern"[^>]*>/);
   const rid = fill?.[0].match(/\sr:id="\{?([^"}]+)\}?"/)?.[1];

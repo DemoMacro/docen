@@ -198,7 +198,9 @@ export class CanvasStage {
    *  reads identically at every level). */
   private applyBackground(frame: HTMLElement): void {
     const bg = this.ctx.background;
-    frame.style.backgroundColor = bg?.color ?? "#ffffff";
+    // OOXML hex has no '#' — CSS colors do; the raw token is invalid CSS and
+    // the assignment would be silently dropped.
+    frame.style.backgroundColor = bg?.color ? `#${bg.color}` : "#ffffff";
     if (bg?.tileSrc && bg.tilePx) {
       const size = Math.max(1, Math.round(bg.tilePx * this.factor));
       frame.style.backgroundImage = `url(${bg.tileSrc})`;
@@ -427,6 +429,29 @@ export class CanvasStage {
     // of it (the story under edit stays fully opaque).
     const items = this.pages[index]?.items ?? [];
     ctx.layer = "behind";
+    // The page's w:background must tint the BITMAP itself (exports and pixel
+    // probes read the canvas, not the frame's CSS), so the base color / tile
+    // pattern paints as the bottommost scene element. The App-level `fill`
+    // cannot host it: an App has no canvas of its own and drops `fill` from
+    // the child-layer configs it builds (App.ts __getChildConfig).
+    const bg = this.ctx.background;
+    if (bg) {
+      tree.add(
+        new Rect({
+          x: 0,
+          y: 0,
+          width: flow.pageWidthPx,
+          height: flow.pageHeightPx,
+          fill:
+            bg.tileSrc && bg.tilePx
+              ? { type: "image", url: bg.tileSrc, repeat: true, size: bg.tilePx }
+              : bg.color
+                ? `#${bg.color}`
+                : undefined,
+          hittable: false,
+        }),
+      );
+    }
     paintScene(tree, items, ctx);
     ctx.layer = "body";
     if (!this.storyEdit) {
