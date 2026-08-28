@@ -37,6 +37,7 @@ import type {
   MediaDataTransformation,
   ParagraphOptions,
   SectionChild,
+  SectionOptions,
   StylesOptions,
   TableCellOptions,
   TableOptions,
@@ -1743,11 +1744,13 @@ export interface ProjectedPageFurniture {
   footerDistancePx: number;
 }
 
-/** Project the first section's headers/footers. An absent slot stays
- *  undefined (the painter falls back per OOXML: page 1 without titlePage and
- *  even pages without evenAndOddHeaders both use `default`). */
-function projectPageFurniture(doc: DocumentOptions): ProjectedPageFurniture {
-  const section = doc.sections?.[0];
+/** Project a section's headers/footers. An absent slot stays undefined (the
+ *  painter falls back per OOXML: page 1 without titlePage and even pages
+ *  without evenAndOddHeaders both use `default`). */
+function projectPageFurniture(
+  section: SectionOptions | undefined,
+  doc: DocumentOptions,
+): ProjectedPageFurniture {
   const ctx: ProjectContext = {
     styles: doc.styles,
     numberings: indexNumberings(doc.numbering),
@@ -1855,14 +1858,23 @@ function projectPageBackground(doc: DocumentOptions): ProjectedPageBackground | 
   };
 }
 
-/** Project a full DocumentOptions into the engine's input: the FIRST section's
- *  body and flow box (multi-section flow — later sectPrs arrive as body-level
- *  section breaks — is a later milestone; sections beyond the first are
- *  concatenated into the first's flow). */
-export function projectDocumentOptions(doc: DocumentOptions): {
+/** One section's projection: the body block flow, the page geometry its
+ *  content paginates against, and its headers/footers. A multi-section
+ *  document renders one entry per section — each starts on a fresh page with
+ *  its own paper size, margins, grid, and furniture (Word section
+ *  semantics); a single-section document is a one-entry list. */
+export interface ProjectedSection {
   blocks: LayoutBlock[];
   flow: ProjectedFlowBox;
   furniture: ProjectedPageFurniture;
+}
+
+/** Project a full DocumentOptions into the engine's input: one
+ *  {@link ProjectedSection} per document section plus the page background
+ *  (document-wide). Sections paginate in order — see
+ *  `layoutFlowSections` in @docen/layout. */
+export function projectDocumentOptions(doc: DocumentOptions): {
+  sections: ProjectedSection[];
   background?: ProjectedPageBackground;
 } {
   const ctx: ProjectContext = {
@@ -1870,18 +1882,30 @@ export function projectDocumentOptions(doc: DocumentOptions): {
     numberings: indexNumberings(doc.numbering),
     listCounters: new Map(),
   };
-  const blocks: LayoutBlock[] = [];
-  for (const section of doc.sections ?? []) {
+  const sections: ProjectedSection[] = (doc.sections ?? []).map((section) => {
+    const blocks: LayoutBlock[] = [];
     for (const child of section.children ?? []) {
       const block = projectChild(child, ctx);
       if (Array.isArray(block)) blocks.push(...block);
       else if (block) blocks.push(block);
     }
-  }
+    return {
+      blocks,
+      flow: projectFlowBox(section.properties),
+      furniture: projectPageFurniture(section, doc),
+    };
+  });
   return {
-    blocks,
-    flow: projectFlowBox(doc.sections?.[0]?.properties),
-    furniture: projectPageFurniture(doc),
+    sections:
+      sections.length > 0
+        ? sections
+        : [
+            {
+              blocks: [],
+              flow: projectFlowBox(undefined),
+              furniture: projectPageFurniture(undefined, doc),
+            },
+          ],
     background: projectPageBackground(doc),
   };
 }

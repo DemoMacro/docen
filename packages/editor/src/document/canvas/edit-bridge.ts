@@ -97,10 +97,12 @@ export interface EditBridgeOptions {
 export interface EditBridge {
   editor: Editor;
   /** Feed each render's flow result — rebuilds the pixel↔position map and
-   *  re-places the caret against the fresh geometry. */
+   *  re-places the caret against the fresh geometry. `pageOrigin` resolves a
+   *  page to its content-box origin (multi-section documents: each page's
+   *  own section's margins). */
   updatePages(
     pages: readonly FlowPage[],
-    flow: { contentLeftPx: number; contentTopPx: number },
+    pageOrigin: (page: number) => { contentLeftPx: number; contentTopPx: number },
   ): void;
   /** Feed the active furniture story's fresh stack + band after the host
    *  re-projected it (each story keystroke rebuilds the story map). The
@@ -152,8 +154,9 @@ interface Story {
   /** The single page frame every overlay mounts in (furniture stories never
    *  span pages); −1 = the main story follows each rect's own page. */
   anchorPage: number;
-  /** The story's flow box (updatePages / enterStory record it). */
-  flow: { contentLeftPx: number; contentTopPx: number } | null;
+  /** The content origin per page (updatePages records it) — the story's
+   *  caret map anchors at its anchor page's section origin. */
+  pageOrigin: ((page: number) => { contentLeftPx: number; contentTopPx: number }) | null;
   raf: number;
   schedule(): void;
   /** Furniture-story only: what is being edited and its initial content. */
@@ -189,7 +192,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       lastCaretPos: -1,
       onDoc,
       anchorPage,
-      flow: null,
+      pageOrigin: null,
       raf: 0,
       // One relayout per frame regardless of keystroke bursts — content
       // changes only; selection-only transactions (drag-select, caret moves)
@@ -503,13 +506,14 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     // — comparing against that would flag every untouched story dirty.
     s.initialJson = JSON.stringify(s.editor.getJSON().content);
     if (geo.stack && geo.band) {
-      // Local const: `geo` is captured by the makeStory closure above, so its
-      // narrowing doesn't survive to this property access.
+      // Local consts: `geo` is captured by the makeStory closure above, so its
+      // narrowing doesn't survive to these property accesses.
       const band = geo.band;
-      s.map = new CaretMap([{ items: geo.stack }] as never, s.editor.state.doc, {
-        contentLeftPx: main.flow?.contentLeftPx ?? 0,
+      const origin = main.pageOrigin?.(s.anchorPage);
+      s.map = new CaretMap([{ items: geo.stack }] as never, s.editor.state.doc, () => ({
+        contentLeftPx: origin?.contentLeftPx ?? 0,
         contentTopPx: band.paintY,
-      });
+      }));
     }
     attachTransactions(s);
     story = s;
@@ -951,20 +955,25 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
 
   return {
     editor,
-    updatePages(pages, flow): void {
-      main.flow = flow;
-      main.map = new CaretMap(pages, main.editor.state.doc, flow);
+    updatePages(pages, pageOrigin): void {
+      main.pageOrigin = pageOrigin;
+      main.map = new CaretMap(
+        pages,
+        main.editor.state.doc,
+        (page) => pageOrigin(page) ?? { contentLeftPx: 0, contentTopPx: 0 },
+      );
       main.pageCount = pages.length;
       placeCaret();
     },
     updateStoryMap(stack, band): void {
       const s = story;
       if (!s) return;
+      const origin = main.pageOrigin?.(s.anchorPage);
       s.map = stack
-        ? new CaretMap([{ items: stack }] as never, s.editor.state.doc, {
-            contentLeftPx: main.flow?.contentLeftPx ?? 0,
+        ? new CaretMap([{ items: stack }] as never, s.editor.state.doc, () => ({
+            contentLeftPx: origin?.contentLeftPx ?? 0,
             contentTopPx: band.paintY,
-          })
+          }))
         : null;
       placeCaret();
     },

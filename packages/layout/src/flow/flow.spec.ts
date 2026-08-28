@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { fakeFontMetrics, installFakeCanvas } from "../../test/fake-canvas";
 import type { LayoutBlock, LayoutParagraph, LayoutTable } from "../layout-doc";
 import { TextMeasurer } from "../text/measure";
-import { layoutFlow } from "./flow";
+import { layoutFlow, layoutFlowSections } from "./flow";
 
 installFakeCanvas();
 const measurer = new TextMeasurer(fakeFontMetrics);
@@ -388,5 +388,70 @@ describe("layoutFlow float wraps", () => {
     const [head, tail] = [paras(pages)[0][0], paras(pages)[1][0]];
     expect(head.drawings).toHaveLength(1);
     expect(tail.drawings).toBeUndefined();
+  });
+});
+
+describe("layoutFlowSections", () => {
+  const opts = (
+    contentHeightPx: number,
+    pageInsets?: Parameters<typeof layoutFlow>[1]["pageInsets"],
+  ) => ({
+    contentWidthPx: 300,
+    contentHeightPx,
+    ...(pageInsets ? { pageInsets } : {}),
+  });
+
+  it("starts each section on a fresh page and maps pages to sections", () => {
+    // Section 0 fills 2 pages (6 paragraphs of 20px into a 100px page: 5 fit,
+    // the 6th overflows), section 1 adds a third page.
+    const run = layoutFlowSections(
+      [
+        {
+          blocks: [para(1), para(1), para(1), para(1), para(1), para(1)],
+          opts: opts(100),
+        },
+        { blocks: [para(2)], opts: opts(100) },
+      ],
+      measurer,
+    );
+    expect(run.pages).toHaveLength(3);
+    expect(run.sectionOfPage).toEqual([0, 0, 1]);
+  });
+
+  it("keys the even inset slot off the PHYSICAL page across sections", () => {
+    // Section 0 has 3 paragraphs of 20px on an 80px page — all 3 lines DO fit
+    // (60 <= 80), so it is one page; the even slot of the DOCUMENT's page 2
+    // (the second section's first page) must apply there. With a 30px top
+    // push on even pages, the second section's first paragraph starts at y=30.
+    const even = { topPx: 30, bottomPx: 0 };
+    const run = layoutFlowSections(
+      [
+        { blocks: [para(3)], opts: opts(100, { default: { topPx: 0, bottomPx: 0 }, even }) },
+        { blocks: [para(1)], opts: opts(100, { default: { topPx: 0, bottomPx: 0 }, even }) },
+      ],
+      measurer,
+    );
+    expect(run.pages).toHaveLength(2);
+    expect(run.sectionOfPage).toEqual([0, 1]);
+    // Global page 1 (physical page 2, odd 0-based index) → even slot.
+    expect(run.pages[1].items[0].yPx).toBe(30);
+    // Global page 0 (physical page 1) → default slot.
+    expect(run.pages[0].items[0].yPx).toBe(0);
+  });
+
+  it("keeps the first-page inset local to each section", () => {
+    // Both sections carry a first-page top push — each section's own first
+    // page gets it, whichever global page it lands on.
+    const first = { topPx: 30, bottomPx: 0 };
+    const run = layoutFlowSections(
+      [
+        { blocks: [para(1)], opts: opts(100, { default: { topPx: 0, bottomPx: 0 }, first }) },
+        { blocks: [para(1)], opts: opts(100, { default: { topPx: 0, bottomPx: 0 }, first }) },
+      ],
+      measurer,
+    );
+    expect(run.pages).toHaveLength(2);
+    expect(run.pages[0].items[0].yPx).toBe(30);
+    expect(run.pages[1].items[0].yPx).toBe(30);
   });
 });

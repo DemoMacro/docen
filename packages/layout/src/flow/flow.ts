@@ -53,6 +53,11 @@ export interface FlowOptions {
   /** Per-slot body insets from the header/footer stacks (absent = margins
    *  rule everywhere). */
   pageInsets?: FlowPageInsets;
+  /** This flow's starting page in the document's global page sequence — the
+   *  odd/even inset slot keys off the PHYSICAL page number (Word's
+   *  evenAndOddHeaders is document-wide), while the first slot stays local
+   *  (a section's own first page). Absent = 0 (single-section documents). */
+  pageOffset?: number;
 }
 
 /** Lay a block flow into pages. Always returns at least one page (an empty
@@ -65,6 +70,42 @@ export function layoutFlow(
   const flow = new Flow(opts, measurer);
   for (const block of blocks) flow.push(block);
   return flow.finish();
+}
+
+/** One section of a multi-section document: its block flow plus the flow
+ *  geometry it paginates against (page size, margins, grid, insets). */
+export interface FlowSection {
+  blocks: readonly LayoutBlock[];
+  opts: FlowOptions;
+}
+
+export interface SectionedFlowPages {
+  pages: FlowPage[];
+  /** Global page index → section index (parallel to `pages`). */
+  sectionOfPage: number[];
+}
+
+/** Lay a multi-section document into one continuous page list. Each section
+ *  starts on a fresh page (OOXML's nextPage section break); `pageOffset`
+ *  threads each section's starting global page number so the odd/even inset
+ *  slot follows the physical page across section boundaries. */
+export function layoutFlowSections(
+  sections: readonly FlowSection[],
+  measurer: TextMeasurer,
+): SectionedFlowPages {
+  const pages: FlowPage[] = [];
+  const sectionOfPage: number[] = [];
+  sections.forEach((section, i) => {
+    for (const page of layoutFlow(
+      section.blocks,
+      { ...section.opts, pageOffset: pages.length },
+      measurer,
+    )) {
+      pages.push(page);
+      sectionOfPage.push(i);
+    }
+  });
+  return { pages, sectionOfPage };
 }
 
 class Flow {
@@ -94,15 +135,19 @@ class Flow {
     this.y = this.insets().topPx;
   }
 
-  /** The current page's furniture insets (first page → `first`, odd →
-   *  `even`, else `default`; missing slots fall back to `default`). */
+  /** The current page's furniture insets (the section's first page →
+   *  `first`, an odd PHYSICAL page → `even`, else `default`; missing slots
+   *  fall back to `default`). The odd/even test uses the global page number
+   *  (`pageOffset` + the local index) so the pattern is continuous across
+   *  section boundaries, Word's evenAndOddHeaders semantics. */
   private insets(): { topPx: number; bottomPx: number } {
     const pi = this.opts.pageInsets;
     if (!pi) return { topPx: 0, bottomPx: 0 };
+    const globalIndex = this.pageIndex + (this.opts.pageOffset ?? 0);
     const slot =
       this.pageIndex === 0 && pi.first
         ? pi.first
-        : this.pageIndex % 2 === 1 && pi.even
+        : globalIndex % 2 === 1 && pi.even
           ? pi.even
           : pi.default;
     return { topPx: slot?.topPx ?? 0, bottomPx: slot?.bottomPx ?? 0 };

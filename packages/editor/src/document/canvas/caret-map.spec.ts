@@ -80,10 +80,7 @@ describe("CaretMap click boundaries", () => {
     const map = new CaretMap(
       pageOf([fakePara([{ text: "abcd", xPx: 0, yPx: 0, maxWidthPx: 100 }])]) as never,
       doc,
-      {
-        contentLeftPx: 0,
-        contentTopPx: 0,
-      },
+      () => ({ contentLeftPx: 0, contentTopPx: 0 }),
     );
     expect(map.valid).toBe(true);
     // Paragraph innerPos = 1 (doc > paragraph > text).
@@ -100,10 +97,7 @@ describe("CaretMap click boundaries", () => {
     const map = new CaretMap(
       pageOf([fakePara([{ text: "abcd", xPx: 0, yPx: 0, maxWidthPx: 100 }])]) as never,
       doc,
-      {
-        contentLeftPx: 0,
-        contentTopPx: 0,
-      },
+      () => ({ contentLeftPx: 0, contentTopPx: 0 }),
     );
     // Click at x=15 → position 2 → the caret draws at boundary 1's x (10),
     // within half a glyph of the click.
@@ -124,7 +118,7 @@ describe("CaretMap selection rectangles", () => {
         fakePara([{ text: "cde", xPx: 0, yPx: 0, maxWidthPx: 100 }]),
       ]) as never,
       doc,
-      { contentLeftPx: 0, contentTopPx: 0 },
+      () => ({ contentLeftPx: 0, contentTopPx: 0 }),
     );
     const rects = map.selectionRects(0, doc.content.size);
     // Paragraph 1's line: selected past its end (the selection continues into
@@ -146,7 +140,7 @@ describe("CaretMap selection rectangles", () => {
         ]),
       ]) as never,
       doc,
-      { contentLeftPx: 0, contentTopPx: 0 },
+      () => ({ contentLeftPx: 0, contentTopPx: 0 }),
     );
     const rects = map.selectionRects(0, doc.content.size);
     expect(rects).toHaveLength(2);
@@ -164,7 +158,7 @@ describe("CaretMap selection rectangles", () => {
         fakePara([{ text: "cde", xPx: 0, yPx: 0, maxWidthPx: 100 }]),
       ]) as never,
       doc,
-      { contentLeftPx: 0, contentTopPx: 0 },
+      () => ({ contentLeftPx: 0, contentTopPx: 0 }),
     );
     const rects = map.selectionRects(0, doc.content.size);
     // Paragraph 1's rect bottom reaches paragraph 2's line top (page-local 50).
@@ -182,7 +176,7 @@ describe("CaretMap selection rectangles", () => {
         fakePara([{ text: "", xPx: 0, yPx: 0, maxWidthPx: 100 }]),
       ]) as never,
       doc,
-      { contentLeftPx: 0, contentTopPx: 0 },
+      () => ({ contentLeftPx: 0, contentTopPx: 0 }),
     );
     const rects = map.selectionRects(0, doc.content.size);
     expect(rects).toHaveLength(2);

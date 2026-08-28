@@ -19,11 +19,13 @@ import type { Editor } from "@docen/docx/core";
 import {
   projectDocumentOptions,
   type ProjectedFlowBox,
+  type ProjectedPageBackground,
   type ProjectedPageFurniture,
+  type ProjectedSection,
 } from "@docen/docx/layout";
 import {
   browserFontMetrics,
-  layoutFlow,
+  layoutFlowSections,
   stackBlocks,
   TextMeasurer,
   twipToPx,
@@ -66,7 +68,7 @@ import {
 // <docen-outline> (navigation Headings tab).
 import "./components/format-pane";
 import "./components/outline";
-import { CanvasStage } from "./canvas/stage";
+import { CanvasStage, type CanvasStageSection } from "./canvas/stage";
 import type { OutlineItem } from "./components/outline";
 import { WIRED_DISPATCH } from "./extensions/commands";
 // Side-effect import: registers the ribbon/header translation tables.
@@ -433,6 +435,11 @@ class DocenDocument extends AddinHost<Editor> {
   #stageHost?: HTMLElement;
   #measurer = new TextMeasurer(browserFontMetrics);
   #pages: readonly FlowPage[] = [];
+  /** Page index → section index (the caret's section and per-page geometry
+   *  read through it). */
+  #sectionOfPage: readonly number[] = [];
+  /** The first section's flow box (page-width presets / TOC tab position;
+   *  a multi-section refinement reads the caret's own section). */
   #flow?: ProjectedFlowBox;
   #fileInput?: HTMLInputElement;
   #imageInput?: HTMLInputElement;
@@ -1091,38 +1098,32 @@ class DocenDocument extends AddinHost<Editor> {
     this.dispatchEvent(new CustomEvent("docen:ready", { bubbles: true, composed: true }));
   }
 
-  /** The attrs object a section's header/footer slots live on — the first
-   *  paragraph carrying sectionProperties (that section's last paragraph)
-   *  when one exists, else the doc node's (the final section closes at the
-   *  body end; its attrs may hold a null sectionProperties — the section
-   *  then uses the defaults, but its slots still live there). The returned
-   *  object is part of a fresh getJSON() tree, safe to patch. */
-  #sectionAttrsOf(doc: JSONContent): Record<string, unknown> | null {
-    let found: Record<string, unknown> | null = null;
-    const walk = (node: JSONContent): void => {
-      if (found) return;
-      const a = node.attrs as Record<string, unknown> | undefined;
-      if (a?.sectionProperties != null) {
-        found = a;
-        return;
-      }
-      for (const child of node.content ?? []) walk(child);
-    };
-    for (const child of doc.content ?? []) walk(child);
-    if (found) return found;
-    return (doc.attrs as Record<string, unknown> | undefined) ?? null;
+  /** The attrs object carrying the CURRENT section's header/footer slots —
+   *  the first section-carrying paragraph at/after the caret (that
+   *  section's last paragraph), else the doc node (the final section closes
+   *  at the body end). Reads the live PM state through the same lookup
+   *  #writeSlots writes through, so reads and writes land on one node even
+   *  in multi-section documents. */
+  #sectionAttrsAtCaret(): Record<string, unknown> | null {
+    const editor = this.editor;
+    if (!editor) return null;
+    const targetPos = this.#sectionSectPrPos();
+    if (targetPos != null) {
+      const node = editor.state.doc.nodeAt(targetPos);
+      if (node) return node.attrs as Record<string, unknown>;
+    }
+    return (editor.state.doc.attrs as Record<string, unknown>) ?? null;
   }
 
   #slotsKeyOf(kind: StoryKind): "sectionHeaders" | "sectionFooters" {
     return kind === "header" ? "sectionHeaders" : "sectionFooters";
   }
 
-  /** The story's source JSON — the slot's own content, falling back to the
-   *  default slot's (what the page displays until the edit breaks the tie). */
+  /** The story's source JSON — the caret's section's slot content, falling
+   *  back to the default slot's (what the page displays until the edit
+   *  breaks the tie). */
   #readStorySource(kind: StoryKind, slot: StorySlot): JSONContent[] {
-    const bridge = this.#bridge;
-    if (!bridge) return [];
-    const attrs = this.#sectionAttrsOf(bridge.editor.getJSON());
+    const attrs = this.#sectionAttrsAtCaret();
     const group = attrs?.[this.#slotsKeyOf(kind)] as
       | { default?: JSONContent[]; first?: JSONContent[]; even?: JSONContent[] }
       | undefined;
@@ -1144,14 +1145,12 @@ class DocenDocument extends AddinHost<Editor> {
     const attrs = { ...((raw.attrs as Record<string, unknown>) ?? {}) };
     const key = this.#slotsKeyOf(kind);
     attrs[key] = { ...(attrs[key] as object | undefined), [slot]: json };
-    const { blocks, flow, furniture, background } = projectDocumentOptions(
-      compileDocument({ ...raw, attrs } as JSONContent),
-    );
-    const pageInsets = this.#pageInsets(flow, furniture);
-    const pages = layoutFlow(blocks, pageInsets ? { ...flow, pageInsets } : flow, this.#measurer);
-    this.#pages = pages;
-    stage.sync(pages, flow, furniture, background);
-    bridge.updatePages(pages, flow);
+    const run = this.#projectAndLayout({ ...raw, attrs } as JSONContent);
+    this.#pages = run.pages;
+    this.#sectionOfPage = run.sectionOfPage;
+    this.#flow = run.sections[0]?.flow;
+    stage.sync(run.pages, run.sections, run.sectionOfPage, run.background);
+    bridge.updatePages(run.pages, this.#pageOriginOf(run.sections, run.sectionOfPage));
     const band = stage.furnitureBand(kind, this.#storyPage);
     bridge.updateStoryMap(
       band ? stage.furnitureStack(kind, this.#storyPage) : null,
@@ -1343,26 +1342,62 @@ class DocenDocument extends AddinHost<Editor> {
     return out;
   }
 
+  /** The canvas pipeline's projection + layout half, shared by the full
+   *  render and the story's live re-render: compile → project (one section
+   *  per document section) → measure each section's furniture insets →
+   *  paginate continuously across sections (each section starts a fresh
+   *  page; the page→section map drives per-page geometry everywhere). */
+  #projectAndLayout(doc: JSONContent): {
+    pages: FlowPage[];
+    sectionOfPage: number[];
+    sections: (ProjectedSection & CanvasStageSection)[];
+    background?: ProjectedPageBackground;
+  } {
+    const { sections, background } = projectDocumentOptions(compileDocument(doc));
+    const stageSections = sections.map((section) => {
+      const pageInsets = this.#pageInsets(section.flow, section.furniture);
+      return {
+        ...section,
+        flow: pageInsets ? { ...section.flow, pageInsets } : section.flow,
+      };
+    });
+    const { pages, sectionOfPage } = layoutFlowSections(
+      stageSections.map((s) => ({ blocks: s.blocks, opts: s.flow })),
+      this.#measurer,
+    );
+    return { pages, sectionOfPage, sections: stageSections, background };
+  }
+
+  /** The page→section origin resolver the bridge's caret maps need (each
+   *  page's own section's content-box origin). */
+  #pageOriginOf(
+    sections: readonly (ProjectedSection & CanvasStageSection)[],
+    sectionOfPage: readonly number[],
+  ): (page: number) => { contentLeftPx: number; contentTopPx: number } {
+    return (page) =>
+      sections[sectionOfPage[page] ?? 0]?.flow ?? { contentLeftPx: 0, contentTopPx: 0 };
+  }
+
   /** The canvas pipeline — the single render entry the bridge's transactions
    *  and the loaders share: compile → project → layout → paint, then re-arm
    *  the caret map against the fresh geometry. */
   #renderDoc(doc: JSONContent): void {
     if (!this.#stageHost) return;
-    const { blocks, flow, furniture, background } = projectDocumentOptions(compileDocument(doc));
-    const pageInsets = this.#pageInsets(flow, furniture);
-    const pages = layoutFlow(blocks, pageInsets ? { ...flow, pageInsets } : flow, this.#measurer);
-    this.#pages = pages;
-    this.#flow = flow;
+    const run = this.#projectAndLayout(doc);
+    this.#pages = run.pages;
+    this.#sectionOfPage = run.sectionOfPage;
+    this.#flow = run.sections[0]?.flow;
     this.#stage ??= new CanvasStage(this.#stageHost, {
       metrics: browserFontMetrics,
-      flow,
-      furniture,
+      sections: run.sections,
+      sectionOfPage: run.sectionOfPage,
+      background: run.background,
     });
     // A `zoom` attribute parsed before the stage existed only recorded the
     // level here — push it in before the first sync sizes the slots.
     if (this.#stage.zoom !== this.#zoom) this.#stage.setZoom(this.#zoom);
-    this.#stage.sync(pages, flow, furniture, background);
-    this.#bridge?.updatePages(pages, flow);
+    this.#stage.sync(run.pages, run.sections, run.sectionOfPage, run.background);
+    this.#bridge?.updatePages(run.pages, this.#pageOriginOf(run.sections, run.sectionOfPage));
     this.#updateStatus();
   }
 
@@ -1930,9 +1965,8 @@ class DocenDocument extends AddinHost<Editor> {
     const editor = this.editor;
     const page = editor ? (this.#bridge?.pageOf(editor.state.selection.from) ?? -1) + 1 : 0;
     const total = this.#pages.length;
-    // Section count: the projection flows a single section for now; a
-    // multi-section document reports its body section.
-    const section = 1;
+    // The caret's section: the section its page belongs to (1-based).
+    const section = page > 0 ? (this.#sectionOfPage[page - 1] ?? 0) + 1 : 1;
     // Word count is cached by doc nodeSize so caret moves skip re-walking the
     // full document (CharacterCount.words() regexes all text).
     const docSize = editor?.state.doc.nodeSize ?? 0;

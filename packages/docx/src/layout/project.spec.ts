@@ -53,9 +53,12 @@ const doc = (
   sections: [{ children, ...(sectionProps ? { properties: sectionProps } : {}) }],
 });
 
+/** Single-section documents: the first (only) projected section. */
+const oneSection = (doc: DocumentOptions) => projectDocumentOptions(doc).sections[0]!;
+
 describe("projectDocumentOptions style cascade", () => {
   it("resolves spacing/indent per field through the whole cascade", () => {
-    const { blocks } = projectDocumentOptions(doc([{ paragraph: { children: ["hi"] } }]));
+    const { blocks } = oneSection(doc([{ paragraph: { children: ["hi"] } }]));
     const para = blocks[0];
     expect(para?.kind).toBe("paragraph");
     if (para?.kind !== "paragraph") return;
@@ -82,7 +85,7 @@ describe("projectDocumentOptions style cascade", () => {
         } as NonNullable<typeof styles.paragraphStyles>[number],
       ],
     };
-    const { blocks } = projectDocumentOptions({
+    const { blocks } = oneSection({
       styles: withColor,
       sections: [
         {
@@ -114,7 +117,7 @@ describe("projectDocumentOptions style cascade", () => {
     // A round-tripped run can carry an rFonts object with no usable slot;
     // that shell must not shadow the style chain's face (it used to resolve
     // to empty slots and the painter fell to its fallback font).
-    const { blocks } = projectDocumentOptions(
+    const { blocks } = oneSection(
       doc([
         {
           paragraph: {
@@ -134,7 +137,7 @@ describe("projectDocumentOptions style cascade", () => {
   });
 
   it("direct attrs win and basedOn ancestors fill gaps (Heading1 → Normal)", () => {
-    const { blocks } = projectDocumentOptions(
+    const { blocks } = oneSection(
       doc([
         {
           paragraph: {
@@ -158,7 +161,7 @@ describe("projectDocumentOptions style cascade", () => {
   });
 
   it("resolves run rPr over the defaults and converts breaks/pictures", () => {
-    const { blocks } = projectDocumentOptions(
+    const { blocks } = oneSection(
       doc([
         {
           paragraph: {
@@ -225,7 +228,7 @@ describe("projectDocumentOptions style cascade", () => {
   });
 
   it("projects run color and underline/strike decorations", () => {
-    const { blocks } = projectDocumentOptions(
+    const { blocks } = oneSection(
       doc([
         {
           paragraph: {
@@ -257,7 +260,7 @@ describe("projectDocumentOptions style cascade", () => {
     const numbered = (reference: string, level = 0): SectionChild => ({
       paragraph: { numbering: { reference, level }, children: ["x"] },
     });
-    const { blocks } = projectDocumentOptions({
+    const { blocks } = oneSection({
       styles,
       numbering: {
         abstractNumberings: [
@@ -296,7 +299,7 @@ describe("projectDocumentOptions style cascade", () => {
   });
 
   it("converts exact/atLeast line rules and twip indents to px", () => {
-    const { blocks } = projectDocumentOptions(
+    const { blocks } = oneSection(
       doc([
         {
           paragraph: {
@@ -317,7 +320,7 @@ describe("projectDocumentOptions style cascade", () => {
 
 describe("projectDocumentOptions blocks", () => {
   it("splits a paragraph at run-level page breaks into pageBreak blocks", () => {
-    const { blocks } = projectDocumentOptions(
+    const { blocks } = oneSection(
       doc([
         {
           paragraph: {
@@ -339,25 +342,21 @@ describe("projectDocumentOptions blocks", () => {
   });
 
   it("drops the empty legs a break-only paragraph would produce", () => {
-    const { blocks } = projectDocumentOptions(
-      doc([{ paragraph: { children: [{ pageBreak: true }] } }]),
-    );
+    const { blocks } = oneSection(doc([{ paragraph: { children: [{ pageBreak: true }] } }]));
     // Word renders the break row (break mark + paragraph mark together) on
     // the page the break closes — the next page starts clean, no blank row.
     expect(blocks.map((b) => b.kind)).toEqual(["pageBreak"]);
   });
 
   it("keeps a pageBreakBefore paragraph as one block", () => {
-    const { blocks } = projectDocumentOptions(
-      doc([{ paragraph: { children: ["x"], pageBreakBefore: true } }]),
-    );
+    const { blocks } = oneSection(doc([{ paragraph: { children: ["x"], pageBreakBefore: true } }]));
     expect(blocks).toHaveLength(1);
     if (blocks[0]?.kind !== "paragraph") throw new Error("expected paragraph");
     expect(blocks[0].pageBreakBefore).toBe(true);
   });
 
   it("projects tables with converted geometry and threaded styles", () => {
-    const { blocks } = projectDocumentOptions(
+    const { blocks } = oneSection(
       doc([
         {
           table: {
@@ -414,7 +413,7 @@ describe("projectDocumentOptions blocks", () => {
         },
       ],
     };
-    const { blocks } = projectDocumentOptions({
+    const { blocks } = oneSection({
       styles: stylesWithTable,
       sections: [
         {
@@ -462,7 +461,7 @@ describe("projectDocumentOptions blocks", () => {
   });
 
   it("turns unprojectable body shapes into labeled placeholders and drops bookmarks", () => {
-    const { blocks } = projectDocumentOptions(
+    const { blocks } = oneSection(
       doc([
         { bookmarkStart: { id: 1, name: "n" } },
         { rawXml: "<w:customWrap/>" },
@@ -478,7 +477,7 @@ describe("projectDocumentOptions blocks", () => {
   });
 
   it("projects rendered TOC entries as real paragraphs", () => {
-    const { blocks } = projectDocumentOptions(
+    const { blocks } = oneSection(
       doc([
         {
           toc: {
@@ -509,7 +508,7 @@ describe("projectDocumentOptions blocks", () => {
 
 describe("projectDocumentOptions fields and furniture", () => {
   it("projects PAGE/NUMPAGES fields as dynamic atoms and other fields as cached text", () => {
-    const { blocks } = projectDocumentOptions(
+    const { blocks } = oneSection(
       doc([
         {
           paragraph: {
@@ -533,7 +532,7 @@ describe("projectDocumentOptions fields and furniture", () => {
   });
 
   it("projects the first section's header/footer slots with placement flags", () => {
-    const { furniture } = projectDocumentOptions({
+    const { furniture } = oneSection({
       styles,
       settings: { evenAndOddHeaders: true },
       sections: [
@@ -565,7 +564,7 @@ describe("projectDocumentOptions fields and furniture", () => {
 describe("projectDocumentOptions drawings", () => {
   it("projects a wpg group into an anchored drawing with resolved child space", () => {
     const px = (emu: number): number => emu / 9525;
-    const { blocks } = projectDocumentOptions(
+    const { blocks } = oneSection(
       doc([
         {
           paragraph: {
@@ -662,7 +661,7 @@ describe("projectDocumentOptions drawings", () => {
   });
 
   it("mirrors members of a flipH nested group within that group's box", () => {
-    const { blocks } = projectDocumentOptions(
+    const { blocks } = oneSection(
       doc([
         {
           paragraph: {
@@ -721,7 +720,7 @@ describe("projectDocumentOptions drawings", () => {
   });
 
   it("projects a wps text-box child's paragraphs through the style cascade", () => {
-    const { blocks } = projectDocumentOptions(
+    const { blocks } = oneSection(
       doc([
         {
           paragraph: {
@@ -768,7 +767,7 @@ describe("projectDocumentOptions drawings", () => {
 
   it("maps every relativeFrom axis and the align/percent position forms", () => {
     const anchorOf = (h: HorizontalPositionOptions, v: VerticalPositionOptions) => {
-      const { blocks } = projectDocumentOptions(
+      const { blocks } = oneSection(
         doc([
           {
             paragraph: {
@@ -811,7 +810,7 @@ describe("projectDocumentOptions drawings", () => {
   });
 
   it("flattens nested wpg groups through the composed child-space mapping", () => {
-    const { blocks } = projectDocumentOptions(
+    const { blocks } = oneSection(
       doc([
         {
           paragraph: {
@@ -874,7 +873,7 @@ describe("projectDocumentOptions drawings", () => {
   });
 
   it("projects custom geometry into a scaled SVG path member", () => {
-    const { blocks } = projectDocumentOptions(
+    const { blocks } = oneSection(
       doc([
         {
           paragraph: {
@@ -946,7 +945,7 @@ describe("projectDocumentOptions drawings", () => {
       '<stop offset="0" stop-color="#db8c90"/><stop offset="1" stop-color="#7d181c"/>' +
       "</linearGradient></defs>" +
       '<path fill="url(#wps{x}@#db8c90@#7d181c)" d="M0 0"/></svg>';
-    const { blocks } = projectDocumentOptions(
+    const { blocks } = oneSection(
       doc([
         {
           paragraph: {
@@ -1063,7 +1062,7 @@ describe("projectFlowBox", () => {
 
 describe("projectDocumentOptions inline containers", () => {
   const paraOf = (children: SectionChild[]): LayoutBlock[] =>
-    projectDocumentOptions(doc(children)).blocks;
+    projectDocumentOptions(doc(children)).sections[0]!.blocks;
 
   it("projects hyperlink containers as their runs with the Hyperlink look", () => {
     const blocks = paraOf([

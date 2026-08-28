@@ -25,12 +25,23 @@ import { paintFurnitureStack, paintScene, type PaintContext } from "./scene";
 
 const PAGE_GAP = 24;
 
-/** Font metrics (baseline ratios for half-leading) + page geometry. */
+/** One section's paint inputs: the page geometry its pages paginate against
+ *  and the headers/footers its pages display. */
+export interface CanvasStageSection {
+  flow: ProjectedFlowBox;
+  /** Headers/footers for this section's pages (absent = none). */
+  furniture?: ProjectedPageFurniture;
+}
+
+/** Font metrics (baseline ratios for half-leading) + per-section geometry. */
 export interface CanvasStageContext {
   metrics: FontMetrics;
-  flow: ProjectedFlowBox;
-  /** Headers/footers to paint on every page (absent = none). */
-  furniture?: ProjectedPageFurniture;
+  /** One entry per document section — each page paints with the box and
+   *  furniture of the section {@link CanvasStageContext.sectionOfPage} maps
+   *  it to. */
+  sections: CanvasStageSection[];
+  /** Page index → index into `sections` (parallel to the page list). */
+  sectionOfPage: number[];
   /** Page background (w:background — base color + optional pattern tile). */
   background?: ProjectedPageBackground;
 }
@@ -40,9 +51,16 @@ export class CanvasStage {
   private readonly slots: { el: HTMLElement; app: App | null }[] = [];
   private readonly io: IntersectionObserver;
   private pages: FlowPage[] = [];
-  /** Header/footer stacks per furniture slot, laid out once per sync at the
-   *  content width (furniture never reflows across pages). */
+  /** Header/footer stack HEIGHTS, keyed by stack reference — laid out once
+   *  per sync at the owning section's content width (furniture never reflows
+   *  across pages). */
   private furnitureStacks: Map<readonly LaidOutStackItem[], number> = new Map();
+
+  /** The section a page belongs to (its flow box + furniture). */
+  private sectionAt(page: number): CanvasStageSection {
+    const i = this.ctx.sectionOfPage[page] ?? 0;
+    return this.ctx.sections[i] ?? this.ctx.sections[0]!;
+  }
 
   constructor(
     stage: HTMLElement,
@@ -134,8 +152,8 @@ export class CanvasStage {
    *  exhausting memory. */
   private static readonly BITMAP_CAP = 3600;
 
-  private renderPixelRatio(): number {
-    const w = this.ctx.flow.pageWidthPx * this.factor;
+  private renderPixelRatio(flow: ProjectedFlowBox): number {
+    const w = flow.pageWidthPx * this.factor;
     return Math.min(devicePixelRatio, CanvasStage.BITMAP_CAP / Math.max(w, 1));
   }
 
@@ -150,11 +168,12 @@ export class CanvasStage {
   }
 
   private applyZoom(): void {
-    if (this.slots.length === 0) return;
-    const w = this.pageCss(this.ctx.flow.pageWidthPx);
-    const h = this.pageCss(this.ctx.flow.pageHeightPx);
-    const pixelRatio = this.renderPixelRatio();
+    // Sections can carry different paper sizes — each slot sizes to its own.
     for (const [index, slot] of this.slots.entries()) {
+      const flow = this.sectionAt(index).flow;
+      const w = this.pageCss(flow.pageWidthPx);
+      const h = this.pageCss(flow.pageHeightPx);
+      const pixelRatio = this.renderPixelRatio(flow);
       this.sizeSlot(slot, w, h);
       if (slot.app) {
         slot.app.resize({ width: w, height: h, pixelRatio });
@@ -191,24 +210,29 @@ export class CanvasStage {
 
   /** Lay out page slots for a flow result and repaint visible pages. The
    *  stage is built once and lives across documents — every sync must
-   *  refresh the context (an opened file's headers/footers arrive here). */
+   *  refresh the context (an opened file's headers/footers arrive here).
+   *  Multi-section documents pass one {@link CanvasStageSection} per section
+   *  plus the page→section map; a single-section document is a one-entry
+   *  list. */
   sync(
     pages: FlowPage[],
-    flow: ProjectedFlowBox,
-    furniture?: ProjectedPageFurniture,
+    sections: CanvasStageSection[],
+    sectionOfPage: number[],
     background?: ProjectedPageBackground,
   ): void {
     this.pages = pages;
-    this.ctx.flow = flow;
-    if (furniture !== undefined) this.ctx.furniture = furniture;
+    this.ctx.sections = sections;
+    this.ctx.sectionOfPage = sectionOfPage;
     // A pure derived value (recomputed per render) — always overwritten so a
     // document without a background clears the previous one's tile.
     this.ctx.background = background;
     this.layoutFurniture();
-    const w = this.pageCss(flow.pageWidthPx);
-    const h = this.pageCss(flow.pageHeightPx);
 
     while (this.slots.length < pages.length) {
+      // New slots clone the size of the section their page belongs to.
+      const flow = this.sectionAt(this.slots.length).flow;
+      const w = this.pageCss(flow.pageWidthPx);
+      const h = this.pageCss(flow.pageHeightPx);
       const frame = document.createElement("div");
       Object.assign(frame.style, {
         position: "relative",
@@ -226,27 +250,18 @@ export class CanvasStage {
       this.slots.push({ el, app: null });
       this.io.observe(el);
     }
-    // A zoom applied between syncs (initial attr → first sync) re-sizes
-    // already-created slots too.
-    for (const slot of this.slots) this.sizeSlot(slot, w, h);
     while (this.slots.length > pages.length) {
       const slot = this.slots.pop()!;
       this.io.unobserve(slot.el);
       slot.app?.destroy();
       slot.el.parentElement?.remove();
     }
+    // A zoom applied between syncs (initial attr → first sync) or a section
+    // mix re-sizes created slots to their page's own section.
     for (const [index, slot] of this.slots.entries()) {
-      if (slot.app) this.repaint(slot.app, index);
+      const flow = this.sectionAt(index).flow;
+      this.sizeSlot(slot, this.pageCss(flow.pageWidthPx), this.pageCss(flow.pageHeightPx));
     }
-  }
-
-  /** Re-lay the furniture stacks and repaint every live page — the
-   *  header/footer story's render path. The body flow is untouched: pages and
-   *  their laid blocks stay, only the furniture trees rebuild. */
-  syncFurniture(furniture?: ProjectedPageFurniture, background?: ProjectedPageBackground): void {
-    if (furniture !== undefined) this.ctx.furniture = furniture;
-    if (background !== undefined) this.ctx.background = background;
-    this.layoutFurniture();
     for (const [index, slot] of this.slots.entries()) {
       if (slot.app) this.repaint(slot.app, index);
     }
@@ -259,13 +274,14 @@ export class CanvasStage {
     return slot === 1 ? "first" : slot === 2 ? "even" : "default";
   }
 
-  /** The laid furniture stack a page displays (its geometry, whether the
-   *  stack's own slot or the default fallback). Null when the doc has none. */
+  /** The laid furniture stack a page displays (its section's stacks; an
+   *  absent slot falls back to default). Null when the doc has none. */
   furnitureStack(kind: "header" | "footer", page = 0): readonly LaidOutStackItem[] | null {
-    if (!this.ctx.furniture) return null;
+    const sectionIndex = this.ctx.sectionOfPage[page] ?? 0;
     const slot = this.slotOf(page);
-    const stacks = kind === "header" ? this.headerStacks : this.footerStacks;
-    return stacks[slot] ?? stacks[0] ?? null;
+    const stacks = kind === "header" ? this.headerStacksBySection : this.footerStacksBySection;
+    const own = stacks[sectionIndex];
+    return own?.[slot] ?? own?.[0] ?? null;
   }
 
   /** A page's editable furniture band, page-local — [top, bottom) with the
@@ -277,16 +293,16 @@ export class CanvasStage {
     kind: "header" | "footer",
     page = 0,
   ): { top: number; bottom: number; paintY: number } | null {
-    if (!this.ctx.furniture) return null;
-    const f = this.ctx.furniture;
+    const { flow, furniture: f } = this.sectionAt(page);
+    if (!f) return null;
     const stack = this.furnitureStack(kind, page);
     const h = Math.max(stack ? (this.furnitureStacks.get(stack) ?? 0) : 0, 24);
     if (kind === "header") {
       const paintY = f.headerDistancePx ?? 48;
       return { top: 0, bottom: paintY + h, paintY };
     }
-    const paintY = this.ctx.flow.pageHeightPx - (f.footerDistancePx ?? 48) - h;
-    return { top: paintY, bottom: this.ctx.flow.pageHeightPx, paintY };
+    const paintY = flow.pageHeightPx - (f.footerDistancePx ?? 48) - h;
+    return { top: paintY, bottom: flow.pageHeightPx, paintY };
   }
 
   /** Story chrome while a header/footer is being edited: Word grays the body
@@ -320,7 +336,7 @@ export class CanvasStage {
       fill: "transparent",
       // Explicit DPR (Leafer's default samples it at creation anyway) so the
       // value stays consistent across app.resize calls.
-      pixelRatio: this.renderPixelRatio(),
+      pixelRatio: this.renderPixelRatio(this.sectionAt(this.slots.indexOf(slot)).flow),
       editor: { moveable: false },
       // The document surface is MS Office-shaped: scrolling belongs to the
       // outer DOM container, never to the canvas. `leafer-editor` (imported by
@@ -334,35 +350,47 @@ export class CanvasStage {
     this.repaint(app, this.slots.indexOf(slot));
   }
 
-  /** Lay each furniture slot out once (width = the content box) and remember
-   *  each stack's height for the footer's bottom-edge placement. No grid
-   *  context: Word snaps header/footer paragraphs to their natural line
-   *  height — the body docGrid does not apply to the furniture story. */
+  /** Lay each furniture slot out once per SECTION (width = that section's
+   *  content box) and remember each stack's height for the footer's
+   *  bottom-edge placement. No grid context: Word snaps header/footer
+   *  paragraphs to their natural line height — the body docGrid does not
+   *  apply to the furniture story. */
   private layoutFurniture(): void {
     this.furnitureStacks = new Map();
-    const f = this.ctx.furniture;
-    if (!f) return;
+    this.headerStacksBySection = [];
+    this.footerStacksBySection = [];
     const measurer = new TextMeasurer(this.ctx.metrics);
-    const lay = (blocks: typeof f.header): readonly LaidOutStackItem[] | undefined => {
-      if (!blocks) return undefined;
-      const laid = stackBlocks(blocks, this.ctx.flow.contentWidthPx, undefined, measurer);
-      this.furnitureStacks.set(laid.stack, laid.heightPx);
-      return laid.stack;
-    };
-    this.headerStacks = [lay(f.header), lay(f.firstHeader), lay(f.evenHeader)];
-    this.footerStacks = [lay(f.footer), lay(f.firstFooter), lay(f.evenFooter)];
+    this.ctx.sections.forEach((section) => {
+      const f = section.furniture;
+      if (!f) {
+        this.headerStacksBySection.push([undefined, undefined, undefined]);
+        this.footerStacksBySection.push([undefined, undefined, undefined]);
+        return;
+      }
+      const lay = (blocks: typeof f.header): readonly LaidOutStackItem[] | undefined => {
+        if (!blocks) return undefined;
+        const laid = stackBlocks(blocks, section.flow.contentWidthPx, undefined, measurer);
+        this.furnitureStacks.set(laid.stack, laid.heightPx);
+        return laid.stack;
+      };
+      this.headerStacksBySection.push([lay(f.header), lay(f.firstHeader), lay(f.evenHeader)]);
+      this.footerStacksBySection.push([lay(f.footer), lay(f.firstFooter), lay(f.evenFooter)]);
+    });
   }
 
-  /** Per-slot header/footer stacks [default, first, even] — an undefined slot
-   *  falls back to default at pick time (OOXML). */
-  private headerStacks: (readonly LaidOutStackItem[] | undefined)[] = [];
-  private footerStacks: (readonly LaidOutStackItem[] | undefined)[] = [];
+  /** Per-section, per-slot header/footer stacks [default, first, even] — an
+   *  undefined slot falls back to default at pick time (OOXML). */
+  private headerStacksBySection: (readonly LaidOutStackItem[] | undefined)[][] = [];
+  private footerStacksBySection: (readonly LaidOutStackItem[] | undefined)[][] = [];
 
-  /** Which slot a page uses: first (titlePage) on page 1, even on even pages
-   *  when the document asks for different even/odd headers, else default. */
+  /** Which slot a page uses: first (titlePage) on its SECTION's first page,
+   *  even on even PHYSICAL pages (the pattern runs document-wide — Word's
+   *  evenAndOddHeaders is a settings-level switch), else default. */
   private slotOf(index: number): number {
-    const f = this.ctx.furniture;
-    if (index === 0 && f?.titlePage) return 1;
+    const section = this.sectionAt(index);
+    const f = section.furniture;
+    const local = index - this.ctx.sectionOfPage.indexOf(this.ctx.sectionOfPage[index] ?? 0);
+    if (local === 0 && f?.titlePage) return 1;
     if ((index + 1) % 2 === 0 && f?.evenAndOddHeaders) return 2;
     return 0;
   }
@@ -375,13 +403,17 @@ export class CanvasStage {
     // stay in unzoomed page px and this scale maps them onto the bitmap.
     tree.scale = this.factor;
     tree.clear();
+    // This page paints with its OWN section's box + furniture.
+    const { flow, furniture } = this.sectionAt(index);
     const ctx: PaintContext = {
-      ...this.ctx,
+      metrics: this.ctx.metrics,
+      flow,
+      furniture,
+      background: this.ctx.background,
       pageIndex: index,
       pageCount: this.pages.length,
       layer: "behind",
     };
-    const { flow } = this.ctx;
     const slot = this.slotOf(index);
     // Word's stacking: behind-text floats sit under everything from the text
     // layer — footer furniture included (a full-bleed backdrop never covers
@@ -395,7 +427,7 @@ export class CanvasStage {
     paintScene(tree, items, ctx);
     ctx.layer = "body";
     if (!this.storyEdit) {
-      this.paintFurniture(tree, slot, ctx, flow);
+      this.paintFurniture(tree, slot, ctx, flow, furniture);
       paintScene(tree, items, ctx);
     } else {
       paintScene(tree, items, ctx);
@@ -409,7 +441,7 @@ export class CanvasStage {
           hittable: false,
         }),
       );
-      this.paintFurniture(tree, slot, ctx, flow);
+      this.paintFurniture(tree, slot, ctx, flow, furniture);
       this.paintStoryBoundary(tree, ctx, flow);
     }
     // Render eagerly: Leafer's change-driven scheduling stalls when the App
@@ -418,28 +450,29 @@ export class CanvasStage {
     app.forceRender();
   }
 
-  /** Both furniture stacks for a page's slot, at their page positions. */
+  /** Both furniture stacks for a page's slot, at their page positions —
+   *  distances come from the page's own section. */
   private paintFurniture(
     tree: IGroup,
     slot: number,
     ctx: PaintContext,
     flow: ProjectedFlowBox,
+    furniture: ProjectedPageFurniture | undefined,
   ): void {
     ctx.layer = "body";
-    const header = this.headerStacks[slot] ?? this.headerStacks[0];
+    const sectionIndex = this.ctx.sectionOfPage[ctx.pageIndex] ?? 0;
+    const header =
+      this.headerStacksBySection[sectionIndex]?.[slot] ??
+      this.headerStacksBySection[sectionIndex]?.[0];
     if (header) {
-      paintFurnitureStack(
-        tree,
-        header,
-        flow.contentLeftPx,
-        this.ctx.furniture?.headerDistancePx ?? 48,
-        ctx,
-      );
+      paintFurnitureStack(tree, header, flow.contentLeftPx, furniture?.headerDistancePx ?? 48, ctx);
     }
-    const footer = this.footerStacks[slot] ?? this.footerStacks[0];
+    const footer =
+      this.footerStacksBySection[sectionIndex]?.[slot] ??
+      this.footerStacksBySection[sectionIndex]?.[0];
     if (footer) {
       const height = this.furnitureStacks.get(footer) ?? 0;
-      const bottom = flow.pageHeightPx - (this.ctx.furniture?.footerDistancePx ?? 48);
+      const bottom = flow.pageHeightPx - (furniture?.footerDistancePx ?? 48);
       paintFurnitureStack(tree, footer, flow.contentLeftPx, bottom - height, ctx);
     }
   }

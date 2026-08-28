@@ -1,3 +1,8 @@
+import type {
+  ProjectedFlowBox,
+  ProjectedPageBackground,
+  ProjectedPageFurniture,
+} from "@docen/docx/layout";
 /**
  * Scene painter — walks a laid-out page (the @docen/layout result) and builds
  * the LeaferJS tree. The layout engine owns ALL geometry; painting positions
@@ -9,6 +14,7 @@ import {
   stackBlocks,
   TextMeasurer,
   type FlowItem,
+  type FontMetrics,
   type LaidOutBlock,
   type LaidOutCell,
   type LaidOutLineItem,
@@ -31,8 +37,6 @@ import {
   type IGroup,
 } from "leafer-ui";
 
-import type { CanvasStageContext } from "./stage";
-
 /** OOXML prstDash tokens → dash patterns in px (line-width units, the host's
  *  preset line styles); unlisted tokens render solid. */
 const PRSTDASH_PATTERN: Record<string, number[]> = {
@@ -54,8 +58,15 @@ const PRSTDASH_PATTERN: Record<string, number[]> = {
  *  text-underlapping layers is being composed right now (the stage paints a
  *  page twice: once for behind-doc floats, once for everything else with
  *  header/footer furniture between them — Word renders footer furniture and
- *  the body over those floats, so furniture must not sit under them). */
-export interface PaintContext extends CanvasStageContext {
+ *  the body over those floats, so furniture must not sit under them).
+ *
+ *  The flow box and furniture are the PAGE's OWN section's (multi-section
+ *  documents give every page the box of the section it belongs to). */
+export interface PaintContext {
+  metrics: FontMetrics;
+  flow: ProjectedFlowBox;
+  furniture?: ProjectedPageFurniture;
+  background?: ProjectedPageBackground;
   pageIndex: number;
   pageCount: number;
   layer: "behind" | "body";

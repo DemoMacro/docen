@@ -154,12 +154,14 @@ export class CaretMap {
   constructor(
     pages: readonly FlowPage[],
     doc: PmNode,
-    private readonly flow: { contentLeftPx: number; contentTopPx: number },
+    private readonly originOf: (page: number) => { contentLeftPx: number; contentTopPx: number },
   ) {
-    // Layout side, document order.
+    // Layout side, document order. Multi-section documents give each page its
+    // own content origin — the section the page belongs to.
     const laid: { page: number; para: LaidOutParagraph; xPx: number; yPx: number }[] = [];
     pages.forEach((p, page) => {
-      collectLayoutParas(p.items, page, flow.contentLeftPx, flow.contentTopPx, laid);
+      const origin = originOf(page);
+      collectLayoutParas(p.items, page, origin.contentLeftPx, origin.contentTopPx, laid);
     });
     // PM side: every textblock, document order (descendants).
     const tbs: { node: PmNode; pos: number }[] = [];
