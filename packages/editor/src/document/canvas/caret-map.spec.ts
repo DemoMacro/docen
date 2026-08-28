@@ -183,3 +183,68 @@ describe("CaretMap selection rectangles", () => {
     expect(rects[1]).toMatchObject({ xPx: 0, widthPx: 8, heightPx: 20 });
   });
 });
+
+describe("CaretMap tolerant zip", () => {
+  it("stays valid and keeps later positions correct across unlaid PM textblocks", () => {
+    // A floating table's cells paint in the scene without flow items: the PM
+    // doc carries their paragraphs but the layout never lays them. The zip
+    // must skip them unmapped instead of invalidating the whole map (every
+    // click dead) — paragraphs after the gap still pair with their own text.
+    const { editor, doc } = buildDoc(["aaa", "bbb", "ccc", "ddd"]);
+    const map = new CaretMap(
+      pageOf([
+        fakePara([{ text: "aaa", xPx: 0, yPx: 0, maxWidthPx: 100 }]),
+        fakePara([{ text: "ddd", xPx: 0, yPx: 0, maxWidthPx: 100 }]),
+      ]) as never,
+      doc,
+      () => ({ contentLeftPx: 0, contentTopPx: 0 }),
+    );
+    expect(map.valid).toBe(true);
+    // "aaa" pairs with the first paragraph, "ddd" with the last — not
+    // shifted onto the unlaid cells (inner positions 1 and 16).
+    expect(map.posAtPoint(0, 5, 5)).toBe(1); // aaa's start
+    expect(map.posAtPoint(0, 5, 55)).toBe(16); // ddd's start
+    expect(map.caretRect(1)?.yPx).toBe(0);
+    expect(map.caretRect(16)?.yPx).toBe(50);
+  });
+
+  it("stays valid when the layout emits render-only paragraphs the PM lacks", () => {
+    // A repeated table header row renders on every continuation page but is
+    // one PM row: the duplicated header block pairs with nothing. The zip
+    // skips it once the NEXT laid block's text matches the current textblock.
+    const { editor, doc } = buildDoc(["aaa", "bbb"]);
+    const map = new CaretMap(
+      pageOf([
+        fakePara([{ text: "aaa", xPx: 0, yPx: 0, maxWidthPx: 100 }]),
+        fakePara([{ text: "bbb", xPx: 0, yPx: 0, maxWidthPx: 100 }]),
+        // Render-only repeat of the header on the next page.
+        fakePara([{ text: "aaa", xPx: 0, yPx: 0, maxWidthPx: 100 }]),
+      ]) as never,
+      doc,
+      () => ({ contentLeftPx: 0, contentTopPx: 0 }),
+    );
+    expect(map.valid).toBe(true);
+    expect(map.caretRect(1)?.yPx).toBe(0);
+    expect(map.caretRect(6)?.yPx).toBe(50);
+  });
+
+  it("pairs same-position text drift positionally (a TOC laid from cached text)", () => {
+    // A TOC's PM field-content paragraphs hold no text; the laid entries render
+    // their cached option text at the same positions. Text differs at every
+    // pair, no resync fires, and the positional pairing keeps the map valid.
+    const { editor, doc } = buildDoc(["title", "", ""]);
+    const map = new CaretMap(
+      pageOf([
+        fakePara([{ text: "title", xPx: 0, yPx: 0, maxWidthPx: 100 }]),
+        fakePara([{ text: "cached entry one", xPx: 0, yPx: 0, maxWidthPx: 100 }]),
+        fakePara([{ text: "cached entry two", xPx: 0, yPx: 0, maxWidthPx: 100 }]),
+      ]) as never,
+      doc,
+      () => ({ contentLeftPx: 0, contentTopPx: 0 }),
+    );
+    expect(map.valid).toBe(true);
+    expect(map.caretRect(1)?.yPx).toBe(0);
+    expect(map.caretRect(8)?.yPx).toBe(50);
+    expect(map.caretRect(10)?.yPx).toBe(100);
+  });
+});

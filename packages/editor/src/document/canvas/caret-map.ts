@@ -172,26 +172,70 @@ export class CaretMap {
       }
       return true;
     });
-    if (laid.length < tbs.length) {
-      this.valid = false;
-      return;
-    }
+    // Rendered text of a laid paragraph (inline runs concatenated) — the
+    // resync signal when the two sides drift apart.
+    const norm = (s: string): string => s.replace(/\s+/g, "");
+    const laidText = (para: LaidOutParagraph): string => {
+      let text = "";
+      for (const line of para.lines) {
+        for (const item of line.items) if (item.kind === "text") text += item.text;
+      }
+      return norm(text);
+    };
+    // True zip: walk the laid blocks, consuming one PM textblock per logical
+    // paragraph. Three drifts must not invalidate the whole map:
+    // 1. PM textblocks the flow never lays (floating-table cells paint in the
+    //    scene without flow items) stay unmapped — their positions render a
+    //    caret nowhere instead of killing editing document-wide.
+    // 2. Render-only laid paragraphs (repeated table headers on continuation
+    //    pages, a TOC entry laid from its cached options while the PM field
+    //    content stays empty) pair by position instead.
     this.valid = true;
-    // Page-split paragraphs lay out as one block per page but share their
-    // inline array by reference — such continuation blocks append lines to
-    // the running ParaEntry instead of consuming the next textblock.
     let j = 0;
-    for (const entry of laid) {
+    let i = 0;
+    while (i < laid.length) {
+      const entry = laid[i]!;
       const para = entry.para;
       const prev = this.paras[this.paras.length - 1];
       const continuation = prev !== undefined && prev.para.inline === para.inline;
       if (continuation && prev) {
         this.appendLines(prev, entry);
+        i++;
         continue;
       }
       if (j >= tbs.length) {
-        this.valid = false;
-        return;
+        // Render-only tail (a repeated table header row on a continuation
+        // page): nothing left to pair with — skip the laid block.
+        i++;
+        continue;
+      }
+      const here = laidText(para);
+      const there = norm(tbs[j]!.node.textContent);
+      if (here !== there) {
+        // Text disagrees at this position. First suspect a PM-side gap: this
+        // laid paragraph's text appears further ahead in the textblock list —
+        // the textblocks in between (floating-table cells, passthrough runs)
+        // are never laid, so skip them unmapped.
+        let gap = 0;
+        for (let k = 1; k <= 6 && j + k < tbs.length; k++) {
+          if (here === norm(tbs[j + k]!.node.textContent)) {
+            gap = k;
+            break;
+          }
+        }
+        if (gap > 0) {
+          j += gap;
+        } else {
+          const next = i + 1 < laid.length ? laidText(laid[i + 1]!.para) : null;
+          if (next != null && next === there) {
+            // Laid-side gap: the NEXT laid block pairs with this textblock,
+            // so this one is render-only — skip it without consuming.
+            i++;
+            continue;
+          }
+          // Otherwise a legal same-position drift (a TOC entry laid from its
+          // cached text over an empty field-content paragraph) — pair as is.
+        }
       }
       const { node, pos } = tbs[j++]!;
       const paraEntry: ParaEntry = {
@@ -204,8 +248,8 @@ export class CaretMap {
       };
       this.paras.push(paraEntry);
       this.appendLines(paraEntry, entry);
+      i++;
     }
-    if (j !== tbs.length) this.valid = false;
   }
 
   /** Append one laid block's lines to a ParaEntry (startChar continues from
