@@ -349,6 +349,31 @@ const zoomItems = (): string =>
     { text: opt("page-width"), value: "page-width" },
   ]);
 
+/** The Header/Footer split's drop-down: edit (the split's main action),
+ *  remove, and the slot-visibility flags. Static seed only — the host
+ *  re-stamps the items with live `checked` flags on every transaction
+ *  (the flags live in sectionProperties, which the static schema can't
+ *  read). */
+const storyMenuItems = (kind: "header" | "footer"): string =>
+  JSON.stringify([
+    { text: opt(kind === "header" ? "edit-header" : "edit-footer"), value: "edit" },
+    {
+      text: opt(kind === "header" ? "remove-header" : "remove-footer"),
+      value: kind === "header" ? "remove-header" : "remove-footer",
+    },
+    { text: opt("different-first"), value: "title-page" },
+    { text: opt("odd-even"), value: "odd-even" },
+  ]);
+
+/** The Page Number split's drop-down: placement (the main button is the
+ *  Word default, bottom of page) plus removal. */
+const pageNumberItems = (): string =>
+  JSON.stringify([
+    { text: opt("page-num-top"), value: "top" },
+    { text: opt("page-num-bottom"), value: "bottom" },
+    { text: opt("remove-page-numbers"), value: "remove-numbers" },
+  ]);
+
 // --- Tabs --------------------------------------------------------------------
 
 /** Default active tab id. */
@@ -758,9 +783,9 @@ const insertTab = (): RibbonTab =>
       btn("comment-add", "comment", { size: "large" }),
     ]),
     group("header-footer", [
-      btn("header", "header", { size: "large" }),
-      btn("footer", "footer", { size: "large" }),
-      btn("page-number", "page-number", { size: "large" }),
+      split("header", "header", parsedItems(storyMenuItems("header")), { size: "large" }),
+      split("footer", "footer", parsedItems(storyMenuItems("footer")), { size: "large" }),
+      split("page-number", "page-number", parsedItems(pageNumberItems()), { size: "large" }),
     ]),
     group("text", [
       btn("text-box", "text-box", { size: "large" }),

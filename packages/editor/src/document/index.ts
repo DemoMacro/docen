@@ -859,6 +859,7 @@ class DocenDocument extends AddinHost<Editor> {
     const sync = (): void => {
       this.#syncFontControls();
       this.#syncStyleControl();
+      this.#syncStoryMenus();
       this.#updateStatus();
     };
     editor.on("transaction", sync);
@@ -1200,6 +1201,92 @@ class DocenDocument extends AddinHost<Editor> {
     if (dirty) this.#persistStory(kind, slot, json);
   }
 
+  /** Write a slots group through a transaction: the group lives on the
+   *  current section's sectPr paragraph when there is one, else on the doc
+   *  node (the #loadDoc state-rebuild path — the doc node is not step
+   *  addressable; see #persistStory). */
+  #writeSlots(key: "sectionHeaders" | "sectionFooters", group: Record<string, unknown>): void {
+    const bridge = this.#bridge;
+    const editor = this.editor;
+    if (!bridge || !editor) return;
+    const { doc, tr } = editor.state;
+    const targetPos = this.#sectionSectPrPos();
+    if (targetPos != null) {
+      const node = doc.nodeAt(targetPos);
+      if (node) {
+        tr.setNodeMarkup(targetPos, undefined, { ...node.attrs, [key]: group });
+        editor.view.dispatch(tr);
+        return;
+      }
+    }
+    const raw = bridge.editor.getJSON();
+    this.#loadDoc({
+      ...raw,
+      attrs: { ...((raw.attrs as Record<string, unknown>) ?? {}), [key]: group },
+    } as JSONContent);
+  }
+
+  /** Remove Header / Remove Footer — drop the story's whole slots group from
+   *  the current section (Word removes the content; the slot stops
+   *  rendering on every page). */
+  #removeStory(kind: StoryKind): void {
+    this.#writeSlots(this.#slotsKeyOf(kind), {});
+  }
+
+  /** Is this inline passthrough atom a PAGE (not NUMPAGES/PAGEREF) field? */
+  static isPageField(child: JSONContent): boolean {
+    if (child.type !== "inlinePassthrough") return false;
+    try {
+      const data = JSON.parse(String((child.attrs as { data?: string } | undefined)?.data)) as {
+        simpleField?: { instruction?: string };
+      };
+      const instr = data.simpleField?.instruction?.trim().toUpperCase() ?? "";
+      return instr.startsWith("PAGE") && !instr.startsWith("PAGES") && !instr.startsWith("PAGEREF");
+    } catch {
+      return false;
+    }
+  }
+
+  /** The slots group as #writeSlots addresses it (same container semantics:
+   *  the current section's sectPr paragraph, else the doc node). */
+  #readSlotsGroup(key: "sectionHeaders" | "sectionFooters"): Record<string, unknown> {
+    const editor = this.editor;
+    if (!editor) return {};
+    const targetPos = this.#sectionSectPrPos();
+    const group = (attrs: Record<string, unknown> | undefined): Record<string, unknown> =>
+      (attrs?.[key] as Record<string, unknown> | undefined) ?? {};
+    if (targetPos != null) {
+      const node = editor.state.doc.nodeAt(targetPos);
+      if (node) return group(node.attrs as Record<string, unknown>);
+    }
+    return group(editor.state.doc.attrs as Record<string, unknown>);
+  }
+
+  /** Remove Page Numbers — strip the PAGE field atoms from every slot of
+   *  both stories (Word deletes the fields, leaving their paragraphs). */
+  #removePageNumbers(): void {
+    const strip = (blocks: unknown): unknown => {
+      const json = blocks as JSONContent[] | undefined;
+      if (!Array.isArray(json)) return blocks;
+      return json.map((block) =>
+        block.type === "paragraph"
+          ? {
+              ...block,
+              content: (block.content ?? []).filter((c) => !DocenDocument.isPageField(c)),
+            }
+          : block,
+      );
+    };
+    for (const key of ["sectionHeaders", "sectionFooters"] as const) {
+      const group = this.#readSlotsGroup(key);
+      const next: Record<string, unknown> = {};
+      for (const slot of ["default", "first", "even"] as const) {
+        if (group[slot] !== undefined) next[slot] = strip(group[slot]);
+      }
+      this.#writeSlots(key, next);
+    }
+  }
+
   /** Word's furniture overflow rule: a header taller than the top margin
    *  pushes the body down, a taller footer pushes it up — each page by its
    *  own slot's stack (the first page by the first slot when titlePage asks
@@ -1399,6 +1486,7 @@ class DocenDocument extends AddinHost<Editor> {
     searchEl?.setTabs(tabs, root.querySelector("docen-workspace"));
     this.#applyRibbonGreying();
     this.#syncEditModeMenu();
+    this.#syncStoryMenus();
     this.#renderPanes();
   }
 
@@ -1517,6 +1605,51 @@ class DocenDocument extends AddinHost<Editor> {
     );
   }
 
+  /** Re-stamp the Header/Footer split drop-downs with live checked flags —
+   *  the slot-visibility items read sectionProperties (titlePage /
+   *  evenAndOddHeaders), which the static ribbon schema can't carry. Runs on
+   *  every chrome re-stamp and every transaction (a flag toggle flips its
+   *  check on the next pass). */
+  #syncStoryMenus(): void {
+    const sp = (
+      this.editor?.state.doc.attrs as
+        | { sectionProperties?: { titlePage?: boolean; evenAndOddHeaders?: boolean } }
+        | undefined
+    )?.sectionProperties;
+    const stamp = (kind: "header" | "footer"): void => {
+      const el = this.shadowRoot?.querySelector(`docen-ribbon-split-button[event="${kind}"]`);
+      if (!el) return;
+      el.setAttribute(
+        "items",
+        JSON.stringify([
+          {
+            text: t(kind === "header" ? "ribbon.opt.edit-header" : "ribbon.opt.edit-footer", this),
+            value: "edit",
+          },
+          {
+            text: t(
+              kind === "header" ? "ribbon.opt.remove-header" : "ribbon.opt.remove-footer",
+              this,
+            ),
+            value: kind === "header" ? "remove-header" : "remove-footer",
+          },
+          {
+            text: t("ribbon.opt.different-first", this),
+            value: "title-page",
+            checked: !!sp?.titlePage,
+          },
+          {
+            text: t("ribbon.opt.odd-even", this),
+            value: "odd-even",
+            checked: !!sp?.evenAndOddHeaders,
+          },
+        ]),
+      );
+    };
+    stamp("header");
+    stamp("footer");
+  }
+
   /** The full set of wired command names (Tiptap dispatch + locally handled +
    *  addin commands). External add-ins register non-Tiptap actions (e.g. open a
    *  URL) via `commands`; their keys count as wired so {@link #applyRibbonGreying}
@@ -1606,21 +1739,16 @@ class DocenDocument extends AddinHost<Editor> {
     }
   }
 
-  /** Deep-merge a sectionProperties patch into the CURRENT section's sectPr and
-   *  dispatch it — Word's "this section" semantics. The current section is the
-   *  one holding the caret: its sectPr rides on its last paragraph (the first
-   *  section-carrying paragraph at/after the caret), or, when the caret is in the
-   *  final section, on doc.attrs.sectionProperties (the body-level sectPr).
-   *  The dispatched transaction re-renders every page of the canvas. */
-  #updateSectionGeometry(patch: SectionPropertiesOptions): void {
+  /** The doc position carrying the current section's sectPr — the first
+   *  section-carrying paragraph at/after the caret (OOXML: its sectPr ends
+   *  that section), or null when the caret sits in the final section (the
+   *  sectPr is body-level on doc.attrs). */
+  #sectionSectPrPos(): number | null {
     const editor = this.editor;
-    if (!editor) return;
-    const { doc, tr } = editor.state;
+    if (!editor) return null;
     const from = editor.state.selection.from;
-    // First section-carrying paragraph at/after the caret = the current
-    // section's last paragraph (OOXML: its sectPr ends that section).
     let targetPos: number | null = null;
-    doc.descendants((node, nodePos) => {
+    editor.state.doc.descendants((node, nodePos) => {
       if (targetPos != null || nodePos < from) return true;
       if (
         node.type.name === "paragraph" &&
@@ -1631,6 +1759,17 @@ class DocenDocument extends AddinHost<Editor> {
       }
       return true;
     });
+    return targetPos;
+  }
+
+  /** Deep-merge a sectionProperties patch into the CURRENT section's sectPr and
+   *  dispatch it — Word's "this section" semantics. The dispatched transaction
+   *  re-renders every page of the canvas. */
+  #updateSectionGeometry(patch: SectionPropertiesOptions): void {
+    const editor = this.editor;
+    if (!editor) return;
+    const { doc, tr } = editor.state;
+    const targetPos = this.#sectionSectPrPos();
     if (targetPos != null) {
       const node = doc.nodeAt(targetPos);
       if (node) {
@@ -1646,6 +1785,33 @@ class DocenDocument extends AddinHost<Editor> {
       // its sectPr is body-level (doc.attrs.sectionProperties).
       const cur = (doc.attrs as { sectionProperties?: SectionPropertiesOptions }).sectionProperties;
       tr.setDocAttribute("sectionProperties", mergeSectionProperties(cur, patch));
+    }
+    editor.view.dispatch(tr);
+  }
+
+  /** Toggle a slot-visibility flag (titlePage / evenAndOddHeaders) on the
+   *  current section's sectPr (Word's Different First Page / Odd & Even
+   *  Pages). The transaction re-renders; the furniture projection picks the
+   *  flag up and the page pattern (first/even slots) follows. */
+  #toggleSectionFlag(flag: "titlePage" | "evenAndOddHeaders"): void {
+    const editor = this.editor;
+    if (!editor) return;
+    const { doc, tr } = editor.state;
+    const flip = (cur: SectionPropertiesOptions | undefined): SectionPropertiesOptions => ({
+      ...cur,
+      [flag]: !(cur as unknown as Record<string, unknown> | undefined)?.[flag],
+    });
+    const targetPos = this.#sectionSectPrPos();
+    if (targetPos != null) {
+      const node = doc.nodeAt(targetPos);
+      if (node) {
+        const cur = (node.attrs as { sectionProperties?: SectionPropertiesOptions })
+          .sectionProperties;
+        tr.setNodeMarkup(targetPos, undefined, { ...node.attrs, sectionProperties: flip(cur) });
+      }
+    } else {
+      const cur = (doc.attrs as { sectionProperties?: SectionPropertiesOptions }).sectionProperties;
+      tr.setDocAttribute("sectionProperties", flip(cur));
     }
     editor.view.dispatch(tr);
   }
@@ -1905,23 +2071,36 @@ class DocenDocument extends AddinHost<Editor> {
       }
       return;
     }
-    // Header/Footer — open the story on the caret's page (Word: the button
-    // drops into the header/footer for editing; the body click exits).
+    // Header/Footer — the split's main action opens the story on the caret's
+    // page; the drop-down carries remove + the slot-visibility flags.
     if (name === "header" || name === "footer") {
+      if (value === "title-page" || value === "odd-even") {
+        this.#toggleSectionFlag(value === "title-page" ? "titlePage" : "evenAndOddHeaders");
+        return;
+      }
+      if (value === "remove-header" || value === "remove-footer") {
+        this.#removeStory(name);
+        return;
+      }
       const page = this.#bridge?.pageOf(editor.state.selection.from);
       if (page != null) this.#bridge?.enterStory(name, page);
       return;
     }
-    // Page Number — enter the footer story and seed a PAGE field at its end
-    // (Word's default "Bottom of Page"); the story stays open so the user
-    // can adjust, and the normal exit persists the slots.
+    // Page Number — seed a PAGE field at the chosen story's end (Word's
+    // default is bottom of page); the story stays open so the user can
+    // adjust, and the normal exit persists the slots.
     if (name === "page-number") {
+      if (value === "remove-numbers") {
+        this.#removePageNumbers();
+        return;
+      }
       const page = this.#bridge?.pageOf(editor.state.selection.from);
+      const seed: JSONContent = {
+        type: "inlinePassthrough",
+        attrs: { data: JSON.stringify({ simpleField: { instruction: "PAGE" } }) },
+      };
       if (page != null) {
-        this.#bridge?.enterStory("footer", page, {
-          type: "inlinePassthrough",
-          attrs: { data: JSON.stringify({ simpleField: { instruction: "PAGE" } }) },
-        });
+        this.#bridge?.enterStory(value === "top" ? "header" : "footer", page, seed);
       }
       return;
     }
