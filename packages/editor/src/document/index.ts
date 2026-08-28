@@ -155,6 +155,8 @@ const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   // Bookmark prompts for a name and wraps the selection.
   "symbol",
   "bookmark",
+  // Link prompts for an address and marks the selection (Word's Insert Link).
+  "link",
   // Text Box / Shapes insert a standalone wps shape run (Shapes reads the
   // gallery preset from the split item's value).
   "text-box",
@@ -2098,6 +2100,46 @@ class DocenDocument extends AddinHost<Editor> {
     editor.view.dispatch(editor.state.tr.insert(from, start).insert(to + 1, end));
   }
 
+  /** Insert → Link: prompt for the address (pre-filled with the selection's
+   *  existing link, Word's edit-an-existing-hyperlink behavior), then either
+   *  mark the selected text or insert fresh display text. An empty address on
+   *  an existing link removes it (Word's "remove hyperlink"). `#name`
+   *  addresses are bookmark anchors (in-page jumps); bare hosts gain the
+   *  https scheme (Word's auto-complete). */
+  #insertLink(): void {
+    const editor = this.editor;
+    if (!editor) return;
+    // The link mark riding the selection, if any (extendMarkRange snaps the
+    // range to the whole mark, so a caret inside a link edits the whole one).
+    const existing = editor.getAttributes("link").href as string | undefined;
+    const raw = window.prompt(t("link.prompt", this), existing ?? "https://")?.trim();
+    if (raw == null) return;
+    if (raw === "") {
+      if (existing) editor.chain().focus().extendMarkRange("link").unsetLink().run();
+      return;
+    }
+    const href = raw.startsWith("#") || /^[a-z][a-z0-9+.-]*:/i.test(raw) ? raw : `https://${raw}`;
+    const { empty } = editor.state.selection;
+    if (!empty) {
+      editor.chain().focus().extendMarkRange("link").setLink({ href }).run();
+      return;
+    }
+    // No selection: Word asks for display text and inserts it marked.
+    const text = window
+      .prompt(t("link.text.prompt", this), raw.replace(/^https?:\/\//, ""))
+      ?.trim();
+    if (!text) return;
+    editor
+      .chain()
+      .focus()
+      .insertContent({
+        type: "text",
+        text,
+        marks: [{ type: "link", attrs: { href, target: href.startsWith("#") ? null : "_blank" } }],
+      })
+      .run();
+  }
+
   /** Insert → Text Box / Shapes: a standalone wps shape run, floating
    *  wrap-none and centered on the page (Word's insertion behavior). The
    *  text box carries Word's plain look — white fill, accent-1 hairline —
@@ -2275,6 +2317,12 @@ class DocenDocument extends AddinHost<Editor> {
     // bookmarkStart/bookmarkEnd pair (Word's Insert → Bookmark).
     if (name === "bookmark") {
       this.#insertBookmark();
+      return;
+    }
+    // Link — prompt for an address and mark the selection (or insert fresh
+    // display text when the selection is empty).
+    if (name === "link") {
+      this.#insertLink();
       return;
     }
     // Text Box / Shapes — insert a floating wps shape run (Shapes reads its
