@@ -244,11 +244,17 @@ export interface LayoutDrawing {
  *  and the anchor paragraph's own self-zones) share this so the square/
  *  tight/topAndBottom paddings stay in lockstep. `boxTopPx` is the drawing's
  *  own top in the caller's Y space; the distances pad top and bottom around
- *  it. Returns undefined when the padded box misses the column entirely. */
+ *  it. `inCell` applies Word's layoutInCell containment: a cell-anchored
+ *  object never extends past its cell — an offset that overflows the cell's
+ *  right edge shifts the whole box left to touch it (the wrap zone follows
+ *  the shifted box). Body floats keep their raw offset (they may hang into
+ *  the margins). Returns undefined when the padded box misses the column
+ *  entirely. */
 export function drawingWrapBox(
   d: LayoutDrawing,
   boxTopPx: number,
   columnWidth: number,
+  inCell = false,
 ):
   | {
       widthPx: number;
@@ -260,9 +266,13 @@ export function drawingWrapBox(
     }
   | undefined {
   const left = d.distances?.left ?? 0;
-  const x0 = (d.anchor.horizontal.offsetPx ?? 0) - left;
+  const offset = inCell
+    ? Math.min(Math.max(d.anchor.horizontal.offsetPx ?? 0, 0), Math.max(0, columnWidth - d.width))
+    : (d.anchor.horizontal.offsetPx ?? 0);
+  const x0 = offset - left;
   const start = Math.max(x0, 0);
-  const widthPx = Math.min(x0 + d.width + left + (d.distances?.right ?? 0), columnWidth) - start;
+  const widthPx =
+    Math.min(offset + d.width + left + (d.distances?.right ?? 0), columnWidth) - start;
   if (widthPx <= 0) return undefined;
   // Which side takes the text: "right" forces the right side, "left" keeps
   // the text left no matter what, and both/largest take the wider side —
@@ -273,7 +283,7 @@ export function drawingWrapBox(
   // The contour rides along in zone coordinates: the drawing box's own
   // top-left sits at (offset-start, distTop) inside the padded zone box.
   const contour = d.contour?.map((p) => ({
-    x: p.x + (d.anchor.horizontal.offsetPx ?? 0) - start,
+    x: p.x + offset - start,
     y: p.y + (d.distances?.top ?? 0),
   }));
   return {
@@ -284,6 +294,41 @@ export function drawingWrapBox(
     ...(textAfter ? { textAfter } : {}),
     ...(contour ? { contour } : {}),
   };
+}
+
+/** A paragraph's wrapping drawings as flow effects in the caller's Y space
+ *  (`baseY` = the anchor paragraph's top; 0 for paragraph-relative zones).
+ *  Zones shrink the lines they overlap; bands (topAndBottom, or a square box
+ *  covering the full column) clear everything in their band — callers that
+ *  cannot dodge a band mid-stack (a paragraph's own lines, a table cell)
+ *  drop them. Column/margin/page-anchored and wrapNone drawings produce
+ *  neither. */
+export function wrapEffectsOf(
+  drawings: readonly LayoutDrawing[] | undefined,
+  baseY: number,
+  columnWidth: number,
+  inCell = false,
+): { zones: LayoutFloatZone[]; bands: LayoutFloatZone[] } {
+  const zones: LayoutFloatZone[] = [];
+  const bands: LayoutFloatZone[] = [];
+  for (const d of drawings ?? []) {
+    if (!d.wrap) continue;
+    const { horizontal: h, vertical: v } = d.anchor;
+    if (v.relative !== "paragraph" || h.relative !== "column") continue;
+    const box = drawingWrapBox(d, baseY + (v.offsetPx ?? 0), columnWidth, inCell);
+    if (!box) continue;
+    const zone: LayoutFloatZone = {
+      widthPx: box.widthPx,
+      topPx: box.topPx,
+      bottomPx: box.bottomPx,
+      x0Px: box.x0Px,
+      ...(box.textAfter ? { textAfter: true } : {}),
+      ...(box.contour ? { contour: box.contour } : {}),
+    };
+    if (d.wrap === "topAndBottom" || box.widthPx >= columnWidth - 1) bands.push(zone);
+    else zones.push(zone);
+  }
+  return { zones, bands };
 }
 
 // ── blocks ──

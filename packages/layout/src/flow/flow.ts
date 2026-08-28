@@ -19,10 +19,10 @@
 
 import { layoutBlock } from "../block/block";
 import {
-  drawingWrapBox,
   type LayoutBlock,
   type LayoutBlockContext,
   type LayoutFloatZone,
+  wrapEffectsOf,
 } from "../layout-doc";
 import type { LaidOutBlock, LaidOutLine, LaidOutStackItem, LaidOutTable } from "../layout-result";
 import type { TextMeasurer } from "../text/measure";
@@ -291,26 +291,9 @@ class Flow {
    *  distances first (distL/R/T/B), so text keeps its Word gap. Margin/
    *  page-anchored and aligned boxes stay painter-only (registered gaps). */
   private registerFloats(laid: Extract<LaidOutBlock, { kind: "paragraph" }>, yPx: number): void {
-    for (const d of laid.drawings ?? []) {
-      if (!d.wrap) continue;
-      const { horizontal: h, vertical: v } = d.anchor;
-      if (v.relative !== "paragraph" || h.relative !== "column") continue;
-      const box = drawingWrapBox(d, yPx + (v.offsetPx ?? 0), this.opts.contentWidthPx);
-      if (!box) continue;
-      const zone: LayoutFloatZone = {
-        widthPx: box.widthPx,
-        topPx: box.topPx,
-        bottomPx: box.bottomPx,
-        x0Px: box.x0Px,
-        ...(box.textAfter ? { textAfter: true } : {}),
-        ...(box.contour ? { contour: box.contour } : {}),
-      };
-      if (d.wrap === "topAndBottom" || box.widthPx >= this.opts.contentWidthPx - 1) {
-        this.bands.push(zone);
-      } else {
-        this.zones.push(zone);
-      }
-    }
+    const { zones, bands } = wrapEffectsOf(laid.drawings, yPx, this.opts.contentWidthPx);
+    this.zones.push(...zones);
+    this.bands.push(...bands);
   }
 
   /** Detach the trailing run of placed keepNext blocks (cascades through the

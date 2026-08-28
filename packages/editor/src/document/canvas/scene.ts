@@ -81,6 +81,15 @@ export interface PaintContext {
   rerender: () => void;
 }
 
+/** The text column a block paints inside: the page's content box for body
+ *  blocks, the cell's inner box for table content (a text box's insets box
+ *  for its paragraphs). Cell-anchored floats clamp inside it — Word's
+ *  layoutInCell containment, matching the wrap zones the layout built. */
+interface PaintColumn {
+  width: number;
+  inCell: boolean;
+}
+
 /** Paint one page's flow items (block + page-content y). */
 export function paintScene(tree: IGroup, items: readonly FlowItem[], ctx: PaintContext): void {
   for (const item of items) {
@@ -107,10 +116,11 @@ function paintBlock(
   x: number,
   y: number,
   ctx: PaintContext,
+  col?: PaintColumn,
 ): void {
   switch (block.kind) {
     case "paragraph":
-      paintParagraph(tree, block, x, y, ctx);
+      paintParagraph(tree, block, x, y, ctx, col);
       return;
     // Only paragraphs can carry drawings; the behind pass therefore skips
     // every other block so nothing paints twice.
@@ -123,7 +133,7 @@ function paintBlock(
       return;
     case "group":
       for (const child of block.children) {
-        paintBlock(tree, child.block, x, y + child.yPx, ctx);
+        paintBlock(tree, child.block, x, y + child.yPx, ctx, col);
       }
       return;
   }
@@ -135,13 +145,14 @@ function paintParagraph(
   x: number,
   y: number,
   ctx: PaintContext,
+  col?: PaintColumn,
 ): void {
   // The stage composes a page in two passes; this one paints only its own
   // layer's drawings. Behind-doc floats land beneath the furniture pass.
   const behind = ctx.layer === "behind";
   if (behind) {
     for (const drawing of para.drawings ?? []) {
-      if (drawing.behind) paintDrawing(tree, drawing, x, y, ctx);
+      if (drawing.behind) paintDrawing(tree, drawing, x, y, ctx, col);
     }
     return;
   }
@@ -312,7 +323,7 @@ function paintParagraph(
   // over the text — the flow reserved them no height. (behindDoc ones went
   // first, above.)
   for (const drawing of para.drawings ?? []) {
-    if (!drawing.behind) paintDrawing(tree, drawing, x, y, ctx);
+    if (!drawing.behind) paintDrawing(tree, drawing, x, y, ctx, col);
   }
 }
 
@@ -367,12 +378,16 @@ function paintDrawing(
   x: number,
   y: number,
   ctx: PaintContext,
+  col?: PaintColumn,
 ): void {
   const { flow } = ctx;
   // The reference box each axis resolves against: the content box (column /
   // topMargin), the page box, an edge (leftMargin/rightMargin/bottomMargin),
   // or — vertically — the anchor paragraph's own top (extent 0: offsets and
-  // align both hang off the edge itself).
+  // align both hang off the edge itself). The column's left edge is the
+  // CALLER's text column — the page's for body paragraphs, the cell's for
+  // cell-anchored floats (Word's layoutInCell), matching the wrap zones the
+  // layout computes against the same base.
   const hBox =
     drawing.anchor.horizontal.relative === "page"
       ? { left: 0, width: flow.pageWidthPx }
@@ -380,7 +395,7 @@ function paintDrawing(
         ? { left: flow.contentLeftPx + flow.contentWidthPx, width: 0 }
         : drawing.anchor.horizontal.relative === "leftMargin"
           ? { left: flow.contentLeftPx, width: 0 }
-          : { left: flow.contentLeftPx, width: flow.contentWidthPx };
+          : { left: x, width: col?.width ?? flow.contentWidthPx };
   const vBox =
     drawing.anchor.vertical.relative === "page"
       ? { top: 0, height: flow.pageHeightPx }
@@ -403,8 +418,15 @@ function paintDrawing(
     if (spec.percent != null) return base + spec.percent * extent;
     return base + (spec.offsetPx ?? 0);
   };
-  const boxX = axisPos(drawing.anchor.horizontal, hBox.left, hBox.width, drawing.width);
+  let boxX = axisPos(drawing.anchor.horizontal, hBox.left, hBox.width, drawing.width);
   const boxY = axisPos(drawing.anchor.vertical, vBox.top, vBox.height, drawing.height);
+  // Word's layoutInCell: a cell-anchored object never extends past its cell —
+  // an offset that overflows the right edge shifts the whole box left to touch
+  // it (the wrap zones shifted with it at layout time). Body floats keep
+  // their raw position (they may hang into the margins).
+  if (col?.inCell && drawing.anchor.horizontal.relative === "column") {
+    boxX = Math.min(Math.max(boxX, hBox.left), hBox.left + Math.max(0, hBox.width - drawing.width));
+  }
   paintMembers(tree, drawing.members, boxX, boxY, ctx);
 }
 
@@ -500,12 +522,15 @@ function paintMembers(
         // a group keeps the offsets in text space and carries the angle.
         const group = new Group({ x: mx, y: my, rotation: m.rotation });
         for (const item of laid.stack) {
-          paintBlock(group, item.block, left, oy + item.yPx, ctx);
+          paintBlock(group, item.block, left, oy + item.yPx, ctx, { width: inner, inCell: true });
         }
         tree.add(group);
       } else {
         for (const item of laid.stack) {
-          paintBlock(tree, item.block, mx + left, my + oy + item.yPx, ctx);
+          paintBlock(tree, item.block, mx + left, my + oy + item.yPx, ctx, {
+            width: inner,
+            inCell: true,
+          });
         }
       }
     }
@@ -706,7 +731,10 @@ function paintTable(
     const contentX = x + p.contentXPx;
     const contentY = y + p.contentYPx;
     for (const stacked of p.cell.stack) {
-      paintBlock(tree, stacked.block, contentX, contentY + stacked.yPx, ctx);
+      paintBlock(tree, stacked.block, contentX, contentY + stacked.yPx, ctx, {
+        width: p.cell.innerWidthPx,
+        inCell: true,
+      });
     }
   }
 

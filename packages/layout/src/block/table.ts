@@ -31,7 +31,9 @@ export function layoutTable(
   let heightPx = 0;
   const rows = table.rows.map((row, rowIndex) => {
     // Cells measure under the table-cell line-height rule (max(natural,
-    // pitch)) so trHeight governs; floats never bend a cell's width.
+    // pitch)) so trHeight governs. Zones start empty per cell — the cell's
+    // stacker accumulates its own floats' zones (never the page's: a cell's
+    // width is its column).
     const cellCtx: LayoutBlockContext = {
       ...ctx,
       inTable: true,

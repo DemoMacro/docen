@@ -468,3 +468,114 @@ describe("layoutTable", () => {
     expect(out.columnWidthsPx[1]).toBeCloseTo(140, 4);
   });
 });
+
+describe("layoutTable cell float wraps", () => {
+  // A wrapping cell paragraph: latin atoms are 8px under the fake metrics,
+  // exact 20px rows keep the arithmetic simple (flow.spec's conventions).
+  const wrapPara = (chars: number, over: Partial<LayoutParagraph> = {}): LayoutParagraph => ({
+    kind: "paragraph",
+    inline: [{ kind: "text", text: "x".repeat(chars), style: latin }],
+    spacing: { lineHeight: { rule: "exact", px: 20 }, beforePx: 0, afterPx: 0 },
+    defaultTextStyle: latin,
+    widowControl: false,
+    ...over,
+  });
+  const drawing = (
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    wrap: "square" | "tight" | "topAndBottom" | undefined,
+  ): NonNullable<LayoutParagraph["drawings"]>[number] => ({
+    anchor: {
+      horizontal: { relative: "column", offsetPx: x },
+      vertical: { relative: "paragraph", offsetPx: y },
+    },
+    width,
+    height,
+    members: [],
+    wrap,
+  });
+  const oneCell = (blocks: LayoutParagraph[]): LayoutTable => ({
+    kind: "table",
+    columnWidthsPx: [300],
+    rows: [{ cells: [{ blocks }] }],
+  });
+  const cellOf = (out: ReturnType<typeof layoutBlock>) => {
+    if (out.kind !== "table") throw new Error("expected table");
+    return out.rows[0].cells[0].stack.map((i) => i.block);
+  };
+
+  it("wraps the anchor cell paragraph's own lines beside its square float", () => {
+    // 24 atoms = 192px: one 300px line without the float, two 96px lines
+    // (12 atoms beside the 200px box) with it — the cell paragraph wraps
+    // beside its own drawing just like a body paragraph.
+    const out = layoutBlock(
+      oneCell([wrapPara(24, { drawings: [drawing(0, 0, 200, 40, "square")] })]),
+      300,
+      undefined,
+      measurer,
+    );
+    const [anchor] = cellOf(out);
+    if (anchor.kind !== "paragraph") throw new Error("expected paragraph");
+    expect(anchor.lines).toHaveLength(2);
+  });
+
+  it("wraps later paragraphs in the cell beside the anchor's float", () => {
+    // The 40px-tall box spans the anchor's line and the next paragraph's
+    // first line: that line packs beside it (12 atoms), the second is past
+    // the zone (full width).
+    const out = layoutBlock(
+      oneCell([wrapPara(1, { drawings: [drawing(0, 0, 200, 40, "square")] }), wrapPara(24)]),
+      300,
+      undefined,
+      measurer,
+    );
+    const [anchor, body] = cellOf(out);
+    if (anchor.kind !== "paragraph" || body.kind !== "paragraph")
+      throw new Error("expected paragraphs");
+    expect(anchor.lines).toHaveLength(1);
+    expect(body.lines).toHaveLength(2);
+    expect(body.lines[0]!.maxWidthPx).toBe(100);
+    expect(body.lines[1]!.maxWidthPx).toBe(300);
+  });
+
+  it("clamps a cell float that overflows the cell's right edge (layoutInCell)", () => {
+    // offset 250 + 200 wide overflows the 300px cell by 150: the box shifts
+    // left to touch the cell's right edge (x0 = 300-200 = 100) and the wrap
+    // zone follows — the next paragraph's first line packs beside the SHIFTED
+    // box (100px), not beside the requested one (250px).
+    const out = layoutBlock(
+      oneCell([wrapPara(1, { drawings: [drawing(250, 0, 200, 40, "square")] }), wrapPara(24)]),
+      300,
+      undefined,
+      measurer,
+    );
+    const [anchor, body] = cellOf(out);
+    if (anchor.kind !== "paragraph" || body.kind !== "paragraph")
+      throw new Error("expected paragraphs");
+    expect(body.lines[0]!.maxWidthPx).toBe(100);
+    expect(body.lines[1]!.maxWidthPx).toBe(300);
+  });
+
+  it("keeps a sibling cell's text unwrapped by another cell's float", () => {
+    // The float lives in cell A; cell B's paragraph packs the full 300px.
+    const table: LayoutTable = {
+      kind: "table",
+      columnWidthsPx: [300, 300],
+      rows: [
+        {
+          cells: [
+            { blocks: [wrapPara(1, { drawings: [drawing(0, 0, 200, 80, "square")] })] },
+            { blocks: [wrapPara(24)] },
+          ],
+        },
+      ],
+    };
+    const out = layoutBlock(table, 600, undefined, measurer);
+    if (out.kind !== "table") throw new Error("expected table");
+    const b = out.rows[0].cells[1].stack[0].block;
+    if (b.kind !== "paragraph") throw new Error("expected paragraph");
+    expect(b.lines).toHaveLength(1);
+  });
+});

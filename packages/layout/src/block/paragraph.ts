@@ -21,12 +21,12 @@
 // empty line takes NO grid pitch (verified vs Word).
 
 import {
-  drawingWrapBox,
   type LayoutBlockContext,
   type LayoutFloatZone,
   type LayoutInline,
   type LayoutLineHeight,
   type LayoutParagraph,
+  wrapEffectsOf,
 } from "../layout-doc";
 import type { LaidOutLine, LaidOutLineItem, LaidOutParagraph } from "../layout-result";
 import { packLines, type PackedLine } from "../text/line-break";
@@ -58,29 +58,14 @@ export function layoutParagraph(
 
   // The anchor paragraph wraps beside its own square floats: the drawings'
   // offsets are paragraph-relative by definition, so their zones feed the
-  // packer in paragraph-relative Y (the flow's absolute zones cover every
-  // later paragraph). The box grows by the anchor's wrap distances first
-  // (distL/R/T/B), matching the flow's zone padding. Full-column boxes and
-  // topAndBottom clears are bands — the packer cannot skip a mid-paragraph
-  // band, so they stay flow-only.
-  const selfZones: LayoutFloatZone[] = [];
-  if (!inTable) {
-    for (const d of para.drawings ?? []) {
-      if (d.wrap == null || d.wrap === "topAndBottom") continue;
-      const { horizontal: h, vertical: v } = d.anchor;
-      if (v.relative !== "paragraph" || h.relative !== "column") continue;
-      const box = drawingWrapBox(d, Math.max(0, v.offsetPx ?? 0), width);
-      if (!box || box.widthPx >= width - 1) continue;
-      selfZones.push({
-        widthPx: box.widthPx,
-        topPx: box.topPx,
-        bottomPx: box.bottomPx,
-        x0Px: box.x0Px,
-        ...(box.textAfter ? { textAfter: true } : {}),
-        ...(box.contour ? { contour: box.contour } : {}),
-      });
-    }
-  }
+  // packer in paragraph-relative Y (the flow's — or the table cell's —
+  // absolute zones cover every later paragraph). The box grows by the
+  // anchor's wrap distances first (distL/R/T/B), matching the flow's zone
+  // padding. Full-column boxes and topAndBottom clears are bands — the
+  // packer cannot skip a mid-paragraph band, so they stay flow-only.
+  // Table cells qualify too (Word's layoutInCell): a cell-anchored float
+  // wraps the cell's text, and inside a cell `column` IS the cell's column.
+  const selfZones: LayoutFloatZone[] = wrapEffectsOf(para.drawings, 0, width, inTable).zones;
 
   const packed = packLines(para.inline, {
     measurer,
@@ -93,8 +78,11 @@ export function layoutParagraph(
         ? resolveLine(spec, naturalPx, pitch, hasCjk, inTable)
         : snapLine(naturalPx, hasCjk, pitch, inTable),
     startY: ctx?.startY,
-    // A cell's width is its column, not the page flow — floats never bend it.
-    floatZones: inTable ? undefined : ctx?.floatZones,
+    // Absolute zones come from whoever stacks the blocks: the flow passes the
+    // page's float zones, the table cell stacker accumulates the cell's own
+    // (a cell's width is its column — page floats never reach it because the
+    // cellCtx starts empty, not because the paragraph drops them here).
+    floatZones: ctx?.floatZones,
     selfZones: selfZones.length > 0 ? selfZones : undefined,
   });
 
