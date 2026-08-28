@@ -157,6 +157,9 @@ const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   "bookmark",
   // Link prompts for an address and marks the selection (Word's Insert Link).
   "link",
+  // New Comment anchors the selection with a Word comment (range markers +
+  // a documentExtras.comments entry).
+  "new-comment",
   // Text Box / Shapes insert a standalone wps shape run (Shapes reads the
   // gallery preset from the split item's value).
   "text-box",
@@ -2140,6 +2143,51 @@ class DocenDocument extends AddinHost<Editor> {
       .run();
   }
 
+  /** Review → New Comment: anchor the selection the way Word does — a
+   *  commentRangeStart/commentRangeEnd passthrough pair around it with a
+   *  commentReference after — and append the structured content to
+   *  doc.attrs.documentExtras.comments (word/comments.xml on export, the
+   *  round-trip channel the parse side already fills). */
+  #insertComment(): void {
+    const editor = this.editor;
+    if (!editor) return;
+    const text = window.prompt(t("comment.prompt", this))?.trim();
+    if (!text) return;
+    const docAttrs = (editor.state.doc.attrs ?? {}) as {
+      documentExtras?: { comments?: Record<string, unknown>[] };
+    };
+    const comments = docAttrs.documentExtras?.comments ?? [];
+    const id = comments.reduce((max, c) => Math.max(max, Number(c.id ?? 0)), -1) + 1;
+    const seed = (data: object): JSONContent =>
+      ({
+        type: "inlinePassthrough",
+        attrs: { data: JSON.stringify(data) },
+      }) as JSONContent;
+    const { from, to } = editor.state.selection;
+    const start = editor.schema.nodeFromJSON(seed({ commentRangeStart: { id } }));
+    const end = editor.schema.nodeFromJSON(seed({ commentRangeEnd: { id } }));
+    const ref = editor.schema.nodeFromJSON(seed({ commentReference: id }));
+    editor.view.dispatch(
+      editor.state.tr
+        .insert(from, start)
+        .insert(to + 1, end)
+        .insert(to + 2, ref)
+        .setDocAttribute("documentExtras", {
+          ...docAttrs.documentExtras,
+          comments: [
+            ...comments,
+            {
+              id,
+              author: "Docen User",
+              initials: "DU",
+              date: new Date().toISOString(),
+              children: [{ text }],
+            },
+          ],
+        }),
+    );
+  }
+
   /** Insert → Text Box / Shapes: a standalone wps shape run, floating
    *  wrap-none and centered on the page (Word's insertion behavior). The
    *  text box carries Word's plain look — white fill, accent-1 hairline —
@@ -2323,6 +2371,11 @@ class DocenDocument extends AddinHost<Editor> {
     // display text when the selection is empty).
     if (name === "link") {
       this.#insertLink();
+      return;
+    }
+    // New Comment — anchor the selection with a Word comment.
+    if (name === "new-comment") {
+      this.#insertComment();
       return;
     }
     // Text Box / Shapes — insert a floating wps shape run (Shapes reads its
