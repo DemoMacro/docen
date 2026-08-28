@@ -10,9 +10,15 @@ import {
   cssFontOf,
   familyOfSlot,
   type FlowPage,
+  gridPadOf,
+  isCjkCodeUnit,
+  justifiedIntervals,
+  justifyPerGrapheme,
   type LaidOutLine,
   type LaidOutParagraph,
   leaferWordIndices,
+  lineOriginXPx,
+  tableGridOf,
 } from "@docen/layout";
 import type { Node as PmNode } from "@tiptap/pm/model";
 
@@ -41,6 +47,9 @@ interface LineEntry {
   yPx: number;
   /** Page-local x of the line's first glyph (indents applied). */
   xPx: number;
+  /** Per-item justified stretch-interval ends (null on unjustified lines) —
+   *  the same intervals the painter stretches to. */
+  intervals: number[] | null;
   /** Collapsed-char range within the paragraph's full text. */
   startChar: number;
   endChar: number;
@@ -108,36 +117,12 @@ function collectLayoutParas(
         collectLayoutParas(b.children, page, bx, by, out);
         break;
       case "table": {
-        // Mirror the painter's occupancy walk (colspans shift the column
-        // cursor); content anchors at the start row + cell insets.
-        const colX = [0];
-        for (const w of b.columnWidthsPx) colX.push(colX[colX.length - 1] + w);
-        const rowY = [0];
-        for (const row of b.rows) rowY.push(rowY[rowY.length - 1] + row.heightPx);
-        const nCols = b.columnWidthsPx.length;
-        const nRows = b.rows.length;
-        const occ: (boolean | undefined)[][] = Array.from({ length: nRows }, () =>
-          Array.from<boolean | undefined>({ length: nCols }),
-        );
-        b.rows.forEach((row, r) => {
-          let col = 0;
-          for (const cell of row.cells) {
-            while (col < nCols && occ[r][col]) col++;
-            if (col >= nCols) break;
-            const spanW = Math.min(cell.colspan, nCols - col);
-            const spanH = Math.min(cell.rowspan ?? 1, nRows - r);
-            for (let dr = 0; dr < spanH; dr++)
-              for (let dc = 0; dc < spanW; dc++) occ[r + dr][col + dc] = true;
-            collectLayoutParas(
-              cell.stack,
-              page,
-              bx + colX[col] + (cell.insets.left ?? 0),
-              by + rowY[r] + (cell.insets.top ?? 0),
-              out,
-            );
-            col += spanW;
-          }
-        });
+        // The painter's own walk (tableGridOf): content anchors at the placed
+        // origin — column left + insets, row top + insets + vertical-align
+        // offset — exactly where painting puts it.
+        for (const p of tableGridOf(b).cells) {
+          collectLayoutParas(p.cell.stack, page, bx + p.contentXPx, by + p.contentYPx, out);
+        }
         break;
       }
       default:
@@ -260,15 +245,11 @@ export class CaretMap {
     entry: { page: number; para: LaidOutParagraph; xPx: number; yPx: number },
   ): void {
     const para = entry.para;
-    const first = paraEntry.lines.length === 0;
     let startChar = paraEntry.chars;
-    para.lines.forEach((line, lineIndex) => {
-      const xPx =
-        entry.xPx +
-        (para.indent?.leftPx ?? 0) +
-        (first && lineIndex === 0 ? (para.indent?.firstLinePx ?? 0) : 0) +
-        // A wrapSide right/largest float shifts the whole line past its edge.
-        (line.xOffsetPx ?? 0);
+    para.lines.forEach((line) => {
+      // The painter's own origin sum — the line carries its first-line flag,
+      // so no line-index guessing.
+      const xPx = entry.xPx + lineOriginXPx(para, line);
       let chars = 0;
       for (const item of line.items) {
         // for...of iterates code points, same as the spread it replaces.
@@ -281,6 +262,7 @@ export class CaretMap {
         line,
         yPx: entry.yPx + line.yPx,
         xPx,
+        intervals: justifiedIntervals(line),
         startChar,
         endChar: startChar + chars,
       };
@@ -338,7 +320,7 @@ export class CaretMap {
    *  the grid-centered pad). Sizing to the runs' ink box keeps the highlight
    *  hugging the glyphs; the font-box model floated a ~0.3em gap above them. */
   private bandOf(line: LineEntry): { yPx: number; heightPx: number } {
-    const pad = line.line.grid ? Math.max(0, (line.line.heightPx - line.line.naturalPx) / 2) : 0;
+    const pad = gridPadOf(line.line);
     const ctx = measureCanvas?.getContext("2d");
     if (!ctx) return { yPx: line.yPx + pad, heightPx: Math.max(line.line.naturalPx, 2) };
     let top = Infinity;
@@ -347,9 +329,12 @@ export class CaretMap {
       if (item.kind !== "text") continue;
       const inline = line.para.inline[item.inlineIndex];
       if (inline?.kind !== "text") continue;
+      // The slot test the layout's own measurement used (isCjkCodeUnit over
+      // the engine's CJK ranges) — the band hugs glyphs measured AND painted
+      // in the same face.
       const font = cssFontOf(
         inline.style,
-        familyOfSlot(inline.style.family, /[一-鿿぀-ヿ가-힯]/.test(item.text[0] ?? "")),
+        familyOfSlot(inline.style.family, isCjkCodeUnit(item.text, 0)),
       );
       ctx.font = font;
       const baseline = line.yPx + pad + 1.1 * inline.style.sizePx;
@@ -456,7 +441,7 @@ export class CaretMap {
       if (inline?.kind !== "text") continue;
       const font = cssFontOf(
         inline.style,
-        familyOfSlot(inline.style.family, /[一-鿿぀-ヿ가-힯]/.test(item.text[0] ?? "")),
+        familyOfSlot(inline.style.family, isCjkCodeUnit(item.text, 0)),
       );
       const widths = graphemeWidths(item.text, font);
       let prefix = 0;
@@ -493,28 +478,21 @@ export class CaretMap {
   ): number {
     const item = entry.line.items[itemIndex]!;
     const base = entry.xPx + item.xPx + plainPrefix;
-    const { line } = entry;
     if (item.kind !== "text") return base;
+    const ends = entry.intervals;
     // The boundary past the item's last glyph: a natural item ends at its
     // advance sum; a justified item stretches to its interval's end (the
-    // painter fills the width — see paintLine's justified rights[]).
+    // painter fills the width — the shared justifiedIntervals).
     if (graphemeIndex >= widths.length) {
-      if (line.justifyGapPx == null) return base;
-      let intervalEnd = (line.maxWidthPx ?? 0) + (line.hangPx ?? 0);
-      for (let i = line.items.length - 1; i > itemIndex; i--) intervalEnd = line.items[i]!.xPx;
-      return entry.xPx + intervalEnd;
+      return ends ? entry.xPx + ends[itemIndex]! : base;
     }
-    if (line.justifyGapPx == null) return base;
-    // The painter's interval math: the last item stretches to maxWidth(+hang),
-    // each earlier one to the next item's post-justify x.
-    let intervalEnd = (line.maxWidthPx ?? 0) + (line.hangPx ?? 0);
-    for (let i = line.items.length - 1; i > itemIndex; i--) intervalEnd = line.items[i]!.xPx;
-    const interval = intervalEnd - item.xPx;
+    if (!ends) return base;
+    const interval = ends[itemIndex]! - item.xPx;
     const count = widths.length;
     if (count <= 1) return base;
     let natural = 0;
     for (const w of widths) natural += w;
-    if (/[一-鿿぀-ヿ가-힯]/.test(item.text)) {
+    if (justifyPerGrapheme(item.text)) {
       return base + graphemeIndex * ((interval - natural) / (count - 1));
     }
     // Word gaps: a grapheme's shift is its Leafer word index × gap.
@@ -634,7 +612,7 @@ export class CaretMap {
         if (inline?.kind !== "text") return line.xPx + item.xPx;
         const font = cssFontOf(
           inline.style,
-          familyOfSlot(inline.style.family, /[一-鿿぀-ヿ가-힯]/.test(item.text[0] ?? "")),
+          familyOfSlot(inline.style.family, isCjkCodeUnit(item.text, 0)),
         );
         const widths = graphemeWidths(item.text, font);
         return this.xInItem(

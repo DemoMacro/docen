@@ -25,12 +25,55 @@ import { paintFurnitureStack, paintScene, type PaintContext } from "./scene";
 
 const PAGE_GAP = 24;
 
+/** One laid furniture slot: the paint-ready stack and its laid height. */
+export interface LaidFurnitureSlot {
+  stack: readonly LaidOutStackItem[];
+  heightPx: number;
+}
+
+/** One section's laid furniture slots — [default, first, even]. */
+export interface LaidFurnitureSection {
+  header: (LaidFurnitureSlot | undefined)[];
+  footer: (LaidFurnitureSlot | undefined)[];
+}
+
 /** One section's paint inputs: the page geometry its pages paginate against
  *  and the headers/footers its pages display. */
 export interface CanvasStageSection {
   flow: ProjectedFlowBox;
   /** Headers/footers for this section's pages (absent = none). */
   furniture?: ProjectedPageFurniture;
+  /** The slots of `furniture` laid out once (layFurnitureSections) — the
+   *  page insets push the body by these heights and the painter draws these
+   *  same stacks, so push-down == painted band height by construction. */
+  furnitureLaid?: LaidFurnitureSection;
+}
+
+/** [default, first, even] slot pick order. */
+const FURNITURE_SLOTS = [0, 1, 2] as const;
+
+/** Lay every furniture slot once, at its section's content width — the
+ *  single pass both consumers share. No grid context: Word keeps
+ *  header/footer paragraphs at natural line height (the body docGrid does
+ *  not apply to the furniture story). */
+export function layFurnitureSections(
+  sections: readonly CanvasStageSection[],
+  metrics: FontMetrics,
+): (LaidFurnitureSection | undefined)[] {
+  const measurer = new TextMeasurer(metrics);
+  return sections.map((section) => {
+    const f = section.furniture;
+    if (!f) return undefined;
+    const lay = (blocks: ProjectedPageFurniture["header"]): LaidFurnitureSlot | undefined => {
+      if (!blocks) return undefined;
+      const laid = stackBlocks(blocks, section.flow.contentWidthPx, undefined, measurer);
+      return { stack: laid.stack, heightPx: laid.heightPx };
+    };
+    return {
+      header: FURNITURE_SLOTS.map((slot) => lay([f.header, f.firstHeader, f.evenHeader][slot])),
+      footer: FURNITURE_SLOTS.map((slot) => lay([f.footer, f.firstFooter, f.evenFooter][slot])),
+    };
+  });
 }
 
 /** Font metrics (baseline ratios for half-leading) + per-section geometry. */
@@ -51,10 +94,6 @@ export class CanvasStage {
   private readonly slots: { el: HTMLElement; app: App | null }[] = [];
   private readonly io: IntersectionObserver;
   private pages: FlowPage[] = [];
-  /** Header/footer stack HEIGHTS, keyed by stack reference — laid out once
-   *  per sync at the owning section's content width (furniture never reflows
-   *  across pages). */
-  private furnitureStacks: Map<readonly LaidOutStackItem[], number> = new Map();
 
   /** The section a page belongs to (its flow box + furniture). */
   private sectionAt(page: number): CanvasStageSection {
@@ -228,7 +267,6 @@ export class CanvasStage {
     // A pure derived value (recomputed per render) — always overwritten so a
     // document without a background clears the previous one's tile.
     this.ctx.background = background;
-    this.layoutFurniture();
 
     while (this.slots.length < pages.length) {
       // New slots clone the size of the section their page belongs to.
@@ -276,14 +314,18 @@ export class CanvasStage {
     return slot === 1 ? "first" : slot === 2 ? "even" : "default";
   }
 
+  /** A section's slot stack for a page (an absent slot falls back to
+   *  default). Null when the doc has none. */
+  private slotStackOf(kind: "header" | "footer", page: number): LaidFurnitureSlot | undefined {
+    const laid = this.sectionAt(page).furnitureLaid;
+    const slots = laid?.[kind];
+    return slots?.[this.slotOf(page)] ?? slots?.[0];
+  }
+
   /** The laid furniture stack a page displays (its section's stacks; an
    *  absent slot falls back to default). Null when the doc has none. */
   furnitureStack(kind: "header" | "footer", page = 0): readonly LaidOutStackItem[] | null {
-    const sectionIndex = this.ctx.sectionOfPage[page] ?? 0;
-    const slot = this.slotOf(page);
-    const stacks = kind === "header" ? this.headerStacksBySection : this.footerStacksBySection;
-    const own = stacks[sectionIndex];
-    return own?.[slot] ?? own?.[0] ?? null;
+    return this.slotStackOf(kind, page)?.stack ?? null;
   }
 
   /** A page's editable furniture band, page-local — [top, bottom) with the
@@ -297,8 +339,7 @@ export class CanvasStage {
   ): { top: number; bottom: number; paintY: number } | null {
     const { flow, furniture: f } = this.sectionAt(page);
     if (!f) return null;
-    const stack = this.furnitureStack(kind, page);
-    const h = Math.max(stack ? (this.furnitureStacks.get(stack) ?? 0) : 0, 24);
+    const h = Math.max(this.slotStackOf(kind, page)?.heightPx ?? 0, 24);
     if (kind === "header") {
       const paintY = f.headerDistancePx ?? 48;
       return { top: 0, bottom: paintY + h, paintY };
@@ -351,39 +392,6 @@ export class CanvasStage {
     slot.app = app;
     this.repaint(app, this.slots.indexOf(slot));
   }
-
-  /** Lay each furniture slot out once per SECTION (width = that section's
-   *  content box) and remember each stack's height for the footer's
-   *  bottom-edge placement. No grid context: Word snaps header/footer
-   *  paragraphs to their natural line height — the body docGrid does not
-   *  apply to the furniture story. */
-  private layoutFurniture(): void {
-    this.furnitureStacks = new Map();
-    this.headerStacksBySection = [];
-    this.footerStacksBySection = [];
-    const measurer = new TextMeasurer(this.ctx.metrics);
-    this.ctx.sections.forEach((section) => {
-      const f = section.furniture;
-      if (!f) {
-        this.headerStacksBySection.push([undefined, undefined, undefined]);
-        this.footerStacksBySection.push([undefined, undefined, undefined]);
-        return;
-      }
-      const lay = (blocks: typeof f.header): readonly LaidOutStackItem[] | undefined => {
-        if (!blocks) return undefined;
-        const laid = stackBlocks(blocks, section.flow.contentWidthPx, undefined, measurer);
-        this.furnitureStacks.set(laid.stack, laid.heightPx);
-        return laid.stack;
-      };
-      this.headerStacksBySection.push([lay(f.header), lay(f.firstHeader), lay(f.evenHeader)]);
-      this.footerStacksBySection.push([lay(f.footer), lay(f.firstFooter), lay(f.evenFooter)]);
-    });
-  }
-
-  /** Per-section, per-slot header/footer stacks [default, first, even] — an
-   *  undefined slot falls back to default at pick time (OOXML). */
-  private headerStacksBySection: (readonly LaidOutStackItem[] | undefined)[][] = [];
-  private footerStacksBySection: (readonly LaidOutStackItem[] | undefined)[][] = [];
 
   /** Which slot a page uses: first (titlePage) on its SECTION's first page,
    *  even on even PHYSICAL pages (the pattern runs document-wide — Word's
@@ -488,20 +496,21 @@ export class CanvasStage {
     furniture: ProjectedPageFurniture | undefined,
   ): void {
     ctx.layer = "body";
-    const sectionIndex = this.ctx.sectionOfPage[ctx.pageIndex] ?? 0;
-    const header =
-      this.headerStacksBySection[sectionIndex]?.[slot] ??
-      this.headerStacksBySection[sectionIndex]?.[0];
+    const section = this.sectionAt(ctx.pageIndex);
+    const header = section.furnitureLaid?.header[slot] ?? section.furnitureLaid?.header[0];
     if (header) {
-      paintFurnitureStack(tree, header, flow.contentLeftPx, furniture?.headerDistancePx ?? 48, ctx);
+      paintFurnitureStack(
+        tree,
+        header.stack,
+        flow.contentLeftPx,
+        furniture?.headerDistancePx ?? 48,
+        ctx,
+      );
     }
-    const footer =
-      this.footerStacksBySection[sectionIndex]?.[slot] ??
-      this.footerStacksBySection[sectionIndex]?.[0];
+    const footer = section.furnitureLaid?.footer[slot] ?? section.furnitureLaid?.footer[0];
     if (footer) {
-      const height = this.furnitureStacks.get(footer) ?? 0;
       const bottom = flow.pageHeightPx - (furniture?.footerDistancePx ?? 48);
-      paintFurnitureStack(tree, footer, flow.contentLeftPx, bottom - height, ctx);
+      paintFurnitureStack(tree, footer.stack, flow.contentLeftPx, bottom - footer.heightPx, ctx);
     }
   }
 

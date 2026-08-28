@@ -26,7 +26,6 @@ import {
 import {
   browserFontMetrics,
   layoutFlowSections,
-  stackBlocks,
   TextMeasurer,
   twipToPx,
   type FlowPage,
@@ -68,7 +67,12 @@ import {
 // <docen-outline> (navigation Headings tab).
 import "./components/format-pane";
 import "./components/outline";
-import { CanvasStage, type CanvasStageSection } from "./canvas/stage";
+import {
+  CanvasStage,
+  type CanvasStageSection,
+  type LaidFurnitureSection,
+  layFurnitureSections,
+} from "./canvas/stage";
 import type { OutlineItem } from "./components/outline";
 import { WIRED_DISPATCH } from "./extensions/commands";
 // Side-effect import: registers the ribbon/header translation tables.
@@ -1322,23 +1326,23 @@ class DocenDocument extends AddinHost<Editor> {
 
   /** Word's furniture overflow rule: a header taller than the top margin
    *  pushes the body down, a taller footer pushes it up — each page by its
-   *  own slot's stack (the first page by the first slot when titlePage asks
-   *  for one, even pages by the even slot). Slots without their own content
-   *  fall back to the default stack (OOXML reference semantics), matching
-   *  the stage's paint fallback. */
+   *  own slot's LAID stack (the first page by the first slot when titlePage
+   *  asks for one, even pages by the even slot). Slots without their own
+   *  content fall back to the default stack (OOXML reference semantics),
+   *  matching the stage's paint fallback — the heights are the same layout
+   *  pass the painter's bands come from. */
   #pageInsets(
     flow: ProjectedFlowBox,
     furniture: ProjectedPageFurniture | undefined,
+    laid: LaidFurnitureSection | undefined,
   ): FlowPageInsets | undefined {
     if (!furniture) return undefined;
     const topMargin = flow.contentTopPx;
     const bottomMargin = flow.pageHeightPx - flow.contentTopPx - flow.contentHeightPx;
     const headerDistance = furniture.headerDistancePx ?? 48;
     const footerDistance = furniture.footerDistancePx ?? 48;
-    const height = (blocks: ProjectedPageFurniture["header"]): number | undefined =>
-      blocks
-        ? stackBlocks(blocks, flow.contentWidthPx, undefined, this.#measurer).heightPx
-        : undefined;
+    const height = (kind: "header" | "footer", slot: 0 | 1 | 2): number | undefined =>
+      laid?.[kind][slot]?.heightPx;
     const inset = (headerPx: number | undefined, footerPx: number | undefined) => {
       const top = Math.max(0, headerDistance + (headerPx ?? 0) - topMargin);
       const bottom = Math.max(0, footerDistance + (footerPx ?? 0) - bottomMargin);
@@ -1346,21 +1350,21 @@ class DocenDocument extends AddinHost<Editor> {
         ? { topPx: Math.round(top), bottomPx: Math.round(bottom) }
         : undefined;
     };
-    const def = inset(height(furniture.header), height(furniture.footer));
+    const def = inset(height("header", 0), height("footer", 0));
     if (!def) return undefined;
     const out: FlowPageInsets = { default: def };
     if (furniture.titlePage) {
       out.first =
         inset(
-          height(furniture.firstHeader) ?? height(furniture.header),
-          height(furniture.firstFooter) ?? height(furniture.footer),
+          height("header", 1) ?? height("header", 0),
+          height("footer", 1) ?? height("footer", 0),
         ) ?? undefined;
     }
     if (furniture.evenAndOddHeaders) {
       out.even =
         inset(
-          height(furniture.evenHeader) ?? height(furniture.header),
-          height(furniture.evenFooter) ?? height(furniture.footer),
+          height("header", 2) ?? height("header", 0),
+          height("footer", 2) ?? height("footer", 0),
         ) ?? undefined;
     }
     return out;
@@ -1368,9 +1372,10 @@ class DocenDocument extends AddinHost<Editor> {
 
   /** The canvas pipeline's projection + layout half, shared by the full
    *  render and the story's live re-render: compile → project (one section
-   *  per document section) → measure each section's furniture insets →
-   *  paginate continuously across sections (each section starts a fresh
-   *  page; the page→section map drives per-page geometry everywhere). */
+   *  per document section) → lay each section's furniture ONCE (the insets
+   *  and the painter's bands share the pass) → paginate continuously across
+   *  sections (each section starts a fresh page; the page→section map drives
+   *  per-page geometry everywhere). */
   #projectAndLayout(doc: JSONContent): {
     pages: FlowPage[];
     sectionOfPage: number[];
@@ -1378,17 +1383,21 @@ class DocenDocument extends AddinHost<Editor> {
     background?: ProjectedPageBackground;
   } {
     const { sections, background } = projectDocumentOptions(compileDocument(doc));
-    const stageSections = sections.map((section) => {
-      const pageInsets = this.#pageInsets(section.flow, section.furniture);
+    const stageSections: (ProjectedSection & CanvasStageSection)[] = sections.map((section) => ({
+      ...section,
+    }));
+    const laidFurniture = layFurnitureSections(stageSections, browserFontMetrics);
+    stageSections.forEach((section, i) => {
+      section.furnitureLaid = laidFurniture[i];
+    });
+    const flowSections = stageSections.map((section) => {
+      const pageInsets = this.#pageInsets(section.flow, section.furniture, section.furnitureLaid);
       return {
-        ...section,
-        flow: pageInsets ? { ...section.flow, pageInsets } : section.flow,
+        blocks: section.blocks,
+        opts: pageInsets ? { ...section.flow, pageInsets } : section.flow,
       };
     });
-    const { pages, sectionOfPage } = layoutFlowSections(
-      stageSections.map((s) => ({ blocks: s.blocks, opts: s.flow })),
-      this.#measurer,
-    );
+    const { pages, sectionOfPage } = layoutFlowSections(flowSections, this.#measurer);
     return { pages, sectionOfPage, sections: stageSections, background };
   }
 

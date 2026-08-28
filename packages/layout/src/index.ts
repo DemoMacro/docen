@@ -5,6 +5,7 @@ export * from "./layout-result";
 export * from "./text/measure";
 export * from "./text/line-break";
 export * from "./block/paragraph";
+export * from "./block/geometry";
 export * from "./block/table";
 export * from "./block/block";
 export * from "./flow/flow";

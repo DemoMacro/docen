@@ -132,6 +132,12 @@ export function isCjkCodePoint(ch: string): boolean {
   return CJK_RANGE.test(ch);
 }
 
+/** Whether any code point of the text falls in the CJK ranges — the
+ *  whole-run test behind font-slot resolution. */
+export function isCjkText(text: string): boolean {
+  return text.length > 0 && CJK_RANGE.test(text);
+}
+
 /** Resolve the family a run's text renders in. A string wins as-is; slots
  *  merge over `defaultSlots` (a hint-only run font inherits the defaults,
  *  never replaces them) and the text's script picks the slot. */
@@ -144,7 +150,7 @@ export function resolveFontFamily(
   const base = defaultFont && typeof defaultFont === "object" ? defaultFont : {};
   const over = font && typeof font === "object" ? font : {};
   const slots: FontSlots = { ...base, ...over };
-  if ((text && CJK_RANGE.test(text)) || slots.eastAsiaHint) {
+  if (isCjkText(text) || slots.eastAsiaHint) {
     return slots.eastAsia ?? slots.latin ?? null;
   }
   return slots.latin ?? slots.eastAsia ?? null;

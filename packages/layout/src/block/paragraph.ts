@@ -240,8 +240,15 @@ function justifyLine(
 }
 
 /** Items stretch per grapheme when they hold any CJK glyph (the painter's
- *  "both-letter" trigger — keep the two in lockstep). */
+ *  "both-letter" trigger — painter and caret map consume this same test). */
 const CJK_ITEM = /[一-鿿぀-ヿ가-힯]/;
+
+/** Whether a text item justifies per grapheme (any CJK glyph) rather than
+ *  per word gap — Leafer's both-letter vs both-justify choice, shared by
+ *  the painter's textAlign and the caret map's boundary distribution. */
+export function justifyPerGrapheme(text: string): boolean {
+  return CJK_ITEM.test(text);
+}
 
 /** Leafer's word split (its justify denominator): a space or one of its
  *  break chars, or a CJK glyph, stands alone as one word; other runs

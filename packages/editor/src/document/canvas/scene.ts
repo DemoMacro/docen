@@ -10,13 +10,17 @@ import type {
  * height — Leafer never paints an element whose height is still 0.
  */
 import {
+  gridPadOf,
   isCjkCodeUnit,
+  justifiedIntervals,
+  justifyPerGrapheme,
+  lineOriginXPx,
   stackBlocks,
+  tableGridOf,
   TextMeasurer,
   type FlowItem,
   type FontMetrics,
   type LaidOutBlock,
-  type LaidOutCell,
   type LaidOutLineItem,
   type LaidOutParagraph,
   type LaidOutStackItem,
@@ -165,36 +169,21 @@ function paintParagraph(
     // in the grid span (half-leading); every other regime (multiple without a
     // grid, atLeast, text boxes, headers/footers) anchors the text at the line
     // top and sinks the slack below. Both verified against the reference PDF.
-    const pad = line.grid ? Math.max(0, (line.heightPx - line.naturalPx) / 2) : 0;
-    // Line x origin: the left indent (every line) plus THIS line's own
-    // first-line indent — a split tail's leading line carries none (it is
-    // mid-paragraph), so the flag lives on the line, not the line index.
-    // A wrapSide right/largest float shifts the whole line past its edge.
-    const lineX =
-      x + (para.indent?.leftPx ?? 0) + (line.firstLineIndentPx ?? 0) + (line.xOffsetPx ?? 0);
+    const pad = gridPadOf(line);
+    // Line x origin — the shared sum (left indent + the line's own first-line
+    // indent + a wrapSide float's shift) the caret map anchors by too.
+    const lineX = x + lineOriginXPx(para, line);
     // A justified line stretches each text item to the next item's x (the
-    // last one to the line's content width): Leafer's textAlign "both-letter"
-    // spreads the slack as uniform letter spacing inside that interval —
-    // Word's CJK justification model.
-    const justified = line.justifyGapPx != null;
-    const rights: number[] = [];
-    if (justified) {
-      // The last item's stretch target extends past the content width by the
-      // overflow-punct hang: the full glyphs fill the width (both-letter
-      // spacing covers the wider interval), and the closer lands in the
-      // margin at ~its natural advance — Word's justified hang.
-      let nextLeft = (line.maxWidthPx ?? 0) + (line.hangPx ?? 0);
-      for (let i = line.items.length - 1; i >= 0; i--) {
-        rights[i] = nextLeft;
-        nextLeft = line.items[i].xPx;
-      }
-    }
+    // last one past the content width by the overflow-punct hang): Leafer's
+    // textAlign "both-letter" spreads the slack as uniform letter spacing
+    // inside that interval — Word's CJK justification model.
+    const rights = justifiedIntervals(line);
     for (const [itemIndex, item] of line.items.entries()) {
       const inline: LayoutInline | undefined = para.inline[item.inlineIndex];
       if (!inline) continue;
       if (item.kind === "text" && inline.kind === "text") {
         const family = familyOf(inline.style, item.text);
-        const intervalPx = justified ? rights[itemIndex] - item.xPx : undefined;
+        const intervalPx = rights ? rights[itemIndex]! - item.xPx : undefined;
         // Comment range tint (w:commentRangeStart..End): a translucent box
         // under the item's glyphs, Word's light-amber reviewer tint. Painted
         // before the text so the glyphs stay on top.
@@ -226,12 +215,12 @@ function paintParagraph(
           // interval from wrapping; height keeps the element paintable
           // (height 0 is skipped by Leafer).
           width: intervalPx,
-          textWrap: justified ? "none" : undefined,
+          textWrap: rights ? "none" : undefined,
           // CJK items spread per glyph (both-letter); Latin items spread
           // per word gap (both-justify — Leafer's word mode, Word's Latin
           // justification). "both" keeps the single-row Text justifiable.
-          textAlign: justified
-            ? /[一-鿿぀-ヿ가-힯]/.test(item.text)
+          textAlign: rights
+            ? justifyPerGrapheme(item.text)
               ? "both-letter"
               : "both-justify"
             : undefined,
@@ -694,52 +683,32 @@ function paintTable(
 ): void {
   // w:jc: the whole grid (borders included) shifts as one box.
   x += table.offsetXPx ?? 0;
-  const cols = table.columnWidthsPx;
+  // The shared walk: boundaries, the occupancy grid, and every cell's
+  // content origin — the caret map consumes the same tableGridOf output.
+  const { colX, rowY, occ, cells } = tableGridOf(table);
   const nRows = table.rows.length;
-  const nCols = cols.length;
-  // Boundary coordinates (column left edges + the right rim, row tops + bottom).
-  const colX = [0];
-  for (const w of cols) colX.push(colX[colX.length - 1] + w);
-  const rowY = [0];
-  for (const row of table.rows) rowY.push(rowY[rowY.length - 1] + row.heightPx);
+  const nCols = table.columnWidthsPx.length;
 
-  // Occupancy: occ[r][c] = the cell covering that grid slot. A merged cell
-  // fills its whole span so boundary resolution sees across rows/columns; a
-  // boundary inside a span has the same cell on both sides and draws nothing.
-  const occ: (LaidOutCell | undefined)[][] = Array.from({ length: nRows }, () =>
-    Array.from<LaidOutCell | undefined>({ length: nCols }),
-  );
-  table.rows.forEach((row, r) => {
-    let col = 0;
-    for (const cell of row.cells) {
-      while (col < nCols && occ[r][col]) col++;
-      if (col >= nCols) break;
-      const spanW = Math.min(cell.colspan, nCols - col);
-      const spanH = Math.min(cell.rowspan ?? 1, nRows - r);
-      // Shading covers the merged box; content anchors to the start row (the
-      // engine measured it there).
-      if (cell.fill) {
-        tree.add(
-          new Rect({
-            x: x + colX[col],
-            y: y + rowY[r],
-            width: colX[col + spanW] - colX[col],
-            height: rowY[r + spanH] - rowY[r],
-            fill: `#${cell.fill}`,
-          }),
-        );
-      }
-      for (let dr = 0; dr < spanH; dr++) {
-        for (let dc = 0; dc < spanW; dc++) occ[r + dr][col + dc] = cell;
-      }
-      const contentX = x + colX[col] + (cell.insets.left ?? 0);
-      const contentY = y + rowY[r] + (cell.insets.top ?? 0) + (cell.contentOffsetYPx ?? 0);
-      for (const stacked of cell.stack) {
-        paintBlock(tree, stacked.block, contentX, contentY + stacked.yPx, ctx);
-      }
-      col += spanW;
+  for (const p of cells) {
+    // Shading covers the merged box; content anchors to the start row (the
+    // engine measured it there).
+    if (p.cell.fill) {
+      tree.add(
+        new Rect({
+          x: x + colX[p.col]!,
+          y: y + rowY[p.row]!,
+          width: colX[p.col + p.spanW]! - colX[p.col]!,
+          height: rowY[p.row + p.spanH]! - rowY[p.row]!,
+          fill: `#${p.cell.fill}`,
+        }),
+      );
     }
-  });
+    const contentX = x + p.contentXPx;
+    const contentY = y + p.contentYPx;
+    for (const stacked of p.cell.stack) {
+      paintBlock(tree, stacked.block, contentX, contentY + stacked.yPx, ctx);
+    }
+  }
 
   // Collapsed borders: every shared boundary resolves to its heaviest
   // candidate — the two adjacent cells' own edges and the table-level default
