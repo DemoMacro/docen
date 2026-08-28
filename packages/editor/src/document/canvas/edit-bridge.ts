@@ -111,6 +111,12 @@ export interface EditBridge {
   ): void;
   /** Whether a furniture story is active (its kind, else null). */
   storyKind(): StoryKind | null;
+  /** Open a furniture story programmatically (Insert → Header/Footer/Page
+   *  Number) — the same lifecycle as the band double-click. `page` defaults
+   *  to the caret's page; `seed` is inserted at the story's end after entry
+   *  (the Page Number drop's PAGE field). False when blocked (no furniture,
+   *  read-only, or a story already active). */
+  enterStory(kind: StoryKind, page?: number, seed?: JSONContent): boolean;
   /** Leave the furniture story — tears down the story editor and restores
    *  the main story's overlays. Returns the story's final JSON; persistence
    *  stays with the host (it already ran `exit` for band/Esc routes). */
@@ -461,15 +467,30 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
   const enterStory = (
     kind: StoryKind,
     page: number,
-    geo: NonNullable<ReturnType<NonNullable<EditBridgeStory["geometry"]>>>,
+    geoIn: NonNullable<ReturnType<NonNullable<EditBridgeStory["geometry"]>>>,
   ): boolean => {
     const storyCfg = opts.story;
     // A read-only document has no stories (viewless editing is command-driven
     // — setEditable(false) alone cannot stop a transaction).
-    if (!storyCfg || story || composing || !geo.band || !main.editor.isEditable) return false;
-    const source = storyCfg.read(kind, geo.slot);
+    if (!storyCfg || story || composing || !geoIn.band || !main.editor.isEditable) return false;
+    const source = storyCfg.read(kind, geoIn.slot);
     // An empty story starts with one empty paragraph (Word's blank header).
     const initial = source.length > 0 ? source : [{ type: "paragraph" }];
+    // Register the story first — the host's onDoc guards on its own story
+    // state, and an empty slot needs one onDoc pass below to lay the strut.
+    storyCfg.entered(kind, geoIn.slot, page);
+    // An empty slot has no laid stack, so the caret map would have nowhere to
+    // land — project the initial paragraph (the host's onDoc lays the strut
+    // into the furniture) and re-read the geometry. updateStoryMap is a no-op
+    // at this point (the story isn't registered yet); the refreshed geometry
+    // below is what carries the stack into the new map.
+    let geo = geoIn;
+    if (!geo.stack) {
+      storyCfg.onDoc(kind, geo.slot, initial);
+      const refreshed = storyCfg.geometry(kind, page);
+      if (!refreshed?.band || !refreshed.stack) return false;
+      geo = refreshed;
+    }
     const s = makeStory(
       { type: "doc", content: initial },
       (json) => storyCfg.onDoc(kind, geo.slot, (json.content ?? []) as JSONContent[]),
@@ -477,16 +498,21 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     );
     s.kind = kind;
     s.slot = geo.slot;
-    s.initialJson = JSON.stringify(initial);
-    if (geo.stack) {
+    // Dirty baseline AFTER schema normalization: the editor's getJSON is the
+    // schema-filled shape (paragraph attrs expanded), not the lean `initial`
+    // — comparing against that would flag every untouched story dirty.
+    s.initialJson = JSON.stringify(s.editor.getJSON().content);
+    if (geo.stack && geo.band) {
+      // Local const: `geo` is captured by the makeStory closure above, so its
+      // narrowing doesn't survive to this property access.
+      const band = geo.band;
       s.map = new CaretMap([{ items: geo.stack }] as never, s.editor.state.doc, {
         contentLeftPx: main.flow?.contentLeftPx ?? 0,
-        contentTopPx: geo.band.paintY,
+        contentTopPx: band.paintY,
       });
     }
     attachTransactions(s);
     story = s;
-    storyCfg.entered(kind, geo.slot, page);
     // The caret enters at the story's end (Word drops you after the text) —
     // the last textblock's end, not the doc's outer boundary (no caret there).
     setSel(TextSelection.atEnd(s.editor.state.doc).from);
@@ -944,6 +970,25 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     },
     storyKind(): StoryKind | null {
       return story?.kind ?? null;
+    },
+    enterStory(kind, page, seed): boolean {
+      const storyCfg = opts.story;
+      if (!storyCfg) return false;
+      const p =
+        page ??
+        (main.map?.valid ? (main.map.caretRect(main.editor.state.selection.from)?.page ?? 0) : 0);
+      const geo = storyCfg.geometry(kind, p);
+      if (!geo || !enterStory(kind, p, geo)) return false;
+      if (seed) {
+        // The caret already sits at the story's end (enterStory dropped it
+        // there) — the seed lands right after it, the render riding the
+        // story's own raf-merged onDoc.
+        const s = story!;
+        s.editor.commands.insertContentAt(TextSelection.atEnd(s.editor.state.doc).from, seed);
+      }
+      ta.focus();
+      ta.value = "";
+      return true;
     },
     exitStory() {
       return leaveStory();

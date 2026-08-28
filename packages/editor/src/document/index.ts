@@ -138,6 +138,11 @@ const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   // in the canvas caret map, which editor.commands can't reach).
   "toc",
   "update-toc",
+  // Header/footer stories — open through the bridge (the same lifecycle as
+  // the band double-click); the Page Number drop seeds a PAGE field.
+  "header",
+  "footer",
+  "page-number",
   // #onChange (data-event)
   "open",
   "save-as",
@@ -1839,6 +1844,26 @@ class DocenDocument extends AddinHost<Editor> {
         requestAnimationFrame(() =>
           requestAnimationFrame(() => editor.commands["update-toc"](pageOf, tabPositionTw)),
         );
+      }
+      return;
+    }
+    // Header/Footer — open the story on the caret's page (Word: the button
+    // drops into the header/footer for editing; the body click exits).
+    if (name === "header" || name === "footer") {
+      const page = this.#bridge?.pageOf(editor.state.selection.from);
+      if (page != null) this.#bridge?.enterStory(name, page);
+      return;
+    }
+    // Page Number — enter the footer story and seed a PAGE field at its end
+    // (Word's default "Bottom of Page"); the story stays open so the user
+    // can adjust, and the normal exit persists the slots.
+    if (name === "page-number") {
+      const page = this.#bridge?.pageOf(editor.state.selection.from);
+      if (page != null) {
+        this.#bridge?.enterStory("footer", page, {
+          type: "inlinePassthrough",
+          attrs: { data: JSON.stringify({ simpleField: { instruction: "PAGE" } }) },
+        });
       }
       return;
     }
