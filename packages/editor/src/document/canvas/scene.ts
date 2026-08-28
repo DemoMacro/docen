@@ -70,6 +70,10 @@ export interface PaintContext {
   pageIndex: number;
   pageCount: number;
   layer: "behind" | "body";
+  /** Forces a frame after an async image insert: Leafer's change-driven
+   *  scheduling stalls on apps created while offscreen (see stage.repaint),
+   *  so a decode completing after repaint would otherwise never show. */
+  rerender: () => void;
 }
 
 /** Paint one page's flow items (block + page-content y). */
@@ -270,6 +274,7 @@ function paintParagraph(
             lineY + pad,
             item.widthPx,
             item.heightPx,
+            ctx,
           );
         } else if (inline.src) {
           tree.add(
@@ -429,9 +434,9 @@ function paintMembers(
     const my = boxY + m.y;
     if (m.kind === "picture") {
       if (m.src && m.crop) {
-        addCroppedImage(tree, m.src, m.crop, mx, my, m.width, m.height, m.flipH, m.flipV);
+        addCroppedImage(tree, m.src, m.crop, mx, my, m.width, m.height, ctx, m.flipH, m.flipV);
       } else if (m.src) {
-        addPlainImage(tree, m, mx, my);
+        addPlainImage(tree, m, mx, my, ctx);
       } else {
         tree.add(
           new Rect({
@@ -582,11 +587,15 @@ function addPlainImage(
   m: Extract<LayoutDrawingMember, { kind: "picture" }>,
   mx: number,
   my: number,
+  ctx: PaintContext,
 ): void {
   const slot = new Rect({ x: mx, y: my, width: m.width, height: m.height });
   tree.add(slot);
   const el = new Image();
   el.onload = () => {
+    // A repaint since the decode started cleared the tree (slot included) —
+    // that repaint's own decode now owns the paint-order slot.
+    if (!slot.parent) return;
     tree.addAfter(
       new LeaferImage({
         url: m.src!,
@@ -603,6 +612,9 @@ function addPlainImage(
       slot,
     );
     tree.remove(slot);
+    // The stage's eager render already ran when this decode finished; without
+    // a fresh frame the inserted image waits for a repaint that may never come.
+    ctx.rerender();
   };
   el.src = m.src!;
 }
@@ -621,6 +633,7 @@ function addCroppedImage(
   y: number,
   width: number,
   height: number,
+  ctx: PaintContext,
   flipH?: boolean,
   flipV?: boolean,
 ): void {
@@ -628,6 +641,9 @@ function addCroppedImage(
   tree.add(slot);
   const el = new Image();
   el.onload = () => {
+    // A repaint since the decode started cleared the tree (slot included) —
+    // that repaint's own decode now owns the paint-order slot.
+    if (!slot.parent) return;
     const sx = Math.round(crop.left * el.naturalWidth);
     const sy = Math.round(crop.top * el.naturalHeight);
     const sw = Math.max(1, el.naturalWidth - sx - Math.round(crop.right * el.naturalWidth));
@@ -651,6 +667,8 @@ function addCroppedImage(
       slot,
     );
     tree.remove(slot);
+    // Same eager-render gap as addPlainImage.
+    ctx.rerender();
   };
   el.src = src;
 }

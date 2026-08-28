@@ -413,6 +413,9 @@ export class CanvasStage {
       pageIndex: index,
       pageCount: this.pages.length,
       layer: "behind",
+      // Async image decodes landing after this repaint need the same eager
+      // render — the change-driven scheduler cannot be relied on here.
+      rerender: () => app.forceRender(),
     };
     const slot = this.slotOf(index);
     // Word's stacking: behind-text floats sit under everything from the text
