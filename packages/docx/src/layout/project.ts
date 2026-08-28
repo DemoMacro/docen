@@ -164,6 +164,27 @@ function base64Of(bytes: Uint8Array): string {
   return btoa(bin);
 }
 
+// Encoded src cache, keyed by the bytes object itself: renderDocx hands out
+// the same cached array every pass (see decodedBytesOf), so identity is
+// stable across transactions and the megabyte btoa runs once per image,
+// not once per keystroke. The bytes stay alive with their document node,
+// which keeps the entry alive with them — no eviction needed.
+const encodedSrcs = new WeakMap<Uint8Array, string>();
+
+/** Raster bytes → data URL, memoized per bytes identity. SVG bytes first get
+ *  their broken gradient defs flattened (browser loaders choke on them). */
+function encodedDataUrl(mime: string, data: Uint8Array): string {
+  const hit = encodedSrcs.get(data);
+  if (hit) return hit;
+  const body =
+    mime === "image/svg+xml"
+      ? new TextEncoder().encode(flattenBrokenSvgGradients(new TextDecoder().decode(data)))
+      : data;
+  const url = `data:${mime};base64,${base64Of(body)}`;
+  encodedSrcs.set(data, url);
+  return url;
+}
+
 /** PictureOptions (type + data) → a data URL the painter can load. Absent
  *  bytes (linked-only) yields undefined — the renderer draws an empty frame.
  *  Metafile types with no raster MIME (emf/wmf — browsers have no GDI
@@ -182,20 +203,18 @@ function pictureSrc(pic: { type?: unknown; data?: unknown }): string | undefined
     return data.startsWith("data:") ? data : `data:${mime};base64,${data}`;
   }
   if (data instanceof Uint8Array) {
-    if (mime === "image/svg+xml") {
-      const flat = flattenBrokenSvgGradients(new TextDecoder().decode(data));
-      return `data:${mime};base64,${base64Of(new TextEncoder().encode(flat))}`;
-    }
-    return `data:${mime};base64,${base64Of(data)}`;
+    return encodedDataUrl(mime, data);
   }
   return undefined;
 }
 
 /** Metafile caches: project reruns on every editor transaction, and
- *  re-scanning megabyte WMFs each pass is pure waste. Keyed by a cheap
- *  fingerprint (type + length + head bytes) so freshly parsed — freshly
- *  re-allocated — data still hits. Insertion-ordered Map doubles as the
- *  eviction queue; a miss on a full map drops the oldest entry. */
+ *  re-scanning megabyte WMFs each pass is pure waste. Editor-driven passes
+ *  hand out the same bytes object every pass (renderDocx keys its decode on
+ *  attrs identity), so the hot path lives in WeakMaps keyed by those bytes —
+ *  entry lifetime rides the picture's own. Direct-API callers passing a bare
+ *  base64 string fall back to a bounded fingerprint memo (type + length +
+ *  head payload); its insertion-ordered Map doubles as the eviction queue. */
 function memoByFingerprint<V>(limit: number): (key: string, make: () => V) => V {
   const map = new Map<string, V>();
   return (key, make) => {
@@ -210,19 +229,37 @@ function memoByFingerprint<V>(limit: number): (key: string, make: () => V) => V 
   };
 }
 
-const dibFallbackOf = memoByFingerprint<string | undefined>(64);
-const wmfMembersOf = memoByFingerprint<LayoutDrawingMember[] | undefined>(128);
+const dibFallbackByIdentity = new WeakMap<Uint8Array, string | undefined>();
+const dibFallbackOfString = memoByFingerprint<string | undefined>(16);
+const wmfMembersByIdentity = new WeakMap<
+  Uint8Array,
+  Map<string, LayoutDrawingMember[] | undefined>
+>();
+const wmfMembersOfString = memoByFingerprint<LayoutDrawingMember[] | undefined>(32);
 
-function metafileFallback(type: string, data: string | Uint8Array): string | undefined {
-  const head = typeof data === "string" ? data.slice(0, 24) : hexOf(data.subarray(0, 18));
-  return dibFallbackOf(`${type}:${data.length}:${head}`, () => {
-    const bytes = typeof data === "string" ? base64ToBytes(data) : data;
-    return bytes ? wmfDibFallback(bytes) : undefined;
-  });
+/** Cache fingerprint head for string data: the base64 payload prefix after a
+ *  data-URL header (the header itself is constant, zero distinguishing
+ *  entropy) — or the raw prefix when no header is present. */
+function fingerprintHead(data: string): string {
+  const start = data.startsWith("data:") ? data.indexOf(",") + 1 : 0;
+  return data.slice(start, start + 24);
 }
 
-/** A metafile picture's vector replay (wmf.ts), cached per fingerprint+box:
- *  the members scale with the box, so the size rides the key. Raster types
+function metafileFallback(type: string, data: string | Uint8Array): string | undefined {
+  if (typeof data === "string") {
+    return dibFallbackOfString(`${type}:${data.length}:${fingerprintHead(data)}`, () => {
+      const bytes = base64ToBytes(data);
+      return bytes ? wmfDibFallback(bytes) : undefined;
+    });
+  }
+  if (dibFallbackByIdentity.has(data)) return dibFallbackByIdentity.get(data);
+  const value = wmfDibFallback(data);
+  dibFallbackByIdentity.set(data, value);
+  return value;
+}
+
+/** A metafile picture's vector replay (wmf.ts), cached per bytes+box (the
+ *  members scale with the box, so the size rides the key). Raster types
  *  (a real MIME) return undefined — they paint through `src` directly.
  *  Mask-layer files (SRCPAINT/SRCAND blts, no SRCCOPY) replay text and
  *  strokes but not their photo — the flat DIB backdrop carries it under
@@ -239,35 +276,53 @@ function metafileMembers(
   if (typeof pic.type !== "string" || MIME_BY_TYPE[pic.type]) return undefined;
   const { data } = pic;
   if (typeof data !== "string" && !(data instanceof Uint8Array)) return undefined;
-  const head = typeof data === "string" ? data.slice(0, 24) : hexOf(data.subarray(0, 18));
-  const key = `${pic.type}:${data.length}:${head}:${Math.round(boxW)}x${Math.round(boxH)}`;
-  return wmfMembersOf(key, () => {
-    const bytes = typeof data === "string" ? base64ToBytes(data) : data;
-    if (bytes) {
-      const plus = emfPlusMembers(bytes, boxW, boxH);
-      if (plus) return plus;
+  const boxKey = `${Math.round(boxW)}x${Math.round(boxH)}`;
+  if (data instanceof Uint8Array) {
+    let byBox = wmfMembersByIdentity.get(data);
+    if (!byBox) {
+      byBox = new Map();
+      wmfMembersByIdentity.set(data, byBox);
     }
-    const replay = bytes ? wmfMembers(bytes, boxW, boxH) : undefined;
-    if (!replay) return undefined;
-    if (!replay.some((m) => m.kind === "picture")) {
-      const backdrop = metafileFallback(pic.type as string, data);
-      if (backdrop) {
-        replay.unshift({ kind: "picture", x: 0, y: 0, width: boxW, height: boxH, src: backdrop });
-      }
-    }
-    return replay;
+    if (byBox.has(boxKey)) return byBox.get(boxKey);
+    const value = replayMetafile(pic.type as string, data, boxW, boxH);
+    byBox.set(boxKey, value);
+    return value;
+  }
+  const key = `${pic.type}:${data.length}:${fingerprintHead(data)}:${boxKey}`;
+  return wmfMembersOfString(key, () => {
+    const bytes = base64ToBytes(data);
+    return bytes ? replayMetafile(pic.type as string, bytes, boxW, boxH) : undefined;
   });
 }
 
-function hexOf(bytes: Uint8Array): string {
-  let hex = "";
-  for (const b of bytes) hex += b.toString(16).padStart(2, "0");
-  return hex;
+/** EMF+ stream first, then the WMF record replay; a replay without any
+ *  raster member gets the flat DIB backdrop layered beneath it. */
+function replayMetafile(
+  type: string,
+  bytes: Uint8Array,
+  boxW: number,
+  boxH: number,
+): LayoutDrawingMember[] | undefined {
+  const plus = emfPlusMembers(bytes, boxW, boxH);
+  if (plus) return plus;
+  const replay = wmfMembers(bytes, boxW, boxH);
+  if (!replay) return undefined;
+  if (!replay.some((m) => m.kind === "picture")) {
+    const backdrop = metafileFallback(type, bytes);
+    if (backdrop) {
+      replay.unshift({ kind: "picture", x: 0, y: 0, width: boxW, height: boxH, src: backdrop });
+    }
+  }
+  return replay;
 }
 
 function base64ToBytes(b64: string): Uint8Array | undefined {
   try {
-    const bin = atob(b64);
+    // Editor pictures carry full data URLs (`data:…;base64,…`), not bare
+    // base64 — strip the prefix or atob chokes on the header characters.
+    const comma = b64.indexOf(",");
+    const payload = b64.startsWith("data:") && comma >= 0 ? b64.slice(comma + 1) : b64;
+    const bin = atob(payload);
     const bytes = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
     return bytes;

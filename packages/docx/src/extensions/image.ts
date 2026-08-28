@@ -50,6 +50,33 @@ const attrDataJson = (name: string) => ({
   },
 });
 
+/** Decoded src cache, keyed by the node's attrs object itself: Node.toJSON
+ *  carries attrs by reference, so untouched images keep a stable identity
+ *  across transactions and the megabyte atob runs once per image, not once
+ *  per keystroke. A src-content Map thrashes here instead — the corpus can
+ *  hold more images than any bounded entry count, and content-hashing
+ *  megabyte keys each pass costs as much as the decode. When the editor
+ *  rewrites the attrs (image replaced), the old object dies and the entry
+ *  is collected with it. Callers must not mutate the returned arrays — the
+ *  cache hands out shared instances. */
+const decodedByAttrs = new WeakMap<object, Uint8Array>();
+
+function decodedBytesOf(attrs: object, src: string): Uint8Array | undefined {
+  const hit = decodedByAttrs.get(attrs);
+  if (hit) return hit;
+  const comma = src.indexOf(",");
+  if (comma < 0) return undefined;
+  try {
+    const bin = atob(src.slice(comma + 1));
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    decodedByAttrs.set(attrs, bytes);
+    return bytes;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Tiptap JSON image node → CorePictureOptions-shaped object.
  *
@@ -61,16 +88,14 @@ export function renderDocx(node: JSONContent): Record<string, unknown> | null {
   const attrs = (node.attrs ?? {}) as Record<string, unknown>;
   const imageOpts: Record<string, unknown> = {};
 
-  // src (data URL) → { type, data } base64-decoded bytes
+  // src (data URL) → { type, data }, decoded through the shared cache so the
+  // projection downstream sees a stable bytes identity across transactions.
   const src = attrs.src as string | undefined;
   if (src?.startsWith("data:image/")) {
-    const match = src.match(/^data:image\/([\w.+-]+);base64,(.+)$/);
+    const match = src.match(/^data:image\/([\w.+-]+);base64,/);
     if (match) {
       imageOpts.type = match[1] === "jpeg" ? "jpg" : match[1];
-      const binary = atob(match[2]);
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-      imageOpts.data = bytes;
+      imageOpts.data = decodedBytesOf(attrs, src);
     }
   }
 
