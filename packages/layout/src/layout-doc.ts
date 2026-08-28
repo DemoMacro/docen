@@ -170,6 +170,10 @@ export type LayoutDrawingMember =
        *  text (GDI ExtTextOut / EMF+ DrawString) draws the string as-is and
        *  never word-wraps, so the width re-fit must not re-break it. */
       nowrap?: boolean;
+      /** Clockwise rotation of the text body about the box origin, degrees —
+       *  metafile vertical text: a rotated GDI world transform lays runs down
+       *  a column; shaping stays horizontal, the paint rotates. */
+      rotation?: number;
       /** The box's content as projected blocks — the renderer stacks them
        *  inside the box (the flow never sees them; the drawing wraps none). */
       blocks: LayoutBlock[];

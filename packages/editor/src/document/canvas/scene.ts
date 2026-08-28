@@ -29,6 +29,7 @@ import {
 } from "@docen/layout";
 import {
   Ellipse,
+  Group,
   Image as LeaferImage,
   Line,
   Path as LeaferPath,
@@ -493,7 +494,7 @@ function paintMembers(
         ? Number.POSITIVE_INFINITY
         : Math.max(0, m.width - left - (m.insets?.right ?? 0));
       const laid = stackBlocks(m.blocks, inner, undefined, measurer);
-      let oy = my + (m.insets?.top ?? 0);
+      let oy = m.insets?.top ?? 0;
       if (m.anchor !== "top") {
         // spAutoFit shrinks the drawn box to the text, so slack resolves
         // against the fitted height — an oversized declared extent (stale
@@ -504,8 +505,19 @@ function paintMembers(
         const slack = boxH - (m.insets?.top ?? 0) - (m.insets?.bottom ?? 0) - laid.heightPx;
         oy += m.anchor === "center" ? Math.max(0, slack / 2) : Math.max(0, slack);
       }
-      for (const item of laid.stack) {
-        paintBlock(tree, item.block, mx + left, oy + item.yPx, ctx);
+      if (m.rotation) {
+        // Vertical metafile text (a rotated GDI world transform): the body
+        // shapes horizontally as usual, then rotates about the box origin —
+        // a group keeps the offsets in text space and carries the angle.
+        const group = new Group({ x: mx, y: my, rotation: m.rotation });
+        for (const item of laid.stack) {
+          paintBlock(group, item.block, left, oy + item.yPx, ctx);
+        }
+        tree.add(group);
+      } else {
+        for (const item of laid.stack) {
+          paintBlock(tree, item.block, mx + left, my + oy + item.yPx, ctx);
+        }
       }
     }
   }
