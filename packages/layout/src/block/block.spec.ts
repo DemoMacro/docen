@@ -121,6 +121,25 @@ describe("layoutParagraph line-height semantics", () => {
     if (out.kind === "paragraph") expect(out.heightPx).toBeCloseTo(pitch, 4);
   });
 
+  it("keeps a table cell's CJK multiple line at factor×pitch, not whole grid rows", () => {
+    // Body: 1.5×25 = 37.5 < natural 38.4? no — ceil(38.4/25)×25 = 50 (2 rows).
+    // Cell: no row snap — max(natural, 1.5×pitch) = 37.5 (Word-verified).
+    const pitch = 25;
+    const cjkStyle = { family: { latin: "serif", eastAsia: "SimSun" }, sizePx: 16 };
+    const cjk = (inTable: boolean) =>
+      layoutBlock(
+        para({
+          inline: [{ kind: "text", text: "中文", style: cjkStyle }],
+          spacing: { lineHeight: { rule: "multiple", factor: 1.5 }, beforePx: 0, afterPx: 0 },
+        }),
+        500,
+        { linePitchPx: pitch, inTable },
+        measurer,
+      );
+    if (cjk(true).kind === "paragraph") expect(cjk(true).heightPx).toBeCloseTo(37.5, 4);
+    if (cjk(false).kind === "paragraph") expect(cjk(false).heightPx).toBeCloseTo(50, 4);
+  });
+
   it("honors snapToGrid=false by dropping the pitch", () => {
     const out = layoutBlock(para({ snapToGrid: false }), 500, { linePitchPx: 100 }, measurer);
     if (out.kind === "paragraph") expect(out.heightPx).toBeCloseTo(NATURAL, 4);
