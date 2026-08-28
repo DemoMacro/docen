@@ -439,6 +439,41 @@ describe("layoutFlow float wraps", () => {
     expect(anchor.lines[0]!.maxWidthPx).toBe(200);
   });
 
+  it("wraps a tight contour by slicing the polygon per line", () => {
+    // A right triangle (0,0 → 200,0 → 0,40): at the next paragraph's first
+    // line (mid-height y 30 relative to the zone) the hypotenuse slice ends
+    // at x 50 — narrower than the 200px box, so the text shifts right of
+    // the slice's far edge with 250px of room.
+    const d = drawing(0, 0, 200, 60, "tight");
+    d.contour = [
+      { x: 0, y: 0 },
+      { x: 200, y: 0 },
+      { x: 0, y: 40 },
+    ];
+    const pages = flow([para(1, { drawings: [d] }), wrapPara(24)], 300);
+    const [, body] = paras(pages)[0];
+    expect(body.lines[0]!.xOffsetPx).toBe(50);
+    expect(body.lines[0]!.maxWidthPx).toBe(250);
+  });
+
+  it("lets a line above the contour's slice use the full width", () => {
+    // The triangle only occupies the zone's bottom strip (y 30-40): line 0
+    // (mid-height 10) slices nothing and keeps the full width; line 1
+    // (mid-height 30) cuts the full-width top edge and shifts right of it.
+    const d = drawing(0, 0, 200, 40, "tight");
+    d.contour = [
+      { x: 0, y: 30 },
+      { x: 200, y: 30 },
+      { x: 0, y: 40 },
+    ];
+    const pages = flow([wrapPara(48, { drawings: [d] })], 300);
+    const [anchor] = paras(pages)[0];
+    expect(anchor.lines[0]!.maxWidthPx).toBe(300);
+    expect(anchor.lines[0]!.xOffsetPx).toBeUndefined();
+    expect(anchor.lines[1]!.xOffsetPx).toBe(200);
+    expect(anchor.lines[1]!.maxWidthPx).toBe(100);
+  });
+
   it("picks the wider side for wrapSide largest", () => {
     // Float at x 180-280: the left side (180px) is wider than the right
     // (20px), so the lines shrink from the left with no shift.

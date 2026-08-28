@@ -1148,7 +1148,11 @@ function projectDrawing(group: GroupOptions, ctx: ProjectContext): LayoutDrawing
   const extW = measureEmu(group.transformation.width);
   const extH = measureEmu(group.transformation.height);
   if (extW == null || extH == null || extW <= 0 || extH <= 0) return undefined;
-  const { anchor, wrap, wrapSide, behind, distances } = drawingAnchorOf(group.floating);
+  const { anchor, wrap, wrapSide, contour, behind, distances } = drawingAnchorOf(
+    group.floating,
+    emuToPx(extW),
+    emuToPx(extH),
+  );
 
   // Child coordinate space: chOff/chExt → the group's EMU box. A missing
   // chExt means the children already live in the group's own units (1:1).
@@ -1171,6 +1175,7 @@ function projectDrawing(group: GroupOptions, ctx: ProjectContext): LayoutDrawing
     members,
     wrap,
     wrapSide,
+    ...(contour ? { contour } : {}),
     behind,
     distances,
   };
@@ -1181,11 +1186,18 @@ function projectDrawing(group: GroupOptions, ctx: ProjectContext): LayoutDrawing
  *  the painter owns the page geometry each axis resolves against. Wrap modes
  *  that keep the box out of the text flow (none, through's transparent
  *  interior) map to undefined. The wrap distances (w:anchor distL/T/R/B,
- *  floating.margins) thread through: zones and bands pad by them. */
-function drawingAnchorOf(floating: unknown): {
+ *  floating.margins) thread through: zones and bands pad by them. The tight/
+ *  through contour polygon scales out of Word's 21600×21600 wrap space onto
+ *  the px extent (`widthPx`/`heightPx`, box-relative). */
+function drawingAnchorOf(
+  floating: unknown,
+  widthPx = 0,
+  heightPx = 0,
+): {
   anchor: LayoutDrawingAnchor;
   wrap: "square" | "tight" | "topAndBottom" | undefined;
   wrapSide: LayoutDrawing["wrapSide"];
+  contour: LayoutDrawing["contour"];
   behind: boolean | undefined;
   distances: LayoutDrawing["distances"];
 } {
@@ -1223,6 +1235,21 @@ function drawingAnchorOf(floating: unknown): {
       : rawSide === "bothSides"
         ? ("both" as const)
         : undefined;
+  // The wrapPolygon's points live in Word's 21600×21600 space, stretched
+  // onto the extent box per axis (LibreOffice's GraphicImport does the same).
+  const polygon =
+    isRecord(f.wrap) && isRecord(f.wrap.polygon) && Array.isArray(f.wrap.polygon.points)
+      ? f.wrap.polygon.points
+      : undefined;
+  const contour =
+    polygon && polygon.length >= 3 && widthPx > 0 && heightPx > 0
+      ? polygon
+          .filter((p: unknown) => isRecord(p))
+          .map((p: Rec) => ({
+            x: ((num(p.x) ?? 0) / 21600) * widthPx,
+            y: ((num(p.y) ?? 0) / 21600) * heightPx,
+          }))
+      : undefined;
   // Wrap distances: EMU (or a UniversalMeasure) per side → px. wrapNone never
   // reads them, but carrying them costs nothing and keeps round-trips honest.
   const margins = isRecord(f.margins) ? f.margins : undefined;
@@ -1244,6 +1271,7 @@ function drawingAnchorOf(floating: unknown): {
     anchor,
     wrap,
     wrapSide,
+    contour,
     // Word 2013+ honors behindDoc for wrapNone anchors only: a wrapped box
     // (square/tight/through/topAndBottom) always paints opaque in front of
     // the text, regardless of the attribute.
@@ -1259,15 +1287,20 @@ function projectFloatingPicture(pic: Rec): LayoutDrawing | undefined {
   const w = measureEmu(tr.width);
   const h = measureEmu(tr.height);
   if (w == null || h == null || w <= 0 || h <= 0) return undefined;
-  const { anchor, wrap, wrapSide, behind, distances } = drawingAnchorOf(pic.floating);
   const width = emuToPx(w);
   const height = emuToPx(h);
+  const { anchor, wrap, wrapSide, contour, behind, distances } = drawingAnchorOf(
+    pic.floating,
+    width,
+    height,
+  );
   return {
     anchor,
     width,
     height,
     wrap,
     wrapSide,
+    ...(contour ? { contour } : {}),
     behind,
     distances,
     // A metafile picture expands into its vector replay; anything else stays
@@ -1296,7 +1329,11 @@ function projectWpsShapeRun(wps: Rec, ctx: ProjectContext): LayoutDrawing | unde
   if (w == null || h == null || w <= 0 || h <= 0) return undefined;
   const member = wpsMemberOf(wps, 0, 0, emuToPx(w), emuToPx(h), ctx);
   if (!member) return undefined;
-  const { anchor, wrap, wrapSide, behind, distances } = drawingAnchorOf(wps.floating);
+  const { anchor, wrap, wrapSide, contour, behind, distances } = drawingAnchorOf(
+    wps.floating,
+    emuToPx(w),
+    emuToPx(h),
+  );
   return {
     anchor,
     width: emuToPx(w),
@@ -1304,6 +1341,7 @@ function projectWpsShapeRun(wps: Rec, ctx: ProjectContext): LayoutDrawing | unde
     members: [member],
     wrap,
     wrapSide,
+    ...(contour ? { contour } : {}),
     behind,
     distances,
   };

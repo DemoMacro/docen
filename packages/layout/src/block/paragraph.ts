@@ -77,6 +77,7 @@ export function layoutParagraph(
         bottomPx: box.bottomPx,
         x0Px: box.x0Px,
         ...(box.textAfter ? { textAfter: true } : {}),
+        ...(box.contour ? { contour: box.contour } : {}),
       });
     }
   }

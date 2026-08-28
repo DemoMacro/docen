@@ -1144,6 +1144,50 @@ describe("projectDocumentOptions drawings", () => {
     // Only wrapNone keeps the behind-text layer.
     expect(behindOf(undefined)).toBe(true);
   });
+
+  it("scales a wrapTight polygon out of the 21600 wrap space onto the extent", () => {
+    const { blocks } = oneSection(
+      doc([
+        {
+          paragraph: {
+            children: [
+              {
+                picture: {
+                  type: "png",
+                  data: "eA",
+                  transformation: { width: 432000, height: 216000 },
+                  floating: {
+                    horizontalPosition: { relative: "column", offset: 0 },
+                    verticalPosition: { relative: "paragraph", offset: 0 },
+                    wrap: {
+                      type: "tight",
+                      polygon: {
+                        points: [
+                          { x: 0, y: 0 },
+                          { x: 21600, y: 0 },
+                          { x: 21600, y: 21600 },
+                        ],
+                      },
+                    },
+                  },
+                },
+              },
+            ],
+          },
+        },
+      ]),
+    );
+    const para = blocks[0];
+    if (para?.kind !== "paragraph") throw new Error("expected paragraph");
+    const drawing = para.drawings?.[0];
+    if (!drawing) throw new Error("expected a drawing");
+    // 432000×216000 EMU = 45.3×22.7 px; the polygon maps onto it per axis.
+    const contour = drawing.contour!;
+    expect(contour).toHaveLength(3);
+    expect(contour[1]!.x).toBeCloseTo(432000 / 9525, 3);
+    expect(contour[2]!.x).toBeCloseTo(432000 / 9525, 3);
+    expect(contour[2]!.y).toBeCloseTo(216000 / 9525, 3);
+  });
 });
 
 describe("projectFlowBox", () => {

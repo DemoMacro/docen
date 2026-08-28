@@ -239,6 +239,25 @@ function buildGroups(inline: LayoutInline[], measurer: TextMeasurer): FlowGroup[
   return groups;
 }
 
+/** The x span of a closed polygon's horizontal slice at `y` (even-odd rule,
+ *  points in zone coordinates); undefined when the line misses the polygon. */
+function contourSpanAt(
+  pts: readonly { x: number; y: number }[],
+  y: number,
+): { min: number; max: number } | undefined {
+  const xs: number[] = [];
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i]!;
+    const b = pts[(i + 1) % pts.length]!;
+    if ((a.y <= y && b.y > y) || (b.y <= y && a.y > y)) {
+      xs.push(a.x + ((y - a.y) / (b.y - a.y)) * (b.x - a.x));
+    }
+  }
+  if (xs.length < 2) return undefined;
+  xs.sort((p, q) => p - q);
+  return { min: xs[0]!, max: xs[xs.length - 1]! };
+}
+
 /** The width — and start offset — available to line `lineIndex` whose box
  *  spans `[y, y+bottom)` (flow Y, for the absolute zones) / `[yPara,
  *  yPara+bottom)` (paragraph-relative Y, for the anchor's own zones). Zones
@@ -264,6 +283,23 @@ function maxWidthAt(
     if (!zones || zones.length === 0) return;
     for (const z of zones) {
       if (!(z.bottomPx > zoneY && z.topPx < zoneY + bottomPx)) continue;
+      if (z.contour) {
+        // A tight/through contour: slice the polygon at the line's mid-height
+        // — the slice's bounding span is the forbidden interval (a concave
+        // slice's gaps fill in), the text takes the wider side of it.
+        const span = contourSpanAt(z.contour, zoneY + bottomPx / 2 - z.topPx);
+        if (!span) continue;
+        const relX0 = z.x0Px ?? 0;
+        const leftRoom = relX0 + span.min;
+        const rightRoom = opts.width - relX0 - span.max;
+        if (rightRoom > leftRoom) {
+          const start = relX0 + span.max;
+          if (start > xOffset) xOffset = start;
+        } else if (relX0 + span.min < cap) {
+          cap = relX0 + span.min;
+        }
+        continue;
+      }
       if (z.textAfter) {
         // Text packs right of the box: the line starts past its far edge.
         const start = (z.x0Px ?? 0) + z.widthPx;

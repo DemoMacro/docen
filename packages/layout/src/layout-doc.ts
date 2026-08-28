@@ -222,6 +222,11 @@ export interface LayoutDrawing {
    *  (or "largest" with the wider right side) moves the wrapped lines past
    *  the box's right edge; "left"/"both" pack from the left as usual. */
   wrapSide?: "both" | "left" | "right" | "largest";
+  /** wrapTight/through contour (wp:wrapPolygon points) in px, relative to
+   *  the drawing box's top-left — the adapter scaled them out of Word's
+   *  21600×21600 polygon space. Registered on the zone; the line breaker
+   *  slices it per line (a bounding-box approximation without it). */
+  contour?: { x: number; y: number }[];
   /** w:behindDoc — painted under the text layer (text strokes stay visible). */
   behind?: boolean;
   /** w:anchor distL/distT/distR/distB in px — how far wrapping text keeps
@@ -247,6 +252,7 @@ export function drawingWrapBox(
       bottomPx: number;
       x0Px: number;
       textAfter?: boolean;
+      contour?: { x: number; y: number }[];
     }
   | undefined {
   const left = d.distances?.left ?? 0;
@@ -260,12 +266,19 @@ export function drawingWrapBox(
   const rightSpace = columnWidth - start - widthPx;
   const textAfter =
     d.wrapSide === "right" || (d.wrapSide !== "left" && rightSpace > start) || undefined;
+  // The contour rides along in zone coordinates: the drawing box's own
+  // top-left sits at (offset-start, distTop) inside the padded zone box.
+  const contour = d.contour?.map((p) => ({
+    x: p.x + (d.anchor.horizontal.offsetPx ?? 0) - start,
+    y: p.y + (d.distances?.top ?? 0),
+  }));
   return {
     widthPx,
     topPx: boxTopPx - (d.distances?.top ?? 0),
     bottomPx: boxTopPx + d.height + (d.distances?.bottom ?? 0),
     x0Px: start,
     ...(textAfter ? { textAfter } : {}),
+    ...(contour ? { contour } : {}),
   };
 }
 
@@ -473,6 +486,10 @@ export interface LayoutFloatZone {
   /** Text packs RIGHT of the box: the line's usable interval starts past
    *  x0Px + widthPx instead of packing from the left margin. */
   textAfter?: boolean;
+  /** Tight/through contour polygon in zone coordinates (the drawing box's
+   *  own contour translated by the wrap distances) — the line breaker
+   *  slices it at each line's mid-height instead of using the box. */
+  contour?: { x: number; y: number }[];
 }
 
 /** Block-level layout context threaded by the caller that stacks blocks. */
