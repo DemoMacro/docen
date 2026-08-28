@@ -42,6 +42,10 @@ export function layoutTable(
     };
     let rowHeight = 0;
     let colCursor = 0;
+    // w:trHeight atLeast floors the row's CONTENT box (see the cell loop);
+    // exact fixes the row outright.
+    const tr = row.height;
+    const trFloorPx = tr && tr.rule === "atLeast" ? tr.px : 0;
     // (cell total height, for the vAlign slack pass after the row height settles)
     const totals: number[] = [];
     const cells: LaidOutCell[] = row.cells.map((cell) => {
@@ -86,7 +90,13 @@ export function layoutTable(
         (insets.bottom ?? 0) +
         Math.max(borderEdgePx(topEdge), borderEdgePx(bottomEdge));
 
-      const cellHeightPx = stacked.heightPx + vOverheadPx;
+      // Word applies trHeight to the CONTENT box alone (verified: a 374-twip
+      // atLeast row with 85-twip top/bottom cell margins renders 18.7pt +
+      // 8.5pt + border — the margins ride on TOP of the trHeight match, they
+      // do not join the content in competing against it), then adds the
+      // margins and border to whatever won.
+      const contentPx = Math.max(stacked.heightPx, trFloorPx);
+      const cellHeightPx = contentPx + vOverheadPx;
       totals.push(cellHeightPx);
       if (cellHeightPx > rowHeight) rowHeight = cellHeightPx;
       return {
@@ -100,10 +110,8 @@ export function layoutTable(
       };
     });
 
-    const tr = row.height;
-    if (tr && tr.px > 0) {
-      rowHeight = tr.rule === "exact" ? tr.px : Math.max(rowHeight, tr.px);
-    }
+    const trExactPx = tr && tr.rule === "exact" ? tr.px : undefined;
+    if (trExactPx != null) rowHeight = trExactPx;
     // w:vAlign: place the content in the row's slack (read back from the
     // source cells — the laid-out cell carries only the resolved offset). A
     // vertically merged cell keeps its content on the start row (the

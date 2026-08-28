@@ -121,9 +121,10 @@ describe("layoutParagraph line-height semantics", () => {
     if (out.kind === "paragraph") expect(out.heightPx).toBeCloseTo(pitch, 4);
   });
 
-  it("keeps a table cell's CJK multiple line at factor×pitch, not whole grid rows", () => {
-    // Body: 1.5×25 = 37.5 < natural 38.4? no — ceil(38.4/25)×25 = 50 (2 rows).
-    // Cell: no row snap — max(natural, 1.5×pitch) = 37.5 (Word-verified).
+  it("raises a table cell's CJK multiple line to whole grid rows of factor×natural", () => {
+    // Word experiment set E14: 1.5x SimSun 12pt on a 25px grid — demand
+    // 1.5×19.2 = 28.8 → TWO rows = 50, not max(natural, 1.5×pitch) = 37.5.
+    // Body (non-cell) keeps its max(factor×pitch, natural) rounding.
     const pitch = 25;
     const cjkStyle = { family: { latin: "serif", eastAsia: "SimSun" }, sizePx: 16 };
     const cjk = (inTable: boolean) =>
@@ -136,7 +137,7 @@ describe("layoutParagraph line-height semantics", () => {
         { linePitchPx: pitch, inTable },
         measurer,
       );
-    if (cjk(true).kind === "paragraph") expect(cjk(true).heightPx).toBeCloseTo(37.5, 4);
+    if (cjk(true).kind === "paragraph") expect(cjk(true).heightPx).toBeCloseTo(50, 4);
     if (cjk(false).kind === "paragraph") expect(cjk(false).heightPx).toBeCloseTo(50, 4);
   });
 
@@ -397,6 +398,8 @@ describe("layoutTable", () => {
     };
     const floorOut = layoutBlock(atLeast, 200, undefined, measurer);
     if (floorOut.kind !== "table") throw new Error("expected table");
+    // atLeast floors the CONTENT box; the cell's margins ride on top (the
+    // Word E0/E5 experiment: 18.7pt trHeight + 8.5pt margins + border).
     expect(floorOut.rows[0].heightPx).toBe(99);
 
     const exact: LayoutTable = {
@@ -407,6 +410,24 @@ describe("layoutTable", () => {
     const exactOut = layoutBlock(exact, 200, undefined, measurer);
     if (exactOut.kind !== "table") throw new Error("expected table");
     expect(exactOut.rows[0].heightPx).toBe(20);
+  });
+
+  it("adds cell insets on top of a won trHeight, not into the contest (Word E0)", () => {
+    // Content 19.2px, trHeight atLeast 24.93, insets 5.67×2: Word renders
+    // 24.93 + 11.33 — the corpus table Word-measured at 27.72pt per row.
+    const table: LayoutTable = {
+      kind: "table",
+      columnWidthsPx: [300],
+      rows: [
+        {
+          height: { rule: "atLeast", px: 24.93 },
+          cells: [{ insets: { top: 5.67, bottom: 5.67 }, blocks: [cellPara()] }],
+        },
+      ],
+    };
+    const out = layoutBlock(table, 300, undefined, measurer);
+    if (out.kind !== "table") throw new Error("expected table");
+    expect(out.rows[0].heightPx).toBeCloseTo(24.93 + 11.34, 2);
   });
 
   it("sums colspan columns and wraps cell text at the combined width", () => {

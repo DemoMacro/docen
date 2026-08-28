@@ -282,7 +282,13 @@ function resolveLine(
   // 340-twip pitch is ~1.2em of a 14pt line) takes the rows it needs. Latin
   // lines are exempt from the lattice, and so are table cells (no row snap).
   if (pitch > 0 && hasCjk) {
-    if (inTable) return Math.max(naturalPx, spec.factor * pitch);
+    if (inTable) {
+      // Word-verified (grid experiment set E0-E16): a cell line's multiple
+      // demand is factor × NATURAL raised to whole grid rows — 1.5x SimSun
+      // 12pt on the 340-twip grid renders TWO rows (34pt), not 1.5 × pitch
+      // (25.5pt) and not the raw 23.3pt demand.
+      return Math.ceil((spec.factor * naturalPx) / pitch) * pitch;
+    }
     const specH = spec.factor * pitch;
     return Math.ceil(Math.max(specH, naturalPx) / pitch) * pitch;
   }
