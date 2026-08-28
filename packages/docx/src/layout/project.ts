@@ -1148,7 +1148,7 @@ function projectDrawing(group: GroupOptions, ctx: ProjectContext): LayoutDrawing
   const extW = measureEmu(group.transformation.width);
   const extH = measureEmu(group.transformation.height);
   if (extW == null || extH == null || extW <= 0 || extH <= 0) return undefined;
-  const { anchor, wrap, behind } = drawingAnchorOf(group.floating);
+  const { anchor, wrap, behind, distances } = drawingAnchorOf(group.floating);
 
   // Child coordinate space: chOff/chExt → the group's EMU box. A missing
   // chExt means the children already live in the group's own units (1:1).
@@ -1164,18 +1164,28 @@ function projectDrawing(group: GroupOptions, ctx: ProjectContext): LayoutDrawing
     members,
     ctx,
   );
-  return { anchor, width: emuToPx(extW), height: emuToPx(extH), members, wrap, behind };
+  return {
+    anchor,
+    width: emuToPx(extW),
+    height: emuToPx(extH),
+    members,
+    wrap,
+    behind,
+    distances,
+  };
 }
 
 /** wp:anchor positioning shared by every floating drawing kind (group, wps
  *  shape, picture) — every relativeFrom axis plus the offset/align choice;
  *  the painter owns the page geometry each axis resolves against. Wrap modes
  *  that keep the box out of the text flow (none, through's transparent
- *  interior) map to undefined. */
+ *  interior) map to undefined. The wrap distances (w:anchor distL/T/R/B,
+ *  floating.margins) thread through: zones and bands pad by them. */
 function drawingAnchorOf(floating: unknown): {
   anchor: LayoutDrawingAnchor;
   wrap: "square" | "tight" | "topAndBottom" | undefined;
   behind: boolean | undefined;
+  distances: LayoutDrawing["distances"];
 } {
   const f = isRecord(floating) ? floating : {};
   const anchor: LayoutDrawingAnchor = {
@@ -1203,7 +1213,29 @@ function drawingAnchorOf(floating: unknown): {
         : wrapType === "topAndBottom"
           ? ("topAndBottom" as const)
           : undefined;
-  return { anchor, wrap, behind: f.behindDocument === true || undefined };
+  // Wrap distances: EMU (or a UniversalMeasure) per side → px. wrapNone never
+  // reads them, but carrying them costs nothing and keeps round-trips honest.
+  const margins = isRecord(f.margins) ? f.margins : undefined;
+  const distPx = (v: unknown): number | undefined => {
+    const emu = measureEmu(v);
+    return emu != null ? emuToPx(emu) : undefined;
+  };
+  const distances =
+    margins &&
+    (margins.left != null || margins.top != null || margins.right != null || margins.bottom != null)
+      ? {
+          left: distPx(margins.left),
+          top: distPx(margins.top),
+          right: distPx(margins.right),
+          bottom: distPx(margins.bottom),
+        }
+      : undefined;
+  return {
+    anchor,
+    wrap,
+    behind: f.behindDocument === true || undefined,
+    distances,
+  };
 }
 
 /** A standalone floating picture run (wp:anchor pic:pic, PictureOptions):
@@ -1213,7 +1245,7 @@ function projectFloatingPicture(pic: Rec): LayoutDrawing | undefined {
   const w = measureEmu(tr.width);
   const h = measureEmu(tr.height);
   if (w == null || h == null || w <= 0 || h <= 0) return undefined;
-  const { anchor, wrap, behind } = drawingAnchorOf(pic.floating);
+  const { anchor, wrap, behind, distances } = drawingAnchorOf(pic.floating);
   const width = emuToPx(w);
   const height = emuToPx(h);
   return {
@@ -1222,6 +1254,7 @@ function projectFloatingPicture(pic: Rec): LayoutDrawing | undefined {
     height,
     wrap,
     behind,
+    distances,
     // A metafile picture expands into its vector replay; anything else stays
     // one flat member (crop applies to the flat source only).
     members: metafileMembers(pic, width, height) ?? [
@@ -1248,8 +1281,16 @@ function projectWpsShapeRun(wps: Rec, ctx: ProjectContext): LayoutDrawing | unde
   if (w == null || h == null || w <= 0 || h <= 0) return undefined;
   const member = wpsMemberOf(wps, 0, 0, emuToPx(w), emuToPx(h), ctx);
   if (!member) return undefined;
-  const { anchor, wrap, behind } = drawingAnchorOf(wps.floating);
-  return { anchor, width: emuToPx(w), height: emuToPx(h), members: [member], wrap, behind };
+  const { anchor, wrap, behind, distances } = drawingAnchorOf(wps.floating);
+  return {
+    anchor,
+    width: emuToPx(w),
+    height: emuToPx(h),
+    members: [member],
+    wrap,
+    behind,
+    distances,
+  };
 }
 
 /** Collect the anchored drawing runs of one paragraph (top level and one
@@ -1387,12 +1428,15 @@ function projectRuns(
       const heightPx = emuToPx(h);
       // The metafile replay (WMF vector layers) is the main battlefield for
       // inline pictures — the flat DIB src only fills in when replay fails.
+      // A flat src carries its a:srcRect crop (members carry their own, per
+      // child); dropping it stretches the WHOLE source into the extent box.
       const members = metafileMembers(pic, widthPx, heightPx);
       out.push({
         kind: "picture",
         widthPx,
         heightPx,
         src: members ? undefined : pictureSrc(pic),
+        crop: members ? undefined : cropOf(pic),
         members,
       });
     }

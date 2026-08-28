@@ -1027,8 +1027,8 @@ describe("projectDocumentOptions drawings", () => {
     const decoded = atob(band.src.split(",")[1] ?? "");
     expect(decoded).toContain("#ac5256");
     expect(decoded).not.toContain("linearGradient");
-    if (stripes?.kind !== "picture") throw new Error("expected stripes member");
-    const crop = stripes.crop as Record<string, number>;
+    if (stripes?.kind !== "picture" || !stripes.crop) throw new Error("expected stripes member");
+    const crop = stripes.crop;
     expect(crop.left).toBeCloseTo(0.12632, 5);
     expect(crop.top).toBeCloseTo(0.34824, 5);
     expect(crop.right).toBe(0);
@@ -1038,6 +1038,68 @@ describe("projectDocumentOptions drawings", () => {
       kind: "paragraph",
       inline: [{ kind: "text", style: { color: "FFFFFF" } }],
     });
+  });
+
+  it("threads an inline picture's srcRect crop into the atom", () => {
+    const { blocks } = oneSection(
+      doc([
+        {
+          paragraph: {
+            children: [
+              {
+                picture: {
+                  type: "png",
+                  data: "eA",
+                  transformation: { width: 609600, height: 152400 },
+                  // Raw ST_Percentage int (37923 = 37.923%), as the parse emits.
+                  sourceRectangle: { bottom: 37923 },
+                },
+              },
+            ],
+          },
+        },
+      ]),
+    );
+    const para = blocks[0];
+    if (para?.kind !== "paragraph") throw new Error("expected paragraph");
+    const pic = para.inline[0];
+    if (pic?.kind !== "picture") throw new Error("expected picture atom");
+    // The flat source paints only the visible remainder — the whole source
+    // would stretch into the extent box instead.
+    expect(pic.crop).toEqual({ left: 0, top: 0, right: 0, bottom: 0.37923 });
+  });
+
+  it("threads the anchor's wrap distances (floating margins) into the drawing", () => {
+    const { blocks } = oneSection(
+      doc([
+        {
+          paragraph: {
+            children: [
+              {
+                picture: {
+                  type: "png",
+                  data: "eA",
+                  transformation: { width: 952500, height: 952500 },
+                  floating: {
+                    horizontalPosition: { relative: "column", offset: 0 },
+                    verticalPosition: { relative: "paragraph", offset: 0 },
+                    wrap: { type: "square" },
+                    margins: { left: 114300, right: 114300 },
+                  },
+                },
+              },
+            ],
+          },
+        },
+      ]),
+    );
+    const para = blocks[0];
+    if (para?.kind !== "paragraph") throw new Error("expected paragraph");
+    const drawing = para.drawings?.[0];
+    if (!drawing) throw new Error("expected a drawing");
+    expect(drawing.wrap).toBe("square");
+    // 114300 EMU = 12 px at 96 dpi; unset sides stay undefined.
+    expect(drawing.distances).toEqual({ left: 12, right: 12 });
   });
 });
 

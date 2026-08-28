@@ -406,6 +406,26 @@ describe("layoutFlow float wraps", () => {
     expect(paras(pages)[0][1].lines).toHaveLength(1);
   });
 
+  it("pads a square zone by the anchor's wrap distances (distL/distR)", () => {
+    // Without distances the 200px box leaves 100px (12 atoms per line); with
+    // 10px pads each side the zone widens to 220px — 80px usable, 10 atoms,
+    // so 24 atoms need three lines.
+    const d = drawing(0, 0, 200, 40, "square");
+    d.distances = { left: 10, right: 10 };
+    const pages = flow([wrapPara(24, { drawings: [d] })], 300);
+    const [anchor] = paras(pages)[0];
+    expect(anchor.lines).toHaveLength(3);
+  });
+
+  it("pads a topAndBottom band by distT/distB", () => {
+    // The plain band [20, 70] resumes the next paragraph at y 70; 5px pads
+    // each side widen it to [15, 75].
+    const d = drawing(0, 20, 200, 50, "topAndBottom");
+    d.distances = { top: 5, bottom: 5 };
+    const pages = flow([para(1, { drawings: [d] }), para(1)], 300);
+    expect(pages[0].items[1].yPx).toBe(75);
+  });
+
   it("forgets float zones at a page break (floats never cross pages)", () => {
     // The anchor paragraph sits at the page bottom (y 80-100) and its zone
     // [80, 160] reaches past the page edge; the wrapping paragraph lands on

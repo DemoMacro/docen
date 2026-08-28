@@ -257,6 +257,18 @@ function paintParagraph(
           // A metafile source replayed into members (WMF vector layers): the
           // structured scene paints in place of the flat image.
           paintMembers(tree, inline.members, lineX + item.xPx, lineY + pad, ctx);
+        } else if (inline.src && inline.crop) {
+          // A cropped flat source (a:srcRect): the visible remainder fills
+          // the extent box — the whole source would stretch into it.
+          addCroppedImage(
+            tree,
+            inline.src,
+            inline.crop,
+            lineX + item.xPx,
+            lineY + pad,
+            item.widthPx,
+            item.heightPx,
+          );
         } else if (inline.src) {
           tree.add(
             new LeaferImage({
@@ -415,7 +427,7 @@ function paintMembers(
     const my = boxY + m.y;
     if (m.kind === "picture") {
       if (m.src && m.crop) {
-        addCroppedImage(tree, m, mx, my);
+        addCroppedImage(tree, m.src, m.crop, mx, my, m.width, m.height);
       } else if (m.src) {
         addPlainImage(tree, m, mx, my);
       } else {
@@ -596,21 +608,25 @@ function addPlainImage(
 /** A cropped picture (a:srcRect): Leafer paints whole sources only, so the
  *  sub-region renders through an offscreen canvas copy, added when decoded —
  *  into the paint-order slot a placeholder kept open for it (see
- *  addPlainImage; the stage re-paints on the next sync regardless). */
+ *  addPlainImage; the stage re-paints on the next sync regardless). Shared by
+ *  drawing members and inline picture atoms. */
 function addCroppedImage(
   tree: IGroup,
-  m: Extract<LayoutDrawingMember, { kind: "picture" }>,
-  mx: number,
-  my: number,
+  src: string,
+  crop: { left: number; top: number; right: number; bottom: number },
+  x: number,
+  y: number,
+  width: number,
+  height: number,
 ): void {
-  const slot = new Rect({ x: mx, y: my, width: m.width, height: m.height });
+  const slot = new Rect({ x, y, width, height });
   tree.add(slot);
   const el = new Image();
   el.onload = () => {
-    const sx = Math.round(m.crop!.left * el.naturalWidth);
-    const sy = Math.round(m.crop!.top * el.naturalHeight);
-    const sw = Math.max(1, el.naturalWidth - sx - Math.round(m.crop!.right * el.naturalWidth));
-    const sh = Math.max(1, el.naturalHeight - sy - Math.round(m.crop!.bottom * el.naturalHeight));
+    const sx = Math.round(crop.left * el.naturalWidth);
+    const sy = Math.round(crop.top * el.naturalHeight);
+    const sw = Math.max(1, el.naturalWidth - sx - Math.round(crop.right * el.naturalWidth));
+    const sh = Math.max(1, el.naturalHeight - sy - Math.round(crop.bottom * el.naturalHeight));
     const canvas = document.createElement("canvas");
     canvas.width = sw;
     canvas.height = sh;
@@ -618,18 +634,16 @@ function addCroppedImage(
     tree.addAfter(
       new LeaferImage({
         url: canvas.toDataURL("image/png"),
-        x: mx,
-        y: my,
-        width: m.width,
-        height: m.height,
-        ...(m.flipH ? { x: mx + m.width, scaleX: -1 } : {}),
-        ...(m.flipV ? { y: my + m.height, scaleY: -1 } : {}),
+        x,
+        y,
+        width,
+        height,
       }),
       slot,
     );
     tree.remove(slot);
   };
-  el.src = m.src!;
+  el.src = src;
 }
 
 function paintTable(

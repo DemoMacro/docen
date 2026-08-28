@@ -20,12 +20,13 @@
 // size (an absolute height), then the default run's natural metric. The
 // empty line takes NO grid pitch (verified vs Word).
 
-import type {
-  LayoutBlockContext,
-  LayoutFloatZone,
-  LayoutInline,
-  LayoutLineHeight,
-  LayoutParagraph,
+import {
+  drawingWrapBox,
+  type LayoutBlockContext,
+  type LayoutFloatZone,
+  type LayoutInline,
+  type LayoutLineHeight,
+  type LayoutParagraph,
 } from "../layout-doc";
 import type { LaidOutLine, LaidOutLineItem, LaidOutParagraph } from "../layout-result";
 import { packLines, type PackedLine } from "../text/line-break";
@@ -58,19 +59,19 @@ export function layoutParagraph(
   // The anchor paragraph wraps beside its own square floats: the drawings'
   // offsets are paragraph-relative by definition, so their zones feed the
   // packer in paragraph-relative Y (the flow's absolute zones cover every
-  // later paragraph). Full-column boxes and topAndBottom clears are bands —
-  // the packer cannot skip a mid-paragraph band, so they stay flow-only.
+  // later paragraph). The box grows by the anchor's wrap distances first
+  // (distL/R/T/B), matching the flow's zone padding. Full-column boxes and
+  // topAndBottom clears are bands — the packer cannot skip a mid-paragraph
+  // band, so they stay flow-only.
   const selfZones: LayoutFloatZone[] = [];
   if (!inTable) {
     for (const d of para.drawings ?? []) {
       if (d.wrap == null || d.wrap === "topAndBottom") continue;
       const { horizontal: h, vertical: v } = d.anchor;
       if (v.relative !== "paragraph" || h.relative !== "column") continue;
-      const topPx = Math.max(0, v.offsetPx ?? 0);
-      const x0 = h.offsetPx ?? 0;
-      const overlap = Math.min(x0 + d.width, width) - Math.max(x0, 0);
-      if (overlap <= 0 || overlap >= width - 1) continue;
-      selfZones.push({ widthPx: overlap, topPx, bottomPx: topPx + d.height });
+      const box = drawingWrapBox(d, Math.max(0, v.offsetPx ?? 0), width);
+      if (!box || box.widthPx >= width - 1) continue;
+      selfZones.push({ widthPx: box.widthPx, topPx: box.topPx, bottomPx: box.bottomPx });
     }
   }
 

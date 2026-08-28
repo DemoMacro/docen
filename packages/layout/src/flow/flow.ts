@@ -18,7 +18,12 @@
 //   max — one vertical-margin model shared with table cells.
 
 import { layoutBlock } from "../block/block";
-import type { LayoutBlock, LayoutBlockContext, LayoutFloatZone } from "../layout-doc";
+import {
+  drawingWrapBox,
+  type LayoutBlock,
+  type LayoutBlockContext,
+  type LayoutFloatZone,
+} from "../layout-doc";
 import type { LaidOutBlock, LaidOutLine, LaidOutStackItem, LaidOutTable } from "../layout-result";
 import type { TextMeasurer } from "../text/measure";
 
@@ -282,19 +287,22 @@ class Flow {
   /** Turn the anchor paragraph's wrapped drawings into flow effects: a
    *  paragraph-anchored box offset into the column either shrinks the lines
    *  it overlaps (a zone) or clears its whole band (topAndBottom / a box
-   *  covering the full column width). Margin/page-anchored and aligned
-   *  boxes stay painter-only (registered gaps). */
+   *  covering the full column width). The box grows by the anchor's wrap
+   *  distances first (distL/R/T/B), so text keeps its Word gap. Margin/
+   *  page-anchored and aligned boxes stay painter-only (registered gaps). */
   private registerFloats(laid: Extract<LaidOutBlock, { kind: "paragraph" }>, yPx: number): void {
     for (const d of laid.drawings ?? []) {
       if (!d.wrap) continue;
       const { horizontal: h, vertical: v } = d.anchor;
       if (v.relative !== "paragraph" || h.relative !== "column") continue;
-      const topPx = yPx + (v.offsetPx ?? 0);
-      const x0 = h.offsetPx ?? 0;
-      const overlap = Math.min(x0 + d.width, this.opts.contentWidthPx) - Math.max(x0, 0);
-      if (overlap <= 0) continue;
-      const zone: LayoutFloatZone = { widthPx: overlap, topPx, bottomPx: topPx + d.height };
-      if (d.wrap === "topAndBottom" || overlap >= this.opts.contentWidthPx - 1) {
+      const box = drawingWrapBox(d, yPx + (v.offsetPx ?? 0), this.opts.contentWidthPx);
+      if (!box) continue;
+      const zone: LayoutFloatZone = {
+        widthPx: box.widthPx,
+        topPx: box.topPx,
+        bottomPx: box.bottomPx,
+      };
+      if (d.wrap === "topAndBottom" || box.widthPx >= this.opts.contentWidthPx - 1) {
         this.bands.push(zone);
       } else {
         this.zones.push(zone);

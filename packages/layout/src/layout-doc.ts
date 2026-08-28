@@ -39,6 +39,15 @@ export interface LayoutTextStyle {
  *  the box and never loads it. A tab advances to the next stop: the explicit
  *  `toPx` (a numbering bullet's hop to the body text), the paragraph's
  *  `tabStops`, or the default grid (720 twips). */
+/** a:srcRect crop as fractions of the image edge (0-1, each side inward);
+ *  the painted region is the remainder. */
+export interface LayoutPictureCrop {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
 export type LayoutInline =
   /** A `field` marker makes the text a dynamic page-number atom (w:fldSimple /
    *  complexField PAGE / NUMPAGES): the value only exists after pagination, so
@@ -60,9 +69,13 @@ export type LayoutInline =
       kind: "picture";
       widthPx: number;
       heightPx: number;
-      src?: string /** Vector replay members (a WMF/EMF metafile source): when present, the
+      src?: string;
+      /** a:srcRect crop: the flat `src` paints only the visible remainder
+       *  (Leafer paints whole sources, so the renderer sub-regions it). */
+      crop?: LayoutPictureCrop;
+      /** Vector replay members (a WMF/EMF metafile source): when present, the
        * renderer paints these instead of loading `src` — same renderer-only
-       * passthrough contract; the engine never reads beyond widthPx/heightPx. */;
+       * passthrough contract; the engine never reads beyond widthPx/heightPx. */
       members?: LayoutDrawingMember[];
     };
 
@@ -84,9 +97,9 @@ export type LayoutDrawingMember =
       /** Mirrored content flips (a:xfrm @flipH/@flipV). */
       flipH?: boolean;
       flipV?: boolean;
-      /** Source rectangle crop (a:srcRect) as fractions of the image edge
-       *  (0-1, each side inward); the painted region is the remainder. */
-      crop?: { left: number; top: number; right: number; bottom: number };
+      /** Source rectangle crop (a:srcRect): the painted region is the
+       *  visible remainder of the image edge. */
+      crop?: LayoutPictureCrop;
     }
   | {
       kind: "shape";
@@ -207,6 +220,33 @@ export interface LayoutDrawing {
   wrap?: "square" | "tight" | "topAndBottom";
   /** w:behindDoc — painted under the text layer (text strokes stay visible). */
   behind?: boolean;
+  /** w:anchor distL/distT/distR/distB in px — how far wrapping text keeps
+   *  its distance from the box. square/tight zones widen by left+right,
+   *  topAndBottom bands by top+bottom; wrapNone never reads them. */
+  distances?: { left?: number; top?: number; right?: number; bottom?: number };
+}
+
+/** A drawing's wrap box: its extent grown by the anchor's wrap distances,
+ *  clipped to the column. Both zone builders (the flow's post-anchor zones
+ *  and the anchor paragraph's own self-zones) share this so the square/
+ *  tight/topAndBottom paddings stay in lockstep. `boxTopPx` is the drawing's
+ *  own top in the caller's Y space; the distances pad top and bottom around
+ *  it. Returns undefined when the padded box misses the column entirely. */
+export function drawingWrapBox(
+  d: LayoutDrawing,
+  boxTopPx: number,
+  columnWidth: number,
+): { widthPx: number; topPx: number; bottomPx: number } | undefined {
+  const left = d.distances?.left ?? 0;
+  const x0 = (d.anchor.horizontal.offsetPx ?? 0) - left;
+  const widthPx =
+    Math.min(x0 + d.width + left + (d.distances?.right ?? 0), columnWidth) - Math.max(x0, 0);
+  if (widthPx <= 0) return undefined;
+  return {
+    widthPx,
+    topPx: boxTopPx - (d.distances?.top ?? 0),
+    bottomPx: boxTopPx + d.height + (d.distances?.bottom ?? 0),
+  };
 }
 
 // ── blocks ──
