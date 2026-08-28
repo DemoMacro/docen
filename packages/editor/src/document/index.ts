@@ -158,8 +158,11 @@ const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   // Link prompts for an address and marks the selection (Word's Insert Link).
   "link",
   // New Comment anchors the selection with a Word comment (range markers +
-  // a documentExtras.comments entry).
+  // a documentExtras.comments entry); Edit/Delete operate on the comment
+  // covering the selection.
   "new-comment",
+  "edit-comment",
+  "delete-comment",
   // Text Box / Shapes insert a standalone wps shape run (Shapes reads the
   // gallery preset from the split item's value).
   "text-box",
@@ -2143,6 +2146,104 @@ class DocenDocument extends AddinHost<Editor> {
       .run();
   }
 
+  /** One inlinePassthrough comment atom (see #insertComment) → its marker
+   *  kind and comment id; non-comment atoms yield null. Accepts both a JSON
+   *  atom (type is the string name) and a PM node from doc.descendants
+   *  (type is the NodeType — read its name). */
+  static commentMarkerOf(
+    child: JSONContent | { type?: { name?: string }; attrs?: { data?: string } },
+  ): { id: number; kind: "start" | "end" | "reference" } | null {
+    const type = child.type as string | { name?: string } | undefined;
+    const typeName = typeof type === "string" ? type : type?.name;
+    if (typeName !== "inlinePassthrough") return null;
+    try {
+      const data = JSON.parse(String((child.attrs as { data?: string } | undefined)?.data)) as {
+        commentRangeStart?: { id?: number };
+        commentRangeEnd?: { id?: number };
+        commentReference?: number;
+      };
+      if (typeof data.commentRangeStart?.id === "number")
+        return { id: data.commentRangeStart.id, kind: "start" };
+      if (typeof data.commentRangeEnd?.id === "number")
+        return { id: data.commentRangeEnd.id, kind: "end" };
+      if (typeof data.commentReference === "number")
+        return { id: data.commentReference, kind: "reference" };
+    } catch {
+      // Malformed passthrough data — not a comment marker.
+    }
+    return null;
+  }
+
+  /** The comment whose range covers the selection (a marker pair bracketing
+   *  it in document order — markers may sit in earlier paragraphs), lowest id
+   *  first; null when the selection touches no comment. */
+  #activeCommentId(): number | null {
+    const editor = this.editor;
+    if (!editor) return null;
+    const { from, to } = editor.state.selection;
+    const opened = new Map<number, number>();
+    const covering = new Set<number>();
+    editor.state.doc.descendants((child, pos) => {
+      const marker = DocenDocument.commentMarkerOf(child);
+      if (!marker) return;
+      if (marker.kind === "start") opened.set(marker.id, pos);
+      else if (marker.kind === "end") {
+        const start = opened.get(marker.id);
+        if (start != null && start < to && pos > from) covering.add(marker.id);
+      }
+    });
+    return covering.size > 0 ? Math.min(...covering) : null;
+  }
+
+  /** Review → Edit Comment: prompt prefilled with the comment's current text
+   *  (the same input the insert path uses) and rewrite its children. */
+  #editComment(): void {
+    const editor = this.editor;
+    if (!editor) return;
+    const id = this.#activeCommentId();
+    if (id == null) return;
+    const docAttrs = (editor.state.doc.attrs ?? {}) as {
+      documentExtras?: { comments?: Array<{ id?: number; children?: Array<{ text?: string }> }> };
+    };
+    const comments = docAttrs.documentExtras?.comments ?? [];
+    const entry = comments.find((c) => Number(c.id) === id);
+    if (!entry) return;
+    const current = (entry.children ?? []).map((c) => c.text ?? "").join("");
+    const text = window.prompt(t("comment.prompt", this), current)?.trim();
+    if (!text) return;
+    editor.view.dispatch(
+      editor.state.tr.setDocAttribute("documentExtras", {
+        ...docAttrs.documentExtras,
+        comments: comments.map((c) => (Number(c.id) === id ? { ...c, children: [{ text }] } : c)),
+      }),
+    );
+  }
+
+  /** Review → Delete: remove the covering comment's marker/reference atoms
+   *  (descending positions keep the earlier offsets valid) and its
+   *  documentExtras entry. */
+  #deleteComment(): void {
+    const editor = this.editor;
+    if (!editor) return;
+    const id = this.#activeCommentId();
+    if (id == null) return;
+    const atoms: { pos: number; size: number }[] = [];
+    editor.state.doc.descendants((child, pos) => {
+      const marker = DocenDocument.commentMarkerOf(child);
+      if (marker && marker.id === id) atoms.push({ pos, size: child.nodeSize });
+    });
+    const docAttrs = (editor.state.doc.attrs ?? {}) as {
+      documentExtras?: { comments?: Record<string, unknown>[] };
+    };
+    const tr = editor.state.tr;
+    for (const { pos, size } of atoms.sort((a, b) => b.pos - a.pos)) tr.delete(pos, pos + size);
+    tr.setDocAttribute("documentExtras", {
+      ...docAttrs.documentExtras,
+      comments: (docAttrs.documentExtras?.comments ?? []).filter((c) => Number(c.id) !== id),
+    });
+    editor.view.dispatch(tr);
+  }
+
   /** Review → New Comment: anchor the selection the way Word does — a
    *  commentRangeStart/commentRangeEnd passthrough pair around it with a
    *  commentReference after — and append the structured content to
@@ -2373,9 +2474,18 @@ class DocenDocument extends AddinHost<Editor> {
       this.#insertLink();
       return;
     }
-    // New Comment — anchor the selection with a Word comment.
+    // New Comment — anchor the selection with a Word comment; Edit/Delete
+    // operate on the comment covering the selection.
     if (name === "new-comment") {
       this.#insertComment();
+      return;
+    }
+    if (name === "edit-comment") {
+      this.#editComment();
+      return;
+    }
+    if (name === "delete-comment") {
+      this.#deleteComment();
       return;
     }
     // Text Box / Shapes — insert a floating wps shape run (Shapes reads its
