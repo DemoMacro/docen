@@ -1148,7 +1148,7 @@ function projectDrawing(group: GroupOptions, ctx: ProjectContext): LayoutDrawing
   const extW = measureEmu(group.transformation.width);
   const extH = measureEmu(group.transformation.height);
   if (extW == null || extH == null || extW <= 0 || extH <= 0) return undefined;
-  const { anchor, wrap, behind, distances } = drawingAnchorOf(group.floating);
+  const { anchor, wrap, wrapSide, behind, distances } = drawingAnchorOf(group.floating);
 
   // Child coordinate space: chOff/chExt → the group's EMU box. A missing
   // chExt means the children already live in the group's own units (1:1).
@@ -1170,6 +1170,7 @@ function projectDrawing(group: GroupOptions, ctx: ProjectContext): LayoutDrawing
     height: emuToPx(extH),
     members,
     wrap,
+    wrapSide,
     behind,
     distances,
   };
@@ -1184,6 +1185,7 @@ function projectDrawing(group: GroupOptions, ctx: ProjectContext): LayoutDrawing
 function drawingAnchorOf(floating: unknown): {
   anchor: LayoutDrawingAnchor;
   wrap: "square" | "tight" | "topAndBottom" | undefined;
+  wrapSide: LayoutDrawing["wrapSide"];
   behind: boolean | undefined;
   distances: LayoutDrawing["distances"];
 } {
@@ -1213,6 +1215,14 @@ function drawingAnchorOf(floating: unknown): {
         : wrapType === "topAndBottom"
           ? ("topAndBottom" as const)
           : undefined;
+  // ST_WrapSide: which side of the box takes text (square/tight only).
+  const rawSide = isRecord(f.wrap) ? str(f.wrap.side) : undefined;
+  const wrapSide =
+    rawSide === "left" || rawSide === "right" || rawSide === "largest"
+      ? rawSide
+      : rawSide === "bothSides"
+        ? ("both" as const)
+        : undefined;
   // Wrap distances: EMU (or a UniversalMeasure) per side → px. wrapNone never
   // reads them, but carrying them costs nothing and keeps round-trips honest.
   const margins = isRecord(f.margins) ? f.margins : undefined;
@@ -1233,6 +1243,7 @@ function drawingAnchorOf(floating: unknown): {
   return {
     anchor,
     wrap,
+    wrapSide,
     // Word 2013+ honors behindDoc for wrapNone anchors only: a wrapped box
     // (square/tight/through/topAndBottom) always paints opaque in front of
     // the text, regardless of the attribute.
@@ -1248,7 +1259,7 @@ function projectFloatingPicture(pic: Rec): LayoutDrawing | undefined {
   const w = measureEmu(tr.width);
   const h = measureEmu(tr.height);
   if (w == null || h == null || w <= 0 || h <= 0) return undefined;
-  const { anchor, wrap, behind, distances } = drawingAnchorOf(pic.floating);
+  const { anchor, wrap, wrapSide, behind, distances } = drawingAnchorOf(pic.floating);
   const width = emuToPx(w);
   const height = emuToPx(h);
   return {
@@ -1256,6 +1267,7 @@ function projectFloatingPicture(pic: Rec): LayoutDrawing | undefined {
     width,
     height,
     wrap,
+    wrapSide,
     behind,
     distances,
     // A metafile picture expands into its vector replay; anything else stays
@@ -1284,13 +1296,14 @@ function projectWpsShapeRun(wps: Rec, ctx: ProjectContext): LayoutDrawing | unde
   if (w == null || h == null || w <= 0 || h <= 0) return undefined;
   const member = wpsMemberOf(wps, 0, 0, emuToPx(w), emuToPx(h), ctx);
   if (!member) return undefined;
-  const { anchor, wrap, behind, distances } = drawingAnchorOf(wps.floating);
+  const { anchor, wrap, wrapSide, behind, distances } = drawingAnchorOf(wps.floating);
   return {
     anchor,
     width: emuToPx(w),
     height: emuToPx(h),
     members: [member],
     wrap,
+    wrapSide,
     behind,
     distances,
   };

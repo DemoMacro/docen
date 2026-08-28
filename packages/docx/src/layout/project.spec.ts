@@ -1083,7 +1083,7 @@ describe("projectDocumentOptions drawings", () => {
                   floating: {
                     horizontalPosition: { relative: "column", offset: 0 },
                     verticalPosition: { relative: "paragraph", offset: 0 },
-                    wrap: { type: "square" },
+                    wrap: { type: "square", side: "right" },
                     margins: { left: 114300, right: 114300 },
                   },
                 },
@@ -1098,6 +1098,7 @@ describe("projectDocumentOptions drawings", () => {
     const drawing = para.drawings?.[0];
     if (!drawing) throw new Error("expected a drawing");
     expect(drawing.wrap).toBe("square");
+    expect(drawing.wrapSide).toBe("right");
     // 114300 EMU = 12 px at 96 dpi; unset sides stay undefined.
     expect(drawing.distances).toEqual({ left: 12, right: 12 });
   });

@@ -218,6 +218,10 @@ export interface LayoutDrawing {
    *  the lines the box overlaps (tight reduces to square's rectangle — a
    *  contour pass is a registered gap); "topAndBottom" clears the band. */
   wrap?: "square" | "tight" | "topAndBottom";
+  /** ST_WrapSide (w:wrap @side): which side of the box takes text. "right"
+   *  (or "largest" with the wider right side) moves the wrapped lines past
+   *  the box's right edge; "left"/"both" pack from the left as usual. */
+  wrapSide?: "both" | "left" | "right" | "largest";
   /** w:behindDoc — painted under the text layer (text strokes stay visible). */
   behind?: boolean;
   /** w:anchor distL/distT/distR/distB in px — how far wrapping text keeps
@@ -236,16 +240,32 @@ export function drawingWrapBox(
   d: LayoutDrawing,
   boxTopPx: number,
   columnWidth: number,
-): { widthPx: number; topPx: number; bottomPx: number } | undefined {
+):
+  | {
+      widthPx: number;
+      topPx: number;
+      bottomPx: number;
+      x0Px: number;
+      textAfter?: boolean;
+    }
+  | undefined {
   const left = d.distances?.left ?? 0;
   const x0 = (d.anchor.horizontal.offsetPx ?? 0) - left;
-  const widthPx =
-    Math.min(x0 + d.width + left + (d.distances?.right ?? 0), columnWidth) - Math.max(x0, 0);
+  const start = Math.max(x0, 0);
+  const widthPx = Math.min(x0 + d.width + left + (d.distances?.right ?? 0), columnWidth) - start;
   if (widthPx <= 0) return undefined;
+  // Which side takes the text: "right" forces the right side, "left" keeps
+  // the text left no matter what, and both/largest take the wider side —
+  // Word's two-sided wrap approximated per line (a line packs on one side).
+  const rightSpace = columnWidth - start - widthPx;
+  const textAfter =
+    d.wrapSide === "right" || (d.wrapSide !== "left" && rightSpace > start) || undefined;
   return {
     widthPx,
     topPx: boxTopPx - (d.distances?.top ?? 0),
     bottomPx: boxTopPx + d.height + (d.distances?.bottom ?? 0),
+    x0Px: start,
+    ...(textAfter ? { textAfter } : {}),
   };
 }
 
@@ -447,6 +467,12 @@ export interface LayoutFloatZone {
   widthPx: number;
   topPx: number;
   bottomPx: number;
+  /** Line-content x of the zone's left edge — pairs with `textAfter` to move
+   *  the line's text right of the box (wrapSide right/largest). */
+  x0Px?: number;
+  /** Text packs RIGHT of the box: the line's usable interval starts past
+   *  x0Px + widthPx instead of packing from the left margin. */
+  textAfter?: boolean;
 }
 
 /** Block-level layout context threaded by the caller that stacks blocks. */

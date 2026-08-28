@@ -71,7 +71,13 @@ export function layoutParagraph(
       if (v.relative !== "paragraph" || h.relative !== "column") continue;
       const box = drawingWrapBox(d, Math.max(0, v.offsetPx ?? 0), width);
       if (!box || box.widthPx >= width - 1) continue;
-      selfZones.push({ widthPx: box.widthPx, topPx: box.topPx, bottomPx: box.bottomPx });
+      selfZones.push({
+        widthPx: box.widthPx,
+        topPx: box.topPx,
+        bottomPx: box.bottomPx,
+        x0Px: box.x0Px,
+        ...(box.textAfter ? { textAfter: true } : {}),
+      });
     }
   }
 
@@ -158,6 +164,7 @@ export function layoutParagraph(
       maxWidthPx: line.maxWidthPx,
       justifyGapPx: justifyGapPx[i],
       hangPx: line.hangPx,
+      xOffsetPx: line.xOffsetPx,
     });
     heightPx += line.heightPx;
   }

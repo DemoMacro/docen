@@ -301,6 +301,8 @@ class Flow {
         widthPx: box.widthPx,
         topPx: box.topPx,
         bottomPx: box.bottomPx,
+        x0Px: box.x0Px,
+        ...(box.textAfter ? { textAfter: true } : {}),
       };
       if (d.wrap === "topAndBottom" || box.widthPx >= this.opts.contentWidthPx - 1) {
         this.bands.push(zone);

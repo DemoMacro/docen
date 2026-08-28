@@ -59,6 +59,10 @@ export interface PackedLine {
    *  edge (w:overflowPunct) — 0/undefined when the line ends flush. The hang
    *  never counts against justification or center/right slack. */
   hangPx?: number;
+  /** How far the line's content start sits right of the paragraph's text box
+   *  edge — set when a wrapSide right/largest float takes the left side and
+   *  the text packs past its right edge (the renderer shifts the line). */
+  xOffsetPx?: number;
 }
 
 export interface PackLinesOptions {
@@ -235,38 +239,44 @@ function buildGroups(inline: LayoutInline[], measurer: TextMeasurer): FlowGroup[
   return groups;
 }
 
-/** The width available to line `lineIndex` whose box spans `[y, y+bottom)`
- *  (flow Y, for the absolute zones) / `[yPara, yPara+bottom)` (paragraph-
- *  relative Y, for the anchor's own zones): the content width (minus the
- *  first-line indent on line 0) reduced by the widest zone the box overlaps
- *  (text wraps beside the float). The real line height isn't known until the
- *  line packs, so the box bottom uses the resolver's floor — a zone top
- *  inside `[y, y+floor)` always overlaps the real line box, so the check
- *  never over-reduces. */
+/** The width — and start offset — available to line `lineIndex` whose box
+ *  spans `[y, y+bottom)` (flow Y, for the absolute zones) / `[yPara,
+ *  yPara+bottom)` (paragraph-relative Y, for the anchor's own zones). Zones
+ *  are intervals in the line's x space: a `textAfter` zone shifts the line
+ *  start past its far edge (text right of the float); every other zone caps
+ *  the line's right edge at its near edge (text left of the float — a flat
+ *  width reduction would run text under a float off the left margin). The
+ *  real line height isn't known until the line packs, so the box bottom uses
+ *  the resolver's floor — a zone top inside `[y, y+floor)` always overlaps
+ *  the real line box, so the check never over-reduces. */
 function maxWidthAt(
   opts: PackLinesOptions,
   lineIndex: number,
   y: number,
   yPara: number,
   bottomPx: number,
-): number {
+): { widthPx: number; xOffsetPx: number } {
   let w = opts.width;
   if (lineIndex === 0 && opts.firstLineIndentPx) w -= opts.firstLineIndentPx;
-  if (opts.floatZones && opts.floatZones.length > 0 && opts.startY != null) {
-    let reduce = 0;
-    for (const z of opts.floatZones) {
-      if (z.bottomPx > y && z.topPx < y + bottomPx) reduce = Math.max(reduce, z.widthPx);
+  let cap = Infinity;
+  let xOffset = 0;
+  const scan = (zones: readonly LayoutFloatZone[] | undefined, zoneY: number): void => {
+    if (!zones || zones.length === 0) return;
+    for (const z of zones) {
+      if (!(z.bottomPx > zoneY && z.topPx < zoneY + bottomPx)) continue;
+      if (z.textAfter) {
+        // Text packs right of the box: the line starts past its far edge.
+        const start = (z.x0Px ?? 0) + z.widthPx;
+        if (start > xOffset) xOffset = start;
+      } else if ((z.x0Px ?? 0) < cap) {
+        // Text packs left of the box: the line ends at its near edge.
+        cap = z.x0Px ?? 0;
+      }
     }
-    w -= reduce;
-  }
-  if (opts.selfZones && opts.selfZones.length > 0) {
-    let reduce = 0;
-    for (const z of opts.selfZones) {
-      if (z.bottomPx > yPara && z.topPx < yPara + bottomPx) reduce = Math.max(reduce, z.widthPx);
-    }
-    w -= reduce;
-  }
-  return Math.max(0, w);
+  };
+  if (opts.startY != null) scan(opts.floatZones, y);
+  scan(opts.selfZones, yPara);
+  return { widthPx: Math.max(0, Math.min(w, cap) - xOffset), xOffsetPx: xOffset };
 }
 
 /** Tab geometry: the explicit stops and this line's content origin — x=0 of
@@ -388,7 +398,7 @@ export function packLines(inline: LayoutInline[], opts: PackLinesOptions): Packe
   const zoneFloorPx = Math.max(opts.lineHeight({ naturalPx: 0, hasCjk: false }), opts.strutPx ?? 0);
 
   while (done.some((d) => !d)) {
-    const maxWidth = maxWidthAt(opts, lineIndex, y, yPara, zoneFloorPx);
+    const { widthPx: maxWidth, xOffsetPx } = maxWidthAt(opts, lineIndex, y, yPara, zoneFloorPx);
     const tabs: TabContext = {
       stops: opts.tabStops,
       lineBasePx: lineIndex === 0 ? (opts.firstLineIndentPx ?? 0) : 0,
@@ -545,6 +555,7 @@ export function packLines(inline: LayoutInline[], opts: PackLinesOptions): Packe
       heightPx: height,
       naturalPx,
       hangPx: hangPx > 0 ? hangPx : undefined,
+      xOffsetPx: xOffsetPx > 0 ? xOffsetPx : undefined,
     });
     y += height;
     yPara += height;

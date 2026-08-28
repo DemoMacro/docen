@@ -77,6 +77,10 @@ export interface LaidOutLine {
    *  extends by it, so the full glyphs fill the width and the closer hangs
    *  into the margin at its natural advance. */
   hangPx?: number;
+  /** How far the line's content start sits right of the paragraph's text box
+   *  edge — set when a wrapSide right/largest float takes the left side and
+   *  the text packs past its right edge (the painter shifts the line). */
+  xOffsetPx?: number;
 }
 
 export interface LaidOutParagraph {

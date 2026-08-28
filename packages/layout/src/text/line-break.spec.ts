@@ -135,13 +135,25 @@ describe("packLines", () => {
   });
 
   it("reduces line width through an active float zone", () => {
-    // Full "aaaa bbbb" = 68px; a 32px zone at the first line's top leaves 36.
+    // Full "aaaa bbbb" = 68px; a zone spanning [48, 80) at the first line's
+    // top caps the line at its near edge — 48px of text room.
     const lines = pack([text("aaaa bbbb cccc dddd")], 68.5, {
       startY: 0,
-      floatZones: [{ widthPx: 32, topPx: -10, bottomPx: 5 }],
+      floatZones: [{ widthPx: 32, topPx: -10, bottomPx: 5, x0Px: 48 }],
     });
     expect(lines.length).toBeGreaterThan(1);
-    expect(lines[0].maxWidthPx).toBeLessThan(68.5);
+    expect(lines[0].maxWidthPx).toBe(48);
+  });
+
+  it("shifts a line right of a textAfter float zone", () => {
+    // A zone [0, 40) with textAfter: the line starts at 40 with 28px of room.
+    const lines = pack([text("aaaa bbbb cccc dddd")], 68.5, {
+      startY: 0,
+      floatZones: [{ widthPx: 40, topPx: -10, bottomPx: 5, x0Px: 0, textAfter: true }],
+    });
+    expect(lines.length).toBeGreaterThan(1);
+    expect(lines[0].xOffsetPx).toBe(40);
+    expect(lines[0].maxWidthPx).toBe(28.5);
   });
 
   it("mixes text and pictures in one flow", () => {

@@ -222,7 +222,9 @@ export class CaretMap {
       const xPx =
         entry.xPx +
         (para.indent?.leftPx ?? 0) +
-        (first && lineIndex === 0 ? (para.indent?.firstLinePx ?? 0) : 0);
+        (first && lineIndex === 0 ? (para.indent?.firstLinePx ?? 0) : 0) +
+        // A wrapSide right/largest float shifts the whole line past its edge.
+        (line.xOffsetPx ?? 0);
       let chars = 0;
       for (const item of line.items) {
         // for...of iterates code points, same as the spread it replaces.

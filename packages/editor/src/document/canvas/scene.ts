@@ -164,7 +164,9 @@ function paintParagraph(
     // Line x origin: the left indent (every line) plus THIS line's own
     // first-line indent — a split tail's leading line carries none (it is
     // mid-paragraph), so the flag lives on the line, not the line index.
-    const lineX = x + (para.indent?.leftPx ?? 0) + (line.firstLineIndentPx ?? 0);
+    // A wrapSide right/largest float shifts the whole line past its edge.
+    const lineX =
+      x + (para.indent?.leftPx ?? 0) + (line.firstLineIndentPx ?? 0) + (line.xOffsetPx ?? 0);
     // A justified line stretches each text item to the next item's x (the
     // last one to the line's content width): Leafer's textAlign "both-letter"
     // spreads the slack as uniform letter spacing inside that interval —

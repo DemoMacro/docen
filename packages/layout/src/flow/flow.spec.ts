@@ -426,6 +426,38 @@ describe("layoutFlow float wraps", () => {
     expect(pages[0].items[1].yPx).toBe(75);
   });
 
+  it("packs lines right of a wrapSide-right float instead of shrinking", () => {
+    // The 100px float sits at x 0: side "right" moves the text past its
+    // edge — a 200px line shifted by 100 (192px of atoms fit one line),
+    // not the left 200px strip.
+    const d = drawing(0, 0, 100, 40, "square");
+    d.wrapSide = "right";
+    const pages = flow([wrapPara(24, { drawings: [d] })], 300);
+    const [anchor] = paras(pages)[0];
+    expect(anchor.lines).toHaveLength(1);
+    expect(anchor.lines[0]!.xOffsetPx).toBe(100);
+    expect(anchor.lines[0]!.maxWidthPx).toBe(200);
+  });
+
+  it("picks the wider side for wrapSide largest", () => {
+    // Float at x 180-280: the left side (180px) is wider than the right
+    // (20px), so the lines shrink from the left with no shift.
+    const left = drawing(180, 0, 100, 40, "square");
+    left.wrapSide = "largest";
+    const pages = flow([wrapPara(24, { drawings: [left] })], 300);
+    const [a] = paras(pages)[0];
+    expect(a.lines[0]!.xOffsetPx).toBeUndefined();
+    expect(a.lines[0]!.maxWidthPx).toBe(180);
+
+    // Float at x 0-100: the right side (200px) wins — the text shifts past it.
+    const right = drawing(0, 0, 100, 40, "square");
+    right.wrapSide = "largest";
+    const shifted = flow([wrapPara(24, { drawings: [right] })], 300);
+    const [b] = paras(shifted)[0];
+    expect(b.lines[0]!.xOffsetPx).toBe(100);
+    expect(b.lines[0]!.maxWidthPx).toBe(200);
+  });
+
   it("forgets float zones at a page break (floats never cross pages)", () => {
     // The anchor paragraph sits at the page bottom (y 80-100) and its zone
     // [80, 160] reaches past the page edge; the wrapping paragraph lands on
