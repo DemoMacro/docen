@@ -1101,6 +1101,48 @@ describe("projectDocumentOptions drawings", () => {
     // 114300 EMU = 12 px at 96 dpi; unset sides stay undefined.
     expect(drawing.distances).toEqual({ left: 12, right: 12 });
   });
+
+  it("honors behindDoc for wrapNone anchors only (Word 2013+ rule)", () => {
+    const behindOf = (wrapType: "square" | "topAndBottom" | undefined): boolean | undefined => {
+      const { blocks } = oneSection(
+        doc([
+          {
+            paragraph: {
+              children: [
+                {
+                  picture: {
+                    type: "png",
+                    data: "eA",
+                    transformation: { width: 952500, height: 952500 },
+                    floating: wrapType
+                      ? {
+                          horizontalPosition: { relative: "column", offset: 0 },
+                          verticalPosition: { relative: "paragraph", offset: 0 },
+                          wrap: { type: wrapType },
+                          behindDocument: true,
+                        }
+                      : {
+                          horizontalPosition: { relative: "column", offset: 0 },
+                          verticalPosition: { relative: "paragraph", offset: 0 },
+                          behindDocument: true,
+                        },
+                  },
+                },
+              ],
+            },
+          },
+        ]),
+      );
+      const para = blocks[0];
+      if (para?.kind !== "paragraph") throw new Error("expected paragraph");
+      return para.drawings?.[0]?.behind;
+    };
+    // A wrapped box paints opaque in front regardless of the attribute.
+    expect(behindOf("square")).toBeUndefined();
+    expect(behindOf("topAndBottom")).toBeUndefined();
+    // Only wrapNone keeps the behind-text layer.
+    expect(behindOf(undefined)).toBe(true);
+  });
 });
 
 describe("projectFlowBox", () => {

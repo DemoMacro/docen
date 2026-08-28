@@ -427,7 +427,7 @@ function paintMembers(
     const my = boxY + m.y;
     if (m.kind === "picture") {
       if (m.src && m.crop) {
-        addCroppedImage(tree, m.src, m.crop, mx, my, m.width, m.height);
+        addCroppedImage(tree, m.src, m.crop, mx, my, m.width, m.height, m.flipH, m.flipV);
       } else if (m.src) {
         addPlainImage(tree, m, mx, my);
       } else {
@@ -608,8 +608,9 @@ function addPlainImage(
 /** A cropped picture (a:srcRect): Leafer paints whole sources only, so the
  *  sub-region renders through an offscreen canvas copy, added when decoded —
  *  into the paint-order slot a placeholder kept open for it (see
- *  addPlainImage; the stage re-paints on the next sync regardless). Shared by
- *  drawing members and inline picture atoms. */
+ *  addPlainImage; the stage re-paints on the next sync regardless). Mirrors
+ *  flip the cropped result (the xfrm flip applies to the blip, post-crop).
+ *  Shared by drawing members and inline picture atoms. */
 function addCroppedImage(
   tree: IGroup,
   src: string,
@@ -618,6 +619,8 @@ function addCroppedImage(
   y: number,
   width: number,
   height: number,
+  flipH?: boolean,
+  flipV?: boolean,
 ): void {
   const slot = new Rect({ x, y, width, height });
   tree.add(slot);
@@ -638,6 +641,10 @@ function addCroppedImage(
         y,
         width,
         height,
+        // Mirrors flip around the element's (x,y) origin — same shift as
+        // addPlainImage: move the origin to the far edge first.
+        ...(flipH ? { x: x + width, scaleX: -1 } : {}),
+        ...(flipV ? { y: y + height, scaleY: -1 } : {}),
       }),
       slot,
     );

@@ -1233,7 +1233,10 @@ function drawingAnchorOf(floating: unknown): {
   return {
     anchor,
     wrap,
-    behind: f.behindDocument === true || undefined,
+    // Word 2013+ honors behindDoc for wrapNone anchors only: a wrapped box
+    // (square/tight/through/topAndBottom) always paints opaque in front of
+    // the text, regardless of the attribute.
+    behind: wrap == null ? f.behindDocument === true || undefined : undefined,
     distances,
   };
 }
