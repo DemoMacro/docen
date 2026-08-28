@@ -394,6 +394,9 @@ export const ribbonEn: AdditionalLanguage = {
     "header.close": "Close",
     "header.lang.zh": "中文",
     "header.lang.en": "English",
+    // --- Header/footer edit stories (the canvas story chrome tag) ---
+    "story.header": "Header",
+    "story.footer": "Footer",
     // --- Side panes + status bar ---
     "pane.navigation": "Navigation",
     "pane.properties": "Properties",
@@ -797,6 +800,9 @@ export const ribbonZhCN: AdditionalLanguage = {
     "header.close": "关闭",
     "header.lang.zh": "中文",
     "header.lang.en": "English",
+    // --- Header/footer edit stories (the canvas story chrome tag) ---
+    "story.header": "页眉",
+    "story.footer": "页脚",
     // --- Side panes + status bar ---
     "pane.navigation": "导航",
     "pane.properties": "属性",

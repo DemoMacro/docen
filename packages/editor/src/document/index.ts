@@ -49,7 +49,12 @@ import {
   type DocenAddin,
 } from "../ui";
 import { createDefaultAddin, textCounter } from "./addin";
-import { mountEditBridge, type EditBridge } from "./canvas/edit-bridge";
+import {
+  mountEditBridge,
+  type EditBridge,
+  type StoryKind,
+  type StorySlot,
+} from "./canvas/edit-bridge";
 // Side-effect: register the document-specific UI components moved out of the
 // shared ui/ barrel — <docen-format-pane> (properties fallback) and
 // <docen-outline> (navigation Headings tab).
@@ -449,6 +454,11 @@ class DocenDocument extends AddinHost<Editor> {
    *  save/autosave/getJSON call. */
   #cachedJSON?: JSONContent;
   #jsonDirty = true;
+  /** The header/footer story under edit (null = none). `#storyPage` is the
+   *  anchor page the story edits in place on. */
+  #storyKind: StoryKind | null = null;
+  #storySlot: StorySlot = "default";
+  #storyPage = -1;
 
   /** The underlying Tiptap Editor (undefined before connect / after disconnect).
    *  Exposed so a host (the @docen/vue adapter, or any parent element) can drive
@@ -973,6 +983,33 @@ class DocenDocument extends AddinHost<Editor> {
       pageHost: (page) => this.#stage?.slotAt(page)?.parentElement ?? null,
       extensions: [...docxExtensions, ...(defaultAddin.extensions ?? [])],
       scale: () => this.#stage?.scale() ?? 1,
+      // Header/footer edit stories — the bridge routes band double-clicks
+      // here; the host owns the slots' persistence (attrs on the doc node or
+      // the section's last paragraph).
+      story: {
+        geometry: (kind, page) => {
+          const stage = this.#stage;
+          const band = stage?.furnitureBand(kind, page);
+          if (!stage || !band) return null;
+          return {
+            stack: stage.furnitureStack(kind, page),
+            band,
+            slot: stage.slotOfPage(page),
+          };
+        },
+        read: (kind, slot) => this.#readStorySource(kind, slot),
+        entered: (kind, slot, page) => {
+          this.#storyKind = kind;
+          this.#storySlot = slot;
+          this.#storyPage = page;
+          this.#stage?.setStoryEdit({
+            kind,
+            label: t(kind === "header" ? "story.header" : "story.footer", this),
+          });
+        },
+        onDoc: (kind, slot, json) => this.#renderStoryFurniture(kind, slot, json),
+        exit: ({ kind, slot, json, dirty }) => this.#exitStory(kind, slot, json, dirty),
+      },
     });
     if (this.getAttribute("editable") === "false") this.#bridge.editor.setEditable(false);
     // First paint + caret map feed (transactions re-render via the bridge's
@@ -1030,6 +1067,121 @@ class DocenDocument extends AddinHost<Editor> {
     document.addEventListener("fullscreenchange", this.#onFullscreenChange);
     this.addEventListener("keydown", this.#onZoomKey);
     this.dispatchEvent(new CustomEvent("docen:ready", { bubbles: true, composed: true }));
+  }
+
+  /** The attrs object a section's header/footer slots live on — the first
+   *  paragraph carrying sectionProperties (that section's last paragraph)
+   *  when one exists, else the doc node's (the final section closes at the
+   *  body end; its attrs may hold a null sectionProperties — the section
+   *  then uses the defaults, but its slots still live there). The returned
+   *  object is part of a fresh getJSON() tree, safe to patch. */
+  #sectionAttrsOf(doc: JSONContent): Record<string, unknown> | null {
+    let found: Record<string, unknown> | null = null;
+    const walk = (node: JSONContent): void => {
+      if (found) return;
+      const a = node.attrs as Record<string, unknown> | undefined;
+      if (a?.sectionProperties != null) {
+        found = a;
+        return;
+      }
+      for (const child of node.content ?? []) walk(child);
+    };
+    for (const child of doc.content ?? []) walk(child);
+    if (found) return found;
+    return (doc.attrs as Record<string, unknown> | undefined) ?? null;
+  }
+
+  #slotsKeyOf(kind: StoryKind): "sectionHeaders" | "sectionFooters" {
+    return kind === "header" ? "sectionHeaders" : "sectionFooters";
+  }
+
+  /** The story's source JSON — the slot's own content, falling back to the
+   *  default slot's (what the page displays until the edit breaks the tie). */
+  #readStorySource(kind: StoryKind, slot: StorySlot): JSONContent[] {
+    const bridge = this.#bridge;
+    if (!bridge) return [];
+    const attrs = this.#sectionAttrsOf(bridge.editor.getJSON());
+    const group = attrs?.[this.#slotsKeyOf(kind)] as
+      | { default?: JSONContent[]; first?: JSONContent[]; even?: JSONContent[] }
+      | undefined;
+    return group?.[slot] ?? group?.default ?? [];
+  }
+
+  /** A story keystroke's render path: patch the slot into a copy of the doc
+   *  JSON, re-project the furniture (the body flow never re-lays) and hand
+   *  the fresh stack back to the bridge's story map. */
+  #renderStoryFurniture(kind: StoryKind, slot: StorySlot, json: JSONContent[]): void {
+    const bridge = this.#bridge;
+    const stage = this.#stage;
+    if (!bridge || !stage || this.#storyKind !== kind) return;
+    const raw = bridge.editor.getJSON();
+    // getJSON()'s attrs object IS the live PM attrs (Node.toJSON carries it by
+    // reference) — patch a shallow copy or the editor state would mutate
+    // without a transaction (no render, no undo, no docen:change).
+    const attrs = { ...((raw.attrs as Record<string, unknown>) ?? {}) };
+    const key = this.#slotsKeyOf(kind);
+    attrs[key] = { ...(attrs[key] as object | undefined), [slot]: json };
+    const { furniture, background } = projectDocumentOptions(
+      compileDocument({ ...raw, attrs } as JSONContent),
+    );
+    stage.syncFurniture(furniture, background);
+    const band = stage.furnitureBand(kind, this.#storyPage);
+    bridge.updateStoryMap(
+      band ? stage.furnitureStack(kind, this.#storyPage) : null,
+      band ?? { top: 0, bottom: 0, paintY: 0 },
+    );
+  }
+
+  /** Write a finished story's JSON back. An earlier section's slots live on
+   *  its last paragraph (the node carrying sectionProperties) and go through
+   *  a plain setNodeMarkup transaction — one undo step. With no such
+   *  paragraph the final section closes at the body end and its slots live
+   *  on the doc node, which no step can address (nodeAt(0) is the first
+   *  child) — they land through #loadDoc's state rebuild, the same path
+   *  setJSON takes (history resets with it, like any document load). */
+  #persistStory(kind: StoryKind, slot: StorySlot, json: JSONContent[]): void {
+    const bridge = this.#bridge;
+    if (!bridge) return;
+    const key = this.#slotsKeyOf(kind);
+    const slots = (attrs: Record<string, unknown>): Record<string, unknown> => ({
+      ...(attrs[key] as object | undefined),
+      [slot]: json,
+    });
+    const state = bridge.editor.state;
+    let target = -1;
+    state.doc.descendants((node, pos) => {
+      if (target < 0 && node.attrs.sectionProperties != null) {
+        target = pos;
+        return false;
+      }
+      return true;
+    });
+    if (target < 0) {
+      const raw = bridge.editor.getJSON();
+      this.#loadDoc({
+        ...raw,
+        attrs: {
+          ...((raw.attrs as Record<string, unknown>) ?? {}),
+          [key]: slots((raw.attrs as Record<string, unknown>) ?? {}),
+        },
+      } as JSONContent);
+      return;
+    }
+    bridge.editor.commands.command(({ state: s, dispatch }) => {
+      const node = s.doc.nodeAt(target)!;
+      dispatch?.(
+        s.tr.setNodeMarkup(target, undefined, { ...node.attrs, [key]: slots(node.attrs) }),
+      );
+      return true;
+    });
+  }
+
+  #exitStory(kind: StoryKind, slot: StorySlot, json: JSONContent[], dirty: boolean): void {
+    this.#stage?.setStoryEdit(null);
+    this.#storyKind = null;
+    this.#storySlot = "default";
+    this.#storyPage = -1;
+    if (dirty) this.#persistStory(kind, slot, json);
   }
 
   /** The canvas pipeline — the single render entry the bridge's transactions

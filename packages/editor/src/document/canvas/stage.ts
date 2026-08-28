@@ -19,7 +19,7 @@ import type {
  */
 import type { FlowPage, FontMetrics, LaidOutStackItem } from "@docen/layout";
 import { stackBlocks, TextMeasurer } from "@docen/layout";
-import { App } from "leafer-ui";
+import { App, Line, Rect, Text, type IGroup } from "leafer-ui";
 
 import { paintFurnitureStack, paintScene, type PaintContext } from "./scene";
 
@@ -240,6 +240,67 @@ export class CanvasStage {
     }
   }
 
+  /** Re-lay the furniture stacks and repaint every live page — the
+   *  header/footer story's render path. The body flow is untouched: pages and
+   *  their laid blocks stay, only the furniture trees rebuild. */
+  syncFurniture(furniture?: ProjectedPageFurniture, background?: ProjectedPageBackground): void {
+    if (furniture !== undefined) this.ctx.furniture = furniture;
+    if (background !== undefined) this.ctx.background = background;
+    this.layoutFurniture();
+    for (const [index, slot] of this.slots.entries()) {
+      if (slot.app) this.repaint(slot.app, index);
+    }
+  }
+
+  /** Which furniture slot a page displays — the edit story's data source
+   *  (an absent first/even slot falls back to default at pick time). */
+  slotOfPage(page: number): "default" | "first" | "even" {
+    const slot = this.slotOf(page);
+    return slot === 1 ? "first" : slot === 2 ? "even" : "default";
+  }
+
+  /** The laid furniture stack a page displays (its geometry, whether the
+   *  stack's own slot or the default fallback). Null when the doc has none. */
+  furnitureStack(kind: "header" | "footer", page = 0): readonly LaidOutStackItem[] | null {
+    if (!this.ctx.furniture) return null;
+    const slot = this.slotOf(page);
+    const stacks = kind === "header" ? this.headerStacks : this.footerStacks;
+    return stacks[slot] ?? stacks[0] ?? null;
+  }
+
+  /** A page's editable furniture band, page-local — [top, bottom) with the
+   *  dashed boundary at the inner edge (bottom for headers, top for
+   *  footers); `paintY` is the stack's own draw y (the band reaches past it
+   *  to the page edge, the caret map must anchor at the stack itself). At
+   *  least one strut line tall so an empty story is enterable. */
+  furnitureBand(
+    kind: "header" | "footer",
+    page = 0,
+  ): { top: number; bottom: number; paintY: number } | null {
+    if (!this.ctx.furniture) return null;
+    const f = this.ctx.furniture;
+    const stack = this.furnitureStack(kind, page);
+    const h = Math.max(stack ? (this.furnitureStacks.get(stack) ?? 0) : 0, 24);
+    if (kind === "header") {
+      const paintY = f.headerDistancePx ?? 48;
+      return { top: 0, bottom: paintY + h, paintY };
+    }
+    const paintY = this.ctx.flow.pageHeightPx - (f.footerDistancePx ?? 48) - h;
+    return { top: paintY, bottom: this.ctx.flow.pageHeightPx, paintY };
+  }
+
+  /** Story chrome while a header/footer is being edited: Word grays the body
+   *  and draws the dashed boundary + a gray "Header"/"Footer" tag on every
+   *  page (the boundary is an interaction affordance, never printed). */
+  setStoryEdit(edit: { kind: "header" | "footer"; label: string } | null): void {
+    this.storyEdit = edit;
+    for (const [index, slot] of this.slots.entries()) {
+      if (slot.app) this.repaint(slot.app, index);
+    }
+  }
+
+  private storyEdit: { kind: "header" | "footer"; label: string } | null = null;
+
   /** A page's slot element (scrollIntoView target for page jumps). */
   slotAt(index: number): HTMLElement | null {
     return this.slots[index]?.el ?? null;
@@ -326,12 +387,44 @@ export class CanvasStage {
     // layer — footer furniture included (a full-bleed backdrop never covers
     // the page number). Paint the behind pass first, then furniture + the
     // body pass on top; in-front floats close the sequence inside the body
-    // pass's paragraphs.
+    // pass's paragraphs. While a furniture story is being edited the body
+    // pass sits under a white veil instead and the furniture paints on top
+    // of it (the story under edit stays fully opaque).
     const items = this.pages[index]?.items ?? [];
     ctx.layer = "behind";
     paintScene(tree, items, ctx);
-    // The furniture pass paints like the body (its paragraphs' text must not
-    // hit the behind pass's drawings-only early return).
+    ctx.layer = "body";
+    if (!this.storyEdit) {
+      this.paintFurniture(tree, slot, ctx, flow);
+      paintScene(tree, items, ctx);
+    } else {
+      paintScene(tree, items, ctx);
+      tree.add(
+        new Rect({
+          x: 0,
+          y: 0,
+          width: flow.pageWidthPx,
+          height: flow.pageHeightPx,
+          fill: "rgba(255,255,255,.62)",
+          hittable: false,
+        }),
+      );
+      this.paintFurniture(tree, slot, ctx, flow);
+      this.paintStoryBoundary(tree, ctx, flow);
+    }
+    // Render eagerly: Leafer's change-driven scheduling stalls when the App
+    // was created while its view was offscreen (an IO callback during mount)
+    // and never picks the page back up.
+    app.forceRender();
+  }
+
+  /** Both furniture stacks for a page's slot, at their page positions. */
+  private paintFurniture(
+    tree: IGroup,
+    slot: number,
+    ctx: PaintContext,
+    flow: ProjectedFlowBox,
+  ): void {
     ctx.layer = "body";
     const header = this.headerStacks[slot] ?? this.headerStacks[0];
     if (header) {
@@ -349,10 +442,35 @@ export class CanvasStage {
       const bottom = flow.pageHeightPx - (this.ctx.furniture?.footerDistancePx ?? 48);
       paintFurnitureStack(tree, footer, flow.contentLeftPx, bottom - height, ctx);
     }
-    paintScene(tree, items, ctx);
-    // Render eagerly: Leafer's change-driven scheduling stalls when the App
-    // was created while its view was offscreen (an IO callback during mount)
-    // and never picks the page back up.
-    app.forceRender();
+  }
+
+  /** The dashed boundary of the story under edit plus its gray tag — a
+   *  header's boundary runs under its content, a footer's runs above it;
+   *  the tag sits just above the line in both cases (Word's layout). */
+  private paintStoryBoundary(tree: IGroup, ctx: PaintContext, flow: ProjectedFlowBox): void {
+    const edit = this.storyEdit;
+    if (!edit) return;
+    const band = this.furnitureBand(edit.kind, ctx.pageIndex);
+    if (!band) return;
+    const dashY = edit.kind === "header" ? band.bottom : band.top;
+    tree.add(
+      new Line({
+        points: [flow.contentLeftPx, dashY, flow.contentLeftPx + flow.contentWidthPx, dashY],
+        stroke: "#a6a6a6",
+        strokeWidth: 1,
+        dashPattern: [4, 3, 1, 3],
+        hittable: false,
+      }),
+    );
+    tree.add(
+      new Text({
+        x: flow.contentLeftPx,
+        y: dashY - 17,
+        text: edit.label,
+        fill: "#8a8886",
+        fontSize: 11,
+        hittable: false,
+      }),
+    );
   }
 }

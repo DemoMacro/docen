@@ -41,6 +41,36 @@ function firstGraphemeUnits(text: string): number {
   return 0;
 }
 
+/** A furniture edit story — the header/footer editing mode. One story at a
+ *  time: its editor, map, and render schedule live beside the main story's,
+ *  and every input handler routes through the active one. */
+export type StoryKind = "header" | "footer";
+export type StorySlot = "default" | "first" | "even";
+
+export interface EditBridgeStory {
+  /** Live furniture geometry for a page — null when the doc has no
+   *  furniture (no story is enterable). */
+  geometry(
+    kind: StoryKind,
+    page: number,
+  ): {
+    stack: readonly import("@docen/layout").LaidOutStackItem[] | null;
+    band: { top: number; bottom: number; paintY: number } | null;
+    slot: StorySlot;
+  } | null;
+  /** The story's source JSON (empty when the slot has no content yet). */
+  read: (kind: StoryKind, slot: StorySlot) => JSONContent[];
+  /** A story entered — drop in the stage chrome (grayed body, boundary).
+   *  `page` is the anchor page the story edits in place on. */
+  entered: (kind: StoryKind, slot: StorySlot, page: number) => void;
+  /** A story transaction landed — re-project the furniture from this JSON
+   *  (the body flow must not re-lay) and call back updateStoryMap. */
+  onDoc: (kind: StoryKind, slot: StorySlot, json: JSONContent[]) => void;
+  /** The story exited (a body click / Esc) — persist `json` when `dirty`,
+   *  drop the stage chrome. */
+  exit: (story: { kind: StoryKind; slot: StorySlot; json: JSONContent[]; dirty: boolean }) => void;
+}
+
 export interface EditBridgeOptions {
   /** A positioned host covering the canvas surface — the bridge's textarea
    *  overlays it and captures clicks to take focus. */
@@ -60,6 +90,8 @@ export interface EditBridgeOptions {
    *  written in screen px inside zoom-sized frames; hit-testing converts the
    *  other way. Defaults to 1 (unzoomed). */
   scale?: () => number;
+  /** Header/footer edit stories — absent, the furniture bands are inert. */
+  story?: EditBridgeStory;
 }
 
 export interface EditBridge {
@@ -70,6 +102,19 @@ export interface EditBridge {
     pages: readonly FlowPage[],
     flow: { contentLeftPx: number; contentTopPx: number },
   ): void;
+  /** Feed the active furniture story's fresh stack + band after the host
+   *  re-projected it (each story keystroke rebuilds the story map). The
+   *  map anchors at the band's `paintY` — the stack's own draw y. */
+  updateStoryMap(
+    stack: readonly import("@docen/layout").LaidOutStackItem[] | null,
+    band: { top: number; bottom: number; paintY: number },
+  ): void;
+  /** Whether a furniture story is active (its kind, else null). */
+  storyKind(): StoryKind | null;
+  /** Leave the furniture story — tears down the story editor and restores
+   *  the main story's overlays. Returns the story's final JSON; persistence
+   *  stays with the host (it already ran `exit` for band/Esc routes). */
+  exitStory(): { kind: StoryKind; slot: StorySlot; json: JSONContent[]; dirty: boolean } | null;
   /** Scroll the page holding a doc position into view (null when unmappable). */
   scrollIntoView(pos: number): void;
   /** The page index a doc position renders on (null when unmappable). */
@@ -86,36 +131,92 @@ export interface EditBridge {
   destroy(): void;
 }
 
-export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
-  const editor = new Editor({
-    element: null,
-    extensions: [...(opts.extensions ?? docxExtensions), UndoRedo],
-    content: opts.content as never,
-  });
-  // element:null skips mount(), and with it plugin installation — the state
-  // comes up schema-only (EditorState.create with no plugins). Register the
-  // extension manager's full, priority-sorted plugin list by hand: undo
-  // history, keymaps, outline, search … all read their plugin's state.
-  for (const plugin of editor.extensionManager.plugins) editor.registerPlugin(plugin);
+/** One editing story — a viewless editor, its pixel↔position map, and its
+ *  raf-merged render schedule. The main story lives for the bridge's
+ *  lifetime; a furniture story (header/footer) joins it on entry and every
+ *  input handler routes through the active one. */
+interface Story {
+  editor: Editor;
+  map: CaretMap | null;
+  pageCount: number;
+  lastCaretPos: number;
+  /** The story's content callback — main: the full re-flow; furniture: the
+   *  host's furniture-only re-projection. */
+  onDoc: (json: JSONContent) => void;
+  /** The single page frame every overlay mounts in (furniture stories never
+   *  span pages); −1 = the main story follows each rect's own page. */
+  anchorPage: number;
+  /** The story's flow box (updatePages / enterStory record it). */
+  flow: { contentLeftPx: number; contentTopPx: number } | null;
+  raf: number;
+  schedule(): void;
+  /** Furniture-story only: what is being edited and its initial content. */
+  kind?: StoryKind;
+  slot?: StorySlot;
+  initialJson?: string;
+}
 
-  // One relayout per frame regardless of keystroke bursts — content changes
-  // only; selection-only transactions (drag-select, caret moves) skip the
-  // full re-flow, their placement rides the synchronous selectionUpdate.
-  let raf = 0;
-  const schedule = (): void => {
-    if (raf) return;
-    raf = requestAnimationFrame(() => {
-      raf = 0;
-      opts.onDoc(editor.getJSON());
+export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
+  const makeEditor = (content: unknown): Editor => {
+    const editor = new Editor({
+      element: null,
+      extensions: [...(opts.extensions ?? docxExtensions), UndoRedo],
+      content: content as never,
+    });
+    // element:null skips mount(), and with it plugin installation — the state
+    // comes up schema-only (EditorState.create with no plugins). Register the
+    // extension manager's full, priority-sorted plugin list by hand: undo
+    // history, keymaps, outline, search … all read their plugin's state.
+    for (const plugin of editor.extensionManager.plugins) editor.registerPlugin(plugin);
+    return editor;
+  };
+
+  const makeStory = (
+    content: unknown,
+    onDoc: (json: JSONContent) => void,
+    anchorPage: number,
+  ): Story => {
+    const s: Story = {
+      editor: makeEditor(content),
+      map: null,
+      pageCount: 0,
+      lastCaretPos: -1,
+      onDoc,
+      anchorPage,
+      flow: null,
+      raf: 0,
+      // One relayout per frame regardless of keystroke bursts — content
+      // changes only; selection-only transactions (drag-select, caret moves)
+      // skip the render, their placement rides the synchronous selectionUpdate.
+      schedule(): void {
+        if (s.raf) return;
+        s.raf = requestAnimationFrame(() => {
+          s.raf = 0;
+          s.onDoc(s.editor.getJSON());
+        });
+      },
+    };
+    return s;
+  };
+
+  const main = makeStory(opts.content, opts.onDoc, -1);
+  let story: Story | null = null;
+  const active = (): Story => story ?? main;
+  // The main editor stays the public `editor` surface (document commands,
+  // schema reads) — furniture stories are reachable only through the story
+  // lifecycle below.
+  const editor = main.editor;
+
+  /** Content changes ride the story's own render (the map feed re-places).
+   *  Everything else that still moves pixels — selection metas — re-places
+   *  synchronously; idempotent with the selectionUpdate path. */
+  const attachTransactions = (s: Story): void => {
+    s.editor.on("transaction", ({ transaction }) => {
+      if (transaction.docChanged) s.schedule();
+      else if (active() === s) placeCaret();
     });
   };
-  editor.on("transaction", ({ transaction }) => {
-    // Content changes ride the re-flow (updatePages re-places). Everything
-    // else that still moves pixels — search-state metas, selection metas —
-    // re-places synchronously; idempotent with the selectionUpdate path.
-    if (transaction.docChanged) schedule();
-    else placeCaret();
-  });
+  attachTransactions(main);
 
   // The invisible input surface. Kept at 1px and positioned on click so the
   // IME candidate window anchors near the interaction point (true caret-point
@@ -156,12 +257,15 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
   opts.host.append(caret);
   let blink: Animation | null = null;
 
-  // The pixel↔position geometry, rebuilt from every render's flow result.
-  // Between a transaction and its re-render it is one frame stale — caretRect
-  // tolerates out-of-range positions by hiding until the fresh map lands.
-  let map: CaretMap | null = null;
-  let pageCount = 0;
-  let lastCaretPos = -1;
+  // The pixel↔position geometry lives on each Story, rebuilt from every
+  // render's feed. Between a transaction and its re-render it is one frame
+  // stale — caretRect tolerates out-of-range positions by hiding until the
+  // fresh map lands.
+
+  /** The DOM page frame a rect's page maps to — furniture stories pin every
+   *  overlay to their anchor page (their map has one pseudo page). */
+  const framePage = (s: Story, page: number): number =>
+    s.anchorPage >= 0 ? s.anchorPage + page : page;
 
   const restartBlink = (): void => {
     blink?.cancel();
@@ -179,11 +283,12 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
   const placeSelection = (): void => {
     for (const el of selectionLayer) el.remove();
     selectionLayer.length = 0;
-    const { from, to } = editor.state.selection;
-    if (from === to || !map?.valid) return;
-    const s = opts.scale?.() ?? 1;
-    for (const r of map.selectionRects(from, to)) {
-      const frame = opts.pageHost?.(r.page);
+    const s = active();
+    const { from, to } = s.editor.state.selection;
+    if (from === to || !s.map?.valid) return;
+    const scale = opts.scale?.() ?? 1;
+    for (const r of s.map.selectionRects(from, to)) {
+      const frame = opts.pageHost?.(framePage(s, r.page));
       if (!frame) continue;
       const el = document.createElement("div");
       Object.assign(el.style, {
@@ -191,10 +296,10 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
         background: "rgba(0,120,215,.25)",
         pointerEvents: "none",
         zIndex: "4",
-        left: `${r.xPx * s}px`,
-        top: `${r.yPx * s}px`,
-        width: `${r.widthPx * s}px`,
-        height: `${r.heightPx * s}px`,
+        left: `${r.xPx * scale}px`,
+        top: `${r.yPx * scale}px`,
+        width: `${r.widthPx * scale}px`,
+        height: `${r.heightPx * scale}px`,
       } satisfies Partial<CSSStyleDeclaration>);
       frame.append(el);
       selectionLayer.push(el);
@@ -212,25 +317,26 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
   const placeSearch = (): void => {
     for (const el of searchLayer) el.remove();
     searchLayer.length = 0;
-    if (!map?.valid) return;
-    const sel = editor.state.selection;
-    const s = opts.scale?.() ?? 1;
-    for (const deco of getMatchHighlights(editor.state).find()) {
+    const s = active();
+    if (!s.map?.valid) return;
+    const sel = s.editor.state.selection;
+    const scale = opts.scale?.() ?? 1;
+    for (const deco of getMatchHighlights(s.editor.state).find()) {
       const { from, to } = deco as { from: number; to: number };
-      const active = from <= sel.to && sel.from <= to;
-      for (const r of map.selectionRects(from, to)) {
-        const frame = opts.pageHost?.(r.page);
+      const activeMatch = from <= sel.to && sel.from <= to;
+      for (const r of s.map.selectionRects(from, to)) {
+        const frame = opts.pageHost?.(framePage(s, r.page));
         if (!frame) continue;
         const el = document.createElement("div");
         Object.assign(el.style, {
           position: "absolute",
-          background: active ? "rgba(255,141,35,.7)" : "rgba(255,213,79,.45)",
+          background: activeMatch ? "rgba(255,141,35,.7)" : "rgba(255,213,79,.45)",
           pointerEvents: "none",
           zIndex: "3",
-          left: `${r.xPx * s}px`,
-          top: `${r.yPx * s}px`,
-          width: `${r.widthPx * s}px`,
-          height: `${r.heightPx * s}px`,
+          left: `${r.xPx * scale}px`,
+          top: `${r.yPx * scale}px`,
+          width: `${r.widthPx * scale}px`,
+          height: `${r.heightPx * scale}px`,
         } satisfies Partial<CSSStyleDeclaration>);
         frame.append(el);
         searchLayer.push(el);
@@ -241,67 +347,68 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
   const placeCaret = (): void => {
     placeSelection();
     placeSearch();
-    if (!map?.valid) {
+    const s = active();
+    if (!s.map?.valid) {
       caret.style.display = "none";
       return;
     }
-    const { from, to } = editor.state.selection;
+    const { from, to } = s.editor.state.selection;
     if (from !== to) {
       // A selection replaces the caret (Word hides it too).
       caret.style.display = "none";
       return;
     }
-    const rect = map.caretRect(from);
-    const frame = rect ? (opts.pageHost?.(rect.page) ?? null) : null;
+    const rect = s.map.caretRect(from);
+    const frame = rect ? (opts.pageHost?.(framePage(s, rect.page)) ?? null) : null;
     if (!rect || !frame) {
       caret.style.display = "none";
       return;
     }
     if (frame !== caret.parentElement) frame.append(caret);
     caret.style.display = "block";
-    const s = opts.scale?.() ?? 1;
-    caret.style.left = `${rect.xPx * s}px`;
-    caret.style.top = `${rect.yPx * s}px`;
-    caret.style.height = `${rect.heightPx * s}px`;
+    const scale = opts.scale?.() ?? 1;
+    caret.style.left = `${rect.xPx * scale}px`;
+    caret.style.top = `${rect.yPx * scale}px`;
+    caret.style.height = `${rect.heightPx * scale}px`;
     // Keep the textarea anchored at the caret so the IME candidate window
     // opens at the typing point.
     const hostRect = opts.host.getBoundingClientRect();
     const frameRect = frame.getBoundingClientRect();
-    ta.style.left = `${frameRect.left - hostRect.left + rect.xPx * s}px`;
-    ta.style.top = `${frameRect.top - hostRect.top + rect.yPx * s}px`;
-    if (from !== lastCaretPos) {
-      lastCaretPos = from;
+    ta.style.left = `${frameRect.left - hostRect.left + rect.xPx * scale}px`;
+    ta.style.top = `${frameRect.top - hostRect.top + rect.yPx * scale}px`;
+    if (from !== s.lastCaretPos) {
+      s.lastCaretPos = from;
       restartBlink();
     }
   };
-  editor.on("selectionUpdate", placeCaret);
+  main.editor.on("selectionUpdate", placeCaret);
 
   /** A viewport point → the hit page and its page-local coordinates (in
-   *  semantic page px — the caret map knows nothing of the zoom). */
+   *  semantic page px — the caret map knows nothing of the zoom). Pure frame
+   *  geometry: story routing decides what a hit means. */
   const hitPage = (
     clientX: number,
     clientY: number,
   ): { page: number; lx: number; ly: number } | null => {
-    if (!map?.valid) return null;
     const hostRect = opts.host.getBoundingClientRect();
     const x = clientX - hostRect.left;
     const y = clientY - hostRect.top;
-    for (let p = 0; p < pageCount; p++) {
+    const scale = opts.scale?.() ?? 1;
+    for (let p = 0; p < main.pageCount; p++) {
       const frame = opts.pageHost?.(p);
       if (!frame) continue;
       const r = frame.getBoundingClientRect();
       const lx = x - (r.left - hostRect.left);
       const ly = y - (r.top - hostRect.top);
       if (lx >= 0 && ly >= 0 && lx < r.width && ly < r.height) {
-        const s = opts.scale?.() ?? 1;
-        return { page: p, lx: lx / s, ly: ly / s };
+        return { page: p, lx: lx / scale, ly: ly / scale };
       }
     }
     return null;
   };
 
   const setSel = (pos: number, anchor?: number): void => {
-    editor.commands.command(({ state, dispatch }) => {
+    active().editor.commands.command(({ state, dispatch }) => {
       // The cast bridges the dual PM d.ts identity (same runtime
       // instance — see the module's command casts). create takes
       // (anchor, head) — the anchor leads.
@@ -312,9 +419,13 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     });
   };
 
+  /** A viewport point → the active story's doc position (furniture stories
+   *  map through their single pseudo page). */
   const posAtClient = (clientX: number, clientY: number): number | null => {
+    const s = active();
     const hit = hitPage(clientX, clientY);
-    return hit ? map!.posAtPoint(hit.page, hit.lx, hit.ly) : null;
+    if (!hit || !s.map?.valid) return null;
+    return s.map.posAtPoint(story ? 0 : hit.page, hit.lx, hit.ly);
   };
 
   // Mouse selection: mousedown anchors, moves extend, mouseup settles. The
@@ -344,10 +455,140 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
   opts.host.addEventListener("mousemove", onMouseMove);
   document.addEventListener("mouseup", onMouseUp);
 
+  /** Enter a furniture story: a second viewless editor over the slot's
+   *  JSON, a caret map over its laid stack (wrapped as one pseudo page
+   *  anchored at the band), the caret dropped at the story's end. */
+  const enterStory = (
+    kind: StoryKind,
+    page: number,
+    geo: NonNullable<ReturnType<NonNullable<EditBridgeStory["geometry"]>>>,
+  ): boolean => {
+    const storyCfg = opts.story;
+    // A read-only document has no stories (viewless editing is command-driven
+    // — setEditable(false) alone cannot stop a transaction).
+    if (!storyCfg || story || composing || !geo.band || !main.editor.isEditable) return false;
+    const source = storyCfg.read(kind, geo.slot);
+    // An empty story starts with one empty paragraph (Word's blank header).
+    const initial = source.length > 0 ? source : [{ type: "paragraph" }];
+    const s = makeStory(
+      { type: "doc", content: initial },
+      (json) => storyCfg.onDoc(kind, geo.slot, (json.content ?? []) as JSONContent[]),
+      page,
+    );
+    s.kind = kind;
+    s.slot = geo.slot;
+    s.initialJson = JSON.stringify(initial);
+    if (geo.stack) {
+      s.map = new CaretMap([{ items: geo.stack }] as never, s.editor.state.doc, {
+        contentLeftPx: main.flow?.contentLeftPx ?? 0,
+        contentTopPx: geo.band.paintY,
+      });
+    }
+    attachTransactions(s);
+    story = s;
+    storyCfg.entered(kind, geo.slot, page);
+    // The caret enters at the story's end (Word drops you after the text) —
+    // the last textblock's end, not the doc's outer boundary (no caret there).
+    setSel(TextSelection.atEnd(s.editor.state.doc).from);
+    return true;
+  };
+
+  /** Tear the furniture story down and hand its final JSON to the host.
+   *  The main story's overlays re-place against the geometry that is
+   *  already there (the host's exit handler re-renders if dirty). */
+  const leaveStory = (): {
+    kind: StoryKind;
+    slot: StorySlot;
+    json: JSONContent[];
+    dirty: boolean;
+  } | null => {
+    const s = story;
+    if (!s) return null;
+    story = null;
+    if (s.raf) cancelAnimationFrame(s.raf);
+    const json = (s.editor.getJSON().content ?? []) as JSONContent[];
+    const dirty = JSON.stringify(json) !== s.initialJson;
+    s.editor.destroy();
+    opts.story?.exit({ kind: s.kind!, slot: s.slot!, json, dirty });
+    placeCaret();
+    return { kind: s.kind!, slot: s.slot!, json, dirty };
+  };
+
+  // Word's entry click: a DOUBLE click on a furniture band opens its story
+  // (single clicks there are inert); while a story is active, clicks inside
+  // its band position the story caret and any other click closes it.
+  let lastClick: { t: number; x: number; y: number } | null = null;
+  const isDoubleClick = (event: MouseEvent): boolean =>
+    lastClick != null &&
+    event.timeStamp - lastClick.t < 500 &&
+    Math.hypot(event.clientX - lastClick.x, event.clientY - lastClick.y) < 4;
+
   const takeFocus = (event: MouseEvent): void => {
     // preventDefault keeps the click from blurring on mousedown; the caret
     // placement below is the real focus move.
     event.preventDefault();
+    if (composing) return;
+    const dbl = isDoubleClick(event);
+    lastClick = { t: event.timeStamp, x: event.clientX, y: event.clientY };
+    const storyCfg = opts.story;
+    const hit = hitPage(event.clientX, event.clientY);
+    if (storyCfg && hit) {
+      const header = storyCfg.geometry("header", hit.page);
+      const footer = storyCfg.geometry("footer", hit.page);
+      const inHeader =
+        header?.band != null && hit.ly >= header.band.top && hit.ly < header.band.bottom;
+      const inFooter =
+        footer?.band != null && hit.ly >= footer.band.top && hit.ly < footer.band.bottom;
+      if (story) {
+        const own = story.kind === "header" ? inHeader : inFooter;
+        // The anchor page's band edits in place; any other click (another
+        // page, the body, the other story's band) closes the story — Word's
+        // "double-click the body" exit, single-clicked.
+        if (own && hit.page === story.anchorPage) {
+          const pos = posAtClient(event.clientX, event.clientY);
+          if (pos != null) {
+            setSel(pos);
+            dragAnchor = pos;
+            dragStart = { x: event.clientX, y: event.clientY };
+            dragMoved = false;
+          }
+        } else {
+          leaveStory();
+          const pos = posAtClient(event.clientX, event.clientY);
+          if (pos != null) {
+            setSel(pos);
+            dragAnchor = pos;
+            dragStart = { x: event.clientX, y: event.clientY };
+            dragMoved = false;
+          }
+        }
+        ta.focus();
+        ta.value = "";
+        return;
+      }
+      if ((inHeader || inFooter) && !dbl) {
+        // A single click on a band does nothing (Word), but must not blur
+        // into a body position under it.
+        ta.focus();
+        ta.value = "";
+        return;
+      }
+      if (inHeader && header) {
+        enterStory("header", hit.page, header);
+        ta.focus();
+        ta.value = "";
+        return;
+      }
+      if (inFooter && footer) {
+        enterStory("footer", hit.page, footer);
+        ta.focus();
+        ta.value = "";
+        return;
+      }
+    } else if (story) {
+      leaveStory();
+    }
+    // Body editing (the main story).
     const pos = posAtClient(event.clientX, event.clientY);
     if (pos != null) {
       setSel(pos);
@@ -363,7 +604,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
   let composing = false;
 
   const insertText = (text: string): void => {
-    editor.commands.command(({ state, dispatch }) => {
+    active().editor.commands.command(({ state, dispatch }) => {
       const { from, to } = state.selection;
       dispatch?.(state.tr.insertText(text, from, to));
       return true;
@@ -371,7 +612,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
   };
 
   const backspace = (): void => {
-    editor.commands.command(({ state, dispatch }) => {
+    active().editor.commands.command(({ state, dispatch }) => {
       const { selection } = state;
       if (!selection.empty) {
         dispatch?.(state.tr.deleteSelection());
@@ -393,7 +634,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
   };
 
   const deleteForward = (): void => {
-    editor.commands.command(({ state, dispatch }) => {
+    active().editor.commands.command(({ state, dispatch }) => {
       const { selection } = state;
       if (!selection.empty) {
         dispatch?.(state.tr.deleteSelection());
@@ -432,7 +673,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       // list instead (Word: Enter on an empty item ends the list).
       case "insertParagraph":
       case "insertLineBreak":
-        editor.commands.command(({ state, dispatch }) => {
+        active().editor.commands.command(({ state, dispatch }) => {
           const { $from, empty } = state.selection;
           const parent = $from.parent;
           if (parent.type.name !== "paragraph") {
@@ -502,13 +743,14 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
    *  geometry lives); unmapped falls back to the block's boundaries. */
   const edgeTarget = (state: Editor["state"], pos: number, toEnd: boolean): number => {
     const $from = state.doc.resolve(pos);
-    const edges = map?.valid ? map.lineEdges(pos) : null;
+    const edges = active().map?.valid ? active().map!.lineEdges(pos) : null;
     if (edges) return toEnd ? edges.end : edges.home;
     return toEnd ? $from.end() : $from.start();
   };
 
   /** One line up/down at the goal column (null at the paragraph's edge). */
   const vStep = (pos: number, dir: -1 | 1): number | null => {
+    const map = active().map;
     return map?.valid ? map.posVertical(pos, dir) : null;
   };
 
@@ -517,7 +759,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
   const apply = (target: number | null, extend: boolean): void => {
     if (target == null) return;
     if (extend) {
-      setSel(target, editor.state.selection.anchor);
+      setSel(target, active().editor.state.selection.anchor);
     } else {
       setSel(target);
     }
@@ -531,13 +773,13 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       const key = event.key.toLowerCase();
       if (key === "z") {
         event.preventDefault();
-        if (event.shiftKey) editor.commands.redo();
-        else editor.commands.undo();
+        if (event.shiftKey) active().editor.commands.redo();
+        else active().editor.commands.undo();
         return;
       }
       if (key === "y") {
         event.preventDefault();
-        editor.commands.redo();
+        active().editor.commands.redo();
         return;
       }
       // Viewless editors have no EditorView, so nothing dispatches Tiptap's
@@ -547,12 +789,14 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       const command = KEYBOARD_SHORTCUTS[combo];
       if (command) {
         event.preventDefault();
-        (editor.commands as unknown as Record<string, (() => boolean) | undefined>)[command]?.();
+        (active().editor.commands as unknown as Record<string, (() => boolean) | undefined>)[
+          command
+        ]?.();
       }
       return;
     }
     const extend = event.shiftKey;
-    const head = () => editor.state.selection.head;
+    const head = () => active().editor.state.selection.head;
     switch (event.key) {
       case "ArrowLeft":
         event.preventDefault();
@@ -572,19 +816,26 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
         break;
       case "Home":
         event.preventDefault();
-        apply(edgeTarget(editor.state, head(), false), extend);
+        apply(edgeTarget(active().editor.state, head(), false), extend);
         break;
       case "End":
         event.preventDefault();
-        apply(edgeTarget(editor.state, head(), true), extend);
+        apply(edgeTarget(active().editor.state, head(), true), extend);
+        break;
+      // Leaving a furniture story (Word: Esc = Close Header and Footer).
+      case "Escape":
+        if (story) {
+          event.preventDefault();
+          leaveStory();
+        }
         break;
       // Tab / Shift+Tab on list paragraphs adjusts the nesting level (Word);
       // the browser keeps its default Tab behavior everywhere else. One
       // transaction for the whole selection (a single undo step).
       case "Tab": {
-        const { from, to } = editor.state.selection;
+        const { from, to } = active().editor.state.selection;
         const patches: { pos: number; patch: Record<string, unknown> }[] = [];
-        editor.state.doc.nodesBetween(from, to, (node, pos) => {
+        active().editor.state.doc.nodesBetween(from, to, (node, pos) => {
           if (node.type.name !== "paragraph") return true;
           const attrs = node.attrs as Record<string, unknown>;
           const bullet = attrs.bullet as { level?: number } | null | undefined;
@@ -603,7 +854,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
         });
         if (patches.length > 0) {
           event.preventDefault();
-          editor.commands.command(({ state, dispatch }) => {
+          active().editor.commands.command(({ state, dispatch }) => {
             const tr = state.tr;
             for (const { pos, patch } of patches) {
               const live = tr.doc.nodeAt(pos);
@@ -641,8 +892,8 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
   };
 
   const selectionText = (): string | null => {
-    const { from, to } = editor.state.selection;
-    return from === to ? null : editor.state.doc.textBetween(from, to, "\n");
+    const { from, to } = active().editor.state.selection;
+    return from === to ? null : active().editor.state.doc.textBetween(from, to, "\n");
   };
 
   const onCopy = (event: ClipboardEvent): void => {
@@ -657,7 +908,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     if (text == null) return;
     event.preventDefault();
     event.clipboardData?.setData("text/plain", text);
-    editor.commands.command(({ state, dispatch }) => {
+    active().editor.commands.command(({ state, dispatch }) => {
       dispatch?.(state.tr.deleteSelection());
       return true;
     });
@@ -675,22 +926,40 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
   return {
     editor,
     updatePages(pages, flow): void {
-      map = new CaretMap(pages, editor.state.doc, flow);
-      pageCount = pages.length;
+      main.flow = flow;
+      main.map = new CaretMap(pages, main.editor.state.doc, flow);
+      main.pageCount = pages.length;
       placeCaret();
     },
+    updateStoryMap(stack, band): void {
+      const s = story;
+      if (!s) return;
+      s.map = stack
+        ? new CaretMap([{ items: stack }] as never, s.editor.state.doc, {
+            contentLeftPx: main.flow?.contentLeftPx ?? 0,
+            contentTopPx: band.paintY,
+          })
+        : null;
+      placeCaret();
+    },
+    storyKind(): StoryKind | null {
+      return story?.kind ?? null;
+    },
+    exitStory() {
+      return leaveStory();
+    },
     scrollIntoView(pos): void {
-      const rect = map?.valid ? map.caretRect(pos) : null;
+      const rect = main.map?.valid ? main.map.caretRect(pos) : null;
       if (!rect) return;
       opts.pageHost?.(rect.page)?.scrollIntoView({ block: "start", behavior: "auto" });
     },
     /** The page index a doc position renders on (null when unmappable). */
     pageOf(pos): number | null {
-      return map?.valid ? (map.caretRect(pos)?.page ?? null) : null;
+      return main.map?.valid ? (main.map.caretRect(pos)?.page ?? null) : null;
     },
     /** The first doc position rendered on a page (null when unmappable). */
     firstPosOfPage(page: number): number | null {
-      return map?.valid ? map.firstPosOfPage(page) : null;
+      return main.map?.valid ? main.map.firstPosOfPage(page) : null;
     },
     focus(): void {
       ta.focus();
@@ -699,10 +968,12 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       placeCaret();
     },
     destroy(): void {
-      if (raf) cancelAnimationFrame(raf);
+      if (main.raf) cancelAnimationFrame(main.raf);
       blink?.cancel();
-      editor.off("selectionUpdate", placeCaret);
-      editor.destroy();
+      main.editor.off("selectionUpdate", placeCaret);
+      story?.editor.destroy();
+      story = null;
+      main.editor.destroy();
       opts.host.removeEventListener("mousedown", takeFocus);
       opts.host.removeEventListener("mousemove", onMouseMove);
       document.removeEventListener("mouseup", onMouseUp);
