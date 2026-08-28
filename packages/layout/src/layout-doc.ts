@@ -124,6 +124,17 @@ export type LayoutDrawingMember =
       y: number;
       width: number;
       height: number;
+      /** The shape's own solid fill, hex RRGGBB; absent → no fill (a plain
+       *  wps:txbx draws its spPr fill under the text). */
+      fill?: string;
+      /** Fill opacity 0-1 (the solid color's a:alpha percent ÷ 100). */
+      opacity?: number;
+      /** The shape's outline stroke (a:ln): width px + hex color. Word draws
+       *  the txbx box even when the body is empty. */
+      line?: { px: number; color?: string };
+      /** Preset geometry (a:prstGeom @prst) — a txbx can live in any shape
+       *  (a text-carrying ellipse); the box paints in that shape. */
+      preset?: string;
       /** Text insets px (wps:bodyPr lIns/tIns/rIns/bIns, DrawingML defaults
        *  applied by the adapter). */
       insets?: { left?: number; top?: number; right?: number; bottom?: number };

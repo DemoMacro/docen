@@ -445,43 +445,13 @@ function paintMembers(
         }),
       );
     } else if (m.kind === "shape") {
-      const fill = m.fill
-        ? m.opacity != null
-          ? rgbaOf(m.fill, m.opacity)
-          : `#${m.fill}`
-        : undefined;
-      const stroke = m.line ? (m.line.color ? `#${m.line.color}` : "#000000") : undefined;
-      const strokeWidth = m.line?.px;
-      if (m.preset === "ellipse") {
-        tree.add(
-          new Ellipse({
-            x: mx,
-            y: my,
-            width: m.width,
-            height: m.height,
-            fill,
-            stroke,
-            strokeWidth,
-          }),
-        );
-      } else {
-        // rect/roundRect and every box-like preset; unknown presets skip —
-        // an honest absence beats a wrong geometry.
-        if (m.preset !== "rect" && m.preset !== "roundRect") continue;
-        tree.add(
-          new Rect({
-            x: mx,
-            y: my,
-            width: m.width,
-            height: m.height,
-            fill,
-            stroke,
-            strokeWidth,
-            cornerRadius: m.preset === "roundRect" ? Math.min(m.width, m.height) / 6 : undefined,
-          }),
-        );
-      }
+      paintShapeBox(tree, { ...m, x: mx, y: my }, false);
     } else {
+      // The txbx shape's own paint (prstGeom silhouette + spPr fill + a:ln)
+      // sits under its text — Word draws the box even when the body is empty
+      // (a plain text box is white fill + an accent hairline, visible on a
+      // white page).
+      paintShapeBox(tree, { ...m, x: mx, y: my }, true);
       const measurer = new TextMeasurer(ctx.metrics);
       const left = m.insets?.left ?? 0;
       // Metafile runs carry nowrap: GDI draws the string as-is, so the width
@@ -514,6 +484,61 @@ function paintMembers(
 function rgbaOf(hex: string, opacity: number): string {
   const n = parseInt(hex, 16);
   return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${opacity})`;
+}
+
+/** One box-like shape's own paint — preset silhouette + solid fill + outline
+ *  stroke. Shared by standalone shape members and text-box shapes (a txbx is
+ *  a shape carrying text; Word paints its prstGeom under the body). Unknown
+ *  presets degrade to a plain rectangle when `rectFallback` (a txbx is a box
+ *  by nature) and skip otherwise (an honest absence). */
+function paintShapeBox(
+  tree: IGroup,
+  box: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    preset?: string;
+    fill?: string;
+    opacity?: number;
+    line?: { px: number; color?: string };
+  },
+  rectFallback: boolean,
+): void {
+  if (
+    box.preset != null &&
+    box.preset !== "rect" &&
+    box.preset !== "roundRect" &&
+    box.preset !== "ellipse"
+  ) {
+    if (!rectFallback) return;
+  }
+  const fill = box.fill
+    ? box.opacity != null
+      ? rgbaOf(box.fill, box.opacity)
+      : `#${box.fill}`
+    : undefined;
+  const stroke = box.line ? (box.line.color ? `#${box.line.color}` : "#000000") : undefined;
+  const strokeWidth = box.line?.px;
+  const common = {
+    x: box.x,
+    y: box.y,
+    width: box.width,
+    height: box.height,
+    fill,
+    stroke,
+    strokeWidth,
+  };
+  if (box.preset === "ellipse") {
+    tree.add(new Ellipse(common));
+    return;
+  }
+  tree.add(
+    new Rect({
+      ...common,
+      cornerRadius: box.preset === "roundRect" ? Math.min(box.width, box.height) / 6 : undefined,
+    }),
+  );
 }
 
 /** An uncropped picture. The element must join the tree only once its encoding

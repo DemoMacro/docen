@@ -374,6 +374,16 @@ const pageNumberItems = (): string =>
     { text: opt("remove-page-numbers"), value: "remove-numbers" },
   ]);
 
+/** The Shapes gallery — the presets the canvas paints today (box presets,
+ *  ellipse, straight line); values are the ST_ShapeType tokens verbatim. */
+const shapeItems = (): string =>
+  JSON.stringify([
+    { text: opt("shape-rect"), value: "rect", event: "shapes" },
+    { text: opt("shape-round-rect"), value: "roundRect", event: "shapes" },
+    { text: opt("shape-ellipse"), value: "ellipse", event: "shapes" },
+    { text: opt("shape-line"), value: "line", event: "shapes" },
+  ]);
+
 // --- Tabs --------------------------------------------------------------------
 
 /** Default active tab id. */
@@ -770,7 +780,7 @@ const insertTab = (): RibbonTab =>
     group("illustrations", [
       btn("picture", "insert-picture", { size: "large" }),
       btn("online-picture", "online-picture", { size: "large" }),
-      btn("shapes", "shapes", { size: "large" }),
+      split("shapes", "shapes", parsedItems(shapeItems()), { size: "large" }),
       btn("icon-library", "icons", { size: "large" }),
       btn("3d-model", "3d-model", { size: "large" }),
       btn("smartart", "smartart", { size: "large" }),

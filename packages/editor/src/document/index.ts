@@ -155,6 +155,10 @@ const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   // Bookmark prompts for a name and wraps the selection.
   "symbol",
   "bookmark",
+  // Text Box / Shapes insert a standalone wps shape run (Shapes reads the
+  // gallery preset from the split item's value).
+  "text-box",
+  "shapes",
   // #onChange (data-event)
   "open",
   "save-as",
@@ -2094,6 +2098,40 @@ class DocenDocument extends AddinHost<Editor> {
     editor.view.dispatch(editor.state.tr.insert(from, start).insert(to + 1, end));
   }
 
+  /** Insert → Text Box / Shapes: a standalone wps shape run, floating
+   *  wrap-none and centered on the page (Word's insertion behavior). The
+   *  text box carries Word's plain look — white fill, accent-1 hairline —
+   *  and an editable empty body (the PM `content`); a gallery shape carries
+   *  its preset geometry with the accent fill instead. */
+  #insertShape(preset: string | undefined): void {
+    const editor = this.editor;
+    if (!editor) return;
+    const geometry: Record<string, unknown> = {
+      // Word's plain text box default: 2" × 1.2".
+      transformation: { width: 1828800, height: 1097280 },
+      floating: {
+        horizontalPosition: { relative: "page", align: "center" },
+        verticalPosition: { relative: "page", align: "center" },
+        wrap: { type: "none" },
+      },
+    };
+    if (preset) {
+      geometry.presetGeometry = { preset };
+      // The theme's accent-1 pair (fill + its darkened outline) — the same
+      // look Word gives a fresh shape; the projection paints flat hex.
+      geometry.fill = { type: "solid", color: "4472C4" };
+      geometry.outline = { color: "2F528F", width: 12700 };
+    } else {
+      geometry.fill = { type: "solid", color: "FFFFFF" };
+      geometry.outline = { color: "4472C4", width: 12700 };
+    }
+    editor.commands.insertContentAt(editor.state.selection.from, {
+      type: "wpsShape",
+      attrs: { wpsShape: geometry },
+      content: [{ type: "paragraph" }],
+    } as JSONContent);
+  }
+
   readonly #onCommand = (event: CustomEvent<{ event?: string; value?: string }>): void => {
     const { event: name, value } = event.detail ?? {};
     if (typeof name !== "string") return;
@@ -2237,6 +2275,12 @@ class DocenDocument extends AddinHost<Editor> {
     // bookmarkStart/bookmarkEnd pair (Word's Insert → Bookmark).
     if (name === "bookmark") {
       this.#insertBookmark();
+      return;
+    }
+    // Text Box / Shapes — insert a floating wps shape run (Shapes reads its
+    // preset from the gallery item's value; the text box has no preset).
+    if (name === "text-box" || name === "shapes") {
+      this.#insertShape(name === "shapes" ? (value ?? "rect") : undefined);
       return;
     }
     // Clipboard — the selection is canvas-rendered (no DOM editor selection),

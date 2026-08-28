@@ -311,6 +311,11 @@ export const ribbonEn: AdditionalLanguage = {
     "ribbon.opt.page-num-top": "Top of Page",
     "ribbon.opt.page-num-bottom": "Bottom of Page",
     "ribbon.opt.remove-page-numbers": "Remove Page Numbers",
+    // --- Shapes gallery (values are ST_ShapeType tokens) ---
+    "ribbon.opt.shape-rect": "Rectangle",
+    "ribbon.opt.shape-round-rect": "Rounded Rectangle",
+    "ribbon.opt.shape-ellipse": "Ellipse",
+    "ribbon.opt.shape-line": "Line",
     // --- Symbol dialog / Bookmark prompt ---
     "symbol.title": "Symbol",
     "symbol.insert": "Insert",
@@ -732,6 +737,11 @@ export const ribbonZhCN: AdditionalLanguage = {
     "ribbon.opt.page-num-top": "页面顶端",
     "ribbon.opt.page-num-bottom": "页面底端",
     "ribbon.opt.remove-page-numbers": "删除页码",
+    // --- 形状库（value 为 ST_ShapeType token） ---
+    "ribbon.opt.shape-rect": "矩形",
+    "ribbon.opt.shape-round-rect": "圆角矩形",
+    "ribbon.opt.shape-ellipse": "椭圆",
+    "ribbon.opt.shape-line": "直线",
     // --- 符号对话框 / 书签 ---
     "symbol.title": "符号",
     "symbol.insert": "插入",

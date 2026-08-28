@@ -964,6 +964,12 @@ function wpsMemberOf(
       y,
       width,
       height,
+      // The shape's own spPr paint — a txbx box draws under its text even
+      // when the body is empty (Word's plain text box). The preset travels
+      // with it: a text-carrying ellipse paints as an ellipse.
+      ...(preset ? { preset } : {}),
+      ...(fill ? { fill } : {}),
+      ...(line ? { line: { px: line.px, ...(line.color ? { color: line.color } : {}) } } : {}),
       insets: {
         left: ins(bodyPr.lIns, BODY_INSET_EMU.left),
         top: ins(bodyPr.tIns, BODY_INSET_EMU.top),
