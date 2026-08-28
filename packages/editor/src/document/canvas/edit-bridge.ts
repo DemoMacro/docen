@@ -58,8 +58,11 @@ export interface EditBridgeStory {
     band: { top: number; bottom: number; paintY: number } | null;
     slot: StorySlot;
   } | null;
-  /** The story's source JSON (empty when the slot has no content yet). */
-  read: (kind: StoryKind, slot: StorySlot) => JSONContent[];
+  /** The story's source JSON (empty when the slot has no content yet) —
+   *  resolved for the section the anchor `page` belongs to (Word: double-
+   *  clicking a band edits THAT page's section's furniture, whatever body
+   *  position the caret happens to sit at). */
+  read: (kind: StoryKind, slot: StorySlot, page: number) => JSONContent[];
   /** A story entered — drop in the stage chrome (grayed body, boundary).
    *  `page` is the anchor page the story edits in place on. */
   entered: (kind: StoryKind, slot: StorySlot, page: number) => void;
@@ -476,7 +479,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     // A read-only document has no stories (viewless editing is command-driven
     // — setEditable(false) alone cannot stop a transaction).
     if (!storyCfg || story || composing || !geoIn.band || !main.editor.isEditable) return false;
-    const source = storyCfg.read(kind, geoIn.slot);
+    const source = storyCfg.read(kind, geoIn.slot, page);
     // An empty story starts with one empty paragraph (Word's blank header).
     const initial = source.length > 0 ? source : [{ type: "paragraph" }];
     // Register the story first — the host's onDoc guards on its own story
@@ -558,6 +561,13 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     // placement below is the real focus move.
     event.preventDefault();
     if (composing) return;
+    // Park the textarea at the click point BEFORE focusing it: focus() would
+    // otherwise scroll its stale position (the old caret, possibly another
+    // page) into view, yanking the surface away between the two clicks of a
+    // band double-click. It also anchors the IME window at the click.
+    const hostRect = opts.host.getBoundingClientRect();
+    ta.style.left = `${event.clientX - hostRect.left}px`;
+    ta.style.top = `${event.clientY - hostRect.top}px`;
     const dbl = isDoubleClick(event);
     lastClick = { t: event.timeStamp, x: event.clientX, y: event.clientY };
     const storyCfg = opts.story;

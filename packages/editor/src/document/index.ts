@@ -1021,7 +1021,7 @@ class DocenDocument extends AddinHost<Editor> {
             slot: stage.slotOfPage(page),
           };
         },
-        read: (kind, slot) => this.#readStorySource(kind, slot),
+        read: (kind, slot, page) => this.#readStorySource(kind, slot, page),
         entered: (kind, slot, page) => {
           this.#storyKind = kind;
           this.#storySlot = slot;
@@ -1098,32 +1098,22 @@ class DocenDocument extends AddinHost<Editor> {
     this.dispatchEvent(new CustomEvent("docen:ready", { bubbles: true, composed: true }));
   }
 
-  /** The attrs object carrying the CURRENT section's header/footer slots —
-   *  the first section-carrying paragraph at/after the caret (that
-   *  section's last paragraph), else the doc node (the final section closes
-   *  at the body end). Reads the live PM state through the same lookup
-   *  #writeSlots writes through, so reads and writes land on one node even
-   *  in multi-section documents. */
-  #sectionAttrsAtCaret(): Record<string, unknown> | null {
-    const editor = this.editor;
-    if (!editor) return null;
-    const targetPos = this.#sectionSectPrPos();
-    if (targetPos != null) {
-      const node = editor.state.doc.nodeAt(targetPos);
-      if (node) return node.attrs as Record<string, unknown>;
-    }
-    return (editor.state.doc.attrs as Record<string, unknown>) ?? null;
-  }
-
   #slotsKeyOf(kind: StoryKind): "sectionHeaders" | "sectionFooters" {
     return kind === "header" ? "sectionHeaders" : "sectionFooters";
   }
 
-  /** The story's source JSON — the caret's section's slot content, falling
-   *  back to the default slot's (what the page displays until the edit
-   *  breaks the tie). */
-  #readStorySource(kind: StoryKind, slot: StorySlot): JSONContent[] {
-    const attrs = this.#sectionAttrsAtCaret();
+  /** The story's source JSON — the section owning `page` holds the slots
+   *  (Word: the band double-clicked edits that page's section, regardless of
+   *  where the caret sits); an absent slot falls back to the default slot's
+   *  (what the page displays until the edit breaks the tie). */
+  #readStorySource(kind: StoryKind, slot: StorySlot, page: number): JSONContent[] {
+    const editor = this.editor;
+    if (!editor) return [];
+    const pos = this.#sectPrPosOfSection(this.#sectionOfPage[page] ?? 0);
+    const attrs =
+      pos >= 0
+        ? (editor.state.doc.nodeAt(pos)?.attrs as Record<string, unknown> | undefined)
+        : (editor.state.doc.attrs as Record<string, unknown> | undefined);
     const group = attrs?.[this.#slotsKeyOf(kind)] as
       | { default?: JSONContent[]; first?: JSONContent[]; even?: JSONContent[] }
       | undefined;
@@ -1158,14 +1148,41 @@ class DocenDocument extends AddinHost<Editor> {
     );
   }
 
-  /** Write a finished story's JSON back. An earlier section's slots live on
-   *  its last paragraph (the node carrying sectionProperties) and go through
-   *  a plain setNodeMarkup transaction — one undo step. With no such
-   *  paragraph the final section closes at the body end and its slots live
-   *  on the doc node, which no step can address (nodeAt(0) is the first
-   *  child) — they land through #loadDoc's state rebuild, the same path
-   *  setJSON takes (history resets with it, like any document load). */
-  #persistStory(kind: StoryKind, slot: StorySlot, json: JSONContent[]): void {
+  /** The doc position of the paragraph closing the given section (0-based —
+   *  the Nth sectionProperties paragraph in document order), or -1 when that
+   *  section closes at the body end (its sectPr lives on the doc node). */
+  #sectPrPosOfSection(sectionIndex: number): number {
+    const editor = this.editor;
+    if (!editor) return -1;
+    let seen = -1;
+    let target = -1;
+    editor.state.doc.descendants((node, pos) => {
+      if (target >= 0) return false;
+      if (
+        node.type.name === "paragraph" &&
+        (node.attrs as { sectionProperties?: unknown }).sectionProperties != null
+      ) {
+        seen++;
+        if (seen === sectionIndex) {
+          target = pos;
+          return false;
+        }
+      }
+      return true;
+    });
+    return target;
+  }
+
+  /** Write a finished story's JSON back. The story edits the section its
+   *  anchor page belongs to — the caret is no address here (exiting by
+   *  clicking another page's body moves it). An earlier section's slots live
+   *  on its closing sectPr paragraph and go through a plain setNodeMarkup
+   *  transaction — one undo step. The final section closes at the body end
+   *  and its slots live on the doc node, which no step can address
+   *  (nodeAt(0) is the first child) — they land through #loadDoc's state
+   *  rebuild, the same path setJSON takes (history resets with it, like any
+   *  document load). */
+  #persistStory(kind: StoryKind, slot: StorySlot, json: JSONContent[], anchorPage: number): void {
     const bridge = this.#bridge;
     if (!bridge) return;
     const key = this.#slotsKeyOf(kind);
@@ -1173,15 +1190,8 @@ class DocenDocument extends AddinHost<Editor> {
       ...(attrs[key] as object | undefined),
       [slot]: json,
     });
-    const state = bridge.editor.state;
-    let target = -1;
-    state.doc.descendants((node, pos) => {
-      if (target < 0 && node.attrs.sectionProperties != null) {
-        target = pos;
-        return false;
-      }
-      return true;
-    });
+    const sectionIndex = this.#sectionOfPage[anchorPage] ?? 0;
+    const target = this.#sectPrPosOfSection(sectionIndex);
     if (target < 0) {
       const raw = bridge.editor.getJSON();
       this.#loadDoc({
@@ -1206,8 +1216,8 @@ class DocenDocument extends AddinHost<Editor> {
     this.#stage?.setStoryEdit(null);
     this.#storyKind = null;
     this.#storySlot = "default";
+    if (dirty) this.#persistStory(kind, slot, json, this.#storyPage);
     this.#storyPage = -1;
-    if (dirty) this.#persistStory(kind, slot, json);
   }
 
   /** Write a slots group through a transaction: the group lives on the
@@ -1797,7 +1807,11 @@ class DocenDocument extends AddinHost<Editor> {
     const from = editor.state.selection.from;
     let targetPos: number | null = null;
     editor.state.doc.descendants((node, nodePos) => {
-      if (targetPos != null || nodePos < from) return true;
+      if (targetPos != null) return true;
+      // Paragraphs ending at/before the caret close earlier sections; a
+      // paragraph CONTAINING the caret owns the current section (OOXML: its
+      // sectPr ends that section, caret position included).
+      if (nodePos + node.nodeSize <= from) return true;
       if (
         node.type.name === "paragraph" &&
         (node.attrs as { sectionProperties?: unknown }).sectionProperties != null
