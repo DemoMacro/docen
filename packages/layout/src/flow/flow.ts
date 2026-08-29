@@ -119,6 +119,11 @@ class Flow {
   private y = 0;
   private prevAfter = 0;
   private firstOnPage = true;
+  /** The current page was opened by automatic pagination (overflow), not by
+   *  an explicit break — Word never paints space-before on such a page's
+   *  first block (COM-verified: a 600-twip before shows after a manual page
+   *  break, never after overflow; section-start pages keep it too). */
+  private autoBreak = false;
   /** Zero-based index of the page being filled — picks the slot's insets. */
   private pageIndex = 0;
   /** Partial-overlap float zones (wrap square/tight): lines inside the band
@@ -193,13 +198,15 @@ class Flow {
     return moved;
   }
 
-  /** Seal the current page's items and start a fresh page. */
-  private newPage(): void {
+  /** Seal the current page's items and start a fresh page. `auto` marks an
+   *  overflow-driven break — its page's first block drops its space-before. */
+  private newPage(auto = false): void {
     if (this.items.length > 0) this.pages.push({ items: this.items.splice(0) });
     this.pageIndex++;
     this.y = this.insets().topPx;
     this.prevAfter = 0;
     this.firstOnPage = true;
+    this.autoBreak = auto;
     this.zones.length = 0;
     this.bands.length = 0;
   }
@@ -208,6 +215,14 @@ class Flow {
     this.newPage();
     if (this.pages.length === 0) this.pages.push({ items: [] });
     return this.pages;
+  }
+
+  /** Page-top spacing: when the page was opened by automatic pagination the
+   *  first block paints no space-before (Word's overflow-page behavior — see
+   *  autoBreak). Manual breaks and section-start pages keep the margin. */
+  private spacingBefore(laid: LaidOutBlock): number {
+    const m = marginBefore(laid, this.prevAfter, this.firstOnPage);
+    return this.firstOnPage && this.autoBreak ? 0 : m;
   }
 
   /** Place a block: whole, split, or moved to the next page. */
@@ -230,23 +245,22 @@ class Flow {
     // along (a heading stays with the paragraph that follows it). The pulled
     // blocks precede this one — re-place them first, then this block.
     const pulled = this.pullKeepNext();
-    this.newPage();
+    this.newPage(true);
     for (const kept of pulled) this.pushLaid(kept);
     // Re-lay on the fresh page: float zones are page-local, so the lines
     // laid against the old page's zones/y are stale here.
     const fresh = layoutBlock(block, this.opts.contentWidthPx, this.ctx, this.measurer);
     if (!this.tryPlace(fresh)) {
       // Cannot fit even a full empty page — place whole and overflow.
-      this.commit(fresh, marginBefore(fresh, this.prevAfter, this.firstOnPage));
+      this.commit(fresh, this.spacingBefore(fresh));
     }
   }
 
   /** Continue placing an already-laid block (split tails, pulled keepNext). */
   private pushLaid(laid: LaidOutBlock): void {
     if (this.tryPlace(laid)) return;
-    this.newPage();
-    if (!this.tryPlace(laid))
-      this.commit(laid, marginBefore(laid, this.prevAfter, this.firstOnPage));
+    this.newPage(true);
+    if (!this.tryPlace(laid)) this.commit(laid, this.spacingBefore(laid));
   }
 
   /** Try to place `laid` on the current page; on overflow, split at a legal
@@ -258,7 +272,7 @@ class Flow {
     // Never place inside a cleared band — drop below it first (whether this
     // is a fresh push, a split tail, or a re-placed keepNext block).
     this.dodgeBands();
-    const before = marginBefore(laid, this.prevAfter, this.firstOnPage);
+    const before = this.spacingBefore(laid);
     // Both spans are relative to this.y: the page bottom and the band top.
     const room = Math.min(this.remaining(), this.bandCeiling() - this.y) - before;
     if (before + laid.heightPx <= room) {
@@ -375,9 +389,13 @@ class Flow {
 }
 
 /** The stacked `before` margin: the first block of a box counts in full (a
- *  page/cell is a BFC), later blocks collapse against `prevAfter` at max. */
+ *  page/cell is a BFC), later blocks collapse against `prevAfter` at max —
+ *  except a table, which never inherits the preceding paragraph's space-after
+ *  (Word drops space-before-a-table; corpus-verified on the honor table:
+ *  ref row-0 top = heading bottom, its 4px after painted nowhere). */
 function marginBefore(laid: LaidOutBlock, prevAfter: number, firstInBox: boolean): number {
   const before = laid.kind === "paragraph" ? laid.beforePx : 0;
+  if (laid.kind === "table") return before;
   return firstInBox ? before : Math.max(prevAfter, before);
 }
 

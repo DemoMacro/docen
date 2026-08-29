@@ -263,13 +263,17 @@ export function leaferWordIndices(text: string): number[] {
 
 const LEAFER_BREAK_CHARS = new Set(["-", "—", "／", "～", "｜", "┆", "·"]);
 
-/** A spacing.line spec against a line's natural height. Table cells take the
- *  pitch as the multiple's single-line base but never snap to whole rows —
- *  the "add grid pitch to cell lines" compat (w:adjustLineHeightInTable,
- *  on in every CJK-Word document) floors at one pitch, it never ceils:
- *  corpus-verified (honor table, 340-twip grid): a 1.5× 宋体 12pt cell line
- *  renders at 1.5 × pitch (34px ≈ the reference's 34.7px row pitch), while
- *  the old 2-row snap measured 45px. */
+/** A spacing.line spec against a line's natural height. On a grid, a body CJK
+ *  line's spec'd height never falls below the line's natural height and snaps
+ *  up to whole rows; a cell line (w:adjustLineHeightInTable, on in every
+ *  CJK-Word document) adds grid pitch only as far as the line's own natural
+ *  height demands — the multiple's demand is factor × pitch, and the natural
+ *  height snaps up to whole rows *before* the comparison. Corpus-verified
+ *  (honor table, 340-twip grid): the 14pt header cell (natural 24.2px >
+ *  pitch 22.7px) takes 2 rows (45.3px) while every 12pt/10.5pt row stays at
+ *  1.5 × pitch (34px); shrinking the header run to 12pt moves its bottom
+ *  border from y215 to y204 (= 1.5 × pitch), confirming natural — not factor
+ *  — drives the snap. */
 function resolveLine(
   spec: LayoutLineHeight,
   naturalPx: number,
@@ -287,10 +291,9 @@ function resolveLine(
   // lines are exempt from the lattice.
   if (pitch > 0 && hasCjk) {
     if (inTable) {
-      // A cell line floors at its demand — the grid pitch scales the multiple
-      // but the row never rounds up to whole rows (the row's trHeight floors
-      // separately, so rounding here would overshoot it).
-      return Math.max(spec.factor * pitch, naturalPx);
+      // A cell line's natural height still snaps up to whole rows before the
+      // comparison against the multiple's demand (see resolveLine doc).
+      return Math.max(spec.factor * pitch, Math.ceil(naturalPx / pitch) * pitch);
     }
     const specH = spec.factor * pitch;
     return Math.ceil(Math.max(specH, naturalPx) / pitch) * pitch;
@@ -302,9 +305,8 @@ function resolveLine(
 /** No spacing.line: snap to the document grid. */
 function snapLine(naturalPx: number, hasCjk: boolean, pitch: number, inTable: boolean): number {
   if (pitch <= 0) return naturalPx;
-  // A cell line takes one pitch of "added" grid height at most
-  // (w:adjustLineHeightInTable semantics — a floor, never whole-row ceils).
-  if (inTable) return Math.max(naturalPx, pitch);
-  if (hasCjk) return Math.ceil(naturalPx / pitch) * pitch;
+  // A cell line's natural height snaps up to whole rows — the "add grid
+  // pitch" compat raises it as far as the line demands, never just one pitch.
+  if (inTable || hasCjk) return Math.ceil(naturalPx / pitch) * pitch;
   return Math.max(naturalPx, pitch);
 }
