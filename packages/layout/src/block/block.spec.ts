@@ -69,7 +69,7 @@ describe("layoutParagraph line-height semantics", () => {
     if (out.kind === "paragraph") expect(out.heightPx).toBeCloseTo(37.5, 4);
   });
 
-  it("flags grid lines only for the body flow (onGrid) and non-overriding spacing", () => {
+  it("flags grid lines only for grid contexts (onGrid) with non-overriding spacing", () => {
     const spec = { lineHeight: { rule: "multiple" as const, factor: 2 }, beforePx: 0, afterPx: 0 };
     const body = layoutBlock(
       para({ spacing: spec }),
@@ -81,8 +81,9 @@ describe("layoutParagraph line-height semantics", () => {
       expect(body.lines[0].grid).toBe(true);
       expect(body.lines[0].naturalPx).toBeGreaterThan(0);
     }
-    // Furniture/text-box stacks pass the pitch without onGrid: heights still
-    // scale, but the line never carries the lattice-placement flag.
+    // Pitch without onGrid (a caller that scales heights but places at the
+    // line top — none today, but the flag must stay caller-driven): heights
+    // still scale, and the line never carries the lattice-placement flag.
     const stack = layoutBlock(para({ spacing: spec }), 500, { linePitchPx: 25 }, measurer);
     if (stack.kind === "paragraph") {
       expect(stack.heightPx).toBeCloseTo(50, 4);

@@ -25,6 +25,7 @@ import {
   type LaidOutParagraph,
   type LaidOutStackItem,
   type LaidOutTable,
+  type LayoutBlockContext,
   type LayoutBorderEdge,
   type LayoutDrawing,
   type LayoutDrawingMember,
@@ -504,7 +505,14 @@ function paintMembers(
       const inner = m.nowrap
         ? Number.POSITIVE_INFINITY
         : Math.max(0, m.width - left - (m.insets?.right ?? 0));
-      const laid = stackBlocks(m.blocks, inner, undefined, measurer);
+      // A text box shares the section's doc grid with the body: the multiple
+      // line rule takes whole grid rows (Word-verified: 1.5× CJK on the
+      // 340-twip grid renders two rows) and the natural text box centers in
+      // that span — ref PDF shows the same half-leading pad as body lines.
+      const grid: LayoutBlockContext | undefined = ctx.flow.linePitchPx
+        ? { linePitchPx: ctx.flow.linePitchPx, onGrid: true }
+        : undefined;
+      const laid = stackBlocks(m.blocks, inner, grid, measurer);
       let oy = m.insets?.top ?? 0;
       if (m.anchor !== "top") {
         // spAutoFit shrinks the drawn box to the text, so slack resolves
