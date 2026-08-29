@@ -21,7 +21,7 @@ import type { FlowPage, FontMetrics, LaidOutStackItem } from "@docen/layout";
 import { stackBlocks, TextMeasurer } from "@docen/layout";
 import { App, Line, Rect, Text, type IGroup } from "leafer-ui";
 
-import { paintFurnitureStack, paintScene, type PaintContext } from "./scene";
+import { paintFurnitureStack, paintScene, releasePinnedImages, type PaintContext } from "./scene";
 
 const PAGE_GAP = 24;
 
@@ -369,6 +369,7 @@ export class CanvasStage {
     this.io.disconnect();
     this.dprMedia?.removeEventListener("change", this.dprChange);
     for (const slot of this.slots) slot.app?.destroy();
+    releasePinnedImages();
     this.shell.remove();
   }
 

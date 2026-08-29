@@ -36,11 +36,13 @@ import {
   Ellipse,
   Group,
   Image as LeaferImage,
+  ImageManager,
   Line,
   Path as LeaferPath,
   Rect,
   Text,
   type IGroup,
+  type ILeaferImage,
 } from "leafer-ui";
 
 /** OOXML prstDash tokens → dash patterns in px (line-width units, the host's
@@ -285,6 +287,7 @@ function paintParagraph(
             ctx,
           );
         } else if (inline.src) {
+          pinImage(inline.src);
           tree.add(
             new LeaferImage({
               url: inline.src,
@@ -615,6 +618,30 @@ function paintShapeBox(
   );
 }
 
+/** Leafer evicts a decoded image larger than its 4MP cache threshold the
+ *  moment a paint's use count drops back to zero (ImageManager.recycle →
+ *  Resource.remove), so page recycling under scroll re-loaded every big
+ *  banner/photo from its data URL and painted it a second late — the pop-in.
+ *  One pinned use per media url keeps the decoded entry resident for the
+ *  stage's lifetime: every later paint hits the ready entry and renders
+ *  synchronously. The per-position `LeaferImage` elements stay thin shells —
+ *  Leafer's paint resolves the bitmap through this shared entry. */
+const pinnedImages = new Map<string, ILeaferImage>();
+
+function pinImage(url: string): void {
+  if (pinnedImages.has(url)) return;
+  const image = ImageManager.get({ url }, "image");
+  pinnedImages.set(url, image);
+  image.load();
+}
+
+/** Release the pins at stage teardown — Leafer's own recycle then evicts the
+ *  large entries it no longer shares. */
+export function releasePinnedImages(): void {
+  for (const image of pinnedImages.values()) ImageManager.recycle(image);
+  pinnedImages.clear();
+}
+
 /** An uncropped picture. The element must join the tree only once its encoding
  *  is decoded (the stage renders eagerly right after paint — Leafer's
  *  change-driven re-render stalls afterwards, so an Image added before its
@@ -630,6 +657,7 @@ function addPlainImage(
   my: number,
   ctx: PaintContext,
 ): void {
+  pinImage(m.src!);
   const slot = new Rect({ x: mx, y: my, width: m.width, height: m.height });
   tree.add(slot);
   const el = new Image();
@@ -693,9 +721,11 @@ function addCroppedImage(
     canvas.width = sw;
     canvas.height = sh;
     canvas.getContext("2d")?.drawImage(el, sx, sy, sw, sh, 0, 0, sw, sh);
+    const croppedUrl = canvas.toDataURL("image/png");
+    pinImage(croppedUrl);
     tree.addAfter(
       new LeaferImage({
-        url: canvas.toDataURL("image/png"),
+        url: croppedUrl,
         x,
         y,
         width,
