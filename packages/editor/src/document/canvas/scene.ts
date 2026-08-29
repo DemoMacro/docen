@@ -249,6 +249,12 @@ function paintParagraph(
                   : undefined,
           fontFamily: family,
           fontSize: inline.style.sizePx,
+          // Leafer's default 150% line spacing half-leads the glyphs ~0.25×
+          // fontSize below the line-box top the layout handed over (text-box
+          // text riding low). The px form pins one line's spacing to the font
+          // size — the percent form (`{ type: "percent" }`) silently blanks
+          // every body Text when combined with an explicit height.
+          lineHeight: inline.style.sizePx,
           // Numbers only: Leafer's fontWeight setter treats strings as named
           // weights ("bold"/"thin"…) and silently maps unknown strings to 400,
           // so a string "700" would lose bold. Italic is the `italic` boolean
@@ -515,7 +521,7 @@ function paintMembers(
         : undefined;
       const laid = stackBlocks(m.blocks, inner, grid, measurer);
       let oy = m.insets?.top ?? 0;
-      if (m.anchor !== "top") {
+      if (m.anchor === "center" || m.anchor === "bottom") {
         // spAutoFit shrinks the drawn box to the text, so slack resolves
         // against the fitted height — an oversized declared extent (stale
         // cy from a template) must not push the text down/center the box.

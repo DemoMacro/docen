@@ -160,7 +160,8 @@ export type LayoutDrawingMember =
       /** Text insets px (wps:bodyPr lIns/tIns/rIns/bIns, DrawingML defaults
        *  applied by the adapter). */
       insets?: { left?: number; top?: number; right?: number; bottom?: number };
-      /** Vertical anchoring (bodyPr @anchor). */
+      /** Vertical anchoring (bodyPr @anchor); absent = top (the OOXML
+       *  ST_TextAnchoringType default). */
       anchor?: "top" | "center" | "bottom";
       /** bodyPr a:spAutoFit — the shape hugs its text, so vertical anchoring
        *  resolves against the fitted height, not the declared extent (Word
