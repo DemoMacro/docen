@@ -545,8 +545,9 @@ export interface LayoutFloatZone {
 /** Block-level layout context threaded by the caller that stacks blocks. */
 export interface LayoutBlockContext {
   /** Section document-grid pitch in px (w:docGrid linePitch); 0/absent = no
-   *  grid. CJK lines ceil to a whole pitch multiple; Latin lines floor at
-   *  max(natural, pitch); table cells floor at max(natural, pitch). */
+   *  grid. Body CJK lines ceil to a whole pitch multiple; Latin lines floor
+   *  at max(natural, pitch); table cells never ceil — the pitch scales a
+   *  multiple rule and floors a snapped one (adjustLineHeightInTable). */
   linePitchPx?: number;
   /** The body flow centers a grid-height line's natural text box in the
    *  span (the docGrid lattice — Word-verified). Text-box stacks take the
@@ -554,9 +555,10 @@ export interface LayoutBlockContext {
    *  header/footer stacks are laid with no grid context at all (natural
    *  line heights) — neither sets this. */
   onGrid?: boolean;
-  /** True inside a table cell: the grid snap floors instead of ceils (the
-   *  row's trHeight governs, not the line box). Cells also clear float
-   *  zones — a cell's width is its column, not the page flow. */
+  /** True inside a table cell: lines never ceil to whole grid rows (the row's
+   *  trHeight floors separately — the w:adjustLineHeightInTable pitch is a
+   *  floor, not a row count). Cells also clear float zones — a cell's width
+   *  is its column, not the page flow. */
   inTable?: boolean;
   floatZones?: readonly LayoutFloatZone[];
   /** This block's top Y within the flow — pairs with floatZones to derive

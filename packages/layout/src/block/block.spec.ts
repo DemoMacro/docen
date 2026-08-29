@@ -122,10 +122,12 @@ describe("layoutParagraph line-height semantics", () => {
     if (out.kind === "paragraph") expect(out.heightPx).toBeCloseTo(pitch, 4);
   });
 
-  it("raises a table cell's CJK multiple line to whole grid rows of factor×natural", () => {
-    // Word experiment set E14: 1.5x SimSun 12pt on a 25px grid — demand
-    // 1.5×19.2 = 28.8 → TWO rows = 50, not max(natural, 1.5×pitch) = 37.5.
-    // Body (non-cell) keeps its max(factor×pitch, natural) rounding.
+  it("bases a table cell's CJK multiple line on the pitch without row snapping", () => {
+    // Corpus-verified (honor table, 340-twip grid): a 1.5× cell line measures
+    // 1.5 × pitch — the cell floors at its demand, never rounding up to whole
+    // grid rows (the row's trHeight floors separately). The earlier E14
+    // "renders TWO rows" reading mistook 1.5×pitch in px for 2 rows in pt.
+    // Body (non-cell) keeps its whole-row rounding.
     const pitch = 25;
     const cjkStyle = { family: { latin: "serif", eastAsia: "SimSun" }, sizePx: 16 };
     const cjk = (inTable: boolean) =>
@@ -138,7 +140,7 @@ describe("layoutParagraph line-height semantics", () => {
         { linePitchPx: pitch, inTable },
         measurer,
       );
-    if (cjk(true).kind === "paragraph") expect(cjk(true).heightPx).toBeCloseTo(50, 4);
+    if (cjk(true).kind === "paragraph") expect(cjk(true).heightPx).toBeCloseTo(37.5, 4);
     if (cjk(false).kind === "paragraph") expect(cjk(false).heightPx).toBeCloseTo(50, 4);
   });
 

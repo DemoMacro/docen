@@ -262,10 +262,13 @@ export function leaferWordIndices(text: string): number[] {
 
 const LEAFER_BREAK_CHARS = new Set(["-", "—", "／", "～", "｜", "┆", "·"]);
 
-/** A spacing.line spec against a line's natural height. Table cells use the
- *  grid pitch for the multiple rule but never snap to whole rows (verified vs
- *  Word: a 1.5x cell line on a 340-twip grid renders at 1.5 × pitch, not 2
- *  rows). */
+/** A spacing.line spec against a line's natural height. Table cells take the
+ *  pitch as the multiple's single-line base but never snap to whole rows —
+ *  the "add grid pitch to cell lines" compat (w:adjustLineHeightInTable,
+ *  on in every CJK-Word document) floors at one pitch, it never ceils:
+ *  corpus-verified (honor table, 340-twip grid): a 1.5× 宋体 12pt cell line
+ *  renders at 1.5 × pitch (34px ≈ the reference's 34.7px row pitch), while
+ *  the old 2-row snap measured 45px. */
 function resolveLine(
   spec: LayoutLineHeight,
   naturalPx: number,
@@ -276,18 +279,17 @@ function resolveLine(
   if (spec.rule === "exact") return spec.px;
   if (spec.rule === "atLeast") return Math.max(naturalPx, spec.px);
   // multiple: 240ths of a single line — the grid pitch when defined, else the
-  // font natural (verified vs Word). On a grid, a CJK line's spec'd height
-  // never falls below the line's natural height and snaps up to whole rows:
-  // a face taller than its grid rows (Microsoft YaHei runs ~1.7em while a
-  // 340-twip pitch is ~1.2em of a 14pt line) takes the rows it needs. Latin
-  // lines are exempt from the lattice, and so are table cells (no row snap).
+  // font natural (verified vs Word). On a grid, a body CJK line's spec'd
+  // height never falls below the line's natural height and snaps up to whole
+  // rows: a face taller than its grid rows (Microsoft YaHei runs ~1.7em while
+  // a 340-twip pitch is ~1.2em of a 14pt line) takes the rows it needs. Latin
+  // lines are exempt from the lattice.
   if (pitch > 0 && hasCjk) {
     if (inTable) {
-      // Word-verified (grid experiment set E0-E16): a cell line's multiple
-      // demand is factor × NATURAL raised to whole grid rows — 1.5x SimSun
-      // 12pt on the 340-twip grid renders TWO rows (34pt), not 1.5 × pitch
-      // (25.5pt) and not the raw 23.3pt demand.
-      return Math.ceil((spec.factor * naturalPx) / pitch) * pitch;
+      // A cell line floors at its demand — the grid pitch scales the multiple
+      // but the row never rounds up to whole rows (the row's trHeight floors
+      // separately, so rounding here would overshoot it).
+      return Math.max(spec.factor * pitch, naturalPx);
     }
     const specH = spec.factor * pitch;
     return Math.ceil(Math.max(specH, naturalPx) / pitch) * pitch;
@@ -299,6 +301,8 @@ function resolveLine(
 /** No spacing.line: snap to the document grid. */
 function snapLine(naturalPx: number, hasCjk: boolean, pitch: number, inTable: boolean): number {
   if (pitch <= 0) return naturalPx;
+  // A cell line takes one pitch of "added" grid height at most
+  // (w:adjustLineHeightInTable semantics — a floor, never whole-row ceils).
   if (inTable) return Math.max(naturalPx, pitch);
   if (hasCjk) return Math.ceil(naturalPx / pitch) * pitch;
   return Math.max(naturalPx, pitch);
