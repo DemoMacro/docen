@@ -764,17 +764,35 @@ function carrierDrafts(emf: Uint8Array, basis: Xform | undefined, depth: number)
     }
     po += rs;
   }
-  // Dual-mode carriers repeat their text across the two layers (GDI is the
+  // Dual-mode carriers repeat their art across the two layers (GDI is the
   // renderer's fallback): a GDI run matching an EMF+ string at the same spot
-  // would paint twice, while the GDI side also carries runs the EMF+ layer
-  // never drew (its DrawString output is partial on corpus files). Merge only
-  // the runs the EMF+ layer lacks — same string within a run-height of the
-  // same spot (the two layers' y conventions differ by up to a line). The GDI
-  // side's strokes (polyline underlines) join unconditionally.
+  // would paint twice, and a GDI path twin of an EMF+ shape — the same wave
+  // exported once as beziers and once as a straight-line polygon — paints its
+  // jagged version over the smooth one. Merge only what the EMF+ layer lacks:
+  // texts match by string near the same spot, paths by paint (fill or stroke
+  // color) under a coinciding bounding box. GDI paths with no EMF+ twin keep
+  // joining — the corpus's wavy panels and list underlines ride exactly that
+  // side (their EMF+ counterparts draw only fragments), and the GDI photo blts
+  // back image slots the EMF+ layer never defines.
+  const plusPaints = drafts
+    .filter((dr): dr is PathDraft => dr.kind === "path" && (!!dr.fill || !!dr.strokeColor))
+    .map((dr) => ({ fill: dr.fill, stroke: dr.strokeColor, box: boxOf(dr) }));
   const plusTexts = drafts.filter((dr) => dr.kind === "text");
   const gdi = gdiTextDrafts(emf, effOf);
   drafts.push(
     ...gdi.filter((g) => {
+      if (g.kind === "path") {
+        const box = boxOf(g);
+        return !plusPaints.some(
+          (p) =>
+            p.fill === g.fill &&
+            p.stroke === g.strokeColor &&
+            Math.abs(p.box.x0 - box.x0) <= 2 &&
+            Math.abs(p.box.y0 - box.y0) <= 2 &&
+            Math.abs(p.box.x1 - box.x1) <= 2 &&
+            Math.abs(p.box.y1 - box.y1) <= 2,
+        );
+      }
       if (g.kind !== "text") return true;
       return !plusTexts.some(
         (p) =>
