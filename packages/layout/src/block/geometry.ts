@@ -12,11 +12,15 @@ export function lineOriginXPx(para: LaidOutParagraph, line: LaidOutLine): number
   return (para.indent?.leftPx ?? 0) + (line.firstLineIndentPx ?? 0) + (line.xOffsetPx ?? 0);
 }
 
-/** A docGrid body line's half-leading: the natural text box centered in the
- *  grid span; every other regime anchors at the line top (pad 0). Both the
- *  painter's text y and the caret band anchor at this pad. */
+/** A docGrid body line's half-leading: Word centers the run's EM box in the
+ *  grid span (the browser font box the natural height measures runs deeper —
+ *  corpus-verified on the honor table, ~0.3em of it); every other regime
+ *  anchors at the line top (pad 0). Both the painter's text y and the caret
+ *  band anchor at this pad. */
 export function gridPadOf(line: LaidOutLine): number {
-  return line.grid ? Math.max(0, (line.heightPx - line.naturalPx) / 2) : 0;
+  if (!line.grid) return 0;
+  const ref = line.textEmPx ?? line.naturalPx;
+  return Math.max(0, (line.heightPx - ref) / 2);
 }
 
 /** Each item's justified stretch-interval end — a text item's glyphs fill

@@ -46,8 +46,9 @@ export function layoutTable(
     // exact fixes the row outright.
     const tr = row.height;
     const trFloorPx = tr && tr.rule === "atLeast" ? tr.px : 0;
-    // (cell total height, for the vAlign slack pass after the row height settles)
-    const totals: number[] = [];
+    // (natural content + vertical overhead per cell, for the vAlign slack
+    // pass after the row height settles)
+    const totals: { stackedPx: number; overheadPx: number }[] = [];
     const cells: LaidOutCell[] = row.cells.map((cell) => {
       const colspan = cell.colspan ?? 1;
       let cellWidth = 0;
@@ -97,7 +98,7 @@ export function layoutTable(
       // margins and border to whatever won.
       const contentPx = Math.max(stacked.heightPx, trFloorPx);
       const cellHeightPx = contentPx + vOverheadPx;
-      totals.push(cellHeightPx);
+      totals.push({ stackedPx: stacked.heightPx, overheadPx: vOverheadPx });
       if (cellHeightPx > rowHeight) rowHeight = cellHeightPx;
       return {
         colspan,
@@ -113,11 +114,16 @@ export function layoutTable(
     const trExactPx = tr && tr.rule === "exact" ? tr.px : undefined;
     if (trExactPx != null) rowHeight = trExactPx;
     // w:vAlign: place the content in the row's slack (read back from the
-    // source cells — the laid-out cell carries only the resolved offset). A
-    // vertically merged cell keeps its content on the start row (the
-    // span-distribution boundary above), so only single-row cells shift.
+    // source cells — the laid-out cell carries only the resolved offset). The
+    // slack is measured against the cell's NATURAL content (stack + overhead):
+    // an atLeast trHeight floor makes the floored height the row's tallest,
+    // and centering against it would report zero slack in a row with real
+    // room (corpus: the honor table's header row). A vertically merged cell
+    // keeps its content on the start row (the span-distribution boundary
+    // above), so only single-row cells shift.
     cells.forEach((cell, i) => {
-      const slack = rowHeight - (totals[i] ?? 0);
+      const nat = totals[i];
+      const slack = nat ? rowHeight - nat.stackedPx - nat.overheadPx : 0;
       const va = row.cells[i]?.verticalAlign;
       if (slack <= 0 || (cell.rowspan ?? 1) > 1) return;
       cell.contentOffsetYPx = va === "center" ? slack / 2 : va === "bottom" ? slack : undefined;

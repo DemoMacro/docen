@@ -55,6 +55,10 @@ export interface PackedLine {
   /** The resolver's `naturalPx` input (max text natural height, 0 when the
    *  line has no text) — mirrored for the painter's half-leading math. */
   naturalPx: number;
+  /** The line's largest run font size (undefined on textless lines) — the
+   *  EM-box reference Word centers in a grid span (smaller than the browser
+   *  font box the natural height measures). */
+  textEmPx?: number;
   /** The advance of the closing punctuation hanging past this line's right
    *  edge (w:overflowPunct) — 0/undefined when the line ends flush. The hang
    *  never counts against justification or center/right slack. */
@@ -457,6 +461,7 @@ export function packLines(inline: LayoutInline[], opts: PackLinesOptions): Packe
     const lineItems: LaidOutLineItem[] = [];
     let xLine = 0;
     let naturalPx = 0;
+    let textEmPx: number | undefined;
     let hasCjk = false;
     let tallestPicturePx = 0;
     let hasText = false;
@@ -559,6 +564,7 @@ export function packLines(inline: LayoutInline[], opts: PackLinesOptions): Packe
               hasText = true;
               const analyzed = measurer.analyze(src.text, src.style);
               if (analyzed.naturalPx > naturalPx) naturalPx = analyzed.naturalPx;
+              if (textEmPx == null || src.style.sizePx > textEmPx) textEmPx = src.style.sizePx;
               if (analyzed.hasCjk) hasCjk = true;
             } else if (src.kind === "picture") {
               lineItems.push({
@@ -641,6 +647,7 @@ export function packLines(inline: LayoutInline[], opts: PackLinesOptions): Packe
       maxWidthPx: maxWidth,
       heightPx: height,
       naturalPx,
+      textEmPx,
       hangPx: hangPx > 0 ? hangPx : undefined,
       xOffsetPx: xOffsetPx > 0 ? xOffsetPx : undefined,
     });

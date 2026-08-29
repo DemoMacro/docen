@@ -53,6 +53,11 @@ export interface LaidOutLine {
   /** The line's max text natural height (0 when no text) — the half-leading
    *  reference when a grid span centers its content. */
   naturalPx: number;
+  /** The line's largest run font size (undefined on textless lines) — the
+   *  EM-box reference Word centers in a grid span (corpus-verified: the honor
+   *  table's rows center the 12pt em box, ~10px above in a 34.7px cell line;
+   *  the browser font box the natural height measures runs ~0.3em deeper). */
+  textEmPx?: number;
   /** The height is docGrid-derived in the body flow: Word centers the natural
    *  box in the span; non-grid slack sinks below the text instead. */
   grid?: boolean;
