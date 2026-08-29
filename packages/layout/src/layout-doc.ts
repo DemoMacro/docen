@@ -30,6 +30,10 @@ export interface LayoutTextStyle {
   strikethrough?: boolean;
   /** Extra per-character spacing in px (OOXML w:spacing resolved). */
   letterSpacingPx?: number;
+  /** Raised/lowered run (w:vertAlign): glyphs paint at the scaled size on a
+   *  shifted baseline (Word's FootnoteReference look). Measuring applies the
+   *  same scaling — see vertAlignedSizePx. */
+  verticalAlign?: "superscript" | "subscript";
 }
 
 /** One inline item of a paragraph. Text, hard breaks, tabs, and inline

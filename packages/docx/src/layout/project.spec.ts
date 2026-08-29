@@ -1378,3 +1378,73 @@ describe("projectDocumentOptions comment ranges", () => {
     ]);
   });
 });
+
+describe("projectDocumentOptions footnote references", () => {
+  const textItems = (blocks: LayoutBlock[]): { text: string; verticalAlign?: string }[] => {
+    const out: { text: string; verticalAlign?: string }[] = [];
+    for (const b of blocks) {
+      if (b.kind !== "paragraph") continue;
+      for (const i of b.inline)
+        if (i.kind === "text") out.push({ text: i.text, verticalAlign: i.style.verticalAlign });
+    }
+    return out;
+  };
+
+  it("numbers references in first-reference order as superscript ordinals", () => {
+    const { blocks } = oneSection(
+      doc([
+        {
+          paragraph: {
+            children: [
+              { text: "a" },
+              { footnoteReference: 5 },
+              { text: "b" },
+              { footnoteReference: 2 },
+            ],
+          },
+        },
+        { paragraph: { children: [{ text: "c" }, { footnoteReference: 5 }, { text: "d" }] } },
+      ]),
+    );
+    // Word's numbering: the Nth distinct note referenced shows N — note 5 was
+    // referenced first (so it is "1"), note 2 second ("2"), and the repeat of
+    // note 5 shows its original number again.
+    expect(textItems(blocks)).toEqual([
+      { text: "a" },
+      { text: "1", verticalAlign: "superscript" },
+      { text: "b" },
+      { text: "2", verticalAlign: "superscript" },
+      { text: "c" },
+      { text: "1", verticalAlign: "superscript" },
+      { text: "d" },
+    ]);
+  });
+
+  it("accepts the option-object reference shape", () => {
+    const { blocks } = oneSection(
+      doc([{ paragraph: { children: [{ footnoteReference: { id: 3 } }] } }]),
+    );
+    expect(textItems(blocks)).toEqual([{ text: "1", verticalAlign: "superscript" }]);
+  });
+
+  it("projects w:vertAlign runs at the raised/lowered style", () => {
+    const { blocks } = oneSection(
+      doc([
+        {
+          paragraph: {
+            children: [
+              { text: "up", verticalAlign: "superscript" },
+              { text: "-" },
+              { text: "down", verticalAlign: "subscript" },
+            ],
+          },
+        },
+      ]),
+    );
+    expect(textItems(blocks)).toEqual([
+      { text: "up", verticalAlign: "superscript" },
+      { text: "-" },
+      { text: "down", verticalAlign: "subscript" },
+    ]);
+  });
+});

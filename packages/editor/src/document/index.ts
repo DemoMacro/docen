@@ -159,6 +159,9 @@ const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   // Bookmark prompts for a name and wraps the selection.
   "symbol",
   "bookmark",
+  // Footnote prompts for the note text, references the caret and appends the
+  // note body to documentExtras.footnotes.
+  "insert-footnote",
   // Link prompts for an address and marks the selection (Word's Insert Link).
   "link",
   // New Comment anchors the selection with a Word comment (range markers +
@@ -2334,6 +2337,75 @@ class DocenDocument extends AddinHost<Editor> {
     );
   }
 
+  /** Insert → Footnote: prompt for the note text, then drop a
+   *  footnoteReference atom at the caret and append the note's content to
+   *  doc.attrs.documentExtras.footnotes (word/footnotes.xml on export — the
+   *  round-trip channel the parse side already fills). The note body opens
+   *  with the footnoteRef mark run (Word's note-number placeholder); the bare
+   *  reference atom picks up the built-in FootnoteReference style on export.
+   *  A document carrying explicit content types needs the footnotes override
+   *  added too — the packer gates the part on it whenever contentTypes exists. */
+  #insertFootnote(): void {
+    const editor = this.editor;
+    if (!editor) return;
+    const text = window.prompt(t("footnote.prompt", this))?.trim();
+    if (!text) return;
+    const docAttrs = (editor.state.doc.attrs ?? {}) as {
+      documentExtras?: {
+        footnotes?: Array<{ id?: number }>;
+        contentTypes?: {
+          overrides?: Array<{ partName?: string; contentType?: string }>;
+        };
+      };
+    };
+    const extras = docAttrs.documentExtras ?? {};
+    const footnotes = extras.footnotes ?? [];
+    const id = footnotes.reduce((max, n) => Math.max(max, Number(n.id ?? 0)), 0) + 1;
+    const ref = editor.schema.nodeFromJSON({
+      type: "inlinePassthrough",
+      attrs: { data: JSON.stringify({ footnoteReference: id }) },
+    } as JSONContent);
+    const documentExtras = {
+      ...extras,
+      footnotes: [
+        ...footnotes,
+        {
+          id,
+          // Word's canonical note body: one FootnoteText paragraph holding the
+          // note-number mark run (the bare footnoteRef atom — export wraps it
+          // in the FootnoteReference rStyle) followed by the note text inline.
+          children: [
+            {
+              style: "FootnoteText",
+              children: [{ footnoteRef: true }, { text }],
+            },
+          ],
+        },
+      ],
+    };
+    if (
+      extras.contentTypes &&
+      !extras.contentTypes.overrides?.some((o) => o.partName === "/word/footnotes.xml")
+    ) {
+      documentExtras.contentTypes = {
+        ...extras.contentTypes,
+        overrides: [
+          ...(extras.contentTypes.overrides ?? []),
+          {
+            partName: "/word/footnotes.xml",
+            contentType:
+              "application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml",
+          },
+        ],
+      };
+    }
+    editor.view.dispatch(
+      editor.state.tr
+        .insert(editor.state.selection.from, ref)
+        .setDocAttribute("documentExtras", documentExtras),
+    );
+  }
+
   /** Insert → Text Box / Shapes: a standalone wps shape run, floating
    *  wrap-none and centered on the page (Word's insertion behavior). The
    *  text box carries Word's plain look — white fill, accent-1 hairline —
@@ -2511,6 +2583,12 @@ class DocenDocument extends AddinHost<Editor> {
     // bookmarkStart/bookmarkEnd pair (Word's Insert → Bookmark).
     if (name === "bookmark") {
       this.#insertBookmark();
+      return;
+    }
+    // Footnote — prompt for the note text, reference the caret and append the
+    // note body (Word's References → Insert Footnote).
+    if (name === "insert-footnote") {
+      this.#insertFootnote();
       return;
     }
     // Link — prompt for an address and mark the selection (or insert fresh

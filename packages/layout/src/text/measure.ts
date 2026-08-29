@@ -26,6 +26,29 @@ export interface AnalyzedText {
 
 const CACHE_LIMIT = 4000;
 
+/** The raised/lowered run's size fraction (w:vertAlign — Word's built-in
+ *  FootnoteReference style is the same ~65% look). */
+const VERT_ALIGN_SCALE = 0.65;
+/** The baseline shift as a fraction of the BASE size: superscript raises by
+ *  ~1/3 em (CSS `super`), subscript sinks by ~1/6 em. */
+export const VERT_ALIGN_RISE = 0.34;
+export const VERT_ALIGN_DROP = 0.17;
+
+/** The size a style's glyphs measure and paint at — the base size scaled
+ *  down for a raised/lowered run. Measuring (analyze/cssFontOf) and painting
+ *  (the renderer's fontSize) must both go through this so the two never
+ *  drift. */
+export function vertAlignedSizePx(style: LayoutTextStyle): number {
+  return style.verticalAlign ? style.sizePx * VERT_ALIGN_SCALE : style.sizePx;
+}
+
+/** The baseline offset a raised/lowered run paints at, px (negative = up). */
+export function vertAlignBaselineShiftPx(style: LayoutTextStyle): number {
+  if (style.verticalAlign === "superscript") return -style.sizePx * VERT_ALIGN_RISE;
+  if (style.verticalAlign === "subscript") return style.sizePx * VERT_ALIGN_DROP;
+  return 0;
+}
+
 /** Analyzes and caches runs. One instance per layout pass; the cache key
  *  covers everything a metric depends on, so re-flows and re-sizes pay the
  *  cheap path (same determinism contract the paginator was built on). */
@@ -44,12 +67,15 @@ export class TextMeasurer {
   naturalOf(style: LayoutTextStyle): number {
     const family = familyOfSlot(style.family, false);
     return (
-      this.metrics.normalRatio({ family, bold: style.bold, italic: style.italic }) * style.sizePx
+      this.metrics.normalRatio({ family, bold: style.bold, italic: style.italic }) *
+      vertAlignedSizePx(style)
     );
   }
 
   analyze(text: string, style: LayoutTextStyle): AnalyzedText {
-    const key = `${text} ${familyKey(style.family)} ${style.sizePx} ${style.bold ? "b" : ""}${style.italic ? "i" : ""}`;
+    // The key uses the SCALED size: raised/lowered runs of the same base face
+    // measure identically, so one cache entry serves both.
+    const key = `${text} ${familyKey(style.family)} ${vertAlignedSizePx(style)} ${style.bold ? "b" : ""}${style.italic ? "i" : ""}`;
     const cached = this.cache.get(key);
     if (cached) return cached;
 
@@ -71,7 +97,8 @@ export class TextMeasurer {
       segments.push({ text: segment, isCjk: segIsCjk });
       const family = familyOfSlot(style.family, segIsCjk);
       const natural =
-        this.metrics.normalRatio({ family, bold: style.bold, italic: style.italic }) * style.sizePx;
+        this.metrics.normalRatio({ family, bold: style.bold, italic: style.italic }) *
+        vertAlignedSizePx(style);
       if (natural > naturalPx) naturalPx = natural;
     };
     let i = 0;
@@ -90,7 +117,7 @@ export class TextMeasurer {
       i += width;
     }
     flush(text.length);
-    if (naturalPx === 0) naturalPx = style.sizePx * 1.2;
+    if (naturalPx === 0) naturalPx = vertAlignedSizePx(style) * 1.2;
     return { segments, hasCjk, naturalPx };
   }
 }
@@ -108,7 +135,7 @@ export function cssFontOf(style: LayoutTextStyle, family: string): string {
   const parts: string[] = [];
   if (style.italic) parts.push("italic");
   if (style.bold) parts.push("bold");
-  parts.push(`${style.sizePx}px`);
+  parts.push(`${vertAlignedSizePx(style)}px`);
   parts.push(family ? `"${family.replace(/"/g, '\\"')}", serif` : "serif");
   return parts.join(" ");
 }

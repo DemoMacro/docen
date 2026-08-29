@@ -409,6 +409,7 @@ interface RunStyle {
   color?: string;
   underline?: boolean;
   strikethrough?: boolean;
+  verticalAlign?: "superscript" | "subscript";
 }
 
 /** rPr (a run's own, or the ¶-mark/paragraph default) → resolved fields.
@@ -432,6 +433,10 @@ function runStyleOf(rPr: Rec): RunStyle {
         : rPr.strike === false && rPr.doubleStrike === false
           ? false
           : undefined,
+    verticalAlign:
+      rPr.verticalAlign === "superscript" || rPr.verticalAlign === "subscript"
+        ? rPr.verticalAlign
+        : undefined,
   };
 }
 
@@ -499,6 +504,10 @@ interface ProjectContext {
    *  opened, w:commentRangeEnd not yet seen) — ranges span paragraphs, so the
    *  set lives across the projection walk and every text atom inside tints. */
   openComments: Set<number>;
+  /** Footnote id → displayed ordinal, assigned in first-reference order
+   *  (Word's numbering: the Nth distinct note referenced shows N; the same id
+   *  twice shows the same number). Lives across the whole projection walk. */
+  footnoteOrdinals: Map<number, number>;
 }
 
 // ── list-number formats (w:numFmt) ──
@@ -773,11 +782,10 @@ function projectParagraph(p: BodyParagraph, ctx: ProjectContext): LayoutParagrap
   const runs: readonly unknown[] =
     typeof p === "string" ? [p] : (p?.children ?? (p?.text != null ? [p.text] : []));
   const drawings = projectDrawings(runs, ctx);
+  const inline = projectRuns(runs, chainRPr, docRPr, defaultTextStyle, ctx);
   return {
     kind: "paragraph",
-    inline: markerInline.length
-      ? markerInline.concat(projectRuns(runs, chainRPr, docRPr, defaultTextStyle, ctx.openComments))
-      : projectRuns(runs, chainRPr, docRPr, defaultTextStyle, ctx.openComments),
+    inline: markerInline.length ? markerInline.concat(inline) : inline,
     drawings: drawings.length > 0 ? drawings : undefined,
     spacing,
     indent,
@@ -1445,6 +1453,15 @@ const HYPERLINK_DISPLAY = { underline: { type: "single" }, color: "0563C1" } as 
 const INSERTION_DISPLAY = { underline: { type: "single" }, color: "FF0000" } as const;
 const DELETION_DISPLAY = { strike: true, color: "FF0000" } as const;
 
+/** A footnote reference's note id — the bare number form (`{ footnoteReference:
+ *  1 }`) or the option object form (`{ id }`); anything else is not one. */
+function footnoteRefId(child: Rec): number | undefined {
+  const ref = child.footnoteReference;
+  if (typeof ref === "number") return ref;
+  if (isRecord(ref)) return num(ref.id);
+  return undefined;
+}
+
 /** Inline content: text runs (rPr resolved over the paragraph default), hard
  *  breaks, pictures (paragraph-child or run-child slot), and the container
  *  children (hyperlink / insertion / deletion — their runs project with the
@@ -1459,8 +1476,9 @@ function projectRuns(
   chainRPr: Rec,
   docRPr: Rec,
   defRun: LayoutTextStyle,
-  openComments?: Set<number>,
+  ctx: ProjectContext,
 ): LayoutInline[] {
+  const { openComments } = ctx;
   const out: LayoutInline[] = [];
   const textStyleOf = (rPr: Rec): LayoutTextStyle => {
     const own = runStyleOf(rPr);
@@ -1474,6 +1492,7 @@ function projectRuns(
       strikethrough: own.strikethrough ?? defRun.strikethrough,
       letterSpacingPx:
         own.characterSpacingTw != null ? twipToPx(own.characterSpacingTw) : defRun.letterSpacingPx,
+      verticalAlign: own.verticalAlign ?? defRun.verticalAlign,
     };
   };
   const pushText = (text: string, rPr: Rec): void => {
@@ -1573,6 +1592,22 @@ function projectRuns(
       if (isRecord(child.commentRangeEnd) && num(child.commentRangeEnd.id) != null)
         openComments?.delete(num(child.commentRangeEnd.id)!);
       const rPr: Rec = { ...preset, ...child };
+      // A footnote reference is a superscript ordinal (Word's FootnoteReference
+      // style look) — numbered by first-reference order, the same id twice
+      // showing the same number. The reference run's own rPr still applies.
+      const fnRefId = footnoteRefId(child);
+      if (fnRefId != null) {
+        let ordinal = ctx.footnoteOrdinals.get(fnRefId);
+        if (ordinal == null) {
+          ordinal = ctx.footnoteOrdinals.size + 1;
+          ctx.footnoteOrdinals.set(fnRefId, ordinal);
+        }
+        out.push({
+          kind: "text",
+          text: String(ordinal),
+          style: { ...textStyleOf(rPr), verticalAlign: "superscript" },
+        });
+      }
       if (typeof child.text === "string") pushText(child.text, rPr);
       if (child.break != null) out.push({ kind: "break" });
       if (child.tab != null) out.push({ kind: "tab" });
@@ -1934,6 +1969,9 @@ function projectPageFurniture(
     numberings: indexNumberings(doc.numbering),
     listCounters: new Map(),
     openComments: new Set(),
+    // Word forbids footnote references in headers/footers — a fresh counter
+    // keeps the furniture walk independent even if malformed input carries one.
+    footnoteOrdinals: new Map(),
   };
   const projectSlots = (side: unknown): LayoutBlock[] | undefined => {
     if (!Array.isArray(side)) return undefined;
@@ -2068,6 +2106,7 @@ export function projectDocumentOptions(doc: DocumentOptions): {
     numberings: indexNumberings(doc.numbering),
     listCounters: new Map(),
     openComments: new Set(),
+    footnoteOrdinals: new Map(),
   };
   const sections: ProjectedSection[] = (doc.sections ?? []).map((section) => {
     const blocks: LayoutBlock[] = [];

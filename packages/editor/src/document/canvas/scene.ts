@@ -18,6 +18,8 @@ import {
   stackBlocks,
   tableGridOf,
   TextMeasurer,
+  vertAlignedSizePx,
+  vertAlignBaselineShiftPx,
   type FlowItem,
   type FontMetrics,
   type LaidOutBlock,
@@ -222,7 +224,10 @@ function paintParagraph(
               : item.text;
         const textEl = new Text({
           x: lineX + item.xPx,
-          y: lineY + pad,
+          // A raised/lowered run (w:vertAlign — the footnote reference) paints
+          // at the scaled size on a shifted baseline; the scaling itself is
+          // the shared vertAlignedSizePx so measure and paint agree.
+          y: lineY + pad + vertAlignBaselineShiftPx(inline.style),
           // width ONLY on justified items (their stretch interval): a width
           // on every line would let Leafer wrap the slice again with its
           // own metrics (a phantom second line). textWrap "none" keeps the
@@ -250,13 +255,13 @@ function paintParagraph(
                   ? "delete"
                   : undefined,
           fontFamily: family,
-          fontSize: inline.style.sizePx,
+          fontSize: vertAlignedSizePx(inline.style),
           // Leafer's default 150% line spacing half-leads the glyphs ~0.25×
           // fontSize below the line-box top the layout handed over (text-box
           // text riding low). The px form pins one line's spacing to the font
           // size — the percent form (`{ type: "percent" }`) silently blanks
           // every body Text when combined with an explicit height.
-          lineHeight: inline.style.sizePx,
+          lineHeight: vertAlignedSizePx(inline.style),
           // Numbers only: Leafer's fontWeight setter treats strings as named
           // weights ("bold"/"thin"…) and silently maps unknown strings to 400,
           // so a string "700" would lose bold. Italic is the `italic` boolean
@@ -319,9 +324,14 @@ function paintParagraph(
           let color = "#1b1b1b";
           for (const other of line.items) {
             const src = para.inline[other.inlineIndex];
-            if (src?.kind === "text" && src.style.sizePx > sizePx) {
-              sizePx = src.style.sizePx;
-              color = src.style.color ? `#${src.style.color}` : color;
+            if (src?.kind === "text") {
+              // Raised/lowered runs count at their scaled size — a footnote
+              // reference must not pull the leader dots up.
+              const px = vertAlignedSizePx(src.style);
+              if (px > sizePx) {
+                sizePx = px;
+                color = src.style.color ? `#${src.style.color}` : color;
+              }
             }
           }
           if (sizePx > 0) paintTabLeader(tree, item, lineX, lineY, pad, sizePx, color);
