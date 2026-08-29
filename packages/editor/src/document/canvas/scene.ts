@@ -51,7 +51,9 @@ import {
  *  preset line styles); unlisted tokens render solid. */
 const PRSTDASH_PATTERN: Record<string, number[]> = {
   dot: [1, 3],
-  sysDot: [1, 1],
+  // A 1px-on/1px-off antialiased hairline blends to a faint tint — Word's
+  // sysDot boxes read as clear 2px dots at hairline widths (user-verified).
+  sysDot: [2, 2],
   dash: [4, 3],
   sysDash: [4, 2],
   dashDot: [4, 3, 1, 3],
@@ -624,6 +626,9 @@ function paintShapeBox(
     fill,
     stroke,
     strokeWidth,
+    // Closed shapes default to an inside stroke, under which Leafer's dash
+    // pass paints nothing — center stroke renders the dashPattern.
+    strokeAlign: "center",
     dashPattern: box.line?.dash ? PRSTDASH_PATTERN[box.line.dash] : undefined,
   };
   if (box.preset === "ellipse") {
