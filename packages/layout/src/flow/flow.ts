@@ -359,6 +359,25 @@ class Flow {
         return k;
       }
       case "table": {
+        // Word repeats a leading tblHeader band on every continuation page, so
+        // a cut must keep the whole band + at least one body row here, and a
+        // band taller than the page's body area gives up repeating (Word's
+        // anti-loop rule) — the table then splits as if unmarked.
+        const headers = headerRowCount(laid);
+        if (headers > 0 && headers < laid.rows.length) {
+          const headerH = sumRows(laid.rows.slice(0, headers));
+          if (headerH <= this.opts.contentHeightPx - this.insets().topPx) {
+            let k = headers;
+            let h = headerH;
+            while (k < laid.rows.length && h + laid.rows[k].heightPx <= space) {
+              h += laid.rows[k].heightPx;
+              k++;
+            }
+            // No body row fits under the band — move the table whole.
+            if (k === headers) return 0;
+            return k;
+          }
+        }
         let k = 0;
         let h = 0;
         while (k < laid.rows.length && h + laid.rows[k].heightPx <= space) {
@@ -399,6 +418,14 @@ function marginBefore(laid: LaidOutBlock, prevAfter: number, firstInBox: boolean
   return firstInBox ? before : Math.max(prevAfter, before);
 }
 
+/** The table's repeat band: the contiguous tblHeader prefix from the first
+ *  row (Word ignores a mark that doesn't start at the top). */
+function headerRowCount(laid: LaidOutTable): number {
+  let n = 0;
+  while (n < laid.rows.length && laid.rows[n].tableHeader) n++;
+  return n;
+}
+
 /** Split a laid block after its k-th line/row/child. The head keeps the
  *  `before` margin; the tail carries no `before` (it continues) and keeps
  *  `after`. */
@@ -422,7 +449,22 @@ function splitLaid(laid: LaidOutBlock, k: number): [LaidOutBlock, LaidOutBlock] 
     }
     case "table": {
       const headRows = laid.rows.slice(0, k);
-      const tailRows = laid.rows.slice(k);
+      const headers = headerRowCount(laid);
+      // Word re-opens EVERY continuation with the header band when the cut
+      // kept it whole (k > headers) — the tail's leading copies keep the mark
+      // so a further cut repeats them again (the copy count stays constant:
+      // each cut regenerates slice(0, headers) from the tail's own lead). The
+      // non-copy tail rows lose any mark — a mid-table marked row must never
+      // widen the band count on a later page. Any other cut (a give-up split,
+      // or a table that is all header) continues band-less entirely: the
+      // tail's marks are stripped so no later page re-derives a band from a
+      // marked row that is no longer at a table top.
+      const strip = (row: LaidOutTable["rows"][number]) =>
+        row.tableHeader ? { ...row, tableHeader: undefined } : row;
+      const tailRows =
+        k > headers
+          ? [...laid.rows.slice(0, headers), ...laid.rows.slice(k).map(strip)]
+          : laid.rows.slice(k).map(strip);
       return [
         { ...laid, rows: headRows, heightPx: sumRows(headRows) },
         { ...laid, rows: tailRows, heightPx: sumRows(tailRows) },

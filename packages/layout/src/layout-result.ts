@@ -149,6 +149,9 @@ export interface LaidOutCell {
 export interface LaidOutRow {
   heightPx: number;
   cells: LaidOutCell[];
+  /** Leading w:tblHeader row (a contiguous prefix from the first row) — the
+   *  flow re-inserts stripped copies when the table splits across pages. */
+  tableHeader?: boolean;
 }
 
 export interface LaidOutTable {

@@ -28,6 +28,12 @@ export function layoutTable(
   const widthPx = tableWidthOf(table, containerWidth);
   const columnWidths = tableColumnWidths(table, widthPx);
 
+  // Word honors w:tblHeader only as a contiguous prefix from the first row —
+  // marks past the prefix are voided here so no later page can re-derive a
+  // band from a marked row that is no longer at a table top.
+  let bandEnd = 0;
+  while (bandEnd < table.rows.length && table.rows[bandEnd].tableHeader) bandEnd++;
+
   let heightPx = 0;
   const rows = table.rows.map((row, rowIndex) => {
     // Cells measure under the table-cell line-height rule (max(natural,
@@ -129,7 +135,7 @@ export function layoutTable(
       cell.contentOffsetYPx = va === "center" ? slack / 2 : va === "bottom" ? slack : undefined;
     });
     heightPx += rowHeight;
-    return { heightPx: rowHeight, cells };
+    return { heightPx: rowHeight, cells, tableHeader: rowIndex < bandEnd || undefined };
   });
 
   return {

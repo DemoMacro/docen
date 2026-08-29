@@ -1825,6 +1825,7 @@ function projectTable(t: TableOptions, ctx: ProjectContext): LayoutTable {
         .filter((cell) => cell.verticalMerge !== "continue")
         .map((cell) => projectCell(cell, ctx, rowSpans.get(cell))),
       height,
+      tableHeader: row.tableHeader || undefined,
     });
   }
 

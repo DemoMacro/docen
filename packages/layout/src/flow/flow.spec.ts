@@ -234,6 +234,119 @@ describe("layoutFlow", () => {
     expect(counts).toEqual([2, 2, 1]);
   });
 
+  it("repeats the tblHeader row on every continuation page", () => {
+    const row = (header = false): LayoutTable["rows"][number] => ({
+      cells: [{ blocks: [para(1)] }],
+      ...(header ? { tableHeader: true } : {}),
+    });
+    const table: LayoutTable = {
+      kind: "table",
+      columnWidthsPx: [300],
+      rows: [row(true), row(), row(), row(), row()],
+    };
+    // 20px rows in a 50px page: a cut must keep the band + a body row, so the
+    // header rides along and re-opens EVERY continuation — the copy keeps its
+    // mark (Word repeats it again on a further page) while eating one row's
+    // worth of space per page (4 body rows → 4 band+body pages).
+    const pages = flow([table], 50);
+    expect(pages).toHaveLength(4);
+    const tables = pages.map((p) => {
+      const t = p.items[0].block;
+      if (t.kind !== "table") throw new Error(`expected table, got ${t.kind}`);
+      return t;
+    });
+    expect(tables.map((t) => t.rows.length)).toEqual([2, 2, 2, 2]);
+    for (const page of tables) {
+      expect(page.rows[0].tableHeader).toBe(true);
+      expect(page.rows.slice(1).every((r) => !r.tableHeader)).toBe(true);
+    }
+  });
+
+  it("treats only the contiguous tblHeader prefix as the repeat band", () => {
+    const row = (header = false): LayoutTable["rows"][number] => ({
+      cells: [{ blocks: [para(1)] }],
+      ...(header ? { tableHeader: true } : {}),
+    });
+    // A mark that doesn't start at the top row is not part of the band (Word
+    // ignores mid-table tblHeader rows).
+    const table: LayoutTable = {
+      kind: "table",
+      columnWidthsPx: [300],
+      rows: [row(true), row(true), row(), row(true), row()],
+    };
+    // Band = the 2-row prefix (40px). A 60px page fits band + 1 body row.
+    const pages = flow([table], 60);
+    const tables = pages.map((p) => {
+      const t = p.items[0].block;
+      if (t.kind !== "table") throw new Error(`expected table, got ${t.kind}`);
+      return t;
+    });
+    // Page 1 [band + body1]; page 2 [copies + the mid marked row as a plain
+    // body row]; page 3 [copies + body3]. The copies keep the band alive on
+    // every page, but the mid-table mark is stripped — it never widens the
+    // band or opens one of its own.
+    expect(tables.map((t) => t.rows.length)).toEqual([3, 3, 3]);
+    for (const page of tables.slice(1)) {
+      expect(page.rows[0].tableHeader).toBe(true);
+      expect(page.rows[1].tableHeader).toBe(true);
+    }
+    expect(tables[1].rows[2].tableHeader).toBeUndefined();
+    expect(tables[2].rows[2].tableHeader).toBeUndefined();
+  });
+
+  it("moves the table whole when the band + first body row don't fit", () => {
+    const row = (header = false): LayoutTable["rows"][number] => ({
+      cells: [{ blocks: [para(1)] }],
+      ...(header ? { tableHeader: true } : {}),
+    });
+    const table: LayoutTable = {
+      kind: "table",
+      columnWidthsPx: [300],
+      rows: [row(true), row(), row(), row()],
+    };
+    // The 40px paragraph leaves 10px: not enough for band (20) + a body row —
+    // the table moves whole to page 2 instead of splitting off a band-less
+    // fragment, then splits normally (band + 1 body row per page, the band
+    // repeated on every one).
+    const pages = flow([para(2), table], 50);
+    expect(pages[0].items.map((i) => i.block.kind)).toEqual(["paragraph"]);
+    expect(pages).toHaveLength(4);
+    const tables = pages.slice(1).map((p) => {
+      const t = p.items[0].block;
+      if (t.kind !== "table") throw new Error(`expected table, got ${t.kind}`);
+      return t;
+    });
+    expect(tables.map((t) => t.rows.length)).toEqual([2, 2, 2]);
+    expect(tables[0].rows[0].tableHeader).toBe(true);
+    expect(tables[1].rows[0].tableHeader).toBe(true);
+  });
+
+  it("gives up repeating when the band is taller than the page body area", () => {
+    // Band = 2 × 40px rows = 80px; the page body is 60px — Word's anti-loop
+    // rule drops the repetition and the table splits as if unmarked.
+    const tall = (header = false): LayoutTable["rows"][number] => ({
+      cells: [{ blocks: [para(2)] }],
+      ...(header ? { tableHeader: true } : {}),
+    });
+    const tallTable: LayoutTable = {
+      kind: "table",
+      columnWidthsPx: [300],
+      rows: [tall(true), tall(true), tall(), tall()],
+    };
+    const pages = flow([tallTable], 60);
+    const tables = pages.map((p) => {
+      const t = p.items[0].block;
+      if (t.kind !== "table") throw new Error(`expected table, got ${t.kind}`);
+      return t;
+    });
+    // Plain row-boundary split (1 row per 40px page), no copies anywhere; the
+    // page-2 tail stripped the residual marks, so no later page re-derives a
+    // band from a mid-table marked row.
+    expect(tables.map((t) => t.rows.length)).toEqual([1, 1, 1, 1]);
+    expect(tables[0].rows[0].tableHeader).toBe(true);
+    for (const t of tables.slice(1)) expect(t.rows.every((r) => !r.tableHeader)).toBe(true);
+  });
+
   it("splits groups at child boundaries", () => {
     const pages = flow([{ kind: "group", blocks: [para(1), para(1), para(1)] }], 50);
     expect(pages).toHaveLength(2);

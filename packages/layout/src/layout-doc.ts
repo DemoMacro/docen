@@ -468,6 +468,9 @@ export interface LayoutTableRow {
   /** w:trHeight resolved: atLeast floors the row, exact fixes it (content
    *  overflows but the row does not grow). */
   height?: { rule: "atLeast" | "exact"; px: number };
+  /** w:tblHeader — leading rows repeat on every page the table splits onto
+   *  (only a contiguous prefix from the first row counts). */
+  tableHeader?: boolean;
 }
 
 export type LayoutTableWidth =
