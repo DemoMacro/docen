@@ -568,10 +568,10 @@ export interface LayoutBlockContext {
    *  multiple rule and floors a snapped one (adjustLineHeightInTable). */
   linePitchPx?: number;
   /** The body flow centers a grid-height line's natural text box in the
-   *  span (the docGrid lattice — Word-verified). Text-box stacks take the
-   *  pitch-scaled heights but place glyphs at the line-box top, and
+   *  span (the docGrid lattice — Word-verified). Text-box stacks share the
+   *  rule for their grid-snapped lines (half-leading like the body);
    *  header/footer stacks are laid with no grid context at all (natural
-   *  line heights) — neither sets this. */
+   *  line heights) and so never set this. */
   onGrid?: boolean;
   /** True inside a table cell: lines never ceil to whole grid rows (the row's
    *  trHeight floors separately — the w:adjustLineHeightInTable pitch is a

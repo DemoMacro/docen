@@ -15,11 +15,17 @@ export function lineOriginXPx(para: LaidOutParagraph, line: LaidOutLine): number
 /** A docGrid body line's half-leading: Word centers the run's EM box in the
  *  grid span (the browser font box the natural height measures runs deeper —
  *  corpus-verified on the honor table, ~0.3em of it); every other regime
- *  anchors at the line top (pad 0). Both the painter's text y and the caret
- *  band anchor at this pad. */
+ *  anchors at the line top (pad 0). Text-box stacks take the same rule —
+ *  their grid-snapped lines half-lead like the body's (pixel-verified: the
+ *  reference render's first ink sits at half-leading in a box whose border
+ *  position matches ours exactly), and bodyPr @compatLnSpc changes nothing
+ *  (Word ignores it when laying out wps txbxContent). Both the painter's
+ *  text y and the caret band anchor at this pad. */
 export function gridPadOf(line: LaidOutLine): number {
   if (!line.grid) return 0;
-  const ref = line.textEmPx ?? line.naturalPx;
+  // A picture-floored line centers the picture box itself — its height IS the
+  // natural box, and beside-text pictures must not inherit the text EM ref.
+  const ref = line.pictureFloored ? line.naturalPx : (line.textEmPx ?? line.naturalPx);
   return Math.max(0, (line.heightPx - ref) / 2);
 }
 

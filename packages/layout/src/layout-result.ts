@@ -61,6 +61,9 @@ export interface LaidOutLine {
   /** The height is docGrid-derived in the body flow: Word centers the natural
    *  box in the span; non-grid slack sinks below the text instead. */
   grid?: boolean;
+  /** A picture floored this line's height — a grid line ceils to whole rows
+   *  and centers the picture box itself (its height is the natural box). */
+  pictureFloored?: boolean;
   /** This line's own first-line indent (w:ind/@w:firstLine, negative for a
    *  hanging indent) — set on the paragraph's FIRST line only, so a split
    * tail's leading line (mid-paragraph, mid-page) carries none. The painter

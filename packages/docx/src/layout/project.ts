@@ -1067,6 +1067,11 @@ function wpsMemberOf(
       // a:spAutoFit: Word draws the box shrunk to its text — the declared
       // extent's height is stale and must not drive vertical centering.
       ...(bodyPr.spAutoFit === true ? { autoFit: true } : {}),
+      // bodyPr @compatLnSpc is deliberately not threaded: Word's own layout
+      // engine ignores it for wps text boxes (the txbxContent is laid out by
+      // the standard paragraph rules — grid snap and half-leading included;
+      // pixel-verified against the reference render), so the attribute only
+      // matters to PowerPoint-native consumers.
       blocks,
     };
   }

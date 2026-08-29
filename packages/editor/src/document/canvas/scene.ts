@@ -181,10 +181,11 @@ function paintParagraph(
   }
   for (const line of para.lines) {
     const lineY = y + line.yPx;
-    // In-line vertical placement: a docGrid body line centers its natural box
-    // in the grid span (half-leading); every other regime (multiple without a
-    // grid, atLeast, text boxes, headers/footers) anchors the text at the line
-    // top and sinks the slack below. Both verified against the reference PDF.
+    // In-line vertical placement: a docGrid line centers its natural box in
+    // the grid span (half-leading — body flow and text-box stacks alike);
+    // every other regime (multiple without a grid, atLeast, plain text
+    // boxes, header/footer stories) anchors the text at the line top and
+    // sinks the slack below. All verified against the reference PDF.
     const pad = gridPadOf(line);
     // Line x origin — the shared sum (left indent + the line's own first-line
     // indent + a wrapSide float's shift) the caret map anchors by too.
@@ -524,14 +525,19 @@ function paintMembers(
       const inner = m.nowrap
         ? Number.POSITIVE_INFINITY
         : Math.max(0, m.width - left - (m.insets?.right ?? 0));
-      // A text box shares the section's doc grid with the body: the multiple
-      // line rule takes whole grid rows (Word-verified: 1.5× CJK on the
-      // 340-twip grid renders two rows). Unlike body lines the glyphs stay
-      // at the line-box top — Word does not center a box line's natural
-      // text in the grid span (user-verified: centering sank every txbx).
-      const grid: LayoutBlockContext | undefined = ctx.flow.linePitchPx
-        ? { linePitchPx: ctx.flow.linePitchPx }
-        : undefined;
+      // A text box shares its STORY's doc grid with the surrounding text: a
+      // body box snaps to the section grid and centers its grid rows
+      // (onGrid — the half-leading the reference renders), while a
+      // header/footer box gets no pitch at all (the furniture paint context
+      // clears it — the story keeps natural line heights). bodyPr
+      // @compatLnSpc plays no role: Word ignores it for wps txbxContent.
+      // Metafile text carries nowrap: GDI strings are absolutely positioned
+      // by the replay (baseline-derived y), not story rows — the grid pad
+      // would shove them half a pitch off their drawn spot.
+      const grid: LayoutBlockContext | undefined =
+        ctx.flow.linePitchPx && !m.nowrap
+          ? { linePitchPx: ctx.flow.linePitchPx, onGrid: true }
+          : undefined;
       const laid = stackBlocks(m.blocks, inner, grid, measurer);
       let oy = m.insets?.top ?? 0;
       if (m.anchor === "center" || m.anchor === "bottom") {

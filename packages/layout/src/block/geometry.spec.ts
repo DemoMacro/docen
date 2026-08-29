@@ -43,6 +43,22 @@ describe("gridPadOf", () => {
     expect(gridPadOf(line({ heightPx: 34, naturalPx: 18 }))).toBe(0);
     expect(gridPadOf(line({ grid: true, heightPx: 10, naturalPx: 18 }))).toBe(0);
   });
+
+  it("centers a picture-floored grid line on the picture box, not the text em", () => {
+    expect(
+      gridPadOf(
+        line({ grid: true, pictureFloored: true, heightPx: 28, naturalPx: 21.5, textEmPx: 7 }),
+      ),
+    ).toBe(3.25);
+    // Without the floor the text em keeps winning.
+    expect(gridPadOf(line({ grid: true, heightPx: 28, naturalPx: 21.5, textEmPx: 7 }))).toBe(10.5);
+  });
+
+  it("half-leads a textbox grid line the same as a body line — compatLnSpc changes nothing", () => {
+    expect(gridPadOf(line({ grid: true, heightPx: 45.3, textEmPx: 18.7 }))).toBeCloseTo(13.3, 5);
+    // No grid — the slack sinks below the glyphs.
+    expect(gridPadOf(line({ heightPx: 45.3, textEmPx: 18.7 }))).toBe(0);
+  });
 });
 
 describe("justifiedIntervals", () => {

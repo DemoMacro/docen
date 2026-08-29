@@ -488,7 +488,10 @@ export class CanvasStage {
   }
 
   /** Both furniture stacks for a page's slot, at their page positions —
-   *  distances come from the page's own section. */
+   *  distances come from the page's own section. The paint context clears
+   *  the body flow's grid pitch: the header/footer story keeps natural line
+   *  heights (its paragraphs were laid out with no grid context either), so
+   *  a text box inside the story must not inherit the body's docGrid. */
   private paintFurniture(
     tree: IGroup,
     slot: number,
@@ -497,6 +500,8 @@ export class CanvasStage {
     furniture: ProjectedPageFurniture | undefined,
   ): void {
     ctx.layer = "body";
+    const storyFlow = flow.linePitchPx ? { ...flow, linePitchPx: undefined } : flow;
+    const storyCtx: PaintContext = { ...ctx, flow: storyFlow };
     const section = this.sectionAt(ctx.pageIndex);
     const header = section.furnitureLaid?.header[slot] ?? section.furnitureLaid?.header[0];
     if (header) {
@@ -505,13 +510,19 @@ export class CanvasStage {
         header.stack,
         flow.contentLeftPx,
         furniture?.headerDistancePx ?? 48,
-        ctx,
+        storyCtx,
       );
     }
     const footer = section.furnitureLaid?.footer[slot] ?? section.furnitureLaid?.footer[0];
     if (footer) {
       const bottom = flow.pageHeightPx - (furniture?.footerDistancePx ?? 48);
-      paintFurnitureStack(tree, footer.stack, flow.contentLeftPx, bottom - footer.heightPx, ctx);
+      paintFurnitureStack(
+        tree,
+        footer.stack,
+        flow.contentLeftPx,
+        bottom - footer.heightPx,
+        storyCtx,
+      );
     }
   }
 

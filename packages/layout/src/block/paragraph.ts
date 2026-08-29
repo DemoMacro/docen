@@ -139,12 +139,17 @@ export function layoutParagraph(
     pitch > 0 && ctx?.onGrid === true && spec?.rule !== "exact" && spec?.rule !== "atLeast";
   for (let i = 0; i < packed.length; i++) {
     const line = packed[i];
+    // A picture line keeps its natural height even on the grid: ceil-to-rows
+    // inflates every tall image by up to a pitch, and the cascade evicts
+    // pictures onto lone pages document-wide (Word packs the reference PDF's
+    // collage against the next row, not a whole row later).
     lines.push({
       yPx: heightPx,
       heightPx: line.heightPx,
       naturalPx: line.naturalPx,
       textEmPx: line.textEmPx,
       grid: gridLine || undefined,
+      pictureFloored: line.pictureFloored,
       firstLineIndentPx: i === 0 ? para.indent?.firstLinePx : undefined,
       endInlineIndex: line.endInlineIndex,
       items: line.items,

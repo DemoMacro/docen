@@ -63,6 +63,9 @@ export interface PackedLine {
    *  edge (w:overflowPunct) — 0/undefined when the line ends flush. The hang
    *  never counts against justification or center/right slack. */
   hangPx?: number;
+  /** A picture floored this line's height (the resolver's height was smaller)
+   *  — a grid line ceils to whole rows and centers the picture box itself. */
+  pictureFloored?: boolean;
   /** How far the line's content start sits right of the paragraph's text box
    *  edge — set when a wrapSide right/largest float takes the left side and
    *  the text packs past its right edge (the renderer shifts the line). */
@@ -623,6 +626,7 @@ export function packLines(inline: LayoutInline[], opts: PackLinesOptions): Packe
     // all bottoms at the paragraph strut (the ¶-mark line box).
     let height = opts.lineHeight({ naturalPx, hasCjk });
     if (!hasText && opts.strutPx != null && opts.strutPx > height) height = opts.strutPx;
+    const pictureFloored = tallestPicturePx > height;
     if (tallestPicturePx > height) height = tallestPicturePx;
     // A picture is line content: its height is part of the line's natural
     // box. Without this, a docGrid line carrying only a picture reports a
@@ -648,6 +652,7 @@ export function packLines(inline: LayoutInline[], opts: PackLinesOptions): Packe
       heightPx: height,
       naturalPx,
       textEmPx,
+      ...(pictureFloored ? { pictureFloored: true } : {}),
       hangPx: hangPx > 0 ? hangPx : undefined,
       xOffsetPx: xOffsetPx > 0 ? xOffsetPx : undefined,
     });
