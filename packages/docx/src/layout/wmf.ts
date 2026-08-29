@@ -184,7 +184,10 @@ export function wmfMembers(
           height: view.getInt16(p, true),
           weight: view.getUint16(p + 8, true),
           italic: bytes[p + 10] !== 0,
-          face: gbkDecoder.decode(bytes.subarray(p + 18, faceEnd)),
+          // A leading '@' names GDI's vertical variant of the face — a GDI-only
+          // convention browser font matching cannot resolve, and the vertical
+          // geometry comes from the record geometry, so strip it.
+          face: gbkDecoder.decode(bytes.subarray(p + 18, faceEnd)).replace(/^@/, ""),
         });
         break;
       }

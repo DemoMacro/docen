@@ -502,6 +502,14 @@ const MEMBERS_CAP = 4000;
  *  winAscent+winDescent). Shared with the WMF player's font sizing. */
 export const GDI_CELL_PER_EM = 1.2969;
 
+/** Realized GDI ascent/descent per em for a vertical (@-prefixed) CJK font —
+ *  measured on @楷体 at a −360 request (tmAscent 328 / tmDescent 60), the
+ *  corpus's only vertical-slogan face. Word's metafile replay renders these
+ *  runs upright with the glyph BASELINE through the reference point, so the
+ *  ink centers (ascent − descent)/2 = 0.37 em right of it. */
+const GDI_V_ASCENT_PER_EM = 328 / 360;
+const GDI_V_DESCENT_PER_EM = 60 / 360;
+
 /**
  * Replay a dual-mode WMF's embedded EMF+ stream into drawing members sized to
  * the display box. Returns undefined when there is nothing to replay: no
@@ -1109,7 +1117,11 @@ function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): Draft[] {
         fonts.set(slot, {
           height: view.getInt32(base, true),
           weight: view.getUint32(base + 16, true),
-          face,
+          // A leading '@' names GDI's vertical variant of the face — a GDI-only
+          // convention browser font matching cannot resolve (it falls back to a
+          // thinner face), and the vertical geometry comes from the world
+          // transform anyway, so strip it for the rendered family.
+          face: face.replace(/^@/, ""),
         });
         break;
       }
@@ -1448,13 +1460,16 @@ function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): Draft[] {
             // calibration as the horizontal box below.
             const hoist =
               (textAlign & 0x18) === 0x18 ? height * 0.8 : (textAlign & 0x18) === 0x08 ? height : 0;
-            // A vertical (@font) run's cell spans GDI_CELL_PER_EM × em across
-            // the cross axis, extending OPPOSITE the logical +y column from
-            // the reference point (TA_TOP|TA_LEFT anchors the cell's leading
-            // corner): reference-measured, the glyph ink centers at reference
-            // + cellW/2. The glyph itself centers in the cell.
-            const colW = height * GDI_CELL_PER_EM;
-            const cellInset = (colW - height) / 2;
+            // A vertical (@font) run renders upright with its BASELINE
+            // through the reference point: the cell spans [ref − descent,
+            // ref + ascent] across the column (GDI_V_* measured on the
+            // realized font), the em box centered in it — pixel-verified
+            // against the reference render (ink center lands (ascent −
+            // descent)/2 right of the reference). Raw GDI would draw the run
+            // sideways; Word's metafile replay is the fidelity target.
+            const cellL = height * GDI_V_DESCENT_PER_EM;
+            const cellR = height * GDI_V_ASCENT_PER_EM;
+            const cellInset = (cellL + cellR - height) / 2;
             let prefix = -hoist;
             let ci = 0;
             for (const ch of text) {
@@ -1465,17 +1480,29 @@ function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): Draft[] {
               const ay = refY + ub * prefix;
               const bx = ax + ua * step;
               const by = ay + ub * step;
-              const cx = ax - va * colW;
-              const cy = ay - vb * colW;
-              // Corner fold of the advance and cross extents.
-              const fx = bx + cx - ax;
-              const fy = by + cy - ay;
+              // Corner fold of the advance span against both cross edges.
+              const xsn = [
+                ax,
+                bx,
+                ax + va * cellL,
+                bx + va * cellL,
+                ax - va * cellR,
+                bx - va * cellR,
+              ];
+              const ysn = [
+                ay,
+                by,
+                ay + vb * cellL,
+                by + vb * cellL,
+                ay - vb * cellR,
+                by - vb * cellR,
+              ];
               drafts.push({
                 kind: "text",
-                x: Math.min(ax, bx, cx, fx),
-                y: Math.min(ay, by, cy, fy),
-                w: Math.max(ax, bx, cx, fx) - Math.min(ax, bx, cx, fx) + 2,
-                h: Math.max(ay, by, cy, fy) - Math.min(ay, by, cy, fy),
+                x: Math.min(...xsn),
+                y: Math.min(...ysn),
+                w: Math.max(...xsn) - Math.min(...xsn) + 2,
+                h: Math.max(...ysn) - Math.min(...ysn),
                 text: ch,
                 family: font?.face ?? "",
                 sizeWorld: height,

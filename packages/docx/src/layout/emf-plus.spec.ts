@@ -779,6 +779,24 @@ describe("emfPlusMembers", () => {
       expect(run.style.letterSpacingPx).toBeUndefined();
     });
 
+    it("strips the GDI @ vertical-variant prefix from the face", () => {
+      // '@楷体' names GDI's vertical variant of the face — browser font
+      // matching cannot resolve the '@' (it falls back to a thinner face),
+      // so the rendered family is the base face.
+      const wmf = carrierWithText(
+        [extcreatefont(1, 24, 400, "@楷体"), selectfont(1), exttextoutw("示例文字", 1000, 40000)],
+        [epHeader(), epEof()],
+      );
+      const members = emfPlusMembers(wmf, 400, 300);
+      expect(members).toBeDefined();
+      const box = members!.find((m) => m.kind === "textBox");
+      if (box?.kind !== "textBox") return;
+      const para = box.blocks[0];
+      const run = para?.kind === "paragraph" ? para.inline[0] : undefined;
+      if (run?.kind !== "text") return;
+      expect(run.style.family).toBe("楷体");
+    });
+
     it("marks runs under a rotated world transform with the screen angle", () => {
       // Vertical plan-box columns: a 90°-rotated GDI world transform steers
       // the run's advance but never turns the glyph outlines (GDI plays
@@ -820,6 +838,41 @@ describe("emfPlusMembers", () => {
       const ys = boxes.map((b) => b.y);
       expect([...ys].sort((a, b) => a - b)).toEqual(ys);
       for (const b of boxes) expect(b.rotation).toBeUndefined();
+    });
+
+    it("anchors vertical columns with the glyph baseline at the reference", () => {
+      // Word's replay draws upright @font glyphs with the baseline through
+      // the reference point: the cell spans [ref − descent, ref + ascent]
+      // (realized @楷体: 328/60 at a −360 request) with the em centered in
+      // it — a small positive insets.left, and the face stripped of its '@'.
+      // The ink-center position is pixel-verified in the editor against the
+      // reference render (the box scale differs per axis, so no ratio here).
+      const setworld = (m: number[]): Uint8Array => {
+        const body = new Uint8Array(24);
+        const v = new DataView(body.buffer);
+        m.forEach((n, i) => v.setFloat32(i * 4, n, true));
+        return emr(35, body);
+      };
+      const wmf = carrierWithText(
+        [
+          setworld([0, 0.07, -0.07, 0, 31580, -1287]),
+          extcreatefont(1, 24, 400, "@楷体"),
+          selectfont(1),
+          settextcolor("1a1a1a"),
+          exttextoutw("例字", 21015, 470415),
+        ],
+        [epHeader(), epEof()],
+      );
+      const members = emfPlusMembers(wmf, 400, 300);
+      expect(members).toBeDefined();
+      const box = members!.find((m) => m.kind === "textBox");
+      if (box?.kind !== "textBox") return;
+      const para = box.blocks[0];
+      const run =
+        para?.kind === "paragraph" && para.inline[0]?.kind === "text" ? para.inline[0] : undefined;
+      if (!run) return;
+      expect(run.style.family).toBe("楷体");
+      expect(box.insets?.left).toBeGreaterThan(0);
     });
 
     it("keeps walking past whitespace-only text runs", () => {
