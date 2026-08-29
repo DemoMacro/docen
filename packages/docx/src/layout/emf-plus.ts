@@ -165,6 +165,10 @@ interface TextDraft {
    *  tracked text (letter-spaced labels) reports wider advances than the
    *  glyphs are wide; the member threads the difference into the run style. */
   letterSpacingWorld?: number;
+  /** Cross-axis inset of the ink inside its cell, device px — a vertical
+   *  (@font) run centers each glyph in its cell, so the ink starts
+   *  (cellW − em)/2 into the box the fold produced. */
+  cellInsetWorld?: number;
   /** Clockwise screen angle of the text-direction column, degrees — a
    *  rotated world transform means vertical text (plan-box columns); the
    *  member carries it so the paint rotates instead of laying the run
@@ -1444,7 +1448,13 @@ function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): Draft[] {
             // calibration as the horizontal box below.
             const hoist =
               (textAlign & 0x18) === 0x18 ? height * 0.8 : (textAlign & 0x18) === 0x08 ? height : 0;
-            const colW = height * 1.35;
+            // A vertical (@font) run's cell spans GDI_CELL_PER_EM × em across
+            // the cross axis, extending OPPOSITE the logical +y column from
+            // the reference point (TA_TOP|TA_LEFT anchors the cell's leading
+            // corner): reference-measured, the glyph ink centers at reference
+            // + cellW/2. The glyph itself centers in the cell.
+            const colW = height * GDI_CELL_PER_EM;
+            const cellInset = (colW - height) / 2;
             let prefix = -hoist;
             let ci = 0;
             for (const ch of text) {
@@ -1455,8 +1465,8 @@ function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): Draft[] {
               const ay = refY + ub * prefix;
               const bx = ax + ua * step;
               const by = ay + ub * step;
-              const cx = ax + va * colW;
-              const cy = ay + vb * colW;
+              const cx = ax - va * colW;
+              const cy = ay - vb * colW;
               // Corner fold of the advance and cross extents.
               const fx = bx + cx - ax;
               const fy = by + cy - ay;
@@ -1469,6 +1479,7 @@ function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): Draft[] {
                 text: ch,
                 family: font?.face ?? "",
                 sizeWorld: height,
+                ...(cellInset > 0.01 ? { cellInsetWorld: cellInset } : {}),
                 ...(textColor ? { color: textColor } : {}),
                 ...(font && font.weight >= 700 ? { bold: true } : {}),
               });
@@ -1617,6 +1628,7 @@ function finalize(
         width: dr.w * sX,
         height: dr.h * sY,
         nowrap: true,
+        ...(dr.cellInsetWorld ? { insets: { left: dr.cellInsetWorld * sX } } : {}),
         ...(dr.rotation ? { rotation: dr.rotation } : {}),
         blocks: [
           {
