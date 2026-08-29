@@ -12,6 +12,8 @@
 //  2. No spacing.line + snapToGrid on + a grid pitch:
 //     - table cell → max(natural, pitch) (the row's trHeight governs)
 //     - CJK line → ceil(natural / pitch) × pitch (chars snap to the grid)
+//     - picture-sized line → same ceil (the box spans whole rows; the
+//       painter half-leads it — gridPadOf)
 //     - Latin line → max(natural, pitch)
 //  3. Otherwise → natural.
 //
@@ -73,10 +75,10 @@ export function layoutParagraph(
     firstLineIndentPx: para.indent?.firstLinePx,
     tabStops: para.tabStops,
     strutPx,
-    lineHeight: ({ naturalPx, hasCjk }) =>
+    lineHeight: ({ naturalPx, hasCjk, hasPicture }) =>
       spec
-        ? resolveLine(spec, naturalPx, pitch, hasCjk, inTable)
-        : snapLine(naturalPx, hasCjk, pitch, inTable),
+        ? resolveLine(spec, naturalPx, pitch, hasCjk, inTable, hasPicture)
+        : snapLine(naturalPx, hasCjk, pitch, inTable, hasPicture),
     startY: ctx?.startY,
     // Absolute zones come from whoever stacks the blocks: the flow passes the
     // page's float zones, the table cell stacker accumulates the cell's own
@@ -139,10 +141,6 @@ export function layoutParagraph(
     pitch > 0 && ctx?.onGrid === true && spec?.rule !== "exact" && spec?.rule !== "atLeast";
   for (let i = 0; i < packed.length; i++) {
     const line = packed[i];
-    // A picture line keeps its natural height even on the grid: ceil-to-rows
-    // inflates every tall image by up to a pitch, and the cascade evicts
-    // pictures onto lone pages document-wide (Word packs the reference PDF's
-    // collage against the next row, not a whole row later).
     lines.push({
       yPx: heightPx,
       heightPx: line.heightPx,
@@ -285,6 +283,7 @@ function resolveLine(
   pitch: number,
   hasCjk = false,
   inTable = false,
+  hasPicture = false,
 ): number {
   if (spec.rule === "exact") return spec.px;
   if (spec.rule === "atLeast") return Math.max(naturalPx, spec.px);
@@ -293,8 +292,10 @@ function resolveLine(
   // height never falls below the line's natural height and snaps up to whole
   // rows: a face taller than its grid rows (Microsoft YaHei runs ~1.7em while
   // a 340-twip pitch is ~1.2em of a 14pt line) takes the rows it needs. Latin
-  // lines are exempt from the lattice.
-  if (pitch > 0 && hasCjk) {
+  // lines are exempt from the lattice — but a picture-sized line joins it
+  // (its box spans whole rows and half-leads; pixel-verified against the
+  // reference renders).
+  if (pitch > 0 && (hasCjk || hasPicture)) {
     if (inTable) {
       // A cell line's natural height still snaps up to whole rows before the
       // comparison against the multiple's demand (see resolveLine doc).
@@ -308,10 +309,18 @@ function resolveLine(
 }
 
 /** No spacing.line: snap to the document grid. */
-function snapLine(naturalPx: number, hasCjk: boolean, pitch: number, inTable: boolean): number {
+function snapLine(
+  naturalPx: number,
+  hasCjk: boolean,
+  pitch: number,
+  inTable: boolean,
+  hasPicture = false,
+): number {
   if (pitch <= 0) return naturalPx;
   // A cell line's natural height snaps up to whole rows — the "add grid
   // pitch" compat raises it as far as the line demands, never just one pitch.
-  if (inTable || hasCjk) return Math.ceil(naturalPx / pitch) * pitch;
+  // A picture-sized body line snaps the same way: the box spans whole rows
+  // and gridPadOf half-leads the picture inside them.
+  if (inTable || hasCjk || hasPicture) return Math.ceil(naturalPx / pitch) * pitch;
   return Math.max(naturalPx, pitch);
 }

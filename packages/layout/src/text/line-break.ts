@@ -34,6 +34,9 @@ export interface LineHeightInput {
   naturalPx: number;
   /** Whether any of the line's text itemized as CJK (docGrid ceil snap). */
   hasCjk: boolean;
+  /** A picture floored this line (its box is the natural): the grid resolver
+   *  ceil-snaps it to whole rows like a CJK line's. */
+  hasPicture?: boolean;
 }
 
 export type LineHeightResolver = (line: LineHeightInput) => number;
@@ -633,6 +636,14 @@ export function packLines(inline: LayoutInline[], opts: PackLinesOptions): Packe
     // text-sized natural, and the painter's grid centering sinks the picture
     // by half its height instead of pinning it to the line top.
     if (tallestPicturePx > naturalPx) naturalPx = tallestPicturePx;
+    // A grid line's picture box spans whole rows too: re-resolve so the
+    // ceil snap takes the picture's natural, and the painter's half-leading
+    // (gridPadOf) centers the box in the span. Pixel-verified against the
+    // reference renders — a 681px and a 639px picture on a 17pt pitch land
+    // (span − box)/2 = 10.8/9.2px lower, matching the ±0.2px tolerance.
+    if (pictureFloored) {
+      height = Math.max(height, opts.lineHeight({ naturalPx, hasCjk, hasPicture: true }));
+    }
 
     // An exhausted stream re-enters the packing loop once more before every
     // cursor reports done; that pass places nothing (the resolver emits an

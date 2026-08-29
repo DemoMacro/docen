@@ -18,6 +18,7 @@
 //   max — one vertical-margin model shared with table cells.
 
 import { layoutBlock } from "../block/block";
+import { fitExtentPx } from "../block/geometry";
 import {
   type LayoutBlock,
   type LayoutBlockContext,
@@ -283,7 +284,7 @@ class Flow {
     const before = this.spacingBefore(laid);
     // Both spans are relative to this.y: the page bottom and the band top.
     const room = Math.min(this.remaining(), this.bandCeiling() - this.y) - before;
-    if (before + laid.heightPx <= room) {
+    if (before + fitExtentPx(laid) <= room) {
       this.commit(laid, before);
       return true;
     }

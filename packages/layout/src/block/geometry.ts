@@ -3,7 +3,13 @@
 // (hit-testing). One implementation here means the caret can never drift
 // from the paint — each function is the single authority for its sum.
 
-import type { LaidOutCell, LaidOutLine, LaidOutParagraph, LaidOutTable } from "../layout-result";
+import type {
+  LaidOutBlock,
+  LaidOutCell,
+  LaidOutLine,
+  LaidOutParagraph,
+  LaidOutTable,
+} from "../layout-result";
 
 /** A line's x origin relative to its block: the left indent (every line),
  *  the line's own first-line indent flag (a split tail carries none), and a
@@ -23,10 +29,23 @@ export function lineOriginXPx(para: LaidOutParagraph, line: LaidOutLine): number
  *  text y and the caret band anchor at this pad. */
 export function gridPadOf(line: LaidOutLine): number {
   if (!line.grid) return 0;
-  // A picture-floored line centers the picture box itself — its height IS the
-  // natural box, and beside-text pictures must not inherit the text EM ref.
+  // A picture-floored line centers the picture box (its natural) in the
+  // spanned rows — beside-text pictures must not inherit the text EM ref.
   const ref = line.pictureFloored ? line.naturalPx : (line.textEmPx ?? line.naturalPx);
   return Math.max(0, (line.heightPx - ref) / 2);
+}
+
+/** A block's page-fitting extent — its content bottom. A paragraph whose
+ *  last line is a picture spans grid rows whose trailing half-leading may
+ *  overhang the page bottom: Word keeps the picture when its own box fits
+ *  (pixel-verified — a 639px picture with 9px leading stays on a page 6px
+ *  short of the padded box). The flow's cursor still advances by the full
+ *  padded box; only the fit check sees this extent. */
+export function fitExtentPx(block: LaidOutBlock): number {
+  if (block.kind !== "paragraph") return block.heightPx;
+  const last = block.lines[block.lines.length - 1];
+  if (!last?.pictureFloored) return block.heightPx;
+  return block.heightPx - last.heightPx + gridPadOf(last) + last.naturalPx;
 }
 
 /** Each item's justified stretch-interval end — a text item's glyphs fill
