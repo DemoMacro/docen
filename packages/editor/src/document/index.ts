@@ -2340,64 +2340,70 @@ class DocenDocument extends AddinHost<Editor> {
     );
   }
 
-  /** Insert → Footnote: prompt for the note text, then drop a
-   *  footnoteReference atom at the caret and append the note's content to
-   *  doc.attrs.documentExtras.footnotes (word/footnotes.xml on export — the
-   *  round-trip channel the parse side already fills). The note body opens
-   *  with the footnoteRef mark run (Word's note-number placeholder); the bare
-   *  reference atom picks up the built-in FootnoteReference style on export.
-   *  A document carrying explicit content types needs the footnotes override
+  /** Insert → Footnote / Endnote (Word's References → Insert Footnote, the
+   *  split's two items): prompt for the note text, drop a footnoteReference /
+   *  endnoteReference atom at the caret and append the note's content to
+   *  doc.attrs.documentExtras.footnotes/endnotes (word/footnotes.xml /
+   *  word/endnotes.xml on export — the round-trip channel the parse side
+   *  already fills). The note body opens with the noteRef mark run (Word's
+   *  note-number placeholder); the bare reference atom picks up the built-in
+   *  FootnoteReference/EndnoteReference style on export (the canvas paints
+   *  endnote references lowercase Roman, Word's endnote default numFmt).
+   *  A document carrying explicit content types needs the matching override
    *  added too — the packer gates the part on it whenever contentTypes exists. */
-  #insertFootnote(): void {
+  #insertNote(kind: "footnote" | "endnote"): void {
     const editor = this.editor;
     if (!editor) return;
     const text = window.prompt(t("footnote.prompt", this))?.trim();
     if (!text) return;
+    const channel = `${kind}s` as "footnotes" | "endnotes";
     const docAttrs = (editor.state.doc.attrs ?? {}) as {
       documentExtras?: {
         footnotes?: Array<{ id?: number }>;
+        endnotes?: Array<{ id?: number }>;
         contentTypes?: {
           overrides?: Array<{ partName?: string; contentType?: string }>;
         };
       };
     };
     const extras = docAttrs.documentExtras ?? {};
-    const footnotes = extras.footnotes ?? [];
-    const id = footnotes.reduce((max, n) => Math.max(max, Number(n.id ?? 0)), 0) + 1;
+    const notes = extras[channel] ?? [];
+    const id = notes.reduce((max, n) => Math.max(max, Number(n.id ?? 0)), 0) + 1;
+    const Note = kind === "footnote" ? "FootnoteText" : "EndnoteText";
     const ref = editor.schema.nodeFromJSON({
       type: "inlinePassthrough",
-      attrs: { data: JSON.stringify({ footnoteReference: id }) },
+      attrs: { data: JSON.stringify({ [`${kind}Reference`]: id }) },
     } as JSONContent);
     const documentExtras = {
       ...extras,
-      footnotes: [
-        ...footnotes,
+      [channel]: [
+        ...notes,
         {
           id,
-          // Word's canonical note body: one FootnoteText paragraph holding the
-          // note-number mark run (the bare footnoteRef atom — export wraps it
-          // in the FootnoteReference rStyle) followed by the note text inline.
+          // Word's canonical note body: one *Text paragraph holding the
+          // note-number mark run (the bare *Ref atom — export wraps it in the
+          // *Reference rStyle) followed by the note text inline.
           children: [
             {
-              style: "FootnoteText",
-              children: [{ footnoteRef: true }, { text }],
+              style: Note,
+              children: [{ [`${kind}Ref`]: true }, { text }],
             },
           ],
         },
       ],
     };
+    const partName = `/word/${channel}.xml`;
     if (
       extras.contentTypes &&
-      !extras.contentTypes.overrides?.some((o) => o.partName === "/word/footnotes.xml")
+      !extras.contentTypes.overrides?.some((o) => o.partName === partName)
     ) {
       documentExtras.contentTypes = {
         ...extras.contentTypes,
         overrides: [
           ...(extras.contentTypes.overrides ?? []),
           {
-            partName: "/word/footnotes.xml",
-            contentType:
-              "application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml",
+            partName,
+            contentType: `application/vnd.openxmlformats-officedocument.wordprocessingml.${channel}+xml`,
           },
         ],
       };
@@ -2405,7 +2411,7 @@ class DocenDocument extends AddinHost<Editor> {
     editor.view.dispatch(
       editor.state.tr
         .insert(editor.state.selection.from, ref)
-        .setDocAttribute("documentExtras", documentExtras),
+        .setDocAttribute("documentExtras", documentExtras as typeof extras),
     );
   }
 
@@ -2612,10 +2618,11 @@ class DocenDocument extends AddinHost<Editor> {
       this.#insertBookmark();
       return;
     }
-    // Footnote — prompt for the note text, reference the caret and append the
-    // note body (Word's References → Insert Footnote).
+    // Footnote / Endnote — prompt for the note text, reference the caret and
+    // append the note body (Word's References → Insert Footnote; the split's
+    // endnote item shares the event).
     if (name === "insert-footnote") {
-      this.#insertFootnote();
+      this.#insertNote(value === "endnote" ? "endnote" : "footnote");
       return;
     }
     // Page Color — write/clear the doc-level w:background from the palette

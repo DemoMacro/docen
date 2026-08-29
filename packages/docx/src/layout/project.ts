@@ -508,6 +508,9 @@ interface ProjectContext {
    *  (Word's numbering: the Nth distinct note referenced shows N; the same id
    *  twice shows the same number). Lives across the whole projection walk. */
   footnoteOrdinals: Map<number, number>;
+  /** Endnote id → displayed ordinal — same first-reference-order rule as the
+   *  footnotes; painted as lowercase Roman (Word's endnote default numFmt). */
+  endnoteOrdinals: Map<number, number>;
 }
 
 // ── list-number formats (w:numFmt) ──
@@ -1453,13 +1456,25 @@ const HYPERLINK_DISPLAY = { underline: { type: "single" }, color: "0563C1" } as 
 const INSERTION_DISPLAY = { underline: { type: "single" }, color: "FF0000" } as const;
 const DELETION_DISPLAY = { strike: true, color: "FF0000" } as const;
 
-/** A footnote reference's note id — the bare number form (`{ footnoteReference:
- *  1 }`) or the option object form (`{ id }`); anything else is not one. */
-function footnoteRefId(child: Rec): number | undefined {
-  const ref = child.footnoteReference;
+/** A footnote/endnote reference's note id — the bare number form (`{
+ *  footnoteReference: 1 }` / `{ endnoteReference: 1 }`) or the option object
+ *  form (`{ id }`); anything else is not one. */
+function noteRefId(child: Rec, key: "footnoteReference" | "endnoteReference"): number | undefined {
+  const ref = child[key];
   if (typeof ref === "number") return ref;
   if (isRecord(ref)) return num(ref.id);
   return undefined;
+}
+
+/** The displayed ordinal for a note id — assign the next number on first
+ *  reference, reuse it afterward (the Nth distinct note referenced shows N). */
+function noteOrdinal(ordinals: Map<number, number>, id: number): number {
+  let ordinal = ordinals.get(id);
+  if (ordinal == null) {
+    ordinal = ordinals.size + 1;
+    ordinals.set(id, ordinal);
+  }
+  return ordinal;
 }
 
 /** Inline content: text runs (rPr resolved over the paragraph default), hard
@@ -1592,19 +1607,24 @@ function projectRuns(
       if (isRecord(child.commentRangeEnd) && num(child.commentRangeEnd.id) != null)
         openComments?.delete(num(child.commentRangeEnd.id)!);
       const rPr: Rec = { ...preset, ...child };
-      // A footnote reference is a superscript ordinal (Word's FootnoteReference
-      // style look) — numbered by first-reference order, the same id twice
-      // showing the same number. The reference run's own rPr still applies.
-      const fnRefId = footnoteRefId(child);
+      // A footnote/endnote reference is a superscript ordinal (Word's
+      // FootnoteReference/EndnoteReference style look) — numbered by
+      // first-reference order, the same id twice showing the same number;
+      // endnotes paint lowercase Roman (Word's endnote default numFmt). The
+      // reference run's own rPr still applies.
+      const fnRefId = noteRefId(child, "footnoteReference");
       if (fnRefId != null) {
-        let ordinal = ctx.footnoteOrdinals.get(fnRefId);
-        if (ordinal == null) {
-          ordinal = ctx.footnoteOrdinals.size + 1;
-          ctx.footnoteOrdinals.set(fnRefId, ordinal);
-        }
         out.push({
           kind: "text",
-          text: String(ordinal),
+          text: String(noteOrdinal(ctx.footnoteOrdinals, fnRefId)),
+          style: { ...textStyleOf(rPr), verticalAlign: "superscript" },
+        });
+      }
+      const enRefId = noteRefId(child, "endnoteReference");
+      if (enRefId != null) {
+        out.push({
+          kind: "text",
+          text: romanNumeral(noteOrdinal(ctx.endnoteOrdinals, enRefId), false),
           style: { ...textStyleOf(rPr), verticalAlign: "superscript" },
         });
       }
@@ -1972,6 +1992,7 @@ function projectPageFurniture(
     // Word forbids footnote references in headers/footers — a fresh counter
     // keeps the furniture walk independent even if malformed input carries one.
     footnoteOrdinals: new Map(),
+    endnoteOrdinals: new Map(),
   };
   const projectSlots = (side: unknown): LayoutBlock[] | undefined => {
     if (!Array.isArray(side)) return undefined;
@@ -2107,6 +2128,7 @@ export function projectDocumentOptions(doc: DocumentOptions): {
     listCounters: new Map(),
     openComments: new Set(),
     footnoteOrdinals: new Map(),
+    endnoteOrdinals: new Map(),
   };
   const sections: ProjectedSection[] = (doc.sections ?? []).map((section) => {
     const blocks: LayoutBlock[] = [];

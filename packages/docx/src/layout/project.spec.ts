@@ -1448,3 +1448,52 @@ describe("projectDocumentOptions footnote references", () => {
     ]);
   });
 });
+
+describe("projectDocumentOptions endnote references", () => {
+  const textItems = (blocks: LayoutBlock[]): { text: string; verticalAlign?: string }[] => {
+    const out: { text: string; verticalAlign?: string }[] = [];
+    for (const b of blocks) {
+      if (b.kind !== "paragraph") continue;
+      for (const i of b.inline)
+        if (i.kind === "text") out.push({ text: i.text, verticalAlign: i.style.verticalAlign });
+    }
+    return out;
+  };
+
+  it("numbers references in first-reference order as lowercase Roman superscripts", () => {
+    const { blocks } = oneSection(
+      doc([
+        {
+          paragraph: {
+            children: [
+              { text: "a" },
+              { endnoteReference: 5 },
+              { text: "b" },
+              { endnoteReference: 2 },
+            ],
+          },
+        },
+        { paragraph: { children: [{ text: "c" }, { endnoteReference: 5 }, { text: "d" }] } },
+      ]),
+    );
+    // Word's endnote default numFmt is lowercase Roman: the Nth distinct note
+    // referenced shows N (i, ii, …) — note 5 referenced first ("i"), note 2
+    // second ("ii"), and the repeat of note 5 shows "i" again.
+    expect(textItems(blocks)).toEqual([
+      { text: "a" },
+      { text: "i", verticalAlign: "superscript" },
+      { text: "b" },
+      { text: "ii", verticalAlign: "superscript" },
+      { text: "c" },
+      { text: "i", verticalAlign: "superscript" },
+      { text: "d" },
+    ]);
+  });
+
+  it("accepts the option-object reference shape", () => {
+    const { blocks } = oneSection(
+      doc([{ paragraph: { children: [{ endnoteReference: { id: 3 } }] } }]),
+    );
+    expect(textItems(blocks)).toEqual([{ text: "i", verticalAlign: "superscript" }]);
+  });
+});
