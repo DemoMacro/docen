@@ -72,6 +72,24 @@ describe("packLines", () => {
     expect(plain[0].hangPx).toBeUndefined();
   });
 
+  it("squeezes a CJK line that misses fitting by a hair (compressPunctuation)", () => {
+    // Corpus-verified (honor table): a 17-char run — 16 chars + a mid-run 、,
+    // natural 272px against a 269px column — renders ONE line with advances
+    // squeezed ~1% (Word's compressPunctuation), not two.
+    const lines = pack([text("测试机关名称、下级行政管理部门测试", cjk)], 269);
+    expect(lines).toHaveLength(1);
+    expect(lines[0].hangPx).toBeUndefined();
+    // The re-spaced fragments fill the column: the last one ends at the edge.
+    const texts = lines[0].items.filter(
+      (i): i is Extract<LaidOutLineItem, { kind: "text" }> => i.kind === "text",
+    );
+    const last = texts[texts.length - 1]!;
+    expect(last.xPx + last.widthPx).toBeGreaterThan(268);
+    // A genuinely overflowing run still wraps — the 4% bound holds.
+    const over = pack([text("测试机关名称、下级行政管理部门测试人员名单", cjk)], 269);
+    expect(over.length).toBeGreaterThan(1);
+  });
+
   it("shrinks only the first line by the first-line indent", () => {
     // "abcd ab" = 32+4+16 = 52px; line 0 at 72−28.8 = 43.2px fits "abcd" only.
     const lines = pack([text("abcd ab")], 72, { firstLineIndentPx: 28.8 });

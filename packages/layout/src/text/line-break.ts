@@ -121,6 +121,19 @@ const CLOSING_PUNCT = new Set([
   "’",
 ]);
 
+/** CJK text (ideographs, kana, fullwidth forms, CJK punctuation) — the only
+ *  content the advance squeeze below may touch; Latin runs keep their
+ *  natural metrics. */
+const CJK_TEXT = /^[　-〿㐀-䶿一-鿿぀-ヿ＀-￯‘’“”…]+$/;
+
+/** Word's w:characterSpacingControl compressPunctuation (its CJK default):
+ *  a line whose next pushed run is pure CJK and misses fitting by a hair
+ *  squeezes the line's advances to fit instead of breaking (corpus-verified:
+ *  the honor table's 17-char cell — natural 272px in a 269.2px cell —
+ *  renders ONE line at ~98.9% advance, not two). Bounded at 4% so a genuinely
+ *  overflowing line still wraps; the residual squeeze is sub-glyph. */
+const SQUEEZE_MAX = 0.04;
+
 /** Prepared flows cache — prepare is the expensive pass (segment + measure);
  *  line queries are pure arithmetic. Keyed by the full item sequence. */
 const preparedCache = new Map<string, PreparedRichInline>();
@@ -453,6 +466,9 @@ export function packLines(inline: LayoutInline[], opts: PackLinesOptions): Packe
     let endInlineIndex = 0;
     let brokeMidGroup = false;
     let hangPx = 0;
+    // The uniform advance factor applied to this line's fragments (just under
+    // 1, or undefined = natural advances).
+    let squeeze: number | undefined;
 
     for (let g = 0; g < groups.length; g++) {
       const group = groups[g];
@@ -492,19 +508,53 @@ export function packLines(inline: LayoutInline[], opts: PackLinesOptions): Packe
             }
           }
         }
+        // The advance squeeze (see SQUEEZE_MAX): tried after the hang — a
+        // hanging closer already fits its line, squeezing is moot there.
+        if (range && range.end.itemIndex < group.items.length && !squeeze) {
+          const probe = layoutNextRichInlineLineRange(group.prepared, 1e9, range.end);
+          if (probe) {
+            const probeFrags = materializeRichInlineLineRange(group.prepared, probe).fragments;
+            const lineFrags = materializeRichInlineLineRange(group.prepared, range).fragments;
+            const allCjk =
+              probeFrags.every((f) => CJK_TEXT.test(f.text)) &&
+              lineFrags.every((f) => CJK_TEXT.test(f.text));
+            const queryNow = Math.max(1, maxWidth - xLine);
+            const total = range.width + probe.width;
+            const overflow = total - queryNow;
+            if (allCjk && overflow > 0 && overflow <= total * SQUEEZE_MAX) {
+              // Re-query at the run's natural width: the greedy break now
+              // covers the probed run (or more). The materialized width under
+              // the real squeeze below decides the factor.
+              const re = layoutNextRichInlineLineRange(group.prepared, total, cursors[g]);
+              if (re) {
+                const width = materializeRichInlineLineRange(group.prepared, re).width;
+                const k = queryNow / width;
+                if (k < 1 && k >= 1 - SQUEEZE_MAX) {
+                  range = re;
+                  squeeze = k;
+                }
+              }
+            }
+          }
+        }
         if (range) {
           const line = materializeRichInlineLineRange(group.prepared, range);
+          const xStart = xLine;
           let xFrag = xLine;
           for (const frag of line.fragments) {
             const inlineIndex = group.itemInline[frag.itemIndex];
             const src = inline[inlineIndex];
+            // A squeezed line re-spaces its fragments' advances (k < 1) — the
+            // glyphs keep their metrics, only the positions tighten (Word's
+            // advance compression; the painter draws at the given x).
+            const at = squeeze ? xStart + (xFrag - xStart) * squeeze : xFrag;
             if (src.kind === "text") {
               lineItems.push({
                 kind: "text",
                 inlineIndex,
                 text: frag.text,
-                xPx: xFrag,
-                widthPx: frag.occupiedWidth,
+                xPx: at,
+                widthPx: squeeze ? frag.occupiedWidth * squeeze : frag.occupiedWidth,
               });
               hasText = true;
               const analyzed = measurer.analyze(src.text, src.style);
@@ -514,7 +564,7 @@ export function packLines(inline: LayoutInline[], opts: PackLinesOptions): Packe
               lineItems.push({
                 kind: "picture",
                 inlineIndex,
-                xPx: xFrag,
+                xPx: at,
                 widthPx: src.widthPx,
                 heightPx: src.heightPx,
               });
@@ -523,7 +573,8 @@ export function packLines(inline: LayoutInline[], opts: PackLinesOptions): Packe
             xFrag += frag.gapBefore + frag.occupiedWidth;
             endInlineIndex = inlineIndex;
           }
-          xLine += line.width;
+          // A squeezed group fills the line's remaining width exactly.
+          xLine += squeeze ? maxWidth - xStart : line.width;
           cursors[g] = range.end;
           if (range.end.itemIndex >= group.items.length) {
             done[g] = true;
