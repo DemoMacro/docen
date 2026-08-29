@@ -471,6 +471,10 @@ export interface LayoutTableRow {
   /** w:tblHeader — leading rows repeat on every page the table splits onto
    *  (only a contiguous prefix from the first row counts). */
   tableHeader?: boolean;
+  /** w:cantSplit — the row moves whole to the next page instead of splitting
+   *  mid-content (a row taller than a page still force-splits — Word clips
+   *  nothing). */
+  cantSplit?: boolean;
 }
 
 export type LayoutTableWidth =

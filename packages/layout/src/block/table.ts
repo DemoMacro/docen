@@ -135,7 +135,13 @@ export function layoutTable(
       cell.contentOffsetYPx = va === "center" ? slack / 2 : va === "bottom" ? slack : undefined;
     });
     heightPx += rowHeight;
-    return { heightPx: rowHeight, cells, tableHeader: rowIndex < bandEnd || undefined };
+    return {
+      heightPx: rowHeight,
+      cells,
+      tableHeader: rowIndex < bandEnd || undefined,
+      cantSplit: row.cantSplit || undefined,
+      exactHeight: tr?.rule === "exact" || undefined,
+    };
   });
 
   return {

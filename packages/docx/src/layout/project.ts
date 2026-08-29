@@ -1826,6 +1826,7 @@ function projectTable(t: TableOptions, ctx: ProjectContext): LayoutTable {
         .map((cell) => projectCell(cell, ctx, rowSpans.get(cell))),
       height,
       tableHeader: row.tableHeader || undefined,
+      cantSplit: row.cantSplit || undefined,
     });
   }
 

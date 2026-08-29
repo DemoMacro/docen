@@ -24,7 +24,15 @@ import {
   type LayoutFloatZone,
   wrapEffectsOf,
 } from "../layout-doc";
-import type { LaidOutBlock, LaidOutLine, LaidOutStackItem, LaidOutTable } from "../layout-result";
+import type {
+  LaidOutBlock,
+  LaidOutCell,
+  LaidOutLine,
+  LaidOutParagraph,
+  LaidOutRow,
+  LaidOutStackItem,
+  LaidOutTable,
+} from "../layout-result";
 import type { TextMeasurer } from "../text/measure";
 
 /** One block placed on a page: `yPx` from the page content top. Split blocks
@@ -279,9 +287,11 @@ class Flow {
       this.commit(laid, before);
       return true;
     }
-    const k = this.sliceFitting(laid, room);
-    if (k > 0) {
-      const [head, tail] = splitLaid(laid, k);
+    const { k, midDepth } = this.sliceFitting(laid, room);
+    // k = 0 with a midDepth is the force-split of a first row no page could
+    // hold — the head is just that row's upper half.
+    if (k > 0 || midDepth != null) {
+      const [head, tail] = splitLaid(laid, k, midDepth);
       this.commit(head, before);
       this.pushLaid(tail);
       return true;
@@ -334,29 +344,31 @@ class Flow {
     return moved;
   }
 
-  /** Max prefix count whose stacked height fits `space` (0 = none fit). */
-  private sliceFitting(laid: LaidOutBlock, space: number): number {
-    if (space <= 0) return 0;
+  /** The next split: `k` = the prefix count whose stacked height fits `space`,
+   *  plus `midDepth` (px from the k-th table row's top) when that row itself
+   *  splits mid-content. `k` = 0 means nothing fits — move the whole block. */
+  private sliceFitting(laid: LaidOutBlock, space: number): { k: number; midDepth?: number } {
+    if (space <= 0) return { k: 0 };
     // A block taller than the page ignores keepLines/widowControl — pushing
     // it to the next page cannot help, so it splits greedily (Word relaxes
     // the same way; progress beats clipping).
     const overPage = laid.heightPx > this.opts.contentHeightPx;
     switch (laid.kind) {
       case "paragraph": {
-        if (laid.keepLines && !overPage) return 0;
+        if (laid.keepLines && !overPage) return { k: 0 };
         let k = 0;
         let h = 0;
         while (k < laid.lines.length && h + laid.lines[k].heightPx <= space) {
           h += laid.lines[k].heightPx;
           k++;
         }
-        if (k === 0) return 0;
+        if (k === 0) return { k: 0 };
         if (!overPage && laid.widowControl !== false && laid.lines.length >= 2) {
-          if (k === 1) return 0; // an orphaned single head line — move whole
+          if (k === 1) return { k: 0 }; // an orphaned single head line — move whole
           if (laid.lines.length - k === 1) k--; // tail widow — give it a line
-          if (k < 2) return 0; // can't satisfy both — move whole
+          if (k < 2) return { k: 0 }; // can't satisfy both — move whole
         }
-        return k;
+        return { k };
       }
       case "table": {
         // Word repeats a leading tblHeader band on every continuation page, so
@@ -373,9 +385,15 @@ class Flow {
               h += laid.rows[k].heightPx;
               k++;
             }
-            // No body row fits under the band — move the table whole.
-            if (k === headers) return 0;
-            return k;
+            // No body row fits under the band whole — try splitting it
+            // mid-content, else move the table whole.
+            if (k === headers) {
+              const mid = this.midRowDepth(laid.rows[k], space - h);
+              return mid != null ? { k, midDepth: mid } : { k: 0 };
+            }
+            const mid =
+              k < laid.rows.length ? this.midRowDepth(laid.rows[k], space - h) : undefined;
+            return { k, midDepth: mid };
           }
         }
         let k = 0;
@@ -384,7 +402,18 @@ class Flow {
           h += laid.rows[k].heightPx;
           k++;
         }
-        return k;
+        // The first row alone doesn't fit: force-split it when no page could
+        // hold it whole (Word: progress beats clipping), else move whole.
+        if (k === 0) {
+          const row = laid.rows[0];
+          if (row && row.heightPx > this.opts.contentHeightPx) {
+            const mid = this.midRowDepth(row, space);
+            if (mid != null) return { k: 0, midDepth: mid };
+          }
+          return { k: 0 };
+        }
+        const mid = this.midRowDepth(laid.rows[k], space - h);
+        return { k, midDepth: mid };
       }
       case "group": {
         let k = 0;
@@ -398,12 +427,42 @@ class Flow {
           prevAfter = child.kind === "paragraph" ? child.afterPx : 0;
           k++;
         }
-        return k;
+        return { k };
       }
       case "placeholder":
       case "pageBreak":
-        return 0;
+        return { k: 0 };
     }
+  }
+
+  /** The depth a row that doesn't fit splits at (`depth` px from its top), or
+   *  undefined when it must move whole: exact heights never split (overflow
+   *  clips); cantSplit rows only when no page could hold them whole (Word
+   *  force-splits rather than clip); the cut needs content on BOTH sides in
+   *  some cell — an empty-shell head or tail moves the row instead. */
+  private midRowDepth(row: LaidOutRow | undefined, depth: number): number | undefined {
+    if (!row || depth <= 0 || depth >= row.heightPx) return undefined;
+    if (row.exactHeight) return undefined;
+    if (row.cantSplit && row.heightPx <= this.opts.contentHeightPx) return undefined;
+    let head = false;
+    let tail = false;
+    for (const cell of row.cells) {
+      const d = depth - (cell.contentOffsetYPx ?? 0);
+      let cut = 0;
+      while (cut < cell.stack.length && cell.stack[cut].yPx + cell.stack[cut].block.heightPx <= d) {
+        cut++;
+      }
+      if (cut > 0) head = true;
+      const crossing = cell.stack[cut];
+      if (
+        crossing?.block.kind === "paragraph" &&
+        fittingLines(crossing.block, d - crossing.yPx) > 0
+      ) {
+        head = true;
+      }
+      if (cut < cell.stack.length) tail = true;
+    }
+    return head && tail ? depth : undefined;
   }
 }
 
@@ -426,10 +485,11 @@ function headerRowCount(laid: LaidOutTable): number {
   return n;
 }
 
-/** Split a laid block after its k-th line/row/child. The head keeps the
- *  `before` margin; the tail carries no `before` (it continues) and keeps
+/** Split a laid block after its k-th line/row/child — or, for a table with
+ *  `midDepth`, through the k-th row's interior at that depth. The head keeps
+ *  the `before` margin; the tail carries no `before` (it continues) and keeps
  *  `after`. */
-function splitLaid(laid: LaidOutBlock, k: number): [LaidOutBlock, LaidOutBlock] {
+function splitLaid(laid: LaidOutBlock, k: number, midDepth?: number): [LaidOutBlock, LaidOutBlock] {
   switch (laid.kind) {
     case "paragraph": {
       const headLines = laid.lines.slice(0, k);
@@ -448,8 +508,26 @@ function splitLaid(laid: LaidOutBlock, k: number): [LaidOutBlock, LaidOutBlock] 
       ];
     }
     case "table": {
-      const headRows = laid.rows.slice(0, k);
       const headers = headerRowCount(laid);
+      const strip = (row: LaidOutTable["rows"][number]) =>
+        row.tableHeader ? { ...row, tableHeader: undefined } : row;
+      // Mid-row: the k-th row itself splits — the head keeps its upper half,
+      // the tail re-opens with the lower half. Band copies apply exactly as
+      // at a row-boundary cut (k ≥ headers keeps the whole band in the head;
+      // the tail half is a body-row slice and never carries a mark itself).
+      if (midDepth != null) {
+        const [headHalf, tailHalf] = splitRowAt(laid.rows[k], midDepth);
+        const headRows = [...laid.rows.slice(0, k), headHalf];
+        const tailRows =
+          k >= headers
+            ? [...laid.rows.slice(0, headers), tailHalf, ...laid.rows.slice(k + 1).map(strip)]
+            : [tailHalf, ...laid.rows.slice(k + 1).map(strip)];
+        return [
+          { ...laid, rows: headRows, heightPx: sumRows(headRows) },
+          { ...laid, rows: tailRows, heightPx: sumRows(tailRows) },
+        ];
+      }
+      const headRows = laid.rows.slice(0, k);
       // Word re-opens EVERY continuation with the header band when the cut
       // kept it whole (k > headers) — the tail's leading copies keep the mark
       // so a further cut repeats them again (the copy count stays constant:
@@ -459,8 +537,6 @@ function splitLaid(laid: LaidOutBlock, k: number): [LaidOutBlock, LaidOutBlock] 
       // or a table that is all header) continues band-less entirely: the
       // tail's marks are stripped so no later page re-derives a band from a
       // marked row that is no longer at a table top.
-      const strip = (row: LaidOutTable["rows"][number]) =>
-        row.tableHeader ? { ...row, tableHeader: undefined } : row;
       const tailRows =
         k > headers
           ? [...laid.rows.slice(0, headers), ...laid.rows.slice(k).map(strip)]
@@ -482,6 +558,84 @@ function splitLaid(laid: LaidOutBlock, k: number): [LaidOutBlock, LaidOutBlock] 
     case "pageBreak":
       throw new Error("pageBreak is not splittable");
   }
+}
+
+/** Split a row mid-content at `depth` px from its top: every cell cuts at the
+ *  same line (Word's split line crosses the whole row); cells whose content
+ *  ends above the line ride whole in the head. The tail half loses any
+ *  tblHeader mark — a band only re-opens at a row boundary. */
+function splitRowAt(row: LaidOutRow, depth: number): [LaidOutRow, LaidOutRow] {
+  const headCells: LaidOutCell[] = [];
+  const tailCells: LaidOutCell[] = [];
+  for (const cell of row.cells) {
+    const [head, tail] = splitCellAt(cell, depth - (cell.contentOffsetYPx ?? 0));
+    headCells.push(head);
+    tailCells.push(tail);
+  }
+  return [
+    { ...row, heightPx: depth, cells: headCells },
+    {
+      ...row,
+      heightPx: Math.max(row.heightPx - depth, 0),
+      cells: tailCells,
+      tableHeader: undefined,
+    },
+  ];
+}
+
+/** Cut one cell's stack at `depth` px below its content top: the head keeps
+ *  every full item plus the crossing paragraph's fitting lines; the tail
+ *  carries the rest, rebased to its own top. A nested table/group crossing
+ *  the line rides whole to the tail (only paragraphs split at line bounds). */
+function splitCellAt(cell: LaidOutCell, depth: number): [LaidOutCell, LaidOutCell] {
+  let cut = 0;
+  while (cut < cell.stack.length && cell.stack[cut].yPx + cell.stack[cut].block.heightPx <= depth) {
+    cut++;
+  }
+  const headStack: LaidOutStackItem[] = cell.stack.slice(0, cut);
+  const rest: LaidOutStackItem[] = cell.stack.slice(cut);
+  // The tail's base: where its first item's top sat in the cell's own space
+  // (the crossing paragraph's top when it splits — the tail re-opens there).
+  let base = rest[0]?.yPx ?? 0;
+  const crossing = rest[0];
+  if (crossing?.block.kind === "paragraph") {
+    const k = fittingLines(crossing.block, depth - crossing.yPx);
+    if (k > 0) {
+      const headLines = crossing.block.lines.slice(0, k);
+      const tailLines = rebaseLines(crossing.block.lines.slice(k));
+      headStack.push({
+        yPx: crossing.yPx,
+        block: { ...crossing.block, lines: headLines, heightPx: sumLines(headLines) },
+      });
+      rest[0] = {
+        yPx: 0,
+        // The tail paragraph continues the split one — its `before` rode in
+        // the head's item position already.
+        block: { ...crossing.block, lines: tailLines, heightPx: sumLines(tailLines), beforePx: 0 },
+      };
+      base = crossing.yPx;
+    }
+  }
+  return [
+    { ...cell, stack: headStack },
+    {
+      ...cell,
+      stack: rest.map((item) => ({ yPx: item.yPx - base, block: item.block })),
+      // The tail is its own row slice — the head row's vAlign slack is void.
+      contentOffsetYPx: undefined,
+    },
+  ];
+}
+
+/** Lines of a laid paragraph that fit within `height` px from its top. */
+function fittingLines(block: LaidOutParagraph, height: number): number {
+  let k = 0;
+  let h = 0;
+  while (k < block.lines.length && h + block.lines[k].heightPx <= height) {
+    h += block.lines[k].heightPx;
+    k++;
+  }
+  return k;
 }
 
 /** Re-derive a stack's y offsets after a cut: the new first child's full

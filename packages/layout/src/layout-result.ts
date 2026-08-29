@@ -152,6 +152,13 @@ export interface LaidOutRow {
   /** Leading w:tblHeader row (a contiguous prefix from the first row) — the
    *  flow re-inserts stripped copies when the table splits across pages. */
   tableHeader?: boolean;
+  /** w:cantSplit — the row moves whole to the next page instead of splitting
+   *  mid-content (unless it is taller than a whole page, where Word force-
+   *  splits rather than clip). */
+  cantSplit?: boolean;
+  /** w:trHeight exact — the row's height is fixed, so mid-content splitting
+   *  is meaningless (overflow clips); the flow always moves it whole. */
+  exactHeight?: boolean;
 }
 
 export interface LaidOutTable {

@@ -339,12 +339,173 @@ describe("layoutFlow", () => {
       if (t.kind !== "table") throw new Error(`expected table, got ${t.kind}`);
       return t;
     });
-    // Plain row-boundary split (1 row per 40px page), no copies anywhere; the
-    // page-2 tail stripped the residual marks, so no later page re-derives a
-    // band from a mid-table marked row.
-    expect(tables.map((t) => t.rows.length)).toEqual([1, 1, 1, 1]);
+    // Plain split, no copies anywhere: row 1 fills page 1 by splitting
+    // mid-content and its tail re-opens page 2 beside row 2. Every tail row
+    // was stripped, so no later page re-derives a band from a mid-table
+    // marked row.
+    expect(tables.map((t) => t.rows.length)).toEqual([2, 2, 1]);
     expect(tables[0].rows[0].tableHeader).toBe(true);
     for (const t of tables.slice(1)) expect(t.rows.every((r) => !r.tableHeader)).toBe(true);
+  });
+
+  it("splits a tall row mid-content when the page runs out (mid-row split)", () => {
+    const table: LayoutTable = {
+      kind: "table",
+      columnWidthsPx: [300],
+      rows: [
+        { cells: [{ blocks: [para(1)] }] },
+        { cells: [{ blocks: [para(1)] }] },
+        { cells: [{ blocks: [para(4)] }] }, // 80px of content — the split target
+        { cells: [{ blocks: [para(1)] }] },
+      ],
+    };
+    // 40px of paragraphs + 20 + 20 fills 80; the 80px row can't fit the last
+    // 20px — it splits there: 1 line stays in the head half, 3 re-open on
+    // page 2 above the trailing row (the tail rebased to its own top).
+    const pages = flow([para(2), table], 100);
+    expect(pages).toHaveLength(2);
+    const [head, tail] = pages.map((p) => {
+      const t = p.items.find((i) => i.block.kind === "table")?.block;
+      if (t?.kind !== "table") throw new Error("expected table");
+      return t;
+    });
+    expect(head.rows.map((r) => r.heightPx)).toEqual([20, 20, 20]);
+    const headPara = head.rows[2].cells[0].stack[0].block;
+    if (headPara.kind !== "paragraph") throw new Error("expected paragraph");
+    expect(headPara.lines).toHaveLength(1);
+    expect(tail.rows.map((r) => r.heightPx)).toEqual([60, 20]);
+    const tailCell = tail.rows[0].cells[0];
+    const tailPara = tailCell.stack[0].block;
+    if (tailPara.kind !== "paragraph") throw new Error("expected paragraph");
+    expect(tailPara.lines).toHaveLength(3);
+    expect(tailPara.lines[0].yPx).toBe(0);
+    // The continuation is a fresh row slice — the head's vAlign slack is void.
+    expect(tailCell.contentOffsetYPx).toBeUndefined();
+  });
+
+  it("moves a cantSplit row whole instead of splitting it mid-content", () => {
+    const table: LayoutTable = {
+      kind: "table",
+      columnWidthsPx: [300],
+      rows: [
+        { cells: [{ blocks: [para(1)] }] },
+        { cells: [{ blocks: [para(4)] }], cantSplit: true }, // 80px, won't split
+      ],
+    };
+    // 40 + 20 = 60 fills; the 80px cantSplit row leaves the head as a row-
+    // boundary slice and re-opens whole on page 2.
+    const pages = flow([para(2), table], 100);
+    expect(pages).toHaveLength(2);
+    expect(pages[0].items.map((i) => i.block.kind)).toEqual(["paragraph", "table"]);
+    const t = pages[1].items[0].block;
+    if (t.kind !== "table") throw new Error("expected table");
+    expect(t.rows.map((r) => r.heightPx)).toEqual([80]);
+    const moved = t.rows[0].cells[0].stack[0].block;
+    if (moved.kind !== "paragraph") throw new Error("expected paragraph");
+    expect(moved.lines).toHaveLength(4);
+  });
+
+  it("force-splits a row taller than a whole page (progress beats clipping)", () => {
+    const table: LayoutTable = {
+      kind: "table",
+      columnWidthsPx: [300],
+      rows: [{ cells: [{ blocks: [para(5)] }] }], // 100px into a 60px page
+    };
+    const pages = flow([table], 60);
+    expect(pages).toHaveLength(2);
+    const [head, tail] = pages.map((p) => {
+      const b = p.items[0].block;
+      if (b.kind !== "table") throw new Error("expected table");
+      return b;
+    });
+    // 3 lines fit the 60px page; the remaining 2 re-open on page 2.
+    expect(head.rows).toHaveLength(1);
+    expect(head.rows[0].heightPx).toBe(60);
+    const headPara = head.rows[0].cells[0].stack[0].block;
+    if (headPara.kind !== "paragraph") throw new Error("expected paragraph");
+    expect(headPara.lines).toHaveLength(3);
+    expect(tail.rows[0].heightPx).toBe(40);
+    const tailPara = tail.rows[0].cells[0].stack[0].block;
+    if (tailPara.kind !== "paragraph") throw new Error("expected paragraph");
+    expect(tailPara.lines).toHaveLength(2);
+  });
+
+  it("never splits an exact-height row — it moves whole instead", () => {
+    const table: LayoutTable = {
+      kind: "table",
+      columnWidthsPx: [300],
+      rows: [{ cells: [{ blocks: [para(4)] }], height: { rule: "exact", px: 80 } }],
+    };
+    // 40px of paragraphs leave 60; the exact 80px row cannot split mid-content
+    // (its height is fixed — overflow clips), so it moves whole.
+    const pages = flow([para(2), table], 100);
+    expect(pages).toHaveLength(2);
+    expect(pages[0].items.map((i) => i.block.kind)).toEqual(["paragraph"]);
+    const t = pages[1].items[0].block;
+    if (t.kind !== "table") throw new Error("expected table");
+    expect(t.rows).toHaveLength(1);
+    expect(t.rows[0].heightPx).toBe(80);
+    const cellPara = t.rows[0].cells[0].stack[0].block;
+    if (cellPara.kind !== "paragraph") throw new Error("expected paragraph");
+    expect(cellPara.lines).toHaveLength(4);
+  });
+
+  it("repeats the header band when a mid-row split continues the table", () => {
+    const table: LayoutTable = {
+      kind: "table",
+      columnWidthsPx: [300],
+      rows: [
+        { cells: [{ blocks: [para(1)] }], tableHeader: true },
+        { cells: [{ blocks: [para(1)] }] },
+        { cells: [{ blocks: [para(4)] }] }, // 80px — the mid-row split target
+        { cells: [{ blocks: [para(1)] }] },
+      ],
+    };
+    // 40px of paragraphs leave 60: band(20) + body1(20) fit, the 80px body
+    // row splits at 20px — page 2 re-opens with a fresh band copy + the row's
+    // lower half + the trailing row.
+    const pages = flow([para(2), table], 100);
+    expect(pages).toHaveLength(2);
+    const [head, tail] = pages.map((p) => {
+      const t = p.items.find((i) => i.block.kind === "table")?.block;
+      if (t?.kind !== "table") throw new Error("expected table");
+      return t;
+    });
+    expect(head.rows.map((r) => r.heightPx)).toEqual([20, 20, 20]);
+    expect(head.rows[0].tableHeader).toBe(true);
+    expect(tail.rows.map((r) => r.heightPx)).toEqual([20, 60, 20]);
+    expect(tail.rows[0].tableHeader).toBe(true);
+    expect(tail.rows[1].tableHeader).toBeUndefined();
+    const tailPara = tail.rows[1].cells[0].stack[0].block;
+    if (tailPara.kind !== "paragraph") throw new Error("expected paragraph");
+    expect(tailPara.lines).toHaveLength(3);
+  });
+
+  it("moves the row whole when no cell has content above the cut (guard)", () => {
+    // The only content is a nested table — a non-paragraph block cannot split
+    // at a line boundary, so the cut would leave an empty-shell head: the row
+    // moves whole instead.
+    const nested: LayoutTable = {
+      kind: "table",
+      columnWidthsPx: [300],
+      rows: [
+        { cells: [{ blocks: [para(1)] }] },
+        { cells: [{ blocks: [para(1)] }] },
+        { cells: [{ blocks: [para(1)] }] },
+      ],
+    };
+    const table: LayoutTable = {
+      kind: "table",
+      columnWidthsPx: [300],
+      rows: [{ cells: [{ blocks: [nested] }] }], // 60px row
+    };
+    const pages = flow([para(3), table], 100);
+    expect(pages).toHaveLength(2);
+    expect(pages[0].items.map((i) => i.block.kind)).toEqual(["paragraph"]);
+    const t = pages[1].items[0].block;
+    if (t.kind !== "table") throw new Error("expected table");
+    expect(t.rows).toHaveLength(1);
+    expect(t.rows[0].heightPx).toBe(60);
   });
 
   it("splits groups at child boundaries", () => {

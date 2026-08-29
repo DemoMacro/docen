@@ -367,6 +367,7 @@ describe("projectDocumentOptions blocks", () => {
               {
                 height: { value: 600, rule: "atLeast" },
                 tableHeader: true,
+                cantSplit: true,
                 cells: [
                   {
                     columnSpan: 2,
@@ -390,6 +391,9 @@ describe("projectDocumentOptions blocks", () => {
     expect(row.height).toEqual({ rule: "atLeast", px: 40 });
     // w:tblHeader rides through so the flow can repeat the band on splits.
     expect(row.tableHeader).toBe(true);
+    // w:cantSplit rides through so the flow moves the row whole (or force-
+    // splits a row taller than a page).
+    expect(row.cantSplit).toBe(true);
     const cell = row.cells[0];
     expect(cell.colspan).toBe(2);
     expect(cell.insets).toEqual({ left: 4 }); // cell's own tcMar wins per side
