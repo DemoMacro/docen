@@ -588,7 +588,7 @@ function paintShapeBox(
     preset?: string;
     fill?: string;
     opacity?: number;
-    line?: { px: number; color?: string };
+    line?: { px: number; color?: string; dash?: string };
   },
   rectFallback: boolean,
 ): void {
@@ -606,7 +606,10 @@ function paintShapeBox(
       : `#${box.fill}`
     : undefined;
   const stroke = box.line ? (box.line.color ? `#${box.line.color}` : "#000000") : undefined;
-  const strokeWidth = box.line?.px;
+  // A dashed hairline vanishes in the dash gaps — hold the same 1.5 px floor
+  // the member path uses so preset dashes render.
+  const strokeWidth =
+    box.line?.px != null && box.line.dash ? Math.max(box.line.px, 1.5) : box.line?.px;
   const common = {
     x: box.x,
     y: box.y,
@@ -615,6 +618,7 @@ function paintShapeBox(
     fill,
     stroke,
     strokeWidth,
+    dashPattern: box.line?.dash ? PRSTDASH_PATTERN[box.line.dash] : undefined,
   };
   if (box.preset === "ellipse") {
     tree.add(new Ellipse(common));

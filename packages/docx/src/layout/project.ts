@@ -1044,7 +1044,17 @@ function wpsMemberOf(
       // with it: a text-carrying ellipse paints as an ellipse.
       ...(preset ? { preset } : {}),
       ...(fill ? { fill } : {}),
-      ...(line ? { line: { px: line.px, ...(line.color ? { color: line.color } : {}) } } : {}),
+      ...(line
+        ? {
+            line: {
+              px: line.px,
+              ...(line.color ? { color: line.color } : {}),
+              ...(line.cap ? { cap: line.cap } : {}),
+              ...(line.join ? { join: line.join } : {}),
+              ...(line.dash ? { dash: line.dash } : {}),
+            },
+          }
+        : {}),
       insets: {
         left: ins(bodyPr.lIns, BODY_INSET_EMU.left),
         top: ins(bodyPr.tIns, BODY_INSET_EMU.top),

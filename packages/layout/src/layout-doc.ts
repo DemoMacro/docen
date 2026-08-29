@@ -155,9 +155,16 @@ export type LayoutDrawingMember =
       fill?: string;
       /** Fill opacity 0-1 (the solid color's a:alpha percent ÷ 100). */
       opacity?: number;
-      /** The shape's outline stroke (a:ln): width px + hex color. Word draws
-       *  the txbx box even when the body is empty. */
-      line?: { px: number; color?: string };
+      /** The shape's outline stroke (a:ln): width px + hex color + the line-
+       *  dressing tokens (cap/join full-word, dash the prstDash token). Word
+       *  draws the txbx box even when the body is empty. */
+      line?: {
+        px: number;
+        color?: string;
+        cap?: "round" | "square" | "flat";
+        join?: "round" | "bevel" | "miter";
+        dash?: string;
+      };
       /** Preset geometry (a:prstGeom @prst) — a txbx can live in any shape
        *  (a text-carrying ellipse); the box paints in that shape. */
       preset?: string;
