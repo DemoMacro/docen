@@ -843,8 +843,14 @@ const designTab = (): RibbonTab =>
       "themes-dialog",
     ),
     group("page-background", [
-      btn("page-color", "watermark", { size: "large" }),
-      btn("page-color", "page-color", { size: "large" }),
+      btn("watermark", "watermark", { size: "large" }),
+      {
+        type: "color-picker",
+        icon: "page-color",
+        event: "page-color",
+        label: cmd("page-color"),
+        defaultColor: "FFFFFF",
+      },
       btn("page-border", "page-border", { size: "large" }),
     ]),
   ]);

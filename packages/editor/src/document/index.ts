@@ -162,6 +162,9 @@ const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   // Footnote prompts for the note text, references the caret and appends the
   // note body to documentExtras.footnotes.
   "insert-footnote",
+  // Page Color writes the doc-level w:background (doc.attrs.background) from
+  // the color-picker's palette value.
+  "page-color",
   // Link prompts for an address and marks the selection (Word's Insert Link).
   "link",
   // New Comment anchors the selection with a Word comment (range markers +
@@ -2406,6 +2409,30 @@ class DocenDocument extends AddinHost<Editor> {
     );
   }
 
+  /** Design → Page Color: write the doc-level page background
+   *  (doc.attrs.background → w:background on export; the stage paints it as
+   *  the page frame color). "none" clears it (Word's No Color); a bare hex is
+   *  the standard/custom swatch path; a theme-semantic pick carries its
+   *  themeColor/tint/shade through so Word re-resolves on theme change. */
+  #setPageColor(
+    value?: string | { themeColor: string; val: string; themeTint?: string; themeShade?: string },
+  ): void {
+    const editor = this.editor;
+    if (!editor) return;
+    const background =
+      value == null || value === "none"
+        ? null
+        : typeof value === "string"
+          ? { color: value }
+          : {
+              color: value.val,
+              themeColor: value.themeColor,
+              ...(value.themeTint ? { themeTint: value.themeTint } : {}),
+              ...(value.themeShade ? { themeShade: value.themeShade } : {}),
+            };
+    editor.view.dispatch(editor.state.tr.setDocAttribute("background", background));
+  }
+
   /** Insert → Text Box / Shapes: a standalone wps shape run, floating
    *  wrap-none and centered on the page (Word's insertion behavior). The
    *  text box carries Word's plain look — white fill, accent-1 hairline —
@@ -2589,6 +2616,16 @@ class DocenDocument extends AddinHost<Editor> {
     // note body (Word's References → Insert Footnote).
     if (name === "insert-footnote") {
       this.#insertFootnote();
+      return;
+    }
+    // Page Color — write/clear the doc-level w:background from the palette
+    // (Word's Design → Page Color).
+    if (name === "page-color") {
+      this.#setPageColor(
+        value as
+          | string
+          | { themeColor: string; val: string; themeTint?: string; themeShade?: string },
+      );
       return;
     }
     // Link — prompt for an address and mark the selection (or insert fresh
