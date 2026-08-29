@@ -81,9 +81,9 @@ describe("layoutParagraph line-height semantics", () => {
       expect(body.lines[0].grid).toBe(true);
       expect(body.lines[0].naturalPx).toBeGreaterThan(0);
     }
-    // Pitch without onGrid (a caller that scales heights but places at the
-    // line top — none today, but the flag must stay caller-driven): heights
-    // still scale, and the line never carries the lattice-placement flag.
+    // Pitch without onGrid (the text-box stack caller: pitch-scaled heights,
+    // glyphs at the line-box top — user-verified vs Word): heights still
+    // scale, and the line never carries the lattice-placement flag.
     const stack = layoutBlock(para({ spacing: spec }), 500, { linePitchPx: 25 }, measurer);
     if (stack.kind === "paragraph") {
       expect(stack.heightPx).toBeCloseTo(50, 4);

@@ -547,10 +547,11 @@ export interface LayoutBlockContext {
    *  grid. CJK lines ceil to a whole pitch multiple; Latin lines floor at
    *  max(natural, pitch); table cells floor at max(natural, pitch). */
   linePitchPx?: number;
-  /** The body flow and text-box stacks center a grid-height line's natural
-   *  text box in the span (the docGrid lattice — Word-verified in both).
-   *  Header/footer stacks are laid with no grid context at all (natural
-   *  line heights), so they never set this. */
+  /** The body flow centers a grid-height line's natural text box in the
+   *  span (the docGrid lattice — Word-verified). Text-box stacks take the
+   *  pitch-scaled heights but place glyphs at the line-box top, and
+   *  header/footer stacks are laid with no grid context at all (natural
+   *  line heights) — neither sets this. */
   onGrid?: boolean;
   /** True inside a table cell: the grid snap floors instead of ceils (the
    *  row's trHeight governs, not the line box). Cells also clear float

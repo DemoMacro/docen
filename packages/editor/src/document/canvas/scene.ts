@@ -507,10 +507,11 @@ function paintMembers(
         : Math.max(0, m.width - left - (m.insets?.right ?? 0));
       // A text box shares the section's doc grid with the body: the multiple
       // line rule takes whole grid rows (Word-verified: 1.5× CJK on the
-      // 340-twip grid renders two rows) and the natural text box centers in
-      // that span — ref PDF shows the same half-leading pad as body lines.
+      // 340-twip grid renders two rows). Unlike body lines the glyphs stay
+      // at the line-box top — Word does not center a box line's natural
+      // text in the grid span (user-verified: centering sank every txbx).
       const grid: LayoutBlockContext | undefined = ctx.flow.linePitchPx
-        ? { linePitchPx: ctx.flow.linePitchPx, onGrid: true }
+        ? { linePitchPx: ctx.flow.linePitchPx }
         : undefined;
       const laid = stackBlocks(m.blocks, inner, grid, measurer);
       let oy = m.insets?.top ?? 0;
