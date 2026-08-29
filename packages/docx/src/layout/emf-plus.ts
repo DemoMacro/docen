@@ -1408,28 +1408,79 @@ function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): Draft[] {
           // run extends along: 0° horizontal, ±90° vertical (plan-box
           // columns). Unrotated runs stay unmarked.
           const angle = (Math.atan2(eff.m12, eff.m11) * 180) / Math.PI;
-          drafts.push({
-            kind: "text",
-            x: x * eff.m11 + yBaseline * eff.m21 + eff.dx,
-            y:
-              (textAlign & 0x18) === 0x18
-                ? refY - height * 0.8
-                : (textAlign & 0x18) === 0x08
-                  ? refY - height
-                  : refY,
-            w: advance + 2,
-            h: height * 1.35,
-            text,
-            family: font?.face ?? "",
-            sizeWorld: height,
-            ...(spacing ? { letterSpacingWorld: spacing } : {}),
-            ...(Math.abs(angle) > 0.5 ? { rotation: angle } : {}),
-            ...(textColor ? { color: textColor } : {}),
-            // GDI face matching splits at FW_BOLD (700): a 681-weight request
-            // (corpus norm for 微软雅黑) still resolves to the regular face,
-            // and bolding it sinks the label look of the source rendering.
-            ...(font && font.weight >= 700 ? { bold: true } : {}),
-          });
+          // GDI plays rotated text with upright glyphs — the world transform
+          // steers the run's advance but never turns the glyph outlines
+          // (PlayEnhMetaFile-verified: the corpus vertical-banner columns
+          // render as upright stacked characters, and Word matches). A ±90°
+          // run therefore emits one box per character stacked along the
+          // advance vector; other angles keep a rotation-carrying box.
+          if (Math.abs(Math.abs(angle) - 90) < 0.5) {
+            // Advance (logical +x) and cross (logical +y) device columns,
+            // normalized to unit logical steps.
+            const ua = eff.m11 / glyphScale;
+            const ub = eff.m12 / glyphScale;
+            const va = eff.m21 / glyphScale;
+            const vb = eff.m22 / glyphScale;
+            // SetTextAlign hoists the reference along the advance axis
+            // (baseline by the CJK ascent, bottom by the full em) — same
+            // calibration as the horizontal box below.
+            const hoist =
+              (textAlign & 0x18) === 0x18 ? height * 0.8 : (textAlign & 0x18) === 0x08 ? height : 0;
+            const colW = height * 1.35;
+            let prefix = -hoist;
+            let ci = 0;
+            for (const ch of text) {
+              const step = dxAdvances
+                ? dxAdvances[ci] * glyphScale
+                : height * (ch.charCodeAt(0) > 0xff ? 1 : 0.55);
+              const ax = x * eff.m11 + yBaseline * eff.m21 + eff.dx + ua * prefix;
+              const ay = refY + ub * prefix;
+              const bx = ax + ua * step;
+              const by = ay + ub * step;
+              const cx = ax + va * colW;
+              const cy = ay + vb * colW;
+              // Corner fold of the advance and cross extents.
+              const fx = bx + cx - ax;
+              const fy = by + cy - ay;
+              drafts.push({
+                kind: "text",
+                x: Math.min(ax, bx, cx, fx),
+                y: Math.min(ay, by, cy, fy),
+                w: Math.max(ax, bx, cx, fx) - Math.min(ax, bx, cx, fx) + 2,
+                h: Math.max(ay, by, cy, fy) - Math.min(ay, by, cy, fy),
+                text: ch,
+                family: font?.face ?? "",
+                sizeWorld: height,
+                ...(textColor ? { color: textColor } : {}),
+                ...(font && font.weight >= 700 ? { bold: true } : {}),
+              });
+              prefix += step;
+              ci++;
+            }
+          } else {
+            drafts.push({
+              kind: "text",
+              x: x * eff.m11 + yBaseline * eff.m21 + eff.dx,
+              y:
+                (textAlign & 0x18) === 0x18
+                  ? refY - height * 0.8
+                  : (textAlign & 0x18) === 0x08
+                    ? refY - height
+                    : refY,
+              w: advance + 2,
+              h: height * 1.35,
+              text,
+              family: font?.face ?? "",
+              sizeWorld: height,
+              ...(spacing ? { letterSpacingWorld: spacing } : {}),
+              ...(Math.abs(angle) > 0.5 ? { rotation: angle } : {}),
+              ...(textColor ? { color: textColor } : {}),
+              // GDI face matching splits at FW_BOLD (700): a 681-weight request
+              // (corpus norm for 微软雅黑) still resolves to the regular face,
+              // and bolding it sinks the label look of the source rendering.
+              ...(font && font.weight >= 700 ? { bold: true } : {}),
+            });
+          }
         }
         break;
       }

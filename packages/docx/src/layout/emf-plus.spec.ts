@@ -2,6 +2,7 @@
 // reassembly, GDI+ record replay, and member shaping. Fixtures are built at
 // the byte level against layouts verified on real corpus files.
 
+import type { LayoutDrawingMember } from "@docen/layout";
 import { describe, expect, it } from "vitest";
 
 import { embeddedEmfStream, emfPlusMembers } from "./emf-plus";
@@ -779,9 +780,11 @@ describe("emfPlusMembers", () => {
     });
 
     it("marks runs under a rotated world transform with the screen angle", () => {
-      // Vertical plan-box columns: a 90°-rotated GDI world transform lays the
-      // run down a column — the member must carry the rotation so the paint
-      // rotates it instead of drawing it horizontally across the neighbors.
+      // Vertical plan-box columns: a 90°-rotated GDI world transform steers
+      // the run's advance but never turns the glyph outlines (GDI plays
+      // rotated text with upright glyphs). The run therefore emits one
+      // upright box per character stacked down the advance column — not a
+      // single rotation-carrying box.
       const setworld = (m: number[]): Uint8Array => {
         const body = new Uint8Array(24);
         const v = new DataView(body.buffer);
@@ -800,9 +803,23 @@ describe("emfPlusMembers", () => {
       );
       const members = emfPlusMembers(wmf, 400, 300);
       expect(members).toBeDefined();
-      const box = members!.find((m) => m.kind === "textBox");
-      if (box?.kind !== "textBox") return;
-      expect(box.rotation).toBeCloseTo(90, 0);
+      const boxes: Extract<LayoutDrawingMember, { kind: "textBox" }>[] = [];
+      for (const m of members!) {
+        if (m.kind === "textBox") boxes.push(m);
+      }
+      expect(boxes.map((b) => b.blocks)).toHaveLength(6);
+      const texts = boxes.map((b) => {
+        const para = b.blocks[0];
+        return para?.kind === "paragraph" && para.inline[0]?.kind === "text"
+          ? para.inline[0].text
+          : "";
+      });
+      expect(texts.join("")).toBe("示例竖排文字");
+      // The advance column points down (m12 = +0.07): successive characters
+      // descend, and no box carries a rotation.
+      const ys = boxes.map((b) => b.y);
+      expect([...ys].sort((a, b) => a - b)).toEqual(ys);
+      for (const b of boxes) expect(b.rotation).toBeUndefined();
     });
 
     it("keeps walking past whitespace-only text runs", () => {
