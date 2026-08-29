@@ -209,12 +209,17 @@ function pictureSrc(pic: { type?: unknown; data?: unknown }): string | undefined
 }
 
 /** Metafile caches: project reruns on every editor transaction, and
- *  re-scanning megabyte WMFs each pass is pure waste. Editor-driven passes
- *  hand out the same bytes object every pass (renderDocx keys its decode on
- *  attrs identity), so the hot path lives in WeakMaps keyed by those bytes —
- *  entry lifetime rides the picture's own. Direct-API callers passing a bare
- *  base64 string fall back to a bounded fingerprint memo (type + length +
- *  head payload); its insertion-ordered Map doubles as the eviction queue. */
+ *  re-scanning megabyte WMFs each pass is pure waste. Direct-API callers
+ *  handing out the same bytes object every pass hit WeakMaps keyed by those
+ *  bytes — entry lifetime rides the picture's own. The editor's compiled
+ *  options rebuild the picture objects each pass (identity dies in
+ *  compileDocument) and its attrs carry data-URL strings, so the editor's
+ *  hot path is the string memo: its bound must exceed a real document's
+ *  metafile count or the working set thrashes (the 112-media corpus doc
+ *  against a 32-slot memo re-replayed ~80 files every relayout). Replays
+ *  are lightweight structure, so the bound is generous; the DIB backdrop
+ *  memo stays small on purpose — its values are multi-megabyte BMP data
+ *  URLs and mask-layer files are rare. */
 function memoByFingerprint<V>(limit: number): (key: string, make: () => V) => V {
   const map = new Map<string, V>();
   return (key, make) => {
@@ -235,7 +240,7 @@ const wmfMembersByIdentity = new WeakMap<
   Uint8Array,
   Map<string, LayoutDrawingMember[] | undefined>
 >();
-const wmfMembersOfString = memoByFingerprint<LayoutDrawingMember[] | undefined>(32);
+const wmfMembersOfString = memoByFingerprint<LayoutDrawingMember[] | undefined>(192);
 
 /** Cache fingerprint head for string data: the base64 payload prefix after a
  *  data-URL header (the header itself is constant, zero distinguishing
