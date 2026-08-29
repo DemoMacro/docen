@@ -315,10 +315,12 @@ export class CaretMap {
   }
 
   /** The vertical caret box of a line — anchored where the painter actually
-   *  draws: Leafer's Text defaults to a 150% lineHeight, which puts the
-   *  alphabetic baseline at 1.1 × fontSize below the element top (itself at
-   *  the grid-centered pad). Sizing to the runs' ink box keeps the highlight
-   *  hugging the glyphs; the font-box model floated a ~0.3em gap above them. */
+   *  draws: the painter pins each Text's lineHeight to the font size (px
+   *  form, scene.ts), so Leafer's baseline formula ((lineHeight +
+   *  0.7·fontSize)/2, draw.esm.js) puts the alphabetic baseline at 0.85 ×
+   *  fontSize below the element top (itself at the grid-centered pad).
+   *  Sizing to the runs' ink box keeps the highlight hugging the glyphs;
+   *  the font-box model floated a ~0.3em gap above them. */
   private bandOf(line: LineEntry): { yPx: number; heightPx: number } {
     const pad = gridPadOf(line.line);
     const ctx = measureCanvas?.getContext("2d");
@@ -337,7 +339,7 @@ export class CaretMap {
         familyOfSlot(inline.style.family, isCjkCodeUnit(item.text, 0)),
       );
       ctx.font = font;
-      const baseline = line.yPx + pad + 1.1 * inline.style.sizePx;
+      const baseline = line.yPx + pad + 0.85 * inline.style.sizePx;
       // The item's own ink box (first graphemes carry its script's shape); the
       // deepest run's descent and highest run's ascent bound the highlight.
       const metrics = ctx.measureText(Array.from(item.text).slice(0, 8).join(""));
