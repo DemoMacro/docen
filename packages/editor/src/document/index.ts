@@ -169,8 +169,10 @@ const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   "link",
   // New Comment anchors the selection with a Word comment (range markers +
   // a documentExtras.comments entry); Edit/Delete operate on the comment
-  // covering the selection, Previous/Next step through the ranges.
+  // covering the selection, Previous/Next step through the ranges. The
+  // trailing toolbar comment shares the "comment" event.
   "new-comment",
+  "comment",
   "edit-comment",
   "delete-comment",
   "previous-comment",
@@ -2666,8 +2668,9 @@ class DocenDocument extends AddinHost<Editor> {
       return;
     }
     // New Comment — anchor the selection with a Word comment; Edit/Delete
-    // operate on the comment covering the selection.
-    if (name === "new-comment") {
+    // operate on the comment covering the selection. The Review tab's large
+    // button and the trailing toolbar comment share the "comment" event.
+    if (name === "new-comment" || name === "comment") {
       this.#insertComment();
       return;
     }
