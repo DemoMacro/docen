@@ -2163,6 +2163,28 @@ class DocenDocument extends AddinHost<Editor> {
       .run();
   }
 
+  /** References → Next Footnote: place the caret on the next
+   *  footnote/endnote reference after the selection (document order); none is
+   *  a no-op (Word steps through its notes without wrapping). */
+  #jumpNextNote(): void {
+    const editor = this.editor;
+    if (!editor) return;
+    const { from } = editor.state.selection;
+    let target: number | null = null;
+    editor.state.doc.descendants((child, pos) => {
+      if (target != null) return false;
+      if (pos <= from || child.type.name !== "inlinePassthrough") return;
+      try {
+        const data = JSON.parse(String(child.attrs?.data ?? "{}")) as Record<string, unknown>;
+        if ("footnoteReference" in data || "endnoteReference" in data) target = pos;
+      } catch {
+        // opaque verbatim blob — not a note reference
+      }
+    });
+    // After the leaf atom (pos is its left edge) so the caret sits past it.
+    if (target != null) this.#setTextSelection(target + 1);
+  }
+
   /** One inlinePassthrough comment atom (see #insertComment) → its marker
    *  kind and comment id; non-comment atoms yield null. Accepts both a JSON
    *  atom (type is the string name) and a PM node from doc.descendants
@@ -2620,9 +2642,11 @@ class DocenDocument extends AddinHost<Editor> {
     }
     // Footnote / Endnote — prompt for the note text, reference the caret and
     // append the note body (Word's References → Insert Footnote; the split's
-    // endnote item shares the event).
+    // endnote item shares the event, and Next Footnote steps references).
     if (name === "insert-footnote") {
-      this.#insertNote(value === "endnote" ? "endnote" : "footnote");
+      if (value === "endnote") this.#insertNote("endnote");
+      else if (value === "next") this.#jumpNextNote();
+      else this.#insertNote("footnote");
       return;
     }
     // Page Color — write/clear the doc-level w:background from the palette
