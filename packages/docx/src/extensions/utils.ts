@@ -510,3 +510,32 @@ export function bordersFromElement(el: HTMLElement): BordersOptions | null {
 export function shadingFromElement(el: HTMLElement): ShadingProperties | null {
   return shadingFromCss(el.style.backgroundColor || null);
 }
+
+// ── Clipboard slice round-trip ──
+
+/** The custom MIME type carrying a docen selection as ProseMirror slice JSON —
+ *  the lossless clipboard lane between docen editors (the plain-text lane is
+ *  for every other consumer). */
+export const DOCEN_CLIP_MIME = "application/x-docen-docx";
+
+/** Serialize the selection as a PM slice JSON payload (marks, node attrs, and
+ *  open depths intact) — null for an empty selection. */
+export function selectionSlicePayload(state: {
+  selection: { from: number; to: number };
+  doc: {
+    slice(
+      from: number,
+      to: number,
+      leafNodes?: boolean,
+    ): { openStart: number; openEnd: number; content: { toJSON(): unknown } };
+  };
+}): string | null {
+  const { from, to } = state.selection;
+  if (from === to) return null;
+  const slice = state.doc.slice(from, to, true);
+  return JSON.stringify({
+    openStart: slice.openStart,
+    openEnd: slice.openEnd,
+    content: slice.content.toJSON(),
+  });
+}

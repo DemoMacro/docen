@@ -10,6 +10,8 @@ import {
   parseHTMLBody,
   parseMarkdown,
   sectionPageSizeDefaults,
+  DOCEN_CLIP_MIME,
+  selectionSlicePayload,
   type JSONContent,
   type BorderOptions,
   type PageBordersOptions,
@@ -816,17 +818,24 @@ class DocenDocument extends AddinHost<Editor> {
     this.#bridge?.focus();
   }
 
-  /** Paste from the system clipboard. Prefers text/html — styled paste through
-   *  the schema's parse rules — and falls back to plain text; `textOnly` (the
-   *  menu's Keep Text Only) skips the HTML leg. navigator.clipboard is the
+  /** Paste from the system clipboard. The docen lane wins (a copy from a
+   *  docen editor round-trips losslessly through the custom MIME — Chrome
+   *  reads it back as a web custom format), then text/html — styled paste
+   *  through the schema's parse rules — then plain text; `textOnly` (the
+   *  menu's Keep Text Only) skips the rich legs. navigator.clipboard is the
    *  reliable path; execCommand("paste") is the fallback (often blocked). */
   async #paste(textOnly = false): Promise<void> {
     const editor = this.editor;
     if (!editor) return;
     this.#bridge?.focus();
+    const docenType = textOnly ? null : `web ${DOCEN_CLIP_MIME}`;
     try {
       const items = await navigator.clipboard.read();
       for (const item of items) {
+        if (docenType && item.types.includes(docenType)) {
+          const raw = await (await item.getType(docenType)).text();
+          if (raw && this.#bridge?.insertSlicePayload(raw)) return;
+        }
         const type =
           !textOnly && item.types.includes("text/html")
             ? "text/html"
@@ -3035,18 +3044,33 @@ class DocenDocument extends AddinHost<Editor> {
     this.dispatchCommand(name, value);
   };
 
-  /** Copy/cut the current selection to the system clipboard as plain text;
-   *  cut also deletes the range. */
+  /** Copy/cut the current selection to the system clipboard. The custom
+   *  docen MIME (a PM slice payload) rides along so a paste back into a docen
+   *  editor keeps every mark — Chrome carries it through the async clipboard
+   *  as a web custom format; engines that reject it degrade to plain text.
+   *  Cut also deletes the range. */
   async #copySelection(cut: boolean): Promise<void> {
     const editor = this.editor;
     if (!editor) return;
     const { from, to } = editor.state.selection;
     if (from === to) return;
     const text = editor.state.doc.textBetween(from, to, "\n");
+    const payload = selectionSlicePayload(editor.state);
     try {
-      await navigator.clipboard.writeText(text);
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          "text/plain": new Blob([text], { type: "text/plain" }),
+          ...(payload
+            ? { [`web ${DOCEN_CLIP_MIME}`]: new Blob([payload], { type: DOCEN_CLIP_MIME }) }
+            : {}),
+        }),
+      ]);
     } catch {
-      // Clipboard write may be denied (permissions/policy) — still cut.
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {
+        // Clipboard write may be denied (permissions/policy) — still cut.
+      }
     }
     if (cut) {
       editor.view.dispatch(editor.state.tr.deleteSelection());

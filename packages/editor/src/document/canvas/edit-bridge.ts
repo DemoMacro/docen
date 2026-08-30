@@ -10,11 +10,18 @@
 // captureTransaction) crashes — so every translation here goes through pure
 // PM state commands.
 
-import { docxExtensions, parseHTMLBody, type JSONContent } from "@docen/docx";
+import {
+  docxExtensions,
+  parseHTMLBody,
+  DOCEN_CLIP_MIME,
+  selectionSlicePayload,
+  type JSONContent,
+} from "@docen/docx";
 import { Editor } from "@docen/docx/core";
 import type { FlowPage } from "@docen/layout";
 import { UndoRedo } from "@tiptap/extensions";
 import { joinBackward, joinForward, splitBlock } from "@tiptap/pm/commands";
+import { Fragment, Slice } from "@tiptap/pm/model";
 import { NodeSelection, TextSelection } from "@tiptap/pm/state";
 import { getMatchHighlights } from "prosemirror-search";
 
@@ -167,6 +174,10 @@ export interface EditBridge {
    *  when the map is stale) — the context menu moves the caret to where it
    *  was right-clicked, like Word. */
   posAtClient(clientX: number, clientY: number): number | null;
+  /** Insert a docen slice payload (DOCEN_CLIP_MIME) into the ACTIVE story at
+   *  the caret — the host's ribbon Paste routes here after reading the system
+   *  clipboard. False when the payload did not parse. */
+  insertSlicePayload(raw: string): boolean;
   /** Move keyboard focus to the bridge's input surface (the editing focus —
    *  there is no DOM editor to focus). */
   focus(): void;
@@ -1037,11 +1048,33 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     return true;
   };
 
+  /** Insert a docen slice payload (the DOCEN_CLIP_MIME lane) at the caret —
+   *  marks, node attrs, and open depths all survive. Returns true when the
+   *  payload parsed and landed. */
+  const insertSlicePayload = (raw: string): boolean => {
+    try {
+      const parsed = JSON.parse(raw) as { openStart?: number; openEnd?: number; content?: unknown };
+      if (!Array.isArray(parsed.content)) return false;
+      const { state, view } = active().editor;
+      const slice = new Slice(
+        Fragment.fromJSON(state.schema, parsed.content),
+        parsed.openStart ?? 0,
+        parsed.openEnd ?? 0,
+      );
+      view.dispatch(state.tr.replaceSelection(slice));
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   const onPaste = (event: ClipboardEvent): void => {
     event.preventDefault();
-    // Styled paste first: clipboard HTML through the schema's parse rules so
-    // bold/italic/headings/lists/links map to their DOCX equivalents. Plain
-    // text remains the fallback (and the only path for text-only clipboards).
+    // The docen lane first (a copy from a docen editor round-trips losslessly);
+    // then styled HTML through the schema's parse rules so external rich text
+    // maps to its DOCX equivalents; plain text is the last resort.
+    const docen = event.clipboardData?.getData(DOCEN_CLIP_MIME);
+    if (docen && insertSlicePayload(docen)) return;
     const html = event.clipboardData?.getData("text/html");
     if (html && insertPastedJSON(html)) return;
     const text = event.clipboardData?.getData("text/plain");
@@ -1058,6 +1091,8 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     if (text == null) return;
     event.preventDefault();
     event.clipboardData?.setData("text/plain", text);
+    const payload = selectionSlicePayload(active().editor.state);
+    if (payload) event.clipboardData?.setData(DOCEN_CLIP_MIME, payload);
   };
 
   const onCut = (event: ClipboardEvent): void => {
@@ -1065,6 +1100,8 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     if (text == null) return;
     event.preventDefault();
     event.clipboardData?.setData("text/plain", text);
+    const payload = selectionSlicePayload(active().editor.state);
+    if (payload) event.clipboardData?.setData(DOCEN_CLIP_MIME, payload);
     active().editor.commands.command(({ state, dispatch }) => {
       dispatch?.(state.tr.deleteSelection());
       return true;
@@ -1150,6 +1187,12 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     },
     posAtClient(clientX, clientY): number | null {
       return posAtClient(clientX, clientY);
+    },
+    /** Insert a docen slice payload (DOCEN_CLIP_MIME) into the ACTIVE story at
+     *  the caret — the host's ribbon Paste routes here after reading the
+     *  system clipboard. False when the payload did not parse. */
+    insertSlicePayload(raw: string): boolean {
+      return insertSlicePayload(raw);
     },
     focus(): void {
       ta.focus();
