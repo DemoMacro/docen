@@ -242,6 +242,7 @@ export class CanvasStage {
       frame.style.height = `${h}px`;
       this.applyBackground(frame);
       this.applyBorders(frame, page);
+      this.applyCropMarks(frame, page);
     }
     slot.el.style.width = `${w}px`;
     slot.el.style.height = `${h}px`;
@@ -346,6 +347,59 @@ export class CanvasStage {
     div.style.bottom = `${insetPt(b.bottom, margin.bottom)}px`;
     div.style.left = `${insetPt(b.left, margin.left)}px`;
     frame.append(div);
+  }
+
+  /** Crop marks — the four L-brackets Word draws in the margin gutter, each
+   *  L's vertex just outside a content-box corner with the two 23px legs
+   *  reaching into the margin. One div covers the page and carries the
+   *  (zoom-scaled) margin as padding, so its content box IS the page's;
+   *  eight gradient strokes offset from that origin (background-origin:
+   *  content-box) land in the gutter, never over text. Leg length stays in
+   *  screen px — like Word, the brackets read as fixed-size guide marks. */
+  private applyCropMarks(frame: HTMLElement, page: number): void {
+    const flow = this.sectionAt(page).flow;
+    const pad = (px: number) => `${px * this.factor}px`;
+    let div = frame.querySelector<HTMLDivElement>(":scope > .crop-marks");
+    if (!div) {
+      const c = "var(--docen-color-crop, #c0c0c0)";
+      div = document.createElement("div");
+      div.className = "crop-marks";
+      Object.assign(div.style, {
+        position: "absolute",
+        inset: "0",
+        pointerEvents: "none",
+        zIndex: "2",
+        backgroundOrigin: "content-box",
+        backgroundRepeat: "no-repeat",
+        backgroundImage: Array.from({ length: 8 }, () => `linear-gradient(${c}, ${c})`).join(", "),
+        backgroundPosition: [
+          "-24px -2px",
+          "-2px -24px",
+          "calc(100% + 24px) -2px",
+          "calc(100% + 2px) -24px",
+          "-24px calc(100% + 2px)",
+          "-2px calc(100% + 24px)",
+          "calc(100% + 24px) calc(100% + 2px)",
+          "calc(100% + 2px) calc(100% + 24px)",
+        ].join(", "),
+        backgroundSize: [
+          "23px 1px",
+          "1px 23px",
+          "23px 1px",
+          "1px 23px",
+          "23px 1px",
+          "1px 23px",
+          "23px 1px",
+          "1px 23px",
+        ].join(", "),
+      } satisfies Partial<CSSStyleDeclaration>);
+      frame.append(div);
+    }
+    div.style.padding =
+      `${pad(flow.contentTopPx)} ` +
+      `${pad(flow.pageWidthPx - flow.contentLeftPx - flow.contentWidthPx)} ` +
+      `${pad(flow.pageHeightPx - flow.contentTopPx - flow.contentHeightPx)} ` +
+      `${pad(flow.contentLeftPx)}`;
   }
 
   /** Lay out page slots for a flow result and repaint visible pages. The
