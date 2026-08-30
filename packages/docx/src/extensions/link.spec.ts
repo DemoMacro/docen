@@ -64,6 +64,21 @@ function firstText(json: JSONContent): string {
   return walk(json) ?? "";
 }
 
+/** The first text node carrying a link mark (marks included, for style checks). */
+function firstRunWithLink(json: JSONContent): JSONContent {
+  const walk = (node: JSONContent): JSONContent | undefined => {
+    for (const child of node.content ?? []) {
+      if (child.type === "text" && (child.marks ?? []).some((m) => m.type === "link")) return child;
+      const hit = walk(child);
+      if (hit) return hit;
+    }
+    return undefined;
+  };
+  const hit = walk(json);
+  if (!hit) throw new Error("no link-marked run in parsed document");
+  return hit;
+}
+
 describe("link mark round-trip", () => {
   it("exports an external URL hyperlink and parses back as a marked run", () => {
     const json = parseDOCX(
@@ -78,5 +93,43 @@ describe("link mark round-trip", () => {
   it("exports a #bookmark anchor and restores it as an in-page href", () => {
     const json = parseDOCX(generateDOCXSync(docWithLink("#section-1")) as Uint8Array);
     expect(firstLinkMark(json).href).toBe("#section-1");
+  });
+
+  it("keeps a bare link mark un-styled (a TOC entry stays plain)", () => {
+    // A link mark alone (no Hyperlink character style attr) compiles to a
+    // hyperlink container whose runs carry no w:rStyle — Word's TOC entries
+    // link without the link look. The style must come from the run's textStyle
+    // attr (the insert paths stamp it), never from the container.
+    const json = parseDOCX(generateDOCXSync(docWithLink("#toc-1")) as Uint8Array);
+    const run = firstRunWithLink(json);
+    expect(run.marks!.some((m) => m.type === "link")).toBe(true);
+    const textStyle = run.marks!.find((m) => m.type === "textStyle");
+    expect(textStyle?.attrs?.style ?? null).toBe(null);
+  });
+
+  it("round-trips the Hyperlink character style stamped on inserted links", () => {
+    const json = parseDOCX(
+      generateDOCXSync({
+        ...docWithLink("https://example.com"),
+        content: [
+          {
+            type: "paragraph",
+            content: [
+              {
+                type: "text",
+                text: "portal",
+                marks: [
+                  { type: "link", attrs: { href: "https://example.com", target: "_blank" } },
+                  { type: "textStyle", attrs: { style: "Hyperlink" } },
+                ],
+              },
+            ],
+          },
+        ],
+      }) as Uint8Array,
+    );
+    const run = firstRunWithLink(json);
+    const textStyle = run.marks!.find((m) => m.type === "textStyle");
+    expect(textStyle?.attrs?.style).toBe("Hyperlink");
   });
 });

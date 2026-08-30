@@ -110,12 +110,15 @@ export const Link = LinkBase.extend({
   parseDocxInline,
 
   addOptions(): LinkOptions {
-    // Disable the upstream plain-click window.open (openOnClick); a plain click
-    // now places the caret (Word), and docxLinkClickHandler follows on Ctrl+Click.
+    // Disable the upstream plain-click window.open (openOnClick) and the
+    // type-as-you-go autolink. A plain click places the caret (Word) and
+    // docxLinkClickHandler follows on Ctrl+Click; an autolinked run would miss
+    // the "Hyperlink" character style the insert paths stamp (see the setLink
+    // call sites), so typed URLs would link invisibly — no Word link look.
     // `this.parent?.()` is `LinkOptions | undefined`; spreading widens LinkOptions'
     // required fields to optional in the inferred literal type, so it no longer
     // satisfies LinkOptions even though parent always supplies them at runtime.
-    return { ...this.parent?.(), openOnClick: false } as LinkOptions;
+    return { ...this.parent?.(), openOnClick: false, autolink: false } as LinkOptions;
   },
 
   addProseMirrorPlugins() {

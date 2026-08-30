@@ -37,6 +37,10 @@ const styles: StylesOptions = {
       run: { size: 32, bold: true },
     },
   ] satisfies DefaultFlaggedStyle[],
+  characterStyles: [
+    // Word's built-in Hyperlink look — what a body link's w:rStyle resolves.
+    { id: "Hyperlink", name: "Hyperlink", run: { color: "0563C1", underline: { type: "single" } } },
+  ],
   default: {
     document: {
       paragraph: { spacing: { after: 160 }, indent: { firstLineChars: 200 } },
@@ -1251,7 +1255,7 @@ describe("projectDocumentOptions inline containers", () => {
   const paraOf = (children: SectionChild[]): LayoutBlock[] =>
     projectDocumentOptions(doc(children)).sections[0]!.blocks;
 
-  it("projects hyperlink containers as their runs with the Hyperlink look", () => {
+  it("styles hyperlink runs through the Hyperlink character style, not the container", () => {
     const blocks = paraOf([
       {
         paragraph: {
@@ -1259,7 +1263,12 @@ describe("projectDocumentOptions inline containers", () => {
             {
               hyperlink: {
                 url: "https://example.com",
-                children: [{ text: "linked", bold: true }, " and "],
+                children: [
+                  // A Word body link: the run carries w:rStyle "Hyperlink".
+                  { text: "linked", style: "Hyperlink", bold: true },
+                  // A TOC entry's hyperlink: no character style, plain look.
+                  { text: "entry" },
+                ],
               },
             },
             { text: "plain" },
@@ -1269,14 +1278,36 @@ describe("projectDocumentOptions inline containers", () => {
     ]);
     const para = blocks[0];
     if (para?.kind !== "paragraph") throw new Error("expected paragraph");
-    const [linked, , plain] = para.inline;
-    // The run's own bold wins; color/underline come from Word's Hyperlink style.
+    const [linked, entry, plain] = para.inline;
+    // The run's own bold wins; color/underline come from the Hyperlink style.
     expect(linked).toMatchObject({
       kind: "text",
       text: "linked",
       style: { bold: true, underline: true, color: "0563C1" },
     });
+    // Word leaves TOC entry hyperlinks un-styled — plain text, no link look.
+    expect(entry).toMatchObject({
+      kind: "text",
+      text: "entry",
+      style: { color: undefined, underline: undefined },
+    });
     expect(plain).toMatchObject({ kind: "text", text: "plain", style: { underline: undefined } });
+  });
+
+  it("lets an explicit run color beat the character style", () => {
+    const blocks = paraOf([
+      {
+        paragraph: {
+          children: [{ text: "recolor", style: "Hyperlink", color: "FF0000" }],
+        },
+      },
+    ]);
+    const para = blocks[0];
+    if (para?.kind !== "paragraph") throw new Error("expected paragraph");
+    expect(para.inline[0]).toMatchObject({
+      kind: "text",
+      style: { color: "FF0000", underline: true },
+    });
   });
 
   it("projects tracked insertions/deletions with Word's revision display", () => {

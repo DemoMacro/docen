@@ -613,12 +613,19 @@ export const DocumentCommands = Extension.create({
           return true;
         },
       // Wrap the selection in a link (empty selection → link around the URL text).
+      // Word stamps inserted hyperlink runs with the "Hyperlink" character
+      // style — that style (not the w:hyperlink element) paints links blue —
+      // so the same chain stamps it here (one transaction, one undo step).
       link:
         (href) =>
         ({ chain }) => {
           const url = href || (typeof window !== "undefined" && window.prompt("Link URL")) || "";
           if (!url) return false;
-          return chain().extendMarkRange("link").setLink({ href: url }).run();
+          return chain()
+            .extendMarkRange("link")
+            .setLink({ href: url })
+            .setMark("textStyle", { style: "Hyperlink" })
+            .run();
         },
 
       // ── Style gallery (combobox-driven): value picks the block style ──

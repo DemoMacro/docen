@@ -2205,8 +2205,17 @@ class DocenDocument extends AddinHost<Editor> {
     }
     const href = raw.startsWith("#") || /^[a-z][a-z0-9+.-]*:/i.test(raw) ? raw : `https://${raw}`;
     const { empty } = editor.state.selection;
+    // Word stamps inserted hyperlink runs with the "Hyperlink" character style
+    // — that style (not the w:hyperlink element) paints links blue — so every
+    // insert path here stamps it in the same transaction.
     if (!empty) {
-      editor.chain().focus().extendMarkRange("link").setLink({ href }).run();
+      editor
+        .chain()
+        .focus()
+        .extendMarkRange("link")
+        .setLink({ href })
+        .setMark("textStyle", { style: "Hyperlink" })
+        .run();
       return;
     }
     // No selection: Word asks for display text and inserts it marked.
@@ -2220,7 +2229,10 @@ class DocenDocument extends AddinHost<Editor> {
       .insertContent({
         type: "text",
         text,
-        marks: [{ type: "link", attrs: { href, target: href.startsWith("#") ? null : "_blank" } }],
+        marks: [
+          { type: "link", attrs: { href, target: href.startsWith("#") ? null : "_blank" } },
+          { type: "textStyle", attrs: { style: "Hyperlink" } },
+        ],
       })
       .run();
   }

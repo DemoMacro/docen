@@ -48,7 +48,13 @@ import type {
 import { emfPlusMembers, wmfMembers, wmfDibFallback, type SourceCrop } from "leafer-x-metafile";
 
 import { resolvePageSize } from "../extensions/utils";
-import { defaultParagraphStyleId, indexParagraphStyles, mergeStyleChain } from "../style-cascade";
+import {
+  defaultParagraphStyleId,
+  indexCharacterStyles,
+  indexParagraphStyles,
+  mergeStyleChain,
+  type StyleEntry,
+} from "../style-cascade";
 import { toLayoutMembers } from "./metafile-members";
 
 // The paragraph leg of SectionChild is `string | ParagraphOptions` (shorthand
@@ -504,6 +510,11 @@ function indexNumberings(numbering: unknown): NumberingIndex {
 /** Per-document projection context, resolved once and threaded down. */
 interface ProjectContext {
   styles: StylesOptions | undefined;
+  /** id → character style (w:style type="character") — a run's w:rStyle
+   *  resolves its run props here (e.g. "Hyperlink" supplies the blue underline
+   *  Word paints body links with, while a TOC entry's un-styled hyperlink
+   *  stays plain). */
+  characterStyles: Map<string, StyleEntry>;
   numberings: NumberingIndex;
   /** Live list counters per numbering reference (level → count), advanced in
    *  document order as numbered paragraphs project. */
@@ -1490,11 +1501,11 @@ function projectDrawings(runs: readonly unknown[], ctx: ProjectContext): LayoutD
 }
 
 /** Word display presets merged UNDER a container's runs (explicit run props
- *  win per field): hyperlinks take the Hyperlink character style look
- *  (blue underline), tracked insertions underline and tracked deletions
- *  strike in the first author's revision red — Word's "By author" palette
- *  starts at red, and a single default author sees red for every revision. */
-const HYPERLINK_DISPLAY = { underline: { type: "single" }, color: "0563C1" } as const;
+ *  win per field): tracked insertions underline and tracked deletions strike
+ *  in the first author's revision red — Word's "By author" palette starts at
+ *  red, and a single default author sees red for every revision. Hyperlinks
+ *  carry no preset: Word styles them only via the run's "Hyperlink" character
+ *  style (w:rStyle), which the cascade resolves per run. */
 const INSERTION_DISPLAY = { underline: { type: "single" }, color: "FF0000" } as const;
 const DELETION_DISPLAY = { strike: true, color: "FF0000" } as const;
 
@@ -1538,7 +1549,14 @@ function projectRuns(
   const { openComments } = ctx;
   const out: LayoutInline[] = [];
   const textStyleOf = (rPr: Rec): LayoutTextStyle => {
-    const own = runStyleOf(rPr);
+    // A run's character style (w:rStyle, e.g. a body link's "Hyperlink") slots
+    // between the paragraph-style chain and direct formatting: its props beat
+    // chainRPr/docRPr (they land in `own`), and an explicit rPr field beats it
+    // (the spread keeps rPr's keys on top). Word paints w:hyperlink content
+    // solely through this style — the container itself carries no look.
+    const styleId = str(rPr.style);
+    const charRun = styleId ? mergeStyleChain(ctx.characterStyles, styleId).run : undefined;
+    const own = runStyleOf(charRun ? { ...charRun, ...rPr } : rPr);
     return {
       family: toFamily(own.font, fontAttr(chainRPr.font) ?? fontAttr(docRPr.font)) ?? defRun.family,
       sizePx: ptToPx(own.sizePt ?? num(chainRPr.size) ?? num(docRPr.size) ?? 12),
@@ -1679,7 +1697,7 @@ function projectRuns(
       if (isRecord(child.complexField)) pushField(child.complexField, rPr);
       if (isRecord(child.simpleField)) pushField(child.simpleField, rPr);
       if (isRecord(child.hyperlink) && Array.isArray(child.hyperlink.children)) {
-        pushRuns(child.hyperlink.children, { ...preset, ...HYPERLINK_DISPLAY });
+        pushRuns(child.hyperlink.children, preset);
       }
       if (isRecord(child.insertion) && Array.isArray(child.insertion.children)) {
         pushRuns(child.insertion.children, { ...preset, ...INSERTION_DISPLAY });
@@ -1998,6 +2016,7 @@ function projectPageFurniture(
 ): ProjectedPageFurniture {
   const ctx: ProjectContext = {
     styles: doc.styles,
+    characterStyles: indexCharacterStyles(doc.styles),
     numberings: indexNumberings(doc.numbering),
     listCounters: new Map(),
     openComments: new Set(),
@@ -2127,6 +2146,7 @@ export function projectDocumentOptions(doc: DocumentOptions): {
 } {
   const ctx: ProjectContext = {
     styles: doc.styles,
+    characterStyles: indexCharacterStyles(doc.styles),
     numberings: indexNumberings(doc.numbering),
     listCounters: new Map(),
     openComments: new Set(),

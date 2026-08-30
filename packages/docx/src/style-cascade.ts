@@ -75,6 +75,39 @@ export function indexParagraphStyles(styles: StylesOptions): Map<string, StyleEn
   return byId;
 }
 
+/** The `default` keys that carry character styles (DefaultStylesOptions types
+ *  them CharacterStyleOptions; every other key is a paragraph style). */
+const CHARACTER_DEFAULT_KEYS = [
+  "hyperlink",
+  "footnoteReference",
+  "footnoteTextChar",
+  "endnoteReference",
+  "endnoteTextChar",
+] as const;
+
+/** Build an id → style-entry index over every character style: the explicit
+ *  `characterStyles` plus the built-in character styles nested under `default`
+ *  (key → style id via pStyleIdFromKey, e.g. "hyperlink" → "Hyperlink"). A
+ *  built-in that also appears in characterStyles is deduped by id. WeakMap-
+ *  cached per styles object, like indexParagraphStyles — the projection
+ *  resolves a run's w:rStyle per run, only a handful of distinct ids exist. */
+const characterStyleIndexCache = new WeakMap<StylesOptions, Map<string, StyleEntry>>();
+
+export function indexCharacterStyles(styles: StylesOptions | undefined): Map<string, StyleEntry> {
+  if (!styles) return new Map();
+  const cached = characterStyleIndexCache.get(styles);
+  if (cached) return cached;
+  const byId = new Map<string, StyleEntry>();
+  for (const cs of styles.characterStyles ?? []) byId.set(cs.id, cs);
+  const defaults = styles.default as unknown as Record<string, StyleEntry | undefined>;
+  for (const key of CHARACTER_DEFAULT_KEYS) {
+    const style = defaults?.[key];
+    if (style) byId.set(pStyleIdFromKey(key), style);
+  }
+  characterStyleIndexCache.set(styles, byId);
+  return byId;
+}
+
 /** Whether `v` is a plain object — an OOXML property group (spacing/indent/
  *  border/shading/font) that merges key by key — as opposed to an array
  *  (tabStops) or scalar, which replace. */

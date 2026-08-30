@@ -809,49 +809,60 @@ export class DocxManager {
     }
   }
 
-  /** Emit a single run for `text` with all inline marks applied. */
+  /** Emit a single run for `text` with all inline marks applied. Container
+   *  marks (hyperlink/insertion/deletion) wrap the run AFTER the rPr overlay
+   *  marks are collected — a link whose run carries a character style (e.g.
+   *  the stamped "Hyperlink") must keep it inside the container, so the
+   *  container legs can no longer short-circuit the overlay pass. */
   private compileTextRun(
     text: string,
     marks: JSONContent["marks"],
     children: ParagraphChild[],
   ): void {
     const runOpts: Record<string, unknown> = { text };
+    let linkMark: NonNullable<JSONContent["marks"]>[number] | undefined;
+    let trackMark: NonNullable<JSONContent["marks"]>[number] | undefined;
 
     for (const mark of marks ?? []) {
-      // Container marks wrap the run (early return) rather than overlay rPr —
-      // they assemble child runs and are handled directly here.
-      switch (mark.type) {
-        case "link": {
-          const href = mark.attrs?.href as string | undefined;
-          if (href) {
-            const { text: _, ...runWithoutText } = runOpts;
-            const linkChildren: (RunOptions | string)[] = [];
-            if (text) linkChildren.push({ ...runWithoutText, text } as RunOptions);
-            children.push({
-              hyperlink: {
-                url: href.startsWith("#") ? undefined : href,
-                anchor: href.startsWith("#") ? href.slice(1) : undefined,
-                // resolveHyperlink parks w:tooltip on the mark's title attr.
-                tooltip: (mark.attrs?.title as string | null | undefined) ?? undefined,
-                children: linkChildren,
-              },
-            });
-            return;
-          }
-          break;
-        }
-        case "insertion":
-        case "deletion":
-          // Wrap the run back into a w:ins/w:del container — the reverse of
-          // resolveTrackedChange. compileTrackedChangeRun returns the typed
-          // ParagraphChild branch, so no cast is needed here. office-open's
-          // stringifyDeletedRun emits <w:delText> for deletion children.
-          children.push(this.compileTrackedChangeRun(mark.type, mark.attrs, text, runOpts));
-          return;
+      if (mark.type === "link") {
+        if (mark.attrs?.href) linkMark = mark;
+        continue;
+      }
+      if (mark.type === "insertion" || mark.type === "deletion") {
+        trackMark = mark;
+        continue;
       }
       // rPr overlay marks — each extension's renderDocx contributes run props.
       const render = this.markRender.get(mark.type);
       if (render) Object.assign(runOpts, render((mark.attrs ?? {}) as Record<string, unknown>));
+    }
+
+    if (linkMark) {
+      const href = linkMark.attrs?.href as string;
+      const { text: _, ...runWithoutText } = runOpts;
+      const linkChildren: (RunOptions | string)[] = [];
+      if (text) linkChildren.push({ ...runWithoutText, text } as RunOptions);
+      children.push({
+        hyperlink: {
+          url: href.startsWith("#") ? undefined : href,
+          anchor: href.startsWith("#") ? href.slice(1) : undefined,
+          // resolveHyperlink parks w:tooltip on the mark's title attr.
+          tooltip: (linkMark.attrs?.title as string | null | undefined) ?? undefined,
+          children: linkChildren,
+        },
+      });
+      return;
+    }
+    if (trackMark) {
+      // Wrap the run back into a w:ins/w:del container — the reverse of
+      // resolveTrackedChange. compileTrackedChangeRun returns the typed
+      // ParagraphChild branch, so no cast is needed here. office-open's
+      // stringifyDeletedRun emits <w:delText> for deletion children.
+      const kind = trackMark.type;
+      if (kind === "insertion" || kind === "deletion") {
+        children.push(this.compileTrackedChangeRun(kind, trackMark.attrs, text, runOpts));
+        return;
+      }
     }
 
     children.push(runOpts as RunOptions);
