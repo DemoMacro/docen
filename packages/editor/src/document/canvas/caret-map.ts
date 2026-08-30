@@ -315,6 +315,14 @@ export class CaretMap {
     paraEntry.chars = startChar;
   }
 
+  /** The PM position just inside the textblock a laid paragraph paired with
+   *  (null when the paragraph never paired — render-only or unmapped). The
+   *  drawing selection resolves its hit box's host paragraph through this;
+   *  a split paragraph's continuation blocks all resolve to the same entry. */
+  posOfPara(para: LaidOutParagraph): number | null {
+    return this.paras.find((p) => p.lines.some((l) => l.para === para))?.innerPos ?? null;
+  }
+
   /** A click's page-local coordinates → the nearest doc position. */
   posAtPoint(page: number, x: number, y: number): number | null {
     let best: { entry: LineEntry; dist: number; xDist: number } | null = null;

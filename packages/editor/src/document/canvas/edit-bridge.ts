@@ -15,7 +15,7 @@ import { Editor } from "@docen/docx/core";
 import type { FlowPage } from "@docen/layout";
 import { UndoRedo } from "@tiptap/extensions";
 import { joinBackward, joinForward, splitBlock } from "@tiptap/pm/commands";
-import { TextSelection } from "@tiptap/pm/state";
+import { NodeSelection, TextSelection } from "@tiptap/pm/state";
 import { getMatchHighlights } from "prosemirror-search";
 
 import { KEYBOARD_SHORTCUTS } from "../extensions/keymap";
@@ -95,6 +95,29 @@ export interface EditBridgeOptions {
   scale?: () => number;
   /** Header/footer edit stories — absent, the furniture bands are inert. */
   story?: EditBridgeStory;
+  /** Drawing hit-test (page-local px) — the stage's painted-box table. A hit
+   *  selects the drawing (Word: clicking a picture grabs it) instead of
+   *  placing the caret behind it; absent, every click is text. */
+  drawingAt?: (page: number, lx: number, ly: number) => DrawingHit | null;
+  /** The PM node selection for a drawing hit — resolves the host paragraph
+   *  position and the index-th drawing node inside it (null when the map
+   *  cannot pair the host, e.g. a furniture story paragraph). */
+  drawingSelection?: (hit: { para: unknown; index: number }) => number | null;
+  /** Re-resolves a selected drawing's painted box after a re-render (the
+   *  selection drops when the drawing no longer paints). */
+  drawingBoxOf?: (para: unknown, index: number) => DrawingHit | null;
+}
+
+/** A drawing's painted box plus its identity — how a click hit it and how the
+ *  box re-resolves after a re-render (host laid paragraph + drawing index). */
+interface DrawingHit {
+  page: number;
+  para: unknown;
+  index: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 export interface EditBridge {
@@ -132,6 +155,9 @@ export interface EditBridge {
   pageOf(pos: number): number | null;
   /** The first doc position rendered on a page (null when unmappable). */
   firstPosOfPage(page: number): number | null;
+  /** The PM position just inside the laid paragraph (null when the map
+   *  cannot pair it — render-only or unmapped). */
+  posOfPara(para: unknown): number | null;
   /** Move keyboard focus to the bridge's input surface (the editing focus —
    *  there is no DOM editor to focus). */
   focus(): void;
@@ -359,6 +385,11 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
   const placeCaret = (): void => {
     placeSelection();
     placeSearch();
+    // A selection that stopped being the drawing's NodeSelection (arrow keys,
+    // a command, undo) drops the selection box — the box mirrors the PM state.
+    if (selDrawing && !(main.editor.state.selection instanceof NodeSelection)) {
+      selDrawing = null;
+    }
     const s = active();
     if (!s.map?.valid) {
       caret.style.display = "none";
@@ -429,6 +460,52 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       );
       return true;
     });
+  };
+
+  /** The selected drawing — Word's picture selection. The hit box carries
+   *  the laid host paragraph + its drawing index (how the PM node was found);
+   *  after a re-render the box re-resolves from the stage table, and a
+   *  drawing that no longer paints drops the selection. */
+  let selDrawing: DrawingHit | null = null;
+
+  const drawingSel = document.createElement("div");
+  Object.assign(drawingSel.style, {
+    position: "absolute",
+    border: "1.5px solid #2b7cd3",
+    pointerEvents: "none",
+    zIndex: "6",
+    display: "none",
+  } satisfies Partial<CSSStyleDeclaration>);
+  opts.host.append(drawingSel);
+
+  const placeDrawingSel = (): void => {
+    if (selDrawing) {
+      const fresh = opts.drawingBoxOf?.(selDrawing.para, selDrawing.index) ?? null;
+      selDrawing = fresh;
+    }
+    const frame = selDrawing ? (opts.pageHost?.(selDrawing.page) ?? null) : null;
+    if (!selDrawing || !frame) {
+      drawingSel.style.display = "none";
+      return;
+    }
+    if (frame !== drawingSel.parentElement) frame.append(drawingSel);
+    drawingSel.style.display = "block";
+    const scale = opts.scale?.() ?? 1;
+    drawingSel.style.left = `${selDrawing.x * scale}px`;
+    drawingSel.style.top = `${selDrawing.y * scale}px`;
+    drawingSel.style.width = `${selDrawing.width * scale}px`;
+    drawingSel.style.height = `${selDrawing.height * scale}px`;
+  };
+
+  const selectDrawing = (hit: DrawingHit): void => {
+    const nodePos = opts.drawingSelection?.(hit) ?? null;
+    if (nodePos == null || !main.editor.state.doc.nodeAt(nodePos)) return;
+    main.editor.commands.command(({ state, dispatch }) => {
+      dispatch?.(state.tr.setSelection(NodeSelection.create(state.doc, nodePos) as never));
+      return true;
+    });
+    selDrawing = hit;
+    placeDrawingSel();
   };
 
   /** A viewport point → the active story's doc position (furniture stories
@@ -628,7 +705,18 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     } else if (story) {
       leaveStory();
     }
-    // Body editing (the main story).
+    // Body editing (the main story). A click landing on a drawing grabs it
+    // (Word's picture selection) instead of dropping a caret behind the art;
+    // any other click drops a standing drawing selection first.
+    const drawHit = hit && opts.drawingAt ? opts.drawingAt(hit.page, hit.lx, hit.ly) : null;
+    if (drawHit) {
+      selectDrawing(drawHit);
+      ta.focus();
+      ta.value = "";
+      return;
+    }
+    selDrawing = null;
+    placeDrawingSel();
     const pos = posAtClient(event.clientX, event.clientY);
     if (pos != null) {
       setSel(pos);
@@ -973,6 +1061,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
         (page) => pageOrigin(page) ?? { contentLeftPx: 0, contentTopPx: 0 },
       );
       main.pageCount = pages.length;
+      placeDrawingSel();
       placeCaret();
     },
     updateStoryMap(stack, band): void {
@@ -1025,10 +1114,16 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     firstPosOfPage(page: number): number | null {
       return main.map?.valid ? main.map.firstPosOfPage(page) : null;
     },
+    posOfPara(para): number | null {
+      return main.map?.valid
+        ? main.map.posOfPara(para as import("@docen/layout").LaidOutParagraph)
+        : null;
+    },
     focus(): void {
       ta.focus();
     },
     replaceOverlays(): void {
+      placeDrawingSel();
       placeCaret();
     },
     destroy(): void {
@@ -1041,6 +1136,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       opts.host.removeEventListener("mousedown", takeFocus);
       opts.host.removeEventListener("mousemove", onMouseMove);
       document.removeEventListener("mouseup", onMouseUp);
+      drawingSel.remove();
       for (const el of selectionLayer) el.remove();
       for (const el of searchLayer) el.remove();
       ta.remove();

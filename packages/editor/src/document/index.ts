@@ -1060,6 +1060,14 @@ class DocenDocument extends AddinHost<Editor> {
         onDoc: (kind, slot, json) => this.#renderStoryFurniture(kind, slot, json),
         exit: ({ kind, slot, json, dirty }) => this.#exitStory(kind, slot, json, dirty),
       },
+      // Drawing selection — the stage's painted-box hit table resolves the
+      // click; the caret map pairs the hit's host paragraph to the PM
+      // position, and the index-th drawing node inside it becomes the
+      // NodeSelection (projectDrawings collects drawings in run order, the
+      // same order the paragraph's content carries the nodes).
+      drawingAt: (page, lx, ly) => this.#stage?.drawingAt(page, lx, ly) ?? null,
+      drawingSelection: (hit) => this.#drawingNodePos(hit.para, hit.index),
+      drawingBoxOf: (para, index) => this.#stage?.drawingBoxOf(para, index) ?? null,
     });
     if (this.getAttribute("editable") === "false") this.#bridge.editor.setEditable(false);
     // First paint + caret map feed (transactions re-render via the bridge's
@@ -1376,6 +1384,28 @@ class DocenDocument extends AddinHost<Editor> {
         ) ?? undefined;
     }
     return out;
+  }
+
+  /** The PM node position of a drawing hit's target — the host paragraph's
+   *  inner position via the caret map, then the index-th drawing node (a
+   *  floating picture or a wps shape) in the paragraph's content order
+   *  (projectDrawings collects drawings in that same order). */
+  #drawingNodePos(para: unknown, index: number): number | null {
+    const bridge = this.#bridge;
+    const doc = bridge?.editor.state.doc;
+    const innerPos = bridge?.posOfPara(para) ?? null;
+    if (innerPos == null || !doc) return null;
+    const host = doc.nodeAt(innerPos - 1);
+    if (!host) return null;
+    let seen = 0;
+    let hit = -1;
+    host.forEach((child, offset) => {
+      const drawing =
+        child.type.name === "wpsShape" ||
+        (child.type.name === "image" && child.attrs.floating != null);
+      if (drawing && hit < 0 && seen++ === index) hit = innerPos + offset;
+    });
+    return hit >= 0 ? hit : null;
   }
 
   /** The canvas pipeline's projection + layout half, shared by the full

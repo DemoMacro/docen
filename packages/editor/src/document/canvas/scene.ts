@@ -67,6 +67,21 @@ const PRSTDASH_PATTERN: Record<string, number[]> = {
   lgDashDotDot: [12, 3, 1, 3, 1, 3],
 };
 
+/** One hit-testable drawing box, page-local px — what a click needs to grab a
+ *  drawing (Word: clicking a picture selects it). `para` is the laid host
+ *  paragraph (the caret map resolves it to the PM position) and `index` the
+ *  drawing's position among that paragraph's drawings, matching the run order
+ *  projectDrawings collected them in. */
+export interface DrawingHitBox {
+  page: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  para: LaidOutParagraph;
+  index: number;
+}
+
 /** The paint context for one page — the stage context plus the page's own
  *  identity (page-number fields resolve against it) and which of Word's two
  *  text-underlapping layers is being composed right now (the stage paints a
@@ -88,6 +103,9 @@ export interface PaintContext {
    *  scheduling stalls on apps created while offscreen (see stage.repaint),
    *  so a decode completing after repaint would otherwise never show. */
   rerender: () => void;
+  /** Accumulates this page's drawing boxes as the body pass paints them —
+   *  the stage turns the list into its click hit table. */
+  hitBoxes?: DrawingHitBox[];
 }
 
 /** The text column a block paints inside: the page's content box for body
@@ -160,8 +178,10 @@ function paintParagraph(
   // layer's drawings. Behind-doc floats land beneath the furniture pass.
   const behind = ctx.layer === "behind";
   if (behind) {
+    let index = 0;
     for (const drawing of para.drawings ?? []) {
-      if (drawing.behind) paintDrawing(tree, drawing, x, y, ctx, col);
+      if (drawing.behind) paintDrawing(tree, drawing, x, y, ctx, col, { para, index: index++ });
+      else index++;
     }
     return;
   }
@@ -359,8 +379,13 @@ function paintParagraph(
   // Floating drawings anchored to this paragraph: wrap-none boxes painted
   // over the text — the flow reserved them no height. (behindDoc ones went
   // first, above.)
+  // The body pass collects EVERY drawing's hit box — behind-doc floats
+  // painted by the earlier pass included (their boxes are just as clickable).
+  let hitIndex = 0;
   for (const drawing of para.drawings ?? []) {
-    if (!drawing.behind) paintDrawing(tree, drawing, x, y, ctx, col);
+    const host = { para, index: hitIndex++ };
+    if (!drawing.behind) paintDrawing(tree, drawing, x, y, ctx, col, host);
+    else if (ctx.hitBoxes) recordDrawingHit(drawing, x, y, ctx, ctx.hitBoxes, host);
   }
 }
 
@@ -405,18 +430,16 @@ const TAB_LEADER_STYLES: Record<
   underscore: { widthPx: 1, underside: true },
 };
 
-/** One floating drawing: members absolutely positioned in the drawing's box,
- *  itself placed by the anchor spec against the page geometry. A text box
- *  stacks its own paragraphs inside its insets (the same stackBlocks the
- *  header/footer furniture uses). */
-function paintDrawing(
-  tree: IGroup,
+/** The page-local box a drawing's anchor spec resolves to — the single
+ *  implementation behind both the painter and the hit recorder, so what a
+ *  click tests is exactly what painted. */
+function drawingBoxOf(
   drawing: LayoutDrawing,
   x: number,
   y: number,
   ctx: PaintContext,
   col?: PaintColumn,
-): void {
+): { x: number; y: number } {
   const { flow } = ctx;
   // The reference box each axis resolves against: the content box (column /
   // topMargin), the page box, an edge (leftMargin/rightMargin/bottomMargin),
@@ -464,6 +487,63 @@ function paintDrawing(
   if (col?.inCell && drawing.anchor.horizontal.relative === "column") {
     boxX = Math.min(Math.max(boxX, hBox.left), hBox.left + Math.max(0, hBox.width - drawing.width));
   }
+  return { x: boxX, y: boxY };
+}
+
+/** Record a drawing's hit box without painting it — the body pass catalogs
+ *  behind-doc floats the earlier pass already painted. */
+function recordDrawingHit(
+  drawing: LayoutDrawing,
+  x: number,
+  y: number,
+  ctx: PaintContext,
+  boxes: DrawingHitBox[],
+  host: DrawingHost,
+): void {
+  const box = drawingBoxOf(drawing, x, y, ctx);
+  boxes.push({
+    page: ctx.pageIndex,
+    x: box.x,
+    y: box.y,
+    width: drawing.width,
+    height: drawing.height,
+    para: host.para,
+    index: host.index,
+  });
+}
+
+/** One floating drawing: members absolutely positioned in the drawing's box,
+ *  itself placed by the anchor spec against the page geometry. A text box
+ *  stacks its own paragraphs inside its insets (the same stackBlocks the
+ *  header/footer furniture uses). */
+/** Which paragraph carries a drawing, and its position among that paragraph's
+ *  drawings (run order — how the PM side re-finds the node). */
+interface DrawingHost {
+  para: LaidOutParagraph;
+  index: number;
+}
+
+function paintDrawing(
+  tree: IGroup,
+  drawing: LayoutDrawing,
+  x: number,
+  y: number,
+  ctx: PaintContext,
+  col: PaintColumn | undefined,
+  host: DrawingHost,
+): void {
+  const box = drawingBoxOf(drawing, x, y, ctx, col);
+  const boxX = box.x;
+  const boxY = box.y;
+  ctx.hitBoxes?.push({
+    page: ctx.pageIndex,
+    x: boxX,
+    y: boxY,
+    width: drawing.width,
+    height: drawing.height,
+    para: host.para,
+    index: host.index,
+  });
   if (drawing.clipMembers) {
     // A srcRect-cropped metafile replay reaches past the extent (GDI clips
     // metafile playback to the rect); wps text boxes must NOT clip — their

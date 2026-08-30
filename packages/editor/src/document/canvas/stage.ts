@@ -21,7 +21,13 @@ import type { FlowPage, FontMetrics, LaidOutStackItem } from "@docen/layout";
 import { stackBlocks, TextMeasurer } from "@docen/layout";
 import { App, Line, Rect, Text, type IGroup } from "leafer-ui";
 
-import { paintFurnitureStack, paintScene, releasePinnedImages, type PaintContext } from "./scene";
+import {
+  paintFurnitureStack,
+  paintScene,
+  releasePinnedImages,
+  type DrawingHitBox,
+  type PaintContext,
+} from "./scene";
 
 const PAGE_GAP = 24;
 
@@ -463,6 +469,11 @@ export class CanvasStage {
     }
     paintScene(tree, items, ctx);
     ctx.layer = "body";
+    // The body pass also catalogs every drawing's box for click hit-testing
+    // (behind-doc floats included — the earlier pass painted them, this one
+    // records where).
+    const hitBoxes: DrawingHitBox[] = [];
+    ctx.hitBoxes = hitBoxes;
     if (!this.storyEdit) {
       this.paintFurniture(tree, slot, ctx, flow, furniture);
       paintScene(tree, items, ctx);
@@ -485,6 +496,34 @@ export class CanvasStage {
     // was created while its view was offscreen (an IO callback during mount)
     // and never picks the page back up.
     app.forceRender();
+    this.hitBoxes.set(index, hitBoxes);
+  }
+
+  /** The page's drawing boxes as the body pass painted them — the click
+   *  hit table (empty until the page repaints at least once). */
+  private readonly hitBoxes = new Map<number, DrawingHitBox[]>();
+
+  /** The topmost drawing whose painted box contains the page-local point
+   *  (null when none does) — later-painted wins, Word's z-click. */
+  drawingAt(page: number, lx: number, ly: number): DrawingHitBox | null {
+    const boxes = this.hitBoxes.get(page);
+    if (!boxes) return null;
+    for (let i = boxes.length - 1; i >= 0; i--) {
+      const b = boxes[i]!;
+      if (lx >= b.x && lx <= b.x + b.width && ly >= b.y && ly <= b.y + b.height) return b;
+    }
+    return null;
+  }
+
+  /** The painted box of a paragraph's index-th drawing across pages — the
+   *  selection overlay's geometry source (a re-render may have moved the
+   *  host paragraph, and with it the drawing, onto another page). */
+  drawingBoxOf(para: unknown, index: number): DrawingHitBox | null {
+    for (const boxes of this.hitBoxes.values()) {
+      const b = boxes.find((box) => box.para === para && box.index === index);
+      if (b) return b;
+    }
+    return null;
   }
 
   /** Both furniture stacks for a page's slot, at their page positions —
