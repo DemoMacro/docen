@@ -8,6 +8,8 @@ import {
 import type {
   ProjectedFlowBox,
   ProjectedPageBackground,
+  ProjectedPageBorder,
+  ProjectedPageBorders,
   ProjectedPageFurniture,
 } from "@docen/layout";
 /**
@@ -46,6 +48,8 @@ export interface LaidFurnitureSection {
  *  and the headers/footers its pages display. */
 export interface CanvasStageSection {
   flow: ProjectedFlowBox;
+  /** The section's page borders (w:pgBorders), absent when none. */
+  pageBorders?: ProjectedPageBorders;
   /** Headers/footers for this section's pages (absent = none). */
   furniture?: ProjectedPageFurniture;
   /** The slots of `furniture` laid out once (layFurnitureSections) — the
@@ -218,7 +222,7 @@ export class CanvasStage {
       const w = this.pageCss(flow.pageWidthPx);
       const h = this.pageCss(flow.pageHeightPx);
       const pixelRatio = this.renderPixelRatio(flow);
-      this.sizeSlot(slot, w, h);
+      this.sizeSlot(slot, w, h, index);
       if (slot.app) {
         slot.app.resize({ width: w, height: h, pixelRatio });
         this.repaint(slot.app, index);
@@ -226,12 +230,18 @@ export class CanvasStage {
     }
   }
 
-  private sizeSlot(slot: { el: HTMLElement; app: App | null }, w: number, h: number): void {
+  private sizeSlot(
+    slot: { el: HTMLElement; app: App | null },
+    w: number,
+    h: number,
+    page: number,
+  ): void {
     const frame = slot.el.parentElement;
     if (frame) {
       frame.style.width = `${w}px`;
       frame.style.height = `${h}px`;
       this.applyBackground(frame);
+      this.applyBorders(frame, page);
     }
     slot.el.style.width = `${w}px`;
     slot.el.style.height = `${h}px`;
@@ -252,6 +262,90 @@ export class CanvasStage {
     } else {
       frame.style.backgroundImage = "none";
     }
+  }
+
+  /** ST_Border tokens → CSS border-styles. Word's art borders (fancy
+   *  compound/wavy lines) have no CSS counterpart and fall back to solid. */
+  static readonly BORDER_STYLE: Readonly<Record<string, string>> = {
+    single: "solid",
+    thick: "solid",
+    double: "double",
+    triple: "double",
+    dashed: "dashed",
+    dashSmallGap: "dashed",
+    dashDotStroked: "dashed",
+    dotted: "dotted",
+    dotDash: "dotted",
+    dotDotDash: "dotted",
+    threeDEmboss: "ridge",
+    threeDEngrave: "groove",
+    inset: "inset",
+    outset: "outset",
+  };
+
+  /** The page's index within its own section (0-based) — w:pgBorders'
+   *  firstPage/notFirstPage filter on the section's first page, not the
+   *  document's. */
+  private pageInSection(page: number): number {
+    const section = this.ctx.sectionOfPage[page];
+    let first = page;
+    while (first > 0 && this.ctx.sectionOfPage[first - 1] === section) first--;
+    return page - first;
+  }
+
+  /** Stamp a page's w:pgBorders — one absolutely-positioned div whose CSS
+   *  border paints the four sides (each side carries its own style/width/
+   *  color). The box insets from the page edge or the text margin per
+   *  offsetFrom, scaled with the zoom like the rest of the frame. */
+  private applyBorders(frame: HTMLElement, page: number): void {
+    const section = this.sectionAt(page);
+    const b = section.pageBorders;
+    const existing = frame.querySelector(":scope > .page-borders");
+    existing?.remove();
+    if (!b) return;
+    const nth = this.pageInSection(page);
+    if (b.display === "firstPage" && nth !== 0) return;
+    if (b.display === "notFirstPage" && nth === 0) return;
+    const flow = section.flow;
+    // offsetFrom=page measures space from the paper edge (Word's default 24
+    // pt when omitted); text measures from the margin box (default 0).
+    const fromPage = b.offsetFrom !== "text";
+    const insetPt = (side: ProjectedPageBorder | undefined, marginPx: number): number => {
+      const space = side?.spacePt ?? (fromPage ? 24 : 0);
+      const px = space * (96 / 72) + (fromPage ? 0 : marginPx / this.factor);
+      return px * this.factor;
+    };
+    const margin = {
+      top: flow.contentTopPx,
+      right: flow.pageWidthPx - flow.contentLeftPx - flow.contentWidthPx,
+      bottom: flow.pageHeightPx - flow.contentTopPx - flow.contentHeightPx,
+      left: flow.contentLeftPx,
+    };
+    const cssSide = (side: ProjectedPageBorder | undefined): string =>
+      side
+        ? `${Math.max(1, Math.round(side.widthPx * this.factor))}px ` +
+          `${CanvasStage.BORDER_STYLE[side.style] ?? "solid"} ` +
+          `#${side.color && side.color !== "auto" ? side.color : "000000"}`
+        : "none";
+    const div = document.createElement("div");
+    div.className = "page-borders";
+    Object.assign(div.style, {
+      position: "absolute",
+      pointerEvents: "none",
+      // front (Word's default) paints over content; back must sit UNDER the
+      // Leafer view — the view is statically positioned (z-index immune), so
+      // back is negative (still above the frame's own background fill).
+      zIndex: b.behind ? "-1" : "2",
+    } satisfies Partial<CSSStyleDeclaration>);
+    div.style.borderTop = cssSide(b.top);
+    div.style.borderRight = cssSide(b.right);
+    div.style.borderBottom = cssSide(b.bottom);
+    div.style.borderLeft = cssSide(b.left);
+    div.style.top = `${insetPt(b.top, margin.top)}px`;
+    div.style.right = `${insetPt(b.right, margin.right)}px`;
+    div.style.bottom = `${insetPt(b.bottom, margin.bottom)}px`;
+    div.style.left = `${insetPt(b.left, margin.left)}px`;
+    frame.append(div);
   }
 
   /** Lay out page slots for a flow result and repaint visible pages. The
@@ -305,7 +399,7 @@ export class CanvasStage {
     // mix re-sizes created slots to their page's own section.
     for (const [index, slot] of this.slots.entries()) {
       const flow = this.sectionAt(index).flow;
-      this.sizeSlot(slot, this.pageCss(flow.pageWidthPx), this.pageCss(flow.pageHeightPx));
+      this.sizeSlot(slot, this.pageCss(flow.pageWidthPx), this.pageCss(flow.pageHeightPx), index);
     }
     for (const [index, slot] of this.slots.entries()) {
       if (slot.app) this.repaint(slot.app, index);

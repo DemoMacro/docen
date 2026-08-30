@@ -355,6 +355,18 @@ const zoomItems = (): string =>
     { text: opt("page-width"), value: "page-width" },
   ]);
 
+/** The Page Borders split's presets — Word's Borders and Shading gallery in
+ *  menu form: none, a plain box, Word's shadow box (thick bottom/right), a
+ *  double rule, and a dashed rule. */
+const pageBorderItems = (): string =>
+  JSON.stringify([
+    { text: opt("page-border-none"), value: "none" },
+    { text: opt("page-border-box"), value: "box" },
+    { text: opt("page-border-shadow"), value: "shadow" },
+    { text: opt("page-border-double"), value: "double" },
+    { text: opt("page-border-dashed"), value: "dashed" },
+  ]);
+
 /** The Header/Footer split's drop-down: edit (the split's main action),
  *  remove, and the slot-visibility flags. Static seed only — the host
  *  re-stamps the items with live `checked` flags on every transaction
@@ -857,7 +869,7 @@ const designTab = (): RibbonTab =>
         label: cmd("page-color"),
         defaultColor: "FFFFFF",
       },
-      btn("page-border", "page-border", { size: "large" }),
+      split("page-border", "page-border", parsedItems(pageBorderItems()), { size: "large" }),
     ]),
   ]);
 

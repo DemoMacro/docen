@@ -54,6 +54,7 @@ export type {
   SectionOptions,
   SectionChild,
   SectionPropertiesOptions,
+  PageBordersOptions,
   // Paragraph
   ParagraphOptions,
   ParagraphChild,

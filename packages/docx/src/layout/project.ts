@@ -30,6 +30,8 @@ import {
   type LayoutTextStyle,
   type ProjectedFlowBox,
   type ProjectedPageBackground,
+  type ProjectedPageBorder,
+  type ProjectedPageBorders,
   type ProjectedPageFurniture,
 } from "@docen/layout";
 import type { CustomGeometryOptions } from "@office-open/core/drawing";
@@ -2125,6 +2127,43 @@ function projectPageBackground(doc: DocumentOptions): ProjectedPageBackground | 
   };
 }
 
+/** One side of the projected w:pgBorders (see {@link ProjectedPageBorders}). */
+function projectPageBorderSide(v: unknown): ProjectedPageBorder | undefined {
+  if (!isRecord(v)) return undefined;
+  const style = str(v.style);
+  // nil/none explicitly paint nothing; an absent side is simply not rendered.
+  if (!style || style === "nil" || style === "none") return undefined;
+  const size = num(v.size);
+  return {
+    style,
+    // w:sz counts 1/8 pt; Word's default 4 = 0.5 pt ≈ 0.67 px.
+    widthPx: size != null ? (size / 8) * (96 / 72) : (4 / 8) * (96 / 72),
+    color: str(v.color),
+    spacePt: num(v.space),
+  };
+}
+
+/** Project a section's w:pgBorders for painting: per-side strokes, the pages
+ *  that paint them, and the offset reference (page edge vs text margin). */
+function projectPageBorders(properties: unknown): ProjectedPageBorders | undefined {
+  const raw =
+    isRecord(properties) && isRecord(properties.pageBorders)
+      ? (properties.pageBorders as Rec)
+      : null;
+  if (!raw) return undefined;
+  const borders: ProjectedPageBorders = {
+    display: str(raw.display) as ProjectedPageBorders["display"],
+    offsetFrom: str(raw.offsetFrom) as ProjectedPageBorders["offsetFrom"],
+    behind: raw.zOrder === "back" || undefined,
+    top: projectPageBorderSide(raw.top),
+    right: projectPageBorderSide(raw.right),
+    bottom: projectPageBorderSide(raw.bottom),
+    left: projectPageBorderSide(raw.left),
+  };
+  const hasSide = borders.top || borders.right || borders.bottom || borders.left;
+  return hasSide ? borders : undefined;
+}
+
 /** One section's projection: the body block flow, the page geometry its
  *  content paginates against, and its headers/footers. A multi-section
  *  document renders one entry per section — each starts on a fresh page with
@@ -2134,6 +2173,8 @@ export interface ProjectedSection {
   blocks: LayoutBlock[];
   flow: ProjectedFlowBox;
   furniture: ProjectedPageFurniture;
+  /** The section's page borders (w:pgBorders), absent when none. */
+  pageBorders?: ProjectedPageBorders;
 }
 
 /** Project a full DocumentOptions into the engine's input: one
@@ -2164,6 +2205,7 @@ export function projectDocumentOptions(doc: DocumentOptions): {
       blocks,
       flow: projectFlowBox(section.properties),
       furniture: projectPageFurniture(section, doc),
+      pageBorders: projectPageBorders(section.properties),
     };
   });
   return {
@@ -2175,6 +2217,7 @@ export function projectDocumentOptions(doc: DocumentOptions): {
               blocks: [],
               flow: projectFlowBox(undefined),
               furniture: projectPageFurniture(undefined, doc),
+              pageBorders: undefined,
             },
           ],
     background: projectPageBackground(doc),

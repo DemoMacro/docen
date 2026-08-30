@@ -360,6 +360,11 @@ export const ribbonEn: AdditionalLanguage = {
     // --- Options: layout ---
     "ribbon.opt.normal-margin": "Normal",
     "ribbon.opt.narrow": "Narrow",
+    "ribbon.opt.page-border-none": "None",
+    "ribbon.opt.page-border-box": "Box",
+    "ribbon.opt.page-border-shadow": "Shadow",
+    "ribbon.opt.page-border-double": "Double",
+    "ribbon.opt.page-border-dashed": "Dashed",
     "ribbon.opt.moderate": "Moderate",
     "ribbon.opt.wide": "Wide",
     "ribbon.opt.custom-margins": "Custom Margins…",
@@ -810,6 +815,11 @@ export const ribbonZhCN: AdditionalLanguage = {
     // --- Options: layout ---
     "ribbon.opt.normal-margin": "普通",
     "ribbon.opt.narrow": "窄",
+    "ribbon.opt.page-border-none": "无",
+    "ribbon.opt.page-border-box": "方框",
+    "ribbon.opt.page-border-shadow": "阴影",
+    "ribbon.opt.page-border-double": "双线",
+    "ribbon.opt.page-border-dashed": "虚线",
     "ribbon.opt.moderate": "适中",
     "ribbon.opt.wide": "宽",
     "ribbon.opt.custom-margins": "自定义边距…",

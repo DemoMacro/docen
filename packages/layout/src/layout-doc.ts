@@ -645,3 +645,33 @@ export interface ProjectedPageBackground {
   /** On-page tile size in px at 100% zoom. */
   tilePx?: number;
 }
+
+/** One side of the projected page borders (w:pgBorders): the stroke a page
+ *  paints on that edge. */
+export interface ProjectedPageBorder {
+  /** ST_Border token — the painter maps it to a CSS border-style. */
+  style: string;
+  /** Stroke width in px at 100% zoom (w:sz is 1/8 pt; Word's default 4). */
+  widthPx: number;
+  /** Hex without '#' (absent = Word's auto, painted black). */
+  color?: string;
+  /** Distance from the offset reference to this border, in pt. */
+  spacePt?: number;
+}
+
+/** Page borders projected for painting (w:pgBorders): which pages of the
+ *  section paint a border, where the border box measures from, and the
+ *  per-side strokes. */
+export interface ProjectedPageBorders {
+  /** Which of the section's pages paint the border (default allPages). */
+  display?: "allPages" | "firstPage" | "notFirstPage";
+  /** The border box measures from the page edge (space inset, Word's default
+   *  24 pt) or from the text margin (the default). */
+  offsetFrom?: "page" | "text";
+  /** Paint behind intersecting content (w:zOrder=back; default in front). */
+  behind?: boolean;
+  top?: ProjectedPageBorder;
+  right?: ProjectedPageBorder;
+  bottom?: ProjectedPageBorder;
+  left?: ProjectedPageBorder;
+}

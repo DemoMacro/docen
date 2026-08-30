@@ -11,6 +11,8 @@ import {
   parseMarkdown,
   sectionPageSizeDefaults,
   type JSONContent,
+  type BorderOptions,
+  type PageBordersOptions,
   type SectionPropertiesOptions,
   type StylesOptions,
 } from "@docen/docx";
@@ -160,8 +162,10 @@ const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   // note body to documentExtras.footnotes.
   "insert-footnote",
   // Page Color writes the doc-level w:background (doc.attrs.background) from
-  // the color-picker's palette value.
+  // the color-picker's palette value. Page Borders stamps a w:pgBorders
+  // preset (none/box/shadow/double/dashed) on the current section.
   "page-color",
+  "page-border",
   // Link prompts for an address and marks the selection (Word's Insert Link);
   // the context menu's Remove Hyperlink unsets the mark over the clicked link.
   "link",
@@ -401,7 +405,9 @@ function marginTwipsFromCss(css: string): {
 
 /** Deep-merge a sectionProperties patch (page.size / page.margin) into a base,
  *  preserving sides/dims the patch omits — so e.g. changing only the margins
- *  keeps the page size. Reuses the engine's SectionPropertiesOptions type. */
+ *  keeps the page size. `pageBorders` replaces whole (a present-but-undefined
+ *  key clears it — Word's "none" preset; an absent key keeps the base).
+ *  Reuses the engine's SectionPropertiesOptions type. */
 function mergeSectionProperties(
   base: SectionPropertiesOptions | null | undefined,
   patch: SectionPropertiesOptions,
@@ -413,6 +419,7 @@ function mergeSectionProperties(
     p === undefined ? b : p === false || b === undefined || b === false ? p : { ...b, ...p };
   return {
     ...base,
+    ...("pageBorders" in patch ? { pageBorders: patch.pageBorders } : {}),
     pageSize: mergeGroup(base?.pageSize, patch.pageSize),
     pageMargin: mergeGroup(base?.pageMargin, patch.pageMargin),
   };
@@ -2707,6 +2714,43 @@ class DocenDocument extends AddinHost<Editor> {
     editor.view.dispatch(editor.state.tr.setDocAttribute("background", background));
   }
 
+  /** Design → Page Borders presets — stamp w:pgBorders on the current
+   *  section (Word's Borders and Shading gallery): none clears it; box is a
+   *  plain rule; shadow thickens the bottom/right edges; double and dashed
+   *  swap the rule's style. Sides measure from the text margin (Word's
+   *  default offsetFrom), 0.5 pt black. */
+  #setPageBorders(preset?: string): void {
+    if (!preset) return;
+    const side = (style: BorderOptions["style"], size = 4): BorderOptions => ({
+      style,
+      size,
+      space: 0,
+    });
+    const rule: BorderOptions["style"] =
+      preset === "double" ? "double" : preset === "dashed" ? "dashSmallGap" : "single";
+    const borders: PageBordersOptions | undefined =
+      preset === "none"
+        ? undefined
+        : preset === "shadow"
+          ? {
+              offsetFrom: "text",
+              top: side("single"),
+              left: side("single"),
+              bottom: side("single", 18),
+              right: side("single", 18),
+            }
+          : {
+              offsetFrom: "text",
+              top: side(rule),
+              right: side(rule),
+              bottom: side(rule),
+              left: side(rule),
+            };
+    // pageBorders rides the top-level spread in mergeSectionProperties (an
+    // undefined patch value removes the pgBorders — Word's "none").
+    this.#updateSectionGeometry({ pageBorders: borders });
+  }
+
   /** Insert → Text Box / Shapes: a standalone wps shape run, floating
    *  wrap-none and centered on the page (Word's insertion behavior). The
    *  text box carries Word's plain look — white fill, accent-1 hairline —
@@ -2903,6 +2947,10 @@ class DocenDocument extends AddinHost<Editor> {
           | string
           | { themeColor: string; val: string; themeTint?: string; themeShade?: string },
       );
+      return;
+    }
+    if (name === "page-border") {
+      this.#setPageBorders(value);
       return;
     }
     // Link — prompt for an address and mark the selection (or insert fresh

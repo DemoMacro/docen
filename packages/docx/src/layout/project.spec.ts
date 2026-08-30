@@ -601,6 +601,53 @@ describe("projectDocumentOptions fields and furniture", () => {
     expect(furniture.headerDistancePx).toBeCloseTo(900 / 15, 5);
     expect(furniture.footerDistancePx).toBeCloseTo(850 / 15, 5);
   });
+
+  it("projects w:pgBorders per side with display, offset and z-order", () => {
+    const { pageBorders } = oneSection({
+      styles,
+      sections: [
+        {
+          children: [],
+          properties: {
+            pageBorders: {
+              display: "notFirstPage",
+              offsetFrom: "page",
+              zOrder: "back",
+              top: { style: "double", size: 4, color: "38761D", space: 24 },
+              right: { style: "dashSmallGap", size: 8 },
+              bottom: { style: "nil" },
+            },
+          },
+        },
+      ],
+    });
+    // w:sz counts 1/8 pt → px at 96 dpi.
+    expect(pageBorders).toMatchObject({
+      display: "notFirstPage",
+      offsetFrom: "page",
+      behind: true,
+      top: { style: "double", widthPx: (4 / 8) * (96 / 72), color: "38761D", spacePt: 24 },
+      right: { style: "dashSmallGap", widthPx: (8 / 8) * (96 / 72), spacePt: undefined },
+    });
+    // A nil side paints nothing and stays absent.
+    expect(pageBorders?.bottom).toBeUndefined();
+    expect(pageBorders?.left).toBeUndefined();
+  });
+
+  it("omits pageBorders when the section carries none or only nil sides", () => {
+    expect(oneSection({ styles, sections: [{ children: [] }] }).pageBorders).toBeUndefined();
+    expect(
+      oneSection({
+        styles,
+        sections: [
+          {
+            children: [],
+            properties: { pageBorders: { top: { style: "nil" }, left: { style: "none" } } },
+          },
+        ],
+      }).pageBorders,
+    ).toBeUndefined();
+  });
 });
 
 describe("projectDocumentOptions drawings", () => {
