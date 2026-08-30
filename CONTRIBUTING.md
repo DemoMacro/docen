@@ -8,6 +8,7 @@ Thanks for contributing! This guide covers the **workflow** for contributing and
 pnpm install                          # install dependencies
 pnpm build                            # build all packages
 cd packages/<pkg> && pnpm build       # build one package
+cd packages/<pkg> && pnpm exec vp test run   # test one package
 vp check                              # lint & format
 ```
 
@@ -18,7 +19,7 @@ Prerequisites: Node.js 18+, pnpm 9+.
 1. **Fork & clone** — fork on GitHub, clone your fork, add `upstream` (`git remote add upstream https://github.com/DemoMacro/docen.git`).
 2. **Branch** — branch off `main` (`feat/...`, `fix:...`, `docs/...`, …).
 3. **Code** — follow the standards below; match existing style.
-4. **Verify** — `vp check` passes; `pnpm build` succeeds for the changed package.
+4. **Verify** — `vp check` passes; `pnpm build` + tests succeed for the changed package.
 5. **Commit** — use [conventional commits](https://www.conventionalcommits.org/): `feat:`, `fix:`, `docs:`, `refactor:`, `perf:`, `test:`, `build:`, `ci:`, `chore:`, `revert:`.
 6. **Push & PR** — push to your fork and open a PR against `upstream/main`.
 
@@ -26,14 +27,14 @@ Prerequisites: Node.js 18+, pnpm 9+.
 
 ```
 packages/
-  docen/    docen          (all-in-one aggregate entry — re-exports @docen/docx + @docen/editor)
-  vue/      @docen/vue     (Vue 3 adapter — <DocenDocument> component: v-model + v-slot editor)
-  editor/   @docen/editor  (multi-editor host + add-ins: Fluent UI surfaces + @docen/docx → <docen-document>; owns pagination)
-  docx/     @docen/docx    (Tiptap DOCX editor + converters + custom extensions)
+  docen/         docen              (all-in-one aggregate entry — re-exports @docen/docx + @docen/editor)
+  vue/           @docen/vue         (Vue 3 adapter — <DocenDocument> component: v-model + v-slot editor)
+  editor/        @docen/editor      (multi-editor host + add-ins + canvas stage/painter → <docen-document>)
+  docx/          @docen/docx        (Tiptap DOCX engine + converters + layout projection; no UI)
+  layout/        @docen/layout      (pagination engine — measurement → paginated LayoutDoc)
+  core/          @docen/core        (shared drawing/render helpers: geometry, style, image, export)
+  deduplicate/   @docen/deduplicate (document comparison for the compare feature)
 ```
-
-- **@docen/editor** — multi-editor host + add-ins: Fluent UI surfaces (under `src/ui/`) + docx engine.
-- **@docen/docx** — engine + converters, no UI.
 
 See CLAUDE.md → Package Layout for the file-level tree.
 
@@ -41,7 +42,7 @@ See CLAUDE.md → Package Layout for the file-level tree.
 
 ### Naming
 
-- **Functions**: camelCase with a semantic prefix — `parse*` / `generate*` (external-format I/O), `resolve*` (DocOpts→JSON), `compile*` (JSON→DocOpts), `create*` (factories)
+- **Functions**: camelCase with a semantic prefix — `parse*` / `generate*` (external-format I/O), `resolve*` (DocOpts→JSON), `compile*` (JSON→DocOpts), `project*` (JSON→LayoutDoc), `create*` (factories)
 - **Files & directories**: kebab-case
 - **Interfaces**: PascalCase, no `I` prefix, `Options` suffix, `readonly` properties
 - **Constants**: `as const` objects (not `enum`), SCREAMING_SNAKE_CASE keys, lowercase values
@@ -68,27 +69,25 @@ Avoid `.forEach()` — `for...of` is strictly superior.
 
 ## Adding DOCX Features
 
-The runtime model is Tiptap JSON; the persistence model is `DocumentOptions` (OOXML). Converters bridge the two. See CLAUDE.md → Data Model & API Layering for the data flow.
+The runtime model is Tiptap JSON; the persistence model is `DocumentOptions` (OOXML). Converters bridge the two; the layout projection turns the same JSON into `LayoutDoc`; the canvas paints it. See CLAUDE.md → Data Model for the projection chain.
 
 ### Converter pattern
 
-`DocxManager` (`converters/docx.ts`) walks the tree and assembles `DocumentOptions`. An extension contributes its DOCX expression by scope:
+`resolveDocument` / `compileDocument` (`converters/docx.ts`) walk the tree and assemble `DocumentOptions`. An extension contributes its DOCX expression by scope:
 
 | Scope                      | Extensions                                           | Contribution                                                        |
 | -------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------- |
 | **Single-node**            | paragraph, heading, image, table, text-style, strike | export `renderDocx(node)` / `parseDocx(opts)` — dispatched per node |
-| **Cross-node / container** | blockquote, lists, task-item, mention, details       | export helpers — `DocxManager` orchestrates multi-node assembly     |
-| **Simple constant**        | page-break, column-break                             | payload inlined in `DocxManager`                                    |
+| **Cross-node / container** | blockquote, lists, task-item, mention, details       | export helpers — the converters orchestrate multi-node assembly     |
+| **Simple constant**        | page-break, column-break                             | payload inlined in the converter                                    |
 
 ### Extension pattern
 
-Custom extensions extend `@tiptap/extension-*` to carry DOCX properties:
+Custom extensions extend `@tiptap/extension-*` to carry DOCX properties. There is **no DOM rendering path** — `renderHTML` does not exist in this repo:
 
-1. **Attrs** with `parseHTML` only (no attribute-level renderHTML for nodes)
-2. **Node-level `renderHTML`** computes all CSS at once (avoids style-merge conflicts)
-3. **`renderDocx` / `parseDocx`** for DOCX serialization (single-node only)
-
-Mark extensions (text-style, strike) keep attribute-level `renderHTML`.
+1. **Attrs** mirror office-open property keys verbatim, with `parseHTML` for clipboard-paste input only
+2. **`renderDocx` / `parseDocx`** for DOCX serialization (near-identity passes — attrs are the Options model)
+3. Anything visual belongs in the layout projection (`docx/src/layout/project.ts`) or the painter (`editor document/canvas/scene.ts`), never in the extension
 
 ```typescript
 export function renderDocx(node: JSONContent): ParagraphOptions {
@@ -102,32 +101,25 @@ export const Paragraph = BaseParagraph.extend({
   addAttributes() {
     return {
       ...this.parent?.(),
-      indent: { default: null, parseHTML: (el) => el.style.marginLeft || null },
+      indent: { default: null, parseHTML: (el) => indentFromElement(el) },
     };
-  },
-  renderHTML({ node, HTMLAttributes }) {
-    const styles = renderParagraphStyles(node.attrs);
-    const attrs = styles.length ? { ...HTMLAttributes, style: styles.join(";") } : HTMLAttributes;
-    return ["p", attrs, 0] as const;
   },
   renderDocx,
   parseDocx,
 });
 ```
 
-### Pagination conventions (C-route)
+### Layout & painting conventions
 
-`doc > page+`, fixed-height page boxes, physical reflow. See CLAUDE.md → Pagination for the architecture.
+Pagination lives in `@docen/layout` + `docx/src/layout/project.ts`; painting in `editor/document/canvas/`. The split:
 
-- **Page node is round-trip transparent** — never enters DOCX. `DocxManager` operates on flat `doc > block+`; the page node exists only at the editor layer. Do NOT add page-node handling to `DocxManager`. (`pageBreak`/`sectionBreak` ARE semantic nodes that round-trip.)
-- **Fixed page box** — `.docen-page { height: <content area>; overflow: hidden }`. Use `height`, not `min-height` (min-height lets content stretch the page).
-- **Reflow** — break at block boundaries first (whole paragraph), then whole table rows; never mid-glyph. Binary-search the break. Debounce + cache measurements (DOM `offsetHeight` is ground truth).
-- **Paragraph rules** (Word defaults) — widow/orphan control, keepNext (heading + next block), keepLines.
-- **Table across pages** — whole-row move; clone `tableHeader` on continuation pages; clip + warn for over-tall rows (no infinite loop). Mid-row split is out of scope (see CLAUDE.md → Fidelity boundary).
+- **Projection is pure** — `project.ts` reads Tiptap attrs (+ the style cascade) and emits `LayoutDoc` geometry. No Leafer types, no DOM.
+- **Painter is dumb** — `scene.ts` maps `LayoutDoc` to Leafer elements 1:1. It makes no layout decisions; if something renders at the wrong place, fix the projection or the engine, not the painter.
+- **Page model** — fixed-height pages come from the engine (`@docen/layout`); Word stacking rules (docGrid pitch, snap-to-grid, widow/orphan, keepNext/keepLines, table band split with repeated headers, mid-row split under `cantSplit`) are engine semantics — change them there, once.
 
 ## Pull Request Checklist
 
 - [ ] `vp check` passes
-- [ ] `pnpm build` succeeds for the changed package
+- [ ] `pnpm build` + tests succeed for the changed package
 - [ ] Naming & patterns follow the standards above
 - [ ] Changes are minimal and focused — match existing style
