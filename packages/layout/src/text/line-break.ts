@@ -299,7 +299,11 @@ function maxWidthAt(
   bottomPx: number,
 ): { widthPx: number; xOffsetPx: number } {
   let w = opts.width;
-  if (lineIndex === 0 && opts.firstLineIndentPx) w -= opts.firstLineIndentPx;
+  // The first-line indent shifts the line's glyphs right, so it comes OFF the
+  // capped width (Word: line 0 packs into min(width, cap) − indent), not off
+  // `width` before the cap — a tight float cap would otherwise swallow the
+  // indent and line 0 would pack characters Word breaks to the next line.
+  const firstLine = lineIndex === 0 ? (opts.firstLineIndentPx ?? 0) : 0;
   let cap = Infinity;
   let xOffset = 0;
   const scan = (zones: readonly LayoutFloatZone[] | undefined, zoneY: number): void => {
@@ -335,7 +339,10 @@ function maxWidthAt(
   };
   if (opts.startY != null) scan(opts.floatZones, y);
   scan(opts.selfZones, yPara);
-  return { widthPx: Math.max(0, Math.min(w, cap) - xOffset), xOffsetPx: xOffset };
+  return {
+    widthPx: Math.max(0, Math.min(w, cap) - xOffset - firstLine),
+    xOffsetPx: xOffset,
+  };
 }
 
 /** Tab geometry: the explicit stops and this line's content origin — x=0 of
