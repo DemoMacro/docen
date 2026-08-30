@@ -1818,7 +1818,7 @@ class DocenDocument extends AddinHost<Editor> {
    *  stay overridable. */
   #emitCancelable(
     name: "docen:save" | "docen:save-as" | "docen:open" | "docen:new" | "docen:print",
-    detail?: { format?: "docx" | "markdown" | "html" },
+    detail?: { format?: "docx" | "markdown" },
   ): boolean {
     const event = new CustomEvent(name, {
       bubbles: true,

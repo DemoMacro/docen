@@ -2017,15 +2017,16 @@ function projectPageFurniture(
   };
 }
 
-/** A pattern tile reads correctly at 4× the tile's pixel size; smaller
- *  looks like a checkerboard, larger smears the texture away. */
-const TILE_SCALE = 4;
+/** Word paints a pattern tile at 1:1 device px — an 8px tile reads as an 8px
+ *  weave on screen and in the PDF export alike (measured: the reference's
+ *  background autocorrelation peaks at lag 8). */
+const TILE_SCALE = 1;
 
 /** Project w:background. The v:fill's 1bpp hatch tile recolors in place (its
- *  palette IS the paint: bit-1 ink takes w:color, bit-0 paper takes the
- *  fill's color2), which is how Word paints the element; the reference
- *  render matches the tile at 4x its natural pixel size (8px -> 32px),
- *  smoothed by the browser's bilinear image scaling. */
+ *  palette IS the paint): set bits — the woven threads, the tile's majority —
+ *  take the fill's color2, clear bits — the gaps — take w:color, so the page
+ *  base shows through the gaps (verified against the Word reference: a woven
+ *  tile with 70% set bits renders ~75% color2). */
 function projectPageBackground(doc: DocumentOptions): ProjectedPageBackground | undefined {
   const bg = doc.background as
     | {
@@ -2067,16 +2068,17 @@ function projectPageBackground(doc: DocumentOptions): ProjectedPageBackground | 
   const clrUsed = view.getUint32(46, true) || (bpp <= 8 ? 1 << bpp : 0);
   const paletteAt = 14 + headerSize;
   if (bpp !== 1 || clrUsed !== 2 || paletteAt + 8 > data.length) return out;
-  // Rewrite the 2-entry palette: entry 0 (bit 0) the fill's paper color,
-  // entry 1 (bit 1) the page's ink color — pixel data passes untouched.
+  // Rewrite the 2-entry palette: entry 0 (clear bits, the gaps) the page's
+  // base color, entry 1 (set bits, the threads) the fill's color2 — pixel
+  // data passes untouched.
   const setEntry = (at: number, hex: string): void => {
     data[at] = parseInt(hex.slice(4, 6), 16);
     data[at + 1] = parseInt(hex.slice(2, 4), 16);
     data[at + 2] = parseInt(hex.slice(0, 2), 16);
     data[at + 3] = 0;
   };
-  setEntry(paletteAt, hexOf(fill[0].match(/\scolor2="#?([0-9A-Fa-f]{6})"/)) ?? "FFFFFF");
-  setEntry(paletteAt + 4, color ?? "000000");
+  setEntry(paletteAt, color ?? "FFFFFF");
+  setEntry(paletteAt + 4, hexOf(fill[0].match(/\scolor2="#?([0-9A-Fa-f]{6})"/)) ?? "000000");
   let bin = "";
   const CHUNK = 0x8000;
   for (let i = 0; i < data.length; i += CHUNK) {

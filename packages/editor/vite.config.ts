@@ -31,7 +31,6 @@ export default defineConfig({
       // Each subpath export maps to its own source entry. @docen/docx is NOT
       // aliased: editor's source imports it by package name → dist, so docx src
       // changes still need `pnpm --filter @docen/docx build`.
-      "@docen/core/painter": fileURLToPath(new URL("../core/src/painter.ts", import.meta.url)),
       "@docen/core": fileURLToPath(new URL("../core/src/index.ts", import.meta.url)),
       // The layout engine serves from source too: the canvas demo imports it
       // directly, and @docen/docx's dist (not aliased) bare-imports it from

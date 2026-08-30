@@ -4,7 +4,7 @@ import {
   releasePinnedImages,
   type DrawingHitBox,
   type PaintContext,
-} from "@docen/core/painter";
+} from "@docen/core";
 import type {
   ProjectedFlowBox,
   ProjectedPageBackground,
@@ -458,7 +458,16 @@ export class CanvasStage {
           height: flow.pageHeightPx,
           fill:
             bg.tileSrc && bg.tilePx
-              ? { type: "image", url: bg.tileSrc, repeat: true, size: bg.tilePx }
+              ? // mode:repeat + width/height is Leafer's tiling contract —
+                // an unknown `repeat`/`size` key is silently ignored and the
+                // tile stretches over the whole page.
+                {
+                  type: "image",
+                  url: bg.tileSrc,
+                  mode: "repeat",
+                  width: bg.tilePx,
+                  height: bg.tilePx,
+                }
               : bg.color
                 ? `#${bg.color}`
                 : undefined,
