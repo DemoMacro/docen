@@ -1455,22 +1455,23 @@ function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): Draft[] {
             const ub = eff.m12 / glyphScale;
             const va = eff.m21 / glyphScale;
             const vb = eff.m22 / glyphScale;
-            // SetTextAlign hoists the reference along the advance axis
-            // (baseline by the CJK ascent, bottom by the full em) — same
-            // calibration as the horizontal box below.
-            const hoist =
-              (textAlign & 0x18) === 0x18 ? height * 0.8 : (textAlign & 0x18) === 0x08 ? height : 0;
-            // A vertical (@font) run renders upright with its BASELINE
-            // through the reference point: the cell spans [ref − descent,
-            // ref + ascent] across the column (GDI_V_* measured on the
-            // realized font), the em box centered in it — pixel-verified
-            // against the reference render (ink center lands (ascent −
-            // descent)/2 right of the reference). Raw GDI would draw the run
-            // sideways; Word's metafile replay is the fidelity target.
+            // A vertical (@font) run's reference point names the FIRST CELL's
+            // top corner — layout-origin semantics, not GDI's SetTextAlign:
+            // hoisting by the TA_BASELINE ascent (0.8 em) lifts every column
+            // a full 19px above Word's render. Pixel-verified on all three
+            // corpus @楷体 instances (P27/P28/P42, −360 request, TA_BASELINE):
+            // with the hoist every column sits exactly 0.8 em high; without
+            // it the per-char pitch already matched (27px) and the tops land
+            // on the reference. Word's upright replay of vertical runs is the
+            // fidelity target; raw GDI would draw them sideways anyway.
+            // The cell spans [ref − descent, ref + ascent] across the column
+            // (GDI_V_* measured on the realized font), the em box centered in
+            // it — pixel-verified against the reference render (ink center
+            // lands (ascent − descent)/2 right of the reference).
             const cellL = height * GDI_V_DESCENT_PER_EM;
             const cellR = height * GDI_V_ASCENT_PER_EM;
             const cellInset = (cellL + cellR - height) / 2;
-            let prefix = -hoist;
+            let prefix = 0;
             let ci = 0;
             for (const ch of text) {
               const step = dxAdvances
