@@ -970,6 +970,7 @@ const reviewTab = (): RibbonTab =>
       btn("comment-add", "new-comment", { size: "large" }),
       col([grid([btn("edit", "edit-comment"), btn("close", "delete-comment")])]),
       col([grid([btn("align-left", "previous-comment"), btn("align-right", "next-comment")])]),
+      btn("comment", "show-comments", { size: "large" }),
     ]),
     group("tracking", [btn("group-objects", "track-changes", { size: "large" })]),
     group("changes", [

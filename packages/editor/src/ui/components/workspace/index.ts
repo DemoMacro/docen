@@ -4,6 +4,7 @@ export { default as DocenWorkspace } from "./workspace";
 export { default as DocenDocumentArea } from "./document-area";
 export { default as DocenTaskPane } from "./task-pane";
 export { default as DocenNavigationPane } from "./navigation-pane";
+export { default as DocenCommentsPane } from "./comments-pane";
 export { default as DocenFindReplaceDialog } from "./find-replace-dialog";
 export { default as DocenStatusBar } from "./status-bar";
 export { default as DocenCommandSearch } from "./command-search";

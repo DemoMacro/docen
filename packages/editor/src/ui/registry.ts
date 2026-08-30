@@ -58,6 +58,8 @@ import {
   RadioGroupDefinition,
   TextInput,
   TextInputDefinition,
+  TextArea,
+  TextAreaDefinition,
   Tree,
   TreeDefinition,
   TreeItem,
@@ -358,6 +360,9 @@ export async function registerComponents(): Promise<void> {
   await defineElement(ProgressBar, ProgressBarDefinition);
   await defineElement(Tablist, TablistDefinition);
   await defineElement(TextInput, TextInputDefinition);
+  // fluent-text-area: the comments pane's compose box (Word's comment sidebar
+  // uses a multiline input with Ctrl+Enter to post).
+  await defineElement(TextArea, TextAreaDefinition);
   // fluent-toggle-button: same padding/min-width/gap tightening as the button.
   await defineElement(ToggleButton, {
     name: "fluent-toggle-button",

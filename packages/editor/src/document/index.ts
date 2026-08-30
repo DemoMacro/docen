@@ -164,15 +164,17 @@ const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   // Link prompts for an address and marks the selection (Word's Insert Link).
   "link",
   // New Comment anchors the selection with a Word comment (range markers +
-  // a documentExtras.comments entry); Edit/Delete operate on the comment
-  // covering the selection, Previous/Next step through the ranges. The
-  // trailing toolbar comment shares the "comment" event.
+  // a documentExtras.comments entry) — composed in the comments pane, not a
+  // prompt; Edit opens the pane (cards edit inline), Delete removes the
+  // comment covering the selection, Previous/Next step through the ranges.
+  // Show Comments toggles the pane (Word's Review → Show Comments).
   "new-comment",
   "comment",
   "edit-comment",
   "delete-comment",
   "previous-comment",
   "next-comment",
+  "show-comments",
   // Text Box / Shapes insert a standalone wps shape run (Shapes reads the
   // gallery preset from the split item's value).
   "text-box",
@@ -311,6 +313,9 @@ const documentTemplate = html`
         <docen-format-pane></docen-format-pane>
       </slot>
     </docen-task-pane>
+    <docen-task-pane slot="task-pane-end" position="end" part="comments-pane" title="Comments">
+      <docen-comments-pane></docen-comments-pane>
+    </docen-task-pane>
     <docen-status-bar slot="status" part="status"></docen-status-bar>
   </docen-workspace>
   <docen-options-dialog part="options"></docen-options-dialog>
@@ -424,19 +429,13 @@ function mergeSectionProperties(
  * Task pane identifiers, mirroring the Office `<TaskpaneId>` concept. The host
  * ships two built-in panes: `navigation` (start/left) and `properties` (end/right).
  */
-export type TaskPaneId = "navigation" | "properties";
+export type TaskPaneId = "navigation" | "properties" | "comments";
 
 /**
  * Visibility mode values, matching `Office.VisibilityMode` (`taskpane` | `hidden`).
  * Carried on {@link docen:taskpane-visibility-change} event details.
  */
 export type VisibilityMode = "taskpane" | "hidden";
-
-/** Maps a public {@link TaskPaneId} to the slot position its pane renders in. */
-const TASKPANE_POSITION: Record<TaskPaneId, "start" | "end"> = {
-  navigation: "start",
-  properties: "end",
-};
 
 @customElement({ name: "docen-document", template: documentTemplate, styles: documentStyles })
 class DocenDocument extends AddinHost<Editor> {
@@ -494,6 +493,9 @@ class DocenDocument extends AddinHost<Editor> {
    *  after the user pauses typing (the query dispatches immediately, so Enter /
    *  find-next stays in sync with the last keystroke). */
   #searchTimer?: ReturnType<typeof setTimeout>;
+  /** The selection captured when a New Comment opened the compose box — the
+   *  comment anchors there on Post (the box takes focus, moving the caret). */
+  #pendingCommentRange?: { from: number; to: number };
   /** Cached unwrapped JSON (host.getJSON result). Invalidated on every user/doc
    *  change; recomputed lazily. Saves the editor.getJSON walk on every
    *  save/autosave/getJSON call. */
@@ -1121,6 +1123,13 @@ class DocenDocument extends AddinHost<Editor> {
     // Nav-pane search → Find (live highlight, next/prev, results count).
     this.addEventListener("navigation:search", this.#onSearch as EventListener);
     this.addEventListener("navigation:find", this.#onFind as EventListener);
+    // Comments pane → create/cancel (compose box), select (scroll to range),
+    // update/delete (inline card actions).
+    this.addEventListener("comment:create", this.#onCommentCreate as EventListener);
+    this.addEventListener("comment:cancel", this.#onCommentCancel as EventListener);
+    this.addEventListener("comment:select", this.#onCommentSelect as EventListener);
+    this.addEventListener("comment:update", this.#onCommentUpdate as EventListener);
+    this.addEventListener("comment:delete", this.#onCommentDelete as EventListener);
     // Click a Results entry → jump to that match (delegated on the container).
     this.shadowRoot!.querySelector(".search-results")?.addEventListener(
       "click",
@@ -1501,6 +1510,7 @@ class DocenDocument extends AddinHost<Editor> {
     this.#stage.sync(run.pages, run.sections, run.sectionOfPage, run.background);
     this.#bridge?.updatePages(run.pages, this.#pageOriginOf(run.sections, run.sectionOfPage));
     this.#updateStatus();
+    this.#syncCommentsPane();
   }
 
   disconnectedCallback(): void {
@@ -1636,6 +1646,9 @@ class DocenDocument extends AddinHost<Editor> {
     this.#applyRibbonGreying();
     this.#syncEditModeMenu();
     this.#syncStoryMenus();
+    root
+      .querySelector('docen-task-pane[part="comments-pane"]')
+      ?.setAttribute("title", t("comments.title", this));
     this.#renderPanes();
   }
 
@@ -2308,38 +2321,27 @@ class DocenDocument extends AddinHost<Editor> {
     return covering.size > 0 ? Math.min(...covering) : null;
   }
 
-  /** Review → Edit Comment: prompt prefilled with the comment's current text
-   *  (the same input the insert path uses) and rewrite its children. */
+  /** Review → Edit Comment: open the comments pane — editing happens inline
+   *  on the card (Word edits comments in the sidebar, not a dialog). */
   #editComment(): void {
-    const editor = this.editor;
-    if (!editor) return;
-    const id = this.#activeCommentId();
-    if (id == null) return;
-    const docAttrs = (editor.state.doc.attrs ?? {}) as {
-      documentExtras?: { comments?: Array<{ id?: number; children?: Array<{ text?: string }> }> };
-    };
-    const comments = docAttrs.documentExtras?.comments ?? [];
-    const entry = comments.find((c) => Number(c.id) === id);
-    if (!entry) return;
-    const current = (entry.children ?? []).map((c) => c.text ?? "").join("");
-    const text = window.prompt(t("comment.prompt", this), current)?.trim();
-    if (!text) return;
-    editor.view.dispatch(
-      editor.state.tr.setDocAttribute("documentExtras", {
-        ...docAttrs.documentExtras,
-        comments: comments.map((c) => (Number(c.id) === id ? { ...c, children: [{ text }] } : c)),
-      }),
-    );
+    this.showTaskpane("comments");
   }
 
   /** Review → Delete: remove the covering comment's marker/reference atoms
    *  (descending positions keep the earlier offsets valid) and its
    *  documentExtras entry. */
   #deleteComment(): void {
-    const editor = this.editor;
-    if (!editor) return;
     const id = this.#activeCommentId();
     if (id == null) return;
+    this.#deleteCommentById(id);
+  }
+
+  /** Remove a comment's marker/reference atoms (descending positions keep the
+   *  earlier offsets valid) and its documentExtras entry — shared by the
+   *  ribbon's Delete Comment and the pane's per-card delete. */
+  #deleteCommentById(id: number): void {
+    const editor = this.editor;
+    if (!editor) return;
     const atoms: { pos: number; size: number }[] = [];
     editor.state.doc.descendants((child, pos) => {
       const marker = DocenDocument.commentMarkerOf(child);
@@ -2391,16 +2393,33 @@ class DocenDocument extends AddinHost<Editor> {
     );
   }
 
-  /** Review → New Comment: anchor the selection the way Word does — a
-   *  commentRangeStart/commentRangeEnd passthrough pair around it with a
-   *  commentReference after — and append the structured content to
-   *  doc.attrs.documentExtras.comments (word/comments.xml on export, the
-   *  round-trip channel the parse side already fills). */
+  /** Review → New Comment: open the comments pane's compose box on the
+   *  current selection (Word's sidebar compose card); the text arrives via
+   *  the `comment:create` event (#onCommentCreate commits it). */
   #insertComment(): void {
     const editor = this.editor;
     if (!editor) return;
-    const text = window.prompt(t("comment.prompt", this))?.trim();
-    if (!text) return;
+    this.showTaskpane("comments");
+    const pane = this.#commentsPaneEl();
+    if (!pane) return;
+    // Spread would miss from/to — they're prototype getters on Selection.
+    const { from, to } = editor.state.selection;
+    this.#pendingCommentRange = { from, to };
+    pane.setAttribute("draft", "");
+  }
+
+  /** comment:create → commit the pending comment: anchor the stored range the
+   *  way Word does — a commentRangeStart/commentRangeEnd passthrough pair
+   *  around it with a commentReference after — and append the structured
+   *  content to doc.attrs.documentExtras.comments (word/comments.xml on
+   *  export, the round-trip channel the parse side already fills). */
+  readonly #onCommentCreate = (event: CustomEvent<{ text?: string }>): void => {
+    const editor = this.editor;
+    const text = event.detail?.text?.trim();
+    const range = this.#pendingCommentRange;
+    this.#pendingCommentRange = undefined;
+    this.#commentsPaneEl()?.removeAttribute("draft");
+    if (!editor || !text || !range) return;
     const docAttrs = (editor.state.doc.attrs ?? {}) as {
       documentExtras?: { comments?: Record<string, unknown>[] };
     };
@@ -2411,15 +2430,14 @@ class DocenDocument extends AddinHost<Editor> {
         type: "inlinePassthrough",
         attrs: { data: JSON.stringify(data) },
       }) as JSONContent;
-    const { from, to } = editor.state.selection;
     const start = editor.schema.nodeFromJSON(seed({ commentRangeStart: { id } }));
     const end = editor.schema.nodeFromJSON(seed({ commentRangeEnd: { id } }));
     const ref = editor.schema.nodeFromJSON(seed({ commentReference: id }));
     editor.view.dispatch(
       editor.state.tr
-        .insert(from, start)
-        .insert(to + 1, end)
-        .insert(to + 2, ref)
+        .insert(range.from, start)
+        .insert(range.to + 1, end)
+        .insert(range.to + 2, ref)
         .setDocAttribute("documentExtras", {
           ...docAttrs.documentExtras,
           comments: [
@@ -2434,6 +2452,101 @@ class DocenDocument extends AddinHost<Editor> {
           ],
         }),
     );
+  };
+
+  /** comment:cancel → drop the pending compose (Word's Cancel). */
+  readonly #onCommentCancel = (): void => {
+    this.#pendingCommentRange = undefined;
+    this.#commentsPaneEl()?.removeAttribute("draft");
+  };
+
+  /** comment:select → select and scroll to the comment's range (Word scrolls
+   *  the anchored text into view when its card is clicked). */
+  readonly #onCommentSelect = (event: CustomEvent<{ id?: number }>): void => {
+    const editor = this.editor;
+    const id = event.detail?.id;
+    if (!editor || id == null) return;
+    const range = this.#commentRangeOf(id);
+    if (!range) return;
+    editor.view.dispatch(
+      editor.state.tr.setSelection(
+        new TextSelection(editor.state.doc.resolve(range.from), editor.state.doc.resolve(range.to)),
+      ),
+    );
+    this.#bridge?.scrollIntoView(range.from);
+  };
+
+  /** comment:update → rewrite the comment's text (the sidebar's inline edit,
+   *  replacing the old prompt-based Edit Comment for pane interactions). */
+  readonly #onCommentUpdate = (event: CustomEvent<{ id?: number; text?: string }>): void => {
+    const editor = this.editor;
+    const id = event.detail?.id;
+    const text = event.detail?.text?.trim();
+    if (!editor || id == null || !text) return;
+    const docAttrs = (editor.state.doc.attrs ?? {}) as {
+      documentExtras?: { comments?: Array<{ id?: number; children?: Array<{ text?: string }> }> };
+    };
+    const comments = docAttrs.documentExtras?.comments ?? [];
+    editor.view.dispatch(
+      editor.state.tr.setDocAttribute("documentExtras", {
+        ...docAttrs.documentExtras,
+        comments: comments.map((c) => (Number(c.id) === id ? { ...c, children: [{ text }] } : c)),
+      }),
+    );
+  };
+
+  /** comment:delete → remove the comment's marker/reference atoms and its
+   *  documentExtras entry (same teardown as the ribbon's Delete Comment). */
+  readonly #onCommentDelete = (event: CustomEvent<{ id?: number }>): void => {
+    const id = event.detail?.id;
+    if (id != null) this.#deleteCommentById(id);
+  };
+
+  /** The comments pane element (inside its task-pane), when mounted. */
+  #commentsPaneEl(): (HTMLElement & { comments?: string; draft?: boolean }) | null {
+    return this.shadowRoot?.querySelector("docen-comments-pane") ?? null;
+  }
+
+  /** The document order range a comment id covers (start marker through end
+   *  marker), or null when its markers are gone. */
+  #commentRangeOf(id: number): { from: number; to: number } | null {
+    const editor = this.editor;
+    if (!editor) return null;
+    let from: number | null = null;
+    let to: number | null = null;
+    editor.state.doc.descendants((child, pos) => {
+      const marker = DocenDocument.commentMarkerOf(child);
+      if (!marker || marker.id !== id) return;
+      if (marker.kind === "start") from = pos + child.nodeSize;
+      else if (marker.kind === "end") to = pos;
+    });
+    return from != null && to != null ? { from, to } : null;
+  }
+
+  /** Sync the comments pane's card list from the doc's documentExtras after
+   *  every transaction (the pane is a pure view of the model). */
+  #syncCommentsPane(): void {
+    const pane = this.#commentsPaneEl();
+    if (!pane) return;
+    const docAttrs = (this.editor?.state.doc.attrs ?? {}) as {
+      documentExtras?: {
+        comments?: Array<{
+          id?: number;
+          author?: string;
+          initials?: string;
+          date?: string;
+          children?: Array<{ text?: string }>;
+        }>;
+      };
+    };
+    const cards = (docAttrs.documentExtras?.comments ?? []).map((c) => ({
+      id: Number(c.id ?? 0),
+      author: c.author ?? "",
+      initials: c.initials ?? "",
+      date: c.date ?? "",
+      text: (c.children ?? []).map((r) => r.text ?? "").join(""),
+    }));
+    pane.comments = JSON.stringify(cards);
   }
 
   /** Insert → Footnote / Endnote (Word's References → Insert Footnote, the
@@ -2760,6 +2873,11 @@ class DocenDocument extends AddinHost<Editor> {
     }
     if (name === "next-comment") {
       this.#jumpComment("next");
+      return;
+    }
+    // Review → Show Comments: toggle the comments pane (Word's sidebar).
+    if (name === "show-comments") {
+      this.#setTaskpane("comments", !this.getTaskpaneState("comments"));
       return;
     }
     // Text Box / Shapes — insert a floating wps shape run (Shapes reads its
@@ -3284,8 +3402,11 @@ class DocenDocument extends AddinHost<Editor> {
   }
 
   #paneEl(id: TaskPaneId): (HTMLElement & { open: boolean }) | null {
-    const pos = TASKPANE_POSITION[id];
-    return this.shadowRoot?.querySelector(`docen-task-pane[position="${pos}"]`) as
+    // Panes are looked up by part, not position — two panes can share a side
+    // (properties + comments both live on the end rail).
+    const part =
+      id === "navigation" ? "nav-pane" : id === "comments" ? "comments-pane" : "props-pane";
+    return this.shadowRoot?.querySelector(`docen-task-pane[part="${part}"]`) as
       | (HTMLElement & { open: boolean })
       | null;
   }
