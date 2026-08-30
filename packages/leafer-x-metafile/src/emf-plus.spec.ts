@@ -2,11 +2,11 @@
 // reassembly, GDI+ record replay, and member shaping. Fixtures are built at
 // the byte level against layouts verified on real corpus files.
 
-import type { LayoutDrawingMember } from "@docen/layout";
 import { describe, expect, it } from "vitest";
 
 import { embeddedEmfStream, emfPlusMembers } from "./emf-plus";
-import { dualModeWmf, emfCarrier, emfPlusWmf, emrEmfPlusComment, epRecord } from "./wmf-test-util";
+import type { MetafileMember } from "./member";
+import { dualModeWmf, emfCarrier, emfPlusWmf, emrEmfPlusComment, epRecord } from "./test-util";
 
 // EmfPlus record codes used by the fixtures.
 const HEADER = 0x4001;
@@ -711,21 +711,14 @@ describe("emfPlusMembers", () => {
       expect(members).toBeDefined();
       const box = members!.find((m) => m.kind === "textBox");
       if (box?.kind !== "textBox") return;
-      expect(box.blocks[0]).toMatchObject({
-        kind: "paragraph",
-        inline: [
-          {
-            kind: "text",
-            text: "示例里程碑文案",
-            style: { family: "微软雅黑", color: "404040" },
-          },
-        ],
+      expect(box.runs[0]).toMatchObject({
+        text: "示例里程碑文案",
+        family: "微软雅黑",
+        color: "404040",
       });
-      const para = box.blocks[0];
-      if (para.kind !== "paragraph") return;
-      const run = para.inline[0];
-      if (run.kind !== "text") return;
-      expect(run.style.sizePx ?? 0).toBeGreaterThan(0);
+      const run = box.runs[0];
+      if (!run) return;
+      expect(run.sizePx ?? 0).toBeGreaterThan(0);
     });
 
     it("threads Dx-run tracking into width and letter spacing", () => {
@@ -751,12 +744,10 @@ describe("emfPlusMembers", () => {
       const box = members!.find((m) => m.kind === "textBox");
       if (box?.kind !== "textBox") return;
       // Weight 681 < FW_BOLD: GDI face matching keeps the regular face.
-      const para = box.blocks[0];
-      if (para.kind !== "paragraph") return;
-      const run = para.inline[0];
-      if (run.kind !== "text") return;
-      expect(run.style.bold).toBeUndefined();
-      expect(run.style.letterSpacingPx ?? 0).toBeGreaterThan(5);
+      const run = box.runs[0];
+      if (!run) return;
+      expect(run.bold).toBeUndefined();
+      expect(run.letterSpacingPx ?? 0).toBeGreaterThan(5);
       // Width = Σ advances × scale (≈ 33px/char at this box scale), not the
       // estimate (24px/char).
       expect(box.width).toBeGreaterThan(160);
@@ -771,12 +762,10 @@ describe("emfPlusMembers", () => {
       expect(members).toBeDefined();
       const box = members!.find((m) => m.kind === "textBox");
       if (box?.kind !== "textBox") return;
-      const para = box.blocks[0];
-      if (para.kind !== "paragraph") return;
-      const run = para.inline[0];
-      if (run.kind !== "text") return;
-      expect(run.style.bold).toBe(true);
-      expect(run.style.letterSpacingPx).toBeUndefined();
+      const run = box.runs[0];
+      if (!run) return;
+      expect(run.bold).toBe(true);
+      expect(run.letterSpacingPx).toBeUndefined();
     });
 
     it("strips the GDI @ vertical-variant prefix from the face", () => {
@@ -791,10 +780,9 @@ describe("emfPlusMembers", () => {
       expect(members).toBeDefined();
       const box = members!.find((m) => m.kind === "textBox");
       if (box?.kind !== "textBox") return;
-      const para = box.blocks[0];
-      const run = para?.kind === "paragraph" ? para.inline[0] : undefined;
-      if (run?.kind !== "text") return;
-      expect(run.style.family).toBe("楷体");
+      const run = box.runs[0];
+      if (!run) return;
+      expect(run.family).toBe("楷体");
     });
 
     it("marks runs under a rotated world transform with the screen angle", () => {
@@ -821,17 +809,12 @@ describe("emfPlusMembers", () => {
       );
       const members = emfPlusMembers(wmf, 400, 300);
       expect(members).toBeDefined();
-      const boxes: Extract<LayoutDrawingMember, { kind: "textBox" }>[] = [];
+      const boxes: Extract<MetafileMember, { kind: "textBox" }>[] = [];
       for (const m of members!) {
         if (m.kind === "textBox") boxes.push(m);
       }
-      expect(boxes.map((b) => b.blocks)).toHaveLength(6);
-      const texts = boxes.map((b) => {
-        const para = b.blocks[0];
-        return para?.kind === "paragraph" && para.inline[0]?.kind === "text"
-          ? para.inline[0].text
-          : "";
-      });
+      expect(boxes).toHaveLength(6);
+      const texts = boxes.map((b) => b.runs[0]?.text ?? "");
       expect(texts.join("")).toBe("示例竖排文字");
       // The advance column points down (m12 = +0.07): successive characters
       // descend, and no box carries a rotation.
@@ -867,11 +850,9 @@ describe("emfPlusMembers", () => {
       expect(members).toBeDefined();
       const box = members!.find((m) => m.kind === "textBox");
       if (box?.kind !== "textBox") return;
-      const para = box.blocks[0];
-      const run =
-        para?.kind === "paragraph" && para.inline[0]?.kind === "text" ? para.inline[0] : undefined;
+      const run = box.runs[0];
       if (!run) return;
-      expect(run.style.family).toBe("楷体");
+      expect(run.family).toBe("楷体");
       expect(box.insets?.left).toBeGreaterThan(0);
     });
 
@@ -896,12 +877,11 @@ describe("emfPlusMembers", () => {
       );
       const members = emfPlusMembers(wmf, 400, 300);
       expect(members).toBeDefined();
-      const byText = new Map<string, Extract<LayoutDrawingMember, { kind: "textBox" }>>();
+      const byText = new Map<string, Extract<MetafileMember, { kind: "textBox" }>>();
       for (const m of members!) {
         if (m.kind !== "textBox") continue;
-        const para = m.blocks[0];
-        const run = para?.kind === "paragraph" ? para.inline[0] : undefined;
-        if (run?.kind === "text") byText.set(run.text, m);
+        const run = m.runs[0];
+        if (run) byText.set(run.text, m);
       }
       expect(byText.get("【")?.rotation).toBe(90);
       expect(byText.get("】")?.rotation).toBe(90);
@@ -928,10 +908,8 @@ describe("emfPlusMembers", () => {
       expect(members).toBeDefined();
       const texts = members!.filter((m) => m.kind === "textBox");
       expect(texts).toHaveLength(1);
-      const para = texts[0].blocks[0];
-      if (para.kind !== "paragraph") return;
-      const run = para.inline[0];
-      if (run.kind !== "text") return;
+      const run = texts[0].runs[0];
+      if (!run) return;
       expect(run.text).toBe("示例里程碑文案");
     });
 
@@ -960,10 +938,8 @@ describe("emfPlusMembers", () => {
       expect(members).toBeDefined();
       const box = members!.find((m) => m.kind === "textBox");
       if (box?.kind !== "textBox") return;
-      const para = box.blocks[0];
-      if (para.kind !== "paragraph") return;
-      const run = para.inline[0];
-      if (run.kind !== "text") return;
+      const run = box.runs[0];
+      if (!run) return;
       expect(run.text).toBe("一二三四五六七八九十甲乙");
       // Device-space placement: inside the EMF bounds, scaled glyph metrics.
       expect(box.x).toBeGreaterThan(140);
@@ -992,11 +968,9 @@ describe("emfPlusMembers", () => {
       expect(members).toBeDefined();
       const box = members!.find((m) => m.kind === "textBox");
       if (box?.kind !== "textBox") return;
-      const para = box.blocks[0];
-      if (para.kind !== "paragraph") return;
-      const run = para.inline[0];
-      if (run.kind !== "text") return;
-      expect(run.style.family).toBe("方正大黑简体");
+      const run = box.runs[0];
+      if (!run) return;
+      expect(run.family).toBe("方正大黑简体");
     });
 
     it("merges carrier text with same-stream EMF+ pictures", () => {

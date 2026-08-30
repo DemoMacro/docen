@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { wmfDibFallback } from "./wmf-dib";
-import { decodedBmp, dib, wmfWithRecords } from "./wmf-test-util";
+import { wmfDibFallback } from "./dib";
+import { decodedBmp, dib, wmfWithRecords } from "./test-util";
 
 describe("wmfDibFallback", () => {
   it("reframes a stretch-DIB blit record as a BMP data URL", () => {

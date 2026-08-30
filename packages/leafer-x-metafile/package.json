@@ -1,0 +1,45 @@
+{
+  "name": "leafer-x-metafile",
+  "version": "0.1.0",
+  "description": "WMF / EMF+ metafile replay into neutral drawing members — a zero-dependency GDI record player (WMF placeable stream, EMF+ GDI+ records, embedded DIB extraction) for LeaferJS-based renderers",
+  "keywords": [
+    "emf",
+    "gdi",
+    "leafer",
+    "leaferjs",
+    "metafile",
+    "vector",
+    "wmf"
+  ],
+  "homepage": "https://github.com/DemoMacro/docen#readme",
+  "bugs": {
+    "url": "https://github.com/DemoMacro/docen/issues"
+  },
+  "license": "MIT",
+  "author": {
+    "name": "Demo Macro",
+    "email": "abc@imst.xyz",
+    "url": "https://www.demomacro.com/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DemoMacro/docen.git"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "dist/index.mjs",
+  "types": "dist/index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    }
+  },
+  "scripts": {
+    "dev": "basis build --stub",
+    "build": "vp pack",
+    "prepack": "pnpm build"
+  }
+}

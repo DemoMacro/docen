@@ -73,7 +73,8 @@
     "@tiptap/extension-link": "3.29.2",
     "@tiptap/markdown": "3.29.2",
     "@tiptap/pm": "3.29.2",
-    "image-meta": "0.2.2"
+    "image-meta": "0.2.2",
+    "leafer-x-metafile": "workspace:*"
   },
   "devDependencies": {
     "linkedom": "0.18.13"

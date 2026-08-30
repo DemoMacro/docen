@@ -1,7 +1,7 @@
 // WMF metafile player: replays a placeable-WMF record stream into structured
 // scene members (paths, shapes, text boxes, pictures) positioned inside the
 // drawing's extent box. This is the vector + text layer the flat DIB
-// fallback (wmf-dib.ts) cannot see — Office's ".emf" exports in the wild are
+// fallback (dib.ts) cannot see — Office's ".emf" exports in the wild are
 // placeable WMFs whose labels and icon strokes live exactly here.
 //
 // One pass, a DC state machine, and a GDI object table. Record layouts were
@@ -11,10 +11,9 @@
 // lead byte and its trail byte carries 0; point arrays are x,y-ordered
 // while scalar params are pushed Y-then-X (the GDI16 calling convention).
 
-import type { LayoutDrawingMember } from "@docen/layout";
-
-import { GDI_CELL_PER_EM, type SourceCrop } from "./emf-plus";
-import { bltDibAt, bmpDataUrl } from "./wmf-dib";
+import { bltDibAt, bmpDataUrl } from "./dib";
+import { GDI_CELL_PER_EM } from "./emf-plus";
+import type { MetafileMember, SourceCrop } from "./member";
 
 const CREATE_PEN = 0x02fa;
 const CREATE_BRUSH = 0x02fc;
@@ -83,7 +82,7 @@ export function wmfMembers(
   boxW: number,
   boxH: number,
   crop?: SourceCrop,
-): LayoutDrawingMember[] | undefined {
+): MetafileMember[] | undefined {
   if (bytes.length < 22 + 18 + 6) return undefined;
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   if (view.getUint32(0, true) !== 0x9ac6cdd7) return undefined;
@@ -104,7 +103,7 @@ export function wmfMembers(
     curY: 0,
   };
 
-  const members: LayoutDrawingMember[] = [];
+  const members: MetafileMember[] = [];
   const objects: (GdiObject | undefined)[] = [];
   // Create*Indirect parks the object in the lowest free slot — GDI reuses
   // released handles, so a DeleteObject + create pair must not leave the
@@ -338,7 +337,7 @@ export function wmfMembers(
         // 0x0B41: Rop, SrcH, SrcW, YSrc, XSrc, DestH, DestW, YDest, XDest →
         // DIB@20; 0x0F43 inserts ColorUsage after Rop and the DIB sits at 22.
         // Mask layers (SRCPAINT/SRCAND pairs) are an honest miss — SRCCOPY
-        // only, the same deal wmf-dib.ts makes.
+        // only, the same deal dib.ts makes.
         if (view.getUint32(p, true) !== SRCCOPY) break;
         const dib = bltDibAt(view, off, end, fn & 0xff);
         if (!dib) break;
@@ -418,7 +417,7 @@ function readSubPolygons(view: DataView, p: number, end: number): Pt[][] | undef
  *  local-space). Returns without emitting when neither fill nor stroke is
  *  active — a fully transparent member would only pollute the scene tree. */
 function pushPathMember(
-  members: LayoutDrawingMember[],
+  members: MetafileMember[],
   subPaths: Pt[][],
   closed: boolean,
   fillColor: string | undefined,
@@ -468,7 +467,7 @@ function round1(n: number): number {
  *  char's advance sits at its lead byte and its trail byte carries 0. The
  *  emitted box is sized to the advance sum so the text never wraps. */
 function pushTextMember(
-  members: LayoutDrawingMember[],
+  members: MetafileMember[],
   view: DataView,
   bytes: Uint8Array,
   p: number,
@@ -522,22 +521,14 @@ function pushTextMember(
     width: Math.ceil(advancePx) + 2,
     height: Math.ceil(sizePx * 1.35),
     nowrap: true,
-    blocks: [
+    runs: [
       {
-        kind: "paragraph",
-        inline: [
-          {
-            kind: "text",
-            text,
-            style: {
-              family: font.face,
-              sizePx,
-              color: hexOf(st.textColor),
-              bold: font.weight >= 550 || undefined,
-              italic: font.italic || undefined,
-            },
-          },
-        ],
+        text,
+        family: font.face,
+        sizePx,
+        color: hexOf(st.textColor),
+        bold: font.weight >= 550 || undefined,
+        italic: font.italic || undefined,
       },
     ],
   });

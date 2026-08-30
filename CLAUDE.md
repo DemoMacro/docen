@@ -11,7 +11,8 @@ You are a senior TypeScript developer working on **docen**.
 - **`@docen/editor`** — multi-editor assembly: a Fluent UI host (`<docen-workspace>` + UI surfaces) shared by editor elements `<docen-document>` (today) and `<docen-presentation>`/`<docen-workbook>` (future); all UI surfaces (title-bar/ribbon/status-bar/panes) and engine extensions are contributed by **add-ins** (Office.js-style). Bundles the `@docen/docx` engine; owns the canvas stage, painting, and caret/selection mapping.
 - **`@docen/docx`** — the engine: Tiptap DOCX schema + converters + custom extensions + the layout projection (Tiptap JSON → LayoutDoc, incl. WMF/EMF+ metafile replay). No UI.
 - **`@docen/layout`** — the layout engine: block/flow/text measurement and pagination producing a paginated `LayoutDoc`. Pure computation, no DOM, no editor types.
-- **`@docen/core`** — shared rendering helpers for drawing data (geometry, style, image, export) consumed by the editors' painters.
+- **`@docen/core`** — shared rendering helpers for drawing data (geometry, style, image, export) plus the scene painter (`./painter`: LayoutDoc → LeaferJS tree) consumed by the editors' canvas stages.
+- **`leafer-x-metafile`** — zero-dependency WMF/EMF+ metafile replay into neutral drawing members (no Leafer, no docen types — built to be contributed to the LeaferJS ecosystem as `leafer-x-*`). The docx layout projection consumes it and adapts members into `LayoutDoc`.
 - **`@docen/deduplicate`** — document comparison (SimHash + Winnowing fingerprinting, `compareDocuments`/`findDuplicates`) for the editors' future compare feature. Standalone; no editor dependencies.
 - **`@office-open/*`** — OOXML parse/generate APIs (external). The canonical document model.
 

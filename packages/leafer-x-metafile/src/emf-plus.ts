@@ -6,23 +6,16 @@
 // drawing members native OOXML drawings are projected into, so metafile art
 // renders through the identical layout/paint model instead of a raster detour.
 
-import type { LayoutDrawingMember } from "@docen/layout";
+import { bmpDataUrl } from "./dib";
+import type { MetafileMember, SourceCrop } from "./member";
 
-import { bmpDataUrl } from "./wmf-dib";
+export type { SourceCrop } from "./member";
 
 const PLACEABLE_MAGIC = 0x9ac6cdd7;
 const META_ESCAPE = 0x0626;
 const WMFC_MAGIC = 0x43464d57; // "WMFC"
 const WMFC_CHUNK_HEADER = 34;
 
-/** a:srcRect crop as per-side fractions of the source (0-1), shared by the
- *  carrier and WMF-body replays. */
-export interface SourceCrop {
-  left: number;
-  top: number;
-  right: number;
-  bottom: number;
-}
 /** Every GDI+ object payload in these files repeats this version stamp. */
 const GDIPLUS_VERSION = 0xdbc01002;
 
@@ -552,7 +545,7 @@ export function emfPlusMembers(
   boxW: number,
   boxH: number,
   crop?: SourceCrop,
-): LayoutDrawingMember[] | undefined {
+): MetafileMember[] | undefined {
   const emf = embeddedEmfStream(bytes);
   if (!emf) return undefined;
   const drafts = carrierDrafts(emf, undefined, 0);
@@ -1678,7 +1671,7 @@ function finalize(
   boxH: number,
   frame?: { x: number; y: number; w: number; h: number },
   crop?: SourceCrop,
-): LayoutDrawingMember[] | undefined {
+): MetafileMember[] | undefined {
   let minX: number, minY: number, sX: number, sY: number;
   if (frame && frame.w > 0 && frame.h > 0) {
     minX = frame.x;
@@ -1733,7 +1726,7 @@ function finalize(
   }
   const X = (x: number) => (x - minX) * sX;
   const Y = (y: number) => (y - minY) * sY;
-  const members: LayoutDrawingMember[] = [];
+  const members: MetafileMember[] = [];
   for (const dr of drafts) {
     if (dr.kind === "text") {
       members.push({
@@ -1745,22 +1738,14 @@ function finalize(
         nowrap: true,
         ...(dr.cellInsetWorld ? { insets: { left: dr.cellInsetWorld * sX } } : {}),
         ...(dr.rotation ? { rotation: dr.rotation } : {}),
-        blocks: [
+        runs: [
           {
-            kind: "paragraph",
-            inline: [
-              {
-                kind: "text",
-                text: dr.text,
-                style: {
-                  family: dr.family,
-                  sizePx: dr.sizeWorld * sY,
-                  ...(dr.color ? { color: dr.color } : {}),
-                  ...(dr.bold ? { bold: true } : {}),
-                  ...(dr.letterSpacingWorld ? { letterSpacingPx: dr.letterSpacingWorld * sX } : {}),
-                },
-              },
-            ],
+            text: dr.text,
+            family: dr.family,
+            sizePx: dr.sizeWorld * sY,
+            ...(dr.color ? { color: dr.color } : {}),
+            ...(dr.bold ? { bold: true } : {}),
+            ...(dr.letterSpacingWorld ? { letterSpacingPx: dr.letterSpacingWorld * sX } : {}),
           },
         ],
       });

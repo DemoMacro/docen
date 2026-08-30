@@ -1,8 +1,8 @@
-import type { LayoutDrawingMember } from "@docen/layout";
 import { describe, expect, it } from "vitest";
 
+import type { MetafileMember } from "./member";
+import { dib, decodedBmp, gbk, logfont, words, wmfWithRecords } from "./test-util";
 import { wmfMembers } from "./wmf";
-import { dib, decodedBmp, gbk, logfont, words, wmfWithRecords } from "./wmf-test-util";
 
 // ── record builders (fn + raw params), in the order a GDI emitter pushes ──
 
@@ -65,18 +65,16 @@ const u32 = (n: number): Uint8Array => {
   return b;
 };
 
-function firstPath(members: LayoutDrawingMember[]) {
+function firstPath(members: MetafileMember[]) {
   const m = members.find((mem) => mem.kind === "path");
   expect(m).toBeDefined();
-  return m as Extract<LayoutDrawingMember, { kind: "path" }>;
+  return m as Extract<MetafileMember, { kind: "path" }>;
 }
 
 /** The first text run of a replayed text box. */
-function firstRun(m: Extract<LayoutDrawingMember, { kind: "textBox" }>) {
-  const block = m.blocks[0];
-  if (!block || block.kind !== "paragraph") throw new Error("expected a paragraph block");
-  const run = block.inline[0];
-  if (!run || run.kind !== "text") throw new Error("expected a text run");
+function firstRun(m: Extract<MetafileMember, { kind: "textBox" }>) {
+  const run = m.runs[0];
+  if (!run) throw new Error("expected a text run");
   return run;
 }
 
@@ -175,7 +173,7 @@ describe("wmfMembers", () => {
       100,
     )!;
     expect(members).toHaveLength(3);
-    const [rect, round, ellipse] = members as Extract<LayoutDrawingMember, { kind: "shape" }>[];
+    const [rect, round, ellipse] = members as Extract<MetafileMember, { kind: "shape" }>[];
     expect(rect).toMatchObject({
       preset: "rect",
       x: 20,
@@ -203,16 +201,15 @@ describe("wmfMembers", () => {
       200,
       100,
     )!;
-    const m = members[0] as Extract<LayoutDrawingMember, { kind: "textBox" }>;
-    const { style } = firstRun(m);
+    const m = members[0] as Extract<MetafileMember, { kind: "textBox" }>;
     expect(firstRun(m).text).toBe("示例文本");
     expect(m.x).toBe(100);
     expect(m.y).toBeCloseTo(50 - 0.8 * 20); // TA_BASELINE ascent hoist
     expect(m.width).toBe(4 * 16 + 2); // dx sum + wrap guard
-    expect(style.family).toBe("微软雅黑");
-    expect(style.sizePx).toBe(20);
-    expect(style.color).toBe("ff0000");
-    expect(style.bold).toBe(true);
+    expect(firstRun(m).family).toBe("微软雅黑");
+    expect(firstRun(m).sizePx).toBe(20);
+    expect(firstRun(m).color).toBe("ff0000");
+    expect(firstRun(m).bold).toBe(true);
   });
 
   it("treats the device-default TA_TOP reference y as the cell top (no hoist)", () => {
@@ -226,7 +223,7 @@ describe("wmfMembers", () => {
       200,
       100,
     )!;
-    const m = members[0] as Extract<LayoutDrawingMember, { kind: "textBox" }>;
+    const m = members[0] as Extract<MetafileMember, { kind: "textBox" }>;
     expect(m.y).toBe(50);
   });
 
@@ -240,7 +237,7 @@ describe("wmfMembers", () => {
       200,
       100,
     )!;
-    const m = members[0] as Extract<LayoutDrawingMember, { kind: "textBox" }>;
+    const m = members[0] as Extract<MetafileMember, { kind: "textBox" }>;
     expect(firstRun(m).text).toBe("示例文本");
   });
 
@@ -260,7 +257,7 @@ describe("wmfMembers", () => {
       50,
     )!;
     expect(members).toHaveLength(1);
-    const m = members[0] as Extract<LayoutDrawingMember, { kind: "picture" }>;
+    const m = members[0] as Extract<MetafileMember, { kind: "picture" }>;
     expect(m.x).toBe(10);
     expect(m.y).toBe(20);
     expect(m.width).toBe(30);

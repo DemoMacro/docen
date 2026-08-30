@@ -80,6 +80,9 @@ importers:
       image-meta:
         specifier: 0.2.2
         version: 0.2.2
+      leafer-x-metafile:
+        specifier: workspace:*
+        version: link:../leafer-x-metafile
     devDependencies:
       linkedom:
         specifier: 0.18.13
@@ -141,6 +144,8 @@ importers:
       '@chenglou/pretext':
         specifier: 0.0.8
         version: 0.0.8(patch_hash=9ebb839c158a4ffee8fd952a8570b94bc9f7e93791776cce66e1319949286f2d)
+
+  packages/leafer-x-metafile: {}
 
   packages/vue:
     dependencies:

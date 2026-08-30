@@ -45,12 +45,11 @@ import type {
   TableCellOptions,
   TableOptions,
 } from "@office-open/docx";
+import { emfPlusMembers, wmfMembers, wmfDibFallback, type SourceCrop } from "leafer-x-metafile";
 
 import { resolvePageSize } from "../extensions/utils";
 import { defaultParagraphStyleId, indexParagraphStyles, mergeStyleChain } from "../style-cascade";
-import { emfPlusMembers, type SourceCrop } from "./emf-plus";
-import { wmfMembers } from "./wmf";
-import { wmfDibFallback } from "./wmf-dib";
+import { toLayoutMembers } from "./metafile-members";
 
 // The paragraph leg of SectionChild is `string | ParagraphOptions` (shorthand
 // or full options); null appears at runtime (empty paragraph legs from
@@ -316,7 +315,7 @@ function replayMetafile(
   crop?: SourceCrop,
 ): LayoutDrawingMember[] | undefined {
   const plus = emfPlusMembers(bytes, boxW, boxH, crop);
-  if (plus) return plus;
+  if (plus) return toLayoutMembers(plus);
   const replay = wmfMembers(bytes, boxW, boxH, crop);
   if (!replay) return undefined;
   if (!replay.some((m) => m.kind === "picture")) {
@@ -325,7 +324,7 @@ function replayMetafile(
       replay.unshift({ kind: "picture", x: 0, y: 0, width: boxW, height: boxH, src: backdrop });
     }
   }
-  return replay;
+  return toLayoutMembers(replay);
 }
 
 function base64ToBytes(b64: string): Uint8Array | undefined {

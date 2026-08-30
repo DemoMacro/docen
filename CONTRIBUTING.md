@@ -32,7 +32,8 @@ packages/
   editor/        @docen/editor      (multi-editor host + add-ins + canvas stage/painter → <docen-document>)
   docx/          @docen/docx        (Tiptap DOCX engine + converters + layout projection; no UI)
   layout/        @docen/layout      (pagination engine — measurement → paginated LayoutDoc)
-  core/          @docen/core        (shared drawing/render helpers: geometry, style, image, export)
+  core/          @docen/core        (shared drawing/render helpers + the LeaferJS scene painter)
+  leafer-x-metafile/  leafer-x-metafile  (zero-dependency WMF/EMF+ replay → neutral members; ecosystem-bound)
   deduplicate/   @docen/deduplicate (document comparison for the compare feature)
 ```
 
