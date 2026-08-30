@@ -238,6 +238,29 @@ export class CaretMap {
           }
         }
         if (gap > 0) {
+          // But not when this text lays again later (a TOC entry whose
+          // heading also lays in the body — the entry's text equals its
+          // heading's once the page number drops out): this block is the
+          // render-only copy. Park it on the current EMPTY textblock
+          // without consuming it — the entries share the field paragraph's
+          // position and stay clickable — and let the later laid copy pair
+          // with its heading.
+          const runs = laidRuns.get(here);
+          if (runs && runs[runs.length - 1] !== i && there === "") {
+            const { node, pos } = tbs[j]!;
+            const paraEntry: ParaEntry = {
+              page: entry.page,
+              para,
+              innerPos: pos + 1,
+              node,
+              lines: [],
+              chars: 0,
+            };
+            this.paras.push(paraEntry);
+            this.appendLines(paraEntry, entry);
+            i++;
+            continue;
+          }
           j += gap;
         } else {
           const next = i + 1 < laid.length ? laidTexts[i + 1]! : null;
