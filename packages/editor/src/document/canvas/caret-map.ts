@@ -601,7 +601,9 @@ export class CaretMap {
   private posOfChar(entry: ParaEntry, char: number): number {
     let pos = entry.innerPos;
     let remaining = char;
+    let lastAtomStart = -1;
     entry.node.content.forEach((child) => {
+      if (remaining < 0) return;
       if (child.isText) {
         if (remaining <= child.textContent.length) {
           pos += remaining;
@@ -610,10 +612,20 @@ export class CaretMap {
           remaining -= child.textContent.length;
           pos += child.nodeSize;
         }
-      } else {
+      } else if (remaining > 0) {
+        // An atom carries no collapsed chars — step over it while offsets
+        // remain to reach the text after it.
+        lastAtomStart = pos;
         pos += child.nodeSize;
       }
     });
+    // Ghost chars — a rendered line longer than its paragraph's PM content
+    // (a TOC entry paints the cached entry text over a single field atom)
+    // — have no position of their own: fold them back before the last atom
+    // instead of onto the paragraph's far edge, or every selection anchored
+    // inside the line clipped the paragraph to an empty range and the line
+    // highlighted nothing (the next line lit up instead).
+    if (remaining > 0 && lastAtomStart >= 0) return lastAtomStart;
     return pos;
   }
 
