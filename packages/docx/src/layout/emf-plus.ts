@@ -804,39 +804,27 @@ function carrierDrafts(emf: Uint8Array, basis: Xform | undefined, depth: number)
     }
     po += rs;
   }
-  // Dual-mode carriers repeat their art across the two layers (GDI is the
-  // renderer's fallback): a GDI run matching an EMF+ string at the same spot
-  // would paint twice, and a GDI path twin of an EMF+ shape — the same wave
-  // exported once as beziers and once as a straight-line polygon — paints its
-  // jagged version over the smooth one. Merge only what the EMF+ layer lacks:
-  // texts match by string near the same spot, paths by paint (fill or stroke
-  // color) under a coinciding bounding box. GDI paths with no EMF+ twin keep
-  // joining — the corpus's wavy panels and list underlines ride exactly that
-  // side (their EMF+ counterparts draw only fragments), and the GDI photo blts
-  // back image slots the EMF+ layer never defines.
+  // Dual-mode carriers hold two complete encodings of the same art: the EMF+
+  // records an EMF+ player replays, and the GDI records kept as the fallback
+  // for legacy players ([MS-EMFPLUS] §3.1.1; RFC 7903: either set alone
+  // reconstitutes the drawing). A GDI picture would stack the coarser raster
+  // over the vector art — photos re-blitted whole, halftone textures laid
+  // across the composed design, white-backed masks where the EMF+ layer is
+  // already transparent — so once the EMF+ layer pictures anything, GDI blts
+  // drop entirely; they survive only when the EMF+ layer emits no pictures
+  // (a bare EMF+ header with all imagery on the GDI side). GDI paths keep
+  // the coincident-box dedup only: unlike blts, corpus files do split their
+  // vector art across both layers, so a blanket drop would delete art. Text
+  // never drops: the EMF+ walk does not decode DrawString runs yet, and a
+  // dual file's GDI text is the same glyphs at the same spots.
   const plusPaints = drafts
     .filter((dr): dr is PathDraft => dr.kind === "path" && (!!dr.fill || !!dr.strokeColor))
     .map((dr) => ({ fill: dr.fill, stroke: dr.strokeColor, box: boxOf(dr) }));
-  const plusPics = drafts.filter((dr) => dr.kind === "pic").map((dr) => boxOf(dr));
-  const plusTexts = drafts.filter((dr) => dr.kind === "text");
+  const plusHasPic = drafts.some((dr) => dr.kind === "pic");
   const gdi = gdiTextDrafts(emf, effOf);
   drafts.push(
     ...gdi.filter((g) => {
-      if (g.kind === "pic") {
-        // A GDI blt at a box the EMF+ layer already pictures is the fallback
-        // twin of the same art — the backdrop photo re-blitted whole, or an
-        // icon the EMF+ layer sprites in itself. Painting both stacks the
-        // raster copy over the vector; keep only blts for image slots the
-        // EMF+ layer never defines.
-        const box = boxOf(g);
-        return !plusPics.some(
-          (p) =>
-            Math.abs(p.x0 - box.x0) <= 2 &&
-            Math.abs(p.y0 - box.y0) <= 2 &&
-            Math.abs(p.x1 - box.x1) <= 2 &&
-            Math.abs(p.y1 - box.y1) <= 2,
-        );
-      }
+      if (g.kind === "pic") return !plusHasPic;
       if (g.kind === "path") {
         const box = boxOf(g);
         return !plusPaints.some(
@@ -849,13 +837,7 @@ function carrierDrafts(emf: Uint8Array, basis: Xform | undefined, depth: number)
             Math.abs(p.box.y1 - box.y1) <= 2,
         );
       }
-      if (g.kind !== "text") return true;
-      return !plusTexts.some(
-        (p) =>
-          p.text === g.text &&
-          Math.abs(p.x - g.x) <= Math.max(g.w, p.w) &&
-          Math.abs(p.y - g.y) <= Math.max(g.h, p.h) * 2,
-      );
+      return true;
     }),
   );
   return drafts;
