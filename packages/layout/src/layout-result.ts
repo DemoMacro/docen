@@ -109,6 +109,8 @@ export interface LaidOutParagraph {
   widowControl?: boolean;
   /** Borders mirrored from the input (w:pBdr) — the painter draws them. */
   borders?: Partial<Record<"top" | "right" | "bottom" | "left", LayoutParagraphBorderEdge>>;
+  /** Paragraph shading (w:shd @w:fill), hex RRGGBB, mirrored for the painter. */
+  shadingFill?: string;
   /** Indents mirrored from the input — the painter offsets each line's origin
    *  (left on every line, firstLine additionally on line 0; hanging < 0). */
   indent?: LayoutIndent;

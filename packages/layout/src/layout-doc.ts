@@ -34,6 +34,10 @@ export interface LayoutTextStyle {
    *  shifted baseline (Word's FootnoteReference look). Measuring applies the
    *  same scaling — see vertAlignedSizePx. */
   verticalAlign?: "superscript" | "subscript";
+  /** Character highlight (w:highlight), the ST_HighlightColor token — the
+   *  painter maps it to Word's highlight palette and fills the run's box
+   *  beneath the glyphs. */
+  highlight?: string;
 }
 
 /** One inline item of a paragraph. Text, hard breaks, tabs, and inline
@@ -403,6 +407,9 @@ export interface LayoutParagraph {
   tabStops?: LayoutTabStop[];
   /** Paragraph borders (w:pBdr) — the painter draws them beside the block. */
   borders?: Partial<Record<"top" | "right" | "bottom" | "left", LayoutParagraphBorderEdge>>;
+  /** Paragraph shading (w:shd @w:fill), hex RRGGBB — the painter fills the
+   *  block box with it beneath everything else the paragraph paints. */
+  shadingFill?: string;
   /** ¶-mark strut size in px (w:pPr/w:rPr/w:sz resolved): an ABSOLUTE line
    *  height for the paragraph-mark line — the sole content of an empty
    *  paragraph, and the minimum of a picture row shorter than a text line. */

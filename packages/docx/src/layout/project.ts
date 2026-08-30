@@ -413,6 +413,7 @@ interface RunStyle {
   bold?: boolean;
   italic?: boolean;
   color?: string;
+  highlight?: string;
   underline?: boolean;
   strikethrough?: boolean;
   verticalAlign?: "superscript" | "subscript";
@@ -432,6 +433,7 @@ function runStyleOf(rPr: Rec): RunStyle {
     bold: tri(rPr.bold),
     italic: tri(rPr.italic),
     color: colorOf(rPr.color),
+    highlight: str(rPr.highlight),
     underline,
     strikethrough:
       rPr.strike === true || rPr.doubleStrike === true
@@ -755,6 +757,17 @@ function projectParagraph(p: BodyParagraph, ctx: ProjectContext): LayoutParagrap
     bottom: borderEdge(bRec.bottom),
     left: borderEdge(bRec.left),
   };
+  // Paragraph shading (w:shd): direct, else the style chain's — same
+  // direct-else-chain as borders; the fill gate mirrors the cell projection.
+  const shdRec: Rec = isRecord(pPr.shading)
+    ? pPr.shading
+    : isRecord(chainPPr.shading)
+      ? chainPPr.shading
+      : {};
+  const shadingFill =
+    typeof shdRec.fill === "string" && shdRec.fill !== "auto" && shdRec.type !== "nil"
+      ? shdRec.fill
+      : undefined;
 
   // The list marker: a bullet emits its glyph; a numbered level advances its
   // counter (resetting deeper levels) and substitutes %k in w:lvlText with the
@@ -800,6 +813,7 @@ function projectParagraph(p: BodyParagraph, ctx: ProjectContext): LayoutParagrap
     indent,
     tabStops: tabStops && tabStops.length > 0 ? tabStops : undefined,
     borders: borders.top || borders.right || borders.bottom || borders.left ? borders : undefined,
+    shadingFill,
     markSizePx: markSize != null ? ptToPx(markSize) : undefined,
     defaultTextStyle,
     snapToGrid: typeof pPr.snapToGrid === "boolean" ? pPr.snapToGrid : null,
@@ -1531,6 +1545,7 @@ function projectRuns(
       bold: own.bold ?? defRun.bold,
       italic: own.italic ?? defRun.italic,
       color: own.color ?? defRun.color,
+      highlight: own.highlight ?? str(chainRPr.highlight) ?? str(docRPr.highlight),
       underline: own.underline ?? defRun.underline,
       strikethrough: own.strikethrough ?? defRun.strikethrough,
       letterSpacingPx:

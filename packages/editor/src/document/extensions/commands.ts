@@ -40,7 +40,7 @@ declare module "@tiptap/core" {
       strike: () => ReturnType;
       subscript: () => ReturnType;
       superscript: () => ReturnType;
-      highlight: () => ReturnType;
+      highlight: (value?: string) => ReturnType;
       code: () => ReturnType;
       "clear-format": () => ReturnType;
       "font-name": (font?: string) => ReturnType;
@@ -159,6 +159,18 @@ const DEFAULT_BORDER = {
   color: "auto",
 } as const;
 const BORDER_SIDES = ["top", "bottom", "left", "right"] as const;
+/** Ribbon highlight color names → OOXML ST_HighlightColor tokens ("green" in
+ *  the ribbon palette is the bright green; the palette's own "Green" is the
+ *  dark one). */
+const HIGHLIGHT_TOKENS: Readonly<Record<string, string>> = {
+  yellow: "yellow",
+  "bright-green": "green",
+  turquoise: "cyan",
+  pink: "magenta",
+  red: "red",
+  green: "darkGreen",
+  blue: "blue",
+};
 
 /** Encode a line-spacing multiple (1.0/1.15/1.5/2.0) as OOXML w:spacing `line`.
  *  Per ECMA-376, `lineRule="auto"` expresses `line` in 240ths of a single line
@@ -362,9 +374,14 @@ export const DocumentCommands = Extension.create({
         ({ commands }) =>
           commands.toggleMark("superscript"),
       highlight:
-        () =>
-        ({ commands }) =>
-          commands.toggleMark("highlight"),
+        (value) =>
+        ({ commands }) => {
+          // "none" clears; a palette color sets its token; no value (the split
+          // button's main click) applies Word's default yellow.
+          if (value === "none") return commands.unsetMark("highlight");
+          const token = HIGHLIGHT_TOKENS[value ?? ""] ?? "yellow";
+          return commands.setMark("highlight", { color: token });
+        },
       code:
         () =>
         ({ commands }) =>

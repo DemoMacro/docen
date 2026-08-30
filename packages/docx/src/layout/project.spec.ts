@@ -355,6 +355,37 @@ describe("projectDocumentOptions blocks", () => {
     expect(blocks[0].pageBreakBefore).toBe(true);
   });
 
+  it("projects paragraph shading, run highlight, and all four border edges", () => {
+    const { blocks } = oneSection(
+      doc([
+        {
+          paragraph: {
+            children: [{ text: "hl", highlight: "darkGreen" }],
+            shading: { fill: "DDEBF7", type: "clear" },
+            border: {
+              top: { style: "single", size: 4 },
+              right: { style: "single", size: 8 },
+              bottom: { style: "single", size: 4 },
+              left: { style: "single", size: 8 },
+            },
+          },
+        },
+        { paragraph: { children: ["plain"], shading: { fill: "auto", type: "clear" } } },
+      ]),
+    );
+    const para = blocks[0];
+    if (para?.kind !== "paragraph") throw new Error("expected paragraph");
+    expect(para.shadingFill).toBe("DDEBF7");
+    expect(para.inline[0]).toMatchObject({ kind: "text", style: { highlight: "darkGreen" } });
+    // All four edges reach the painter — the left/right rails used to stop at
+    // the projection (only top/bottom were drawn).
+    expect(Object.keys(para.borders ?? {}).sort()).toEqual(["bottom", "left", "right", "top"]);
+    // fill "auto" carries no paintable fill — the cell-shading gate, shared.
+    const plain = blocks[1];
+    if (plain?.kind !== "paragraph") throw new Error("expected plain paragraph");
+    expect(plain.shadingFill).toBeUndefined();
+  });
+
   it("projects tables with converted geometry and threaded styles", () => {
     const { blocks } = oneSection(
       doc([

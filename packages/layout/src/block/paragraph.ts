@@ -173,6 +173,7 @@ export function layoutParagraph(
     keepNext: para.keepNext,
     widowControl: para.widowControl,
     borders: para.borders,
+    shadingFill: para.shadingFill,
     indent: para.indent,
     drawings: para.drawings,
   };

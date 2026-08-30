@@ -30,6 +30,7 @@ import {
   type LayoutDrawing,
   type LayoutDrawingMember,
   type LayoutInline,
+  type LayoutParagraphBorderEdge,
   type LayoutTextStyle,
   type ProjectedFlowBox,
   type ProjectedPageBackground,
@@ -65,6 +66,26 @@ const PRSTDASH_PATTERN: Record<string, number[]> = {
   lgDash: [12, 3],
   lgDashDot: [12, 3, 1, 3],
   lgDashDotDot: [12, 3, 1, 3, 1, 3],
+};
+
+/** OOXML ST_HighlightColor tokens → Word's highlight palette, #RRGGBB. */
+const HIGHLIGHT_COLOR: Record<string, string> = {
+  yellow: "#FFFF00",
+  green: "#00FF00",
+  cyan: "#00FFFF",
+  magenta: "#FF00FF",
+  blue: "#0000FF",
+  red: "#FF0000",
+  darkBlue: "#000080",
+  darkYellow: "#808000",
+  darkGreen: "#008000",
+  darkRed: "#800000",
+  darkCyan: "#008080",
+  darkMagenta: "#800080",
+  lightGray: "#C0C0C0",
+  darkGray: "#808080",
+  black: "#000000",
+  white: "#FFFFFF",
 };
 
 /** One hit-testable drawing box, page-local px — what a click needs to grab a
@@ -182,6 +203,20 @@ function paintParagraph(
   // layer's drawings. Behind-doc floats land beneath the furniture pass.
   const behind = ctx.layer === "behind";
   if (behind) {
+    // Paragraph shading (w:shd) fills the block box beneath everything else
+    // the paragraph paints — behind-doc floats included, matching Word.
+    if (para.shadingFill) {
+      const right = ctx.flow.contentLeftPx + ctx.flow.contentWidthPx;
+      tree.add(
+        new Rect({
+          x,
+          y,
+          width: Math.max(0, right - x),
+          height: para.heightPx,
+          fill: `#${para.shadingFill}`,
+        }),
+      );
+    }
     let index = 0;
     for (const drawing of para.drawings ?? []) {
       if (drawing.behind) paintDrawing(tree, drawing, x, y, ctx, col, { para, index: index++ });
@@ -189,24 +224,65 @@ function paintParagraph(
     }
     return;
   }
-  // w:pBdr horizontal rules (the "Education" underline shape): between the
-  // text and `spacePx` below it, spanning the wrapping width.
-  for (const side of ["top", "bottom"] as const) {
-    const edge = para.borders?.[side];
-    if (!edge || !edge.px || edge.style === "nil" || edge.style === "none") continue;
-    const top = side === "top";
-    const lineY = top ? y - (edge.spacePx ?? 0) : y + para.heightPx + (edge.spacePx ?? 0);
-    const right = ctx.flow.contentLeftPx + ctx.flow.contentWidthPx;
-    tree.add(
-      new Rect({
-        x,
-        y: lineY - (top ? 0 : edge.px),
-        width: Math.max(0, right - x),
-        height: edge.px,
-        fill: "#1b1b1b",
-      }),
-    );
-  }
+  // w:pBdr: horizontal rules (the "Education" underline shape) span the
+  // wrapping width between the text and `spacePx` of it; the vertical rails
+  // run the paragraph's height, extended by the horizontal edges' space so a
+  // four-side box reads closed. Added AFTER the line loop so Word's paint
+  // order holds: borders ride above text and character highlights, below
+  // the paragraph's own floating drawings.
+  const paintBorders = (): void => {
+    const live = (
+      e: LayoutParagraphBorderEdge | undefined,
+    ): e is LayoutParagraphBorderEdge & { px: number } =>
+      !!e?.px && e.style !== "nil" && e.style !== "none";
+    const { top, right, bottom, left } = para.borders ?? {};
+    const boxRight = ctx.flow.contentLeftPx + ctx.flow.contentWidthPx;
+    if (live(top)) {
+      tree.add(
+        new Rect({
+          x,
+          y: y - (top.spacePx ?? 0),
+          width: Math.max(0, boxRight - x),
+          height: top.px,
+          fill: "#1b1b1b",
+        }),
+      );
+    }
+    if (live(bottom)) {
+      tree.add(
+        new Rect({
+          x,
+          y: y + para.heightPx + (bottom.spacePx ?? 0) - bottom.px,
+          width: Math.max(0, boxRight - x),
+          height: bottom.px,
+          fill: "#1b1b1b",
+        }),
+      );
+    }
+    if (live(left) || live(right)) {
+      const y0 = y - (live(top) ? (top.spacePx ?? 0) : 0);
+      const height =
+        para.heightPx +
+        (live(top) ? (top.spacePx ?? 0) : 0) +
+        (live(bottom) ? (bottom.spacePx ?? 0) : 0);
+      if (live(left)) {
+        tree.add(
+          new Rect({ x: x - (left.spacePx ?? 0), y: y0, width: left.px, height, fill: "#1b1b1b" }),
+        );
+      }
+      if (live(right)) {
+        tree.add(
+          new Rect({
+            x: boxRight + (right.spacePx ?? 0),
+            y: y0,
+            width: right.px,
+            height,
+            fill: "#1b1b1b",
+          }),
+        );
+      }
+    }
+  };
   let inlinePicIndex = 0;
   for (const line of para.lines) {
     const lineY = y + line.yPx;
@@ -230,6 +306,20 @@ function paintParagraph(
       if (item.kind === "text" && inline.kind === "text") {
         const family = familyOf(inline.style, item.text);
         const intervalPx = rights ? rights[itemIndex]! - item.xPx : undefined;
+        // Character highlight (w:highlight): the token's palette color fills
+        // the run's box beneath the glyphs (Word paints it opaque).
+        const hl = inline.style.highlight ? HIGHLIGHT_COLOR[inline.style.highlight] : undefined;
+        if (hl) {
+          tree.add(
+            new Rect({
+              x: lineX + item.xPx,
+              y: lineY + pad,
+              width: intervalPx ?? item.widthPx,
+              height: Math.max(1, line.naturalPx || line.heightPx),
+              fill: hl,
+            }),
+          );
+        }
         // Comment range tint (w:commentRangeStart..End): a translucent box
         // under the item's glyphs, Word's light-amber reviewer tint. Painted
         // before the text so the glyphs stay on top.
@@ -395,6 +485,7 @@ function paintParagraph(
       }
     }
   }
+  paintBorders();
   // Floating drawings anchored to this paragraph: wrap-none boxes painted
   // over the text — the flow reserved them no height. (behindDoc ones went
   // first, above.)
