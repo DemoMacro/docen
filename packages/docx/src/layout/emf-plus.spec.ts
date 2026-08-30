@@ -875,6 +875,42 @@ describe("emfPlusMembers", () => {
       expect(box.insets?.left).toBeGreaterThan(0);
     });
 
+    it("turns vertical punctuation 90° clockwise while ideographs stay upright", () => {
+      // Word's vertical replay applies the font's vert substitutions: fullwidth
+      // brackets/quotes rotate, ideographs and kana do not.
+      const setworld = (m: number[]): Uint8Array => {
+        const body = new Uint8Array(24);
+        const v = new DataView(body.buffer);
+        m.forEach((n, i) => v.setFloat32(i * 4, n, true));
+        return emr(35, body);
+      };
+      const wmf = carrierWithText(
+        [
+          setworld([0, 0.07, -0.07, 0, 31580, -1287]),
+          extcreatefont(1, 24, 400, "@楷体"),
+          selectfont(1),
+          settextcolor("1a1a1a"),
+          exttextoutw("【例】字", 21015, 470415),
+        ],
+        [epHeader(), epEof()],
+      );
+      const members = emfPlusMembers(wmf, 400, 300);
+      expect(members).toBeDefined();
+      const byText = new Map<string, Extract<LayoutDrawingMember, { kind: "textBox" }>>();
+      for (const m of members!) {
+        if (m.kind !== "textBox") continue;
+        const para = m.blocks[0];
+        const run = para?.kind === "paragraph" ? para.inline[0] : undefined;
+        if (run?.kind === "text") byText.set(run.text, m);
+      }
+      expect(byText.get("【")?.rotation).toBe(90);
+      expect(byText.get("】")?.rotation).toBe(90);
+      // Rotated punctuation anchors the cell's top-right corner — no em-center
+      // inset (that rule is for upright ideographs).
+      expect(byText.get("【")?.insets?.left).toBeUndefined();
+      expect(byText.get("例")?.rotation).toBeUndefined();
+    });
+
     it("keeps walking past whitespace-only text runs", () => {
       // A blank run must not stall the record walk: the loop advances only
       // at its tail, so any skip has to route through the advance.
@@ -1152,7 +1188,7 @@ describe("emfPlusMembers", () => {
       return emr(27, buf);
     }
 
-    /** PolylineTo16: [bounds 4×i32][count u32][points int16 pairs]. */
+    /** PolylineTo16 (record type 89): [bounds 4×i32][count u32][points]. */
     function polyLineTo16(pts: Array<[number, number]>): Uint8Array {
       const buf = new Uint8Array(20 + pts.length * 4);
       const v = new DataView(buf.buffer);
@@ -1161,7 +1197,7 @@ describe("emfPlusMembers", () => {
         v.setInt16(20 + i * 4, x, true);
         v.setInt16(20 + i * 4 + 2, y, true);
       });
-      return emr(88, buf);
+      return emr(89, buf);
     }
 
     const noOp = (t: number) => emr(t, new Uint8Array(0));

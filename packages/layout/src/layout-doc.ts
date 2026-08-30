@@ -98,6 +98,9 @@ export type LayoutDrawingMember =
       height: number;
       /** Renderer media source (data URL); absent → an empty frame. */
       src?: string;
+      /** Metafile raster-op emulation blend (SRCPAINT → screen,
+       *  SRCAND → multiply) for masked GDI blt pairs. */
+      blend?: "screen" | "multiply";
       /** Mirrored content flips (a:xfrm @flipH/@flipV). */
       flipH?: boolean;
       flipV?: boolean;

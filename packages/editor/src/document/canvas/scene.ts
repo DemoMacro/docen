@@ -493,9 +493,34 @@ function paintMembers(
   boxY: number,
   ctx: PaintContext,
 ): void {
-  for (const m of members) {
+  for (let i = 0; i < members.length; i++) {
+    const m = members[i];
     const mx = boxX + m.x;
     const my = boxY + m.y;
+    if (m.kind === "picture" && m.src && !m.crop) {
+      // A masked GDI blt sequence (SRCPAINT then SRCAND halves) composites
+      // against the metafile's own backdrop. The run is flattened into one
+      // image before painting: canvas blend modes only see the editor's
+      // layered App canvases, whose destinations are transparent — not the
+      // underlying members a ternary raster-op needs.
+      const run: Extract<LayoutDrawingMember, { kind: "picture" }>[] = [m];
+      let end = i + 1;
+      while (end < members.length) {
+        const cur = members[end];
+        if (cur.kind !== "picture" || !cur.src || cur.crop) break;
+        run.push(cur);
+        end++;
+      }
+      if (run.some((p) => p.blend)) {
+        // A masked layer is meaningful only inside a composited run: painted
+        // alone its opaque mask background (SRCPAINT halves are black-backed)
+        // would lay a black slab over the page. A run of one blends against
+        // nothing — honest absence beats a wrong slab.
+        if (run.length > 1) addBlendedPictureRun(tree, run, boxX, boxY, ctx);
+        i = end - 1;
+        continue;
+      }
+    }
     if (m.kind === "picture") {
       if (m.src && m.crop) {
         addCroppedImage(tree, m.src, m.crop, mx, my, m.width, m.height, ctx, m.flipH, m.flipV);
@@ -584,8 +609,15 @@ function paintMembers(
       if (m.rotation) {
         // Vertical metafile text (a rotated GDI world transform): the body
         // shapes horizontally as usual, then rotates about the box origin —
-        // a group keeps the offsets in text space and carries the angle.
-        const group = new Group({ x: mx, y: my, rotation: m.rotation });
+        // a group keeps the offsets in text space and carries the angle. A
+        // clockwise 90° (vertical punctuation) swings the box left of the
+        // origin, so the group shifts right by the box width and the ink
+        // anchors the cell's top-right corner.
+        const group = new Group({
+          x: m.rotation === 90 ? mx + m.width : mx,
+          y: my,
+          rotation: m.rotation,
+        });
         for (const item of laid.stack) {
           paintBlock(group, item.block, left, oy + item.yPx, ctx, { width: inner, inCell: true });
         }
@@ -740,6 +772,157 @@ function addPlainImage(
     ctx.rerender();
   };
   el.src = m.src!;
+}
+
+/** A run of masked GDI blt members (SRCPAINT/SRCAND halves, optionally over a
+ *  plain backdrop picture): decode all sources, flatten them in record order
+ *  through canvas `screen`/`multiply` compositing — the ternary raster-op
+ *  semantics — and insert the result as one image. Decode failures drop that
+ *  member; if nothing survives the run falls back to individual painting. */
+function addBlendedPictureRun(
+  tree: IGroup,
+  run: Extract<LayoutDrawingMember, { kind: "picture" }>[],
+  boxX: number,
+  boxY: number,
+  ctx: PaintContext,
+): void {
+  const x0 = Math.min(...run.map((p) => p.x));
+  const y0 = Math.min(...run.map((p) => p.y));
+  const width = Math.ceil(Math.max(...run.map((p) => p.x + p.width)) - x0);
+  const height = Math.ceil(Math.max(...run.map((p) => p.y + p.height)) - y0);
+  if (width < 1 || height < 1 || width > 8192 || height > 8192) return;
+  const slot = new Rect({ x: boxX + x0, y: boxY + y0, width, height });
+  tree.add(slot);
+  const loads = run.map(
+    (p) =>
+      new Promise<HTMLImageElement | null>((resolve) => {
+        const el = new Image();
+        el.onload = () => resolve(el);
+        el.onerror = () => resolve(null);
+        el.src = p.src!;
+      }),
+  );
+  void Promise.all(loads).then((decoded) => {
+    // A repaint since the decode started cleared the tree (slot included) —
+    // that repaint's own run now owns the paint-order slot.
+    if (!slot.parent) return;
+    if (!decoded.some(Boolean)) {
+      tree.remove(slot);
+      // Masked halves never paint alone (their opaque mask background would
+      // slab the page) — only plain backdrops fall back.
+      for (const p of run) if (!p.blend) addPlainImage(tree, p, boxX + p.x, boxY + p.y, ctx);
+      return;
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const c2d = canvas.getContext("2d")!;
+    // GDI replays these blts against its live destination surface — the page
+    // behind the metafile — so the composite stays transparent wherever the
+    // records keep the destination: a screen half only marks the shape mask
+    // (never painted), and a multiply half lands just its colored content
+    // inside that mask. Page color and lower members show through.
+    let maskData: Uint8ClampedArray | undefined;
+    for (let k = 0; k < run.length; k++) {
+      const img = decoded[k];
+      if (!img) continue;
+      const dx = run[k].x - x0;
+      const dy = run[k].y - y0;
+      const dw = run[k].width;
+      const dh = run[k].height;
+      if (run[k].blend === "screen") {
+        maskData = shapeMaskAt(img, dx, dy, dw, dh, width, height);
+        continue;
+      }
+      if (run[k].blend === "multiply") {
+        const content = maskedContent(img, dx, dy, dw, dh, maskData, width);
+        maskData = undefined;
+        if (!content) continue;
+        c2d.drawImage(content, dx, dy, dw, dh);
+        continue;
+      }
+      maskData = undefined;
+      c2d.drawImage(img, dx, dy, dw, dh);
+    }
+    // The composite is a brand-new data URL: decode it through a DOM Image
+    // first (the same protocol addPlainImage follows) — inserting a url
+    // Leafer hasn't decoded rides the stage's eager render as an empty
+    // bitmap that the stalled re-render never picks back up.
+    const url = canvas.toDataURL("image/png");
+    const el = new Image();
+    el.onload = () => {
+      // A repaint since the decode started cleared the tree (slot included)
+      // — that repaint's own run now owns the paint-order slot.
+      if (!slot.parent) return;
+      pinImage(url);
+      tree.addAfter(new LeaferImage({ url, x: boxX + x0, y: boxY + y0, width, height }), slot);
+      tree.remove(slot);
+      ctx.rerender();
+    };
+    el.src = url;
+  });
+}
+
+/** A screen half's brightness as the shape mask, sampled on the run's union
+ *  box: each pixel's alpha takes its max channel — the 1bpp white shape
+ *  lights up, the black backdrop drops out. This is the raster-op's "where
+ *  the shape is" term, derived from the record's own bytes. */
+function shapeMaskAt(
+  img: HTMLImageElement,
+  dx: number,
+  dy: number,
+  dw: number,
+  dh: number,
+  width: number,
+  height: number,
+): Uint8ClampedArray {
+  const c = document.createElement("canvas");
+  c.width = width;
+  c.height = height;
+  const g = c.getContext("2d")!;
+  g.drawImage(img, dx, dy, dw, dh);
+  const d = g.getImageData(0, 0, width, height);
+  const a = d.data;
+  for (let i = 0; i < a.length; i += 4) a[i + 3] = Math.max(a[i], a[i + 1], a[i + 2]);
+  return a;
+}
+
+/** A multiply half reduced to its colored content inside the pending shape
+ *  mask: per pixel, white keeps the destination (alpha 0) and every other
+ *  color lands verbatim at the mask's coverage — GDI's AND over a white page
+ *  writes the source pixel itself wherever it is not white, not a blend. A
+ *  distance-from-white ramp would turn light fills and antialiased ink into
+ *  translucent washes over the page. An unconsumed multiply half falls back
+ *  to its own non-white key. */
+function maskedContent(
+  img: HTMLImageElement,
+  dx: number,
+  dy: number,
+  dw: number,
+  dh: number,
+  maskData: Uint8ClampedArray | undefined,
+  maskWidth: number,
+): HTMLCanvasElement | undefined {
+  if (dw < 1 || dh < 1) return undefined;
+  const c = document.createElement("canvas");
+  c.width = dw;
+  c.height = dh;
+  const g = c.getContext("2d")!;
+  g.drawImage(img, 0, 0, dw, dh);
+  const d = g.getImageData(0, 0, dw, dh);
+  const a = d.data;
+  for (let j = 0; j < dh; j++) {
+    for (let i = 0; i < dw; i++) {
+      const p = (j * dw + i) * 4;
+      const m =
+        maskData && dy + j >= 0 && dy + j < maskData.length / 4 / maskWidth
+          ? maskData[((dy + j) * maskWidth + dx + i) * 4 + 3]
+          : 255;
+      a[p + 3] = Math.min(a[p], a[p + 1], a[p + 2]) >= 250 ? 0 : m;
+    }
+  }
+  g.putImageData(d, 0, 0);
+  return c;
 }
 
 /** A cropped picture (a:srcRect): Leafer paints whole sources only, so the

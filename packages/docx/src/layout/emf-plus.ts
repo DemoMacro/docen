@@ -153,6 +153,8 @@ interface PicDraft {
   src: string;
   /** Source-rectangle crop, fractions of each image edge (DrawImagePoints). */
   crop?: { l: number; t: number; r: number; b: number };
+  /** Ternary raster-op emulation blend (SRCPAINT → screen, SRCAND → multiply). */
+  blend?: "screen" | "multiply";
 }
 
 /** A GDI-side ExtTextOutW run, kept in the same world coordinate space as
@@ -519,6 +521,22 @@ export const GDI_CELL_PER_EM = 1.2969;
 const GDI_V_ASCENT_PER_EM = 328 / 360;
 const GDI_V_DESCENT_PER_EM = 60 / 360;
 
+/** CJK punctuation that Word's vertical replay turns 90° clockwise (the
+ *  font's vert substitutions): brackets, quotes, dots and dashes. Ideographs,
+ *  kana, fullwidth alphanumerics, 々/〇 and the katakana middle dot stay
+ *  upright — their vert forms are identity. */
+function isVerticalPunct(ch: string): boolean {
+  const c = ch.codePointAt(0) ?? 0;
+  if (c === 0x3005 || c === 0x3007 || c === 0x30fb) return false;
+  if (c >= 0x3000 && c <= 0x303f) return true; // 、。〈〉《》「」『』【】〔〕…
+  if (c >= 0x2013 && c <= 0x2026) return true; // – — ‘ ’ “ ” ‥ …
+  if (c >= 0xff01 && c <= 0xff0f) return true; // ！＂＃…（）＊＋，－．／
+  if (c >= 0xff1a && c <= 0xff20) return true; // ：；＜＝＞？＠
+  if (c >= 0xff3b && c <= 0xff40) return true; // ［＼］＾＿｀
+  if (c >= 0xff5b && c <= 0xff65) return true; // ｛｜｝～ and halfwidth 、｡｢｣
+  return false;
+}
+
 /**
  * Replay a dual-mode WMF's embedded EMF+ stream into drawing members sized to
  * the display box. Returns undefined when there is nothing to replay: no
@@ -799,10 +817,26 @@ function carrierDrafts(emf: Uint8Array, basis: Xform | undefined, depth: number)
   const plusPaints = drafts
     .filter((dr): dr is PathDraft => dr.kind === "path" && (!!dr.fill || !!dr.strokeColor))
     .map((dr) => ({ fill: dr.fill, stroke: dr.strokeColor, box: boxOf(dr) }));
+  const plusPics = drafts.filter((dr) => dr.kind === "pic").map((dr) => boxOf(dr));
   const plusTexts = drafts.filter((dr) => dr.kind === "text");
   const gdi = gdiTextDrafts(emf, effOf);
   drafts.push(
     ...gdi.filter((g) => {
+      if (g.kind === "pic") {
+        // A GDI blt at a box the EMF+ layer already pictures is the fallback
+        // twin of the same art — the backdrop photo re-blitted whole, or an
+        // icon the EMF+ layer sprites in itself. Painting both stacks the
+        // raster copy over the vector; keep only blts for image slots the
+        // EMF+ layer never defines.
+        const box = boxOf(g);
+        return !plusPics.some(
+          (p) =>
+            Math.abs(p.x0 - box.x0) <= 2 &&
+            Math.abs(p.y0 - box.y0) <= 2 &&
+            Math.abs(p.x1 - box.x1) <= 2 &&
+            Math.abs(p.y1 - box.y1) <= 2,
+        );
+      }
       if (g.kind === "path") {
         const box = boxOf(g);
         return !plusPaints.some(
@@ -991,8 +1025,8 @@ const EMR_CREATE_BRUSH_INDIRECT = 39;
 const EMR_DELETE_OBJECT = 40;
 const EMR_SETTEXTCOLOR = 24;
 const EMR_SETTEXTALIGN = 22;
-const EMR_STRETCHDIBITS = 44;
 const EMR_BITBLT = 76;
+const EMR_STRETCHDIBITS = 81;
 const EMR_EXT_CREATE_FONT = 82;
 const EMR_EXT_TEXT_OUT_A = 83;
 const EMR_EXT_TEXT_OUT_W = 84;
@@ -1010,8 +1044,9 @@ const EMR_STROKE_AND_FILL_PATH = 63;
 const EMR_STROKE_PATH = 64;
 const EMR_ABORT_PATH = 68;
 const EMR_LINE_TO = 54;
-const EMR_POLY_BEZIER_TO16 = 86;
-const EMR_POLY_LINE_TO16 = 88;
+const EMR_POLYGON16 = 86;
+const EMR_POLYBEZIERTO16 = 88;
+const EMR_POLYLINETO16 = 89;
 
 /** EmrText offsets inside EMR_EXTTEXTOUTW (relative to the record start):
  *  bounds[16], graphicsMode, ex/eyScale, then Reference xy, Chars, offString,
@@ -1203,50 +1238,53 @@ function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): Draft[] {
       case EMR_BITBLT: {
         // The carrier's own photo blits join the replay as pictures: dual-mode
         // files keep their photos here when the EMF+ layer references image
-        // slots that are never defined (its draw is then a no-op). The two
-        // record shapes agree on the leading fields — dest rect @24..36 and
-        // the BITMAPINFO at @48..64 — so one body reads both. SRCAND halves
-        // of masked blit pairs skip: the AND mask whitens those pixels only
-        // for the SRCPAINT pass to refill, invisible over the white page.
-        const rop =
-          type === EMR_STRETCHDIBITS
-            ? view.getUint32(eo + 68, true)
-            : view.getUint32(eo + 44, true);
-        if (rop === 0x008800c6) break;
-        const copy = rop % 0x1000000;
-        if (copy !== 0x0020 && copy !== 0x0086) break; // SRCCOPY / SRCPAINT
-        const offBmi = view.getUint32(eo + 48, true);
-        const cbBmi = view.getUint32(eo + 52, true);
-        const offBits = view.getUint32(eo + 56, true);
-        const cbBits = view.getUint32(eo + 60, true);
+        // slots that are never defined (its draw is then a no-op). STRETCHDIBITS
+        // reads dest @24..28, source @32..44, BITMAPINFO @48..64, rop @68 and
+        // dest size @72..76; BITBLT packs dest @24..36, rop @40, source @44..48
+        // and its (XformSrc-padded) BITMAPINFO @84..100.
+        const isDib = type === EMR_STRETCHDIBITS;
+        const rop = view.getUint32(eo + (isDib ? 68 : 40), true);
+        // The raster-op opcode is the low byte: 0x20 SRCCOPY, 0x86 SRCPAINT,
+        // 0xC6 SRCAND. Masked icon pairs blit a 1bpp white-shape layer with
+        // SRCPAINT then a color layer with SRCAND — exactly a screen pass
+        // (black regions keep the destination) followed by a multiply pass
+        // (white regions keep it), landing the color content inside the shape.
+        const low = rop & 0xff;
+        if (low !== 0x20 && low !== 0x86 && low !== 0xc6) break;
+        const offBmi = view.getUint32(eo + (isDib ? 48 : 84), true);
+        const cbBmi = view.getUint32(eo + (isDib ? 52 : 88), true);
+        const offBits = view.getUint32(eo + (isDib ? 56 : 92), true);
+        const cbBits = view.getUint32(eo + (isDib ? 60 : 96), true);
         if (!cbBmi || cbBmi > 1_000_000 || !cbBits || cbBits > 12_000_000) break;
         if (offBmi < 8 || offBits < offBmi + cbBmi || eo + offBits + cbBits > eo + size) break;
         const bmiW = view.getInt32(eo + offBmi + 4, true);
         const bmiH = Math.abs(view.getInt32(eo + offBmi + 8, true));
         const dx = view.getInt32(eo + 24, true);
         const dy = view.getInt32(eo + 28, true);
-        const dw = view.getUint32(eo + 32, true);
-        const dh = view.getUint32(eo + 36, true);
-        const sx =
-          type === EMR_STRETCHDIBITS ? view.getInt32(eo + 32, true) : view.getInt32(eo + 64, true);
-        const sy =
-          type === EMR_STRETCHDIBITS ? view.getInt32(eo + 36, true) : view.getInt32(eo + 68, true);
+        const dw = view.getUint32(eo + (isDib ? 72 : 32), true);
+        const dh = view.getUint32(eo + (isDib ? 76 : 36), true);
+        const sx = view.getInt32(eo + (isDib ? 32 : 44), true);
+        const sy = view.getInt32(eo + (isDib ? 36 : 48), true);
         let crop: PicDraft["crop"];
-        if (
-          bmiW > 0 &&
-          bmiH > 0 &&
-          dw > 0 &&
-          dh > 0 &&
-          (sx > 0 || sy > 0 || sx + dw < bmiW || sy + dh < bmiH)
-        ) {
-          crop = {
-            l: Math.max(0, sx / bmiW),
-            t: Math.max(0, sy / bmiH),
-            r: Math.max(0, 1 - (sx + dw) / bmiW),
-            b: Math.max(0, 1 - (sy + dh) / bmiH),
-          };
-          if (!(crop.l > 0.001 || crop.t > 0.001 || crop.r > 0.001 || crop.b > 0.001))
-            crop = undefined;
+        if (isDib) {
+          const cxS = view.getUint32(eo + 40, true);
+          const cyS = view.getUint32(eo + 44, true);
+          if (
+            bmiW > 0 &&
+            bmiH > 0 &&
+            cxS > 0 &&
+            cyS > 0 &&
+            (sx > 0 || sy > 0 || sx + cxS < bmiW || sy + cyS < bmiH)
+          ) {
+            crop = {
+              l: Math.max(0, sx / bmiW),
+              t: Math.max(0, sy / bmiH),
+              r: Math.max(0, 1 - (sx + cxS) / bmiW),
+              b: Math.max(0, 1 - (sy + cyS) / bmiH),
+            };
+            if (!(crop.l > 0.001 || crop.t > 0.001 || crop.r > 0.001 || crop.b > 0.001))
+              crop = undefined;
+          }
         }
         const eff = effOf ? effOf(xf) : xf;
         const [px, py] = xformPoint(eff, dx, dy);
@@ -1260,6 +1298,9 @@ function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): Draft[] {
           w: px2 - px,
           h: py2 - py,
           src: bmpDataUrl(emf, eo + offBmi, cbBmi + cbBits),
+          ...(low !== 0x20
+            ? { blend: low === 0x86 ? ("screen" as const) : ("multiply" as const) }
+            : {}),
           ...(crop ? { crop } : {}),
         });
         break;
@@ -1295,42 +1336,71 @@ function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): Draft[] {
         break;
       }
       case EMR_MOVE_TO_EX: {
-        // A move starts a figure unconditionally: corpus exporters skip the
-        // BeginPath bracket entirely and grow paths straight from MoveToEx,
-        // so a `figure != null` guard here would silence every path. A move
-        // outside any fill/stroke pair just leaves an unconsumed figure —
-        // harmless (AbortPath / a later fill clear it).
-        figure = [["M", [view.getInt32(eo + 8, true), view.getInt32(eo + 12, true)]]];
+        // A move starts a figure: corpus exporters skip the BeginPath bracket
+        // and grow paths straight from MoveToEx, so a move with no pending
+        // figure opens one. With a figure pending the move opens a NEW SUBPATH
+        // of the same path — GDI fills all its figures together (the ring
+        // icons: two MoveTo'd circles consumed by one FillPath, ALTERNATE
+        // winding carving the hole). Replacing there dropped the outer circle
+        // and left the inner twin as a solid disc painted over the ring.
+        const pt: [number, number] = [view.getInt32(eo + 8, true), view.getInt32(eo + 12, true)];
+        figure = figure ? [...figure, ["M", pt]] : [["M", pt]];
         break;
       }
       case EMR_LINE_TO: {
         if (figure) figure.push(["L", [view.getInt32(eo + 8, true), view.getInt32(eo + 12, true)]]);
         break;
       }
-      case EMR_POLY_LINE_TO16:
-      case EMR_POLY_BEZIER_TO16: {
+      case EMR_POLYGON16: {
+        // A standalone closed polygon (same body shape as POLYLINE16),
+        // filled with the selected brush and outlined with the pen — the
+        // icon artwork (circles, arrows, bar-chart bars) rides these.
+        const fill = brushes.get(selectedBrush);
+        if (!fill) break;
+        const count = view.getUint32(eo + 24, true);
+        if (!count || count > 10_000 || eo + 28 + count * 4 > eo + size) break;
+        const cmds: PathCmds = [];
+        for (let i = 0; i < count; i++) {
+          const x = view.getInt16(eo + 28 + i * 4, true);
+          const y = view.getInt16(eo + 28 + i * 4 + 2, true);
+          cmds.push([i === 0 ? "M" : "L", [x, y]]);
+        }
+        cmds.push(["Z", []]);
+        const pen = pens.get(selectedPen);
+        const eff = effOf ? effOf(xf) : xf;
+        const scale = Math.max(Math.hypot(eff.m11, eff.m21), Math.hypot(eff.m12, eff.m22));
+        pushPath(drafts, cmds, eff, {
+          fill,
+          ...(pen && pen.width > 0
+            ? { strokeColor: pen.color, strokeWidth: Math.max(pen.width * scale, 1) }
+            : {}),
+        });
+        break;
+      }
+      case EMR_POLYLINETO16:
+      case EMR_POLYBEZIERTO16: {
         // Both share the POLYLINE16 body: [bounds 4×i32][count u32][points].
-        // PolyLineTo16 appends line vertices; PolyBezierTo16 appends bezier
+        // PolylineTo16 appends line vertices; PolyBezierTo16 appends bezier
         // triplets ([control1, control2, end] per segment, running position
         // opens the segment — the same convention decodePath applies).
         const count = view.getUint32(eo + 24, true);
         if (!count || count > 10_000 || eo + 28 + count * 4 > eo + size || !figure) break;
-        for (let i = 0; i < count; i++) {
-          const x = view.getInt16(eo + 28 + i * 4, true);
-          const y = view.getInt16(eo + 28 + i * 4 + 2, true);
-          if (type === EMR_POLY_LINE_TO16) {
-            figure.push(["L", [x, y]]);
-          } else {
-            // Accumulate the triplet on the anchor command, then lift it off
-            // as a cubic: the running position is the anchor (it stays), the
-            // three pairs are [control1, control2, end].
-            const anchor = figure[figure.length - 1];
-            if (!anchor || anchor[0] === "Z") break;
-            anchor[1].push(x, y);
-            if (i % 3 === 2 && anchor[1].length >= 8) {
-              figure.push(["C", anchor[1].slice(2)]);
-              anchor[1].length = 2;
-            }
+        if (type === EMR_POLYLINETO16) {
+          for (let i = 0; i < count; i++) {
+            figure.push([
+              "L",
+              [view.getInt16(eo + 28 + i * 4, true), view.getInt16(eo + 28 + i * 4 + 2, true)],
+            ]);
+          }
+        } else {
+          // PolyBezierTo16 points are [control1, control2, end] triplets;
+          // each segment's start anchor is the running position (the previous
+          // command's last point), so a straight emit of cubics needs no
+          // state. A partial trailing triplet is not a segment.
+          for (let i = 0; i + 2 < count; i += 3) {
+            const at = eo + 28 + i * 4;
+            const p = (o: number): number => view.getInt16(at + o, true);
+            figure.push(["C", [p(0), p(2), p(4), p(6), p(8), p(10)]]);
           }
         }
         break;
@@ -1517,7 +1587,8 @@ function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): Draft[] {
                 text: ch,
                 family: font?.face ?? "",
                 sizeWorld: height,
-                ...(cellInset > 0.01 ? { cellInsetWorld: cellInset } : {}),
+                ...(isVerticalPunct(ch) ? { rotation: 90 } : {}),
+                ...(!isVerticalPunct(ch) && cellInset > 0.01 ? { cellInsetWorld: cellInset } : {}),
                 ...(textColor ? { color: textColor } : {}),
                 ...(font && font.weight >= 700 ? { bold: true } : {}),
               });
@@ -1721,6 +1792,7 @@ function finalize(
         width: dr.w * sX,
         height: dr.h * sY,
         src: dr.src,
+        ...(dr.blend ? { blend: dr.blend } : {}),
         ...(dr.crop
           ? {
               crop: {
