@@ -502,7 +502,6 @@ class DocenDocument extends AddinHost<Editor> {
   /** The header/footer story under edit (null = none). `#storyPage` is the
    *  anchor page the story edits in place on. */
   #storyKind: StoryKind | null = null;
-  #storySlot: StorySlot = "default";
   #storyPage = -1;
 
   /** The underlying Tiptap Editor (undefined before connect / after disconnect).
@@ -1081,7 +1080,6 @@ class DocenDocument extends AddinHost<Editor> {
         read: (kind, slot, page) => this.#readStorySource(kind, slot, page),
         entered: (kind, slot, page) => {
           this.#storyKind = kind;
-          this.#storySlot = slot;
           this.#storyPage = page;
           this.#stage?.setStoryEdit({
             kind,
@@ -1197,7 +1195,7 @@ class DocenDocument extends AddinHost<Editor> {
     // getJSON()'s attrs object IS the live PM attrs (Node.toJSON carries it by
     // reference) — patch a shallow copy or the editor state would mutate
     // without a transaction (no render, no undo, no docen:change).
-    const attrs = { ...((raw.attrs as Record<string, unknown>) ?? {}) };
+    const attrs = { ...(raw.attrs as Record<string, unknown>) };
     const key = this.#slotsKeyOf(kind);
     attrs[key] = { ...(attrs[key] as object | undefined), [slot]: json };
     const run = this.#projectAndLayout({ ...raw, attrs } as JSONContent);
@@ -1262,8 +1260,8 @@ class DocenDocument extends AddinHost<Editor> {
       this.#loadDoc({
         ...raw,
         attrs: {
-          ...((raw.attrs as Record<string, unknown>) ?? {}),
-          [key]: slots((raw.attrs as Record<string, unknown>) ?? {}),
+          ...(raw.attrs as Record<string, unknown>),
+          [key]: slots(raw.attrs as Record<string, unknown>),
         },
       } as JSONContent);
       return;
@@ -1280,7 +1278,6 @@ class DocenDocument extends AddinHost<Editor> {
   #exitStory(kind: StoryKind, slot: StorySlot, json: JSONContent[], dirty: boolean): void {
     this.#stage?.setStoryEdit(null);
     this.#storyKind = null;
-    this.#storySlot = "default";
     if (dirty) this.#persistStory(kind, slot, json, this.#storyPage);
     this.#storyPage = -1;
   }
@@ -1306,7 +1303,7 @@ class DocenDocument extends AddinHost<Editor> {
     const raw = bridge.editor.getJSON();
     this.#loadDoc({
       ...raw,
-      attrs: { ...((raw.attrs as Record<string, unknown>) ?? {}), [key]: group },
+      attrs: { ...(raw.attrs as Record<string, unknown>), [key]: group },
     } as JSONContent);
   }
 
@@ -2996,9 +2993,47 @@ class DocenDocument extends AddinHost<Editor> {
     URL.revokeObjectURL(url);
   }
 
-  /** Print the document: window.print(). */
+  /** Print only the document pages — never the ribbon/chrome. Each page
+   *  canvas rasterizes into a hidden print-only iframe (one image per page at
+   *  the page's true paper size, @page margin 0), so the browser's print
+   *  dialog receives exactly the paginated document, like Word's print
+   *  output. */
   #print(): void {
-    window.print();
+    const shots = this.#stage?.printSnapshots() ?? [];
+    if (shots.length === 0) return;
+    const first = shots[0]!;
+    const frame = document.createElement("iframe");
+    Object.assign(frame.style, {
+      position: "fixed",
+      right: "0",
+      bottom: "0",
+      width: "0",
+      height: "0",
+      border: "0",
+    });
+    document.body.append(frame);
+    const doc = frame.contentDocument!;
+    doc.open();
+    doc.write(`<!doctype html><html><head><title>${this.getAttribute("filename") ?? "Document"}</title><style>
+      @page { size: ${first.width / 96}in ${first.height / 96}in; margin: 0; }
+      html, body { margin: 0; }
+      img { display: block; width: 100%; }
+      .pg { page-break-after: always; break-after: page; }
+      .pg:last-child { page-break-after: auto; break-after: auto; }
+    </style></head><body>`);
+    for (const s of shots) doc.write(`<div class="pg"><img src="${s.url}"></div>`);
+    doc.write("</body></html>");
+    doc.close();
+    frame.onload = () => {
+      const win = frame.contentWindow;
+      if (!win) return;
+      const cleanup = (): void => frame.remove();
+      win.addEventListener("afterprint", cleanup, { once: true });
+      win.focus();
+      win.print();
+      // afterprint can lag behind the dialog closing — sweep after a grace.
+      setTimeout(cleanup, 30_000);
+    };
   }
 
   /** Common load path for openDOCX/openMarkdown: adopt a filename, replace the
@@ -3023,17 +3058,87 @@ class DocenDocument extends AddinHost<Editor> {
   /** Load a .docx into the editor from a File or a buffer (ArrayBuffer /
    *  Uint8Array). A File also adopts its name as the filename; a bare buffer
    *  carries no name. parseDOCX is synchronous, but this is async so a File's
-   *  bytes can be awaited. */
+   *  bytes can be awaited. Large files report progress in the status bar
+   *  (Word's bottom-row "Opening…"): streaming the bytes gives a real
+   *  percentage; parsing and first layout show an indeterminate bar. */
   async openDOCX(input: File | ArrayBuffer | Uint8Array): Promise<void> {
-    const buffer = input instanceof File ? await input.arrayBuffer() : input;
-    this.#applyOpenedJSON(parseDOCX(buffer), input instanceof File ? input.name : undefined);
+    const name = input instanceof File ? input.name : undefined;
+    this.#setProgress(t("status.opening", this).replace("{name}", name ?? "DOCX"));
+    try {
+      const buffer = input instanceof File ? await this.#readBytesProgressive(input) : input;
+      // parseDOCX blocks the main thread — yield two frames so the read-stage
+      // bar paints before it freezes, then swap to the indeterminate parse bar.
+      await this.#nextFrame();
+      this.#setProgress(t("status.parsing", this));
+      const json = parseDOCX(buffer);
+      this.#applyOpenedJSON(json, name);
+      await this.#nextFrame();
+      this.#setProgress();
+    } catch (err) {
+      this.#setProgress();
+      throw err;
+    }
   }
 
   /** Load a Markdown file/string into the editor. A File adopts its name as the
    *  filename; a bare string carries no name. */
   async openMarkdown(input: File | string): Promise<void> {
-    const text = typeof input === "string" ? input : await input.text();
-    this.#applyOpenedJSON(parseMarkdown(text), typeof input === "string" ? undefined : input.name);
+    const name = typeof input === "string" ? undefined : input.name;
+    this.#setProgress(t("status.opening", this).replace("{name}", name ?? "Markdown"));
+    try {
+      const text = typeof input === "string" ? input : await input.text();
+      await this.#nextFrame();
+      this.#setProgress(t("status.parsing", this));
+      this.#applyOpenedJSON(parseMarkdown(text), name);
+      await this.#nextFrame();
+      this.#setProgress();
+    } catch (err) {
+      this.#setProgress();
+      throw err;
+    }
+  }
+
+  /** Show (label + optional 0-100 value; absent = indeterminate) or clear the
+   *  status bar's open-progress cluster. */
+  #setProgress(label?: string, value?: number): void {
+    const bar = this.shadowRoot?.querySelector("docen-status-bar");
+    if (!bar) return;
+    if (label == null) bar.removeAttribute("progress");
+    else bar.setAttribute("progress", JSON.stringify({ label, value }));
+  }
+
+  /** Read a File's bytes through its stream so the progress bar tracks real
+   *  bytes (File.arrayBuffer() is opaque). */
+  async #readBytesProgressive(file: File): Promise<ArrayBuffer> {
+    const total = file.size || 1;
+    const reader = file.stream().getReader();
+    const chunks: Uint8Array[] = [];
+    let loaded = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done || !value) break;
+      chunks.push(value);
+      loaded += value.byteLength;
+      this.#setProgress(
+        t("status.opening", this).replace("{name}", file.name),
+        5 + Math.round((loaded / total) * 35),
+      );
+    }
+    const out = new Uint8Array(loaded);
+    let offset = 0;
+    for (const chunk of chunks) {
+      out.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return out.buffer;
+  }
+
+  /** Two rAFs — enough for the current progress state to paint before a
+   *  synchronous block (parseDOCX) freezes the frame. */
+  #nextFrame(): Promise<void> {
+    return new Promise((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+    );
   }
 
   /** Serialize the current document to a DOCX buffer. */

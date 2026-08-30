@@ -370,6 +370,32 @@ export class CanvasStage {
     return this.slots[index]?.el ?? null;
   }
 
+  /** Rasterize every page for printing: pages the IntersectionObserver never
+   *  reached get their App forced (a printout needs all pages, not just the
+   *  scrolled-into-view ones), every slot repaints and force-renders, then
+   *  each canvas exports as PNG. `width`/`height` are the page's unzoomed CSS
+   *  px (96 dpi) so the print view can lay the images out at true paper size. */
+  printSnapshots(): { width: number; height: number; url: string }[] {
+    for (const [index, slot] of this.slots.entries()) {
+      this.ensure(slot);
+      if (!slot.app) continue;
+      this.repaint(slot.app, index);
+      slot.app.forceRender();
+    }
+    const shots: { width: number; height: number; url: string }[] = [];
+    for (const [index, slot] of this.slots.entries()) {
+      const canvas = slot.el.querySelector("canvas");
+      if (!canvas) continue;
+      const flow = this.sectionAt(index).flow;
+      shots.push({
+        width: this.pageCss(flow.pageWidthPx),
+        height: this.pageCss(flow.pageHeightPx),
+        url: canvas.toDataURL("image/png"),
+      });
+    }
+    return shots;
+  }
+
   destroy(): void {
     this.io.disconnect();
     this.dprMedia?.removeEventListener("change", this.dprChange);

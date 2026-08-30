@@ -1,12 +1,4 @@
-import {
-  FASTElement,
-  attr,
-  css,
-  customElement,
-  html,
-  observable,
-  ref,
-} from "@microsoft/fast-element";
+import { FASTElement, css, customElement, html, observable, ref } from "@microsoft/fast-element";
 
 import { observeLang, t } from "../../i18n/localize";
 

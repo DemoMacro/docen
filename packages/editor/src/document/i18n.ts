@@ -430,6 +430,8 @@ export const ribbonEn: AdditionalLanguage = {
     "status.section": "Section: {n}",
     "status.page-of": "Page {page} of {total}",
     "status.words": "Words: {n}",
+    "status.opening": "Opening {name}",
+    "status.parsing": "Parsing document",
     // --- Options dialog ---
     "options.title": "Options",
     "options.ok": "OK",
@@ -861,6 +863,8 @@ export const ribbonZhCN: AdditionalLanguage = {
     "status.section": "节: {n}",
     "status.page-of": "第 {page} 页，共 {total} 页",
     "status.words": "字数: {n}",
+    "status.opening": "正在打开 {name}",
+    "status.parsing": "正在解析文档",
     // --- 选项对话框 ---
     "options.title": "选项",
     "options.ok": "确定",

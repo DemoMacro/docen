@@ -22,6 +22,19 @@ const styles = css`
     display: flex;
     gap: 14px;
   }
+  /* Open-progress cluster (Word's bottom-row "Opening…"): label + a slim
+     determinate/indeterminate bar, shown only while a document loads. */
+  .progress {
+    display: none;
+    align-items: center;
+    gap: 8px;
+  }
+  .progress.open {
+    display: inline-flex;
+  }
+  .progress fluent-progress {
+    width: 120px;
+  }
   /* Right cluster — Word's zoom control: a minus / plus button flanking a
      draggable slider, then the percent. The slider is a native range input
      styled to a Fluent track + accent thumb. */
@@ -90,6 +103,10 @@ const styles = css`
 
 const template = html<DocenStatusBar>`
   <span class="left">
+    <span class="progress" ${ref("progressEl")}>
+      <span ${ref("progressLabelEl")}></span>
+      <fluent-progress ${ref("progressBarEl")}></fluent-progress>
+    </span>
     <span class="section" ${ref("sectionEl")}></span>
     <span class="pages" ${ref("pagesEl")}></span>
     <span class="words" ${ref("wordsEl")}></span>
@@ -126,6 +143,10 @@ class DocenStatusBar extends FASTElement {
   @attr total?: string;
   @attr words?: string;
   @attr zoom?: string;
+  /** Open progress as JSON: `{ label, value? }` — a value makes the bar
+   *  determinate (0-100); no value leaves it indeterminate. Clearing the
+   *  attribute hides the cluster. */
+  @attr progress?: string;
 
   @observable sectionEl?: HTMLElement;
   @observable pagesEl?: HTMLElement;
@@ -135,10 +156,17 @@ class DocenStatusBar extends FASTElement {
   @observable outBtn?: HTMLButtonElement;
   @observable inBtn?: HTMLButtonElement;
   @observable langBtn?: HTMLElement;
+  @observable progressEl?: HTMLElement;
+  @observable progressLabelEl?: HTMLElement;
+  @observable progressBarEl?: HTMLElement & { value?: number | null };
   #unsubscribe?: () => void;
 
   sectionChanged(): void {
     this.#renderSection();
+  }
+
+  progressChanged(): void {
+    this.#renderProgress();
   }
   pageChanged(): void {
     this.#renderPages();
@@ -188,6 +216,23 @@ class DocenStatusBar extends FASTElement {
     this.#renderPages();
     this.#renderWords();
     this.#renderZoom();
+    this.#renderProgress();
+  }
+
+  #renderProgress(): void {
+    const host = this.progressEl;
+    if (!host || !this.progressBarEl || !this.progressLabelEl) return;
+    let data: { label?: string; value?: number } | undefined;
+    try {
+      data = this.progress ? (JSON.parse(this.progress) as typeof data) : undefined;
+    } catch {
+      data = undefined;
+    }
+    host.classList.toggle("open", !!data);
+    if (!data) return;
+    this.progressLabelEl.textContent = data.label ?? "";
+    // A null/absent value switches fluent-progress to its indeterminate spin.
+    this.progressBarEl.value = typeof data.value === "number" ? data.value : null;
   }
 
   #renderLang(): void {

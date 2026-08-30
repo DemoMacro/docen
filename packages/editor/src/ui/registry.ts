@@ -41,6 +41,8 @@ import {
   MenuListDefinition,
   MenuStyles,
   MenuTemplate,
+  ProgressBar,
+  ProgressBarDefinition,
   Listbox,
   ListboxDefinition,
   Switch,
@@ -351,6 +353,9 @@ export async function registerComponents(): Promise<void> {
     styles: TabStyles,
   });
   await defineElement(Listbox, ListboxDefinition);
+  // fluent-progress: the status bar's open-progress indicator (Word shows the
+  // same bar in its bottom status row while opening a large document).
+  await defineElement(ProgressBar, ProgressBarDefinition);
   await defineElement(Tablist, TablistDefinition);
   await defineElement(TextInput, TextInputDefinition);
   // fluent-toggle-button: same padding/min-width/gap tightening as the button.

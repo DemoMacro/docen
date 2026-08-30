@@ -76,7 +76,7 @@ describe("CaretMap click boundaries", () => {
     // is equidistant from boundaries 1 and 2 and must resolve to 1 — the old
     // pairing handed boundary 1's x to position 2, landing every click one
     // character right.
-    const { editor, doc } = buildDoc(["abcd"]);
+    const { doc } = buildDoc(["abcd"]);
     const map = new CaretMap(
       pageOf([fakePara([{ text: "abcd", xPx: 0, yPx: 0, maxWidthPx: 100 }])]) as never,
       doc,
@@ -93,7 +93,7 @@ describe("CaretMap click boundaries", () => {
   });
 
   it("renders the caret at the clicked boundary, not one past it", () => {
-    const { editor, doc } = buildDoc(["abcd"]);
+    const { doc } = buildDoc(["abcd"]);
     const map = new CaretMap(
       pageOf([fakePara([{ text: "abcd", xPx: 0, yPx: 0, maxWidthPx: 100 }])]) as never,
       doc,
@@ -111,7 +111,7 @@ describe("CaretMap click boundaries", () => {
 
 describe("CaretMap selection rectangles", () => {
   it("stretches fully crossed lines to the wrap edge; the last line stops at text", () => {
-    const { editor, doc } = buildDoc(["ab", "cde"]);
+    const { doc } = buildDoc(["ab", "cde"]);
     const map = new CaretMap(
       pageOf([
         fakePara([{ text: "ab", xPx: 0, yPx: 0, maxWidthPx: 100 }]),
@@ -130,7 +130,7 @@ describe("CaretMap selection rectangles", () => {
   });
 
   it("keeps multi-line highlights contiguous with line-box heights", () => {
-    const { editor, doc } = buildDoc(["abc"]);
+    const { doc } = buildDoc(["abc"]);
     // One paragraph wrapped into two lines ("ab" / "c", 20px tall each).
     const map = new CaretMap(
       pageOf([
@@ -149,7 +149,7 @@ describe("CaretMap selection rectangles", () => {
   });
 
   it("highlights the paragraph gap once the next paragraph is selected too", () => {
-    const { editor, doc } = buildDoc(["ab", "cde"]);
+    const { doc } = buildDoc(["ab", "cde"]);
     // Paragraph 2's block sits 50px down (fakePara page items step 50): the
     // gap between the paragraphs belongs to a whole-document selection.
     const map = new CaretMap(
@@ -169,7 +169,7 @@ describe("CaretMap selection rectangles", () => {
   });
 
   it("shows an empty paragraph as a caret-width block", () => {
-    const { editor, doc } = buildDoc(["ab", ""]);
+    const { doc } = buildDoc(["ab", ""]);
     const map = new CaretMap(
       pageOf([
         fakePara([{ text: "ab", xPx: 0, yPx: 0, maxWidthPx: 100 }]),
@@ -188,7 +188,7 @@ describe("CaretMap selection rectangles", () => {
     // empty: the zip pairs them as-is, so no PM position maps into the line.
     // The selection crossing the paragraph must still highlight the line the
     // reader sees — not drop it (the old char-intersection test did).
-    const { editor, doc } = buildDoc(["ab", ""]);
+    const { doc } = buildDoc(["ab", ""]);
     const map = new CaretMap(
       pageOf([
         fakePara([{ text: "ab", xPx: 0, yPx: 0, maxWidthPx: 100 }]),
@@ -209,7 +209,7 @@ describe("CaretMap tolerant zip", () => {
     // doc carries their paragraphs but the layout never lays them. The zip
     // must skip them unmapped instead of invalidating the whole map (every
     // click dead) — paragraphs after the gap still pair with their own text.
-    const { editor, doc } = buildDoc(["aaa", "bbb", "ccc", "ddd"]);
+    const { doc } = buildDoc(["aaa", "bbb", "ccc", "ddd"]);
     const map = new CaretMap(
       pageOf([
         fakePara([{ text: "aaa", xPx: 0, yPx: 0, maxWidthPx: 100 }]),
@@ -231,7 +231,7 @@ describe("CaretMap tolerant zip", () => {
     // A repeated table header row renders on every continuation page but is
     // one PM row: the duplicated header block pairs with nothing. The zip
     // skips it once the NEXT laid block's text matches the current textblock.
-    const { editor, doc } = buildDoc(["aaa", "bbb"]);
+    const { doc } = buildDoc(["aaa", "bbb"]);
     const map = new CaretMap(
       pageOf([
         fakePara([{ text: "aaa", xPx: 0, yPx: 0, maxWidthPx: 100 }]),
@@ -251,7 +251,7 @@ describe("CaretMap tolerant zip", () => {
     // A TOC's PM field-content paragraphs hold no text; the laid entries render
     // their cached option text at the same positions. Text differs at every
     // pair, no resync fires, and the positional pairing keeps the map valid.
-    const { editor, doc } = buildDoc(["title", "", ""]);
+    const { doc } = buildDoc(["title", "", ""]);
     const map = new CaretMap(
       pageOf([
         fakePara([{ text: "title", xPx: 0, yPx: 0, maxWidthPx: 100 }]),
