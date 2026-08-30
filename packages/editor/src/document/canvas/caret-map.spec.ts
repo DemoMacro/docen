@@ -266,4 +266,31 @@ describe("CaretMap tolerant zip", () => {
     expect(map.caretRect(8)?.yPx).toBe(50);
     expect(map.caretRect(10)?.yPx).toBe(100);
   });
+
+  it("resyncs after a render-only run longer than the blank-paragraph supply", () => {
+    // A multi-entry TOC lays N paragraphs over one empty field paragraph: the
+    // first entry pair-as-is's onto the blank, the remaining entries meet the
+    // REAL body heading as `there` and must skip ahead (laid-side anchor) to
+    // the heading's laid block — not pair onto the heading and shift every
+    // later paragraph by one.
+    const { editor: _editor, doc } = buildDoc(["", "heading", "body"]);
+    const map = new CaretMap(
+      pageOf([
+        fakePara([{ text: "heading1", xPx: 0, yPx: 0, maxWidthPx: 100 }]),
+        fakePara([{ text: "entry2", xPx: 0, yPx: 0, maxWidthPx: 100 }]),
+        fakePara([{ text: "heading", xPx: 0, yPx: 0, maxWidthPx: 100 }]),
+        fakePara([{ text: "body", xPx: 0, yPx: 0, maxWidthPx: 100 }]),
+      ]) as never,
+      doc,
+      () => ({ contentLeftPx: 0, contentTopPx: 0 }),
+    );
+    expect(map.valid).toBe(true);
+    // The heading's laid line (y=100) maps the heading's own PM position
+    // (doc: blank 0-2, heading 2-11 → its inner start is 3).
+    expect(map.posAtPoint(0, 5, 105)).toBe(3);
+    expect(map.caretRect(3)?.yPx).toBe(100);
+    // The paragraph after it stays aligned too (inner start 12).
+    expect(map.posAtPoint(0, 5, 155)).toBe(12);
+    expect(map.caretRect(12)?.yPx).toBe(150);
+  });
 });

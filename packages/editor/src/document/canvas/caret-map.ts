@@ -19,6 +19,8 @@ import {
   leaferWordIndices,
   lineOriginXPx,
   tableGridOf,
+  vertAlignBaselineShiftPx,
+  vertAlignedSizePx,
 } from "@docen/layout";
 import type { Node as PmNode } from "@tiptap/pm/model";
 
@@ -71,24 +73,36 @@ const measureCanvas: HTMLCanvasElement | null =
 
 const SEGMENTER = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
-/** Per-grapheme advance widths of a text in a font — measured once, reused
- *  across every caret query against the same item (drag-select rescans its
- *  line on every mousemove; per-grapheme sums approximate the kerned run,
- *  caret placement only). */
-const widthCache = new Map<string, number[]>();
+/** Per-grapheme advances and UTF-16 lengths of a text in a font — measured
+ *  once, reused across every caret query against the same item (drag-select
+ *  rescans its line on every mousemove; per-grapheme sums approximate the
+ *  kerned run, caret placement only). The advance carries the letter
+ *  spacing after every glyph — Leafer's own char layout adds it there too
+ *  (createRows), so boundaries land where the painter actually puts glyphs. */
+interface GraphemeMetrics {
+  widths: number[];
+  lens: number[];
+}
 
-function graphemeWidths(text: string, font: string): number[] {
-  const key = `${font}\u0000${text}`;
+const widthCache = new Map<string, GraphemeMetrics>();
+
+function graphemeMetrics(text: string, font: string, letterSpacingPx = 0): GraphemeMetrics {
+  const key = `${font}\u0000${letterSpacingPx}\u0000${text}`;
   const cached = widthCache.get(key);
   if (cached) return cached;
   const ctx = measureCanvas?.getContext("2d");
-  if (!ctx) return [];
+  if (!ctx) return { widths: [], lens: [] };
   ctx.font = font;
   const widths: number[] = [];
-  for (const { segment } of SEGMENTER.segment(text)) widths.push(ctx.measureText(segment).width);
+  const lens: number[] = [];
+  for (const { segment } of SEGMENTER.segment(text)) {
+    widths.push(ctx.measureText(segment).width + letterSpacingPx);
+    lens.push(segment.length);
+  }
   if (widthCache.size >= 4000) widthCache.clear();
-  widthCache.set(key, widths);
-  return widths;
+  const metrics = { widths, lens };
+  widthCache.set(key, metrics);
+  return metrics;
 }
 
 /** Sum of the first `n` grapheme widths. */
@@ -117,11 +131,15 @@ function collectLayoutParas(
         collectLayoutParas(b.children, page, bx, by, out);
         break;
       case "table": {
-        // The painter's own walk (tableGridOf): content anchors at the placed
-        // origin — column left + insets, row top + insets + vertical-align
-        // offset — exactly where painting puts it.
+        // The painter's own walk (tableGridOf), including the w:jc placement
+        // it applies before that walk (paintTable adds offsetXPx there):
+        // content anchors at the placed origin — column left + insets, row
+        // top + insets + vertical-align offset — exactly where painting puts
+        // it. Skipping the placement shifted every click and highlight in a
+        // centered/right table a full offset left of the glyphs.
+        const gx = bx + (b.offsetXPx ?? 0);
         for (const p of tableGridOf(b).cells) {
-          collectLayoutParas(p.cell.stack, page, bx + p.contentXPx, by + p.contentYPx, out);
+          collectLayoutParas(p.cell.stack, page, gx + p.contentXPx, by + p.contentYPx, out);
         }
         break;
       }
@@ -175,6 +193,17 @@ export class CaretMap {
     // 2. Render-only laid paragraphs (repeated table headers on continuation
     //    pages, a TOC entry laid from its cached options while the PM field
     //    content stays empty) pair by position instead.
+    // 3. A RUN of render-only paragraphs longer than the local scans (a
+    //    21-entry TOC lays as 21 paragraphs over one empty field paragraph)
+    //    resyncs on the laid-side anchor: where the current textblock's text
+    //    next appears in the laid list, skipping the run in between.
+    const laidTexts = laid.map((l) => laidText(l.para));
+    const laidRuns = new Map<string, number[]>();
+    laidTexts.forEach((t, idx) => {
+      const run = laidRuns.get(t);
+      if (run) run.push(idx);
+      else laidRuns.set(t, [idx]);
+    });
     this.valid = true;
     let j = 0;
     let i = 0;
@@ -194,7 +223,7 @@ export class CaretMap {
         i++;
         continue;
       }
-      const here = laidText(para);
+      const here = laidTexts[i]!;
       const there = norm(tbs[j]!.node.textContent);
       if (here !== there) {
         // Text disagrees at this position. First suspect a PM-side gap: this
@@ -211,11 +240,22 @@ export class CaretMap {
         if (gap > 0) {
           j += gap;
         } else {
-          const next = i + 1 < laid.length ? laidText(laid[i + 1]!.para) : null;
+          const next = i + 1 < laid.length ? laidTexts[i + 1]! : null;
+          const anchor = laidRuns.get(there)?.find((idx) => idx > i);
           if (next != null && next === there) {
             // Laid-side gap: the NEXT laid block pairs with this textblock,
             // so this one is render-only — skip it without consuming.
             i++;
+            continue;
+          }
+          if (anchor != null && there !== "") {
+            // A render-only RUN: skip straight to the laid block carrying
+            // this textblock's text. Without it every TOC entry after the
+            // first pair-as-is'd onto a real body paragraph and every click
+            // below selected the wrong paragraph's text. Empty `there` (the
+            // blank paragraphs after a TOC field) stays on pair-as-is — an
+            // empty anchor is never a reliable resync point.
+            i = anchor;
             continue;
           }
           // Otherwise a legal same-position drift (a TOC entry laid from its
@@ -251,9 +291,11 @@ export class CaretMap {
       // so no line-index guessing.
       const xPx = entry.xPx + lineOriginXPx(para, line);
       let chars = 0;
+      // UTF-16 units — the PM side (posOfChar/charOfPos) counts
+      // textContent.length, so the collapsed-char space must too; counting
+      // code points drifted every boundary after an astral char.
       for (const item of line.items) {
-        // for...of iterates code points, same as the spread it replaces.
-        if (item.kind === "text") for (const _ of item.text) chars++;
+        if (item.kind === "text") chars += item.text.length;
       }
       const lineEntry: LineEntry = {
         page: entry.page,
@@ -339,7 +381,15 @@ export class CaretMap {
         familyOfSlot(inline.style.family, isCjkCodeUnit(item.text, 0)),
       );
       ctx.font = font;
-      const baseline = line.yPx + pad + 0.85 * inline.style.sizePx;
+      // The painter's own baseline: a vertAlign run paints at the scaled
+      // size on a shifted baseline (vertAlignedSizePx in cssFontOf above,
+      // vertAlignBaselineShiftPx in scene.ts) — the band must anchor there
+      // too, or a footnote reference's highlight rides below its glyphs.
+      const baseline =
+        line.yPx +
+        pad +
+        vertAlignBaselineShiftPx(inline.style) +
+        0.85 * vertAlignedSizePx(inline.style);
       // The item's own ink box (first graphemes carry its script's shape); the
       // deepest run's descent and highest run's ascent bound the highlight.
       const metrics = ctx.measureText(Array.from(item.text).slice(0, 8).join(""));
@@ -457,16 +507,16 @@ export class CaretMap {
         inline.style,
         familyOfSlot(inline.style.family, isCjkCodeUnit(item.text, 0)),
       );
-      const widths = graphemeWidths(item.text, font);
+      const { widths, lens } = graphemeMetrics(item.text, font, inline.style.letterSpacingPx);
       let prefix = 0;
       for (let g = 0; g < widths.length; g++) {
         // xInItem(g) is the g-th grapheme's LEFT edge — the boundary with
-        // exactly `g` collapsed chars before it. Push it against the
-        // pre-increment char; pairing it with char+1 shifted every boundary
-        // one position right and clicks landed a full character off.
+        // exactly `char` collapsed UTF-16 units before it. Push it against
+        // the pre-increment char; pairing it with char+1 shifted every
+        // boundary one position right and clicks landed a full character off.
         push(this.xInItem(entry, itemIndex, g, prefix, widths), this.posOfChar(entry.owner, char));
         prefix += widths[g]!;
-        char++;
+        char += lens[g]!;
       }
     }
     // The line-end edge: clicking past the last glyph lands here (Word's
@@ -620,24 +670,26 @@ export class CaretMap {
     let char = line.startChar;
     for (const [itemIndex, item] of line.line.items.entries()) {
       if (item.kind !== "text") continue;
-      const graphemes = [...item.text];
-      if (offset <= char + graphemes.length) {
+      if (offset <= char + item.text.length) {
         const inline = line.para.inline[item.inlineIndex];
         if (inline?.kind !== "text") return line.xPx + item.xPx;
         const font = cssFontOf(
           inline.style,
           familyOfSlot(inline.style.family, isCjkCodeUnit(item.text, 0)),
         );
-        const widths = graphemeWidths(item.text, font);
-        return this.xInItem(
-          line,
-          itemIndex,
-          offset - char,
-          prefixWidth(widths, offset - char),
-          widths,
-        );
+        const { widths, lens } = graphemeMetrics(item.text, font, inline.style.letterSpacingPx);
+        // UTF-16 offset → grapheme index: an offset that splits a multi-unit
+        // grapheme lands at that grapheme's left edge.
+        const local = offset - char;
+        let g = 0;
+        let cum = 0;
+        while (g < lens.length && cum + lens[g]! <= local) {
+          cum += lens[g]!;
+          g++;
+        }
+        return this.xInItem(line, itemIndex, g, prefixWidth(widths, g), widths);
       }
-      char += graphemes.length;
+      char += item.text.length;
     }
     const last = line.line.items[line.line.items.length - 1];
     return line.xPx + (last ? last.xPx + last.widthPx : 0);

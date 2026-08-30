@@ -10,6 +10,7 @@ import type {
  * height — Leafer never paints an element whose height is still 0.
  */
 import {
+  familyOfSlot,
   gridPadOf,
   isCjkCodeUnit,
   justifiedIntervals,
@@ -1198,14 +1199,10 @@ function paintPlaceholder(
   }
 }
 
-/** The font family a text slice paints in: a slot-aware pick over the item's
- *  own text (the engine already itemized runs; CJK slices take the eastAsia
- *  slot — the resolveFontFamily rule, applied at paint time). */
+/** The font family a text slice paints in: the measurement side's slot pick
+ *  (cssFontOf builds `, serif` on top of it — layout, caret map and paint
+ *  must resolve empty slots to the same face or glyph advances drift from
+ *  the boundaries the caret map computed). */
 function familyOf(style: LayoutTextStyle, text: string): string {
-  if (typeof style.family === "string") return style.family;
-  const slots = style.family;
-  if (text && isCjkCodeUnit(text, 0)) {
-    return slots.eastAsia ?? slots.latin ?? "Inter";
-  }
-  return slots.latin ?? "Inter";
+  return familyOfSlot(style.family, isCjkCodeUnit(text, 0)) || "serif";
 }
