@@ -6,13 +6,14 @@
 
 > Assembly layer for docen editors — bundles a Fluent UI host with the
 > @docen/docx Tiptap engine into turnkey web components like `<docen-document>`,
-> and owns Office-style C-route pagination.
+> and owns the LeaferJS canvas stage that renders the paginated pages.
 
 ## Features
 
 - 🧩 **Turnkey `<docen-document>`** — One custom element bundles the Fluent UI host (title bar, ribbon, document area, status bar, panes, find/replace) with the @docen/docx engine
-- 📄 **Office-style pagination** — C-route: fixed-height page boxes with physical overflow reflow, keeping edit == render in a single contenteditable
-- 🎨 **Fluent UI surfaces** — Ribbon (buttons, split/toggle buttons, combobox, galleries, color picker), workspace, task/navigation/format panes, context menu
+- 🎨 **Canvas rendering** — Pages render on a LeaferJS canvas (no contenteditable, no DOM text); a viewless Tiptap model drives editing through a textarea bridge
+- 📄 **Office-style pagination** — Fixed-height pages with Word's stacking rules (docGrid pitch, table band split, widow/orphan) from @docen/layout; layout re-runs on every edit
+- 🖌️ **Fluent UI surfaces** — Ribbon (buttons, split/toggle buttons, combobox, galleries, color picker), workspace, task/navigation/format panes, context menu
 - 🌐 **i18n** — Built-in Chinese (zh-CN) and English (en); add more via `registerTranslation` / `localizationInfo`. Switch live from the status bar (cycles every registered locale) or the Options dialog
 - 🌓 **Light/dark theme** — Fluent design tokens drive the chrome; switch via the `theme` attribute
 - 🔄 **DOCX round-trip** — Open/save `.docx` through the underlying @docen/docx engine
@@ -69,7 +70,7 @@ Configuration attributes split by reactivity:
   `filename`, `user`, `avatar`, `section-properties`, `styles`, `addins`,
   `theme`.
 - **Once** — read only on connect (initial value); runtime control goes through
-  methods: `content`, `spellcheck`, `navigation-pane`, `properties-pane`,
+  methods: `content`, `navigation-pane`, `properties-pane`,
   `zoom`, `show-marks`.
 
 The chrome (title bar, ribbon, status bar, panes) is always shown — extend it
@@ -80,9 +81,8 @@ via add-ins rather than toggling attributes.
 | `user`               | —          | Display name shown in the header                                       |
 | `avatar`             | —          | Avatar image URL (omitted → initial-letter avatar)                     |
 | `filename`           | "Document" | Document name shown in the header and save dialog default              |
-| `content`            | —          | Initial document as HTML (once on connect)                             |
+| `content`            | —          | Initial document as Tiptap JSON (once on connect)                      |
 | `editable`           | `true`     | `false` makes the surface read-only (reactive)                         |
-| `spellcheck`         | `false`    | `true` enables browser spellcheck (perf cost on large docs; once)      |
 | `section-properties` | —          | JSON section page setup (size, margins, orientation); reactive         |
 | `styles`             | —          | JSON named styles; reactive                                            |
 | `addins`             | —          | JSON array of external add-ins (ribbon/task-pane data); see Add-ins    |
@@ -100,21 +100,18 @@ Unwired ribbon commands (skeleton buttons) render visually but are greyed out
 
 ```typescript
 class DocenDocument extends HTMLElement {
-  // Open — single entry point auto-detects docx/md/html from the extension.
+  // Open — single entry point auto-detects docx/md from the extension.
   open(file: File): Promise<void>;
   // Format-specific loaders (use when the format is known up front, e.g. a
   // server-fetched docx buffer with no filename).
   openDOCX(input: File | ArrayBuffer | Uint8Array): Promise<void>;
   openMarkdown(input: File | string): Promise<void>;
-  openHTML(input: File | string): Promise<void>;
   saveDOCX(): Promise<Uint8Array>;
   saveMarkdown(): string;
-  saveHTML(): string;
 
-  // Runtime model — flat Tiptap JSON (doc > block+). The editor stores pages
-  // internally (C-route pagination); getJSON/setJSON unwrap/wrap them so the
-  // public model stays page-free (pages must not leak into DOCX export). For
-  // Tiptap's own getHTML / getText / setContent / chain, use getEditor().
+  // Runtime model — flat Tiptap JSON (doc > block+). Pages are a rendering
+  // projection (@docen/layout paginates per edit), never stored in the model.
+  // For Tiptap's own getText / setContent / chain, use getEditor().
   getJSON(): JSONContent;
   setJSON(json: JSONContent): void;
 
@@ -150,9 +147,9 @@ class DocenDocument extends HTMLElement {
 All events bubble and compose out of the shadow DOM — listen on the host
 element. `docen:save` / `:save-as` / `:open` / `:print` are cancelable: call
 `preventDefault()` to take over the action (otherwise the built-in behavior runs).
-`docen:save-as` carries `{ format }` (`"docx" | "markdown" | "html"`) — which
+`docen:save-as` carries `{ format }` (`"docx" | "markdown"`) — which
 Save-As variant the user picked. (`docen:open` is format-agnostic: the host
-auto-detects docx/md/html from the chosen file's extension, so it carries no
+auto-detects docx/md from the chosen file's extension, so it carries no
 detail.)
 
 | Event                              | When                                           | Detail                   |

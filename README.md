@@ -5,24 +5,28 @@
 ![GitHub](https://img.shields.io/github/license/DemoMacro/docen)
 [![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg)](https://www.contributor-covenant.org/version/2/1/code_of_conduct/)
 
-> Universal document format converter and DOCX editor built on TipTap/ProseMirror, with comprehensive TypeScript support. Convert between Markdown, HTML, and DOCX through a unified Tiptap JSON model.
+> Universal document format converter and canvas DOCX editor built on TipTap/ProseMirror and LeaferJS, with comprehensive TypeScript support. Convert between Markdown and DOCX through a unified Tiptap JSON model; render and edit documents on a canvas that matches MS Office layout.
 
 ![Docen Editor](./assets/editor-demo.png)
 
 ## Packages
 
-| Package                                      | Version                                            | Description                                                                              |
-| -------------------------------------------- | -------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| [docen](./packages/docen/README.md)          | ![npm](https://img.shields.io/npm/v/docen)         | All-in-one — headless Markdown/HTML/DOCX conversion + the full `<docen-document>` editor |
-| [@docen/vue](./packages/vue/README.md)       | ![npm](https://img.shields.io/npm/v/@docen/vue)    | Vue 3 adapter — `<DocenDocument>` component (v-model + v-slot editor)                    |
-| [@docen/editor](./packages/editor/README.md) | ![npm](https://img.shields.io/npm/v/@docen/editor) | Assembly layer — Fluent UI host + docx engine into `<docen-document>`                    |
-| [@docen/docx](./packages/docx/README.md)     | ![npm](https://img.shields.io/npm/v/@docen/docx)   | Tiptap DOCX editor + converters, powered by @office-open/docx                            |
+| Package                                                     | Version                                                 | Description                                                                                |
+| ----------------------------------------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| [docen](./packages/docen/README.md)                         | ![npm](https://img.shields.io/npm/v/docen)              | All-in-one — headless Markdown/DOCX conversion + the full `<docen-document>` editor        |
+| [@docen/vue](./packages/vue/README.md)                      | ![npm](https://img.shields.io/npm/v/@docen/vue)         | Vue 3 adapter — `<DocenDocument>` component (v-model + v-slot editor)                      |
+| [@docen/editor](./packages/editor/README.md)                | ![npm](https://img.shields.io/npm/v/@docen/editor)      | Assembly layer — Fluent UI host + docx engine into `<docen-document>`                      |
+| [@docen/docx](./packages/docx/README.md)                    | ![npm](https://img.shields.io/npm/v/@docen/docx)        | DOCX engine — Tiptap schema + converters + layout projection, powered by @office-open/docx |
+| [@docen/layout](./packages/layout/README.md)                | ![npm](https://img.shields.io/npm/v/@docen/layout)      | Pagination engine — measurement → paginated LayoutDoc, Word's stacking rules               |
+| [@docen/core](./packages/core/README.md)                    | ![npm](https://img.shields.io/npm/v/@docen/core)        | Scene painter — LayoutDoc → LeaferJS tree for the canvas editors                           |
+| [leafer-x-metafile](./packages/leafer-x-metafile/README.md) | ![npm](https://img.shields.io/npm/v/leafer-x-metafile)  | Zero-dependency WMF/EMF+ metafile replay → neutral drawing members                         |
+| [@docen/deduplicate](./packages/deduplicate/README.md)      | ![npm](https://img.shields.io/npm/v/@docen/deduplicate) | Document comparison (SimHash + Winnowing) for the compare feature                          |
 
 ## Quick Start
 
 ### Universal Converter (`docen`)
 
-For seamless conversion between Markdown, HTML, and DOCX through a single unified API:
+For seamless conversion between Markdown, plain text, and DOCX through a single unified API:
 
 ```bash
 # Install with pnpm
@@ -30,38 +34,45 @@ $ pnpm add docen
 ```
 
 ```typescript
-import { parseHTML, generateDOCX, parseMarkdown, generateHTML } from "docen";
+import { parseMarkdown, generateDOCX, parseDOCX, generateMarkdown } from "docen";
 
-// HTML → DOCX
-const doc = parseHTML("<h1>Title</h1><p>Hello World</p>");
+// Markdown → DOCX
+const doc = parseMarkdown("# Title\n\nHello World");
 const docx = await generateDOCX(doc);
 
-// Markdown → HTML
-const doc2 = parseMarkdown("# Title\n\nHello World");
-const html = generateHTML(doc2);
+// DOCX → Markdown
+const json = await parseDOCX(buffer);
+const markdown = generateMarkdown(json);
 ```
+
+Styled HTML from the clipboard is supported as **paste input** in the editor — the extensions' `parseHTML` rules turn it into document JSON. There is no HTML generation anywhere.
 
 > 💡 The `docen` package also bundles the full engine and editor — `import { createDocxEditor } from "docen/docx"` or `import { DocenDocument } from "docen/editor"` — so one dependency covers headless conversion, the engine, and the web component.
 
-### DOCX Editor (`@docen/docx`)
+### DOCX Engine (`@docen/docx`)
 
-A full-featured WYSIWYG DOCX editor with near-lossless round-trip conversion:
+The DOCX engine — Tiptap schema, converters, and the layout projection — with near-lossless round-trip conversion:
 
 ```bash
 $ pnpm add @docen/docx
 ```
 
 ```typescript
-import { createDocxEditor, parseDOCX, generateDOCX } from "@docen/docx";
+import { docxExtensions, parseDOCX, generateDOCX } from "@docen/docx";
+import { Editor } from "@docen/docx/core";
 
-const editor = createDocxEditor({ element: document.querySelector("#editor") });
-editor.commands.setContent(parseDOCX(buffer));
+// Viewless: the editor is the editing model — rendering belongs to the host.
+const editor = new Editor({
+  element: null,
+  extensions: docxExtensions,
+  content: await parseDOCX(buffer),
+});
 const output = await generateDOCX(editor.getJSON());
 ```
 
 ### Visual Editor (`@docen/editor`)
 
-A turnkey web-component editor (`<docen-document>`) bundling the Fluent UI host with the `@docen/docx` engine:
+A turnkey web-component editor (`<docen-document>`) bundling the Fluent UI host, the `@docen/docx` engine, and the LeaferJS canvas stage:
 
 ```bash
 $ pnpm add @docen/editor
@@ -145,6 +156,10 @@ cd packages/<pkg> && pnpm build  # Build one package
 vp check                         # Lint & format
 ```
 
+## Versioning
+
+This project follows [Semantic Versioning](https://semver.org/). While the major version is `0` (pre-1.0), breaking API changes are released as **minor** version bumps (`0.x.0`) rather than patch releases — the public API is expected to keep evolving until the `1.0.0` stabilization release. Pin exact versions in downstream projects if you require stability between minor updates.
+
 ## Contributing
 
 We welcome contributions! See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full contribution workflow, coding standards, and PR checklist.
@@ -156,6 +171,9 @@ We welcome contributions! See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full 
 - 📚 [@docen/vue Documentation](./packages/vue/README.md)
 - 📚 [@docen/editor Documentation](./packages/editor/README.md)
 - 📚 [@docen/docx Documentation](./packages/docx/README.md)
+- 📚 [@docen/layout Documentation](./packages/layout/README.md)
+- 📚 [@docen/core Documentation](./packages/core/README.md)
+- 📚 [leafer-x-metafile Documentation](./packages/leafer-x-metafile/README.md)
 
 ## License
 

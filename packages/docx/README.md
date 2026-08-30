@@ -10,7 +10,7 @@
 
 ## Features
 
-- 📝 **Tiptap Editor** — Full-featured WYSIWYG editor with DOCX-aware extensions
+- 📝 **Viewless Tiptap engine** — the DOCX editing model with DOCX-aware extensions; rendering belongs to the host (e.g. @docen/editor's canvas stage)
 - 🔄 **DOCX Round-trip** — Near-lossless DOCX ↔ Editor conversion via @office-open/docx
 - 📄 **Markdown Support** — Tiptap JSON ↔ Markdown conversion
 - 🎨 **DOCX Properties** — Custom Tiptap extensions carry shading, borders, indent, spacing, floating, crop
@@ -29,15 +29,15 @@ $ npm install @docen/docx
 ## Quick Start
 
 ```typescript
-import { createDocxEditor, docxExtensions, parseDOCX, generateDOCX } from "@docen/docx";
+import { docxExtensions, parseDOCX, generateDOCX } from "@docen/docx";
+import { Editor } from "@docen/docx/core";
 
-// Create editor
-const editor = createDocxEditor({
-  element: document.querySelector("#editor"),
+// Viewless: the editor is the editing model — rendering belongs to the host.
+const editor = new Editor({
+  element: null,
+  extensions: docxExtensions,
+  content: await parseDOCX(buffer),
 });
-
-// Load a DOCX file
-editor.commands.setContent(parseDOCX(buffer));
 
 // Save back to DOCX
 const output = await generateDOCX(editor.getJSON());
