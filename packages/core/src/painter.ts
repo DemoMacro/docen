@@ -1,13 +1,10 @@
-import type {
-  ProjectedFlowBox,
-  ProjectedPageBackground,
-  ProjectedPageFurniture,
-} from "@docen/docx/layout";
 /**
  * Scene painter — walks a laid-out page (the @docen/layout result) and builds
  * the LeaferJS tree. The layout engine owns ALL geometry; painting positions
  * what it is given and never measures. Text elements carry explicit width AND
  * height — Leafer never paints an element whose height is still 0.
+ *
+ * @module
  */
 import {
   familyOfSlot,
@@ -34,6 +31,9 @@ import {
   type LayoutDrawingMember,
   type LayoutInline,
   type LayoutTextStyle,
+  type ProjectedFlowBox,
+  type ProjectedPageBackground,
+  type ProjectedPageFurniture,
 } from "@docen/layout";
 import {
   Box,

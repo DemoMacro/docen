@@ -28,6 +28,9 @@ import {
   type LayoutTable,
   type LayoutTableWidth,
   type LayoutTextStyle,
+  type ProjectedFlowBox,
+  type ProjectedPageBackground,
+  type ProjectedPageFurniture,
 } from "@docen/layout";
 import type { CustomGeometryOptions } from "@office-open/core/drawing";
 import type {
@@ -1948,20 +1951,6 @@ function projectParagraphBlocks(
 
 // ── section flow geometry ──
 
-/** The flow box a section defines, in px: paper size minus margins
- *  (orientation already resolved by resolvePageSize) and the docGrid pitch. */
-export interface ProjectedFlowBox {
-  pageWidthPx: number;
-  pageHeightPx: number;
-  contentWidthPx: number;
-  contentHeightPx: number;
-  /** Content-box origin within the page (margin left/top) — where the flow's
-   *  (0,0) sits on paper; the painter anchors page content here. */
-  contentLeftPx: number;
-  contentTopPx: number;
-  linePitchPx?: number;
-}
-
 export function projectFlowBox(properties: unknown): ProjectedFlowBox {
   const sp: Rec = isRecord(properties) ? properties : {};
   const { width, height } = resolvePageSize(sp.pageSize);
@@ -1984,26 +1973,6 @@ export function projectFlowBox(properties: unknown): ProjectedFlowBox {
     contentTopPx: top,
     linePitchPx,
   };
-}
-
-/** Page furniture (headers/footers) projected for painting: the block lists
- *  per slot (already projected like body blocks — the stage lays them out once
- *  at the content width) plus the placement flags read at paint time.
- *  `headerDistancePx`/`footerDistancePx` are w:pgMar's @w:header/@w:footer
- *  (page edge to the header/footer box; 720 twips = Word's default). */
-export interface ProjectedPageFurniture {
-  header?: LayoutBlock[];
-  firstHeader?: LayoutBlock[];
-  evenHeader?: LayoutBlock[];
-  footer?: LayoutBlock[];
-  firstFooter?: LayoutBlock[];
-  evenFooter?: LayoutBlock[];
-  /** w:titlePg — page 1 uses the `first` slots instead of `default`. */
-  titlePage: boolean;
-  /** settings' w:evenAndOddHeaders — even pages use the `even` slots. */
-  evenAndOddHeaders: boolean;
-  headerDistancePx: number;
-  footerDistancePx: number;
 }
 
 /** Project a section's headers/footers. An absent slot stays undefined (the
@@ -2049,26 +2018,15 @@ function projectPageFurniture(
   };
 }
 
-/** Page background projected for painting (w:background): the solid page
- *  color plus — when the round-tripped VML fill is a pattern — the tile
- *  bitmap. The v:fill's 1bpp hatch tile recolors in place (its palette IS the
- *  paint: bit-1 ink takes w:color, bit-0 paper takes the fill's color2),
- *  which is how Word paints the element; the reference render matches the
- *  tile at 4× its natural pixel size (8px → 32px), smoothed by the browser's
- *  bilinear image scaling. */
-export interface ProjectedPageBackground {
-  /** w:background @w:color — the page base under the tile. */
-  color?: string;
-  /** Pattern tile: full BMP file (palette already remapped) as a data URL. */
-  tileSrc?: string;
-  /** On-page tile size in px at 100% zoom. */
-  tilePx?: number;
-}
-
 /** A pattern tile reads correctly at 4× the tile's pixel size; smaller
  *  looks like a checkerboard, larger smears the texture away. */
 const TILE_SCALE = 4;
 
+/** Project w:background. The v:fill's 1bpp hatch tile recolors in place (its
+ *  palette IS the paint: bit-1 ink takes w:color, bit-0 paper takes the
+ *  fill's color2), which is how Word paints the element; the reference
+ *  render matches the tile at 4x its natural pixel size (8px -> 32px),
+ *  smoothed by the browser's bilinear image scaling. */
 function projectPageBackground(doc: DocumentOptions): ProjectedPageBackground | undefined {
   const bg = doc.background as
     | {

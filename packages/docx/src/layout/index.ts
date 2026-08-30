@@ -1,8 +1,8 @@
-export {
-  projectDocumentOptions,
-  projectFlowBox,
-  type ProjectedFlowBox,
-  type ProjectedPageBackground,
-  type ProjectedPageFurniture,
-  type ProjectedSection,
-} from "./project";
+export { projectDocumentOptions, projectFlowBox, type ProjectedSection } from "./project";
+// Page-level projection types live in @docen/layout (the painter consumes
+// them without depending on this package).
+export type {
+  ProjectedFlowBox,
+  ProjectedPageBackground,
+  ProjectedPageFurniture,
+} from "@docen/layout";

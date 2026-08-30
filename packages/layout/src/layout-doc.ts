@@ -590,3 +590,51 @@ export interface LayoutBlockContext {
    *  each line's band. */
   startY?: number;
 }
+
+// ── Page-level projection types (filled by the format adapters' projectors) ──
+
+/** The flow box a section defines, in px: paper size minus margins
+ *  (orientation already resolved by the adapter) and the docGrid pitch. */
+export interface ProjectedFlowBox {
+  pageWidthPx: number;
+  pageHeightPx: number;
+  contentWidthPx: number;
+  contentHeightPx: number;
+  /** Content-box origin within the page (margin left/top) — where the flow's
+   *  (0,0) sits on paper; the painter anchors page content here. */
+  contentLeftPx: number;
+  contentTopPx: number;
+  linePitchPx?: number;
+}
+
+/** Page furniture (headers/footers) projected for painting: the block lists
+ *  per slot (already projected like body blocks — the stage lays them out once
+ *  at the content width) plus the placement flags read at paint time.
+ *  `headerDistancePx`/`footerDistancePx` are w:pgMar's @w:header/@w:footer
+ *  (page edge to the header/footer box; 720 twips = Word's default). */
+export interface ProjectedPageFurniture {
+  header?: LayoutBlock[];
+  firstHeader?: LayoutBlock[];
+  evenHeader?: LayoutBlock[];
+  footer?: LayoutBlock[];
+  firstFooter?: LayoutBlock[];
+  evenFooter?: LayoutBlock[];
+  /** w:titlePg — page 1 uses the `first` slots instead of `default`. */
+  titlePage: boolean;
+  /** settings' w:evenAndOddHeaders — even pages use the `even` slots. */
+  evenAndOddHeaders: boolean;
+  headerDistancePx: number;
+  footerDistancePx: number;
+}
+
+/** Page background projected for painting (w:background): the solid page
+ *  color plus — when the round-tripped VML fill is a pattern — the tile
+ *  bitmap. */
+export interface ProjectedPageBackground {
+  /** w:background @w:color — the page base under the tile. */
+  color?: string;
+  /** Pattern tile: full BMP file (palette already remapped) as a data URL. */
+  tileSrc?: string;
+  /** On-page tile size in px at 100% zoom. */
+  tilePx?: number;
+}

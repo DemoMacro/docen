@@ -1,8 +1,15 @@
+import {
+  paintFurnitureStack,
+  paintScene,
+  releasePinnedImages,
+  type DrawingHitBox,
+  type PaintContext,
+} from "@docen/core/painter";
 import type {
   ProjectedFlowBox,
   ProjectedPageBackground,
   ProjectedPageFurniture,
-} from "@docen/docx/layout";
+} from "@docen/layout";
 /**
  * Canvas stage — the page layer of the canvas document component.
  *
@@ -20,14 +27,6 @@ import type {
 import type { FlowPage, FontMetrics, LaidOutStackItem } from "@docen/layout";
 import { stackBlocks, TextMeasurer } from "@docen/layout";
 import { App, Line, Rect, Text, type IGroup } from "leafer-ui";
-
-import {
-  paintFurnitureStack,
-  paintScene,
-  releasePinnedImages,
-  type DrawingHitBox,
-  type PaintContext,
-} from "./scene";
 
 const PAGE_GAP = 24;
 

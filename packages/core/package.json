@@ -1,21 +1,18 @@
 {
   "name": "@docen/core",
   "version": "0.5.5",
-  "description": "Pure rendering layer mapping OOXML drawing data (image/shape/chart/smartart) to LeaferJS/ECharts elements, shared across docx/pptx/xlsx editors",
+  "description": "Shared rendering layer for docen editors — geometry/style/image helpers and the LeaferJS scene painter for laid-out documents",
   "keywords": [
     "canvas",
-    "chart",
     "docen",
     "drawingml",
-    "echarts",
     "graphics",
     "image",
     "leaferjs",
     "office",
     "ooxml",
     "render",
-    "shape",
-    "smartart"
+    "shape"
   ],
   "homepage": "https://github.com/DemoMacro/docen#readme",
   "bugs": {
@@ -57,6 +54,10 @@
     "./export": {
       "types": "./dist/export.d.mts",
       "import": "./dist/export.mjs"
+    },
+    "./painter": {
+      "types": "./dist/painter.d.mts",
+      "import": "./dist/painter.mjs"
     }
   },
   "scripts": {
@@ -65,6 +66,7 @@
     "prepack": "pnpm build"
   },
   "dependencies": {
+    "@docen/layout": "workspace:*",
     "@office-open/core": "0.12.3",
     "leafer-ui": "2.2.9"
   }
