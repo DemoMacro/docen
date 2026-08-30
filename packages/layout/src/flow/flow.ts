@@ -277,6 +277,21 @@ class Flow {
    *  still fills it). The room is the smaller of the page bottom and the
    *  nearest cleared band top — lines resume below the band. Returns true
    *  when anything was placed. */
+  /** A grid picture line fits when its spanned rows fit the remaining row
+   *  budget — Word quantizes the page fit at line-pitch granularity, so the
+   *  padded span may cross the page bottom by the trailing partial row while
+   *  the picture box (centered in the span) keeps its ink above it. The ink
+   *  rule above is the first test; this catches the boundary case the row
+   *  math owns (pixel-verified: a 464px picture spanning 21 rows stays on a
+   *  page whose room is 20.6 rows — its ink clears the bottom by 1px, the
+   *  padded box crosses by 9). */
+  private gridRowsFit(laid: LaidOutBlock, room: number): boolean {
+    const pitch = this.opts.linePitchPx;
+    const last = laid.kind === "paragraph" ? laid.lines[laid.lines.length - 1] : undefined;
+    if (!pitch || !last?.pictureFloored) return false;
+    return last.heightPx <= Math.ceil(room / pitch) * pitch;
+  }
+
   private tryPlace(laid: LaidOutBlock): boolean {
     // Never place inside a cleared band — drop below it first (whether this
     // is a fresh push, a split tail, or a re-placed keepNext block).
@@ -284,7 +299,11 @@ class Flow {
     const before = this.spacingBefore(laid);
     // Both spans are relative to this.y: the page bottom and the band top.
     const room = Math.min(this.remaining(), this.bandCeiling() - this.y) - before;
-    if (before + fitExtentPx(laid) <= room) {
+    // `room` is already net of the before-margin, so the check adds the
+    // extent alone — adding `before` here too would count the margin twice
+    // and evict blocks Word keeps (a picture paragraph with an 8px before on
+    // a near-full page, pixel-verified against the reference render).
+    if (fitExtentPx(laid) <= room || this.gridRowsFit(laid, room)) {
       this.commit(laid, before);
       return true;
     }
