@@ -452,15 +452,22 @@ export const DocumentCommands = Extension.create({
             .run();
         },
       // Line spacing as a multiple of single (1.0/1.15/1.5/2.0); preserves
-      // existing before/after.
+      // existing before/after. The dropdown's trailing entries are Word's
+      // "Add Space Before/After Paragraph": 10pt (200 twips), not a multiple.
       "line-spacing":
         (mult) =>
         ({ state, chain }) => {
-          const m = parseFloat(mult ?? "");
-          if (!Number.isFinite(m)) return false;
           const block = formattableBlock(state);
           if (!block) return false;
           const current = (block.attrs.spacing ?? {}) as Record<string, unknown>;
+          if (mult === "add-before" || mult === "add-after") {
+            const key = mult === "add-before" ? "before" : "after";
+            return chain()
+              .updateAttributes(block.type, { spacing: { ...current, [key]: 200 } })
+              .run();
+          }
+          const m = parseFloat(mult ?? "");
+          if (!Number.isFinite(m)) return false;
           return chain()
             .updateAttributes(block.type, {
               spacing: { ...current, line: lineMultipleToOoxml(m), lineRule: "auto" },

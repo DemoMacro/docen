@@ -804,20 +804,22 @@ class DocenDocument extends AddinHost<Editor> {
   }
 
   /** Paste from the system clipboard. Prefers text/html — styled paste through
-   *  the schema's parse rules — and falls back to plain text. navigator.clipboard
-   *  is the reliable path; execCommand("paste") is the fallback (often blocked). */
-  async #paste(): Promise<void> {
+   *  the schema's parse rules — and falls back to plain text; `textOnly` (the
+   *  menu's Keep Text Only) skips the HTML leg. navigator.clipboard is the
+   *  reliable path; execCommand("paste") is the fallback (often blocked). */
+  async #paste(textOnly = false): Promise<void> {
     const editor = this.editor;
     if (!editor) return;
     this.#bridge?.focus();
     try {
       const items = await navigator.clipboard.read();
       for (const item of items) {
-        const type = item.types.includes("text/html")
-          ? "text/html"
-          : item.types.includes("text/plain")
-            ? "text/plain"
-            : null;
+        const type =
+          !textOnly && item.types.includes("text/html")
+            ? "text/html"
+            : item.types.includes("text/plain")
+              ? "text/plain"
+              : null;
         if (!type) continue;
         const text = await (await item.getType(type)).text();
         if (!text) continue;
@@ -2764,7 +2766,7 @@ class DocenDocument extends AddinHost<Editor> {
       return;
     }
     if (name === "paste") {
-      void this.#paste();
+      void this.#paste(value === "keep-text-only");
       return;
     }
     // Editing → Select: selectAll() spans the whole document.

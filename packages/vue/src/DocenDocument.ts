@@ -21,8 +21,8 @@ type DocenEl = HTMLElement & {
   editor?: Editor;
   // Office.context.displayLanguage equivalent — read-only current locale.
   displayLanguage?: string;
-  // DocenHost content surface — getJSON unwraps page nodes (external consumers
-  // see flat doc > block+); setJSON wraps pages and preserves doc-level attrs
+  // DocenHost content surface — the model is flat Tiptap JSON (doc > block+;
+  // pages are a rendering projection). setJSON preserves doc-level attrs
   // (styles/core/sectionProperties) that editor.commands.setContent drops.
   setJSON?: (json: JSONContent) => void;
   getJSON?: () => JSONContent;
@@ -48,7 +48,7 @@ type DocenEl = HTMLElement & {
  * print; `{ format }` for save-as).
  */
 export type DocenSaveEvent = CustomEvent;
-export type DocenSaveAsEvent = CustomEvent<{ format?: "docx" | "markdown" | "html" }>;
+export type DocenSaveAsEvent = CustomEvent<{ format?: "docx" | "markdown" }>;
 export type DocenOpenEvent = CustomEvent;
 export type DocenNewEvent = CustomEvent;
 export type DocenPrintEvent = CustomEvent;
@@ -63,9 +63,6 @@ export type DocenPrintEvent = CustomEvent;
  *     until docen:ready) so a parent can render ad-hoc UI alongside the editor.
  *   - a template ref exposes `{ editor, getElement(), getJSON(), setJSON() }`.
  *
- * Why JSON not HTML: HTML round-trips (getHTML/setContent) drop DOCX-rich attrs
- * (styles/sectionProperties) and serialize O(n) per change; JSON carries the
- * full runtime model and injects via host.setJSON which keeps doc-level attrs.
  * The editor change → emit path is debounced (300 ms) so a large DOCX import
  * (many pagination-reflow change events) produces one getJSON, not one per
  * transaction.
@@ -76,13 +73,12 @@ export type DocenPrintEvent = CustomEvent;
 export const DocenDocument = defineComponent({
   name: "DocenDocument",
   props: {
-    /** Content (Tiptap JSON, page nodes unwrapped) — two-way via v-model.
+    /** Content (flat Tiptap JSON, doc > block+) — two-way via v-model.
      *  Seeded through host.setJSON on ready; emitted as host.getJSON()
      *  (debounced) on editor change. */
     modelValue: { type: Object as PropType<JSONContent>, default: undefined },
     filename: { type: String, default: undefined },
     editable: { type: Boolean, default: undefined },
-    spellcheck: { type: Boolean, default: undefined },
     user: { type: String, default: undefined },
     avatar: { type: String, default: undefined },
     sectionProperties: { type: Object as PropType<SectionPropertiesOptions>, default: undefined },
@@ -155,7 +151,6 @@ export const DocenDocument = defineComponent({
       // attribute on every change.
       if (props.filename != null) a.filename = props.filename;
       if (props.editable != null) a.editable = props.editable ? "true" : "false";
-      if (props.spellcheck != null) a.spellcheck = props.spellcheck ? "true" : "false";
       if (props.user != null) a.user = props.user;
       if (props.avatar != null) a.avatar = props.avatar;
       if (props.sectionProperties != null)
@@ -301,7 +296,7 @@ export const DocenDocument = defineComponent({
       getElement: (): HTMLElement | null => el.value,
       /** Current UI locale (Office.context.displayLanguage equivalent). */
       getDisplayLanguage: (): string | undefined => el.value?.displayLanguage,
-      /** Read the document as Tiptap JSON (page nodes unwrapped). */
+      /** Read the document as flat Tiptap JSON (doc > block+). */
       getJSON: (): JSONContent | undefined => el.value?.getJSON?.(),
       /** Replace the document from Tiptap JSON (routes through #loadDoc, so
        *  doc.attrs.styles/core are preserved). */

@@ -25,7 +25,7 @@ import type { JSONContent } from "@docen/docx";
 import { DocenDocument } from "@docen/vue";
 import { parseDOCX } from "@docen/docx";
 
-// v-model carries Tiptap JSON (page nodes unwrapped); the template ref
+// v-model carries the flat Tiptap JSON model (doc > block+); the template ref
 // exposes the Tiptap editor plus a getJSON/setJSON pair.
 const content = ref<JSONContent>({ type: "doc", content: [{ type: "paragraph" }] });
 const editorRef = ref();
@@ -53,7 +53,7 @@ Reaching the editor without a ref — via the default slot scope:
 
 ## v-model
 
-`v-model` binds the document content as Tiptap JSON (page nodes unwrapped — the public model is a flat `doc > block+`; the editor repackages it into C-route pages internally):
+`v-model` binds the document content as Tiptap JSON — the public model is a flat `doc > block+` (pages are a rendering projection, never stored in the model):
 
 - Setting `modelValue` calls `host.setJSON(json)`, which routes through the host's loader (a fresh `EditorState`) so document-level attrs (`styles`, `core`, `sectionProperties`) survive — `editor.commands.setContent` would drop them. The set is skipped when `modelValue` is the same reference the adapter just emitted (round-trip echo break).
 - Every editor change emits `update:modelValue` with `host.getJSON()`, debounced by the `debounce` prop (default 300 ms; 0 = synchronous). A DOCX import triggers many change events as pagination reflows — one `getJSON` per quiet window instead of one per transaction.
@@ -64,23 +64,22 @@ The initial `modelValue` seeds the editor on `docen:ready` via `host.setJSON` (n
 
 Mirror the `<docen-document>` attributes. Pass `undefined` to leave an attribute unset (the web component's default applies).
 
-| Prop                | Type    | Attribute            | Notes                                       |
-| ------------------- | ------- | -------------------- | ------------------------------------------- |
-| `modelValue`        | object  | — (setJSON)          | Tiptap JSON (page nodes unwrapped); two-way |
-| `debounce`          | number  | —                    | Emit debounce ms (default 300; 0 = sync)    |
-| `filename`          | string  | `filename`           |                                             |
-| `editable`          | boolean | `editable`           |                                             |
-| `spellcheck`        | boolean | `spellcheck`         |                                             |
-| `user` / `avatar`   | string  | `user` / `avatar`    | Identity in the header                      |
-| `sectionProperties` | object  | `section-properties` | JSON page setup (size/margin/orientation)   |
-| `styles`            | object  | `styles`             | JSON named-styles model                     |
-| `addins`            | array   | `addins`             | JSON external add-ins (ribbon/task-pane)    |
-| `theme`             | string  | `theme`              | Fluent built-in key; reactive               |
-| `navigationPane`    | boolean | `navigation-pane`    | Initial nav-pane visibility (once)          |
-| `propertiesPane`    | boolean | `properties-pane`    | Initial properties-pane visibility (once)   |
-| `zoom`              | number  | `zoom`               | Initial zoom percent (once)                 |
-| `showMarks`         | boolean | `show-marks`         | Initial marks visibility (once)             |
-| `lang`              | string  | `lang`               | BCP-47 UI locale; per-instance, reactive    |
+| Prop                | Type    | Attribute            | Notes                                     |
+| ------------------- | ------- | -------------------- | ----------------------------------------- |
+| `modelValue`        | object  | — (setJSON)          | Tiptap JSON (flat doc > block+); two-way  |
+| `debounce`          | number  | —                    | Emit debounce ms (default 300; 0 = sync)  |
+| `filename`          | string  | `filename`           |                                           |
+| `editable`          | boolean | `editable`           |                                           |
+| `user` / `avatar`   | string  | `user` / `avatar`    | Identity in the header                    |
+| `sectionProperties` | object  | `section-properties` | JSON page setup (size/margin/orientation) |
+| `styles`            | object  | `styles`             | JSON named-styles model                   |
+| `addins`            | array   | `addins`             | JSON external add-ins (ribbon/task-pane)  |
+| `theme`             | string  | `theme`              | Fluent built-in key; reactive             |
+| `navigationPane`    | boolean | `navigation-pane`    | Initial nav-pane visibility (once)        |
+| `propertiesPane`    | boolean | `properties-pane`    | Initial properties-pane visibility (once) |
+| `zoom`              | number  | `zoom`               | Initial zoom percent (once)               |
+| `showMarks`         | boolean | `show-marks`         | Initial marks visibility (once)           |
+| `lang`              | string  | `lang`               | BCP-47 UI locale; per-instance, reactive  |
 
 ## Events
 
@@ -115,7 +114,7 @@ async function onSave(e: DocenSaveEvent) {
 
 ## Template ref
 
-The ref exposes `{ editor, getElement(), getDisplayLanguage(), getJSON(), setJSON(json), addAddin(addin) }`, where `editor` is the Tiptap `Editor` (undefined until the editor is live). `getJSON()/setJSON()` mirror the host's page-unwrapping loaders; `getDisplayLanguage()` returns the current UI locale (`Office.context.displayLanguage` equivalent).
+The ref exposes `{ editor, getElement(), getDisplayLanguage(), getJSON(), setJSON(json), addAddin(addin) }`, where `editor` is the Tiptap `Editor` (undefined until the editor is live). `getJSON()/setJSON()` mirror the host's content surface; `getDisplayLanguage()` returns the current UI locale (`Office.context.displayLanguage` equivalent).
 
 `addAddin(addin)` registers an Office.js-style add-in at runtime (commands / task-pane / ribbon / mini-toolbar). Use it for add-ins carrying functions — the `addins` prop only accepts JSON-serializable data (attribute values are strings), so command handlers and pane render functions must register through the ref. Wait for the host to be live (the exposed `editor` is non-undefined) before calling:
 

@@ -138,7 +138,8 @@ const styleItems = (styles?: StylesOptions | null): string => {
 const pasteItems = (): string =>
   JSON.stringify([
     { text: opt("paste"), value: "paste" },
-    { text: opt("paste-special"), value: "paste-special" },
+    // Paste Special needs Word's format-pick dialog (not built yet).
+    { text: opt("paste-special"), value: "paste-special", disabled: true },
     { text: opt("keep-text-only"), value: "keep-text-only" },
   ]);
 
@@ -226,8 +227,9 @@ const findItems = (): string =>
 const selectItems = (): string =>
   JSON.stringify([
     { text: opt("select-all"), value: "all" },
-    { text: opt("select-objects"), value: "objects" },
-    { text: opt("select-similar"), value: "similar" },
+    // Need a canvas selection model for objects / similar-format picks.
+    { text: opt("select-objects"), value: "objects", disabled: true },
+    { text: opt("select-similar"), value: "similar", disabled: true },
   ]);
 
 const coverItems = (): string =>
@@ -251,7 +253,8 @@ const marginsItems = (): string =>
     { text: opt("narrow"), value: "narrow" },
     { text: opt("moderate"), value: "moderate" },
     { text: opt("wide"), value: "wide" },
-    { text: opt("custom-margins"), value: "custom" },
+    // Custom Margins opens the Page Setup dialog (not built yet).
+    { text: opt("custom-margins"), value: "custom", disabled: true },
   ]);
 
 const orientationItems = (): string =>
@@ -271,7 +274,8 @@ const sizePaperItems = (): string =>
     { text: opt("b5"), value: "b5" },
     { text: opt("statement"), value: "statement" },
     { text: opt("executive"), value: "executive" },
-    { text: opt("more-sizes"), value: "more" },
+    // More Paper Sizes opens the Page Setup dialog (not built yet).
+    { text: opt("more-sizes"), value: "more", disabled: true },
   ]);
 
 const columnsItems = (): string =>
@@ -286,14 +290,15 @@ const breaksItems = (): string =>
   JSON.stringify([
     { text: cmd("page-break"), value: "page-break", event: "page-break" },
     { text: opt("column-break"), value: "column-break", event: "column-break" },
-    { text: opt("text-wrapping"), value: "text-wrapping", event: "text-wrapping" },
+    // Text Wrapping opens Word's layout-options dialog (not built yet).
+    { text: opt("text-wrapping"), value: "text-wrapping", event: "text-wrapping", disabled: true },
     { text: cmd("section-break"), value: "section-break", event: "section-break" },
   ]);
 
 const indentItems = (): string =>
   JSON.stringify([
-    { text: opt("increase-indent"), value: "increase" },
-    { text: opt("decrease-indent"), value: "decrease" },
+    { text: opt("increase-indent"), value: "increase", event: "indent-increase" },
+    { text: opt("decrease-indent"), value: "decrease", event: "indent-decrease" },
   ]);
 
 const groupItems = (): string =>
@@ -312,9 +317,10 @@ const rotateItems = (): string =>
 
 const alignItems = (): string =>
   JSON.stringify([
-    { text: cmd("align-left"), value: "left" },
-    { text: opt("align-center"), value: "center" },
-    { text: cmd("align-right"), value: "right" },
+    { text: cmd("align-left"), value: "left", event: "align-left" },
+    { text: opt("align-center"), value: "center", event: "align-center" },
+    { text: cmd("align-right"), value: "right", event: "align-right" },
+    { text: cmd("justify"), value: "justify", event: "justify" },
   ]);
 
 const footnoteItems = (): string =>
@@ -875,8 +881,8 @@ const layoutTab = (): RibbonTab =>
     group(
       "paragraph",
       [
-        split("indent-increase", "indent-left", parsedItems(indentItems()), { size: "large" }),
-        split("line-spacing", "spacing", parsedItems(spacingItems()), { size: "large" }),
+        split("indent-increase", "indent-increase", parsedItems(indentItems()), { size: "large" }),
+        split("line-spacing", "line-spacing", parsedItems(spacingItems()), { size: "large" }),
       ],
       "paragraph-dialog",
     ),
@@ -885,7 +891,7 @@ const layoutTab = (): RibbonTab =>
         row([btn("orientation", "position"), btn("wrap", "wrap")]),
         row([btn("orientation", "bring-forward"), btn("orientation", "send-backward")]),
       ]),
-      split("align-left", "align", parsedItems(alignItems()), { size: "large" }),
+      split("align-left", "align-left", parsedItems(alignItems()), { size: "large" }),
       split("group-objects", "group", parsedItems(groupItems()), { size: "large" }),
       split("rotate", "rotate", parsedItems(rotateItems()), { size: "large" }),
     ]),
