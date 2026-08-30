@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>@docen/editor — demos</title>
+    <title>@docen/editor — demo</title>
     <style>
       html,
       body {
@@ -16,39 +16,10 @@
           sans-serif;
         color: #3b3b3b;
       }
-      /* Full-height flex column: tablist (auto) + stage (fills the rest). */
-      #app {
-        display: flex;
-        flex-direction: column;
-        height: 100%;
-      }
-      #app fluent-tablist {
-        flex-shrink: 0;
-      }
-      #app main {
-        flex: 1;
-        min-height: 0;
-        display: flex;
-        flex-direction: column;
-      }
-      /* Demo helpers (shared by image + document demos). */
-      .demo-row {
-        display: flex;
-        gap: 8px;
-        padding: 16px;
-        flex-wrap: wrap;
-        flex-shrink: 0;
-      }
-      .demo-readout {
-        padding: 0 16px;
-        font-size: 13px;
-        color: #666;
-        flex-shrink: 0;
-      }
-      /* The document component fills the remaining stage height. */
+      /* The document component fills the viewport. */
       .demo-doc {
-        flex: 1;
-        min-height: 0;
+        display: flex;
+        height: 100%;
       }
     </style>
   </head>

@@ -5,14 +5,10 @@
   "keywords": [
     "canvas",
     "docen",
-    "drawingml",
     "graphics",
-    "image",
     "leaferjs",
     "office",
-    "ooxml",
-    "render",
-    "shape"
+    "render"
   ],
   "homepage": "https://github.com/DemoMacro/docen#readme",
   "bugs": {
@@ -38,26 +34,6 @@
     ".": {
       "types": "./dist/index.d.mts",
       "import": "./dist/index.mjs"
-    },
-    "./image": {
-      "types": "./dist/image.d.mts",
-      "import": "./dist/image.mjs"
-    },
-    "./geometry": {
-      "types": "./dist/geometry.d.mts",
-      "import": "./dist/geometry.mjs"
-    },
-    "./style": {
-      "types": "./dist/style.d.mts",
-      "import": "./dist/style.mjs"
-    },
-    "./export": {
-      "types": "./dist/export.d.mts",
-      "import": "./dist/export.mjs"
-    },
-    "./painter": {
-      "types": "./dist/painter.d.mts",
-      "import": "./dist/painter.mjs"
     }
   },
   "scripts": {
@@ -67,7 +43,6 @@
   },
   "dependencies": {
     "@docen/layout": "workspace:*",
-    "@office-open/core": "0.12.3",
     "leafer-ui": "2.2.9"
   }
 }

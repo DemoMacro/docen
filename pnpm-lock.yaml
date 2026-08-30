@@ -28,9 +28,6 @@ importers:
       '@docen/layout':
         specifier: workspace:*
         version: link:../layout
-      '@office-open/core':
-        specifier: 0.12.3
-        version: 0.12.3
       leafer-ui:
         specifier: 2.2.9
         version: 2.2.9
