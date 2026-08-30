@@ -5,32 +5,28 @@ import { Node } from "@tiptap/core";
 
 import type { JSONContent } from "../core";
 import type { ParseInlineRule, ResolveContext } from "./types";
-import { floatAnchorScope, floatingToStyles } from "./utils";
 
 /** The picture ParagraphChild branch office-open parses a drawing run into. */
 type PictureBranch = Extract<ParagraphChild, { picture: PictureOptions }>;
 
-/** a:srcRect percentages (office-open SourceRectangleOptions), 0-100000 per side. */
-type CropRect = NonNullable<PictureOptions["sourceRectangle"]>;
-
 /**
- * Custom Image extension with node-level renderHTML + renderDocx/parseDocx.
+ * Custom Image extension with renderDocx/parseDocx (rendering is canvas-only;
+ * HTML is parse-input only).
  *
  * Attrs:
  *  - src/alt/title/width/height: Tiptap structural names (kept verbatim so base
  *    image commands work).
- *  - rotation: editor display only (CSS transform) but also carried through DOCX
- *    via transformation.rotation (MediaTransformation.rotation).
- *  - flipH/flipV: editor display (CSS scaleX/scaleY) + DOCX round-trip via
- *    transformation.flipHorizontal/flipVertical (a:xfrm@flipH/flipV). Three-state
- *    (null/true/false) — an explicit false emits flipH="0" byte-faithfully.
+ *  - rotation: carried through DOCX via transformation.rotation
+ *    (MediaTransformation.rotation).
+ *  - flipH/flipV: DOCX round-trip via transformation.flipHorizontal/flipVertical
+ *    (a:xfrm@flipH/flipV). Three-state (null/true/false) — an explicit false
+ *    emits flipH="0" byte-faithfully.
  *  - floating/outline: nested office-open objects (Floating / OutlineOptions).
  *  - crop: nested office-open SourceRectangleOptions (srcRect).
  *  - display: editor-only display hint, no OOXML equivalent.
  *
  * DOCX round-trip is near-identity: renderDocx packs attrs into CorePictureOptions;
  * parseDocx unpacks them back. src is a data URL ↔ { type, data } base64.
- * Node-level renderHTML solves the style merge problem (rotation + floating).
  */
 
 // ── DOCX serialization (module-level, exported for DocxManager) ──
@@ -230,145 +226,6 @@ export const parseDocxInline: ParseInlineRule<PictureBranch> = {
   convert: (child, ctx) => resolveImage(child.picture, ctx),
 };
 
-// ── Node-level renderHTML helpers ──
-
-/** Extent-box dimensions needed to size the inner <img> for a cropped image. */
-export interface CropRenderContext {
-  width?: number;
-  height?: number;
-}
-
-/**
- * Render crop as the inner <img> style for byte-accurate four-sided srcRect.
- *
- * object-fit:cover scales uniformly, so it only matches single-axis crops.
- * Instead the inner <img> is sized to the un-cropped display size per axis
- * (imgW = W/visibleW, imgH = H/visibleH) and translated so the visible srcRect
- * region maps exactly onto the extent box; the outer box clips (overflow:hidden)
- * the cropped-out left/top region. Mathematically equivalent to a
- * background-size/background-position crop, but keeps a real <img> (alt,
- * accessibility, semantics, drag-to-save).
- */
-export function renderCropAttrs(crop: CropRect, ctx: CropRenderContext = {}): { style: string } {
-  const c = crop;
-  const leftPct = (c.left || 0) / 100000;
-  const topPct = (c.top || 0) / 100000;
-  const rightPct = (c.right || 0) / 100000;
-  const bottomPct = (c.bottom || 0) / 100000;
-
-  const visibleW = 1 - leftPct - rightPct;
-  const visibleH = 1 - topPct - bottomPct;
-
-  // Inner <img> display size per axis (independent of the other axis — the key
-  // difference from object-fit:cover). Falls back to the box size when an axis
-  // is uncropped (visible = 1 → same size).
-  const w = ctx.width ?? 0;
-  const h = ctx.height ?? 0;
-  const imgW = visibleW > 0 ? w / visibleW : w;
-  const imgH = visibleH > 0 ? h / visibleH : h;
-
-  // Shift the image so the visible region's top-left lands at the box's
-  // top-left: translate by the cropped-left/top amount (pct × display size).
-  const offX = -(leftPct * imgW);
-  const offY = -(topPct * imgH);
-
-  return {
-    style: [
-      "display:block",
-      `width:${imgW.toFixed(2)}px`,
-      `height:${imgH.toFixed(2)}px`,
-      `transform:translate(${offX.toFixed(2)}px,${offY.toFixed(2)}px)`,
-      "transform-origin:0 0",
-    ].join(";"),
-  };
-}
-
-export function renderImageStyles(attrs: Record<string, unknown>, marginOrigin = false): string[] {
-  const styles: string[] = [];
-
-  if (attrs.display) {
-    styles.push(`display:${attrs.display as string}`);
-  } else if (!attrs.floating) {
-    // Cropped images render as a <span> box and vector images as a <div> — both
-    // are block-level by default, so without inline-block a box claims its own
-    // line and breaks side-by-side image rows (a centered row of two images
-    // collapses to one-per-line). floating images are placed via
-    // position:absolute/float, where display no longer governs layout.
-    styles.push("display:inline-block");
-  }
-
-  // OOXML a:xfrm applies flip THEN rotate; a CSS transform list applies
-  // right-to-left, so `rotate() scaleX() scaleY()` runs the scales first
-  // (= flip) then rotate — matching the OOXML order. Both flips compose
-  // commutatively, so their relative order in the list doesn't matter.
-  const transforms: string[] = [];
-  if (attrs.rotation) transforms.push(`rotate(${attrs.rotation as number}deg)`);
-  if (attrs.flipH) transforms.push("scaleX(-1)");
-  if (attrs.flipV) transforms.push("scaleY(-1)");
-  if (transforms.length > 0) styles.push(`transform:${transforms.join(" ")}`);
-
-  if (attrs.floating) {
-    // Floating anchor (wp:anchor) → CSS. Shared with WpgGroup via utils so
-    // anchored images and drawing groups render identically (wrapNone →
-    // position:absolute "in front/behind text"; square/tight → float).
-    styles.push(
-      ...floatingToStyles(
-        attrs.floating,
-        attrs.src as string | undefined,
-        attrs.width as number | undefined,
-        marginOrigin,
-      ),
-    );
-  }
-
-  return styles;
-}
-
-/** Office vector (GDI) formats the browser cannot decode — EMF/WMF render as
- *  a labeled placeholder (Image.renderHTML) instead of an <img> that decodes
- *  to naturalWidth 0 (an empty box). */
-function isVectorImage(src: unknown): boolean {
-  return typeof src === "string" && /^data:image\/(?:x-)?(?:emf|wmf)/i.test(src);
-}
-
-/** Remote http(s) images are lazy-loaded + async-decoded in renderHTML; data
- *  URLs (the imported-DOCX majority) have no network to defer, so they stay
- *  eager — and their load event, awaited by the editor's cap path, is not
- *  delayed by `loading="lazy"`. */
-function isRemoteImage(src: unknown): boolean {
-  return typeof src === "string" && /^https?:/.test(src);
-}
-
-/** Render attrs applied only to remote images (see isRemoteImage). */
-const REMOTE_IMG_ATTRS: Record<string, unknown> = { loading: "lazy", decoding: "async" };
-
-/**
- * Stamp the nested office-open attrs onto an HTML attribute map as JSON
- * data-* pairs. Shared by the cropped-div and plain-img render branches so the
- * fidelity fields (floating/outline/nonVisualProperties/…) round-trip through
- * HTML identically. `crop` is handled separately (crop branch only).
- */
-const RAW_ATTR_DATA: Array<[string, string]> = [
-  ["floating", "data-floating"],
-  ["outline", "data-outline"],
-  ["nonVisualProperties", "data-non-visual"],
-  ["effectExtent", "data-effect-extent"],
-  ["graphicFrameLocks", "data-graphic-frame-locks"],
-  ["blipEffects", "data-blip-effects"],
-  ["useLocalDpi", "data-use-local-dpi"],
-  ["fill", "data-fill"],
-  ["effects", "data-effects"],
-  ["tile", "data-tile"],
-  ["runProperties", "data-run-properties"],
-];
-
-function attachRawAttrs(target: Record<string, unknown>, attrs: Record<string, unknown>): void {
-  for (const [attr, data] of RAW_ATTR_DATA) {
-    const value = attrs[attr];
-    if (value !== null && value !== undefined) target[data] = JSON.stringify(value);
-  }
-}
-
 // ── Extension ──
 
 /** Fully custom image node (no upstream extension): an inline atom carrying
@@ -403,10 +260,7 @@ export const Image = Node.create({
 
       // Editor-only loading state for an unsized http image (image-cap stamps
       // loading/error/timeout). A transient runtime state — never present in
-      // imported HTML/JSON — so no parseHTML rule and not round-tripped. Drives
-      // the renderHTML placeholder branch (data-image=placeholder) alongside the
-      // vector branch, so a loading/failed/timed-out image keeps a sized,
-      // labeled placeholder instead of an empty box (stable measure, no reflow).
+      // imported HTML/JSON — so no parseHTML rule and not round-tripped.
       loadState: {
         default: null,
         rendered: false,
@@ -475,7 +329,7 @@ export const Image = Node.create({
         },
       },
 
-      // Nested office-open Floating (JSON in data-floating; CSS rendered)
+      // Nested office-open Floating (JSON in data-floating)
       floating: {
         default: null,
         rendered: false,
@@ -532,106 +386,6 @@ export const Image = Node.create({
       tile: attrDataJson("data-tile"),
       runProperties: attrDataJson("data-run-properties"),
     };
-  },
-
-  renderHTML({
-    node,
-    HTMLAttributes,
-  }: {
-    node: { attrs: Record<string, unknown> };
-    HTMLAttributes: Record<string, unknown>;
-  }) {
-    const attrs = node.attrs;
-    // A paragraph-anchored wrapNone image resolves its absolute top/left from
-    // the anchor <p> (data-float-anchor → editor CSS makes the <p> relative);
-    // otherwise it anchors to the page box and floats over the heading/body.
-    const floatAnchor =
-      attrs.floating && floatAnchorScope(attrs.floating) === "paragraph" ? "paragraph" : null;
-
-    // Placeholder branch: a vector image (EMF/WMF — Office GDI formats the
-    // browser cannot decode, <img> yields naturalWidth 0) OR an unsized http
-    // image in a transient load state (loading/error/timeout, stamped by the
-    // editor's image-cap). Render a labeled div that keeps the image's
-    // size/floating/rotation so pagination and float anchoring stay faithful.
-    // For vector the real art is preserved in data-vector-src + node attrs for
-    // DOCX round-trip; for a load-state placeholder the src stays in the model
-    // attrs (the div renders no real image — measure reads the stamped width/
-    // height, not the DOM).
-    const loadState = (attrs.loadState as string | null) ?? null;
-    const isVector = isVectorImage(attrs.src);
-    if (isVector || loadState) {
-      const styles = renderImageStyles(attrs);
-      if (attrs.width != null) styles.push(`width:${attrs.width as number}px`);
-      if (attrs.height != null) styles.push(`height:${attrs.height as number}px`);
-      const divAttrs: Record<string, unknown> = {
-        "data-image": isVector ? "vector" : "placeholder",
-        role: "img",
-        style: styles.join(";"),
-      };
-      if (isVector) {
-        divAttrs["data-vector-src"] = attrs.src as string;
-      } else {
-        divAttrs["data-load-state"] = loadState;
-      }
-      if (attrs.alt) divAttrs["aria-label"] = attrs.alt;
-      if (attrs.title) divAttrs["title"] = attrs.title;
-      attachRawAttrs(divAttrs, attrs);
-      if (floatAnchor) divAttrs["data-float-anchor"] = floatAnchor;
-      const label = isVector
-        ? "Vector image"
-        : loadState === "error"
-          ? "Image failed to load"
-          : loadState === "timeout"
-            ? "Image load timed out"
-            : "Loading…";
-      return ["div", divAttrs, label] as const;
-    }
-
-    // Cropped images render as a span[extent-box] (overflow:hidden + placement)
-    // wrapping a real <img>. The <img> is sized per axis and translated so the
-    // visible srcRect region maps onto the box (object-fit:cover is uniform and
-    // only exact for single-axis crops); the box clips the cropped-out region.
-    // Keeping a real <img> (vs a background-image div) preserves alt/accessibility.
-    if (attrs.crop) {
-      const width = attrs.width as number;
-      const height = attrs.height as number;
-      const boxStyles = renderImageStyles(attrs);
-      boxStyles.push("overflow:hidden", `width:${width}px`, `height:${height}px`);
-      const crop = renderCropAttrs(attrs.crop as CropRect, { width, height });
-      const boxAttrs: Record<string, unknown> = {
-        "data-image": "crop",
-        style: boxStyles.join(";"),
-      };
-      attachRawAttrs(boxAttrs, attrs);
-      boxAttrs["data-crop"] = JSON.stringify(attrs.crop);
-      if (floatAnchor) boxAttrs["data-float-anchor"] = floatAnchor;
-      const imgAttrs: Record<string, unknown> = {
-        src: attrs.src as string,
-        style: crop.style,
-        ...(isRemoteImage(attrs.src) ? REMOTE_IMG_ATTRS : {}),
-      };
-      if (attrs.alt) imgAttrs.alt = attrs.alt;
-      if (attrs.title) imgAttrs.title = attrs.title;
-      return ["span", boxAttrs, ["img", imgAttrs]] as const;
-    }
-
-    const htmlAttrs: Record<string, unknown> = {
-      ...HTMLAttributes,
-      ...(isRemoteImage(attrs.src) ? REMOTE_IMG_ATTRS : {}),
-    };
-    const styles = renderImageStyles(attrs);
-    // Unsized image placeholder (no width/height, e.g. an un-refined http
-    // image): reserve a CSS box so layout settles before decode, avoiding
-    // reflow on lazy-load. The 4:3 ratio matches measure.layoutImageLines'
-    // default placeholder (edit == render). Once image-cap stamps the real
-    // width/height this branch is skipped.
-    if (attrs.width == null && attrs.height == null) {
-      styles.push("width:100%", "aspect-ratio:4/3");
-    }
-    if (styles.length > 0) htmlAttrs.style = styles.join(";");
-    attachRawAttrs(htmlAttrs, attrs);
-    if (floatAnchor) htmlAttrs["data-float-anchor"] = floatAnchor;
-    return ["img", htmlAttrs] as const;
   },
 
   parseHTML() {

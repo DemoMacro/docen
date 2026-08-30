@@ -4,11 +4,11 @@
 ![npm downloads](https://img.shields.io/npm/dw/docen)
 ![npm license](https://img.shields.io/npm/l/docen)
 
-> Universal document toolkit — one package for headless Markdown/HTML/DOCX conversion AND the full `<docen-document>` web-component editor (via the `docen/editor` subpath).
+> Universal document toolkit — one package for headless Markdown/DOCX conversion AND the full `<docen-document>` web-component editor (via the `docen/editor` subpath).
 
 ## Features
 
-- 🔄 **Universal Format Support** - Seamless conversion between Markdown, HTML, and DOCX
+- 🔄 **Universal Format Support** - Seamless conversion between Markdown and DOCX (styled HTML is accepted as paste input)
 - 🎯 **Unified API** - Consistent, intuitive interface across all format conversions
 - 📦 **All-in-One Package** - Single dependency for both headless conversion AND the full `<docen-document>` editor (via `docen/editor`)
 - 🔧 **Built on TipTap** - Powered by the robust TipTap/ProseMirror ecosystem
@@ -31,18 +31,6 @@ $ pnpm add docen
 ```
 
 ## Quick Start
-
-### HTML ↔ TipTap JSON
-
-```typescript
-import { parseHTML, generateHTML } from "docen";
-
-// Parse HTML to TipTap JSON
-const doc = parseHTML("<h1>Hello World</h1><p>This is <strong>bold</strong> text.</p>");
-
-// Generate HTML from TipTap JSON
-const html = generateHTML(doc);
-```
 
 ### Markdown ↔ TipTap JSON
 
@@ -70,21 +58,15 @@ const docxBuffer = await generateDOCX(doc); // defaults to a Node.js Buffer
 
 ### Cross-Format Conversion
 
-Convert between any formats by using TipTap JSON as the intermediate format:
+Convert between formats by using TipTap JSON as the intermediate format:
 
 ```typescript
-import { parseHTML, generateDOCX } from "docen";
+import { parseMarkdown, generateDOCX } from "docen";
 
-// HTML → DOCX
-const html = "<h1>Title</h1><p>Content...</p>";
-const doc = parseHTML(html);
-const docx = await generateDOCX(doc, { packer: { type: "blob" } });
-
-// Markdown → HTML
-import { parseMarkdown, generateHTML } from "docen";
+// Markdown → DOCX
 const md = "# Title\n\nContent...";
-const doc2 = parseMarkdown(md);
-const htmlContent = generateHTML(doc2);
+const doc = parseMarkdown(md);
+const docx = await generateDOCX(doc, { packer: { type: "blob" } });
 ```
 
 ### Full Editor (via `docen/editor`)
@@ -104,39 +86,6 @@ The same `docen` package also re-exports the turnkey web-component editor. Impor
 > The editor lives on a subpath so that pure-converter imports (`import { parseDOCX } from "docen"`) stay tree-shakable and never pull in the Fluent UI shell.
 
 ## API Reference
-
-### HTML Functions
-
-#### `parseHTML(html, extensions?, options?)`
-
-Parses an HTML string into TipTap JSON content.
-
-**Parameters:**
-
-- `html: string` - HTML string to parse
-- `extensions?: Extensions` - Optional TipTap extensions (defaults to @docen/docx's docxExtensions)
-- `options?: ParseOptions` - Optional ProseMirror parse options
-
-**Returns:** `JSONContent` - TipTap document object
-
-```typescript
-const doc = parseHTML("<p>Hello World</p>");
-```
-
-#### `generateHTML(doc, extensions?)`
-
-Generates an HTML string from TipTap JSON content.
-
-**Parameters:**
-
-- `doc: JSONContent` - TipTap document object
-- `extensions?: Extensions` - Optional TipTap extensions
-
-**Returns:** `string` - HTML string
-
-```typescript
-const html = generateHTML({ type: 'doc', content: [...] });
-```
 
 ### Markdown Functions
 
@@ -232,14 +181,14 @@ return new Response(stream);
 
 ### Custom Extensions
 
-Use custom TipTap extensions for HTML/Markdown conversions:
+Use custom TipTap extensions for Markdown conversions:
 
 ```typescript
 import { CustomExtension } from "./custom-extension";
-import { parseHTML, generateHTML } from "docen";
+import { parseMarkdown, generateMarkdown } from "docen";
 
-const doc = parseHTML(html, [CustomExtension]);
-const htmlContent = generateHTML(doc, [CustomExtension]);
+const doc = parseMarkdown(md, [CustomExtension]);
+const mdContent = generateMarkdown(doc, [CustomExtension]);
 ```
 
 ### DOCX Template Patching
@@ -247,12 +196,12 @@ const htmlContent = generateHTML(doc, [CustomExtension]);
 Replace `{{placeholders}}` in a DOCX template with TipTap-JSON content:
 
 ```typescript
-import { patchDOCX, parseHTML, parseMarkdown } from "docen";
+import { patchDOCX, parseMarkdown } from "docen";
 
 const result = await patchDOCX({
   template: templateBuffer,
   patches: {
-    title: { content: parseHTML("<h1>Report</h1>") },
+    title: { content: parseMarkdown("# Report") },
     body: { content: parseMarkdown("## Section\n\nHello **world**.") },
   },
   outputType: "nodebuffer",
@@ -263,11 +212,10 @@ Each patch's `content` is compiled to DOCX (styling derived from attrs) and the 
 
 ## Format Conversion Matrix
 
-| From \ To    | HTML     | Markdown | DOCX     |
-| ------------ | -------- | -------- | -------- |
-| **HTML**     | -        | via JSON | via JSON |
-| **Markdown** | via JSON | -        | via JSON |
-| **DOCX**     | via JSON | via JSON | -        |
+| From \ To    | Markdown | DOCX     |
+| ------------ | -------- | -------- |
+| **Markdown** | -        | via JSON |
+| **DOCX**     | via JSON | -        |
 
 All conversions go through TipTap JSON as the intermediate format, ensuring consistency and enabling cross-format transformations.
 
@@ -304,7 +252,7 @@ All conversions go through TipTap JSON as the intermediate format, ensuring cons
 - **Content Management Systems** - Import/export documents in multiple formats
 - **Documentation Tools** - Convert between Markdown and Word
 - **Note-taking Apps** - Support various import/export formats
-- **Report Generation** - Generate DOCX reports from HTML/Markdown templates
+- **Report Generation** - Generate DOCX reports from Markdown templates
 - **Content Migration** - Migrate content between different formats
 - **Collaborative Editing** - Use TipTap editor with format support
 
@@ -312,10 +260,10 @@ All conversions go through TipTap JSON as the intermediate format, ensuring cons
 
 `docen` ships three entry points: the **root** re-exports the high-level converters; **`docen/docx`** exposes the full engine (`createDocxEditor`, `docxExtensions`, resolve/compile/prepare, styles); **`docen/editor`** exposes the `<docen-document>` web component. It builds on:
 
-- **@docen/docx** - DOCX / HTML / Markdown converters built on the DocxManager architecture (full surface via `docen/docx`)
+- **@docen/docx** - DOCX / Markdown converters built on the DocxManager architecture (full surface via `docen/docx`)
 - **@docen/editor** - Fluent UI shell + docx engine → `<docen-document>` (exposed via the `docen/editor` subpath)
 - **@office-open/docx** - Native OOXML parse/generate (`parseDocument`, `generateDocument`, `patchDocument`)
-- **@tiptap/html** / **@tiptap/markdown** - HTML and Markdown serialization (via @docen/docx)
+- **@tiptap/markdown** - Markdown serialization (via @docen/docx)
 
 ## Comparison with Alternatives
 
@@ -323,8 +271,6 @@ All conversions go through TipTap JSON as the intermediate format, ensuring cons
 | ----------- | ----- | ------------- | ------- | -------- |
 | MD → DOCX   | ✅    | ✅            | ❌      | ❌       |
 | DOCX → MD   | ✅    | ❌            | ❌      | ❌       |
-| HTML ↔ MD   | ✅    | ❌            | ❌      | ✅       |
-| DOCX ↔ HTML | ✅    | ❌            | ✅      | ❌       |
 | TypeScript  | ✅    | ✅            | ✅      | ✅       |
 | Unified API | ✅    | ❌            | ❌      | ❌       |
 | Extensible  | ✅    | ❌            | ❌      | ✅       |

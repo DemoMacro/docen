@@ -4,11 +4,10 @@ import {
   docxExtensions,
   effectiveRunProps,
   generateDOCX,
-  generateHTML,
   generateMarkdown,
   normalizeDocument,
   parseDOCX,
-  parseHTML,
+  parseHTMLBody,
   parseMarkdown,
   sectionPageSizeDefaults,
   type JSONContent,
@@ -92,15 +91,13 @@ const escapeHtml = (s: string): string =>
  *  first (the picker filters on it), MIME as a fallback for platforms that fill
  *  it in. Throws on an unrecognized type so the caller surfaces the error
  *  rather than silently parsing garbage. */
-function detectOpenFormat(file: File): "docx" | "markdown" | "html" {
+function detectOpenFormat(file: File): "docx" | "markdown" {
   const name = file.name.toLowerCase();
   if (name.endsWith(".docx")) return "docx";
   if (name.endsWith(".md") || name.endsWith(".markdown")) return "markdown";
-  if (name.endsWith(".html") || name.endsWith(".htm")) return "html";
   const type = file.type;
   if (type.includes("wordprocessingml.document")) return "docx";
   if (type === "text/markdown") return "markdown";
-  if (type === "text/html") return "html";
   throw new Error(`Unsupported file type: ${file.name || type || "(unknown)"}`);
 }
 
@@ -109,7 +106,7 @@ function detectOpenFormat(file: File): "docx" | "markdown" | "html" {
  *  must be a BARE type — showSaveFilePicker rejects accept keys carrying params
  *  (e.g. ";charset=utf-8") with NotSupportedError, so the picker never opens. */
 const SAVE_FORMATS: Record<
-  "docx" | "markdown" | "html",
+  "docx" | "markdown",
   { description: string; mime: string; ext: string }
 > = {
   docx: {
@@ -118,7 +115,6 @@ const SAVE_FORMATS: Record<
     ext: ".docx",
   },
   markdown: { description: "Markdown", mime: "text/markdown", ext: ".md" },
-  html: { description: "HTML Document", mime: "text/html", ext: ".html" },
 };
 
 /** Commands handled locally in #onCommand/#onChange (not routed to
@@ -321,7 +317,7 @@ const documentTemplate = html`
   <docen-word-count-dialog part="word-count"></docen-word-count-dialog>
   <docen-symbol-dialog part="symbol"></docen-symbol-dialog>
   <docen-find-replace-dialog></docen-find-replace-dialog>
-  <input type="file" id="file-input" accept=".docx,.md,.markdown,.html,.htm" hidden />
+  <input type="file" id="file-input" accept=".docx,.md,.markdown" hidden />
   <input type="file" id="image-input" accept="image/*" hidden />
 `;
 
@@ -807,20 +803,44 @@ class DocenDocument extends AddinHost<Editor> {
     this.#bridge?.focus();
   }
 
-  /** Paste from the system clipboard as plain text. navigator.clipboard is the
-   *  reliable path; execCommand("paste") is the fallback (often blocked). */
+  /** Paste from the system clipboard. Prefers text/html — styled paste through
+   *  the schema's parse rules — and falls back to plain text. navigator.clipboard
+   *  is the reliable path; execCommand("paste") is the fallback (often blocked). */
   async #paste(): Promise<void> {
     const editor = this.editor;
     if (!editor) return;
-    let text: string | null = null;
+    this.#bridge?.focus();
     try {
-      text = await navigator.clipboard.readText();
+      const items = await navigator.clipboard.read();
+      for (const item of items) {
+        const type = item.types.includes("text/html")
+          ? "text/html"
+          : item.types.includes("text/plain")
+            ? "text/plain"
+            : null;
+        if (!type) continue;
+        const text = await (await item.getType(type)).text();
+        if (!text) continue;
+        if (type === "text/html") {
+          const body = new DOMParser().parseFromString(text, "text/html").body;
+          const content = parseHTMLBody(body, editor.state.schema).content ?? [];
+          if (content.length) {
+            editor.commands.insertContent(content);
+            return;
+          }
+        } else {
+          editor.commands.insertContent(text);
+          return;
+        }
+      }
     } catch {
-      return;
+      // read() may be denied (permission policy) — fall through to readText.
     }
-    if (text) {
-      this.#bridge?.focus();
-      editor.commands.insertContent(text);
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text) editor.commands.insertContent(text);
+    } catch {
+      /* clipboard unavailable — nothing to paste */
     }
   }
 
@@ -1001,7 +1021,16 @@ class DocenDocument extends AddinHost<Editor> {
     // Declarative section-properties / styles (JSON) seed doc-level attrs so a
     // host can bootstrap page setup + named styles without openDOCX/setJSON.
     const initAttrs = this.#readInitAttrs();
-    const baseDoc = contentAttr ? parseHTML(contentAttr) : ({} as JSONContent);
+    // The content attribute accepts Tiptap JSON only; a malformed string
+    // mounts an empty document rather than throwing mid-connection.
+    let baseDoc = {} as JSONContent;
+    if (contentAttr) {
+      try {
+        baseDoc = JSON.parse(contentAttr) as JSONContent;
+      } catch {
+        console.warn("[docen-document] content attribute is not valid JSON — ignored");
+      }
+    }
     const seeded =
       Object.keys(initAttrs).length > 0
         ? { ...baseDoc, attrs: { ...baseDoc.attrs, ...initAttrs } }
@@ -1554,7 +1583,6 @@ class DocenDocument extends AddinHost<Editor> {
                 <fluent-divider role="separator" aria-orientation="horizontal" orientation="horizontal"></fluent-divider>
                 <fluent-menu-item data-event="save-as">${t("header.save-as", this)}</fluent-menu-item>
                 <fluent-menu-item data-event="save-as-markdown">${t("header.save-as-markdown", this)}</fluent-menu-item>
-                <fluent-menu-item data-event="save-as-html">${t("header.save-as-html", this)}</fluent-menu-item>
                 <fluent-divider role="separator" aria-orientation="horizontal" orientation="horizontal"></fluent-divider>
                 <fluent-menu-item data-event="print">${t("header.print", this)}</fluent-menu-item>
                 <fluent-menu-item data-event="options">${t("header.options", this)}</fluent-menu-item>
@@ -2790,7 +2818,7 @@ class DocenDocument extends AddinHost<Editor> {
     switch (name) {
       case "open":
         // Host can take over via docen:open (preventDefault); else open the
-        // picker — #onFileChange auto-detects docx/md/html from the extension.
+        // picker — #onFileChange auto-detects docx/md from the extension.
         if (!this.#emitCancelable("docen:open")) this.#pickFile();
         break;
       case "save-as":
@@ -2799,9 +2827,6 @@ class DocenDocument extends AddinHost<Editor> {
       case "save-as-markdown":
         if (!this.#emitCancelable("docen:save-as", { format: "markdown" }))
           void this.#saveAs("markdown");
-        break;
-      case "save-as-html":
-        if (!this.#emitCancelable("docen:save-as", { format: "html" })) void this.#saveAs("html");
         break;
       case "print":
         if (!this.#emitCancelable("docen:print")) this.#print();
@@ -2881,8 +2906,8 @@ class DocenDocument extends AddinHost<Editor> {
   }
 
   /** Open the OS file picker. The accept filter on the input element covers
-   *  .docx/.md/.markdown/.html/.htm; #onFileChange routes the chosen file by
-   *  extension via open(). */
+   *  .docx/.md/.markdown; #onFileChange routes the chosen file by extension
+   *  via open(). */
   #pickFile(): void {
     this.#fileInput?.click();
   }
@@ -2915,23 +2940,16 @@ class DocenDocument extends AddinHost<Editor> {
   /** Save the document in the given format via the native Save As dialog
    *  (showSaveFilePicker) when available so the user picks the location and name;
    *  falls back to a plain download otherwise. The header filename is updated to
-   *  match the saved name. HTML is wrapped in a full document so the file
-   *  renders standalone in a browser. */
-  async #saveAs(format: "docx" | "markdown" | "html" = "docx"): Promise<void> {
+   *  match the saved name. */
+  async #saveAs(format: "docx" | "markdown" = "docx"): Promise<void> {
     const cfg = SAVE_FORMATS[format];
-    // saveDOCX returns a buffer; the text formats return a string (HTML wrapped
-    // for standalone rendering).
-    const data =
-      format === "docx"
-        ? await this.saveDOCX()
-        : format === "markdown"
-          ? this.saveMarkdown()
-          : this.#wrapHtmlDocument(this.saveHTML());
+    // saveDOCX returns a buffer; Markdown returns a string.
+    const data = format === "docx" ? await this.saveDOCX() : this.saveMarkdown();
     const blob = new Blob([data as BlobPart], { type: cfg.mime });
     // Re-stamp the extension so a .docx opened then saved as Markdown does not
     // keep its .docx name.
     const baseName = (this.getAttribute("filename")?.trim() || t("header.doc-name", this)).replace(
-      /\.(docx|md|markdown|htm|html|txt)$/i,
+      /\.(docx|md|markdown|txt)$/i,
       "",
     );
     const suggestedName = baseName + cfg.ext;
@@ -2976,40 +2994,28 @@ class DocenDocument extends AddinHost<Editor> {
     URL.revokeObjectURL(url);
   }
 
-  /** Wrap a generated HTML body fragment in a full document so a saved .html
-   *  file renders standalone — generateHTML returns <section> fragments only. */
-  #wrapHtmlDocument(body: string): string {
-    const title = (this.getAttribute("filename")?.trim() || t("header.doc-name", this)).replace(
-      /\.[^.]+$/,
-      "",
-    );
-    return `<!DOCTYPE html><html lang="${escapeHtml(document.documentElement.lang || "en")}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(title)}</title></head><body>${body}</body></html>`;
-  }
-
   /** Print the document: window.print(). */
   #print(): void {
     window.print();
   }
 
-  /** Common load path for openDOCX/openMarkdown/openHTML: adopt a filename,
-   *  replace the whole doc node. The #loadDoc wake-up transaction re-renders
-   *  the canvas through the bridge. */
+  /** Common load path for openDOCX/openMarkdown: adopt a filename, replace the
+   *  whole doc node. The #loadDoc wake-up transaction re-renders the canvas
+   *  through the bridge. */
   #applyOpenedJSON(json: JSONContent, filename?: string): void {
     if (filename) this.setAttribute("filename", filename);
     this.#loadDoc(json);
   }
 
   /** Load a file into the editor, auto-detecting its format from the extension
-   *  (.docx → DOCX, .md/.markdown → Markdown, .html/.htm → HTML). This is the
-   *  single entry point the filename-menu "Open…" uses; openDOCX/openMarkdown/
-   *  openHTML remain for when the caller already knows the format (e.g. loading
-   *  a server-fetched docx buffer that has no filename). Throws on an
-   *  unrecognized extension. */
+   *  (.docx → DOCX, .md/.markdown → Markdown). This is the single entry point
+   *  the filename-menu "Open…" uses; openDOCX/openMarkdown remain for when the
+   *  caller already knows the format (e.g. loading a server-fetched docx buffer
+   *  that has no filename). Throws on an unrecognized extension. */
   async open(file: File): Promise<void> {
     const format = detectOpenFormat(file);
     if (format === "docx") return this.openDOCX(file);
-    if (format === "markdown") return this.openMarkdown(file);
-    return this.openHTML(file);
+    return this.openMarkdown(file);
   }
 
   /** Load a .docx into the editor from a File or a buffer (ArrayBuffer /
@@ -3028,15 +3034,6 @@ class DocenDocument extends AddinHost<Editor> {
     this.#applyOpenedJSON(parseMarkdown(text), typeof input === "string" ? undefined : input.name);
   }
 
-  /** Load an HTML file/string into the editor. A File adopts its name as the
-   *  filename; a bare string carries no name. Section geometry and the page
-   *  background are doc-level metadata that round-trip via DOCX, not HTML, so
-   *  only the content is restored. */
-  async openHTML(input: File | string): Promise<void> {
-    const text = typeof input === "string" ? input : await input.text();
-    this.#applyOpenedJSON(parseHTML(text), typeof input === "string" ? undefined : input.name);
-  }
-
   /** Serialize the current document to a DOCX buffer. */
   async saveDOCX(): Promise<Uint8Array> {
     const buffer = await generateDOCX(this.getJSON());
@@ -3046,12 +3043,6 @@ class DocenDocument extends AddinHost<Editor> {
   /** Serialize the current document to a Markdown string. */
   saveMarkdown(): string {
     return generateMarkdown(this.getJSON());
-  }
-
-  /** Serialize the current document to an HTML body fragment (no
-   *  <html>/<!DOCTYPE> wrapper — #saveAs wraps it for a standalone file). */
-  saveHTML(): string {
-    return generateHTML(this.getJSON());
   }
 
   /** Current document as Tiptap JSON. Cached — recomputed only after a doc

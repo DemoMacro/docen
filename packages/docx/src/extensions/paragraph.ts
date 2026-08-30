@@ -1,11 +1,10 @@
 import type { ParagraphOptions, StylesOptions } from "@office-open/docx";
 import { Node as TiptapNode } from "@tiptap/core";
 import type { JSONContent, MarkdownRendererHelpers, RenderContext } from "@tiptap/core";
-import type { Node as PMNode } from "@tiptap/pm/model";
 
 import { indexParagraphStyles } from "../style-cascade";
 import { HTML_ORDERED_TEMP } from "./list-numbering";
-import { docxParagraphAttrs, renderTextBlock, SECTION_ATTR_KEYS } from "./utils";
+import { docxParagraphAttrs, SECTION_ATTR_KEYS } from "./utils";
 
 /**
  * Paragraph extension with nested office-open attrs — the single textblock node.
@@ -15,8 +14,7 @@ import { docxParagraphAttrs, renderTextBlock, SECTION_ATTR_KEYS } from "./utils"
  * + heading/style/bullet/numbering/thematicBreak): a heading IS a paragraph in
  * OOXML, so its HeadingLevel pStyle rides on the `heading` attr instead of a
  * separate node, and DOCX round-trip is near-identity — renderDocx/parseDocx
- * pass attrs through; CSS conversion happens only in renderHTML via utils
- * mappers. Consumers derive the display level via detectHeadingLevel.
+ * pass attrs through. Consumers derive the display level via detectHeadingLevel.
  */
 
 /** HeadingLevel literals: "Heading1".."Heading9", "Title". */
@@ -101,18 +99,6 @@ export function detectHeadingLevel(
   return undefined;
 }
 
-/** The heading tag for renderHTML: levels 1-6 map to h1-h6; 7-9 fall back to
- *  a <h6 data-heading-level="N"> proxy (HTML has no h7-h9; parseHTML reads the
- *  data attr back). A non-heading paragraph renders as <p>. */
-function headingTag(resolved: { heading?: string; style?: string; outlineLevel?: number }): {
-  tag: string;
-  level?: number;
-} {
-  const level = detectHeadingLevel(resolved, undefined);
-  if (!level) return { tag: "p" };
-  return { tag: level >= 1 && level <= 6 ? `h${level}` : "h6", level };
-}
-
 // ── DOCX serialization (near-identity: attrs mirror ParagraphPropertiesOptionsBase) ──
 
 export function renderDocx(node: JSONContent): Record<string, unknown> {
@@ -160,9 +146,10 @@ export const Paragraph = TiptapNode.create({
     return docxParagraphAttrs();
   },
 
-  // HTML round-trip: h1-h6 parse back with a lifted HeadingLevel `heading`
-  // attr; a <h6 data-heading-level="N"> proxy restores levels 7-9. The proxy
-  // rule runs before the native h6 rule so a plain <h6> maps to level 6.
+  // HTML input (clipboard paste): h1-h6 parse back with a lifted HeadingLevel
+  // `heading` attr; a <h6 data-heading-level="N"> proxy restores levels 7-9.
+  // The proxy rule runs before the native h6 rule so a plain <h6> maps to
+  // level 6.
   // A <li> maps to a flat list paragraph: nesting depth = ancestor ul/ol
   // count, and the NEAREST list element decides bullet vs ordered (an <ol>
   // wrapping a nested <ul> marks that sublist's items as bullets). Ordered
@@ -184,6 +171,15 @@ export const Paragraph = TiptapNode.create({
       {
         tag: "li",
         getAttrs: (el: HTMLElement) => {
+          // Pasted li elements are flattened by parseHTMLBody (paste.ts):
+          // level + kind ride on attributes.
+          const flatLevel = el.getAttribute("data-docen-level");
+          if (flatLevel != null && flatLevel !== "") {
+            const level = Math.max(0, Number(flatLevel) || 0);
+            return el.getAttribute("data-docen-kind") === "ol"
+              ? { numbering: { reference: HTML_ORDERED_TEMP, level } }
+              : { bullet: { level } };
+          }
           let depth = 0;
           let nearest: string | null = null;
           for (let p = el.parentElement; p; p = p.parentElement) {
@@ -216,29 +212,6 @@ export const Paragraph = TiptapNode.create({
       })),
       { tag: "p" },
     ];
-  },
-
-  renderHTML({ node, HTMLAttributes }: { node: PMNode; HTMLAttributes: Record<string, unknown> }) {
-    // renderHTML has no access to the document styles, so the tag decision
-    // covers the lifted `heading` attr and an explicit outlineLevel only; a
-    // numeric pStyle id resolved through styles.xml (WPS/zh-CN Word) falls
-    // back to <p> — its docx-style-{id} CSS class still applies the style.
-    const { tag, level } = headingTag(
-      node.attrs as { heading?: string; style?: string; outlineLevel?: number },
-    );
-    // A list paragraph marks itself (kind + depth) so generateHTML can regroup
-    // consecutive list paragraphs into nested ul/ol lists — parseHTML's <li>
-    // rule reads the grouping back.
-    const attrs = node.attrs as { bullet?: { level?: number } | null; numbering?: unknown };
-    const withList = { ...HTMLAttributes };
-    if (attrs.bullet) {
-      withList["data-list"] = "bullet";
-      withList["data-list-level"] = String(attrs.bullet.level ?? 0);
-    } else if (attrs.numbering) {
-      withList["data-list"] = "ordered";
-      withList["data-list-level"] = String((attrs.numbering as { level?: number }).level ?? 0);
-    }
-    return renderTextBlock(node, withList, tag, level);
   },
 
   renderDocx,

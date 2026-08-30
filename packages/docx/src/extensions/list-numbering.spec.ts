@@ -1,10 +1,11 @@
 import { generateDocumentSync } from "@office-open/docx";
+import { getSchema } from "@tiptap/core";
+import { parseHTML as parseLinkedomHTML } from "linkedom";
 import { describe, expect, it } from "vitest";
 
 import { compileDocument, parseDOCX } from "../converters/docx";
-import { generateHTML, parseHTML } from "../converters/html";
 import { generateMarkdown, parseMarkdown } from "../converters/markdown";
-import type { JSONContent } from "../core";
+import { docxExtensions, type JSONContent } from "../core";
 import {
   assignOrderedReferences,
   buildListLevels,
@@ -12,6 +13,7 @@ import {
   isGeneratedListReference,
   nextOrderedReference,
 } from "./list-numbering";
+import { parseHTMLBody } from "./paste";
 
 describe("list-numbering builders", () => {
   it("builds a decimal ordered definition with per-level restarts", () => {
@@ -198,35 +200,15 @@ describe("markdown flat lists", () => {
 
 describe("html flat lists", () => {
   it("parses nested ul/ol into leveled list paragraphs", () => {
-    const json = parseHTML("<ul><li>a<ul><li>b</li></ul></li><li>c</li></ul><ol><li>x</li></ol>");
+    // Wrap in a full document: linkedom does not synthesize <body> for a bare
+    // fragment, and document.body would be empty.
+    const { document } = parseLinkedomHTML(
+      `<!DOCTYPE html><html><body><ul><li>a<ul><li>b</li></ul></li><li>c</li></ul><ol><li>x</li></ol></body></html>`,
+    );
+    const json = parseHTMLBody(document.body as HTMLElement, getSchema(docxExtensions));
     const content = json.content ?? [];
     expect(content).toHaveLength(4);
     const levels = content.map((n) => n.attrs?.bullet?.level ?? n.attrs?.numbering?.level);
     expect(levels).toEqual([0, 1, 0, 0]);
-  });
-
-  it("regroups list paragraphs into nested ul/ol on generate", () => {
-    const html = generateHTML({
-      type: "doc",
-      content: [
-        {
-          type: "paragraph",
-          attrs: { bullet: { level: 0 } },
-          content: [{ type: "text", text: "a" }],
-        },
-        {
-          type: "paragraph",
-          attrs: { bullet: { level: 1 } },
-          content: [{ type: "text", text: "b" }],
-        },
-        { type: "paragraph", content: [{ type: "text", text: "plain" }] },
-      ],
-    });
-    // Nested shape: ul > li(a) > ul > li(b); the plain paragraph stays outside.
-    expect(html).toContain("<ul>");
-    expect(html.indexOf("b")).toBeGreaterThan(html.indexOf("a"));
-    expect(html).toContain("plain");
-    const open = (html.match(/<ul>/g) ?? []).length;
-    expect(open).toBe(2);
   });
 });

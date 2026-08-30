@@ -56,7 +56,7 @@ export function defaultParagraphStyleId(styles: StylesOptions | null | undefined
 // model is stable for its lifetime (set on load, unchanged across edits), yet
 // indexParagraphStyles is called per-paragraph (detectHeadingLevel during
 // resolve), per-transaction (effectiveRunProps at the caret), and per-render
-// (stylesToCss). The WeakMap memo turns all of those into O(1) lookups after
+// (layout projection). The WeakMap memo turns all of those into O(1) lookups after
 // the first build and frees the entry when the styles object is GC'd. Callers
 // treat the result as read-only (mergeStyleChain only .get()s).
 const styleIndexCache = new WeakMap<StylesOptions, Map<string, StyleEntry>>();

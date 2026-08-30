@@ -53,18 +53,13 @@ export {
   type ImageFetchHandler,
 } from "./converters/prepare";
 
-// Converters: HTML pipeline (HTML string ↔ Tiptap JSON)
-export { parseHTML, generateHTML } from "./converters/html";
-
 // Converters: Markdown pipeline (Markdown string ↔ Tiptap JSON)
 export { parseMarkdown, generateMarkdown } from "./converters/markdown";
 
-// Converters: styles → CSS (styles.xml model → scoped editor CSS for rendering)
+// Style-facing editor helpers (Quick Styles gallery entries, caret run props)
 export {
-  stylesToCss,
   quickStyles,
   effectiveRunProps,
-  inlineStyles,
   type QuickStyleEntry,
   type StylesOptions,
 } from "./converters/styles";

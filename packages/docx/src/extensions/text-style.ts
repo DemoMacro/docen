@@ -4,14 +4,10 @@ import { Mark } from "@tiptap/core";
 import {
   attrNative,
   characterSpacingFromCss,
-  characterSpacingToCss,
   type DocxAttrSpec,
   normalizeColorToHex,
-  resolveFontFamilyCss,
   shadingFromCss,
-  shadingToCss,
   sizeFromCss,
-  sizeToCss,
 } from "./utils";
 
 /**
@@ -19,11 +15,11 @@ import {
  *
  * Attrs mirror RunStylePropertiesOptions. bold/italic/strike/doubleStrike are
  * three-state booleans (true/false/null) carried here for lossless round-trip
- * and CSS cascade; the dedicated Bold/Italic/Strike marks only surface the
- * "true" state for editor interaction (<strong>/<em>/<s>). subScript/
+ * and the layout cascade; the dedicated Bold/Italic/Strike marks only surface
+ * the "true" state for editor interaction (<strong>/<em>/<s>). subScript/
  * superScript (OOXML vertAlign enum, no false state) stay on dedicated marks.
  * DOCX round-trip is near-identity: renderDocx/parseDocx pass attrs through;
- * CSS conversion happens only in attribute-level renderHTML/parseHTML.
+ * attribute-level parseHTML maps pasted inline CSS into native attrs.
  */
 
 /** Structural/semantic keys expressed elsewhere (run children/text/break). */
@@ -57,9 +53,8 @@ type RunAttrKey = keyof RunPropertiesOptions;
  *  keyof RunStylePropertiesOptions. */
 const NATIVE_RUN_ATTRS = {
   // Three-state booleans (true/false/null) that have no dedicated mark — ride
-  // TextStyle for round-trip + stylesToCss cascade. bold/italic are defined
-  // separately in docxRunAttrs with attribute-level renderHTML so their "false"
-  // state cancels an inherited bold/italic on the run (CSS cascade).
+  // TextStyle for round-trip + the layout cascade. bold/italic are defined
+  // separately in docxRunAttrs so their "false" state survives round-trip.
   strike: attrNative(),
   underline: attrNative(),
   emphasisMark: attrNative(),
@@ -104,97 +99,56 @@ const NATIVE_RUN_ATTRS = {
  *  docxParagraphAttrs in utils.ts). */
 const docxRunAttrs = {
   // rStyle reference (e.g. "InternetLink") — the named character style.
-  // renderHTML emits class="docx-char-{style}" so the injected document
-  // CSS (generated from styles.xml characterStyles) applies.
   style: {
     default: null,
     parseHTML: (element: HTMLElement) => {
       const m = (element.getAttribute("class") || "").match(/(?:^|\s)docx-char-(\S+)/);
       return m ? m[1] : null;
     },
-    renderHTML: (attributes: Record<string, unknown>) => {
-      const id = attributes.style as string | null;
-      return id ? { class: `docx-char-${id}` } : {};
-    },
   },
 
   // Scalar OOXML run properties with CSS equivalents.
   // Attr values are office-open native (color hex, font name, size in
-  // points, shading object); CSS conversion lives in renderHTML/parseHTML.
+  // points, shading object); pasted inline CSS is converted in parseHTML.
   color: {
     default: null,
     parseHTML: (element: HTMLElement) =>
       normalizeColorToHex(element.style.color || undefined) ?? null,
-    renderHTML: (attributes: Record<string, unknown>) => {
-      // "auto"/unset emit no inline color: the text inherits the page
-      // default (color: contrast-color(var(--docen-ink-bg)) on .docen-page),
-      // so default text inverts against the nearest fill like Word. An
-      // explicit hex overrides it.
-      if (attributes.color === "auto") return {};
-      const hex = normalizeColorToHex(attributes.color as string | undefined);
-      return hex ? { style: `color:${hex}` } : {};
-    },
   },
   characterSpacing: {
     default: null,
     parseHTML: (element: HTMLElement) =>
       characterSpacingFromCss(element.style.letterSpacing || null),
-    renderHTML: (attributes: Record<string, unknown>) => {
-      const css = characterSpacingToCss(attributes.characterSpacing as number | null | undefined);
-      return css ? { style: `letter-spacing:${css}` } : {};
-    },
   },
   font: {
     default: null,
     parseHTML: (element: HTMLElement) => element.style.fontFamily || null,
-    renderHTML: (attributes: Record<string, unknown>) => {
-      const name = resolveFontFamilyCss(attributes.font);
-      return name ? { style: `font-family:${name}` } : {};
-    },
   },
   rightToLeft: {
     default: null,
     parseHTML: (element: HTMLElement) => (element.dir === "rtl" ? true : null),
-    renderHTML: (attributes: Record<string, unknown>) =>
-      attributes.rightToLeft ? { style: "direction:rtl" } : {},
   },
-  // RunOptions.size is in POINTS (office-open convention); CSS font-size is
-  // derived in renderHTML and parsed back in parseHTML.
+  // RunOptions.size is in POINTS (office-open convention); pasted CSS
+  // font-size is converted back in parseHTML.
   size: {
     default: null,
     parseHTML: (element: HTMLElement) => sizeFromCss(element.style.fontSize),
-    renderHTML: (attributes: Record<string, unknown>) => {
-      const css = sizeToCss(attributes.size as number | null | undefined);
-      return css ? { style: `font-size:${css}` } : {};
-    },
   },
   // RunOptions.shading (OOXML <w:shd>) ↔ CSS background-color.
   shading: {
     default: null,
     parseHTML: (element: HTMLElement) => shadingFromCss(element.style.backgroundColor),
-    renderHTML: (attributes: Record<string, unknown>) => {
-      const css = shadingToCss(attributes.shading as { fill?: string } | null | undefined);
-      // A run fill flips the ink against it (Word "auto"). Declared on the
-      // run's own span so the text inherits the inverted color directly.
-      return css ? { style: `background-color:${css};color:contrast-color(${css})` } : {};
-    },
   },
 
   // bold/italic are three-state. The dedicated Bold/Italic marks surface
-  // "true" as <strong>/<em>; TextStyle carries the full state for round-trip,
-  // and "false" emits an inline normal so a run cancelling an inherited
-  // bold/italic (e.g. <w:b w:val="0"/> inside a bold style) renders un-bold
-  // via CSS cascade (inline overrides the stylesToCss stylesheet). "true"
-  // emits nothing here to avoid duplicating <strong>/<em>.
+  // "true" as <strong>/<em>; TextStyle carries the full state for round-trip
+  // (e.g. <w:b w:val="0"/> cancelling an inherited bold survives as
+  // bold=false). "true" rides the dedicated mark instead.
   bold: {
     default: null,
-    renderHTML: (attrs: Record<string, unknown>) =>
-      attrs.bold === false ? { style: "font-weight:normal" } : {},
   },
   italic: {
     default: null,
-    renderHTML: (attrs: Record<string, unknown>) =>
-      attrs.italic === false ? { style: "font-style:normal" } : {},
   },
 
   ...NATIVE_RUN_ATTRS,
@@ -211,12 +165,8 @@ export const TextStyle = Mark.create({
   parseHTML() {
     return [{ tag: "span" }];
   },
-  renderHTML() {
-    return ["span", null, 0] as const;
-  },
 
   // Near-identity: attrs mirror RunStylePropertiesOptions (rStyle included).
-  // CSS conversion happens only in attribute-level renderHTML/parseHTML above.
   renderDocx: (attrs: Record<string, unknown>): Partial<RunOptions> => {
     const opts: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(attrs)) {

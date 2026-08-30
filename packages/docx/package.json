@@ -1,13 +1,12 @@
 {
   "name": "@docen/docx",
   "version": "0.5.5",
-  "description": "DOCX editor and converter powered by @office-open/docx with Tiptap editing layer, supporting bidirectional conversion between DOCX, HTML, and Markdown",
+  "description": "DOCX editor and converter powered by @office-open/docx with a Tiptap editing layer — bidirectional DOCX and Markdown conversion, styled HTML paste input",
   "keywords": [
     "converter",
     "docen",
     "docx",
     "editor",
-    "html",
     "markdown",
     "microsoft-word",
     "office",
@@ -67,13 +66,16 @@
     "prepack": "pnpm build"
   },
   "dependencies": {
+    "@docen/layout": "workspace:*",
     "@office-open/core": "0.12.3",
     "@office-open/docx": "0.12.3",
     "@tiptap/core": "3.29.2",
     "@tiptap/extension-link": "3.29.2",
     "@tiptap/markdown": "3.29.2",
     "@tiptap/pm": "3.29.2",
-    "image-meta": "0.2.2",
+    "image-meta": "0.2.2"
+  },
+  "devDependencies": {
     "linkedom": "0.18.13"
   }
 }

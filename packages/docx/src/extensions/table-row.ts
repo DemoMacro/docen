@@ -91,26 +91,6 @@ export const TableRow = Node.create({
     return [{ tag: "tr" }];
   },
 
-  renderHTML({
-    node,
-    HTMLAttributes,
-  }: {
-    node: { attrs: Record<string, unknown> };
-    HTMLAttributes: Record<string, unknown>;
-  }) {
-    const attrs = { ...HTMLAttributes };
-    const styles: string[] = [];
-
-    // height.value is in twips → pt
-    if (node.attrs.height && typeof node.attrs.height === "object") {
-      const h = node.attrs.height as { value?: number };
-      if (h.value != null) styles.push(`height:${h.value / 20}pt`);
-    }
-
-    if (styles.length > 0) attrs.style = styles.join(";");
-    return ["tr", attrs, 0] as const;
-  },
-
   renderDocx,
   parseDocx,
 });

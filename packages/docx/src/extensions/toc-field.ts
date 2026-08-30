@@ -84,9 +84,5 @@ export const TocField = Node.create({
     return [{ tag: "div.docx-toc" }];
   },
 
-  renderHTML() {
-    return ["div", { class: "docx-toc" }, 0];
-  },
-
   parseDocxBlock,
 });

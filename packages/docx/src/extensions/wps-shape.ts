@@ -4,13 +4,11 @@ import type {
   SectionChild,
   ShapeOptions,
 } from "@office-open/docx";
-import type { DOMOutputSpec } from "@tiptap/pm/model";
 
 import { cleanAttrs } from "../converters/styles";
-import type { JSONContent } from "../core";
 import { Node } from "../core";
+import type { JSONContent } from "../core";
 import type { ParseInlineRule, ResolveContext } from "./types";
-import { wpsShapeStyles, type WpsShapeStandalone } from "./wpg-group";
 
 /**
  * wpsShape — inline node carrying a standalone DOCX text-box shape
@@ -19,8 +17,7 @@ import { wpsShapeStyles, type WpsShapeStandalone } from "./wpg-group";
  * attrs.wpsShape; the editable text body is PM content (block+), one paragraph
  * per office-open ParagraphOptions. Unlike a group's interior wps children
  * (laid out in the group's coordinate space), this shape floats on its own
- * anchor. The engine node has no NodeView (UI-free); the editor layer extends
- * it with a two-element NodeView (outer placement/rotation, inner contentDOM).
+ * anchor. The engine node is UI-free; rendering is owned by the editor layer.
  */
 
 /** The standalone text-box shape ParagraphChild branch. */
@@ -82,8 +79,7 @@ function resolveWpsShape(ws: WpsBranch["wpsShape"], ctx: ResolveContext): JSONCo
       }
       const para: ParagraphOptions = child;
       // DrawingML defRPr (para.run) is the default run-properties for the box's
-      // runs, NOT the OOXML ¶-mark rPr. Merge it into each run (matching the
-      // prior atom renderWpsText: {...para.run, ...r}), then drop it from the
+      // runs, NOT the OOXML ¶-mark rPr. Merge it into each run, then drop it from the
       // paragraph (run: undefined): paragraph.ts renders attrs.run.size as
       // ¶-mark line-height, which would override the box's grid line-height —
       // but defRPr is a run default, not a ¶ mark. Round-trip safe — runs carry
@@ -145,25 +141,6 @@ export const WpsShape = Node.create({
         contentElement: "div",
       },
     ];
-  },
-
-  renderHTML({
-    node,
-  }: {
-    node: { attrs: Record<string, unknown> };
-    HTMLAttributes: Record<string, unknown>;
-  }) {
-    const ws = (node.attrs.wpsShape ?? {}) as WpsShapeStandalone;
-    const { outer, inner, paragraphAnchor } = wpsShapeStyles(ws);
-    // Serialize the shape geometry so generateHTML→parseHTML round-trips it
-    // (parseHTML JSON.parses data-wps-shape; "" would throw and drop it). The
-    // text body is NOT serialized here — it round-trips as PM content.
-    const attrs: Record<string, string> = {
-      "data-wps-shape": JSON.stringify(ws),
-      style: outer,
-    };
-    if (paragraphAnchor) attrs["data-float-anchor"] = "paragraph";
-    return ["div", attrs, ["div", { style: inner }, 0]] as unknown as DOMOutputSpec;
   },
 
   parseDocxInline,

@@ -4,7 +4,7 @@
 ![npm downloads](https://img.shields.io/npm/dw/@docen/docx)
 ![npm license](https://img.shields.io/npm/l/@docen/docx)
 
-> DOCX editor and converter powered by @office-open/docx with Tiptap editing layer, supporting bidirectional conversion between DOCX, HTML, and Markdown.
+> DOCX editor and converter powered by @office-open/docx with Tiptap editing layer, supporting bidirectional conversion between DOCX and Markdown (styled HTML is accepted as paste input).
 
 > Need a ready-made visual editor? [`@docen/editor`](../editor/README.md) wraps this engine in a Fluent UI host with the turnkey `<docen-document>` web component.
 
@@ -12,7 +12,6 @@
 
 - 📝 **Tiptap Editor** — Full-featured WYSIWYG editor with DOCX-aware extensions
 - 🔄 **DOCX Round-trip** — Near-lossless DOCX ↔ Editor conversion via @office-open/docx
-- 🌐 **HTML Conversion** — Bidirectional Tiptap JSON ↔ HTML (editor path + standalone)
 - 📄 **Markdown Support** — Tiptap JSON ↔ Markdown conversion
 - 🎨 **DOCX Properties** — Custom Tiptap extensions carry shading, borders, indent, spacing, floating, crop
 - 🔗 **Template Patching** — Replace `{{placeholders}}` in DOCX templates with Tiptap-JSON content
@@ -56,8 +55,6 @@ import {
   generateDOCX,
   generateDOCXSync,
   generateDOCXStream,
-  parseHTML,
-  generateHTML,
   parseMarkdown,
   generateMarkdown,
 } from "@docen/docx";
@@ -68,10 +65,6 @@ const buffer = await generateDOCX(json); // → Buffer (pre-fetches http images 
 const blob = await generateDOCX(json, { packer: { type: "blob" } }); // → Blob
 const sync = generateDOCXSync(json); // → Buffer (skips prepare)
 const stream = await generateDOCXStream(json); // → ReadableStream<Uint8Array>
-
-// HTML pipeline: HTML string ↔ Tiptap JSON
-const json = parseHTML("<p>Hello</p>"); // → JSONContent
-const html = generateHTML(json); // → string
 
 // Markdown pipeline: Markdown string ↔ Tiptap JSON
 const json = parseMarkdown("# Hello"); // → JSONContent
@@ -109,12 +102,12 @@ Replace `{{placeholders}}` in a DOCX template with Tiptap-JSON content. Each
 patch's `content` is prepared (default: fetch http images) then compiled to DOCX.
 
 ```typescript
-import { patchDOCX, parseHTML } from "@docen/docx";
+import { patchDOCX, parseMarkdown } from "@docen/docx";
 
 const result = await patchDOCX({
   template: templateBuffer,
   patches: {
-    title: { content: parseHTML("<h1>Report</h1>") },
+    title: { content: parseMarkdown("# Report") },
   },
   outputType: "nodebuffer",
 });
@@ -139,7 +132,7 @@ await prepareDocument(json); // in place: http image URLs → data URLs
 ```
 Standalone Functions (core)
   parseDOCX / generateDOCX / generateDOCXSync / generateDOCXStream / patchDOCX
-  parseHTML / generateHTML / parseMarkdown / generateMarkdown
+  parseMarkdown / generateMarkdown
   resolveDocument / compileDocument / prepareDocument  (model bridge, advanced)
         ↕ used by
 Tiptap Extension Commands (thin wrappers)

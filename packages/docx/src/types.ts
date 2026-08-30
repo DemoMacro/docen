@@ -12,7 +12,7 @@
  * - Store office-open native values (twips, points, AlignmentType strings)
  *   so DOCX round-trip is lossless by construction
  *   NOTE: `size` is in POINTS (new office-open convention), not half-points
- * - CSS conversion happens only in renderHTML via utils mappers
+ * - CSS conversion happens only in the canvas layout/paint layer via utils mappers
  * - Keep structural names only where no OOXML counterpart exists (src, alt)
  *
  * @module
@@ -318,8 +318,9 @@ export interface ImageNode extends TiptapJSONContent {
 
 /**
  * Drawing group (wpg) carried as an opaque blob — the full WpgGroupRunOptions
- * (pictures/shapes/nested groups + transform) round-trips verbatim. renderHTML
- * lays out every child at its transformed position (Office-style group rendering).
+ * (pictures/shapes/nested groups + transform) round-trips verbatim; the canvas
+ * layer lays out every child at its transformed position (Office-style group
+ * rendering).
  */
 export interface WpgGroupNode extends TiptapJSONContent {
   type: "wpgGroup";

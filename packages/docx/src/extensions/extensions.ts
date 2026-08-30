@@ -37,9 +37,6 @@ const HardBreak = TiptapNode.create({
   parseHTML() {
     return [{ tag: "br" }];
   },
-  renderHTML() {
-    return ["br"] as const;
-  },
 });
 
 export const tiptapNodeExtensions: AnyExtension[] = [
@@ -81,8 +78,8 @@ export const tiptapMarkExtensions: AnyExtension[] = [
 // DOCX schema + DOCX-specific extensions. Editing-behavior extensions
 // (UndoRedo/Dropcursor/Gapcursor/TrailingNode/ListKeymap/CharacterCount/Focus)
 // live in @docen/editor — the engine stays free of editing-UX concerns.
-// Converters (html/markdown) use this array as schema; those extensions add no
-// schema, so omitting them does not affect conversion.
+// The markdown converter and the HTML paste parser use this array as schema;
+// those extensions add no schema, so omitting them does not affect conversion.
 export const docxExtensions: AnyExtension[] = [
   ...tiptapNodeExtensions,
   ...tiptapMarkExtensions,
@@ -117,12 +114,7 @@ export { TextStyle } from "./text-style";
 export { Insertion, Deletion } from "./track-change";
 export { FormattingMarks } from "./formatting-marks";
 export { PageBreak } from "./page-break";
-export {
-  WpgGroup,
-  wpsShapeStyles,
-  type WpsShapeStyles,
-  type WpsShapeStandalone,
-} from "./wpg-group";
+export { WpgGroup } from "./wpg-group";
 export { WpsShape } from "./wps-shape";
 export { Passthrough, InlinePassthrough } from "./passthrough";
 export { TocField } from "./toc-field";

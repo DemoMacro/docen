@@ -72,9 +72,9 @@ const DEFAULT_SIZE_PT = 12;
 const DEFAULT_FAMILY = "serif";
 
 // ── run-style extraction from node attrs + marks ──
-// Field names mirror `packages/docx/src/extensions/utils.ts` `renderRunStyles`
-// (font/size/bold/italic/characterSpacing) so the measured font matches the CSS
-// the renderer emits.
+// Field names follow the office-open run property keys (font/size/bold/italic/
+// characterSpacing) so the measured font matches the properties the layout
+// cascade resolves.
 
 interface RunStyle {
   size: number | null; // points
@@ -145,13 +145,12 @@ function styleTableOf(styles: unknown): StyleTable | null {
   return styles && typeof styles === "object" ? (styles as StyleTable) : null;
 }
 
-/** The merged {run, paragraph} for a paragraph's style — reusing the RENDERER's
+/** The merged {run, paragraph} for a paragraph's style — reusing style-cascade's
  *  `mergeStyleChain` (deep-merge the style's `basedOn` chain, root first) so
- *  pagination measures the SAME effective properties stylesToCss emits. A
- *  paragraph with NO explicit styleId resolves to the doc's default paragraph
- *  style (`w:default="1", usually Normal) — the same target as the renderer's
- *  `.docx-default` class. docDefaults is NOT in this chain (the renderer emits
- *  it as a separate base rule on p/h1-6); each resolver falls back to it last.
+ *  pagination measures the SAME effective properties the layout cascade
+ *  resolves. A paragraph with NO explicit styleId resolves to the doc's default
+ *  paragraph style (`w:default="1"`, usually Normal). docDefaults is NOT in
+ *  this chain; each resolver falls back to it last.
  *
  *  Cached per (styles, style id): a document's styles model is stable for its
  *  lifetime, and resolveSpacing + resolveIndentAttrs + defaultRunOf all need
@@ -190,18 +189,18 @@ function styleChainOf(
 export function resolveSpacing(node: PmNode, styles: unknown): SpacingProperties | null {
   const direct = (node.attrs as { spacing?: SpacingProperties | null }).spacing;
   if (direct && direct.line != null) return direct;
-  // Style chain via the renderer's mergeStyleChain (direct style + its basedOn
-  // ancestors, e.g. Heading1 → Normal) — same source as stylesToCss, so measure
-  // == render. A paragraph with no styleId resolves to the doc's default style
-  // (Normal). Previously this read only the single direct style, missing a
+  // Style chain via style-cascade's mergeStyleChain (direct style + its basedOn
+  // ancestors, e.g. Heading1 → Normal) — the same source the layout cascade
+  // resolves, so measure == render. A paragraph with no styleId resolves to the
+  // doc's default style (Normal). Previously this read only the single direct style, missing a
   // basedOn ancestor's spacing.line (e.g. a heading whose line spacing lives on
   // Normal) → measured too tall/short vs the rendered page.
   const styleId = (node.attrs as { style?: string | null }).style;
   const sp = styleChainOf(styles, styleId)?.paragraph?.spacing as SpacingProperties | undefined;
   if (sp && sp.line != null) return sp;
-  // docDefaults is the base layer under every named style (the renderer emits it
-  // on p/h1-6); mergeStyleChain covers only the named-style chain, so fall back
-  // to docDefaults last (matches stylesToCss's base-rule layer order).
+  // docDefaults is the base layer under every named style; mergeStyleChain
+  // covers only the named-style chain, so fall back to docDefaults last (the
+  // cascade's base-rule layer order).
   const t = styleTableOf(styles);
   const docSp = t?.default?.document?.paragraph?.spacing;
   if (docSp && docSp.line != null) return docSp;
@@ -225,17 +224,17 @@ export function paragraphSpacingMargins(
   let before: number | null = direct?.before != null ? Number(direct.before) : null;
   let after: number | null = direct?.after != null ? Number(direct.after) : null;
   if (before == null || after == null) {
-    // Style chain via the renderer's mergeStyleChain (direct style + basedOn
+    // Style chain via style-cascade's mergeStyleChain (direct style + basedOn
     // ancestors; a styleId-less paragraph → default style). A cell paragraph
     // with style "TableHeaderText" (no spacing) inherits "TableText" (spacing
-    // 60tw = 4px each) — the renderer resolves the same chain, so measure must
-    // too, or every table row under-measures by its paragraph's before+after.
+    // 60tw = 4px each) — the layout cascade resolves the same chain, so measure
+    // must too, or every table row under-measures by its paragraph's before+after.
     const styleId = (node.attrs as { style?: string | null }).style;
     const sp = styleChainOf(styles, styleId)?.paragraph?.spacing as SpacingProperties | undefined;
     if (before == null && sp?.before != null) before = Number(sp.before);
     if (after == null && sp?.after != null) after = Number(sp.after);
-    // docDefaults is the base layer under every named style (renderer emits it
-    // on p/h1-6); mergeStyleChain covers only the named-style chain.
+    // docDefaults is the base layer under every named style; mergeStyleChain
+    // covers only the named-style chain.
     const t = styleTableOf(styles);
     const docSp = t?.default?.document?.paragraph?.spacing;
     if (before == null && docSp?.before != null) before = Number(docSp.before);
@@ -253,10 +252,10 @@ export function paragraphSpacingMargins(
  *  measures wider than the generic "serif" fallback, which under-counted wrapped
  *  lines. */
 function defaultRunOf(node: PmNode, styles?: unknown): Partial<RunStyle> {
-  // Style chain via the renderer's mergeStyleChain (direct style + basedOn
-  // ancestors; a styleId-less paragraph → default style Normal). Same source as
-  // stylesToCss so the measured font matches the rendered one — a CJK doc
-  // default of 宋体 measures wider than the generic "serif" fallback.
+  // Style chain via style-cascade's mergeStyleChain (direct style + basedOn
+  // ancestors; a styleId-less paragraph → default style Normal) — the same
+  // source the layout cascade resolves, so the measured font matches the
+  // rendered one — a CJK doc default of 宋体 measures wider than "serif".
   const styleId = (node.attrs as { style?: string | null }).style;
   const run = styleChainOf(styles, styleId)?.run as
     | {
@@ -343,7 +342,8 @@ function normalPxOf(spec: FontSpec): number {
  *     - Latin-dominant body -> MAX(natural, pitch) (Latin chars don't snap)
  *  4. No spacing.line + snapToGrid off / no grid -> natural.
  * `normalPx` + `hasCjk` come from paragraphNormalPx (CJK-dominant metric +
- * CJK-presence flag). Mirrors the renderer's lineSpacingToCss (edit == render). */
+ * CJK-presence flag). Mirrors the layout engine's line-height resolution (edit
+ * == render). */
 export function resolveLineHeight({
   spacing,
   normalPx,
@@ -485,11 +485,10 @@ export function paragraphMaxRatio(node: PmNode, styles: unknown): number {
   return max > 0 ? max : 1.2;
 }
 
-/** Max font SIZE (pt) across the paragraph's runs — feeds the per-paragraph
- *  --docen-line-base decoration so lineSpacingToCss's
- *  `calc(metric × multiple × line-base + pitch)` resolves against the line
- *  box's tallest font, NOT the paragraph's inherited container font-size (which
- *  under-counts large-font runs: a 42pt heading must scale at 42pt, not 14pt). */
+/** Max font SIZE (pt) across the paragraph's runs — the line box's multiple
+ *  (metric × multiple) resolves against the line's TALLEST font, NOT the
+ *  paragraph's inherited default font-size (which under-counts large-font runs:
+ *  a 42pt heading must scale at 42pt, not 14pt). */
 export function paragraphMaxSizePt(node: PmNode, styles: unknown): number {
   const def = defaultRunOf(node, styles);
   const specs = collectRunSpecs(node, def);
@@ -562,12 +561,11 @@ function isEmptyTextblock(node: PmNode): boolean {
 }
 
 /** Height of a paragraph's strut line — the line-box minimum when there is no
- *  text (an empty paragraph, or an image row shorter than a text line). Mirrors
- *  renderParagraphStyles: spacing.line wins; else the paragraph-mark run size
- *  (pPr/rPr.sz) renders as `line-height:${size}pt` — an ABSOLUTE value, so
- *  markSize × PT_TO_PX (the ¶ glyph's line-height is an absolute pt, not a font
- *  metric); else the font's `normal` metric — the empty ¶ line is the font's
- *  pure natural metric (no grid pitch; verified vs Word). */
+ *  text (an empty paragraph, or an image row shorter than a text line). Word
+ *  semantics: spacing.line wins; else the paragraph-mark run size (pPr/rPr.sz)
+ *  is an ABSOLUTE line height, so markSize × PT_TO_PX (an absolute pt, not a
+ *  font metric); else the font's `normal` metric — the empty ¶ line is the
+ *  font's pure natural metric (no grid pitch; verified vs Word). */
 function emptyLineHeight({
   node,
   styles,
@@ -1018,11 +1016,11 @@ export function resolvePaginationAttrs(node: PmNode): PaginationAttrs {
 }
 
 /** A paragraph's effective indent, resolved through the same cascade the
- *  renderer uses: direct attrs → its style (styleId) → the document default.
- *  The style/default indent reaches the DOM via stylesToCss (a CSS class on the
- *  paragraph), NOT node attrs, so reading only attrs misses it — which is why a
- *  doc whose first-line indent lives in docDefaults measured at the full page
- *  width, under-counted short paragraphs by a line, and overflowed the page. */
+ *  layout uses: direct attrs → its style (styleId) → the document default.
+ *  The style/default indent never lands on node attrs, so reading only attrs
+ *  misses it — which is why a doc whose first-line indent lives in docDefaults
+ *  measured at the full page width, under-counted short paragraphs by a line,
+ *  and overflowed the page. */
 type IndentAttrs = {
   left?: number | null;
   right?: number | null;
@@ -1034,9 +1032,9 @@ type IndentAttrs = {
 function resolveIndentAttrs(node: PmNode, styles: unknown): IndentAttrs | null {
   const direct = (node.attrs as { indent?: IndentAttrs | null }).indent;
   if (direct) return direct;
-  // Style chain via the renderer's mergeStyleChain (direct style + basedOn
-  // ancestors); a styleId-less paragraph → default style. Same source as
-  // stylesToCss so measure == render.
+  // Style chain via style-cascade's mergeStyleChain (direct style + basedOn
+  // ancestors); a styleId-less paragraph → default style — the same source the
+  // layout cascade resolves, so measure == render.
   const styleId = (node.attrs as { style?: string | null }).style;
   const indent = styleChainOf(styles, styleId)?.paragraph?.indent as IndentAttrs | undefined;
   if (indent) return indent;
@@ -1046,9 +1044,8 @@ function resolveIndentAttrs(node: PmNode, styles: unknown): IndentAttrs | null {
   return null;
 }
 
-/** A textblock's USABLE wrapping width in px — mirrors renderParagraphStyles
- *  (utils.ts): `indent.left/right` → `margin-left/right` (shrink the content
- *  box); `indent.firstLine` (twips) or `firstLineChars` (→ text-indent N/100 em)
+/** A textblock's USABLE wrapping width in px: `indent.left/right` shrink the
+ *  content box; `indent.firstLine` (twips) or `firstLineChars` (→ N/100 em)
  *  shrinks the FIRST line. Pretext wraps at a single width for all lines, so
  *  the first-line indent is subtracted from the whole block — conservative
  *  (may count a hair more lines than render, never fewer), which beats the
@@ -1070,10 +1067,10 @@ export function resolveIndentWidth(
   return Math.max(0, pageContentWidth - left - right);
 }
 
-/** The paragraph's first-line indent in px (text-indent shrinks ONLY the first
- *  line). Resolved through the same cascade as renderParagraphStyles +
- *  stylesToCss. Used by layoutLineOffsets so the first line wraps at
- *  width−indent while later lines wrap at the full width. */
+/** The paragraph's first-line indent in px (it shrinks ONLY the first line).
+ *  Resolved through the same cascade as the layout's indent resolution. Used
+ *  by layoutLineOffsets so the first line wraps at width−indent while later
+ *  lines wrap at the full width. */
 function resolveFirstLineIndentPx(node: PmNode, styles?: unknown): number {
   const indent = resolveIndentAttrs(node, styles);
   if (!indent) return 0;
@@ -1356,13 +1353,13 @@ function cellVerticalOverhead(cell: PmNode, margins?: CellMargins | null): numbe
 /** A cell border edge: { style, size (eighths of a point) } — OOXML's w:sz. */
 type BorderEdge = { style?: string; size?: number } | null | undefined;
 
-// The "Table Grid" fallback the renderer stamps on cells whose OOXML left a
-// side open (`.docen-pages table td { border: 1px solid }`): 0.75pt = 1px.
+// The "Table Grid" fallback applied to cells whose OOXML left a side open:
+// 0.75pt = 1px.
 const TABLE_GRID_BORDER_PX = 0.75 * PT_TO_PX;
 
 /** One border edge's rendered width (px). An explicit real border (size in
  *  eighths-of-pt, style not nil/none) wins; an absent/nil side falls back to
- *  the Table-Grid default the renderer applies. Mirrors renderBorderCSS so
+ *  the Table-Grid default — the same rule the cell painter applies, so
  *  measure == render for cell content boxes. */
 function borderEdgePx(s: BorderEdge): number {
   if (s && s.style && s.style !== "nil" && s.style !== "none" && s.size != null)

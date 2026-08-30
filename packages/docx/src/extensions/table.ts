@@ -3,7 +3,6 @@ import type {
   SectionChild,
   TableOptions,
   TablePropertiesOptions,
-  TableWidthProperties,
 } from "@office-open/docx";
 import type { JSONContent } from "@tiptap/core";
 import { Node } from "@tiptap/core";
@@ -14,14 +13,9 @@ import type { ParseBlockRule, ResolveContext } from "./types";
 import {
   attrNative,
   alignmentFromElement,
-  alignmentToCss,
   bordersFromElement,
   type DocxAttrSpec,
   shadingFromElement,
-  shadingToCss,
-  tableFloatToCss,
-  twipToCss,
-  renderBorderCSS,
 } from "./utils";
 
 /**
@@ -31,7 +25,8 @@ import {
  * Attrs mirror TableOptions (width/float/layout/borders/alignment/margins/indent/
  * cellSpacing/tableLook/columnWidths/etc.). DOCX round-trip is near-identity:
  * renderDocx/parseDocx pass attrs through (omitting only `rows`, which DocxManager
- * rebuilds from the row/cell nodes). CSS conversion happens only in renderHTML.
+ * rebuilds from the row/cell nodes); parseHTML rules exist only for clipboard
+ * HTML input.
  */
 
 // ── DOCX serialization (near-identity: attrs mirror TableOptions minus rows) ──
@@ -302,142 +297,6 @@ export const Table = Node.create({
 
   parseHTML() {
     return [{ tag: "table" }];
-  },
-
-  renderHTML({
-    node,
-    HTMLAttributes,
-  }: {
-    node: { attrs: Record<string, unknown> };
-    HTMLAttributes: Record<string, unknown>;
-  }) {
-    const a = node.attrs;
-    const attrs = { ...HTMLAttributes };
-    const styles: string[] = [];
-
-    // A floating table (w:tblpPr) renders as CSS float + margins. When float is
-    // active it owns the table's margins and width, so the alignment margins and
-    // the default 100% width stand down below. When float degrades to [] (page/
-    // margin anchor, or center/inside/outside), the table renders as a normal
-    // block and alignment/width apply as before.
-    const floatStyles = tableFloatToCss(a.float);
-
-    if (floatStyles.length === 0) {
-      const align = alignmentToCss(a.alignment as string | null | undefined);
-      if (align === "center") {
-        styles.push("margin-left:auto", "margin-right:auto");
-      } else if (align === "right") {
-        styles.push("margin-left:auto", "margin-right:0");
-      } else if (align) {
-        styles.push("margin-left:0", "margin-right:auto");
-      }
-    }
-
-    if (a.layout === "fixed") styles.push("table-layout:fixed");
-
-    // Table width: pct → percentage; dxa/numeric → twips; "auto" or no
-    // <w:tblW> → fill the page content area. Word's "auto" tables size to the
-    // text column (full-width unless content is sparse); with no width the
-    // browser would shrink the table to its content, so match Word with 100%.
-    if (a.width && typeof a.width === "object") {
-      const w = a.width as TableWidthProperties;
-      const numSize = typeof w.size === "string" ? parseFloat(w.size) : w.size;
-      if (w.type === "percent") {
-        if (typeof w.size === "string" && w.size.includes("%")) {
-          // office-open keeps the percentage literal verbatim ("100%" = 100%) —
-          // it is NOT fiftieths-of-a-percent, so do not divide by 50.
-          styles.push(`width:${w.size}`);
-        } else if (!Number.isNaN(numSize)) {
-          // office-open normalizes pct to a percentage number (0-100) via
-          // widthFiftiethsToPct (fiftieths / 50) on parse — 99.96 ≈ 100%. Use
-          // it directly; dividing by 50 again collapses the table to a sliver.
-          styles.push(`width:${numSize}%`);
-        }
-      } else if (w.type === "auto") {
-        styles.push(floatStyles.length ? "width:auto" : "width:100%");
-      } else if (numSize != null) {
-        const css = twipToCss(numSize);
-        if (css) styles.push(`width:${css}`);
-      }
-    } else {
-      styles.push(floatStyles.length ? "width:auto" : "width:100%");
-    }
-    // Cap dxa tables at the page text column. A tblW in twips can exceed the
-    // content area (Word's table-width vs grid-column-sum mismatch — e.g. a
-    // stray narrow trailing grid column inflates tblW past the text column),
-    // which overflows the fixed page box on the right. max-width:100% shrinks
-    // only over-wide tables; pct/auto/100% widths are already ≤100% so this is
-    // a no-op for them.
-    styles.push("max-width:100%");
-
-    if (a.indent && typeof a.indent === "object") {
-      const ind = a.indent as TableWidthProperties;
-      if (typeof ind.size === "number") {
-        const css = twipToCss(ind.size);
-        if (css) styles.push(`margin-left:${css}`);
-      }
-    }
-
-    if (a.cellSpacing && typeof a.cellSpacing === "object") {
-      // TableWidthProperties: { size, type } — office-open's cellSpacingStr reads
-      // opts.size (comments-BKbOd_pv.mjs:7451). The previous `cs.value` read never
-      // matched, so <w:tblCellSpacing> was silently dropped from the editor render.
-      const cs = a.cellSpacing as { size?: number; type?: string };
-      if (cs.size != null) {
-        const css = twipToCss(cs.size);
-        if (css) styles.push(`border-spacing:${css}`);
-      }
-    }
-
-    const bg = shadingToCss(a.shading as { fill?: string } | null | undefined);
-    if (bg) styles.push(`background-color:${bg}`);
-
-    if (a.borders && typeof a.borders === "object") {
-      const b = a.borders as Record<string, unknown>;
-      const sides: Array<[string, unknown]> = [
-        ["top", b.top],
-        ["bottom", b.bottom],
-        ["left", b.left],
-        ["right", b.right],
-      ];
-      for (const [side, border] of sides) {
-        const css = renderBorderCSS(border as Parameters<typeof renderBorderCSS>[0]);
-        if (css) styles.push(`border-${side}:${css}`);
-      }
-    }
-
-    // colgroup columns from the tblGrid (columnWidths) — the table's real
-    // column structure.
-    const gridPx = ((a.columnWidths as Array<number> | null) ?? []).map((w) =>
-      Math.round((w || 0) / 15),
-    );
-
-    // Float styles last so they win any same-property duel with the alignment
-    // margins above (which only run on the floatStyles.length === 0 path).
-    for (const s of floatStyles) styles.push(s);
-
-    if (styles.length > 0) attrs.style = styles.join(";");
-    if (gridPx.some((w) => w > 0)) {
-      // Column widths are relative ratios in OOXML: Word scales the grid to
-      // the table width (tblW) or the page text column, never to the raw grid
-      // sum. Emit percentages so the table's CSS width (tblW → pt, or 100% for
-      // "auto") sets the total and columns share it proportionally. Absolute
-      // px would let an oversized grid (e.g. 1063px of columns on a 579px
-      // tblW) blow past the page content area, which the fixed page box then
-      // clips — Word never does.
-      const gridTotal = gridPx.reduce((sum, w) => sum + w, 0);
-      const cols = gridPx.map(
-        (w) =>
-          [
-            "col",
-            { style: `width:${gridTotal > 0 ? ((w / gridTotal) * 100).toFixed(2) : 0}%` },
-          ] as const,
-      );
-      // Wrap the content hole in <tbody>: ProseMirror requires a content hole
-      // (0) to be the SOLE child of its parent, so it can't sit beside colgroup.
-      return ["table", attrs, ["colgroup", {}, ...cols], ["tbody", 0]] as const;
-    }
-    return ["table", attrs, 0] as const;
   },
 
   renderDocx,

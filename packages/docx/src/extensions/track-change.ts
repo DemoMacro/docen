@@ -101,11 +101,6 @@ export const Insertion = Mark.create({
   addAttributes() {
     return trackChangeAttrs();
   },
-  renderHTML() {
-    // <ins> is HTML's native "inserted text" element — semantic, accessible,
-    // and browser-default underlined. The class stays as a CSS hook.
-    return ["ins", { class: "docen-insertion" }, 0];
-  },
   parseHTML() {
     // Claim our <ins class="docen-insertion"> plus a bare <ins> from pasted
     // HTML — no other mark matches <ins>, so the bare tag is safe.
@@ -126,11 +121,6 @@ export const Deletion = Mark.create({
   inclusive: false,
   addAttributes() {
     return trackChangeAttrs();
-  },
-  renderHTML() {
-    // <del> is HTML's native "deleted text" element — semantic and
-    // browser-default struck-through.
-    return ["del", { class: "docen-deletion" }, 0];
   },
   parseHTML() {
     // Only claim <del class="docen-deletion">: the base Strike mark already

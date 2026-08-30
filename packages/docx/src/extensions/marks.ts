@@ -23,9 +23,6 @@ export const Bold = Mark.create({
   parseHTML() {
     return [{ tag: "strong" }, { tag: "b" }];
   },
-  renderHTML() {
-    return ["strong", null, 0] as const;
-  },
   renderDocx: () => ({ bold: true }),
   parseDocx: (opts: RunOptions) => (opts.bold ? {} : null),
 });
@@ -35,9 +32,6 @@ export const Italic = Mark.create({
   parseHTML() {
     return [{ tag: "em" }, { tag: "i" }];
   },
-  renderHTML() {
-    return ["em", null, 0] as const;
-  },
   renderDocx: () => ({ italic: true }),
   parseDocx: (opts: RunOptions) => (opts.italic ? {} : null),
 });
@@ -46,9 +40,6 @@ export const Underline = Mark.create({
   name: "underline",
   parseHTML() {
     return [{ tag: "u" }];
-  },
-  renderHTML() {
-    return ["u", null, 0] as const;
   },
   renderDocx: () => ({ underline: { type: "single" } }),
   // office-open represents <w:u> as { type, color? }. val="none" means NO
@@ -68,9 +59,6 @@ export const Code = Mark.create({
   parseHTML() {
     return [{ tag: "code" }];
   },
-  renderHTML() {
-    return ["code", null, 0] as const;
-  },
   // rStyle "CodeChar" is the precise round-trip carrier; Consolas is a visual
   // fallback when styles.xml lacks the CodeChar character-style definition.
   renderDocx: () => ({ style: "CodeChar", font: "Consolas" }),
@@ -87,16 +75,11 @@ export const Highlight = Mark.create({
         // data-color so a re-parsed mark survives without CSS interpretation.
         parseHTML: (el: HTMLElement) =>
           el.getAttribute("data-color") || el.style.backgroundColor || null,
-        renderHTML: (attrs: Record<string, unknown>) =>
-          attrs.color ? { "data-color": attrs.color as string } : {},
       },
     };
   },
   parseHTML() {
     return [{ tag: "mark" }];
-  },
-  renderHTML({ HTMLAttributes }: { HTMLAttributes: Record<string, unknown> }) {
-    return ["mark", HTMLAttributes, 0] as const;
   },
   renderDocx: (attrs: Record<string, unknown>) => ({ highlight: attrs.color ?? "yellow" }),
   // office-open models <w:highlight w:val="none"/> (Word's "cancel inherited
@@ -117,9 +100,6 @@ export const Subscript = Mark.create({
   parseHTML() {
     return [{ tag: "sub" }];
   },
-  renderHTML() {
-    return ["sub", null, 0] as const;
-  },
   renderDocx: () => ({ verticalAlign: "subscript" }),
   parseDocx: (opts: RunOptions) => (opts.verticalAlign === "subscript" ? {} : null),
 });
@@ -129,9 +109,6 @@ export const Superscript = Mark.create({
   excludes: "subscript",
   parseHTML() {
     return [{ tag: "sup" }];
-  },
-  renderHTML() {
-    return ["sup", null, 0] as const;
   },
   renderDocx: () => ({ verticalAlign: "superscript" }),
   parseDocx: (opts: RunOptions) => (opts.verticalAlign === "superscript" ? {} : null),
@@ -150,9 +127,6 @@ export const Strike = Mark.create({
   name: "strike",
   parseHTML() {
     return [{ tag: "s" }, { tag: "del" }, { tag: "strike" }];
-  },
-  renderHTML() {
-    return ["s", null, 0] as const;
   },
   renderDocx: () => ({ strike: true }),
   parseDocx: (opts: RunOptions): Record<string, unknown> | null => (opts.strike ? {} : null),

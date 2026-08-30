@@ -37,15 +37,8 @@ export const PageBreak = Node.create({
   atom: true,
 
   parseHTML() {
-    // span is the current render; br kept for legacy HTML round-trip.
+    // span is the historical serialization; br kept for legacy HTML round-trip.
     return [{ tag: 'span[data-type="pageBreak"]' }, { tag: 'br[data-type="pageBreak"]' }];
-  },
-
-  renderHTML() {
-    // span (not br) so CSS ::before can paint the dashed "Page Break" rule
-    // shown by the show-marks formatting-marks toggle (br is void — no
-    // pseudo-element). The DOCX payload stays <w:br w:type="page"/>.
-    return ["span", { "data-type": "pageBreak", style: "break-after:page" }];
   },
 
   parseDocxInline,

@@ -162,8 +162,8 @@ const BORDER_SIDES = ["top", "bottom", "left", "right"] as const;
 
 /** Encode a line-spacing multiple (1.0/1.15/1.5/2.0) as OOXML w:spacing `line`.
  *  Per ECMA-376, `lineRule="auto"` expresses `line` in 240ths of a single line
- *  (240 = 1.0, 360 = 1.5). The renderer inverts this — utils.lineSpacingToCss
- *  divides `line/240` back to a multiple for `calc(pitch × multiple)`. */
+ *  (240 = 1.0, 360 = 1.5); the layout engine divides by 240 to get the
+ *  multiple back. */
 function lineMultipleToOoxml(mult: number): number {
   return Math.round(mult * 240);
 }

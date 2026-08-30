@@ -33,11 +33,6 @@ export const ColumnBreak = Node.create({
     return [{ tag: 'span[data-type="columnBreak"]' }, { tag: 'br[data-type="columnBreak"]' }];
   },
 
-  renderHTML() {
-    // span (not br) so CSS ::before can paint a formatting-marks label.
-    return ["span", { "data-type": "columnBreak", style: "break-after:column" }];
-  },
-
   parseDocxInline,
 
   addCommands() {

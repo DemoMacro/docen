@@ -364,9 +364,9 @@ const ALIGN_TO_LAYOUT = {
 } as const;
 
 /** The merged {run, paragraph} for a style id — the same mergeStyleChain the
- *  DOM route's stylesToCss resolves, so both renderings share one cascade.
- *  A style-less paragraph resolves to the default paragraph style (usually
- *  Normal); docDefaults sits UNDER the chain, not in it. */
+ *  editor's measure.ts resolves, so projection and pagination share one
+ *  cascade. A style-less paragraph resolves to the default paragraph style
+ *  (usually Normal); docDefaults sits UNDER the chain, not in it. */
 function styleChainOf(styles: StylesOptions | undefined, styleId: string | null | undefined) {
   if (!styles) return { run: {}, paragraph: {} };
   return mergeStyleChain(indexParagraphStyles(styles), styleId || defaultParagraphStyleId(styles));

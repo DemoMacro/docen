@@ -2,7 +2,7 @@ import type { TableCellOptions } from "@office-open/docx";
 import type { JSONContent } from "@tiptap/core";
 import { Node } from "@tiptap/core";
 
-import { docxTableCellAttrs, renderTableCellStyles } from "./utils";
+import { docxTableCellAttrs } from "./utils";
 
 /**
  * Table cell node with nested office-open attrs — fully custom (no upstream
@@ -11,8 +11,7 @@ import { docxTableCellAttrs, renderTableCellStyles } from "./utils";
  * so the OOXML grid shape IS the PM shape. renderDocx/parseDocx are plain
  * pass-throughs (no vMerge↔rowspan rebuild, no px colwidth↔twip conversion);
  * the layout engine expands verticalMerge into rowspan at the single
- * projection point. CSS conversion happens solely in renderHTML via
- * utils.renderTableCellStyles (consuming nested shading/verticalAlign/noWrap).
+ * projection point.
  */
 
 // ── DOCX serialization (near-identity) ──
@@ -69,22 +68,6 @@ export const TableCell = Node.create({
       // tblHeader, so both tags resolve to the same node.
       { tag: "th" },
     ];
-  },
-
-  renderHTML({
-    node,
-    HTMLAttributes,
-  }: {
-    node: { attrs: Record<string, unknown> };
-    HTMLAttributes: Record<string, unknown>;
-  }) {
-    const styles = renderTableCellStyles(node.attrs);
-    const attrs = { ...HTMLAttributes };
-    // The OOXML column span surfaces as the HTML colspan the browser needs.
-    const span = typeof node.attrs.columnSpan === "number" ? node.attrs.columnSpan : undefined;
-    if (span && span > 1) attrs.colspan = String(span);
-    if (styles.length > 0) attrs.style = styles.join(";");
-    return ["td", attrs, 0] as const;
   },
 
   renderDocx,

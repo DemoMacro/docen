@@ -36,9 +36,5 @@ export const Tab = Node.create({
     return [{ tag: "span.docx-tab" }];
   },
 
-  renderHTML() {
-    return ["span", { class: "docx-tab", contenteditable: "false" }];
-  },
-
   parseDocxInline,
 });

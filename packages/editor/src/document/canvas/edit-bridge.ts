@@ -10,7 +10,7 @@
 // captureTransaction) crashes — so every translation here goes through pure
 // PM state commands.
 
-import { docxExtensions, type JSONContent } from "@docen/docx";
+import { docxExtensions, parseHTMLBody, type JSONContent } from "@docen/docx";
 import { Editor } from "@docen/docx/core";
 import type { FlowPage } from "@docen/layout";
 import { UndoRedo } from "@tiptap/extensions";
@@ -1018,8 +1018,24 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     if (data) insertText(data);
   };
 
+  /** Insert pasted JSON at the caret, dropping stray empty text nodes the
+   *  clipboard HTML can leave behind. Returns true when something landed. */
+  const insertPastedJSON = (html: string): boolean => {
+    const body = new DOMParser().parseFromString(html, "text/html").body;
+    const json = parseHTMLBody(body, active().editor.state.schema);
+    const content = (json.content ?? []).filter((n) => n.type !== "text" || n.text);
+    if (!content.length) return false;
+    active().editor.commands.insertContent(content);
+    return true;
+  };
+
   const onPaste = (event: ClipboardEvent): void => {
     event.preventDefault();
+    // Styled paste first: clipboard HTML through the schema's parse rules so
+    // bold/italic/headings/lists/links map to their DOCX equivalents. Plain
+    // text remains the fallback (and the only path for text-only clipboards).
+    const html = event.clipboardData?.getData("text/html");
+    if (html && insertPastedJSON(html)) return;
     const text = event.clipboardData?.getData("text/plain");
     if (text) insertText(text);
   };

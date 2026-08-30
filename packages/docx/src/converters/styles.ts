@@ -2,10 +2,9 @@ import type { BorderOptions, ParagraphOptions, StylesOptions } from "@office-ope
 import type { JSONContent } from "@tiptap/core";
 
 import type { ResolveContext } from "../extensions/types";
-import { renderParagraphStyles, renderRunStyles, resolveFontName } from "../extensions/utils";
+import { resolveFontName } from "../extensions/utils";
 import {
   defaultParagraphStyleId,
-  deepMergeInto,
   indexParagraphStyles,
   mergeStyleChain,
   pStyleIdFromKey,
@@ -15,104 +14,11 @@ import {
 // Re-export the public styles model type so consumers (the editor's Styles
 // gallery) type against office-open's source of truth instead of a local
 // mirror. The style-entry type and every cascade primitive live in
-// style-cascade.ts (rendering-neutral); this module owns the CSS route.
+// style-cascade.ts (rendering-neutral); this module owns the style-facing
+// editor helpers (Quick Styles gallery, caret run props, resolve/compile
+// attr helpers).
 export type { StylesOptions };
 
-/** Escape a style id for safe use in a CSS class selector. OOXML style ids are
- *  NCNames so this is rarely needed, but it keeps arbitrary ids safe. */
-function escapeClass(id: string): string {
-  return id.replace(/[^A-Za-z0-9_-]/g, (ch) => `\\${ch}`);
-}
-
-/**
- * Generate scoped CSS from a document's `styles.xml` model (`StylesOptions`) so
- * named paragraph/character styles and the document defaults render correctly
- * in the editor. All rules are scoped to `.docen-page` (the editor's page
- * surface); the editor injects the result into a `<style>` after load.
- *
- * - `default.document` → `.docen-page` base run + paragraph defaults (the doc's
- *   default font/size, line spacing, …).
- * - `paragraphStyles[]` → `.docen-page .docx-style-{id}` (run + paragraph CSS).
- *   Paragraph nodes carry `class="docx-style-{styleId}"` (see the Paragraph /
- *   Heading extensions' pStyle ↔ styleId round-trip).
- * - `characterStyles[]` → `.docen-page .docx-char-{id}` (run CSS).
- *
- * `basedOn` inheritance is deep-merged per-property into each named style's
- * rule (root first, child overrides) — see mergeStyleChain. CSS inheritance
- * follows the DOM tree, not a style's basedOn, so each `.docx-style-{id}` rule
- * carries its full ancestor chain rather than relying on source order.
- */
-export function stylesToCss(styles: StylesOptions | null | undefined, scope: string): string {
-  if (!styles) return "";
-  const rules: string[] = [];
-  // Descendant prefix for named-style rules. The caller picks the container
-  // selector (the editor passes its page surface); @docen/docx itself owns no
-  // such class, so the scope is parameter rather than hard-coded.
-  const within = scope ? `${scope} ` : "";
-
-  // Document defaults (w:docDefaults) — the base layer applied to EVERY
-  // paragraph before named styles override (ECMA-376). Split by target:
-  //  - run defaults (font/size/...) → the page surface base, inherited by all.
-  //  - paragraph defaults (spacing.line, alignment, indent…) → the paragraph
-  //    selectors p/h1-h6, NOT the page surface. The page's own line-height is
-  //    the document-grid single pitch (page-node sets it inline); a docDefaults
-  //    spacing.line placed on `.docen-page` would be overridden by that inline
-  //    (inline > stylesheet) — and it is semantically a per-paragraph multiple
-  //    of the grid pitch, so it belongs on paragraphs. There it overrides the
-  //    inherited single pitch. Named styles (.docx-style-*, specificity 0,2,0)
-  //    outrank these (0,1,1) and keep their own spacing, matching OOXML.
-  const doc = styles.default?.document;
-  // docDefaults carries the doc's eastAsia language (rPrDefault/lang @eastAsia);
-  // forward it so *Theme fonts resolve to the right CJK font (等线/游ゴシック/…).
-  const docEastAsia =
-    (doc?.run as { language?: { eastAsia?: string } } | undefined)?.language?.eastAsia ?? "zh-CN";
-  if (doc) {
-    const runDecls = doc.run
-      ? renderRunStyles(doc.run as Record<string, unknown>, docEastAsia)
-      : [];
-    if (runDecls.length && scope) rules.push(`${scope} { ${runDecls.join(";")} }`);
-    const paraDecls = doc.paragraph
-      ? renderParagraphStyles(doc.paragraph as Record<string, unknown>)
-      : [];
-    if (paraDecls.length) {
-      const paraSel = `${within}p, ${within}h1, ${within}h2, ${within}h3, ${within}h4, ${within}h5, ${within}h6`;
-      rules.push(`${paraSel} { ${paraDecls.join(";")} }`);
-    }
-  }
-
-  // Named paragraph styles (custom + built-in nested under `default`) →
-  // .docx-style-{id}, each with its basedOn chain deep-merged so the class
-  // carries inherited properties. indexParagraphStyles dedupes the two sources
-  // (a built-in may also appear in paragraphStyles) by pStyle id.
-  const byId = indexParagraphStyles(styles);
-  // The default paragraph style (w:default="1") is the implicit style for any
-  // paragraph without a pStyle (OOXML). Its rule also matches `.docx-default` —
-  // the class Paragraph/Heading renderHTML emit on a styleId-less node — so the
-  // 94%-of-paragraphs body text renders as the document's real body style.
-  const defaultId = defaultParagraphStyleId(styles);
-  for (const id of byId.keys()) {
-    const { run, paragraph } = mergeStyleChain(byId, id);
-    const decls: string[] = [];
-    if (Object.keys(run).length) decls.push(...renderRunStyles(run, docEastAsia));
-    if (Object.keys(paragraph).length) decls.push(...renderParagraphStyles(paragraph));
-    if (!decls.length) continue;
-    const selector =
-      id === defaultId
-        ? `${within}.docx-default, ${within}.docx-style-${escapeClass(id)}`
-        : `${within}.docx-style-${escapeClass(id)}`;
-    rules.push(`${selector} { ${decls.join(";")} }`);
-  }
-
-  // Named character styles.
-  for (const cs of styles.characterStyles ?? []) {
-    const decls: string[] = [];
-    if (cs.run) decls.push(...renderRunStyles(cs.run as Record<string, unknown>, docEastAsia));
-    if (decls.length)
-      rules.push(`${within}.docx-char-${escapeClass(cs.id)} { ${decls.join(";")} }`);
-  }
-
-  return rules.join("\n");
-}
 // ── Quick Styles gallery selection ──────────────────────────────────────────
 
 /** A gallery-ready paragraph-style entry for the Styles combobox. */
@@ -221,113 +127,6 @@ export function effectiveRunProps(
   }
 
   return { font, size };
-}
-
-// ── Style baking (flatten global styles into nodes) ──────────────────────────
-
-/** Index a document's character styles (explicit `characterStyles` + the
- *  built-in character keys under `default`) by pStyle id → run properties. Core
- *  phase: a character style's own run only (its basedOn chain is not walked —
- *  rare in practice; paragraph styles above already deep-merge). */
-function indexCharacterRunStyles(styles: StylesOptions): Map<string, Record<string, unknown>> {
-  const byId = new Map<string, Record<string, unknown>>();
-  for (const cs of styles.characterStyles ?? []) {
-    if (cs.run) byId.set(cs.id, cs.run as Record<string, unknown>);
-  }
-  const defaults = styles.default as unknown as Record<string, StyleEntry | undefined>;
-  for (const [key, style] of Object.entries(defaults ?? {})) {
-    if (!style || !style.run || key === "document") continue;
-    if (!CHARACTER_DEFAULT_KEYS.has(key)) continue;
-    byId.set(pStyleIdFromKey(key), style.run as Record<string, unknown>);
-  }
-  return byId;
-}
-
-/** Resolve one node's style inheritance. A paragraph/heading absorbs its
- *  styleId's basedOn chain (paragraph properties + the default `run`); a
- *  textStyle mark absorbs its character style's run. Other nodes (table,
- *  tableRow, tableCell, image, …) are NOT baked here — they only recurse into
- *  `content`, so a cell's paragraphs still get baked (see inlineStyles for why
- *  tables and docDefaults are intentionally out of scope). Explicit attrs/marks
- *  override the inherited values; styleId is preserved. Pure JSON — no DOM, no
- *  marks pushed onto text. */
-function resolveNode(
-  node: JSONContent,
-  paraById: Map<string, StyleEntry>,
-  charRunById: Map<string, Record<string, unknown>>,
-): JSONContent {
-  const out: JSONContent = { ...node };
-  const attrs = node.attrs as Record<string, unknown> | undefined;
-  const type = node.type;
-  if (type === "paragraph" && attrs?.style) {
-    const { paragraph, run } = mergeStyleChain(paraById, attrs.style as string);
-    // Baked chain is the base; explicit attrs override per-property. Use
-    // deepMergeInto (not object spread) so a node's schema null defaults
-    // (spacing:null, indent:null, …) don't clobber the baked values, and a
-    // partial override (attrs.spacing.before) merges key by key instead of
-    // replacing the whole group. Nullish attrs drop out — the baked value (or
-    // nothing) remains, so no dead nulls linger on the baked node.
-    const mergedAttrs = deepMergeInto({ ...paragraph }, attrs);
-    mergedAttrs.run = deepMergeInto(
-      { ...run },
-      (attrs.run as Record<string, unknown> | null | undefined) ?? {},
-    );
-    out.attrs = mergedAttrs;
-  }
-  if (node.marks) {
-    out.marks = node.marks.map((m) => {
-      if (m.type !== "textStyle") return m;
-      const sid = (m.attrs as Record<string, unknown> | undefined)?.style as string | undefined;
-      const crun = sid ? charRunById.get(sid) : undefined;
-      // deepMergeInto (not spread) so the mark's schema null defaults don't
-      // clobber the baked character-style run (e.g. italic:null wiping the
-      // style's italic:true); explicit attrs still override per-property.
-      return crun ? { ...m, attrs: deepMergeInto({ ...crun }, m.attrs ?? {}) } : m;
-    });
-  }
-  if (node.content) {
-    out.content = node.content.map((c) => resolveNode(c, paraById, charRunById));
-  }
-  return out;
-}
-
-/**
- * Bake a document's named styles into each node's attrs so a snippet of
- * JSONContent can be lifted into ANOTHER document (DB storage → extract →
- * recombine) without its source styles.xml. The use case is fragment
- * recombination, not editor rendering — the editor never calls this (it
- * renders via stylesToCss global CSS); this is an offline util for
- * self-contained JSON.
- *
- * Baking is intentionally PARTIAL:
- *  - A paragraph/heading or textStyle mark WITH a styleId absorbs its basedOn
- *    chain, so a "Heading 1" stays styled across documents even when the
- *    target lacks that style. styleId is kept as the semantic reference; the
- *    baked props are the rendering fallback.
- *  - A node WITHOUT a styleId (body text, a default table) is LEFT AS-IS so it
- *    follows the TARGET document's body style after recombination. Baking
- *    docDefaults here would freeze font/size onto every body paragraph and
- *    defeat "change one body style to restyle them all".
- *  - Tables are NOT baked here: resolveTable already merged the table style
- *    (borders/cellMargin) and pushed insideH/V onto cells at parse time, so a
- *    table's JSON is already self-contained. stylesToCss cannot render the
- *    interior grid (CSS border-collapse puts it on cells), so that bake MUST
- *    stay in resolveDocument — moving it here would regress the editor.
- *
- * Explicit attrs/marks always override the baked values; the style definitions
- * themselves are untouched. Pure JSON — no DOM, no marks pushed onto text.
- * Styles default to the document's own `attrs.styles` (the round-tripped
- * styles.xml model on the doc node), so `inlineStyles(doc)` needs no second
- * argument; pass `styles` to override.
- */
-export function inlineStyles(json: JSONContent, styles?: StylesOptions | null): JSONContent {
-  // Prefer explicitly passed styles; fall back to the document's own attrs.styles
-  // so a caller can resolve a full document with no extra argument.
-  const docStyles =
-    styles ??
-    ((json.attrs as Record<string, unknown> | undefined)?.styles as StylesOptions | undefined);
-  if (!docStyles) return json;
-  return resolveNode(json, indexParagraphStyles(docStyles), indexCharacterRunStyles(docStyles));
 }
 
 // ── Attr/border helpers (shared by resolve + compile) ────────────────────────
