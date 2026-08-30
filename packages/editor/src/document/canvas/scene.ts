@@ -35,6 +35,7 @@ import {
   type LayoutTextStyle,
 } from "@docen/layout";
 import {
+  Box,
   Ellipse,
   Group,
   Image as LeaferImage,
@@ -279,8 +280,20 @@ function paintParagraph(
       } else if (item.kind === "picture" && inline.kind === "picture") {
         if (inline.members) {
           // A metafile source replayed into members (WMF vector layers): the
-          // structured scene paints in place of the flat image.
-          paintMembers(tree, inline.members, lineX + item.xPx, lineY + pad, ctx);
+          // structured scene paints in place of the flat image, clipped to
+          // the extent — a srcRect leaves records reaching past the box and
+          // GDI never lets metafile ink out of the playback rect. Leafer's
+          // Group ignores `overflow` (a Box-only data getter clips children),
+          // so the clip holder must be a Box.
+          const holder = new Box({
+            x: lineX + item.xPx,
+            y: lineY + pad,
+            width: item.widthPx,
+            height: item.heightPx,
+            overflow: "hide",
+          });
+          paintMembers(holder, inline.members, 0, 0, ctx);
+          tree.add(holder);
         } else if (inline.src && inline.crop) {
           // A cropped flat source (a:srcRect): the visible remainder fills
           // the extent box — the whole source would stretch into it.
@@ -450,7 +463,23 @@ function paintDrawing(
   if (col?.inCell && drawing.anchor.horizontal.relative === "column") {
     boxX = Math.min(Math.max(boxX, hBox.left), hBox.left + Math.max(0, hBox.width - drawing.width));
   }
-  paintMembers(tree, drawing.members, boxX, boxY, ctx);
+  if (drawing.clipMembers) {
+    // A srcRect-cropped metafile replay reaches past the extent (GDI clips
+    // metafile playback to the rect); wps text boxes must NOT clip — their
+    // text may legitimately overflow a stale declared extent. Leafer clips
+    // children only on a Box (`overflow` is Box data, Group ignores it).
+    const holder = new Box({
+      x: boxX,
+      y: boxY,
+      width: drawing.width,
+      height: drawing.height,
+      overflow: "hide",
+    });
+    paintMembers(holder, drawing.members, 0, 0, ctx);
+    tree.add(holder);
+  } else {
+    paintMembers(tree, drawing.members, boxX, boxY, ctx);
+  }
 }
 
 /** The members of a drawing box (or of an inline picture's metafile replay),

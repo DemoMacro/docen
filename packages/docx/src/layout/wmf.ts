@@ -13,7 +13,7 @@
 
 import type { LayoutDrawingMember } from "@docen/layout";
 
-import { GDI_CELL_PER_EM } from "./emf-plus";
+import { GDI_CELL_PER_EM, type SourceCrop } from "./emf-plus";
 import { bltDibAt, bmpDataUrl } from "./wmf-dib";
 
 const CREATE_PEN = 0x02fa;
@@ -75,11 +75,14 @@ const gbkDecoder = new TextDecoder("gbk");
 /** Replay a placeable-WMF byte stream into members laid out inside a
  *  boxW×boxH extent. Returns undefined when the bytes are not a placeable
  *  WMF or produce no drawable member — callers fall back to the flat DIB
- *  picture. */
+ *  picture. An a:srcRect crop selects the window region that stretches onto
+ *  the extent (records outside it land past the box for the painter to clip,
+ *  matching Word's source-then-stretch semantics). */
 export function wmfMembers(
   bytes: Uint8Array,
   boxW: number,
   boxH: number,
+  crop?: SourceCrop,
 ): LayoutDrawingMember[] | undefined {
   if (bytes.length < 22 + 18 + 6) return undefined;
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -117,10 +120,16 @@ export function wmfMembers(
 
   // Logical → box px, against the live window (SetWindowExt may rescale
   // mid-stream). Scales also convert GDI sizes — font height, pen width —
-  // into box px.
-  const sx = (): number => boxW / st.extX;
-  const sy = (): number => boxH / st.extY;
-  const box = (x: number, y: number): Pt => ({ x: (x - st.orgX) * sx(), y: (y - st.orgY) * sy() });
+  // into box px. A srcRect narrows the mapped window: the crop fractions
+  // ride the live window so a mid-stream SetWindowOrg/Ext keeps working.
+  const cropX = (): number => (crop ? 1 - crop.left - crop.right : 1);
+  const cropY = (): number => (crop ? 1 - crop.top - crop.bottom : 1);
+  const sx = (): number => boxW / (st.extX * cropX());
+  const sy = (): number => boxH / (st.extY * cropY());
+  const box = (x: number, y: number): Pt => ({
+    x: (x - (st.orgX + (crop ? crop.left * st.extX : 0))) * sx(),
+    y: (y - (st.orgY + (crop ? crop.top * st.extY : 0))) * sy(),
+  });
 
   const stroke = (): { px: number; color?: string } | undefined => {
     const pen = st.pen;

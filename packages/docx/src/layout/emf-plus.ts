@@ -14,6 +14,15 @@ const PLACEABLE_MAGIC = 0x9ac6cdd7;
 const META_ESCAPE = 0x0626;
 const WMFC_MAGIC = 0x43464d57; // "WMFC"
 const WMFC_CHUNK_HEADER = 34;
+
+/** a:srcRect crop as per-side fractions of the source (0-1), shared by the
+ *  carrier and WMF-body replays. */
+export interface SourceCrop {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
 /** Every GDI+ object payload in these files repeats this version stamp. */
 const GDIPLUS_VERSION = 0xdbc01002;
 
@@ -524,6 +533,7 @@ export function emfPlusMembers(
   bytes: Uint8Array,
   boxW: number,
   boxH: number,
+  crop?: SourceCrop,
 ): LayoutDrawingMember[] | undefined {
   const emf = embeddedEmfStream(bytes);
   if (!emf) return undefined;
@@ -546,7 +556,7 @@ export function emfPlusMembers(
       if (r > l && b > t) frame = { x: l, y: t, w: r - l, h: b - t };
     }
   }
-  return finalize(drafts, boxW, boxH, frame);
+  return finalize(drafts, boxW, boxH, frame, crop);
 }
 
 /** Nested-metafile recursion guard — a self-referencing or malformed blob
@@ -1602,19 +1612,35 @@ function participatesInBox(dr: Draft): boolean {
  *  (EMR_HEADER rclFrame at 96 dpi) onto the extent independently per axis —
  *  content past the frame edges stays inside the box instead of stretching
  *  everything above it. When the frame is unavailable or degenerate, the
- *  union bounding box stands in. */
+ *  union bounding box stands in.
+ *
+ *  An a:srcRect crops the frame first (pixel-verified on the corpus stack
+ *  where the visible frame is the top third of the carrier: Word stretches
+ *  only that region onto the extent, near-aspect-preserved, and the records
+ *  below the crop line never draw — members may now reach past the box, so
+ *  the painter clips the replay to the extent like GDI does). */
 function finalize(
   drafts: Draft[],
   boxW: number,
   boxH: number,
   frame?: { x: number; y: number; w: number; h: number },
+  crop?: SourceCrop,
 ): LayoutDrawingMember[] | undefined {
   let minX: number, minY: number, sX: number, sY: number;
   if (frame && frame.w > 0 && frame.h > 0) {
     minX = frame.x;
     minY = frame.y;
-    sX = boxW / frame.w;
-    sY = boxH / frame.h;
+    let fw = frame.w,
+      fh = frame.h;
+    if (crop) {
+      minX += crop.left * fw;
+      minY += crop.top * fh;
+      fw *= 1 - crop.left - crop.right;
+      fh *= 1 - crop.top - crop.bottom;
+    }
+    if (!(fw > 0 && fh > 0)) return undefined;
+    sX = boxW / fw;
+    sY = boxH / fh;
   } else {
     let x0 = Infinity,
       y0 = Infinity,
@@ -1637,6 +1663,14 @@ function finalize(
       y0 = Math.min(y0, dr.y);
       x1 = Math.max(x1, dr.x + dr.w);
       y1 = Math.max(y1, dr.y + dr.h);
+    }
+    if (crop) {
+      const w = x1 - x0,
+        h = y1 - y0;
+      x0 += crop.left * w;
+      y0 += crop.top * h;
+      x1 -= crop.right * w;
+      y1 -= crop.bottom * h;
     }
     minX = x0;
     minY = y0;

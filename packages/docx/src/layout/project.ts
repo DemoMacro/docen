@@ -45,7 +45,7 @@ import type {
 
 import { resolvePageSize } from "../extensions/utils";
 import { defaultParagraphStyleId, indexParagraphStyles, mergeStyleChain } from "../style-cascade";
-import { emfPlusMembers } from "./emf-plus";
+import { emfPlusMembers, type SourceCrop } from "./emf-plus";
 import { wmfMembers } from "./wmf";
 import { wmfDibFallback } from "./wmf-dib";
 
@@ -277,11 +277,14 @@ function metafileMembers(
   pic: { type?: unknown; data?: unknown },
   boxW: number,
   boxH: number,
+  crop?: SourceCrop,
 ): LayoutDrawingMember[] | undefined {
   if (typeof pic.type !== "string" || MIME_BY_TYPE[pic.type]) return undefined;
   const { data } = pic;
   if (typeof data !== "string" && !(data instanceof Uint8Array)) return undefined;
-  const boxKey = `${Math.round(boxW)}x${Math.round(boxH)}`;
+  const boxKey = `${Math.round(boxW)}x${Math.round(boxH)}${
+    crop ? `:${crop.left},${crop.top},${crop.right},${crop.bottom}` : ""
+  }`;
   if (data instanceof Uint8Array) {
     let byBox = wmfMembersByIdentity.get(data);
     if (!byBox) {
@@ -289,14 +292,14 @@ function metafileMembers(
       wmfMembersByIdentity.set(data, byBox);
     }
     if (byBox.has(boxKey)) return byBox.get(boxKey);
-    const value = replayMetafile(pic.type as string, data, boxW, boxH);
+    const value = replayMetafile(pic.type as string, data, boxW, boxH, crop);
     byBox.set(boxKey, value);
     return value;
   }
   const key = `${pic.type}:${data.length}:${fingerprintHead(data)}:${boxKey}`;
   return wmfMembersOfString(key, () => {
     const bytes = base64ToBytes(data);
-    return bytes ? replayMetafile(pic.type as string, bytes, boxW, boxH) : undefined;
+    return bytes ? replayMetafile(pic.type as string, bytes, boxW, boxH, crop) : undefined;
   });
 }
 
@@ -307,10 +310,11 @@ function replayMetafile(
   bytes: Uint8Array,
   boxW: number,
   boxH: number,
+  crop?: SourceCrop,
 ): LayoutDrawingMember[] | undefined {
-  const plus = emfPlusMembers(bytes, boxW, boxH);
+  const plus = emfPlusMembers(bytes, boxW, boxH, crop);
   if (plus) return plus;
-  const replay = wmfMembers(bytes, boxW, boxH);
+  const replay = wmfMembers(bytes, boxW, boxH, crop);
   if (!replay) return undefined;
   if (!replay.some((m) => m.kind === "picture")) {
     const backdrop = metafileFallback(type, bytes);
@@ -1118,24 +1122,27 @@ function wpsMemberOf(
  *  over its chExt). Children are the office-open GroupChildMediaData union —
  *  the same contract stringify consumes, so field/token drift fails here at
  *  compile time. */
-/** a:srcRect crops the source image inward per side, as fractions. office-
- *  open's picture parse (readSourceRectangle) emits the RAW ST_Percentage
- *  int (100000 = 100%), despite SourceRectangleOptions documenting integer
- *  percent — flip to /100 when that contract breach is fixed upstream. */
+/** a:srcRect crops the source image per side, as signed fractions — negative
+ *  insets (ST_Percentage < 0) pad the source outward. office-open's picture
+ *  parse (readSourceRectangle) emits the RAW ST_Percentage int (100000 =
+ *  100%), despite SourceRectangleOptions documenting integer percent — flip
+ *  to /100 when that contract breach is fixed upstream. */
 function cropOf(
   pic: unknown,
 ): { left: number; top: number; right: number; bottom: number } | undefined {
   const sr = isRecord(pic) && isRecord(pic.sourceRectangle) ? pic.sourceRectangle : undefined;
   if (!sr) return undefined;
   const pct = (v: unknown): number | undefined =>
-    typeof v === "number" && v > 0 ? v / 100000 : undefined;
+    typeof v === "number" && v !== 0 ? v / 100000 : undefined;
   const crop = {
     left: pct(sr.left) ?? 0,
     top: pct(sr.top) ?? 0,
     right: pct(sr.right) ?? 0,
     bottom: pct(sr.bottom) ?? 0,
   };
-  return crop.left > 0 || crop.top > 0 || crop.right > 0 || crop.bottom > 0 ? crop : undefined;
+  return crop.left !== 0 || crop.top !== 0 || crop.right !== 0 || crop.bottom !== 0
+    ? crop
+    : undefined;
 }
 
 function walkGroup(
@@ -1204,7 +1211,7 @@ function walkGroup(
       // yields undefined — the painter's empty-frame placeholder. A metafile
       // child expands into its vector replay instead, offset by the child
       // box (replay members are box-relative).
-      const replay = metafileMembers(child, width, height);
+      const replay = metafileMembers(child, width, height, cropOf(child));
       if (replay) {
         out.push(...replay.map((m) => ({ ...m, x: m.x + x, y: m.y + y })));
       } else {
@@ -1389,9 +1396,13 @@ function projectFloatingPicture(pic: Rec): LayoutDrawing | undefined {
     ...(contour ? { contour } : {}),
     behind,
     distances,
-    // A metafile picture expands into its vector replay; anything else stays
-    // one flat member (crop applies to the flat source only).
-    members: metafileMembers(pic, width, height) ?? [
+    // A srcRect-cropped metafile replay reaches past the extent — flag it so
+    // the painter clips (GDI playback semantics); the flat member never does.
+    ...(cropOf(pic) ? { clipMembers: true } : {}),
+    // A metafile picture expands into its vector replay (the srcRect crop
+    // folds into the replay's frame mapping); anything else stays one flat
+    // member with the crop on the raster source.
+    members: metafileMembers(pic, width, height, cropOf(pic)) ?? [
       {
         kind: "picture",
         x: 0,
@@ -1591,9 +1602,10 @@ function projectRuns(
       const heightPx = emuToPx(h);
       // The metafile replay (WMF vector layers) is the main battlefield for
       // inline pictures — the flat DIB src only fills in when replay fails.
-      // A flat src carries its a:srcRect crop (members carry their own, per
-      // child); dropping it stretches the WHOLE source into the extent box.
-      const members = metafileMembers(pic, widthPx, heightPx);
+      // A flat src carries its a:srcRect crop; a replay folds the same crop
+      // into its frame mapping — dropping it stretches the WHOLE source into
+      // the extent box.
+      const members = metafileMembers(pic, widthPx, heightPx, cropOf(pic));
       out.push({
         kind: "picture",
         widthPx,

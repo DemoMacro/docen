@@ -249,6 +249,10 @@ export interface LayoutDrawing {
    *  its distance from the box. square/tight zones widen by left+right,
    *  topAndBottom bands by top+bottom; wrapNone never reads them. */
   distances?: { left?: number; top?: number; right?: number; bottom?: number };
+  /** A srcRect-cropped metafile replay clips its members to the extent (GDI
+   *  playback semantics — records past the crop line never draw). Absent on
+   *  wps text boxes: their text may overflow a stale declared extent. */
+  clipMembers?: boolean;
 }
 
 /** A drawing's wrap box: its extent grown by the anchor's wrap distances,
