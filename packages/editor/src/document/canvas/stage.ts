@@ -518,9 +518,9 @@ export class CanvasStage {
   /** The painted box of a paragraph's index-th drawing across pages — the
    *  selection overlay's geometry source (a re-render may have moved the
    *  host paragraph, and with it the drawing, onto another page). */
-  drawingBoxOf(para: unknown, index: number): DrawingHitBox | null {
+  drawingBoxOf(para: unknown, index: number, kind: DrawingHitBox["kind"]): DrawingHitBox | null {
     for (const boxes of this.hitBoxes.values()) {
-      const b = boxes.find((box) => box.para === para && box.index === index);
+      const b = boxes.find((box) => box.para === para && box.index === index && box.kind === kind);
       if (b) return b;
     }
     return null;

@@ -102,10 +102,14 @@ export interface EditBridgeOptions {
   /** The PM node selection for a drawing hit — resolves the host paragraph
    *  position and the index-th drawing node inside it (null when the map
    *  cannot pair the host, e.g. a furniture story paragraph). */
-  drawingSelection?: (hit: { para: unknown; index: number }) => number | null;
+  drawingSelection?: (hit: {
+    para: unknown;
+    index: number;
+    kind: "drawing" | "inline";
+  }) => number | null;
   /** Re-resolves a selected drawing's painted box after a re-render (the
    *  selection drops when the drawing no longer paints). */
-  drawingBoxOf?: (para: unknown, index: number) => DrawingHit | null;
+  drawingBoxOf?: (para: unknown, index: number, kind: "drawing" | "inline") => DrawingHit | null;
 }
 
 /** A drawing's painted box plus its identity — how a click hit it and how the
@@ -114,6 +118,7 @@ interface DrawingHit {
   page: number;
   para: unknown;
   index: number;
+  kind: "drawing" | "inline";
   x: number;
   y: number;
   width: number;
@@ -480,7 +485,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
 
   const placeDrawingSel = (): void => {
     if (selDrawing) {
-      const fresh = opts.drawingBoxOf?.(selDrawing.para, selDrawing.index) ?? null;
+      const fresh = opts.drawingBoxOf?.(selDrawing.para, selDrawing.index, selDrawing.kind) ?? null;
       selDrawing = fresh;
     }
     const frame = selDrawing ? (opts.pageHost?.(selDrawing.page) ?? null) : null;

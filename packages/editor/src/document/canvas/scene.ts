@@ -80,6 +80,10 @@ export interface DrawingHitBox {
   height: number;
   para: LaidOutParagraph;
   index: number;
+  /** "drawing" — a floating picture/shape from para.drawings (index counts
+   *  that sequence); "inline" — a picture line item (index counts the
+   *  paragraph's inline pictures). The PM side re-finds the node per kind. */
+  kind: "drawing" | "inline";
 }
 
 /** The paint context for one page — the stage context plus the page's own
@@ -203,6 +207,7 @@ function paintParagraph(
       }),
     );
   }
+  let inlinePicIndex = 0;
   for (const line of para.lines) {
     const lineY = y + line.yPx;
     // In-line vertical placement: a docGrid line centers its natural box in
@@ -299,6 +304,20 @@ function paintParagraph(
         });
         tree.add(textEl);
       } else if (item.kind === "picture" && inline.kind === "picture") {
+        // An inline picture is a grab target just like a floating drawing —
+        // without a hit box a click lands behind the art (Word selects the
+        // picture). Index counts the paragraph's inline pictures; the PM side
+        // re-finds the same k-th non-floating image node.
+        ctx.hitBoxes?.push({
+          page: ctx.pageIndex,
+          x: lineX + item.xPx,
+          y: lineY + pad,
+          width: item.widthPx,
+          height: item.heightPx,
+          para,
+          index: inlinePicIndex++,
+          kind: "inline",
+        });
         if (inline.members) {
           // A metafile source replayed into members (WMF vector layers): the
           // structured scene paints in place of the flat image, clipped to
@@ -509,6 +528,7 @@ function recordDrawingHit(
     height: drawing.height,
     para: host.para,
     index: host.index,
+    kind: "drawing",
   });
 }
 
@@ -543,6 +563,7 @@ function paintDrawing(
     height: drawing.height,
     para: host.para,
     index: host.index,
+    kind: "drawing",
   });
   if (drawing.clipMembers) {
     // A srcRect-cropped metafile replay reaches past the extent (GDI clips

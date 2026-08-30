@@ -1066,8 +1066,8 @@ class DocenDocument extends AddinHost<Editor> {
       // NodeSelection (projectDrawings collects drawings in run order, the
       // same order the paragraph's content carries the nodes).
       drawingAt: (page, lx, ly) => this.#stage?.drawingAt(page, lx, ly) ?? null,
-      drawingSelection: (hit) => this.#drawingNodePos(hit.para, hit.index),
-      drawingBoxOf: (para, index) => this.#stage?.drawingBoxOf(para, index) ?? null,
+      drawingSelection: (hit) => this.#drawingNodePos(hit.para, hit.index, hit.kind),
+      drawingBoxOf: (para, index, kind) => this.#stage?.drawingBoxOf(para, index, kind) ?? null,
     });
     if (this.getAttribute("editable") === "false") this.#bridge.editor.setEditable(false);
     // First paint + caret map feed (transactions re-render via the bridge's
@@ -1387,10 +1387,11 @@ class DocenDocument extends AddinHost<Editor> {
   }
 
   /** The PM node position of a drawing hit's target — the host paragraph's
-   *  inner position via the caret map, then the index-th drawing node (a
-   *  floating picture or a wps shape) in the paragraph's content order
-   *  (projectDrawings collects drawings in that same order). */
-  #drawingNodePos(para: unknown, index: number): number | null {
+   *  inner position via the caret map, then the index-th node of the hit's
+   *  kind: "drawing" counts floating pictures + wps shapes (projectDrawings'
+   *  run order = the paragraph's content order), "inline" counts the
+   *  paragraph's non-floating images (the line items' picture order). */
+  #drawingNodePos(para: unknown, index: number, kind: "drawing" | "inline"): number | null {
     const bridge = this.#bridge;
     const doc = bridge?.editor.state.doc;
     const innerPos = bridge?.posOfPara(para) ?? null;
@@ -1400,10 +1401,12 @@ class DocenDocument extends AddinHost<Editor> {
     let seen = 0;
     let hit = -1;
     host.forEach((child, offset) => {
-      const drawing =
-        child.type.name === "wpsShape" ||
-        (child.type.name === "image" && child.attrs.floating != null);
-      if (drawing && hit < 0 && seen++ === index) hit = innerPos + offset;
+      const target =
+        kind === "drawing"
+          ? child.type.name === "wpsShape" ||
+            (child.type.name === "image" && child.attrs.floating != null)
+          : child.type.name === "image" && child.attrs.floating == null;
+      if (target && hit < 0 && seen++ === index) hit = innerPos + offset;
     });
     return hit >= 0 ? hit : null;
   }
