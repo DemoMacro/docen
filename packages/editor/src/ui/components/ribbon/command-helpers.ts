@@ -100,9 +100,11 @@ interface MenuItemLike {
 /** Append `items` as `<fluent-menu-item>`s into `list`, replacing its children.
  *  A `change` on any item routes to `onSelect(item)`. `checked` items render as
  *  `role="menuitemradio"` with Fluent's own checkmark; plain items stay
- *  `menuitem`. Every item gets `data-indent="0"` so a plain-text label spans the
- *  full row — without it Fluent pins the content to the fixed-width indicator
- *  track and clips long labels (see the registry's fluent-menu-item override). */
+ *  `menuitem`. A `{ text: "-" }` item renders as a divider (Word's context
+ *  menu groups clipboard / link / comment sections with rules). Every item
+ *  gets `data-indent="0"` so a plain-text label spans the full row — without
+ *  it Fluent pins the content to the fixed-width indicator track and clips
+ *  long labels (see the registry's fluent-menu-item override). */
 export function appendMenuItems<T extends MenuItemLike>(
   list: HTMLElement,
   items: readonly T[],
@@ -110,6 +112,12 @@ export function appendMenuItems<T extends MenuItemLike>(
 ): void {
   list.replaceChildren();
   for (const item of items) {
+    if (item.text === "-") {
+      const divider = document.createElement("fluent-divider");
+      divider.setAttribute("role", "separator");
+      list.append(divider);
+      continue;
+    }
     const menuItem = document.createElement("fluent-menu-item");
     if (item.checked) {
       menuItem.setAttribute("role", "menuitemradio");

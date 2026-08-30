@@ -163,6 +163,10 @@ export interface EditBridge {
   /** The PM position just inside the laid paragraph (null when the map
    *  cannot pair it — render-only or unmapped). */
   posOfPara(para: unknown): number | null;
+  /** A viewport point → the active story's doc position (null off-page or
+   *  when the map is stale) — the context menu moves the caret to where it
+   *  was right-clicked, like Word. */
+  posAtClient(clientX: number, clientY: number): number | null;
   /** Move keyboard focus to the bridge's input surface (the editing focus —
    *  there is no DOM editor to focus). */
   focus(): void;
@@ -642,6 +646,10 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     // preventDefault keeps the click from blurring on mousedown; the caret
     // placement below is the real focus move.
     event.preventDefault();
+    // A right-click only opens the context menu — its mousedown must not
+    // disturb the selection (Word keeps a selection right-clicked inside it;
+    // clicking elsewhere moves the caret from the menu handler, not here).
+    if (event.button === 2) return;
     if (composing) return;
     // Park the textarea at the click point BEFORE focusing it: focus() would
     // otherwise scroll its stale position (the old caret, possibly another
@@ -1139,6 +1147,9 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       return main.map?.valid
         ? main.map.posOfPara(para as import("@docen/layout").LaidOutParagraph)
         : null;
+    },
+    posAtClient(clientX, clientY): number | null {
+      return posAtClient(clientX, clientY);
     },
     focus(): void {
       ta.focus();

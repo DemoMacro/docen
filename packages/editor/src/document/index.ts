@@ -53,6 +53,7 @@ import {
   resolveTheme,
   t,
   type DocenAddin,
+  type RibbonMenuItem,
 } from "../ui";
 import { createDefaultAddin, textCounter } from "./addin";
 import {
@@ -161,8 +162,10 @@ const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   // Page Color writes the doc-level w:background (doc.attrs.background) from
   // the color-picker's palette value.
   "page-color",
-  // Link prompts for an address and marks the selection (Word's Insert Link).
+  // Link prompts for an address and marks the selection (Word's Insert Link);
+  // the context menu's Remove Hyperlink unsets the mark over the clicked link.
   "link",
+  "unset-link",
   // New Comment anchors the selection with a Word comment (range markers +
   // a documentExtras.comments entry) — composed in the comments pane, not a
   // prompt; Edit opens the pane (cards edit inline), Delete removes the
@@ -306,7 +309,9 @@ const documentTemplate = html`
       </docen-navigation-pane>
     </docen-task-pane>
     <docen-document-area>
-      <div class="docen-canvas" part="page"></div>
+      <docen-context-menu part="context-menu">
+        <div class="docen-canvas" part="page"></div>
+      </docen-context-menu>
     </docen-document-area>
     <docen-task-pane slot="task-pane-end" position="end" part="props-pane">
       <slot name="properties">
@@ -1113,6 +1118,10 @@ class DocenDocument extends AddinHost<Editor> {
     // reach us, not just composed ones (ribbon "command").
     this.shadowRoot!.addEventListener("command", this.#onCommand as EventListener);
     this.shadowRoot!.addEventListener("change", this.#onChange as EventListener);
+    // Right-click → Word's context menu. Captured on the shadow root so the
+    // items are built before <docen-context-menu>'s own capture handler opens
+    // the Fluent menu (capture runs outermost-first).
+    this.shadowRoot!.addEventListener("contextmenu", this.#onContextMenu as EventListener, true);
     this.#fileInput.addEventListener("change", this.#onFileChange);
     this.#imageInput.addEventListener("change", this.#onImageChange);
     // Outline (Headings tab) → jump to the clicked heading.
@@ -2393,6 +2402,56 @@ class DocenDocument extends AddinHost<Editor> {
     );
   }
 
+  /** Right-click on the canvas — Word's context menu, rebuilt per click.
+   *  Clicking outside the selection first moves the caret there (Word's
+   *  behavior), the clipboard section appears only with a selection, and a
+   *  click on a hyperlink swaps the Link item for Edit/Remove. Menu items
+   *  dispatch the same command ids as the ribbon, so #onCommand handles them.
+   *  While a furniture story (header/footer) is being edited the positions
+   *  belong to the story's editor, which these main-story commands cannot
+   *  target — suppress the menu there. */
+  readonly #onContextMenu = (event: MouseEvent): void => {
+    const menu = this.shadowRoot?.querySelector("docen-context-menu") ?? null;
+    const editor = this.editor;
+    if (!menu || !editor || !event.composedPath().includes(menu)) return;
+    if (this.#bridge?.storyKind() != null) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    const { selection } = editor.state;
+    const pos = this.#bridge?.posAtClient(event.clientX, event.clientY) ?? null;
+    const inSelection =
+      !selection.empty && pos != null && pos >= selection.from && pos <= selection.to;
+    const onLink =
+      pos != null &&
+      editor.state.doc
+        .resolve(Math.min(Math.max(pos, 0), editor.state.doc.content.size))
+        .marks()
+        .some((m) => m.type.name === "link");
+    // Word: a right-click outside the selection collapses the caret there.
+    if (pos != null && !inSelection) editor.commands.setTextSelection(pos);
+    const items: RibbonMenuItem[] = [];
+    if (inSelection) {
+      items.push({ text: t("context.cut", this), event: "cut" });
+      items.push({ text: t("context.copy", this), event: "copy" });
+    }
+    items.push({ text: t("context.paste", this), event: "paste" });
+    items.push({ text: "-" });
+    if (inSelection) {
+      if (onLink) {
+        items.push({ text: t("context.edit-link", this), event: "link" });
+        items.push({ text: t("context.unlink", this), event: "unset-link" });
+      } else {
+        items.push({ text: t("context.link", this), event: "link" });
+      }
+      items.push({ text: t("context.comment", this), event: "new-comment" });
+      items.push({ text: "-" });
+    }
+    items.push({ text: t("context.select-all", this), event: "select" });
+    menu.setAttribute("items", JSON.stringify(items));
+  };
+
   /** Review → New Comment: open the comments pane's compose box on the
    *  current selection (Word's sidebar compose card); the text arrives via
    *  the `comment:create` event (#onCommentCreate commits it). */
@@ -2850,6 +2909,12 @@ class DocenDocument extends AddinHost<Editor> {
     // display text when the selection is empty).
     if (name === "link") {
       this.#insertLink();
+      return;
+    }
+    // Context menu → Remove Hyperlink: unset the link mark across the
+    // right-clicked link (extendMarkRange reaches past the caret's spot).
+    if (name === "unset-link") {
+      this.editor?.chain().extendMarkRange("link").unsetLink().run();
       return;
     }
     // New Comment — anchor the selection with a Word comment; Edit/Delete
