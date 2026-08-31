@@ -486,22 +486,24 @@ export class CanvasStage {
 
   /** A page's editable furniture band, page-local — [top, bottom) with the
    *  dashed boundary at the inner edge (bottom for headers, top for
-   *  footers); `paintY` is the stack's own draw y (the band reaches past it
-   *  to the page edge, the caret map must anchor at the stack itself). At
-   *  least one strut line tall so an empty story is enterable. */
+   *  footers). Two heights: `paintY` anchors the caret map at the stack's
+   *  actual draw y (the painter uses the raw stack height — no floor), while
+   *  the band extent is floored at one strut line so an empty story is
+   *  still enterable (hit target + dashed boundary). */
   furnitureBand(
     kind: "header" | "footer",
     page = 0,
   ): { top: number; bottom: number; paintY: number } | null {
     const { flow, furniture: f } = this.sectionAt(page);
     if (!f) return null;
-    const h = Math.max(this.slotStackOf(kind, page)?.heightPx ?? 0, 24);
+    const stackH = this.slotStackOf(kind, page)?.heightPx ?? 0;
+    const bandH = Math.max(stackH, 24);
     if (kind === "header") {
       const paintY = f.headerDistancePx ?? 48;
-      return { top: 0, bottom: paintY + h, paintY };
+      return { top: 0, bottom: paintY + bandH, paintY };
     }
-    const paintY = flow.pageHeightPx - (f.footerDistancePx ?? 48) - h;
-    return { top: paintY, bottom: flow.pageHeightPx, paintY };
+    const paintY = flow.pageHeightPx - (f.footerDistancePx ?? 48) - stackH;
+    return { top: paintY - (bandH - stackH), bottom: flow.pageHeightPx, paintY };
   }
 
   /** Story chrome while a header/footer is being edited: Word grays the body
