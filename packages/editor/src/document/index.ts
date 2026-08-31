@@ -1704,16 +1704,26 @@ class DocenDocument extends AddinHost<Editor> {
     // A `zoom` attribute parsed before the stage existed only recorded the
     // level here — push it in before the first sync sizes the slots.
     if (this.#stage.zoom !== this.#zoom) this.#stage.setZoom(this.#zoom);
-    // Anything structural (page count shifts aside: section geometry, page
-    // background) repaints everything — the per-page diff only skips pages
-    // whose placement, section, AND background are all unchanged. Furniture
-    // compares on the projected options, not the laid stacks (the stacks
-    // derive from them plus the already-compared flow width); the frame CSS
-    // (background/borders) re-stamps on every sync and needs no diff.
+    // Anything structural (section geometry, page background, section count)
+    // repaints everything — the per-page diff only skips pages whose
+    // placement, section, AND background are all unchanged. A page-count
+    // shift is deliberately NOT structural: deleting across a pagination
+    // boundary bounces the count between renders, and a full repaint per
+    // bounce is the visible flicker of holding Backspace. dirtyPagesOf
+    // covers count changes positionally (pages past either end stay dirty;
+    // the trailing slots' lifecycles are handled in sync). The overlapping
+    // page range still compares its section map: a deletion may pull a later
+    // section onto an existing page slot, which changes its flow/furniture.
+    // Furniture compares on the projected options, not the laid stacks (the
+    // stacks derive from them plus the already-compared flow width); the
+    // frame CSS (background/borders) re-stamps on every sync and needs no
+    // diff.
     const structural =
       !prev ||
-      prev.sectionOfPage.length !== run.sectionOfPage.length ||
-      prev.sectionOfPage.some((s, i) => s !== run.sectionOfPage[i]) ||
+      prev.sectionOfPage.some(
+        (section, index) =>
+          index < run.sectionOfPage.length && section !== run.sectionOfPage[index],
+      ) ||
       prev.background?.color !== run.background?.color ||
       prev.sections.length !== run.sections.length ||
       prev.sections.some((s, i) => !deepEq(s.flow, run.sections[i]!.flow)) ||

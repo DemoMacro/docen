@@ -28,7 +28,7 @@ import type {
  */
 import type { FlowPage, FontMetrics, LaidOutStackItem } from "@docen/layout";
 import { stackBlocks, TextMeasurer } from "@docen/layout";
-import { App, Line, Rect, Text, type IGroup } from "leafer-ui";
+import { App, Group, Line, Rect, Text, type IGroup } from "leafer-ui";
 
 const PAGE_GAP = 24;
 
@@ -36,6 +36,30 @@ const PAGE_GAP = 24;
 export interface LaidFurnitureSlot {
   stack: readonly LaidOutStackItem[];
   heightPx: number;
+}
+
+/** A page's persistent paint layers, in z-order. The two furniture groups
+ *  survive body-only repaints — headers/footers are per-section constants in
+ *  Word, and re-creating their image leaves on every keystroke re-decode gap
+ *  that reads as header flicker while deleting. */
+interface PageLayers {
+  /** Body behind-text floats (under furniture). */
+  behind: Group;
+  /** Header/footer behind-text drawings (watermarks). */
+  furnitureBehind: Group;
+  /** Header/footer stories. */
+  furnitureBody: Group;
+  /** Body content plus its deferred in-front floats. */
+  body: Group;
+}
+
+/** One page slot: its DOM frame, its Leafer App, and the layers its last
+ *  full paint created (null while a story edit paints flat, after an App
+ *  recycle, or before the first paint). */
+interface PageSlot {
+  el: HTMLElement;
+  app: App | null;
+  layers: PageLayers | null;
 }
 
 /** One section's laid furniture slots — [default, first, even]. */
@@ -100,7 +124,7 @@ export interface CanvasStageContext {
 
 export class CanvasStage {
   readonly shell: HTMLElement;
-  private readonly slots: { el: HTMLElement; app: App | null }[] = [];
+  private readonly slots: PageSlot[] = [];
   private readonly io: IntersectionObserver;
   private pages: FlowPage[] = [];
 
@@ -138,16 +162,23 @@ export class CanvasStage {
           else if (slot.app) {
             slot.app.destroy();
             slot.app = null;
+            // The layers belonged to the destroyed tree — drop the stale
+            // reference so the next paint rebuilds rather than addressing
+            // groups of a dead App.
+            slot.layers = null;
           }
         }
       },
       // The IO root is the SCROLL CONTAINER (the stage host's parent), not the
       // viewport: rootMargin only widens the root's clip rect, and an
       // intermediate overflow:auto box re-clips it — pages below the scroller's
-      // visible area would never pre-render against a viewport root. The bottom
-      // margin (order top/right/bottom/left) pre-renders ahead of the scroll
-      // direction so fast scrolls rarely meet a blank page.
-      { root: stage.parentElement, rootMargin: "0px 0px 150% 0px" },
+      // visible area would never pre-render against a viewport root. The
+      // margins (order top/right/bottom/left) pre-render ahead of BOTH scroll
+      // directions: downward for fast scrolls, and upward because deletion
+      // pulls content up — the viewport effectively scans upward through the
+      // doc, and a one-sided margin there shows blank pages while holding
+      // Backspace.
+      { root: stage.parentElement, rootMargin: "150% 0px 150% 0px" },
     );
     // Leafer samples devicePixelRatio at App creation and misses a cross-
     // monitor / browser-zoom change, leaving the canvas CSS-stretched (blurry
@@ -230,12 +261,7 @@ export class CanvasStage {
     }
   }
 
-  private sizeSlot(
-    slot: { el: HTMLElement; app: App | null },
-    w: number,
-    h: number,
-    page: number,
-  ): void {
+  private sizeSlot(slot: PageSlot, w: number, h: number, page: number): void {
     const frame = slot.el.parentElement;
     if (frame) {
       frame.style.width = `${w}px`;
@@ -436,7 +462,7 @@ export class CanvasStage {
       el.style.height = `${h}px`;
       frame.append(el);
       this.shell.append(frame);
-      this.slots.push({ el, app: null });
+      this.slots.push({ el, app: null, layers: null });
       this.io.observe(el);
     }
     while (this.slots.length > pages.length) {
@@ -452,7 +478,13 @@ export class CanvasStage {
       this.sizeSlot(slot, this.pageCss(flow.pageWidthPx), this.pageCss(flow.pageHeightPx), index);
     }
     for (const [index, slot] of this.slots.entries()) {
-      if (slot.app && dirty?.[index] !== false) this.repaint(slot.app, index);
+      // An absent `dirty` is the caller's structural signal (section
+      // geometry/furniture/background changed) — repaint flat. With a dirty
+      // array every repainted page is a body-only change, so its furniture
+      // layers survive (see repaint).
+      if (slot.app && dirty?.[index] !== false) {
+        this.repaint(slot.app, index, dirty != null);
+      }
     }
   }
 
@@ -550,8 +582,9 @@ export class CanvasStage {
     this.shell.remove();
   }
 
-  private ensure(slot: { el: HTMLElement; app: App | null }): void {
+  private ensure(slot: PageSlot): void {
     if (slot.app) return;
+    slot.layers = null;
     const app = new App({
       view: slot.el,
       fill: "transparent",
@@ -583,14 +616,19 @@ export class CanvasStage {
     return 0;
   }
 
-  private repaint(app: App, index: number): void {
+  /** Repaint one page. `keepFurniture` (the per-keystroke body-only path)
+   *  rebuilds just the body-bearing layers in place, preserving the furniture
+   *  groups — headers/footers are per-section constants in Word, and
+   *  re-creating their image leaves a decode gap on every keystroke that
+   *  reads as header flicker while deleting. Any structural change (section
+   *  geometry, furniture data, background) or a story edit repaints flat. */
+  private repaint(app: App, index: number, keepFurniture = false): void {
     // app.tree is an ILeafer (extends IGroup) — clear/add come with it.
     const tree = app.tree;
     if (!tree) return;
     // The canvas is laid out at the zoomed size; all paint coordinates below
     // stay in unzoomed page px and this scale maps them onto the bitmap.
     tree.scale = this.factor;
-    tree.clear();
     // This page paints with its OWN section's box + furniture.
     const { flow, furniture } = this.sectionAt(index);
     const ctx: PaintContext = {
@@ -608,16 +646,29 @@ export class CanvasStage {
       // its last paragraph (Word stacks them above ALL text).
       deferredDrawings: [],
     };
-    const slot = this.slotOf(index);
-    // Word's stacking: behind-text floats sit under everything from the text
-    // layer — footer furniture included (a full-bleed backdrop never covers
-    // the page number). Paint the behind pass first, then furniture + the
-    // body pass on top; in-front floats close the sequence inside the body
-    // pass's paragraphs. While a furniture story is being edited the body
-    // pass sits under a white veil instead and the furniture paints on top
-    // of it (the story under edit stays fully opaque).
+    const slotIndex = this.slotOf(index);
     const items = this.pages[index]?.items ?? [];
-    ctx.layer = "behind";
+    // The body pass also catalogs every drawing's box for click hit-testing
+    // (behind-doc floats included — the earlier pass painted them, this one
+    // records where).
+    const hitBoxes: DrawingHitBox[] = [];
+
+    const layers = keepFurniture && !this.storyEdit ? this.slots[index]!.layers : null;
+    if (layers) {
+      ctx.hitBoxes = hitBoxes;
+      layers.behind.clear();
+      paintScene(layers.behind, items, ctx);
+      ctx.layer = "body";
+      layers.body.clear();
+      paintScene(layers.body, items, ctx);
+      this.#flushDrawings(ctx);
+      app.forceRender();
+      this.hitBoxes.set(index, hitBoxes);
+      return;
+    }
+
+    tree.clear();
+    this.slots[index]!.layers = null;
     // The page's w:background must tint the BITMAP itself (exports and pixel
     // probes read the canvas, not the frame's CSS), so the base color paints
     // as the bottommost scene element. The App-level `fill` cannot host it:
@@ -636,18 +687,43 @@ export class CanvasStage {
         }),
       );
     }
-    paintScene(tree, items, ctx);
-    ctx.layer = "body";
-    // The body pass also catalogs every drawing's box for click hit-testing
-    // (behind-doc floats included — the earlier pass painted them, this one
-    // records where).
-    const hitBoxes: DrawingHitBox[] = [];
-    ctx.hitBoxes = hitBoxes;
+    // Word's stacking: behind-text floats sit under everything from the text
+    // layer — footer furniture included (a full-bleed backdrop never covers
+    // the page number). Paint the behind pass first, then furniture + the
+    // body pass on top; in-front floats close the sequence inside the body
+    // pass's paragraphs. While a furniture story is being edited the body
+    // pass sits under a white veil instead and the furniture paints on top
+    // of it (the story under edit stays fully opaque) — the story-edit order
+    // interleaves body and furniture, so it paints flat (no layers).
     if (!this.storyEdit) {
-      this.paintFurniture(tree, slot, ctx, flow, furniture);
-      paintScene(tree, items, ctx);
+      const pageLayers: PageLayers = {
+        behind: new Group(),
+        furnitureBehind: new Group(),
+        furnitureBody: new Group(),
+        body: new Group(),
+      };
+      tree.add([
+        pageLayers.behind,
+        pageLayers.furnitureBehind,
+        pageLayers.furnitureBody,
+        pageLayers.body,
+      ]);
+      paintScene(pageLayers.behind, items, ctx);
+      ctx.layer = "body";
+      ctx.hitBoxes = hitBoxes;
+      this.paintFurniture(
+        pageLayers.furnitureBehind,
+        pageLayers.furnitureBody,
+        slotIndex,
+        ctx,
+        flow,
+        furniture,
+      );
+      paintScene(pageLayers.body, items, ctx);
       this.#flushDrawings(ctx);
+      this.slots[index]!.layers = pageLayers;
     } else {
+      ctx.hitBoxes = hitBoxes;
       paintScene(tree, items, ctx);
       // Under the story-edit veil like the rest of the body — the story being
       // edited paints above (opaque) on top.
@@ -662,7 +738,7 @@ export class CanvasStage {
           hittable: false,
         }),
       );
-      this.paintFurniture(tree, slot, ctx, flow, furniture);
+      this.paintFurniture(tree, tree, slotIndex, ctx, flow, furniture);
       this.paintStoryBoundary(tree, ctx, flow);
     }
     // Render eagerly: Leafer's change-driven scheduling stalls when the App
@@ -713,7 +789,8 @@ export class CanvasStage {
    *  heights (its paragraphs were laid out with no grid context either), so
    *  a text box inside the story must not inherit the body's docGrid. */
   private paintFurniture(
-    tree: IGroup,
+    behind: IGroup,
+    body: IGroup,
     slot: number,
     ctx: PaintContext,
     flow: ProjectedFlowBox,
@@ -727,7 +804,7 @@ export class CanvasStage {
       const storyCtx: PaintContext = { ...ctx, flow: storyFlow, layer };
       if (header) {
         paintFurnitureStack(
-          tree,
+          layer === "behind" ? behind : body,
           header.stack,
           flow.contentLeftPx,
           furniture?.headerDistancePx ?? 48,
@@ -737,7 +814,7 @@ export class CanvasStage {
       if (footer) {
         const bottom = flow.pageHeightPx - (furniture?.footerDistancePx ?? 48);
         paintFurnitureStack(
-          tree,
+          layer === "behind" ? behind : body,
           footer.stack,
           flow.contentLeftPx,
           bottom - footer.heightPx,
