@@ -311,6 +311,12 @@ function paintParagraph(
       if (item.kind === "text" && inline.kind === "text") {
         const family = familyOf(inline.style, item.text);
         const intervalPx = rights ? rights[itemIndex]! - item.xPx : undefined;
+        // A squeezed line (advanceScale — Word's compressPunctuation)
+        // compresses its pure-CJK glyphs to the item's already-scaled width:
+        // the same both-letter uniform distribution the justified path
+        // stretches with, run at negative slack (Leafer accepts it).
+        const squeezePx =
+          intervalPx == null && line.advanceScale != null ? item.widthPx : undefined;
         // Character highlight (w:highlight): the token's palette color fills
         // the run's box beneath the glyphs (Word paints it opaque).
         const hl = inline.style.highlight ? HIGHLIGHT_COLOR[inline.style.highlight] : undefined;
@@ -353,21 +359,25 @@ function paintParagraph(
           // at the scaled size on a shifted baseline; the scaling itself is
           // the shared vertAlignedSizePx so measure and paint agree.
           y: lineY + pad + vertAlignBaselineShiftPx(inline.style),
-          // width ONLY on justified items (their stretch interval): a width
-          // on every line would let Leafer wrap the slice again with its
-          // own metrics (a phantom second line). textWrap "none" keeps the
-          // interval from wrapping; height keeps the element paintable
-          // (height 0 is skipped by Leafer).
-          width: intervalPx,
-          textWrap: rights ? "none" : undefined,
+          // width ONLY on justified/squeezed items (their stretch interval
+          // or compressed width): a width on every line would let Leafer
+          // wrap the slice again with its own metrics (a phantom second
+          // line). textWrap "none" keeps the interval from wrapping; height
+          // keeps the element paintable (height 0 is skipped by Leafer).
+          width: intervalPx ?? squeezePx,
+          textWrap: intervalPx != null || squeezePx != null ? "none" : undefined,
           // CJK items spread per glyph (both-letter); Latin items spread
           // per word gap (both-justify — Leafer's word mode, Word's Latin
-          // justification). "both" keeps the single-row Text justifiable.
+          // justification). "both" keeps the single-row Text justifiable —
+          // and compresses when the interval is narrower than the glyphs
+          // (the squeeze path).
           textAlign: rights
             ? justifyPerGrapheme(item.text)
               ? "both-letter"
               : "both-justify"
-            : undefined,
+            : squeezePx != null
+              ? "both-letter"
+              : undefined,
           height: Math.max(1, line.heightPx),
           text: label,
           fill: inline.style.color ? `#${inline.style.color}` : "#1b1b1b",

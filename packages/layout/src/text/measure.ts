@@ -49,6 +49,16 @@ export function vertAlignBaselineShiftPx(style: LayoutTextStyle): number {
   return 0;
 }
 
+/** The alphabetic baseline's offset below a painted Text element's top: the
+ *  painter pins each Text's lineHeight to the font size (px form), and
+ *  Leafer's baseline formula ((lineHeight + 0.7·fontSize) / 2) then puts the
+ *  baseline at 0.85 × fontSize. Consumers that must anchor where the glyphs
+ *  actually draw (the caret map's ink band) go through this — if the
+ *  painter's lineHeight pin ever changes, this is the one place to update. */
+export function leaferBaselinePadPx(fontSize: number): number {
+  return 0.85 * fontSize;
+}
+
 /** Analyzes and caches runs. One instance per layout pass; the cache key
  *  covers everything a metric depends on, so re-flows and re-sizes pay the
  *  cheap path (same determinism contract the paginator was built on). */

@@ -16,6 +16,7 @@ import {
   justifyPerGrapheme,
   type LaidOutLine,
   type LaidOutParagraph,
+  leaferBaselinePadPx,
   leaferWordIndices,
   lineOriginXPx,
   tableGridOf,
@@ -398,12 +399,10 @@ export class CaretMap {
   }
 
   /** The vertical caret box of a line — anchored where the painter actually
-   *  draws: the painter pins each Text's lineHeight to the font size (px
-   *  form, scene.ts), so Leafer's baseline formula ((lineHeight +
-   *  0.7·fontSize)/2, draw.esm.js) puts the alphabetic baseline at 0.85 ×
-   *  fontSize below the element top (itself at the grid-centered pad).
-   *  Sizing to the runs' ink box keeps the highlight hugging the glyphs;
-   *  the font-box model floated a ~0.3em gap above them. */
+   *  draws: the baseline sits `leaferBaselinePadPx` below the element top
+   *  (itself at the grid-centered pad). Sizing to the runs' ink box keeps
+   *  the highlight hugging the glyphs; the font-box model floated a ~0.3em
+   *  gap above them. */
   private bandOf(line: LineEntry): { yPx: number; heightPx: number } {
     const pad = gridPadOf(line.line);
     const ctx = measureCanvas?.getContext("2d");
@@ -424,13 +423,14 @@ export class CaretMap {
       ctx.font = font;
       // The painter's own baseline: a vertAlign run paints at the scaled
       // size on a shifted baseline (vertAlignedSizePx in cssFontOf above,
-      // vertAlignBaselineShiftPx in scene.ts) — the band must anchor there
-      // too, or a footnote reference's highlight rides below its glyphs.
+      // vertAlignBaselineShiftPx in the shared measure module) — the band
+      // must anchor there too, or a footnote reference's highlight rides
+      // below its glyphs.
       const baseline =
         line.yPx +
         pad +
         vertAlignBaselineShiftPx(inline.style) +
-        0.85 * vertAlignedSizePx(inline.style);
+        leaferBaselinePadPx(vertAlignedSizePx(inline.style));
       // The item's own ink box (first graphemes carry its script's shape); the
       // deepest run's descent and highest run's ascent bound the highlight.
       const metrics = ctx.measureText(Array.from(item.text).slice(0, 8).join(""));
@@ -585,14 +585,20 @@ export class CaretMap {
     const base = entry.xPx + item.xPx + plainPrefix;
     if (item.kind !== "text") return base;
     const ends = entry.intervals;
+    // A squeezed line (advanceScale) compresses glyph advances to the item's
+    // already-scaled width — the painter runs both-letter at negative slack,
+    // i.e. the same uniform per-grapheme delta as justification. Modeled as
+    // a justify whose interval ends at the item's own right edge.
+    const squeezeEnd = entry.line.advanceScale != null ? item.xPx + item.widthPx : undefined;
+    const end = ends?.[itemIndex] ?? squeezeEnd;
     // The boundary past the item's last glyph: a natural item ends at its
-    // advance sum; a justified item stretches to its interval's end (the
+    // advance sum; a justified/squeezed item at its interval's end (the
     // painter fills the width — the shared justifiedIntervals).
     if (graphemeIndex >= widths.length) {
-      return ends ? entry.xPx + ends[itemIndex]! : base;
+      return end != null ? entry.xPx + end : base;
     }
-    if (!ends) return base;
-    const interval = ends[itemIndex]! - item.xPx;
+    if (end == null) return base;
+    const interval = end - item.xPx;
     const count = widths.length;
     if (count <= 1) return base;
     let natural = 0;

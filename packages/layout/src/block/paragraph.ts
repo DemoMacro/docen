@@ -148,6 +148,7 @@ export function layoutParagraph(
       textEmPx: line.textEmPx,
       grid: gridLine || undefined,
       pictureFloored: line.pictureFloored,
+      advanceScale: line.advanceScale,
       firstLineIndentPx: i === 0 ? para.indent?.firstLinePx : undefined,
       endInlineIndex: line.endInlineIndex,
       items: line.items,

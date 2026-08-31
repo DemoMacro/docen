@@ -69,6 +69,11 @@ export interface PackedLine {
   /** A picture floored this line's height (the resolver's height was smaller)
    *  — a grid line ceils to whole rows and centers the picture box itself. */
   pictureFloored?: boolean;
+  /** The uniform advance squeeze this line's pure-CJK run was compressed by
+   *  (Word's compressPunctuation, < 1; undefined = natural advances) — the
+   *  item x/width are already scaled; the renderer and caret map compress
+   *  glyph advances to the same factor. */
+  advanceScale?: number;
   /** How far the line's content start sits right of the paragraph's text box
    *  edge — set when a wrapSide right/largest float takes the left side and
    *  the text packs past its right edge (the renderer shifts the line). */
@@ -676,6 +681,7 @@ export function packLines(inline: LayoutInline[], opts: PackLinesOptions): Packe
       naturalPx,
       textEmPx,
       ...(pictureFloored ? { pictureFloored: true } : {}),
+      ...(squeeze != null ? { advanceScale: squeeze } : {}),
       hangPx: hangPx > 0 ? hangPx : undefined,
       xOffsetPx: xOffsetPx > 0 ? xOffsetPx : undefined,
     });

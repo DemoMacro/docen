@@ -85,6 +85,11 @@ describe("packLines", () => {
     );
     const last = texts[texts.length - 1]!;
     expect(last.xPx + last.widthPx).toBeGreaterThan(268);
+    // The factor is carried on the line — the painter compresses glyph
+    // advances and the caret map distributes boundaries by it.
+    expect(lines[0].advanceScale).toBeDefined();
+    expect(lines[0].advanceScale!).toBeLessThan(1);
+    expect(lines[0].advanceScale!).toBeGreaterThanOrEqual(0.96);
     // A genuinely overflowing run still wraps — the 4% bound holds.
     const over = pack([text("测试机关名称、下级行政管理部门测试人员名单", cjk)], 269);
     expect(over.length).toBeGreaterThan(1);

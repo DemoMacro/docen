@@ -64,6 +64,12 @@ export interface LaidOutLine {
   /** A picture floored this line's height — a grid line ceils to whole rows
    *  and centers the picture box itself (its height is the natural box). */
   pictureFloored?: boolean;
+  /** The uniform advance squeeze this line's pure-CJK run was compressed by
+   *  (Word's compressPunctuation, < 1; undefined = natural advances) — the
+   *  item x/width are already scaled; the painter compresses glyph advances
+   *  to the item's scaled width and the caret map distributes boundaries by
+   *  the same factor. */
+  advanceScale?: number;
   /** This line's own first-line indent (w:ind/@w:firstLine, negative for a
    *  hanging indent) — set on the paragraph's FIRST line only, so a split
    * tail's leading line (mid-paragraph, mid-page) carries none. The painter
