@@ -428,62 +428,85 @@ export const DocumentCommands = Extension.create({
           commands.updateAttributes("paragraph", { alignment: "both" }),
 
       // ── Indent / spacing / shading / border — stamp office-open block attrs ──
-      // Increase/decrease left indent by Word's 0.5" step.
+      // All four walk EVERY selected paragraph (each keeps its own existing
+      // attrs — a range-spanning updateAttributes would stamp the first
+      // paragraph's merged value onto the rest). Increase/decrease left
+      // indent by Word's 0.5" step.
       "indent-increase":
         () =>
-        ({ state, chain }) => {
-          const block = formattableBlock(state);
-          if (!block) return false;
-          const current = (block.attrs.indent ?? {}) as { left?: number; right?: number };
-          const left = Math.max(0, (current.left ?? 0) + INDENT_STEP_TWIPS);
-          return chain()
-            .updateAttributes(block.type, { indent: { ...current, left } })
-            .run();
+        ({ state, tr }) => {
+          let touched = false;
+          for (const { pos, node } of selectedParagraphs(state)) {
+            const attrs = node.attrs as Record<string, unknown>;
+            const current = (attrs.indent ?? {}) as { left?: number; right?: number };
+            const left = Math.max(0, (current.left ?? 0) + INDENT_STEP_TWIPS);
+            tr.setNodeMarkup(pos, undefined, { ...attrs, indent: { ...current, left } });
+            touched = true;
+          }
+          return touched;
         },
       "indent-decrease":
         () =>
-        ({ state, chain }) => {
-          const block = formattableBlock(state);
-          if (!block) return false;
-          const current = (block.attrs.indent ?? {}) as { left?: number; right?: number };
-          const left = Math.max(0, (current.left ?? 0) - INDENT_STEP_TWIPS);
-          return chain()
-            .updateAttributes(block.type, { indent: { ...current, left } })
-            .run();
+        ({ state, tr }) => {
+          let touched = false;
+          for (const { pos, node } of selectedParagraphs(state)) {
+            const attrs = node.attrs as Record<string, unknown>;
+            const current = (attrs.indent ?? {}) as { left?: number; right?: number };
+            const left = Math.max(0, (current.left ?? 0) - INDENT_STEP_TWIPS);
+            tr.setNodeMarkup(pos, undefined, { ...attrs, indent: { ...current, left } });
+            touched = true;
+          }
+          return touched;
         },
       // Line spacing as a multiple of single (1.0/1.15/1.5/2.0); preserves
-      // existing before/after. The dropdown's trailing entries are Word's
-      // "Add Space Before/After Paragraph": 10pt (200 twips), not a multiple.
+      // existing before/after. The split's main click carries no value — it
+      // applies single spacing (Word's default). The dropdown's trailing
+      // entries are Word's "Add Space Before/After Paragraph": 10pt (200
+      // twips), not a multiple.
       "line-spacing":
         (mult) =>
-        ({ state, chain }) => {
-          const block = formattableBlock(state);
-          if (!block) return false;
-          const current = (block.attrs.spacing ?? {}) as Record<string, unknown>;
+        ({ state, tr }) => {
+          const blocks = selectedParagraphs(state);
+          if (!blocks.length) return false;
           if (mult === "add-before" || mult === "add-after") {
             const key = mult === "add-before" ? "before" : "after";
-            return chain()
-              .updateAttributes(block.type, { spacing: { ...current, [key]: 200 } })
-              .run();
+            for (const { pos, node } of blocks) {
+              const attrs = node.attrs as Record<string, unknown>;
+              const current = (attrs.spacing ?? {}) as Record<string, unknown>;
+              tr.setNodeMarkup(pos, undefined, {
+                ...attrs,
+                spacing: { ...current, [key]: 200 },
+              });
+            }
+            return true;
           }
-          const m = parseFloat(mult ?? "");
-          if (!Number.isFinite(m)) return false;
-          return chain()
-            .updateAttributes(block.type, {
+          const parsed = parseFloat(mult ?? "");
+          const m = Number.isFinite(parsed) ? parsed : 1;
+          for (const { pos, node } of blocks) {
+            const attrs = node.attrs as Record<string, unknown>;
+            const current = (attrs.spacing ?? {}) as Record<string, unknown>;
+            tr.setNodeMarkup(pos, undefined, {
+              ...attrs,
               spacing: { ...current, line: lineMultipleToOoxml(m), lineRule: "auto" },
-            })
-            .run();
+            });
+          }
+          return true;
         },
       // Paragraph shading: "none" clears; a theme pick stores a themeFill-bound
       // ShadingProperties; a bare hex stores fill directly.
       shading:
         (value) =>
-        ({ state, chain }) => {
-          const block = formattableBlock(state);
-          if (!block) return false;
-          if (value === "none") {
-            return chain().updateAttributes(block.type, { shading: null }).run();
-          }
+        ({ state, tr }) => {
+          const blocks = selectedParagraphs(state);
+          if (!blocks.length) return false;
+          const stamp = (shading: unknown): boolean => {
+            for (const { pos, node } of blocks) {
+              const attrs = node.attrs as Record<string, unknown>;
+              tr.setNodeMarkup(pos, undefined, { ...attrs, shading });
+            }
+            return true;
+          };
+          if (value === "none") return stamp(null);
           if (isThemeColor(value)) {
             const shading: Record<string, unknown> = {
               fill: value.val,
@@ -492,12 +515,10 @@ export const DocumentCommands = Extension.create({
             };
             if (value.themeTint) shading.themeFillTint = value.themeTint;
             if (value.themeShade) shading.themeFillShade = value.themeShade;
-            return chain().updateAttributes(block.type, { shading }).run();
+            return stamp(shading);
           }
           if (typeof value === "string" && value) {
-            return chain()
-              .updateAttributes(block.type, { shading: { fill: value, type: "clear" } })
-              .run();
+            return stamp({ fill: value, type: "clear" });
           }
           return false;
         },
@@ -513,17 +534,21 @@ export const DocumentCommands = Extension.create({
           return false;
         },
       // Paragraph borders: value picks sides (bottom/top/left/right/all/outside);
-      // "none" clears all. Merges with existing so other sides stay. Default
-      // single 0.75pt, "auto" color (Word default).
+      // "none" clears all. Merges with each paragraph's existing so other sides
+      // stay. Default single 0.75pt, "auto" color (Word default).
       border:
         (side) =>
-        ({ state, chain }) => {
-          const block = formattableBlock(state);
-          if (!block) return false;
+        ({ state, tr }) => {
+          const blocks = selectedParagraphs(state);
+          if (!blocks.length) return false;
           // The split button's main click carries no value — default bottom.
           const s = side ?? "bottom";
           if (s === "none") {
-            return chain().updateAttributes(block.type, { border: null }).run();
+            for (const { pos, node } of blocks) {
+              const attrs = node.attrs as Record<string, unknown>;
+              tr.setNodeMarkup(pos, undefined, { ...attrs, border: null });
+            }
+            return true;
           }
           const sides =
             s === "all" || s === "outside"
@@ -532,10 +557,14 @@ export const DocumentCommands = Extension.create({
                 ? [s]
                 : null;
           if (!sides) return false;
-          const current = (block.attrs.border ?? {}) as Record<string, unknown>;
-          const border = { ...current };
-          for (const side of sides) border[side] = { ...DEFAULT_BORDER };
-          return chain().updateAttributes(block.type, { border }).run();
+          for (const { pos, node } of blocks) {
+            const attrs = node.attrs as Record<string, unknown>;
+            const current = (attrs.border ?? {}) as Record<string, unknown>;
+            const border = { ...current };
+            for (const side of sides) border[side] = { ...DEFAULT_BORDER };
+            tr.setNodeMarkup(pos, undefined, { ...attrs, border });
+          }
+          return true;
         },
 
       // ── Lists / blocks ──
@@ -703,11 +732,13 @@ export const DocumentCommands = Extension.create({
         },
       // Promote/demote the selected list paragraphs to a fixed multilevel
       // depth (level-1 = top, level-2/3 = one/two in), keeping each
-      // paragraph's list kind and reference. No-op on non-list paragraphs.
+      // paragraph's list kind and reference. The split's main click carries
+      // no value — top level, not a demotion to level 2. No-op on non-list
+      // paragraphs.
       "multilevel-list":
         (level) =>
         ({ state, tr }) => {
-          const target = level === "level-1" ? 0 : level === "level-3" ? 2 : 1;
+          const target = level == null || level === "level-1" ? 0 : level === "level-3" ? 2 : 1;
           let touched = false;
           for (const { pos, node } of selectedParagraphs(state)) {
             const attrs = node.attrs as Record<string, unknown>;
