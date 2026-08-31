@@ -333,6 +333,42 @@ const documentStyles = css`
     padding: 32px 0;
     cursor: text;
   }
+  /* Open-progress veil over the canvas (Word centers its opening spinner in
+       the document area too): label + Fluent progress bar, centered on a
+       translucent white wash so the not-yet-laid-out document doesn't flash
+       behind it. The area is the scroll container, so the veil is its FIRST
+       child, sticky at top, and one area-height tall (= the visible region,
+       so the center lands mid-viewport). While shown, the veil adds its
+       height to the scroll range — so freeze the scroller for the duration
+       (nothing behind it is worth scrolling to). */
+  docen-document-area:has(> .load-veil:not([hidden])) {
+    overflow: hidden;
+  }
+  .load-veil {
+    position: sticky;
+    top: 0;
+    /* 100% = the area's content box (its 24px paddings stay uncovered — under
+       the translucent wash the not-yet-replaced document shows as a hairline
+       edge, invisible against a blank first load). */
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    background: rgba(255, 255, 255, 0.82);
+    z-index: 40;
+  }
+  .load-veil[hidden] {
+    display: none;
+  }
+  .load-veil fluent-progress-bar {
+    width: 240px;
+  }
+  .load-veil .load-label {
+    font-size: 13px;
+    color: var(--docen-color-text-2, #424242);
+  }
   /* Grey the "Auto-save" label to match its disabled switch (skeleton
        feature), so the label + switch read as one unavailable control, like
        ribbon skeleton buttons. Lifts automatically once the switch loses
@@ -391,6 +427,10 @@ const documentTemplate = html`
       </docen-navigation-pane>
     </docen-task-pane>
     <docen-document-area>
+      <div class="load-veil" part="load-veil" hidden>
+        <fluent-progress-bar></fluent-progress-bar>
+        <span class="load-label"></span>
+      </div>
       <docen-context-menu part="context-menu">
         <div class="docen-canvas" part="page"></div>
       </docen-context-menu>
@@ -3447,18 +3487,18 @@ class DocenDocument extends AddinHost<Editor> {
   /** Load a .docx into the editor from a File or a buffer (ArrayBuffer /
    *  Uint8Array). A File also adopts its name as the filename; a bare buffer
    *  carries no name. parseDOCX is synchronous, but this is async so a File's
-   *  bytes can be awaited. Large files report progress in the status bar
-   *  (Word's bottom-row "Opening…"): streaming the bytes gives a real
-   *  percentage; parsing and first layout show an indeterminate bar. */
+   *  bytes can be awaited. While loading, an "Opening <name>" veil covers the
+   *  canvas (Office shows the same message for a slow open) and the scroller
+   *  stays frozen until the document is ready. */
   async openDOCX(input: File | ArrayBuffer | Uint8Array): Promise<void> {
     const name = input instanceof File ? input.name : undefined;
     this.#setProgress(t("status.opening", this).replace("{name}", name ?? "DOCX"));
     try {
-      const buffer = input instanceof File ? await this.#readBytesProgressive(input) : input;
-      // parseDOCX blocks the main thread — yield two frames so the read-stage
-      // bar paints before it freezes, then swap to the indeterminate parse bar.
+      const buffer = input instanceof File ? await input.arrayBuffer() : input;
+      // parseDOCX blocks the main thread — yield two frames so the veil paints
+      // before the freeze (the bar's sweep is compositor-driven and keeps
+      // moving through it).
       await this.#nextFrame();
-      this.#setProgress(t("status.parsing", this));
       const json = parseDOCX(buffer);
       this.#applyOpenedJSON(json, name);
       await this.#nextFrame();
@@ -3477,7 +3517,6 @@ class DocenDocument extends AddinHost<Editor> {
     try {
       const text = typeof input === "string" ? input : await input.text();
       await this.#nextFrame();
-      this.#setProgress(t("status.parsing", this));
       this.#applyOpenedJSON(parseMarkdown(text), name);
       await this.#nextFrame();
       this.#setProgress();
@@ -3487,39 +3526,23 @@ class DocenDocument extends AddinHost<Editor> {
     }
   }
 
-  /** Show (label + optional 0-100 value; absent = indeterminate) or clear the
-   *  status bar's open-progress cluster. */
-  #setProgress(label?: string, value?: number): void {
-    const bar = this.shadowRoot?.querySelector("docen-status-bar");
-    if (!bar) return;
-    if (label == null) bar.removeAttribute("progress");
-    else bar.setAttribute("progress", JSON.stringify({ label, value }));
-  }
-
-  /** Read a File's bytes through its stream so the progress bar tracks real
-   *  bytes (File.arrayBuffer() is opaque). */
-  async #readBytesProgressive(file: File): Promise<ArrayBuffer> {
-    const total = file.size || 1;
-    const reader = file.stream().getReader();
-    const chunks: Uint8Array[] = [];
-    let loaded = 0;
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done || !value) break;
-      chunks.push(value);
-      loaded += value.byteLength;
-      this.#setProgress(
-        t("status.opening", this).replace("{name}", file.name),
-        5 + Math.round((loaded / total) * 35),
-      );
+  /** Open progress on the canvas veil — a label + indeterminate Fluent
+   *  progress bar centered over the document area (Word centers its opening
+   *  spinner the same way). Byte reads are a sliver of the load and parse/
+   *  layout report nothing, so the bar never fakes a percentage. Clearing
+   *  hides the veil. */
+  #setProgress(label?: string): void {
+    const root = this.shadowRoot;
+    const veil = root?.querySelector<HTMLElement>(".load-veil");
+    if (!veil || !root) return;
+    if (label == null) {
+      veil.hidden = true;
+      return;
     }
-    const out = new Uint8Array(loaded);
-    let offset = 0;
-    for (const chunk of chunks) {
-      out.set(chunk, offset);
-      offset += chunk.byteLength;
-    }
-    return out.buffer;
+    const labelEl = root.querySelector<HTMLElement>(".load-veil .load-label");
+    if (!labelEl) return;
+    veil.hidden = false;
+    labelEl.textContent = label;
   }
 
   /** Two rAFs — enough for the current progress state to paint before a

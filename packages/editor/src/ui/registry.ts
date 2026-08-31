@@ -42,7 +42,8 @@ import {
   MenuStyles,
   MenuTemplate,
   ProgressBar,
-  ProgressBarDefinition,
+  ProgressBarStyles,
+  ProgressBarTemplate,
   Listbox,
   ListboxDefinition,
   Switch,
@@ -355,9 +356,33 @@ export async function registerComponents(): Promise<void> {
     styles: TabStyles,
   });
   await defineElement(Listbox, ListboxDefinition);
-  // fluent-progress: the status bar's open-progress indicator (Word shows the
-  // same bar in its bottom status row while opening a large document).
-  await defineElement(ProgressBar, ProgressBarDefinition);
+  // fluent-progress-bar: the document area's load veil (Office shows
+  // "Opening <file>" over the page area while a large document opens).
+  // Fluent's stock indeterminate loop animates inset-inline-start — a layout
+  // property the main thread owns, so the bar freezes solid while a
+  // synchronous parse blocks the thread. Restate the same sweep as a
+  // transform animation (compositor-driven, keeps moving through the
+  // freeze): the 33%-wide indicator travels -33% → 100% of the track =
+  // -100% → ~303% of its own width.
+  await defineElement(ProgressBar, {
+    name: "fluent-progress-bar",
+    template: ProgressBarTemplate,
+    styles: css`
+      ${ProgressBarStyles}
+      :host(:not([value])) .indicator {
+        animation-name: docen-indeterminate;
+        will-change: transform;
+      }
+      @keyframes docen-indeterminate {
+        from {
+          transform: translateX(-100%);
+        }
+        to {
+          transform: translateX(303%);
+        }
+      }
+    `,
+  });
   await defineElement(Tablist, TablistDefinition);
   await defineElement(TextInput, TextInputDefinition);
   // fluent-text-area: the comments pane's compose box (Word's comment sidebar
