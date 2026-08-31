@@ -686,6 +686,12 @@ function paintMembers(
   boxY: number,
   ctx: PaintContext,
 ): void {
+  // A drawing box is a complete little scene: its members paint in full
+  // whichever pass anchors the box. A behind-doc watermark's text still lays
+  // out as ordinary story rows — threading the behind layer into the member
+  // paragraphs would hit paintParagraph's behind branch, which skips line
+  // painting entirely, and the body pass never repainted the box.
+  const mctx: PaintContext = ctx.layer === "behind" ? { ...ctx, layer: "body" } : ctx;
   for (let i = 0; i < members.length; i++) {
     const m = members[i];
     const mx = boxX + m.x;
@@ -812,12 +818,12 @@ function paintMembers(
           rotation: m.rotation,
         });
         for (const item of laid.stack) {
-          paintBlock(group, item.block, left, oy + item.yPx, ctx, { width: inner, inCell: true });
+          paintBlock(group, item.block, left, oy + item.yPx, mctx, { width: inner, inCell: true });
         }
         tree.add(group);
       } else {
         for (const item of laid.stack) {
-          paintBlock(tree, item.block, mx + left, my + oy + item.yPx, ctx, {
+          paintBlock(tree, item.block, mx + left, my + oy + item.yPx, mctx, {
             width: inner,
             inCell: true,
           });
