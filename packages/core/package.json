@@ -1,6 +1,6 @@
 {
   "name": "@docen/core",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Shared rendering layer for docen editors — geometry/style/image helpers and the LeaferJS scene painter for laid-out documents",
   "keywords": [
     "canvas",

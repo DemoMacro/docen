@@ -606,6 +606,9 @@ export class CanvasStage {
       // Async image decodes landing after this repaint need the same eager
       // render — the change-driven scheduler cannot be relied on here.
       rerender: () => app.forceRender(),
+      // In-front floats collect here through the body pass and paint after
+      // its last paragraph (Word stacks them above ALL text).
+      deferredDrawings: [],
     };
     const slot = this.slotOf(index);
     // Word's stacking: behind-text floats sit under everything from the text
@@ -659,8 +662,12 @@ export class CanvasStage {
     if (!this.storyEdit) {
       this.paintFurniture(tree, slot, ctx, flow, furniture);
       paintScene(tree, items, ctx);
+      this.#flushDrawings(ctx);
     } else {
       paintScene(tree, items, ctx);
+      // Under the story-edit veil like the rest of the body — the story being
+      // edited paints above (opaque) on top.
+      this.#flushDrawings(ctx);
       tree.add(
         new Rect({
           x: 0,
@@ -679,6 +686,14 @@ export class CanvasStage {
     // and never picks the page back up.
     app.forceRender();
     this.hitBoxes.set(index, hitBoxes);
+  }
+
+  /** Paint the in-front floats the body pass parked in the queue — after the
+   *  pass's last paragraph, so no text paragraph can paint over them (Word
+   *  stacks in-front floats above ALL body text). */
+  #flushDrawings(ctx: PaintContext): void {
+    for (const paint of ctx.deferredDrawings ?? []) paint();
+    if (ctx.deferredDrawings) ctx.deferredDrawings.length = 0;
   }
 
   /** The page's drawing boxes as the body pass painted them — the click

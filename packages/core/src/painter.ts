@@ -131,6 +131,11 @@ export interface PaintContext {
   /** Accumulates this page's drawing boxes as the body pass paints them —
    *  the stage turns the list into its click hit table. */
   hitBoxes?: DrawingHitBox[];
+  /** In-front floats park here instead of painting inside their anchor
+   *  paragraph: Word stacks them above ALL text (an anchor earlier in the
+   *  flow must not let later paragraphs paint over the float), so the stage
+   *  flushes this queue after the body pass paints its last paragraph. */
+  deferredDrawings?: Array<() => void>;
 }
 
 /** The text column a block paints inside: the page's content box for body
@@ -488,14 +493,20 @@ function paintParagraph(
   paintBorders();
   // Floating drawings anchored to this paragraph: wrap-none boxes painted
   // over the text — the flow reserved them no height. (behindDoc ones went
-  // first, above.)
+  // first, above.) In-front floats defer to the queue: Word paints them
+  // above every paragraph, not just the ones before their anchor.
   // The body pass collects EVERY drawing's hit box — behind-doc floats
   // painted by the earlier pass included (their boxes are just as clickable).
   let hitIndex = 0;
   for (const drawing of para.drawings ?? []) {
     const host = { para, index: hitIndex++ };
-    if (!drawing.behind) paintDrawing(tree, drawing, x, y, ctx, col, host);
-    else if (ctx.hitBoxes) recordDrawingHit(drawing, x, y, ctx, ctx.hitBoxes, host);
+    if (drawing.behind) {
+      if (ctx.hitBoxes) recordDrawingHit(drawing, x, y, ctx, ctx.hitBoxes, host);
+      continue;
+    }
+    const paint = (): void => paintDrawing(tree, drawing, x, y, ctx, col, host);
+    if (ctx.deferredDrawings) ctx.deferredDrawings.push(paint);
+    else paint();
   }
 }
 

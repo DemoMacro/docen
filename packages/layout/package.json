@@ -1,6 +1,6 @@
 {
   "name": "@docen/layout",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Pure TypeScript layout engine for docen — text line breaking (UAX #14 + CJK kinsoku), OOXML paragraph/table block layout, and flow/fixed/grid strategies with zero DOM dependencies",
   "keywords": [
     "cjk",
