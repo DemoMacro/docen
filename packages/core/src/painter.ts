@@ -942,11 +942,13 @@ function paintShapeBox(
  *  Leafer's paint resolves the bitmap through this shared entry. */
 const pinnedImages = new Map<string, ILeaferImage>();
 
-function pinImage(url: string): void {
-  if (pinnedImages.has(url)) return;
+function pinImage(url: string): ILeaferImage {
+  const pinned = pinnedImages.get(url);
+  if (pinned) return pinned;
   const image = ImageManager.get({ url }, "image");
   pinnedImages.set(url, image);
   image.load();
+  return image;
 }
 
 /** Release the pins at stage teardown — Leafer's own recycle then evicts the
@@ -956,14 +958,31 @@ export function releasePinnedImages(): void {
   pinnedImages.clear();
 }
 
-/** An uncropped picture. The element must join the tree only once its encoding
- *  is decoded (the stage renders eagerly right after paint — Leafer's
- *  change-driven re-render stalls afterwards, so an Image added before its
- *  url has a bitmap would be force-rendered empty and never picked back up).
- *  A transparent placeholder holds the paint-order slot meanwhile: the async
- *  insert must not land on top of members painted after this one, or z-order
- *  would follow decode completion instead of record order (labels would sink
- *  under their plates). */
+/** An uncropped picture. A ready Leafer resource joins synchronously; on the
+ *  first decode, a transparent placeholder preserves record order until the
+ *  bitmap becomes available. */
+function plainImageLeaf(
+  src: string,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  flipH?: boolean,
+  flipV?: boolean,
+): LeaferImage {
+  return new LeaferImage({
+    url: src,
+    x: flipH ? x + width : x,
+    y: flipV ? y + height : y,
+    width,
+    height,
+    // Mirrors flip around the element's (x,y) origin: shifting the origin
+    // to the far edge first makes the reflection cover the original box.
+    ...(flipH ? { scaleX: -1 } : {}),
+    ...(flipV ? { scaleY: -1 } : {}),
+  });
+}
+
 function addPlainImage(
   tree: IGroup,
   m: Extract<LayoutDrawingMember, { kind: "picture" }>,
@@ -971,35 +990,27 @@ function addPlainImage(
   my: number,
   ctx: PaintContext,
 ): void {
-  pinImage(m.src!);
+  const src = m.src!;
+  const image = pinImage(src);
+  // Repainting the body must reuse Leafer's already-decoded resource. Going
+  // through a fresh DOM Image here leaves an empty placeholder until its load
+  // event, which is the visible flash of cached WMF/EMF raster members.
+  if (image.ready) {
+    tree.add(plainImageLeaf(src, mx, my, m.width, m.height, m.flipH, m.flipV));
+    return;
+  }
   const slot = new Rect({ x: mx, y: my, width: m.width, height: m.height });
   tree.add(slot);
-  const el = new Image();
-  el.onload = () => {
+  image.load(() => {
     // A repaint since the decode started cleared the tree (slot included) —
     // that repaint's own decode now owns the paint-order slot.
     if (!slot.parent) return;
-    tree.addAfter(
-      new LeaferImage({
-        url: m.src!,
-        x: mx,
-        y: my,
-        width: m.width,
-        height: m.height,
-        // Mirrors flip around the element's (x,y) origin: shifting the
-        // origin to the far edge first makes the reflection cover the
-        // original box exactly.
-        ...(m.flipH ? { x: mx + m.width, scaleX: -1 } : {}),
-        ...(m.flipV ? { y: my + m.height, scaleY: -1 } : {}),
-      }),
-      slot,
-    );
+    tree.addAfter(plainImageLeaf(src, mx, my, m.width, m.height, m.flipH, m.flipV), slot);
     tree.remove(slot);
     // The stage's eager render already ran when this decode finished; without
     // a fresh frame the inserted image waits for a repaint that may never come.
     ctx.rerender();
-  };
-  el.src = m.src!;
+  });
 }
 
 /** A run of masked GDI blt members (SRCPAINT/SRCAND halves, optionally over a
