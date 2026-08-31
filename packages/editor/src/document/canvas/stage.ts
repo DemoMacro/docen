@@ -248,21 +248,14 @@ export class CanvasStage {
     slot.el.style.height = `${h}px`;
   }
 
-  /** Stamp the frame's w:background — base color plus the pattern tile sized
-   *  to the current zoom (CSS background scales with the page, so the pattern
-   *  reads identically at every level). */
+  /** Stamp the frame's w:background — the base color (pattern fills arrive
+   *  pre-averaged by the projection). */
   private applyBackground(frame: HTMLElement): void {
     const bg = this.ctx.background;
     // OOXML hex has no '#' — CSS colors do; the raw token is invalid CSS and
     // the assignment would be silently dropped.
     frame.style.backgroundColor = bg?.color ? `#${bg.color}` : "#ffffff";
-    if (bg?.tileSrc && bg.tilePx) {
-      const size = Math.max(1, Math.round(bg.tilePx * this.factor));
-      frame.style.backgroundImage = `url(${bg.tileSrc})`;
-      frame.style.backgroundSize = `${size}px ${size}px`;
-    } else {
-      frame.style.backgroundImage = "none";
-    }
+    frame.style.backgroundImage = "none";
   }
 
   /** ST_Border tokens → CSS border-styles. Word's art borders (fancy
@@ -626,33 +619,19 @@ export class CanvasStage {
     const items = this.pages[index]?.items ?? [];
     ctx.layer = "behind";
     // The page's w:background must tint the BITMAP itself (exports and pixel
-    // probes read the canvas, not the frame's CSS), so the base color / tile
-    // pattern paints as the bottommost scene element. The App-level `fill`
-    // cannot host it: an App has no canvas of its own and drops `fill` from
-    // the child-layer configs it builds (App.ts __getChildConfig).
+    // probes read the canvas, not the frame's CSS), so the base color paints
+    // as the bottommost scene element. The App-level `fill` cannot host it:
+    // an App has no canvas of its own and drops `fill` from the child-layer
+    // configs it builds (App.ts __getChildConfig).
     const bg = this.ctx.background;
-    if (bg) {
+    if (bg?.color) {
       tree.add(
         new Rect({
           x: 0,
           y: 0,
           width: flow.pageWidthPx,
           height: flow.pageHeightPx,
-          fill:
-            bg.tileSrc && bg.tilePx
-              ? // mode:repeat + width/height is Leafer's tiling contract —
-                // an unknown `repeat`/`size` key is silently ignored and the
-                // tile stretches over the whole page.
-                {
-                  type: "image",
-                  url: bg.tileSrc,
-                  mode: "repeat",
-                  width: bg.tilePx,
-                  height: bg.tilePx,
-                }
-              : bg.color
-                ? `#${bg.color}`
-                : undefined,
+          fill: `#${bg.color}`,
           hittable: false,
         }),
       );

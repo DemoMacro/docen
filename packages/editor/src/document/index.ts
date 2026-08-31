@@ -1715,7 +1715,6 @@ class DocenDocument extends AddinHost<Editor> {
       prev.sectionOfPage.length !== run.sectionOfPage.length ||
       prev.sectionOfPage.some((s, i) => s !== run.sectionOfPage[i]) ||
       prev.background?.color !== run.background?.color ||
-      prev.background?.tileSrc !== run.background?.tileSrc ||
       prev.sections.length !== run.sections.length ||
       prev.sections.some((s, i) => !deepEq(s.flow, run.sections[i]!.flow)) ||
       prev.sections.some((s, i) => !deepEq(s.furniture, run.sections[i]!.furniture));

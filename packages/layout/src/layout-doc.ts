@@ -635,15 +635,11 @@ export interface ProjectedPageFurniture {
 }
 
 /** Page background projected for painting (w:background): the solid page
- *  color plus — when the round-tripped VML fill is a pattern — the tile
- *  bitmap. */
+ *  color — a VML pattern fill arrives pre-averaged into it. */
 export interface ProjectedPageBackground {
-  /** w:background @w:color — the page base under the tile. */
+  /** On-page color: the plain w:color, or the pattern tile's threads/gaps
+   *  mixed by bit coverage. */
   color?: string;
-  /** Pattern tile: full BMP file (palette already remapped) as a data URL. */
-  tileSrc?: string;
-  /** On-page tile size in px at 100% zoom. */
-  tilePx?: number;
 }
 
 /** One side of the projected page borders (w:pgBorders): the stroke a page

@@ -1621,48 +1621,49 @@ describe("projectDocumentOptions endnote references", () => {
 
 describe("projectDocumentOptions page background", () => {
   /** Minimal 8x8 1bpp BMP: BFHEADER + INFOHEADER + 2-entry palette +
-   * 4-byte-padded rows. `rows` are top-down bit strings ("11000000"). */
+   * 4-byte-padded rows. `rows` are top-down bit strings ("11000000"); rows
+   * past the array end read as zero. */
   const tileBmp = (rows: string[]): Uint8Array => {
     const out = new Uint8Array(14 + 40 + 8 + 8 * 4);
     const view = new DataView(out.buffer);
     out[0] = 0x42;
     out[1] = 0x4d;
+    view.setUint32(10, 62, true);
     view.setUint32(14, 40, true);
     view.setInt32(18, 8, true);
     view.setInt32(22, 8, true);
     view.setUint16(28, 1, true);
     view.setUint32(46, 2, true);
-    // Palette stays 0 (the projection rewrites both entries).
     for (let y = 0; y < 8; y++) {
-      const bits = rows[7 - y]!; // BMP rows are bottom-up
-      out[62 + y * 4] = parseInt(bits, 2);
+      const bits = rows[7 - y]; // BMP rows are bottom-up
+      if (bits) out[62 + y * 4] = parseInt(bits, 2);
     }
     return out;
   };
-  const bgr = (bytes: Uint8Array, at: number): string =>
-    [bytes[at + 2], bytes[at + 1], bytes[at]]
-      .map((v) => v.toString(16).padStart(2, "0"))
-      .join("")
-      .toUpperCase();
+  const backgroundOf = (data: Uint8Array) => ({
+    rawXml:
+      '<w:background w:color="F9F1E2"><v:background>' +
+      '<v:fill type="pattern" color2="#F9FBF8" r:id="{tile.bmp}"/>' +
+      "</v:background></w:background>",
+    rawMedia: [{ fileName: "tile.bmp", type: "bmp", data }],
+  });
 
-  it("maps pattern set bits to color2 and gaps to the page color", () => {
-    const background = {
-      rawXml:
-        '<w:background w:color="F9F1E2"><v:background>' +
-        '<v:fill type="pattern" color2="#F9FBF8" r:id="{tile.bmp}"/>' +
-        "</v:background></w:background>",
-      rawMedia: [{ fileName: "tile.bmp", type: "bmp", data: tileBmp(["11000000"]) }],
-    };
+  it("averages a pattern tile into one flat color by bit coverage", () => {
+    // One row "11000000": 2 set bits of 64 → coverage 1/32.
     const projected = projectDocumentOptions({
       ...doc([]),
-      background,
+      background: backgroundOf(tileBmp(["11000000"])),
     } as DocumentOptions).background;
+    // (1/32)·F9FBF8 + (31/32)·F9F1E2 per channel, rounded.
+    expect(projected?.color).toBe("F9F1E3");
+  });
+
+  it("keeps a plain w:color background untouched", () => {
+    const projected = projectDocumentOptions({
+      ...doc([]),
+      background: backgroundOf(tileBmp([])),
+    } as DocumentOptions).background;
+    // All-zero tile: full coverage of the gap color — the flat base itself.
     expect(projected?.color).toBe("F9F1E2");
-    expect(projected?.tilePx).toBe(8);
-    const bin = atob(projected!.tileSrc!.slice("data:image/bmp;base64,".length));
-    const bmp = Uint8Array.from(bin, (c) => c.charCodeAt(0));
-    // Clear bits (gaps) carry the page base color, set bits (threads) color2.
-    expect(bgr(bmp, 54)).toBe("F9F1E2");
-    expect(bgr(bmp, 58)).toBe("F9FBF8");
   });
 });

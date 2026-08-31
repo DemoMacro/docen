@@ -2042,16 +2042,12 @@ function projectPageFurniture(
   };
 }
 
-/** Word paints a pattern tile at 1:1 device px — an 8px tile reads as an 8px
- *  weave on screen and in the PDF export alike (measured: the reference's
- *  background autocorrelation peaks at lag 8). */
-const TILE_SCALE = 1;
-
-/** Project w:background. The v:fill's 1bpp hatch tile recolors in place (its
- *  palette IS the paint): set bits — the woven threads, the tile's majority —
- *  take the fill's color2, clear bits — the gaps — take w:color, so the page
- *  base shows through the gaps (verified against the Word reference: a woven
- *  tile with 70% set bits renders ~75% color2). */
+/** Project w:background. A v:fill pattern's 1bpp hatch tile paints threads
+ *  (set bits) in the fill's color2 and gaps (clear bits) in w:color — but
+ *  Word's own rasterization smooths the weave into a near-flat tint (the PDF
+ *  reference shows the same bit coverage with far weaker periodicity), and a
+ *  1:1 dot screen on the canvas reads as harsh yellow speckle against it.
+ *  Average the two colors by bit coverage into one flat color instead. */
 function projectPageBackground(doc: DocumentOptions): ProjectedPageBackground | undefined {
   const bg = doc.background as
     | {
@@ -2089,30 +2085,48 @@ function projectPageBackground(doc: DocumentOptions): ProjectedPageBackground | 
   }
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
   const headerSize = view.getUint32(14, true);
+  const width = view.getInt32(18, true);
+  const height = Math.abs(view.getInt32(22, true));
   const bpp = view.getUint16(28, true);
   const clrUsed = view.getUint32(46, true) || (bpp <= 8 ? 1 << bpp : 0);
-  const paletteAt = 14 + headerSize;
-  if (bpp !== 1 || clrUsed !== 2 || paletteAt + 8 > data.length) return out;
-  // Rewrite the 2-entry palette: entry 0 (clear bits, the gaps) the page's
-  // base color, entry 1 (set bits, the threads) the fill's color2 — pixel
-  // data passes untouched.
-  const setEntry = (at: number, hex: string): void => {
-    data[at] = parseInt(hex.slice(4, 6), 16);
-    data[at + 1] = parseInt(hex.slice(2, 4), 16);
-    data[at + 2] = parseInt(hex.slice(0, 2), 16);
-    data[at + 3] = 0;
-  };
-  setEntry(paletteAt, color ?? "FFFFFF");
-  setEntry(paletteAt + 4, hexOf(fill[0].match(/\scolor2="#?([0-9A-Fa-f]{6})"/)) ?? "000000");
-  let bin = "";
-  const CHUNK = 0x8000;
-  for (let i = 0; i < data.length; i += CHUNK) {
-    bin += String.fromCharCode(...data.subarray(i, i + CHUNK));
+  const dataAt = view.getUint32(10, true);
+  if (
+    bpp !== 1 ||
+    clrUsed !== 2 ||
+    width <= 0 ||
+    height <= 0 ||
+    width > 64 ||
+    height > 64 ||
+    dataAt < 14 + headerSize + 8 ||
+    dataAt + Math.ceil(width / 8) * height > data.length
+  ) {
+    return out;
   }
+  // Count the set bits (threads): rows are padded to 4-byte boundaries.
+  let ones = 0;
+  const rowBytes = Math.ceil(width / 8);
+  const rowStride = Math.ceil(rowBytes / 4) * 4;
+  for (let y = 0; y < height; y++) {
+    for (let b = 0; b < rowBytes; b++) {
+      const byte = view.getUint8(dataAt + y * rowStride + b);
+      for (let bit = 0; bit < 8 && b * 8 + bit < width; bit++) {
+        ones += (byte >> (7 - bit)) & 1;
+      }
+    }
+  }
+  const coverage = ones / (width * height);
+  const thread = hexOf(fill[0].match(/\scolor2="#?([0-9A-Fa-f]{6})"/)) ?? "000000";
+  const gap = color ?? "FFFFFF";
+  const chan = (t: string, g: string, i: number): number =>
+    Math.round(
+      coverage * parseInt(thread.slice(i * 2, i * 2 + 2), 16) +
+        (1 - coverage) * parseInt(gap.slice(i * 2, i * 2 + 2), 16),
+    );
   return {
-    ...out,
-    tileSrc: `data:image/bmp;base64,${btoa(bin)}`,
-    tilePx: view.getInt32(18, true) * TILE_SCALE,
+    color: [0, 1, 2]
+      .map((i) => chan(thread, gap, i).toString(16).padStart(2, "0"))
+      .join("")
+      .toUpperCase(),
   };
 }
 
