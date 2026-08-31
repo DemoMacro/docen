@@ -88,7 +88,7 @@ Custom extensions extend `@tiptap/extension-*` to carry DOCX properties. There i
 
 1. **Attrs** mirror office-open property keys verbatim, with `parseHTML` for clipboard-paste input only
 2. **`renderDocx` / `parseDocx`** for DOCX serialization (near-identity passes — attrs are the Options model)
-3. Anything visual belongs in the layout projection (`docx/src/layout/project.ts`) or the painter (`editor document/canvas/scene.ts`), never in the extension
+3. Anything visual belongs in the layout projection (`docx/src/layout/project/`) or the painter (`core/src/paint/`), never in the extension
 
 ```typescript
 export function renderDocx(node: JSONContent): ParagraphOptions {
@@ -112,10 +112,10 @@ export const Paragraph = BaseParagraph.extend({
 
 ### Layout & painting conventions
 
-Pagination lives in `@docen/layout` + `docx/src/layout/project.ts`; painting in `editor/document/canvas/`. The split:
+Pagination lives in `@docen/layout` + `docx/src/layout/project/`; painting in `@docen/core` (`painter.ts` + `paint/`). The split:
 
-- **Projection is pure** — `project.ts` reads Tiptap attrs (+ the style cascade) and emits `LayoutDoc` geometry. No Leafer types, no DOM.
-- **Painter is dumb** — `scene.ts` maps `LayoutDoc` to Leafer elements 1:1. It makes no layout decisions; if something renders at the wrong place, fix the projection or the engine, not the painter.
+- **Projection is pure** — the projection reads persisted attrs (+ the style cascade) and emits `LayoutDoc` geometry. No Leafer types, no DOM.
+- **Painter is dumb** — the painter maps `LayoutDoc` to Leafer elements 1:1. It makes no layout decisions; if something renders at the wrong place, fix the projection or the engine, not the painter.
 - **Page model** — fixed-height pages come from the engine (`@docen/layout`); Word stacking rules (docGrid pitch, snap-to-grid, widow/orphan, keepNext/keepLines, table band split with repeated headers, mid-row split under `cantSplit`) are engine semantics — change them there, once.
 
 ## Pull Request Checklist

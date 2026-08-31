@@ -73,8 +73,8 @@ parseHTMLBody(body, schema) → JSONContent             // text/html clipboard �
 
 - **Viewless Tiptap editor** (`element: null`): ProseMirror is the editing model only; the EditorView never mounts. Typing/IME goes through a textarea bridge (`document/canvas/edit-bridge.ts`), which also owns clipboard paste (see below).
 - **Layout engine** (`@docen/layout`): block/flow/text measurement with Word's stacking rules (docGrid line pitch, snap-to-grid, spacing collapse, table band split with repeated headers and mid-row `cantSplit` handling) produces a paginated `LayoutDoc` of fixed-height pages.
-- **Projection** (`docx/src/layout/project.ts`): Tiptap JSON → `LayoutDoc`. This is also where WMF/EMF+ metafiles (`wmf.ts`, `emf-plus.ts`, `wmf-dib.ts`) replay into structured drawing members — vector layers become scene members, not flat bitmaps.
-- **Painter** (`editor/document/canvas/scene.ts`): `LayoutDoc` → Leafer elements — the only place the scene is instantiated. `caret-map.ts` maps caret/selection between PM positions and canvas geometry; `stage.ts` owns the Leafer app and zoom.
+- **Projection** (`docx/src/layout/project/`): DocumentOptions → `LayoutDoc` (callers chain Tiptap JSON → `compileDocument` first). WMF/EMF+ metafiles replay into structured drawing members through `leafer-x-metafile` (`docx/src/layout/metafile-members.ts` adapts the members) — vector layers become scene members, not flat bitmaps.
+- **Painter** (`core/src/painter.ts` + `core/src/paint/`): `LayoutDoc` → Leafer elements — the only place the scene is instantiated. `caret-map.ts` maps caret/selection between PM positions and canvas geometry; `stage.ts` owns the Leafer app and zoom.
 
 **Fidelity target:** pixel parity with Word/WPS on real documents, verified page-by-page against PDF exports of the same files. The canvas pipeline (self-drawn layout + paint) is what makes mid-row table splits, vmerge across pages, and docGrid-exact line pitch possible — decoration/contenteditable approaches cannot.
 
@@ -97,11 +97,11 @@ packages/docx/src/ — engine + converters + layout projection
   style-cascade.ts  StylesOptions index/merge (basedOn chains) — shared by resolve/compile/measure
   extensions/     Custom Tiptap extensions (utils.ts, paste.ts, formatting-marks.ts, …)
   converters/     docx.ts (resolveDocument/compileDocument) · styles.ts (quickStyles, effectiveRunProps) · markdown.ts
-  layout/         project.ts (JSON → LayoutDoc) · wmf.ts / emf-plus.ts / wmf-dib.ts (metafile replay)
+  layout/         project/ (DocumentOptions → LayoutDoc projection, by domain) · metafile-members.ts (metafile replay adapter)
 
 packages/layout/src/ — pagination engine
   block/ flow/ text/   measurement domains
-  layout-doc.ts  the LayoutDoc types (rendering projection)
+  layout-doc/     the LayoutDoc types (rendering projection, by domain)
   font.ts        font metrics (incl. CJK)
 
 packages/editor/src/ — multi-editor host + add-ins
@@ -111,11 +111,11 @@ packages/editor/src/ — multi-editor host + add-ins
     components/   ribbon (fast-element) · workspace (title-bar/document-area/status-bar/task-pane/navigation-pane/find-replace/options-dialog/dialog) · context-menu
   document/       <docen-document>
     index.ts      The editor element (open/save/paste, format detection)
-    canvas/       stage.ts (Leafer app) · scene.ts (painter) · caret-map.ts (PM pos ↔ canvas geometry) · edit-bridge.ts (textarea + paste)
+    canvas/       stage.ts (Leafer app) · caret-map.ts (PM pos ↔ canvas geometry) · edit-bridge.ts (textarea + paste)
     addin.ts ribbon.ts commands.ts components/ utils/ extensions/ i18n.ts
   presentation.ts workbook.ts   (future editors — reuse host + add-ins)
 
-packages/core/src/       shared drawing/render helpers (geometry, style, image, export)
+packages/core/src/       the scene painter: painter.ts (orchestration) + paint/ (context/paragraph/drawing/image/table)
 packages/deduplicate/src/  document comparison (SimHash + Winnowing)
 ```
 
