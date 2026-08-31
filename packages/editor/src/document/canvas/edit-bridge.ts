@@ -20,7 +20,7 @@ import {
 import { Editor } from "@docen/docx/core";
 import type { FlowPage } from "@docen/layout";
 import { UndoRedo } from "@tiptap/extensions";
-import { joinBackward, joinForward, splitBlock } from "@tiptap/pm/commands";
+import { joinBackward, joinForward, selectAll, splitBlock } from "@tiptap/pm/commands";
 import { Fragment, Slice } from "@tiptap/pm/model";
 import { NodeSelection, TextSelection } from "@tiptap/pm/state";
 import { getMatchHighlights } from "prosemirror-search";
@@ -46,6 +46,27 @@ function lastGraphemeUnits(text: string): number {
 function firstGraphemeUnits(text: string): number {
   for (const { segment } of segmenter.segment(text)) return segment.length;
   return 0;
+}
+
+/** The code-unit cut of a word-delete backward from `offset` (Ctrl+Backspace):
+ *  skip the caret's preceding whitespace, then take the run of non-whitespace
+ *  up to the next boundary — Word's deleteWordLeft. */
+function wordUnitsBackward(text: string, offset: number): number {
+  let i = offset;
+  while (i > 0 && /\s/.test(text[i - 1]!)) i--;
+  const wordEnd = i;
+  while (i > 0 && !/\s/.test(text[i - 1]!)) i--;
+  return wordEnd - i;
+}
+
+/** The forward mirror of wordUnitsBackward (Ctrl+Delete). */
+function wordUnitsForward(text: string, offset: number): number {
+  const end = text.length;
+  let i = offset;
+  while (i < end && /\s/.test(text[i]!)) i++;
+  const wordStart = i;
+  while (i < end && !/\s/.test(text[i]!)) i++;
+  return i - wordStart;
 }
 
 /** A furniture edit story — the header/footer editing mode. One story at a
@@ -826,7 +847,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     });
   };
 
-  const backspace = (): void => {
+  const backspace = (word = false): void => {
     active().editor.commands.command(({ state, dispatch }) => {
       const { selection } = state;
       if (!selection.empty) {
@@ -836,7 +857,9 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       const $from = selection.$from;
       const text = $from.parent.textContent;
       if ($from.parentOffset > 0 && text) {
-        const cut = lastGraphemeUnits(text.slice(0, $from.parentOffset));
+        const cut = word
+          ? wordUnitsBackward(text, $from.parentOffset)
+          : lastGraphemeUnits(text.slice(0, $from.parentOffset));
         if (cut > 0) {
           dispatch?.(state.tr.delete($from.pos - cut, $from.pos));
           return true;
@@ -848,7 +871,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     });
   };
 
-  const deleteForward = (): void => {
+  const deleteForward = (word = false): void => {
     active().editor.commands.command(({ state, dispatch }) => {
       const { selection } = state;
       if (!selection.empty) {
@@ -859,13 +882,26 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       const text = $from.parent.textContent;
       const offset = $from.parentOffset;
       if (offset < text.length) {
-        const cut = firstGraphemeUnits(text.slice(offset));
+        const cut = word ? wordUnitsForward(text, offset) : firstGraphemeUnits(text.slice(offset));
         if (cut > 0) {
           dispatch?.(state.tr.delete($from.pos, $from.pos + cut));
           return true;
         }
       }
       return joinForward(state as never, dispatch);
+    });
+  };
+
+  /** Delete from the caret to a boundary target (delete-to-line-edge family:
+   *  the target is the same edge Home/End resolve to). */
+  const deleteTo = (toEnd: boolean): void => {
+    const state = active().editor.state;
+    const target = edgeTarget(state, state.selection.head, toEnd);
+    if (target == null || target === state.selection.head) return;
+    active().editor.commands.command(({ state: s, dispatch }) => {
+      const head = s.selection.head;
+      dispatch?.(s.tr.delete(Math.min(head, target), Math.max(head, target)));
+      return true;
     });
   };
 
@@ -920,13 +956,37 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
         });
         break;
       case "deleteContentBackward":
-      case "deleteWordBackward":
         backspace();
         break;
+      case "deleteWordBackward":
+        backspace(true);
+        break;
       case "deleteContentForward":
-      case "deleteWordForward":
         deleteForward();
         break;
+      case "deleteWordForward":
+        deleteForward(true);
+        break;
+      // Cmd/Ctrl+Backspace-adjacent line deletes (macOS reports these as soft
+      // line deletes; Windows IMEs occasionally emit the hard variants). The
+      // target is the wrapped line's edge — the same edge Home/End resolve to.
+      case "deleteSoftLineBackward":
+      case "deleteHardLineBackward":
+        deleteTo(false);
+        break;
+      case "deleteSoftLineForward":
+      case "deleteHardLineForward":
+        deleteTo(true);
+        break;
+      // Spell-check corrections / autofill: the replacement text rides in
+      // `data` or the dataTransfer (data is null on Chrome's context-menu
+      // correction). Replacing a non-empty selection; at an empty caret the
+      // target word is browser-internal, so fall back to plain insertion.
+      case "insertReplacementText": {
+        const text = event.data ?? event.dataTransfer?.getData("text/plain");
+        if (text) insertText(text);
+        break;
+      }
       default:
         break;
     }
@@ -997,6 +1057,15 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
         active().editor.commands.redo();
         return;
       }
+      // Select all — without this the browser default selects the 1px
+      // textarea's (empty) contents and the press is lost.
+      if (key === "a") {
+        event.preventDefault();
+        active().editor.commands.command(({ state, dispatch }) =>
+          selectAll(state as never, dispatch),
+        );
+        return;
+      }
       // Viewless editors have no EditorView, so nothing dispatches Tiptap's
       // per-extension keyboard shortcuts — match the shared table here (the
       // DocenKeymap extension serves the same table on a DOM route).
@@ -1015,11 +1084,11 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     switch (event.key) {
       case "ArrowLeft":
         event.preventDefault();
-        apply(hStep(editor.state, head(), -1), extend);
+        apply(hStep(active().editor.state, head(), -1), extend);
         break;
       case "ArrowRight":
         event.preventDefault();
-        apply(hStep(editor.state, head(), 1), extend);
+        apply(hStep(active().editor.state, head(), 1), extend);
         break;
       case "ArrowUp":
         event.preventDefault();
@@ -1044,10 +1113,13 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
           leaveStory();
         }
         break;
-      // Tab / Shift+Tab on list paragraphs adjusts the nesting level (Word);
-      // the browser keeps its default Tab behavior everywhere else. One
-      // transaction for the whole selection (a single undo step).
+      // Tab / Shift+Tab on list paragraphs adjusts the nesting level (Word).
+      // Everywhere else the press is still claimed: the browser default would
+      // move focus off the textarea (the caret overlay stays, but every
+      // following keystroke lands elsewhere — input silently dead until the
+      // next click). Plain-paragraph tab stops are future work (w:tab).
       case "Tab": {
+        event.preventDefault();
         const { from, to } = active().editor.state.selection;
         const patches: { pos: number; patch: Record<string, unknown> }[] = [];
         active().editor.state.doc.nodesBetween(from, to, (node, pos) => {
@@ -1068,7 +1140,6 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
           return true;
         });
         if (patches.length > 0) {
-          event.preventDefault();
           active().editor.commands.command(({ state, dispatch }) => {
             const tr = state.tr;
             for (const { pos, patch } of patches) {
@@ -1098,6 +1169,13 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     const data = ta.value;
     ta.value = "";
     if (data) insertText(data);
+  };
+  // A cancelled composition (IME dismissed, focus stolen mid-composition —
+  // paths where some browsers never fire compositionend) still must clear the
+  // flag, or every input handler above stays gated off permanently.
+  const onCompositionCancel = (): void => {
+    composing = false;
+    ta.value = "";
   };
 
   /** Insert pasted JSON at the caret, dropping stray empty text nodes the
@@ -1175,6 +1253,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
   ta.addEventListener("keydown", onKeyDown);
   ta.addEventListener("compositionstart", onCompositionStart);
   ta.addEventListener("compositionend", onCompositionEnd);
+  ta.addEventListener("compositioncancel", onCompositionCancel);
   ta.addEventListener("paste", onPaste);
   ta.addEventListener("copy", onCopy);
   ta.addEventListener("cut", onCut);
