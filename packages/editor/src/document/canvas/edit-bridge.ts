@@ -482,6 +482,48 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     });
   };
 
+  // Word's multi-click selection: the second click takes the word under the
+  // caret, the third the whole paragraph. Word boundaries approximate as
+  // same-class runs — Latin/digit words, CJK ideograph runs, whitespace runs;
+  // punctuation stands alone (Word picks the single mark).
+  const charClass = (ch: string): number =>
+    /\s/.test(ch) ? 0 : /[㐀-鿿豈-﫿]/.test(ch) ? 1 : /[0-9A-Za-z]/.test(ch) ? 2 : 3;
+
+  const setSelClick = (pos: number, clicks: number): void => {
+    const { doc } = active().editor.state;
+    if (clicks >= 2) {
+      const $pos = doc.resolve(pos);
+      const po = $pos.parentOffset;
+      const base = pos - po;
+      if (clicks >= 3) {
+        setSel(base + $pos.parent.content.size, base);
+        return;
+      }
+      // Flat text with one placeholder per inline leaf keeps the string index
+      // aligned with the parent's content offsets (text nodes contribute
+      // their length, atom nodes their nodeSize of 1).
+      const flat = $pos.parent.textBetween(0, $pos.parent.content.size, undefined, "￼");
+      if (flat.length === $pos.parent.content.size) {
+        const anchor = flat[po] ?? flat[po - 1];
+        if (anchor != null) {
+          const cls = charClass(anchor);
+          let from = po;
+          let to = po;
+          if (cls === 3) {
+            to = Math.min(po + 1, flat.length);
+            from = to - 1;
+          } else {
+            while (from > 0 && charClass(flat[from - 1]!) === cls) from--;
+            while (to < flat.length && charClass(flat[to]!) === cls) to++;
+          }
+          setSel(base + to, base + from);
+          return;
+        }
+      }
+    }
+    setSel(pos);
+  };
+
   /** The selected drawing — Word's picture selection. The hit box carries
    *  the laid host paragraph + its drawing index (how the PM node was found);
    *  after a re-render the box re-resolves from the stage table, and a
@@ -647,12 +689,16 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
   // Word's entry click: a DOUBLE click on a furniture band opens its story
   // (single clicks there are inert); while a story is active, clicks inside
   // its band position the story caret and any other click closes it.
-  let lastClick: { t: number; x: number; y: number } | null = null;
-  const isDoubleClick = (event: MouseEvent): boolean =>
-    lastClick != null &&
-    event.timeStamp - lastClick.t < 500 &&
-    Math.hypot(event.clientX - lastClick.x, event.clientY - lastClick.y) < 4;
-
+  let lastClick: { t: number; x: number; y: number; count: number } | null = null;
+  const clickCount = (event: MouseEvent): number => {
+    const again =
+      lastClick != null &&
+      event.timeStamp - lastClick.t < 500 &&
+      Math.hypot(event.clientX - lastClick.x, event.clientY - lastClick.y) < 4;
+    const count = again ? lastClick!.count + 1 : 1;
+    lastClick = { t: event.timeStamp, x: event.clientX, y: event.clientY, count };
+    return count;
+  };
   const takeFocus = (event: MouseEvent): void => {
     // preventDefault keeps the click from blurring on mousedown; the caret
     // placement below is the real focus move.
@@ -669,8 +715,8 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     const hostRect = opts.host.getBoundingClientRect();
     ta.style.left = `${event.clientX - hostRect.left}px`;
     ta.style.top = `${event.clientY - hostRect.top}px`;
-    const dbl = isDoubleClick(event);
-    lastClick = { t: event.timeStamp, x: event.clientX, y: event.clientY };
+    const clicks = clickCount(event);
+    const dbl = clicks >= 2;
     const storyCfg = opts.story;
     const hit = hitPage(event.clientX, event.clientY);
     if (storyCfg && hit) {
@@ -688,19 +734,27 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
         if (own && hit.page === story.anchorPage) {
           const pos = posAtClient(event.clientX, event.clientY);
           if (pos != null) {
-            setSel(pos);
-            dragAnchor = pos;
-            dragStart = { x: event.clientX, y: event.clientY };
-            dragMoved = false;
+            if (clicks >= 2) {
+              setSelClick(pos, clicks);
+            } else {
+              setSel(pos);
+              dragAnchor = pos;
+              dragStart = { x: event.clientX, y: event.clientY };
+              dragMoved = false;
+            }
           }
         } else {
           leaveStory();
           const pos = posAtClient(event.clientX, event.clientY);
           if (pos != null) {
-            setSel(pos);
-            dragAnchor = pos;
-            dragStart = { x: event.clientX, y: event.clientY };
-            dragMoved = false;
+            if (clicks >= 2) {
+              setSelClick(pos, clicks);
+            } else {
+              setSel(pos);
+              dragAnchor = pos;
+              dragStart = { x: event.clientX, y: event.clientY };
+              dragMoved = false;
+            }
           }
         }
         ta.focus();
@@ -743,10 +797,14 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     placeDrawingSel();
     const pos = posAtClient(event.clientX, event.clientY);
     if (pos != null) {
-      setSel(pos);
-      dragAnchor = pos;
-      dragStart = { x: event.clientX, y: event.clientY };
-      dragMoved = false;
+      if (clicks >= 2) {
+        setSelClick(pos, clicks);
+      } else {
+        setSel(pos);
+        dragAnchor = pos;
+        dragStart = { x: event.clientX, y: event.clientY };
+        dragMoved = false;
+      }
     }
     ta.focus();
     ta.value = "";
