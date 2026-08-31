@@ -110,7 +110,7 @@ packages/editor/src/ — multi-editor host + add-ins
     addin/        DocenHost/DocenAddin types · AddinHost base · defineAddin
     components/   ribbon (fast-element) · workspace (title-bar/document-area/status-bar/task-pane/navigation-pane/find-replace/options-dialog/dialog) · context-menu
   document/       <docen-document>
-    index.ts      The editor element (open/save/paste, format detection)
+    index.ts      The editor element (open/save/paste) — chrome/page-setup/watermark/format tables in sibling modules
     canvas/       stage.ts (Leafer app) · caret-map.ts (PM pos ↔ canvas geometry) · edit-bridge.ts (textarea + paste)
     addin.ts ribbon.ts commands.ts components/ utils/ extensions/ i18n.ts
   presentation.ts workbook.ts   (future editors — reuse host + add-ins)
