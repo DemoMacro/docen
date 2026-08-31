@@ -5,11 +5,11 @@ Thanks for contributing! This guide covers the **workflow** for contributing and
 ## Development Setup
 
 ```bash
-pnpm install                          # install dependencies
-pnpm build                            # build all packages
-cd packages/<pkg> && pnpm build       # build one package
-cd packages/<pkg> && pnpm exec vp test run   # test one package
-vp check                              # lint & format
+pnpm install                                # install dependencies
+pnpm build                                  # build all packages
+cd packages/<pkg> && pnpm build             # build one package
+cd packages/<pkg> && pnpm exec vp test run  # test one package
+pnpm exec vp check                          # lint, format & type check
 ```
 
 Prerequisites: Node.js 18+, pnpm 9+.
@@ -19,25 +19,12 @@ Prerequisites: Node.js 18+, pnpm 9+.
 1. **Fork & clone** — fork on GitHub, clone your fork, add `upstream` (`git remote add upstream https://github.com/DemoMacro/docen.git`).
 2. **Branch** — branch off `main` (`feat/...`, `fix:...`, `docs/...`, …).
 3. **Code** — follow the standards below; match existing style.
-4. **Verify** — `vp check` passes; `pnpm build` + tests succeed for the changed package.
-5. **Commit** — use [conventional commits](https://www.conventionalcommits.org/): `feat:`, `fix:`, `docs:`, `refactor:`, `perf:`, `test:`, `build:`, `ci:`, `chore:`, `revert:`.
-6. **Push & PR** — push to your fork and open a PR against `upstream/main`.
+4. **Commit** — use [conventional commits](https://www.conventionalcommits.org/): `feat:`, `fix:`, `docs:`, `refactor:`, `perf:`, `test:`, `build:`, `ci:`, `chore:`, `revert:`.
+5. **Push & PR** — push to your fork and open a PR against `upstream/main` (checklist below).
 
 ## Project Structure
 
-```
-packages/
-  docen/         docen              (all-in-one aggregate entry — re-exports @docen/docx + @docen/editor)
-  vue/           @docen/vue         (Vue 3 adapter — <DocenDocument> component: v-model + v-slot editor)
-  editor/        @docen/editor      (multi-editor host + add-ins + canvas stage/painter → <docen-document>)
-  docx/          @docen/docx        (Tiptap DOCX engine + converters + layout projection; no UI)
-  layout/        @docen/layout      (pagination engine — measurement → paginated LayoutDoc)
-  core/          @docen/core        (the LeaferJS scene painter: LayoutDoc → elements)
-  leafer-x-metafile/  leafer-x-metafile  (zero-dependency WMF/EMF+ replay → neutral members; ecosystem-bound)
-  deduplicate/   @docen/deduplicate (document comparison for the compare feature)
-```
-
-See CLAUDE.md → Package Layout for the file-level tree.
+The package map and the file-level tree live in [CLAUDE.md](./CLAUDE.md) → Project / Package Layout — one source, kept current there.
 
 ## Coding Standards
 
@@ -112,11 +99,11 @@ export const Paragraph = BaseParagraph.extend({
 
 ### Layout & painting conventions
 
-Pagination lives in `@docen/layout` + `docx/src/layout/project/`; painting in `@docen/core` (`painter.ts` + `paint/`). The split:
+The rendering pipeline (projection → layout → paint) is described in [CLAUDE.md](./CLAUDE.md) → Architecture: Canvas Rendering. The contribution rules that follow from it:
 
-- **Projection is pure** — the projection reads persisted attrs (+ the style cascade) and emits `LayoutDoc` geometry. No Leafer types, no DOM.
-- **Painter is dumb** — the painter maps `LayoutDoc` to Leafer elements 1:1. It makes no layout decisions; if something renders at the wrong place, fix the projection or the engine, not the painter.
-- **Page model** — fixed-height pages come from the engine (`@docen/layout`); Word stacking rules (docGrid pitch, snap-to-grid, widow/orphan, keepNext/keepLines, table band split with repeated headers, mid-row split under `cantSplit`) are engine semantics — change them there, once.
+- **Projection is pure** — reads persisted attrs (+ the style cascade), emits `LayoutDoc` geometry. No Leafer types, no DOM.
+- **Painter is dumb** — maps `LayoutDoc` to Leafer elements 1:1. If something renders at the wrong place, fix the projection or the engine, not the painter.
+- **Page model** — fixed-height pages and the Word stacking rules are engine semantics (`@docen/layout`) — change them there, once.
 
 ## Pull Request Checklist
 

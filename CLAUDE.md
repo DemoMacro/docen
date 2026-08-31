@@ -1,5 +1,3 @@
-You are a senior TypeScript developer working on **docen**.
-
 > Coding standards, design patterns, and the contribution workflow live in [CONTRIBUTING.md](./CONTRIBUTING.md). This file is the architectural context an agent must understand before changing code. Read both.
 
 ## Project
@@ -18,21 +16,11 @@ You are a senior TypeScript developer working on **docen**.
 
 `pptx` and `xlsx` editors are planned — not yet implemented (`packages/editor/src/` has `presentation.ts`/`workbook.ts` stubs). They will reuse the same host + add-in system in `ui/`, swapping only the engine.
 
-## Tech Stack
-
-| Package | Engine                               | Parse/Generate    | Role                                                                                 |
-| ------- | ------------------------------------ | ----------------- | ------------------------------------------------------------------------------------ |
-| editor  | LeaferJS canvas + Tiptap + Fluent UI | @office-open/docx | Multi-editor host + add-ins + canvas stage/painter/caret-map → `<docen-document>`    |
-| docx    | Tiptap (ProseMirror, viewless)       | @office-open/docx | DOCX engine: schema + converters + extensions + layout projection (JSON → LayoutDoc) |
-| layout  | —                                    | —                 | Pagination engine: measurement → paginated LayoutDoc                                 |
-
 ## Build
 
-- `pnpm install` · `pnpm build` (all) or `cd packages/<pkg> && pnpm build` (one) · `vp check` (lint, also via pre-commit hook)
-- Build tool: `vp pack` (vite-plus)
-- Test: `cd packages/<pkg> && pnpm exec vp test run`
+Commands live in [CONTRIBUTING.md](./CONTRIBUTING.md) → Development Setup. The cross-package rule an agent must not miss:
 
-> editor imports `@docen/docx` by package name (→ `dist`), so **docx src changes need `pnpm --filter @docen/docx build`** before they show in the editor demo. editor/src is HMR'd — no build needed.
+> editor imports `@docen/docx` by package name (→ `dist`), so **docx src changes need `pnpm --filter @docen/docx build`** before they show in the editor demo. editor/src is HMR'd — no build needed. After deleting or moving files, clear the vite dep cache (`node_modules/.vite` in the root and `packages/editor`) or the demo keeps loading ghosts.
 
 ## Data Model
 
