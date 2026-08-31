@@ -720,31 +720,39 @@ export class CanvasStage {
     flow: ProjectedFlowBox,
     furniture: ProjectedPageFurniture | undefined,
   ): void {
-    ctx.layer = "body";
     const storyFlow = flow.linePitchPx ? { ...flow, linePitchPx: undefined } : flow;
-    const storyCtx: PaintContext = { ...ctx, flow: storyFlow };
     const section = this.sectionAt(ctx.pageIndex);
     const header = section.furnitureLaid?.header[slot] ?? section.furnitureLaid?.header[0];
-    if (header) {
-      paintFurnitureStack(
-        tree,
-        header.stack,
-        flow.contentLeftPx,
-        furniture?.headerDistancePx ?? 48,
-        storyCtx,
-      );
-    }
     const footer = section.furnitureLaid?.footer[slot] ?? section.furnitureLaid?.footer[0];
-    if (footer) {
-      const bottom = flow.pageHeightPx - (furniture?.footerDistancePx ?? 48);
-      paintFurnitureStack(
-        tree,
-        footer.stack,
-        flow.contentLeftPx,
-        bottom - footer.heightPx,
-        storyCtx,
-      );
-    }
+    const paintSlots = (layer: PaintContext["layer"]): void => {
+      const storyCtx: PaintContext = { ...ctx, flow: storyFlow, layer };
+      if (header) {
+        paintFurnitureStack(
+          tree,
+          header.stack,
+          flow.contentLeftPx,
+          furniture?.headerDistancePx ?? 48,
+          storyCtx,
+        );
+      }
+      if (footer) {
+        const bottom = flow.pageHeightPx - (furniture?.footerDistancePx ?? 48);
+        paintFurnitureStack(
+          tree,
+          footer.stack,
+          flow.contentLeftPx,
+          bottom - footer.heightPx,
+          storyCtx,
+        );
+      }
+    };
+    // Furniture paragraphs carry anchored drawings through the same
+    // projection as body paragraphs — Word's header-anchored watermarks are
+    // behind-doc shapes. Paint those first, beneath the body's own behind
+    // floats and just above the page background; the body pass paints the
+    // story text and front drawings as before.
+    paintSlots("behind");
+    paintSlots("body");
   }
 
   /** The dashed boundary of the story under edit plus its gray tag — a
