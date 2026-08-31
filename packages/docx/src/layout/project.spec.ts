@@ -1112,10 +1112,15 @@ describe("projectDocumentOptions drawings", () => {
     if (band?.kind !== "picture" || typeof band.src !== "string") {
       throw new Error("expected picture member");
     }
-    // The WPS gradient (stop average #ac5256) flattens; the def drops.
+    // The WPS gradient survives with its stops — only the NCName-invalid id
+    // is renamed (MS Office renders these as true gradients, and the browser
+    // can too once the url() reference resolves).
     const decoded = atob(band.src.split(",")[1] ?? "");
-    expect(decoded).toContain("#ac5256");
-    expect(decoded).not.toContain("linearGradient");
+    expect(decoded).toContain("linearGradient");
+    expect(decoded).toContain('id="wpsGradient0"');
+    expect(decoded).toContain("url(#wpsGradient0)");
+    expect(decoded).toContain("#db8c90");
+    expect(decoded).not.toContain("{");
     if (stripes?.kind !== "picture" || !stripes.crop) throw new Error("expected stripes member");
     const crop = stripes.crop;
     expect(crop.left).toBeCloseTo(0.12632, 5);

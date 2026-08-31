@@ -131,37 +131,22 @@ const MIME_BY_TYPE: Record<string, string> = {
 
 /** WPS-authored svgBlip art names its gradients with NCName-invalid ids
  *  (`wps{guid}@#c1@#c2`): a strict CSS parser cannot resolve those paint
- *  references, and the host renderer falls back to the average of the
- *  gradient's stop colors. Mirror that fallback so WPS-exported art matches
- *  MS Office output; well-formed gradients (valid ids) pass through. */
-function flattenBrokenSvgGradients(svg: string): string {
-  const averages = new Map<string, string>();
-  for (const m of svg.matchAll(
-    /<linearGradient\b[^>]*\bid="([^"]+)"[^>]*>([\s\S]*?)<\/linearGradient>/g,
-  )) {
-    const [whole, id, body] = m;
-    if (!/[{}@#]/.test(id)) continue;
-    const stops = [...body.matchAll(/stop-color\s*[:=]\s*"?#([0-9a-fA-F]{6})"?/g)].map((s) => s[1]);
-    if (stops.length === 0) continue;
-    const sum = [0, 0, 0];
-    for (const h of stops) {
-      sum[0] += parseInt(h.slice(0, 2), 16);
-      sum[1] += parseInt(h.slice(2, 4), 16);
-      sum[2] += parseInt(h.slice(4, 6), 16);
-    }
-    averages.set(
-      id,
-      `#${sum
-        .map((v) =>
-          Math.round(v / stops.length)
-            .toString(16)
-            .padStart(2, "0"),
-        )
-        .join("")}`,
-    );
-    svg = svg.replace(whole, "");
+ *  references. The gradient def itself is well-formed (real stop children),
+ *  and MS Office renders these as true gradients — its PDF export shows the
+ *  full ramp — so rename each invalid id (def + url() refs) to a valid one
+ *  instead of degrading the art; well-formed ids pass through untouched. */
+function sanitizeSvgGradientIds(svg: string): string {
+  const renames = new Map<string, string>();
+  let i = 0;
+  for (const m of svg.matchAll(/<linearGradient\b[^>]*\bid="([^"]+)"/g)) {
+    const id = m[1]!;
+    if (!/[{}@#]/.test(id) || renames.has(id)) continue;
+    renames.set(id, `wpsGradient${i++}`);
   }
-  for (const [id, color] of averages) svg = svg.split(`url(#${id})`).join(color);
+  for (const [oldId, newId] of renames) {
+    svg = svg.split(`id="${oldId}"`).join(`id="${newId}"`);
+    svg = svg.split(`url(#${oldId})`).join(`url(#${newId})`);
+  }
   return svg;
 }
 
@@ -182,13 +167,14 @@ function base64Of(bytes: Uint8Array): string {
 const encodedSrcs = new WeakMap<Uint8Array, string>();
 
 /** Raster bytes → data URL, memoized per bytes identity. SVG bytes first get
- *  their broken gradient defs flattened (browser loaders choke on them). */
+ *  their WPS-invalid gradient ids renamed (browser loaders cannot resolve
+ *  the originals). */
 function encodedDataUrl(mime: string, data: Uint8Array): string {
   const hit = encodedSrcs.get(data);
   if (hit) return hit;
   const body =
     mime === "image/svg+xml"
-      ? new TextEncoder().encode(flattenBrokenSvgGradients(new TextDecoder().decode(data)))
+      ? new TextEncoder().encode(sanitizeSvgGradientIds(new TextDecoder().decode(data)))
       : data;
   const url = `data:${mime};base64,${base64Of(body)}`;
   encodedSrcs.set(data, url);
