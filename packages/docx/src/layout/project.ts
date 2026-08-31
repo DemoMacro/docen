@@ -1053,6 +1053,8 @@ function wpsMemberOf(
   const line = outlineOf(data.outline);
   const preset = isRecord(data.presetGeometry) ? str(data.presetGeometry.preset) : undefined;
   const children = Array.isArray(data.children) ? data.children : [];
+  // The shape's own a:xfrm @rot (degrees) — Word's diagonal watermark.
+  const rotation = isRecord(data.transformation) ? num(data.transformation.rotation) : undefined;
   if (children.length > 0) {
     const bodyPr = isRecord(data.bodyProperties) ? data.bodyProperties : {};
     // Insets are EMU or universal measure; BODY_INSET_EMU is the Word
@@ -1072,6 +1074,7 @@ function wpsMemberOf(
       y,
       width,
       height,
+      ...(rotation != null && rotation !== 0 ? { rotation } : {}),
       // The shape's own spPr paint — a txbx box draws under its text even
       // when the body is empty (Word's plain text box). The preset travels
       // with it: a text-carrying ellipse paints as an ellipse.

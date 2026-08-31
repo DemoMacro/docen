@@ -367,6 +367,19 @@ const pageBorderItems = (): string =>
     { text: opt("page-border-dashed"), value: "dashed" },
   ]);
 
+/** The Watermark split's drop-down: Word's preset gallery plus Remove. */
+const watermarkItems = (): string =>
+  JSON.stringify([
+    { text: opt("watermark-confidential-1"), value: "confidential-1" },
+    { text: opt("watermark-confidential-2"), value: "confidential-2" },
+    { text: opt("watermark-confidential-3"), value: "confidential-3" },
+    { text: opt("watermark-urgent"), value: "urgent" },
+    { text: opt("watermark-asap"), value: "asap" },
+    { text: opt("watermark-draft"), value: "draft" },
+    { text: opt("watermark-sample"), value: "sample" },
+    { text: opt("watermark-remove"), value: "remove" },
+  ]);
+
 /** The Header/Footer split's drop-down: edit (the split's main action),
  *  remove, and the slot-visibility flags. Static seed only — the host
  *  re-stamps the items with live `checked` flags on every transaction
@@ -861,7 +874,7 @@ const designTab = (): RibbonTab =>
       "themes-dialog",
     ),
     group("page-background", [
-      btn("watermark", "watermark", { size: "large" }),
+      split("watermark", "watermark", parsedItems(watermarkItems()), { size: "large" }),
       {
         type: "color-picker",
         icon: "page-color",

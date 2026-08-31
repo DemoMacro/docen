@@ -92,6 +92,80 @@ const escapeHtml = (s: string): string =>
     c === "&" ? "&amp;" : c === "<" ? "&lt;" : c === ">" ? "&gt;" : c === '"' ? "&quot;" : "&#39;",
   );
 
+/** Word's watermark shape name — how Remove Watermark finds the shape again
+ *  (Word's own galleries stamp PowerPlusWaterMarkObject* / WordPictureWatermark
+ *  on the header shape). */
+const WATERMARK_NAME = "WordPictureWatermark";
+
+/** The gallery presets: Word's diagonal silver text watermarks. Box 7.5" x
+ *  1.6" centered on the page, text 96 pt; the diagonal ones rotate -45°
+ *  about the box center. The text itself is a translation key — Word's
+ *  presets spell CONFIDENTIAL/DRAFT in English locales, 机密/草稿 in Chinese. */
+const WATERMARK_PRESETS: Record<string, { textKey: string; color: string; rotation: number }> = {
+  "confidential-1": { textKey: "watermark.text-confidential", color: "C0C0C0", rotation: -45 },
+  "confidential-2": { textKey: "watermark.text-confidential", color: "C0C0C0", rotation: 0 },
+  "confidential-3": { textKey: "watermark.text-confidential", color: "C00000", rotation: -45 },
+  urgent: { textKey: "watermark.text-urgent", color: "C0C0C0", rotation: -45 },
+  asap: { textKey: "watermark.text-asap", color: "C0C0C0", rotation: -45 },
+  draft: { textKey: "watermark.text-draft", color: "C0C0C0", rotation: -45 },
+  sample: { textKey: "watermark.text-sample", color: "C0C0C0", rotation: -45 },
+};
+
+/** One preset's header paragraph: the watermark shape alone on its line. */
+function watermarkPara(spec: { textKey: string; color: string; rotation: number }): JSONContent {
+  return {
+    type: "paragraph",
+    content: [
+      {
+        type: "wpsShape",
+        attrs: {
+          wpsShape: {
+            name: WATERMARK_NAME,
+            transformation: { width: 6858000, height: 1463040, rotation: spec.rotation },
+            floating: {
+              horizontalPosition: { relative: "page", align: "center" },
+              verticalPosition: { relative: "page", align: "center" },
+              wrap: { type: "none" },
+              behindDocument: true,
+              allowOverlap: true,
+            },
+            fill: { type: "none" },
+            outline: { type: "none" },
+          },
+        },
+        content: [
+          {
+            type: "paragraph",
+            attrs: { alignment: "center" },
+            content: [
+              {
+                type: "text",
+                text: t(spec.textKey),
+                marks: [{ type: "textStyle", attrs: { color: spec.color, size: 96 } }],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+}
+
+/** A header paragraph with its watermark shape stripped (null when nothing
+ *  but the watermark rode the paragraph). */
+function stripWatermarkPara(para: JSONContent | undefined): JSONContent | null {
+  if (!para || para.type !== "paragraph") return para ?? null;
+  const content = (para.content ?? []).filter(
+    (child) =>
+      !(
+        child.type === "wpsShape" &&
+        (child.attrs as { wpsShape?: { name?: string } })?.wpsShape?.name === WATERMARK_NAME
+      ),
+  );
+  if (content.length === 0 && (para.content ?? []).length > 0) return null;
+  return { ...para, content };
+}
+
 /** Detect a document's format from its filename + MIME for open(). Extension
  *  first (the picker filters on it), MIME as a fallback for platforms that fill
  *  it in. Throws on an unrecognized type so the caller surfaces the error
@@ -165,9 +239,11 @@ const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   "insert-footnote",
   // Page Color writes the doc-level w:background (doc.attrs.background) from
   // the color-picker's palette value. Page Borders stamps a w:pgBorders
-  // preset (none/box/shadow/double/dashed) on the current section.
+  // preset (none/box/shadow/double/dashed) on the current section. Watermark
+  // stamps/removes the preset header shape (every slot, behind-doc).
   "page-color",
   "page-border",
+  "watermark",
   // Link prompts for an address and marks the selection (Word's Insert Link);
   // the context menu's Remove Hyperlink unsets the mark over the clicked link.
   "link",
@@ -2723,6 +2799,46 @@ class DocenDocument extends AddinHost<Editor> {
     editor.view.dispatch(editor.state.tr.setDocAttribute("background", background));
   }
 
+  /** Design → Watermark presets (Word's gallery): one diagonal silver text
+   *  shape stamped into every header slot — Word's watermark IS a
+   *  behind-document, page-centered shape anchored in the header, so it
+   *  repeats on every page of the slot. The shape carries Word's watermark
+   *  name ("WordPictureWatermark"), which is also how Remove finds it. */
+  #setWatermark(preset?: string): void {
+    const editor = this.editor;
+    if (!editor) return;
+    const tr = editor.state.tr;
+    const headers = (editor.state.doc.attrs.sectionHeaders ?? {}) as Record<
+      string,
+      JSONContent[] | undefined
+    >;
+    // Drop any existing watermark shape first — switching presets replaces,
+    // Word's re-insert does the same.
+    const stripped: Record<string, JSONContent[]> = {};
+    for (const [slot, paras] of Object.entries(headers)) {
+      stripped[slot] = paras?.map(stripWatermarkPara).filter((p) => p != null) ?? [];
+    }
+    if (preset && preset !== "remove") {
+      const spec = WATERMARK_PRESETS[preset];
+      if (spec) {
+        for (const slot of Object.keys(stripped)) {
+          stripped[slot]!.push(watermarkPara(spec));
+        }
+        // Slots the document never carried still get the watermark (Word
+        // stamps every header part); a slot with no paragraphs gets its strut.
+        for (const slot of ["default", "first", "even"]) {
+          if (!stripped[slot]) stripped[slot] = [watermarkPara(spec)];
+        }
+      }
+    }
+    // An all-empty sectionHeaders is the no-headers state (Word's Remove
+    // Watermark leaves a blank header behind; an empty attrs object is the
+    // cleaner equivalent here and drops the furniture strut).
+    const anyContent = Object.values(stripped).some((paras) => paras.length > 0);
+    tr.setDocAttribute("sectionHeaders", anyContent ? stripped : {});
+    editor.view.dispatch(tr);
+  }
+
   /** Design → Page Borders presets — stamp w:pgBorders on the current
    *  section (Word's Borders and Shading gallery): none clears it; box is a
    *  plain rule; shadow thickens the bottom/right edges; double and dashed
@@ -2960,6 +3076,12 @@ class DocenDocument extends AddinHost<Editor> {
     }
     if (name === "page-border") {
       this.#setPageBorders(value);
+      return;
+    }
+    // Watermark gallery — a preset id stamps the header shape, "remove"
+    // strips it (Word's Design → Watermark split button).
+    if (name === "watermark") {
+      this.#setWatermark(typeof value === "string" ? value : undefined);
       return;
     }
     // Link — prompt for an address and mark the selection (or insert fresh

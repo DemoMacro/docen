@@ -811,14 +811,22 @@ function paintMembers(
         // a group keeps the offsets in text space and carries the angle. A
         // clockwise 90° (vertical punctuation) swings the box left of the
         // origin, so the group shifts right by the box width and the ink
-        // anchors the cell's top-right corner.
+        // anchors the cell's top-right corner. Any other angle (Word's
+        // diagonal watermark) pivots about the box CENTER — the anchor box
+        // was laid centered on the page, so the rotated box stays centered.
+        const pivot = m.rotation === 90;
         const group = new Group({
-          x: m.rotation === 90 ? mx + m.width : mx,
-          y: my,
+          x: pivot ? mx + m.width : mx + m.width / 2,
+          y: pivot ? my : my + m.height / 2,
           rotation: m.rotation,
         });
+        const dx = pivot ? 0 : -m.width / 2;
+        const dy = pivot ? 0 : -m.height / 2;
         for (const item of laid.stack) {
-          paintBlock(group, item.block, left, oy + item.yPx, mctx, { width: inner, inCell: true });
+          paintBlock(group, item.block, left + dx, oy + dy + item.yPx, mctx, {
+            width: inner,
+            inCell: true,
+          });
         }
         tree.add(group);
       } else {
