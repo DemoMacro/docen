@@ -231,7 +231,17 @@ export class CaretMap {
         // the textblocks in between (floating-table cells, passthrough runs)
         // are never laid, so skip them unmapped.
         let gap = 0;
-        for (let k = 1; k <= 6 && j + k < tbs.length; k++) {
+        // An EMPTY laid text never gap-skips: "" matches any empty textblock
+        // ahead, so the "match" is noise and the skipped range swallows real
+        // paragraphs (it must fall through to the anchor resync below). A
+        // unique non-empty text pairs with its textblock however far ahead it
+        // sits (a floating table parks dozens of never-laid cell textblocks
+        // between two laid paragraphs); a text laying more than once (TOC
+        // entry + its heading) keeps the short window — the park path below
+        // owns those copies.
+        const reach =
+          here === "" ? 0 : (laidRuns.get(here)?.length ?? 0) === 1 ? tbs.length - j - 1 : 6;
+        for (let k = 1; k <= reach; k++) {
           if (here === norm(tbs[j + k]!.node.textContent)) {
             gap = k;
             break;

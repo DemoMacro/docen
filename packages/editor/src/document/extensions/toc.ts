@@ -30,11 +30,22 @@ export type PageOf = (pos: number) => number | null | undefined;
  *  doc carries no TOC1-3 style definitions. */
 const TOC_INDENT_TW = 220;
 
-/** Entry paragraphs for the headings the default TOC covers (levels 1-3). */
+/** The \o switch's heading-level window ("1-3"). An absent or malformed
+ *  range falls back to Word's default 1-3. */
+function headingRangeOf(range: unknown): { min: number; max: number } {
+  const m = /^(\d+)-(\d+)$/.exec(typeof range === "string" ? range : "");
+  if (!m) return { min: 1, max: 3 };
+  const min = Number(m[1]);
+  const max = Number(m[2]);
+  return min >= 1 && max >= min && max <= 9 ? { min, max } : { min: 1, max: 3 };
+}
+
+/** Entry paragraphs for the headings the TOC's level window covers. */
 function buildTocEntries(
   doc: PMNode,
   pageOf?: PageOf,
   tabPositionTw = 9350,
+  levels: { min: number; max: number } = { min: 1, max: 3 },
 ): { type: string; attrs?: Record<string, unknown>; content: unknown[] }[] {
   const styles = (doc.attrs as { styles?: StylesOptions }).styles;
   const out: { type: string; attrs?: Record<string, unknown>; content: unknown[] }[] = [];
@@ -48,7 +59,8 @@ function buildTocEntries(
       },
       styles,
     );
-    if (level == null || level > 3 || node.textContent.length === 0) return true;
+    if (level == null || level < levels.min || level > levels.max || node.textContent.length === 0)
+      return true;
     const page = pageOf?.(pos + 1);
     out.push({
       type: "paragraph",
@@ -113,15 +125,18 @@ export const TocCommands = Extension.create({
           return true;
         },
       // Rebuild the first TOC's entries from the current headings — Word's F9.
-      // The field switches (attrs.options) are preserved verbatim. Entries
-      // materialize through nodeFromJSON — replaceWith takes PM nodes, not
-      // JSON (JSON would silently land outside the field).
+      // The field switches (attrs.options) are preserved verbatim, INCLUDING
+      // the \o level window: a document whose TOC covers "3-4" (skipped
+      // levels) must not rebuild with the 1-3 default and lose entries.
       "update-toc":
         (pageOf?: PageOf, tabPositionTw?: number) =>
         ({ state, tr, dispatch }) => {
           const found = findTocField(state.doc);
           if (!found) return false;
-          const entries = buildTocEntries(state.doc, pageOf, tabPositionTw);
+          const levels = headingRangeOf(
+            (found.node.attrs.options as { headingStyleRange?: string } | null)?.headingStyleRange,
+          );
+          const entries = buildTocEntries(state.doc, pageOf, tabPositionTw, levels);
           if (entries.length === 0) return false;
           if (dispatch) {
             const nodes = entries.map((entry) => state.schema.nodeFromJSON(entry));
