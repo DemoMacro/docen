@@ -805,29 +805,30 @@ function carrierDrafts(emf: Uint8Array, basis: Xform | undefined, depth: number)
   // across the composed design, white-backed masks where the EMF+ layer is
   // already transparent — so once the EMF+ layer pictures anything, GDI blts
   // drop entirely; they survive only when the EMF+ layer emits no pictures
-  // (a bare EMF+ header with all imagery on the GDI side). GDI paths keep
-  // the coincident-box dedup only: unlike blts, corpus files do split their
-  // vector art across both layers, so a blanket drop would delete art. Text
-  // never drops: the EMF+ walk does not decode DrawString runs yet, and a
-  // dual file's GDI text is the same glyphs at the same spots.
+  // (a bare EMF+ header with all imagery on the GDI side). GDI paths drop
+  // only against a same-source EMF+ paint: same box, and the EMF+ fill is
+  // the GDI flat COLORREF composited over white at one uniform alpha — the
+  // systematic relation of a dual pair, since argbHex pre-blends partial
+  // alpha (an EMF+ 25%-alpha gold reads FFF9E5 against a GDI FFE699). Art
+  // that lives only on the GDI side (corpus wavy panels whose EMF+
+  // counterparts draw fragments) keeps its distinct box or unrelated color
+  // and survives. Text never drops: the EMF+ walk does not decode DrawString
+  // runs yet, and a dual file's GDI text is the same glyphs at the same
+  // spots.
   const plusPaints = drafts
     .filter((dr): dr is PathDraft => dr.kind === "path" && (!!dr.fill || !!dr.strokeColor))
-    .map((dr) => ({ fill: dr.fill, stroke: dr.strokeColor, box: boxOf(dr) }));
+    .map((dr) => ({ fill: dr.fill, box: boxOf(dr) }));
   const plusHasPic = drafts.some((dr) => dr.kind === "pic");
   const gdi = gdiTextDrafts(emf, effOf);
   drafts.push(
     ...gdi.filter((g) => {
       if (g.kind === "pic") return !plusHasPic;
       if (g.kind === "path") {
+        const { fill } = g;
         const box = boxOf(g);
-        return !plusPaints.some(
-          (p) =>
-            p.fill === g.fill &&
-            p.stroke === g.strokeColor &&
-            Math.abs(p.box.x0 - box.x0) <= 2 &&
-            Math.abs(p.box.y0 - box.y0) <= 2 &&
-            Math.abs(p.box.x1 - box.x1) <= 2 &&
-            Math.abs(p.box.y1 - box.y1) <= 2,
+        return !(
+          fill != null &&
+          plusPaints.some((p) => sameBox(p.box, box) && sameSourceBlend(p.fill, fill))
         );
       }
       return true;
@@ -1811,6 +1812,45 @@ function finalize(
 
 function round1(n: number): string {
   return String(Math.round(n * 10) / 10);
+}
+
+/** Boxes coincide within the tolerance that separates a dual pair's float32
+ *  EMF+ geometry from its int16-quantized GDI twin. */
+function sameBox(
+  a: { x0: number; y0: number; x1: number; y1: number },
+  b: { x0: number; y0: number; x1: number; y1: number },
+): boolean {
+  return (
+    Math.abs(a.x0 - b.x0) <= 2 &&
+    Math.abs(a.y0 - b.y0) <= 2 &&
+    Math.abs(a.x1 - b.x1) <= 2 &&
+    Math.abs(a.y1 - b.y1) <= 2
+  );
+}
+
+/** True when `blend` equals `solid` composited over white at one uniform
+ *  alpha — the systematic relation between a dual pair's fills: argbHex
+ *  pre-blends the EMF+ brush's partial alpha (25% FFE699 → FFF9E5) while the
+ *  GDI fallback carries the flat COLORREF. Channel 255 carries no alpha
+ *  information and is skipped; the remaining channels must agree on alpha
+ *  within rounding. */
+function sameSourceBlend(blend: string | undefined, solid: string): boolean {
+  if (!blend) return false;
+  if (blend === solid) return true;
+  let alpha = -1;
+  for (let i = 0; i < 3; i++) {
+    const b = parseInt(blend.slice(i * 2, i * 2 + 2), 16);
+    const s = parseInt(solid.slice(i * 2, i * 2 + 2), 16);
+    if (s === 255) {
+      if (b !== 255) return false;
+      continue;
+    }
+    const a = (b - 255) / (s - 255);
+    if (a <= 0 || a >= 1) return false;
+    if (alpha < 0) alpha = a;
+    else if (Math.abs(a - alpha) > 0.03) return false;
+  }
+  return alpha > 0;
 }
 
 /** World-space bounding box of one draft (diagnostics hook shape). */
