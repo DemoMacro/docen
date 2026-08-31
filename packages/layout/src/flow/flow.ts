@@ -398,7 +398,11 @@ class Flow {
         const headers = headerRowCount(laid);
         if (headers > 0 && headers < laid.rows.length) {
           const headerH = sumRows(laid.rows.slice(0, headers));
-          if (headerH <= this.opts.contentHeightPx - this.insets().topPx) {
+          const body = this.opts.contentHeightPx - this.insets().topPx;
+          if (headerH <= body) {
+            // A body row re-opens under a fresh band copy on the next page,
+            // so its whole-page room is the body net of the band.
+            const pageRoom = body - headerH;
             let k = headers;
             let h = headerH;
             while (k < laid.rows.length && h + laid.rows[k].heightPx <= space) {
@@ -408,11 +412,13 @@ class Flow {
             // No body row fits under the band whole — try splitting it
             // mid-content, else move the table whole.
             if (k === headers) {
-              const mid = this.midRowDepth(laid.rows[k], space - h);
+              const mid = this.midRowDepth(laid.rows[k], space - h, pageRoom);
               return mid != null ? { k, midDepth: mid } : { k: 0 };
             }
             const mid =
-              k < laid.rows.length ? this.midRowDepth(laid.rows[k], space - h) : undefined;
+              k < laid.rows.length
+                ? this.midRowDepth(laid.rows[k], space - h, pageRoom)
+                : undefined;
             return { k, midDepth: mid };
           }
         }
@@ -423,16 +429,13 @@ class Flow {
           k++;
         }
         // The first row alone doesn't fit: force-split it when no page could
-        // hold it whole (Word: progress beats clipping), else move whole.
+        // hold it whole (Word: progress beats clipping), else move whole —
+        // midRowDepth itself refuses pageable rows.
         if (k === 0) {
-          const row = laid.rows[0];
-          if (row && row.heightPx > this.opts.contentHeightPx) {
-            const mid = this.midRowDepth(row, space);
-            if (mid != null) return { k: 0, midDepth: mid };
-          }
-          return { k: 0 };
+          const mid = this.midRowDepth(laid.rows[0], space, this.opts.contentHeightPx);
+          return mid != null ? { k: 0, midDepth: mid } : { k: 0 };
         }
-        const mid = this.midRowDepth(laid.rows[k], space - h);
+        const mid = this.midRowDepth(laid.rows[k], space - h, this.opts.contentHeightPx);
         return { k, midDepth: mid };
       }
       case "group": {
@@ -456,14 +459,22 @@ class Flow {
   }
 
   /** The depth a row that doesn't fit splits at (`depth` px from its top), or
-   *  undefined when it must move whole: exact heights never split (overflow
-   *  clips); cantSplit rows only when no page could hold them whole (Word
-   *  force-splits rather than clip); the cut needs content on BOTH sides in
-   *  some cell — an empty-shell head or tail moves the row instead. */
-  private midRowDepth(row: LaidOutRow | undefined, depth: number): number | undefined {
+   *  undefined when it must move whole: Word only ever splits a row no page
+   *  could hold whole — one taller than `pageRoom` (the fresh-page body,
+   *  net of the repeated band's own height) force-splits mid-content
+   *  (progress beats clipping, cantSplit or not), while any pageable row
+   *  moves whole (COM-verified: wrapped 2/3/4-line single paragraphs, a cut
+   *  at a paragraph boundary, widowControl off, and a 40-paragraph row all
+   *  refuse the cut); exact heights never split (overflow clips); and the
+   *  cut needs content on BOTH sides in some cell — an empty-shell head or
+   *  tail moves the row instead. */
+  private midRowDepth(
+    row: LaidOutRow | undefined,
+    depth: number,
+    pageRoom: number,
+  ): number | undefined {
     if (!row || depth <= 0 || depth >= row.heightPx) return undefined;
-    if (row.exactHeight) return undefined;
-    if (row.cantSplit && row.heightPx <= this.opts.contentHeightPx) return undefined;
+    if (row.exactHeight || row.heightPx <= pageRoom) return undefined;
     let head = false;
     let tail = false;
     for (const cell of row.cells) {

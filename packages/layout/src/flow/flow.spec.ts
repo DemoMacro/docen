@@ -339,11 +339,12 @@ describe("layoutFlow", () => {
       if (t.kind !== "table") throw new Error(`expected table, got ${t.kind}`);
       return t;
     });
-    // Plain split, no copies anywhere: row 1 fills page 1 by splitting
-    // mid-content and its tail re-opens page 2 beside row 2. Every tail row
-    // was stripped, so no later page re-derives a band from a mid-table
-    // marked row.
-    expect(tables.map((t) => t.rows.length)).toEqual([2, 2, 1]);
+    // Plain split, no copies anywhere: every 40px row fits the 60px page
+    // whole, so each page holds one row and none ever splits mid-content
+    // (Word only force-splits rows no page could hold). Every tail row was
+    // stripped, so no later page re-derives a band from a mid-table marked
+    // row.
+    expect(tables.map((t) => t.rows.length)).toEqual([1, 1, 1, 1]);
     expect(tables[0].rows[0].tableHeader).toBe(true);
     for (const t of tables.slice(1)) expect(t.rows.every((r) => !r.tableHeader)).toBe(true);
   });
@@ -355,13 +356,52 @@ describe("layoutFlow", () => {
       rows: [
         { cells: [{ blocks: [para(1)] }] },
         { cells: [{ blocks: [para(1)] }] },
-        { cells: [{ blocks: [para(4)] }] }, // 80px of content — the split target
+        { cells: [{ blocks: [para(6)] }] }, // 120px — taller than the 100px page
+        { cells: [{ blocks: [para(1)] }] },
+      ],
+    };
+    // 40px of paragraphs + 20 + 20 fills 80; the over-page 120px row can't
+    // fit the last 20px — it splits there: 1 line stays in the head half, 5
+    // re-open on page 2 above the trailing row (the tail rebased to its own
+    // top). A row that fits a fresh page moves whole instead — Word never
+    // splits pageable rows (COM-verified).
+    const pages = flow([para(2), table], 100);
+    expect(pages).toHaveLength(3);
+    const tables = pages.map((p) => {
+      const t = p.items.find((i) => i.block.kind === "table")?.block;
+      if (t?.kind !== "table") throw new Error("expected table");
+      return t;
+    });
+    const [head, tail] = tables;
+    expect(head.rows.map((r) => r.heightPx)).toEqual([20, 20, 20]);
+    const headPara = head.rows[2].cells[0].stack[0].block;
+    if (headPara.kind !== "paragraph") throw new Error("expected paragraph");
+    expect(headPara.lines).toHaveLength(1);
+    expect(tail.rows.map((r) => r.heightPx)).toEqual([100]);
+    expect(tables[2].rows.map((r) => r.heightPx)).toEqual([20]);
+    const tailCell = tail.rows[0].cells[0];
+    const tailPara = tailCell.stack[0].block;
+    if (tailPara.kind !== "paragraph") throw new Error("expected paragraph");
+    expect(tailPara.lines).toHaveLength(5);
+    expect(tailPara.lines[0].yPx).toBe(0);
+    // The continuation is a fresh row slice — the head's vAlign slack is void.
+    expect(tailCell.contentOffsetYPx).toBeUndefined();
+  });
+
+  it("moves a pageable tall row whole — Word never splits it", () => {
+    const table: LayoutTable = {
+      kind: "table",
+      columnWidthsPx: [300],
+      rows: [
+        { cells: [{ blocks: [para(1)] }] },
+        { cells: [{ blocks: [para(1)] }] },
+        { cells: [{ blocks: [para(4)] }] }, // 80px — fits the 100px page whole
         { cells: [{ blocks: [para(1)] }] },
       ],
     };
     // 40px of paragraphs + 20 + 20 fills 80; the 80px row can't fit the last
-    // 20px — it splits there: 1 line stays in the head half, 3 re-open on
-    // page 2 above the trailing row (the tail rebased to its own top).
+    // 20px, but a fresh page holds it whole — Word moves it (COM-verified:
+    // wrapped/multi-paragraph/pageable rows all refuse the mid cut).
     const pages = flow([para(2), table], 100);
     expect(pages).toHaveLength(2);
     const [head, tail] = pages.map((p) => {
@@ -369,18 +409,8 @@ describe("layoutFlow", () => {
       if (t?.kind !== "table") throw new Error("expected table");
       return t;
     });
-    expect(head.rows.map((r) => r.heightPx)).toEqual([20, 20, 20]);
-    const headPara = head.rows[2].cells[0].stack[0].block;
-    if (headPara.kind !== "paragraph") throw new Error("expected paragraph");
-    expect(headPara.lines).toHaveLength(1);
-    expect(tail.rows.map((r) => r.heightPx)).toEqual([60, 20]);
-    const tailCell = tail.rows[0].cells[0];
-    const tailPara = tailCell.stack[0].block;
-    if (tailPara.kind !== "paragraph") throw new Error("expected paragraph");
-    expect(tailPara.lines).toHaveLength(3);
-    expect(tailPara.lines[0].yPx).toBe(0);
-    // The continuation is a fresh row slice — the head's vAlign slack is void.
-    expect(tailCell.contentOffsetYPx).toBeUndefined();
+    expect(head.rows.map((r) => r.heightPx)).toEqual([20, 20]);
+    expect(tail.rows.map((r) => r.heightPx)).toEqual([80, 20]);
   });
 
   it("moves a cantSplit row whole instead of splitting it mid-content", () => {
@@ -457,28 +487,29 @@ describe("layoutFlow", () => {
       rows: [
         { cells: [{ blocks: [para(1)] }], tableHeader: true },
         { cells: [{ blocks: [para(1)] }] },
-        { cells: [{ blocks: [para(4)] }] }, // 80px — the mid-row split target
+        { cells: [{ blocks: [para(5)] }] }, // 100px — over the band's 80px room
         { cells: [{ blocks: [para(1)] }] },
       ],
     };
-    // 40px of paragraphs leave 60: band(20) + body1(20) fit, the 80px body
-    // row splits at 20px — page 2 re-opens with a fresh band copy + the row's
-    // lower half + the trailing row.
-    const pages = flow([para(2), table], 100);
+    // Page 1 fits band(20) + body1(20) then 60px of the over-room 100px row;
+    // page 2 re-opens with a fresh band copy + the row's lower 40px + the
+    // trailing row. A row the band's fresh-page room (100 − 20) holds whole
+    // would move instead — Word only force-splits what no page could hold.
+    const pages = flow([table], 100);
     expect(pages).toHaveLength(2);
     const [head, tail] = pages.map((p) => {
       const t = p.items.find((i) => i.block.kind === "table")?.block;
       if (t?.kind !== "table") throw new Error("expected table");
       return t;
     });
-    expect(head.rows.map((r) => r.heightPx)).toEqual([20, 20, 20]);
+    expect(head.rows.map((r) => r.heightPx)).toEqual([20, 20, 60]);
     expect(head.rows[0].tableHeader).toBe(true);
-    expect(tail.rows.map((r) => r.heightPx)).toEqual([20, 60, 20]);
+    expect(tail.rows.map((r) => r.heightPx)).toEqual([20, 40, 20]);
     expect(tail.rows[0].tableHeader).toBe(true);
     expect(tail.rows[1].tableHeader).toBeUndefined();
     const tailPara = tail.rows[1].cells[0].stack[0].block;
     if (tailPara.kind !== "paragraph") throw new Error("expected paragraph");
-    expect(tailPara.lines).toHaveLength(3);
+    expect(tailPara.lines).toHaveLength(2);
   });
 
   it("moves the row whole when no cell has content above the cut (guard)", () => {
