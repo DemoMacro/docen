@@ -71,6 +71,7 @@ import {
 // <docen-outline> (navigation Headings tab).
 import "./components/format-pane";
 import "./components/outline";
+import { deepEq, dirtyPagesOf } from "./canvas/page-eq";
 import {
   CanvasStage,
   type CanvasStageSection,
@@ -1632,10 +1633,14 @@ class DocenDocument extends AddinHost<Editor> {
 
   /** The canvas pipeline — the single render entry the bridge's transactions
    *  and the loaders share: compile → project → layout → paint, then re-arm
-   *  the caret map against the fresh geometry. */
+   *  the caret map against the fresh geometry. Page-level diff: only pages
+   *  whose laid-out content changed repaint (the rest keep their canvas), so
+   *  a keystroke costs one page, not one per scrolled-into-view page. */
   #renderDoc(doc: JSONContent): void {
     if (!this.#stageHost) return;
+    const prev = this.#lastRun;
     const run = this.#projectAndLayout(doc);
+    this.#lastRun = run;
     this.#pages = run.pages;
     this.#sectionOfPage = run.sectionOfPage;
     this.#flow = run.sections[0]?.flow;
@@ -1648,11 +1653,31 @@ class DocenDocument extends AddinHost<Editor> {
     // A `zoom` attribute parsed before the stage existed only recorded the
     // level here — push it in before the first sync sizes the slots.
     if (this.#stage.zoom !== this.#zoom) this.#stage.setZoom(this.#zoom);
-    this.#stage.sync(run.pages, run.sections, run.sectionOfPage, run.background);
+    // Anything structural (page count shifts aside: section geometry, page
+    // background) repaints everything — the per-page diff only skips pages
+    // whose placement, section, AND background are all unchanged.
+    const structural =
+      !prev ||
+      prev.sectionOfPage.length !== run.sectionOfPage.length ||
+      prev.sectionOfPage.some((s, i) => s !== run.sectionOfPage[i]) ||
+      prev.background?.color !== run.background?.color ||
+      prev.background?.tileSrc !== run.background?.tileSrc ||
+      prev.sections.length !== run.sections.length ||
+      prev.sections.some((s, i) => !deepEq(s.flow, run.sections[i]!.flow));
+    const dirty = structural ? undefined : dirtyPagesOf(prev.pages, run.pages);
+    this.#stage.sync(run.pages, run.sections, run.sectionOfPage, run.background, dirty);
     this.#bridge?.updatePages(run.pages, this.#pageOriginOf(run.sections, run.sectionOfPage));
     this.#updateStatus();
     this.#syncCommentsPane();
   }
+
+  /** The previous render's flow result — the diff base for the next one. */
+  #lastRun?: {
+    pages: FlowPage[];
+    sectionOfPage: number[];
+    sections: (ProjectedSection & CanvasStageSection)[];
+    background?: ProjectedPageBackground;
+  };
 
   disconnectedCallback(): void {
     this.#langObserver?.disconnect();

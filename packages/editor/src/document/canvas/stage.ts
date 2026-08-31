@@ -407,12 +407,15 @@ export class CanvasStage {
    *  refresh the context (an opened file's headers/footers arrive here).
    *  Multi-section documents pass one {@link CanvasStageSection} per section
    *  plus the page→section map; a single-section document is a one-entry
-   *  list. */
+   *  list. `dirty` (parallel to `pages`, absent = all) marks the pages whose
+   *  layout changed — the others keep their painted canvas untouched, which
+   *  is what makes a one-word edit cost one repaint instead of ninety-one. */
   sync(
     pages: FlowPage[],
     sections: CanvasStageSection[],
     sectionOfPage: number[],
     background?: ProjectedPageBackground,
+    dirty?: readonly boolean[],
   ): void {
     this.pages = pages;
     this.ctx.sections = sections;
@@ -456,7 +459,7 @@ export class CanvasStage {
       this.sizeSlot(slot, this.pageCss(flow.pageWidthPx), this.pageCss(flow.pageHeightPx), index);
     }
     for (const [index, slot] of this.slots.entries()) {
-      if (slot.app) this.repaint(slot.app, index);
+      if (slot.app && dirty?.[index] !== false) this.repaint(slot.app, index);
     }
   }
 
