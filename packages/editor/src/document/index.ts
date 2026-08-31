@@ -1706,7 +1706,10 @@ class DocenDocument extends AddinHost<Editor> {
     if (this.#stage.zoom !== this.#zoom) this.#stage.setZoom(this.#zoom);
     // Anything structural (page count shifts aside: section geometry, page
     // background) repaints everything — the per-page diff only skips pages
-    // whose placement, section, AND background are all unchanged.
+    // whose placement, section, AND background are all unchanged. Furniture
+    // compares on the projected options, not the laid stacks (the stacks
+    // derive from them plus the already-compared flow width); the frame CSS
+    // (background/borders) re-stamps on every sync and needs no diff.
     const structural =
       !prev ||
       prev.sectionOfPage.length !== run.sectionOfPage.length ||
@@ -1714,7 +1717,8 @@ class DocenDocument extends AddinHost<Editor> {
       prev.background?.color !== run.background?.color ||
       prev.background?.tileSrc !== run.background?.tileSrc ||
       prev.sections.length !== run.sections.length ||
-      prev.sections.some((s, i) => !deepEq(s.flow, run.sections[i]!.flow));
+      prev.sections.some((s, i) => !deepEq(s.flow, run.sections[i]!.flow)) ||
+      prev.sections.some((s, i) => !deepEq(s.furniture, run.sections[i]!.furniture));
     const dirty = structural ? undefined : dirtyPagesOf(prev.pages, run.pages);
     this.#stage.sync(run.pages, run.sections, run.sectionOfPage, run.background, dirty);
     this.#bridge?.updatePages(run.pages, this.#pageOriginOf(run.sections, run.sectionOfPage));
