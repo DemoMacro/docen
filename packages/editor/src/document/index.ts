@@ -197,6 +197,23 @@ const SAVE_FORMATS: Record<
   markdown: { description: "Markdown", mime: "text/markdown", ext: ".md" },
 };
 
+/** Commands that stay live when the document is read-only (Viewing mode):
+ *  chrome toggles, view panes, the mode switch, save, clipboard reads and
+ *  selection — everything else mutates the document and is refused. */
+const READONLY_LIVE: ReadonlySet<string> = new Set([
+  "toggle-navigation",
+  "zoom",
+  "zoom-100",
+  "edit-mode",
+  "save",
+  "copy",
+  "select",
+  "search",
+  "word-count",
+  "show-marks",
+  "show-comments",
+]);
+
 /** Commands handled locally in #onCommand/#onChange (not routed to
  *  editor.commands — they read/write host state the editor can't reach, e.g.
  *  navigation/find/zoom). Together with {@link WIRED_DISPATCH} this is the
@@ -956,7 +973,7 @@ class DocenDocument extends AddinHost<Editor> {
    *  menu's Keep Text Only) skips the rich legs. navigator.clipboard is the
    *  reliable path; execCommand("paste") is the fallback (often blocked). */
   async #paste(textOnly = false): Promise<void> {
-    const editor = this.editor;
+    const editor = this.#bridge?.activeEditor() ?? this.editor;
     if (!editor) return;
     this.#bridge?.focus();
     const docenType = textOnly ? null : `web ${DOCEN_CLIP_MIME}`;
@@ -984,6 +1001,17 @@ class DocenDocument extends AddinHost<Editor> {
             return;
           }
         } else {
+          // Chromium never persists a copy EVENT's custom types to the system
+          // clipboard (the `web ` spelling only survives the async write API),
+          // so a same-page Ctrl+C → context-menu Paste round-trip can't see
+          // the docen lane in read(). When the plain text still matches the
+          // pinned in-editor copy, the slice payload rides memory instead; a
+          // copy made elsewhere produces different text and the fallback
+          // correctly stays out.
+          const pinned = textOnly ? null : this.#bridge?.copiedSlice();
+          if (pinned && pinned.text === text && this.#bridge?.insertSlicePayload(pinned.payload)) {
+            return;
+          }
           editor.commands.insertContent(text);
           return;
         }
@@ -993,7 +1021,13 @@ class DocenDocument extends AddinHost<Editor> {
     }
     try {
       const text = await navigator.clipboard.readText();
-      if (text) editor.commands.insertContent(text);
+      if (text) {
+        const pinned = textOnly ? null : this.#bridge?.copiedSlice();
+        if (pinned && pinned.text === text && this.#bridge?.insertSlicePayload(pinned.payload)) {
+          return;
+        }
+        editor.commands.insertContent(text);
+      }
     } catch {
       /* clipboard unavailable — nothing to paste */
     }
@@ -1914,7 +1948,7 @@ class DocenDocument extends AddinHost<Editor> {
     const wired = this.#wiredCommands();
     ribbon
       .querySelectorAll<HTMLElement>(
-        "docen-ribbon-button[event], docen-ribbon-split-button[event], docen-ribbon-toggle-button[event]",
+        "docen-ribbon-button[event], docen-ribbon-split-button[event], docen-ribbon-toggle-button[event], docen-ribbon-menu[event]",
       )
       .forEach((el) => {
         const event = el.getAttribute("event");
@@ -2995,6 +3029,13 @@ class DocenDocument extends AddinHost<Editor> {
   readonly #onCommand = (event: CustomEvent<{ event?: string; value?: string }>): void => {
     const { event: name, value } = event.detail ?? {};
     if (typeof name !== "string") return;
+    // Read-only documents (Viewing mode) reject document-changing commands —
+    // the viewless editor has no DOM surface to refuse them, so the gate
+    // lives here (Word's read-only ribbon). Chrome actions and clipboard
+    // reads stay live.
+    if (this.editor && !this.editor.isEditable && !READONLY_LIVE.has(name)) {
+      return;
+    }
     // UI chrome actions are handled locally and need no Tiptap editor.
     if (name === "toggle-navigation") {
       this.#togglePane("navigation");
@@ -3175,7 +3216,13 @@ class DocenDocument extends AddinHost<Editor> {
     // Context menu → Remove Hyperlink: unset the link mark across the
     // right-clicked link (extendMarkRange reaches past the caret's spot).
     if (name === "unset-link") {
-      this.editor?.chain().extendMarkRange("link").unsetLink().run();
+      // The link mark spans the right-clicked range in whichever editor the
+      // caret lives in (a furniture story has its own links).
+      (this.#bridge?.activeEditor() ?? this.editor)
+        ?.chain()
+        .extendMarkRange("link")
+        .unsetLink()
+        .run();
       return;
     }
     // New Comment — anchor the selection with a Word comment; Edit/Delete
@@ -3236,10 +3283,20 @@ class DocenDocument extends AddinHost<Editor> {
     // DocumentCommands registers every ribbon event as a native Tiptap command.
     // A user add-in overrides one by contributing a Tiptap extension whose
     // addCommands redefines the same name (Tiptap's native override mechanism).
-    const commands = editor.commands as unknown as Record<string, (value?: string) => unknown>;
+    // They target the editor input currently routes into — while a furniture
+    // story is open that's the story's editor, not the main document (whose
+    // selection is stale and would be stamped instead).
+    const target = this.#bridge?.activeEditor() ?? editor;
+    const commands = target.commands as unknown as Record<string, (value?: string) => unknown>;
     const cmd = commands[name];
     if (typeof cmd === "function") {
       cmd(value);
+      // The comboboxes keep focus to filter their lists — after a pick, hand
+      // the keyboard back to the document (buttons never take it: their
+      // mousedown preventDefaults).
+      if (name === "font-name" || name === "font-size" || name === "style") {
+        this.#bridge?.focus();
+      }
       return;
     }
     // Not a Tiptap command — route to the first add-in that declares it. This
@@ -3277,7 +3334,12 @@ class DocenDocument extends AddinHost<Editor> {
       }
     }
     if (cut) {
-      editor.view.dispatch(editor.state.tr.deleteSelection());
+      // Viewless: there is no view to dispatch through — route the delete as
+      // a command (the bridge's own pattern).
+      editor.commands.command(({ state, dispatch }) => {
+        dispatch?.(state.tr.deleteSelection());
+        return true;
+      });
     }
   }
 

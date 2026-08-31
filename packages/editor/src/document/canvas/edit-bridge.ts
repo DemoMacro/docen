@@ -205,6 +205,16 @@ export interface EditBridge {
    *  the caret — the host's ribbon Paste routes here after reading the system
    *  clipboard. False when the payload did not parse. */
   insertSlicePayload(raw: string): boolean;
+  /** The pinned payload of the most recent in-editor copy/cut (null after a
+   *  copy that carried no slice). The async paste's fallback lane: Chromium
+   *  never persists a copy event's custom types to the system clipboard, so
+   *  the payload rides memory when the system text still matches it. */
+  copiedSlice(): { payload: string; text: string } | null;
+  /** The editor input currently routes into — the main editor, or the
+   *  furniture story's when one is open. Ribbon commands must target the same
+   *  editor the caret lives in, or they stamp the main document's stale
+   *  selection. */
+  activeEditor(): Editor;
   /** Move keyboard focus to the bridge's input surface (the editing focus —
    *  there is no DOM editor to focus). */
   focus(): void;
@@ -1213,12 +1223,17 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     event.preventDefault();
     // The docen lane first (a copy from a docen editor round-trips losslessly);
     // then styled HTML through the schema's parse rules so external rich text
-    // maps to its DOCX equivalents; plain text is the last resort.
-    const docen = event.clipboardData?.getData(DOCEN_CLIP_MIME);
+    // maps to its DOCX equivalents; plain text is the last resort. The custom
+    // lane reads through BOTH spellings: the `web `-prefixed key is what the
+    // system clipboard carries (Chromium's custom-format spec — and what the
+    // async clipboard.read() below matches), the bare key is what a same-page
+    // DataTransfer passthrough may still hand back.
+    const data = event.clipboardData;
+    const docen = data?.getData(`web ${DOCEN_CLIP_MIME}`) || data?.getData(DOCEN_CLIP_MIME);
     if (docen && insertSlicePayload(docen)) return;
-    const html = event.clipboardData?.getData("text/html");
+    const html = data?.getData("text/html");
     if (html && insertPastedJSON(html)) return;
-    const text = event.clipboardData?.getData("text/plain");
+    const text = data?.getData("text/plain");
     if (text) insertText(text);
   };
 
@@ -1227,13 +1242,26 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     return from === to ? null : active().editor.state.doc.textBetween(from, to, "\n");
   };
 
+  /** The most recent copy/cut's slice payload. Chromium never persists a copy
+   *  EVENT's custom types to the system clipboard (the `web ` spelling only
+   *  works through the async write API), so a same-page paste via the async
+   *  read() — the ribbon and context-menu Paste — can't see the lane. The
+   *  payload is pinned here instead; the host's paste falls back to it when
+   *  the system clipboard's plain text matches (stale after a copy elsewhere,
+   *  which is exactly when the fallback must not fire). */
+  let lastCopied: { payload: string; text: string } | null = null;
+
   const onCopy = (event: ClipboardEvent): void => {
     const text = selectionText();
     if (text == null) return;
     event.preventDefault();
     event.clipboardData?.setData("text/plain", text);
     const payload = selectionSlicePayload(active().editor.state);
-    if (payload) event.clipboardData?.setData(DOCEN_CLIP_MIME, payload);
+    lastCopied = payload ? { payload, text } : null;
+    // The `web ` prefix is Chromium's spelling for custom clipboard formats;
+    // through a copy event it only survives same-page DataTransfer passthrough
+    // (the async read() needs the pinned payload above).
+    if (payload) event.clipboardData?.setData(`web ${DOCEN_CLIP_MIME}`, payload);
   };
 
   const onCut = (event: ClipboardEvent): void => {
@@ -1242,7 +1270,8 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     event.preventDefault();
     event.clipboardData?.setData("text/plain", text);
     const payload = selectionSlicePayload(active().editor.state);
-    if (payload) event.clipboardData?.setData(DOCEN_CLIP_MIME, payload);
+    lastCopied = payload ? { payload, text } : null;
+    if (payload) event.clipboardData?.setData(`web ${DOCEN_CLIP_MIME}`, payload);
     active().editor.commands.command(({ state, dispatch }) => {
       dispatch?.(state.tr.deleteSelection());
       return true;
@@ -1286,6 +1315,12 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     },
     storyKind(): StoryKind | null {
       return story?.kind ?? null;
+    },
+    activeEditor(): Editor {
+      return active().editor;
+    },
+    copiedSlice(): { payload: string; text: string } | null {
+      return lastCopied;
     },
     enterStory(kind, page, seed): boolean {
       const storyCfg = opts.story;
