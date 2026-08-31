@@ -82,9 +82,15 @@ export interface EditBridgeStory {
 }
 
 export interface EditBridgeOptions {
-  /** A positioned host covering the canvas surface — the bridge's textarea
-   *  overlays it and captures clicks to take focus. */
+  /** A positioned host covering the canvas surface — the bridge's overlays
+   *  mount here and it captures clicks to take focus. */
   host: HTMLElement;
+  /** The input textarea's mount point — MUST sit outside any menu component:
+   *  an ancestor fluent-menu treats Space/Enter as menu activation keys and
+   *  preventDefaults them, which kills the textarea's default insertion (no
+   *  beforeinput → spaces and Enter are silently dropped). Positioned, so the
+   *  textarea's caret-anchored coordinates resolve against it. */
+  inputHost: HTMLElement;
   /** Initial document (Tiptap JSON, e.g. parseDOCX's result). */
   content: JSONContent | Record<string, unknown>;
   /** raf-merged document callback — one per frame at most, with the fresh
@@ -435,7 +441,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     caret.style.height = `${rect.heightPx * scale}px`;
     // Keep the textarea anchored at the caret so the IME candidate window
     // opens at the typing point.
-    const hostRect = opts.host.getBoundingClientRect();
+    const hostRect = opts.inputHost.getBoundingClientRect();
     const frameRect = frame.getBoundingClientRect();
     ta.style.left = `${frameRect.left - hostRect.left + rect.xPx * scale}px`;
     ta.style.top = `${frameRect.top - hostRect.top + rect.yPx * scale}px`;
@@ -708,11 +714,10 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     // clicking elsewhere moves the caret from the menu handler, not here).
     if (event.button === 2) return;
     if (composing) return;
-    // Park the textarea at the click point BEFORE focusing it: focus() would
-    // otherwise scroll its stale position (the old caret, possibly another
-    // page) into view, yanking the surface away between the two clicks of a
-    // band double-click. It also anchors the IME window at the click.
-    const hostRect = opts.host.getBoundingClientRect();
+    // Park the textarea at the click point BEFORE focusing it (anchors the
+    // IME window at the click; it no longer sits in the scroll container, so
+    // focus() cannot yank the surface anymore, but parking stays harmless).
+    const hostRect = opts.inputHost.getBoundingClientRect();
     ta.style.left = `${event.clientX - hostRect.left}px`;
     ta.style.top = `${event.clientY - hostRect.top}px`;
     const clicks = clickCount(event);
@@ -1173,7 +1178,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
   ta.addEventListener("paste", onPaste);
   ta.addEventListener("copy", onCopy);
   ta.addEventListener("cut", onCut);
-  opts.host.append(ta);
+  opts.inputHost.append(ta);
 
   return {
     editor,

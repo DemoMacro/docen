@@ -276,6 +276,15 @@ const documentStyles = css`
     display: flex;
     flex-direction: column;
     height: 100%;
+    /* Anchors the input layer (see the template comment there). */
+    position: relative;
+  }
+  .input-layer {
+    position: absolute;
+    inset: 0;
+    /* The layer itself must never intercept pointer input — only the bridge's
+       programmatic textarea focus uses it. */
+    pointer-events: none;
   }
   /* Office ribbon group layout helpers — a large button beside stacked rows of
        small icon-only buttons. Applied to light-DOM wrappers in the ribbon. */
@@ -446,6 +455,11 @@ const documentTemplate = html`
     </docen-task-pane>
     <docen-status-bar slot="status" part="status"></docen-status-bar>
   </docen-workspace>
+  <!-- The edit bridge's textarea lives here, at the shadow root: inside the
+       workspace it would sit under docen-context-menu, whose fluent-menu
+       treats Space/Enter as menu keys and preventDefaults them — killing the
+       textarea's beforeinput (spaces and Enter silently dropped). -->
+  <div class="input-layer" part="input-layer"></div>
   <docen-options-dialog part="options"></docen-options-dialog>
   <docen-word-count-dialog part="word-count"></docen-word-count-dialog>
   <docen-symbol-dialog part="symbol"></docen-symbol-dialog>
@@ -1198,6 +1212,9 @@ class DocenDocument extends AddinHost<Editor> {
 
     this.#bridge = mountEditBridge({
       host: this.#stageHost,
+      // The textarea must live outside docen-context-menu (fluent-menu eats
+      // Space/Enter) — the input layer at the shadow root is menu-free.
+      inputHost: this.shadowRoot!.querySelector<HTMLElement>(".input-layer")!,
       content: initialDoc,
       onDoc: (json) => this.#renderDoc(json),
       pageHost: (page) => this.#stage?.slotAt(page)?.parentElement ?? null,

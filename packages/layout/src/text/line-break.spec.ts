@@ -219,3 +219,34 @@ describe("packLines", () => {
     expect(pack([], 100)).toHaveLength(0);
   });
 });
+
+describe("packLines inter-run gaps", () => {
+  it("keeps the inter-run space's advance between two runs", () => {
+    // A run ending in a space hands the space to the NEXT run's gapBefore
+    // (pretext trims boundary whitespace into gaps); that gap moves the next
+    // run's x — without it a recolored word hugs the word before it (the
+    // space between runs vanished, though the same space inside one run
+    // never did).
+    const lines = pack([text("re-flows "), text("the")], 200);
+    expect(lines).toHaveLength(1);
+    const texts = lines[0].items.filter(
+      (i): i is Extract<LaidOutLineItem, { kind: "text" }> => i.kind === "text",
+    );
+    expect(texts).toHaveLength(2);
+    const gap = texts[1].xPx - (texts[0].xPx + texts[0].widthPx);
+    expect(gap).toBeCloseTo(4, 5); // one space at the synthetic em/4
+  });
+
+  it("keeps a leading-space run's gap too", () => {
+    // The mirror case: the second run OPENS with the space (a selection
+    // that started before it). The gap precedes the run's own glyphs.
+    const lines = pack([text("re-flows"), text(" the")], 200);
+    expect(lines).toHaveLength(1);
+    const texts = lines[0].items.filter(
+      (i): i is Extract<LaidOutLineItem, { kind: "text" }> => i.kind === "text",
+    );
+    expect(texts).toHaveLength(2);
+    const gap = texts[1].xPx - (texts[0].xPx + texts[0].widthPx);
+    expect(gap).toBeCloseTo(4, 5);
+  });
+});

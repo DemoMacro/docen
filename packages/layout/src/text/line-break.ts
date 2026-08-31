@@ -562,6 +562,11 @@ export function packLines(inline: LayoutInline[], opts: PackLinesOptions): Packe
           for (const frag of line.fragments) {
             const inlineIndex = group.itemInline[frag.itemIndex];
             const src = inline[inlineIndex];
+            // The fragment's gap is its own leading advance (an inter-run
+            // space — pretext trims boundary whitespace into gaps): it moves
+            // the fragment's start before the fragment is placed, or the
+            // space's width would vanish between two runs.
+            xFrag += frag.gapBefore;
             // A squeezed line re-spaces its fragments' advances (k < 1) — the
             // glyphs keep their metrics, only the positions tighten (Word's
             // advance compression; the painter draws at the given x).
@@ -589,7 +594,7 @@ export function packLines(inline: LayoutInline[], opts: PackLinesOptions): Packe
               });
               if (src.heightPx > tallestPicturePx) tallestPicturePx = src.heightPx;
             }
-            xFrag += frag.gapBefore + frag.occupiedWidth;
+            xFrag += frag.occupiedWidth;
             endInlineIndex = inlineIndex;
           }
           // A squeezed group fills the line's remaining width exactly.
