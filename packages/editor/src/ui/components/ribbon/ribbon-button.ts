@@ -115,9 +115,9 @@ class DocenRibbonButton extends FASTElement {
     super.connectedCallback();
     this.syncIconSlot();
     if (this.iconSlot) renderIcon(this.iconSlot, this.icon ?? "");
-    // Keep the editor's selection on click — mousedown preventDefault (capture)
-    // stops the contenteditable from blurring before the command runs, mirroring
-    // Tiptap BubbleMenu's handler.
+    // Keep the editor's input focus on click — mousedown preventDefault
+    // (capture) stops the bridge textarea (the document input) from blurring
+    // before the command runs, mirroring Tiptap BubbleMenu's handler.
     this.addEventListener("mousedown", this.onMousedown, { capture: true });
   }
 

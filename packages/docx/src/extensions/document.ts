@@ -16,14 +16,15 @@ import { attrNative } from "./utils";
  *   orientation, columns, type, grid; intermediate sections carry theirs on
  *   sectionBreak nodes).
  *
- * None rendered to HTML — phase 2 applies styles via injected CSS.
+ * None of these render anywhere — they ride the JSON for the converters and
+ * the canvas editor's projection to consume.
  *
- * Factory form (`createDocument`): the editor layer needs a different top-level
- * content expression (`doc > page+` for the C-route editing schema) but the SAME
- * DOCX attrs. Building it via this factory keeps the Document definition in ONE
- * place (here) — the editor parameterizes only `content`, instead of `.extend`-
- * overriding this Document and re-stating the attrs. `Document` is the default
- * flat `doc > block+` shape used by the docx package itself.
+ * Factory form (`createDocument`): the editor layer may parameterize a
+ * different top-level `content` expression but keeps the SAME DOCX attrs.
+ * Building it via this factory keeps the Document definition in ONE place
+ * (here), instead of `.extend`-overriding this Document and re-stating the
+ * attrs. `Document` is the default flat `doc > block+` shape used by the docx
+ * package itself.
  */
 
 export function createDocument(content = "block+") {

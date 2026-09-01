@@ -268,12 +268,12 @@ function defaultRunOf(node: PmNode, styles?: unknown): Partial<RunStyle> {
   const t = styleTableOf(styles);
   const defRun = t?.default?.document?.run;
   return {
-    // ¶ glyph rPr (attrs.run) styles ONLY the paragraph-mark glyph, NOT run text
-    // (ECMA-376: w:pPr/w:rPr applies only to the ¶ glyph). A run therefore
-    // inherits font/size/bold/italic from its paragraph STYLE / doc default —
-    // NEVER attrs.run — so attrs.run is not read here. Empty-paragraph struts
-    // still read attrs.run.size directly via emptyLineHeight (the ¶ glyph is
-    // their sole content).
+    // Paragraph-mark rPr (attrs.run) styles ONLY the paragraph mark, NOT run
+    // text (ECMA-376: w:pPr/w:rPr applies only to the mark glyph). A run
+    // therefore inherits font/size/bold/italic from its paragraph STYLE / doc
+    // default — NEVER attrs.run — so attrs.run is not read here. Empty-
+    // paragraph struts still read attrs.run.size directly via emptyLineHeight
+    // (the mark is their sole content).
     size: run?.size ?? defRun?.size ?? null,
     font: run?.font ?? defRun?.font ?? null,
     bold: run?.bold ?? defRun?.bold ?? false,

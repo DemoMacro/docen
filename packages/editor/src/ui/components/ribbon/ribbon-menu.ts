@@ -113,9 +113,10 @@ class DocenRibbonMenu extends FASTElement {
     this.applyAnchor();
     if (this.iconSlot) renderIcon(this.iconSlot, this.icon ?? "");
     this.renderItems();
-    // Keep the editor focused on mousedown so opening the menu doesn't blur the
-    // contenteditable — a blur/refocus race otherwise closes the popover right
-    // after it opens (the "click several times before it appears" symptom).
+    // Keep the editor focused on mousedown so opening the menu doesn't blur
+    // the bridge textarea (the document input) — a blur/refocus race otherwise
+    // closes the popover right after it opens (the "click several times before
+    // it appears" symptom).
     this.trigger?.addEventListener("mousedown", this.onMousedown, { capture: true });
     this.#tooltipDisposer = suppressTooltipWhileMenuOpen(this.tooltipEl, this.list);
   }

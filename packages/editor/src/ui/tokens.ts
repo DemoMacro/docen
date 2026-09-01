@@ -17,8 +17,6 @@ export const OFFICE_TOKENS_CSS = `
 :where(:root) {
   /* Office layout metrics — no Fluent equivalent. */
   --docen-ribbon-panel-height: 92px;
-  --docen-page-width: 210mm;
-  --docen-page-min-height: 297mm;
   --docen-page-gap: 24px;
   --docen-font-size-ribbon: 12px;
   --docen-font-size-group-label: 10px;

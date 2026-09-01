@@ -3,7 +3,6 @@ import { Node as TiptapNode } from "@tiptap/core";
 import type { AnyExtension } from "../core";
 import { ColumnBreak } from "./column-break";
 import { Document } from "./document";
-import { FormattingMarks } from "./formatting-marks";
 import { Image } from "./image";
 import { Link } from "./link";
 import { Bold, Code, Highlight, Italic, Strike, Subscript, Superscript, Underline } from "./marks";
@@ -80,11 +79,7 @@ export const tiptapMarkExtensions: AnyExtension[] = [
 // live in @docen/editor — the engine stays free of editing-UX concerns.
 // The markdown converter and the HTML paste parser use this array as schema;
 // those extensions add no schema, so omitting them does not affect conversion.
-export const docxExtensions: AnyExtension[] = [
-  ...tiptapNodeExtensions,
-  ...tiptapMarkExtensions,
-  FormattingMarks,
-];
+export const docxExtensions: AnyExtension[] = [...tiptapNodeExtensions, ...tiptapMarkExtensions];
 
 // Export all individual extensions for direct imports from @docen/docx.
 // Re-export explicitly (no `export *`) so the public surface is visible.
@@ -112,11 +107,9 @@ export { Image } from "./image";
 export { Link } from "./link";
 export { TextStyle } from "./text-style";
 export { Insertion, Deletion } from "./track-change";
-export { FormattingMarks } from "./formatting-marks";
 export { PageBreak } from "./page-break";
 export { WpgGroup } from "./wpg-group";
 export { WpsShape } from "./wps-shape";
 export { Passthrough, InlinePassthrough } from "./passthrough";
 export { TocField } from "./toc-field";
 export { Tab } from "./tab";
-export { scrollCaretToTop, scrollContainerOf } from "./scroll";
