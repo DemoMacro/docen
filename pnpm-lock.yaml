@@ -87,9 +87,6 @@ importers:
 
   packages/editor:
     dependencies:
-      '@chenglou/pretext':
-        specifier: 0.0.8
-        version: 0.0.8(patch_hash=9ebb839c158a4ffee8fd952a8570b94bc9f7e93791776cce66e1319949286f2d)
       '@docen/core':
         specifier: workspace:*
         version: link:../core
@@ -135,9 +132,13 @@ importers:
       prosemirror-search:
         specifier: 1.1.1
         version: 1.1.1
+    devDependencies:
+      '@chenglou/pretext':
+        specifier: 0.0.8
+        version: 0.0.8(patch_hash=9ebb839c158a4ffee8fd952a8570b94bc9f7e93791776cce66e1319949286f2d)
 
   packages/layout:
-    dependencies:
+    devDependencies:
       '@chenglou/pretext':
         specifier: 0.0.8
         version: 0.0.8(patch_hash=9ebb839c158a4ffee8fd952a8570b94bc9f7e93791776cce66e1319949286f2d)

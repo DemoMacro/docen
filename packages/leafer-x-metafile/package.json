@@ -1,6 +1,6 @@
 {
   "name": "leafer-x-metafile",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "WMF / EMF+ metafile replay into neutral drawing members — a zero-dependency GDI record player (WMF placeable stream, EMF+ GDI+ records, embedded DIB extraction) for LeaferJS-based renderers",
   "keywords": [
     "emf",

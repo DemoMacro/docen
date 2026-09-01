@@ -1,6 +1,6 @@
 {
   "name": "@docen/editor",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "Assembly layer for docen editors — bundles a Fluent UI host (ribbon, panes, status bar) with the @docen/docx engine into turnkey <docen-document> web components, with Office.js-style add-ins and Office-style pagination",
   "keywords": [
     "add-ins",
@@ -71,7 +71,6 @@
     "prepack": "pnpm build"
   },
   "dependencies": {
-    "@chenglou/pretext": "0.0.8",
     "@docen/core": "workspace:*",
     "@docen/docx": "workspace:*",
     "@docen/layout": "workspace:*",
@@ -87,5 +86,8 @@
     "leafer-editor": "2.2.9",
     "leafer-ui": "2.2.9",
     "prosemirror-search": "1.1.1"
+  },
+  "devDependencies": {
+    "@chenglou/pretext": "0.0.8"
   }
 }
