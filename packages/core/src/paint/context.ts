@@ -54,6 +54,12 @@ export interface PaintContext {
    *  flow must not let later paragraphs paint over the float), so the stage
    *  flushes this queue after the body pass paints its last paragraph. */
   deferredDrawings?: Array<() => void>;
+  /** Formatting marks visibility (Word's ¶ toggle): the painter draws the
+   *  bent arrow at line/paragraph ends, an arrow on tabs, a dot on spaces,
+   *  and the break rows (page/section) between blocks. */
+  showMarks?: boolean;
+  /** The break rows' labels (Word paints them in the UI language). */
+  marksLabels?: { pageBreak?: string; sectionBreak?: string };
 }
 
 /** The text column a block paints inside: the page's content box for body

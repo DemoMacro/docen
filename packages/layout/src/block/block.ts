@@ -29,7 +29,10 @@ export function layoutBlock(
     case "placeholder":
       return { kind: "placeholder", heightPx: block.heightPx, label: block.label };
     case "pageBreak":
-      return { kind: "pageBreak", heightPx: 0 };
+      // The break's own row occupies a line on the page it ends (a grid pitch
+      // when the section has one, a plain strut line otherwise) — Word's
+      // "····分页符····" row, whose height never depends on marks visibility.
+      return { kind: "pageBreak", heightPx: ctx?.linePitchPx || 20 };
   }
 }
 

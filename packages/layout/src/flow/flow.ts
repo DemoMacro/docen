@@ -237,6 +237,9 @@ class Flow {
   /** Place a block: whole, split, or moved to the next page. */
   push(block: LayoutBlock): void {
     if (block.kind === "pageBreak") {
+      // The break's row commits past the fit check — it is the page's last
+      // line even when the page is exactly full, then the page closes.
+      this.commit(layoutBlock(block, this.opts.contentWidthPx, this.ctx, this.measurer), 0);
       this.newPage();
       return;
     }

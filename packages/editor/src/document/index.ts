@@ -1288,9 +1288,15 @@ class DocenDocument extends AddinHost<Editor> {
       sectionOfPage: run.sectionOfPage,
       background: run.background,
     });
+    this.#stage.setMarksLabels({
+      pageBreak: t("marks.pageBreak", this),
+      sectionBreak: t("marks.sectionBreak", this),
+    });
     // A `zoom` attribute parsed before the stage existed only recorded the
-    // level here — push it in before the first sync sizes the slots.
+    // level here — push it in before the first sync sizes the slots. The
+    // `show-marks` attribute gets the same once-over (idempotent setter).
     if (this.#stage.zoom !== this.#zoom) this.#stage.setZoom(this.#zoom);
+    if (this.hasAttribute("show-marks")) this.#stage.setShowMarks(true);
     // Anything structural (section geometry, page background, section count)
     // repaints everything — the per-page diff only skips pages whose
     // placement, section, AND background are all unchanged. A page-count
@@ -3557,11 +3563,11 @@ class DocenDocument extends AddinHost<Editor> {
 
   /** Toggle editing/formatting marks on or off. Idempotent; dispatches
    *  `docen:marks-change`. The boolean `show-marks` attribute is the source of
-   *  truth. Canvas-side mark rendering (¶ pilcrows, break dividers) is a later
-   *  milestone — the attribute + event contract holds either way. */
+   *  truth; the stage paints the ↵/→/· marks and break rows from it. */
   setShowMarks(on: boolean): void {
     if (this.hasAttribute("show-marks") === on) return;
     this.toggleAttribute("show-marks", on);
+    this.#stage?.setShowMarks(on);
     this.dispatchEvent(
       new CustomEvent("docen:marks-change", {
         bubbles: true,

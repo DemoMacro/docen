@@ -177,6 +177,8 @@ export function layoutParagraph(
     shadingFill: para.shadingFill,
     indent: para.indent,
     drawings: para.drawings,
+    markSizePx: para.markSizePx,
+    sectionEnd: para.sectionEnd,
   };
 }
 

@@ -10,7 +10,7 @@ import type { FlowItem, LaidOutBlock, LaidOutStackItem } from "@docen/layout";
 import { Rect, Text, type IGroup } from "leafer-ui";
 
 import type { PaintColumn, PaintContext } from "./paint/context";
-import { paintParagraph } from "./paint/paragraph";
+import { paintBreakRow, paintParagraph } from "./paint/paragraph";
 import { paintTable } from "./paint/table";
 
 export * from "./paint/context";
@@ -58,6 +58,7 @@ export function paintBlock(
       if (ctx.layer === "behind") return;
       if (block.kind === "table") paintTable(tree, block, x, y, ctx);
       else if (block.kind === "placeholder") paintPlaceholder(tree, block, x, y);
+      else if (ctx.showMarks) paintBreakRow(tree, block, x, y, ctx.flow.contentWidthPx, ctx);
       return;
     case "group":
       for (const child of block.children) {

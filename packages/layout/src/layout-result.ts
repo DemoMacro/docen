@@ -120,9 +120,14 @@ export interface LaidOutParagraph {
   /** Indents mirrored from the input — the painter offsets each line's origin
    *  (left on every line, firstLine additionally on line 0; hanging < 0). */
   indent?: LayoutIndent;
+  /** ¶-mark strut size in px (w:pPr/w:rPr/w:sz) — the formatting marks' size
+   *  fallback on a textless line. */
+  markSizePx?: number;
   /** Floating drawings anchored to this paragraph, mirrored for the painter
    *  (the flow gives them no height). */
   drawings?: LayoutDrawing[];
+  /** The paragraph closes its section — the painter's mark row reads it. */
+  sectionEnd?: boolean;
 }
 
 /** One stacked block with its content-box offset inside the stack (collapsed
@@ -201,7 +206,8 @@ export interface LaidOutPlaceholder {
 
 export interface LaidOutPageBreak {
   kind: "pageBreak";
-  heightPx: 0;
+  /** The break's own row height (a grid pitch, or a strut line without one). */
+  heightPx: number;
 }
 
 export type LaidOutBlock =

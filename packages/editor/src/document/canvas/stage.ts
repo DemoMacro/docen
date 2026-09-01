@@ -120,6 +120,8 @@ export interface CanvasStageContext {
   sectionOfPage: number[];
   /** Page background (w:background — base color + optional pattern tile). */
   background?: ProjectedPageBackground;
+  /** The break rows' labels in the UI language (Word paints them localized). */
+  marksLabels?: { pageBreak?: string; sectionBreak?: string };
 }
 
 export class CanvasStage {
@@ -244,6 +246,30 @@ export class CanvasStage {
     if (pct === this.zoomPercent) return;
     this.zoomPercent = pct;
     this.applyZoom();
+  }
+
+  /** Formatting marks (Word's ¶ toggle) — a paint-time flag: flipping it
+   *  repaints every live page with marks drawn (or dropped). */
+  #showMarks = false;
+
+  setShowMarks(on: boolean): void {
+    if (on === this.#showMarks) return;
+    this.#showMarks = on;
+    for (const [index, slot] of this.slots.entries()) {
+      if (slot.app) this.repaint(slot.app, index);
+    }
+  }
+
+  /** The break rows' labels (locale change): repainting is deferred to the
+   *  next marks-visible repaint when marks are off, immediate when on. */
+  setMarksLabels(labels: { pageBreak: string; sectionBreak: string }): void {
+    const cur = this.ctx.marksLabels;
+    if (cur?.pageBreak === labels.pageBreak && cur?.sectionBreak === labels.sectionBreak) return;
+    this.ctx.marksLabels = labels;
+    if (!this.#showMarks) return;
+    for (const [index, slot] of this.slots.entries()) {
+      if (slot.app) this.repaint(slot.app, index);
+    }
   }
 
   private applyZoom(): void {
@@ -639,6 +665,8 @@ export class CanvasStage {
       pageIndex: index,
       pageCount: this.pages.length,
       layer: "behind",
+      showMarks: this.#showMarks,
+      marksLabels: this.ctx.marksLabels,
       // Async image decodes landing after this repaint need the same eager
       // render — the change-driven scheduler cannot be relied on here.
       rerender: () => app.forceRender(),

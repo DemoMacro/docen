@@ -164,7 +164,10 @@ describe("layoutFlow", () => {
   it("closes the page at a pageBreak atom (never opens one)", () => {
     const pages = flow([para(1), { kind: "pageBreak" }, para(1)], 300);
     expect(pages).toHaveLength(2);
-    expect(pages[0].items).toHaveLength(1);
+    // The break's own row stays on the page it ends (Word's "····分页符····"
+    // line), the closing paragraph opens the next page.
+    expect(pages[0].items).toHaveLength(2);
+    expect(pages[0].items[1]!.block.kind).toBe("pageBreak");
     expect(pages[1].items).toHaveLength(1);
   });
 

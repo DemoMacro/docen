@@ -56,13 +56,18 @@ export function projectDocumentOptions(doc: DocumentOptions): {
     footnoteOrdinals: new Map(),
     endnoteOrdinals: new Map(),
   };
-  const sections: ProjectedSection[] = (doc.sections ?? []).map((section) => {
+  const sections: ProjectedSection[] = (doc.sections ?? []).map((section, i) => {
     const blocks: LayoutBlock[] = [];
     for (const child of section.children ?? []) {
       const block = projectChild(child, ctx);
       if (Array.isArray(block)) blocks.push(...block);
       else if (block) blocks.push(block);
     }
+    // A non-final section's last paragraph carries the sectPr — Word paints
+    // its mark row as "─────分节符(下一页)─────". The final section's sectPr
+    // rides the body's end (no paragraph holds it) and shows no mark.
+    const last = blocks[blocks.length - 1];
+    if (i < (doc.sections?.length ?? 0) - 1 && last?.kind === "paragraph") last.sectionEnd = true;
     return {
       blocks,
       flow: projectFlowBox(section.properties),

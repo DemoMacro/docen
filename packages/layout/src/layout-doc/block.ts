@@ -89,6 +89,10 @@ export interface LayoutParagraph {
   keepNext?: boolean;
   widowControl?: boolean;
   pageBreakBefore?: boolean;
+  /** The paragraph closes its section (carries the sectPr): the painter swaps
+   *  its ¶ for Word's "─────分节符(下一页)─────" mark row. The last section's
+   *  sectPr rides the body end and never sets this. */
+  sectionEnd?: boolean;
   /** Floating drawings anchored to this paragraph: wrap-none boxes paint at
    *  their offset; a `wrap` on the drawing also shrinks the anchor
    *  paragraph's own lines around the box and registers a float zone the
