@@ -3,6 +3,7 @@ export * from "./font";
 export * from "./layout-doc";
 export * from "./layout-result";
 export * from "./text/measure";
+export * from "./text/advance";
 export * from "./text/line-break";
 export * from "./block/paragraph";
 export * from "./block/geometry";

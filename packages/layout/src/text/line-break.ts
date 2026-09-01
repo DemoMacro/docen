@@ -26,7 +26,7 @@ import {
 } from "@chenglou/pretext/rich-inline";
 
 import type { LayoutFloatZone, LayoutInline, LayoutTabStop } from "../layout-doc";
-import type { LaidOutLineItem } from "../layout-result";
+import type { LaidOutLine, LaidOutLineItem } from "../layout-result";
 import { cssFontOf, familyOfSlot, type TextMeasurer } from "./measure";
 
 export interface LineHeightInput {
@@ -406,6 +406,36 @@ function tabAdvance(
   const advancePx =
     w > 0 ? w : Math.max(0, (Math.floor(absX / DEFAULT_TAB_PX) + 1) * DEFAULT_TAB_PX - absX);
   return { advancePx, leader: matched?.leader };
+}
+
+/** The whitespace pretext collapses into the gaps between a line's text items
+ *  (CSS white-space semantics; Word keeps the characters). Both consumers of
+ *  the gaps — the painter's space dots and the caret map's character lattice
+ *  — must agree on where those characters are, so the walk lives here: each
+ *  item consumes the whitespace ahead of it in the paragraph's concatenated
+ *  run text. `cursor` continues across the paragraph's lines; `matched: false`
+ *  means the walk drifted off the runs (a render-only paragraph) and every
+ *  count came back 0 — callers degrade to the item texts alone. */
+export function lineSpaceGaps(
+  line: Pick<LaidOutLine, "items">,
+  fullText: string,
+  cursor: number,
+): { spaces: number[]; next: number; matched: boolean } {
+  const spaces = line.items.map(() => 0);
+  let at = cursor;
+  let matched = true;
+  line.items.forEach((item, itemIndex) => {
+    if (item.kind !== "text") return;
+    let p = at;
+    while (p < fullText.length && (fullText[p] === " " || fullText[p] === "　")) p++;
+    if (fullText.startsWith(item.text, p)) {
+      spaces[itemIndex] = p - at;
+      at = p + item.text.length;
+    } else {
+      matched = false;
+    }
+  });
+  return { spaces, next: at, matched };
 }
 
 /** One-off advance measurements for hanging closers, keyed by char+font. */

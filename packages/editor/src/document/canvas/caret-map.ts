@@ -12,13 +12,14 @@ import {
   type FlowPage,
   gridPadOf,
   isCjkCodeUnit,
+  type ItemGlyphLayout,
+  itemGlyphLayout,
   justifiedIntervals,
-  justifyPerGrapheme,
   type LaidOutLine,
   type LaidOutParagraph,
   leaferBaselinePadPx,
-  leaferWordIndices,
   lineOriginXPx,
+  lineSpaceGaps,
   tableGridOf,
   vertAlignBaselineShiftPx,
   vertAlignedSizePx,
@@ -56,6 +57,13 @@ interface LineEntry {
   /** Collapsed-char range within the paragraph's full text. */
   startChar: number;
   endChar: number;
+  /** Per-item whitespace the packer trimmed ahead of the item (same indexes
+   *  as `line.items`) — the gap characters this line owns in the collapsed
+   *  space. */
+  spaces: number[];
+  /** Per-item gap start x (line-local; null when the item follows an atom or
+   *  nothing) — the left caret boundary of the trimmed whitespace. */
+  gapStarts: (number | null)[];
 }
 
 interface ParaEntry {
@@ -67,51 +75,16 @@ interface ParaEntry {
   lines: LineEntry[];
   /** Total collapsed chars (concatenated line item texts). */
   chars: number;
+  /** The paragraph's concatenated run text and the walk cursor into it —
+   *  the laid items match it in order, consuming the whitespace pretext
+   *  trimmed into the gaps (the same walk the painted space dots run, so a
+   *  caret boundary, a selection edge and a dot share one lattice). */
+  fullText: string;
+  srcCursor: number;
 }
 
 const measureCanvas: HTMLCanvasElement | null =
   typeof document !== "undefined" ? document.createElement("canvas") : null;
-
-const SEGMENTER = new Intl.Segmenter(undefined, { granularity: "grapheme" });
-
-/** Per-grapheme advances and UTF-16 lengths of a text in a font — measured
- *  once, reused across every caret query against the same item (drag-select
- *  rescans its line on every mousemove; per-grapheme sums approximate the
- *  kerned run, caret placement only). The advance carries the letter
- *  spacing after every glyph — Leafer's own char layout adds it there too
- *  (createRows), so boundaries land where the painter actually puts glyphs. */
-interface GraphemeMetrics {
-  widths: number[];
-  lens: number[];
-}
-
-const widthCache = new Map<string, GraphemeMetrics>();
-
-function graphemeMetrics(text: string, font: string, letterSpacingPx = 0): GraphemeMetrics {
-  const key = `${font}\u0000${letterSpacingPx}\u0000${text}`;
-  const cached = widthCache.get(key);
-  if (cached) return cached;
-  const ctx = measureCanvas?.getContext("2d");
-  if (!ctx) return { widths: [], lens: [] };
-  ctx.font = font;
-  const widths: number[] = [];
-  const lens: number[] = [];
-  for (const { segment } of SEGMENTER.segment(text)) {
-    widths.push(ctx.measureText(segment).width + letterSpacingPx);
-    lens.push(segment.length);
-  }
-  if (widthCache.size >= 4000) widthCache.clear();
-  const metrics = { widths, lens };
-  widthCache.set(key, metrics);
-  return metrics;
-}
-
-/** Sum of the first `n` grapheme widths. */
-function prefixWidth(widths: number[], n: number): number {
-  let w = 0;
-  for (let i = 0; i < n && i < widths.length; i++) w += widths[i]!;
-  return w;
-}
 
 function collectLayoutParas(
   items: readonly { yPx: number; block: import("@docen/layout").LaidOutBlock }[],
@@ -185,6 +158,13 @@ export class CaretMap {
         for (const item of line.items) if (item.kind === "text") text += item.text;
       }
       return norm(text);
+    };
+    // The paragraph's run text — the source the gap walk matches items
+    // against (its whitespace is what pretext trimmed into the gaps).
+    const runTextOf = (para: LaidOutParagraph): string => {
+      let text = "";
+      for (const inline of para.inline) if (inline.kind === "text") text += inline.text;
+      return text;
     };
     // True zip: walk the laid blocks, consuming one PM textblock per logical
     // paragraph. Three drifts must not invalidate the whole map:
@@ -266,6 +246,8 @@ export class CaretMap {
               node,
               lines: [],
               chars: 0,
+              fullText: runTextOf(para),
+              srcCursor: 0,
             };
             this.paras.push(paraEntry);
             this.appendLines(paraEntry, entry);
@@ -304,6 +286,8 @@ export class CaretMap {
         node,
         lines: [],
         chars: 0,
+        fullText: runTextOf(para),
+        srcCursor: 0,
       };
       this.paras.push(paraEntry);
       this.appendLines(paraEntry, entry);
@@ -325,12 +309,30 @@ export class CaretMap {
       // so no line-index guessing.
       const xPx = entry.xPx + lineOriginXPx(para, line);
       let chars = 0;
+      const spaces: number[] = [];
+      const gapStarts: (number | null)[] = [];
+      let prevTextEnd: number | null = null;
       // UTF-16 units — the PM side (posOfChar/charOfPos) counts
       // textContent.length, so the collapsed-char space must too; counting
-      // code points drifted every boundary after an astral char.
-      for (const item of line.items) {
-        if (item.kind === "text") chars += item.text.length;
-      }
+      // code points drifted every boundary after an astral char. The gap
+      // walk counts back the whitespace pretext trimmed ahead of each item
+      // (those characters exist in the PM text — a doc position, a click
+      // boundary and a painted space dot must agree on them).
+      const gaps = lineSpaceGaps(line, paraEntry.fullText, paraEntry.srcCursor);
+      if (gaps.matched) paraEntry.srcCursor = gaps.next;
+      line.items.forEach((item, itemIndex) => {
+        if (item.kind !== "text") {
+          spaces.push(0);
+          gapStarts.push(null);
+          prevTextEnd = null;
+          return;
+        }
+        const gap = gaps.matched ? gaps.spaces[itemIndex]! : 0;
+        chars += gap + item.text.length;
+        spaces.push(gap);
+        gapStarts.push(prevTextEnd);
+        prevTextEnd = item.xPx + item.widthPx;
+      });
       const lineEntry: LineEntry = {
         page: entry.page,
         para,
@@ -341,6 +343,8 @@ export class CaretMap {
         intervals: justifiedIntervals(line),
         startChar,
         endChar: startChar + chars,
+        spaces,
+        gapStarts,
       };
       paraEntry.lines.push(lineEntry);
       this.lines.push(lineEntry);
@@ -530,7 +534,6 @@ export class CaretMap {
 
   /** The x-resolved position within one line (round to the nearest boundary). */
   private posInLine(entry: LineEntry, x: number): number | null {
-    const { line } = entry;
     let char = entry.startChar;
     // Initialized via a cast so TS keeps the declared union at the read site
     // (closure writes aren't tracked and a plain null narrows to never).
@@ -540,24 +543,33 @@ export class CaretMap {
       if (!bestOffset || dist < bestOffset.dist) bestOffset = { pos, dist };
     };
     push(entry.xPx, this.posOfChar(entry.owner, char));
-    for (const [itemIndex, item] of line.items.entries()) {
+    for (const [itemIndex, item] of entry.line.items.entries()) {
       if (item.kind !== "text") continue;
-      const inline = entry.para.inline[item.inlineIndex];
-      if (inline?.kind !== "text") continue;
-      const font = cssFontOf(
-        inline.style,
-        familyOfSlot(inline.style.family, isCjkCodeUnit(item.text, 0)),
-      );
-      const { widths, lens } = graphemeMetrics(item.text, font, inline.style.letterSpacingPx);
-      let prefix = 0;
-      for (let g = 0; g < widths.length; g++) {
-        // xInItem(g) is the g-th grapheme's LEFT edge — the boundary with
+      // The trimmed gap ahead of the item: its characters' left boundaries
+      // share the gap the space dots center in (the previous item's laid end
+      // → this item's x, evenly split), so a click inside the gap lands on
+      // the space char the PM side knows about.
+      const gap = entry.spaces[itemIndex]!;
+      if (gap > 0) {
+        const gs = entry.gapStarts[itemIndex]!;
+        const span = gs != null ? item.xPx - gs : 0;
+        for (let k = 0; k < gap; k++) {
+          push(
+            entry.xPx + (gs != null && span > 0 ? gs + (span * k) / gap : item.xPx),
+            this.posOfChar(entry.owner, char),
+          );
+          char++;
+        }
+      }
+      const glyphs = this.glyphLayout(entry, itemIndex);
+      if (!glyphs) continue;
+      for (let g = 0; g < glyphs.layout.lens.length; g++) {
+        // layout.xs[g] is the g-th grapheme's LEFT edge — the boundary with
         // exactly `char` collapsed UTF-16 units before it. Push it against
         // the pre-increment char; pairing it with char+1 shifted every
         // boundary one position right and clicks landed a full character off.
-        push(this.xInItem(entry, itemIndex, g, prefix, widths), this.posOfChar(entry.owner, char));
-        prefix += widths[g]!;
-        char += lens[g]!;
+        push(glyphs.base + glyphs.layout.xs[g]!, this.posOfChar(entry.owner, char));
+        char += glyphs.layout.lens[g]!;
       }
     }
     // The line-end edge: clicking past the last glyph lands here (Word's
@@ -567,50 +579,37 @@ export class CaretMap {
     return bestOffset?.pos ?? this.posOfChar(entry.owner, entry.endChar);
   }
 
-  /** The x of one grapheme inside an item — the exact distribution the
-   *  painter's justified Text applies: CJK items advance each grapheme by a
-   *  uniform share of the stretch interval (Leafer "both-letter"), Latin
-   *  items shift each word by its word index × the per-gap share ("both-
-   *  justify"). The layout's item widths are pretext's compressed measures —
-   *  scaling plain prefixes by them (the old proportional model) drifted up
-   *  to a full punctuation run mid-line. */
-  private xInItem(
+  /** One text item's glyph placement anchored at the line — the shared
+   *  itemGlyphLayout model (the exact distribution the painter's Text
+   *  renders, Leafer's CharLayout) with the item's stretch/compress
+   *  interval: a justified item's interval end, or on a squeezed line the
+   *  item's own right edge (the painter runs both-letter at negative
+   *  slack — the same uniform per-grapheme delta as justification). */
+  private glyphLayout(
     entry: LineEntry,
     itemIndex: number,
-    graphemeIndex: number,
-    plainPrefix: number,
-    widths: number[],
-  ): number {
+  ): { layout: ItemGlyphLayout; base: number; end: number | undefined } | null {
     const item = entry.line.items[itemIndex]!;
-    const base = entry.xPx + item.xPx + plainPrefix;
-    if (item.kind !== "text") return base;
-    const ends = entry.intervals;
-    // A squeezed line (advanceScale) compresses glyph advances to the item's
-    // already-scaled width — the painter runs both-letter at negative slack,
-    // i.e. the same uniform per-grapheme delta as justification. Modeled as
-    // a justify whose interval ends at the item's own right edge.
-    const squeezeEnd = entry.line.advanceScale != null ? item.xPx + item.widthPx : undefined;
-    const end = ends?.[itemIndex] ?? squeezeEnd;
-    // The boundary past the item's last glyph: a natural item ends at its
-    // advance sum; a justified/squeezed item at its interval's end (the
-    // painter fills the width — the shared justifiedIntervals).
-    if (graphemeIndex >= widths.length) {
-      return end != null ? entry.xPx + end : base;
-    }
-    if (end == null) return base;
-    const interval = end - item.xPx;
-    const count = widths.length;
-    if (count <= 1) return base;
-    let natural = 0;
-    for (const w of widths) natural += w;
-    if (justifyPerGrapheme(item.text)) {
-      return base + graphemeIndex * ((interval - natural) / (count - 1));
-    }
-    // Word gaps: a grapheme's shift is its Leafer word index × gap.
-    const indices = leaferWordIndices(item.text);
-    const words = (indices[count - 1] ?? 0) + 1;
-    if (words <= 1) return base;
-    return base + ((indices[graphemeIndex] ?? 0) * (interval - natural)) / (words - 1);
+    if (item.kind !== "text") return null;
+    const inline = entry.para.inline[item.inlineIndex];
+    if (inline?.kind !== "text") return null;
+    const end =
+      entry.intervals?.[itemIndex] ??
+      (entry.line.advanceScale != null ? item.xPx + item.widthPx : undefined);
+    const font = cssFontOf(
+      inline.style,
+      familyOfSlot(inline.style.family, isCjkCodeUnit(item.text, 0)),
+    );
+    return {
+      layout: itemGlyphLayout(
+        item.text,
+        font,
+        inline.style.letterSpacingPx,
+        end != null ? end - item.xPx : undefined,
+      ),
+      base: entry.xPx + item.xPx,
+      end,
+    };
   }
 
   /** Collapsed-char offset → doc position (walk the textblock's children). */
@@ -729,24 +728,36 @@ export class CaretMap {
     let char = line.startChar;
     for (const [itemIndex, item] of line.line.items.entries()) {
       if (item.kind !== "text") continue;
+      // The trimmed gap ahead of the item: the boundary rides the gap's even
+      // split — the same lattice the space dots center in.
+      const gap = line.spaces[itemIndex]!;
+      if (gap > 0 && offset <= char + gap) {
+        const gs = line.gapStarts[itemIndex]!;
+        const span = gs != null ? item.xPx - gs : 0;
+        return line.xPx + (gs != null && span > 0 ? gs + (span * (offset - char)) / gap : item.xPx);
+      }
+      char += gap;
+      // Inside the item's own glyphs: the shared per-grapheme lattice.
       if (offset <= char + item.text.length) {
-        const inline = line.para.inline[item.inlineIndex];
-        if (inline?.kind !== "text") return line.xPx + item.xPx;
-        const font = cssFontOf(
-          inline.style,
-          familyOfSlot(inline.style.family, isCjkCodeUnit(item.text, 0)),
-        );
-        const { widths, lens } = graphemeMetrics(item.text, font, inline.style.letterSpacingPx);
+        const glyphs = this.glyphLayout(line, itemIndex);
+        if (!glyphs) return line.xPx + item.xPx;
         // UTF-16 offset → grapheme index: an offset that splits a multi-unit
         // grapheme lands at that grapheme's left edge.
         const local = offset - char;
         let g = 0;
         let cum = 0;
-        while (g < lens.length && cum + lens[g]! <= local) {
-          cum += lens[g]!;
+        while (g < glyphs.layout.lens.length && cum + glyphs.layout.lens[g]! <= local) {
+          cum += glyphs.layout.lens[g]!;
           g++;
         }
-        return this.xInItem(line, itemIndex, g, prefixWidth(widths, g), widths);
+        // Past the last grapheme the boundary is the item's end edge: a
+        // justified/squeezed item at its interval's end (the painter fills
+        // the width), a natural item at its advance sum.
+        return g >= glyphs.layout.xs.length
+          ? glyphs.end != null
+            ? line.xPx + glyphs.end
+            : glyphs.base + glyphs.layout.endX
+          : glyphs.base + glyphs.layout.xs[g]!;
       }
       char += item.text.length;
     }

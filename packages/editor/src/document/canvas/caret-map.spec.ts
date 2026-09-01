@@ -109,6 +109,63 @@ describe("CaretMap click boundaries", () => {
   });
 });
 
+describe("CaretMap trimmed-space boundaries", () => {
+  // "ab cd": pretext trims the inter-word space into the gap between the
+  // items (ab@0..20, cd@30..50) — the character itself stays in the PM text,
+  // so the collapsed-char space must count it back in.
+  const gappedPara = (text: string, cdX: number): Record<string, unknown> => ({
+    kind: "paragraph",
+    heightPx: 20,
+    beforePx: 0,
+    afterPx: 0,
+    inline: [{ kind: "text", text, style: { sizePx: 16, family: "Test" } }],
+    lines: [
+      {
+        yPx: 0,
+        heightPx: 20,
+        naturalPx: 16,
+        items: [
+          { kind: "text", text: "ab", xPx: 0, widthPx: 20, inlineIndex: 0 },
+          { kind: "text", text: "cd", xPx: cdX, widthPx: 20, inlineIndex: 0 },
+        ],
+        maxWidthPx: 100,
+      },
+    ],
+  });
+
+  it("counts trimmed gap characters so positions match the PM text", () => {
+    // Before: the collapsed space held 4 chars, so the line-end click mapped
+    // to innerPos+4 — one char short of the paragraph's real end (5 chars).
+    const { doc } = buildDoc(["ab cd"]);
+    const map = new CaretMap(pageOf([gappedPara("ab cd", 30)]) as never, doc, () => ({
+      contentLeftPx: 0,
+      contentTopPx: 0,
+    }));
+    // Past the last glyph → the paragraph's true end (innerPos 1 + 5 chars).
+    expect(map.posAtPoint(0, 48, 5)).toBe(6);
+    // Inside the gap → the space character's own boundaries.
+    expect(map.posAtPoint(0, 22, 5)).toBe(3);
+    expect(map.caretRect(3)?.xPx).toBe(20); // the space's left edge (ab's end)
+    expect(map.caretRect(4)?.xPx).toBe(30); // its right edge = cd's start
+    expect(map.caretRect(6)?.xPx).toBe(50); // the line's advance sum
+  });
+
+  it("splits a multi-space gap's boundaries evenly across the gap", () => {
+    // "ab  cd": two trimmed spaces share the 20px gap — the caret boundaries
+    // sit at 20 / 30 inside it, the same split the space dots center in.
+    const { doc } = buildDoc(["ab  cd"]);
+    const map = new CaretMap(pageOf([gappedPara("ab  cd", 40)]) as never, doc, () => ({
+      contentLeftPx: 0,
+      contentTopPx: 0,
+    }));
+    expect(map.caretRect(3)?.xPx).toBe(20); // first space's left edge
+    expect(map.caretRect(4)?.xPx).toBe(30); // between the two spaces
+    expect(map.caretRect(5)?.xPx).toBe(40); // cd's start
+    // The paragraph's real end: innerPos 1 + 6 chars.
+    expect(map.posAtPoint(0, 58, 5)).toBe(7);
+  });
+});
+
 describe("CaretMap selection rectangles", () => {
   it("stretches fully crossed lines to the wrap edge; the last line stops at text", () => {
     const { doc } = buildDoc(["ab", "cde"]);
