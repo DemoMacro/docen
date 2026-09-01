@@ -9,7 +9,7 @@ import { describe, expect, it, vi } from "vitest";
 // deterministic 10px-per-grapheme font so boundary lattices are exact.
 const fakeCtx = {
   set font(_v: string) {},
-  measureText: (text: string) => ({ width: [...text].length * 10 }),
+  measureText: (text: string) => ({ width: text.length * 10 }),
 } as unknown as CanvasRenderingContext2D;
 vi.stubGlobal("document", {
   createElement: (tag: string) => (tag === "canvas" ? { getContext: () => fakeCtx } : {}),

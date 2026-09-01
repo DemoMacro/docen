@@ -53,7 +53,7 @@ export function fitExtentPx(block: LaidOutBlock): number {
  *  maxWidth + the overflow-punct hang. Null on unjustified lines. */
 export function justifiedIntervals(line: LaidOutLine): number[] | null {
   if (line.justifyGapPx == null) return null;
-  const ends: number[] = new Array(line.items.length);
+  const ends: number[] = Array.from({ length: line.items.length });
   let nextLeft = (line.maxWidthPx ?? 0) + (line.hangPx ?? 0);
   for (let i = line.items.length - 1; i >= 0; i--) {
     ends[i] = nextLeft;

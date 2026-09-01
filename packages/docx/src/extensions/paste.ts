@@ -32,10 +32,10 @@ function flattenListNesting(root: HTMLElement): void {
   for (const list of topLevel) {
     const items: HTMLElement[] = [];
     const walk = (parent: Element, level: number, ordered: boolean): void => {
-      for (const li of [...parent.children]) {
+      for (const li of parent.children) {
         if (li.tagName.toUpperCase() !== "LI") continue;
         const nested: Element[] = [];
-        for (const child of [...li.children]) {
+        for (const child of li.children) {
           const tag = child.tagName.toUpperCase();
           if (tag === "UL" || tag === "OL") nested.push(child);
         }

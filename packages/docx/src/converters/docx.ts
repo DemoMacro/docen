@@ -111,7 +111,7 @@ const COMPILE_OWNED_KEYS = new Set<string>([
   "styles",
   "background",
   ...CORE_PROPERTY_KEYS,
-] satisfies (keyof DocumentOptions & string)[]);
+] satisfies (keyof DocumentOptions)[]);
 
 /** Collect core properties present on DocumentOptions into a plain object. */
 function extractCoreProperties(docOpts: DocumentOptions): DocxCoreProperties | null {
