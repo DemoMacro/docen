@@ -10,7 +10,10 @@
 // `toggleMark` command).
 
 import type { RunOptions } from "@office-open/docx";
+import { HighlightColor, HIGHLIGHT_PALETTE_RGB } from "@office-open/docx";
 import { Mark } from "@tiptap/core";
+
+import { normalizeColorToHex } from "./utils";
 
 // Each mark surfaces only the "true" state for editor interaction (toolbar
 // toggle, <strong>/<em>). The full three-state round-trip (true/false/null) is
@@ -82,6 +85,15 @@ export const Code = Mark.create({
   parseDocx: (opts: RunOptions) => (opts.style === "CodeChar" ? {} : null),
 });
 
+// w:highlight val is the fixed ST_HighlightColor enumeration — hex is illegal
+// there and Word refuses the file. The palette table lives in office-open next
+// to HighlightColor; off-palette colors ride as character shading (the same
+// encoding Word itself uses — highlight supersedes shd when both are present).
+const HIGHLIGHT_NAME_BY_RGB = new Map(
+  Object.entries(HIGHLIGHT_PALETTE_RGB).map(([name, rgb]) => [rgb.toUpperCase(), name]),
+);
+const HIGHLIGHT_NAMES: ReadonlySet<string> = new Set(Object.values(HighlightColor));
+
 export const Highlight = Mark.create({
   name: "highlight",
   addAttributes() {
@@ -98,7 +110,26 @@ export const Highlight = Mark.create({
   parseHTML() {
     return [{ tag: "mark" }];
   },
-  renderDocx: (attrs: Record<string, unknown>) => ({ highlight: attrs.color ?? "yellow" }),
+  renderDocx: (attrs: Record<string, unknown>) => {
+    const color = typeof attrs.color === "string" ? attrs.color : null;
+    if (!color) return { highlight: "yellow" };
+    // Palette names are lowercase OOXML tokens; accept any case, emit the token.
+    const lower = color.toLowerCase();
+    if (HIGHLIGHT_NAMES.has(lower)) return { highlight: lower };
+    // normalizeColorToHex accepts every form pasted HTML carries (rgb(), #hex,
+    // CSS names); a palette hex maps back to its token. Off-palette colors ride
+    // as character shading — the same encoding Word itself uses when a
+    // highlight color outside the fixed palette is wanted (highlight supersedes
+    // shd when both are present, so this reads back as plain background color).
+    const hex = normalizeColorToHex(color)?.slice(1);
+    if (hex) {
+      const named = HIGHLIGHT_NAME_BY_RGB.get(hex);
+      return named ? { highlight: named } : { shading: { fill: hex, type: "clear" } };
+    }
+    // Unparseable color — fall back to the default token rather than emit an
+    // illegal w:highlight/w:fill value Word would refuse.
+    return { highlight: "yellow" };
+  },
   // office-open models <w:highlight w:val="none"/> (Word's "cancel inherited
   // highlight") as the string "none" — a truthy value. Exclude it so the mark
   // is not wrongly applied; TextStyle still passes highlight="none" through
