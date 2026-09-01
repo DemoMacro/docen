@@ -179,7 +179,8 @@ const bulletItems = (): string =>
     { text: opt("bullet"), value: "bullet" },
     { text: opt("circle"), value: "circle" },
     { text: opt("square"), value: "square" },
-    { text: opt("change-list-level"), value: "level" },
+    // Word's Change List Level — demote one level (the menu stand-in for Tab).
+    { text: opt("change-list-level"), value: "in", event: "multilevel-list" },
   ]);
 
 const numberItems = (): string =>
@@ -187,7 +188,7 @@ const numberItems = (): string =>
     { text: opt("decimal"), value: "decimal" },
     { text: opt("lower-alpha"), value: "lower-alpha" },
     { text: opt("lower-roman"), value: "lower-roman" },
-    { text: opt("change-list-level"), value: "level" },
+    { text: opt("change-list-level"), value: "in", event: "multilevel-list" },
   ]);
 
 const multilevelItems = (): string =>

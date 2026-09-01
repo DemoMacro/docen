@@ -25,6 +25,7 @@ import { Fragment, Slice } from "@tiptap/pm/model";
 import { NodeSelection, TextSelection } from "@tiptap/pm/state";
 import { getMatchHighlights } from "prosemirror-search";
 
+import { listLevelStepPatch } from "../extensions/commands";
 import { KEYBOARD_SHORTCUTS } from "../extensions/keymap";
 import { CaretMap } from "./caret-map";
 
@@ -218,6 +219,10 @@ export interface EditBridge {
    *  never persists a copy event's custom types to the system clipboard, so
    *  the payload rides memory when the system text still matches it. */
   copiedSlice(): { payload: string; text: string } | null;
+  /** Copy/cut the ACTIVE story's selection for the entry points that produce
+   *  no copy event (ribbon / context-menu buttons). Pins the slice payload
+   *  exactly like the keyboard path, so every paste entry recovers marks. */
+  copySelection(cut: boolean): Promise<void>;
   /** The editor input currently routes into — the main editor, or the
    *  furniture story's when one is open. Ribbon commands must target the same
    *  editor the caret lives in, or they stamp the main document's stale
@@ -325,6 +330,10 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
   // IME candidate window anchors near the interaction point (true caret-point
   // anchoring lands with the caret milestone).
   const ta = document.createElement("textarea");
+  // Marks the bridge input for the host's chrome-key gate: Ctrl+= / Ctrl+0
+  // must still zoom with the caret in the document (this textarea IS the
+  // document input, not a form field).
+  ta.dataset.docenBridgeInput = "true";
   Object.assign(ta.style, {
     position: "absolute",
     width: "1px",
@@ -933,6 +942,12 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     // candidate navigation). Preventing insertCompositionText breaks that
     // management — the final text is taken from ta.value on compositionend.
     if (composing) return;
+    // Viewing mode refuses text entry (the bridge textarea is invisible but
+    // focused — without this gate typing would still mutate the doc).
+    if (!active().editor.isEditable) {
+      event.preventDefault();
+      return;
+    }
     event.preventDefault();
     switch (event.inputType) {
       case "insertText":
@@ -1067,22 +1082,46 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     // The IME owns the keyboard during composition (candidate navigation,
     // commit keys) — our caret moves would cancel it mid-word.
     if (composing) return;
+    // Viewing mode: caret moves and selection stay live (the READONLY_LIVE
+    // ribbon set's keyboard counterpart), but nothing may mutate the doc.
+    const editable = active().editor.isEditable;
+    // Shift+Enter inserts a soft line break (w:br inside the paragraph) —
+    // captured here because the textarea reports both Enter flavors to
+    // beforeinput as the same insertLineBreak.
+    if (editable && event.key === "Enter" && event.shiftKey && !event.ctrlKey && !event.metaKey) {
+      event.preventDefault();
+      active().editor.commands.command(({ state, dispatch }) => {
+        if (dispatch) {
+          const tr = state.tr;
+          const br = state.schema.nodes.hardBreak?.create();
+          if (!br) return false;
+          if (!state.selection.empty) tr.deleteSelection();
+          tr.insert(state.selection.from, br);
+          dispatch(tr.scrollIntoView());
+        }
+        return true;
+      });
+      return;
+    }
     if (event.ctrlKey || event.metaKey) {
-      const key = event.key.toLowerCase();
-      if (key === "z") {
+      const key = event.key;
+      const lower = key.toLowerCase();
+      if (lower === "z") {
+        if (!editable) return;
         event.preventDefault();
         if (event.shiftKey) active().editor.commands.redo();
         else active().editor.commands.undo();
         return;
       }
-      if (key === "y") {
+      if (lower === "y") {
+        if (!editable) return;
         event.preventDefault();
         active().editor.commands.redo();
         return;
       }
       // Select all — without this the browser default selects the 1px
       // textarea's (empty) contents and the press is lost.
-      if (key === "a") {
+      if (lower === "a") {
         event.preventDefault();
         active().editor.commands.command(({ state, dispatch }) =>
           selectAll(state as never, dispatch),
@@ -1091,14 +1130,22 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       }
       // Viewless editors have no EditorView, so nothing dispatches Tiptap's
       // per-extension keyboard shortcuts — match the shared table here (the
-      // DocenKeymap extension serves the same table on a DOM route).
-      const combo = `Mod${event.shiftKey ? "-Shift" : ""}-${key.toUpperCase()}`;
+      // DocenKeymap extension serves the same table on a DOM route). Named
+      // keys keep their spelling ("Mod-Enter"); single characters uppercase
+      // ("Mod-B") — a blanket toUpperCase turned Enter into "ENTER" and
+      // silently dead-matched the table.
+      const combo = `Mod${event.shiftKey ? "-Shift" : ""}-${key.length === 1 ? lower.toUpperCase() : key}`;
       const command = KEYBOARD_SHORTCUTS[combo];
       if (command) {
+        if (!editable) return;
         event.preventDefault();
-        (active().editor.commands as unknown as Record<string, (() => boolean) | undefined>)[
-          command
-        ]?.();
+        const [name, arg] = command.split(":");
+        (
+          active().editor.commands as unknown as Record<
+            string,
+            ((arg?: string) => boolean) | undefined
+          >
+        )[name]?.(arg);
       }
       return;
     }
@@ -1147,19 +1194,11 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
         const patches: { pos: number; patch: Record<string, unknown> }[] = [];
         active().editor.state.doc.nodesBetween(from, to, (node, pos) => {
           if (node.type.name !== "paragraph") return true;
-          const attrs = node.attrs as Record<string, unknown>;
-          const bullet = attrs.bullet as { level?: number } | null | undefined;
-          const numbering = attrs.numbering as
-            | { reference?: string; level?: number }
-            | null
-            | undefined;
-          if (!bullet && !numbering) return true;
-          const delta = event.shiftKey ? -1 : 1;
-          const level = Math.min(8, Math.max(0, (bullet?.level ?? numbering?.level ?? 0) + delta));
-          patches.push({
-            pos,
-            patch: bullet ? { bullet: { level } } : { numbering: { ...numbering, level } },
-          });
+          const patch = listLevelStepPatch(
+            node.attrs as Record<string, unknown>,
+            event.shiftKey ? -1 : 1,
+          );
+          if (patch) patches.push({ pos, patch });
           return true;
         });
         if (patches.length > 0) {
@@ -1247,7 +1286,14 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     const html = data?.getData("text/html");
     if (html && insertPastedJSON(html)) return;
     const text = data?.getData("text/plain");
-    if (text) insertText(text);
+    if (text) {
+      // A ribbon/context-menu copy wrote its custom format through the async
+      // API, which a paste event never sees — recover the marks via the pin
+      // when the plain text still matches it (stale after a copy elsewhere,
+      // which is exactly when the fallback must not fire).
+      if (lastCopied?.text === text && insertSlicePayload(lastCopied.payload)) return;
+      insertText(text);
+    }
   };
 
   const selectionText = (): string | null => {
@@ -1264,31 +1310,74 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
    *  which is exactly when the fallback must not fire). */
   let lastCopied: { payload: string; text: string } | null = null;
 
-  const onCopy = (event: ClipboardEvent): void => {
+  /** Pin the current selection's copy pieces and register them for the
+   *  fallback lane. Neither clipboard channel carries the custom format to a
+   *  paste event — a copy EVENT's types never persist to the system clipboard,
+   *  and the async write's `web ` format never reaches a paste event — so the
+   *  pinned payload plus the matching plain text is what every paste path
+   *  recovers marks through. */
+  const pinCopied = (): { text: string; payload: string | null } | null => {
     const text = selectionText();
-    if (text == null) return;
-    event.preventDefault();
-    event.clipboardData?.setData("text/plain", text);
+    if (text == null) return null;
     const payload = selectionSlicePayload(active().editor.state);
     lastCopied = payload ? { payload, text } : null;
+    return { text, payload };
+  };
+
+  const onCopy = (event: ClipboardEvent): void => {
+    const copied = pinCopied();
+    if (!copied) return;
+    event.preventDefault();
+    event.clipboardData?.setData("text/plain", copied.text);
     // The `web ` prefix is Chromium's spelling for custom clipboard formats;
     // through a copy event it only survives same-page DataTransfer passthrough
     // (the async read() needs the pinned payload above).
-    if (payload) event.clipboardData?.setData(`web ${DOCEN_CLIP_MIME}`, payload);
+    if (copied.payload) event.clipboardData?.setData(`web ${DOCEN_CLIP_MIME}`, copied.payload);
   };
 
   const onCut = (event: ClipboardEvent): void => {
-    const text = selectionText();
-    if (text == null) return;
+    const copied = pinCopied();
+    if (!copied) return;
     event.preventDefault();
-    event.clipboardData?.setData("text/plain", text);
-    const payload = selectionSlicePayload(active().editor.state);
-    lastCopied = payload ? { payload, text } : null;
-    if (payload) event.clipboardData?.setData(`web ${DOCEN_CLIP_MIME}`, payload);
+    event.clipboardData?.setData("text/plain", copied.text);
+    if (copied.payload) event.clipboardData?.setData(`web ${DOCEN_CLIP_MIME}`, copied.payload);
     active().editor.commands.command(({ state, dispatch }) => {
       dispatch?.(state.tr.deleteSelection());
       return true;
     });
+  };
+
+  /** Copy/cut for the entry points that produce no copy event (the ribbon and
+   *  context-menu buttons — the selection is canvas-rendered). Writes the
+   *  system clipboard through the async API (the custom format survives there
+   *  for clipboard.read()-based pastes) and pins the payload so a keyboard
+   *  paste — which cannot see either custom-format channel — still recovers
+   *  the marks. */
+  const copySelection = async (cut: boolean): Promise<void> => {
+    const copied = pinCopied();
+    if (!copied) return;
+    try {
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          "text/plain": new Blob([copied.text], { type: "text/plain" }),
+          ...(copied.payload
+            ? { [`web ${DOCEN_CLIP_MIME}`]: new Blob([copied.payload], { type: DOCEN_CLIP_MIME }) }
+            : {}),
+        }),
+      ]);
+    } catch {
+      try {
+        await navigator.clipboard.writeText(copied.text);
+      } catch {
+        // Clipboard write may be denied (permissions/policy) — still cut.
+      }
+    }
+    if (cut) {
+      active().editor.commands.command(({ state, dispatch }) => {
+        dispatch?.(state.tr.deleteSelection());
+        return true;
+      });
+    }
   };
 
   ta.addEventListener("beforeinput", onBeforeInput);
@@ -1334,6 +1423,9 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     },
     copiedSlice(): { payload: string; text: string } | null {
       return lastCopied;
+    },
+    copySelection(cut: boolean): Promise<void> {
+      return copySelection(cut);
     },
     enterStory(kind, page, seed): boolean {
       const storyCfg = opts.story;

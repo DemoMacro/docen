@@ -229,6 +229,21 @@ function listStateOf(attrs: Record<string, unknown>): ListState {
   return { kind: "ordered", variant: "source", reference, level };
 }
 
+/** The Word Tab semantics patch for a paragraph: a list paragraph steps its
+ *  bullet/numbering level by `delta` (clamped 0–8, keeping the numbering
+ *  reference); null when the paragraph is not a list. Shared by the Tab key,
+ *  the indent commands, and the list drop-downs' Change List Level. */
+export function listLevelStepPatch(
+  attrs: Record<string, unknown>,
+  delta: number,
+): Record<string, unknown> | null {
+  const bullet = attrs.bullet as { level?: number } | null | undefined;
+  const numbering = attrs.numbering as { reference?: string; level?: number } | null | undefined;
+  if (!bullet && !numbering) return null;
+  const level = Math.min(8, Math.max(0, (bullet?.level ?? numbering?.level ?? 0) + delta));
+  return bullet ? { bullet: { level } } : { numbering: { ...numbering, level } };
+}
+
 /** The paragraphs the selection covers, with their positions. */
 function selectedParagraphs(state: EditorState): { pos: number; node: PMNode }[] {
   const { from, to } = state.selection;
@@ -450,13 +465,20 @@ export const DocumentCommands = Extension.create({
       // All four walk EVERY selected paragraph (each keeps its own existing
       // attrs — a range-spanning updateAttributes would stamp the first
       // paragraph's merged value onto the rest). Increase/decrease left
-      // indent by Word's 0.5" step.
+      // indent by Word's 0.5" step; a list paragraph indents to the next
+      // outline level instead (the Tab semantics, not a text shift).
       "indent-increase":
         () =>
         ({ state, tr }) => {
           let touched = false;
           for (const { pos, node } of selectedParagraphs(state)) {
             const attrs = node.attrs as Record<string, unknown>;
+            const list = listLevelStepPatch(attrs, 1);
+            if (list) {
+              tr.setNodeMarkup(pos, undefined, { ...attrs, ...list });
+              touched = true;
+              continue;
+            }
             const current = (attrs.indent ?? {}) as { left?: number; right?: number };
             const left = Math.max(0, (current.left ?? 0) + INDENT_STEP_TWIPS);
             tr.setNodeMarkup(pos, undefined, { ...attrs, indent: { ...current, left } });
@@ -470,6 +492,12 @@ export const DocumentCommands = Extension.create({
           let touched = false;
           for (const { pos, node } of selectedParagraphs(state)) {
             const attrs = node.attrs as Record<string, unknown>;
+            const list = listLevelStepPatch(attrs, -1);
+            if (list) {
+              tr.setNodeMarkup(pos, undefined, { ...attrs, ...list });
+              touched = true;
+              continue;
+            }
             const current = (attrs.indent ?? {}) as { left?: number; right?: number };
             const left = Math.max(0, (current.left ?? 0) - INDENT_STEP_TWIPS);
             tr.setNodeMarkup(pos, undefined, { ...attrs, indent: { ...current, left } });
@@ -740,22 +768,28 @@ export const DocumentCommands = Extension.create({
         },
       // Promote/demote the selected list paragraphs to a fixed multilevel
       // depth (level-1 = top, level-2/3 = one/two in), keeping each
-      // paragraph's list kind and reference. The split's main click carries
-      // no value — top level, not a demotion to level 2. No-op on non-list
-      // paragraphs.
+      // paragraph's list kind and reference. "in"/"out" (the Bullets and
+      // Numbering drop-downs' Change List Level item) step each paragraph
+      // relative to its own level — the shared Tab semantics. The split's
+      // main click carries no value — top level, not a demotion to level 2.
+      // No-op on non-list paragraphs.
       "multilevel-list":
         (level) =>
         ({ state, tr }) => {
-          const target = level == null || level === "level-1" ? 0 : level === "level-3" ? 2 : 1;
+          const step = level === "in" ? 1 : level === "out" ? -1 : 0;
+          const target =
+            step === 0 ? (level === "level-3" ? 2 : level === "level-2" ? 1 : 0) : null;
           let touched = false;
           for (const { pos, node } of selectedParagraphs(state)) {
             const attrs = node.attrs as Record<string, unknown>;
             const cur = listStateOf(attrs);
             if (!cur.kind) continue;
+            const depth = step === 0 ? target! : Math.min(8, Math.max(0, cur.level + step));
+            if (depth === cur.level) continue;
             const patch =
               cur.kind === "bullet" && cur.variant === "bullet"
-                ? { bullet: { level: target }, numbering: null }
-                : { bullet: null, numbering: { reference: cur.reference, level: target } };
+                ? { bullet: { level: depth }, numbering: null }
+                : { bullet: null, numbering: { reference: cur.reference, level: depth } };
             tr.setNodeMarkup(pos, undefined, { ...attrs, ...patch });
             touched = true;
           }

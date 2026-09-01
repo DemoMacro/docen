@@ -23,7 +23,6 @@ import {
   parseMarkdown,
   sectionPageSizeDefaults,
   DOCEN_CLIP_MIME,
-  selectionSlicePayload,
   type JSONContent,
   type BorderOptions,
   type PageBordersOptions,
@@ -314,6 +313,12 @@ class DocenDocument extends AddinHost<Editor> {
       search?.focus();
       return;
     }
+    // F12 = Save As (Word).
+    if (event.key === "F12") {
+      event.preventDefault();
+      void this.#saveAs();
+      return;
+    }
     if (!(event.ctrlKey || event.metaKey)) return;
     // Ctrl+F opens Find, Ctrl+H opens Find & Replace (Word behavior).
     if (event.key === "f" || event.key === "F") {
@@ -326,9 +331,27 @@ class DocenDocument extends AddinHost<Editor> {
       this.#openFindReplace();
       return;
     }
+    // Ctrl+S saves (Word) — before the input gate, a save applies everywhere.
+    if (event.key === "s" || event.key === "S") {
+      event.preventDefault();
+      if (!this.#emitCancelable("docen:save")) void this.#saveAs();
+      return;
+    }
+    // Ctrl+P prints the canvas pages (Word) — not the browser's DOM print.
+    if (event.key === "p" || event.key === "P") {
+      event.preventDefault();
+      if (!this.#emitCancelable("docen:print")) this.#print();
+      return;
+    }
     // composedPath()[0] is the real target inside the shadow DOM (e.g. a combobox input).
     const target = event.composedPath()[0] as HTMLElement | null;
-    if (target instanceof HTMLElement && target.closest("input, textarea, docen-ribbon-combobox"))
+    if (
+      target instanceof HTMLElement &&
+      target.closest("input, textarea, docen-ribbon-combobox") &&
+      // The bridge textarea IS the document input — zoom must stay live with
+      // the caret in the document.
+      !target.closest("[data-docen-bridge-input]")
+    )
       return;
     const key = event.key;
     if (key === "+" || key === "=") {
@@ -595,7 +618,9 @@ class DocenDocument extends AddinHost<Editor> {
   /** Editing → Select menu. "all" uses the official selectAll() command;
    *  "objects"/"similar" are placeholders. */
   #select(value?: string): void {
-    const editor = this.editor;
+    // The story the caret lives in — Ctrl+A selects the story text, the menu
+    // command must agree with it (a stale main-doc range would be invisible).
+    const editor = this.#bridge?.activeEditor() ?? this.editor;
     if (!editor) return;
     if ((value ?? "all") !== "all") return;
     this.#bridge?.focus();
@@ -625,7 +650,7 @@ class DocenDocument extends AddinHost<Editor> {
       this.#stopFormatPainter();
       return;
     }
-    const editor = this.editor;
+    const editor = this.#bridge?.activeEditor() ?? this.editor;
     if (!editor || editor.state.selection.empty) return;
     // Probe one character into the selection: $from sits on the boundary,
     // and ResolvedPos.marks() reads the character BEFORE the position — the
@@ -634,7 +659,7 @@ class DocenDocument extends AddinHost<Editor> {
     this.#painterMarks = editor.state.doc.resolve(editor.state.selection.from + 1).marks();
     this.toggleAttribute("format-painter", true);
     const onUp = (): void => {
-      const ed = this.editor;
+      const ed = this.#bridge?.activeEditor() ?? this.editor;
       if (!ed) return;
       const { from, to, empty } = ed.state.selection;
       if (!empty && this.#painterMarks) {
@@ -2221,6 +2246,11 @@ class DocenDocument extends AddinHost<Editor> {
       items.push({ text: t("context.copy", this), event: "copy" });
     }
     items.push({ text: t("context.paste", this), event: "paste" });
+    items.push({
+      text: t("context.keep-text-only", this),
+      event: "paste",
+      value: "keep-text-only",
+    });
     items.push({ text: "-" });
     if (inSelection) {
       if (onLink) {
@@ -2705,7 +2735,9 @@ class DocenDocument extends AddinHost<Editor> {
    *  and an editable empty body (the PM `content`); a gallery shape carries
    *  its preset geometry with the accent fill instead. */
   #insertShape(preset: string | undefined): void {
-    const editor = this.editor;
+    // Insert into the story the caret lives in — a header/footer story must
+    // receive the shape, not the stale main-doc selection behind it.
+    const editor = this.#bridge?.activeEditor() ?? this.editor;
     if (!editor) return;
     const geometry: Record<string, unknown> = {
       // Word's plain text box default: 2" × 1.2".
@@ -2823,6 +2855,9 @@ class DocenDocument extends AddinHost<Editor> {
     // the update once the fresh layout lands (Word's insert-then-update-
     // fields behavior).
     if (name === "toc" || name === "update-toc") {
+      // Insert/update in the story the caret lives in (a header/footer story
+      // opening must not send the TOC into the stale main-doc selection).
+      const target = this.#bridge?.activeEditor() ?? editor;
       const pageOf = (pos: number): number | null => {
         const page = this.#bridge?.pageOf(pos);
         return typeof page === "number" ? page + 1 : null;
@@ -2830,12 +2865,12 @@ class DocenDocument extends AddinHost<Editor> {
       const tabPositionTw = this.#flow
         ? Math.round(this.#flow.contentWidthPx / twipToPx(1))
         : undefined;
-      const ran = editor.commands[name](pageOf, tabPositionTw);
+      const ran = target.commands[name](pageOf, tabPositionTw);
       if (name === "toc" && ran) {
         // Frame N re-flows (the bridge's raf-merged onDoc), frame N+1 the
         // caret map carries the post-insert pagination.
         requestAnimationFrame(() =>
-          requestAnimationFrame(() => editor.commands["update-toc"](pageOf, tabPositionTw)),
+          requestAnimationFrame(() => target.commands["update-toc"](pageOf, tabPositionTw)),
         );
       }
       return;
@@ -2972,13 +3007,20 @@ class DocenDocument extends AddinHost<Editor> {
       return;
     }
     // Clipboard — the selection is canvas-rendered (no DOM editor selection),
-    // so copy/cut read the doc range and write the clipboard directly.
+    // so copy/cut route through the bridge's lane (it pins the slice payload
+    // exactly like a keyboard copy, keeping every paste entry lossless).
     if (name === "copy" || name === "cut") {
-      void this.#copySelection(name === "cut");
+      void this.#bridge?.copySelection(name === "cut");
       return;
     }
     if (name === "paste") {
       void this.#paste(value === "keep-text-only");
+      return;
+    }
+    // View → Print Layout split button — the same canvas-page print the file
+    // menu's Print performs (Word's print shortcut surface).
+    if (name === "print-layout") {
+      if (!this.#emitCancelable("docen:print")) this.#print();
       return;
     }
     // Editing → Select: selectAll() spans the whole document.
@@ -3016,44 +3058,6 @@ class DocenDocument extends AddinHost<Editor> {
     // button that opens a URL) that Tiptap can't express.
     this.dispatchCommand(name, value);
   };
-
-  /** Copy/cut the current selection to the system clipboard. The custom
-   *  docen MIME (a PM slice payload) rides along so a paste back into a docen
-   *  editor keeps every mark — Chrome carries it through the async clipboard
-   *  as a web custom format; engines that reject it degrade to plain text.
-   *  Cut also deletes the range. */
-  async #copySelection(cut: boolean): Promise<void> {
-    const editor = this.editor;
-    if (!editor) return;
-    const { from, to } = editor.state.selection;
-    if (from === to) return;
-    const text = editor.state.doc.textBetween(from, to, "\n");
-    const payload = selectionSlicePayload(editor.state);
-    try {
-      await navigator.clipboard.write([
-        new ClipboardItem({
-          "text/plain": new Blob([text], { type: "text/plain" }),
-          ...(payload
-            ? { [`web ${DOCEN_CLIP_MIME}`]: new Blob([payload], { type: DOCEN_CLIP_MIME }) }
-            : {}),
-        }),
-      ]);
-    } catch {
-      try {
-        await navigator.clipboard.writeText(text);
-      } catch {
-        // Clipboard write may be denied (permissions/policy) — still cut.
-      }
-    }
-    if (cut) {
-      // Viewless: there is no view to dispatch through — route the delete as
-      // a command (the bridge's own pattern).
-      editor.commands.command(({ state, dispatch }) => {
-        dispatch?.(state.tr.deleteSelection());
-        return true;
-      });
-    }
-  }
 
   /** Menu items and the auto-save switch carry their action in `data-event`. */
   readonly #onChange = (event: Event): void => {

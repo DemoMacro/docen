@@ -40,6 +40,16 @@ export const KEYBOARD_SHORTCUTS: Readonly<Record<string, string>> = {
   "Mod-I": "italic",
   "Mod-U": "underline",
   "Mod-Shift-X": "strike",
+  // Alignment (Word's Ctrl+E/L/R/J). Line-spacing Ctrl+1/2/5 are browser
+  // tab-switch reserved keys — not bindable on the web. Ctrl+= (sub/super-
+  // script in Word) stays on the host's zoom, Ctrl+Shift+< / > grow/shrink.
+  "Mod-E": "align-center",
+  "Mod-L": "align-left",
+  "Mod-R": "align-right",
+  "Mod-J": "justify",
+  "Mod-Shift->": "grow-font",
+  "Mod-Shift-<": "shrink-font",
+  // A value rides after ":" — `line-spacing:2` calls the command with "2".
 };
 
 export const DocenKeymap = Extension.create({
@@ -50,10 +60,14 @@ export const DocenKeymap = Extension.create({
       Object.entries(KEYBOARD_SHORTCUTS).map(([key, event]) => [
         key,
         () => {
+          const [name, arg] = event.split(":");
           const cmd = (
-            this.editor.commands as unknown as Record<string, (() => boolean) | undefined>
-          )[event];
-          return typeof cmd === "function" ? cmd() : false;
+            this.editor.commands as unknown as Record<
+              string,
+              ((arg?: string) => boolean) | undefined
+            >
+          )[name];
+          return typeof cmd === "function" ? cmd(arg) : false;
         },
       ]),
     );
