@@ -814,6 +814,51 @@ describe("projectDocumentOptions drawings", () => {
     expect(member.width).toBeCloseTo(50, 5);
   });
 
+  it("mirrors every member of a top-level flipH group within the drawing box", () => {
+    const { blocks } = oneSection(
+      doc([
+        {
+          paragraph: {
+            children: [
+              {
+                wpgGroup: {
+                  children: [
+                    {
+                      type: "wps",
+                      transformation: {
+                        pixels: { x: 0, y: 0 },
+                        emus: { x: 476250, y: 190500 },
+                        offset: { pixels: { x: 0, y: 0 }, emus: { x: 476250, y: 0 } },
+                      },
+                      data: {
+                        geometry: "rect",
+                        fill: { type: "none" },
+                        children: [],
+                      },
+                    },
+                  ],
+                  transformation: { width: 952500, height: 190500, flipHorizontal: true },
+                  childOffsetX: 0,
+                  childOffsetY: 0,
+                  childExtentWidth: 952500,
+                  childExtentHeight: 190500,
+                },
+              },
+            ],
+          },
+        },
+      ]),
+    );
+    const para = blocks[0];
+    if (para?.kind !== "paragraph") throw new Error("expected paragraph");
+    const member = para.drawings?.[0]?.members[0];
+    if (member?.kind !== "shape") throw new Error("expected shape member");
+    // Box = 100×20px, children share its units 1:1. The child's unmirrored
+    // [50,100) span reflects to [0,50) inside the box.
+    expect(member.x).toBeCloseTo(0, 5);
+    expect(member.width).toBeCloseTo(50, 5);
+  });
+
   it("projects a wps text-box child's paragraphs through the style cascade", () => {
     const { blocks } = oneSection(
       doc([

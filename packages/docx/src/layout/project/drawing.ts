@@ -458,6 +458,19 @@ function projectDrawing(group: GroupOptions, ctx: ProjectContext): LayoutDrawing
 
   // Child coordinate space: chOff/chExt → the group's EMU box. A missing
   // chExt means the children already live in the group's own units (1:1).
+  // A flip on the top-level group mirrors that whole child space within the
+  // drawing's own box — the same mirror stack nested groups extend.
+  const topMirror: GroupMirror | undefined =
+    group.transformation.flipHorizontal === true || group.transformation.flipVertical === true
+      ? {
+          h: group.transformation.flipHorizontal === true,
+          v: group.transformation.flipVertical === true,
+          x: 0,
+          y: 0,
+          width: emuToPx(extW),
+          height: emuToPx(extH),
+        }
+      : undefined;
   const members: LayoutDrawingMember[] = [];
   walkGroup(
     group,
@@ -469,6 +482,7 @@ function projectDrawing(group: GroupOptions, ctx: ProjectContext): LayoutDrawing
     group.childOffsetY ?? 0,
     members,
     ctx,
+    topMirror ? [topMirror] : undefined,
   );
   return {
     anchor,
