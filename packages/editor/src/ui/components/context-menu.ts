@@ -34,6 +34,12 @@ class DocenContextMenu extends HTMLElement {
 
   #menu?: HTMLElement;
   #list?: HTMLElement;
+  /** The document-level click listener that closes the menu (see #armDismiss). */
+  #dismiss?: (event: Event) => void;
+
+  disconnectedCallback(): void {
+    this.#disarmDismiss();
+  }
 
   connectedCallback(): void {
     if (!this.shadowRoot) {
@@ -56,10 +62,31 @@ class DocenContextMenu extends HTMLElement {
         this.#list.style.left = `${event.clientX}px`;
         event.stopPropagation();
         (this.#menu as unknown as { openMenu: () => void }).openMenu();
+        this.#armDismiss();
       },
       true,
     );
     this.#renderItems();
+  }
+
+  /** Close on any click outside the menu list. Fluent's own light dismiss
+   *  exempts the slotted trigger — which here wraps the WHOLE workspace — so
+   *  a click on the document would never close the menu. Capture phase, so a
+   *  stopPropagation deeper in the tree (canvas bridge, other menus) can't
+   *  keep the stale menu up; a click INSIDE the list keeps it open. */
+  #armDismiss(): void {
+    this.#disarmDismiss();
+    this.#dismiss = (event) => {
+      if (!this.#list || event.composedPath().includes(this.#list)) return;
+      this.#disarmDismiss();
+      (this.#menu as unknown as { closeMenu: () => void }).closeMenu();
+    };
+    document.addEventListener("click", this.#dismiss, true);
+  }
+
+  #disarmDismiss(): void {
+    if (this.#dismiss) document.removeEventListener("click", this.#dismiss, true);
+    this.#dismiss = undefined;
   }
 
   get items(): RibbonMenuItem[] {
