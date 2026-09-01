@@ -1,16 +1,16 @@
 import {
-  prepareRichInline,
-  layoutNextRichInlineLineRange,
-  materializeRichInlineLineRange,
-  type RichInlineItem,
-  type RichInlineCursor,
-} from "@chenglou/pretext/rich-inline";
-import {
   defaultParagraphStyleId,
   indexParagraphStyles,
   mergeStyleChain,
   type StylesOptions,
 } from "@docen/docx";
+import {
+  prepareRichInline,
+  layoutNextRichInlineLineRange,
+  materializeRichInlineLineRange,
+  type RichInlineItem,
+  type RichInlineCursor,
+} from "@docen/pretext/rich-inline";
 import type { SpacingProperties, TableWidthProperties } from "@office-open/docx";
 import type { Node as PmNode } from "@tiptap/pm/model";
 

@@ -74,6 +74,7 @@
     "@docen/core": "workspace:*",
     "@docen/docx": "workspace:*",
     "@docen/layout": "workspace:*",
+    "@docen/pretext": "workspace:*",
     "@fluentui/svg-icons": "1.1.334",
     "@fluentui/tokens": "1.0.0-alpha.23",
     "@fluentui/web-components": "3.0.3",
@@ -86,8 +87,5 @@
     "leafer-editor": "2.2.9",
     "leafer-ui": "2.2.9",
     "prosemirror-search": "1.1.1"
-  },
-  "devDependencies": {
-    "@chenglou/pretext": "0.0.8"
   }
 }

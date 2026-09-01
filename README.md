@@ -18,6 +18,7 @@
 | [@docen/editor](./packages/editor/README.md)                | ![npm](https://img.shields.io/npm/v/@docen/editor)      | Assembly layer — Fluent UI host + docx engine into `<docen-document>`                      |
 | [@docen/docx](./packages/docx/README.md)                    | ![npm](https://img.shields.io/npm/v/@docen/docx)        | DOCX engine — Tiptap schema + converters + layout projection, powered by @office-open/docx |
 | [@docen/layout](./packages/layout/README.md)                | ![npm](https://img.shields.io/npm/v/@docen/layout)      | Pagination engine — measurement → paginated LayoutDoc, Word's stacking rules               |
+| [@docen/pretext](./packages/pretext/README.md)              | ![npm](https://img.shields.io/npm/v/@docen/pretext)     | Vendored fork of @chenglou/pretext — CJK measure correction + Word/CJK layout fixes        |
 | [@docen/core](./packages/core/README.md)                    | ![npm](https://img.shields.io/npm/v/@docen/core)        | Scene painter — LayoutDoc → LeaferJS tree for the canvas editors                           |
 | [leafer-x-metafile](./packages/leafer-x-metafile/README.md) | ![npm](https://img.shields.io/npm/v/leafer-x-metafile)  | Zero-dependency WMF/EMF+ metafile replay → neutral drawing members                         |
 | [@docen/deduplicate](./packages/deduplicate/README.md)      | ![npm](https://img.shields.io/npm/v/@docen/deduplicate) | Document comparison (SimHash + Winnowing) for the compare feature                          |

@@ -23,7 +23,7 @@ import {
   type PreparedRichInline,
   type RichInlineCursor,
   type RichInlineItem,
-} from "@chenglou/pretext/rich-inline";
+} from "@docen/pretext/rich-inline";
 
 import type { LayoutFloatZone, LayoutInline, LayoutTabStop } from "../layout-doc";
 import type { LaidOutLine, LaidOutLineItem } from "../layout-result";

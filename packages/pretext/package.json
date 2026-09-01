@@ -1,0 +1,48 @@
+{
+  "name": "@docen/pretext",
+  "version": "0.6.2",
+  "description": "Vendored fork of @chenglou/pretext 0.0.8 (text measurement & line breaking) with docen-local fixes: CJK canvas->DOM advance correction, empty-text atom retention, and future Word/CJK layout work that upstream won't carry",
+  "keywords": [
+    "cjk",
+    "docen",
+    "line-breaking",
+    "text-layout",
+    "text-measurement"
+  ],
+  "homepage": "https://github.com/DemoMacro/docen#readme",
+  "bugs": {
+    "url": "https://github.com/DemoMacro/docen/issues"
+  },
+  "license": "MIT",
+  "author": {
+    "name": "Demo Macro",
+    "email": "abc@imst.xyz",
+    "url": "https://www.demomacro.com/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DemoMacro/docen.git",
+    "directory": "packages/pretext"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "dist/layout.mjs",
+  "types": "dist/layout.d.mts",
+  "exports": {
+    ".": {
+      "types": "./dist/layout.d.mts",
+      "import": "./dist/layout.mjs"
+    },
+    "./rich-inline": {
+      "types": "./dist/rich-inline.d.mts",
+      "import": "./dist/rich-inline.mjs"
+    }
+  },
+  "scripts": {
+    "dev": "basis build --stub",
+    "build": "vp pack",
+    "prepack": "pnpm build"
+  }
+}

@@ -45,7 +45,7 @@
     "build": "vp pack",
     "prepack": "pnpm build"
   },
-  "devDependencies": {
-    "@chenglou/pretext": "0.0.8"
+  "dependencies": {
+    "@docen/pretext": "workspace:*"
   }
 }
