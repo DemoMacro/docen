@@ -201,6 +201,14 @@ export interface EditBridge {
    *  when the map is stale) — the context menu moves the caret to where it
    *  was right-clicked, like Word. */
   posAtClient(clientX: number, clientY: number): number | null;
+  /** The selection's last-line rect against its page frame — frame-relative
+   * screen px (zoom applied), the anchor a floating comment compose positions
+   * at (Word hangs the reply box in the margin beside the anchored text).
+   * Main story only; null when unmappable or in a furniture story. */
+  commentAnchorRect(
+    from: number,
+    to: number,
+  ): { frame: HTMLElement; left: number; top: number; height: number } | null;
   /** Insert a docen slice payload (DOCEN_CLIP_MIME) into the ACTIVE story at
    *  the caret — the host's ribbon Paste routes here after reading the system
    *  clipboard. False when the payload did not parse. */
@@ -737,6 +745,11 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     return count;
   };
   const takeFocus = (event: MouseEvent): void => {
+    // Overlay widgets (the floating comment compose) own their focus — a
+    // click inside one must not be dragged back to the input textarea.
+    const path = event.composedPath() as HTMLElement[];
+    if (path.some((el) => el instanceof HTMLElement && el.hasAttribute?.("data-docen-overlay")))
+      return;
     // preventDefault keeps the click from blurring on mousedown; the caret
     // placement below is the real focus move.
     event.preventDefault();
@@ -1364,6 +1377,23 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     },
     posAtClient(clientX, clientY): number | null {
       return posAtClient(clientX, clientY);
+    },
+    commentAnchorRect(from, to) {
+      // Comments anchor main-doc text — a furniture story's geometry cannot
+      // host one.
+      if (story || !main.map?.valid) return null;
+      const rects = main.map.selectionRects(from, to);
+      const last = rects[rects.length - 1];
+      if (!last) return null;
+      const frame = opts.pageHost?.(framePage(main, last.page));
+      if (!frame) return null;
+      const scale = opts.scale?.() ?? 1;
+      return {
+        frame,
+        left: (last.xPx + last.widthPx) * scale,
+        top: last.yPx * scale,
+        height: last.heightPx * scale,
+      };
     },
     /** Insert a docen slice payload (DOCEN_CLIP_MIME) into the ACTIVE story at
      *  the caret — the host's ribbon Paste routes here after reading the

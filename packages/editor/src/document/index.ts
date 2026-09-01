@@ -100,6 +100,34 @@ import { MARGINS, PAPER_SIZES, marginTwipsFromCss, mergeSectionProperties } from
 import { renderRibbonFromSchema, ribbonActions, ribbonTabs } from "./ribbon";
 import { WATERMARK_PRESETS, stripWatermarkPara, watermarkPara } from "./watermark";
 
+/** The word at `pos` — the non-whitespace run in the caret's text node, capped
+ *  at 32 chars around the caret (CJK text has no spaces, so an uncapped run
+ *  swallows the whole paragraph). Null when the caret touches no text. */
+function wordRangeAt(
+  doc: import("@tiptap/pm/model").Node,
+  pos: number,
+): { from: number; to: number } | null {
+  const $pos = doc.resolve(pos);
+  const node = $pos.nodeBefore?.isText
+    ? $pos.nodeBefore
+    : $pos.nodeAfter?.isText
+      ? $pos.nodeAfter
+      : null;
+  if (!node) return null;
+  const start = pos - ($pos.nodeBefore?.isText ? $pos.nodeBefore.nodeSize : 0);
+  const chars = node.text ?? "";
+  const at = pos - start;
+  let from = at;
+  while (from > 0 && !/\s/.test(chars.charAt(from - 1))) from--;
+  let to = at;
+  while (to < chars.length && !/\s/.test(chars.charAt(to))) to++;
+  if (to - from > 32) {
+    from = Math.max(from, at - 16);
+    to = Math.min(to, at + 16);
+  }
+  return from < to ? { from: start + from, to: start + to } : null;
+}
+
 /** Build a nested OutlineItem tree from the flat outline anchor list: each
  *  heading nests under the nearest preceding heading with a smaller level. */
 function buildOutlineTree(
@@ -889,6 +917,9 @@ class DocenDocument extends AddinHost<Editor> {
     // Emit docen:change on every content change (autosave driver) and docen:ready
     // once the editor is live — both bubble out so a host can react.
     this.editor?.on("transaction", this.#onTransaction);
+    // Selection moves repaint the anchored comment card (Word highlights the
+    // card whose range the caret sits in).
+    this.editor?.on("selectionUpdate", this.#syncActiveCommentCard);
     document.addEventListener("fullscreenchange", this.#onFullscreenChange);
     this.addEventListener("keydown", this.#onZoomKey);
     this.dispatchEvent(new CustomEvent("docen:ready", { bubbles: true, composed: true }));
@@ -1306,6 +1337,7 @@ class DocenDocument extends AddinHost<Editor> {
       ?.querySelector<HTMLElement>("docen-status-bar")
       ?.removeEventListener("zoom:change", this.#onZoomChange as EventListener);
     this.editor?.off("transaction", this.#onTransaction);
+    this.editor?.off("selectionUpdate", this.#syncActiveCommentCard);
     document.removeEventListener("fullscreenchange", this.#onFullscreenChange);
     this.removeEventListener("keydown", this.#onZoomKey);
     this.shadowRoot
@@ -2204,19 +2236,127 @@ class DocenDocument extends AddinHost<Editor> {
     menu.setAttribute("items", JSON.stringify(items));
   };
 
-  /** Review → New Comment: open the comments pane's compose box on the
-   *  current selection (Word's sidebar compose card); the text arrives via
-   *  the `comment:create` event (#onCommentCreate commits it). */
+  /** Review → New Comment: open the floating compose box beside the
+   *  selection (Word's Simple-Markup reply card — it hangs in the margin at
+   *  the anchored line and scrolls with its page). The text arrives via the
+   *  `comment:create` event (#onCommentCreate commits it). Without a
+   *  selection the word at the caret anchors the comment (Word for the web's
+   *  behavior); a caret on whitespace is a no-op. */
   #insertComment(): void {
     const editor = this.editor;
     if (!editor) return;
-    this.showTaskpane("comments");
-    const pane = this.#commentsPaneEl();
-    if (!pane) return;
     // Spread would miss from/to — they're prototype getters on Selection.
     const { from, to } = editor.state.selection;
-    this.#pendingCommentRange = { from, to };
-    pane.setAttribute("draft", "");
+    if (from === to) {
+      const word = wordRangeAt(editor.state.doc, from);
+      if (!word) return;
+      this.#pendingCommentRange = word;
+    } else {
+      this.#pendingCommentRange = { from, to };
+    }
+    this.#openCommentCompose();
+  }
+
+  /** The floating compose box over the canvas (null once dismissed). */
+  #commentCompose?: HTMLElement;
+
+  /** Mount the floating compose card on the anchored page frame — Fluent
+   *  components (text-area, buttons) over the design-token palette, no
+   *  hand-rolled colors. */
+  #openCommentCompose(): void {
+    this.#closeCommentCompose();
+    const range = this.#pendingCommentRange;
+    if (!range) return;
+    const anchor = this.#bridge?.commentAnchorRect(range.from, range.to);
+    if (!anchor) {
+      // Unmappable selection (stale map) — drop the pending compose.
+      this.#pendingCommentRange = undefined;
+      return;
+    }
+    const card = document.createElement("div");
+    card.setAttribute("data-docen-overlay", "");
+    Object.assign(card.style, {
+      position: "absolute",
+      zIndex: "6",
+      width: "220px",
+      boxSizing: "border-box",
+      padding: "10px",
+      display: "flex",
+      flexDirection: "column",
+      gap: "8px",
+      background: "var(--docen-color-bg, #ffffff)",
+      border: "1px solid var(--docen-color-divider, #e2e2e2)",
+      borderRadius: "var(--borderRadiusLarge, 8px)",
+      boxShadow: "var(--shadow4, 0 4px 8px rgba(0,0,0,.14))",
+      fontFamily: "inherit",
+      fontSize: "var(--docen-font-size-ribbon, 12px)",
+    } satisfies Partial<CSSStyleDeclaration>);
+    const area = document.createElement("fluent-textarea") as HTMLTextAreaElement & HTMLElement;
+    // `block` drops Fluent's fixed 18rem inline-size — without it the inner
+    // root box overflows the 220px card.
+    area.setAttribute("block", "");
+    area.setAttribute("resize", "vertical");
+    area.setAttribute("rows", "3");
+    area.setAttribute("placeholder", t("comments.placeholder", this));
+    const row = document.createElement("div");
+    Object.assign(row.style, {
+      display: "flex",
+      gap: "6px",
+      justifyContent: "flex-end",
+    } satisfies Partial<CSSStyleDeclaration>);
+    const cancel = document.createElement("fluent-button");
+    cancel.setAttribute("appearance", "neutral");
+    cancel.textContent = t("comments.cancel", this);
+    const post = document.createElement("fluent-button");
+    post.setAttribute("appearance", "accent");
+    post.textContent = t("comments.post", this);
+    cancel.addEventListener("click", () =>
+      this.dispatchEvent(new CustomEvent("comment:cancel", { bubbles: true, composed: true })),
+    );
+    const postIt = (): void => {
+      const text = (area.value ?? "").trim();
+      if (!text) return;
+      this.dispatchEvent(
+        new CustomEvent("comment:create", { bubbles: true, composed: true, detail: { text } }),
+      );
+    };
+    post.addEventListener("click", postIt);
+    // Ctrl+Enter posts (the sidebar edit's shortcut); Escape cancels.
+    area.addEventListener("keydown", (event: KeyboardEvent) => {
+      if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        postIt();
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        this.dispatchEvent(new CustomEvent("comment:cancel", { bubbles: true, composed: true }));
+      }
+    });
+    row.append(cancel, post);
+    card.append(area, row);
+    // Word hangs the card in the margin just past the anchored line's end,
+    // clamped into the page frame when the line runs to the right edge.
+    const frameW = anchor.frame.clientWidth;
+    const CARD_W = 220;
+    const left = Math.min(anchor.left + 12, Math.max(frameW - CARD_W - 8, 0));
+    Object.assign(card.style, {
+      left: `${left}px`,
+      top: `${anchor.top}px`,
+    } satisfies Partial<CSSStyleDeclaration>);
+    anchor.frame.append(card);
+    this.#commentCompose = card;
+    // The host is not focusable — focus lands on the shadow <textarea>, or
+    // every keystroke goes to the canvas bridge and into the document.
+    requestAnimationFrame(() => {
+      const input = (area.shadowRoot?.querySelector("textarea") ?? area) as HTMLElement | null;
+      input?.focus();
+    });
+  }
+
+  /** Tear down the floating compose card (Post, Cancel, or Escape). */
+  #closeCommentCompose(): void {
+    this.#commentCompose?.remove();
+    this.#commentCompose = undefined;
   }
 
   /** comment:create → commit the pending comment: anchor the stored range the
@@ -2229,8 +2369,10 @@ class DocenDocument extends AddinHost<Editor> {
     const text = event.detail?.text?.trim();
     const range = this.#pendingCommentRange;
     this.#pendingCommentRange = undefined;
-    this.#commentsPaneEl()?.removeAttribute("draft");
+    this.#closeCommentCompose();
     if (!editor || !text || !range) return;
+    // Word returns the caret to the body once the comment is committed.
+    this.#bridge?.focus();
     const docAttrs = (editor.state.doc.attrs ?? {}) as {
       documentExtras?: { comments?: Record<string, unknown>[] };
     };
@@ -2268,7 +2410,7 @@ class DocenDocument extends AddinHost<Editor> {
   /** comment:cancel → drop the pending compose (Word's Cancel). */
   readonly #onCommentCancel = (): void => {
     this.#pendingCommentRange = undefined;
-    this.#commentsPaneEl()?.removeAttribute("draft");
+    this.#closeCommentCompose();
   };
 
   /** comment:select → select and scroll to the comment's range (Word scrolls
@@ -2314,7 +2456,7 @@ class DocenDocument extends AddinHost<Editor> {
   };
 
   /** The comments pane element (inside its task-pane), when mounted. */
-  #commentsPaneEl(): (HTMLElement & { comments?: string; draft?: boolean }) | null {
+  #commentsPaneEl(): (HTMLElement & { comments?: string; activeId?: string }) | null {
     return this.shadowRoot?.querySelector("docen-comments-pane") ?? null;
   }
 
@@ -2335,7 +2477,9 @@ class DocenDocument extends AddinHost<Editor> {
   }
 
   /** Sync the comments pane's card list from the doc's documentExtras after
-   *  every transaction (the pane is a pure view of the model). */
+   *  every transaction (the pane is a pure view of the model). Cards order by
+   *  their anchored range's document position — Word's sidebar follows the
+   *  text, not the round-trip append order the extras array stores. */
   #syncCommentsPane(): void {
     const pane = this.#commentsPaneEl();
     if (!pane) return;
@@ -2350,15 +2494,34 @@ class DocenDocument extends AddinHost<Editor> {
         }>;
       };
     };
-    const cards = (docAttrs.documentExtras?.comments ?? []).map((c) => ({
-      id: Number(c.id ?? 0),
-      author: c.author ?? "",
-      initials: c.initials ?? "",
-      date: c.date ?? "",
-      text: (c.children ?? []).map((r) => r.text ?? "").join(""),
-    }));
+    const startPos = new Map<number, number>();
+    this.editor?.state.doc.descendants((child, pos) => {
+      const marker = DocenDocument.commentMarkerOf(child);
+      if (marker?.kind === "start") startPos.set(marker.id, pos);
+    });
+    const cards = (docAttrs.documentExtras?.comments ?? [])
+      .map((c) => ({
+        id: Number(c.id ?? 0),
+        author: c.author ?? "",
+        initials: c.initials ?? "",
+        date: c.date ?? "",
+        text: (c.children ?? []).map((r) => r.text ?? "").join(""),
+        pos: startPos.get(Number(c.id ?? 0)),
+      }))
+      .sort((a, b) => (a.pos ?? Number.MAX_SAFE_INTEGER) - (b.pos ?? Number.MAX_SAFE_INTEGER))
+      .map(({ pos: _pos, ...card }) => card);
     pane.comments = JSON.stringify(cards);
   }
+
+  /** selectionUpdate → highlight the comments-pane card whose anchored range
+   *  covers the selection (Word paints the anchored card while the caret sits
+   *  in its text). */
+  readonly #syncActiveCommentCard = (): void => {
+    const pane = this.#commentsPaneEl();
+    if (!pane) return;
+    const id = this.#activeCommentId();
+    pane.setAttribute("active-id", id == null ? "" : String(id));
+  };
 
   /** Insert → Footnote / Endnote (Word's References → Insert Footnote, the
    *  split's two items): prompt for the note text, drop a footnoteReference /
@@ -2769,11 +2932,16 @@ class DocenDocument extends AddinHost<Editor> {
         .run();
       return;
     }
-    // New Comment — anchor the selection with a Word comment; Edit/Delete
-    // operate on the comment covering the selection. The Review tab's large
-    // button and the trailing toolbar comment share the "comment" event.
-    if (name === "new-comment" || name === "comment") {
+    // New Comment — anchor the selection (or the word at the caret) with a
+    // Word comment; Edit/Delete operate on the comment covering the selection.
+    if (name === "new-comment") {
       this.#insertComment();
+      return;
+    }
+    // The trailing title-bar "comment" button toggles the comments pane
+    // (Word's sidebar) — it lists every comment, it does not create one.
+    if (name === "comment") {
+      this.#togglePane("comments");
       return;
     }
     if (name === "edit-comment") {
@@ -3343,10 +3511,21 @@ class DocenDocument extends AddinHost<Editor> {
 
   /** Apply a visibility state and dispatch `docen:taskpane-visibility-change`
    *  when it flips. The detail carries `visibilityMode: "taskpane"|"hidden"` to
-   *  mirror `Office.VisibilityMode`. Idempotent — no event when state is unchanged. */
+   *  mirror `Office.VisibilityMode`. Idempotent — no event when state is
+   *  unchanged. Opening a pane dismisses its rail-mates (Word's task panes are
+   *  mutually exclusive per side — Comments replaces Properties, never
+   *  stacks with it). */
   #setTaskpane(id: TaskPaneId, open: boolean): void {
     const pane = this.#paneEl(id);
     if (!pane || pane.open === open) return;
+    if (open) {
+      const side = pane.getAttribute("position") ?? "start";
+      for (const other of this.shadowRoot?.querySelectorAll("docen-task-pane[open]") ?? []) {
+        if (other !== pane && (other.getAttribute("position") ?? "start") === side) {
+          (other as HTMLElement & { open: boolean }).open = false;
+        }
+      }
+    }
     pane.open = open;
     this.dispatchEvent(
       new CustomEvent("docen:taskpane-visibility-change", {

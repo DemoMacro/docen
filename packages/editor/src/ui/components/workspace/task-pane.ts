@@ -38,7 +38,12 @@ const styles = css`
      dismiss it. Keying display on :host(:not([open])) makes the
      attribute the single source of truth: show()/hide() still update
      the drawer internal state, but the canvas reflow follows the
-     attribute. */
+     attribute. The host itself hides too — a closed pane left in the
+     aside's flow stacks the next pane below a phantom full-height box
+     (two end panes rendered as one half-clamped column). */
+  :host(:not([open])) {
+    display: none;
+  }
   :host(:not([open])) fluent-drawer::part(dialog) {
     display: none;
   }
@@ -122,6 +127,10 @@ class DocenTaskPane extends FASTElement {
     this.#applyPosition();
   }
   openChanged(): void {
+    // Reflect synchronously — FAST reflects attributes through its rAF-driven
+    // update queue, so the display:none CSS below would keep a just-opened
+    // pane invisible (and a just-closed one visible) until the queue flushes.
+    this.toggleAttribute("open", this.open === true);
     this.#applyOpen();
   }
   closableChanged(): void {
@@ -135,6 +144,9 @@ class DocenTaskPane extends FASTElement {
     this.#applyClosable();
     this.closeBtn?.addEventListener("click", () => this.hide());
     this.#lockBlankClose();
+    // Align the attribute with the property up front (an HTML-carried `open`
+    // already set the property; a missing one must not leave a stale attr).
+    this.toggleAttribute("open", this.open === true);
     this.#applyOpen();
     this.#applyI18n();
     this.#unsubscribe = observeLang(() => this.#applyI18n());
