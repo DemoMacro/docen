@@ -21,7 +21,16 @@ import { Mark } from "@tiptap/core";
 export const Bold = Mark.create({
   name: "bold",
   parseHTML() {
-    return [{ tag: "strong" }, { tag: "b" }];
+    return [
+      { tag: "strong" },
+      { tag: "b" },
+      // Word/web pastes carry emphasis as styled spans, not tags — match the
+      // numeric scale too (600+ is semibold and up).
+      {
+        style: "font-weight",
+        getAttrs: (v) => /^(bold(?:er)?|[5-9]\d{2,})$/s.test(String(v)) && null,
+      },
+    ];
   },
   renderDocx: () => ({ bold: true }),
   parseDocx: (opts: RunOptions) => (opts.bold ? {} : null),
@@ -30,7 +39,7 @@ export const Bold = Mark.create({
 export const Italic = Mark.create({
   name: "italic",
   parseHTML() {
-    return [{ tag: "em" }, { tag: "i" }];
+    return [{ tag: "em" }, { tag: "i" }, { style: "font-style=italic" }];
   },
   renderDocx: () => ({ italic: true }),
   parseDocx: (opts: RunOptions) => (opts.italic ? {} : null),
@@ -39,7 +48,15 @@ export const Italic = Mark.create({
 export const Underline = Mark.create({
   name: "underline",
   parseHTML() {
-    return [{ tag: "u" }];
+    return [
+      { tag: "u" },
+      // The shorthand is often compound ("underline line-through") — match on
+      // the token, not the whole value.
+      {
+        style: "text-decoration",
+        getAttrs: (v) => String(v).includes("underline") && null,
+      },
+    ];
   },
   renderDocx: () => ({ underline: { type: "single" } }),
   // office-open represents <w:u> as { type, color? }. val="none" means NO
@@ -126,7 +143,15 @@ export const Superscript = Mark.create({
 export const Strike = Mark.create({
   name: "strike",
   parseHTML() {
-    return [{ tag: "s" }, { tag: "del" }, { tag: "strike" }];
+    return [
+      { tag: "s" },
+      { tag: "del" },
+      { tag: "strike" },
+      {
+        style: "text-decoration",
+        getAttrs: (v) => String(v).includes("line-through") && null,
+      },
+    ];
   },
   renderDocx: () => ({ strike: true }),
   parseDocx: (opts: RunOptions): Record<string, unknown> | null => (opts.strike ? {} : null),

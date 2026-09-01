@@ -38,6 +38,32 @@ describe("paste style mapping", () => {
     expect(firstTextMarks(parse("<p><del>x</del></p>"))).toContainEqual({ type: "strike" });
   });
 
+  // Word/web pastes carry emphasis as styled spans, not tags.
+  it("maps inline font styles on spans to their marks", () => {
+    expect(firstTextMarks(parse('<p><span style="font-weight:bold">x</span></p>'))).toContainEqual({
+      type: "bold",
+    });
+    expect(firstTextMarks(parse('<p><span style="font-style:italic">x</span></p>'))).toContainEqual(
+      { type: "italic" },
+    );
+    expect(
+      firstTextMarks(parse('<p><span style="text-decoration:underline">x</span></p>')),
+    ).toContainEqual({ type: "underline" });
+    expect(
+      firstTextMarks(parse('<p><span style="text-decoration:line-through">x</span></p>')),
+    ).toContainEqual({ type: "strike" });
+  });
+
+  it("maps span color to the textStyle attr in both CSS forms", () => {
+    const colorOf = (html: string) => {
+      const marks = firstTextMarks(parse(html));
+      return marks.find((m) => m.type === "textStyle")?.attrs?.color;
+    };
+    expect(colorOf('<p><span style="color:#FF0000">x</span></p>')).toBe("#FF0000");
+    // element.style serializes to rgb() — the form real pastes arrive in.
+    expect(colorOf('<p><span style="color:rgb(255, 0, 0)">x</span></p>')).toBe("#FF0000");
+  });
+
   it("maps <h1>-<h6> to paragraphs with a HeadingN style attr", () => {
     const json = parse("<h1>Title</h1>");
     expect(json.content?.[0]?.type).toBe("paragraph");

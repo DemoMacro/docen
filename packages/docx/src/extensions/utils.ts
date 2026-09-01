@@ -271,6 +271,16 @@ export function normalizeColorToHex(color: unknown): string | undefined {
   if (/^[0-9A-Fa-f]{6}$/.test(color)) return `#${color.toUpperCase()}`;
   if (/^[0-9A-Fa-f]{3}$/.test(color))
     return `#${color[0]}${color[0]}${color[1]}${color[1]}${color[2]}${color[2]}`.toUpperCase();
+  // element.style serializes colors as rgb()/rgba() — the form pasted HTML
+  // actually arrives in. Fully transparent carries no visible color.
+  const rgb = /^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*(?:,\s*([\d.]+)\s*)?\)$/.exec(
+    color,
+  );
+  if (rgb) {
+    if (rgb[4] != null && Number(rgb[4]) === 0) return undefined;
+    const byte = (n: string) => Number(n).toString(16).padStart(2, "0").toUpperCase();
+    return `#${byte(rgb[1])}${byte(rgb[2])}${byte(rgb[3])}`;
+  }
   const hex = CSS_COLORS[color.toLowerCase()];
   return hex ?? undefined;
 }
