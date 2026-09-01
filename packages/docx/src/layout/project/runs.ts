@@ -77,6 +77,11 @@ export function projectRuns(
       italic: own.italic ?? defRun.italic,
       color: own.color ?? defRun.color,
       highlight: own.highlight ?? str(chainRPr.highlight) ?? str(docRPr.highlight),
+      shadingFill:
+        own.shadingFill ??
+        str((isRecord(chainRPr.shading) ? chainRPr.shading : undefined)?.fill) ??
+        str((isRecord(docRPr.shading) ? docRPr.shading : undefined)?.fill) ??
+        defRun.shadingFill,
       underline: own.underline ?? defRun.underline,
       strikethrough: own.strikethrough ?? defRun.strikethrough,
       letterSpacingPx:

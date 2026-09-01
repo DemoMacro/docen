@@ -87,6 +87,7 @@ export interface RunStyle {
   italic?: boolean;
   color?: string;
   highlight?: string;
+  shadingFill?: string;
   underline?: boolean;
   strikethrough?: boolean;
   verticalAlign?: "superscript" | "subscript";
@@ -107,6 +108,9 @@ export function runStyleOf(rPr: Rec): RunStyle {
     italic: tri(rPr.italic),
     color: colorOf(rPr.color),
     highlight: str(rPr.highlight),
+    // Direct hex fill only — a themeFill-bound shading needs the theme palette
+    // resolved with the document context, which runStyleOf doesn't carry.
+    shadingFill: isRecord(rPr.shading) ? str(rPr.shading.fill) : undefined,
     underline,
     strikethrough:
       rPr.strike === true || rPr.doubleStrike === true

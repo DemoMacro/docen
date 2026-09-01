@@ -161,16 +161,20 @@ export function paintParagraph(
         const squeezePx =
           intervalPx == null && line.advanceScale != null ? item.widthPx : undefined;
         // Character highlight (w:highlight): the token's palette color fills
-        // the run's box beneath the glyphs (Word paints it opaque).
+        // the run's box beneath the glyphs (Word paints it opaque). A run
+        // shading (w:shd) fills the same box with an arbitrary color when no
+        // highlight is present — OOXML precedence puts the highlight on top.
         const hl = inline.style.highlight ? HIGHLIGHT_COLOR[inline.style.highlight] : undefined;
-        if (hl) {
+        const runFill =
+          hl ?? (inline.style.shadingFill ? `#${inline.style.shadingFill}` : undefined);
+        if (runFill) {
           tree.add(
             new Rect({
               x: lineX + item.xPx,
               y: lineY + pad,
               width: intervalPx ?? item.widthPx,
               height: Math.max(1, line.naturalPx || line.heightPx),
-              fill: hl,
+              fill: runFill,
             }),
           );
         }

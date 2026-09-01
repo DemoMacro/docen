@@ -22,6 +22,10 @@ export interface LayoutTextStyle {
    *  painter maps it to Word's highlight palette and fills the run's box
    *  beneath the glyphs. */
   highlight?: string;
+  /** Character shading (w:shd) fill, #RRGGBB — the arbitrary-color highlight
+   *  Word's shading button paints on selected text. A highlight (same box,
+   *  Word's palette) wins when both are present, per OOXML precedence. */
+  shadingFill?: string;
 }
 
 /** a:srcRect crop as fractions of the image edge (0-1, each side inward);

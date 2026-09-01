@@ -322,6 +322,25 @@ function isThemeColor(value: unknown): value is ThemeColorValue {
   return typeof value === "object" && value !== null && "themeColor" in value && "val" in value;
 }
 
+/** The ShadingProperties stamp for a shading pick: null clears, a theme pick
+ *  carries themeFill bindings, a bare hex stores fill. undefined = unrecognized
+ *  value (command declines). */
+function shadingStamp(value: unknown): Record<string, unknown> | null | undefined {
+  if (value === "none") return null;
+  if (isThemeColor(value)) {
+    const shading: Record<string, unknown> = {
+      fill: value.val,
+      type: "clear",
+      themeFill: value.themeColor,
+    };
+    if (value.themeTint) shading.themeFillTint = value.themeTint;
+    if (value.themeShade) shading.themeFillShade = value.themeShade;
+    return shading;
+  }
+  if (typeof value === "string" && value) return { fill: value, type: "clear" };
+  return undefined;
+}
+
 /** Transform text per Word's Change Case modes. CJK sentence terminators
  *  (。！？) honoured alongside ASCII .!?. */
 function transformCase(text: string, mode?: string): string {
@@ -492,35 +511,24 @@ export const DocumentCommands = Extension.create({
           }
           return true;
         },
-      // Paragraph shading: "none" clears; a theme pick stores a themeFill-bound
-      // ShadingProperties; a bare hex stores fill directly.
+      // Shading follows Word's selection split: a text selection paints only
+      // the selected runs (character shading via the textStyle mark); a bare
+      // cursor paints the whole paragraph.
       shading:
         (value) =>
-        ({ state, tr }) => {
+        ({ state, commands, tr }) => {
+          const stamp = shadingStamp(value);
+          if (stamp === undefined) return false;
+          if (!state.selection.empty) {
+            return commands.setMark("textStyle", { shading: stamp });
+          }
           const blocks = selectedParagraphs(state);
           if (!blocks.length) return false;
-          const stamp = (shading: unknown): boolean => {
-            for (const { pos, node } of blocks) {
-              const attrs = node.attrs as Record<string, unknown>;
-              tr.setNodeMarkup(pos, undefined, { ...attrs, shading });
-            }
-            return true;
-          };
-          if (value === "none") return stamp(null);
-          if (isThemeColor(value)) {
-            const shading: Record<string, unknown> = {
-              fill: value.val,
-              type: "clear",
-              themeFill: value.themeColor,
-            };
-            if (value.themeTint) shading.themeFillTint = value.themeTint;
-            if (value.themeShade) shading.themeFillShade = value.themeShade;
-            return stamp(shading);
+          for (const { pos, node } of blocks) {
+            const attrs = node.attrs as Record<string, unknown>;
+            tr.setNodeMarkup(pos, undefined, { ...attrs, shading: stamp });
           }
-          if (typeof value === "string" && value) {
-            return stamp({ fill: value, type: "clear" });
-          }
-          return false;
+          return true;
         },
       // Run font color: "none" clears; a theme pick stores a ColorOptions
       // (theme-bound); a bare hex stores the color directly.
