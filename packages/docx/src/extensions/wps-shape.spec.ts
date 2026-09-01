@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { generateDOCXSync, parseDOCX, type JSONContent } from "../index";
 
 // The ribbon's Text Box / Shapes insert commands build a wpsShape node whose
-// geometry (transformation/floating/presetGeometry/fill/outline) rides on
+// geometry (transformation/floating/geometry/fill/outline) rides on
 // attrs.wpsShape and whose text body is PM content. This pins the export
 // contract end to end: that exact node shape must generate a DOCX that parses
 // back into the same geometry with the body restored as content.
@@ -45,7 +45,7 @@ function shapeDoc(): JSONContent {
   const node = doc.content![0].content![0];
   node.attrs!.wpsShape = {
     ...node.attrs!.wpsShape,
-    presetGeometry: { preset: "ellipse" },
+    geometry: "ellipse",
     fill: { type: "solid", color: "4472C4" },
     outline: { color: "2F528F", width: 12700 },
   };
@@ -84,7 +84,8 @@ describe("wpsShape insert round-trip", () => {
     const json = parseDOCX(generateDOCXSync(shapeDoc()) as Uint8Array);
     const node = firstWpsShape(json);
     const ws = node.attrs.wpsShape as Record<string, any>;
-    expect(ws.presetGeometry).toEqual({ preset: "ellipse" });
+    // Parse re-emits the object shape — the string is a stringify-side shorthand.
+    expect(ws.geometry).toEqual({ preset: "ellipse" });
     expect(ws.fill).toMatchObject({ type: "solid" });
     expect(ws.outline).toMatchObject({ width: 12700 });
   });

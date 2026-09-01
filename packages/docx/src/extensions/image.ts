@@ -110,19 +110,14 @@ export function renderDocx(node: JSONContent): Record<string, unknown> | null {
   const transformation: Record<string, unknown> = { width: `${width}px`, height: `${height}px` };
   const rotation = attrs.rotation as number | undefined;
   if (rotation != null) transformation.rotation = rotation;
-  // flip: office-open MediaTransformation.flip is {horizontal, vertical} (mapped
-  // to a:xfrm flipH/flipV by createTransformation). Three-state per axis: null =
-  // omit, true/false both emit (office-open keeps an explicit flipH="0" — byte-
-  // faithful round-trip needs the false case). Build the object only when at
-  // least one axis is set.
+  // flip: office-open MediaTransformation carries flat flipHorizontal/flipVertical
+  // (mapped to a:xfrm flipH/flipV by createTransformation). Three-state per
+  // axis: null = omit, true/false both emit (office-open keeps an explicit
+  // flipH="0" — byte-faithful round-trip needs the false case).
   const flipHSet = attrs.flipH !== null && attrs.flipH !== undefined;
   const flipVSet = attrs.flipV !== null && attrs.flipV !== undefined;
-  if (flipHSet || flipVSet) {
-    transformation.flip = {
-      ...(flipHSet ? { horizontal: attrs.flipH as boolean } : {}),
-      ...(flipVSet ? { vertical: attrs.flipV as boolean } : {}),
-    };
-  }
+  if (flipHSet) transformation.flipHorizontal = attrs.flipH as boolean;
+  if (flipVSet) transformation.flipVertical = attrs.flipV as boolean;
   imageOpts.transformation = transformation;
 
   // altText: alt → name, title → description (DocPropertiesOptions)
@@ -169,13 +164,11 @@ export function parseDocx(picture: PictureOptions): Record<string, unknown> {
     if (typeof transformation.height === "number")
       attrs.height = convertEmuToPixels(transformation.height);
     if (typeof transformation.rotation === "number") attrs.rotation = transformation.rotation;
-    // office-open MediaTransformation.flip is {horizontal, vertical}; carry both
-    // true and false through per axis (false is meaningful: flipH="0").
-    const { flip } = transformation;
-    if (flip) {
-      if (flip.horizontal !== undefined) attrs.flipH = flip.horizontal;
-      if (flip.vertical !== undefined) attrs.flipV = flip.vertical;
-    }
+    // office-open MediaTransformation carries flat flipHorizontal/flipVertical;
+    // carry both true and false through per axis (false is meaningful:
+    // flipH="0").
+    if (transformation.flipHorizontal !== undefined) attrs.flipH = transformation.flipHorizontal;
+    if (transformation.flipVertical !== undefined) attrs.flipV = transformation.flipVertical;
   }
 
   // altText → alt/title

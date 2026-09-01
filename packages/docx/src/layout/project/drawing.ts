@@ -221,7 +221,14 @@ function wpsMemberOf(
   if (!isRecord(data)) return null;
   const fill = solidFillOf(data.fill);
   const line = outlineOf(data.outline);
-  const preset = isRecord(data.presetGeometry) ? str(data.presetGeometry.preset) : undefined;
+  // 0.13.0 renamed ShapeCoreOptions.presetGeometry → geometry and widened it to
+  // the ShapeType token shorthand | PresetGeometryOptions.
+  const preset =
+    typeof data.geometry === "string"
+      ? data.geometry
+      : isRecord(data.geometry)
+        ? str(data.geometry.preset)
+        : undefined;
   const children = Array.isArray(data.children) ? data.children : [];
   // The shape's own a:xfrm @rot (degrees) — Word's diagonal watermark.
   const rotation = isRecord(data.transformation) ? num(data.transformation.rotation) : undefined;
@@ -376,10 +383,10 @@ function walkGroup(
     // box through the composed mapping (Word renders the group tree unrolled).
     if (child.type === "wpg") {
       const own: GroupMirror | undefined =
-        t.flip?.horizontal === true || t.flip?.vertical === true
+        t.flipHorizontal === true || t.flipVertical === true
           ? {
-              h: t.flip?.horizontal === true,
-              v: t.flip?.vertical === true,
+              h: t.flipHorizontal === true,
+              v: t.flipVertical === true,
               x,
               y,
               width,
@@ -390,10 +397,10 @@ function walkGroup(
         child,
         x,
         y,
-        childScale(width, child.childExtent?.cx, t.emus.x),
-        childScale(height, child.childExtent?.cy, t.emus.y),
-        child.childOffset?.x ?? 0,
-        child.childOffset?.y ?? 0,
+        childScale(width, child.childExtentWidth, t.emus.x),
+        childScale(height, child.childExtentHeight, t.emus.y),
+        child.childOffsetX ?? 0,
+        child.childOffsetY ?? 0,
         out,
         ctx,
         own ? [...(mirrors ?? []), own] : mirrors,
@@ -424,8 +431,8 @@ function walkGroup(
           width,
           height,
           src: pictureSrc(child),
-          flipH: t.flip?.horizontal === true || undefined,
-          flipV: t.flip?.vertical === true || undefined,
+          flipH: t.flipHorizontal === true || undefined,
+          flipV: t.flipVertical === true || undefined,
           crop: cropOf(child),
         });
       }
@@ -456,10 +463,10 @@ function projectDrawing(group: GroupOptions, ctx: ProjectContext): LayoutDrawing
     group,
     0,
     0,
-    childScale(emuToPx(extW), group.childExtent?.cx, extW),
-    childScale(emuToPx(extH), group.childExtent?.cy, extH),
-    group.childOffset?.x ?? 0,
-    group.childOffset?.y ?? 0,
+    childScale(emuToPx(extW), group.childExtentWidth, extW),
+    childScale(emuToPx(extH), group.childExtentHeight, extH),
+    group.childOffsetX ?? 0,
+    group.childOffsetY ?? 0,
     members,
     ctx,
   );

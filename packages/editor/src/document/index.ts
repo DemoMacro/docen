@@ -2554,7 +2554,7 @@ class DocenDocument extends AddinHost<Editor> {
       },
     };
     if (preset) {
-      geometry.presetGeometry = { preset };
+      geometry.geometry = preset;
       // The theme's accent-1 pair (fill + its darkened outline) — the same
       // look Word gives a fresh shape; the projection paints flat hex.
       geometry.fill = { type: "solid", color: "4472C4" };

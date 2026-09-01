@@ -669,7 +669,7 @@ describe("projectDocumentOptions drawings", () => {
                         pixels: { x: 50, y: 10 },
                         emus: { x: 500000, y: 100000 },
                         offset: { pixels: { x: 0, y: 0 }, emus: { x: 200000, y: 60000 } },
-                        flip: { horizontal: true },
+                        flipHorizontal: true,
                       },
                     },
                     {
@@ -680,7 +680,7 @@ describe("projectDocumentOptions drawings", () => {
                         offset: { pixels: { x: 0, y: 0 }, emus: { x: 300000, y: 0 } },
                       },
                       data: {
-                        presetGeometry: { preset: "rect" },
+                        geometry: "rect",
                         fill: { type: "solid", color: "FF0000" },
                         outline: { width: 12700, color: { value: "0000FF" } },
                         children: [],
@@ -712,8 +712,10 @@ describe("projectDocumentOptions drawings", () => {
                     },
                   ],
                   transformation: { width: 1905000, height: 1905000 },
-                  childOffset: { x: 100000, y: 50000 },
-                  childExtent: { cx: 1000000, cy: 200000 },
+                  childOffsetX: 100000,
+                  childOffsetY: 50000,
+                  childExtentWidth: 1000000,
+                  childExtentHeight: 200000,
                   floating: {
                     horizontalPosition: { relative: "column", offset: 47625 },
                     verticalPosition: { relative: "paragraph", offset: 95250 },
@@ -767,10 +769,12 @@ describe("projectDocumentOptions drawings", () => {
                           pixels: { x: 0, y: 0 },
                           emus: { x: 200000, y: 0 },
                         },
-                        flip: { horizontal: true },
+                        flipHorizontal: true,
                       },
-                      childOffset: { x: 0, y: 0 },
-                      childExtent: { cx: 500000, cy: 100000 },
+                      childOffsetX: 0,
+                      childOffsetY: 0,
+                      childExtentWidth: 500000,
+                      childExtentHeight: 100000,
                       children: [
                         {
                           type: "wps",
@@ -780,7 +784,7 @@ describe("projectDocumentOptions drawings", () => {
                             offset: { pixels: { x: 0, y: 0 }, emus: { x: 0, y: 0 } },
                           },
                           data: {
-                            presetGeometry: { preset: "rect" },
+                            geometry: "rect",
                             fill: { type: "none" },
                             children: [],
                           },
@@ -789,8 +793,10 @@ describe("projectDocumentOptions drawings", () => {
                     },
                   ],
                   transformation: { width: 1905000, height: 190500 },
-                  childOffset: { x: 100000, y: 0 },
-                  childExtent: { cx: 1000000, cy: 100000 },
+                  childOffsetX: 100000,
+                  childOffsetY: 0,
+                  childExtentWidth: 1000000,
+                  childExtentHeight: 100000,
                 },
               },
             ],
@@ -825,7 +831,7 @@ describe("projectDocumentOptions drawings", () => {
                         offset: { pixels: { x: 0, y: 0 }, emus: { x: 0, y: 0 } },
                       },
                       data: {
-                        presetGeometry: { preset: "rect" },
+                        geometry: "rect",
                         fill: { type: "none" },
                         bodyProperties: { lIns: 0, tIns: 0, rIns: 0, bIns: 0, anchor: "center" },
                         children: [{ alignment: "right", children: [{ text: "XX项目" }] }],
@@ -914,8 +920,10 @@ describe("projectDocumentOptions drawings", () => {
                         emus: { x: 476250, y: 95250 },
                         offset: { pixels: { x: 0, y: 0 }, emus: { x: 190500, y: 0 } },
                       },
-                      childOffset: { x: 100000, y: 0 },
-                      childExtent: { cx: 238125, cy: 95250 },
+                      childOffsetX: 100000,
+                      childOffsetY: 0,
+                      childExtentWidth: 238125,
+                      childExtentHeight: 95250,
                       children: [
                         {
                           type: "wps",
@@ -925,7 +933,7 @@ describe("projectDocumentOptions drawings", () => {
                             offset: { pixels: { x: 0, y: 0 }, emus: { x: 100000, y: 0 } },
                           },
                           data: {
-                            presetGeometry: { preset: "line" },
+                            geometry: "line",
                             outline: {
                               width: 9525,
                               type: "solidFill",
@@ -939,8 +947,10 @@ describe("projectDocumentOptions drawings", () => {
                     },
                   ],
                   transformation: { width: 952500, height: 95250 },
-                  childOffset: { x: 0, y: 0 },
-                  childExtent: { cx: 952500, cy: 95250 },
+                  childOffsetX: 0,
+                  childOffsetY: 0,
+                  childExtentWidth: 952500,
+                  childExtentHeight: 95250,
                 },
               },
             ],
@@ -1083,7 +1093,7 @@ describe("projectDocumentOptions drawings", () => {
                         offset: { pixels: { x: 0, y: 0 }, emus: { x: 0, y: 0 } },
                       },
                       data: {
-                        presetGeometry: { preset: "rect" },
+                        geometry: "rect",
                         fill: { type: "solid", color: { value: "7D181C" } },
                         children: [
                           {
