@@ -772,7 +772,8 @@ export const DocumentCommands = Extension.create({
       // Numbering drop-downs' Change List Level item) step each paragraph
       // relative to its own level — the shared Tab semantics. The split's
       // main click carries no value — top level, not a demotion to level 2.
-      // No-op on non-list paragraphs.
+      // Plain paragraphs gain a fresh decimal multilevel list (Word's gallery
+      // applies a list; a silent no-op reads as a broken button).
       "multilevel-list":
         (level) =>
         ({ state, tr }) => {
@@ -780,10 +781,25 @@ export const DocumentCommands = Extension.create({
           const target =
             step === 0 ? (level === "level-3" ? 2 : level === "level-2" ? 1 : 0) : null;
           let touched = false;
+          let freshRef: string | null = null;
           for (const { pos, node } of selectedParagraphs(state)) {
             const attrs = node.attrs as Record<string, unknown>;
             const cur = listStateOf(attrs);
-            if (!cur.kind) continue;
+            if (!cur.kind) {
+              // One shared list for the whole selection (Word numbers the
+              // applied gallery as one list).
+              freshRef ??= nextOrderedReference(
+                collectListReferences(state.doc),
+                (state.doc.attrs as { numbering?: unknown }).numbering,
+              );
+              tr.setNodeMarkup(pos, undefined, {
+                ...attrs,
+                bullet: null,
+                numbering: { reference: freshRef, level: step === 0 ? target! : 0 },
+              });
+              touched = true;
+              continue;
+            }
             const depth = step === 0 ? target! : Math.min(8, Math.max(0, cur.level + step));
             if (depth === cur.level) continue;
             const patch =

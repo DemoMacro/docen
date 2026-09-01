@@ -24,7 +24,7 @@ export type NumberingIndex = Map<string, NumberingLevel[]>;
  *  office-open's parser emits for an unresolvable w:numPr, and what a fresh
  *  hand-authored list carries — resolves against this table when no explicit
  *  numbering definition covers it. */
-const BUILTIN_BULLET_GLYPHS = ["●", "○", "■", "●", "○", "■", "●", "●", "●"];
+const BUILTIN_BULLET_GLYPHS = Array.from({ length: 9 }, (_, i) => ["●", "○", "■"][i % 3]);
 export const BUILTIN_BULLET_LEVEL = (level: number): NumberingLevel => ({
   format: "bullet",
   text: BUILTIN_BULLET_GLYPHS[Math.min(Math.max(level, 0), 8)],

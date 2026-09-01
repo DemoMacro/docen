@@ -35,8 +35,16 @@ export const ORDERED_FORMATS: Readonly<Record<string, LevelsOptions["format"]>> 
   "lower-roman": LevelFormat.LOWER_ROMAN,
 };
 
-/** lvlText per nesting depth (level 0 → "%1.", … level 8 → "%9."). */
-const ORDERED_LEVEL_TEXT = ["%1.", "%2.", "%3.", "%4.", "%5.", "%6.", "%7.", "%8.", "%9."];
+/** lvlText per nesting depth — Word's default multilevel shape: every level
+ *  cascades its ancestors ("%1.", "%1.%2.", "%1.%2.%3.", …), so stepping a
+ *  paragraph's level visibly renumbers it. */
+const ORDERED_LEVEL_TEXT = Array.from(
+  { length: 9 },
+  (_, level) => Array.from({ length: level + 1 }, (_, i) => `%${i + 1}`).join(".") + ".",
+);
+
+/** Word's built-in bullet level cycle (●/○/■), repeated past depth 3. */
+const LEVEL_GLYPH_CYCLE = ["●", "○", "■"];
 
 /** Build nine ordered levels; level 0 carries `format`, deeper levels decimal
  *  (Word's library lists only restyle the top level). Each level restarts at 1
@@ -58,15 +66,16 @@ export function buildOrderedLevels(
   );
 }
 
-/** Build nine bullet levels with the chosen glyph, mirroring Word's built-in
- *  bullet indentation (0.5" per level, 0.25" hanging). */
+/** Build nine bullet levels mirroring Word's built-in bullet indentation
+ *  (0.5" per level, 0.25" hanging) and its glyph cycle (●/○/■); the variant
+ *  glyph rides level 0. */
 export function buildBulletLevels(glyph = "●"): LevelsOptions[] {
   return Array.from(
     { length: 9 },
     (_, level): LevelsOptions => ({
       level,
       format: LevelFormat.BULLET,
-      text: glyph,
+      text: level === 0 ? glyph : LEVEL_GLYPH_CYCLE[level % 3],
       paragraph: {
         indent: { left: 720 * (level + 1), hanging: 360 },
       },

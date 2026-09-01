@@ -20,7 +20,9 @@ describe("list-numbering builders", () => {
     const levels = buildListLevels("docen-ordered-1")!;
     expect(levels).toHaveLength(9);
     expect(levels[0]).toMatchObject({ level: 0, format: "decimal", start: 1, text: "%1." });
-    expect(levels[8]).toMatchObject({ level: 8, text: "%9." });
+    // Deeper levels cascade their ancestors (Word's default multilevel shape),
+    // so stepping a paragraph's level visibly renumbers it.
+    expect(levels[8]).toMatchObject({ level: 8, text: "%1.%2.%3.%4.%5.%6.%7.%8.%9." });
   });
 
   it("maps the lower-roman variant to a level-0 lowerRoman format", () => {
