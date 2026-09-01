@@ -1,19 +1,12 @@
 // Bridge from the leafer-x-metafile plugin's neutral member types to the
-// layout engine's drawing members: field-by-field passthrough for pictures,
-// shapes, and paths; plugin text runs become one single-run paragraph block
-// each (the layout engine lays blocks, the metafile replay only knows runs).
+// layout engine's drawing members. picture/shape/path members are structural
+// subsets of their layout counterparts (the layout types carry the extra
+// editor-side fields: flips, opacity, cap/join) — passed through as-is. Plugin
+// text runs become one single-run paragraph block each (the layout engine lays
+// blocks, the metafile replay only knows runs).
 
-import type {
-  LayoutBlock,
-  LayoutDrawingMember,
-  LayoutPictureCrop,
-  LayoutTextStyle,
-} from "@docen/layout";
-import type { MetafileCrop, MetafileMember, MetafileTextRun } from "leafer-x-metafile";
-
-function cropOf(crop: MetafileCrop): LayoutPictureCrop {
-  return { left: crop.left, top: crop.top, right: crop.right, bottom: crop.bottom };
-}
+import type { LayoutBlock, LayoutDrawingMember, LayoutTextStyle } from "@docen/layout";
+import type { MetafileMember, MetafileTextRun } from "leafer-x-metafile";
 
 function styleOf(run: MetafileTextRun): LayoutTextStyle {
   return {
@@ -31,56 +24,23 @@ function runBlock(run: MetafileTextRun): LayoutBlock {
 }
 
 /** Replay members → layout drawing members (identity for geometry; text runs
- *  wrap into paragraph blocks). */
+ *  wrap into paragraph blocks). Members come from the replay cache and are
+ *  shared by reference — the projection treats them as read-only. */
 export function toLayoutMembers(members: MetafileMember[]): LayoutDrawingMember[] {
-  return members.map((member): LayoutDrawingMember => {
-    switch (member.kind) {
-      case "picture":
-        return {
-          kind: "picture",
-          x: member.x,
-          y: member.y,
-          width: member.width,
-          height: member.height,
-          ...(member.src ? { src: member.src } : {}),
-          ...(member.blend ? { blend: member.blend } : {}),
-          ...(member.crop ? { crop: cropOf(member.crop) } : {}),
-        };
-      case "shape":
-        return {
-          kind: "shape",
-          x: member.x,
-          y: member.y,
-          width: member.width,
-          height: member.height,
-          ...(member.preset ? { preset: member.preset } : {}),
-          ...(member.fill ? { fill: member.fill } : {}),
-          ...(member.line ? { line: member.line } : {}),
-        };
-      case "path":
-        return {
-          kind: "path",
-          x: member.x,
-          y: member.y,
-          width: member.width,
-          height: member.height,
-          d: member.d,
-          ...(member.fillRule ? { fillRule: member.fillRule } : {}),
-          ...(member.fill ? { fill: member.fill } : {}),
-          ...(member.line ? { line: member.line } : {}),
-        };
-      case "textBox":
-        return {
-          kind: "textBox",
-          x: member.x,
-          y: member.y,
-          width: member.width,
-          height: member.height,
-          ...(member.nowrap ? { nowrap: true } : {}),
-          ...(member.insets ? { insets: member.insets } : {}),
-          ...(member.rotation ? { rotation: member.rotation } : {}),
-          blocks: member.runs.map(runBlock),
-        };
-    }
-  });
+  return members.map(
+    (member): LayoutDrawingMember =>
+      member.kind === "textBox"
+        ? {
+            kind: "textBox",
+            x: member.x,
+            y: member.y,
+            width: member.width,
+            height: member.height,
+            ...(member.nowrap ? { nowrap: true } : {}),
+            ...(member.insets ? { insets: member.insets } : {}),
+            ...(member.rotation ? { rotation: member.rotation } : {}),
+            blocks: member.runs.map(runBlock),
+          }
+        : member,
+  );
 }

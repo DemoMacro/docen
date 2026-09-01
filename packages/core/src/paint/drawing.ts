@@ -28,6 +28,31 @@ const PRSTDASH_PATTERN: Record<string, number[]> = {
   lgDashDot: [12, 3, 1, 3],
   lgDashDotDot: [12, 3, 1, 3, 1, 3],
 };
+/** One member's outline as Leafer stroke props: hex color (ink when absent),
+ *  the 1.5 px floor that keeps dashed hairlines from vanishing in their gaps,
+ *  and the dressing Leafer spells differently (cap/join — a flat cap has no
+ *  Leafer counterpart and stays unset). Shared by path members and
+ *  paintShapeBox; strokeAlign stays at the call sites (closed shapes need the
+ *  explicit center, open paths already default to it). */
+function strokePropsOf(
+  line:
+    | {
+        px: number;
+        color?: string;
+        cap?: "round" | "square" | "flat";
+        join?: "round" | "bevel" | "miter";
+        dash?: string;
+      }
+    | undefined,
+) {
+  return {
+    stroke: line ? (line.color ? `#${line.color}` : "#000000") : undefined,
+    strokeWidth: line?.px != null && line.dash ? Math.max(line.px, 1.5) : line?.px,
+    strokeCap: line?.cap === "round" || line?.cap === "square" ? line.cap : undefined,
+    strokeJoin: line?.join === "round" || line?.join === "bevel" ? line.join : undefined,
+    dashPattern: line?.dash ? PRSTDASH_PATTERN[line.dash] : undefined,
+  };
+}
 function drawingBoxOf(
   drawing: LayoutDrawing,
   x: number,
@@ -234,18 +259,7 @@ export function paintMembers(
           // the parsed command array — a string there paints nothing).
           path: m.d,
           fill: m.fill ? `#${m.fill}` : undefined,
-          stroke: m.line ? (m.line.color ? `#${m.line.color}` : "#000000") : undefined,
-          // A dashed hairline disappears entirely: the antialiased 1 px stroke
-          // fades under the dash gaps and nothing survives. Hold a 1.5 px
-          // floor on dashed strokes so the pattern renders; solid lines keep
-          // their true width (fading is invisible there).
-          strokeWidth:
-            m.line?.px != null ? (m.line.dash ? Math.max(m.line.px, 1.5) : m.line.px) : undefined,
-          strokeCap:
-            m.line?.cap === "round" ? "round" : m.line?.cap === "square" ? "square" : undefined,
-          strokeJoin:
-            m.line?.join === "round" ? "round" : m.line?.join === "bevel" ? "bevel" : undefined,
-          dashPattern: m.line?.dash ? PRSTDASH_PATTERN[m.line.dash] : undefined,
+          ...strokePropsOf(m.line),
           // Leafer spells the SVG fill-rule attribute `windingRule`.
           windingRule: m.fillRule,
         }),
@@ -366,23 +380,16 @@ function paintShapeBox(
       ? rgbaOf(box.fill, box.opacity)
       : `#${box.fill}`
     : undefined;
-  const stroke = box.line ? (box.line.color ? `#${box.line.color}` : "#000000") : undefined;
-  // A dashed hairline vanishes in the dash gaps — hold the same 1.5 px floor
-  // the member path uses so preset dashes render.
-  const strokeWidth =
-    box.line?.px != null && box.line.dash ? Math.max(box.line.px, 1.5) : box.line?.px;
   const common = {
     x: box.x,
     y: box.y,
     width: box.width,
     height: box.height,
     fill,
-    stroke,
-    strokeWidth,
+    ...strokePropsOf(box.line),
     // Closed shapes default to an inside stroke, under which Leafer's dash
     // pass paints nothing — center stroke renders the dashPattern.
     strokeAlign: "center",
-    dashPattern: box.line?.dash ? PRSTDASH_PATTERN[box.line.dash] : undefined,
   };
   if (box.preset === "ellipse") {
     tree.add(new Ellipse(common));
