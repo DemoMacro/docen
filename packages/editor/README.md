@@ -307,4 +307,4 @@ applyTheme("light"); // "light" | "dark"
 
 ## License
 
-- [MIT](LICENSE) &copy; [Demo Macro](https://www.demomacro.com/)
+- [MIT](../../LICENSE) &copy; [Demo Macro](https://www.demomacro.com/)

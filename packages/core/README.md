@@ -53,4 +53,4 @@ The painter deliberately owns **no layout decisions** (geometry comes from the e
 
 ## License
 
-- [MIT](LICENSE) &copy; [Demo Macro](https://www.demomacro.com/)
+- [MIT](../../LICENSE) &copy; [Demo Macro](https://www.demomacro.com/)

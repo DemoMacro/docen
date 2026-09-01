@@ -8,16 +8,20 @@
 
 ## Features
 
-- Duplicate detection within a single document
-- Cross-document paragraph comparison with bidirectional coverage
-- Sentence-level matching: SimHash for fast screening, Levenshtein for precise verification
-- No false positives from n-gram containment — all matches verified by edit distance
-- Multilingual support (Chinese, English, etc.)
+- 🔁 **Duplicate detection** within a single document
+- 📑 **Cross-document comparison** with bidirectional paragraph coverage
+- 🎯 **Two-phase matching** — SimHash screens fast, Levenshtein verifies precisely
+- 🚫 **No false positives** from n-gram containment — all matches verified by edit distance
+- 🌏 **Multilingual** (Chinese, English, etc.)
 
 ## Installation
 
 ```bash
-pnpm add @docen/deduplicate
+# Install with pnpm
+$ pnpm add @docen/deduplicate
+
+# Install with npm
+$ npm install @docen/deduplicate
 ```
 
 ## Quick Start
@@ -193,4 +197,4 @@ interface LocalMatch {
 
 ## License
 
-MIT &copy; [Demo Macro](https://www.demomacro.com/)
+- [MIT](../../LICENSE) &copy; [Demo Macro](https://www.demomacro.com/)

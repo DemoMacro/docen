@@ -1,8 +1,12 @@
 # leafer-x-metafile
 
+![npm version](https://img.shields.io/npm/v/leafer-x-metafile)
+![npm downloads](https://img.shields.io/npm/dw/leafer-x-metafile)
+![npm license](https://img.shields.io/npm/l/leafer-x-metafile)
+
 > Zero-dependency WMF / EMF+ metafile player: replays placeable-WMF record streams and EMF+ (GDI+) record streams into neutral, box-local drawing members — pictures, shapes, paths, and text boxes — that any renderer can consume.
 
-Browsers cannot rasterize GDI metafiles, so Office documents carrying `.wmf`/`.emf` vector art render as empty frames. This package reassembles those byte streams (including dual-mode files whose real art hides in `META_ESCAPE` "WMFC" chunks as an embedded EMF+ stream) and replays them record-by-record into structured members, ready to be painted on canvas or instantiated as LeaferJS elements.
+Browsers cannot rasterize GDI metafiles, so Office documents carrying `.wmf`/`.emf` vector art render as empty frames. This package reassembles those byte streams (including dual-mode files whose real art hides in `META_ESCAPE` "WMFC" chunks as an embedded EMF+ stream) and replays them record-by-record into structured members, ready to be painted on canvas or instantiated as LeaferJS elements. Consumed by [`@docen/docx`](../docx/README.md)'s layout projection, which adapts the members into its `LayoutDoc` drawings.
 
 ## Features
 
@@ -34,10 +38,6 @@ for (const member of members ?? []) {
 }
 ```
 
-## Roadmap
-
-- A LeaferJS painter layer that instantiates the members directly into a scene (`Leafer` / `Path` / `Text` nodes) — planned as the package's rendering half.
-
 ## License
 
-[MIT](./LICENSE)
+- [MIT](../../LICENSE) &copy; [Demo Macro](https://www.demomacro.com/)

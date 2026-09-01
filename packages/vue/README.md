@@ -222,4 +222,4 @@ const DocenDocument = defineAsyncComponent(() => import("@docen/vue").then((m) =
 
 ## License
 
-MIT © [Demo Macro](https://www.demomacro.com/)
+- [MIT](../../LICENSE) &copy; [Demo Macro](https://www.demomacro.com/)

@@ -84,17 +84,7 @@ const editor = createDocxEditor({
 });
 ```
 
-### Extension Commands (Thin Wrappers)
-
-Convenience commands that call standalone functions internally.
-
-```typescript
-// Load DOCX into editor (calls parseDOCX → setContent)
-editor.commands.importDocx(buffer);
-
-// Export editor content as DOCX (calls getJSON → generateDOCX)
-const buffer = await editor.commands.exportDocx();
-```
+Need a ready-made editor UI? [`@docen/editor`](../editor/README.md)'s `<docen-document>` bundles this engine with open/save, canvas rendering, and the Fluent host.
 
 ### Template Patching
 
@@ -135,14 +125,15 @@ Standalone Functions (core)
   parseMarkdown / generateMarkdown
   resolveDocument / compileDocument / prepareDocument  (model bridge, advanced)
         ↕ used by
-Tiptap Extension Commands (thin wrappers)
-  editor.commands.importDocx() / exportDocx()
+createDocxEditor / docxExtensions — the viewless Tiptap editing model
+        ↕ rendered by
+@docen/editor's canvas stage (LeaferJS pages, caret/selection mapping)
 ```
 
 - **Runtime model**: Tiptap JSON with DOCX-rich attributes via custom extensions
 - **Persistence model**: DocumentOptions (complete OOXML expressiveness)
-- **Standalone functions are core** — extension commands are thin wrappers
+- **Standalone functions are core** — the editor bindings are thin wrappers
 
 ## License
 
-- [MIT](LICENSE) &copy; [Demo Macro](https://www.demomacro.com/)
+- [MIT](../../LICENSE) &copy; [Demo Macro](https://www.demomacro.com/)
