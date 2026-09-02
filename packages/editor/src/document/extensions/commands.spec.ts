@@ -657,3 +657,40 @@ describe("arrange — floating drawings", () => {
     expect(editor.commands["align-objects"]("left")).toBe(false);
   });
 });
+
+describe("add-text — TOC level stamps", () => {
+  it("stamps heading levels and clears them, keeping the style rule", () => {
+    const editor = build();
+    editor.commands.setContent({
+      type: "doc",
+      content: [
+        { type: "paragraph", content: [{ type: "text", text: "甲" }] },
+        { type: "paragraph", content: [{ type: "text", text: "乙" }] },
+        {
+          type: "paragraph",
+          attrs: { style: "IntenseQuote" },
+          content: [{ type: "text", text: "丙" }],
+        },
+      ],
+    });
+    editor.commands.setTextSelection({ from: 2, to: editor.state.doc.content.size - 1 });
+    expect(editor.commands["add-text"]("level-2")).toBe(true);
+    const headingsOf = () => {
+      const paras: Record<string, unknown>[] = [];
+      editor.state.doc.descendants((n) => {
+        if (n.type.name === "paragraph") paras.push(n.attrs as Record<string, unknown>);
+      });
+      return paras;
+    };
+    // Every selected paragraph became Heading2; the named style yields to it.
+    const paras = headingsOf();
+    expect(paras[0].heading).toBe("Heading2");
+    expect(paras[1].heading).toBe("Heading2");
+    expect(paras[2].heading).toBe("Heading2");
+    expect(paras[2].style).toBeNull();
+    // "none" returns them to body text (the style stays cleared).
+    expect(editor.commands["add-text"]("none")).toBe(true);
+    expect(headingsOf()[0].heading).toBeNull();
+    expect(editor.commands["add-text"]("bogus")).toBe(false);
+  });
+});

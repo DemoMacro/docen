@@ -346,6 +346,16 @@ const alignObjectsItems = (): string =>
     { text: cmd("align-right"), value: "right" },
   ]);
 
+// References > Add Text: the TOC levels (Word's menu minus the missing-level
+// caption line).
+const addTextItems = (): string =>
+  JSON.stringify([
+    { text: opt("add-text-level-1"), value: "level-1" },
+    { text: opt("add-text-level-2"), value: "level-2" },
+    { text: opt("add-text-level-3"), value: "level-3" },
+    { text: opt("add-text-none"), value: "none" },
+  ]);
+
 const footnoteItems = (): string =>
   JSON.stringify([
     { text: cmd("insert-footnote"), value: "footnote" },
@@ -979,7 +989,7 @@ const referencesTab = (): RibbonTab =>
   tabNode("references", [
     group("toc", [
       btn("toc", "toc", { size: "large" }),
-      btn("multilevel", "add-text", { size: "large" }),
+      split("multilevel", "add-text", parsedItems(addTextItems()), { size: "large" }),
       btn("sync", "update-toc", { size: "large" }),
     ]),
     group("footnotes", [

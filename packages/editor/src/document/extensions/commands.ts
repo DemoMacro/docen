@@ -99,6 +99,7 @@ declare module "@tiptap/core" {
       "cell-height": (value?: string) => ReturnType;
       link: (href?: string) => ReturnType;
       style: (styleId?: string) => ReturnType;
+      "add-text": (value?: string) => ReturnType;
       // Editing
       "change-case": (mode?: string) => ReturnType;
       sort: () => ReturnType;
@@ -182,6 +183,7 @@ export const WIRED_DISPATCH: ReadonlySet<string> = new Set([
   "convert-to-text",
   "link",
   "style",
+  "add-text",
   "undo",
   "redo",
   "change-case",
@@ -557,6 +559,15 @@ const POSITION_ALIGN: Record<string, { v: string; h: string }> = {
   bl: { v: "bottom", h: "left" },
   bc: { v: "bottom", h: "center" },
   br: { v: "bottom", h: "right" },
+};
+
+/** Word's Add Text menu: a TOC level → the heading pStyle it stamps (the TOC
+ *  field collects Heading 1-3), "none" returning paragraphs to body text. */
+const ADD_TEXT_LEVELS: Readonly<Record<string, string | null>> = {
+  "level-1": "Heading1",
+  "level-2": "Heading2",
+  "level-3": "Heading3",
+  none: null,
 };
 
 // ── Cell Size / AutoFit measurement helpers ──────────────────────────────────
@@ -1803,6 +1814,28 @@ export const DocumentCommands = Extension.create({
           return chain()
             .updateAttributes("paragraph", { style: id || null, heading: null })
             .run();
+        },
+      // Word's References > Add Text: mark every selected paragraph as a TOC
+      // level by stamping its heading pStyle; "none" returns it to body text.
+      // The heading wins over a named style (the single pStyle writer prefers
+      // `style`), so a level stamp clears it — the same rule the style
+      // gallery applies in reverse.
+      "add-text":
+        (value) =>
+        ({ state, tr }) => {
+          const heading = ADD_TEXT_LEVELS[value ?? ""];
+          if (heading === undefined) return false;
+          const blocks = selectedParagraphs(state);
+          if (!blocks.length) return false;
+          for (const { pos, node } of blocks) {
+            const attrs = node.attrs as Record<string, unknown>;
+            tr.setNodeMarkup(pos, undefined, {
+              ...attrs,
+              heading,
+              style: heading ? null : ((attrs.style as string | null) ?? null),
+            });
+          }
+          return true;
         },
 
       // ── Editing — change case / sort / multilevel list level ──

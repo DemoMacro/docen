@@ -500,6 +500,11 @@ export const ribbonEn: AdditionalLanguage = {
     "ribbon.opt.wrap-tight": "Tight",
     "ribbon.opt.wrap-through": "Through",
     "ribbon.opt.wrap-top-bottom": "Top and Bottom",
+    // --- Options: Add Text (TOC levels) ---
+    "ribbon.opt.add-text-level-1": "Level 1",
+    "ribbon.opt.add-text-level-2": "Level 2",
+    "ribbon.opt.add-text-level-3": "Level 3",
+    "ribbon.opt.add-text-none": "Do Not Show in Table of Contents",
     // --- Options: references / mailings ---
     "ribbon.opt.endnote": "Insert Endnote",
     "ribbon.opt.next-footnote": "Next Footnote",
@@ -1059,6 +1064,11 @@ export const ribbonZhCN: AdditionalLanguage = {
     "ribbon.opt.wrap-tight": "紧密型",
     "ribbon.opt.wrap-through": "穿越型",
     "ribbon.opt.wrap-top-bottom": "上下型",
+    // --- 选项：添加文字（目录级别） ---
+    "ribbon.opt.add-text-level-1": "1 级",
+    "ribbon.opt.add-text-level-2": "2 级",
+    "ribbon.opt.add-text-level-3": "3 级",
+    "ribbon.opt.add-text-none": "不在目录中显示",
     // --- Options: references / mailings ---
     "ribbon.opt.endnote": "插入尾注",
     "ribbon.opt.next-footnote": "下一脚注",
