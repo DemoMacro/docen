@@ -87,6 +87,7 @@ declare module "@tiptap/core" {
       "convert-to-text": () => ReturnType;
       "table-style": (value?: string) => ReturnType;
       "table-borders": (value?: string) => ReturnType;
+      "toggle-table-look": (value?: string) => ReturnType;
       link: (href?: string) => ReturnType;
       style: (styleId?: string) => ReturnType;
       // Editing
@@ -151,6 +152,7 @@ export const WIRED_DISPATCH: ReadonlySet<string> = new Set([
   "cell-shading",
   "table-style",
   "table-borders",
+  "toggle-table-look",
   "text-direction",
   "convert-to-text",
   "link",
@@ -434,39 +436,65 @@ type TableBordersLike = Record<string, { style: string; size: number; color: str
 const GRID_BORDER = { style: "single", size: 4, color: "auto" };
 const NO_BORDER = { style: "none", size: 0, color: "auto" };
 
-/** Word's Table Styles gallery stand-ins — border presets the canvas paints
- *  today (a full style system waits on the styles pane). */
-const TABLE_STYLE_PRESETS: Record<string, TableBordersLike> = {
-  "grid-table": {
-    top: GRID_BORDER,
-    bottom: GRID_BORDER,
-    left: GRID_BORDER,
-    right: GRID_BORDER,
-    insideHorizontal: GRID_BORDER,
-    insideVertical: GRID_BORDER,
+/** A Table Styles gallery preset: the border set plus the conditional fills —
+ *  the header-row shading and the alternating body-row band. Word renders
+ *  those through the table style; the editor has no style engine, so applying
+ *  a preset bakes the fills onto the cells directly. */
+export interface TableStylePreset {
+  borders: TableBordersLike | null;
+  /** Shading stamped on every tblHeader row's cells (Word's header-row
+   *  conditional formatting). */
+  headerFill?: string;
+  /** Shading stamped on alternating body rows (Word's banded-rows
+   *  conditional formatting). */
+  bandFill?: string;
+}
+
+const TABLE_GRID_BORDERS: TableBordersLike = {
+  top: GRID_BORDER,
+  bottom: GRID_BORDER,
+  left: GRID_BORDER,
+  right: GRID_BORDER,
+  insideHorizontal: GRID_BORDER,
+  insideVertical: GRID_BORDER,
+};
+const TABLE_NO_BORDERS: TableBordersLike = {
+  top: NO_BORDER,
+  bottom: NO_BORDER,
+  left: NO_BORDER,
+  right: NO_BORDER,
+  insideHorizontal: NO_BORDER,
+  insideVertical: NO_BORDER,
+};
+
+/** Word's Table Styles gallery stand-ins, named after the built-ins they
+ *  approximate (Accent 1 colors — the Office default theme). */
+export const TABLE_STYLE_PRESETS: Record<string, TableStylePreset> = {
+  "no-style-no-grid": { borders: TABLE_NO_BORDERS },
+  "table-grid": { borders: TABLE_GRID_BORDERS },
+  // Horizontal rules only, with a light band on alternating body rows.
+  "light-shading": {
+    borders: { top: GRID_BORDER, bottom: GRID_BORDER, insideHorizontal: GRID_BORDER },
+    bandFill: "D9E2F3",
   },
+  // Horizontal rules + a tinted header row.
   "light-list": {
-    top: GRID_BORDER,
-    bottom: GRID_BORDER,
-    left: GRID_BORDER,
-    right: GRID_BORDER,
-    insideHorizontal: GRID_BORDER,
-    insideVertical: NO_BORDER,
+    borders: { top: GRID_BORDER, bottom: GRID_BORDER, insideHorizontal: GRID_BORDER },
+    headerFill: "8EAADB",
   },
-  "no-vertical": {
-    bottom: GRID_BORDER,
-    insideHorizontal: GRID_BORDER,
-    left: NO_BORDER,
-    right: NO_BORDER,
-    top: NO_BORDER,
-  },
-  "no-border": {
-    bottom: NO_BORDER,
-    insideHorizontal: NO_BORDER,
-    insideVertical: NO_BORDER,
-    left: NO_BORDER,
-    right: NO_BORDER,
-    top: NO_BORDER,
+  // Full grid + a tinted header row.
+  "light-grid": { borders: TABLE_GRID_BORDERS, headerFill: "D9E2F3" },
+  // Heavier outside frame + the dark Accent-1 header.
+  "grid-table": {
+    borders: {
+      top: { style: "single", size: 8, color: "auto" },
+      bottom: { style: "single", size: 8, color: "auto" },
+      left: { style: "single", size: 8, color: "auto" },
+      right: { style: "single", size: 8, color: "auto" },
+      insideHorizontal: GRID_BORDER,
+      insideVertical: GRID_BORDER,
+    },
+    headerFill: "4472C4",
   },
 };
 
@@ -476,7 +504,7 @@ function tableBordersStamp(
   value: string,
   current: TableBordersLike | null,
 ): TableBordersLike | null {
-  if (value === "none") return TABLE_STYLE_PRESETS["no-border"]!;
+  if (value === "none") return TABLE_STYLE_PRESETS["no-style-no-grid"]!.borders;
   const borders: TableBordersLike = { ...current };
   if (value === "all" || value === "outside") {
     borders.top = GRID_BORDER;
@@ -1161,12 +1189,70 @@ export const DocumentCommands = Extension.create({
           }
           return true;
         },
+      // Apply a Table Styles gallery preset: the border set on the table plus
+      // the conditional fills baked onto the cells. Every cell's shading is
+      // rewritten (fill or null), so switching presets never leaves the
+      // previous style's bands behind.
       "table-style":
         (value) =>
         ({ state, dispatch }) => {
           const preset = value ? TABLE_STYLE_PRESETS[value] : undefined;
           if (!preset) return false;
-          return stampTableBorders(state, dispatch, preset);
+          const anchor = tableAncestry(state);
+          if (!anchor) return false;
+          if (dispatch) {
+            const { $from } = state.selection;
+            const tablePos = $from.before(anchor.tableAt);
+            const tableNode = $from.node(anchor.tableAt);
+            const tr = state.tr.setNodeMarkup(tablePos, undefined, {
+              ...tableNode.attrs,
+              borders: preset.borders,
+            });
+            for (let r = 0; r < tableNode.childCount; r += 1) {
+              const rowNode = tableNode.child(r);
+              let rowPos = tablePos + 1;
+              for (let i = 0; i < r; i += 1) rowPos += tableNode.child(i).nodeSize;
+              const isHeader = !!rowNode.attrs.tableHeader;
+              // Word bands the odd body rows (1st, 3rd, …); with a header at
+              // r=0 those are the even table indices ≥ 2.
+              const isBand = !isHeader && preset.bandFill != null && r >= 2 && r % 2 === 0;
+              const fill = isHeader ? preset.headerFill : isBand ? preset.bandFill : undefined;
+              rowNode.forEach((cell: PMNode, offset: number) => {
+                const cellPos = rowPos + 1 + offset;
+                tr.setNodeMarkup(cellPos, undefined, {
+                  ...cell.attrs,
+                  shading: fill ? { fill, type: "clear" } : null,
+                });
+              });
+            }
+            dispatch(tr.scrollIntoView());
+          }
+          return true;
+        },
+      // Toggle one of the Table Style Options flags (Word's Header Row /
+      // Total Row / Banded Rows / … checkboxes) — the table's tblLook.
+      "toggle-table-look":
+        (value) =>
+        ({ state, dispatch }) => {
+          const flags = ["firstRow", "lastRow", "firstCol", "lastCol", "bandRow", "bandCol"];
+          if (typeof value !== "string" || !flags.includes(value)) return false;
+          const anchor = tableAncestry(state);
+          if (!anchor) return false;
+          if (dispatch) {
+            const { $from } = state.selection;
+            const tablePos = $from.before(anchor.tableAt);
+            const table = $from.node(anchor.tableAt);
+            const look = {
+              ...((table.attrs.tableLook ?? {}) as Record<string, boolean>),
+            };
+            look[value] = !look[value];
+            dispatch(
+              state.tr
+                .setNodeMarkup(tablePos, undefined, { ...table.attrs, tableLook: look })
+                .scrollIntoView(),
+            );
+          }
+          return true;
         },
       // Border-side presets on the table (value space matches the Home
       // paragraph-border menu).

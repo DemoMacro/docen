@@ -107,7 +107,7 @@ import zoomIn from "@fluentui/svg-icons/icons/zoom_in_24_regular.svg?raw";
  * References/Mailings/Review/View). Extend as editor packages adopt more
  * commands.
  */
-export const RIBBON_ICONS: Readonly<Record<string, string>> = {
+const RIBBON_ICONS: Record<string, string> = {
   // Shared / app
   app: appLogo,
   caret: chevronDown,
@@ -239,4 +239,11 @@ export const RIBBON_ICONS: Readonly<Record<string, string>> = {
 /** Raw SVG markup for a known icon name, else `null`. */
 export function ribbonIcon(name: string): string | null {
   return RIBBON_ICONS[name] ?? null;
+}
+
+/** Register a runtime-generated icon — the table-style gallery stamps its
+ *  preview thumbnails here (rendered mini-tables, not a static Fluent glyph).
+ *  Idempotent: re-registering a name replaces its markup. */
+export function registerIcon(name: string, svg: string): void {
+  RIBBON_ICONS[name] = svg;
 }

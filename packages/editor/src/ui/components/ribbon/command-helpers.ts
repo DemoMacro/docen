@@ -11,6 +11,9 @@ export const COMMAND_HOST_STYLE = `
   :host { display: inline-flex; }
   .rb-icon { display: contents; }
   .rb-icon svg { display: block; fill: currentColor; width: 16px; height: 16px; }
+  /* Menu-item start glyphs run larger than command icons — a gallery drop-down
+     shows each preset's thumbnail beside its name (Word's More gallery). */
+  .rb-item-icon svg { display: block; fill: currentColor; width: 24px; height: 24px; }
   :host([icon-only]) .rb-label { display: none; }
   /* Scope to fluent-button only. ::part(content) is a wildcard and would
      also hit fluent-menu-item / fluent-option (both expose part="content"),
@@ -93,6 +96,7 @@ export function suppressTooltipWhileMenuOpen(
  *  menu item type — command routing fields stay on the caller's own type). */
 interface MenuItemLike {
   text: string;
+  icon?: string;
   checked?: boolean;
   disabled?: boolean;
 }
@@ -104,7 +108,9 @@ interface MenuItemLike {
  *  menu groups clipboard / link / comment sections with rules). Every item
  *  gets `data-indent="0"` so a plain-text label spans the full row — without
  *  it Fluent pins the content to the fixed-width indicator track and clips
- *  long labels (see the registry's fluent-menu-item override). */
+ *  long labels (see the registry's fluent-menu-item override). An `icon` item
+ *  instead renders the glyph in Fluent's `start` slot and keeps Fluent's own
+ *  indent (icon-then-text columns). */
 export function appendMenuItems<T extends MenuItemLike>(
   list: HTMLElement,
   items: readonly T[],
@@ -125,8 +131,19 @@ export function appendMenuItems<T extends MenuItemLike>(
     } else {
       menuItem.setAttribute("role", "menuitem");
     }
-    menuItem.setAttribute("data-indent", "0");
-    menuItem.textContent = item.text;
+    if (item.icon) {
+      const start = document.createElement("span");
+      start.slot = "start";
+      start.className = "rb-item-icon";
+      renderIcon(start, item.icon);
+      // Text first — a textContent assignment clears existing children and
+      // would wipe the just-appended start glyph.
+      menuItem.textContent = item.text;
+      menuItem.append(start);
+    } else {
+      menuItem.setAttribute("data-indent", "0");
+      menuItem.textContent = item.text;
+    }
     if (item.disabled) menuItem.setAttribute("disabled", "");
     menuItem.addEventListener("change", () => onSelect(item));
     list.append(menuItem);

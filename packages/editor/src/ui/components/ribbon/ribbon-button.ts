@@ -85,6 +85,9 @@ class DocenRibbonButton extends FASTElement {
   @attr label?: string;
   @attr icon?: string;
   @attr event?: string;
+  /** Command value carried on the emitted `command` detail (a gallery button
+   *  dispatches its shared command with the preset id as the value). */
+  @attr value?: string;
   @attr tooltip?: string;
   @attr appearance?: string;
   @attr({ mode: "boolean" }) disabled?: boolean;
@@ -139,7 +142,7 @@ class DocenRibbonButton extends FASTElement {
       new CustomEvent("command", {
         bubbles: true,
         composed: true,
-        detail: { event: this.eventName, source: this },
+        detail: { event: this.eventName, value: this.value, source: this },
       }),
     );
   }

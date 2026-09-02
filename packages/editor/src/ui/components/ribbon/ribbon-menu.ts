@@ -17,6 +17,10 @@ import {
 
 export interface RibbonMenuItem {
   text: string;
+  /** Docen icon key (see the RIBBON_ICONS map) — a glyph in the item's
+   *  `start` slot (the table-style gallery's dropdown shows each preset's
+   *  mini-table thumbnail). */
+  icon?: string;
   event?: string;
   value?: string;
   disabled?: boolean;

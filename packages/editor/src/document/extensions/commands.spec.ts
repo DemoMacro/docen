@@ -211,15 +211,40 @@ describe("table cell property commands", () => {
     expect(firstNodeOf(editor, "tableCell").attrs.shading).toBeFalsy();
   });
 
-  it("table-style applies a border preset to the enclosing table", () => {
+  it("table-style applies a preset's borders and conditional fills", () => {
     const editor = build();
     editor.commands["insert-table"]();
     caretInCell(editor, 0, 0);
     expect(editor.commands["table-style"]("light-list")).toBe(true);
     const borders = tablesOf(editor)[0]!.attrs.borders as Record<string, unknown>;
     expect(borders.top).toEqual(GRID);
-    expect(borders.insideVertical).toEqual({ style: "none", size: 0, color: "auto" });
+    // Light List rules off the inside verticals — absent, not "none".
+    expect(borders.insideVertical).toBeUndefined();
+    // The header row's cells carry the preset's conditional fill (the first
+    // cell in document order sits in that row).
+    expect(firstNodeOf(editor, "tableCell").attrs.shading).toEqual({
+      fill: "8EAADB",
+      type: "clear",
+    });
+    // Switching presets rewrites every cell's shading (no stale bands).
+    expect(editor.commands["table-style"]("table-grid")).toBe(true);
+    expect(firstNodeOf(editor, "tableCell").attrs.shading).toBeNull();
+    expect((tablesOf(editor)[0]!.attrs.borders as Record<string, unknown>).insideVertical).toEqual(
+      GRID,
+    );
     expect(editor.commands["table-style"]("bogus")).toBe(false);
+  });
+
+  it("toggle-table-look flips one tblLook flag at a time", () => {
+    const editor = build();
+    editor.commands["insert-table"]();
+    caretInCell(editor, 0, 0);
+    expect(editor.commands["toggle-table-look"]("bandRow")).toBe(true);
+    expect((tablesOf(editor)[0]!.attrs.tableLook as Record<string, unknown>).bandRow).toBe(true);
+    expect(editor.commands["toggle-table-look"]("bandRow")).toBe(true);
+    expect((tablesOf(editor)[0]!.attrs.tableLook as Record<string, unknown>).bandRow).toBe(false);
+    // Unknown flags decline.
+    expect(editor.commands["toggle-table-look"]("bogus")).toBe(false);
   });
 
   it("text-direction toggles the cell's tcPr textDirection", () => {

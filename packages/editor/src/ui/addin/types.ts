@@ -26,6 +26,9 @@ export interface RibbonMenuItem {
   /** Display text — an i18n key resolved via `t()` at render time (a plain
    *  string also works; `t()` returns it unchanged if no key matches). */
   text: string;
+  /** Docen icon key rendered in the item's `start` slot (e.g. a gallery
+   *  drop-down showing each preset's thumbnail beside its name). */
+  icon?: string;
   value?: string;
   event?: string;
   checked?: boolean;
@@ -42,6 +45,9 @@ export interface RibbonControlBase {
    *  also works). */
   label?: string;
   event?: string;
+  /** Command value carried on the activation detail (buttons and menu items
+   *  alike — e.g. a table-style gallery button carries its preset id). */
+  value?: string;
   disabled?: boolean;
   size?: RibbonControlSize;
   /** Render the icon only (label surfaces in a tooltip). */
@@ -50,6 +56,14 @@ export interface RibbonControlBase {
 
 export interface RibbonButton extends RibbonControlBase {
   type: "button";
+}
+
+/** A labelled checkbox (Office.js manifest `CheckBox`) — Word's Table Style
+ *  Options flags. `checked` is the visual stamp; the host re-stamps it to
+ *  mirror the live state. */
+export interface RibbonCheckbox extends RibbonControlBase {
+  type: "checkbox";
+  checked?: boolean;
 }
 
 export interface RibbonMenu extends RibbonControlBase {
@@ -80,6 +94,17 @@ export interface RibbonColorPicker extends RibbonControlBase {
   defaultColor?: string;
 }
 
+/** Word's gallery control — a strip of icon-over-label thumbnails plus a More
+ *  bar whose drop-down shows every entry in the same shape (the Table Styles
+ *  gallery). `items` share the {@link RibbonMenuItem} shape; `value` rides the
+ *  emitted command detail. */
+export interface RibbonGallery extends RibbonControlBase {
+  type: "gallery";
+  items: RibbonMenuItem[];
+  /** Entries shown in the closed strip; the drop-down lists all. */
+  visibleCount?: number;
+}
+
 /** A vertical separator between controls in a row. */
 export interface RibbonSeparator {
   type: "separator";
@@ -88,14 +113,17 @@ export interface RibbonSeparator {
 /** A discriminated union of every ribbon control kind. The `type` discriminator
  *  uses kebab-case (Web Component convention) and maps to Office.js manifest
  *  control kinds: `Button`→"button", `Menu`→"menu", `SplitButton`→"split",
- *  `ComboBox`→"combobox". `RibbonColorPicker` / `RibbonSeparator` are docen
- *  additions with no manifest counterpart. */
+ *  `ComboBox`→"combobox", `CheckBox`→"checkbox". `RibbonColorPicker` /
+ *  `RibbonGallery` / `RibbonSeparator` are docen additions with no manifest
+ *  counterpart. */
 export type RibbonControl =
   | RibbonButton
+  | RibbonCheckbox
   | RibbonMenu
   | RibbonSplit
   | RibbonCombobox
   | RibbonColorPicker
+  | RibbonGallery
   | RibbonSeparator;
 
 /** A layout wrapper. Office stacks a large button beside rows/columns of small

@@ -6,6 +6,8 @@ import type {
   RibbonCombobox,
   RibbonControl,
   RibbonControlOrLayout,
+  RibbonControlSize,
+  RibbonGallery,
   RibbonGroup,
   RibbonLayout,
   RibbonMenu,
@@ -35,7 +37,8 @@ import type {
  * styles, breaks, history); the rest render as a complete visual skeleton and
  * no-op on click until wired.
  */
-import { resolveLang, t } from "../ui";
+import { resolveLang, t, registerIcon } from "../ui";
+import { TABLE_STYLE_PRESETS, type TableStylePreset } from "./extensions/commands";
 
 // --- i18n shortcuts (ribbon.* keys, resolved at call time) -------------------
 
@@ -519,16 +522,17 @@ function buildLayout(l: RibbonLayout, scope: Element): HTMLElement {
   return el;
 }
 
-/** Stamp the shared base attrs (icon/label/event/iconOnly/size/disabled) every
- *  control component reads. */
+/** Stamp the shared base attrs (icon/label/event/value/iconOnly/size/disabled)
+ *  every control component reads. */
 function applyBase(
   el: HTMLElement,
   c: {
     icon?: string;
     label?: string;
     event?: string;
+    value?: string;
     iconOnly?: boolean;
-    size?: "small" | "large";
+    size?: RibbonControlSize;
     disabled?: boolean;
   },
   scope: Element,
@@ -536,8 +540,9 @@ function applyBase(
   if (c.icon) el.setAttribute("icon", c.icon);
   if (c.label) el.setAttribute("label", t(c.label, scope));
   if (c.event) el.setAttribute("event", c.event);
+  if (c.value) el.setAttribute("value", c.value);
   if (c.iconOnly) el.setAttribute("icon-only", "");
-  if (c.size === "large") el.setAttribute("size", "large");
+  if (c.size) el.setAttribute("size", c.size);
   if (c.disabled) el.setAttribute("disabled", "");
 }
 
@@ -556,6 +561,12 @@ function buildControl(c: RibbonControl, scope: Element): HTMLElement {
     case "button": {
       const el = document.createElement("docen-ribbon-button");
       applyBase(el, c, scope);
+      return el;
+    }
+    case "checkbox": {
+      const el = document.createElement("docen-ribbon-checkbox");
+      applyBase(el, c, scope);
+      if (c.checked) el.setAttribute("checked", "");
       return el;
     }
     case "menu": {
@@ -583,6 +594,13 @@ function buildControl(c: RibbonControl, scope: Element): HTMLElement {
       const el = document.createElement("docen-color-picker");
       applyBase(el, c, scope);
       if (c.defaultColor) el.setAttribute("default-color", c.defaultColor);
+      return el;
+    }
+    case "gallery": {
+      const el = document.createElement("docen-ribbon-gallery");
+      applyBase(el, c, scope);
+      el.setAttribute("items", JSON.stringify(translateItems(c.items ?? [], scope)));
+      if (c.visibleCount != null) el.setAttribute("visible-count", String(c.visibleCount));
       return el;
     }
   }
@@ -1061,13 +1079,87 @@ const viewTab = (): RibbonTab =>
 // table-borders sides (same as the Home border menu), and the align-cell
 // 9-grid keys (top/middle/bottom × left/center/right).
 
-const tableStyleItems = (): string =>
-  JSON.stringify([
-    { text: opt("style-grid-table"), value: "grid-table" },
-    { text: opt("style-light-list"), value: "light-list" },
-    { text: opt("style-no-vertical"), value: "no-vertical" },
-    { text: opt("no-border"), value: "no-border" },
-  ]);
+// --- Table Design gallery -----------------------------------------------------
+// Word renders each gallery entry as a mini-table thumbnail painted from the
+// style's borders and conditional fills. We generate that thumbnail as an SVG
+// from the same preset data the command stamps — one source, preview and
+// result can't drift.
+
+function tableStylePreviewSvg(preset: TableStylePreset): string {
+  const stroke = `stroke="#595959" stroke-width="1"`;
+  const cell = 10;
+  const x3 = 1 + cell * 3;
+  const y3 = 1 + cell * 3;
+  const parts: string[] = [];
+  if (preset.headerFill) {
+    parts.push(
+      `<rect x="1" y="1" width="${cell * 3}" height="${cell}" fill="#${preset.headerFill}"/>`,
+    );
+  }
+  if (preset.bandFill) {
+    parts.push(
+      `<rect x="1" y="${1 + cell * 2}" width="${cell * 3}" height="${cell}" fill="#${preset.bandFill}"/>`,
+    );
+  }
+  const b = preset.borders ?? {};
+  const on = (side: { style: string } | undefined): boolean => !!side && side.style !== "none";
+  if (on(b.top)) parts.push(`<line x1="1" y1="1" x2="${x3}" y2="1" ${stroke}/>`);
+  if (on(b.bottom)) parts.push(`<line x1="1" y1="${y3}" x2="${x3}" y2="${y3}" ${stroke}/>`);
+  if (on(b.left)) parts.push(`<line x1="1" y1="1" x2="1" y2="${y3}" ${stroke}/>`);
+  if (on(b.right)) parts.push(`<line x1="${x3}" y1="1" x2="${x3}" y2="${y3}" ${stroke}/>`);
+  if (on(b.insideHorizontal)) {
+    for (const i of [1, 2]) {
+      parts.push(`<line x1="1" y1="${1 + cell * i}" x2="${x3}" y2="${1 + cell * i}" ${stroke}/>`);
+    }
+  }
+  if (on(b.insideVertical)) {
+    for (const i of [1, 2]) {
+      parts.push(`<line x1="${1 + cell * i}" y1="1" x2="${1 + cell * i}" y2="${y3}" ${stroke}/>`);
+    }
+  }
+  // A borderless preset still shows a faint dashed cell grid, like Word's.
+  if (parts.length === 0) {
+    parts.push(
+      `<rect x="1" y="1" width="${cell * 3}" height="${cell * 3}" fill="none" stroke="#C8C8C8" stroke-dasharray="2,2"/>`,
+    );
+  }
+  return `<svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">${parts.join("")}</svg>`;
+}
+
+// The tblLook flags behind Word's Table Style Options checkboxes, in Word's
+// order, with their checkbox label keys.
+const TABLE_LOOK_OPTIONS: readonly { flag: string; label: string }[] = [
+  { flag: "firstRow", label: opt("look-header-row") },
+  { flag: "lastRow", label: opt("look-total-row") },
+  { flag: "bandRow", label: opt("look-banded-rows") },
+  { flag: "firstCol", label: opt("look-first-column") },
+  { flag: "lastCol", label: opt("look-last-column") },
+  { flag: "bandCol", label: opt("look-banded-columns") },
+];
+
+let tableStyleIconsRegistered = false;
+function ensureTableStyleIcons(): void {
+  if (tableStyleIconsRegistered) return;
+  for (const [id, preset] of Object.entries(TABLE_STYLE_PRESETS)) {
+    registerIcon(`table-style-${id}`, tableStylePreviewSvg(preset));
+  }
+  tableStyleIconsRegistered = true;
+}
+
+/** Word's Table Styles gallery: the presets as icon-over-label thumbnails in a
+ *  strip (first four visible), the More bar expanding every preset in the
+ *  same compound shape as a drop-down grid. */
+const tableStyleGallery = (): RibbonGallery => ({
+  type: "gallery",
+  event: "table-style",
+  label: opt("more-table-styles"),
+  items: Object.keys(TABLE_STYLE_PRESETS).map((id) => ({
+    icon: `table-style-${id}`,
+    text: opt(`style-${id}`),
+    value: id,
+  })),
+  visibleCount: 4,
+});
 
 const cellAlignItems = (): string =>
   JSON.stringify(
@@ -1100,15 +1192,26 @@ const tableDeleteItems = (): string =>
  *  them (via {@link buildContextualTab}) when the selection enters a table and
  *  removes them when it leaves. */
 export function tableContextTabs(): RibbonTab[] {
+  ensureTableStyleIcons();
   return [
     {
       id: "table-design",
       label: tab("table-design"),
       contextual: true,
       groups: [
-        group("table-styles", [
-          split("table-simple", "table-style", parsedItems(tableStyleItems()), { size: "large" }),
+        // Word's two leading groups, in Word's order: the Table Style Options
+        // checkboxes (2×3), then the Table Styles gallery.
+        group("table-style-options", [
+          grid(
+            TABLE_LOOK_OPTIONS.map((o) => ({
+              type: "checkbox" as const,
+              event: "toggle-table-look",
+              value: o.flag,
+              label: o.label,
+            })),
+          ),
         ]),
+        group("table-styles", [tableStyleGallery()]),
         group("table-shading", [
           {
             type: "color-picker",
@@ -1121,6 +1224,15 @@ export function tableContextTabs(): RibbonTab[] {
         ]),
         group("table-borders", [
           split("border", "table-borders", parsedItems(borderItems()), { size: "large" }),
+        ]),
+        group("draw-border", [
+          // Word's Draw Border tools — the canvas has no border-painting
+          // interaction yet, so the group greys until then.
+          btn("pen", "pen-style", { size: "large" }),
+          btn("font-size", "pen-size", { size: "large" }),
+          btn("font-color", "pen-color", { size: "large" }),
+          btn("format-painter", "border-painter", { size: "large" }),
+          btn("gridlines", "toggle-gridlines", { size: "large" }),
         ]),
       ],
     },
