@@ -348,6 +348,14 @@ class Flow {
   /** Continue placing an already-laid block (split tails, pulled keepNext). */
   private pushLaid(laid: LaidOutBlock): void {
     if (this.tryPlace(laid)) return;
+    // Out of room: fill the next column before paging (same rule as push's
+    // whole-block path). The tail keeps its wrapping — equal-width columns
+    // reflow nothing, and a split tail is always born from a column that just
+    // filled, i.e. this is the tail's normal continuation.
+    if (this.colIndex < this.cols.length - 1) {
+      this.newColumn();
+      if (this.tryPlace(laid)) return;
+    }
     this.newPage(true);
     if (!this.tryPlace(laid)) this.commit(laid, this.spacingBefore(laid));
   }

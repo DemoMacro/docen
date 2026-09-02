@@ -920,6 +920,20 @@ describe("layoutFlow columns", () => {
     expect(pages[1].items[0].xPx).toBe(0);
   });
 
+  it("a split tail continues in the next column before paging", () => {
+    // A 12-line paragraph: 5 lines fill the left column, the tail continues
+    // at the top of the right one (5 more fit there), and the remaining 2
+    // lines page — a column boundary never skips the sibling column.
+    const pages = colFlow([para(12)], 100);
+    expect(pages).toHaveLength(2);
+    expect(pages[0].items.map((i) => i.xPx)).toEqual([0, 160]);
+    expect(pages[1].items[0].xPx).toBe(0);
+    const lineCounts = pages.map((p) =>
+      p.items.map((i) => (i.block.kind === "paragraph" ? i.block.lines.length : 0)),
+    );
+    expect(lineCounts).toEqual([[5, 5], [2]]);
+  });
+
   it("columnBreak moves the following content to the next column", () => {
     const blocks: LayoutBlock[] = [para(1), { kind: "columnBreak" }, para(1)];
     const pages = colFlow(blocks, 100);
