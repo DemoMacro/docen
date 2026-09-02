@@ -464,20 +464,13 @@ export function renderRibbonFromSchema(
   tablist.setAttribute("appearance", "transparent");
   const activeId = tabs[0]?.id ?? "";
   if (activeId) tablist.setAttribute("activeid", activeId);
-  for (const tab of tabs) {
-    const tabEl = document.createElement("docen-ribbon-tab");
-    tabEl.setAttribute("slot", "tab");
-    tabEl.id = tab.id;
-    tabEl.textContent = t(tab.label, scope);
-    tablist.append(tabEl);
-  }
   frag.append(tablist);
 
   for (const tab of tabs) {
-    const panel = document.createElement("docen-ribbon-panel");
-    panel.setAttribute("value", tab.id);
-    for (const g of tab.groups) panel.append(buildGroup(g, scope));
-    frag.append(panel);
+    if (tab.contextual) continue; // the host appends these on selection
+    const built = buildContextualTab(tab, scope);
+    tablist.append(built.tab);
+    frag.append(built.panel);
   }
 
   for (const c of actions) {
@@ -486,6 +479,25 @@ export function renderRibbonFromSchema(
     frag.append(el);
   }
   return frag;
+}
+
+/** Build one tab's DOM pair — the `docen-ribbon-tab` heading and its
+ *  `docen-ribbon-panel` of groups. The static render appends these into the
+ *  tablist/panel container; the host reuses the same builder to append/remove
+ *  contextual tabs (Table Design/Layout) as the selection enters/leaves their
+ *  owning context. */
+export function buildContextualTab(
+  tab: RibbonTab,
+  scope: Element = document.documentElement,
+): { tab: HTMLElement; panel: HTMLElement } {
+  const tabEl = document.createElement("docen-ribbon-tab");
+  tabEl.setAttribute("slot", "tab");
+  tabEl.id = tab.id;
+  tabEl.textContent = t(tab.label, scope);
+  const panel = document.createElement("docen-ribbon-panel");
+  panel.setAttribute("value", tab.id);
+  for (const g of tab.groups) panel.append(buildGroup(g, scope));
+  return { tab: tabEl, panel };
 }
 
 function buildGroup(g: RibbonGroup, scope: Element): HTMLElement {
@@ -1043,3 +1055,94 @@ const viewTab = (): RibbonTab =>
       btn("edit", "record-macro", { size: "large" }),
     ]),
   ]);
+
+// --- Contextual tabs (Word's Table Tools) ------------------------------------
+// Values match the commands.ts value spaces: table-style presets, the
+// table-borders sides (same as the Home border menu), and the align-cell
+// 9-grid keys (top/middle/bottom × left/center/right).
+
+const tableStyleItems = (): string =>
+  JSON.stringify([
+    { text: opt("style-grid-table"), value: "grid-table" },
+    { text: opt("style-light-list"), value: "light-list" },
+    { text: opt("style-no-vertical"), value: "no-vertical" },
+    { text: opt("no-border"), value: "no-border" },
+  ]);
+
+const cellAlignItems = (): string =>
+  JSON.stringify(
+    ["tl", "tc", "tr", "ml", "mc", "mr", "bl", "bc", "br"].map((value) => ({
+      text: opt(`cell-align-${value}`),
+      value,
+    })),
+  );
+
+const tableSelectItems = (): string =>
+  JSON.stringify([
+    { text: opt("select-table"), value: "table" },
+    { text: opt("select-table-row"), value: "row", event: "select-table-row" },
+    { text: opt("select-table-cell"), value: "cell", event: "select-table-cell" },
+  ]);
+
+const tableDeleteItems = (): string =>
+  JSON.stringify([
+    { text: opt("delete-columns"), value: "columns", event: "delete-column" },
+    { text: opt("delete-rows"), value: "rows", event: "delete-row" },
+    { text: opt("delete-table"), value: "table" },
+  ]);
+
+/** Word's contextual Table Tools — the Table Design / Table Layout tabs that
+ *  appear while the caret is inside a table. Marked `contextual` so
+ *  {@link ribbonTabs} excludes them from the static render; the host appends
+ *  them (via {@link buildContextualTab}) when the selection enters a table and
+ *  removes them when it leaves. */
+export function tableContextTabs(): RibbonTab[] {
+  return [
+    {
+      id: "table-design",
+      label: tab("table-design"),
+      contextual: true,
+      groups: [
+        group("table-styles", [
+          split("table-simple", "table-style", parsedItems(tableStyleItems()), { size: "large" }),
+        ]),
+        group("table-shading", [
+          {
+            type: "color-picker",
+            icon: "shading",
+            event: "cell-shading",
+            label: cmd("cell-shading"),
+            defaultColor: "FFFF00",
+            size: "large",
+          },
+        ]),
+        group("table-borders", [
+          split("border", "table-borders", parsedItems(borderItems()), { size: "large" }),
+        ]),
+      ],
+    },
+    {
+      id: "table-layout",
+      label: tab("table-layout"),
+      contextual: true,
+      groups: [
+        group("table", [
+          split("table-cursor", "select-table", parsedItems(tableSelectItems()), { size: "large" }),
+          split("table-delete", "delete-table", parsedItems(tableDeleteItems()), { size: "large" }),
+        ]),
+        group("rows-columns", [
+          row([
+            btn("table-insert-row", "insert-row-above", { iconOnly: true }),
+            btn("table-insert-row", "insert-row-below", { iconOnly: true }),
+            btn("table-insert-column", "insert-column-left", { iconOnly: true }),
+            btn("table-insert-column", "insert-column-right", { iconOnly: true }),
+          ]),
+        ]),
+        group("alignment", [
+          split("align-center", "align-cell", parsedItems(cellAlignItems()), { size: "large" }),
+        ]),
+        group("data", [btn("table-repeat-headers", "repeat-header-rows", { size: "large" })]),
+      ],
+    },
+  ];
+}

@@ -3,6 +3,7 @@ import { BULLET_GLYPHS, nextOrderedReference, ORDERED_FORMATS } from "@docen/doc
 import { Extension } from "@docen/docx/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import type { EditorState } from "@tiptap/pm/state";
+import type { Transaction } from "@tiptap/pm/state";
 import { NodeSelection, TextSelection } from "@tiptap/pm/state";
 
 /**
@@ -68,6 +69,21 @@ declare module "@tiptap/core" {
       "section-break": () => ReturnType;
       "insert-table": () => ReturnType;
       "delete-table": () => ReturnType;
+      // Table context commands (the Table Design / Layout contextual tabs).
+      "insert-row-above": () => ReturnType;
+      "insert-row-below": () => ReturnType;
+      "insert-column-left": () => ReturnType;
+      "insert-column-right": () => ReturnType;
+      "delete-row": () => ReturnType;
+      "delete-column": () => ReturnType;
+      "select-table": () => ReturnType;
+      "select-table-row": () => ReturnType;
+      "select-table-cell": () => ReturnType;
+      "align-cell": (value?: string) => ReturnType;
+      "repeat-header-rows": () => ReturnType;
+      "cell-shading": (value?: unknown) => ReturnType;
+      "table-style": (value?: string) => ReturnType;
+      "table-borders": (value?: string) => ReturnType;
       link: (href?: string) => ReturnType;
       style: (styleId?: string) => ReturnType;
       // Editing
@@ -117,6 +133,20 @@ export const WIRED_DISPATCH: ReadonlySet<string> = new Set([
   "section-break",
   "insert-table",
   "delete-table",
+  "insert-row-above",
+  "insert-row-below",
+  "insert-column-left",
+  "insert-column-right",
+  "delete-row",
+  "delete-column",
+  "select-table",
+  "select-table-row",
+  "select-table-cell",
+  "align-cell",
+  "repeat-header-rows",
+  "cell-shading",
+  "table-style",
+  "table-borders",
   "link",
   "style",
   "undo",
@@ -356,6 +386,142 @@ function shadingStamp(value: unknown): Record<string, unknown> | null | undefine
   }
   if (typeof value === "string" && value) return { fill: value, type: "clear" };
   return undefined;
+}
+
+/** Depths of the enclosing table / row / cell on the selection's `$from`
+ *  path (negative = absent). The table check is also the contextual-tab
+ *  signal, so it is exported for the host. */
+export function tableAncestry(state: EditorState): {
+  tableAt: number;
+  rowAt: number;
+  cellAt: number;
+} | null {
+  const { table, tableRow, tableCell } = state.schema.nodes;
+  const { $from } = state.selection;
+  let tableAt = -1;
+  let rowAt = -1;
+  let cellAt = -1;
+  for (let d = $from.depth; d > 0; d -= 1) {
+    const node = $from.node(d);
+    if (node.type === table && tableAt < 0) tableAt = d;
+    else if (node.type === tableRow && rowAt < 0) rowAt = d;
+    else if (node.type === tableCell && cellAt < 0) cellAt = d;
+  }
+  return tableAt < 0 ? null : { tableAt, rowAt, cellAt };
+}
+
+/** The 9-grid cell alignment: vertical half → the cell's verticalAlign, the
+ *  horizontal half → every paragraph's alignment in the cell. */
+const CELL_ALIGN: Record<string, { v: string; h: string }> = {
+  tl: { v: "top", h: "left" },
+  tc: { v: "top", h: "center" },
+  tr: { v: "top", h: "right" },
+  ml: { v: "center", h: "left" },
+  mc: { v: "center", h: "center" },
+  mr: { v: "center", h: "right" },
+  bl: { v: "bottom", h: "left" },
+  bc: { v: "bottom", h: "center" },
+  br: { v: "bottom", h: "right" },
+};
+
+type TableBordersLike = Record<string, { style: string; size: number; color: string } | undefined>;
+const GRID_BORDER = { style: "single", size: 4, color: "auto" };
+const NO_BORDER = { style: "none", size: 0, color: "auto" };
+
+/** Word's Table Styles gallery stand-ins — border presets the canvas paints
+ *  today (a full style system waits on the styles pane). */
+const TABLE_STYLE_PRESETS: Record<string, TableBordersLike> = {
+  "grid-table": {
+    top: GRID_BORDER,
+    bottom: GRID_BORDER,
+    left: GRID_BORDER,
+    right: GRID_BORDER,
+    insideHorizontal: GRID_BORDER,
+    insideVertical: GRID_BORDER,
+  },
+  "light-list": {
+    top: GRID_BORDER,
+    bottom: GRID_BORDER,
+    left: GRID_BORDER,
+    right: GRID_BORDER,
+    insideHorizontal: GRID_BORDER,
+    insideVertical: NO_BORDER,
+  },
+  "no-vertical": {
+    bottom: GRID_BORDER,
+    insideHorizontal: GRID_BORDER,
+    left: NO_BORDER,
+    right: NO_BORDER,
+    top: NO_BORDER,
+  },
+  "no-border": {
+    bottom: NO_BORDER,
+    insideHorizontal: NO_BORDER,
+    insideVertical: NO_BORDER,
+    left: NO_BORDER,
+    right: NO_BORDER,
+    top: NO_BORDER,
+  },
+};
+
+/** Border-side stamps for the Layout/Design borders dropdown — value matches
+ *  the Home border menu (none/bottom/top/left/right/all/outside). */
+function tableBordersStamp(
+  value: string,
+  current: TableBordersLike | null,
+): TableBordersLike | null {
+  if (value === "none") return TABLE_STYLE_PRESETS["no-border"]!;
+  const borders: TableBordersLike = { ...current };
+  if (value === "all" || value === "outside") {
+    borders.top = GRID_BORDER;
+    borders.bottom = GRID_BORDER;
+    borders.left = GRID_BORDER;
+    borders.right = GRID_BORDER;
+  }
+  if (value === "all") {
+    borders.insideHorizontal = GRID_BORDER;
+    borders.insideVertical = GRID_BORDER;
+  }
+  if (value === "bottom" || value === "top" || value === "left" || value === "right") {
+    borders[value] = GRID_BORDER;
+  }
+  return borders;
+}
+
+/** Delete the table at `pos` (size `size`) and park the caret where it stood
+ *  — shared by delete-table and the collapse cases of delete-row/-column. */
+function deleteTableAt(
+  state: EditorState,
+  dispatch: ((tr: Transaction) => void) | undefined,
+  pos: number,
+  size: number,
+): boolean {
+  if (!dispatch) return true;
+  const tr = state.tr.delete(pos, pos + size);
+  tr.setSelection(TextSelection.near(tr.doc.resolve(pos)));
+  dispatch(tr.scrollIntoView());
+  return true;
+}
+
+/** Stamp a borders preset on the enclosing table. */
+function stampTableBorders(
+  state: EditorState,
+  dispatch: ((tr: Transaction) => void) | undefined,
+  borders: TableBordersLike | null,
+): boolean {
+  if (!borders) return false;
+  const anchor = tableAncestry(state);
+  if (!anchor) return false;
+  if (dispatch) {
+    const { $from } = state.selection;
+    const table = $from.node(anchor.tableAt);
+    dispatch(
+      state.tr
+        .setNodeMarkup($from.before(anchor.tableAt), undefined, { ...table.attrs, borders })
+        .scrollIntoView(),
+    );
+  }
+  return true;
 }
 
 /** Transform text per Word's Change Case modes. CJK sentence terminators
@@ -671,16 +837,15 @@ export const DocumentCommands = Extension.create({
           // "tableCell+" row), so the fill can only fail on a schema drift.
           const mkRow = (header: boolean): PMNode =>
             tableRow.createAndFill(header ? { tableHeader: true } : null, [cell, cell, cell])!;
-          const grid = { style: "single", size: 4, color: "auto" };
           const node = table.createAndFill(
             {
               borders: {
-                top: grid,
-                bottom: grid,
-                left: grid,
-                right: grid,
-                insideHorizontal: grid,
-                insideVertical: grid,
+                top: GRID_BORDER,
+                bottom: GRID_BORDER,
+                left: GRID_BORDER,
+                right: GRID_BORDER,
+                insideHorizontal: GRID_BORDER,
+                insideVertical: GRID_BORDER,
               },
             },
             [mkRow(true), mkRow(false), mkRow(false)],
@@ -701,19 +866,280 @@ export const DocumentCommands = Extension.create({
       "delete-table":
         () =>
         ({ state, dispatch }) => {
-          const { table } = state.schema.nodes;
+          const anchor = tableAncestry(state);
+          if (!anchor) return false;
           const { $from } = state.selection;
-          let depth = $from.depth;
-          while (depth > 0 && $from.node(depth).type !== table) depth -= 1;
-          if (depth === 0) return false;
+          return deleteTableAt(
+            state,
+            dispatch,
+            $from.before(anchor.tableAt),
+            $from.node(anchor.tableAt).nodeSize,
+          );
+        },
+      // ── Table context commands (Word's Table Design / Layout tabs) ──
+
+      // Insert a row copying the current one (formatting follows, like Word).
+      "insert-row-above":
+        () =>
+        ({ state, dispatch }) => {
+          const anchor = tableAncestry(state);
+          if (!anchor || anchor.rowAt < 0) return false;
           if (dispatch) {
-            const pos = $from.before(depth);
-            const tr = state.tr.delete(pos, pos + $from.node(depth).nodeSize);
-            // The caret lands where the table stood (Word behavior).
-            tr.setSelection(TextSelection.near(tr.doc.resolve(pos)));
+            const { $from } = state.selection;
+            const row = $from.node(anchor.rowAt);
+            dispatch(
+              state.tr.insert($from.before(anchor.rowAt), row.copy(row.content)).scrollIntoView(),
+            );
+          }
+          return true;
+        },
+      "insert-row-below":
+        () =>
+        ({ state, dispatch }) => {
+          const anchor = tableAncestry(state);
+          if (!anchor || anchor.rowAt < 0) return false;
+          if (dispatch) {
+            const { $from } = state.selection;
+            const row = $from.node(anchor.rowAt);
+            dispatch(
+              state.tr.insert($from.after(anchor.rowAt), row.copy(row.content)).scrollIntoView(),
+            );
+          }
+          return true;
+        },
+      // One cell per row, copied from each row's cell at the current column
+      // index (rows may index differently once spans exist — span-aware grid
+      // math is logged for a later batch). Bottom-up keeps positions valid as
+      // earlier edits shift later ones.
+      "insert-column-right":
+        () =>
+        ({ state, dispatch }) => {
+          const anchor = tableAncestry(state);
+          if (!anchor || anchor.rowAt < 0) return false;
+          if (dispatch) {
+            const { $from } = state.selection;
+            const tableNode = $from.node(anchor.tableAt);
+            const tablePos = $from.before(anchor.tableAt);
+            const cellIndex = $from.index(anchor.rowAt);
+            const tr = state.tr;
+            for (let r = tableNode.childCount - 1; r >= 0; r -= 1) {
+              const rowNode = tableNode.child(r);
+              let rowPos = tablePos + 1;
+              for (let i = 0; i < r; i += 1) rowPos += tableNode.child(i).nodeSize;
+              const idx = Math.min(cellIndex, rowNode.childCount - 1);
+              let cellPos = rowPos + 1;
+              for (let c = 0; c <= idx; c += 1) cellPos += rowNode.child(c).nodeSize;
+              tr.insert(cellPos, rowNode.child(idx));
+            }
             dispatch(tr.scrollIntoView());
           }
           return true;
+        },
+      "insert-column-left":
+        () =>
+        ({ state, dispatch }) => {
+          const anchor = tableAncestry(state);
+          if (!anchor || anchor.rowAt < 0) return false;
+          if (dispatch) {
+            const { $from } = state.selection;
+            const tableNode = $from.node(anchor.tableAt);
+            const tablePos = $from.before(anchor.tableAt);
+            const cellIndex = $from.index(anchor.rowAt);
+            const tr = state.tr;
+            for (let r = tableNode.childCount - 1; r >= 0; r -= 1) {
+              const rowNode = tableNode.child(r);
+              let rowPos = tablePos + 1;
+              for (let i = 0; i < r; i += 1) rowPos += tableNode.child(i).nodeSize;
+              const idx = Math.min(cellIndex, rowNode.childCount - 1);
+              let cellPos = rowPos + 1;
+              for (let c = 0; c < idx; c += 1) cellPos += rowNode.child(c).nodeSize;
+              tr.insert(cellPos, rowNode.child(idx));
+            }
+            dispatch(tr.scrollIntoView());
+          }
+          return true;
+        },
+      // Deleting the last row/column deletes the whole table (Word behavior).
+      "delete-row":
+        () =>
+        ({ state, dispatch }) => {
+          const anchor = tableAncestry(state);
+          if (!anchor || anchor.rowAt < 0) return false;
+          const { $from } = state.selection;
+          const tableNode = $from.node(anchor.tableAt);
+          if (tableNode.childCount === 1) {
+            return deleteTableAt(state, dispatch, $from.before(anchor.tableAt), tableNode.nodeSize);
+          }
+          if (dispatch) {
+            const rowPos = $from.before(anchor.rowAt);
+            const row = $from.node(anchor.rowAt);
+            dispatch(state.tr.delete(rowPos, rowPos + row.nodeSize).scrollIntoView());
+          }
+          return true;
+        },
+      "delete-column":
+        () =>
+        ({ state, dispatch }) => {
+          const anchor = tableAncestry(state);
+          if (!anchor || anchor.rowAt < 0) return false;
+          const { $from } = state.selection;
+          const tableNode = $from.node(anchor.tableAt);
+          const cellIndex = $from.index(anchor.rowAt);
+          const minCells = Math.min(
+            ...Array.from(
+              { length: tableNode.childCount },
+              (_, r) => tableNode.child(r).childCount,
+            ),
+          );
+          if (minCells === 1) {
+            return deleteTableAt(state, dispatch, $from.before(anchor.tableAt), tableNode.nodeSize);
+          }
+          if (dispatch) {
+            const tablePos = $from.before(anchor.tableAt);
+            const tr = state.tr;
+            for (let r = tableNode.childCount - 1; r >= 0; r -= 1) {
+              const rowNode = tableNode.child(r);
+              let rowPos = tablePos + 1;
+              for (let i = 0; i < r; i += 1) rowPos += tableNode.child(i).nodeSize;
+              const idx = Math.min(cellIndex, rowNode.childCount - 1);
+              let cellPos = rowPos + 1;
+              for (let c = 0; c < idx; c += 1) cellPos += rowNode.child(c).nodeSize;
+              tr.delete(cellPos, cellPos + rowNode.child(idx).nodeSize);
+            }
+            dispatch(tr.scrollIntoView());
+          }
+          return true;
+        },
+      "select-table":
+        () =>
+        ({ state, dispatch }) => {
+          const anchor = tableAncestry(state);
+          if (!anchor) return false;
+          if (dispatch) {
+            const pos = state.selection.$from.before(anchor.tableAt);
+            dispatch(state.tr.setSelection(NodeSelection.create(state.doc, pos)).scrollIntoView());
+          }
+          return true;
+        },
+      "select-table-row":
+        () =>
+        ({ state, dispatch }) => {
+          const anchor = tableAncestry(state);
+          if (!anchor || anchor.rowAt < 0) return false;
+          if (dispatch) {
+            const pos = state.selection.$from.before(anchor.rowAt);
+            dispatch(state.tr.setSelection(NodeSelection.create(state.doc, pos)).scrollIntoView());
+          }
+          return true;
+        },
+      "select-table-cell":
+        () =>
+        ({ state, dispatch }) => {
+          const anchor = tableAncestry(state);
+          if (!anchor || anchor.cellAt < 0) return false;
+          if (dispatch) {
+            const { $from } = state.selection;
+            const cellPos = $from.before(anchor.cellAt);
+            const cell = $from.node(anchor.cellAt);
+            dispatch(
+              state.tr
+                .setSelection(
+                  TextSelection.create(state.doc, cellPos + 1, cellPos + cell.nodeSize - 1),
+                )
+                .scrollIntoView(),
+            );
+          }
+          return true;
+        },
+      // Word's 9-grid: the vertical half lands on the cell (verticalAlign),
+      // the horizontal half on every paragraph in the cell (alignment).
+      "align-cell":
+        (value) =>
+        ({ state, dispatch }) => {
+          const spec = CELL_ALIGN[value ?? ""];
+          if (!spec) return false;
+          const anchor = tableAncestry(state);
+          if (!anchor || anchor.cellAt < 0) return false;
+          if (dispatch) {
+            const { $from } = state.selection;
+            const cellPos = $from.before(anchor.cellAt);
+            const cell = $from.node(anchor.cellAt);
+            const from = cellPos + 1;
+            const to = cellPos + cell.nodeSize - 1;
+            const { paragraph } = state.schema.nodes;
+            const tr = state.tr.setNodeMarkup(cellPos, undefined, {
+              ...cell.attrs,
+              verticalAlign: spec.v,
+            });
+            state.doc.nodesBetween(from, to, (node, pos) => {
+              if (node.type === paragraph && node.attrs.alignment !== spec.h) {
+                tr.setNodeMarkup(pos, undefined, { ...node.attrs, alignment: spec.h });
+              }
+              return true;
+            });
+            dispatch(tr.scrollIntoView());
+          }
+          return true;
+        },
+      // Word's Repeat Header Rows — toggles the current row's tblHeader.
+      "repeat-header-rows":
+        () =>
+        ({ state, dispatch }) => {
+          const anchor = tableAncestry(state);
+          if (!anchor || anchor.rowAt < 0) return false;
+          if (dispatch) {
+            const { $from } = state.selection;
+            const row = $from.node(anchor.rowAt);
+            dispatch(
+              state.tr
+                .setNodeMarkup($from.before(anchor.rowAt), undefined, {
+                  ...row.attrs,
+                  tableHeader: !row.attrs.tableHeader,
+                })
+                .scrollIntoView(),
+            );
+          }
+          return true;
+        },
+      // Cell-level shading (tcPr shd) — the Home shading button stays at
+      // paragraph level; Word's Table Design shading is the cell property.
+      "cell-shading":
+        (value) =>
+        ({ state, dispatch }) => {
+          const anchor = tableAncestry(state);
+          if (!anchor || anchor.cellAt < 0) return false;
+          const stamp = shadingStamp(value);
+          if (stamp === undefined) return false;
+          if (dispatch) {
+            const { $from } = state.selection;
+            const cellPos = $from.before(anchor.cellAt);
+            const cell = $from.node(anchor.cellAt);
+            dispatch(
+              state.tr
+                .setNodeMarkup(cellPos, undefined, { ...cell.attrs, shading: stamp })
+                .scrollIntoView(),
+            );
+          }
+          return true;
+        },
+      "table-style":
+        (value) =>
+        ({ state, dispatch }) => {
+          const preset = value ? TABLE_STYLE_PRESETS[value] : undefined;
+          if (!preset) return false;
+          return stampTableBorders(state, dispatch, preset);
+        },
+      // Border-side presets on the table (value space matches the Home
+      // paragraph-border menu).
+      "table-borders":
+        (value) =>
+        ({ state, dispatch }) => {
+          if (typeof value !== "string") return false;
+          const anchor = tableAncestry(state);
+          if (!anchor) return false;
+          const current = (state.selection.$from.node(anchor.tableAt).attrs.borders ??
+            null) as TableBordersLike | null;
+          return stampTableBorders(state, dispatch, tableBordersStamp(value, current));
         },
       // Wrap the selection in a link (empty selection → link around the URL text).
       // Word stamps inserted hyperlink runs with the "Hyperlink" character

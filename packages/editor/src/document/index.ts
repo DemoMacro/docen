@@ -93,10 +93,17 @@ import { documentStyles, documentTemplate, escapeHtml } from "./chrome";
 import type { OutlineItem } from "./components/outline";
 // Side-effect import: registers the ribbon/header translation tables.
 import "./i18n";
-import { WIRED_DISPATCH } from "./extensions/commands";
+import { tableAncestry, WIRED_DISPATCH } from "./extensions/commands";
 import { LOCAL_HANDLED, READONLY_LIVE, SAVE_FORMATS, detectOpenFormat } from "./file-formats";
 import { MARGINS, PAPER_SIZES, marginTwipsFromCss, mergeSectionProperties } from "./page-setup";
-import { renderRibbonFromSchema, ribbonActions, ribbonTabs } from "./ribbon";
+import {
+  buildContextualTab,
+  DEFAULT_RIBBON_TAB,
+  renderRibbonFromSchema,
+  ribbonActions,
+  ribbonTabs,
+  tableContextTabs,
+} from "./ribbon";
 import { WATERMARK_PRESETS, stripWatermarkPara, watermarkPara } from "./watermark";
 
 /** The word at `pos` — the non-whitespace run in the caret's text node, capped
@@ -691,6 +698,7 @@ class DocenDocument extends AddinHost<Editor> {
       this.#syncFontControls();
       this.#syncStyleControl();
       this.#syncStoryMenus();
+      this.#syncContextTabs();
       this.#updateStatus();
     };
     editor.on("transaction", sync);
@@ -1470,6 +1478,10 @@ class DocenDocument extends AddinHost<Editor> {
     this.#applyRibbonGreying();
     this.#syncEditModeMenu();
     this.#syncStoryMenus();
+    // The ribbon DOM was rebuilt from scratch — drop the stale context-tab
+    // tracking, then re-append them if the selection is inside a table.
+    this.#contextTabIds.clear();
+    this.#syncContextTabs();
     root
       .querySelector('docen-task-pane[part="comments-pane"]')
       ?.setAttribute("title", t("comments.title", this));
@@ -1634,6 +1646,48 @@ class DocenDocument extends AddinHost<Editor> {
     };
     stamp("header");
     stamp("footer");
+  }
+
+  /** Contextual tab ids currently appended to the ribbon (Word's Table Tools).
+   *  Non-empty ⇔ the selection is inside a table; #syncContextTabs diffs this
+   *  against that fact so the per-transaction pass is a cheap equality check. */
+  #contextTabIds = new Set<string>();
+
+  /** Word's Table Tools — append/remove the contextual Table Design/Layout tabs
+   *  as the selection enters/leaves a table. Runs per transaction (via
+   *  #setupFontSync) and after every chrome re-stamp (#renderChrome, which
+   *  clears the tracking set because the ribbon DOM was rebuilt). */
+  #syncContextTabs(): void {
+    const root = this.shadowRoot;
+    const tablist = root?.querySelector("fluent-tablist");
+    const ribbon = root?.querySelector("docen-ribbon");
+    if (!root || !tablist || !ribbon) return;
+    const inside = this.editor ? tableAncestry(this.editor.state) !== null : false;
+    const present = this.#contextTabIds;
+    if (inside === present.size > 0) return;
+    const scope = root.querySelector("docen-workspace") ?? this;
+    if (inside) {
+      for (const tab of tableContextTabs()) {
+        const built = buildContextualTab(tab, scope);
+        tablist.append(built.tab);
+        ribbon.append(built.panel);
+        present.add(tab.id);
+      }
+      // Word activates the context tabs as the caret enters their context.
+      tablist.setAttribute("activeid", "table-design");
+    } else {
+      // Fall back off the context tabs BEFORE removing them so the tablist
+      // never holds an activeid with no matching tab.
+      if (present.has(tablist.getAttribute("activeid") ?? "")) {
+        tablist.setAttribute("activeid", DEFAULT_RIBBON_TAB);
+      }
+      for (const id of present) {
+        tablist.querySelector(`#${id}`)?.remove();
+        ribbon.querySelector(`docen-ribbon-panel[value="${id}"]`)?.remove();
+      }
+      present.clear();
+    }
+    this.#applyRibbonGreying();
   }
 
   /** The full set of wired command names (Tiptap dispatch + locally handled +

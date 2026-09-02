@@ -54,6 +54,14 @@ import shapes from "@fluentui/svg-icons/icons/shapes_24_regular.svg?raw";
 import share from "@fluentui/svg-icons/icons/share_24_regular.svg?raw";
 import table from "@fluentui/svg-icons/icons/table_24_regular.svg?raw";
 import tableAdd from "@fluentui/svg-icons/icons/table_add_24_regular.svg?raw";
+import tableArrowRepeatAll from "@fluentui/svg-icons/icons/table_arrow_repeat_all_24_regular.svg?raw";
+import tableCursor from "@fluentui/svg-icons/icons/table_cursor_24_regular.svg?raw";
+import tableDeleteColumn from "@fluentui/svg-icons/icons/table_delete_column_24_regular.svg?raw";
+import tableDeleteRow from "@fluentui/svg-icons/icons/table_delete_row_24_regular.svg?raw";
+import tableDismiss from "@fluentui/svg-icons/icons/table_dismiss_24_regular.svg?raw";
+import tableInsertColumn from "@fluentui/svg-icons/icons/table_insert_column_24_regular.svg?raw";
+import tableInsertRow from "@fluentui/svg-icons/icons/table_insert_row_24_regular.svg?raw";
+import tableSimple from "@fluentui/svg-icons/icons/table_simple_24_regular.svg?raw";
 import textAlignCenter from "@fluentui/svg-icons/icons/text_align_center_24_regular.svg?raw";
 import textAlignJustify from "@fluentui/svg-icons/icons/text_align_justify_24_regular.svg?raw";
 import textAlignLeft from "@fluentui/svg-icons/icons/text_align_left_24_regular.svg?raw";
@@ -139,6 +147,15 @@ export const RIBBON_ICONS: Readonly<Record<string, string>> = {
   "page-break": documentPageBreak,
   table,
   "table-add": tableAdd,
+  // Table context tabs (Table Design / Table Layout)
+  "table-simple": tableSimple,
+  "table-cursor": tableCursor,
+  "table-insert-row": tableInsertRow,
+  "table-insert-column": tableInsertColumn,
+  "table-delete-row": tableDeleteRow,
+  "table-delete-column": tableDeleteColumn,
+  "table-delete": tableDismiss,
+  "table-repeat-headers": tableArrowRepeatAll,
   picture: image,
   "insert-picture": imageAdd,
   shapes,

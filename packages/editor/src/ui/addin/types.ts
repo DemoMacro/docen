@@ -124,6 +124,10 @@ export interface RibbonTab {
   /** Tab heading — an i18n key resolved via `t()` at render time. */
   label: string;
   groups: RibbonGroup[];
+  /** Contextual tabs (Word's Table Design/Layout) are excluded from the static
+   *  render — the host appends/removes them as the selection enters/leaves the
+   *  owning context. */
+  contextual?: boolean;
 }
 
 // ── Contributions (what an addin gives the host) ─────────────────────────────
