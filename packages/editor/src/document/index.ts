@@ -1328,7 +1328,8 @@ class DocenDocument extends AddinHost<Editor> {
       prev.background?.color !== run.background?.color ||
       prev.sections.length !== run.sections.length ||
       prev.sections.some((s, i) => !deepEq(s.flow, run.sections[i]!.flow)) ||
-      prev.sections.some((s, i) => !deepEq(s.furniture, run.sections[i]!.furniture));
+      prev.sections.some((s, i) => !deepEq(s.furniture, run.sections[i]!.furniture)) ||
+      prev.sections.some((s, i) => !deepEq(s.lineNumbers, run.sections[i]!.lineNumbers));
     const dirty = structural ? undefined : dirtyPagesOf(prev.pages, run.pages);
     this.#stage.sync(run.pages, run.sections, run.sectionOfPage, run.background, dirty);
     this.#bridge?.updatePages(run.pages, this.#pageOriginOf(run.sections, run.sectionOfPage));

@@ -6,6 +6,7 @@ import {
   twipToPx,
   type LayoutBlock,
   type ProjectedFlowBox,
+  type ProjectedLineNumbers,
   type ProjectedPageBackground,
   type ProjectedPageBorder,
   type ProjectedPageBorders,
@@ -296,4 +297,21 @@ export function projectPageBorders(properties: unknown): ProjectedPageBorders | 
   };
   const hasSide = borders.top || borders.right || borders.bottom || borders.left;
   return hasSide ? borders : undefined;
+}
+
+/** Project a section's w:lnNumType for painting: the count stride, the
+ *  restart number, what resets the counter, and the margin gap
+ *  (w:distance twips → px). */
+export function projectLineNumbers(properties: unknown): ProjectedLineNumbers | undefined {
+  const raw =
+    isRecord(properties) && isRecord(properties.lineNumberType)
+      ? (properties.lineNumberType as Rec)
+      : null;
+  if (!raw) return undefined;
+  return {
+    countBy: num(raw.countBy) ?? 1,
+    start: num(raw.start) ?? 1,
+    restart: raw.restart === "continuous" || raw.restart === "newSection" ? raw.restart : "newPage",
+    distancePx: twipToPx(measureTwip(raw.distance) ?? 0),
+  };
 }

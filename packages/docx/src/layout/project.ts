@@ -12,6 +12,7 @@
 import type {
   LayoutBlock,
   ProjectedFlowBox,
+  ProjectedLineNumbers,
   ProjectedPageBackground,
   ProjectedPageBorders,
   ProjectedPageFurniture,
@@ -24,6 +25,7 @@ import { indexNumberings } from "./project/numbering";
 import {
   projectChild,
   projectFlowBox,
+  projectLineNumbers,
   projectPageBackground,
   projectPageBorders,
   projectPageFurniture,
@@ -37,6 +39,8 @@ export interface ProjectedSection {
   furniture: ProjectedPageFurniture;
   /** The section's page borders (w:pgBorders), absent when none. */
   pageBorders?: ProjectedPageBorders;
+  /** The section's line numbering (w:lnNumType), absent when none. */
+  lineNumbers?: ProjectedLineNumbers;
 }
 
 /** Project a full DocumentOptions into the engine's input: one
@@ -73,6 +77,7 @@ export function projectDocumentOptions(doc: DocumentOptions): {
       flow: projectFlowBox(section.properties),
       furniture: projectPageFurniture(section, doc),
       pageBorders: projectPageBorders(section.properties),
+      lineNumbers: projectLineNumbers(section.properties),
     };
   });
   return {
@@ -85,6 +90,7 @@ export function projectDocumentOptions(doc: DocumentOptions): {
               flow: projectFlowBox(undefined),
               furniture: projectPageFurniture(undefined, doc),
               pageBorders: undefined,
+              lineNumbers: undefined,
             },
           ],
     background: projectPageBackground(doc),

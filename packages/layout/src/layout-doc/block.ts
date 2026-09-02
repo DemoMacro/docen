@@ -79,6 +79,9 @@ export interface LayoutParagraph {
   /** OOXML pagination controls, already resolved through the style cascade
    *  (a heading defaults keepNext=true — the adapter decides that). */
   keepLines?: boolean;
+  /** w:suppressLineNumbers — the paragraph's lines render but never count
+   *  toward the section's line numbering (w:lnNumType). */
+  suppressLineNumbers?: boolean;
   /** Horizontal alignment (w:jc, resolved through the style cascade). "both"
    *  (justify) stretches every WRAPPED line's inter-character gaps to the
    *  full content width — the paragraph's last line and hard-break lines

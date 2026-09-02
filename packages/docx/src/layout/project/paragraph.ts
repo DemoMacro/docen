@@ -241,5 +241,6 @@ export function projectParagraph(p: BodyParagraph, ctx: ProjectContext): LayoutP
     keepNext: pPr.keepNext === true || chainPPr.keepNext === true,
     widowControl: pick([pPr, chainPPr], "widowControl") !== false,
     pageBreakBefore: pPr.pageBreakBefore === true || chainPPr.pageBreakBefore === true,
+    suppressLineNumbers: pPr.suppressLineNumbers === true || chainPPr.suppressLineNumbers === true,
   };
 }

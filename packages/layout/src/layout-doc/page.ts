@@ -73,3 +73,18 @@ export interface ProjectedPageBorders {
   bottom?: ProjectedPageBorder;
   left?: ProjectedPageBorder;
 }
+
+/** Line numbering projected for painting (w:lnNumType): body text lines are
+ *  counted across the flow (tables and suppressed paragraphs skip) and a
+ *  number paints in the margin beside every countBy-th one. */
+export interface ProjectedLineNumbers {
+  /** Show a number on every countBy-th counted line (default 1 = all). */
+  countBy: number;
+  /** The first number after each restart (default 1). */
+  start: number;
+  /** What resets the counter: every page (the OOXML default), every section,
+   *  or nothing (continuous through the document). */
+  restart: "newPage" | "newSection" | "continuous";
+  /** Gap between the text margin and the number's right edge, in px. */
+  distancePx: number;
+}

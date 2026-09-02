@@ -171,6 +171,7 @@ export function layoutParagraph(
     lines,
     inline: para.inline,
     keepLines: para.keepLines,
+    suppressLineNumbers: para.suppressLineNumbers,
     keepNext: para.keepNext,
     widowControl: para.widowControl,
     borders: para.borders,

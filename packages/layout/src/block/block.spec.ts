@@ -166,6 +166,11 @@ describe("layoutParagraph line-height semantics", () => {
     if (natural.kind === "paragraph") expect(natural.heightPx).toBeCloseTo(NATURAL, 4);
   });
 
+  it("carries w:suppressLineNumbers to the laid block", () => {
+    const out = layoutBlock(para({ suppressLineNumbers: true }), 500, undefined, measurer);
+    if (out.kind === "paragraph") expect(out.suppressLineNumbers).toBe(true);
+  });
+
   it("emits per-line y positions and split points", () => {
     const out = layoutBlock(
       para({ inline: [{ kind: "text", text: "aaa bbb ccc ddd", style: latin }] }),

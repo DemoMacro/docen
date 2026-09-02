@@ -123,6 +123,9 @@ export interface LaidOutParagraph {
   /** ¶-mark strut size in px (w:pPr/w:rPr/w:sz) — the formatting marks' size
    *  fallback on a textless line. */
   markSizePx?: number;
+  /** w:suppressLineNumbers — the paragraph's lines render but do not count
+   *  toward the section's line numbering. */
+  suppressLineNumbers?: boolean;
   /** Floating drawings anchored to this paragraph, mirrored for the painter
    *  (the flow gives them no height). */
   drawings?: LayoutDrawing[];

@@ -25,6 +25,32 @@ export function paintScene(tree: IGroup, items: readonly FlowItem[], ctx: PaintC
   }
 }
 
+/** Paint this page's line numbers (w:lnNumType) in the left margin — each
+ *  number's right edge sits `distancePx` left of the text margin and its box
+ *  top aligns with the counted line's text box (same strut size, so the
+ *  baselines agree). The marks arrive pre-counted from the stage; painting
+ *  never measures beyond the label box. */
+export function paintLineNumbers(tree: IGroup, ctx: PaintContext): void {
+  const ln = ctx.lineNumbers;
+  if (!ln || ln.marks.length === 0) return;
+  const widest = Math.max(...ln.marks.map((m) => m.sizePx));
+  const boxWidth = String(ln.marks[ln.marks.length - 1]!.num).length * widest * 0.62;
+  for (const mark of ln.marks) {
+    tree.add(
+      new Text({
+        x: ctx.flow.contentLeftPx - ln.config.distancePx - boxWidth,
+        y: ctx.flow.contentTopPx + mark.yPx,
+        width: boxWidth,
+        height: mark.sizePx * 1.4,
+        text: String(mark.num),
+        fill: "#000000",
+        fontSize: mark.sizePx,
+        textAlign: "right",
+      }),
+    );
+  }
+}
+
 /** Paint a pre-laid header/footer stack at its page position. */
 export function paintFurnitureStack(
   tree: IGroup,

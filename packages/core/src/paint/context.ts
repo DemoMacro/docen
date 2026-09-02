@@ -2,6 +2,7 @@ import type {
   FontMetrics,
   LaidOutParagraph,
   ProjectedFlowBox,
+  ProjectedLineNumbers,
   ProjectedPageBackground,
   ProjectedPageFurniture,
 } from "@docen/layout";
@@ -25,6 +26,16 @@ export interface DrawingHitBox {
   kind: "drawing" | "inline";
 }
 
+/** One line-number label on this page — content-flow yPx (the painter adds
+ *  the page's content origin) plus the number and the strut size it paints
+ *  at (the counted line's ¶-mark size — Word renders the numbers in the
+ *  paragraph's run font size). */
+export interface LineNumberMark {
+  yPx: number;
+  num: number;
+  sizePx: number;
+}
+
 /** The paint context for one page — the stage context plus the page's own
  *  identity (page-number fields resolve against it) and which of Word's two
  *  text-underlapping layers is being composed right now (the stage paints a
@@ -38,6 +49,9 @@ export interface PaintContext {
   metrics: FontMetrics;
   flow: ProjectedFlowBox;
   furniture?: ProjectedPageFurniture;
+  /** This page's line numbers (w:lnNumType): the section's config plus the
+   *  marks from the stage's cross-page count. Absent = the section has none. */
+  lineNumbers?: { config: ProjectedLineNumbers; marks: LineNumberMark[] };
   background?: ProjectedPageBackground;
   pageIndex: number;
   pageCount: number;

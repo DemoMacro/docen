@@ -1,12 +1,15 @@
 import {
   paintFurnitureStack,
+  paintLineNumbers,
   paintScene,
   releasePinnedImages,
   type DrawingHitBox,
+  type LineNumberMark,
   type PaintContext,
 } from "@docen/core";
 import type {
   ProjectedFlowBox,
+  ProjectedLineNumbers,
   ProjectedPageBackground,
   ProjectedPageBorder,
   ProjectedPageBorders,
@@ -29,6 +32,8 @@ import type {
 import type { FlowPage, FontMetrics, LaidOutStackItem } from "@docen/layout";
 import { stackBlocks, TextMeasurer } from "@docen/layout";
 import { App, Group, Line, Rect, Text, type IGroup } from "leafer-ui";
+
+import { computeLineNumbers } from "./line-numbers";
 
 const PAGE_GAP = 24;
 
@@ -74,6 +79,8 @@ export interface CanvasStageSection {
   flow: ProjectedFlowBox;
   /** The section's page borders (w:pgBorders), absent when none. */
   pageBorders?: ProjectedPageBorders;
+  /** The section's line numbering (w:lnNumType), absent when none. */
+  lineNumbers?: ProjectedLineNumbers;
   /** Headers/footers for this section's pages (absent = none). */
   furniture?: ProjectedPageFurniture;
   /** The slots of `furniture` laid out once (layFurnitureSections) — the
@@ -129,6 +136,9 @@ export class CanvasStage {
   private readonly slots: PageSlot[] = [];
   private readonly io: IntersectionObserver;
   private pages: FlowPage[] = [];
+  /** Per-page line-number labels (sync's one-pass count; empty pages of
+   *  unnumbered sections carry an empty list). */
+  private lineNumberMarks = new Map<number, LineNumberMark[]>();
 
   /** The section a page belongs to (its flow box + furniture). */
   private sectionAt(page: number): CanvasStageSection {
@@ -468,6 +478,9 @@ export class CanvasStage {
     // A pure derived value (recomputed per render) — always overwritten so a
     // document without a background clears the previous one's tile.
     this.ctx.background = background;
+    // Line numbers count across pages (continuous runs through page breaks)
+    // — one pass over the whole flow, keyed by page for the per-page paint.
+    this.lineNumberMarks = computeLineNumbers(pages, sections, sectionOfPage);
 
     while (this.slots.length < pages.length) {
       // New slots clone the size of the section their page belongs to.
@@ -656,7 +669,8 @@ export class CanvasStage {
     // stay in unzoomed page px and this scale maps them onto the bitmap.
     tree.scale = this.factor;
     // This page paints with its OWN section's box + furniture.
-    const { flow, furniture } = this.sectionAt(index);
+    const { flow, furniture, lineNumbers } = this.sectionAt(index);
+    const marks = this.lineNumberMarks.get(index);
     const ctx: PaintContext = {
       metrics: this.ctx.metrics,
       flow,
@@ -673,6 +687,7 @@ export class CanvasStage {
       // In-front floats collect here through the body pass and paint after
       // its last paragraph (Word stacks them above ALL text).
       deferredDrawings: [],
+      ...(lineNumbers && marks?.length ? { lineNumbers: { config: lineNumbers, marks } } : {}),
     };
     const slotIndex = this.slotOf(index);
     const items = this.pages[index]?.items ?? [];
@@ -689,6 +704,7 @@ export class CanvasStage {
       ctx.layer = "body";
       layers.body.clear();
       paintScene(layers.body, items, ctx);
+      paintLineNumbers(layers.body, ctx);
       this.#flushDrawings(ctx);
       app.forceRender();
       this.hitBoxes.set(index, hitBoxes);
@@ -748,11 +764,13 @@ export class CanvasStage {
         furniture,
       );
       paintScene(pageLayers.body, items, ctx);
+      paintLineNumbers(pageLayers.body, ctx);
       this.#flushDrawings(ctx);
       this.slots[index]!.layers = pageLayers;
     } else {
       ctx.hitBoxes = hitBoxes;
       paintScene(tree, items, ctx);
+      paintLineNumbers(tree, ctx);
       // Under the story-edit veil like the rest of the body — the story being
       // edited paints above (opaque) on top.
       this.#flushDrawings(ctx);
