@@ -1307,8 +1307,11 @@ export function tableContextTabs(): RibbonTab[] {
         group("table", [
           // Table Properties opens Word's dialog (not built) — greying marks it.
           btn("table-properties", "table-properties", { size: "large" }),
-          menu("table-cursor", "select-table", parsedItems(tableSelectItems())),
-          menu("table-delete", "delete-table", parsedItems(tableDeleteItems())),
+          // Word stacks Select over Delete — two small menus, one column.
+          col([
+            menu("table-cursor", "select-table", parsedItems(tableSelectItems())),
+            menu("table-delete", "delete-table", parsedItems(tableDeleteItems())),
+          ]),
         ]),
         group("rows-columns", [
           row([

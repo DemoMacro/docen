@@ -267,6 +267,20 @@ function buildGroups(inline: LayoutInline[], measurer: TextMeasurer): FlowGroup[
   return groups;
 }
 
+/** The natural (unwrapped) width of an inline flow: each tab/break-delimited
+ *  group packs at infinite width and the widest group wins (a hard break's
+ *  line width is its widest segment). The autofit column fit measures cells
+ *  with this — the same pretext pipeline that packs the real lines, so the
+ *  fit and the wrap can never drift apart. */
+export function naturalWidthOfInline(inline: LayoutInline[], measurer: TextMeasurer): number {
+  let widest = 0;
+  for (const group of buildGroups(inline, measurer)) {
+    const w = measureRichInlineStats(group.prepared, 1e9).maxLineWidth;
+    if (w > widest) widest = w;
+  }
+  return widest;
+}
+
 /** The x span of a closed polygon's horizontal slice at `y` (even-odd rule,
  *  points in zone coordinates); undefined when the line misses the polygon. */
 function contourSpanAt(

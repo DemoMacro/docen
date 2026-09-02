@@ -608,3 +608,105 @@ describe("layoutTable cell float wraps", () => {
     expect(b.lines).toHaveLength(1);
   });
 });
+
+describe("layoutTable autofit", () => {
+  const cellPara = (t = "word"): LayoutParagraph => ({
+    kind: "paragraph",
+    inline: [{ kind: "text", text: t, style: latin }],
+    defaultTextStyle: latin,
+  });
+  // The fake's advance: an ordinary grapheme is 0.5em = 8px at 16px.
+  const fit = (table: LayoutTable, container = 400) => {
+    const out = layoutBlock(table, container, undefined, measurer);
+    if (out.kind !== "table") throw new Error("expected table");
+    return out;
+  };
+
+  it("grows a column to its content and sizes an auto table to the total", () => {
+    // Grid 100+100; the first cell's 20×8px word widens its column to 160.
+    const out = fit({
+      kind: "table",
+      layout: "autofit",
+      columnWidthsPx: [100, 100],
+      rows: [{ cells: [{ blocks: [cellPara("a".repeat(20))] }, { blocks: [cellPara()] }] }],
+    });
+    expect(out.widthPx).toBe(260);
+    expect(out.columnWidthsPx[0]).toBeCloseTo(160, 4);
+    expect(out.columnWidthsPx[1]).toBeCloseTo(100, 4);
+  });
+
+  it("scales the fitted columns to a pinned tblW", () => {
+    const out = fit(
+      {
+        kind: "table",
+        layout: "autofit",
+        width: { type: "percent", percent: 50 },
+        columnWidthsPx: [100, 100],
+        rows: [{ cells: [{ blocks: [cellPara("a".repeat(20))] }, { blocks: [cellPara()] }] }],
+      },
+      400,
+    );
+    // 160:100 scales to the 200px table width.
+    expect(out.widthPx).toBe(200);
+    expect(out.columnWidthsPx[0]).toBeCloseTo((160 / 260) * 200, 4);
+    expect(out.columnWidthsPx[1]).toBeCloseTo((100 / 260) * 200, 4);
+  });
+
+  it("counts insets and side borders into the natural content width", () => {
+    // 10×8px word + 10+10 insets + 2+2 borders = 104 — just over the 100 grid.
+    const out = fit({
+      kind: "table",
+      layout: "autofit",
+      columnWidthsPx: [100],
+      rows: [
+        {
+          cells: [
+            {
+              insets: { left: 10, right: 10 },
+              borders: { left: { style: "single", px: 2 }, right: { style: "single", px: 2 } },
+              blocks: [cellPara("a".repeat(10))],
+            },
+          ],
+        },
+      ],
+    });
+    expect(out.widthPx).toBeCloseTo(104, 4);
+  });
+
+  it("splits a hard-break line at the widest segment, not the sum", () => {
+    const hardBreak = (): LayoutParagraph => ({
+      kind: "paragraph",
+      inline: [
+        { kind: "text", text: "a".repeat(10), style: latin },
+        { kind: "break" },
+        { kind: "text", text: "a".repeat(5), style: latin },
+      ],
+      defaultTextStyle: latin,
+    });
+    const out = fit({
+      kind: "table",
+      layout: "autofit",
+      columnWidthsPx: [100],
+      rows: [{ cells: [{ blocks: [hardBreak()] }] }],
+    });
+    expect(out.widthPx).toBeCloseTo(100, 4); // 80px < the 100 grid — no growth
+  });
+
+  it("spanning cells don't constrain the fit; absent layout stays fixed", () => {
+    const span = fit({
+      kind: "table",
+      layout: "autofit",
+      columnWidthsPx: [100, 100],
+      rows: [{ cells: [{ colspan: 2, blocks: [cellPara("a".repeat(50))] }] }],
+    });
+    expect(span.widthPx).toBe(200);
+    // Absent layout: the grid scales to the width, content never widens it.
+    const fixed = fit({
+      kind: "table",
+      columnWidthsPx: [100, 100],
+      rows: [{ cells: [{ blocks: [cellPara("a".repeat(20))] }, { blocks: [cellPara()] }] }],
+    });
+    expect(fixed.widthPx).toBe(400); // fills the container (auto width)
+    expect(fixed.columnWidthsPx[0]).toBeCloseTo(200, 4);
+  });
+});

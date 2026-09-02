@@ -56,6 +56,11 @@ export interface LayoutTable {
   kind: "table";
   /** Absent width = auto: fill the containing flow width. */
   width?: LayoutTableWidth;
+  /** w:tblLayout — explicit "fixed" pins the grid; "autofit" re-fits the
+   *  columns to their content every layout (Word's autofit algorithm).
+   *  Absent behaves as fixed: a parsed document's tblGrid already carries
+   *  Word's final layout, so re-fitting would drift from the reference. */
+  layout?: "autofit" | "fixed";
   /** w:tblPr/w:jc — the table box's placement inside the flow column. A table
    *  wider than the column centers into the margins (negative offset). */
   align?: "left" | "center" | "right";

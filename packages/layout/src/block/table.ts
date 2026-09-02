@@ -9,12 +9,14 @@
 // (no re-flow wobble); mid-row page splitting lands with flow/ in P2.
 
 import type {
+  LayoutBlock,
   LayoutBlockContext,
   LayoutBorderEdge,
   LayoutCellInsets,
   LayoutTable,
 } from "../layout-doc";
 import type { LaidOutCell, LaidOutTable } from "../layout-result";
+import { naturalWidthOfInline } from "../text/line-break";
 import type { TextMeasurer } from "../text/measure";
 import { stackBlocks } from "./block";
 
@@ -26,7 +28,13 @@ export function layoutTable(
   measurer: TextMeasurer,
 ): LaidOutTable {
   const widthPx = tableWidthOf(table, containerWidth);
-  const columnWidths = tableColumnWidths(table, widthPx);
+  // w:tblLayout autofit re-fits the columns to their content (and, for an
+  // auto-width table, the table to its columns) at every layout; the fixed
+  // path just scales the grid. Absent layout = fixed (see LayoutTable).
+  const { columnWidths, tableWidth } =
+    table.layout === "autofit"
+      ? autofitColumns(table, containerWidth, measurer)
+      : { columnWidths: tableColumnWidths(table, widthPx), tableWidth: widthPx };
 
   // Word honors w:tblHeader only as a contiguous prefix from the first row —
   // marks past the prefix are voided here so no later page can re-derive a
@@ -146,16 +154,16 @@ export function layoutTable(
 
   return {
     kind: "table",
-    widthPx,
+    widthPx: tableWidth,
     columnWidthsPx: columnWidths,
     // w:jc: the table box's placement in the flow column — center/right
     // against the column width, which goes negative for a table wider than
     // the column (Word centers those into the margins).
     offsetXPx:
       table.align === "center"
-        ? (containerWidth - widthPx) / 2
+        ? (containerWidth - tableWidth) / 2
         : table.align === "right"
-          ? containerWidth - widthPx
+          ? containerWidth - tableWidth
           : undefined,
     heightPx,
     borders: table.borders,
@@ -177,25 +185,105 @@ function tableWidthOf(table: LayoutTable, containerWidth: number): number {
  *  because it is identical across page-split slices of the same table, so
  *  column widths (and row heights) stay stable across re-flows. */
 function tableColumnWidths(table: LayoutTable, tableWidth: number): number[] {
-  const grid: number[] = [];
-  if (table.columnWidthsPx && table.columnWidthsPx.length > 0) {
-    grid.push(...table.columnWidthsPx);
-  } else {
-    const firstRow = table.rows[0];
-    if (firstRow) {
-      for (const cell of firstRow.cells) {
-        const colspan = cell.colspan ?? 1;
-        if (cell.widthPx != null && cell.widthPx > 0) {
-          for (let i = 0; i < colspan; i++) grid.push(cell.widthPx / colspan);
-        } else {
-          for (let i = 0; i < colspan; i++) grid.push(0);
-        }
-      }
-    }
-  }
+  const grid = rawGridOf(table);
   if (grid.length === 0) return [];
   const total = grid.reduce((a, b) => a + b, 0) || 1;
   return grid.map((w) => (w / total) * tableWidth);
+}
+
+/** The raw tblGrid (or the first row's cell widths), unscaled, px. */
+function rawGridOf(table: LayoutTable): number[] {
+  if (table.columnWidthsPx && table.columnWidthsPx.length > 0) {
+    return [...table.columnWidthsPx];
+  }
+  const grid: number[] = [];
+  const firstRow = table.rows[0];
+  if (firstRow) {
+    for (const cell of firstRow.cells) {
+      const colspan = cell.colspan ?? 1;
+      if (cell.widthPx != null && cell.widthPx > 0) {
+        for (let i = 0; i < colspan; i++) grid.push(cell.widthPx / colspan);
+      } else {
+        for (let i = 0; i < colspan; i++) grid.push(0);
+      }
+    }
+  }
+  return grid;
+}
+
+/** Word's autofit (w:tblLayout autofit): every column starts at its grid
+ *  preference and grows to its widest cell's natural content; the total then
+ *  scales to the table width — w:tblW pct/dxa pin it, an auto table sizes to
+ *  its content (Word never stretches an auto table beyond what the grid
+ *  already spans). Spanning cells don't constrain the fit (Word distributes
+ *  across the span; a per-column split would be guesswork). */
+function autofitColumns(
+  table: LayoutTable,
+  containerWidth: number,
+  measurer: TextMeasurer,
+): { columnWidths: number[]; tableWidth: number } {
+  const grid = rawGridOf(table);
+  if (grid.length === 0) return { columnWidths: [], tableWidth: containerWidth };
+  const content = grid.map(() => 0);
+  for (const row of table.rows) {
+    let col = 0;
+    for (const cell of row.cells) {
+      const span = cell.colspan ?? 1;
+      if (span === 1 && col < content.length) {
+        const insets = mergeInsets(cell.insets, table.cellInsets);
+        const natural =
+          naturalWidthOfBlocks(cell.blocks, measurer) +
+          (insets.left ?? 0) +
+          (insets.right ?? 0) +
+          edgeWidth(cell.borders?.left) +
+          edgeWidth(cell.borders?.right);
+        content[col] = Math.max(content[col]!, natural);
+      }
+      col += span;
+    }
+  }
+  // The grid preference is the starting point — content only widens a
+  // column (a 0/absent grid entry starts from the content itself).
+  const target = grid.map((w, c) => Math.max(w > 0 ? w : content[c]!, content[c]!));
+  const total = target.reduce((a, b) => a + b, 0);
+  if (total <= 0) return { columnWidths: grid, tableWidth: containerWidth };
+  const width =
+    table.width?.type === "percent"
+      ? (containerWidth * table.width.percent) / 100
+      : table.width?.type === "px"
+        ? table.width.px
+        : total;
+  return { columnWidths: target.map((w) => (w / total) * width), tableWidth: width };
+}
+
+/** A cell stack's widest natural line (hard breaks split it; nothing wraps).
+ *  Nested tables contribute their grid sum; placeholders nothing. */
+function naturalWidthOfBlocks(blocks: readonly LayoutBlock[], measurer: TextMeasurer): number {
+  let widest = 0;
+  for (const block of blocks) {
+    switch (block.kind) {
+      case "paragraph":
+        widest = Math.max(widest, naturalWidthOfInline(block.inline, measurer));
+        break;
+      case "group":
+        widest = Math.max(widest, naturalWidthOfBlocks(block.blocks, measurer));
+        break;
+      case "table": {
+        const sum = (block.columnWidthsPx ?? []).reduce((a, b) => a + b, 0);
+        widest = Math.max(widest, sum);
+        break;
+      }
+      default:
+        break;
+    }
+  }
+  return widest;
+}
+
+/** The border edge's painted width (nil/none → 0). */
+function edgeWidth(edge: LayoutBorderEdge | undefined): number {
+  if (!edge || edge.style === "nil" || edge.style === "none") return 0;
+  return edge.px ?? 0;
 }
 
 /** A cell's own inset wins per side, else the table's default. */

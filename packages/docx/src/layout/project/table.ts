@@ -204,6 +204,7 @@ export function projectTable(t: TableOptions, ctx: ProjectContext): LayoutTable 
   return {
     kind: "table",
     width: toTableWidth(t.width),
+    layout: t.layout,
     align: t.alignment === "center" ? "center" : t.alignment === "right" ? "right" : undefined,
     columnWidthsPx: columnWidthsPx && columnWidthsPx.length > 0 ? columnWidthsPx : undefined,
     cellInsets: toCellInsets(t.margins) ?? WORD_DEFAULT_CELL_INSETS,
