@@ -668,7 +668,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
 
   const placeGrip = (): void => {
     const frame = grip.zone ? (opts.pageHost?.(framePage(active(), grip.zone.page)) ?? null) : null;
-    if (!grip.kind || !grip.zone || !frame) {
+    if (!grip.zone || !frame) {
       gripEl.style.display = "none";
       return;
     }
@@ -700,15 +700,16 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     gripEl.style.width = `${width}px`;
     gripEl.style.height = `${height}px`;
     // The column arrow is the row arrow rotated to face down, centered in
-    // its strip; the corner square drops the arrow entirely.
+    // its strip; the corner square (the select grip and its always-on hover
+    // preview alike) drops the arrow and paints its own face — the strip
+    // modes must stay faceless or the square's background would smear into
+    // a bar across the whole strip.
     gripEl.firstElementChild?.setAttribute(
       "style",
-      rotate
-        ? `display:block;margin:auto;transform:${rotate}`
-        : grip.kind === "table"
-          ? "display:none"
-          : "display:block;margin:auto",
+      rotate ? `display:block;margin:auto;transform:${rotate}` : "display:none",
     );
+    gripEl.style.background = rotate ? "transparent" : "#454545";
+    gripEl.style.borderRadius = rotate ? "0" : "2px";
     gripEl.style.display = "block";
   };
 
@@ -751,6 +752,10 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
             grip.zone = zone;
             grip.index = idx;
           }
+        } else if (lx > 0 && lx < zone.widthPx && ly > 0 && ly < zone.heightPx) {
+          // Word: hovering anywhere in the table shows the corner square —
+          // but only the corner window itself clicks it; here a click edits.
+          grip.zone = zone;
         }
       }
     }
@@ -768,19 +773,21 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     placeGrip();
     if (!kind || !zone || !s.map?.valid) return;
     // The first cell box inside the strip — its PM cell pos (+2) is the
-    // inner position the select commands anchor from.
+    // inner position the select commands anchor from. Col/row boxes OVERLAP
+    // the strip rather than filling it: a strip swallowed by a merged cell
+    // must still grip (the select commands widen to the covering span).
     let anchorPos = -1;
     for (const [pos, box] of s.map.cellBoxes) {
       if (box.page !== zone.page) continue;
       const inner =
         kind === "col"
-          ? box.xPx >= zone.xPx + zone.colEdges[grip.index]! &&
-            box.xPx + box.widthPx <= zone.xPx + zone.colEdges[grip.index + 1]! + 0.5 &&
+          ? box.xPx + box.widthPx > zone.xPx + zone.colEdges[grip.index]! + 0.5 &&
+            box.xPx < zone.xPx + zone.colEdges[grip.index + 1]! &&
             box.yPx >= zone.yPx &&
             box.yPx + box.heightPx <= zone.yPx + zone.heightPx + 0.5
           : kind === "row"
-            ? box.yPx >= zone.yPx + zone.rowEdges[grip.index]! &&
-              box.yPx + box.heightPx <= zone.yPx + zone.rowEdges[grip.index + 1]! + 0.5 &&
+            ? box.yPx + box.heightPx > zone.yPx + zone.rowEdges[grip.index]! + 0.5 &&
+              box.yPx < zone.yPx + zone.rowEdges[grip.index + 1]! &&
               box.xPx >= zone.xPx &&
               box.xPx + box.widthPx <= zone.xPx + zone.widthPx + 0.5
             : box.xPx >= zone.xPx && box.yPx >= zone.yPx;
