@@ -1079,13 +1079,16 @@ const cellAlignItems = (): string =>
 
 const tableSelectItems = (): string =>
   JSON.stringify([
-    { text: opt("select-table"), value: "table" },
-    { text: opt("select-table-row"), value: "row", event: "select-table-row" },
     { text: opt("select-table-cell"), value: "cell", event: "select-table-cell" },
+    { text: opt("select-table-column"), value: "column", event: "select-table-column" },
+    { text: opt("select-table-row"), value: "row", event: "select-table-row" },
+    { text: opt("select-table"), value: "table" },
   ]);
 
 const tableDeleteItems = (): string =>
   JSON.stringify([
+    // Word opens the Delete Cells dialog — needs its own dialog (not built).
+    { text: opt("delete-cells"), value: "cells", event: "delete-table", disabled: true },
     { text: opt("delete-columns"), value: "columns", event: "delete-column" },
     { text: opt("delete-rows"), value: "rows", event: "delete-row" },
     { text: opt("delete-table"), value: "table" },
@@ -1127,21 +1130,31 @@ export function tableContextTabs(): RibbonTab[] {
       contextual: true,
       groups: [
         group("table", [
-          split("table-cursor", "select-table", parsedItems(tableSelectItems()), { size: "large" }),
-          split("table-delete", "delete-table", parsedItems(tableDeleteItems()), { size: "large" }),
+          // Table Properties opens Word's dialog (not built) — greying marks it.
+          btn("table-properties", "table-properties", { size: "large" }),
+          menu("table-cursor", "select-table", parsedItems(tableSelectItems())),
+          menu("table-delete", "delete-table", parsedItems(tableDeleteItems())),
         ]),
         group("rows-columns", [
           row([
-            btn("table-insert-row", "insert-row-above", { iconOnly: true }),
-            btn("table-insert-row", "insert-row-below", { iconOnly: true }),
-            btn("table-insert-column", "insert-column-left", { iconOnly: true }),
-            btn("table-insert-column", "insert-column-right", { iconOnly: true }),
+            col([
+              btn("table-stack-above", "insert-row-above"),
+              btn("table-stack-below", "insert-row-below"),
+            ]),
+            col([
+              btn("table-stack-left", "insert-column-left"),
+              btn("table-stack-right", "insert-column-right"),
+            ]),
           ]),
         ]),
         group("alignment", [
           split("align-center", "align-cell", parsedItems(cellAlignItems()), { size: "large" }),
+          btn("text-direction", "text-direction", { size: "large" }),
         ]),
-        group("data", [btn("table-repeat-headers", "repeat-header-rows", { size: "large" })]),
+        group("data", [
+          btn("table-repeat-headers", "repeat-header-rows", { size: "large" }),
+          btn("list", "convert-to-text", { size: "large" }),
+        ]),
       ],
     },
   ];

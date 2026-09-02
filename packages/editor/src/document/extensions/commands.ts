@@ -79,9 +79,12 @@ declare module "@tiptap/core" {
       "select-table": () => ReturnType;
       "select-table-row": () => ReturnType;
       "select-table-cell": () => ReturnType;
+      "select-table-column": () => ReturnType;
       "align-cell": (value?: string) => ReturnType;
       "repeat-header-rows": () => ReturnType;
       "cell-shading": (value?: unknown) => ReturnType;
+      "text-direction": () => ReturnType;
+      "convert-to-text": () => ReturnType;
       "table-style": (value?: string) => ReturnType;
       "table-borders": (value?: string) => ReturnType;
       link: (href?: string) => ReturnType;
@@ -142,11 +145,14 @@ export const WIRED_DISPATCH: ReadonlySet<string> = new Set([
   "select-table",
   "select-table-row",
   "select-table-cell",
+  "select-table-column",
   "align-cell",
   "repeat-header-rows",
   "cell-shading",
   "table-style",
   "table-borders",
+  "text-direction",
+  "convert-to-text",
   "link",
   "style",
   "undo",
@@ -1051,6 +1057,39 @@ export const DocumentCommands = Extension.create({
           }
           return true;
         },
+      // The caret's column across all rows: a TextSelection from the first
+      // row's cell content to the last row's (the same index-per-row fallback
+      // as insert-column — span-aware grid math is logged for a later batch).
+      "select-table-column":
+        () =>
+        ({ state, dispatch }) => {
+          const anchor = tableAncestry(state);
+          if (!anchor || anchor.rowAt < 0) return false;
+          if (dispatch) {
+            const { $from } = state.selection;
+            const tableNode = $from.node(anchor.tableAt);
+            const tablePos = $from.before(anchor.tableAt);
+            const cellIndex = $from.index(anchor.rowAt);
+            let first = -1;
+            let lastEnd = -1;
+            for (let r = 0; r < tableNode.childCount; r += 1) {
+              const rowNode = tableNode.child(r);
+              let rowPos = tablePos + 1;
+              for (let i = 0; i < r; i += 1) rowPos += tableNode.child(i).nodeSize;
+              const idx = Math.min(cellIndex, rowNode.childCount - 1);
+              let cellPos = rowPos + 1;
+              for (let c = 0; c < idx; c += 1) cellPos += rowNode.child(c).nodeSize;
+              if (first < 0) first = cellPos + 1;
+              lastEnd = cellPos + rowNode.child(idx).nodeSize - 1;
+            }
+            dispatch(
+              state.tr
+                .setSelection(TextSelection.create(state.doc, first, lastEnd))
+                .scrollIntoView(),
+            );
+          }
+          return true;
+        },
       // Word's 9-grid: the vertical half lands on the cell (verticalAlign),
       // the horizontal half on every paragraph in the cell (alignment).
       "align-cell":
@@ -1140,6 +1179,56 @@ export const DocumentCommands = Extension.create({
           const current = (state.selection.$from.node(anchor.tableAt).attrs.borders ??
             null) as TableBordersLike | null;
           return stampTableBorders(state, dispatch, tableBordersStamp(value, current));
+        },
+      // Word's Text Direction button: toggles the cell's tcPr textDirection
+      // (tbRl ↔ unset). The attr round-trips through the docx engine; the
+      // canvas doesn't paint vertical cell text yet.
+      "text-direction":
+        () =>
+        ({ state, dispatch }) => {
+          const anchor = tableAncestry(state);
+          if (!anchor || anchor.cellAt < 0) return false;
+          if (dispatch) {
+            const { $from } = state.selection;
+            const cellPos = $from.before(anchor.cellAt);
+            const cell = $from.node(anchor.cellAt);
+            const next = cell.attrs.textDirection ? null : "tbRl";
+            dispatch(
+              state.tr
+                .setNodeMarkup(cellPos, undefined, { ...cell.attrs, textDirection: next })
+                .scrollIntoView(),
+            );
+          }
+          return true;
+        },
+      // Word's "Convert to Text": each row becomes a paragraph, cells joined
+      // by tabs (Word's default separator); the caret lands where the table
+      // stood. A cell's multi-paragraph content collapses to its text — Word
+      // keeps the paragraphs, our join is the honest simple form.
+      "convert-to-text":
+        () =>
+        ({ state, dispatch }) => {
+          const anchor = tableAncestry(state);
+          if (!anchor) return false;
+          if (dispatch) {
+            const { $from } = state.selection;
+            const tablePos = $from.before(anchor.tableAt);
+            const tableNode = $from.node(anchor.tableAt);
+            const { paragraph } = state.schema.nodes;
+            const paras: PMNode[] = [];
+            for (let r = 0; r < tableNode.childCount; r += 1) {
+              const texts: string[] = [];
+              tableNode.child(r).forEach((cell: PMNode) => texts.push(cell.textContent));
+              const text = texts.join("\t");
+              paras.push(
+                text ? paragraph.create(null, state.schema.text(text)) : paragraph.create(),
+              );
+            }
+            const tr = state.tr.replaceWith(tablePos, tablePos + tableNode.nodeSize, paras);
+            tr.setSelection(TextSelection.near(tr.doc.resolve(tablePos + 1)));
+            dispatch(tr.scrollIntoView());
+          }
+          return true;
         },
       // Wrap the selection in a link (empty selection → link around the URL text).
       // Word stamps inserted hyperlink runs with the "Hyperlink" character

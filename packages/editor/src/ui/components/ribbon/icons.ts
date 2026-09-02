@@ -61,7 +61,12 @@ import tableDeleteRow from "@fluentui/svg-icons/icons/table_delete_row_24_regula
 import tableDismiss from "@fluentui/svg-icons/icons/table_dismiss_24_regular.svg?raw";
 import tableInsertColumn from "@fluentui/svg-icons/icons/table_insert_column_24_regular.svg?raw";
 import tableInsertRow from "@fluentui/svg-icons/icons/table_insert_row_24_regular.svg?raw";
+import tableSettings from "@fluentui/svg-icons/icons/table_settings_24_regular.svg?raw";
 import tableSimple from "@fluentui/svg-icons/icons/table_simple_24_regular.svg?raw";
+import tableStackAbove from "@fluentui/svg-icons/icons/table_stack_above_24_regular.svg?raw";
+import tableStackBelow from "@fluentui/svg-icons/icons/table_stack_below_24_regular.svg?raw";
+import tableStackLeft from "@fluentui/svg-icons/icons/table_stack_left_24_regular.svg?raw";
+import tableStackRight from "@fluentui/svg-icons/icons/table_stack_right_24_regular.svg?raw";
 import textAlignCenter from "@fluentui/svg-icons/icons/text_align_center_24_regular.svg?raw";
 import textAlignJustify from "@fluentui/svg-icons/icons/text_align_justify_24_regular.svg?raw";
 import textAlignLeft from "@fluentui/svg-icons/icons/text_align_left_24_regular.svg?raw";
@@ -72,6 +77,7 @@ import textBulletListSquare from "@fluentui/svg-icons/icons/text_bullet_list_squ
 import textBulletListTree from "@fluentui/svg-icons/icons/text_bullet_list_tree_24_regular.svg?raw";
 import textChangeCase from "@fluentui/svg-icons/icons/text_change_case_24_regular.svg?raw";
 import textColor from "@fluentui/svg-icons/icons/text_color_24_regular.svg?raw";
+import textDirectionVertical from "@fluentui/svg-icons/icons/text_direction_vertical_24_regular.svg?raw";
 import textEffects from "@fluentui/svg-icons/icons/text_effects_24_regular.svg?raw";
 import textField from "@fluentui/svg-icons/icons/text_field_24_regular.svg?raw";
 import textFont from "@fluentui/svg-icons/icons/text_font_24_regular.svg?raw";
@@ -156,6 +162,12 @@ export const RIBBON_ICONS: Readonly<Record<string, string>> = {
   "table-delete-column": tableDeleteColumn,
   "table-delete": tableDismiss,
   "table-repeat-headers": tableArrowRepeatAll,
+  "table-properties": tableSettings,
+  "table-stack-above": tableStackAbove,
+  "table-stack-below": tableStackBelow,
+  "table-stack-left": tableStackLeft,
+  "table-stack-right": tableStackRight,
+  "text-direction": textDirectionVertical,
   picture: image,
   "insert-picture": imageAdd,
   shapes,

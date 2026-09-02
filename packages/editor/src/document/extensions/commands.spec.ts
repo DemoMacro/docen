@@ -221,4 +221,68 @@ describe("table cell property commands", () => {
     expect(borders.insideVertical).toEqual({ style: "none", size: 0, color: "auto" });
     expect(editor.commands["table-style"]("bogus")).toBe(false);
   });
+
+  it("text-direction toggles the cell's tcPr textDirection", () => {
+    const editor = build();
+    editor.commands["insert-table"]();
+    caretInCell(editor, 0, 0);
+    expect(firstNodeOf(editor, "tableCell").attrs.textDirection).toBeFalsy();
+    expect(editor.commands["text-direction"]()).toBe(true);
+    expect(firstNodeOf(editor, "tableCell").attrs.textDirection).toBe("tbRl");
+    expect(editor.commands["text-direction"]()).toBe(true);
+    expect(firstNodeOf(editor, "tableCell").attrs.textDirection).toBeFalsy();
+  });
+});
+
+describe("select-table-column / convert-to-text", () => {
+  it("select-table-column selects the caret's column across all rows", () => {
+    const editor = build();
+    editor.commands["insert-table"]();
+    caretInCell(editor, 0, 1); // middle cell of the header row
+    expect(editor.commands["select-table-column"]()).toBe(true);
+    const { from, to, empty } = editor.state.selection;
+    expect(empty).toBe(false);
+    // The selection spans from the header row's cell into the last row's.
+    const $from = editor.state.doc.resolve(from);
+    const $to = editor.state.doc.resolve(to);
+    expect($from.node(2).type.name).toBe("tableRow");
+    expect($to.node(2).type.name).toBe("tableRow");
+    expect($from.before(2)).toBeLessThan($to.before(2));
+  });
+
+  it("convert-to-text replaces the table with tab-joined paragraphs", () => {
+    const editor = build();
+    editor.commands["insert-table"]();
+    caretInCell(editor, 0, 0);
+    // Type into the first cell so the conversion has content to move.
+    editor.commands.setContent({
+      type: "doc",
+      content: [
+        {
+          type: "table",
+          content: [
+            {
+              type: "tableRow",
+              content: [
+                {
+                  type: "tableCell",
+                  content: [{ type: "paragraph", content: [{ type: "text", text: "甲" }] }],
+                },
+                {
+                  type: "tableCell",
+                  content: [{ type: "paragraph", content: [{ type: "text", text: "乙" }] }],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    caretInCell(editor, 0, 0);
+    expect(editor.commands["convert-to-text"]()).toBe(true);
+    expect(tablesOf(editor)).toHaveLength(0);
+    expect(editor.state.doc.childCount).toBe(1);
+    expect(editor.state.doc.firstChild?.type.name).toBe("paragraph");
+    expect(editor.state.doc.textContent).toBe("甲\t乙");
+  });
 });
