@@ -49,9 +49,25 @@ const rowCellOf = ($cell: ResolvedPos): { row: number; cell: number } => ({
   cell: $cell.index($cell.depth),
 });
 
+/** A cell's columnSpan — 1 unless the schema attr carries a wider one. */
+const spanOf = (cell: PmNode): number => {
+  const span = cell.attrs.columnSpan as unknown;
+  return typeof span === "number" && span > 1 ? span : 1;
+};
+
+/** The grid column a row's cell sibling starts at — the spans of its
+ *  preceding siblings (a spanning cell covers its columns). */
+const gridColOf = (rowNode: PmNode, cellIndex: number): number => {
+  let col = 0;
+  for (let i = 0; i < cellIndex; i += 1) col += spanOf(rowNode.child(i)!);
+  return col;
+};
+
 /** Every cell of the selection rectangle (Word's block): rows between the
- *  anchor and head rows, across the anchor..head cell columns. Rows shorter
- *  than the rectangle (post-merge) contribute what they have. */
+ *  anchor and head rows, across the anchor..head columns. The rectangle
+ *  lives in GRID columns — a spanning cell covers its columns — so a drag
+ *  over merged rows still reaches every grid column its ends span; rows
+ *  shorter than the rectangle contribute what they have. */
 export function cellsInRect(
   doc: PmNode,
   anchorPos: number,
@@ -64,18 +80,27 @@ export function cellsInRect(
   const rh = rowCellOf($h);
   const rowFrom = Math.min(ra.row, rh.row);
   const rowTo = Math.max(ra.row, rh.row);
-  const colFrom = Math.min(ra.cell, rh.cell);
-  const colTo = Math.max(ra.cell, rh.cell);
   const table = $a.node($a.depth - 1);
   const tableStart = $a.before($a.depth - 1);
+  const anchorRow = table.child(ra.row)!;
+  const headRow = table.child(rh.row)!;
+  // Half-open [colFrom, colTo): each end covers its own span.
+  const colFrom = Math.min(gridColOf(anchorRow, ra.cell), gridColOf(headRow, rh.cell));
+  const colTo = Math.max(
+    gridColOf(anchorRow, ra.cell) + spanOf(anchorRow.child(ra.cell)!),
+    gridColOf(headRow, rh.cell) + spanOf(headRow.child(rh.cell)!),
+  );
   for (let r = rowFrom; r <= rowTo; r += 1) {
     const rowNode = table.child(r);
     let rowPos = tableStart + 1;
     for (let i = 0; i < r; i += 1) rowPos += table.child(i).nodeSize;
     let cellPos = rowPos + 1;
-    for (let c = 0; c <= Math.min(colTo, rowNode.childCount - 1); c += 1) {
+    let col = 0;
+    for (let c = 0; c < rowNode.childCount && col < colTo; c += 1) {
       const node = rowNode.child(c);
-      if (c >= colFrom) visit(node, cellPos);
+      const span = spanOf(node);
+      if (col + span > colFrom) visit(node, cellPos);
+      col += span;
       cellPos += node.nodeSize;
     }
   }
@@ -203,21 +228,33 @@ export class CellSelection extends Selection {
     );
   }
 
-  /** The single column the cell sits in, across every row of its table. */
+  /** The single column the cell sits in, across every row of its table. The
+   *  per-row hit is the cell covering the column in GRID terms — a row that
+   *  merges the column away contributes its spanning cell, not whatever
+   *  sibling happens to sit at the index. */
   static colSelection($cell: ResolvedPos): CellSelection {
-    const cellIndex = $cell.index($cell.depth);
+    const rowNode = $cell.node($cell.depth);
+    const gridCol = gridColOf(rowNode, $cell.index($cell.depth));
     const table = $cell.node($cell.depth - 1);
     let tablePos = $cell.before($cell.depth - 1) + 1;
     let first = -1;
     let last = -1;
     for (let r = 0; r < table.childCount; r += 1) {
-      const rowNode = table.child(r);
+      const row = table.child(r);
       let cellPos = tablePos + 1;
-      const c = Math.min(cellIndex, rowNode.childCount - 1);
-      for (let i = 0; i < c; i += 1) cellPos += rowNode.child(i).nodeSize;
-      if (first < 0) first = cellPos;
-      last = cellPos;
-      tablePos += rowNode.nodeSize;
+      let col = 0;
+      for (let c = 0; c < row.childCount && col <= gridCol; c += 1) {
+        const node = row.child(c);
+        const span = spanOf(node);
+        if (col + span > gridCol) {
+          if (first < 0) first = cellPos;
+          last = cellPos;
+          break;
+        }
+        col += span;
+        cellPos += node.nodeSize;
+      }
+      tablePos += row.nodeSize;
     }
     return new CellSelection($cell.doc.resolve(first), $cell.doc.resolve(last));
   }

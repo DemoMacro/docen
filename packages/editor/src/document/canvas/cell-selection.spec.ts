@@ -80,6 +80,44 @@ const cellsOf = (editor: EditorType, selection: CellSelection): string[] => {
   return texts;
 };
 
+/** A plain single-cell column. */
+const cell = (text: string): object => ({
+  type: "tableCell",
+  content: [{ type: "paragraph", content: [{ type: "text", text }] }],
+});
+
+// The showcase table: row 2 merges the first two grid columns into one
+// spanning cell — from there sibling indexes stop mapping to grid columns.
+const buildMerged = (): EditorType =>
+  new Editor({
+    element: null,
+    extensions: [Document, Paragraph, Text, Table, TableRow, TableCell],
+    content: {
+      type: "doc",
+      content: [
+        {
+          type: "table",
+          content: [
+            { type: "tableRow", content: [cell("甲"), cell("乙"), cell("丙")] },
+            { type: "tableRow", content: [cell("丁"), cell("戊"), cell("己")] },
+            {
+              type: "tableRow",
+              content: [
+                {
+                  type: "tableCell",
+                  attrs: { columnSpan: 2 },
+                  content: [{ type: "paragraph", content: [{ type: "text", text: "庚辛" }] }],
+                },
+                cell("壬"),
+              ],
+            },
+          ],
+        },
+        { type: "paragraph" },
+      ],
+    },
+  });
+
 describe("cellAt / inSameTable", () => {
   it("resolves a position inside a cell to that cell; null outside", () => {
     const editor = build();
@@ -154,5 +192,47 @@ describe("CellSelection rectangles", () => {
       return true;
     });
     expect(tableTexts).toEqual(["", "", "丙", "", "", "己"]);
+  });
+});
+
+describe("CellSelection over merged columns", () => {
+  it("a drag over a spanning row still reaches every grid column", () => {
+    // Top-left → row 2's second cell. A sibling-index rectangle stopped at
+    // sibling 1 and dropped the plain rows' third column.
+    const editor = buildMerged();
+    const { doc } = editor.state;
+    const sel = CellSelection.create(doc, cellPos(editor, 0, 0), cellPos(editor, 2, 1));
+    expect(cellsOf(editor, sel)).toEqual(["甲", "乙", "丙", "丁", "戊", "己", "庚辛", "壬"]);
+  });
+
+  it("a reversed drag covers the same grid", () => {
+    const editor = buildMerged();
+    const { doc } = editor.state;
+    const sel = CellSelection.create(doc, cellPos(editor, 2, 1), cellPos(editor, 0, 0));
+    expect(cellsOf(editor, sel)).toEqual(["甲", "乙", "丙", "丁", "戊", "己", "庚辛", "壬"]);
+  });
+
+  it("selecting the column a row merged away picks the spanning cell", () => {
+    // Column 1 (乙/戊): row 2 covers it with the spanning cell — not
+    // whatever sibling sits at index 1 (壬). The rectangle widens to the
+    // end cells' spans, so the plain rows contribute both covered columns.
+    const editor = buildMerged();
+    const { doc } = editor.state;
+    const col = CellSelection.colSelection(doc.resolve(cellPos(editor, 1, 1)));
+    expect(cellsOf(editor, col)).toEqual(["甲", "乙", "丁", "戊", "庚辛"]);
+  });
+
+  it("a single-cell pick on the spanning row selects just that cell", () => {
+    const editor = buildMerged();
+    const { doc } = editor.state;
+    const sel = CellSelection.create(doc, cellPos(editor, 2, 0));
+    expect(cellsOf(editor, sel)).toEqual(["庚辛"]);
+  });
+
+  it("tableSelection covers every cell across the merged row", () => {
+    const editor = buildMerged();
+    const { doc } = editor.state;
+    const sel = CellSelection.tableSelection(doc.resolve(cellPos(editor, 1, 1)));
+    expect(cellsOf(editor, sel)).toEqual(["甲", "乙", "丙", "丁", "戊", "己", "庚辛", "壬"]);
   });
 });
