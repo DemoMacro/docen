@@ -1226,35 +1226,69 @@ const autofitItems = (): string =>
     { text: opt("fixed-column-width"), value: "fixed", event: "fixed-column-width" },
   ]);
 
+/** The locale's Cell Size unit system (Word zh shows cm, en shows inches) —
+ *  resolved against the ribbon's i18n scope (the workspace carries the
+ *  effective `<docen-document lang>`), shared with the host's live combo
+ *  sync (#syncCellSize). */
+export const useCmUnits = (scope?: Element): boolean =>
+  resolveLang(scope ?? document.documentElement)
+    .toLowerCase()
+    .startsWith("zh");
+
+/** A length in twips as the Cell Size string ("1.50 厘米" / '1.00"'). */
+export function formatMeasureTwip(tw: number, scope?: Element): string {
+  return useCmUnits(scope) ? `${(tw / 567).toFixed(2)} 厘米` : `${(tw / 1440).toFixed(2)}"`;
+}
+
 /** Word's Cell Size spinner presets — the values are the twips the commands
- *  receive; the labels are what a human says (free-typed entries accept the
- *  same UniversalMeasure units, "1.5cm" / "0.5in"). */
-const CELL_WIDTH_PRESETS: readonly (readonly [string, string])[] = [
-  ['0.5"', "720"],
-  ['0.75"', "1080"],
-  ['1"', "1440"],
-  ['1.5"', "2160"],
-  ['2"', "2880"],
-  ['3"', "4320"],
+ *  receive; the labels follow the locale's unit system. Free-typed entries
+ *  accept the same UniversalMeasure units ("1.5cm" / "0.5in"). */
+const cellWidthPresets = (scope?: Element): readonly (readonly [string, string])[] =>
+  useCmUnits(scope)
+    ? [
+        ["0.5 厘米", "283"],
+        ["1 厘米", "567"],
+        ["1.5 厘米", "850"],
+        ["2 厘米", "1134"],
+        ["3 厘米", "1701"],
+        ["4 厘米", "2268"],
+      ]
+    : [
+        ['0.5"', "720"],
+        ['0.75"', "1080"],
+        ['1"', "1440"],
+        ['1.5"', "2160"],
+        ['2"', "2880"],
+        ['3"', "4320"],
+      ];
+const cellHeightPresets = (scope?: Element): readonly (readonly [string, string])[] => [
+  ...(useCmUnits(scope)
+    ? ([
+        ["0.5 厘米", "283"],
+        ["1 厘米", "567"],
+        ["1.5 厘米", "850"],
+        ["2 厘米", "1134"],
+      ] as const)
+    : ([
+        ['0.25"', "360"],
+        ['0.5"', "720"],
+        ['0.75"', "1080"],
+        ['1"', "1440"],
+      ] as const)),
+  [useCmUnits(scope) ? "自动" : "auto", "0"],
 ];
-const CELL_HEIGHT_PRESETS: readonly (readonly [string, string])[] = [
-  ['0.25"', "360"],
-  ['0.5"', "720"],
-  ['0.75"', "1080"],
-  ['1"', "1440"],
-  ["auto", "0"],
-];
-const cellWidthItems = (): string =>
-  JSON.stringify(CELL_WIDTH_PRESETS.map(([text, value]) => ({ text, value })));
-const cellHeightItems = (): string =>
-  JSON.stringify(CELL_HEIGHT_PRESETS.map(([text, value]) => ({ text, value })));
+const cellWidthItems = (scope?: Element): string =>
+  JSON.stringify(cellWidthPresets(scope).map(([text, value]) => ({ text, value })));
+const cellHeightItems = (scope?: Element): string =>
+  JSON.stringify(cellHeightPresets(scope).map(([text, value]) => ({ text, value })));
 
 /** Word's contextual Table Tools — the Table Design / Table Layout tabs that
  *  appear while the caret is inside a table. Marked `contextual` so
  *  {@link ribbonTabs} excludes them from the static render; the host appends
  *  them (via {@link buildContextualTab}) when the selection enters a table and
- *  removes them when it leaves. */
-export function tableContextTabs(): RibbonTab[] {
+ *  removes them when it leaves. `scope` is the i18n scope the unit-system
+ *  presets (Cell Size) resolve against. */
+export function tableContextTabs(scope?: Element): RibbonTab[] {
   ensureTableStyleIcons();
   return [
     {
@@ -1333,8 +1367,12 @@ export function tableContextTabs(): RibbonTab[] {
         group("cell-size", [
           split("autofit", "autofit", parsedItems(autofitItems()), { size: "large" }),
           col([
-            combo("cell-height", "auto", parsedItems(cellHeightItems()), { comboboxSize: "short" }),
-            combo("cell-width", '1"', parsedItems(cellWidthItems()), { comboboxSize: "short" }),
+            combo("cell-height", "auto", parsedItems(cellHeightItems(scope)), {
+              comboboxSize: "short",
+            }),
+            combo("cell-width", '1"', parsedItems(cellWidthItems(scope)), {
+              comboboxSize: "short",
+            }),
           ]),
           col([
             grid([

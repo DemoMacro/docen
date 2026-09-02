@@ -99,10 +99,12 @@ import { MARGINS, PAPER_SIZES, marginTwipsFromCss, mergeSectionProperties } from
 import {
   buildContextualTab,
   DEFAULT_RIBBON_TAB,
+  formatMeasureTwip,
   renderRibbonFromSchema,
   ribbonActions,
   ribbonTabs,
   tableContextTabs,
+  useCmUnits,
 } from "./ribbon";
 import { WATERMARK_PRESETS, stripWatermarkPara, watermarkPara } from "./watermark";
 
@@ -699,6 +701,10 @@ class DocenDocument extends AddinHost<Editor> {
       this.#syncStyleControl();
       this.#syncStoryMenus();
       this.#syncContextTabs();
+      // After #syncContextTabs: the first transaction that enters a table is
+      // also the one that appends the Table Layout panel — the combos only
+      // exist from that pass on.
+      this.#syncCellSize();
       this.#updateStatus();
     };
     editor.on("transaction", sync);
@@ -1488,6 +1494,7 @@ class DocenDocument extends AddinHost<Editor> {
     // tracking, then re-append them if the selection is inside a table.
     this.#contextTabIds.clear();
     this.#syncContextTabs();
+    this.#syncCellSize();
     root
       .querySelector('docen-task-pane[part="comments-pane"]')
       ?.setAttribute("title", t("comments.title", this));
@@ -1654,6 +1661,36 @@ class DocenDocument extends AddinHost<Editor> {
     stamp("footer");
   }
 
+  /** Mirror the caret cell's live width/height into the Cell Size combos —
+   *  Word behavior: the boxes report the selection's column width and row
+   *  height (in the locale's unit system), not a fixed default. Runs on every
+   *  chrome re-stamp and transaction (via #setupFontSync). */
+  #syncCellSize(): void {
+    const root = this.shadowRoot;
+    const widthEl = root?.querySelector('docen-ribbon-combobox[event="cell-width"]');
+    const heightEl = root?.querySelector('docen-ribbon-combobox[event="cell-height"]');
+    const editor = this.editor;
+    if ((!widthEl && !heightEl) || !editor) return;
+    const anchor = tableAncestry(editor.state);
+    if (!anchor) return;
+    const scope = root?.querySelector("docen-workspace") ?? this;
+    const { $from } = editor.state.selection;
+    if (widthEl) {
+      const widths = ($from.node(anchor.tableAt).attrs as { columnWidths?: number[] | null })
+        .columnWidths;
+      const col = $from.index(anchor.rowAt);
+      const tw = widths != null && col < widths.length ? widths[col] : undefined;
+      widthEl.setAttribute("value", tw != null ? formatMeasureTwip(tw, scope) : "");
+    }
+    if (heightEl) {
+      const h = ($from.node(anchor.rowAt).attrs as { height?: { value?: number } | null }).height;
+      heightEl.setAttribute(
+        "value",
+        h?.value != null ? formatMeasureTwip(h.value, scope) : useCmUnits(scope) ? "自动" : "auto",
+      );
+    }
+  }
+
   /** Contextual tab ids currently appended to the ribbon (Word's Table Tools).
    *  Non-empty ⇔ the selection is inside a table; #syncContextTabs diffs this
    *  against that fact so the per-transaction pass is a cheap equality check. */
@@ -1673,7 +1710,7 @@ class DocenDocument extends AddinHost<Editor> {
     if (inside === present.size > 0) return;
     const scope = root.querySelector("docen-workspace") ?? this;
     if (inside) {
-      for (const tab of tableContextTabs()) {
+      for (const tab of tableContextTabs(scope)) {
         const built = buildContextualTab(tab, scope);
         tablist.append(built.tab);
         ribbon.append(built.panel);
