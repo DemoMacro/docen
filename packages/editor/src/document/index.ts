@@ -2244,6 +2244,19 @@ class DocenDocument extends AddinHost<Editor> {
         .resolve(Math.min(Math.max(pos, 0), editor.state.doc.content.size))
         .marks()
         .some((m) => m.type.name === "link");
+    // The click sits inside a table when any ancestor (nearest wins for the
+    // command) is a table node — Word then carries table entries on the menu.
+    const inTable =
+      pos != null &&
+      (() => {
+        const $p = editor.state.doc.resolve(
+          Math.min(Math.max(pos, 0), editor.state.doc.content.size),
+        );
+        for (let d = $p.depth; d > 0; d -= 1) {
+          if ($p.node(d).type === editor.state.schema.nodes.table) return true;
+        }
+        return false;
+      })();
     // Word: a right-click outside the selection collapses the caret there.
     if (pos != null && !inSelection) editor.commands.setTextSelection(pos);
     const items: RibbonMenuItem[] = [];
@@ -2269,6 +2282,10 @@ class DocenDocument extends AddinHost<Editor> {
       items.push({ text: "-" });
     }
     items.push({ text: t("context.select-all", this), event: "select" });
+    if (inTable) {
+      items.push({ text: "-" });
+      items.push({ text: t("context.delete-table", this), event: "delete-table" });
+    }
     menu.setAttribute("items", JSON.stringify(items));
   };
 
@@ -3185,8 +3202,26 @@ class DocenDocument extends AddinHost<Editor> {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (): void => {
-      this.#bridge?.focus();
-      this.editor?.commands.insertContent({ type: "image", attrs: { src: reader.result } });
+      const src = String(reader.result);
+      // Natural size → attrs, clamped to the content width (Word inserts at
+      // natural size but never wider than the frame, keeping the aspect).
+      // Without explicit dimensions renderDocx falls back to a flat 400×300,
+      // which distorts every non-default-shaped picture.
+      const img = new Image();
+      img.onload = (): void => {
+        this.#bridge?.focus();
+        const contentW = this.#flow?.contentWidthPx ?? 620;
+        const scale = Math.min(1, contentW / Math.max(1, img.naturalWidth));
+        this.editor?.commands.insertContent({
+          type: "image",
+          attrs: {
+            src,
+            width: Math.round(img.naturalWidth * scale),
+            height: Math.round(img.naturalHeight * scale),
+          },
+        });
+      };
+      img.src = src;
     };
     reader.readAsDataURL(file);
   };

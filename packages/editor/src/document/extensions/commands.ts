@@ -67,6 +67,7 @@ declare module "@tiptap/core" {
       "column-break": () => ReturnType;
       "section-break": () => ReturnType;
       "insert-table": () => ReturnType;
+      "delete-table": () => ReturnType;
       link: (href?: string) => ReturnType;
       style: (styleId?: string) => ReturnType;
       // Editing
@@ -115,6 +116,7 @@ export const WIRED_DISPATCH: ReadonlySet<string> = new Set([
   "column-break",
   "section-break",
   "insert-table",
+  "delete-table",
   "link",
   "style",
   "undo",
@@ -655,7 +657,10 @@ export const DocumentCommands = Extension.create({
           commands.setSectionBreak(),
       // Insert a 3×3 table (Word's default Insert > Table preset). The header
       // row is the row-level tblHeader attr (w:tblHeader) — no header-cell
-      // node type exists; every cell is a plain tableCell.
+      // node type exists; every cell is a plain tableCell. Borders stamp
+      // Word's "Table Grid" — 0.5pt single lines everywhere (w:sz is eighths
+      // of a point, 4 = 0.5pt) — so the table is visible without a TableGrid
+      // style in the document's styles.xml.
       "insert-table":
         () =>
         ({ state, dispatch }) => {
@@ -666,13 +671,46 @@ export const DocumentCommands = Extension.create({
           // "tableCell+" row), so the fill can only fail on a schema drift.
           const mkRow = (header: boolean): PMNode =>
             tableRow.createAndFill(header ? { tableHeader: true } : null, [cell, cell, cell])!;
-          const node = table.createAndFill(null, [mkRow(true), mkRow(false), mkRow(false)]);
+          const grid = { style: "single", size: 4, color: "auto" };
+          const node = table.createAndFill(
+            {
+              borders: {
+                top: grid,
+                bottom: grid,
+                left: grid,
+                right: grid,
+                insideHorizontal: grid,
+                insideVertical: grid,
+              },
+            },
+            [mkRow(true), mkRow(false), mkRow(false)],
+          );
           if (!node) return false;
           if (dispatch) {
             const pos = state.selection.from;
             const tr = state.tr.replaceSelectionWith(node);
             // Caret lands in the first cell, ready to type (Word behavior).
             tr.setSelection(TextSelection.near(tr.doc.resolve(pos + 2)));
+            dispatch(tr.scrollIntoView());
+          }
+          return true;
+        },
+      // Delete the enclosing table (Word's right-click "Delete Table"). The
+      // nearest ancestor table wins, so a table nested in a cell deletes
+      // only itself.
+      "delete-table":
+        () =>
+        ({ state, dispatch }) => {
+          const { table } = state.schema.nodes;
+          const { $from } = state.selection;
+          let depth = $from.depth;
+          while (depth > 0 && $from.node(depth).type !== table) depth -= 1;
+          if (depth === 0) return false;
+          if (dispatch) {
+            const pos = $from.before(depth);
+            const tr = state.tr.delete(pos, pos + $from.node(depth).nodeSize);
+            // The caret lands where the table stood (Word behavior).
+            tr.setSelection(TextSelection.near(tr.doc.resolve(pos)));
             dispatch(tr.scrollIntoView());
           }
           return true;
