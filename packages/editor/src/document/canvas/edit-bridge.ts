@@ -27,7 +27,8 @@ import { getMatchHighlights } from "prosemirror-search";
 
 import { listLevelStepPatch } from "../extensions/commands";
 import { KEYBOARD_SHORTCUTS } from "../extensions/keymap";
-import { CaretMap } from "./caret-map";
+import { CaretMap, type TableZone } from "./caret-map";
+import { CellSelection, cellAt, inSameTable } from "./cell-selection";
 
 /** A grapheme-boundary segmenter shared by the delete translations — surrogate
  *  pairs, combining marks, and emoji must delete as one user-perceived
@@ -390,16 +391,24 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
   };
 
   /** The selection highlight — one translucent div per crossed line, rebuilt
-   *  on every placement (selections span few lines; rebuild beats diffing). */
+   *  on every placement (selections span few lines; rebuild beats diffing).
+   *  A cell selection highlights each cell's whole grid box instead (Word's
+   *  cell highlight covers the slot, insets included). */
   const selectionLayer: HTMLDivElement[] = [];
   const placeSelection = (): void => {
     for (const el of selectionLayer) el.remove();
     selectionLayer.length = 0;
     const s = active();
-    const { from, to } = s.editor.state.selection;
-    if (from === to || !s.map?.valid) return;
+    const sel = s.editor.state.selection;
+    if (!s.map?.valid) return;
     const scale = opts.scale?.() ?? 1;
-    for (const r of s.map.selectionRects(from, to)) {
+    const rects =
+      sel instanceof CellSelection
+        ? s.map.cellSelectionRects(sel)
+        : sel.from === sel.to
+          ? []
+          : s.map.selectionRects(sel.from, sel.to);
+    for (const r of rects) {
       const frame = opts.pageHost?.(framePage(s, r.page));
       if (!frame) continue;
       const el = document.createElement("div");
@@ -633,14 +642,195 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     return s.map.posAtPoint(story ? 0 : hit.page, hit.lx, hit.ly);
   };
 
+  // Word's table grips: the black bar arrows hover just outside the table
+  // (down arrows over each column, right arrows beside each row) plus the
+  // select-all square at the table's top-left corner. One overlay div per
+  // hover state; clicking resolves the geometry back to a PM cell through
+  // the caret map's cell boxes and runs the select command.
+  type GripKind = "col" | "row" | "table" | null;
+  const grip: { kind: GripKind; zone: TableZone | null; index: number } = {
+    kind: null,
+    zone: null,
+    index: -1,
+  };
+  const GRIP_WINDOW = 12;
+  const gripEl = document.createElement("div");
+  Object.assign(gripEl.style, {
+    position: "absolute",
+    display: "none",
+    pointerEvents: "none",
+    zIndex: "7",
+    cursor: "pointer",
+  } satisfies Partial<CSSStyleDeclaration>);
+  gripEl.innerHTML =
+    '<svg width="12" height="12" viewBox="0 0 12 12"><path d="M1 6h7M5 2l4 4-4 4z" fill="#454545"/></svg>';
+  opts.host.append(gripEl);
+
+  const placeGrip = (): void => {
+    const frame = grip.zone ? (opts.pageHost?.(framePage(active(), grip.zone.page)) ?? null) : null;
+    if (!grip.kind || !grip.zone || !frame) {
+      gripEl.style.display = "none";
+      return;
+    }
+    if (frame !== gripEl.parentElement) frame.append(gripEl);
+    const scale = opts.scale?.() ?? 1;
+    const z = grip.zone;
+    let left = z.xPx;
+    let top = z.yPx;
+    let width = 12;
+    let height = 12;
+    let rotate = "";
+    if (grip.kind === "col") {
+      const colLeft = z.colEdges[grip.index]!;
+      width = (z.colEdges[grip.index + 1]! - colLeft) * scale;
+      left = (z.xPx + colLeft) * scale;
+      top = (z.yPx - GRIP_WINDOW - 2) * scale;
+      rotate = "rotate(90deg)";
+    } else if (grip.kind === "row") {
+      const rowTop = z.rowEdges[grip.index]!;
+      height = (z.rowEdges[grip.index + 1]! - rowTop) * scale;
+      left = (z.xPx - GRIP_WINDOW - 2) * scale;
+      top = (z.yPx + rowTop) * scale;
+    } else {
+      left = (z.xPx - GRIP_WINDOW - 1) * scale;
+      top = (z.yPx - GRIP_WINDOW - 1) * scale;
+    }
+    gripEl.style.left = `${left}px`;
+    gripEl.style.top = `${top}px`;
+    gripEl.style.width = `${width}px`;
+    gripEl.style.height = `${height}px`;
+    // The column arrow is the row arrow rotated to face down, centered in
+    // its strip; the corner square drops the arrow entirely.
+    gripEl.firstElementChild?.setAttribute(
+      "style",
+      rotate
+        ? `display:block;margin:auto;transform:${rotate}`
+        : grip.kind === "table"
+          ? "display:none"
+          : "display:block;margin:auto",
+    );
+    gripEl.style.display = "block";
+  };
+
+  /** The hover pass — mousemoves outside a drag resolve against the active
+   *  page's table zones (innermost zone wins on nested tables). */
+  const hoverTableGrip = (event: MouseEvent): void => {
+    grip.kind = null;
+    grip.zone = null;
+    grip.index = -1;
+    const s = active();
+    if (s.map?.valid && !story) {
+      const hit = hitPage(event.clientX, event.clientY);
+      // The bars live just outside the zone — widen the zone test to the
+      // grip window (the strips reach ~14px past the table's edges).
+      const zone = hit
+        ? s.map.tableZoneAt(story ? 0 : hit.page, hit.lx, hit.ly, GRIP_WINDOW + 2)
+        : null;
+      if (hit && zone) {
+        const lx = hit.lx - zone.xPx;
+        const ly = hit.ly - zone.yPx;
+        // The corner square wins the top-left overlap with the row strip.
+        if (lx >= -GRIP_WINDOW - 1 && lx <= 1 && ly >= -GRIP_WINDOW - 1 && ly <= 1) {
+          grip.kind = "table";
+          grip.zone = zone;
+        } else if (ly >= -GRIP_WINDOW - 2 && ly <= 4 && lx > 0 && lx < zone.widthPx) {
+          const idx = zone.colEdges.findIndex(
+            (e, i) => i < zone.colEdges.length - 1 && lx >= e && lx < zone.colEdges[i + 1]!,
+          );
+          if (idx >= 0) {
+            grip.kind = "col";
+            grip.zone = zone;
+            grip.index = idx;
+          }
+        } else if (lx >= -GRIP_WINDOW - 2 && lx <= 4 && ly > 0 && ly < zone.heightPx) {
+          const idx = zone.rowEdges.findIndex(
+            (e, i) => i < zone.rowEdges.length - 1 && ly >= e && ly < zone.rowEdges[i + 1]!,
+          );
+          if (idx >= 0) {
+            grip.kind = "row";
+            grip.zone = zone;
+            grip.index = idx;
+          }
+        }
+      }
+    }
+    placeGrip();
+  };
+
+  /** A grip click: park the caret in the strip's first cell (the commands
+   *  resolve the target from the caret's ancestry) and run Word's select. */
+  const applyGrip = (): void => {
+    const s = active();
+    const zone = grip.zone;
+    const kind = grip.kind;
+    grip.kind = null;
+    grip.zone = null;
+    placeGrip();
+    if (!kind || !zone || !s.map?.valid) return;
+    // The first cell box inside the strip — its PM cell pos (+2) is the
+    // inner position the select commands anchor from.
+    let anchorPos = -1;
+    for (const [pos, box] of s.map.cellBoxes) {
+      if (box.page !== zone.page) continue;
+      const inner =
+        kind === "col"
+          ? box.xPx >= zone.xPx + zone.colEdges[grip.index]! &&
+            box.xPx + box.widthPx <= zone.xPx + zone.colEdges[grip.index + 1]! + 0.5 &&
+            box.yPx >= zone.yPx &&
+            box.yPx + box.heightPx <= zone.yPx + zone.heightPx + 0.5
+          : kind === "row"
+            ? box.yPx >= zone.yPx + zone.rowEdges[grip.index]! &&
+              box.yPx + box.heightPx <= zone.yPx + zone.rowEdges[grip.index + 1]! + 0.5 &&
+              box.xPx >= zone.xPx &&
+              box.xPx + box.widthPx <= zone.xPx + zone.widthPx + 0.5
+            : box.xPx >= zone.xPx && box.yPx >= zone.yPx;
+      if (inner && (anchorPos < 0 || pos < anchorPos)) anchorPos = pos + 2;
+    }
+    if (anchorPos < 0) return;
+    setSel(anchorPos);
+    if (kind === "col") s.editor.commands["select-table-column"]();
+    else if (kind === "row") s.editor.commands["select-table-row"]();
+    else s.editor.commands["select-table"]();
+  };
+
   // Mouse selection: mousedown anchors, moves extend, mouseup settles. The
   // 3px threshold keeps a plain click from flashing a degenerate selection.
   let dragAnchor: number | null = null;
   let dragMoved = false;
   let dragStart: { x: number; y: number } | null = null;
 
+  /** The drag's moving edge. Word's cross-cell drag: when anchor and head
+   *  sit in different cells of one table the selection rectangle becomes a
+   *  cell selection (every crossed cell selected whole); within one cell it
+   *  stays a text selection. */
+  const setDragSelection = (anchorPos: number, headPos: number): void => {
+    const { doc } = active().editor.state;
+    const anchorCell = cellAt(doc.resolve(anchorPos));
+    const headCell = cellAt(doc.resolve(headPos));
+    if (
+      anchorCell &&
+      headCell &&
+      anchorCell.pos !== headCell.pos &&
+      inSameTable(anchorCell, headCell)
+    ) {
+      active().editor.commands.command(({ state, dispatch }) => {
+        dispatch?.(
+          state.tr.setSelection(
+            CellSelection.create(state.doc, anchorCell.pos, headCell.pos) as never,
+          ),
+        );
+        return true;
+      });
+      return;
+    }
+    setSel(headPos, anchorPos);
+  };
+
   const onMouseMove = (event: MouseEvent): void => {
-    if (dragAnchor == null) return;
+    if (dragAnchor == null) {
+      hoverTableGrip(event);
+      return;
+    }
     if (
       !dragMoved &&
       dragStart &&
@@ -650,7 +840,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     }
     dragMoved = true;
     const head = posAtClient(event.clientX, event.clientY);
-    if (head != null) setSel(head, dragAnchor);
+    if (head != null) setDragSelection(dragAnchor, head);
   };
   const onMouseUp = (): void => {
     dragAnchor = null;
@@ -840,6 +1030,18 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       }
     } else if (story) {
       leaveStory();
+    }
+    // A grip click selects Word-style (column strip / row strip / corner
+    // square) instead of dropping a caret. The hover state is refreshed for
+    // a click that lands without a prior move reaching the strip.
+    if (!story) {
+      hoverTableGrip(event);
+      if (grip.kind) {
+        applyGrip();
+        ta.focus();
+        ta.value = "";
+        return;
+      }
     }
     // Body editing (the main story). A click landing on a drawing grabs it
     // (Word's picture selection) instead of dropping a caret behind the art;
@@ -1085,6 +1287,20 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     // Viewing mode: caret moves and selection stay live (the READONLY_LIVE
     // ribbon set's keyboard counterpart), but nothing may mutate the doc.
     const editable = active().editor.isEditable;
+    // A cell selection's delete empties the selected cells (Word) — the
+    // grid itself survives. The default join path would tear cell content
+    // across the range, so this must run before it.
+    if (editable && (event.key === "Backspace" || event.key === "Delete")) {
+      const sel = active().editor.state.selection;
+      if (sel instanceof CellSelection) {
+        event.preventDefault();
+        active().editor.commands.command(({ tr, dispatch }) => {
+          if (dispatch) sel.replace(tr as never);
+          return true;
+        });
+        return;
+      }
+    }
     // Shift+Enter inserts a soft line break (w:br inside the paragraph) —
     // captured here because the textarea reports both Enter flavors to
     // beforeinput as the same insertLineBreak.

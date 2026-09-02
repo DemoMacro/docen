@@ -6,6 +6,8 @@ import type { EditorState } from "@tiptap/pm/state";
 import type { Transaction } from "@tiptap/pm/state";
 import { NodeSelection, TextSelection } from "@tiptap/pm/state";
 
+import { CellSelection } from "../canvas/cell-selection";
+
 /**
  * Document editor commands (Office.js-style "add-in commands") as native
  * Tiptap commands.
@@ -1226,21 +1228,34 @@ export const DocumentCommands = Extension.create({
         () =>
         ({ state, dispatch }) => {
           const anchor = tableAncestry(state);
-          if (!anchor) return false;
+          if (!anchor || anchor.cellAt < 0) return false;
           if (dispatch) {
-            const pos = state.selection.$from.before(anchor.tableAt);
-            dispatch(state.tr.setSelection(NodeSelection.create(state.doc, pos)).scrollIntoView());
+            // Every cell whole (Word's corner-handle pick) — a NodeSelection
+            // over the table node would make Backspace erase the table.
+            const cellPos = state.selection.$from.before(anchor.cellAt);
+            dispatch(
+              state.tr
+                .setSelection(CellSelection.tableSelection(state.doc.resolve(cellPos)) as never)
+                .scrollIntoView(),
+            );
           }
           return true;
         },
+      // Word's row pick: a cell selection over the caret's whole row — the
+      // same shape a bar-arrow click or a cross-cell drag produces, so
+      // delete-row / merge-cells downstream see one selection model.
       "select-table-row":
         () =>
         ({ state, dispatch }) => {
           const anchor = tableAncestry(state);
-          if (!anchor || anchor.rowAt < 0) return false;
+          if (!anchor || anchor.cellAt < 0) return false;
           if (dispatch) {
-            const pos = state.selection.$from.before(anchor.rowAt);
-            dispatch(state.tr.setSelection(NodeSelection.create(state.doc, pos)).scrollIntoView());
+            const cellPos = state.selection.$from.before(anchor.cellAt);
+            dispatch(
+              state.tr
+                .setSelection(CellSelection.rowSelection(state.doc.resolve(cellPos)) as never)
+                .scrollIntoView(),
+            );
           }
           return true;
         },
@@ -1263,34 +1278,18 @@ export const DocumentCommands = Extension.create({
           }
           return true;
         },
-      // The caret's column across all rows: a TextSelection from the first
-      // row's cell content to the last row's (the same index-per-row fallback
-      // as insert-column — span-aware grid math is logged for a later batch).
+      // The caret's column across all rows: a cell selection over the whole
+      // column (span-aware grid math comes free from prosemirror-tables).
       "select-table-column":
         () =>
         ({ state, dispatch }) => {
           const anchor = tableAncestry(state);
-          if (!anchor || anchor.rowAt < 0) return false;
+          if (!anchor || anchor.cellAt < 0) return false;
           if (dispatch) {
-            const { $from } = state.selection;
-            const tableNode = $from.node(anchor.tableAt);
-            const tablePos = $from.before(anchor.tableAt);
-            const cellIndex = $from.index(anchor.rowAt);
-            let first = -1;
-            let lastEnd = -1;
-            for (let r = 0; r < tableNode.childCount; r += 1) {
-              const rowNode = tableNode.child(r);
-              let rowPos = tablePos + 1;
-              for (let i = 0; i < r; i += 1) rowPos += tableNode.child(i).nodeSize;
-              const idx = Math.min(cellIndex, rowNode.childCount - 1);
-              let cellPos = rowPos + 1;
-              for (let c = 0; c < idx; c += 1) cellPos += rowNode.child(c).nodeSize;
-              if (first < 0) first = cellPos + 1;
-              lastEnd = cellPos + rowNode.child(idx).nodeSize - 1;
-            }
+            const cellPos = state.selection.$from.before(anchor.cellAt);
             dispatch(
               state.tr
-                .setSelection(TextSelection.create(state.doc, first, lastEnd))
+                .setSelection(CellSelection.colSelection(state.doc.resolve(cellPos)) as never)
                 .scrollIntoView(),
             );
           }

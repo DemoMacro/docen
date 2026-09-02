@@ -86,12 +86,52 @@ interface ParaEntry {
 const measureCanvas: HTMLCanvasElement | null =
   typeof document !== "undefined" ? document.createElement("canvas") : null;
 
+/** A cell's full grid box, page-local — Word's cell highlight covers the
+ *  whole grid slot (insets included), not the text lines inside it. */
+interface CellBoxDraft {
+  page: number;
+  xPx: number;
+  yPx: number;
+  widthPx: number;
+  heightPx: number;
+  /** The cell's first laid paragraph — the zip's bridge to a PM position. */
+  head: LaidOutParagraph | null;
+}
+
+/** A table's placed extent with its column/row boundaries (zone-local) — the
+ *  row/column selection bars and the select-all grip hit-test against it. */
+export interface TableZone {
+  page: number;
+  xPx: number;
+  yPx: number;
+  widthPx: number;
+  heightPx: number;
+  /** Column left edges + the right rim (nCols + 1, table-local = zone-local). */
+  colEdges: number[];
+  /** Row top edges + the bottom rim (nRows + 1). */
+  rowEdges: number[];
+}
+
+/** The cell content stack's first paragraph block — the position the PM zip
+ *  pairs. A cell opening with a nested table (rare) has none. */
+function firstParaOf(
+  stack: readonly { block: import("@docen/layout").LaidOutBlock }[],
+): LaidOutParagraph | null {
+  const item = stack[0];
+  if (!item) return null;
+  if (item.block.kind === "paragraph") return item.block;
+  if (item.block.kind === "group") return firstParaOf(item.block.children);
+  return null;
+}
+
 function collectLayoutParas(
   items: readonly { yPx: number; block: import("@docen/layout").LaidOutBlock }[],
   page: number,
   x: number,
   y: number,
   out: { page: number; para: LaidOutParagraph; xPx: number; yPx: number }[],
+  boxes: CellBoxDraft[] | null,
+  zones: TableZone[] | null,
 ): void {
   for (const item of items) {
     const b = item.block;
@@ -102,7 +142,7 @@ function collectLayoutParas(
         out.push({ page, para: b, xPx: bx, yPx: by });
         break;
       case "group":
-        collectLayoutParas(b.children, page, bx, by, out);
+        collectLayoutParas(b.children, page, bx, by, out, boxes, zones);
         break;
       case "table": {
         // The painter's own walk (tableGridOf), including the w:jc placement
@@ -112,9 +152,40 @@ function collectLayoutParas(
         // it. Skipping the placement shifted every click and highlight in a
         // centered/right table a full offset left of the glyphs.
         const gx = bx + (b.offsetXPx ?? 0);
-        for (const p of tableGridOf(b).cells) {
-          collectLayoutParas(p.cell.stack, page, gx + p.contentXPx, by + p.contentYPx, out);
+        const grid = tableGridOf(b);
+        for (const p of grid.cells) {
+          collectLayoutParas(
+            p.cell.stack,
+            page,
+            gx + p.contentXPx,
+            by + p.contentYPx,
+            out,
+            boxes,
+            zones,
+          );
+          // The full grid slot: spanned column/row edges (insets included —
+          // the highlight is the cell, not its content). Keyed later by the
+          // first paragraph's PM position.
+          const left = grid.colX[p.col]!;
+          const top = grid.rowY[p.row]!;
+          boxes?.push({
+            page,
+            xPx: gx + left,
+            yPx: by + top,
+            widthPx: grid.colX[p.col + p.spanW]! - left,
+            heightPx: grid.rowY[p.row + p.spanH]! - top,
+            head: firstParaOf(p.cell.stack),
+          });
         }
+        zones?.push({
+          page,
+          xPx: gx,
+          yPx: by,
+          widthPx: grid.colX[grid.colX.length - 1]!,
+          heightPx: grid.rowY[grid.rowY.length - 1]!,
+          colEdges: [...grid.colX],
+          rowEdges: [...grid.rowY],
+        });
         break;
       }
       default:
@@ -127,6 +198,13 @@ export class CaretMap {
   readonly valid: boolean;
   private readonly paras: ParaEntry[] = [];
   private readonly lines: LineEntry[] = [];
+  /** Cell grid boxes keyed by the cell's PM position — the cell selection's
+   *  whole-slot highlight, and the geometry the selection bars resolve a
+   *  clicked column/row back to a PM cell from. Cells whose first paragraph
+   *  never zipped (render-only copies, nested-table openings) stay unmapped. */
+  readonly cellBoxes = new Map<number, SelectionRect>();
+  /** Every placed table's extent + column/row edges — the selection bars. */
+  readonly tableZones: TableZone[] = [];
 
   constructor(
     pages: readonly FlowPage[],
@@ -136,9 +214,18 @@ export class CaretMap {
     // Layout side, document order. Multi-section documents give each page its
     // own content origin — the section the page belongs to.
     const laid: { page: number; para: LaidOutParagraph; xPx: number; yPx: number }[] = [];
+    const boxDrafts: CellBoxDraft[] = [];
     pages.forEach((p, page) => {
       const origin = originOf(page);
-      collectLayoutParas(p.items, page, origin.contentLeftPx, origin.contentTopPx, laid);
+      collectLayoutParas(
+        p.items,
+        page,
+        origin.contentLeftPx,
+        origin.contentTopPx,
+        laid,
+        boxDrafts,
+        this.tableZones,
+      );
     });
     // PM side: every textblock, document order (descendants).
     const tbs: { node: PmNode; pos: number }[] = [];
@@ -292,6 +379,23 @@ export class CaretMap {
       this.paras.push(paraEntry);
       this.appendLines(paraEntry, entry);
       i++;
+    }
+    // The cell grid boxes: keyed by each cell's PM position — the zip pairs
+    // the cell's first paragraph (innerPos), and the cell node sits two
+    // positions up (cell pos → first-child pos +1 → textblock innerPos +1).
+    const innerOf = new Map<LaidOutParagraph, number>();
+    for (const p of this.paras) innerOf.set(p.para, p.innerPos);
+    for (const draft of boxDrafts) {
+      const inner = draft.head ? innerOf.get(draft.head) : undefined;
+      if (inner != null) {
+        this.cellBoxes.set(inner - 2, {
+          page: draft.page,
+          xPx: draft.xPx,
+          yPx: draft.yPx,
+          widthPx: draft.widthPx,
+          heightPx: draft.heightPx,
+        });
+      }
     }
   }
 
@@ -530,6 +634,40 @@ export class CaretMap {
       }
     });
     return rects;
+  }
+
+  /** A cell selection's highlight — every selected cell as one full grid box
+   *  (Word highlights the cell, insets included, not the crossed text lines).
+   *  Cells the zip never paired stay unhighlighted. */
+  cellSelectionRects(selection: {
+    forEachCell(f: (node: PmNode, pos: number) => void): void;
+  }): SelectionRect[] {
+    const rects: SelectionRect[] = [];
+    selection.forEachCell((_node, pos) => {
+      const box = this.cellBoxes.get(pos);
+      if (box) rects.push(box);
+    });
+    return rects;
+  }
+
+  /** The innermost table zone containing a page-local point, if any — the
+   *  selection bars' hover test. `pad` widens the test past the zone's edges
+   *  (the bars hover just OUTSIDE the table). Nested tables collect after
+   *  their parent, so the last match is the innermost. */
+  tableZoneAt(page: number, x: number, y: number, pad = 0): TableZone | null {
+    let hit: TableZone | null = null;
+    for (const z of this.tableZones) {
+      if (
+        z.page === page &&
+        x >= z.xPx - pad &&
+        x <= z.xPx + z.widthPx + pad &&
+        y >= z.yPx - pad &&
+        y <= z.yPx + z.heightPx + pad
+      ) {
+        hit = z;
+      }
+    }
+    return hit;
   }
 
   /** The x-resolved position within one line (round to the nearest boundary). */

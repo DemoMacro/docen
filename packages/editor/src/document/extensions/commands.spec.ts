@@ -316,19 +316,67 @@ describe("table cell property commands", () => {
 });
 
 describe("select-table-column / convert-to-text", () => {
+  // Word's row/column picks are cell selections — every covered cell whole
+  // (the same model a bar-arrow click or a cross-cell drag produces).
   it("select-table-column selects the caret's column across all rows", () => {
     const editor = build();
     editor.commands["insert-table"]();
     caretInCell(editor, 0, 1); // middle cell of the header row
     expect(editor.commands["select-table-column"]()).toBe(true);
-    const { from, to, empty } = editor.state.selection;
-    expect(empty).toBe(false);
-    // The selection spans from the header row's cell into the last row's.
-    const $from = editor.state.doc.resolve(from);
-    const $to = editor.state.doc.resolve(to);
-    expect($from.node(2).type.name).toBe("tableRow");
-    expect($to.node(2).type.name).toBe("tableRow");
-    expect($from.before(2)).toBeLessThan($to.before(2));
+    const sel = editor.state.selection as unknown as {
+      forEachCell(f: (node: { textContent: string }) => void): void;
+    };
+    const texts: string[] = [];
+    sel.forEachCell((node) => texts.push(node.textContent));
+    expect(texts).toHaveLength(3);
+  });
+
+  it("select-table-row selects the caret's whole row", () => {
+    const editor = build();
+    editor.commands["insert-table"]();
+    caretInCell(editor, 1, 2); // last cell of the middle row
+    expect(editor.commands["select-table-row"]()).toBe(true);
+    const sel = editor.state.selection as unknown as {
+      forEachCell(f: (node: { textContent: string }) => void): void;
+    };
+    const texts: string[] = [];
+    sel.forEachCell((node) => texts.push(node.textContent));
+    expect(texts).toHaveLength(3);
+    // Outside a table both decline.
+    editor.commands.setContent({ type: "doc", content: [{ type: "paragraph" }] });
+    editor.commands.setTextSelection(2);
+    expect(editor.commands["select-table-row"]()).toBe(false);
+    expect(editor.commands["select-table-column"]()).toBe(false);
+  });
+
+  it("select-table selects every cell (not a NodeSelection — Backspace must empty cells, not erase the table)", () => {
+    const editor = build();
+    editor.commands["insert-table"]();
+    caretInCell(editor, 2, 2);
+    expect(editor.commands["select-table"]()).toBe(true);
+    const sel = editor.state.selection as unknown as {
+      forEachCell(f: (node: { textContent: string }) => void): void;
+    };
+    const texts: string[] = [];
+    sel.forEachCell((node) => texts.push(node.textContent));
+    expect(texts).toHaveLength(9);
+    // Word's cell delete: the grid survives, every cell empties.
+    editor.commands.command(({ tr, dispatch }) => {
+      if (dispatch) (sel as unknown as { replace: (tr: unknown) => void }).replace(tr);
+      return true;
+    });
+    let tables = 0;
+    let filled = 0;
+    editor.state.doc.descendants((node) => {
+      if (node.type.name === "table") {
+        tables += 1;
+        return false;
+      }
+      if (node.type.name === "tableCell" && node.textContent) filled += 1;
+      return true;
+    });
+    expect(tables).toBe(1);
+    expect(filled).toBe(0);
   });
 
   it("convert-to-text replaces the table with tab-joined paragraphs", () => {
