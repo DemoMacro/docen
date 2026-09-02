@@ -69,8 +69,14 @@ export function paintParagraph(
     }
     let index = 0;
     for (const drawing of para.drawings ?? []) {
-      if (drawing.behind) paintDrawing(tree, drawing, x, y, ctx, col, { para, index: index++ });
-      else index++;
+      const host = { para, index: index++ };
+      if (!drawing.behind) continue;
+      // Deferred like the body band: the stage sorts the queue by
+      // relativeHeight, so same-band stacking follows the z-order.
+      const paint = (): void => paintDrawing(tree, drawing, x, y, ctx, col, host);
+      if (ctx.deferredDrawings)
+        ctx.deferredDrawings.push({ z: drawing.zIndex ?? 0, layer: "behind", paint });
+      else paint();
     }
     return;
   }
@@ -373,7 +379,8 @@ export function paintParagraph(
       continue;
     }
     const paint = (): void => paintDrawing(tree, drawing, x, y, ctx, col, host);
-    if (ctx.deferredDrawings) ctx.deferredDrawings.push(paint);
+    if (ctx.deferredDrawings)
+      ctx.deferredDrawings.push({ z: drawing.zIndex ?? 0, layer: "body", paint });
     else paint();
   }
 }

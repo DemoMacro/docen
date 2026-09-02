@@ -52,8 +52,13 @@ export interface PaintContext {
   /** In-front floats park here instead of painting inside their anchor
    *  paragraph: Word stacks them above ALL text (an anchor earlier in the
    *  flow must not let later paragraphs paint over the float), so the stage
-   *  flushes this queue after the body pass paints its last paragraph. */
-  deferredDrawings?: Array<() => void>;
+   *  flushes this queue after the body pass paints its last paragraph.
+   *  Behind-doc floats defer too: the stage sorts each band by
+   *  w:relativeHeight before executing, so same-band stacking follows the
+   *  document's z-order instead of document order. The entry carries its
+   *  band — the flush restores ctx.layer per band so member painting keeps
+   *  the layer semantics it had with direct painting. */
+  deferredDrawings?: Array<{ z: number; layer: "behind" | "body"; paint: () => void }>;
   /** Formatting marks visibility (Word's ¶ toggle): the painter draws the
    *  bent arrow at line/paragraph ends, an arrow on tabs, a dot on spaces,
    *  and the break rows (page/section) between blocks. */

@@ -213,6 +213,7 @@ export const ribbonEn: AdditionalLanguage = {
     "ribbon.cmd.group": "Group",
     "ribbon.cmd.rotate": "Rotate",
     "ribbon.cmd.align": "Align",
+    "ribbon.cmd.align-objects": "Align",
     // --- Commands: References ---
     "ribbon.cmd.toc": "Table of Contents",
     "ribbon.cmd.add-text": "Add Text",
@@ -492,6 +493,13 @@ export const ribbonEn: AdditionalLanguage = {
     "ribbon.opt.flip-vertical": "Flip Vertical",
     "ribbon.opt.flip-horizontal": "Flip Horizontal",
     "ribbon.opt.align-center": "Align Center",
+    // --- Options: wrap text (floating drawings) ---
+    "ribbon.opt.wrap-front": "In Front of Text",
+    "ribbon.opt.wrap-behind": "Behind Text",
+    "ribbon.opt.wrap-square": "Square",
+    "ribbon.opt.wrap-tight": "Tight",
+    "ribbon.opt.wrap-through": "Through",
+    "ribbon.opt.wrap-top-bottom": "Top and Bottom",
     // --- Options: references / mailings ---
     "ribbon.opt.endnote": "Insert Endnote",
     "ribbon.opt.next-footnote": "Next Footnote",
@@ -764,6 +772,7 @@ export const ribbonZhCN: AdditionalLanguage = {
     "ribbon.cmd.group": "组合",
     "ribbon.cmd.rotate": "旋转",
     "ribbon.cmd.align": "对齐",
+    "ribbon.cmd.align-objects": "对齐",
     // --- Commands: References ---
     "ribbon.cmd.toc": "目录",
     "ribbon.cmd.add-text": "添加文字",
@@ -1043,6 +1052,13 @@ export const ribbonZhCN: AdditionalLanguage = {
     "ribbon.opt.flip-vertical": "垂直翻转",
     "ribbon.opt.flip-horizontal": "水平翻转",
     "ribbon.opt.align-center": "居中对齐",
+    // --- 选项：浮动对象文字环绕 ---
+    "ribbon.opt.wrap-front": "浮于文字上方",
+    "ribbon.opt.wrap-behind": "衬于文字下方",
+    "ribbon.opt.wrap-square": "四周型",
+    "ribbon.opt.wrap-tight": "紧密型",
+    "ribbon.opt.wrap-through": "穿越型",
+    "ribbon.opt.wrap-top-bottom": "上下型",
     // --- Options: references / mailings ---
     "ribbon.opt.endnote": "插入尾注",
     "ribbon.opt.next-footnote": "下一脚注",

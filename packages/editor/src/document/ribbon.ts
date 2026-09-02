@@ -319,12 +319,31 @@ const rotateItems = (): string =>
     { text: opt("flip-horizontal"), value: "flip-h" },
   ]);
 
-const alignItems = (): string =>
+// The Arrange group's floating-drawing menus: Wrap Text (Word's six) and the
+// Position gallery's nine-cell grid (option texts reuse the 9-grid keys).
+const wrapItems = (): string =>
   JSON.stringify([
-    { text: cmd("align-left"), value: "left", event: "align-left" },
-    { text: opt("align-center"), value: "center", event: "align-center" },
-    { text: cmd("align-right"), value: "right", event: "align-right" },
-    { text: cmd("justify"), value: "justify", event: "justify" },
+    { text: opt("wrap-front"), value: "front" },
+    { text: opt("wrap-behind"), value: "behind" },
+    { text: opt("wrap-square"), value: "square" },
+    { text: opt("wrap-tight"), value: "tight" },
+    { text: opt("wrap-through"), value: "through" },
+    { text: opt("wrap-top-bottom"), value: "top-bottom" },
+  ]);
+
+const positionItems = (): string =>
+  JSON.stringify(
+    ["tl", "tc", "tr", "ml", "mc", "mr", "bl", "bc", "br"].map((cell) => ({
+      text: opt(`cell-align-${cell}`),
+      value: cell,
+    })),
+  );
+
+const alignObjectsItems = (): string =>
+  JSON.stringify([
+    { text: cmd("align-left"), value: "left" },
+    { text: cmd("align-center"), value: "center" },
+    { text: cmd("align-right"), value: "right" },
   ]);
 
 const footnoteItems = (): string =>
@@ -944,10 +963,13 @@ const layoutTab = (): RibbonTab =>
     ),
     group("arrange", [
       col([
-        row([btn("orientation", "position"), btn("wrap", "wrap")]),
+        row([
+          split("orientation", "position", parsedItems(positionItems())),
+          split("wrap", "wrap", parsedItems(wrapItems())),
+        ]),
         row([btn("orientation", "bring-forward"), btn("orientation", "send-backward")]),
       ]),
-      split("align-left", "align-left", parsedItems(alignItems()), { size: "large" }),
+      split("align-left", "align-objects", parsedItems(alignObjectsItems()), { size: "large" }),
       split("group-objects", "group", parsedItems(groupItems()), { size: "large" }),
       split("rotate", "rotate", parsedItems(rotateItems()), { size: "large" }),
     ]),

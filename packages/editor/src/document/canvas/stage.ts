@@ -776,12 +776,21 @@ export class CanvasStage {
     this.hitBoxes.set(index, hitBoxes);
   }
 
-  /** Paint the in-front floats the body pass parked in the queue — after the
-   *  pass's last paragraph, so no text paragraph can paint over them (Word
-   *  stacks in-front floats above ALL body text). */
+  /** Paint the floats both passes parked in the queue — after the pass's
+   *  last paragraph, so no text paragraph can paint over them (Word stacks
+   *  in-front floats above ALL body text). Each band sorts by
+   *  w:relativeHeight first: same-band stacking follows the z-order, ties
+   *  keep document order (a stable sort). */
   #flushDrawings(ctx: PaintContext): void {
-    for (const paint of ctx.deferredDrawings ?? []) paint();
-    if (ctx.deferredDrawings) ctx.deferredDrawings.length = 0;
+    const queue = ctx.deferredDrawings;
+    if (!queue) return;
+    for (const layer of ["behind", "body"] as const) {
+      const band = queue.filter((entry) => entry.layer === layer).sort((a, b) => a.z - b.z);
+      if (band.length === 0) continue;
+      ctx.layer = layer;
+      for (const entry of band) entry.paint();
+    }
+    queue.length = 0;
   }
 
   /** The page's drawing boxes as the body pass painted them — the click

@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { Document, Paragraph, Table, TableCell, TableRow } from "@docen/docx";
+import { Document, Image, Paragraph, Table, TableCell, TableRow, WpsShape } from "@docen/docx";
 import { Editor, Node as TextNode, type Editor as EditorType } from "@docen/docx/core";
 import { describe, expect, it } from "vitest";
 
@@ -12,7 +12,17 @@ const Text = TextNode.create({ name: "text", group: "inline" });
 const build = (): EditorType =>
   new Editor({
     element: null,
-    extensions: [Document, Paragraph, Text, Table, TableRow, TableCell, DocumentCommands],
+    extensions: [
+      Document,
+      Paragraph,
+      Text,
+      Table,
+      TableRow,
+      TableCell,
+      Image,
+      WpsShape,
+      DocumentCommands,
+    ],
     content: { type: "doc", content: [{ type: "paragraph" }] },
   });
 
@@ -473,5 +483,177 @@ describe("cell size / autofit commands", () => {
     // The combobox's "auto" entry sends the clear value.
     expect(editor.commands["cell-height"]("0")).toBe(true);
     expect(tablesOf(editor)[0]!.child(0).attrs.height).toBeNull();
+  });
+});
+
+describe("arrange — floating drawings", () => {
+  const FLOATING = {
+    behindDocument: false,
+    zIndex: 2,
+    horizontalPosition: { relative: "column", offset: 0 },
+    verticalPosition: { relative: "paragraph", offset: 0 },
+  };
+
+  /** A doc whose paragraphs carry one floating image and one wps shape. */
+  const floatDoc = (editor: EditorType): void => {
+    editor.commands.setContent({
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [
+            {
+              type: "image",
+              attrs: {
+                src: "data:image/png;base64,AAAA",
+                width: 100,
+                height: 80,
+                floating: { ...FLOATING },
+              },
+            },
+            { type: "text", text: "甲" },
+          ],
+        },
+        {
+          type: "paragraph",
+          content: [
+            {
+              type: "wpsShape",
+              attrs: {
+                wpsShape: {
+                  transformation: { width: 100, height: 80 },
+                  floating: { ...FLOATING, zIndex: 1 },
+                },
+              },
+              // The editable textbox body — the node is content:"block+".
+              content: [{ type: "paragraph" }],
+            },
+          ],
+        },
+      ],
+    } as never);
+  };
+
+  /** Node-select the first node of `name` (the doc carries one). */
+  const selectFirstNode = (editor: EditorType, name: string): void => {
+    let pos = -1;
+    editor.state.doc.descendants((node, nodePos) => {
+      if (node.type.name === name) {
+        pos = nodePos;
+        return false;
+      }
+      return true;
+    });
+    editor.commands.setNodeSelection(pos);
+  };
+
+  it("bring-forward / send-backward step the z-order, flooring at 0", () => {
+    const editor = build();
+    floatDoc(editor);
+    selectFirstNode(editor, "image");
+    expect(editor.commands["bring-forward"]()).toBe(true);
+    expect(firstNodeOf(editor, "image").attrs.floating).toMatchObject({ zIndex: 3 });
+    expect(editor.commands["send-backward"]()).toBe(true);
+    expect(firstNodeOf(editor, "image").attrs.floating).toMatchObject({ zIndex: 2 });
+
+    selectFirstNode(editor, "wpsShape");
+    expect(editor.commands["send-backward"]()).toBe(true);
+    expect(editor.commands["send-backward"]()).toBe(true);
+    expect(
+      (firstNodeOf(editor, "wpsShape").attrs.wpsShape as Record<string, unknown>).floating,
+    ).toMatchObject({ zIndex: 0 });
+    expect(editor.commands["send-backward"]()).toBe(true);
+    expect(
+      (firstNodeOf(editor, "wpsShape").attrs.wpsShape as Record<string, unknown>).floating,
+    ).toMatchObject({ zIndex: 0 });
+  });
+
+  it("wrap stamps the wrap type; front/behind clear it and set behindDoc", () => {
+    const editor = build();
+    floatDoc(editor);
+    selectFirstNode(editor, "image");
+    expect(editor.commands.wrap("square")).toBe(true);
+    expect(firstNodeOf(editor, "image").attrs.floating).toMatchObject({ wrap: { type: "square" } });
+    expect(editor.commands.wrap("top-bottom")).toBe(true);
+    expect(firstNodeOf(editor, "image").attrs.floating).toMatchObject({
+      wrap: { type: "topAndBottom" },
+    });
+    // In Front of Text drops the wrap (wrapNone) and clears behindDoc.
+    expect(editor.commands.wrap("front")).toBe(true);
+    const front = firstNodeOf(editor, "image").attrs.floating as Record<string, unknown>;
+    expect("wrap" in front).toBe(false);
+    expect(front.behindDocument).toBe(false);
+    expect(editor.commands.wrap("behind")).toBe(true);
+    expect(firstNodeOf(editor, "image").attrs.floating).toMatchObject({ behindDocument: true });
+    expect(editor.commands.wrap("bogus")).toBe(false);
+  });
+
+  it("rotate steps image rotation and toggles the tri-state flips", () => {
+    const editor = build();
+    floatDoc(editor);
+    selectFirstNode(editor, "image");
+    expect(editor.commands.rotate("right")).toBe(true);
+    expect(firstNodeOf(editor, "image").attrs.rotation).toBe(90);
+    expect(editor.commands.rotate("right")).toBe(true);
+    expect(firstNodeOf(editor, "image").attrs.rotation).toBe(180);
+    expect(editor.commands.rotate("left")).toBe(true);
+    expect(firstNodeOf(editor, "image").attrs.rotation).toBe(90);
+    // Tri-state: omitted → true (explicit emit) → false → true.
+    expect(editor.commands.rotate("flip-h")).toBe(true);
+    expect(firstNodeOf(editor, "image").attrs.flipH).toBe(true);
+    expect(editor.commands.rotate("flip-h")).toBe(true);
+    expect(firstNodeOf(editor, "image").attrs.flipH).toBe(false);
+    expect(editor.commands.rotate("flip-v")).toBe(true);
+    expect(firstNodeOf(editor, "image").attrs.flipV).toBe(true);
+    expect(editor.commands.rotate("bogus")).toBe(false);
+  });
+
+  it("rotate on a shape writes the nested transformation", () => {
+    const editor = build();
+    floatDoc(editor);
+    selectFirstNode(editor, "wpsShape");
+    expect(editor.commands.rotate("right")).toBe(true);
+    const shape = firstNodeOf(editor, "wpsShape").attrs.wpsShape as Record<string, unknown>;
+    expect(shape.transformation).toMatchObject({ rotation: 90 });
+    expect(editor.commands.rotate("flip-h")).toBe(true);
+    expect(
+      (firstNodeOf(editor, "wpsShape").attrs.wpsShape as Record<string, unknown>).transformation,
+    ).toMatchObject({ flipHorizontal: true });
+  });
+
+  it("position stamps margin-relative aligns on both axes", () => {
+    const editor = build();
+    floatDoc(editor);
+    selectFirstNode(editor, "image");
+    expect(editor.commands.position("tl")).toBe(true);
+    expect(firstNodeOf(editor, "image").attrs.floating).toMatchObject({
+      horizontalPosition: { relative: "margin", align: "left" },
+      verticalPosition: { relative: "margin", align: "top" },
+      zIndex: 2,
+    });
+    expect(editor.commands.position("bogus")).toBe(false);
+  });
+
+  it("align-objects aligns horizontally within the margins", () => {
+    const editor = build();
+    floatDoc(editor);
+    selectFirstNode(editor, "wpsShape");
+    expect(editor.commands["align-objects"]("center")).toBe(true);
+    expect(
+      (firstNodeOf(editor, "wpsShape").attrs.wpsShape as Record<string, unknown>).floating,
+    ).toMatchObject({ horizontalPosition: { relative: "margin", align: "center" } });
+    expect(editor.commands["align-objects"]("justify")).toBe(false);
+  });
+
+  it("declines on a bare caret, a text range, or an inline image", () => {
+    const editor = build();
+    floatDoc(editor);
+    editor.commands.setTextSelection(2);
+    expect(editor.commands["bring-forward"]()).toBe(false);
+    expect(editor.commands["send-backward"]()).toBe(false);
+    expect(editor.commands.wrap("square")).toBe(false);
+    expect(editor.commands.rotate("right")).toBe(false);
+    expect(editor.commands.position("mc")).toBe(false);
+    expect(editor.commands["align-objects"]("left")).toBe(false);
   });
 });

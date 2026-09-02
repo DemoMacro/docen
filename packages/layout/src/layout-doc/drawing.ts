@@ -166,6 +166,9 @@ export interface LayoutDrawing {
   contour?: { x: number; y: number }[];
   /** w:behindDoc — painted under the text layer (text strokes stay visible). */
   behind?: boolean;
+  /** w:relativeHeight — stacking order within the behind/in-front band
+   *  (renderer-only; the layout never reads it). Absent = document order. */
+  zIndex?: number;
   /** w:anchor distL/distT/distR/distB in px — how far wrapping text keeps
    *  its distance from the box. square/tight zones widen by left+right,
    *  topAndBottom bands by top+bottom; wrapNone never reads them. */

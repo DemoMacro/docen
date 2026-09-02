@@ -450,7 +450,7 @@ function projectDrawing(group: GroupOptions, ctx: ProjectContext): LayoutDrawing
   const extW = measureEmu(group.transformation.width);
   const extH = measureEmu(group.transformation.height);
   if (extW == null || extH == null || extW <= 0 || extH <= 0) return undefined;
-  const { anchor, wrap, wrapSide, contour, behind, distances } = drawingAnchorOf(
+  const { anchor, wrap, wrapSide, contour, behind, zIndex, distances } = drawingAnchorOf(
     group.floating,
     emuToPx(extW),
     emuToPx(extH),
@@ -493,6 +493,7 @@ function projectDrawing(group: GroupOptions, ctx: ProjectContext): LayoutDrawing
     wrapSide,
     ...(contour ? { contour } : {}),
     behind,
+    ...(zIndex != null ? { zIndex } : {}),
     distances,
   };
 }
@@ -515,6 +516,7 @@ function drawingAnchorOf(
   wrapSide: LayoutDrawing["wrapSide"];
   contour: LayoutDrawing["contour"];
   behind: boolean | undefined;
+  zIndex: number | undefined;
   distances: LayoutDrawing["distances"];
 } {
   const f = isRecord(floating) ? floating : {};
@@ -592,6 +594,7 @@ function drawingAnchorOf(
     // (square/tight/through/topAndBottom) always paints opaque in front of
     // the text, regardless of the attribute.
     behind: wrap == null ? f.behindDocument === true || undefined : undefined,
+    zIndex: typeof f.zIndex === "number" ? f.zIndex : undefined,
     distances,
   };
 }
@@ -605,7 +608,7 @@ function projectFloatingPicture(pic: Rec): LayoutDrawing | undefined {
   if (w == null || h == null || w <= 0 || h <= 0) return undefined;
   const width = emuToPx(w);
   const height = emuToPx(h);
-  const { anchor, wrap, wrapSide, contour, behind, distances } = drawingAnchorOf(
+  const { anchor, wrap, wrapSide, contour, behind, zIndex, distances } = drawingAnchorOf(
     pic.floating,
     width,
     height,
@@ -618,6 +621,7 @@ function projectFloatingPicture(pic: Rec): LayoutDrawing | undefined {
     wrapSide,
     ...(contour ? { contour } : {}),
     behind,
+    ...(zIndex != null ? { zIndex } : {}),
     distances,
     // A srcRect-cropped metafile replay reaches past the extent — flag it so
     // the painter clips (GDI playback semantics); the flat member never does.
@@ -649,7 +653,7 @@ function projectWpsShapeRun(wps: Rec, ctx: ProjectContext): LayoutDrawing | unde
   if (w == null || h == null || w <= 0 || h <= 0) return undefined;
   const member = wpsMemberOf(wps, 0, 0, emuToPx(w), emuToPx(h), ctx);
   if (!member) return undefined;
-  const { anchor, wrap, wrapSide, contour, behind, distances } = drawingAnchorOf(
+  const { anchor, wrap, wrapSide, contour, behind, zIndex, distances } = drawingAnchorOf(
     wps.floating,
     emuToPx(w),
     emuToPx(h),
@@ -663,6 +667,7 @@ function projectWpsShapeRun(wps: Rec, ctx: ProjectContext): LayoutDrawing | unde
     wrapSide,
     ...(contour ? { contour } : {}),
     behind,
+    ...(zIndex != null ? { zIndex } : {}),
     distances,
   };
 }

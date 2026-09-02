@@ -106,6 +106,13 @@ declare module "@tiptap/core" {
       // Picture — names align to Office.js InlinePicture (delete / left / top).
       "delete-picture": () => ReturnType;
       "position-picture": (value?: string) => ReturnType;
+      // Arrange — floating drawings (z-order, wrap, rotation, position).
+      "bring-forward": () => ReturnType;
+      "send-backward": () => ReturnType;
+      wrap: (value?: string) => ReturnType;
+      rotate: (value?: string) => ReturnType;
+      position: (value?: string) => ReturnType;
+      "align-objects": (value?: string) => ReturnType;
     };
   }
 }
@@ -182,6 +189,12 @@ export const WIRED_DISPATCH: ReadonlySet<string> = new Set([
   "multilevel-list",
   "delete-picture",
   "position-picture",
+  "bring-forward",
+  "send-backward",
+  "wrap",
+  "rotate",
+  "position",
+  "align-objects",
   // Review tab revision tracking (the docenTrackChanges extension).
   "track-changes",
   "accept-change",
@@ -445,9 +458,96 @@ function ancestryAt($pos: ResolvedPos): {
   return tableAt < 0 ? null : { tableAt, rowAt, cellAt };
 }
 
+// ── Floating drawing helpers (the Arrange commands' shared target) ───────────
+
+/** The selected floating drawing — a NodeSelection on a floating image (its
+ *  `floating` attr set) or a wps shape (floating inside its `wpsShape`
+ *  payload); the stage's hit boxes produce exactly these. Null on any other
+ *  selection, so Arrange greys out through editor.can(). */
+function floatingDrawingAt(
+  state: EditorState,
+): { pos: number; attrs: Record<string, unknown>; kind: "image" | "shape" } | null {
+  const sel = state.selection;
+  if (!(sel instanceof NodeSelection)) return null;
+  const attrs = sel.node.attrs as Record<string, unknown>;
+  if (sel.node.type.name === "image") {
+    return attrs.floating ? { pos: sel.from, attrs, kind: "image" } : null;
+  }
+  if (sel.node.type.name === "wpsShape") {
+    const shape = attrs.wpsShape as Record<string, unknown> | null;
+    return shape?.floating ? { pos: sel.from, attrs, kind: "shape" } : null;
+  }
+  return null;
+}
+
+/** The drawing's Floating object (image: a flat attr; shape: inside the
+ *  wpsShape payload). */
+function floatingOf(
+  target: NonNullable<ReturnType<typeof floatingDrawingAt>>,
+): Record<string, unknown> {
+  return (
+    target.kind === "image"
+      ? target.attrs.floating
+      : (target.attrs.wpsShape as Record<string, unknown>).floating
+  ) as Record<string, unknown>;
+}
+
+/** Write a Floating back onto the drawing, shallow-copying the carrier the
+ *  way PM immutability requires (image: flat; shape: the wpsShape payload). */
+function withFloating(
+  target: NonNullable<ReturnType<typeof floatingDrawingAt>>,
+  floating: Record<string, unknown>,
+): Record<string, unknown> {
+  return target.kind === "image"
+    ? { ...target.attrs, floating }
+    : {
+        ...target.attrs,
+        wpsShape: { ...(target.attrs.wpsShape as Record<string, unknown>), floating },
+      };
+}
+
+/** Stamp the next Floating onto the drawing (one markup write, no scroll —
+ *  Arrange edits never move the caret). The markup write replaces the node,
+ *  which collapses a NodeSelection to a caret — restoring it keeps the
+ *  drawing selected so the command can repeat (Word's Bring Forward chains). */
+function stampFloating(
+  tr: Transaction,
+  target: NonNullable<ReturnType<typeof floatingDrawingAt>>,
+  floating: Record<string, unknown>,
+): boolean {
+  return stampAttrs(tr, target, withFloating(target, floating));
+}
+
+/** {@link stampFloating} for a full attrs object (rotate rewrites the image's
+ *  top level or the shape's payload, not just the Floating). */
+function stampAttrs(
+  tr: Transaction,
+  target: NonNullable<ReturnType<typeof floatingDrawingAt>>,
+  attrs: Record<string, unknown>,
+): boolean {
+  tr.setNodeMarkup(target.pos, undefined, attrs);
+  tr.setSelection(NodeSelection.create(tr.doc, target.pos));
+  return true;
+}
+
 /** The 9-grid cell alignment: vertical half → the cell's verticalAlign, the
  *  horizontal half → every paragraph's alignment in the cell. */
 const CELL_ALIGN: Record<string, { v: string; h: string }> = {
+  tl: { v: "top", h: "left" },
+  tc: { v: "top", h: "center" },
+  tr: { v: "top", h: "right" },
+  ml: { v: "center", h: "left" },
+  mc: { v: "center", h: "center" },
+  mr: { v: "center", h: "right" },
+  bl: { v: "bottom", h: "left" },
+  bc: { v: "bottom", h: "center" },
+  br: { v: "bottom", h: "right" },
+};
+
+/** The Position gallery's nine cells → margin-relative align tokens (same
+ *  key space as {@link CELL_ALIGN}; the ST_PositionAlign vocabulary both
+ *  axes resolve through). */
+const POSITION_ALIGN: Record<string, { v: string; h: string }> = {
   tl: { v: "top", h: "left" },
   tc: { v: "top", h: "center" },
   tr: { v: "top", h: "right" },
@@ -1848,6 +1948,130 @@ export const DocumentCommands = Extension.create({
           // looking at the image and a scroll jump would feel jumpy.
           tr.setMeta("scrollIntoView", false);
           return true;
+        },
+      // ── Arrange — floating drawings (the Layout tab's Arrange group) ──
+      // Every command targets the selected floating drawing (a floating
+      // image or a wps shape); on any other selection they decline, so the
+      // ribbon greys them out through editor.can().
+
+      // Word's Bring Forward / Send Backward: step w:relativeHeight within
+      // the drawing's behind/in-front band; the painter stacks same-band
+      // floats by it (ties keep document order).
+      "bring-forward":
+        () =>
+        ({ state, tr }) => {
+          const target = floatingDrawingAt(state);
+          if (!target) return false;
+          const floating = floatingOf(target);
+          return stampFloating(tr, target, {
+            ...floating,
+            zIndex: (typeof floating.zIndex === "number" ? floating.zIndex : 0) + 1,
+          });
+        },
+      "send-backward":
+        () =>
+        ({ state, tr }) => {
+          const target = floatingDrawingAt(state);
+          if (!target) return false;
+          const floating = floatingOf(target);
+          return stampFloating(tr, target, {
+            ...floating,
+            zIndex: Math.max(0, (typeof floating.zIndex === "number" ? floating.zIndex : 0) - 1),
+          });
+        },
+      // Word's Wrap Text menu: In Front of Text / Behind Text clear the wrap
+      // (wrapNone) and set behindDoc; the four wrap styles stamp the type
+      // and drop behindDoc (Word 2013+ honors it for wrapNone anchors only).
+      wrap:
+        (value) =>
+        ({ state, tr }) => {
+          const target = floatingDrawingAt(state);
+          if (!target) return false;
+          const floating = { ...floatingOf(target) };
+          if (value === "front" || value === "behind") {
+            delete floating.wrap;
+            floating.behindDocument = value === "behind";
+          } else if (value === "square" || value === "tight" || value === "through") {
+            floating.wrap = { type: value };
+            floating.behindDocument = false;
+          } else if (value === "top-bottom") {
+            floating.wrap = { type: "topAndBottom" };
+            floating.behindDocument = false;
+          } else {
+            return false;
+          }
+          return stampFloating(tr, target, floating);
+        },
+      // Word's Rotate menu: right/left step the rotation 90° (OOXML rot is
+      // clockwise-positive); the flips toggle the mirror flags. The attrs
+      // live in two places — an image carries rotation/flipH/flipV on its
+      // top level (a tri-state: null omits, true/false emit explicit bytes),
+      // a shape mirrors them inside its transformation.
+      rotate:
+        (value) =>
+        ({ state, tr }) => {
+          const target = floatingDrawingAt(state);
+          if (!target) return false;
+          const step = value === "right" ? 90 : value === "left" ? -90 : 0;
+          if (target.kind === "image") {
+            const attrs = { ...target.attrs };
+            if (step !== 0) {
+              const rotation = typeof attrs.rotation === "number" ? attrs.rotation : 0;
+              attrs.rotation = (((rotation + step) % 360) + 360) % 360;
+            } else if (value === "flip-h") {
+              attrs.flipH = attrs.flipH !== true;
+            } else if (value === "flip-v") {
+              attrs.flipV = attrs.flipV !== true;
+            } else {
+              return false;
+            }
+            return stampAttrs(tr, target, attrs);
+          }
+          const shape = { ...(target.attrs.wpsShape as Record<string, unknown>) };
+          const t = { ...((shape.transformation ?? {}) as Record<string, unknown>) };
+          if (step !== 0) {
+            const rotation = typeof t.rotation === "number" ? t.rotation : 0;
+            t.rotation = (((rotation + step) % 360) + 360) % 360;
+          } else if (value === "flip-h") {
+            t.flipHorizontal = t.flipHorizontal !== true;
+          } else if (value === "flip-v") {
+            t.flipVertical = t.flipVertical !== true;
+          } else {
+            return false;
+          }
+          shape.transformation = t;
+          return stampAttrs(tr, target, { ...target.attrs, wpsShape: shape });
+        },
+      // Word's Position gallery: the nine-cell grid stamps margin-relative
+      // align tokens on both axes. A fresh position object per stamp — align
+      // and offset are mutually exclusive, so a stale offset must not
+      // survive next to the new align.
+      position:
+        (value) =>
+        ({ state, tr }) => {
+          const spec = POSITION_ALIGN[value ?? ""];
+          if (!spec) return false;
+          const target = floatingDrawingAt(state);
+          if (!target) return false;
+          return stampFloating(tr, target, {
+            ...floatingOf(target),
+            horizontalPosition: { relative: "margin", align: spec.h },
+            verticalPosition: { relative: "margin", align: spec.v },
+          });
+        },
+      // The Align menu: horizontal alignment within the margins (the single
+      // axis of the position gallery).
+      "align-objects":
+        (value) =>
+        ({ state, tr }) => {
+          const align = value === "left" || value === "center" || value === "right" ? value : null;
+          if (!align) return false;
+          const target = floatingDrawingAt(state);
+          if (!target) return false;
+          return stampFloating(tr, target, {
+            ...floatingOf(target),
+            horizontalPosition: { relative: "margin", align },
+          });
         },
     };
   },
