@@ -1,4 +1,5 @@
 import {
+  paintColumnSeparators,
   paintFurnitureStack,
   paintLineNumbers,
   paintScene,
@@ -8,6 +9,7 @@ import {
   type PaintContext,
 } from "@docen/core";
 import type {
+  ProjectedColumns,
   ProjectedFlowBox,
   ProjectedLineNumbers,
   ProjectedPageBackground,
@@ -81,6 +83,8 @@ export interface CanvasStageSection {
   pageBorders?: ProjectedPageBorders;
   /** The section's line numbering (w:lnNumType), absent when none. */
   lineNumbers?: ProjectedLineNumbers;
+  /** The section's columns (w:cols), absent for a single-column section. */
+  columns?: ProjectedColumns;
   /** Headers/footers for this section's pages (absent = none). */
   furniture?: ProjectedPageFurniture;
   /** The slots of `furniture` laid out once (layFurnitureSections) — the
@@ -669,7 +673,7 @@ export class CanvasStage {
     // stay in unzoomed page px and this scale maps them onto the bitmap.
     tree.scale = this.factor;
     // This page paints with its OWN section's box + furniture.
-    const { flow, furniture, lineNumbers } = this.sectionAt(index);
+    const { flow, furniture, lineNumbers, columns } = this.sectionAt(index);
     const marks = this.lineNumberMarks.get(index);
     const ctx: PaintContext = {
       metrics: this.ctx.metrics,
@@ -687,6 +691,7 @@ export class CanvasStage {
       // In-front floats collect here through the body pass and paint after
       // its last paragraph (Word stacks them above ALL text).
       deferredDrawings: [],
+      columns,
       ...(lineNumbers && marks?.length ? { lineNumbers: { config: lineNumbers, marks } } : {}),
     };
     const slotIndex = this.slotOf(index);
@@ -705,6 +710,7 @@ export class CanvasStage {
       layers.body.clear();
       paintScene(layers.body, items, ctx);
       paintLineNumbers(layers.body, ctx);
+      paintColumnSeparators(layers.body, ctx);
       this.#flushDrawings(ctx);
       app.forceRender();
       this.hitBoxes.set(index, hitBoxes);
@@ -765,12 +771,14 @@ export class CanvasStage {
       );
       paintScene(pageLayers.body, items, ctx);
       paintLineNumbers(pageLayers.body, ctx);
+      paintColumnSeparators(pageLayers.body, ctx);
       this.#flushDrawings(ctx);
       this.slots[index]!.layers = pageLayers;
     } else {
       ctx.hitBoxes = hitBoxes;
       paintScene(tree, items, ctx);
       paintLineNumbers(tree, ctx);
+      paintColumnSeparators(tree, ctx);
       // Under the story-edit veil like the rest of the body — the story being
       // edited paints above (opaque) on top.
       this.#flushDrawings(ctx);

@@ -5,6 +5,7 @@
 import {
   twipToPx,
   type LayoutBlock,
+  type ProjectedColumns,
   type ProjectedFlowBox,
   type ProjectedLineNumbers,
   type ProjectedPageBackground,
@@ -67,20 +68,20 @@ function projectToc(toc: unknown, ctx: ProjectContext): LayoutBlock | LayoutBloc
     : { kind: "placeholder", heightPx: PLACEHOLDER_PX, label: "toc" };
 }
 
-/** A run-level page break (w:br type=page) splits its paragraph: the flow
- *  engine consumes pageBreak blocks, so the paragraph is re-emitted around
- *  each break with its properties intact (Word keeps the paragraph running
- *  onto the next page). An empty chunk flushes to nothing: the paragraph
- *  mark rides on the break's own line (Word shows "———page break———¶" as
- *  one row), so a trailing break must not leave an empty paragraph behind
- *  on the next page. */
+/** A run-level page break (w:br type=page) or column break (w:br
+ *  type=column) splits its paragraph: the flow engine consumes pageBreak /
+ *  columnBreak blocks, so the paragraph is re-emitted around each break with
+ *  its properties intact (Word keeps the paragraph running onto the next
+ *  page/column). An empty chunk flushes to nothing: the paragraph mark rides
+ *  on the break's own line (Word shows "———page break———¶" as one row), so a
+ *  trailing break must not leave an empty paragraph behind on the next page. */
 export function projectParagraphBlocks(
   p: BodyParagraph,
   ctx: ProjectContext,
 ): LayoutBlock | LayoutBlock[] {
   const runs: readonly unknown[] =
     typeof p === "string" ? [p] : (p?.children ?? (p?.text != null ? [p.text] : []));
-  if (!runs.some((run) => isRecord(run) && run.pageBreak === true)) {
+  if (!runs.some((run) => isRecord(run) && (run.pageBreak === true || run.columnBreak === true))) {
     return projectParagraph(p, ctx);
   }
   const out: LayoutBlock[] = [];
@@ -96,6 +97,9 @@ export function projectParagraphBlocks(
     if (isRecord(run) && run.pageBreak === true) {
       flush();
       out.push({ kind: "pageBreak" });
+    } else if (isRecord(run) && run.columnBreak === true) {
+      flush();
+      out.push({ kind: "columnBreak" });
     } else {
       chunk.push(run);
     }
@@ -313,5 +317,27 @@ export function projectLineNumbers(properties: unknown): ProjectedLineNumbers | 
     start: num(raw.start) ?? 1,
     restart: raw.restart === "continuous" || raw.restart === "newSection" ? raw.restart : "newPage",
     distancePx: twipToPx(measureTwip(raw.distance) ?? 0),
+  };
+}
+
+/** Project a section's w:cols for the flow: the column count, the gap
+ *  (w:space twips → px, Word's default 720), the separator line flag, and
+ *  explicit per-column widths (w:col children, twips → px) when the widths
+ *  are unequal. Absent/1-column sections project to undefined. */
+export function projectColumns(properties: unknown): ProjectedColumns | undefined {
+  const raw =
+    isRecord(properties) && isRecord(properties.columns) ? (properties.columns as Rec) : null;
+  if (!raw) return undefined;
+  const count = num(raw.count) ?? 1;
+  if (count <= 1) return undefined;
+  const children = Array.isArray(raw.children)
+    ? raw.children.filter(isRecord).map((col) => twipToPx(measureTwip(col.width) ?? 0))
+    : [];
+  return {
+    count,
+    spacePx: twipToPx(measureTwip(raw.space) ?? 720),
+    separate: raw.separate === true,
+    equalWidth: raw.equalWidth !== false,
+    columnsPx: raw.equalWidth === false && children.length > 0 ? children : undefined,
   };
 }

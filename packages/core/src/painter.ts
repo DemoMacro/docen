@@ -7,7 +7,8 @@
  * @module
  */
 import type { FlowItem, LaidOutBlock, LaidOutStackItem } from "@docen/layout";
-import { Rect, Text, type IGroup } from "leafer-ui";
+import { columnBoxesOf } from "@docen/layout";
+import { Line, Rect, Text, type IGroup } from "leafer-ui";
 
 import type { PaintColumn, PaintContext } from "./paint/context";
 import { paintBreakRow, paintParagraph } from "./paint/paragraph";
@@ -21,7 +22,33 @@ export * from "./paint/paragraph";
 
 export function paintScene(tree: IGroup, items: readonly FlowItem[], ctx: PaintContext): void {
   for (const item of items) {
-    paintBlock(tree, item.block, ctx.flow.contentLeftPx, ctx.flow.contentTopPx + item.yPx, ctx);
+    paintBlock(
+      tree,
+      item.block,
+      ctx.flow.contentLeftPx + (item.xPx ?? 0),
+      ctx.flow.contentTopPx + item.yPx,
+      ctx,
+    );
+  }
+}
+
+/** Paint the section's column separator lines (w:cols/@w:sep) — one vertical
+ *  line centered in each gap between neighboring columns, spanning the
+ *  content box. */
+export function paintColumnSeparators(tree: IGroup, ctx: PaintContext): void {
+  const cols = ctx.columns;
+  if (!cols?.separate || cols.count < 2) return;
+  const boxes = columnBoxesOf(ctx.flow.contentWidthPx, cols);
+  for (let i = 0; i < boxes.length - 1; i++) {
+    const x = ctx.flow.contentLeftPx + boxes[i]!.xPx + boxes[i]!.widthPx + cols.spacePx / 2;
+    tree.add(
+      new Line({
+        points: [x, ctx.flow.contentTopPx, x, ctx.flow.contentTopPx + ctx.flow.contentHeightPx],
+        stroke: "#000000",
+        strokeWidth: 1,
+        hittable: false,
+      }),
+    );
   }
 }
 

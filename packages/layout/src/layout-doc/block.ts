@@ -122,10 +122,17 @@ export interface LayoutPlaceholder {
   label?: string;
 }
 
-/** A page/column break atom: zero height, closes the current flow box after
+/** A page break atom: zero height, closes the current flow box after
  *  the preceding content (the break never opens a page — Word semantics). */
 export interface LayoutPageBreak {
   kind: "pageBreak";
+}
+
+/** A column break atom (w:br/@w:type="column"): closes the current column
+ *  after the preceding content — the flow continues in the next column, or
+ *  on a fresh page past the last one. */
+export interface LayoutColumnBreak {
+  kind: "columnBreak";
 }
 
 export type LayoutBlock =
@@ -133,7 +140,8 @@ export type LayoutBlock =
   | LayoutTable
   | LayoutGroup
   | LayoutPlaceholder
-  | LayoutPageBreak;
+  | LayoutPageBreak
+  | LayoutColumnBreak;
 
 /** Block-level layout context threaded by the caller that stacks blocks. */
 export interface LayoutBlockContext {

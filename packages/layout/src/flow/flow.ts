@@ -23,6 +23,7 @@ import {
   type LayoutBlock,
   type LayoutBlockContext,
   type LayoutFloatZone,
+  type ProjectedColumns,
   wrapEffectsOf,
 } from "../layout-doc";
 import type {
@@ -42,6 +43,9 @@ import type { TextMeasurer } from "../text/measure";
 export interface FlowItem {
   yPx: number;
   block: LaidOutBlock;
+  /** The item's column left edge within the content box, px (multi-column
+   *  sections, w:cols) — absent in a single-column flow (full width). */
+  xPx?: number;
 }
 
 export interface FlowPage {
@@ -72,6 +76,10 @@ export interface FlowOptions {
    *  evenAndOddHeaders is document-wide), while the first slot stays local
    *  (a section's own first page). Absent = 0 (single-section documents). */
   pageOffset?: number;
+  /** Section columns (w:cols) — the content box splits into `count` columns
+   *  the flow fills left to right before paging. Absent = one full-width
+   *  column. */
+  columns?: ProjectedColumns;
 }
 
 /** Lay a block flow into pages. Always returns at least one page (an empty
@@ -84,6 +92,32 @@ export function layoutFlow(
   const flow = new Flow(opts, measurer);
   for (const block of blocks) flow.push(block);
   return flow.finish();
+}
+
+/** Split a content width into w:cols column boxes — the single source the
+ *  flow fills against and the painter derives separator positions from.
+ *  Explicit w:col widths keep their own width/gap; equal (the default)
+ *  divides the box minus the gaps evenly — Word shrinks the columns, never
+ *  the gap. */
+export function columnBoxesOf(
+  contentWidthPx: number,
+  cols: ProjectedColumns | undefined,
+): { xPx: number; widthPx: number }[] {
+  if (!cols || cols.count <= 1) return [{ xPx: 0, widthPx: contentWidthPx }];
+  if (!cols.equalWidth && cols.columnsPx && cols.columnsPx.length > 0) {
+    const boxes: { xPx: number; widthPx: number }[] = [];
+    let x = 0;
+    for (const widthPx of cols.columnsPx) {
+      boxes.push({ xPx: x, widthPx });
+      x += widthPx + cols.spacePx;
+    }
+    return boxes;
+  }
+  const width = (contentWidthPx - cols.spacePx * (cols.count - 1)) / cols.count;
+  return Array.from({ length: cols.count }, (_, i) => ({
+    xPx: (width + cols.spacePx) * i,
+    widthPx: width,
+  }));
 }
 
 /** One section of a multi-section document: its block flow plus the flow
@@ -145,13 +179,23 @@ class Flow {
    *  resume below it. Both lists are page-local — floats never cross a page
    *  boundary (Word anchors the box to the page its paragraph lands on). */
   private readonly bands: LayoutFloatZone[] = [];
+  /** The page's column boxes (content-box-relative x + width, w:cols) and
+   *  the index being filled — a single-column flow carries one full-width
+   *  box and every column branch below short-circuits. */
+  private readonly cols: { xPx: number; widthPx: number }[];
+  private colIndex = 0;
 
   constructor(
     private readonly opts: FlowOptions,
     private readonly measurer: TextMeasurer,
   ) {
+    this.cols = columnBoxesOf(opts.contentWidthPx, opts.columns);
     // The body starts below the header's push (first page / default slot).
     this.y = this.insets().topPx;
+  }
+
+  private get col(): { xPx: number; widthPx: number } {
+    return this.cols[this.colIndex] ?? this.cols[this.cols.length - 1]!;
   }
 
   /** The current page's furniture insets (the section's first page →
@@ -212,10 +256,27 @@ class Flow {
   private newPage(auto = false): void {
     if (this.items.length > 0) this.pages.push({ items: this.items.splice(0) });
     this.pageIndex++;
+    this.colIndex = 0;
     this.y = this.insets().topPx;
     this.prevAfter = 0;
     this.firstOnPage = true;
     this.autoBreak = auto;
+    this.zones.length = 0;
+    this.bands.length = 0;
+  }
+
+  /** Close the current column and continue at the top of the next one — a
+   *  fresh page past the last column. Column tops keep their space-before
+   *  (only overflow page tops drop it, so this routes through the manual
+   *  newPage). Zones/bands reset like a page: floats are box-local. */
+  private newColumn(): void {
+    if (this.colIndex >= this.cols.length - 1) {
+      this.newPage();
+      return;
+    }
+    this.colIndex += 1;
+    this.y = this.insets().topPx;
+    this.prevAfter = 0;
     this.zones.length = 0;
     this.bands.length = 0;
   }
@@ -243,14 +304,30 @@ class Flow {
       this.newPage();
       return;
     }
+    if (block.kind === "columnBreak") {
+      // A column break closes the column committing nothing (Word paints no
+      // marker row); in a one-column flow newColumn closes the page instead.
+      this.newColumn();
+      return;
+    }
     // pageBreakBefore is a break atom before the content.
     if (block.kind === "paragraph" && block.pageBreakBefore) this.newPage();
 
-    const laid = layoutBlock(block, this.opts.contentWidthPx, this.ctx, this.measurer);
+    const laid = layoutBlock(block, this.col.widthPx, this.ctx, this.measurer);
     if (this.tryPlace(laid)) return;
     // Blocked by a band rather than the page bottom: resume below the band.
     if (this.dodgeBands()) {
       this.pushLaid(laid);
+      return;
+    }
+    // Out of room in this column: Word fills the next one before paging.
+    // Re-lay against the fresh column — zones are box-local, so lines laid
+    // against the old column's zones/y are stale there.
+    if (this.colIndex < this.cols.length - 1) {
+      this.newColumn();
+      const fresh = layoutBlock(block, this.col.widthPx, this.ctx, this.measurer);
+      if (this.tryPlace(fresh)) return;
+      this.pushLaid(fresh);
       return;
     }
     // Nothing fit here: blocks placed before this one with keepNext move
@@ -261,7 +338,7 @@ class Flow {
     for (const kept of pulled) this.pushLaid(kept);
     // Re-lay on the fresh page: float zones are page-local, so the lines
     // laid against the old page's zones/y are stale here.
-    const fresh = layoutBlock(block, this.opts.contentWidthPx, this.ctx, this.measurer);
+    const fresh = layoutBlock(block, this.col.widthPx, this.ctx, this.measurer);
     if (!this.tryPlace(fresh)) {
       // Cannot fit even a full empty page — place whole and overflow.
       this.commit(fresh, this.spacingBefore(fresh));
@@ -324,7 +401,10 @@ class Flow {
 
   private commit(laid: LaidOutBlock, before: number): void {
     const yPx = this.y + before;
-    this.items.push({ yPx, block: laid });
+    // Multi-column flows stamp each item with its column's left edge (the
+    // painter and the caret map offset by it); single-column stays undefined.
+    const xPx = this.cols.length > 1 ? this.col.xPx : undefined;
+    this.items.push({ yPx, block: laid, xPx });
     this.y += before + laid.heightPx;
     this.prevAfter = laid.kind === "paragraph" ? laid.afterPx : 0;
     this.firstOnPage = false;

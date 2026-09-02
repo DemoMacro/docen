@@ -33,6 +33,10 @@ export function layoutBlock(
       // when the section has one, a plain strut line otherwise) — Word's
       // "····分页符····" row, whose height never depends on marks visibility.
       return { kind: "pageBreak", heightPx: ctx?.linePitchPx || 20 };
+    case "columnBreak":
+      // Consumed by the flow (it closes the column, nothing commits); this
+      // zero-height stand-in only satisfies the switch.
+      return { kind: "pageBreak", heightPx: 0 };
   }
 }
 

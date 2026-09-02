@@ -1260,7 +1260,11 @@ class DocenDocument extends AddinHost<Editor> {
       const pageInsets = this.#pageInsets(section.flow, section.furniture, section.furnitureLaid);
       return {
         blocks: section.blocks,
-        opts: pageInsets ? { ...section.flow, pageInsets } : section.flow,
+        opts: {
+          ...section.flow,
+          columns: section.columns,
+          ...(pageInsets ? { pageInsets } : {}),
+        },
       };
     });
     const { pages, sectionOfPage } = layoutFlowSections(flowSections, this.#measurer);
@@ -1329,7 +1333,8 @@ class DocenDocument extends AddinHost<Editor> {
       prev.sections.length !== run.sections.length ||
       prev.sections.some((s, i) => !deepEq(s.flow, run.sections[i]!.flow)) ||
       prev.sections.some((s, i) => !deepEq(s.furniture, run.sections[i]!.furniture)) ||
-      prev.sections.some((s, i) => !deepEq(s.lineNumbers, run.sections[i]!.lineNumbers));
+      prev.sections.some((s, i) => !deepEq(s.lineNumbers, run.sections[i]!.lineNumbers)) ||
+      prev.sections.some((s, i) => !deepEq(s.columns, run.sections[i]!.columns));
     const dirty = structural ? undefined : dirtyPagesOf(prev.pages, run.pages);
     this.#stage.sync(run.pages, run.sections, run.sectionOfPage, run.background, dirty);
     this.#bridge?.updatePages(run.pages, this.#pageOriginOf(run.sections, run.sectionOfPage));

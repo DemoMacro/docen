@@ -1,6 +1,7 @@
 import type {
   FontMetrics,
   LaidOutParagraph,
+  ProjectedColumns,
   ProjectedFlowBox,
   ProjectedLineNumbers,
   ProjectedPageBackground,
@@ -52,6 +53,9 @@ export interface PaintContext {
   /** This page's line numbers (w:lnNumType): the section's config plus the
    *  marks from the stage's cross-page count. Absent = the section has none. */
   lineNumbers?: { config: ProjectedLineNumbers; marks: LineNumberMark[] };
+  /** The page's section columns (w:cols) — separator lines paint between
+   *  them when `separate` is set. Absent = single column, nothing to draw. */
+  columns?: ProjectedColumns;
   background?: ProjectedPageBackground;
   pageIndex: number;
   pageCount: number;

@@ -88,3 +88,22 @@ export interface ProjectedLineNumbers {
   /** Gap between the text margin and the number's right edge, in px. */
   distancePx: number;
 }
+
+/** Section columns projected for the flow (w:cols): the page's content box
+ *  splits into `count` columns the flow fills left to right before paging.
+ *  Absent from a section = one full-width column (the default). */
+export interface ProjectedColumns {
+  /** Column count (w:cols/@w:num, ≥1). */
+  count: number;
+  /** Gap between neighboring columns, in px (w:cols/@w:space; Word's default
+   *  720 twips when omitted). */
+  spacePx: number;
+  /** Paint a line between columns (w:cols/@w:sep). */
+  separate: boolean;
+  /** false = `columnsPx` carries explicit per-column widths (w:col children);
+   *  true (the default) = equal split of the content box. */
+  equalWidth: boolean;
+  /** Explicit column widths, px (w:col/@w:w) — present only when equalWidth
+   *  is false; gaps stay `spacePx` between every pair. */
+  columnsPx?: number[];
+}

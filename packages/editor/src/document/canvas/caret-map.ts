@@ -125,7 +125,11 @@ function firstParaOf(
 }
 
 function collectLayoutParas(
-  items: readonly { yPx: number; block: import("@docen/layout").LaidOutBlock }[],
+  items: readonly {
+    yPx: number;
+    xPx?: number;
+    block: import("@docen/layout").LaidOutBlock;
+  }[],
   page: number,
   x: number,
   y: number,
@@ -135,7 +139,8 @@ function collectLayoutParas(
 ): void {
   for (const item of items) {
     const b = item.block;
-    const bx = x;
+    // xPx is the item's column left edge (w:cols sections, absent single-column).
+    const bx = x + (item.xPx ?? 0);
     const by = y + item.yPx;
     switch (b.kind) {
       case "paragraph":

@@ -887,3 +887,66 @@ describe("layoutFlowSections", () => {
     expect(run.pages[1].items[0].yPx).toBe(30);
   });
 });
+
+describe("layoutFlow columns", () => {
+  const twoCol = { count: 2, spacePx: 20, separate: false, equalWidth: true };
+  const colFlow = (blocks: LayoutBlock[], contentHeightPx: number) =>
+    layoutFlow(blocks, { contentWidthPx: 300, contentHeightPx, columns: twoCol }, measurer);
+
+  it("splits the box into equal columns and lays against the column width", () => {
+    // 300px box, 20px gap → two 140px columns.
+    const pages = colFlow([para(1)], 100);
+    expect(pages).toHaveLength(1);
+    expect(pages[0].items[0].xPx).toBe(0);
+    const laid = pages[0].items[0].block;
+    if (laid.kind === "paragraph") expect(laid.lines[0].maxWidthPx).toBe(140);
+  });
+
+  it("fills the left column before the right one", () => {
+    // Five 20px lines fill a 100px column; the 6th continues in the right
+    // column (left edge 140 + 20).
+    const pages = colFlow([para(1), para(1), para(1), para(1), para(1), para(1), para(1)], 100);
+    expect(pages).toHaveLength(1);
+    expect(pages[0].items.map((i) => i.xPx)).toEqual([0, 0, 0, 0, 0, 160, 160]);
+  });
+
+  it("pages after the last column fills", () => {
+    const pages = colFlow(
+      Array.from({ length: 11 }, () => para(1)),
+      100,
+    );
+    expect(pages).toHaveLength(2);
+    expect(pages[0].items.map((i) => i.xPx).slice(-1)).toEqual([160]);
+    expect(pages[1].items[0].xPx).toBe(0);
+  });
+
+  it("columnBreak moves the following content to the next column", () => {
+    const blocks: LayoutBlock[] = [para(1), { kind: "columnBreak" }, para(1)];
+    const pages = colFlow(blocks, 100);
+    expect(pages).toHaveLength(1);
+    expect(pages[0].items.map((i) => i.xPx)).toEqual([0, 160]);
+  });
+
+  it("explicit widths keep their own boxes", () => {
+    const cols = {
+      count: 2,
+      spacePx: 20,
+      separate: false,
+      equalWidth: false,
+      columnsPx: [100, 180],
+    };
+    const pages = layoutFlow(
+      [{ kind: "columnBreak" }, para(1)],
+      { contentWidthPx: 300, contentHeightPx: 100, columns: cols },
+      measurer,
+    );
+    // The break commits nothing — the paragraph is the only item, in column 2.
+    expect(pages[0].items).toHaveLength(1);
+    expect(pages[0].items[0].xPx).toBe(120);
+  });
+
+  it("single-column flows stay unstamped", () => {
+    const pages = flow([para(1)], 100);
+    expect(pages[0].items[0].xPx).toBeUndefined();
+  });
+});

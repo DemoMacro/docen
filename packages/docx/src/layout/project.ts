@@ -11,6 +11,7 @@
 
 import type {
   LayoutBlock,
+  ProjectedColumns,
   ProjectedFlowBox,
   ProjectedLineNumbers,
   ProjectedPageBackground,
@@ -24,6 +25,7 @@ import type { ProjectContext } from "./project/context";
 import { indexNumberings } from "./project/numbering";
 import {
   projectChild,
+  projectColumns,
   projectFlowBox,
   projectLineNumbers,
   projectPageBackground,
@@ -41,6 +43,8 @@ export interface ProjectedSection {
   pageBorders?: ProjectedPageBorders;
   /** The section's line numbering (w:lnNumType), absent when none. */
   lineNumbers?: ProjectedLineNumbers;
+  /** The section's columns (w:cols), absent for a single-column section. */
+  columns?: ProjectedColumns;
 }
 
 /** Project a full DocumentOptions into the engine's input: one
@@ -78,6 +82,7 @@ export function projectDocumentOptions(doc: DocumentOptions): {
       furniture: projectPageFurniture(section, doc),
       pageBorders: projectPageBorders(section.properties),
       lineNumbers: projectLineNumbers(section.properties),
+      columns: projectColumns(section.properties),
     };
   });
   return {
@@ -91,6 +96,7 @@ export function projectDocumentOptions(doc: DocumentOptions): {
               furniture: projectPageFurniture(undefined, doc),
               pageBorders: undefined,
               lineNumbers: undefined,
+              columns: undefined,
             },
           ],
     background: projectPageBackground(doc),
