@@ -2888,6 +2888,19 @@ class DocenDocument extends AddinHost<Editor> {
       this.#setMargins(value);
       return;
     }
+    // AutoFit Window needs the page's text width — a layout value the command
+    // layer can't see, so the host injects it as the twip value (px × 15 at
+    // the layout's 96 dpi).
+    if (name === "autofit-window") {
+      const flow = this.#flow;
+      const ed = this.editor;
+      if (ed && flow && flow.contentWidthPx > 0) {
+        (ed.commands as unknown as Record<string, (v?: string) => unknown>)["autofit-window"](
+          String(Math.round(flow.contentWidthPx * 15)),
+        );
+      }
+      return;
+    }
     // Zoom is a canvas action (not a Tiptap command): step in, or apply a
     // preset from the split menu (200/100/75/50/page-width); the split's
     // main button sets 100%.

@@ -1,7 +1,7 @@
 import type { ImageAttrs } from "@docen/docx";
 import { BULLET_GLYPHS, nextOrderedReference, ORDERED_FORMATS } from "@docen/docx";
 import { Extension } from "@docen/docx/core";
-import type { Node as PMNode } from "@tiptap/pm/model";
+import type { Node as PMNode, ResolvedPos } from "@tiptap/pm/model";
 import type { EditorState } from "@tiptap/pm/state";
 import type { Transaction } from "@tiptap/pm/state";
 import { NodeSelection, TextSelection } from "@tiptap/pm/state";
@@ -88,6 +88,15 @@ declare module "@tiptap/core" {
       "table-style": (value?: string) => ReturnType;
       "table-borders": (value?: string) => ReturnType;
       "toggle-table-look": (value?: string) => ReturnType;
+      "merge-cells": () => ReturnType;
+      "split-cell": () => ReturnType;
+      "split-table": () => ReturnType;
+      "autofit-contents": () => ReturnType;
+      "autofit-window": (value?: string) => ReturnType;
+      "fixed-column-width": () => ReturnType;
+      "distribute-columns": () => ReturnType;
+      "cell-width": (value?: string) => ReturnType;
+      "cell-height": (value?: string) => ReturnType;
       link: (href?: string) => ReturnType;
       style: (styleId?: string) => ReturnType;
       // Editing
@@ -153,6 +162,15 @@ export const WIRED_DISPATCH: ReadonlySet<string> = new Set([
   "table-style",
   "table-borders",
   "toggle-table-look",
+  "merge-cells",
+  "split-cell",
+  "split-table",
+  "autofit-contents",
+  "autofit-window",
+  "fixed-column-width",
+  "distribute-columns",
+  "cell-width",
+  "cell-height",
   "text-direction",
   "convert-to-text",
   "link",
@@ -404,13 +422,22 @@ export function tableAncestry(state: EditorState): {
   rowAt: number;
   cellAt: number;
 } | null {
-  const { table, tableRow, tableCell } = state.schema.nodes;
-  const { $from } = state.selection;
+  return ancestryAt(state.selection.$from);
+}
+
+/** {@link tableAncestry} for an arbitrary position — Merge Cells resolves the
+ *  selection's two ends independently. */
+function ancestryAt($pos: ResolvedPos): {
+  tableAt: number;
+  rowAt: number;
+  cellAt: number;
+} | null {
+  const { table, tableRow, tableCell } = $pos.doc.type.schema.nodes;
   let tableAt = -1;
   let rowAt = -1;
   let cellAt = -1;
-  for (let d = $from.depth; d > 0; d -= 1) {
-    const node = $from.node(d);
+  for (let d = $pos.depth; d > 0; d -= 1) {
+    const node = $pos.node(d);
     if (node.type === table && tableAt < 0) tableAt = d;
     else if (node.type === tableRow && rowAt < 0) rowAt = d;
     else if (node.type === tableCell && cellAt < 0) cellAt = d;
@@ -431,6 +458,46 @@ const CELL_ALIGN: Record<string, { v: string; h: string }> = {
   bc: { v: "bottom", h: "center" },
   br: { v: "bottom", h: "right" },
 };
+
+// ── Cell Size / AutoFit measurement helpers ──────────────────────────────────
+
+/** A UniversalMeasure string ("1.5cm") or bare number string → twips; number
+ *  passes through as twips already. Mirrors the engine's UM table
+ *  (docx/src/layout/project/guards.ts measureTwip) — the value spaces are the
+ *  office-open length fields. */
+const MEASURE_TWIP_UNITS: ReadonlyArray<readonly [string, number]> = [
+  ["pt", 20],
+  ["pc", 240],
+  ["in", 1440],
+  ["mm", 1440 / 25.4],
+  ["cm", 1440 / 2.54],
+  ["px", 15],
+];
+function parseMeasureTwip(v: unknown): number | null {
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  if (typeof v !== "string") return null;
+  const bare = Number(v);
+  if (Number.isFinite(bare)) return bare;
+  const m = /^(-?[\d.]+)\s*(pt|pc|in|mm|cm|px)$/.exec(v.trim());
+  if (!m) return null;
+  const unit = MEASURE_TWIP_UNITS.find(([u]) => u === m[2]);
+  return unit ? Number(m[1]) * unit[1] : null;
+}
+
+const CJK_CHAR = /[⺀-鿿豈-﫿！-｠　-〿]/;
+
+/** Content-width heuristic for AutoFit Contents: no text measurer runs in the
+ *  command layer, so a column's width comes from its widest cell's character
+ *  count (a CJK glyph ≈ one 12pt em = 240 twips, Latin ≈ half) plus inset
+ *  slack. Honest sizing for text cells; images/wide objects overflow. */
+function measureTextTwip(text: string): number {
+  let tw = 0;
+  for (const ch of text) tw += CJK_CHAR.test(ch) ? 240 : 110;
+  return tw + 120;
+}
+
+/** Word's smallest usable column — 0.5" — also the AutoFit floor. */
+const MIN_COL_TWIP = 720;
 
 type TableBordersLike = Record<string, { style: string; size: number; color: string } | undefined>;
 const GRID_BORDER = { style: "single", size: 4, color: "auto" };
@@ -1313,6 +1380,294 @@ export const DocumentCommands = Extension.create({
             const tr = state.tr.replaceWith(tablePos, tablePos + tableNode.nodeSize, paras);
             tr.setSelection(TextSelection.near(tr.doc.resolve(tablePos + 1)));
             dispatch(tr.scrollIntoView());
+          }
+          return true;
+        },
+      // Word's Merge Cells over the selection's bounding rectangle. Each
+      // spanned row folds its cells into one: the row's first cell takes
+      // columnSpan = width, rows below the first take verticalMerge
+      // "continue" (their content stays put — the layout folds continue
+      // cells into the restart cell, so nothing is lost). Grid math is
+      // cellIndex-approximate, so a span-mismatched row is left untouched.
+      "merge-cells":
+        () =>
+        ({ state, dispatch }) => {
+          const fromA = ancestryAt(state.selection.$from);
+          const toA = ancestryAt(state.selection.$to);
+          if (!fromA || !toA || fromA.rowAt < 0 || toA.rowAt < 0) return false;
+          const { $from, $to } = state.selection;
+          if ($from.before(fromA.tableAt) !== $to.before(toA.tableAt)) return false;
+          const tableNode = $from.node(fromA.tableAt);
+          const grid = (tableNode.attrs.columnWidths as number[] | null)?.length ?? 0;
+          const c1 = $from.index(fromA.rowAt);
+          const c2 = $to.index(toA.rowAt);
+          if (fromA.rowAt === toA.rowAt && c1 === c2) return false;
+          if (dispatch) {
+            const tablePos = $from.before(fromA.tableAt);
+            // Row indices into the table's children — the ancestry depths are
+            // not indexes (a depth-2 rowAt would address the last row).
+            const rowFrom = $from.index(fromA.tableAt);
+            const rowTo = $to.index(toA.tableAt);
+            const tr = state.tr;
+            for (let r = rowTo; r >= rowFrom; r -= 1) {
+              const rowNode = tableNode.child(r);
+              // Bottom-up keeps positions valid as earlier deletions shift
+              // later ones; a row that doesn't match the grid exactly (a
+              // previously merged one) is skipped rather than corrupted.
+              if (grid > 0 && rowNode.childCount !== grid) continue;
+              let rowPos = tablePos + 1;
+              for (let i = 0; i < r; i += 1) rowPos += tableNode.child(i).nodeSize;
+              const last = Math.min(c2, rowNode.childCount - 1);
+              if (c1 > last) continue;
+              let basePos = rowPos + 1;
+              for (let c = 0; c < c1; c += 1) basePos += rowNode.child(c).nodeSize;
+              const base = rowNode.child(c1);
+              tr.setNodeMarkup(basePos, undefined, {
+                ...base.attrs,
+                columnSpan: last > c1 ? last - c1 + 1 : null,
+                verticalMerge: r > rowFrom ? "continue" : base.attrs.verticalMerge,
+              });
+              for (let c = last; c > c1; c -= 1) {
+                let cellPos = rowPos + 1;
+                for (let cc = 0; cc < c; cc += 1) cellPos += rowNode.child(cc).nodeSize;
+                tr.delete(cellPos, cellPos + rowNode.child(c).nodeSize);
+              }
+            }
+            dispatch(tr.scrollIntoView());
+          }
+          return true;
+        },
+      // Word's Split Cells without the dialog: a merged cell (columnSpan or
+      // verticalMerge) returns to its own single grid cell, empty twins
+      // taking the spanned columns. The dialog's rows×cols form is not built.
+      "split-cell":
+        () =>
+        ({ state, dispatch }) => {
+          const anchor = tableAncestry(state);
+          if (!anchor || anchor.cellAt < 0) return false;
+          const { $from } = state.selection;
+          const cell = $from.node(anchor.cellAt);
+          const span = (cell.attrs.columnSpan as number | null) ?? 1;
+          if (span < 2 && !cell.attrs.verticalMerge) return false;
+          if (dispatch) {
+            const cellPos = $from.before(anchor.cellAt);
+            const tr = state.tr.setNodeMarkup(cellPos, undefined, {
+              ...cell.attrs,
+              columnSpan: null,
+              verticalMerge: null,
+            });
+            const blank = cell.type.create(null, state.schema.nodes.paragraph.create());
+            for (let i = 0; i < span - 1; i += 1) {
+              tr.insert(cellPos + cell.nodeSize, blank);
+            }
+            dispatch(tr.scrollIntoView());
+          }
+          return true;
+        },
+      // Word's Split Table: the caret's row starts a second table with the
+      // same formatting (attrs are shared — borders, grid, style).
+      "split-table":
+        () =>
+        ({ state, dispatch }) => {
+          const anchor = tableAncestry(state);
+          if (!anchor || anchor.rowAt < 0) return false;
+          const { $from } = state.selection;
+          const tableNode = $from.node(anchor.tableAt);
+          const rowIdx = $from.index(anchor.tableAt);
+          if (rowIdx === 0 || rowIdx >= tableNode.childCount) return false;
+          if (dispatch) {
+            const tablePos = $from.before(anchor.tableAt);
+            const rowsA: PMNode[] = [];
+            const rowsB: PMNode[] = [];
+            for (let r = 0; r < tableNode.childCount; r += 1) {
+              (r < rowIdx ? rowsA : rowsB).push(tableNode.child(r));
+            }
+            const create = state.schema.nodes.table.create.bind(state.schema.nodes.table);
+            const tr = state.tr.replaceWith(tablePos, tablePos + tableNode.nodeSize, [
+              create(tableNode.attrs, rowsA),
+              create(tableNode.attrs, rowsB),
+            ]);
+            // The caret lands in the second table's first cell: the first
+            // table's size is its rows plus the open/close tokens.
+            const firstTableSize = rowsA.reduce((sum, r) => sum + r.nodeSize, 0) + 2;
+            tr.setSelection(TextSelection.near(tr.doc.resolve(tablePos + firstTableSize + 1)));
+            dispatch(tr.scrollIntoView());
+          }
+          return true;
+        },
+      // Word's AutoFit Contents: each column shrinks to its widest cell's
+      // content (a character-count heuristic — see measureTextTwip) without
+      // growing past the current grid. Span-free tables only.
+      "autofit-contents":
+        () =>
+        ({ state, dispatch }) => {
+          const anchor = tableAncestry(state);
+          if (!anchor) return false;
+          const { $from } = state.selection;
+          const tableNode = $from.node(anchor.tableAt);
+          const widths = tableNode.attrs.columnWidths as number[] | null;
+          if (!widths || widths.length === 0) return false;
+          const cols = widths.length;
+          for (let r = 0; r < tableNode.childCount; r += 1) {
+            const row = tableNode.child(r);
+            if (row.childCount !== cols) return false;
+            for (let c = 0; c < cols; c += 1) {
+              const cell = row.child(c);
+              if (cell.attrs.columnSpan || cell.attrs.verticalMerge) return false;
+            }
+          }
+          if (dispatch) {
+            const next = widths.map((w, c) => {
+              let widest = 0;
+              for (let r = 0; r < tableNode.childCount; r += 1) {
+                widest = Math.max(widest, measureTextTwip(tableNode.child(r).child(c).textContent));
+              }
+              return Math.max(MIN_COL_TWIP, Math.min(w, widest));
+            });
+            dispatch(
+              state.tr
+                .setNodeMarkup($from.before(anchor.tableAt), undefined, {
+                  ...tableNode.attrs,
+                  columnWidths: next,
+                  layout: null,
+                })
+                .scrollIntoView(),
+            );
+          }
+          return true;
+        },
+      // Word's AutoFit Window: the grid scales proportionally to the page's
+      // text width (the host resolves that from the layout flow and passes it
+      // as the twip value). A table without a grid starts from equal columns.
+      "autofit-window":
+        (value) =>
+        ({ state, dispatch }) => {
+          const anchor = tableAncestry(state);
+          if (!anchor) return false;
+          const total = Number(value);
+          if (!Number.isFinite(total) || total <= 0) return false;
+          const { $from } = state.selection;
+          const tableNode = $from.node(anchor.tableAt);
+          const widths =
+            (tableNode.attrs.columnWidths as number[] | null)?.filter((w) => w > 0) ?? [];
+          const cols = Math.max(widths.length, tableNode.child(0)?.childCount ?? 0);
+          if (cols === 0) return false;
+          if (dispatch) {
+            const sum = widths.reduce((a, b) => a + b, 0);
+            const next = Array.from({ length: cols }, (_, c) =>
+              sum > 0 && c < widths.length
+                ? Math.max(1, Math.round((widths[c]! / sum) * total))
+                : Math.round(total / cols),
+            );
+            dispatch(
+              state.tr
+                .setNodeMarkup($from.before(anchor.tableAt), undefined, {
+                  ...tableNode.attrs,
+                  columnWidths: next,
+                  layout: null,
+                })
+                .scrollIntoView(),
+            );
+          }
+          return true;
+        },
+      // Word's Fixed Column Width — toggles the tblLayout fixed flag (the
+      // grid stops following content; the columns stay where the grid puts
+      // them).
+      "fixed-column-width":
+        () =>
+        ({ state, dispatch }) => {
+          const anchor = tableAncestry(state);
+          if (!anchor) return false;
+          if (dispatch) {
+            const { $from } = state.selection;
+            const tableNode = $from.node(anchor.tableAt);
+            dispatch(
+              state.tr
+                .setNodeMarkup($from.before(anchor.tableAt), undefined, {
+                  ...tableNode.attrs,
+                  layout: tableNode.attrs.layout === "fixed" ? null : "fixed",
+                })
+                .scrollIntoView(),
+            );
+          }
+          return true;
+        },
+      // Word's Distribute Columns: the grid splits its total evenly (the last
+      // column absorbs the rounding remainder so the sum is exact).
+      "distribute-columns":
+        () =>
+        ({ state, dispatch }) => {
+          const anchor = tableAncestry(state);
+          if (!anchor) return false;
+          const { $from } = state.selection;
+          const tableNode = $from.node(anchor.tableAt);
+          const widths = tableNode.attrs.columnWidths as number[] | null;
+          if (!widths || widths.length === 0) return false;
+          if (dispatch) {
+            const sum = widths.reduce((a, b) => a + b, 0);
+            const even = Math.floor(sum / widths.length);
+            const next = widths.map((_, c) =>
+              c === widths.length - 1 ? sum - even * (widths.length - 1) : even,
+            );
+            dispatch(
+              state.tr
+                .setNodeMarkup($from.before(anchor.tableAt), undefined, {
+                  ...tableNode.attrs,
+                  columnWidths: next,
+                })
+                .scrollIntoView(),
+            );
+          }
+          return true;
+        },
+      // Cell width — the column width of the caret's cell (the grid is the
+      // one width source the layout reads; Word's tcW maps onto it here).
+      "cell-width":
+        (value) =>
+        ({ state, dispatch }) => {
+          const anchor = tableAncestry(state);
+          if (!anchor || anchor.rowAt < 0) return false;
+          const tw = parseMeasureTwip(value);
+          if (tw == null || tw < MIN_COL_TWIP) return false;
+          const { $from } = state.selection;
+          const tableNode = $from.node(anchor.tableAt);
+          const widths = tableNode.attrs.columnWidths as number[] | null;
+          const col = $from.index(anchor.rowAt);
+          if (!widths || col >= widths.length) return false;
+          if (dispatch) {
+            const next = [...widths];
+            next[col] = Math.round(tw);
+            dispatch(
+              state.tr
+                .setNodeMarkup($from.before(anchor.tableAt), undefined, {
+                  ...tableNode.attrs,
+                  columnWidths: next,
+                })
+                .scrollIntoView(),
+            );
+          }
+          return true;
+        },
+      // Row height — the caret row's trHeight (atLeast; "0"/auto clears it).
+      "cell-height":
+        (value) =>
+        ({ state, dispatch }) => {
+          const anchor = tableAncestry(state);
+          if (!anchor || anchor.rowAt < 0) return false;
+          const tw = parseMeasureTwip(value);
+          if (tw == null || tw < 0) return false;
+          if (dispatch) {
+            const { $from } = state.selection;
+            const row = $from.node(anchor.rowAt);
+            dispatch(
+              state.tr
+                .setNodeMarkup($from.before(anchor.rowAt), undefined, {
+                  ...row.attrs,
+                  height: tw > 0 ? { value: Math.round(tw), rule: "atLeast" } : null,
+                })
+                .scrollIntoView(),
+            );
           }
           return true;
         },

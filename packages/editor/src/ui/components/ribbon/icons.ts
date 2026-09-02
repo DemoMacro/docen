@@ -1,6 +1,9 @@
 // Draw (inking) + Insert illustration extras — Fluent System Icons
 import apps from "@fluentui/svg-icons/icons/apps_24_regular.svg?raw";
+import arrowAutofitContent from "@fluentui/svg-icons/icons/arrow_autofit_content_24_regular.svg?raw";
 import arrowBidirectionalUpDown from "@fluentui/svg-icons/icons/arrow_bidirectional_up_down_24_regular.svg?raw";
+import arrowExpand from "@fluentui/svg-icons/icons/arrow_expand_24_regular.svg?raw";
+import arrowMaximizeVertical from "@fluentui/svg-icons/icons/arrow_maximize_vertical_24_regular.svg?raw";
 import arrowRedo from "@fluentui/svg-icons/icons/arrow_redo_24_regular.svg?raw";
 import arrowRotateClockwise from "@fluentui/svg-icons/icons/arrow_rotate_clockwise_24_regular.svg?raw";
 import arrowSort from "@fluentui/svg-icons/icons/arrow_sort_24_regular.svg?raw";
@@ -55,6 +58,8 @@ import share from "@fluentui/svg-icons/icons/share_24_regular.svg?raw";
 import table from "@fluentui/svg-icons/icons/table_24_regular.svg?raw";
 import tableAdd from "@fluentui/svg-icons/icons/table_add_24_regular.svg?raw";
 import tableArrowRepeatAll from "@fluentui/svg-icons/icons/table_arrow_repeat_all_24_regular.svg?raw";
+import tableCellsMerge from "@fluentui/svg-icons/icons/table_cells_merge_24_regular.svg?raw";
+import tableCellsSplit from "@fluentui/svg-icons/icons/table_cells_split_24_regular.svg?raw";
 import tableCursor from "@fluentui/svg-icons/icons/table_cursor_24_regular.svg?raw";
 import tableDeleteColumn from "@fluentui/svg-icons/icons/table_delete_column_24_regular.svg?raw";
 import tableDeleteRow from "@fluentui/svg-icons/icons/table_delete_row_24_regular.svg?raw";
@@ -161,6 +166,11 @@ const RIBBON_ICONS: Record<string, string> = {
   "table-delete-row": tableDeleteRow,
   "table-delete-column": tableDeleteColumn,
   "table-delete": tableDismiss,
+  "merge-cells": tableCellsMerge,
+  "split-cells": tableCellsSplit,
+  autofit: arrowAutofitContent,
+  "distribute-rows": arrowMaximizeVertical,
+  "distribute-columns": arrowExpand,
   "table-repeat-headers": tableArrowRepeatAll,
   "table-properties": tableSettings,
   "table-stack-above": tableStackAbove,

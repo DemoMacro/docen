@@ -1186,6 +1186,37 @@ const tableDeleteItems = (): string =>
     { text: opt("delete-table"), value: "table" },
   ]);
 
+/** The AutoFit split's drop-down: Word's three AutoFit modes. */
+const autofitItems = (): string =>
+  JSON.stringify([
+    { text: opt("autofit-contents"), value: "contents", event: "autofit-contents" },
+    { text: opt("autofit-window"), value: "window", event: "autofit-window" },
+    { text: opt("fixed-column-width"), value: "fixed", event: "fixed-column-width" },
+  ]);
+
+/** Word's Cell Size spinner presets — the values are the twips the commands
+ *  receive; the labels are what a human says (free-typed entries accept the
+ *  same UniversalMeasure units, "1.5cm" / "0.5in"). */
+const CELL_WIDTH_PRESETS: readonly (readonly [string, string])[] = [
+  ['0.5"', "720"],
+  ['0.75"', "1080"],
+  ['1"', "1440"],
+  ['1.5"', "2160"],
+  ['2"', "2880"],
+  ['3"', "4320"],
+];
+const CELL_HEIGHT_PRESETS: readonly (readonly [string, string])[] = [
+  ['0.25"', "360"],
+  ['0.5"', "720"],
+  ['0.75"', "1080"],
+  ['1"', "1440"],
+  ["auto", "0"],
+];
+const cellWidthItems = (): string =>
+  JSON.stringify(CELL_WIDTH_PRESETS.map(([text, value]) => ({ text, value })));
+const cellHeightItems = (): string =>
+  JSON.stringify(CELL_HEIGHT_PRESETS.map(([text, value]) => ({ text, value })));
+
 /** Word's contextual Table Tools — the Table Design / Table Layout tabs that
  *  appear while the caret is inside a table. Marked `contextual` so
  *  {@link ribbonTabs} excludes them from the static render; the host appends
@@ -1259,9 +1290,29 @@ export function tableContextTabs(): RibbonTab[] {
             ]),
           ]),
         ]),
+        group("merge", [
+          btn("merge-cells", "merge-cells", { size: "large" }),
+          btn("split-cells", "split-cell", { size: "large" }),
+          btn("table-simple", "split-table", { size: "large" }),
+        ]),
+        group("cell-size", [
+          split("autofit", "autofit", parsedItems(autofitItems()), { size: "large" }),
+          col([
+            combo("cell-height", "auto", parsedItems(cellHeightItems()), { comboboxSize: "short" }),
+            combo("cell-width", '1"', parsedItems(cellWidthItems()), { comboboxSize: "short" }),
+          ]),
+          col([
+            grid([
+              btn("distribute-rows", "distribute-rows"),
+              btn("distribute-columns", "distribute-columns"),
+            ]),
+          ]),
+        ]),
         group("alignment", [
           split("align-center", "align-cell", parsedItems(cellAlignItems()), { size: "large" }),
           btn("text-direction", "text-direction", { size: "large" }),
+          // Word opens the Cell Margins options dialog (not built) — greyed.
+          btn("table-properties", "cell-margins", { size: "large" }),
         ]),
         group("data", [
           btn("table-repeat-headers", "repeat-header-rows", { size: "large" }),

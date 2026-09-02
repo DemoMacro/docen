@@ -16,24 +16,18 @@ const build = (): EditorType =>
     content: { type: "doc", content: [{ type: "paragraph" }] },
   });
 
-const tablesOf = (
-  editor: EditorType,
-): Array<{
-  attrs: Record<string, unknown>;
-  childCount: number;
-  child: (i: number) => { attrs: Record<string, unknown>; childCount: number };
-}> => {
-  const out: Array<never> = [];
-  editor.state.doc.descendants((node) => {
-    if (node.type.name === "table") out.push(node as never);
-  });
-  return out as never;
-};
-
 type AnyNode = {
   attrs: Record<string, unknown>;
   childCount: number;
   child: (i: number) => AnyNode;
+};
+
+const tablesOf = (editor: EditorType): AnyNode[] => {
+  const out: AnyNode[] = [];
+  editor.state.doc.descendants((node) => {
+    if (node.type.name === "table") out.push(node as unknown as AnyNode);
+  });
+  return out;
 };
 
 /** The first node of `name` in document order. `descendants` cannot abort the
@@ -53,7 +47,6 @@ const firstNodeOf = (editor: EditorType, name: string): AnyNode => {
 /** Move the caret into cell (row, col) of the first table — inside its first
  *  paragraph, the way a user's caret sits. */
 const caretInCell = (editor: EditorType, row = 0, col = 0): void => {
-  const table = tablesOf(editor)[0]!;
   let cellPos = -1;
   editor.state.doc.descendants((node, nodePos) => {
     if (node.type.name !== "table") return true;
@@ -65,6 +58,59 @@ const caretInCell = (editor: EditorType, row = 0, col = 0): void => {
     return false;
   });
   editor.commands.setTextSelection(cellPos + 2);
+};
+
+/** A TextSelection dragging across cells (rowA,colA) → (rowB,colB) of the
+ *  first table — the shape Merge Cells receives from the user. */
+const selectCells = (
+  editor: EditorType,
+  rowA: number,
+  colA: number,
+  rowB: number,
+  colB: number,
+): void => {
+  let from = -1;
+  let to = -1;
+  editor.state.doc.descendants((node, nodePos) => {
+    if (node.type.name !== "table") return true;
+    const at = (r: number, c: number): number => {
+      let p = nodePos + 1;
+      for (let i = 0; i < r; i += 1) p += node.child(i).nodeSize;
+      const rowNode = node.child(r);
+      for (let i = 0; i < c; i += 1) p += rowNode.child(i).nodeSize;
+      return p;
+    };
+    from = at(rowA, colA) + 1;
+    to = at(rowB, colB) + node.child(rowB).child(colB).nodeSize - 1;
+    return false;
+  });
+  editor.commands.setTextSelection({ from, to });
+};
+
+/** Replace the document with a 2-column table carrying an explicit grid —
+ *  the shape the Cell Size commands need (insert-table stamps no widths). */
+const gridTable = (editor: EditorType, widths: number[], text: string[] = []): void => {
+  const cell = (t: string | undefined): unknown => ({
+    type: "tableCell",
+    content: [
+      t ? { type: "paragraph", content: [{ type: "text", text: t }] } : { type: "paragraph" },
+    ],
+  });
+  const row = (cells: unknown[]): unknown => ({ type: "tableRow", content: cells });
+  editor.commands.setContent({
+    type: "doc",
+    content: [
+      {
+        type: "table",
+        attrs: { columnWidths: widths },
+        content: [
+          row(text.length ? text.map((t) => cell(t)) : [cell(undefined), cell(undefined)]),
+          row([cell(undefined), cell(undefined)]),
+        ],
+      },
+    ],
+  } as never);
+  caretInCell(editor, 0, 0);
 };
 
 const GRID = { style: "single", size: 4, color: "auto" };
@@ -309,5 +355,123 @@ describe("select-table-column / convert-to-text", () => {
     expect(editor.state.doc.childCount).toBe(1);
     expect(editor.state.doc.firstChild?.type.name).toBe("paragraph");
     expect(editor.state.doc.textContent).toBe("甲\t乙");
+  });
+});
+
+describe("merge / split table commands", () => {
+  it("merge-cells folds same-row cells into a columnSpan", () => {
+    const editor = build();
+    editor.commands["insert-table"]();
+    selectCells(editor, 0, 0, 0, 1);
+    expect(editor.commands["merge-cells"]()).toBe(true);
+    const row = tablesOf(editor)[0]!.child(0);
+    expect(row.childCount).toBe(2);
+    expect(row.child(0).attrs.columnSpan).toBe(2);
+    // A second selection must hit the same table for the merge to apply.
+    selectCells(editor, 0, 0, 0, 0);
+    expect(editor.commands["merge-cells"]()).toBe(false);
+  });
+
+  it("merge-cells spans rows with verticalMerge restart/continue", () => {
+    const editor = build();
+    editor.commands["insert-table"]();
+    selectCells(editor, 0, 0, 1, 1);
+    expect(editor.commands["merge-cells"]()).toBe(true);
+    const table = tablesOf(editor)[0]!;
+    // Each spanned row folds to one cell; the first row is the restart (no
+    // vMerge marker), the row below carries "continue".
+    expect(table.child(0).childCount).toBe(2);
+    expect(table.child(0).child(0).attrs.columnSpan).toBe(2);
+    expect(table.child(0).child(0).attrs.verticalMerge).toBeFalsy();
+    expect(table.child(1).childCount).toBe(2);
+    expect(table.child(1).child(0).attrs.columnSpan).toBe(2);
+    expect(table.child(1).child(0).attrs.verticalMerge).toBe("continue");
+  });
+
+  it("split-cell restores a merged cell to its own grid slot", () => {
+    const editor = build();
+    editor.commands["insert-table"]();
+    selectCells(editor, 0, 0, 0, 1);
+    editor.commands["merge-cells"]();
+    caretInCell(editor, 0, 0);
+    expect(editor.commands["split-cell"]()).toBe(true);
+    const row = tablesOf(editor)[0]!.child(0);
+    expect(row.childCount).toBe(3);
+    expect(row.child(0).attrs.columnSpan).toBeFalsy();
+    // Splitting an unmerged cell declines.
+    expect(editor.commands["split-cell"]()).toBe(false);
+  });
+
+  it("split-table splits at the caret's row keeping both tables' attrs", () => {
+    const editor = build();
+    editor.commands["insert-table"]();
+    caretInCell(editor, 1, 0);
+    expect(editor.commands["split-table"]()).toBe(true);
+    const tables = tablesOf(editor);
+    expect(tables).toHaveLength(2);
+    expect(tables[0]!.childCount).toBe(1);
+    expect(tables[1]!.childCount).toBe(2);
+    // The caret lands in the second table's first cell.
+    const $from = editor.state.doc.resolve(editor.state.selection.from);
+    // The caret sits inside the second table (the one after the split).
+    expect($from.node(3).type.name).toBe("tableCell");
+    expect($from.before(1)).toBe(editor.state.doc.firstChild!.nodeSize);
+    // Splitting at the first row declines.
+    caretInCell(editor, 0, 0);
+    expect(editor.commands["split-table"]()).toBe(false);
+  });
+});
+
+describe("cell size / autofit commands", () => {
+  it("autofit-window rescales the grid to the injected total width", () => {
+    const editor = build();
+    gridTable(editor, [720, 1440]);
+    expect(editor.commands["autofit-window"]("1440")).toBe(true);
+    expect(tablesOf(editor)[0]!.attrs.columnWidths).toEqual([480, 960]);
+    expect(editor.commands["autofit-window"]("bogus")).toBe(false);
+  });
+
+  it("autofit-contents shrinks each column to its widest cell", () => {
+    const editor = build();
+    gridTable(editor, [2000, 2000], ["甲乙丙", ""]);
+    // 甲乙丙 ≈ 3 × 240 + slack = 840 twips; the empty column hits the floor.
+    expect(editor.commands["autofit-contents"]()).toBe(true);
+    expect(tablesOf(editor)[0]!.attrs.columnWidths).toEqual([840, 720]);
+  });
+
+  it("fixed-column-width toggles the tblLayout flag", () => {
+    const editor = build();
+    gridTable(editor, [1440, 1440]);
+    expect(editor.commands["fixed-column-width"]()).toBe(true);
+    expect(tablesOf(editor)[0]!.attrs.layout).toBe("fixed");
+    expect(editor.commands["fixed-column-width"]()).toBe(true);
+    expect(tablesOf(editor)[0]!.attrs.layout).toBeNull();
+  });
+
+  it("distribute-columns splits the grid total evenly", () => {
+    const editor = build();
+    gridTable(editor, [720, 1440]);
+    expect(editor.commands["distribute-columns"]()).toBe(true);
+    expect(tablesOf(editor)[0]!.attrs.columnWidths).toEqual([1080, 1080]);
+  });
+
+  it("cell-width writes the caret column's width, accepting measures", () => {
+    const editor = build();
+    gridTable(editor, [1440, 1440]);
+    // "2cm" → 2 × 1440 / 2.54 ≈ 1134 twips.
+    expect(editor.commands["cell-width"]("2cm")).toBe(true);
+    expect(tablesOf(editor)[0]!.attrs.columnWidths).toEqual([1134, 1440]);
+    // Below Word's 0.5" floor declines (1cm ≈ 567 < 720).
+    expect(editor.commands["cell-width"]("1cm")).toBe(false);
+  });
+
+  it("cell-height stamps the caret row's height, auto clears it", () => {
+    const editor = build();
+    gridTable(editor, [1440, 1440]);
+    expect(editor.commands["cell-height"]("1cm")).toBe(true);
+    expect(tablesOf(editor)[0]!.child(0).attrs.height).toEqual({ value: 567, rule: "atLeast" });
+    // The combobox's "auto" entry sends the clear value.
+    expect(editor.commands["cell-height"]("0")).toBe(true);
+    expect(tablesOf(editor)[0]!.child(0).attrs.height).toBeNull();
   });
 });
