@@ -472,6 +472,7 @@ class DocenDocument extends AddinHost<Editor> {
     const editor = this.editor;
     if (!editor) return;
     (event.detail.direction === "prev" ? findPrev : findNext)(editor.state, editor.view.dispatch);
+    this.#bridge?.scrollIntoView(editor.state.selection.from);
   };
 
   /** Stamp the Results slot with the live match list — each hit rendered with

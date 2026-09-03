@@ -1176,11 +1176,13 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     const pos = posAtClient(event.clientX, event.clientY);
     if (pos != null) {
       // Word's Ctrl+Click follows the link instead of dropping a caret; a
-      // plain click keeps its editing meaning. A `#name` href is a bookmark
-      // anchor — followLink declines it, so the host resolves the jump.
+      // plain click keeps its editing meaning, and in viewing mode (read-only)
+      // a plain click follows too. A `#name` href is a bookmark anchor —
+      // followLink declines it, so the host resolves the jump.
       const link = linkAt(pos);
+      const follow = event.ctrlKey || event.metaKey || !active().editor.isEditable;
       if (
-        (event.ctrlKey || event.metaKey) &&
+        follow &&
         link &&
         (link.href.startsWith("#")
           ? (opts.onInternalAnchor?.(link.href.slice(1)), true)
@@ -1443,10 +1445,61 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     }
   };
 
-  const scrollTo = (pos: number): void => {
-    const rect = active().map?.valid ? active().map!.caretRect(pos) : null;
+  /** Finds the doc position of the next or previous table cell (reading order). */
+  const adjacentCellPos = (
+    state: Editor["state"],
+    dir: -1 | 1,
+  ): { pos: number; isLastInTable: boolean } | null => {
+    const $from = state.selection.$from;
+    const $cell = cellAt($from);
+    if (!$cell) return null;
+    const table = $cell.node($cell.depth - 1);
+    const tableStart = $cell.before($cell.depth - 1);
+    const cells: number[] = [];
+    let rowPos = tableStart + 1;
+    for (let r = 0; r < table.childCount; r++) {
+      const row = table.child(r);
+      let cellPos = rowPos + 1;
+      for (let c = 0; c < row.childCount; c++) {
+        cells.push(cellPos);
+        cellPos += row.child(c).nodeSize;
+      }
+      rowPos += row.nodeSize;
+    }
+    const idx = cells.indexOf($cell.pos);
+    if (idx < 0) return null;
+    const targetIdx = idx + dir;
+    if (targetIdx >= 0 && targetIdx < cells.length) {
+      return { pos: cells[targetIdx]! + 1, isLastInTable: false };
+    }
+    return { pos: $cell.pos, isLastInTable: dir > 0 && targetIdx >= cells.length };
+  };
+
+  /** Scrolls the caret's page so the caret sits a third of the way down the
+   *  workspace viewport — only when it is out of view (Home/End/PageUp/PageDown,
+   *  find-next). A caret already visible keeps its position. */
+  const scrollIntoView = (pos: number): void => {
+    const rect = main.map?.valid ? main.map.caretRect(pos) : null;
     if (!rect) return;
-    opts.pageHost?.(rect.page)?.scrollIntoView({ block: "start", behavior: "auto" });
+    const pageEl = opts.pageHost?.(rect.page);
+    if (!pageEl) return;
+    const scale = opts.scale?.() ?? 1;
+    const scrollParent =
+      (pageEl.closest(
+        "[data-docen-scroll-container], .workspace, .editor-viewport, [style*='overflow']",
+      ) as HTMLElement | null) ?? pageEl.parentElement;
+    if (scrollParent && scrollParent.scrollHeight > scrollParent.clientHeight) {
+      const pageRect = pageEl.getBoundingClientRect();
+      const parentRect = scrollParent.getBoundingClientRect();
+      const caretY = pageRect.top + rect.yPx * scale;
+      if (caretY < parentRect.top || caretY + rect.heightPx * scale > parentRect.bottom) {
+        const targetScrollTop =
+          scrollParent.scrollTop + (caretY - parentRect.top) - parentRect.height / 3;
+        scrollParent.scrollTo({ top: Math.max(0, targetScrollTop), behavior: "auto" });
+        return;
+      }
+    }
+    pageEl.scrollIntoView({ block: "nearest", behavior: "auto" });
   };
 
   const onKeyDown = (event: KeyboardEvent): void => {
@@ -1511,16 +1564,18 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     if (event.ctrlKey || event.metaKey) {
       const key = event.key;
       const lower = key.toLowerCase();
+      // Modifier combos dispatch commands (registered in KEYBOARD_SHORTCUTS).
+      // Undo / Redo
       if (lower === "z") {
-        if (!editable) return;
         event.preventDefault();
+        if (!editable) return;
         if (event.shiftKey) active().editor.commands.redo();
         else active().editor.commands.undo();
         return;
       }
       if (lower === "y") {
-        if (!editable) return;
         event.preventDefault();
+        if (!editable) return;
         active().editor.commands.redo();
         return;
       }
@@ -1598,7 +1653,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
         const target =
           event.ctrlKey || event.metaKey ? 0 : edgeTarget(active().editor.state, head(), false);
         apply(target, extend);
-        scrollTo(target);
+        scrollIntoView(target);
         break;
       }
       case "End": {
@@ -1608,7 +1663,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
             ? active().editor.state.doc.content.size
             : edgeTarget(active().editor.state, head(), true);
         apply(target, extend);
-        scrollTo(target);
+        scrollIntoView(target);
         break;
       }
       case "PageUp": {
@@ -1620,7 +1675,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
           const targetPage = Math.max(0, curPage - 1);
           const targetPos = map.firstPosOfPage(targetPage) ?? 0;
           apply(targetPos, extend);
-          scrollTo(targetPos);
+          scrollIntoView(targetPos);
         }
         break;
       }
@@ -1633,7 +1688,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
           const targetPos =
             map.firstPosOfPage(curPage + 1) ?? active().editor.state.doc.content.size;
           apply(targetPos, extend);
-          scrollTo(targetPos);
+          scrollIntoView(targetPos);
         }
         break;
       }
@@ -1656,14 +1711,26 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
           leaveStory();
         }
         break;
-      // Tab / Shift+Tab on list paragraphs adjusts the nesting level (Word).
-      // Everywhere else the press is still claimed: the browser default would
-      // move focus off the textarea (the caret overlay stays, but every
-      // following keystroke lands elsewhere — input silently dead until the
-      // next click). Plain-paragraph tab stops are future work (w:tab).
+      // Tab / Shift+Tab: table cells navigate; list paragraphs adjust nesting; normal text inserts tab.
       case "Tab": {
         event.preventDefault();
-        const { from, to } = active().editor.state.selection;
+        const { from, to, $from } = active().editor.state.selection;
+        // 1. Table navigation: Tab moves to next cell; in the last cell, it inserts a new row below.
+        const $cell = cellAt($from);
+        if ($cell) {
+          const adj = adjacentCellPos(active().editor.state, event.shiftKey ? -1 : 1);
+          if (adj) {
+            if (adj.isLastInTable) {
+              if (editable) {
+                active().editor.commands["insert-row-below"]?.();
+              }
+            } else {
+              setSel(TextSelection.near(active().editor.state.doc.resolve(adj.pos)).from);
+            }
+          }
+          break;
+        }
+        // 2. List paragraphs: Tab / Shift+Tab adjusts nesting level (Word).
         const patches: { pos: number; patch: Record<string, unknown> }[] = [];
         active().editor.state.doc.nodesBetween(from, to, (node, pos) => {
           if (node.type.name !== "paragraph") return true;
@@ -1688,6 +1755,18 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
             dispatch?.(tr.scrollIntoView());
             return true;
           });
+          break;
+        }
+        // 3. Normal paragraphs: insert tab character or node
+        if (editable && !event.shiftKey) {
+          if (active().editor.state.schema.nodes.tab) {
+            active().editor.commands.command(({ state, dispatch }) => {
+              dispatch?.(state.tr.replaceSelectionWith(state.schema.nodes.tab.create()));
+              return true;
+            });
+          } else {
+            insertText("\t");
+          }
         }
         break;
       }
@@ -1923,7 +2002,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       return leaveStory();
     },
     scrollIntoView(pos): void {
-      scrollTo(pos);
+      scrollIntoView(pos);
     },
     /** The page index a doc position renders on (null when unmappable). */
     pageOf(pos): number | null {

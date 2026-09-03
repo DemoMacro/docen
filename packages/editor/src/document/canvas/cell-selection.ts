@@ -173,17 +173,19 @@ export class CellSelection extends Selection {
     cellsInRect(this.$from.doc, this.anchorCell, this.headCell, f);
   }
 
-  /** Word's cell delete: every selected cell's content empties out (one
-   *  blank paragraph each), the grid itself survives. */
+  /** A cell selection's delete empties the selected cells (to one
+   *  blank paragraph each), the grid itself survives, preserving cell attrs. */
   replace(tr: Transaction, _content: Slice = Slice.empty): void {
     const { nodes } = tr.doc.type.schema;
-    const emptyCell = nodes.tableCell?.createAndFill();
-    if (!emptyCell) return;
-    const visited: { pos: number; size: number }[] = [];
-    this.forEachCell((node, pos) => visited.push({ pos, size: node.nodeSize }));
+    if (!nodes.tableCell) return;
+    const visited: { pos: number; size: number; attrs: Record<string, unknown> }[] = [];
+    this.forEachCell((node, pos) =>
+      visited.push({ pos, size: node.nodeSize, attrs: node.attrs as Record<string, unknown> }),
+    );
     for (let i = visited.length - 1; i >= 0; i -= 1) {
-      const { pos, size } = visited[i]!;
-      tr.replaceWith(pos, pos + size, emptyCell);
+      const { pos, size, attrs } = visited[i]!;
+      const emptyCell = nodes.tableCell.createAndFill(attrs);
+      if (emptyCell) tr.replaceWith(pos, pos + size, emptyCell);
     }
     // A caret near the range's old start — replacements shifted the cells,
     // so `near` clamps into the first emptied one.
