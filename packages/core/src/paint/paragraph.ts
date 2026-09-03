@@ -376,21 +376,9 @@ export function paintParagraph(
       } else if (item.kind === "tab" && inline.kind === "tab") {
         if (item.leader && item.widthPx > 1) {
           // Leader fill across the tab's advance (a TOC's dot row). The glyph
-          // metrics come from the line's text — the tab atom carries no style.
-          let sizePx = 0;
-          let color = "#1b1b1b";
-          for (const other of line.items) {
-            const src = para.inline[other.inlineIndex];
-            if (src?.kind === "text") {
-              // Raised/lowered runs count at their scaled size — a footnote
-              // reference must not pull the leader dots up.
-              const px = vertAlignedSizePx(src.style);
-              if (px > sizePx) {
-                sizePx = px;
-                color = src.style.color ? `#${src.style.color}` : color;
-              }
-            }
-          }
+          // metrics come from the line's dominant run — the tab atom carries
+          // no style of its own.
+          const { sizePx, color } = dominantRunOf(para, line, 0, "#1b1b1b");
           if (sizePx > 0) paintTabLeader(tree, item, lineX, lineY, pad, sizePx, color);
         }
       }
@@ -448,6 +436,33 @@ function paragraphMarkState(para: LaidOutParagraph): ParagraphMarkState {
   return { cursor: 0, broken: false, fullText };
 }
 
+/** The line's dominant run — the largest text run by vert-align-scaled size,
+ *  blank runs skipped; the tab leader's dots and the formatting marks both
+ *  ride its size and color (the tab atom carries no style, the marks ride
+ *  the text's own). `floorPx`/`fallback` are the caller's defaults — the ¶
+ *  strut and ink — kept when no run beats them. */
+function dominantRunOf(
+  para: LaidOutParagraph,
+  line: LaidOutLine,
+  floorPx: number,
+  fallback: string,
+): { sizePx: number; color: string } {
+  let sizePx = floorPx;
+  let color = fallback;
+  for (const other of line.items) {
+    const src = para.inline[other.inlineIndex];
+    if (src?.kind !== "text" || !(src.text ?? "").trim()) continue;
+    // Raised/lowered runs count at their scaled size — a footnote reference
+    // must not pull the leader dots up.
+    const px = vertAlignedSizePx(src.style);
+    if (px > sizePx) {
+      sizePx = px;
+      color = src.style.color ? `#${src.style.color}` : color;
+    }
+  }
+  return { sizePx, color };
+}
+
 /** One line's formatting marks (Word's ¶ toggle): the bent arrow at every
  *  line end — a soft break or the paragraph's final line (the paragraph mark
  *  rides the project's arrow style, not Word's ¶) — while a section-end
@@ -471,16 +486,9 @@ function paintLineMarks(
 ): void {
   // The line's dominant run style — the end-of-line marks ride it like the
   // tab leader; the color comes off that same run.
-  let sizePx = para.markSizePx ?? 0;
-  let color = "#000000";
-  for (const other of line.items) {
-    const src = para.inline[other.inlineIndex];
-    if (src?.kind !== "text" || !(src.text ?? "").trim()) continue;
-    const px = vertAlignedSizePx(src.style);
-    if (px > sizePx) sizePx = px;
-    if (src.style.color) color = `#${src.style.color}`;
-  }
-  if (sizePx <= 0) sizePx = 12;
+  const dominant = dominantRunOf(para, line, para.markSizePx ?? 0, "#000000");
+  const sizePx = dominant.sizePx > 0 ? dominant.sizePx : 12;
+  const color = dominant.color;
 
   // Space dots: Word centers a dim dot in each space. Pretext trims the
   // inter-word spaces out of the laid items — they live on as the gaps
@@ -735,9 +743,6 @@ const TAB_LEADER_STYLES: Record<
   hyphen: { dash: [3, 2.5], widthPx: 1 },
   underscore: { widthPx: 1, underside: true },
 };
-
-/** The page-local box a drawing's anchor spec resolves to — the single
- *  implementation behind both the painter and the hit recorder, so what a
 
 /** The font family a text slice paints in: the measurement side's slot pick
  *  (cssFontOf builds `, serif` on top of it — layout, caret map and paint

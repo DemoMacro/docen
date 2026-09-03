@@ -213,14 +213,16 @@ export function paintMembers(
       // layered App canvases, whose destinations are transparent — not the
       // underlying members a ternary raster-op needs.
       const run: Extract<LayoutDrawingMember, { kind: "picture" }>[] = [m];
+      let runHasBlend = !!m.blend;
       let end = i + 1;
       while (end < members.length) {
         const cur = members[end];
         if (cur.kind !== "picture" || !cur.src || cur.crop) break;
         run.push(cur);
+        runHasBlend ||= !!cur.blend;
         end++;
       }
-      if (run.some((p) => p.blend)) {
+      if (runHasBlend) {
         // A masked layer is meaningful only inside a composited run: painted
         // alone its opaque mask background (SRCPAINT halves are black-backed)
         // would lay a black slab over the page. A run of one blends against
