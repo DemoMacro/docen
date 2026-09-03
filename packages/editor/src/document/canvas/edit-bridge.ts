@@ -511,10 +511,12 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
 
   /** A viewport point → the hit page and its page-local coordinates (in
    *  semantic page px — the caret map knows nothing of the zoom). Pure frame
-   *  geometry: story routing decides what a hit means. */
+   *  geometry: story routing decides what a hit means. When clamp is true,
+   *  out-of-bounds coordinates clamp to the nearest page edges (used for dragging). */
   const hitPage = (
     clientX: number,
     clientY: number,
+    clamp = false,
   ): { page: number; lx: number; ly: number } | null => {
     const hostRect = opts.host.getBoundingClientRect();
     const x = clientX - hostRect.left;
@@ -530,7 +532,22 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
         return { page: p, lx: lx / scale, ly: ly / scale };
       }
     }
-    return null;
+    if (!clamp || main.pageCount === 0) return null;
+    let best: { page: number; lx: number; ly: number; dist: number } | null = null;
+    for (let p = 0; p < main.pageCount; p++) {
+      const frame = opts.pageHost?.(p);
+      if (!frame) continue;
+      const r = frame.getBoundingClientRect();
+      const rawLx = x - (r.left - hostRect.left);
+      const rawLy = y - (r.top - hostRect.top);
+      const clampedLx = Math.max(0, Math.min(r.width, rawLx));
+      const clampedLy = Math.max(0, Math.min(r.height, rawLy));
+      const dist = rawLy < 0 ? -rawLy : rawLy > r.height ? rawLy - r.height : 0;
+      if (!best || dist < best.dist) {
+        best = { page: p, lx: clampedLx / scale, ly: clampedLy / scale, dist };
+      }
+    }
+    return best ? { page: best.page, lx: best.lx, ly: best.ly } : null;
   };
 
   const setSel = (pos: number, anchor?: number): void => {
@@ -635,9 +652,9 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
 
   /** A viewport point → the active story's doc position (furniture stories
    *  map through their single pseudo page). */
-  const posAtClient = (clientX: number, clientY: number): number | null => {
+  const posAtClient = (clientX: number, clientY: number, clamp = false): number | null => {
     const s = active();
-    const hit = hitPage(clientX, clientY);
+    const hit = hitPage(clientX, clientY, clamp);
     if (!hit || !s.map?.valid) return null;
     return s.map.posAtPoint(story ? 0 : hit.page, hit.lx, hit.ly);
   };
@@ -839,7 +856,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       return;
     }
     dragMoved = true;
-    const head = posAtClient(event.clientX, event.clientY);
+    const head = posAtClient(event.clientX, event.clientY, true);
     if (head != null) setDragSelection(dragAnchor, head);
   };
   const onMouseUp = (): void => {
@@ -847,7 +864,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     dragMoved = false;
     dragStart = null;
   };
-  opts.host.addEventListener("mousemove", onMouseMove);
+  document.addEventListener("mousemove", onMouseMove);
   document.addEventListener("mouseup", onMouseUp);
 
   /** Enter a furniture story: a second viewless editor over the slot's
@@ -952,10 +969,8 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     // preventDefault keeps the click from blurring on mousedown; the caret
     // placement below is the real focus move.
     event.preventDefault();
-    // A right-click only opens the context menu — its mousedown must not
-    // disturb the selection (Word keeps a selection right-clicked inside it;
-    // clicking elsewhere moves the caret from the menu handler, not here).
-    if (event.button === 2) return;
+    // Only left-click moves caret or creates selection (ignore right-click and middle-click).
+    if (event.button !== 0) return;
     if (composing) return;
     // Park the textarea at the click point BEFORE focusing it (anchors the
     // IME window at the click; it no longer sits in the scroll container, so
@@ -984,6 +999,9 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
           if (pos != null) {
             if (clicks >= 2) {
               setSelClick(pos, clicks);
+              dragAnchor = active().editor.state.selection.anchor;
+              dragStart = { x: event.clientX, y: event.clientY };
+              dragMoved = false;
             } else {
               setSel(pos);
               dragAnchor = pos;
@@ -997,6 +1015,9 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
           if (pos != null) {
             if (clicks >= 2) {
               setSelClick(pos, clicks);
+              dragAnchor = active().editor.state.selection.anchor;
+              dragStart = { x: event.clientX, y: event.clientY };
+              dragMoved = false;
             } else {
               setSel(pos);
               dragAnchor = pos;
@@ -1059,6 +1080,9 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     if (pos != null) {
       if (clicks >= 2) {
         setSelClick(pos, clicks);
+        dragAnchor = active().editor.state.selection.anchor;
+        dragStart = { x: event.clientX, y: event.clientY };
+        dragMoved = false;
       } else {
         setSel(pos);
         dragAnchor = pos;
@@ -1254,6 +1278,41 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     return $near.from === pos ? null : $near.from;
   };
 
+  /** One word step horizontally from a position — Latin/digit words, CJK ideographs,
+   *  or punctuation runs, stepping across blocks when at the edge. */
+  const wordStep = (state: Editor["state"], pos: number, dir: -1 | 1): number | null => {
+    const $from = state.doc.resolve(pos);
+    const text = $from.parent.textBetween(0, $from.parent.content.size, undefined, "￼");
+    const offset = $from.parentOffset;
+    if (dir > 0) {
+      if (offset >= text.length) {
+        const after = $from.after();
+        if (after >= state.doc.content.size) return null;
+        return TextSelection.near(state.doc.resolve(after), 1).from;
+      }
+      let i = offset;
+      const initialCls = charClass(text[i]!);
+      if (initialCls !== 0) {
+        while (i < text.length && charClass(text[i]!) === initialCls) i++;
+      }
+      while (i < text.length && charClass(text[i]!) === 0) i++;
+      return pos + (i - offset);
+    } else {
+      if (offset <= 0) {
+        const before = $from.before();
+        if (before <= 0) return null;
+        return TextSelection.near(state.doc.resolve(before), -1).from;
+      }
+      let i = offset;
+      while (i > 0 && charClass(text[i - 1]!) === 0) i--;
+      if (i > 0) {
+        const cls = charClass(text[i - 1]!);
+        while (i > 0 && charClass(text[i - 1]!) === cls) i--;
+      }
+      return pos - (offset - i);
+    }
+  };
+
   /** A line's boundary position off the caret map (the only place the wrap
    *  geometry lives); unmapped falls back to the block's boundaries. */
   const edgeTarget = (state: Editor["state"], pos: number, toEnd: boolean): number => {
@@ -1344,6 +1403,54 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
         );
         return;
       }
+      // Mod cursor navigation
+      const extend = event.shiftKey;
+      const head = () => active().editor.state.selection.head;
+      if (key === "ArrowLeft") {
+        event.preventDefault();
+        apply(wordStep(active().editor.state, head(), -1), extend);
+        return;
+      }
+      if (key === "ArrowRight") {
+        event.preventDefault();
+        apply(wordStep(active().editor.state, head(), 1), extend);
+        return;
+      }
+      if (key === "Home") {
+        event.preventDefault();
+        apply(TextSelection.near(active().editor.state.doc.resolve(0), 1).from, extend);
+        return;
+      }
+      if (key === "End") {
+        event.preventDefault();
+        apply(
+          TextSelection.near(
+            active().editor.state.doc.resolve(active().editor.state.doc.content.size),
+            -1,
+          ).from,
+          extend,
+        );
+        return;
+      }
+      if (key === "ArrowUp") {
+        event.preventDefault();
+        const $from = active().editor.state.doc.resolve(head());
+        const target =
+          head() > $from.start() ? $from.start() : hStep(active().editor.state, $from.start(), -1);
+        apply(target, extend);
+        return;
+      }
+      if (key === "ArrowDown") {
+        event.preventDefault();
+        const $from = active().editor.state.doc.resolve(head());
+        const next = $from.after();
+        const target =
+          next < active().editor.state.doc.content.size
+            ? TextSelection.near(active().editor.state.doc.resolve(next), 1).from
+            : $from.end();
+        apply(target, extend);
+        return;
+      }
       // Viewless editors have no EditorView, so nothing dispatches Tiptap's
       // per-extension keyboard shortcuts — match the shared table here (the
       // DocenKeymap extension serves the same table on a DOM route). Named
@@ -1392,6 +1499,28 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
         event.preventDefault();
         apply(edgeTarget(active().editor.state, head(), true), extend);
         break;
+      case "PageUp": {
+        event.preventDefault();
+        let target: number | null = head();
+        for (let i = 0; i < 15; i++) {
+          const next = vStep(target, -1);
+          if (next == null) break;
+          target = next;
+        }
+        apply(target, extend);
+        break;
+      }
+      case "PageDown": {
+        event.preventDefault();
+        let target: number | null = head();
+        for (let i = 0; i < 15; i++) {
+          const next = vStep(target, 1);
+          if (next == null) break;
+          target = next;
+        }
+        apply(target, extend);
+        break;
+      }
       // Leaving a furniture story (Word: Esc = Close Header and Footer).
       case "Escape":
         if (story) {

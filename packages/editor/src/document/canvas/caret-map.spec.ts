@@ -350,4 +350,46 @@ describe("CaretMap tolerant zip", () => {
     expect(map.posAtPoint(0, 5, 155)).toBe(12);
     expect(map.caretRect(12)?.yPx).toBe(150);
   });
+
+  it("navigates posVertical across paragraph boundaries", () => {
+    // Two paragraphs: "Hello" (pos 1..6) and "World" (pos 8..13).
+    const { doc } = buildDoc(["Hello", "World"]);
+    const map = new CaretMap(
+      pageOf([
+        fakePara([{ text: "Hello", xPx: 0, yPx: 0, maxWidthPx: 100 }]),
+        fakePara([{ text: "World", xPx: 0, yPx: 50, maxWidthPx: 100 }]),
+      ]) as never,
+      doc,
+      () => ({ contentLeftPx: 0, contentTopPx: 0 }),
+    );
+    expect(map.valid).toBe(true);
+    // From inside first paragraph, stepping down lands in the second paragraph at the same column.
+    // 'H' is at pos 1, stepping down lands at 'W' at pos 8.
+    expect(map.posVertical(1, 1)).toBe(8);
+    // 'l' (second l) is at pos 4, stepping down lands at 'l' at pos 11.
+    expect(map.posVertical(4, 1)).toBe(11);
+    // From second paragraph, stepping up lands in the first paragraph.
+    expect(map.posVertical(8, -1)).toBe(1);
+    expect(map.posVertical(11, -1)).toBe(4);
+    // Top-edge and bottom-edge return null.
+    expect(map.posVertical(1, -1)).toBeNull();
+    expect(map.posVertical(8, 1)).toBeNull();
+  });
+
+  it("resolves clicks in empty space far below text to the nearest line", () => {
+    const { doc } = buildDoc(["Single line at top"]);
+    const map = new CaretMap(
+      pageOf([
+        fakePara([{ text: "Single line at top", xPx: 0, yPx: 0, maxWidthPx: 200 }]),
+      ]) as never,
+      doc,
+      () => ({ contentLeftPx: 0, contentTopPx: 0 }),
+    );
+    expect(map.valid).toBe(true);
+    // Click at y=500 (far below the line at y=0, dist = 480 > 40).
+    // Should resolve to the line rather than returning null.
+    const pos = map.posAtPoint(0, 50, 500);
+    expect(pos).not.toBeNull();
+    expect(pos).toBeGreaterThanOrEqual(1);
+  });
 });

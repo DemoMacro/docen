@@ -133,6 +133,8 @@ export interface CanvasStageContext {
   background?: ProjectedPageBackground;
   /** The break rows' labels in the UI language (Word paints them localized). */
   marksLabels?: { pageBreak?: string; sectionBreak?: string };
+  /** Callback when Ctrl/Cmd + wheel zoom is triggered over canvas. */
+  onZoomDelta?: (delta: number) => void;
 }
 
 export class CanvasStage {
@@ -167,7 +169,21 @@ export class CanvasStage {
     // (app-config flags do not stop that), which would kill the browser's
     // default scrolling of the outer container. Cut the event before it
     // reaches the canvases — the pages scroll as one document surface.
-    this.shell.addEventListener("wheel", (event) => event.stopPropagation(), { capture: true });
+    // If Ctrl/Cmd is pressed, pinch-to-zoom / Ctrl+Wheel adjusts document zoom.
+    this.shell.addEventListener(
+      "wheel",
+      (event) => {
+        if (event.ctrlKey || event.metaKey) {
+          event.preventDefault();
+          event.stopPropagation();
+          const delta = event.deltaY < 0 ? 10 : -10;
+          this.ctx.onZoomDelta?.(delta);
+          return;
+        }
+        event.stopPropagation();
+      },
+      { capture: true, passive: false },
+    );
     stage.append(this.shell);
     this.io = new IntersectionObserver(
       (records) => {

@@ -479,7 +479,6 @@ export class CaretMap {
       const dist = within
         ? 0
         : Math.min(Math.abs(y - entry.yPx), Math.abs(y - (entry.yPx + entry.line.heightPx)));
-      if (dist > 40) continue;
       // Table columns share one y band — x proximity breaks the tie, else
       // every click in the row lands on the first cell's paragraph.
       const items = entry.line.items;
@@ -497,18 +496,19 @@ export class CaretMap {
   /** The position one line above/below a position's line, at the same
    *  character column (clamped to the target line's length — the Word goal
    *  column; a pixel target would drift across differently stretched
-   *  justified lines). Null at the paragraph's vertical edge. */
+   *  justified lines). Null at the document's vertical edge. */
   posVertical(pos: number, dir: -1 | 1): number | null {
     const located = this.locate(pos);
     if (!located) return null;
-    const lines = located.entry.lines;
-    const target = lines[lines.indexOf(located.line) + dir];
+    const lineIndex = this.lines.indexOf(located.line);
+    if (lineIndex < 0) return null;
+    const target = this.lines[lineIndex + dir];
     if (!target) return null;
     const col = Math.min(
       located.offset - located.line.startChar,
       target.endChar - target.startChar,
     );
-    return this.posOfChar(located.entry, target.startChar + col);
+    return this.posOfChar(target.owner, target.startChar + col);
   }
 
   /** The vertical caret box of a line — anchored where the painter actually

@@ -100,7 +100,7 @@ export function paintParagraph(
           y: y - (top.spacePx ?? 0),
           width: Math.max(0, boxRight - x),
           height: top.px,
-          fill: "#1b1b1b",
+          fill: top.color ? `#${top.color}` : "#1b1b1b",
         }),
       );
     }
@@ -111,7 +111,7 @@ export function paintParagraph(
           y: y + para.heightPx + (bottom.spacePx ?? 0) - bottom.px,
           width: Math.max(0, boxRight - x),
           height: bottom.px,
-          fill: "#1b1b1b",
+          fill: bottom.color ? `#${bottom.color}` : "#1b1b1b",
         }),
       );
     }
@@ -123,7 +123,13 @@ export function paintParagraph(
         (live(bottom) ? (bottom.spacePx ?? 0) : 0);
       if (live(left)) {
         tree.add(
-          new Rect({ x: x - (left.spacePx ?? 0), y: y0, width: left.px, height, fill: "#1b1b1b" }),
+          new Rect({
+            x: x - (left.spacePx ?? 0),
+            y: y0,
+            width: left.px,
+            height,
+            fill: left.color ? `#${left.color}` : "#1b1b1b",
+          }),
         );
       }
       if (live(right)) {
@@ -133,7 +139,7 @@ export function paintParagraph(
             y: y0,
             width: right.px,
             height,
-            fill: "#1b1b1b",
+            fill: right.color ? `#${right.color}` : "#1b1b1b",
           }),
         );
       }
@@ -694,9 +700,6 @@ const TAB_LEADER_STYLES: Record<
   hyphen: { dash: [3, 2.5], widthPx: 1 },
   underscore: { widthPx: 1, underside: true },
 };
-
-/** The page-local box a drawing's anchor spec resolves to — the single
- *  implementation behind both the painter and the hit recorder, so what a
 
 /** The font family a text slice paints in: the measurement side's slot pick
  *  (cssFontOf builds `, serif` on top of it — layout, caret map and paint

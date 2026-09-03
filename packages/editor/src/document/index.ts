@@ -1305,6 +1305,7 @@ class DocenDocument extends AddinHost<Editor> {
       sections: run.sections,
       sectionOfPage: run.sectionOfPage,
       background: run.background,
+      onZoomDelta: (delta) => this.#setZoom(this.#zoom + delta),
     });
     this.#stage.setMarksLabels({
       pageBreak: t("marks.pageBreak", this),
