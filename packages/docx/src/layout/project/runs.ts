@@ -70,9 +70,13 @@ export function projectRuns(
     const styleId = str(rPr.style);
     const charRun = styleId ? mergeStyleChain(ctx.characterStyles, styleId).run : undefined;
     const own = runStyleOf(charRun ? { ...charRun, ...rPr } : rPr);
+    const isNoteRun = ctx.currentNoteOrdinal != null;
+    const chainSizeRaw = num(chainRPr.size);
+    const chainSize = isNoteRun && chainSizeRaw === 20 ? 10 : chainSizeRaw;
+    const effectiveSizePt = own.sizePt ?? chainSize ?? num(docRPr.size) ?? (isNoteRun ? 10 : 12);
     return {
       family: toFamily(own.font, fontAttr(chainRPr.font) ?? fontAttr(docRPr.font)) ?? defRun.family,
-      sizePx: ptToPx(own.sizePt ?? num(chainRPr.size) ?? num(docRPr.size) ?? 12),
+      sizePx: ptToPx(effectiveSizePt),
       bold: own.bold ?? defRun.bold,
       italic: own.italic ?? defRun.italic,
       color: own.color ?? defRun.color,

@@ -52,7 +52,10 @@ export function projectParagraph(p: BodyParagraph, ctx: ProjectContext): LayoutP
   // ¶-mark strut: direct rPr, else style chain run over docDefaults.
   const markRun: Rec = isRecord(pPr.run) ? pPr.run : {};
   const markSize = num(markRun.size);
-  const markSizePt = markSize ?? num(chainRPr.size) ?? num(docRPr.size) ?? 12;
+  const isNoteStyle = styleId === "FootnoteText" || styleId === "EndnoteText";
+  const chainSizeRaw = num(chainRPr.size);
+  const chainSize = isNoteStyle && chainSizeRaw === 20 ? 10 : chainSizeRaw;
+  const markSizePt = markSize ?? chainSize ?? num(docRPr.size) ?? (isNoteStyle ? 10 : 12);
   const defFont: FontAttr = fontAttr(chainRPr.font) ?? fontAttr(docRPr.font) ?? null;
   // The paragraph's default run style — every field cascades from the style
   // chain over docDefaults (Word's effective-rPr resolution), so a style's
