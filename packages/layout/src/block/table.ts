@@ -80,10 +80,12 @@ export function layoutTable(
       const hInsetPx = (insets.left ?? 0) + (insets.right ?? 0);
       // Under border-collapse the column width is the cell's BORDER box, so
       // text wraps at cellWidth − insets − side borders.
-      const leftEdge =
-        cell.borders?.left ?? (firstCol ? table.borders?.left : table.borders?.insideVertical);
-      const rightEdge =
-        cell.borders?.right ?? (lastCol ? table.borders?.right : table.borders?.insideVertical);
+      const { left: leftEdge, right: rightEdge } = horizontalEdgesOf(
+        cell,
+        table,
+        firstCol,
+        lastCol,
+      );
       const topEdge =
         cell.borders?.top ??
         (rowIndex === 0 ? table.borders?.top : table.borders?.insideHorizontal);
@@ -233,11 +235,16 @@ function autofitColumns(
       const span = cell.colspan ?? 1;
       if (span === 1 && col < content.length) {
         const insets = mergeInsets(cell.insets, table.cellInsets);
-        const frame =
-          (insets.left ?? 0) +
-          (insets.right ?? 0) +
-          edgeWidth(cell.borders?.left) +
-          edgeWidth(cell.borders?.right);
+        // The same table-level border fallback the wrap width uses below —
+        // a table-bordered cell (Table Grid) must charge its side borders
+        // to the column or the fit comes out a hair too narrow.
+        const { left, right } = horizontalEdgesOf(
+          cell,
+          table,
+          col === 0,
+          col + span >= grid.length,
+        );
+        const frame = (insets.left ?? 0) + (insets.right ?? 0) + edgeWidth(left) + edgeWidth(right);
         // A column without a grid entry measures unconstrained — content
         // starts from its own unwrapped width.
         const budget = grid[col]! > 0 ? grid[col]! - frame : 1e9;
@@ -293,6 +300,22 @@ function minWidthOfBlocks(
 function edgeWidth(edge: LayoutBorderEdge | undefined): number {
   if (!edge || edge.style === "nil" || edge.style === "none") return 0;
   return edge.px ?? 0;
+}
+
+/** A cell's horizontal border edges after the table-level fallback — the
+ *  grid rim (first/last column) takes the outer edges, interior boundaries
+ *  the inside one (CT_TblBorders semantics). Single source for the wrap
+ *  width and the autofit frame so both charge the same borders. */
+function horizontalEdgesOf(
+  cell: LayoutTable["rows"][number]["cells"][number],
+  table: LayoutTable,
+  firstCol: boolean,
+  lastCol: boolean,
+): { left: LayoutBorderEdge | undefined; right: LayoutBorderEdge | undefined } {
+  return {
+    left: cell.borders?.left ?? (firstCol ? table.borders?.left : table.borders?.insideVertical),
+    right: cell.borders?.right ?? (lastCol ? table.borders?.right : table.borders?.insideVertical),
+  };
 }
 
 /** A cell's own inset wins per side, else the table's default. */
