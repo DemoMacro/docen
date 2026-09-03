@@ -21,13 +21,28 @@ export * from "./paint/table";
 export * from "./paint/paragraph";
 
 export function paintScene(tree: IGroup, items: readonly FlowItem[], ctx: PaintContext): void {
+  const cols = columnBoxesOf(ctx.flow.contentWidthPx, ctx.columns);
   for (const item of items) {
+    const x = ctx.flow.contentLeftPx + (item.xPx ?? 0);
     paintBlock(
       tree,
       item.block,
-      ctx.flow.contentLeftPx + (item.xPx ?? 0),
+      x,
       ctx.flow.contentTopPx + item.yPx,
       ctx,
+      // A multi-column item paints within its column box: shading fills,
+      // paragraph borders and the break rows' rules span the column, not the
+      // whole content width (the table walk threads its cell width the same
+      // way). The interval match survives float drift between the flow's
+      // stamped x and the boxes recomputed here.
+      item.xPx != null
+        ? {
+            width:
+              cols.find((c) => item.xPx! >= c.xPx - 0.01 && item.xPx! < c.xPx + c.widthPx)
+                ?.widthPx ?? cols[0]!.widthPx,
+            inCell: false,
+          }
+        : undefined,
     );
   }
 }
@@ -144,7 +159,8 @@ export function paintBlock(
       if (ctx.layer === "behind") return;
       if (block.kind === "table") paintTable(tree, block, x, y, ctx);
       else if (block.kind === "placeholder") paintPlaceholder(tree, block, x, y);
-      else if (ctx.showMarks) paintBreakRow(tree, block, x, y, ctx.flow.contentWidthPx, ctx);
+      else if (ctx.showMarks)
+        paintBreakRow(tree, block, x, y, col?.width ?? ctx.flow.contentWidthPx, ctx);
       return;
     case "group":
       for (const child of block.children) {

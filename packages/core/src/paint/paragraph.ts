@@ -49,6 +49,10 @@ export function paintParagraph(
   ctx: PaintContext,
   col?: PaintColumn,
 ): void {
+  // The paragraph's right edge: the column/cell width when one was threaded
+  // down (a table cell's content box, a w:cols column), else the full content
+  // width. Shading, borders and the marks rules all stop here.
+  const boxRight = x + (col?.width ?? ctx.flow.contentWidthPx);
   // The stage composes a page in two passes; this one paints only its own
   // layer's drawings. Behind-doc floats land beneath the furniture pass.
   const behind = ctx.layer === "behind";
@@ -56,12 +60,11 @@ export function paintParagraph(
     // Paragraph shading (w:shd) fills the block box beneath everything else
     // the paragraph paints — behind-doc floats included, matching Word.
     if (para.shadingFill) {
-      const right = ctx.flow.contentLeftPx + ctx.flow.contentWidthPx;
       tree.add(
         new Rect({
           x,
           y,
-          width: Math.max(0, right - x),
+          width: Math.max(0, boxRight - x),
           height: para.heightPx,
           fill: `#${para.shadingFill}`,
         }),
@@ -92,7 +95,6 @@ export function paintParagraph(
     ): e is LayoutParagraphBorderEdge & { px: number } =>
       !!e?.px && e.style !== "nil" && e.style !== "none";
     const { top, right, bottom, left } = para.borders ?? {};
-    const boxRight = ctx.flow.contentLeftPx + ctx.flow.contentWidthPx;
     if (live(top)) {
       tree.add(
         new Rect({
@@ -395,7 +397,8 @@ export function paintParagraph(
     }
     // Formatting marks (Word's ¶ toggle) — drawn per line after its content,
     // above the glyphs, in the text's own color.
-    if (ctx.showMarks && marks) paintLineMarks(tree, para, line, lineX, lineY, pad, ctx, marks);
+    if (ctx.showMarks && marks)
+      paintLineMarks(tree, para, line, lineX, lineY, pad, ctx, marks, boxRight);
   }
   paintBorders();
   // Floating drawings anchored to this paragraph: wrap-none boxes painted
@@ -464,8 +467,8 @@ function paintLineMarks(
   pad: number,
   ctx: PaintContext,
   marks: ParagraphMarkState,
+  rightX: number,
 ): void {
-  const rightX = ctx.flow.contentLeftPx + ctx.flow.contentWidthPx;
   // The line's dominant run style — the end-of-line marks ride it like the
   // tab leader; the color comes off that same run.
   let sizePx = para.markSizePx ?? 0;
