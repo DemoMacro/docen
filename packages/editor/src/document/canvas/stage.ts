@@ -551,14 +551,20 @@ export class CanvasStage {
     const mount = (cls: string, style: Partial<CSSStyleDeclaration>, svg: string): void => {
       const div = document.createElement("div");
       div.className = cls;
-      Object.assign(div.style, {
-        position: "absolute",
-        pointerEvents: "none",
-        zIndex: "2",
-        background: "#fafbfc",
-        border: "1px solid #d8dce2",
-        ...style,
-      } satisfies Partial<CSSStyleDeclaration>);
+      // Two assign targets, not one spread object: the linter flags spreading
+      // a CSSStyleDeclaration-typed value (index-signature interface) into an
+      // object literal as an iterable spread.
+      Object.assign(
+        div.style,
+        {
+          position: "absolute",
+          pointerEvents: "none",
+          zIndex: "2",
+          background: "#fafbfc",
+          border: "1px solid #d8dce2",
+        } satisfies Partial<CSSStyleDeclaration>,
+        style,
+      );
       div.innerHTML = svg;
       frame.append(div);
     };
