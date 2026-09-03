@@ -392,11 +392,6 @@ class Flow {
     if (!this.tryPlace(laid)) this.commit(laid, this.spacingBefore(laid));
   }
 
-  /** Try to place `laid` on the current page; on overflow, split at a legal
-   *  boundary that fits (even on an empty page — a block taller than the page
-   *  still fills it). The room is the smaller of the page bottom and the
-   *  nearest cleared band top — lines resume below the band. Returns true
-   *  when anything was placed. */
   /** A grid picture line fits when its spanned rows fit the remaining row
    *  budget — Word quantizes the page fit at line-pitch granularity, so the
    *  padded span may cross the page bottom by the trailing partial row while
@@ -412,6 +407,11 @@ class Flow {
     return last.heightPx <= Math.ceil(room / pitch) * pitch;
   }
 
+  /** Try to place `laid` on the current page; on overflow, split at a legal
+   *  boundary that fits (even on an empty page — a block taller than the page
+   *  still fills it). The room is the smaller of the page bottom and the
+   *  nearest cleared band top — lines resume below the band. Returns true
+   *  when anything was placed. */
   private tryPlace(laid: LaidOutBlock): boolean {
     // Never place inside a cleared band — drop below it first (whether this
     // is a fresh push, a split tail, or a re-placed keepNext block).

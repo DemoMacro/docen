@@ -283,6 +283,13 @@ const LEAFER_BREAK_CHARS = new Set(["-", "—", "／", "～", "｜", "┆", "·"
  *  1.5 × pitch (34px); shrinking the header run to 12pt moves its bottom
  *  border from y215 to y204 (= 1.5 × pitch), confirming natural — not factor
  *  — drives the snap. */
+
+/** Round a height up to whole grid rows — the lattice snap every on-grid
+ *  branch applies (a CJK/picture/cell line always spans whole rows). */
+function snapUpToPitch(px: number, pitch: number): number {
+  return Math.ceil(px / pitch) * pitch;
+}
+
 function resolveLine(
   spec: LayoutLineHeight,
   naturalPx: number,
@@ -305,10 +312,10 @@ function resolveLine(
     if (inTable) {
       // A cell line's natural height still snaps up to whole rows before the
       // comparison against the multiple's demand (see resolveLine doc).
-      return Math.max(spec.factor * pitch, Math.ceil(naturalPx / pitch) * pitch);
+      return Math.max(spec.factor * pitch, snapUpToPitch(naturalPx, pitch));
     }
     const specH = spec.factor * pitch;
-    return Math.ceil(Math.max(specH, naturalPx) / pitch) * pitch;
+    return snapUpToPitch(Math.max(specH, naturalPx), pitch);
   }
   const single = pitch > 0 ? pitch : naturalPx;
   return spec.factor * single;
@@ -327,6 +334,6 @@ function snapLine(
   // pitch" compat raises it as far as the line demands, never just one pitch.
   // A picture-sized body line snaps the same way: the box spans whole rows
   // and gridPadOf half-leads the picture inside them.
-  if (inTable || hasCjk || hasPicture) return Math.ceil(naturalPx / pitch) * pitch;
+  if (inTable || hasCjk || hasPicture) return snapUpToPitch(naturalPx, pitch);
   return Math.max(naturalPx, pitch);
 }

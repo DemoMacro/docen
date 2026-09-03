@@ -44,7 +44,6 @@ export interface LayoutPictureCrop {
  *  the box and never loads it. A tab advances to the next stop: the explicit
  *  `toPx` (a numbering bullet's hop to the body text), the paragraph's
  *  `tabStops`, or the default grid (720 twips). */
-
 export type LayoutInline =
   /** A `field` marker makes the text a dynamic page-number atom (w:fldSimple /
    *  complexField PAGE / NUMPAGES): the value only exists after pagination, so

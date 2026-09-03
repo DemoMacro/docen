@@ -3,6 +3,16 @@ import type { LayoutPictureCrop } from "./inline";
 
 // ── floating drawings (anchored shape groups) ──
 
+/** One member's outline stroke (a:ln): width px + hex color plus the line-
+ *  dressing tokens (cap/join full-word, dash the prstDash token). */
+export interface LayoutDrawingLine {
+  px: number;
+  color?: string;
+  cap?: "round" | "square" | "flat";
+  join?: "round" | "bevel" | "miter";
+  dash?: string;
+}
+
 /** One absolutely-positioned member of a floating drawing. Coordinates and
  *  sizes are px in the drawing's own box (top-left corner the origin) — the
  *  adapter already resolved the group's child coordinate space (chOff/chExt
@@ -41,7 +51,7 @@ export type LayoutDrawingMember =
        *  absent → fully opaque. Fades the fill only, never the stroke. */
       opacity?: number;
       /** Outline stroke: width in px + hex color (absent color → ink). */
-      line?: { px: number; color?: string };
+      line?: LayoutDrawingLine;
     }
   | {
       kind: "path";
@@ -57,13 +67,7 @@ export type LayoutDrawingMember =
       /** Solid fill, hex RRGGBB; absent → no fill. */
       fill?: string;
       /** Outline stroke (a:ln): width px + hex color + cap/join/dash. */
-      line?: {
-        px: number;
-        color?: string;
-        cap?: "round" | "square" | "flat";
-        join?: "round" | "bevel" | "miter";
-        dash?: string;
-      };
+      line?: LayoutDrawingLine;
     }
   | {
       kind: "textBox";
@@ -76,16 +80,9 @@ export type LayoutDrawingMember =
       fill?: string;
       /** Fill opacity 0-1 (the solid color's a:alpha percent ÷ 100). */
       opacity?: number;
-      /** The shape's outline stroke (a:ln): width px + hex color + the line-
-       *  dressing tokens (cap/join full-word, dash the prstDash token). Word
-       *  draws the txbx box even when the body is empty. */
-      line?: {
-        px: number;
-        color?: string;
-        cap?: "round" | "square" | "flat";
-        join?: "round" | "bevel" | "miter";
-        dash?: string;
-      };
+      /** The shape's outline stroke (a:ln). Word draws the txbx box even
+       *  when the body is empty. */
+      line?: LayoutDrawingLine;
       /** Preset geometry (a:prstGeom @prst) — a txbx can live in any shape
        *  (a text-carrying ellipse); the box paints in that shape. */
       preset?: string;
@@ -151,13 +148,14 @@ export interface LayoutDrawing {
   height: number;
   members: LayoutDrawingMember[];
   /** w:wrap — how text flows around the box. Absent (wrapNone) paints over
-   *  or under the text without affecting the flow; "square"/"tight" shrink
-   *  the lines the box overlaps (tight reduces to square's rectangle — a
-   *  contour pass is a registered gap); "topAndBottom" clears the band. */
+   *  or under the text without affecting the flow; "square" shrinks the lines
+   *  the box overlaps, "tight" the same lines sliced along `contour` (square's
+   *  rectangle without one); "topAndBottom" clears the band. */
   wrap?: "square" | "tight" | "topAndBottom";
   /** ST_WrapSide (w:wrap @side): which side of the box takes text. "right"
-   *  (or "largest" with the wider right side) moves the wrapped lines past
-   *  the box's right edge; "left"/"both" pack from the left as usual. */
+   *  moves the wrapped lines past the box's right edge; "left" keeps them on
+   *  the left no matter what; "both"/"largest" take the wider side per line
+   *  (Word's two-sided wrap approximated — a line packs on one side). */
   wrapSide?: "both" | "left" | "right" | "largest";
   /** wrapTight/through contour (wp:wrapPolygon points) in px, relative to
    *  the drawing box's top-left — the adapter scaled them out of Word's
