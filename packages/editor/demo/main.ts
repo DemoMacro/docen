@@ -91,7 +91,12 @@ const demoDocument = (): JSONContent => ({
           { type: "link", attrs: { href: "https://github.com/DemoMacro/docen", target: "_blank" } },
           { type: "textStyle", attrs: { style: "Hyperlink" } },
         ]),
-        t(" (the link blue comes from the Hyperlink character style, matching Word)."),
+        t(" (the link blue comes from the Hyperlink character style, matching Word)"),
+        {
+          type: "inlinePassthrough",
+          attrs: { data: JSON.stringify({ footnoteReference: 1 }) },
+        },
+        t("."),
       ],
     },
     {
@@ -278,7 +283,27 @@ const demoDocument = (): JSONContent => ({
       ],
     },
   ],
-  attrs: { sectionProperties: { columns: { count: 2, space: 360, separate: true } } },
+  attrs: {
+    sectionProperties: { columns: { count: 2, space: 360, separate: true } },
+    documentExtras: {
+      footnotes: [
+        {
+          id: 1,
+          children: [
+            {
+              style: "FootnoteText",
+              children: [
+                { footnoteRef: true },
+                {
+                  text: " Open-source Word document engine with full canvas rendering and typesetting.",
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  },
 });
 
 // The UI language follows the browser (the library itself has no navigator

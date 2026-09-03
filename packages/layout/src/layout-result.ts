@@ -235,3 +235,22 @@ export type LaidOutBlock =
   | LaidOutGroup
   | LaidOutPlaceholder
   | LaidOutPageBreak;
+
+/** One laid footnote note at the bottom of a page. */
+export interface LaidOutFootnoteNote {
+  id: number;
+  ordinal: number;
+  stack: LaidOutStackItem[];
+  heightPx: number;
+}
+
+/** The footnote area at the bottom of a page: the separator line and notes. */
+export interface LaidOutFootnoteArea {
+  /** Page-local content-box Y coordinate where the separator starts. */
+  yPx: number;
+  /** Width of the footnote separator line in px (Word default: 192 px / 2 in). */
+  separatorWidthPx: number;
+  notes: LaidOutFootnoteNote[];
+  items: LaidOutStackItem[];
+  totalHeightPx: number;
+}

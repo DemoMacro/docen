@@ -44,6 +44,13 @@ export interface LayoutPictureCrop {
  *  the box and never loads it. A tab advances to the next stop: the explicit
  *  `toPx` (a numbering bullet's hop to the body text), the paragraph's
  *  `tabStops`, or the default grid (720 twips). */
+
+export interface LayoutInlineNoteRef {
+  kind: "footnote" | "endnote";
+  id: number;
+  ordinal: number;
+}
+
 export type LayoutInline =
   /** A `field` marker makes the text a dynamic page-number atom (w:fldSimple /
    *  complexField PAGE / NUMPAGES): the value only exists after pagination, so
@@ -62,6 +69,9 @@ export type LayoutInline =
        *  (a numbering bullet's glyph): the editor's caret/selection mapping
        *  must not count it against the paragraph's text positions. */
       synthetic?: boolean;
+      /** Note reference metadata (Word's FootnoteReference / EndnoteReference).
+       *  The paginator reads this to anchor footnotes to the page where this run lands. */
+      noteRef?: LayoutInlineNoteRef;
     }
   | { kind: "break" }
   | { kind: "tab"; toPx?: number }

@@ -30,4 +30,7 @@ export interface ProjectContext {
    *  settings.xml resolved once here) — every paragraph's tabs fall back to
    *  it past the last explicit stop. */
   defaultTabStopPx?: number;
+  /** The ordinal of the footnote/endnote currently being projected, so its
+   *  footnoteRef/endnoteRef mark runs pick up the matching note number. */
+  currentNoteOrdinal?: number;
 }

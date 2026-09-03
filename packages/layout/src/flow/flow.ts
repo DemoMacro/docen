@@ -17,7 +17,7 @@
 //   contains its first `before` and last `after`, middles collapse at the
 //   max — one vertical-margin model shared with table cells.
 
-import { layoutBlock } from "../block/block";
+import { layoutBlock, stackBlocks } from "../block/block";
 import { fitExtentPx } from "../block/geometry";
 import {
   type LayoutBlock,
@@ -29,6 +29,8 @@ import {
 import type {
   LaidOutBlock,
   LaidOutCell,
+  LaidOutFootnoteArea,
+  LaidOutFootnoteNote,
   LaidOutLine,
   LaidOutParagraph,
   LaidOutRow,
@@ -50,6 +52,8 @@ export interface FlowItem {
 
 export interface FlowPage {
   items: FlowItem[];
+  /** Footnotes placed at the bottom of this page (absent when none). */
+  footnotes?: LaidOutFootnoteArea;
 }
 
 /** Furniture-driven body insets for one page slot (px, measured from the
@@ -83,6 +87,10 @@ export interface FlowOptions {
    *  the flow fills left to right before paging. Absent = one full-width
    *  column. */
   columns?: ProjectedColumns;
+  /** Footnote id → definition blocks (absent when document has no footnotes). */
+  footnoteDefinitions?: Map<number, readonly LayoutBlock[]>;
+  /** Endnote id → definition blocks (absent when document has no endnotes). */
+  endnoteDefinitions?: Map<number, readonly LayoutBlock[]>;
 }
 
 /** Lay a block flow into pages. Always returns at least one page (an empty
@@ -159,6 +167,62 @@ export function layoutFlowSections(
   return { pages, sectionOfPage };
 }
 
+/** Footnote separator width in px (Word default: 2 inches = 144 pt = 192 px). */
+export const FOOTNOTE_SEPARATOR_WIDTH_PX = 192;
+/** Height of the footnote separator stroke and spacing (px):
+ *  10px space before separator line, 1px line, 6px space after before first note. */
+export const FOOTNOTE_SEPARATOR_HEIGHT_PX = 17;
+
+function noteRefsInBlock(block: LaidOutBlock): { id: number; ordinal: number }[] {
+  if (block.kind === "paragraph") {
+    const refs: { id: number; ordinal: number }[] = [];
+    const seen = new Set<number>();
+    for (const line of block.lines) {
+      for (const item of line.items) {
+        const inl = block.inline[item.inlineIndex];
+        if (inl?.kind === "text" && inl.noteRef?.kind === "footnote") {
+          if (!seen.has(inl.noteRef.id)) {
+            seen.add(inl.noteRef.id);
+            refs.push({ id: inl.noteRef.id, ordinal: inl.noteRef.ordinal });
+          }
+        }
+      }
+    }
+    return refs;
+  }
+  if (block.kind === "table") {
+    const refs: { id: number; ordinal: number }[] = [];
+    const seen = new Set<number>();
+    for (const row of block.rows) {
+      for (const cell of row.cells) {
+        for (const item of cell.stack) {
+          for (const r of noteRefsInBlock(item.block)) {
+            if (!seen.has(r.id)) {
+              seen.add(r.id);
+              refs.push(r);
+            }
+          }
+        }
+      }
+    }
+    return refs;
+  }
+  if (block.kind === "group") {
+    const refs: { id: number; ordinal: number }[] = [];
+    const seen = new Set<number>();
+    for (const child of block.children) {
+      for (const r of noteRefsInBlock(child.block)) {
+        if (!seen.has(r.id)) {
+          seen.add(r.id);
+          refs.push(r);
+        }
+      }
+    }
+    return refs;
+  }
+  return [];
+}
+
 class Flow {
   private readonly pages: FlowPage[] = [];
   private readonly items: FlowItem[] = [];
@@ -187,6 +251,15 @@ class Flow {
    *  box and every column branch below short-circuits. */
   private readonly cols: { xPx: number; widthPx: number }[];
   private colIndex = 0;
+  /** Cached laid footnote stacks (id → stack, height, ordinal). */
+  private readonly laidFootnoteCache = new Map<
+    number,
+    { stack: LaidOutStackItem[]; heightPx: number; ordinal: number }
+  >();
+  /** Footnote IDs referenced on the current page in reference order. */
+  private readonly pageFootnoteIds: number[] = [];
+  /** Total height of the current page's footnote area (separator + notes). */
+  private pageFootnoteHeight = 0;
 
   constructor(
     private readonly opts: FlowOptions,
@@ -229,8 +302,96 @@ class Flow {
     };
   }
 
+  private getLaidFootnote(
+    id: number,
+    ordinal: number,
+  ): { stack: LaidOutStackItem[]; heightPx: number; ordinal: number } | undefined {
+    const cached = this.laidFootnoteCache.get(id);
+    if (cached) return cached;
+    const blocks = this.opts.footnoteDefinitions?.get(id);
+    if (!blocks || blocks.length === 0) return undefined;
+    const stacked = stackBlocks(blocks, this.opts.contentWidthPx, undefined, this.measurer);
+    const entry = { stack: stacked.stack, heightPx: stacked.heightPx, ordinal };
+    this.laidFootnoteCache.set(id, entry);
+    return entry;
+  }
+
+  private extraFootnoteHeightFor(laid: LaidOutBlock): number {
+    if (!this.opts.footnoteDefinitions || this.opts.footnoteDefinitions.size === 0) return 0;
+    const refs = noteRefsInBlock(laid);
+    if (refs.length === 0) return 0;
+    let extra = 0;
+    let isFirst = this.pageFootnoteIds.length === 0;
+    for (const ref of refs) {
+      if (this.pageFootnoteIds.includes(ref.id)) continue;
+      if (isFirst) {
+        extra += FOOTNOTE_SEPARATOR_HEIGHT_PX;
+        isFirst = false;
+      }
+      const note = this.getLaidFootnote(ref.id, ref.ordinal);
+      if (note) extra += note.heightPx;
+    }
+    return extra;
+  }
+
+  private registerFootnotes(laid: LaidOutBlock): void {
+    if (!this.opts.footnoteDefinitions || this.opts.footnoteDefinitions.size === 0) return;
+    const refs = noteRefsInBlock(laid);
+    for (const ref of refs) {
+      if (!this.pageFootnoteIds.includes(ref.id)) {
+        if (this.pageFootnoteIds.length === 0) {
+          this.pageFootnoteHeight += FOOTNOTE_SEPARATOR_HEIGHT_PX;
+        }
+        this.pageFootnoteIds.push(ref.id);
+        const note = this.getLaidFootnote(ref.id, ref.ordinal);
+        if (note) this.pageFootnoteHeight += note.heightPx;
+      }
+    }
+  }
+
+  private resyncFootnotes(): void {
+    this.pageFootnoteIds.length = 0;
+    this.pageFootnoteHeight = 0;
+    for (const item of this.items) {
+      this.registerFootnotes(item.block);
+    }
+  }
+
+  private buildPageFootnotes(): LaidOutFootnoteArea | undefined {
+    if (this.pageFootnoteIds.length === 0) return undefined;
+    const notes: LaidOutFootnoteNote[] = [];
+    const items: LaidOutStackItem[] = [];
+    let curY = FOOTNOTE_SEPARATOR_HEIGHT_PX;
+    for (const id of this.pageFootnoteIds) {
+      const laidNote = this.laidFootnoteCache.get(id);
+      if (!laidNote) continue;
+      notes.push({
+        id,
+        ordinal: laidNote.ordinal,
+        stack: laidNote.stack,
+        heightPx: laidNote.heightPx,
+      });
+      for (const item of laidNote.stack) {
+        items.push({
+          yPx: curY + item.yPx,
+          block: item.block,
+        });
+      }
+      curY += laidNote.heightPx;
+    }
+    const totalHeightPx = curY;
+    const yPx = this.opts.contentHeightPx - this.insets().bottomPx - totalHeightPx;
+    return {
+      yPx,
+      separatorWidthPx: FOOTNOTE_SEPARATOR_WIDTH_PX,
+      notes,
+      items,
+      totalHeightPx,
+    };
+  }
+
   private remaining(): number {
-    return this.opts.contentHeightPx - this.insets().bottomPx - this.y;
+    return this.opts.contentHeightPx - this.insets().bottomPx - this.pageFootnoteHeight - this.y;
   }
 
   /** The body a fresh page offers (px): the content box net of BOTH furniture
@@ -269,7 +430,10 @@ class Flow {
    *  top), so pageIndex re-syncs to the emitted count — a no-op break must
    *  not skew the even/odd inset slots of every page after it. */
   private newPage(auto = false): void {
-    if (this.items.length > 0) this.pages.push({ items: this.items.splice(0) });
+    if (this.items.length > 0) {
+      const footnotes = this.buildPageFootnotes();
+      this.pages.push({ items: this.items.splice(0), footnotes });
+    }
     this.pageIndex = this.pages.length;
     this.colIndex = 0;
     this.y = this.insets().topPx;
@@ -278,6 +442,8 @@ class Flow {
     this.autoBreak = auto;
     this.zones.length = 0;
     this.bands.length = 0;
+    this.pageFootnoteIds.length = 0;
+    this.pageFootnoteHeight = 0;
   }
 
   /** Close the current column and continue at the top of the next one — a
@@ -421,8 +587,9 @@ class Flow {
     // is a fresh push, a split tail, or a re-placed keepNext block).
     this.dodgeBands();
     const before = this.spacingBefore(laid);
+    const extraFnH = this.extraFootnoteHeightFor(laid);
     // Both spans are relative to this.y: the page bottom and the band top.
-    const room = Math.min(this.remaining(), this.bandCeiling() - this.y) - before;
+    const room = Math.min(this.remaining() - extraFnH, this.bandCeiling() - this.y) - before;
     // `room` is already net of the before-margin, so the check adds the
     // extent alone — adding `before` here too would count the margin twice
     // and evict blocks Word keeps (a picture paragraph with an 8px before on
@@ -452,6 +619,7 @@ class Flow {
     this.y += before + laid.heightPx;
     this.prevAfter = laid.kind === "paragraph" ? laid.afterPx : 0;
     this.firstOnPage = false;
+    this.registerFootnotes(laid);
     if (laid.kind === "paragraph") this.registerFloats(laid, yPx);
   }
 
@@ -488,6 +656,7 @@ class Flow {
       this.prevAfter = 0;
       this.firstOnPage = true;
     }
+    this.resyncFootnotes();
     return moved;
   }
 

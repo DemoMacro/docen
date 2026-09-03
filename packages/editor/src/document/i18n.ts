@@ -571,6 +571,7 @@ export const ribbonEn: AdditionalLanguage = {
     // --- Options: references / mailings ---
     "ribbon.opt.endnote": "Insert Endnote",
     "ribbon.opt.next-footnote": "Next Footnote",
+    "ribbon.opt.previous-footnote": "Previous Footnote",
     "ribbon.opt.letters": "Letters",
     "ribbon.opt.email": "E-mail Messages",
     "ribbon.opt.envelopes": "Envelopes",
@@ -1203,6 +1204,7 @@ export const ribbonZhCN: AdditionalLanguage = {
     // --- Options: references / mailings ---
     "ribbon.opt.endnote": "插入尾注",
     "ribbon.opt.next-footnote": "下一脚注",
+    "ribbon.opt.previous-footnote": "上一脚注",
     "ribbon.opt.letters": "信函",
     "ribbon.opt.email": "电子邮件",
     "ribbon.opt.envelopes": "信封",

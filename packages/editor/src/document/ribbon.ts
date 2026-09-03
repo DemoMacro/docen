@@ -375,6 +375,7 @@ const footnoteItems = (): string =>
     { text: cmd("insert-footnote"), value: "footnote" },
     { text: opt("endnote"), value: "endnote" },
     { text: opt("next-footnote"), value: "next" },
+    { text: opt("previous-footnote"), value: "prev" },
   ]);
 
 const startMergeItems = (): string =>
