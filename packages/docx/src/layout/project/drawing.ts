@@ -613,6 +613,7 @@ function projectFloatingPicture(pic: Rec): LayoutDrawing | undefined {
     width,
     height,
   );
+  const crop = cropOf(pic);
   return {
     anchor,
     width,
@@ -625,11 +626,11 @@ function projectFloatingPicture(pic: Rec): LayoutDrawing | undefined {
     distances,
     // A srcRect-cropped metafile replay reaches past the extent — flag it so
     // the painter clips (GDI playback semantics); the flat member never does.
-    ...(cropOf(pic) ? { clipMembers: true } : {}),
+    ...(crop ? { clipMembers: true } : {}),
     // A metafile picture expands into its vector replay (the srcRect crop
     // folds into the replay's frame mapping); anything else stays one flat
     // member with the crop on the raster source.
-    members: metafileMembers(pic, width, height, cropOf(pic)) ?? [
+    members: metafileMembers(pic, width, height, crop) ?? [
       {
         kind: "picture",
         x: 0,
@@ -637,7 +638,7 @@ function projectFloatingPicture(pic: Rec): LayoutDrawing | undefined {
         width,
         height,
         src: pictureSrc(pic as { type?: unknown; data?: unknown }),
-        crop: cropOf(pic),
+        crop,
       },
     ],
   };

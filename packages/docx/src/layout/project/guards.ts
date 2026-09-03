@@ -3,7 +3,7 @@
 // sub-objects), so fields are read through these narrow helpers instead of
 // per-site casts — plus the universal-measure (number | UM string) parsing.
 
-import type { LayoutTable } from "@docen/layout";
+import { ptToPx, type LayoutTable } from "@docen/layout";
 import type { ParagraphOptions } from "@office-open/docx";
 
 // The paragraph leg of SectionChild is `string | ParagraphOptions` (shorthand
@@ -39,6 +39,21 @@ export function unescapeXml(v: string): string {
 
 /** Estimated height of one placeholder box: three default body lines. */
 export const PLACEHOLDER_PX = 3 * 16;
+
+/** A block node's child content: the children array, else the bare-text
+ *  shorthand (`string` or `{ text }`) as a one-item list — the one shape walk
+ *  both the paragraph and the page projection share. `p?.` not `p.`:
+ *  compiled/parsed documents can carry a null leg even though the public type
+ *  says otherwise. */
+export function childRunsOf(p: BodyParagraph): readonly unknown[] {
+  return typeof p === "string" ? [p] : (p?.children ?? (p?.text != null ? [p.text] : []));
+}
+
+/** An OOXML eighth-point border size (w:sz, w:pBdr/w:pgBorders/tcBorders) →
+ *  px — Word's default 4 = 0.5 pt ≈ 0.67 px. */
+export function eighthPtToPx(size: number): number {
+  return (size / 8) * ptToPx(1);
+}
 
 // ── universal-measure parsing (number = native unit, string = UM) ──
 

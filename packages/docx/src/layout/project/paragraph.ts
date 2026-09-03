@@ -16,7 +16,16 @@ import {
 
 import type { ProjectContext } from "./context";
 import { projectDrawings } from "./drawing";
-import { isRecord, measureTwip, num, str, type BodyParagraph, type Rec } from "./guards";
+import {
+  childRunsOf,
+  eighthPtToPx,
+  isRecord,
+  measureTwip,
+  num,
+  str,
+  type BodyParagraph,
+  type Rec,
+} from "./guards";
 import { BUILTIN_BULLET_LEVEL, formatListNumber } from "./numbering";
 import { projectRuns } from "./runs";
 import {
@@ -184,7 +193,7 @@ export function projectParagraph(p: BodyParagraph, ctx: ProjectContext): LayoutP
     const space = num(v.space);
     return {
       style: typeof v.style === "string" ? v.style : undefined,
-      px: size != null ? (size / 8) * ptToPx(1) : undefined,
+      px: size != null ? eighthPtToPx(size) : undefined,
       spacePx: space != null ? ptToPx(space) : undefined,
     };
   };
@@ -236,10 +245,7 @@ export function projectParagraph(p: BodyParagraph, ctx: ProjectContext): LayoutP
     ];
   })();
 
-  // `p?.` not `p.`: compiled/parsed documents can carry `paragraph: null`
-  // (an empty paragraph leg) even though the public type says otherwise.
-  const runs: readonly unknown[] =
-    typeof p === "string" ? [p] : (p?.children ?? (p?.text != null ? [p.text] : []));
+  const runs: readonly unknown[] = childRunsOf(p);
   const drawings = projectDrawings(runs, ctx);
   const inline = projectRuns(runs, chainRPr, docRPr, defaultTextStyle, ctx);
   return {

@@ -3,7 +3,6 @@
 // into the engine's rowspan shape.
 
 import {
-  ptToPx,
   twipToPx,
   type LayoutBlock,
   type LayoutBorderEdge,
@@ -15,7 +14,7 @@ import type { TableCellOptions, TableOptions } from "@office-open/docx";
 
 import { indexTableStyles } from "../../style-cascade";
 import type { ProjectContext } from "./context";
-import { isRecord, measureTwip, num, type LayoutCell, type Rec } from "./guards";
+import { eighthPtToPx, isRecord, measureTwip, num, type LayoutCell, type Rec } from "./guards";
 import { projectChild } from "./page";
 
 // ── table projection ──
@@ -69,7 +68,7 @@ function toBorderEdge(v: unknown): LayoutBorderEdge | undefined {
   const color = typeof v.color === "string" && v.color !== "auto" ? v.color : undefined;
   return {
     style: typeof v.style === "string" ? v.style : undefined,
-    px: size != null ? (size / 8) * ptToPx(1) : undefined,
+    px: size != null ? eighthPtToPx(size) : undefined,
     color,
   };
 }

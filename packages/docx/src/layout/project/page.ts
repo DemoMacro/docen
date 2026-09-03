@@ -20,6 +20,8 @@ import { indexCharacterStyles } from "../../style-cascade";
 import type { ProjectContext } from "./context";
 import {
   PLACEHOLDER_PX,
+  childRunsOf,
+  eighthPtToPx,
   isRecord,
   measureTwip,
   num,
@@ -79,8 +81,7 @@ export function projectParagraphBlocks(
   p: BodyParagraph,
   ctx: ProjectContext,
 ): LayoutBlock | LayoutBlock[] {
-  const runs: readonly unknown[] =
-    typeof p === "string" ? [p] : (p?.children ?? (p?.text != null ? [p.text] : []));
+  const runs: readonly unknown[] = childRunsOf(p);
   if (!runs.some((run) => isRecord(run) && (run.pageBreak === true || run.columnBreak === true))) {
     return projectParagraph(p, ctx);
   }
@@ -276,7 +277,7 @@ function projectPageBorderSide(v: unknown): ProjectedPageBorder | undefined {
   return {
     style,
     // w:sz counts 1/8 pt; Word's default 4 = 0.5 pt ≈ 0.67 px.
-    widthPx: size != null ? (size / 8) * (96 / 72) : (4 / 8) * (96 / 72),
+    widthPx: size != null ? eighthPtToPx(size) : eighthPtToPx(4),
     color: str(v.color),
     spacePt: num(v.space),
   };
