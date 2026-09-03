@@ -450,6 +450,18 @@ const pageNumberItems = (): string =>
     { text: opt("remove-page-numbers"), value: "remove-numbers" },
   ]);
 
+/** The Paragraph Spacing menu (Word's Design → Paragraph Spacing): document-
+ *  default spacing presets stamped onto the styles' docDefaults — Word's
+ *  "default" restores its factory 8pt-after / 1.08-line spacing. */
+const paragraphSpacingItems = (): string =>
+  JSON.stringify([
+    { text: opt("paragraph-spacing-default"), value: "default" },
+    { text: opt("paragraph-spacing-none"), value: "none" },
+    { text: opt("paragraph-spacing-compact"), value: "compact" },
+    { text: opt("narrow"), value: "narrow" },
+    { text: opt("wide"), value: "wide" },
+  ]);
+
 /** The Shapes gallery — the presets the canvas paints today (box presets,
  *  ellipse, straight line); values are the ST_ShapeType tokens verbatim. */
 const shapeItems = (): string =>
@@ -943,7 +955,12 @@ const designTab = (): RibbonTab =>
         btn("font-color", "colors", { size: "large" }),
         btn("text-font", "fonts", { size: "large" }),
         btn("text-effects", "effects", { size: "large" }),
-        col([grid([btn("line-spacing", "paragraph-spacing"), btn("page-border", "set-default")])]),
+        col([
+          grid([
+            menu("line-spacing", "paragraph-spacing", parsedItems(paragraphSpacingItems())),
+            btn("page-border", "set-default"),
+          ]),
+        ]),
       ],
       "themes-dialog",
     ),

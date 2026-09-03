@@ -32,6 +32,30 @@ export function paintScene(tree: IGroup, items: readonly FlowItem[], ctx: PaintC
   }
 }
 
+/** Paint the document grid (Word's View → Gridlines): one horizontal rule
+ *  every `linePitchPx` across the content box — the pitch the docGrid snaps
+ *  body lines to, so the overlay shows why lines sit where they sit. */
+export function paintGridlines(tree: IGroup, ctx: PaintContext): void {
+  const pitch = ctx.flow.linePitchPx;
+  if (!ctx.showGridlines || !pitch || pitch <= 0) return;
+  const left = ctx.flow.contentLeftPx;
+  const right = left + ctx.flow.contentWidthPx;
+  for (
+    let y = ctx.flow.contentTopPx;
+    y <= ctx.flow.contentTopPx + ctx.flow.contentHeightPx;
+    y += pitch
+  ) {
+    tree.add(
+      new Line({
+        points: [left, y, right, y],
+        stroke: "#c5d3ee",
+        strokeWidth: 1,
+        hittable: false,
+      }),
+    );
+  }
+}
+
 /** Paint the section's column separator lines (w:cols/@w:sep) — one vertical
  *  line centered in each gap between neighboring columns, spanning the
  *  content box. */

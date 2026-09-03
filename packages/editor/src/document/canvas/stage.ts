@@ -1,6 +1,7 @@
 import {
   paintColumnSeparators,
   paintFurnitureStack,
+  paintGridlines,
   paintLineNumbers,
   paintScene,
   releasePinnedImages,
@@ -274,6 +275,39 @@ export class CanvasStage {
     }
   }
 
+  /** Document-grid overlay (Word's View → Gridlines) — a paint-time flag like
+   *  the formatting marks: flipping it repaints every live page. */
+  #showGridlines = false;
+
+  get showGridlines(): boolean {
+    return this.#showGridlines;
+  }
+
+  setShowGridlines(on: boolean): void {
+    if (on === this.#showGridlines) return;
+    this.#showGridlines = on;
+    for (const [index, slot] of this.slots.entries()) {
+      if (slot.app) this.repaint(slot.app, index);
+    }
+  }
+
+  /** Ruler visibility (Word's View → Ruler). The rulers are frame-level DOM
+   *  overlays (see {@link applyRulers}), so this just mounts/unmounts them. */
+  #showRuler = false;
+
+  get showRuler(): boolean {
+    return this.#showRuler;
+  }
+
+  setShowRuler(on: boolean): void {
+    if (on === this.#showRuler) return;
+    this.#showRuler = on;
+    for (const [index, slot] of this.slots.entries()) {
+      const frame = slot.el.parentElement;
+      if (frame) this.applyRulers(frame, index);
+    }
+  }
+
   /** The break rows' labels (locale change): repainting is deferred to the
    *  next marks-visible repaint when marks are off, immediate when on. */
   setMarksLabels(labels: { pageBreak: string; sectionBreak: string }): void {
@@ -309,6 +343,7 @@ export class CanvasStage {
       this.applyBackground(frame);
       this.applyBorders(frame, page);
       this.applyCropMarks(frame, page);
+      this.applyRulers(frame, page);
     }
     slot.el.style.width = `${w}px`;
     slot.el.style.height = `${h}px`;
@@ -459,6 +494,83 @@ export class CanvasStage {
       `${pad(flow.pageWidthPx - flow.contentLeftPx - flow.contentWidthPx)} ` +
       `${pad(flow.pageHeightPx - flow.contentTopPx - flow.contentHeightPx)} ` +
       `${pad(flow.contentLeftPx)}`;
+  }
+
+  /** Rulers (Word's View → Ruler): a horizontal strip above the page and a
+   *  vertical strip to its left, each an SVG of tick lines whose 0 sits on
+   *  the content-box edge (Word's margin-line origin — the margin shows
+   *  negative ticks). Inch ticks on en locales, centimetres otherwise; the
+   *  strips re-render on every sizeSlot, so zoom rescales the ticks. They
+   *  hang in the inter-page gutter (PAGE_GAP 24 > strip 20), covering
+   *  nothing on the page. */
+  private applyRulers(frame: HTMLElement, page: number): void {
+    frame.querySelectorAll(":scope > .h-ruler, :scope > .v-ruler").forEach((el) => el.remove());
+    if (!this.#showRuler) return;
+    const flow = this.sectionAt(page).flow;
+    const THICKNESS = 20;
+    const metric = !/^en/i.test(navigator.language || "");
+    const unit = (metric ? 96 / 2.54 : 96) * this.factor;
+    const half = unit / 2;
+    const minor = metric ? unit / 10 : unit / 4;
+    const build = (length: number, zero: number, vertical: boolean): string => {
+      let out = "";
+      for (let p = Math.ceil(-zero / minor) * minor; p <= length - zero; p += minor) {
+        const whole = p / unit;
+        const major = Math.abs(whole - Math.round(whole)) < 1e-6;
+        const mid = Math.abs(p / half - Math.round(p / half)) < 1e-6;
+        const len = major ? THICKNESS - 2 : mid ? THICKNESS * 0.62 : THICKNESS * 0.38;
+        const pos = zero + p;
+        const num = Math.round(whole);
+        if (vertical) {
+          out += `<line x1="${THICKNESS}" y1="${pos}" x2="${THICKNESS - len}" y2="${pos}"/>`;
+          if (major)
+            out += `<text x="${THICKNESS - len - 2}" y="${pos + 2}" text-anchor="middle" transform="rotate(-90 ${THICKNESS - len - 2} ${pos + 2})">${num}</text>`;
+        } else {
+          out += `<line x1="${pos}" y1="${THICKNESS}" x2="${pos}" y2="${THICKNESS - len}"/>`;
+          if (major)
+            out += `<text x="${pos + 1}" y="${THICKNESS - len - 3}" stroke="none">${num}</text>`;
+        }
+      }
+      return (
+        `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">` +
+        `<g stroke="#9aa4b2" stroke-width="1" fill="#5b6675" font-size="7"` +
+        ` font-family="Inter, sans-serif">${out}</g></svg>`
+      );
+    };
+    const mount = (cls: string, style: Partial<CSSStyleDeclaration>, svg: string): void => {
+      const div = document.createElement("div");
+      div.className = cls;
+      Object.assign(div.style, {
+        position: "absolute",
+        pointerEvents: "none",
+        zIndex: "2",
+        background: "#fafbfc",
+        border: "1px solid #d8dce2",
+        ...style,
+      } satisfies Partial<CSSStyleDeclaration>);
+      div.innerHTML = svg;
+      frame.append(div);
+    };
+    mount(
+      "h-ruler",
+      {
+        left: "0",
+        top: `-${THICKNESS}px`,
+        width: `${this.pageCss(flow.pageWidthPx)}px`,
+        height: `${THICKNESS}px`,
+      },
+      build(this.pageCss(flow.pageWidthPx), flow.contentLeftPx * this.factor, false),
+    );
+    mount(
+      "v-ruler",
+      {
+        left: `-${THICKNESS}px`,
+        top: "0",
+        width: `${THICKNESS}px`,
+        height: `${this.pageCss(flow.pageHeightPx)}px`,
+      },
+      build(this.pageCss(flow.pageHeightPx), flow.contentTopPx * this.factor, true),
+    );
   }
 
   /** Lay out page slots for a flow result and repaint visible pages. The
@@ -684,6 +796,7 @@ export class CanvasStage {
       pageCount: this.pages.length,
       layer: "behind",
       showMarks: this.#showMarks,
+      showGridlines: this.#showGridlines,
       marksLabels: this.ctx.marksLabels,
       // Async image decodes landing after this repaint need the same eager
       // render — the change-driven scheduler cannot be relied on here.
@@ -706,6 +819,7 @@ export class CanvasStage {
       ctx.hitBoxes = hitBoxes;
       layers.behind.clear();
       paintScene(layers.behind, items, ctx);
+      paintGridlines(layers.behind, ctx);
       ctx.layer = "body";
       layers.body.clear();
       paintScene(layers.body, items, ctx);
@@ -759,6 +873,7 @@ export class CanvasStage {
         pageLayers.body,
       ]);
       paintScene(pageLayers.behind, items, ctx);
+      paintGridlines(pageLayers.behind, ctx);
       ctx.layer = "body";
       ctx.hitBoxes = hitBoxes;
       this.paintFurniture(

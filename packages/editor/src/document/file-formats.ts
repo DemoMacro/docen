@@ -47,6 +47,9 @@ export const READONLY_LIVE: ReadonlySet<string> = new Set([
   "word-count",
   "show-marks",
   "show-comments",
+  // View-surface toggles — paint-time view state, not document content.
+  "toggle-ruler",
+  "toggle-gridlines",
 ]);
 
 /** Commands handled locally in #onCommand/#onChange (not routed to
@@ -98,9 +101,14 @@ export const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   // the color-picker's palette value. Page Borders stamps a w:pgBorders
   // preset (none/box/shadow/double/dashed) on the current section. Watermark
   // stamps/removes the preset header shape (every slot, behind-doc).
+  // Paragraph Spacing stamps the styles' docDefaults paragraph spacing.
   "page-color",
   "page-border",
   "watermark",
+  "paragraph-spacing",
+  // View-surface toggles (Word's View → Ruler / Gridlines).
+  "toggle-ruler",
+  "toggle-gridlines",
   // Link prompts for an address and marks the selection (Word's Insert Link);
   // the context menu's Remove Hyperlink unsets the mark over the clicked link.
   "link",

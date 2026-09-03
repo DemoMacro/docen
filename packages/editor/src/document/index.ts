@@ -2819,6 +2819,40 @@ class DocenDocument extends AddinHost<Editor> {
     );
   }
 
+  /** Design → Paragraph Spacing presets — stamp the styles' docDefaults
+   *  paragraph spacing (styles.default.document.paragraph.spacing), the
+   *  document-level default every paragraph without explicit spacing
+   *  inherits. Word's preset values: default restores the factory 8pt-after /
+   *  1.08-line spacing; the named presets are single-spaced with the after
+   *  gap shrinking (none 0pt → compact 2pt → narrow 6pt → wide 16pt). */
+  #setParagraphSpacing(preset?: string): void {
+    const editor = this.editor;
+    if (!editor) return;
+    const spacing =
+      preset === "none"
+        ? { before: 0, after: 0, line: 240, lineRule: "auto" }
+        : preset === "compact"
+          ? { after: 40, line: 240, lineRule: "auto" }
+          : preset === "narrow"
+            ? { after: 120, line: 240, lineRule: "auto" }
+            : preset === "wide"
+              ? { after: 320, line: 240, lineRule: "auto" }
+              : preset === "default"
+                ? { after: 160, line: 259, lineRule: "auto" }
+                : null;
+    if (!spacing) return;
+    const styles = { ...((editor.state.doc.attrs.styles ?? {}) as Record<string, unknown>) };
+    const defaults = { ...((styles.default ?? {}) as Record<string, unknown>) };
+    const documentDefaults = { ...((defaults.document ?? {}) as Record<string, unknown>) };
+    documentDefaults.paragraph = {
+      ...((documentDefaults.paragraph ?? {}) as Record<string, unknown>),
+      spacing,
+    };
+    defaults.document = documentDefaults;
+    styles.default = defaults;
+    editor.view.dispatch(editor.state.tr.setDocAttribute("styles", styles));
+  }
+
   /** Design → Page Color: write the doc-level page background
    *  (doc.attrs.background → w:background on export; the stage paints it as
    *  the page frame color). "none" clears it (Word's No Color); a bare hex is
@@ -3162,6 +3196,23 @@ class DocenDocument extends AddinHost<Editor> {
     }
     if (name === "page-border") {
       this.#setPageBorders(value);
+      return;
+    }
+    // Paragraph Spacing presets — stamp the styles' docDefaults paragraph
+    // spacing (Word's Design → Paragraph Spacing; the document-level default
+    // every paragraph without explicit spacing inherits).
+    if (name === "paragraph-spacing") {
+      this.#setParagraphSpacing(typeof value === "string" ? value : undefined);
+      return;
+    }
+    // View toggles — ruler and gridlines are paint-time view state (never in
+    // the document), so the stage flips the flag and repaints.
+    if (name === "toggle-ruler") {
+      this.#stage?.setShowRuler(!this.#stage.showRuler);
+      return;
+    }
+    if (name === "toggle-gridlines") {
+      this.#stage?.setShowGridlines(!this.#stage.showGridlines);
       return;
     }
     // Watermark gallery — a preset id stamps the header shape, "remove"

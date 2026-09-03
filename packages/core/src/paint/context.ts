@@ -81,6 +81,9 @@ export interface PaintContext {
    *  bent arrow at line/paragraph ends, an arrow on tabs, a dot on spaces,
    *  and the break rows (page/section) between blocks. */
   showMarks?: boolean;
+  /** Document-grid overlay (Word's View → Gridlines): horizontal rules every
+   *  `linePitchPx` across the content box, painted under the body text. */
+  showGridlines?: boolean;
   /** The break rows' labels (Word paints them in the UI language). */
   marksLabels?: { pageBreak?: string; sectionBreak?: string };
 }
