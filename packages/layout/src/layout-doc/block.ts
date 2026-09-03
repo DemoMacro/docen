@@ -10,8 +10,8 @@ export type LayoutLineHeight =
 
 /** Paragraph spacing (w:spacing), all px. `before`/`after` are data for the
  *  flow: vertical margin collapse between siblings is applied by the caller
- *  that stacks blocks (the flow for body paragraphs, the cell for table
- *  content — a cell is a BFC that eats the first `before` and last `after`). */
+ *  that stacks blocks (the body flow and table cells alike — the BFC model:
+ *  edge margins count, middles collapse at the max). */
 export interface LayoutSpacing {
   lineHeight?: LayoutLineHeight;
   beforePx: number;
@@ -160,11 +160,16 @@ export interface LayoutBlockContext {
    *  header/footer stacks are laid with no grid context at all (natural
    *  line heights) and so never set this. */
   onGrid?: boolean;
-  /** True inside a table cell: lines never ceil to whole grid rows (the row's
-   *  trHeight floors separately — the w:adjustLineHeightInTable pitch is a
-   *  floor, not a row count). Cells also clear float zones — a cell's width
-   *  is its column, not the page flow. */
+  /** True inside a table cell: cell lines join the document grid only when
+   *  `adjustLinesInTable` is set (the compat flag), and even then the pitch
+   *  is a floor, not a row count (the row's trHeight floors separately).
+   *  Cells also clear float zones — a cell's width is its column, not the
+   *  page flow. */
   inTable?: boolean;
+  /** w:adjustLineHeightInTable (settings.xml compat): cell lines join the
+   *  document grid. Absent (its OOXML default) leaves cells grid-free —
+   *  CJK-Word documents carry the element, most Western ones don't. */
+  adjustLinesInTable?: boolean;
   floatZones?: readonly LayoutFloatZone[];
   /** This block's top Y within the flow — pairs with floatZones to derive
    *  each line's band. */

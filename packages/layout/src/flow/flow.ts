@@ -68,6 +68,9 @@ export interface FlowOptions {
   contentHeightPx: number;
   /** Section document-grid pitch (threads into every block layout). */
   linePitchPx?: number;
+  /** w:adjustLineHeightInTable (settings.xml compat) — lets table cell lines
+   *  join this grid. Absent leaves cells grid-free (the OOXML default). */
+  adjustLinesInTable?: boolean;
   /** Per-slot body insets from the header/footer stacks (absent = margins
    *  rule everywhere). */
   pageInsets?: FlowPageInsets;
@@ -219,6 +222,7 @@ class Flow {
   private get ctx(): LayoutBlockContext {
     return {
       linePitchPx: this.opts.linePitchPx,
+      adjustLinesInTable: this.opts.adjustLinesInTable,
       onGrid: true,
       floatZones: this.zones.length > 0 ? this.zones : undefined,
       startY: this.y,

@@ -116,32 +116,47 @@ describe("layoutParagraph line-height semantics", () => {
     }
   });
 
-  it("floors a table cell's snapped line at max(natural, pitch)", () => {
+  it("floors a grid-joined table cell's snapped line at max(natural, pitch)", () => {
     const pitch = Math.ceil(NATURAL) + 5;
-    const out = layoutBlock(para(), 500, { linePitchPx: pitch, inTable: true }, measurer);
+    // Under the compat flag the cell joins the grid; without it (the OOXML
+    // default) the cell stays grid-free and keeps its natural height.
+    const out = layoutBlock(
+      para(),
+      500,
+      { linePitchPx: pitch, inTable: true, adjustLinesInTable: true },
+      measurer,
+    );
     if (out.kind === "paragraph") expect(out.heightPx).toBeCloseTo(pitch, 4);
+    const free = layoutBlock(para(), 500, { linePitchPx: pitch, inTable: true }, measurer);
+    if (free.kind === "paragraph") expect(free.heightPx).toBeCloseTo(NATURAL, 4);
   });
 
-  it("bases a table cell's CJK multiple line on the pitch without row snapping", () => {
+  it("bases a grid-joined table cell's CJK multiple line on the pitch without row snapping", () => {
     // Corpus-verified (honor table, 340-twip grid): a 1.5× cell line measures
     // 1.5 × pitch — the cell floors at its demand, never rounding up to whole
     // grid rows (the row's trHeight floors separately). The earlier E14
     // "renders TWO rows" reading mistook 1.5×pitch in px for 2 rows in pt.
-    // Body (non-cell) keeps its whole-row rounding.
+    // Body (non-cell) keeps its whole-row rounding; a cell without the compat
+    // flag scales off the font natural instead of the pitch.
     const pitch = 25;
     const cjkStyle = { family: { latin: "serif", eastAsia: "SimSun" }, sizePx: 16 };
-    const cjk = (inTable: boolean) =>
+    const cjk = (ctx: Record<string, unknown>) =>
       layoutBlock(
         para({
           inline: [{ kind: "text", text: "中文", style: cjkStyle }],
           spacing: { lineHeight: { rule: "multiple", factor: 1.5 }, beforePx: 0, afterPx: 0 },
         }),
         500,
-        { linePitchPx: pitch, inTable },
+        { linePitchPx: pitch, ...ctx },
         measurer,
       );
-    if (cjk(true).kind === "paragraph") expect(cjk(true).heightPx).toBeCloseTo(37.5, 4);
-    if (cjk(false).kind === "paragraph") expect(cjk(false).heightPx).toBeCloseTo(50, 4);
+    const joined = cjk({ inTable: true, adjustLinesInTable: true });
+    const body = cjk({});
+    const free = cjk({ inTable: true });
+    if (joined.kind === "paragraph") expect(joined.heightPx).toBeCloseTo(37.5, 4);
+    if (body.kind === "paragraph") expect(body.heightPx).toBeCloseTo(50, 4);
+    // Flag absent: grid-free cell — the multiple scales off the font natural.
+    if (free.kind === "paragraph") expect(free.heightPx).toBeCloseTo(1.5 * NATURAL, 4);
   });
 
   it("honors snapToGrid=false by dropping the pitch", () => {
@@ -478,9 +493,10 @@ describe("layoutTable", () => {
     if (out.kind !== "table") {
       throw new Error("expected table");
     }
-    // Word's cell: the first before and the last after render nowhere — the
-    // box starts at the first line and ends at the last; middles collapse.
-    expect(out.rows[0].heightPx).toBeCloseTo(NATURAL + 6 + NATURAL, 4);
+    // The BFC rule, cells included: the first before and last after belong to
+    // the paragraphs' boxes (a row's trHeight must be able to cover them);
+    // middles collapse at the max. Same arithmetic as the body flow.
+    expect(out.rows[0].heightPx).toBeCloseTo(10 + NATURAL + 6 + NATURAL + 8, 4);
   });
 
   it("falls back to first-row cell widths when no grid is given", () => {

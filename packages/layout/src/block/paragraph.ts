@@ -43,8 +43,14 @@ export function layoutParagraph(
   measurer: TextMeasurer,
 ): LaidOutParagraph {
   const spec = para.spacing?.lineHeight;
-  const pitch = para.snapToGrid === false ? 0 : (ctx?.linePitchPx ?? 0);
   const inTable = ctx?.inTable ?? false;
+  // Cell lines join the document grid only under the adjustLineHeightInTable
+  // compat (CT_Compat: absence leaves cells grid-free — CJK-Word documents
+  // carry it, most Western ones don't).
+  const pitch =
+    para.snapToGrid === false || (inTable && ctx?.adjustLinesInTable !== true)
+      ? 0
+      : (ctx?.linePitchPx ?? 0);
 
   // The ¶-mark strut line: spacing wins, then the mark size, then the default
   // run's natural metric (no grid pitch — see the module doc).

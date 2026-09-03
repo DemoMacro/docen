@@ -15,10 +15,16 @@ export interface WordFontMetric {
   upem: number;
   winAscent: number;
   winDescent: number;
+  /** Measured single-spacing ratio overriding the +15%-leading formula —
+   *  faces whose rendered Word line box the OS/2 triple does not reproduce
+   *  (the formula holds for the bitmap-lineage CJK faces and the Latin
+   *  cores; see dengxian). */
+  wordRatio?: number;
 }
 
 /** Word's single-spacing ratio for one face's tables. */
 export function wordLineRatio(m: WordFontMetric): number {
+  if (m.wordRatio != null) return m.wordRatio;
   const sum = m.winAscent + m.winDescent;
   return (sum + 2 * Math.round(0.15 * sum)) / m.upem;
 }
@@ -45,8 +51,12 @@ export const WORD_FONT_METRICS: Readonly<Record<string, WordFontMetric>> = {
   "microsoft yahei": { upem: 2048, winAscent: 2080, winDescent: 536 },
   微软雅黑: { upem: 2048, winAscent: 2080, winDescent: 536 },
   "microsoft yahei ui": { upem: 2048, winAscent: 2167, winDescent: 521 },
-  dengxian: { upem: 2048, winAscent: 1659, winDescent: 475 },
-  等线: { upem: 2048, winAscent: 1659, winDescent: 475 },
+  // DengXian: the formula on this true OS/2 triple gives 1.3545, but Word
+  // renders 1.4× single spacing (10.5/11/12pt samples agree) — the face's
+  // line box includes leading the formula doesn't model, so the measured
+  // ratio overrides it.
+  dengxian: { upem: 2048, winAscent: 1659, winDescent: 475, wordRatio: 1.4 },
+  等线: { upem: 2048, winAscent: 1659, winDescent: 475, wordRatio: 1.4 },
   "times new roman": { upem: 2048, winAscent: 1825, winDescent: 443 },
   arial: { upem: 2048, winAscent: 1854, winDescent: 434 },
   calibri: { upem: 2048, winAscent: 1950, winDescent: 550 },

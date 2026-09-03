@@ -85,7 +85,14 @@ export function projectDocumentOptions(doc: DocumentOptions): {
     if (i < (doc.sections?.length ?? 0) - 1 && last?.kind === "paragraph") last.sectionEnd = true;
     return {
       blocks,
-      flow: projectFlowBox(section.properties),
+      flow: {
+        ...projectFlowBox(section.properties),
+        // settings.xml compat: cell lines join the section's grid only when
+        // the document declares w:adjustLineHeightInTable.
+        adjustLinesInTable:
+          typeof doc.settings?.compatibility === "object" &&
+          doc.settings.compatibility.adjustLineHeightInTable === true,
+      },
       furniture: projectPageFurniture(section, doc),
       pageBorders: projectPageBorders(section.properties),
       lineNumbers: projectLineNumbers(section.properties),

@@ -1,7 +1,8 @@
-// Block dispatch + BFC stacking. The stacker is the vertical-margin model a
-// table cell uses (ported from the editor's measureRowHeight): the first
-// paragraph's `before` and the last `after` are contained (a BFC eats its
-// edge margins), adjacent siblings collapse at the max of after/before.
+// Block dispatch + BFC stacking. The stacker is the one vertical-margin
+// model everywhere (body flow and table cells alike): a stacking context
+// contains its edge margins (the first paragraph's `before` and the last
+// `after` count into its height), and adjacent siblings collapse at the
+// max of after/before.
 
 import type { LayoutBlock, LayoutBlockContext, LayoutFloatZone } from "../layout-doc";
 import { wrapEffectsOf } from "../layout-doc";
@@ -69,10 +70,11 @@ export function stackBlocks(
     const out = layoutBlock(block, width, blockCtx, measurer);
     const before = out.kind === "paragraph" ? out.beforePx : 0;
     const after = out.kind === "paragraph" ? out.afterPx : 0;
-    // A Word table cell renders neither its first paragraph's before nor its
-    // last paragraph's after — the cell box starts at the first line and ends
-    // at the last (no CSS-BFC edge margins; verified against the Word render).
-    const gap = first ? (ctx?.inTable ? 0 : before) : Math.max(prevAfter, before);
+    // One stack rule everywhere (body flow and table cells alike, the BFC
+    // model): edge margins count, middles collapse at the max — a paragraph's
+    // w:spacing belongs to its box, so the first before and last after are
+    // part of the height a table row must cover.
+    const gap = first ? before : Math.max(prevAfter, before);
     heightPx += gap + out.heightPx;
     if (cellZones && out.kind === "paragraph" && out.drawings) {
       cellZones.push(...wrapEffectsOf(out.drawings, heightPx - out.heightPx, width, true).zones);
@@ -81,6 +83,6 @@ export function stackBlocks(
     prevAfter = after;
     first = false;
   }
-  if (!ctx?.inTable) heightPx += prevAfter; // the last paragraph's after is contained too
+  heightPx += prevAfter; // the last paragraph's after is contained too
   return { stack, heightPx };
 }
