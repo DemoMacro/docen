@@ -964,3 +964,111 @@ describe("layoutFlow columns", () => {
     expect(pages[0].items[0].xPx).toBeUndefined();
   });
 });
+
+describe("layoutFlow footnotes", () => {
+  const footnotePara = (id: number, ordinal: number): LayoutParagraph => ({
+    kind: "paragraph",
+    inline: [
+      { kind: "text", text: "text", style: latin },
+      {
+        kind: "text",
+        text: String(ordinal),
+        style: latin,
+        noteRef: { kind: "footnote", id, ordinal },
+      },
+    ],
+    spacing: exact20,
+    defaultTextStyle: latin,
+    widowControl: false,
+  });
+
+  const noteBody = (text: string): LayoutBlock[] => [
+    {
+      kind: "paragraph",
+      inline: [{ kind: "text", text, style: latin }],
+      spacing: exact20,
+      defaultTextStyle: latin,
+      widowControl: false,
+    },
+  ];
+
+  it("places footnote at the bottom of the page where reference lands", () => {
+    const fnDefs = new Map<number, readonly LayoutBlock[]>([[1, noteBody("Footnote 1 text")]]);
+    const pages = layoutFlow(
+      [footnotePara(1, 1)],
+      { contentWidthPx: 300, contentHeightPx: 200, footnoteDefinitions: fnDefs },
+      measurer,
+    );
+    expect(pages).toHaveLength(1);
+    expect(pages[0].footnotes).toBeDefined();
+    expect(pages[0].footnotes?.separatorWidthPx).toBe(192);
+    expect(pages[0].footnotes?.notes).toHaveLength(1);
+    expect(pages[0].footnotes?.notes[0].id).toBe(1);
+    expect(pages[0].footnotes?.notes[0].ordinal).toBe(1);
+    // Note height: 20px, separator: 17px, total: 37px
+    // yPx: 200 - 37 = 163
+    expect(pages[0].footnotes?.totalHeightPx).toBe(37);
+    expect(pages[0].footnotes?.yPx).toBe(163);
+    expect(pages[0].footnotes?.items).toHaveLength(1);
+  });
+
+  it("reserves vertical space for footnote so body wraps to next page earlier", () => {
+    // Page height = 100px (normally fits 5 lines of 20px).
+    // Footnote consumes 17px (separator) + 20px (note) = 37px.
+    // Available body height = 100 - 37 = 63px (fits only 3 lines of 20px).
+    // 4 lines of 20px will not fit on page 0 with the footnote, so the 4th line must move to page 1.
+    const fnDefs = new Map<number, readonly LayoutBlock[]>([[1, noteBody("Note 1")]]);
+    const p4 = para(4, {
+      inline: [
+        {
+          kind: "text",
+          text: "line 1",
+          style: latin,
+          noteRef: { kind: "footnote", id: 1, ordinal: 1 },
+        },
+        { kind: "break" },
+        { kind: "text", text: "line 2", style: latin },
+        { kind: "break" },
+        { kind: "text", text: "line 3", style: latin },
+        { kind: "break" },
+        { kind: "text", text: "line 4", style: latin },
+      ],
+    });
+    const pages = layoutFlow(
+      [p4],
+      { contentWidthPx: 300, contentHeightPx: 100, footnoteDefinitions: fnDefs },
+      measurer,
+    );
+    expect(pages).toHaveLength(2);
+    // Page 0 holds 3 lines and has the footnote
+    expect(pages[0].items[0].block.kind).toBe("paragraph");
+    if (pages[0].items[0].block.kind === "paragraph") {
+      expect(pages[0].items[0].block.lines).toHaveLength(3);
+    }
+    expect(pages[0].footnotes).toBeDefined();
+    // Page 1 holds the 4th line and has NO footnotes
+    expect(pages[1].footnotes).toBeUndefined();
+    if (pages[1].items[0].block.kind === "paragraph") {
+      expect(pages[1].items[0].block.lines).toHaveLength(1);
+    }
+  });
+
+  it("accumulates multiple footnotes on the same page", () => {
+    const fnDefs = new Map<number, readonly LayoutBlock[]>([
+      [1, noteBody("Note 1")],
+      [2, noteBody("Note 2")],
+    ]);
+    const pages = layoutFlow(
+      [footnotePara(1, 1), footnotePara(2, 2)],
+      { contentWidthPx: 300, contentHeightPx: 200, footnoteDefinitions: fnDefs },
+      measurer,
+    );
+    expect(pages).toHaveLength(1);
+    expect(pages[0].footnotes?.notes).toHaveLength(2);
+    expect(pages[0].footnotes?.notes[0].id).toBe(1);
+    expect(pages[0].footnotes?.notes[1].id).toBe(2);
+    // Total height = 17 (separator once) + 20 + 20 = 57px
+    expect(pages[0].footnotes?.totalHeightPx).toBe(57);
+    expect(pages[0].footnotes?.yPx).toBe(200 - 57);
+  });
+});

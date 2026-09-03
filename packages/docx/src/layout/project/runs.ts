@@ -194,17 +194,35 @@ export function projectRuns(
       // reference run's own rPr still applies.
       const fnRefId = noteRefId(child, "footnoteReference");
       if (fnRefId != null) {
+        const ordinal = noteOrdinal(ctx.footnoteOrdinals, fnRefId);
         out.push({
           kind: "text",
-          text: String(noteOrdinal(ctx.footnoteOrdinals, fnRefId)),
+          text: String(ordinal),
           style: { ...textStyleOf(rPr), verticalAlign: "superscript" },
+          noteRef: { kind: "footnote", id: fnRefId, ordinal },
         });
       }
       const enRefId = noteRefId(child, "endnoteReference");
       if (enRefId != null) {
+        const ordinal = noteOrdinal(ctx.endnoteOrdinals, enRefId);
         out.push({
           kind: "text",
-          text: romanNumeral(noteOrdinal(ctx.endnoteOrdinals, enRefId), false),
+          text: romanNumeral(ordinal, false),
+          style: { ...textStyleOf(rPr), verticalAlign: "superscript" },
+          noteRef: { kind: "endnote", id: enRefId, ordinal },
+        });
+      }
+      if (child.footnoteRef === true) {
+        out.push({
+          kind: "text",
+          text: String(ctx.currentNoteOrdinal ?? 1),
+          style: { ...textStyleOf(rPr), verticalAlign: "superscript" },
+        });
+      }
+      if (child.endnoteRef === true) {
+        out.push({
+          kind: "text",
+          text: romanNumeral(ctx.currentNoteOrdinal ?? 1, false),
           style: { ...textStyleOf(rPr), verticalAlign: "superscript" },
         });
       }

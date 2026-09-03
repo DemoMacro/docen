@@ -1269,6 +1269,8 @@ class DocenDocument extends AddinHost<Editor> {
         opts: {
           ...section.flow,
           columns: section.columns,
+          footnoteDefinitions: section.footnoteDefinitions,
+          endnoteDefinitions: section.endnoteDefinitions,
           ...(pageInsets ? { pageInsets } : {}),
         },
       };
@@ -2193,6 +2195,25 @@ class DocenDocument extends AddinHost<Editor> {
     if (target != null) this.#setTextSelection(target + 1);
   }
 
+  /** References → Previous Footnote: place the caret on the previous
+   *  footnote/endnote reference before the selection (document order). */
+  #jumpPreviousNote(): void {
+    const editor = this.editor;
+    if (!editor) return;
+    const { from } = editor.state.selection;
+    let target: number | null = null;
+    editor.state.doc.descendants((child, pos) => {
+      if (pos >= from || child.type.name !== "inlinePassthrough") return;
+      try {
+        const data = JSON.parse(String(child.attrs?.data ?? "{}")) as Record<string, unknown>;
+        if ("footnoteReference" in data || "endnoteReference" in data) target = pos;
+      } catch {
+        // opaque verbatim blob — not a note reference
+      }
+    });
+    if (target != null) this.#setTextSelection(target + 1);
+  }
+
   /** One inlinePassthrough comment atom (see #insertComment) → its marker
    *  kind and comment id; non-comment atoms yield null. Accepts both a JSON
    *  atom (type is the string name) and a PM node from doc.descendants
@@ -3059,6 +3080,7 @@ class DocenDocument extends AddinHost<Editor> {
     if (name === "insert-footnote") {
       if (value === "endnote") this.#insertNote("endnote");
       else if (value === "next") this.#jumpNextNote();
+      else if (value === "prev") this.#jumpPreviousNote();
       else this.#insertNote("footnote");
       return;
     }

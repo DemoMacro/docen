@@ -1666,11 +1666,64 @@ describe("projectDocumentOptions endnote references", () => {
     ]);
   });
 
-  it("accepts the option-object reference shape", () => {
-    const { blocks } = oneSection(
-      doc([{ paragraph: { children: [{ endnoteReference: { id: 3 } }] } }]),
-    );
-    expect(textItems(blocks)).toEqual([{ text: "i", verticalAlign: "superscript" }]);
+  it("attaches noteRef to reference text items", () => {
+    const { blocks } = oneSection(doc([{ paragraph: { children: [{ footnoteReference: 7 }] } }]));
+    const para = blocks[0];
+    if (para?.kind !== "paragraph") throw new Error("expected paragraph");
+    expect(para.inline[0]).toEqual({
+      kind: "text",
+      text: "1",
+      style: expect.objectContaining({ verticalAlign: "superscript" }),
+      noteRef: { kind: "footnote", id: 7, ordinal: 1 },
+    });
+  });
+
+  it("projects footnote definitions with matching footnoteRef mark numbers", () => {
+    const projected = projectDocumentOptions({
+      sections: [
+        {
+          children: [
+            {
+              paragraph: {
+                children: [{ text: "ref " }, { footnoteReference: 42 }],
+              },
+            },
+          ],
+        },
+      ],
+      footnotes: [
+        {
+          id: 42,
+          children: [
+            {
+              paragraph: {
+                style: "FootnoteText",
+                children: [{ footnoteRef: true }, { text: " note text" }],
+              },
+            },
+          ],
+        },
+      ],
+    } as unknown as DocumentOptions);
+
+    const section = projected.sections[0];
+    expect(section.footnoteDefinitions).toBeDefined();
+    const noteBlocks = section.footnoteDefinitions?.get(42);
+    expect(noteBlocks).toHaveLength(1);
+    const notePara = noteBlocks?.[0];
+    if (notePara?.kind !== "paragraph") throw new Error("expected paragraph in note");
+    expect(notePara.inline).toHaveLength(2);
+    // footnoteRef projects ordinal 1 (matching footnoteReference 42)
+    expect(notePara.inline[0]).toEqual({
+      kind: "text",
+      text: "1",
+      style: expect.objectContaining({ verticalAlign: "superscript" }),
+    });
+    expect(notePara.inline[1]).toEqual({
+      kind: "text",
+      text: " note text",
+      style: expect.any(Object),
+    });
   });
 });
 

@@ -53,4 +53,26 @@ describe("dirtyPagesOf", () => {
     ]);
     expect(dirtyPagesOf(two, [page({ t: "a" })])).toEqual([false]);
   });
+
+  it("marks a page dirty when its footnotes change", () => {
+    const fn1 = {
+      yPx: 100,
+      separatorWidthPx: 192,
+      notes: [{ id: 1, ordinal: 1, stack: [], heightPx: 20 }],
+      items: [],
+      totalHeightPx: 37,
+    };
+    const fn2 = {
+      yPx: 100,
+      separatorWidthPx: 192,
+      notes: [{ id: 1, ordinal: 1, stack: [], heightPx: 30 }],
+      items: [],
+      totalHeightPx: 47,
+    };
+    const prev = [{ ...page({ t: "a" }), footnotes: fn1 }];
+    const nextUnchanged = [{ ...page({ t: "a" }), footnotes: fn1 }];
+    const nextChanged = [{ ...page({ t: "a" }), footnotes: fn2 }];
+    expect(dirtyPagesOf(prev, nextUnchanged)).toEqual([false]);
+    expect(dirtyPagesOf(prev, nextChanged)).toEqual([true]);
+  });
 });

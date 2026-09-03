@@ -45,6 +45,12 @@ export interface LayoutPictureCrop {
  *  `toPx` (a numbering bullet's hop to the body text), the paragraph's
  *  `tabStops`, or the default grid (720 twips). */
 
+export interface LayoutInlineNoteRef {
+  kind: "footnote" | "endnote";
+  id: number;
+  ordinal: number;
+}
+
 export type LayoutInline =
   /** A `field` marker makes the text a dynamic page-number atom (w:fldSimple /
    *  complexField PAGE / NUMPAGES): the value only exists after pagination, so
@@ -59,6 +65,9 @@ export type LayoutInline =
        *  /commentRangeEnd): the painter tints the text's box (sorted, unique).
        *  Pure paint metadata — measuring and wrapping ignore it. */
       commentIds?: number[];
+      /** Note reference metadata (Word's FootnoteReference / EndnoteReference).
+       *  The paginator reads this to anchor footnotes to the page where this run lands. */
+      noteRef?: LayoutInlineNoteRef;
     }
   | { kind: "break" }
   | { kind: "tab"; toPx?: number }

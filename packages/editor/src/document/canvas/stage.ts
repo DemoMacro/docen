@@ -1,5 +1,6 @@
 import {
   paintColumnSeparators,
+  paintFootnotes,
   paintFurnitureStack,
   paintLineNumbers,
   paintScene,
@@ -9,6 +10,7 @@ import {
   type PaintContext,
 } from "@docen/core";
 import type {
+  LayoutBlock,
   ProjectedColumns,
   ProjectedFlowBox,
   ProjectedLineNumbers,
@@ -91,6 +93,10 @@ export interface CanvasStageSection {
    *  page insets push the body by these heights and the painter draws these
    *  same stacks, so push-down == painted band height by construction. */
   furnitureLaid?: LaidFurnitureSection;
+  /** Footnote definitions (absent when document has no footnotes). */
+  footnoteDefinitions?: Map<number, readonly LayoutBlock[]>;
+  /** Endnote definitions (absent when document has no endnotes). */
+  endnoteDefinitions?: Map<number, readonly LayoutBlock[]>;
 }
 
 /** [default, first, even] slot pick order. */
@@ -711,6 +717,7 @@ export class CanvasStage {
       paintScene(layers.body, items, ctx);
       paintLineNumbers(layers.body, ctx);
       paintColumnSeparators(layers.body, ctx);
+      paintFootnotes(layers.body, this.pages[index]?.footnotes, ctx);
       this.#flushDrawings(ctx);
       app.forceRender();
       this.hitBoxes.set(index, hitBoxes);
@@ -772,6 +779,7 @@ export class CanvasStage {
       paintScene(pageLayers.body, items, ctx);
       paintLineNumbers(pageLayers.body, ctx);
       paintColumnSeparators(pageLayers.body, ctx);
+      paintFootnotes(pageLayers.body, this.pages[index]?.footnotes, ctx);
       this.#flushDrawings(ctx);
       this.slots[index]!.layers = pageLayers;
     } else {
@@ -779,6 +787,7 @@ export class CanvasStage {
       paintScene(tree, items, ctx);
       paintLineNumbers(tree, ctx);
       paintColumnSeparators(tree, ctx);
+      paintFootnotes(tree, this.pages[index]?.footnotes, ctx);
       // Under the story-edit veil like the rest of the body — the story being
       // edited paints above (opaque) on top.
       this.#flushDrawings(ctx);

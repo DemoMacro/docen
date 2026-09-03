@@ -26,4 +26,7 @@ export interface ProjectContext {
   /** Endnote id → displayed ordinal — same first-reference-order rule as the
    *  footnotes; painted as lowercase Roman (Word's endnote default numFmt). */
   endnoteOrdinals: Map<number, number>;
+  /** The ordinal of the footnote/endnote currently being projected, so its
+   *  footnoteRef/endnoteRef mark runs pick up the matching note number. */
+  currentNoteOrdinal?: number;
 }

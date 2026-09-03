@@ -6,7 +6,7 @@
  *
  * @module
  */
-import type { FlowItem, LaidOutBlock, LaidOutStackItem } from "@docen/layout";
+import type { FlowItem, LaidOutBlock, LaidOutFootnoteArea, LaidOutStackItem } from "@docen/layout";
 import { columnBoxesOf } from "@docen/layout";
 import { Line, Rect, Text, type IGroup } from "leafer-ui";
 
@@ -27,6 +27,37 @@ export function paintScene(tree: IGroup, items: readonly FlowItem[], ctx: PaintC
       item.block,
       ctx.flow.contentLeftPx + (item.xPx ?? 0),
       ctx.flow.contentTopPx + item.yPx,
+      ctx,
+    );
+  }
+}
+
+/** Paint this page's footnotes at the bottom of the content box:
+ *  the separator line (Word default: 2 inches = 192 px, 1px stroke) followed
+ *  by each laid footnote note. */
+export function paintFootnotes(
+  tree: IGroup,
+  footnotes: LaidOutFootnoteArea | undefined,
+  ctx: PaintContext,
+): void {
+  if (!footnotes || footnotes.items.length === 0) return;
+  // Footnote separator line: 10px below the top of the footnote area
+  const sepY = ctx.flow.contentTopPx + footnotes.yPx + 10;
+  const sepX = ctx.flow.contentLeftPx;
+  tree.add(
+    new Line({
+      points: [sepX, sepY, sepX + footnotes.separatorWidthPx, sepY],
+      stroke: "#000000",
+      strokeWidth: 1,
+      hittable: false,
+    }),
+  );
+  for (const item of footnotes.items) {
+    paintBlock(
+      tree,
+      item.block,
+      ctx.flow.contentLeftPx,
+      ctx.flow.contentTopPx + footnotes.yPx + item.yPx,
       ctx,
     );
   }
