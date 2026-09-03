@@ -59,6 +59,10 @@ export type LayoutInline =
        *  /commentRangeEnd): the painter tints the text's box (sorted, unique).
        *  Pure paint metadata — measuring and wrapping ignore it. */
       commentIds?: number[];
+      /** Synthesized paint content with no document-model character behind it
+       *  (a numbering bullet's glyph): the editor's caret/selection mapping
+       *  must not count it against the paragraph's text positions. */
+      synthetic?: boolean;
     }
   | { kind: "break" }
   | { kind: "tab"; toPx?: number }

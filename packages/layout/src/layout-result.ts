@@ -24,6 +24,9 @@ export interface LaidOutTextItem {
   text: string;
   xPx: number;
   widthPx: number;
+  /** Carried from the source inline item (a numbering marker): synthesized
+   *  paint content with no document-model character behind it. */
+  synthetic?: boolean;
 }
 
 export interface LaidOutPictureItem {

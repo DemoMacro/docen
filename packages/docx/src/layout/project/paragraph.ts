@@ -196,7 +196,7 @@ export function projectParagraph(p: BodyParagraph, ctx: ProjectContext): LayoutP
     if (level.format === "bullet") {
       return level.text
         ? [
-            { kind: "text", text: level.text, style: defaultTextStyle },
+            { kind: "text", text: level.text, style: defaultTextStyle, synthetic: true },
             { kind: "tab", toPx: 0 },
           ]
         : [];
@@ -213,7 +213,7 @@ export function projectParagraph(p: BodyParagraph, ctx: ProjectContext): LayoutP
       return formatListNumber(lvl?.format ?? level.format, counters[idx] ?? 1);
     });
     return [
-      { kind: "text", text: marker, style: defaultTextStyle },
+      { kind: "text", text: marker, style: defaultTextStyle, synthetic: true },
       { kind: "tab", toPx: 0 },
     ];
   })();

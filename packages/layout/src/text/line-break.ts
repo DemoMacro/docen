@@ -627,6 +627,10 @@ export function packLines(inline: LayoutInline[], opts: PackLinesOptions): Packe
                 text: frag.text,
                 xPx: at,
                 widthPx: squeeze ? frag.occupiedWidth * squeeze : frag.occupiedWidth,
+                // Synthetic markers stay flagged through materialization — the
+                // editor's caret map reads it to keep them out of the PM
+                // offset space.
+                synthetic: src.synthetic,
               });
               hasText = true;
               const analyzed = measurer.analyze(src.text, src.style);

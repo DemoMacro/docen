@@ -436,6 +436,16 @@ export class CaretMap {
           prevTextEnd = null;
           return;
         }
+        // A synthetic item (a list marker) paints but has no document-model
+        // character behind it — it stays outside the PM offset space, so it
+        // neither advances the char count nor participates in the gap
+        // lattice (lineSpaceGaps still consumed its text above, keeping the
+        // walk over the layout-side fullText aligned).
+        if (item.synthetic) {
+          spaces.push(0);
+          gapStarts.push(null);
+          return;
+        }
         const gap = gaps.matched ? gaps.spaces[itemIndex]! : 0;
         chars += gap + item.text.length;
         spaces.push(gap);
@@ -688,6 +698,10 @@ export class CaretMap {
     push(entry.xPx, this.posOfChar(entry.owner, char));
     for (const [itemIndex, item] of entry.line.items.entries()) {
       if (item.kind !== "text") continue;
+      // A synthetic item (a list marker) carries no PM characters — its
+      // glyphs sit outside the offset space, so skip both its gap and its
+      // grapheme boundaries.
+      if (item.synthetic) continue;
       // The trimmed gap ahead of the item: its characters' left boundaries
       // share the gap the space dots center in (the previous item's laid end
       // → this item's x, evenly split), so a click inside the gap lands on
@@ -871,6 +885,10 @@ export class CaretMap {
     let char = line.startChar;
     for (const [itemIndex, item] of line.line.items.entries()) {
       if (item.kind !== "text") continue;
+      // A synthetic item (a list marker) sits outside the offset space — its
+      // glyphs paint before the paragraph's own characters and never answer
+      // a boundary query.
+      if (item.synthetic) continue;
       // The trimmed gap ahead of the item: the boundary rides the gap's even
       // split — the same lattice the space dots center in.
       const gap = line.spaces[itemIndex]!;
