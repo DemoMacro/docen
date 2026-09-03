@@ -136,6 +136,11 @@ function wordRangeAt(
   return from < to ? { from: start + from, to: start + to } : null;
 }
 
+/** Split buttons whose face carries no command of its own — the handler only
+ *  exists for the drop-down variants' values (Word's menu buttons; a face
+ *  click opens the menu instead of emitting a valueless command). */
+const FACE_ONLY_SPLITS: ReadonlySet<string> = new Set(["autofit", "columns"]);
+
 /** Build a nested OutlineItem tree from the flat outline anchor list: each
  *  heading nests under the nearest preceding heading with a smaller level. */
 function buildOutlineTree(
@@ -1584,8 +1589,45 @@ class DocenDocument extends AddinHost<Editor> {
       )
       .forEach((el) => {
         const event = el.getAttribute("event");
-        if (event && !wired.has(event)) el.setAttribute("disabled", "");
+        if (!event) return;
+        // A composite (split/menu) stays live while ANY drop-down variant
+        // resolves to a wired command — greying the host would bury its live
+        // items (the AutoFit split's face has no action, its three variants
+        // do). A face-only split keeps its caret and opens the menu instead.
+        const liveItems =
+          el.tagName === "DOCEN-RIBBON-SPLIT-BUTTON" || el.tagName === "DOCEN-RIBBON-MENU"
+            ? this.#ribbonMenuItems(el).some(
+                (item) => !item.disabled && wired.has(item.event ?? event),
+              )
+            : false;
+        if (wired.has(event) || liveItems) {
+          el.removeAttribute("disabled");
+          // A face with no action of its own opens the drop-down instead:
+          // either its own event is unwired while the variants are live, or
+          // the handler only exists for the variants' values (Columns).
+          const faceOnly =
+            el.tagName === "DOCEN-RIBBON-SPLIT-BUTTON" && FACE_ONLY_SPLITS.has(event);
+          if (faceOnly || (liveItems && !wired.has(event)))
+            el.setAttribute("primary-opens-menu", "");
+          else el.removeAttribute("primary-opens-menu");
+        } else {
+          el.setAttribute("disabled", "");
+          el.removeAttribute("primary-opens-menu");
+        }
       });
+  }
+
+  /** A composite control's parsed `items` attribute (menu variants), empty on
+   *  malformed JSON so a typo greys the control rather than crashing. */
+  #ribbonMenuItems(el: HTMLElement): { disabled?: boolean; event?: string }[] {
+    try {
+      return JSON.parse(el.getAttribute("items") ?? "[]") as {
+        disabled?: boolean;
+        event?: string;
+      }[];
+    } catch {
+      return [];
+    }
   }
 
   /** Re-stamp the tab-row "Editing" menu so its label + checked item match the
@@ -1876,31 +1918,60 @@ class DocenDocument extends AddinHost<Editor> {
     editor.view.dispatch(tr);
   }
 
-  /** Toggle a slot-visibility flag (titlePage / evenAndOddHeaders) on the
-   *  current section's sectPr (Word's Different First Page / Odd & Even
-   *  Pages). The transaction re-renders; the furniture projection picks the
-   *  flag up and the page pattern (first/even slots) follows. */
-  #toggleSectionFlag(flag: "titlePage" | "evenAndOddHeaders"): void {
+  /** Rewrite the current section's sectPr through `mutate` (Word's "this
+   *  section" semantics — a section-carrying paragraph at/after the caret
+   *  owns it, otherwise the body-level sectPr) and dispatch. The transaction
+   *  re-renders every page of the canvas. */
+  #mutateCurrentSection(
+    mutate: (cur: SectionPropertiesOptions | undefined) => SectionPropertiesOptions,
+  ): void {
     const editor = this.editor;
     if (!editor) return;
     const { doc, tr } = editor.state;
-    const flip = (cur: SectionPropertiesOptions | undefined): SectionPropertiesOptions => ({
-      ...cur,
-      [flag]: !(cur as unknown as Record<string, unknown> | undefined)?.[flag],
-    });
     const targetPos = this.#sectionSectPrPos();
     if (targetPos != null) {
       const node = doc.nodeAt(targetPos);
       if (node) {
         const cur = (node.attrs as { sectionProperties?: SectionPropertiesOptions })
           .sectionProperties;
-        tr.setNodeMarkup(targetPos, undefined, { ...node.attrs, sectionProperties: flip(cur) });
+        tr.setNodeMarkup(targetPos, undefined, { ...node.attrs, sectionProperties: mutate(cur) });
       }
     } else {
       const cur = (doc.attrs as { sectionProperties?: SectionPropertiesOptions }).sectionProperties;
-      tr.setDocAttribute("sectionProperties", flip(cur));
+      tr.setDocAttribute("sectionProperties", mutate(cur));
     }
     editor.view.dispatch(tr);
+  }
+
+  /** Toggle a slot-visibility flag (titlePage / evenAndOddHeaders) on the
+   *  current section's sectPr (Word's Different First Page / Odd & Even
+   *  Pages). The furniture projection picks the flag up and the page pattern
+   *  (first/even slots) follows. */
+  #toggleSectionFlag(flag: "titlePage" | "evenAndOddHeaders"): void {
+    this.#mutateCurrentSection((cur) => ({
+      ...cur,
+      [flag]: !(cur as unknown as Record<string, unknown> | undefined)?.[flag],
+    }));
+  }
+
+  /** Column count for the current section (Word's Page Layout → Columns
+   *  presets). The rest of the columns object survives (the gap, the
+   *  separator), so toggling back to one column and re-applying keeps the
+   *  original geometry. */
+  #setColumnCount(count: number): void {
+    this.#mutateCurrentSection((cur) => ({
+      ...cur,
+      columns: { ...cur?.columns, count },
+    }));
+  }
+
+  /** Line numbering on/off for the current section (w:lnNumType) — Word's
+   *  Layout → Line Numbers toggle. */
+  #toggleLineNumbers(): void {
+    this.#mutateCurrentSection((cur) => ({
+      ...cur,
+      lineNumberType: cur?.lineNumberType ? undefined : { countBy: 1 },
+    }));
   }
 
   /** Parse the declarative `section-properties` / `styles` attributes (JSON).
@@ -2929,6 +3000,17 @@ class DocenDocument extends AddinHost<Editor> {
     }
     if (name === "margins") {
       this.#setMargins(value);
+      return;
+    }
+    // Columns presets (the Layout tab's Columns menu: one/two/three).
+    if (name === "columns") {
+      const count = Number(value);
+      if (count >= 1 && count <= 9) this.#setColumnCount(count);
+      return;
+    }
+    // Line Numbers toggle (the Layout tab's Line Numbers button).
+    if (name === "line-numbers") {
+      this.#toggleLineNumbers();
       return;
     }
     // AutoFit Window needs the page's text width — a layout value the command

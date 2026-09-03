@@ -62,6 +62,10 @@ export const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   "page-size",
   "orientation",
   "margins",
+  // Columns presets write the current section's w:cols count; Line Numbers
+  // toggles the section's w:lnNumType (both via #mutateCurrentSection).
+  "columns",
+  "line-numbers",
   "zoom",
   "zoom-100",
   "save",

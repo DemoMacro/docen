@@ -287,7 +287,8 @@ const columnsItems = (): string =>
     { text: opt("one-col"), value: "1" },
     { text: opt("two-col"), value: "2" },
     { text: opt("three-col"), value: "3" },
-    { text: opt("more-columns"), value: "more" },
+    // Word opens the Columns dialog; the editor has none yet — honest grey.
+    { text: opt("more-columns"), value: "more", disabled: true },
   ]);
 
 const breaksItems = (): string =>

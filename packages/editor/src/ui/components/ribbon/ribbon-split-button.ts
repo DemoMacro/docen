@@ -113,6 +113,7 @@ const template = html<DocenRibbonSplitButton>`
       aria-haspopup="true"
       aria-expanded="false"
       ?disabled="${(x) => x.disabled}"
+      ${ref("caret")}
     ></fluent-menu-button>
     <fluent-menu-list focusgroup="menu" popover part="list" ${ref("list")}></fluent-menu-list>
   </fluent-menu>
@@ -142,8 +143,12 @@ class DocenRibbonSplitButton extends FASTElement {
   @attr appearance?: string;
   @attr({ mode: "boolean" }) disabled?: boolean;
   @attr({ attribute: "icon-only", mode: "boolean" }) iconOnly?: boolean;
+  /** The primary has no action of its own (Word's AutoFit: the face is just
+   *  the menu's carrier) — a click opens the drop-down instead of emitting. */
+  @attr({ attribute: "primary-opens-menu", mode: "boolean" }) primaryOpensMenu?: boolean;
 
   @observable primary?: HTMLElement;
+  @observable caret?: HTMLElement;
   @observable menu?: HTMLElement;
   @observable list?: HTMLElement;
   @observable iconSlot?: HTMLSpanElement;
@@ -247,6 +252,10 @@ class DocenRibbonSplitButton extends FASTElement {
   private readonly onPrimaryClick = (event: Event): void => {
     event.stopPropagation();
     if (this.disabled) return;
+    if (this.primaryOpensMenu) {
+      this.caret?.dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true }));
+      return;
+    }
     this.dispatchEvent(
       new CustomEvent("command", {
         bubbles: true,
