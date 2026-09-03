@@ -427,9 +427,10 @@ function tabAdvance(
  *  the gaps — the painter's space dots and the caret map's character lattice
  *  — must agree on where those characters are, so the walk lives here: each
  *  item consumes the whitespace ahead of it in the paragraph's concatenated
- *  run text. `cursor` continues across the paragraph's lines; `matched: false`
- *  means the walk drifted off the runs (a render-only paragraph) and every
- *  count came back 0 — callers degrade to the item texts alone. */
+ *  run text, which marks every non-text inline's source position with one
+ *  U+FFFC placeholder (an atom consumes its placeholder after its gap). When
+ *  `fullText` carries no placeholders the atoms miss and `matched: false`
+ *  degrades every count to 0 — callers fall back to the item texts alone. */
 export function lineSpaceGaps(
   line: Pick<LaidOutLine, "items">,
   fullText: string,
@@ -439,9 +440,21 @@ export function lineSpaceGaps(
   let at = cursor;
   let matched = true;
   line.items.forEach((item, itemIndex) => {
-    if (item.kind !== "text") return;
     let p = at;
     while (p < fullText.length && (fullText[p] === " " || fullText[p] === "　")) p++;
+    if (item.kind !== "text") {
+      // An atom's gap: the whitespace ahead of it is trimmed from the laid
+      // line just the same (the collapsed run between it and the previous
+      // content), and its own placeholder is consumed so the items after it
+      // stay aligned.
+      if (fullText[p] === "￼") {
+        spaces[itemIndex] = p - at;
+        at = p + 1;
+      } else {
+        matched = false;
+      }
+      return;
+    }
     if (fullText.startsWith(item.text, p)) {
       spaces[itemIndex] = p - at;
       at = p + item.text.length;

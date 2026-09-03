@@ -86,6 +86,25 @@ interface ParaEntry {
 const measureCanvas: HTMLCanvasElement | null =
   typeof document !== "undefined" ? document.createElement("canvas") : null;
 
+/** A PM inline atom the layout projects as a laid box (an embedded picture,
+ *  a math placeholder) — Word's "in line with text" graphic. It owns one
+ *  selectable slot in the collapsed-char space. Atoms without a laid box
+ *  (breaks, tabs — also synthesized by the projection for numbering, paged
+ *  runs) stay outside it. */
+function boxedInline(node: PmNode): boolean {
+  return node.type.name === "image" || node.type.name === "inlinePassthrough";
+}
+
+/** The caret band of a line with no measurable text (a picture line, an
+ *  empty paragraph): the line box itself, so a caret parked beside an
+ *  embedded picture stays visible instead of collapsing to 2px. */
+function textlessBand(line: LineEntry, pad: number): { yPx: number; heightPx: number } {
+  return {
+    yPx: line.yPx + pad,
+    heightPx: Math.max(line.line.naturalPx, line.line.heightPx, 2),
+  };
+}
+
 /** A cell's full grid box, page-local — Word's cell highlight covers the
  *  whole grid slot (insets included), not the text lines inside it. */
 interface CellBoxDraft {
@@ -256,10 +275,15 @@ export class CaretMap {
       return norm(text);
     };
     // The paragraph's run text — the source the gap walk matches items
-    // against (its whitespace is what pretext trimmed into the gaps).
+    // against (its whitespace is what pretext trimmed into the gaps). Every
+    // non-text inline marks its source position with one U+FFFC placeholder,
+    // so whitespace between two atoms attributes to the atom it precedes
+    // (pictures edge to edge are selectable, the collapsed run included).
     const runTextOf = (para: LaidOutParagraph): string => {
       let text = "";
-      for (const inline of para.inline) if (inline.kind === "text") text += inline.text;
+      for (const inline of para.inline) {
+        text += inline.kind === "text" ? inline.text : "￼";
+      }
       return text;
     };
     // True zip: walk the laid blocks, consuming one PM textblock per logical
@@ -427,6 +451,9 @@ export class CaretMap {
       const spaces: number[] = [];
       const gapStarts: (number | null)[] = [];
       let prevTextEnd: number | null = null;
+      // The previous item's laid end edge regardless of kind — the physical
+      // left boundary of a gap whose text predecessor was an atom.
+      let prevItemEnd: number | null = null;
       // UTF-16 units — the PM side (posOfChar/charOfPos) counts
       // textContent.length, so the collapsed-char space must too; counting
       // code points drifted every boundary after an astral char. The gap
@@ -437,9 +464,20 @@ export class CaretMap {
       if (gaps.matched) paraEntry.srcCursor = gaps.next;
       line.items.forEach((item, itemIndex) => {
         if (item.kind !== "text") {
-          spaces.push(0);
-          gapStarts.push(null);
+          // The trimmed whitespace ahead of the item is its gap in the
+          // collapsed space too (Word's inline graphic is selectable edge to
+          // edge, the collapsed run around it included). A boxed inline (an
+          // embedded picture, a math placeholder) additionally owns one
+          // character slot; breaks and tabs count their gap only (a break IS
+          // the line split; a tab can also be synthesized by the projection
+          // for numbering).
+          const gap = gaps.matched ? gaps.spaces[itemIndex]! : 0;
+          chars += gap;
+          spaces.push(gap);
+          gapStarts.push(prevTextEnd ?? prevItemEnd);
+          if (item.kind === "picture" || item.kind === "math") chars += 1;
           prevTextEnd = null;
+          prevItemEnd = item.xPx + item.widthPx;
           return;
         }
         // A synthetic item (a list marker) paints but has no document-model
@@ -455,8 +493,9 @@ export class CaretMap {
         const gap = gaps.matched ? gaps.spaces[itemIndex]! : 0;
         chars += gap + item.text.length;
         spaces.push(gap);
-        gapStarts.push(prevTextEnd);
+        gapStarts.push(prevTextEnd ?? prevItemEnd);
         prevTextEnd = item.xPx + item.widthPx;
+        prevItemEnd = prevTextEnd;
       });
       const lineEntry: LineEntry = {
         page: entry.page,
@@ -559,7 +598,7 @@ export class CaretMap {
   private bandOf(line: LineEntry): { yPx: number; heightPx: number } {
     const pad = gridPadOf(line.line);
     const ctx = measureCanvas?.getContext("2d");
-    if (!ctx) return { yPx: line.yPx + pad, heightPx: Math.max(line.line.naturalPx, 2) };
+    if (!ctx) return textlessBand(line, pad);
     let top = Infinity;
     let bottom = -Infinity;
     for (const item of line.line.items) {
@@ -591,7 +630,7 @@ export class CaretMap {
       bottom = Math.max(bottom, baseline + metrics.actualBoundingBoxDescent);
     }
     if (!Number.isFinite(top)) {
-      return { yPx: line.yPx + pad, heightPx: Math.max(line.line.naturalPx, 2) };
+      return textlessBand(line, pad);
     }
     return { yPx: top, heightPx: Math.max(bottom - top, 2) };
   }
@@ -666,11 +705,15 @@ export class CaretMap {
           continue;
         }
         if (offA === offB) {
+          // From the line's own content start (a leading atom's item x carries
+          // the centering/hang offset — line.xPx alone would sit in the
+          // margin), through the line's packed width.
+          const startXPx = this.xOfChar(line, line.startChar);
           rects.push({
             page: line.page,
-            xPx: line.xPx,
+            xPx: startXPx,
             yPx: line.yPx,
-            widthPx: Math.max(line.line.maxWidthPx ?? 0, 2),
+            widthPx: Math.max((line.line.maxWidthPx ?? 0) - (startXPx - line.xPx), 2),
             heightPx: bottom - line.yPx,
           });
           continue;
@@ -682,7 +725,7 @@ export class CaretMap {
         const endPos = this.posOfChar(entry, line.endChar);
         const coversEnd =
           offB > line.endChar || (offB === line.endChar && (to === endPos || nextSelected));
-        const left = fromOff === line.startChar ? line.xPx : this.xOfChar(line, fromOff);
+        const left = this.xOfChar(line, fromOff);
         const right = coversEnd
           ? line.xPx + (line.line.maxWidthPx ?? 0) + (line.line.hangPx ?? 0)
           : this.xOfChar(line, Math.min(offB, line.endChar));
@@ -744,15 +787,18 @@ export class CaretMap {
     };
     push(entry.xPx, this.posOfChar(entry.owner, char));
     for (const [itemIndex, item] of entry.line.items.entries()) {
-      if (item.kind !== "text") continue;
+      const boxed = item.kind === "picture" || item.kind === "math";
+      if (!boxed && item.kind !== "text") continue;
       // A synthetic item (a list marker) carries no PM characters — its
       // glyphs sit outside the offset space, so skip both its gap and its
       // grapheme boundaries.
-      if (item.synthetic) continue;
+      if (item.kind === "text" && item.synthetic) continue;
       // The trimmed gap ahead of the item: its characters' left boundaries
       // share the gap the space dots center in (the previous item's laid end
       // → this item's x, evenly split), so a click inside the gap lands on
-      // the space char the PM side knows about.
+      // the space char the PM side knows about. Boxed inlines share the
+      // lattice — their gap is the collapsed run between them and the
+      // previous content.
       const gap = entry.spaces[itemIndex]!;
       if (gap > 0) {
         const gs = entry.gapStarts[itemIndex]!;
@@ -764,6 +810,16 @@ export class CaretMap {
           );
           char++;
         }
+      }
+      // A boxed inline offers its two edges as caret boundaries — clicking
+      // left of it lands before the box, right of it after (Word's inline
+      // graphic is one character wide); clicking ON it selects the drawing
+      // before this map is ever asked.
+      if (boxed) {
+        push(entry.xPx + item.xPx, this.posOfChar(entry.owner, char));
+        char += 1;
+        push(entry.xPx + item.xPx + item.widthPx, this.posOfChar(entry.owner, char));
+        continue;
       }
       const glyphs = this.glyphLayout(entry, itemIndex);
       if (!glyphs) continue;
@@ -831,9 +887,17 @@ export class CaretMap {
           remaining -= child.textContent.length;
           pos += child.nodeSize;
         }
+      } else if (boxedInline(child)) {
+        // A boxed inline owns one offset slot: crossing it consumes that
+        // slot, so the offset past it lands right after the box. Offset 0
+        // relative to it stays before it (the walk just stops here).
+        if (remaining > 0) {
+          pos += child.nodeSize;
+          remaining -= 1;
+        }
       } else if (remaining > 0) {
-        // An atom carries no collapsed chars — step over it while offsets
-        // remain to reach the text after it.
+        // An atom with no laid box carries no collapsed chars — step over it
+        // while offsets remain to reach the text after it.
         lastAtomStart = pos;
         pos += child.nodeSize;
       }
@@ -914,9 +978,23 @@ export class CaretMap {
         }
         char += child.textContent.length;
         cursor = end;
+      } else if (boxedInline(child)) {
+        // A boxed inline owns one offset slot: positions before it map to
+        // the running offset, positions after it to the slot past it.
+        const start = cursor;
+        cursor += child.nodeSize;
+        if (pos <= start) {
+          resolved = char;
+          return;
+        }
+        char += 1;
+        if (pos <= cursor) {
+          resolved = char;
+          return;
+        }
       } else {
-        // Atoms carry no collapsed chars — a caret beside one maps to the
-        // running offset either way.
+        // Atoms with no laid box (breaks, tabs, paged runs) carry no
+        // collapsed chars — a caret beside one maps to the running offset.
         cursor += child.nodeSize;
         if (pos <= cursor) {
           resolved = char;
@@ -931,13 +1009,15 @@ export class CaretMap {
   private xOfChar(line: LineEntry, offset: number): number {
     let char = line.startChar;
     for (const [itemIndex, item] of line.line.items.entries()) {
-      if (item.kind !== "text") continue;
+      const boxed = item.kind === "picture" || item.kind === "math";
+      if (!boxed && item.kind !== "text") continue;
       // A synthetic item (a list marker) sits outside the offset space — its
       // glyphs paint before the paragraph's own characters and never answer
       // a boundary query.
-      if (item.synthetic) continue;
+      if (item.kind === "text" && item.synthetic) continue;
       // The trimmed gap ahead of the item: the boundary rides the gap's even
-      // split — the same lattice the space dots center in.
+      // split — the same lattice the space dots center in. Boxed inlines
+      // share it (their gap is the collapsed run before the box).
       const gap = line.spaces[itemIndex]!;
       if (gap > 0 && offset <= char + gap) {
         const gs = line.gapStarts[itemIndex]!;
@@ -945,6 +1025,13 @@ export class CaretMap {
         return line.xPx + (gs != null && span > 0 ? gs + (span * (offset - char)) / gap : item.xPx);
       }
       char += gap;
+      // A boxed inline's own slot maps to its left edge (the boundary before
+      // it); the offset past it resolves against the following content.
+      if (boxed) {
+        if (offset === char) return line.xPx + item.xPx;
+        char += 1;
+        continue;
+      }
       // Inside the item's own glyphs: the shared per-grapheme lattice.
       if (offset <= char + item.text.length) {
         const glyphs = this.glyphLayout(line, itemIndex);

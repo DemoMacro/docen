@@ -436,9 +436,11 @@ interface ParagraphMarkState {
 }
 
 function paragraphMarkState(para: LaidOutParagraph): ParagraphMarkState {
+  // The caret map's runTextOf — the same placeholder-marked text, so the two
+  // lattices the shared gap walk builds stay in lockstep.
   let fullText = "";
   for (const inline of para.inline) {
-    if (inline.kind === "text") fullText += inline.text;
+    fullText += inline.kind === "text" ? inline.text : "￼";
   }
   return { cursor: 0, broken: false, fullText };
 }
