@@ -29,6 +29,7 @@ import { listLevelStepPatch } from "../extensions/commands";
 import { KEYBOARD_SHORTCUTS } from "../extensions/keymap";
 import { CaretMap, type TableZone } from "./caret-map";
 import { CellSelection, cellAt, inSameTable } from "./cell-selection";
+import { followLink, installLinkHover, type LinkHit } from "./link-hover";
 
 /** A grapheme-boundary segmenter shared by the delete translations — surrogate
  *  pairs, combining marks, and emoji must delete as one user-perceived
@@ -922,9 +923,30 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     setSel(headPos, anchorPos);
   };
 
+  // Word's link surface: hovering a link shows its URL with the Ctrl+Click
+  // hint, and Ctrl+Click follows it — a plain click keeps dropping a caret.
+  const linkAt = (pos: number): LinkHit | null => {
+    const mark = active()
+      .editor.state.doc.resolve(pos)
+      .marks()
+      .find((m) => m.type.name === "link");
+    if (!mark) return null;
+    const a = mark.attrs as { href?: unknown; target?: unknown };
+    return typeof a.href === "string" && a.href
+      ? { href: a.href, target: typeof a.target === "string" ? a.target : null }
+      : null;
+  };
+  const linkHover = installLinkHover({
+    host: opts.inputHost,
+    posAtClient: (x, y) => posAtClient(x, y),
+    linkAt,
+  });
+  opts.host.addEventListener("mouseleave", linkHover.hide);
+
   const onMouseMove = (event: MouseEvent): void => {
     if (dragAnchor == null) {
       hoverTableGrip(event);
+      linkHover.onMove(event);
       return;
     }
     if (
@@ -1059,6 +1081,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     // clicking elsewhere moves the caret from the menu handler, not here).
     if (event.button === 2) return;
     if (composing) return;
+    linkHover.hide();
     // Park the textarea at the click point BEFORE focusing it (anchors the
     // IME window at the click; it no longer sits in the scroll container, so
     // focus() cannot yank the surface anymore, but parking stays harmless).
@@ -1140,7 +1163,16 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     selDrawing = null;
     placeDrawingSel();
     const pos = posAtClient(event.clientX, event.clientY);
-    if (pos != null) clickSelection(pos, event, clicks);
+    if (pos != null) {
+      // Word's Ctrl+Click follows the link instead of dropping a caret; a
+      // plain click keeps its editing meaning.
+      if ((event.ctrlKey || event.metaKey) && followLink(linkAt(pos))) {
+        ta.focus();
+        ta.value = "";
+        return;
+      }
+      clickSelection(pos, event, clicks);
+    }
     ta.focus();
     ta.value = "";
   };

@@ -588,6 +588,8 @@ export const ribbonEn: AdditionalLanguage = {
     "theme.teams-high-contrast": "Teams High Contrast",
     "theme.teams-light-v21": "Teams V21 Light",
     "theme.teams-dark-v21": "Teams V21 Dark",
+    // --- Canvas link tooltip ---
+    "docen.link.hint": "Ctrl+Click to follow link",
   },
 };
 
@@ -1161,6 +1163,8 @@ export const ribbonZhCN: AdditionalLanguage = {
     "theme.teams-high-contrast": "Teams 高对比度",
     "theme.teams-light-v21": "Teams V21 浅色",
     "theme.teams-dark-v21": "Teams V21 深色",
+    // --- Canvas link tooltip ---
+    "docen.link.hint": "按住 Ctrl 并单击以访问链接",
   },
 };
 
