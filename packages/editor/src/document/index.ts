@@ -2971,6 +2971,12 @@ class DocenDocument extends AddinHost<Editor> {
       this.#togglePane("navigation");
       return;
     }
+    // View → Outline: Word's outline view maps to the document-structure
+    // pane here (the same tree the navigation pane shows).
+    if (name === "outline") {
+      this.#togglePane("navigation");
+      return;
+    }
     // Find (ribbon Home → Editing → Find, or Ctrl+F) → open the nav-pane search.
     if (name === "search") {
       // Find drop-down → Go To jumps to a page; the main button and Find

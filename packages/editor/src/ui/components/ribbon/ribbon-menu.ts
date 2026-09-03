@@ -79,6 +79,7 @@ const template = html<DocenRibbonMenu>`
 class DocenRibbonMenu extends FASTElement {
   @attr label?: string;
   @attr icon?: string;
+  @attr event?: string;
   @attr tooltip?: string;
   @attr appearance?: string;
   @attr({ mode: "boolean" }) disabled?: boolean;
@@ -92,6 +93,10 @@ class DocenRibbonMenu extends FASTElement {
   readonly anchorId = `--rb-menu-${++seq}`;
 
   #tooltipDisposer?: () => void;
+
+  get eventName(): string {
+    return this.event || this.label || "";
+  }
 
   get tooltipText(): string {
     return this.tooltip || this.label || "";
@@ -158,7 +163,14 @@ class DocenRibbonMenu extends FASTElement {
       new CustomEvent("command", {
         bubbles: true,
         composed: true,
-        detail: { event: item.event ?? item.value ?? item.text, value: item.value, source: this },
+        // A menu item is a variant of the menu's own command — the command
+        // name is the menu's event unless the item sets its own (the same
+        // rule the split button applies); the variant rides in value.
+        detail: {
+          event: item.event ?? this.eventName,
+          value: item.value,
+          source: this,
+        },
       }),
     );
   }

@@ -261,6 +261,17 @@ const marginsItems = (): string =>
     { text: opt("custom-margins"), value: "custom", disabled: true },
   ]);
 
+// Word's Cell Margins presets; "custom" opens the cell options dialog (not
+// built yet) and stays greyed.
+const cellMarginItems = (): string =>
+  JSON.stringify([
+    { text: opt("cell-margin-normal"), value: "default" },
+    { text: opt("cell-margin-none"), value: "none" },
+    { text: opt("narrow"), value: "narrow" },
+    { text: opt("wide"), value: "wide" },
+    { text: opt("custom-margins"), value: "custom", disabled: true },
+  ]);
+
 const orientationItems = (): string =>
   JSON.stringify([
     { text: opt("portrait"), value: "portrait" },
@@ -694,13 +705,15 @@ const menu = (
   icon: string,
   event: string,
   items: RibbonMenuItem[],
-  label?: string,
+  o: { label?: string; size?: "large"; iconOnly?: boolean } = {},
 ): RibbonMenu => ({
   type: "menu",
   icon,
   event,
-  label: label ?? cmd(event),
+  label: o.label ?? cmd(event),
   items,
+  ...(o.size ? { size: o.size } : {}),
+  ...(o.iconOnly ? { iconOnly: true } : {}),
 });
 
 const combo = (
@@ -766,7 +779,7 @@ export function ribbonTabs(styles?: StylesOptions | null, opts: RibbonOptions = 
 export function ribbonActions(): RibbonControl[] {
   return [
     btn("comment", "comment"),
-    menu("edit", "edit-mode", parsedItems(editItems()), cmd("editing")),
+    menu("edit", "edit-mode", parsedItems(editItems()), { label: cmd("editing") }),
     btn("share", "share"),
   ];
 }
@@ -1385,8 +1398,11 @@ export function tableContextTabs(scope?: Element): RibbonTab[] {
         group("alignment", [
           split("align-center", "align-cell", parsedItems(cellAlignItems()), { size: "large" }),
           btn("text-direction", "text-direction", { size: "large" }),
-          // Word opens the Cell Margins options dialog (not built) — greyed.
-          btn("table-properties", "cell-margins", { size: "large" }),
+          // Word's Cell Margins menu button: the presets stamp the caret
+          // cell's tcMar; Custom opens the options dialog (not built).
+          menu("table-properties", "cell-margins", parsedItems(cellMarginItems()), {
+            size: "large",
+          }),
         ]),
         group("data", [
           btn("table-repeat-headers", "repeat-header-rows", { size: "large" }),

@@ -97,6 +97,8 @@ declare module "@tiptap/core" {
       "autofit-window": (value?: string) => ReturnType;
       "fixed-column-width": () => ReturnType;
       "distribute-columns": () => ReturnType;
+      "distribute-rows": () => ReturnType;
+      "cell-margins": (value?: string) => ReturnType;
       "cell-width": (value?: string) => ReturnType;
       "cell-height": (value?: string) => ReturnType;
       link: (href?: string) => ReturnType;
@@ -179,6 +181,8 @@ export const WIRED_DISPATCH: ReadonlySet<string> = new Set([
   "autofit-window",
   "fixed-column-width",
   "distribute-columns",
+  "distribute-rows",
+  "cell-margins",
   "cell-width",
   "cell-height",
   "text-direction",
@@ -570,6 +574,32 @@ const ADD_TEXT_LEVELS: Readonly<Record<string, string | null>> = {
   "level-2": "Heading2",
   "level-3": "Heading3",
   none: null,
+};
+
+/** The Cell Margins menu presets (Word's Table Layout → Alignment group):
+ *  null clears the cell's tcMar so the table's default applies; the named
+ *  presets stamp Word's twip values (0 top/bottom, narrow 0.075" / wide 0.2"
+ *  left/right). */
+const CELL_MARGIN_PRESETS: Readonly<Record<string, Record<string, unknown> | null>> = {
+  default: null,
+  none: {
+    top: { size: 0, type: "twips" },
+    right: { size: 0, type: "twips" },
+    bottom: { size: 0, type: "twips" },
+    left: { size: 0, type: "twips" },
+  },
+  narrow: {
+    top: { size: 0, type: "twips" },
+    right: { size: 108, type: "twips" },
+    bottom: { size: 0, type: "twips" },
+    left: { size: 108, type: "twips" },
+  },
+  wide: {
+    top: { size: 0, type: "twips" },
+    right: { size: 288, type: "twips" },
+    bottom: { size: 0, type: "twips" },
+    left: { size: 288, type: "twips" },
+  },
 };
 
 // ── Cell Size / AutoFit measurement helpers ──────────────────────────────────
@@ -1325,6 +1355,30 @@ export const DocumentCommands = Extension.create({
           }
           return true;
         },
+      // Word's Cell Margins presets (Table Layout): "default" clears the cell's
+      // tcMar so the table default applies again; the named presets stamp
+      // their twip insets on the caret's cell.
+      "cell-margins":
+        (value) =>
+        ({ state, dispatch }) => {
+          if (typeof value !== "string" || !CELL_MARGIN_PRESETS.hasOwnProperty(value)) return false;
+          const anchor = tableAncestry(state);
+          if (!anchor || anchor.cellAt < 0) return false;
+          if (dispatch) {
+            const { $from } = state.selection;
+            const cellPos = $from.before(anchor.cellAt);
+            const cell = $from.node(anchor.cellAt);
+            dispatch(
+              state.tr
+                .setNodeMarkup(cellPos, undefined, {
+                  ...cell.attrs,
+                  margins: CELL_MARGIN_PRESETS[value],
+                })
+                .scrollIntoView(),
+            );
+          }
+          return true;
+        },
       // Word's Repeat Header Rows — toggles the current row's tblHeader.
       "repeat-header-rows":
         () =>
@@ -1728,6 +1782,56 @@ export const DocumentCommands = Extension.create({
                 })
                 .scrollIntoView(),
             );
+          }
+          return true;
+        },
+      // Word's Distribute Rows: the selected rows' declared heights split
+      // their total evenly (the last row absorbs the rounding remainder); a
+      // bare caret (or a single-row pick) applies table-wide, like Distribute
+      // Columns. Rows without a declared height stay auto — there is nothing
+      // to redistribute from, so at least two rows need one.
+      "distribute-rows":
+        () =>
+        ({ state, dispatch }) => {
+          const fromA = ancestryAt(state.selection.$from);
+          const toA = ancestryAt(state.selection.$to);
+          if (!fromA || !toA || fromA.rowAt < 0 || toA.rowAt < 0) return false;
+          const { $from, $to } = state.selection;
+          if ($from.before(fromA.tableAt) !== $to.before(toA.tableAt)) return false;
+          const tableNode = $from.node(fromA.tableAt);
+          const tablePos = $from.before(fromA.tableAt);
+          const rowFrom = $from.index(fromA.tableAt);
+          const rowTo = $to.index(toA.tableAt);
+          const last = rowFrom === rowTo ? tableNode.childCount - 1 : rowTo;
+          // Ancestry depths are not indexes — resolve row positions by child
+          // offsets (the merge-cells pattern); markup writes keep positions
+          // stable, so a forward walk stays valid.
+          const rows: { pos: number; height: number }[] = [];
+          let rowPos = tablePos + 1;
+          for (let r = 0; r <= last; r += 1) {
+            const row = tableNode.child(r);
+            const h = row.attrs.height as { value?: unknown } | null;
+            if (r >= rowFrom && h && typeof h.value === "number" && h.value > 0) {
+              rows.push({ pos: rowPos, height: h.value });
+            }
+            rowPos += row.nodeSize;
+          }
+          if (rows.length < 2) return false;
+          if (dispatch) {
+            const sum = rows.reduce((a, b) => a + b.height, 0);
+            const even = Math.floor(sum / rows.length);
+            const tr = state.tr;
+            rows.forEach(({ pos, height }, i) => {
+              const row = tr.doc.nodeAt(pos)!;
+              tr.setNodeMarkup(pos, undefined, {
+                ...row.attrs,
+                height: {
+                  value: i === rows.length - 1 ? sum - even * (rows.length - 1) : even,
+                  rule: "atLeast",
+                },
+              });
+            });
+            dispatch(tr.scrollIntoView());
           }
           return true;
         },

@@ -121,6 +121,11 @@ export const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   // gallery preset from the split item's value).
   "text-box",
   "shapes",
+  // View → Print Layout runs the same canvas print as the file menu's Print;
+  // Outline opens the document-structure pane (Word's outline view maps to
+  // the navigation pane here).
+  "print-layout",
+  "outline",
   // #onChange (data-event)
   "open",
   "save-as",
