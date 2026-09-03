@@ -1099,6 +1099,34 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
           return true;
         }
       }
+      // Backspace at the start of a list item: outdent if nested, or clear list formatting (Word behavior).
+      const parent = $from.parent;
+      if (parent.type.name === "paragraph") {
+        const attrs = parent.attrs as Record<string, unknown>;
+        const isList = attrs.bullet != null || attrs.numbering != null;
+        if (isList) {
+          const curLevel =
+            (attrs.bullet as { level?: number } | null | undefined)?.level ??
+            (attrs.numbering as { level?: number } | null | undefined)?.level ??
+            0;
+          if (curLevel > 0) {
+            const patch = listLevelStepPatch(attrs, -1);
+            if (patch) {
+              dispatch?.(state.tr.setNodeMarkup($from.before(), undefined, { ...attrs, ...patch }));
+              return true;
+            }
+          } else {
+            dispatch?.(
+              state.tr.setNodeMarkup($from.before(), undefined, {
+                ...attrs,
+                bullet: null,
+                numbering: null,
+              }),
+            );
+            return true;
+          }
+        }
+      }
       // Same runtime PM instance (single .pnpm dir); the cast bridges the
       // dual d.ts identity between this package's @tiptap/pm and the engine's.
       return joinBackward(state as never, dispatch);
@@ -1300,6 +1328,19 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
         });
         return;
       }
+      if (sel instanceof NodeSelection) {
+        event.preventDefault();
+        active().editor.commands.command(({ tr, dispatch }) => {
+          if (dispatch) {
+            tr.deleteSelection();
+            dispatch(tr);
+          }
+          return true;
+        });
+        selDrawing = null;
+        placeDrawingSel();
+        return;
+      }
     }
     // Shift+Enter inserts a soft line break (w:br inside the paragraph) —
     // captured here because the textarea reports both Enter flavors to
@@ -1391,6 +1432,12 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       case "End":
         event.preventDefault();
         apply(edgeTarget(active().editor.state, head(), true), extend);
+        break;
+      case "Delete":
+        if (editable) {
+          event.preventDefault();
+          deleteForward(event.ctrlKey || event.metaKey);
+        }
         break;
       // Leaving a furniture story (Word: Esc = Close Header and Footer).
       case "Escape":
@@ -1508,6 +1555,15 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       // when the plain text still matches it (stale after a copy elsewhere,
       // which is exactly when the fallback must not fire).
       if (lastCopied?.text === text && insertSlicePayload(lastCopied.payload)) return;
+      if (text.includes("\n")) {
+        const lines = text.replace(/\r\n/g, "\n").split("\n");
+        const paragraphs = lines.map((line) => ({
+          type: "paragraph",
+          content: line ? [{ type: "text", text: line }] : [],
+        }));
+        active().editor.commands.insertContent(paragraphs);
+        return;
+      }
       insertText(text);
     }
   };

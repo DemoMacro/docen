@@ -439,6 +439,10 @@ export function tableAncestry(state: EditorState): {
   rowAt: number;
   cellAt: number;
 } | null {
+  if (state.selection instanceof CellSelection) {
+    const sel = state.selection as unknown as CellSelection;
+    return ancestryAt(state.doc.resolve(sel.anchorCell + 1));
+  }
   return ancestryAt(state.selection.$from);
 }
 
@@ -1305,22 +1309,34 @@ export const DocumentCommands = Extension.create({
           const anchor = tableAncestry(state);
           if (!anchor || anchor.cellAt < 0) return false;
           if (dispatch) {
-            const { $from } = state.selection;
-            const cellPos = $from.before(anchor.cellAt);
-            const cell = $from.node(anchor.cellAt);
-            const from = cellPos + 1;
-            const to = cellPos + cell.nodeSize - 1;
+            const tr = state.tr;
             const { paragraph } = state.schema.nodes;
-            const tr = state.tr.setNodeMarkup(cellPos, undefined, {
-              ...cell.attrs,
-              verticalAlign: spec.v,
-            });
-            state.doc.nodesBetween(from, to, (node, pos) => {
-              if (node.type === paragraph && node.attrs.alignment !== spec.h) {
-                tr.setNodeMarkup(pos, undefined, { ...node.attrs, alignment: spec.h });
-              }
-              return true;
-            });
+            const applyToCell = (cell: PMNode, cellPos: number) => {
+              const live = tr.doc.nodeAt(cellPos);
+              if (!live) return;
+              tr.setNodeMarkup(cellPos, undefined, {
+                ...live.attrs,
+                verticalAlign: spec.v,
+              });
+              const from = cellPos + 1;
+              const to = cellPos + live.nodeSize - 1;
+              state.doc.nodesBetween(from, to, (node, pos) => {
+                if (node.type === paragraph && node.attrs.alignment !== spec.h) {
+                  tr.setNodeMarkup(pos, undefined, { ...node.attrs, alignment: spec.h });
+                }
+                return true;
+              });
+            };
+            if (state.selection instanceof CellSelection) {
+              (state.selection as unknown as CellSelection).forEachCell((cell, cellPos) => {
+                applyToCell(cell, cellPos);
+              });
+            } else {
+              const { $from } = state.selection;
+              const cellPos = $from.before(anchor.cellAt);
+              const cell = $from.node(anchor.cellAt);
+              applyToCell(cell, cellPos);
+            }
             dispatch(tr.scrollIntoView());
           }
           return true;
@@ -1355,14 +1371,19 @@ export const DocumentCommands = Extension.create({
           const stamp = shadingStamp(value);
           if (stamp === undefined) return false;
           if (dispatch) {
-            const { $from } = state.selection;
-            const cellPos = $from.before(anchor.cellAt);
-            const cell = $from.node(anchor.cellAt);
-            dispatch(
-              state.tr
-                .setNodeMarkup(cellPos, undefined, { ...cell.attrs, shading: stamp })
-                .scrollIntoView(),
-            );
+            const tr = state.tr;
+            if (state.selection instanceof CellSelection) {
+              (state.selection as unknown as CellSelection).forEachCell((_cell, cellPos) => {
+                const live = tr.doc.nodeAt(cellPos);
+                if (live) tr.setNodeMarkup(cellPos, undefined, { ...live.attrs, shading: stamp });
+              });
+            } else {
+              const { $from } = state.selection;
+              const cellPos = $from.before(anchor.cellAt);
+              const cell = $from.node(anchor.cellAt);
+              tr.setNodeMarkup(cellPos, undefined, { ...cell.attrs, shading: stamp });
+            }
+            dispatch(tr.scrollIntoView());
           }
           return true;
         },
@@ -1452,15 +1473,23 @@ export const DocumentCommands = Extension.create({
           const anchor = tableAncestry(state);
           if (!anchor || anchor.cellAt < 0) return false;
           if (dispatch) {
-            const { $from } = state.selection;
-            const cellPos = $from.before(anchor.cellAt);
-            const cell = $from.node(anchor.cellAt);
-            const next = cell.attrs.textDirection ? null : "tbRl";
-            dispatch(
-              state.tr
-                .setNodeMarkup(cellPos, undefined, { ...cell.attrs, textDirection: next })
-                .scrollIntoView(),
-            );
+            const tr = state.tr;
+            if (state.selection instanceof CellSelection) {
+              (state.selection as unknown as CellSelection).forEachCell((_cell, cellPos) => {
+                const live = tr.doc.nodeAt(cellPos);
+                if (live) {
+                  const next = live.attrs.textDirection ? null : "tbRl";
+                  tr.setNodeMarkup(cellPos, undefined, { ...live.attrs, textDirection: next });
+                }
+              });
+            } else {
+              const { $from } = state.selection;
+              const cellPos = $from.before(anchor.cellAt);
+              const cell = $from.node(anchor.cellAt);
+              const next = cell.attrs.textDirection ? null : "tbRl";
+              tr.setNodeMarkup(cellPos, undefined, { ...cell.attrs, textDirection: next });
+            }
+            dispatch(tr.scrollIntoView());
           }
           return true;
         },

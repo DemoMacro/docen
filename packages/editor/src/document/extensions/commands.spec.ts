@@ -30,6 +30,7 @@ type AnyNode = {
   attrs: Record<string, unknown>;
   childCount: number;
   child: (i: number) => AnyNode;
+  textContent: string;
 };
 
 const tablesOf = (editor: EditorType): AnyNode[] => {
@@ -312,6 +313,40 @@ describe("table cell property commands", () => {
     expect(firstNodeOf(editor, "tableCell").attrs.textDirection).toBe("tbRl");
     expect(editor.commands["text-direction"]()).toBe(true);
     expect(firstNodeOf(editor, "tableCell").attrs.textDirection).toBeFalsy();
+  });
+
+  it("cell-shading, align-cell, and text-direction apply to all cells when CellSelection is active", () => {
+    const editor = build();
+    editor.commands["insert-table"]();
+    caretInCell(editor, 1, 0);
+    // Select entire row 1 (3 cells)
+    expect(editor.commands["select-table-row"]()).toBe(true);
+
+    // Apply shading to all selected cells
+    expect(editor.commands["cell-shading"]("FFFF00")).toBe(true);
+    const table = tablesOf(editor)[0]!;
+    const row1 = table.child(1);
+    for (let c = 0; c < row1.childCount; c += 1) {
+      expect((row1.child(c).attrs.shading as { fill: string }).fill).toBe("FFFF00");
+    }
+    // Cells in row 0 should still be unshaded
+    expect(table.child(0).child(0).attrs.shading).toBeNull();
+
+    // Apply align-cell to all selected cells
+    expect(editor.commands["align-cell"]("bc")).toBe(true);
+    const tableAfterAlign = tablesOf(editor)[0]!;
+    const row1AfterAlign = tableAfterAlign.child(1);
+    for (let c = 0; c < row1AfterAlign.childCount; c += 1) {
+      expect(row1AfterAlign.child(c).attrs.verticalAlign).toBe("bottom");
+    }
+
+    // Apply text-direction to all selected cells
+    expect(editor.commands["text-direction"]()).toBe(true);
+    const tableAfterDir = tablesOf(editor)[0]!;
+    const row1AfterDir = tableAfterDir.child(1);
+    for (let c = 0; c < row1AfterDir.childCount; c += 1) {
+      expect(row1AfterDir.child(c).attrs.textDirection).toBe("tbRl");
+    }
   });
 });
 

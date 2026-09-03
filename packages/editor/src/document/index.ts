@@ -305,6 +305,16 @@ class DocenDocument extends AddinHost<Editor> {
     this.#setZoom(event.detail.zoom);
   };
 
+  /** Ctrl+Wheel zoom on the canvas (Word / standard desktop behavior). */
+  readonly #onWheel = (event: WheelEvent): void => {
+    if (event.ctrlKey || event.metaKey) {
+      event.preventDefault();
+      event.stopPropagation();
+      const delta = event.deltaY < 0 ? 10 : -10;
+      this.#setZoom(this.#zoom + delta);
+    }
+  };
+
   /** Ctrl+= / Ctrl+- / Ctrl+0 zoom, Ctrl+F find (Word behavior). Zoom is
    *  ignored inside ribbon comboboxes and other inputs (so the keystroke reaches
    *  them); Ctrl+F is global. preventDefault blocks the browser's native zoom/find. */
@@ -961,6 +971,7 @@ class DocenDocument extends AddinHost<Editor> {
     this.editor?.on("selectionUpdate", this.#syncActiveCommentCard);
     document.addEventListener("fullscreenchange", this.#onFullscreenChange);
     this.addEventListener("keydown", this.#onZoomKey);
+    this.addEventListener("wheel", this.#onWheel, { capture: true, passive: false });
     this.dispatchEvent(new CustomEvent("docen:ready", { bubbles: true, composed: true }));
   }
 
@@ -1391,6 +1402,7 @@ class DocenDocument extends AddinHost<Editor> {
     this.editor?.off("selectionUpdate", this.#syncActiveCommentCard);
     document.removeEventListener("fullscreenchange", this.#onFullscreenChange);
     this.removeEventListener("keydown", this.#onZoomKey);
+    this.removeEventListener("wheel", this.#onWheel, { capture: true });
     this.shadowRoot
       ?.querySelector("docen-ribbon")
       ?.removeEventListener("ribbon-mode-change", this.#onRibbonModeChange);
@@ -2190,7 +2202,10 @@ class DocenDocument extends AddinHost<Editor> {
       }
     });
     // After the leaf atom (pos is its left edge) so the caret sits past it.
-    if (target != null) this.#setTextSelection(target + 1);
+    if (target != null) {
+      this.#setTextSelection(target + 1);
+      this.#bridge?.scrollIntoView(target + 1);
+    }
   }
 
   /** One inlinePassthrough comment atom (see #insertComment) → its marker
