@@ -213,15 +213,31 @@ function groupOf(
   let prepared = preparedCache.get(key);
   if (!prepared) {
     prepared = prepareRichInline(items);
-    if (preparedCache.size >= PREPARED_CACHE_LIMIT) preparedCache.clear();
+    // Evict one oldest entry (Map iteration = insertion order) instead of
+    // clearing wholesale — a clear wipes the warm working set mid-pass and
+    // every subsequent prepare re-pays the full segmentation.
+    if (preparedCache.size >= PREPARED_CACHE_LIMIT) {
+      const oldest = preparedCache.keys().next().value;
+      if (oldest != null) preparedCache.delete(oldest);
+    }
     preparedCache.set(key, prepared);
   }
   return { itemInline, items, prepared, ...closer, followingPx: 0 };
 }
 
+/** Memoized group builds per inline array. The autofit path builds the same
+ *  groups twice (minWidthOfInline analysis, then packLines layout) on the
+ *  same array instance; the WeakMap makes the second build free and dies
+ *  with the array when the next transaction re-projects. An inline array's
+ *  lifetime spans one projection, hence one layout pass, hence one
+ *  measurer — caching per array cannot go stale on fonts. */
+const groupsCache = new WeakMap<LayoutInline[], FlowGroup[]>();
+
 /** Split the inline flow at tab and break atoms into pretext-prepared
  *  groups; the final group (no closing atom) runs to the flow's end. */
 function buildGroups(inline: LayoutInline[], measurer: TextMeasurer): FlowGroup[] {
+  const cached = groupsCache.get(inline);
+  if (cached) return cached;
   const groups: FlowGroup[] = [];
   let start = 0;
   for (let i = 0; i < inline.length; i++) {
@@ -264,6 +280,7 @@ function buildGroups(inline: LayoutInline[], measurer: TextMeasurer): FlowGroup[
     }
     groups[g].followingPx = following;
   }
+  groupsCache.set(inline, groups);
   return groups;
 }
 

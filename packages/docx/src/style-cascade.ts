@@ -4,7 +4,12 @@
 // caret/gallery resolvers all share these primitives, so one cascade runs
 // everywhere.
 
-import type { StylesOptions, TableBordersOptions, TableOptions } from "@office-open/docx";
+import type {
+  StylesOptions,
+  TableBordersOptions,
+  TableOptions,
+  TableStyleOptions,
+} from "@office-open/docx";
 
 /** Table-level cell margins (w:tblCellMar) — TableCellMarginOptions is not
  *  exported, derive it from the field that carries it. */
@@ -105,6 +110,23 @@ export function indexCharacterStyles(styles: StylesOptions | undefined): Map<str
     if (style) byId.set(pStyleIdFromKey(key), style);
   }
   characterStyleIndexCache.set(styles, byId);
+  return byId;
+}
+
+/** id → table-style index, WeakMap-cached per styles object like the
+ *  paragraph/character indexes — the projection resolves a table's w:tblStyle
+ *  per table, per transaction. */
+const tableStyleIndexCache = new WeakMap<StylesOptions, Map<string, TableStyleOptions>>();
+
+export function indexTableStyles(
+  styles: StylesOptions | undefined,
+): Map<string, TableStyleOptions> {
+  if (!styles) return new Map();
+  const cached = tableStyleIndexCache.get(styles);
+  if (cached) return cached;
+  const byId = new Map<string, TableStyleOptions>();
+  for (const ts of styles.tableStyles ?? []) byId.set(ts.id, ts);
+  tableStyleIndexCache.set(styles, byId);
   return byId;
 }
 

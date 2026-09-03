@@ -90,7 +90,13 @@ export class TextMeasurer {
     if (cached) return cached;
 
     const analyzed = this.analyzeUncached(text, style);
-    if (this.cache.size >= CACHE_LIMIT) this.cache.clear();
+    // Evict one oldest entry (Map iteration = insertion order) instead of
+    // clearing wholesale — a clear wipes the warm working set mid-pass and
+    // every subsequent analyze re-pays the full segmentation.
+    if (this.cache.size >= CACHE_LIMIT) {
+      const oldest = this.cache.keys().next().value;
+      if (oldest != null) this.cache.delete(oldest);
+    }
     this.cache.set(key, analyzed);
     return analyzed;
   }

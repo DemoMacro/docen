@@ -32,9 +32,17 @@ export const BUILTIN_BULLET_LEVEL = (level: number): NumberingLevel => ({
   hangingTw: 360,
 });
 
+// Cache the index by the numbering options reference — the numbering model is
+// stable for a document's lifetime, while projectPageFurniture rebuilds the
+// index per section (the same WeakMap memo as indexCharacterStyles).
+const numberingIndexCache = new WeakMap<object, NumberingIndex>();
+
 export function indexNumberings(numbering: unknown): NumberingIndex {
+  if (!isRecord(numbering)) return new Map();
+  const cached = numberingIndexCache.get(numbering);
+  if (cached) return cached;
   const index: NumberingIndex = new Map();
-  if (!isRecord(numbering) || !Array.isArray(numbering.abstractNumberings)) return index;
+  if (!Array.isArray(numbering.abstractNumberings)) return index;
   for (const abs of numbering.abstractNumberings) {
     if (!isRecord(abs)) continue;
     const reference = str(abs.reference);
@@ -54,6 +62,7 @@ export function indexNumberings(numbering: unknown): NumberingIndex {
       index.set(reference, levels);
     }
   }
+  numberingIndexCache.set(numbering, index);
   return index;
 }
 

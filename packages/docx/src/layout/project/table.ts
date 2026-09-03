@@ -13,6 +13,7 @@ import {
 } from "@docen/layout";
 import type { TableCellOptions, TableOptions } from "@office-open/docx";
 
+import { indexTableStyles } from "../../style-cascade";
 import type { ProjectContext } from "./context";
 import { isRecord, measureTwip, num, type LayoutCell, type Rec } from "./guards";
 import { projectChild } from "./page";
@@ -198,9 +199,7 @@ export function projectTable(t: TableOptions, ctx: ProjectContext): LayoutTable 
   }
 
   const columnWidthsPx = t.columnWidths?.map((w) => twipToPx(measureTwip(w) ?? 0));
-  const styleTable = t.style
-    ? ctx.styles?.tableStyles?.find((st) => st.id === t.style)?.table
-    : undefined;
+  const styleTable = t.style ? indexTableStyles(ctx.styles).get(t.style)?.table : undefined;
   return {
     kind: "table",
     width: toTableWidth(t.width),
