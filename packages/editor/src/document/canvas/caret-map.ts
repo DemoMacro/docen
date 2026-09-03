@@ -624,14 +624,20 @@ export class CaretMap {
         }
         // Line-box geometry (the layout's own pitch) keeps multi-line
         // highlights contiguous — the caret's ink band would fragment them.
+        // The line-box floor keeps the height sane across a column split's
+        // line-y rewind: a tail block restarts at the right column's top on
+        // the SAME page, so the next line's y can sit ABOVE the current one
+        // and taking it raw would flip the height negative (invisible).
+        const boxBottom = line.yPx + line.line.heightPx;
         const nextLine = entry.lines[li + 1];
+        const nextFirst = next?.lines[0];
         const bottom = nextLine
-          ? nextLine.yPx
-          : nextSelected && next?.lines[0] && next.lines[0].page === line.page
+          ? Math.max(nextLine.yPx, boxBottom)
+          : nextSelected && nextFirst && nextFirst.page === line.page
             ? // The paragraph gap (after+before spacing) belongs to the
               // selection once the next paragraph is in it too.
-              next.lines[0].yPx
-            : line.yPx + line.line.heightPx;
+              Math.max(nextFirst.yPx, boxBottom)
+            : boxBottom;
         if (empty) {
           rects.push({
             page: line.page,
