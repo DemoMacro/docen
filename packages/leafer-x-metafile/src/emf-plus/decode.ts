@@ -33,8 +33,9 @@ export interface PenInfo {
 }
 
 /** GDI+ DashStyle enum values → prstDash tokens (the member protocol's dash
- *  vocabulary); Solid stays absent. */
-const DASH_STYLE_TOKENS = ["", "", "sysDash", "sysDot", "sysDashDot", "sysDashDotDot"];
+ *  vocabulary); Solid stays absent. DashStyleCustom (5) resolves through the
+ *  pen's repeat array instead, so index 5 reads past this table. */
+const DASH_STYLE_TOKENS = ["", "sysDash", "sysDot", "sysDashDot", "sysDashDotDot"];
 
 /** Custom DashStyle (5) carries a repeat array in pen-width units; the corpus
  *  emits exactly the two stock shapes ([3,1] Dash, [1,1] Dot), so only those
