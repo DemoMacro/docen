@@ -6,7 +6,7 @@ import type { EditorState } from "@tiptap/pm/state";
 import type { Transaction } from "@tiptap/pm/state";
 import { NodeSelection, TextSelection } from "@tiptap/pm/state";
 
-import { CellSelection } from "../canvas/cell-selection";
+import { CellSelection, cellsInRect } from "../canvas/cell-selection";
 
 /**
  * Document editor commands (Office.js-style "add-in commands") as native
@@ -464,6 +464,68 @@ function ancestryAt($pos: ResolvedPos): {
     else if (node.type === tableCell && cellAt < 0) cellAt = d;
   }
   return tableAt < 0 ? null : { tableAt, rowAt, cellAt };
+}
+
+/** The selection's table targets — every cell a CellSelection crosses, or the
+ *  caret's enclosing cell. A CellSelection's `$from` sits at a cell's START
+ *  (inside the row, not the cell), so {@link tableAncestry} reads `cellAt:
+ *  -1` there and every cell-level command would decline — this is the one
+ *  resolver the cell/row/column-level commands share. Cell stamps carry their
+ *  table-child row index and grid column; the row/column commands read
+ *  `rows`/`cols` (Word: a whole-pick height lands on every picked row, a
+ *  width on every picked column). Null outside a table. */
+function tableTargets(state: EditorState): {
+  tablePos: number;
+  tableNode: PMNode;
+  cells: { pos: number; node: PMNode }[];
+  rows: Set<number>;
+  cols: Set<number>;
+} | null {
+  const { selection } = state;
+  const isCell = selection instanceof CellSelection;
+  let anchorCell: number;
+  let tablePos: number;
+  if (isCell) {
+    anchorCell = selection.anchorCell;
+    const $t = selection.$from;
+    tablePos = $t.before($t.depth - 1);
+  } else {
+    const anchor = ancestryAt(selection.$from);
+    if (!anchor || anchor.cellAt < 0) return null;
+    anchorCell = selection.$from.before(anchor.cellAt);
+    tablePos = selection.$from.before(anchor.tableAt);
+  }
+  const cells: { pos: number; node: PMNode }[] = [];
+  const rows = new Set<number>();
+  const cols = new Set<number>();
+  cellsInRect(
+    state.doc,
+    anchorCell,
+    isCell ? selection.headCell : anchorCell,
+    (node, pos, row, col) => {
+      cells.push({ pos, node });
+      rows.add(row);
+      cols.add(col);
+    },
+  );
+  const tableNode = state.doc.nodeAt(tablePos);
+  if (!cells.length || !tableNode) return null;
+  return { tablePos, tableNode, cells, rows, cols };
+}
+
+/** The selected rows stamped through one forward walk (markup writes keep
+ *  positions stable, so row positions stay valid as they're written). */
+function stampRows(
+  tr: Transaction,
+  targets: NonNullable<ReturnType<typeof tableTargets>>,
+  patch: (row: PMNode) => Record<string, unknown>,
+): void {
+  let rowPos = targets.tablePos + 1;
+  for (let r = 0; r < targets.tableNode.childCount; r += 1) {
+    const row = targets.tableNode.child(r)!;
+    if (targets.rows.has(r)) tr.setNodeMarkup(rowPos, undefined, patch(row));
+    rowPos += row.nodeSize;
+  }
 }
 
 // ── Floating drawing helpers (the Arrange commands' shared target) ───────────
@@ -1332,25 +1394,23 @@ export const DocumentCommands = Extension.create({
         ({ state, dispatch }) => {
           const spec = CELL_ALIGN[value ?? ""];
           if (!spec) return false;
-          const anchor = tableAncestry(state);
-          if (!anchor || anchor.cellAt < 0) return false;
+          const targets = tableTargets(state);
+          if (!targets) return false;
           if (dispatch) {
-            const { $from } = state.selection;
-            const cellPos = $from.before(anchor.cellAt);
-            const cell = $from.node(anchor.cellAt);
-            const from = cellPos + 1;
-            const to = cellPos + cell.nodeSize - 1;
             const { paragraph } = state.schema.nodes;
-            const tr = state.tr.setNodeMarkup(cellPos, undefined, {
-              ...cell.attrs,
-              verticalAlign: spec.v,
-            });
-            state.doc.nodesBetween(from, to, (node, pos) => {
-              if (node.type === paragraph && node.attrs.alignment !== spec.h) {
-                tr.setNodeMarkup(pos, undefined, { ...node.attrs, alignment: spec.h });
-              }
-              return true;
-            });
+            const tr = state.tr;
+            for (const { pos, node: cell } of targets.cells) {
+              tr.setNodeMarkup(pos, undefined, {
+                ...cell.attrs,
+                verticalAlign: spec.v,
+              });
+              state.doc.nodesBetween(pos + 1, pos + cell.nodeSize - 1, (node, npos) => {
+                if (node.type === paragraph && node.attrs.alignment !== spec.h) {
+                  tr.setNodeMarkup(npos, undefined, { ...node.attrs, alignment: spec.h });
+                }
+                return true;
+              });
+            }
             dispatch(tr.scrollIntoView());
           }
           return true;
@@ -1362,40 +1422,34 @@ export const DocumentCommands = Extension.create({
         (value) =>
         ({ state, dispatch }) => {
           if (typeof value !== "string" || !CELL_MARGIN_PRESETS.hasOwnProperty(value)) return false;
-          const anchor = tableAncestry(state);
-          if (!anchor || anchor.cellAt < 0) return false;
+          const targets = tableTargets(state);
+          if (!targets) return false;
           if (dispatch) {
-            const { $from } = state.selection;
-            const cellPos = $from.before(anchor.cellAt);
-            const cell = $from.node(anchor.cellAt);
-            dispatch(
-              state.tr
-                .setNodeMarkup(cellPos, undefined, {
-                  ...cell.attrs,
-                  margins: CELL_MARGIN_PRESETS[value],
-                })
-                .scrollIntoView(),
-            );
+            const tr = state.tr;
+            for (const { pos, node: cell } of targets.cells) {
+              tr.setNodeMarkup(pos, undefined, {
+                ...cell.attrs,
+                margins: CELL_MARGIN_PRESETS[value],
+              });
+            }
+            dispatch(tr.scrollIntoView());
           }
           return true;
         },
-      // Word's Repeat Header Rows — toggles the current row's tblHeader.
+      // Word's Repeat Header Rows — one press marks the whole pick (the
+      // selected rows gain or lose tblHeader together, the anchor row's
+      // current state deciding which way).
       "repeat-header-rows":
         () =>
         ({ state, dispatch }) => {
-          const anchor = tableAncestry(state);
-          if (!anchor || anchor.rowAt < 0) return false;
+          const targets = tableTargets(state);
+          if (!targets) return false;
           if (dispatch) {
-            const { $from } = state.selection;
-            const row = $from.node(anchor.rowAt);
-            dispatch(
-              state.tr
-                .setNodeMarkup($from.before(anchor.rowAt), undefined, {
-                  ...row.attrs,
-                  tableHeader: !row.attrs.tableHeader,
-                })
-                .scrollIntoView(),
-            );
+            const firstRow = Math.min(...targets.rows);
+            const next = !(targets.tableNode.child(firstRow)!.attrs.tableHeader as boolean);
+            const tr = state.tr;
+            stampRows(tr, targets, (row) => ({ ...row.attrs, tableHeader: next }));
+            dispatch(tr.scrollIntoView());
           }
           return true;
         },
@@ -1404,19 +1458,16 @@ export const DocumentCommands = Extension.create({
       "cell-shading":
         (value) =>
         ({ state, dispatch }) => {
-          const anchor = tableAncestry(state);
-          if (!anchor || anchor.cellAt < 0) return false;
           const stamp = shadingStamp(value);
           if (stamp === undefined) return false;
+          const targets = tableTargets(state);
+          if (!targets) return false;
           if (dispatch) {
-            const { $from } = state.selection;
-            const cellPos = $from.before(anchor.cellAt);
-            const cell = $from.node(anchor.cellAt);
-            dispatch(
-              state.tr
-                .setNodeMarkup(cellPos, undefined, { ...cell.attrs, shading: stamp })
-                .scrollIntoView(),
-            );
+            const tr = state.tr;
+            for (const { pos, node: cell } of targets.cells) {
+              tr.setNodeMarkup(pos, undefined, { ...cell.attrs, shading: stamp });
+            }
+            dispatch(tr.scrollIntoView());
           }
           return true;
         },
@@ -1497,24 +1548,22 @@ export const DocumentCommands = Extension.create({
             null) as TableBordersLike | null;
           return stampTableBorders(state, dispatch, tableBordersStamp(value, current));
         },
-      // Word's Text Direction button: toggles the cell's tcPr textDirection
-      // (tbRl ↔ unset). The attr round-trips through the docx engine; the
-      // canvas doesn't paint vertical cell text yet.
+      // Word's Text Direction button: one press turns the whole pick to one
+      // direction (tbRl ↔ unset, the anchor cell's state deciding). The attr
+      // round-trips through the docx engine; the canvas doesn't paint
+      // vertical cell text yet.
       "text-direction":
         () =>
         ({ state, dispatch }) => {
-          const anchor = tableAncestry(state);
-          if (!anchor || anchor.cellAt < 0) return false;
+          const targets = tableTargets(state);
+          if (!targets) return false;
           if (dispatch) {
-            const { $from } = state.selection;
-            const cellPos = $from.before(anchor.cellAt);
-            const cell = $from.node(anchor.cellAt);
-            const next = cell.attrs.textDirection ? null : "tbRl";
-            dispatch(
-              state.tr
-                .setNodeMarkup(cellPos, undefined, { ...cell.attrs, textDirection: next })
-                .scrollIntoView(),
-            );
+            const next = targets.cells[0]!.node.attrs.textDirection ? null : "tbRl";
+            const tr = state.tr;
+            for (const { pos, node: cell } of targets.cells) {
+              tr.setNodeMarkup(pos, undefined, { ...cell.attrs, textDirection: next });
+            }
+            dispatch(tr.scrollIntoView());
           }
           return true;
         },
@@ -1821,7 +1870,7 @@ export const DocumentCommands = Extension.create({
             const sum = rows.reduce((a, b) => a + b.height, 0);
             const even = Math.floor(sum / rows.length);
             const tr = state.tr;
-            rows.forEach(({ pos, height }, i) => {
+            rows.forEach(({ pos }, i) => {
               const row = tr.doc.nodeAt(pos)!;
               tr.setNodeMarkup(pos, undefined, {
                 ...row.attrs,
@@ -1835,27 +1884,24 @@ export const DocumentCommands = Extension.create({
           }
           return true;
         },
-      // Cell width — the column width of the caret's cell (the grid is the
-      // one width source the layout reads; Word's tcW maps onto it here).
+      // Cell width — the width of every picked column (the grid is the one
+      // width source the layout reads; Word's tcW maps onto it here).
       "cell-width":
         (value) =>
         ({ state, dispatch }) => {
-          const anchor = tableAncestry(state);
-          if (!anchor || anchor.rowAt < 0) return false;
           const tw = parseMeasureTwip(value);
           if (tw == null || tw < MIN_COL_TWIP) return false;
-          const { $from } = state.selection;
-          const tableNode = $from.node(anchor.tableAt);
-          const widths = tableNode.attrs.columnWidths as number[] | null;
-          const col = $from.index(anchor.rowAt);
-          if (!widths || col >= widths.length) return false;
+          const targets = tableTargets(state);
+          if (!targets) return false;
+          const widths = targets.tableNode.attrs.columnWidths as number[] | null;
+          if (!widths || [...targets.cols].some((col) => col >= widths.length)) return false;
           if (dispatch) {
             const next = [...widths];
-            next[col] = Math.round(tw);
+            for (const col of targets.cols) next[col] = Math.round(tw);
             dispatch(
               state.tr
-                .setNodeMarkup($from.before(anchor.tableAt), undefined, {
-                  ...tableNode.attrs,
+                .setNodeMarkup(targets.tablePos, undefined, {
+                  ...targets.tableNode.attrs,
                   columnWidths: next,
                 })
                 .scrollIntoView(),
@@ -1863,25 +1909,20 @@ export const DocumentCommands = Extension.create({
           }
           return true;
         },
-      // Row height — the caret row's trHeight (atLeast; "0"/auto clears it).
+      // Row height — every picked row's trHeight (atLeast; "0"/auto clears
+      // them all), so a whole-pick height lines the rows up (Word).
       "cell-height":
         (value) =>
         ({ state, dispatch }) => {
-          const anchor = tableAncestry(state);
-          if (!anchor || anchor.rowAt < 0) return false;
           const tw = parseMeasureTwip(value);
           if (tw == null || tw < 0) return false;
+          const targets = tableTargets(state);
+          if (!targets) return false;
           if (dispatch) {
-            const { $from } = state.selection;
-            const row = $from.node(anchor.rowAt);
-            dispatch(
-              state.tr
-                .setNodeMarkup($from.before(anchor.rowAt), undefined, {
-                  ...row.attrs,
-                  height: tw > 0 ? { value: Math.round(tw), rule: "atLeast" } : null,
-                })
-                .scrollIntoView(),
-            );
+            const height = tw > 0 ? { value: Math.round(tw), rule: "atLeast" } : null;
+            const tr = state.tr;
+            stampRows(tr, targets, (row) => ({ ...row.attrs, height }));
+            dispatch(tr.scrollIntoView());
           }
           return true;
         },

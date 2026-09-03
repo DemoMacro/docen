@@ -67,12 +67,14 @@ const gridColOf = (rowNode: PmNode, cellIndex: number): number => {
  *  anchor and head rows, across the anchor..head columns. The rectangle
  *  lives in GRID columns — a spanning cell covers its columns — so a drag
  *  over merged rows still reaches every grid column its ends span; rows
- *  shorter than the rectangle contribute what they have. */
+ *  shorter than the rectangle contribute what they have. The visit also
+ *  carries the cell's table-child row index and grid column — the row- and
+ *  column-level commands derive their target sets from these. */
 export function cellsInRect(
   doc: PmNode,
   anchorPos: number,
   headPos: number,
-  visit: (node: PmNode, pos: number) => void,
+  visit: (node: PmNode, pos: number, row: number, col: number) => void,
 ): void {
   const $a = doc.resolve(anchorPos);
   const $h = doc.resolve(headPos);
@@ -99,7 +101,7 @@ export function cellsInRect(
     for (let c = 0; c < rowNode.childCount && col < colTo; c += 1) {
       const node = rowNode.child(c);
       const span = spanOf(node);
-      if (col + span > colFrom) visit(node, cellPos);
+      if (col + span > colFrom) visit(node, cellPos, r, col);
       col += span;
       cellPos += node.nodeSize;
     }

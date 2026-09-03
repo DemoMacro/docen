@@ -3400,7 +3400,9 @@ class DocenDocument extends AddinHost<Editor> {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (): void => {
-      const src = String(reader.result);
+      // readAsDataURL always yields a string — the guard narrows the union.
+      if (typeof reader.result !== "string") return;
+      const src = reader.result;
       // Natural size → attrs, clamped to the content width (Word inserts at
       // natural size but never wider than the frame, keeping the aspect).
       // Without explicit dimensions renderDocx falls back to a flat 400×300,
