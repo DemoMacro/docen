@@ -1,22 +1,27 @@
 // @vitest-environment node
-import type { FlowPage, ProjectedLineNumbers } from "@docen/layout";
+import type { FlowPage, ProjectedFlowBox, ProjectedLineNumbers } from "@docen/layout";
 import { describe, expect, it } from "vitest";
 
+import type { LineNumberSection } from "./line-numbers";
 import { computeLineNumbers } from "./line-numbers";
 
 /** A page whose items sit at fixed strides: paragraphs get one line each
  *  (plus a configurable count), tables and other kinds are passed through
  *  as opaque blocks. */
-const pageOf = (items: { kind: string; lines?: number; suppress?: boolean }[]): FlowPage[] =>
+const pageOf = (
+  items: { kind: string; lines?: number; suppress?: boolean; sectionEnd?: boolean; xPx?: number }[],
+): FlowPage[] =>
   [
     {
       items: items.map((item, i) => ({
         yPx: i * 100,
+        xPx: item.xPx,
         block:
           item.kind === "paragraph"
             ? {
                 kind: "paragraph",
                 suppressLineNumbers: item.suppress,
+                sectionEnd: item.sectionEnd,
                 markSizePx: 14,
                 lines: Array.from({ length: item.lines ?? 1 }, (_, l) => ({
                   yPx: l * 20,
@@ -28,6 +33,21 @@ const pageOf = (items: { kind: string; lines?: number; suppress?: boolean }[]): 
       })),
     },
   ] as unknown as FlowPage[];
+
+const FLOW: ProjectedFlowBox = {
+  pageWidthPx: 794,
+  pageHeightPx: 1123,
+  contentWidthPx: 554,
+  contentHeightPx: 883,
+  contentLeftPx: 120,
+  contentTopPx: 120,
+};
+
+const section = (extra: Partial<LineNumberSection> = {}): LineNumberSection => ({
+  flow: FLOW,
+  lineNumbers: CONFIG,
+  ...extra,
+});
 
 const CONFIG: ProjectedLineNumbers = {
   countBy: 1,
@@ -44,7 +64,7 @@ describe("computeLineNumbers", () => {
       { kind: "paragraph", suppress: true, lines: 2 },
       { kind: "paragraph" },
     ]);
-    const out = computeLineNumbers(pages, [{ lineNumbers: CONFIG }], [0]);
+    const out = computeLineNumbers(pages, [section()], [0]);
     const marks = out.get(0)!;
     // Table lines don't count; the suppressed paragraph's two lines render
     // but don't either — the last paragraph's line is count 3.
@@ -64,7 +84,7 @@ describe("computeLineNumbers", () => {
     ]);
     const out = computeLineNumbers(
       pages,
-      [{ lineNumbers: { ...CONFIG, countBy: 2, start: 10 } }],
+      [section({ lineNumbers: { ...CONFIG, countBy: 2, start: 10 } })],
       [0],
     );
     expect(out.get(0)!.map((m) => m.num)).toEqual([11, 13]);
@@ -77,7 +97,7 @@ describe("computeLineNumbers", () => {
           ...pageOf([{ kind: "paragraph" }, { kind: "paragraph" }]),
           ...pageOf([{ kind: "paragraph" }]),
         ],
-        [{ lineNumbers: config }],
+        [section({ lineNumbers: config })],
         [0, 0],
       );
     const newPage = two({ ...CONFIG, restart: "newPage" });
@@ -96,7 +116,7 @@ describe("computeLineNumbers", () => {
     const config = { ...CONFIG, restart: "continuous" } as const;
     const out = computeLineNumbers(
       pages,
-      [{ lineNumbers: config }, { lineNumbers: config }],
+      [section({ lineNumbers: config }), section({ lineNumbers: config })],
       [0, 0, 1],
     );
     expect(out.get(0)!.map((m) => m.num)).toEqual([1]);
@@ -112,7 +132,7 @@ describe("computeLineNumbers", () => {
       ...pageOf([{ kind: "paragraph" }]),
       ...pageOf([{ kind: "paragraph" }, { kind: "paragraph" }]),
     ];
-    const out = computeLineNumbers(pages, [{ lineNumbers: CONFIG }, {}], [0, 1]);
+    const out = computeLineNumbers(pages, [section(), { flow: FLOW }], [0, 1]);
     expect(out.get(0)!.map((m) => m.num)).toEqual([1]);
     expect(out.get(1)!).toEqual([]);
   });
@@ -125,12 +145,39 @@ describe("computeLineNumbers", () => {
     const out = computeLineNumbers(
       pages,
       [
-        { lineNumbers: { ...CONFIG, restart: "newSection" } },
-        { lineNumbers: { ...CONFIG, restart: "newSection" } },
+        section({ lineNumbers: { ...CONFIG, restart: "newSection" } }),
+        section({ lineNumbers: { ...CONFIG, restart: "newSection" } }),
       ],
       [0, 1],
     );
     expect(out.get(0)!.map((m) => m.num)).toEqual([1, 2]);
     expect(out.get(1)!.map((m) => m.num)).toEqual([1]);
+  });
+
+  it("a section-break paragraph neither counts nor paints", () => {
+    const pages = pageOf([
+      { kind: "paragraph" },
+      { kind: "paragraph", sectionEnd: true },
+      { kind: "paragraph" },
+    ]);
+    const out = computeLineNumbers(pages, [section()], [0]);
+    expect(out.get(0)!.map((m) => m.num)).toEqual([1, 2]);
+  });
+
+  it("later columns count but paint only beside the first column", () => {
+    const twoCol = {
+      count: 2,
+      spacePx: 31,
+      separate: false,
+      equalWidth: true,
+    } as const;
+    const pages = pageOf([
+      { kind: "paragraph" },
+      { kind: "paragraph", xPx: 0 },
+      { kind: "paragraph", xPx: 293 },
+    ]);
+    const out = computeLineNumbers(pages, [section({ columns: twoCol })], [0]);
+    // Column 2's line (count 3) keeps the count running but paints nothing.
+    expect(out.get(0)!.map((m) => m.num)).toEqual([1, 2]);
   });
 });
