@@ -90,6 +90,25 @@ describe("paste style mapping", () => {
       attrs: { color: null },
     });
   });
+
+  it("maps px and pt border shorthands with rgb colors to the border attr", () => {
+    // Chrome serializes border shorthands in px with an rgb() color — the
+    // form real pastes arrive in. w:sz is eighth-points: 2px = 12, 1pt = 8.
+    const borderOf = (html: string) => parse(html).content?.[0]?.attrs?.border;
+    expect(borderOf('<p style="border-top: 2px solid rgb(0, 0, 0)">x</p>')).toMatchObject({
+      top: { style: "single", size: 12, color: "000000" },
+    });
+    expect(borderOf('<p style="border-bottom: 1pt dashed black">x</p>')).toMatchObject({
+      bottom: { style: "dashed", size: 8, color: "000000" },
+    });
+  });
+
+  it("maps background-color to shading with bare-hex fill", () => {
+    // The renderer prepends "#" and the generator writes w:fill verbatim —
+    // both expect bare six-digit hex, no prefix.
+    const json = parse('<p style="background-color: rgb(255, 0, 0)">x</p>');
+    expect(json.content?.[0]?.attrs?.shading).toMatchObject({ fill: "FF0000", type: "clear" });
+  });
 });
 
 describe("fixture corpus smoke (tests/html)", () => {

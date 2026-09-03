@@ -389,7 +389,8 @@ export function alignmentFromCss(css: string | null | undefined): string | null 
 /** CSS background-color → ShadingProperties (fill normalized to hex). */
 export function shadingFromCss(css: string | null | undefined): ShadingProperties | null {
   const hex = normalizeColorToHex(css ?? undefined);
-  return hex ? { fill: hex, type: "clear" } : null;
+  // w:fill is ST_HexColor — bare six-digit hex, no "#" prefix.
+  return hex ? { fill: hex.replace(/^#/, ""), type: "clear" } : null;
 }
 
 // ── Section geometry ──
@@ -488,9 +489,20 @@ export function spacingFromElement(el: HTMLElement): SpacingProperties | null {
   return Object.keys(spacing).length > 0 ? spacing : null;
 }
 
-/** Parse border-* → OOXML BordersOptions. */
+/** Parse border-* → OOXML BordersOptions. Chrome serializes the shorthand as
+ *  "width style color" ("1px solid rgb(0, 0, 0)") — the form real pastes
+ *  arrive in; hand-written HTML often lists "style width color" (CSS lets the
+ *  components appear in any order), so both orders parse. The width accepts
+ *  px and pt, and the color rides the same hex normalization as shading,
+ *  since a raw rgb() string in w:color violates ST_HexColor. */
 export function bordersFromElement(el: HTMLElement): BordersOptions | null {
   const borders: BordersOptions = {};
+  const styleMap: Record<string, BorderOptions["style"]> = {
+    solid: "single",
+    dashed: "dashed",
+    dotted: "dotted",
+    double: "double",
+  };
   const sides: Array<[keyof BordersOptions, string]> = [
     ["top", el.style.borderTop],
     ["bottom", el.style.borderBottom],
@@ -499,18 +511,21 @@ export function bordersFromElement(el: HTMLElement): BordersOptions | null {
   ];
   for (const [side, css] of sides) {
     if (!css || css === "initial" || css === "none") continue;
-    const m = css.match(/^(none|solid|dashed|dotted|double)\s+([\d.]+pt)\s+(.+)$/);
+    const m =
+      /^([\d.]+)(pt|px)\s+(solid|dashed|dotted|double)\s+(.+)$/.exec(css) ??
+      /^(solid|dashed|dotted|double)\s+([\d.]+)(pt|px)\s+(.+)$/.exec(css);
     if (!m) continue;
-    const styleMap: Record<string, BorderOptions["style"]> = {
-      solid: "single",
-      dashed: "dashed",
-      dotted: "dotted",
-      double: "double",
-    };
+    // The second form lists style first — normalize to [width, unit, style].
+    const [width, unit, style] = Number.isNaN(parseFloat(m[1]!))
+      ? [m[2], m[3], m[1]]
+      : [m[1], m[2], m[3]];
+    const color = normalizeColorToHex(m[4]);
+    if (!color) continue;
     borders[side] = {
-      style: styleMap[m[1]] ?? "single",
-      size: Math.round(parseFloat(m[2]) * 8),
-      color: m[3],
+      style: styleMap[style] ?? "single",
+      // Eighth-points (w:sz): 1pt = 8, 1px = 6 at 96 DPI.
+      size: Math.round(parseFloat(width) * (unit === "px" ? 6 : 8)),
+      color: color.replace(/^#/, ""),
     };
   }
   return Object.keys(borders).length > 0 ? borders : null;
