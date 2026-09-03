@@ -282,14 +282,19 @@ export async function registerComponents(): Promise<void> {
       }
     `,
   });
-  // fluent-menu-item: a plain-text item (no start icon -> data-indent stays 0)
-  // lands its content in the 20px indicator track (calc(--indent + 1) = col 1).
-  // That track is fixed-width, so the content can't stretch the item — a long
-  // label (e.g. "Add Space Before Paragraph") overflows the fixed-width popover
-  // and is clipped. Span the full row for plain-text items so the content
-  // stretches the item (and the popover) to fit. A radio item carries a
-  // checkmark on col 1, so its content starts at col 2 (next rule). Items with
-  // a start icon keep Fluent's default (data-indent 1/2 -> col 2/3, icon-then-text).
+  // fluent-menu-item overrides on top of Fluent's 7-track subgrid (10px rim /
+  // indicator / start / content / end / submenu-glyph / 10px rim — the checkmark
+  // paints in the indicator track, col 2). A plain-text item (no start icon ->
+  // data-indent="0") pins its content to the 1fr content track (col 4), whose
+  // width the popover's max-inline-size clamps — a long label (e.g. "Add Space
+  // Before Paragraph") overflows and is clipped. Span the full row so the label
+  // stretches the popover to fit. `data-indent="1"` marks a plain member of a
+  // pick list (Word's Editing/Viewing drop-down): it too gives up the checkmark
+  // track so both labels share one left edge. A radio item's label starts after
+  // the checkmark (col 3) — col 2 would collide with the checkmark there and
+  // grid auto-placement would push the label to a SECOND row (the checked item's
+  // icon and text stacked). Items with a start icon keep Fluent's default
+  // (icon-then-text columns).
   await defineElement(MenuItem, {
     name: "fluent-menu-item",
     template: MenuItemTemplate,
@@ -298,13 +303,9 @@ export async function registerComponents(): Promise<void> {
       :host([data-indent="0"]) .content {
         grid-column: 1 / -1;
       }
-      /* A radio item (role="menuitemradio") auto-sets data-indent=1 — it carries
-         a checkmark on the col-1 indicator track — which pins its content to the
-         col-2 fixed-width track, so a long label overflows and is clipped (the
-         same plain-text clipping above). Span from col 2 so the content (and the
-         popover) stretch to fit while leaving the checkmark clear on col 1. */
+      :host([data-indent="1"]) .content,
       :host([role="menuitemradio"]) .content {
-        grid-column: 2 / -1;
+        grid-column: 3 / -1;
       }
     `,
   });

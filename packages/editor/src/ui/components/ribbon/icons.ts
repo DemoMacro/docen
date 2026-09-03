@@ -102,6 +102,13 @@ import textWrap from "@fluentui/svg-icons/icons/text_wrap_24_regular.svg?raw";
 import appLogo from "@fluentui/svg-icons/icons/window_apps_24_regular.svg?raw";
 import zoomIn from "@fluentui/svg-icons/icons/zoom_in_24_regular.svg?raw";
 
+// The Fluent set has no omega glyph — Word's Symbol command paints one, so it
+// is drawn here as a stroked path (fill none keeps the container's
+// `svg { fill: currentColor }` from filling the bowl) in the regular style's
+// visual stroke weight.
+const symbolOmega =
+  '<svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M4 18h4s0-1 0-3c0-2.5 0-6 4-6s4 3.5 4 6c0 2 0 3 0 3h4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
 /**
  * Ribbon icons sourced from `@fluentui/svg-icons` (Fluent System Icons — the
  * same set Office uses). Each entry is the raw SVG markup, injected into a
@@ -193,7 +200,7 @@ const RIBBON_ICONS: Record<string, string> = {
   wordart: textEffects,
   "text-effects": textEffects,
   equation: calculator,
-  symbol: numberSymbol,
+  symbol: symbolOmega,
   "number-symbol": numberSymbol,
   // Design
   theme: colorBackground,

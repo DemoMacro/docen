@@ -110,13 +110,16 @@ interface MenuItemLike {
  *  it Fluent pins the content to the fixed-width indicator track and clips
  *  long labels (see the registry's fluent-menu-item override). An `icon` item
  *  instead renders the glyph in Fluent's `start` slot and keeps Fluent's own
- *  indent (icon-then-text columns). */
+ *  indent (icon-then-text columns). In a pick list (any `checked` member) the
+ *  plain members indent past the checkmark track too — Word's Editing/Viewing
+ *  drop-down aligns both labels on one edge (`data-indent="1"`). */
 export function appendMenuItems<T extends MenuItemLike>(
   list: HTMLElement,
   items: readonly T[],
   onSelect: (item: T) => void,
 ): void {
   list.replaceChildren();
+  const pickList = items.some((item) => item.checked);
   for (const item of items) {
     if (item.text === "-") {
       const divider = document.createElement("fluent-divider");
@@ -140,8 +143,12 @@ export function appendMenuItems<T extends MenuItemLike>(
       // would wipe the just-appended start glyph.
       menuItem.textContent = item.text;
       menuItem.append(start);
+    } else if (item.checked) {
+      // Positioned by the registry's menuitemradio rule (checkmark track, then
+      // the label) — no data-indent, so the two overrides never compete.
+      menuItem.textContent = item.text;
     } else {
-      menuItem.setAttribute("data-indent", "0");
+      menuItem.setAttribute("data-indent", pickList ? "1" : "0");
       menuItem.textContent = item.text;
     }
     if (item.disabled) menuItem.setAttribute("disabled", "");
