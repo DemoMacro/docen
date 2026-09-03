@@ -565,14 +565,17 @@ function paintLineMarks(
   // leftward head — down, then left. ANCHORED BY ITS LEFTMOST POINT a small
   // gap past the last glyph, so the shape never leans back over the text at
   // any font size; it stays smaller than the text with the foot longer than
-  // the rod. A vector, not the font's ↵ glyph (fallback faces vary).
+  // the rod. A vector, not the font's ↵ glyph (fallback faces vary). The foot
+  // sits ON the text baseline (0.85s below the element top — the same
+  // leaferBaselinePadPx anchor the glyphs paint at), like Word's paragraph
+  // mark: an earlier 0.3s anchor left it floating 0.17em above the line.
   const rod = sizePx * 0.38;
   const arm = sizePx * 0.6;
   const head = sizePx * 0.18;
   tree.add(
     new Path({
       x: markX + sizePx * 0.25,
-      y: lineY + pad + sizePx * 0.3,
+      y: lineY + pad + sizePx * (0.85 - 0.38),
       path: `M0 ${rod} H${arm} V0 ` + `M${head} ${rod - head} L0 ${rod} L${head} ${rod + head}`,
       stroke: color,
       strokeWidth: Math.max(1, sizePx * 0.06),
