@@ -128,7 +128,19 @@ class DocenFindReplaceDialog extends FASTElement {
   connectedCallback(): void {
     super.connectedCallback();
     this.find?.addEventListener("input", () => this.#emit("query"));
+    this.find?.addEventListener("keydown", (event: KeyboardEvent) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        this.#emit("find-next");
+      }
+    });
     this.replace?.addEventListener("input", () => this.#emit("query"));
+    this.replace?.addEventListener("keydown", (event: KeyboardEvent) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        this.#emit("replace-next");
+      }
+    });
     const root = this.shadowRoot!;
     root
       .querySelector("[part='find-next']")

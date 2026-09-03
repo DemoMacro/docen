@@ -3,6 +3,7 @@ import { Document, Image, Paragraph, Table, TableCell, TableRow, WpsShape } from
 import { Editor, Node as TextNode, type Editor as EditorType } from "@docen/docx/core";
 import { describe, expect, it } from "vitest";
 
+import { CellSelection } from "../canvas/cell-selection";
 import { DocumentCommands } from "./commands";
 
 // Tiptap's schema needs the plain text node (same trick as the TOC spec).
@@ -469,14 +470,38 @@ describe("merge / split table commands", () => {
     expect(tables).toHaveLength(2);
     expect(tables[0]!.childCount).toBe(1);
     expect(tables[1]!.childCount).toBe(2);
+    // The separator paragraph sits between the two tables (keeps them separate in Word).
+    expect(editor.state.doc.child(1).type.name).toBe("paragraph");
     // The caret lands in the second table's first cell.
     const $from = editor.state.doc.resolve(editor.state.selection.from);
-    // The caret sits inside the second table (the one after the split).
     expect($from.node(3).type.name).toBe("tableCell");
-    expect($from.before(1)).toBe(editor.state.doc.firstChild!.nodeSize);
+    expect($from.before(1)).toBe(
+      editor.state.doc.firstChild!.nodeSize + editor.state.doc.child(1).nodeSize,
+    );
     // Splitting at the first row declines.
     caretInCell(editor, 0, 0);
     expect(editor.commands["split-table"]()).toBe(false);
+  });
+
+  it("column-break inside a table delegates to split-table", () => {
+    const editor = build();
+    editor.commands["insert-table"]();
+    caretInCell(editor, 1, 0);
+    expect(editor.commands["column-break"]()).toBe(true);
+    expect(tablesOf(editor)).toHaveLength(2);
+  });
+
+  it("merge-cells supports CellSelection directly from canvas drag", () => {
+    const editor = build();
+    editor.commands["insert-table"]();
+    caretInCell(editor, 0, 0);
+    // Select the first row via CellSelection.
+    editor.commands["select-table-row"]();
+    expect(editor.state.selection instanceof CellSelection).toBe(true);
+    expect(editor.commands["merge-cells"]()).toBe(true);
+    const row = tablesOf(editor)[0]!.child(0);
+    expect(row.childCount).toBe(1);
+    expect(row.child(0).attrs.columnSpan).toBe(3);
   });
 });
 

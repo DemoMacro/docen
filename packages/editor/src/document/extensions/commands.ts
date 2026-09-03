@@ -1029,8 +1029,15 @@ export const DocumentCommands = Extension.create({
           commands.setPageBreak(),
       "column-break":
         () =>
-        ({ commands }) =>
-          commands.setColumnBreak(),
+        ({ state, commands }) => {
+          const anchor = tableAncestry(state);
+          if (anchor && anchor.tableAt >= 0) {
+            return (
+              (commands as unknown as Record<string, () => boolean>)["split-table"]?.() ?? false
+            );
+          }
+          return commands.setColumnBreak();
+        },
       "section-break":
         () =>
         ({ commands }) =>
@@ -1502,22 +1509,30 @@ export const DocumentCommands = Extension.create({
       "merge-cells":
         () =>
         ({ state, dispatch }) => {
-          const fromA = ancestryAt(state.selection.$from);
-          const toA = ancestryAt(state.selection.$to);
+          let $from = state.selection.$from;
+          let $to = state.selection.$to;
+          if (state.selection instanceof CellSelection) {
+            const sel = state.selection as unknown as CellSelection;
+            const $a = state.doc.resolve(sel.anchorCell + 2);
+            const $h = state.doc.resolve(sel.headCell + 2);
+            $from = $a.pos <= $h.pos ? $a : $h;
+            $to = $a.pos <= $h.pos ? $h : $a;
+          }
+          const fromA = ancestryAt($from);
+          const toA = ancestryAt($to);
           if (!fromA || !toA || fromA.rowAt < 0 || toA.rowAt < 0) return false;
-          const { $from, $to } = state.selection;
           if ($from.before(fromA.tableAt) !== $to.before(toA.tableAt)) return false;
           const tableNode = $from.node(fromA.tableAt);
           const grid = (tableNode.attrs.columnWidths as number[] | null)?.length ?? 0;
-          const c1 = $from.index(fromA.rowAt);
-          const c2 = $to.index(toA.rowAt);
-          if (fromA.rowAt === toA.rowAt && c1 === c2) return false;
+          const c1 = Math.min($from.index(fromA.rowAt), $to.index(toA.rowAt));
+          const c2 = Math.max($from.index(fromA.rowAt), $to.index(toA.rowAt));
+          const rowFrom = Math.min($from.index(fromA.tableAt), $to.index(toA.tableAt));
+          const rowTo = Math.max($from.index(fromA.tableAt), $to.index(toA.tableAt));
+          if (rowFrom === rowTo && c1 === c2) return false;
           if (dispatch) {
             const tablePos = $from.before(fromA.tableAt);
             // Row indices into the table's children — the ancestry depths are
             // not indexes (a depth-2 rowAt would address the last row).
-            const rowFrom = $from.index(fromA.tableAt);
-            const rowTo = $to.index(toA.tableAt);
             const tr = state.tr;
             for (let r = rowTo; r >= rowFrom; r -= 1) {
               const rowNode = tableNode.child(r);
@@ -1575,7 +1590,8 @@ export const DocumentCommands = Extension.create({
           return true;
         },
       // Word's Split Table: the caret's row starts a second table with the
-      // same formatting (attrs are shared — borders, grid, style).
+      // same formatting (attrs are shared — borders, grid, style), separated
+      // by a blank paragraph so the two tables don't merge back in Word.
       "split-table":
         () =>
         ({ state, dispatch }) => {
@@ -1593,14 +1609,18 @@ export const DocumentCommands = Extension.create({
               (r < rowIdx ? rowsA : rowsB).push(tableNode.child(r));
             }
             const create = state.schema.nodes.table.create.bind(state.schema.nodes.table);
+            const sep = state.schema.nodes.paragraph.create();
             const tr = state.tr.replaceWith(tablePos, tablePos + tableNode.nodeSize, [
               create(tableNode.attrs, rowsA),
+              sep,
               create(tableNode.attrs, rowsB),
             ]);
             // The caret lands in the second table's first cell: the first
-            // table's size is its rows plus the open/close tokens.
+            // table's size is its rows plus the open/close tokens, plus the separator paragraph.
             const firstTableSize = rowsA.reduce((sum, r) => sum + r.nodeSize, 0) + 2;
-            tr.setSelection(TextSelection.near(tr.doc.resolve(tablePos + firstTableSize + 1)));
+            tr.setSelection(
+              TextSelection.near(tr.doc.resolve(tablePos + firstTableSize + sep.nodeSize + 1)),
+            );
             dispatch(tr.scrollIntoView());
           }
           return true;

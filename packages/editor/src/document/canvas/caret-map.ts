@@ -494,21 +494,27 @@ export class CaretMap {
     return this.posInLine(best.entry, x);
   }
 
-  /** The position one line above/below a position's line, at the same
-   *  character column (clamped to the target line's length — the Word goal
-   *  column; a pixel target would drift across differently stretched
-   *  justified lines). Null at the paragraph's vertical edge. */
+  /** One line up/down at the same character column (within the paragraph or
+   *  crossing into adjacent paragraphs across the document). Null at document edge. */
   posVertical(pos: number, dir: -1 | 1): number | null {
     const located = this.locate(pos);
     if (!located) return null;
     const lines = located.entry.lines;
-    const target = lines[lines.indexOf(located.line) + dir];
+    let target = lines[lines.indexOf(located.line) + dir];
+    let owner = located.entry;
+    if (!target) {
+      const allIdx = this.lines.indexOf(located.line);
+      if (allIdx >= 0) {
+        target = this.lines[allIdx + dir];
+        if (target) owner = target.owner;
+      }
+    }
     if (!target) return null;
     const col = Math.min(
       located.offset - located.line.startChar,
       target.endChar - target.startChar,
     );
-    return this.posOfChar(located.entry, target.startChar + col);
+    return this.posOfChar(owner, target.startChar + col);
   }
 
   /** The vertical caret box of a line — anchored where the painter actually

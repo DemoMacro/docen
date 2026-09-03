@@ -847,7 +847,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     dragMoved = false;
     dragStart = null;
   };
-  opts.host.addEventListener("mousemove", onMouseMove);
+  document.addEventListener("mousemove", onMouseMove);
   document.addEventListener("mouseup", onMouseUp);
 
   /** Enter a furniture story: a second viewless editor over the slot's
@@ -1233,19 +1233,23 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     ta.value = "";
   };
 
-  /** One step horizontally from a position — a grapheme inside the block
+  /** One step horizontally from a position — a grapheme or word inside the block
    *  (atoms step a whole node), the nearest text position past its edge. */
-  const hStep = (state: Editor["state"], pos: number, dir: -1 | 1): number | null => {
+  const hStep = (state: Editor["state"], pos: number, dir: -1 | 1, word = false): number | null => {
     const $from = state.doc.resolve(pos);
     const offset = $from.parentOffset;
     const size = $from.parent.content.size;
+    const text = $from.parent.textBetween(0, size);
     if (dir < 0 && offset > 0) {
-      // textBetween maps the content offset to text units, skipping atoms.
-      const cut = lastGraphemeUnits($from.parent.textBetween(0, offset)) || 1;
+      const cut = word
+        ? wordUnitsBackward(text, offset)
+        : lastGraphemeUnits(text.slice(0, offset)) || 1;
       return pos - cut;
     }
     if (dir > 0 && offset < size) {
-      const cut = firstGraphemeUnits($from.parent.textBetween(offset, size)) || 1;
+      const cut = word
+        ? wordUnitsForward(text, offset)
+        : firstGraphemeUnits(text.slice(offset)) || 1;
       return pos + cut;
     }
     const edge = dir < 0 ? $from.before() : $from.after();
@@ -1278,6 +1282,12 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     } else {
       setSel(target);
     }
+  };
+
+  const scrollTo = (pos: number): void => {
+    const rect = active().map?.valid ? active().map!.caretRect(pos) : null;
+    if (!rect) return;
+    opts.pageHost?.(rect.page)?.scrollIntoView({ block: "start", behavior: "auto" });
   };
 
   const onKeyDown = (event: KeyboardEvent): void => {
@@ -1344,6 +1354,18 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
         );
         return;
       }
+      // Mod-K: Insert / edit hyperlink (Word standard).
+      if (lower === "k") {
+        event.preventDefault();
+        opts.host.dispatchEvent(
+          new CustomEvent("command", {
+            bubbles: true,
+            composed: true,
+            detail: { event: "link" },
+          }),
+        );
+        return;
+      }
       // Viewless editors have no EditorView, so nothing dispatches Tiptap's
       // per-extension keyboard shortcuts — match the shared table here (the
       // DocenKeymap extension serves the same table on a DOM route). Named
@@ -1370,11 +1392,19 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     switch (event.key) {
       case "ArrowLeft":
         event.preventDefault();
-        apply(hStep(active().editor.state, head(), -1), extend);
+        if (selDrawing != null) {
+          selDrawing = null;
+          placeDrawingSel();
+        }
+        apply(hStep(active().editor.state, head(), -1, event.ctrlKey || event.metaKey), extend);
         break;
       case "ArrowRight":
         event.preventDefault();
-        apply(hStep(active().editor.state, head(), 1), extend);
+        if (selDrawing != null) {
+          selDrawing = null;
+          placeDrawingSel();
+        }
+        apply(hStep(active().editor.state, head(), 1, event.ctrlKey || event.metaKey), extend);
         break;
       case "ArrowUp":
         event.preventDefault();
@@ -1384,16 +1414,64 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
         event.preventDefault();
         apply(vStep(head(), 1), extend);
         break;
-      case "Home":
+      case "Home": {
         event.preventDefault();
-        apply(edgeTarget(active().editor.state, head(), false), extend);
+        const target =
+          event.ctrlKey || event.metaKey ? 0 : edgeTarget(active().editor.state, head(), false);
+        apply(target, extend);
+        scrollTo(target);
         break;
-      case "End":
+      }
+      case "End": {
         event.preventDefault();
-        apply(edgeTarget(active().editor.state, head(), true), extend);
+        const target =
+          event.ctrlKey || event.metaKey
+            ? active().editor.state.doc.content.size
+            : edgeTarget(active().editor.state, head(), true);
+        apply(target, extend);
+        scrollTo(target);
+        break;
+      }
+      case "PageUp": {
+        event.preventDefault();
+        const map = active().map;
+        if (map?.valid) {
+          const cur = head();
+          const curPage = map.caretRect(cur)?.page ?? 0;
+          const targetPage = Math.max(0, curPage - 1);
+          const targetPos = map.firstPosOfPage(targetPage) ?? 0;
+          apply(targetPos, extend);
+          scrollTo(targetPos);
+        }
+        break;
+      }
+      case "PageDown": {
+        event.preventDefault();
+        const map = active().map;
+        if (map?.valid) {
+          const cur = head();
+          const curPage = map.caretRect(cur)?.page ?? 0;
+          const targetPos =
+            map.firstPosOfPage(curPage + 1) ?? active().editor.state.doc.content.size;
+          apply(targetPos, extend);
+          scrollTo(targetPos);
+        }
+        break;
+      }
+      case "Delete":
+        if (editable) {
+          event.preventDefault();
+          deleteForward(event.ctrlKey || event.metaKey);
+        }
         break;
       // Leaving a furniture story (Word: Esc = Close Header and Footer).
       case "Escape":
+        if (selDrawing != null) {
+          event.preventDefault();
+          selDrawing = null;
+          placeDrawingSel();
+          return;
+        }
         if (story) {
           event.preventDefault();
           leaveStory();
@@ -1666,9 +1744,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       return leaveStory();
     },
     scrollIntoView(pos): void {
-      const rect = main.map?.valid ? main.map.caretRect(pos) : null;
-      if (!rect) return;
-      opts.pageHost?.(rect.page)?.scrollIntoView({ block: "start", behavior: "auto" });
+      scrollTo(pos);
     },
     /** The page index a doc position renders on (null when unmappable). */
     pageOf(pos): number | null {
@@ -1724,7 +1800,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       story = null;
       main.editor.destroy();
       opts.host.removeEventListener("mousedown", takeFocus);
-      opts.host.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mousemove", onMouseMove);
       document.removeEventListener("mouseup", onMouseUp);
       drawingSel.remove();
       for (const el of selectionLayer) el.remove();
