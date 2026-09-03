@@ -88,7 +88,7 @@ const demoDocument = (): JSONContent => ({
       content: [
         t("Links and character styles: visit the "),
         t("project homepage", [
-          { type: "link", attrs: { href: "https://github.com/docen", target: "_blank" } },
+          { type: "link", attrs: { href: "https://github.com/DemoMacro/docen", target: "_blank" } },
           { type: "textStyle", attrs: { style: "Hyperlink" } },
         ]),
         t(" (the link blue comes from the Hyperlink character style, matching Word)."),
