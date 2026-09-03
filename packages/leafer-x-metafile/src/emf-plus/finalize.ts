@@ -160,7 +160,7 @@ export function finalize(
       width: boxW,
       height: boxH,
       d: parts.join(""),
-      ...(dr.fill ? { fill: dr.fill, fillRule: "evenodd" as const } : {}),
+      ...(dr.fill ? { fill: dr.fill, fillRule: dr.fillRule ?? "evenodd" } : {}),
       ...(dr.strokeColor && strokeWidth
         ? {
             line: { px: strokeWidth, color: dr.strokeColor, ...(dr.dash ? { dash: dr.dash } : {}) },

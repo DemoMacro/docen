@@ -29,6 +29,7 @@ import {
   EMR_RESTOREDC,
   EMR_SAVEDC,
   EMR_SELECT_OBJECT,
+  EMR_SETPOLYFILLMODE,
   EMR_SET_WORLD_TRANSFORM,
   EMR_SETTEXTCOLOR,
   EMR_SETTEXTALIGN,
@@ -80,6 +81,7 @@ interface GdiFont {
 const EMR_MIN_SIZE: Partial<Record<number, number>> = {
   [EMR_SETTEXTCOLOR]: 12,
   [EMR_SETTEXTALIGN]: 12,
+  [EMR_SETPOLYFILLMODE]: 12,
   [EMR_MOVE_TO_EX]: 16,
   [EMR_LINE_TO]: 16,
   [EMR_SELECT_OBJECT]: 12,
@@ -123,6 +125,9 @@ export function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): Dr
   // SetTextAlign flags; the GDI device default is TA_TOP (0) — the reference y
   // is the cell top, not the baseline (misreading it sinks every text box).
   let textAlign = 0;
+  // Polygon fill rule (SetPolyFillMode): the GDI device default ALTERNATE is
+  // even-odd; WINDING fills self-overlaps a nonzero winding count instead.
+  let polyFillMode = 1;
   // The path under construction (figures as raw command tuples), started by
   // BeginPath and frozen by EndPath into `openPath` for a later fill/stroke.
   let figure: PathCmds | null = null;
@@ -135,6 +140,7 @@ export function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): Dr
     selectedBrush: number;
     textColor?: string;
     textAlign: number;
+    polyFillMode: number;
     figure: PathCmds | null;
     openPath: PathCmds | null;
   }> = [];
@@ -153,7 +159,7 @@ export function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): Dr
       // The pen width rides the world transform like text does.
       const scale = Math.max(Math.hypot(eff.m11, eff.m21), Math.hypot(eff.m12, eff.m22));
       pushPath(drafts, openPath, eff, {
-        ...(fill ? { fill } : {}),
+        ...(fill ? { fill, fillRule: polyFillMode === 2 ? "nonzero" : "evenodd" } : {}),
         ...(pen ? { strokeColor: pen.color, strokeWidth: Math.max(pen.width * scale, 1) } : {}),
       });
     }
@@ -341,6 +347,7 @@ export function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): Dr
           selectedBrush,
           textColor,
           textAlign,
+          polyFillMode,
           figure,
           openPath,
         });
@@ -348,9 +355,24 @@ export function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): Dr
       case EMR_RESTOREDC: {
         const st = states.pop();
         if (st) {
-          ({ xf, selected, selectedPen, selectedBrush, textColor, textAlign, figure, openPath } =
-            st);
+          ({
+            xf,
+            selected,
+            selectedPen,
+            selectedBrush,
+            textColor,
+            textAlign,
+            polyFillMode,
+            figure,
+            openPath,
+          } = st);
         }
+        break;
+      }
+      case EMR_SETPOLYFILLMODE: {
+        // iMode u32: 1 = ALTERNATE, 2 = WINDING.
+        const mode = view.getUint32(eo + 8, true);
+        if (mode === 1 || mode === 2) polyFillMode = mode;
         break;
       }
       case EMR_MOVE_TO_EX: {
@@ -389,6 +411,7 @@ export function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): Dr
         const scale = Math.max(Math.hypot(eff.m11, eff.m21), Math.hypot(eff.m12, eff.m22));
         pushPath(drafts, cmds, eff, {
           fill,
+          fillRule: polyFillMode === 2 ? "nonzero" : "evenodd",
           ...(pen && pen.width > 0
             ? { strokeColor: pen.color, strokeWidth: Math.max(pen.width * scale, 1) }
             : {}),

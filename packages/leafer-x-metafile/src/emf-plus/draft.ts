@@ -7,6 +7,9 @@ export interface PathDraft {
   kind: "path";
   cmds: PathCmds;
   fill?: string;
+  /** Fill rule the source declared (GDI SetPolyFillMode); the finalize pass
+   *  defaults paths without one to evenodd (GDI's ALTERNATE device default). */
+  fillRule?: "evenodd" | "nonzero";
   strokeWidth?: number;
   strokeColor?: string;
   /** Preset dash token — threaded to the member's line.dash verbatim. */
@@ -62,7 +65,13 @@ export function pushPath(
   drafts: Draft[],
   rawCmds: PathCmds,
   xf: Xform,
-  paint: { fill?: string; strokeColor?: string; strokeWidth?: number; dash?: string },
+  paint: {
+    fill?: string;
+    fillRule?: "evenodd" | "nonzero";
+    strokeColor?: string;
+    strokeWidth?: number;
+    dash?: string;
+  },
 ): void {
   const transformed: PathCmds = rawCmds.map(([op, nums]) => {
     if (op === "Z") return [op, nums];
@@ -76,7 +85,9 @@ export function pushPath(
   drafts.push({
     kind: "path",
     cmds: transformed,
-    ...(paint.fill ? { fill: paint.fill } : {}),
+    ...(paint.fill
+      ? { fill: paint.fill, ...(paint.fillRule ? { fillRule: paint.fillRule } : {}) }
+      : {}),
     ...(paint.strokeColor && paint.strokeWidth != null
       ? {
           strokeColor: paint.strokeColor,

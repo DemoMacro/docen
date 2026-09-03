@@ -33,6 +33,7 @@ export const EMR_CREATE_BRUSH_INDIRECT = 39;
 export const EMR_DELETE_OBJECT = 40;
 export const EMR_SETTEXTCOLOR = 24;
 export const EMR_SETTEXTALIGN = 22;
+export const EMR_SETPOLYFILLMODE = 19;
 export const EMR_BITBLT = 76;
 export const EMR_STRETCHDIBITS = 81;
 export const EMR_EXT_CREATE_FONT = 82;
