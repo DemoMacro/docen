@@ -672,10 +672,15 @@ function splitLaid(laid: LaidOutBlock, k: number, midDepth?: number): [LaidOutBl
       if (midDepth != null) {
         const [headHalf, tailHalf] = splitRowAt(laid.rows[k], midDepth);
         const headRows = [...laid.rows.slice(0, k), headHalf];
-        const tailRows =
+        const tailBody = [tailHalf, ...laid.rows.slice(k + 1).map(strip)];
+        const tailRows = reopenSpannedCells(
+          k >= headers ? [...laid.rows.slice(0, headers), ...tailBody] : tailBody,
           k >= headers
-            ? [...laid.rows.slice(0, headers), tailHalf, ...laid.rows.slice(k + 1).map(strip)]
-            : [tailHalf, ...laid.rows.slice(k + 1).map(strip)];
+            ? [...leadingSlots(headers), ...rangeSlots(k, laid.rows.length)]
+            : rangeSlots(k, laid.rows.length),
+          laid.rows,
+          laid.columnWidthsPx.length,
+        );
         return [
           { ...laid, rows: headRows, heightPx: sumRows(headRows) },
           { ...laid, rows: tailRows, heightPx: sumRows(tailRows) },
@@ -691,10 +696,16 @@ function splitLaid(laid: LaidOutBlock, k: number, midDepth?: number): [LaidOutBl
       // or a table that is all header) continues band-less entirely: the
       // tail's marks are stripped so no later page re-derives a band from a
       // marked row that is no longer at a table top.
-      const tailRows =
+      const tailRows = reopenSpannedCells(
         k > headers
           ? [...laid.rows.slice(0, headers), ...laid.rows.slice(k).map(strip)]
-          : laid.rows.slice(k).map(strip);
+          : laid.rows.slice(k).map(strip),
+        k > headers
+          ? [...leadingSlots(headers), ...rangeSlots(k, laid.rows.length)]
+          : rangeSlots(k, laid.rows.length),
+        laid.rows,
+        laid.columnWidthsPx.length,
+      );
       return [
         { ...laid, rows: headRows, heightPx: sumRows(headRows) },
         { ...laid, rows: tailRows, heightPx: sumRows(tailRows) },
@@ -712,6 +723,87 @@ function splitLaid(laid: LaidOutBlock, k: number, midDepth?: number): [LaidOutBl
     case "pageBreak":
       throw new Error("pageBreak is not splittable");
   }
+}
+
+/** Word re-opens every vertical merge a page cut crosses: a tail row keeps an
+ *  empty placeholder cell where a row-spanning cell anchored above the cut
+ *  still owns columns — without it the tail's cells pack one column left and
+ *  the first column appears to vanish. `slots` pairs each tail row with the
+ *  source row index it renders (band copies render the leading rows again);
+ *  an anchor whose own source row is in the tail re-opens through itself. */
+function reopenSpannedCells(
+  tailRows: LaidOutTable["rows"],
+  slots: number[],
+  sourceRows: LaidOutTable["rows"],
+  columnCount: number,
+): LaidOutTable["rows"] {
+  // Walk the source grid once — the same occupancy walk the painter runs —
+  // so each row knows where its own cells start and which spans reach down.
+  const occ: (LaidOutCell | undefined)[][] = sourceRows.map(() => []);
+  const at: { cell: LaidOutCell; c: number; spanW: number; spanH: number }[][] = sourceRows.map(
+    () => [],
+  );
+  sourceRows.forEach((row, r) => {
+    let c = 0;
+    for (const cell of row.cells) {
+      while (c < columnCount && occ[r]![c]) c++;
+      if (c >= columnCount) break;
+      const spanW = Math.min(cell.colspan ?? 1, columnCount - c);
+      const spanH = Math.min(cell.rowspan ?? 1, sourceRows.length - r);
+      for (let dr = 0; dr < spanH; dr++)
+        for (let dc = 0; dc < spanW; dc++) occ[r + dr]![c + dc] = cell;
+      at[r]!.push({ cell, c, spanW, spanH });
+      c += spanW;
+    }
+  });
+
+  const present = new Set(slots);
+  return tailRows.map((row, i) => {
+    const rt = slots[i];
+    if (rt == null) return row;
+    const open: { p: (typeof at)[number][number]; r: number }[] = [];
+    for (const [r, list] of at.entries()) {
+      if (present.has(r)) continue;
+      for (const p of list) if (r < rt && rt < r + p.spanH) open.push({ p, r });
+    }
+    if (open.length === 0) return row;
+    // Merge the placeholders into the row's cells by column order — the row's
+    // own cells keep their source order (`at[rt]` walks in cells order).
+    open.sort((a, b) => a.p.c - b.p.c);
+    const cells: LaidOutCell[] = [];
+    let ci = 0;
+    let oi = 0;
+    while (ci < row.cells.length || oi < open.length) {
+      const next = open[oi];
+      const ownC = at[rt]![ci]?.c ?? Infinity;
+      if (next && next.p.c <= ownC) {
+        const { p, r } = next;
+        cells.push({
+          colspan: p.spanW,
+          rowspan: r + p.spanH - rt,
+          insets: p.cell.insets,
+          borders: p.cell.borders,
+          fill: p.cell.fill,
+          innerWidthPx: p.cell.innerWidthPx,
+          stack: [],
+        });
+        oi++;
+      } else {
+        cells.push(row.cells[ci++]!);
+      }
+    }
+    return { ...row, cells };
+  });
+}
+
+/** The tail's source-row slots for the repeated band copies (rows 0..n). */
+function leadingSlots(n: number): number[] {
+  return Array.from({ length: n }, (_, i) => i);
+}
+
+/** The tail's source-row slots for source rows `from` (inclusive) to `to`. */
+function rangeSlots(from: number, to: number): number[] {
+  return Array.from({ length: Math.max(0, to - from) }, (_, i) => from + i);
 }
 
 /** Split a row mid-content at `depth` px from its top: every cell cuts at the

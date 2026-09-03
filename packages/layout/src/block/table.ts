@@ -43,6 +43,11 @@ export function layoutTable(
   while (bandEnd < table.rows.length && table.rows[bandEnd].tableHeader) bandEnd++;
 
   let heightPx = 0;
+  // Columns a row-spanning cell above already owns — vertical merges drop
+  // their continuation cells at projection, so each row's walk must skip the
+  // columns a span anchored on an earlier row keeps, or the row's cells pack
+  // one column left (wrong widths and grid-rim fallbacks follow).
+  const occupied: boolean[][] = table.rows.map(() => []);
   const rows = table.rows.map((row, rowIndex) => {
     // Cells measure under the table-cell line-height rule (max(natural,
     // pitch)) so trHeight governs. Zones start empty per cell — the cell's
@@ -65,10 +70,14 @@ export function layoutTable(
     const totals: { stackedPx: number; overheadPx: number }[] = [];
     const cells: LaidOutCell[] = row.cells.map((cell) => {
       const colspan = cell.colspan ?? 1;
+      while (colCursor < columnWidths.length && occupied[rowIndex]![colCursor]) colCursor++;
       let cellWidth = 0;
       for (let i = 0; i < colspan && colCursor + i < columnWidths.length; i++) {
         cellWidth += columnWidths[colCursor + i];
       }
+      for (let dr = 0; dr < (cell.rowspan ?? 1) && rowIndex + dr < table.rows.length; dr++)
+        for (let dc = 0; dc < colspan && colCursor + dc < columnWidths.length; dc++)
+          occupied[rowIndex + dr]![colCursor + dc] = true;
       // A cell's missing border side falls back to the table-level default —
       // the grid rim (first/last row/column) takes the outer edges, interior
       // boundaries the inside ones (CT_TblBorders semantics).
@@ -229,10 +238,15 @@ function autofitColumns(
   const grid = rawGridOf(table);
   if (grid.length === 0) return { columnWidths: [], tableWidth: containerWidth };
   const content = grid.map(() => 0);
-  for (const row of table.rows) {
+  // Same occupancy walk the fixed path uses: merged rows drop their
+  // continuation cells, so each row's cells must skip columns a span above
+  // keeps or their content floor lands on the wrong column.
+  const occupied: boolean[][] = table.rows.map(() => []);
+  for (const [rowIndex, row] of table.rows.entries()) {
     let col = 0;
     for (const cell of row.cells) {
       const span = cell.colspan ?? 1;
+      while (col < grid.length && occupied[rowIndex]![col]) col++;
       if (span === 1 && col < content.length) {
         const insets = mergeInsets(cell.insets, table.cellInsets);
         // The same table-level border fallback the wrap width uses below —
@@ -251,6 +265,9 @@ function autofitColumns(
         const floor = minWidthOfBlocks(cell.blocks, measurer, budget) + frame;
         content[col] = Math.max(content[col]!, floor);
       }
+      for (let dr = 0; dr < (cell.rowspan ?? 1) && rowIndex + dr < table.rows.length; dr++)
+        for (let dc = 0; dc < span && col + dc < grid.length; dc++)
+          occupied[rowIndex + dr]![col + dc] = true;
       col += span;
     }
   }

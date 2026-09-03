@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { fakeFontMetrics, installFakeCanvas } from "../../test/fake-canvas";
-import type { LayoutBlock, LayoutParagraph, LayoutTable } from "../layout-doc";
+import type { LayoutBlock, LayoutParagraph, LayoutTable, LayoutTableCell } from "../layout-doc";
 import { TextMeasurer } from "../text/measure";
 import { layoutFlow, layoutFlowSections } from "./flow";
 
@@ -270,6 +270,65 @@ describe("layoutFlow", () => {
       return t.rows.length;
     });
     expect(counts).toEqual([2, 2, 1]);
+  });
+
+  it("re-opens row spans a page cut crosses so tail rows keep their columns", () => {
+    // Row 0's first cell spans all three rows (a vertical merge): the cut
+    // leaves its anchor behind, so the tail rows must re-open an empty
+    // placeholder in its columns — Word re-opens the merge on every page —
+    // otherwise the tail's cells pack one column left and the first column
+    // appears to vanish (its content renders where column 2 should be).
+    const cell = (over: Partial<LayoutTableCell> = {}): LayoutTableCell => ({
+      blocks: [para(1)],
+      ...over,
+    });
+    const table: LayoutTable = {
+      kind: "table",
+      columnWidthsPx: [100, 100, 100],
+      rows: [
+        { cells: [cell({ rowspan: 3 }), cell({ colspan: 2 })] },
+        { cells: [cell({ colspan: 2 })] },
+        { cells: [cell({ colspan: 2, blocks: [para(2)] })] },
+      ],
+    };
+    // Row heights 20/20/40 in a 50px page: the cut lands after row 1.
+    const pages = flow([table], 50);
+    expect(pages).toHaveLength(2);
+    const tail = pages[1].items[0].block;
+    if (tail.kind !== "table") throw new Error(`expected table, got ${tail.kind}`);
+    expect(tail.rows).toHaveLength(1);
+    // The re-opened placeholder owns column 0 (empty, no content stack); the
+    // content cell follows at column 1.
+    expect(tail.rows[0]!.cells).toHaveLength(2);
+    expect(tail.rows[0]!.cells[0]!.colspan).toBe(1);
+    expect(tail.rows[0]!.cells[0]!.stack).toHaveLength(0);
+    expect(tail.rows[0]!.cells[1]!.colspan).toBe(2);
+  });
+
+  it("re-opens row spans across a mid-row force-split too", () => {
+    // Row 0's first cell spans rows 0-1; row 1 is taller than the whole page
+    // (force-split mid-content). The tail's first row is row 1's lower half —
+    // the merge anchor above still owns column 0 there.
+    const cell = (over: Partial<LayoutTableCell> = {}): LayoutTableCell => ({
+      blocks: [para(1)],
+      ...over,
+    });
+    const table: LayoutTable = {
+      kind: "table",
+      columnWidthsPx: [100, 100, 100],
+      rows: [
+        { cells: [cell({ rowspan: 2 }), cell({ colspan: 2 })] },
+        { cells: [cell({ colspan: 2, blocks: [para(4)] })] },
+      ],
+    };
+    // Row 0 = 20px, row 1 = 80px in a 50px page → row 1 force-splits at 30px.
+    const pages = flow([table], 50);
+    expect(pages).toHaveLength(2);
+    const tail = pages[1].items[0].block;
+    if (tail.kind !== "table") throw new Error(`expected table, got ${tail.kind}`);
+    expect(tail.rows[0]!.cells[0]!.colspan).toBe(1);
+    expect(tail.rows[0]!.cells[0]!.stack).toHaveLength(0);
+    expect(tail.rows[0]!.cells[1]!.colspan).toBe(2);
   });
 
   it("repeats the tblHeader row on every continuation page", () => {
