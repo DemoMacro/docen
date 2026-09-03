@@ -45,6 +45,32 @@ const styles = css`
   .rb-label {
     font-size: 12px;
   }
+  /* size="large" — Office large menu button: icon stacked over label, matching
+     a sibling large button's box (70px, top-aligned) so a group of large
+     commands lines up. Fluent's own chevron becomes the column's third row —
+     the same icon/label/caret stack a large split shows. */
+  :host([size="large"]) {
+    flex-shrink: 0;
+  }
+  :host([size="large"]) fluent-menu-button {
+    flex-direction: column;
+    justify-content: flex-start;
+    min-width: 0;
+    max-width: 90px;
+    min-height: 70px;
+    padding: 4px 12px;
+  }
+  :host([size="large"]) .rb-icon svg {
+    width: 32px;
+    height: 32px;
+  }
+  :host([size="large"]) .rb-label {
+    font-size: 11px;
+    text-align: center;
+    line-height: 1.2;
+    white-space: normal;
+    overflow-wrap: break-word;
+  }
 `;
 
 const template = html<DocenRibbonMenu>`
@@ -82,6 +108,7 @@ class DocenRibbonMenu extends FASTElement {
   @attr event?: string;
   @attr tooltip?: string;
   @attr appearance?: string;
+  @attr size?: string;
   @attr({ mode: "boolean" }) disabled?: boolean;
   @attr items?: string;
 
