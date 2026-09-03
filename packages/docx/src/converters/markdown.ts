@@ -38,16 +38,18 @@ const ListTokenBridge = Extension.create({
     const out: JSONContent[] = [];
     const walk = (list: MarkdownToken, level: number): void => {
       for (const item of list.items ?? []) {
-        const blocks = (item.tokens ?? []) as MarkdownToken[];
-        const text = blocks.find((b) => b.type === "text" || b.type === "paragraph");
-        if (text) {
-          const attrs = list.ordered
-            ? { numbering: { reference: HTML_ORDERED_TEMP, level } }
-            : { bullet: { level } };
-          out.push(h.createNode("paragraph", attrs, h.parseInline(text.tokens ?? [])));
-        }
-        for (const block of blocks) {
-          if (block.type === "list") walk(block, level + 1);
+        const attrs = list.ordered
+          ? { numbering: { reference: HTML_ORDERED_TEMP, level } }
+          : { bullet: { level } };
+        // A loose item (blank lines between blocks) lexes one `paragraph`
+        // token per block — every one becomes a list paragraph, not just the
+        // first; a tight item's single block lexes as `text`.
+        for (const block of (item.tokens ?? []) as MarkdownToken[]) {
+          if (block.type === "text" || block.type === "paragraph") {
+            out.push(h.createNode("paragraph", attrs, h.parseInline(block.tokens ?? [])));
+          } else if (block.type === "list") {
+            walk(block, level + 1);
+          }
         }
       }
     };
