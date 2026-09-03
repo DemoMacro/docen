@@ -172,6 +172,12 @@ const trackChangesPlugin = new Plugin<boolean>({
               : node.mark([...node.marks, deletionType.create(record)]),
           );
       tr.insert(at, marked);
+      // Word parks the caret BEFORE the text it just struck: Backspace keeps
+      // marking further left, forward Delete stays put, and a delete that hit
+      // already-struck text crosses it instead of stalling on it — without
+      // this the caret maps behind the restored runs and every later
+      // Backspace retargets the same struck character forever.
+      tr.setSelection(TextSelection.create(tr.doc, at));
     }
     return tr;
   },

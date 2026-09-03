@@ -109,6 +109,37 @@ describe("TrackChanges marking", () => {
     editor.destroy();
   });
 
+  it("keeps the caret before struck text so consecutive Backspace marks on", () => {
+    const editor = build();
+    editor.commands["track-changes"](true);
+    type(editor, "", 11, 12); // backspace over "d"
+    // The caret must land BEFORE the restored "d" — the canvas bridge derives
+    // the next Backspace's range from it, and a caret behind the struck runs
+    // retargets the same character forever (stalled consecutive deletes).
+    expect(editor.state.selection.from).toBe(11);
+    type(editor, "", editor.state.selection.from - 1, editor.state.selection.from); // "l"
+    expect(textOf(editor)).toBe("hello world");
+    expect(editor.state.selection.from).toBe(10);
+    // "l" and "d" merge into ONE struck run under ONE record (PM normalizes
+    // the adjacent equal-mark texts) — Word's consecutive-delete semantics.
+    expect(marksOf(editor)).toHaveLength(1);
+    expect(marksOf(editor)[0]!.type).toBe("deletion");
+    editor.destroy();
+  });
+
+  it("crosses already-struck text instead of stalling on it", () => {
+    const editor = build();
+    editor.commands["track-changes"](true);
+    type(editor, "", 6, 9); // strike " wo"
+    expect(editor.state.selection.from).toBe(6);
+    type(editor, "", 8, 9); // a delete that hits the struck "o" — refused
+    expect(textOf(editor)).toBe("hello world");
+    expect(marksOf(editor)).toHaveLength(1);
+    // But the caret crosses it (Word), so editing continues further left.
+    expect(editor.state.selection.from).toBe(8);
+    editor.destroy();
+  });
+
   it("replacing a selection keeps struck original after the inserted text", () => {
     const editor = build();
     editor.commands["track-changes"](true);
