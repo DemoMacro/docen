@@ -229,6 +229,14 @@ class Flow {
     return this.opts.contentHeightPx - this.insets().bottomPx - this.y;
   }
 
+  /** The body a fresh page offers (px): the content box net of BOTH furniture
+   *  insets — the mid-row whole-page room test measures against the page the
+   *  row would move to, so a tall footer shrinks it too. */
+  private freshPageBodyPx(): number {
+    const ins = this.insets();
+    return this.opts.contentHeightPx - ins.topPx - ins.bottomPx;
+  }
+
   /** The nearest cleared-band top above `this.y`, or Infinity — the ceiling
    *  the current block must not cross (its overflow lines continue below
    *  the band). */
@@ -510,7 +518,7 @@ class Flow {
         const headers = headerRowCount(laid);
         if (headers > 0 && headers < laid.rows.length) {
           const headerH = sumRows(laid.rows.slice(0, headers));
-          const body = this.opts.contentHeightPx - this.insets().topPx;
+          const body = this.freshPageBodyPx();
           if (headerH <= body) {
             // A body row re-opens under a fresh band copy on the next page,
             // so its whole-page room is the body net of the band.
@@ -544,10 +552,10 @@ class Flow {
         // hold it whole (Word: progress beats clipping), else move whole —
         // midRowDepth itself refuses pageable rows.
         if (k === 0) {
-          const mid = this.midRowDepth(laid.rows[0], space, this.opts.contentHeightPx);
+          const mid = this.midRowDepth(laid.rows[0], space, this.freshPageBodyPx());
           return mid != null ? { k: 0, midDepth: mid } : { k: 0 };
         }
-        const mid = this.midRowDepth(laid.rows[k], space - h, this.opts.contentHeightPx);
+        const mid = this.midRowDepth(laid.rows[k], space - h, this.freshPageBodyPx());
         return { k, midDepth: mid };
       }
       case "group": {
