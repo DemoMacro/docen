@@ -362,7 +362,7 @@ export function paintParagraph(
           tree.add(
             new Rect({
               x: lineX + item.xPx,
-              y: lineY,
+              y: lineY + pad,
               width: item.widthPx,
               height: item.heightPx,
               fill: "#f3f3f3",
