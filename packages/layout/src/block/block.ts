@@ -69,7 +69,10 @@ export function stackBlocks(
     const out = layoutBlock(block, width, blockCtx, measurer);
     const before = out.kind === "paragraph" ? out.beforePx : 0;
     const after = out.kind === "paragraph" ? out.afterPx : 0;
-    const gap = first ? before : Math.max(prevAfter, before);
+    // A Word table cell renders neither its first paragraph's before nor its
+    // last paragraph's after — the cell box starts at the first line and ends
+    // at the last (no CSS-BFC edge margins; verified against the Word render).
+    const gap = first ? (ctx?.inTable ? 0 : before) : Math.max(prevAfter, before);
     heightPx += gap + out.heightPx;
     if (cellZones && out.kind === "paragraph" && out.drawings) {
       cellZones.push(...wrapEffectsOf(out.drawings, heightPx - out.heightPx, width, true).zones);
@@ -78,6 +81,6 @@ export function stackBlocks(
     prevAfter = after;
     first = false;
   }
-  heightPx += prevAfter; // the last paragraph's after is contained too
+  if (!ctx?.inTable) heightPx += prevAfter; // the last paragraph's after is contained too
   return { stack, heightPx };
 }

@@ -478,7 +478,9 @@ describe("layoutTable", () => {
     if (out.kind !== "table") {
       throw new Error("expected table");
     }
-    expect(out.rows[0].heightPx).toBeCloseTo(10 + NATURAL + 6 + NATURAL + 8, 4);
+    // Word's cell: the first before and the last after render nowhere — the
+    // box starts at the first line and ends at the last; middles collapse.
+    expect(out.rows[0].heightPx).toBeCloseTo(NATURAL + 6 + NATURAL, 4);
   });
 
   it("falls back to first-row cell widths when no grid is given", () => {
