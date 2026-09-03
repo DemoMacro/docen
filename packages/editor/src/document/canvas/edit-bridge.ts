@@ -841,6 +841,53 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
   let dragMoved = false;
   let dragStart: { x: number; y: number } | null = null;
 
+  // Drag auto-scroll (Word): a drag resting in the scroll container's
+  // top/bottom edge hot zone keeps the document scrolling so the selection
+  // reaches content outside the viewport — without it the last line below
+  // the fold can never be dragged into the selection. Each scrolled frame
+  // re-resolves the head at the resting pointer (clamped), so the selection
+  // grows while the document moves under it.
+  const SCROLL_EDGE_PX = 28;
+  const SCROLL_MAX_SPEED_PX = 16;
+  const dragPoint = { x: 0, y: 0 };
+  let scrollRaf = 0;
+  const scrollContainer = (): HTMLElement | null => {
+    let el: HTMLElement | null = opts.host.parentElement;
+    while (el) {
+      if (el.scrollHeight > el.clientHeight + 1) return el;
+      el = el.parentElement;
+    }
+    return null;
+  };
+  const dragAutoScroll = (): void => {
+    scrollRaf = 0;
+    if (dragAnchor == null) return;
+    const container = scrollContainer();
+    if (!container) return;
+    const r = container.getBoundingClientRect();
+    let dy = 0;
+    const fromTop = dragPoint.y - r.top;
+    const fromBottom = r.bottom - dragPoint.y;
+    // Speed ramps 1→16 px/frame from the hot zone's outer edge to the edge.
+    if (fromTop < SCROLL_EDGE_PX)
+      dy = -Math.ceil((1 - fromTop / SCROLL_EDGE_PX) * SCROLL_MAX_SPEED_PX);
+    else if (fromBottom < SCROLL_EDGE_PX)
+      dy = Math.ceil((1 - fromBottom / SCROLL_EDGE_PX) * SCROLL_MAX_SPEED_PX);
+    if (dy !== 0) {
+      container.scrollTop += dy;
+      const head = posAtClient(dragPoint.x, dragPoint.y, true);
+      if (head != null) setDragSelection(dragAnchor, head);
+      scrollRaf = requestAnimationFrame(dragAutoScroll);
+    }
+  };
+  const startDragAutoScroll = (): void => {
+    if (!scrollRaf) scrollRaf = requestAnimationFrame(dragAutoScroll);
+  };
+  const stopDragAutoScroll = (): void => {
+    if (scrollRaf) cancelAnimationFrame(scrollRaf);
+    scrollRaf = 0;
+  };
+
   /** The drag's moving edge. Word's cross-cell drag: when anchor and head
    *  sit in different cells of one table the selection rectangle becomes a
    *  cell selection (every crossed cell selected whole); within one cell it
@@ -881,6 +928,9 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       return;
     }
     dragMoved = true;
+    dragPoint.x = event.clientX;
+    dragPoint.y = event.clientY;
+    startDragAutoScroll();
     // Clamp: a drag overshooting past a line/page edge keeps extending to the
     // nearest text (Word) — unclamped hits would stall the head mid-line.
     const head = posAtClient(event.clientX, event.clientY, true);
@@ -890,6 +940,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     dragAnchor = null;
     dragMoved = false;
     dragStart = null;
+    stopDragAutoScroll();
   };
   opts.host.addEventListener("mousemove", onMouseMove);
   document.addEventListener("mouseup", onMouseUp);
@@ -1740,6 +1791,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       story?.editor.destroy();
       story = null;
       main.editor.destroy();
+      stopDragAutoScroll();
       opts.host.removeEventListener("mousedown", takeFocus);
       opts.host.removeEventListener("mousemove", onMouseMove);
       document.removeEventListener("mouseup", onMouseUp);
