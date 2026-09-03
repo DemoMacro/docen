@@ -25,7 +25,7 @@ import {
   PLUS_SAVE,
   PLUS_SET_WORLD_TRANSFORM,
 } from "./records";
-import { combine, IDENTITY, readXform, xformPoint, type Xform } from "./xform";
+import { combine, IDENTITY, readXform, scaleOf, xformPoint, type Xform } from "./xform";
 
 /** Nested-metafile recursion guard — a self-referencing or malformed blob
  *  must not spin through unbounded container levels. */
@@ -37,28 +37,28 @@ const MAX_NESTING = 3;
  *  parallelograms: the parent maps the image rect onto it and the child plays
  *  under that mapping. */
 export function carrierDrafts(emf: Uint8Array, basis: Xform | undefined, depth: number): Draft[] {
-  // Concatenate every EMR_GDICOMMENT "EMF+" payload into one record stream.
+  // Concatenate every EMR_GDICOMMENT "EMF+" payload into one record stream —
+  // one scan collects zero-copy payload views, then a single copy assembles
+  // the contiguous buffer the record walk reads.
   const ev = new DataView(emf.buffer, emf.byteOffset, emf.byteLength);
-  let plusLen = 0;
-  for (let eo = 0; eo + 8 <= emf.length;) {
-    const type = ev.getUint32(eo, true);
-    const size = ev.getUint32(eo + 4, true);
-    if (size < 8 || eo + size > emf.length) break;
-    if (type === 70 && ev.getUint32(eo + 12, true) === 0x2b464d45) plusLen += size - 16;
-    eo += size;
-  }
-  if (!plusLen) return [];
-  const plus = new Uint8Array(plusLen);
-  let pw = 0;
+  const parts: Uint8Array[] = [];
   for (let eo = 0; eo + 8 <= emf.length;) {
     const type = ev.getUint32(eo, true);
     const size = ev.getUint32(eo + 4, true);
     if (size < 8 || eo + size > emf.length) break;
     if (type === 70 && ev.getUint32(eo + 12, true) === 0x2b464d45) {
-      plus.set(emf.subarray(eo + 16, eo + size), pw);
-      pw += size - 16;
+      parts.push(emf.subarray(eo + 16, eo + size));
     }
     eo += size;
+  }
+  if (parts.length === 0) return [];
+  let plusLen = 0;
+  for (const part of parts) plusLen += part.length;
+  const plus = new Uint8Array(plusLen);
+  let pw = 0;
+  for (const part of parts) {
+    plus.set(part, pw);
+    pw += part.length;
   }
   // Every draft coordinate passes through this effective transform first. A
   // nested level applies its own world FIRST (record space → nested device)
@@ -179,7 +179,7 @@ export function carrierDrafts(emf: Uint8Array, basis: Xform | undefined, depth: 
           // A World-unit pen's width rides its world transform like text does
           // (the same rotation-safe column-norm factor gdiTextDrafts applies).
           const eff = effOf(xf);
-          const scale = Math.max(Math.hypot(eff.m11, eff.m21), Math.hypot(eff.m12, eff.m22));
+          const scale = scaleOf(eff);
           pushPath(drafts, path.cmds, eff, {
             strokeColor: lastPen.color,
             strokeWidth: lastPen.width * scale,
@@ -238,7 +238,7 @@ export function carrierDrafts(emf: Uint8Array, basis: Xform | undefined, depth: 
           const py = compressed ? pv.getInt16(p + 2, true) : pv.getFloat32(p + 4, true);
           cmds.push([i === 0 ? "M" : "L", [px, py]]);
         }
-        const scale = Math.max(Math.hypot(eff.m11, eff.m21), Math.hypot(eff.m12, eff.m22));
+        const scale = scaleOf(eff);
         pushPath(drafts, cmds, eff, {
           strokeColor: color,
           strokeWidth: Math.max((pen?.width ?? 1) * scale, 1),

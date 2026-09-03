@@ -1,4 +1,5 @@
 import { bmpDataUrl } from "../dib";
+import { colorRefHex, gdiAdvanceEm } from "../shared";
 import type { Draft, PathCmds, PicDraft } from "./draft";
 import { pushPath } from "./draft";
 import {
@@ -37,7 +38,7 @@ import {
   EMR_STROKE_AND_FILL_PATH,
   EMR_STROKE_PATH,
 } from "./records";
-import { combine, IDENTITY, readCarrierXform, xformPoint, type Xform } from "./xform";
+import { combine, IDENTITY, readCarrierXform, scaleOf, xformPoint, type Xform } from "./xform";
 
 /** CJK cell-height / em ratio for positive GDI lfHeight values (SimSun's OS/2
  *  winAscent+winDescent). Shared with the WMF player's font sizing. */
@@ -157,7 +158,7 @@ export function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): Dr
     const pen = mode !== "fill" ? pens.get(selectedPen) : undefined;
     if (fill || pen) {
       // The pen width rides the world transform like text does.
-      const scale = Math.max(Math.hypot(eff.m11, eff.m21), Math.hypot(eff.m12, eff.m22));
+      const scale = scaleOf(eff);
       pushPath(drafts, openPath, eff, {
         ...(fill ? { fill, fillRule: polyFillMode === 2 ? "nonzero" : "evenodd" } : {}),
         ...(pen ? { strokeColor: pen.color, strokeWidth: Math.max(pen.width * scale, 1) } : {}),
@@ -217,13 +218,13 @@ export function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): Dr
         // carry payload elsewhere and are skipped.
         const slot = view.getUint32(eo + 8, true);
         if (view.getUint32(eo + 12, true) === 0) {
-          brushes.set(slot, rgbHex(view.getUint32(eo + 16, true)));
+          brushes.set(slot, colorRefHex(view.getUint32(eo + 16, true)));
         }
         break;
       }
       case EMR_CREATE_PEN: {
         // CREATEPEN: [ihPen][LOGPEN style u32][width POINT ×2][COLORREF].
-        const color = rgbHex(view.getUint32(eo + 24, true));
+        const color = colorRefHex(view.getUint32(eo + 24, true));
         pens.set(view.getUint32(eo + 8, true), { color, width: view.getUint32(eo + 16, true) });
         break;
       }
@@ -231,7 +232,7 @@ export function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): Dr
         // EXTCREATEPEN: [ihPen][offBmi][cbBmi][offBits][cbBits] then the
         // EXTLOGPEN: [style][width][brushStyle][COLORREF][hatch][entries…].
         pens.set(view.getUint32(eo + 8, true), {
-          color: rgbHex(view.getUint32(eo + 40, true)),
+          color: colorRefHex(view.getUint32(eo + 40, true)),
           width: view.getUint32(eo + 32, true),
         });
         break;
@@ -251,7 +252,7 @@ export function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): Dr
           cmds.push([i === 0 ? "M" : "L", [x, y]]);
         }
         // The pen width rides the world transform like text does.
-        const scale = Math.max(Math.hypot(eff.m11, eff.m21), Math.hypot(eff.m12, eff.m22));
+        const scale = scaleOf(eff);
         pushPath(drafts, cmds, eff, {
           strokeColor: pen.color,
           strokeWidth: Math.max(pen.width * scale, 1),
@@ -333,7 +334,7 @@ export function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): Dr
         // COLORREF (0x00bbggrr); high-flag words reference the system palette
         // — skip those and keep the last true RGB.
         const ref = view.getUint32(eo + 8, true);
-        if (ref <= 0xffffff) textColor = rgbHex(ref);
+        if (ref <= 0xffffff) textColor = colorRefHex(ref);
         break;
       }
       case EMR_SETTEXTALIGN:
@@ -408,7 +409,7 @@ export function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): Dr
         cmds.push(["Z", []]);
         const pen = pens.get(selectedPen);
         const eff = effOf ? effOf(xf) : xf;
-        const scale = Math.max(Math.hypot(eff.m11, eff.m21), Math.hypot(eff.m12, eff.m22));
+        const scale = scaleOf(eff);
         pushPath(drafts, cmds, eff, {
           fill,
           fillRule: polyFillMode === 2 ? "nonzero" : "evenodd",
@@ -524,7 +525,7 @@ export function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): Dr
           // Column norms survive rotated world transforms: a 90°-rotated
           // (vertical banner) transform zeroes |m11|+|m22|, which used to
           // collapse those runs to height 0 — invisible on the page.
-          const glyphScale = Math.max(Math.hypot(eff.m11, eff.m21), Math.hypot(eff.m12, eff.m22));
+          const glyphScale = scaleOf(eff);
           const height =
             (font
               ? font.height < 0
@@ -546,9 +547,7 @@ export function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): Dr
             chars,
           );
           if (dxAdvances) {
-            const natural = Array.from(text).map(
-              (ch) => height * (ch.charCodeAt(0) > 0xff ? 1 : 0.55),
-            );
+            const natural = Array.from(text).map((ch) => height * gdiAdvanceEm(ch));
             advance = dxAdvances.reduce((sum, a) => sum + a * glyphScale, 0);
             const drift = dxAdvances.reduce(
               (sum, a, i) => sum + a * glyphScale - (natural[i] ?? 0),
@@ -556,7 +555,7 @@ export function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): Dr
             );
             if (Math.abs(drift) > 0.3 * dxAdvances.length) spacing = drift / dxAdvances.length;
           } else {
-            for (const ch of text) advance += height * (ch.charCodeAt(0) > 0xff ? 1 : 0.55);
+            for (const ch of text) advance += height * gdiAdvanceEm(ch);
           }
           const refY = x * eff.m12 + yBaseline * eff.m22 + eff.dy;
           // The text-direction column (m11,m12) names the screen angle the
@@ -595,9 +594,7 @@ export function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): Dr
             let prefix = 0;
             let ci = 0;
             for (const ch of text) {
-              const step = dxAdvances
-                ? dxAdvances[ci] * glyphScale
-                : height * (ch.charCodeAt(0) > 0xff ? 1 : 0.55);
+              const step = dxAdvances ? dxAdvances[ci] * glyphScale : height * gdiAdvanceEm(ch);
               const ax = x * eff.m11 + yBaseline * eff.m21 + eff.dx + ua * prefix;
               const ay = refY + ub * prefix;
               const bx = ax + ua * step;
@@ -669,13 +666,6 @@ export function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): Dr
     eo += size;
   }
   return drafts;
-}
-
-function rgbHex(colorref: number): string {
-  const r = colorref & 0xff;
-  const g = (colorref >> 8) & 0xff;
-  const b = (colorref >> 16) & 0xff;
-  return `${((r << 16) | (g << 8) | b).toString(16).padStart(6, "0")}`;
 }
 
 /** Char advances from the trail Dx run of an ExtTextOut record, in record

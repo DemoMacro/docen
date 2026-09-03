@@ -14,6 +14,7 @@
 import { bltDibAt, bmpDataUrl } from "./dib";
 import { GDI_CELL_PER_EM } from "./emf-plus";
 import type { MetafileMember, SourceCrop } from "./member";
+import { colorRefHex, gdiAdvanceEm } from "./shared";
 
 const CREATE_PEN = 0x02fa;
 const CREATE_BRUSH = 0x02fc;
@@ -135,14 +136,14 @@ export function wmfMembers(
     if (!pen || pen.style === PS_NULL) return undefined;
     return {
       px: Math.max(1, Math.round(Math.abs(pen.width) * ((sx() + sy()) / 2))),
-      color: hexOf(pen.color),
+      color: colorRefHex(pen.color),
     };
   };
   const fill = (): string | undefined => {
     const brush = st.brush;
     // Hatched/pattern brushes flatten to their base color.
     if (!brush || brush.style === BS_NULL) return undefined;
-    return hexOf(brush.color);
+    return colorRefHex(brush.color);
   };
   const flushLine = (): void => {
     if (lineBuf.length >= 2) {
@@ -374,13 +375,6 @@ interface Pt {
   y: number;
 }
 
-/** COLORREF (0x00BBGGRR) → hex RRGGBB. */
-function hexOf(colorRef: number): string {
-  return (((colorRef & 0xff) << 16) | (colorRef & 0xff00) | ((colorRef >> 16) & 0xff))
-    .toString(16)
-    .padStart(6, "0");
-}
-
 /** PointS array of Polygon/Polyline: Count(2) then x,y int16 pairs. */
 function readPoints(view: DataView, p: number, end: number): Pt[] | undefined {
   const count = view.getUint16(p, true);
@@ -501,7 +495,7 @@ function pushTextMember(
     advancePx += view.getInt16(q + i * 2, true) * sx();
   }
   if (advancePx <= 0) {
-    for (const ch of text) advancePx += sizePx * (ch.charCodeAt(0) > 0xff ? 1 : 0.55);
+    for (const ch of text) advancePx += sizePx * gdiAdvanceEm(ch);
   }
   // SetTextAlign semantics for the record's reference y: TA_BASELINE hoists by
   // the typical CJK ascent (approximate; visual calibration refines), TA_BOTTOM
@@ -526,8 +520,10 @@ function pushTextMember(
         text,
         family: font.face,
         sizePx,
-        color: hexOf(st.textColor),
-        bold: font.weight >= 550 || undefined,
+        color: colorRefHex(st.textColor),
+        // GDI face matching splits at FW_BOLD (700) — the same threshold the
+        // EMF+ replay applies (a 681-weight 微软雅黑 request stays regular).
+        bold: font.weight >= 700 || undefined,
         italic: font.italic || undefined,
       },
     ],

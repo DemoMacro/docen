@@ -24,6 +24,13 @@ export function combine(a: Xform, b: Xform): Xform {
   };
 }
 
+/** The uniform length scale the transform applies — the larger column norm
+ *  (rotation-safe: pen widths and glyph ems scale with their columns, not
+ *  their rows). */
+export function scaleOf(t: Xform): number {
+  return Math.max(Math.hypot(t.m11, t.m21), Math.hypot(t.m12, t.m22));
+}
+
 /** XFORM payload: some exporters prefix a byte-length word (0x18); accept
  *  both shapes so a bare matrix still parses. */
 export function readXform(view: DataView, at: number): Xform {
