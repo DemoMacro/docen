@@ -61,6 +61,10 @@ export interface LayoutParagraph {
   /** Explicit tab stops (w:tabs), px from the content-box left edge; tabs
    *  beyond the last stop fall to the default grid (720 twips). */
   tabStops?: LayoutTabStop[];
+  /** The document's default tab-grid pitch in px (w:defaultTabStop) — the
+   *  fallback grid tabs hop to past the last explicit stop. Absent = 720
+   *  twips (Word's default). */
+  defaultTabStopPx?: number;
   /** Paragraph borders (w:pBdr) — the painter draws them beside the block. */
   borders?: Partial<Record<"top" | "right" | "bottom" | "left", LayoutParagraphBorderEdge>>;
   /** Paragraph shading (w:shd @w:fill), hex RRGGBB — the painter fills the

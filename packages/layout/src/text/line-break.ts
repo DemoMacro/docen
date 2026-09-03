@@ -101,6 +101,9 @@ export interface PackLinesOptions {
    *  the last stop (or with no stops) advance over the default grid — 720
    *  twips, Word's defaultTabStop. */
   tabStops?: LayoutTabStop[];
+  /** The document's default tab-grid pitch in px (w:defaultTabStop); absent =
+   *  720 twips, Word's default. */
+  defaultTabStopPx?: number;
 }
 
 /** Word's defaultTabStop: 720 twips = 0.5 inch = 48 px at 96 dpi. */
@@ -395,17 +398,20 @@ interface TabContext {
   /** This line's usable width: a stop past it clamps to the right edge
    *  (Word: an out-of-margin stop still right-aligns at the margin). */
   maxWidthPx: number;
+  /** The document's default grid pitch (w:defaultTabStop, Word's 720-twip
+   *  48px fallback applied). */
+  defaultTabPx: number;
 }
 
 /** The next stop position past `absX`: the first explicit stop beyond it, else
- *  the next slot of the 720-twip default grid. */
+ *  the next slot of the default grid. */
 function nextStopPast(tabs: TabContext, absX: number): number {
   let best: number | null = null;
   for (const s of tabs.stops ?? []) {
     if (s.positionPx > absX + 0.01 && (best == null || s.positionPx < best)) best = s.positionPx;
   }
   if (best != null) return best;
-  return (Math.floor(absX / DEFAULT_TAB_PX) + 1) * DEFAULT_TAB_PX;
+  return (Math.floor(absX / tabs.defaultTabPx) + 1) * tabs.defaultTabPx;
 }
 
 /** The advance a tab atom produces at walk position `xRaw`: to its explicit
@@ -443,7 +449,7 @@ function tabAdvance(
   // A right/center stop the following text cannot reach falls back to the
   // default grid's next slot (the text starts past the stop — progress).
   const advancePx =
-    w > 0 ? w : Math.max(0, (Math.floor(absX / DEFAULT_TAB_PX) + 1) * DEFAULT_TAB_PX - absX);
+    w > 0 ? w : Math.max(0, (Math.floor(absX / tabs.defaultTabPx) + 1) * tabs.defaultTabPx - absX);
   return { advancePx, leader: matched?.leader };
 }
 
@@ -556,6 +562,7 @@ export function packLines(inline: LayoutInline[], opts: PackLinesOptions): Packe
       stops: opts.tabStops,
       lineBasePx: lineIndex === 0 ? (opts.firstLineIndentPx ?? 0) : 0,
       maxWidthPx: maxWidth,
+      defaultTabPx: opts.defaultTabStopPx ?? DEFAULT_TAB_PX,
     };
 
     const lineItems: LaidOutLineItem[] = [];

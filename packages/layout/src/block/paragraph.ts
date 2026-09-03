@@ -74,6 +74,7 @@ export function layoutParagraph(
     width: usable,
     firstLineIndentPx: para.indent?.firstLinePx,
     tabStops: para.tabStops,
+    defaultTabStopPx: para.defaultTabStopPx,
     strutPx,
     lineHeight: ({ naturalPx, hasCjk, hasPicture }) =>
       spec

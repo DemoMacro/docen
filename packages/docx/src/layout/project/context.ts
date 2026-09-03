@@ -26,4 +26,8 @@ export interface ProjectContext {
   /** Endnote id → displayed ordinal — same first-reference-order rule as the
    *  footnotes; painted as lowercase Roman (Word's endnote default numFmt). */
   endnoteOrdinals: Map<number, number>;
+  /** The document's default tab-grid pitch in px (w:defaultTabStop, twips in
+   *  settings.xml resolved once here) — every paragraph's tabs fall back to
+   *  it past the last explicit stop. */
+  defaultTabStopPx?: number;
 }

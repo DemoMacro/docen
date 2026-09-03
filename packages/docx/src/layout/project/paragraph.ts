@@ -249,6 +249,7 @@ export function projectParagraph(p: BodyParagraph, ctx: ProjectContext): LayoutP
     spacing,
     indent,
     tabStops: tabStops && tabStops.length > 0 ? tabStops : undefined,
+    defaultTabStopPx: ctx.defaultTabStopPx,
     borders: borders.top || borders.right || borders.bottom || borders.left ? borders : undefined,
     shadingFill,
     markSizePx: markSize != null ? ptToPx(markSize) : undefined,

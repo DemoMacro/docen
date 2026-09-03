@@ -18,6 +18,7 @@ import type {
   ProjectedPageBorders,
   ProjectedPageFurniture,
 } from "@docen/layout";
+import { twipToPx } from "@docen/layout";
 import type { DocumentOptions } from "@office-open/docx";
 
 import { indexCharacterStyles } from "../style-cascade";
@@ -63,6 +64,12 @@ export function projectDocumentOptions(doc: DocumentOptions): {
     openComments: new Set(),
     footnoteOrdinals: new Map(),
     endnoteOrdinals: new Map(),
+    // The document-wide tab grid (w:defaultTabStop, twips); Word's 720 default
+    // applies when settings omit it (the engine carries that fallback).
+    defaultTabStopPx:
+      doc.settings?.defaultTabStop != null && doc.settings.defaultTabStop > 0
+        ? twipToPx(doc.settings.defaultTabStop)
+        : undefined,
   };
   const sections: ProjectedSection[] = (doc.sections ?? []).map((section, i) => {
     const blocks: LayoutBlock[] = [];
