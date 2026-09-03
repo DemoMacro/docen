@@ -308,11 +308,9 @@ export class DocxManager {
       const levels = buildListLevels(reference);
       if (levels) this.numberingConfigs.push({ reference, levels });
     }
-    const regeneratedRefs = new Set(this.numberingConfigs.map((c) => c.reference));
-    const numberingConfig = [
-      ...origNumberingConfig.filter((c) => !regeneratedRefs.has(c.reference)),
-      ...this.numberingConfigs,
-    ];
+    // Direct concatenation: the loop above skips every reference the source
+    // numbering already carries, so the two lists never intersect.
+    const numberingConfig = [...origNumberingConfig, ...this.numberingConfigs];
     return {
       sections,
       ...(styles ? { styles } : {}),
@@ -380,6 +378,18 @@ export class DocxManager {
   }
 
   resolve(docOpts: DocumentOptions): JSONContent {
+    // The manager is a long-lived singleton: the per-document façade fields
+    // must not outlive this resolve, or the last document's styles snapshot
+    // and resolve closures stay pinned until the next one replaces them.
+    try {
+      return this.resolveInner(docOpts);
+    } finally {
+      this.resolveCtx = undefined;
+      this.resolveStyles = undefined;
+    }
+  }
+
+  private resolveInner(docOpts: DocumentOptions): JSONContent {
     this.resolveStyles = docOpts.styles ?? undefined;
     const sections = docOpts.sections ?? [];
     if (sections.length === 0) {

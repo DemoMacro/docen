@@ -83,7 +83,10 @@ export function quickStyles(styles: StylesOptions | null | undefined): QuickStyl
 
   const byPriority = (a: Candidate, b: Candidate): number => a.uiPriority - b.uiPriority;
   const quick = all.filter((s) => s.quick).sort(byPriority);
-  return (quick.length > 0 ? quick : all).map(({ id, name }) => ({ id, name }));
+  // No quickFormat flags at all (some LibreOffice-generated files): the same
+  // priority order over every paragraph style keeps the gallery non-empty.
+  const listed = quick.length > 0 ? quick : [...all].sort(byPriority);
+  return listed.map(({ id, name }) => ({ id, name }));
 }
 
 /** Resolve the effective run-level properties (font name, size in points) at the

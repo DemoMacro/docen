@@ -350,20 +350,12 @@ export function cssToTwip(value: string | undefined): number | undefined {
   if (!match) return undefined;
   const num = parseFloat(match[1]);
   const unit = match[2] ?? "pt";
-  switch (unit) {
-    case "pt":
-      return Math.round(num * 20);
-    case "px":
-      return Math.round(num * 15);
-    case "in":
-      return Math.round(num * 1440);
-    case "cm":
-      return Math.round(num * 567);
-    case "em":
-      return Math.round(num * 240);
-    default:
-      return Math.round(num * 20);
-  }
+  // The regex leaves exactly these units; pt (or no unit) is the fallback.
+  if (unit === "px") return Math.round(num * 15);
+  if (unit === "in") return Math.round(num * 1440);
+  if (unit === "cm") return Math.round(num * 567);
+  if (unit === "em") return Math.round(num * 240);
+  return Math.round(num * 20);
 }
 
 // ── Alignment mapping ──
