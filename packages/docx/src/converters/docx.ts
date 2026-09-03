@@ -1260,13 +1260,17 @@ export function compileDocument(json: JSONContent, extensions?: Extensions): Doc
  * rendering/pagination drift.
  *
  * Harvests the defaults by round-tripping an EMPTY document through office-open
- * (`generateDOCXSync` → `parseDOCX`) and shallow-merging the resulting
- * `doc.attrs` UNDER the input's. Only document-level attrs are touched —
- * content nodes (paragraphs/runs/marks) pass through verbatim, avoiding the
- * mark pollution a full-content round-trip would cause (a paragraph's default
- * run props leak onto its text as a textStyle mark). Keys already set on
- * `json.attrs` win, so a doc that already carries its own styles/section
- * properties (e.g. from `parseDOCX` or a prior `getJSON`) is left unchanged.
+ * (`generateDOCXSync` → `parseDOCX`) and taking exactly those two attrs — the
+ * empty doc's remaining attrs (documentExtras with passthrough binaries,
+ * settings, contentTypes) are round-trip artifacts a hand-built doc must not
+ * inherit: rawParts carries Uint8Array bytes that break JSON serialization of
+ * the attrs (a host embedding `JSON.stringify(normalizeDocument(...))` then
+ * crashes the next save-as in office-open's media reader). Content nodes
+ * (paragraphs/runs/marks) pass through verbatim, avoiding the mark pollution a
+ * full-content round-trip would cause (a paragraph's default run props leak
+ * onto its text as a textStyle mark). Keys already set on `json.attrs` win, so
+ * a doc that already carries its own styles/section properties (e.g. from
+ * `parseDOCX` or a prior `getJSON`) is left unchanged.
  */
 export function normalizeDocument(json: JSONContent, extensions?: Extensions): JSONContent {
   const defaults = parseDOCX(generateDOCXSync({ type: "doc", content: [] }, { extensions }));
@@ -1277,5 +1281,9 @@ export function normalizeDocument(json: JSONContent, extensions?: Extensions): J
   const userAttrs = Object.fromEntries(
     Object.entries((json.attrs ?? {}) as Record<string, unknown>).filter(([, v]) => v != null),
   );
-  return { ...json, attrs: { ...baseAttrs, ...userAttrs } };
+  const harvested = {
+    styles: baseAttrs.styles,
+    sectionProperties: baseAttrs.sectionProperties,
+  };
+  return { ...json, attrs: { ...harvested, ...userAttrs } };
 }
