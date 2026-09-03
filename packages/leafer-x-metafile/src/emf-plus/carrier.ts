@@ -335,14 +335,16 @@ function drawNestedImage(
   };
   const corners = [read(0), read(1), read(2)].map(([x, y]) => xformPoint(outerEff, x, y));
   const [p0, p1, p2] = corners;
-  // Affine taking the source sub-domain onto the drawn parallelogram.
+  // Affine taking the source sub-domain onto the drawn parallelogram: the
+  // translation subtracts BOTH scaled source coordinates (the cross terms
+  // too — a rotated destination maps the source origin off p0 otherwise).
   const basis: Xform = {
     m11: (p1[0] - p0[0]) / srcW,
     m21: (p1[1] - p0[1]) / srcW,
     m12: (p2[0] - p0[0]) / srcH,
     m22: (p2[1] - p0[1]) / srcH,
-    dx: p0[0] - srcX * ((p1[0] - p0[0]) / srcW),
-    dy: p0[1] - srcY * ((p2[1] - p0[1]) / srcH),
+    dx: p0[0] - srcX * ((p1[0] - p0[0]) / srcW) - srcY * ((p2[0] - p0[0]) / srcH),
+    dy: p0[1] - srcY * ((p2[1] - p0[1]) / srcH) - srcX * ((p1[1] - p0[1]) / srcW),
   };
   drafts.push(...carrierDrafts(nested, basis, depth + 1));
 }
