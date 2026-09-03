@@ -171,6 +171,41 @@ describe("layoutFlow", () => {
     expect(pages[1].items).toHaveLength(1);
   });
 
+  it("collapses a pageBreak that cannot fit the page's last line (zero height)", () => {
+    // 80px of content in a 95px page leaves 15px — short of the break row's
+    // 20px line. The row collapses at the page bottom instead of spilling
+    // past the page edge; the page still closes for the next paragraph.
+    const pages = flow([para(4), { kind: "pageBreak" }, para(1)], 95);
+    expect(pages).toHaveLength(2);
+    const brk = pages[0].items[1]!;
+    expect(brk.block.kind).toBe("pageBreak");
+    expect(brk.block.heightPx).toBe(0);
+    expect(brk.yPx).toBe(80);
+  });
+
+  it("collapses a section-break paragraph that cannot fit, never blanking a page", () => {
+    // The section's last paragraph is a lone marker row: dropped onto a fresh
+    // page it would leave that page blank under the old section (Word's
+    // undeletable blank page). It collapses at the page bottom instead.
+    const pages = flow([para(4), para(1, { sectionEnd: true })], 95);
+    expect(pages).toHaveLength(1);
+    const [, last] = pages[0].items;
+    expect(last!.block.kind).toBe("paragraph");
+    if (last!.block.kind === "paragraph") expect(last!.block.sectionEnd).toBe(true);
+    expect(last!.block.heightPx).toBe(0);
+    expect(last!.yPx).toBe(80);
+  });
+
+  it("still splits a multi-line section-break paragraph that cannot fit", () => {
+    // Content paragraphs split at line boundaries as always — only the lone
+    // marker row collapses.
+    const pages = flow([para(4), para(3, { sectionEnd: true })], 95);
+    expect(pages).toHaveLength(2);
+    expect(paras(pages)[0]).toHaveLength(1);
+    const [tail] = paras(pages)[1];
+    expect(tail.lines).toHaveLength(3);
+  });
+
   it("pushes the body down and shrinks the room under a tall header (pageInsets)", () => {
     // 100px content box; a 30px header push leaves 70px of room: three 20px
     // paragraphs fit, the fourth moves on.

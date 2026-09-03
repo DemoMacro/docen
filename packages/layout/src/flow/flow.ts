@@ -298,9 +298,14 @@ class Flow {
   /** Place a block: whole, split, or moved to the next page. */
   push(block: LayoutBlock): void {
     if (block.kind === "pageBreak") {
-      // The break's row commits past the fit check — it is the page's last
-      // line even when the page is exactly full, then the page closes.
-      this.commit(layoutBlock(block, this.opts.contentWidthPx, this.ctx, this.measurer), 0);
+      const laid = layoutBlock(block, this.opts.contentWidthPx, this.ctx, this.measurer);
+      // A break row the page's last line cannot hold collapses into the page
+      // bottom (zero height — the marker still paints at the edge): the page
+      // closes without spilling its own marker past the page edge, and the
+      // break never opens an empty page for itself. Word's blank-page trap,
+      // cut at the root.
+      const fits = this.y + laid.heightPx <= this.opts.contentHeightPx - this.insets().bottomPx;
+      this.commit(fits ? laid : { ...laid, heightPx: 0 }, 0);
       this.newPage();
       return;
     }
@@ -328,6 +333,22 @@ class Flow {
       const fresh = layoutBlock(block, this.col.widthPx, this.ctx, this.measurer);
       if (this.tryPlace(fresh)) return;
       this.pushLaid(fresh);
+      return;
+    }
+    // A single-line section-break paragraph the page bottom cannot hold
+    // collapses into the page (zero height — its marker still paints at the
+    // edge) instead of dropping whole onto a fresh page it would leave empty:
+    // the paragraph is the section's last, so a dropped one opens a blank
+    // page under the old section (Word's classic undeletable blank page). A
+    // multi-line one carries content — it splits normally above.
+    if (
+      block.kind === "paragraph" &&
+      block.sectionEnd &&
+      laid.kind === "paragraph" &&
+      laid.lines.length === 1 &&
+      this.items.length > 0
+    ) {
+      this.commit({ ...laid, heightPx: 0 }, 0);
       return;
     }
     // Nothing fit here: blocks placed before this one with keepNext move
