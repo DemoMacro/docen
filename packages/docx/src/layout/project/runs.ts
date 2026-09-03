@@ -123,7 +123,7 @@ export function projectRuns(
     const cached =
       typeof field.result === "string" ? field.result : (field.cachedValue as string | undefined);
     const style = textStyleOf(rPr);
-    if (instr.startsWith("PAGE") && !instr.startsWith("PAGES")) {
+    if (instr.startsWith("PAGE") && !instr.startsWith("PAGES") && !instr.startsWith("PAGEREF")) {
       out.push({ kind: "text", text: "0", style, field: "page" });
     } else if (instr.startsWith("NUMPAGES")) {
       out.push({ kind: "text", text: "0", style, field: "numPages" });
