@@ -829,6 +829,21 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
   const onMouseMove = (event: MouseEvent): void => {
     if (dragAnchor == null) {
       hoverTableGrip(event);
+      if (event.ctrlKey || event.metaKey || !active().editor.isEditable) {
+        const p = posAtClient(event.clientX, event.clientY);
+        if (p != null) {
+          const $p = active().editor.state.doc.resolve(p);
+          const hasLink =
+            $p.marks().some((m) => m.type.name === "link") ||
+            Boolean($p.nodeAfter?.marks.some((m) => m.type.name === "link")) ||
+            Boolean($p.nodeBefore?.marks.some((m) => m.type.name === "link"));
+          if (hasLink) {
+            opts.host.style.cursor = "pointer";
+            return;
+          }
+        }
+      }
+      opts.host.style.cursor = "";
       return;
     }
     if (
@@ -1057,6 +1072,29 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     placeDrawingSel();
     const pos = posAtClient(event.clientX, event.clientY);
     if (pos != null) {
+      // Ctrl/Cmd + click (or click in viewing mode) follows hyperlinks or TOC anchors
+      if (clicks === 1 && (event.ctrlKey || event.metaKey || !active().editor.isEditable)) {
+        const $pos = active().editor.state.doc.resolve(pos);
+        const link =
+          $pos.marks().find((m) => m.type.name === "link") ??
+          $pos.nodeAfter?.marks.find((m) => m.type.name === "link") ??
+          $pos.nodeBefore?.marks.find((m) => m.type.name === "link");
+        if (link?.attrs.href) {
+          const href = String(link.attrs.href);
+          if (href.startsWith("#")) {
+            const targetPos = findAnchorPos(active().editor.state.doc, href.slice(1));
+            if (targetPos != null) {
+              setSel(targetPos);
+              scrollIntoView(targetPos);
+              ta.focus();
+              return;
+            }
+          } else if (/^(https?:\/\/|mailto:)/i.test(href)) {
+            window.open(href, "_blank", "noopener,noreferrer");
+            return;
+          }
+        }
+      }
       if (clicks >= 2) {
         setSelClick(pos, clicks);
       } else {
@@ -1280,6 +1318,103 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     }
   };
 
+  /** Finds the doc position of the next or previous table cell (reading order). */
+  const adjacentCellPos = (
+    state: Editor["state"],
+    dir: -1 | 1,
+  ): { pos: number; isLastInTable: boolean } | null => {
+    const $from = state.selection.$from;
+    const $cell = cellAt($from);
+    if (!$cell) return null;
+    const table = $cell.node($cell.depth - 1);
+    const tableStart = $cell.before($cell.depth - 1);
+    const cells: number[] = [];
+    let rowPos = tableStart + 1;
+    for (let r = 0; r < table.childCount; r++) {
+      const row = table.child(r);
+      let cellPos = rowPos + 1;
+      for (let c = 0; c < row.childCount; c++) {
+        cells.push(cellPos);
+        cellPos += row.child(c).nodeSize;
+      }
+      rowPos += row.nodeSize;
+    }
+    const idx = cells.indexOf($cell.pos);
+    if (idx < 0) return null;
+    const targetIdx = idx + dir;
+    if (targetIdx >= 0 && targetIdx < cells.length) {
+      return { pos: cells[targetIdx]! + 1, isLastInTable: false };
+    }
+    return { pos: $cell.pos, isLastInTable: dir > 0 && targetIdx >= cells.length };
+  };
+
+  /** Resolves an anchor ID (e.g. _Toc1 or bookmark name) to its doc position. */
+  const findAnchorPos = (doc: Editor["state"]["doc"], anchor: string): number | null => {
+    if (anchor.startsWith("_Toc")) {
+      const index = parseInt(anchor.slice(4), 10);
+      if (!Number.isNaN(index) && index > 0) {
+        let count = 0;
+        let foundPos: number | null = null;
+        doc.descendants((node, pos) => {
+          if (foundPos != null) return false;
+          if (node.type.name === "paragraph") {
+            const heading = (node.attrs.heading as string) || (node.attrs.style as string);
+            if (
+              heading &&
+              /heading\s*([1-9])/i.test(heading) &&
+              node.textContent.trim().length > 0
+            ) {
+              count++;
+              if (count === index) {
+                foundPos = pos + 1;
+                return false;
+              }
+            }
+          }
+          return true;
+        });
+        if (foundPos != null) return foundPos;
+      }
+    }
+    let bookmarkPos: number | null = null;
+    doc.descendants((node, pos) => {
+      if (bookmarkPos != null) return false;
+      const data = node.attrs.data as
+        | { bookmarkStart?: { name?: string; id?: unknown } }
+        | undefined;
+      if (data?.bookmarkStart?.name === anchor || String(data?.bookmarkStart?.id) === anchor) {
+        bookmarkPos = pos + 1;
+        return false;
+      }
+      return true;
+    });
+    return bookmarkPos;
+  };
+
+  const scrollIntoView = (pos: number): void => {
+    const rect = main.map?.valid ? main.map.caretRect(pos) : null;
+    if (!rect) return;
+    const pageEl = opts.pageHost?.(rect.page);
+    if (!pageEl) return;
+    const scale = opts.scale?.() ?? 1;
+    const scrollParent =
+      (pageEl.closest(
+        "[data-docen-scroll-container], .workspace, .editor-viewport, [style*='overflow']",
+      ) as HTMLElement | null) ?? pageEl.parentElement;
+    if (scrollParent && scrollParent.scrollHeight > scrollParent.clientHeight) {
+      const pageRect = pageEl.getBoundingClientRect();
+      const parentRect = scrollParent.getBoundingClientRect();
+      const caretY = pageRect.top + rect.yPx * scale;
+      if (caretY < parentRect.top || caretY + rect.heightPx * scale > parentRect.bottom) {
+        const targetScrollTop =
+          scrollParent.scrollTop + (caretY - parentRect.top) - parentRect.height / 3;
+        scrollParent.scrollTo({ top: Math.max(0, targetScrollTop), behavior: "auto" });
+        return;
+      }
+    }
+    pageEl.scrollIntoView({ block: "nearest", behavior: "auto" });
+  };
+
   const onKeyDown = (event: KeyboardEvent): void => {
     // The IME owns the keyboard during composition (candidate navigation,
     // commit keys) — our caret moves would cancel it mid-word.
@@ -1322,16 +1457,18 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     if (event.ctrlKey || event.metaKey) {
       const key = event.key;
       const lower = key.toLowerCase();
+      // Modifier combos dispatch commands (registered in KEYBOARD_SHORTCUTS).
+      // Undo / Redo
       if (lower === "z") {
-        if (!editable) return;
         event.preventDefault();
+        if (!editable) return;
         if (event.shiftKey) active().editor.commands.redo();
         else active().editor.commands.undo();
         return;
       }
       if (lower === "y") {
-        if (!editable) return;
         event.preventDefault();
+        if (!editable) return;
         active().editor.commands.redo();
         return;
       }
@@ -1399,14 +1536,26 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
           leaveStory();
         }
         break;
-      // Tab / Shift+Tab on list paragraphs adjusts the nesting level (Word).
-      // Everywhere else the press is still claimed: the browser default would
-      // move focus off the textarea (the caret overlay stays, but every
-      // following keystroke lands elsewhere — input silently dead until the
-      // next click). Plain-paragraph tab stops are future work (w:tab).
+      // Tab / Shift+Tab: table cells navigate; list paragraphs adjust nesting; normal text inserts tab.
       case "Tab": {
         event.preventDefault();
-        const { from, to } = active().editor.state.selection;
+        const { from, to, $from } = active().editor.state.selection;
+        // 1. Table navigation: Tab moves to next cell; in the last cell, it inserts a new row below.
+        const $cell = cellAt($from);
+        if ($cell) {
+          const adj = adjacentCellPos(active().editor.state, event.shiftKey ? -1 : 1);
+          if (adj) {
+            if (adj.isLastInTable) {
+              if (editable) {
+                active().editor.commands["insert-row-below"]?.();
+              }
+            } else {
+              setSel(TextSelection.near(active().editor.state.doc.resolve(adj.pos)).from);
+            }
+          }
+          break;
+        }
+        // 2. List paragraphs: Tab / Shift+Tab adjusts nesting level (Word).
         const patches: { pos: number; patch: Record<string, unknown> }[] = [];
         active().editor.state.doc.nodesBetween(from, to, (node, pos) => {
           if (node.type.name !== "paragraph") return true;
@@ -1431,6 +1580,18 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
             dispatch?.(tr.scrollIntoView());
             return true;
           });
+          break;
+        }
+        // 3. Normal paragraphs: insert tab character or node
+        if (editable && !event.shiftKey) {
+          if (active().editor.state.schema.nodes.tab) {
+            active().editor.commands.command(({ state, dispatch }) => {
+              dispatch?.(state.tr.replaceSelectionWith(state.schema.nodes.tab.create()));
+              return true;
+            });
+          } else {
+            insertText("\t");
+          }
         }
         break;
       }
@@ -1666,9 +1827,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       return leaveStory();
     },
     scrollIntoView(pos): void {
-      const rect = main.map?.valid ? main.map.caretRect(pos) : null;
-      if (!rect) return;
-      opts.pageHost?.(rect.page)?.scrollIntoView({ block: "start", behavior: "auto" });
+      scrollIntoView(pos);
     },
     /** The page index a doc position renders on (null when unmappable). */
     pageOf(pos): number | null {

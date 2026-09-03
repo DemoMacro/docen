@@ -30,6 +30,7 @@ type AnyNode = {
   attrs: Record<string, unknown>;
   childCount: number;
   child: (i: number) => AnyNode;
+  textContent: string;
 };
 
 const tablesOf = (editor: EditorType): AnyNode[] => {
@@ -200,6 +201,28 @@ describe("table row / column commands", () => {
     const table = tablesOf(editor)[0]!;
     expect(table.childCount).toBe(3);
     for (let r = 0; r < 3; r += 1) expect(table.child(r).childCount).toBe(4);
+  });
+
+  it("insert-row and insert-column create empty cells rather than duplicating cell text", () => {
+    const editor = build();
+    editor.commands["insert-table"]();
+    caretInCell(editor, 0, 0);
+    editor.commands.command(({ state, dispatch }) => {
+      dispatch?.(state.tr.insertText("Sample Text"));
+      return true;
+    });
+    expect(tablesOf(editor)[0]!.child(0).child(0).textContent).toBe("Sample Text");
+    expect(editor.commands["insert-row-below"]()).toBe(true);
+    const tableAfterRow = tablesOf(editor)[0]!;
+    expect(tableAfterRow.childCount).toBe(4);
+    // Row 0 has the text, but the newly inserted row 1 must have an empty cell
+    expect(tableAfterRow.child(0).child(0).textContent).toBe("Sample Text");
+    expect(tableAfterRow.child(1).child(0).textContent).toBe("");
+    // Column insert test:
+    caretInCell(editor, 0, 0);
+    expect(editor.commands["insert-column-right"]()).toBe(true);
+    const tableAfterCol = tablesOf(editor)[0]!;
+    expect(tableAfterCol.child(0).child(1).textContent).toBe("");
   });
 
   it("delete-row removes the caret's row; the last row deletes the table", () => {

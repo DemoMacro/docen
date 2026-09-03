@@ -1092,7 +1092,7 @@ export const DocumentCommands = Extension.create({
         },
       // ── Table context commands (Word's Table Design / Layout tabs) ──
 
-      // Insert a row copying the current one (formatting follows, like Word).
+      // Insert an empty row copying the current row's structure and cell formatting.
       "insert-row-above":
         () =>
         ({ state, dispatch }) => {
@@ -1101,9 +1101,16 @@ export const DocumentCommands = Extension.create({
           if (dispatch) {
             const { $from } = state.selection;
             const row = $from.node(anchor.rowAt);
-            dispatch(
-              state.tr.insert($from.before(anchor.rowAt), row.copy(row.content)).scrollIntoView(),
-            );
+            const emptyCells: PMNode[] = [];
+            row.forEach((cell) => {
+              const para = state.schema.nodes.paragraph.create();
+              emptyCells.push(cell.type.createAndFill(cell.attrs, [para])!);
+            });
+            const newRow = row.type.create(row.attrs, emptyCells);
+            const insertPos = $from.before(anchor.rowAt);
+            const tr = state.tr.insert(insertPos, newRow);
+            tr.setSelection(TextSelection.near(tr.doc.resolve(insertPos + 2)));
+            dispatch(tr.scrollIntoView());
           }
           return true;
         },
@@ -1115,16 +1122,21 @@ export const DocumentCommands = Extension.create({
           if (dispatch) {
             const { $from } = state.selection;
             const row = $from.node(anchor.rowAt);
-            dispatch(
-              state.tr.insert($from.after(anchor.rowAt), row.copy(row.content)).scrollIntoView(),
-            );
+            const emptyCells: PMNode[] = [];
+            row.forEach((cell) => {
+              const para = state.schema.nodes.paragraph.create();
+              emptyCells.push(cell.type.createAndFill(cell.attrs, [para])!);
+            });
+            const newRow = row.type.create(row.attrs, emptyCells);
+            const insertPos = $from.after(anchor.rowAt);
+            const tr = state.tr.insert(insertPos, newRow);
+            tr.setSelection(TextSelection.near(tr.doc.resolve(insertPos + 2)));
+            dispatch(tr.scrollIntoView());
           }
           return true;
         },
-      // One cell per row, copied from each row's cell at the current column
-      // index (rows may index differently once spans exist — span-aware grid
-      // math is logged for a later batch). Bottom-up keeps positions valid as
-      // earlier edits shift later ones.
+      // One empty cell per row, copied from each row's cell attrs at the current column
+      // index. Bottom-up keeps positions valid as earlier edits shift later ones.
       "insert-column-right":
         () =>
         ({ state, dispatch }) => {
@@ -1136,6 +1148,7 @@ export const DocumentCommands = Extension.create({
             const tablePos = $from.before(anchor.tableAt);
             const cellIndex = $from.index(anchor.rowAt);
             const tr = state.tr;
+            let targetCellPos = -1;
             for (let r = tableNode.childCount - 1; r >= 0; r -= 1) {
               const rowNode = tableNode.child(r);
               let rowPos = tablePos + 1;
@@ -1143,7 +1156,16 @@ export const DocumentCommands = Extension.create({
               const idx = Math.min(cellIndex, rowNode.childCount - 1);
               let cellPos = rowPos + 1;
               for (let c = 0; c <= idx; c += 1) cellPos += rowNode.child(c).nodeSize;
-              tr.insert(cellPos, rowNode.child(idx));
+              const template = rowNode.child(idx);
+              const para = state.schema.nodes.paragraph.create();
+              const emptyCell = template.type.createAndFill(template.attrs, [para])!;
+              tr.insert(cellPos, emptyCell);
+              if (r === $from.index(anchor.rowAt)) {
+                targetCellPos = cellPos;
+              }
+            }
+            if (targetCellPos > 0) {
+              tr.setSelection(TextSelection.near(tr.doc.resolve(targetCellPos + 1)));
             }
             dispatch(tr.scrollIntoView());
           }
@@ -1160,6 +1182,7 @@ export const DocumentCommands = Extension.create({
             const tablePos = $from.before(anchor.tableAt);
             const cellIndex = $from.index(anchor.rowAt);
             const tr = state.tr;
+            let targetCellPos = -1;
             for (let r = tableNode.childCount - 1; r >= 0; r -= 1) {
               const rowNode = tableNode.child(r);
               let rowPos = tablePos + 1;
@@ -1167,7 +1190,16 @@ export const DocumentCommands = Extension.create({
               const idx = Math.min(cellIndex, rowNode.childCount - 1);
               let cellPos = rowPos + 1;
               for (let c = 0; c < idx; c += 1) cellPos += rowNode.child(c).nodeSize;
-              tr.insert(cellPos, rowNode.child(idx));
+              const template = rowNode.child(idx);
+              const para = state.schema.nodes.paragraph.create();
+              const emptyCell = template.type.createAndFill(template.attrs, [para])!;
+              tr.insert(cellPos, emptyCell);
+              if (r === $from.index(anchor.rowAt)) {
+                targetCellPos = cellPos;
+              }
+            }
+            if (targetCellPos > 0) {
+              tr.setSelection(TextSelection.near(tr.doc.resolve(targetCellPos + 1)));
             }
             dispatch(tr.scrollIntoView());
           }
@@ -1712,13 +1744,17 @@ export const DocumentCommands = Extension.create({
           if (!anchor) return false;
           const { $from } = state.selection;
           const tableNode = $from.node(anchor.tableAt);
-          const widths = tableNode.attrs.columnWidths as number[] | null;
-          if (!widths || widths.length === 0) return false;
+          const cols = tableNode.child(0)?.childCount ?? 0;
+          if (cols === 0) return false;
+          let widths = tableNode.attrs.columnWidths as number[] | null;
+          if (!widths || widths.length === 0) {
+            widths = Array.from({ length: cols }, () => 2880);
+          }
           if (dispatch) {
             const sum = widths.reduce((a, b) => a + b, 0);
-            const even = Math.floor(sum / widths.length);
-            const next = widths.map((_, c) =>
-              c === widths.length - 1 ? sum - even * (widths.length - 1) : even,
+            const even = Math.floor(sum / cols);
+            const next = Array.from({ length: cols }, (_, c) =>
+              c === cols - 1 ? sum - even * (cols - 1) : even,
             );
             dispatch(
               state.tr

@@ -155,4 +155,26 @@ describe("CellSelection rectangles", () => {
     });
     expect(tableTexts).toEqual(["", "", "丙", "", "", "己"]);
   });
+
+  it("preserves cell attributes such as shading and columnSpan on replace", () => {
+    const editor = build();
+    // Set custom shading on cell (0, 0).
+    const cPos = cellPos(editor, 0, 0);
+    editor.commands.command(({ tr, dispatch }) => {
+      const node = tr.doc.nodeAt(cPos)!;
+      tr.setNodeMarkup(cPos, undefined, { ...node.attrs, shading: "FFFF00", columnSpan: 2 });
+      dispatch?.(tr);
+      return true;
+    });
+    const sel = CellSelection.create(editor.state.doc, cPos, cPos);
+    editor.commands.command(({ tr, dispatch }) => {
+      sel.replace(tr as never);
+      dispatch?.(tr);
+      return true;
+    });
+    const clearedCell = editor.state.doc.nodeAt(cPos)!;
+    expect(clearedCell.textContent).toBe("");
+    expect(clearedCell.attrs.shading).toBe("FFFF00");
+    expect(clearedCell.attrs.columnSpan).toBe(2);
+  });
 });

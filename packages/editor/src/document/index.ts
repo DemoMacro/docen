@@ -441,6 +441,7 @@ class DocenDocument extends AddinHost<Editor> {
     const editor = this.editor;
     if (!editor) return;
     (event.detail.direction === "prev" ? findPrev : findNext)(editor.state, editor.view.dispatch);
+    this.#bridge?.scrollIntoView(editor.state.selection.from);
   };
 
   /** Stamp the Results slot with the live match list — each hit rendered with
@@ -541,9 +542,15 @@ class DocenDocument extends AddinHost<Editor> {
     const { action, find, replace, caseSensitive, wholeWord } = event.detail ?? {};
     const query = new SearchQuery({ search: find, replace, caseSensitive, wholeWord });
     editor.view.dispatch(setSearchState(editor.state.tr, query));
-    if (action === "find-next") findNext(editor.state, editor.view.dispatch);
-    else if (action === "replace-next") replaceNext(editor.state, editor.view.dispatch);
-    else if (action === "replace-all") replaceAll(editor.state, editor.view.dispatch);
+    if (action === "find-next") {
+      findNext(editor.state, editor.view.dispatch);
+      this.#bridge?.scrollIntoView(editor.state.selection.from);
+    } else if (action === "replace-next") {
+      replaceNext(editor.state, editor.view.dispatch);
+      this.#bridge?.scrollIntoView(editor.state.selection.from);
+    } else if (action === "replace-all") {
+      replaceAll(editor.state, editor.view.dispatch);
+    }
   };
 
   /** Set a text selection (or a range) on the viewless editor. Same runtime
