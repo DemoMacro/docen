@@ -919,8 +919,8 @@ const insertTab = (): RibbonTab =>
     group("links", [
       btn("hyperlink", "link", { size: "large" }),
       btn("bookmark", "bookmark", { size: "large" }),
-      btn("comment-add", "comment", { size: "large" }),
     ]),
+    group("comments", [btn("comment-add", "comment", { size: "large" })]),
     group("header-footer", [
       split("header", "header", parsedItems(storyMenuItems("header")), { size: "large" }),
       split("footer", "footer", parsedItems(storyMenuItems("footer")), { size: "large" }),
@@ -1103,8 +1103,8 @@ const reviewTab = (): RibbonTab =>
       col([grid([btn("align-left", "previous-comment"), btn("align-right", "next-comment")])]),
       btn("comment", "show-comments", { size: "large" }),
     ]),
-    group("tracking", [btn("group-objects", "track-changes", { size: "large" })]),
-    group("changes", [
+    group("tracking", [
+      btn("group-objects", "track-changes", { size: "large" }),
       btn("accept", "accept-change", { size: "large" }),
       btn("close", "reject-change", { size: "large" }),
       col([grid([btn("align-left", "previous-change"), btn("align-right", "next-change")])]),
@@ -1122,9 +1122,9 @@ const reviewTab = (): RibbonTab =>
 const viewTab = (): RibbonTab =>
   tabNode("view", [
     group("views", [
+      btn("document-print", "read-mode", { size: "large" }),
       btn("print", "print-layout", { size: "large" }),
       btn("document-print", "web-layout", { size: "large" }),
-      btn("document-print", "read-mode", { size: "large" }),
       btn("group-objects", "outline", { size: "large" }),
       btn("document-print", "draft", { size: "large" }),
     ]),
