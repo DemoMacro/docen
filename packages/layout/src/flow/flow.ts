@@ -260,10 +260,13 @@ class Flow {
   }
 
   /** Seal the current page's items and start a fresh page. `auto` marks an
-   *  overflow-driven break — its page's first block drops its space-before. */
+   *  overflow-driven break — its page's first block drops its space-before.
+   *  An empty page emits nothing (Word collapses a break at a fresh page
+   *  top), so pageIndex re-syncs to the emitted count — a no-op break must
+   *  not skew the even/odd inset slots of every page after it. */
   private newPage(auto = false): void {
     if (this.items.length > 0) this.pages.push({ items: this.items.splice(0) });
-    this.pageIndex++;
+    this.pageIndex = this.pages.length;
     this.colIndex = 0;
     this.y = this.insets().topPx;
     this.prevAfter = 0;
