@@ -16,7 +16,7 @@ import type {
   LayoutTable,
 } from "../layout-doc";
 import type { LaidOutCell, LaidOutTable } from "../layout-result";
-import { naturalWidthOfInline } from "../text/line-break";
+import { minWidthOfInline } from "../text/line-break";
 import type { TextMeasurer } from "../text/measure";
 import { stackBlocks } from "./block";
 
@@ -212,11 +212,13 @@ function rawGridOf(table: LayoutTable): number[] {
 }
 
 /** Word's autofit (w:tblLayout autofit): every column starts at its grid
- *  preference and grows to its widest cell's natural content; the total then
- *  scales to the table width — w:tblW pct/dxa pin it, an auto table sizes to
- *  its content (Word never stretches an auto table beyond what the grid
- *  already spans). Spanning cells don't constrain the fit (Word distributes
- *  across the span; a per-column split would be guesswork). */
+ *  preference and grows only when a cell cannot wrap inside it — the fit
+ *  measures each cell wrapped AT its grid width, so prose keeps the column
+ *  and only an unbreakable run (a long word, an image) widens it past the
+ *  grid. A pinned w:tblW scales the result; an auto table sizes to its
+ *  columns, never beyond what the grid already spans. Spanning cells don't
+ *  constrain the fit (Word distributes across the span; a per-column split
+ *  would be guesswork). */
 function autofitColumns(
   table: LayoutTable,
   containerWidth: number,
@@ -231,13 +233,16 @@ function autofitColumns(
       const span = cell.colspan ?? 1;
       if (span === 1 && col < content.length) {
         const insets = mergeInsets(cell.insets, table.cellInsets);
-        const natural =
-          naturalWidthOfBlocks(cell.blocks, measurer) +
+        const frame =
           (insets.left ?? 0) +
           (insets.right ?? 0) +
           edgeWidth(cell.borders?.left) +
           edgeWidth(cell.borders?.right);
-        content[col] = Math.max(content[col]!, natural);
+        // A column without a grid entry measures unconstrained — content
+        // starts from its own unwrapped width.
+        const budget = grid[col]! > 0 ? grid[col]! - frame : 1e9;
+        const floor = minWidthOfBlocks(cell.blocks, measurer, budget) + frame;
+        content[col] = Math.max(content[col]!, floor);
       }
       col += span;
     }
@@ -256,17 +261,21 @@ function autofitColumns(
   return { columnWidths: target.map((w) => (w / total) * width), tableWidth: width };
 }
 
-/** A cell stack's widest natural line (hard breaks split it; nothing wraps).
- *  Nested tables contribute their grid sum; placeholders nothing. */
-function naturalWidthOfBlocks(blocks: readonly LayoutBlock[], measurer: TextMeasurer): number {
+/** A cell stack's widest line when wrapped at `budget` (hard breaks split it;
+ *  nested tables contribute their grid sum; placeholders nothing). */
+function minWidthOfBlocks(
+  blocks: readonly LayoutBlock[],
+  measurer: TextMeasurer,
+  budget: number,
+): number {
   let widest = 0;
   for (const block of blocks) {
     switch (block.kind) {
       case "paragraph":
-        widest = Math.max(widest, naturalWidthOfInline(block.inline, measurer));
+        widest = Math.max(widest, minWidthOfInline(block.inline, measurer, budget));
         break;
       case "group":
-        widest = Math.max(widest, naturalWidthOfBlocks(block.blocks, measurer));
+        widest = Math.max(widest, minWidthOfBlocks(block.blocks, measurer, budget));
         break;
       case "table": {
         const sum = (block.columnWidthsPx ?? []).reduce((a, b) => a + b, 0);

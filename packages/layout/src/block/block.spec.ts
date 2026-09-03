@@ -624,16 +624,18 @@ describe("layoutTable autofit", () => {
     return out;
   };
 
-  it("grows a column to its content and sizes an auto table to the total", () => {
-    // Grid 100+100; the first cell's 20×8px word widens its column to 160.
+  it("keeps wrappable prose at its grid column (Word's autofit wraps, never widens)", () => {
+    // The paragraph's unwrapped width is ~152px, but every word fits a line:
+    // Word's autofit wraps it inside the 100px grid column instead of growing.
+    const prose = cellPara("a".repeat(9) + " " + "b".repeat(9));
     const out = fit({
       kind: "table",
       layout: "autofit",
       columnWidthsPx: [100, 100],
-      rows: [{ cells: [{ blocks: [cellPara("a".repeat(20))] }, { blocks: [cellPara()] }] }],
+      rows: [{ cells: [{ blocks: [prose] }, { blocks: [cellPara()] }] }],
     });
-    expect(out.widthPx).toBe(260);
-    expect(out.columnWidthsPx[0]).toBeCloseTo(160, 4);
+    expect(out.widthPx).toBe(200);
+    expect(out.columnWidthsPx[0]).toBeCloseTo(100, 4);
     expect(out.columnWidthsPx[1]).toBeCloseTo(100, 4);
   });
 
@@ -643,7 +645,7 @@ describe("layoutTable autofit", () => {
         kind: "table",
         layout: "autofit",
         width: { type: "percent", percent: 50 },
-        columnWidthsPx: [100, 100],
+        columnWidthsPx: [0, 100],
         rows: [{ cells: [{ blocks: [cellPara("a".repeat(20))] }, { blocks: [cellPara()] }] }],
       },
       400,
@@ -654,12 +656,13 @@ describe("layoutTable autofit", () => {
     expect(out.columnWidthsPx[1]).toBeCloseTo((100 / 260) * 200, 4);
   });
 
-  it("counts insets and side borders into the natural content width", () => {
-    // 10×8px word + 10+10 insets + 2+2 borders = 104 — just over the 100 grid.
+  it("counts insets and side borders into the unconstrained content width", () => {
+    // 10×8px word + 10+10 insets + 2+2 borders = 104 — a column with no grid
+    // entry starts from that full width.
     const out = fit({
       kind: "table",
       layout: "autofit",
-      columnWidthsPx: [100],
+      columnWidthsPx: [0],
       rows: [
         {
           cells: [

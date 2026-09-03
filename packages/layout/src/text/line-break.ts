@@ -267,15 +267,20 @@ function buildGroups(inline: LayoutInline[], measurer: TextMeasurer): FlowGroup[
   return groups;
 }
 
-/** The natural (unwrapped) width of an inline flow: each tab/break-delimited
- *  group packs at infinite width and the widest group wins (a hard break's
- *  line width is its widest segment). The autofit column fit measures cells
- *  with this — the same pretext pipeline that packs the real lines, so the
- *  fit and the wrap can never drift apart. */
-export function naturalWidthOfInline(inline: LayoutInline[], measurer: TextMeasurer): number {
+/** The widest line an inline flow produces when wrapped at `maxWidth` —
+ *  wrappable prose packs within the budget, an unbreakable run wider than it
+ *  overflows at its own length. That makes this the column floor Word's
+ *  autofit grows a grid column past: prose stays at the grid width, a long
+ *  word demands its own length (the same pretext pipeline that packs the
+ *  real lines, so the fit and the wrap can never drift apart). */
+export function minWidthOfInline(
+  inline: LayoutInline[],
+  measurer: TextMeasurer,
+  maxWidth: number,
+): number {
   let widest = 0;
   for (const group of buildGroups(inline, measurer)) {
-    const w = measureRichInlineStats(group.prepared, 1e9).maxLineWidth;
+    const w = measureRichInlineStats(group.prepared, maxWidth).maxLineWidth;
     if (w > widest) widest = w;
   }
   return widest;
