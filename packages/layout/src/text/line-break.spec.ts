@@ -207,6 +207,20 @@ describe("packLines", () => {
     expect(items[1]).toMatchObject({ kind: "tab", xPx: 16, widthPx: 68, leader: "dot" });
   });
 
+  it("clamps an out-of-margin right stop to the margin, keeping its right semantics", () => {
+    // A stop at 240 in a 200px line: the tab still right-aligns "cd" at the
+    // margin (tab ends at 184, "cd" spans [184, 200)) — the clamp moves the
+    // position, never the stop's identity (type/leader).
+    const lines = pack([text("ab"), { kind: "tab" }, text("cd")], 200, {
+      tabStops: [{ positionPx: 240, type: "right", leader: "dot" }],
+    });
+    expect(lines).toHaveLength(1);
+    const items = lines[0].items;
+    expect(items[1]).toMatchObject({ kind: "tab", xPx: 16, widthPx: 168, leader: "dot" });
+    expect(items[2]).toMatchObject({ kind: "text", text: "cd", xPx: 184 });
+    expect(items[2].xPx + items[2].widthPx).toBeCloseTo(200, 5);
+  });
+
   it("continues the same line across a tab group boundary", () => {
     const lines = pack([text("ab"), { kind: "tab" }, text("cd")], 200);
     expect(lines).toHaveLength(1);

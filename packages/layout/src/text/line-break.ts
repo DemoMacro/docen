@@ -406,13 +406,16 @@ function tabAdvance(
 ): { advancePx: number; leader?: LayoutTabStop["leader"] } {
   const absX = xRaw + tabs.lineBasePx;
   if (tab.toPx != null) return { advancePx: Math.max(0, tab.toPx - absX) };
-  // A stop past this line's usable width clamps to the right edge (Word: an
-  // out-of-margin stop still right-aligns at the margin). maxWidth is measured
-  // from the line's content start; stops from the text box — convert, clamp,
+  // The stop's identity (type/leader) resolves against nextStopPast's raw
+  // return — an explicit stop passes through untouched there, so the equality
+  // is exact. Only then does the position clamp to the line's usable width
+  // (Word: an out-of-margin stop still right-aligns at the margin); clamping
+  // moves the position, never the stop's identity. maxWidth is measured from
+  // the line's content start; stops from the text box — convert, clamp,
   // convert back.
-  const stop =
-    Math.min(nextStopPast(tabs, absX) - tabs.lineBasePx, tabs.maxWidthPx) + tabs.lineBasePx;
-  const matched = tabs.stops?.find((s) => s.positionPx === stop);
+  const found = nextStopPast(tabs, absX);
+  const matched = tabs.stops?.find((s) => s.positionPx === found);
+  const stop = Math.min(found - tabs.lineBasePx, tabs.maxWidthPx) + tabs.lineBasePx;
   const type = matched?.type ?? "left";
   const w =
     type === "right"
