@@ -480,28 +480,52 @@ export class CaretMap {
     return this.paras.find((p) => p.lines.some((l) => l.para === para))?.innerPos ?? null;
   }
 
-  /** A click's page-local coordinates → the nearest doc position. */
-  posAtPoint(page: number, x: number, y: number): number | null {
-    let best: { entry: LineEntry; dist: number; xDist: number } | null = null;
+  /** A click's page-local coordinates → the nearest doc position. Clamping
+   *  (drag extends) drops the distance cap: the overshoot past a line's band
+   *  resolves to that nearest line, so dragging below the last line selects
+   *  through its end instead of stalling. */
+  posAtPoint(page: number, x: number, y: number, clamp = false): number | null {
+    // Lines at the best (smallest) vertical distance — one band per click.
+    let bestDist = Infinity;
+    const band: LineEntry[] = [];
     for (const entry of this.lines) {
       if (entry.page !== page) continue;
       const within = y >= entry.yPx && y <= entry.yPx + entry.line.heightPx;
       const dist = within
         ? 0
         : Math.min(Math.abs(y - entry.yPx), Math.abs(y - (entry.yPx + entry.line.heightPx)));
-      if (dist > 40) continue;
-      // Table columns share one y band — x proximity breaks the tie, else
-      // every click in the row lands on the first cell's paragraph.
+      if (dist > 40 && !clamp) continue;
+      if (dist < bestDist) {
+        bestDist = dist;
+        band.length = 0;
+      }
+      if (dist === bestDist) band.push(entry);
+    }
+    if (!band.length) return null;
+    // The line the x falls inside. A point in the gutter BETWEEN two lines
+    // (column gap, cell spacing) belongs to the line it just LEFT — columns
+    // share one y band, and x proximity would fling a drag overshooting a
+    // column's right edge clear across the gutter into the next column's
+    // text. Document order (band is in it) clamps to the text behind the
+    // gutter instead — Word's drag behavior.
+    const inside = band.find((entry) => {
       const items = entry.line.items;
       const last = items[items.length - 1];
       const right = entry.xPx + (last ? last.xPx + last.widthPx : 0);
-      const xDist = x < entry.xPx ? entry.xPx - x : x > right ? x - right : 0;
-      if (!best || dist < best.dist || (dist === best.dist && xDist < best.xDist)) {
-        best = { entry, dist, xDist };
+      return x >= entry.xPx && x <= right;
+    });
+    // Outside every line's span: the gutter's LEFT line (last line whose left
+    // edge is at/behind x) — an overshoot past a column's right edge clamps
+    // to that column's line end; before the first line clamps to its start.
+    let hit = inside ?? null;
+    if (!hit) {
+      for (const entry of band) {
+        if (entry.xPx <= x) hit = entry;
+        else break;
       }
+      hit ??= band[0]!;
     }
-    if (!best) return null;
-    return this.posInLine(best.entry, x);
+    return this.posInLine(hit, x);
   }
 
   /** The position one line above/below a position's line, at the same

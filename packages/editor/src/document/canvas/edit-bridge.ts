@@ -552,14 +552,24 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
   const charClass = (ch: string): number =>
     /\s/.test(ch) ? 0 : /[㐀-鿿豈-﫿]/.test(ch) ? 1 : /[0-9A-Za-z]/.test(ch) ? 2 : 3;
 
-  const setSelClick = (pos: number, clicks: number): void => {
+  const setSelClick = (pos: number, clicks: number, extendFrom?: number): void => {
     const { doc } = active().editor.state;
     if (clicks >= 2) {
       const $pos = doc.resolve(pos);
       const po = $pos.parentOffset;
       const base = pos - po;
+      // Word's Shift+multi-click: the word/paragraph pick extends the prior
+      // anchor — the selection grows to cover whichever side the pick is on.
+      const extend = (from: number, to: number): void => {
+        if (extendFrom != null) {
+          if (extendFrom <= from) setSel(to, extendFrom);
+          else setSel(extendFrom, from);
+        } else {
+          setSel(to, from);
+        }
+      };
       if (clicks >= 3) {
-        setSel(base + $pos.parent.content.size, base);
+        extend(base, base + $pos.parent.content.size);
         return;
       }
       // Flat text with one placeholder per inline leaf keeps the string index
@@ -579,12 +589,34 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
             while (from > 0 && charClass(flat[from - 1]!) === cls) from--;
             while (to < flat.length && charClass(flat[to]!) === cls) to++;
           }
-          setSel(base + to, base + from);
+          extend(base + from, base + to);
           return;
         }
       }
     }
-    setSel(pos);
+    if (extendFrom != null) {
+      if (extendFrom <= pos) setSel(pos, extendFrom);
+      else setSel(extendFrom, pos);
+    } else {
+      setSel(pos);
+    }
+  };
+
+  /** A click's selection: Word's Shift+Click extends from the caret's anchor
+   *  instead of dropping a fresh caret (the pick — word, paragraph, or bare
+   *  point — grows whichever side it falls on), and a continuing drag grows
+   *  that same selection from the anchor. A plain click drops a caret and
+   *  arms the drag from it. */
+  const clickSelection = (pos: number, event: MouseEvent, clicks: number): void => {
+    const anchor = event.shiftKey ? active().editor.state.selection.anchor : undefined;
+    if (clicks >= 2) {
+      setSelClick(pos, clicks, anchor);
+      return;
+    }
+    setSel(pos, anchor);
+    dragAnchor = anchor ?? pos;
+    dragStart = { x: event.clientX, y: event.clientY };
+    dragMoved = false;
   };
 
   /** The selected drawing — Word's picture selection. The hit box carries
@@ -634,12 +666,15 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
   };
 
   /** A viewport point → the active story's doc position (furniture stories
-   *  map through their single pseudo page). */
-  const posAtClient = (clientX: number, clientY: number): number | null => {
+   *  map through their single pseudo page). Clamping drags resolve the
+   *  nearest line regardless of distance — a drag overshooting past the
+   *  last line's band must keep extending to the line's end (Word), not
+   *  stall the selection mid-line. */
+  const posAtClient = (clientX: number, clientY: number, clamp = false): number | null => {
     const s = active();
     const hit = hitPage(clientX, clientY);
     if (!hit || !s.map?.valid) return null;
-    return s.map.posAtPoint(story ? 0 : hit.page, hit.lx, hit.ly);
+    return s.map.posAtPoint(story ? 0 : hit.page, hit.lx, hit.ly, clamp);
   };
 
   // Word's table grips: the black bar arrows hover just outside the table
@@ -846,7 +881,9 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       return;
     }
     dragMoved = true;
-    const head = posAtClient(event.clientX, event.clientY);
+    // Clamp: a drag overshooting past a line/page edge keeps extending to the
+    // nearest text (Word) — unclamped hits would stall the head mid-line.
+    const head = posAtClient(event.clientX, event.clientY, true);
     if (head != null) setDragSelection(dragAnchor, head);
   };
   const onMouseUp = (): void => {
@@ -988,29 +1025,11 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
         // "double-click the body" exit, single-clicked.
         if (own && hit.page === story.anchorPage) {
           const pos = posAtClient(event.clientX, event.clientY);
-          if (pos != null) {
-            if (clicks >= 2) {
-              setSelClick(pos, clicks);
-            } else {
-              setSel(pos);
-              dragAnchor = pos;
-              dragStart = { x: event.clientX, y: event.clientY };
-              dragMoved = false;
-            }
-          }
+          if (pos != null) clickSelection(pos, event, clicks);
         } else {
           leaveStory();
           const pos = posAtClient(event.clientX, event.clientY);
-          if (pos != null) {
-            if (clicks >= 2) {
-              setSelClick(pos, clicks);
-            } else {
-              setSel(pos);
-              dragAnchor = pos;
-              dragStart = { x: event.clientX, y: event.clientY };
-              dragMoved = false;
-            }
-          }
+          if (pos != null) clickSelection(pos, event, clicks);
         }
         ta.focus();
         ta.value = "";
@@ -1063,16 +1082,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     selDrawing = null;
     placeDrawingSel();
     const pos = posAtClient(event.clientX, event.clientY);
-    if (pos != null) {
-      if (clicks >= 2) {
-        setSelClick(pos, clicks);
-      } else {
-        setSel(pos);
-        dragAnchor = pos;
-        dragStart = { x: event.clientX, y: event.clientY };
-        dragMoved = false;
-      }
-    }
+    if (pos != null) clickSelection(pos, event, clicks);
     ta.focus();
     ta.value = "";
   };
