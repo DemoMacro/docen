@@ -110,25 +110,43 @@ export function projectParagraph(p: BodyParagraph, ctx: ProjectContext): LayoutP
   // Indent cascade: direct w:ind > the numbering level's w:ind > style chain
   // > docDefaults. The level beating the style is Word's rule — applying a
   // list re-indents styled paragraphs (ListParagraph's 720tw must not pin
-  // every level to level 0's indent).
-  let leftTw = measureTwip(dInd.left) ?? level?.leftTw ?? measureTwip(pick([sInd, docInd], "left"));
+  // every level to level 0's indent). Char-unit attributes beat their twip
+  // twins, w:start/w:end are the modern names of w:left/w:right (Word reads
+  // each pair as one slot), and w:hanging is firstLine's negative twin
+  // winning the pair within a tier — the engine takes it as a negative first
+  // line (line 0 starts LEFT of the indent, where a list marker sits).
+  const charsPx = (v: unknown): number | undefined => {
+    const n = num(v);
+    return n != null && n > 0 ? (n / 100) * defaultTextStyle.sizePx : undefined;
+  };
+  const twPx = (v: unknown): number | undefined => {
+    const t = measureTwip(v);
+    return t != null ? twipToPx(t) : undefined;
+  };
+  const leftPx =
+    charsPx(dInd.leftChars ?? dInd.startChars) ??
+    twPx(dInd.left ?? dInd.start) ??
+    (level?.leftTw != null ? twipToPx(level.leftTw) : undefined) ??
+    charsPx(pick([sInd, docInd], "leftChars") ?? pick([sInd, docInd], "startChars")) ??
+    twPx(pick([sInd, docInd], "left") ?? pick([sInd, docInd], "start"));
   const firstLinePx = (() => {
-    const directTw = measureTwip(dInd.firstLine);
-    if (directTw != null) return Math.max(0, twipToPx(directTw));
-    const directChars = num(dInd.firstLineChars);
-    if (directChars != null && directChars > 0) {
-      return (directChars / 100) * defaultTextStyle.sizePx;
-    }
+    const directHanging = charsPx(dInd.hangingChars) ?? twPx(dInd.hanging);
+    if (directHanging != null) return -directHanging;
+    const directTw = twPx(dInd.firstLine);
+    if (directTw != null) return Math.max(0, directTw);
+    const directChars = charsPx(dInd.firstLineChars);
+    if (directChars != null) return directChars;
     if (level?.hangingTw != null && level.hangingTw > 0) return -twipToPx(level.hangingTw);
-    const styleTw = measureTwip(pick([sInd, docInd], "firstLine"));
-    if (styleTw != null) return Math.max(0, twipToPx(styleTw));
-    const styleChars = num(pick([sInd, docInd], "firstLineChars"));
-    if (styleChars != null && styleChars > 0) return (styleChars / 100) * defaultTextStyle.sizePx;
-    return undefined;
+    const styleHanging =
+      charsPx(pick([sInd, docInd], "hangingChars")) ?? twPx(pick([sInd, docInd], "hanging"));
+    if (styleHanging != null) return -styleHanging;
+    const styleTw = twPx(pick([sInd, docInd], "firstLine"));
+    if (styleTw != null) return Math.max(0, styleTw);
+    return charsPx(pick([sInd, docInd], "firstLineChars"));
   })();
   const indent = {
-    leftPx: leftTw != null ? twipToPx(leftTw) || undefined : undefined,
-    rightPx: twipToPx(measureTwip(ind("right")) ?? 0) || undefined,
+    leftPx: leftPx || undefined,
+    rightPx: twipToPx(measureTwip(ind("right") ?? ind("end")) ?? 0) || undefined,
     firstLinePx,
   };
 
