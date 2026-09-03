@@ -269,6 +269,39 @@ export function paintParagraph(
             : undefined,
         });
         tree.add(textEl);
+      } else if (item.kind === "math" && inline.kind === "math") {
+        // A formula the engine does not lay out yet: a dashed slot with the
+        // structural label centered inside — Word's empty-argument look, an
+        // honest stand-in until the math layout engine lands.
+        tree.add(
+          new Rect({
+            x: lineX + item.xPx,
+            y: lineY + pad,
+            width: item.widthPx,
+            height: item.heightPx,
+            fill: "rgba(149, 166, 190, 0.12)",
+            stroke: "#9aa6be",
+            strokeWidth: 1,
+            dashPattern: [3, 2],
+            hittable: false,
+          }),
+        );
+        tree.add(
+          new Text({
+            x: lineX + item.xPx,
+            y: lineY + pad,
+            width: item.widthPx,
+            height: item.heightPx,
+            text: item.label,
+            fill: "#5b6675",
+            fontFamily: "Inter, sans-serif",
+            fontSize: item.heightPx * 0.62,
+            italic: true,
+            textAlign: "center",
+            verticalAlign: "middle",
+            hittable: false,
+          }),
+        );
       } else if (item.kind === "picture" && inline.kind === "picture") {
         // An inline picture is a grab target just like a floating drawing —
         // without a hit box a click lands behind the art (Word selects the

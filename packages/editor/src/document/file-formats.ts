@@ -95,8 +95,11 @@ export const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   "symbol",
   "bookmark",
   // Footnote prompts for the note text, references the caret and appends the
-  // note body to documentExtras.footnotes.
+  // note body to documentExtras.footnotes. Equation drops a placeholder
+  // math template (the gallery's fraction/script/radical/sum/integral) at
+  // the caret.
   "insert-footnote",
+  "equation",
   // Page Color writes the doc-level w:background (doc.attrs.background) from
   // the color-picker's palette value. Page Borders stamps a w:pgBorders
   // preset (none/box/shadow/double/dashed) on the current section. Watermark

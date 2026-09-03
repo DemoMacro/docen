@@ -195,7 +195,7 @@ function groupOf(
         });
         itemInline.push(i);
       }
-    } else if (item.kind === "picture") {
+    } else if (item.kind === "picture" || item.kind === "math") {
       // An unbreakable atom of known width (the patched pretext keeps
       // empty-text extraWidth items alive).
       items.push({ text: "", font: "1px serif", break: "never", extraWidth: item.widthPx });
@@ -644,6 +644,16 @@ export function packLines(inline: LayoutInline[], opts: PackLinesOptions): Packe
                 xPx: at,
                 widthPx: src.widthPx,
                 heightPx: src.heightPx,
+              });
+              if (src.heightPx > tallestPicturePx) tallestPicturePx = src.heightPx;
+            } else if (src.kind === "math") {
+              lineItems.push({
+                kind: "math",
+                inlineIndex,
+                xPx: at,
+                widthPx: src.widthPx,
+                heightPx: src.heightPx,
+                label: src.label,
               });
               if (src.heightPx > tallestPicturePx) tallestPicturePx = src.heightPx;
             }

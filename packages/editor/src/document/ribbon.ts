@@ -462,6 +462,18 @@ const paragraphSpacingItems = (): string =>
     { text: opt("wide"), value: "wide" },
   ]);
 
+/** The Equation menu: the common OMML structures as empty-argument templates
+ *  (Word's equation tool's frequent structures) — the canvas paints each as a
+ *  dashed placeholder slot until the math layout engine lands. */
+const equationItems = (): string =>
+  JSON.stringify([
+    { text: opt("equation-fraction"), value: "fraction" },
+    { text: opt("equation-script"), value: "superScript" },
+    { text: opt("equation-radical"), value: "radical" },
+    { text: opt("equation-sum"), value: "sum" },
+    { text: opt("equation-integral"), value: "integral" },
+  ]);
+
 /** The Shapes gallery — the presets the canvas paints today (box presets,
  *  ellipse, straight line); values are the ST_ShapeType tokens verbatim. */
 const shapeItems = (): string =>
@@ -919,7 +931,7 @@ const insertTab = (): RibbonTab =>
       btn("wordart", "wordart", { size: "large" }),
     ]),
     group("symbols", [
-      btn("equation", "equation", { size: "large" }),
+      menu("equation", "equation", parsedItems(equationItems()), { size: "large" }),
       btn("symbol", "symbol", { size: "large" }),
     ]),
   ]);

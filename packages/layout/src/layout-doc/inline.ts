@@ -67,6 +67,15 @@ export type LayoutInline =
   | { kind: "break" }
   | { kind: "tab"; toPx?: number }
   | {
+      /** An OMML formula (m:oMath) the engine does not lay out yet: a fixed
+       *  unbreakable placeholder box carrying a short structural label (the
+       *  renderer draws it as a dashed slot, Word's empty-argument look). */
+      kind: "math";
+      label: string;
+      widthPx: number;
+      heightPx: number;
+    }
+  | {
       kind: "picture";
       widthPx: number;
       heightPx: number;

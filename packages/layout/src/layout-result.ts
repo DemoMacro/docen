@@ -48,7 +48,20 @@ export interface LaidOutTabItem {
   leader?: "dot" | "heavy" | "hyphen" | "middleDot" | "underscore";
 }
 
-export type LaidOutLineItem = LaidOutTextItem | LaidOutPictureItem | LaidOutTabItem;
+export interface LaidOutMathItem {
+  kind: "math";
+  inlineIndex: number;
+  xPx: number;
+  widthPx: number;
+  heightPx: number;
+  label: string;
+}
+
+export type LaidOutLineItem =
+  | LaidOutTextItem
+  | LaidOutPictureItem
+  | LaidOutTabItem
+  | LaidOutMathItem;
 
 export interface LaidOutLine {
   yPx: number;

@@ -43,6 +43,22 @@ function noteOrdinal(ordinals: Map<number, number>, id: number): number {
   return ordinal;
 }
 
+/** A short structural label for a formula placeholder box — the outermost
+ *  structure's glyph approximation (√□, □/□, ∑□), not a rendering of it. */
+function mathLabelOf(math: Rec): string {
+  const first = Array.isArray(math.children)
+    ? math.children.find((c) => isRecord(c) && !("text" in c))
+    : undefined;
+  if (!isRecord(first)) return "fx";
+  if ("fraction" in first) return "□/□";
+  if ("superScript" in first) return "□^□";
+  if ("subScript" in first) return "□_□";
+  if ("radical" in first) return "√□";
+  if ("sum" in first) return "∑□";
+  if ("integral" in first) return "∫□";
+  return "fx";
+}
+
 /** Inline content: text runs (rPr resolved over the paragraph default), hard
  *  breaks, pictures (paragraph-child or run-child slot), and the container
  *  children (hyperlink / insertion / deletion — their runs project with the
@@ -211,6 +227,20 @@ export function projectRuns(
       if (typeof child.text === "string") pushText(child.text, rPr);
       if (child.break != null) out.push({ kind: "break" });
       if (child.tab != null) out.push({ kind: "tab" });
+      if (isRecord(child.math)) {
+        // An OMML formula the engine does not lay out yet: a fixed
+        // placeholder slot with a structural label, styled as an inert
+        // annotation (Word shows empty argument slots until the math
+        // layout engine lands).
+        const style = { ...textStyleOf(rPr), italic: true, color: "#808080" };
+        const label = mathLabelOf(child.math);
+        out.push({
+          kind: "math",
+          label,
+          widthPx: label.length * style.sizePx * 0.7 + 8,
+          heightPx: style.sizePx * 1.6,
+        });
+      }
       if (isRecord(child.picture)) pushPicture(child.picture);
       if (isRecord(child.complexField)) pushField(child.complexField, rPr);
       if (isRecord(child.simpleField)) pushField(child.simpleField, rPr);

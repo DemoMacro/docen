@@ -2198,6 +2198,47 @@ class DocenDocument extends AddinHost<Editor> {
     editor.view.dispatch(editor.state.tr.insert(from, start).insert(to + 1, end));
   }
 
+  /** Insert → Equation — drop one placeholder template (fraction / script /
+   *  radical / sum / integral) at the caret as a math passthrough atom
+   *  (Word's Insert → Symbols → Equation gallery). Each argument is an empty
+   *  run — the □ slot; the radical's absent degree reads as the square root
+   *  (degHide follows). Round-trips verbatim through DOCX; the projection
+   *  paints the placeholder box until a math editor lands. */
+  #insertEquation(template: string): void {
+    const editor = this.editor;
+    if (!editor) return;
+    const slot = (): object => ({ text: "" });
+    const templates: Record<string, object> = {
+      fraction: { fraction: { numerator: [slot()], denominator: [slot()] } },
+      superScript: { superScript: { children: [slot()], superScript: [slot()] } },
+      radical: { radical: { children: [slot()] } },
+      sum: {
+        sum: {
+          children: [slot()],
+          subScript: [slot()],
+          superScript: [slot()],
+          properties: { limitLocation: "undOvr" },
+        },
+      },
+      integral: {
+        integral: {
+          children: [slot()],
+          subScript: [slot()],
+          superScript: [slot()],
+          properties: { limitLocation: "subSup" },
+        },
+      },
+    };
+    const shape = templates[template];
+    if (!shape) return;
+    const seed: JSONContent = {
+      type: "inlinePassthrough",
+      attrs: { data: JSON.stringify({ math: { children: [shape] } }) },
+    };
+    const node = editor.schema.nodeFromJSON(seed);
+    editor.view.dispatch(editor.state.tr.insert(editor.state.selection.from, node));
+  }
+
   /** Insert → Link: prompt for the address (pre-filled with the selection's
    *  existing link, Word's edit-an-existing-hyperlink behavior), then either
    *  mark the selected text or insert fresh display text. An empty address on
@@ -3190,6 +3231,12 @@ class DocenDocument extends AddinHost<Editor> {
       if (value === "endnote") this.#insertNote("endnote");
       else if (value === "next") this.#jumpNextNote();
       else this.#insertNote("footnote");
+      return;
+    }
+    // Equation — insert one placeholder math template at the caret (Word's
+    // Insert → Symbols → Equation gallery).
+    if (name === "equation") {
+      this.#insertEquation(String(value));
       return;
     }
     // Page Color — write/clear the doc-level w:background from the palette
