@@ -129,6 +129,9 @@ export function carrierDrafts(emf: Uint8Array, basis: Xform | undefined, depth: 
     const objectId = flags & 0xff;
     switch (rt) {
       case PLUS_OBJECT: {
+        // The version stamp check reads d+4..8 — a record that small cannot
+        // carry even the object header, so skip it.
+        if (rs < 16) break;
         const complete =
           (pv.getUint32(d + 4, true) & 0xffff0000) === (GDIPLUS_VERSION & 0xffff0000);
         const run = openRuns.get(objectId);
@@ -192,9 +195,12 @@ export function carrierDrafts(emf: Uint8Array, basis: Xform | undefined, depth: 
         // inlined ColorEmphasis ARGB sits at d+4 and the rect list follows.
         // 0x4000 marks compressed EmfPlusRectS rects (int16, 8 bytes).
         const fill = flags & 0x8000 ? argbHex(pv.getUint32(d + 4, true)) : lastBrush?.solid;
+        if (rs < 12) break;
         const n = pv.getUint32(d + 8, true);
         const step = flags & 0x4000 ? 8 : 16;
-        if (!n || n > 10_000 || d + 12 + n * step > d + rs) break;
+        // rs counts the record's 8-byte header — the rect list must end by
+        // d + rs - 8 (= po + rs), not d + rs.
+        if (!n || n > 10_000 || d + 12 + n * step > d + rs - 8) break;
         const eff = effOf(xf);
         for (let i = 0; i < n; i++) {
           const base = d + 12 + i * step;
@@ -218,10 +224,12 @@ export function carrierDrafts(emf: Uint8Array, basis: Xform | undefined, depth: 
         const pen = objects.get(objectId) as PenInfo | undefined;
         const color = pen?.color ?? lastPen?.color;
         if (!color) break;
+        if (rs < 12) break;
         const n = pv.getUint32(d + 4, true);
         const compressed = (flags & 0x8000) !== 0;
         const step = compressed ? 4 : 8;
-        if (!n || n > 10_000 || d + 8 + n * step > d + rs) break;
+        // rs includes the 8-byte header (same accounting as FILL_RECTS).
+        if (!n || n > 10_000 || d + 8 + n * step > d + rs - 8) break;
         const eff = effOf(xf);
         const cmds: PathCmds = [];
         for (let i = 0; i < n; i++) {
@@ -309,7 +317,8 @@ function drawNestedImage(
   drafts: Draft[],
 ): void {
   if (depth >= MAX_NESTING) return;
-  const end = Math.min(view.byteLength, d + rs);
+  // rs includes the 8-byte record header (same accounting as FILL_RECTS).
+  const end = Math.min(view.byteLength, d + rs - 8);
   const pts = d + 32;
   if (pts + 12 > end || view.getUint32(d + 28, true) !== 3) return;
   const srcX = view.getFloat32(d + 12, true);
@@ -353,7 +362,7 @@ function drawImagePoints(
   // The source rectangle is ALWAYS present and selects a sub-region of the
   // bitmap — Office sprite-sheets entire pages of art into one image object,
   // so ignoring it smears the sheet over every destination box.
-  const end = Math.min(buf.length, d + rs);
+  const end = Math.min(buf.length, d + rs - 8);
   const pts = d + 32;
   if (pts + 12 > end || view.getUint32(d + 28, true) !== 3) return;
   const srcX = view.getFloat32(d + 12, true);

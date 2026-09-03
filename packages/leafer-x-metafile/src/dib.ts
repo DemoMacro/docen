@@ -47,7 +47,13 @@ export function bltDibAt(
   if (fnLow !== 0x41 && fnLow !== 0x40 && fnLow !== 0x43) return undefined;
   if (recordEnd - recordStart < 26 + 40 + 8) return undefined;
   if (recordEnd - recordStart > 12 * 1024 * 1024) return undefined;
-  for (let probe = recordStart + 6; probe < recordStart + 60; probe += 2) {
+  // The header probe reads the 40-byte BITMAPINFOHEADER behind its position —
+  // a hit without the full header in the record cannot be a real DIB.
+  for (
+    let probe = recordStart + 6;
+    probe + 40 <= recordEnd && probe < recordStart + 60;
+    probe += 2
+  ) {
     if (view.getUint32(probe, true) !== 40) continue;
     const w = view.getInt32(probe + 4, true);
     const h = view.getInt32(probe + 8, true);
@@ -69,7 +75,10 @@ export function bltDibAt(
  *  pixel offset must skip the palette (biClrUsed entries, or 2^bpp, for
  *  palettized depths) — decoders honor it literally. */
 export function bmpDataUrl(bytes: Uint8Array, dibStart: number, dibLength: number): string {
-  const dibView = new DataView(bytes.buffer, bytes.byteOffset + dibStart, dibLength);
+  // Callers pass record-derived lengths; clamp to the buffer so a lying
+  // length degrades to a truncated BMP instead of a DataView RangeError.
+  const dibLen = Math.min(dibLength, bytes.byteLength - dibStart);
+  const dibView = new DataView(bytes.buffer, bytes.byteOffset + dibStart, dibLen);
   const bpp = dibView.getUint16(14, true);
   const clrUsed = dibView.getUint32(32, true);
   const paletteBytes = bpp <= 8 ? (clrUsed || 1 << bpp) * 4 : 0;

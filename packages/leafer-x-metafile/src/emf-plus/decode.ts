@@ -60,6 +60,7 @@ export function decodeObject(
   // Payloads start [TotalObjectSize][Version] with type fields at +8; a
   // re-assembled chunk run keeps the exporter's [chunkDataSize][objectTotal]
   // prefix in front of the stamp — locate the stamp to find the field origin.
+  if (end < 8) return undefined;
   let base = 8;
   if (
     view.getUint32(4, true) !== GDIPLUS_VERSION &&
@@ -67,6 +68,7 @@ export function decodeObject(
     view.getUint32(8, true) === GDIPLUS_VERSION
   )
     base = 12;
+  if (end < base + 8) return undefined;
   switch (type) {
     case OBJ_BRUSH: {
       const brushType = view.getUint32(base, true);
@@ -87,39 +89,49 @@ export function decodeObject(
     case OBJ_PEN: {
       // EmfPlusPen layout (corpus-verified): BrushId u32, PenDataFlags u32,
       // Unit u32, Width REAL — the trailing brush blob carries the color.
+      if (end < base + 16) return undefined;
       const flags = view.getUint32(base + 4, true);
       const width = view.getFloat32(base + 12, true);
       let cursor = base + 16;
+      // A truncated record ends the optional walk — the fields behind the
+      // missing bytes are unreadable, the width already decoded stands.
+      const past = (by: number): boolean => {
+        if (cursor + by > end) return true;
+        cursor += by;
+        return false;
+      };
       // OptionalData fields consumed in ascending PenDataFlags bit order
       // ([MS-EMFPLUS] §2.2.2.28): transform(6 REALs), start/end cap, join,
       // miter limit, dash style DWORD, dashed-line cap, dashed-line offset
       // REAL, then the length-prefixed dash array; caps/compound arrays and
       // non-center/alignment words beyond that are skipped unparsed.
-      if (flags & 0x0001) cursor += 24;
-      if (flags & 0x0002) cursor += 4;
-      if (flags & 0x0004) cursor += 4;
-      if (flags & 0x0008) cursor += 4;
-      if (flags & 0x0010) cursor += 4;
+      if (flags & 0x0001 && past(24)) return { width };
+      if (flags & 0x0002 && past(4)) return { width };
+      if (flags & 0x0004 && past(4)) return { width };
+      if (flags & 0x0008 && past(4)) return { width };
+      if (flags & 0x0010 && past(4)) return { width };
       let style: number | undefined;
       if (flags & 0x0020) {
-        style = view.getUint32(cursor, true);
-        cursor += 4;
+        if (past(4)) return { width };
+        style = view.getUint32(cursor - 4, true);
       }
-      if (flags & 0x0040) cursor += 4;
-      if (flags & 0x0080) cursor += 4;
+      if (flags & 0x0040 && past(4)) return { width };
+      if (flags & 0x0080 && past(4)) return { width };
       let dashes: number[] | undefined;
       if (flags & 0x0100) {
-        const n = view.getUint32(cursor, true);
-        if (n > 0 && n <= 16 && cursor + 4 + n * 4 <= end) {
+        if (past(4)) return { width };
+        const n = view.getUint32(cursor - 4, true);
+        if (n > 0 && n <= 16 && cursor + n * 4 <= end) {
           dashes = [];
-          for (let i = 0; i < n; i++) dashes.push(view.getFloat32(cursor + 4 + i * 4, true));
+          for (let i = 0; i < n; i++) dashes.push(view.getFloat32(cursor + i * 4, true));
         }
-        cursor += 4 + Math.min(n ?? 0, 16) * 4;
+        cursor += Math.min(n, 16) * 4;
       }
-      if (flags & 0x0200) cursor += 4;
+      if (flags & 0x0200 && past(4)) return { width };
       if (flags & 0x0400) {
-        const n = view.getUint32(cursor, true);
-        cursor += 4 + Math.min(n, 64) * 4;
+        if (past(4)) return { width };
+        const n = view.getUint32(cursor - 4, true);
+        cursor += Math.min(n, 64) * 4;
       }
       const dash =
         dashes != null ? dashTokenFor(dashes) : DASH_STYLE_TOKENS[style ?? 0] || undefined;

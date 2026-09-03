@@ -72,6 +72,34 @@ interface GdiFont {
   face?: string;
 }
 
+/** Minimum record size (bytes) each handled EMR actually reads through its
+ *  fixed offsets — a record smaller than its own layout is a truncated or
+ *  lying stream; stop before the reads below run past it (the WMF player's
+ *  `end - p >= n` discipline). Count/offset fields further in (point lists,
+ *  DIB blobs) are re-validated per record against `size`. */
+const EMR_MIN_SIZE: Partial<Record<number, number>> = {
+  [EMR_SETTEXTCOLOR]: 12,
+  [EMR_SETTEXTALIGN]: 12,
+  [EMR_MOVE_TO_EX]: 16,
+  [EMR_LINE_TO]: 16,
+  [EMR_SELECT_OBJECT]: 12,
+  [EMR_DELETE_OBJECT]: 12,
+  [EMR_CREATE_BRUSH_INDIRECT]: 20,
+  [EMR_CREATE_PEN]: 28,
+  [EMR_EXT_CREATE_PEN]: 44,
+  [EMR_EXT_CREATE_FONT]: 32,
+  [EMR_EXT_TEXT_OUT_A]: 52,
+  [EMR_EXT_TEXT_OUT_W]: 52,
+  [EMR_POLYLINE16]: 28,
+  [EMR_POLYGON16]: 28,
+  [EMR_POLYBEZIERTO16]: 28,
+  [EMR_POLYLINETO16]: 28,
+  [EMR_SET_WORLD_TRANSFORM]: 32,
+  [EMR_MODIFY_WORLD_TRANSFORM]: 36,
+  [EMR_BITBLT]: 100,
+  [EMR_STRETCHDIBITS]: 80,
+};
+
 /** Replay the carrier's GDI records into the same display space the EMF+ drafts
  *  occupy: its text chain (ExtTextOutW runs, the dual-layer's real text) plus
  *  its polyline strokes (the row underlines of list pages — no EMF+ equivalent
@@ -135,6 +163,8 @@ export function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): Dr
     const type = view.getUint32(eo, true);
     const size = view.getUint32(eo + 4, true);
     if (size < 8 || eo + size > emf.length) break;
+    const min = EMR_MIN_SIZE[type];
+    if (min != null && size < min) break;
     switch (type) {
       case EMR_EXT_CREATE_FONT: {
         // EXTCREATEFONTINDIRECTW: object index dword + LOGFONTW whose face
@@ -243,7 +273,7 @@ export function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): Dr
         const cbBmi = view.getUint32(eo + (isDib ? 52 : 88), true);
         const offBits = view.getUint32(eo + (isDib ? 56 : 92), true);
         const cbBits = view.getUint32(eo + (isDib ? 60 : 96), true);
-        if (!cbBmi || cbBmi > 1_000_000 || !cbBits || cbBits > 12_000_000) break;
+        if (!cbBmi || cbBmi < 40 || cbBmi > 1_000_000 || !cbBits || cbBits > 12_000_000) break;
         if (offBmi < 8 || offBits < offBmi + cbBmi || eo + offBits + cbBits > eo + size) break;
         const bmiW = view.getInt32(eo + offBmi + 4, true);
         const bmiH = Math.abs(view.getInt32(eo + offBmi + 8, true));

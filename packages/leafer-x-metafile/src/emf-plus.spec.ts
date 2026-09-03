@@ -5,6 +5,7 @@
 import { describe, expect, it } from "vitest";
 
 import { embeddedEmfStream, emfPlusMembers } from "./emf-plus";
+import { gdiTextDrafts } from "./emf-plus/gdi";
 import type { MetafileMember } from "./member";
 import { dualModeWmf, emfCarrier, emfPlusWmf, emrEmfPlusComment, epRecord } from "./test-util";
 
@@ -1264,5 +1265,55 @@ describe("emfPlusMembers", () => {
       );
       expect(filled).toBeDefined();
     });
+  });
+});
+
+describe("truncated records", () => {
+  // A record that declares more payload than it carries stops the walk — or
+  // degrades that record — instead of throwing on the fixed-offset reads.
+  it("stops the GDI walk on a record smaller than its own layout", () => {
+    // EMR_CREATE_PEN (38) declaring its 28-byte body but carrying header only.
+    const stub = new Uint8Array(8);
+    const v = new DataView(stub.buffer);
+    v.setUint32(0, 38, true);
+    v.setUint32(4, 8, true);
+    expect(() => gdiTextDrafts(emfCarrier([stub]))).not.toThrow();
+  });
+
+  it("keeps the replay alive on a truncated FillRects rect list", () => {
+    // count = 3 but only one compressed rect fits before the record ends.
+    const body = new Uint8Array(12 + 8);
+    const v = new DataView(body.buffer);
+    v.setUint32(4, 0xff404040, true); // ColorEmphasis ARGB
+    v.setUint32(8, 3, true);
+    v.setInt16(12, 0, true);
+    v.setInt16(14, 0, true);
+    v.setInt16(16, 10, true);
+    v.setInt16(18, 10, true);
+    const wmf = dualModeWmf(
+      emfCarrier([emrEmfPlusComment([epHeader(), epRecord(FILL_RECTS, 0xc000, body), epEof()])]),
+    );
+    expect(() => emfPlusMembers(wmf, 100, 100)).not.toThrow();
+  });
+
+  it("degrades a truncated pen object to nothing instead of throwing", () => {
+    // PenDataFlags claims the 24-byte transform (0x0001) but the payload ends
+    // right behind the header words — no width, no color, no throw.
+    const body = new Uint8Array(16);
+    const v = new DataView(body.buffer);
+    v.setUint32(0, body.length, true);
+    v.setUint32(4, VERSION, true);
+    v.setUint32(8, 0, true); // brush id
+    v.setUint32(12, 0x00000001, true); // flags: transform present, nothing behind
+    const wmf = dualModeWmf(
+      emfCarrier([
+        emrEmfPlusComment([
+          epHeader(),
+          epRecord(OBJECT, 2 | (2 << 8), body), // objectId 2, type pen
+          epEof(),
+        ]),
+      ]),
+    );
+    expect(() => emfPlusMembers(wmf, 100, 100)).not.toThrow();
   });
 });
