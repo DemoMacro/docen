@@ -109,6 +109,12 @@ import zoomIn from "@fluentui/svg-icons/icons/zoom_in_24_regular.svg?raw";
 const symbolOmega =
   '<svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M4 18h4s0-1 0-3c0-2.5 0-6 4-6s4 3.5 4 6c0 2 0 3 0 3h4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
+// The Fluent set has no watermark glyph either — Word's Watermark command
+// paints slanted text across the page, drawn here as two rotated text bars,
+// the lighter one carrying the translucency a watermark reads as.
+const watermarkIcon =
+  '<svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><g fill="none" stroke="currentColor" stroke-linecap="round" transform="rotate(-45 12 12)"><path d="M3.5 10.25h17" stroke-width="1.5"/><path d="M3.5 14.25h12" stroke-width="1.5" opacity=".55"/></g></svg>';
+
 /**
  * Ribbon icons sourced from `@fluentui/svg-icons` (Fluent System Icons — the
  * same set Office uses). Each entry is the raw SVG markup, injected into a
@@ -204,6 +210,7 @@ const RIBBON_ICONS: Record<string, string> = {
   "number-symbol": numberSymbol,
   // Design
   theme: colorBackground,
+  watermark: watermarkIcon,
   "page-color": colorFill,
   "page-border": borderAll,
   // Layout
