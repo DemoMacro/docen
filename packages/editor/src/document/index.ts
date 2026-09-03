@@ -575,6 +575,9 @@ class DocenDocument extends AddinHost<Editor> {
     if (action === "find-next") findNext(editor.state, editor.view.dispatch);
     else if (action === "replace-next") replaceNext(editor.state, editor.view.dispatch);
     else if (action === "replace-all") replaceAll(editor.state, editor.view.dispatch);
+    if (action === "find-next" || action === "replace-next") {
+      this.#bridge?.scrollIntoView(editor.state.selection.from);
+    }
   };
 
   /** Set a text selection (or a range) on the viewless editor. Same runtime
@@ -2797,21 +2800,29 @@ class DocenDocument extends AddinHost<Editor> {
       value: "keep-text-only",
     });
     items.push({ text: "-" });
-    if (inSelection) {
-      if (onLink) {
-        items.push({ text: t("context.open-link", this), event: "open-link" });
-        items.push({ text: t("context.copy-link", this), event: "copy-link" });
-        items.push({ text: t("context.edit-link", this), event: "link" });
-        items.push({ text: t("context.unlink", this), event: "unset-link" });
-      } else {
-        items.push({ text: t("context.link", this), event: "link" });
-      }
+    if (onLink) {
+      items.push({ text: t("context.open-link", this), event: "open-link" });
+      items.push({ text: t("context.copy-link", this), event: "copy-link" });
+      items.push({ text: t("context.edit-link", this), event: "link" });
+      items.push({ text: t("context.unlink", this), event: "unset-link" });
+      items.push({ text: "-" });
+      items.push({ text: t("context.comment", this), event: "new-comment" });
+      items.push({ text: "-" });
+    } else if (inSelection) {
+      items.push({ text: t("context.link", this), event: "link" });
       items.push({ text: t("context.comment", this), event: "new-comment" });
       items.push({ text: "-" });
     }
     items.push({ text: t("context.select-all", this), event: "select" });
     if (inTable) {
       items.push({ text: "-" });
+      items.push({ text: t("ribbon.cmd.insert-row-above", this), event: "insert-row-above" });
+      items.push({ text: t("ribbon.cmd.insert-row-below", this), event: "insert-row-below" });
+      items.push({ text: t("ribbon.cmd.insert-column-left", this), event: "insert-column-left" });
+      items.push({ text: t("ribbon.cmd.insert-column-right", this), event: "insert-column-right" });
+      items.push({ text: "-" });
+      items.push({ text: t("ribbon.cmd.delete-row", this), event: "delete-row" });
+      items.push({ text: t("ribbon.cmd.delete-column", this), event: "delete-column" });
       items.push({ text: t("context.delete-table", this), event: "delete-table" });
     }
     menu.setAttribute("items", JSON.stringify(items));
@@ -3734,6 +3745,9 @@ class DocenDocument extends AddinHost<Editor> {
     const cmd = commands[name];
     if (typeof cmd === "function") {
       cmd(value);
+      if (name === "next-change" || name === "previous-change") {
+        this.#bridge?.scrollIntoView(target.state.selection.from);
+      }
       // The comboboxes keep focus to filter their lists — after a pick, hand
       // the keyboard back to the document (buttons never take it: their
       // mousedown preventDefaults).

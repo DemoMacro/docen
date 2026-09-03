@@ -351,3 +351,26 @@ describe("CaretMap tolerant zip", () => {
     expect(map.caretRect(12)?.yPx).toBe(150);
   });
 });
+
+describe("CaretMap vertical stepping", () => {
+  it("steps within the same paragraph and across paragraph boundaries", () => {
+    const { doc } = buildDoc(["hello", "world"]);
+    const map = new CaretMap(
+      pageOf([
+        fakePara([{ text: "hello", xPx: 0, yPx: 0, maxWidthPx: 100 }]),
+        fakePara([{ text: "world", xPx: 0, yPx: 50, maxWidthPx: 100 }]),
+      ]) as never,
+      doc,
+      () => ({ contentLeftPx: 0, contentTopPx: 0 }),
+    );
+    // In doc:
+    // para 1: pos 1 ("h") to pos 6
+    // para 2: pos 8 ("w") to pos 13
+    // posVertical from pos 2 ('e') downwards: crosses to para 2 at same col ('o' -> pos 9)
+    const down = map.posVertical(2, 1);
+    expect(down).toBe(9);
+    // posVertical from pos 9 ('o') upwards: crosses back to para 1 at pos 2 ('e')
+    const up = map.posVertical(9, -1);
+    expect(up).toBe(2);
+  });
+});
