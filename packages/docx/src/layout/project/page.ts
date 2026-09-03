@@ -304,19 +304,21 @@ export function projectPageBorders(properties: unknown): ProjectedPageBorders | 
 }
 
 /** Project a section's w:lnNumType for painting: the count stride, the
- *  restart number, what resets the counter, and the margin gap
- *  (w:distance twips → px). */
+ *  restart number, what resets the counter, and the margin gap (w:distance
+ *  twips → px; omitted → null, the auto placement the painter centers in the
+ *  left margin — Word's behavior when w:distance is absent). */
 export function projectLineNumbers(properties: unknown): ProjectedLineNumbers | undefined {
   const raw =
     isRecord(properties) && isRecord(properties.lineNumberType)
       ? (properties.lineNumberType as Rec)
       : null;
   if (!raw) return undefined;
+  const distance = measureTwip(raw.distance);
   return {
     countBy: num(raw.countBy) ?? 1,
     start: num(raw.start) ?? 1,
     restart: raw.restart === "continuous" || raw.restart === "newSection" ? raw.restart : "newPage",
-    distancePx: twipToPx(measureTwip(raw.distance) ?? 0),
+    distancePx: distance == null ? null : twipToPx(distance),
   };
 }
 

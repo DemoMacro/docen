@@ -85,8 +85,10 @@ export interface ProjectedLineNumbers {
   /** What resets the counter: every page (the OOXML default), every section,
    *  or nothing (continuous through the document). */
   restart: "newPage" | "newSection" | "continuous";
-  /** Gap between the text margin and the number's right edge, in px. */
-  distancePx: number;
+  /** Gap between the text margin and the number's right edge, in px. Null =
+   *  w:distance omitted — the OOXML auto placement (the number centers in the
+   *  left margin band, where Word puts it). */
+  distancePx: number | null;
 }
 
 /** Section columns projected for the flow (w:cols): the page's content box

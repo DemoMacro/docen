@@ -79,17 +79,26 @@ export function paintColumnSeparators(tree: IGroup, ctx: PaintContext): void {
 /** Paint this page's line numbers (w:lnNumType) in the left margin — each
  *  number's right edge sits `distancePx` left of the text margin and its box
  *  top aligns with the counted line's text box (same strut size, so the
- *  baselines agree). The marks arrive pre-counted from the stage; painting
- *  never measures beyond the label box. */
+ *  baselines agree). Auto placement (w:distance omitted, `distancePx: null` —
+ *  the OOXML default) keeps a small fixed gap from the text margin — about
+ *  the midpoint of the stage's crop-mark leg, where the number reads as
+ *  beside the text, not stranded mid-margin.
+ *  The marks arrive pre-counted from the stage; painting never measures
+ *  beyond the label box. */
 export function paintLineNumbers(tree: IGroup, ctx: PaintContext): void {
   const ln = ctx.lineNumbers;
   if (!ln || ln.marks.length === 0) return;
   const widest = Math.max(...ln.marks.map((m) => m.sizePx));
   const boxWidth = String(ln.marks[ln.marks.length - 1]!.num).length * widest * 0.62;
+  const { distancePx } = ln.config;
+  const labelX =
+    distancePx != null
+      ? ctx.flow.contentLeftPx - distancePx - boxWidth
+      : Math.max(0, ctx.flow.contentLeftPx - 12 - boxWidth);
   for (const mark of ln.marks) {
     tree.add(
       new Text({
-        x: ctx.flow.contentLeftPx - ln.config.distancePx - boxWidth,
+        x: labelX,
         y: ctx.flow.contentTopPx + mark.yPx,
         width: boxWidth,
         height: mark.sizePx * 1.4,
