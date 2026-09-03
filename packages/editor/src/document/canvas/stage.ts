@@ -34,7 +34,7 @@ import type {
  */
 import type { FlowPage, FontMetrics, LaidOutStackItem } from "@docen/layout";
 import { stackBlocks, TextMeasurer } from "@docen/layout";
-import { App, Group, Line, Rect, Text, type IGroup } from "leafer-ui";
+import { App, Debug, Group, Line, Rect, Text, type IGroup } from "leafer-ui";
 
 import { computeLineNumbers } from "./line-numbers";
 
@@ -289,6 +289,17 @@ export class CanvasStage {
     for (const [index, slot] of this.slots.entries()) {
       if (slot.app) this.repaint(slot.app, index);
     }
+  }
+
+  /** Leafer's engine debug flags (element wireframes / hit areas / repaint
+   *  regions + engine logs) — global statics on leafer-ui, so one call covers
+   *  every live page App. `mode`: "bounds" | "hit" | "repaint" | "on";
+   *  anything else clears. */
+  setDebug(mode: string | null | undefined): void {
+    const on = mode === "on" || mode === "bounds" || mode === "hit" || mode === "repaint";
+    Debug.enable = on;
+    Debug.showBounds = mode === "bounds" ? true : mode === "hit" ? "hit" : false;
+    Debug.showRepaint = mode === "repaint";
   }
 
   /** Ruler visibility (Word's View → Ruler). The rulers are frame-level DOM

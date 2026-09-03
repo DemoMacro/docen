@@ -184,6 +184,8 @@ class DocenDocument extends AddinHost<Editor> {
   @attr styles?: string;
   @attr({ attribute: "addins" }) addinsAttr?: string;
   @attr theme?: string;
+  /** Leafer engine debug overlay — "bounds" | "hit" | "repaint" | "on". */
+  @attr debug?: string;
 
   #bridge?: EditBridge;
   #stage?: CanvasStage;
@@ -295,6 +297,10 @@ class DocenDocument extends AddinHost<Editor> {
 
   themeChanged(): void {
     this.#applyThemeAttr(this.theme ?? "");
+  }
+
+  debugChanged(): void {
+    this.#stage?.setDebug(this.debug);
   }
 
   /** Esc fallback: restore the ribbon to "always shown" after the browser leaves fullscreen. */
@@ -1311,6 +1317,8 @@ class DocenDocument extends AddinHost<Editor> {
       sectionOfPage: run.sectionOfPage,
       background: run.background,
     });
+    // A debug attribute stamped before the first render lands here.
+    if (this.debug) this.#stage.setDebug(this.debug);
     this.#stage.setMarksLabels({
       pageBreak: t("marks.pageBreak", this),
       sectionBreak: t("marks.sectionBreak", this),
