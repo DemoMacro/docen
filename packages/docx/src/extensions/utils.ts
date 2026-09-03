@@ -310,7 +310,7 @@ const THEME_EAST_ASIA_FONTS: Record<string, Record<string, string>> = {
  *  *Theme tokens map to the Office default theme fonts (office-open leaves them
  *  unresolved). `eastAsiaLang` picks the CJK font for *eastAsiaTheme (zh-CN
  *  default). Returns null only when the value is empty/non-font. */
-function resolveRFonts(
+export function resolveRFonts(
   font: unknown,
   eastAsiaLang = "zh-CN",
 ): { ascii: string | null; eastAsia: string | null } | null {

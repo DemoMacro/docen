@@ -5,6 +5,7 @@
 import type { LayoutParagraph, LayoutTextStyle } from "@docen/layout";
 import type { StylesOptions } from "@office-open/docx";
 
+import { resolveRFonts } from "../../extensions/utils";
 import {
   defaultParagraphStyleId,
   indexParagraphStyles,
@@ -70,13 +71,17 @@ export function fontAttr(v: unknown): FontAttr {
 
 /** Resolve a font pick against its fallback: a record with no usable slot
  *  (an empty rFonts shell from a round-tripped run) counts as unspecified,
- *  so the chain's face survives instead of shadowing it with empty slots. */
+ *  so the chain's face survives instead of shadowing it with empty slots.
+ *  Theme-only rFonts (Word's default: minorHAnsi/minorEastAsia with no
+ *  literal faces) resolve through the Office default theme table — without
+ *  this the canvas falls back to its serif default and every width drifts. */
 export function toFamily(font: FontAttr, def: FontAttr): LayoutTextStyle["family"] | undefined {
   const f = font ?? def;
   if (typeof f === "string") return f || undefined;
-  const latin = str(f?.ascii) ?? str(f?.hAnsi);
-  const eastAsia = str(f?.eastAsia);
-  return latin || eastAsia ? { latin, eastAsia } : undefined;
+  if (!isRecord(f)) return undefined;
+  const { ascii, eastAsia } = resolveRFonts(f)!;
+  const latin = ascii ?? str(f.hAnsi) ?? undefined;
+  return latin || eastAsia ? { latin, eastAsia: eastAsia ?? undefined } : undefined;
 }
 
 export interface RunStyle {
