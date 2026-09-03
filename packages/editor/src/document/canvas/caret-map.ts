@@ -205,9 +205,13 @@ export class CaretMap {
   private readonly lines: LineEntry[] = [];
   /** Cell grid boxes keyed by the cell's PM position — the cell selection's
    *  whole-slot highlight, and the geometry the selection bars resolve a
-   *  clicked column/row back to a PM cell from. Cells whose first paragraph
-   *  never zipped (render-only copies, nested-table openings) stay unmapped. */
-  readonly cellBoxes = new Map<number, SelectionRect>();
+   *  clicked column/row back to a PM cell from. One cell may paint in several
+   *  places: a repeated tblHeader band's cells ARE the original band's cells
+   *  (splitLaid's band copies keep the row references), so every placement
+   *  keeps its box and a full-table selection highlights them all — Word's
+   *  repeated header lights up on every continuation page too. Cells whose
+   *  first paragraph never zipped (nested-table openings) stay unmapped. */
+  readonly cellBoxes = new Map<number, SelectionRect[]>();
   /** Every placed table's extent + column/row edges — the selection bars. */
   readonly tableZones: TableZone[] = [];
 
@@ -392,15 +396,17 @@ export class CaretMap {
     for (const p of this.paras) innerOf.set(p.para, p.innerPos);
     for (const draft of boxDrafts) {
       const inner = draft.head ? innerOf.get(draft.head) : undefined;
-      if (inner != null) {
-        this.cellBoxes.set(inner - 2, {
-          page: draft.page,
-          xPx: draft.xPx,
-          yPx: draft.yPx,
-          widthPx: draft.widthPx,
-          heightPx: draft.heightPx,
-        });
-      }
+      if (inner == null) continue;
+      const box: SelectionRect = {
+        page: draft.page,
+        xPx: draft.xPx,
+        yPx: draft.yPx,
+        widthPx: draft.widthPx,
+        heightPx: draft.heightPx,
+      };
+      const boxes = this.cellBoxes.get(inner - 2);
+      if (boxes) boxes.push(box);
+      else this.cellBoxes.set(inner - 2, [box]);
     }
   }
 
@@ -639,11 +645,22 @@ export class CaretMap {
               Math.max(nextFirst.yPx, boxBottom)
             : boxBottom;
         if (empty) {
+          // An atom line (a picture) paints no characters but still owns a
+          // box — highlight the items' span; a textless paragraph keeps the
+          // caret-width stub.
+          let first: number | null = null;
+          let last = 0;
+          for (const item of line.line.items) {
+            if (item.kind === "text") continue;
+            if (first == null || item.xPx < first) first = item.xPx;
+            last = Math.max(last, item.xPx + item.widthPx);
+          }
           rects.push({
             page: line.page,
-            xPx: line.xPx,
+            xPx: line.xPx + (first ?? 0),
             yPx: line.yPx,
-            widthPx: Math.min(8, line.line.maxWidthPx ?? 8),
+            widthPx:
+              first == null ? Math.min(8, line.line.maxWidthPx ?? 8) : Math.max(last - first, 2),
             heightPx: bottom - line.yPx,
           });
           continue;
@@ -682,15 +699,15 @@ export class CaretMap {
   }
 
   /** A cell selection's highlight — every selected cell as one full grid box
-   *  (Word highlights the cell, insets included, not the crossed text lines).
-   *  Cells the zip never paired stay unhighlighted. */
+   *  per placement (Word highlights the cell, insets included, and a repeated
+   *  tblHeader band lights up on every continuation page too). Cells the zip
+   *  never paired stay unhighlighted. */
   cellSelectionRects(selection: {
     forEachCell(f: (node: PmNode, pos: number) => void): void;
   }): SelectionRect[] {
     const rects: SelectionRect[] = [];
     selection.forEachCell((_node, pos) => {
-      const box = this.cellBoxes.get(pos);
-      if (box) rects.push(box);
+      for (const box of this.cellBoxes.get(pos) ?? []) rects.push(box);
     });
     return rects;
   }

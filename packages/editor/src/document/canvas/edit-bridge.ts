@@ -697,8 +697,11 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     zIndex: "7",
     cursor: "pointer",
   } satisfies Partial<CSSStyleDeclaration>);
+  // Two faces: the strip arrow (columns/rows) and Word's boxed-cross grid
+  // square (the select-all grip) — placeGrip shows exactly one per mode.
   gripEl.innerHTML =
-    '<svg width="12" height="12" viewBox="0 0 12 12"><path d="M1 6h7M5 2l4 4-4 4z" fill="#454545"/></svg>';
+    '<svg width="12" height="12" viewBox="0 0 12 12"><path d="M1 6h7M5 2l4 4-4 4z" fill="#454545"/></svg>' +
+    '<svg width="12" height="12" viewBox="0 0 12 12"><rect x="0.5" y="0.5" width="11" height="11" fill="#ffffff" stroke="#7f7f7f"/><path d="M6 1v10M1 6h10" stroke="#7f7f7f"/></svg>';
   opts.host.append(gripEl);
 
   const placeGrip = (): void => {
@@ -736,15 +739,16 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     gripEl.style.height = `${height}px`;
     // The column arrow is the row arrow rotated to face down, centered in
     // its strip; the corner square (the select grip and its always-on hover
-    // preview alike) drops the arrow and paints its own face — the strip
-    // modes must stay faceless or the square's background would smear into
-    // a bar across the whole strip.
-    gripEl.firstElementChild?.setAttribute(
+    // preview alike) swaps the arrow for the boxed-cross grid face — the
+    // strip modes must stay square-less or the grid would smear into a bar
+    // across the whole strip.
+    const [arrow, grid] = Array.from(gripEl.children) as SVGElement[];
+    arrow?.setAttribute(
       "style",
       rotate ? `display:block;margin:auto;transform:${rotate}` : "display:none",
     );
-    gripEl.style.background = rotate ? "transparent" : "#454545";
-    gripEl.style.borderRadius = rotate ? "0" : "2px";
+    grid?.setAttribute("style", rotate ? "display:none" : "display:block");
+    gripEl.style.background = "transparent";
     gripEl.style.display = "block";
   };
 
@@ -812,7 +816,10 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     // the strip rather than filling it: a strip swallowed by a merged cell
     // must still grip (the select commands widen to the covering span).
     let anchorPos = -1;
-    for (const [pos, box] of s.map.cellBoxes) {
+    for (const [pos, boxes] of s.map.cellBoxes) {
+      // A cell repeated across pieces keeps one box per placement — the
+      // first (the original placement) is the geometry the strips test.
+      const box = boxes[0]!;
       if (box.page !== zone.page) continue;
       const inner =
         kind === "col"
@@ -1355,15 +1362,35 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     // Viewing mode: caret moves and selection stay live (the READONLY_LIVE
     // ribbon set's keyboard counterpart), but nothing may mutate the doc.
     const editable = active().editor.isEditable;
-    // A cell selection's delete empties the selected cells (Word) — the
-    // grid itself survives. The default join path would tear cell content
-    // across the range, so this must run before it.
+    // A cell selection's delete: Word removes the table node itself when the
+    // selection covers EVERY cell of it, and empties the selected cells
+    // otherwise (the grid survives). The default join path would tear cell
+    // content across the range, so this must run before it.
     if (editable && (event.key === "Backspace" || event.key === "Delete")) {
       const sel = active().editor.state.selection;
       if (sel instanceof CellSelection) {
         event.preventDefault();
-        active().editor.commands.command(({ tr, dispatch }) => {
-          if (dispatch) sel.replace(tr as never);
+        active().editor.commands.command(({ state, dispatch }) => {
+          if (!dispatch) return true;
+          // The host table through the anchor cell (resolved at its start —
+          // the walk lands in the row layer, so depth-1 is the table).
+          const $a = state.doc.resolve(sel.anchorCell);
+          const table = $a.node($a.depth - 1);
+          let total = 0;
+          table.forEach((row) => {
+            total += row.childCount;
+          });
+          let picked = 0;
+          sel.forEachCell(() => {
+            picked += 1;
+          });
+          if (total > 0 && picked >= total) {
+            dispatch(
+              state.tr.delete($a.before($a.depth - 1), $a.before($a.depth - 1) + table.nodeSize),
+            );
+          } else {
+            sel.replace(state.tr as never);
+          }
           return true;
         });
         return;
