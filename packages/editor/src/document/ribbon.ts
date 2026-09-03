@@ -1395,3 +1395,35 @@ export function tableContextTabs(scope?: Element): RibbonTab[] {
     },
   ];
 }
+
+/** Word's Header & Footer Tools — contextual tab when editing a header or footer story. */
+export function headerFooterContextTab(_scope?: Element): RibbonTab {
+  return {
+    id: "header-footer-tab",
+    label: tab("header-footer-tools"),
+    contextual: true,
+    groups: [
+      group("navigation", [
+        btn("header", "goto-header", { size: "large" }),
+        btn("footer", "goto-footer", { size: "large" }),
+      ]),
+      group("options", [
+        col([
+          {
+            type: "checkbox",
+            event: "header-option",
+            value: "title-page",
+            label: opt("title-page"),
+          },
+          {
+            type: "checkbox",
+            event: "header-option",
+            value: "odd-even",
+            label: opt("odd-even"),
+          },
+        ]),
+      ]),
+      group("close", [btn("close", "close-header-footer", { size: "large" })]),
+    ],
+  };
+}

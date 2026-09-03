@@ -162,9 +162,11 @@ export function paintParagraph(
     // textAlign "both-letter" spreads the slack as uniform letter spacing
     // inside that interval — Word's CJK justification model.
     const rights = justifiedIntervals(line);
+    let deltaX = 0;
     for (const [itemIndex, item] of line.items.entries()) {
       const inline: LayoutInline | undefined = para.inline[item.inlineIndex];
       if (!inline) continue;
+      const itemX = lineX + item.xPx + deltaX;
       if (item.kind === "text" && inline.kind === "text") {
         const family = familyOf(inline.style, item.text);
         const intervalPx = rights ? rights[itemIndex]! - item.xPx : undefined;
@@ -174,6 +176,21 @@ export function paintParagraph(
         // stretches with, run at negative slack (Leafer accepts it).
         const squeezePx =
           intervalPx == null && line.advanceScale != null ? item.widthPx : undefined;
+
+        // A page-number field paints its live value; the measured `text` was
+        // only a placeholder.
+        const label =
+          inline.field === "page"
+            ? String(ctx.pageIndex + 1)
+            : inline.field === "numPages"
+              ? String(ctx.pageCount)
+              : item.text;
+        const isDynamicField = inline.field === "page" || inline.field === "numPages";
+        const extraFieldWidth =
+          isDynamicField && label.length > item.text.length
+            ? (label.length - item.text.length) * (item.widthPx / Math.max(1, item.text.length))
+            : 0;
+
         // Character highlight (w:highlight): the token's palette color fills
         // the run's box beneath the glyphs (Word paints it opaque). A run
         // shading (w:shd) fills the same box with an arbitrary color when no
@@ -181,12 +198,13 @@ export function paintParagraph(
         const hl = inline.style.highlight ? HIGHLIGHT_COLOR[inline.style.highlight] : undefined;
         const runFill =
           hl ?? (inline.style.shadingFill ? `#${inline.style.shadingFill}` : undefined);
+        const curW = (intervalPx ?? item.widthPx) + (extraFieldWidth > 0 ? extraFieldWidth : 0);
         if (runFill) {
           tree.add(
             new Rect({
-              x: lineX + item.xPx,
+              x: itemX,
               y: lineY + pad,
-              width: intervalPx ?? item.widthPx,
+              width: curW,
               height: Math.max(1, line.naturalPx || line.heightPx),
               fill: runFill,
             }),
@@ -198,24 +216,16 @@ export function paintParagraph(
         if (inline.commentIds?.length) {
           tree.add(
             new Rect({
-              x: lineX + item.xPx,
+              x: itemX,
               y: lineY + pad,
-              width: intervalPx ?? item.widthPx,
+              width: curW,
               height: Math.max(1, line.naturalPx || line.heightPx),
               fill: "rgba(255, 222, 89, 0.45)",
             }),
           );
         }
-        // A page-number field paints its live value; the measured `text` was
-        // only a placeholder.
-        const label =
-          inline.field === "page"
-            ? String(ctx.pageIndex + 1)
-            : inline.field === "numPages"
-              ? String(ctx.pageCount)
-              : item.text;
         const textEl = new Text({
-          x: lineX + item.xPx,
+          x: itemX,
           // A raised/lowered run (w:vertAlign — the footnote reference) paints
           // at the scaled size on a shifted baseline; the scaling itself is
           // the shared vertAlignedSizePx so measure and paint agree.
@@ -269,6 +279,7 @@ export function paintParagraph(
             : undefined,
         });
         tree.add(textEl);
+        deltaX += extraFieldWidth;
       } else if (item.kind === "picture" && inline.kind === "picture") {
         // An inline picture is a grab target just like a floating drawing —
         // without a hit box a click lands behind the art (Word selects the
@@ -276,7 +287,7 @@ export function paintParagraph(
         // re-finds the same k-th non-floating image node.
         ctx.hitBoxes?.push({
           page: ctx.pageIndex,
-          x: lineX + item.xPx,
+          x: itemX,
           y: lineY + pad,
           width: item.widthPx,
           height: item.heightPx,

@@ -100,6 +100,7 @@ import {
   buildContextualTab,
   DEFAULT_RIBBON_TAB,
   formatMeasureTwip,
+  headerFooterContextTab,
   renderRibbonFromSchema,
   ribbonActions,
   ribbonTabs,
@@ -874,6 +875,7 @@ class DocenDocument extends AddinHost<Editor> {
             kind,
             label: t(kind === "header" ? "story.header" : "story.footer", this),
           });
+          this.#showHeaderFooterContextTab();
         },
         onDoc: (kind, slot, json) => this.#renderStoryFurniture(kind, slot, json),
         exit: ({ kind, slot, json, dirty }) => this.#exitStory(kind, slot, json, dirty),
@@ -995,13 +997,34 @@ class DocenDocument extends AddinHost<Editor> {
     const stage = this.#stage;
     if (!bridge || !stage || this.#storyKind !== kind) return;
     const raw = bridge.editor.getJSON();
-    // getJSON()'s attrs object IS the live PM attrs (Node.toJSON carries it by
-    // reference) — patch a shallow copy or the editor state would mutate
-    // without a transaction (no render, no undo, no docen:change).
-    const attrs = { ...(raw.attrs as Record<string, unknown>) };
+    const sectionIndex = this.#sectionOfPage[this.#storyPage] ?? 0;
+    const target = this.#sectPrPosOfSection(sectionIndex);
     const key = this.#slotsKeyOf(kind);
-    attrs[key] = { ...(attrs[key] as object | undefined), [slot]: json };
-    const run = this.#projectAndLayout({ ...raw, attrs } as JSONContent);
+    let patchedDoc: JSONContent = raw;
+    if (target < 0) {
+      const attrs = { ...(raw.attrs as Record<string, unknown>) };
+      attrs[key] = { ...(attrs[key] as object | undefined), [slot]: json };
+      patchedDoc = { ...raw, attrs };
+    } else {
+      let seen = -1;
+      const patchContent = (nodes: JSONContent[]): JSONContent[] =>
+        nodes.map((n) => {
+          if (
+            n.type === "paragraph" &&
+            (n.attrs as { sectionProperties?: unknown })?.sectionProperties != null
+          ) {
+            seen++;
+            if (seen === sectionIndex) {
+              const na = (n.attrs ?? {}) as Record<string, unknown>;
+              const curSlots = (na[key] as Record<string, unknown> | undefined) ?? {};
+              return { ...n, attrs: { ...na, [key]: { ...curSlots, [slot]: json } } };
+            }
+          }
+          return n;
+        });
+      patchedDoc = { ...raw, content: patchContent(raw.content ?? []) } as unknown as JSONContent;
+    }
+    const run = this.#projectAndLayout(patchedDoc);
     this.#pages = run.pages;
     this.#sectionOfPage = run.sectionOfPage;
     this.#flow = run.sections[0]?.flow;
@@ -1044,10 +1067,8 @@ class DocenDocument extends AddinHost<Editor> {
    *  clicking another page's body moves it). An earlier section's slots live
    *  on its closing sectPr paragraph and go through a plain setNodeMarkup
    *  transaction — one undo step. The final section closes at the body end
-   *  and its slots live on the doc node, which no step can address
-   *  (nodeAt(0) is the first child) — they land through #loadDoc's state
-   *  rebuild, the same path setJSON takes (history resets with it, like any
-   *  document load). */
+   *  and its slots live on the doc node, updated via setDocAttribute so undo
+   *  history is preserved. */
   #persistStory(kind: StoryKind, slot: StorySlot, json: JSONContent[], anchorPage: number): void {
     const bridge = this.#bridge;
     if (!bridge) return;
@@ -1059,14 +1080,12 @@ class DocenDocument extends AddinHost<Editor> {
     const sectionIndex = this.#sectionOfPage[anchorPage] ?? 0;
     const target = this.#sectPrPosOfSection(sectionIndex);
     if (target < 0) {
-      const raw = bridge.editor.getJSON();
-      this.#loadDoc({
-        ...raw,
-        attrs: {
-          ...(raw.attrs as Record<string, unknown>),
-          [key]: slots(raw.attrs as Record<string, unknown>),
-        },
-      } as JSONContent);
+      bridge.editor.commands.command(({ state: s, dispatch }) => {
+        dispatch?.(
+          s.tr.setDocAttribute(key, slots((s.doc.attrs as Record<string, unknown>) ?? {})),
+        );
+        return true;
+      });
       return;
     }
     bridge.editor.commands.command(({ state: s, dispatch }) => {
@@ -1079,6 +1098,7 @@ class DocenDocument extends AddinHost<Editor> {
   }
 
   #exitStory(kind: StoryKind, slot: StorySlot, json: JSONContent[], dirty: boolean): void {
+    this.#hideHeaderFooterContextTab();
     this.#stage?.setStoryEdit(null);
     this.#storyKind = null;
     if (dirty) this.#persistStory(kind, slot, json, this.#storyPage);
@@ -1087,8 +1107,7 @@ class DocenDocument extends AddinHost<Editor> {
 
   /** Write a slots group through a transaction: the group lives on the
    *  current section's sectPr paragraph when there is one, else on the doc
-   *  node (the #loadDoc state-rebuild path — the doc node is not step
-   *  addressable; see #persistStory). */
+   *  node via setDocAttribute. */
   #writeSlots(key: "sectionHeaders" | "sectionFooters", group: Record<string, unknown>): void {
     const bridge = this.#bridge;
     const editor = this.editor;
@@ -1103,11 +1122,8 @@ class DocenDocument extends AddinHost<Editor> {
         return;
       }
     }
-    const raw = bridge.editor.getJSON();
-    this.#loadDoc({
-      ...raw,
-      attrs: { ...(raw.attrs as Record<string, unknown>), [key]: group },
-    } as JSONContent);
+    tr.setDocAttribute(key, group);
+    editor.view.dispatch(tr);
   }
 
   /** Remove Header / Remove Footer — drop the story's whole slots group from
@@ -1627,6 +1643,10 @@ class DocenDocument extends AddinHost<Editor> {
         | { sectionProperties?: { titlePage?: boolean; evenAndOddHeaders?: boolean } }
         | undefined
     )?.sectionProperties;
+    const settings = (
+      this.editor?.state.doc.attrs as { settings?: { evenAndOddHeaders?: boolean } } | undefined
+    )?.settings;
+    const evenAndOdd = !!sp?.evenAndOddHeaders || !!settings?.evenAndOddHeaders;
     const stamp = (kind: "header" | "footer"): void => {
       const el = this.shadowRoot?.querySelector(`docen-ribbon-split-button[event="${kind}"]`);
       if (!el) return;
@@ -1652,13 +1672,25 @@ class DocenDocument extends AddinHost<Editor> {
           {
             text: t("ribbon.opt.odd-even", this),
             value: "odd-even",
-            checked: !!sp?.evenAndOddHeaders,
+            checked: evenAndOdd,
           },
         ]),
       );
     };
     stamp("header");
     stamp("footer");
+    if (this.#storyKind != null) {
+      this.#showHeaderFooterContextTab();
+      const root = this.shadowRoot;
+      const titleCb = root?.querySelector(
+        'docen-ribbon-checkbox[event="header-option"][value="title-page"]',
+      );
+      if (titleCb) titleCb.toggleAttribute("checked", !!sp?.titlePage);
+      const oddEvenCb = root?.querySelector(
+        'docen-ribbon-checkbox[event="header-option"][value="odd-even"]',
+      );
+      if (oddEvenCb) oddEvenCb.toggleAttribute("checked", evenAndOdd);
+    }
   }
 
   /** Mirror the caret cell's live width/height into the Cell Size combos —
@@ -1729,6 +1761,37 @@ class DocenDocument extends AddinHost<Editor> {
         ribbon.querySelector(`docen-ribbon-panel[value="${id}"]`)?.remove();
       }
       present.clear();
+    }
+    this.#applyRibbonGreying();
+  }
+
+  #showHeaderFooterContextTab(): void {
+    const root = this.shadowRoot;
+    const tablist = root?.querySelector("fluent-tablist");
+    const ribbon = root?.querySelector("docen-ribbon");
+    if (!root || !tablist || !ribbon) return;
+    if (tablist.querySelector("#header-footer-tab")) return;
+    const scope = root.querySelector("docen-workspace") ?? this;
+    const tabDef = headerFooterContextTab(scope);
+    const built = buildContextualTab(tabDef, scope);
+    tablist.append(built.tab);
+    ribbon.append(built.panel);
+    tablist.setAttribute("activeid", "header-footer-tab");
+    this.#applyRibbonGreying();
+  }
+
+  #hideHeaderFooterContextTab(): void {
+    const root = this.shadowRoot;
+    const tablist = root?.querySelector("fluent-tablist");
+    const ribbon = root?.querySelector("docen-ribbon");
+    if (!root || !tablist || !ribbon) return;
+    const tabEl = tablist.querySelector("#header-footer-tab");
+    if (tabEl) {
+      if (tablist.getAttribute("activeid") === "header-footer-tab") {
+        tablist.setAttribute("activeid", DEFAULT_RIBBON_TAB);
+      }
+      tabEl.remove();
+      ribbon.querySelector('docen-ribbon-panel[value="header-footer-tab"]')?.remove();
     }
     this.#applyRibbonGreying();
   }
@@ -1884,6 +1947,14 @@ class DocenDocument extends AddinHost<Editor> {
     const editor = this.editor;
     if (!editor) return;
     const { doc, tr } = editor.state;
+    if (flag === "evenAndOddHeaders") {
+      const curSettings =
+        ((doc.attrs as { settings?: Record<string, unknown> }).settings as
+          | Record<string, unknown>
+          | undefined) ?? {};
+      const nextVal = !curSettings.evenAndOddHeaders;
+      tr.setDocAttribute("settings", { ...curSettings, evenAndOddHeaders: nextVal });
+    }
     const flip = (cur: SectionPropertiesOptions | undefined): SectionPropertiesOptions => ({
       ...cur,
       [flag]: !(cur as unknown as Record<string, unknown> | undefined)?.[flag],
@@ -3006,6 +3077,31 @@ class DocenDocument extends AddinHost<Editor> {
           requestAnimationFrame(() => target.commands["update-toc"](pageOf, tabPositionTw)),
         );
       }
+      return;
+    }
+    // Header/Footer contextual tab commands
+    if (name === "close-header-footer") {
+      this.#bridge?.exitStory();
+      return;
+    }
+    if (name === "goto-header") {
+      const page =
+        this.#storyPage >= 0
+          ? this.#storyPage
+          : (this.#bridge?.pageOf(editor.state.selection.from) ?? 0);
+      this.#bridge?.enterStory("header", page);
+      return;
+    }
+    if (name === "goto-footer") {
+      const page =
+        this.#storyPage >= 0
+          ? this.#storyPage
+          : (this.#bridge?.pageOf(editor.state.selection.from) ?? 0);
+      this.#bridge?.enterStory("footer", page);
+      return;
+    }
+    if (name === "header-option") {
+      this.#toggleSectionFlag(value === "title-page" ? "titlePage" : "evenAndOddHeaders");
       return;
     }
     // Header/Footer — the split's main action opens the story on the caret's

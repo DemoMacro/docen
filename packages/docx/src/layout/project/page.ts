@@ -140,6 +140,7 @@ export function projectFlowBox(properties: unknown): ProjectedFlowBox {
 export function projectPageFurniture(
   section: SectionOptions | undefined,
   doc: DocumentOptions,
+  prevFurniture?: ProjectedPageFurniture,
 ): ProjectedPageFurniture {
   const ctx: ProjectContext = {
     styles: doc.styles,
@@ -164,15 +165,22 @@ export function projectPageFurniture(
   };
   const props: Rec = isRecord(section?.properties) ? section.properties : {};
   const margin: Rec = isRecord(props.pageMargin) ? props.pageMargin : {};
+  const explicitHeader = projectSlots(section?.headers?.default);
+  const explicitFirstHeader = projectSlots(section?.headers?.first);
+  const explicitEvenHeader = projectSlots(section?.headers?.even);
+  const explicitFooter = projectSlots(section?.footers?.default);
+  const explicitFirstFooter = projectSlots(section?.footers?.first);
+  const explicitEvenFooter = projectSlots(section?.footers?.even);
+
   return {
-    header: projectSlots(section?.headers?.default),
-    firstHeader: projectSlots(section?.headers?.first),
-    evenHeader: projectSlots(section?.headers?.even),
-    footer: projectSlots(section?.footers?.default),
-    firstFooter: projectSlots(section?.footers?.first),
-    evenFooter: projectSlots(section?.footers?.even),
+    header: explicitHeader ?? prevFurniture?.header,
+    firstHeader: explicitFirstHeader ?? prevFurniture?.firstHeader,
+    evenHeader: explicitEvenHeader ?? prevFurniture?.evenHeader,
+    footer: explicitFooter ?? prevFurniture?.footer,
+    firstFooter: explicitFirstFooter ?? prevFurniture?.firstFooter,
+    evenFooter: explicitEvenFooter ?? prevFurniture?.evenFooter,
     titlePage: props.titlePage === true,
-    evenAndOddHeaders: doc.settings?.evenAndOddHeaders === true,
+    evenAndOddHeaders: doc.settings?.evenAndOddHeaders === true || props.evenAndOddHeaders === true,
     headerDistancePx: twipToPx(measureTwip(margin.header) ?? 720),
     footerDistancePx: twipToPx(measureTwip(margin.footer) ?? 720),
   };

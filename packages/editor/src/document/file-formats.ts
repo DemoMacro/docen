@@ -83,6 +83,10 @@ export const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   "header",
   "footer",
   "page-number",
+  "close-header-footer",
+  "goto-header",
+  "goto-footer",
+  "header-option",
   // Symbol opens its grid dialog (insertion arrives via symbol:insert);
   // Bookmark prompts for a name and wraps the selection.
   "symbol",

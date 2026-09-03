@@ -64,7 +64,9 @@ export function projectDocumentOptions(doc: DocumentOptions): {
     footnoteOrdinals: new Map(),
     endnoteOrdinals: new Map(),
   };
-  const sections: ProjectedSection[] = (doc.sections ?? []).map((section, i) => {
+  const sections: ProjectedSection[] = [];
+  for (let i = 0; i < (doc.sections ?? []).length; i++) {
+    const section = doc.sections![i]!;
     const blocks: LayoutBlock[] = [];
     for (const child of section.children ?? []) {
       const block = projectChild(child, ctx);
@@ -76,15 +78,16 @@ export function projectDocumentOptions(doc: DocumentOptions): {
     // rides the body's end (no paragraph holds it) and shows no mark.
     const last = blocks[blocks.length - 1];
     if (i < (doc.sections?.length ?? 0) - 1 && last?.kind === "paragraph") last.sectionEnd = true;
-    return {
+    const prevFurniture = i > 0 ? sections[i - 1]?.furniture : undefined;
+    sections.push({
       blocks,
       flow: projectFlowBox(section.properties),
-      furniture: projectPageFurniture(section, doc),
+      furniture: projectPageFurniture(section, doc, prevFurniture),
       pageBorders: projectPageBorders(section.properties),
       lineNumbers: projectLineNumbers(section.properties),
       columns: projectColumns(section.properties),
-    };
-  });
+    });
+  }
   return {
     sections:
       sections.length > 0

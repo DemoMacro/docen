@@ -132,11 +132,15 @@ export function projectParagraph(p: BodyParagraph, ctx: ProjectContext): LayoutP
     firstLinePx,
   };
 
-  // Tab stops: twips from the content-box left edge → px from the TEXT-box
-  // edge (the engine measures x from the left indent). "decimal" renders as
-  // left for now; the exotic bar/clear/end kinds carry no box.
-  const tabStops: LayoutTabStop[] | undefined = Array.isArray(pPr.tabStops)
-    ? pPr.tabStops.flatMap((ts) => {
+  // Tab stops: direct pPr.tabStops, else cascaded from style chain (Word's
+  // built-in Header/Footer styles define center/right tab stops).
+  const rawTabStops = Array.isArray(pPr.tabStops)
+    ? pPr.tabStops
+    : Array.isArray(chainPPr.tabStops)
+      ? chainPPr.tabStops
+      : null;
+  const tabStops: LayoutTabStop[] | undefined = rawTabStops
+    ? rawTabStops.flatMap((ts) => {
         if (!isRecord(ts)) return [];
         const positionPx = measureTwip(ts.position);
         if (positionPx == null) return [];

@@ -1722,3 +1722,79 @@ describe("projectDocumentOptions page background", () => {
     expect(projected?.color).toBe("F9F1E2");
   });
 });
+
+describe("projectPageFurniture multi-section and styles", () => {
+  it("inherits header and footer from previous section when unconfigured (linkedToPrevious)", () => {
+    const docWithSections: DocumentOptions = {
+      sections: [
+        {
+          headers: { default: [{ paragraph: { text: "Section 1 Header" } }] },
+          footers: { default: [{ paragraph: { text: "Section 1 Footer" } }] },
+          children: [{ paragraph: { text: "Section 1 Body" } }],
+        },
+        {
+          // Section 2 has no headers or footers defined -> inherits from Section 1
+          children: [{ paragraph: { text: "Section 2 Body" } }],
+        },
+      ],
+    };
+    const { sections } = projectDocumentOptions(docWithSections);
+    expect(sections).toHaveLength(2);
+    expect(sections[0].furniture.header).toBeDefined();
+    expect(sections[1].furniture.header).toBeDefined();
+    expect(sections[1].furniture.header).toEqual(sections[0].furniture.header);
+    expect(sections[1].furniture.footer).toEqual(sections[0].furniture.footer);
+  });
+
+  it("recognizes evenAndOddHeaders declared on sectionProperties", () => {
+    const docWithOddEven: DocumentOptions = {
+      sections: [
+        {
+          properties: { evenAndOddHeaders: true } as never,
+          children: [{ paragraph: { text: "Body" } }],
+        },
+      ],
+    };
+    const { sections } = projectDocumentOptions(docWithOddEven);
+    expect(sections[0].furniture.evenAndOddHeaders).toBe(true);
+  });
+
+  it("cascades tabStops from paragraph style when direct tabStops are omitted", () => {
+    const docWithStyleTabs: DocumentOptions = {
+      styles: {
+        paragraphStyles: [
+          {
+            id: "Header",
+            paragraph: {
+              tabStops: [
+                { position: 4680, type: "center" },
+                { position: 9360, type: "right" },
+              ],
+            },
+          },
+        ],
+      },
+      sections: [
+        {
+          children: [
+            {
+              paragraph: {
+                style: "Header",
+                text: "Header line",
+              },
+            },
+          ],
+        },
+      ],
+    };
+    const { sections } = projectDocumentOptions(docWithStyleTabs);
+    const p = sections[0].blocks[0];
+    expect(p.kind).toBe("paragraph");
+    if (p.kind === "paragraph") {
+      expect(p.tabStops).toBeDefined();
+      expect(p.tabStops).toHaveLength(2);
+      expect(p.tabStops?.[0].type).toBe("center");
+      expect(p.tabStops?.[1].type).toBe("right");
+    }
+  });
+});
