@@ -56,7 +56,7 @@ export function defaultParagraphStyleId(styles: StylesOptions | null | undefined
  *  `paragraphStyles` plus the built-in named styles nested under `default`
  *  (key → pStyle id via pStyleIdFromKey). `document` is docDefaults, not a
  *  named style, so it is excluded. A built-in that also appears in
- *  paragraphStyles is deduped by id (paragraphStyles wins on insertion order). */
+ *  paragraphStyles is deduped by id — the built-in wins, being set second. */
 // Cache the style index by the styles object reference. A document's styles
 // model is stable for its lifetime (set on load, unchanged across edits), yet
 // indexParagraphStyles is called per-paragraph (detectHeadingLevel during
