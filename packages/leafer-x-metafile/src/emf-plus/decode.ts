@@ -121,17 +121,20 @@ export function decodeObject(
       if (flags & 0x0100) {
         if (past(4)) return { width };
         const n = view.getUint32(cursor - 4, true);
-        if (n > 0 && n <= 16 && cursor + n * 4 <= end) {
+        // The whole array must fit behind its count — a lying count skips
+        // nothing (the pen just stays undashed) instead of walking the cursor
+        // into the fields behind it and misaligning everything after.
+        if (n > 0 && n * 4 <= end - cursor) {
           dashes = [];
           for (let i = 0; i < n; i++) dashes.push(view.getFloat32(cursor + i * 4, true));
+          cursor += n * 4;
         }
-        cursor += Math.min(n, 16) * 4;
       }
       if (flags & 0x0200 && past(4)) return { width };
       if (flags & 0x0400) {
         if (past(4)) return { width };
         const n = view.getUint32(cursor - 4, true);
-        cursor += Math.min(n, 64) * 4;
+        if (n * 4 <= end - cursor) cursor += n * 4;
       }
       const dash =
         dashes != null ? dashTokenFor(dashes) : DASH_STYLE_TOKENS[style ?? 0] || undefined;

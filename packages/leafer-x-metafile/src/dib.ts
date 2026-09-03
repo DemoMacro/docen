@@ -48,7 +48,10 @@ export function bltDibAt(
   if (recordEnd - recordStart < 26 + 40 + 8) return undefined;
   if (recordEnd - recordStart > 12 * 1024 * 1024) return undefined;
   // The header probe reads the 40-byte BITMAPINFOHEADER behind its position —
-  // a hit without the full header in the record cannot be a real DIB.
+  // a hit without the full header in the record cannot be a real DIB. A
+  // candidate that fails validation keeps the scan walking: a parameter word
+  // that merely equals 40, or a real header at an unsupported depth, must not
+  // swallow a genuine DIB sitting behind it.
   for (
     let probe = recordStart + 6;
     probe + 40 <= recordEnd && probe < recordStart + 60;
@@ -60,12 +63,15 @@ export function bltDibAt(
     const planes = view.getUint16(probe + 12, true);
     const bpp = view.getUint16(probe + 14, true);
     const compression = view.getUint32(probe + 16, true);
-    if (w > 8 && Math.abs(h) > 8 && planes === 1 && compression === 0) {
-      if (bpp === 8 || bpp === 24 || bpp === 32) {
-        return { start: probe, length: recordEnd - probe };
-      }
+    if (
+      w > 8 &&
+      Math.abs(h) > 8 &&
+      planes === 1 &&
+      compression === 0 &&
+      (bpp === 8 || bpp === 24 || bpp === 32)
+    ) {
+      return { start: probe, length: recordEnd - probe };
     }
-    return undefined;
   }
   return undefined;
 }
