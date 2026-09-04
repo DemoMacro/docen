@@ -155,16 +155,34 @@ const editItems = (): string =>
     { text: opt("viewing"), event: "edit-mode", value: "view" },
   ]);
 
-const highlightItems = (): string =>
+// Word's Underline split menu — the ST_Underline patterns (minus "words",
+// which no Word menu exposes) plus the clear entry.
+const UNDERLINE_STYLES: ReadonlyArray<readonly [string, string]> = [
+  ["double", "underline-double"],
+  ["thick", "underline-thick"],
+  ["dotted", "underline-dotted"],
+  ["dottedHeavy", "underline-dotted-heavy"],
+  ["dash", "underline-dash"],
+  ["dashedHeavy", "underline-dashed-heavy"],
+  ["dashLong", "underline-dash-long"],
+  ["dashLongHeavy", "underline-dash-long-heavy"],
+  ["dotDash", "underline-dot-dash"],
+  ["dashDotHeavy", "underline-dash-dot-heavy"],
+  ["dotDotDash", "underline-dot-dot-dash"],
+  ["dashDotDotHeavy", "underline-dash-dot-dot-heavy"],
+  ["wave", "underline-wave"],
+  ["wavyHeavy", "underline-wavy-heavy"],
+  ["wavyDouble", "underline-wavy-double"],
+];
+
+const underlineItems = (): string =>
   JSON.stringify([
-    { text: opt("no-color"), value: "none" },
-    { text: opt("yellow"), value: "yellow" },
-    { text: opt("bright-green"), value: "bright-green" },
-    { text: opt("turquoise"), value: "turquoise" },
-    { text: opt("pink"), value: "pink" },
-    { text: opt("red"), value: "red" },
-    { text: opt("green"), value: "green" },
-    { text: opt("blue"), value: "blue" },
+    { text: opt("none"), event: "underline-style", value: "none" },
+    ...UNDERLINE_STYLES.map(([value, key]) => ({
+      text: opt(key),
+      event: "underline-style",
+      value,
+    })),
   ]);
 
 const caseItems = (): string =>
@@ -664,6 +682,7 @@ function buildControl(c: RibbonControl, scope: Element): HTMLElement {
       const el = document.createElement("docen-color-picker");
       applyBase(el, c, scope);
       if (c.defaultColor) el.setAttribute("default-color", c.defaultColor);
+      if (c.palette) el.setAttribute("palette", c.palette);
       return el;
     }
     case "gallery": {
@@ -759,13 +778,19 @@ const combo = (
   ...(o.comboboxSize ? { comboboxSize: o.comboboxSize } : {}),
 });
 
-const picker = (icon: string, event: string, defaultColor: string): RibbonColorPicker => ({
+const picker = (
+  icon: string,
+  event: string,
+  defaultColor: string,
+  o: { palette?: "theme" | "highlight" } = {},
+): RibbonColorPicker => ({
   type: "color-picker",
   icon,
   event,
   label: cmd(event),
   defaultColor,
   iconOnly: true,
+  ...(o.palette ? { palette: o.palette } : {}),
 });
 
 const group = (
@@ -844,12 +869,12 @@ const homeTab = (styles?: StylesOptions | null): RibbonTab =>
           row([
             btn("bold", "bold", { iconOnly: true }),
             btn("italic", "italic", { iconOnly: true }),
-            btn("underline", "underline", { iconOnly: true }),
+            split("underline", "underline", parsedItems(underlineItems()), { iconOnly: true }),
             btn("strike", "strike", { iconOnly: true }),
             btn("superscript", "superscript", { iconOnly: true }),
             btn("subscript", "subscript", { iconOnly: true }),
             sep(),
-            split("highlight", "highlight", parsedItems(highlightItems()), { iconOnly: true }),
+            picker("highlight", "highlight", "FFFF00", { palette: "highlight" }),
             picker("font-color", "font-color", "000000"),
           ]),
         ]),

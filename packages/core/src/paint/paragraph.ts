@@ -41,6 +41,111 @@ const HIGHLIGHT_COLOR: Record<string, string> = {
   white: "#FFFFFF",
 };
 
+/** The w:u pattern to hand-stroke — undefined for the plain single line (and
+ *  for runs with no underline at all), which stay on Leafer's textDecoration. */
+function underlinePatternOf(style: LayoutTextStyle): string | undefined {
+  if (!style.underline) return undefined;
+  const s = style.underlineStyle;
+  return !s || s === "single" ? undefined : s;
+}
+
+/** w:u dash patterns in px (Leafer dashPattern stroke-gap pairs). */
+const UNDERLINE_DASHES: Record<string, number[] | undefined> = {
+  dotted: [1, 2],
+  dottedHeavy: [2, 2],
+  dash: [3, 2],
+  dashedHeavy: [4, 2],
+  dashLong: [6, 2],
+  dashLongHeavy: [8, 2],
+  dotDash: [1, 2, 3, 2],
+  dashDotHeavy: [2, 2, 4, 2],
+  dotDotDash: [1, 2, 1, 2, 3, 2],
+  dashDotDotHeavy: [2, 2, 2, 2, 4, 2],
+};
+
+/** Stroke a patterned/colored w:u under one inline item. Coordinates ride the
+ *  Text element's own frame (y is its box top); the baseline sits at the
+ *  shared ~0.85 em ascent approximation (no ascent on the layout type). */
+function paintUnderlinePattern(
+  tree: IGroup,
+  pattern: string,
+  style: LayoutTextStyle,
+  box: { x: number; y: number; width: number; emPx: number },
+): void {
+  const color = style.underlineColor
+    ? `#${style.underlineColor}`
+    : style.color
+      ? `#${style.color}`
+      : "#1b1b1b";
+  const heavy = pattern.endsWith("Heavy") || pattern === "thick";
+  const strokeWidth = heavy ? 2 : 1;
+  const baseline = box.y + box.emPx * 0.85;
+  const wave = pattern.startsWith("wave");
+  if (!wave) {
+    const dash = UNDERLINE_DASHES[pattern];
+    tree.add(
+      new Line({
+        x: box.x,
+        y: baseline + box.emPx * 0.08,
+        width: box.width,
+        stroke: color,
+        strokeWidth,
+        dashPattern: dash,
+        hittable: false,
+      }),
+    );
+    if (pattern === "double") {
+      tree.add(
+        new Line({
+          x: box.x,
+          y: baseline + box.emPx * 0.08 + 2,
+          width: box.width,
+          stroke: color,
+          strokeWidth,
+          hittable: false,
+        }),
+      );
+    }
+    return;
+  }
+  // Sine wave as quadratic half-waves (4px per lobe, ~1/16 em amplitude).
+  const amp = heavy || pattern === "wavyDouble" ? 1.5 : 1;
+  const lobe = 4;
+  let d = "M 0 0";
+  let px = 0;
+  let dir = 1;
+  while (px < box.width) {
+    const step = Math.min(lobe, box.width - px);
+    d += ` Q ${(px + step / 2).toFixed(2)} ${(dir * amp).toFixed(2)} ${(px + step).toFixed(2)} 0`;
+    px += step;
+    dir = -dir;
+  }
+  tree.add(
+    new Path({
+      x: box.x,
+      y: baseline + box.emPx * 0.08,
+      path: d,
+      stroke: color,
+      strokeWidth,
+      fill: "none",
+      hittable: false,
+    }),
+  );
+  if (pattern === "wavyDouble") {
+    tree.add(
+      new Path({
+        x: box.x,
+        y: baseline + box.emPx * 0.08 + 3,
+        path: d,
+        stroke: color,
+        strokeWidth,
+        fill: "none",
+        hittable: false,
+      }),
+    );
+  }
+}
+
 export function paintParagraph(
   tree: IGroup,
   para: LaidOutParagraph,
@@ -244,14 +349,21 @@ export function paintParagraph(
           height: Math.max(1, line.heightPx),
           text: label,
           fill: inline.style.color ? `#${inline.style.color}` : "#1b1b1b",
-          textDecoration:
-            inline.style.underline && inline.style.strikethrough
-              ? "under-delete"
+          // Leafer's textDecoration only knows the single line — a patterned
+          // or colored w:u strokes its own path below (paintUnderlinePattern).
+          // Single keeps the native path: the 91-page parity baseline rides on
+          // its metrics.
+          textDecoration: inline.style.strikethrough
+            ? underlinePatternOf(inline.style)
+              ? "delete"
+              : inline.style.underline
+                ? "under-delete"
+                : "delete"
+            : underlinePatternOf(inline.style)
+              ? undefined
               : inline.style.underline
                 ? "under"
-                : inline.style.strikethrough
-                  ? "delete"
-                  : undefined,
+                : undefined,
           fontFamily: family,
           fontSize: vertAlignedSizePx(inline.style),
           // Leafer's default 150% line spacing half-leads the glyphs ~0.25×
@@ -271,6 +383,15 @@ export function paintParagraph(
             : undefined,
         });
         tree.add(textEl);
+        const pattern = underlinePatternOf(inline.style);
+        if (pattern) {
+          paintUnderlinePattern(tree, pattern, inline.style, {
+            x: lineX + item.xPx,
+            y: lineY + pad + vertAlignBaselineShiftPx(inline.style),
+            width: intervalPx ?? item.widthPx,
+            emPx: vertAlignedSizePx(inline.style),
+          });
+        }
       } else if (item.kind === "math" && inline.kind === "math") {
         // A formula the engine does not lay out yet: a dashed slot with the
         // structural label centered inside — Word's empty-argument look, an

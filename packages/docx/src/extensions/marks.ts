@@ -50,6 +50,14 @@ export const Italic = Mark.create({
 
 export const Underline = Mark.create({
   name: "underline",
+  addAttributes() {
+    return {
+      // w:u val (ST_Underline token) and w:u color (hex without #) — null
+      // means Word's default single line in the text color.
+      style: { default: null },
+      color: { default: null },
+    };
+  },
   parseHTML() {
     return [
       { tag: "u" },
@@ -61,7 +69,11 @@ export const Underline = Mark.create({
       },
     ];
   },
-  renderDocx: () => ({ underline: { type: "single" } }),
+  renderDocx: (attrs: Record<string, unknown>) => {
+    const style = typeof attrs.style === "string" && attrs.style ? attrs.style : "single";
+    const color = typeof attrs.color === "string" && attrs.color ? attrs.color : undefined;
+    return { underline: color ? { type: style, color } : { type: style } };
+  },
   // office-open represents <w:u> as { type, color? }. val="none" means NO
   // underline — Word writes it to cancel an inherited underline (e.g. a run
   // inside a hyperlink style). `{ type: "none" }` is a truthy object, so a
@@ -69,8 +81,8 @@ export const Underline = Mark.create({
   // round-trip, silently adding underlines the source never had. Only treat
   // a concrete non-"none" type as an underline mark.
   parseDocx: (opts: RunOptions) => {
-    const u = opts.underline as { type?: string } | undefined;
-    return u && u.type && u.type !== "none" ? {} : null;
+    const u = opts.underline as { type?: string; color?: string } | undefined;
+    return u && u.type && u.type !== "none" ? { style: u.type, color: u.color ?? null } : null;
   },
 });
 

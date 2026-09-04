@@ -1,3 +1,4 @@
+import { HIGHLIGHT_PALETTE_RGB } from "@docen/docx";
 import {
   FASTElement,
   attr,
@@ -10,6 +11,9 @@ import {
 
 import { observeLang, t } from "../../i18n/localize";
 import { COMMAND_HOST_STYLE, renderIcon } from "./command-helpers";
+
+// Token → RGB with a string index (the palette table is const-narrowed).
+const HIGHLIGHT_RGB: Record<string, string> = HIGHLIGHT_PALETTE_RGB;
 
 // ── Office 2013-2022 default theme palette ──
 // 10 columns × 6 rows, matching Word/WPS's color grid. Each column is an OOXML
@@ -252,6 +256,10 @@ const styles = css`
     grid-template-columns: repeat(10, 16px);
     gap: 2px;
   }
+  /* The highlighter palette: 16 fixed colors in Word's 8×2 grid. */
+  .cp-swatches.cp-hl {
+    grid-template-columns: repeat(8, 16px);
+  }
   .cp-swatch {
     width: 16px;
     height: 16px;
@@ -451,6 +459,10 @@ class DocenColorPicker extends FASTElement {
   @attr tooltip?: string;
   @attr({ attribute: "default-color" }) defaultColor?: string;
   @attr({ attribute: "icon-only", mode: "boolean" }) iconOnly?: boolean;
+  /** "highlight" renders Word's fixed 16-color highlighter palette (swatches
+   *  emit ST_HighlightColor tokens — hex is illegal in w:highlight); the
+   *  default theme palette emits theme-semantic objects. */
+  @attr palette?: "theme" | "highlight";
 
   @observable btn?: HTMLElement;
   @observable caret?: HTMLElement;
@@ -483,6 +495,9 @@ class DocenColorPicker extends FASTElement {
   /** Command key (falls back to label) for the per-feature color memory. */
   get eventName(): string {
     return this.event || this.label || "";
+  }
+  get isHighlight(): boolean {
+    return this.palette === "highlight";
   }
   /** Icon-only hides the visible label (it still feeds the tooltip). */
   get visibleLabel(): string {
@@ -671,12 +686,34 @@ class DocenColorPicker extends FASTElement {
 
   #refreshBar(): void {
     if (!this.#bar) return;
-    const hex = valOf(lastColor.get(this.eventName)) ?? this.#defaultHex();
+    const value = lastColor.get(this.eventName);
+    const hex =
+      value == null
+        ? this.#defaultHex()
+        : typeof value === "string"
+          ? (HIGHLIGHT_RGB[value] ?? value)
+          : value.val;
     this.#bar.style.background = `#${hex}`;
   }
 
   #renderPalette(): void {
     if (!this.themeEl || !this.standardEl || !this.recentEl || !this.recentLabel) return;
+    // Highlight mode: Word's fixed highlighter palette only — no theme rows,
+    // standard colors, recents, or More Colors (tokens are the whole domain).
+    if (this.isHighlight) {
+      this.themeEl.classList.add("cp-hl");
+      this.themeEl.replaceChildren();
+      for (const token of Object.keys(HIGHLIGHT_RGB))
+        this.themeEl.append(this.#highlightSwatch(token));
+      for (const el of this.shadowRoot?.querySelectorAll<HTMLElement>(
+        ".cp-section, .cp-more, [part='standard'], [part='recent']",
+      ) ?? [])
+        el.classList.add("cp-hidden");
+      this.recentEl.classList.add("cp-hidden");
+      this.recentLabel.classList.add("cp-hidden");
+      return;
+    }
+    this.themeEl.classList.remove("cp-hl");
     this.themeEl.replaceChildren();
     this.standardEl.replaceChildren();
     this.recentEl.replaceChildren();
@@ -716,6 +753,21 @@ class DocenColorPicker extends FASTElement {
     btn.addEventListener("click", () => {
       this.#hide();
       this.#pick(hex);
+    });
+    return btn;
+  }
+
+  /** A highlighter swatch — emits the ST_HighlightColor token itself (hex is
+   *  illegal in w:highlight; the mark maps palette RGB back to tokens). */
+  #highlightSwatch(token: string): HTMLButtonElement {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "cp-swatch";
+    btn.style.backgroundColor = `#${HIGHLIGHT_RGB[token]}`;
+    btn.title = token;
+    btn.addEventListener("click", () => {
+      this.#hide();
+      this.#pick(token);
     });
     return btn;
   }

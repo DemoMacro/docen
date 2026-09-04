@@ -94,6 +94,10 @@ export interface RunStyle {
   highlight?: string;
   shadingFill?: string;
   underline?: boolean;
+  /** w:u pattern token (ST_Underline minus "none") — undefined = single. */
+  underlineStyle?: string;
+  /** w:u color, hex RRGGBB — undefined = the text color. */
+  underlineColor?: string;
   strikethrough?: boolean;
   verticalAlign?: "superscript" | "subscript";
 }
@@ -103,7 +107,10 @@ export interface RunStyle {
  *  false so it BEATS an inherited style bold — folding it to undefined would
  *  let the style chain's bold bleed through (Word: direct > style > doc). */
 export function runStyleOf(rPr: Rec): RunStyle {
-  const underline = isRecord(rPr.underline) ? rPr.underline.type !== "none" : undefined;
+  const u = isRecord(rPr.underline) ? rPr.underline : undefined;
+  const underline = u ? u.type !== "none" : undefined;
+  const underlineStyle = u && str(u.type) && u.type !== "none" ? str(u.type) : undefined;
+  const underlineColor = u && str(u.color) && str(u.color) !== "auto" ? str(u.color) : undefined;
   const tri = (v: unknown): boolean | undefined => (v === undefined ? undefined : v === true);
   return {
     sizePt: num(rPr.size),
@@ -117,6 +124,8 @@ export function runStyleOf(rPr: Rec): RunStyle {
     // resolved with the document context, which runStyleOf doesn't carry.
     shadingFill: isRecord(rPr.shading) ? str(rPr.shading.fill) : undefined,
     underline,
+    underlineStyle,
+    underlineColor,
     strikethrough:
       rPr.strike === true || rPr.doubleStrike === true
         ? true

@@ -1,7 +1,13 @@
 import type { ImageAttrs } from "@docen/docx";
-import { BULLET_GLYPHS, nextOrderedReference, ORDERED_FORMATS } from "@docen/docx";
+import {
+  BULLET_GLYPHS,
+  HIGHLIGHT_PALETTE_RGB,
+  nextOrderedReference,
+  ORDERED_FORMATS,
+} from "@docen/docx";
 import { Extension } from "@docen/docx/core";
 import type { Node as PMNode, ResolvedPos } from "@tiptap/pm/model";
+import type { Mark } from "@tiptap/pm/model";
 import type { EditorState } from "@tiptap/pm/state";
 import type { Transaction } from "@tiptap/pm/state";
 import { NodeSelection, TextSelection } from "@tiptap/pm/state";
@@ -40,6 +46,7 @@ declare module "@tiptap/core" {
       bold: () => ReturnType;
       italic: () => ReturnType;
       underline: () => ReturnType;
+      "underline-style": (style?: string) => ReturnType;
       strike: () => ReturnType;
       subscript: () => ReturnType;
       superscript: () => ReturnType;
@@ -130,6 +137,7 @@ export const WIRED_DISPATCH: ReadonlySet<string> = new Set([
   "bold",
   "italic",
   "underline",
+  "underline-style",
   "strike",
   "subscript",
   "superscript",
@@ -908,6 +916,24 @@ export const DocumentCommands = Extension.create({
         () =>
         ({ commands }) =>
           commands.toggleMark("underline"),
+      // The underline split's style pick: "none" clears, a token applies the
+      // pattern — merging over the current mark so the color survives. The
+      // current mark comes from any run in the selection ($from.marks() is
+      // empty across a whole-document selection).
+      "underline-style":
+        (style) =>
+        ({ state, commands }) => {
+          if (!style || style === "none") return commands.unsetMark("underline");
+          let current: Mark | undefined;
+          state.doc.nodesBetween(state.selection.from, state.selection.to, (node) => {
+            current ??= node.marks.find((m) => m.type.name === "underline");
+            return !current;
+          });
+          return commands.setMark("underline", {
+            ...((current?.attrs ?? {}) as Record<string, unknown>),
+            style,
+          });
+        },
       strike:
         () =>
         ({ commands }) =>
@@ -924,9 +950,13 @@ export const DocumentCommands = Extension.create({
         (value) =>
         ({ commands }) => {
           // "none" clears; a palette color sets its token; no value (the split
-          // button's main click) applies Word's default yellow.
+          // button's main click) applies Word's default yellow. A value that is
+          // already an ST_HighlightColor token (the color picker's highlight
+          // palette emits tokens verbatim) passes straight through.
           if (value === "none") return commands.unsetMark("highlight");
-          const token = HIGHLIGHT_TOKENS[value ?? ""] ?? "yellow";
+          const token =
+            HIGHLIGHT_TOKENS[value ?? ""] ??
+            (value && value in HIGHLIGHT_PALETTE_RGB ? value : "yellow");
           return commands.setMark("highlight", { color: token });
         },
       code:

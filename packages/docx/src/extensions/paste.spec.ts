@@ -30,7 +30,10 @@ describe("paste style mapping", () => {
   it("maps <em>/<i> to the italic mark and <u> to underline", () => {
     expect(firstTextMarks(parse("<p><em>x</em></p>"))).toContainEqual({ type: "italic" });
     expect(firstTextMarks(parse("<p><i>x</i></p>"))).toContainEqual({ type: "italic" });
-    expect(firstTextMarks(parse("<p><u>x</u></p>"))).toContainEqual({ type: "underline" });
+    expect(firstTextMarks(parse("<p><u>x</u></p>"))).toContainEqual({
+      type: "underline",
+      attrs: { style: null, color: null },
+    });
   });
 
   it("maps <s>/<del> to the strike mark", () => {
@@ -48,7 +51,7 @@ describe("paste style mapping", () => {
     );
     expect(
       firstTextMarks(parse('<p><span style="text-decoration:underline">x</span></p>')),
-    ).toContainEqual({ type: "underline" });
+    ).toContainEqual({ type: "underline", attrs: { style: null, color: null } });
     expect(
       firstTextMarks(parse('<p><span style="text-decoration:line-through">x</span></p>')),
     ).toContainEqual({ type: "strike" });

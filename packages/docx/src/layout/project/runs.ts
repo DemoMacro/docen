@@ -103,6 +103,8 @@ export function projectRuns(
         str((isRecord(docRPr.shading) ? docRPr.shading : undefined)?.fill) ??
         defRun.shadingFill,
       underline: own.underline ?? defRun.underline,
+      underlineStyle: own.underlineStyle ?? defRun.underlineStyle,
+      underlineColor: own.underlineColor ?? defRun.underlineColor,
       strikethrough: own.strikethrough ?? defRun.strikethrough,
       letterSpacingPx:
         own.characterSpacingTw != null ? twipToPx(own.characterSpacingTw) : defRun.letterSpacingPx,

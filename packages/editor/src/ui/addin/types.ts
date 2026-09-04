@@ -88,10 +88,13 @@ export interface RibbonCombobox extends RibbonControlBase {
   comboboxSize?: "short" | "normal";
 }
 
-/** A swatch popover + "More Colors" picker (font color / paragraph shading). */
+/** A swatch popover + "More Colors" picker (font color / paragraph shading).
+ *  `palette: "highlight"` swaps the popover for Word's fixed highlighter
+ *  palette (swatches emit ST_HighlightColor tokens). */
 export interface RibbonColorPicker extends RibbonControlBase {
   type: "color-picker";
   defaultColor?: string;
+  palette?: "theme" | "highlight";
 }
 
 /** Word's gallery control — a strip of icon-over-label thumbnails plus a More

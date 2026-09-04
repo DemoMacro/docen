@@ -10,6 +10,10 @@ export interface LayoutTextStyle {
   color?: string;
   /** Underlined (w:u, any non-none pattern). */
   underline?: boolean;
+  /** The w:u pattern token (ST_Underline minus "none") — absent = single. */
+  underlineStyle?: string;
+  /** w:u color, hex RRGGBB — absent = the text color. */
+  underlineColor?: string;
   /** Struck through (w:strike / w:dstrike). */
   strikethrough?: boolean;
   /** Extra per-character spacing in px (OOXML w:spacing resolved). */
