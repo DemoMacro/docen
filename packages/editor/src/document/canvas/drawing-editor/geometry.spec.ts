@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { handleAt, resizeBox, rotateDelta, type Box } from "./geometry";
+import { cropFullBox, handleAt, resizeBox, resizeCrop, rotateDelta, type Box } from "./geometry";
 
 const box: Box = { x: 100, y: 80, width: 200, height: 100 };
 
@@ -75,5 +75,45 @@ describe("rotateDelta", () => {
     expect(rotateDelta(c, c, -50, 0, 0, -50)).toBe(90);
     // And counter-clockwise over the same boundary stays negative.
     expect(rotateDelta(c, c, 0, -50, -50, 0)).toBe(-90);
+  });
+});
+
+describe("cropFullBox", () => {
+  it("expands the visible box to the full source", () => {
+    // Visible 100×50 covers the middle half of each axis (0.25 in from each
+    // side) — the source is double the size, shifted by the crop's share.
+    const full = cropFullBox(
+      { x: 100, y: 100, width: 100, height: 50 },
+      {
+        left: 0.25,
+        top: 0.25,
+        right: 0.25,
+        bottom: 0.25,
+      },
+    );
+    expect(full).toEqual({ x: 50, y: 75, width: 200, height: 100 });
+  });
+
+  it("is the visible box itself on an empty crop", () => {
+    expect(cropFullBox(box, { left: 0, top: 0, right: 0, bottom: 0 })).toEqual(box);
+  });
+});
+
+describe("resizeCrop", () => {
+  const crop = { left: 0.1, top: 0.1, right: 0.1, bottom: 0.1 };
+
+  it("grows the inset whose edge drags inward", () => {
+    // West handle rightward grows `left`; east handle rightward shrinks
+    // `right` (the right edge follows the pointer, leaving more source).
+    expect(resizeCrop(crop, "w", 0.1, 0, 0, 0).left).toBe(0.2);
+    expect(resizeCrop(crop, "e", 0.05, 0, 0.05, 0).right).toBe(0.05);
+    expect(resizeCrop(crop, "n", 0, 0.15, 0, 0).top).toBe(0.25);
+    expect(resizeCrop(crop, "s", 0, 0, 0, -0.05).bottom).toBeCloseTo(0.15);
+  });
+
+  it("clamps so an axis never crops past a visible remainder", () => {
+    const next = resizeCrop(crop, "w", 5, 0, 0, 0);
+    expect(next.left + next.right).toBeLessThanOrEqual(0.9);
+    expect(next.left).toBeGreaterThanOrEqual(0);
   });
 });

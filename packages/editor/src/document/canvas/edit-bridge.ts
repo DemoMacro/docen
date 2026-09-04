@@ -36,6 +36,7 @@ import { listLevelStepPatch } from "../extensions/commands";
 import { KEYBOARD_SHORTCUTS } from "../extensions/keymap";
 import { CaretMap, type TableZone } from "./caret-map";
 import { CellSelection, cellAt, inSameTable } from "./cell-selection";
+import { CropOverlay } from "./drawing-editor/crop-overlay";
 import { DrawingOverlay } from "./drawing-editor/overlay";
 import { followLink, installLinkHover, type LinkHit } from "./link-hover";
 
@@ -228,6 +229,10 @@ export interface EditBridge {
    *  (Word selects a picture before its context menu shows). True when a
    *  drawing was hit and selected. */
   selectDrawingAtClient(clientX: number, clientY: number): boolean;
+  /** Enter crop mode on the selected image — the source shows in full with
+   *  crop handles; Enter / a press outside commits, Esc cancels. False when
+   *  the selection isn't a source-carrying image. */
+  enterCropMode(): boolean;
   /** The selection's last-line rect against its page frame — frame-relative
    * screen px (zoom applied), the anchor a floating comment compose positions
    * at (Word hangs the reply box in the margin beside the anchored text).
@@ -747,6 +752,59 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     },
   });
   opts.host.append(drawingOverlay.el);
+
+  // The crop layer: the selected image's source shows in full with black
+  // crop handles; a commit writes the dragged insets through the crop
+  // command (fractions — the command converts to the attrs' raw ints). It
+  // displaces the selection frame while on — its handles share the frame's
+  // grip points, and a resize landing under a crop drag would re-render and
+  // kill the mode — so exiting hands the frame back through onExit.
+  const cropOverlay = new CropOverlay({
+    scale: () => opts.scale?.() ?? 1,
+    applyCrop: (crop) => {
+      if (!selDrawing) return;
+      const nodePos = opts.drawingSelection?.(selDrawing) ?? null;
+      if (nodePos == null) return;
+      main.editor.commands["drawing-crop-apply"](JSON.parse(JSON.stringify(crop)));
+    },
+    onExit: () => placeDrawingSel(),
+  });
+  opts.host.append(cropOverlay.el);
+
+  /** Enter crop mode on the selected image (the context menu's Crop). False
+   *  when the selection frame isn't showing or the node carries no source —
+   *  shapes and source-less images have nothing to crop. */
+  const enterCropMode = (): boolean => {
+    if (!selDrawing || cropOverlay.active) return false;
+    const nodePos = opts.drawingSelection?.(selDrawing) ?? null;
+    const node = nodePos != null ? main.editor.state.doc.nodeAt(nodePos) : null;
+    const attrs = node?.attrs as Record<string, unknown> | undefined;
+    const src = typeof attrs?.src === "string" ? attrs.src : null;
+    if (!src) return false;
+    // The layer positions page-locally, like the selection frame — mount in
+    // the drawing's page frame.
+    const frame = opts.pageHost?.(selDrawing.page) ?? null;
+    if (!frame) return false;
+    if (frame !== cropOverlay.el.parentElement) frame.append(cropOverlay.el);
+    drawingOverlay.hide();
+    // The attrs carry the raw ST_Percentage ints (100000 = 100%) — the same
+    // contract breach cropOf reads through; divide back to fractions here.
+    const raw = (attrs?.crop ?? {}) as Record<string, unknown>;
+    const fraction = (v: unknown): number =>
+      typeof v === "number" && Number.isFinite(v) ? v / 100000 : 0;
+    cropOverlay.show(
+      selDrawing,
+      selDrawing.rotation ?? 0,
+      {
+        left: fraction(raw.left),
+        top: fraction(raw.top),
+        right: fraction(raw.right),
+        bottom: fraction(raw.bottom),
+      },
+      src,
+    );
+    return true;
+  };
 
   const placeDrawingSel = (): void => {
     if (selDrawing) {
@@ -2168,6 +2226,9 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       const drawHit = opts.drawingAt(story ? 0 : hit.page, hit.lx, hit.ly);
       return drawHit ? selectDrawing(drawHit) : false;
     },
+    enterCropMode(): boolean {
+      return enterCropMode();
+    },
     commentAnchorRect(from, to) {
       // Comments anchor main-doc text — a furniture story's geometry cannot
       // host one.
@@ -2209,6 +2270,9 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       ta.focus();
     },
     replaceOverlays(): void {
+      // A re-render under an open crop layer orphans its geometry — drop the
+      // mode (the drag commits through Enter/click, never mid-transaction).
+      if (cropOverlay.active) cropOverlay.cancel();
       placeDrawingSel();
       placeCaret();
     },

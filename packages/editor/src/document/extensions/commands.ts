@@ -126,6 +126,7 @@ declare module "@tiptap/core" {
       "move-drawing": (value?: string) => ReturnType;
       "rotate-drawing": (value?: string) => ReturnType;
       "drawing-properties-apply": (patch?: DrawingPropertiesPatch) => ReturnType;
+      "drawing-crop-apply": (patch?: DrawingCropPatch) => ReturnType;
       // Arrange — floating drawings (z-order, wrap, rotation, position).
       "bring-forward": () => ReturnType;
       "send-backward": () => ReturnType;
@@ -217,6 +218,7 @@ export const WIRED_DISPATCH: ReadonlySet<string> = new Set([
   "move-drawing",
   "rotate-drawing",
   "drawing-properties-apply",
+  "drawing-crop-apply",
   "bring-forward",
   "send-backward",
   "wrap",
@@ -298,6 +300,22 @@ export interface DrawingPropertiesPatch {
   offsetHCm: number;
   /** Vertical offset from the anchor's vertical base, cm → EMU. */
   offsetVCm: number;
+}
+
+/**
+ * What the crop mode commits — the selected image's a:srcRect insets as
+ * fractions of the source (0.1 = 10% off that edge), stamped by {@link
+ * documentCommands.drawing-crop-apply}. An all-zero set clears the crop.
+ */
+export interface DrawingCropPatch {
+  /** Left inset as a source fraction (0.1 = 10% cropped off the left). */
+  left: number;
+  /** Top inset as a source fraction. */
+  top: number;
+  /** Right inset as a source fraction. */
+  right: number;
+  /** Bottom inset as a source fraction. */
+  bottom: number;
 }
 
 /** One w:pBdr edge as the dialog stages it: the ST_Border style token, the
@@ -2546,6 +2564,33 @@ export const DocumentCommands = Extension.create({
           floating.verticalPosition = vPos;
           shape.floating = floating;
           return stampAttrs(tr, target, { ...target.attrs, wpsShape: shape });
+        },
+      // The crop overlay's commit: the selected image's new a:srcRect insets
+      // as source fractions, stored as the raw ST_Percentage ints the attrs
+      // carry (office-open's parse emits raw ints despite the documented
+      // integer percent — mirror cropOf's /100000 read side). All zero clears.
+      "drawing-crop-apply":
+        (patch?) =>
+        ({ state, tr }) => {
+          if (!patch || typeof patch !== "object") return false;
+          const sel = state.selection;
+          if (!(sel instanceof NodeSelection) || sel.node.type.name !== "image") return false;
+          const num = (v: unknown): number | null =>
+            typeof v === "number" && Number.isFinite(v) ? v : null;
+          const left = num(patch.left);
+          const top = num(patch.top);
+          const right = num(patch.right);
+          const bottom = num(patch.bottom);
+          if (left == null || top == null || right == null || bottom == null) return false;
+          const raw = (fraction: number): number => Math.round(fraction * 100000);
+          const crop = { left: raw(left), top: raw(top), right: raw(right), bottom: raw(bottom) };
+          const attrs = { ...sel.node.attrs };
+          if (crop.left === 0 && crop.top === 0 && crop.right === 0 && crop.bottom === 0)
+            delete attrs.crop;
+          else attrs.crop = crop;
+          tr.setNodeMarkup(sel.from, undefined, attrs);
+          tr.setSelection(NodeSelection.create(tr.doc, sel.from) as never);
+          return true;
         },
       // ── Arrange — floating drawings (the Layout tab's Arrange group) ──
       // Every command targets the selected floating drawing (a floating

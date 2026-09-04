@@ -1018,3 +1018,71 @@ describe("drawing-properties-apply", () => {
     expect(editor.commands["drawing-properties-apply"]()).toBe(false);
   });
 });
+
+describe("drawing-crop-apply", () => {
+  it("stamps the crop fractions as the attrs' raw percentage ints", () => {
+    const editor = buildWithFloat({
+      horizontalPosition: { relative: "margin", offset: 1000 },
+      verticalPosition: { relative: "paragraph", offset: 2000 },
+    });
+    selectFloat(editor);
+    expect(
+      editor.commands["drawing-crop-apply"]({ left: 0.1, top: 0.25, right: 0.05, bottom: 0 }),
+    ).toBe(true);
+    const attrs = firstNodeOf(editor, "image").attrs as Record<string, unknown>;
+    // Fractions ×100000 = the raw ST_Percentage ints (10000 = 10%), the
+    // value space cropOf reads back with a /100000.
+    expect(attrs.crop).toEqual({ left: 10000, top: 25000, right: 5000, bottom: 0 });
+    expect(editor.state.selection instanceof NodeSelection).toBe(true);
+  });
+
+  it("clears the crop on an all-zero set", () => {
+    const editor = new Editor({
+      element: null,
+      extensions: EXTENSIONS,
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [
+              {
+                type: "image",
+                attrs: { src: "data:image/png;base64,AAA", crop: { left: 10000 } },
+              },
+            ],
+          },
+        ],
+      },
+    });
+    let pos = -1;
+    editor.state.doc.descendants((node, nodePos) => {
+      if (node.type.name === "image" && pos < 0) {
+        pos = nodePos;
+        return false;
+      }
+      return true;
+    });
+    editor.commands.setNodeSelection(pos);
+    expect(editor.commands["drawing-crop-apply"]({ left: 0, top: 0, right: 0, bottom: 0 })).toBe(
+      true,
+    );
+    const attrs = firstNodeOf(editor, "image").attrs as Record<string, unknown>;
+    // The schema's attr default reads back as null once the key is gone —
+    // falsy for compile's `if (attrs.crop)` gate either way.
+    expect(attrs.crop).toBeNull();
+  });
+
+  it("declines without an image selected or a malformed patch", () => {
+    const editor = buildWithFloat({
+      horizontalPosition: { relative: "margin", offset: 1000 },
+      verticalPosition: { relative: "paragraph", offset: 2000 },
+    });
+    expect(editor.commands["drawing-crop-apply"]({ left: 1, top: 0, right: 0, bottom: 0 })).toBe(
+      false,
+    );
+    selectFloat(editor);
+    expect(editor.commands["drawing-crop-apply"]({ left: 0.1 } as never)).toBe(false);
+    expect(editor.commands["drawing-crop-apply"]()).toBe(false);
+  });
+});
