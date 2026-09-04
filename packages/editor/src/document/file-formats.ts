@@ -97,6 +97,9 @@ export const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   // Language opens the proofing-language dialog (Review → Language, the
   // status-bar language item); the commit stamps w:lang on the selection.
   "language",
+  // Phonetic guide (拼音指南) opens the per-character reading dialog; the
+  // commit splits the selection into per-character ruby runs.
+  "phonetic-guide",
   // TOC insert/update — dispatch with the bridge's pageOf (page numbers live
   // in the canvas caret map, which editor.commands can't reach).
   "toc",

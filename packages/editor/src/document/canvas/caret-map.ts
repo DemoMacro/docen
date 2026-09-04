@@ -623,10 +623,12 @@ export class CaretMap {
       // size on a shifted baseline (vertAlignedSizePx in cssFontOf above,
       // vertAlignBaselineShiftPx in the shared measure module) — the band
       // must anchor there too, or a footnote reference's highlight rides
-      // below its glyphs.
+      // below its glyphs. A ruby base sinks below its annotation space the
+      // same way the painter sinks it (rubyLiftPx, layout-computed).
       const baseline =
         line.yPx +
         pad +
+        (item.rubyLiftPx ?? 0) +
         vertAlignBaselineShiftPx(inline.style) +
         leaferBaselinePadPx(vertAlignedSizePx(inline.style));
       // The item's own ink box (first graphemes carry its script's shape); the

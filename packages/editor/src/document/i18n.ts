@@ -770,6 +770,15 @@ export const ribbonEn: AdditionalLanguage = {
     // --- Language dialog (proofing language) ---
     "languageDialog.title": "Language",
     "languageDialog.noProof": "Do not check spelling or grammar",
+    // --- Phonetic guide dialog (ruby) ---
+    "phoneticDialog.title": "Phonetic Guide",
+    "phoneticDialog.alignment": "Alignment",
+    "phoneticDialog.align.center": "Center",
+    "phoneticDialog.align.distributeLetter": "Distribute",
+    "phoneticDialog.align.distributeSpace": "Distribute all",
+    "phoneticDialog.align.left": "Left",
+    "phoneticDialog.align.right": "Right",
+    "phoneticDialog.clearAll": "Remove all readings",
   },
 };
 
@@ -1525,6 +1534,15 @@ export const ribbonZhCN: AdditionalLanguage = {
     // --- 语言对话框（校对语言） ---
     "languageDialog.title": "语言",
     "languageDialog.noProof": "不检查拼写或语法",
+    // --- 拼音指南对话框（注音） ---
+    "phoneticDialog.title": "拼音指南",
+    "phoneticDialog.alignment": "对齐方式",
+    "phoneticDialog.align.center": "居中",
+    "phoneticDialog.align.distributeLetter": "分散对齐",
+    "phoneticDialog.align.distributeSpace": "全部分散对齐",
+    "phoneticDialog.align.left": "左对齐",
+    "phoneticDialog.align.right": "右对齐",
+    "phoneticDialog.clearAll": "清除读音",
   },
 };
 

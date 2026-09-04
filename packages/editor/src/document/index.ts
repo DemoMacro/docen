@@ -1225,6 +1225,16 @@ class DocenDocument extends AddinHost<Editor> {
       "language:ok",
       this.#onLanguageOk as EventListener,
     );
+    // Phonetic guide dialog — split the selection into per-character ruby
+    // runs, or strip the guides off it.
+    this.shadowRoot!.querySelector("docen-phonetic-dialog")?.addEventListener(
+      "phonetic:ok",
+      this.#onPhoneticOk as EventListener,
+    );
+    this.shadowRoot!.querySelector("docen-phonetic-dialog")?.addEventListener(
+      "phonetic:clear",
+      this.#onPhoneticClear as EventListener,
+    );
     // Status-bar language item — open the language dialog (Word semantics).
     this.shadowRoot!.querySelector("docen-status-bar")?.addEventListener(
       "language:open",
@@ -1838,6 +1848,12 @@ class DocenDocument extends AddinHost<Editor> {
     this.shadowRoot
       ?.querySelector("docen-language-dialog")
       ?.removeEventListener("language:ok", this.#onLanguageOk as EventListener);
+    this.shadowRoot
+      ?.querySelector("docen-phonetic-dialog")
+      ?.removeEventListener("phonetic:ok", this.#onPhoneticOk as EventListener);
+    this.shadowRoot
+      ?.querySelector("docen-phonetic-dialog")
+      ?.removeEventListener("phonetic:clear", this.#onPhoneticClear as EventListener);
     this.shadowRoot
       ?.querySelector("docen-symbol-dialog")
       ?.removeEventListener("symbol:insert", this.#onSymbolInsert as EventListener);
@@ -4659,6 +4675,12 @@ class DocenDocument extends AddinHost<Editor> {
       this.#onLanguageOpen();
       return;
     }
+    // Phonetic guide (拼音指南, Home → Font): the per-character reading
+    // dialog over the selection.
+    if (name === "phonetic-guide") {
+      this.#onPhoneticOpen();
+      return;
+    }
     // Editing → Select: selectAll() spans the whole document.
     if (name === "select") {
       this.#select(value);
@@ -4787,6 +4809,116 @@ class DocenDocument extends AddinHost<Editor> {
       .run();
     this.#bridge?.focus();
     this.#syncStatusLanguage();
+  };
+
+  // ── Phonetic guide (拼音指南) ──
+
+  /** The selection's phonetic state for the dialog: the per-character text,
+   *  the readings already on its runs (blank where unannotated), the first
+   *  ruby mark's alignment, and the selection bounds. Null when the selection
+   *  is empty, spans paragraphs, or holds anything but text (the guide splits
+   *  the run per character — mixed content and cross-paragraph ranges don't
+   *  split). */
+  #selectionPhonetic(): {
+    chars: string[];
+    readings: string[];
+    alignment: string | null;
+    from: number;
+    to: number;
+  } | null {
+    const editor = this.#bridge?.activeEditor() ?? this.editor;
+    if (!editor) return null;
+    const { from, to, empty, $from, $to } = editor.state.selection;
+    if (empty || !$from.sameParent($to)) return null;
+    const { doc } = editor.state;
+    let plain = true;
+    doc.nodesBetween(from, to, (node) => {
+      // (nodesBetween yields the ancestors too — only an inline non-text node
+      // inside the range blocks the split.)
+      if (node.isInline && !node.isText) plain = false;
+    });
+    if (!plain) return null;
+    const chars = doc.textBetween(from, to).split("");
+    const readings = chars.map(() => "");
+    let alignment: string | null = null;
+    doc.nodesBetween(from, to, (node, pos) => {
+      if (!node.isText) return;
+      const ruby = (node.marks ?? []).find((m) => m.type.name === "ruby");
+      if (!ruby) return;
+      alignment ??= (ruby.attrs.alignment as string) ?? null;
+      // This editor writes one node per base character carrying its whole
+      // reading; a parsed multi-character node has no reliable per-character
+      // split, so its reading lands whole on the first character.
+      const start = Math.max(from, pos);
+      const end = Math.min(to, pos + node.nodeSize);
+      if (end > start && start - from < readings.length)
+        readings[start - from] = String(ruby.attrs.text ?? "");
+    });
+    return { chars, readings, alignment, from, to };
+  }
+
+  /** Home → Font → Phonetic guide — open the per-character reading dialog
+   *  (Word grays the button on an empty selection; a non-text or
+   *  cross-paragraph selection is a no-op here). */
+  readonly #onPhoneticOpen = (): void => {
+    const dialog = this.shadowRoot?.querySelector("docen-phonetic-dialog") as unknown as {
+      show(chars: string[], readings: string[], alignment: string | null): void;
+    } | null;
+    const state = this.#selectionPhonetic();
+    if (!dialog || !state) return;
+    dialog.show(state.chars, state.readings, state.alignment);
+  };
+
+  /** Phonetic dialog 确定 — split the selection into per-character runs, each
+   *  carrying a ruby mark with its reading (a blank reading leaves that
+   *  character unannotated). The base run's own marks ride every character;
+   *  the annotation font is half the base size (Word's default). */
+  readonly #onPhoneticOk = (event: Event): void => {
+    const { chars, readings, alignment } =
+      (
+        event as CustomEvent<{
+          chars?: string[];
+          readings?: string[];
+          alignment?: string;
+        }>
+      ).detail ?? {};
+    const target = this.#bridge?.activeEditor() ?? this.editor;
+    if (!target || !chars || !readings || chars.length === 0) return;
+    const { from, to, empty, $from } = target.state.selection;
+    if (empty) return;
+    const carried = $from.marks();
+    const baseSize =
+      (carried.find((m) => m.type.name === "textStyle")?.attrs.size as number | null) ?? null;
+    const { schema, tr } = target.state;
+    const nodes = chars.map((ch, i) => {
+      const marks = readings[i]
+        ? [
+            ...carried,
+            schema.mark("ruby", {
+              text: readings[i],
+              alignment: alignment ?? "center",
+              fontSize: baseSize != null ? Math.round(baseSize / 2) : null,
+              baseFontSize: baseSize,
+              raise: null,
+              languageId: null,
+              dirty: null,
+            }),
+          ]
+        : carried;
+      return schema.text(ch, marks);
+    });
+    const next = tr.replaceWith(from, to, nodes);
+    next.setSelection(TextSelection.create(next.doc, from, from + chars.length));
+    target.view.dispatch(next);
+    this.#bridge?.focus();
+  };
+
+  /** Phonetic dialog 清除读音 — strip the ruby marks off the selection. */
+  readonly #onPhoneticClear = (): void => {
+    const target = this.#bridge?.activeEditor() ?? this.editor;
+    if (!target || target.state.selection.empty) return;
+    target.chain().unsetMark("ruby").run();
+    this.#bridge?.focus();
   };
 
   /** Mirror the caret's proofing language into the status bar (Word shows the

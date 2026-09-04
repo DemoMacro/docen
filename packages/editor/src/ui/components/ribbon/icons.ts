@@ -115,6 +115,11 @@ const symbolOmega =
 const watermarkIcon =
   '<svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><g fill="none" stroke="currentColor" stroke-linecap="round" transform="rotate(-45 12 12)"><path d="M3.5 10.25h17" stroke-width="1.5"/><path d="M3.5 14.25h12" stroke-width="1.5" opacity=".55"/></g></svg>';
 
+// No Fluent glyph for Word's Phonetic Guide (拼音指南) either — drawn here as
+// the base-text line with the smaller annotation row sitting above it.
+const phoneticGuide =
+  '<svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><g fill="none" stroke="currentColor" stroke-linecap="round"><path d="M5 16h14" stroke-width="1.8"/><path d="M6.5 9.5h3.4M11.6 9.5h3.4M16.7 9.5h.9" stroke-width="1.4"/><path d="M6.5 12.6h3.4M11.6 12.6h3.4M16.7 12.6h.9" stroke-width="1.4" opacity=".55"/></g></svg>';
+
 /**
  * Ribbon icons sourced from `@fluentui/svg-icons` (Fluent System Icons — the
  * same set Office uses). Each entry is the raw SVG markup, injected into a
@@ -149,6 +154,7 @@ const RIBBON_ICONS: Record<string, string> = {
   "font-size": textFontSize,
   case: textChangeCase,
   "clear-format": clearFormatting,
+  "phonetic-guide": phoneticGuide,
   // Home — Paragraph
   "align-left": textAlignLeft,
   "align-center": textAlignCenter,

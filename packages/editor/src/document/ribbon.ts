@@ -814,6 +814,8 @@ const homeTab = (styles?: StylesOptions | null): RibbonTab =>
             btn("superscript", "superscript", { iconOnly: true }),
             btn("subscript", "subscript", { iconOnly: true }),
             sep(),
+            btn("phonetic-guide", "phonetic-guide", { iconOnly: true }),
+            sep(),
             picker("highlight", "highlight", "FFFF00", { palette: "highlight" }),
             picker("font-color", "font-color", "000000"),
           ]),
