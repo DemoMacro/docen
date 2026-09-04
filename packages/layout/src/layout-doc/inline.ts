@@ -41,6 +41,22 @@ export interface LayoutPictureCrop {
   bottom: number;
 }
 
+/** Phonetic-guide annotation riding a text item (w:ruby — Word's 拼音指南).
+ *  The annotation paints above the base glyphs at fontSizePx; the base text
+ *  is the item's own text (the editor models the guide as a character mark,
+ *  so this is pure paint/layout metadata). */
+export interface LayoutRuby {
+  /** The annotation text (w:rt, flattened). */
+  text: string;
+  /** The annotation's distribution over the base (ST_RubyAlign token).
+   *  center/left/right shift the annotation within the base's width — the
+   *  distribute variants fall to center. */
+  alignment?: string;
+  /** Annotation font size in px (w:hps resolved; Word's default is half the
+   *  base size). */
+  fontSizePx: number;
+}
+
 /** One inline item of a paragraph. Text, hard breaks, tabs, and inline
  *  pictures are all line-box content — one box packer handles the four (the
  *  unified text+picture breaker the DOM route never had). A picture's `src`
@@ -76,6 +92,9 @@ export type LayoutInline =
       /** Note reference metadata (Word's FootnoteReference / EndnoteReference).
        *  The paginator reads this to anchor footnotes to the page where this run lands. */
       noteRef?: LayoutInlineNoteRef;
+      /** Phonetic guide (w:ruby): the annotation paints above the base glyphs
+       *  and the line's natural height reserves space for it. */
+      ruby?: LayoutRuby;
     }
   | { kind: "break" }
   | { kind: "tab"; toPx?: number }

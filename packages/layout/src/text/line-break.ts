@@ -666,6 +666,16 @@ export function packLines(inline: LayoutInline[], opts: PackLinesOptions): Packe
             // advance compression; the painter draws at the given x).
             const at = squeeze ? xStart + (xFrag - xStart) * squeeze : xFrag;
             if (src.kind === "text") {
+              // A phonetic guide (w:ruby) reserves annotation space above the
+              // base: the line's natural height grows by the annotation's
+              // ascent, and the placed item carries the guide only when the
+              // run's full text landed on this line — a ruby split across
+              // lines annotates neither half.
+              const whole = src.ruby != null && frag.text === src.text;
+              const rubyLiftPx = whole
+                ? measurer.analyze(src.ruby!.text, { ...src.style, sizePx: src.ruby!.fontSizePx })
+                    .naturalPx
+                : 0;
               lineItems.push({
                 kind: "text",
                 inlineIndex,
@@ -676,10 +686,12 @@ export function packLines(inline: LayoutInline[], opts: PackLinesOptions): Packe
                 // editor's caret map reads it to keep them out of the PM
                 // offset space.
                 synthetic: src.synthetic,
+                ...(whole && src.ruby ? { ruby: src.ruby, rubyLiftPx } : {}),
               });
               hasText = true;
               const analyzed = measurer.analyze(src.text, src.style);
-              if (analyzed.naturalPx > naturalPx) naturalPx = analyzed.naturalPx;
+              if (analyzed.naturalPx + rubyLiftPx > naturalPx)
+                naturalPx = analyzed.naturalPx + rubyLiftPx;
               if (textEmPx == null || src.style.sizePx > textEmPx) textEmPx = src.style.sizePx;
               if (analyzed.hasCjk) hasCjk = true;
             } else if (src.kind === "picture") {

@@ -11,6 +11,7 @@ import type {
   LayoutIndent,
   LayoutInline,
   LayoutParagraphBorderEdge,
+  LayoutRuby,
   LayoutTableBorders,
 } from "./layout-doc";
 
@@ -27,6 +28,14 @@ export interface LaidOutTextItem {
   /** Carried from the source inline item (a numbering marker): synthesized
    *  paint content with no document-model character behind it. */
   synthetic?: boolean;
+  /** The phonetic guide riding this item — present only when the run's full
+   *  text landed on this line (a ruby split across lines annotates neither
+   *  half; the 拼音指南 dialog annotates per character, where this never
+   *  fires). */
+  ruby?: LayoutRuby;
+  /** The base text's drop below the line top — the annotation space the
+   *  painter sinks the glyphs by and the caret band anchors to. */
+  rubyLiftPx?: number;
 }
 
 export interface LaidOutPictureItem {

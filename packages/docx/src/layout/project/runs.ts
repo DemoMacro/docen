@@ -165,6 +165,35 @@ export function projectRuns(
       }
     }
   };
+  /** Flatten a w:rt / w:rubyBase content's runs to plain text — the
+   *  annotation has no formatting of its own beyond its font size. */
+  const rubyContentText = (content: unknown): string => {
+    if (!isRecord(content) || !Array.isArray(content.children)) return "";
+    let text = "";
+    for (const c of content.children) {
+      if (typeof c === "string") text += c;
+      else if (isRecord(c) && typeof c.text === "string") text += c.text;
+    }
+    return text;
+  };
+  const pushRuby = (ruby: Rec, rPr: Rec): void => {
+    const baseText = rubyContentText(ruby.base);
+    if (!baseText) return;
+    const props = isRecord(ruby.properties) ? ruby.properties : {};
+    const style = textStyleOf(rPr);
+    // Word's default annotation is half the base size (w:hps absent).
+    const sizePt = num(props.fontSize);
+    out.push({
+      kind: "text",
+      text: baseText,
+      style,
+      ruby: {
+        text: rubyContentText(ruby.text),
+        alignment: str(props.alignment),
+        fontSizePx: sizePt != null ? ptToPx(sizePt) : style.sizePx / 2,
+      },
+    });
+  };
   const pushPicture = (pic: Rec): void => {
     // A floating picture is an anchored drawing (projectDrawings), not an
     // inline atom — projecting it here too would double-render it.
@@ -249,6 +278,10 @@ export function projectRuns(
         });
       }
       if (typeof child.text === "string") pushText(child.text, rPr);
+      // A phonetic guide (w:ruby — Word's 拼音指南): the base text stays the
+      // atom's own text (the guide rides as paint metadata); consumed here so
+      // the children walk below does not re-emit the base runs verbatim.
+      if (isRecord(child.ruby)) pushRuby(child.ruby, rPr);
       if (child.break != null) out.push({ kind: "break" });
       if (child.tab != null) out.push({ kind: "tab" });
       if (isRecord(child.math)) {

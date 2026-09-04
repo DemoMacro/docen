@@ -325,8 +325,9 @@ export function paintParagraph(
           x: lineX + item.xPx,
           // A raised/lowered run (w:vertAlign — the footnote reference) paints
           // at the scaled size on a shifted baseline; the scaling itself is
-          // the shared vertAlignedSizePx so measure and paint agree.
-          y: lineY + pad + vertAlignBaselineShiftPx(inline.style),
+          // the shared vertAlignedSizePx so measure and paint agree. A ruby
+          // base sinks below the annotation space reserved at the line top.
+          y: lineY + pad + (item.rubyLiftPx ?? 0) + vertAlignBaselineShiftPx(inline.style),
           // width ONLY on justified/squeezed items (their stretch interval
           // or compressed width): a width on every line would let Leafer
           // wrap the slice again with its own metrics (a phantom second
@@ -383,11 +384,35 @@ export function paintParagraph(
             : undefined,
         });
         tree.add(textEl);
+        // The phonetic guide (w:ruby): the annotation fills the space
+        // reserved above the base glyphs, centered within the base's width —
+        // Word's default; the other ST_RubyAlign tokens shift the same box.
+        if (item.ruby) {
+          const size = item.ruby.fontSizePx;
+          tree.add(
+            new Text({
+              x: lineX + item.xPx,
+              y: lineY + pad,
+              width: item.widthPx,
+              textWrap: "none",
+              height: Math.max(1, size),
+              textAlign: "center",
+              text: item.ruby.text,
+              fill: inline.style.color ? `#${inline.style.color}` : "#1b1b1b",
+              fontFamily: family,
+              fontSize: size,
+              lineHeight: size,
+              fontWeight: inline.style.bold ? 700 : 400,
+              italic: inline.style.italic,
+              hittable: false,
+            }),
+          );
+        }
         const pattern = underlinePatternOf(inline.style);
         if (pattern) {
           paintUnderlinePattern(tree, pattern, inline.style, {
             x: lineX + item.xPx,
-            y: lineY + pad + vertAlignBaselineShiftPx(inline.style),
+            y: lineY + pad + (item.rubyLiftPx ?? 0) + vertAlignBaselineShiftPx(inline.style),
             width: intervalPx ?? item.widthPx,
             emPx: vertAlignedSizePx(inline.style),
           });

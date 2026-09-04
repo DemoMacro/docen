@@ -269,3 +269,49 @@ describe("packLines inter-run gaps", () => {
     expect(gap).toBeCloseTo(4, 5);
   });
 });
+
+describe("phonetic guide (ruby)", () => {
+  // 16px CJK base + 8px annotation: naturals 19.2 + 9.6 (ratio 1.2).
+  const rubyBase: LayoutInline = {
+    kind: "text",
+    text: "甲",
+    style: cjk,
+    ruby: { text: "jiǎ", alignment: "center", fontSizePx: 8 },
+  };
+
+  it("reserves annotation space in the line's natural height", () => {
+    const lines = pack([rubyBase], 400);
+    expect(lines).toHaveLength(1);
+    // base natural (16 × 1.2) + annotation natural (8 × 1.2)
+    expect(lines[0].naturalPx).toBeCloseTo(28.8, 5);
+    expect(lines[0].heightPx).toBeCloseTo(28.8, 5);
+  });
+
+  it("carries the guide with its lift on the whole-text item", () => {
+    const lines = pack([rubyBase], 400);
+    const texts = lines[0].items.filter(
+      (i): i is Extract<LaidOutLineItem, { kind: "text" }> => i.kind === "text",
+    );
+    expect(texts[0].ruby).toEqual({ text: "jiǎ", alignment: "center", fontSizePx: 8 });
+    expect(texts[0].rubyLiftPx).toBeCloseTo(9.6, 5);
+  });
+
+  it("annotates neither half when the base splits across lines", () => {
+    // "甲乙" = 32px wide; the 24px query forces a split after 甲.
+    const lines = pack(
+      [{ kind: "text", text: "甲乙", style: cjk, ruby: { text: "jiǎyǐ", fontSizePx: 8 } }],
+      24,
+    );
+    expect(lines.length).toBeGreaterThan(1);
+    for (const line of lines) {
+      // No half carries the annotation — and no line reserves its space.
+      expect(line.naturalPx).toBeCloseTo(19.2, 5);
+      for (const item of line.items) {
+        if (item.kind === "text") {
+          expect(item.ruby).toBeUndefined();
+          expect(item.rubyLiftPx).toBeUndefined();
+        }
+      }
+    }
+  });
+});
