@@ -99,6 +99,7 @@ import "./i18n";
 import type { OutlineItem } from "./components/outline";
 import { tableAncestry, WIRED_DISPATCH, type ParagraphDialogPatch } from "./extensions/commands";
 import type { TablePropertiesPatch } from "./extensions/commands";
+import type { BorderSideState, BordersDialogPatch } from "./extensions/commands";
 import { LOCAL_HANDLED, READONLY_LIVE, SAVE_FORMATS, detectOpenFormat } from "./file-formats";
 import { MARGINS, PAPER_SIZES, marginTwipsFromCss, mergeSectionProperties } from "./page-setup";
 import {
@@ -1223,6 +1224,11 @@ class DocenDocument extends AddinHost<Editor> {
       "table-properties:ok",
       this.#onTablePropertiesOk as EventListener,
     );
+    // Borders and Shading dialog — stamp the border/page/shading tab.
+    this.shadowRoot!.querySelector("docen-borders-shading-dialog")?.addEventListener(
+      "borders-shading:ok",
+      this.#onBordersShadingOk as EventListener,
+    );
     this.shadowRoot!.querySelector("docen-status-bar")?.addEventListener(
       "zoom:open",
       this.#onZoomOpen as EventListener,
@@ -1683,6 +1689,9 @@ class DocenDocument extends AddinHost<Editor> {
     this.shadowRoot
       ?.querySelector("docen-table-properties-dialog")
       ?.removeEventListener("table-properties:ok", this.#onTablePropertiesOk as EventListener);
+    this.shadowRoot
+      ?.querySelector("docen-borders-shading-dialog")
+      ?.removeEventListener("borders-shading:ok", this.#onBordersShadingOk as EventListener);
     this.shadowRoot
       ?.querySelector("docen-page-setup-dialog")
       ?.removeEventListener("page-setup:ok", this.#onPageSetupOk as EventListener);
@@ -2701,6 +2710,71 @@ class DocenDocument extends AddinHost<Editor> {
     target?.commands["table-properties-apply"]?.(patch);
     this.#bridge?.focus();
   };
+
+  // The Borders and Shading dialog's OK — route by tab: the border tab
+  // stamps the selected paragraphs' w:pBdr, the page tab the current
+  // section's w:pgBorders, and the shading tab the paragraph fill.
+  readonly #onBordersShadingOk = (event: CustomEvent<BordersDialogPatch | undefined>): void => {
+    const patch = event.detail;
+    if (!patch) return;
+    if (patch.tab === "shading") {
+      const target = this.#bridge?.activeEditor() ?? this.editor;
+      target?.commands.shading?.(patch.fill ? patch.fill : "none");
+      this.#bridge?.focus();
+      return;
+    }
+    if (patch.tab === "border") {
+      const target = this.#bridge?.activeEditor() ?? this.editor;
+      target?.commands["borders-apply"]?.(patch);
+      this.#bridge?.focus();
+      return;
+    }
+    // Page tab — every edge null removes the pgBorders (Word's "none").
+    const sides = patch.sides ?? {};
+    const edge = (s: BorderSideState | null | undefined): BorderOptions | undefined =>
+      s
+        ? {
+            style: s.style as BorderOptions["style"],
+            size: Math.max(2, Math.round(s.size)),
+            color: s.color ?? "auto",
+            space: 0,
+          }
+        : undefined;
+    const borders: PageBordersOptions | undefined =
+      sides.top || sides.bottom || sides.left || sides.right
+        ? {
+            offsetFrom: "text",
+            top: edge(sides.top),
+            left: edge(sides.left),
+            bottom: edge(sides.bottom),
+            right: edge(sides.right),
+          }
+        : undefined;
+    this.#updateSectionGeometry({ pageBorders: borders });
+  };
+
+  // Open the Borders and Shading dialog on `tab`, prefilling the border tab
+  // from the caret paragraph's w:pBdr and the page tab from the current
+  // section's w:pgBorders.
+  #openBordersDialog(tab: "border" | "page" | "shading"): void {
+    const target = this.#bridge?.activeEditor() ?? this.editor;
+    const dialog = this.shadowRoot?.querySelector("docen-borders-shading-dialog") as {
+      show(tab: "border" | "page" | "shading", border?: unknown, page?: unknown): void;
+    } | null;
+    if (!target || !dialog) return;
+    // The caret paragraph's attrs (formattable block only — a code block or
+    // a table cell still carries paragraph attrs here).
+    const { $from } = target.state.selection;
+    const block = $from.parent.type.isTextblock
+      ? ($from.parent.attrs as Record<string, unknown>)
+      : null;
+    const border = (block?.border ?? null) as Record<string, unknown> | null;
+    const page = (this.#currentSectionProperties()?.pageBorders ?? null) as Record<
+      string,
+      unknown
+    > | null;
+    dialog.show(tab, border, page);
+  }
 
   // The Font dialog's prefill — the selection's first text run decides every
   // field (Word reads the same way; a mixed-format selection shows the first
@@ -4043,6 +4117,13 @@ class DocenDocument extends AddinHost<Editor> {
           | string
           | { themeColor: string; val: string; themeTint?: string; themeShade?: string },
       );
+      return;
+    }
+    // The Borders and Shading dialog entries — the border split's and the
+    // page-border split's last item carry the dialog value; the source split
+    // picks the tab (the remaining preset values fall through below).
+    if (value === "borders-shading" && (name === "border" || name === "page-border")) {
+      this.#openBordersDialog(name === "page-border" ? "page" : "border");
       return;
     }
     if (name === "page-border") {

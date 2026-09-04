@@ -69,6 +69,7 @@ declare module "@tiptap/core" {
       shading: (value?: unknown) => ReturnType;
       "font-color": (value?: unknown) => ReturnType;
       border: (side?: string) => ReturnType;
+      "borders-apply": (patch?: BordersDialogPatch) => ReturnType;
       // Lists / blocks
       "bullet-list": (variant?: string) => ReturnType;
       "ordered-list": (variant?: string) => ReturnType;
@@ -269,6 +270,24 @@ export interface TablePropertiesPatch {
   alignment: "left" | "center" | "right";
   /** w:tblInd left indent in twips; 0 commits null. */
   indent: number;
+}
+
+/** One w:pBdr edge as the dialog stages it: the ST_Border style token, the
+ *  width in eighths of a point, and the hex color (null = auto ink). */
+export interface BorderSideState {
+  style: string;
+  size: number;
+  color: string | null;
+}
+
+/** What the Borders and Shading dialog commits on OK: the stamp target tab,
+ *  the per-edge borders (border/page tabs — every edge present, null clears),
+ *  or the paragraph fill (shading tab, null clears). */
+export interface BordersDialogPatch {
+  tab: "border" | "page" | "shading";
+  sides?: Partial<Record<"top" | "bottom" | "left" | "right", BorderSideState | null>>;
+  /** Hex RRGGBB paragraph fill; null clears the shading. */
+  fill?: string | null;
 }
 
 // ── Pure helpers (take EditorState, return data; never touch the chain) ──
@@ -1182,6 +1201,34 @@ export const DocumentCommands = Extension.create({
             const current = (attrs.border ?? {}) as Record<string, unknown>;
             const border = { ...current };
             for (const side of sides) border[side] = { ...DEFAULT_BORDER };
+            tr.setNodeMarkup(pos, undefined, { ...attrs, border });
+          }
+          return true;
+        },
+      // The Borders and Shading dialog's OK (border tab) — replaces each
+      // selected paragraph's w:pBdr wholesale with the staged sides (a null
+      // edge clears that side; every edge null drops the border).
+      "borders-apply":
+        (patch) =>
+        ({ state, tr }) => {
+          if (!patch?.sides) return false;
+          const blocks = selectedParagraphs(state);
+          if (!blocks.length) return false;
+          for (const { pos, node } of blocks) {
+            const attrs = node.attrs as Record<string, unknown>;
+            const current = { ...((attrs.border ?? {}) as Record<string, unknown>) };
+            for (const side of BORDER_SIDES) {
+              const edge = patch.sides[side];
+              if (!edge) delete current[side];
+              else
+                current[side] = {
+                  style: edge.style,
+                  size: Math.max(2, Math.round(edge.size)),
+                  color: edge.color ?? "auto",
+                  space: 0,
+                };
+            }
+            const border = Object.keys(current).length ? current : null;
             tr.setNodeMarkup(pos, undefined, { ...attrs, border });
           }
           return true;

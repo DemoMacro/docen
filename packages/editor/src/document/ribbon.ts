@@ -174,6 +174,7 @@ const borderItems = (): string =>
     { text: opt("right"), value: "right" },
     { text: opt("all"), value: "all" },
     { text: opt("outside"), value: "outside" },
+    { text: opt("borders-shading"), value: "borders-shading" },
   ]);
 
 const findItems = (): string =>
@@ -370,6 +371,7 @@ const pageBorderItems = (): string =>
     { text: opt("page-border-shadow"), value: "shadow" },
     { text: opt("page-border-double"), value: "double" },
     { text: opt("page-border-dashed"), value: "dashed" },
+    { text: opt("borders-shading"), value: "borders-shading" },
   ]);
 
 /** The Watermark split's drop-down: Word's preset gallery plus Remove. */

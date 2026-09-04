@@ -216,6 +216,7 @@ export const documentTemplate = html`
   <docen-paste-special-dialog part="paste-special"></docen-paste-special-dialog>
   <docen-font-dialog part="font"></docen-font-dialog>
   <docen-table-properties-dialog part="table-properties"></docen-table-properties-dialog>
+  <docen-borders-shading-dialog part="borders-shading"></docen-borders-shading-dialog>
   <docen-find-replace-dialog></docen-find-replace-dialog>
   <input type="file" id="file-input" accept=".docx,.md,.markdown" hidden />
   <input type="file" id="image-input" accept="image/*" hidden />
