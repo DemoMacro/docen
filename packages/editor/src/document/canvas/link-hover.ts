@@ -2,7 +2,7 @@
 // hovering a link shows its URL with the Ctrl+Click hint, and Ctrl+Click
 // follows it (a plain click keeps editing, dropping the caret).
 
-import { t } from "../../ui";
+import { t } from "../../ui/i18n/localize";
 
 /** A resolved link mark at a caret position. */
 export interface LinkHit {
@@ -80,7 +80,7 @@ export function installLinkHover(deps: LinkHoverDeps): {
     if (hrefChanged) {
       shownHref = link.href;
       url.textContent = link.href;
-      hint.textContent = t("docen.link.hint");
+      hint.textContent = t("docen.link.hint", deps.host);
       tip.style.display = "block";
     }
     // Park the tooltip under the pointer, clamped into the host's right edge.

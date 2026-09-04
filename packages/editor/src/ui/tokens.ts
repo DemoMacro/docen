@@ -30,12 +30,15 @@ export const OFFICE_TOKENS_CSS = `
   --docen-color-subtle-background-hover: var(--colorSubtleBackgroundHover, #f5f5f5);
   --docen-color-text: var(--colorNeutralForeground2, #444444);
   --docen-color-text-1: var(--colorNeutralForeground1, #242424);
+  --docen-color-text-2: var(--colorNeutralForeground2, #424242);
   --docen-color-text-3: var(--colorNeutralForeground3, #616161);
   --docen-color-text-muted: var(--colorNeutralForeground3, #666666);
   --docen-color-divider: var(--colorNeutralStroke2, #e2e2e2);
   --docen-color-stroke-1: var(--colorNeutralStroke1, #c7c7c7);
   --docen-color-brand: var(--colorBrandBackground, #0078d4);
   --docen-color-accent: var(--colorBrandBackground, #0f6cbd);
+  --docen-color-subtle-background-selected: var(--colorSubtleBackgroundSelected, #e8e8e8);
+  --docen-color-subtle-selected: var(--colorBrandBackground2, #e8f0fb);
 
   /* Page paper — reuse Fluent's neutral background so the sheet follows the
      active theme (white in light, dark in dark/high-contrast), like Word's

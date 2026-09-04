@@ -1,6 +1,6 @@
 import type { JSONContent, SectionPropertiesOptions, StylesOptions } from "@docen/docx";
 import type { Editor } from "@docen/docx/core";
-import type { DocenAddin, VisibilityMode } from "@docen/editor";
+import type { DocenAddin, TaskPaneId, VisibilityMode } from "@docen/editor";
 import type { PropType } from "vue";
 import {
   computed,
@@ -14,8 +14,6 @@ import {
 } from "vue";
 // Side-effect: registers the <docen-document> custom element on first import.
 import "@docen/editor";
-
-type TaskPaneId = "navigation" | "properties";
 
 type DocenEl = HTMLElement & {
   editor?: Editor;

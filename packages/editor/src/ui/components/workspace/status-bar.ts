@@ -20,6 +20,7 @@ const styles = css`
   }
   .left {
     display: flex;
+    align-items: center;
     gap: 14px;
   }
   /* Right cluster — Word's zoom control: a minus / plus button flanking a
