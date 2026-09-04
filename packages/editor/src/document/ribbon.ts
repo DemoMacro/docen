@@ -1349,7 +1349,9 @@ export function tableContextTabs(scope?: Element): RibbonTab[] {
       contextual: true,
       groups: [
         group("table", [
-          // Table Properties opens Word's dialog (not built) — greying marks it.
+          // Table Properties opens Word's table dialog (read arrives via
+          // #onCommand, the commit via table-properties:ok — same pair as the
+          // context menu's entry).
           btn("table-properties", "table-properties", { size: "large" }),
           // Word stacks Select over Delete — two small menus, one column.
           col([

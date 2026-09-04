@@ -98,6 +98,7 @@ import { documentStyles, documentTemplate, escapeHtml } from "./chrome";
 import "./i18n";
 import type { OutlineItem } from "./components/outline";
 import { tableAncestry, WIRED_DISPATCH, type ParagraphDialogPatch } from "./extensions/commands";
+import type { TablePropertiesPatch } from "./extensions/commands";
 import { LOCAL_HANDLED, READONLY_LIVE, SAVE_FORMATS, detectOpenFormat } from "./file-formats";
 import { MARGINS, PAPER_SIZES, marginTwipsFromCss, mergeSectionProperties } from "./page-setup";
 import {
@@ -1217,6 +1218,11 @@ class DocenDocument extends AddinHost<Editor> {
       "font:ok",
       this.#onFontDialogOk as EventListener,
     );
+    // Table Properties dialog — rewrite the caret table's alignment/indent.
+    this.shadowRoot!.querySelector("docen-table-properties-dialog")?.addEventListener(
+      "table-properties:ok",
+      this.#onTablePropertiesOk as EventListener,
+    );
     this.shadowRoot!.querySelector("docen-status-bar")?.addEventListener(
       "zoom:open",
       this.#onZoomOpen as EventListener,
@@ -1674,6 +1680,9 @@ class DocenDocument extends AddinHost<Editor> {
     this.shadowRoot
       ?.querySelector("docen-font-dialog")
       ?.removeEventListener("font:ok", this.#onFontDialogOk as EventListener);
+    this.shadowRoot
+      ?.querySelector("docen-table-properties-dialog")
+      ?.removeEventListener("table-properties:ok", this.#onTablePropertiesOk as EventListener);
     this.shadowRoot
       ?.querySelector("docen-page-setup-dialog")
       ?.removeEventListener("page-setup:ok", this.#onPageSetupOk as EventListener);
@@ -2683,6 +2692,16 @@ class DocenDocument extends AddinHost<Editor> {
     this.#bridge?.focus();
   };
 
+  // The Table Properties dialog's OK — rewrite the caret table's alignment
+  // and left indent (the dialog prefills from the same table's attrs).
+  readonly #onTablePropertiesOk = (event: CustomEvent<TablePropertiesPatch | undefined>): void => {
+    const patch = event.detail;
+    if (!patch) return;
+    const target = this.#bridge?.activeEditor() ?? this.editor;
+    target?.commands["table-properties-apply"]?.(patch);
+    this.#bridge?.focus();
+  };
+
   // The Font dialog's prefill — the selection's first text run decides every
   // field (Word reads the same way; a mixed-format selection shows the first
   // run's values). Underline falls back to the textStyle attr channel when no
@@ -3188,6 +3207,15 @@ class DocenDocument extends AddinHost<Editor> {
       items.push({ text: t("ribbon.cmd.delete-row", this), event: "delete-row" });
       items.push({ text: t("ribbon.cmd.delete-column", this), event: "delete-column" });
       items.push({ text: t("context.delete-table", this), event: "delete-table" });
+      // Word's merge/split + AutoFit + the Properties entry close the table
+      // menu (commands shared with the Table Layout tab).
+      items.push({ text: "-" });
+      items.push({ text: t("ribbon.cmd.merge-cells", this), event: "merge-cells" });
+      items.push({ text: t("ribbon.cmd.split-cell", this), event: "split-cell" });
+      items.push({ text: t("ribbon.opt.autofit-contents", this), event: "autofit-contents" });
+      items.push({ text: t("ribbon.opt.autofit-window", this), event: "autofit-window" });
+      items.push({ text: "-" });
+      items.push({ text: t("context.table-properties", this), event: "table-properties" });
     }
     menu.setAttribute("items", JSON.stringify(items));
   };
@@ -3967,6 +3995,22 @@ class DocenDocument extends AddinHost<Editor> {
         show(state: FontDialogPatch): void;
       } | null;
       if (target && dialog) dialog.show(this.#runStateOf(target.state));
+      return;
+    }
+    // Table Properties — open the dialog prefilled from the caret table's
+    // attrs; the commit arrives via table-properties:ok
+    // (table-properties-apply). No caret table → nothing to show.
+    if (name === "table-properties") {
+      const target = this.#bridge?.activeEditor() ?? editor;
+      const anchor = target ? tableAncestry(target.state) : null;
+      const dialog = this.shadowRoot?.querySelector("docen-table-properties-dialog") as {
+        show(attrs?: Record<string, unknown>): void;
+      } | null;
+      if (target && anchor && dialog) {
+        dialog.show(
+          target.state.selection.$from.node(anchor.tableAt).attrs as Record<string, unknown>,
+        );
+      }
       return;
     }
     // Bookmark — prompt for a name and wrap the selection with a

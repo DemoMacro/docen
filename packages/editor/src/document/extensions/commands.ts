@@ -109,6 +109,7 @@ declare module "@tiptap/core" {
       "cell-margins": (value?: string) => ReturnType;
       "cell-width": (value?: string) => ReturnType;
       "cell-height": (value?: string) => ReturnType;
+      "table-properties-apply": (patch?: TablePropertiesPatch) => ReturnType;
       link: (href?: string) => ReturnType;
       style: (styleId?: string) => ReturnType;
       "add-text": (value?: string) => ReturnType;
@@ -256,6 +257,18 @@ export interface ParagraphDialogPatch {
   keepNext: boolean;
   keepLines: boolean;
   pageBreakBefore: boolean;
+}
+
+/**
+ * What the Table Properties dialog commits on OK — the table tab's geometry
+ * (alignment and left indent in twips), stamped onto the caret's table by
+ * {@link documentCommands.table-properties-apply}.
+ */
+export interface TablePropertiesPatch {
+  /** w:jc table alignment — "left" commits null (OOXML's default). */
+  alignment: "left" | "center" | "right";
+  /** w:tblInd left indent in twips; 0 commits null. */
+  indent: number;
 }
 
 // ── Pure helpers (take EditorState, return data; never touch the chain) ──
@@ -2059,6 +2072,38 @@ export const DocumentCommands = Extension.create({
                 .setNodeMarkup(targets.tablePos, undefined, {
                   ...targets.tableNode.attrs,
                   columnWidths: next,
+                })
+                .scrollIntoView(),
+            );
+          }
+          return true;
+        },
+      // Table Properties dialog's OK — writes the caret table's w:jc
+      // alignment and w:tblInd indent in one transaction ("left" and 0
+      // commit null, OOXML's absent-attribute default).
+      "table-properties-apply":
+        (patch) =>
+        ({ state, dispatch }) => {
+          if (
+            !patch ||
+            (patch.alignment !== "left" &&
+              patch.alignment !== "center" &&
+              patch.alignment !== "right") ||
+            typeof patch.indent !== "number" ||
+            patch.indent < 0
+          )
+            return false;
+          const anchor = tableAncestry(state);
+          if (!anchor) return false;
+          const { $from } = state.selection;
+          const tableNode = $from.node(anchor.tableAt);
+          if (dispatch) {
+            dispatch(
+              state.tr
+                .setNodeMarkup($from.before(anchor.tableAt), undefined, {
+                  ...tableNode.attrs,
+                  alignment: patch.alignment === "left" ? null : patch.alignment,
+                  indent: patch.indent > 0 ? Math.round(patch.indent) : null,
                 })
                 .scrollIntoView(),
             );

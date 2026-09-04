@@ -113,6 +113,10 @@ export const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   // Font opens the font dialog prefilled from the selection's run marks
   // (the commit arrives via font:ok, stamped mark-by-mark by #onFontDialogOk).
   "font-dialog",
+  // Table Properties opens the table dialog prefilled from the caret table's
+  // attrs (the commit arrives via table-properties:ok → table-properties-apply,
+  // which rewrites the table's w:jc alignment and w:tblInd indent).
+  "table-properties",
   // Footnote prompts for the note text, references the caret and appends the
   // note body to documentExtras.footnotes. Equation drops a placeholder
   // math template (the gallery's fraction/script/radical/sum/integral) at
