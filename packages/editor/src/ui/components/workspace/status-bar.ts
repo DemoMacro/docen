@@ -8,7 +8,7 @@ import {
   ref,
 } from "@microsoft/fast-element";
 
-import { availableLanguages, observeLang, resolveLang, t } from "../../i18n/localize";
+import { observeLang, t } from "../../i18n/localize";
 
 const styles = css`
   :host {
@@ -274,6 +274,9 @@ class DocenStatusBar extends FASTElement {
    *  (a green check vs a red cross, Word's spell indicator). Named `proofing`
    *  because `spellcheck` is a native HTMLElement property (boolean). */
   @attr proofing?: string;
+  /** The caret's proofing-language display name (Word shows the selection's
+   *  w:lang in the status bar); a click opens the language dialog. */
+  @attr language?: string;
 
   @observable sectionEl?: HTMLElement;
   @observable pagesEl?: HTMLElement;
@@ -308,6 +311,9 @@ class DocenStatusBar extends FASTElement {
   proofingChanged(): void {
     this.#syncSpellState();
   }
+  languageChanged(): void {
+    this.#renderLanguage();
+  }
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -316,7 +322,9 @@ class DocenStatusBar extends FASTElement {
     this.slider?.addEventListener("input", () => this.#emit(Number(this.slider?.value ?? 100)));
     this.outBtn?.addEventListener("click", () => this.#emit(Number(this.zoom ?? 100) - 10));
     this.inBtn?.addEventListener("click", () => this.#emit(Number(this.zoom ?? 100) + 10));
-    this.langBtn?.addEventListener("click", () => this.#toggleLang());
+    // The language item opens the proofing-language dialog (Word) — it does
+    // NOT switch the UI language (that lives in File → Options).
+    this.langBtn?.addEventListener("click", () => this.#emitOpenLanguage());
     // The percent opens the Zoom dialog (Word), and the view shortcuts select
     // a document view — the host decides which view each name maps to.
     this.pctEl?.addEventListener("click", () => this.#emitOpenZoom());
@@ -335,7 +343,6 @@ class DocenStatusBar extends FASTElement {
     }
     this.#unsubscribe = observeLang(() => {
       this.#renderAll();
-      this.#renderLang();
       this.#renderViewTitles();
     });
     this.#renderViewTitles();
@@ -388,6 +395,16 @@ class DocenStatusBar extends FASTElement {
     this.dispatchEvent(new CustomEvent("spellcheck:open", { bubbles: true, composed: true }));
   }
 
+  #emitOpenLanguage(): void {
+    this.dispatchEvent(new CustomEvent("language:open", { bubbles: true, composed: true }));
+  }
+
+  /** The proofing-language item mirrors the host-provided display name (the
+   *  caret run's w:lang, like Word's status bar). */
+  #renderLanguage(): void {
+    if (this.langBtn) this.langBtn.textContent = this.language ?? "";
+  }
+
   /** The book's check/cross face + localized tooltip mirror the host's
    *  proofing state. */
   #syncSpellState(): void {
@@ -416,35 +433,6 @@ class DocenStatusBar extends FASTElement {
     this.#renderPages();
     this.#renderWords();
     this.#renderZoom();
-  }
-
-  #renderLang(): void {
-    if (!this.langBtn) return;
-    // Show the current locale's display name — every registered language
-    // exposes `$name` via availableLanguages(), so this tracks new locales
-    // automatically (no per-language branch needed).
-    const current = resolveLang(this);
-    const found = availableLanguages().find((l) => l.languageTag === current);
-    this.langBtn.textContent = found?.$name ?? current;
-  }
-
-  #toggleLang(): void {
-    // Cycle through every registered language (en → zh-CN → fr → en …),
-    // not a hard-coded zh ↔ en flip. New locales register via
-    // registerTranslation / addin.localizationInfo and join the rotation
-    // with no change here.
-    const langs = availableLanguages();
-    if (langs.length < 2) return;
-    const current = resolveLang(this);
-    const idx = langs.findIndex((l) => l.languageTag === current);
-    const next = langs[(idx + 1) % langs.length];
-    this.#emitLang(next.languageTag);
-  }
-
-  #emitLang(lang: string): void {
-    this.dispatchEvent(
-      new CustomEvent("lang:change", { bubbles: true, composed: true, detail: { lang } }),
-    );
   }
 
   #renderSection(): void {

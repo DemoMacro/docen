@@ -72,6 +72,7 @@ import {
 } from "../ui";
 import type { ColumnsValues } from "../ui/components/workspace/columns-dialog";
 import type { FontDialogPatch } from "../ui/components/workspace/font-dialog";
+import { proofingLanguageName } from "../ui/components/workspace/language-dialog";
 import type { LinkValues } from "../ui/components/workspace/link-dialog";
 import type { PageSetupValues } from "../ui/components/workspace/page-setup-dialog";
 import { createDefaultAddin, textCounter } from "./addin";
@@ -1214,14 +1215,20 @@ class DocenDocument extends AddinHost<Editor> {
       "find-replace:action",
       this.#onFindReplace as EventListener,
     );
-    // Options dialog — ok; status-bar language indicator — lang:change.
+    // Options dialog — ok (UI language + theme).
     this.shadowRoot!.querySelector("docen-options-dialog")?.addEventListener(
       "options:ok",
       this.#onOptionsOk as EventListener,
     );
+    // Language dialog — commit the selection's proofing language (w:lang).
+    this.shadowRoot!.querySelector("docen-language-dialog")?.addEventListener(
+      "language:ok",
+      this.#onLanguageOk as EventListener,
+    );
+    // Status-bar language item — open the language dialog (Word semantics).
     this.shadowRoot!.querySelector("docen-status-bar")?.addEventListener(
-      "lang:change",
-      this.#onLangChange as EventListener,
+      "language:open",
+      this.#onLanguageOpen as EventListener,
     );
     // Symbol dialog — insert the picked character at the caret.
     this.shadowRoot!.querySelector("docen-symbol-dialog")?.addEventListener(
@@ -1791,6 +1798,7 @@ class DocenDocument extends AddinHost<Editor> {
     this.#updateStatus();
     this.#syncCommentsPane();
     this.#scheduleSpellCheck();
+    this.#syncStatusLanguage();
   }
 
   /** The previous render's flow result — the diff base for the next one. */
@@ -1826,7 +1834,10 @@ class DocenDocument extends AddinHost<Editor> {
       ?.removeEventListener("options:ok", this.#onOptionsOk as EventListener);
     this.shadowRoot
       ?.querySelector("docen-status-bar")
-      ?.removeEventListener("lang:change", this.#onLangChange as EventListener);
+      ?.removeEventListener("language:open", this.#onLanguageOpen as EventListener);
+    this.shadowRoot
+      ?.querySelector("docen-language-dialog")
+      ?.removeEventListener("language:ok", this.#onLanguageOk as EventListener);
     this.shadowRoot
       ?.querySelector("docen-symbol-dialog")
       ?.removeEventListener("symbol:insert", this.#onSymbolInsert as EventListener);
@@ -2336,6 +2347,8 @@ class DocenDocument extends AddinHost<Editor> {
    *  mirroring OnlyOffice's onDocumentStateChange). Selection-only transactions
    *  are skipped. */
   readonly #onTransaction = (props: { transaction: Transaction }): void => {
+    // The status-bar language mirrors the caret's proofing language (Word).
+    if (props.transaction.selectionSet) this.#syncStatusLanguage();
     if (props.transaction.docChanged) {
       this.#jsonDirty = true;
       this.dispatchEvent(
@@ -4640,6 +4653,12 @@ class DocenDocument extends AddinHost<Editor> {
       }
       return;
     }
+    // Language (Review → Language, the status-bar language item): the
+    // proofing-language dialog for the selection.
+    if (name === "language") {
+      this.#onLanguageOpen();
+      return;
+    }
     // Editing → Select: selectAll() spans the whole document.
     if (name === "select") {
       this.#select(value);
@@ -4730,15 +4749,53 @@ class DocenDocument extends AddinHost<Editor> {
     notifyLocaleChange();
   }
 
-  readonly #onLangChange = (event: Event): void => {
-    const lang = (event as CustomEvent<{ lang: string }>).detail?.lang;
-    // Set on the host (not <html lang>) so locale is per-instance; the
-    // #langObserver forwards to the workspace and notifies observers.
-    if (lang) {
-      this.setAttribute("lang", lang);
-      this.#emitLangChange(lang);
-    }
+  /** The caret's proofing language (the textStyle mark's w:lang fields).
+   *  Runs without an explicit mark show the default proofing language —
+   *  Word mirrors the editing language implied by the UI locale here. */
+  #caretLanguage(): { value: string; noProof: boolean } {
+    const editor = this.editor;
+    const mark = editor?.state.selection.$from.marks().find((m) => m.type.name === "textStyle");
+    const language = mark?.attrs.language as { value?: string } | undefined;
+    const fallback = (document.documentElement.lang || "en").startsWith("zh") ? "zh-CN" : "en-US";
+    return { value: language?.value || fallback, noProof: mark?.attrs.noProof === true };
+  }
+
+  /** Status-bar language item / Review → Language — open the dialog prefilled
+   *  from the caret's current proofing language. */
+  readonly #onLanguageOpen = (): void => {
+    const dialog = this.shadowRoot?.querySelector("docen-language-dialog") as unknown as {
+      show(tag: string | null, noProof?: boolean): void;
+    } | null;
+    const { value, noProof } = this.#caretLanguage();
+    dialog?.show(value || null, noProof);
   };
+
+  /** Language dialog 确定 — stamp the proofing language onto the selection's
+   *  runs (w:lang), plus/minus the "do not check spelling" flag (w:noProof).
+   *  Like Word, an empty selection is a no-op here (no input-language service
+   *  to feed). One chained transaction (the font-dialog pattern): `focus()`
+   *  resets the viewless editor's selection, so the bridge restores it after. */
+  readonly #onLanguageOk = (event: Event): void => {
+    const { value, noProof } = (event as CustomEvent<{ value?: string; noProof?: boolean }>)
+      .detail ?? { value: undefined, noProof: false };
+    const target = this.#bridge?.activeEditor() ?? this.editor;
+    if (!value || !target) return;
+    if (target.state.selection.empty) return;
+    target
+      .chain()
+      .setMark("textStyle", { language: { value }, noProof: noProof ? true : null })
+      .run();
+    this.#bridge?.focus();
+    this.#syncStatusLanguage();
+  };
+
+  /** Mirror the caret's proofing language into the status bar (Word shows the
+   *  selection's language there). */
+  #syncStatusLanguage(): void {
+    this.shadowRoot
+      ?.querySelector("docen-status-bar")
+      ?.setAttribute("language", proofingLanguageName(this.#caretLanguage().value));
+  }
 
   /** Options dialog 确定 — commit the UI language + theme. */
   readonly #onOptionsOk = (event: Event): void => {

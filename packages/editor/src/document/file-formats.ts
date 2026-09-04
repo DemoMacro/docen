@@ -94,6 +94,9 @@ export const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   // Spelling opens the proofing pane (Review → Spelling & Grammar); the
   // check itself and the pane actions are host state (#runSpellCheck).
   "spell-check",
+  // Language opens the proofing-language dialog (Review → Language, the
+  // status-bar language item); the commit stamps w:lang on the selection.
+  "language",
   // TOC insert/update — dispatch with the bridge's pageOf (page numbers live
   // in the canvas caret map, which editor.commands can't reach).
   "toc",

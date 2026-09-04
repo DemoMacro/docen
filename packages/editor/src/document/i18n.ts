@@ -767,6 +767,9 @@ export const ribbonEn: AdditionalLanguage = {
     "theme.teams-dark-v21": "Teams V21 Dark",
     // --- Canvas link tooltip ---
     "docen.link.hint": "Ctrl+Click to follow link",
+    // --- Language dialog (proofing language) ---
+    "languageDialog.title": "Language",
+    "languageDialog.noProof": "Do not check spelling or grammar",
   },
 };
 
@@ -1519,6 +1522,9 @@ export const ribbonZhCN: AdditionalLanguage = {
     "theme.teams-dark-v21": "Teams V21 深色",
     // --- Canvas link tooltip ---
     "docen.link.hint": "按住 Ctrl 并单击以访问链接",
+    // --- 语言对话框（校对语言） ---
+    "languageDialog.title": "语言",
+    "languageDialog.noProof": "不检查拼写或语法",
   },
 };
 

@@ -218,6 +218,7 @@ export const documentTemplate = html`
   <docen-zoom-dialog part="zoom"></docen-zoom-dialog>
   <docen-paste-special-dialog part="paste-special"></docen-paste-special-dialog>
   <docen-font-dialog part="font"></docen-font-dialog>
+  <docen-language-dialog part="language"></docen-language-dialog>
   <docen-table-properties-dialog part="table-properties"></docen-table-properties-dialog>
   <docen-borders-shading-dialog part="borders-shading"></docen-borders-shading-dialog>
   <docen-watermark-dialog part="watermark-dialog"></docen-watermark-dialog>
