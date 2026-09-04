@@ -29,16 +29,32 @@ const styles = css`
     display: flex;
     align-items: flex-end;
     background: var(--docen-color-tab-bg, #f0f0f0);
+    /* Narrow viewports: the tab row scrolls horizontally (touch swipe) instead
+       of pushing the trailing actions off-screen. */
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .rb-tabs::-webkit-scrollbar {
+    display: none;
   }
   .rb-tabs-start {
     flex: 0 0 auto;
   }
   /* Office-style tab-row trailing actions (Comment/Edit/Share…): pushed to the
      inline-end. The strip aligns tabs to the bottom (indicator meets the
-     panel), so override with align-self:center to vertically center actions. */
+     panel), so override with align-self:center to vertically center actions.
+     Sticky keeps them pinned to the visible right edge while the tab row
+     scrolls underneath; the opaque background masks the tabs passing by. */
   .rb-tabs-end {
     align-self: center;
+    /* Never shrink: a squeezed actions strip wraps its button labels
+       vertically (批/注 stacked) — overflow goes to the tab row instead. */
+    flex: none;
     margin-inline-start: auto;
+    position: sticky;
+    inset-inline-end: 0;
+    z-index: 1;
+    background: var(--docen-color-tab-bg, #f0f0f0);
     display: flex;
     align-items: center;
     gap: 2px;

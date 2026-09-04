@@ -18,7 +18,9 @@ const styles = css`
     display: flex;
     align-items: center;
     gap: 4px;
-    flex: 0 0 auto;
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
   }
   [part="search"] {
     flex: 1 1 auto;
@@ -36,6 +38,13 @@ const styles = css`
   ::slotted([slot="search"]) {
     width: 100%;
     max-width: 480px;
+  }
+  /* Phone width: the centered search goes (Word mobile has none either) and
+     the end cluster keeps only what fits. */
+  @media (max-width: 560px) {
+    [part="search"] {
+      display: none;
+    }
   }
 `;
 

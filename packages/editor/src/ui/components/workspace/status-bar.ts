@@ -22,6 +22,8 @@ const styles = css`
     display: flex;
     align-items: center;
     gap: 14px;
+    min-width: 0;
+    overflow: hidden;
   }
   /* Right cluster — Word's zoom control: a minus / plus button flanking a
      draggable slider, then the percent. The slider is a native range input
@@ -153,6 +155,22 @@ const styles = css`
   .lang-text {
     cursor: pointer;
     padding-inline: 2px;
+  }
+  /* Narrow viewports: drop the less essential items progressively and shrink
+     the zoom slider, so the bar fits a phone width without overflowing. */
+  @media (max-width: 720px) {
+    .section {
+      display: none;
+    }
+    .slider {
+      width: 48px;
+    }
+  }
+  @media (max-width: 560px) {
+    .views,
+    .lang-text {
+      display: none;
+    }
   }
 `;
 

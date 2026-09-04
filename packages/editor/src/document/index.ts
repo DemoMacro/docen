@@ -1798,7 +1798,12 @@ class DocenDocument extends AddinHost<Editor> {
             <docen-ribbon-button icon="undo" label="${t("header.undo", this)}" event="undo" icon-only></docen-ribbon-button>
             <docen-ribbon-button icon="redo" label="${t("header.redo", this)}" event="redo" icon-only></docen-ribbon-button>
             <fluent-menu>
-              <fluent-menu-button slot="trigger" appearance="subtle">${escapeHtml(filename)}</fluent-menu-button>
+              <fluent-menu-button
+                slot="trigger"
+                appearance="subtle"
+                style="max-width:36vw;overflow:hidden;white-space:nowrap"
+                title="${escapeHtml(filename)}"
+              >${escapeHtml(filename)}</fluent-menu-button>
               <fluent-menu-list>
                 <fluent-menu-item data-event="new">${t("header.new", this)}</fluent-menu-item>
                 <fluent-divider role="separator" aria-orientation="horizontal" orientation="horizontal"></fluent-divider>

@@ -73,7 +73,7 @@ HTML is **input-only**. The extensions' `parseHTML` rules exist for exactly one 
 
 ## Architecture: Add-ins (Office.js-style)
 
-Every editor (`<docen-document>` / `<docen-presentation>` / `<docen-workbook>`) is a **host** (`DocenHost`) whose UI surfaces and engine extensions are contributed by **add-ins** (`DocenAddin`). The default document add-in (`document/addin.ts`) bundles the Office-style ribbon, task panes, commands, and the Tiptap extensions a DOCX editor needs; consumers load extra add-ins to inject ribbon tabs/panes/commands. Implementation in `packages/editor/src/ui/addin/`.
+Every editor (`<docen-document>` / `<docen-presentation>` / `<docen-workbook>`) is a **host** (`DocenHost`); **add-ins** (`DocenAddin`) are the external extension surface. The default document add-in (`document/addin.ts`) contributes only the engine essentials — the Tiptap extensions (outline, search, track changes, TOC/index/commands); the Office-style chrome (ribbon, task panes, command wiring) is built into `<docen-document>` itself. Consumers load extra add-ins to inject their own extensions or UI. Implementation in `packages/editor/src/ui/addin/`.
 
 **Naming** aligns to MS Office / Office.js — UI tags use Office terms (`docen-title-bar` / `-ribbon` / `-document-area` / `-status-bar` / `-task-pane` / `-navigation-pane` / `-format-pane`); `RibbonTab` / `Group` / `Control` / `Action` mirror the Office.js manifest. Layer split: `Docx` = file format (`@docen/docx`, `createDocxEditor`); `Document` = editor (`<docen-document>`, `DocumentAddin`). Editor elements self-contain `:host { display:flex; height:100% }` so consumers never add sizing CSS.
 
