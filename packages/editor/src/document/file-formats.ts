@@ -106,6 +106,9 @@ export const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   // The Multilevel List gallery's last entry opens the Define New Multilevel
   // List dialog; the commit registers a document numbering definition.
   "define-new-list",
+  // Insert Caption (References → Captions) opens the caption dialog; the
+  // commit seeds a Caption-styled paragraph with a SEQ field.
+  "insert-caption",
   // TOC insert/update — dispatch with the bridge's pageOf (page numbers live
   // in the canvas caret map, which editor.commands can't reach).
   "toc",

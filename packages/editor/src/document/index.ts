@@ -1255,6 +1255,12 @@ class DocenDocument extends AddinHost<Editor> {
       "define-list:ok",
       this.#onDefineListOk as EventListener,
     );
+    // Caption dialog — seed a Caption-styled paragraph with a SEQ field next
+    // to the caret's paragraph.
+    this.shadowRoot!.querySelector("docen-caption-dialog")?.addEventListener(
+      "caption:ok",
+      this.#onCaptionOk as EventListener,
+    );
     // Status-bar language item — open the language dialog (Word semantics).
     this.shadowRoot!.querySelector("docen-status-bar")?.addEventListener(
       "language:open",
@@ -1880,6 +1886,9 @@ class DocenDocument extends AddinHost<Editor> {
     this.shadowRoot
       ?.querySelector("docen-define-list-dialog")
       ?.removeEventListener("define-list:ok", this.#onDefineListOk as EventListener);
+    this.shadowRoot
+      ?.querySelector("docen-caption-dialog")
+      ?.removeEventListener("caption:ok", this.#onCaptionOk as EventListener);
     this.shadowRoot
       ?.querySelector("docen-symbol-dialog")
       ?.removeEventListener("symbol:insert", this.#onSymbolInsert as EventListener);
@@ -3153,7 +3162,7 @@ class DocenDocument extends AddinHost<Editor> {
   /** The next free bookmark id — one past the highest id already carried by
    *  any bookmarkStart/bookmarkEnd passthrough in the document (OOXML marks
    *  pairs by a document-unique integer). */
-  #nextBookmarkId(): number {
+  #nextBookmarkId(target: Editor = this.editor!): number {
     let max = -1;
     const scan = (node: JSONContent): void => {
       for (const child of node.content ?? []) {
@@ -3173,7 +3182,7 @@ class DocenDocument extends AddinHost<Editor> {
         scan(child);
       }
     };
-    scan(this.editor!.getJSON());
+    scan(target.getJSON());
     return max + 1;
   }
 
@@ -4508,6 +4517,12 @@ class DocenDocument extends AddinHost<Editor> {
       this.#insertBookmark();
       return;
     }
+    // Caption — open the dialog; the commit arrives via caption:ok
+    // (#onCaptionOk, References → Captions → Insert Caption).
+    if (name === "insert-caption") {
+      (this.shadowRoot?.querySelector("docen-caption-dialog") as { show(): void } | null)?.show();
+      return;
+    }
     // Footnote / Endnote — prompt for the note text, reference the caret and
     // append the note body (Word's References → Insert Footnote; the split's
     // endnote item shares the event, and Next Footnote steps references).
@@ -5085,6 +5100,104 @@ class DocenDocument extends AddinHost<Editor> {
       .run();
     this.#bridge?.focus();
   };
+
+  /** Caption dialog 确定 — seed a Caption-styled paragraph beside the caret's
+   *  paragraph carrying the next SEQ field (cached, so the projection paints
+   *  the number without field evaluation) wrapped in a _Ref bookmark pair
+   *  (the cross-reference target), in one transaction. The Caption style
+   *  definition joins the document styles when absent (compile passes
+   *  doc.attrs.styles straight through). */
+  readonly #onCaptionOk = (event: Event): void => {
+    const { label, text, position, excludeLabel } =
+      (
+        event as CustomEvent<{
+          label?: string;
+          text?: string;
+          position?: string;
+          excludeLabel?: boolean;
+        }>
+      ).detail ?? {};
+    const target = this.#bridge?.activeEditor() ?? this.editor;
+    if (!target || !label) return;
+    const { state } = target;
+    const $from = state.selection.$from;
+    if ($from.parent.type.name !== "paragraph") return;
+    const seq = this.#nextSeqNumber(target, label);
+    const bookmarkId = this.#nextBookmarkId(target);
+    const name = `_Ref${String(bookmarkId).padStart(8, "0")}`;
+    const seed = (data: object): JSONContent =>
+      ({
+        type: "inlinePassthrough",
+        attrs: { data: JSON.stringify(data) },
+      }) as JSONContent;
+    const caption: JSONContent = {
+      type: "paragraph",
+      attrs: { style: "Caption" },
+      content: [
+        seed({ bookmarkStart: { id: bookmarkId, name } }),
+        ...(excludeLabel ? [] : [{ type: "text", text: `${label} ` }]),
+        seed({
+          simpleField: { instruction: `SEQ ${label} \\* ARABIC`, cachedValue: String(seq) },
+        }),
+        ...(text ? [{ type: "text", text: `: ${text}` }] : []),
+        seed({ bookmarkEnd: { id: bookmarkId } }),
+      ],
+    };
+    const styles = { ...((state.doc.attrs.styles ?? {}) as Record<string, unknown>) };
+    const paragraphStyles = (styles.paragraphStyles ?? []) as { id?: string }[];
+    target
+      .chain()
+      .command(({ tr }) => {
+        if (!paragraphStyles.some((s) => s.id === "Caption")) {
+          tr.step(
+            new DocAttrStep("styles", {
+              ...styles,
+              paragraphStyles: [
+                ...paragraphStyles,
+                {
+                  id: "Caption",
+                  name: "caption",
+                  basedOn: "Normal",
+                  next: "Normal",
+                  uiPriority: 35,
+                  quickFormat: true,
+                },
+              ],
+            }),
+          );
+        }
+        // Doc attrs sit outside the position space, so the doc-attr step and
+        // the insertion below compose in either order.
+        tr.insert(
+          position === "above" ? $from.before($from.depth) : $from.after($from.depth),
+          target.schema.nodeFromJSON(caption),
+        );
+        return true;
+      })
+      .run();
+    this.#bridge?.focus();
+  };
+
+  /** The next SEQ number for a caption label — one past the SEQ fields with
+   *  the same label already in the document (each label's sequence restarts
+   *  at 1; the fields carry the cached results the projection paints). */
+  #nextSeqNumber(target: Editor, label: string): number {
+    let count = 0;
+    target.state.doc.descendants((node) => {
+      if (node.type.name !== "inlinePassthrough") return true;
+      try {
+        const data = JSON.parse(String(node.attrs.data ?? "{}")) as {
+          simpleField?: { instruction?: string };
+        };
+        const tokens = (data.simpleField?.instruction ?? "").trim().split(/\s+/);
+        if (tokens[0]?.toUpperCase() === "SEQ" && tokens[1] === label) count++;
+      } catch {
+        // opaque verbatim blobs without field data — skip
+      }
+      return true;
+    });
+    return count + 1;
+  }
 
   /** Mirror the caret's proofing language into the status bar (Word shows the
    *  selection's language there). */
