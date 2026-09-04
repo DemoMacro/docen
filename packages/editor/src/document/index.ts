@@ -1250,6 +1250,15 @@ class DocenDocument extends AddinHost<Editor> {
     };
   }
 
+  /** The selected node when it's a source-carrying image (crop's target) —
+   *  null for shapes and every other selection. */
+  #selectedImage(): { src: string } | null {
+    const sel = this.editor?.state.selection;
+    if (!(sel instanceof NodeSelection) || sel.node.type.name !== "image") return null;
+    const src = sel.node.attrs.src;
+    return typeof src === "string" && src ? { src } : null;
+  }
+
   /** The active view, normalized (an unknown attr value reads as print). */
   #viewMode(): "print" | "web" | "draft" | "read" {
     return this.view === "web" || this.view === "draft" || this.view === "read"
@@ -2560,6 +2569,12 @@ class DocenDocument extends AddinHost<Editor> {
         event: "drawing-properties",
         ...(this.#drawingStateOf() ? {} : { disabled: true }),
       });
+      // Crop edits the picture's source — a shape has no source of its own.
+      items.push({
+        text: t("context.crop", this),
+        event: "drawing-crop",
+        ...(this.#selectedImage() ? {} : { disabled: true }),
+      });
       items.push({ text: "-" });
       items.push({ text: t("context.delete-picture", this), event: "delete-picture" });
       menu.setAttribute("items", JSON.stringify(items));
@@ -3062,6 +3077,12 @@ class DocenDocument extends AddinHost<Editor> {
       } | null;
       const state = this.#drawingStateOf();
       if (dialog && state) dialog.show(state);
+      return;
+    }
+    // Crop — the bridge enters crop mode on the selected image (the overlay
+    // previews the full source; Enter / a press outside commits, Esc cancels).
+    if (name === "drawing-crop") {
+      this.#bridge?.enterCropMode();
       return;
     }
     // Bookmark — prompt for a name and wrap the selection with a

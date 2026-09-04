@@ -119,3 +119,57 @@ export function rotateDelta(
   if (delta <= -180) return delta + 360;
   return delta;
 }
+
+/** The a:srcRect crop as fractions of the source (0.1 = 10% off that edge). */
+export interface CropFractions {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+/** The full (uncropped) source rectangle behind a cropped box: the visible
+ *  width covers 1 − left − right of the source, so the source spans
+ *  width / (1 − left − right), shifted left by the left crop's share of the
+ *  visible width. Degenerate crops (fully cropped axis) fall back to the
+ *  visible box. Page-local px. */
+export function cropFullBox(box: Box, crop: CropFractions): Box {
+  const w = 1 - crop.left - crop.right;
+  const h = 1 - crop.top - crop.bottom;
+  return {
+    x: box.x - box.width * (w > 0 ? crop.left / w : 0),
+    y: box.y - box.height * (h > 0 ? crop.top / h : 0),
+    width: w > 0 ? box.width / w : box.width,
+    height: h > 0 ? box.height / h : box.height,
+  };
+}
+
+/** The crop after dragging crop handle `handle` by fraction deltas (the
+ *  caller divides a pointer delta by the full box's size; dl/dr are rightward
+ *  and dt/db downward). Insets grow as their edge drags inward — a west
+ *  handle moving right grows `left`, an east handle moving right (dr > 0)
+ *  shrinks `right` — and each inset clamps so the opposite inset keeps a
+ *  visible remainder of at least MIN. */
+export function resizeCrop(
+  crop: CropFractions,
+  handle: HandleId,
+  dl: number,
+  dt: number,
+  dr: number,
+  db: number,
+): CropFractions {
+  const MAX = 0.9;
+  const MIN = 0.1;
+  const next = { ...crop };
+  if (handle.includes("w")) next.left = clampCrop(crop.left + dl, crop.right, MIN, MAX);
+  if (handle.includes("e")) next.right = clampCrop(crop.right - dr, crop.left, MIN, MAX);
+  if (handle.includes("n")) next.top = clampCrop(crop.top + dt, crop.bottom, MIN, MAX);
+  if (handle.includes("s")) next.bottom = clampCrop(crop.bottom - db, crop.top, MIN, MAX);
+  return next;
+}
+
+/** One inset dragged by `value`, clamped so the opposite inset keeps at most
+ *  MAX − MIN of the axis visible. */
+function clampCrop(value: number, opposite: number, min: number, max: number): number {
+  return Math.min(Math.max(value, 0), Math.max(0, max - opposite - min));
+}
