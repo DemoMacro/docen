@@ -204,6 +204,7 @@ export const documentTemplate = html`
   <docen-options-dialog part="options"></docen-options-dialog>
   <docen-word-count-dialog part="word-count"></docen-word-count-dialog>
   <docen-symbol-dialog part="symbol"></docen-symbol-dialog>
+  <docen-paragraph-dialog part="paragraph"></docen-paragraph-dialog>
   <docen-find-replace-dialog></docen-find-replace-dialog>
   <input type="file" id="file-input" accept=".docx,.md,.markdown" hidden />
   <input type="file" id="image-input" accept="image/*" hidden />

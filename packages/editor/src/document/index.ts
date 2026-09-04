@@ -93,7 +93,7 @@ import { documentStyles, documentTemplate, escapeHtml } from "./chrome";
 import type { OutlineItem } from "./components/outline";
 // Side-effect import: registers the ribbon/header translation tables.
 import "./i18n";
-import { tableAncestry, WIRED_DISPATCH } from "./extensions/commands";
+import { tableAncestry, WIRED_DISPATCH, type ParagraphDialogPatch } from "./extensions/commands";
 import { LOCAL_HANDLED, READONLY_LIVE, SAVE_FORMATS, detectOpenFormat } from "./file-formats";
 import { MARGINS, PAPER_SIZES, marginTwipsFromCss, mergeSectionProperties } from "./page-setup";
 import {
@@ -956,6 +956,11 @@ class DocenDocument extends AddinHost<Editor> {
       "symbol:insert",
       this.#onSymbolInsert as EventListener,
     );
+    // Paragraph dialog — stamp the committed patch onto the selection.
+    this.shadowRoot!.querySelector("docen-paragraph-dialog")?.addEventListener(
+      "paragraph:ok",
+      this.#onParagraphOk as EventListener,
+    );
 
     // Re-render header + ribbon when the page locale (<html lang>) changes.
     this.#unobserveLang = observeLang(() => this.#renderChrome());
@@ -1397,6 +1402,9 @@ class DocenDocument extends AddinHost<Editor> {
     this.shadowRoot
       ?.querySelector("docen-symbol-dialog")
       ?.removeEventListener("symbol:insert", this.#onSymbolInsert as EventListener);
+    this.shadowRoot
+      ?.querySelector("docen-paragraph-dialog")
+      ?.removeEventListener("paragraph:ok", this.#onParagraphOk as EventListener);
     this.shadowRoot
       ?.querySelector<HTMLElement>("docen-status-bar")
       ?.removeEventListener("zoom:change", this.#onZoomChange as EventListener);
@@ -2143,6 +2151,16 @@ class DocenDocument extends AddinHost<Editor> {
     if (!char) return;
     this.#bridge?.focus();
     this.editor?.commands.insertContent(char);
+  };
+
+  // The Paragraph dialog's OK — stamp its patch onto every selected paragraph
+  // in the editor input currently routes into (a furniture story's editor
+  // while a story is open, else the main document).
+  readonly #onParagraphOk = (event: CustomEvent<ParagraphDialogPatch | undefined>): void => {
+    const patch = event.detail;
+    if (!patch) return;
+    const target = this.#bridge?.activeEditor() ?? this.editor;
+    target?.commands["paragraph-dialog-apply"]?.(patch);
   };
 
   /** The next free bookmark id — one past the highest id already carried by
@@ -3216,6 +3234,20 @@ class DocenDocument extends AddinHost<Editor> {
     // dialog's symbol:insert event (it stays open for several inserts).
     if (name === "symbol") {
       (this.shadowRoot?.querySelector("docen-symbol-dialog") as { show(): void } | null)?.show();
+      return;
+    }
+    // Paragraph — open the dialog prefilled from the caret paragraph's attrs;
+    // the commit arrives via paragraph:ok (stamped by paragraph-dialog-apply).
+    if (name === "paragraph-dialog") {
+      const target = this.#bridge?.activeEditor() ?? editor;
+      const node = target?.state.selection.$from.parent;
+      if (node?.type.name === "paragraph") {
+        (
+          this.shadowRoot?.querySelector("docen-paragraph-dialog") as {
+            show(attrs?: Record<string, unknown>): void;
+          } | null
+        )?.show(node.attrs as Record<string, unknown>);
+      }
       return;
     }
     // Bookmark — prompt for a name and wrap the selection with a

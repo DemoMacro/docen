@@ -58,6 +58,7 @@ declare module "@tiptap/core" {
       "indent-increase": () => ReturnType;
       "indent-decrease": () => ReturnType;
       "line-spacing": (mult?: string) => ReturnType;
+      "paragraph-dialog-apply": (patch?: ParagraphDialogPatch) => ReturnType;
       shading: (value?: unknown) => ReturnType;
       "font-color": (value?: unknown) => ReturnType;
       border: (side?: string) => ReturnType;
@@ -210,6 +211,35 @@ export const WIRED_DISPATCH: ReadonlySet<string> = new Set([
   "previous-change",
   "next-change",
 ]);
+
+/**
+ * The full attr patch the Paragraph dialog commits on OK — every field always
+ * present (Office commits the dialog atomically): "special: none" is an
+ * explicit clear of firstLine/hanging, "body text" an explicit clear of
+ * outlineLevel. Indent/spacing values are OOXML twips; lineRule the w:spacing
+ * tokens. Stamped onto every selected paragraph by
+ * {@link documentCommands.paragraph-dialog-apply}.
+ */
+export interface ParagraphDialogPatch {
+  alignment: string;
+  outlineLevel: number | null;
+  indent: {
+    left?: number;
+    right?: number;
+    firstLine?: number;
+    hanging?: number;
+  };
+  spacing: {
+    before?: number;
+    after?: number;
+    line?: number;
+    lineRule?: "auto" | "atLeast" | "exact";
+  };
+  widowControl: boolean;
+  keepNext: boolean;
+  keepLines: boolean;
+  pageBreakBefore: boolean;
+}
 
 // ── Pure helpers (take EditorState, return data; never touch the chain) ──
 
@@ -1012,6 +1042,31 @@ export const DocumentCommands = Extension.create({
             });
           }
           return true;
+        },
+      // The Paragraph dialog's OK — stamp its full patch onto every selected
+      // paragraph. firstLine/hanging arrive mutually exclusive (the unchosen
+      // key is undefined and clears), so the spread over the current indent
+      // commits the switch; the booleans always write (the dialog commits
+      // atomically, Word-style).
+      "paragraph-dialog-apply":
+        (patch) =>
+        ({ state, tr }) => {
+          if (!patch) return false;
+          let touched = false;
+          for (const { pos, node } of selectedParagraphs(state)) {
+            const attrs = { ...(node.attrs as Record<string, unknown>) };
+            attrs.alignment = patch.alignment;
+            attrs.outlineLevel = patch.outlineLevel ?? undefined;
+            attrs.indent = { ...((attrs.indent ?? {}) as object), ...patch.indent };
+            attrs.spacing = { ...((attrs.spacing ?? {}) as object), ...patch.spacing };
+            attrs.widowControl = patch.widowControl;
+            attrs.keepNext = patch.keepNext;
+            attrs.keepLines = patch.keepLines;
+            attrs.pageBreakBefore = patch.pageBreakBefore;
+            tr.setNodeMarkup(pos, undefined, attrs);
+            touched = true;
+          }
+          return touched;
         },
       // Shading follows Word's selection split: a text selection paints only
       // the selected runs (character shading via the textStyle mark); a bare

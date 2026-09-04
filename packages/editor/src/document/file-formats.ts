@@ -94,6 +94,10 @@ export const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   // Bookmark prompts for a name and wraps the selection.
   "symbol",
   "bookmark",
+  // Paragraph opens the paragraph dialog prefilled from the caret paragraph
+  // (the commit arrives via paragraph:ok → the paragraph-dialog-apply
+  // command, which stamps every selected paragraph).
+  "paragraph-dialog",
   // Footnote prompts for the note text, references the caret and appends the
   // note body to documentExtras.footnotes. Equation drops a placeholder
   // math template (the gallery's fraction/script/radical/sum/integral) at
