@@ -16,3 +16,4 @@ export { default as DocenPageSetupDialog } from "./page-setup-dialog";
 export { default as DocenTableDialog } from "./table-dialog";
 export { default as DocenColumnsDialog } from "./columns-dialog";
 export { default as DocenLinkDialog } from "./link-dialog";
+export { default as DocenZoomDialog } from "./zoom-dialog";

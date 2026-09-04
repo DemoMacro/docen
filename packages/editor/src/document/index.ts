@@ -319,6 +319,16 @@ class DocenDocument extends AddinHost<Editor> {
     this.#setZoom(event.detail.zoom);
   };
 
+  /** Ctrl+wheel zoom over the page area (Word/Office behavior). Captured ahead
+   *  of the stage shell's wheel handling, which stops propagation for its own
+   *  scroll — plain wheel keeps scrolling; only the Ctrl chord zooms. */
+  readonly #onWheel = (event: WheelEvent): void => {
+    if (!event.ctrlKey && !event.metaKey) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    this.#setZoom(this.#zoom + (event.deltaY < 0 ? 10 : -10));
+  };
+
   /** Ctrl+= / Ctrl+- / Ctrl+0 zoom, Ctrl+F find (Word behavior). Zoom is
    *  ignored inside ribbon comboboxes and other inputs (so the keystroke reaches
    *  them); Ctrl+F is global. preventDefault blocks the browser's native zoom/find. */
@@ -819,6 +829,10 @@ class DocenDocument extends AddinHost<Editor> {
       ?.addEventListener("zoom:change", this.#onZoomChange as EventListener);
 
     this.#stageHost = this.shadowRoot!.querySelector<HTMLElement>(".docen-canvas") ?? undefined;
+    this.#stageHost?.addEventListener("wheel", this.#onWheel as EventListener, {
+      capture: true,
+      passive: false,
+    });
     if (!this.#stageHost) return;
 
     // Fonts must be loaded before the pipeline measures, else the layout
@@ -993,6 +1007,16 @@ class DocenDocument extends AddinHost<Editor> {
     this.shadowRoot!.querySelector("docen-link-dialog")?.addEventListener(
       "link:ok",
       this.#onLinkOk as EventListener,
+    );
+    // Zoom dialog — apply the preset or free percent; the status-bar percent
+    // click opens it.
+    this.shadowRoot!.querySelector("docen-zoom-dialog")?.addEventListener(
+      "zoom:ok",
+      this.#onZoomOk as EventListener,
+    );
+    this.shadowRoot!.querySelector("docen-status-bar")?.addEventListener(
+      "zoom:open",
+      this.#onZoomOpen as EventListener,
     );
 
     // Re-render header + ribbon when the page locale (<html lang>) changes.
@@ -1451,8 +1475,17 @@ class DocenDocument extends AddinHost<Editor> {
       ?.querySelector("docen-link-dialog")
       ?.removeEventListener("link:ok", this.#onLinkOk as EventListener);
     this.shadowRoot
+      ?.querySelector("docen-zoom-dialog")
+      ?.removeEventListener("zoom:ok", this.#onZoomOk as EventListener);
+    this.shadowRoot
+      ?.querySelector("docen-status-bar")
+      ?.removeEventListener("zoom:open", this.#onZoomOpen as EventListener);
+    this.shadowRoot
       ?.querySelector<HTMLElement>("docen-status-bar")
       ?.removeEventListener("zoom:change", this.#onZoomChange as EventListener);
+    this.#stageHost?.removeEventListener("wheel", this.#onWheel as EventListener, {
+      capture: true,
+    });
     this.editor?.off("transaction", this.#onTransaction);
     this.editor?.off("selectionUpdate", this.#syncActiveCommentCard);
     document.removeEventListener("fullscreenchange", this.#onFullscreenChange);
@@ -2220,16 +2253,48 @@ class DocenDocument extends AddinHost<Editor> {
     );
   }
 
-  /** Resolve a ribbon zoom preset to a percent. Numeric presets ("200", "100",
-   *  "75", "50") map directly to that zoom level; "page-width" scales the page
-   *  to fill the document-area width (layout px at 100%). */
+  /** Resolve a zoom preset to a percent. Numeric presets map directly; the
+   *  geometric ones read the stage viewport against the flow box (layout px
+   *  at 100%) — page width fills the area width, text width fills it with the
+   *  content column, one page fits the whole sheet into the visible height. */
   #zoomPreset(preset: string): void {
     if (/^\d+$/.test(preset)) return this.#setZoom(Number(preset));
-    if (preset !== "page-width") return;
     const area = this.shadowRoot?.querySelector("docen-document-area");
-    if (!area || !this.#flow) return;
-    this.#setZoom((area.clientWidth / this.#flow.pageWidthPx) * 100);
+    const flow = this.#flow;
+    if (!area || !flow) return;
+    if (preset === "page-width") return this.#setZoom((area.clientWidth / flow.pageWidthPx) * 100);
+    if (preset === "text-width")
+      return this.#setZoom((area.clientWidth / flow.contentWidthPx) * 100);
+    if (preset === "fit-page") {
+      // Whole sheet visible: the net content-box height (clientHeight includes
+      // the area's paddings, which would clip the page edges otherwise).
+      const style = getComputedStyle(area);
+      const visible =
+        area.clientHeight -
+        Number.parseFloat(style.paddingTop) -
+        Number.parseFloat(style.paddingBottom);
+      return this.#setZoom(
+        Math.min(area.clientWidth / flow.pageWidthPx, visible / flow.pageHeightPx) * 100,
+      );
+    }
   }
+
+  /** The Zoom dialog (View → Zoom, the status-bar percent click) — prefilled
+   *  with the current zoom; the commit applies the preset or free percent. */
+  #showZoomDialog(): void {
+    (
+      this.shadowRoot?.querySelector("docen-zoom-dialog") as { show(zoom: number): void } | null
+    )?.show(this.#zoom);
+  }
+
+  readonly #onZoomOk = (event: CustomEvent<string | number>): void => {
+    if (typeof event.detail === "number") this.#setZoom(event.detail);
+    else this.#zoomPreset(event.detail);
+  };
+
+  readonly #onZoomOpen = (): void => {
+    this.#showZoomDialog();
+  };
 
   /** Refresh the status bar to mirror Word's bottom row: the left cluster is
    *  the caret's section, then "Page X of Y", then the word count; the right
@@ -3390,7 +3455,8 @@ class DocenDocument extends AddinHost<Editor> {
       return;
     }
     if (name === "zoom-100") {
-      if (value) this.#zoomPreset(value);
+      if (value === "zoom-dialog") this.#showZoomDialog();
+      else if (value) this.#zoomPreset(value);
       else this.#setZoom(100);
       return;
     }

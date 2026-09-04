@@ -209,6 +209,7 @@ export const documentTemplate = html`
   <docen-table-dialog part="table"></docen-table-dialog>
   <docen-columns-dialog part="columns"></docen-columns-dialog>
   <docen-link-dialog part="link"></docen-link-dialog>
+  <docen-zoom-dialog part="zoom"></docen-zoom-dialog>
   <docen-find-replace-dialog></docen-find-replace-dialog>
   <input type="file" id="file-input" accept=".docx,.md,.markdown" hidden />
   <input type="file" id="image-input" accept="image/*" hidden />

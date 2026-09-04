@@ -400,6 +400,9 @@ const zoomItems = (): string =>
     { text: opt("75"), value: "75" },
     { text: opt("50"), value: "50" },
     { text: opt("page-width"), value: "page-width" },
+    { text: opt("text-width"), value: "text-width" },
+    { text: opt("fit-page"), value: "fit-page" },
+    { text: opt("zoom-dialog"), value: "zoom-dialog" },
   ]);
 
 /** The Page Borders split's presets — Word's Borders and Shading gallery in
