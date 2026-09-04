@@ -41,7 +41,7 @@ import {
 } from "@docen/layout";
 import { attr, customElement } from "@microsoft/fast-element";
 import type { Mark } from "@tiptap/pm/model";
-import { EditorState, TextSelection, type Transaction } from "@tiptap/pm/state";
+import { EditorState, NodeSelection, TextSelection, type Transaction } from "@tiptap/pm/state";
 
 import {
   AddinHost,
@@ -721,7 +721,22 @@ class DocenDocument extends AddinHost<Editor> {
       // same order the paragraph's content carries the nodes).
       drawingAt: (page, lx, ly) => this.#stage?.drawingAt(page, lx, ly) ?? null,
       drawingSelection: (hit) => this.#drawingNodePos(hit.para, hit.index, hit.kind),
-      drawingBoxOf: (para, index, kind) => this.#stage?.drawingBoxOf(para, index, kind) ?? null,
+      drawingBoxOf: (para, index, kind) => {
+        const stage = this.#stage;
+        const hit = stage?.drawingBoxOf(para, index, kind) ?? null;
+        if (hit || !stage) return hit;
+        // A write-back (a resize) re-laid the doc and re-objected every
+        // paragraph — the caller's hit reference is stale. Re-resolve the
+        // PM selection (still a NodeSelection on the same drawing) against
+        // the fresh boxes so the frame follows the resized picture.
+        const sel = this.editor?.state.selection;
+        if (!(sel instanceof NodeSelection)) return null;
+        return (
+          stage
+            .drawingBoxes()
+            .find((box) => this.#drawingNodePos(box.para, box.index, box.kind) === sel.from) ?? null
+        );
+      },
       // `#name` links are bookmark anchors — the host owns the in-page jump.
       onInternalAnchor: (name) => this.#jumpToBookmark(name),
     });
