@@ -96,8 +96,11 @@ export { detectHeadingLevel } from "./paragraph";
 export {
   BULLET_GLYPHS,
   BULLET_REFERENCE,
+  MULTILEVEL_PRESETS,
   ORDERED_FORMATS,
   ORDERED_REFERENCE_PREFIX,
+  buildCustomMultilevelLevels,
+  nextMultilevelReference,
   nextOrderedReference,
 } from "./list-numbering";
 export { ColumnBreak } from "./column-break";

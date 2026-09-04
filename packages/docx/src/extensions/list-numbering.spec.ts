@@ -8,9 +8,11 @@ import { generateMarkdown, parseMarkdown } from "../converters/markdown";
 import { docxExtensions, type JSONContent } from "../core";
 import {
   assignOrderedReferences,
+  buildCustomMultilevelLevels,
   buildListLevels,
   BULLET_REFERENCE,
   isGeneratedListReference,
+  nextMultilevelReference,
   nextOrderedReference,
 } from "./list-numbering";
 import { parseHTMLBody } from "./paste";
@@ -40,7 +42,41 @@ describe("list-numbering builders", () => {
   it("recognizes only generated references", () => {
     expect(isGeneratedListReference(BULLET_REFERENCE)).toBe(true);
     expect(isGeneratedListReference("docen-ordered-3")).toBe(true);
+    expect(isGeneratedListReference("docen-multilevel-cjk-1")).toBe(true);
+    // A dialog-defined reference is not a generated one — its definition
+    // travels in the document numbering.
+    expect(isGeneratedListReference("docen-multilevel-custom-1")).toBe(false);
     expect(isGeneratedListReference("list_3")).toBe(false);
+  });
+});
+
+describe("multilevel presets and custom definitions", () => {
+  it("builds a CJK preset from its reference", () => {
+    const levels = buildListLevels("docen-multilevel-cjk-1")!;
+    expect(levels).toHaveLength(9);
+    expect(levels[0]).toMatchObject({ format: "chineseCounting", text: "%1、" });
+    expect(levels[1]).toMatchObject({ format: "chineseCounting", text: "（%2）" });
+    expect(levels[2]).toMatchObject({ format: "decimal", text: "%3." });
+  });
+
+  it("allocates multilevel references past the highest shared suffix", () => {
+    expect(nextMultilevelReference(["docen-multilevel-cjk-1"], undefined, "custom")).toBe(
+      "docen-multilevel-custom-2",
+    );
+  });
+
+  it("extends the deepest defined level to all nine", () => {
+    const levels = buildCustomMultilevelLevels([
+      { format: "chineseCounting", text: "%1、" },
+      { format: "decimal", text: "%2." },
+    ]);
+    expect(levels).toHaveLength(9);
+    expect(levels[0]).toMatchObject({ format: "chineseCounting", text: "%1、" });
+    // Levels beyond the definitions repeat the last one's shape, shifting
+    // the placeholder (%2. → %3., %4., …).
+    expect(levels[2]).toMatchObject({ format: "decimal", text: "%3." });
+    expect(levels[8]).toMatchObject({ format: "decimal", text: "%9." });
+    expect(levels[8].paragraph?.indent).toMatchObject({ left: 6480, hanging: 360 });
   });
 });
 
