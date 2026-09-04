@@ -20,7 +20,14 @@ import {
 import { Editor } from "@docen/docx/core";
 import type { FlowPage } from "@docen/layout";
 import { UndoRedo } from "@tiptap/extensions";
-import { joinBackward, joinForward, selectAll, splitBlock } from "@tiptap/pm/commands";
+import {
+  joinBackward,
+  joinForward,
+  selectAll,
+  selectNodeBackward,
+  selectNodeForward,
+  splitBlock,
+} from "@tiptap/pm/commands";
 import { Fragment, Slice } from "@tiptap/pm/model";
 import { NodeSelection, TextSelection } from "@tiptap/pm/state";
 import { getMatchHighlights } from "prosemirror-search";
@@ -147,6 +154,10 @@ export interface EditBridgeOptions {
   /** Re-resolves a selected drawing's painted box after a re-render (the
    *  selection drops when the drawing no longer paints). */
   drawingBoxOf?: (para: unknown, index: number, kind: "drawing" | "inline") => DrawingHit | null;
+  /** Ctrl+Click on a `#name` link — the host resolves the bookmark anchor and
+   *  scrolls it into view (followLink only opens external URLs). Absent,
+   *  internal anchors are inert. */
+  onInternalAnchor?: (name: string) => void;
 }
 
 /** A drawing's painted box plus its identity — how a click hit it and how the
@@ -1165,8 +1176,16 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     const pos = posAtClient(event.clientX, event.clientY);
     if (pos != null) {
       // Word's Ctrl+Click follows the link instead of dropping a caret; a
-      // plain click keeps its editing meaning.
-      if ((event.ctrlKey || event.metaKey) && followLink(linkAt(pos))) {
+      // plain click keeps its editing meaning. A `#name` href is a bookmark
+      // anchor — followLink declines it, so the host resolves the jump.
+      const link = linkAt(pos);
+      if (
+        (event.ctrlKey || event.metaKey) &&
+        link &&
+        (link.href.startsWith("#")
+          ? (opts.onInternalAnchor?.(link.href.slice(1)), true)
+          : followLink(link))
+      ) {
         ta.focus();
         ta.value = "";
         return;
@@ -1196,19 +1215,42 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
         return true;
       }
       const $from = selection.$from;
-      const text = $from.parent.textContent;
-      if ($from.parentOffset > 0 && text) {
-        const cut = word
-          ? wordUnitsBackward(text, $from.parentOffset)
-          : lastGraphemeUnits(text.slice(0, $from.parentOffset));
-        if (cut > 0) {
-          dispatch?.(state.tr.delete($from.pos - cut, $from.pos));
+      if ($from.parent.isTextblock) {
+        // A non-text inline atom (picture, shape, break) contributes nothing
+        // to textContent, so slicing textContent by the content offset
+        // misaligns once the paragraph holds one — the cut lands off the real
+        // characters and every later press no-ops (the stranded-caret jam).
+        // Such an atom at the cut edge deletes outright (Word: one Backspace
+        // removes the image); text nodes are leaves too (isAtom), so they are
+        // excluded and zero-width atoms fall through to the text cut.
+        // Otherwise textBetween maps the content offset to text units.
+        const before = $from.nodeBefore;
+        if (
+          $from.parentOffset > 0 &&
+          before &&
+          !before.isText &&
+          before.isAtom &&
+          before.nodeSize > 0
+        ) {
+          dispatch?.(state.tr.delete($from.pos - before.nodeSize, $from.pos));
           return true;
+        }
+        const textBefore = $from.parent.textBetween(0, $from.parentOffset);
+        if (textBefore) {
+          const cut = word
+            ? wordUnitsBackward(textBefore, textBefore.length)
+            : lastGraphemeUnits(textBefore);
+          if (cut > 0) {
+            dispatch?.(state.tr.delete($from.pos - cut, $from.pos));
+            return true;
+          }
         }
       }
       // Same runtime PM instance (single .pnpm dir); the cast bridges the
       // dual d.ts identity between this package's @tiptap/pm and the engine's.
-      return joinBackward(state as never, dispatch);
+      // The selectNode tail is the stock backspace chain's: at a block start
+      // facing a table it selects the table (Word) instead of dead-ending.
+      return joinBackward(state as never, dispatch) || selectNodeBackward(state as never, dispatch);
     });
   };
 
@@ -1220,16 +1262,26 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
         return true;
       }
       const $from = selection.$from;
-      const text = $from.parent.textContent;
-      const offset = $from.parentOffset;
-      if (offset < text.length) {
-        const cut = word ? wordUnitsForward(text, offset) : firstGraphemeUnits(text.slice(offset));
-        if (cut > 0) {
-          dispatch?.(state.tr.delete($from.pos, $from.pos + cut));
+      if ($from.parent.isTextblock) {
+        // The forward mirror of backspace's atom handling: a non-text atom at
+        // the cut edge deletes outright; the text cut reads units past the
+        // caret through textBetween (atom-blind textContent misaligns the
+        // same way).
+        const after = $from.nodeAfter;
+        if (after && !after.isText && after.isAtom && after.nodeSize > 0) {
+          dispatch?.(state.tr.delete($from.pos, $from.pos + after.nodeSize));
           return true;
         }
+        const textAfter = $from.parent.textBetween($from.parentOffset, $from.parent.content.size);
+        if (textAfter) {
+          const cut = word ? wordUnitsForward(textAfter, 0) : firstGraphemeUnits(textAfter);
+          if (cut > 0) {
+            dispatch?.(state.tr.delete($from.pos, $from.pos + cut));
+            return true;
+          }
+        }
       }
-      return joinForward(state as never, dispatch);
+      return joinForward(state as never, dispatch) || selectNodeForward(state as never, dispatch);
     });
   };
 

@@ -290,6 +290,11 @@ export const Table = Node.create({
   name: "table",
   group: "block",
   content: "tableRow+",
+  // Backspace at a block start facing a table must select the table (Word),
+  // not join into it: unisolated, joinBackward's deleteBarrier swallows this
+  // paragraph's content into the last cell (or pulls the first cell's content
+  // out). Matches TableCell/wpsShape; the prosemirror-tables default.
+  isolating: true,
 
   addAttributes() {
     return docxTableAttrs;
