@@ -57,6 +57,19 @@ export interface LayoutRuby {
   fontSizePx: number;
 }
 
+/** Two-lines-in-one / combined characters (w:eastAsianLayout @w:combine —
+ *  Word's 双行合一 / 合并字符). The run's text packs into two half-size lines
+ *  inside a normal line box, optionally wrapped in bracket glyphs. */
+export interface LayoutCombine {
+  /** The upper line's text. */
+  first: string;
+  /** The lower line's text. */
+  second: string;
+  /** The bracket pair drawn around both lines (ST_CombineBrackets minus
+   *  "none"); the painter draws the matching glyph characters. */
+  bracket?: "round" | "square" | "angle" | "curly";
+}
+
 /** One inline item of a paragraph. Text, hard breaks, tabs, and inline
  *  pictures are all line-box content — one box packer handles the four (the
  *  unified text+picture breaker the DOM route never had). A picture's `src`
@@ -95,6 +108,9 @@ export type LayoutInline =
       /** Phonetic guide (w:ruby): the annotation paints above the base glyphs
        *  and the line's natural height reserves space for it. */
       ruby?: LayoutRuby;
+      /** Two-lines-in-one (w:eastAsianLayout): the atom packs its whole text
+       *  into two half-size lines — an unbreakable box of the combined width. */
+      combine?: LayoutCombine;
     }
   | { kind: "break" }
   | { kind: "tab"; toPx?: number }

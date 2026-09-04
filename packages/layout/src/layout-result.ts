@@ -7,6 +7,7 @@
 import type {
   LayoutBorderEdge,
   LayoutCellInsets,
+  LayoutCombine,
   LayoutDrawing,
   LayoutIndent,
   LayoutInline,
@@ -36,6 +37,9 @@ export interface LaidOutTextItem {
   /** The base text's drop below the line top — the annotation space the
    *  painter sinks the glyphs by and the caret band anchors to. */
   rubyLiftPx?: number;
+  /** Two-lines-in-one (双行合一): the item's text packs into these two
+   *  half-size lines (plus optional brackets) inside a normal line box. */
+  combine?: LayoutCombine;
 }
 
 export interface LaidOutPictureItem {

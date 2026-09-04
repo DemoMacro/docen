@@ -313,6 +313,66 @@ export function paintParagraph(
             }),
           );
         }
+        // Two-lines-in-one (双行合一 / 合并字符): the atom packs its text
+        // into two half-size lines within this line box, optionally wrapped
+        // in bracket glyphs — Word's look; the item skips the normal run
+        // paint below.
+        if (item.combine) {
+          const size = vertAlignedSizePx(inline.style) / 2;
+          const boxH = Math.max(line.naturalPx || line.heightPx, size * 2);
+          const rows = [item.combine.first, item.combine.second];
+          const pair = item.combine.bracket
+            ? { round: "()", square: "[]", angle: "<>", curly: "{}" }[item.combine.bracket]
+            : undefined;
+          const inset = pair ? size * 0.35 : 0;
+          for (let row = 0; row < 2; row++) {
+            if (!rows[row]) continue;
+            tree.add(
+              new Text({
+                x: lineX + item.xPx + inset,
+                y: lineY + pad + (row * boxH) / 2,
+                width: Math.max(1, item.widthPx - inset * 2),
+                textWrap: "none",
+                height: Math.max(1, size),
+                textAlign: "center",
+                text: rows[row],
+                fill: inline.style.color ? `#${inline.style.color}` : "#1b1b1b",
+                fontFamily: family,
+                fontSize: size,
+                lineHeight: size,
+                fontWeight: inline.style.bold ? 700 : 400,
+                italic: inline.style.italic,
+                hittable: false,
+              }),
+            );
+          }
+          if (pair) {
+            const ink = inline.style.color ? `#${inline.style.color}` : "#1b1b1b";
+            const brackets: [string, number][] = [
+              [pair[0], lineX + item.xPx],
+              [pair[1], lineX + item.xPx + item.widthPx - inset * 2],
+            ];
+            for (const [glyph, gx] of brackets) {
+              tree.add(
+                new Text({
+                  x: gx,
+                  y: lineY + pad,
+                  width: Math.max(1, inset * 2),
+                  textWrap: "none",
+                  height: Math.max(1, boxH),
+                  textAlign: "center",
+                  text: glyph,
+                  fill: ink,
+                  fontFamily: family,
+                  fontSize: vertAlignedSizePx(inline.style),
+                  lineHeight: boxH,
+                  hittable: false,
+                }),
+              );
+            }
+          }
+          continue;
+        }
         // A page-number field paints its live value; the measured `text` was
         // only a placeholder.
         const label =

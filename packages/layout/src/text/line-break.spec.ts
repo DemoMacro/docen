@@ -315,3 +315,51 @@ describe("phonetic guide (ruby)", () => {
     }
   });
 });
+
+describe("two lines in one (combine)", () => {
+  // "甲乙丙丁" packs two per row at half the run's size: each row 2 × 8 = 16px
+  // wide, the atom 16px — a quarter of the run's natural 64px single line.
+  const combined: LayoutInline = {
+    kind: "text",
+    text: "甲乙丙丁",
+    style: cjk,
+    combine: { first: "甲乙", second: "丙丁" },
+  };
+
+  it("places the atom whole, carrying the split metadata", () => {
+    const lines = pack([combined], 400);
+    expect(lines).toHaveLength(1);
+    const texts = lines[0].items.filter(
+      (i): i is Extract<LaidOutLineItem, { kind: "text" }> => i.kind === "text",
+    );
+    expect(texts[0].text).toBe("甲乙丙丁");
+    expect(texts[0].combine).toEqual({ first: "甲乙", second: "丙丁" });
+    expect(texts[0].widthPx).toBeCloseTo(16, 5);
+  });
+
+  it("never breaks the atom — one line at any width", () => {
+    // 20px fits the 16px atom; the unpacked run would wrap into three lines.
+    const lines = pack([combined], 20);
+    expect(lines).toHaveLength(1);
+    expect(lines[0].naturalPx).toBeCloseTo(19.2, 5);
+  });
+
+  it("adds the bracket pair's width", () => {
+    const lines = pack(
+      [
+        {
+          kind: "text",
+          text: "甲乙丙丁",
+          style: cjk,
+          combine: { first: "甲乙", second: "丙丁", bracket: "round" },
+        },
+      ],
+      400,
+    );
+    const texts = lines[0].items.filter(
+      (i): i is Extract<LaidOutLineItem, { kind: "text" }> => i.kind === "text",
+    );
+    // 16px rows + the bracket allowance (16 × 0.6).
+    expect(texts[0].widthPx).toBeCloseTo(16 + 9.6, 5);
+  });
+});

@@ -5,6 +5,8 @@
 // its slot's family, so one run's Latin and CJK halves measure (and paint)
 // with ascii/eastAsia respectively.
 
+import { measureNaturalWidth, prepareWithSegments } from "@docen/pretext";
+
 import { isCjkCodeUnit, type FontMetrics, type FontSlots } from "../font";
 import type { LayoutTextStyle } from "../layout-doc";
 
@@ -135,6 +137,22 @@ export class TextMeasurer {
     flush(text.length);
     if (naturalPx === 0) naturalPx = vertAlignedSizePx(style) * 1.2;
     return { segments, hasCjk, naturalPx };
+  }
+
+  /** One string's advance width — the packer's own canvas measurement (each
+   *  script segment in its slot's face, the same fonts a broken line sums),
+   *  so a caller-side atom's width never drifts from what the breaker charges
+   *  an equivalent run. */
+  widthOf(text: string, style: LayoutTextStyle): number {
+    const { segments } = this.analyze(text, style);
+    let width = 0;
+    for (const seg of segments)
+      width += measureNaturalWidth(
+        prepareWithSegments(seg.text, cssFontOf(style, familyOfSlot(style.family, seg.isCjk)), {
+          letterSpacing: style.letterSpacingPx ?? 0,
+        }),
+      );
+    return width;
   }
 }
 

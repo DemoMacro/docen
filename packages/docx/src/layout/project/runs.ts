@@ -3,7 +3,14 @@
 // (PAGE/NUMPAGES dynamic, complex-field results re-hydrated), and the
 // container children (hyperlink / tracked insertion / deletion).
 
-import { emuToPx, ptToPx, twipToPx, type LayoutInline, type LayoutTextStyle } from "@docen/layout";
+import {
+  emuToPx,
+  ptToPx,
+  twipToPx,
+  type LayoutCombine,
+  type LayoutInline,
+  type LayoutTextStyle,
+} from "@docen/layout";
 
 import { mergeStyleChain } from "../../style-cascade";
 import type { ProjectContext } from "./context";
@@ -57,6 +64,32 @@ function mathLabelOf(math: Rec): string {
   if ("sum" in first) return "∑□";
   if ("integral" in first) return "∫□";
   return "fx";
+}
+
+const COMBINE_BRACKETS: Record<string, "round" | "square" | "angle" | "curly"> = {
+  round: "round",
+  square: "square",
+  angle: "angle",
+  curly: "curly",
+};
+
+/** Two-lines-in-one metadata (w:eastAsianLayout @w:combine) for a run's text:
+ *  the two lines the run packs into and its optional bracket pair. Word's
+ *  dialog lets spaces mark the split — folded away here for an even split of
+ *  the remaining characters. */
+function combineOf(rPr: Rec, text: string): LayoutCombine | undefined {
+  const layout = isRecord(rPr.eastAsianLayout) ? rPr.eastAsianLayout : {};
+  const on = layout.combine === true || layout.combine === "1" || layout.combine === 1;
+  if (!on) return undefined;
+  const packed = text.replace(/\s+/g, "");
+  if (!packed) return undefined;
+  const half = Math.ceil(packed.length / 2);
+  const bracket = str(layout.combineBrackets);
+  return {
+    first: packed.slice(0, half),
+    second: packed.slice(half),
+    ...(bracket && COMBINE_BRACKETS[bracket] ? { bracket: COMBINE_BRACKETS[bracket] } : {}),
+  };
 }
 
 /** Inline content: text runs (rPr resolved over the paragraph default), hard
@@ -115,7 +148,17 @@ export function projectRuns(
     if (!text) return;
     const commentIds =
       openComments && openComments.size > 0 ? [...openComments].sort((a, b) => a - b) : undefined;
-    out.push({ kind: "text", text, style: textStyleOf(rPr), commentIds });
+    // Two-lines-in-one (双行合一 / 合并字符): the run packs into two
+    // half-size lines; the dialog's spaces mark the split in Word, here
+    // folded away for an even split.
+    const combine = combineOf(rPr, text);
+    out.push({
+      kind: "text",
+      text,
+      style: textStyleOf(rPr),
+      commentIds,
+      ...(combine ? { combine } : {}),
+    });
   };
   /** A field (w:fldSimple / complexField): PAGE/NUMPAGES become dynamic atoms
    *  (the painter resolves the number per page — `text` is a measuring

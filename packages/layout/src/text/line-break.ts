@@ -186,7 +186,18 @@ function groupOf(
   const itemInline: number[] = [];
   for (let i = from; i < to; i++) {
     const item = inline[i];
-    if (item.kind === "text") {
+    if (item.kind === "text" && item.combine) {
+      // Two-lines-in-one (双行合一): an unbreakable atom as wide as its
+      // wider half (each set in half the run's size) plus the brackets.
+      const half = { ...item.style, sizePx: item.style.sizePx / 2 };
+      let widthPx = Math.max(
+        measurer.widthOf(item.combine.first, half),
+        measurer.widthOf(item.combine.second, half),
+      );
+      if (item.combine.bracket) widthPx += item.style.sizePx * 0.6;
+      items.push({ text: "", font: "1px serif", break: "never", extraWidth: widthPx });
+      itemInline.push(i);
+    } else if (item.kind === "text") {
       // Script itemization: each same-script segment measures (and paints)
       // with its slot's family — the OOXML eastAsia/ascii split.
       const { segments } = measurer.analyze(item.text, item.style);
@@ -665,7 +676,25 @@ export function packLines(inline: LayoutInline[], opts: PackLinesOptions): Packe
             // glyphs keep their metrics, only the positions tighten (Word's
             // advance compression; the painter draws at the given x).
             const at = squeeze ? xStart + (xFrag - xStart) * squeeze : xFrag;
-            if (src.kind === "text") {
+            if (src.kind === "text" && src.combine) {
+              // Two-lines-in-one (双行合一): the atom lands whole — the
+              // placed item carries the full text plus the split/bracket
+              // metadata the painter packs into two half-size lines.
+              lineItems.push({
+                kind: "text",
+                inlineIndex,
+                text: src.text,
+                xPx: at,
+                widthPx: squeeze ? frag.occupiedWidth * squeeze : frag.occupiedWidth,
+                synthetic: src.synthetic,
+                combine: src.combine,
+              });
+              hasText = true;
+              const analyzed = measurer.analyze(src.text, src.style);
+              if (analyzed.naturalPx > naturalPx) naturalPx = analyzed.naturalPx;
+              if (textEmPx == null || src.style.sizePx > textEmPx) textEmPx = src.style.sizePx;
+              if (analyzed.hasCjk) hasCjk = true;
+            } else if (src.kind === "text") {
               // A phonetic guide (w:ruby) reserves annotation space above the
               // base: the line's natural height grows by the annotation's
               // ascent, and the placed item carries the guide only when the
