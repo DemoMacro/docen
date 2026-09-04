@@ -44,15 +44,6 @@ import {
 import { attr, customElement } from "@microsoft/fast-element";
 import type { Mark } from "@tiptap/pm/model";
 import { EditorState, TextSelection, type Transaction } from "@tiptap/pm/state";
-import {
-  findNext,
-  findPrev,
-  getMatchHighlights,
-  replaceAll,
-  replaceNext,
-  setSearchState,
-  SearchQuery,
-} from "prosemirror-search";
 
 import {
   AddinHost,
@@ -92,11 +83,11 @@ import { documentStyles, documentTemplate, escapeHtml } from "./chrome";
 import { CommentsCommands } from "./commands/comments";
 import { DesignCommands } from "./commands/design";
 import { DialogCommands } from "./commands/dialogs";
+import { NavigationCommands } from "./commands/navigation";
 import { ReferencesCommands } from "./commands/references";
 import { SectionCommands } from "./commands/sections";
 // Side-effect import: registers the ribbon/header translation tables.
 import "./i18n";
-import type { OutlineItem } from "./components/outline";
 import { tableAncestry, WIRED_DISPATCH } from "./extensions/commands";
 import { LOCAL_HANDLED, READONLY_LIVE, SAVE_FORMATS, detectOpenFormat } from "./file-formats";
 import { mergeSectionProperties } from "./page-setup";
@@ -134,24 +125,6 @@ function stripRunMarks(nodes: JSONContent[]): JSONContent[] {
   });
 }
 
-/** Build a nested OutlineItem tree from the flat outline anchor list: each
- *  heading nests under the nearest preceding heading with a smaller level. */
-function buildOutlineTree(
-  anchors: readonly { id: string; textContent: string; originalLevel: number }[],
-): OutlineItem[] {
-  type Node = { id: string; title: string; level: number; children?: Node[] };
-  const roots: Node[] = [];
-  const stack: Node[] = [];
-  for (const a of anchors) {
-    const node: Node = { id: a.id, title: a.textContent, level: a.originalLevel };
-    while (stack.length && stack[stack.length - 1].level >= a.originalLevel) stack.pop();
-    const parent = stack[stack.length - 1];
-    if (parent) (parent.children ??= []).push(node);
-    else roots.push(node);
-    stack.push(node);
-  }
-  return roots as OutlineItem[];
-}
 /**
  * Task pane identifiers, mirroring the Office `<TaskpaneId>` concept. The host
  * ships two built-in panes: `navigation` (start/left) and `properties` (end/right).
@@ -186,6 +159,12 @@ class DocenDocument extends AddinHost<Editor> {
   #bridge?: EditBridge;
   /** References-tab commands (citations/bibliography/index marking), split
    *  out of this class — see commands/references.ts. */
+  readonly #navigation = new NavigationCommands({
+    editor: () => this.editor,
+    bridge: () => this.#bridge,
+    element: () => this,
+    setTextSelection: (from, to) => this.#setTextSelection(from, to),
+  });
   readonly #design = new DesignCommands({
     editor: () => this.editor,
     bridge: () => this.#bridge,
@@ -231,18 +210,10 @@ class DocenDocument extends AddinHost<Editor> {
   #flow?: ProjectedFlowBox;
   #fileInput?: HTMLInputElement;
   #imageInput?: HTMLInputElement;
-  /** Latest TOC anchors, refreshed by the Outline extension; used to resolve
-   *  an outline click back to a document position (pos). */
-  #anchors: readonly { id: string; pos: number; textContent: string; originalLevel: number }[] = [];
   /** Cached doc nodeSize + Office-style word count so caret-move transactions
    *  don't re-walk the whole document (recomputed only when content changes). */
   #lastDocSize = -1;
   #lastWords = 0;
-  /** Semantic fingerprint of the last outline tree — id/level/title only. `pos`
-   *  shifts on every re-render but never changes what the pane shows, so it's
-   *  excluded; the fingerprint is built from per-anchor arrays (not the
-   *  serialized tree) so object key order can never cause a spurious mismatch. */
-  #outlineSig = "";
   #unobserveLang?: () => void;
   /** Watches the host's `lang` attribute and forwards it to the internal
    *  <docen-workspace> + notifies locale observers. MutationObserver because
@@ -256,10 +227,6 @@ class DocenDocument extends AddinHost<Editor> {
   #painterOff?: () => void;
   /** Current zoom level (percent) applied by the page stage's slot sizing. */
   #zoom = 100;
-  /** Debounce timer for the nav-pane search result list — the list rebuilds only
-   *  after the user pauses typing (the query dispatches immediately, so Enter /
-   *  find-next stays in sync with the last keystroke). */
-  #searchTimer?: ReturnType<typeof setTimeout>;
   /** Cached unwrapped JSON (host.getJSON result). Invalidated on every user/doc
    *  change; recomputed lazily. Saves the editor.getJSON walk on every
    *  save/autosave/getJSON call. */
@@ -336,6 +303,22 @@ class DocenDocument extends AddinHost<Editor> {
   }
 
   /** Esc fallback: restore the ribbon to "always shown" after the browser leaves fullscreen. */
+  /** ribbon-mode-change → drive browser fullscreen + status-bar hide.
+   *  auto-hide = Full Screen (Office); any other mode exits it. Named so it can
+   *  be removed on disconnect (an anonymous listener would leak on reconnect). */
+  readonly #onRibbonModeChange = (event: Event): void => {
+    const workspace = this.shadowRoot?.querySelector("docen-workspace");
+    if (!workspace) return;
+    const mode = (event as CustomEvent<{ mode: string }>).detail.mode;
+    if (mode === "auto-hide") {
+      void this.requestFullscreen?.().catch(() => {});
+      workspace.setAttribute("data-fullscreen", "");
+    } else {
+      if (document.fullscreenElement) void document.exitFullscreen?.().catch(() => {});
+      workspace.removeAttribute("data-fullscreen");
+    }
+  };
+
   readonly #onFullscreenChange = (): void => {
     if (document.fullscreenElement) return;
     const ribbon = this.shadowRoot?.querySelector("docen-ribbon");
@@ -391,12 +374,12 @@ class DocenDocument extends AddinHost<Editor> {
     // Ctrl+F opens Find, Ctrl+H opens Find & Replace (Word behavior).
     if (event.key === "f" || event.key === "F") {
       event.preventDefault();
-      this.#openSearch();
+      this.#navigation.openSearch();
       return;
     }
     if (event.key === "h" || event.key === "H") {
       event.preventDefault();
-      this.#openFindReplace();
+      this.#navigation.openFindReplace();
       return;
     }
     // Ctrl+S saves (Word) — before the input gate, a save applies everywhere.
@@ -438,181 +421,6 @@ class DocenDocument extends AddinHost<Editor> {
     } else if (key === "0") {
       event.preventDefault();
       this.#setZoom(100);
-    }
-  };
-
-  /** Outline.onUpdate → <docen-outline>. Cache the anchors (so an
-   *  outline click resolves to a position) and rebuild the nested tree. */
-  #renderOutline(
-    anchors: readonly { id: string; pos: number; textContent: string; originalLevel: number }[],
-  ): void {
-    this.#anchors = anchors;
-    const outline = this.shadowRoot?.querySelector("docen-outline");
-    if (!outline) return;
-    // Fingerprint only what the pane shows (id/level/title). `pos` moves on
-    // every re-render but never changes the outline, so excluding it avoids
-    // rebuilding — and flickering — the fluent tree each pass. Built from
-    // per-anchor arrays rather than the serialized tree, so object key order
-    // is irrelevant (no dependency on buildOutlineTree's literal field order,
-    // unlike a plain JSON.stringify(tree) comparison).
-    const sig = anchors
-      .map((a) => JSON.stringify([a.id, a.originalLevel, a.textContent]))
-      .join("\n");
-    if (this.#outlineSig === sig) return;
-    this.#outlineSig = sig;
-    outline.setAttribute("items", JSON.stringify(buildOutlineTree(anchors)));
-  }
-
-  /** Outline click → select the heading at its position and scroll it into view. */
-  readonly #onOutlineSelect = (event: CustomEvent<{ id?: string }>): void => {
-    const id = event.detail?.id;
-    const bridge = this.#bridge;
-    if (!id || !bridge) return;
-    const anchor = this.#anchors.find((a) => a.id === id);
-    if (!anchor) return;
-    this.#setTextSelection(anchor.pos);
-    bridge.scrollIntoView(anchor.pos);
-  };
-
-  /** navigation:search → set the active query; matches highlight live. */
-  readonly #onSearch = (event: CustomEvent<{ query?: string }>): void => {
-    const editor = this.editor;
-    if (!editor) return;
-    const query = new SearchQuery({ search: event.detail?.query ?? "", caseSensitive: false });
-    editor.view.dispatch(setSearchState(editor.state.tr, query));
-    // Debounce the result-list rebuild (O(matches) DOM nodes per keystroke); the
-    // query already dispatched above, so find-next reads the live search state.
-    clearTimeout(this.#searchTimer);
-    this.#searchTimer = setTimeout(() => this.#updateSearchResults(), 120);
-  };
-
-  /** ribbon-mode-change → drive browser fullscreen + status-bar hide.
-   *  auto-hide = Full Screen (Office); any other mode exits it. Named so it can
-   *  be removed on disconnect (an anonymous listener would leak on reconnect). */
-  readonly #onRibbonModeChange = (event: Event): void => {
-    const workspace = this.shadowRoot?.querySelector("docen-workspace");
-    if (!workspace) return;
-    const mode = (event as CustomEvent<{ mode: string }>).detail.mode;
-    if (mode === "auto-hide") {
-      void this.requestFullscreen?.().catch(() => {});
-      workspace.setAttribute("data-fullscreen", "");
-    } else {
-      if (document.fullscreenElement) void document.exitFullscreen?.().catch(() => {});
-      workspace.removeAttribute("data-fullscreen");
-    }
-  };
-
-  /** navigation:find → jump to the next/previous match (prosemirror-search). */
-  readonly #onFind = (event: CustomEvent<{ direction: "next" | "prev" }>): void => {
-    const editor = this.editor;
-    if (!editor) return;
-    (event.detail.direction === "prev" ? findPrev : findNext)(editor.state, editor.view.dispatch);
-    this.#bridge?.scrollIntoView(editor.state.selection.from);
-  };
-
-  /** Stamp the Results slot with the live match list — each hit rendered with
-   *  surrounding context and a data-from/to for click-to-jump (Word's Results
-   *  pane lists every match with context, not just a count). */
-  #updateSearchResults(): void {
-    const editor = this.editor;
-    const slot = this.shadowRoot?.querySelector(".search-results");
-    if (!slot) return;
-    const decos = editor ? getMatchHighlights(editor.state).find() : [];
-    slot.replaceChildren();
-    const header = document.createElement("div");
-    header.className = "result-count";
-    header.textContent =
-      decos.length > 0
-        ? `${decos.length} ${t("search.matches", this)}`
-        : t("search.noResults", this);
-    slot.append(header);
-    if (!editor || decos.length === 0) return;
-    const doc = editor.state.doc;
-    const RADIUS = 24;
-    for (const deco of decos) {
-      const { from, to } = deco as { from: number; to: number };
-      const before = doc.textBetween(Math.max(0, from - RADIUS), from, " ");
-      const after = doc.textBetween(to, Math.min(doc.content.size, to + RADIUS), " ");
-      const item = document.createElement("button");
-      item.type = "button";
-      item.className = "result-item";
-      item.dataset.from = String(from);
-      item.dataset.to = String(to);
-      if (before) {
-        const span = document.createElement("span");
-        span.textContent = `…${before}`;
-        item.append(span);
-      }
-      const hit = document.createElement("mark");
-      hit.textContent = doc.textBetween(from, to, " ");
-      item.append(hit);
-      if (after) {
-        const span = document.createElement("span");
-        span.textContent = `${after}…`;
-        item.append(span);
-      }
-      slot.append(item);
-    }
-  }
-
-  /** Click a Results entry → select that match range and scroll it into view. */
-  readonly #onSearchResultClick = (event: Event): void => {
-    const bridge = this.#bridge;
-    if (!bridge) return;
-    const item = (event.target as HTMLElement | null)?.closest(".result-item");
-    if (!(item instanceof HTMLElement)) return;
-    const from = Number(item.dataset.from);
-    const to = Number(item.dataset.to);
-    if (!Number.isFinite(from) || !Number.isFinite(to)) return;
-    this.#setTextSelection(from, to);
-    bridge.scrollIntoView(from);
-  };
-
-  /** Ctrl+F → open the nav pane and focus its search box (Word behavior). */
-  #openSearch(): void {
-    const taskPane = this.shadowRoot?.querySelector('docen-task-pane[position="start"]') as
-      | (HTMLElement & { open: boolean })
-      | null;
-    if (taskPane) taskPane.open = true;
-    const input = this.shadowRoot
-      ?.querySelector("docen-navigation-pane")
-      ?.shadowRoot?.querySelector("[part='search-input']") as
-      | (HTMLElement & { select: () => void })
-      | null;
-    input?.focus();
-    input?.select?.();
-  }
-
-  /** Ctrl+H / ribbon Replace → open the Find & Replace dialog. */
-  #openFindReplace(): void {
-    const dialog = this.shadowRoot?.querySelector("docen-find-replace-dialog") as
-      | (HTMLElement & { show: () => void })
-      | null;
-    dialog?.show();
-  }
-
-  /** find-replace:action → drive prosemirror-search (query highlights, find-next,
-   *  replace-next = replace + advance, replace-all). Each action re-stamps the
-   *  query so Find/Replace/options are always current. */
-  readonly #onFindReplace = (
-    event: CustomEvent<{
-      action: string;
-      find: string;
-      replace: string;
-      caseSensitive: boolean;
-      wholeWord: boolean;
-    }>,
-  ): void => {
-    const editor = this.editor;
-    if (!editor) return;
-    const { action, find, replace, caseSensitive, wholeWord } = event.detail ?? {};
-    const query = new SearchQuery({ search: find, replace, caseSensitive, wholeWord });
-    editor.view.dispatch(setSearchState(editor.state.tr, query));
-    if (action === "find-next") findNext(editor.state, editor.view.dispatch);
-    else if (action === "replace-next") replaceNext(editor.state, editor.view.dispatch);
-    else if (action === "replace-all") replaceAll(editor.state, editor.view.dispatch);
-    if (action === "find-next" || action === "replace-next") {
-      this.#bridge?.scrollIntoView(editor.state.selection.from);
     }
   };
 
@@ -1098,7 +906,7 @@ class DocenDocument extends AddinHost<Editor> {
     // extensions seed the schema. Ribbon events route straight to the engine
     // (editor.commands.<event>), not addin.commands.
     const defaultAddin = createDefaultAddin({
-      onOutlineUpdate: (anchors) => this.#renderOutline(anchors),
+      onOutlineUpdate: (anchors) => this.#navigation.renderOutline(anchors),
     });
     this.addAddin(defaultAddin);
     // Declarative external add-ins (JSON `addins` attribute) register after the
@@ -1179,11 +987,11 @@ class DocenDocument extends AddinHost<Editor> {
     // Outline (Headings tab) → jump to the clicked heading.
     this.shadowRoot!.querySelector("docen-outline")?.addEventListener(
       "outline:select",
-      this.#onOutlineSelect as EventListener,
+      this.#navigation.onOutlineSelect as EventListener,
     );
     // Nav-pane search → Find (live highlight, next/prev, results count).
-    this.addEventListener("navigation:search", this.#onSearch as EventListener);
-    this.addEventListener("navigation:find", this.#onFind as EventListener);
+    this.addEventListener("navigation:search", this.#navigation.onSearch as EventListener);
+    this.addEventListener("navigation:find", this.#navigation.onFind as EventListener);
     // Comments pane → create/cancel (compose box), select (scroll to range),
     // update/delete (inline card actions).
     this.addEventListener("comment:create", this.#comments.onCommentCreate as EventListener);
@@ -1198,12 +1006,12 @@ class DocenDocument extends AddinHost<Editor> {
     // Click a Results entry → jump to that match (delegated on the container).
     this.shadowRoot!.querySelector(".search-results")?.addEventListener(
       "click",
-      this.#onSearchResultClick as EventListener,
+      this.#navigation.onSearchResultClick as EventListener,
     );
     // Find & Replace dialog → Replace / Replace All (prosemirror-search).
     this.shadowRoot!.querySelector("docen-find-replace-dialog")?.addEventListener(
       "find-replace:action",
-      this.#onFindReplace as EventListener,
+      this.#navigation.onFindReplace as EventListener,
     );
     // Options dialog — ok (UI language + theme).
     this.shadowRoot!.querySelector("docen-options-dialog")?.addEventListener(
@@ -1853,15 +1661,15 @@ class DocenDocument extends AddinHost<Editor> {
     this.#imageInput?.removeEventListener("change", this.#onImageChange);
     this.shadowRoot
       ?.querySelector("docen-outline")
-      ?.removeEventListener("outline:select", this.#onOutlineSelect as EventListener);
-    this.removeEventListener("navigation:search", this.#onSearch as EventListener);
-    this.removeEventListener("navigation:find", this.#onFind as EventListener);
+      ?.removeEventListener("outline:select", this.#navigation.onOutlineSelect as EventListener);
+    this.removeEventListener("navigation:search", this.#navigation.onSearch as EventListener);
+    this.removeEventListener("navigation:find", this.#navigation.onFind as EventListener);
     this.shadowRoot
       ?.querySelector(".search-results")
-      ?.removeEventListener("click", this.#onSearchResultClick as EventListener);
+      ?.removeEventListener("click", this.#navigation.onSearchResultClick as EventListener);
     this.shadowRoot
       ?.querySelector("docen-find-replace-dialog")
-      ?.removeEventListener("find-replace:action", this.#onFindReplace as EventListener);
+      ?.removeEventListener("find-replace:action", this.#navigation.onFindReplace as EventListener);
     this.shadowRoot
       ?.querySelector("docen-options-dialog")
       ?.removeEventListener("options:ok", this.#onOptionsOk as EventListener);
@@ -1959,7 +1767,7 @@ class DocenDocument extends AddinHost<Editor> {
     this.#fontSyncCleanup?.();
     this.#fontSyncCleanup = undefined;
     this.#stopFormatPainter();
-    clearTimeout(this.#searchTimer);
+    this.#navigation.dispose();
     if (this.#spellingTimer != null) clearTimeout(this.#spellingTimer);
     this.#bridge?.destroy();
     this.#bridge = undefined;
@@ -3209,12 +3017,12 @@ class DocenDocument extends AddinHost<Editor> {
       // Find drop-down → Go To jumps to a page; the main button and Find
       // open the nav-pane search box.
       if (value === "go-to") this.#goToPage();
-      else this.#openSearch();
+      else this.#navigation.openSearch();
       return;
     }
     // Replace (ribbon Home → Editing → Replace, or Ctrl+H) → Find & Replace dialog.
     if (name === "replace") {
-      this.#openFindReplace();
+      this.#navigation.openFindReplace();
       return;
     }
     // Word Count (ribbon Review → Proofing) → the statistics dialog.
