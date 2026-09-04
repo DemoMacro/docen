@@ -2029,11 +2029,16 @@ class DocenDocument extends AddinHost<Editor> {
    *  every chrome re-stamp and every transaction (a flag toggle flips its
    *  check on the next pass). */
   #syncStoryMenus(): void {
-    const sp = (
-      this.editor?.state.doc.attrs as
-        | { sectionProperties?: { titlePage?: boolean; evenAndOddHeaders?: boolean } }
-        | undefined
-    )?.sectionProperties;
+    const attrs = this.editor?.state.doc.attrs as
+      | {
+          sectionProperties?: { titlePage?: boolean };
+          documentExtras?: { settings?: { evenAndOddHeaders?: boolean } };
+        }
+      | undefined;
+    // titlePage is a sectPr flag; evenAndOddHeaders lives in settings.xml
+    // (toggled through documentExtras — see SectionsCommands.toggleSectionFlag).
+    const sp = attrs?.sectionProperties;
+    const oddEven = attrs?.documentExtras?.settings?.evenAndOddHeaders;
     const stamp = (kind: "header" | "footer"): void => {
       const el = this.shadowRoot?.querySelector(`docen-ribbon-split-button[event="${kind}"]`);
       if (!el) return;
@@ -2059,7 +2064,7 @@ class DocenDocument extends AddinHost<Editor> {
           {
             text: t("ribbon.opt.odd-even", this),
             value: "odd-even",
-            checked: !!sp?.evenAndOddHeaders,
+            checked: !!oddEven,
           },
         ]),
       );
@@ -2077,7 +2082,7 @@ class DocenDocument extends AddinHost<Editor> {
       const oddEvenCb = this.shadowRoot?.querySelector(
         'docen-ribbon-checkbox[event="header-option"][value="odd-even"]',
       );
-      oddEvenCb?.toggleAttribute("checked", !!sp?.evenAndOddHeaders);
+      oddEvenCb?.toggleAttribute("checked", !!oddEven);
     }
   }
 

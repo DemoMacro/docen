@@ -188,14 +188,30 @@ export class SectionCommands {
     this.updateSectionGeometry({ pageBorders: borders });
   }
 
-  /** Toggle a slot-visibility flag (titlePage / evenAndOddHeaders) on the
-   *  current section's sectPr (Word's Different First Page / Odd & Even
-   *  Pages). The furniture projection picks the flag up and the page pattern
-   *  (first/even slots) follows. */
+  /** Toggle a slot-visibility flag — Word's Different First Page / Odd &
+   *  Even Pages. titlePage (w:titlePg) IS a sectPr child and goes to the
+   *  current section; evenAndOddHeaders is a settings.xml flag (CT_SectPr
+   *  has no such child), so a section-level write would be dropped on
+   *  export and the furniture projection (doc.settings) would never see it
+   *  — it toggles document-wide through documentExtras instead. */
   toggleSectionFlag(flag: "titlePage" | "evenAndOddHeaders"): void {
+    if (flag === "evenAndOddHeaders") {
+      const editor = this.host.editor();
+      if (!editor) return;
+      const { doc, tr } = editor.state;
+      const extras =
+        (doc.attrs as { documentExtras?: Record<string, unknown> }).documentExtras ?? {};
+      const settings = (extras.settings ?? {}) as Record<string, unknown>;
+      tr.setDocAttribute("documentExtras", {
+        ...extras,
+        settings: { ...settings, evenAndOddHeaders: !settings.evenAndOddHeaders },
+      });
+      editor.view.dispatch(tr);
+      return;
+    }
     this.mutateCurrentSection((cur) => ({
       ...cur,
-      [flag]: !(cur as unknown as Record<string, unknown> | undefined)?.[flag],
+      titlePage: !cur?.titlePage,
     }));
   }
 
