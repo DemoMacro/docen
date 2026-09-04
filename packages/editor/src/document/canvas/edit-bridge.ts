@@ -158,6 +158,12 @@ export interface EditBridgeOptions {
    *  scrolls it into view (followLink only opens external URLs). Absent,
    *  internal anchors are inert. */
   onInternalAnchor?: (name: string) => void;
+  /** Every in-editor copy/cut (keyboard + ribbon) reports its content here —
+   *  the Office Clipboard pane's collection feed. */
+  onClipboardCollect?: (item: { text: string; payload: string | null }) => void;
+  /** A keyboard paste landed rich content (the docen slice or styled HTML
+   *  lane) — the host shows Word's paste-options bar over the pasted text. */
+  onRichPaste?: (source: { kind: "slice" | "html"; raw: string; text: string }) => void;
 }
 
 /** A drawing's painted box plus its identity — how a click hit it and how the
@@ -222,6 +228,12 @@ export interface EditBridge {
   commentAnchorRect(
     from: number,
     to: number,
+  ): { frame: HTMLElement; left: number; top: number; height: number } | null;
+  /** The caret's rect against its page frame — frame-relative screen px
+   *  (zoom applied). The paste-options bar hangs it beside the pasted
+   *  content. Main story only; null when unmappable or in a story. */
+  pasteAnchorRect(
+    pos: number,
   ): { frame: HTMLElement; left: number; top: number; height: number } | null;
   /** Insert a docen slice payload (DOCEN_CLIP_MIME) into the ACTIVE story at
    *  the caret — the host's ribbon Paste routes here after reading the system
@@ -1839,9 +1851,16 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     // DataTransfer passthrough may still hand back.
     const data = event.clipboardData;
     const docen = data?.getData(`web ${DOCEN_CLIP_MIME}`) || data?.getData(DOCEN_CLIP_MIME);
-    if (docen && insertSlicePayload(docen)) return;
+    if (docen && insertSlicePayload(docen)) {
+      const plain = data?.getData("text/plain") ?? "";
+      opts.onRichPaste?.({ kind: "slice", raw: docen, text: plain });
+      return;
+    }
     const html = data?.getData("text/html");
-    if (html && insertPastedJSON(html)) return;
+    if (html && insertPastedJSON(html)) {
+      opts.onRichPaste?.({ kind: "html", raw: html, text: data?.getData("text/plain") ?? "" });
+      return;
+    }
     const text = data?.getData("text/plain");
     if (text) {
       // A ribbon/context-menu copy wrote its custom format through the async
@@ -1878,6 +1897,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     if (text == null) return null;
     const payload = selectionSlicePayload(active().editor.state);
     lastCopied = payload ? { payload, text } : null;
+    opts.onClipboardCollect?.({ text, payload });
     return { text, payload };
   };
 
@@ -2040,6 +2060,20 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
         left: (last.xPx + last.widthPx) * scale,
         top: last.yPx * scale,
         height: last.heightPx * scale,
+      };
+    },
+    pasteAnchorRect(pos) {
+      if (story || !main.map?.valid) return null;
+      const rect = main.map.caretRect(pos);
+      if (!rect) return null;
+      const frame = opts.pageHost?.(framePage(main, rect.page));
+      if (!frame) return null;
+      const scale = opts.scale?.() ?? 1;
+      return {
+        frame,
+        left: rect.xPx * scale,
+        top: rect.yPx * scale,
+        height: rect.heightPx * scale,
       };
     },
     /** Insert a docen slice payload (DOCEN_CLIP_MIME) into the ACTIVE story at

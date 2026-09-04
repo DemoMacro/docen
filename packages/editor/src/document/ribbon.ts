@@ -141,8 +141,7 @@ const styleItems = (styles?: StylesOptions | null): string => {
 const pasteItems = (): string =>
   JSON.stringify([
     { text: opt("paste"), value: "paste" },
-    // Paste Special needs Word's format-pick dialog (not built yet).
-    { text: opt("paste-special"), value: "paste-special", disabled: true },
+    { text: opt("paste-special"), value: "paste-special" },
     { text: opt("keep-text-only"), value: "keep-text-only" },
   ]);
 

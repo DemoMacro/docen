@@ -194,6 +194,9 @@ export const documentTemplate = html`
     <docen-task-pane slot="task-pane-end" position="end" part="comments-pane" title="Comments">
       <docen-comments-pane></docen-comments-pane>
     </docen-task-pane>
+    <docen-task-pane slot="task-pane-end" position="end" part="clipboard-pane" title="Clipboard">
+      <docen-clipboard-pane></docen-clipboard-pane>
+    </docen-task-pane>
     <docen-status-bar slot="status" part="status"></docen-status-bar>
   </docen-workspace>
   <!-- The edit bridge's textarea lives here, at the shadow root: inside the
@@ -210,6 +213,7 @@ export const documentTemplate = html`
   <docen-columns-dialog part="columns"></docen-columns-dialog>
   <docen-link-dialog part="link"></docen-link-dialog>
   <docen-zoom-dialog part="zoom"></docen-zoom-dialog>
+  <docen-paste-special-dialog part="paste-special"></docen-paste-special-dialog>
   <docen-find-replace-dialog></docen-find-replace-dialog>
   <input type="file" id="file-input" accept=".docx,.md,.markdown" hidden />
   <input type="file" id="image-input" accept="image/*" hidden />

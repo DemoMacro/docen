@@ -17,3 +17,5 @@ export { default as DocenTableDialog } from "./table-dialog";
 export { default as DocenColumnsDialog } from "./columns-dialog";
 export { default as DocenLinkDialog } from "./link-dialog";
 export { default as DocenZoomDialog } from "./zoom-dialog";
+export { default as DocenClipboardPane } from "./clipboard-pane";
+export { default as DocenPasteSpecialDialog } from "./paste-special-dialog";

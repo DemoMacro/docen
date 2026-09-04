@@ -73,6 +73,8 @@ export const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   "zoom-100",
   "save",
   "insert-picture",
+  // Home → Clipboard group launcher — the Office Clipboard pane.
+  "clipboard-dialog",
   "show-marks",
   "copy",
   "cut",
