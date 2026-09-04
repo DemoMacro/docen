@@ -47,47 +47,43 @@ const styles = css`
     padding: 8px 4px 4px;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 14px;
     font-size: 13px;
   }
-  .list {
-    max-height: 260px;
-    overflow: auto;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
+  fluent-dropdown {
+    width: 100%;
+    min-width: 0;
   }
-  .choice {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    cursor: pointer;
-    padding: 1px 2px;
+  fluent-field {
+    align-self: flex-start;
   }
-  .no-proof {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    cursor: pointer;
-  }
+`;
+
+const optionTemplate = html<ProofingLanguage, DocenLanguageDialog>`
+  <fluent-option value="${(l) => l.tag}">${(l) => l.name}</fluent-option>
 `;
 
 const template = html<DocenLanguageDialog>`
   <docen-dialog ${ref("dialogEl")}>
     <div class="lang-body">
-      <div class="list">
-        ${repeat(
-          () => PROOFING_LANGUAGES,
-          html`<label class="choice">
-            <input type="radio" name="proofing-lang" value="${(l) => l.tag}" />
-            <span>${(l) => l.name}</span>
-          </label>`,
-        )}
-      </div>
-      <label class="no-proof">
-        <input type="checkbox" ${ref("noProofBox")} />
-        <span>${(x) => t("languageDialog.noProof", x)}</span>
-      </label>
+      <fluent-dropdown type="combobox" appearance="outline" ${ref("langDropdown")}>
+        <fluent-listbox popover="manual" tabindex="-1">
+          ${repeat(() => PROOFING_LANGUAGES, optionTemplate)}
+        </fluent-listbox>
+        <input
+          slot="control"
+          role="combobox"
+          aria-haspopup="listbox"
+          type="combobox"
+          size="1"
+          style="width:100%;box-sizing:border-box"
+          ${ref("langInput")}
+        />
+      </fluent-dropdown>
+      <fluent-field label-position="after">
+        <fluent-checkbox slot="input" ${ref("noProofBox")}></fluent-checkbox>
+        <label slot="label">${(x) => t("languageDialog.noProof", x)}</label>
+      </fluent-field>
     </div>
     <div slot="action">
       <fluent-button ${ref("cancelBtn")} @click="${(x) => x.hide()}"></fluent-button>
@@ -111,7 +107,12 @@ const template = html<DocenLanguageDialog>`
 @customElement({ name: "docen-language-dialog", template, styles })
 class DocenLanguageDialog extends FASTElement {
   @observable dialogEl?: HTMLElement & { heading?: string; show(): void; hide(): void };
-  @observable noProofBox?: HTMLInputElement;
+  // The combobox (value = the picked w:lang tag) and its control input; the
+  // Fluent checkbox (checked = w:noProof) — both replace the former raw
+  // radio-list + native checkbox.
+  @observable langDropdown?: HTMLElement & { value: string | null };
+  @observable langInput?: HTMLInputElement;
+  @observable noProofBox?: HTMLElement & { checked: boolean };
   @observable okBtn?: HTMLElement;
   @observable cancelBtn?: HTMLElement;
 
@@ -133,11 +134,7 @@ class DocenLanguageDialog extends FASTElement {
    *  no-proof box mirroring the selection's current state. */
   show(tag: string | null, noProof = false): void {
     const target = PROOFING_LANGUAGES.some((l) => l.tag === tag) ? tag : PROOFING_LANGUAGES[0].tag;
-    for (const radio of this.shadowRoot?.querySelectorAll<HTMLInputElement>(
-      'input[name="proofing-lang"]',
-    ) ?? []) {
-      radio.checked = radio.value === target;
-    }
+    if (this.langDropdown) this.langDropdown.value = target;
     if (this.noProofBox) this.noProofBox.checked = noProof;
     this.dialogEl?.show();
   }
@@ -147,13 +144,16 @@ class DocenLanguageDialog extends FASTElement {
   }
 
   /** Template-visible OK handler (FAST templates live outside the class, so a
-   *  `#`-private method can't be referenced from the binding). */
+   *  `#`-private method can't be referenced from the binding). The combobox
+   *  allows free typing, so an unmatched value falls back to the preselected
+   *  language rather than stamping an unknown tag. */
   applyLanguage(): void {
-    const picked = this.shadowRoot?.querySelector<HTMLInputElement>(
-      'input[name="proofing-lang"]:checked',
-    );
-    if (!picked) return;
-    this.$emit("language:ok", { value: picked.value, noProof: this.noProofBox?.checked === true });
+    const raw = this.langDropdown?.value ?? null;
+    const picked = PROOFING_LANGUAGES.find((l) => l.tag === raw) ?? PROOFING_LANGUAGES[0];
+    this.$emit("language:ok", {
+      value: picked.tag,
+      noProof: this.noProofBox?.checked === true,
+    });
     this.hide();
   }
 

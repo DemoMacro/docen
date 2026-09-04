@@ -1,4 +1,12 @@
-import { FASTElement, css, customElement, html, observable, ref } from "@microsoft/fast-element";
+import {
+  FASTElement,
+  css,
+  customElement,
+  html,
+  observable,
+  ref,
+  repeat,
+} from "@microsoft/fast-element";
 
 import { observeLang, t } from "../../i18n/localize";
 
@@ -26,29 +34,29 @@ const styles = css`
     gap: 10px;
     font-size: 13px;
   }
-  .choice {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    cursor: pointer;
+  fluent-radio-group {
+    align-items: flex-start;
+    gap: 6px;
   }
   .as {
     color: var(--docen-color-text-2, #616161);
   }
 `;
 
+const formatTemplate = html<(typeof FORMATS)[number], DocenPasteSpecialDialog>`
+  <fluent-field label-position="after">
+    <fluent-radio slot="input" value="${(f) => f.value}"></fluent-radio>
+    <label slot="label"><span class="format-label" data-key="${(f) => f.key}"></span></label>
+  </fluent-field>
+`;
+
 const template = html<DocenPasteSpecialDialog>`
   <docen-dialog ${ref("dialogEl")}>
     <div class="body">
       <span class="as">${(x) => t("pasteSpecial.as", x)}</span>
-      ${FORMATS.map(
-        (f) => html`
-          <label class="choice">
-            <input type="radio" name="paste-format" value="${f.value}" />
-            <span class="format-label" data-key="${f.key}"></span>
-          </label>
-        `,
-      )}
+      <fluent-radio-group orientation="vertical" ${ref("formatGroup")}>
+        ${repeat(() => FORMATS, formatTemplate)}
+      </fluent-radio-group>
     </div>
     <div slot="action">
       <fluent-button ${ref("cancelBtn")} @click="${(x) => x.hide()}"></fluent-button>
@@ -70,6 +78,8 @@ const template = html<DocenPasteSpecialDialog>`
 @customElement({ name: "docen-paste-special-dialog", template, styles })
 class DocenPasteSpecialDialog extends FASTElement {
   @observable dialogEl?: HTMLElement & { heading?: string; show(): void; hide(): void };
+  // The group's `value` mirrors the checked radio's `value` ("html" | "text").
+  @observable formatGroup?: HTMLElement & { value: string | null };
   @observable okBtn?: HTMLElement;
   @observable cancelBtn?: HTMLElement;
 
@@ -89,11 +99,7 @@ class DocenPasteSpecialDialog extends FASTElement {
 
   /** Open with formatted HTML pre-picked (Word's default). */
   show(): void {
-    const first = this.shadowRoot?.querySelector<HTMLInputElement>('input[name="paste-format"]');
-    for (const radio of this.shadowRoot?.querySelectorAll<HTMLInputElement>(
-      'input[name="paste-format"]',
-    ) ?? [])
-      radio.checked = radio === first;
+    if (this.formatGroup) this.formatGroup.value = FORMATS[0].value;
     this.dialogEl?.show();
   }
 
@@ -104,10 +110,8 @@ class DocenPasteSpecialDialog extends FASTElement {
   /** Template-visible OK handler (FAST templates live outside the class, so a
    *  `#`-private method can't be referenced from the binding). */
   applyFormat(): void {
-    const picked = this.shadowRoot?.querySelector<HTMLInputElement>(
-      'input[name="paste-format"]:checked',
-    );
-    this.$emit("paste-special:ok", (picked?.value ?? "html") as PasteSpecialFormat);
+    const picked = this.formatGroup?.value ?? FORMATS[0].value;
+    this.$emit("paste-special:ok", picked as PasteSpecialFormat);
     this.hide();
   }
 

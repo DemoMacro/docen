@@ -48,7 +48,7 @@ const styles = css`
     min-width: 92px;
   }
   .row select,
-  .row input[type="text"] {
+  fluent-text-input {
     flex: 1;
     min-width: 0;
   }
@@ -70,7 +70,7 @@ const template = html<DocenDefineListDialog>`
         </div>
         <div class="row">
           <label>${(x) => t("defineList.text", x)}</label>
-          <input type="text" ${ref("l0Text")} spellcheck="false" />
+          <fluent-text-input ${ref("l0Text")} spellcheck="false"></fluent-text-input>
         </div>
       </div>
       <div class="level">
@@ -81,7 +81,7 @@ const template = html<DocenDefineListDialog>`
         </div>
         <div class="row">
           <label>${(x) => t("defineList.text", x)}</label>
-          <input type="text" ${ref("l1Text")} spellcheck="false" />
+          <fluent-text-input ${ref("l1Text")} spellcheck="false"></fluent-text-input>
         </div>
       </div>
       <div class="level">
@@ -92,7 +92,7 @@ const template = html<DocenDefineListDialog>`
         </div>
         <div class="row">
           <label>${(x) => t("defineList.text", x)}</label>
-          <input type="text" ${ref("l2Text")} spellcheck="false" />
+          <fluent-text-input ${ref("l2Text")} spellcheck="false"></fluent-text-input>
         </div>
       </div>
       <span class="note">${(x) => t("defineList.note", x)}</span>
@@ -121,9 +121,10 @@ class DocenDefineListDialog extends FASTElement {
   @observable l0Format?: HTMLSelectElement;
   @observable l1Format?: HTMLSelectElement;
   @observable l2Format?: HTMLSelectElement;
-  @observable l0Text?: HTMLInputElement;
-  @observable l1Text?: HTMLInputElement;
-  @observable l2Text?: HTMLInputElement;
+  // fluent-text-input exposes the string on `value`, like a native input.
+  @observable l0Text?: HTMLElement & { value: string };
+  @observable l1Text?: HTMLElement & { value: string };
+  @observable l2Text?: HTMLElement & { value: string };
   @observable okBtn?: HTMLElement;
   @observable cancelBtn?: HTMLElement;
 
@@ -147,7 +148,7 @@ class DocenDefineListDialog extends FASTElement {
     // fresh cascade it is).
     const reset = (
       format: HTMLSelectElement | undefined,
-      text: HTMLInputElement | undefined,
+      text: { value: string } | undefined,
       n: number,
     ) => {
       if (!format || !text) return;
@@ -172,7 +173,7 @@ class DocenDefineListDialog extends FASTElement {
     ]
       .map(([format, text]) => ({
         format: (format as HTMLSelectElement)?.value,
-        text: (text as HTMLInputElement)?.value ?? "",
+        text: text?.value ?? "",
       }))
       .filter((lvl) => lvl.text);
     if (levels.length === 0) return;

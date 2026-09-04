@@ -21,9 +21,9 @@ const styles = css`
     flex-direction: column;
     gap: 4px;
   }
-  .field input[type="text"] {
+  fluent-text-input {
     width: 100%;
-    box-sizing: border-box;
+    min-width: 0;
   }
   .preview {
     border: 1px dashed var(--neutral-stroke-rest, #d1d1d1);
@@ -34,11 +34,8 @@ const styles = css`
     min-height: 20px;
     user-select: none;
   }
-  .check {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    cursor: pointer;
+  fluent-field {
+    align-self: flex-start;
   }
 `;
 
@@ -47,13 +44,21 @@ const template = html<DocenTwoInOneDialog>`
     <div class="body">
       <label class="field">
         <span>${(x) => t("twoInOne.text", x)}</span>
-        <input type="text" ${ref("textEl")} spellcheck="false" @input="${(x) => x.syncPreview()}" />
+        <fluent-text-input
+          ${ref("textEl")}
+          spellcheck="false"
+          @input="${(x) => x.syncPreview()}"
+        ></fluent-text-input>
       </label>
       <div class="preview" ${ref("previewEl")}></div>
-      <label class="check">
-        <input type="checkbox" ${ref("bracketsEl")} @change="${(x) => x.syncPreview()}" />
-        <span>${(x) => t("twoInOne.brackets", x)}</span>
-      </label>
+      <fluent-field label-position="after">
+        <fluent-checkbox
+          slot="input"
+          ${ref("bracketsEl")}
+          @change="${(x) => x.syncPreview()}"
+        ></fluent-checkbox>
+        <label slot="label">${(x) => t("twoInOne.brackets", x)}</label>
+      </fluent-field>
     </div>
     <div slot="action">
       <fluent-button ${ref("cancelBtn")} @click="${(x) => x.hide()}"></fluent-button>
@@ -76,9 +81,11 @@ const template = html<DocenTwoInOneDialog>`
 @customElement({ name: "docen-two-in-one-dialog", template, styles })
 class DocenTwoInOneDialog extends FASTElement {
   @observable dialogEl?: HTMLElement & { heading?: string; show(): void; hide(): void };
-  @observable textEl?: HTMLInputElement;
+  // fluent-text-input exposes the string on `value`; the Fluent checkbox
+  // mirrors the native checked API.
+  @observable textEl?: HTMLElement & { value: string };
   @observable previewEl?: HTMLDivElement;
-  @observable bracketsEl?: HTMLInputElement;
+  @observable bracketsEl?: HTMLElement & { checked: boolean };
   @observable okBtn?: HTMLElement;
   @observable cancelBtn?: HTMLElement;
 

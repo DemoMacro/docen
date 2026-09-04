@@ -101,16 +101,8 @@ const styles = css`
     display: inline-flex;
   }
   .act {
-    border: none;
-    background: transparent;
-    color: var(--docen-color-text-1, #242424);
     font-size: 11px;
-    padding: 2px 6px;
-    border-radius: 3px;
-    cursor: pointer;
-  }
-  .act:hover {
-    background: var(--docen-color-stroke-1, #e0e0e0);
+    color: var(--docen-color-text-1, #242424);
   }
   .body {
     grid-column: 2 / 4;
@@ -217,13 +209,15 @@ class DocenCommentsPane extends FASTElement {
 
     const actions = document.createElement("div");
     actions.className = "actions";
-    const edit = document.createElement("button");
-    edit.type = "button";
+    const edit = document.createElement("fluent-button");
+    edit.setAttribute("appearance", "subtle");
+    edit.setAttribute("size", "small");
     edit.className = "act";
     edit.textContent = t("comments.edit", this);
     edit.addEventListener("click", () => this.#beginEdit(comment, card));
-    const del = document.createElement("button");
-    del.type = "button";
+    const del = document.createElement("fluent-button");
+    del.setAttribute("appearance", "subtle");
+    del.setAttribute("size", "small");
     del.className = "act";
     del.textContent = t("comments.delete", this);
     del.addEventListener("click", () => {

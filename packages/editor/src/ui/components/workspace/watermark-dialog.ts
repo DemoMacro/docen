@@ -94,11 +94,8 @@ const styles = css`
     white-space: nowrap;
     color: var(--docen-color-text-3, #616161);
   }
-  .check {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    cursor: pointer;
+  fluent-field {
+    align-self: flex-start;
   }
 `;
 
@@ -135,10 +132,10 @@ const template = html<DocenWatermarkDialog>`
             <label ${ref("scaleLabel")}></label>
             <select ${ref("scaleSel")}></select>
           </div>
-          <label class="check">
-            <input type="checkbox" ${ref("washoutCheck")} />
-            <span ${ref("washoutLabel")}></span>
-          </label>
+          <fluent-field label-position="after">
+            <fluent-checkbox slot="input" ${ref("washoutCheck")}></fluent-checkbox>
+            <label slot="label"><span ${ref("washoutLabel")}></span></label>
+          </fluent-field>
         </div>
       </div>
       <label class="choice">
@@ -181,10 +178,10 @@ const template = html<DocenWatermarkDialog>`
             </select>
           </div>
         </div>
-        <label class="check">
-          <input type="checkbox" ${ref("transparentCheck")} />
-          <span ${ref("transparentLabel")}></span>
-        </label>
+        <fluent-field label-position="after">
+          <fluent-checkbox slot="input" ${ref("transparentCheck")}></fluent-checkbox>
+          <label slot="label"><span ${ref("transparentLabel")}></span></label>
+        </fluent-field>
       </div>
     </div>
     <div slot="action">
@@ -216,7 +213,8 @@ class DocenWatermarkDialog extends FASTElement {
   @observable filename?: HTMLElement;
   @observable scaleLabel?: HTMLElement;
   @observable scaleSel?: HTMLSelectElement;
-  @observable washoutCheck?: HTMLInputElement;
+  // The Fluent checkbox mirrors the native checked API.
+  @observable washoutCheck?: HTMLElement & { checked: boolean };
   @observable washoutLabel?: HTMLElement;
   @observable textRadio?: HTMLInputElement;
   @observable textLabel?: HTMLElement;
@@ -231,7 +229,7 @@ class DocenWatermarkDialog extends FASTElement {
   @observable colorSel?: HTMLSelectElement;
   @observable layoutLabel?: HTMLElement;
   @observable layoutSel?: HTMLSelectElement;
-  @observable transparentCheck?: HTMLInputElement;
+  @observable transparentCheck?: HTMLElement & { checked: boolean };
   @observable transparentLabel?: HTMLElement;
   @observable okBtn?: HTMLElement;
   @observable cancelBtn?: HTMLElement;

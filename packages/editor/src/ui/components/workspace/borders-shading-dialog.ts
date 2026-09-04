@@ -66,23 +66,7 @@ const styles = css`
     font-size: 13px;
   }
   .tabs {
-    display: flex;
-    gap: 2px;
-    border-bottom: 1px solid var(--docen-color-divider, #e1e1e1);
-  }
-  .tabs button {
-    border: none;
-    background: none;
-    font: inherit;
-    padding: 5px 12px;
-    cursor: pointer;
-    color: var(--docen-color-text-2, #424242);
-    border-bottom: 2px solid transparent;
-  }
-  .tabs button[aria-selected="true"] {
-    color: var(--docen-color-brand, #0078d4);
-    border-bottom-color: var(--docen-color-brand, #0078d4);
-    font-weight: 600;
+    font-size: 13px;
   }
   .row {
     display: flex;
@@ -189,11 +173,11 @@ const styles = css`
 const template = html<DocenBordersShadingDialog>`
   <docen-dialog ${ref("dialogEl")}>
     <div class="body">
-      <div class="tabs">
-        <button ${ref("borderTabBtn")} @click="${(x) => x.showTab("border")}" role="tab"></button>
-        <button ${ref("pageTabBtn")} @click="${(x) => x.showTab("page")}" role="tab"></button>
-        <button ${ref("shadingTabBtn")} @click="${(x) => x.showTab("shading")}" role="tab"></button>
-      </div>
+      <fluent-tablist class="tabs" ${ref("tablist")} @change="${(x) => x.onTabChange()}">
+        <fluent-tab id="bs-tab-border" ${ref("borderTabBtn")}></fluent-tab>
+        <fluent-tab id="bs-tab-page" ${ref("pageTabBtn")}></fluent-tab>
+        <fluent-tab id="bs-tab-shading" ${ref("shadingTabBtn")}></fluent-tab>
+      </fluent-tablist>
       <div ${ref("borderPage")}>
         <div class="heading" ${ref("settingHeading")}></div>
         <div class="presets">
@@ -283,9 +267,12 @@ const template = html<DocenBordersShadingDialog>`
 @customElement({ name: "docen-borders-shading-dialog", template, styles })
 class DocenBordersShadingDialog extends FASTElement {
   @observable dialogEl?: HTMLElement & { heading?: string; show(): void; hide(): void };
-  @observable borderTabBtn?: HTMLButtonElement;
-  @observable pageTabBtn?: HTMLButtonElement;
-  @observable shadingTabBtn?: HTMLButtonElement;
+  // The Fluent tablist owns the selected state (activeid → the picked tab);
+  // the tab refs stay for label writes only.
+  @observable tablist?: HTMLElement & { activeid: string | number | null };
+  @observable borderTabBtn?: HTMLElement;
+  @observable pageTabBtn?: HTMLElement;
+  @observable shadingTabBtn?: HTMLElement;
   @observable borderPage?: HTMLElement;
   @observable shadingPage?: HTMLElement;
   @observable settingHeading?: HTMLElement;
@@ -354,6 +341,15 @@ class DocenBordersShadingDialog extends FASTElement {
     this.dialogEl?.hide();
   }
 
+  /** Template-visible tablist change handler — the tabs carry no click
+   *  bindings of their own; user picks arrive here via the group's change. */
+  onTabChange(): void {
+    const id = String(this.tablist?.activeid ?? "");
+    const tab = id.replace("bs-tab-", "") as "border" | "page" | "shading";
+    // showTab also stamps activeid (programmatic opens); skip the echo.
+    if (tab !== this.#tab) this.showTab(tab);
+  }
+
   showTab(tab: "border" | "page" | "shading"): void {
     this.#tab = tab;
     // The page tab reuses the border widgets, plus a hint that the stamp
@@ -361,13 +357,7 @@ class DocenBordersShadingDialog extends FASTElement {
     this.borderPage?.classList.toggle("hidden", tab === "shading");
     this.shadingPage?.classList.toggle("hidden", tab !== "shading");
     this.pageHint?.classList.toggle("hidden", tab !== "page");
-    const selected = {
-      border: this.borderTabBtn,
-      page: this.pageTabBtn,
-      shading: this.shadingTabBtn,
-    };
-    for (const [key, btn] of Object.entries(selected))
-      btn?.setAttribute("aria-selected", String(key === tab));
+    if (this.tablist) this.tablist.activeid = `bs-tab-${tab}`;
     this.#loadTabState();
     this.#paintEdges();
     this.#paintPresets();
