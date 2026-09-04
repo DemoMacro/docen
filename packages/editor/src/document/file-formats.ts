@@ -100,6 +100,9 @@ export const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   // Phonetic guide (拼音指南) opens the per-character reading dialog; the
   // commit splits the selection into per-character ruby runs.
   "phonetic-guide",
+  // Chinese Layout (中文版式) opens the two-lines-in-one dialog; the commit
+  // stamps the eastAsianLayout combine mark on the selection.
+  "two-lines-in-one",
   // TOC insert/update — dispatch with the bridge's pageOf (page numbers live
   // in the canvas caret map, which editor.commands can't reach).
   "toc",

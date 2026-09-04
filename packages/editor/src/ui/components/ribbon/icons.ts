@@ -73,6 +73,7 @@ import tableStackBelow from "@fluentui/svg-icons/icons/table_stack_below_24_regu
 import tableStackLeft from "@fluentui/svg-icons/icons/table_stack_left_24_regular.svg?raw";
 import tableStackRight from "@fluentui/svg-icons/icons/table_stack_right_24_regular.svg?raw";
 import textAlignCenter from "@fluentui/svg-icons/icons/text_align_center_24_regular.svg?raw";
+import textAlignDistributed from "@fluentui/svg-icons/icons/text_align_distributed_24_regular.svg?raw";
 import textAlignJustify from "@fluentui/svg-icons/icons/text_align_justify_24_regular.svg?raw";
 import textAlignLeft from "@fluentui/svg-icons/icons/text_align_left_24_regular.svg?raw";
 import textAlignRight from "@fluentui/svg-icons/icons/text_align_right_24_regular.svg?raw";
@@ -120,6 +121,11 @@ const watermarkIcon =
 const phoneticGuide =
   '<svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><g fill="none" stroke="currentColor" stroke-linecap="round"><path d="M5 16h14" stroke-width="1.8"/><path d="M6.5 9.5h3.4M11.6 9.5h3.4M16.7 9.5h.9" stroke-width="1.4"/><path d="M6.5 12.6h3.4M11.6 12.6h3.4M16.7 12.6h.9" stroke-width="1.4" opacity=".55"/></g></svg>';
 
+// No Fluent glyph for Two Lines in One (双行合一) — drawn here as the two
+// packed half-height text rows with the bracket pair flanking them.
+const twoInOne =
+  '<svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><g fill="none" stroke="currentColor" stroke-linecap="round"><path d="M6 4.5c-1.4 0-2 1-2 2.5v10c0 1.5.6 2.5 2 2.5" stroke-width="1.5"/><path d="M18 4.5c1.4 0 2 1 2 2.5v10c0 1.5-.6 2.5-2 2.5" stroke-width="1.5"/><path d="M8.5 9.5h7" stroke-width="1.8"/><path d="M8.5 14.5h7" stroke-width="1.8" opacity=".55"/></g></svg>';
+
 /**
  * Ribbon icons sourced from `@fluentui/svg-icons` (Fluent System Icons — the
  * same set Office uses). Each entry is the raw SVG markup, injected into a
@@ -155,11 +161,13 @@ const RIBBON_ICONS: Record<string, string> = {
   case: textChangeCase,
   "clear-format": clearFormatting,
   "phonetic-guide": phoneticGuide,
+  "two-in-one": twoInOne,
   // Home — Paragraph
   "align-left": textAlignLeft,
   "align-center": textAlignCenter,
   "align-right": textAlignRight,
   justify: textAlignJustify,
+  "align-distribute": textAlignDistributed,
   list: textBulletList,
   numbering: numberRow,
   multilevel: textBulletListTree,

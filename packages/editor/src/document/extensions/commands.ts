@@ -62,6 +62,7 @@ declare module "@tiptap/core" {
       "align-center": () => ReturnType;
       "align-right": () => ReturnType;
       justify: () => ReturnType;
+      "justify-distribute": () => ReturnType;
       "indent-increase": () => ReturnType;
       "indent-decrease": () => ReturnType;
       "line-spacing": (mult?: string) => ReturnType;
@@ -154,6 +155,7 @@ export const WIRED_DISPATCH: ReadonlySet<string> = new Set([
   "align-center",
   "align-right",
   "justify",
+  "justify-distribute",
   "indent-increase",
   "indent-decrease",
   "line-spacing",
@@ -1038,6 +1040,10 @@ export const DocumentCommands = Extension.create({
         () =>
         ({ commands }) =>
           commands.updateAttributes("paragraph", { alignment: "both" }),
+      "justify-distribute":
+        () =>
+        ({ commands }) =>
+          commands.updateAttributes("paragraph", { alignment: "distribute" }),
 
       // ── Indent / spacing / shading / border — stamp office-open block attrs ──
       // All four walk EVERY selected paragraph (each keeps its own existing

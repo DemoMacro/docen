@@ -131,6 +131,8 @@ export const ribbonEn: AdditionalLanguage = {
     "ribbon.cmd.align-center": "Center",
     "ribbon.cmd.align-right": "Align Right",
     "ribbon.cmd.justify": "Justify",
+    "ribbon.cmd.justify-distribute": "Distributed",
+    "ribbon.cmd.two-lines-in-one": "Two Lines in One",
     "ribbon.cmd.line-spacing": "Line and Paragraph Spacing",
     "ribbon.cmd.shading": "Shading",
     "ribbon.cmd.border": "Borders",
@@ -358,6 +360,9 @@ export const ribbonEn: AdditionalLanguage = {
     "ribbon.opt.uppercase": "UPPERCASE",
     "ribbon.opt.capitalize": "Capitalize Each Word",
     "ribbon.opt.toggle-case": "tOGGLE cASE",
+    // --- Options: Chinese layout (中文版式) ---
+    "ribbon.opt.combine-characters": "Combine Characters",
+    "ribbon.opt.two-lines-in-one": "Two Lines in One",
     // --- Options: lists ---
     "ribbon.opt.bullet": "•  (Bullet)",
     "ribbon.opt.circle": "◦  (Circle)",
@@ -753,6 +758,9 @@ export const ribbonEn: AdditionalLanguage = {
     "options.title": "Options",
     "options.ok": "OK",
     "options.cancel": "Cancel",
+    "twoInOne.title": "Two Lines in One",
+    "twoInOne.text": "Text",
+    "twoInOne.brackets": "Wrap in brackets",
     "options.language": "Language",
     "options.lang.zh": "Chinese (Simplified)",
     "options.lang.en": "English",
@@ -895,6 +903,8 @@ export const ribbonZhCN: AdditionalLanguage = {
     "ribbon.cmd.align-center": "居中",
     "ribbon.cmd.align-right": "右对齐",
     "ribbon.cmd.justify": "两端对齐",
+    "ribbon.cmd.justify-distribute": "分散对齐",
+    "ribbon.cmd.two-lines-in-one": "双行合一",
     "ribbon.cmd.line-spacing": "行和段落间距",
     "ribbon.cmd.shading": "底纹",
     "ribbon.cmd.border": "边框",
@@ -1122,6 +1132,9 @@ export const ribbonZhCN: AdditionalLanguage = {
     "ribbon.opt.uppercase": "大写",
     "ribbon.opt.capitalize": "每个单词首字母大写",
     "ribbon.opt.toggle-case": "切换大小写",
+    // --- Options: Chinese layout (中文版式) ---
+    "ribbon.opt.combine-characters": "合并字符",
+    "ribbon.opt.two-lines-in-one": "双行合一",
     // --- Options: lists ---
     "ribbon.opt.bullet": "•  (项目符号)",
     "ribbon.opt.circle": "◦  (圆形)",
@@ -1516,6 +1529,9 @@ export const ribbonZhCN: AdditionalLanguage = {
     // --- 选项对话框 ---
     "options.title": "选项",
     "options.ok": "确定",
+    "twoInOne.title": "双行合一",
+    "twoInOne.text": "文字",
+    "twoInOne.brackets": "带括号",
     "options.cancel": "取消",
     "options.language": "语言",
     "options.lang.zh": "中文（简体）",

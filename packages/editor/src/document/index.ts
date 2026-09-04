@@ -1235,6 +1235,12 @@ class DocenDocument extends AddinHost<Editor> {
       "phonetic:clear",
       this.#onPhoneticClear as EventListener,
     );
+    // Two Lines in One dialog — pack the selection's text into two half-size
+    // lines (双行合一 / 合并字符).
+    this.shadowRoot!.querySelector("docen-two-in-one-dialog")?.addEventListener(
+      "two-in-one:ok",
+      this.#onTwoInOneOk as EventListener,
+    );
     // Status-bar language item — open the language dialog (Word semantics).
     this.shadowRoot!.querySelector("docen-status-bar")?.addEventListener(
       "language:open",
@@ -1854,6 +1860,9 @@ class DocenDocument extends AddinHost<Editor> {
     this.shadowRoot
       ?.querySelector("docen-phonetic-dialog")
       ?.removeEventListener("phonetic:clear", this.#onPhoneticClear as EventListener);
+    this.shadowRoot
+      ?.querySelector("docen-two-in-one-dialog")
+      ?.removeEventListener("two-in-one:ok", this.#onTwoInOneOk as EventListener);
     this.shadowRoot
       ?.querySelector("docen-symbol-dialog")
       ?.removeEventListener("symbol:insert", this.#onSymbolInsert as EventListener);
@@ -4681,6 +4690,12 @@ class DocenDocument extends AddinHost<Editor> {
       this.#onPhoneticOpen();
       return;
     }
+    // Chinese Layout (中文版式, Home → Paragraph): the two-lines-in-one
+    // dialog over the selection (合并字符 rides the same dialog).
+    if (name === "two-lines-in-one") {
+      this.#onTwoInOneOpen();
+      return;
+    }
     // Editing → Select: selectAll() spans the whole document.
     if (name === "select") {
       this.#select(value);
@@ -4918,6 +4933,73 @@ class DocenDocument extends AddinHost<Editor> {
     const target = this.#bridge?.activeEditor() ?? this.editor;
     if (!target || target.state.selection.empty) return;
     target.chain().unsetMark("ruby").run();
+    this.#bridge?.focus();
+  };
+
+  // ── Two Lines in One (双行合一 / 合并字符, Home → Paragraph → Chinese Layout) ──
+
+  /** The selection's two-in-one state for the dialog: its text and whether a
+   *  bracket pair is already on. Null when the selection is empty. */
+  #selectionTwoInOne(): { text: string; brackets: boolean } | null {
+    const editor = this.#bridge?.activeEditor() ?? this.editor;
+    if (!editor || editor.state.selection.empty) return null;
+    const { from, to } = editor.state.selection;
+    let brackets = false;
+    editor.state.doc.nodesBetween(from, to, (node) => {
+      if (!node.isText || brackets) return;
+      const style = (node.marks ?? []).find((m) => m.type.name === "textStyle");
+      const layout = style?.attrs.eastAsianLayout as
+        | { combine?: unknown; combineBrackets?: unknown }
+        | undefined;
+      if (
+        layout &&
+        (layout.combine === true || layout.combine === "1") &&
+        typeof layout.combineBrackets === "string" &&
+        layout.combineBrackets !== "none"
+      )
+        brackets = true;
+    });
+    return { text: editor.state.doc.textBetween(from, to), brackets };
+  }
+
+  /** Home → Paragraph → Chinese Layout — open the two-lines-in-one dialog
+   *  (Word grays the button on an empty selection). */
+  readonly #onTwoInOneOpen = (): void => {
+    const dialog = this.shadowRoot?.querySelector("docen-two-in-one-dialog") as unknown as {
+      show(text: string, brackets: boolean): void;
+    } | null;
+    const state = this.#selectionTwoInOne();
+    if (!dialog || !state) return;
+    dialog.show(state.text, state.brackets);
+  };
+
+  /** Two-in-one dialog 确定 — stamp the eastAsianLayout combine mark on the
+   *  selection; a dialog-edited text swaps the range for the new text carrying
+   *  the selection's own marks (the combine attrs merged into its textStyle). */
+  readonly #onTwoInOneOk = (event: Event): void => {
+    const { text, brackets } =
+      (event as CustomEvent<{ text?: string; brackets?: boolean }>).detail ?? {};
+    const target = this.#bridge?.activeEditor() ?? this.editor;
+    if (!target || !text || target.state.selection.empty) return;
+    const { from, to, $from } = target.state.selection;
+    const layout = { combine: true, combineBrackets: brackets ? "round" : null };
+    if (text !== target.state.doc.textBetween(from, to)) {
+      const { schema } = target.state;
+      const carried = $from
+        .marks()
+        .map((m) =>
+          m.type.name === "textStyle" ? schema.mark("textStyle", { ...m.attrs, ...layout }) : m,
+        );
+      target
+        .chain()
+        .command(({ tr }) => {
+          tr.replaceWith(from, to, schema.text(text, carried));
+          return true;
+        })
+        .run();
+    } else {
+      target.chain().setMark("textStyle", { eastAsianLayout: layout }).run();
+    }
     this.#bridge?.focus();
   };
 

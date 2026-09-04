@@ -131,6 +131,15 @@ const caseItems = (): string =>
     { text: opt("toggle-case"), value: "toggle" },
   ]);
 
+// Word's Chinese Layout (中文版式) drop-down in the Paragraph group — both
+// entries open the shared two-lines-in-one dialog (the dialog's bracket
+// checkbox covers 合并字符's no-bracket form).
+const chineseLayoutItems = (): string =>
+  JSON.stringify([
+    { text: opt("combine-characters"), event: "two-lines-in-one", value: "combine-characters" },
+    { text: opt("two-lines-in-one"), event: "two-lines-in-one", value: "two-lines-in-one" },
+  ]);
+
 const bulletItems = (): string =>
   JSON.stringify([
     { text: opt("bullet"), value: "bullet" },
@@ -835,6 +844,9 @@ const homeTab = (styles?: StylesOptions | null): RibbonTab =>
             }),
             btn("indent-decrease", "indent-decrease", { iconOnly: true }),
             btn("indent-increase", "indent-increase", { iconOnly: true }),
+            split("two-in-one", "two-lines-in-one", parsedItems(chineseLayoutItems()), {
+              iconOnly: true,
+            }),
             btn("sort", "sort", { iconOnly: true }),
             btn("show-marks", "show-marks", { iconOnly: true }),
           ]),
@@ -843,6 +855,7 @@ const homeTab = (styles?: StylesOptions | null): RibbonTab =>
             btn("align-center", "align-center", { iconOnly: true }),
             btn("align-right", "align-right", { iconOnly: true }),
             btn("justify", "justify", { iconOnly: true }),
+            btn("align-distribute", "justify-distribute", { iconOnly: true }),
             sep(),
             split("line-spacing", "line-spacing", parsedItems(spacingItems()), { iconOnly: true }),
             picker("shading", "shading", "FFFF00"),
