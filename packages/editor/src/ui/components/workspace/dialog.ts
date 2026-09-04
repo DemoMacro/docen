@@ -36,6 +36,7 @@ const template = html<DocenDialog>`
       <fluent-button
         slot="close"
         part="close"
+        ${ref("closeBtn")}
         tabindex="0"
         appearance="transparent"
         icon-only
@@ -88,6 +89,7 @@ class DocenDialog extends FASTElement {
 
   @observable dialog?: FluentDialog;
   @observable titleEl?: HTMLElement;
+  @observable closeBtn?: HTMLElement;
   #nativeDialog?: HTMLElement;
   #backdropRaf = 0;
   #titleBarRaf = 0;
@@ -112,6 +114,12 @@ class DocenDialog extends FASTElement {
       if (this.open) this.open = false;
     }
   };
+  // The close button carries no behavior of its own (fluent only provides the
+  // slot) — route it through `open` so the attribute and the underlying
+  // dialog stay in sync (same path as Cancel).
+  readonly #closeHandler = (): void => {
+    this.open = false;
+  };
   readonly #backdropHandler = (event: Event): void => {
     if (event.target === this.#nativeDialog) event.stopImmediatePropagation();
   };
@@ -128,6 +136,7 @@ class DocenDialog extends FASTElement {
     // ESC / backdrop close the fluent-dialog directly; sync our `open` attr so
     // state stays consistent. fluent emits `toggle` with newState.
     this.dialog?.addEventListener("toggle", this.#toggleHandler);
+    this.closeBtn?.addEventListener("click", this.#closeHandler);
     // Office dialogs don't light-dismiss on backdrop click. fluent-dialog's
     // clickHandler hides when the click lands on the native <dialog> itself
     // (the backdrop region); intercept those in capture phase so only ESC, the
@@ -142,6 +151,7 @@ class DocenDialog extends FASTElement {
     cancelAnimationFrame(this.#backdropRaf);
     cancelAnimationFrame(this.#titleBarRaf);
     this.dialog?.removeEventListener("toggle", this.#toggleHandler);
+    this.closeBtn?.removeEventListener("click", this.#closeHandler);
     this.#nativeDialog?.removeEventListener("click", this.#backdropHandler, true);
     super.disconnectedCallback();
   }
@@ -188,9 +198,16 @@ class DocenDialog extends FASTElement {
 
   readonly #titlePointerDown = (event: PointerEvent): void => {
     if (event.button !== 0) return;
-    // Buttons and fields in the title row (close, title-action widgets) keep
-    // their click behavior — only the blank bar drags.
-    if ((event.target as HTMLElement | null)?.closest("button, a, input, select, textarea")) {
+    // Widgets in the title row (close, title-action) keep their click
+    // behavior — only the blank bar drags. The event target is retargeted to
+    // the slotted HOST (e.g. fluent-button, not its inner <button>), so the
+    // guard matches custom elements and anything carrying a slot attribute;
+    // capturing on a widget would steal the pointer and swallow its click.
+    if (
+      (event.target as HTMLElement | null)?.closest(
+        "button, a, input, select, textarea, fluent-button, [slot]",
+      )
+    ) {
       return;
     }
     const native = this.#nativeDialog;
