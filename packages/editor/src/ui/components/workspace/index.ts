@@ -22,3 +22,4 @@ export { default as DocenPasteSpecialDialog } from "./paste-special-dialog";
 export { default as DocenFontDialog } from "./font-dialog";
 export { default as DocenTablePropertiesDialog } from "./table-properties-dialog";
 export { default as DocenBordersShadingDialog } from "./borders-shading-dialog";
+export { default as DocenWatermarkDialog } from "./watermark-dialog";

@@ -385,6 +385,7 @@ const watermarkItems = (): string =>
     { text: opt("watermark-draft"), value: "draft" },
     { text: opt("watermark-sample"), value: "sample" },
     { text: opt("watermark-remove"), value: "remove" },
+    { text: opt("watermark-custom"), value: "custom" },
   ]);
 
 /** The Header/Footer split's drop-down: edit (the split's main action),
