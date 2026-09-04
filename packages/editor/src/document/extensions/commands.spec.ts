@@ -795,53 +795,54 @@ describe("add-text — TOC level stamps", () => {
   });
 });
 
+/** An offset-anchored floating picture in its own paragraph (Word's anchor
+ *  run shape — the image node is inline-only). */
+const buildWithFloat = (floating: object): EditorType =>
+  new Editor({
+    element: null,
+    extensions: EXTENSIONS,
+    content: {
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [
+            {
+              type: "image",
+              attrs: { src: "data:,", width: 10, height: 10, floating },
+            },
+          ],
+        },
+      ],
+    },
+  });
+
+/** Select the document's first image (the float the helpers build). */
+const selectFloat = (editor: EditorType): void => {
+  let pos = -1;
+  editor.state.doc.descendants((node, nodePos) => {
+    if (node.type.name === "image" && pos < 0) {
+      pos = nodePos;
+      return false;
+    }
+    return true;
+  });
+  editor.commands.setNodeSelection(pos);
+};
+
+const floatOf = (editor: EditorType): Record<string, unknown> => {
+  let floating: unknown;
+  editor.state.doc.descendants((node) => {
+    if (node.type.name === "image" && floating === undefined) {
+      floating = (node.attrs as Record<string, unknown>).floating;
+      return false;
+    }
+    return true;
+  });
+  return floating as Record<string, unknown>;
+};
+
 describe("move-drawing", () => {
-  /** An offset-anchored floating picture in its own paragraph (Word's anchor
-   *  run shape — the image node is inline-only). */
-  const buildWithFloat = (floating: object): EditorType =>
-    new Editor({
-      element: null,
-      extensions: EXTENSIONS,
-      content: {
-        type: "doc",
-        content: [
-          {
-            type: "paragraph",
-            content: [
-              {
-                type: "image",
-                attrs: { src: "data:,", width: 10, height: 10, floating },
-              },
-            ],
-          },
-        ],
-      },
-    });
-
-  const selectFloat = (editor: EditorType): void => {
-    let pos = -1;
-    editor.state.doc.descendants((node, nodePos) => {
-      if (node.type.name === "image" && pos < 0) {
-        pos = nodePos;
-        return false;
-      }
-      return true;
-    });
-    editor.commands.setNodeSelection(pos);
-  };
-
-  const floatOf = (editor: EditorType): Record<string, unknown> => {
-    let floating: unknown;
-    editor.state.doc.descendants((node) => {
-      if (node.type.name === "image" && floating === undefined) {
-        floating = (node.attrs as Record<string, unknown>).floating;
-        return false;
-      }
-      return true;
-    });
-    return floating as Record<string, unknown>;
-  };
-
   it("adds the drag delta (EMU) to the selected drawing's offsets", () => {
     const editor = buildWithFloat({
       horizontalPosition: { relative: "margin", offset: 1000 },
@@ -900,5 +901,72 @@ describe("move-drawing", () => {
     selectFloat(editor);
     expect(editor.commands["move-drawing"]("not json")).toBe(false);
     expect(editor.commands["move-drawing"]()).toBe(false);
+  });
+});
+
+describe("rotate-drawing", () => {
+  const FLOATING = {
+    horizontalPosition: { relative: "margin", offset: 1000 },
+    verticalPosition: { relative: "paragraph", offset: 2000 },
+  };
+
+  it("adds the swept degrees to the selected floating image's rotation", () => {
+    const editor = buildWithFloat(FLOATING);
+    selectFloat(editor);
+    expect(editor.commands["rotate-drawing"](JSON.stringify(45))).toBe(true);
+    expect(firstNodeOf(editor, "image").attrs.rotation).toBe(45);
+    // The sweep accumulates onto the drawing's current angle.
+    expect(editor.commands["rotate-drawing"](JSON.stringify(-90))).toBe(true);
+    expect(firstNodeOf(editor, "image").attrs.rotation).toBe(-45);
+    expect(editor.state.selection instanceof NodeSelection).toBe(true);
+  });
+
+  it("rotates a floating wps shape through its payload's transformation", () => {
+    const editor = new Editor({
+      element: null,
+      extensions: EXTENSIONS,
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [
+              {
+                type: "wpsShape",
+                attrs: {
+                  wpsShape: {
+                    floating: FLOATING,
+                    transformation: { width: 914400, height: 914400, rotation: 30 },
+                  },
+                },
+                // The shape's editable text body (a block+) rides the node.
+                content: [{ type: "paragraph" }],
+              },
+            ],
+          },
+        ],
+      },
+    });
+    let pos = -1;
+    editor.state.doc.descendants((node, nodePos) => {
+      if (node.type.name === "wpsShape" && pos < 0) {
+        pos = nodePos;
+        return false;
+      }
+      return true;
+    });
+    editor.commands.setNodeSelection(pos);
+    expect(editor.commands["rotate-drawing"](JSON.stringify(15))).toBe(true);
+    const shape = firstNodeOf(editor, "wpsShape").attrs.wpsShape as Record<string, unknown>;
+    expect((shape.transformation as Record<string, unknown>).rotation).toBe(45);
+  });
+
+  it("declines without a floating drawing selected or a zero sweep", () => {
+    const editor = buildWithFloat(FLOATING);
+    expect(editor.commands["rotate-drawing"](JSON.stringify(45))).toBe(false);
+    selectFloat(editor);
+    expect(editor.commands["rotate-drawing"](JSON.stringify(0))).toBe(false);
+    expect(editor.commands["rotate-drawing"]("nan")).toBe(false);
+    expect(editor.commands["rotate-drawing"]()).toBe(false);
   });
 });

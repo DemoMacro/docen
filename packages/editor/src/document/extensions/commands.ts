@@ -124,6 +124,7 @@ declare module "@tiptap/core" {
       "delete-picture": () => ReturnType;
       "position-picture": (value?: string) => ReturnType;
       "move-drawing": (value?: string) => ReturnType;
+      "rotate-drawing": (value?: string) => ReturnType;
       // Arrange — floating drawings (z-order, wrap, rotation, position).
       "bring-forward": () => ReturnType;
       "send-backward": () => ReturnType;
@@ -213,6 +214,7 @@ export const WIRED_DISPATCH: ReadonlySet<string> = new Set([
   "delete-picture",
   "position-picture",
   "move-drawing",
+  "rotate-drawing",
   "bring-forward",
   "send-backward",
   "wrap",
@@ -2438,6 +2440,34 @@ export const DocumentCommands = Extension.create({
             ...floating,
             horizontalPosition: { ...h, offset: h.offset + (parsed.h ?? 0) },
             verticalPosition: { ...v, offset: v.offset + (parsed.v ?? 0) },
+          });
+        },
+      // Rotate the selected floating drawing by a handle-swept delta: value
+      // is the degrees to add to the drawing's current rotation (clockwise;
+      // image: the flat rotation attr, shape: its payload's transformation).
+      "rotate-drawing":
+        (value?) =>
+        ({ state, tr }) => {
+          const delta = value == null ? Number.NaN : Number(value);
+          if (!Number.isFinite(delta) || delta === 0) return false;
+          const target = floatingDrawingAt(state);
+          if (!target) return false;
+          if (target.kind === "image") {
+            const current = target.attrs.rotation;
+            return stampAttrs(tr, target, {
+              ...target.attrs,
+              rotation: (typeof current === "number" ? current : 0) + delta,
+            });
+          }
+          const shape = target.attrs.wpsShape as Record<string, unknown>;
+          const transformation = {
+            ...(shape.transformation as Record<string, unknown> | undefined),
+          };
+          const current = transformation.rotation;
+          transformation.rotation = (typeof current === "number" ? current : 0) + delta;
+          return stampAttrs(tr, target, {
+            ...target.attrs,
+            wpsShape: { ...shape, transformation },
           });
         },
       // ── Arrange — floating drawings (the Layout tab's Arrange group) ──
