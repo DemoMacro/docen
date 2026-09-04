@@ -98,3 +98,24 @@ export function resizeBox(box: Box, handle: HandleId, dx: number, dy: number, mi
   }
   return { x: positive(x), y: positive(y), width: positive(width), height: positive(height) };
 }
+
+/** The clockwise angle (degrees) the pointer swept around the box center
+ *  from point a to point b, normalized to (-180, 180] — one gesture step's
+ *  delta (the caller accumulates per pointer-move, so the normalization
+ *  keeps the spin continuous across the ±180° wrap). Screen px; the angle
+ *  is scale-free. */
+export function rotateDelta(
+  cx: number,
+  cy: number,
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+): number {
+  const a = (Math.atan2(ay - cy, ax - cx) * 180) / Math.PI;
+  const b = (Math.atan2(by - cy, bx - cx) * 180) / Math.PI;
+  const delta = b - a;
+  if (delta > 180) return delta - 360;
+  if (delta <= -180) return delta + 360;
+  return delta;
+}

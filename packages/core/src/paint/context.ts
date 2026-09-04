@@ -25,6 +25,9 @@ export interface DrawingHitBox {
    *  that sequence); "inline" — a picture line item (index counts the
    *  paragraph's inline pictures). The PM side re-finds the node per kind. */
   kind: "drawing" | "inline";
+  /** Clockwise rotation of the box about its center, degrees — the click's
+   *  hit test un-rotates the point into the box's own space. */
+  rotation?: number;
 }
 
 /** One line-number label on this page — content-flow yPx (the painter adds

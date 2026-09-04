@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { handleAt, resizeBox, type Box } from "./geometry";
+import { handleAt, resizeBox, rotateDelta, type Box } from "./geometry";
 
 const box: Box = { x: 100, y: 80, width: 200, height: 100 };
 
@@ -56,5 +56,24 @@ describe("resizeBox", () => {
     expect(next.y).toBe(180 - 24);
     expect(next.width).toBe(24);
     expect(next.height).toBe(24);
+  });
+});
+
+describe("rotateDelta", () => {
+  const c = 0; // center at the origin
+
+  it("measures the clockwise sweep between two pointer positions", () => {
+    // Screen px: +y is DOWN, so right→below sweeps +90° (clockwise).
+    expect(rotateDelta(c, c, 50, 0, 0, 50)).toBe(90);
+    expect(rotateDelta(c, c, 50, 0, 0, -50)).toBe(-90);
+    expect(rotateDelta(c, c, 50, 0, 50, 0)).toBe(0);
+  });
+
+  it("keeps the spin continuous across the ±180° wrap", () => {
+    // Left of the center is atan2's 180° boundary; stepping to the top is a
+    // +90° clockwise sweep, not a -270° rewind.
+    expect(rotateDelta(c, c, -50, 0, 0, -50)).toBe(90);
+    // And counter-clockwise over the same boundary stays negative.
+    expect(rotateDelta(c, c, 0, -50, -50, 0)).toBe(-90);
   });
 });

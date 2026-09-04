@@ -1,4 +1,4 @@
-import { HANDLES, resizeBox, type Box, type HandleId } from "./geometry";
+import { HANDLES, resizeBox, rotateDelta, type Box, type HandleId } from "./geometry";
 
 /**
  * The drawing selection frame — Word's picture selection: a border plus eight
@@ -14,18 +14,21 @@ import { HANDLES, resizeBox, type Box, type HandleId } from "./geometry";
 /** Host-provided I/O: read the scale (page px → screen px), and apply a box
  *  the user dragged to. `applyBox` returns false to reject (e.g. a read-only
  *  doc) — the frame snaps back on the next show/refresh. `applyOffset` moves
- *  the drawing by a drag delta (a floating drawing's move); absent, the
- *  frame stays put on a body drag. */
+ *  the drawing by a drag delta (a floating drawing's move); `applyRotation`
+ *  spins it by a handle-swept delta (degrees, clockwise); absent, the frame
+ *  stays put on a body drag. */
 export interface DrawingOverlayCallbacks {
   scale(): number;
   applyBox(box: Box): void;
   applyOffset?(dx: number, dy: number): void;
+  applyRotation?(delta: number): void;
 }
 
 export class DrawingOverlay {
   readonly el: HTMLDivElement;
   #callbacks: DrawingOverlayCallbacks;
   #box: Box | null = null;
+  #rotation = 0;
   #drag: { handle: HandleId; startX: number; startY: number; origin: Box } | null = null;
   #handles = new Map<HandleId, HTMLDivElement>();
 
@@ -69,22 +72,43 @@ export class DrawingOverlay {
       this.el.append(h);
       h.addEventListener("pointerdown", (e) => this.#onHandleDown(id, e));
     }
+    // Word's rotate handle: a round grip on a stem above the frame's top
+    // edge, spinning the drawing about its center.
+    const rot = document.createElement("div");
+    rot.dataset.handle = "rot";
+    Object.assign(rot.style, {
+      position: "absolute",
+      left: "calc(50% - 5px)",
+      top: "-28px",
+      width: "10px",
+      height: "10px",
+      boxSizing: "border-box",
+      borderRadius: "50%",
+      background: "#fff",
+      border: "1.5px solid #2b7cd3",
+      pointerEvents: "auto",
+      cursor: "grab",
+    } satisfies Partial<CSSStyleDeclaration>);
+    rot.addEventListener("pointerdown", (e) => this.#onRotateDown(e));
+    this.el.append(rot);
     this.el.addEventListener("pointermove", (e) => this.#onPointerMove(e));
     for (const kind of ["pointerup", "pointercancel"] as const)
       this.el.addEventListener(kind, () => this.#onDragEnd());
   }
 
-  /** Show the frame over `box` (page-local px at scale 1). */
-  show(box: Box): void {
+  /** Show the frame over `box` (page-local px at scale 1), tilted by
+   *  `rotation` degrees when the drawing is rotated. */
+  show(box: Box, rotation = 0): void {
     this.#box = box;
+    this.#rotation = rotation;
     this.el.style.display = "block";
     this.#place();
   }
 
   /** Refresh after the box changed underneath (a re-render, an applied drag). */
-  refresh(box: Box | null): void {
+  refresh(box: Box | null, rotation = 0): void {
     if (!box) return this.hide();
-    this.show(box);
+    this.show(box, rotation);
   }
 
   hide(): void {
@@ -101,6 +125,10 @@ export class DrawingOverlay {
     this.el.style.top = `${box.y * scale}px`;
     this.el.style.width = `${box.width * scale}px`;
     this.el.style.height = `${box.height * scale}px`;
+    // The frame tilts with the drawing (Word's rotated selection): a CSS
+    // rotate about the frame's center matches the painter's pivot, and the
+    // handles ride along.
+    this.el.style.transform = `rotate(${this.#rotation}deg)`;
   }
 
   #onHandleDown(handle: HandleId, event: PointerEvent): void {
@@ -135,6 +163,39 @@ export class DrawingOverlay {
     if (!drag || !this.#box) return;
     this.#drag = null;
     this.#callbacks.applyBox(this.#box);
+  }
+
+  /** Start a rotate drag from the rotate handle: each pointer move adds its
+   *  swept angle around the frame center (screen px, so zoom-independent)
+   *  to the spin, and release commits the accumulated degrees. */
+  #onRotateDown(event: PointerEvent): void {
+    if (!this.#box) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const rect = this.el.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const origin = this.#rotation;
+    let prevX = event.clientX;
+    let prevY = event.clientY;
+    let total = 0;
+    const onMove = (e: PointerEvent): void => {
+      total += rotateDelta(cx, cy, prevX, prevY, e.clientX, e.clientY);
+      prevX = e.clientX;
+      prevY = e.clientY;
+      this.#rotation = origin + total;
+      this.#place();
+    };
+    const onUp = (): void => {
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      document.removeEventListener("pointercancel", onUp);
+      const delta = Math.round(total);
+      if (delta !== 0) this.#callbacks.applyRotation?.(delta);
+    };
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+    document.addEventListener("pointercancel", onUp);
   }
 
   /** True while a frame is shown (a selected drawing on screen). */

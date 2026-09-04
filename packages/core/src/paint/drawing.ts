@@ -165,23 +165,42 @@ export function paintDrawing(
     para: host.para,
     index: host.index,
     kind: "drawing",
+    ...(drawing.rotation ? { rotation: drawing.rotation } : {}),
   });
+  // The members' target and origin: the page tree at the box origin — or, on
+  // a rotated drawing, a group parked at the box CENTER carrying the angle
+  // (same pivot trick as the rotated text-box member), with the content
+  // re-offset so the box stays centered under the rotation.
+  let target: IGroup = tree;
+  let ox = boxX;
+  let oy = boxY;
+  if (drawing.rotation) {
+    const spinner = new Group({
+      x: boxX + drawing.width / 2,
+      y: boxY + drawing.height / 2,
+      rotation: drawing.rotation,
+    });
+    tree.add(spinner);
+    target = spinner;
+    ox = -drawing.width / 2;
+    oy = -drawing.height / 2;
+  }
   if (drawing.clipMembers) {
     // A srcRect-cropped metafile replay reaches past the extent (GDI clips
     // metafile playback to the rect); wps text boxes must NOT clip — their
     // text may legitimately overflow a stale declared extent. Leafer clips
     // children only on a Box (`overflow` is Box data, Group ignores it).
     const holder = new Box({
-      x: boxX,
-      y: boxY,
+      x: ox,
+      y: oy,
       width: drawing.width,
       height: drawing.height,
       overflow: "hide",
     });
     paintMembers(holder, drawing.members, 0, 0, ctx);
-    tree.add(holder);
+    target.add(holder);
   } else {
-    paintMembers(tree, drawing.members, boxX, boxY, ctx);
+    paintMembers(target, drawing.members, ox, oy, ctx);
   }
 }
 

@@ -178,6 +178,8 @@ interface DrawingHit {
   y: number;
   width: number;
   height: number;
+  /** Clockwise degrees — the selection frame tilts with the drawing. */
+  rotation?: number;
 }
 
 export interface EditBridge {
@@ -733,6 +735,12 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
         JSON.stringify({ h: Math.round(dx * EMU_PER_PX), v: Math.round(dy * EMU_PER_PX) }),
       );
     },
+    applyRotation: (delta) => {
+      if (!selDrawing) return;
+      const nodePos = opts.drawingSelection?.(selDrawing) ?? null;
+      if (nodePos == null) return;
+      main.editor.commands["rotate-drawing"](JSON.stringify(delta));
+    },
   });
   opts.host.append(drawingOverlay.el);
 
@@ -747,7 +755,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       return;
     }
     if (frame !== drawingOverlay.el.parentElement) frame.append(drawingOverlay.el);
-    drawingOverlay.refresh(selDrawing);
+    drawingOverlay.refresh(selDrawing, selDrawing.rotation);
   };
 
   const selectDrawing = (hit: DrawingHit): void => {

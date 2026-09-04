@@ -1103,13 +1103,26 @@ export class CanvasStage {
   private readonly hitBoxes = new Map<number, DrawingHitBox[]>();
 
   /** The topmost drawing whose painted box contains the page-local point
-   *  (null when none does) — later-painted wins, Word's z-click. */
+   *  (null when none does) — later-painted wins, Word's z-click. A rotated
+   *  box hit-tests in its own space: the point un-rotates about the box
+   *  center before the rectangle check. */
   drawingAt(page: number, lx: number, ly: number): DrawingHitBox | null {
     const boxes = this.hitBoxes.get(page);
     if (!boxes) return null;
     for (let i = boxes.length - 1; i >= 0; i--) {
       const b = boxes[i]!;
-      if (lx >= b.x && lx <= b.x + b.width && ly >= b.y && ly <= b.y + b.height) return b;
+      let px = lx;
+      let py = ly;
+      if (b.rotation) {
+        const rad = (-b.rotation * Math.PI) / 180;
+        const cx = b.x + b.width / 2;
+        const cy = b.y + b.height / 2;
+        const dx = lx - cx;
+        const dy = ly - cy;
+        px = cx + dx * Math.cos(rad) - dy * Math.sin(rad);
+        py = cy + dx * Math.sin(rad) + dy * Math.cos(rad);
+      }
+      if (px >= b.x && px <= b.x + b.width && py >= b.y && py <= b.y + b.height) return b;
     }
     return null;
   }

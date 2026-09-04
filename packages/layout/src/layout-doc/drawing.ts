@@ -175,6 +175,10 @@ export interface LayoutDrawing {
    *  playback semantics — records past the crop line never draw). Absent on
    *  wps text boxes: their text may overflow a stale declared extent. */
   clipMembers?: boolean;
+  /** Clockwise rotation of the whole drawing about its box center, degrees
+   *  (a:xfrm @rot). The flow's wrap box stays the unrotated extent — Word
+   *  wraps text by the extent, not the rotated ink. */
+  rotation?: number;
 }
 
 /** A drawing's wrap box: its extent grown by the anchor's wrap distances,

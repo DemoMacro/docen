@@ -450,6 +450,7 @@ function projectDrawing(group: GroupOptions, ctx: ProjectContext): LayoutDrawing
   const extW = measureEmu(group.transformation.width);
   const extH = measureEmu(group.transformation.height);
   if (extW == null || extH == null || extW <= 0 || extH <= 0) return undefined;
+  const rotation = group.transformation.rotation;
   const { anchor, wrap, wrapSide, contour, behind, zIndex, distances } = drawingAnchorOf(
     group.floating,
     emuToPx(extW),
@@ -495,6 +496,7 @@ function projectDrawing(group: GroupOptions, ctx: ProjectContext): LayoutDrawing
     behind,
     ...(zIndex != null ? { zIndex } : {}),
     distances,
+    ...(rotation ? { rotation } : {}),
   };
 }
 
@@ -624,6 +626,7 @@ function projectFloatingPicture(pic: Rec): LayoutDrawing | undefined {
     behind,
     ...(zIndex != null ? { zIndex } : {}),
     distances,
+    ...(typeof tr.rotation === "number" && tr.rotation ? { rotation: tr.rotation } : {}),
     // A srcRect-cropped metafile replay reaches past the extent — flag it so
     // the painter clips (GDI playback semantics); the flat member never does.
     ...(crop ? { clipMembers: true } : {}),
@@ -670,6 +673,7 @@ function projectWpsShapeRun(wps: Rec, ctx: ProjectContext): LayoutDrawing | unde
     behind,
     ...(zIndex != null ? { zIndex } : {}),
     distances,
+    ...(typeof tr.rotation === "number" && tr.rotation ? { rotation: tr.rotation } : {}),
   };
 }
 
