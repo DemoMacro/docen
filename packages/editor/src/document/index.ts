@@ -70,18 +70,19 @@ import {
   type DocenAddin,
   type RibbonMenuItem,
 } from "../ui";
+import type { PageSetupValues } from "../ui/components/workspace/page-setup-dialog";
 import { createDefaultAddin, textCounter } from "./addin";
+// Side-effect: register the document-specific UI components moved out of the
+// shared ui/ barrel — <docen-format-pane> (properties fallback) and
+// <docen-outline> (navigation Headings tab).
+import "./components/format-pane";
+import "./components/outline";
 import {
   mountEditBridge,
   type EditBridge,
   type StoryKind,
   type StorySlot,
 } from "./canvas/edit-bridge";
-// Side-effect: register the document-specific UI components moved out of the
-// shared ui/ barrel — <docen-format-pane> (properties fallback) and
-// <docen-outline> (navigation Headings tab).
-import "./components/format-pane";
-import "./components/outline";
 import { deepEq, dirtyPagesOf } from "./canvas/page-eq";
 import {
   CanvasStage,
@@ -90,9 +91,9 @@ import {
   layFurnitureSections,
 } from "./canvas/stage";
 import { documentStyles, documentTemplate, escapeHtml } from "./chrome";
-import type { OutlineItem } from "./components/outline";
 // Side-effect import: registers the ribbon/header translation tables.
 import "./i18n";
+import type { OutlineItem } from "./components/outline";
 import { tableAncestry, WIRED_DISPATCH, type ParagraphDialogPatch } from "./extensions/commands";
 import { LOCAL_HANDLED, READONLY_LIVE, SAVE_FORMATS, detectOpenFormat } from "./file-formats";
 import { MARGINS, PAPER_SIZES, marginTwipsFromCss, mergeSectionProperties } from "./page-setup";
@@ -961,6 +962,12 @@ class DocenDocument extends AddinHost<Editor> {
       "paragraph:ok",
       this.#onParagraphOk as EventListener,
     );
+    // Page Setup dialog — write the committed geometry into the current
+    // section (the Custom Margins / More Paper Sizes entries open it).
+    this.shadowRoot!.querySelector("docen-page-setup-dialog")?.addEventListener(
+      "page-setup:ok",
+      this.#onPageSetupOk as EventListener,
+    );
 
     // Re-render header + ribbon when the page locale (<html lang>) changes.
     this.#unobserveLang = observeLang(() => this.#renderChrome());
@@ -1405,6 +1412,9 @@ class DocenDocument extends AddinHost<Editor> {
     this.shadowRoot
       ?.querySelector("docen-paragraph-dialog")
       ?.removeEventListener("paragraph:ok", this.#onParagraphOk as EventListener);
+    this.shadowRoot
+      ?.querySelector("docen-page-setup-dialog")
+      ?.removeEventListener("page-setup:ok", this.#onPageSetupOk as EventListener);
     this.shadowRoot
       ?.querySelector<HTMLElement>("docen-status-bar")
       ?.removeEventListener("zoom:change", this.#onZoomChange as EventListener);
@@ -1859,9 +1869,7 @@ class DocenDocument extends AddinHost<Editor> {
    *  projection can swap edges for landscape. */
   #setOrientation(value?: string): void {
     if (!value) return;
-    const cur = (
-      this.editor?.state.doc.attrs as { sectionProperties?: SectionPropertiesOptions } | undefined
-    )?.sectionProperties?.pageSize;
+    const cur = this.#currentSectionProperties()?.pageSize;
     const size =
       cur && typeof cur.width === "number" && typeof cur.height === "number"
         ? cur
@@ -1905,6 +1913,53 @@ class DocenDocument extends AddinHost<Editor> {
       return true;
     });
     return targetPos;
+  }
+
+  /** The current section's sectPr content — the read side of
+   *  {@link #updateSectionGeometry}'s write side (same "this section" rule). */
+  #currentSectionProperties(): SectionPropertiesOptions | undefined {
+    const editor = this.editor;
+    if (!editor) return undefined;
+    const pos = this.#sectionSectPrPos();
+    if (pos != null) {
+      const node = editor.state.doc.nodeAt(pos);
+      if (!node) return undefined;
+      return (node.attrs as { sectionProperties?: SectionPropertiesOptions }).sectionProperties;
+    }
+    return (editor.state.doc.attrs as { sectionProperties?: SectionPropertiesOptions })
+      .sectionProperties;
+  }
+
+  /** Open the Page Setup dialog prefilled from the current section's geometry
+   *  in centimeters (the Margins menu's Custom Margins and the Size menu's
+   *  More Paper Sizes entries). */
+  #openPageSetup(): void {
+    const cur = this.#currentSectionProperties();
+    // Twips → centimeters for the inputs (2 decimals is Word's display
+    // precision); absent geometry — or a UniversalMeasure string form, which
+    // the dialog doesn't parse — falls back to Word defaults.
+    const cm = (twips?: number | string): number | undefined =>
+      typeof twips === "number" ? Math.round(((twips * 2.54) / 1440) * 100) / 100 : undefined;
+    // pageMargin/pageSize carry `false` (explicit removal) alongside the
+    // properties object — narrow to the object form before reading fields.
+    const margin = cur?.pageMargin && typeof cur.pageMargin === "object" ? cur.pageMargin : {};
+    const size = cur?.pageSize && typeof cur.pageSize === "object" ? cur.pageSize : {};
+    (
+      this.shadowRoot?.querySelector("docen-page-setup-dialog") as {
+        show(values?: {
+          margins?: Partial<PageSetupValues["margins"]>;
+          size?: Partial<PageSetupValues["size"]>;
+        }): void;
+      } | null
+    )?.show({
+      margins: {
+        top: cm(margin.top),
+        bottom: cm(margin.bottom),
+        left: cm(margin.left),
+        right: cm(margin.right),
+      },
+      size: { width: cm(size.width), height: cm(size.height) },
+    });
   }
 
   /** Deep-merge a sectionProperties patch into the CURRENT section's sectPr and
@@ -2161,6 +2216,25 @@ class DocenDocument extends AddinHost<Editor> {
     if (!patch) return;
     const target = this.#bridge?.activeEditor() ?? this.editor;
     target?.commands["paragraph-dialog-apply"]?.(patch);
+  };
+
+  // The Page Setup dialog's OK — convert its centimeters back to twips (the
+  // presets go through the same convertMillimetersToTwip) and write the
+  // current section's geometry; the transaction re-renders the canvas.
+  readonly #onPageSetupOk = (event: CustomEvent<PageSetupValues | undefined>): void => {
+    const values = event.detail;
+    if (!values) return;
+    const twip = (cm: number): number => convertMillimetersToTwip(cm * 10);
+    const { margins, size } = values;
+    this.#updateSectionGeometry({
+      pageMargin: {
+        top: twip(margins.top),
+        bottom: twip(margins.bottom),
+        left: twip(margins.left),
+        right: twip(margins.right),
+      },
+      pageSize: { width: twip(size.width), height: twip(size.height) },
+    });
   };
 
   /** The next free bookmark id — one past the highest id already carried by
@@ -3097,8 +3171,10 @@ class DocenDocument extends AddinHost<Editor> {
       return;
     }
     // Page setup actions write sectionProperties; the transaction re-renders.
+    // "more"/"custom" open the Page Setup dialog instead of a preset.
     if (name === "page-size") {
-      this.#setPageSize(value);
+      if (value === "more") this.#openPageSetup();
+      else this.#setPageSize(value);
       return;
     }
     if (name === "orientation") {
@@ -3106,7 +3182,8 @@ class DocenDocument extends AddinHost<Editor> {
       return;
     }
     if (name === "margins") {
-      this.#setMargins(value);
+      if (value === "custom") this.#openPageSetup();
+      else this.#setMargins(value);
       return;
     }
     // Columns presets (the Layout tab's Columns menu: one/two/three).

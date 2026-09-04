@@ -42,13 +42,16 @@ const styles = css`
   .field > label {
     white-space: nowrap;
   }
-  select,
-  input[type="number"] {
+  select {
     min-width: 0;
     flex: 1 1 auto;
     box-sizing: border-box;
     font: inherit;
     padding: 3px 4px;
+  }
+  fluent-text-input {
+    min-width: 0;
+    flex: 1 1 auto;
   }
   .unit {
     white-space: nowrap;
@@ -99,12 +102,22 @@ const template = html<DocenParagraphDialog>`
       <div class="row">
         <div class="field">
           <label ${ref("leftLabel")}></label>
-          <input ${ref("leftInput")} type="number" step="any" min="0" />
+          <fluent-text-input
+            ${ref("leftInput")}
+            type="number"
+            step="any"
+            min="0"
+          ></fluent-text-input>
           <span class="unit" ${ref("ptA")}></span>
         </div>
         <div class="field">
           <label ${ref("rightLabel")}></label>
-          <input ${ref("rightInput")} type="number" step="any" min="0" />
+          <fluent-text-input
+            ${ref("rightInput")}
+            type="number"
+            step="any"
+            min="0"
+          ></fluent-text-input>
           <span class="unit" ${ref("ptB")}></span>
         </div>
       </div>
@@ -119,7 +132,12 @@ const template = html<DocenParagraphDialog>`
         </div>
         <div class="field">
           <label ${ref("specialValLabel")}></label>
-          <input ${ref("specialVal")} type="number" step="any" min="0" />
+          <fluent-text-input
+            ${ref("specialVal")}
+            type="number"
+            step="any"
+            min="0"
+          ></fluent-text-input>
           <span class="unit" ${ref("ptC")}></span>
         </div>
       </div>
@@ -127,12 +145,22 @@ const template = html<DocenParagraphDialog>`
       <div class="row">
         <div class="field">
           <label ${ref("beforeLabel")}></label>
-          <input ${ref("beforeInput")} type="number" step="any" min="0" />
+          <fluent-text-input
+            ${ref("beforeInput")}
+            type="number"
+            step="any"
+            min="0"
+          ></fluent-text-input>
           <span class="unit" ${ref("ptD")}></span>
         </div>
         <div class="field">
           <label ${ref("afterLabel")}></label>
-          <input ${ref("afterInput")} type="number" step="any" min="0" />
+          <fluent-text-input
+            ${ref("afterInput")}
+            type="number"
+            step="any"
+            min="0"
+          ></fluent-text-input>
           <span class="unit" ${ref("ptE")}></span>
         </div>
       </div>
@@ -150,7 +178,7 @@ const template = html<DocenParagraphDialog>`
         </div>
         <div class="field">
           <label ${ref("lineValLabel")}></label>
-          <input ${ref("lineVal")} type="number" step="any" min="0" />
+          <fluent-text-input ${ref("lineVal")} type="number" step="any" min="0"></fluent-text-input>
         </div>
       </div>
       <div class="para-heading" ${ref("breaksHeading")}></div>
@@ -184,6 +212,10 @@ const template = html<DocenParagraphDialog>`
   </docen-dialog>
 `;
 
+/** A `fluent-text-input` widget plus its string value accessor (the value
+ *  lives on the `value` property, like a native input). */
+type FluentTextInput = HTMLElement & { value: string; disabled: boolean };
+
 /** A checkbox widget plus its checked state accessor (fluent-checkbox exposes
  *  `currentChecked`, not the native `checked`). */
 type FluentCheckbox = HTMLElement & { currentChecked?: boolean };
@@ -205,22 +237,22 @@ class DocenParagraphDialog extends FASTElement {
   @observable outlineSel?: HTMLSelectElement;
   @observable indentHeading?: HTMLElement;
   @observable leftLabel?: HTMLElement;
-  @observable leftInput?: HTMLInputElement;
+  @observable leftInput?: FluentTextInput;
   @observable rightLabel?: HTMLElement;
-  @observable rightInput?: HTMLInputElement;
+  @observable rightInput?: FluentTextInput;
   @observable specialLabel?: HTMLElement;
   @observable specialSel?: HTMLSelectElement;
   @observable specialValLabel?: HTMLElement;
-  @observable specialVal?: HTMLInputElement;
+  @observable specialVal?: FluentTextInput;
   @observable spacingHeading?: HTMLElement;
   @observable beforeLabel?: HTMLElement;
-  @observable beforeInput?: HTMLInputElement;
+  @observable beforeInput?: FluentTextInput;
   @observable afterLabel?: HTMLElement;
-  @observable afterInput?: HTMLInputElement;
+  @observable afterInput?: FluentTextInput;
   @observable lineLabel?: HTMLElement;
   @observable lineSel?: HTMLSelectElement;
   @observable lineValLabel?: HTMLElement;
-  @observable lineVal?: HTMLInputElement;
+  @observable lineVal?: FluentTextInput;
   @observable breaksHeading?: HTMLElement;
   @observable widow?: FluentCheckbox;
   @observable keepNext?: FluentCheckbox;

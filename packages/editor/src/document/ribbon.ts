@@ -257,8 +257,8 @@ const marginsItems = (): string =>
     { text: opt("narrow"), value: "narrow" },
     { text: opt("moderate"), value: "moderate" },
     { text: opt("wide"), value: "wide" },
-    // Custom Margins opens the Page Setup dialog (not built yet).
-    { text: opt("custom-margins"), value: "custom", disabled: true },
+    // Custom Margins opens the Page Setup dialog (host-handled).
+    { text: opt("custom-margins"), value: "custom" },
   ]);
 
 // Word's Cell Margins presets; "custom" opens the cell options dialog (not
@@ -289,8 +289,8 @@ const sizePaperItems = (): string =>
     { text: opt("b5"), value: "b5" },
     { text: opt("statement"), value: "statement" },
     { text: opt("executive"), value: "executive" },
-    // More Paper Sizes opens the Page Setup dialog (not built yet).
-    { text: opt("more-sizes"), value: "more", disabled: true },
+    // More Paper Sizes opens the same Page Setup dialog (host-handled).
+    { text: opt("more-sizes"), value: "more" },
   ]);
 
 const columnsItems = (): string =>

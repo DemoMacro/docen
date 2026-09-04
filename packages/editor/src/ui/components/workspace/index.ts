@@ -12,3 +12,4 @@ export { default as DocenOptionsDialog } from "./options-dialog";
 export { default as DocenWordCountDialog } from "./word-count-dialog";
 export { default as DocenSymbolDialog } from "./symbol-dialog";
 export { default as DocenParagraphDialog } from "./paragraph-dialog";
+export { default as DocenPageSetupDialog } from "./page-setup-dialog";
