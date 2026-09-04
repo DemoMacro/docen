@@ -9,6 +9,7 @@ import { Bold, Code, Highlight, Italic, Strike, Subscript, Superscript, Underlin
 import { PageBreak } from "./page-break";
 import { Paragraph } from "./paragraph";
 import { Passthrough, InlinePassthrough } from "./passthrough";
+import { Ruby } from "./ruby";
 import { SectionBreak } from "./section-break";
 import { Tab } from "./tab";
 import { Table } from "./table";
@@ -67,6 +68,7 @@ export const tiptapMarkExtensions: AnyExtension[] = [
   Insertion,
   Italic,
   Link,
+  Ruby,
   Strike,
   Subscript,
   Superscript,
@@ -105,6 +107,7 @@ export { TableRow } from "./table-row";
 export { TableCell } from "./table-cell";
 export { Image } from "./image";
 export { Link } from "./link";
+export { Ruby } from "./ruby";
 export { TextStyle } from "./text-style";
 export { Insertion, Deletion } from "./track-change";
 export { PageBreak } from "./page-break";

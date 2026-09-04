@@ -150,5 +150,4 @@ export const RUN_CHILDREN_DROPPED: readonly { tag: string; reason: string }[] = 
   { tag: "monthLong", reason: "live date field, value recomputed at view time" },
   { tag: "yearShort", reason: "live date field, value recomputed at view time" },
   { tag: "yearLong", reason: "live date field, value recomputed at view time" },
-  { tag: "ruby", reason: "phonetic guide has no editable representation" },
 ];

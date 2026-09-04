@@ -20,6 +20,7 @@ import type {
   PackerOptions,
   StylesOptions,
   TableOfContentsOptions,
+  RubyPropertiesOptions,
 } from "@office-open/docx";
 import { flattenExtensions, getExtensionField, getSchema } from "@tiptap/core";
 
@@ -832,6 +833,7 @@ export class DocxManager {
     const runOpts: Record<string, unknown> = { text };
     let linkMark: NonNullable<JSONContent["marks"]>[number] | undefined;
     let trackMark: NonNullable<JSONContent["marks"]>[number] | undefined;
+    let rubyMark: NonNullable<JSONContent["marks"]>[number] | undefined;
 
     for (const mark of marks ?? []) {
       if (mark.type === "link") {
@@ -842,9 +844,18 @@ export class DocxManager {
         trackMark = mark;
         continue;
       }
+      if (mark.type === "ruby") {
+        rubyMark = mark;
+        continue;
+      }
       // rPr overlay marks — each extension's renderDocx contributes run props.
       const render = this.markRender.get(mark.type);
       if (render) Object.assign(runOpts, render((mark.attrs ?? {}) as Record<string, unknown>));
+    }
+
+    if (rubyMark) {
+      children.push(this.compileRubyRun(rubyMark.attrs, text, runOpts));
+      return;
     }
 
     if (linkMark) {
@@ -899,6 +910,43 @@ export class DocxManager {
     const date = typeof attrs?.date === "string" ? attrs.date : "";
     const body = { id, author, date, children: trackChildren };
     return type === "insertion" ? { insertion: body } : { deletion: body };
+  }
+
+  /** Wrap a run back into a w:ruby container — the reverse of resolveRuby.
+   *  w:ruby lives INSIDE its w:r (a run-children member, like w:tab), so the
+   *  emitted shape is a text-less run `{ children: [{ ruby }] }`. The
+   *  annotation text is flat on the mark; the base run keeps its other rPr
+   *  props. Null attrs fall back to Word's conventions (half-size ruby,
+   *  raised by its own size, centered). */
+  private compileRubyRun(
+    attrs: Record<string, unknown> | undefined,
+    text: string,
+    runOpts: Record<string, unknown>,
+  ): ParagraphChild {
+    const { text: _, ...runWithoutText } = runOpts;
+    const baseChildren: (RunOptions | string)[] = [];
+    if (text) baseChildren.push({ ...runWithoutText, text } as RunOptions);
+    const fontSize = typeof attrs?.fontSize === "number" ? attrs.fontSize : 5;
+    const baseFontSize = typeof attrs?.baseFontSize === "number" ? attrs.baseFontSize : 10;
+    const annotation = typeof attrs?.text === "string" ? attrs.text : "";
+    return {
+      children: [
+        {
+          ruby: {
+            properties: {
+              alignment: (attrs?.alignment as RubyPropertiesOptions["alignment"]) ?? "center",
+              fontSize,
+              raise: typeof attrs?.raise === "number" ? attrs.raise : fontSize,
+              baseFontSize,
+              languageId: (attrs?.languageId as string) ?? "zh-CN",
+              ...(attrs?.dirty ? { dirty: true } : {}),
+            },
+            text: { children: [{ text: annotation }] },
+            base: { children: baseChildren },
+          },
+        },
+      ],
+    } as RunOptions;
   }
 
   // ── Resolve: DocumentOptions → Tiptap JSON ──
