@@ -18,9 +18,7 @@ import {
   generateMarkdown,
   normalizeDocument,
   parseDOCX,
-  parseHTMLBody,
   parseMarkdown,
-  DOCEN_CLIP_MIME,
   type JSONContent,
   type SectionPropertiesOptions,
   type StylesOptions,
@@ -80,6 +78,7 @@ import {
   layFurnitureSections,
 } from "./canvas/stage";
 import { documentStyles, documentTemplate, escapeHtml } from "./chrome";
+import { ClipboardCommands } from "./commands/clipboard";
 import { CommentsCommands } from "./commands/comments";
 import { DesignCommands } from "./commands/design";
 import { DialogCommands } from "./commands/dialogs";
@@ -108,16 +107,6 @@ import {
  *  exists for the drop-down variants' values (Word's menu buttons; a face
  *  click opens the menu instead of emitting a valueless command). */
 const FACE_ONLY_SPLITS: ReadonlySet<string> = new Set(["autofit", "columns"]);
-
-/** Word's Match Destination Formatting in paste-options form: the block
- *  structure survives (lists, tables, images), the source's run formatting
- *  (bold/italic/color/…) is dropped so the destination's takes over. */
-function stripRunMarks(nodes: JSONContent[]): JSONContent[] {
-  return nodes.map((n) => {
-    const content = n.content ? stripRunMarks(n.content) : undefined;
-    return n.type === "text" ? { ...n, marks: undefined } : content ? { ...n, content } : n;
-  });
-}
 
 /**
  * Task pane identifiers, mirroring the Office `<TaskpaneId>` concept. The host
@@ -196,6 +185,13 @@ class DocenDocument extends AddinHost<Editor> {
     bridge: () => this.#bridge,
     element: () => this,
     flow: () => this.#flow,
+  });
+  /** Paste lanes, the paste-options bar, and the Office Clipboard pane,
+   *  split out of this class — see commands/clipboard.ts. */
+  readonly #clipboard = new ClipboardCommands({
+    editor: () => this.editor,
+    bridge: () => this.#bridge,
+    element: () => this,
   });
   #stage?: CanvasStage;
   #stageHost?: HTMLElement;
@@ -432,241 +428,6 @@ class DocenDocument extends AddinHost<Editor> {
     const sel = TextSelection.create(editor.state.doc, from, to);
     editor.view.dispatch(editor.state.tr.setSelection(sel as never));
     this.#bridge?.focus();
-  }
-
-  /** Paste from the system clipboard. The docen lane wins (a copy from a
-   *  docen editor round-trips losslessly through the custom MIME — Chrome
-   *  reads it back as a web custom format), then text/html — styled paste
-   *  through the schema's parse rules — then plain text; `textOnly` (the
-   *  menu's Keep Text Only) skips the rich legs. navigator.clipboard is the
-   *  reliable path; execCommand("paste") is the fallback (often blocked). */
-  async #paste(textOnly = false): Promise<void> {
-    const editor = this.#bridge?.activeEditor() ?? this.editor;
-    if (!editor) return;
-    this.#bridge?.focus();
-    const docenType = textOnly ? null : `web ${DOCEN_CLIP_MIME}`;
-    try {
-      const items = await navigator.clipboard.read();
-      for (const item of items) {
-        if (docenType && item.types.includes(docenType)) {
-          const raw = await (await item.getType(docenType)).text();
-          if (raw && this.#bridge?.insertSlicePayload(raw)) {
-            const plain =
-              item.types.includes("text/plain") &&
-              (await (await item.getType("text/plain")).text());
-            if (plain) this.#showPasteOptions({ kind: "slice", raw, text: plain });
-            return;
-          }
-        }
-        const type =
-          !textOnly && item.types.includes("text/html")
-            ? "text/html"
-            : item.types.includes("text/plain")
-              ? "text/plain"
-              : null;
-        if (!type) continue;
-        const text = await (await item.getType(type)).text();
-        if (!text) continue;
-        if (type === "text/html") {
-          const body = new DOMParser().parseFromString(text, "text/html").body;
-          const content = parseHTMLBody(body, editor.state.schema).content ?? [];
-          if (content.length) {
-            editor.commands.insertContent(content);
-            const plain = item.types.includes("text/plain")
-              ? await (await item.getType("text/plain")).text()
-              : "";
-            this.#showPasteOptions({ kind: "html", raw: text, text: plain });
-            return;
-          }
-        } else {
-          // Chromium never persists a copy EVENT's custom types to the system
-          // clipboard (the `web ` spelling only survives the async write API),
-          // so a same-page Ctrl+C → context-menu Paste round-trip can't see
-          // the docen lane in read(). When the plain text still matches the
-          // pinned in-editor copy, the slice payload rides memory instead; a
-          // copy made elsewhere produces different text and the fallback
-          // correctly stays out.
-          const pinned = textOnly ? null : this.#bridge?.copiedSlice();
-          if (pinned && pinned.text === text && this.#bridge?.insertSlicePayload(pinned.payload)) {
-            return;
-          }
-          editor.commands.insertContent(text);
-          return;
-        }
-      }
-    } catch {
-      // read() may be denied (permission policy) — fall through to readText.
-    }
-    try {
-      const text = await navigator.clipboard.readText();
-      if (text) {
-        const pinned = textOnly ? null : this.#bridge?.copiedSlice();
-        if (pinned && pinned.text === text && this.#bridge?.insertSlicePayload(pinned.payload)) {
-          this.#showPasteOptions({ kind: "slice", raw: pinned.payload, text });
-          return;
-        }
-        editor.commands.insertContent(text);
-      }
-    } catch {
-      /* clipboard unavailable — nothing to paste */
-    }
-  }
-
-  /** The clipboard content behind the live paste-options bar — the source
-   *  the three picks replay in their picked form (Word's paste options). */
-  #pasteBar?: HTMLElement;
-  #pasteSource?: { kind: "slice" | "html"; raw: string; text: string };
-
-  /** Word's paste-options bar — after a rich paste it hangs below the pasted
-   *  content; the three picks undo the insertion and replay the same
-   *  clipboard content in the picked form (source / destination-matched /
-   *  text only). */
-  #showPasteOptions(source: { kind: "slice" | "html"; raw: string; text: string }): void {
-    this.#hidePasteOptions();
-    const editor = this.#bridge?.activeEditor() ?? this.editor;
-    const anchor = editor ? this.#bridge?.pasteAnchorRect(editor.state.selection.from) : null;
-    if (!anchor) return;
-    this.#pasteSource = source;
-    const bar = document.createElement("div");
-    bar.setAttribute("data-docen-overlay", "");
-    Object.assign(bar.style, {
-      position: "absolute",
-      zIndex: "7",
-      display: "flex",
-      gap: "2px",
-      padding: "3px",
-      background: "var(--docen-color-bg, #ffffff)",
-      border: "1px solid var(--docen-color-divider, #e2e2e2)",
-      borderRadius: "var(--borderRadiusMedium, 6px)",
-      boxShadow: "var(--shadow4, 0 4px 8px rgba(0,0,0,.14))",
-    } satisfies Partial<CSSStyleDeclaration>);
-    const picks: Array<{ mode: "source" | "match" | "text"; key: string }> = [
-      { mode: "source", key: "ribbon.opt.keep-source" },
-      { mode: "match", key: "ribbon.opt.match-dest" },
-      { mode: "text", key: "ribbon.opt.keep-text-only" },
-    ];
-    for (const pick of picks) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.textContent = t(pick.key, this);
-      Object.assign(btn.style, {
-        padding: "3px 8px",
-        border: "none",
-        background: "transparent",
-        borderRadius: "4px",
-        cursor: "pointer",
-        whiteSpace: "nowrap",
-        fontSize: "12px",
-        lineHeight: "1.4",
-        color: "inherit",
-        fontFamily: "inherit",
-      } satisfies Partial<CSSStyleDeclaration>);
-      btn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        this.#hidePasteOptions();
-        this.#replayPaste(pick.mode);
-      });
-      bar.append(btn);
-    }
-    anchor.frame.append(bar);
-    // Below the pasted content's last line, clamped into the frame.
-    Object.assign(bar.style, {
-      left: `${Math.max(0, anchor.left)}px`,
-      top: `${anchor.top + anchor.height + 4}px`,
-    });
-    this.#pasteBar = bar;
-    document.addEventListener("mousedown", this.#pasteBarDismiss, true);
-    document.addEventListener("keydown", this.#pasteBarDismiss, true);
-  }
-
-  #hidePasteOptions(): void {
-    document.removeEventListener("mousedown", this.#pasteBarDismiss, true);
-    document.removeEventListener("keydown", this.#pasteBarDismiss, true);
-    this.#pasteBar?.remove();
-    this.#pasteBar = undefined;
-    this.#pasteSource = undefined;
-  }
-
-  /** A click outside the bar or Escape dismisses it (Word keeps the paste
-   *  itself — only the options bar goes away). Clicks inside the bar fall
-   *  through to the pick buttons. */
-  readonly #pasteBarDismiss = (event: Event): void => {
-    if (event instanceof KeyboardEvent && event.key !== "Escape") return;
-    if (event instanceof MouseEvent && this.#pasteBar?.contains(event.target as Node)) return;
-    this.#hidePasteOptions();
-  };
-
-  /** The Office Clipboard's session collection (newest first, Word's 24-item
-   *  cap) — fed by the bridge's onClipboardCollect, rendered by the pane. */
-  #clipboardItems: { text: string; payload: string | null }[] = [];
-
-  #collectClipboardItem(item: { text: string; payload: string | null }): void {
-    // A re-copy of the newest item keeps the pane's order stable.
-    if (this.#clipboardItems[0]?.text === item.text) return;
-    this.#clipboardItems.unshift({ ...item });
-    if (this.#clipboardItems.length > 24) this.#clipboardItems.length = 24;
-    this.#syncClipboardPane();
-  }
-
-  #syncClipboardPane(): void {
-    const pane = this.shadowRoot?.querySelector("docen-clipboard-pane");
-    if (pane) (pane as unknown as { entries: unknown[] }).entries = [...this.#clipboardItems];
-  }
-
-  #pasteClipboardEntry(entry: { text: string; payload: string | null } | null): void {
-    const editor = this.#bridge?.activeEditor() ?? this.editor;
-    if (!editor || !entry) return;
-    this.#bridge?.focus();
-    if (entry.payload && this.#bridge?.insertSlicePayload(entry.payload)) return;
-    editor.commands.insertContent(entry.text);
-  }
-
-  readonly #onClipboardPaste = (event: Event): void => {
-    this.#pasteClipboardEntry(
-      (event as CustomEvent<{ text: string; payload: string | null }>).detail,
-    );
-  };
-
-  /** Word's Paste All — items land in collection order (oldest first). */
-  readonly #onClipboardPasteAll = (): void => {
-    for (const entry of [...this.#clipboardItems].reverse()) this.#pasteClipboardEntry(entry);
-  };
-
-  readonly #onClipboardClear = (): void => {
-    this.#clipboardItems = [];
-  };
-
-  /** A paste-options pick: undo the insertion, then replay the same clipboard
-   *  content in the picked form. "match" keeps the block structure (lists,
-   *  tables, links) but drops the source's run formatting so the destination's
-   *  takes over; "text" inserts the plain text. */
-  #replayPaste(mode: "source" | "match" | "text"): void {
-    const source = this.#pasteSource;
-    const editor = this.#bridge?.activeEditor() ?? this.editor;
-    if (!source || !editor) return;
-    editor.commands.undo();
-    if (mode === "text") {
-      editor.commands.insertContent(source.text);
-      return;
-    }
-    if (source.kind === "slice") {
-      if (mode === "source" && this.#bridge?.insertSlicePayload(source.raw)) return;
-      // A slice replayed destination-matched: strip its run marks.
-      try {
-        const parsed = JSON.parse(source.raw) as { content?: JSONContent[] };
-        if (parsed.content) {
-          editor.commands.insertContent(stripRunMarks(parsed.content));
-        }
-      } catch {
-        /* unparsable payload — the undo already restored the prior state */
-      }
-      return;
-    }
-    const body = new DOMParser().parseFromString(source.raw, "text/html").body;
-    const json = parseHTMLBody(body, editor.state.schema);
-    const content = (json.content ?? []).filter((n) => n.type !== "text" || n.text);
-    if (content.length)
-      editor.commands.insertContent(mode === "match" ? stripRunMarks(content) : content);
   }
 
   /** Editing → Select menu. "all" uses the official selectAll() command;
@@ -924,8 +685,8 @@ class DocenDocument extends AddinHost<Editor> {
       scale: () => this.#stage?.scale() ?? 1,
       // Word's paste-options bar hangs after every rich paste; the clipboard
       // pane collects each in-editor copy/cut.
-      onRichPaste: (source) => this.#showPasteOptions(source),
-      onClipboardCollect: (item) => this.#collectClipboardItem(item),
+      onRichPaste: (source) => this.#clipboard.showPasteOptions(source),
+      onClipboardCollect: (item) => this.#clipboard.collect(item),
       // Header/footer edit stories — the bridge routes band double-clicks
       // here; the host owns the slots' persistence (attrs on the doc node or
       // the section's last paragraph).
@@ -999,9 +760,9 @@ class DocenDocument extends AddinHost<Editor> {
     this.addEventListener("comment:update", this.#comments.onCommentUpdate as EventListener);
     this.addEventListener("comment:delete", this.#comments.onCommentDelete as EventListener);
     // Office Clipboard pane → paste one entry / paste all / clear.
-    this.addEventListener("clipboard:paste", this.#onClipboardPaste as EventListener);
-    this.addEventListener("clipboard:paste-all", this.#onClipboardPasteAll as EventListener);
-    this.addEventListener("clipboard:clear", this.#onClipboardClear as EventListener);
+    this.addEventListener("clipboard:paste", this.#clipboard.onPanePaste as EventListener);
+    this.addEventListener("clipboard:paste-all", this.#clipboard.onPanePasteAll as EventListener);
+    this.addEventListener("clipboard:clear", this.#clipboard.onPaneClear as EventListener);
     // Click a Results entry → jump to that match (delegated on the container).
     this.shadowRoot!.querySelector(".search-results")?.addEventListener(
       "click",
@@ -1651,6 +1412,7 @@ class DocenDocument extends AddinHost<Editor> {
   };
 
   disconnectedCallback(): void {
+    this.#clipboard.hidePasteOptions();
     this.#langObserver?.disconnect();
     this.#unobserveLang?.();
     this.#unobserveLang = undefined;
@@ -2372,7 +2134,7 @@ class DocenDocument extends AddinHost<Editor> {
   /** Paste Special's pick — re-run the paste in that mode ("text" skips the
    *  rich legs, like the menu's Keep Text Only). */
   readonly #onPasteSpecialOk = (event: CustomEvent<"html" | "text">): void => {
-    void this.#paste(event.detail === "text");
+    void this.#clipboard.paste(event.detail === "text");
   };
 
   /** Refresh the status bar to mirror Word's bottom row: the left cluster is
@@ -3395,7 +3157,7 @@ class DocenDocument extends AddinHost<Editor> {
         )?.show();
         return;
       }
-      void this.#paste(value === "keep-text-only");
+      void this.#clipboard.paste(value === "keep-text-only");
       return;
     }
     // Home → Clipboard group launcher — the Office Clipboard pane.
