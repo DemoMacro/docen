@@ -22,6 +22,7 @@ export { default as DocenSpellingPane } from "./spelling-pane";
 export { default as DocenLanguageDialog } from "./language-dialog";
 export { default as DocenPhoneticDialog } from "./phonetic-dialog";
 export { default as DocenTwoInOneDialog } from "./two-in-one-dialog";
+export { default as DocenDefineListDialog } from "./define-list-dialog";
 export { default as DocenPasteSpecialDialog } from "./paste-special-dialog";
 export { default as DocenFontDialog } from "./font-dialog";
 export { default as DocenTablePropertiesDialog } from "./table-properties-dialog";

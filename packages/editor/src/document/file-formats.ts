@@ -103,6 +103,9 @@ export const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   // Chinese Layout (中文版式) opens the two-lines-in-one dialog; the commit
   // stamps the eastAsianLayout combine mark on the selection.
   "two-lines-in-one",
+  // The Multilevel List gallery's last entry opens the Define New Multilevel
+  // List dialog; the commit registers a document numbering definition.
+  "define-new-list",
   // TOC insert/update — dispatch with the bridge's pageOf (page numbers live
   // in the canvas caret map, which editor.commands can't reach).
   "toc",

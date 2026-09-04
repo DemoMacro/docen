@@ -221,6 +221,7 @@ export const documentTemplate = html`
   <docen-language-dialog part="language"></docen-language-dialog>
   <docen-phonetic-dialog part="phonetic"></docen-phonetic-dialog>
   <docen-two-in-one-dialog part="two-in-one"></docen-two-in-one-dialog>
+  <docen-define-list-dialog part="define-list"></docen-define-list-dialog>
   <docen-table-properties-dialog part="table-properties"></docen-table-properties-dialog>
   <docen-borders-shading-dialog part="borders-shading"></docen-borders-shading-dialog>
   <docen-watermark-dialog part="watermark-dialog"></docen-watermark-dialog>

@@ -157,11 +157,18 @@ const numberItems = (): string =>
     { text: opt("change-list-level"), value: "in", event: "multilevel-list" },
   ]);
 
+// Word's multilevel List Library — each entry names its marker shape (the
+// gallery thumbnails' text) and applies that preset; the last entry opens
+// Define New Multilevel List.
 const multilevelItems = (): string =>
   JSON.stringify([
-    { text: opt("level-1"), value: "level-1" },
-    { text: opt("level-2"), value: "level-2" },
-    { text: opt("level-3"), value: "level-3" },
+    { text: "1., 1.1., 1.1.1.", event: "multilevel-list", value: "preset:cascade" },
+    { text: "1), 1.1), 1.1.1)", event: "multilevel-list", value: "preset:cascade-paren" },
+    { text: "1., a., i.", event: "multilevel-list", value: "preset:hybrid" },
+    { text: "1), a), i)", event: "multilevel-list", value: "preset:hybrid-paren" },
+    { text: "一、（一）1.", event: "multilevel-list", value: "preset:cjk" },
+    { text: "第X章 第X节", event: "multilevel-list", value: "preset:cjk-chapter" },
+    { text: opt("define-new-multilevel-list"), event: "define-new-list" },
   ]);
 
 const spacingItems = (): string =>

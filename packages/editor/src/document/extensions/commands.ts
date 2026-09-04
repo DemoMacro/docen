@@ -2,6 +2,7 @@ import type { ImageAttrs } from "@docen/docx";
 import {
   BULLET_GLYPHS,
   HIGHLIGHT_PALETTE_RGB,
+  nextMultilevelReference,
   nextOrderedReference,
   ORDERED_FORMATS,
 } from "@docen/docx";
@@ -418,7 +419,7 @@ function selectedParagraphs(state: EditorState): { pos: number; node: PMNode }[]
 /** Every numbering reference the doc's list paragraphs carry — feeds the
  *  fresh-reference allocator so a new list never collides with an existing
  *  one's numbering. */
-function collectListReferences(doc: PMNode): string[] {
+export function collectListReferences(doc: PMNode): string[] {
   const refs: string[] = [];
   doc.descendants((node) => {
     if (node.type.name !== "paragraph") return true;
@@ -2297,35 +2298,63 @@ export const DocumentCommands = Extension.create({
       // Numbering drop-downs' Change List Level item) step each paragraph
       // relative to its own level — the shared Tab semantics. The split's
       // main click carries no value — top level, not a demotion to level 2.
-      // Plain paragraphs gain a fresh decimal multilevel list (Word's gallery
-      // applies a list; a silent no-op reads as a broken button).
+      // "preset:<id>" applies a List Library style (Word's gallery): plain
+      // and bullet paragraphs gain one shared fresh reference of the preset,
+      // numbered paragraphs keep their level and re-style wholesale. Plain
+      // paragraphs with no value gain a fresh decimal multilevel list (a
+      // gallery applies a list; a silent no-op reads as a broken button).
       "multilevel-list":
         (level) =>
         ({ state, tr }) => {
-          const step = level === "in" ? 1 : level === "out" ? -1 : 0;
-          const target =
-            step === 0 ? (level === "level-3" ? 2 : level === "level-2" ? 1 : 0) : null;
+          const preset = level?.startsWith("preset:") ? level.slice(7) : null;
+          const demote = level === "in" ? 1 : level === "out" ? -1 : 0;
+          const target = level === "level-3" ? 2 : level === "level-2" ? 1 : 0;
           let touched = false;
           let freshRef: string | null = null;
+          const freshFor = (base: string): string =>
+            base === "ordered"
+              ? nextOrderedReference(
+                  collectListReferences(state.doc),
+                  (state.doc.attrs as { numbering?: unknown }).numbering,
+                )
+              : nextMultilevelReference(
+                  collectListReferences(state.doc),
+                  (state.doc.attrs as { numbering?: unknown }).numbering,
+                  preset!,
+                );
           for (const { pos, node } of selectedParagraphs(state)) {
             const attrs = node.attrs as Record<string, unknown>;
             const cur = listStateOf(attrs);
-            if (!cur.kind) {
-              // One shared list for the whole selection (Word numbers the
-              // applied gallery as one list).
-              freshRef ??= nextOrderedReference(
-                collectListReferences(state.doc),
-                (state.doc.attrs as { numbering?: unknown }).numbering,
-              );
+            if (preset) {
+              // The preset applies to every selected paragraph: numbered
+              // ones re-style in place (level kept), bullets and plain
+              // paragraphs convert into one shared list of the preset.
+              const reference =
+                cur.kind === "ordered" ? cur.reference! : (freshRef ??= freshFor("multilevel"));
               tr.setNodeMarkup(pos, undefined, {
                 ...attrs,
                 bullet: null,
-                numbering: { reference: freshRef, level: step === 0 ? target! : 0 },
+                numbering: {
+                  reference,
+                  level: cur.kind === "ordered" ? cur.level : 0,
+                },
               });
               touched = true;
               continue;
             }
-            const depth = step === 0 ? target! : Math.min(8, Math.max(0, cur.level + step));
+            if (!cur.kind) {
+              // One shared list for the whole selection (Word numbers the
+              // applied gallery as one list).
+              freshRef ??= freshFor("ordered");
+              tr.setNodeMarkup(pos, undefined, {
+                ...attrs,
+                bullet: null,
+                numbering: { reference: freshRef, level: target },
+              });
+              touched = true;
+              continue;
+            }
+            const depth = demote === 0 ? target : Math.min(8, Math.max(0, cur.level + demote));
             if (depth === cur.level) continue;
             const patch =
               cur.kind === "bullet" && cur.variant === "bullet"

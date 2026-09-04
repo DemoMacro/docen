@@ -11,12 +11,14 @@
  */
 
 import {
+  buildCustomMultilevelLevels,
   compileDocument,
   convertMillimetersToTwip,
   docxExtensions,
   effectiveRunProps,
   generateDOCX,
   generateMarkdown,
+  nextMultilevelReference,
   normalizeDocument,
   parseDOCX,
   parseHTMLBody,
@@ -48,6 +50,7 @@ import {
 import { attr, customElement } from "@microsoft/fast-element";
 import type { Mark } from "@tiptap/pm/model";
 import { EditorState, TextSelection, type Transaction } from "@tiptap/pm/state";
+import { DocAttrStep } from "@tiptap/pm/transform";
 import {
   findNext,
   findPrev,
@@ -98,7 +101,12 @@ import { documentStyles, documentTemplate, escapeHtml } from "./chrome";
 // Side-effect import: registers the ribbon/header translation tables.
 import "./i18n";
 import type { OutlineItem } from "./components/outline";
-import { tableAncestry, WIRED_DISPATCH, type ParagraphDialogPatch } from "./extensions/commands";
+import {
+  collectListReferences,
+  tableAncestry,
+  WIRED_DISPATCH,
+  type ParagraphDialogPatch,
+} from "./extensions/commands";
 import type { TablePropertiesPatch } from "./extensions/commands";
 import type { BorderSideState, BordersDialogPatch } from "./extensions/commands";
 import { LOCAL_HANDLED, READONLY_LIVE, SAVE_FORMATS, detectOpenFormat } from "./file-formats";
@@ -1241,6 +1249,12 @@ class DocenDocument extends AddinHost<Editor> {
       "two-in-one:ok",
       this.#onTwoInOneOk as EventListener,
     );
+    // Define New Multilevel List dialog — register the levels as a document
+    // numbering definition and stamp the selection with it.
+    this.shadowRoot!.querySelector("docen-define-list-dialog")?.addEventListener(
+      "define-list:ok",
+      this.#onDefineListOk as EventListener,
+    );
     // Status-bar language item — open the language dialog (Word semantics).
     this.shadowRoot!.querySelector("docen-status-bar")?.addEventListener(
       "language:open",
@@ -1863,6 +1877,9 @@ class DocenDocument extends AddinHost<Editor> {
     this.shadowRoot
       ?.querySelector("docen-two-in-one-dialog")
       ?.removeEventListener("two-in-one:ok", this.#onTwoInOneOk as EventListener);
+    this.shadowRoot
+      ?.querySelector("docen-define-list-dialog")
+      ?.removeEventListener("define-list:ok", this.#onDefineListOk as EventListener);
     this.shadowRoot
       ?.querySelector("docen-symbol-dialog")
       ?.removeEventListener("symbol:insert", this.#onSymbolInsert as EventListener);
@@ -4696,6 +4713,12 @@ class DocenDocument extends AddinHost<Editor> {
       this.#onTwoInOneOpen();
       return;
     }
+    // Multilevel List gallery (Home → Paragraph): the Define New Multilevel
+    // List dialog — its last entry.
+    if (name === "define-new-list") {
+      this.#onDefineListOpen();
+      return;
+    }
     // Editing → Select: selectAll() spans the whole document.
     if (name === "select") {
       this.#select(value);
@@ -5000,6 +5023,66 @@ class DocenDocument extends AddinHost<Editor> {
     } else {
       target.chain().setMark("textStyle", { eastAsianLayout: layout }).run();
     }
+    this.#bridge?.focus();
+  };
+
+  /** Home → Paragraph → Multilevel — open the Define New Multilevel List
+   *  dialog (no prefill: the editor has no current-list readback, the dialog
+   *  resets to a fresh cascade). */
+  readonly #onDefineListOpen = (): void => {
+    const dialog = this.shadowRoot?.querySelector("docen-define-list-dialog") as unknown as {
+      show(): void;
+    } | null;
+    dialog?.show();
+  };
+
+  /** Define-list dialog 确定 — register the defined levels as a document
+   *  numbering definition (compile passes doc.attrs.numbering straight
+   *  through, and a "custom" reference is not a generated one, so the
+   *  definition is never rebuilt) and stamp the selection's paragraphs with
+   *  the fresh reference, all in one transaction. */
+  readonly #onDefineListOk = (event: Event): void => {
+    const { levels } =
+      (event as CustomEvent<{ levels?: { format: string; text: string }[] }>).detail ?? {};
+    const target = this.#bridge?.activeEditor() ?? this.editor;
+    if (!target || !levels?.length) return;
+    const { state } = target;
+    const reference = nextMultilevelReference(
+      collectListReferences(state.doc),
+      (state.doc.attrs as { numbering?: unknown }).numbering,
+      "custom",
+    );
+    const numbering = (state.doc.attrs as { numbering?: { abstractNumberings?: unknown[] } })
+      .numbering;
+    target
+      .chain()
+      .command(({ tr }) => {
+        // Doc attrs sit outside the position space (doc.nodeAt(0) is the
+        // first block), so they go through the dedicated doc-attr step; the
+        // stamps below keep their positions either way.
+        tr.step(
+          new DocAttrStep("numbering", {
+            ...numbering,
+            abstractNumberings: [
+              ...(numbering?.abstractNumberings ?? []),
+              { reference, levels: buildCustomMultilevelLevels(levels) },
+            ],
+          }),
+        );
+        state.doc.nodesBetween(state.selection.from, state.selection.to, (node, pos) => {
+          if (node.type.name !== "paragraph") return true;
+          const attrs = node.attrs as Record<string, unknown>;
+          const level = (attrs.numbering as { level?: number } | null | undefined)?.level;
+          tr.setNodeMarkup(pos, undefined, {
+            ...attrs,
+            bullet: null,
+            numbering: { reference, level: typeof level === "number" ? level : 0 },
+          });
+          return false;
+        });
+        return true;
+      })
+      .run();
     this.#bridge?.focus();
   };
 
