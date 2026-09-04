@@ -55,6 +55,7 @@ import {
   type DocenAddin,
   type RibbonMenuItem,
 } from "../ui";
+import type { DrawingPropertiesState } from "../ui/components/workspace/drawing-properties-dialog";
 import type { FontDialogPatch } from "../ui/components/workspace/font-dialog";
 import { proofingLanguageName } from "../ui/components/workspace/language-dialog";
 import type { LinkValues } from "../ui/components/workspace/link-dialog";
@@ -898,6 +899,11 @@ class DocenDocument extends AddinHost<Editor> {
       "table-properties:ok",
       this.#dialogs.onTablePropertiesOk as EventListener,
     );
+    // Size-and-Position dialog — restamp the selected drawing's geometry.
+    this.shadowRoot!.querySelector("docen-drawing-properties-dialog")?.addEventListener(
+      "drawing-properties:ok",
+      this.#dialogs.onDrawingPropertiesOk as EventListener,
+    );
     // Borders and Shading dialog — stamp the border/page/shading tab.
     this.shadowRoot!.querySelector("docen-borders-shading-dialog")?.addEventListener(
       "borders-shading:ok",
@@ -1214,6 +1220,34 @@ class DocenDocument extends AddinHost<Editor> {
       if (target && hit < 0 && seen++ === index) hit = innerPos + offset;
     });
     return hit >= 0 ? hit : null;
+  }
+
+  /** The selected drawing's geometry in the dialog's display unit (cm for
+   *  size and offsets, degrees for rotation) — an image sizes in px attrs
+   *  while a shape payload sizes in EMU; null on any other selection. */
+  #drawingStateOf(): DrawingPropertiesState | null {
+    const sel = this.editor?.state.selection;
+    if (!(sel instanceof NodeSelection)) return null;
+    const attrs = sel.node.attrs as Record<string, unknown>;
+    const shape = attrs.wpsShape as Record<string, unknown> | null | undefined;
+    const floating = (shape ? shape.floating : attrs.floating) as Record<string, unknown> | null;
+    if (!floating) return null;
+    const EMU_PER_CM = 360000;
+    const PX_PER_CM = 96 / 2.54;
+    const sizeDiv = shape ? EMU_PER_CM : PX_PER_CM;
+    const t = (shape?.transformation ?? {}) as Record<string, unknown>;
+    const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+    const cm = (v: number): number => Math.round((v / sizeDiv) * 100) / 100;
+    const offsetCm = (v: unknown): number => Math.round((num(v) / EMU_PER_CM) * 100) / 100;
+    const hPos = floating.horizontalPosition as Record<string, unknown> | undefined;
+    const vPos = floating.verticalPosition as Record<string, unknown> | undefined;
+    return {
+      widthCm: cm(shape ? num(t.width) : num(attrs.width)),
+      heightCm: cm(shape ? num(t.height) : num(attrs.height)),
+      rotationDeg: num(shape ? t.rotation : attrs.rotation),
+      offsetHCm: offsetCm(hPos?.offset),
+      offsetVCm: offsetCm(vPos?.offset),
+    };
   }
 
   /** The active view, normalized (an unknown attr value reads as print). */
@@ -2519,6 +2553,13 @@ class DocenDocument extends AddinHost<Editor> {
       items.push({ text: "-" });
       items.push({ text: t("context.bring-forward", this), event: "bring-forward" });
       items.push({ text: t("context.send-backward", this), event: "send-backward" });
+      // The numeric layout dialog needs an offset-anchored floating drawing —
+      // an inline picture has no offset to edit.
+      items.push({
+        text: t("context.size-position", this),
+        event: "drawing-properties",
+        ...(this.#drawingStateOf() ? {} : { disabled: true }),
+      });
       items.push({ text: "-" });
       items.push({ text: t("context.delete-picture", this), event: "delete-picture" });
       menu.setAttribute("items", JSON.stringify(items));
@@ -3010,6 +3051,17 @@ class DocenDocument extends AddinHost<Editor> {
           target.state.selection.$from.node(anchor.tableAt).attrs as Record<string, unknown>,
         );
       }
+      return;
+    }
+    // Size and Position — open the drawing dialog prefilled from the selected
+    // floating drawing; the commit arrives via drawing-properties:ok
+    // (drawing-properties-apply).
+    if (name === "drawing-properties") {
+      const dialog = this.shadowRoot?.querySelector("docen-drawing-properties-dialog") as {
+        show(state: DrawingPropertiesState): void;
+      } | null;
+      const state = this.#drawingStateOf();
+      if (dialog && state) dialog.show(state);
       return;
     }
     // Bookmark — prompt for a name and wrap the selection with a

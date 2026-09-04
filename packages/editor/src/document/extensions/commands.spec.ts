@@ -970,3 +970,51 @@ describe("rotate-drawing", () => {
     expect(editor.commands["rotate-drawing"]()).toBe(false);
   });
 });
+
+describe("drawing-properties-apply", () => {
+  const FLOATING = {
+    horizontalPosition: { relative: "margin", offset: 4572000 },
+    verticalPosition: { relative: "paragraph", offset: 95250 },
+  };
+
+  it("stamps the dialog's cm geometry onto the selected image", () => {
+    const editor = buildWithFloat(FLOATING);
+    selectFloat(editor);
+    expect(
+      editor.commands["drawing-properties-apply"]({
+        widthCm: 5,
+        heightCm: 3,
+        rotationDeg: 45,
+        offsetHCm: 2,
+        offsetVCm: 1,
+      }),
+    ).toBe(true);
+    const attrs = firstNodeOf(editor, "image").attrs as Record<string, unknown>;
+    // cm → px at 96 DPI (5cm ≈ 188.98 → 189; 3cm ≈ 112.94 → 113).
+    expect(attrs.width).toBe(189);
+    expect(attrs.height).toBe(113);
+    expect(attrs.rotation).toBe(45);
+    // cm → EMU (360000/cm) — 2cm and 1cm exactly.
+    const floating = attrs.floating as Record<string, unknown>;
+    expect((floating.horizontalPosition as Record<string, unknown>).offset).toBe(720000);
+    expect((floating.verticalPosition as Record<string, unknown>).offset).toBe(360000);
+    expect(editor.state.selection instanceof NodeSelection).toBe(true);
+  });
+
+  it("keeps the values the patch omits", () => {
+    const editor = buildWithFloat(FLOATING);
+    selectFloat(editor);
+    expect(editor.commands["drawing-properties-apply"]({ rotationDeg: 30 } as never)).toBe(true);
+    const attrs = firstNodeOf(editor, "image").attrs as Record<string, unknown>;
+    expect(attrs.width).toBe(10); // untouched
+    expect(attrs.rotation).toBe(30);
+    const floating = attrs.floating as Record<string, unknown>;
+    expect((floating.horizontalPosition as Record<string, unknown>).offset).toBe(4572000);
+  });
+
+  it("declines without a floating drawing selected", () => {
+    const editor = buildWithFloat(FLOATING);
+    expect(editor.commands["drawing-properties-apply"]({ rotationDeg: 1 } as never)).toBe(false);
+    expect(editor.commands["drawing-properties-apply"]()).toBe(false);
+  });
+});
