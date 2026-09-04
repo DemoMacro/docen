@@ -120,10 +120,13 @@ export const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   // View-surface toggles (Word's View → Ruler / Gridlines).
   "toggle-ruler",
   "toggle-gridlines",
-  // Link prompts for an address and marks the selection (Word's Insert Link);
-  // the context menu's Remove Hyperlink unsets the mark over the clicked link.
+  // Link opens the hyperlink dialog and marks the selection (Word's Insert
+  // Link); the context menu's Open/Copy Hyperlink and Remove Hyperlink act on
+  // the clicked link.
   "link",
   "unset-link",
+  "open-link",
+  "copy-link",
   // New Comment anchors the selection with a Word comment (range markers +
   // a documentExtras.comments entry) — composed in the comments pane, not a
   // prompt; Edit opens the pane (cards edit inline), Delete removes the

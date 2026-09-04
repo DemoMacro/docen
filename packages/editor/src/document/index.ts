@@ -71,6 +71,7 @@ import {
   type RibbonMenuItem,
 } from "../ui";
 import type { ColumnsValues } from "../ui/components/workspace/columns-dialog";
+import type { LinkValues } from "../ui/components/workspace/link-dialog";
 import type { PageSetupValues } from "../ui/components/workspace/page-setup-dialog";
 import { createDefaultAddin, textCounter } from "./addin";
 // Side-effect: register the document-specific UI components moved out of the
@@ -375,6 +376,13 @@ class DocenDocument extends AddinHost<Editor> {
       !target.closest("[data-docen-bridge-input]")
     )
       return;
+    // Ctrl+K opens the Link dialog (Word) — after the input gate, so a
+    // combobox keystroke is never hijacked.
+    if (event.key === "k" || event.key === "K") {
+      event.preventDefault();
+      this.#insertLink();
+      return;
+    }
     const key = event.key;
     if (key === "+" || key === "=") {
       event.preventDefault();
@@ -899,6 +907,8 @@ class DocenDocument extends AddinHost<Editor> {
       drawingAt: (page, lx, ly) => this.#stage?.drawingAt(page, lx, ly) ?? null,
       drawingSelection: (hit) => this.#drawingNodePos(hit.para, hit.index, hit.kind),
       drawingBoxOf: (para, index, kind) => this.#stage?.drawingBoxOf(para, index, kind) ?? null,
+      // `#name` links are bookmark anchors — the host owns the in-page jump.
+      onInternalAnchor: (name) => this.#jumpToBookmark(name),
     });
     if (this.getAttribute("editable") === "false") this.#bridge.editor.setEditable(false);
     // First paint + caret map feed (transactions re-render via the bridge's
@@ -978,6 +988,11 @@ class DocenDocument extends AddinHost<Editor> {
     this.shadowRoot!.querySelector("docen-columns-dialog")?.addEventListener(
       "columns:ok",
       this.#onColumnsOk as EventListener,
+    );
+    // Link dialog — commit the hyperlink (mark / replace / insert / remove).
+    this.shadowRoot!.querySelector("docen-link-dialog")?.addEventListener(
+      "link:ok",
+      this.#onLinkOk as EventListener,
     );
 
     // Re-render header + ribbon when the page locale (<html lang>) changes.
@@ -1432,6 +1447,9 @@ class DocenDocument extends AddinHost<Editor> {
     this.shadowRoot
       ?.querySelector("docen-columns-dialog")
       ?.removeEventListener("columns:ok", this.#onColumnsOk as EventListener);
+    this.shadowRoot
+      ?.querySelector("docen-link-dialog")
+      ?.removeEventListener("link:ok", this.#onLinkOk as EventListener);
     this.shadowRoot
       ?.querySelector<HTMLElement>("docen-status-bar")
       ?.removeEventListener("zoom:change", this.#onZoomChange as EventListener);
@@ -2419,56 +2437,102 @@ class DocenDocument extends AddinHost<Editor> {
     editor.view.dispatch(editor.state.tr.insert(editor.state.selection.from, node));
   }
 
-  /** Insert → Link: prompt for the address (pre-filled with the selection's
-   *  existing link, Word's edit-an-existing-hyperlink behavior), then either
-   *  mark the selected text or insert fresh display text. An empty address on
-   *  an existing link removes it (Word's "remove hyperlink"). `#name`
-   *  addresses are bookmark anchors (in-page jumps); bare hosts gain the
-   *  https scheme (Word's auto-complete). */
+  /** Insert → Link / Ctrl+K / right-click Edit Link: open the hyperlink dialog
+   *  prefilled from the selection — its text and the link mark riding it (a
+   *  caret inside a link edits the whole one via extendMarkRange at commit). */
   #insertLink(): void {
-    const editor = this.editor;
+    const editor = this.#bridge?.activeEditor() ?? this.editor;
     if (!editor) return;
-    // The link mark riding the selection, if any (extendMarkRange snaps the
-    // range to the whole mark, so a caret inside a link edits the whole one).
+    const { empty, from, to } = editor.state.selection;
+    (
+      this.shadowRoot?.querySelector("docen-link-dialog") as {
+        show(values?: Partial<LinkValues>): void;
+      } | null
+    )?.show({
+      text: empty ? "" : editor.state.doc.textBetween(from, to, " "),
+      href: editor.getAttributes("link").href as string | undefined,
+    });
+  }
+
+  // The Link dialog's OK — Word's Insert Link semantics: an empty address
+  // removes an existing link; a selection gets marked (its text replaced when
+  // the dialog's display text was edited); an empty selection inserts fresh
+  // display text carrying the mark.
+  readonly #onLinkOk = (event: CustomEvent<LinkValues | undefined>): void => {
+    const values = event.detail;
+    const editor = this.#bridge?.activeEditor() ?? this.editor;
+    if (!values || !editor) return;
+    this.#bridge?.focus();
+    const raw = values.href.trim();
+    // The link mark riding the selection, if any.
     const existing = editor.getAttributes("link").href as string | undefined;
-    const raw = window.prompt(t("link.prompt", this), existing ?? "https://")?.trim();
-    if (raw == null) return;
     if (raw === "") {
       if (existing) editor.chain().focus().extendMarkRange("link").unsetLink().run();
       return;
     }
+    // `#name` stays a bookmark anchor; bare hosts gain the https scheme.
     const href = raw.startsWith("#") || /^[a-z][a-z0-9+.-]*:/i.test(raw) ? raw : `https://${raw}`;
-    const { empty } = editor.state.selection;
-    // Word stamps inserted hyperlink runs with the "Hyperlink" character style
-    // — that style (not the w:hyperlink element) paints links blue — so every
-    // insert path here stamps it in the same transaction.
+    const mark = [
+      { type: "link", attrs: { href, target: href.startsWith("#") ? null : "_blank" } },
+      { type: "textStyle", attrs: { style: "Hyperlink" } },
+    ] as const;
+    const { empty, from, to } = editor.state.selection;
     if (!empty) {
-      editor
-        .chain()
-        .focus()
-        .extendMarkRange("link")
-        .setLink({ href })
-        .setMark("textStyle", { style: "Hyperlink" })
-        .run();
+      const text = values.text.trim();
+      const selected = editor.state.doc.textBetween(from, to, " ");
+      if (text && text !== selected) {
+        // The display text was edited — replace the selection with the fresh
+        // marked run (one undo step).
+        editor.commands.insertContentAt({ from, to }, { type: "text", text, marks: [...mark] });
+        return;
+      }
+      // Word stamps hyperlink runs with the "Hyperlink" character style —
+      // that style (not the w:hyperlink element) paints links blue.
+      editor.chain().focus().extendMarkRange("link").setLink({ href }).run();
+      editor.commands.setMark("textStyle", { style: "Hyperlink" });
       return;
     }
-    // No selection: Word asks for display text and inserts it marked.
-    const text = window
-      .prompt(t("link.text.prompt", this), raw.replace(/^https?:\/\//, ""))
-      ?.trim();
+    // No selection: the display text inserts marked.
+    const text = values.text.trim();
     if (!text) return;
-    editor
-      .chain()
-      .focus()
-      .insertContent({
-        type: "text",
-        text,
-        marks: [
-          { type: "link", attrs: { href, target: href.startsWith("#") ? null : "_blank" } },
-          { type: "textStyle", attrs: { style: "Hyperlink" } },
-        ],
-      })
-      .run();
+    editor.commands.insertContent({ type: "text", text, marks: [...mark] });
+  };
+
+  /** The href of the link mark at the caret (the context menu's open/copy
+   *  source; the right-click collapsed the caret onto the link first), or
+   *  null. */
+  #hrefAtCaret(): string | null {
+    const editor = this.#bridge?.activeEditor() ?? this.editor;
+    if (!editor) return null;
+    const mark = editor.state.doc
+      .resolve(Math.min(editor.state.selection.from, editor.state.doc.content.size))
+      .marks()
+      .find((m) => m.type.name === "link");
+    const href = mark?.attrs.href;
+    return typeof href === "string" && href ? href : null;
+  }
+
+  /** Ctrl+Click / Open Hyperlink on a `#name` link — place the caret past the
+   *  matching bookmarkStart atom and scroll it into view (Word scrolls to the
+   *  bookmark). No matching bookmark is a no-op. */
+  #jumpToBookmark(name: string): void {
+    const editor = this.editor;
+    if (!editor) return;
+    let target: number | null = null;
+    editor.state.doc.descendants((child, pos) => {
+      if (target != null || child.type.name !== "inlinePassthrough") return;
+      try {
+        const data = JSON.parse(String(child.attrs?.data ?? "{}")) as {
+          bookmarkStart?: { name?: string };
+        };
+        if (data.bookmarkStart?.name === name) target = pos + child.nodeSize;
+      } catch {
+        // opaque verbatim blob — not a bookmark
+      }
+    });
+    if (target == null) return;
+    this.#setTextSelection(target);
+    this.#bridge?.scrollIntoView(target);
   }
 
   /** References → Next Footnote: place the caret on the next
@@ -2670,6 +2734,8 @@ class DocenDocument extends AddinHost<Editor> {
     items.push({ text: "-" });
     if (inSelection) {
       if (onLink) {
+        items.push({ text: t("context.open-link", this), event: "open-link" });
+        items.push({ text: t("context.copy-link", this), event: "copy-link" });
         items.push({ text: t("context.edit-link", this), event: "link" });
         items.push({ text: t("context.unlink", this), event: "unset-link" });
       } else {
@@ -3507,6 +3573,21 @@ class DocenDocument extends AddinHost<Editor> {
         .extendMarkRange("link")
         .unsetLink()
         .run();
+      return;
+    }
+    // Context menu → Open Hyperlink: `#name` jumps to its bookmark, anything
+    // else opens in a new window.
+    if (name === "open-link") {
+      const href = this.#hrefAtCaret();
+      if (!href) return;
+      if (href.startsWith("#")) this.#jumpToBookmark(href.slice(1));
+      else window.open(href, "_blank", "noopener,noreferrer");
+      return;
+    }
+    // Context menu → Copy Hyperlink: the address to the system clipboard.
+    if (name === "copy-link") {
+      const href = this.#hrefAtCaret();
+      if (href) void navigator.clipboard.writeText(href);
       return;
     }
     // New Comment — anchor the selection (or the word at the caret) with a
