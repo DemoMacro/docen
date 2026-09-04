@@ -741,6 +741,14 @@ export const ribbonEn: AdditionalLanguage = {
     "status.page-of": "Page {page} of {total}",
     "status.words": "Words: {n}",
     "status.opening": "Opening {name}",
+    "status.spelling": "Spelling",
+    // --- Spelling pane ---
+    "spelling.suggestions": "Suggestions",
+    "spelling.ignore-all": "Ignore All",
+    "spelling.add": "Add to Dictionary",
+    "spelling.empty": "Spelling check complete",
+    "spelling.previous": "Previous",
+    "spelling.next": "Next",
     // --- Options dialog ---
     "options.title": "Options",
     "options.ok": "OK",
@@ -1485,6 +1493,14 @@ export const ribbonZhCN: AdditionalLanguage = {
     "status.page-of": "第 {page} 页，共 {total} 页",
     "status.words": "字数: {n}",
     "status.opening": "正在打开 {name}",
+    "status.spelling": "拼写检查",
+    // --- 拼写检查窗格 ---
+    "spelling.suggestions": "建议",
+    "spelling.ignore-all": "全部忽略",
+    "spelling.add": "添加到词典",
+    "spelling.empty": "拼写检查完成",
+    "spelling.previous": "上一处",
+    "spelling.next": "下一处",
     // --- 选项对话框 ---
     "options.title": "选项",
     "options.ok": "确定",

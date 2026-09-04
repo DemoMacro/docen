@@ -197,6 +197,9 @@ export const documentTemplate = html`
     <docen-task-pane slot="task-pane-end" position="end" part="clipboard-pane" title="Clipboard">
       <docen-clipboard-pane></docen-clipboard-pane>
     </docen-task-pane>
+    <docen-task-pane slot="task-pane-end" position="end" part="proofing-pane" title="Spelling">
+      <docen-spelling-pane></docen-spelling-pane>
+    </docen-task-pane>
     <docen-status-bar slot="status" part="status"></docen-status-bar>
   </docen-workspace>
   <!-- The edit bridge's textarea lives here, at the shadow root: inside the

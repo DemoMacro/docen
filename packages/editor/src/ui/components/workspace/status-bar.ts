@@ -121,6 +121,32 @@ const styles = css`
     background: var(--docen-color-subtle-background-selected, #e8e8e8);
     color: var(--docen-color-accent, #0f6cbd);
   }
+  /* Proofing state (Word's status-bar book): a check when the document is
+     clean, a red cross when misspellings are pending. Click opens the
+     Spelling pane. */
+  .spell-btn {
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: none;
+    border-radius: 3px;
+    background: transparent;
+    color: var(--docen-color-text-2, #424242);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .spell-btn:hover {
+    background: var(--docen-color-subtle-background-hover, #f5f5f5);
+  }
+  .spell-btn[data-state="ok"] .spell-issues,
+  .spell-btn[data-state="issues"] .spell-ok {
+    display: none;
+  }
+  .spell-btn[data-state="issues"] {
+    color: #e81123;
+  }
   /* Language indicator — sat after the word count. Plain text matching the
      surrounding status copy; a click cycles through every registered locale. */
   .lang-text {
@@ -134,6 +160,31 @@ const template = html<DocenStatusBar>`
     <span class="section" ${ref("sectionEl")}></span>
     <span class="pages" ${ref("pagesEl")}></span>
     <span class="words" ${ref("wordsEl")}></span>
+    <button
+      type="button"
+      class="spell-btn"
+      data-state="ok"
+      ${ref("spellBtn")}
+      aria-label="Proofing"
+    >
+      <svg
+        viewBox="0 0 16 16"
+        width="15"
+        height="15"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.2"
+        stroke-linejoin="round"
+        stroke-linecap="round"
+        aria-hidden="true"
+      >
+        <path
+          d="M8 3.5C6.9 2.6 5.2 2 3 2v11c2.2 0 3.9.6 5 1.5 1.1-.9 2.8-1.5 5-1.5V2c-2.2 0-3.9.6-5 1.5z"
+        />
+        <path class="spell-ok" d="M5.6 7.6l1.7 1.7 3.2-3.4" />
+        <path class="spell-issues" d="M6 6.2l4 4M10 6.2l-4 4" />
+      </svg>
+    </button>
     <span class="lang-text" ${ref("langBtn")}></span>
   </span>
   <span class="zoom">
@@ -219,6 +270,10 @@ class DocenStatusBar extends FASTElement {
   /** The active document view — "read" | "print" | "web" | "draft" — drives
    *  the view buttons' pressed state. */
   @attr view?: string;
+  /** The proofing state — "ok" | "issues" — drives the status-bar book icon
+   *  (a green check vs a red cross, Word's spell indicator). Named `proofing`
+   *  because `spellcheck` is a native HTMLElement property (boolean). */
+  @attr proofing?: string;
 
   @observable sectionEl?: HTMLElement;
   @observable pagesEl?: HTMLElement;
@@ -228,6 +283,7 @@ class DocenStatusBar extends FASTElement {
   @observable outBtn?: HTMLButtonElement;
   @observable inBtn?: HTMLButtonElement;
   @observable langBtn?: HTMLElement;
+  @observable spellBtn?: HTMLButtonElement;
   #unsubscribe?: () => void;
 
   sectionChanged(): void {
@@ -249,6 +305,9 @@ class DocenStatusBar extends FASTElement {
   viewChanged(): void {
     this.#syncViewPressed();
   }
+  proofingChanged(): void {
+    this.#syncSpellState();
+  }
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -261,6 +320,8 @@ class DocenStatusBar extends FASTElement {
     // The percent opens the Zoom dialog (Word), and the view shortcuts select
     // a document view — the host decides which view each name maps to.
     this.pctEl?.addEventListener("click", () => this.#emitOpenZoom());
+    // The proofing book opens the Spelling pane (Word: click → Spelling).
+    this.spellBtn?.addEventListener("click", () => this.#emitOpenSpelling());
     for (const btn of this.shadowRoot?.querySelectorAll<HTMLButtonElement>(".view-btn") ?? []) {
       btn.addEventListener("click", () =>
         this.dispatchEvent(
@@ -279,6 +340,7 @@ class DocenStatusBar extends FASTElement {
     });
     this.#renderViewTitles();
     this.#syncViewPressed();
+    this.#syncSpellState();
   }
 
   /** Localized tooltips for the view shortcuts (the same Word view names the
@@ -320,6 +382,18 @@ class DocenStatusBar extends FASTElement {
         detail: { zoom: Number(this.zoom ?? 100) },
       }),
     );
+  }
+
+  #emitOpenSpelling(): void {
+    this.dispatchEvent(new CustomEvent("spellcheck:open", { bubbles: true, composed: true }));
+  }
+
+  /** The book's check/cross face + localized tooltip mirror the host's
+   *  proofing state. */
+  #syncSpellState(): void {
+    if (!this.spellBtn) return;
+    this.spellBtn.dataset.state = this.proofing === "issues" ? "issues" : "ok";
+    this.spellBtn.title = t("status.spelling", this);
   }
 
   disconnectedCallback(): void {

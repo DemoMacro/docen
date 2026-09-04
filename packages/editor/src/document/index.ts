@@ -114,6 +114,13 @@ import {
   useCmUnits,
 } from "./ribbon";
 import {
+  addSpellWord,
+  checkSpelling,
+  ignoreSpellWord,
+  spellSuggestions,
+  type SpellingIssue,
+} from "./spelling";
+import {
   type WatermarkPictureSpec,
   type WatermarkTextSpec,
   WATERMARK_PRESETS,
@@ -190,7 +197,7 @@ function buildOutlineTree(
  * Task pane identifiers, mirroring the Office `<TaskpaneId>` concept. The host
  * ships two built-in panes: `navigation` (start/left) and `properties` (end/right).
  */
-export type TaskPaneId = "navigation" | "properties" | "comments" | "clipboard";
+export type TaskPaneId = "navigation" | "properties" | "comments" | "clipboard" | "proofing";
 
 /**
  * Visibility mode values, matching `Office.VisibilityMode` (`taskpane` | `hidden`).
@@ -381,6 +388,12 @@ class DocenDocument extends AddinHost<Editor> {
     if (event.key === "F12") {
       event.preventDefault();
       void this.#saveAs();
+      return;
+    }
+    // F7 = Spelling & Grammar (Word).
+    if (event.key === "F7") {
+      event.preventDefault();
+      this.#onCommand(new CustomEvent("command", { detail: { event: "spell-check" } }));
       return;
     }
     if (!(event.ctrlKey || event.metaKey)) return;
@@ -1030,6 +1043,27 @@ class DocenDocument extends AddinHost<Editor> {
     this.shadowRoot
       ?.querySelector<HTMLElement>("docen-status-bar")
       ?.addEventListener("zoom:change", this.#onZoomChange as EventListener);
+    // The proofing surfaces: the status-bar book opens the pane; the pane's
+    // actions (replace/ignore/add/step) come back as events.
+    this.shadowRoot
+      ?.querySelector<HTMLElement>("docen-status-bar")
+      ?.addEventListener("spellcheck:open", () =>
+        this.#onCommand(new CustomEvent("command", { detail: { event: "spell-check" } })),
+      );
+    this.shadowRoot
+      ?.querySelector<HTMLElement>("docen-spelling-pane")
+      ?.addEventListener("spelling:replace", ((event: CustomEvent<string>) =>
+        this.#replaceSpellingIssue(event.detail)) as EventListener);
+    this.shadowRoot
+      ?.querySelector<HTMLElement>("docen-spelling-pane")
+      ?.addEventListener("spelling:ignore-all", () => this.#ignoreSpelling("ignore"));
+    this.shadowRoot
+      ?.querySelector<HTMLElement>("docen-spelling-pane")
+      ?.addEventListener("spelling:add", () => this.#ignoreSpelling("add"));
+    this.shadowRoot
+      ?.querySelector<HTMLElement>("docen-spelling-pane")
+      ?.addEventListener("spelling:nav", ((event: CustomEvent<number>) =>
+        this.#gotoSpellingIssue(this.#spellingActive + event.detail)) as EventListener);
 
     this.#stageHost = this.shadowRoot!.querySelector<HTMLElement>(".docen-canvas") ?? undefined;
     this.#stageHost?.addEventListener("wheel", this.#onWheel as EventListener, {
@@ -1756,6 +1790,7 @@ class DocenDocument extends AddinHost<Editor> {
     this.#bridge?.updatePages(run.pages, this.#pageOriginOf(run.sections, run.sectionOfPage));
     this.#updateStatus();
     this.#syncCommentsPane();
+    this.#scheduleSpellCheck();
   }
 
   /** The previous render's flow result — the diff base for the next one. */
@@ -1851,6 +1886,7 @@ class DocenDocument extends AddinHost<Editor> {
     this.#fontSyncCleanup = undefined;
     this.#stopFormatPainter();
     clearTimeout(this.#searchTimer);
+    if (this.#spellingTimer != null) clearTimeout(this.#spellingTimer);
     this.#bridge?.destroy();
     this.#bridge = undefined;
     this.#stage?.destroy();
@@ -2307,6 +2343,90 @@ class DocenDocument extends AddinHost<Editor> {
       );
     }
   };
+
+  // ---- Spelling (Review → Spelling & Grammar) ----
+  // The host owns the check: debounced after every render, its issue list
+  // feeds the squiggle overlay, the proofing pane, and the status-bar book.
+
+  #spellingIssues: SpellingIssue[] = [];
+  /** The pane's active issue (document order); -1 = nothing selected. */
+  #spellingActive = -1;
+  #spellingTimer: ReturnType<typeof setTimeout> | null = null;
+
+  #scheduleSpellCheck(): void {
+    if (this.#spellingTimer != null) clearTimeout(this.#spellingTimer);
+    this.#spellingTimer = setTimeout(() => {
+      this.#spellingTimer = null;
+      this.#runSpellCheck();
+    }, 400);
+  }
+
+  #runSpellCheck(): void {
+    const editor = this.editor;
+    if (!editor) return;
+    this.#spellingIssues = checkSpelling(editor.state.doc);
+    this.#bridge?.setSpellingIssues(this.#spellingIssues);
+    this.#spellingActive = this.#spellingIssues.length ? 0 : -1;
+    const bar = this.shadowRoot?.querySelector("docen-status-bar");
+    bar?.setAttribute("proofing", this.#spellingIssues.length ? "issues" : "ok");
+    this.#syncSpellingPane();
+  }
+
+  /** Push the active issue (with its suggestions, computed here — the pane
+   *  stays data-only) into the proofing pane when it's open. */
+  #syncSpellingPane(): void {
+    const pane = this.shadowRoot?.querySelector("docen-spelling-pane") as
+      | (HTMLElement & {
+          entries: Array<{ word: string; suggestions: string[] }>;
+          active: number;
+          total: number;
+        })
+      | null;
+    if (!pane) return;
+    const issues = this.#spellingIssues;
+    pane.total = issues.length;
+    pane.entries = issues.map((i) => ({ word: i.word, suggestions: [] }));
+    if (this.#spellingActive >= 0 && this.#spellingActive < issues.length) {
+      pane.active = this.#spellingActive;
+      pane.entries[this.#spellingActive].suggestions = spellSuggestions(
+        issues[this.#spellingActive].word,
+      );
+      pane.entries = [...pane.entries];
+    } else {
+      pane.active = -1;
+    }
+  }
+
+  /** Select and scroll to a spelling issue (the pane / command navigation). */
+  #gotoSpellingIssue(index: number): void {
+    const issues = this.#spellingIssues;
+    if (!issues.length) return;
+    this.#spellingActive = ((index % issues.length) + issues.length) % issues.length;
+    const issue = issues[this.#spellingActive];
+    this.editor?.commands.setTextSelection({ from: issue.from, to: issue.to });
+    this.#bridge?.scrollIntoView(issue.from);
+    this.#syncSpellingPane();
+  }
+
+  /** Replace the active issue's text with a suggestion — one transaction, so
+   *  undo steps the whole replacement; the re-check rides the render. */
+  #replaceSpellingIssue(replacement: string): void {
+    const issue = this.#spellingIssues[this.#spellingActive];
+    const editor = this.editor;
+    if (!issue || !editor) return;
+    editor.commands.insertContentAt({ from: issue.from, to: issue.to }, replacement);
+    editor.commands.setTextSelection({ from: issue.from, to: issue.from + replacement.length });
+  }
+
+  /** Add the active word to the session dictionary, or skip it for this
+   *  session — then re-check, which drops the flagged occurrences. */
+  #ignoreSpelling(mode: "ignore" | "add"): void {
+    const issue = this.#spellingIssues[this.#spellingActive];
+    if (!issue) return;
+    if (mode === "add") addSpellWord(issue.word);
+    else ignoreSpellWord(issue.word);
+    this.#runSpellCheck();
+  }
 
   /** Toggle a task pane open/closed (ribbon View → toggle-navigation). */
   #togglePane(id: TaskPaneId): void {
@@ -4506,6 +4626,20 @@ class DocenDocument extends AddinHost<Editor> {
       this.setAttribute("view", viewOf[name]);
       return;
     }
+    // Spelling (Review → Spelling & Grammar, F7, the status-bar book):
+    // re-check now, open the pane, and start at the first issue at/after the
+    // caret (Word starts checking from the insertion point).
+    if (name === "spell-check") {
+      this.#runSpellCheck();
+      this.#setTaskpane("proofing", true);
+      const from = this.editor?.state.selection.from ?? 0;
+      const issues = this.#spellingIssues;
+      if (issues.length) {
+        const first = issues.find((issue) => issue.from >= from) ?? issues[0];
+        this.#gotoSpellingIssue(issues.indexOf(first));
+      }
+      return;
+    }
     // Editing → Select: selectAll() spans the whole document.
     if (name === "select") {
       this.#select(value);
@@ -5023,7 +5157,7 @@ class DocenDocument extends AddinHost<Editor> {
 
   #paneEl(id: TaskPaneId): (HTMLElement & { open: boolean }) | null {
     // Panes are looked up by part, not position — several panes share the end
-    // rail (properties + comments + clipboard).
+    // rail (properties + comments + clipboard + spelling).
     const part =
       id === "navigation"
         ? "nav-pane"
@@ -5031,7 +5165,9 @@ class DocenDocument extends AddinHost<Editor> {
           ? "comments-pane"
           : id === "clipboard"
             ? "clipboard-pane"
-            : "props-pane";
+            : id === "proofing"
+              ? "proofing-pane"
+              : "props-pane";
     return this.shadowRoot?.querySelector(`docen-task-pane[part="${part}"]`) as
       | (HTMLElement & { open: boolean })
       | null;

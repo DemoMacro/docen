@@ -47,6 +47,9 @@ export const READONLY_LIVE: ReadonlySet<string> = new Set([
   "word-count",
   "show-marks",
   "show-comments",
+  // Spelling (Review → Spelling & Grammar) — checking is a read operation;
+  // the pane works read-only too.
+  "spell-check",
   // View-surface toggles — paint-time view state, not document content.
   "toggle-ruler",
   "toggle-gridlines",
@@ -88,6 +91,9 @@ export const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   "format-painter",
   "edit-mode",
   "word-count",
+  // Spelling opens the proofing pane (Review → Spelling & Grammar); the
+  // check itself and the pane actions are host state (#runSpellCheck).
+  "spell-check",
   // TOC insert/update — dispatch with the bridge's pageOf (page numbers live
   // in the canvas caret map, which editor.commands can't reach).
   "toc",

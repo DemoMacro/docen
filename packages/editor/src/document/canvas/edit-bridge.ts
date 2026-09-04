@@ -260,6 +260,9 @@ export interface EditBridge {
    *  geometry — needed when the zoom rescales the frames without a
    *  selection transaction. */
   replaceOverlays(): void;
+  /** Hand the host's spell-check results to the squiggle overlay (the check
+   *  itself runs in the host, debounced per transaction). */
+  setSpellingIssues(issues: Array<{ from: number; to: number }>): void;
   destroy(): void;
 }
 
@@ -489,9 +492,47 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     }
   };
 
+  /** Spelling squiggles — the search layer's pattern again: the host runs
+   *  the dictionary check (debounced per transaction) and hands the issue
+   *  ranges here; each becomes one thin div hugging the line's baseline
+   *  with a red wave drawn by a repeating SVG. zIndex 2 keeps squiggles
+   *  under search matches, selection, and caret. */
+  const spellingLayer: HTMLDivElement[] = [];
+  const SQUIGGLE =
+    "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='3'%3E" +
+    "%3Cpath d='M0 2.5 L1.5 0.5 L3 2.5 L4.5 0.5 L6 2.5' fill='none' stroke='%23e81123'/%3E%3C/svg%3E\")";
+  let spellingIssues: Array<{ from: number; to: number }> = [];
+  const placeSpelling = (): void => {
+    for (const el of spellingLayer) el.remove();
+    spellingLayer.length = 0;
+    const s = active();
+    if (!s.map?.valid || spellingIssues.length === 0) return;
+    const scale = opts.scale?.() ?? 1;
+    for (const issue of spellingIssues) {
+      for (const r of s.map.selectionRects(issue.from, issue.to)) {
+        const frame = opts.pageHost?.(framePage(s, r.page));
+        if (!frame) continue;
+        const el = document.createElement("div");
+        Object.assign(el.style, {
+          position: "absolute",
+          background: `${SQUIGGLE} repeat-x`,
+          pointerEvents: "none",
+          zIndex: "2",
+          left: `${r.xPx * scale}px`,
+          top: `${(r.yPx + r.heightPx) * scale - 3}px`,
+          width: `${r.widthPx * scale}px`,
+          height: "3px",
+        } satisfies Partial<CSSStyleDeclaration>);
+        frame.append(el);
+        spellingLayer.push(el);
+      }
+    }
+  };
+
   const placeCaret = (): void => {
     placeSelection();
     placeSearch();
+    placeSpelling();
     // A selection that stopped being the drawing's NodeSelection (arrow keys,
     // a command, undo) drops the selection box — the box mirrors the PM state.
     if (selDrawing && !(main.editor.state.selection instanceof NodeSelection)) {
@@ -2089,6 +2130,12 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       placeDrawingSel();
       placeCaret();
     },
+    /** Hand the host's fresh spell-check results to the overlay (the check
+     *  itself runs in the host, debounced per transaction). */
+    setSpellingIssues(issues: Array<{ from: number; to: number }>): void {
+      spellingIssues = issues;
+      placeSpelling();
+    },
     destroy(): void {
       if (main.raf) cancelAnimationFrame(main.raf);
       blink?.cancel();
@@ -2103,6 +2150,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       drawingSel.remove();
       for (const el of selectionLayer) el.remove();
       for (const el of searchLayer) el.remove();
+      for (const el of spellingLayer) el.remove();
       ta.remove();
       caret.remove();
     },
