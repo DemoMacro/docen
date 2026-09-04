@@ -36,6 +36,7 @@ import { listLevelStepPatch } from "../extensions/commands";
 import { KEYBOARD_SHORTCUTS } from "../extensions/keymap";
 import { CaretMap, type TableZone } from "./caret-map";
 import { CellSelection, cellAt, inSameTable } from "./cell-selection";
+import { DrawingOverlay } from "./drawing-editor/overlay";
 import { followLink, installLinkHover, type LinkHit } from "./link-hover";
 
 /** A grapheme-boundary segmenter shared by the delete translations — surrogate
@@ -695,15 +696,35 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
    *  drawing that no longer paints drops the selection. */
   let selDrawing: DrawingHit | null = null;
 
-  const drawingSel = document.createElement("div");
-  Object.assign(drawingSel.style, {
-    position: "absolute",
-    border: "1.5px solid #2b7cd3",
-    pointerEvents: "none",
-    zIndex: "6",
-    display: "none",
-  } satisfies Partial<CSSStyleDeclaration>);
-  opts.host.append(drawingSel);
+  /** The drawing-editor adapter: what a dragged box means. The box is
+   *  page-local px at scale 1; the PM node's width/height attrs are px too,
+   *  so the write-back is a direct setNodeMarkup (inline pictures size
+   *  through the same attrs; a re-render re-anchors the frame via
+   *  drawingBoxOf). */
+  const drawingOverlay = new DrawingOverlay({
+    scale: () => opts.scale?.() ?? 1,
+    applyBox: (box) => {
+      if (!selDrawing) return;
+      const nodePos = opts.drawingSelection?.(selDrawing) ?? null;
+      if (nodePos == null) return;
+      const editor = main.editor;
+      if (!editor.state.doc.nodeAt(nodePos)) return;
+      editor.commands.command(({ tr, dispatch }) => {
+        // A setNodeMarkup that changes attrs demotes a NodeSelection to a
+        // caret (PM maps the selection across the node's replace step);
+        // re-create it so the resize keeps the drawing selected — Word's
+        // picture stays selected after a handle drag.
+        tr.setNodeMarkup(nodePos, undefined, {
+          ...editor.state.doc.nodeAt(nodePos)!.attrs,
+          width: box.width,
+          height: box.height,
+        }).setSelection(NodeSelection.create(tr.doc, nodePos) as never);
+        dispatch?.(tr as never);
+        return true;
+      });
+    },
+  });
+  opts.host.append(drawingOverlay.el);
 
   const placeDrawingSel = (): void => {
     if (selDrawing) {
@@ -712,16 +733,11 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     }
     const frame = selDrawing ? (opts.pageHost?.(selDrawing.page) ?? null) : null;
     if (!selDrawing || !frame) {
-      drawingSel.style.display = "none";
+      drawingOverlay.hide();
       return;
     }
-    if (frame !== drawingSel.parentElement) frame.append(drawingSel);
-    drawingSel.style.display = "block";
-    const scale = opts.scale?.() ?? 1;
-    drawingSel.style.left = `${selDrawing.x * scale}px`;
-    drawingSel.style.top = `${selDrawing.y * scale}px`;
-    drawingSel.style.width = `${selDrawing.width * scale}px`;
-    drawingSel.style.height = `${selDrawing.height * scale}px`;
+    if (frame !== drawingOverlay.el.parentElement) frame.append(drawingOverlay.el);
+    drawingOverlay.refresh(selDrawing);
   };
 
   const selectDrawing = (hit: DrawingHit): void => {
@@ -2147,7 +2163,8 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       opts.host.removeEventListener("mousedown", takeFocus);
       document.removeEventListener("mousemove", onMouseMove);
       document.removeEventListener("mouseup", onMouseUp);
-      drawingSel.remove();
+      drawingOverlay.hide();
+      drawingOverlay.el.remove();
       for (const el of selectionLayer) el.remove();
       for (const el of searchLayer) el.remove();
       for (const el of spellingLayer) el.remove();

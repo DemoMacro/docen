@@ -1125,6 +1125,13 @@ export class CanvasStage {
     return null;
   }
 
+  /** Every page's drawing boxes — the host's stale-hit fallback scans these
+   *  against the PM selection (the reference-identity match above cannot
+   *  survive a re-layout, which re-objects every paragraph). */
+  drawingBoxes(): DrawingHitBox[] {
+    return [...this.hitBoxes.values()].flat();
+  }
+
   /** Both furniture stacks for a page's slot, at their page positions —
    *  distances come from the page's own section. The paint context clears
    *  the body flow's grid pitch: the header/footer story keeps natural line
