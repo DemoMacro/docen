@@ -87,8 +87,9 @@ const styles = css`
     background: var(--docen-color-subtle-background-hover, #f5f5f5);
   }
   /* View shortcuts left of the zoom slider — Word's status bar carries
-     Reading / Print Layout / Web Layout buttons. Only Print Layout has a
-     surface today; the other two stay disabled until their projections land. */
+     Reading / Print Layout / Web Layout buttons; the host reports the active
+     view through the view attribute ("read" | "print" | "web" | "draft" —
+     Draft has no status-bar button, Word's doesn't either). */
   .views {
     display: flex;
     align-items: center;
@@ -137,7 +138,7 @@ const template = html<DocenStatusBar>`
   </span>
   <span class="zoom">
     <span class="views">
-      <button type="button" class="view-btn" data-view="reading" disabled>
+      <button type="button" class="view-btn" data-view="reading">
         <svg
           viewBox="0 0 16 16"
           width="15"
@@ -154,7 +155,7 @@ const template = html<DocenStatusBar>`
           <path d="M8 3.5v11" />
         </svg>
       </button>
-      <button type="button" class="view-btn" data-view="print" aria-pressed="true">
+      <button type="button" class="view-btn" data-view="print">
         <svg
           viewBox="0 0 16 16"
           width="15"
@@ -169,7 +170,7 @@ const template = html<DocenStatusBar>`
           <path d="M9.5 1.5v3h3" />
         </svg>
       </button>
-      <button type="button" class="view-btn" data-view="web" disabled>
+      <button type="button" class="view-btn" data-view="web">
         <svg
           viewBox="0 0 16 16"
           width="15"
@@ -215,6 +216,9 @@ class DocenStatusBar extends FASTElement {
   @attr total?: string;
   @attr words?: string;
   @attr zoom?: string;
+  /** The active document view — "read" | "print" | "web" | "draft" — drives
+   *  the view buttons' pressed state. */
+  @attr view?: string;
 
   @observable sectionEl?: HTMLElement;
   @observable pagesEl?: HTMLElement;
@@ -242,6 +246,9 @@ class DocenStatusBar extends FASTElement {
   zoomChanged(): void {
     this.#renderZoom();
   }
+  viewChanged(): void {
+    this.#syncViewPressed();
+  }
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -252,8 +259,7 @@ class DocenStatusBar extends FASTElement {
     this.inBtn?.addEventListener("click", () => this.#emit(Number(this.zoom ?? 100) + 10));
     this.langBtn?.addEventListener("click", () => this.#toggleLang());
     // The percent opens the Zoom dialog (Word), and the view shortcuts select
-    // a document view — the host decides which views exist (only Print Layout
-    // today; the other buttons ship disabled).
+    // a document view — the host decides which view each name maps to.
     this.pctEl?.addEventListener("click", () => this.#emitOpenZoom());
     for (const btn of this.shadowRoot?.querySelectorAll<HTMLButtonElement>(".view-btn") ?? []) {
       btn.addEventListener("click", () =>
@@ -272,6 +278,7 @@ class DocenStatusBar extends FASTElement {
       this.#renderViewTitles();
     });
     this.#renderViewTitles();
+    this.#syncViewPressed();
   }
 
   /** Localized tooltips for the view shortcuts (the same Word view names the
@@ -285,6 +292,23 @@ class DocenStatusBar extends FASTElement {
             ? "ribbon.cmd.web-layout"
             : "ribbon.cmd.print-layout";
       btn.title = t(key, this);
+    }
+  }
+
+  /** The view buttons' pressed state mirrors the host's active view (none
+   *  pressed in Draft — Word's status bar has no Draft button to light). */
+  #syncViewPressed(): void {
+    const active =
+      this.view === "read"
+        ? "reading"
+        : this.view === "web"
+          ? "web"
+          : this.view === "print"
+            ? "print"
+            : null;
+    for (const btn of this.shadowRoot?.querySelectorAll<HTMLButtonElement>(".view-btn") ?? []) {
+      if (active) btn.setAttribute("aria-pressed", String(btn.dataset.view === active));
+      else btn.removeAttribute("aria-pressed");
     }
   }
 

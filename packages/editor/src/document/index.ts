@@ -213,6 +213,9 @@ class DocenDocument extends AddinHost<Editor> {
   @attr theme?: string;
   /** Leafer engine debug overlay — "bounds" | "hit" | "repaint" | "on". */
   @attr debug?: string;
+  /** The document view (Word's View tab): "print" | "web" | "draft" | "read".
+   *  Anything else falls back to "print". */
+  @attr view?: string;
 
   #bridge?: EditBridge;
   #stage?: CanvasStage;
@@ -316,6 +319,10 @@ class DocenDocument extends AddinHost<Editor> {
 
   stylesChanged(): void {
     this.#applyStylesAttr();
+  }
+
+  viewChanged(): void {
+    this.#applyView();
   }
 
   addinsAttrChanged(): void {
@@ -1248,6 +1255,12 @@ class DocenDocument extends AddinHost<Editor> {
       "zoom:open",
       this.#onZoomOpen as EventListener,
     );
+    // Status-bar view shortcuts (Word's Reading / Print Layout / Web Layout
+    // buttons) — the same `view` attribute the ribbon's View tab writes.
+    this.shadowRoot!.querySelector("docen-status-bar")?.addEventListener(
+      "view:select",
+      this.#onViewSelect as EventListener,
+    );
 
     // Re-render header + ribbon when the page locale (<html lang>) changes.
     this.#unobserveLang = observeLang(() => this.#renderChrome());
@@ -1546,6 +1559,39 @@ class DocenDocument extends AddinHost<Editor> {
     return hit >= 0 ? hit : null;
   }
 
+  /** The active view, normalized (an unknown attr value reads as print). */
+  #viewMode(): "print" | "web" | "draft" | "read" {
+    return this.view === "web" || this.view === "draft" || this.view === "read"
+      ? this.view
+      : "print";
+  }
+
+  /** Apply the `view` attribute: restage the render mode, re-project (the
+   *  continuous views re-layout at the viewport width; Draft drops the
+   *  furniture insets), trim the chrome in Read Mode, and sync the status
+   *  bar. Word's Read Mode is read-only; the other views keep editability. */
+  #applyView(): void {
+    const mode = this.#viewMode();
+    this.#stage?.setViewMode(mode);
+    this.#syncReadChrome(mode === "read");
+    if (this.editor) {
+      const editable = this.editable !== "false" && mode !== "read";
+      if (this.editor.isEditable !== editable) {
+        this.editor.setEditable(editable);
+        this.#syncEditModeMenu();
+      }
+    }
+    this.#renderDoc(this.getJSON());
+    this.#updateStatus();
+  }
+
+  /** Read Mode trims the chrome to the document (Word hides the ribbon and
+   *  most of the tab row). */
+  #syncReadChrome(read: boolean): void {
+    const ribbon = this.shadowRoot?.querySelector("docen-ribbon");
+    if (ribbon) ribbon.toggleAttribute("hidden", read);
+  }
+
   /** The canvas pipeline's projection + layout half, shared by the full
    *  render and the story's live re-render: compile → project (one section
    *  per document section) → lay each section's furniture ONCE (the insets
@@ -1562,12 +1608,42 @@ class DocenDocument extends AddinHost<Editor> {
     const stageSections: (ProjectedSection & CanvasStageSection)[] = sections.map((section) => ({
       ...section,
     }));
+    // The continuous views (Web Layout / Read Mode) re-box every section to
+    // the viewport width and lay it as ONE unbounded page — Word's web view
+    // has no page breaks, and its text width follows the window (page margins
+    // kept as the gutters). Furniture is a print concept: no insets. Columns
+    // stay a print-layout feature in this pass.
+    const mode = this.#viewMode();
+    const continuous = mode === "web" || mode === "read";
+    if (continuous) {
+      // The scroll surface's width (the document area — the stage host is
+      // width:fit-content and only reports the pages' own width) minus the
+      // page gutter on each side.
+      const area = this.shadowRoot?.querySelector<HTMLElement>("docen-document-area");
+      const availW = Math.max(320, (area?.clientWidth ?? 794) - 48);
+      for (const section of stageSections) {
+        // Columns stay a print-layout feature: drop them at the source so
+        // every downstream consumer (flow opts, separator painting) lays a
+        // single-column stream.
+        section.columns = undefined;
+        const marginL = section.flow.contentLeftPx;
+        const marginR =
+          section.flow.pageWidthPx - section.flow.contentLeftPx - section.flow.contentWidthPx;
+        section.flow = {
+          ...section.flow,
+          pageWidthPx: availW,
+          contentWidthPx: Math.max(200, availW - marginL - marginR),
+        };
+      }
+    }
     const laidFurniture = layFurnitureSections(stageSections, browserFontMetrics);
     stageSections.forEach((section, i) => {
       section.furnitureLaid = laidFurniture[i];
     });
     const flowSections = stageSections.map((section) => {
-      const pageInsets = this.#pageInsets(section.flow, section.furniture, section.furnitureLaid);
+      const pageInsets = continuous
+        ? undefined
+        : this.#pageInsets(section.flow, section.furniture, section.furnitureLaid);
       return {
         blocks: section.blocks,
         opts: {
@@ -1575,11 +1651,26 @@ class DocenDocument extends AddinHost<Editor> {
           columns: section.columns,
           footnoteDefinitions: section.footnoteDefinitions,
           endnoteDefinitions: section.endnoteDefinitions,
+          ...(continuous ? { unbounded: true, contentHeightPx: 1_000_000 } : {}),
           ...(pageInsets ? { pageInsets } : {}),
         },
       };
     });
     const { pages, sectionOfPage } = layoutFlowSections(flowSections, this.#measurer);
+    if (continuous) {
+      // Size each continuous page to where its content actually ends (the
+      // unbounded layout reports the content bottom) plus the bottom margin.
+      pages.forEach((page, i) => {
+        const section = stageSections[sectionOfPage[i] ?? 0];
+        if (!section || page.contentBottomPx == null) return;
+        const flow = section.flow;
+        const bottomMargin = flow.pageHeightPx - flow.contentTopPx - flow.contentHeightPx;
+        flow.pageHeightPx = Math.max(
+          flow.pageHeightPx,
+          Math.ceil(page.contentBottomPx) + flow.contentTopPx + bottomMargin,
+        );
+      });
+    }
     return { pages, sectionOfPage, sections: stageSections, background };
   }
 
@@ -1601,7 +1692,7 @@ class DocenDocument extends AddinHost<Editor> {
   #renderDoc(doc: JSONContent): void {
     if (!this.#stageHost) return;
     const prev = this.#lastRun;
-    const run = this.#projectAndLayout(doc);
+    const run = { ...this.#projectAndLayout(doc), viewMode: this.#viewMode() };
     this.#lastRun = run;
     this.#pages = run.pages;
     this.#sectionOfPage = run.sectionOfPage;
@@ -1620,9 +1711,19 @@ class DocenDocument extends AddinHost<Editor> {
     });
     // A `zoom` attribute parsed before the stage existed only recorded the
     // level here — push it in before the first sync sizes the slots. The
-    // `show-marks` attribute gets the same once-over (idempotent setter).
+    // `show-marks` and `view` attributes get the same once-over (idempotent
+    // setters; the read-only + chrome trimming rides #applyView's gate).
     if (this.#stage.zoom !== this.#zoom) this.#stage.setZoom(this.#zoom);
     if (this.hasAttribute("show-marks")) this.#stage.setShowMarks(true);
+    if (this.#stage.viewMode !== this.#viewMode()) {
+      this.#stage.setViewMode(this.#viewMode());
+      this.#syncReadChrome(this.#viewMode() === "read");
+      if (this.editor) {
+        const editable = this.editable !== "false" && this.#viewMode() !== "read";
+        this.editor.setEditable(editable);
+        this.#syncEditModeMenu();
+      }
+    }
     // Anything structural (section geometry, page background, section count)
     // repaints everything — the per-page diff only skips pages whose
     // placement, section, AND background are all unchanged. A page-count
@@ -1639,6 +1740,7 @@ class DocenDocument extends AddinHost<Editor> {
     // diff.
     const structural =
       !prev ||
+      prev.viewMode !== run.viewMode ||
       prev.sectionOfPage.some(
         (section, index) =>
           index < run.sectionOfPage.length && section !== run.sectionOfPage[index],
@@ -1662,6 +1764,7 @@ class DocenDocument extends AddinHost<Editor> {
     sectionOfPage: number[];
     sections: (ProjectedSection & CanvasStageSection)[];
     background?: ProjectedPageBackground;
+    viewMode: "print" | "web" | "draft" | "read";
   };
 
   disconnectedCallback(): void {
@@ -1731,6 +1834,9 @@ class DocenDocument extends AddinHost<Editor> {
     this.shadowRoot
       ?.querySelector<HTMLElement>("docen-status-bar")
       ?.removeEventListener("zoom:change", this.#onZoomChange as EventListener);
+    this.shadowRoot
+      ?.querySelector("docen-status-bar")
+      ?.removeEventListener("view:select", this.#onViewSelect as EventListener);
     this.#stageHost?.removeEventListener("wheel", this.#onWheel as EventListener, {
       capture: true,
     });
@@ -2587,6 +2693,13 @@ class DocenDocument extends AddinHost<Editor> {
     this.#showZoomDialog();
   };
 
+  /** A status-bar view button (the detail names the status-bar's view:
+   *  "reading" | "print" | "web") → the `view` attribute. */
+  readonly #onViewSelect = (event: CustomEvent<{ view?: string }>): void => {
+    const v = event.detail?.view;
+    this.setAttribute("view", v === "reading" ? "read" : v === "web" ? "web" : "print");
+  };
+
   /** Paste Special's pick — re-run the paste in that mode ("text" skips the
    *  rich legs, like the menu's Keep Text Only). */
   readonly #onPasteSpecialOk = (event: CustomEvent<"html" | "text">): void => {
@@ -2623,6 +2736,7 @@ class DocenDocument extends AddinHost<Editor> {
       bar.setAttribute("total", String(total || 1));
       bar.setAttribute("words", String(this.#lastWords));
       bar.setAttribute("zoom", String(this.#zoom));
+      bar.setAttribute("view", this.#viewMode());
     }
   }
 
@@ -4380,10 +4494,16 @@ class DocenDocument extends AddinHost<Editor> {
       this.#togglePane("clipboard");
       return;
     }
-    // View → Print Layout split button — the same canvas-page print the file
-    // menu's Print performs (Word's print shortcut surface).
-    if (name === "print-layout") {
-      if (!this.#emitCancelable("docen:print")) this.#print();
+    // View → the four view buttons (Word's View tab): each selects a document
+    // view through the `view` attribute — #applyView restages the render.
+    const viewOf: Record<string, string> = {
+      "print-layout": "print",
+      "web-layout": "web",
+      "read-mode": "read",
+      draft: "draft",
+    };
+    if (viewOf[name]) {
+      this.setAttribute("view", viewOf[name]);
       return;
     }
     // Editing → Select: selectAll() spans the whole document.
@@ -4634,7 +4754,19 @@ class DocenDocument extends AddinHost<Editor> {
    *  dialog receives exactly the paginated document, like Word's print
    *  output. */
   #print(): void {
+    // Printing always outputs the paginated Print Layout pages (Word prints
+    // the paper document whatever the view) — a continuous view re-projects
+    // into print shape for the snapshot, then falls back.
+    const mode = this.#viewMode();
+    if (mode !== "print") {
+      this.#stage?.setViewMode("print");
+      this.#renderDoc(this.getJSON());
+    }
     const shots = this.#stage?.printSnapshots() ?? [];
+    if (mode !== "print") {
+      this.#stage?.setViewMode(mode);
+      this.#renderDoc(this.getJSON());
+    }
     if (shots.length === 0) return;
     const first = shots[0]!;
     const frame = document.createElement("iframe");

@@ -42,6 +42,12 @@ import { computeLineNumbers } from "./line-numbers";
 
 const PAGE_GAP = 24;
 
+/** Continuous pages (web/read) render through a sliding window this tall
+ *  (semantic px): the frame is as tall as the whole continuous page, but its
+ *  canvas only ever covers one window — a 200k px bitmap would blow the
+ *  browser's canvas limits long before memory does. */
+const WINDOW_PX = 2048;
+
 /** One laid furniture slot: the paint-ready stack and its laid height. */
 export interface LaidFurnitureSlot {
   stack: readonly LaidOutStackItem[];
@@ -70,6 +76,9 @@ interface PageSlot {
   el: HTMLElement;
   app: App | null;
   layers: PageLayers | null;
+  /** Continuous pages (web/read) only: the viewport window the canvas
+   *  currently renders — the frame itself is as tall as the whole page. */
+  win?: { idx: number; heightPx: number };
 }
 
 /** One section's laid furniture slots — [default, first, even]. */
@@ -161,6 +170,12 @@ export class CanvasStage {
     stage: HTMLElement,
     private readonly ctx: CanvasStageContext,
   ) {
+    // The scroll container the continuous-view window renderer tracks. The
+    // stage host's parent is NOT it — the scrolling surface is the document
+    // area above (scroll doesn't bubble, so the listener must sit on the
+    // real scroller). The IO root below shares the immediate parent, whose
+    // moving rect keeps the intersection math honest while scrolling.
+    this.#scrollRoot = stage.closest("docen-document-area") ?? stage.parentElement;
     // The page layer: a fit-content centered stack inside the host's scroll
     // container. NOT a scroll surface itself.
     this.shell = document.createElement("div");
@@ -215,6 +230,9 @@ export class CanvasStage {
    *  the scaled page directly (no CSS zoom anywhere) so each canvas bitmaps
    *  at exactly its on-screen pixel size. */
   private zoomPercent = 100;
+  /** The scroll container (the stage host's parent) — the continuous-view
+   *  window renderer tracks its scroll to slide the canvas window. */
+  #scrollRoot: HTMLElement | null = null;
 
   private readonly dprChange = () => {
     this.watchPixelRatio();
@@ -297,6 +315,33 @@ export class CanvasStage {
     }
   }
 
+  /** The document view (Word's View tab): print = paginated pages with
+   *  furniture; draft = paginated, body only (no headers/footers, white
+   *  background); web/read = the section laid as ONE continuous page rendered
+   *  through a viewport window (see {@link WINDOW_PX}), read additionally
+   *  read-only with the chrome trimmed by the host. */
+  #viewMode: "print" | "draft" | "web" | "read" = "print";
+
+  setViewMode(mode: "print" | "draft" | "web" | "read"): void {
+    if (mode === this.#viewMode) return;
+    const wasContinuous = this.#viewMode === "web" || this.#viewMode === "read";
+    this.#viewMode = mode;
+    if ((mode === "web" || mode === "read") !== wasContinuous) this.#toggleWindowScroll();
+    for (const [index, slot] of this.slots.entries()) {
+      if (slot.app) this.repaint(slot.app, index);
+    }
+  }
+
+  get viewMode(): "print" | "draft" | "web" | "read" {
+    return this.#viewMode;
+  }
+
+  /** Headers/footers render only in Print Layout (Draft hides them; Web
+   *  Layout pages carry no furniture — Word's web view has no page edges). */
+  private get showsFurniture(): boolean {
+    return this.#viewMode === "print";
+  }
+
   /** Leafer's engine debug flags (element wireframes / hit areas / repaint
    *  regions + engine logs) — global statics on leafer-ui, so one call covers
    *  every live page App. `mode`: "bounds" | "hit" | "repaint" | "on";
@@ -346,7 +391,12 @@ export class CanvasStage {
       const pixelRatio = this.renderPixelRatio(flow);
       this.sizeSlot(slot, w, h, index);
       if (slot.app) {
-        slot.app.resize({ width: w, height: h, pixelRatio });
+        slot.app.resize({
+          width: w,
+          // A continuous page's canvas only ever covers its current window.
+          height: slot.win ? this.pageCss(slot.win.heightPx) : h,
+          pixelRatio,
+        });
         this.repaint(slot.app, index);
       }
     }
@@ -364,15 +414,81 @@ export class CanvasStage {
     }
     slot.el.style.width = `${w}px`;
     slot.el.style.height = `${h}px`;
+    slot.el.style.position = "static";
+    // A continuous page shrinks its canvas to the rendered window and pins
+    // it at the window's scroll offset — the frame itself stays page-tall
+    // (the scroll geometry, caret DOM, and hit coordinates all read it).
+    const win = this.windowOf(page);
+    slot.win = win ?? undefined;
+    if (win && frame) {
+      slot.el.style.position = "absolute";
+      slot.el.style.left = "0";
+      slot.el.style.top = `${win.idx * WINDOW_PX * this.factor}px`;
+      slot.el.style.height = `${this.pageCss(win.heightPx)}px`;
+    }
+  }
+
+  /** The viewport window a page's canvas should render (continuous views
+   *  only; null in paginated ones): the WINDOW_PX-aligned slice covering the
+   *  scroll container's center where it overlaps the frame. */
+  private windowOf(page: number): { idx: number; heightPx: number } | null {
+    if (this.#viewMode !== "web" && this.#viewMode !== "read") return null;
+    const flow = this.sectionAt(page).flow;
+    const count = Math.max(1, Math.ceil(flow.pageHeightPx / WINDOW_PX));
+    let idx = 0;
+    const root = this.#scrollRoot;
+    const frame = this.slots[page]?.el.parentElement;
+    if (root && frame) {
+      const rr = root.getBoundingClientRect();
+      const fr = frame.getBoundingClientRect();
+      const top = Math.max(rr.top, fr.top);
+      const bottom = Math.min(rr.bottom, fr.bottom);
+      if (bottom > top) {
+        idx = Math.floor(((top + bottom) / 2 - fr.top) / (WINDOW_PX * this.factor));
+        idx = Math.max(0, Math.min(count - 1, idx));
+      }
+    }
+    return { idx, heightPx: Math.min(WINDOW_PX, flow.pageHeightPx - idx * WINDOW_PX) };
+  }
+
+  /** Scroll-driven window sliding: a continuous page repaints only when the
+   *  viewport's center crosses into another WINDOW_PX slice. */
+  readonly #onScroll = (): void => {
+    for (const [index, slot] of this.slots.entries()) {
+      const app = slot.app;
+      if (!app) continue;
+      const win = this.windowOf(index);
+      if (!win || (slot.win && slot.win.idx === win.idx)) continue;
+      slot.win = win;
+      const flow = this.sectionAt(index).flow;
+      this.sizeSlot(slot, this.pageCss(flow.pageWidthPx), this.pageCss(flow.pageHeightPx), index);
+      app.resize({
+        width: this.pageCss(flow.pageWidthPx),
+        height: this.pageCss(win.heightPx),
+        pixelRatio: this.renderPixelRatio(flow),
+      });
+      this.repaint(app, index);
+    }
+  };
+
+  /** Mount/unmount the scroll tracking a continuous view needs. */
+  #toggleWindowScroll(): void {
+    const continuous = this.#viewMode === "web" || this.#viewMode === "read";
+    this.#scrollRoot?.removeEventListener("scroll", this.#onScroll);
+    if (continuous) this.#scrollRoot?.addEventListener("scroll", this.#onScroll, { passive: true });
+    if (!continuous) {
+      for (const slot of this.slots) slot.win = undefined;
+    }
   }
 
   /** Stamp the frame's w:background — the base color (pattern fills arrive
-   *  pre-averaged by the projection). */
+   *  pre-averaged by the projection). Draft renders white. */
   private applyBackground(frame: HTMLElement): void {
     const bg = this.ctx.background;
     // OOXML hex has no '#' — CSS colors do; the raw token is invalid CSS and
     // the assignment would be silently dropped.
-    frame.style.backgroundColor = bg?.color ? `#${bg.color}` : "#ffffff";
+    frame.style.backgroundColor =
+      this.#viewMode !== "draft" && bg?.color ? `#${bg.color}` : "#ffffff";
     frame.style.backgroundImage = "none";
   }
 
@@ -631,8 +747,6 @@ export class CanvasStage {
         position: "relative",
         width: `${w}px`,
         height: `${h}px`,
-        marginBottom: `${PAGE_GAP}px`,
-        boxShadow: "0 1px 3px rgba(0,0,0,.2), 0 4px 12px rgba(0,0,0,.08)",
       } satisfies Partial<CSSStyleDeclaration>);
       // Pristine inner div the App takes over as its view.
       const el = document.createElement("div");
@@ -653,6 +767,18 @@ export class CanvasStage {
     // mix re-sizes created slots to their page's own section.
     for (const [index, slot] of this.slots.entries()) {
       const flow = this.sectionAt(index).flow;
+      // The page edge tracks the view: Print pages carry the shadow + gap;
+      // continuous pages lose the edge entirely (Word's web view) and stack
+      // with just a hairline between. Applied to EVERY slot so re-entering
+      // either view from the other restyles reused frames.
+      const continuous = this.#viewMode === "web" || this.#viewMode === "read";
+      const frame = slot.el.parentElement;
+      if (frame) {
+        frame.style.boxShadow = continuous
+          ? "none"
+          : "0 1px 3px rgba(0,0,0,.2), 0 4px 12px rgba(0,0,0,.08)";
+        frame.style.marginBottom = continuous ? "1px" : `${PAGE_GAP}px`;
+      }
       this.sizeSlot(slot, this.pageCss(flow.pageWidthPx), this.pageCss(flow.pageHeightPx), index);
     }
     for (const [index, slot] of this.slots.entries()) {
@@ -697,6 +823,8 @@ export class CanvasStage {
     kind: "header" | "footer",
     page = 0,
   ): { top: number; bottom: number; paintY: number } | null {
+    // Views without furniture have no bands to enter (Draft/Web/Read).
+    if (!this.showsFurniture) return null;
     const { flow, furniture: f } = this.sectionAt(page);
     if (!f) return null;
     const stackH = this.slotStackOf(kind, page)?.heightPx ?? 0;
@@ -755,6 +883,7 @@ export class CanvasStage {
   destroy(): void {
     this.io.disconnect();
     this.dprMedia?.removeEventListener("change", this.dprChange);
+    this.#scrollRoot?.removeEventListener("scroll", this.#onScroll);
     for (const slot of this.slots) slot.app?.destroy();
     releasePinnedImages();
     this.shell.remove();
@@ -805,8 +934,12 @@ export class CanvasStage {
     const tree = app.tree;
     if (!tree) return;
     // The canvas is laid out at the zoomed size; all paint coordinates below
-    // stay in unzoomed page px and this scale maps them onto the bitmap.
+    // stay in unzoomed page px and this scale maps them onto the bitmap. A
+    // continuous page's canvas covers one WINDOW_PX slice — the scene slides
+    // up by the slices above it.
     tree.scale = this.factor;
+    const win = this.windowOf(index);
+    tree.y = win ? -win.idx * WINDOW_PX * this.factor : 0;
     // This page paints with its OWN section's box + furniture.
     const { flow, furniture, lineNumbers, columns } = this.sectionAt(index);
     const marks = this.lineNumberMarks.get(index);
@@ -861,9 +994,10 @@ export class CanvasStage {
     // probes read the canvas, not the frame's CSS), so the base color paints
     // as the bottommost scene element. The App-level `fill` cannot host it:
     // an App has no canvas of its own and drops `fill` from the child-layer
-    // configs it builds (App.ts __getChildConfig).
+    // configs it builds (App.ts __getChildConfig). Draft renders white —
+    // Word's draft view drops the page background along with the furniture.
     const bg = this.ctx.background;
-    if (bg?.color) {
+    if (bg?.color && this.#viewMode !== "draft") {
       tree.add(
         new Rect({
           x: 0,
@@ -900,14 +1034,16 @@ export class CanvasStage {
       paintGridlines(pageLayers.behind, ctx);
       ctx.layer = "body";
       ctx.hitBoxes = hitBoxes;
-      this.paintFurniture(
-        pageLayers.furnitureBehind,
-        pageLayers.furnitureBody,
-        slotIndex,
-        ctx,
-        flow,
-        furniture,
-      );
+      if (this.showsFurniture) {
+        this.paintFurniture(
+          pageLayers.furnitureBehind,
+          pageLayers.furnitureBody,
+          slotIndex,
+          ctx,
+          flow,
+          furniture,
+        );
+      }
       paintScene(pageLayers.body, items, ctx);
       paintLineNumbers(pageLayers.body, ctx);
       paintColumnSeparators(pageLayers.body, ctx);
@@ -933,7 +1069,9 @@ export class CanvasStage {
           hittable: false,
         }),
       );
-      this.paintFurniture(tree, tree, slotIndex, ctx, flow, furniture);
+      if (this.showsFurniture) {
+        this.paintFurniture(tree, tree, slotIndex, ctx, flow, furniture);
+      }
       this.paintStoryBoundary(tree, ctx, flow);
     }
     // Render eagerly: Leafer's change-driven scheduling stalls when the App

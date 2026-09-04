@@ -54,6 +54,10 @@ export interface FlowPage {
   items: FlowItem[];
   /** Footnotes placed at the bottom of this page (absent when none). */
   footnotes?: LaidOutFootnoteArea;
+  /** Unbounded flows only: the y where the content ends (footnote area
+   *  included) — the host sizes the continuous page from it. Absent on
+   *  paginated pages (their height is the section's paper). */
+  contentBottomPx?: number;
 }
 
 /** Furniture-driven body insets for one page slot (px, measured from the
@@ -91,6 +95,11 @@ export interface FlowOptions {
   footnoteDefinitions?: Map<number, readonly LayoutBlock[]>;
   /** Endnote id → definition blocks (absent when document has no endnotes). */
   endnoteDefinitions?: Map<number, readonly LayoutBlock[]>;
+  /** Word's Web Layout / Read Mode: the content never pages — every block
+   *  stacks onto one continuous page, explicit breaks are inert, and the
+   *  page reports its content bottom via {@link FlowPage.contentBottomPx}.
+   *  `contentHeightPx` is ignored. */
+  unbounded?: boolean;
 }
 
 /** Lay a block flow into pages. Always returns at least one page (an empty
@@ -391,6 +400,7 @@ class Flow {
   }
 
   private remaining(): number {
+    if (this.opts.unbounded) return Infinity;
     return this.opts.contentHeightPx - this.insets().bottomPx - this.pageFootnoteHeight - this.y;
   }
 
@@ -463,7 +473,15 @@ class Flow {
   }
 
   finish(): FlowPage[] {
-    this.newPage();
+    if (this.opts.unbounded) {
+      // Seal the one continuous page, reporting where the content ends
+      // (footnote area included) — the host sizes the page from it.
+      const bottom = this.y + this.pageFootnoteHeight;
+      const footnotes = this.buildPageFootnotes();
+      this.pages.push({ items: this.items.splice(0), footnotes, contentBottomPx: bottom });
+    } else {
+      this.newPage();
+    }
     if (this.pages.length === 0) this.pages.push({ items: [] });
     return this.pages;
   }
@@ -478,6 +496,11 @@ class Flow {
 
   /** Place a block: whole, split, or moved to the next page. */
   push(block: LayoutBlock): void {
+    // An unbounded flow (Web Layout) has no pages to break — explicit break
+    // atoms are inert (Word paints nothing for them there).
+    if (this.opts.unbounded && (block.kind === "pageBreak" || block.kind === "columnBreak")) {
+      return;
+    }
     if (block.kind === "pageBreak") {
       const laid = layoutBlock(block, this.opts.contentWidthPx, this.ctx, this.measurer);
       // A break row the page's last line cannot hold collapses into the page
@@ -496,8 +519,9 @@ class Flow {
       this.newColumn();
       return;
     }
-    // pageBreakBefore is a break atom before the content.
-    if (block.kind === "paragraph" && block.pageBreakBefore) this.newPage();
+    // pageBreakBefore is a break atom before the content (inert unbounded —
+    // Web Layout has no page edge to force).
+    if (block.kind === "paragraph" && block.pageBreakBefore && !this.opts.unbounded) this.newPage();
 
     const laid = layoutBlock(block, this.col.widthPx, this.ctx, this.measurer);
     if (this.tryPlace(laid)) return;
@@ -667,8 +691,9 @@ class Flow {
     if (space <= 0) return { k: 0 };
     // A block taller than the page ignores keepLines/widowControl — pushing
     // it to the next page cannot help, so it splits greedily (Word relaxes
-    // the same way; progress beats clipping).
-    const overPage = laid.heightPx > this.opts.contentHeightPx;
+    // the same way; progress beats clipping). An unbounded flow never splits
+    // mid-block: there is no page edge to relax against.
+    const overPage = !this.opts.unbounded && laid.heightPx > this.opts.contentHeightPx;
     switch (laid.kind) {
       case "paragraph": {
         if (laid.keepLines && !overPage) return { k: 0 };

@@ -50,6 +50,11 @@ export const READONLY_LIVE: ReadonlySet<string> = new Set([
   // View-surface toggles — paint-time view state, not document content.
   "toggle-ruler",
   "toggle-gridlines",
+  // The document views — Word's read-only mode can still switch views.
+  "print-layout",
+  "web-layout",
+  "read-mode",
+  "draft",
 ]);
 
 /** Commands handled locally in #onCommand/#onChange (not routed to
@@ -158,10 +163,13 @@ export const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   // gallery preset from the split item's value).
   "text-box",
   "shapes",
-  // View → Print Layout runs the same canvas print as the file menu's Print;
-  // Outline opens the document-structure pane (Word's outline view maps to
-  // the navigation pane here).
+  // View → the four document views write the `view` attribute (Print Layout /
+  // Web Layout / Read Mode / Draft); Outline opens the document-structure
+  // pane (Word's outline view maps to the navigation pane here).
   "print-layout",
+  "web-layout",
+  "read-mode",
+  "draft",
   "outline",
   // #onChange (data-event)
   "open",
