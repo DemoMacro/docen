@@ -13,10 +13,13 @@ import { HANDLES, resizeBox, type Box, type HandleId } from "./geometry";
 
 /** Host-provided I/O: read the scale (page px → screen px), and apply a box
  *  the user dragged to. `applyBox` returns false to reject (e.g. a read-only
- *  doc) — the frame snaps back on the next show/refresh. */
+ *  doc) — the frame snaps back on the next show/refresh. `applyOffset` moves
+ *  the drawing by a drag delta (a floating drawing's move); absent, the
+ *  frame stays put on a body drag. */
 export interface DrawingOverlayCallbacks {
   scale(): number;
   applyBox(box: Box): void;
+  applyOffset?(dx: number, dy: number): void;
 }
 
 export class DrawingOverlay {
@@ -133,7 +136,51 @@ export class DrawingOverlay {
     this.#drag = null;
     this.#callbacks.applyBox(this.#box);
   }
+
+  /** True while a frame is shown (a selected drawing on screen). */
+  get active(): boolean {
+    return this.#box != null;
+  }
+
+  /** Begin a move drag from a pointerdown on the selected drawing itself
+   *  (the bridge owns that hit chain). The frame trails the pointer via
+   *  document-level listeners — the gesture starts on the canvas, not this
+   *  element — and a release past {@link MOVE_THRESHOLD} commits as an
+   *  offset; a plain click (no real move) leaves everything untouched, so
+   *  clicking the selection keeps it (Word). */
+  beginMove(clientX: number, clientY: number): void {
+    if (!this.#box) return;
+    const startX = clientX;
+    const startY = clientY;
+    const origin = { ...this.#box };
+    let moved = false;
+    let last: Box = origin;
+    const scale = (): number => this.#callbacks.scale() || 1;
+    const onMove = (event: PointerEvent): void => {
+      const dx = (event.clientX - startX) / scale();
+      const dy = (event.clientY - startY) / scale();
+      if (!moved && Math.hypot(event.clientX - startX, event.clientY - startY) < MOVE_THRESHOLD)
+        return;
+      moved = true;
+      last = { ...origin, x: origin.x + dx, y: origin.y + dy };
+      this.#box = last;
+      this.#place();
+    };
+    const onUp = (): void => {
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      document.removeEventListener("pointercancel", onUp);
+      if (moved) this.#callbacks.applyOffset?.(last.x - origin.x, last.y - origin.y);
+    };
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+    document.addEventListener("pointercancel", onUp);
+  }
 }
+
+/** Pointer travel (screen px) that separates a move drag from a plain click
+ *  on the selection. */
+const MOVE_THRESHOLD = 3;
 
 const HANDLE_CURSORS: Record<HandleId, string> = {
   nw: "nwse-resize",

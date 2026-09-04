@@ -123,6 +123,7 @@ declare module "@tiptap/core" {
       // Picture — names align to Office.js InlinePicture (delete / left / top).
       "delete-picture": () => ReturnType;
       "position-picture": (value?: string) => ReturnType;
+      "move-drawing": (value?: string) => ReturnType;
       // Arrange — floating drawings (z-order, wrap, rotation, position).
       "bring-forward": () => ReturnType;
       "send-backward": () => ReturnType;
@@ -211,6 +212,7 @@ export const WIRED_DISPATCH: ReadonlySet<string> = new Set([
   "multilevel-list",
   "delete-picture",
   "position-picture",
+  "move-drawing",
   "bring-forward",
   "send-backward",
   "wrap",
@@ -2408,6 +2410,35 @@ export const DocumentCommands = Extension.create({
           // looking at the image and a scroll jump would feel jumpy.
           tr.setMeta("scrollIntoView", false);
           return true;
+        },
+      // Move a selected floating drawing (image or wps shape) by a pointer-
+      // drag delta: value is JSON {h, v} in EMU, added to the drawing's
+      // current offsets. Align-anchored floats decline — the bridge only
+      // starts a drag when both axes anchor by offset (Word converts an
+      // alignment to an offset on drag; that needs the painted position,
+      // a later batch).
+      "move-drawing":
+        (value?) =>
+        ({ state, tr }) => {
+          if (!value) return false;
+          const target = floatingDrawingAt(state);
+          if (!target) return false;
+          let parsed: { h?: number; v?: number };
+          try {
+            parsed = JSON.parse(value) as { h?: number; v?: number };
+          } catch {
+            return false;
+          }
+          const floating = floatingOf(target);
+          const h = floating.horizontalPosition as Record<string, unknown> | undefined;
+          const v = floating.verticalPosition as Record<string, unknown> | undefined;
+          if (!h || !v || typeof h.offset !== "number" || typeof v.offset !== "number")
+            return false;
+          return stampFloating(tr, target, {
+            ...floating,
+            horizontalPosition: { ...h, offset: h.offset + (parsed.h ?? 0) },
+            verticalPosition: { ...v, offset: v.offset + (parsed.v ?? 0) },
+          });
         },
       // ── Arrange — floating drawings (the Layout tab's Arrange group) ──
       // Every command targets the selected floating drawing (a floating
