@@ -86,6 +86,7 @@ import { DialogCommands } from "./commands/dialogs";
 import { NavigationCommands } from "./commands/navigation";
 import { ReferencesCommands } from "./commands/references";
 import { SectionCommands } from "./commands/sections";
+import { SpellingCommands } from "./commands/spelling";
 // Side-effect import: registers the ribbon/header translation tables.
 import "./i18n";
 import { tableAncestry, WIRED_DISPATCH } from "./extensions/commands";
@@ -102,13 +103,6 @@ import {
   tableContextTabs,
   useCmUnits,
 } from "./ribbon";
-import {
-  addSpellWord,
-  checkSpelling,
-  ignoreSpellWord,
-  spellSuggestions,
-  type SpellingIssue,
-} from "./spelling";
 
 /** Split buttons whose face carries no command of its own — the handler only
  *  exists for the drop-down variants' values (Word's menu buttons; a face
@@ -159,6 +153,11 @@ class DocenDocument extends AddinHost<Editor> {
   #bridge?: EditBridge;
   /** References-tab commands (citations/bibliography/index marking), split
    *  out of this class — see commands/references.ts. */
+  readonly #spelling = new SpellingCommands({
+    editor: () => this.editor,
+    bridge: () => this.#bridge,
+    element: () => this,
+  });
   readonly #navigation = new NavigationCommands({
     editor: () => this.editor,
     bridge: () => this.#bridge,
@@ -852,17 +851,17 @@ class DocenDocument extends AddinHost<Editor> {
     this.shadowRoot
       ?.querySelector<HTMLElement>("docen-spelling-pane")
       ?.addEventListener("spelling:replace", ((event: CustomEvent<string>) =>
-        this.#replaceSpellingIssue(event.detail)) as EventListener);
+        this.#spelling.replace(event.detail)) as EventListener);
     this.shadowRoot
       ?.querySelector<HTMLElement>("docen-spelling-pane")
-      ?.addEventListener("spelling:ignore-all", () => this.#ignoreSpelling("ignore"));
+      ?.addEventListener("spelling:ignore-all", () => this.#spelling.ignore("ignore"));
     this.shadowRoot
       ?.querySelector<HTMLElement>("docen-spelling-pane")
-      ?.addEventListener("spelling:add", () => this.#ignoreSpelling("add"));
+      ?.addEventListener("spelling:add", () => this.#spelling.ignore("add"));
     this.shadowRoot
       ?.querySelector<HTMLElement>("docen-spelling-pane")
       ?.addEventListener("spelling:nav", ((event: CustomEvent<number>) =>
-        this.#gotoSpellingIssue(this.#spellingActive + event.detail)) as EventListener);
+        this.#spelling.goto(this.#spelling.activeIndex() + event.detail)) as EventListener);
 
     this.#stageHost = this.shadowRoot!.querySelector<HTMLElement>(".docen-canvas") ?? undefined;
     this.#stageHost?.addEventListener("wheel", this.#onWheel as EventListener, {
@@ -1638,7 +1637,7 @@ class DocenDocument extends AddinHost<Editor> {
     this.#bridge?.updatePages(run.pages, this.#pageOriginOf(run.sections, run.sectionOfPage));
     this.#updateStatus();
     this.#comments.syncCommentsPane();
-    this.#scheduleSpellCheck();
+    this.#spelling.schedule();
     this.#syncStatusLanguage();
   }
 
@@ -1768,7 +1767,7 @@ class DocenDocument extends AddinHost<Editor> {
     this.#fontSyncCleanup = undefined;
     this.#stopFormatPainter();
     this.#navigation.dispose();
-    if (this.#spellingTimer != null) clearTimeout(this.#spellingTimer);
+    this.#spelling.dispose();
     this.#bridge?.destroy();
     this.#bridge = undefined;
     this.#stage?.destroy();
@@ -2227,90 +2226,6 @@ class DocenDocument extends AddinHost<Editor> {
       );
     }
   };
-
-  // ---- Spelling (Review → Spelling & Grammar) ----
-  // The host owns the check: debounced after every render, its issue list
-  // feeds the squiggle overlay, the proofing pane, and the status-bar book.
-
-  #spellingIssues: SpellingIssue[] = [];
-  /** The pane's active issue (document order); -1 = nothing selected. */
-  #spellingActive = -1;
-  #spellingTimer: ReturnType<typeof setTimeout> | null = null;
-
-  #scheduleSpellCheck(): void {
-    if (this.#spellingTimer != null) clearTimeout(this.#spellingTimer);
-    this.#spellingTimer = setTimeout(() => {
-      this.#spellingTimer = null;
-      this.#runSpellCheck();
-    }, 400);
-  }
-
-  #runSpellCheck(): void {
-    const editor = this.editor;
-    if (!editor) return;
-    this.#spellingIssues = checkSpelling(editor.state.doc);
-    this.#bridge?.setSpellingIssues(this.#spellingIssues);
-    this.#spellingActive = this.#spellingIssues.length ? 0 : -1;
-    const bar = this.shadowRoot?.querySelector("docen-status-bar");
-    bar?.setAttribute("proofing", this.#spellingIssues.length ? "issues" : "ok");
-    this.#syncSpellingPane();
-  }
-
-  /** Push the active issue (with its suggestions, computed here — the pane
-   *  stays data-only) into the proofing pane when it's open. */
-  #syncSpellingPane(): void {
-    const pane = this.shadowRoot?.querySelector("docen-spelling-pane") as
-      | (HTMLElement & {
-          entries: Array<{ word: string; suggestions: string[] }>;
-          active: number;
-          total: number;
-        })
-      | null;
-    if (!pane) return;
-    const issues = this.#spellingIssues;
-    pane.total = issues.length;
-    pane.entries = issues.map((i) => ({ word: i.word, suggestions: [] }));
-    if (this.#spellingActive >= 0 && this.#spellingActive < issues.length) {
-      pane.active = this.#spellingActive;
-      pane.entries[this.#spellingActive].suggestions = spellSuggestions(
-        issues[this.#spellingActive].word,
-      );
-      pane.entries = [...pane.entries];
-    } else {
-      pane.active = -1;
-    }
-  }
-
-  /** Select and scroll to a spelling issue (the pane / command navigation). */
-  #gotoSpellingIssue(index: number): void {
-    const issues = this.#spellingIssues;
-    if (!issues.length) return;
-    this.#spellingActive = ((index % issues.length) + issues.length) % issues.length;
-    const issue = issues[this.#spellingActive];
-    this.editor?.commands.setTextSelection({ from: issue.from, to: issue.to });
-    this.#bridge?.scrollIntoView(issue.from);
-    this.#syncSpellingPane();
-  }
-
-  /** Replace the active issue's text with a suggestion — one transaction, so
-   *  undo steps the whole replacement; the re-check rides the render. */
-  #replaceSpellingIssue(replacement: string): void {
-    const issue = this.#spellingIssues[this.#spellingActive];
-    const editor = this.editor;
-    if (!issue || !editor) return;
-    editor.commands.insertContentAt({ from: issue.from, to: issue.to }, replacement);
-    editor.commands.setTextSelection({ from: issue.from, to: issue.from + replacement.length });
-  }
-
-  /** Add the active word to the session dictionary, or skip it for this
-   *  session — then re-check, which drops the flagged occurrences. */
-  #ignoreSpelling(mode: "ignore" | "add"): void {
-    const issue = this.#spellingIssues[this.#spellingActive];
-    if (!issue) return;
-    if (mode === "add") addSpellWord(issue.word);
-    else ignoreSpellWord(issue.word);
-    this.#runSpellCheck();
-  }
 
   /** Toggle a task pane open/closed (ribbon View → toggle-navigation). */
   #togglePane(id: TaskPaneId): void {
@@ -3494,13 +3409,13 @@ class DocenDocument extends AddinHost<Editor> {
     // re-check now, open the pane, and start at the first issue at/after the
     // caret (Word starts checking from the insertion point).
     if (name === "spell-check") {
-      this.#runSpellCheck();
+      this.#spelling.run();
       this.#setTaskpane("proofing", true);
       const from = this.editor?.state.selection.from ?? 0;
-      const issues = this.#spellingIssues;
+      const issues = this.#spelling.issues();
       if (issues.length) {
         const first = issues.find((issue) => issue.from >= from) ?? issues[0];
-        this.#gotoSpellingIssue(issues.indexOf(first));
+        this.#spelling.goto(issues.indexOf(first));
       }
       return;
     }
