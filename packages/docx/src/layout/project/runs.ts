@@ -81,15 +81,24 @@ function combineOf(rPr: Rec, text: string): LayoutCombine | undefined {
   const layout = isRecord(rPr.eastAsianLayout) ? rPr.eastAsianLayout : {};
   const on = layout.combine === true || layout.combine === "1" || layout.combine === 1;
   if (!on) return undefined;
-  const packed = text.replace(/\s+/g, "");
-  if (!packed) return undefined;
-  const half = Math.ceil(packed.length / 2);
+  // Word's dialog marks the split with a space — honor it; an unsplit text
+  // folds to an even split of the whitespace-free run.
+  const at = text.indexOf(" ");
+  const [first, second] =
+    at >= 0 ? [text.slice(0, at), text.slice(at + 1)] : evenSplit(text.replace(/\s+/g, ""));
+  if (!first && !second) return undefined;
   const bracket = str(layout.combineBrackets);
   return {
-    first: packed.slice(0, half),
-    second: packed.slice(half),
+    first,
+    second,
     ...(bracket && COMBINE_BRACKETS[bracket] ? { bracket: COMBINE_BRACKETS[bracket] } : {}),
   };
+}
+
+/** Even two-lines-in-one split — the shorter second line takes the tail. */
+function evenSplit(text: string): [string, string] {
+  const half = Math.ceil(text.length / 2);
+  return [text.slice(0, half), text.slice(half)];
 }
 
 /** Inline content: text runs (rPr resolved over the paragraph default), hard
