@@ -8,7 +8,7 @@
 // Any named import from @docen/editor evaluates the module, which defines
 // the <docen-document> custom element (the @customElement decorator).
 import { normalizeDocument, type JSONContent } from "@docen/docx";
-import { applyTheme, registerComponents } from "@docen/editor";
+import { applyTheme, DocenDocument, registerComponents } from "@docen/editor";
 
 // A text run with optional marks — the demo document's only repetition.
 const t = (text: string, marks?: JSONContent["marks"]): JSONContent => ({
@@ -321,7 +321,7 @@ void registerComponents().then(async () => {
 
   [dog.src, cat.src] = await Promise.all([toDataUrl(dog.src), toDataUrl(cat.src)]);
 
-  const el = document.createElement("docen-document");
+  const el = document.createElement("docen-document") as DocenDocument;
   el.className = "demo-doc";
   el.setAttribute("filename", "Demo.docx");
   // Formatting marks (¶, →, ·) on by default — Word's Show/Hide ¶.
@@ -330,4 +330,54 @@ void registerComponents().then(async () => {
   // document-level defaults (doc attrs win over them), same as setJSON does.
   el.setAttribute("content", JSON.stringify(normalizeDocument(demoDocument())));
   document.body.append(el);
+
+  // The add-in surface end to end: a ribbon contribution (a new "About" tab —
+  // mergeRibbonSchema appends it after the built-ins), a commands map, and a
+  // localization manifest. The Help button's "open-help" is not a Tiptap
+  // command, so the host routes it here via dispatchCommand (the #onCommand
+  // fallback); #wiredCommands counts it, so the button stays enabled in the
+  // greying pass. Labels are i18n keys — the demo ships the en table (the
+  // default locale) plus zh-CN, registered by addAddin.
+  el.addAddin({
+    id: "about",
+    name: "About",
+    ribbon: [
+      {
+        tab: "about",
+        label: "demo.addin.tab.about",
+        groups: [
+          {
+            id: "about-help",
+            label: "demo.addin.help",
+            controls: [
+              {
+                type: "button",
+                id: "help",
+                icon: "help",
+                label: "demo.addin.help",
+                event: "open-help",
+                size: "large",
+              },
+            ],
+          },
+        ],
+      },
+    ],
+    commands: {
+      "open-help": () => window.open("https://github.com/DemoMacro/docen", "_blank"),
+    },
+    localizationInfo: {
+      defaultLanguageTag: "en",
+      additionalLanguages: [
+        {
+          languageTag: "en",
+          translations: { "demo.addin.tab.about": "About", "demo.addin.help": "Help" },
+        },
+        {
+          languageTag: "zh-CN",
+          translations: { "demo.addin.tab.about": "关于", "demo.addin.help": "帮助" },
+        },
+      ],
+    },
+  });
 });

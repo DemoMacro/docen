@@ -50,6 +50,7 @@ import paintBrush from "@fluentui/svg-icons/icons/paint_brush_24_regular.svg?raw
 import pen from "@fluentui/svg-icons/icons/pen_24_regular.svg?raw";
 import penDismiss from "@fluentui/svg-icons/icons/pen_dismiss_24_regular.svg?raw";
 import people from "@fluentui/svg-icons/icons/people_24_regular.svg?raw";
+import question from "@fluentui/svg-icons/icons/question_24_regular.svg?raw";
 import ruler from "@fluentui/svg-icons/icons/ruler_24_regular.svg?raw";
 import save from "@fluentui/svg-icons/icons/save_24_regular.svg?raw";
 import search from "@fluentui/svg-icons/icons/search_24_regular.svg?raw";
@@ -141,6 +142,7 @@ const RIBBON_ICONS: Record<string, string> = {
   app: appLogo,
   caret: chevronDown,
   close: dismiss,
+  help: question,
   launcher: arrowBidirectionalUpDown,
   // Home — Clipboard
   paste: clipboardPaste,
