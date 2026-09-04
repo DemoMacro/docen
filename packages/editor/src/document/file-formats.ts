@@ -124,9 +124,13 @@ export const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   "insert-citation",
   "bibliography",
   // TOC insert/update — dispatch with the bridge's pageOf (page numbers live
-  // in the canvas caret map, which editor.commands can't reach).
+  // in the canvas caret map, which editor.commands can't reach). Table of
+  // Figures is the same field with the \c caption switch (mark-citation /
+  // insert-toa — the Table of Authorities pair — stay unwired and greyed).
   "toc",
   "update-toc",
+  "table-of-figures",
+  "update-figures",
   // Header/footer stories — open through the bridge (the same lifecycle as
   // the band double-click); the Page Number drop seeds a PAGE field.
   "header",

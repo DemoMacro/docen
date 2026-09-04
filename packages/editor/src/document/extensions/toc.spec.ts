@@ -1,4 +1,4 @@
-import { Document, Link, Paragraph, Tab, TocField } from "@docen/docx";
+import { Document, InlinePassthrough, Link, Paragraph, Tab, TocField } from "@docen/docx";
 import { Editor, Node as TextNode, type Editor as EditorType } from "@docen/docx/core";
 import { describe, expect, it } from "vitest";
 
@@ -23,7 +23,7 @@ const docOf = (...blocks: Record<string, unknown>[]): Record<string, unknown> =>
 const build = (doc: Record<string, unknown>): EditorType => {
   const editor = new Editor({
     element: null,
-    extensions: [Document, Paragraph, Text, Tab, Link, TocField, TocCommands],
+    extensions: [Document, Paragraph, Text, Tab, Link, TocField, InlinePassthrough, TocCommands],
     content: doc,
   });
   // element:null skips Tiptap's mount (and with it plugin installation) — the
@@ -177,6 +177,83 @@ describe("update-toc command", () => {
   it("reports false when the doc has no tocField", () => {
     const editor = build(docOf(heading(1, "Alpha")));
     expect(editor.commands["update-toc"]()).toBe(false);
+    editor.destroy();
+  });
+});
+
+// ── Table of Figures (the \c caption switch) ──
+
+const caption = (label: string, text: string): Record<string, unknown> => ({
+  type: "paragraph",
+  attrs: { style: "Caption" },
+  content: [
+    { type: "text", text: `${label} ` },
+    {
+      type: "inlinePassthrough",
+      attrs: {
+        data: JSON.stringify({
+          simpleField: { instruction: `SEQ ${label} * ARABIC`, cachedValue: "1" },
+        }),
+      },
+    },
+    { type: "text", text: `: ${text}` },
+  ],
+});
+
+describe("table-of-figures command", () => {
+  it("builds one entry per matching caption with the c switch stamped", () => {
+    const editor = build(
+      docOf(heading(1, "Intro"), caption("Figure", "Alpha chart"), caption("Table", "Beta grid")),
+    );
+    editor.commands.setTextSelection(1);
+    expect(editor.commands["table-of-figures"](() => 4, undefined, "Figure")).toBe(true);
+    const entries = entriesOf(editor);
+    // Only the Figure caption counts — Table captions belong to another \c.
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ style: "TOC1", text: "Figure : Alpha chart", page: "4" });
+    expect(entries[0].linkHref).toBeNull();
+    editor.state.doc.descendants((node) => {
+      if (node.type.name === "tocField") {
+        expect(node.attrs.options).toEqual({ captionLabel: "Figure" });
+      }
+      return true;
+    });
+    editor.destroy();
+  });
+
+  it("fails with no matching captions and inserts nothing", () => {
+    const editor = build(docOf(caption("Table", "Beta grid")));
+    editor.commands.setTextSelection(1);
+    expect(editor.commands["table-of-figures"]()).toBe(false);
+    expect(editor.state.doc.firstChild?.attrs.style).toBe("Caption");
+    editor.destroy();
+  });
+});
+
+describe("update-figures command", () => {
+  it("rebuilds the figure table from current captions and keeps the label", () => {
+    const editor = build(docOf(caption("Figure", "Alpha chart")));
+    editor.commands.setTextSelection(1);
+    editor.commands["table-of-figures"]();
+    // Add a second caption, then update: the entry list follows.
+    editor.commands.command(({ state, dispatch }) => {
+      const node = state.schema.nodeFromJSON(caption("Figure", "Second chart"));
+      dispatch?.(state.tr.insert(state.doc.content.size - 1, node));
+      return true;
+    });
+    expect(editor.commands["update-figures"]()).toBe(true);
+    expect(entriesOf(editor).map((e) => e.text)).toEqual([
+      "Figure : Alpha chart",
+      "Figure : Second chart",
+    ]);
+    editor.destroy();
+  });
+
+  it("reports false when the doc has no figure table", () => {
+    const editor = build(docOf(heading(1, "Alpha")));
+    editor.commands.setTextSelection(1);
+    editor.commands.toc(); // a heading TOC is not a figure table
+    expect(editor.commands["update-figures"]()).toBe(false);
     editor.destroy();
   });
 });

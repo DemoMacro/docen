@@ -2840,6 +2840,25 @@ class DocenDocument extends AddinHost<Editor> {
       }
       return;
     }
+    // Table of Figures — insert/update the caption directory (the TOC field's
+    // \c switch): same story routing and post-insert update pass as the TOC.
+    if (name === "table-of-figures" || name === "update-figures") {
+      const target = this.#bridge?.activeEditor() ?? editor;
+      const pageOf = (pos: number): number | null => {
+        const page = this.#bridge?.pageOf(pos);
+        return typeof page === "number" ? page + 1 : null;
+      };
+      const tabPositionTw = this.#flow
+        ? Math.round(this.#flow.contentWidthPx / twipToPx(1))
+        : undefined;
+      const ran = target.commands[name](pageOf, tabPositionTw);
+      if (name === "table-of-figures" && ran) {
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => target.commands["update-figures"](pageOf, tabPositionTw)),
+        );
+      }
+      return;
+    }
     // Index — Mark Entry prompts for the entry text and seeds an XE field at
     // the selection (the invisible marker Word hides from the page); insert
     // and update collect the XE fields into the Index-styled entry block.

@@ -100,6 +100,77 @@ function findTocField(doc: PMNode): { node: PMNode; pos: number } | null {
   return found;
 }
 
+// ── Table of figures (the TOC field's \c switch) ──
+
+/** The SEQ label a caption paragraph counts in — the `SEQ <label>` simple
+ *  field the caption dialog inserts (attrs.data JSON inside an
+ *  inlinePassthrough, invisible to textContent). Null for non-caption
+ *  paragraphs and captions of another label. */
+function captionLabelOf(node: PMNode): string | null {
+  if (node.type.name !== "paragraph" || node.attrs.style !== "Caption") return null;
+  let label: string | null = null;
+  node.descendants((child) => {
+    if (label || child.type.name !== "inlinePassthrough") return true;
+    try {
+      const data = JSON.parse(String(child.attrs.data ?? "{}")) as {
+        simpleField?: { instruction?: string };
+      };
+      const m = /^SEQ (\S+)/.exec(data.simpleField?.instruction ?? "");
+      if (m) label = m[1];
+    } catch {
+      /* opaque payload — not a SEQ field we can read */
+    }
+    return true;
+  });
+  return label;
+}
+
+/** Entry paragraphs for the caption paragraphs whose SEQ label matches. */
+function buildTofEntries(
+  doc: PMNode,
+  pageOf: PageOf | undefined,
+  tabPositionTw = 9350,
+  label: string,
+): { type: string; attrs?: Record<string, unknown>; content: unknown[] }[] {
+  const out: { type: string; attrs?: Record<string, unknown>; content: unknown[] }[] = [];
+  doc.descendants((node, pos) => {
+    if (captionLabelOf(node) !== label || node.textContent.length === 0) return true;
+    const page = pageOf?.(pos + 1);
+    out.push({
+      type: "paragraph",
+      attrs: {
+        style: "TOC1",
+        tabStops: [{ type: "right", position: tabPositionTw, leader: "dot" }],
+      },
+      content: [
+        { type: "text", text: node.textContent },
+        { type: "tab" },
+        ...(typeof page === "number" ? [{ type: "text", text: String(page) }] : []),
+      ],
+    });
+    return true;
+  });
+  return out;
+}
+
+/** The first figure-table tocField (a tocField carrying the \c captionLabel
+ *  switch) — update-figures' target. */
+function findTofField(doc: PMNode): { node: PMNode; pos: number } | null {
+  let found: { node: PMNode; pos: number } | null = null;
+  doc.descendants((node, pos) => {
+    if (found) return false;
+    if (
+      node.type.name === "tocField" &&
+      !!(node.attrs.options as { captionLabel?: string } | null)?.captionLabel
+    ) {
+      found = { node, pos };
+      return false;
+    }
+    return true;
+  });
+  return found;
+}
+
 export const TocCommands = Extension.create({
   name: "docenTocCommands",
 
@@ -144,6 +215,41 @@ export const TocCommands = Extension.create({
           }
           return true;
         },
+      // Insert a table of figures at the caret: one TOC1 entry per caption
+      // counting the given SEQ label (Word's References → Insert Table of
+      // Figures, the \c switch).
+      "table-of-figures":
+        (pageOf?: PageOf, tabPositionTw?: number, captionLabel = "Figure") =>
+        ({ state, dispatch }) => {
+          const entries = buildTofEntries(state.doc, pageOf, tabPositionTw, captionLabel);
+          if (entries.length === 0) return false;
+          const node = state.schema.nodeFromJSON({
+            type: "tocField",
+            attrs: { options: { captionLabel } },
+            content: entries,
+          });
+          if (!node) return false;
+          if (dispatch) dispatch(state.tr.replaceSelectionWith(node).scrollIntoView());
+          return true;
+        },
+      // Rebuild the first figure-table tocField's entries from the current
+      // captions, keeping its \c label.
+      "update-figures":
+        (pageOf?: PageOf, tabPositionTw?: number) =>
+        ({ state, tr, dispatch }) => {
+          const found = findTofField(state.doc);
+          if (!found) return false;
+          const label =
+            (found.node.attrs.options as { captionLabel?: string } | null)?.captionLabel ??
+            "Figure";
+          const entries = buildTofEntries(state.doc, pageOf, tabPositionTw, label);
+          if (entries.length === 0) return false;
+          if (dispatch) {
+            const nodes = entries.map((entry) => state.schema.nodeFromJSON(entry));
+            tr.replaceWith(found.pos + 1, found.pos + found.node.nodeSize - 1, nodes);
+          }
+          return true;
+        },
     };
   },
 });
@@ -153,6 +259,12 @@ declare module "@tiptap/core" {
     docenTocCommands: {
       toc: (pageOf?: PageOf, tabPositionTw?: number) => ReturnType;
       "update-toc": (pageOf?: PageOf, tabPositionTw?: number) => ReturnType;
+      "table-of-figures": (
+        pageOf?: PageOf,
+        tabPositionTw?: number,
+        captionLabel?: string,
+      ) => ReturnType;
+      "update-figures": (pageOf?: PageOf, tabPositionTw?: number) => ReturnType;
     };
   }
 }
