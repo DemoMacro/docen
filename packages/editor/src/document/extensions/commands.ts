@@ -70,7 +70,7 @@ declare module "@tiptap/core" {
       "page-break": () => ReturnType;
       "column-break": () => ReturnType;
       "section-break": () => ReturnType;
-      "insert-table": () => ReturnType;
+      "insert-table": (options?: InsertTableOptions) => ReturnType;
       "delete-table": () => ReturnType;
       // Table context commands (the Table Design / Layout contextual tabs).
       "insert-row-above": () => ReturnType;
@@ -220,6 +220,15 @@ export const WIRED_DISPATCH: ReadonlySet<string> = new Set([
  * tokens. Stamped onto every selected paragraph by
  * {@link documentCommands.paragraph-dialog-apply}.
  */
+/** Options for the insert-table command (all fields fall back to Word's
+ *  3×3 default preset; rows/cols are clamped to the schema-safe range). */
+export interface InsertTableOptions {
+  /** Row count (1-50, default 3 — the first row is the header row). */
+  rows?: number;
+  /** Column count (1-10, default 3). */
+  cols?: number;
+}
+
 export interface ParagraphDialogPatch {
   alignment: string;
   outlineLevel: number | null;
@@ -1189,15 +1198,18 @@ export const DocumentCommands = Extension.create({
       // of a point, 4 = 0.5pt) — so the table is visible without a TableGrid
       // style in the document's styles.xml.
       "insert-table":
-        () =>
+        (options) =>
         ({ state, dispatch }) => {
+          const rows = Math.max(1, Math.min(50, Math.trunc(options?.rows ?? 3)));
+          const cols = Math.max(1, Math.min(10, Math.trunc(options?.cols ?? 3)));
           const { table, tableRow, tableCell, paragraph } = state.schema.nodes;
           const cell = tableCell.createAndFill(null, [paragraph.create()]);
           if (!cell) return false;
-          // The shape is structurally valid by construction (3 cells in a
+          // The shape is structurally valid by construction (cols cells in a
           // "tableCell+" row), so the fill can only fail on a schema drift.
-          const mkRow = (header: boolean): PMNode =>
-            tableRow.createAndFill(header ? { tableHeader: true } : null, [cell, cell, cell])!;
+          // Cells/rows are immutable PM nodes — one instance is shared.
+          const headerRow = tableRow.createAndFill({ tableHeader: true }, Array(cols).fill(cell))!;
+          const dataRow = tableRow.createAndFill(null, Array(cols).fill(cell))!;
           const node = table.createAndFill(
             {
               borders: {
@@ -1209,7 +1221,7 @@ export const DocumentCommands = Extension.create({
                 insideVertical: GRID_BORDER,
               },
             },
-            [mkRow(true), mkRow(false), mkRow(false)],
+            [headerRow, ...Array(rows - 1).fill(dataRow)],
           );
           if (!node) return false;
           if (dispatch) {

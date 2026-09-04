@@ -70,6 +70,7 @@ import {
   type DocenAddin,
   type RibbonMenuItem,
 } from "../ui";
+import type { ColumnsValues } from "../ui/components/workspace/columns-dialog";
 import type { PageSetupValues } from "../ui/components/workspace/page-setup-dialog";
 import { createDefaultAddin, textCounter } from "./addin";
 // Side-effect: register the document-specific UI components moved out of the
@@ -968,6 +969,16 @@ class DocenDocument extends AddinHost<Editor> {
       "page-setup:ok",
       this.#onPageSetupOk as EventListener,
     );
+    // Table grid — insert the picked shape through insert-table.
+    this.shadowRoot!.querySelector("docen-table-dialog")?.addEventListener(
+      "table-grid:insert",
+      this.#onTableInsert as EventListener,
+    );
+    // Columns dialog — write the committed layout into the current section.
+    this.shadowRoot!.querySelector("docen-columns-dialog")?.addEventListener(
+      "columns:ok",
+      this.#onColumnsOk as EventListener,
+    );
 
     // Re-render header + ribbon when the page locale (<html lang>) changes.
     this.#unobserveLang = observeLang(() => this.#renderChrome());
@@ -1415,6 +1426,12 @@ class DocenDocument extends AddinHost<Editor> {
     this.shadowRoot
       ?.querySelector("docen-page-setup-dialog")
       ?.removeEventListener("page-setup:ok", this.#onPageSetupOk as EventListener);
+    this.shadowRoot
+      ?.querySelector("docen-table-dialog")
+      ?.removeEventListener("table-grid:insert", this.#onTableInsert as EventListener);
+    this.shadowRoot
+      ?.querySelector("docen-columns-dialog")
+      ?.removeEventListener("columns:ok", this.#onColumnsOk as EventListener);
     this.shadowRoot
       ?.querySelector<HTMLElement>("docen-status-bar")
       ?.removeEventListener("zoom:change", this.#onZoomChange as EventListener);
@@ -1962,6 +1979,69 @@ class DocenDocument extends AddinHost<Editor> {
     });
   }
 
+  /** Open the Columns dialog prefilled from the current section's w:cols
+   *  (the Columns menu's More Columns entry). */
+  #openColumnsDialog(): void {
+    const cur = this.#currentSectionProperties()?.columns;
+    // Twips → centimeters for the inputs; absent fields take Word's defaults
+    // inside the dialog.
+    const columns =
+      cur && typeof cur === "object"
+        ? cur
+        : ({} as Partial<SectionPropertiesOptions["columns"]> & Record<string, unknown>);
+    const cm = (twips?: number | string): number | undefined =>
+      typeof twips === "number" ? Math.round(((twips * 2.54) / 1440) * 100) / 100 : undefined;
+    const raw = columns as {
+      count?: number;
+      space?: number | string;
+      separate?: boolean;
+      equalWidth?: boolean;
+    };
+    (
+      this.shadowRoot?.querySelector("docen-columns-dialog") as {
+        show(values?: Partial<ColumnsValues>): void;
+      } | null
+    )?.show({
+      count: typeof raw.count === "number" ? raw.count : undefined,
+      space: cm(raw.space),
+      separate: raw.separate === true,
+      equalWidth: raw.equalWidth !== false,
+    });
+  }
+
+  // The Columns dialog's OK — convert back to twips and write the current
+  // section's w:cols. Unequal widths get evenly-split explicit children (the
+  // w:col list the projection needs once equalWidth is false); per-column
+  // manual widths stay out until the dialog grows inputs for them.
+  readonly #onColumnsOk = (event: CustomEvent<ColumnsValues | undefined>): void => {
+    const values = event.detail;
+    if (!values) return;
+    const count = Math.max(1, Math.min(9, Math.trunc(values.count) || 1));
+    const space = convertMillimetersToTwip(values.space * 10);
+    const children =
+      values.equalWidth || count <= 1
+        ? undefined
+        : Array.from({ length: count }, () => ({
+            width: Math.max(
+              1,
+              Math.floor(((this.#flow?.contentWidthPx ?? 0) * 15 - space * (count - 1)) / count),
+            ),
+          }));
+    this.#mutateCurrentSection((cur) => ({
+      ...cur,
+      columns: {
+        ...cur?.columns,
+        count,
+        space,
+        // Explicit both ways — a conditional spread would let a stale
+        // separate:true from the previous w:cols survive an unchecked box.
+        separate: values.separate,
+        equalWidth: values.equalWidth,
+        ...(children ? { children } : {}),
+      },
+    }));
+  };
+
   /** Deep-merge a sectionProperties patch into the CURRENT section's sectPr and
    *  dispatch it — Word's "this section" semantics. The dispatched transaction
    *  re-renders every page of the canvas. */
@@ -2216,6 +2296,14 @@ class DocenDocument extends AddinHost<Editor> {
     if (!patch) return;
     const target = this.#bridge?.activeEditor() ?? this.editor;
     target?.commands["paragraph-dialog-apply"]?.(patch);
+  };
+
+  // The table grid's pick (hover grid or the classic dialog shape) — the
+  // engine's insert-table takes rows/cols (Word's 3×3 preset is the default).
+  readonly #onTableInsert = (event: CustomEvent<{ rows?: number; cols?: number }>): void => {
+    const { rows, cols } = event.detail ?? {};
+    const target = this.#bridge?.activeEditor() ?? this.editor;
+    target?.commands["insert-table"]?.({ rows, cols });
   };
 
   // The Page Setup dialog's OK — convert its centimeters back to twips (the
@@ -3170,6 +3258,20 @@ class DocenDocument extends AddinHost<Editor> {
       this.#showWordCount();
       return;
     }
+    // The Table button's face opens the hover grid; its dropdown's Insert
+    // Table opens the classic dialog shape (both insert via table-grid:insert).
+    if (name === "insert-table") {
+      (
+        this.shadowRoot?.querySelector("docen-table-dialog") as { show(m?: string): void } | null
+      )?.show("grid");
+      return;
+    }
+    if (name === "table-dialog") {
+      (
+        this.shadowRoot?.querySelector("docen-table-dialog") as { show(m?: string): void } | null
+      )?.show("form");
+      return;
+    }
     // Page setup actions write sectionProperties; the transaction re-renders.
     // "more"/"custom" open the Page Setup dialog instead of a preset.
     if (name === "page-size") {
@@ -3186,10 +3288,14 @@ class DocenDocument extends AddinHost<Editor> {
       else this.#setMargins(value);
       return;
     }
-    // Columns presets (the Layout tab's Columns menu: one/two/three).
+    // Columns presets (the Layout tab's Columns menu: one/two/three);
+    // More Columns opens the dialog prefilled from the current section.
     if (name === "columns") {
-      const count = Number(value);
-      if (count >= 1 && count <= 9) this.#setColumnCount(count);
+      if (value === "more") this.#openColumnsDialog();
+      else {
+        const count = Number(value);
+        if (count >= 1 && count <= 9) this.#setColumnCount(count);
+      }
       return;
     }
     // Line Numbers toggle (the Layout tab's Line Numbers button).

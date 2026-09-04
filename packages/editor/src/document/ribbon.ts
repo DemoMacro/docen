@@ -244,11 +244,13 @@ const coverItems = (): string =>
 
 const tableItems = (): string =>
   JSON.stringify([
-    { text: opt("insert-table"), value: "insert" },
-    { text: opt("draw-table"), value: "draw" },
-    { text: opt("convert-text"), value: "convert" },
-    { text: opt("excel"), value: "excel" },
-    { text: opt("quick-tables"), value: "quick" },
+    // Insert Table opens the classic dialog shape of the table grid entry.
+    { text: opt("insert-table"), value: "insert", event: "table-dialog" },
+    // Draw Table / Convert Text / Excel / Quick Tables are not built yet.
+    { text: opt("draw-table"), value: "draw", disabled: true },
+    { text: opt("convert-text"), value: "convert", disabled: true },
+    { text: opt("excel"), value: "excel", disabled: true },
+    { text: opt("quick-tables"), value: "quick", disabled: true },
   ]);
 
 const marginsItems = (): string =>
@@ -298,8 +300,8 @@ const columnsItems = (): string =>
     { text: opt("one-col"), value: "1" },
     { text: opt("two-col"), value: "2" },
     { text: opt("three-col"), value: "3" },
-    // Word opens the Columns dialog; the editor has none yet — honest grey.
-    { text: opt("more-columns"), value: "more", disabled: true },
+    // More Columns opens the Columns dialog (host-handled).
+    { text: opt("more-columns"), value: "more" },
   ]);
 
 const breaksItems = (): string =>

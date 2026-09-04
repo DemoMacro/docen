@@ -94,6 +94,10 @@ export const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   // Bookmark prompts for a name and wraps the selection.
   "symbol",
   "bookmark",
+  // The Table button's face opens the hover grid; its dropdown's Insert
+  // Table opens the classic dialog shape. ("insert-table" itself is wired —
+  // the face click is intercepted before the engine dispatch.)
+  "table-dialog",
   // Paragraph opens the paragraph dialog prefilled from the caret paragraph
   // (the commit arrives via paragraph:ok → the paragraph-dialog-apply
   // command, which stamps every selected paragraph).
