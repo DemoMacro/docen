@@ -61,6 +61,18 @@ import {
   SearchQuery,
 } from "prosemirror-search";
 
+/** A bibliography source as the sources dialog edits it — office-open's
+ *  SourceTypeOptions narrowed to the exposed fields (the document's own
+ *  sources round-trip untouched through the open attrs value). */
+type BibliographySource = {
+  tag?: string;
+  sourceType?: string;
+  title?: string;
+  year?: string;
+  publisher?: string;
+  author?: { authors?: { last?: string; first?: string; corporate?: string }[] };
+};
+
 import {
   AddinHost,
   applyTheme,
@@ -1266,6 +1278,16 @@ class DocenDocument extends AddinHost<Editor> {
       "cross-ref:ok",
       this.#onCrossRefOk as EventListener,
     );
+    // Sources dialog — write the bibliography source list (attrs.bibliography)
+    // and seed a cached CITATION field at the caret.
+    this.shadowRoot!.querySelector("docen-sources-dialog")?.addEventListener(
+      "sources:ok",
+      this.#onSourcesOk as EventListener,
+    );
+    this.shadowRoot!.querySelector("docen-sources-dialog")?.addEventListener(
+      "citation:ok",
+      this.#onCitationOk as EventListener,
+    );
     // Status-bar language item — open the language dialog (Word semantics).
     this.shadowRoot!.querySelector("docen-status-bar")?.addEventListener(
       "language:open",
@@ -1897,6 +1919,12 @@ class DocenDocument extends AddinHost<Editor> {
     this.shadowRoot
       ?.querySelector("docen-cross-reference-dialog")
       ?.removeEventListener("cross-ref:ok", this.#onCrossRefOk as EventListener);
+    this.shadowRoot
+      ?.querySelector("docen-sources-dialog")
+      ?.removeEventListener("sources:ok", this.#onSourcesOk as EventListener);
+    this.shadowRoot
+      ?.querySelector("docen-sources-dialog")
+      ?.removeEventListener("citation:ok", this.#onCitationOk as EventListener);
     this.shadowRoot
       ?.querySelector("docen-symbol-dialog")
       ?.removeEventListener("symbol:insert", this.#onSymbolInsert as EventListener);
@@ -4561,6 +4589,23 @@ class DocenDocument extends AddinHost<Editor> {
       )?.show(this.#crossReferenceTargets());
       return;
     }
+    // Source Manager / Insert Citation — the same dialog in two modes (Word's
+    // References → Citations & Bibliography group); commits arrive via
+    // sources:ok / citation:ok (#onSourcesOk / #onCitationOk).
+    if (name === "manage-sources" || name === "insert-citation") {
+      (
+        this.shadowRoot?.querySelector("docen-sources-dialog") as {
+          show(mode: "manage" | "cite", sources: unknown[]): void;
+        } | null
+      )?.show(name === "insert-citation" ? "cite" : "manage", this.#bibliographySources());
+      return;
+    }
+    // Bibliography — insert (or rebuild) the Bibliography-styled block beside
+    // the caret from the document's sources (#insertBibliography).
+    if (name === "bibliography") {
+      this.#insertBibliography();
+      return;
+    }
     // Footnote / Endnote — prompt for the note text, reference the caret and
     // append the note body (Word's References → Insert Footnote; the split's
     // endnote item shares the event, and Next Footnote steps references).
@@ -5341,6 +5386,138 @@ class DocenDocument extends AddinHost<Editor> {
       },
     } as JSONContent;
     target.view.dispatch(target.state.tr.insert(to, target.schema.nodeFromJSON(seed)));
+    this.#bridge?.focus();
+  }
+
+  /** The document's bibliography sources — doc.attrs.bibliography (the Source
+   *  Manager's master list, word/bibliography.xml on save). */
+  #bibliographySources(): BibliographySource[] {
+    const attrs = this.editor?.state.doc.attrs as {
+      bibliography?: { sources?: BibliographySource[] } | null;
+    };
+    return [...(attrs.bibliography?.sources ?? [])];
+  }
+
+  /** Sources dialog commit — replace the document's source list. An empty
+   *  list clears the attr (null) so no empty part is emitted. */
+  readonly #onSourcesOk = (event: Event): void => {
+    const { sources } = (event as CustomEvent<{ sources?: BibliographySource[] }>).detail ?? {};
+    const target = this.#bridge?.activeEditor() ?? this.editor;
+    if (!target || !sources) return;
+    target.commands.command(({ tr }) => {
+      tr.step(new DocAttrStep("bibliography", sources.length > 0 ? { sources } : null));
+      return true;
+    });
+  };
+
+  /** Citation dialog insert — seed a cached CITATION field at the caret in
+   *  Word's in-text shape "(Author, Year)" (the title stands in when the
+   *  source has no author). */
+  readonly #onCitationOk = (event: Event): void => {
+    const { tag } = (event as CustomEvent<{ tag?: string }>).detail ?? {};
+    const target = this.#bridge?.activeEditor() ?? this.editor;
+    if (!target || !tag) return;
+    const source = this.#bibliographySources().find((entry) => entry.tag === tag);
+    const authors = (source?.author?.authors ?? [])
+      .map((person) => [person.last, person.first].filter(Boolean).join(", "))
+      .join("; ");
+    const head = authors || source?.title || tag;
+    const cached = `(${head}${source?.year ? `, ${source.year}` : ""})`;
+    const seed: JSONContent = {
+      type: "inlinePassthrough",
+      attrs: {
+        data: JSON.stringify({
+          simpleField: { instruction: `CITATION "${tag}" \\l 1033`, cachedValue: cached },
+        }),
+      },
+    } as JSONContent;
+    const { from } = target.state.selection;
+    target.view.dispatch(target.state.tr.insert(from, target.schema.nodeFromJSON(seed)));
+    this.#bridge?.focus();
+  };
+
+  /** Bibliography — rebuild the Bibliography-styled block after the caret's
+   *  paragraph from the document's sources (an existing block is replaced,
+   *  not duplicated). The two style definitions join the document styles when
+   *  absent. */
+  #insertBibliography(): void {
+    const target = this.#bridge?.activeEditor() ?? this.editor;
+    if (!target) return;
+    const sources = this.#bibliographySources();
+    if (sources.length === 0) {
+      window.alert(t("bibliography.empty", this));
+      return;
+    }
+    const { state } = target;
+    if (state.selection.$from.parent.type.name !== "paragraph") return;
+    // A simplified APA entry line: Authors (Year). Title. Publisher.
+    const entryText = (source: BibliographySource): string => {
+      const authors = (source.author?.authors ?? [])
+        .map((person) => person.corporate ?? [person.last, person.first].filter(Boolean).join(", "))
+        .join("; ");
+      return [
+        authors,
+        source.year ? `(${source.year})` : "",
+        source.title ? `${source.title}.` : "",
+        source.publisher ? `${source.publisher}.` : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
+    };
+    const block: JSONContent[] = [
+      {
+        type: "paragraph",
+        attrs: { style: "BibliographyHeading" },
+        content: [{ type: "text", text: t("bibliography.heading", this) }],
+      },
+      ...sources.map((source) => ({
+        type: "paragraph",
+        attrs: { style: "Bibliography" },
+        content: [{ type: "text", text: entryText(source) }],
+      })),
+    ];
+    const styles = { ...((state.doc.attrs.styles ?? {}) as Record<string, unknown>) };
+    const paragraphStyles = (styles.paragraphStyles ?? []) as { id?: string }[];
+    const missing = (["BibliographyHeading", "Bibliography"] as const).filter(
+      (id) => !paragraphStyles.some((style) => style.id === id),
+    );
+    const afterCaret = state.selection.$from.after(state.selection.$from.depth);
+    target
+      .chain()
+      .command(({ tr }) => {
+        if (missing.length > 0) {
+          const definitions = missing.map((id) => ({
+            id,
+            name: id === "Bibliography" ? "bibliography" : "Bibliography Heading",
+            basedOn: "Normal",
+            next: "Normal",
+            ...(id === "BibliographyHeading" ? { bold: true } : {}),
+          }));
+          tr.step(
+            new DocAttrStep("styles", {
+              ...styles,
+              paragraphStyles: [...paragraphStyles, ...definitions],
+            }),
+          );
+        }
+        // Drop the stale block first; map the insertion anchor through the
+        // deletions so the fresh block lands after the caret's paragraph
+        // even when the old block sat before the caret.
+        state.doc.descendants((node, at) => {
+          if (node.type.name !== "paragraph") return true;
+          const raw = (node.attrs as Record<string, unknown>).style;
+          const style = typeof raw === "string" ? raw : "";
+          if (style === "Bibliography" || style === "BibliographyHeading")
+            tr.delete(at, at + node.nodeSize);
+          return true;
+        });
+        tr.insert(
+          tr.mapping.map(afterCaret),
+          block.map((node) => target.schema.nodeFromJSON(node)),
+        );
+        return true;
+      })
+      .run();
     this.#bridge?.focus();
   }
 

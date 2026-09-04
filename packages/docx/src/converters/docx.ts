@@ -111,6 +111,7 @@ const COMPILE_OWNED_KEYS = new Set<string>([
   "numbering",
   "styles",
   "background",
+  "bibliography",
   ...CORE_PROPERTY_KEYS,
 ] satisfies (keyof DocumentOptions)[]);
 
@@ -291,6 +292,9 @@ export class DocxManager {
     const documentExtras = (docAttrs.documentExtras ?? undefined) as
       | Partial<DocumentOptions>
       | undefined;
+    const bibliography = (docAttrs.bibliography ?? undefined) as
+      | DocumentOptions["bibliography"]
+      | undefined;
     // Merge source numbering definitions (custom bullet/number markers) with
     // any regenerated ordered-list definitions; drop originals shadowed by a
     // regenerated reference to avoid duplicates.
@@ -317,6 +321,7 @@ export class DocxManager {
       ...(styles ? { styles } : {}),
       ...core,
       ...(background ? { background } : {}),
+      ...(bibliography ? { bibliography } : {}),
       ...documentExtras,
       ...(numberingConfig.length > 0 ? { numbering: { abstractNumberings: numberingConfig } } : {}),
     };
@@ -454,6 +459,9 @@ export class DocxManager {
     // Source numbering definitions (abstractNum) carried verbatim so list
     // markers round-trip; compile merges these with regenerated ordered defs.
     if (docOpts.numbering) attrs.numbering = docOpts.numbering;
+    // Bibliography sources (word/bibliography.xml) — the citation dialog's
+    // master list and the bibliography block's data.
+    if (docOpts.bibliography) attrs.bibliography = docOpts.bibliography;
     const core = extractCoreProperties(docOpts);
     if (core) attrs.core = core;
     const lastSection = sections[lastIndex];

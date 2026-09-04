@@ -117,6 +117,12 @@ export const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   "mark-entry",
   "insert-index",
   "update-index",
+  // Citations & Bibliography — the Source Manager dialog in two modes (its
+  // sources:ok writes attrs.bibliography; citation:ok seeds a cached CITATION
+  // field), and the Bibliography block rebuild.
+  "manage-sources",
+  "insert-citation",
+  "bibliography",
   // TOC insert/update — dispatch with the bridge's pageOf (page numbers live
   // in the canvas caret map, which editor.commands can't reach).
   "toc",

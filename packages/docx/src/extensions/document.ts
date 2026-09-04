@@ -40,6 +40,9 @@ export function createDocument(content = "block+") {
         sectionFooters: attrNative(),
         background: attrNative(),
         documentExtras: attrNative(),
+        // Bibliography sources (word/bibliography.xml) — the citation dialog's
+        // master list and the bibliography block's data.
+        bibliography: attrNative(),
         // Source numbering.config (abstractNum definitions) carried verbatim so
         // list markers (glyph/font/indent) round-trip; compile merges it with
         // any regenerated ordered-list definitions.

@@ -25,6 +25,7 @@ export { default as DocenTwoInOneDialog } from "./two-in-one-dialog";
 export { default as DocenDefineListDialog } from "./define-list-dialog";
 export { default as DocenCaptionDialog } from "./caption-dialog";
 export { default as DocenCrossReferenceDialog } from "./cross-reference-dialog";
+export { default as DocenSourcesDialog } from "./sources-dialog";
 export { default as DocenPasteSpecialDialog } from "./paste-special-dialog";
 export { default as DocenFontDialog } from "./font-dialog";
 export { default as DocenTablePropertiesDialog } from "./table-properties-dialog";

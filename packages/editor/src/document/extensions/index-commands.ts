@@ -1,4 +1,3 @@
-import { type StylesOptions } from "@docen/docx";
 import { Extension } from "@docen/docx/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { Fragment, Slice } from "@tiptap/pm/model";
@@ -26,13 +25,6 @@ import type { PageOf } from "./toc";
 /** Word's built-in index styles indent 220 twips per level — the same ladder
  *  the TOC styles use. */
 const INDEX_INDENT_TW = 220;
-
-/** One collected index entry: the entry text (main[:sub]) and the pages its
- *  XE fields sit on. */
-interface IndexEntry {
-  text: string;
-  pages: number[];
-}
 
 /** Collect the document's XE fields, grouped by entry text. Pages dedupe and
  *  stay in document order. */
