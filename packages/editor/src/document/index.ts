@@ -1261,6 +1261,11 @@ class DocenDocument extends AddinHost<Editor> {
       "caption:ok",
       this.#onCaptionOk as EventListener,
     );
+    // Cross-reference dialog — seed a cached REF/PAGEREF field at the caret.
+    this.shadowRoot!.querySelector("docen-cross-reference-dialog")?.addEventListener(
+      "cross-ref:ok",
+      this.#onCrossRefOk as EventListener,
+    );
     // Status-bar language item — open the language dialog (Word semantics).
     this.shadowRoot!.querySelector("docen-status-bar")?.addEventListener(
       "language:open",
@@ -1889,6 +1894,9 @@ class DocenDocument extends AddinHost<Editor> {
     this.shadowRoot
       ?.querySelector("docen-caption-dialog")
       ?.removeEventListener("caption:ok", this.#onCaptionOk as EventListener);
+    this.shadowRoot
+      ?.querySelector("docen-cross-reference-dialog")
+      ?.removeEventListener("cross-ref:ok", this.#onCrossRefOk as EventListener);
     this.shadowRoot
       ?.querySelector("docen-symbol-dialog")
       ?.removeEventListener("symbol:insert", this.#onSymbolInsert as EventListener);
@@ -4523,6 +4531,16 @@ class DocenDocument extends AddinHost<Editor> {
       (this.shadowRoot?.querySelector("docen-caption-dialog") as { show(): void } | null)?.show();
       return;
     }
+    // Cross-reference — open the dialog over the document's bookmarks; the
+    // commit arrives via cross-ref:ok (#onCrossRefOk).
+    if (name === "cross-reference") {
+      (
+        this.shadowRoot?.querySelector("docen-cross-reference-dialog") as {
+          show(targets: { name: string; text: string; kind: string }[]): void;
+        } | null
+      )?.show(this.#crossReferenceTargets());
+      return;
+    }
     // Footnote / Endnote — prompt for the note text, reference the caret and
     // append the note body (Word's References → Insert Footnote; the split's
     // endnote item shares the event, and Next Footnote steps references).
@@ -5133,14 +5151,17 @@ class DocenDocument extends AddinHost<Editor> {
     const caption: JSONContent = {
       type: "paragraph",
       attrs: { style: "Caption" },
+      // The _Ref bookmark wraps only label + number (Word's shape), so a
+      // cross-reference's "label and number" content reads "图 1" without the
+      // caption text.
       content: [
         seed({ bookmarkStart: { id: bookmarkId, name } }),
         ...(excludeLabel ? [] : [{ type: "text", text: `${label} ` }]),
         seed({
           simpleField: { instruction: `SEQ ${label} \\* ARABIC`, cachedValue: String(seq) },
         }),
-        ...(text ? [{ type: "text", text: `: ${text}` }] : []),
         seed({ bookmarkEnd: { id: bookmarkId } }),
+        ...(text ? [{ type: "text", text: `: ${text}` }] : []),
       ],
     };
     const styles = { ...((state.doc.attrs.styles ?? {}) as Record<string, unknown>) };
@@ -5198,6 +5219,89 @@ class DocenDocument extends AddinHost<Editor> {
     });
     return count + 1;
   }
+
+  /** The document's referenceable bookmarks for the cross-reference dialog —
+   *  a caption's `_Ref` pair (its inner text reads "图 1") plus the user's
+   *  own bookmarks, each with its bookmark position for PAGEREF page lookups. */
+  #crossReferenceTargets(): { name: string; text: string; kind: string; pos: number }[] {
+    const target = this.#bridge?.activeEditor() ?? this.editor;
+    if (!target) return [];
+    const out: { name: string; text: string; kind: string; pos: number }[] = [];
+    target.state.doc.descendants((node, pos) => {
+      if (node.type.name !== "paragraph") return true;
+      let name = "";
+      let open = false;
+      let text = "";
+      node.forEach((child) => {
+        if (child.type.name === "inlinePassthrough") {
+          try {
+            const data = JSON.parse(String(child.attrs.data ?? "{}")) as {
+              bookmarkStart?: { name?: string };
+              bookmarkEnd?: unknown;
+              simpleField?: { cachedValue?: string };
+            };
+            if (data.bookmarkStart?.name && !open) {
+              name = data.bookmarkStart.name;
+              open = true;
+              return;
+            }
+            if (data.bookmarkEnd && open) {
+              open = false;
+              return;
+            }
+            if (open && data.simpleField) text += String(data.simpleField.cachedValue ?? "");
+          } catch {
+            // opaque verbatim blobs — skip
+          }
+        } else if (open && child.type.name === "text") {
+          text += child.textContent ?? "";
+        }
+      });
+      if (name)
+        out.push({
+          name,
+          text: text.trim(),
+          kind: name.startsWith("_Ref") ? "caption" : "bookmark",
+          pos,
+        });
+      return true;
+    });
+    return out;
+  }
+
+  /** Cross-reference dialog 确定 — seed a cached REF field at the caret: a
+   *  REF for "label and number" / "bookmark text" content (the bookmark's
+   *  inner text), a PAGEREF for page content (resolved through the bridge's
+   *  pageOf, the same geometry the TOC's page numbers use). Both carry \h —
+   *  Word's hyperlink form. */
+  readonly #onCrossRefOk = (event: Event): void => {
+    const { name, content } =
+      (event as CustomEvent<{ name?: string; content?: string }>).detail ?? {};
+    const target = this.#bridge?.activeEditor() ?? this.editor;
+    if (!target || !name) return;
+    const hit = this.#crossReferenceTargets().find((entry) => entry.name === name);
+    if (!hit) return;
+    // The bridge's pageOf is 0-based; Word's page numbers are 1-based (the
+    // TOC's conversion, with 1 as the fallback when the position has no
+    // laid-out page yet).
+    const page = this.#bridge?.pageOf(hit.pos);
+    const cached =
+      content === "page" ? String(typeof page === "number" ? page + 1 : 1) : hit.text || "1";
+    const seed: JSONContent = {
+      type: "inlinePassthrough",
+      attrs: {
+        data: JSON.stringify({
+          simpleField: {
+            instruction: `${content === "page" ? "PAGEREF" : "REF"} ${name} \\h`,
+            cachedValue: cached,
+          },
+        }),
+      },
+    } as JSONContent;
+    const { from } = target.state.selection;
+    target.view.dispatch(target.state.tr.insert(from, target.schema.nodeFromJSON(seed)));
+    this.#bridge?.focus();
+  };
 
   /** Mirror the caret's proofing language into the status bar (Word shows the
    *  selection's language there). */

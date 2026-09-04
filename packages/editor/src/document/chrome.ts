@@ -223,6 +223,7 @@ export const documentTemplate = html`
   <docen-two-in-one-dialog part="two-in-one"></docen-two-in-one-dialog>
   <docen-define-list-dialog part="define-list"></docen-define-list-dialog>
   <docen-caption-dialog part="caption"></docen-caption-dialog>
+  <docen-cross-reference-dialog part="cross-reference"></docen-cross-reference-dialog>
   <docen-table-properties-dialog part="table-properties"></docen-table-properties-dialog>
   <docen-borders-shading-dialog part="borders-shading"></docen-borders-shading-dialog>
   <docen-watermark-dialog part="watermark-dialog"></docen-watermark-dialog>

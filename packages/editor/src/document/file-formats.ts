@@ -109,6 +109,9 @@ export const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   // Insert Caption (References → Captions) opens the caption dialog; the
   // commit seeds a Caption-styled paragraph with a SEQ field.
   "insert-caption",
+  // Cross-reference (References → Captions) opens its dialog; the commit
+  // seeds a cached REF/PAGEREF field pointing at a document bookmark.
+  "cross-reference",
   // TOC insert/update — dispatch with the bridge's pageOf (page numbers live
   // in the canvas caret map, which editor.commands can't reach).
   "toc",
