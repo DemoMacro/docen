@@ -125,6 +125,7 @@ declare module "@tiptap/core" {
       "position-picture": (value?: string) => ReturnType;
       "move-drawing": (value?: string) => ReturnType;
       "rotate-drawing": (value?: string) => ReturnType;
+      "drawing-properties-apply": (patch?: DrawingPropertiesPatch) => ReturnType;
       // Arrange — floating drawings (z-order, wrap, rotation, position).
       "bring-forward": () => ReturnType;
       "send-backward": () => ReturnType;
@@ -215,6 +216,7 @@ export const WIRED_DISPATCH: ReadonlySet<string> = new Set([
   "position-picture",
   "move-drawing",
   "rotate-drawing",
+  "drawing-properties-apply",
   "bring-forward",
   "send-backward",
   "wrap",
@@ -277,6 +279,25 @@ export interface TablePropertiesPatch {
   alignment: "left" | "center" | "right";
   /** w:tblInd left indent in twips; 0 commits null. */
   indent: number;
+}
+
+/**
+ * What the Size-and-Position dialog commits on OK — the selected floating
+ * drawing's geometry in centimeters (the dialog's display unit), stamped by
+ * {@link documentCommands.drawing-properties-apply}. Absent fields keep the
+ * current value.
+ */
+export interface DrawingPropertiesPatch {
+  /** The drawing box width in cm (px for an image, EMU for a shape payload). */
+  widthCm: number;
+  /** The drawing box height in cm. */
+  heightCm: number;
+  /** Clockwise rotation about the box center, degrees. */
+  rotationDeg: number;
+  /** Horizontal offset from the anchor's horizontal base, cm → EMU. */
+  offsetHCm: number;
+  /** Vertical offset from the anchor's vertical base, cm → EMU. */
+  offsetVCm: number;
 }
 
 /** One w:pBdr edge as the dialog stages it: the ST_Border style token, the
@@ -2469,6 +2490,62 @@ export const DocumentCommands = Extension.create({
             ...target.attrs,
             wpsShape: { ...shape, transformation },
           });
+        },
+      // The Size-and-Position dialog's OK: absolute geometry in centimeters
+      // (the dialog's display unit), converted to each carrier's native unit —
+      // an image sizes in px and offsets in EMU, a shape payload in EMU.
+      "drawing-properties-apply":
+        (patch?) =>
+        ({ state, tr }) => {
+          if (!patch || typeof patch !== "object") return false;
+          const target = floatingDrawingAt(state);
+          if (!target) return false;
+          const cmTo = (v: number, factor: number): number => Math.round(v * factor);
+          const PX_PER_CM = 96 / 2.54;
+          const EMU_PER_CM = 360000;
+          const num = (v: unknown): number | null =>
+            typeof v === "number" && Number.isFinite(v) ? v : null;
+          const widthCm = num(patch.widthCm);
+          const heightCm = num(patch.heightCm);
+          const rotationDeg = num(patch.rotationDeg);
+          const offsetHCm = num(patch.offsetHCm);
+          const offsetVCm = num(patch.offsetVCm);
+          if (target.kind === "image") {
+            const attrs = { ...target.attrs };
+            if (widthCm != null) attrs.width = cmTo(widthCm, PX_PER_CM);
+            if (heightCm != null) attrs.height = cmTo(heightCm, PX_PER_CM);
+            if (rotationDeg != null) attrs.rotation = rotationDeg;
+            const floating = { ...floatingOf(target) };
+            const hPos = {
+              ...(floating.horizontalPosition as Record<string, unknown> | undefined),
+            };
+            const vPos = {
+              ...(floating.verticalPosition as Record<string, unknown> | undefined),
+            };
+            if (offsetHCm != null) hPos.offset = cmTo(offsetHCm, EMU_PER_CM);
+            if (offsetVCm != null) vPos.offset = cmTo(offsetVCm, EMU_PER_CM);
+            floating.horizontalPosition = hPos;
+            floating.verticalPosition = vPos;
+            return stampAttrs(tr, target, { ...attrs, floating });
+          }
+          const shape = { ...(target.attrs.wpsShape as Record<string, unknown>) };
+          const t = { ...((shape.transformation ?? {}) as Record<string, unknown>) };
+          if (widthCm != null) t.width = cmTo(widthCm, EMU_PER_CM);
+          if (heightCm != null) t.height = cmTo(heightCm, EMU_PER_CM);
+          if (rotationDeg != null) t.rotation = rotationDeg;
+          shape.transformation = t;
+          // The shape's offsets ride the same Floating object as an image's.
+          if (offsetHCm == null && offsetVCm == null)
+            return stampAttrs(tr, target, { ...target.attrs, wpsShape: shape });
+          const floating = { ...floatingOf(target) };
+          const hPos = { ...(floating.horizontalPosition as Record<string, unknown> | undefined) };
+          const vPos = { ...(floating.verticalPosition as Record<string, unknown> | undefined) };
+          if (offsetHCm != null) hPos.offset = cmTo(offsetHCm, EMU_PER_CM);
+          if (offsetVCm != null) vPos.offset = cmTo(offsetVCm, EMU_PER_CM);
+          floating.horizontalPosition = hPos;
+          floating.verticalPosition = vPos;
+          shape.floating = floating;
+          return stampAttrs(tr, target, { ...target.attrs, wpsShape: shape });
         },
       // ── Arrange — floating drawings (the Layout tab's Arrange group) ──
       // Every command targets the selected floating drawing (a floating

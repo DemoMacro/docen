@@ -226,6 +226,7 @@ export const documentTemplate = html`
   <docen-cross-reference-dialog part="cross-reference"></docen-cross-reference-dialog>
   <docen-sources-dialog part="sources"></docen-sources-dialog>
   <docen-table-properties-dialog part="table-properties"></docen-table-properties-dialog>
+  <docen-drawing-properties-dialog part="drawing-properties"></docen-drawing-properties-dialog>
   <docen-borders-shading-dialog part="borders-shading"></docen-borders-shading-dialog>
   <docen-watermark-dialog part="watermark-dialog"></docen-watermark-dialog>
   <docen-find-replace-dialog></docen-find-replace-dialog>

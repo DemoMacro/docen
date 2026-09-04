@@ -5,7 +5,11 @@ import { TextSelection } from "@tiptap/pm/state";
 import { DocAttrStep } from "@tiptap/pm/transform";
 
 import type { FontDialogPatch } from "../../ui/components/workspace/font-dialog";
-import type { ParagraphDialogPatch, TablePropertiesPatch } from "../extensions/commands";
+import type {
+  DrawingPropertiesPatch,
+  ParagraphDialogPatch,
+  TablePropertiesPatch,
+} from "../extensions/commands";
 import { collectListReferences } from "../extensions/commands";
 
 /** The dialog commands' view of the host — resolved per call so the controller
@@ -97,6 +101,18 @@ export class DialogCommands {
     if (!patch) return;
     const target = this.#target();
     target?.commands["table-properties-apply"]?.(patch);
+    this.host.bridge()?.focus();
+  };
+
+  /** Size-and-Position dialog 确定 — stamp the committed geometry (cm) onto
+   *  the selected floating drawing. */
+  readonly onDrawingPropertiesOk = (
+    event: CustomEvent<DrawingPropertiesPatch | undefined>,
+  ): void => {
+    const patch = event.detail;
+    if (!patch) return;
+    const target = this.#target();
+    target?.commands["drawing-properties-apply"]?.(patch);
     this.host.bridge()?.focus();
   };
 
