@@ -35,6 +35,7 @@ export const ribbonEn: AdditionalLanguage = {
     "ribbon.tab.draw": "Draw",
     "ribbon.tab.table-design": "Table Design",
     "ribbon.tab.table-layout": "Table Layout",
+    "ribbon.tab.header-footer-tools": "Header & Footer",
     // --- Groups: Home ---
     "ribbon.group.clipboard": "Clipboard",
     "ribbon.group.font": "Font",
@@ -94,6 +95,10 @@ export const ribbonEn: AdditionalLanguage = {
     "ribbon.group.rows-columns": "Rows & Columns",
     "ribbon.group.alignment": "Alignment",
     "ribbon.group.data": "Data",
+    // --- Groups: Header & Footer context tab ---
+    "ribbon.group.navigation": "Navigation",
+    "ribbon.group.options": "Options",
+    "ribbon.group.close": "Close",
     // --- Groups: Draw ---
     "ribbon.group.pens": "Pens",
     "ribbon.group.draw-tools": "Tools",
@@ -161,6 +166,9 @@ export const ribbonEn: AdditionalLanguage = {
     "ribbon.cmd.autofit": "AutoFit",
     "ribbon.cmd.distribute-rows": "Distribute Rows",
     "ribbon.cmd.distribute-columns": "Distribute Columns",
+    "ribbon.cmd.goto-header": "Header",
+    "ribbon.cmd.goto-footer": "Footer",
+    "ribbon.cmd.close-header-footer": "Close Header and Footer",
     "ribbon.cmd.cell-width": "Width",
     "ribbon.cmd.cell-height": "Height",
     "ribbon.cmd.cell-margins": "Cell Margins",
@@ -668,6 +676,7 @@ export const ribbonZhCN: AdditionalLanguage = {
     "ribbon.tab.draw": "绘图",
     "ribbon.tab.table-design": "表设计",
     "ribbon.tab.table-layout": "表布局",
+    "ribbon.tab.header-footer-tools": "页眉和页脚",
     // --- Groups: Home ---
     "ribbon.group.clipboard": "剪贴板",
     "ribbon.group.font": "字体",
@@ -727,6 +736,10 @@ export const ribbonZhCN: AdditionalLanguage = {
     "ribbon.group.rows-columns": "行和列",
     "ribbon.group.alignment": "对齐",
     "ribbon.group.data": "数据",
+    // --- Groups: Header & Footer context tab ---
+    "ribbon.group.navigation": "导航",
+    "ribbon.group.options": "选项",
+    "ribbon.group.close": "关闭",
     // --- Groups: Draw ---
     "ribbon.group.pens": "笔",
     "ribbon.group.draw-tools": "工具",
@@ -794,6 +807,9 @@ export const ribbonZhCN: AdditionalLanguage = {
     "ribbon.cmd.autofit": "自动调整",
     "ribbon.cmd.distribute-rows": "分布行",
     "ribbon.cmd.distribute-columns": "分布列",
+    "ribbon.cmd.goto-header": "页眉",
+    "ribbon.cmd.goto-footer": "页脚",
+    "ribbon.cmd.close-header-footer": "关闭页眉和页脚",
     "ribbon.cmd.cell-width": "宽度",
     "ribbon.cmd.cell-height": "高度",
     "ribbon.cmd.cell-margins": "单元格边距",

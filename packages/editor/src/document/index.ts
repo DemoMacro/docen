@@ -103,6 +103,7 @@ import {
   buildContextualTab,
   DEFAULT_RIBBON_TAB,
   formatMeasureTwip,
+  headerFooterContextTab,
   renderRibbonFromSchema,
   ribbonActions,
   ribbonTabs,
@@ -913,6 +914,7 @@ class DocenDocument extends AddinHost<Editor> {
             kind,
             label: t(kind === "header" ? "story.header" : "story.footer", this),
           });
+          this.#showHeaderFooterContextTab();
         },
         onDoc: (kind, slot, json) => this.#renderStoryFurniture(kind, slot, json),
         exit: ({ kind, slot, json, dirty }) => this.#exitStory(kind, slot, json, dirty),
@@ -1156,6 +1158,7 @@ class DocenDocument extends AddinHost<Editor> {
   }
 
   #exitStory(kind: StoryKind, slot: StorySlot, json: JSONContent[], dirty: boolean): void {
+    this.#hideHeaderFooterContextTab();
     this.#stage?.setStoryEdit(null);
     this.#storyKind = null;
     if (dirty) this.#persistStory(kind, slot, json, this.#storyPage);
@@ -1801,6 +1804,49 @@ class DocenDocument extends AddinHost<Editor> {
     };
     stamp("header");
     stamp("footer");
+    // While a story is open the chrome re-stamp may have rebuilt the ribbon —
+    // re-hang the context tab and mirror the flags into its checkboxes.
+    if (this.#storyKind != null) {
+      this.#showHeaderFooterContextTab();
+      const titleCb = this.shadowRoot?.querySelector(
+        'docen-ribbon-checkbox[event="header-option"][value="title-page"]',
+      );
+      titleCb?.toggleAttribute("checked", !!sp?.titlePage);
+      const oddEvenCb = this.shadowRoot?.querySelector(
+        'docen-ribbon-checkbox[event="header-option"][value="odd-even"]',
+      );
+      oddEvenCb?.toggleAttribute("checked", !!sp?.evenAndOddHeaders);
+    }
+  }
+
+  /** Word's Header & Footer Tools — append the contextual tab while a story
+   *  is open and activate it (Word drops you on the tab); idempotent across
+   *  chrome re-stamps. */
+  #showHeaderFooterContextTab(): void {
+    const root = this.shadowRoot;
+    const tablist = root?.querySelector("fluent-tablist");
+    const ribbon = root?.querySelector("docen-ribbon");
+    if (!root || !tablist || !ribbon) return;
+    if (tablist.querySelector("#header-footer-tab")) return;
+    const scope = root.querySelector("docen-workspace") ?? this;
+    const built = buildContextualTab(headerFooterContextTab(), scope);
+    tablist.append(built.tab);
+    ribbon.append(built.panel);
+    tablist.setAttribute("activeid", "header-footer-tab");
+    this.#applyRibbonGreying();
+  }
+
+  #hideHeaderFooterContextTab(): void {
+    const root = this.shadowRoot;
+    const tablist = root?.querySelector("fluent-tablist");
+    const ribbon = root?.querySelector("docen-ribbon");
+    if (!root || !tablist || !ribbon) return;
+    if (!tablist.querySelector("#header-footer-tab")) return;
+    if (tablist.getAttribute("activeid") === "header-footer-tab")
+      tablist.setAttribute("activeid", DEFAULT_RIBBON_TAB);
+    tablist.querySelector("#header-footer-tab")?.remove();
+    ribbon.querySelector('docen-ribbon-panel[value="header-footer-tab"]')?.remove();
+    this.#applyRibbonGreying();
   }
 
   /** Mirror the caret cell's live width/height into the Cell Size combos —
@@ -3564,6 +3610,25 @@ class DocenDocument extends AddinHost<Editor> {
       }
       const page = this.#bridge?.pageOf(editor.state.selection.from);
       if (page != null) this.#bridge?.enterStory(name, page);
+      return;
+    }
+    // The Header & Footer context tab — switch stories (the dirty close rides
+    // the normal exit path), flip the same slot flags, and close.
+    if (name === "goto-header" || name === "goto-footer") {
+      const page =
+        this.#storyPage >= 0 ? this.#storyPage : this.#bridge?.pageOf(editor.state.selection.from);
+      this.#bridge?.exitStory();
+      if (page != null)
+        this.#bridge?.enterStory(name === "goto-header" ? "header" : "footer", page);
+      return;
+    }
+    if (name === "close-header-footer") {
+      this.#bridge?.exitStory();
+      return;
+    }
+    if (name === "header-option") {
+      if (value === "title-page" || value === "odd-even")
+        this.#toggleSectionFlag(value === "title-page" ? "titlePage" : "evenAndOddHeaders");
       return;
     }
     // Page Number — seed a PAGE field at the chosen story's end (Word's

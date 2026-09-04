@@ -90,6 +90,12 @@ export const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   "header",
   "footer",
   "page-number",
+  // The Header & Footer context tab — switch stories, flip the slot flags
+  // (same sectionProperties writes the Insert drop-downs use), and close.
+  "goto-header",
+  "goto-footer",
+  "header-option",
+  "close-header-footer",
   // Symbol opens its grid dialog (insertion arrives via symbol:insert);
   // Bookmark prompts for a name and wraps the selection.
   "symbol",
