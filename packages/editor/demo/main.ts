@@ -216,6 +216,31 @@ const demoDocument = (): JSONContent => ({
         },
       ],
     },
+    // A floating picture (wrap none, EMU offsets) — the drag-to-move and
+    // resize overlay target. The image node is inline-only, so the drawing
+    // rides its anchor paragraph's content (Word: a floating drawing lives
+    // in a run of the paragraph it anchors to). Offsets are EMU
+    // (914400/inch): 4572000 = 1.2" from the margin, 952500 = 0.26" below
+    // the anchor paragraph.
+    {
+      type: "paragraph",
+      content: [
+        {
+          type: "image",
+          attrs: {
+            src: cat.src,
+            width: 140,
+            height: 93,
+            alt: "A floating cat",
+            floating: {
+              horizontalPosition: { relative: "margin", offset: 4572000 },
+              verticalPosition: { relative: "paragraph", offset: 95250 },
+              wrap: { type: "none" },
+            },
+          },
+        },
+      ],
+    },
     // Section break — an explicit next-page section break; the next section
     // starts on a fresh page.
     {

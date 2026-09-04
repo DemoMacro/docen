@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { Document, Image, Paragraph, Table, TableCell, TableRow, WpsShape } from "@docen/docx";
 import { Editor, Node as TextNode, type Editor as EditorType } from "@docen/docx/core";
+import { NodeSelection } from "@tiptap/pm/state";
 import { describe, expect, it } from "vitest";
 
 import { CellSelection } from "../canvas/cell-selection";
@@ -9,21 +10,24 @@ import { DocumentCommands } from "./commands";
 // Tiptap's schema needs the plain text node (same trick as the TOC spec).
 const Text = TextNode.create({ name: "text", group: "inline" });
 
+/** The schema the document commands touch. */
+const EXTENSIONS = [
+  Document,
+  Paragraph,
+  Text,
+  Table,
+  TableRow,
+  TableCell,
+  Image,
+  WpsShape,
+  DocumentCommands,
+];
+
 /** A headless editor with exactly the schema the table commands touch. */
 const build = (): EditorType =>
   new Editor({
     element: null,
-    extensions: [
-      Document,
-      Paragraph,
-      Text,
-      Table,
-      TableRow,
-      TableCell,
-      Image,
-      WpsShape,
-      DocumentCommands,
-    ],
+    extensions: EXTENSIONS,
     content: { type: "doc", content: [{ type: "paragraph" }] },
   });
 
@@ -788,5 +792,113 @@ describe("add-text — TOC level stamps", () => {
     expect(editor.commands["add-text"]("none")).toBe(true);
     expect(headingsOf()[0].heading).toBeNull();
     expect(editor.commands["add-text"]("bogus")).toBe(false);
+  });
+});
+
+describe("move-drawing", () => {
+  /** An offset-anchored floating picture in its own paragraph (Word's anchor
+   *  run shape — the image node is inline-only). */
+  const buildWithFloat = (floating: object): EditorType =>
+    new Editor({
+      element: null,
+      extensions: EXTENSIONS,
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [
+              {
+                type: "image",
+                attrs: { src: "data:,", width: 10, height: 10, floating },
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+  const selectFloat = (editor: EditorType): void => {
+    let pos = -1;
+    editor.state.doc.descendants((node, nodePos) => {
+      if (node.type.name === "image" && pos < 0) {
+        pos = nodePos;
+        return false;
+      }
+      return true;
+    });
+    editor.commands.setNodeSelection(pos);
+  };
+
+  const floatOf = (editor: EditorType): Record<string, unknown> => {
+    let floating: unknown;
+    editor.state.doc.descendants((node) => {
+      if (node.type.name === "image" && floating === undefined) {
+        floating = (node.attrs as Record<string, unknown>).floating;
+        return false;
+      }
+      return true;
+    });
+    return floating as Record<string, unknown>;
+  };
+
+  it("adds the drag delta (EMU) to the selected drawing's offsets", () => {
+    const editor = buildWithFloat({
+      horizontalPosition: { relative: "margin", offset: 1000 },
+      verticalPosition: { relative: "paragraph", offset: 2000 },
+    });
+    selectFloat(editor);
+    expect(editor.commands["move-drawing"](JSON.stringify({ h: 300, v: -500 }))).toBe(true);
+    const floating = floatOf(editor);
+    expect((floating.horizontalPosition as Record<string, unknown>).offset).toBe(1300);
+    expect((floating.verticalPosition as Record<string, unknown>).offset).toBe(1500);
+    // The drag keeps the drawing selected (Word's picture stays grabbed).
+    expect(editor.state.selection instanceof NodeSelection).toBe(true);
+  });
+
+  it("declines with no drawing selected", () => {
+    const editor = buildWithFloat({
+      horizontalPosition: { relative: "margin", offset: 1000 },
+      verticalPosition: { relative: "paragraph", offset: 2000 },
+    });
+    editor.commands.setTextSelection(1);
+    expect(editor.commands["move-drawing"](JSON.stringify({ h: 1, v: 1 }))).toBe(false);
+  });
+
+  it("declines an inline (non-floating) picture selection", () => {
+    const editor = new Editor({
+      element: null,
+      extensions: EXTENSIONS,
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [{ type: "image", attrs: { src: "data:,", width: 10, height: 10 } }],
+          },
+        ],
+      },
+    });
+    selectFloat(editor);
+    expect(editor.commands["move-drawing"](JSON.stringify({ h: 1, v: 1 }))).toBe(false);
+  });
+
+  it("declines an align-anchored float — its position is not an offset", () => {
+    const editor = buildWithFloat({
+      horizontalPosition: { relative: "margin", align: "right" },
+      verticalPosition: { relative: "paragraph", offset: 2000 },
+    });
+    selectFloat(editor);
+    expect(editor.commands["move-drawing"](JSON.stringify({ h: 1, v: 1 }))).toBe(false);
+  });
+
+  it("declines malformed JSON", () => {
+    const editor = buildWithFloat({
+      horizontalPosition: { relative: "margin", offset: 1000 },
+      verticalPosition: { relative: "paragraph", offset: 2000 },
+    });
+    selectFloat(editor);
+    expect(editor.commands["move-drawing"]("not json")).toBe(false);
+    expect(editor.commands["move-drawing"]()).toBe(false);
   });
 });

@@ -18,7 +18,7 @@ import {
   type JSONContent,
 } from "@docen/docx";
 import { Editor } from "@docen/docx/core";
-import type { FlowPage } from "@docen/layout";
+import { EMU_PER_PX, type FlowPage } from "@docen/layout";
 import { UndoRedo } from "@tiptap/extensions";
 import {
   joinBackward,
@@ -700,7 +700,9 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
    *  page-local px at scale 1; the PM node's width/height attrs are px too,
    *  so the write-back is a direct setNodeMarkup (inline pictures size
    *  through the same attrs; a re-render re-anchors the frame via
-   *  drawingBoxOf). */
+   *  drawingBoxOf). A body drag moves the drawing: the px delta converts to
+   *  EMU (the floating attrs' unit) and lands through the engine's
+   *  move-drawing command, which adds it to the current offsets. */
   const drawingOverlay = new DrawingOverlay({
     scale: () => opts.scale?.() ?? 1,
     applyBox: (box) => {
@@ -722,6 +724,14 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
         dispatch?.(tr as never);
         return true;
       });
+    },
+    applyOffset: (dx, dy) => {
+      if (!selDrawing) return;
+      const nodePos = opts.drawingSelection?.(selDrawing) ?? null;
+      if (nodePos == null) return;
+      main.editor.commands["move-drawing"](
+        JSON.stringify({ h: Math.round(dx * EMU_PER_PX), v: Math.round(dy * EMU_PER_PX) }),
+      );
     },
   });
   opts.host.append(drawingOverlay.el);
@@ -756,6 +766,26 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
    *  nearest line regardless of distance — a drag overshooting past the
    *  last line's band must keep extending to the line's end (Word), not
    *  stall the selection mid-line. */
+  /** Whether the selection is a floating drawing both axes anchor by EMU
+   *  offset — the only anchoring a pointer drag can express. Align-anchored
+   *  (and inline) drawings decline: their position isn't an offset. */
+  const movableFloating = (): boolean => {
+    const sel = main.editor.state.selection;
+    if (!(sel instanceof NodeSelection)) return false;
+    const attrs = sel.node.attrs as Record<string, unknown>;
+    const floating =
+      sel.node.type.name === "image"
+        ? (attrs.floating as Record<string, unknown> | null)
+        : ((attrs.wpsShape as Record<string, unknown> | null | undefined)?.floating as Record<
+            string,
+            unknown
+          > | null);
+    if (!floating) return false;
+    const h = floating.horizontalPosition as Record<string, unknown> | undefined;
+    const v = floating.verticalPosition as Record<string, unknown> | undefined;
+    return typeof h?.offset === "number" && typeof v?.offset === "number";
+  };
+
   const posAtClient = (clientX: number, clientY: number, clamp = false): number | null => {
     const s = active();
     const hit = hitPage(clientX, clientY);
@@ -1240,6 +1270,23 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     // any other click drops a standing drawing selection first.
     const drawHit = hit && opts.drawingAt ? opts.drawingAt(hit.page, hit.lx, hit.ly) : null;
     if (drawHit) {
+      // Word: a press on the already-selected offset-anchored floating
+      // drawing starts a move drag (the frame trails the pointer, release
+      // writes the new offsets); the drawing itself stays put until the
+      // drag commits. Any other press (another drawing, an align-anchored
+      // float, or the same one after a re-layout cleared the frame) just
+      // selects.
+      const same =
+        selDrawing &&
+        drawHit.para === selDrawing.para &&
+        drawHit.index === selDrawing.index &&
+        drawHit.kind === selDrawing.kind;
+      if (same && drawingOverlay.active && movableFloating()) {
+        drawingOverlay.beginMove(event.clientX, event.clientY);
+        ta.focus();
+        ta.value = "";
+        return;
+      }
       selectDrawing(drawHit);
       ta.focus();
       ta.value = "";
