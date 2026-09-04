@@ -77,7 +77,9 @@ interface FluentToggleEvent extends Event {
  * action regions). The default slot is the body — any fields or content the
  * caller supplies; the `action` slot is the footer (OK/Cancel). `show()`/
  * `hide()` drive the underlying fluent-dialog (modal: showModal → backdrop +
- * ESC). This is a content-agnostic container — it owns no business fields.
+ * ESC). The title bar drags the dialog (Office dialogs move by their title
+ * row) — fluent-dialog has no drag support of its own. This is a
+ * content-agnostic container — it owns no business fields.
  */
 @customElement({ name: "docen-dialog", template, styles })
 class DocenDialog extends FASTElement {
@@ -88,6 +90,23 @@ class DocenDialog extends FASTElement {
   @observable titleEl?: HTMLElement;
   #nativeDialog?: HTMLElement;
   #backdropRaf = 0;
+  #titleBarRaf = 0;
+  /** The dialog's drag offset (CSS `translate`, kept clear of fluent's own
+   *  transforms); it survives open/close so a re-opened dialog returns to
+   *  where the user left it, Word-style. */
+  #tx = 0;
+  #ty = 0;
+  #drag?: {
+    pointerId: number;
+    startX: number;
+    startY: number;
+    originX: number;
+    originY: number;
+    width: number;
+    height: number;
+    startTx: number;
+    startTy: number;
+  };
   readonly #toggleHandler = (event: Event): void => {
     if ((event as FluentToggleEvent).detail?.newState === "closed") {
       if (this.open) this.open = false;
@@ -114,12 +133,14 @@ class DocenDialog extends FASTElement {
     // (the backdrop region); intercept those in capture phase so only ESC, the
     // close button, or Cancel dismisses the dialog.
     this.#disableBackdropDismiss();
+    this.#resolveTitleBar();
     this.#applyHeading();
     this.#applyOpen();
   }
 
   disconnectedCallback(): void {
     cancelAnimationFrame(this.#backdropRaf);
+    cancelAnimationFrame(this.#titleBarRaf);
     this.dialog?.removeEventListener("toggle", this.#toggleHandler);
     this.#nativeDialog?.removeEventListener("click", this.#backdropHandler, true);
     super.disconnectedCallback();
@@ -144,6 +165,82 @@ class DocenDialog extends FASTElement {
       native.addEventListener("click", this.#backdropHandler, true);
     };
     apply();
+  }
+
+  /** Find the body's title row (the drag handle) once fluent upgrades. */
+  #resolveTitleBar(): void {
+    const apply = (): void => {
+      const body = this.dialog?.querySelector("fluent-dialog-body");
+      const title = body?.shadowRoot?.querySelector<HTMLElement>('[part="title"]');
+      if (!title) {
+        this.#titleBarRaf = requestAnimationFrame(apply);
+        return;
+      }
+      title.style.cursor = "move";
+      title.style.userSelect = "none";
+      title.style.touchAction = "none";
+      title.addEventListener("pointerdown", this.#titlePointerDown);
+      title.addEventListener("pointermove", this.#titlePointerMove);
+      title.addEventListener("pointerup", this.#titlePointerUp);
+    };
+    apply();
+  }
+
+  readonly #titlePointerDown = (event: PointerEvent): void => {
+    if (event.button !== 0) return;
+    // Buttons and fields in the title row (close, title-action widgets) keep
+    // their click behavior — only the blank bar drags.
+    if ((event.target as HTMLElement | null)?.closest("button, a, input, select, textarea")) {
+      return;
+    }
+    const native = this.#nativeDialog;
+    if (!(event.currentTarget instanceof HTMLElement) || !native) return;
+    const rect = native.getBoundingClientRect();
+    this.#drag = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: rect.left,
+      originY: rect.top,
+      width: rect.width,
+      height: rect.height,
+      startTx: this.#tx,
+      startTy: this.#ty,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  };
+
+  readonly #titlePointerMove = (event: PointerEvent): void => {
+    const drag = this.#drag;
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    // Clamp against the viewport from the drag-start rect (which already
+    // includes the current translate): the new offset must keep the dialog
+    // fully on screen. A viewport smaller than the dialog degenerates the
+    // range — the dialog pins to the top-left corner then.
+    this.#tx = Math.max(
+      drag.startTx - drag.originX,
+      Math.min(
+        drag.startTx + window.innerWidth - drag.originX - drag.width,
+        drag.startTx + event.clientX - drag.startX,
+      ),
+    );
+    this.#ty = Math.max(
+      drag.startTy - drag.originY,
+      Math.min(
+        drag.startTy + window.innerHeight - drag.originY - drag.height,
+        drag.startTy + event.clientY - drag.startY,
+      ),
+    );
+    this.#applyTranslate();
+  };
+
+  readonly #titlePointerUp = (event: PointerEvent): void => {
+    if (this.#drag && event.pointerId === this.#drag.pointerId) this.#drag = undefined;
+  };
+
+  #applyTranslate(): void {
+    if (this.#nativeDialog) this.#nativeDialog.style.translate = `${this.#tx}px ${this.#ty}px`;
   }
 
   #applyHeading(): void {
