@@ -71,6 +71,7 @@ import {
   type RibbonMenuItem,
 } from "../ui";
 import type { ColumnsValues } from "../ui/components/workspace/columns-dialog";
+import type { FontDialogPatch } from "../ui/components/workspace/font-dialog";
 import type { LinkValues } from "../ui/components/workspace/link-dialog";
 import type { PageSetupValues } from "../ui/components/workspace/page-setup-dialog";
 import { createDefaultAddin, textCounter } from "./addin";
@@ -1211,6 +1212,11 @@ class DocenDocument extends AddinHost<Editor> {
       "paste-special:ok",
       this.#onPasteSpecialOk as EventListener,
     );
+    // Font dialog — stamp the committed run state onto the selection.
+    this.shadowRoot!.querySelector("docen-font-dialog")?.addEventListener(
+      "font:ok",
+      this.#onFontDialogOk as EventListener,
+    );
     this.shadowRoot!.querySelector("docen-status-bar")?.addEventListener(
       "zoom:open",
       this.#onZoomOpen as EventListener,
@@ -1662,6 +1668,12 @@ class DocenDocument extends AddinHost<Editor> {
     this.shadowRoot
       ?.querySelector("docen-paragraph-dialog")
       ?.removeEventListener("paragraph:ok", this.#onParagraphOk as EventListener);
+    this.shadowRoot
+      ?.querySelector("docen-paste-special-dialog")
+      ?.removeEventListener("paste-special:ok", this.#onPasteSpecialOk as EventListener);
+    this.shadowRoot
+      ?.querySelector("docen-font-dialog")
+      ?.removeEventListener("font:ok", this.#onFontDialogOk as EventListener);
     this.shadowRoot
       ?.querySelector("docen-page-setup-dialog")
       ?.removeEventListener("page-setup:ok", this.#onPageSetupOk as EventListener);
@@ -2629,6 +2641,87 @@ class DocenDocument extends AddinHost<Editor> {
     const target = this.#bridge?.activeEditor() ?? this.editor;
     target?.commands["paragraph-dialog-apply"]?.(patch);
   };
+
+  // The Font dialog's OK — the patch is the selection's absolute run state
+  // (Office commits the dialog atomically): everything lands in ONE chained
+  // transaction, so a single undo reverts the whole dialog. (Separate
+  // commands can't be fired in sequence off one cached commands object:
+  // Tiptap's non-chain commands capture their transaction state once, so a
+  // second dispatch applies a stale tr and PM throws "mismatched transaction".)
+  readonly #onFontDialogOk = (event: CustomEvent<FontDialogPatch | undefined>): void => {
+    const patch = event.detail;
+    if (!patch) return;
+    const target = this.#bridge?.activeEditor() ?? this.editor;
+    if (!target) return;
+    const chain = target.chain();
+    // Native attrs ride one textStyle setMark (attrNative null = absent).
+    chain.setMark("textStyle", {
+      font: patch.font,
+      size: patch.size ? Number(patch.size) : null,
+      doubleStrike: patch.doubleStrike || null,
+      smallCaps: patch.smallCaps || null,
+      allCaps: patch.allCaps || null,
+      vanish: patch.hidden || null,
+    });
+    if (patch.bold) chain.setMark("bold");
+    else chain.unsetMark("bold");
+    if (patch.italic) chain.setMark("italic");
+    else chain.unsetMark("italic");
+    if (patch.strike) chain.setMark("strike");
+    else chain.unsetMark("strike");
+    if (patch.underlineStyle) chain["underline-style"](patch.underlineStyle, patch.underlineColor);
+    else chain.unsetMark("underline");
+    // Sub-/superscript are mutually exclusive marks — commit the checked one
+    // and clear both when neither is.
+    if (patch.superscript) chain.setMark("superscript");
+    else if (patch.subscript) chain.setMark("subscript");
+    else {
+      chain.unsetMark("superscript");
+      chain.unsetMark("subscript");
+    }
+    chain.run();
+    this.#bridge?.focus();
+  };
+
+  // The Font dialog's prefill — the selection's first text run decides every
+  // field (Word reads the same way; a mixed-format selection shows the first
+  // run's values). Underline falls back to the textStyle attr channel when no
+  // underline mark is present (both carry the same w:u shape).
+  #runStateOf(state: EditorState): FontDialogPatch {
+    const seen = new Map<string, Record<string, unknown>>();
+    state.doc.nodesBetween(state.selection.from, state.selection.to, (node) => {
+      if (seen.size > 0) return false;
+      if (!node.isText) return true;
+      for (const m of node.marks)
+        if (!seen.has(m.type.name)) seen.set(m.type.name, m.attrs as Record<string, unknown>);
+      return false;
+    });
+    const ts = seen.get("textStyle") ?? {};
+    const um = seen.get("underline") as
+      | { style?: string | null; color?: string | null }
+      | undefined;
+    const tsU = ts.underline as { type?: string; color?: string } | undefined;
+    const str = (v: unknown): string | null => (typeof v === "string" && v ? v : null);
+    return {
+      font: str(ts.font),
+      size: typeof ts.size === "number" || typeof ts.size === "string" ? String(ts.size) : null,
+      bold: seen.has("bold") || ts.bold === true,
+      italic: seen.has("italic") || ts.italic === true,
+      underlineStyle: um
+        ? (str(um.style) ?? "single")
+        : tsU && tsU.type && tsU.type !== "none"
+          ? tsU.type
+          : null,
+      underlineColor: um ? str(um.color) : str(tsU?.color),
+      strike: seen.has("strike") || ts.strike === true,
+      doubleStrike: ts.doubleStrike === true,
+      superscript: seen.has("superscript"),
+      subscript: seen.has("subscript"),
+      smallCaps: ts.smallCaps === true,
+      allCaps: ts.allCaps === true,
+      hidden: ts.vanish === true,
+    };
+  }
 
   // The table grid's pick (hover grid or the classic dialog shape) — the
   // engine's insert-table takes rows/cols (Word's 3×3 preset is the default).
@@ -3864,6 +3957,16 @@ class DocenDocument extends AddinHost<Editor> {
           } | null
         )?.show(node.attrs as Record<string, unknown>);
       }
+      return;
+    }
+    // Font — open the dialog prefilled from the selection's run marks; the
+    // commit arrives via font:ok (#onFontDialogOk).
+    if (name === "font-dialog") {
+      const target = this.#bridge?.activeEditor() ?? editor;
+      const dialog = this.shadowRoot?.querySelector("docen-font-dialog") as {
+        show(state: FontDialogPatch): void;
+      } | null;
+      if (target && dialog) dialog.show(this.#runStateOf(target.state));
       return;
     }
     // Bookmark — prompt for a name and wrap the selection with a

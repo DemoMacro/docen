@@ -46,7 +46,7 @@ declare module "@tiptap/core" {
       bold: () => ReturnType;
       italic: () => ReturnType;
       underline: () => ReturnType;
-      "underline-style": (style?: string) => ReturnType;
+      "underline-style": (style?: string, color?: string | null) => ReturnType;
       strike: () => ReturnType;
       subscript: () => ReturnType;
       superscript: () => ReturnType;
@@ -921,7 +921,7 @@ export const DocumentCommands = Extension.create({
       // current mark comes from any run in the selection ($from.marks() is
       // empty across a whole-document selection).
       "underline-style":
-        (style) =>
+        (style, color) =>
         ({ state, commands }) => {
           if (!style || style === "none") return commands.unsetMark("underline");
           let current: Mark | undefined;
@@ -932,6 +932,9 @@ export const DocumentCommands = Extension.create({
           return commands.setMark("underline", {
             ...((current?.attrs ?? {}) as Record<string, unknown>),
             style,
+            // The Font dialog passes an explicit color ("automatic" = null);
+            // the ribbon menu omits it and keeps whatever the mark carried.
+            ...(color !== undefined ? { color } : {}),
           });
         },
       strike:

@@ -19,3 +19,4 @@ export { default as DocenLinkDialog } from "./link-dialog";
 export { default as DocenZoomDialog } from "./zoom-dialog";
 export { default as DocenClipboardPane } from "./clipboard-pane";
 export { default as DocenPasteSpecialDialog } from "./paste-special-dialog";
+export { default as DocenFontDialog } from "./font-dialog";

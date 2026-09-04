@@ -110,6 +110,9 @@ export const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   // (the commit arrives via paragraph:ok → the paragraph-dialog-apply
   // command, which stamps every selected paragraph).
   "paragraph-dialog",
+  // Font opens the font dialog prefilled from the selection's run marks
+  // (the commit arrives via font:ok, stamped mark-by-mark by #onFontDialogOk).
+  "font-dialog",
   // Footnote prompts for the note text, references the caret and appends the
   // note body to documentExtras.footnotes. Equation drops a placeholder
   // math template (the gallery's fraction/script/radical/sum/integral) at
