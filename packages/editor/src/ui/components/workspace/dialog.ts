@@ -90,7 +90,7 @@ class DocenDialog extends FASTElement {
   @observable dialog?: FluentDialog;
   @observable titleEl?: HTMLElement;
   @observable closeBtn?: HTMLElement;
-  #nativeDialog?: HTMLElement;
+  #nativeDialog?: HTMLDialogElement;
   #backdropRaf = 0;
   #titleBarRaf = 0;
   /** The dialog's drag offset (CSS `translate`, kept clear of fluent's own
@@ -124,6 +124,10 @@ class DocenDialog extends FASTElement {
     if (event.target === this.#nativeDialog) event.stopImmediatePropagation();
   };
 
+  readonly #nativeCloseHandler = (): void => {
+    if (this.open) this.open = false;
+  };
+
   headingChanged(): void {
     this.#applyHeading();
   }
@@ -153,15 +157,20 @@ class DocenDialog extends FASTElement {
     this.dialog?.removeEventListener("toggle", this.#toggleHandler);
     this.closeBtn?.removeEventListener("click", this.#closeHandler);
     this.#nativeDialog?.removeEventListener("click", this.#backdropHandler, true);
+    this.#nativeDialog?.removeEventListener("close", this.#nativeCloseHandler);
     super.disconnectedCallback();
   }
 
   show(): void {
     this.open = true;
+    // Drive the underlying dialog directly — the openChanged callback alone
+    // proved unreliable when the attr reflection lags behind the write.
+    this.#applyOpen();
   }
 
   hide(): void {
     this.open = false;
+    this.#applyOpen();
   }
 
   #disableBackdropDismiss(): void {
@@ -173,6 +182,9 @@ class DocenDialog extends FASTElement {
       }
       this.#nativeDialog = native;
       native.addEventListener("click", this.#backdropHandler, true);
+      // ESC (cancel→close) dismisses the modal behind our back — keep the
+      // `open` attribute in sync (fluent's toggle event no-ops the same way).
+      native.addEventListener("close", this.#nativeCloseHandler);
     };
     apply();
   }
@@ -264,19 +276,27 @@ class DocenDialog extends FASTElement {
     if (this.titleEl) this.titleEl.textContent = this.heading ?? "";
   }
 
-  // Sync the `open` attribute to fluent-dialog's show/hide. The dialog may not
-  // be upgraded on first connect, so retry once it is.
+  // Sync the `open` attribute to the native <dialog>. The dialog may not be
+  // upgraded on first connect, so retry once it is.
   #applyOpen(): void {
     const dialog = this.dialog;
     if (!dialog || typeof dialog.show !== "function") {
       if (dialog) requestAnimationFrame(() => this.#applyOpen());
       return;
     }
-    // fluent-dialog, like fluent-drawer, has no reliable `open` reflection —
-    // show()/hide() drive the <dialog> directly and are idempotent, so branch
-    // on our own `open` attribute alone.
-    if (this.open) dialog.show();
-    else dialog.hide();
+    // fluent-dialog's show()/hide() route through its own attr pipeline, which
+    // silently no-ops under fast-element 3.0.2 — drive the native <dialog>
+    // directly instead (idempotent, top-layer from showModal alone).
+    const native = this.#nativeDialog;
+    if (!native) {
+      requestAnimationFrame(() => this.#applyOpen());
+      return;
+    }
+    if (this.open) {
+      if (!native.open) native.showModal();
+    } else if (native.open) {
+      native.close();
+    }
   }
 }
 
