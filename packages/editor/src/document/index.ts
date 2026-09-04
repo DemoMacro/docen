@@ -2508,6 +2508,17 @@ class DocenDocument extends AddinHost<Editor> {
       event.stopPropagation();
       return;
     }
+    // Word: a right-click on a picture selects it and shows the picture menu
+    // instead of the text menu — the caret-based branches below never run.
+    if (this.#bridge?.selectDrawingAtClient(event.clientX, event.clientY)) {
+      const items: RibbonMenuItem[] = [];
+      items.push({ text: t("context.bring-forward", this), event: "bring-forward" });
+      items.push({ text: t("context.send-backward", this), event: "send-backward" });
+      items.push({ text: "-" });
+      items.push({ text: t("context.delete-picture", this), event: "delete-picture" });
+      menu.setAttribute("items", JSON.stringify(items));
+      return;
+    }
     const { selection } = editor.state;
     const pos = this.#bridge?.posAtClient(event.clientX, event.clientY) ?? null;
     const inSelection =

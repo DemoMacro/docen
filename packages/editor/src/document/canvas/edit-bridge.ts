@@ -224,6 +224,10 @@ export interface EditBridge {
    *  when the map is stale) — the context menu moves the caret to where it
    *  was right-clicked, like Word. */
   posAtClient(clientX: number, clientY: number): number | null;
+  /** Right-click on a drawing: select the drawing under the viewport point
+   *  (Word selects a picture before its context menu shows). True when a
+   *  drawing was hit and selected. */
+  selectDrawingAtClient(clientX: number, clientY: number): boolean;
   /** The selection's last-line rect against its page frame — frame-relative
    * screen px (zoom applied), the anchor a floating comment compose positions
    * at (Word hangs the reply box in the margin beside the anchored text).
@@ -758,15 +762,16 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     drawingOverlay.refresh(selDrawing, selDrawing.rotation);
   };
 
-  const selectDrawing = (hit: DrawingHit): void => {
+  const selectDrawing = (hit: DrawingHit): boolean => {
     const nodePos = opts.drawingSelection?.(hit) ?? null;
-    if (nodePos == null || !main.editor.state.doc.nodeAt(nodePos)) return;
+    if (nodePos == null || !main.editor.state.doc.nodeAt(nodePos)) return false;
     main.editor.commands.command(({ state, dispatch }) => {
       dispatch?.(state.tr.setSelection(NodeSelection.create(state.doc, nodePos) as never));
       return true;
     });
     selDrawing = hit;
     placeDrawingSel();
+    return true;
   };
 
   /** A viewport point → the active story's doc position (furniture stories
@@ -2156,6 +2161,12 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     },
     posAtClient(clientX, clientY): number | null {
       return posAtClient(clientX, clientY);
+    },
+    selectDrawingAtClient(clientX, clientY) {
+      const hit = hitPage(clientX, clientY);
+      if (!hit || !opts.drawingAt) return false;
+      const drawHit = opts.drawingAt(story ? 0 : hit.page, hit.lx, hit.ly);
+      return drawHit ? selectDrawing(drawHit) : false;
     },
     commentAnchorRect(from, to) {
       // Comments anchor main-doc text — a furniture story's geometry cannot
