@@ -623,6 +623,11 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     const anchor = event.shiftKey ? active().editor.state.selection.anchor : undefined;
     if (clicks >= 2) {
       setSelClick(pos, clicks, anchor);
+      // Word keeps drag-extending after a word/paragraph pick — the drag
+      // anchor is the pick's far edge, not the click point.
+      dragAnchor = active().editor.state.selection.anchor;
+      dragStart = { x: event.clientX, y: event.clientY };
+      dragMoved = false;
       return;
     }
     setSel(pos, anchor);

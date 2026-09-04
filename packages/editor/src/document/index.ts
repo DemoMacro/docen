@@ -2625,7 +2625,10 @@ class DocenDocument extends AddinHost<Editor> {
       }
     });
     // After the leaf atom (pos is its left edge) so the caret sits past it.
-    if (target != null) this.#setTextSelection(target + 1);
+    if (target != null) {
+      this.#setTextSelection(target + 1);
+      this.#bridge?.scrollIntoView(target + 1);
+    }
   }
 
   /** References → Previous Footnote: place the caret on the previous
@@ -2644,7 +2647,10 @@ class DocenDocument extends AddinHost<Editor> {
         // opaque verbatim blob — not a note reference
       }
     });
-    if (target != null) this.#setTextSelection(target + 1);
+    if (target != null) {
+      this.#setTextSelection(target + 1);
+      this.#bridge?.scrollIntoView(target + 1);
+    }
   }
 
   /** One inlinePassthrough comment atom (see #insertComment) → its marker

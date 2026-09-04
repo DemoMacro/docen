@@ -54,7 +54,14 @@ export function installLinkHover(deps: LinkHoverDeps): {
 
   let shownHref: string | null = null;
 
+  // Word's hand cursor over a link — the editing caret stays an I-beam
+  // everywhere else (Ctrl+Click still means "follow" while editing).
+  const setCursor = (on: boolean): void => {
+    deps.host.style.cursor = on ? "pointer" : "";
+  };
+
   const hide = (): void => {
+    setCursor(false);
     if (shownHref == null) return;
     shownHref = null;
     tip.style.display = "none";
@@ -67,6 +74,7 @@ export function installLinkHover(deps: LinkHoverDeps): {
       hide();
       return;
     }
+    setCursor(true);
     const hostRect = deps.host.getBoundingClientRect();
     const hrefChanged = link.href !== shownHref;
     if (hrefChanged) {
