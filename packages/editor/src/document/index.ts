@@ -2512,6 +2512,11 @@ class DocenDocument extends AddinHost<Editor> {
     // instead of the text menu — the caret-based branches below never run.
     if (this.#bridge?.selectDrawingAtClient(event.clientX, event.clientY)) {
       const items: RibbonMenuItem[] = [];
+      // The clipboard entries work on a NodeSelection: the slice payload
+      // carries the whole drawing, deleteSelection cuts it.
+      items.push({ text: t("context.cut", this), event: "cut" });
+      items.push({ text: t("context.copy", this), event: "copy" });
+      items.push({ text: "-" });
       items.push({ text: t("context.bring-forward", this), event: "bring-forward" });
       items.push({ text: t("context.send-backward", this), event: "send-backward" });
       items.push({ text: "-" });
