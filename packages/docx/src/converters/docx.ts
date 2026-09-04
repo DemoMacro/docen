@@ -79,12 +79,21 @@ interface DocxCoreProperties {
   description?: string;
   lastModifiedBy?: string;
   lastPrinted?: string;
-  created?: string;
-  modified?: string;
+  /** W3CDTF; null = the source core.xml carried none (office-open semantics). */
+  created?: string | null;
+  modified?: string | null;
   revision?: number;
+  category?: string;
+  contentStatus?: string;
+  contentType?: string;
+  identifier?: string;
+  language?: string;
+  version?: string;
 }
 
-/** Keys round-tripped between DocumentOptions core properties and `doc.attrs.core`. */
+/** Keys round-tripped between DocumentOptions core properties and
+ *  `doc.attrs.core` — every data field of @office-open/core's
+ *  CorePropertiesOptions except the defaultNamespace emit flag. */
 const CORE_PROPERTY_KEYS: readonly (keyof DocxCoreProperties)[] = [
   "title",
   "subject",
@@ -96,6 +105,12 @@ const CORE_PROPERTY_KEYS: readonly (keyof DocxCoreProperties)[] = [
   "created",
   "modified",
   "revision",
+  "category",
+  "contentStatus",
+  "contentType",
+  "identifier",
+  "language",
+  "version",
 ];
 
 /**

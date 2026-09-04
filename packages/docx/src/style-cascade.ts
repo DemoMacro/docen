@@ -238,13 +238,16 @@ export function mergeTableStyleProps(
     chain.unshift(s); // root first → children override below
     cur = s.basedOn;
   }
+  // Per-key inheritance: a child style's tblBorders/tblCellMar overrides only
+  // the edges it declares — Word keeps the basedOn chain's remaining edges,
+  // so a whole-object swap would lose the parent's other sides.
   let borders: TableBordersOptions | undefined;
   let margins: TableCellMargins | undefined;
   for (const s of chain) {
     const t = s.table;
     if (!t) continue;
-    if (t.borders) borders = t.borders;
-    if (t.margins) margins = t.margins;
+    if (t.borders) borders = { ...borders, ...t.borders };
+    if (t.margins) margins = { ...margins, ...t.margins };
   }
   const out: { borders?: TableBordersOptions; margins?: TableCellMargins } = {};
   if (borders) out.borders = borders;
