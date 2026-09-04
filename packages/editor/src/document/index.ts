@@ -4421,6 +4421,26 @@ class DocenDocument extends AddinHost<Editor> {
       }
       return;
     }
+    // Index — Mark Entry prompts for the entry text and seeds an XE field at
+    // the selection (the invisible marker Word hides from the page); insert
+    // and update collect the XE fields into the Index-styled entry block.
+    if (name === "mark-entry" || name === "insert-index" || name === "update-index") {
+      const target = this.#bridge?.activeEditor() ?? editor;
+      if (name === "mark-entry") {
+        this.#markIndexEntry(target);
+        return;
+      }
+      const pageOf = (pos: number): number | null => {
+        const page = this.#bridge?.pageOf(pos);
+        return typeof page === "number" ? page + 1 : null;
+      };
+      const tabPositionTw = this.#flow
+        ? Math.round(this.#flow.contentWidthPx / twipToPx(1))
+        : undefined;
+      const ran = target.commands[name](pageOf, tabPositionTw);
+      if (!ran) window.alert(t("index.empty", this));
+      return;
+    }
     // Header/Footer — the split's main action opens the story on the caret's
     // page; the drop-down carries remove + the slot-visibility flags.
     if (name === "header" || name === "footer") {
@@ -5302,6 +5322,27 @@ class DocenDocument extends AddinHost<Editor> {
     target.view.dispatch(target.state.tr.insert(from, target.schema.nodeFromJSON(seed)));
     this.#bridge?.focus();
   };
+
+  /** Mark Entry — prompt for the entry text (defaulting to the selection) and
+   *  seed an `XE "…"` field at the selection's end. A cached-less fldSimple
+   *  renders nothing (Word's invisible index marker) but round-trips verbatim
+   *  through DOCX for Insert Index to collect. */
+  #markIndexEntry(target: Editor): void {
+    const { empty, from, to } = target.state.selection;
+    const selected = empty ? "" : target.state.doc.textBetween(from, to, " ");
+    const entry = window.prompt(t("index.prompt", this), selected)?.trim();
+    if (!entry) return;
+    const seed: JSONContent = {
+      type: "inlinePassthrough",
+      attrs: {
+        data: JSON.stringify({
+          simpleField: { instruction: `XE "${entry.replaceAll('"', "''")}"` },
+        }),
+      },
+    } as JSONContent;
+    target.view.dispatch(target.state.tr.insert(to, target.schema.nodeFromJSON(seed)));
+    this.#bridge?.focus();
+  }
 
   /** Mirror the caret's proofing language into the status bar (Word shows the
    *  selection's language there). */

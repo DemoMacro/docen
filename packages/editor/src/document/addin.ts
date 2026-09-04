@@ -4,6 +4,7 @@ import { search } from "prosemirror-search";
 
 import { type DocenAddin, type DocenHost } from "../ui";
 import { DocumentCommands } from "./extensions/commands";
+import { IndexCommands } from "./extensions/index-commands";
 import { Outline, type OutlineAnchor } from "./extensions/outline";
 import { TocCommands } from "./extensions/toc";
 import { TrackChanges } from "./extensions/track-changes";
@@ -70,6 +71,9 @@ export function createDocumentExtensions(opts: {
     // References tab TOC: insert/refresh a tocField built from the doc's
     // headings (page numbers arrive per dispatch via the host's bridge).
     TocCommands,
+    // References tab index: rebuild an index from the doc's XE fields (Mark
+    // Entry prompts in the host; page numbers arrive per dispatch).
+    IndexCommands,
     // Ribbon commands as native Tiptap commands (editor.commands.<event>), so
     // #onCommand routes event → editor.commands[event](value) with no mapping
     // layer. Includes editor.can() for precise ribbon greying.

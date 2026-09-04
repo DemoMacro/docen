@@ -112,6 +112,11 @@ export const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   // Cross-reference (References → Captions) opens its dialog; the commit
   // seeds a cached REF/PAGEREF field pointing at a document bookmark.
   "cross-reference",
+  // Index — Mark Entry prompts and seeds an XE field; insert/update collect
+  // the XE fields into the Index-styled entry block (commands take pageOf).
+  "mark-entry",
+  "insert-index",
+  "update-index",
   // TOC insert/update — dispatch with the bridge's pageOf (page numbers live
   // in the canvas caret map, which editor.commands can't reach).
   "toc",
