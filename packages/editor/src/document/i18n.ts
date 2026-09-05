@@ -768,6 +768,12 @@ export const ribbonEn: AdditionalLanguage = {
     "ribbon.opt.add-text-level-2": "Level 2",
     "ribbon.opt.add-text-level-3": "Level 3",
     "ribbon.opt.add-text-none": "Do Not Show in Table of Contents",
+    // --- Options: Table of Contents split menus ---
+    "ribbon.opt.toc-auto": "Automatic Table",
+    "ribbon.opt.toc-custom": "Custom Table of Contents...",
+    "ribbon.opt.toc-remove": "Remove Table of Contents",
+    "ribbon.opt.toc-update-page": "Update page numbers only",
+    "ribbon.opt.toc-update-all": "Update entire table",
     // --- Options: references / mailings ---
     "ribbon.opt.endnote": "Insert Endnote",
     "ribbon.opt.next-footnote": "Next Footnote",
@@ -932,6 +938,17 @@ export const ribbonEn: AdditionalLanguage = {
     "coverPage.subtitle": "Subtitle",
     "coverPage.author": "Author",
     "coverPage.company": "Company",
+    // --- Table of Contents dialog (custom TOC) ---
+    "tocDialog.title": "Table of Contents",
+    "tocDialog.showPageNumbers": "Show page numbers",
+    "tocDialog.alignPageNumbers": "Right align page numbers",
+    "tocDialog.tabLeader": "Tab leader",
+    "tocDialog.levels": "Show levels",
+    "tocDialog.leader.dot": "Dots",
+    "tocDialog.leader.hyphen": "Dashes",
+    "tocDialog.leader.underscore": "Underscores",
+    "tocDialog.leader.middleDot": "Middle dots",
+    "tocDialog.leader.none": "None",
     // --- Phonetic guide dialog (ruby) ---
     "phoneticDialog.title": "Phonetic Guide",
     "phoneticDialog.alignment": "Alignment",
@@ -1716,6 +1733,12 @@ export const ribbonZhCN: AdditionalLanguage = {
     "ribbon.opt.add-text-level-2": "2 级",
     "ribbon.opt.add-text-level-3": "3 级",
     "ribbon.opt.add-text-none": "不在目录中显示",
+    // --- 选项：目录 split 菜单 ---
+    "ribbon.opt.toc-auto": "自动目录",
+    "ribbon.opt.toc-custom": "自定义目录...",
+    "ribbon.opt.toc-remove": "删除目录",
+    "ribbon.opt.toc-update-page": "只更新页码",
+    "ribbon.opt.toc-update-all": "更新整个目录",
     // --- Options: references / mailings ---
     "ribbon.opt.endnote": "插入尾注",
     "ribbon.opt.next-footnote": "下一脚注",
@@ -1880,6 +1903,17 @@ export const ribbonZhCN: AdditionalLanguage = {
     "coverPage.subtitle": "副标题",
     "coverPage.author": "作者",
     "coverPage.company": "公司",
+    // --- 目录对话框（自定义目录） ---
+    "tocDialog.title": "目录",
+    "tocDialog.showPageNumbers": "显示页码",
+    "tocDialog.alignPageNumbers": "页码右对齐",
+    "tocDialog.tabLeader": "制表符前导符",
+    "tocDialog.levels": "显示级别",
+    "tocDialog.leader.dot": "点线",
+    "tocDialog.leader.hyphen": "短横线",
+    "tocDialog.leader.underscore": "下划线",
+    "tocDialog.leader.middleDot": "中间点",
+    "tocDialog.leader.none": "无",
     // --- 拼音指南对话框（注音） ---
     "phoneticDialog.title": "拼音指南",
     "phoneticDialog.alignment": "对齐方式",

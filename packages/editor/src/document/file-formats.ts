@@ -133,6 +133,9 @@ export const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   // insert-toa — the Table of Authorities pair — stay unwired and greyed).
   "toc",
   "update-toc",
+  "toc-dialog",
+  "remove-toc",
+  "update-toc-page",
   "table-of-figures",
   "update-figures",
   // Header/footer stories — open through the bridge (the same lifecycle as

@@ -1147,6 +1147,17 @@ class DocenDocument extends AddinHost<Editor> {
       ((event: CustomEvent<{ text: string; instruction?: string }>) =>
         this.#insertDateTime(event.detail)) as EventListener,
     );
+    // Custom Table of Contents dialog — insert the TOC with the picked level
+    // window / leader / page-number shape, then repaginate-and-update (the
+    // same post-insert pass as the plain toc command).
+    this.shadowRoot!.querySelector("docen-toc-dialog")?.addEventListener("toc:ok", ((
+      event: CustomEvent<{
+        headingRange: string;
+        leader: string;
+        showPageNumbers: boolean;
+        alignPageNumbers: boolean;
+      }>,
+    ) => this.#insertCustomToc(event.detail)) as EventListener);
     // Phonetic guide dialog — split the selection into per-character ruby
     // runs, or strip the guides off it.
     this.shadowRoot!.querySelector("docen-phonetic-dialog")?.addEventListener(
@@ -3372,6 +3383,30 @@ class DocenDocument extends AddinHost<Editor> {
     editor.commands.insertContentAt(editor.state.selection.from, node);
   }
 
+  /** Custom Table of Contents — run the toc command with the dialog's picks,
+   *  then the same repaginate-and-update pass the plain toc uses. */
+  #insertCustomToc(detail: {
+    headingRange: string;
+    leader: string;
+    showPageNumbers: boolean;
+    alignPageNumbers: boolean;
+  }): void {
+    const editor = this.#bridge?.activeEditor() ?? this.editor;
+    if (!editor) return;
+    const pageOf = (pos: number): number | null => {
+      const page = this.#bridge?.pageOf(pos);
+      return typeof page === "number" ? page + 1 : null;
+    };
+    const tabPositionTw = this.#flow
+      ? Math.round(this.#flow.contentWidthPx / twipToPx(1))
+      : undefined;
+    if (editor.commands.toc(pageOf, tabPositionTw, detail)) {
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => editor.commands["update-toc"](pageOf, tabPositionTw)),
+      );
+    }
+  }
+
   /** Object → Text from File — read a plain-text file in at the caret, one
    *  paragraph per line (Word's Insert File). */
   #insertFileText(): void {
@@ -3560,8 +3595,14 @@ class DocenDocument extends AddinHost<Editor> {
     // numbers come from the canvas caret map; 0-based → Word's 1-based) and
     // the content-width tab stop. Inserting repaginates, so insert re-runs
     // the update once the fresh layout lands (Word's insert-then-update-
-    // fields behavior).
-    if (name === "toc" || name === "update-toc") {
+    // fields behavior). remove-toc drops the block; update-toc-page is
+    // Word's "update page numbers only".
+    if (
+      name === "toc" ||
+      name === "update-toc" ||
+      name === "remove-toc" ||
+      name === "update-toc-page"
+    ) {
       // Insert/update in the story the caret lives in (a header/footer story
       // opening must not send the TOC into the stale main-doc selection).
       const target = this.#bridge?.activeEditor() ?? editor;
@@ -3572,7 +3613,12 @@ class DocenDocument extends AddinHost<Editor> {
       const tabPositionTw = this.#flow
         ? Math.round(this.#flow.contentWidthPx / twipToPx(1))
         : undefined;
-      const ran = target.commands[name](pageOf, tabPositionTw);
+      const ran =
+        name === "remove-toc"
+          ? target.commands["remove-toc"]()
+          : name === "update-toc-page"
+            ? target.commands["update-toc-page"](pageOf)
+            : target.commands[name](pageOf, tabPositionTw);
       if (name === "toc" && ran) {
         // Frame N re-flows (the bridge's raf-merged onDoc), frame N+1 the
         // caret map carries the post-insert pagination.
@@ -3943,6 +3989,12 @@ class DocenDocument extends AddinHost<Editor> {
     // (static text, or a DATE field when "update automatically" is checked).
     if (name === "date-time") {
       (this.shadowRoot?.querySelector("docen-date-time-dialog") as { show(): void } | null)?.show();
+      return;
+    }
+    // Custom Table of Contents — open the dialog; the commit arrives via
+    // toc:ok (#insertCustomToc).
+    if (name === "toc-dialog") {
+      (this.shadowRoot?.querySelector("docen-toc-dialog") as { show(): void } | null)?.show();
       return;
     }
     // Object → Text from File — read a plain-text file at the caret (the

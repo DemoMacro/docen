@@ -19,6 +19,20 @@ const docOf = (...blocks: Record<string, unknown>[]): Record<string, unknown> =>
   content: blocks,
 });
 
+/** The [from, to) text range of the heading paragraph named `text` — entry
+ *  paragraphs carry a TOC style and no heading attr, so they never match. */
+const headingTextRange = (editor: EditorType, text: string): [number, number] => {
+  let range: [number, number] = [0, 0];
+  editor.state.doc.descendants((node, pos) => {
+    if (node.type.name === "paragraph" && node.attrs.heading && node.textContent === text) {
+      range = [pos + 1, pos + 1 + text.length];
+      return false;
+    }
+    return true;
+  });
+  return range;
+};
+
 /** A headless editor with exactly the schema the TOC workflow touches. */
 const build = (doc: Record<string, unknown>): EditorType => {
   const editor = new Editor({
@@ -157,9 +171,10 @@ describe("update-toc command", () => {
     editor.commands.setTextSelection(1);
     editor.commands.toc();
     // Rename a heading, then update: the entry text follows. The inserted TOC
-    // sits before the headings, so "Alpha" now lives at [18, 23).
+    // sits before the headings.
+    const [from, to] = headingTextRange(editor, "Alpha");
     editor.commands.command(({ state, dispatch }) => {
-      dispatch?.(state.tr.insertText("Renamed", 18, 23)); // replace "Alpha"
+      dispatch?.(state.tr.insertText("Renamed", from, to));
       return true;
     });
     expect(editor.commands["update-toc"]()).toBe(true);
@@ -177,6 +192,82 @@ describe("update-toc command", () => {
   it("reports false when the doc has no tocField", () => {
     const editor = build(docOf(heading(1, "Alpha")));
     expect(editor.commands["update-toc"]()).toBe(false);
+    editor.destroy();
+  });
+});
+
+describe("custom toc insert options", () => {
+  it("honors the level window, leader, and unaligned page numbers", () => {
+    const editor = build(docOf(heading(1, "Alpha"), heading(3, "Deep")));
+    editor.commands.setTextSelection(1);
+    editor.commands.toc(() => 5, undefined, {
+      headingRange: "1-2",
+      leader: "hyphen",
+      alignPageNumbers: false,
+    });
+    const entries = entriesOf(editor);
+    // The \o window excludes level 3; the unaligned number trails the entry
+    // text after a space (entriesOf only splits pages off at a tab).
+    expect(entries.map((e) => e.text)).toEqual(["Alpha 5"]);
+    // Unaligned numbers trail the text after a space — no right tab, no leader.
+    expect(entries[0].page).toBe("");
+    expect(entries[0].tabStops).toBeNull();
+    editor.state.doc.descendants((node) => {
+      if (node.type.name === "tocField") {
+        expect(node.attrs.options).toEqual({ headingStyleRange: "1-2", hyperlink: true });
+      }
+      return true;
+    });
+    editor.destroy();
+  });
+
+  it("omits the number run entirely when page numbers are off", () => {
+    const editor = build(docOf(heading(1, "Alpha")));
+    editor.commands.setTextSelection(1);
+    editor.commands.toc(() => 5, undefined, { showPageNumbers: false });
+    const entries = entriesOf(editor);
+    expect(entries[0]).toMatchObject({ style: "TOC1", text: "Alpha", page: "" });
+    expect(entries[0].tabStops).toBeNull();
+    editor.destroy();
+  });
+});
+
+describe("update-toc-page command", () => {
+  it("rewrites only the trailing numbers, keeping every entry's text", () => {
+    const editor = build(docOf(heading(1, "Alpha"), heading(2, "Beta")));
+    editor.commands.setTextSelection(1);
+    editor.commands.toc(() => 2);
+    expect(editor.commands["update-toc-page"](() => 7)).toBe(true);
+    const entries = entriesOf(editor);
+    expect(entries.map((e) => e.text)).toEqual(["Alpha", "Beta"]);
+    expect(entries.map((e) => e.page)).toEqual(["7", "7"]);
+    editor.destroy();
+  });
+
+  it("reports false and keeps the old numbers when no heading maps to a page", () => {
+    const editor = build(docOf(heading(1, "Alpha")));
+    editor.commands.setTextSelection(1);
+    editor.commands.toc(() => 2);
+    expect(editor.commands["update-toc-page"](() => null)).toBe(false);
+    expect(entriesOf(editor).map((e) => e.page)).toEqual(["2"]);
+    editor.destroy();
+  });
+});
+
+describe("remove-toc command", () => {
+  it("deletes the whole TOC block but keeps the headings", () => {
+    const editor = build(docOf(heading(1, "Alpha"), heading(2, "Beta")));
+    editor.commands.setTextSelection(1);
+    editor.commands.toc();
+    expect(editor.commands["remove-toc"]()).toBe(true);
+    expect(editor.state.doc.firstChild?.attrs.heading).toBe("Heading1");
+    expect(entriesOf(editor)).toHaveLength(0);
+    editor.destroy();
+  });
+
+  it("reports false when the doc has no tocField", () => {
+    const editor = build(docOf(heading(1, "Alpha")));
+    expect(editor.commands["remove-toc"]()).toBe(false);
     editor.destroy();
   });
 });
@@ -254,6 +345,20 @@ describe("update-figures command", () => {
     editor.commands.setTextSelection(1);
     editor.commands.toc(); // a heading TOC is not a figure table
     expect(editor.commands["update-figures"]()).toBe(false);
+    editor.destroy();
+  });
+});
+
+describe("heading TOC vs figure table isolation", () => {
+  it("update-toc and remove-toc ignore the \\c figure table", () => {
+    const editor = build(docOf(caption("Figure", "Alpha chart")));
+    editor.commands.setTextSelection(1);
+    editor.commands["table-of-figures"]();
+    // A figures-only document must not be rebuilt as (or deleted by) the
+    // heading-TOC commands.
+    expect(editor.commands["update-toc"]()).toBe(false);
+    expect(editor.commands["remove-toc"]()).toBe(false);
+    expect(entriesOf(editor)).toHaveLength(1);
     editor.destroy();
   });
 });

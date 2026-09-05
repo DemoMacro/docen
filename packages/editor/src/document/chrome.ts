@@ -219,6 +219,7 @@ export const documentTemplate = html`
   <docen-font-dialog part="font"></docen-font-dialog>
   <docen-language-dialog part="language"></docen-language-dialog>
   <docen-date-time-dialog part="date-time"></docen-date-time-dialog>
+  <docen-toc-dialog part="toc"></docen-toc-dialog>
   <docen-phonetic-dialog part="phonetic"></docen-phonetic-dialog>
   <docen-two-in-one-dialog part="two-in-one"></docen-two-in-one-dialog>
   <docen-define-list-dialog part="define-list"></docen-define-list-dialog>

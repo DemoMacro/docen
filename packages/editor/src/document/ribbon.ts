@@ -400,6 +400,23 @@ const addTextItems = (): string =>
     { text: opt("add-text-none"), value: "none" },
   ]);
 
+// References > Table of Contents drop-down (Word lists two auto galleries;
+// one auto build covers the same command here): the auto build, the custom
+// dialog, and the removal.
+const tocItems = (): string =>
+  JSON.stringify([
+    { text: opt("toc-auto"), value: "toc", event: "toc" },
+    { text: opt("toc-custom"), value: "toc-custom", event: "toc-dialog" },
+    { text: opt("toc-remove"), value: "remove-toc", event: "remove-toc" },
+  ]);
+
+// References > Update Table: Word's page-numbers-only vs whole-table pass.
+const updateTocItems = (): string =>
+  JSON.stringify([
+    { text: opt("toc-update-page"), value: "update-toc-page", event: "update-toc-page" },
+    { text: opt("toc-update-all"), value: "update-toc", event: "update-toc" },
+  ]);
+
 const footnoteItems = (): string =>
   JSON.stringify([
     { text: cmd("insert-footnote"), value: "footnote" },
@@ -1104,9 +1121,9 @@ const layoutTab = (): RibbonTab =>
 const referencesTab = (): RibbonTab =>
   tabNode("references", [
     group("toc", [
-      btn("toc", "toc", { size: "large" }),
+      split("toc", "toc", parsedItems(tocItems()), { size: "large" }),
       split("multilevel", "add-text", parsedItems(addTextItems()), { size: "large" }),
-      btn("sync", "update-toc", { size: "large" }),
+      split("sync", "update-toc", parsedItems(updateTocItems()), { size: "large" }),
     ]),
     group("footnotes", [
       split("footnote", "insert-footnote", parsedItems(footnoteItems()), { size: "large" }),

@@ -46,8 +46,10 @@ function buildTocEntries(
   pageOf?: PageOf,
   tabPositionTw = 9350,
   levels: { min: number; max: number } = { min: 1, max: 3 },
+  opts: { leader?: string; showPageNumbers?: boolean; alignPageNumbers?: boolean } = {},
 ): { type: string; attrs?: Record<string, unknown>; content: unknown[] }[] {
   const styles = (doc.attrs as { styles?: StylesOptions }).styles;
+  const { leader = "dot", showPageNumbers = true, alignPageNumbers = true } = opts;
   const out: { type: string; attrs?: Record<string, unknown>; content: unknown[] }[] = [];
   doc.descendants((node, pos) => {
     if (node.type.name !== "paragraph") return true;
@@ -61,12 +63,22 @@ function buildTocEntries(
     );
     if (level == null || level < levels.min || level > levels.max || node.textContent.length === 0)
       return true;
-    const page = pageOf?.(pos + 1);
+    const page = showPageNumbers ? pageOf?.(pos + 1) : undefined;
+    // Unaligned numbers trail the text after a space (Word's "Right align
+    // page numbers" off); aligned ones ride the right leader tab.
+    const numberRun =
+      showPageNumbers && typeof page === "number"
+        ? alignPageNumbers
+          ? [{ type: "tab" }, { type: "text", text: String(page) }]
+          : [{ type: "text", text: ` ${page}` }]
+        : [];
     out.push({
       type: "paragraph",
       attrs: {
         style: `TOC${level}`,
-        tabStops: [{ type: "right", position: tabPositionTw, leader: "dot" }],
+        ...(showPageNumbers && alignPageNumbers
+          ? { tabStops: [{ type: "right", position: tabPositionTw, leader }] }
+          : {}),
         ...(level > 1 ? { indent: { left: (level - 1) * TOC_INDENT_TW } } : {}),
       },
       content: [
@@ -75,10 +87,9 @@ function buildTocEntries(
           text: node.textContent,
           marks: [{ type: "link", attrs: { href: `#_Toc${out.length + 1}` } }],
         },
-        { type: "tab" },
         // A blank page (unmapped heading) omits the number run — an empty
         // text node is illegal in PM.
-        ...(typeof page === "number" ? [{ type: "text", text: String(page) }] : []),
+        ...numberRun,
       ],
     });
     return true;
@@ -86,12 +97,17 @@ function buildTocEntries(
   return out;
 }
 
-/** The first tocField in the doc, with its position (null when none). */
+/** The first tocField in the doc that is a TABLE OF CONTENTS (not the \c
+ *  caption table — a figures-only document must not be rebuilt as a heading
+ *  TOC), with its position (null when none). */
 function findTocField(doc: PMNode): { node: PMNode; pos: number } | null {
   let found: { node: PMNode; pos: number } | null = null;
   doc.descendants((node, pos) => {
     if (found) return false;
-    if (node.type.name === "tocField") {
+    if (
+      node.type.name === "tocField" &&
+      !(node.attrs.options as { captionLabel?: string } | null)?.captionLabel
+    ) {
       found = { node, pos };
       return false;
     }
@@ -179,16 +195,34 @@ export const TocCommands = Extension.create({
       // Insert a fresh TOC (Word's default: heading levels 1-3, hyperlinked)
       // at the caret. Entries build from the live headings; page numbers ride
       // the host's pageOf (null → blank until the post-insert update lands).
-      // PM's nodeFromJSON (not Tiptap's insertContentAt) keeps the command
-      // DOM-free — the viewless editor and the headless tests have no window.
+      // The insert options carry the custom dialog's choices (level window,
+      // tab leader, page numbers); PM's nodeFromJSON (not Tiptap's
+      // insertContentAt) keeps the command DOM-free — the viewless editor and
+      // the headless tests have no window.
       toc:
-        (pageOf?: PageOf, tabPositionTw?: number) =>
+        (
+          pageOf?: PageOf,
+          tabPositionTw?: number,
+          insert?: {
+            headingRange?: string;
+            leader?: string;
+            showPageNumbers?: boolean;
+            alignPageNumbers?: boolean;
+          },
+        ) =>
         ({ state, dispatch }) => {
-          const entries = buildTocEntries(state.doc, pageOf, tabPositionTw);
+          const levels = headingRangeOf(insert?.headingRange);
+          const entries = buildTocEntries(state.doc, pageOf, tabPositionTw, levels, {
+            leader: insert?.leader,
+            showPageNumbers: insert?.showPageNumbers,
+            alignPageNumbers: insert?.alignPageNumbers,
+          });
           if (entries.length === 0) return false;
           const node = state.schema.nodeFromJSON({
             type: "tocField",
-            attrs: { options: { headingStyleRange: "1-3", hyperlink: true } },
+            attrs: {
+              options: { headingStyleRange: insert?.headingRange ?? "1-3", hyperlink: true },
+            },
             content: entries,
           });
           if (!node) return false;
@@ -213,6 +247,76 @@ export const TocCommands = Extension.create({
             const nodes = entries.map((entry) => state.schema.nodeFromJSON(entry));
             tr.replaceWith(found.pos + 1, found.pos + found.node.nodeSize - 1, nodes);
           }
+          return true;
+        },
+      // Word's "Update page numbers only": keep every entry's text and level,
+      // re-deriving just the trailing number run from the live pagination.
+      // Entries map to headings by their text (first match in document order)
+      // — the hyperlinks carry no bookmark to walk back through; an entry
+      // whose heading vanished (or sits on an unmapped page) keeps its number.
+      "update-toc-page":
+        (pageOf?: PageOf) =>
+        ({ state, tr, dispatch }) => {
+          const found = findTocField(state.doc);
+          if (!found) return false;
+          const levels = headingRangeOf(
+            (found.node.attrs.options as { headingStyleRange?: string } | null)?.headingStyleRange,
+          );
+          const styles = (state.doc.attrs as { styles?: StylesOptions }).styles;
+          const pages = new Map<string, number>();
+          state.doc.descendants((node, pos) => {
+            if (node.type.name !== "paragraph") return true;
+            const level = detectHeadingLevel(
+              {
+                heading: (node.attrs.heading as string) || undefined,
+                style: (node.attrs.style as string) || undefined,
+                outlineLevel: node.attrs.outlineLevel as number | undefined,
+              },
+              styles,
+            );
+            if (
+              level == null ||
+              level < levels.min ||
+              level > levels.max ||
+              node.textContent.length === 0
+            )
+              return true;
+            const page = pageOf?.(pos + 1);
+            if (typeof page === "number" && !pages.has(node.textContent))
+              pages.set(node.textContent, page);
+            return true;
+          });
+          if (pages.size === 0) return false;
+          if (!dispatch) return true;
+          const docx = state.schema;
+          found.node.content.forEach((entry, entryOffset) => {
+            const head = entry.firstChild;
+            if (entry.type.name !== "paragraph" || !head || !head.isText) return;
+            const page = pages.get(head.textContent);
+            if (page == null) return;
+            const num = entry.lastChild;
+            if (num && num.isText && num.textContent === String(page)) return;
+            const base = found.pos + 1 + entryOffset + 1;
+            if (num && num.isText) {
+              tr.replaceWith(
+                base + entry.content.size - num.nodeSize,
+                base + entry.content.size,
+                docx.text(String(page)),
+              );
+            } else {
+              tr.insert(base + entry.content.size, docx.text(String(page)));
+            }
+          });
+          return true;
+        },
+      // Word's "Remove Table of Contents": delete the heading TOC block (the
+      // figures table stays — it is a different command's subject).
+      "remove-toc":
+        () =>
+        ({ state, tr, dispatch }) => {
+          const found = findTocField(state.doc);
+          if (!found) return false;
+          if (dispatch) tr.delete(found.pos, found.pos + found.node.nodeSize);
           return true;
         },
       // Insert a table of figures at the caret: one TOC1 entry per caption
@@ -257,8 +361,19 @@ export const TocCommands = Extension.create({
 declare module "@tiptap/core" {
   interface Commands<ReturnType> {
     docenTocCommands: {
-      toc: (pageOf?: PageOf, tabPositionTw?: number) => ReturnType;
+      toc: (
+        pageOf?: PageOf,
+        tabPositionTw?: number,
+        insert?: {
+          headingRange?: string;
+          leader?: string;
+          showPageNumbers?: boolean;
+          alignPageNumbers?: boolean;
+        },
+      ) => ReturnType;
       "update-toc": (pageOf?: PageOf, tabPositionTw?: number) => ReturnType;
+      "update-toc-page": (pageOf?: PageOf) => ReturnType;
+      "remove-toc": () => ReturnType;
       "table-of-figures": (
         pageOf?: PageOf,
         tabPositionTw?: number,
