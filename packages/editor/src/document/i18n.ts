@@ -198,6 +198,8 @@ export const ribbonEn: AdditionalLanguage = {
     "ribbon.cmd.page-number": "Page Number",
     "ribbon.cmd.text-box": "Text Box",
     "ribbon.cmd.wordart": "WordArt",
+    "ribbon.cmd.date-time": "Date & Time",
+    "ribbon.cmd.object": "Object",
     "ribbon.cmd.equation": "Equation",
     "ribbon.cmd.symbol": "Symbol",
     // --- Commands: Design ---
@@ -652,6 +654,8 @@ export const ribbonEn: AdditionalLanguage = {
     "ribbon.opt.cover": "Cover Page",
     "ribbon.opt.blank": "Blank Page",
     "ribbon.opt.page-break": "Page Break",
+    "ribbon.opt.object-dialog": "Object…",
+    "ribbon.opt.file-text": "Text from File…",
     "ribbon.opt.insert-table": "Insert Table…",
     "ribbon.opt.draw-table": "Draw Table",
     "ribbon.opt.convert-text": "Convert Text to Table",
@@ -919,6 +923,15 @@ export const ribbonEn: AdditionalLanguage = {
     // --- Language dialog (proofing language) ---
     "languageDialog.title": "Language",
     "languageDialog.noProof": "Do not check spelling or grammar",
+    // --- Date and Time dialog (Insert → Date and Time) ---
+    "dateDialog.title": "Date and Time",
+    "dateDialog.updateAuto": "Update automatically",
+    // --- WordArt / cover-page placeholders ---
+    "wordArt.placeholder": "Your Text Here",
+    "coverPage.title": "Document Title",
+    "coverPage.subtitle": "Subtitle",
+    "coverPage.author": "Author",
+    "coverPage.company": "Company",
     // --- Phonetic guide dialog (ruby) ---
     "phoneticDialog.title": "Phonetic Guide",
     "phoneticDialog.alignment": "Alignment",
@@ -1134,6 +1147,8 @@ export const ribbonZhCN: AdditionalLanguage = {
     "ribbon.cmd.page-number": "页码",
     "ribbon.cmd.text-box": "文本框",
     "ribbon.cmd.wordart": "艺术字",
+    "ribbon.cmd.date-time": "日期和时间",
+    "ribbon.cmd.object": "对象",
     "ribbon.cmd.equation": "公式",
     "ribbon.cmd.symbol": "符号",
     // --- Commands: Design ---
@@ -1587,6 +1602,8 @@ export const ribbonZhCN: AdditionalLanguage = {
     "ribbon.opt.cover": "封面",
     "ribbon.opt.blank": "空白页",
     "ribbon.opt.page-break": "分页符",
+    "ribbon.opt.object-dialog": "对象…",
+    "ribbon.opt.file-text": "文件中的文字…",
     "ribbon.opt.insert-table": "插入表格…",
     "ribbon.opt.draw-table": "绘制表格",
     "ribbon.opt.convert-text": "文本转换成表格",
@@ -1854,6 +1871,15 @@ export const ribbonZhCN: AdditionalLanguage = {
     // --- 语言对话框（校对语言） ---
     "languageDialog.title": "语言",
     "languageDialog.noProof": "不检查拼写或语法",
+    // --- 日期和时间对话框（插入 → 日期和时间） ---
+    "dateDialog.title": "日期和时间",
+    "dateDialog.updateAuto": "自动更新",
+    // --- 艺术字 / 封面占位文本 ---
+    "wordArt.placeholder": "请在此放置您的文字",
+    "coverPage.title": "文档标题",
+    "coverPage.subtitle": "副标题",
+    "coverPage.author": "作者",
+    "coverPage.company": "公司",
     // --- 拼音指南对话框（注音） ---
     "phoneticDialog.title": "拼音指南",
     "phoneticDialog.alignment": "对齐方式",

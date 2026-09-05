@@ -1140,6 +1140,13 @@ class DocenDocument extends AddinHost<Editor> {
       "language:ok",
       this.#dialogs.onLanguageOk as EventListener,
     );
+    // Date and Time dialog — insert the picked format (static text or a DATE
+    // field when "update automatically" is checked).
+    this.shadowRoot!.querySelector("docen-date-time-dialog")?.addEventListener(
+      "date-time:insert",
+      ((event: CustomEvent<{ text: string; instruction?: string }>) =>
+        this.#insertDateTime(event.detail)) as EventListener,
+    );
     // Phonetic guide dialog — split the selection into per-character ruby
     // runs, or strip the guides off it.
     this.shadowRoot!.querySelector("docen-phonetic-dialog")?.addEventListener(
@@ -3270,6 +3277,126 @@ class DocenDocument extends AddinHost<Editor> {
     } as JSONContent);
   }
 
+  /** WordArt — a centered text box whose single run carries the preset look
+   *  (large, bold, theme accent); Word 2013+ models WordArt the same way. */
+  #insertWordArt(): void {
+    const editor = this.#bridge?.activeEditor() ?? this.editor;
+    if (!editor) return;
+    editor.commands.insertContentAt(editor.state.selection.from, {
+      type: "wpsShape",
+      attrs: {
+        wpsShape: {
+          transformation: { width: 3657600, height: 914400 },
+          fill: { type: "solid", color: "FFFFFF" },
+          outline: { color: "4472C4", width: 12700 },
+          floating: {
+            horizontalPosition: { relative: "page", align: "center" },
+            verticalPosition: { relative: "page", align: "center" },
+            wrap: { type: "none" },
+          },
+        },
+      },
+      content: [
+        {
+          type: "paragraph",
+          content: [
+            {
+              type: "text",
+              text: t("wordArt.placeholder", this),
+              marks: [{ type: "textStyle", attrs: { size: 48, bold: true, color: "4472C4" } }],
+            },
+          ],
+        },
+      ],
+    } as JSONContent);
+  }
+
+  /** Blank Page — two page breaks at the caret: the rest of the current page
+   *  stays empty and a full empty page follows (Word's Blank Page). */
+  #insertBlankPage(): void {
+    const editor = this.#bridge?.activeEditor() ?? this.editor;
+    if (!editor) return;
+    editor
+      .chain()
+      .insertContentAt(editor.state.selection.from, { type: "pageBreak" } as JSONContent)
+      .insertContentAt(editor.state.selection.from, { type: "pageBreak" } as JSONContent)
+      .run();
+  }
+
+  /** Cover Page — a title block at the document start (title/subtitle/author/
+   *  company/date, centered and oversized) followed by a page break. */
+  #insertCoverPage(): void {
+    const editor = this.#bridge?.activeEditor() ?? this.editor;
+    if (!editor) return;
+    const centered = (text: string, attrs: Record<string, unknown>): JSONContent =>
+      ({
+        type: "paragraph",
+        attrs: { alignment: "center" },
+        content: text ? [{ type: "text", text, marks: [{ type: "textStyle", attrs }] }] : undefined,
+      }) as JSONContent;
+    editor.commands.insertContentAt(1, [
+      { type: "paragraph" } as JSONContent,
+      centered(t("coverPage.title", this), { size: 56, bold: true, color: "2E74B5" }),
+      centered(t("coverPage.subtitle", this), { size: 28, color: "595959" }),
+      { type: "paragraph" } as JSONContent,
+      centered(t("coverPage.author", this), { size: 24 }),
+      centered(t("coverPage.company", this), { size: 22, color: "595959" }),
+      centered(
+        new Intl.DateTimeFormat(undefined, {
+          year: "numeric",
+          month: "long",
+          day: "numeric",
+        }).format(new Date()),
+        { size: 22 },
+      ),
+      { type: "pageBreak" } as JSONContent,
+    ]);
+  }
+
+  /** Date and Time — static formatted text, or a DATE field ("update
+   *  automatically") whose cached result renders on canvas and refreshes
+   *  when Word updates fields. */
+  #insertDateTime(detail: { text: string; instruction?: string }): void {
+    const editor = this.#bridge?.activeEditor() ?? this.editor;
+    if (!editor || !detail?.text) return;
+    const node: JSONContent = detail.instruction
+      ? ({
+          type: "inlinePassthrough",
+          attrs: {
+            data: JSON.stringify({
+              simpleField: { instruction: detail.instruction, cachedValue: detail.text },
+            }),
+          },
+        } as JSONContent)
+      : ({ type: "text", text: detail.text } as JSONContent);
+    editor.commands.insertContentAt(editor.state.selection.from, node);
+  }
+
+  /** Object → Text from File — read a plain-text file in at the caret, one
+   *  paragraph per line (Word's Insert File). */
+  #insertFileText(): void {
+    const input = this.shadowRoot?.querySelector<HTMLInputElement>("#text-input");
+    if (!input) return;
+    input.onchange = () => {
+      const file = input.files?.[0];
+      input.value = "";
+      if (!file) return;
+      void file.text().then((text) => {
+        const editor = this.#bridge?.activeEditor() ?? this.editor;
+        if (!editor || !text) return;
+        const paragraphs = text.split(/\r\n|\n|\r/).map(
+          (line) =>
+            ({
+              type: "paragraph",
+              content: line ? [{ type: "text", text: line }] : undefined,
+            }) as JSONContent,
+        );
+        editor.commands.insertContentAt(editor.state.selection.from, paragraphs);
+      });
+    };
+    input.click();
+  }
+
   readonly #onCommand = (event: CustomEvent<{ event?: string; value?: string }>): void => {
     const { event: name, value } = event.detail ?? {};
     if (typeof name !== "string") return;
@@ -3796,6 +3923,32 @@ class DocenDocument extends AddinHost<Editor> {
     // preset from the gallery item's value; the text box has no preset).
     if (name === "text-box" || name === "shapes") {
       this.#insertShape(name === "shapes" ? (value ?? "rect") : undefined);
+      return;
+    }
+    // Insert → Pages menu: a cover block at the document start, or two page
+    // breaks (Word's Blank Page). WordArt inserts a preset-styled text box.
+    if (name === "cover-page") {
+      this.#insertCoverPage();
+      return;
+    }
+    if (name === "blank-page") {
+      this.#insertBlankPage();
+      return;
+    }
+    if (name === "wordart") {
+      this.#insertWordArt();
+      return;
+    }
+    // Date & Time — open the dialog; the commit arrives via date-time:insert
+    // (static text, or a DATE field when "update automatically" is checked).
+    if (name === "date-time") {
+      (this.shadowRoot?.querySelector("docen-date-time-dialog") as { show(): void } | null)?.show();
+      return;
+    }
+    // Object → Text from File — read a plain-text file at the caret (the
+    // Object… OLE entry is greyed: not built).
+    if (name === "insert-file-text") {
+      this.#insertFileText();
       return;
     }
     // Clipboard — the selection is canvas-rendered (no DOM editor selection),

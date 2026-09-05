@@ -218,6 +218,7 @@ export const documentTemplate = html`
   <docen-paste-special-dialog part="paste-special"></docen-paste-special-dialog>
   <docen-font-dialog part="font"></docen-font-dialog>
   <docen-language-dialog part="language"></docen-language-dialog>
+  <docen-date-time-dialog part="date-time"></docen-date-time-dialog>
   <docen-phonetic-dialog part="phonetic"></docen-phonetic-dialog>
   <docen-two-in-one-dialog part="two-in-one"></docen-two-in-one-dialog>
   <docen-define-list-dialog part="define-list"></docen-define-list-dialog>
@@ -233,4 +234,5 @@ export const documentTemplate = html`
   <docen-find-replace-dialog></docen-find-replace-dialog>
   <input type="file" id="file-input" accept=".docx,.md,.markdown" hidden />
   <input type="file" id="image-input" accept="image/*" hidden />
+  <input type="file" id="text-input" accept=".txt,.md,.markdown,text/plain" hidden />
 `;

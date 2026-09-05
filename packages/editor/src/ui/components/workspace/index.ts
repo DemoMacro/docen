@@ -21,6 +21,7 @@ export { default as DocenZoomDialog } from "./zoom-dialog";
 export { default as DocenClipboardPane } from "./clipboard-pane";
 export { default as DocenSpellingPane } from "./spelling-pane";
 export { default as DocenLanguageDialog } from "./language-dialog";
+export { default as DocenDateTimeDialog } from "./date-time-dialog";
 export { default as DocenPhoneticDialog } from "./phonetic-dialog";
 export { default as DocenTwoInOneDialog } from "./two-in-one-dialog";
 export { default as DocenDefineListDialog } from "./define-list-dialog";

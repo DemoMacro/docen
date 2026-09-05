@@ -12,7 +12,9 @@ import arrowUndo from "@fluentui/svg-icons/icons/arrow_undo_24_regular.svg?raw";
 import board from "@fluentui/svg-icons/icons/board_24_regular.svg?raw";
 import bookmark from "@fluentui/svg-icons/icons/bookmark_24_regular.svg?raw";
 import borderAll from "@fluentui/svg-icons/icons/border_all_24_regular.svg?raw";
+import box from "@fluentui/svg-icons/icons/box_24_regular.svg?raw";
 import calculator from "@fluentui/svg-icons/icons/calculator_24_regular.svg?raw";
+import calendarLtr from "@fluentui/svg-icons/icons/calendar_ltr_24_regular.svg?raw";
 import chartMultiple from "@fluentui/svg-icons/icons/chart_multiple_24_regular.svg?raw";
 import checkmarkCircle from "@fluentui/svg-icons/icons/checkmark_circle_24_regular.svg?raw";
 import chevronDown from "@fluentui/svg-icons/icons/chevron_down_24_regular.svg?raw";
@@ -195,6 +197,8 @@ const RIBBON_ICONS: Record<string, string> = {
   "page-break": documentPageBreak,
   table,
   "table-add": tableAdd,
+  "date-time": calendarLtr,
+  object: box,
   // Table context tabs (Table Design / Table Layout)
   "table-simple": tableSimple,
   "table-cursor": tableCursor,

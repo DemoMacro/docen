@@ -225,8 +225,18 @@ const selectItems = (): string =>
 
 const coverItems = (): string =>
   JSON.stringify([
+    { text: opt("cover"), value: "cover", event: "cover-page" },
+    { text: opt("blank"), value: "blank", event: "blank-page" },
     { text: cmd("page-break"), value: "page-break", event: "page-break" },
     { text: cmd("section-break"), value: "section-break", event: "section-break" },
+  ]);
+
+// Word's Object menu: OLE embedding is not built (greyed), but "Text from
+// File" reads a plain-text file in at the caret.
+const objectItems = (): string =>
+  JSON.stringify([
+    { text: opt("object-dialog"), value: "object", disabled: true },
+    { text: opt("file-text"), value: "file", event: "insert-file-text" },
   ]);
 
 const tableItems = (): string =>
@@ -982,6 +992,8 @@ const insertTab = (): RibbonTab =>
     group("text", [
       btn("text-box", "text-box", { size: "large" }),
       btn("wordart", "wordart", { size: "large" }),
+      btn("date-time", "date-time", { size: "large" }),
+      menu("object", "object", parsedItems(objectItems()), { size: "large" }),
     ]),
     group("symbols", [
       menu("equation", "equation", parsedItems(equationItems()), { size: "large" }),

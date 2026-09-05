@@ -209,6 +209,16 @@ export const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   // gallery preset from the split item's value).
   "text-box",
   "shapes",
+  // Insert → Pages menu extras: a cover block at the document start, or two
+  // page breaks (Word's blank half-page + full page). WordArt inserts a
+  // preset-styled text box; Date & Time opens its dialog (static text or a
+  // DATE field); Object's "Text from File" reads a .txt at the caret.
+  "cover-page",
+  "blank-page",
+  "wordart",
+  "date-time",
+  "object",
+  "insert-file-text",
   // View → the four document views write the `view` attribute (Print Layout /
   // Web Layout / Read Mode / Draft); Outline opens the document-structure
   // pane (Word's outline view maps to the navigation pane here).
