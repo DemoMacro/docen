@@ -840,7 +840,9 @@ export const ribbonEn: AdditionalLanguage = {
     "status.spelling": "Spelling",
     // --- Spelling pane ---
     "spelling.suggestions": "Suggestions",
+    "spelling.ignore-once": "Ignore Once",
     "spelling.ignore-all": "Ignore All",
+    "spelling.no-suggestions": "(No Suggestions)",
     "spelling.add": "Add to Dictionary",
     "spelling.empty": "Spelling check complete",
     "spelling.previous": "Previous",
@@ -1773,7 +1775,9 @@ export const ribbonZhCN: AdditionalLanguage = {
     "status.spelling": "拼写检查",
     // --- 拼写检查窗格 ---
     "spelling.suggestions": "建议",
+    "spelling.ignore-once": "忽略一次",
     "spelling.ignore-all": "全部忽略",
+    "spelling.no-suggestions": "(没有建议)",
     "spelling.add": "添加到词典",
     "spelling.empty": "拼写检查完成",
     "spelling.previous": "上一处",

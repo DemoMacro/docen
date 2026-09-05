@@ -92,6 +92,9 @@ const template = html<DocenSpellingPane>`
               ${repeat((x) => x.entries[x.active]?.suggestions ?? [], suggestionTemplate)}
             </div>
             <div class="actions">
+              <fluent-button appearance="neutral" @click="${(x) => x.$emit("spelling:ignore-once")}"
+                >${(x) => t("spelling.ignore-once", x)}</fluent-button
+              >
               <fluent-button appearance="neutral" @click="${(x) => x.$emit("spelling:ignore-all")}"
                 >${(x) => t("spelling.ignore-all", x)}</fluent-button
               >
@@ -114,10 +117,10 @@ const template = html<DocenSpellingPane>`
 
 /**
  * `<docen-spelling-pane>` — Word's Spelling pane: the current misspelling in
- * red with its suggestions, Ignore All / Add to Dictionary, and previous /
- * next stepping. The host owns the check and the navigation; the pane reports
- * intents (`spelling:replace` / `spelling:ignore-all` / `spelling:add` /
- * `spelling:nav`) back.
+ * red with its suggestions, Ignore Once / Ignore All / Add to Dictionary, and
+ * previous / next stepping. The host owns the check and the navigation; the
+ * pane reports intents (`spelling:replace` / `spelling:ignore-once` /
+ * `spelling:ignore-all` / `spelling:add` / `spelling:nav`) back.
  */
 @customElement({ name: "docen-spelling-pane", template, styles })
 class DocenSpellingPane extends FASTElement {

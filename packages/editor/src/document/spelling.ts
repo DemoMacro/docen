@@ -22,6 +22,9 @@ const WORD_RE = /^[A-Za-z][A-Za-z'’-]*$/;
  *  All) — shared by every check run so edits don't lose the user's calls. */
 const addedWords = new Set<string>();
 const ignoredWords = new Set<string>();
+/** Ignore Once: exact positions, so only the flagged occurrence is exempt
+ *  while the rest of the word keeps its squiggles (Word's per-hit ignore). */
+const ignoredOnce = new Set<string>();
 
 /** A word is correct when it (lowercased, or as written — proper nouns sit
  *  outside the lowercase list) hits the built-in list, a host-added word, or
@@ -38,15 +41,20 @@ function known(word: string): boolean {
 
 /** Spell check one document: every text node is segmented into words and
  *  looked up. Numbers, URLs, CJK runs and anything non-word-like are not
- *  candidates (Word's checker behaves the same for a first pass). */
+ *  candidates (Word's checker behaves the same for a first pass). Runs marked
+ *  "do not check spelling" (w:noProof via the language dialog) are skipped. */
 export function checkSpelling(doc: PMNode): SpellingIssue[] {
   const segmenter = new Intl.Segmenter("en", { granularity: "word" });
   const issues: SpellingIssue[] = [];
   doc.descendants((node, pos) => {
     if (!node.isText || !node.text) return;
+    const style = node.marks.find((m) => m.type.name === "textStyle");
+    if (style?.attrs.noProof === true) return;
     for (const { segment, index, isWordLike } of segmenter.segment(node.text)) {
       if (!isWordLike || !WORD_RE.test(segment) || known(segment)) continue;
-      issues.push({ from: pos + index, to: pos + index + segment.length, word: segment });
+      const from = pos + index;
+      if (ignoredOnce.has(`${from}:${segment.toLowerCase()}`)) continue;
+      issues.push({ from, to: from + segment.length, word: segment });
     }
   });
   return issues;
@@ -60,6 +68,13 @@ export function addSpellWord(word: string): void {
 /** Skip every occurrence of a word for this session. */
 export function ignoreSpellWord(word: string): void {
   ignoredWords.add(word.toLowerCase());
+}
+
+/** Skip one occurrence (Ignore Once) — keyed on its position, so other hits
+ *  of the same word stay flagged. The exemption lapses when the text moves
+ *  (an edit reflows the positions), matching how transient Word's is. */
+export function ignoreSpellOnce(issue: SpellingIssue): void {
+  ignoredOnce.add(`${issue.from}:${issue.word.toLowerCase()}`);
 }
 
 /** Damerau-Levenshtein distance (with transpositions) — small words get a

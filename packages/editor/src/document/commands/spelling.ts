@@ -3,6 +3,7 @@ import type { Editor } from "@docen/docx/core";
 import {
   addSpellWord,
   checkSpelling,
+  ignoreSpellOnce,
   ignoreSpellWord,
   spellSuggestions,
   type SpellingIssue,
@@ -100,6 +101,22 @@ export class SpellingCommands {
     this.#syncPane();
   }
 
+  /** Make the issue covering `pos` the active one (no scroll) so the
+   *  replace/ignore commands act on the right-clicked word; returns it. The
+   *  context menu's hit test — the caret already sits on the right-clicked
+   *  word when this runs. A click on a word's trailing edge resolves to the
+   *  boundary after it, so the word that just ended counts too. */
+  activateAt(pos: number): SpellingIssue | null {
+    const hit = (p: number) => this.#issues.findIndex((i) => i.from <= p && p < i.to);
+    const index = hit(pos) >= 0 ? hit(pos) : hit(pos - 1);
+    if (index < 0) return null;
+    this.#active = index;
+    const issue = this.#issues[index];
+    this.host.editor()?.commands.setTextSelection({ from: issue.from, to: issue.to });
+    this.#syncPane();
+    return issue;
+  }
+
   /** The pane's active issue index (the nav stepper offsets from it). */
   activeIndex(): number {
     return this.#active;
@@ -115,12 +132,14 @@ export class SpellingCommands {
     editor.commands.setTextSelection({ from: issue.from, to: issue.from + replacement.length });
   }
 
-  /** Add the active word to the session dictionary, or skip it for this
-   *  session — then re-check, which drops the flagged occurrences. */
-  ignore(mode: "ignore" | "add"): void {
+  /** The ignore levels (Word's pane and context menu): skip one occurrence,
+   *  skip every occurrence of the word for this session, or add it to the
+   *  session dictionary — then re-check, which drops the flagged hits. */
+  ignore(mode: "once" | "ignore" | "add"): void {
     const issue = this.#issues[this.#active];
     if (!issue) return;
     if (mode === "add") addSpellWord(issue.word);
+    else if (mode === "once") ignoreSpellOnce(issue);
     else ignoreSpellWord(issue.word);
     this.run();
   }

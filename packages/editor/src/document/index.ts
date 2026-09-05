@@ -95,9 +95,9 @@ import { RevisionsCommands } from "./commands/revisions";
 import { SectionCommands } from "./commands/sections";
 import { SpellingCommands } from "./commands/spelling";
 import type { StylesInspectorData, StylesPaneState } from "./components/styles-pane";
+import { pagesToPdf } from "./export-pdf";
 // Side-effect import: registers the ribbon/header translation tables.
 import "./i18n";
-import { pagesToPdf } from "./export-pdf";
 import type { ModifyStylePatch } from "./extensions/commands";
 import { tableAncestry, WIRED_DISPATCH } from "./extensions/commands";
 import { LOCAL_HANDLED, READONLY_LIVE, SAVE_FORMATS, detectOpenFormat } from "./file-formats";
@@ -113,6 +113,7 @@ import {
   tableContextTabs,
   useCmUnits,
 } from "./ribbon";
+import { spellSuggestions } from "./spelling";
 
 /** Split buttons whose face carries no command of its own — the handler only
  *  exists for the drop-down variants' values (Word's menu buttons; a face
@@ -909,6 +910,9 @@ class DocenDocument extends AddinHost<Editor> {
       ?.querySelector<HTMLElement>("docen-spelling-pane")
       ?.addEventListener("spelling:replace", ((event: CustomEvent<string>) =>
         this.#spelling.replace(event.detail)) as EventListener);
+    this.shadowRoot
+      ?.querySelector<HTMLElement>("docen-spelling-pane")
+      ?.addEventListener("spelling:ignore-once", () => this.#spelling.ignore("once"));
     this.shadowRoot
       ?.querySelector<HTMLElement>("docen-spelling-pane")
       ?.addEventListener("spelling:ignore-all", () => this.#spelling.ignore("ignore"));
@@ -3087,7 +3091,26 @@ class DocenDocument extends AddinHost<Editor> {
       })();
     // Word: a right-click outside the selection collapses the caret there.
     if (pos != null && !inSelection) editor.commands.setTextSelection(pos);
+    // Word's spelling menu: a right-click on a flagged word leads with its
+    // suggestions and the ignore levels. activateAt marks it active so the
+    // shared replace/ignore commands below act on this occurrence.
+    const spellingHit = pos != null ? this.#spelling.activateAt(pos) : null;
     const items: RibbonMenuItem[] = [];
+    if (spellingHit) {
+      const suggestions = spellSuggestions(spellingHit.word);
+      if (suggestions.length) {
+        for (const suggestion of suggestions) {
+          items.push({ text: suggestion, event: "spell-pick", value: suggestion });
+        }
+      } else {
+        items.push({ text: t("spelling.no-suggestions", this), disabled: true });
+      }
+      items.push({ text: "-" });
+      items.push({ text: t("spelling.ignore-once", this), event: "spell-ignore-once" });
+      items.push({ text: t("spelling.ignore-all", this), event: "spell-ignore-all" });
+      items.push({ text: t("spelling.add", this), event: "spell-add" });
+      items.push({ text: "-" });
+    }
     if (inSelection) {
       items.push({ text: t("context.cut", this), event: "cut" });
       items.push({ text: t("context.copy", this), event: "copy" });
@@ -3835,6 +3858,19 @@ class DocenDocument extends AddinHost<Editor> {
         const first = issues.find((issue) => issue.from >= from) ?? issues[0];
         this.#spelling.goto(issues.indexOf(first));
       }
+      return;
+    }
+    // The context menu's spelling group: replace with the picked suggestion
+    // or apply one of the three ignore levels (the issue was activated when
+    // the menu was built).
+    if (name === "spell-pick") {
+      this.#spelling.replace(value ?? "");
+      return;
+    }
+    if (name === "spell-ignore-once" || name === "spell-ignore-all" || name === "spell-add") {
+      this.#spelling.ignore(
+        name === "spell-ignore-once" ? "once" : name === "spell-ignore-all" ? "ignore" : "add",
+      );
       return;
     }
     // Language (Review → Language, the status-bar language item): the
