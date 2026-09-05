@@ -3300,7 +3300,8 @@ class DocenDocument extends AddinHost<Editor> {
       return;
     }
     // Replace (ribbon Home → Editing → Replace, or Ctrl+H) → Find & Replace dialog.
-    if (name === "replace") {
+    // The Editing group's dialog-box launcher opens the same dialog (Word).
+    if (name === "replace" || name === "find-dialog") {
       this.#navigation.openFindReplace();
       return;
     }
