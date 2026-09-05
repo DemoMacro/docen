@@ -74,6 +74,16 @@ interface GdiFont {
   face?: string;
 }
 
+/** A draft plus its position in the carrier's record stream — the merge key
+ *  that interleaves the GDI walk with the EMF+ comment payloads in true
+ *  replay order (see carrierDrafts). `gdi` marks which walk produced it, the
+ *  flag the dual-mode dedup pass keys on. */
+export interface TaggedDraft {
+  draft: Draft;
+  order: number;
+  gdi?: boolean;
+}
+
 /** Minimum record size (bytes) each handled EMR actually reads through its
  *  fixed offsets — a record smaller than its own layout is a truncated or
  *  lying stream; stop before the reads below run past it (the WMF player's
@@ -112,9 +122,13 @@ const EMR_MIN_SIZE: Partial<Record<number, number>> = {
  *  based (CreateFontIndirectW/CreatePen define a slot, SelectObject activates
  *  it); text color rides on SetTextColor's COLORREF, stroke color on the pen.
  *  `effOf` folds a parent nesting basis into that transform (nested carriers). */
-export function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): Draft[] {
+export function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): TaggedDraft[] {
   const view = new DataView(emf.buffer, emf.byteOffset);
-  const drafts: Draft[] = [];
+  const drafts: TaggedDraft[] = [];
+  // Byte offset of the record currently being replayed — the order tag every
+  // push below stamps (the open-path painter runs outside the loop, so it
+  // reads this rather than receiving `eo`).
+  let order = 0;
   const fonts = new Map<number, GdiFont>();
   const pens = new Map<number, { color: string; width: number }>();
   const brushes = new Map<number, string>();
@@ -159,9 +173,13 @@ export function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): Dr
     if (fill || pen) {
       // The pen width rides the world transform like text does.
       const scale = scaleOf(eff);
-      pushPath(drafts, openPath, eff, {
-        ...(fill ? { fill, fillRule: polyFillMode === 2 ? "nonzero" : "evenodd" } : {}),
-        ...(pen ? { strokeColor: pen.color, strokeWidth: Math.max(pen.width * scale, 1) } : {}),
+      drafts.push({
+        draft: pushPath(openPath, eff, {
+          ...(fill ? { fill, fillRule: polyFillMode === 2 ? "nonzero" : "evenodd" } : {}),
+          ...(pen ? { strokeColor: pen.color, strokeWidth: Math.max(pen.width * scale, 1) } : {}),
+        }),
+        order,
+        gdi: true,
       });
     }
     openPath = null;
@@ -170,6 +188,7 @@ export function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): Dr
     const type = view.getUint32(eo, true);
     const size = view.getUint32(eo + 4, true);
     if (size < 8 || eo + size > emf.length) break;
+    order = eo;
     const min = EMR_MIN_SIZE[type];
     if (min != null && size < min) break;
     switch (type) {
@@ -253,9 +272,13 @@ export function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): Dr
         }
         // The pen width rides the world transform like text does.
         const scale = scaleOf(eff);
-        pushPath(drafts, cmds, eff, {
-          strokeColor: pen.color,
-          strokeWidth: Math.max(pen.width * scale, 1),
+        drafts.push({
+          draft: pushPath(cmds, eff, {
+            strokeColor: pen.color,
+            strokeWidth: Math.max(pen.width * scale, 1),
+          }),
+          order,
+          gdi: true,
         });
         break;
       }
@@ -317,16 +340,20 @@ export function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): Dr
         const [, py2] = xformPoint(eff, dx, dy + dh);
         if (px2 - px <= 0 || py2 - py <= 0) break;
         drafts.push({
-          kind: "pic",
-          x: px,
-          y: py,
-          w: px2 - px,
-          h: py2 - py,
-          src: bmpDataUrl(emf, eo + offBmi, cbBmi + cbBits),
-          ...(low !== 0x20
-            ? { blend: low === 0x86 ? ("screen" as const) : ("multiply" as const) }
-            : {}),
-          ...(crop ? { crop } : {}),
+          draft: {
+            kind: "pic",
+            x: px,
+            y: py,
+            w: px2 - px,
+            h: py2 - py,
+            src: bmpDataUrl(emf, eo + offBmi, cbBmi + cbBits),
+            ...(low !== 0x20
+              ? { blend: low === 0x86 ? ("screen" as const) : ("multiply" as const) }
+              : {}),
+            ...(crop ? { crop } : {}),
+          },
+          order,
+          gdi: true,
         });
         break;
       }
@@ -410,12 +437,16 @@ export function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): Dr
         const pen = pens.get(selectedPen);
         const eff = effOf ? effOf(xf) : xf;
         const scale = scaleOf(eff);
-        pushPath(drafts, cmds, eff, {
-          fill,
-          fillRule: polyFillMode === 2 ? "nonzero" : "evenodd",
-          ...(pen && pen.width > 0
-            ? { strokeColor: pen.color, strokeWidth: Math.max(pen.width * scale, 1) }
-            : {}),
+        drafts.push({
+          draft: pushPath(cmds, eff, {
+            fill,
+            fillRule: polyFillMode === 2 ? "nonzero" : "evenodd",
+            ...(pen && pen.width > 0
+              ? { strokeColor: pen.color, strokeWidth: Math.max(pen.width * scale, 1) }
+              : {}),
+          }),
+          order,
+          gdi: true,
         });
         break;
       }
@@ -617,44 +648,54 @@ export function gdiTextDrafts(emf: Uint8Array, effOf?: (xf: Xform) => Xform): Dr
                 by - vb * cellR,
               ];
               drafts.push({
-                kind: "text",
-                x: Math.min(...xsn),
-                y: Math.min(...ysn),
-                w: Math.max(...xsn) - Math.min(...xsn) + 2,
-                h: Math.max(...ysn) - Math.min(...ysn),
-                text: ch,
-                family: font?.face ?? "",
-                sizeWorld: height,
-                ...(isVerticalPunct(ch) ? { rotation: 90 } : {}),
-                ...(!isVerticalPunct(ch) && cellInset > 0.01 ? { cellInsetWorld: cellInset } : {}),
-                ...(textColor ? { color: textColor } : {}),
-                ...(font && font.weight >= 700 ? { bold: true } : {}),
+                draft: {
+                  kind: "text",
+                  x: Math.min(...xsn),
+                  y: Math.min(...ysn),
+                  w: Math.max(...xsn) - Math.min(...xsn) + 2,
+                  h: Math.max(...ysn) - Math.min(...ysn),
+                  text: ch,
+                  family: font?.face ?? "",
+                  sizeWorld: height,
+                  ...(isVerticalPunct(ch) ? { rotation: 90 } : {}),
+                  ...(!isVerticalPunct(ch) && cellInset > 0.01
+                    ? { cellInsetWorld: cellInset }
+                    : {}),
+                  ...(textColor ? { color: textColor } : {}),
+                  ...(font && font.weight >= 700 ? { bold: true } : {}),
+                },
+                order,
+                gdi: true,
               });
               prefix += step;
               ci++;
             }
           } else {
             drafts.push({
-              kind: "text",
-              x: x * eff.m11 + yBaseline * eff.m21 + eff.dx,
-              y:
-                (textAlign & 0x18) === 0x18
-                  ? refY - height * 0.8
-                  : (textAlign & 0x18) === 0x08
-                    ? refY - height
-                    : refY,
-              w: advance + 2,
-              h: height * 1.35,
-              text,
-              family: font?.face ?? "",
-              sizeWorld: height,
-              ...(spacing ? { letterSpacingWorld: spacing } : {}),
-              ...(Math.abs(angle) > 0.5 ? { rotation: angle } : {}),
-              ...(textColor ? { color: textColor } : {}),
-              // GDI face matching splits at FW_BOLD (700): a 681-weight request
-              // (corpus norm for 微软雅黑) still resolves to the regular face,
-              // and bolding it sinks the label look of the source rendering.
-              ...(font && font.weight >= 700 ? { bold: true } : {}),
+              draft: {
+                kind: "text",
+                x: x * eff.m11 + yBaseline * eff.m21 + eff.dx,
+                y:
+                  (textAlign & 0x18) === 0x18
+                    ? refY - height * 0.8
+                    : (textAlign & 0x18) === 0x08
+                      ? refY - height
+                      : refY,
+                w: advance + 2,
+                h: height * 1.35,
+                text,
+                family: font?.face ?? "",
+                sizeWorld: height,
+                ...(spacing ? { letterSpacingWorld: spacing } : {}),
+                ...(Math.abs(angle) > 0.5 ? { rotation: angle } : {}),
+                ...(textColor ? { color: textColor } : {}),
+                // GDI face matching splits at FW_BOLD (700): a 681-weight request
+                // (corpus norm for 微软雅黑) still resolves to the regular face,
+                // and bolding it sinks the label look of the source rendering.
+                ...(font && font.weight >= 700 ? { bold: true } : {}),
+              },
+              order,
+              gdi: true,
             });
           }
         }

@@ -62,7 +62,6 @@ export interface TextDraft {
 export type Draft = PathDraft | PicDraft | TextDraft;
 
 export function pushPath(
-  drafts: Draft[],
   rawCmds: PathCmds,
   xf: Xform,
   paint: {
@@ -72,7 +71,7 @@ export function pushPath(
     strokeWidth?: number;
     dash?: string;
   },
-): void {
+): PathDraft {
   const transformed: PathCmds = rawCmds.map(([op, nums]) => {
     if (op === "Z") return [op, nums];
     const out: number[] = [];
@@ -82,7 +81,7 @@ export function pushPath(
     }
     return [op, out];
   });
-  drafts.push({
+  return {
     kind: "path",
     cmds: transformed,
     ...(paint.fill
@@ -95,19 +94,18 @@ export function pushPath(
           ...(paint.dash ? { dash: paint.dash } : {}),
         }
       : {}),
-  });
+  };
 }
 
 export function pushRect(
-  drafts: Draft[],
   x: number,
   y: number,
   w: number,
   h: number,
   fill?: string,
-): void {
-  if (!fill || !(w >= 0 && h >= 0)) return;
-  drafts.push({
+): PathDraft | undefined {
+  if (!fill || !(w >= 0 && h >= 0)) return undefined;
+  return {
     kind: "path",
     cmds: [
       ["M", [x, y]],
@@ -117,5 +115,5 @@ export function pushRect(
       ["Z", []],
     ],
     fill,
-  });
+  };
 }

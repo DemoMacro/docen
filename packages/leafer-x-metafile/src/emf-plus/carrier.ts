@@ -9,7 +9,7 @@ import {
 import type { Draft, PathCmds, PathDraft, PicDraft } from "./draft";
 import { pushPath, pushRect } from "./draft";
 import { boxOf, sameBox, sameSourceBlend } from "./finalize";
-import { gdiTextDrafts } from "./gdi";
+import { gdiTextDrafts, type TaggedDraft } from "./gdi";
 import {
   GDIPLUS_VERSION,
   PLUS_DRAW_IMAGE_POINTS,
@@ -35,19 +35,31 @@ const MAX_NESTING = 3;
  *  stream replayed with `basis` pre-applied on top of every world transform,
  *  plus the GDI-side text chain. `basis` carries nested DrawImagePoints
  *  parallelograms: the parent maps the image rect onto it and the child plays
- *  under that mapping. */
+ *  under that mapping.
+ *
+ *  Draft order is the record order of the carrier: each draft is tagged with
+ *  the byte offset of the record that produced it (the EMR_GDICOMMENT header
+ *  for an EMF+ payload, the EMR itself for a GDI record) and the merged list
+ *  sorts on that tag. Word replays the interleaved stream in exactly this
+ *  order, so a dual file whose GDI side paints the band under a later EMF+
+ *  circle keeps that stacking — appending the GDI walk after the EMF+ one
+ *  hoisted every GDI fill above the shared art (the corpus Venn's gradient
+ *  strips drew on top of both circles). */
 export function carrierDrafts(emf: Uint8Array, basis: Xform | undefined, depth: number): Draft[] {
   // Concatenate every EMR_GDICOMMENT "EMF+" payload into one record stream —
-  // one scan collects zero-copy payload views, then a single copy assembles
-  // the contiguous buffer the record walk reads.
+  // one scan collects zero-copy payload views (plus each comment's EMF byte
+  // offset, the merge key), then a single copy assembles the contiguous
+  // buffer the record walk reads.
   const ev = new DataView(emf.buffer, emf.byteOffset, emf.byteLength);
   const parts: Uint8Array[] = [];
+  const partOffsets: number[] = [];
   for (let eo = 0; eo + 8 <= emf.length;) {
     const type = ev.getUint32(eo, true);
     const size = ev.getUint32(eo + 4, true);
     if (size < 8 || eo + size > emf.length) break;
     if (type === 70 && ev.getUint32(eo + 12, true) === 0x2b464d45) {
       parts.push(emf.subarray(eo + 16, eo + size));
+      partOffsets.push(eo);
     }
     eo += size;
   }
@@ -70,9 +82,24 @@ export function carrierDrafts(emf: Uint8Array, basis: Xform | undefined, depth: 
   const objects = new Map<number, unknown>();
   let xf: Xform = { ...IDENTITY };
   const saved: Xform[] = [];
-  const drafts: Draft[] = [];
+  const tagged: TaggedDraft[] = [];
+  // Each EMF+ record tags with the byte offset of its comment record in the
+  // carrier (the merge key shared with the GDI walk) — records past a part
+  // boundary belong to the next comment.
+  const partEnds = parts.map((_, i) => parts.slice(0, i + 1).reduce((n, p) => n + p.length, 0));
+  let partIdx = 0;
+  const order = (): number => {
+    while (partIdx + 1 < partEnds.length && po >= partEnds[partIdx]!) partIdx++;
+    return partOffsets[partIdx] ?? 0;
+  };
+  const emit = (d: Draft): void => {
+    if (d) tagged.push({ draft: d, order: order() });
+  };
   let lastBrush: BrushInfo | undefined;
   let lastPen: PenInfo | undefined;
+  // Position in the concatenated EMF+ stream — function scope because the
+  // order-tag closure reads it.
+  let po = 0;
 
   // Object payloads are [chunkDataSize u32][versionStamp-or-bytes]: complete
   // definitions start with the GDI+ version stamp, continuation chunks carry
@@ -113,7 +140,7 @@ export function carrierDrafts(emf: Uint8Array, basis: Xform | undefined, depth: 
     table.set(slot, obj);
   };
 
-  for (let po = 0; po + 8 <= plus.length;) {
+  for (; po + 8 <= plus.length;) {
     const rt = pv.getUint16(po, true);
     const flags = pv.getUint16(po + 2, true);
     const rs = pv.getUint32(po + 4, true);
@@ -169,7 +196,7 @@ export function carrierDrafts(emf: Uint8Array, basis: Xform | undefined, depth: 
         // inline ([u32][ARGB] behind the header) instead of the last-defined
         // brush — corpus census shows every inlined color is opaque ARGB.
         const fill = flags & 0x8000 ? argbHex(pv.getUint32(d + 4, true)) : lastBrush?.solid;
-        if (path?.cmds && fill) pushPath(drafts, path.cmds, effOf(xf), { fill });
+        if (path?.cmds && fill) emit(pushPath(path.cmds, effOf(xf), { fill }));
         break;
       }
       case PLUS_DRAW_PATH: {
@@ -180,11 +207,13 @@ export function carrierDrafts(emf: Uint8Array, basis: Xform | undefined, depth: 
           // (the same rotation-safe column-norm factor gdiTextDrafts applies).
           const eff = effOf(xf);
           const scale = scaleOf(eff);
-          pushPath(drafts, path.cmds, eff, {
-            strokeColor: lastPen.color,
-            strokeWidth: lastPen.width * scale,
-            ...(lastPen.dash ? { dash: lastPen.dash } : {}),
-          });
+          emit(
+            pushPath(path.cmds, eff, {
+              strokeColor: lastPen.color,
+              strokeWidth: lastPen.width * scale,
+              ...(lastPen.dash ? { dash: lastPen.dash } : {}),
+            }),
+          );
         }
         break;
       }
@@ -210,7 +239,8 @@ export function carrierDrafts(emf: Uint8Array, basis: Xform | undefined, depth: 
           const rh = step === 8 ? pv.getInt16(base + 6, true) : pv.getFloat32(base + 12, true);
           const [x, y] = xformPoint(eff, rx, ry);
           const [x2, y2] = xformPoint(eff, rx + rw, ry + rh);
-          pushRect(drafts, x, y, x2 - x, y2 - y, fill);
+          const rect = pushRect(x, y, x2 - x, y2 - y, fill);
+          if (rect) emit(rect);
         }
         break;
       }
@@ -239,11 +269,13 @@ export function carrierDrafts(emf: Uint8Array, basis: Xform | undefined, depth: 
           cmds.push([i === 0 ? "M" : "L", [px, py]]);
         }
         const scale = scaleOf(eff);
-        pushPath(drafts, cmds, eff, {
-          strokeColor: color,
-          strokeWidth: Math.max((pen?.width ?? 1) * scale, 1),
-          ...(pen?.dash ? { dash: pen.dash } : {}),
-        });
+        emit(
+          pushPath(cmds, eff, {
+            strokeColor: color,
+            strokeWidth: Math.max((pen?.width ?? 1) * scale, 1),
+            ...(pen?.dash ? { dash: pen.dash } : {}),
+          }),
+        );
         break;
       }
       case PLUS_DRAW_IMAGE_POINTS: {
@@ -251,9 +283,9 @@ export function carrierDrafts(emf: Uint8Array, basis: Xform | undefined, depth: 
         const img = objects.get(objectId) as ImageInfo | undefined;
         if (!img) break;
         if (img.emfBytes) {
-          drawNestedImage(img.emfBytes, pv, d, rs, flags, effOf(xf), depth, drafts);
+          drawNestedImage(img.emfBytes, pv, d, rs, flags, effOf(xf), depth, emit);
         } else if (img.src) {
-          drawImagePoints(pv, plus, d, rs, flags, effOf(xf), img, drafts);
+          drawImagePoints(pv, plus, d, rs, flags, effOf(xf), img, emit);
         }
         break;
       }
@@ -280,25 +312,38 @@ export function carrierDrafts(emf: Uint8Array, basis: Xform | undefined, depth: 
   // and survives. Text never drops: the EMF+ walk does not decode DrawString
   // runs yet, and a dual file's GDI text is the same glyphs at the same
   // spots.
-  const plusPaints = drafts
+  const plusPaints = tagged
+    .map((t) => t.draft)
     .filter((dr): dr is PathDraft => dr.kind === "path" && (!!dr.fill || !!dr.strokeColor))
     .map((dr) => ({ fill: dr.fill, box: boxOf(dr) }));
-  const plusHasPic = drafts.some((dr) => dr.kind === "pic");
-  const gdi = gdiTextDrafts(emf, effOf);
-  drafts.push(
-    ...gdi.filter((g) => {
-      if (g.kind === "pic") return !plusHasPic;
-      if (g.kind === "path") {
-        const { fill } = g;
-        const box = boxOf(g);
-        return !(
+  const plusHasPic = tagged.some((t) => t.draft.kind === "pic");
+  // True record order across both encodings, then the dedup pass on the GDI
+  // tail — the same dual-pair rules as before, applied at each GDI draft's
+  // own layer position.
+  const drafts: Draft[] = [];
+  for (const t of tagged.concat(gdiTextDrafts(emf, effOf)).sort((a, b) => a.order - b.order)) {
+    const g = t.draft;
+    if (!t.gdi) {
+      drafts.push(g);
+      continue;
+    }
+    if (g.kind === "pic") {
+      if (!plusHasPic) drafts.push(g);
+    } else if (g.kind === "path") {
+      const { fill } = g;
+      const box = boxOf(g);
+      if (
+        !(
           fill != null &&
           plusPaints.some((p) => sameBox(p.box, box) && sameSourceBlend(p.fill, fill))
-        );
+        )
+      ) {
+        drafts.push(g);
       }
-      return true;
-    }),
-  );
+    } else {
+      drafts.push(g);
+    }
+  }
   return drafts;
 }
 
@@ -314,7 +359,7 @@ function drawNestedImage(
   flags: number,
   outerEff: Xform,
   depth: number,
-  drafts: Draft[],
+  emit: (d: Draft) => void,
 ): void {
   if (depth >= MAX_NESTING) return;
   // rs includes the 8-byte record header (same accounting as FILL_RECTS).
@@ -346,7 +391,7 @@ function drawNestedImage(
     dx: p0[0] - srcX * ((p1[0] - p0[0]) / srcW) - srcY * ((p2[0] - p0[0]) / srcH),
     dy: p0[1] - srcY * ((p2[1] - p0[1]) / srcH) - srcX * ((p1[1] - p0[1]) / srcW),
   };
-  drafts.push(...carrierDrafts(nested, basis, depth + 1));
+  for (const d of carrierDrafts(nested, basis, depth + 1)) emit(d);
 }
 
 function drawImagePoints(
@@ -357,7 +402,7 @@ function drawImagePoints(
   flags: number,
   xf: Xform,
   img: ImageInfo,
-  drafts: Draft[],
+  emit: (d: Draft) => void,
 ): void {
   // Payload layout (corpus-verified against the [MS-EMFPLUS] field table):
   // [attrsId u32][srcUnit u32][reserved u32][SrcRect RectF][count u32][points].
@@ -401,5 +446,5 @@ function drawImagePoints(
   if (crop && !(crop.l > 0.001 || crop.t > 0.001 || crop.r > 0.001 || crop.b > 0.001)) {
     crop = undefined;
   }
-  drafts.push({ kind: "pic", x: minX, y: minY, w, h, src: img.src!, ...(crop ? { crop } : {}) });
+  emit({ kind: "pic", x: minX, y: minY, w, h, src: img.src!, ...(crop ? { crop } : {}) });
 }
