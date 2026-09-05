@@ -28,13 +28,14 @@ const LINE_STYLES = [
   "thick",
 ] as const;
 
-/** The palette row: Word's standard colors (auto = the text ink). */
+/** The palette row: Word's standard colors (auto = the text ink) — the keys
+ *  are the `fontDialog.color*` i18n suffixes. */
 const COLORS: Array<[string | null, string]> = [
   [null, "colorAuto"],
   ["000000", "colorBlack"],
-  ["800000", "colorMaroon"],
+  ["800000", "colorDarkRed"],
   ["008000", "colorGreen"],
-  ["000080", "colorNavy"],
+  ["000080", "colorDarkBlue"],
   ["FF0000", "colorRed"],
   ["FF00FF", "colorMagenta"],
   ["FFFF00", "colorYellow"],
