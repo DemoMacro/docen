@@ -44,6 +44,7 @@ import {
   type FlowPageInsets,
 } from "@docen/layout";
 import { attr, customElement } from "@microsoft/fast-element";
+import { redoDepth, undoDepth } from "@tiptap/pm/history";
 import type { Mark, Node as PMNode } from "@tiptap/pm/model";
 import { EditorState, NodeSelection, TextSelection, type Transaction } from "@tiptap/pm/state";
 
@@ -134,6 +135,7 @@ const QAT_CANDIDATES: readonly { id: string; icon: string; labelKey: string }[] 
   { id: "print", icon: "print", labelKey: "header.print" },
   { id: "undo", icon: "undo", labelKey: "header.undo" },
   { id: "redo", icon: "redo", labelKey: "header.redo" },
+  { id: "repeat", icon: "repeat", labelKey: "header.repeat" },
   { id: "spell-check", icon: "spell-check", labelKey: "ribbon.cmd.spell-check" },
 ];
 const QAT_DEFAULT: readonly string[] = ["save", "undo", "redo"];
@@ -1090,6 +1092,10 @@ class DocenDocument extends AddinHost<Editor> {
     // items are built before <docen-context-menu>'s own capture handler opens
     // the Fluent menu (capture runs outermost-first).
     this.shadowRoot!.addEventListener("contextmenu", this.#onContextMenu as EventListener, true);
+    // QAT undo/redo history flyouts — click delegation on the shadow root (the
+    // title bar is re-stamped per #renderChrome): a caret trigger fills its
+    // list with the live depths, an entry rewinds/advances that many steps.
+    this.shadowRoot!.addEventListener("click", this.#onHistoryClick as EventListener);
     this.#fileInput.addEventListener("change", this.#onFileChange);
     this.#imageInput.addEventListener("change", this.#onImageChange);
     // Outline (Headings tab) → jump to the clicked heading.
@@ -2114,11 +2120,24 @@ class DocenDocument extends AddinHost<Editor> {
         : "";
     const autosave = t("header.autosave", this);
     const qatIds = this.#qatIds();
+    // Undo/redo carry Word's QAT history flyout: a narrow caret next to the
+    // button opens the step list (#fillHistory fills it on open).
+    const historyMenu = (kind: "undo" | "redo") => `
+            <fluent-menu>
+              <fluent-menu-button
+                slot="trigger"
+                appearance="subtle"
+                data-history-trigger="${kind}"
+                title="${t(kind === "undo" ? "header.undo-history" : "header.redo-history", this)}"
+                style="min-width:14px;padding-inline:1px"
+              ><span style="display:inline-flex;width:10px;height:10px;overflow:hidden">${ribbonIcon("caret") ?? ""}</span></fluent-menu-button>
+              <fluent-menu-list data-history-list="${kind}"></fluent-menu-list>
+            </fluent-menu>`;
     const qatButtons = QAT_CANDIDATES.filter((c) => qatIds.includes(c.id))
-      .map(
-        (c) =>
-          `<docen-ribbon-button icon="${c.icon}" label="${t(c.labelKey, this)}" event="${c.id}" icon-only></docen-ribbon-button>`,
-      )
+      .map((c) => {
+        const button = `<docen-ribbon-button icon="${c.icon}" label="${t(c.labelKey, this)}" event="${c.id}" icon-only></docen-ribbon-button>`;
+        return c.id === "undo" || c.id === "redo" ? button + historyMenu(c.id) : button;
+      })
       .join("");
     const qatMenuItems = QAT_CANDIDATES.map((c) => {
       const on = qatIds.includes(c.id);
@@ -2224,6 +2243,48 @@ class DocenDocument extends AddinHost<Editor> {
     this.#syncCellSize();
     this.#renderPanes();
   }
+
+  /** Fill a QAT history flyout with one entry per available step. PM's history
+   *  keeps no per-item labels, so entries read "Edit N"; picking entry N
+   *  rewinds/advances N steps at once (Word's flyout shape). */
+  #fillHistory(kind: "undo" | "redo"): void {
+    const editor = this.#bridge?.activeEditor() ?? this.editor;
+    const list = this.shadowRoot?.querySelector(`[data-history-list="${kind}"]`);
+    if (!editor || !list) return;
+    const depth = kind === "undo" ? undoDepth(editor.state) : redoDepth(editor.state);
+    const label = t("header.history-item", this);
+    const items: string[] = [];
+    for (let steps = depth; steps >= 1; steps--) {
+      items.push(
+        `<fluent-menu-item data-history-kind="${kind}" data-history-steps="${steps}">${label.replace("{0}", String(steps))}</fluent-menu-item>`,
+      );
+    }
+    list.innerHTML = items.join("");
+  }
+
+  /** Shadow-root click delegation for the history flyouts: the caret trigger
+   *  fills its list before Fluent opens it; an entry batch-runs that many
+   *  undo()/redo() commands (each its own transaction, stop at the first
+   *  refusal). */
+  readonly #onHistoryClick = (event: Event): void => {
+    const target = event.target as HTMLElement | null;
+    const trigger = target?.closest?.("[data-history-trigger]");
+    if (trigger) {
+      this.#fillHistory(trigger.getAttribute("data-history-trigger") as "undo" | "redo");
+      return;
+    }
+    const item = target?.closest?.("[data-history-steps]") as HTMLElement | null;
+    if (!item || item.hasAttribute("disabled")) return;
+    const editor = this.#bridge?.activeEditor() ?? this.editor;
+    if (!editor) return;
+    const kind = item.getAttribute("data-history-kind");
+    const steps = Number(item.getAttribute("data-history-steps"));
+    if (!Number.isInteger(steps) || steps < 1) return;
+    for (let i = 0; i < steps; i++) {
+      const ok = kind === "redo" ? editor.commands.redo() : editor.commands.undo();
+      if (!ok) break;
+    }
+  };
 
   /** Addin registry changed (add-in registered/removed) — re-stamp the ribbon
    *  so an external add-in's ribbon contribution appears. The default add-in
@@ -3654,6 +3715,18 @@ class DocenDocument extends AddinHost<Editor> {
     // Word Count (ribbon Review → Proofing) → the statistics dialog.
     if (name === "word-count") {
       this.#showWordCount();
+      return;
+    }
+    // Repeat (QAT; F4 lives in the bridge) — retype the last plain-text
+    // insertion at the caret. The bridge records it on the editor's storage;
+    // both entry points read that single source.
+    if (name === "repeat") {
+      const editor = this.#bridge?.activeEditor() ?? this.editor;
+      const repeat = (editor?.storage as { repeat?: string } | undefined)?.repeat;
+      if (editor && repeat) {
+        const { from, to } = editor.state.selection;
+        editor.view.dispatch(editor.state.tr.insertText(repeat, from, to));
+      }
       return;
     }
     // The Table button's face opens the hover grid; its dropdown's Insert

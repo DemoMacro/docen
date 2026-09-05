@@ -351,6 +351,15 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
   const main = makeStory(opts.content, opts.onDoc, -1);
   let story: Story | null = null;
   const active = (): Story => story ?? main;
+  // Word's Repeat (F4): the last plain-text typing session, kept on the
+  // editor's storage so the host's repeat command shares this single source.
+  // Consecutive insertText calls merge into one session ("typing a word");
+  // any other transaction (caret move, delete, format, undo) ends it — the
+  // recorded text stays repeatable, the next typing starts fresh. Multi-line
+  // insertions (an insertContent paste shape) clear the record outright.
+  // The marker rides the attachTransactions listener below, so it must exist
+  // before any editor transaction can fire.
+  let repeatInsert: string | null = null;
   // The main editor stays the public `editor` surface (document commands,
   // schema reads) — furniture stories are reachable only through the story
   // lifecycle below.
@@ -358,9 +367,18 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
 
   /** Content changes ride the story's own render (the map feed re-places).
    *  Everything else that still moves pixels — selection metas — re-places
-   *  synchronously; idempotent with the selectionUpdate path. */
+   *  synchronously; idempotent with the selectionUpdate path. Also owns the
+   *  Repeat typing-session bookkeeping (see repeatInsert above). */
   const attachTransactions = (s: Story): void => {
     s.editor.on("transaction", ({ transaction }) => {
+      const storage = s.editor.storage as { repeat?: string; repeatLive?: boolean };
+      if (repeatInsert !== null) {
+        storage.repeat = storage.repeatLive ? (storage.repeat ?? "") + repeatInsert : repeatInsert;
+        storage.repeatLive = true;
+        repeatInsert = null;
+      } else if (storage.repeatLive) {
+        storage.repeatLive = false;
+      }
       if (transaction.docChanged) s.schedule();
       else if (active() === s) placeCaret();
     });
@@ -1423,13 +1441,20 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
         content: line ? [{ type: "text", text: line }] : [],
       }));
       active().editor.commands.insertContent(paragraphs);
+      const storage = active().editor.storage as { repeat?: string; repeatLive?: boolean };
+      storage.repeat = undefined;
+      storage.repeatLive = false;
       return;
     }
+    repeatInsert = text;
     active().editor.commands.command(({ state, dispatch }) => {
       const { from, to } = state.selection;
       dispatch?.(state.tr.insertText(text, from, to));
       return true;
     });
+    // The transaction listener consumes the marker; this only covers a
+    // refused command (no dispatch, no event).
+    repeatInsert = null;
   };
 
   const backspace = (word = false): void => {
@@ -1840,6 +1865,15 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
         }
         return true;
       });
+      return;
+    }
+    // F4 (Word Repeat) — retype the last text insertion at the caret.
+    if (event.key === "F4" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      event.preventDefault();
+      if (editable) {
+        const repeat = (active().editor.storage as { repeat?: string }).repeat;
+        if (repeat) insertText(repeat);
+      }
       return;
     }
     if (event.ctrlKey || event.metaKey) {

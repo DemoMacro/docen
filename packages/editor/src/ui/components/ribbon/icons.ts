@@ -5,6 +5,7 @@ import arrowBidirectionalUpDown from "@fluentui/svg-icons/icons/arrow_bidirectio
 import arrowExpand from "@fluentui/svg-icons/icons/arrow_expand_24_regular.svg?raw";
 import arrowMaximizeVertical from "@fluentui/svg-icons/icons/arrow_maximize_vertical_24_regular.svg?raw";
 import arrowRedo from "@fluentui/svg-icons/icons/arrow_redo_24_regular.svg?raw";
+import arrowRepeatAll from "@fluentui/svg-icons/icons/arrow_repeat_all_24_regular.svg?raw";
 import arrowRotateClockwise from "@fluentui/svg-icons/icons/arrow_rotate_clockwise_24_regular.svg?raw";
 import arrowSort from "@fluentui/svg-icons/icons/arrow_sort_24_regular.svg?raw";
 import arrowSync from "@fluentui/svg-icons/icons/arrow_sync_24_regular.svg?raw";
@@ -274,6 +275,7 @@ const RIBBON_ICONS: Record<string, string> = {
   save,
   undo: arrowUndo,
   redo: arrowRedo,
+  repeat: arrowRepeatAll,
   share,
   edit,
   people,

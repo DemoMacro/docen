@@ -95,6 +95,9 @@ export const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   "format-painter",
   "edit-mode",
   "word-count",
+  // Repeat (QAT; F4 lives in the bridge) — the host dispatches the recorded
+  // insertion from the editor's storage.
+  "repeat",
   // Spelling opens the proofing pane (Review → Spelling & Grammar); the
   // check itself and the pane actions are host state (#runSpellCheck).
   "spell-check",
