@@ -702,18 +702,9 @@ export class CaretMap {
             if (first == null || item.xPx < first) first = item.xPx;
             last = Math.max(last, item.xPx + item.widthPx);
           }
-          const slack = line.line.maxWidthPx ?? 0;
-          const shift =
-            first == null
-              ? line.para.align === "center"
-                ? slack / 2
-                : line.para.align === "right"
-                  ? slack
-                  : 0
-              : 0;
           rects.push({
             page: line.page,
-            xPx: line.xPx + (first ?? shift),
+            xPx: line.xPx + (first ?? this.emptyLineShift(line)),
             yPx: line.yPx,
             widthPx:
               first == null ? Math.min(8, line.line.maxWidthPx ?? 8) : Math.max(last - first, 2),
@@ -1022,6 +1013,13 @@ export class CaretMap {
     return resolved ?? char;
   }
 
+  /** An empty line renders no items — its single caret/selection stub sits at
+   *  the alignment's share of the slack (center: half, right: all, left: 0). */
+  private emptyLineShift(line: LineEntry): number {
+    const slack = line.line.maxWidthPx ?? 0;
+    return line.para.align === "center" ? slack / 2 : line.para.align === "right" ? slack : 0;
+  }
+
   /** Collapsed-char offset → page-local x within its line. */
   private xOfChar(line: LineEntry, offset: number): number {
     let char = line.startChar;
@@ -1075,9 +1073,6 @@ export class CaretMap {
     }
     const last = line.line.items[line.line.items.length - 1];
     if (last) return line.xPx + last.xPx + last.widthPx;
-    const slack = line.line.maxWidthPx ?? 0;
-    const shift =
-      line.para.align === "center" ? slack / 2 : line.para.align === "right" ? slack : 0;
-    return line.xPx + shift;
+    return line.xPx + this.emptyLineShift(line);
   }
 }

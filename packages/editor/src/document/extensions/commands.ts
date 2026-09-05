@@ -284,20 +284,16 @@ export interface ModifyStylePatch {
   color: string | null;
 }
 
-export const ALIGN_VALUES = ["left", "center", "right", "both", "distribute"] as const;
+const ALIGN_VALUES = ["left", "center", "right", "both", "distribute"] as const;
 
-/** Normalize incoming paragraph alignment (e.g. from CSS/OOXML start/end/justify) to standard options. */
+// CSS/OOXML synonyms fold onto the paragraph attr's vocabulary.
+const ALIGN_ALIASES: Record<string, string> = { start: "left", end: "right", justify: "both" };
+
+/** Normalize an incoming paragraph alignment (w:jc val, CSS text-align, or a
+ *  dialog string) onto the paragraph attr's vocabulary; unknown → "left". */
 export function normalizeParagraphAlignment(raw: unknown): string {
-  const alignment = typeof raw === "string" ? raw : "left";
-  const mapped =
-    alignment === "end"
-      ? "right"
-      : alignment === "start"
-        ? "left"
-        : alignment === "justify"
-          ? "both"
-          : alignment;
-  return (ALIGN_VALUES as readonly string[]).includes(mapped) ? mapped : "left";
+  const alignment = typeof raw === "string" ? (ALIGN_ALIASES[raw] ?? raw) : "left";
+  return (ALIGN_VALUES as readonly string[]).includes(alignment) ? alignment : "left";
 }
 
 export interface ParagraphDialogPatch {
@@ -592,6 +588,9 @@ function selectedParagraphs(state: EditorState): { pos: number; node: PMNode }[]
   return out;
 }
 
+/** Stamp the alignment onto every selected paragraph directly — PM's
+ *  updateAttributes would walk the CellSelection's bounding range and bleed
+ *  onto cells the rectangular selection skips. */
 function setParagraphAlignment(state: EditorState, tr: Transaction, alignment: string): boolean {
   const paras = selectedParagraphs(state);
   if (!paras.length) return false;
@@ -1801,7 +1800,9 @@ export const DocumentCommands = Extension.create({
       "align-cell":
         (value) =>
         ({ state, dispatch }) => {
-          const spec = CELL_ALIGN[value || "mc"];
+          // No value = the split's primary face — Word defaults it to
+          // middle-center (what the button's icon shows).
+          const spec = CELL_ALIGN[value ?? "mc"];
           if (!spec) return false;
           const targets = tableTargets(state);
           if (!targets) return false;
@@ -2949,6 +2950,8 @@ export const DocumentCommands = Extension.create({
       "align-objects":
         (value) =>
         ({ state, tr }) => {
+          // No value = the split's primary face — Word defaults it to left
+          // (the button's icon); an unknown value declines.
           const align =
             value === "center" || value === "right"
               ? value

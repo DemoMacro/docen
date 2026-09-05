@@ -797,6 +797,8 @@ function paintLineMarks(
   const paragraphEnd = para.inline.length === 0 || line.endInlineIndex >= para.inline.length - 1;
   if (!paragraphEnd && endInline?.kind !== "break") return;
   const last = line.items[line.items.length - 1];
+  // An empty line paints no items — its ↵ mark rides the alignment's share of
+  // the slack (center: half, right: all), like the caret stub in the editor.
   const emptySlack = line.maxWidthPx ?? 0;
   const emptyShift =
     para.align === "center" ? emptySlack / 2 : para.align === "right" ? emptySlack : 0;
