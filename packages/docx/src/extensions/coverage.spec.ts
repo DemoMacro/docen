@@ -466,6 +466,52 @@ describe("real-XML round-trip (generateDocument → parseDocument)", () => {
     expect(picture.picture.altText?.name).toBe("probe");
   });
 
+  it("oversized picture skips the base64 round-trip via the media registry", () => {
+    // Above MEDIA_INLINE_LIMIT the resolve leg must hand out a registered
+    // blob: URL (no megabyte base64 string in the attrs) and the compile leg
+    // must recover the original bytes from the registry, untouched.
+    const oversized = new Uint8Array(256 * 1024 + 1).fill(0x5a);
+    const json = resolveDocument(
+      parseDocument(
+        new Uint8Array(
+          generateDocumentSync({
+            sections: [
+              {
+                children: [
+                  {
+                    paragraph: {
+                      children: [
+                        {
+                          picture: {
+                            type: "png",
+                            data: oversized,
+                            transformation: { width: 100, height: 60 },
+                          },
+                        },
+                      ],
+                    },
+                  },
+                ],
+              },
+            ],
+          }) as Buffer,
+        ),
+      ),
+      docxExtensions,
+    );
+    const node = (
+      json.content?.[0] as {
+        content?: { type: string; attrs?: { src?: string } }[];
+      }
+    )?.content?.[0];
+    expect(node?.type).toBe("image");
+    expect(node?.attrs?.src?.startsWith("blob:")).toBe(true);
+
+    const compiled = compileDocument(json, docxExtensions).sections[0].children;
+    const picture = firstInline(compiled) as { picture: { data?: Uint8Array } };
+    expect(picture.picture.data).toStrictEqual(oversized);
+  });
+
   it("table survives real XML with the editable table route", () => {
     const compiled = throughXml([
       {

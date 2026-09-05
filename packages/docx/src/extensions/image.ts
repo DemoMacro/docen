@@ -4,6 +4,7 @@ import type { ParagraphChild, PictureOptions } from "@office-open/docx";
 import { Node } from "@tiptap/core";
 
 import type { JSONContent } from "../core";
+import { MEDIA_INLINE_LIMIT, mediaBytesOf, registerMediaBlob } from "./media-registry";
 import type { ParseInlineRule, ResolveContext } from "./types";
 
 /** The picture ParagraphChild branch office-open parses a drawing run into. */
@@ -26,7 +27,8 @@ type PictureBranch = Extract<ParagraphChild, { picture: PictureOptions }>;
  *  - display: editor-only display hint, no OOXML equivalent.
  *
  * DOCX round-trip is near-identity: renderDocx packs attrs into CorePictureOptions;
- * parseDocx unpacks them back. src is a data URL ↔ { type, data } base64.
+ * parseDocx unpacks them back. src is a data URL ↔ { type, data } base64, or —
+ * above MEDIA_INLINE_LIMIT — a registered blob: URL the registry resolves back.
  */
 
 // ── DOCX serialization (module-level, exported for DocxManager) ──
@@ -84,10 +86,16 @@ export function renderDocx(node: JSONContent): Record<string, unknown> | null {
   const attrs = (node.attrs ?? {}) as Record<string, unknown>;
   const imageOpts: Record<string, unknown> = {};
 
-  // src (data URL) → { type, data }, decoded through the shared cache so the
-  // projection downstream sees a stable bytes identity across transactions.
+  // src → { type, data }: registered blob: URLs resolve through the media
+  // registry (the bytes never left), data URLs decode through the shared
+  // cache so the projection downstream sees a stable bytes identity across
+  // transactions.
   const src = attrs.src as string | undefined;
-  if (src?.startsWith("data:image/")) {
+  const media = src ? mediaBytesOf(src) : undefined;
+  if (media) {
+    imageOpts.type = media.type;
+    imageOpts.data = media.bytes;
+  } else if (src?.startsWith("data:image/")) {
     const match = src.match(/^data:image\/([\w.+-]+);base64,/);
     if (match) {
       imageOpts.type = match[1] === "jpeg" ? "jpg" : match[1];
@@ -208,7 +216,10 @@ function resolveImage(picture: PictureOptions, ctx: ResolveContext): JSONContent
   const bytes =
     data instanceof Uint8Array ? data : data instanceof ArrayBuffer ? new Uint8Array(data) : null;
   if (bytes && type) {
-    attrs.src = `data:image/${type};base64,${encodeBase64(bytes)}`;
+    attrs.src =
+      bytes.byteLength > MEDIA_INLINE_LIMIT
+        ? registerMediaBlob(bytes, type)
+        : `data:image/${type};base64,${encodeBase64(bytes)}`;
   }
   return { type: "image", attrs };
 }
