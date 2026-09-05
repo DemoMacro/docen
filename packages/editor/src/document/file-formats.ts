@@ -51,6 +51,9 @@ export const READONLY_LIVE: ReadonlySet<string> = new Set([
   // Spelling (Review → Spelling & Grammar) — checking is a read operation;
   // the pane works read-only too.
   "spell-check",
+  // The Styles pane — a read view over the styles model (Word's read-only
+  // mode can still open it); MODIFYING a style stays a live-document action.
+  "styles-pane",
   // View-surface toggles — paint-time view state, not document content.
   "toggle-ruler",
   "toggle-gridlines",

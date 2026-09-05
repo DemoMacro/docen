@@ -439,6 +439,18 @@ const pageBorderItems = (): string =>
     { text: opt("borders-shading"), value: "borders-shading" },
   ]);
 
+/** The Design tab's style-set gallery (Word's Document Formatting group): the
+ *  document's opening model ("default") plus three font-family presets. The
+ *  presets stamp through the style-set command; "default" restores from the
+ *  host's open snapshot. */
+const styleSetItems = (): string =>
+  JSON.stringify([
+    { text: opt("style-set-default"), value: "default" },
+    { text: opt("style-set-modern"), value: "modern" },
+    { text: opt("style-set-classic"), value: "classic" },
+    { text: opt("style-set-elegant"), value: "elegant" },
+  ]);
+
 /** The Watermark split's drop-down: Word's preset gallery plus Remove. */
 const watermarkItems = (): string =>
   JSON.stringify([
@@ -1004,6 +1016,9 @@ const designTab = (): RibbonTab =>
     group(
       "document-formatting",
       [
+        // The paint-brush glyph doubles here: a style set is Word's "apply a
+        // formatting theme to the document" action.
+        split("format-painter", "style-set", parsedItems(styleSetItems()), { size: "large" }),
         btn("theme", "theme", { size: "large" }),
         btn("font-color", "colors", { size: "large" }),
         btn("text-font", "fonts", { size: "large" }),

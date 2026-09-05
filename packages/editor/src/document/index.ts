@@ -12,10 +12,13 @@
 
 import {
   compileDocument,
+  defaultParagraphStyleId,
   docxExtensions,
   effectiveRunProps,
   generateDOCX,
   generateMarkdown,
+  indexParagraphStyles,
+  mergeStyleChain,
   normalizeDocument,
   parseDOCX,
   parseMarkdown,
@@ -60,12 +63,8 @@ import type { DrawingPropertiesState } from "../ui/components/workspace/drawing-
 import type { FontDialogPatch } from "../ui/components/workspace/font-dialog";
 import { proofingLanguageName } from "../ui/components/workspace/language-dialog";
 import type { LinkValues } from "../ui/components/workspace/link-dialog";
+import type { StyleChoice, ModifyStyleState } from "../ui/components/workspace/modify-style-dialog";
 import { createDefaultAddin, textCounter } from "./addin";
-// Side-effect: register the document-specific UI components moved out of the
-// shared ui/ barrel — <docen-format-pane> (properties fallback) and
-// <docen-outline> (navigation Headings tab).
-import "./components/format-pane";
-import "./components/outline";
 import {
   mountEditBridge,
   type EditBridge,
@@ -73,6 +72,12 @@ import {
   type StorySlot,
 } from "./canvas/edit-bridge";
 import { deepEq, dirtyPagesOf } from "./canvas/page-eq";
+// Side-effect: register the document-specific UI components moved out of the
+// shared ui/ barrel — <docen-format-pane> (properties fallback),
+// <docen-outline> (navigation Headings tab), <docen-styles-pane> (Styles).
+import "./components/format-pane";
+import "./components/outline";
+import "./components/styles-pane";
 import {
   CanvasStage,
   type CanvasStageSection,
@@ -88,10 +93,12 @@ import { NavigationCommands } from "./commands/navigation";
 import { ReferencesCommands } from "./commands/references";
 import { RevisionsCommands } from "./commands/revisions";
 import { SectionCommands } from "./commands/sections";
+import { SpellingCommands } from "./commands/spelling";
+import type { StylesInspectorData, StylesPaneState } from "./components/styles-pane";
 // Side-effect import: registers the ribbon/header translation tables.
 import "./i18n";
-import { SpellingCommands } from "./commands/spelling";
 import { pagesToPdf } from "./export-pdf";
+import type { ModifyStylePatch } from "./extensions/commands";
 import { tableAncestry, WIRED_DISPATCH } from "./extensions/commands";
 import { LOCAL_HANDLED, READONLY_LIVE, SAVE_FORMATS, detectOpenFormat } from "./file-formats";
 import { mergeSectionProperties } from "./page-setup";
@@ -131,6 +138,30 @@ const AUTOSAVE_ON_KEY = "docen:autosave";
  *  backup) rather than throwing mid-typing. */
 const AUTOSAVE_MAX_CHARS = 4_000_000;
 
+/** Run marks the Style Inspector lists as direct formatting (i18n keys — the
+ *  ribbon's command labels double as the formatting names). */
+const MARK_LABELS: Readonly<Record<string, string>> = {
+  bold: "ribbon.cmd.bold",
+  italic: "ribbon.cmd.italic",
+  underline: "ribbon.cmd.underline",
+  strike: "ribbon.cmd.strike",
+  subscript: "ribbon.cmd.subscript",
+  superscript: "ribbon.cmd.superscript",
+};
+
+/** The built-in paragraph styles whose display name Word localizes ("Heading 1"
+ *  / "标题 1") regardless of what the document's styles.xml calls them. Keys
+ *  are lower-cased style ids. */
+const BUILT_IN_STYLE_KEYS: Readonly<Record<string, string>> = {
+  normal: "styleName.normal",
+  heading1: "styleName.heading1",
+  heading2: "styleName.heading2",
+  heading3: "styleName.heading3",
+  heading4: "styleName.heading4",
+  title: "styleName.title",
+  subtitle: "styleName.subtitle",
+};
+
 /**
  * Task pane identifiers, mirroring the Office `<TaskpaneId>` concept. The host
  * ships two built-in panes: `navigation` (start/left) and `properties` (end/right).
@@ -141,7 +172,8 @@ export type TaskPaneId =
   | "comments"
   | "clipboard"
   | "proofing"
-  | "revisions";
+  | "revisions"
+  | "styles";
 
 /**
  * Visibility mode values, matching `Office.VisibilityMode` (`taskpane` | `hidden`).
@@ -391,6 +423,18 @@ class DocenDocument extends AddinHost<Editor> {
       event.preventDefault();
       const search = this.shadowRoot?.querySelector("docen-command-search") as HTMLElement | null;
       search?.focus();
+      return;
+    }
+    // Ctrl+Shift+S focuses the Styles box (Word's Apply Styles shortcut).
+    if (
+      (event.ctrlKey || event.metaKey) &&
+      event.shiftKey &&
+      (event.key === "s" || event.key === "S")
+    ) {
+      event.preventDefault();
+      (
+        this.shadowRoot?.querySelector('docen-ribbon-combobox[event="style"]') as HTMLElement | null
+      )?.focus();
       return;
     }
     // F12 = Save As (Word).
@@ -658,6 +702,15 @@ class DocenDocument extends AddinHost<Editor> {
     return (editor.state.doc.attrs?.styles as StylesOptions | undefined) ?? null;
   }
 
+  /** A style's display name: built-in styles show Word's localized name
+   *  (BUILT_IN_STYLE_KEYS), everything else shows the document's own name
+   *  (the id as the fallback). */
+  #styleDisplayName(id: string, name: unknown): string {
+    const builtin = BUILT_IN_STYLE_KEYS[id.toLowerCase()];
+    if (builtin) return t(builtin, this);
+    return typeof name === "string" && name ? name : id;
+  }
+
   /** The paragraph-style id at the caret (the HeadingLevel literal carried on
    *  `heading` for heading paragraphs, the pStyle id on `style` otherwise). */
   #currentStyleId(editor: Editor): string | null {
@@ -681,6 +734,142 @@ class DocenDocument extends AddinHost<Editor> {
     const value = this.#currentStyleId(editor) || "Normal";
     const cb = this.shadowRoot?.querySelector<HTMLElement>('docen-ribbon-combobox[event="style"]');
     if (cb && cb.getAttribute("value") !== value) cb.setAttribute("value", value);
+    // The Styles pane's highlight follows the caret's paragraph style.
+    const pane = this.shadowRoot?.querySelector("docen-styles-pane") as
+      | (HTMLElement & { setCurrent(id: string): void })
+      | null;
+    pane?.setCurrent(value);
+  }
+
+  // ── Styles pane / Modify Style dialog / Style Inspector ──────────────────
+
+  /** The styles model as the document opened with — the Design tab's style-set
+   *  gallery restores it from here ("default" entry). */
+  #stylesSnapshot: string | null = null;
+
+  /** Build the Styles pane's list from the document's styles model: every
+   *  paragraph style (custom + built-in named), each row previewed with the
+   *  formatting its basedOn chain merges to. */
+  #renderStylesPane(): void {
+    const pane = this.shadowRoot?.querySelector("docen-styles-pane") as
+      | (HTMLElement & { renderStyles(state: StylesPaneState): void })
+      | null;
+    const editor = this.editor;
+    if (!pane || !editor) return;
+    const styles = this.#docStyles(editor);
+    const byId = styles ? indexParagraphStyles(styles) : new Map();
+    const entries = [...byId.entries()].map(([id, style]) => {
+      const run = mergeStyleChain(byId, id).run as Record<string, unknown>;
+      return {
+        id,
+        name: this.#styleDisplayName(id, style.name),
+        preview: {
+          font: typeof run.font === "string" ? run.font : undefined,
+          size: typeof run.size === "number" ? run.size : undefined,
+          bold: run.bold === true,
+          italic: run.italic === true,
+          color: typeof run.color === "string" ? run.color : undefined,
+          underline: !!run.underline,
+        },
+      };
+    });
+    // A paragraph without heading/pStyle attrs carries the document's default
+    // paragraph style (Word highlights "Normal" in that case).
+    const currentId =
+      this.#currentStyleId(editor) ??
+      defaultParagraphStyleId(styles) ??
+      (byId.has("Normal") ? "Normal" : "");
+    pane.renderStyles({ entries, currentId });
+  }
+
+  /** Push the selection's style stack to the pane's inspector view: the
+   *  paragraph style, the hyperlink character style (the docx editing model
+   *  has no other character-style carrier), and the run marks at the
+   *  selection as the direct-formatting list. */
+  #renderStylesInspector(): void {
+    const pane = this.shadowRoot?.querySelector("docen-styles-pane") as
+      | (HTMLElement & { renderInspector(data: StylesInspectorData): void })
+      | null;
+    const editor = this.editor;
+    if (!pane || !editor) return;
+    const styles = this.#docStyles(editor);
+    const byId = styles ? indexParagraphStyles(styles) : new Map();
+    const styleId = this.#currentStyleId(editor);
+    const marks = editor.state.selection.$from.marks();
+    const characterStyle = marks.some((m) => m.type.name === "link")
+      ? t("styleName.hyperlink", this)
+      : null;
+    const direct: string[] = [];
+    for (const mark of marks) {
+      const attrs = mark.attrs as Record<string, unknown>;
+      if (mark.type.name === "textStyle") {
+        const { font, size, color } = attrs;
+        if (typeof font === "string") direct.push(`${t("fontDialog.font", this)}: ${font}`);
+        if (typeof size === "number") direct.push(`${t("fontDialog.size", this)}: ${size} pt`);
+        if (typeof color === "string")
+          direct.push(`${t("modifyStyleDialog.color", this)}: #${color}`);
+        continue;
+      }
+      const label = MARK_LABELS[mark.type.name];
+      if (label) direct.push(t(label, this));
+    }
+    pane.renderInspector({
+      paragraphStyle: styleId
+        ? this.#styleDisplayName(styleId, byId.get(styleId)?.name)
+        : t("styleName.normal", this),
+      characterStyle,
+      direct,
+    });
+  }
+
+  /** Prefill and open the Modify Style dialog for one style. The fields read
+   *  the style's OWN definition (not the merged chain) — Word shows what the
+   *  style itself says, leaving inherited values blank. */
+  #openModifyStyle(id: string): void {
+    const dialog = this.shadowRoot?.querySelector("docen-modify-style-dialog") as
+      | (HTMLElement & { show(state: ModifyStyleState): void })
+      | null;
+    const editor = this.editor;
+    if (!dialog || !editor || !id) return;
+    const styles = this.#docStyles(editor);
+    const byId = styles ? indexParagraphStyles(styles) : new Map();
+    const style = byId.get(id);
+    const run = (style?.run ?? {}) as Record<string, unknown>;
+    const underline = run.underline as { type?: unknown } | undefined;
+    const choices: StyleChoice[] = [...byId.entries()]
+      .map(([cid, cs]) => ({ id: cid, name: this.#styleDisplayName(cid, cs.name) }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    dialog.show({
+      id,
+      name: this.#styleDisplayName(id, style?.name),
+      choices,
+      basedOn: (style?.basedOn as string | undefined) ?? null,
+      next: (style?.next as string | undefined) ?? null,
+      font: typeof run.font === "string" ? run.font : null,
+      size: typeof run.size === "number" ? run.size : null,
+      bold: run.bold === true,
+      italic: run.italic === true,
+      underline: underline?.type != null,
+      color: typeof run.color === "string" ? run.color : null,
+    });
+  }
+
+  /** Capture the opened styles model (called from #renderDoc). */
+  #snapshotStyles(): void {
+    const styles = this.editor ? this.#docStyles(this.editor) : null;
+    this.#stylesSnapshot = styles ? JSON.stringify(styles) : null;
+  }
+
+  /** Restore the styles model captured at open (the style-set gallery's
+   *  "document default" entry) — the same doc-attrs write path as
+   *  #applyStylesAttr, so the restore rides undo and re-renders chrome. */
+  #restoreStylesSnapshot(): void {
+    const editor = this.editor;
+    if (!editor || this.#stylesSnapshot === null) return;
+    editor.view.dispatch(
+      editor.state.tr.setDocAttribute("styles", JSON.parse(this.#stylesSnapshot)),
+    );
+    this.#renderChrome();
   }
 
   async connectedCallback(): Promise<void> {
@@ -892,6 +1081,32 @@ class DocenDocument extends AddinHost<Editor> {
     this.addEventListener("clipboard:paste", this.#clipboard.onPanePaste as EventListener);
     this.addEventListener("clipboard:paste-all", this.#clipboard.onPanePasteAll as EventListener);
     this.addEventListener("clipboard:clear", this.#clipboard.onPaneClear as EventListener);
+    // Styles pane → apply a style / open Modify Style / switch to the
+    // inspector view (which pushes fresh data back).
+    this.shadowRoot!.querySelector("docen-styles-pane")?.addEventListener("style-apply", ((
+      event: CustomEvent<string>,
+    ) => {
+      this.editor?.commands.style(event.detail);
+      this.#bridge?.focus();
+    }) as EventListener);
+    this.shadowRoot!.querySelector("docen-styles-pane")?.addEventListener("modify-style", ((
+      event: CustomEvent<string>,
+    ) => this.#openModifyStyle(event.detail)) as EventListener);
+    this.shadowRoot!.querySelector("docen-styles-pane")?.addEventListener("view", ((event) => {
+      if ((event as CustomEvent<string>).detail === "inspector") this.#renderStylesInspector();
+      else this.#renderStylesPane();
+    }) as EventListener);
+    // Modify Style dialog — stamp the patched definition (the modify-style
+    // command rides the undo history) and re-render the pane so the row
+    // previews follow the new formatting.
+    this.shadowRoot!.querySelector("docen-modify-style-dialog")?.addEventListener(
+      "modify-style:ok",
+      ((event: CustomEvent<ModifyStylePatch>) => {
+        this.editor?.commands["modify-style"](event.detail);
+        this.#renderStylesPane();
+        this.#bridge?.focus();
+      }) as EventListener,
+    );
     // Click a Results entry → jump to that match (delegated on the container).
     this.shadowRoot!.querySelector(".search-results")?.addEventListener(
       "click",
@@ -1593,6 +1808,8 @@ class DocenDocument extends AddinHost<Editor> {
     this.#revisions.syncRevisionsPane();
     this.#spelling.schedule();
     this.#syncStatusLanguage();
+    // The style-set gallery's "document default" restores from here.
+    this.#snapshotStyles();
   }
 
   /** The previous render's flow result — the diff base for the next one. */
@@ -3588,6 +3805,19 @@ class DocenDocument extends AddinHost<Editor> {
       this.setAttribute("view", viewOf[name]);
       return;
     }
+    // Styles group launcher (Home → Styles): the Styles task pane.
+    if (name === "styles-pane") {
+      this.showTaskpane("styles");
+      this.#renderStylesPane();
+      return;
+    }
+    // The style-set gallery's "document default" entry restores the styles
+    // model the document opened with (the preset values are written by the
+    // style-set command; only this entry needs the snapshot).
+    if (name === "style-set" && value === "default") {
+      this.#restoreStylesSnapshot();
+      return;
+    }
     // Spelling (Review → Spelling & Grammar, F7, the status-bar book):
     // re-check now, open the pane, and start at the first issue at/after the
     // caret (Word starts checking from the insertion point).
@@ -4316,7 +4546,9 @@ class DocenDocument extends AddinHost<Editor> {
               ? "proofing-pane"
               : id === "revisions"
                 ? "revisions-pane"
-                : "props-pane";
+                : id === "styles"
+                  ? "styles-pane"
+                  : "props-pane";
     return this.shadowRoot?.querySelector(`docen-task-pane[part="${part}"]`) as
       | (HTMLElement & { open: boolean })
       | null;

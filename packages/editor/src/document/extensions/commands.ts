@@ -12,6 +12,7 @@ import type { Mark } from "@tiptap/pm/model";
 import type { EditorState } from "@tiptap/pm/state";
 import type { Transaction } from "@tiptap/pm/state";
 import { NodeSelection, TextSelection } from "@tiptap/pm/state";
+import { DocAttrStep } from "@tiptap/pm/transform";
 
 import { CellSelection, cellsInRect } from "../canvas/cell-selection";
 
@@ -117,6 +118,8 @@ declare module "@tiptap/core" {
       "table-properties-apply": (patch?: TablePropertiesPatch) => ReturnType;
       link: (href?: string) => ReturnType;
       style: (styleId?: string) => ReturnType;
+      "modify-style": (patch?: ModifyStylePatch) => ReturnType;
+      "style-set": (value?: string) => ReturnType;
       "add-text": (value?: string) => ReturnType;
       // Editing
       "change-case": (mode?: string) => ReturnType;
@@ -212,6 +215,8 @@ export const WIRED_DISPATCH: ReadonlySet<string> = new Set([
   "convert-to-text",
   "link",
   "style",
+  "modify-style",
+  "style-set",
   "add-text",
   "undo",
   "redo",
@@ -254,6 +259,29 @@ export interface InsertTableOptions {
   rows?: number;
   /** Column count (1-10, default 3). */
   cols?: number;
+}
+
+/**
+ * What the Modify Style dialog commits on OK — the style's chain pointers
+ * plus the run formatting the dialog edits, stamped onto the named style by
+ * {@link documentCommands.modify-style}. `null` clears the field (the style
+ * inherits from its basedOn chain again); the run booleans are absolute
+ * states, matching the dialog's checkboxes.
+ */
+export interface ModifyStylePatch {
+  /** The styleId to modify (e.g. "Normal", "Heading1", a custom id). */
+  id: string;
+  basedOn: string | null;
+  /** The style applied to the next paragraph typed after this one. */
+  next: string | null;
+  font: string | null;
+  /** Font size in points. */
+  size: number | null;
+  bold: boolean;
+  italic: boolean;
+  underline: boolean;
+  /** Hex without "#", or null for the automatic (text) color. */
+  color: string | null;
 }
 
 export interface ParagraphDialogPatch {
@@ -356,6 +384,60 @@ export interface BordersDialogPatch {
 }
 
 // ── Pure helpers (take EditorState, return data; never touch the chain) ──
+
+/** The Design tab's built-in style sets — body + heading font families written
+ *  onto the document defaults and the built-in heading styles (Word's Style
+ *  Set gallery swaps the theme fonts the same way). Keys are the
+ *  DefaultStylesOptions slots ("document" = the docDefaults run defaults). */
+const STYLE_SET_PRESETS: Readonly<Record<string, Readonly<Record<string, unknown>>>> = {
+  modern: {
+    document: { font: "Calibri" },
+    title: { font: "Calibri Light" },
+    heading1: { font: "Calibri Light" },
+    heading2: { font: "Calibri Light" },
+    heading3: { font: "Calibri Light" },
+  },
+  classic: {
+    document: { font: "Times New Roman" },
+    title: { font: "Cambria" },
+    heading1: { font: "Cambria" },
+    heading2: { font: "Cambria" },
+    heading3: { font: "Cambria" },
+  },
+  elegant: {
+    document: { font: "Georgia" },
+    title: { font: "Georgia" },
+    heading1: { font: "Georgia" },
+    heading2: { font: "Georgia" },
+    heading3: { font: "Georgia" },
+  },
+};
+
+/** Copy a style entry with the Modify Style dialog's chain pointers and run
+ *  formatting applied. `null` fields are cleared (inherit again); the JSON
+ *  round-trip drops the undefined holes the clearing leaves behind and keeps
+ *  the stamped model structured-cloneable. */
+function withModifyStylePatch(
+  entry: Record<string, unknown>,
+  patch: ModifyStylePatch,
+): Record<string, unknown> {
+  const run = { ...((entry.run ?? {}) as Record<string, unknown>) };
+  run.font = patch.font ?? undefined;
+  // w:sz travels with w:szCs (Word writes the pair together) — one patch
+  // field stamps both.
+  run.size = patch.size ?? undefined;
+  run.sizeComplexScript = patch.size ?? undefined;
+  run.bold = patch.bold;
+  run.italic = patch.italic;
+  run.underline = patch.underline ? { type: "single" } : undefined;
+  run.color = patch.color ?? undefined;
+  const out: Record<string, unknown> = { ...entry, run };
+  if (patch.basedOn) out.basedOn = patch.basedOn;
+  else delete out.basedOn;
+  if (patch.next) out.next = patch.next;
+  else delete out.next;
+  return JSON.parse(JSON.stringify(out)) as Record<string, unknown>;
+}
 
 /** HeadingLevel literals the style gallery recognizes as headings. */
 const HEADING_LEVEL_BY_STYLE: Readonly<Record<string, 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9>> = {
@@ -2293,6 +2375,60 @@ export const DocumentCommands = Extension.create({
           return chain()
             .updateAttributes("paragraph", { style: id || null, heading: null })
             .run();
+        },
+      // ── Styles system: redefine an existing style (the Modify Style dialog)
+      // and the Design tab's style sets. Both stamp doc.attrs.styles in one
+      // DocAttrStep, so the change rides the undo history and every consumer
+      // (layout projection, compile) re-reads the same model.
+      "modify-style":
+        (patch) =>
+        ({ tr }) => {
+          if (!patch?.id) return false;
+          const styles = { ...((tr.doc.attrs.styles ?? {}) as Record<string, unknown>) };
+          const list = ((styles.paragraphStyles ?? []) as Record<string, unknown>[]).slice();
+          const at = list.findIndex((s) => s.id === patch.id);
+          // A built-in style may ALSO live under default.<key> (style sets
+          // write there) — the pStyle id is the key with its first letter
+          // upper-cased (Heading1 → heading1). The style index lets an
+          // explicit paragraphStyles entry shadow the built-in slot, so both
+          // sides must agree: once the style has an explicit definition the
+          // built-in slot is dropped (Word does the same — a modified built-in
+          // style becomes an explicit w:style). Copy slots before writing
+          // (attrs may be aliased by a snapshot).
+          const key = patch.id.charAt(0).toLowerCase() + patch.id.slice(1);
+          const defaults = { ...((styles.default ?? {}) as Record<string, unknown>) };
+          if (at >= 0) {
+            list[at] = withModifyStylePatch(list[at], patch);
+            styles.paragraphStyles = list;
+            delete defaults[key];
+            styles.default = defaults;
+          } else {
+            const entry = { ...((defaults[key] ?? {}) as Record<string, unknown>) };
+            if (entry.name === undefined) entry.name = patch.id;
+            defaults[key] = withModifyStylePatch(entry, patch);
+            styles.default = defaults;
+          }
+          tr.step(new DocAttrStep("styles", styles));
+          return true;
+        },
+      "style-set":
+        (value) =>
+        ({ tr }) => {
+          const preset = STYLE_SET_PRESETS[value ?? ""];
+          if (!preset) return false;
+          const styles = { ...((tr.doc.attrs.styles ?? {}) as Record<string, unknown>) };
+          const defaults = { ...((styles.default ?? {}) as Record<string, unknown>) };
+          for (const [key, runPatch] of Object.entries(preset)) {
+            const entry = { ...((defaults[key] ?? {}) as Record<string, unknown>) };
+            entry.run = {
+              ...((entry.run ?? {}) as Record<string, unknown>),
+              ...(runPatch as Record<string, unknown>),
+            };
+            defaults[key] = entry;
+          }
+          styles.default = defaults;
+          tr.step(new DocAttrStep("styles", styles));
+          return true;
         },
       // Word's References > Add Text: mark every selected paragraph as a TOC
       // level by stamping its heading pStyle; "none" returns it to body text.

@@ -49,6 +49,11 @@ export const KEYBOARD_SHORTCUTS: Readonly<Record<string, string>> = {
   "Mod-J": "justify",
   "Mod-Shift->": "grow-font",
   "Mod-Shift-<": "shrink-font",
+  // Style application (Word's Ctrl+Alt+1/2/3 heading shortcuts; the value
+  // form routes through the style gallery's command).
+  "Mod-Alt-1": "style:Heading1",
+  "Mod-Alt-2": "style:Heading2",
+  "Mod-Alt-3": "style:Heading3",
   // A value rides after ":" — `line-spacing:2` calls the command with "2".
 };
 
