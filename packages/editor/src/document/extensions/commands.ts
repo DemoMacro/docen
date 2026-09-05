@@ -80,6 +80,8 @@ declare module "@tiptap/core" {
       "page-break": () => ReturnType;
       "column-break": () => ReturnType;
       "section-break": () => ReturnType;
+      "section-break-next": () => ReturnType;
+      "section-break-continuous": () => ReturnType;
       "insert-table": (options?: InsertTableOptions) => ReturnType;
       "delete-table": () => ReturnType;
       // Table context commands (the Table Design / Layout contextual tabs).
@@ -175,6 +177,8 @@ export const WIRED_DISPATCH: ReadonlySet<string> = new Set([
   "page-break",
   "column-break",
   "section-break",
+  "section-break-next",
+  "section-break-continuous",
   "insert-table",
   "delete-table",
   "insert-row-above",
@@ -1364,6 +1368,16 @@ export const DocumentCommands = Extension.create({
         () =>
         ({ commands }) =>
           commands.setSectionBreak(),
+      // The Breaks menu's typed section breaks — Next Page (the plain
+      // section-break command) and Continuous (flows on the same page).
+      "section-break-next":
+        () =>
+        ({ commands }) =>
+          commands.setSectionBreak(),
+      "section-break-continuous":
+        () =>
+        ({ commands }) =>
+          commands.setSectionBreak({ type: "continuous" }),
       // Insert a 3×3 table (Word's default Insert > Table preset). The header
       // row is the row-level tblHeader attr (w:tblHeader) — no header-cell
       // node type exists; every cell is a plain tableCell. Borders stamp

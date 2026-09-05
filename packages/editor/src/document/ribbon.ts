@@ -297,7 +297,40 @@ const breaksItems = (): string =>
     { text: opt("column-break"), value: "column-break", event: "column-break" },
     // Text Wrapping opens Word's layout-options dialog (not built yet).
     { text: opt("text-wrapping"), value: "text-wrapping", event: "text-wrapping", disabled: true },
-    { text: cmd("section-break"), value: "section-break", event: "section-break" },
+    // Word's four section-break types; Even/Odd Page need engine support for
+    // starting sections on even/odd pages (with blank interleaves) — greyed
+    // until then.
+    { text: opt("next-page-section"), value: "section-break-next", event: "section-break-next" },
+    {
+      text: opt("continuous-section"),
+      value: "section-break-continuous",
+      event: "section-break-continuous",
+    },
+    { text: opt("even-page-section"), value: "even", disabled: true },
+    { text: opt("odd-page-section"), value: "odd", disabled: true },
+  ]);
+
+// Word's Line Numbers menu: the numbering mode writes w:lnNumType on the
+// current section; the trailing options entry opens Word's Line Numbering
+// dialog (start-at / count-by / distance) — greyed until that dialog exists.
+const lineNumbersItems = (): string =>
+  JSON.stringify([
+    { text: opt("no-line-numbers"), value: "none", event: "line-numbers" },
+    { text: opt("continuous-line-numbers"), value: "continuous", event: "line-numbers" },
+    { text: opt("restart-each-page"), value: "newPage", event: "line-numbers" },
+    { text: opt("restart-each-section"), value: "newSection", event: "line-numbers" },
+    { text: opt("line-numbering-options"), value: "options", disabled: true },
+  ]);
+
+// Word's Hyphenation menu. The layout engine has no hyphenation dictionary or
+// soft-break insertion, so every mode is greyed until it lands — the control
+// is here so the Layout tab matches Word's silhouette.
+const hyphenationItems = (): string =>
+  JSON.stringify([
+    { text: opt("hyphenation-none"), value: "none", disabled: true },
+    { text: opt("hyphenation-manual"), value: "manual", disabled: true },
+    { text: opt("hyphenation-auto"), value: "auto", disabled: true },
+    { text: opt("hyphenation-options"), value: "options", disabled: true },
   ]);
 
 const indentItems = (): string =>
@@ -1010,7 +1043,11 @@ const layoutTab = (): RibbonTab =>
           size: "large",
           label: cmd("breaks"),
         }),
-        btn("number-symbol", "line-numbers", { size: "large" }),
+        split("number-symbol", "line-numbers", parsedItems(lineNumbersItems()), { size: "large" }),
+        split("hyphenation", "hyphenation", parsedItems(hyphenationItems()), {
+          size: "large",
+          label: cmd("hyphenation"),
+        }),
       ],
       "page-setup-dialog",
     ),

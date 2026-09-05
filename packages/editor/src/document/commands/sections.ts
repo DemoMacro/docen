@@ -226,12 +226,14 @@ export class SectionCommands {
     }));
   }
 
-  /** Line numbering on/off for the current section (w:lnNumType) — Word's
-   *  Layout → Line Numbers toggle. */
-  toggleLineNumbers(): void {
+  /** Line numbering mode for the current section (w:lnNumType) — Word's
+   *  Layout → Line Numbers menu. "none" clears the numbering; the restart
+   *  modes map to w:lnNumType's @w:restart values. */
+  setLineNumbers(mode: "none" | "continuous" | "newPage" | "newSection"): void {
     this.mutateCurrentSection((cur) => ({
       ...cur,
-      lineNumberType: cur?.lineNumberType ? undefined : { countBy: 1 },
+      lineNumberType:
+        mode === "none" ? undefined : { ...cur?.lineNumberType, countBy: 1, restart: mode },
     }));
   }
 
@@ -254,6 +256,7 @@ export class SectionCommands {
         show(values?: {
           margins?: Partial<PageSetupValues["margins"]>;
           size?: Partial<PageSetupValues["size"]>;
+          verticalAlign?: PageSetupValues["verticalAlign"];
         }): void;
       } | null
     )?.show({
@@ -264,6 +267,7 @@ export class SectionCommands {
         right: cm(margin.right),
       },
       size: { width: cm(size.width), height: cm(size.height) },
+      verticalAlign: cur?.verticalAlign ?? "top",
     });
   }
 
@@ -406,7 +410,7 @@ export class SectionCommands {
     const values = event.detail;
     if (!values) return;
     const twip = (cm: number): number => convertMillimetersToTwip(cm * 10);
-    const { margins, size } = values;
+    const { margins, size, verticalAlign } = values;
     this.updateSectionGeometry({
       pageMargin: {
         top: twip(margins.top),
@@ -415,6 +419,7 @@ export class SectionCommands {
         right: twip(margins.right),
       },
       pageSize: { width: twip(size.width), height: twip(size.height) },
+      verticalAlign: verticalAlign === "top" ? undefined : verticalAlign,
     });
   };
 }

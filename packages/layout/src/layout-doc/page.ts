@@ -14,6 +14,10 @@ export interface ProjectedFlowBox {
   contentLeftPx: number;
   contentTopPx: number;
   linePitchPx?: number;
+  /** Section vertical alignment (w:vAlign) — only the shifted modes survive
+   *  the projection; Word's "both" (justified stretch) is unmodeled and
+   *  drops to top. */
+  verticalAlign?: "top" | "center" | "bottom";
 }
 
 /** Page furniture (headers/footers) projected for painting: the block lists

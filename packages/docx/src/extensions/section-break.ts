@@ -41,15 +41,16 @@ export const SectionBreak = Extension.create({
 
   addCommands() {
     return {
-      // Next Page section break: stamp the current paragraph as its section's
-      // last paragraph (forcesPageBreakAfter then closes the page after it),
-      // insert a fresh empty paragraph as the next section's first paragraph,
-      // and move the caret into it so it lands on the next page after reflow.
-      // A new paragraph is inserted rather than split from the current one so
-      // it does NOT inherit the just-stamped sectionProperties (which would
-      // make it a section boundary too and page-break forever).
+      // Section break: stamp the current paragraph as its section's last
+      // paragraph (with the requested sectPr @w:type), insert a fresh empty
+      // paragraph as the next section's first paragraph, and move the caret
+      // into it. A new paragraph is inserted rather than split from the
+      // current one so it does NOT inherit the just-stamped sectionProperties
+      // (which would make it a section boundary too and break forever).
+      // "nextPage" (the OOXML default) reflows the next section onto a fresh
+      // page; "continuous" keeps it flowing on the same page.
       setSectionBreak:
-        () =>
+        (options?: { type?: "nextPage" | "continuous" | "evenPage" | "oddPage" }) =>
         ({ tr, state, dispatch }) => {
           if (!dispatch) return true;
           const { $from } = tr.selection;
@@ -58,13 +59,17 @@ export const SectionBreak = Extension.create({
           // heading too (e.g. a chapter title that ends its section).
           if (para.type.name !== "paragraph" && para.type.name !== "heading") return false;
           const paraPos = $from.before($from.depth);
-          // 1. Current paragraph becomes its section's last paragraph.
+          // 1. Current paragraph becomes its section's last paragraph. The
+          //    type omits on nextPage (the OOXML default) so round-trips of
+          //    plain Next Page breaks stay byte-stable.
           tr.setNodeMarkup(paraPos, undefined, {
             ...para.attrs,
-            sectionProperties: {},
+            sectionProperties:
+              options?.type && options.type !== "nextPage" ? { type: options.type } : {},
           });
           // 2. Insert a fresh empty paragraph (new section's first paragraph)
-          //    and move the caret into it; repaginate pushes it to the next page.
+          //    and move the caret into it; repaginate pushes it to the next
+          //    page (nextPage) or flows it on (continuous).
           const paraEnd = paraPos + para.nodeSize;
           tr.insert(paraEnd, state.schema.nodes.paragraph.create());
           tr.setSelection(TextSelection.near(tr.doc.resolve(paraEnd + 1)));
@@ -102,8 +107,11 @@ export const SectionBreak = Extension.create({
 declare module "@tiptap/core" {
   interface Commands<ReturnType> {
     sectionBreak: {
-      /** Insert a Next Page section break at the current paragraph. */
-      setSectionBreak: () => ReturnType;
+      /** Insert a section break at the current paragraph (Next Page by
+       *  default; `type` stamps sectPr @w:type, e.g. Continuous). */
+      setSectionBreak: (options?: {
+        type?: "nextPage" | "continuous" | "evenPage" | "oddPage";
+      }) => ReturnType;
     };
   }
 }

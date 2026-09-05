@@ -1454,6 +1454,9 @@ class DocenDocument extends AddinHost<Editor> {
         : this.#pageInsets(section.flow, section.furniture, section.furnitureLaid);
       return {
         blocks: section.blocks,
+        // Continuous section breaks flow on (Word's Section Break Continuous)
+        // instead of opening a fresh page.
+        ...(section.type === "continuous" ? { type: section.type } : {}),
         opts: {
           ...section.flow,
           columns: section.columns,
@@ -1516,6 +1519,9 @@ class DocenDocument extends AddinHost<Editor> {
     this.#stage.setMarksLabels({
       pageBreak: t("marks.pageBreak", this),
       sectionBreak: t("marks.sectionBreak", this),
+      sectionBreakContinuous: t("marks.sectionBreakContinuous", this),
+      sectionBreakEvenPage: t("marks.sectionBreakEvenPage", this),
+      sectionBreakOddPage: t("marks.sectionBreakOddPage", this),
     });
     // A `zoom` attribute parsed before the stage existed only recorded the
     // level here — push it in before the first sync sizes the slots. The
@@ -2979,9 +2985,16 @@ class DocenDocument extends AddinHost<Editor> {
       }
       return;
     }
-    // Line Numbers toggle (the Layout tab's Line Numbers button).
+    // Line Numbers menu (the Layout tab): the mode writes w:lnNumType's
+    // restart on the current section; "none" clears the numbering.
     if (name === "line-numbers") {
-      this.#sections.toggleLineNumbers();
+      if (
+        value === "none" ||
+        value === "continuous" ||
+        value === "newPage" ||
+        value === "newSection"
+      )
+        this.#sections.setLineNumbers(value);
       return;
     }
     // AutoFit Window needs the page's text width — a layout value the command

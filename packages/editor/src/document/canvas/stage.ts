@@ -148,7 +148,13 @@ export interface CanvasStageContext {
   /** Page background (w:background — base color + optional pattern tile). */
   background?: ProjectedPageBackground;
   /** The break rows' labels in the UI language (Word paints them localized). */
-  marksLabels?: { pageBreak?: string; sectionBreak?: string };
+  marksLabels?: {
+    pageBreak?: string;
+    sectionBreak?: string;
+    sectionBreakContinuous?: string;
+    sectionBreakEvenPage?: string;
+    sectionBreakOddPage?: string;
+  };
 }
 
 export class CanvasStage {
@@ -372,9 +378,23 @@ export class CanvasStage {
 
   /** The break rows' labels (locale change): repainting is deferred to the
    *  next marks-visible repaint when marks are off, immediate when on. */
-  setMarksLabels(labels: { pageBreak: string; sectionBreak: string }): void {
+  setMarksLabels(labels: {
+    pageBreak: string;
+    sectionBreak: string;
+    sectionBreakContinuous: string;
+    sectionBreakEvenPage: string;
+    sectionBreakOddPage: string;
+  }): void {
     const cur = this.ctx.marksLabels;
-    if (cur?.pageBreak === labels.pageBreak && cur?.sectionBreak === labels.sectionBreak) return;
+    if (
+      cur?.pageBreak === labels.pageBreak &&
+      cur?.sectionBreak === labels.sectionBreak &&
+      cur?.sectionBreakContinuous === labels.sectionBreakContinuous &&
+      cur?.sectionBreakEvenPage === labels.sectionBreakEvenPage &&
+      cur?.sectionBreakOddPage === labels.sectionBreakOddPage
+    ) {
+      return;
+    }
     this.ctx.marksLabels = labels;
     if (!this.#showMarks) return;
     for (const [index, slot] of this.slots.entries()) {

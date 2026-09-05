@@ -122,6 +122,11 @@ const watermarkIcon =
 const phoneticGuide =
   '<svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><g fill="none" stroke="currentColor" stroke-linecap="round"><path d="M5 16h14" stroke-width="1.8"/><path d="M6.5 9.5h3.4M11.6 9.5h3.4M16.7 9.5h.9" stroke-width="1.4"/><path d="M6.5 12.6h3.4M11.6 12.6h3.4M16.7 12.6h.9" stroke-width="1.4" opacity=".55"/></g></svg>';
 
+// Word's Hyphenation has no Fluent glyph — a wrapped word splits across two
+// lines with the hyphen carrying over, drawn as two text bars joined by one.
+const hyphenationIcon =
+  '<svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><g fill="none" stroke="currentColor" stroke-linecap="round"><path d="M4 7.5h16" stroke-width="1.8"/><path d="M4 12h9" stroke-width="1.8"/><path d="M16.5 12h3.5" stroke-width="1.8" opacity=".55"/><path d="M4 16.5h16" stroke-width="1.8" opacity=".55"/></g></svg>';
+
 // No Fluent glyph for Two Lines in One (双行合一) — drawn here as the two
 // packed half-height text rows with the bracket pair flanking them.
 const twoInOne =
@@ -224,6 +229,7 @@ const RIBBON_ICONS: Record<string, string> = {
   equation: calculator,
   symbol: symbolOmega,
   "number-symbol": numberSymbol,
+  hyphenation: hyphenationIcon,
   // Design
   theme: colorBackground,
   watermark: watermarkIcon,

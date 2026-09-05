@@ -158,8 +158,9 @@ export interface LaidOutParagraph {
   /** Floating drawings anchored to this paragraph, mirrored for the painter
    *  (the flow gives them no height). */
   drawings?: LayoutDrawing[];
-  /** The paragraph closes its section — the painter's mark row reads it. */
-  sectionEnd?: boolean;
+  /** The paragraph closes its section — the painter's mark row reads it and
+   *  names the break type (mirrors the input block's field). */
+  sectionEnd?: boolean | "continuous" | "evenPage" | "oddPage";
 }
 
 /** One stacked block with its content-box offset inside the stack (collapsed

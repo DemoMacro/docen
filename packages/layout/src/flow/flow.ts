@@ -100,6 +100,10 @@ export interface FlowOptions {
    *  page reports its content bottom via {@link FlowPage.contentBottomPx}.
    *  `contentHeightPx` is ignored. */
   unbounded?: boolean;
+  /** Section vertical alignment (w:vAlign) — underfull pages shift their
+   *  content down (center) or to the bottom. Word's "both" (justified
+   *  stretch) is not modeled; the projection drops it to top. */
+  verticalAlign?: "top" | "center" | "bottom";
 }
 
 /** Lay a block flow into pages. Always returns at least one page (an empty
@@ -111,7 +115,27 @@ export function layoutFlow(
 ): FlowPage[] {
   const flow = new Flow(opts, measurer);
   for (const block of blocks) flow.push(block);
-  return flow.finish();
+  return applyVerticalAlign(flow.finish(), opts);
+}
+
+/** w:vAlign pass — shift each underfull page's items down so the content
+ *  block centers in, or bottoms out against, the content box. Full pages
+ *  shift by ~0 (their ink already fills the box). Pages with footnotes shift
+ *  within the box above the footnote area's reserved space implicitly: the
+ *  flow never places body items into it, so a plain max-bottom measure is
+ *  safe (the shift only grows the gap to the notes, never overlaps them). */
+function applyVerticalAlign(pages: FlowPage[], opts: FlowOptions): FlowPage[] {
+  const mode = opts.verticalAlign;
+  if (!mode || mode === "top" || opts.unbounded) return pages;
+  for (const page of pages) {
+    let ink = 0;
+    for (const item of page.items) ink = Math.max(ink, item.yPx + item.block.heightPx);
+    const offset =
+      mode === "center" ? (opts.contentHeightPx - ink) / 2 : opts.contentHeightPx - ink;
+    if (offset <= 0) continue;
+    for (const item of page.items) item.yPx += offset;
+  }
+  return pages;
 }
 
 /** Split a content width into w:cols column boxes — the single source the
@@ -145,6 +169,11 @@ export function columnBoxesOf(
 export interface FlowSection {
   blocks: readonly LayoutBlock[];
   opts: FlowOptions;
+  /** The section break type (sectPr @w:type) — a "continuous" section merges
+   *  onto the previous section's flow instead of opening a fresh page. The
+   *  page-per-section modes (nextPage/evenPage/oddPage/nextColumn) all open
+   *  a fresh page here; even/odd blank interleaves stay unmodeled. */
+  type?: "nextPage" | "nextColumn" | "continuous" | "evenPage" | "oddPage";
 }
 
 export interface SectionedFlowPages {
@@ -154,19 +183,31 @@ export interface SectionedFlowPages {
 }
 
 /** Lay a multi-section document into one continuous page list. Each section
- *  starts on a fresh page (OOXML's nextPage section break); `pageOffset`
- *  threads each section's starting global page number so the odd/even inset
- *  slot follows the physical page across section boundaries. */
+ *  starts on a fresh page (OOXML's nextPage section break) except "continuous"
+ *  ones, which merge onto the previous section's flow (Word: content keeps
+ *  flowing on the same page; the previous section's page geometry rules —
+ *  mixed page sizes or column counts degrade to the previous section's).
+ *  `pageOffset` threads each section's starting global page number so the
+ *  odd/even inset slot follows the physical page across section boundaries. */
 export function layoutFlowSections(
   sections: readonly FlowSection[],
   measurer: TextMeasurer,
 ): SectionedFlowPages {
   const pages: FlowPage[] = [];
   const sectionOfPage: number[] = [];
-  sections.forEach((section, i) => {
+  // Merge continuous sections into their predecessor up front: the flow
+  // state can't resume mid-document, so "keeps flowing" must be a single
+  // layout pass over the union.
+  const runs: { blocks: LayoutBlock[]; opts: FlowOptions }[] = [];
+  for (const section of sections) {
+    const prev = runs[runs.length - 1];
+    if (section.type === "continuous" && prev) prev.blocks.push(...section.blocks);
+    else runs.push({ blocks: [...section.blocks], opts: section.opts });
+  }
+  runs.forEach((run, i) => {
     for (const page of layoutFlow(
-      section.blocks,
-      { ...section.opts, pageOffset: pages.length },
+      run.blocks,
+      { ...run.opts, pageOffset: pages.length },
       measurer,
     )) {
       pages.push(page);

@@ -799,13 +799,16 @@ function paintLineMarks(
   const last = line.items[line.items.length - 1];
   const markX = lineX + (last ? last.xPx + last.widthPx : 0);
   if (paragraphEnd && para.sectionEnd) {
-    paintSectionEndMark(
-      tree,
-      markX + sizePx * 0.25,
-      rightX,
-      lineY + pad + sizePx * 0.62,
-      ctx.marksLabels?.sectionBreak ?? "Section Break (Next Page)",
-    );
+    const labels = ctx.marksLabels;
+    const label =
+      para.sectionEnd === "continuous"
+        ? (labels?.sectionBreakContinuous ?? "Section Break (Continuous)")
+        : para.sectionEnd === "evenPage"
+          ? (labels?.sectionBreakEvenPage ?? "Section Break (Even Page)")
+          : para.sectionEnd === "oddPage"
+            ? (labels?.sectionBreakOddPage ?? "Section Break (Odd Page)")
+            : (labels?.sectionBreak ?? "Section Break (Next Page)");
+    paintSectionEndMark(tree, markX + sizePx * 0.25, rightX, lineY + pad + sizePx * 0.62, label);
     return;
   }
   // The bent-arrow mark (Word's ↵): a rod dropping into a foot that ends in a

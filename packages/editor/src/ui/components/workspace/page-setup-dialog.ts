@@ -6,11 +6,16 @@ import { observeLang, t } from "../../i18n/localize";
  *  lives on the `value` property, like a native input). */
 type FluentTextInput = HTMLElement & { value: string; disabled: boolean };
 
+/** A `fluent-dropdown` combobox: `value` reads/writes the picked option. */
+type FluentDropdown = HTMLElement & { value: string };
+
 /** The dialog's values in centimeters — the unit Word's zh dialogs show. All
  *  conversion to/from OOXML twips stays on the host. */
 export interface PageSetupValues {
   margins: { top: number; bottom: number; left: number; right: number };
   size: { width: number; height: number };
+  /** Section vertical alignment (w:vAlign). */
+  verticalAlign: "top" | "center" | "both" | "bottom";
 }
 
 /** Word's defaults (Normal margins on A4) for absent prefill fields. */
@@ -133,6 +138,20 @@ const template = html<DocenPageSetupDialog>`
           <span class="unit"></span>
         </div>
       </div>
+      <div class="row">
+        <div class="field">
+          <label ${ref("verticalAlignLabel")}></label>
+          <fluent-dropdown type="combobox" appearance="outline" ${ref("verticalAlignDropdown")}>
+            <fluent-listbox popover="manual" tabindex="-1">
+              <fluent-option value="top"></fluent-option>
+              <fluent-option value="center"></fluent-option>
+              <fluent-option value="both"></fluent-option>
+              <fluent-option value="bottom"></fluent-option>
+            </fluent-listbox>
+            <input slot="control" role="combobox" aria-readonly="true" readonly />
+          </fluent-dropdown>
+        </div>
+      </div>
     </div>
     <div slot="action">
       <fluent-button ${ref("cancelBtn")} @click="${(x) => x.hide()}"></fluent-button>
@@ -170,6 +189,8 @@ class DocenPageSetupDialog extends FASTElement {
   @observable widthInput?: FluentTextInput;
   @observable heightLabel?: HTMLElement;
   @observable heightInput?: FluentTextInput;
+  @observable verticalAlignLabel?: HTMLElement;
+  @observable verticalAlignDropdown?: FluentDropdown;
   @observable okBtn?: HTMLElement;
   @observable cancelBtn?: HTMLElement;
 
@@ -193,6 +214,7 @@ class DocenPageSetupDialog extends FASTElement {
     values: {
       margins?: Partial<PageSetupValues["margins"]>;
       size?: Partial<PageSetupValues["size"]>;
+      verticalAlign?: PageSetupValues["verticalAlign"];
     } = {},
   ): void {
     const margins = values.margins ?? {};
@@ -203,6 +225,8 @@ class DocenPageSetupDialog extends FASTElement {
     if (this.rightInput) this.rightInput.value = this.#cm(margins.right, DEFAULTS.side);
     if (this.widthInput) this.widthInput.value = this.#cm(size.width, DEFAULTS.width);
     if (this.heightInput) this.heightInput.value = this.#cm(size.height, DEFAULTS.height);
+    if (this.verticalAlignDropdown)
+      this.verticalAlignDropdown.value = values.verticalAlign ?? "top";
     this.dialogEl?.show();
   }
 
@@ -223,7 +247,13 @@ class DocenPageSetupDialog extends FASTElement {
       width: this.#num(this.widthInput?.value, DEFAULTS.width),
       height: this.#num(this.heightInput?.value, DEFAULTS.height),
     };
-    this.$emit("page-setup:ok", { margins, size });
+    const vAlign = String(this.verticalAlignDropdown?.value ?? "top");
+    const verticalAlign = (["top", "center", "both", "bottom"] as const).includes(
+      vAlign as PageSetupValues["verticalAlign"],
+    )
+      ? (vAlign as PageSetupValues["verticalAlign"])
+      : "top";
+    this.$emit("page-setup:ok", { margins, size, verticalAlign });
     this.hide();
   }
 
@@ -239,6 +269,13 @@ class DocenPageSetupDialog extends FASTElement {
     return Number.isFinite(n) && n > 0 ? n : fallback;
   }
 
+  #labelOptions(dropdown: FluentDropdown | undefined, labels: string[]): void {
+    if (!dropdown) return;
+    dropdown.querySelectorAll("fluent-option").forEach((opt, i) => {
+      if (labels[i]) opt.textContent = labels[i];
+    });
+  }
+
   #applyLabels(): void {
     if (this.dialogEl) this.dialogEl.heading = t("ribbon.group.page-setup", this);
     if (this.marginsHeading) this.marginsHeading.textContent = t("ribbon.cmd.margins", this);
@@ -249,6 +286,14 @@ class DocenPageSetupDialog extends FASTElement {
     if (this.rightLabel) this.rightLabel.textContent = t("pageSetup.right", this);
     if (this.widthLabel) this.widthLabel.textContent = t("pageSetup.width", this);
     if (this.heightLabel) this.heightLabel.textContent = t("pageSetup.height", this);
+    if (this.verticalAlignLabel)
+      this.verticalAlignLabel.textContent = t("pageSetup.verticalAlign", this);
+    this.#labelOptions(this.verticalAlignDropdown, [
+      t("pageSetup.vAlignTop", this),
+      t("pageSetup.vAlignCenter", this),
+      t("pageSetup.vAlignBoth", this),
+      t("pageSetup.vAlignBottom", this),
+    ]);
     if (this.okBtn) this.okBtn.textContent = t("options.ok", this);
     if (this.cancelBtn) this.cancelBtn.textContent = t("options.cancel", this);
     // The unit chips after each input share one text.

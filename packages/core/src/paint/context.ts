@@ -87,8 +87,16 @@ export interface PaintContext {
   /** Document-grid overlay (Word's View → Gridlines): horizontal rules every
    *  `linePitchPx` across the content box, painted under the body text. */
   showGridlines?: boolean;
-  /** The break rows' labels (Word paints them in the UI language). */
-  marksLabels?: { pageBreak?: string; sectionBreak?: string };
+  /** The break rows' labels (Word paints them in the UI language). The
+   *  section-break one has per-type variants — Word names the actual break
+   *  ("分节符(连续)"), defaulting to the next-page label. */
+  marksLabels?: {
+    pageBreak?: string;
+    sectionBreak?: string;
+    sectionBreakContinuous?: string;
+    sectionBreakEvenPage?: string;
+    sectionBreakOddPage?: string;
+  };
 }
 
 /** The text column a block paints inside: the page's content box for body

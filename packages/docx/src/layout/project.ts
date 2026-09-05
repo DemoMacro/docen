@@ -19,7 +19,7 @@ import type {
   ProjectedPageFurniture,
 } from "@docen/layout";
 import { twipToPx } from "@docen/layout";
-import type { DocumentOptions } from "@office-open/docx";
+import type { DocumentOptions, SectionPropertiesOptions } from "@office-open/docx";
 
 import { indexCharacterStyles } from "../style-cascade";
 import type { ProjectContext } from "./project/context";
@@ -49,6 +49,9 @@ export interface ProjectedSection {
   lineNumbers?: ProjectedLineNumbers;
   /** The section's columns (w:cols), absent for a single-column section. */
   columns?: ProjectedColumns;
+  /** The section break type (sectPr @w:type): a "continuous" section merges
+   *  onto the previous section's flow instead of opening a fresh page. */
+  type?: SectionPropertiesOptions["type"];
   /** Footnote id → definition blocks (absent when document has no footnotes). */
   footnoteDefinitions?: Map<number, readonly LayoutBlock[]>;
   /** Endnote id → definition blocks (absent when document has no endnotes). */
@@ -149,7 +152,13 @@ export function projectDocumentOptions(doc: DocumentOptions): {
     // its mark row as "─────分节符(下一页)─────". The final section's sectPr
     // rides the body's end (no paragraph holds it) and shows no mark.
     const last = blocks[blocks.length - 1];
-    if (i < (doc.sections?.length ?? 0) - 1 && last?.kind === "paragraph") last.sectionEnd = true;
+    if (i < (doc.sections?.length ?? 0) - 1 && last?.kind === "paragraph") {
+      // The mark row names the break type (Word: "分节符(连续)") — nextPage
+      // collapses to true, the painter's default label.
+      const type = section.properties?.type;
+      last.sectionEnd =
+        type === "continuous" || type === "evenPage" || type === "oddPage" ? type : true;
+    }
     return {
       blocks,
       flow: {
@@ -164,6 +173,7 @@ export function projectDocumentOptions(doc: DocumentOptions): {
       pageBorders: projectPageBorders(section.properties),
       lineNumbers: projectLineNumbers(section.properties),
       columns: projectColumns(section.properties),
+      type: section.properties?.type,
       footnoteDefinitions: fnDefs,
       endnoteDefinitions: enDefs,
     };

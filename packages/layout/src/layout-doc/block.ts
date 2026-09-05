@@ -97,9 +97,11 @@ export interface LayoutParagraph {
   widowControl?: boolean;
   pageBreakBefore?: boolean;
   /** The paragraph closes its section (carries the sectPr): the painter swaps
-   *  its ¶ for Word's "─────分节符(下一页)─────" mark row. The last section's
-   *  sectPr rides the body end and never sets this. */
-  sectionEnd?: boolean;
+   *  its ¶ for Word's "─────分节符(下一页)─────" mark row. The break type
+   *  labels the mark ("连续"/"偶数页"/"奇数页" variants); true and absent both
+   *  mean the default next-page break. The last section's sectPr rides the
+   *  body end and never sets this. */
+  sectionEnd?: boolean | "continuous" | "evenPage" | "oddPage";
   /** Floating drawings anchored to this paragraph: wrap-none boxes paint at
    *  their offset; a `wrap` on the drawing also shrinks the anchor
    *  paragraph's own lines around the box and registers a float zone the

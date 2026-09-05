@@ -70,6 +70,9 @@ export function mergeSectionProperties(
   return {
     ...base,
     ...("pageBorders" in patch ? { pageBorders: patch.pageBorders } : {}),
+    // Present-but-undefined clears verticalAlign (the dialog's "top" — Word
+    // drops w:vAlign); an absent key keeps the base.
+    ...("verticalAlign" in patch ? { verticalAlign: patch.verticalAlign } : {}),
     pageSize: mergeGroup(base?.pageSize, patch.pageSize),
     pageMargin: mergeGroup(base?.pageMargin, patch.pageMargin),
   };
