@@ -124,6 +124,7 @@ declare module "@tiptap/core" {
       "delete-picture": () => ReturnType;
       "position-picture": (value?: string) => ReturnType;
       "move-drawing": (value?: string) => ReturnType;
+      "place-drawing": (value?: string) => ReturnType;
       "rotate-drawing": (value?: string) => ReturnType;
       "drawing-properties-apply": (patch?: DrawingPropertiesPatch) => ReturnType;
       "drawing-crop-apply": (patch?: DrawingCropPatch) => ReturnType;
@@ -216,6 +217,7 @@ export const WIRED_DISPATCH: ReadonlySet<string> = new Set([
   "delete-picture",
   "position-picture",
   "move-drawing",
+  "place-drawing",
   "rotate-drawing",
   "drawing-properties-apply",
   "drawing-crop-apply",
@@ -2454,10 +2456,8 @@ export const DocumentCommands = Extension.create({
         },
       // Move a selected floating drawing (image or wps shape) by a pointer-
       // drag delta: value is JSON {h, v} in EMU, added to the drawing's
-      // current offsets. Align-anchored floats decline — the bridge only
-      // starts a drag when both axes anchor by offset (Word converts an
-      // alignment to an offset on drag; that needs the painted position,
-      // a later batch).
+      // current offsets. Align-anchored floats decline — the bridge commits
+      // those through place-drawing instead.
       "move-drawing":
         (value?) =>
         ({ state, tr }) => {
@@ -2481,23 +2481,53 @@ export const DocumentCommands = Extension.create({
             verticalPosition: { ...v, offset: v.offset + (parsed.v ?? 0) },
           });
         },
-      // Rotate the selected floating drawing by a handle-swept delta: value
-      // is the degrees to add to the drawing's current rotation (clockwise;
-      // image: the flat rotation attr, shape: its payload's transformation).
+      // Drop a dragged drawing at an absolute page position: value is JSON
+      // {h, v} in EMU, page-local. An align-anchored float has no offset for
+      // move-drawing to add to, so the drag lands as page-anchored offsets —
+      // the painted position IS the value (Word converts an alignment to an
+      // offset on drag; the drawn spot doesn't shift).
+      "place-drawing":
+        (value?) =>
+        ({ state, tr }) => {
+          if (!value) return false;
+          const target = floatingDrawingAt(state);
+          if (!target) return false;
+          let parsed: { h?: number; v?: number };
+          try {
+            parsed = JSON.parse(value) as { h?: number; v?: number };
+          } catch {
+            return false;
+          }
+          if (typeof parsed.h !== "number" || typeof parsed.v !== "number") return false;
+          return stampFloating(tr, target, {
+            ...floatingOf(target),
+            horizontalPosition: { relative: "page", offset: parsed.h },
+            verticalPosition: { relative: "page", offset: parsed.v },
+          });
+        },
+      // Rotate the selected drawing by a handle-swept delta: value is the
+      // degrees to add to the drawing's current rotation (clockwise; image:
+      // the flat rotation attr, floating or inline alike — the a:xfrm rot
+      // spins the extent box either way; shape: its payload's transformation,
+      // floating only).
       "rotate-drawing":
         (value?) =>
         ({ state, tr }) => {
           const delta = value == null ? Number.NaN : Number(value);
           if (!Number.isFinite(delta) || delta === 0) return false;
-          const target = floatingDrawingAt(state);
-          if (!target) return false;
-          if (target.kind === "image") {
-            const current = target.attrs.rotation;
+          const sel = state.selection;
+          if (!(sel instanceof NodeSelection)) return false;
+          if (sel.node.type.name === "image") {
+            const attrs = sel.node.attrs as Record<string, unknown>;
+            const target = { pos: sel.from, attrs, kind: "image" as const };
+            const current = attrs.rotation;
             return stampAttrs(tr, target, {
-              ...target.attrs,
+              ...attrs,
               rotation: (typeof current === "number" ? current : 0) + delta,
             });
           }
+          const target = floatingDrawingAt(state);
+          if (!target) return false;
           const shape = target.attrs.wpsShape as Record<string, unknown>;
           const transformation = {
             ...(shape.transformation as Record<string, unknown> | undefined),

@@ -740,8 +740,22 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       if (!selDrawing) return;
       const nodePos = opts.drawingSelection?.(selDrawing) ?? null;
       if (nodePos == null) return;
-      main.editor.commands["move-drawing"](
-        JSON.stringify({ h: Math.round(dx * EMU_PER_PX), v: Math.round(dy * EMU_PER_PX) }),
+      const hEmu = Math.round(dx * EMU_PER_PX);
+      const vEmu = Math.round(dy * EMU_PER_PX);
+      // An offset-anchored float adds the drag delta to its offsets; an
+      // align-anchored one has none to add to — the drop lands absolute,
+      // page-anchored, at the dragged spot (Word: dragging breaks the
+      // alignment, the drawn result doesn't shift).
+      const anchors = selectedFloatingAnchors();
+      if (typeof anchors?.h?.offset === "number" && typeof anchors.v?.offset === "number") {
+        main.editor.commands["move-drawing"](JSON.stringify({ h: hEmu, v: vEmu }));
+        return;
+      }
+      main.editor.commands["place-drawing"](
+        JSON.stringify({
+          h: Math.round(selDrawing.x * EMU_PER_PX) + hEmu,
+          v: Math.round(selDrawing.y * EMU_PER_PX) + vEmu,
+        }),
       );
     },
     applyRotation: (delta) => {
@@ -837,12 +851,15 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
    *  nearest line regardless of distance — a drag overshooting past the
    *  last line's band must keep extending to the line's end (Word), not
    *  stall the selection mid-line. */
-  /** Whether the selection is a floating drawing both axes anchor by EMU
-   *  offset — the only anchoring a pointer drag can express. Align-anchored
-   *  (and inline) drawings decline: their position isn't an offset. */
-  const movableFloating = (): boolean => {
+  /** The selected floating drawing's position anchors (null on any other
+   *  selection) — any float can start a pointer drag; whether the drop adds
+   *  a delta or lands absolute depends on the anchor shape. */
+  const selectedFloatingAnchors = (): {
+    h: Record<string, unknown> | undefined;
+    v: Record<string, unknown> | undefined;
+  } | null => {
     const sel = main.editor.state.selection;
-    if (!(sel instanceof NodeSelection)) return false;
+    if (!(sel instanceof NodeSelection)) return null;
     const attrs = sel.node.attrs as Record<string, unknown>;
     const floating =
       sel.node.type.name === "image"
@@ -851,11 +868,15 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
             string,
             unknown
           > | null);
-    if (!floating) return false;
-    const h = floating.horizontalPosition as Record<string, unknown> | undefined;
-    const v = floating.verticalPosition as Record<string, unknown> | undefined;
-    return typeof h?.offset === "number" && typeof v?.offset === "number";
+    if (!floating) return null;
+    return {
+      h: floating.horizontalPosition as Record<string, unknown> | undefined,
+      v: floating.verticalPosition as Record<string, unknown> | undefined,
+    };
   };
+
+  /** Whether the selection is a floating drawing a pointer drag can move. */
+  const movableFloating = (): boolean => selectedFloatingAnchors() != null;
 
   const posAtClient = (clientX: number, clientY: number, clamp = false): number | null => {
     const s = active();

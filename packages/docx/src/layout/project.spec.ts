@@ -231,6 +231,35 @@ describe("projectDocumentOptions style cascade", () => {
     });
   });
 
+  it("carries an inline picture's a:xfrm rotation into the projection", () => {
+    const { blocks } = oneSection(
+      doc([
+        {
+          paragraph: {
+            children: [
+              {
+                picture: {
+                  type: "png",
+                  data: "x",
+                  transformation: { width: 609600, height: 457200, rotation: 45 },
+                },
+              },
+            ],
+          },
+        },
+      ]),
+    );
+    const para = blocks[0];
+    if (para?.kind !== "paragraph") throw new Error("expected paragraph");
+    expect(para.inline[0]).toEqual({
+      kind: "picture",
+      widthPx: 64,
+      heightPx: 48,
+      src: "data:image/png;base64,x",
+      rotation: 45,
+    });
+  });
+
   it("projects run color and underline/strike decorations", () => {
     const { blocks } = oneSection(
       doc([

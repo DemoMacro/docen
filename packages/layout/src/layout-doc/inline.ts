@@ -135,4 +135,7 @@ export type LayoutInline =
        * renderer paints these instead of loading `src` — same renderer-only
        * passthrough contract; the engine never reads beyond widthPx/heightPx. */
       members?: LayoutDrawingMember[];
+      /** Clockwise spin of the box about its center, degrees (a:xfrm @rot) —
+       * the extent stays put, the painted content tilts inside it. */
+      rotation?: number;
     };
