@@ -1040,6 +1040,7 @@ const designTab = (): RibbonTab =>
         event: "page-color",
         label: cmd("page-color"),
         defaultColor: "FFFFFF",
+        size: "large",
       },
       split("page-border", "page-border", parsedItems(pageBorderItems()), { size: "large" }),
     ]),

@@ -182,6 +182,42 @@ const styles = css`
     border: 1px solid rgba(0, 0, 0, 0.3);
     background: #000;
   }
+  /* size="large" — Office large color button: icon over a wider color stripe
+     with the label under it, and the caret drops to a short full-width bar
+     (the large split's caret row) so the 70px height matches a sibling large
+     button/split in the same group. */
+  :host([size="large"]) {
+    flex-direction: column;
+    flex-shrink: 0;
+  }
+  :host([size="large"]) fluent-button#target {
+    flex-direction: column;
+    justify-content: flex-start;
+    min-width: 0;
+    max-width: 90px;
+    min-height: 56px;
+    padding: 4px 12px;
+  }
+  :host([size="large"]) .rb-icon svg {
+    width: 32px;
+    height: 32px;
+  }
+  :host([size="large"]) .rb-color-bar {
+    width: 32px;
+  }
+  :host([size="large"]) .rb-label {
+    font-size: 11px;
+    text-align: center;
+    line-height: 1.2;
+    white-space: normal;
+    overflow-wrap: break-word;
+  }
+  :host([size="large"]) .cp-caret {
+    width: 100%;
+    min-width: 0;
+    min-height: 14px;
+    margin-inline-start: 0;
+  }
   button.cp-caret {
     appearance: none;
     -webkit-appearance: none;
