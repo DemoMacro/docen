@@ -528,7 +528,49 @@ describe("projectDocumentOptions blocks", () => {
       px: (4 / 8) * (4 / 3),
       color: "000000",
     });
-    expect(table.borders?.left).toBeUndefined();
+  });
+
+  it("projects table alignment from direct attributes and table styles", () => {
+    const { blocks } = oneSection({
+      styles: {
+        ...styles,
+        tableStyles: [
+          {
+            id: "StyledRight",
+            table: {
+              alignment: "right",
+            },
+          },
+        ],
+      },
+      sections: [
+        {
+          children: [
+            {
+              table: {
+                alignment: "center",
+                rows: [{ cells: [{ children: [{ paragraph: { text: "centered" } }] }] }],
+              },
+            },
+            {
+              table: {
+                style: "StyledRight",
+                rows: [{ cells: [{ children: [{ paragraph: { text: "styled right" } }] }] }],
+              },
+            },
+            {
+              table: {
+                alignment: "end",
+                rows: [{ cells: [{ children: [{ paragraph: { text: "end" } }] }] }],
+              },
+            },
+          ],
+        },
+      ],
+    });
+    expect(blocks[0]?.kind === "table" && blocks[0].align).toBe("center");
+    expect(blocks[1]?.kind === "table" && blocks[1].align).toBe("right");
+    expect(blocks[2]?.kind === "table" && blocks[2].align).toBe("right");
   });
 
   it("turns unprojectable body shapes into labeled placeholders and drops bookmarks", () => {

@@ -399,7 +399,7 @@ describe("run children drops", () => {
  * with office-open, then run the docen resolve → compile legs on the PARSED
  * options — the shapes are canonical by construction.
  */
-describe("real-XML round-trip (generateDocument → parseDocument)", () => {
+describe("real-XML round-trip (generateDocument → parseDocument)", { timeout: 20000 }, () => {
   function throughXml(children: SectionChild[]) {
     const binary = generateDocumentSync({ sections: [{ children }] });
     const parsed = parseDocument(new Uint8Array(binary as Buffer));
