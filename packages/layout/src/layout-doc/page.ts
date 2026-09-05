@@ -41,11 +41,15 @@ export interface ProjectedPageFurniture {
 }
 
 /** Page background projected for painting (w:background): the solid page
- *  color — a VML pattern fill arrives pre-averaged into it. */
+ *  color — a VML pattern fill arrives pre-averaged into it — or a full-page
+ *  image fill. */
 export interface ProjectedPageBackground {
   /** On-page color: the plain w:color, or the pattern tile's threads/gaps
    *  mixed by bit coverage. */
   color?: string;
+  /** Full-page image fill (w:background v:fill type="frame") as a data URL —
+   *  Word's Fill Effects → Picture, stretched over the page. */
+  image?: string;
 }
 
 /** One side of the projected page borders (w:pgBorders): the stroke a page

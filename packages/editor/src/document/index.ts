@@ -67,7 +67,8 @@ import type { FontDialogPatch } from "../ui/components/workspace/font-dialog";
 import { proofingLanguageName } from "../ui/components/workspace/language-dialog";
 import type { LinkValues } from "../ui/components/workspace/link-dialog";
 import type { StyleChoice, ModifyStyleState } from "../ui/components/workspace/modify-style-dialog";
-import { createDefaultAddin, textCounter } from "./addin";
+import type { WordCountStats } from "../ui/components/workspace/word-count-dialog";
+import { createDefaultAddin, textCounter, wordCounter } from "./addin";
 import {
   mountEditBridge,
   type EditBridge,
@@ -1322,6 +1323,11 @@ class DocenDocument extends AddinHost<Editor> {
       "watermark:ok",
       this.#design.onWatermarkOk as EventListener,
     );
+    // Fill Effects dialog — set/clear the page's picture fill.
+    this.shadowRoot!.querySelector("docen-fill-effects-dialog")?.addEventListener(
+      "fill-effects:ok",
+      this.#design.onFillEffectsOk as EventListener,
+    );
     this.shadowRoot!.querySelector("docen-status-bar")?.addEventListener(
       "zoom:open",
       this.#onZoomOpen as EventListener,
@@ -1866,6 +1872,7 @@ class DocenDocument extends AddinHost<Editor> {
           index < run.sectionOfPage.length && section !== run.sectionOfPage[index],
       ) ||
       prev.background?.color !== run.background?.color ||
+      prev.background?.image !== run.background?.image ||
       prev.sections.length !== run.sections.length ||
       prev.sections.some((s, i) => !deepEq(s.flow, run.sections[i]!.flow)) ||
       prev.sections.some((s, i) => !deepEq(s.furniture, run.sections[i]!.furniture)) ||
@@ -1978,6 +1985,9 @@ class DocenDocument extends AddinHost<Editor> {
     this.shadowRoot
       ?.querySelector("docen-watermark-dialog")
       ?.removeEventListener("watermark:ok", this.#design.onWatermarkOk as EventListener);
+    this.shadowRoot
+      ?.querySelector("docen-fill-effects-dialog")
+      ?.removeEventListener("fill-effects:ok", this.#design.onFillEffectsOk as EventListener);
     this.shadowRoot
       ?.querySelector("docen-page-setup-dialog")
       ?.removeEventListener("page-setup:ok", this.#sections.onPageSetupOk as EventListener);
@@ -2120,23 +2130,32 @@ class DocenDocument extends AddinHost<Editor> {
         : "";
     const autosave = t("header.autosave", this);
     const qatIds = this.#qatIds();
-    // Undo/redo carry Word's QAT history flyout: a narrow caret next to the
-    // button opens the step list (#fillHistory fills it on open).
-    const historyMenu = (kind: "undo" | "redo") => `
-            <fluent-menu>
-              <fluent-menu-button
-                slot="trigger"
-                appearance="subtle"
-                data-history-trigger="${kind}"
-                title="${t(kind === "undo" ? "header.undo-history" : "header.redo-history", this)}"
-                style="min-width:14px;padding-inline:1px"
-              ><span style="display:inline-flex;width:10px;height:10px;overflow:hidden">${ribbonIcon("caret") ?? ""}</span></fluent-menu-button>
-              <fluent-menu-list data-history-list="${kind}"></fluent-menu-list>
-            </fluent-menu>`;
+    // The caret SVG ships at 24×24 and would clip inside the small customize
+    // window, so the attribute size is restamped to the window it renders in.
+    const caretIcon = (size: number): string =>
+      (ribbonIcon("caret") ?? "").replace(
+        /width="24" height="24"/,
+        `width="${size}" height="${size}"`,
+      );
+    // Undo/redo render as icon-only split buttons (Word's QAT shape): the
+    // primary runs one step, the 14px caret opens the history flyout
+    // (#fillHistory fills it on open). An empty stack hides the caret through
+    // data-history-empty (documentStyles; Word shows no flyout for a fresh
+    // document) — #updateStatus keeps the flag in step with the depths, the
+    // header doesn't rebuild per transaction.
+    const editorForDepth = this.#bridge?.activeEditor() ?? this.editor;
+    const depthOf = (kind: "undo" | "redo"): number =>
+      !editorForDepth
+        ? 0
+        : kind === "undo"
+          ? undoDepth(editorForDepth.state)
+          : redoDepth(editorForDepth.state);
     const qatButtons = QAT_CANDIDATES.filter((c) => qatIds.includes(c.id))
       .map((c) => {
-        const button = `<docen-ribbon-button icon="${c.icon}" label="${t(c.labelKey, this)}" event="${c.id}" icon-only></docen-ribbon-button>`;
-        return c.id === "undo" || c.id === "redo" ? button + historyMenu(c.id) : button;
+        if (c.id === "undo" || c.id === "redo") {
+          return `<docen-ribbon-split-button icon="${c.icon}" label="${t(c.labelKey, this)}" event="${c.id}" icon-only data-history="${c.id}" items="[]"${depthOf(c.id) === 0 ? " data-history-empty" : ""}></docen-ribbon-split-button>`;
+        }
+        return `<docen-ribbon-button icon="${c.icon}" label="${t(c.labelKey, this)}" event="${c.id}" icon-only></docen-ribbon-button>`;
       })
       .join("");
     const qatMenuItems = QAT_CANDIDATES.map((c) => {
@@ -2151,16 +2170,19 @@ class DocenDocument extends AddinHost<Editor> {
             <span class="autosave-label">${autosave}</span>
             <fluent-switch data-event="autosave" ${this.#autosaveEnabled() ? "checked" : ""} aria-label="${autosave}"></fluent-switch>
             ${qatButtons}
-            <fluent-menu>
+            <!-- The customize caret and the file menu detach from the QAT
+                 cluster (the row's 4px gap would read the caret as the last
+                 button's split dropdown, and butt it against the file name). -->
+            <fluent-menu style="margin-inline-start:4px">
               <fluent-menu-button
                 slot="trigger"
                 appearance="subtle"
+                class="qat-customize"
                 title="${t("header.qat-customize", this)}"
-                style="min-width:22px;padding-inline:2px"
-              ><span style="display:inline-flex;width:12px;height:12px;overflow:hidden">${ribbonIcon("caret") ?? ""}</span></fluent-menu-button>
+              ><span style="display:inline-flex;width:12px;height:12px;overflow:hidden">${caretIcon(12)}</span></fluent-menu-button>
               <fluent-menu-list>${qatMenuItems}</fluent-menu-list>
             </fluent-menu>
-            <fluent-menu>
+            <fluent-menu style="margin-inline-start:10px">
               <fluent-menu-button
                 slot="trigger"
                 appearance="subtle"
@@ -2246,43 +2268,32 @@ class DocenDocument extends AddinHost<Editor> {
 
   /** Fill a QAT history flyout with one entry per available step. PM's history
    *  keeps no per-item labels, so entries read "Edit N"; picking entry N
-   *  rewinds/advances N steps at once (Word's flyout shape). */
+   *  arrives as the undo/redo command carrying its step count (#onCommand,
+   *  Word's flyout shape). */
   #fillHistory(kind: "undo" | "redo"): void {
     const editor = this.#bridge?.activeEditor() ?? this.editor;
-    const list = this.shadowRoot?.querySelector(`[data-history-list="${kind}"]`);
-    if (!editor || !list) return;
+    const split = this.shadowRoot?.querySelector(
+      `docen-ribbon-split-button[data-history="${kind}"]`,
+    );
+    if (!editor || !split) return;
     const depth = kind === "undo" ? undoDepth(editor.state) : redoDepth(editor.state);
     const label = t("header.history-item", this);
-    const items: string[] = [];
+    const items: Array<{ text: string; value: string }> = [];
     for (let steps = depth; steps >= 1; steps--) {
-      items.push(
-        `<fluent-menu-item data-history-kind="${kind}" data-history-steps="${steps}">${label.replace("{0}", String(steps))}</fluent-menu-item>`,
-      );
+      items.push({ text: label.replace("{0}", String(steps)), value: String(steps) });
     }
-    list.innerHTML = items.join("");
+    split.setAttribute("items", JSON.stringify(items));
   }
 
-  /** Shadow-root click delegation for the history flyouts: the caret trigger
-   *  fills its list before Fluent opens it; an entry batch-runs that many
-   *  undo()/redo() commands (each its own transaction, stop at the first
-   *  refusal). */
+  /** Shadow-root click delegation for the history flyouts: the split's caret
+   *  fills its item list as Fluent opens the drop-down (the primary's click is
+   *  stopped inside the split, so only caret/menu clicks reach here). */
   readonly #onHistoryClick = (event: Event): void => {
-    const target = event.target as HTMLElement | null;
-    const trigger = target?.closest?.("[data-history-trigger]");
-    if (trigger) {
-      this.#fillHistory(trigger.getAttribute("data-history-trigger") as "undo" | "redo");
-      return;
-    }
-    const item = target?.closest?.("[data-history-steps]") as HTMLElement | null;
-    if (!item || item.hasAttribute("disabled")) return;
-    const editor = this.#bridge?.activeEditor() ?? this.editor;
-    if (!editor) return;
-    const kind = item.getAttribute("data-history-kind");
-    const steps = Number(item.getAttribute("data-history-steps"));
-    if (!Number.isInteger(steps) || steps < 1) return;
-    for (let i = 0; i < steps; i++) {
-      const ok = kind === "redo" ? editor.commands.redo() : editor.commands.undo();
-      if (!ok) break;
+    const split = (event.target as HTMLElement | null)?.closest?.(
+      "docen-ribbon-split-button[data-history]",
+    );
+    if (split) {
+      this.#fillHistory(split.getAttribute("data-history") as "undo" | "redo");
     }
   };
 
@@ -2865,39 +2876,101 @@ class DocenDocument extends AddinHost<Editor> {
       bar.setAttribute("zoom", String(this.#zoom));
       bar.setAttribute("view", this.#viewMode());
     }
+    // The QAT history carets follow the undo/redo depths live (the header
+    // only rebuilds on chrome renders — Word hides the flyout on an empty
+    // stack; documentStyles' [data-history-empty] rule drops the caret).
+    const liveEditor = this.#bridge?.activeEditor() ?? editor;
+    for (const [kind, depth] of [
+      ["undo", liveEditor ? undoDepth(liveEditor.state) : 0],
+      ["redo", liveEditor ? redoDepth(liveEditor.state) : 0],
+    ] as const) {
+      root
+        .querySelector(`docen-ribbon-split-button[data-history="${kind}"]`)
+        ?.toggleAttribute("data-history-empty", depth === 0);
+    }
   }
 
-  /** Word Count (Review tab) — compute the document statistics (the status
-   *  bar's words source + grapheme character counts + layout line total) and
-   *  hand them to the dialog as one JSON attribute. */
+  /** Word Count (Review tab) — compute the document statistics twice (Word's
+   *  dialog shape): the body alone, and with textboxes + footnotes/endnotes
+   *  folded back in — the dialog's "include" toggle (default ON) switches
+   *  between the two readouts. Textboxes are wpsShape subtrees in the body;
+   *  the notes live in the documentExtras channels. */
   #showWordCount(): void {
     const editor = this.editor;
     const dialog = this.shadowRoot?.querySelector("docen-word-count-dialog") as
-      | (HTMLElement & { stats?: string; show(): void })
+      | (HTMLElement & { stats?: string; statsExtra?: string; show(): void })
       | undefined;
     if (!editor || !dialog) return;
-    const cc = editor.storage.characterCount as { words?: () => number } | undefined;
-    const text = editor.state.doc.textContent;
-    let paragraphs = 0;
-    editor.state.doc.descendants((node) => {
-      if (node.type.name === "paragraph") paragraphs++;
-      return true;
+    // Walk the doc once: paragraphs/text under a wpsShape subtree are the
+    // textbox bucket, everything else the body bucket.
+    let bodyText = "";
+    let bodyParas = 0;
+    let shapeText = "";
+    let shapeParas = 0;
+    const walk = (node: PMNode, inShape: boolean): void => {
+      const shape = inShape || node.type.name === "wpsShape";
+      if (node.type.name === "paragraph") {
+        if (shape) {
+          shapeParas++;
+          shapeText += `${node.textContent}\n`;
+        } else {
+          bodyParas++;
+          bodyText += `${node.textContent}\n`;
+        }
+        return;
+      }
+      node.forEach((child) => walk(child, shape));
+    };
+    walk(editor.state.doc, false);
+    // Footnotes/endnotes — documentExtras note bodies are paragraph JSON.
+    const extras =
+      (
+        editor.state.doc.attrs as {
+          documentExtras?: {
+            footnotes?: Array<{ children?: JSONContent[] }>;
+            endnotes?: Array<{ children?: JSONContent[] }>;
+          };
+        }
+      ).documentExtras ?? {};
+    let notesText = "";
+    let notesParas = 0;
+    const jsonText = (node: JSONContent): string =>
+      (typeof node.text === "string" ? node.text : "") +
+      (node.content ?? []).map(jsonText).join("");
+    for (const channel of [extras.footnotes, extras.endnotes]) {
+      for (const note of channel ?? []) {
+        for (const para of note.children ?? []) {
+          notesParas++;
+          notesText += `${jsonText(para)}\n`;
+        }
+      }
+    }
+    const counted = (text: string, paras: number): WordCountStats => ({
+      pages: this.#pages.length,
+      words: wordCounter(text),
+      charsWithSpaces: textCounter(text),
+      charsNoSpaces: textCounter(text.replace(/\s+/g, "")),
+      paragraphs: paras,
+      lines: this.#layoutLines(),
     });
+    dialog.stats = JSON.stringify(counted(bodyText, bodyParas));
+    const merged = {
+      text: bodyText + shapeText + notesText,
+      paras: bodyParas + shapeParas + notesParas,
+    };
+    dialog.statsExtra = JSON.stringify(counted(merged.text, merged.paras));
+    dialog.show();
+  }
+
+  /** The laid-out line total (paragraph blocks across every page). */
+  #layoutLines(): number {
     let lines = 0;
     for (const page of this.#pages) {
       for (const item of page.items) {
         if (item.block.kind === "paragraph") lines += item.block.lines.length;
       }
     }
-    dialog.stats = JSON.stringify({
-      pages: this.#pages.length,
-      words: cc?.words?.() ?? 0,
-      charsWithSpaces: textCounter(text),
-      charsNoSpaces: textCounter(text.replace(/\s+/g, "")),
-      paragraphs,
-      lines,
-    });
-    dialog.show();
+    return lines;
   }
 
   /** Symbol dialog Insert → drop the picked character at the caret (the
@@ -3717,6 +3790,20 @@ class DocenDocument extends AddinHost<Editor> {
       this.#showWordCount();
       return;
     }
+    // The QAT history flyout's entries arrive as undo/redo carrying their step
+    // count — batch-run that many commands (each its own transaction, stop at
+    // the first refusal); the value-less primary click falls through to the
+    // wired single-step command.
+    if ((name === "undo" || name === "redo") && value) {
+      const editor = this.#bridge?.activeEditor() ?? this.editor;
+      const steps = Number(value);
+      if (editor && Number.isInteger(steps) && steps > 0) {
+        for (let i = 0; i < steps; i++) {
+          if (!(name === "redo" ? editor.commands.redo() : editor.commands.undo())) break;
+        }
+      }
+      return;
+    }
     // Repeat (QAT; F4 lives in the bridge) — retype the last plain-text
     // insertion at the caret. The bridge records it on the editor's storage;
     // both entry points read that single source.
@@ -4207,6 +4294,12 @@ class DocenDocument extends AddinHost<Editor> {
         return;
       }
       this.#design.setWatermark(typeof value === "string" ? value : undefined);
+      return;
+    }
+    // Fill Effects — the page background's picture fill (Word's Design →
+    // Page Color → Fill Effects; the dialog commits via fill-effects:ok).
+    if (name === "fill-effects") {
+      this.#design.openFillEffectsDialog();
       return;
     }
     // Link — prompt for an address and mark the selection (or insert fresh

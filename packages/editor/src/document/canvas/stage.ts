@@ -328,6 +328,11 @@ export class CanvasStage {
    *  read-only with the chrome trimmed by the host. */
   #viewMode: "print" | "draft" | "web" | "read" = "print";
 
+  /** Print snapshots repaint without the page color (Word's "Print
+   *  background colors and images" ships off) — set only inside
+   *  {@link printSnapshots}. */
+  #suppressBackground = false;
+
   setViewMode(mode: "print" | "draft" | "web" | "read"): void {
     if (mode === this.#viewMode) return;
     const wasContinuous = this.#viewMode === "web" || this.#viewMode === "read";
@@ -502,14 +507,23 @@ export class CanvasStage {
   }
 
   /** Stamp the frame's w:background — the base color (pattern fills arrive
-   *  pre-averaged by the projection). Draft renders white. */
+   *  pre-averaged by the projection) or the full-page image fill (Word's
+   *  Fill Effects → Picture, stretched over the page like v:fill type="frame").
+   *  Draft renders white. */
   private applyBackground(frame: HTMLElement): void {
     const bg = this.ctx.background;
     // OOXML hex has no '#' — CSS colors do; the raw token is invalid CSS and
     // the assignment would be silently dropped.
+    if (this.#viewMode !== "draft" && bg?.image) {
+      frame.style.backgroundColor = "#ffffff";
+      frame.style.backgroundImage = `url("${bg.image}")`;
+      frame.style.backgroundSize = "100% 100%";
+      return;
+    }
     frame.style.backgroundColor =
       this.#viewMode !== "draft" && bg?.color ? `#${bg.color}` : "#ffffff";
     frame.style.backgroundImage = "none";
+    frame.style.backgroundSize = "";
   }
 
   /** ST_Border tokens → CSS border-styles. Word's art borders (fancy
@@ -880,27 +894,39 @@ export class CanvasStage {
    *  as PNG. `width`/`height` are the page's unzoomed CSS px (96 dpi) so the
    *  print view can lay the images out at true paper size. */
   async printSnapshots(): Promise<{ width: number; height: number; url: string }[]> {
-    const apps: App[] = [];
-    for (const [index, slot] of this.slots.entries()) {
-      this.ensure(slot);
-      if (!slot.app) continue;
-      this.repaint(slot.app, index);
-      slot.app.forceRender();
-      apps.push(slot.app);
+    // Strip the page color for the export (see repaint's background note),
+    // then repaint with it back — the print repaint overwrote the live view.
+    this.#suppressBackground = true;
+    try {
+      const apps: App[] = [];
+      for (const [index, slot] of this.slots.entries()) {
+        this.ensure(slot);
+        if (!slot.app) continue;
+        this.repaint(slot.app, index);
+        slot.app.forceRender();
+        apps.push(slot.app);
+      }
+      await this.#settleCanvases(apps);
+      const shots: { width: number; height: number; url: string }[] = [];
+      for (const [index, slot] of this.slots.entries()) {
+        const canvas = slot.el.querySelector("canvas");
+        if (!canvas) continue;
+        const flow = this.sectionAt(index).flow;
+        shots.push({
+          width: this.pageCss(flow.pageWidthPx),
+          height: this.pageCss(flow.pageHeightPx),
+          url: canvas.toDataURL("image/png"),
+        });
+      }
+      return shots;
+    } finally {
+      this.#suppressBackground = false;
+      for (const [index, slot] of this.slots.entries()) {
+        if (!slot.app) continue;
+        this.repaint(slot.app, index);
+        slot.app.forceRender();
+      }
     }
-    await this.#settleCanvases(apps);
-    const shots: { width: number; height: number; url: string }[] = [];
-    for (const [index, slot] of this.slots.entries()) {
-      const canvas = slot.el.querySelector("canvas");
-      if (!canvas) continue;
-      const flow = this.sectionAt(index).flow;
-      shots.push({
-        width: this.pageCss(flow.pageWidthPx),
-        height: this.pageCss(flow.pageHeightPx),
-        url: canvas.toDataURL("image/png"),
-      });
-    }
-    return shots;
   }
 
   /** repaint clears each canvas and forceRender only requests a frame —
@@ -1066,9 +1092,11 @@ export class CanvasStage {
     // as the bottommost scene element. The App-level `fill` cannot host it:
     // an App has no canvas of its own and drops `fill` from the child-layer
     // configs it builds (App.ts __getChildConfig). Draft renders white —
-    // Word's draft view drops the page background along with the furniture.
+    // Word's draft view drops the page background along with the furniture;
+    // print snapshots strip it too (Word's "Print background colors" ships
+    // off) and repaint with it once the export is done.
     const bg = this.ctx.background;
-    if (bg?.color && this.#viewMode !== "draft") {
+    if (bg?.color && this.#viewMode !== "draft" && !this.#suppressBackground) {
       tree.add(
         new Rect({
           x: 0,

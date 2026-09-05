@@ -1076,6 +1076,7 @@ const designTab = (): RibbonTab =>
         defaultColor: "FFFFFF",
         size: "large",
       },
+      btn("image", "fill-effects", { size: "large" }),
       split("page-border", "page-border", parsedItems(pageBorderItems()), { size: "large" }),
     ]),
   ]);
@@ -1085,10 +1086,10 @@ const layoutTab = (): RibbonTab =>
     group(
       "page-setup",
       [
-        split("page-color", "margins", parsedItems(marginsItems()), { size: "large" }),
+        split("margins", "margins", parsedItems(marginsItems()), { size: "large" }),
         split("orientation", "orientation", parsedItems(orientationItems()), { size: "large" }),
-        split("page-color", "page-size", parsedItems(sizePaperItems()), { size: "large" }),
-        split("multilevel", "columns", parsedItems(columnsItems()), { size: "large" }),
+        split("page-size", "page-size", parsedItems(sizePaperItems()), { size: "large" }),
+        split("columns", "columns", parsedItems(columnsItems()), { size: "large" }),
         split("page-break", "page-break", parsedItems(breaksItems()), {
           size: "large",
           label: cmd("breaks"),

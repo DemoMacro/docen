@@ -29,6 +29,7 @@ import {
   type BodyParagraph,
   type Rec,
 } from "./guards";
+import { pictureSrc } from "./media";
 import { indexNumberings } from "./numbering";
 import { projectParagraph } from "./paragraph";
 import { projectTable } from "./table";
@@ -192,6 +193,7 @@ export function projectPageBackground(doc: DocumentOptions): ProjectedPageBackgr
   const bg = doc.background as
     | {
         color?: string;
+        image?: { type?: unknown; data?: unknown };
         rawXml?: string;
         rawMedia?: Array<{ fileName?: string; type?: string; data?: Uint8Array }>;
       }
@@ -209,6 +211,19 @@ export function projectPageBackground(doc: DocumentOptions): ProjectedPageBackgr
       : undefined;
   const color = structured ?? hexOf(raw.match(/<w:background[^>]*\sw:color="([0-9A-Fa-f]{6})"/));
   const out: ProjectedPageBackground = color ? { color } : {};
+  // Word's Fill Effects → Picture: a full-page image fill (v:fill
+  // type="frame"). The structured `image` arm carries {type,data} directly;
+  // the round-trip rawXml arm references media through the v:fill's rId
+  // placeholder.
+  const frameFill = raw.match(/<v:fill[^>]*type="frame"[^>]*>/);
+  const frameRid = frameFill?.[0].match(/\sr:id="\{?([^"}]+)\}?"/)?.[1];
+  const frameMedia =
+    frameRid !== undefined ? bg.rawMedia?.find((m) => m.fileName === frameRid) : undefined;
+  const frameData = bg.image?.data ?? frameMedia?.data;
+  if (frameData != null) {
+    const src = pictureSrc({ type: bg.image?.type ?? frameMedia?.type, data: frameData });
+    if (src) return { color, image: src };
+  }
   const fill = raw.match(/<v:fill[^>]*type="pattern"[^>]*>/);
   const rid = fill?.[0].match(/\sr:id="\{?([^"}]+)\}?"/)?.[1];
   const media =

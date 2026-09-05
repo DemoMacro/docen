@@ -42,7 +42,7 @@ const styles = css`
     padding: 7px 2px;
     border-block-end: 1px solid var(--colorNeutralStroke2, #e0e0e0);
   }
-  .wc-row:last-child {
+  .wc-row:last-of-type {
     border-block-end: none;
   }
   .wc-row span {
@@ -53,11 +53,20 @@ const styles = css`
     font-weight: 600;
     font-variant-numeric: tabular-nums;
   }
+  .wc-notes {
+    padding: 10px 2px 0;
+  }
 `;
 
 const template = html<DocenWordCountDialog>`
   <docen-dialog ${ref("dialogEl")}>
-    <div class="wc-body" ${ref("bodyEl")}></div>
+    <div class="wc-body" ${ref("bodyEl")}>
+      <fluent-checkbox
+        class="wc-notes"
+        ${ref("notesEl")}
+        @change="${(x) => x.toggleNotes()}"
+      ></fluent-checkbox>
+    </div>
     <div slot="action">
       <fluent-button
         appearance="accent"
@@ -81,16 +90,23 @@ const ROW_KEYS: readonly (keyof WordCountStats)[] = [
 
 /**
  * `<docen-word-count-dialog>` — MS Office "Word Count" dialog. The host hands
- * over the computed statistics as a JSON `stats` attribute and calls `show()`;
- * the dialog is a read-only readout with a single Close button (Word's shape).
+ * over the computed statistics as JSON — `stats` for the body and
+ * `stats-extra` with textboxes/notes folded back in — and calls `show()`; the
+ * checkbox (Word's, default ON) picks which readout renders.
  */
 @customElement({ name: "docen-word-count-dialog", template, styles })
 class DocenWordCountDialog extends FASTElement {
   @attr stats?: string;
 
+  @attr statsExtra?: string;
+
   @observable dialogEl?: HTMLElement & { heading?: string; show(): void; hide(): void };
   @observable bodyEl?: HTMLElement;
   @observable closeBtn?: HTMLElement;
+  @observable notesEl?: HTMLElement & { textContent?: string; checked?: boolean };
+
+  // Word's checkbox ships checked.
+  #includeNotes = true;
 
   #unobserveLang?: () => void;
 
@@ -110,6 +126,10 @@ class DocenWordCountDialog extends FASTElement {
     this.#renderRows();
   }
 
+  statsExtraChanged(): void {
+    this.#renderRows();
+  }
+
   show(): void {
     this.dialogEl?.show();
   }
@@ -118,21 +138,32 @@ class DocenWordCountDialog extends FASTElement {
     this.dialogEl?.hide();
   }
 
+  toggleNotes(): void {
+    this.#includeNotes = !this.#includeNotes;
+    this.#renderRows();
+  }
+
   #applyLabels(): void {
     if (this.dialogEl) this.dialogEl.heading = t("wordCount.title", this);
     if (this.closeBtn) this.closeBtn.textContent = t("wordCount.close", this);
+    if (this.notesEl) {
+      this.notesEl.textContent = t("wordCount.includeNotes", this);
+      this.notesEl.checked = this.#includeNotes;
+    }
     this.#renderRows();
   }
 
   #renderRows(): void {
     if (!this.bodyEl) return;
+    const raw = this.#includeNotes ? (this.statsExtra ?? this.stats) : this.stats;
     let stats: Partial<WordCountStats> = {};
     try {
-      stats = this.stats ? (JSON.parse(this.stats) as Partial<WordCountStats>) : {};
+      stats = raw ? (JSON.parse(raw) as Partial<WordCountStats>) : {};
     } catch {
       stats = {};
     }
-    this.bodyEl.textContent = "";
+    for (const row of this.bodyEl.querySelectorAll(".wc-row")) row.remove();
+    const notesEl = this.notesEl;
     for (const key of ROW_KEYS) {
       const row = document.createElement("div");
       row.className = "wc-row";
@@ -141,7 +172,9 @@ class DocenWordCountDialog extends FASTElement {
       const value = document.createElement("b");
       value.textContent = String(stats[key] ?? 0);
       row.append(label, value);
-      this.bodyEl.append(row);
+      // The checkbox lives inside the body container; rows insert before it
+      // so the readout keeps ROW_KEYS order (pages first, lines last).
+      this.bodyEl.insertBefore(row, notesEl ?? null);
     }
   }
 }

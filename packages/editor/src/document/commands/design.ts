@@ -91,6 +91,41 @@ export class DesignCommands {
     editor.view.dispatch(editor.state.tr.setDocAttribute("background", background));
   }
 
+  /** Design → Fill Effects dialog's OK: an image replaces the background's
+   *  picture fill (keeping any color), an empty payload drops the fill, and
+   *  a color-less all-empty background goes away entirely (Word keeps the
+   *  two Fill Effects panes independent). */
+  readonly onFillEffectsOk = (
+    event: CustomEvent<{ image?: { data: string; type: string } }>,
+  ): void => {
+    const editor = this.host.editor();
+    if (!editor) return;
+    const current = (editor.state.doc.attrs.background ?? {}) as Record<string, unknown>;
+    let background: Record<string, unknown> | null = { ...current };
+    if (event.detail.image) {
+      background.image = event.detail.image;
+    } else {
+      delete background.image;
+      if (Object.keys(background).length === 0) background = null;
+    }
+    editor.view.dispatch(editor.state.tr.setDocAttribute("background", background));
+    this.host.bridge()?.focus();
+  };
+
+  /** Design → Fill Effects: open the dialog prefilled from the current
+   *  background picture fill. */
+  openFillEffectsDialog(): void {
+    const dialog = this.host.element().shadowRoot?.querySelector("docen-fill-effects-dialog") as {
+      show(current?: unknown): void;
+    } | null;
+    if (!dialog) return;
+    const background = this.host.editor()?.state.doc.attrs.background as
+      | { image?: unknown }
+      | null
+      | undefined;
+    dialog.show(background?.image ?? null);
+  }
+
   /** Design → Watermark presets (Word's gallery): one diagonal silver text
    *  shape stamped into every header slot — Word's watermark IS a
    *  behind-document, page-centered shape anchored in the header, so it

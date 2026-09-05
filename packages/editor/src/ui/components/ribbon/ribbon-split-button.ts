@@ -75,11 +75,14 @@ const styles = css`
   }
   /* Non-large split (icon-only): a narrow caret hugging the primary — the
      Office compact split. Fluent's icon-only button clamps max-width, so lift
-     it and pin a tight width; the chevron centers within. */
+     it and pin a tight width; the chevron centers within. Fluent's menu-button
+     also defaults to min-height 32px — the same trap the primary's 26px rule
+     fixes; left alone it stretches the whole split past sibling buttons. */
   :host(:not([size="large"])) [part="caret"] {
     width: 14px;
     min-width: 14px;
     max-width: none;
+    min-height: 26px;
   }
   :host([size="large"]) [part="caret"] {
     width: 100%;

@@ -98,6 +98,9 @@ export const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   // Repeat (QAT; F4 lives in the bridge) — the host dispatches the recorded
   // insertion from the editor's storage.
   "repeat",
+  // Fill Effects opens the page-picture-fill dialog (Design → Page Color
+  // group); the OK path rides the fill-effects:ok event.
+  "fill-effects",
   // Spelling opens the proofing pane (Review → Spelling & Grammar); the
   // check itself and the pane actions are host state (#runSpellCheck).
   "spell-check",

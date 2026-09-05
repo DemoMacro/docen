@@ -73,6 +73,21 @@ export const documentStyles = css`
     object-fit: cover;
     background: none;
   }
+  /* QAT undo/redo history: an empty stack shows no flyout caret (Word's QAT
+       drops it for a fresh document) — #updateStatus stamps the flag. */
+  docen-ribbon-split-button[data-history-empty]::part(caret) {
+    display: none;
+  }
+  /* QAT customize ("…") — a tight subtle chevron, kept visually apart from
+       the undo/redo splits' flyouts (the Ribbon Display Options recipe:
+       Fluent's menu-button padding would inflate it into another pill). */
+  .qat-customize {
+    min-width: 0;
+    width: 22px;
+    max-width: none;
+    min-height: 26px;
+    padding-inline: 0;
+  }
   /* The canvas surface — the scroll container sits one level up (the
        document-area); this wrapper just anchors the edit bridge's textarea and
        caret overlays (position:relative). cursor:text is the editing surface's
@@ -232,6 +247,7 @@ export const documentTemplate = html`
   <docen-drawing-properties-dialog part="drawing-properties"></docen-drawing-properties-dialog>
   <docen-borders-shading-dialog part="borders-shading"></docen-borders-shading-dialog>
   <docen-watermark-dialog part="watermark-dialog"></docen-watermark-dialog>
+  <docen-fill-effects-dialog part="fill-effects"></docen-fill-effects-dialog>
   <docen-inspect-dialog part="inspect"></docen-inspect-dialog>
   <docen-modify-style-dialog part="modify-style"></docen-modify-style-dialog>
   <docen-find-replace-dialog></docen-find-replace-dialog>

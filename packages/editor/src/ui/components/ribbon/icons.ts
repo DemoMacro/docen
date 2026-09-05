@@ -13,6 +13,7 @@ import arrowUndo from "@fluentui/svg-icons/icons/arrow_undo_24_regular.svg?raw";
 import board from "@fluentui/svg-icons/icons/board_24_regular.svg?raw";
 import bookmark from "@fluentui/svg-icons/icons/bookmark_24_regular.svg?raw";
 import borderAll from "@fluentui/svg-icons/icons/border_all_24_regular.svg?raw";
+import borderOutside from "@fluentui/svg-icons/icons/border_outside_24_regular.svg?raw";
 import box from "@fluentui/svg-icons/icons/box_24_regular.svg?raw";
 import calculator from "@fluentui/svg-icons/icons/calculator_24_regular.svg?raw";
 import calendarLtr from "@fluentui/svg-icons/icons/calendar_ltr_24_regular.svg?raw";
@@ -23,6 +24,7 @@ import clearFormatting from "@fluentui/svg-icons/icons/clear_formatting_24_regul
 import clipboardPaste from "@fluentui/svg-icons/icons/clipboard_paste_24_regular.svg?raw";
 import colorBackground from "@fluentui/svg-icons/icons/color_background_24_regular.svg?raw";
 import colorFill from "@fluentui/svg-icons/icons/color_fill_24_regular.svg?raw";
+import column from "@fluentui/svg-icons/icons/column_24_regular.svg?raw";
 import comment from "@fluentui/svg-icons/icons/comment_24_regular.svg?raw";
 import commentAdd from "@fluentui/svg-icons/icons/comment_add_24_regular.svg?raw";
 import copy from "@fluentui/svg-icons/icons/copy_24_regular.svg?raw";
@@ -52,6 +54,7 @@ import mail from "@fluentui/svg-icons/icons/mail_24_regular.svg?raw";
 import numberRow from "@fluentui/svg-icons/icons/number_row_24_regular.svg?raw";
 import numberSymbol from "@fluentui/svg-icons/icons/number_symbol_24_regular.svg?raw";
 import orientation from "@fluentui/svg-icons/icons/orientation_24_regular.svg?raw";
+import pageFit from "@fluentui/svg-icons/icons/page_fit_24_regular.svg?raw";
 import paintBrush from "@fluentui/svg-icons/icons/paint_brush_24_regular.svg?raw";
 import pen from "@fluentui/svg-icons/icons/pen_24_regular.svg?raw";
 import penDismiss from "@fluentui/svg-icons/icons/pen_dismiss_24_regular.svg?raw";
@@ -191,6 +194,11 @@ const RIBBON_ICONS: Record<string, string> = {
   "line-spacing": textLineSpacing,
   shading: colorFill,
   border: borderAll,
+  // Layout tab — the margin/page-size/columns splits (Word gives each its own
+  // glyph; these were mis-mapped to page-color/multilevel before).
+  margins: borderOutside,
+  "page-size": pageFit,
+  columns: column,
   // Home — Editing
   search,
   replace: textMore,
