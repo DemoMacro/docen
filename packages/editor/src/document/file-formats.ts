@@ -138,6 +138,8 @@ export const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   "update-toc-page",
   "table-of-figures",
   "update-figures",
+  // The Equation context tab's symbol grid drops glyphs at the caret.
+  "insert-symbol",
   // Header/footer stories — open through the bridge (the same lifecycle as
   // the band double-click); the Page Number drop seeds a PAGE field.
   "header",

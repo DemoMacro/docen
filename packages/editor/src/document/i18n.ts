@@ -36,6 +36,7 @@ export const ribbonEn: AdditionalLanguage = {
     "ribbon.tab.table-design": "Table Design",
     "ribbon.tab.table-layout": "Table Layout",
     "ribbon.tab.header-footer-tools": "Header & Footer",
+    "ribbon.tab.equation": "Equation",
     // --- Groups: Home ---
     "ribbon.group.clipboard": "Clipboard",
     "ribbon.group.font": "Font",
@@ -50,6 +51,8 @@ export const ribbonEn: AdditionalLanguage = {
     "ribbon.group.header-footer": "Header & Footer",
     "ribbon.group.text": "Text",
     "ribbon.group.symbols": "Symbols",
+    // --- Groups: Equation (contextual) ---
+    "ribbon.group.structures": "Structures",
     // --- Groups: Design ---
     "ribbon.group.document-formatting": "Document Formatting",
     "ribbon.group.page-background": "Page Background",
@@ -682,6 +685,7 @@ export const ribbonEn: AdditionalLanguage = {
     "ribbon.opt.paragraph-spacing-default": "Default",
     "ribbon.opt.paragraph-spacing-none": "No Spacing",
     "ribbon.opt.paragraph-spacing-compact": "Compact",
+    "ribbon.opt.equation-blank": "Blank",
     "ribbon.opt.equation-fraction": "Fraction",
     "ribbon.opt.equation-script": "Script",
     "ribbon.opt.equation-radical": "Radical",
@@ -1002,6 +1006,7 @@ export const ribbonZhCN: AdditionalLanguage = {
     "ribbon.tab.table-design": "表设计",
     "ribbon.tab.table-layout": "表布局",
     "ribbon.tab.header-footer-tools": "页眉和页脚",
+    "ribbon.tab.equation": "公式",
     // --- Groups: Home ---
     "ribbon.group.clipboard": "剪贴板",
     "ribbon.group.font": "字体",
@@ -1016,6 +1021,7 @@ export const ribbonZhCN: AdditionalLanguage = {
     "ribbon.group.header-footer": "页眉和页脚",
     "ribbon.group.text": "文本",
     "ribbon.group.symbols": "符号",
+    "ribbon.group.structures": "结构",
     // --- Groups: Design ---
     "ribbon.group.document-formatting": "文档格式",
     "ribbon.group.page-background": "页面背景",
@@ -1647,6 +1653,7 @@ export const ribbonZhCN: AdditionalLanguage = {
     "ribbon.opt.paragraph-spacing-default": "默认",
     "ribbon.opt.paragraph-spacing-none": "无",
     "ribbon.opt.paragraph-spacing-compact": "紧凑",
+    "ribbon.opt.equation-blank": "空白",
     "ribbon.opt.equation-fraction": "分数",
     "ribbon.opt.equation-script": "上下标",
     "ribbon.opt.equation-radical": "根式",

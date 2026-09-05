@@ -43,7 +43,7 @@ import {
   type FlowPageInsets,
 } from "@docen/layout";
 import { attr, customElement } from "@microsoft/fast-element";
-import type { Mark } from "@tiptap/pm/model";
+import type { Mark, Node as PMNode } from "@tiptap/pm/model";
 import { EditorState, NodeSelection, TextSelection, type Transaction } from "@tiptap/pm/state";
 
 import {
@@ -57,6 +57,7 @@ import {
   t,
   type DocenAddin,
   type RibbonMenuItem,
+  type RibbonTab,
 } from "../ui";
 import { ribbonIcon } from "../ui/components/ribbon/icons";
 import type { DrawingPropertiesState } from "../ui/components/workspace/drawing-properties-dialog";
@@ -105,6 +106,7 @@ import { mergeSectionProperties } from "./page-setup";
 import {
   buildContextualTab,
   DEFAULT_RIBBON_TAB,
+  equationContextTab,
   formatMeasureTwip,
   headerFooterContextTab,
   renderRibbonFromSchema,
@@ -162,6 +164,27 @@ const BUILT_IN_STYLE_KEYS: Readonly<Record<string, string>> = {
   title: "styleName.title",
   subtitle: "styleName.subtitle",
 };
+
+/** The inlinePassthrough carrying a math payload at the selection — the
+ *  equation context tab's trigger. A caret hugging the atom (before or after)
+ *  or a NodeSelection wrapping it counts; `pos` is the atom's document
+ *  position so the host can re-select it after inserts shift positions. */
+function mathAtomAt(state: EditorState): { node: PMNode; pos: number } | null {
+  const { $from } = state.selection;
+  const before = $from.parent.childAfter($from.parentOffset);
+  const after = $from.parent.childBefore($from.parentOffset);
+  for (const child of [before, after]) {
+    const node = child.node;
+    if (!node || node.type.name !== "inlinePassthrough") continue;
+    try {
+      const data = JSON.parse(String(node.attrs.data ?? "{}")) as { math?: unknown };
+      if (data.math) return { node, pos: $from.start() + child.offset };
+    } catch {
+      /* opaque payload — not a math atom */
+    }
+  }
+  return null;
+}
 
 /**
  * Task pane identifiers, mirroring the Office `<TaskpaneId>` concept. The host
@@ -2467,40 +2490,50 @@ class DocenDocument extends AddinHost<Editor> {
    *  against that fact so the per-transaction pass is a cheap equality check. */
   #contextTabIds = new Set<string>();
 
-  /** Word's Table Tools — append/remove the contextual Table Design/Layout tabs
-   *  as the selection enters/leaves a table. Runs per transaction (via
-   *  #setupFontSync) and after every chrome re-stamp (#renderChrome, which
-   *  clears the tracking set because the ribbon DOM was rebuilt). */
+  /** Word's Table Tools + Equation Tools — append/remove the contextual tabs as
+   *  the selection enters/leaves their owning context (a table, or a math
+   *  atom). Runs per transaction (via #setupFontSync) and after every chrome
+   *  re-stamp (#renderChrome, which clears the tracking set because the ribbon
+   *  DOM was rebuilt). */
   #syncContextTabs(): void {
     const root = this.shadowRoot;
     const tablist = root?.querySelector("fluent-tablist");
     const ribbon = root?.querySelector("docen-ribbon");
     if (!root || !tablist || !ribbon) return;
-    const inside = this.editor ? tableAncestry(this.editor.state) !== null : false;
-    const present = this.#contextTabIds;
-    if (inside === present.size > 0) return;
     const scope = root.querySelector("docen-workspace") ?? this;
-    if (inside) {
-      for (const tab of tableContextTabs(scope)) {
-        const built = buildContextualTab(tab, scope);
-        tablist.append(built.tab);
-        ribbon.append(built.panel);
-        present.add(tab.id);
-      }
-      // Word activates the context tabs as the caret enters their context.
-      tablist.setAttribute("activeid", "table-design");
-    } else {
-      // Fall back off the context tabs BEFORE removing them so the tablist
-      // never holds an activeid with no matching tab.
-      if (present.has(tablist.getAttribute("activeid") ?? "")) {
-        tablist.setAttribute("activeid", DEFAULT_RIBBON_TAB);
-      }
-      for (const id of present) {
-        tablist.querySelector(`#${id}`)?.remove();
-        ribbon.querySelector(`docen-ribbon-panel[value="${id}"]`)?.remove();
-      }
-      present.clear();
+    // The tab ids the current selection calls for (Word's one context set —
+    // a table selection and a math selection never coexist).
+    const want = new Map<string, RibbonTab>();
+    if (this.editor) {
+      const state = this.editor.state;
+      if (tableAncestry(state)) for (const tab of tableContextTabs(scope)) want.set(tab.id, tab);
+      else if (mathAtomAt(state)) want.set("equation", equationContextTab());
     }
+    const present = this.#contextTabIds;
+    const changed = want.size !== present.size || [...want.keys()].some((id) => !present.has(id));
+    if (!changed) return;
+    // Retire the tabs whose context the selection left (activeid first, so
+    // the tablist never holds an id with no matching tab).
+    const active = tablist.getAttribute("activeid") ?? "";
+    if (present.has(active) && !want.has(active))
+      tablist.setAttribute("activeid", DEFAULT_RIBBON_TAB);
+    for (const id of present) {
+      if (want.has(id)) continue;
+      tablist.querySelector(`#${id}`)?.remove();
+      ribbon.querySelector(`docen-ribbon-panel[value="${id}"]`)?.remove();
+    }
+    // Append the fresh arrivals and activate them (Word drops you on the tab).
+    let firstNew: string | null = null;
+    for (const [id, tab] of want) {
+      if (present.has(id)) continue;
+      const built = buildContextualTab(tab, scope);
+      tablist.append(built.tab);
+      ribbon.append(built.panel);
+      firstNew = firstNew ?? id;
+    }
+    if (firstNew) tablist.setAttribute("activeid", firstNew);
+    present.clear();
+    for (const id of want.keys()) present.add(id);
     this.#applyRibbonGreying();
   }
 
@@ -2890,7 +2923,44 @@ class DocenDocument extends AddinHost<Editor> {
       attrs: { data: JSON.stringify({ math: { children: [shape] } }) },
     };
     const node = editor.schema.nodeFromJSON(seed);
-    editor.view.dispatch(editor.state.tr.insert(editor.state.selection.from, node));
+    // One transaction: insert the atom and wrap it in a NodeSelection — the
+    // selection rides the new atom, keeping the equation context tab alive
+    // (a bare insert leaves the caret behind it and the tab would blink off).
+    const pos = editor.state.selection.from;
+    const tr = editor.state.tr.insert(pos, node);
+    tr.setSelection(NodeSelection.create(tr.doc, pos));
+    editor.view.dispatch(tr.scrollIntoView());
+  }
+
+  /** The equation context tab's symbol grid: drop the glyph at the caret.
+   *  When the selection rides the math atom, hand the selection back to it
+   *  afterwards — the atom shifts by the inserted glyph — so the tab stays
+   *  up and symbols can be typed in a run. (insertContent would replace the
+   *  NodeSelection's whole atom, so this goes through the transaction.) */
+  #insertEquationSymbol(char: string): void {
+    const editor = this.editor;
+    if (!editor || !char) return;
+    const touching = mathAtomAt(editor.state);
+    if (!touching) {
+      editor.commands.insertContent(char);
+      return;
+    }
+    // A caret inserts at its edge; a NodeSelection appends after the atom
+    // (the formula stays put). The atom shifts by the glyph when the insert
+    // lands before it — aim the selection back accordingly.
+    const onAtom = editor.state.selection instanceof NodeSelection;
+    const insertAt = onAtom ? touching.pos + touching.node.nodeSize : editor.state.selection.from;
+    const backAt = insertAt <= touching.pos ? touching.pos + char.length : touching.pos;
+    const tr = editor.state.tr.insertText(
+      char,
+      insertAt,
+      onAtom ? insertAt : editor.state.selection.to,
+    );
+    const $back = tr.doc.resolve(backAt);
+    if ($back.nodeAfter?.type.name === "inlinePassthrough") {
+      tr.setSelection(NodeSelection.create(tr.doc, backAt));
+    }
+    editor.view.dispatch(tr.scrollIntoView());
   }
 
   /** Insert → Link / Ctrl+K / right-click Edit Link: open the hyperlink dialog
@@ -3842,6 +3912,10 @@ class DocenDocument extends AddinHost<Editor> {
     // Insert → Symbols → Equation gallery).
     if (name === "equation") {
       this.#insertEquation(value ? String(value) : "fraction");
+      return;
+    }
+    if (name === "insert-symbol") {
+      this.#insertEquationSymbol(value ? String(value) : "");
       return;
     }
     // Page Color — write/clear the doc-level w:background from the palette
