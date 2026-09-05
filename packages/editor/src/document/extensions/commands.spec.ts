@@ -961,6 +961,28 @@ describe("rotate-drawing", () => {
     expect((shape.transformation as Record<string, unknown>).rotation).toBe(45);
   });
 
+  it("rotates an inline image through the same flat attr", () => {
+    // Word spins an inline picture about its extent's center exactly like a
+    // floating one — the rotation attr carries either way.
+    const editor = new Editor({
+      element: null,
+      extensions: EXTENSIONS,
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [{ type: "image", attrs: { src: "data:,", width: 10, height: 10 } }],
+          },
+        ],
+      },
+    });
+    selectFloat(editor);
+    expect(editor.commands["rotate-drawing"](JSON.stringify(30))).toBe(true);
+    expect(firstNodeOf(editor, "image").attrs.rotation).toBe(30);
+    expect(editor.state.selection instanceof NodeSelection).toBe(true);
+  });
+
   it("declines without a floating drawing selected or a zero sweep", () => {
     const editor = buildWithFloat(FLOATING);
     expect(editor.commands["rotate-drawing"](JSON.stringify(45))).toBe(false);
@@ -968,6 +990,47 @@ describe("rotate-drawing", () => {
     expect(editor.commands["rotate-drawing"](JSON.stringify(0))).toBe(false);
     expect(editor.commands["rotate-drawing"]("nan")).toBe(false);
     expect(editor.commands["rotate-drawing"]()).toBe(false);
+  });
+});
+
+describe("place-drawing", () => {
+  const FLOATING = {
+    horizontalPosition: { relative: "margin", offset: 1000 },
+    verticalPosition: { relative: "paragraph", offset: 2000 },
+  };
+
+  it("lands an align-anchored float as page-anchored offsets", () => {
+    const editor = buildWithFloat({
+      horizontalPosition: { relative: "margin", align: "center" },
+      verticalPosition: { relative: "page", align: "top" },
+    });
+    selectFloat(editor);
+    expect(editor.commands["place-drawing"](JSON.stringify({ h: 914400, v: 1828800 }))).toBe(true);
+    const floating = floatOf(editor);
+    // The painted spot IS the value: relative flips to page, the offset
+    // replaces the alignment outright.
+    expect(floating.horizontalPosition).toEqual({ relative: "page", offset: 914400 });
+    expect(floating.verticalPosition).toEqual({ relative: "page", offset: 1828800 });
+    expect(editor.state.selection instanceof NodeSelection).toBe(true);
+  });
+
+  it("also accepts an offset-anchored float (the bridge's dispatch is by anchor)", () => {
+    const editor = buildWithFloat(FLOATING);
+    selectFloat(editor);
+    expect(editor.commands["place-drawing"](JSON.stringify({ h: 1, v: 2 }))).toBe(true);
+    const floating = floatOf(editor);
+    expect(floating.horizontalPosition).toEqual({ relative: "page", offset: 1 });
+  });
+
+  it("declines malformed or incomplete values and non-floating selections", () => {
+    const editor = buildWithFloat(FLOATING);
+    selectFloat(editor);
+    expect(editor.commands["place-drawing"]("not json")).toBe(false);
+    expect(editor.commands["place-drawing"](JSON.stringify({ h: 1 }))).toBe(false);
+    expect(editor.commands["place-drawing"]()).toBe(false);
+    // Without the drawing selected there is nothing to place.
+    editor.commands.setTextSelection(1);
+    expect(editor.commands["place-drawing"](JSON.stringify({ h: 1, v: 2 }))).toBe(false);
   });
 });
 

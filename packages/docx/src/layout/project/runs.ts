@@ -269,6 +269,9 @@ export function projectRuns(
         src: members ? undefined : pictureSrc(pic),
         crop: members ? undefined : cropOf(pic),
         members,
+        // a:xfrm @rot (degrees) — Word tilts inline pictures about the
+        // extent's center just like floating ones.
+        ...(typeof tr.rotation === "number" && tr.rotation !== 0 ? { rotation: tr.rotation } : {}),
       });
     }
   };

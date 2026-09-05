@@ -15,7 +15,17 @@ import {
   type LayoutParagraphBorderEdge,
   type LayoutTextStyle,
 } from "@docen/layout";
-import { Box, Ellipse, Image as LeaferImage, Line, Path, Rect, Text, type IGroup } from "leafer-ui";
+import {
+  Box,
+  Ellipse,
+  Group,
+  Image as LeaferImage,
+  Line,
+  Path,
+  Rect,
+  Text,
+  type IGroup,
+} from "leafer-ui";
 
 import type { PaintColumn, PaintContext } from "./context";
 import { paintDrawing, paintMembers, recordDrawingHit } from "./drawing";
@@ -524,7 +534,27 @@ export function paintParagraph(
           para,
           index: inlinePicIndex++,
           kind: "inline",
+          ...(inline.rotation ? { rotation: inline.rotation } : {}),
         });
+        // A rotated picture spins about the extent's center — a group parked
+        // at the center carries the angle (the floating drawing's pivot) and
+        // the content re-offsets so the box stays centered under it.
+        const picX = lineX + item.xPx;
+        const picY = lineY + pad;
+        let target: IGroup = tree;
+        let ox = picX;
+        let oy = picY;
+        if (inline.rotation) {
+          const spinner = new Group({
+            x: picX + item.widthPx / 2,
+            y: picY + item.heightPx / 2,
+            rotation: inline.rotation,
+          });
+          tree.add(spinner);
+          target = spinner;
+          ox = -item.widthPx / 2;
+          oy = -item.heightPx / 2;
+        }
         if (inline.members) {
           // A metafile source replayed into members (WMF vector layers): the
           // structured scene paints in place of the flat image, clipped to
@@ -533,44 +563,44 @@ export function paintParagraph(
           // Group ignores `overflow` (a Box-only data getter clips children),
           // so the clip holder must be a Box.
           const holder = new Box({
-            x: lineX + item.xPx,
-            y: lineY + pad,
+            x: ox,
+            y: oy,
             width: item.widthPx,
             height: item.heightPx,
             overflow: "hide",
           });
           paintMembers(holder, inline.members, 0, 0, ctx);
-          tree.add(holder);
+          target.add(holder);
         } else if (inline.src && inline.crop) {
           // A cropped flat source (a:srcRect): the visible remainder fills
           // the extent box — the whole source would stretch into it.
           addCroppedImage(
-            tree,
+            target,
             inline.src,
             inline.crop,
-            lineX + item.xPx,
-            lineY + pad,
+            ox,
+            oy,
             item.widthPx,
             item.heightPx,
             ctx,
           );
         } else if (inline.src) {
           pinImage(inline.src);
-          tree.add(
+          target.add(
             new LeaferImage({
               url: inline.src,
-              x: lineX + item.xPx,
-              y: lineY + pad,
+              x: ox,
+              y: oy,
               width: item.widthPx,
               height: item.heightPx,
             }),
           );
         } else {
           // Linked-only picture (no bytes in the package): an empty frame.
-          tree.add(
+          target.add(
             new Rect({
-              x: lineX + item.xPx,
-              y: lineY + pad,
+              x: ox,
+              y: oy,
               width: item.widthPx,
               height: item.heightPx,
               fill: "#f3f3f3",
