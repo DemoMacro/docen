@@ -11,6 +11,7 @@ import type {
   LayoutDrawing,
   LayoutIndent,
   LayoutInline,
+  LayoutParagraph,
   LayoutParagraphBorderEdge,
   LayoutRuby,
   LayoutTableBorders,
@@ -137,6 +138,8 @@ export interface LaidOutParagraph {
   /** The input inline atoms, mirrored so the renderer can read the text and
    *  style behind each line item (`inline[item.inlineIndex]`). */
   inline: readonly LayoutInline[];
+  /** Horizontal alignment mirrored from the input block. */
+  align?: LayoutParagraph["align"];
   /** Pagination controls mirrored from the input — the flow strategy's
    *  split/move decisions read them off the laid tree. */
   keepLines?: boolean;

@@ -45,10 +45,14 @@ interface FakeLine {
 
 /** A laid paragraph whose items split the text across the given lines
  *  (10px/grapheme widths, matching the measurement stub). */
-const fakePara = (lines: FakeLine[]): Record<string, unknown> => {
+const fakePara = (
+  lines: FakeLine[],
+  align?: "left" | "center" | "right" | "both" | "distribute",
+): Record<string, unknown> => {
   const text = lines.map((l) => l.text).join("");
   return {
     kind: "paragraph",
+    align,
     heightPx: lines.length * 20,
     beforePx: 0,
     afterPx: 0,
@@ -372,5 +376,64 @@ describe("CaretMap vertical stepping", () => {
     // posVertical from pos 9 ('o') upwards: crosses back to para 1 at pos 2 ('e')
     const up = map.posVertical(9, -1);
     expect(up).toBe(2);
+  });
+});
+
+describe("CaretMap empty paragraph alignment", () => {
+  it("centers caret on empty center-aligned paragraph", () => {
+    const { doc } = buildDoc([""]);
+    const map = new CaretMap(
+      pageOf([fakePara([{ text: "", xPx: 0, yPx: 0, maxWidthPx: 200 }], "center")]) as never,
+      doc,
+      () => ({ contentLeftPx: 0, contentTopPx: 0 }),
+    );
+    expect(map.valid).toBe(true);
+    // xPx = line.xPx (0) + slack / 2 (100) = 100
+    expect(map.caretRect(1)?.xPx).toBe(100);
+  });
+
+  it("right-aligns caret on empty right-aligned paragraph", () => {
+    const { doc } = buildDoc([""]);
+    const map = new CaretMap(
+      pageOf([fakePara([{ text: "", xPx: 0, yPx: 0, maxWidthPx: 200 }], "right")]) as never,
+      doc,
+      () => ({ contentLeftPx: 0, contentTopPx: 0 }),
+    );
+    expect(map.valid).toBe(true);
+    // xPx = line.xPx (0) + slack (200) = 200
+    expect(map.caretRect(1)?.xPx).toBe(200);
+  });
+
+  it("hits pos across full width of empty aligned paragraph", () => {
+    const { doc } = buildDoc([""]);
+    const map = new CaretMap(
+      pageOf([fakePara([{ text: "", xPx: 0, yPx: 0, maxWidthPx: 200 }], "center")]) as never,
+      doc,
+      () => ({ contentLeftPx: 0, contentTopPx: 0 }),
+    );
+    // Point inside line width [0, 200] should resolve to the empty paragraph pos
+    expect(map.posAtPoint(0, 100, 5)).toBe(1);
+    expect(map.posAtPoint(0, 180, 5)).toBe(1);
+  });
+
+  it("positions selection stub at center/right for empty paragraphs", () => {
+    const { doc } = buildDoc([""]);
+    const mapCenter = new CaretMap(
+      pageOf([fakePara([{ text: "", xPx: 0, yPx: 0, maxWidthPx: 200 }], "center")]) as never,
+      doc,
+      () => ({ contentLeftPx: 0, contentTopPx: 0 }),
+    );
+    const centerRects = mapCenter.selectionRects(1, 1);
+    expect(centerRects).toHaveLength(1);
+    expect(centerRects[0]?.xPx).toBe(100);
+
+    const mapRight = new CaretMap(
+      pageOf([fakePara([{ text: "", xPx: 0, yPx: 0, maxWidthPx: 200 }], "right")]) as never,
+      doc,
+      () => ({ contentLeftPx: 0, contentTopPx: 0 }),
+    );
+    const rightRects = mapRight.selectionRects(1, 1);
+    expect(rightRects).toHaveLength(1);
+    expect(rightRects[0]?.xPx).toBe(200);
   });
 });

@@ -284,6 +284,22 @@ export interface ModifyStylePatch {
   color: string | null;
 }
 
+export const ALIGN_VALUES = ["left", "center", "right", "both", "distribute"] as const;
+
+/** Normalize incoming paragraph alignment (e.g. from CSS/OOXML start/end/justify) to standard options. */
+export function normalizeParagraphAlignment(raw: unknown): string {
+  const alignment = typeof raw === "string" ? raw : "left";
+  const mapped =
+    alignment === "end"
+      ? "right"
+      : alignment === "start"
+        ? "left"
+        : alignment === "justify"
+          ? "both"
+          : alignment;
+  return (ALIGN_VALUES as readonly string[]).includes(mapped) ? mapped : "left";
+}
+
 export interface ParagraphDialogPatch {
   alignment: string;
   outlineLevel: number | null;

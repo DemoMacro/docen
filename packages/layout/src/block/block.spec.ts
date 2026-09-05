@@ -274,7 +274,14 @@ describe("layoutParagraph line-height semantics", () => {
     if (centered.kind === "paragraph" && righted.kind === "paragraph") {
       expect(centered.lines[0].items[0].xPx).toBeCloseTo(26, 5);
       expect(righted.lines[0].items[0].xPx).toBeCloseTo(52, 5);
+      expect(centered.align).toBe("center");
+      expect(righted.align).toBe("right");
     }
+  });
+
+  it("preserves align property on empty LaidOutParagraph", () => {
+    const p = layoutBlock(para({ inline: [], align: "center" }), 100, undefined, measurer);
+    expect(p.kind === "paragraph" && p.align).toBe("center");
   });
 
   it("distribute stretches the last line too, both does not", () => {
