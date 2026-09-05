@@ -915,7 +915,7 @@ class DocenDocument extends AddinHost<Editor> {
       ?.addEventListener("spelling:ignore-once", () => this.#spelling.ignore("once"));
     this.shadowRoot
       ?.querySelector<HTMLElement>("docen-spelling-pane")
-      ?.addEventListener("spelling:ignore-all", () => this.#spelling.ignore("ignore"));
+      ?.addEventListener("spelling:ignore-all", () => this.#spelling.ignoreAll());
     this.shadowRoot
       ?.querySelector<HTMLElement>("docen-spelling-pane")
       ?.addEventListener("spelling:add", () => this.#spelling.ignore("add"));

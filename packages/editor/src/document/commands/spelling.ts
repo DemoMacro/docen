@@ -143,4 +143,11 @@ export class SpellingCommands {
     else ignoreSpellWord(issue.word);
     this.run();
   }
+
+  /** The pane's Ignore All: every misspelled word in the document stops
+   *  being flagged for this session — one click clears every squiggle. */
+  ignoreAll(): void {
+    for (const issue of this.#issues) ignoreSpellWord(issue.word);
+    this.run();
+  }
 }

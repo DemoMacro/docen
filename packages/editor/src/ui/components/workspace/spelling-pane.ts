@@ -95,6 +95,8 @@ const template = html<DocenSpellingPane>`
               <fluent-button appearance="neutral" @click="${(x) => x.$emit("spelling:ignore-once")}"
                 >${(x) => t("spelling.ignore-once", x)}</fluent-button
               >
+              <!-- Ignore All clears every misspelling in the document, not
+                   just the active word's occurrences. -->
               <fluent-button appearance="neutral" @click="${(x) => x.$emit("spelling:ignore-all")}"
                 >${(x) => t("spelling.ignore-all", x)}</fluent-button
               >
