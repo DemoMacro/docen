@@ -1,4 +1,13 @@
-import { FASTElement, attr, css, customElement, html, observable } from "@microsoft/fast-element";
+import {
+  FASTElement,
+  attr,
+  css,
+  customElement,
+  html,
+  observable,
+  ref,
+  repeat,
+} from "@microsoft/fast-element";
 
 import { observeLang, t } from "../../i18n/localize";
 
@@ -56,6 +65,14 @@ const styles = css`
   }
 `;
 
+/** One collected item. Clicks are delegated from the list container — a
+ *  per-item @click binding would stretch this past the formatter's line
+ *  width, and the wrapped-out text node (`.item` is pre-wrap) renders the
+ *  template's own indentation as blank lines above the text. A `repeat` (not
+ *  a binding returning `.map()`): FAST stringifies an array a nested binding
+ *  returns, rendering each template fragment as "[object Object]". */
+const itemTemplate = html<ClipboardEntry>`<div class="item">${(entry) => entry.text}</div>`;
+
 const template = html<DocenClipboardPane>`
   <div class="toolbar">
     <fluent-button appearance="neutral" @click="${(x) => x.pasteAll()}"
@@ -65,14 +82,10 @@ const template = html<DocenClipboardPane>`
       >${(x) => t("clipboard.clear", x)}</fluent-button
     >
   </div>
-  <div class="list">
+  <div class="list" ${ref("listEl")} @click="${(x, c) => x.onListClick(c.event)}">
     ${(x) =>
       x.entries.length
-        ? x.entries.map(
-            (entry) => html`
-              <div class="item" @click="${(e: Event) => x.emitPaste(entry, e)}">${entry.text}</div>
-            `,
-          )
+        ? html`${repeat((x) => x.entries, itemTemplate)}`
         : html`<div class="empty">${(x) => t("clipboard.empty", x)}</div>`}
   </div>
 `;
@@ -85,6 +98,7 @@ const template = html<DocenClipboardPane>`
  */
 @customElement({ name: "docen-clipboard-pane", template, styles })
 class DocenClipboardPane extends FASTElement {
+  @observable listEl?: HTMLElement;
   /** Newest first; the host caps the length (Word keeps 24). */
   @observable entries: ClipboardEntry[] = [];
   /** Set once after a paste so the pane closes like Word's (options allow
@@ -94,6 +108,16 @@ class DocenClipboardPane extends FASTElement {
   emitPaste(entry: ClipboardEntry, event: Event): void {
     event.stopPropagation();
     this.$emit("clipboard:paste", entry);
+  }
+
+  /** Template-bound (public — the FAST template cannot reach a #private
+   *  member): the list's delegated click — the item hit pastes its entry. */
+  onListClick(event: Event): void {
+    const item = (event.target as HTMLElement | null)?.closest(".item");
+    if (!item || !this.listEl) return;
+    const entries = [...this.listEl.querySelectorAll(".item")];
+    const entry = this.entries[entries.indexOf(item)];
+    if (entry) this.emitPaste(entry, event);
   }
 
   pasteAll(): void {

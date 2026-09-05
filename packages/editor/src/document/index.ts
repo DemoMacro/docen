@@ -2151,12 +2151,6 @@ class DocenDocument extends AddinHost<Editor> {
     this.#contextTabIds.clear();
     this.#syncContextTabs();
     this.#syncCellSize();
-    root
-      .querySelector('docen-task-pane[part="comments-pane"]')
-      ?.setAttribute("title", t("comments.title", this));
-    root
-      .querySelector('docen-task-pane[part="revisions-pane"]')
-      ?.setAttribute("title", t("revisions.title", this));
     this.#renderPanes();
   }
 
@@ -2176,6 +2170,17 @@ class DocenDocument extends AddinHost<Editor> {
     if (navPane) navPane.setAttribute("title", t("pane.navigation", this));
     const propsPane = root.querySelector('docen-task-pane[position="end"]');
     if (propsPane) propsPane.setAttribute("title", t("pane.properties", this));
+    // The end-rail panes — the static template's title attrs are English
+    // literals, so every pane's title is stamped here for the locale.
+    for (const [part, key] of [
+      ["comments-pane", "pane.comments"],
+      ["revisions-pane", "pane.revisions"],
+      ["clipboard-pane", "pane.clipboard"],
+      ["proofing-pane", "pane.proofing"],
+      ["styles-pane", "pane.styles"],
+    ] as const) {
+      root.querySelector(`docen-task-pane[part="${part}"]`)?.setAttribute("title", t(key, this));
+    }
     // Status bar is dynamic (page count / caret page / zoom) — re-stamp it so a
     // locale change re-localizes the text too.
     this.#updateStatus();
