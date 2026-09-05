@@ -17,7 +17,7 @@ import {
   justifiedIntervals,
   type LaidOutLine,
   type LaidOutParagraph,
-  leaferBaselinePadPx,
+  lineBaselineDepthPx,
   lineOriginXPx,
   lineSpaceGaps,
   tableGridOf,
@@ -597,11 +597,24 @@ export class CaretMap {
   }
 
   /** The vertical caret box of a line — anchored where the painter actually
-   *  draws: the baseline sits `leaferBaselinePadPx` below the element top
-   *  (itself at the grid-centered pad). Sizing to the runs' ink box keeps
-   *  the highlight hugging the glyphs; the font-box model floated a ~0.3em
-   *  gap above them. */
+   *  draws: every run hangs on the line's measured baseline (the shared
+   *  lineBaselineDepthPx). Sizing to the runs' ink box keeps the highlight
+   *  hugging the glyphs; the font-box model floated a ~0.3em gap above
+   *  them. */
   private bandOf(line: LineEntry): { yPx: number; heightPx: number } {
+    const cached = this.bandCache.get(line);
+    if (cached) return cached;
+    const band = this.computeBand(line);
+    this.bandCache.set(line, band);
+    return band;
+  }
+
+  /** Per-entry memo — a layout pass rebuilds `paras` (and every LineEntry),
+   *  so the cache dies with the geometry it was computed from. Ctrl+A walks
+   *  every line of the document through here per selection paint. */
+  private readonly bandCache = new WeakMap<LineEntry, { yPx: number; heightPx: number }>();
+
+  private computeBand(line: LineEntry): { yPx: number; heightPx: number } {
     const pad = gridPadOf(line.line);
     const ctx = measureCanvas?.getContext("2d");
     if (!ctx) return textlessBand(line, pad);
@@ -619,18 +632,18 @@ export class CaretMap {
         familyOfSlot(inline.style.family, isCjkCodeUnit(item.text, 0)),
       );
       ctx.font = font;
-      // The painter's own baseline: a vertAlign run paints at the scaled
-      // size on a shifted baseline (vertAlignedSizePx in cssFontOf above,
-      // vertAlignBaselineShiftPx in the shared measure module) — the band
+      // The painter's own baseline: the LINE's measured baseline (the shared
+      // lineBaselineDepthPx — mixed-size runs align on it, so a small run's
+      // band may not re-derive its own depth), plus a vertAlign run's shift
+      // (vertAlignBaselineShiftPx in the shared measure module) — the band
       // must anchor there too, or a footnote reference's highlight rides
       // below its glyphs. A ruby base sinks below its annotation space the
       // same way the painter sinks it (rubyLiftPx, layout-computed).
       const baseline =
         line.yPx +
-        pad +
+        lineBaselineDepthPx(line.line, vertAlignedSizePx(inline.style)) +
         (item.rubyLiftPx ?? 0) +
-        vertAlignBaselineShiftPx(inline.style) +
-        leaferBaselinePadPx(vertAlignedSizePx(inline.style));
+        vertAlignBaselineShiftPx(inline.style);
       // The item's own ink box (first graphemes carry its script's shape); the
       // deepest run's descent and highest run's ascent bound the highlight.
       const metrics = ctx.measureText(Array.from(item.text).slice(0, 8).join(""));
@@ -648,7 +661,10 @@ export class CaretMap {
    *  the end line stops at the selection's last boundary, heights are the
    *  full line box (contiguous down the paragraph, covering the pitch gap),
    *  and a paragraph's trailing spacing highlights when the next paragraph is
-   *  selected too. Empty paragraphs show a caret-width block. */
+   *  selected too. Empty paragraphs show a caret-width block. A paragraph's
+   *  last line never stretches to the wrap edge unless the paragraph mark
+   *  itself is in the range — selecting to the last glyph (Shift+End on the
+   *  final line) stops at that glyph, like Word. */
   selectionRects(from: number, to: number): SelectionRect[] {
     const rects: SelectionRect[] = [];
     this.paras.forEach((entry, paraIndex) => {
@@ -676,11 +692,12 @@ export class CaretMap {
           continue;
         }
         // Line-box geometry (the layout's own pitch) keeps multi-line
-        // highlights contiguous — the caret's ink band would fragment them.
-        // The line-box floor keeps the height sane across a column split's
-        // line-y rewind: a tail block restarts at the right column's top on
-        // the SAME page, so the next line's y can sit ABOVE the current one
-        // and taking it raw would flip the height negative (invisible).
+        // highlights contiguous — Word highlights the whole line box, so the
+        // caret's ink band would fragment them. The line-box floor keeps the
+        // height sane across a column split's line-y rewind: a tail block
+        // restarts at the right column's top on the SAME page, so the next
+        // line's y can sit ABOVE the current one and taking it raw would flip
+        // the height negative (invisible).
         const boxBottom = line.yPx + line.line.heightPx;
         const nextLine = entry.lines[li + 1];
         const nextFirst = next?.lines[0];
@@ -691,6 +708,7 @@ export class CaretMap {
               // selection once the next paragraph is in it too.
               Math.max(nextFirst.yPx, boxBottom)
             : boxBottom;
+        const isLastLine = nextLine == null;
         if (empty) {
           // An atom line (a picture) paints no characters but still owns a
           // box — highlight the items' span; a textless paragraph keeps the
@@ -727,12 +745,18 @@ export class CaretMap {
           continue;
         }
         const fromOff = Math.max(offA, line.startChar);
-        // A line's highlight reaches the wrap edge when the selection passes
-        // its end — but the document's final boundary stops at the last glyph
-        // (Word: Ctrl+A's last line is not stretched).
+        // A mid-paragraph line's highlight reaches the wrap edge once the
+        // selection passes its end — but a paragraph's LAST line stops at the
+        // last glyph unless the range crossed the paragraph mark (Word:
+        // Shift+End on the final line doesn't stretch; dragging one further —
+        // `to` past the node-end boundary, no next-paragraph glyph needed —
+        // does, and so does Ctrl+A). The document's own last paragraph never
+        // stretches: there is no line after it to run to.
         const endPos = this.posOfChar(entry, line.endChar);
         const coversEnd =
-          offB > line.endChar || (offB === line.endChar && (to === endPos || nextSelected));
+          offB > line.endChar ||
+          (offB === line.endChar &&
+            (isLastLine ? to > endPos && next !== undefined : to === endPos || nextSelected));
         const left = this.xOfChar(line, fromOff);
         const right = coversEnd
           ? line.xPx + (line.line.maxWidthPx ?? 0) + (line.line.hangPx ?? 0)

@@ -106,4 +106,12 @@ export interface PaintContext {
 export interface PaintColumn {
   width: number;
   inCell: boolean;
+  /** The stack renders inside a drawing shape (a wps txbx / metafile
+   *  text-box member): its lines follow Word's DrawingML text-box baseline
+   *  model — the element's own 0.85 × size share IS the baseline depth —
+   *  not the body's measured-ascent model. Metafile strings additionally
+   *  encode the GDI baseline in each line top (the −0.8 × size
+   *  calibration), which the same share absorbs. Pixel-verified against
+   *  the reference PDF: the header banner slogan rides the 0.85 anchor. */
+  shapeText?: boolean;
 }

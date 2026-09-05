@@ -7,7 +7,8 @@
 
 import { measureNaturalWidth, prepareWithSegments } from "@docen/pretext";
 
-import { isCjkCodeUnit, type FontMetrics, type FontSlots } from "../font";
+import { isCjkCodeUnit, isCjkText, type FontMetrics, type FontSlots } from "../font";
+import { WORD_FONT_METRICS } from "../font-metrics-data";
 import type { LayoutTextStyle } from "../layout-doc";
 
 /** One same-script stretch of a run. */
@@ -59,6 +60,48 @@ export function vertAlignBaselineShiftPx(style: LayoutTextStyle): number {
  *  painter's lineHeight pin ever changes, this is the one place to update. */
 export function leaferBaselinePadPx(fontSize: number): number {
   return 0.85 * fontSize;
+}
+
+/** A face's alphabetic baseline depth as a fraction of the font size — where
+ *  the glyphs actually hang: Word draws its baseline winAscent/upem below
+ *  the line top (GDI's ascent), and canvas fillText hangs the glyphs on the
+ *  baseline we hand it, so anchoring there is what makes the paint match
+ *  Word. The 0.85 constant this replaces was Leafer's element formula whose
+ *  near-equality with DengXian's 0.81 masked the drift for Latin faces
+ *  (Calibri 0.95, Segoe UI 1.08 — text rode visibly high). Resolution:
+ *  Word's tabulated number, else the painting engine's own fontBoundingBox
+ *  (untabulated faces), else the 0.85 constant. Cached per face. */
+const baselineShareCache = new Map<string, number>();
+let baselineCanvas: HTMLCanvasElement | null = null;
+
+export function baselineShareOf(family: string, bold: boolean, italic: boolean): number {
+  const key = `${family}|${bold ? "b" : ""}${italic ? "i" : ""}`;
+  const cached = baselineShareCache.get(key);
+  if (cached != null) return cached;
+  const word = WORD_FONT_METRICS[family.trim().toLowerCase()];
+  let share = word ? word.winAscent / word.upem : 0;
+  if (share === 0 && typeof document !== "undefined") {
+    baselineCanvas ??= document.createElement("canvas");
+    const ctx = baselineCanvas.getContext("2d");
+    if (ctx) {
+      ctx.font = `${italic ? "italic " : ""}${bold ? "bold " : ""}100px "${family.replace(/"/g, '\\"')}", serif`;
+      const m = ctx.measureText("中Ag");
+      if (m.fontBoundingBoxAscent > 0) share = m.fontBoundingBoxAscent / 100;
+    }
+  }
+  if (share === 0) share = 0.85;
+  baselineShareCache.set(key, share);
+  return share;
+}
+
+/** A run's baseline depth in px — the share above times the painted size.
+ *  `text` picks the script slot (a run renders its CJK half in a face whose
+ *  baseline usually sits deeper than the Latin one). */
+export function baselinePadPxOf(style: LayoutTextStyle, text: string): number {
+  const family = familyOfSlot(style.family, isCjkText(text));
+  return (
+    baselineShareOf(family, style.bold === true, style.italic === true) * vertAlignedSizePx(style)
+  );
 }
 
 /** Analyzes and caches runs. One instance per layout pass; the cache key

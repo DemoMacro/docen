@@ -40,8 +40,9 @@ describe("lineOriginXPx", () => {
 describe("gridPadOf", () => {
   it("centers the natural box in a grid span and pins everything else to the top", () => {
     expect(gridPadOf(line({ grid: true, heightPx: 34, naturalPx: 18 }))).toBe(8);
-    expect(gridPadOf(line({ heightPx: 34, naturalPx: 18 }))).toBe(0);
     expect(gridPadOf(line({ grid: true, heightPx: 10, naturalPx: 18 }))).toBe(0);
+    // Textless non-grid lines (strut rows) have no ascent to scale.
+    expect(gridPadOf(line({ heightPx: 34, naturalPx: 18 }))).toBe(0);
   });
 
   it("centers a picture-floored grid line on the picture box, not the text em", () => {
@@ -54,10 +55,32 @@ describe("gridPadOf", () => {
     expect(gridPadOf(line({ grid: true, heightPx: 28, naturalPx: 21.5, textEmPx: 7 }))).toBe(10.5);
   });
 
+  it("splits a non-grid multiple line's slack on the natural box's ascent ratio", () => {
+    // Word's multiple spacing scales the whole box: the baseline rides at
+    // factor × its single-line height (0.85 × em here), so of the 8px of
+    // slack the ascent share (8.5/20) lands above the glyphs — not all 8px
+    // below them.
+    expect(gridPadOf(line({ heightPx: 28, naturalPx: 20, textEmPx: 10 }))).toBeCloseTo(3.4, 5);
+    // A picture-floored line keeps its box top-anchored (the picture sits on
+    // the baseline, i.e. the box bottom).
+    expect(
+      gridPadOf(line({ heightPx: 28, naturalPx: 20, textEmPx: 10, pictureFloored: true })),
+    ).toBe(0);
+    // Single spacing has no slack to split.
+    expect(gridPadOf(line({ heightPx: 20, naturalPx: 20, textEmPx: 10 }))).toBe(0);
+  });
+
+  it("keeps atLeast/exact lines top-anchored (Word pins their extra space at the top)", () => {
+    expect(
+      gridPadOf(line({ heightPx: 28, naturalPx: 20, textEmPx: 10, spacingRule: "atLeast" })),
+    ).toBe(0);
+    expect(
+      gridPadOf(line({ heightPx: 28, naturalPx: 20, textEmPx: 10, spacingRule: "exact" })),
+    ).toBe(0);
+  });
+
   it("half-leads a textbox grid line the same as a body line — compatLnSpc changes nothing", () => {
     expect(gridPadOf(line({ grid: true, heightPx: 45.3, textEmPx: 18.7 }))).toBeCloseTo(13.3, 5);
-    // No grid — the slack sinks below the glyphs.
-    expect(gridPadOf(line({ heightPx: 45.3, textEmPx: 18.7 }))).toBe(0);
   });
 });
 

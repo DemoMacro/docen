@@ -11,6 +11,7 @@ import type {
   LayoutDrawing,
   LayoutIndent,
   LayoutInline,
+  LayoutLineHeight,
   LayoutParagraph,
   LayoutParagraphBorderEdge,
   LayoutRuby,
@@ -88,9 +89,20 @@ export interface LaidOutLine {
    *  table's rows center the 12pt em box, ~10px above in a 34.7px cell line;
    *  the browser font box the natural height measures runs ~0.3em deeper). */
   textEmPx?: number;
+  /** The line's alphabetic baseline depth below the line top's leading pad
+   *  (px): the dominant face's ascent at its painted size, max over the
+   *  line's runs — every run hangs on this one baseline. Undefined on
+   *  textless lines (and test fixtures); consumers fall back to 0.85 × the
+   *  font size (Leafer's element formula). */
+  baselinePadPx?: number;
   /** The height is docGrid-derived in the body flow: Word centers the natural
-   *  box in the span; non-grid slack sinks below the text instead. */
+   *  box in the span; a non-grid multiple-spacing line scales the whole box
+   *  (the slack splits on the natural box's ascent:descent ratio). */
   grid?: boolean;
+  /** The spacing rule that set this line's height (undefined = no explicit
+   *  spacing) — the non-grid leading pad picks the distribution Word uses:
+   *  proportional for multiple, extra-space-at-top for atLeast/exact. */
+  spacingRule?: LayoutLineHeight["rule"];
   /** A picture floored this line's height — a grid line ceils to whole rows
    *  and centers the picture box itself (its height is the natural box). */
   pictureFloored?: boolean;

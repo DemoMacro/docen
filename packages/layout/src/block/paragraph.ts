@@ -154,6 +154,7 @@ export function layoutParagraph(
       naturalPx: line.naturalPx,
       textEmPx: line.textEmPx,
       grid: gridLine || undefined,
+      spacingRule: spec?.rule,
       pictureFloored: line.pictureFloored,
       advanceScale: line.advanceScale,
       firstLineIndentPx: i === 0 ? para.indent?.firstLinePx : undefined,

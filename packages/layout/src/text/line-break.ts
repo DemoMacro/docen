@@ -27,7 +27,7 @@ import {
 
 import type { LayoutFloatZone, LayoutInline, LayoutTabStop } from "../layout-doc";
 import type { LaidOutLine, LaidOutLineItem } from "../layout-result";
-import { cssFontOf, familyOfSlot, type TextMeasurer } from "./measure";
+import { baselinePadPxOf, cssFontOf, familyOfSlot, type TextMeasurer } from "./measure";
 
 export interface LineHeightInput {
   /** Max run natural height among the line's text content (0 when none). */
@@ -580,6 +580,7 @@ export function packLines(inline: LayoutInline[], opts: PackLinesOptions): Packe
     let xLine = 0;
     let naturalPx = 0;
     let textEmPx: number | undefined;
+    let baselinePadPx = 0;
     let hasCjk = false;
     let tallestPicturePx = 0;
     let hasText = false;
@@ -693,6 +694,8 @@ export function packLines(inline: LayoutInline[], opts: PackLinesOptions): Packe
               const analyzed = measurer.analyze(src.text, src.style);
               if (analyzed.naturalPx > naturalPx) naturalPx = analyzed.naturalPx;
               if (textEmPx == null || src.style.sizePx > textEmPx) textEmPx = src.style.sizePx;
+              const baseline = baselinePadPxOf(src.style, src.text);
+              if (baseline > baselinePadPx) baselinePadPx = baseline;
               if (analyzed.hasCjk) hasCjk = true;
             } else if (src.kind === "text") {
               // A phonetic guide (w:ruby) reserves annotation space above the
@@ -722,6 +725,8 @@ export function packLines(inline: LayoutInline[], opts: PackLinesOptions): Packe
               if (analyzed.naturalPx + rubyLiftPx > naturalPx)
                 naturalPx = analyzed.naturalPx + rubyLiftPx;
               if (textEmPx == null || src.style.sizePx > textEmPx) textEmPx = src.style.sizePx;
+              const baseline = baselinePadPxOf(src.style, src.text);
+              if (baseline > baselinePadPx) baselinePadPx = baseline;
               if (analyzed.hasCjk) hasCjk = true;
             } else if (src.kind === "picture") {
               lineItems.push({
@@ -824,6 +829,7 @@ export function packLines(inline: LayoutInline[], opts: PackLinesOptions): Packe
       heightPx: height,
       naturalPx,
       textEmPx,
+      ...(baselinePadPx > 0 ? { baselinePadPx } : {}),
       ...(pictureFloored ? { pictureFloored: true } : {}),
       ...(squeeze != null ? { advanceScale: squeeze } : {}),
       hangPx: hangPx > 0 ? hangPx : undefined,

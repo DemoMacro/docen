@@ -4,6 +4,8 @@ import {
   isCjkCodeUnit,
   justifiedIntervals,
   justifyPerGrapheme,
+  leaferBaselinePadPx,
+  lineBaselineDepthPx,
   lineOriginXPx,
   lineSpaceGaps,
   vertAlignedSizePx,
@@ -74,8 +76,8 @@ const UNDERLINE_DASHES: Record<string, number[] | undefined> = {
 };
 
 /** Stroke a patterned/colored w:u under one inline item. Coordinates ride the
- *  Text element's own frame (y is its box top); the baseline sits at the
- *  shared ~0.85 em ascent approximation (no ascent on the layout type). */
+ *  line's text baseline (y — the shared lineBaselineDepthPx anchor); the
+ *  strokes sit Word's ~0.08 em below it. */
 function paintUnderlinePattern(
   tree: IGroup,
   pattern: string,
@@ -89,7 +91,7 @@ function paintUnderlinePattern(
       : "#1b1b1b";
   const heavy = pattern.endsWith("Heavy") || pattern === "thick";
   const strokeWidth = heavy ? 2 : 1;
-  const baseline = box.y + box.emPx * 0.85;
+  const baseline = box.y;
   const wave = pattern.startsWith("wave");
   if (!wave) {
     const dash = UNDERLINE_DASHES[pattern];
@@ -265,11 +267,11 @@ export function paintParagraph(
   const marks: ParagraphMarkState | null = ctx.showMarks ? paragraphMarkState(para) : null;
   for (const line of para.lines) {
     const lineY = y + line.yPx;
-    // In-line vertical placement: a docGrid line centers its natural box in
-    // the grid span (half-leading — body flow and text-box stacks alike);
-    // every other regime (multiple without a grid, atLeast, plain text
-    // boxes, header/footer stories) anchors the text at the line top and
-    // sinks the slack below. All verified against the reference PDF.
+    // In-line vertical placement (the shared gridPadOf): a docGrid line
+    // centers its natural box in the grid span (half-leading — body flow and
+    // text-box stacks alike); a non-grid multiple-spacing line splits its
+    // slack on the natural box's ascent ratio (Word scales the whole box);
+    // atLeast/exact and picture-floored lines anchor at the line top.
     const pad = gridPadOf(line);
     // Line x origin — the shared sum (left indent + the line's own first-line
     // indent + a wrapSide float's shift) the caret map anchors by too.
@@ -391,13 +393,29 @@ export function paintParagraph(
             : inline.field === "numPages"
               ? String(ctx.pageCount)
               : item.text;
+        // Every run hangs on the LINE's one baseline: Leafer pins an
+        // element's own baseline at 0.85 × its font size below the element
+        // top, so the element top re-anchors by that share below the line
+        // baseline (the shared lineBaselineDepthPx — measured ascent, mixed-
+        // size runs aligning instead of drifting per run). Text inside a
+        // drawing shape keeps its own 0.85 share AS the baseline depth
+        // (Word's DrawingML text-box model — see PaintColumn.shapeText);
+        // the fallbacks reproduce the old constant for fixtures without the
+        // field.
+        const ownSize = vertAlignedSizePx(inline.style);
+        const baseY =
+          lineY +
+          (col?.shapeText ? leaferBaselinePadPx(ownSize) : lineBaselineDepthPx(line, ownSize)) -
+          leaferBaselinePadPx(ownSize) +
+          (item.rubyLiftPx ?? 0) +
+          vertAlignBaselineShiftPx(inline.style);
         const textEl = new Text({
           x: lineX + item.xPx,
           // A raised/lowered run (w:vertAlign — the footnote reference) paints
           // at the scaled size on a shifted baseline; the scaling itself is
           // the shared vertAlignedSizePx so measure and paint agree. A ruby
           // base sinks below the annotation space reserved at the line top.
-          y: lineY + pad + (item.rubyLiftPx ?? 0) + vertAlignBaselineShiftPx(inline.style),
+          y: baseY,
           // width ONLY on justified/squeezed items (their stretch interval
           // or compressed width): a width on every line would let Leafer
           // wrap the slice again with its own metrics (a phantom second
@@ -482,7 +500,7 @@ export function paintParagraph(
         if (pattern) {
           paintUnderlinePattern(tree, pattern, inline.style, {
             x: lineX + item.xPx,
-            y: lineY + pad + (item.rubyLiftPx ?? 0) + vertAlignBaselineShiftPx(inline.style),
+            y: baseY,
             width: intervalPx ?? item.widthPx,
             emPx: vertAlignedSizePx(inline.style),
           });
@@ -615,14 +633,22 @@ export function paintParagraph(
           // metrics come from the line's dominant run — the tab atom carries
           // no style of its own.
           const { sizePx, color } = dominantRunOf(para, line, 0, "#1b1b1b");
-          if (sizePx > 0) paintTabLeader(tree, item, lineX, lineY, pad, sizePx, color);
+          if (sizePx > 0)
+            paintTabLeader(
+              tree,
+              item,
+              lineX,
+              lineY + lineBaselineDepthPx(line, sizePx),
+              sizePx,
+              color,
+            );
         }
       }
     }
     // Formatting marks (Word's ¶ toggle) — drawn per line after its content,
     // above the glyphs, in the text's own color.
     if (ctx.showMarks && marks)
-      paintLineMarks(tree, para, line, lineX, lineY, pad, ctx, marks, boxRight);
+      paintLineMarks(tree, para, line, lineX, lineY, ctx, marks, boxRight);
   }
   paintBorders();
   // Floating drawings anchored to this paragraph: wrap-none boxes painted
@@ -715,7 +741,6 @@ function paintLineMarks(
   line: LaidOutLine,
   lineX: number,
   lineY: number,
-  pad: number,
   ctx: PaintContext,
   marks: ParagraphMarkState,
   rightX: number,
@@ -725,6 +750,12 @@ function paintLineMarks(
   const dominant = dominantRunOf(para, line, para.markSizePx ?? 0, "#000000");
   const sizePx = dominant.sizePx > 0 ? dominant.sizePx : 12;
   const color = dominant.color;
+  // Every mark hangs off the LINE's baseline (the shared anchor — on a
+  // textless line the mark strut's own 0.85 share stands in for it), like
+  // the glyphs: the coefficients below are each mark's natural offset from
+  // that baseline, so a measured-ascent change moves marks and text
+  // together.
+  const baselineY = lineY + lineBaselineDepthPx(line, sizePx);
 
   // Space dots: Word centers a dim dot in each space. Pretext trims the
   // inter-word spaces out of the laid items — they live on as the gaps
@@ -757,7 +788,7 @@ function paintLineMarks(
             tree.add(
               new Ellipse({
                 x: lineX + cx - r,
-                y: lineY + pad + sizePx * 0.55 - r,
+                y: baselineY - sizePx * 0.3 - r,
                 width: r * 2,
                 height: r * 2,
                 fill,
@@ -780,7 +811,7 @@ function paintLineMarks(
     tree.add(
       new Path({
         x: lineX + item.xPx,
-        y: lineY + pad + sizePx * 0.62,
+        y: baselineY - sizePx * 0.23,
         path: `M0 0 H${w} M${w - h} ${-h} L${w} 0 L${w - h} ${h}`,
         stroke: color,
         strokeWidth: Math.max(1, sizePx * 0.07),
@@ -813,7 +844,7 @@ function paintLineMarks(
           : para.sectionEnd === "oddPage"
             ? (labels?.sectionBreakOddPage ?? "Section Break (Odd Page)")
             : (labels?.sectionBreak ?? "Section Break (Next Page)");
-    paintSectionEndMark(tree, markX + sizePx * 0.25, rightX, lineY + pad + sizePx * 0.62, label);
+    paintSectionEndMark(tree, markX + sizePx * 0.25, rightX, baselineY - sizePx * 0.23, label);
     return;
   }
   // The bent-arrow mark (Word's ↵): a rod dropping into a foot that ends in a
@@ -821,16 +852,16 @@ function paintLineMarks(
   // gap past the last glyph, so the shape never leans back over the text at
   // any font size; it stays smaller than the text with the foot longer than
   // the rod. A vector, not the font's ↵ glyph (fallback faces vary). The foot
-  // sits ON the text baseline (0.85s below the element top — the same
-  // leaferBaselinePadPx anchor the glyphs paint at), like Word's paragraph
-  // mark: an earlier 0.3s anchor left it floating 0.17em above the line.
+  // sits ON the line's baseline (the shared lineBaselineDepthPx anchor the
+  // glyphs hang off), like Word's paragraph mark: an earlier 0.3s anchor
+  // left it floating 0.17em above the line.
   const rod = sizePx * 0.38;
   const arm = sizePx * 0.6;
   const head = sizePx * 0.18;
   tree.add(
     new Path({
       x: markX + sizePx * 0.25,
-      y: lineY + pad + sizePx * (0.85 - 0.38),
+      y: baselineY - rod,
       path: `M0 ${rod} H${arm} V0 ` + `M${head} ${rod - head} L0 ${rod} L${head} ${rod + head}`,
       stroke: color,
       strokeWidth: Math.max(1, sizePx * 0.06),
@@ -947,14 +978,14 @@ export function paintBreakRow(
  *  browser (Leafer), so the canvas is always available here. */
 let markCtx: CanvasRenderingContext2D | null | undefined;
 
-/** w:leader fill across a tab's interval: dots/hyphens/underscores drawn on
- *  the text baseline (a hair below it for the underscore, Word's placement). */
+/** w:leader fill across a tab's interval: dots/hyphens/underscores drawn just
+ *  above the text baseline (a hair below it for the underscore, Word's
+ *  placement) — y is that baseline (the shared lineBaselineDepthPx anchor). */
 function paintTabLeader(
   tree: IGroup,
   item: Extract<LaidOutLineItem, { kind: "tab" }>,
   lineX: number,
-  lineY: number,
-  pad: number,
+  baselineY: number,
   sizePx: number,
   color: string,
 ): void {
@@ -963,7 +994,7 @@ function paintTabLeader(
   const x1 = lineX + item.xPx;
   const x2 = x1 + item.widthPx;
   if (x2 - x1 < 2) return;
-  const y = lineY + pad + sizePx * (style.underside ? 0.9 : 0.82);
+  const y = baselineY + sizePx * (style.underside ? 0.05 : -0.03);
   tree.add(
     new Line({
       points: [x1, y, x2, y],

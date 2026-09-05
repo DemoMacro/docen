@@ -346,6 +346,7 @@ export function paintMembers(
           paintBlock(group, item.block, left + dx, oy + dy + item.yPx, mctx, {
             width: inner,
             inCell: true,
+            shapeText: true,
           });
         }
         tree.add(group);
@@ -354,6 +355,7 @@ export function paintMembers(
           paintBlock(tree, item.block, mx + left, my + oy + item.yPx, mctx, {
             width: inner,
             inCell: true,
+            shapeText: true,
           });
         }
       }

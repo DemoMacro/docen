@@ -17,7 +17,7 @@ import type {
   ProjectedFlowBox,
   ProjectedLineNumbers,
 } from "@docen/layout";
-import { columnBoxesOf, gridPadOf } from "@docen/layout";
+import { columnBoxesOf, leaferBaselinePadPx, lineBaselineDepthPx } from "@docen/layout";
 
 /** The stage's per-section paint inputs this counter reads. */
 export interface LineNumberSection {
@@ -65,10 +65,20 @@ export function computeLineNumbers(
         for (const line of item.block.lines) {
           counter += 1;
           if (numbered && counter % countBy === 0) {
+            // The label's glyphs hang on the line's baseline like its text:
+            // the mark depth minus Leafer's own 0.85 × size element anchor,
+            // so the painted baseline lands exactly on the shared
+            // lineBaselineDepthPx (on a textless line the strut's own share
+            // cancels — the old pad-only position).
+            const sizePx = item.block.markSizePx ?? 12;
             marks.push({
-              yPx: item.yPx + line.yPx + gridPadOf(line),
+              yPx:
+                item.yPx +
+                line.yPx +
+                lineBaselineDepthPx(line, sizePx) -
+                leaferBaselinePadPx(sizePx),
               num: start + counter - 1,
-              sizePx: item.block.markSizePx ?? 12,
+              sizePx,
             });
           }
         }

@@ -10,6 +10,7 @@ import type {
   LaidOutParagraph,
   LaidOutTable,
 } from "../layout-result";
+import { leaferBaselinePadPx } from "../text/measure";
 
 /** A line's x origin relative to its block: the left indent (every line),
  *  the line's own first-line indent flag (a split tail carries none), and a
@@ -18,21 +19,56 @@ export function lineOriginXPx(para: LaidOutParagraph, line: LaidOutLine): number
   return (para.indent?.leftPx ?? 0) + (line.firstLineIndentPx ?? 0) + (line.xOffsetPx ?? 0);
 }
 
-/** A docGrid body line's half-leading: Word centers the run's EM box in the
- *  grid span (the browser font box the natural height measures runs deeper —
- *  corpus-verified on the honor table, ~0.3em of it); every other regime
- *  anchors at the line top (pad 0). Text-box stacks take the same rule —
- *  their grid-snapped lines half-lead like the body's (pixel-verified: the
- *  reference render's first ink sits at half-leading in a box whose border
- *  position matches ours exactly), and bodyPr @compatLnSpc changes nothing
- *  (Word ignores it when laying out wps txbxContent). Both the painter's
- *  text y and the caret band anchor at this pad. */
+/** A line's leading pad above its text. A docGrid body line centers the run's
+ *  EM box in the grid span (Word's half-leading — the browser font box the
+ *  natural height measures runs deeper — corpus-verified on the honor table,
+ *  ~0.3em of it). A non-grid multiple-spacing line scales the WHOLE box
+ *  (Word): the baseline rides at factor × its single-line height, so the
+ *  slack splits on the natural box's own ascent:descent ratio instead of
+ *  sinking below the text — the single-line baseline height is the paint
+ *  anchor (leaferBaselinePadPx). A picture-floored line keeps its slack
+ *  below the box: an inline picture sits ON the baseline, whose single-line
+ *  position IS the box bottom, so scaling leaves the box top-anchored.
+ *  atLeast/exact lines stay top-anchored too (Word pins their extra space at
+ *  the line TOP — text against the box bottom); that regime is not modeled
+ *  here yet. Text-box stacks take the grid rule — their grid-snapped lines
+ *  half-lead like the body's (pixel-verified: the reference render's first
+ *  ink sits at half-leading in a box whose border position matches ours
+ *  exactly), and bodyPr @compatLnSpc changes nothing (Word ignores it when
+ *  laying out wps txbxContent). Both the painter's text y and the caret band
+ *  anchor at this pad. */
 export function gridPadOf(line: LaidOutLine): number {
-  if (!line.grid) return 0;
-  // A picture-floored line centers the picture box (its natural) in the
-  // spanned rows — beside-text pictures must not inherit the text EM ref.
-  const ref = line.pictureFloored ? line.naturalPx : (line.textEmPx ?? line.naturalPx);
-  return Math.max(0, (line.heightPx - ref) / 2);
+  if (line.grid) {
+    // A picture-floored line centers the picture box (its natural) in the
+    // spanned rows — beside-text pictures must not inherit the text EM ref.
+    const ref = line.pictureFloored ? line.naturalPx : (line.textEmPx ?? line.naturalPx);
+    return Math.max(0, (line.heightPx - ref) / 2);
+  }
+  if (line.pictureFloored || line.spacingRule === "atLeast" || line.spacingRule === "exact") {
+    return 0;
+  }
+  if (!line.textEmPx || line.naturalPx <= 0) return 0;
+  const slack = line.heightPx - line.naturalPx;
+  if (slack <= 0) return 0;
+  // The single-line baseline height the multiple scales: the measured face
+  // ascent (baselinePadPx), falling back to Leafer's 0.85 constant on
+  // fixtures that predate the field.
+  const singleBaseline = line.baselinePadPx ?? leaferBaselinePadPx(line.textEmPx);
+  return (slack * singleBaseline) / line.naturalPx;
+}
+
+/** A line's alphabetic baseline depth below its top (px): the leading pad
+ *  (gridPadOf) plus the dominant face's measured ascent (the layout's
+ *  per-line `baselinePadPx`), falling back to Leafer's 0.85 × size constant
+ *  on lines without the field (`fallbackSizePx` covers textless lines, where
+ *  the paragraph-mark strut is the only baseline reference). The ONE anchor
+ *  every text consumer hangs off — the painter's glyphs, underline, tab
+ *  leaders and formatting marks, plus the editor's caret band and line
+ *  numbers all position relative to this, so none can drift from the paint. */
+export function lineBaselineDepthPx(line: LaidOutLine, fallbackSizePx = 0): number {
+  return (
+    gridPadOf(line) + (line.baselinePadPx ?? leaferBaselinePadPx(line.textEmPx ?? fallbackSizePx))
+  );
 }
 
 /** A block's page-fitting extent — its content bottom. A paragraph whose

@@ -244,6 +244,25 @@ describe("CaretMap selection rectangles", () => {
     expect(rects[1]).toMatchObject({ xPx: 0, widthPx: 8, heightPx: 20 });
   });
 
+  it("stops a paragraph's last line at the last glyph, stretching only on the paragraph mark", () => {
+    const { doc } = buildDoc(["abcd", "efgh"]);
+    const map = new CaretMap(
+      pageOf([
+        fakePara([{ text: "abcd", xPx: 0, yPx: 0, maxWidthPx: 100 }]),
+        fakePara([{ text: "efgh", xPx: 0, yPx: 0, maxWidthPx: 100 }]),
+      ]) as never,
+      doc,
+      () => ({ contentLeftPx: 0, contentTopPx: 0 }),
+    );
+    // Selecting to the first paragraph's final glyph (Shift+End on its only
+    // line) stops at that glyph — Word doesn't stretch the final line.
+    const [tail] = map.selectionRects(1, 5);
+    expect(tail?.widthPx).toBe(40);
+    // Crossing into paragraph 2 (the paragraph mark joins the range) does.
+    const [crossed] = map.selectionRects(1, 7);
+    expect(crossed?.widthPx).toBe(100);
+  });
+
   it("highlights a render-only line across its full width (TOC entry)", () => {
     // A TOC entry paints from its cached options while the PM paragraph stays
     // empty: the zip pairs them as-is, so no PM position maps into the line.
