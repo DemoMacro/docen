@@ -530,11 +530,25 @@ export class CaretMap {
    *  resolves to that nearest line, so dragging below the last line selects
    *  through its end instead of stalling. */
   posAtPoint(page: number, x: number, y: number, clamp = false): number | null {
+    // Columns stack a second column's lines onto the same y axis, so the
+    // nearest-line band must be picked WITHIN the column the point sits in:
+    // a purely vertical pick lets the neighbor column's line win whenever it
+    // happens to lie closer (a drag crossing an inter-paragraph gap in the
+    // left column snaps into the right column once its last line is a few px
+    // nearer). Column boxes recover from the laid lines' own spans — columns
+    // are horizontally disjoint runs, so transitive overlap merging rebuilds
+    // their extents; a point outside every box (margins, gutter) resolves to
+    // the column it just entered, left-preferred (the gutter belongs to the
+    // line it left, matching the fallback below).
+    const boxes = this.columnBoxes(page);
+    const box = boxes.length ? (boxes.findLast((b) => b.left <= x) ?? boxes[0]!) : undefined;
     // Lines at the best (smallest) vertical distance — one band per click.
     let bestDist = Infinity;
     const band: LineEntry[] = [];
     for (const entry of this.lines) {
       if (entry.page !== page) continue;
+      if (box && !(entry.xPx < box.right && entry.xPx + (entry.line.maxWidthPx ?? 0) > box.left))
+        continue;
       const within = y >= entry.yPx && y <= entry.yPx + entry.line.heightPx;
       const dist = within
         ? 0
@@ -571,6 +585,29 @@ export class CaretMap {
       hit ??= band[0]!;
     }
     return this.posInLine(hit, x);
+  }
+
+  /** A page's column boxes, left to right — transitive merges of the laid
+   *  lines' own [xPx, xPx + width] spans. Columns are horizontally disjoint
+   *  by construction, so spans merge within a column (indent and centering
+   *  vary a line's span) and never across neighboring ones; a table's cells
+   *  merge back into one box per row band, which the band pick treats like
+   *  any single column. */
+  private columnBoxes(page: number): { left: number; right: number }[] {
+    const boxes: { left: number; right: number }[] = [];
+    for (const entry of this.lines) {
+      if (entry.page !== page) continue;
+      const left = entry.xPx;
+      const right = entry.xPx + (entry.line.maxWidthPx ?? 0) + (entry.line.hangPx ?? 0);
+      const box = boxes.find((b) => left < b.right && right > b.left);
+      if (box) {
+        box.left = Math.min(box.left, left);
+        box.right = Math.max(box.right, right);
+      } else {
+        boxes.push({ left, right });
+      }
+    }
+    return boxes;
   }
 
   /** One line up/down at the same character column (within the paragraph or
