@@ -12,6 +12,51 @@ import {
 import { t } from "../../ui";
 import type { OutlineItem } from "../components/outline";
 
+/** Regex metacharacters that must be escaped when a Word wildcard pattern
+ *  asks for a literal match. */
+const REGEX_META = /[.*+?^${}()|[\]\\]/;
+
+/** Translate Word's wildcard find syntax into a JavaScript RegExp source:
+ *  ? = any character, * = any run, < / > = word boundaries, [!…] = negated
+ *  character set, {n,m} = counted repeat, @ = one-or-more of the previous
+ *  item. Everything else matches literally, so regex metacharacters are
+ *  escaped and a malformed construct stays a literal. */
+export function wordWildcardToRegExp(pattern: string): string {
+  let out = "";
+  // The previous token's source form — `@` turns it into "one or more"
+  // (out already ends with it, so it is swapped out, not appended).
+  let prev = "";
+  const emit = (token: string): void => {
+    out += token;
+    prev = token;
+  };
+  for (let i = 0; i < pattern.length; i++) {
+    const ch = pattern[i]!;
+    if (ch === "?") emit(".");
+    else if (ch === "*") emit(".*");
+    else if (ch === "<" || ch === ">") emit("\\b");
+    else if (ch === "@") {
+      if (prev) out = out.slice(0, -prev.length) + `${prev}+`;
+      else emit("@");
+    } else if (ch === "[") {
+      const close = pattern.indexOf("]", i + 1);
+      if (close === -1) emit("\\[");
+      else {
+        const body = pattern.slice(i + 1, close);
+        emit(body.startsWith("!") ? `[^${body.slice(1)}]` : `[${body}]`);
+        i = close;
+      }
+    } else if (ch === "{") {
+      const count = /^\{(\d+)(,(\d*)?)?\}/.exec(pattern.slice(i))?.[0];
+      if (count) {
+        emit(count);
+        i += count.length - 1;
+      } else emit("\\{");
+    } else emit(REGEX_META.test(ch) ? `\\${ch}` : ch);
+  }
+  return out;
+}
+
 /** Build a nested OutlineItem tree from the flat outline anchor list: each
  *  heading nests under the nearest preceding heading with a smaller level. */
 function buildOutlineTree(
@@ -208,7 +253,8 @@ export class NavigationCommands {
 
   /** find-replace:action → drive prosemirror-search (query highlights, find-next,
    *  replace-next = replace + advance, replace-all). Each action re-stamps the
-   *  query so Find/Replace/options are always current. */
+   *  query so Find/Replace/options are always current. With Use wildcards on,
+   *  the pattern is Word's wildcard syntax — translated to a real RegExp. */
   readonly onFindReplace = (
     event: CustomEvent<{
       action: string;
@@ -216,12 +262,21 @@ export class NavigationCommands {
       replace: string;
       caseSensitive: boolean;
       wholeWord: boolean;
+      wildcard?: boolean;
     }>,
   ): void => {
     const editor = this.host.editor();
     if (!editor) return;
-    const { action, find, replace, caseSensitive, wholeWord } = event.detail ?? {};
-    const query = new SearchQuery({ search: find, replace, caseSensitive, wholeWord });
+    const { action, find, replace, caseSensitive, wholeWord, wildcard } = event.detail ?? {};
+    const query =
+      wildcard && find
+        ? new SearchQuery({
+            search: wordWildcardToRegExp(find),
+            replace,
+            caseSensitive,
+            regexp: true,
+          })
+        : new SearchQuery({ search: find, replace, caseSensitive, wholeWord });
     editor.view.dispatch(setSearchState(editor.state.tr, query));
     if (action === "find-next") findNext(editor.state, editor.view.dispatch);
     else if (action === "replace-next") replaceNext(editor.state, editor.view.dispatch);

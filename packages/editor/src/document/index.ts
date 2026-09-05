@@ -385,7 +385,20 @@ class DocenDocument extends AddinHost<Editor> {
       this.#onCommand(new CustomEvent("command", { detail: { event: "spell-check" } }));
       return;
     }
+    // Alt+= inserts a blank inline equation (Word's Insert Equation shortcut).
+    if (event.altKey && !event.ctrlKey && !event.metaKey && event.key === "=") {
+      event.preventDefault();
+      this.#insertEquation("plain");
+      return;
+    }
     if (!(event.ctrlKey || event.metaKey)) return;
+    // Ctrl+Shift+8 toggles formatting marks (Word). Shift+8 turns the key
+    // into "*" on US layouts, so both spellings count.
+    if (event.shiftKey && (event.key === "8" || event.key === "*")) {
+      event.preventDefault();
+      this.setShowMarks(!this.getShowMarks());
+      return;
+    }
     // Ctrl+F opens Find, Ctrl+H opens Find & Replace (Word behavior).
     if (event.key === "f" || event.key === "F") {
       event.preventDefault();
@@ -1006,6 +1019,11 @@ class DocenDocument extends AddinHost<Editor> {
     this.shadowRoot!.querySelector("docen-status-bar")?.addEventListener(
       "zoom:open",
       this.#onZoomOpen as EventListener,
+    );
+    // Status-bar word count → the statistics dialog (Word).
+    this.shadowRoot!.querySelector("docen-status-bar")?.addEventListener(
+      "wordcount:open",
+      this.#onWordCountOpen as EventListener,
     );
     // Status-bar view shortcuts (Word's Reading / Print Layout / Web Layout
     // buttons) — the same `view` attribute the ribbon's View tab writes.
@@ -1659,6 +1677,9 @@ class DocenDocument extends AddinHost<Editor> {
       ?.querySelector("docen-status-bar")
       ?.removeEventListener("zoom:open", this.#onZoomOpen as EventListener);
     this.shadowRoot
+      ?.querySelector("docen-status-bar")
+      ?.removeEventListener("wordcount:open", this.#onWordCountOpen as EventListener);
+    this.shadowRoot
       ?.querySelector<HTMLElement>("docen-status-bar")
       ?.removeEventListener("zoom:change", this.#onZoomChange as EventListener);
     this.shadowRoot
@@ -2290,6 +2311,10 @@ class DocenDocument extends AddinHost<Editor> {
     this.#showZoomDialog();
   };
 
+  readonly #onWordCountOpen = (): void => {
+    this.#showWordCount();
+  };
+
   /** A status-bar view button (the detail names the status-bar's view:
    *  "reading" | "print" | "web") → the `view` attribute. */
   readonly #onViewSelect = (event: CustomEvent<{ view?: string }>): void => {
@@ -2467,6 +2492,8 @@ class DocenDocument extends AddinHost<Editor> {
     if (!editor) return;
     const slot = (): object => ({ text: "" });
     const templates: Record<string, object> = {
+      // Alt+= inserts a blank equation — one empty run to type into.
+      plain: { text: "" },
       fraction: { fraction: { numerator: [slot()], denominator: [slot()] } },
       superScript: { superScript: { children: [slot()], superScript: [slot()] } },
       radical: { radical: { children: [slot()] } },

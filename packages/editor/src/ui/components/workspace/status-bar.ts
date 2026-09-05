@@ -156,6 +156,10 @@ const styles = css`
     cursor: pointer;
     padding-inline: 2px;
   }
+  /* Word count opens the statistics dialog, same plain-text affordance. */
+  .words {
+    cursor: pointer;
+  }
   /* Narrow viewports: drop the less essential items progressively and shrink
      the zoom slider, so the bar fits a phone width without overflowing. */
   @media (max-width: 720px) {
@@ -347,6 +351,8 @@ class DocenStatusBar extends FASTElement {
     // The percent opens the Zoom dialog (Word), and the view shortcuts select
     // a document view — the host decides which view each name maps to.
     this.pctEl?.addEventListener("click", () => this.#emitOpenZoom());
+    // The word count opens the Word Count dialog (Word).
+    this.wordsEl?.addEventListener("click", () => this.#emitOpenWordCount());
     // The proofing book opens the Spelling pane (Word: click → Spelling).
     this.spellBtn?.addEventListener("click", () => this.#emitOpenSpelling());
     for (const btn of this.shadowRoot?.querySelectorAll<HTMLButtonElement>(".view-btn") ?? []) {
@@ -408,6 +414,10 @@ class DocenStatusBar extends FASTElement {
         detail: { zoom: Number(this.zoom ?? 100) },
       }),
     );
+  }
+
+  #emitOpenWordCount(): void {
+    this.dispatchEvent(new CustomEvent("wordcount:open", { bubbles: true, composed: true }));
   }
 
   #emitOpenSpelling(): void {

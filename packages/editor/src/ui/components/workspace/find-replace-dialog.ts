@@ -62,6 +62,10 @@ const template = html<DocenFindReplaceDialog>`
         <fluent-checkbox part="word" ${ref("word")}></fluent-checkbox>
         <span data-i18n="findReplace.wholeWord">Whole word</span>
       </label>
+      <label class="check-field">
+        <fluent-checkbox part="wildcard" ${ref("wildcard")}></fluent-checkbox>
+        <span data-i18n="findReplace.useWildcards">Use wildcards</span>
+      </label>
     </div>
     <fluent-button
       slot="action"
@@ -118,6 +122,7 @@ class DocenFindReplaceDialog extends FASTElement {
   @observable replace?: InputEl;
   @observable case?: CheckEl;
   @observable word?: CheckEl;
+  @observable wildcard?: CheckEl;
   #dialogObserver?: MutationObserver;
   #unsubscribe?: () => void;
 
@@ -196,6 +201,7 @@ class DocenFindReplaceDialog extends FASTElement {
       replace: this.replace?.value ?? "",
       caseSensitive: !!this.case?.checked,
       wholeWord: !!this.word?.checked,
+      wildcard: !!this.wildcard?.checked,
     };
   }
 
