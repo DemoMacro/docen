@@ -3186,7 +3186,7 @@ class DocenDocument extends AddinHost<Editor> {
     // Equation — insert one placeholder math template at the caret (Word's
     // Insert → Symbols → Equation gallery).
     if (name === "equation") {
-      this.#insertEquation(String(value));
+      this.#insertEquation(value ? String(value) : "fraction");
       return;
     }
     // Page Color — write/clear the doc-level w:background from the palette

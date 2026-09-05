@@ -15,6 +15,19 @@ function stripRunMarks(nodes: JSONContent[]): JSONContent[] {
   });
 }
 
+function insertPlainText(editor: Editor, text: string): void {
+  if (text.includes("\n")) {
+    const lines = text.split(/\r?\n/);
+    const paragraphs = lines.map((line) => ({
+      type: "paragraph",
+      content: line ? [{ type: "text", text: line }] : [],
+    }));
+    editor.commands.insertContent(paragraphs);
+  } else {
+    editor.commands.insertContent(text);
+  }
+}
+
 /** Where the paste options bar hangs — the pasted content's last line, as
  *  frame-relative screen px (the bridge's paste anchor). */
 export type PasteSource = { kind: "slice" | "html"; raw: string; text: string };
@@ -97,7 +110,7 @@ export class ClipboardCommands {
           if (pinned && pinned.text === text && bridge?.insertSlicePayload(pinned.payload)) {
             return;
           }
-          editor.commands.insertContent(text);
+          insertPlainText(editor, text);
           return;
         }
       }
@@ -112,7 +125,7 @@ export class ClipboardCommands {
           this.showPasteOptions({ kind: "slice", raw: pinned.payload, text });
           return;
         }
-        editor.commands.insertContent(text);
+        insertPlainText(editor, text);
       }
     } catch {
       /* clipboard unavailable — nothing to paste */

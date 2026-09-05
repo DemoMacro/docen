@@ -5,7 +5,7 @@ import { NodeSelection } from "@tiptap/pm/state";
 import { describe, expect, it } from "vitest";
 
 import { CellSelection } from "../canvas/cell-selection";
-import { DocumentCommands } from "./commands";
+import { DocumentCommands, listLevelStepPatch } from "./commands";
 
 // Tiptap's schema needs the plain text node (same trick as the TOC spec).
 const Text = TextNode.create({ name: "text", group: "inline" });
@@ -1147,5 +1147,27 @@ describe("drawing-crop-apply", () => {
     selectFloat(editor);
     expect(editor.commands["drawing-crop-apply"]({ left: 0.1 } as never)).toBe(false);
     expect(editor.commands["drawing-crop-apply"]()).toBe(false);
+  });
+});
+
+describe("listLevelStepPatch", () => {
+  it("steps bullet level within 0-8 bounds", () => {
+    expect(listLevelStepPatch({ bullet: { level: 2 } }, -1)).toEqual({ bullet: { level: 1 } });
+    expect(listLevelStepPatch({ bullet: { level: 0 } }, -1)).toEqual({ bullet: { level: 0 } });
+    expect(listLevelStepPatch({ bullet: { level: 8 } }, 1)).toEqual({ bullet: { level: 8 } });
+  });
+
+  it("steps numbering level keeping the reference", () => {
+    expect(listLevelStepPatch({ numbering: { reference: "list-1", level: 1 } }, -1)).toEqual({
+      numbering: { reference: "list-1", level: 0 },
+    });
+    expect(listLevelStepPatch({ numbering: { reference: "list-1", level: 0 } }, 1)).toEqual({
+      numbering: { reference: "list-1", level: 1 },
+    });
+  });
+
+  it("returns null for non-list paragraphs", () => {
+    expect(listLevelStepPatch({}, 1)).toBeNull();
+    expect(listLevelStepPatch({ style: "Normal" }, -1)).toBeNull();
   });
 });

@@ -57,6 +57,12 @@ describe("resizeBox", () => {
     expect(next.width).toBe(24);
     expect(next.height).toBe(24);
   });
+
+  it("allows coordinates to reach zero or negative values without clamping to 1", () => {
+    const next = resizeBox({ x: 10, y: 10, width: 50, height: 50 }, "w", -20, 0);
+    expect(next.x).toBe(-10);
+    expect(next.width).toBe(70);
+  });
 });
 
 describe("rotateDelta", () => {

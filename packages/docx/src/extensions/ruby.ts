@@ -26,7 +26,7 @@ function flattenText(nodes: JSONContent[]): string {
 /** `{ ruby: {...} }` → text[] carrying a ruby mark. Mirrors resolveHyperlink:
  *  recurse the base runs via ctx, merge adjacent text, then stamp every text
  *  node with the mark. Returns null for an empty base. */
-function resolveRuby(ruby: RubyOptions, ctx: ResolveContext): JSONContent | null {
+function resolveRuby(ruby: RubyOptions, ctx: ResolveContext): JSONContent[] | null {
   const props = ruby.properties;
   if (!props) return null;
   const base = ctx.resolveInlineChildren(ruby.base?.children ?? []);

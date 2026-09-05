@@ -96,7 +96,7 @@ export function resizeBox(box: Box, handle: HandleId, dx: number, dy: number, mi
     if (north) y = box.y + box.height - min;
     height = min;
   }
-  return { x: positive(x), y: positive(y), width: positive(width), height: positive(height) };
+  return { x: Math.round(x), y: Math.round(y), width: positive(width), height: positive(height) };
 }
 
 /** The clockwise angle (degrees) the pointer swept around the box center

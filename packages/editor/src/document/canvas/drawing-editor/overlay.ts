@@ -145,6 +145,17 @@ export class DrawingOverlay {
       startY: event.clientY,
       origin: { ...this.#box },
     };
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === "Escape" && this.#drag) {
+        e.preventDefault();
+        e.stopPropagation();
+        this.#box = { ...this.#drag.origin };
+        this.#drag = null;
+        this.#place();
+        document.removeEventListener("keydown", onKey, true);
+      }
+    };
+    document.addEventListener("keydown", onKey, true);
   }
 
   #onPointerMove(event: PointerEvent): void {
