@@ -5,7 +5,7 @@ import { NodeSelection } from "@tiptap/pm/state";
 import { describe, expect, it } from "vitest";
 
 import { CellSelection } from "../canvas/cell-selection";
-import { DocumentCommands, listLevelStepPatch } from "./commands";
+import { DocumentCommands, listLevelStepPatch, normalizeParagraphAlignment } from "./commands";
 
 // Tiptap's schema needs the plain text node (same trick as the TOC spec).
 const Text = TextNode.create({ name: "text", group: "inline" });
@@ -1227,5 +1227,21 @@ describe("paragraph alignment commands", () => {
     expect(table.child(0).child(2).child(0).attrs.alignment).toBeNull();
     expect(table.child(1).child(0).child(0).attrs.alignment).toBeNull();
     expect(table.child(1).child(2).child(0).attrs.alignment).toBeNull();
+  });
+});
+
+describe("normalizeParagraphAlignment", () => {
+  it("maps end to right, start to left, and justify to both", () => {
+    expect(normalizeParagraphAlignment("end")).toBe("right");
+    expect(normalizeParagraphAlignment("start")).toBe("left");
+    expect(normalizeParagraphAlignment("justify")).toBe("both");
+    expect(normalizeParagraphAlignment("center")).toBe("center");
+    expect(normalizeParagraphAlignment("distribute")).toBe("distribute");
+  });
+
+  it("defaults unknown or missing values to left", () => {
+    expect(normalizeParagraphAlignment(undefined)).toBe("left");
+    expect(normalizeParagraphAlignment(null)).toBe("left");
+    expect(normalizeParagraphAlignment("invalid")).toBe("left");
   });
 });

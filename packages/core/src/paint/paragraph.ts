@@ -797,7 +797,10 @@ function paintLineMarks(
   const paragraphEnd = para.inline.length === 0 || line.endInlineIndex >= para.inline.length - 1;
   if (!paragraphEnd && endInline?.kind !== "break") return;
   const last = line.items[line.items.length - 1];
-  const markX = lineX + (last ? last.xPx + last.widthPx : 0);
+  const emptySlack = line.maxWidthPx ?? 0;
+  const emptyShift =
+    para.align === "center" ? emptySlack / 2 : para.align === "right" ? emptySlack : 0;
+  const markX = lineX + (last ? last.xPx + last.widthPx : emptyShift);
   if (paragraphEnd && para.sectionEnd) {
     const labels = ctx.marksLabels;
     const label =

@@ -177,6 +177,7 @@ export function layoutParagraph(
     afterPx: para.spacing?.afterPx ?? 0,
     lines,
     inline: para.inline,
+    align: para.align,
     keepLines: para.keepLines,
     suppressLineNumbers: para.suppressLineNumbers,
     keepNext: para.keepNext,

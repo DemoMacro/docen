@@ -556,7 +556,7 @@ export class CaretMap {
     const inside = band.find((entry) => {
       const items = entry.line.items;
       const last = items[items.length - 1];
-      const right = entry.xPx + (last ? last.xPx + last.widthPx : 0);
+      const right = entry.xPx + (last ? last.xPx + last.widthPx : (entry.line.maxWidthPx ?? 0));
       return x >= entry.xPx && x <= right;
     });
     // Outside every line's span: the gutter's LEFT line (last line whose left
@@ -702,9 +702,18 @@ export class CaretMap {
             if (first == null || item.xPx < first) first = item.xPx;
             last = Math.max(last, item.xPx + item.widthPx);
           }
+          const slack = line.line.maxWidthPx ?? 0;
+          const shift =
+            first == null
+              ? line.para.align === "center"
+                ? slack / 2
+                : line.para.align === "right"
+                  ? slack
+                  : 0
+              : 0;
           rects.push({
             page: line.page,
-            xPx: line.xPx + (first ?? 0),
+            xPx: line.xPx + (first ?? shift),
             yPx: line.yPx,
             widthPx:
               first == null ? Math.min(8, line.line.maxWidthPx ?? 8) : Math.max(last - first, 2),
@@ -1065,6 +1074,10 @@ export class CaretMap {
       char += item.text.length;
     }
     const last = line.line.items[line.line.items.length - 1];
-    return line.xPx + (last ? last.xPx + last.widthPx : 0);
+    if (last) return line.xPx + last.xPx + last.widthPx;
+    const slack = line.line.maxWidthPx ?? 0;
+    const shift =
+      line.para.align === "center" ? slack / 2 : line.para.align === "right" ? slack : 0;
+    return line.xPx + shift;
   }
 }

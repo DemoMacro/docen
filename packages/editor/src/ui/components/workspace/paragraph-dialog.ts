@@ -1,6 +1,9 @@
 import { FASTElement, css, customElement, html, observable, ref } from "@microsoft/fast-element";
 
-import type { ParagraphDialogPatch } from "../../../document/extensions/commands";
+import {
+  normalizeParagraphAlignment,
+  type ParagraphDialogPatch,
+} from "../../../document/extensions/commands";
 import { observeLang, t } from "../../i18n/localize";
 
 /** Line-spacing select values — multiples encode as w:line 240ths under
@@ -10,7 +13,6 @@ type LineSpacingChoice = "single" | "lines15" | "double" | "multiple" | "atLeast
 const PT_TO_TWIPS = 20;
 const LINE_PER_MULTIPLE = 240;
 
-const ALIGN_VALUES = ["left", "center", "right", "both", "distribute"];
 const TA_VALUES = ["auto", "top", "center", "baseline", "bottom"];
 
 const styles = css`
@@ -477,9 +479,7 @@ class DocenParagraphDialog extends FASTElement {
       line?: number;
       lineRule?: string;
     };
-    const alignment = (attrs.alignment as string) ?? "left";
-    if (this.alignDropdown)
-      this.alignDropdown.value = ALIGN_VALUES.includes(alignment) ? alignment : "left";
+    if (this.alignDropdown) this.alignDropdown.value = normalizeParagraphAlignment(attrs.alignment);
     if (this.outlineDropdown) {
       const level = typeof attrs.outlineLevel === "number" ? attrs.outlineLevel : -1;
       this.outlineDropdown.value = String(Math.max(-1, Math.min(8, level)));
@@ -568,7 +568,7 @@ class DocenParagraphDialog extends FASTElement {
     // body text. Level 0 is a legal level and must survive.
     const outline = Number(this.outlineDropdown?.value ?? "-1");
     const patch: ParagraphDialogPatch = {
-      alignment: ALIGN_VALUES.includes(alignment) ? alignment : "left",
+      alignment: normalizeParagraphAlignment(alignment),
       outlineLevel: outline >= 0 ? outline : null,
       indent: {
         left: this.#twips(this.leftInput?.value),
