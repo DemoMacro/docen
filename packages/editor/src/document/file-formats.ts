@@ -21,7 +21,7 @@ export function detectOpenFormat(file: File): "docx" | "markdown" {
  *  must be a BARE type — showSaveFilePicker rejects accept keys carrying params
  *  (e.g. ";charset=utf-8") with NotSupportedError, so the picker never opens. */
 export const SAVE_FORMATS: Record<
-  "docx" | "markdown",
+  "docx" | "markdown" | "pdf",
   { description: string; mime: string; ext: string }
 > = {
   docx: {
@@ -30,6 +30,7 @@ export const SAVE_FORMATS: Record<
     ext: ".docx",
   },
   markdown: { description: "Markdown", mime: "text/markdown", ext: ".md" },
+  pdf: { description: "PDF Document", mime: "application/pdf", ext: ".pdf" },
 };
 
 /** Commands that stay live when the document is read-only (Viewing mode):
@@ -213,5 +214,14 @@ export const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   // #onChange (data-event)
   "open",
   "save-as",
+  "save-as-pdf",
   "print",
+  // The filename menu's tail (Word's File menu): Properties opens the
+  // properties task pane, Inspect Document its findings dialog, Share goes
+  // through the Web Share API (clipboard fallback), Close resets the
+  // document (all host-handled via docen:close first).
+  "properties",
+  "inspect-document",
+  "share",
+  "close",
 ]);

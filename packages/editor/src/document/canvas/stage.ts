@@ -856,16 +856,19 @@ export class CanvasStage {
 
   /** Rasterize every page for printing: pages the IntersectionObserver never
    *  reached get their App forced (a printout needs all pages, not just the
-   *  scrolled-into-view ones), every slot repaints and force-renders, then
-   *  each canvas exports as PNG. `width`/`height` are the page's unzoomed CSS
-   *  px (96 dpi) so the print view can lay the images out at true paper size. */
-  printSnapshots(): { width: number; height: number; url: string }[] {
+   *  scrolled-into-view ones), every slot repaints, then each canvas exports
+   *  as PNG. `width`/`height` are the page's unzoomed CSS px (96 dpi) so the
+   *  print view can lay the images out at true paper size. */
+  async printSnapshots(): Promise<{ width: number; height: number; url: string }[]> {
+    const apps: App[] = [];
     for (const [index, slot] of this.slots.entries()) {
       this.ensure(slot);
       if (!slot.app) continue;
       this.repaint(slot.app, index);
       slot.app.forceRender();
+      apps.push(slot.app);
     }
+    await this.#settleCanvases(apps);
     const shots: { width: number; height: number; url: string }[] = [];
     for (const [index, slot] of this.slots.entries()) {
       const canvas = slot.el.querySelector("canvas");
@@ -878,6 +881,54 @@ export class CanvasStage {
       });
     }
     return shots;
+  }
+
+  /** repaint clears each canvas and forceRender only requests a frame —
+   *  Leafer rasterizes over several frames (base fill, content, then async
+   *  image decodes re-request renders through the `rerender` hook), and a
+   *  premature toDataURL exports blank pages. Wait per app until its canvas
+   *  stops changing between render frames (the same two-identical-samples
+   *  rule as the page-compare captures); the timeout only bounds a stalled
+   *  engine — a settled page returns within a few frames. */
+  async #settleCanvases(apps: App[]): Promise<void> {
+    const settled = async (app: App): Promise<void> => {
+      const view = app.view as unknown as HTMLElement | undefined;
+      const canvas =
+        view instanceof HTMLCanvasElement ? view : (view?.querySelector("canvas") ?? null);
+      if (!canvas) return;
+      // 0 marks a still-fully-transparent canvas (nothing painted yet) — the
+      // all-zero hash is stable, so transparency must not count as settled.
+      const sample = (): number => {
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return -1;
+        const d = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+        for (let i = 3; i < d.length; i += 4) {
+          if (d[i] !== 0) {
+            let h = 0;
+            for (let j = 0; j < d.length; j += 4)
+              h = (Math.imul(h ^ d[j], 16777619) + d[j + 1] + d[j + 2]) | 0;
+            return h;
+          }
+        }
+        return 0;
+      };
+      let last = sample();
+      if (last === -1) return;
+      for (let frame = 0; frame < 120; frame++) {
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, 120);
+          app.nextRender(() => {
+            clearTimeout(timer);
+            resolve();
+          });
+        });
+        const now = sample();
+        if (now === -1) return;
+        if (now !== 0 && now === last) return;
+        last = now;
+      }
+    };
+    await Promise.all(apps.map(settled));
   }
 
   destroy(): void {

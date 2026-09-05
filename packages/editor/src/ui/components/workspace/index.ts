@@ -32,3 +32,4 @@ export { default as DocenTablePropertiesDialog } from "./table-properties-dialog
 export { default as DocenDrawingPropertiesDialog } from "./drawing-properties-dialog";
 export { default as DocenBordersShadingDialog } from "./borders-shading-dialog";
 export { default as DocenWatermarkDialog } from "./watermark-dialog";
+export { default as DocenInspectDialog } from "./inspect-dialog";

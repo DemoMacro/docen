@@ -160,6 +160,29 @@ export class CommentsCommands {
     editor.view.dispatch(tr);
   }
 
+  /** Document Inspector → Remove All: every comment's marker/reference atoms
+   *  and the whole documentExtras list go in ONE transaction (one undo step) —
+   *  deleting them one by one would also re-render the pane N times. */
+  deleteAllComments(): void {
+    const editor = this.host.editor();
+    if (!editor) return;
+    const atoms: { pos: number; size: number }[] = [];
+    editor.state.doc.descendants((child, pos) => {
+      if (commentMarkerOf(child)) atoms.push({ pos, size: child.nodeSize });
+    });
+    if (atoms.length === 0) return;
+    const docAttrs = (editor.state.doc.attrs ?? {}) as {
+      documentExtras?: { comments?: Record<string, unknown>[] };
+    };
+    const tr = editor.state.tr;
+    for (const { pos, size } of atoms.sort((a, b) => b.pos - a.pos)) tr.delete(pos, pos + size);
+    tr.setDocAttribute("documentExtras", {
+      ...docAttrs.documentExtras,
+      comments: [],
+    });
+    editor.view.dispatch(tr);
+  }
+
   /** Review → Previous/Next Comment: select the range of the comment before
    *  or after the selection (document order); no further comment in that
    *  direction is a no-op. */

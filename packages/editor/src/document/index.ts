@@ -89,6 +89,7 @@ import { SectionCommands } from "./commands/sections";
 import { SpellingCommands } from "./commands/spelling";
 // Side-effect import: registers the ribbon/header translation tables.
 import "./i18n";
+import { pagesToPdf } from "./export-pdf";
 import { tableAncestry, WIRED_DISPATCH } from "./extensions/commands";
 import { LOCAL_HANDLED, READONLY_LIVE, SAVE_FORMATS, detectOpenFormat } from "./file-formats";
 import { mergeSectionProperties } from "./page-setup";
@@ -387,7 +388,7 @@ class DocenDocument extends AddinHost<Editor> {
     // Ctrl+P prints the canvas pages (Word) — not the browser's DOM print.
     if (event.key === "p" || event.key === "P") {
       event.preventDefault();
-      if (!this.#emitCancelable("docen:print")) this.#print();
+      if (!this.#emitCancelable("docen:print")) void this.#print();
       return;
     }
     // composedPath()[0] is the real target inside the shadow DOM (e.g. a combobox input).
@@ -793,6 +794,15 @@ class DocenDocument extends AddinHost<Editor> {
     this.shadowRoot!.querySelector("docen-options-dialog")?.addEventListener(
       "options:ok",
       this.#onOptionsOk as EventListener,
+    );
+    // Document Inspector (检查问题) — the findings dialog's removal buttons.
+    this.shadowRoot!.querySelector("docen-inspect-dialog")?.addEventListener(
+      "inspect:clear-comments",
+      this.#onInspect as EventListener,
+    );
+    this.shadowRoot!.querySelector("docen-inspect-dialog")?.addEventListener(
+      "inspect:accept-revisions",
+      this.#onInspect as EventListener,
     );
     // Language dialog — commit the selection's proofing language (w:lang).
     this.shadowRoot!.querySelector("docen-language-dialog")?.addEventListener(
@@ -1631,9 +1641,17 @@ class DocenDocument extends AddinHost<Editor> {
                 <fluent-divider role="separator" aria-orientation="horizontal" orientation="horizontal"></fluent-divider>
                 <fluent-menu-item data-event="save-as">${t("header.save-as", this)}</fluent-menu-item>
                 <fluent-menu-item data-event="save-as-markdown">${t("header.save-as-markdown", this)}</fluent-menu-item>
+                <fluent-menu-item data-event="save-as-pdf">${t("header.save-as-pdf", this)}</fluent-menu-item>
                 <fluent-divider role="separator" aria-orientation="horizontal" orientation="horizontal"></fluent-divider>
                 <fluent-menu-item data-event="print">${t("header.print", this)}</fluent-menu-item>
+                <fluent-divider role="separator" aria-orientation="horizontal" orientation="horizontal"></fluent-divider>
+                <fluent-menu-item data-event="share">${t("header.share", this)}</fluent-menu-item>
+                <fluent-divider role="separator" aria-orientation="horizontal" orientation="horizontal"></fluent-divider>
+                <fluent-menu-item data-event="properties">${t("header.properties", this)}</fluent-menu-item>
+                <fluent-menu-item data-event="inspect-document">${t("header.inspect", this)}</fluent-menu-item>
+                <fluent-divider role="separator" aria-orientation="horizontal" orientation="horizontal"></fluent-divider>
                 <fluent-menu-item data-event="options">${t("header.options", this)}</fluent-menu-item>
+                <fluent-menu-item data-event="close">${t("header.close", this)}</fluent-menu-item>
               </fluent-menu-list>
             </fluent-menu>
           </div>
@@ -2030,8 +2048,14 @@ class DocenDocument extends AddinHost<Editor> {
    *  (i.e. took over the action). Lets save/open/print/new work out-of-box yet
    *  stay overridable. */
   #emitCancelable(
-    name: "docen:save" | "docen:save-as" | "docen:open" | "docen:new" | "docen:print",
-    detail?: { format?: "docx" | "markdown" },
+    name:
+      | "docen:save"
+      | "docen:save-as"
+      | "docen:open"
+      | "docen:new"
+      | "docen:print"
+      | "docen:close",
+    detail?: { format?: "docx" | "markdown" | "pdf" },
   ): boolean {
     const event = new CustomEvent(name, {
       bubbles: true,
@@ -3394,8 +3418,24 @@ class DocenDocument extends AddinHost<Editor> {
         if (!this.#emitCancelable("docen:save-as", { format: "markdown" }))
           void this.#saveAs("markdown");
         break;
+      case "save-as-pdf":
+        if (!this.#emitCancelable("docen:save-as", { format: "pdf" })) void this.#saveAsPdf();
+        break;
       case "print":
-        if (!this.#emitCancelable("docen:print")) this.#print();
+        if (!this.#emitCancelable("docen:print")) void this.#print();
+        break;
+      case "properties":
+        // Word's File → Info: the document properties pane.
+        this.showTaskpane("properties");
+        break;
+      case "inspect-document":
+        this.#inspectDocument();
+        break;
+      case "share":
+        void this.#share();
+        break;
+      case "close":
+        this.#closeDocument();
         break;
       case "new":
         // No built-in "new" — always hand to the host (docen:new).
@@ -3550,7 +3590,19 @@ class DocenDocument extends AddinHost<Editor> {
     const cfg = SAVE_FORMATS[format];
     // saveDOCX returns a buffer; Markdown returns a string.
     const data = format === "docx" ? await this.saveDOCX() : this.saveMarkdown();
-    const blob = new Blob([data as BlobPart], { type: cfg.mime });
+    await this.#saveBlob(data as BlobPart, cfg, true);
+  }
+
+  /** Write a finished blob out through the File System Access picker (adopting
+   *  the picked name as the filename when `adoptName`), falling back to a
+   *  plain download where the picker doesn't exist. `adoptName` is false for
+   *  format exports (PDF) — saving a copy doesn't rename the document. */
+  async #saveBlob(
+    data: BlobPart,
+    cfg: { description: string; mime: string; ext: string },
+    adoptName: boolean,
+  ): Promise<void> {
+    const blob = new Blob([data], { type: cfg.mime });
     // Re-stamp the extension so a .docx opened then saved as Markdown does not
     // keep its .docx name.
     const baseName = (this.getAttribute("filename")?.trim() || t("header.doc-name", this)).replace(
@@ -3581,8 +3633,10 @@ class DocenDocument extends AddinHost<Editor> {
         const writable = await handle.createWritable();
         await writable.write(blob);
         await writable.close();
-        this.setAttribute("filename", handle.name);
-        this.#renderChrome();
+        if (adoptName) {
+          this.setAttribute("filename", handle.name);
+          this.#renderChrome();
+        }
         return;
       } catch {
         // The user cancelled the picker (AbortError) or it was blocked — do NOT
@@ -3599,12 +3653,113 @@ class DocenDocument extends AddinHost<Editor> {
     URL.revokeObjectURL(url);
   }
 
+  /** Export as PDF (filename menu → Export as PDF): the paginated print
+   *  snapshots flatten into a PDF blob. Same view round-trip as #print — a
+   *  non-print view re-projects into print shape for the snapshot, then falls
+   *  back. The export never renames the document. */
+  async #saveAsPdf(): Promise<void> {
+    const mode = this.#viewMode();
+    if (mode !== "print") {
+      this.#stage?.setViewMode("print");
+      this.#renderDoc(this.getJSON());
+    }
+    const shots = (await this.#stage?.printSnapshots()) ?? [];
+    if (mode !== "print") {
+      this.#stage?.setViewMode(mode);
+      this.#renderDoc(this.getJSON());
+    }
+    if (shots.length === 0) return;
+    const blob = await pagesToPdf(shots);
+    await this.#saveBlob(blob, SAVE_FORMATS.pdf, false);
+  }
+
+  /** Filename menu → Share: the Web Share sheet where the platform has one
+   *  (title only — the document body is not uploaded); otherwise copy the
+   *  document URL (Word for the web's share = share a link). */
+  async #share(): Promise<void> {
+    const title = this.getAttribute("filename") ?? t("header.doc-name", this);
+    const nav = navigator as Navigator & { share?: (data: ShareData) => Promise<void> };
+    if (typeof nav.share === "function") {
+      try {
+        await nav.share({ title });
+        return;
+      } catch {
+        return; // the user dismissed the sheet (AbortError)
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(location.href);
+    } catch {
+      // Clipboard denied — nothing else to offer.
+    }
+  }
+
+  /** Filename menu → Close: end the editing session. A host takes over via
+   *  docen:close; otherwise the document resets to a blank slate (Word's Close
+   *  closes the window — the browser element's equivalent). Unsaved work is
+   *  confirmed away — there is no dirty-save model to offer. */
+  #closeDocument(): void {
+    if (this.#emitCancelable("docen:close")) return;
+    if (this.#jsonDirty && !window.confirm(t("close.confirm", this))) return;
+    this.setAttribute("filename", t("header.doc-name", this));
+    this.#renderChrome();
+    this.setJSON({ type: "doc", content: [{ type: "paragraph" }] });
+  }
+
+  /** The Document Inspector's scan: comment cards in documentExtras and the
+   *  distinct revision records (w:ins/w:del ids) in the doc. */
+  #inspectFindings(): { comments: number; revisions: number } {
+    const comments = (
+      (this.editor?.state.doc.attrs ?? {}) as {
+        documentExtras?: { comments?: unknown[] };
+      }
+    ).documentExtras?.comments?.length;
+    const ids = new Set<string>();
+    this.editor?.state.doc.descendants((node) => {
+      if (!node.isText) return true;
+      for (const mark of node.marks) {
+        const name = mark.type.name;
+        if (name === "insertion" || name === "deletion") {
+          ids.add(`${name}:${String((mark.attrs as { id?: unknown }).id)}`);
+        }
+      }
+      return true;
+    });
+    return { comments: comments ?? 0, revisions: ids.size };
+  }
+
+  /** Filename menu → Inspect Document (Word's 检查问题): scan, then show the
+   *  findings dialog; its removal buttons come back as events (#onInspect). */
+  #inspectDocument(): void {
+    const dialog = this.shadowRoot?.querySelector("docen-inspect-dialog") as unknown as {
+      setAttribute(name: string, value: string): void;
+      show(): void;
+    } | null;
+    if (!dialog) return;
+    dialog.setAttribute("findings", JSON.stringify(this.#inspectFindings()));
+    dialog.show();
+  }
+
+  /** The inspector dialog's removal buttons — clear comments / accept all
+   *  revisions, then re-hand the scan so the counts fall to zero in place. */
+  readonly #onInspect = (event: Event): void => {
+    if (event.type === "inspect:clear-comments") {
+      this.#comments.deleteAllComments();
+    } else if (event.type === "inspect:accept-revisions") {
+      const commands = this.editor?.commands;
+      if (commands)
+        (commands as unknown as Record<string, () => unknown>)["accept-all-changes"]?.();
+    }
+    const dialog = this.shadowRoot?.querySelector("docen-inspect-dialog");
+    dialog?.setAttribute("findings", JSON.stringify(this.#inspectFindings()));
+  };
+
   /** Print only the document pages — never the ribbon/chrome. Each page
    *  canvas rasterizes into a hidden print-only iframe (one image per page at
    *  the page's true paper size, @page margin 0), so the browser's print
    *  dialog receives exactly the paginated document, like Word's print
    *  output. */
-  #print(): void {
+  async #print(): Promise<void> {
     // Printing always outputs the paginated Print Layout pages (Word prints
     // the paper document whatever the view) — a continuous view re-projects
     // into print shape for the snapshot, then falls back.
@@ -3613,7 +3768,7 @@ class DocenDocument extends AddinHost<Editor> {
       this.#stage?.setViewMode("print");
       this.#renderDoc(this.getJSON());
     }
-    const shots = this.#stage?.printSnapshots() ?? [];
+    const shots = (await this.#stage?.printSnapshots()) ?? [];
     if (mode !== "print") {
       this.#stage?.setViewMode(mode);
       this.#renderDoc(this.getJSON());

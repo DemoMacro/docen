@@ -256,6 +256,23 @@ export const TrackChanges = Extension.create({
           dispatch(tr.scrollIntoView());
           return true;
         },
+      "accept-all-changes":
+        () =>
+        ({ state, tr, dispatch }) => {
+          const ranges = revisionRanges(state.doc);
+          if (ranges.length === 0) return false;
+          if (!dispatch) return true;
+          // Descending order: removing text (an accepted deletion) shifts
+          // nothing ahead of it, so the earlier ranges' offsets stay valid.
+          // One transaction — one undo step (Word's Accept All).
+          for (const r of [...ranges].reverse()) {
+            if (r.type === "insertion") tr.removeMark(r.from, r.to, state.schema.marks.insertion!);
+            else tr.delete(r.from, r.to);
+          }
+          tr.setMeta(skipTrackingKey, true);
+          dispatch(tr);
+          return true;
+        },
       "reject-change":
         () =>
         ({ state, tr, dispatch }) => {
@@ -305,6 +322,7 @@ declare module "@tiptap/core" {
     docenTrackChanges: {
       "track-changes": (enabled?: boolean) => ReturnType;
       "accept-change": () => ReturnType;
+      "accept-all-changes": () => ReturnType;
       "reject-change": () => ReturnType;
       "previous-change": () => ReturnType;
       "next-change": () => ReturnType;
