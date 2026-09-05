@@ -791,6 +791,7 @@ export const ribbonEn: AdditionalLanguage = {
     // --- App header ---
     "header.brand": "Docen",
     "header.autosave": "Auto-save",
+    "header.qat-customize": "Customize Quick Access Toolbar",
     "header.save": "Save",
     "header.undo": "Undo",
     "header.redo": "Redo",
@@ -1690,6 +1691,7 @@ export const ribbonZhCN: AdditionalLanguage = {
     // --- App header ---
     "header.brand": "Docen",
     "header.autosave": "自动保存",
+    "header.qat-customize": "自定义快速访问工具栏",
     "header.save": "保存",
     "header.undo": "撤销",
     "header.redo": "重做",

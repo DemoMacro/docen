@@ -304,7 +304,8 @@ export async function registerComponents(): Promise<void> {
         grid-column: 1 / -1;
       }
       :host([data-indent="1"]) .content,
-      :host([role="menuitemradio"]) .content {
+      :host([role="menuitemradio"]) .content,
+      :host([role="menuitemcheckbox"]) .content {
         grid-column: 3 / -1;
       }
     `,

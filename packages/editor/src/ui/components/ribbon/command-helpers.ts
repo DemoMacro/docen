@@ -103,20 +103,23 @@ interface MenuItemLike {
 
 /** Append `items` as `<fluent-menu-item>`s into `list`, replacing its children.
  *  A `change` on any item routes to `onSelect(item)`. `checked` items render as
- *  `role="menuitemradio"` with Fluent's own checkmark; plain items stay
- *  `menuitem`. A `{ text: "-" }` item renders as a divider (Word's context
- *  menu groups clipboard / link / comment sections with rules). Every item
- *  gets `data-indent="0"` so a plain-text label spans the full row — without
- *  it Fluent pins the content to the fixed-width indicator track and clips
- *  long labels (see the registry's fluent-menu-item override). An `icon` item
- *  instead renders the glyph in Fluent's `start` slot and keeps Fluent's own
- *  indent (icon-then-text columns). In a pick list (any `checked` member) the
- *  plain members indent past the checkmark track too — Word's Editing/Viewing
- *  drop-down aligns both labels on one edge (`data-indent="1"`). */
+ *  `role="menuitemradio"` with Fluent's own checkmark (or `menuitemcheckbox`
+ *  when `options.multiple` — an independent toggle, e.g. the QAT customize
+ *  menu); plain items stay `menuitem`. A `{ text: "-" }` item renders as a
+ *  divider (Word's context menu groups clipboard / link / comment sections
+ *  with rules). Every item gets `data-indent="0"` so a plain-text label spans
+ *  the full row — without it Fluent pins the content to the fixed-width
+ *  indicator track and clips long labels (see the registry's fluent-menu-item
+ *  override). An `icon` item instead renders the glyph in Fluent's `start`
+ *  slot and keeps Fluent's own indent (icon-then-text columns). In a pick list
+ *  (any `checked` member) the plain members indent past the checkmark track
+ *  too — Word's Editing/Viewing drop-down aligns both labels on one edge
+ *  (`data-indent="1"`). */
 export function appendMenuItems<T extends MenuItemLike>(
   list: HTMLElement,
   items: readonly T[],
   onSelect: (item: T) => void,
+  options?: { multiple?: boolean },
 ): void {
   list.replaceChildren();
   const pickList = items.some((item) => item.checked);
@@ -129,7 +132,7 @@ export function appendMenuItems<T extends MenuItemLike>(
     }
     const menuItem = document.createElement("fluent-menu-item");
     if (item.checked) {
-      menuItem.setAttribute("role", "menuitemradio");
+      menuItem.setAttribute("role", options?.multiple ? "menuitemcheckbox" : "menuitemradio");
       menuItem.setAttribute("checked", "");
     } else {
       menuItem.setAttribute("role", "menuitem");

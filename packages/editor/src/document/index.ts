@@ -55,22 +55,23 @@ import {
   type DocenAddin,
   type RibbonMenuItem,
 } from "../ui";
+import { ribbonIcon } from "../ui/components/ribbon/icons";
 import type { DrawingPropertiesState } from "../ui/components/workspace/drawing-properties-dialog";
 import type { FontDialogPatch } from "../ui/components/workspace/font-dialog";
 import { proofingLanguageName } from "../ui/components/workspace/language-dialog";
 import type { LinkValues } from "../ui/components/workspace/link-dialog";
 import { createDefaultAddin, textCounter } from "./addin";
+// Side-effect: register the document-specific UI components moved out of the
+// shared ui/ barrel — <docen-format-pane> (properties fallback) and
+// <docen-outline> (navigation Headings tab).
+import "./components/format-pane";
+import "./components/outline";
 import {
   mountEditBridge,
   type EditBridge,
   type StoryKind,
   type StorySlot,
 } from "./canvas/edit-bridge";
-// Side-effect: register the document-specific UI components moved out of the
-// shared ui/ barrel — <docen-format-pane> (properties fallback) and
-// <docen-outline> (navigation Headings tab).
-import "./components/format-pane";
-import "./components/outline";
 import { deepEq, dirtyPagesOf } from "./canvas/page-eq";
 import {
   CanvasStage,
@@ -87,9 +88,9 @@ import { NavigationCommands } from "./commands/navigation";
 import { ReferencesCommands } from "./commands/references";
 import { RevisionsCommands } from "./commands/revisions";
 import { SectionCommands } from "./commands/sections";
-import { SpellingCommands } from "./commands/spelling";
 // Side-effect import: registers the ribbon/header translation tables.
 import "./i18n";
+import { SpellingCommands } from "./commands/spelling";
 import { pagesToPdf } from "./export-pdf";
 import { tableAncestry, WIRED_DISPATCH } from "./extensions/commands";
 import { LOCAL_HANDLED, READONLY_LIVE, SAVE_FORMATS, detectOpenFormat } from "./file-formats";
@@ -110,6 +111,25 @@ import {
  *  exists for the drop-down variants' values (Word's menu buttons; a face
  *  click opens the menu instead of emitting a valueless command). */
 const FACE_ONLY_SPLITS: ReadonlySet<string> = new Set(["autofit", "columns"]);
+
+/** Quick Access Toolbar candidates (Word's customize-QAT menu): each id is a
+ *  routed command (`event`), shown in the title bar while checked. The shown
+ *  set persists in localStorage (`docen:qat`); the order here is the bar's. */
+const QAT_CANDIDATES: readonly { id: string; icon: string; labelKey: string }[] = [
+  { id: "new", icon: "new", labelKey: "header.new" },
+  { id: "open", icon: "open", labelKey: "header.open" },
+  { id: "save", icon: "save", labelKey: "header.save" },
+  { id: "print", icon: "print", labelKey: "header.print" },
+  { id: "undo", icon: "undo", labelKey: "header.undo" },
+  { id: "redo", icon: "redo", labelKey: "header.redo" },
+  { id: "spell-check", icon: "spell-check", labelKey: "ribbon.cmd.spell-check" },
+];
+const QAT_DEFAULT: readonly string[] = ["save", "undo", "redo"];
+const QAT_STORAGE_KEY = "docen:qat";
+const AUTOSAVE_ON_KEY = "docen:autosave";
+/** localStorage quota is ~5MB per origin — skip the write (keep the last
+ *  backup) rather than throwing mid-typing. */
+const AUTOSAVE_MAX_CHARS = 4_000_000;
 
 /**
  * Task pane identifiers, mirroring the Office `<TaskpaneId>` concept. The host
@@ -1703,6 +1723,7 @@ class DocenDocument extends AddinHost<Editor> {
       ?.removeEventListener("ribbon-mode-change", this.#onRibbonModeChange);
     this.#fontSyncCleanup?.();
     this.#fontSyncCleanup = undefined;
+    clearTimeout(this.#autosaveTimer);
     this.#stopFormatPainter();
     this.#navigation.dispose();
     this.#spelling.dispose();
@@ -1711,6 +1732,86 @@ class DocenDocument extends AddinHost<Editor> {
     this.#stage?.destroy();
     this.#stage = undefined;
     super.disconnectedCallback();
+  }
+
+  // ── Quick Access Toolbar (title bar) ──────────────────────────────────────
+
+  /** The shown QAT ids, persisted across sessions; falls back to Word's
+   *  default trio when nothing (or anything stale) is stored. */
+  #qatIds(): string[] {
+    try {
+      const raw = localStorage.getItem(QAT_STORAGE_KEY);
+      if (raw) {
+        const ids = JSON.parse(raw) as unknown;
+        if (
+          Array.isArray(ids) &&
+          ids.length > 0 &&
+          ids.every((id) => QAT_CANDIDATES.some((c) => c.id === id))
+        ) {
+          return ids as string[];
+        }
+      }
+    } catch {
+      // Private mode / disabled storage — defaults only.
+    }
+    return [...QAT_DEFAULT];
+  }
+
+  #toggleQat(id: string): void {
+    const cur = this.#qatIds();
+    const next = cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id];
+    try {
+      localStorage.setItem(QAT_STORAGE_KEY, JSON.stringify(next));
+    } catch {
+      // Storage unavailable — the bar still toggles for this session.
+    }
+    // Re-stamp the header so the bar and the menu's checkmarks follow.
+    this.#renderChrome();
+  }
+
+  // ── Auto-save (title bar switch) ──────────────────────────────────────────
+
+  /** Debounces content changes into a localStorage backup while auto-save is
+   *  on. The switch state and the backup are both per-filename so concurrent
+   *  documents don't overwrite each other. */
+  #autosaveTimer?: number;
+
+  #autosaveEnabled(): boolean {
+    try {
+      return localStorage.getItem(AUTOSAVE_ON_KEY) === "1";
+    } catch {
+      return false;
+    }
+  }
+
+  #setAutosave(on: boolean): void {
+    try {
+      localStorage.setItem(AUTOSAVE_ON_KEY, on ? "1" : "0");
+      if (on) this.#scheduleAutosave();
+      else {
+        clearTimeout(this.#autosaveTimer);
+        localStorage.removeItem(this.#autosaveKey());
+      }
+    } catch {
+      // Storage unavailable — the switch still flips for this session.
+    }
+  }
+
+  #autosaveKey(): string {
+    return `docen:autosave:${this.getAttribute("filename") ?? "document"}`;
+  }
+
+  #scheduleAutosave(): void {
+    if (!this.#autosaveEnabled() || !this.editor) return;
+    clearTimeout(this.#autosaveTimer);
+    this.#autosaveTimer = window.setTimeout(() => {
+      try {
+        const json = JSON.stringify(this.editor?.getJSON() ?? null);
+        if (json.length <= AUTOSAVE_MAX_CHARS) localStorage.setItem(this.#autosaveKey(), json);
+      } catch {
+        // Quota exceeded — keep the last good backup, retry on the next change.
+      }
+    }, 1500);
   }
 
   #renderHeader(): string {
@@ -1724,17 +1825,34 @@ class DocenDocument extends AddinHost<Editor> {
         ? `<span class="avatar">${initial}</span>`
         : "";
     const autosave = t("header.autosave", this);
+    const qatIds = this.#qatIds();
+    const qatButtons = QAT_CANDIDATES.filter((c) => qatIds.includes(c.id))
+      .map(
+        (c) =>
+          `<docen-ribbon-button icon="${c.icon}" label="${t(c.labelKey, this)}" event="${c.id}" icon-only></docen-ribbon-button>`,
+      )
+      .join("");
+    const qatMenuItems = QAT_CANDIDATES.map((c) => {
+      const on = qatIds.includes(c.id);
+      // `checked` drives Fluent's checkmark glyph and the change event;
+      // aria-checked is kept in sync by the element internals.
+      return `<fluent-menu-item role="menuitemcheckbox" ${on ? "checked" : ""} data-qat="${c.id}">${t(c.labelKey, this)}</fluent-menu-item>`;
+    }).join("");
     return `
           <div slot="start" style="display:flex;align-items:center;gap:4px">
             <span style="font-weight:600;font-size:13px;padding-inline:6px">${t("header.brand", this)}</span>
             <span class="autosave-label">${autosave}</span>
-            <!-- auto-save is skeleton-only — disabled (greyed, non-interactive)
-                 until the feature is wired; the autosave case in onChange is a
-                 no-op. Remove disabled (and re-add checked) when it lands. -->
-            <fluent-switch data-event="autosave" disabled aria-label="${autosave}"></fluent-switch>
-            <docen-ribbon-button icon="save" label="${t("header.save", this)}" event="save" icon-only></docen-ribbon-button>
-            <docen-ribbon-button icon="undo" label="${t("header.undo", this)}" event="undo" icon-only></docen-ribbon-button>
-            <docen-ribbon-button icon="redo" label="${t("header.redo", this)}" event="redo" icon-only></docen-ribbon-button>
+            <fluent-switch data-event="autosave" ${this.#autosaveEnabled() ? "checked" : ""} aria-label="${autosave}"></fluent-switch>
+            ${qatButtons}
+            <fluent-menu>
+              <fluent-menu-button
+                slot="trigger"
+                appearance="subtle"
+                title="${t("header.qat-customize", this)}"
+                style="min-width:22px;padding-inline:2px"
+              ><span style="display:inline-flex;width:12px;height:12px;overflow:hidden">${ribbonIcon("caret") ?? ""}</span></fluent-menu-button>
+              <fluent-menu-list>${qatMenuItems}</fluent-menu-list>
+            </fluent-menu>
             <fluent-menu>
               <fluent-menu-button
                 slot="trigger"
@@ -2189,6 +2307,7 @@ class DocenDocument extends AddinHost<Editor> {
       this.dispatchEvent(
         new CustomEvent("docen:change", { bubbles: true, composed: true, detail: { dirty: true } }),
       );
+      if (this.#autosaveEnabled()) this.#scheduleAutosave();
     }
   };
 
@@ -3038,6 +3157,21 @@ class DocenDocument extends AddinHost<Editor> {
       if (!this.#emitCancelable("docen:save")) void this.#saveAs();
       return;
     }
+    // The QAT buttons re-emit the filename menu's file actions as commands
+    // (those menu items ride change events instead) — same bodies as the
+    // matching #onChange cases.
+    if (name === "new") {
+      this.#emitCancelable("docen:new");
+      return;
+    }
+    if (name === "open") {
+      if (!this.#emitCancelable("docen:open")) this.#pickFile();
+      return;
+    }
+    if (name === "print") {
+      if (!this.#emitCancelable("docen:print")) void this.#print();
+      return;
+    }
     // Picture needs a file picker — open it, then insert the chosen image.
     if (name === "insert-picture") {
       this.#imageInput?.click();
@@ -3533,9 +3667,21 @@ class DocenDocument extends AddinHost<Editor> {
 
   /** Menu items and the auto-save switch carry their action in `data-event`. */
   readonly #onChange = (event: Event): void => {
+    // The QAT customize menu toggles bar membership (data-qat), not commands.
+    const qat = (event.target as HTMLElement)?.dataset?.qat;
+    if (qat) {
+      this.#toggleQat(qat);
+      return;
+    }
     const name = (event.target as HTMLElement)?.dataset?.event;
     if (!name) return;
     switch (name) {
+      case "autosave": {
+        // The switch itself carries the new state; persists + (re)schedules or
+        // clears the content backup.
+        this.#setAutosave((event.target as HTMLInputElement).checked === true);
+        break;
+      }
       case "open":
         // Host can take over via docen:open (preventDefault); else open the
         // picker — #onFileChange auto-detects docx/md from the extension.
@@ -3581,7 +3727,6 @@ class DocenDocument extends AddinHost<Editor> {
         }
         break;
       }
-      // autosave: skeleton — wired when that feature lands.
     }
   };
 

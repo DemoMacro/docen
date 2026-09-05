@@ -28,12 +28,14 @@ import cut from "@fluentui/svg-icons/icons/cut_24_regular.svg?raw";
 import designIdeas from "@fluentui/svg-icons/icons/design_ideas_24_regular.svg?raw";
 import diagram from "@fluentui/svg-icons/icons/diagram_24_regular.svg?raw";
 import dismiss from "@fluentui/svg-icons/icons/dismiss_24_regular.svg?raw";
+import documentAdd from "@fluentui/svg-icons/icons/document_add_24_regular.svg?raw";
 import documentFooter from "@fluentui/svg-icons/icons/document_footer_24_regular.svg?raw";
 import documentHeader from "@fluentui/svg-icons/icons/document_header_24_regular.svg?raw";
 import documentPageBreak from "@fluentui/svg-icons/icons/document_page_break_24_regular.svg?raw";
 import documentPrint from "@fluentui/svg-icons/icons/document_print_24_regular.svg?raw";
 import edit from "@fluentui/svg-icons/icons/edit_24_regular.svg?raw";
 import eraser from "@fluentui/svg-icons/icons/eraser_24_regular.svg?raw";
+import folderOpen from "@fluentui/svg-icons/icons/folder_open_24_regular.svg?raw";
 import grid from "@fluentui/svg-icons/icons/grid_24_regular.svg?raw";
 import groupList from "@fluentui/svg-icons/icons/group_list_24_regular.svg?raw";
 import highlight from "@fluentui/svg-icons/icons/highlight_24_regular.svg?raw";
@@ -261,6 +263,8 @@ const RIBBON_ICONS: Record<string, string> = {
   grid,
   "zoom-in": zoomIn,
   // Header actions (workspace)
+  new: documentAdd,
+  open: folderOpen,
   save,
   undo: arrowUndo,
   redo: arrowRedo,

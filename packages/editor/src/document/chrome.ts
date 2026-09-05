@@ -120,13 +120,6 @@ export const documentStyles = css`
     font-size: 13px;
     color: var(--docen-color-text-2, #424242);
   }
-  /* Grey the "Auto-save" label to match its disabled switch (skeleton
-       feature), so the label + switch read as one unavailable control, like
-       ribbon skeleton buttons. Lifts automatically once the switch loses
-       disabled. */
-  .autosave-label:has(+ fluent-switch[disabled]) {
-    color: var(--docen-color-text-3, #8a8a8a);
-  }
   /* Find Results — Office-style match list: each hit rendered with surrounding
        context and a data-from/to for click-to-jump. Padding keeps items off the
        pane edge (the previous "N matches" text butted right against it). */
