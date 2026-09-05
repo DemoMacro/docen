@@ -29,22 +29,26 @@ export function lineOriginXPx(para: LaidOutParagraph, line: LaidOutLine): number
  *  anchor (leaferBaselinePadPx). A picture-floored line keeps its slack
  *  below the box: an inline picture sits ON the baseline, whose single-line
  *  position IS the box bottom, so scaling leaves the box top-anchored.
- *  atLeast/exact lines stay top-anchored too (Word pins their extra space at
- *  the line TOP — text against the box bottom); that regime is not modeled
- *  here yet. Text-box stacks take the grid rule — their grid-snapped lines
- *  half-lead like the body's (pixel-verified: the reference render's first
- *  ink sits at half-leading in a box whose border position matches ours
- *  exactly), and bodyPr @compatLnSpc changes nothing (Word ignores it when
- *  laying out wps txbxContent). Both the painter's text y and the caret band
- *  anchor at this pad. */
+ *  atLeast lines stay top-anchored (Word rides the extra space BELOW the
+ *  text). exact lines sink onto the box bottom — the slack piles ABOVE the
+ *  text — but never rise past the top: Word's undersized exact keeps the
+ *  glyphs at their natural position (clipping their tops at the box edge,
+ *  pixel-verified) rather than lifting them, so the pad clamps at 0.
+ *  Text-box stacks take the grid rule — their grid-snapped lines half-lead
+ *  like the body's (pixel-verified: the reference render's first ink sits at
+ *  half-leading in a box whose border position matches ours exactly), and
+ *  bodyPr @compatLnSpc changes nothing (Word ignores it when laying out wps
+ *  txbxContent). Both the painter's text y and the caret band anchor at this
+ *  pad. */
 export function gridPadOf(line: LaidOutLine): number {
+  if (line.spacingRule === "exact") return Math.max(0, line.heightPx - line.naturalPx);
   if (line.grid) {
     // A picture-floored line centers the picture box (its natural) in the
     // spanned rows — beside-text pictures must not inherit the text EM ref.
     const ref = line.pictureFloored ? line.naturalPx : (line.textEmPx ?? line.naturalPx);
     return Math.max(0, (line.heightPx - ref) / 2);
   }
-  if (line.pictureFloored || line.spacingRule === "atLeast" || line.spacingRule === "exact") {
+  if (line.pictureFloored || line.spacingRule === "atLeast") {
     return 0;
   }
   if (!line.textEmPx || line.naturalPx <= 0) return 0;
@@ -55,6 +59,18 @@ export function gridPadOf(line: LaidOutLine): number {
   // fixtures that predate the field.
   const singleBaseline = line.baselinePadPx ?? leaferBaselinePadPx(line.textEmPx);
   return (slack * singleBaseline) / line.naturalPx;
+}
+
+/** A shape-text line's leading pad: only the container pads — the grid
+ *  half-lead and the exact-line sink, the two pixel-verified inside text
+ *  boxes. The body's multiple-spacing scale stays a flow behavior: a
+ *  DrawingML body anchors its first baseline at the font box (inset +
+ *  ascent), and the stack's own line heights already space later lines, so
+ *  the scale's extra leads BELOW each line — applying it above sinks a
+ *  box's first line out of its artwork (pixel-verified: the header banner
+ *  slogan inheriting the document default's double spacing). */
+export function shapeTextPadPx(line: LaidOutLine): number {
+  return line.grid || line.spacingRule === "exact" ? gridPadOf(line) : 0;
 }
 
 /** A line's alphabetic baseline depth below its top (px): the leading pad

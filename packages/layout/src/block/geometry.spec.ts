@@ -70,12 +70,19 @@ describe("gridPadOf", () => {
     expect(gridPadOf(line({ heightPx: 20, naturalPx: 20, textEmPx: 10 }))).toBe(0);
   });
 
-  it("keeps atLeast/exact lines top-anchored (Word pins their extra space at the top)", () => {
+  it("keeps atLeast top-anchored and bottoms an exact line (Word's regimes)", () => {
     expect(
       gridPadOf(line({ heightPx: 28, naturalPx: 20, textEmPx: 10, spacingRule: "atLeast" })),
     ).toBe(0);
+    // exact sinks the glyphs onto the box bottom — the slack rides above.
     expect(
       gridPadOf(line({ heightPx: 28, naturalPx: 20, textEmPx: 10, spacingRule: "exact" })),
+    ).toBe(8);
+    // Undersized exact keeps the natural position (pad clamps at 0): Word
+    // clips the glyph tops at the box edge rather than lifting the text
+    // (pixel-verified against the reference render).
+    expect(
+      gridPadOf(line({ heightPx: 16, naturalPx: 20, textEmPx: 10, spacingRule: "exact" })),
     ).toBe(0);
   });
 

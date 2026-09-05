@@ -8,6 +8,7 @@ import {
   lineBaselineDepthPx,
   lineOriginXPx,
   lineSpaceGaps,
+  shapeTextPadPx,
   vertAlignedSizePx,
   vertAlignBaselineShiftPx,
   type LaidOutLine,
@@ -271,7 +272,9 @@ export function paintParagraph(
     // centers its natural box in the grid span (half-leading — body flow and
     // text-box stacks alike); a non-grid multiple-spacing line splits its
     // slack on the natural box's ascent ratio (Word scales the whole box);
-    // atLeast/exact and picture-floored lines anchor at the line top.
+    // atLeast and picture-floored lines anchor at the line top; an exact line
+    // bottoms its text (the raw difference may sit the ascent past the top —
+    // Word's undersized-exact overlap).
     const pad = gridPadOf(line);
     // Line x origin — the shared sum (left indent + the line's own first-line
     // indent + a wrapSide float's shift) the caret map anchors by too.
@@ -398,14 +401,17 @@ export function paintParagraph(
         // top, so the element top re-anchors by that share below the line
         // baseline (the shared lineBaselineDepthPx — measured ascent, mixed-
         // size runs aligning instead of drifting per run). Text inside a
-        // drawing shape keeps its own 0.85 share AS the baseline depth
-        // (Word's DrawingML text-box model — see PaintColumn.shapeText);
-        // the fallbacks reproduce the old constant for fixtures without the
-        // field.
+        // drawing shape keeps its own 0.85 share AS the baseline component
+        // (Word's DrawingML text-box model — see PaintColumn.shapeText) and
+        // rides only the container pads (shapeTextPadPx — the exact sink and
+        // grid half-lead, not the body's multiple-spacing scale). The
+        // fallbacks reproduce the old constant for fixtures without the field.
         const ownSize = vertAlignedSizePx(inline.style);
         const baseY =
           lineY +
-          (col?.shapeText ? leaferBaselinePadPx(ownSize) : lineBaselineDepthPx(line, ownSize)) -
+          (col?.shapeText
+            ? shapeTextPadPx(line) + leaferBaselinePadPx(ownSize)
+            : lineBaselineDepthPx(line, ownSize)) -
           leaferBaselinePadPx(ownSize) +
           (item.rubyLiftPx ?? 0) +
           vertAlignBaselineShiftPx(inline.style);
