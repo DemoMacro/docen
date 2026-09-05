@@ -269,6 +269,9 @@ describe("table cell property commands", () => {
     expect(cell.attrs.verticalAlign).toBe("bottom");
     expect(cell.child(0).attrs.alignment).toBe("center");
     expect(editor.commands["align-cell"]("bogus")).toBe(false);
+    expect(editor.commands["align-cell"]()).toBe(true);
+    expect(firstNodeOf(editor, "tableCell").attrs.verticalAlign).toBe("center");
+    expect(firstNodeOf(editor, "tableCell").child(0).attrs.alignment).toBe("center");
   });
 
   it("repeat-header-rows toggles the row's tblHeader flag", () => {
@@ -743,6 +746,10 @@ describe("arrange — floating drawings", () => {
       (firstNodeOf(editor, "wpsShape").attrs.wpsShape as Record<string, unknown>).floating,
     ).toMatchObject({ horizontalPosition: { relative: "margin", align: "center" } });
     expect(editor.commands["align-objects"]("justify")).toBe(false);
+    expect(editor.commands["align-objects"]()).toBe(true);
+    expect(
+      (firstNodeOf(editor, "wpsShape").attrs.wpsShape as Record<string, unknown>).floating,
+    ).toMatchObject({ horizontalPosition: { relative: "margin", align: "left" } });
   });
 
   it("declines on a bare caret, a text range, or an inline image", () => {
@@ -1169,5 +1176,56 @@ describe("listLevelStepPatch", () => {
   it("returns null for non-list paragraphs", () => {
     expect(listLevelStepPatch({}, 1)).toBeNull();
     expect(listLevelStepPatch({ style: "Normal" }, -1)).toBeNull();
+  });
+});
+
+describe("paragraph alignment commands", () => {
+  it("aligns paragraphs in regular text selection", () => {
+    const editor = build();
+    editor.commands.setContent({
+      type: "doc",
+      content: [
+        { type: "paragraph", content: [{ type: "text", text: "Line 1" }] },
+        { type: "paragraph", content: [{ type: "text", text: "Line 2" }] },
+      ],
+    } as never);
+    editor.commands.setTextSelection(2);
+    expect(editor.commands["align-center"]()).toBe(true);
+    expect(editor.state.doc.child(0).attrs.alignment).toBe("center");
+    expect(editor.state.doc.child(1).attrs.alignment).toBeNull();
+
+    expect(editor.commands["align-right"]()).toBe(true);
+    expect(editor.state.doc.child(0).attrs.alignment).toBe("right");
+
+    expect(editor.commands["justify"]()).toBe(true);
+    expect(editor.state.doc.child(0).attrs.alignment).toBe("both");
+
+    expect(editor.commands["justify-distribute"]()).toBe(true);
+    expect(editor.state.doc.child(0).attrs.alignment).toBe("distribute");
+
+    expect(editor.commands["align-left"]()).toBe(true);
+    expect(editor.state.doc.child(0).attrs.alignment).toBe("left");
+  });
+
+  it("aligns only selected cells when CellSelection is active", () => {
+    const editor = build();
+    editor.commands["insert-table"](); // 2 rows x 3 cols
+    // Select column 1 (row 0 col 1 and row 1 col 1)
+    caretInCell(editor, 0, 1);
+    editor.commands["select-table-column"]();
+    expect(editor.state.selection instanceof CellSelection).toBe(true);
+
+    expect(editor.commands["align-center"]()).toBe(true);
+
+    const table = tablesOf(editor)[0]!;
+    // Col 1 of row 0 and row 1 should be centered:
+    expect(table.child(0).child(1).child(0).attrs.alignment).toBe("center");
+    expect(table.child(1).child(1).child(0).attrs.alignment).toBe("center");
+
+    // Other columns should remain untouched:
+    expect(table.child(0).child(0).child(0).attrs.alignment).toBeNull();
+    expect(table.child(0).child(2).child(0).attrs.alignment).toBeNull();
+    expect(table.child(1).child(0).child(0).attrs.alignment).toBeNull();
+    expect(table.child(1).child(2).child(0).attrs.alignment).toBeNull();
   });
 });

@@ -549,8 +549,24 @@ export function listLevelStepPatch(
   return bullet ? { bullet: { level } } : { numbering: { ...numbering, level } };
 }
 
-/** The paragraphs the selection covers, with their positions. */
+/** The paragraphs the selection covers, with their positions. Supports
+ *  both regular selections and rectangular CellSelection ranges. */
 function selectedParagraphs(state: EditorState): { pos: number; node: PMNode }[] {
+  if (state.selection instanceof CellSelection) {
+    const targets = tableTargets(state);
+    if (targets && targets.cells.length > 0) {
+      const out: { pos: number; node: PMNode }[] = [];
+      for (const { pos: cellPos, node: cellNode } of targets.cells) {
+        cellNode.descendants((node, offset) => {
+          if (node.type.name === "paragraph") {
+            out.push({ pos: cellPos + 1 + offset, node });
+          }
+          return true;
+        });
+      }
+      return out;
+    }
+  }
   const { from, to } = state.selection;
   const out: { pos: number; node: PMNode }[] = [];
   state.doc.nodesBetween(from, to, (node, pos) => {
@@ -558,6 +574,15 @@ function selectedParagraphs(state: EditorState): { pos: number; node: PMNode }[]
     return true;
   });
   return out;
+}
+
+function setParagraphAlignment(state: EditorState, tr: Transaction, alignment: string): boolean {
+  const paras = selectedParagraphs(state);
+  if (!paras.length) return false;
+  for (const { pos, node } of paras) {
+    tr.setNodeMarkup(pos, undefined, { ...node.attrs, alignment });
+  }
+  return true;
 }
 
 /** Every numbering reference the doc's list paragraphs carry — feeds the
@@ -1171,24 +1196,24 @@ export const DocumentCommands = Extension.create({
       // ── Paragraph / alignment ──
       "align-left":
         () =>
-        ({ commands }) =>
-          commands.updateAttributes("paragraph", { alignment: "left" }),
+        ({ state, tr }) =>
+          setParagraphAlignment(state, tr, "left"),
       "align-center":
         () =>
-        ({ commands }) =>
-          commands.updateAttributes("paragraph", { alignment: "center" }),
+        ({ state, tr }) =>
+          setParagraphAlignment(state, tr, "center"),
       "align-right":
         () =>
-        ({ commands }) =>
-          commands.updateAttributes("paragraph", { alignment: "right" }),
+        ({ state, tr }) =>
+          setParagraphAlignment(state, tr, "right"),
       justify:
         () =>
-        ({ commands }) =>
-          commands.updateAttributes("paragraph", { alignment: "both" }),
+        ({ state, tr }) =>
+          setParagraphAlignment(state, tr, "both"),
       "justify-distribute":
         () =>
-        ({ commands }) =>
-          commands.updateAttributes("paragraph", { alignment: "distribute" }),
+        ({ state, tr }) =>
+          setParagraphAlignment(state, tr, "distribute"),
 
       // ── Indent / spacing / shading / border — stamp office-open block attrs ──
       // All four walk EVERY selected paragraph (each keeps its own existing
@@ -1760,7 +1785,7 @@ export const DocumentCommands = Extension.create({
       "align-cell":
         (value) =>
         ({ state, dispatch }) => {
-          const spec = CELL_ALIGN[value ?? ""];
+          const spec = CELL_ALIGN[value || "mc"];
           if (!spec) return false;
           const targets = tableTargets(state);
           if (!targets) return false;
@@ -2908,7 +2933,12 @@ export const DocumentCommands = Extension.create({
       "align-objects":
         (value) =>
         ({ state, tr }) => {
-          const align = value === "left" || value === "center" || value === "right" ? value : null;
+          const align =
+            value === "center" || value === "right"
+              ? value
+              : value === "left" || value == null || value === ""
+                ? "left"
+                : null;
           if (!align) return false;
           const target = floatingDrawingAt(state);
           if (!target) return false;

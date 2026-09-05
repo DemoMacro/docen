@@ -26,7 +26,7 @@ beforeEach(() => {
   getFontMeasurementState(FONT, false, false);
 });
 
-describe("vendored CJK correction", () => {
+describe.sequential("vendored CJK correction", () => {
   it("gates the DOM probe off without a document and reports zero correction", () => {
     // The fake's CJK advance rounds 14.67px up to 15 (> fontSize + 0.01), so
     // the gate opens; with no usable `document` the probe is skipped and the
@@ -58,7 +58,7 @@ describe("vendored CJK correction", () => {
   });
 });
 
-describe("vendored empty-text atom retention", () => {
+describe.sequential("vendored empty-text atom retention", () => {
   it("keeps a zero-text extraWidth atom as an unbreakable fragment", () => {
     // An inline image rides as { text: "", extraWidth }: upstream collapsed it
     // away entirely, the vendored fix keeps it as a break:'never' item.
