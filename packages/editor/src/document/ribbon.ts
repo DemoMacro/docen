@@ -427,18 +427,23 @@ const footnoteItems = (): string =>
 
 const startMergeItems = (): string =>
   JSON.stringify([
-    { text: opt("letters"), value: "letters" },
-    { text: opt("email"), value: "email" },
-    { text: opt("envelopes"), value: "envelopes" },
-    { text: cmd("labels"), value: "labels" },
-    { text: opt("directory"), value: "directory" },
+    // The kinds the editor can carry: letters merge one copy per recipient,
+    // directory streams the records into one document. Envelope/label/e-mail
+    // merges need the page-geometry and delivery engines (greyed).
+    { text: opt("letters"), value: "letters", event: "start-merge" },
+    { text: opt("directory"), value: "directory", event: "start-merge" },
+    { text: opt("email"), value: "email", disabled: true },
+    { text: opt("envelopes"), value: "envelopes", disabled: true },
+    { text: cmd("labels"), value: "labels", disabled: true },
   ]);
 
 const finishMergeItems = (): string =>
   JSON.stringify([
-    { text: opt("edit-docs"), value: "edit" },
-    { text: opt("print-docs"), value: "print" },
-    { text: opt("send-email"), value: "email" },
+    // "Edit individual documents" assembles one section-per-recipient docx.
+    // Print/e-mail delivery has no pipeline here (greyed).
+    { text: opt("edit-docs"), value: "edit", event: "finish-merge" },
+    { text: opt("print-docs"), value: "print", disabled: true },
+    { text: opt("send-email"), value: "email", disabled: true },
   ]);
 
 const zoomItems = (): string =>

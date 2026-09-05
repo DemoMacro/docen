@@ -953,6 +953,16 @@ export const ribbonEn: AdditionalLanguage = {
     "tocDialog.leader.underscore": "Underscores",
     "tocDialog.leader.middleDot": "Middle dots",
     "tocDialog.leader.none": "None",
+    // --- Mail merge (recipients + merge fields) ---
+    "recipients.title": "Mail Merge Recipients",
+    "recipients.hint": "Paste a CSV/TSV data source — the first row names the merge fields.",
+    "recipients.preview": "{0} recipient(s): {1}",
+    "recipients.previewEmpty": "No data source yet — a header row plus records.",
+    "mergeField.title": "Insert Merge Field",
+    "mergeField.column": "Recipient column",
+    "mergeField.name": "Field name",
+    "merge.greetingPrefix": "Dear",
+    "merge.greetingSuffix": ",",
     // --- Phonetic guide dialog (ruby) ---
     "phoneticDialog.title": "Phonetic Guide",
     "phoneticDialog.alignment": "Alignment",
@@ -1921,6 +1931,16 @@ export const ribbonZhCN: AdditionalLanguage = {
     "tocDialog.leader.underscore": "下划线",
     "tocDialog.leader.middleDot": "中间点",
     "tocDialog.leader.none": "无",
+    // --- 邮件合并（收件人 + 合并域） ---
+    "recipients.title": "邮件合并收件人",
+    "recipients.hint": "粘贴 CSV/TSV 数据源——第一行为合并域字段名。",
+    "recipients.preview": "{0} 位收件人：{1}",
+    "recipients.previewEmpty": "还没有数据源——需要一行表头加若干记录。",
+    "mergeField.title": "插入合并域",
+    "mergeField.column": "收件人列",
+    "mergeField.name": "域名称",
+    "merge.greetingPrefix": "尊敬的",
+    "merge.greetingSuffix": "：",
     // --- 拼音指南对话框（注音） ---
     "phoneticDialog.title": "拼音指南",
     "phoneticDialog.alignment": "对齐方式",

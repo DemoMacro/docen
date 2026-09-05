@@ -47,6 +47,11 @@ export function createDocument(content = "block+") {
         // list markers (glyph/font/indent) round-trip; compile merges it with
         // any regenerated ordered-list definitions.
         numbering: attrNative(),
+        // Mail merge state (session-scoped — no OOXML part carries recipient
+        // rows): the pasted data source and the Start Mail Merge document
+        // kind, consumed by the editor's preview and Finish & Merge.
+        recipients: attrNative(),
+        mergeType: attrNative(),
       };
     },
 

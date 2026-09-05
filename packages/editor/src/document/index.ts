@@ -22,6 +22,7 @@ import {
   normalizeDocument,
   parseDOCX,
   parseMarkdown,
+  prepareDocument,
   type JSONContent,
   type SectionPropertiesOptions,
   type StylesOptions,
@@ -90,6 +91,7 @@ import { ClipboardCommands } from "./commands/clipboard";
 import { CommentsCommands } from "./commands/comments";
 import { DesignCommands } from "./commands/design";
 import { DialogCommands } from "./commands/dialogs";
+import { applyRecipientsRow, MailMergeCommands } from "./commands/mail-merge";
 import { NavigationCommands } from "./commands/navigation";
 import { ReferencesCommands } from "./commands/references";
 import { RevisionsCommands } from "./commands/revisions";
@@ -258,6 +260,14 @@ class DocenDocument extends AddinHost<Editor> {
     editor: () => this.editor,
     bridge: () => this.#bridge,
     element: () => this,
+  });
+  /** Mailings-tab merge commands (recipients/merge fields/preview), split out
+   *  of this class — see commands/mail-merge.ts. */
+  readonly #merge = new MailMergeCommands({
+    editor: () => this.editor,
+    bridge: () => this.#bridge,
+    element: () => this,
+    rerender: () => this.#renderDoc(this.getJSON()),
   });
   /** Dialog-commit commands (paragraph/font/table/Chinese layout/caption/
    *  cross-reference), split out of this class — see commands/dialogs.ts. */
@@ -1224,6 +1234,16 @@ class DocenDocument extends AddinHost<Editor> {
       "citation:ok",
       this.#references.onCitationOk as EventListener,
     );
+    // Recipients dialog — write the merge data source (attrs.recipients).
+    this.shadowRoot!.querySelector("docen-recipients-dialog")?.addEventListener(
+      "recipients:ok",
+      this.#merge.onRecipientsOk as EventListener,
+    );
+    // Merge-field dialog — seed a MERGEFIELD simple field at the caret.
+    this.shadowRoot!.querySelector("docen-merge-field-dialog")?.addEventListener(
+      "merge-field:ok",
+      this.#onMergeFieldOk as EventListener,
+    );
     // Status-bar language item — open the language dialog (Word semantics).
     this.shadowRoot!.querySelector("docen-status-bar")?.addEventListener(
       "language:open",
@@ -1692,7 +1712,7 @@ class DocenDocument extends AddinHost<Editor> {
     sections: (ProjectedSection & CanvasStageSection)[];
     background?: ProjectedPageBackground;
   } {
-    const { sections, background } = projectDocumentOptions(compileDocument(doc));
+    const { sections, background } = projectDocumentOptions(compileDocument(this.#mergedView(doc)));
     const stageSections: (ProjectedSection & CanvasStageSection)[] = sections.map((section) => ({
       ...section,
     }));
@@ -1919,6 +1939,12 @@ class DocenDocument extends AddinHost<Editor> {
     this.shadowRoot
       ?.querySelector("docen-sources-dialog")
       ?.removeEventListener("citation:ok", this.#references.onCitationOk as EventListener);
+    this.shadowRoot
+      ?.querySelector("docen-recipients-dialog")
+      ?.removeEventListener("recipients:ok", this.#merge.onRecipientsOk as EventListener);
+    this.shadowRoot
+      ?.querySelector("docen-merge-field-dialog")
+      ?.removeEventListener("merge-field:ok", this.#onMergeFieldOk as EventListener);
     this.shadowRoot
       ?.querySelector("docen-symbol-dialog")
       ?.removeEventListener("symbol:insert", this.#onSymbolInsert as EventListener);
@@ -2319,6 +2345,22 @@ class DocenDocument extends AddinHost<Editor> {
           el.removeAttribute("primary-opens-menu");
         }
       });
+    // The merge controls need a recipient data source (Word grays them the
+    // same way until Select Recipients has run).
+    const hasSource = this.#merge.recipients() !== null;
+    for (const event of [
+      "merge-field",
+      "address-block",
+      "greeting-line",
+      "preview-results",
+      "first-record",
+      "last-record",
+      "finish-merge",
+    ]) {
+      ribbon
+        .querySelectorAll<HTMLElement>(`[event="${event}"]`)
+        .forEach((el) => el.toggleAttribute("disabled", !hasSource));
+    }
   }
 
   /** A composite control's parsed `items` attribute (menu variants), empty on
@@ -2961,6 +3003,78 @@ class DocenDocument extends AddinHost<Editor> {
       tr.setSelection(NodeSelection.create(tr.doc, backAt));
     }
     editor.view.dispatch(tr.scrollIntoView());
+  }
+
+  /** Merge-field dialog commit — seed the picked field at the caret. */
+  readonly #onMergeFieldOk = (event: Event): void => {
+    const { name } = (event as CustomEvent<{ name?: string }>).detail ?? {};
+    if (name) this.#merge.insertMergeField(name);
+  };
+
+  /** The render's preview view — the document JSON with every merge field's
+   *  chevron swapped to the previewed recipient's value (identity when the
+   *  preview is off). Runs before compile so measure and paint agree. */
+  #mergedView(doc: JSONContent): JSONContent {
+    const row = this.#merge.previewRow();
+    if (row === null) return doc;
+    const recipients = this.#merge.recipients();
+    return recipients ? applyRecipientsRow(doc, recipients, row) : doc;
+  }
+
+  /** Finish & Merge — assemble one document from the recipient rows (Word's
+   *  Edit Individual Documents): "letters" clones the body once per row as
+   *  its own section (each clone's last paragraph carries the body sectPr,
+   *  closing the section the way OOXML wants); "directory" streams every
+   *  record into one continuous body. The result downloads as a .docx. */
+  async #finishMerge(mode: "edit" | "print" | "email"): Promise<void> {
+    if (mode !== "edit" || !this.editor) return;
+    const recipients = this.#merge.recipients();
+    if (!recipients) return;
+    // Prepare images once on a clone — the per-row merges below then carry
+    // embedded data and skip the fetch.
+    const json = structuredClone(this.getJSON());
+    await prepareDocument(json);
+    const body = json.content ?? [];
+    const bodyAttrs = (json.attrs ?? {}) as {
+      sectionProperties?: SectionPropertiesOptions | null;
+    };
+    const rows =
+      this.#merge.mergeType() === "directory"
+        ? [recipients.rows.map((_, i) => i)]
+        : recipients.rows.map((_, i) => [i]);
+    const content: JSONContent[] = [];
+    rows.forEach((rowIndexes, copy) => {
+      const last = copy < rows.length - 1;
+      for (const row of rowIndexes) {
+        const view = applyRecipientsRow({ ...json, content: body }, recipients, row);
+        for (const [index, block] of (view.content ?? []).entries()) {
+          if (last && block.type === "paragraph" && index === (view.content?.length ?? 0) - 1) {
+            content.push({
+              ...block,
+              attrs: {
+                ...block.attrs,
+                sectionProperties: structuredClone(bodyAttrs.sectionProperties ?? null),
+              },
+            });
+          } else {
+            content.push(block);
+          }
+        }
+      }
+    });
+    const buffer = await generateDOCX(
+      { ...json, content },
+      { prepare: false, packer: { type: "uint8array" } },
+    );
+    const blob = new Blob([buffer as BlobPart], {
+      type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "mail-merge.docx";
+    anchor.click();
+    URL.revokeObjectURL(url);
   }
 
   /** Insert → Link / Ctrl+K / right-click Edit Link: open the hyperlink dialog
@@ -3896,6 +4010,61 @@ class DocenDocument extends AddinHost<Editor> {
     // the caret from the document's sources (#references.insertBibliography).
     if (name === "bibliography") {
       this.#references.insertBibliography();
+      return;
+    }
+    // Mail merge — the recipients dialogs, the merge-field seeds, the preview
+    // pass, and the Finish & Merge document (#merge / #finishMerge).
+    if (name === "select-recipients" || name === "edit-recipients") {
+      (
+        this.shadowRoot?.querySelector("docen-recipients-dialog") as {
+          show(recipients: unknown): void;
+        } | null
+      )?.show(this.#merge.recipients());
+      return;
+    }
+    if (name === "merge-field") {
+      const recipients = this.#merge.recipients();
+      (
+        this.shadowRoot?.querySelector("docen-merge-field-dialog") as {
+          show(headers: string[]): void;
+        } | null
+      )?.show(recipients?.headers ?? []);
+      return;
+    }
+    if (name === "address-block") {
+      this.#merge.insertAddressBlock();
+      return;
+    }
+    if (name === "greeting-line") {
+      this.#merge.insertGreetingLine();
+      return;
+    }
+    if (name === "preview-results") {
+      this.#merge.togglePreview();
+      return;
+    }
+    if (name === "first-record") {
+      this.#merge.firstRecord();
+      return;
+    }
+    if (name === "last-record") {
+      this.#merge.lastRecord();
+      return;
+    }
+    if (name === "start-merge") {
+      // The menu picks record the document kind; the face opens the
+      // recipients dialog (the merge's first step).
+      if (value === "letters" || value === "directory") this.#merge.setMergeType(value);
+      else
+        (
+          this.shadowRoot?.querySelector("docen-recipients-dialog") as {
+            show(recipients: unknown): void;
+          } | null
+        )?.show(this.#merge.recipients());
+      return;
+    }
+    if (name === "finish-merge") {
+      void this.#finishMerge(value === "edit" || !value ? "edit" : (value as "print" | "email"));
       return;
     }
     // Footnote / Endnote — prompt for the note text, reference the caret and

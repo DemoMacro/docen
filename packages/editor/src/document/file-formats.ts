@@ -138,6 +138,18 @@ export const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   "update-toc-page",
   "table-of-figures",
   "update-figures",
+  // Mail merge — recipients dialogs, the merge-field seeds, the preview
+  // pass, and the Finish & Merge document (attrs.recipients data source).
+  "select-recipients",
+  "edit-recipients",
+  "merge-field",
+  "address-block",
+  "greeting-line",
+  "preview-results",
+  "first-record",
+  "last-record",
+  "start-merge",
+  "finish-merge",
   // The Equation context tab's symbol grid drops glyphs at the caret.
   "insert-symbol",
   // Header/footer stories — open through the bridge (the same lifecycle as
