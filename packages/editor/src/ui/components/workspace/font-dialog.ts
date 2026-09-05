@@ -7,6 +7,7 @@ import {
   UNDERLINE_STYLES,
 } from "../../../document/font-lists";
 import { observeLang, resolveLang, t } from "../../i18n/localize";
+import { listboxOf, opt, pick, pickedValue, type FluentDropdown } from "./fluent-combo";
 
 /**
  * What the Font dialog commits on OK — every field always present (Office
@@ -35,16 +36,17 @@ export interface FontDialogPatch {
   hidden: boolean;
 }
 
-/** Word's underline color dropdown (Automatic + the standard color row). */
+/** Word's underline color dropdown (Automatic + the standard color row) — the
+ *  keys are the `fontDialog.color*` i18n suffixes. */
 const UNDERLINE_COLORS: ReadonlyArray<readonly [string, string]> = [
-  ["000000", "color-black"],
-  ["800000", "color-darkRed"],
-  ["008000", "color-green"],
-  ["000080", "color-darkBlue"],
-  ["FF0000", "color-red"],
-  ["FF00FF", "color-magenta"],
-  ["FFFF00", "color-yellow"],
-  ["00FFFF", "color-cyan"],
+  ["000000", "colorBlack"],
+  ["800000", "colorDarkRed"],
+  ["008000", "colorGreen"],
+  ["000080", "colorDarkBlue"],
+  ["FF0000", "colorRed"],
+  ["FF00FF", "colorMagenta"],
+  ["FFFF00", "colorYellow"],
+  ["00FFFF", "colorCyan"],
 ];
 
 const styles = css`
@@ -76,12 +78,13 @@ const styles = css`
   .field > label {
     white-space: nowrap;
   }
-  select {
+  fluent-dropdown {
     min-width: 0;
     flex: 1 1 auto;
+  }
+  fluent-dropdown input {
+    width: 100%;
     box-sizing: border-box;
-    font: inherit;
-    padding: 3px 4px;
   }
   .heading {
     font-weight: 600;
@@ -105,32 +108,80 @@ const template = html<DocenFontDialog>`
       <div class="row">
         <div class="field">
           <label ${ref("fontLabel")}></label>
-          <select ${ref("fontSel")}></select>
+          <fluent-dropdown type="combobox" appearance="outline" ${ref("fontSel")}>
+            <fluent-listbox popover="manual" tabindex="-1"></fluent-listbox>
+            <input
+              slot="control"
+              role="combobox"
+              aria-haspopup="listbox"
+              type="combobox"
+              size="1"
+              style="width:100%;box-sizing:border-box"
+            />
+          </fluent-dropdown>
         </div>
         <div class="field">
           <label ${ref("styleLabel")}></label>
-          <select ${ref("styleSel")}>
-            <option value="regular"></option>
-            <option value="italic"></option>
-            <option value="bold"></option>
-            <option value="boldItalic"></option>
-          </select>
+          <fluent-dropdown type="combobox" appearance="outline" ${ref("styleSel")}>
+            <fluent-listbox popover="manual" tabindex="-1">
+              <fluent-option value="regular"></fluent-option>
+              <fluent-option value="italic"></fluent-option>
+              <fluent-option value="bold"></fluent-option>
+              <fluent-option value="boldItalic"></fluent-option>
+            </fluent-listbox>
+            <input
+              slot="control"
+              role="combobox"
+              aria-haspopup="listbox"
+              type="combobox"
+              size="1"
+              style="width:100%;box-sizing:border-box"
+            />
+          </fluent-dropdown>
         </div>
         <div class="field">
           <label ${ref("sizeLabel")}></label>
-          <select ${ref("sizeSel")}></select>
+          <fluent-dropdown type="combobox" appearance="outline" ${ref("sizeSel")}>
+            <fluent-listbox popover="manual" tabindex="-1"></fluent-listbox>
+            <input
+              slot="control"
+              role="combobox"
+              aria-haspopup="listbox"
+              type="combobox"
+              size="1"
+              style="width:100%;box-sizing:border-box"
+            />
+          </fluent-dropdown>
         </div>
       </div>
       <div class="row">
         <div class="field">
           <label ${ref("underlineLabel")}></label>
-          <select ${ref("underlineSel")}>
-            <option value="">${""}</option>
-          </select>
+          <fluent-dropdown type="combobox" appearance="outline" ${ref("underlineSel")}>
+            <fluent-listbox popover="manual" tabindex="-1"></fluent-listbox>
+            <input
+              slot="control"
+              role="combobox"
+              aria-haspopup="listbox"
+              type="combobox"
+              size="1"
+              style="width:100%;box-sizing:border-box"
+            />
+          </fluent-dropdown>
         </div>
         <div class="field">
           <label ${ref("underlineColorLabel")}></label>
-          <select ${ref("underlineColorSel")}></select>
+          <fluent-dropdown type="combobox" appearance="outline" ${ref("underlineColorSel")}>
+            <fluent-listbox popover="manual" tabindex="-1"></fluent-listbox>
+            <input
+              slot="control"
+              role="combobox"
+              aria-haspopup="listbox"
+              type="combobox"
+              size="1"
+              style="width:100%;box-sizing:border-box"
+            />
+          </fluent-dropdown>
         </div>
       </div>
       <div class="heading" ${ref("effectsHeading")}></div>
@@ -192,15 +243,15 @@ type FluentCheckbox = HTMLElement & { checked?: boolean };
 class DocenFontDialog extends FASTElement {
   @observable dialogEl?: HTMLElement & { heading?: string; show(): void; hide(): void };
   @observable fontLabel?: HTMLElement;
-  @observable fontSel?: HTMLSelectElement;
+  @observable fontSel?: FluentDropdown;
   @observable styleLabel?: HTMLElement;
-  @observable styleSel?: HTMLSelectElement;
+  @observable styleSel?: FluentDropdown;
   @observable sizeLabel?: HTMLElement;
-  @observable sizeSel?: HTMLSelectElement;
+  @observable sizeSel?: FluentDropdown;
   @observable underlineLabel?: HTMLElement;
-  @observable underlineSel?: HTMLSelectElement;
+  @observable underlineSel?: FluentDropdown;
   @observable underlineColorLabel?: HTMLElement;
-  @observable underlineColorSel?: HTMLSelectElement;
+  @observable underlineColorSel?: FluentDropdown;
   @observable effectsHeading?: HTMLElement;
   @observable strike?: FluentCheckbox;
   @observable doubleStrike?: FluentCheckbox;
@@ -246,7 +297,7 @@ class DocenFontDialog extends FASTElement {
           : state.italic
             ? "italic"
             : "regular";
-    if (this.styleSel) this.styleSel.value = style;
+    pick(this.styleSel, style);
     this.#pick(this.sizeSel, state.size ?? "");
     this.#pick(this.underlineSel, state.underlineStyle ?? "");
     this.#pick(this.underlineColorSel, state.underlineColor ?? "");
@@ -267,14 +318,14 @@ class DocenFontDialog extends FASTElement {
   /** Template-visible OK handler (FAST templates live outside the class, so a
    *  `#`-private method can't be referenced from the binding). */
   applyFont(): void {
-    const style = this.styleSel?.value ?? "regular";
+    const style = pickedValue(this.styleSel) ?? "regular";
     const patch: FontDialogPatch = {
-      font: this.fontSel?.value || null,
-      size: this.sizeSel?.value || null,
+      font: pickedValue(this.fontSel),
+      size: pickedValue(this.sizeSel),
       bold: style === "bold" || style === "boldItalic",
       italic: style === "italic" || style === "boldItalic",
-      underlineStyle: this.underlineSel?.value || null,
-      underlineColor: this.underlineColorSel?.value || null,
+      underlineStyle: pickedValue(this.underlineSel),
+      underlineColor: pickedValue(this.underlineColorSel),
       strike: this.strike?.checked ?? false,
       doubleStrike: this.doubleStrike?.checked ?? false,
       superscript: this.superscript?.checked ?? false,
@@ -291,46 +342,61 @@ class DocenFontDialog extends FASTElement {
    *  size lists are re-filled on every show() so a value outside the preset
    *  ladder (e.g. 13pt) still appears as the picked option. */
   #fillCombos(): void {
-    if (!this.fontSel || !this.sizeSel || !this.underlineSel || !this.underlineColorSel) return;
-    const fontValue = this.fontSel.value;
-    this.fontSel.replaceChildren(
-      ...FONT_NAMES.map((name) => new Option(name, name)),
-      ...(fontValue && !FONT_NAMES.includes(fontValue) ? [new Option(fontValue, fontValue)] : []),
+    const boxes = [this.fontSel, this.sizeSel, this.underlineSel, this.underlineColorSel].map(
+      listboxOf,
     );
+    if (boxes.some((b) => !b)) return;
+    const [fontBox, sizeBox, underlineBox, colorBox] = boxes;
+    const fontValue = this.fontSel?.dataset.picked ?? "";
+    fontBox!.replaceChildren(
+      ...FONT_NAMES.map((name) => opt(name, name)),
+      ...(fontValue && !FONT_NAMES.includes(fontValue) ? [opt(fontValue, fontValue)] : []),
+    );
+    // Re-selecting after a refill keeps the visible value stable across
+    // language switches.
+    pick(this.fontSel, fontValue);
     const zh = resolveLang(this).toLowerCase().startsWith("zh");
-    const sizeValue = this.sizeSel.value;
+    const sizeValue = this.sizeSel?.dataset.picked ?? "";
     // A zh locale lists the Chinese names above the numeric points (the same
     // ladder the ribbon's size combobox shows); the emitted value is always
     // the pt string.
     const ladder = [
-      ...(zh ? FONT_SIZES_CN.map(([name, pt]) => new Option(`${name} (${pt})`, String(pt))) : []),
-      ...FONT_SIZES_PT.map((pt) => new Option(String(pt), String(pt))),
+      ...(zh ? FONT_SIZES_CN.map(([name, pt]) => opt(`${name} (${pt})`, String(pt))) : []),
+      ...FONT_SIZES_PT.map((pt) => opt(String(pt), String(pt))),
     ];
-    this.sizeSel.replaceChildren(
+    sizeBox!.replaceChildren(
       ...ladder,
-      ...(sizeValue && !ladder.some((o) => o.value === sizeValue)
-        ? [new Option(sizeValue, sizeValue)]
+      ...(sizeValue && !ladder.some((o) => o.getAttribute("value") === sizeValue)
+        ? [opt(sizeValue, sizeValue)]
         : []),
     );
-    this.underlineSel.replaceChildren(
-      new Option(t("ribbon.opt.none", this), ""),
-      ...UNDERLINE_STYLES.map(([value, key]) => new Option(t(`ribbon.opt.${key}`, this), value)),
+    pick(this.sizeSel, sizeValue);
+    // Single sits between None and the variants here (Word's dialog order);
+    // the ribbon ladder omits it because the split's primary action IS single.
+    underlineBox!.replaceChildren(
+      opt(t("ribbon.opt.none", this), ""),
+      opt(t("fontDialog.underlineSingle", this), "single"),
+      ...UNDERLINE_STYLES.map(([value, key]) => opt(t(`ribbon.opt.${key}`, this), value)),
     );
-    this.underlineColorSel.replaceChildren(
-      new Option(t("fontDialog.colorAuto", this), ""),
-      ...UNDERLINE_COLORS.map(([hex, key]) => new Option(t(`fontDialog.${key}`, this), hex)),
+    pick(this.underlineSel, this.underlineSel?.dataset.picked ?? "");
+    colorBox!.replaceChildren(
+      opt(t("fontDialog.colorAuto", this), ""),
+      ...UNDERLINE_COLORS.map(([hex, key]) => opt(t(`fontDialog.${key}`, this), hex)),
     );
-    // Re-selecting after a refill keeps the visible value stable across
-    // language switches.
-    if (this.fontSel.dataset.picked) this.fontSel.value = this.fontSel.dataset.picked;
+    pick(this.underlineColorSel, this.underlineColorSel?.dataset.picked ?? "");
   }
 
   /** Pick a value, adding a temporary option when it's off the preset ladder. */
-  #pick(sel: HTMLSelectElement | undefined, value: string): void {
-    if (!sel) return;
-    if (value && !Array.from(sel.options).some((o) => o.value === value))
-      sel.add(new Option(value, value), 0);
-    sel.value = value;
+  #pick(sel: FluentDropdown | undefined, value: string): void {
+    const listbox = listboxOf(sel);
+    if (!sel || !listbox) return;
+    if (
+      value &&
+      ![...listbox.querySelectorAll("fluent-option")].some((o) => o.getAttribute("value") === value)
+    ) {
+      listbox.prepend(opt(value, value));
+    }
+    pick(sel, value);
     sel.dataset.picked = value;
   }
 
@@ -364,15 +430,16 @@ class DocenFontDialog extends FASTElement {
     if (this.okBtn) this.okBtn.textContent = t("options.ok", this);
     if (this.cancelBtn) this.cancelBtn.textContent = t("options.cancel", this);
     if (this.styleSel) {
-      const [regular, italic, bold, boldItalic] = this.styleSel.options;
+      const [regular, italic, bold, boldItalic] = this.styleSel.querySelectorAll("fluent-option");
       regular.textContent = t("fontDialog.fsRegular", this);
       italic.textContent = t("fontDialog.fsItalic", this);
       bold.textContent = t("fontDialog.fsBold", this);
       boldItalic.textContent = t("fontDialog.fsBoldItalic", this);
     }
-    if (this.underlineSel) this.underlineSel.options[0].textContent = t("ribbon.opt.none", this);
-    if (this.underlineColorSel)
-      this.underlineColorSel.options[0].textContent = t("fontDialog.colorAuto", this);
+    const none = listboxOf(this.underlineSel)?.querySelector("fluent-option");
+    if (none) none.textContent = t("ribbon.opt.none", this);
+    const auto = listboxOf(this.underlineColorSel)?.querySelector("fluent-option");
+    if (auto) auto.textContent = t("fontDialog.colorAuto", this);
   }
 }
 

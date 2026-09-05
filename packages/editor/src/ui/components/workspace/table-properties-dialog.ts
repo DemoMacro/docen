@@ -2,6 +2,7 @@ import { FASTElement, css, customElement, html, observable, ref } from "@microso
 
 import type { TablePropertiesPatch } from "../../../document/extensions/commands";
 import { observeLang, t } from "../../i18n/localize";
+import { pick, pickedValue, type FluentDropdown } from "./fluent-combo";
 
 const CM_TO_TWIPS = 567;
 
@@ -37,12 +38,13 @@ const styles = css`
   .field > label {
     white-space: nowrap;
   }
-  select {
+  fluent-dropdown {
     min-width: 0;
     flex: 1 1 auto;
+  }
+  fluent-dropdown input {
+    width: 100%;
     box-sizing: border-box;
-    font: inherit;
-    padding: 3px 4px;
   }
   fluent-text-input {
     min-width: 0;
@@ -67,11 +69,21 @@ const template = html<DocenTablePropertiesDialog>`
       <div class="row">
         <div class="field">
           <label ${ref("alignmentLabel")}></label>
-          <select ${ref("alignmentSel")}>
-            <option value="left"></option>
-            <option value="center"></option>
-            <option value="right"></option>
-          </select>
+          <fluent-dropdown type="combobox" appearance="outline" ${ref("alignmentSel")}>
+            <fluent-listbox popover="manual" tabindex="-1">
+              <fluent-option value="left"></fluent-option>
+              <fluent-option value="center"></fluent-option>
+              <fluent-option value="right"></fluent-option>
+            </fluent-listbox>
+            <input
+              slot="control"
+              role="combobox"
+              aria-haspopup="listbox"
+              type="combobox"
+              size="1"
+              style="width:100%;box-sizing:border-box"
+            />
+          </fluent-dropdown>
         </div>
         <div class="field">
           <label ${ref("indentLabel")}></label>
@@ -117,7 +129,7 @@ class DocenTablePropertiesDialog extends FASTElement {
   @observable widthInput?: FluentTextInput;
   @observable widthUnit?: HTMLElement;
   @observable alignmentLabel?: HTMLElement;
-  @observable alignmentSel?: HTMLSelectElement;
+  @observable alignmentSel?: FluentDropdown;
   @observable indentLabel?: HTMLElement;
   @observable indentInput?: FluentTextInput;
   @observable cmUnit?: HTMLElement;
@@ -141,9 +153,12 @@ class DocenTablePropertiesDialog extends FASTElement {
   /** Prefill from the caret table's attrs (verbatim PM mirror of the table
    *  attrs). The indent shows in centimeters (twips → 2-decimal cm). */
   show(attrs: Record<string, unknown> = {}): void {
-    if (this.alignmentSel)
-      this.alignmentSel.value =
-        attrs.alignment === "center" || attrs.alignment === "right" ? attrs.alignment : "left";
+    pick(
+      this.alignmentSel,
+      attrs.alignment === "center" || attrs.alignment === "right"
+        ? (attrs.alignment as string)
+        : "left",
+    );
     if (this.indentInput) {
       const tw = typeof attrs.indent === "number" ? attrs.indent : 0;
       this.indentInput.value = String(Math.round((tw / CM_TO_TWIPS) * 100) / 100);
@@ -168,7 +183,7 @@ class DocenTablePropertiesDialog extends FASTElement {
   applyProperties(): void {
     const cm = Number(this.indentInput?.value);
     const patch: TablePropertiesPatch = {
-      alignment: (this.alignmentSel?.value ?? "left") as TablePropertiesPatch["alignment"],
+      alignment: (pickedValue(this.alignmentSel) ?? "left") as TablePropertiesPatch["alignment"],
       indent: Number.isFinite(cm) && cm > 0 ? Math.round(cm * CM_TO_TWIPS) : 0,
     };
     this.$emit("table-properties:ok", patch);
@@ -187,7 +202,7 @@ class DocenTablePropertiesDialog extends FASTElement {
     if (this.okBtn) this.okBtn.textContent = t("options.ok", this);
     if (this.cancelBtn) this.cancelBtn.textContent = t("options.cancel", this);
     if (this.alignmentSel) {
-      const [left, center, right] = this.alignmentSel.options;
+      const [left, center, right] = this.alignmentSel.querySelectorAll("fluent-option");
       left.textContent = t("ribbon.cmd.align-left", this);
       center.textContent = t("ribbon.cmd.align-center", this);
       right.textContent = t("ribbon.cmd.align-right", this);

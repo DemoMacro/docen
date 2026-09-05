@@ -3,6 +3,7 @@ import { FASTElement, css, customElement, html, observable, ref } from "@microso
 import { FONT_NAMES } from "../../../document/font-lists";
 import type { WatermarkPictureSpec, WatermarkTextSpec } from "../../../document/watermark";
 import { observeLang, t } from "../../i18n/localize";
+import { listboxOf, opt, pick, pickedValue, type FluentDropdown } from "./fluent-combo";
 
 /** The picture-scale ladder (Word's 缩放 list; "auto" fits the box width). */
 const SCALES: Array<[string, number | "auto"]> = [
@@ -75,16 +76,14 @@ const styles = css`
   .field > label {
     white-space: nowrap;
   }
-  select {
-    min-width: 0;
-    flex: 1 1 auto;
-    box-sizing: border-box;
-    font: inherit;
-    padding: 3px 4px;
-  }
+  fluent-dropdown,
   fluent-text-input {
     min-width: 0;
     flex: 1 1 auto;
+  }
+  fluent-dropdown input {
+    width: 100%;
+    box-sizing: border-box;
   }
   .filename {
     flex: 1 1 auto;
@@ -130,7 +129,17 @@ const template = html<DocenWatermarkDialog>`
         <div class="row">
           <div class="field">
             <label ${ref("scaleLabel")}></label>
-            <select ${ref("scaleSel")}></select>
+            <fluent-dropdown type="combobox" appearance="outline" ${ref("scaleSel")}>
+              <fluent-listbox popover="manual" tabindex="-1"></fluent-listbox>
+              <input
+                slot="control"
+                role="combobox"
+                aria-haspopup="listbox"
+                type="combobox"
+                size="1"
+                style="width:100%;box-sizing:border-box"
+              />
+            </fluent-dropdown>
           </div>
           <fluent-field label-position="after">
             <fluent-checkbox slot="input" ${ref("washoutCheck")}></fluent-checkbox>
@@ -158,24 +167,64 @@ const template = html<DocenWatermarkDialog>`
         <div class="row">
           <div class="field">
             <label ${ref("fontLabel")}></label>
-            <select ${ref("fontSel")}></select>
+            <fluent-dropdown type="combobox" appearance="outline" ${ref("fontSel")}>
+              <fluent-listbox popover="manual" tabindex="-1"></fluent-listbox>
+              <input
+                slot="control"
+                role="combobox"
+                aria-haspopup="listbox"
+                type="combobox"
+                size="1"
+                style="width:100%;box-sizing:border-box"
+              />
+            </fluent-dropdown>
           </div>
           <div class="field">
             <label ${ref("sizeLabel")}></label>
-            <select ${ref("sizeSel")}></select>
+            <fluent-dropdown type="combobox" appearance="outline" ${ref("sizeSel")}>
+              <fluent-listbox popover="manual" tabindex="-1"></fluent-listbox>
+              <input
+                slot="control"
+                role="combobox"
+                aria-haspopup="listbox"
+                type="combobox"
+                size="1"
+                style="width:100%;box-sizing:border-box"
+              />
+            </fluent-dropdown>
           </div>
         </div>
         <div class="row">
           <div class="field">
             <label ${ref("colorLabel")}></label>
-            <select ${ref("colorSel")}></select>
+            <fluent-dropdown type="combobox" appearance="outline" ${ref("colorSel")}>
+              <fluent-listbox popover="manual" tabindex="-1"></fluent-listbox>
+              <input
+                slot="control"
+                role="combobox"
+                aria-haspopup="listbox"
+                type="combobox"
+                size="1"
+                style="width:100%;box-sizing:border-box"
+              />
+            </fluent-dropdown>
           </div>
           <div class="field">
             <label ${ref("layoutLabel")}></label>
-            <select ${ref("layoutSel")}>
-              <option value="diagonal"></option>
-              <option value="horizontal"></option>
-            </select>
+            <fluent-dropdown type="combobox" appearance="outline" ${ref("layoutSel")}>
+              <fluent-listbox popover="manual" tabindex="-1">
+                <fluent-option value="diagonal"></fluent-option>
+                <fluent-option value="horizontal"></fluent-option>
+              </fluent-listbox>
+              <input
+                slot="control"
+                role="combobox"
+                aria-haspopup="listbox"
+                type="combobox"
+                size="1"
+                style="width:100%;box-sizing:border-box"
+              />
+            </fluent-dropdown>
           </div>
         </div>
         <fluent-field label-position="after">
@@ -212,7 +261,7 @@ class DocenWatermarkDialog extends FASTElement {
   @observable pickBtn?: HTMLElement;
   @observable filename?: HTMLElement;
   @observable scaleLabel?: HTMLElement;
-  @observable scaleSel?: HTMLSelectElement;
+  @observable scaleSel?: FluentDropdown;
   // The Fluent checkbox mirrors the native checked API.
   @observable washoutCheck?: HTMLElement & { checked: boolean };
   @observable washoutLabel?: HTMLElement;
@@ -222,13 +271,13 @@ class DocenWatermarkDialog extends FASTElement {
   @observable textLabel2?: HTMLElement;
   @observable textInput?: HTMLElement & { value: string };
   @observable fontLabel?: HTMLElement;
-  @observable fontSel?: HTMLSelectElement;
+  @observable fontSel?: FluentDropdown;
   @observable sizeLabel?: HTMLElement;
-  @observable sizeSel?: HTMLSelectElement;
+  @observable sizeSel?: FluentDropdown;
   @observable colorLabel?: HTMLElement;
-  @observable colorSel?: HTMLSelectElement;
+  @observable colorSel?: FluentDropdown;
   @observable layoutLabel?: HTMLElement;
-  @observable layoutSel?: HTMLSelectElement;
+  @observable layoutSel?: FluentDropdown;
   @observable transparentCheck?: HTMLElement & { checked: boolean };
   @observable transparentLabel?: HTMLElement;
   @observable okBtn?: HTMLElement;
@@ -264,23 +313,21 @@ class DocenWatermarkDialog extends FASTElement {
     if (this.noneRadio) this.noneRadio.checked = kind === "none";
     if (kind === "text") {
       if (this.textInput) this.textInput.value = (cur.text as string) || "ASAP";
-      if (this.fontSel) this.fontSel.value = (cur.font as string) || "";
-      if (this.sizeSel)
-        this.sizeSel.value =
-          typeof cur.size === "number" && cur.size > 0
-            ? String(cur.size)
-            : (this.sizeSel.options[0]?.value ?? "auto");
+      pick(this.fontSel, (cur.font as string) || "");
+      pick(this.sizeSel, typeof cur.size === "number" && cur.size > 0 ? String(cur.size) : "auto");
       if (this.colorSel) {
         // A preset's silver (C0C0C0) isn't in the standard ladder — fall back
-        // to 自动 rather than a silently-unmatched select.
+        // to 自动 rather than a silently-unmatched pick.
         const c = cur.color as string;
-        this.colorSel.value =
-          c && [...this.colorSel.options].some((o) => o.value === c) ? c : "auto";
+        const known = [...(listboxOf(this.colorSel)?.querySelectorAll("fluent-option") ?? [])].some(
+          (o) => o.getAttribute("value") === c,
+        );
+        pick(this.colorSel, c && known ? c : "auto");
       }
-      if (this.layoutSel) this.layoutSel.value = cur.diagonal ? "diagonal" : "horizontal";
+      pick(this.layoutSel, cur.diagonal ? "diagonal" : "horizontal");
       if (this.transparentCheck) this.transparentCheck.checked = !!cur.semiTransparent;
     } else {
-      if (this.scaleSel) this.scaleSel.value = "auto";
+      pick(this.scaleSel, "auto");
       if (this.washoutCheck) this.washoutCheck.checked = !!cur.washout;
       if (this.filename) this.filename.textContent = cur.hasImage ? "…" : "";
     }
@@ -324,10 +371,10 @@ class DocenWatermarkDialog extends FASTElement {
     if (this.textRadio?.checked) {
       const spec: WatermarkTextSpec = {
         text: this.textInput?.value || "ASAP",
-        font: this.fontSel?.value || undefined,
+        font: pickedValue(this.fontSel) || undefined,
         size: this.#sizeValue(),
         color: this.#colorValue(),
-        diagonal: (this.layoutSel?.value ?? "diagonal") === "diagonal",
+        diagonal: (pickedValue(this.layoutSel) ?? "diagonal") === "diagonal",
         semiTransparent: !!this.transparentCheck?.checked,
       };
       this.$emit("watermark:ok", { kind: "text", spec });
@@ -350,63 +397,49 @@ class DocenWatermarkDialog extends FASTElement {
   }
 
   #sizeValue(): number | "auto" {
-    // An unmatched select reads "" (a stale value with no option) — 自动, not 0.
-    const raw = this.sizeSel?.value ?? "";
+    // An unmatched pick reads "" (a stale value with no option) — 自动, not 0.
+    const raw = pickedValue(this.sizeSel) ?? "";
     const n = Number(raw);
     return raw === "auto" || raw === "" || !Number.isFinite(n) ? "auto" : n;
   }
 
   /** 自动 reads as black to the stamp (the run color is plain hex). */
   #colorValue(): string {
-    const raw = this.colorSel?.value ?? "auto";
+    const raw = pickedValue(this.colorSel) ?? "auto";
     return raw === "auto" ? "000000" : raw;
   }
 
   #scaleValue(): number | "auto" {
-    const raw = this.scaleSel?.value ?? "auto";
+    const raw = pickedValue(this.scaleSel) ?? "auto";
     const hit = SCALES.find(([key]) => key === raw);
     return raw === "auto" || !hit ? "auto" : (hit[1] as number);
   }
 
   #fillCombos(): void {
-    if (this.fontSel && this.fontSel.options.length === 0) {
-      // Word's font list leads with a blank entry — no face means inherit.
-      const blank = document.createElement("option");
-      blank.value = "";
-      this.fontSel.append(blank);
-      for (const name of FONT_NAMES) {
-        const opt = document.createElement("option");
-        opt.value = name;
-        opt.textContent = name;
-        this.fontSel.append(opt);
-      }
-    }
-    if (this.sizeSel && this.sizeSel.options.length === 0) {
-      const auto = document.createElement("option");
-      auto.value = "auto";
-      this.sizeSel.append(auto);
-      for (const size of TEXT_SIZES) {
-        const opt = document.createElement("option");
-        opt.value = String(size);
-        opt.textContent = String(size);
-        this.sizeSel.append(opt);
-      }
-    }
-    if (this.scaleSel && this.scaleSel.options.length === 0) {
-      for (const [key, value] of SCALES) {
-        const opt = document.createElement("option");
-        opt.value = key;
-        opt.textContent = value === "auto" ? "" : `${Math.round((value as number) * 100)}%`;
-        this.scaleSel.append(opt);
-      }
-    }
-    if (this.colorSel && this.colorSel.options.length === 0) {
-      for (const [hex] of COLORS) {
-        const opt = document.createElement("option");
-        opt.value = hex;
-        this.colorSel.append(opt);
-      }
-    }
+    // Word's font list leads with a blank entry — no face means inherit.
+    listboxOf(this.fontSel)?.replaceChildren(
+      opt("", ""),
+      ...FONT_NAMES.map((name) => opt(name, name)),
+    );
+    listboxOf(this.sizeSel)?.replaceChildren(
+      opt(t("watermarkDialog.auto", this), "auto"),
+      ...TEXT_SIZES.map((size) => opt(String(size), String(size))),
+    );
+    listboxOf(this.scaleSel)?.replaceChildren(
+      ...SCALES.map(([key, value]) =>
+        opt(
+          value === "auto"
+            ? t("watermarkDialog.auto", this)
+            : `${Math.round((value as number) * 100)}%`,
+          key,
+        ),
+      ),
+    );
+    listboxOf(this.colorSel)?.replaceChildren(
+      ...COLORS.map(([hex, key]) =>
+        opt(key ? t(`fontDialog.${key}`, this) : t("watermarkDialog.auto", this), hex),
+      ),
+    );
   }
 
   #applyLabels(): void {
@@ -426,19 +459,22 @@ class DocenWatermarkDialog extends FASTElement {
       this.transparentLabel.textContent = t("watermarkDialog.semitransparent", this);
     if (this.okBtn) this.okBtn.textContent = t("options.ok", this);
     if (this.cancelBtn) this.cancelBtn.textContent = t("options.cancel", this);
-    if (this.scaleSel && this.scaleSel.options[0])
-      this.scaleSel.options[0].textContent = t("watermarkDialog.auto", this);
-    if (this.sizeSel && this.sizeSel.options[0])
-      this.sizeSel.options[0].textContent = t("watermarkDialog.auto", this);
-    if (this.colorSel)
-      COLORS.forEach(([, key], i) => {
-        const opt = this.colorSel?.options[i];
-        if (opt && key) opt.textContent = t(`fontDialog.${key}`, this);
-      });
-    if (this.layoutSel) {
-      this.layoutSel.options[0].textContent = t("watermarkDialog.diagonal", this);
-      this.layoutSel.options[1].textContent = t("watermarkDialog.horizontal", this);
-    }
+    // The combos' option labels are i18n too — a language switch re-resolves
+    // them in place (the picks survive; only the text changes).
+    const auto = t("watermarkDialog.auto", this);
+    const relabel = (sel: FluentDropdown | undefined, value: string, text: string): void => {
+      const o = [...(listboxOf(sel)?.querySelectorAll("fluent-option") ?? [])].find(
+        (o) => o.getAttribute("value") === value,
+      );
+      if (o) o.textContent = text;
+    };
+    relabel(this.scaleSel, "auto", auto);
+    relabel(this.sizeSel, "auto", auto);
+    relabel(this.colorSel, "auto", auto);
+    for (const [hex, key] of COLORS)
+      if (key) relabel(this.colorSel, hex, t(`fontDialog.${key}`, this));
+    relabel(this.layoutSel, "diagonal", t("watermarkDialog.diagonal", this));
+    relabel(this.layoutSel, "horizontal", t("watermarkDialog.horizontal", this));
   }
 }
 

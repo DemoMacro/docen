@@ -2,6 +2,7 @@ import { FASTElement, css, customElement, html, observable, ref } from "@microso
 
 import type { BorderSideState, BordersDialogPatch } from "../../../document/extensions/commands";
 import { observeLang, t } from "../../i18n/localize";
+import { listboxOf, opt, pick, pickedValue, type FluentDropdown } from "./fluent-combo";
 
 /** OOXML border `size` is eighths of a point; the picker lists Word's standard
  *  pt ladder. */
@@ -83,12 +84,13 @@ const styles = css`
   .field > label {
     white-space: nowrap;
   }
-  select {
+  fluent-dropdown {
     min-width: 0;
     flex: 1 1 auto;
+  }
+  fluent-dropdown input {
+    width: 100%;
     box-sizing: border-box;
-    font: inherit;
-    padding: 3px 4px;
   }
   .presets {
     display: flex;
@@ -194,17 +196,62 @@ const template = html<DocenBordersShadingDialog>`
         <div class="row">
           <div class="field">
             <label ${ref("styleLabel")}></label>
-            <select ${ref("styleSel")} @change="${(x) => x.syncStyle()}"></select>
+            <fluent-dropdown
+              type="combobox"
+              appearance="outline"
+              ${ref("styleSel")}
+              @change="${(x) => x.syncStyle()}"
+            >
+              <fluent-listbox popover="manual" tabindex="-1"></fluent-listbox>
+              <input
+                slot="control"
+                role="combobox"
+                aria-haspopup="listbox"
+                type="combobox"
+                size="1"
+                style="width:100%;box-sizing:border-box"
+              />
+            </fluent-dropdown>
           </div>
           <div class="field">
             <label ${ref("colorLabel")}></label>
-            <select ${ref("colorSel")} @change="${(x) => x.syncColor()}"></select>
+            <fluent-dropdown
+              type="combobox"
+              appearance="outline"
+              ${ref("colorSel")}
+              @change="${(x) => x.syncColor()}"
+            >
+              <fluent-listbox popover="manual" tabindex="-1"></fluent-listbox>
+              <input
+                slot="control"
+                role="combobox"
+                aria-haspopup="listbox"
+                type="combobox"
+                size="1"
+                style="width:100%;box-sizing:border-box"
+              />
+            </fluent-dropdown>
           </div>
         </div>
         <div class="row">
           <div class="field">
             <label ${ref("widthLabel")}></label>
-            <select ${ref("widthSel")} @change="${(x) => x.syncWidth()}"></select>
+            <fluent-dropdown
+              type="combobox"
+              appearance="outline"
+              ${ref("widthSel")}
+              @change="${(x) => x.syncWidth()}"
+            >
+              <fluent-listbox popover="manual" tabindex="-1"></fluent-listbox>
+              <input
+                slot="control"
+                role="combobox"
+                aria-haspopup="listbox"
+                type="combobox"
+                size="1"
+                style="width:100%;box-sizing:border-box"
+              />
+            </fluent-dropdown>
           </div>
           <div class="field">
             <label ${ref("applyToLabel")}></label>
@@ -283,11 +330,11 @@ class DocenBordersShadingDialog extends FASTElement {
   @observable presetBoxLabel?: HTMLElement;
   @observable presetShadowLabel?: HTMLElement;
   @observable styleLabel?: HTMLElement;
-  @observable styleSel?: HTMLSelectElement;
+  @observable styleSel?: FluentDropdown;
   @observable colorLabel?: HTMLElement;
-  @observable colorSel?: HTMLSelectElement;
+  @observable colorSel?: FluentDropdown;
   @observable widthLabel?: HTMLElement;
-  @observable widthSel?: HTMLSelectElement;
+  @observable widthSel?: FluentDropdown;
   @observable applyToLabel?: HTMLElement;
   @observable applyToValue?: HTMLElement;
   @observable previewHeading?: HTMLElement;
@@ -399,18 +446,18 @@ class DocenBordersShadingDialog extends FASTElement {
   }
 
   syncStyle(): void {
-    this.#tabState().style = this.styleSel?.value ?? "single";
+    this.#tabState().style = pickedValue(this.styleSel) ?? "single";
     this.#paintEdges();
   }
 
   syncColor(): void {
-    const v = this.colorSel?.value ?? "";
+    const v = pickedValue(this.colorSel) ?? "";
     this.#tabState().color = v === "auto" || !v ? null : v;
     this.#paintEdges();
   }
 
   syncWidth(): void {
-    this.#tabState().width = Number(this.widthSel?.value ?? 6);
+    this.#tabState().width = Number(pickedValue(this.widthSel) ?? 6);
     this.#paintEdges();
   }
 
@@ -472,9 +519,9 @@ class DocenBordersShadingDialog extends FASTElement {
   /** Push the active tab's staged state into the shared widgets. */
   #loadTabState(): void {
     const state = this.#tabState();
-    if (this.styleSel) this.styleSel.value = state.style;
-    if (this.colorSel) this.colorSel.value = state.color ?? "auto";
-    if (this.widthSel) this.widthSel.value = String(state.width);
+    pick(this.styleSel, state.style);
+    pick(this.colorSel, state.color ?? "auto");
+    pick(this.widthSel, String(state.width));
   }
 
   /** Render each preview edge from the staged sides — the edge itself shows
@@ -526,29 +573,23 @@ class DocenBordersShadingDialog extends FASTElement {
   }
 
   #fillCombos(): void {
-    if (this.styleSel && !this.styleSel.options.length) {
-      for (const style of LINE_STYLES) {
-        const opt = document.createElement("option");
-        opt.value = style;
-        opt.dataset.style = style;
-        this.styleSel.append(opt);
-      }
-    }
-    if (this.widthSel && !this.widthSel.options.length) {
-      for (const [eighths, label] of WIDTHS) {
-        const opt = document.createElement("option");
-        opt.value = String(eighths);
-        opt.textContent = `${label} pt`;
-        this.widthSel.append(opt);
-      }
-    }
-    if (this.colorSel && !this.colorSel.options.length) {
-      for (const [hex] of COLORS) {
-        const opt = document.createElement("option");
-        opt.value = hex ?? "auto";
-        this.colorSel.append(opt);
-      }
-    }
+    const styleBox = listboxOf(this.styleSel);
+    if (styleBox && styleBox.children.length === 0)
+      styleBox.replaceChildren(
+        ...LINE_STYLES.map((style) => {
+          const o = opt("", style);
+          o.setAttribute("data-style", style);
+          return o;
+        }),
+      );
+    const widthBox = listboxOf(this.widthSel);
+    if (widthBox && widthBox.children.length === 0)
+      widthBox.replaceChildren(
+        ...WIDTHS.map(([eighths, label]) => opt(`${label} pt`, String(eighths))),
+      );
+    const colorBox = listboxOf(this.colorSel);
+    if (colorBox && colorBox.children.length === 0)
+      colorBox.replaceChildren(...COLORS.map(([hex]) => opt("", hex ?? "auto")));
     if (this.palette && !this.palette.children.length) {
       const none = document.createElement("button");
       none.dataset.color = "";
@@ -571,12 +612,12 @@ class DocenBordersShadingDialog extends FASTElement {
   /** The line-style option labels resolve at refresh time (they are i18n
    *  keys); color names reuse the font dialog's palette keys. */
   #styleOptionLabels(): void {
-    for (const opt of this.styleSel?.options ?? [])
-      opt.textContent = t(`bordersShading.style-${opt.dataset.style}`, this);
-    for (const opt of this.colorSel?.options ?? []) {
-      const hex = opt.value === "auto" ? null : opt.value;
+    for (const o of listboxOf(this.styleSel)?.querySelectorAll("fluent-option") ?? [])
+      o.textContent = t(`bordersShading.style-${o.getAttribute("data-style")}`, this);
+    for (const o of listboxOf(this.colorSel)?.querySelectorAll("fluent-option") ?? []) {
+      const hex = o.getAttribute("value") === "auto" ? null : o.getAttribute("value");
       const key = COLORS.find(([h]) => h === hex)?.[1] ?? "colorAuto";
-      opt.textContent = t(`fontDialog.${key}`, this);
+      o.textContent = t(`fontDialog.${key}`, this);
     }
   }
 

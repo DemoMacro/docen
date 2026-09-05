@@ -1,6 +1,7 @@
 import { FASTElement, css, customElement, html, observable, ref } from "@microsoft/fast-element";
 
 import { observeLang, t } from "../../i18n/localize";
+import { listboxOf, opt, pick, pickedValue, type FluentDropdown } from "./fluent-combo";
 
 const styles = css`
   :host {
@@ -31,10 +32,14 @@ const styles = css`
   .row > label {
     min-width: 76px;
   }
-  .row select,
+  .row fluent-dropdown,
   .row fluent-text-input {
     flex: 1;
     min-width: 0;
+  }
+  .row fluent-dropdown input {
+    width: 100%;
+    box-sizing: border-box;
   }
 `;
 
@@ -46,7 +51,22 @@ const template = html<DocenCaptionDialog>`
       <div class="preview" ${ref("previewEl")}></div>
       <div class="row">
         <label ${ref("labelLabel")}></label>
-        <select ${ref("labelSel")} @change="${(x) => x.syncPreview()}"></select>
+        <fluent-dropdown
+          type="combobox"
+          appearance="outline"
+          ${ref("labelSel")}
+          @change="${(x) => x.syncPreview()}"
+        >
+          <fluent-listbox popover="manual" tabindex="-1"></fluent-listbox>
+          <input
+            slot="control"
+            role="combobox"
+            aria-haspopup="listbox"
+            type="combobox"
+            size="1"
+            style="width:100%;box-sizing:border-box"
+          />
+        </fluent-dropdown>
       </div>
       <div class="row">
         <label ${ref("textLabel")}></label>
@@ -58,10 +78,25 @@ const template = html<DocenCaptionDialog>`
       </div>
       <div class="row">
         <label ${ref("positionLabel")}></label>
-        <select ${ref("positionSel")} @change="${(x) => x.syncPreview()}">
-          <option value="below"></option>
-          <option value="above"></option>
-        </select>
+        <fluent-dropdown
+          type="combobox"
+          appearance="outline"
+          ${ref("positionSel")}
+          @change="${(x) => x.syncPreview()}"
+        >
+          <fluent-listbox popover="manual" tabindex="-1">
+            <fluent-option value="below"></fluent-option>
+            <fluent-option value="above"></fluent-option>
+          </fluent-listbox>
+          <input
+            slot="control"
+            role="combobox"
+            aria-haspopup="listbox"
+            type="combobox"
+            size="1"
+            style="width:100%;box-sizing:border-box"
+          />
+        </fluent-dropdown>
       </div>
       <label class="row">
         <fluent-checkbox ${ref("excludeChk")} @change="${(x) => x.syncPreview()}"></fluent-checkbox>
@@ -97,11 +132,11 @@ class DocenCaptionDialog extends FASTElement {
   @observable dialogEl?: HTMLElement & { heading?: string; show(): void; hide(): void };
   @observable previewEl?: HTMLElement;
   @observable labelLabel?: HTMLElement;
-  @observable labelSel?: HTMLSelectElement;
+  @observable labelSel?: FluentDropdown;
   @observable textLabel?: HTMLElement;
   @observable textInput?: FluentTextInput;
   @observable positionLabel?: HTMLElement;
-  @observable positionSel?: HTMLSelectElement;
+  @observable positionSel?: FluentDropdown;
   @observable excludeChk?: FluentCheckbox;
   @observable excludeLabel?: HTMLElement;
   @observable okBtn?: HTMLElement;
@@ -122,9 +157,9 @@ class DocenCaptionDialog extends FASTElement {
   }
 
   show(): void {
-    if (this.labelSel && this.labelSel.options.length === 0) this.#applyLabels();
+    this.#applyLabels();
     if (this.textInput) this.textInput.value = "";
-    if (this.positionSel) this.positionSel.value = "below";
+    pick(this.positionSel, "below");
     if (this.excludeChk) this.excludeChk.checked = false;
     this.syncPreview();
     this.dialogEl?.show();
@@ -138,7 +173,7 @@ class DocenCaptionDialog extends FASTElement {
    *  real next SEQ number; the preview always shows 1). */
   syncPreview(): void {
     if (!this.previewEl) return;
-    const label = this.labelSel?.value ?? "";
+    const label = pickedValue(this.labelSel) ?? "";
     const text = this.textInput?.value ?? "";
     const excluded = this.excludeChk?.checked ?? false;
     const head = `${excluded ? "" : `${label} `}1`;
@@ -146,13 +181,13 @@ class DocenCaptionDialog extends FASTElement {
   }
 
   applyCaption(): void {
-    const label = this.labelSel?.value ?? "";
+    const label = pickedValue(this.labelSel) ?? "";
     const text = this.textInput?.value ?? "";
     if (!label) return;
     this.$emit("caption:ok", {
       label,
       text,
-      position: this.positionSel?.value === "above" ? "above" : "below",
+      position: pickedValue(this.positionSel) === "above" ? "above" : "below",
       excludeLabel: this.excludeChk?.checked ?? false,
     });
     this.hide();
@@ -167,19 +202,23 @@ class DocenCaptionDialog extends FASTElement {
     if (this.okBtn) this.okBtn.textContent = t("options.ok", this);
     if (this.cancelBtn) this.cancelBtn.textContent = t("options.cancel", this);
     if (this.positionSel) {
-      const [below, above] = this.positionSel.options;
+      const [below, above] = this.positionSel.querySelectorAll("fluent-option");
       if (below) below.textContent = t("caption.below", this);
       if (above) above.textContent = t("caption.above", this);
     }
     // The label options are rebuilt on language change: the option VALUE is
     // the label word written into the document, and Word writes it in the UI
-    // language (Chinese Word captions read 图 1, English ones Figure 1).
-    if (this.labelSel)
-      this.labelSel.replaceChildren(
-        new Option(t("caption.figure", this), t("caption.figure", this)),
-        new Option(t("caption.table", this), t("caption.table", this)),
-        new Option(t("caption.equation", this), t("caption.equation", this)),
+    // language (Chinese Word captions read 图 1, English ones Figure 1). The
+    // first label is the pick, like a native select's initial selection.
+    if (this.labelSel) {
+      const figure = t("caption.figure", this);
+      listboxOf(this.labelSel)?.replaceChildren(
+        opt(figure, figure),
+        opt(t("caption.table", this), t("caption.table", this)),
+        opt(t("caption.equation", this), t("caption.equation", this)),
       );
+      pick(this.labelSel, figure);
+    }
   }
 }
 

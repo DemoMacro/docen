@@ -1,6 +1,14 @@
 import { FASTElement, css, customElement, html, observable, ref } from "@microsoft/fast-element";
 
 import { observeLang, t } from "../../i18n/localize";
+import {
+  listValue,
+  opt,
+  pick,
+  pickedValue,
+  type FluentDropdown,
+  type FluentListbox,
+} from "./fluent-combo";
 
 const styles = css`
   :host {
@@ -16,12 +24,14 @@ const styles = css`
     gap: 10px;
     font-size: 13px;
   }
-  select.list {
+  fluent-listbox.list {
+    width: 100%;
     min-height: 148px;
     border: 1px solid var(--colorNeutralStroke1, #d1d1d1);
     border-radius: 4px;
     padding: 2px;
     font-size: 13px;
+    box-shadow: none;
   }
   .toolbar {
     display: flex;
@@ -46,17 +56,21 @@ const styles = css`
   .row > label {
     min-width: 76px;
   }
-  .row select,
+  .row fluent-dropdown,
   .row fluent-text-input {
     flex: 1;
     min-width: 0;
+  }
+  .row fluent-dropdown input {
+    width: 100%;
+    box-sizing: border-box;
   }
 `;
 
 const template = html<DocenSourcesDialog>`
   <docen-dialog ${ref("dialogEl")}>
     <div class="body">
-      <select class="list" ${ref("listSel")}></select>
+      <fluent-listbox class="list" ${ref("listSel")}></fluent-listbox>
       <div class="toolbar">
         <fluent-button
           appearance="accent"
@@ -69,14 +83,24 @@ const template = html<DocenSourcesDialog>`
       <div class="form" ${ref("formEl")} hidden>
         <div class="row">
           <label ${ref("typeLabel")}></label>
-          <select ${ref("typeSel")}>
-            <option value="Book"></option>
-            <option value="JournalArticle"></option>
-            <option value="ArticleInAPeriodical"></option>
-            <option value="DocumentFromInternetSite"></option>
-            <option value="Report"></option>
-            <option value="Misc"></option>
-          </select>
+          <fluent-dropdown type="combobox" appearance="outline" ${ref("typeSel")}>
+            <fluent-listbox popover="manual" tabindex="-1">
+              <fluent-option value="Book"></fluent-option>
+              <fluent-option value="JournalArticle"></fluent-option>
+              <fluent-option value="ArticleInAPeriodical"></fluent-option>
+              <fluent-option value="DocumentFromInternetSite"></fluent-option>
+              <fluent-option value="Report"></fluent-option>
+              <fluent-option value="Misc"></fluent-option>
+            </fluent-listbox>
+            <input
+              slot="control"
+              role="combobox"
+              aria-haspopup="listbox"
+              type="combobox"
+              size="1"
+              style="width:100%;box-sizing:border-box"
+            />
+          </fluent-dropdown>
         </div>
         <div class="row">
           <label ${ref("tagLabel")}></label>
@@ -169,13 +193,13 @@ export const sourceLabel = (source: SourceDraft): string => {
 @customElement({ name: "docen-sources-dialog", template, styles })
 class DocenSourcesDialog extends FASTElement {
   @observable dialogEl?: HTMLElement & { heading?: string; show(): void; hide(): void };
-  @observable listSel?: HTMLSelectElement;
+  @observable listSel?: FluentListbox;
   @observable citeBtn?: HTMLElement;
   @observable newBtn?: HTMLElement;
   @observable deleteBtn?: HTMLElement;
   @observable formEl?: HTMLElement;
   @observable typeLabel?: HTMLElement;
-  @observable typeSel?: HTMLSelectElement;
+  @observable typeSel?: FluentDropdown;
   @observable tagLabel?: HTMLElement;
   @observable tagInput?: FluentTextInput;
   @observable authorLabel?: HTMLElement;
@@ -233,9 +257,12 @@ class DocenSourcesDialog extends FASTElement {
   #renderList(): void {
     if (!this.listSel) return;
     this.listSel.replaceChildren(
-      ...this.#sources.map((source, index) => new Option(sourceLabel(source), String(index))),
+      ...this.#sources.map((source, index) => opt(sourceLabel(source), String(index))),
     );
-    if (this.listSel.options.length > 0) this.listSel.selectedIndex = 0;
+    // A native select shows its first option preselected — a standalone
+    // listbox starts with nothing picked, so pick it here.
+    const first = this.listSel.querySelector("fluent-option");
+    if (first) (first as HTMLElement & { selected?: boolean }).selected = true;
   }
 
   toggleForm(): void {
@@ -243,7 +270,7 @@ class DocenSourcesDialog extends FASTElement {
     const opening = this.formEl.hidden;
     this.formEl.hidden = !opening;
     if (opening) {
-      if (this.typeSel) this.typeSel.value = "Book";
+      pick(this.typeSel, "Book");
       if (this.tagInput) this.tagInput.value = "";
       if (this.authorInput) this.authorInput.value = "";
       if (this.titleInput) this.titleInput.value = "";
@@ -259,7 +286,7 @@ class DocenSourcesDialog extends FASTElement {
     const authorRaw = this.authorInput?.value ?? "";
     const source: SourceDraft = {
       ...(tag ? { tag } : {}),
-      sourceType: this.typeSel?.value ?? "Misc",
+      sourceType: pickedValue(this.typeSel) ?? "Misc",
       ...(title ? { title } : {}),
       ...(this.yearInput?.value.trim() ? { year: this.yearInput.value.trim() } : {}),
       ...(this.publisherInput?.value.trim() ? { publisher: this.publisherInput.value.trim() } : {}),
@@ -273,7 +300,7 @@ class DocenSourcesDialog extends FASTElement {
   }
 
   removeSource(): void {
-    const index = Number(this.listSel?.value ?? -1);
+    const index = Number(listValue(this.listSel) ?? -1);
     if (!Number.isInteger(index) || index < 0 || index >= this.#sources.length) return;
     this.#sources.splice(index, 1);
     this.#renderList();
@@ -281,7 +308,7 @@ class DocenSourcesDialog extends FASTElement {
   }
 
   insertCitation(): void {
-    const index = Number(this.listSel?.value ?? -1);
+    const index = Number(listValue(this.listSel) ?? -1);
     const source = Number.isInteger(index) ? this.#sources[index] : undefined;
     if (!source?.tag) return;
     this.$emit("citation:ok", { tag: source.tag });
@@ -304,7 +331,8 @@ class DocenSourcesDialog extends FASTElement {
     if (this.saveBtn) this.saveBtn.textContent = t("sources.save", this);
     if (this.cancelBtn) this.cancelBtn.textContent = t("options.close", this);
     if (this.typeSel) {
-      const [book, journal, periodical, web, report, misc] = this.typeSel.options;
+      const [book, journal, periodical, web, report, misc] =
+        this.typeSel.querySelectorAll("fluent-option");
       if (book) book.textContent = t("sources.typeBook", this);
       if (journal) journal.textContent = t("sources.typeJournal", this);
       if (periodical) periodical.textContent = t("sources.typePeriodical", this);

@@ -1,6 +1,7 @@
 import { FASTElement, css, customElement, html, observable, ref } from "@microsoft/fast-element";
 
 import { observeLang, t } from "../../i18n/localize";
+import { listboxOf, opt, pick, pickedValue, type FluentDropdown } from "./fluent-combo";
 
 /** The alignment choices (ST_RubyAlign's horizontal tokens — rightVertical is
  *  a vertical-text form the dialog does not offer). */
@@ -46,8 +47,13 @@ const styles = css`
     align-items: center;
     gap: 8px;
   }
-  .meta select {
+  .meta fluent-dropdown {
     flex: 1;
+    min-width: 0;
+  }
+  .meta fluent-dropdown input {
+    width: 100%;
+    box-sizing: border-box;
   }
   .clear {
     align-self: flex-end;
@@ -60,7 +66,17 @@ const template = html<DocenPhoneticDialog>`
       <div class="rows" ${ref("rowsEl")}></div>
       <div class="meta">
         <span>${(x) => t("phoneticDialog.alignment", x)}</span>
-        <select ${ref("alignSel")}></select>
+        <fluent-dropdown type="combobox" appearance="outline" ${ref("alignSel")}>
+          <fluent-listbox popover="manual" tabindex="-1"></fluent-listbox>
+          <input
+            slot="control"
+            role="combobox"
+            aria-haspopup="listbox"
+            type="combobox"
+            size="1"
+            style="width:100%;box-sizing:border-box"
+          />
+        </fluent-dropdown>
       </div>
       <fluent-button
         class="clear"
@@ -91,7 +107,7 @@ const template = html<DocenPhoneticDialog>`
 class DocenPhoneticDialog extends FASTElement {
   @observable dialogEl?: HTMLElement & { heading?: string; show(): void; hide(): void };
   @observable rowsEl?: HTMLDivElement;
-  @observable alignSel?: HTMLSelectElement;
+  @observable alignSel?: FluentDropdown;
   @observable okBtn?: HTMLElement;
   @observable cancelBtn?: HTMLElement;
   @observable clearBtn?: HTMLElement;
@@ -134,10 +150,10 @@ class DocenPhoneticDialog extends FASTElement {
         }),
       );
     }
-    if (this.alignSel)
-      this.alignSel.value = (ALIGNMENTS as readonly string[]).includes(alignment ?? "")
-        ? alignment!
-        : "center";
+    pick(
+      this.alignSel,
+      (ALIGNMENTS as readonly string[]).includes(alignment ?? "") ? alignment! : "center",
+    );
     this.dialogEl?.show();
   }
 
@@ -154,7 +170,7 @@ class DocenPhoneticDialog extends FASTElement {
     this.$emit("phonetic:ok", {
       chars: this.chars,
       readings,
-      alignment: this.alignSel?.value ?? "center",
+      alignment: pickedValue(this.alignSel) ?? "center",
     });
     this.hide();
   }
@@ -169,12 +185,12 @@ class DocenPhoneticDialog extends FASTElement {
     if (this.okBtn) this.okBtn.textContent = t("options.ok", this);
     if (this.cancelBtn) this.cancelBtn.textContent = t("options.cancel", this);
     if (this.clearBtn) this.clearBtn.textContent = t("phoneticDialog.clearAll", this);
-    // The alignment options are built here (like font-dialog's selects) —
+    // The alignment options are built here (like font-dialog's combos) —
     // a `t()` inside a template repeat binds with the item, not the element,
     // and aborts the whole render.
-    if (this.alignSel && this.alignSel.options.length === 0)
-      this.alignSel.replaceChildren(
-        ...ALIGNMENTS.map((value) => new Option(t(`phoneticDialog.align.${value}`, this), value)),
+    if (this.alignSel && listboxOf(this.alignSel)?.children.length === 0)
+      listboxOf(this.alignSel)!.replaceChildren(
+        ...ALIGNMENTS.map((value) => opt(t(`phoneticDialog.align.${value}`, this), value)),
       );
   }
 }

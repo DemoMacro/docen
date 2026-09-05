@@ -1,6 +1,15 @@
 import { FASTElement, css, customElement, html, observable, ref } from "@microsoft/fast-element";
 
 import { observeLang, t } from "../../i18n/localize";
+import {
+  listValue,
+  listboxOf,
+  opt,
+  pick,
+  pickedValue,
+  type FluentDropdown,
+  type FluentListbox,
+} from "./fluent-combo";
 
 const styles = css`
   :host {
@@ -24,19 +33,25 @@ const styles = css`
   .row > label {
     min-width: 92px;
   }
-  .row select {
+  .row fluent-dropdown {
     flex: 1;
     min-width: 0;
+  }
+  .row fluent-dropdown input {
+    width: 100%;
+    box-sizing: border-box;
   }
   .which {
     opacity: 0.75;
   }
-  select.list {
+  fluent-listbox.list {
+    width: 100%;
     min-height: 168px;
     border: 1px solid var(--colorNeutralStroke1, #d1d1d1);
     border-radius: 4px;
     padding: 2px;
     font-size: 13px;
+    box-shadow: none;
   }
 `;
 
@@ -55,20 +70,45 @@ const template = html<DocenCrossReferenceDialog>`
     <div class="body">
       <div class="row">
         <label ${ref("typeLabel")}></label>
-        <select ${ref("typeSel")} @change="${(x) => x.syncType()}">
-          <option value="caption"></option>
-          <option value="bookmark"></option>
-        </select>
+        <fluent-dropdown
+          type="combobox"
+          appearance="outline"
+          ${ref("typeSel")}
+          @change="${(x) => x.syncType()}"
+        >
+          <fluent-listbox popover="manual" tabindex="-1">
+            <fluent-option value="caption"></fluent-option>
+            <fluent-option value="bookmark"></fluent-option>
+          </fluent-listbox>
+          <input
+            slot="control"
+            role="combobox"
+            aria-haspopup="listbox"
+            type="combobox"
+            size="1"
+            style="width:100%;box-sizing:border-box"
+          />
+        </fluent-dropdown>
       </div>
       <div class="row">
         <label ${ref("contentLabel")}></label>
-        <select ${ref("contentSel")}>
-          <option value="text"></option>
-          <option value="page"></option>
-        </select>
+        <fluent-dropdown type="combobox" appearance="outline" ${ref("contentSel")}>
+          <fluent-listbox popover="manual" tabindex="-1">
+            <fluent-option value="text"></fluent-option>
+            <fluent-option value="page"></fluent-option>
+          </fluent-listbox>
+          <input
+            slot="control"
+            role="combobox"
+            aria-haspopup="listbox"
+            type="combobox"
+            size="1"
+            style="width:100%;box-sizing:border-box"
+          />
+        </fluent-dropdown>
       </div>
       <span class="which" ${ref("whichLabel")}></span>
-      <select class="list" ${ref("listSel")}></select>
+      <fluent-listbox class="list" ${ref("listSel")}></fluent-listbox>
     </div>
     <div slot="action">
       <fluent-button ${ref("cancelBtn")} @click="${(x) => x.hide()}"></fluent-button>
@@ -93,11 +133,11 @@ const template = html<DocenCrossReferenceDialog>`
 class DocenCrossReferenceDialog extends FASTElement {
   @observable dialogEl?: HTMLElement & { heading?: string; show(): void; hide(): void };
   @observable typeLabel?: HTMLElement;
-  @observable typeSel?: HTMLSelectElement;
+  @observable typeSel?: FluentDropdown;
   @observable contentLabel?: HTMLElement;
-  @observable contentSel?: HTMLSelectElement;
+  @observable contentSel?: FluentDropdown;
   @observable whichLabel?: HTMLElement;
-  @observable listSel?: HTMLSelectElement;
+  @observable listSel?: FluentListbox;
   @observable okBtn?: HTMLElement;
   @observable cancelBtn?: HTMLElement;
 
@@ -119,7 +159,7 @@ class DocenCrossReferenceDialog extends FASTElement {
 
   show(targets: CrossReferenceTarget[]): void {
     this.#targets = targets;
-    if (this.typeSel) this.typeSel.value = "caption";
+    pick(this.typeSel, "caption");
     this.#syncType();
     this.dialogEl?.show();
   }
@@ -131,14 +171,14 @@ class DocenCrossReferenceDialog extends FASTElement {
   /** Template-visible type change handler (FAST bindings can't reach
    *  `#`-private methods). */
   #syncType(): void {
-    const kind = this.typeSel?.value === "bookmark" ? "bookmark" : "caption";
+    const kind = pickedValue(this.typeSel) === "bookmark" ? "bookmark" : "caption";
     // The content option's word follows the type, like Word's dialog
     // ("Label and number" for captions, "Bookmark text" for bookmarks).
     if (this.contentSel) {
-      const text = this.contentSel.options[0];
+      const text = listboxOf(this.contentSel)?.querySelector("fluent-option");
       if (text)
         text.textContent = t(kind === "bookmark" ? "crossRef.refText" : "crossRef.refLabel", this);
-      this.contentSel.value = "text";
+      pick(this.contentSel, "text");
     }
     if (this.whichLabel)
       this.whichLabel.textContent = t(
@@ -153,24 +193,27 @@ class DocenCrossReferenceDialog extends FASTElement {
   }
 
   applyCrossReference(): void {
-    const name = this.listSel?.value;
+    const name = listValue(this.listSel);
     if (!name) return;
     this.$emit("cross-ref:ok", {
       name,
-      content: this.contentSel?.value === "page" ? "page" : "text",
+      content: pickedValue(this.contentSel) === "page" ? "page" : "text",
     });
     this.hide();
   }
 
   #renderList(): void {
     if (!this.listSel) return;
-    const kind = this.typeSel?.value === "bookmark" ? "bookmark" : "caption";
+    const kind = pickedValue(this.typeSel) === "bookmark" ? "bookmark" : "caption";
     this.listSel.replaceChildren(
       ...this.#targets
         .filter((target) => target.kind === kind)
-        .map((target) => new Option(target.text || target.name, target.name)),
+        .map((target) => opt(target.text || target.name, target.name)),
     );
-    if (this.listSel.options.length > 0) this.listSel.selectedIndex = 0;
+    // A native select shows its first option preselected — a standalone
+    // listbox starts with nothing picked, so pick it here.
+    const first = this.listSel.querySelector("fluent-option");
+    if (first) (first as HTMLElement & { selected?: boolean }).selected = true;
   }
 
   #applyLabels(): void {
@@ -180,15 +223,15 @@ class DocenCrossReferenceDialog extends FASTElement {
     if (this.okBtn) this.okBtn.textContent = t("crossRef.insert", this);
     if (this.cancelBtn) this.cancelBtn.textContent = t("options.cancel", this);
     if (this.typeSel) {
-      const [caption, bookmark] = this.typeSel.options;
+      const [caption, bookmark] = this.typeSel.querySelectorAll("fluent-option");
       if (caption) caption.textContent = t("crossRef.caption", this);
       if (bookmark) bookmark.textContent = t("crossRef.bookmark", this);
     }
     if (this.contentSel) {
-      const [text, page] = this.contentSel.options;
+      const [text, page] = this.contentSel.querySelectorAll("fluent-option");
       if (text)
         text.textContent = t(
-          this.typeSel?.value === "bookmark" ? "crossRef.refText" : "crossRef.refLabel",
+          pickedValue(this.typeSel) === "bookmark" ? "crossRef.refText" : "crossRef.refLabel",
           this,
         );
       if (page) page.textContent = t("crossRef.refPage", this);
