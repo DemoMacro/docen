@@ -1,6 +1,7 @@
 import type { JSONContent } from "@docen/docx";
 import { buildCustomMultilevelLevels, nextMultilevelReference } from "@docen/docx";
 import type { Editor } from "@docen/docx/core";
+import type { Node as PMNode } from "@tiptap/pm/model";
 import { TextSelection } from "@tiptap/pm/state";
 import { DocAttrStep } from "@tiptap/pm/transform";
 
@@ -116,17 +117,47 @@ export class DialogCommands {
     this.host.bridge()?.focus();
   };
 
-  /** Language dialog 确定 — commit the selection's proofing language (w:lang). */
+  /** Language dialog 确定 — commit the selection's proofing language
+   *  (w:lang). With a bare caret the setting rides the run the caret sits in
+   *  (extended over the adjacent text sharing its marks) — the viewless input
+   *  path has no stored-marks lane, so a caret-only commit would otherwise
+   *  be dropped and the dialog would never stick. */
   readonly onLanguageOk = (event: Event): void => {
     const { value, noProof } = (event as CustomEvent<{ value?: string; noProof?: boolean }>)
       .detail ?? { value: undefined, noProof: false };
     const target = this.#target();
     if (!value || !target) return;
-    if (target.state.selection.empty) return;
-    target
-      .chain()
-      .setMark("textStyle", { language: { value }, noProof: noProof ? true : null })
-      .run();
+    const { selection } = target.state;
+    const attrs = { language: { value }, noProof: noProof ? true : null };
+    if (selection.empty) {
+      const $from = selection.$from;
+      const base = $from.marks();
+      const sameRun = (node: PMNode) =>
+        node.isText &&
+        node.marks.length === base.length &&
+        node.marks.every((m) => base.some((b) => b.eq(m)));
+      let from = selection.from;
+      let to = selection.from;
+      const parentStart = $from.start();
+      $from.parent.forEach((child, off) => {
+        if (!sameRun(child)) return;
+        const start = parentStart + off;
+        const end = start + child.nodeSize;
+        if (end <= selection.from) from = Math.min(from, start);
+        else if (start <= selection.from) {
+          from = Math.min(from, start);
+          to = Math.max(to, end);
+        }
+      });
+      target
+        .chain()
+        .setTextSelection({ from, to })
+        .setMark("textStyle", attrs)
+        .setTextSelection(selection.from)
+        .run();
+    } else {
+      target.chain().setMark("textStyle", attrs).run();
+    }
     this.host.bridge()?.focus();
     this.host.syncStatusLanguage();
   };
