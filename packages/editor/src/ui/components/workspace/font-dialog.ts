@@ -176,9 +176,9 @@ const template = html<DocenFontDialog>`
   </docen-dialog>
 `;
 
-/** A checkbox widget plus its checked state accessor (fluent-checkbox exposes
- *  `currentChecked`, not the native `checked`). */
-type FluentCheckbox = HTMLElement & { currentChecked?: boolean };
+/** A checkbox widget. The rendered state follows `checked`; `currentChecked`
+ *  is a separate slot only user clicks keep in sync. */
+type FluentCheckbox = HTMLElement & { checked?: boolean };
 
 /**
  * `<docen-font-dialog>` — the Word "Font" dialog (Home group's dialog-box
@@ -275,13 +275,13 @@ class DocenFontDialog extends FASTElement {
       italic: style === "italic" || style === "boldItalic",
       underlineStyle: this.underlineSel?.value || null,
       underlineColor: this.underlineColorSel?.value || null,
-      strike: this.strike?.currentChecked ?? false,
-      doubleStrike: this.doubleStrike?.currentChecked ?? false,
-      superscript: this.superscript?.currentChecked ?? false,
-      subscript: this.subscript?.currentChecked ?? false,
-      smallCaps: this.smallCaps?.currentChecked ?? false,
-      allCaps: this.allCaps?.currentChecked ?? false,
-      hidden: this.hiddenCheck?.currentChecked ?? false,
+      strike: this.strike?.checked ?? false,
+      doubleStrike: this.doubleStrike?.checked ?? false,
+      superscript: this.superscript?.checked ?? false,
+      subscript: this.subscript?.checked ?? false,
+      smallCaps: this.smallCaps?.checked ?? false,
+      allCaps: this.allCaps?.checked ?? false,
+      hidden: this.hiddenCheck?.checked ?? false,
     };
     this.$emit("font:ok", patch);
     this.hide();
@@ -335,7 +335,9 @@ class DocenFontDialog extends FASTElement {
   }
 
   #check(box: FluentCheckbox | undefined, value: boolean): void {
-    if (box) box.currentChecked = value;
+    // `checked` is what renders — writing `currentChecked` alone leaves the
+    // box visually unchecked (a user click syncs both slots, a write doesn't).
+    if (box) box.checked = value;
   }
 
   #applyLabels(): void {

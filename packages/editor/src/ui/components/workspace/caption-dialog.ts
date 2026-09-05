@@ -79,9 +79,9 @@ const template = html<DocenCaptionDialog>`
   </docen-dialog>
 `;
 
-/** A checkbox widget plus its checked state accessor (fluent-checkbox exposes
- *  `currentChecked`, not the native `checked`). */
-type FluentCheckbox = HTMLElement & { currentChecked?: boolean };
+/** A checkbox widget. The rendered state follows `checked`; `currentChecked`
+ *  is a separate slot only user clicks keep in sync. */
+type FluentCheckbox = HTMLElement & { checked?: boolean };
 type FluentTextInput = HTMLElement & { value: string };
 
 /**
@@ -125,7 +125,7 @@ class DocenCaptionDialog extends FASTElement {
     if (this.labelSel && this.labelSel.options.length === 0) this.#applyLabels();
     if (this.textInput) this.textInput.value = "";
     if (this.positionSel) this.positionSel.value = "below";
-    if (this.excludeChk) this.excludeChk.currentChecked = false;
+    if (this.excludeChk) this.excludeChk.checked = false;
     this.syncPreview();
     this.dialogEl?.show();
   }
@@ -140,7 +140,7 @@ class DocenCaptionDialog extends FASTElement {
     if (!this.previewEl) return;
     const label = this.labelSel?.value ?? "";
     const text = this.textInput?.value ?? "";
-    const excluded = this.excludeChk?.currentChecked ?? false;
+    const excluded = this.excludeChk?.checked ?? false;
     const head = `${excluded ? "" : `${label} `}1`;
     this.previewEl.textContent = text ? `${head}: ${text}` : head;
   }
@@ -153,7 +153,7 @@ class DocenCaptionDialog extends FASTElement {
       label,
       text,
       position: this.positionSel?.value === "above" ? "above" : "below",
-      excludeLabel: this.excludeChk?.currentChecked ?? false,
+      excludeLabel: this.excludeChk?.checked ?? false,
     });
     this.hide();
   }

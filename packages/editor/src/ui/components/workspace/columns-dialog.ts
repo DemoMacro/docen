@@ -6,9 +6,9 @@ import { observeLang, t } from "../../i18n/localize";
  *  lives on the `value` property, like a native input). */
 type FluentTextInput = HTMLElement & { value: string };
 
-/** A `fluent-checkbox` plus its checked accessor (fluent-checkbox exposes
- *  `currentChecked`, not the native `checked`). */
-type FluentCheckbox = HTMLElement & { currentChecked: boolean };
+/** A `fluent-checkbox`. The rendered state follows `checked`; `currentChecked`
+ *  is a separate slot only user clicks keep in sync. */
+type FluentCheckbox = HTMLElement & { checked: boolean };
 
 /** The dialog's values — the column count, the gap in centimeters, the
  *  separator-line flag, and the equal-width flag. All twip conversion stays
@@ -152,8 +152,8 @@ class DocenColumnsDialog extends FASTElement {
           ? String(Math.round(values.space * 100) / 100)
           : String(DEFAULTS.space);
     }
-    if (this.separateCheck) this.separateCheck.currentChecked = values.separate === true;
-    if (this.equalCheck) this.equalCheck.currentChecked = values.equalWidth !== false;
+    if (this.separateCheck) this.separateCheck.checked = values.separate === true;
+    if (this.equalCheck) this.equalCheck.checked = values.equalWidth !== false;
     this.dialogEl?.show();
   }
 
@@ -173,8 +173,8 @@ class DocenColumnsDialog extends FASTElement {
     this.$emit("columns:ok", {
       count,
       space,
-      separate: this.separateCheck?.currentChecked === true,
-      equalWidth: this.equalCheck?.currentChecked !== false,
+      separate: this.separateCheck?.checked === true,
+      equalWidth: this.equalCheck?.checked !== false,
     });
     this.hide();
   }

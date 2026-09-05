@@ -271,6 +271,19 @@ export interface ParagraphDialogPatch {
   keepNext: boolean;
   keepLines: boolean;
   pageBreakBefore: boolean;
+  // The Line-and-Page-Breaks tab's formatting exceptions.
+  suppressLineNumbers: boolean;
+  suppressAutoHyphens: boolean;
+  // The Chinese-Layout tab: kinsoku/wordWrap/overflowPunct are the line-break
+  // group, the two autoSpace flags the character-spacing group (autoSpaceDN
+  // rides the engine's autoSpaceEastAsianText attr), textAlignment the
+  // vertical alignment drop-down (w:textAlignment tokens).
+  kinsoku: boolean;
+  wordWrap: boolean;
+  overflowPunct: boolean;
+  autoSpaceDE: boolean;
+  autoSpaceDN: boolean;
+  textAlignment: string;
 }
 
 /**
@@ -1189,6 +1202,14 @@ export const DocumentCommands = Extension.create({
             attrs.keepNext = patch.keepNext;
             attrs.keepLines = patch.keepLines;
             attrs.pageBreakBefore = patch.pageBreakBefore;
+            attrs.suppressLineNumbers = patch.suppressLineNumbers;
+            attrs.suppressAutoHyphens = patch.suppressAutoHyphens;
+            attrs.kinsoku = patch.kinsoku;
+            attrs.wordWrap = patch.wordWrap;
+            attrs.overflowPunctuation = patch.overflowPunct;
+            attrs.autoSpaceDE = patch.autoSpaceDE;
+            attrs.autoSpaceEastAsianText = patch.autoSpaceDN;
+            attrs.textAlignment = patch.textAlignment;
             tr.setNodeMarkup(pos, undefined, attrs);
             touched = true;
           }
