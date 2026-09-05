@@ -85,6 +85,7 @@ import { DesignCommands } from "./commands/design";
 import { DialogCommands } from "./commands/dialogs";
 import { NavigationCommands } from "./commands/navigation";
 import { ReferencesCommands } from "./commands/references";
+import { RevisionsCommands } from "./commands/revisions";
 import { SectionCommands } from "./commands/sections";
 import { SpellingCommands } from "./commands/spelling";
 // Side-effect import: registers the ribbon/header translation tables.
@@ -114,7 +115,13 @@ const FACE_ONLY_SPLITS: ReadonlySet<string> = new Set(["autofit", "columns"]);
  * Task pane identifiers, mirroring the Office `<TaskpaneId>` concept. The host
  * ships two built-in panes: `navigation` (start/left) and `properties` (end/right).
  */
-export type TaskPaneId = "navigation" | "properties" | "comments" | "clipboard" | "proofing";
+export type TaskPaneId =
+  | "navigation"
+  | "properties"
+  | "comments"
+  | "clipboard"
+  | "proofing"
+  | "revisions";
 
 /**
  * Visibility mode values, matching `Office.VisibilityMode` (`taskpane` | `hidden`).
@@ -165,6 +172,11 @@ class DocenDocument extends AddinHost<Editor> {
     bridge: () => this.#bridge,
     element: () => this,
     showTaskpane: (id) => this.showTaskpane(id),
+  });
+  readonly #revisions = new RevisionsCommands({
+    editor: () => this.editor,
+    bridge: () => this.#bridge,
+    element: () => this,
   });
   readonly #references = new ReferencesCommands({
     editor: () => this.editor,
@@ -776,6 +788,11 @@ class DocenDocument extends AddinHost<Editor> {
     this.addEventListener("comment:select", this.#comments.onCommentSelect as EventListener);
     this.addEventListener("comment:update", this.#comments.onCommentUpdate as EventListener);
     this.addEventListener("comment:delete", this.#comments.onCommentDelete as EventListener);
+    // Reviewing pane → select (scroll to the revision), accept/reject (the
+    // by-id command form — one transaction per card action).
+    this.addEventListener("revision:select", this.#revisions.onRevisionSelect as EventListener);
+    this.addEventListener("revision:accept", this.#revisions.onRevisionAccept as EventListener);
+    this.addEventListener("revision:reject", this.#revisions.onRevisionReject as EventListener);
     // Office Clipboard pane → paste one entry / paste all / clear.
     this.addEventListener("clipboard:paste", this.#clipboard.onPanePaste as EventListener);
     this.addEventListener("clipboard:paste-all", this.#clipboard.onPanePasteAll as EventListener);
@@ -948,6 +965,7 @@ class DocenDocument extends AddinHost<Editor> {
     // Selection moves repaint the anchored comment card (Word highlights the
     // card whose range the caret sits in).
     this.editor?.on("selectionUpdate", this.#comments.syncActiveCommentCard);
+    this.editor?.on("selectionUpdate", this.#revisions.syncActiveRevision);
     document.addEventListener("fullscreenchange", this.#onFullscreenChange);
     this.addEventListener("keydown", this.#onZoomKey);
     this.dispatchEvent(new CustomEvent("docen:ready", { bubbles: true, composed: true }));
@@ -1466,6 +1484,7 @@ class DocenDocument extends AddinHost<Editor> {
     this.#bridge?.updatePages(run.pages, this.#pageOriginOf(run.sections, run.sectionOfPage));
     this.#updateStatus();
     this.#comments.syncCommentsPane();
+    this.#revisions.syncRevisionsPane();
     this.#spelling.schedule();
     this.#syncStatusLanguage();
   }
@@ -1711,6 +1730,9 @@ class DocenDocument extends AddinHost<Editor> {
     root
       .querySelector('docen-task-pane[part="comments-pane"]')
       ?.setAttribute("title", t("comments.title", this));
+    root
+      .querySelector('docen-task-pane[part="revisions-pane"]')
+      ?.setAttribute("title", t("revisions.title", this));
     this.#renderPanes();
   }
 
@@ -3282,6 +3304,12 @@ class DocenDocument extends AddinHost<Editor> {
       this.#setTaskpane("comments", !this.getTaskpaneState("comments"));
       return;
     }
+    // Review → Reviewing Pane: toggle the revisions pane (Word's vertical
+    // reviewing pane listing every tracked change).
+    if (name === "reviewing-pane") {
+      this.#togglePane("revisions");
+      return;
+    }
     // Text Box / Shapes — insert a floating wps shape run (Shapes reads its
     // preset from the gallery item's value; the text box has no preset).
     if (name === "text-box" || name === "shapes") {
@@ -4039,7 +4067,9 @@ class DocenDocument extends AddinHost<Editor> {
             ? "clipboard-pane"
             : id === "proofing"
               ? "proofing-pane"
-              : "props-pane";
+              : id === "revisions"
+                ? "revisions-pane"
+                : "props-pane";
     return this.shadowRoot?.querySelector(`docen-task-pane[part="${part}"]`) as
       | (HTMLElement & { open: boolean })
       | null;

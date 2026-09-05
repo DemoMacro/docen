@@ -131,6 +131,22 @@ const caseItems = (): string =>
     { text: opt("toggle-case"), value: "toggle" },
   ]);
 
+// Word's Accept / Reject splits (Review → Tracking): the face accepts or
+// rejects the selected revision and moves to the next; the drop-down repeats
+// that and adds the accept/reject-all sweep. ("Accept All Changes Shown"
+// needs the markup view filter — stays out until that exists.)
+const acceptItems = (): string =>
+  JSON.stringify([
+    { text: opt("accept-and-next"), event: "accept-change" },
+    { text: opt("accept-all-changes"), event: "accept-all-changes" },
+  ]);
+
+const rejectItems = (): string =>
+  JSON.stringify([
+    { text: opt("reject-and-next"), event: "reject-change" },
+    { text: opt("reject-all-changes"), event: "reject-all-changes" },
+  ]);
+
 // Word's Chinese Layout (中文版式) drop-down in the Paragraph group — both
 // entries open the shared two-lines-in-one dialog (the dialog's bracket
 // checkbox covers 合并字符's no-bracket form).
@@ -1097,9 +1113,10 @@ const reviewTab = (): RibbonTab =>
     ]),
     group("tracking", [
       btn("group-objects", "track-changes", { size: "large" }),
-      btn("accept", "accept-change", { size: "large" }),
-      btn("close", "reject-change", { size: "large" }),
+      split("accept", "accept-change", parsedItems(acceptItems()), { size: "large" }),
+      split("close", "reject-change", parsedItems(rejectItems()), { size: "large" }),
       col([grid([btn("align-left", "previous-change"), btn("align-right", "next-change")])]),
+      btn("reviewing-pane", "reviewing-pane", { size: "large" }),
     ]),
     group("compare", [
       btn("group-objects", "compare", { size: "large" }),

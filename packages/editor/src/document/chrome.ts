@@ -194,6 +194,9 @@ export const documentTemplate = html`
     <docen-task-pane slot="task-pane-end" position="end" part="comments-pane" title="Comments">
       <docen-comments-pane></docen-comments-pane>
     </docen-task-pane>
+    <docen-task-pane slot="task-pane-end" position="end" part="revisions-pane" title="Revisions">
+      <docen-revisions-pane></docen-revisions-pane>
+    </docen-task-pane>
     <docen-task-pane slot="task-pane-end" position="end" part="clipboard-pane" title="Clipboard">
       <docen-clipboard-pane></docen-clipboard-pane>
     </docen-task-pane>

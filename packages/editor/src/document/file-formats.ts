@@ -199,6 +199,9 @@ export const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   "previous-comment",
   "next-comment",
   "show-comments",
+  // Review → Reviewing Pane toggles the revisions pane (the card actions
+  // dispatch the engine's by-id accept/reject commands).
+  "reviewing-pane",
   // Text Box / Shapes insert a standalone wps shape run (Shapes reads the
   // gallery preset from the split item's value).
   "text-box",

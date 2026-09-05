@@ -191,6 +191,53 @@ interface RevisionRange {
   id: unknown;
 }
 
+/** One revision as the reviewing pane lists it: the range plus the record's
+ *  author/date and the tracked text (the pane shows what was typed or what
+ *  Word would remove). */
+export interface RevisionInfo extends RevisionRange {
+  author: string;
+  date: string;
+  text: string;
+}
+
+/** The document's revisions in document order, with each record's metadata
+ *  (read off the first text node carrying the record's mark). */
+export function collectRevisions(doc: PMNode): RevisionInfo[] {
+  const meta = new Map<unknown, { author: string; date: string }>();
+  const out: RevisionInfo[] = [];
+  doc.descendants((node, pos) => {
+    if (!node.isText) return true;
+    const mark = node.marks.find((m) => isRevisionMark(m.type.name));
+    if (!mark) return true;
+    const id = (mark.attrs as { id?: unknown }).id;
+    const from = pos;
+    const to = pos + node.nodeSize;
+    const last = out[out.length - 1];
+    if (last && last.type === mark.type.name && last.id === id && last.to === from) {
+      last.to = to;
+      last.text += node.text ?? "";
+      return true;
+    }
+    let record = meta.get(id);
+    if (!record) {
+      const attrs = mark.attrs as { author?: string; date?: string };
+      record = { author: attrs.author ?? "", date: attrs.date ?? "" };
+      meta.set(id, record);
+    }
+    out.push({
+      from,
+      to,
+      type: mark.type.name as "insertion" | "deletion",
+      id,
+      author: record.author,
+      date: record.date,
+      text: node.text ?? "",
+    });
+    return true;
+  });
+  return out;
+}
+
 function revisionRanges(doc: PMNode): RevisionRange[] {
   const out: RevisionRange[] = [];
   doc.descendants((node, pos) => {
@@ -239,20 +286,25 @@ export const TrackChanges = Extension.create({
           return true;
         },
       "accept-change":
-        () =>
+        (id?: string) =>
         ({ state, tr, dispatch }) => {
-          const target = pickRevision(
-            revisionRanges(state.doc),
-            state.selection.from,
-            state.selection.to,
-          );
+          const ranges = revisionRanges(state.doc);
+          // With an id (the reviewing pane's cards) act on that revision;
+          // without one, on the revision overlapping the selection.
+          const target = id
+            ? ranges.find((r) => String(r.id) === id)
+            : pickRevision(ranges, state.selection.from, state.selection.to);
           if (!target) return false;
           if (!dispatch) return true;
           if (target.type === "insertion")
             tr.removeMark(target.from, target.to, state.schema.marks.insertion!);
           else tr.delete(target.from, target.to);
           tr.setMeta(skipTrackingKey, true);
-          tr.setSelection(TextSelection.near(tr.doc.resolve(target.from)));
+          // Word's button is "Accept and Move to Next": after accepting, the
+          // caret jumps to the next remaining revision (>= the accepted start
+          // — the removal shifted later content back); none left, stay put.
+          const next = revisionRanges(tr.doc).find((r) => r.from >= target.from);
+          tr.setSelection(TextSelection.near(tr.doc.resolve(next ? next.from : target.from)));
           dispatch(tr.scrollIntoView());
           return true;
         },
@@ -274,21 +326,40 @@ export const TrackChanges = Extension.create({
           return true;
         },
       "reject-change":
-        () =>
+        (id?: string) =>
         ({ state, tr, dispatch }) => {
-          const target = pickRevision(
-            revisionRanges(state.doc),
-            state.selection.from,
-            state.selection.to,
-          );
+          const ranges = revisionRanges(state.doc);
+          const target = id
+            ? ranges.find((r) => String(r.id) === id)
+            : pickRevision(ranges, state.selection.from, state.selection.to);
           if (!target) return false;
           if (!dispatch) return true;
           if (target.type === "deletion")
             tr.removeMark(target.from, target.to, state.schema.marks.deletion!);
           else tr.delete(target.from, target.to);
           tr.setMeta(skipTrackingKey, true);
-          tr.setSelection(TextSelection.near(tr.doc.resolve(target.from)));
+          // "Reject and Move to Next" — same walk as accept.
+          const next = revisionRanges(tr.doc).find((r) => r.from >= target.from);
+          tr.setSelection(TextSelection.near(tr.doc.resolve(next ? next.from : target.from)));
           dispatch(tr.scrollIntoView());
+          return true;
+        },
+      "reject-all-changes":
+        () =>
+        ({ state, tr, dispatch }) => {
+          const ranges = revisionRanges(state.doc);
+          if (ranges.length === 0) return false;
+          if (!dispatch) return true;
+          // Mirror of accept-all: a rejected insertion loses its text, a
+          // rejected deletion just loses its mark. Descending order keeps the
+          // earlier offsets valid through the deletions; one transaction, one
+          // undo step (Word's Reject All).
+          for (const r of [...ranges].reverse()) {
+            if (r.type === "insertion") tr.delete(r.from, r.to);
+            else tr.removeMark(r.from, r.to, state.schema.marks.deletion!);
+          }
+          tr.setMeta(skipTrackingKey, true);
+          dispatch(tr);
           return true;
         },
       "previous-change":
@@ -321,9 +392,10 @@ declare module "@tiptap/core" {
   interface Commands<ReturnType> {
     docenTrackChanges: {
       "track-changes": (enabled?: boolean) => ReturnType;
-      "accept-change": () => ReturnType;
+      "accept-change": (id?: string) => ReturnType;
       "accept-all-changes": () => ReturnType;
-      "reject-change": () => ReturnType;
+      "reject-change": (id?: string) => ReturnType;
+      "reject-all-changes": () => ReturnType;
       "previous-change": () => ReturnType;
       "next-change": () => ReturnType;
     };
