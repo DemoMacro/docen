@@ -61,7 +61,6 @@ import {
   type RibbonMenuItem,
   type RibbonTab,
 } from "../ui";
-import { ribbonIcon } from "../ui/components/ribbon/icons";
 import type { DrawingPropertiesState } from "../ui/components/workspace/drawing-properties-dialog";
 import type { FontDialogPatch } from "../ui/components/workspace/font-dialog";
 import { proofingLanguageName } from "../ui/components/workspace/language-dialog";
@@ -2130,13 +2129,6 @@ class DocenDocument extends AddinHost<Editor> {
         : "";
     const autosave = t("header.autosave", this);
     const qatIds = this.#qatIds();
-    // The caret SVG ships at 24×24 and would clip inside the small customize
-    // window, so the attribute size is restamped to the window it renders in.
-    const caretIcon = (size: number): string =>
-      (ribbonIcon("caret") ?? "").replace(
-        /width="24" height="24"/,
-        `width="${size}" height="${size}"`,
-      );
     // Undo/redo render as icon-only split buttons (Word's QAT shape): the
     // primary runs one step, the 14px caret opens the history flyout
     // (#fillHistory fills it on open). An empty stack hides the caret through
@@ -2177,9 +2169,10 @@ class DocenDocument extends AddinHost<Editor> {
               <fluent-menu-button
                 slot="trigger"
                 appearance="subtle"
+                icon-only
                 class="qat-customize"
                 title="${t("header.qat-customize", this)}"
-              ><span style="display:inline-flex;width:12px;height:12px;overflow:hidden">${caretIcon(12)}</span></fluent-menu-button>
+              ></fluent-menu-button>
               <fluent-menu-list>${qatMenuItems}</fluent-menu-list>
             </fluent-menu>
             <fluent-menu style="margin-inline-start:10px">

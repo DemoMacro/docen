@@ -78,12 +78,13 @@ export const documentStyles = css`
   docen-ribbon-split-button[data-history-empty]::part(caret) {
     display: none;
   }
-  /* QAT customize ("…") — a tight subtle chevron, kept visually apart from
-       the undo/redo splits' flyouts (the Ribbon Display Options recipe:
-       Fluent's menu-button padding would inflate it into another pill). */
+  /* QAT customize — the trigger is Fluent's native icon-only menu-button
+       (its own chevron, no injected glyph: injected content duplicates the
+       built-in end-slot caret). Sized to the row like the Ribbon Display
+       Options button; Fluent's 32px clamps would inflate it into a pill. */
   .qat-customize {
     min-width: 0;
-    width: 22px;
+    width: 20px;
     max-width: none;
     min-height: 26px;
     padding-inline: 0;
