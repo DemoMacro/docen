@@ -30,6 +30,7 @@ export class DrawingOverlay {
   #box: Box | null = null;
   #rotation = 0;
   #drag: { handle: HandleId; startX: number; startY: number; origin: Box } | null = null;
+  #escCancel?: (e: KeyboardEvent) => void;
   #handles = new Map<HandleId, HTMLDivElement>();
 
   constructor(callbacks: DrawingOverlayCallbacks) {
@@ -145,6 +146,9 @@ export class DrawingOverlay {
       startY: event.clientY,
       origin: { ...this.#box },
     };
+    // Escape cancels the drag back to its origin (Word) — the listener rides
+    // down with the gesture (#onDragEnd) so completed drags don't leak it.
+    this.#endEscCancel();
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === "Escape" && this.#drag) {
         e.preventDefault();
@@ -152,10 +156,17 @@ export class DrawingOverlay {
         this.#box = { ...this.#drag.origin };
         this.#drag = null;
         this.#place();
-        document.removeEventListener("keydown", onKey, true);
+        this.#endEscCancel();
       }
     };
+    this.#escCancel = onKey;
     document.addEventListener("keydown", onKey, true);
+  }
+
+  #endEscCancel(): void {
+    if (!this.#escCancel) return;
+    document.removeEventListener("keydown", this.#escCancel, true);
+    this.#escCancel = undefined;
   }
 
   #onPointerMove(event: PointerEvent): void {
@@ -173,6 +184,7 @@ export class DrawingOverlay {
     const drag = this.#drag;
     if (!drag || !this.#box) return;
     this.#drag = null;
+    this.#endEscCancel();
     this.#callbacks.applyBox(this.#box);
   }
 
