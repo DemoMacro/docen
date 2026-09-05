@@ -1416,6 +1416,15 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
   let composing = false;
 
   const insertText = (text: string): void => {
+    if (text.includes("\n")) {
+      const lines = text.split(/\r?\n/);
+      const paragraphs = lines.map((line) => ({
+        type: "paragraph",
+        content: line ? [{ type: "text", text: line }] : [],
+      }));
+      active().editor.commands.insertContent(paragraphs);
+      return;
+    }
     active().editor.commands.command(({ state, dispatch }) => {
       const { from, to } = state.selection;
       dispatch?.(state.tr.insertText(text, from, to));
@@ -1458,6 +1467,35 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
             : lastGraphemeUnits(textBefore);
           if (cut > 0) {
             dispatch?.(state.tr.delete($from.pos - cut, $from.pos));
+            return true;
+          }
+        }
+      }
+      // Word list backspace: at offset 0 of a list item, outdent if level > 0,
+      // or clear list formatting if level === 0 (do not merge into previous block).
+      if ($from.parentOffset === 0 && $from.parent.type.name === "paragraph") {
+        const attrs = $from.parent.attrs as Record<string, unknown>;
+        const bullet = attrs.bullet as { level?: number } | null | undefined;
+        const numbering = attrs.numbering as
+          | { reference?: string; level?: number }
+          | null
+          | undefined;
+        if (bullet || numbering) {
+          const level = bullet?.level ?? numbering?.level ?? 0;
+          if (level > 0) {
+            const patch = listLevelStepPatch(attrs, -1);
+            if (patch) {
+              dispatch?.(state.tr.setNodeMarkup($from.before(), undefined, { ...attrs, ...patch }));
+              return true;
+            }
+          } else {
+            dispatch?.(
+              state.tr.setNodeMarkup($from.before(), undefined, {
+                ...attrs,
+                bullet: null,
+                numbering: null,
+              }),
+            );
             return true;
           }
         }
@@ -1746,6 +1784,18 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     // content across the range, so this must run before it.
     if (editable && (event.key === "Backspace" || event.key === "Delete")) {
       const sel = active().editor.state.selection;
+      if (sel instanceof NodeSelection) {
+        event.preventDefault();
+        active().editor.commands.command(({ state, dispatch }) => {
+          if (dispatch) dispatch(state.tr.deleteSelection());
+          return true;
+        });
+        if (selDrawing != null) {
+          selDrawing = null;
+          placeDrawingSel();
+        }
+        return;
+      }
       if (sel instanceof CellSelection) {
         event.preventDefault();
         active().editor.commands.command(({ state, dispatch }) => {
@@ -1827,6 +1877,18 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
             bubbles: true,
             composed: true,
             detail: { event: "link" },
+          }),
+        );
+        return;
+      }
+      // Mod-D: Font dialog (Word standard).
+      if (lower === "d" && !event.shiftKey) {
+        event.preventDefault();
+        opts.host.dispatchEvent(
+          new CustomEvent("command", {
+            bubbles: true,
+            composed: true,
+            detail: { event: "font-dialog" },
           }),
         );
         return;
