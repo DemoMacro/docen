@@ -29,6 +29,7 @@ import designIdeas from "@fluentui/svg-icons/icons/design_ideas_24_regular.svg?r
 import diagram from "@fluentui/svg-icons/icons/diagram_24_regular.svg?raw";
 import dismiss from "@fluentui/svg-icons/icons/dismiss_24_regular.svg?raw";
 import documentAdd from "@fluentui/svg-icons/icons/document_add_24_regular.svg?raw";
+import documentBulletList from "@fluentui/svg-icons/icons/document_bullet_list_24_regular.svg?raw";
 import documentFooter from "@fluentui/svg-icons/icons/document_footer_24_regular.svg?raw";
 import documentHeader from "@fluentui/svg-icons/icons/document_header_24_regular.svg?raw";
 import documentPageBreak from "@fluentui/svg-icons/icons/document_page_break_24_regular.svg?raw";
@@ -264,6 +265,7 @@ const RIBBON_ICONS: Record<string, string> = {
   "zoom-in": zoomIn,
   // Header actions (workspace)
   new: documentAdd,
+  "reviewing-pane": documentBulletList,
   open: folderOpen,
   save,
   undo: arrowUndo,
