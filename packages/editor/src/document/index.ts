@@ -782,12 +782,14 @@ class DocenDocument extends AddinHost<Editor> {
     this.addEventListener("navigation:search", this.#navigation.onSearch as EventListener);
     this.addEventListener("navigation:find", this.#navigation.onFind as EventListener);
     // Comments pane → create/cancel (compose box), select (scroll to range),
-    // update/delete (inline card actions).
+    // update/delete (inline card actions), reply/resolve (thread actions).
     this.addEventListener("comment:create", this.#comments.onCommentCreate as EventListener);
     this.addEventListener("comment:cancel", this.#comments.onCommentCancel as EventListener);
     this.addEventListener("comment:select", this.#comments.onCommentSelect as EventListener);
     this.addEventListener("comment:update", this.#comments.onCommentUpdate as EventListener);
     this.addEventListener("comment:delete", this.#comments.onCommentDelete as EventListener);
+    this.addEventListener("comment:reply", this.#comments.onCommentReply as EventListener);
+    this.addEventListener("comment:resolve", this.#comments.onCommentResolve as EventListener);
     // Reviewing pane → select (scroll to the revision), accept/reject (the
     // by-id command form — one transaction per card action).
     this.addEventListener("revision:select", this.#revisions.onRevisionSelect as EventListener);

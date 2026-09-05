@@ -11,13 +11,18 @@ import {
 import { observeLang, t } from "../../i18n/localize";
 
 /** One comment card's data — the host flattens documentExtras.comments into
- *  this shape (children runs joined to a single text). */
+ *  this shape (children runs joined to a single text) and nests replies under
+ *  their thread root through the commentsExtended paraIdParent chain. */
 export interface CommentCard {
   id: number;
   author: string;
   initials: string;
   date: string;
   text: string;
+  /** The thread's resolved state (w15:done on the commentsExtended entry). */
+  resolved?: boolean;
+  /** Replies to this comment (top-level cards have none themselves). */
+  replies?: CommentCard[];
 }
 
 const styles = css`
@@ -128,6 +133,44 @@ const styles = css`
     gap: 6px;
     justify-content: flex-end;
   }
+  /* Reply thread — replies indent under the root's text column and share the
+     card layout; a resolved thread dims (Word grays resolved conversations). */
+  .thread {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .card.reply {
+    margin-left: 36px;
+  }
+  .card.resolved {
+    opacity: 0.55;
+  }
+  .resolved-badge {
+    font-size: 10px;
+    line-height: 16px;
+    color: var(--docen-color-accent, #0f6cbd);
+    border: 1px solid currentColor;
+    border-radius: 3px;
+    padding: 0 4px;
+    white-space: nowrap;
+  }
+  .replybox {
+    grid-column: 2 / 4;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 2px;
+  }
+  .replybox fluent-textarea {
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .replybox .row {
+    display: flex;
+    gap: 6px;
+    justify-content: flex-end;
+  }
 `;
 
 const template = html<DocenCommentsPane>`<div class="list" ${ref("listEl")}></div>`;
@@ -170,14 +213,15 @@ class DocenCommentsPane extends FASTElement {
     super.disconnectedCallback();
   }
 
-  /** One card. The edit state swaps the body for a text area + Save/Cancel
-   *  and is tracked per pane (#editingId), not per attr. */
-  #renderCard(comment: CommentCard, frag: DocumentFragment): void {
+  /** One card (root or reply). The edit state swaps the body for a text area
+   *  + Save/Cancel; roots grow a Reply action and carry their replies below. */
+  #renderCard(comment: CommentCard, frag: HTMLElement, isReply = false): void {
     const card = document.createElement("div");
-    card.className = "card";
+    card.className = isReply ? "card reply" : "card";
+    if (comment.resolved) card.classList.add("resolved");
     card.dataset.id = String(comment.id);
     card.addEventListener("click", (e) => {
-      if ((e.target as HTMLElement).closest(".actions, .edit")) return;
+      if ((e.target as HTMLElement).closest(".actions, .edit, .replybox")) return;
       this.dispatchEvent(
         new CustomEvent("comment:select", {
           bubbles: true,
@@ -205,10 +249,40 @@ class DocenCommentsPane extends FASTElement {
       when.textContent = comment.date;
     }
     meta.append(author, when);
+    if (comment.resolved) {
+      const badge = document.createElement("span");
+      badge.className = "resolved-badge";
+      badge.textContent = t("comments.resolved", this);
+      meta.append(badge);
+    }
     card.append(meta);
 
     const actions = document.createElement("div");
     actions.className = "actions";
+    if (!isReply) {
+      const reply = document.createElement("fluent-button");
+      reply.setAttribute("appearance", "subtle");
+      reply.setAttribute("size", "small");
+      reply.className = "act";
+      reply.textContent = t("comments.reply", this);
+      reply.addEventListener("click", () => this.#beginReply(comment, card));
+      const resolve = document.createElement("fluent-button");
+      resolve.setAttribute("appearance", "subtle");
+      resolve.setAttribute("size", "small");
+      resolve.className = "act";
+      // Resolving is a thread operation (Word resolves the conversation).
+      resolve.textContent = t(comment.resolved ? "comments.reopen" : "comments.resolve", this);
+      resolve.addEventListener("click", () => {
+        this.dispatchEvent(
+          new CustomEvent("comment:resolve", {
+            bubbles: true,
+            composed: true,
+            detail: { id: comment.id, done: !comment.resolved },
+          }),
+        );
+      });
+      actions.append(reply, resolve);
+    }
     const edit = document.createElement("fluent-button");
     edit.setAttribute("appearance", "subtle");
     edit.setAttribute("size", "small");
@@ -238,6 +312,57 @@ class DocenCommentsPane extends FASTElement {
     card.append(body);
 
     frag.append(card);
+  }
+
+  /** The inline reply box under a thread root (Word's reply entry lives on
+   *  the card, not a separate dialog). Posts `comment:reply {parentId,text}`. */
+  #beginReply(comment: CommentCard, card: HTMLElement): void {
+    if (card.querySelector(".replybox")) return;
+    const wrap = document.createElement("div");
+    wrap.className = "replybox";
+    const area = document.createElement("fluent-textarea") as HTMLTextAreaElement & HTMLElement;
+    // `block` drops Fluent's fixed 18rem inline-size (see #beginEdit).
+    area.setAttribute("block", "");
+    area.setAttribute("rows", "2");
+    area.setAttribute("placeholder", t("comments.placeholder", this));
+    const row = document.createElement("div");
+    row.className = "row";
+    const cancel = document.createElement("fluent-button");
+    cancel.setAttribute("appearance", "neutral");
+    cancel.textContent = t("comments.cancel", this);
+    cancel.addEventListener("click", () => wrap.remove());
+    const post = document.createElement("fluent-button");
+    post.setAttribute("appearance", "accent");
+    post.textContent = t("comments.post", this);
+    post.addEventListener("click", () => {
+      const text = (area.value ?? "").trim();
+      if (text)
+        this.dispatchEvent(
+          new CustomEvent("comment:reply", {
+            bubbles: true,
+            composed: true,
+            detail: { parentId: comment.id, text },
+          }),
+        );
+      wrap.remove();
+    });
+    area.addEventListener("keydown", (event: KeyboardEvent) => {
+      if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        post.click();
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        wrap.remove();
+      }
+    });
+    row.append(cancel, post);
+    wrap.append(area, row);
+    card.append(wrap);
+    requestAnimationFrame(() => {
+      const input = (area.shadowRoot?.querySelector("textarea") ?? area) as HTMLElement | null;
+      input?.focus();
+    });
   }
 
   #beginEdit(comment: CommentCard, card: HTMLElement): void {
@@ -312,7 +437,14 @@ class DocenCommentsPane extends FASTElement {
       return;
     }
     const frag = document.createDocumentFragment();
-    for (const card of cards) this.#renderCard(card, frag);
+    for (const card of cards) {
+      // A thread = the root card plus its replies in one visual group.
+      const thread = document.createElement("div");
+      thread.className = "thread";
+      this.#renderCard(card, thread);
+      for (const reply of card.replies ?? []) this.#renderCard(reply, thread, true);
+      frag.append(thread);
+    }
     list.append(frag);
     this.#highlightActive();
   }

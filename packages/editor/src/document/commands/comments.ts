@@ -60,6 +60,80 @@ function wordRangeAt(
   return from < to ? { from: start + from, to: start + to } : null;
 }
 
+/** The comment threads' model view — doc.attrs.documentExtras carries the
+ *  round-trip channels: comments (word/comments.xml entries, replies included)
+ *  and commentsExtended (w15:commentEx — the paraId reply links + resolved
+ *  flags). Shapes mirror office-open's CommentOptions/CommentExtendedOptions. */
+interface CommentExtras {
+  comments?: Array<{
+    id?: number;
+    author?: string;
+    initials?: string;
+    date?: string;
+    children?: unknown[];
+  }>;
+  commentsExtended?: Array<{
+    paraId?: string;
+    paraIdParent?: string;
+    done?: boolean;
+  }>;
+}
+
+/** The comments payload as stored in documentExtras (one w:comment). The
+ *  first child is the paragraph that carries the thread-linking w14:paraId. */
+type CommentEntry = NonNullable<CommentExtras["comments"]>[number];
+
+/** A fresh w14:paraId (8-digit hex) not colliding with the given entries. */
+function newParaId(taken: Iterable<string | undefined>): string {
+  const used = new Set(taken);
+  let id: string;
+  do {
+    id = Array.from({ length: 8 }, () =>
+      "0123456789ABCDEF".charAt(Math.floor(Math.random() * 16)),
+    ).join("");
+  } while (used.has(id));
+  return id;
+}
+
+/** The w14:paraId of a comment's first paragraph (null for legacy entries
+ *  written before threads existed — they mint one on first thread operation). */
+function paraIdOf(comment: CommentEntry): string | null {
+  const first = comment.children?.[0];
+  if (first && typeof first === "object") {
+    const paraId = (first as { paraId?: unknown }).paraId;
+    if (typeof paraId === "string") return paraId;
+  }
+  return null;
+}
+
+/** A copy of the comment whose first paragraph carries paraId. */
+function withParaId(comment: CommentEntry, paraId: string): CommentEntry {
+  const [first, ...rest] = comment.children ?? [];
+  const head =
+    first === undefined
+      ? { children: [], paraId }
+      : typeof first === "string"
+        ? { children: [first], paraId }
+        : { ...first, paraId };
+  return { ...comment, children: [head, ...rest] };
+}
+
+/** A comment's plain text — children may be raw strings, run shapes ({text})
+ *  or paragraph shapes ({children: [...]}) depending on who wrote the entry. */
+function commentText(comment: CommentEntry): string {
+  const walk = (kids: unknown[]): string =>
+    (kids ?? [])
+      .map((kid) => {
+        if (typeof kid === "string") return kid;
+        const obj = kid as { text?: unknown; children?: unknown[] };
+        if (typeof obj.text === "string") return obj.text;
+        if (Array.isArray(obj.children)) return walk(obj.children);
+        return "";
+      })
+      .join("");
+  return walk(comment.children ?? []);
+}
+
 /** The comments commands' view of the host — resolved per call so the
  *  controller can be built before a document opens. */
 export interface CommentsHost {
@@ -139,7 +213,9 @@ export class CommentsCommands {
 
   /** Remove a comment's marker/reference atoms (descending positions keep the
    *  earlier offsets valid) and its documentExtras entry — shared by the
-   *  ribbon's Delete Comment and the pane's per-card delete. */
+   *  ribbon's Delete Comment and the pane's per-card delete. Deleting a thread
+   *  root takes its replies with it (Word's behavior); deleting a reply keeps
+   *  the rest of the thread. */
   #deleteCommentById(id: number): void {
     const editor = this.host.editor();
     if (!editor) return;
@@ -148,16 +224,52 @@ export class CommentsCommands {
       const marker = commentMarkerOf(child);
       if (marker && marker.id === id) atoms.push({ pos, size: child.nodeSize });
     });
-    const docAttrs = (editor.state.doc.attrs ?? {}) as {
-      documentExtras?: { comments?: Record<string, unknown>[] };
-    };
+    const docAttrs = (editor.state.doc.attrs ?? {}) as { documentExtras?: CommentExtras };
+    const extras = docAttrs.documentExtras ?? {};
+    const comments = extras.comments ?? [];
+    const exs = extras.commentsExtended ?? [];
+    const root = comments.find((c) => Number(c.id) === id);
+    const threadParaIds = root ? this.#threadParaIds(root, comments, exs) : new Set<string>();
+    const dropIds = new Set<number>([id]);
+    for (const c of comments) {
+      const pid = paraIdOf(c);
+      if (pid && threadParaIds.has(pid)) dropIds.add(Number(c.id));
+    }
     const tr = editor.state.tr;
     for (const { pos, size } of atoms.sort((a, b) => b.pos - a.pos)) tr.delete(pos, pos + size);
     tr.setDocAttribute("documentExtras", {
-      ...docAttrs.documentExtras,
-      comments: (docAttrs.documentExtras?.comments ?? []).filter((c) => Number(c.id) !== id),
+      ...extras,
+      comments: comments.filter((c) => !dropIds.has(Number(c.id))),
+      commentsExtended: exs.filter((e) => !e.paraId || !threadParaIds.has(e.paraId)),
     });
     editor.view.dispatch(tr);
+  }
+
+  /** Every paraId in the thread rooted at `root` (the root's own plus all
+   *  descendants through commentsExtended's paraIdParent links). The walk is
+   *  bounded per pass so a malformed cyclic chain can't spin forever. */
+  #threadParaIds(
+    root: CommentEntry,
+    comments: CommentEntry[],
+    exs: NonNullable<CommentExtras["commentsExtended"]>,
+  ): Set<string> {
+    const paraIds = new Set<string>();
+    const rootParaId = paraIdOf(root);
+    if (rootParaId) paraIds.add(rootParaId);
+    let grown = true;
+    while (grown) {
+      grown = false;
+      for (const c of comments) {
+        const pid = paraIdOf(c);
+        if (!pid || paraIds.has(pid)) continue;
+        const parentParaId = exs.find((e) => e.paraId === pid)?.paraIdParent;
+        if (parentParaId && paraIds.has(parentParaId)) {
+          paraIds.add(pid);
+          grown = true;
+        }
+      }
+    }
+    return paraIds;
   }
 
   /** Document Inspector → Remove All: every comment's marker/reference atoms
@@ -171,14 +283,13 @@ export class CommentsCommands {
       if (commentMarkerOf(child)) atoms.push({ pos, size: child.nodeSize });
     });
     if (atoms.length === 0) return;
-    const docAttrs = (editor.state.doc.attrs ?? {}) as {
-      documentExtras?: { comments?: Record<string, unknown>[] };
-    };
+    const docAttrs = (editor.state.doc.attrs ?? {}) as { documentExtras?: CommentExtras };
     const tr = editor.state.tr;
     for (const { pos, size } of atoms.sort((a, b) => b.pos - a.pos)) tr.delete(pos, pos + size);
     tr.setDocAttribute("documentExtras", {
       ...docAttrs.documentExtras,
       comments: [],
+      commentsExtended: [],
     });
     editor.view.dispatch(tr);
   }
@@ -358,10 +469,15 @@ export class CommentsCommands {
     // Word returns the caret to the body once the comment is committed.
     this.host.bridge()?.focus();
     const docAttrs = (editor.state.doc.attrs ?? {}) as {
-      documentExtras?: { comments?: Record<string, unknown>[] };
+      documentExtras?: CommentExtras;
     };
-    const comments = docAttrs.documentExtras?.comments ?? [];
+    const extras = docAttrs.documentExtras ?? {};
+    const comments = extras.comments ?? [];
+    const exs = extras.commentsExtended ?? [];
     const id = comments.reduce((max, c) => Math.max(max, Number(c.id ?? 0)), -1) + 1;
+    // The first paragraph's w14:paraId links the commentsExtended entry (the
+    // Word 2013+ channel Word reads reply threading and resolved state from).
+    const paraId = newParaId(exs.map((e) => e.paraId));
     const seed = (data: object): JSONContent =>
       ({
         type: "inlinePassthrough",
@@ -376,7 +492,7 @@ export class CommentsCommands {
         .insert(range.to + 1, end)
         .insert(range.to + 2, ref)
         .setDocAttribute("documentExtras", {
-          ...docAttrs.documentExtras,
+          ...extras,
           comments: [
             ...comments,
             {
@@ -384,9 +500,10 @@ export class CommentsCommands {
               author: "Docen User",
               initials: "DU",
               date: new Date().toISOString(),
-              children: [{ text }],
+              children: [{ children: [text], paraId }],
             },
           ],
+          commentsExtended: [...exs, { paraId, done: false }],
         }),
     );
   };
@@ -413,21 +530,101 @@ export class CommentsCommands {
     this.host.bridge()?.scrollIntoView(range.from);
   };
 
-  /** comment:update → rewrite the comment's text (the sidebar's inline edit,
-   *  replacing the old prompt-based Edit Comment for pane interactions). */
+  /** comment:update → rewrite the comment's text (the sidebar's inline edit).
+   *  The thread-linking paraId on the first paragraph survives the rewrite. */
   readonly onCommentUpdate = (event: CustomEvent<{ id?: number; text?: string }>): void => {
     const editor = this.host.editor();
     const id = event.detail?.id;
     const text = event.detail?.text?.trim();
     if (!editor || id == null || !text) return;
-    const docAttrs = (editor.state.doc.attrs ?? {}) as {
-      documentExtras?: { comments?: Array<{ id?: number; children?: Array<{ text?: string }> }> };
-    };
+    const docAttrs = (editor.state.doc.attrs ?? {}) as { documentExtras?: CommentExtras };
     const comments = docAttrs.documentExtras?.comments ?? [];
     editor.view.dispatch(
       editor.state.tr.setDocAttribute("documentExtras", {
         ...docAttrs.documentExtras,
-        comments: comments.map((c) => (Number(c.id) === id ? { ...c, children: [{ text }] } : c)),
+        comments: comments.map((c) => {
+          if (Number(c.id) !== id) return c;
+          const paraId = paraIdOf(c);
+          return { ...c, children: [paraId ? { children: [text], paraId } : text] };
+        }),
+      }),
+    );
+  };
+
+  /** comment:reply → append a reply to the thread (Word's reply is its own
+   *  w:comment with no body anchors, linked through commentsExtended's
+   *  paraIdParent). Legacy parents without a paraId mint one so the reply can
+   *  link to them — one transaction, one undo step. */
+  readonly onCommentReply = (event: CustomEvent<{ parentId?: number; text?: string }>): void => {
+    const editor = this.host.editor();
+    const parentId = event.detail?.parentId;
+    const text = event.detail?.text?.trim();
+    if (!editor || parentId == null || !text) return;
+    const docAttrs = (editor.state.doc.attrs ?? {}) as { documentExtras?: CommentExtras };
+    const extras = docAttrs.documentExtras ?? {};
+    let comments = extras.comments ?? [];
+    let exs = extras.commentsExtended ?? [];
+    const parent = comments.find((c) => Number(c.id) === parentId);
+    if (!parent) return;
+    let parentParaId = paraIdOf(parent);
+    if (!parentParaId) {
+      parentParaId = newParaId(exs.map((e) => e.paraId));
+      comments = comments.map((c) =>
+        Number(c.id) === parentId ? withParaId(c, parentParaId as string) : c,
+      );
+      exs = [...exs, { paraId: parentParaId, done: false }];
+    }
+    const id = comments.reduce((max, c) => Math.max(max, Number(c.id ?? 0)), -1) + 1;
+    const paraId = newParaId(exs.map((e) => e.paraId));
+    editor.view.dispatch(
+      editor.state.tr.setDocAttribute("documentExtras", {
+        ...extras,
+        comments: [
+          ...comments,
+          {
+            id,
+            author: "Docen User",
+            initials: "DU",
+            date: new Date().toISOString(),
+            children: [{ children: [text], paraId }],
+          },
+        ],
+        commentsExtended: [...exs, { paraId, paraIdParent: parentParaId, done: false }],
+      }),
+    );
+  };
+
+  /** comment:resolve → Word resolves the whole conversation: every
+   *  commentsExtended entry in the thread gets the w15:done flag (or loses it
+   *  on reopen). */
+  readonly onCommentResolve = (event: CustomEvent<{ id?: number; done?: boolean }>): void => {
+    const editor = this.host.editor();
+    const id = event.detail?.id;
+    const done = event.detail?.done === true;
+    if (!editor || id == null) return;
+    const docAttrs = (editor.state.doc.attrs ?? {}) as { documentExtras?: CommentExtras };
+    const extras = docAttrs.documentExtras ?? {};
+    let comments = extras.comments ?? [];
+    let exs = extras.commentsExtended ?? [];
+    const root = comments.find((c) => Number(c.id) === id);
+    if (!root) return;
+    // Legacy roots mint their paraId so thread membership is well-defined.
+    let rootParaId = paraIdOf(root);
+    if (!rootParaId) {
+      rootParaId = newParaId(exs.map((e) => e.paraId));
+      comments = comments.map((c) =>
+        Number(c.id) === id ? withParaId(c, rootParaId as string) : c,
+      );
+      exs = [...exs, { paraId: rootParaId, done: false }];
+    }
+    const threadParaIds = this.#threadParaIds(root, comments, exs);
+    editor.view.dispatch(
+      editor.state.tr.setDocAttribute("documentExtras", {
+        ...extras,
+        comments,
+        commentsExtended: exs.map((e) =>
+          e.paraId && threadParaIds.has(e.paraId) ? { ...e, done } : e,
+        ),
       }),
     );
   };
@@ -461,41 +658,79 @@ export class CommentsCommands {
   }
 
   /** Sync the comments pane's card list from the doc's documentExtras after
-   *  every transaction (the pane is a pure view of the model). Cards order by
-   *  their anchored range's document position — Word's sidebar follows the
-   *  text, not the round-trip append order the extras array stores. */
+   *  every transaction (the pane is a pure view of the model). Threads order
+   *  by their anchored range's document position — Word's sidebar follows the
+   *  text, not the round-trip append order the extras array stores; replies
+   *  hang under their thread root through the commentsExtended paraIdParent
+   *  chain (multi-level links flatten under the root). */
   syncCommentsPane(): void {
     const pane = this.#commentsPaneEl();
     if (!pane) return;
     const editor = this.host.editor();
-    const docAttrs = (editor?.state.doc.attrs ?? {}) as {
-      documentExtras?: {
-        comments?: Array<{
-          id?: number;
-          author?: string;
-          initials?: string;
-          date?: string;
-          children?: Array<{ text?: string }>;
-        }>;
-      };
-    };
+    const docAttrs = (editor?.state.doc.attrs ?? {}) as { documentExtras?: CommentExtras };
+    const comments = docAttrs.documentExtras?.comments ?? [];
+    const exs = docAttrs.documentExtras?.commentsExtended ?? [];
+    const exByParaId = new Map(exs.filter((e) => e.paraId).map((e) => [e.paraId as string, e]));
     const startPos = new Map<number, number>();
     editor?.state.doc.descendants((child, pos) => {
       const marker = commentMarkerOf(child);
       if (marker?.kind === "start") startPos.set(marker.id, pos);
     });
-    const cards = (docAttrs.documentExtras?.comments ?? [])
-      .map((c) => ({
+    interface ThreadCard {
+      id: number;
+      author: string;
+      initials: string;
+      date: string;
+      text: string;
+      resolved: boolean;
+      replies: ThreadCard[];
+    }
+    const cardOf = new Map<number, ThreadCard>();
+    const makeCard = (c: CommentEntry): ThreadCard => {
+      const paraId = paraIdOf(c);
+      const card: ThreadCard = {
         id: Number(c.id ?? 0),
         author: c.author ?? "",
         initials: c.initials ?? "",
         date: c.date ?? "",
-        text: (c.children ?? []).map((r) => r.text ?? "").join(""),
-        pos: startPos.get(Number(c.id ?? 0)),
-      }))
-      .sort((a, b) => (a.pos ?? Number.MAX_SAFE_INTEGER) - (b.pos ?? Number.MAX_SAFE_INTEGER))
-      .map(({ pos: _pos, ...card }) => card);
-    pane.comments = JSON.stringify(cards);
+        text: commentText(c),
+        resolved: paraId != null && exByParaId.get(paraId)?.done === true,
+        replies: [],
+      };
+      cardOf.set(card.id, card);
+      return card;
+    };
+    const ordered = comments
+      .map((c, index) => ({ c, index, pos: startPos.get(Number(c.id ?? 0)) }))
+      .sort((a, b) => {
+        if (a.pos != null && b.pos != null) return a.pos - b.pos;
+        if (a.pos != null) return -1;
+        if (b.pos != null) return 1;
+        return a.index - b.index;
+      });
+    for (const { c } of ordered) makeCard(c);
+    const roots: ThreadCard[] = [];
+    for (const { c } of ordered) {
+      const card = cardOf.get(Number(c.id ?? 0));
+      if (!card) continue;
+      // Walk the paraIdParent chain to the thread root (bounded — a malformed
+      // cyclic chain falls back to a top-level card instead of spinning).
+      const paraId = paraIdOf(c);
+      let parentParaId = paraId ? exByParaId.get(paraId)?.paraIdParent : undefined;
+      let root: CommentEntry | undefined;
+      let guard = 0;
+      while (parentParaId && guard++ < 32) {
+        const parent = comments.find((k) => paraIdOf(k) === parentParaId);
+        if (!parent) break;
+        root = parent;
+        const parentEx = exByParaId.get(parentParaId);
+        parentParaId = parentEx?.paraIdParent;
+      }
+      const rootCard = root ? cardOf.get(Number(root.id)) : undefined;
+      if (rootCard && rootCard.id !== card.id) rootCard.replies.push(card);
+      else roots.push(card);
+    }
+    pane.comments = JSON.stringify(roots);
   }
 
   /** selectionUpdate → highlight the comments-pane card whose anchored range
