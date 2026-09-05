@@ -281,6 +281,10 @@ export function paintMembers(
           path: m.d,
           fill: m.fill ? `#${m.fill}` : undefined,
           ...strokePropsOf(m.line),
+          // Adjacent same-color fills share their edge and the rasterizer
+          // leaves a 1px antialiasing seam between them — a hairline in the
+          // fill color closes it (an outlined member keeps its own stroke).
+          ...(m.fill && !m.line ? { stroke: `#${m.fill}`, strokeWidth: 1 } : {}),
           // Leafer spells the SVG fill-rule attribute `windingRule`.
           windingRule: m.fillRule,
         }),
@@ -325,6 +329,11 @@ export function paintMembers(
         const slack = boxH - (m.insets?.top ?? 0) - (m.insets?.bottom ?? 0) - laid.heightPx;
         oy += m.anchor === "center" ? Math.max(0, slack / 2) : Math.max(0, slack);
       }
+      // Metafile text is drawn art replayed from GDI records, not editable
+      // story rows: its strings carry no paragraph marks, so the marks pass
+      // must not paint a ¶ into the box (a wps txbx keeps them — Word shows
+      // marks inside text boxes too).
+      const tctx = m.nowrap ? { ...mctx, showMarks: false } : mctx;
       if (m.rotation) {
         // Vertical metafile text (a rotated GDI world transform): the body
         // shapes horizontally as usual, then rotates about the box origin —
@@ -343,7 +352,7 @@ export function paintMembers(
         const dx = pivot ? 0 : -m.width / 2;
         const dy = pivot ? 0 : -m.height / 2;
         for (const item of laid.stack) {
-          paintBlock(group, item.block, left + dx, oy + dy + item.yPx, mctx, {
+          paintBlock(group, item.block, left + dx, oy + dy + item.yPx, tctx, {
             width: inner,
             inCell: true,
             shapeText: true,
@@ -352,7 +361,7 @@ export function paintMembers(
         tree.add(group);
       } else {
         for (const item of laid.stack) {
-          paintBlock(tree, item.block, mx + left, my + oy + item.yPx, mctx, {
+          paintBlock(tree, item.block, mx + left, my + oy + item.yPx, tctx, {
             width: inner,
             inCell: true,
             shapeText: true,
