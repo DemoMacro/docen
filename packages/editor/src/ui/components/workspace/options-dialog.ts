@@ -262,7 +262,7 @@ class DocenOptionsDialog extends FASTElement {
 
   #applyLabels(): void {
     if (this.dialogEl) this.dialogEl.heading = t("options.title", this);
-    if (this.headingEl) this.headingEl.textContent = t("options.language", this);
+    if (this.headingEl) this.headingEl.textContent = t("options.uiLanguage", this);
     if (this.themeHeadingEl) this.themeHeadingEl.textContent = t("options.theme", this);
     if (this.okBtn) this.okBtn.textContent = t("options.ok", this);
     if (this.cancelBtn) this.cancelBtn.textContent = t("options.cancel", this);
