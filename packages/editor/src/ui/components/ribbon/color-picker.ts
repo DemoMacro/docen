@@ -222,6 +222,11 @@ const styles = css`
     inset-inline-start: anchor(self-start);
     inset-inline-end: auto;
   }
+  /* The highlighter grid is 8 narrow columns (142px) — the 188px floor would
+     leave the No Color button 30px wider than the swatches below it. */
+  :host([palette="highlight"]) .color-grid {
+    min-width: 0;
+  }
   .cp-section {
     font-size: 11px;
     color: #666;
