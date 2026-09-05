@@ -34,6 +34,7 @@ import { getMatchHighlights } from "prosemirror-search";
 
 import { listLevelStepPatch } from "../extensions/commands";
 import { KEYBOARD_SHORTCUTS } from "../extensions/keymap";
+import { autocorrectOf } from "./autocorrect";
 import { CaretMap, type TableZone } from "./caret-map";
 import { CellSelection, cellAt, inSameTable } from "./cell-selection";
 import { CropOverlay } from "./drawing-editor/crop-overlay";
@@ -1526,9 +1527,26 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     }
     event.preventDefault();
     switch (event.inputType) {
-      case "insertText":
-        if (event.data) insertText(event.data);
+      case "insertText": {
+        if (!event.data) break;
+        // Autocorrect rides the typed leg only — the last character before
+        // the caret decides the smart quote's side, and a boundary character
+        // corrects the word behind it. IME/paste/spell legs skip this.
+        const s = active();
+        const $from = s.editor.state.selection.$from;
+        const textBefore = $from.parent.textBetween(0, $from.parentOffset);
+        const fix = autocorrectOf(event.data, textBefore);
+        if (fix) {
+          s.editor.commands.command(({ state, dispatch }) => {
+            const { from, to } = state.selection;
+            dispatch?.(state.tr.insertText(fix.text, from - fix.back, to));
+            return true;
+          });
+        } else {
+          insertText(event.data);
+        }
         break;
+      }
       // Chrome reports textarea Enter as insertLineBreak; keep both mapped to
       // a paragraph split (Shift+Enter variants included for now). PM's
       // splitBlock drops attrs — a list paragraph would lose its

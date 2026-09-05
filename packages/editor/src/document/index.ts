@@ -231,9 +231,15 @@ class DocenDocument extends AddinHost<Editor> {
   #langObserver?: MutationObserver;
   /** Tears down the transaction listener mirroring caret font/size → comboboxes. */
   #fontSyncCleanup?: () => void;
-  // Format Painter captured marks + the pointerup listener that applies them.
+  // Format Painter captured formatting + the listeners that apply it. Marks
+  // and paragraph attrs capture together; sticky mode (double click) paints
+  // every following selection until Esc or another painter click.
   #painterMarks: readonly Mark[] | null = null;
+  #painterPara: Record<string, unknown> | null = null;
   #painterOff?: () => void;
+  #painterKeyOff?: () => void;
+  #painterSticky = false;
+  #painterClickAt = 0;
   /** Current zoom level (percent) applied by the page stage's slot sizing. */
   #zoom = 100;
   /** Cached unwrapped JSON (host.getJSON result). Invalidated on every user/doc
@@ -471,11 +477,21 @@ class DocenDocument extends AddinHost<Editor> {
     bridge.scrollIntoView(pos);
   }
 
-  /** Format Painter: on first click, capture the current selection's marks and
-   *  arm a one-shot pointerup listener; the next non-empty selection receives
-   *  those marks and disarms the painter. A second click cancels. */
+  /** Format Painter: a click captures the selection's run marks + paragraph
+   *  formatting and arms a one-shot pointerup; the next non-empty selection
+   *  receives both and disarms. A double click arms sticky mode — every
+   *  following selection paints until Esc or another painter click (Word's
+   *  format painter). A click while armed cancels. */
   #toggleFormatPainter(): void {
+    const now = performance.now();
+    const rapid = now - this.#painterClickAt < 500;
+    this.#painterClickAt = now;
     if (this.#painterMarks) {
+      if (rapid) {
+        // Second click of a double click: stay armed, paint repeatedly.
+        this.#painterSticky = true;
+        return;
+      }
       this.#stopFormatPainter();
       return;
     }
@@ -486,27 +502,71 @@ class DocenDocument extends AddinHost<Editor> {
     // first selected character's marks (e.g. bold stamped on [from,to))
     // would be lost.
     this.#painterMarks = editor.state.doc.resolve(editor.state.selection.from + 1).marks();
+    const $from = editor.state.selection.$from;
+    if ($from.parent.type.name === "paragraph") {
+      // Paragraph formatting paints too (Word: alignment, indent, spacing,
+      // lists). The section-close markers belong to the target's position,
+      // not the source's — stripped here, preserved on apply.
+      const para = { ...($from.parent.attrs as Record<string, unknown>) };
+      delete para.sectionProperties;
+      delete para.sectionHeaders;
+      delete para.sectionFooters;
+      this.#painterPara = para;
+    }
+    this.#painterSticky = rapid;
     this.toggleAttribute("format-painter", true);
     const onUp = (): void => {
       const ed = this.#bridge?.activeEditor() ?? this.editor;
-      if (!ed) return;
-      const { from, to, empty } = ed.state.selection;
-      if (!empty && this.#painterMarks) {
-        const tr = ed.state.tr;
-        for (const mark of this.#painterMarks) tr.addMark(from, to, mark);
-        ed.view.dispatch(tr);
+      if (ed) this.#applyFormatPainter(ed);
+      if (this.#painterSticky) {
+        // Stay armed: re-arm for the next selection. A bare caret click
+        // (empty selection) consumes this listener without painting, exactly
+        // like Word's sticky painter ignoring navigation clicks.
+        this.addEventListener("pointerup", onUp, { once: true });
+        this.#painterOff = () => this.removeEventListener("pointerup", onUp);
+      } else {
+        this.#stopFormatPainter();
       }
-      this.#stopFormatPainter();
+    };
+    const onKey = (event: Event): void => {
+      if ((event as KeyboardEvent).key === "Escape") this.#stopFormatPainter();
     };
     this.addEventListener("pointerup", onUp, { once: true });
+    this.addEventListener("keydown", onKey);
     this.#painterOff = () => this.removeEventListener("pointerup", onUp);
+    this.#painterKeyOff = () => this.removeEventListener("keydown", onKey);
+  }
+
+  /** Stamp the captured marks + paragraph attrs onto the current selection. */
+  #applyFormatPainter(ed: Editor): void {
+    const { from, to, empty } = ed.state.selection;
+    if (empty || (!this.#painterMarks && !this.#painterPara)) return;
+    const tr = ed.state.tr;
+    for (const mark of this.#painterMarks ?? []) tr.addMark(from, to, mark);
+    if (this.#painterPara) {
+      ed.state.doc.nodesBetween(from, to, (node, pos) => {
+        if (node.type.name !== "paragraph") return;
+        const next: Record<string, unknown> = { ...this.#painterPara! };
+        // The target keeps its own section-close markers.
+        const target = node.attrs as Record<string, unknown>;
+        for (const key of ["sectionProperties", "sectionHeaders", "sectionFooters"]) {
+          if (target[key] != null) next[key] = target[key];
+        }
+        tr.setNodeMarkup(pos, undefined, next);
+      });
+    }
+    ed.view.dispatch(tr);
   }
 
   #stopFormatPainter(): void {
     this.#painterMarks = null;
+    this.#painterPara = null;
+    this.#painterSticky = false;
     this.removeAttribute("format-painter");
     this.#painterOff?.();
     this.#painterOff = undefined;
+    this.#painterKeyOff?.();
+    this.#painterKeyOff = undefined;
   }
 
   /** Mirror the font name / size and paragraph style at the caret into the
