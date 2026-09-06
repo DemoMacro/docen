@@ -82,10 +82,8 @@ export function layoutParagraph(
     tabStops: para.tabStops,
     defaultTabStopPx: para.defaultTabStopPx,
     strutPx,
-    lineHeight: ({ naturalPx, hasCjk, hasPicture }) =>
-      spec
-        ? resolveLine(spec, naturalPx, pitch, hasCjk, inTable, hasPicture)
-        : snapLine(naturalPx, hasCjk, pitch, inTable, hasPicture),
+    lineHeight: ({ naturalPx }) =>
+      spec ? resolveLine(spec, naturalPx, pitch) : snapLine(naturalPx, pitch),
     startY: ctx?.startY,
     // Absolute zones come from whoever stacks the blocks: the flow passes the
     // page's float zones, the table cell stacker accumulates the cell's own
@@ -298,50 +296,22 @@ function snapUpToPitch(px: number, pitch: number): number {
   return Math.ceil(px / pitch) * pitch;
 }
 
-function resolveLine(
-  spec: LayoutLineHeight,
-  naturalPx: number,
-  pitch: number,
-  hasCjk = false,
-  inTable = false,
-  hasPicture = false,
-): number {
+function resolveLine(spec: LayoutLineHeight, naturalPx: number, pitch: number): number {
   if (spec.rule === "exact") return spec.px;
   if (spec.rule === "atLeast") return Math.max(naturalPx, spec.px);
   // multiple: 240ths of a single line — the grid pitch when defined, else the
-  // font natural (verified vs Word). On a grid, a body CJK line's spec'd
-  // height never falls below the line's natural height and snaps up to whole
-  // rows: a face taller than its grid rows (Microsoft YaHei runs ~1.7em while
-  // a 340-twip pitch is ~1.2em of a 14pt line) takes the rows it needs. Latin
-  // lines are exempt from the lattice — but a picture-sized line joins it
-  // (its box spans whole rows and half-leads; pixel-verified against the
-  // reference renders).
-  if (pitch > 0 && (hasCjk || hasPicture)) {
-    if (inTable) {
-      // A cell line's natural height still snaps up to whole rows before the
-      // comparison against the multiple's demand (see resolveLine doc).
-      return Math.max(spec.factor * pitch, snapUpToPitch(naturalPx, pitch));
-    }
-    const specH = spec.factor * pitch;
-    return snapUpToPitch(Math.max(specH, naturalPx), pitch);
-  }
-  const single = pitch > 0 ? pitch : naturalPx;
-  return spec.factor * single;
+  // font natural (verified vs Word). On a grid every line takes the larger of
+  // the multiple's demand (factor × pitch) and its own natural height snapped
+  // up to whole rows — body CJK, Latin, cell and picture lines alike.
+  // Word-COM verified: an 11pt body line stays at factor × pitch (18.04pt on a
+  // 15.6pt grid, never snapped to the lattice) while a 24pt heading line spans
+  // 2 rows (31.2pt).
+  if (pitch > 0) return Math.max(spec.factor * pitch, snapUpToPitch(naturalPx, pitch));
+  return spec.factor * naturalPx;
 }
 
-/** No spacing.line: snap to the document grid. */
-function snapLine(
-  naturalPx: number,
-  hasCjk: boolean,
-  pitch: number,
-  inTable: boolean,
-  hasPicture = false,
-): number {
+/** No spacing.line: snap the natural height to the document grid. */
+function snapLine(naturalPx: number, pitch: number): number {
   if (pitch <= 0) return naturalPx;
-  // A cell line's natural height snaps up to whole rows — the "add grid
-  // pitch" compat raises it as far as the line demands, never just one pitch.
-  // A picture-sized body line snaps the same way: the box spans whole rows
-  // and gridPadOf half-leads the picture inside them.
-  if (inTable || hasCjk || hasPicture) return snapUpToPitch(naturalPx, pitch);
-  return Math.max(naturalPx, pitch);
+  return snapUpToPitch(naturalPx, pitch);
 }

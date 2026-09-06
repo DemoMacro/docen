@@ -131,13 +131,14 @@ describe("layoutParagraph line-height semantics", () => {
     if (free.kind === "paragraph") expect(free.heightPx).toBeCloseTo(NATURAL, 4);
   });
 
-  it("bases a grid-joined table cell's CJK multiple line on the pitch without row snapping", () => {
+  it("bases CJK multiple lines on the pitch without row snapping — cell and body alike", () => {
     // Corpus-verified (honor table, 340-twip grid): a 1.5× cell line measures
-    // 1.5 × pitch — the cell floors at its demand, never rounding up to whole
+    // 1.5 × pitch — the line floors at its demand, never rounding up to whole
     // grid rows (the row's trHeight floors separately). The earlier E14
     // "renders TWO rows" reading mistook 1.5×pitch in px for 2 rows in pt.
-    // Body (non-cell) keeps its whole-row rounding; a cell without the compat
-    // flag scales off the font natural instead of the pitch.
+    // Word-COM verified for body lines too (grid-test5/8): the demand value is
+    // kept unsnapped whenever it exceeds the line's snapped natural; a cell
+    // without the compat flag scales off the font natural instead of the pitch.
     const pitch = 25;
     const cjkStyle = { family: { latin: "serif", eastAsia: "SimSun" }, sizePx: 16 };
     const cjk = (ctx: Record<string, unknown>) =>
@@ -154,7 +155,7 @@ describe("layoutParagraph line-height semantics", () => {
     const body = cjk({});
     const free = cjk({ inTable: true });
     if (joined.kind === "paragraph") expect(joined.heightPx).toBeCloseTo(37.5, 4);
-    if (body.kind === "paragraph") expect(body.heightPx).toBeCloseTo(50, 4);
+    if (body.kind === "paragraph") expect(body.heightPx).toBeCloseTo(37.5, 4);
     // Flag absent: grid-free cell — the multiple scales off the font natural.
     if (free.kind === "paragraph") expect(free.heightPx).toBeCloseTo(1.5 * NATURAL, 4);
   });
