@@ -1,4 +1,5 @@
 import type { Editor } from "@docen/docx/core";
+import type { Transaction } from "@tiptap/pm/state";
 
 import {
   addSpellWord,
@@ -36,6 +37,10 @@ export class SpellingCommands {
   /** The pane's active issue (document order); -1 = nothing selected. */
   #active = -1;
   #timer: ReturnType<typeof setTimeout> | null = null;
+  /** Word's "Check spelling as you type" (File → Options → Proofing): off
+   *  stops the checks and clears the squiggles — the per-selection noProof
+   *  mark and the session ignores cannot turn the checker itself off. */
+  #enabled = true;
 
   /** Tear down pending timers (the host's disconnectedCallback). */
   dispose(): void {
@@ -44,6 +49,7 @@ export class SpellingCommands {
 
   /** Re-check after the user pauses (debounced; driven by every render). */
   schedule(): void {
+    if (!this.#enabled) return;
     if (this.#timer != null) clearTimeout(this.#timer);
     this.#timer = setTimeout(() => {
       this.#timer = null;
@@ -51,9 +57,59 @@ export class SpellingCommands {
     }, 400);
   }
 
+  /** The checker's on/off (the options dialog's Proofing section). Turning
+   *  it off clears every visible squiggle immediately; turning it back on
+   *  re-checks at once. */
+  setEnabled(on: boolean): void {
+    if (on === this.#enabled) return;
+    this.#enabled = on;
+    this.#active = -1;
+    if (on) this.run();
+    else {
+      if (this.#timer != null) clearTimeout(this.#timer);
+      this.#timer = null;
+      this.#issues = [];
+      this.host.bridge()?.setSpellingIssues([]);
+      const bar = this.host.element().shadowRoot?.querySelector("docen-status-bar");
+      bar?.setAttribute("proofing", "ok");
+      this.#syncPane();
+    }
+  }
+
+  /** Whether the checker runs (the options dialog pre-fills from here). */
+  enabled(): boolean {
+    return this.#enabled;
+  }
+
   /** The live issue list (the ribbon's spell-check command reads it). */
   issues(): SpellingIssue[] {
     return this.#issues;
+  }
+
+  /** Carry the issue ranges through a doc-changing transaction — the same
+   *  mapping PM applies to selections, applied the moment the edit lands.
+   *  Without it every consumer of the positions (the squiggle overlay, the
+   *  right-click activate, the pane's replace) reads the pre-edit ranges
+   *  against the post-edit doc until the debounced re-check catches up:
+   *  squiggles ride the wrong text while typing, and a replace deletes a
+   *  range that no longer holds its word. The re-check still owns word
+   *  discovery; this keeps the existing ranges honest in between. */
+  mapThrough(tr: Transaction): void {
+    if (this.#issues.length === 0) return;
+    const mapped: SpellingIssue[] = [];
+    for (const issue of this.#issues) {
+      const from = tr.mapping.map(issue.from, -1);
+      const to = tr.mapping.map(issue.to, 1);
+      // A word the edit deleted outright (or hollowed to a point) has no
+      // range left to flag.
+      if (from >= to) continue;
+      mapped.push(from === issue.from && to === issue.to ? issue : { ...issue, from, to });
+    }
+    this.#issues = mapped;
+    // Push now so the render's placeSpelling (new map, next rAF) draws the
+    // carried ranges; the stale-map gate keeps the interim frames empty
+    // rather than wrong.
+    this.host.bridge()?.setSpellingIssues(this.#issues);
   }
 
   run(): void {

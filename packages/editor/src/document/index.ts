@@ -2815,6 +2815,7 @@ class DocenDocument extends AddinHost<Editor> {
     if (props.transaction.selectionSet) this.#syncStatusLanguage();
     if (props.transaction.docChanged) {
       this.#jsonDirty = true;
+      this.#spelling.mapThrough(props.transaction);
       this.dispatchEvent(
         new CustomEvent("docen:change", { bubbles: true, composed: true, detail: { dirty: true } }),
       );
@@ -4724,11 +4725,13 @@ class DocenDocument extends AddinHost<Editor> {
         this.#emitCancelable("docen:new");
         break;
       case "options": {
-        // Filename menu → open the Options dialog (UI language + theme).
+        // Filename menu → open the Options dialog (UI language + theme +
+        // spell-as-you-type).
         const optionsEl = this.shadowRoot?.querySelector("docen-options-dialog");
         if (optionsEl) {
           optionsEl.setAttribute("locale", this.lang || document.documentElement.lang || "zh-CN");
           optionsEl.setAttribute("theme", this.theme ?? "light");
+          optionsEl.setAttribute("proofing", String(this.#spelling.enabled()));
           (optionsEl as unknown as { show?: () => void }).show?.();
         }
         break;
@@ -4780,7 +4783,8 @@ class DocenDocument extends AddinHost<Editor> {
 
   /** Options dialog 确定 — commit the UI language + theme. */
   readonly #onOptionsOk = (event: Event): void => {
-    const { lang, theme } = (event as CustomEvent<{ lang?: string; theme?: string }>).detail ?? {};
+    const { lang, theme, spellcheck } =
+      (event as CustomEvent<{ lang?: string; theme?: string; spellcheck?: boolean }>).detail ?? {};
     if (lang && this.getAttribute("lang") !== lang) {
       this.setAttribute("lang", lang);
       this.#emitLangChange(lang);
@@ -4789,6 +4793,7 @@ class DocenDocument extends AddinHost<Editor> {
       this.setAttribute("theme", theme);
       this.#emitThemeChange(theme);
     }
+    if (typeof spellcheck === "boolean") this.#spelling.setEnabled(spellcheck);
   };
 
   /** Notify external listeners (framework wrappers like @docen/vue) when the

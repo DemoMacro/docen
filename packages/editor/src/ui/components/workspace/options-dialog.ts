@@ -118,6 +118,10 @@ const template = html<DocenOptionsDialog>`
           />
         </fluent-dropdown>
       </div>
+      <div class="opt-field">
+        <div class="opt-heading" ${ref("spellHeadingEl")}></div>
+        <fluent-checkbox ${ref("spellBox")}></fluent-checkbox>
+      </div>
     </div>
     <div slot="action" class="opt-actions">
       <fluent-button
@@ -141,16 +145,19 @@ type ComboboxLike = {
 };
 
 /**
- * `<docen-options-dialog locale="…" theme="…">` — MS Office "Options" dialog.
- * v1 carries the two host-level prefs: UI language (over {@link availableLanguages},
+ * `<docen-options-dialog locale="…" theme="…" proofing="…">` — MS Office
+ * "Options" dialog. v1 carries the host-level prefs: UI language (over
+ * {@link availableLanguages},
  * so a locale added via `registerTranslation` or an add-in's `localizationInfo`
- * appears here with no further wiring) and theme (the built-in Fluent web /
- * teams / high-contrast themes, plus any registered via registerTheme). Rides
+ * appears here with no further wiring), theme (the built-in Fluent web /
+ * teams / high-contrast themes, plus any registered via registerTheme), and
+ * the spell-as-you-type toggle (Proofing). Rides
  * on `<docen-dialog>` for
  * the modal shell (backdrop / Esc / show).
  *
- * The host seeds the current values via `locale` / `theme`, calls `show()`, and
- * listens for `options:ok { lang, theme }` (确定). Cancel / Esc just close.
+ * The host seeds the current values via `locale` / `theme` / `proofing`, calls
+ * `show()`, and listens for `options:ok { lang, theme, spellcheck }` (确定).
+ * Cancel / Esc just close.
  * State commits atomically on OK (Office behavior — not live).
  *
  * Both pickers are `<fluent-dropdown type="combobox">` — typeable, so a long
@@ -162,6 +169,9 @@ class DocenOptionsDialog extends FASTElement {
   // clashes with the base property (TS2416).
   @attr locale?: string;
   @attr theme?: string;
+  /** Whether spell-as-you-type runs ("true"/"false") — the Proofing section's
+   *  checkbox pre-fills from it. Absent = on. */
+  @attr proofing?: string;
 
   @observable dialogEl?: HTMLElement & { heading?: string; show(): void; hide(): void };
   @observable headingEl?: HTMLElement;
@@ -172,6 +182,8 @@ class DocenOptionsDialog extends FASTElement {
   @observable themeDropdown?: HTMLElement;
   @observable themeListbox?: HTMLElement;
   @observable themeInput?: HTMLInputElement;
+  @observable spellHeadingEl?: HTMLElement;
+  @observable spellBox?: HTMLElement & { checked?: boolean };
   @observable okBtn?: HTMLElement;
   @observable cancelBtn?: HTMLElement;
   /** Pickable locales — refreshed when a locale is registered at runtime. */
@@ -218,6 +230,9 @@ class DocenOptionsDialog extends FASTElement {
     this.themeOptions = this.#computeThemeOptions();
     this.#langLocal = this.locale ?? resolveLang(this);
     this.#themeLocal = resolveTheme(this.theme);
+    // The checkbox writes `checked` directly — programmatic currentChecked
+    // never renders (the prefill/read-back rule).
+    if (this.spellBox) this.spellBox.checked = this.proofing !== "false";
     this.#syncCombobox(
       this.dropdown as unknown as ComboboxLike | undefined,
       this.listbox,
@@ -240,7 +255,11 @@ class DocenOptionsDialog extends FASTElement {
       new CustomEvent("options:ok", {
         bubbles: true,
         composed: true,
-        detail: { lang: this.#langLocal, theme: this.#themeLocal },
+        detail: {
+          lang: this.#langLocal,
+          theme: this.#themeLocal,
+          spellcheck: this.spellBox?.checked !== false,
+        },
       }),
     );
     this.hide();
@@ -264,6 +283,8 @@ class DocenOptionsDialog extends FASTElement {
     if (this.dialogEl) this.dialogEl.heading = t("options.title", this);
     if (this.headingEl) this.headingEl.textContent = t("options.uiLanguage", this);
     if (this.themeHeadingEl) this.themeHeadingEl.textContent = t("options.theme", this);
+    if (this.spellHeadingEl) this.spellHeadingEl.textContent = t("options.proofing", this);
+    if (this.spellBox) this.spellBox.textContent = t("options.spellAsYouType", this);
     if (this.okBtn) this.okBtn.textContent = t("options.ok", this);
     if (this.cancelBtn) this.cancelBtn.textContent = t("options.cancel", this);
   }

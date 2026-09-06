@@ -28,7 +28,7 @@ import {
   selectNodeForward,
   splitBlock,
 } from "@tiptap/pm/commands";
-import { Fragment, Slice } from "@tiptap/pm/model";
+import { Fragment, type Node as PMNode, Slice } from "@tiptap/pm/model";
 import { NodeSelection, TextSelection } from "@tiptap/pm/state";
 import { getMatchHighlights } from "prosemirror-search";
 
@@ -286,6 +286,12 @@ export interface EditBridge {
 interface Story {
   editor: Editor;
   map: CaretMap | null;
+  /** The doc the map was zipped against — overlays refuse to draw when the
+   *  editor has moved past it (a transaction applied, the raf-merged render
+   *  not yet landed): a stale map's paragraphs no longer match the doc's
+   *  positions, and painting through it puts the caret, selection and
+   *  squiggles on the wrong text until the fresh map arrives. */
+  mapDoc: PMNode | null;
   pageCount: number;
   lastCaretPos: number;
   /** The story's content callback — main: the full re-flow; furniture: the
@@ -328,6 +334,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     const s: Story = {
       editor: makeEditor(content),
       map: null,
+      mapDoc: null,
       pageCount: 0,
       lastCaretPos: -1,
       onDoc,
@@ -448,6 +455,15 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     });
   };
 
+  /** The map is drawable only against the doc it was zipped from — a
+   *  transaction the raf-merged render has not answered yet leaves it one
+   *  generation behind, and painting through it puts the caret, selection
+   *  and squiggles on the wrong text for a frame. Overlays hide until the
+   *  fresh map lands (a selection-only change never bumps the doc, so
+   *  drag-select and caret moves keep drawing synchronously). */
+  const mapFresh = (s: Story): s is Story & { map: CaretMap } =>
+    s.map?.valid === true && s.mapDoc === s.editor.state.doc;
+
   /** The selection highlight — one translucent div per crossed line, rebuilt
    *  on every placement (selections span few lines; rebuild beats diffing).
    *  A cell selection highlights each cell's whole grid box instead (Word's
@@ -458,7 +474,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     selectionLayer.length = 0;
     const s = active();
     const sel = s.editor.state.selection;
-    if (!s.map?.valid) return;
+    if (!mapFresh(s)) return;
     const scale = opts.scale?.() ?? 1;
     const rects =
       sel instanceof CellSelection
@@ -497,7 +513,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     for (const el of searchLayer) el.remove();
     searchLayer.length = 0;
     const s = active();
-    if (!s.map?.valid) return;
+    if (!mapFresh(s)) return;
     const sel = s.editor.state.selection;
     const scale = opts.scale?.() ?? 1;
     for (const deco of getMatchHighlights(s.editor.state).find()) {
@@ -537,7 +553,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     for (const el of spellingLayer) el.remove();
     spellingLayer.length = 0;
     const s = active();
-    if (!s.map?.valid || spellingIssues.length === 0) return;
+    if (!mapFresh(s) || spellingIssues.length === 0) return;
     const scale = opts.scale?.() ?? 1;
     for (const issue of spellingIssues) {
       for (const r of s.map.selectionRects(issue.from, issue.to)) {
@@ -570,7 +586,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       selDrawing = null;
     }
     const s = active();
-    if (!s.map?.valid) {
+    if (!mapFresh(s)) {
       caret.style.display = "none";
       return;
     }
@@ -2281,6 +2297,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     editor,
     updatePages(pages, pageOrigin): void {
       main.pageOrigin = pageOrigin;
+      main.mapDoc = main.editor.state.doc;
       main.map = new CaretMap(
         pages,
         main.editor.state.doc,
@@ -2294,6 +2311,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       const s = story;
       if (!s) return;
       const origin = main.pageOrigin?.(s.anchorPage);
+      s.mapDoc = s.editor.state.doc;
       s.map = stack
         ? new CaretMap([{ items: stack }] as never, s.editor.state.doc, () => ({
             contentLeftPx: origin?.contentLeftPx ?? 0,
