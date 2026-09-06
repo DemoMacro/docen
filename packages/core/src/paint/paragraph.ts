@@ -18,21 +18,11 @@ import {
   type LayoutParagraphBorderEdge,
   type LayoutTextStyle,
 } from "@docen/layout";
-import {
-  Box,
-  Ellipse,
-  Group,
-  Image as LeaferImage,
-  Line,
-  Path,
-  Rect,
-  Text,
-  type IGroup,
-} from "leafer-ui";
+import { Box, Ellipse, Group, Line, Path, Rect, Text, type IGroup } from "leafer-ui";
 
 import type { PaintColumn, PaintContext } from "./context";
 import { paintDrawing, paintMembers, recordDrawingHit } from "./drawing";
-import { addCroppedImage, pinImage } from "./image";
+import { addCroppedImage, addDecodedImage } from "./image";
 
 /** OOXML ST_HighlightColor tokens → Word's highlight palette, #RRGGBB. */
 const HIGHLIGHT_COLOR: Record<string, string> = {
@@ -609,16 +599,10 @@ export function paintParagraph(
             ctx,
           );
         } else if (inline.src) {
-          pinImage(inline.src);
-          target.add(
-            new LeaferImage({
-              url: inline.src,
-              x: ox,
-              y: oy,
-              width: item.widthPx,
-              height: item.heightPx,
-            }),
-          );
+          // An uncropped flat source: a first decode lands after the stage's
+          // eager render, so the slot-and-rerender dance keeps the frame from
+          // staying blank (same protocol the floating drawing members use).
+          addDecodedImage(target, inline.src, ox, oy, item.widthPx, item.heightPx, ctx);
         } else {
           // Linked-only picture (no bytes in the package): an empty frame.
           target.add(

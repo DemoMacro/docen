@@ -3,6 +3,7 @@ import {
   Image as LeaferImage,
   ImageManager,
   Rect,
+  Resource,
   type IGroup,
   type ILeaferImage,
 } from "leafer-ui";
@@ -20,11 +21,21 @@ import type { PaintContext } from "./context";
 const pinnedImages = new Map<string, ILeaferImage>();
 
 export function pinImage(url: string): ILeaferImage {
-  const pinned = pinnedImages.get(url);
-  if (pinned) return pinned;
-  const image = ImageManager.get({ url }, "image");
-  pinnedImages.set(url, image);
-  image.load();
+  let image = pinnedImages.get(url);
+  // A tree clear can briefly drive the shared entry's use count to zero, and
+  // Leafer's recycle judges eviction on a setTimeout — after the repaint has
+  // already re-added the leaf. The Resource-table entry then disappears while
+  // this stale handle still reports ready, and every later paint resolves the
+  // url into a fresh async decode nothing ever frames. Re-anchor instead.
+  if (image && !Resource.get(url)) {
+    pinnedImages.delete(url);
+    image = undefined;
+  }
+  if (!image) {
+    image = ImageManager.get({ url }, "image");
+    pinnedImages.set(url, image);
+    image.load();
+  }
   return image;
 }
 
@@ -60,6 +71,47 @@ function plainImageLeaf(
   });
 }
 
+/** A decoded-plain picture at a box: ready resources join synchronously; on
+ *  the first decode a placeholder keeps the paint-order slot open until the
+ *  bitmap lands. Shared by drawing members and inline picture atoms. */
+export function addDecodedImage(
+  tree: IGroup,
+  src: string,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  ctx: PaintContext,
+  flipH?: boolean,
+  flipV?: boolean,
+): void {
+  const image = pinImage(src);
+  // Repainting the body must reuse Leafer's already-decoded resource. Going
+  // through a fresh DOM Image here leaves an empty placeholder until its load
+  // event, which is the visible flash of cached WMF/EMF raster members.
+  if (image.ready) {
+    tree.add(plainImageLeaf(src, x, y, width, height, flipH, flipV));
+    return;
+  }
+  const slot = new Rect({ x, y, width, height });
+  tree.add(slot);
+  image.load(() => {
+    // A repaint since the decode started cleared the tree (slot included) —
+    // that repaint's own decode now owns the paint-order slot.
+    if (!slot.parent) return;
+    // The decode resolves mid-frame: swapping immediately races the frame's
+    // already-consumed layout plan, and the forced render can miss the
+    // element entirely. Slide the swap to the next frame — the placeholder
+    // keeps the box open until then.
+    requestAnimationFrame(() => {
+      if (!slot.parent) return;
+      tree.addAfter(plainImageLeaf(src, x, y, width, height, flipH, flipV), slot);
+      tree.remove(slot);
+      ctx.rerender();
+    });
+  });
+}
+
 export function addPlainImage(
   tree: IGroup,
   m: Extract<LayoutDrawingMember, { kind: "picture" }>,
@@ -67,27 +119,7 @@ export function addPlainImage(
   my: number,
   ctx: PaintContext,
 ): void {
-  const src = m.src!;
-  const image = pinImage(src);
-  // Repainting the body must reuse Leafer's already-decoded resource. Going
-  // through a fresh DOM Image here leaves an empty placeholder until its load
-  // event, which is the visible flash of cached WMF/EMF raster members.
-  if (image.ready) {
-    tree.add(plainImageLeaf(src, mx, my, m.width, m.height, m.flipH, m.flipV));
-    return;
-  }
-  const slot = new Rect({ x: mx, y: my, width: m.width, height: m.height });
-  tree.add(slot);
-  image.load(() => {
-    // A repaint since the decode started cleared the tree (slot included) —
-    // that repaint's own decode now owns the paint-order slot.
-    if (!slot.parent) return;
-    tree.addAfter(plainImageLeaf(src, mx, my, m.width, m.height, m.flipH, m.flipV), slot);
-    tree.remove(slot);
-    // The stage's eager render already ran when this decode finished; without
-    // a fresh frame the inserted image waits for a repaint that may never come.
-    ctx.rerender();
-  });
+  addDecodedImage(tree, m.src!, mx, my, m.width, m.height, ctx, m.flipH, m.flipV);
 }
 
 /** A run of masked GDI blt members (SRCPAINT/SRCAND halves, optionally over a
