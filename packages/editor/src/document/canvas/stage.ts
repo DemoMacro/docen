@@ -992,16 +992,21 @@ export class CanvasStage {
     const app = new App({
       view: slot.el,
       fill: "transparent",
+      // The body scene lives on an explicit tree layer — an App creates NO
+      // child layer (and so no canvas) unless tree/sky/ground/editor appears
+      // in the config. The old `editor` key used to create the tree as a
+      // side effect; removing it without naming the tree left every page a
+      // childless shell that painted nothing.
+      tree: { type: "design" },
       // Explicit DPR (Leafer's default samples it at creation anyway) so the
       // value stays consistent across app.resize calls.
       pixelRatio: this.renderPixelRatio(this.sectionAt(this.slots.indexOf(slot)).flow),
-      // No `editor` key: selection/editing is docen's own overlay, and an
-      // editor key makes every App construction demand the uninstalled
-      // @leafer-in/editor plugin (one console error per page).
-      // The document surface is MS Office-shaped: scrolling belongs to the
-      // outer DOM container, never to the canvas — disable both interaction
-      // groups so a globally-registered viewport plugin cannot pan the
-      // App's world on wheel.
+      // No `sky` layer (Leafer's interaction/editor surface): selection and
+      // editing live in docen's own overlay. The document surface is MS
+      // Office-shaped: scrolling belongs to the outer DOM container, never
+      // to the canvas — disable both interaction groups so a
+      // globally-registered viewport plugin cannot pan the App's world on
+      // wheel.
       move: { disabled: true },
       wheel: { disabled: true },
     });
