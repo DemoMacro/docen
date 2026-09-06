@@ -145,7 +145,7 @@ export function projectParagraph(p: BodyParagraph, ctx: ProjectContext): LayoutP
     const directHanging = charsPx(dInd.hangingChars) ?? twPx(dInd.hanging);
     if (directHanging != null) return -directHanging;
     const directTw = twPx(dInd.firstLine);
-    if (directTw != null) return Math.max(0, directTw);
+    if (directTw != null) return directTw;
     const directChars = charsPx(dInd.firstLineChars);
     if (directChars != null) return directChars;
     if (level?.hangingTw != null && level.hangingTw > 0) return -twipToPx(level.hangingTw);
@@ -153,7 +153,7 @@ export function projectParagraph(p: BodyParagraph, ctx: ProjectContext): LayoutP
       charsPx(pick([sInd, docInd], "hangingChars")) ?? twPx(pick([sInd, docInd], "hanging"));
     if (styleHanging != null) return -styleHanging;
     const styleTw = twPx(pick([sInd, docInd], "firstLine"));
-    if (styleTw != null) return Math.max(0, styleTw);
+    if (styleTw != null) return styleTw;
     return charsPx(pick([sInd, docInd], "firstLineChars"));
   })();
   const indent = {
