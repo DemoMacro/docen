@@ -1004,14 +1004,16 @@ export class CaretMap {
     const located = this.locate(pos);
     if (!located) return null;
     const { offset, line } = located;
-    const band = this.bandOf(line);
     return {
       // The line's page — a split paragraph's ParaEntry.page stays at its
       // first block's page, the caret belongs where the line actually lays.
       page: line.page,
       xPx: this.xOfChar(line, offset),
-      yPx: band.yPx,
-      heightPx: band.heightPx,
+      // Word's caret covers the whole line box (Word's GetPoint reports the
+      // line height even on a plain single-size line), not the glyph ink box
+      // the selection highlight hugs.
+      yPx: line.yPx,
+      heightPx: line.line.heightPx,
     };
   }
 

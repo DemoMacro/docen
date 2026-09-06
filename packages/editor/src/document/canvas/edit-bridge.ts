@@ -426,7 +426,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
   const caret = document.createElement("div");
   Object.assign(caret.style, {
     position: "absolute",
-    width: "2px",
+    width: "1px",
     background: "#000",
     pointerEvents: "none",
     zIndex: "5",
