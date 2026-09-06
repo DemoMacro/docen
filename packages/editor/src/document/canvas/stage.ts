@@ -1268,7 +1268,13 @@ export class CanvasStage {
     const header = section.furnitureLaid?.header[slot] ?? section.furnitureLaid?.header[0];
     const footer = section.furnitureLaid?.footer[slot] ?? section.furnitureLaid?.footer[0];
     const paintSlots = (layer: PaintContext["layer"]): void => {
-      const storyCtx: PaintContext = { ...ctx, flow: storyFlow, layer };
+      // No hit boxes from furniture art: the body-click hit table pairs a
+      // drawing with a PM selection through its host paragraph, and a
+      // furniture paragraph lives outside the main doc — its watermark or
+      // banner would enter the table unpairable and swallow every body
+      // click landing on it (Word: body clicks pass through header-anchored
+      // shapes; entering the header is the band double-click, not a hit).
+      const storyCtx: PaintContext = { ...ctx, flow: storyFlow, layer, hitBoxes: undefined };
       if (header) {
         paintFurnitureStack(
           layer === "behind" ? behind : body,

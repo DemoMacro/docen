@@ -1414,10 +1414,15 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
         ta.value = "";
         return;
       }
-      selectDrawing(drawHit);
-      ta.focus();
-      ta.value = "";
-      return;
+      // A drawing the PM side cannot pair (furniture-anchored art whose host
+      // paragraph lives outside the main doc, a stale box after a re-layout)
+      // must not swallow the click — fall through to the text placement
+      // (Word: body clicks pass through header-anchored shapes).
+      if (selectDrawing(drawHit)) {
+        ta.focus();
+        ta.value = "";
+        return;
+      }
     }
     selDrawing = null;
     placeDrawingSel();
