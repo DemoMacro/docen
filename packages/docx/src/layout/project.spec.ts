@@ -1845,4 +1845,24 @@ describe("projectDocumentOptions page background", () => {
     // All-zero tile: full coverage of the gap color — the flat base itself.
     expect(projected?.color).toBe("F9F1E2");
   });
+
+  it("passes negative firstLine twips through unclamped", () => {
+    const projected = projectDocumentOptions(
+      doc([
+        {
+          paragraph: {
+            indent: { left: 720, firstLine: -720 },
+            children: ["Hanging indent with negative firstLine"],
+          },
+        },
+      ]),
+    );
+    const [sec] = projected.sections;
+    const [p] = sec.blocks;
+    expect(p.kind).toBe("paragraph");
+    if (p.kind === "paragraph") {
+      expect(p.indent?.leftPx).toBe(48);
+      expect(p.indent?.firstLinePx).toBe(-48);
+    }
+  });
 });
