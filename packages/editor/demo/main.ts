@@ -245,7 +245,9 @@ const demoDocument = (): JSONContent => ({
     // starts on a fresh page.
     {
       type: "paragraph",
-      attrs: { sectionProperties: {} },
+      attrs: {
+        sectionProperties: { grid: { linePitch: 312, type: "lines" } },
+      },
       content: [],
     },
 
@@ -309,7 +311,10 @@ const demoDocument = (): JSONContent => ({
     },
   ],
   attrs: {
-    sectionProperties: { columns: { count: 2, space: 360, separate: true } },
+    sectionProperties: {
+      columns: { count: 2, space: 360, separate: true },
+      grid: { linePitch: 312, type: "lines" },
+    },
     documentExtras: {
       footnotes: [
         {
