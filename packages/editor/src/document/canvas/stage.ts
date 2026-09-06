@@ -995,15 +995,16 @@ export class CanvasStage {
       // Explicit DPR (Leafer's default samples it at creation anyway) so the
       // value stays consistent across app.resize calls.
       pixelRatio: this.renderPixelRatio(this.sectionAt(this.slots.indexOf(slot)).flow),
-      editor: { moveable: false },
+      // No `editor` key: selection/editing is docen's own overlay, and an
+      // editor key makes every App construction demand the uninstalled
+      // @leafer-in/editor plugin (one console error per page).
       // The document surface is MS Office-shaped: scrolling belongs to the
-      // outer DOM container, never to the canvas. `leafer-editor` (imported by
-      // the picture surface) registers viewport plugins globally which would
-      // otherwise pan the App's world on wheel — disable both groups.
+      // outer DOM container, never to the canvas — disable both interaction
+      // groups so a globally-registered viewport plugin cannot pan the
+      // App's world on wheel.
       move: { disabled: true },
       wheel: { disabled: true },
     });
-    if (app.editor) app.editor.visible = false;
     slot.app = app;
     this.repaint(app, this.slots.indexOf(slot));
   }
