@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { generateDOCXSync, parseDOCX, type JSONContent } from "../index";
+import { generateDOCXSync, parseDOCXSync, type JSONContent } from "../index";
 
 // The Review tab's comment commands anchor a comment by stamping
 // commentRangeStart/commentRangeEnd/commentReference markers into the body
@@ -49,7 +49,7 @@ function walk(node: JSONContent, visit: (n: JSONContent) => void): void {
 
 describe("comment round-trip", () => {
   it("keeps the structured comment and the body range markers", () => {
-    const json = parseDOCX(generateDOCXSync(INSERTED_DOC) as Uint8Array);
+    const json = parseDOCXSync(generateDOCXSync(INSERTED_DOC) as Uint8Array);
     const attrs = (json.attrs ?? {}) as { documentExtras?: { comments?: Record<string, any>[] } };
     const comments = attrs.documentExtras?.comments ?? [];
     expect(comments).toHaveLength(1);

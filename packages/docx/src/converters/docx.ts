@@ -3,6 +3,7 @@ import {
   generateDocumentStream,
   generateDocumentSync,
   parseDocument,
+  parseDocumentSync,
 } from "@office-open/docx";
 import type {
   DocumentOptions,
@@ -1193,13 +1194,26 @@ function getDocxManager(extensions?: Extensions): DocxManager {
  * Parse a DOCX file into Tiptap JSON (runtime model).
  *
  * Combines @office-open/docx's `parseDocument` (DOCX binary → DocumentOptions)
- * with `DocxManager.resolve` (DocumentOptions → Tiptap JSON).
+ * with `DocxManager.resolve` (DocumentOptions → Tiptap JSON). Async since
+ * office-open 0.14, so `Blob` (including `File`) and `ReadableStream` inputs
+ * are accepted alongside raw bytes; `parseDOCXSync` covers synchronous bytes.
  */
-export function parseDOCX(
+export async function parseDOCX(
   data: Parameters<typeof parseDocument>[0],
   extensions?: Extensions,
+): Promise<JSONContent> {
+  return getDocxManager(extensions).resolve(await parseDocument(data));
+}
+
+/**
+ * Synchronous counterpart of {@link parseDOCX} for already-normalized bytes —
+ * `Blob` and `ReadableStream` inputs throw (use the async entry).
+ */
+export function parseDOCXSync(
+  data: Parameters<typeof parseDocumentSync>[0],
+  extensions?: Extensions,
 ): JSONContent {
-  return getDocxManager(extensions).resolve(parseDocument(data));
+  return getDocxManager(extensions).resolve(parseDocumentSync(data));
 }
 
 /**
@@ -1354,7 +1368,11 @@ export function compileDocument(json: JSONContent, extensions?: Extensions): Doc
  * `parseDOCX` or a prior `getJSON`) is left unchanged.
  */
 export function normalizeDocument(json: JSONContent, extensions?: Extensions): JSONContent {
-  const defaults = parseDOCX(generateDOCXSync({ type: "doc", content: [] }, { extensions }));
+  // parseDOCXSync, not parseDOCX: this is a synchronous public API (demo and
+  // editor call it inline), and the harvest input is always normalized bytes.
+  const defaults = getDocxManager(extensions).resolve(
+    parseDocumentSync(generateDOCXSync({ type: "doc", content: [] }, { extensions })),
+  );
   const baseAttrs = (defaults.attrs ?? {}) as Record<string, unknown>;
   // A hand-built doc (e.g. parseHTML output) carries attrs keys with null
   // values (schema defaults) — those are "lacking", not overrides, so they

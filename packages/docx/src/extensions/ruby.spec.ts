@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { generateDOCXSync, parseDOCX, type JSONContent } from "../index";
+import { generateDOCXSync, parseDOCXSync, type JSONContent } from "../index";
 
 // Phonetic guide (拼音指南) round-trip: a w:ruby container resolves to text
 // nodes carrying a ruby mark (annotation text + CT_RubyPr fields), and the
@@ -50,7 +50,7 @@ function rubyMark(json: JSONContent): Record<string, unknown> | undefined {
 
 describe("ruby (phonetic guide)", () => {
   it("round-trips a ruby mark through the DOCX container", () => {
-    const json = parseDOCX(generateDOCXSync(docWithRuby()));
+    const json = parseDOCXSync(generateDOCXSync(docWithRuby()));
     const attrs = rubyMark(json);
     expect(attrs).toBeDefined();
     expect(attrs?.text).toBe("jiǎ");
@@ -66,7 +66,7 @@ describe("ruby (phonetic guide)", () => {
   });
 
   it("keeps sibling marks on the base run across the container", () => {
-    const json = parseDOCX(generateDOCXSync(docWithRuby([{ type: "bold", attrs: {} }])));
+    const json = parseDOCXSync(generateDOCXSync(docWithRuby([{ type: "bold", attrs: {} }])));
     const types = (json.content?.[0]?.content?.[0]?.marks ?? []).map((m) => m.type);
     // (the compile pipeline also stamps a textStyle carrier — ignore it)
     expect(types).toContain("bold");
@@ -78,7 +78,7 @@ describe("ruby (phonetic guide)", () => {
     const marks = doc.content?.[0]?.content?.[0]?.marks ?? [];
     const attrs = marks.find((m) => m.type === "ruby")?.attrs as Record<string, unknown>;
     attrs.dirty = true;
-    const json = parseDOCX(generateDOCXSync(doc));
+    const json = parseDOCXSync(generateDOCXSync(doc));
     expect(rubyMark(json)?.dirty).toBe(true);
   });
 
@@ -95,7 +95,7 @@ describe("ruby (phonetic guide)", () => {
         },
       ],
     };
-    const json = parseDOCX(generateDOCXSync(doc));
+    const json = parseDOCXSync(generateDOCXSync(doc));
     const texts = json.content?.[0]?.content ?? [];
     expect(texts).toHaveLength(2);
     expect(texts[0]?.text).toBe("无注音");

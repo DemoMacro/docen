@@ -1,5 +1,5 @@
 import type { DocumentOptions, ParagraphChild, RunOptions, SectionChild } from "@office-open/docx";
-import { generateDocumentSync, parseDocument } from "@office-open/docx";
+import { generateDocumentSync, parseDocumentSync } from "@office-open/docx";
 import type { JSONContent } from "@tiptap/core";
 import { describe, expect, it } from "vitest";
 
@@ -402,7 +402,7 @@ describe("run children drops", () => {
 describe("real-XML round-trip (generateDocument → parseDocument)", { timeout: 20000 }, () => {
   function throughXml(children: SectionChild[]) {
     const binary = generateDocumentSync({ sections: [{ children }] });
-    const parsed = parseDocument(new Uint8Array(binary as Buffer));
+    const parsed = parseDocumentSync(new Uint8Array(binary as Buffer));
     const json = resolveDocument(parsed, docxExtensions);
     return compileDocument(json, docxExtensions).sections[0].children;
   }
@@ -413,7 +413,10 @@ describe("real-XML round-trip (generateDocument → parseDocument)", { timeout: 
         { children: [{ paragraph: { heading: "Heading2", children: [{ text: "chapter" }] } }] },
       ],
     });
-    const json = resolveDocument(parseDocument(new Uint8Array(binary as Buffer)), docxExtensions);
+    const json = resolveDocument(
+      parseDocumentSync(new Uint8Array(binary as Buffer)),
+      docxExtensions,
+    );
     const block = json.content?.[0] as { type: string; attrs?: { heading?: string } };
     expect(block.type).toBe("paragraph");
     expect(block.attrs?.heading).toBe("Heading2");
@@ -472,7 +475,7 @@ describe("real-XML round-trip (generateDocument → parseDocument)", { timeout: 
     // must recover the original bytes from the registry, untouched.
     const oversized = new Uint8Array(256 * 1024 + 1).fill(0x5a);
     const json = resolveDocument(
-      parseDocument(
+      parseDocumentSync(
         new Uint8Array(
           generateDocumentSync({
             sections: [

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { generateDOCXSync, parseDOCX, type JSONContent } from "../index";
+import { generateDOCXSync, parseDOCXSync, type JSONContent } from "../index";
 
 // The ribbon's Link command stamps a link mark on the selection (or inserts
 // fresh marked text). This pins the export contract: a marked text run must
@@ -81,7 +81,7 @@ function firstRunWithLink(json: JSONContent): JSONContent {
 
 describe("link mark round-trip", () => {
   it("exports an external URL hyperlink and parses back as a marked run", () => {
-    const json = parseDOCX(
+    const json = parseDOCXSync(
       generateDOCXSync(docWithLink("https://example.com", "Example")) as Uint8Array,
     );
     const attrs = firstLinkMark(json);
@@ -91,7 +91,7 @@ describe("link mark round-trip", () => {
   });
 
   it("exports a #bookmark anchor and restores it as an in-page href", () => {
-    const json = parseDOCX(generateDOCXSync(docWithLink("#section-1")) as Uint8Array);
+    const json = parseDOCXSync(generateDOCXSync(docWithLink("#section-1")) as Uint8Array);
     expect(firstLinkMark(json).href).toBe("#section-1");
   });
 
@@ -100,7 +100,7 @@ describe("link mark round-trip", () => {
     // hyperlink container whose runs carry no w:rStyle — Word's TOC entries
     // link without the link look. The style must come from the run's textStyle
     // attr (the insert paths stamp it), never from the container.
-    const json = parseDOCX(generateDOCXSync(docWithLink("#toc-1")) as Uint8Array);
+    const json = parseDOCXSync(generateDOCXSync(docWithLink("#toc-1")) as Uint8Array);
     const run = firstRunWithLink(json);
     expect(run.marks!.some((m) => m.type === "link")).toBe(true);
     const textStyle = run.marks!.find((m) => m.type === "textStyle");
@@ -108,7 +108,7 @@ describe("link mark round-trip", () => {
   });
 
   it("round-trips the Hyperlink character style stamped on inserted links", () => {
-    const json = parseDOCX(
+    const json = parseDOCXSync(
       generateDOCXSync({
         ...docWithLink("https://example.com"),
         content: [

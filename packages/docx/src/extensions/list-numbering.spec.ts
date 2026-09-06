@@ -3,7 +3,7 @@ import { getSchema } from "@tiptap/core";
 import { parseHTML as parseLinkedomHTML } from "linkedom";
 import { describe, expect, it } from "vitest";
 
-import { compileDocument, parseDOCX } from "../converters/docx";
+import { compileDocument, parseDOCXSync } from "../converters/docx";
 import { generateMarkdown, parseMarkdown } from "../converters/markdown";
 import { docxExtensions, type JSONContent } from "../core";
 import {
@@ -185,7 +185,7 @@ describe("compile registers generated list definitions", () => {
       ],
     };
     const bytes = generateDocumentSync(compileDocument(doc));
-    const parsed = parseDOCX(bytes);
+    const parsed = parseDOCXSync(bytes);
     const content = parsed.content ?? [];
     expect(content).toHaveLength(2);
     expect(content[0].type).toBe("paragraph");

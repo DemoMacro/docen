@@ -31,6 +31,7 @@ export * from "./extensions";
 // Converters: DOCX pipeline (DOCX binary ↔ Tiptap JSON)
 export {
   parseDOCX,
+  parseDOCXSync,
   generateDOCX,
   generateDOCXSync,
   generateDOCXStream,

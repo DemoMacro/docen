@@ -1,7 +1,7 @@
 import { generateDocumentSync } from "@office-open/docx";
 import { describe, expect, it } from "vitest";
 
-import { compileDocument, parseDOCX } from "../converters/docx";
+import { compileDocument, parseDOCXSync } from "../converters/docx";
 import { projectDocumentOptions, type ProjectedSection } from "../layout/project";
 import { parseDocxBlock } from "./table";
 import { parseDocx as parseCellDocx, renderDocx as renderCellDocx } from "./table-cell";
@@ -92,7 +92,7 @@ describe("flat table grid", () => {
       ],
     };
     const bytes = generateDocumentSync(compileDocument(doc as never));
-    const parsed = parseDOCX(bytes);
+    const parsed = parseDOCXSync(bytes);
     const table = parsed.content?.[0];
     expect(table?.type).toBe("table");
     const rows = (table?.content ?? []) as { content: { attrs?: Record<string, unknown> }[] }[];
@@ -120,7 +120,7 @@ describe("flat table grid", () => {
       ],
     };
     const bytes = generateDocumentSync(compileDocument(doc as never));
-    const parsed = parseDOCX(bytes);
+    const parsed = parseDOCXSync(bytes);
     const table = parsed.content?.[0];
     // A 2+1 first row spans 3 grid columns — the tblGrid must keep all three.
     expect(((table?.attrs?.columnWidths as number[]) ?? []).length).toBe(3);

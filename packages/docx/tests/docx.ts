@@ -52,7 +52,7 @@ for (const docxFile of docxFiles) {
 
     // Step 1: DOCX → Tiptap JSON (runtime model)
     let t0 = performance.now();
-    const json = parseDOCX(buffer);
+    const json = await parseDOCX(buffer);
     const tParse = performance.now() - t0;
     writeFileSync(join(jsonDir, `${baseName}.json`), JSON.stringify(json, null, 2));
 

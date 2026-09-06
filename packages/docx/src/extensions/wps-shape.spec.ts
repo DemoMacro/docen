@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { generateDOCXSync, parseDOCX, type JSONContent } from "../index";
+import { generateDOCXSync, parseDOCXSync, type JSONContent } from "../index";
 
 // The ribbon's Text Box / Shapes insert commands build a wpsShape node whose
 // geometry (transformation/floating/geometry/fill/outline) rides on
@@ -66,7 +66,7 @@ function firstWpsShape(json: JSONContent): {
 
 describe("wpsShape insert round-trip", () => {
   it("restores the text-box geometry from a generated DOCX", () => {
-    const json = parseDOCX(generateDOCXSync(textBoxDoc()) as Uint8Array);
+    const json = parseDOCXSync(generateDOCXSync(textBoxDoc()) as Uint8Array);
     const node = firstWpsShape(json);
     const ws = node.attrs.wpsShape as Record<string, any>;
     // The round-tripped xfrm also carries the effect extents (a/b/l/r/t, all
@@ -81,7 +81,7 @@ describe("wpsShape insert round-trip", () => {
   });
 
   it("restores the preset geometry and accent fill of a gallery shape", () => {
-    const json = parseDOCX(generateDOCXSync(shapeDoc()) as Uint8Array);
+    const json = parseDOCXSync(generateDOCXSync(shapeDoc()) as Uint8Array);
     const node = firstWpsShape(json);
     const ws = node.attrs.wpsShape as Record<string, any>;
     // Parse re-emits the object shape — the string is a stringify-side shorthand.

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { generateDOCXSync, parseDOCX, type JSONContent } from "../index";
+import { generateDOCXSync, parseDOCXSync, type JSONContent } from "../index";
 
 // w:highlight val is the fixed ST_HighlightColor enumeration — a hex value
 // there makes Word refuse the file. The Highlight mark's renderDocx maps every
@@ -66,22 +66,24 @@ function textStyleHighlight(json: JSONContent): unknown {
 
 describe("highlight mark export mapping", () => {
   it("emits a palette token and parses back as the mark", () => {
-    const json = parseDOCX(generateDOCXSync(docWithHighlight("yellow")) as Uint8Array);
+    const json = parseDOCXSync(generateDOCXSync(docWithHighlight("yellow")) as Uint8Array);
     expect(highlightColor(json)).toBe("yellow");
   });
 
   it("maps a palette RGB (pasted #hex form) back onto its token", () => {
-    const json = parseDOCX(generateDOCXSync(docWithHighlight("FFFF00")) as Uint8Array);
+    const json = parseDOCXSync(generateDOCXSync(docWithHighlight("FFFF00")) as Uint8Array);
     expect(highlightColor(json)).toBe("yellow");
   });
 
   it("maps the CSS rgb() form pasted HTML carries onto its token", () => {
-    const json = parseDOCX(generateDOCXSync(docWithHighlight("rgb(255, 255, 0)")) as Uint8Array);
+    const json = parseDOCXSync(
+      generateDOCXSync(docWithHighlight("rgb(255, 255, 0)")) as Uint8Array,
+    );
     expect(highlightColor(json)).toBe("yellow");
   });
 
   it("routes an off-palette color through character shading, never w:highlight", () => {
-    const json = parseDOCX(generateDOCXSync(docWithHighlight("00CCFF")) as Uint8Array);
+    const json = parseDOCXSync(generateDOCXSync(docWithHighlight("00CCFF")) as Uint8Array);
     expect(highlightColor(json)).toBeUndefined();
     expect(shadingFill(json)).toBe("00CCFF");
   });
@@ -90,7 +92,7 @@ describe("highlight mark export mapping", () => {
     // <w:highlight w:val="none"/> cancels an inherited highlight — TextStyle
     // carries it verbatim; the mark must stay off (same class as underline
     // val="none").
-    const json = parseDOCX(
+    const json = parseDOCXSync(
       generateDOCXSync({
         type: "doc",
         content: [
