@@ -115,27 +115,25 @@ export function layoutFlow(
 ): FlowPage[] {
   const flow = new Flow(opts, measurer);
   for (const block of blocks) flow.push(block);
-  return applyVerticalAlign(flow.finish(), opts);
+  flow.finish();
+  return flow.sealedPages();
 }
 
-/** w:vAlign pass — shift each underfull page's items down so the content
- *  block centers in, or bottoms out against, the content box. Full pages
- *  shift by ~0 (their ink already fills the box). Pages with footnotes shift
- *  within the box above the footnote area's reserved space implicitly: the
- *  flow never places body items into it, so a plain max-bottom measure is
- *  safe (the shift only grows the gap to the notes, never overlaps them). */
-function applyVerticalAlign(pages: FlowPage[], opts: FlowOptions): FlowPage[] {
+/** w:vAlign for one sealed page — shift its items down so the content block
+ *  centers in, or bottoms out against, the content box. A full page shifts
+ *  by ~0 (its ink already fills the box). Pages with footnotes shift within
+ *  the box above the footnote area's reserved space implicitly: the flow
+ *  never places body items into it, so a plain max-bottom measure is safe
+ *  (the shift only grows the gap to the notes, never overlaps them). */
+function alignPageVertical(page: FlowPage, opts: FlowOptions): FlowPage {
   const mode = opts.verticalAlign;
-  if (!mode || mode === "top" || opts.unbounded) return pages;
-  for (const page of pages) {
-    let ink = 0;
-    for (const item of page.items) ink = Math.max(ink, item.yPx + item.block.heightPx);
-    const offset =
-      mode === "center" ? (opts.contentHeightPx - ink) / 2 : opts.contentHeightPx - ink;
-    if (offset <= 0) continue;
-    for (const item of page.items) item.yPx += offset;
-  }
-  return pages;
+  if (!mode || mode === "top" || opts.unbounded) return page;
+  let ink = 0;
+  for (const item of page.items) ink = Math.max(ink, item.yPx + item.block.heightPx);
+  const offset = mode === "center" ? (opts.contentHeightPx - ink) / 2 : opts.contentHeightPx - ink;
+  if (offset <= 0) return page;
+  for (const item of page.items) item.yPx += offset;
+  return page;
 }
 
 /** Split a content width into w:cols column boxes — the single source the
@@ -195,26 +193,48 @@ export function layoutFlowSections(
 ): SectionedFlowPages {
   const pages: FlowPage[] = [];
   const sectionOfPage: number[] = [];
-  // Merge continuous sections into their predecessor up front: the flow
-  // state can't resume mid-document, so "keeps flowing" must be a single
-  // layout pass over the union.
+  for (const { page, section } of layoutSectionsIncremental(sections, measurer)) {
+    pages.push(page);
+    sectionOfPage.push(section);
+  }
+  return { pages, sectionOfPage };
+}
+
+/** One sealed page plus the run (merged section) it belongs to — the
+ *  incremental host threads its own awaits between steps. */
+export interface IncrementalPage {
+  page: FlowPage;
+  section: number;
+}
+
+/** Lay a multi-section document one page seal at a time. The walk is strictly
+ *  forward over the blocks (keepNext pulls back within the live Flow state,
+ *  never looks ahead), so the generator is exact — draining it equals
+ *  {@link layoutFlowSections}. Between `next()` calls the host yields to the
+ *  browser; the Flow instances stay alive across the awaits. */
+export function* layoutSectionsIncremental(
+  sections: readonly FlowSection[],
+  measurer: TextMeasurer,
+): Generator<IncrementalPage> {
+  // Merge continuous sections into their predecessor up front: a run is one
+  // Flow instance, so "keeps flowing" must stay a single layout pass.
   const runs: { blocks: LayoutBlock[]; opts: FlowOptions }[] = [];
   for (const section of sections) {
     const prev = runs[runs.length - 1];
     if (section.type === "continuous" && prev) prev.blocks.push(...section.blocks);
     else runs.push({ blocks: [...section.blocks], opts: section.opts });
   }
-  runs.forEach((run, i) => {
-    for (const page of layoutFlow(
-      run.blocks,
-      { ...run.opts, pageOffset: pages.length },
-      measurer,
-    )) {
-      pages.push(page);
-      sectionOfPage.push(i);
+  let laid = 0;
+  for (const [i, run] of runs.entries()) {
+    const flow = new Flow({ ...run.opts, pageOffset: laid }, measurer);
+    for (const block of run.blocks) {
+      flow.push(block);
+      for (const page of flow.takeSealed()) yield { page, section: i };
     }
-  });
-  return { pages, sectionOfPage };
+    flow.finish();
+    for (const page of flow.takeSealed()) yield { page, section: i };
+    laid = flow.pageCount;
+  }
 }
 
 /** Footnote separator width in px (Word default: 2 inches = 144 pt = 192 px). */
@@ -275,6 +295,8 @@ function noteRefsInBlock(block: LaidOutBlock): { id: number; ordinal: number }[]
 
 class Flow {
   private readonly pages: FlowPage[] = [];
+  /** Pages already handed out by takeSealed — the drain cursor. */
+  private taken = 0;
   private readonly items: FlowItem[] = [];
   private y = 0;
   private prevAfter = 0;
@@ -483,7 +505,7 @@ class Flow {
   private newPage(auto = false): void {
     if (this.items.length > 0) {
       const footnotes = this.buildPageFootnotes();
-      this.pages.push({ items: this.items.splice(0), footnotes });
+      this.pages.push(alignPageVertical({ items: this.items.splice(0), footnotes }, this.opts));
     }
     this.pageIndex = this.pages.length;
     this.colIndex = 0;
@@ -519,12 +541,37 @@ class Flow {
       // (footnote area included) — the host sizes the page from it.
       const bottom = this.y + this.pageFootnoteHeight;
       const footnotes = this.buildPageFootnotes();
-      this.pages.push({ items: this.items.splice(0), footnotes, contentBottomPx: bottom });
+      this.pages.push(
+        alignPageVertical(
+          { items: this.items.splice(0), footnotes, contentBottomPx: bottom },
+          this.opts,
+        ),
+      );
     } else {
       this.newPage();
     }
     if (this.pages.length === 0) this.pages.push({ items: [] });
     return this.pages;
+  }
+
+  /** Pages sealed since the previous call — the incremental host paints each
+   *  batch as it lands; seals are append-only, so batches never re-occur. */
+  takeSealed(): readonly FlowPage[] {
+    if (this.taken === this.pages.length) return [];
+    const batch = this.pages.slice(this.taken);
+    this.taken = this.pages.length;
+    return batch;
+  }
+
+  /** All sealed pages — the drain-everything path ({@link layoutFlow}). */
+  sealedPages(): FlowPage[] {
+    this.taken = this.pages.length;
+    return this.pages;
+  }
+
+  /** Sealed page count so far — threads the global page offset across runs. */
+  get pageCount(): number {
+    return this.pages.length;
   }
 
   /** Page-top spacing: when the page was opened by automatic pagination the

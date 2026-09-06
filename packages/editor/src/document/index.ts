@@ -38,10 +38,12 @@ import {
 import {
   browserFontMetrics,
   layoutFlowSections,
+  layoutSectionsIncremental,
   TextMeasurer,
   twipToPx,
   type FlowPage,
   type FlowPageInsets,
+  type FlowSection,
 } from "@docen/layout";
 import { attr, customElement } from "@microsoft/fast-element";
 import { redoDepth, undoDepth } from "@tiptap/pm/history";
@@ -144,6 +146,19 @@ const AUTOSAVE_ON_KEY = "docen:autosave";
 /** localStorage quota is ~5MB per origin — skip the write (keep the last
  *  backup) rather than throwing mid-typing. */
 const AUTOSAVE_MAX_CHARS = 4_000_000;
+/** Layout budget per incremental render slice (ms) — the open path lays
+ *  sealed pages for this long, then yields a frame to the browser. */
+const LAYOUT_SLICE_MS = 12;
+
+/** The projection half's output — the flow inputs both the synchronous drain
+ *  and the incremental walk lay. */
+interface ProjectedFlowInputs {
+  sections: (ProjectedSection & CanvasStageSection)[];
+  background?: ProjectedPageBackground;
+  flowSections: FlowSection[];
+  viewMode: "print" | "web" | "draft" | "read";
+  continuous: boolean;
+}
 
 /** Run marks the Style Inspector lists as direct formatting (i18n keys — the
  *  ribbon's command labels double as the formatting names). */
@@ -1711,18 +1726,11 @@ class DocenDocument extends AddinHost<Editor> {
     if (ribbon) ribbon.toggleAttribute("hidden", read);
   }
 
-  /** The canvas pipeline's projection + layout half, shared by the full
-   *  render and the story's live re-render: compile → project (one section
-   *  per document section) → lay each section's furniture ONCE (the insets
-   *  and the painter's bands share the pass) → paginate continuously across
-   *  sections (each section starts a fresh page; the page→section map drives
-   *  per-page geometry everywhere). */
-  #projectAndLayout(doc: JSONContent): {
-    pages: FlowPage[];
-    sectionOfPage: number[];
-    sections: (ProjectedSection & CanvasStageSection)[];
-    background?: ProjectedPageBackground;
-  } {
+  /** The canvas pipeline's projection half, shared by every layout path:
+   *  compile → project (one section per document section) → lay each
+   *  section's furniture ONCE (the insets and the painter's bands share the
+   *  pass) → assemble the flow inputs. Pure preparation — no pagination. */
+  #projectFlowSections(doc: JSONContent): ProjectedFlowInputs {
     const { sections, background } = projectDocumentOptions(compileDocument(this.#mergedView(doc)));
     const stageSections: (ProjectedSection & CanvasStageSection)[] = sections.map((section) => ({
       ...section,
@@ -1778,12 +1786,23 @@ class DocenDocument extends AddinHost<Editor> {
         },
       };
     });
-    const { pages, sectionOfPage } = layoutFlowSections(flowSections, this.#measurer);
-    if (continuous) {
-      // Size each continuous page to where its content actually ends (the
-      // unbounded layout reports the content bottom) plus the bottom margin.
+    return { sections: stageSections, background, flowSections, viewMode: mode, continuous };
+  }
+
+  /** The layout half in one synchronous drain — the pagination walk over the
+   *  projected flow inputs, plus the continuous views' page-height correction
+   *  (the unbounded layout reports where the content ends; the host sizes the
+   *  page from it). */
+  #laySections(projected: ProjectedFlowInputs): {
+    pages: FlowPage[];
+    sectionOfPage: number[];
+  } {
+    const { pages, sectionOfPage } = layoutFlowSections(projected.flowSections, this.#measurer);
+    if (projected.continuous) {
+      // Size each continuous page to where its content actually ends plus the
+      // bottom margin.
       pages.forEach((page, i) => {
-        const section = stageSections[sectionOfPage[i] ?? 0];
+        const section = projected.sections[sectionOfPage[i] ?? 0];
         if (!section || page.contentBottomPx == null) return;
         const flow = section.flow;
         const bottomMargin = flow.pageHeightPx - flow.contentTopPx - flow.contentHeightPx;
@@ -1793,7 +1812,20 @@ class DocenDocument extends AddinHost<Editor> {
         );
       });
     }
-    return { pages, sectionOfPage, sections: stageSections, background };
+    return { pages, sectionOfPage };
+  }
+
+  /** The canvas pipeline's projection + layout half, shared by the full
+   *  render and the story's live re-render. */
+  #projectAndLayout(doc: JSONContent): {
+    pages: FlowPage[];
+    sectionOfPage: number[];
+    sections: (ProjectedSection & CanvasStageSection)[];
+    background?: ProjectedPageBackground;
+  } {
+    const projected = this.#projectFlowSections(doc);
+    const { pages, sectionOfPage } = this.#laySections(projected);
+    return { pages, sectionOfPage, sections: projected.sections, background: projected.background };
   }
 
   /** The page→section origin resolver the bridge's caret maps need (each
@@ -1813,42 +1845,32 @@ class DocenDocument extends AddinHost<Editor> {
    *  a keystroke costs one page, not one per scrolled-into-view page. */
   #renderDoc(doc: JSONContent): void {
     if (!this.#stageHost) return;
+    const seq = ++this.#renderSeq;
+    const projected = this.#projectFlowSections(doc);
+    // A first render in a paged view (the open path) paints page-by-page:
+    // the layout walk yields sealed pages, the stage appends their slots per
+    // time slice, and the veil lifts over the first slice — an open shows its
+    // first screens in seconds instead of blocking until the last page is
+    // laid. Any render landing mid-walk (a transaction, a view switch) bumps
+    // the sequence; the walk drops and this entry re-runs from the top.
+    if (!this.#lastRun && !projected.continuous) {
+      void this.#renderDocIncremental(projected, seq);
+      return;
+    }
+    const laid = this.#laySections(projected);
+    const run = {
+      pages: laid.pages,
+      sectionOfPage: laid.sectionOfPage,
+      sections: projected.sections,
+      background: projected.background,
+      viewMode: projected.viewMode,
+    };
     const prev = this.#lastRun;
-    const run = { ...this.#projectAndLayout(doc), viewMode: this.#viewMode() };
     this.#lastRun = run;
     this.#pages = run.pages;
     this.#sectionOfPage = run.sectionOfPage;
     this.#flow = run.sections[0]?.flow;
-    this.#stage ??= new CanvasStage(this.#stageHost, {
-      metrics: browserFontMetrics,
-      sections: run.sections,
-      sectionOfPage: run.sectionOfPage,
-      background: run.background,
-    });
-    // A debug attribute stamped before the first render lands here.
-    if (this.debug) this.#stage.setDebug(this.debug);
-    this.#stage.setMarksLabels({
-      pageBreak: t("marks.pageBreak", this),
-      sectionBreak: t("marks.sectionBreak", this),
-      sectionBreakContinuous: t("marks.sectionBreakContinuous", this),
-      sectionBreakEvenPage: t("marks.sectionBreakEvenPage", this),
-      sectionBreakOddPage: t("marks.sectionBreakOddPage", this),
-    });
-    // A `zoom` attribute parsed before the stage existed only recorded the
-    // level here — push it in before the first sync sizes the slots. The
-    // `show-marks` and `view` attributes get the same once-over (idempotent
-    // setters; the read-only + chrome trimming rides #applyView's gate).
-    if (this.#stage.zoom !== this.#zoom) this.#stage.setZoom(this.#zoom);
-    if (this.hasAttribute("show-marks")) this.#stage.setShowMarks(true);
-    if (this.#stage.viewMode !== this.#viewMode()) {
-      this.#stage.setViewMode(this.#viewMode());
-      this.#syncReadChrome(this.#viewMode() === "read");
-      if (this.editor) {
-        const editable = this.editable !== "false" && this.#viewMode() !== "read";
-        this.editor.setEditable(editable);
-        this.#syncEditModeMenu();
-      }
-    }
+    const stage = this.#armStage(run);
     // Anything structural (section geometry, page background, section count)
     // repaints everything — the per-page diff only skips pages whose
     // placement, section, AND background are all unchanged. A page-count
@@ -1878,8 +1900,109 @@ class DocenDocument extends AddinHost<Editor> {
       prev.sections.some((s, i) => !deepEq(s.lineNumbers, run.sections[i]!.lineNumbers)) ||
       prev.sections.some((s, i) => !deepEq(s.columns, run.sections[i]!.columns));
     const dirty = structural ? undefined : dirtyPagesOf(prev.pages, run.pages);
-    this.#stage.sync(run.pages, run.sections, run.sectionOfPage, run.background, dirty);
+    stage.sync(run.pages, run.sections, run.sectionOfPage, run.background, dirty);
     this.#bridge?.updatePages(run.pages, this.#pageOriginOf(run.sections, run.sectionOfPage));
+    this.#afterLayout();
+  }
+
+  /** The paged first render: consume {@link layoutSectionsIncremental} in
+   *  ~12ms slices, syncing the stage's growing page list each slice (painted
+   *  pages keep their canvas — only the slice's tail is dirty). The first
+   *  slice lifts the opening veil and hands the painted pages a caret map;
+   *  the finished walk records the run and arms the panes without a second
+   *  sync. A render starting mid-walk bumps the sequence and this walk just
+   *  drops — that render re-projects and takes over. */
+  async #renderDocIncremental(projected: ProjectedFlowInputs, seq: number): Promise<void> {
+    const stage = this.#armStage(projected);
+    const pages: FlowPage[] = [];
+    const sectionOfPage: number[] = [];
+    const origin = this.#pageOriginOf(projected.sections, sectionOfPage);
+    const iterator = layoutSectionsIncremental(projected.flowSections, this.#measurer);
+    let done = false;
+    while (!done) {
+      const painted = pages.length;
+      const deadline = performance.now() + LAYOUT_SLICE_MS;
+      let step = iterator.next();
+      while (!step.done) {
+        pages.push(step.value.page);
+        sectionOfPage.push(step.value.section);
+        if (performance.now() >= deadline) break;
+        step = iterator.next();
+      }
+      if (step.done) done = true;
+      // Another render started, or the element went away — the walk is dead.
+      if (seq !== this.#renderSeq || !this.isConnected) return;
+      stage.sync(
+        pages,
+        projected.sections,
+        sectionOfPage,
+        projected.background,
+        Array.from({ length: painted }, () => false),
+      );
+      if (painted === 0) {
+        // First slice: real pages are on screen — lift the veil and give the
+        // painted range a caret map so clicks and typing already work.
+        this.#setProgress();
+        this.#bridge?.updatePages(pages, origin);
+      }
+      if (done) break;
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+    }
+    this.#lastRun = {
+      pages,
+      sectionOfPage,
+      sections: projected.sections,
+      background: projected.background,
+      viewMode: projected.viewMode,
+    };
+    this.#pages = pages;
+    this.#sectionOfPage = sectionOfPage;
+    this.#bridge?.updatePages(pages, origin);
+    this.#afterLayout();
+  }
+
+  /** Create the stage on first use and refresh its per-render context —
+   *  idempotent setters both render paths call before their first sync. */
+  #armStage(p: {
+    sections: (ProjectedSection & CanvasStageSection)[];
+    background?: ProjectedPageBackground;
+    viewMode: "print" | "web" | "draft" | "read";
+  }): CanvasStage {
+    this.#stage ??= new CanvasStage(this.#stageHost!, {
+      metrics: browserFontMetrics,
+      sections: p.sections,
+      sectionOfPage: [],
+      background: p.background,
+    });
+    // A debug attribute stamped before the first render lands here.
+    if (this.debug) this.#stage.setDebug(this.debug);
+    this.#stage.setMarksLabels({
+      pageBreak: t("marks.pageBreak", this),
+      sectionBreak: t("marks.sectionBreak", this),
+      sectionBreakContinuous: t("marks.sectionBreakContinuous", this),
+      sectionBreakEvenPage: t("marks.sectionBreakEvenPage", this),
+      sectionBreakOddPage: t("marks.sectionBreakOddPage", this),
+    });
+    // A `zoom` attribute parsed before the stage existed only recorded the
+    // level here — push it in before the first sync sizes the slots. The
+    // `show-marks` and `view` attributes get the same once-over (idempotent
+    // setters; the read-only + chrome trimming rides #applyView's gate).
+    if (this.#stage.zoom !== this.#zoom) this.#stage.setZoom(this.#zoom);
+    if (this.hasAttribute("show-marks")) this.#stage.setShowMarks(true);
+    if (this.#stage.viewMode !== p.viewMode) {
+      this.#stage.setViewMode(p.viewMode);
+      this.#syncReadChrome(p.viewMode === "read");
+      if (this.editor) {
+        const editable = this.editable !== "false" && p.viewMode !== "read";
+        this.editor.setEditable(editable);
+        this.#syncEditModeMenu();
+      }
+    }
+    return this.#stage;
+  }
+
+  /** The panes-and-status tail both render paths run after their final sync. */
+  #afterLayout(): void {
     this.#updateStatus();
     this.#comments.syncCommentsPane();
     this.#revisions.syncRevisionsPane();
@@ -1897,6 +2020,10 @@ class DocenDocument extends AddinHost<Editor> {
     background?: ProjectedPageBackground;
     viewMode: "print" | "web" | "draft" | "read";
   };
+
+  /** Bumped by every render — an incremental layout walk compares its capture
+   *  against this each slice and drops when another render has started. */
+  #renderSeq = 0;
 
   disconnectedCallback(): void {
     this.#clipboard.hidePasteOptions();
