@@ -52,11 +52,11 @@ importers:
         specifier: workspace:*
         version: link:../layout
       '@office-open/core':
-        specifier: 0.14.1
-        version: 0.14.1
+        specifier: 0.14.2
+        version: 0.14.2
       '@office-open/docx':
-        specifier: 0.14.1
-        version: 0.14.1
+        specifier: 0.14.2
+        version: 0.14.2
       '@tiptap/core':
         specifier: 3.29.2
         version: 3.29.2(@tiptap/pm@3.29.2)
@@ -857,14 +857,14 @@ packages:
     resolution: {integrity: sha512-oN+QwyX7VSHotibwubG3kpzbwKrfnyR6OOO+3Nk/53ADL7FmgHHz4TgrbaYKvvOw09u6QTx0oiH1cNCIOuN0CQ==}
     engines: {node: '>= 20.19.0'}
 
-  '@office-open/core@0.14.1':
-    resolution: {integrity: sha512-Q5ZhpZEewUu/zlXpdfy8FK4jeH+fbwLSdeIIElEAvORC+5e51VhF9WJPC8GG0y64wmdMhMw6ORVx89F16+DFDg==}
+  '@office-open/core@0.14.2':
+    resolution: {integrity: sha512-AtXcWZlJUJOI0NwPr2rFfZiqo6DIUJOZtOaD00xo0A6cBsOFMzEC+pmjZmXSj66y2jr4LZvFqfpw1LjqUHC9jg==}
 
-  '@office-open/docx@0.14.1':
-    resolution: {integrity: sha512-re/fTwZ3H7bqDUagUrmRBo0eR9ssbIgUgillFIxJzke9lFocz48f9/PM9EG7qv6sDEo4fele6QvVZa/qOILtVA==}
+  '@office-open/docx@0.14.2':
+    resolution: {integrity: sha512-Wwb15G08lTXTsDEFcdM3VzMRncKy4T2ZN/XBd07fHxzFgYIer6M88ZcrFevgWauequjfUXKHsn6ilMgtR4SpYg==}
 
-  '@office-open/xml@0.14.1':
-    resolution: {integrity: sha512-f5iX3DoL5GaOHLhF6gIrKVFtMlpk7QCym1WZJcetTl4q0ryM38SAogevcUZl9gysRNxSEPIvHz7dKl/01A6Ddw==}
+  '@office-open/xml@0.14.2':
+    resolution: {integrity: sha512-a6aLLzVsT6KJYlRLPkO6FLoy7m4OmQ59PaGneqFvriRxPwVT4HwfPPHl7QehkfaBV6DYx7QJwkofXXPIAHUMOQ==}
 
   '@oxc-project/runtime@0.142.0':
     resolution: {integrity: sha512-Dv3jRrcXFdvUBUEljUu9kusrEo9G0iiqZFZNg3yCg+mkET4DD4S2Ow6Q6shFWDJwPidSa980d6YVXBlErUGADw==}
@@ -3554,18 +3554,18 @@ snapshots:
 
   '@noble/hashes@2.3.0': {}
 
-  '@office-open/core@0.14.1':
+  '@office-open/core@0.14.2':
     dependencies:
       '@noble/hashes': 2.3.0
-      '@office-open/xml': 0.14.1
+      '@office-open/xml': 0.14.2
       fflate: 0.8.3
 
-  '@office-open/docx@0.14.1':
+  '@office-open/docx@0.14.2':
     dependencies:
-      '@office-open/core': 0.14.1
-      '@office-open/xml': 0.14.1
+      '@office-open/core': 0.14.2
+      '@office-open/xml': 0.14.2
 
-  '@office-open/xml@0.14.1': {}
+  '@office-open/xml@0.14.2': {}
 
   '@oxc-project/runtime@0.142.0': {}
 
