@@ -243,9 +243,9 @@ const tableItems = (): string =>
   JSON.stringify([
     // Insert Table opens the classic dialog shape of the table grid entry.
     { text: opt("insert-table"), value: "insert", event: "table-dialog" },
-    // Draw Table / Convert Text / Excel / Quick Tables are not built yet.
+    // Draw Table / Excel / Quick Tables are not built yet.
     { text: opt("draw-table"), value: "draw", disabled: true },
-    { text: opt("convert-text"), value: "convert", disabled: true },
+    { text: opt("convert-text"), value: "convert", event: "convert-text-to-table" },
     { text: opt("excel"), value: "excel", disabled: true },
     { text: opt("quick-tables"), value: "quick", disabled: true },
   ]);
@@ -1533,9 +1533,11 @@ export function tableContextTabs(scope?: Element): RibbonTab[] {
           }),
         ]),
         group("data", [
+          btn("sort", "sort-table", { size: "large" }),
           btn("table-repeat-headers", "repeat-header-rows", { size: "large" }),
           btn("cant-split", "cant-split", { size: "large" }),
           btn("list", "convert-to-text", { size: "large" }),
+          btn("table-formula", "table-formula", { size: "large" }),
         ]),
       ],
     },

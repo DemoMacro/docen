@@ -439,6 +439,211 @@ describe("table cell property commands", () => {
     );
   });
 
+  it("table-cell-spacing sets cell spacing and clears it, and works via table-properties-apply", () => {
+    const editor = build();
+    editor.commands["insert-table"]();
+    caretInCell(editor, 0, 0);
+
+    expect(editor.commands["table-cell-spacing"](120)).toBe(true);
+    expect(tablesOf(editor)[0]!.attrs.cellSpacing).toEqual({ size: 120, type: "twips" });
+
+    // Universal measure string
+    expect(editor.commands["table-cell-spacing"]("10pt")).toBe(true);
+    expect(tablesOf(editor)[0]!.attrs.cellSpacing).toEqual({ size: 200, type: "twips" });
+
+    // Object
+    expect(editor.commands["table-cell-spacing"]({ size: 80, type: "twips" })).toBe(true);
+    expect(tablesOf(editor)[0]!.attrs.cellSpacing).toEqual({ size: 80, type: "twips" });
+
+    // Clear with 0 or null
+    expect(editor.commands["table-cell-spacing"](0)).toBe(true);
+    expect(tablesOf(editor)[0]!.attrs.cellSpacing).toBeNull();
+
+    // Via table-properties-apply
+    expect(editor.commands["table-properties-apply"]({ cellSpacing: 160 })).toBe(true);
+    expect(tablesOf(editor)[0]!.attrs.cellSpacing).toEqual({ size: 160, type: "twips" });
+    expect(editor.commands["table-properties-apply"]({ cellSpacing: null })).toBe(true);
+    expect(tablesOf(editor)[0]!.attrs.cellSpacing).toBeNull();
+  });
+
+  it("convert-text-to-table converts delimited text to table with auto-delimiter and headers", () => {
+    const editor = build();
+    editor.commands.setContent({
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [
+            {
+              type: "text",
+              text: "HeaderA\tHeaderB\nVal1\tVal2\nVal3\tVal4",
+            },
+          ],
+        },
+      ],
+    });
+    editor.commands.setTextSelection(2);
+    expect(editor.commands["convert-text-to-table"]({ hasHeader: true })).toBe(true);
+
+    const tables = tablesOf(editor);
+    expect(tables.length).toBe(1);
+    const table = tables[0]!;
+    expect(table.childCount).toBe(3);
+    // Header row
+    expect(table.child(0).attrs.tableHeader).toBe(true);
+    expect(table.child(0).child(0).textContent).toBe("HeaderA");
+    expect(table.child(0).child(1).textContent).toBe("HeaderB");
+    // Data rows
+    expect(table.child(1).child(0).textContent).toBe("Val1");
+    expect(table.child(1).child(1).textContent).toBe("Val2");
+    expect(table.child(2).child(0).textContent).toBe("Val3");
+    expect(table.child(2).child(1).textContent).toBe("Val4");
+
+    // Returns false if already inside a table
+    expect(editor.commands["convert-text-to-table"]()).toBe(false);
+
+    // Comma-separated conversion with padding across multiple paragraphs
+    const editor2 = build();
+    editor2.commands.setContent({
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [{ type: "text", text: "Col1, Col2, Col3" }],
+        },
+        {
+          type: "paragraph",
+          content: [{ type: "text", text: "Row2_1, Row2_2" }],
+        },
+      ],
+    });
+    // Select across both paragraphs
+    editor2.commands.setTextSelection({ from: 1, to: 25 });
+    expect(editor2.commands["convert-text-to-table"]()).toBe(true);
+    const table2 = tablesOf(editor2)[0]!;
+    expect(table2.childCount).toBe(2);
+    expect(table2.child(0).childCount).toBe(3);
+    expect(table2.child(1).childCount).toBe(3);
+    expect(table2.child(1).child(2).textContent).toBe("");
+  });
+
+  it("sort-table and sort inside table sort rows by column respecting headers and numeric values", () => {
+    const editor = build();
+    editor.commands.setContent({
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [
+            {
+              type: "text",
+              text: "Item\tPrice\nApple\t10\nBanana\t2\nCherry\t100",
+            },
+          ],
+        },
+      ],
+    });
+    editor.commands.setTextSelection(2);
+    expect(editor.commands["convert-text-to-table"]({ hasHeader: true })).toBe(true);
+
+    // Active cell in row 1 col 1 ("10")
+    caretInCell(editor, 1, 1);
+
+    // Sort ascending by price: 2, 10, 100
+    expect(editor.commands["sort-table"]({ column: 1, order: "asc" })).toBe(true);
+    let table = tablesOf(editor)[0]!;
+    expect(table.child(0).child(0).textContent).toBe("Item"); // Header preserved
+    expect(table.child(1).child(0).textContent).toBe("Banana");
+    expect(table.child(1).child(1).textContent).toBe("2");
+    expect(table.child(2).child(0).textContent).toBe("Apple");
+    expect(table.child(2).child(1).textContent).toBe("10");
+    expect(table.child(3).child(0).textContent).toBe("Cherry");
+    expect(table.child(3).child(1).textContent).toBe("100");
+
+    // Sort descending by price: 100, 10, 2
+    expect(editor.commands["sort-table"]({ column: 1, order: "desc" })).toBe(true);
+    table = tablesOf(editor)[0]!;
+    expect(table.child(1).child(0).textContent).toBe("Cherry");
+    expect(table.child(2).child(0).textContent).toBe("Apple");
+    expect(table.child(3).child(0).textContent).toBe("Banana");
+
+    // sort command delegates to sort-table inside table
+    caretInCell(editor, 1, 0); // inside col 0 ("Item")
+    expect(editor.commands.sort()).toBe(true);
+    table = tablesOf(editor)[0]!;
+    // Alphabetical order: Apple, Banana, Cherry
+    expect(table.child(1).child(0).textContent).toBe("Apple");
+    expect(table.child(2).child(0).textContent).toBe("Banana");
+    expect(table.child(3).child(0).textContent).toBe("Cherry");
+  });
+
+  it("table-formula evaluates SUM, AVERAGE, COUNT, cell references, and auto-detects formula", () => {
+    const editor = build();
+    editor.commands.setContent({
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [
+            {
+              type: "text",
+              text: "Score\n10\n20\n30\n0",
+            },
+          ],
+        },
+      ],
+    });
+    editor.commands.setTextSelection(2);
+    expect(editor.commands["convert-text-to-table"]({ hasHeader: true })).toBe(true);
+
+    // Table has 5 rows: Header, 10, 20, 30, 0
+    caretInCell(editor, 4, 0);
+
+    // Auto formula detects numbers above -> =SUM(ABOVE) -> 10 + 20 + 30 = 60
+    expect(editor.commands["table-formula"]()).toBe(true);
+    let table = tablesOf(editor)[0]!;
+    expect(table.child(4).child(0).textContent).toBe("60");
+
+    // Explicit =AVERAGE(ABOVE) -> (10 + 20 + 30) / 3 = 20
+    expect(editor.commands["table-formula"]("=AVERAGE(ABOVE)")).toBe(true);
+    table = tablesOf(editor)[0]!;
+    expect(table.child(4).child(0).textContent).toBe("20");
+
+    // Explicit =COUNT(ABOVE) -> 3
+    expect(editor.commands["table-formula"]("=COUNT(ABOVE)")).toBe(true);
+    table = tablesOf(editor)[0]!;
+    expect(table.child(4).child(0).textContent).toBe("3");
+
+    // Cell reference formula: =A2+A3 -> 10 + 20 = 30
+    expect(editor.commands["table-formula"]("=A2+A3")).toBe(true);
+    table = tablesOf(editor)[0]!;
+    expect(table.child(4).child(0).textContent).toBe("30");
+
+    // Currency handling: table with left row numbers
+    const editor2 = build();
+    editor2.commands.setContent({
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [
+            {
+              type: "text",
+              text: "Qty, Rate, Total\n5, $20.00, 0",
+            },
+          ],
+        },
+      ],
+    });
+    editor2.commands.setTextSelection(2);
+    expect(editor2.commands["convert-text-to-table"]({ hasHeader: true })).toBe(true);
+    caretInCell(editor2, 1, 2); // Row 1, Col 2 (Total cell)
+    // Auto formula detects numbers to left -> =SUM(LEFT) -> 5 + 20 = 25
+    expect(editor2.commands["table-formula"]()).toBe(true);
+    const table2 = tablesOf(editor2)[0]!;
+    expect(table2.child(1).child(2).textContent).toBe("25");
+  });
+
   it("cell-shading stamps the cell shading, clearing with none or null, supporting objects", () => {
     const editor = build();
     editor.commands["insert-table"]();

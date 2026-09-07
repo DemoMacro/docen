@@ -51,6 +51,7 @@ import lasso from "@fluentui/svg-icons/icons/lasso_24_regular.svg?raw";
 import link from "@fluentui/svg-icons/icons/link_24_regular.svg?raw";
 import lockShield from "@fluentui/svg-icons/icons/lock_shield_24_regular.svg?raw";
 import mail from "@fluentui/svg-icons/icons/mail_24_regular.svg?raw";
+import mathFormula from "@fluentui/svg-icons/icons/math_formula_24_regular.svg?raw";
 import numberRow from "@fluentui/svg-icons/icons/number_row_24_regular.svg?raw";
 import numberSymbol from "@fluentui/svg-icons/icons/number_symbol_24_regular.svg?raw";
 import orientation from "@fluentui/svg-icons/icons/orientation_24_regular.svg?raw";
@@ -223,6 +224,7 @@ const RIBBON_ICONS: Record<string, string> = {
   "distribute-columns": arrowExpand,
   "table-repeat-headers": tableArrowRepeatAll,
   "cant-split": tableSimple,
+  "table-formula": mathFormula,
   "table-properties": tableSettings,
   "table-stack-above": tableStackAbove,
   "table-stack-below": tableStackBelow,

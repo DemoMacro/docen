@@ -132,6 +132,12 @@ declare module "@tiptap/core" {
         value: "none" | "around" | boolean | TableFloatOptions | null,
       ) => ReturnType;
       "table-properties-apply": (patch?: TablePropertiesPatch) => ReturnType;
+      "convert-text-to-table": (options?: ConvertTextToTableOptions | string) => ReturnType;
+      "sort-table": (options?: SortTableOptions | "asc" | "desc") => ReturnType;
+      "table-formula": (options?: TableFormulaOptions | string) => ReturnType;
+      "table-cell-spacing": (
+        value?: number | string | { size: number; type?: string } | null,
+      ) => ReturnType;
       link: (href?: string) => ReturnType;
       style: (styleId?: string) => ReturnType;
       "modify-style": (patch?: ModifyStylePatch) => ReturnType;
@@ -240,6 +246,10 @@ export const WIRED_DISPATCH: ReadonlySet<string> = new Set([
   "table-properties-apply",
   "text-direction",
   "convert-to-text",
+  "convert-text-to-table",
+  "sort-table",
+  "table-formula",
+  "table-cell-spacing",
   "link",
   "style",
   "modify-style",
@@ -376,6 +386,36 @@ export interface TablePropertiesPatch {
   textWrapping?: "none" | "around";
   /** w:tblpPr floating options directly. */
   float?: TableFloatOptions | null;
+  /** w:tblCellSpacing cell spacing in twips, universal measure string, or object. */
+  cellSpacing?: number | string | { size: number; type?: string } | null;
+}
+
+/** Options for {@link documentCommands.convert-text-to-table}. */
+export interface ConvertTextToTableOptions {
+  /** Delimiter to split columns by. If omitted, auto-detected (\t, ,, ;, |). */
+  delimiter?: string | RegExp;
+  /** If true, the first row is marked as tableHeader. */
+  hasHeader?: boolean;
+}
+
+/** Options for {@link documentCommands.sort-table}. */
+export interface SortTableOptions {
+  /** 0-based column index to sort by. Defaults to active cell's column. */
+  column?: number;
+  /** Sort order. Defaults to "asc". */
+  order?: "asc" | "desc";
+  /** Whether row 0 is treated as a table header (not sorted).
+   * Defaults to whether row 0 has tableHeader: true. */
+  hasHeader?: boolean;
+}
+
+/** Options for {@link documentCommands.table-formula}. */
+export interface TableFormulaOptions {
+  /** The formula string, e.g. "=SUM(ABOVE)", "=AVERAGE(LEFT)", "=COUNT(A1:B3)", etc.
+   * If omitted, auto-picks =SUM(ABOVE) or =SUM(LEFT) based on adjacent numbers. */
+  formula?: string;
+  /** Optional number format or prefix/suffix. */
+  numberFormat?: string;
 }
 
 /**
@@ -2490,6 +2530,431 @@ export const DocumentCommands = Extension.create({
           }
           return true;
         },
+      // Word's "Convert Text to Table": converts delimited text into a structured
+      // table with automatic delimiter detection (tabs, commas, semicolons, pipes).
+      "convert-text-to-table":
+        (options) =>
+        ({ state, dispatch }) => {
+          if (tableAncestry(state)) return false;
+
+          const opts: ConvertTextToTableOptions =
+            typeof options === "string" ? { delimiter: options } : (options ?? {});
+
+          const { from, to } = state.selection;
+          const $from = state.doc.resolve(from);
+          const $to = state.doc.resolve(to);
+
+          const lines: string[] = [];
+          let startPos: number;
+          let endPos: number;
+
+          if ($from.sameParent($to) && $from.parent.isTextblock) {
+            startPos = $from.before();
+            endPos = $from.after();
+            const text = state.selection.empty
+              ? $from.parent.textContent
+              : state.doc.textBetween(from, to, "\n");
+            for (const l of text.split(/\r?\n/)) {
+              lines.push(l);
+            }
+          } else {
+            const startIndex = $from.index(0);
+            const endIndex = Math.min(
+              state.doc.childCount,
+              Math.max(startIndex + 1, $to.index(0) + ($to.parentOffset > 0 ? 1 : 0)),
+            );
+
+            let pos = 0;
+            for (let i = 0; i < startIndex; i += 1) {
+              pos += state.doc.child(i).nodeSize;
+            }
+            startPos = pos;
+            for (let i = startIndex; i < endIndex; i += 1) {
+              const child = state.doc.child(i);
+              pos += child.nodeSize;
+              const text = child.textContent;
+              for (const l of text.split(/\r?\n/)) {
+                lines.push(l);
+              }
+            }
+            endPos = pos;
+          }
+
+          while (lines.length > 1 && !lines[lines.length - 1]!.trim()) {
+            lines.pop();
+          }
+          if (!lines.length || (lines.length === 1 && !lines[0]!.trim())) {
+            return false;
+          }
+
+          let delimiter = opts.delimiter;
+          if (!delimiter) {
+            if (lines.some((l) => l.includes("\t"))) {
+              delimiter = "\t";
+            } else if (lines.some((l) => l.includes(","))) {
+              delimiter = ",";
+            } else if (lines.some((l) => l.includes(";"))) {
+              delimiter = ";";
+            } else if (lines.some((l) => l.includes("|"))) {
+              delimiter = "|";
+            } else {
+              delimiter = "\t";
+            }
+          }
+
+          const rawRows = lines.map((line) => {
+            if (delimiter === "|") {
+              let trimmed = line.trim();
+              if (trimmed.startsWith("|")) trimmed = trimmed.slice(1);
+              if (trimmed.endsWith("|")) trimmed = trimmed.slice(0, -1);
+              return trimmed.split("|").map((p) => p.trim());
+            }
+            if (typeof delimiter === "string") {
+              return line.split(delimiter).map((p) => p.trim());
+            }
+            return line.split(delimiter).map((p) => p.trim());
+          });
+
+          const maxCols = Math.max(1, ...rawRows.map((r) => r.length));
+          const { table, tableRow, tableCell, paragraph } = state.schema.nodes;
+          const rows: PMNode[] = [];
+
+          for (let r = 0; r < rawRows.length; r += 1) {
+            const parts = rawRows[r]!;
+            const cells: PMNode[] = [];
+            for (let c = 0; c < maxCols; c += 1) {
+              const text = parts[c] ?? "";
+              const p = text ? paragraph.create(null, state.schema.text(text)) : paragraph.create();
+              cells.push(tableCell.create(null, [p]));
+            }
+            const isHeader = Boolean(opts.hasHeader && r === 0);
+            rows.push(tableRow.create(isHeader ? { tableHeader: true } : null, cells));
+          }
+
+          const tableNode = table.create(
+            {
+              borders: TABLE_GRID_BORDERS,
+            },
+            rows,
+          );
+
+          if (dispatch) {
+            const tr = state.tr.replaceWith(startPos, endPos, tableNode);
+            tr.setSelection(TextSelection.near(tr.doc.resolve(startPos + 2)));
+            dispatch(tr.scrollIntoView());
+          }
+          return true;
+        },
+      // Word's Sort inside Table: sorts table rows by active or specified column,
+      // preserving header rows (tableHeader: true) with natural locale and numeric comparison.
+      "sort-table":
+        (options) =>
+        ({ state, dispatch }) => {
+          const targets = tableTargets(state);
+          if (!targets) return false;
+          const { tableNode, tablePos } = targets;
+          if (tableNode.childCount < 2) return false;
+
+          const colIndex =
+            typeof options === "object" && typeof options?.column === "number"
+              ? options.column
+              : (targets.cols.values().next().value ?? 0);
+          const order =
+            (typeof options === "string" ? options : options?.order) === "desc" ? "desc" : "asc";
+
+          const row0 = tableNode.child(0);
+          const hasHeader =
+            typeof options === "object" && options?.hasHeader !== undefined
+              ? Boolean(options.hasHeader)
+              : Boolean(row0.attrs.tableHeader);
+
+          const startRow = hasHeader ? 1 : 0;
+          if (tableNode.childCount - startRow < 2) return false;
+
+          const allRows: PMNode[] = [];
+          tableNode.forEach((r) => allRows.push(r));
+
+          const headerRows = allRows.slice(0, startRow);
+          const dataRows = allRows.slice(startRow);
+
+          const getCellText = (row: PMNode, targetCol: number): string => {
+            let col = 0;
+            for (let c = 0; c < row.childCount; c += 1) {
+              const cell = row.child(c);
+              const span = spanOf(cell);
+              if (targetCol >= col && targetCol < col + span) {
+                return cell.textContent.trim();
+              }
+              col += span;
+            }
+            return "";
+          };
+
+          const sortedRows = [...dataRows].sort((a, b) => {
+            const textA = getCellText(a, colIndex);
+            const textB = getCellText(b, colIndex);
+            const cmp = textA.localeCompare(textB, undefined, {
+              numeric: true,
+              sensitivity: "base",
+            });
+            return order === "desc" ? -cmp : cmp;
+          });
+
+          const newRows = [...headerRows, ...sortedRows];
+          if (dispatch) {
+            const newTable = tableNode.type.create(tableNode.attrs, newRows);
+            const tr = state.tr.replaceWith(tablePos, tablePos + tableNode.nodeSize, newTable);
+            dispatch(tr.scrollIntoView());
+          }
+          return true;
+        },
+      // Word's Formula in Table: evaluates =SUM(ABOVE), =SUM(LEFT), =AVERAGE(...),
+      // =COUNT(...), =MIN(...), =MAX(...), =PRODUCT(...) and writes formatted result into active cell.
+      "table-formula":
+        (options) =>
+        ({ state, dispatch }) => {
+          const targets = tableTargets(state);
+          if (!targets) return false;
+          const { tableNode, cells } = targets;
+          const activeCellTarget = cells[0];
+          if (!activeCellTarget) return false;
+
+          const activeRow = activeCellTarget.row;
+          const activeCol = activeCellTarget.col;
+          const numRows = tableNode.childCount;
+
+          const grid: (PMNode | null)[][] = [];
+          for (let r = 0; r < numRows; r += 1) {
+            const rowNode = tableNode.child(r);
+            grid[r] = [];
+            let col = 0;
+            for (let c = 0; c < rowNode.childCount; c += 1) {
+              const cellNode = rowNode.child(c);
+              const span = spanOf(cellNode);
+              for (let s = 0; s < span; s += 1) {
+                grid[r]![col + s] = cellNode;
+              }
+              col += span;
+            }
+          }
+
+          const extractNumber = (cell: PMNode | null | undefined): number | null => {
+            if (!cell) return null;
+            const text = cell.textContent.trim();
+            if (!text) return null;
+            const cleaned = text.replace(/[$€£¥, ]/g, "");
+            if (cleaned.endsWith("%")) {
+              const n = Number(cleaned.slice(0, -1));
+              return Number.isFinite(n) ? n / 100 : null;
+            }
+            if (cleaned.startsWith("(") && cleaned.endsWith(")")) {
+              const n = Number(cleaned.slice(1, -1));
+              return Number.isFinite(n) ? -n : null;
+            }
+            const n = Number(cleaned);
+            return Number.isFinite(n) ? n : null;
+          };
+
+          let formulaStr: string;
+          if (typeof options === "string") {
+            formulaStr = options;
+          } else if (options?.formula) {
+            formulaStr = options.formula;
+          } else {
+            let hasAbove = false;
+            if (activeRow > 0 && extractNumber(grid[activeRow - 1]?.[activeCol]) !== null) {
+              hasAbove = true;
+            }
+            let hasLeft = false;
+            if (activeCol > 0 && extractNumber(grid[activeRow]?.[activeCol - 1]) !== null) {
+              hasLeft = true;
+            }
+            if (hasAbove) {
+              formulaStr = "=SUM(ABOVE)";
+            } else if (hasLeft) {
+              formulaStr = "=SUM(LEFT)";
+            } else {
+              formulaStr = "=SUM(ABOVE)";
+            }
+          }
+
+          const rawExpr = formulaStr.trim().replace(/^=/, "").trim();
+
+          const parseCoord = (coord: string): { r: number; c: number } | null => {
+            const m = /^([A-Za-z]+)(\d+)$/.exec(coord.trim());
+            if (!m) return null;
+            const colLetters = m[1]!.toUpperCase();
+            let c = 0;
+            for (let i = 0; i < colLetters.length; i += 1) {
+              c = c * 26 + (colLetters.charCodeAt(i) - 64);
+            }
+            c -= 1;
+            const r = parseInt(m[2]!, 10) - 1;
+            return { r, c };
+          };
+
+          const parseRange = (rangeStr: string): number[] => {
+            const nums: number[] = [];
+            const parts = rangeStr.split(",").map((p) => p.trim());
+            for (const part of parts) {
+              const upper = part.toUpperCase();
+              if (upper === "ABOVE") {
+                for (let r = activeRow - 1; r >= 0; r -= 1) {
+                  const val = extractNumber(grid[r]?.[activeCol]);
+                  if (val !== null) nums.push(val);
+                  else break;
+                }
+              } else if (upper === "LEFT") {
+                for (let c = activeCol - 1; c >= 0; c -= 1) {
+                  const val = extractNumber(grid[activeRow]?.[c]);
+                  if (val !== null) nums.push(val);
+                  else break;
+                }
+              } else if (upper === "BELOW") {
+                for (let r = activeRow + 1; r < numRows; r += 1) {
+                  const val = extractNumber(grid[r]?.[activeCol]);
+                  if (val !== null) nums.push(val);
+                  else break;
+                }
+              } else if (upper === "RIGHT") {
+                const maxC = grid[activeRow]?.length ?? 0;
+                for (let c = activeCol + 1; c < maxC; c += 1) {
+                  const val = extractNumber(grid[activeRow]?.[c]);
+                  if (val !== null) nums.push(val);
+                  else break;
+                }
+              } else if (upper.includes(":")) {
+                const [fromStr, toStr] = upper.split(":");
+                const fromCoord = parseCoord(fromStr!);
+                const toCoord = parseCoord(toStr!);
+                if (fromCoord && toCoord) {
+                  const rMin = Math.min(fromCoord.r, toCoord.r);
+                  const rMax = Math.max(fromCoord.r, toCoord.r);
+                  const cMin = Math.min(fromCoord.c, toCoord.c);
+                  const cMax = Math.max(fromCoord.c, toCoord.c);
+                  for (let r = rMin; r <= rMax; r += 1) {
+                    for (let c = cMin; c <= cMax; c += 1) {
+                      const val = extractNumber(grid[r]?.[c]);
+                      if (val !== null) nums.push(val);
+                    }
+                  }
+                }
+              } else {
+                const coord = parseCoord(upper);
+                if (coord) {
+                  const val = extractNumber(grid[coord.r]?.[coord.c]);
+                  if (val !== null) nums.push(val);
+                }
+              }
+            }
+            return nums;
+          };
+
+          let calculatedVal = 0;
+          const fnMatch = /^(SUM|AVERAGE|COUNT|MIN|MAX|PRODUCT)\s*\((.*?)\)$/i.exec(rawExpr);
+          if (fnMatch) {
+            const fnName = fnMatch[1]!.toUpperCase();
+            const args = fnMatch[2]!;
+            const nums = parseRange(args);
+            switch (fnName) {
+              case "SUM":
+                calculatedVal = nums.reduce((acc, v) => acc + v, 0);
+                break;
+              case "AVERAGE":
+                calculatedVal = nums.length ? nums.reduce((acc, v) => acc + v, 0) / nums.length : 0;
+                break;
+              case "COUNT":
+                calculatedVal = nums.length;
+                break;
+              case "MIN":
+                calculatedVal = nums.length ? Math.min(...nums) : 0;
+                break;
+              case "MAX":
+                calculatedVal = nums.length ? Math.max(...nums) : 0;
+                break;
+              case "PRODUCT":
+                calculatedVal = nums.length ? nums.reduce((acc, v) => acc * v, 1) : 0;
+                break;
+            }
+          } else {
+            const evalExpr = rawExpr.replace(/[A-Za-z]+\d+/g, (match) => {
+              const coord = parseCoord(match);
+              if (!coord) return "0";
+              const val = extractNumber(grid[coord.r]?.[coord.c]);
+              return String(val ?? 0);
+            });
+            if (!/^[\d+\-*/.() ]+$/.test(evalExpr)) {
+              return false;
+            }
+            const tokens = evalExpr.match(/\d+(?:\.\d+)?|[+\-*/()]/g) || [];
+            let pos = 0;
+            const parsePrimary = (): number => {
+              const token = tokens[pos];
+              if (token === "(") {
+                pos += 1;
+                const val = parseExpr();
+                if (tokens[pos] === ")") pos += 1;
+                return val;
+              }
+              if (token === "-") {
+                pos += 1;
+                return -parsePrimary();
+              }
+              if (token === "+") {
+                pos += 1;
+                return parsePrimary();
+              }
+              pos += 1;
+              return Number(token) || 0;
+            };
+            const parseFactor = (): number => {
+              let left = parsePrimary();
+              while (pos < tokens.length && (tokens[pos] === "*" || tokens[pos] === "/")) {
+                const op = tokens[pos++];
+                const right = parsePrimary();
+                if (op === "*") left *= right;
+                else if (op === "/") left = right !== 0 ? left / right : 0;
+              }
+              return left;
+            };
+            const parseExpr = (): number => {
+              let left = parseFactor();
+              while (pos < tokens.length && (tokens[pos] === "+" || tokens[pos] === "-")) {
+                const op = tokens[pos++];
+                const right = parseFactor();
+                if (op === "+") left += right;
+                else if (op === "-") left -= right;
+              }
+              return left;
+            };
+            calculatedVal = parseExpr();
+          }
+
+          let resultText = String(calculatedVal);
+          if (Number.isFinite(calculatedVal)) {
+            if (Number.isInteger(calculatedVal)) {
+              resultText = calculatedVal.toString();
+            } else {
+              resultText = Number(calculatedVal.toFixed(4)).toString();
+            }
+          }
+
+          if (dispatch) {
+            const cellNode = activeCellTarget.node;
+            const p = state.schema.nodes.paragraph.create(
+              null,
+              resultText ? state.schema.text(resultText) : undefined,
+            );
+            const tr = state.tr.replaceWith(
+              activeCellTarget.pos + 1,
+              activeCellTarget.pos + cellNode.nodeSize - 1,
+              p,
+            );
+            tr.setSelection(TextSelection.near(tr.doc.resolve(activeCellTarget.pos + 2)));
+            dispatch(tr.scrollIntoView());
+          }
+          return true;
+        },
       // Word's Merge Cells over the selection's bounding rectangle. Each
       // spanned row folds its cells into one: the row's first cell takes
       // columnSpan = width, rows below the first take verticalMerge
@@ -3180,6 +3645,31 @@ export const DocumentCommands = Extension.create({
             changedTable = true;
           }
 
+          if (patch.cellSpacing !== undefined) {
+            if (
+              patch.cellSpacing === null ||
+              patch.cellSpacing === 0 ||
+              patch.cellSpacing === "0"
+            ) {
+              nextAttrs.cellSpacing = null;
+              changedTable = true;
+            } else if (typeof patch.cellSpacing === "number") {
+              nextAttrs.cellSpacing =
+                patch.cellSpacing > 0
+                  ? { size: Math.round(patch.cellSpacing), type: "twips" }
+                  : null;
+              changedTable = true;
+            } else if (typeof patch.cellSpacing === "string") {
+              const parsed = parseMeasureTwip(patch.cellSpacing);
+              nextAttrs.cellSpacing =
+                parsed !== null && parsed > 0 ? { size: Math.round(parsed), type: "twips" } : null;
+              changedTable = true;
+            } else if (typeof patch.cellSpacing === "object") {
+              nextAttrs.cellSpacing = patch.cellSpacing;
+              changedTable = true;
+            }
+          }
+
           if (dispatch) {
             const tr = state.tr;
             if (changedTable) {
@@ -3201,6 +3691,38 @@ export const DocumentCommands = Extension.create({
               }
             }
             dispatch(tr.scrollIntoView());
+          }
+          return true;
+        },
+      // Table cell spacing (w:tblCellSpacing) — sets cell spacing twips on the enclosing table node.
+      "table-cell-spacing":
+        (value) =>
+        ({ state, dispatch }) => {
+          const anchor = tableAncestry(state);
+          if (!anchor) return false;
+          let spacing: { size: number; type?: string } | null = null;
+          if (value === null || value === undefined || value === 0 || value === "0") {
+            spacing = null;
+          } else if (typeof value === "number") {
+            spacing = value > 0 ? { size: Math.round(value), type: "twips" } : null;
+          } else if (typeof value === "string") {
+            const parsed = parseMeasureTwip(value);
+            spacing =
+              parsed !== null && parsed > 0 ? { size: Math.round(parsed), type: "twips" } : null;
+          } else if (typeof value === "object" && "size" in (value as object)) {
+            spacing = value as { size: number; type?: string };
+          } else {
+            return false;
+          }
+          if (dispatch) {
+            const { $from } = state.selection;
+            const tablePos = $from.before(anchor.tableAt);
+            const tableNode = $from.node(anchor.tableAt);
+            dispatch(
+              state.tr
+                .setNodeMarkup(tablePos, undefined, { ...tableNode.attrs, cellSpacing: spacing })
+                .scrollIntoView(),
+            );
           }
           return true;
         },
@@ -3352,11 +3874,14 @@ export const DocumentCommands = Extension.create({
             .run();
         },
       // Sort the sibling blocks covered by the selection in ascending text
-      // order (locale-aware, numeric). Only same-parent block sequences are
-      // reorderable — mirroring Word Sort on a paragraph/list range.
+      // order (locale-aware, numeric). When selection is inside a table,
+      // delegates to Word table sorting (sort-table).
       sort:
         () =>
-        ({ state, chain }) => {
+        ({ state, chain, commands }) => {
+          if (tableAncestry(state)) {
+            return commands["sort-table"]();
+          }
           const { selection, doc } = state;
           const { from, to, empty } = selection;
           if (empty) return false;
