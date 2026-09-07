@@ -760,6 +760,133 @@ describe("cell size / autofit commands", () => {
     expect(tablesOf(editor)[0]!.attrs.columnWidths).toEqual([1080, 1080]);
   });
 
+  it("autofit-window without arguments scales to available text width", () => {
+    const editor = build();
+    gridTable(editor, [720, 1440]);
+    expect(editor.commands["autofit-window"]()).toBe(true);
+    const widths = tablesOf(editor)[0]!.attrs.columnWidths as number[];
+    expect(widths).toHaveLength(2);
+    expect(widths[0] + widths[1]).toBe(9360);
+    expect(widths[0]).toBe(3120);
+    expect(widths[1]).toBe(6240);
+  });
+
+  it("autofit-contents works on tables with merged cells", () => {
+    const editor = build();
+    editor.commands["insert-table"](); // 3 cols
+    // Merge row 0 col 0 and 1
+    caretInCell(editor, 0, 0);
+    selectCells(editor, 0, 0, 0, 1);
+    expect(editor.commands["merge-cells"]()).toBe(true);
+
+    // Call autofit-contents
+    expect(editor.commands["autofit-contents"]()).toBe(true);
+    const widths = tablesOf(editor)[0]!.attrs.columnWidths as number[];
+    expect(widths).toHaveLength(3);
+    for (const w of widths) {
+      expect(w).toBeGreaterThanOrEqual(720);
+    }
+  });
+
+  it("distribute-columns distributes only selected columns when CellSelection covers a subset", () => {
+    const editor = build();
+    editor.commands.setContent({
+      type: "doc",
+      content: [
+        {
+          type: "table",
+          attrs: { columnWidths: [1000, 2000, 4000, 1000] },
+          content: [
+            {
+              type: "tableRow",
+              content: [
+                { type: "tableCell", content: [{ type: "paragraph" }] },
+                { type: "tableCell", content: [{ type: "paragraph" }] },
+                { type: "tableCell", content: [{ type: "paragraph" }] },
+                { type: "tableCell", content: [{ type: "paragraph" }] },
+              ],
+            },
+            {
+              type: "tableRow",
+              content: [
+                { type: "tableCell", content: [{ type: "paragraph" }] },
+                { type: "tableCell", content: [{ type: "paragraph" }] },
+                { type: "tableCell", content: [{ type: "paragraph" }] },
+                { type: "tableCell", content: [{ type: "paragraph" }] },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    // Select columns 1 and 2
+    selectCells(editor, 0, 1, 1, 2);
+    // Find cell positions for CellSelection:
+    let cell1Pos = -1;
+    let cell2Pos = -1;
+    editor.state.doc.descendants((node, pos) => {
+      if (node.type.name === "tableRow") {
+        if (cell1Pos < 0) {
+          cell1Pos = pos + 1 + node.child(0).nodeSize; // row 0 col 1
+        } else if (cell2Pos < 0) {
+          cell2Pos = pos + 1 + node.child(0).nodeSize + node.child(1).nodeSize; // row 1 col 2
+        }
+      }
+    });
+    editor.view.dispatch(
+      editor.state.tr.setSelection(
+        new CellSelection(editor.state.doc.resolve(cell1Pos), editor.state.doc.resolve(cell2Pos)),
+      ),
+    );
+    expect(editor.state.selection instanceof CellSelection).toBe(true);
+
+    expect(editor.commands["distribute-columns"]()).toBe(true);
+    // Cols 1 and 2 (sum 6000) are distributed evenly (3000, 3000), cols 0 and 3 are untouched (1000)
+    expect(tablesOf(editor)[0]!.attrs.columnWidths).toEqual([1000, 3000, 3000, 1000]);
+  });
+
+  it("distribute-rows equalizes row heights across table and supports CellSelection", () => {
+    const editor = build();
+    editor.commands["insert-table"]();
+    caretInCell(editor, 0, 0);
+
+    // Initial rows have null heights
+    expect(editor.commands["distribute-rows"]()).toBe(true);
+    const table = tablesOf(editor)[0]!;
+    expect(table.childCount).toBe(3);
+    for (let r = 0; r < table.childCount; r += 1) {
+      expect(table.child(r).attrs.height).toEqual({ value: 400, rule: "atLeast" });
+    }
+
+    // Set custom heights
+    expect(editor.commands["set-table-row-height"](0, { value: 300, rule: "atLeast" })).toBe(true);
+    expect(editor.commands["set-table-row-height"](1, { value: 700, rule: "atLeast" })).toBe(true);
+
+    // Select rows 0 and 1
+    let r0Pos = -1;
+    let r1Pos = -1;
+    editor.state.doc.descendants((node, pos) => {
+      if (node.type.name === "tableRow") {
+        if (r0Pos < 0) r0Pos = pos + 1;
+        else if (r1Pos < 0) r1Pos = pos + 1;
+      }
+    });
+    editor.view.dispatch(
+      editor.state.tr.setSelection(
+        new CellSelection(editor.state.doc.resolve(r0Pos), editor.state.doc.resolve(r1Pos)),
+      ),
+    );
+
+    expect(editor.commands["distribute-rows"]()).toBe(true);
+    const tableAfter = tablesOf(editor)[0]!;
+    // Rows 0 and 1 (300 + 700 = 1000) distribute to 500 each
+    expect(tableAfter.child(0).attrs.height).toEqual({ value: 500, rule: "atLeast" });
+    expect(tableAfter.child(1).attrs.height).toEqual({ value: 500, rule: "atLeast" });
+    // Row 2 untouched at 400
+    expect(tableAfter.child(2).attrs.height).toEqual({ value: 400, rule: "atLeast" });
+  });
+
   it("cell-width writes the caret column's width, accepting measures", () => {
     const editor = build();
     gridTable(editor, [1440, 1440]);

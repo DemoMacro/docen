@@ -1026,6 +1026,52 @@ function measureTextTwip(text: string): number {
 /** Word's smallest usable column — 0.5" — also the AutoFit floor. */
 const MIN_COL_TWIP = 720;
 
+/** Total number of grid columns across all rows in tableNode (span-aware). */
+function tableGridColumns(tableNode: PMNode): number {
+  if (Array.isArray(tableNode.attrs.columnWidths) && tableNode.attrs.columnWidths.length > 0) {
+    return tableNode.attrs.columnWidths.length;
+  }
+  let maxCols = 0;
+  for (let r = 0; r < tableNode.childCount; r += 1) {
+    const row = tableNode.child(r);
+    let cols = 0;
+    for (let c = 0; c < row.childCount; c += 1) {
+      cols += spanOf(row.child(c));
+    }
+    maxCols = Math.max(maxCols, cols);
+  }
+  return maxCols;
+}
+
+/** Computes the available text body width in twips from the document's sectionProperties. */
+function availableTextWidthTwips(state: EditorState): number {
+  let sectPr: Record<string, unknown> | undefined;
+  const from = state.selection.from;
+  state.doc.descendants((node, nodePos) => {
+    if (nodePos + node.nodeSize <= from) return true;
+    if (node.type.name === "paragraph" && node.attrs.sectionProperties) {
+      sectPr = node.attrs.sectionProperties as Record<string, unknown>;
+      return false;
+    }
+    return true;
+  });
+  if (!sectPr) {
+    sectPr = (state.doc.attrs as { sectionProperties?: Record<string, unknown> })
+      ?.sectionProperties;
+  }
+  const pageSize = (
+    sectPr?.pageSize && typeof sectPr.pageSize === "object" ? sectPr.pageSize : {}
+  ) as Record<string, unknown>;
+  const pageMargin = (
+    sectPr?.pageMargin && typeof sectPr.pageMargin === "object" ? sectPr.pageMargin : {}
+  ) as Record<string, unknown>;
+  const pageWidth = typeof pageSize.width === "number" ? pageSize.width : 12240;
+  const marginLeft = typeof pageMargin.left === "number" ? pageMargin.left : 1440;
+  const marginRight = typeof pageMargin.right === "number" ? pageMargin.right : 1440;
+  const textWidth = pageWidth - (marginLeft + marginRight);
+  return textWidth > 0 ? textWidth : 9360;
+}
+
 type TableBordersLike = Record<string, { style: string; size: number; color: string } | undefined>;
 const GRID_BORDER = { style: "single", size: 4, color: "auto" };
 const NO_BORDER = { style: "none", size: 0, color: "auto" };
@@ -2712,7 +2758,7 @@ export const DocumentCommands = Extension.create({
         },
       // Word's AutoFit Contents: each column shrinks to its widest cell's
       // content (a character-count heuristic — see measureTextTwip) without
-      // growing past the current grid. Span-free tables only.
+      // growing past the current grid. Supports tables with merged cells.
       "autofit-contents":
         () =>
         ({ state, dispatch }) => {
@@ -2720,24 +2766,42 @@ export const DocumentCommands = Extension.create({
           if (!anchor) return false;
           const { $from } = state.selection;
           const tableNode = $from.node(anchor.tableAt);
-          const widths = tableNode.attrs.columnWidths as number[] | null;
-          if (!widths || widths.length === 0) return false;
-          const cols = widths.length;
+          const cols = tableGridColumns(tableNode);
+          if (cols === 0) return false;
+
+          const existingWidths = (tableNode.attrs.columnWidths as number[] | null) ?? [];
+
+          // Compute widest content for each grid column
+          const colWidest = Array.from<number>({ length: cols }).fill(0);
           for (let r = 0; r < tableNode.childCount; r += 1) {
             const row = tableNode.child(r);
-            if (row.childCount !== cols) return false;
-            for (let c = 0; c < cols; c += 1) {
+            let col = 0;
+            for (let c = 0; c < row.childCount; c += 1) {
               const cell = row.child(c);
-              if (cell.attrs.columnSpan || cell.attrs.verticalMerge) return false;
+              const span = spanOf(cell);
+              if (cell.attrs.verticalMerge === "continue") {
+                col += span;
+                continue;
+              }
+              const textLen = measureTextTwip(cell.textContent);
+              if (span === 1) {
+                if (col < cols) {
+                  colWidest[col] = Math.max(colWidest[col], textLen);
+                }
+              } else {
+                const perCol = Math.round(textLen / span);
+                for (let s = 0; s < span && col + s < cols; s += 1) {
+                  colWidest[col + s] = Math.max(colWidest[col + s], perCol);
+                }
+              }
+              col += span;
             }
           }
+
           if (dispatch) {
-            const next = widths.map((w, c) => {
-              let widest = 0;
-              for (let r = 0; r < tableNode.childCount; r += 1) {
-                widest = Math.max(widest, measureTextTwip(tableNode.child(r).child(c).textContent));
-              }
-              return Math.max(MIN_COL_TWIP, Math.min(w, widest));
+            const next = colWidest.map((widest, c) => {
+              const currentW = existingWidths[c] ?? 2880;
+              return Math.max(MIN_COL_TWIP, Math.min(currentW, widest));
             });
             dispatch(
               state.tr
@@ -2752,20 +2816,25 @@ export const DocumentCommands = Extension.create({
           return true;
         },
       // Word's AutoFit Window: the grid scales proportionally to the page's
-      // text width (the host resolves that from the layout flow and passes it
-      // as the twip value). A table without a grid starts from equal columns.
+      // text width (or an explicitly provided twip value). A table without a
+      // grid starts from equal columns.
       "autofit-window":
         (value) =>
         ({ state, dispatch }) => {
           const anchor = tableAncestry(state);
           if (!anchor) return false;
-          const total = Number(value);
-          if (!Number.isFinite(total) || total <= 0) return false;
+          let total: number;
+          if (value !== undefined) {
+            total = Number(value);
+            if (!Number.isFinite(total) || total <= 0) return false;
+          } else {
+            total = availableTextWidthTwips(state);
+          }
           const { $from } = state.selection;
           const tableNode = $from.node(anchor.tableAt);
           const widths =
             (tableNode.attrs.columnWidths as number[] | null)?.filter((w) => w > 0) ?? [];
-          const cols = Math.max(widths.length, tableNode.child(0)?.childCount ?? 0);
+          const cols = Math.max(widths.length, tableGridColumns(tableNode));
           if (cols === 0) return false;
           if (dispatch) {
             const sum = widths.reduce((a, b) => a + b, 0);
@@ -2808,8 +2877,9 @@ export const DocumentCommands = Extension.create({
           }
           return true;
         },
-      // Word's Distribute Columns: the grid splits its total evenly (the last
-      // column absorbs the rounding remainder so the sum is exact).
+      // Word's Distribute Columns: the grid splits its width evenly. When a
+      // CellSelection spans multiple columns, distributes only the selected
+      // columns; otherwise distributes all columns table-wide.
       "distribute-columns":
         () =>
         ({ state, dispatch }) => {
@@ -2817,18 +2887,36 @@ export const DocumentCommands = Extension.create({
           if (!anchor) return false;
           const { $from } = state.selection;
           const tableNode = $from.node(anchor.tableAt);
-          const cols = tableNode.child(0)?.childCount ?? 0;
-          if (cols === 0) return false;
+          const totalCols = tableGridColumns(tableNode);
+          if (totalCols === 0) return false;
+
           let widths = tableNode.attrs.columnWidths as number[] | null;
-          if (!widths || widths.length === 0) {
-            widths = Array.from({ length: cols }, () => 2880);
+          if (!widths || widths.length !== totalCols) {
+            widths = Array.from({ length: totalCols }, () => 2880);
           }
+
+          const targets = tableTargets(state);
+          const isCell = state.selection instanceof CellSelection;
+          const hasSubsetCols =
+            isCell && targets && targets.cols.size > 1 && targets.cols.size < totalCols;
+
           if (dispatch) {
-            const sum = widths.reduce((a, b) => a + b, 0);
-            const even = Math.floor(sum / cols);
-            const next = Array.from({ length: cols }, (_, c) =>
-              c === cols - 1 ? sum - even * (cols - 1) : even,
-            );
+            const next = [...widths];
+            if (hasSubsetCols && targets) {
+              const selectedCols = Array.from(targets.cols).sort((a, b) => a - b);
+              const sum = selectedCols.reduce((acc, c) => acc + (widths![c] ?? 2880), 0);
+              const even = Math.floor(sum / selectedCols.length);
+              selectedCols.forEach((c, i) => {
+                next[c] =
+                  i === selectedCols.length - 1 ? sum - even * (selectedCols.length - 1) : even;
+              });
+            } else {
+              const sum = widths.reduce((a, b) => a + b, 0);
+              const even = Math.floor(sum / totalCols);
+              for (let c = 0; c < totalCols; c += 1) {
+                next[c] = c === totalCols - 1 ? sum - even * (totalCols - 1) : even;
+              }
+            }
             dispatch(
               state.tr
                 .setNodeMarkup($from.before(anchor.tableAt), undefined, {
@@ -2840,48 +2928,67 @@ export const DocumentCommands = Extension.create({
           }
           return true;
         },
-      // Word's Distribute Rows: the selected rows' declared heights split
-      // their total evenly (the last row absorbs the rounding remainder); a
-      // bare caret (or a single-row pick) applies table-wide, like Distribute
-      // Columns. Rows without a declared height stay auto — there is nothing
-      // to redistribute from, so at least two rows need one.
+      // Word's Distribute Rows: the targeted rows' heights split their total evenly.
+      // If a CellSelection spans multiple rows, distributes only those rows;
+      // otherwise distributes all rows in the table. Rows without a declared
+      // height use an appropriate default (~400 twips).
       "distribute-rows":
         () =>
         ({ state, dispatch }) => {
-          const fromA = ancestryAt(state.selection.$from);
-          const toA = ancestryAt(state.selection.$to);
-          if (!fromA || !toA || fromA.rowAt < 0 || toA.rowAt < 0) return false;
-          const { $from, $to } = state.selection;
-          if ($from.before(fromA.tableAt) !== $to.before(toA.tableAt)) return false;
-          const tableNode = $from.node(fromA.tableAt);
-          const tablePos = $from.before(fromA.tableAt);
-          const rowFrom = $from.index(fromA.tableAt);
-          const rowTo = $to.index(toA.tableAt);
-          const last = rowFrom === rowTo ? tableNode.childCount - 1 : rowTo;
-          // Ancestry depths are not indexes — resolve row positions by child
-          // offsets (the merge-cells pattern); markup writes keep positions
-          // stable, so a forward walk stays valid.
-          const rows: { pos: number; height: number }[] = [];
-          let rowPos = tablePos + 1;
-          for (let r = 0; r <= last; r += 1) {
+          const anchor = tableAncestry(state);
+          if (!anchor) return false;
+          const { $from } = state.selection;
+          const tableNode = $from.node(anchor.tableAt);
+          const tablePos = $from.before(anchor.tableAt);
+          const totalRows = tableNode.childCount;
+          if (totalRows < 2) return false;
+
+          const targets = tableTargets(state);
+          const isCell = state.selection instanceof CellSelection;
+          const selectedRowIndices =
+            isCell && targets && targets.rows.size > 1
+              ? Array.from(targets.rows).sort((a, b) => a - b)
+              : Array.from({ length: totalRows }, (_, i) => i);
+
+          if (selectedRowIndices.length < 2) return false;
+
+          const DEFAULT_ROW_HEIGHT = 400;
+          let declaredCount = 0;
+          let declaredSum = 0;
+
+          const rowInfos: { pos: number; rowIdx: number; height: number }[] = [];
+          let curPos = tablePos + 1;
+          for (let r = 0; r < totalRows; r += 1) {
             const row = tableNode.child(r);
-            const h = row.attrs.height as { value?: unknown } | null;
-            if (r >= rowFrom && h && typeof h.value === "number" && h.value > 0) {
-              rows.push({ pos: rowPos, height: h.value });
+            if (selectedRowIndices.includes(r)) {
+              const h = row.attrs.height as { value?: unknown } | null;
+              const hasVal = h && typeof h.value === "number" && h.value > 0;
+              const val = hasVal ? (h.value as number) : DEFAULT_ROW_HEIGHT;
+              if (hasVal) {
+                declaredCount += 1;
+                declaredSum += val;
+              }
+              rowInfos.push({ pos: curPos, rowIdx: r, height: val });
             }
-            rowPos += row.nodeSize;
+            curPos += row.nodeSize;
           }
-          if (rows.length < 2) return false;
+
           if (dispatch) {
-            const sum = rows.reduce((a, b) => a + b.height, 0);
-            const even = Math.floor(sum / rows.length);
+            const totalSum =
+              declaredCount > 0
+                ? declaredSum + (rowInfos.length - declaredCount) * DEFAULT_ROW_HEIGHT
+                : rowInfos.length * DEFAULT_ROW_HEIGHT;
+            const even = Math.floor(totalSum / rowInfos.length);
             const tr = state.tr;
-            rows.forEach(({ pos }, i) => {
+
+            rowInfos.forEach(({ pos }, i) => {
               const row = tr.doc.nodeAt(pos)!;
+              const hValue =
+                i === rowInfos.length - 1 ? totalSum - even * (rowInfos.length - 1) : even;
               tr.setNodeMarkup(pos, undefined, {
                 ...row.attrs,
                 height: {
-                  value: i === rows.length - 1 ? sum - even * (rows.length - 1) : even,
+                  value: hValue,
                   rule: "atLeast",
                 },
               });
