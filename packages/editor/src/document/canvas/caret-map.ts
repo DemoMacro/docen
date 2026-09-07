@@ -129,6 +129,8 @@ export interface TableZone {
   colEdges: number[];
   /** Row top edges + the bottom rim (nRows + 1). */
   rowEdges: number[];
+  /** Document position of the ProseMirror table node (if mapped). */
+  tablePos?: number;
 }
 
 /** The cell content stack's first paragraph block — the position the PM zip
@@ -431,6 +433,31 @@ export class CaretMap {
       const boxes = this.cellBoxes.get(inner - 2);
       if (boxes) boxes.push(box);
       else this.cellBoxes.set(inner - 2, [box]);
+    }
+    const tableType = doc.type.schema.nodes.table;
+    if (tableType) {
+      for (const z of this.tableZones) {
+        for (const [cellPos, boxes] of this.cellBoxes) {
+          const box = boxes[0];
+          if (
+            box &&
+            box.page === z.page &&
+            box.xPx >= z.xPx - 1 &&
+            box.xPx + box.widthPx <= z.xPx + z.widthPx + 1 &&
+            box.yPx >= z.yPx - 1 &&
+            box.yPx + box.heightPx <= z.yPx + z.heightPx + 1
+          ) {
+            const $cell = doc.resolve(cellPos + 1);
+            for (let d = $cell.depth; d > 0; d -= 1) {
+              if ($cell.node(d).type === tableType) {
+                z.tablePos = $cell.before(d);
+                break;
+              }
+            }
+            if (z.tablePos != null) break;
+          }
+        }
+      }
     }
   }
 

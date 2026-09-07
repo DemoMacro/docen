@@ -88,8 +88,16 @@ declare module "@tiptap/core" {
       // Table context commands (the Table Design / Layout contextual tabs).
       "insert-row-above": () => ReturnType;
       "insert-row-below": () => ReturnType;
+      "insert-row-at": (index: number, tablePos?: number) => ReturnType;
       "insert-column-left": () => ReturnType;
       "insert-column-right": () => ReturnType;
+      "insert-column-at": (index: number, tablePos?: number) => ReturnType;
+      "set-table-column-widths": (widths: number[], tablePos?: number) => ReturnType;
+      "set-table-row-height": (
+        rowIndex: number,
+        height: { rule: "atLeast" | "exact"; value: number } | null,
+        tablePos?: number,
+      ) => ReturnType;
       "delete-row": () => ReturnType;
       "delete-column": () => ReturnType;
       "select-table": () => ReturnType;
@@ -186,8 +194,12 @@ export const WIRED_DISPATCH: ReadonlySet<string> = new Set([
   "delete-table",
   "insert-row-above",
   "insert-row-below",
+  "insert-row-at",
   "insert-column-left",
   "insert-column-right",
+  "insert-column-at",
+  "set-table-column-widths",
+  "set-table-row-height",
   "delete-row",
   "delete-column",
   "select-table",
@@ -714,7 +726,7 @@ export function tableAncestry(state: EditorState): {
 
 /** {@link tableAncestry} for an arbitrary position — Merge Cells resolves the
  *  selection's two ends independently. */
-function ancestryAt($pos: ResolvedPos): {
+export function ancestryAt($pos: ResolvedPos): {
   tableAt: number;
   rowAt: number;
   cellAt: number;
@@ -1603,6 +1615,41 @@ export const DocumentCommands = Extension.create({
           }
           return true;
         },
+      // Insert an empty row at a specific row index (0..nRows).
+      "insert-row-at":
+        (rowIndex: number, targetTablePos?: number) =>
+        ({ state, dispatch }) => {
+          let tablePos = targetTablePos;
+          let tableNode: PMNode | null = null;
+          if (tablePos != null) {
+            tableNode = state.doc.nodeAt(tablePos);
+          } else {
+            const anchor = tableAncestry(state);
+            if (!anchor) return false;
+            tablePos = state.selection.$from.before(anchor.tableAt);
+            tableNode = state.selection.$from.node(anchor.tableAt);
+          }
+          if (!tableNode || tablePos == null || tableNode.childCount === 0) return false;
+          if (dispatch) {
+            const tr = state.tr;
+            const templateIdx = Math.min(rowIndex > 0 ? rowIndex - 1 : 0, tableNode.childCount - 1);
+            const templateRow = tableNode.child(templateIdx);
+            const emptyCells: PMNode[] = [];
+            templateRow.forEach((cell) => {
+              const para = state.schema.nodes.paragraph.create();
+              emptyCells.push(cell.type.createAndFill(cell.attrs, [para])!);
+            });
+            const newRow = templateRow.type.create(templateRow.attrs, emptyCells);
+            let insertPos = tablePos + 1;
+            for (let r = 0; r < Math.min(rowIndex, tableNode.childCount); r += 1) {
+              insertPos += tableNode.child(r).nodeSize;
+            }
+            tr.insert(insertPos, newRow);
+            tr.setSelection(TextSelection.near(tr.doc.resolve(insertPos + 2)));
+            dispatch(tr.scrollIntoView());
+          }
+          return true;
+        },
       // One empty cell per row, copied from each row's cell attrs at the current column
       // index. Bottom-up keeps positions valid as earlier edits shift later ones.
       "insert-column-right":
@@ -1631,6 +1678,12 @@ export const DocumentCommands = Extension.create({
               if (r === $from.index(anchor.rowAt)) {
                 targetCellPos = cellPos;
               }
+            }
+            if (Array.isArray(tableNode.attrs.columnWidths)) {
+              const widths = [...(tableNode.attrs.columnWidths as number[])];
+              const w = widths[cellIndex] ?? 2880;
+              widths.splice(cellIndex + 1, 0, w);
+              tr.setNodeMarkup(tablePos, undefined, { ...tableNode.attrs, columnWidths: widths });
             }
             if (targetCellPos > 0) {
               tr.setSelection(TextSelection.near(tr.doc.resolve(targetCellPos + 1)));
@@ -1666,10 +1719,122 @@ export const DocumentCommands = Extension.create({
                 targetCellPos = cellPos;
               }
             }
+            if (Array.isArray(tableNode.attrs.columnWidths)) {
+              const widths = [...(tableNode.attrs.columnWidths as number[])];
+              const w = widths[cellIndex] ?? 2880;
+              widths.splice(cellIndex, 0, w);
+              tr.setNodeMarkup(tablePos, undefined, { ...tableNode.attrs, columnWidths: widths });
+            }
             if (targetCellPos > 0) {
               tr.setSelection(TextSelection.near(tr.doc.resolve(targetCellPos + 1)));
             }
             dispatch(tr.scrollIntoView());
+          }
+          return true;
+        },
+      // Insert a column at a specific column index (0..nCols).
+      "insert-column-at":
+        (colIndex: number, targetTablePos?: number) =>
+        ({ state, dispatch }) => {
+          let tablePos = targetTablePos;
+          let tableNode: PMNode | null = null;
+          if (tablePos != null) {
+            tableNode = state.doc.nodeAt(tablePos);
+          } else {
+            const anchor = tableAncestry(state);
+            if (!anchor) return false;
+            tablePos = state.selection.$from.before(anchor.tableAt);
+            tableNode = state.selection.$from.node(anchor.tableAt);
+          }
+          if (!tableNode || tablePos == null || tableNode.childCount === 0) return false;
+          if (dispatch) {
+            const tr = state.tr;
+            let targetCellPos = -1;
+            for (let r = tableNode.childCount - 1; r >= 0; r -= 1) {
+              const rowNode = tableNode.child(r);
+              let rowPos = tablePos + 1;
+              for (let i = 0; i < r; i += 1) rowPos += tableNode.child(i).nodeSize;
+              const idx = Math.min(colIndex, rowNode.childCount);
+              let cellPos = rowPos + 1;
+              for (let c = 0; c < idx; c += 1) cellPos += rowNode.child(c).nodeSize;
+              const templateIdx = Math.min(colIndex > 0 ? colIndex - 1 : 0, rowNode.childCount - 1);
+              const template = rowNode.child(templateIdx);
+              const para = state.schema.nodes.paragraph.create();
+              const emptyCell = template.type.createAndFill(template.attrs, [para])!;
+              tr.insert(cellPos, emptyCell);
+              if (r === 0) targetCellPos = cellPos;
+            }
+            if (Array.isArray(tableNode.attrs.columnWidths)) {
+              const widths = [...(tableNode.attrs.columnWidths as number[])];
+              const w = widths[colIndex - 1] ?? widths[colIndex] ?? 2880;
+              widths.splice(colIndex, 0, w);
+              tr.setNodeMarkup(tablePos, undefined, { ...tableNode.attrs, columnWidths: widths });
+            }
+            if (targetCellPos > 0) {
+              tr.setSelection(TextSelection.near(tr.doc.resolve(targetCellPos + 1)));
+            }
+            dispatch(tr.scrollIntoView());
+          }
+          return true;
+        },
+      // Set table column widths directly on the table node.
+      "set-table-column-widths":
+        (widths: number[], targetTablePos?: number) =>
+        ({ state, dispatch }) => {
+          let tablePos = targetTablePos;
+          let tableNode: PMNode | null = null;
+          if (tablePos != null) {
+            tableNode = state.doc.nodeAt(tablePos);
+          } else {
+            const anchor = tableAncestry(state);
+            if (!anchor) return false;
+            tablePos = state.selection.$from.before(anchor.tableAt);
+            tableNode = state.selection.$from.node(anchor.tableAt);
+          }
+          if (!tableNode || tablePos == null) return false;
+          if (dispatch) {
+            dispatch(
+              state.tr
+                .setNodeMarkup(tablePos, undefined, {
+                  ...tableNode.attrs,
+                  columnWidths: widths,
+                })
+                .scrollIntoView(),
+            );
+          }
+          return true;
+        },
+      // Set height on a specific table row.
+      "set-table-row-height":
+        (
+          rowIndex: number,
+          height: { rule: "atLeast" | "exact"; value: number } | null,
+          targetTablePos?: number,
+        ) =>
+        ({ state, dispatch }) => {
+          let tablePos = targetTablePos;
+          let tableNode: PMNode | null = null;
+          if (tablePos != null) {
+            tableNode = state.doc.nodeAt(tablePos);
+          } else {
+            const anchor = tableAncestry(state);
+            if (!anchor) return false;
+            tablePos = state.selection.$from.before(anchor.tableAt);
+            tableNode = state.selection.$from.node(anchor.tableAt);
+          }
+          if (!tableNode || tablePos == null || rowIndex >= tableNode.childCount) return false;
+          if (dispatch) {
+            let rowPos = tablePos + 1;
+            for (let r = 0; r < rowIndex; r += 1) rowPos += tableNode.child(r).nodeSize;
+            const rowNode = state.doc.nodeAt(rowPos)!;
+            dispatch(
+              state.tr
+                .setNodeMarkup(rowPos, undefined, {
+                  ...rowNode.attrs,
+                  height,
+                })
+                .scrollIntoView(),
+            );
           }
           return true;
         },
@@ -1719,6 +1884,13 @@ export const DocumentCommands = Extension.create({
               let cellPos = rowPos + 1;
               for (let c = 0; c < idx; c += 1) cellPos += rowNode.child(c).nodeSize;
               tr.delete(cellPos, cellPos + rowNode.child(idx).nodeSize);
+            }
+            if (Array.isArray(tableNode.attrs.columnWidths)) {
+              const widths = [...(tableNode.attrs.columnWidths as number[])];
+              if (cellIndex < widths.length) {
+                widths.splice(cellIndex, 1);
+                tr.setNodeMarkup(tablePos, undefined, { ...tableNode.attrs, columnWidths: widths });
+              }
             }
             dispatch(tr.scrollIntoView());
           }
