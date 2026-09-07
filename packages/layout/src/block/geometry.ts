@@ -77,14 +77,22 @@ export function shapeTextPadPx(line: LaidOutLine): number {
  *  (gridPadOf) plus the dominant face's measured ascent (the layout's
  *  per-line `baselinePadPx`), falling back to Leafer's 0.85 × size constant
  *  on lines without the field (`fallbackSizePx` covers textless lines, where
- *  the paragraph-mark strut is the only baseline reference). The ONE anchor
+ *  the paragraph-mark strut is the only baseline reference). A picture-floored
+ *  line pushes the baseline to the picture's bottom — Word treats an inline
+ *  graphic as a single character whose bottom edge sits ON the baseline
+ *  ("images are aligned to the baseline", so taller pictures sink the line's
+ *  baseline and shorter pictures bottom-align with them). The ONE anchor
  *  every text consumer hangs off — the painter's glyphs, underline, tab
  *  leaders and formatting marks, plus the editor's caret band and line
  *  numbers all position relative to this, so none can drift from the paint. */
 export function lineBaselineDepthPx(line: LaidOutLine, fallbackSizePx = 0): number {
-  return (
-    gridPadOf(line) + (line.baselinePadPx ?? leaferBaselinePadPx(line.textEmPx ?? fallbackSizePx))
-  );
+  const pad = gridPadOf(line);
+  const textDepth =
+    pad + (line.baselinePadPx ?? leaferBaselinePadPx(line.textEmPx ?? fallbackSizePx));
+  // The floored natural IS the tallest picture (line-break floors it), so the
+  // picture's bottom = pad + naturalPx; a text-only line keeps the text depth.
+  const pictureDepth = line.pictureFloored ? pad + line.naturalPx : 0;
+  return Math.max(textDepth, pictureDepth);
 }
 
 /** A block's page-fitting extent — its content bottom. A paragraph whose

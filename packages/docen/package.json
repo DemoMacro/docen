@@ -1,6 +1,6 @@
 {
   "name": "docen",
-  "version": "0.6.2",
+  "version": "0.7.0",
   "description": "The full docen canvas web-component editor plus headless Markdown/DOCX conversion in one package. Re-exports @docen/docx (converters + engine) and @docen/editor (<docen-document>).",
   "keywords": [
     "canvas",

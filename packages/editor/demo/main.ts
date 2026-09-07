@@ -220,7 +220,7 @@ const demoDocument = (): JSONContent => ({
     // resize overlay target. The image node is inline-only, so the drawing
     // rides its anchor paragraph's content (Word: a floating drawing lives
     // in a run of the paragraph it anchors to). Offsets are EMU
-    // (914400/inch): 4572000 = 1.2" from the margin, 952500 = 0.26" below
+    // (914400/inch): 4572000 = 5" from the margin, 95250 ≈ 0.1" below
     // the anchor paragraph.
     {
       type: "paragraph",

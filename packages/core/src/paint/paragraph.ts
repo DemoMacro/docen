@@ -535,6 +535,14 @@ export function paintParagraph(
           }),
         );
       } else if (item.kind === "picture" && inline.kind === "picture") {
+        // Word treats an inline picture as a single big character: its BOTTOM
+        // edge sits ON the text baseline ("in line with text" = baseline
+        // aligned), so a taller sibling sinks the line baseline and shorter
+        // pictures bottom-align with it, and line text hangs at the same
+        // baseline. lineBaselineDepthPx sinks to the picture bottom on a
+        // picture-floored line; a small picture in a text-sized line hangs
+        // from the text baseline like any glyph.
+        const baselineY = lineY + lineBaselineDepthPx(line);
         // An inline picture is a grab target just like a floating drawing —
         // without a hit box a click lands behind the art (Word selects the
         // picture). Index counts the paragraph's inline pictures; the PM side
@@ -542,7 +550,7 @@ export function paintParagraph(
         ctx.hitBoxes?.push({
           page: ctx.pageIndex,
           x: lineX + item.xPx,
-          y: lineY + pad,
+          y: baselineY - item.heightPx,
           width: item.widthPx,
           height: item.heightPx,
           para,
@@ -554,7 +562,7 @@ export function paintParagraph(
         // at the center carries the angle (the floating drawing's pivot) and
         // the content re-offsets so the box stays centered under it.
         const picX = lineX + item.xPx;
-        const picY = lineY + pad;
+        const picY = baselineY - item.heightPx;
         let target: IGroup = tree;
         let ox = picX;
         let oy = picY;

@@ -5,7 +5,13 @@
 import { describe, expect, it } from "vitest";
 
 import type { LaidOutLine, LaidOutParagraph, LaidOutTable } from "../layout-result";
-import { gridPadOf, justifiedIntervals, lineOriginXPx, tableGridOf } from "./geometry";
+import {
+  gridPadOf,
+  justifiedIntervals,
+  lineBaselineDepthPx,
+  lineOriginXPx,
+  tableGridOf,
+} from "./geometry";
 
 const line = (over: Partial<LaidOutLine> = {}): LaidOutLine =>
   ({
@@ -34,6 +40,28 @@ describe("lineOriginXPx", () => {
     expect(lineOriginXPx(p, line({ firstLineIndentPx: 21, xOffsetPx: 30 }))).toBe(75);
     // A continuation line carries no first-line indent.
     expect(lineOriginXPx(p, line({ xOffsetPx: 30 }))).toBe(54);
+  });
+});
+
+describe("lineBaselineDepthPx", () => {
+  it("sinks the baseline to the picture bottom on a picture-floored line", () => {
+    // Word treats an inline picture as a single big character whose bottom
+    // edge sits ON the baseline: the floored line's baseline = pad + picture.
+    // Grid span 28 centers the 21.5px picture (pad 3.25) → 3.25 + 21.5.
+    expect(
+      lineBaselineDepthPx(
+        line({ grid: true, pictureFloored: true, heightPx: 28, naturalPx: 21.5, textEmPx: 7 }),
+      ),
+    ).toBeCloseTo(24.75, 5);
+    // A text-only line keeps the text ascent depth — the grid pad centers the
+    // text em here (pad (28−7)/2 = 10.5, plus 0.85 × 7).
+    expect(
+      lineBaselineDepthPx(line({ grid: true, heightPx: 28, naturalPx: 21.5, textEmPx: 7 })),
+    ).toBeCloseTo(16.45, 5);
+    // A non-grid floored line is top-anchored, so the baseline is the picture.
+    expect(
+      lineBaselineDepthPx(line({ pictureFloored: true, heightPx: 28, naturalPx: 21.5 })),
+    ).toBeCloseTo(21.5, 5);
   });
 });
 
