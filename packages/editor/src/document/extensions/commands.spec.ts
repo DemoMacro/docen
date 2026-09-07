@@ -307,7 +307,7 @@ describe("table cell property commands", () => {
     expect(firstNodeOf(editor, "tableCell").child(0).attrs.alignment).toBe("center");
   });
 
-  it("repeat-header-rows toggles the row's tblHeader flag", () => {
+  it("repeat-header-rows toggles the row's tblHeader flag and supports explicit boolean", () => {
     const editor = build();
     editor.commands["insert-table"]();
     caretInCell(editor, 1, 0);
@@ -316,6 +316,127 @@ describe("table cell property commands", () => {
     expect(tablesOf(editor)[0]!.child(1).attrs.tableHeader).toBe(true);
     expect(editor.commands["repeat-header-rows"]()).toBe(true);
     expect(tablesOf(editor)[0]!.child(1).attrs.tableHeader).toBe(false);
+    expect(editor.commands["repeat-header-rows"](true)).toBe(true);
+    expect(tablesOf(editor)[0]!.child(1).attrs.tableHeader).toBe(true);
+    expect(editor.commands["repeat-header-rows"](false)).toBe(true);
+    expect(tablesOf(editor)[0]!.child(1).attrs.tableHeader).toBe(false);
+  });
+
+  it("cant-split toggles and explicitly sets row cantSplit flag, supporting CellSelection", () => {
+    const editor = build();
+    editor.commands["insert-table"]();
+    caretInCell(editor, 1, 0);
+    expect(tablesOf(editor)[0]!.child(1).attrs.cantSplit).toBeFalsy();
+    expect(editor.commands["cant-split"]()).toBe(true);
+    expect(tablesOf(editor)[0]!.child(1).attrs.cantSplit).toBe(true);
+    expect(editor.commands["cant-split"]()).toBe(true);
+    expect(tablesOf(editor)[0]!.child(1).attrs.cantSplit).toBeFalsy();
+    expect(editor.commands["cant-split"](true)).toBe(true);
+    expect(tablesOf(editor)[0]!.child(1).attrs.cantSplit).toBe(true);
+    expect(editor.commands["cant-split"](false)).toBe(true);
+    expect(tablesOf(editor)[0]!.child(1).attrs.cantSplit).toBeFalsy();
+
+    // With CellSelection across multiple rows
+    let r0Pos = -1;
+    let r1Pos = -1;
+    editor.state.doc.descendants((node, pos) => {
+      if (node.type.name === "table") {
+        r0Pos = pos + 2;
+        r1Pos = pos + 1 + node.child(0).nodeSize + 1;
+        return false;
+      }
+      return true;
+    });
+    editor.view.dispatch(
+      editor.state.tr.setSelection(
+        new CellSelection(editor.state.doc.resolve(r0Pos), editor.state.doc.resolve(r1Pos)),
+      ),
+    );
+    expect(editor.commands["cant-split"](true)).toBe(true);
+    expect(tablesOf(editor)[0]!.child(0).attrs.cantSplit).toBe(true);
+    expect(tablesOf(editor)[0]!.child(1).attrs.cantSplit).toBe(true);
+  });
+
+  it("table-alignment sets left (null), center, and right alignment on table", () => {
+    const editor = build();
+    editor.commands["insert-table"]();
+    caretInCell(editor, 0, 0);
+
+    expect(editor.commands["table-alignment"]("center")).toBe(true);
+    expect(tablesOf(editor)[0]!.attrs.alignment).toBe("center");
+
+    expect(editor.commands["table-alignment"]("right")).toBe(true);
+    expect(tablesOf(editor)[0]!.attrs.alignment).toBe("right");
+
+    expect(editor.commands["table-alignment"]("left")).toBe(true);
+    expect(tablesOf(editor)[0]!.attrs.alignment).toBeNull();
+
+    expect(editor.commands["table-alignment"]("bogus" as never)).toBe(false);
+  });
+
+  it("table-text-wrapping toggles around and none and accepts custom float", () => {
+    const editor = build();
+    editor.commands["insert-table"]();
+    caretInCell(editor, 0, 0);
+
+    expect(editor.commands["table-text-wrapping"]("around")).toBe(true);
+    expect(tablesOf(editor)[0]!.attrs.float).toEqual({
+      horizontalAnchor: "margin",
+      verticalAnchor: "paragraph",
+    });
+
+    expect(editor.commands["table-text-wrapping"]("none")).toBe(true);
+    expect(tablesOf(editor)[0]!.attrs.float).toBeNull();
+
+    expect(
+      editor.commands["table-text-wrapping"]({
+        horizontalAnchor: "page",
+        verticalAnchor: "margin",
+      }),
+    ).toBe(true);
+    expect(tablesOf(editor)[0]!.attrs.float).toEqual({
+      horizontalAnchor: "page",
+      verticalAnchor: "margin",
+    });
+  });
+
+  it("table-properties-apply applies partial and full patches", () => {
+    const editor = build();
+    editor.commands["insert-table"]();
+    caretInCell(editor, 0, 0);
+
+    // Full patch like Table Properties dialog
+    expect(
+      editor.commands["table-properties-apply"]({
+        alignment: "center",
+        indent: 720,
+        textWrapping: "around",
+        cantSplit: true,
+      }),
+    ).toBe(true);
+    expect(tablesOf(editor)[0]!.attrs.alignment).toBe("center");
+    expect(tablesOf(editor)[0]!.attrs.indent).toBe(720);
+    expect(tablesOf(editor)[0]!.attrs.float).toEqual({
+      horizontalAnchor: "margin",
+      verticalAnchor: "paragraph",
+    });
+    expect(tablesOf(editor)[0]!.child(0).attrs.cantSplit).toBe(true);
+
+    // Partial patch updating only alignment
+    expect(editor.commands["table-properties-apply"]({ alignment: "left" })).toBe(true);
+    expect(tablesOf(editor)[0]!.attrs.alignment).toBeNull();
+    // indent preserved
+    expect(tablesOf(editor)[0]!.attrs.indent).toBe(720);
+
+    // Partial patch clearing wrapping
+    expect(editor.commands["table-properties-apply"]({ textWrapping: "none" })).toBe(true);
+    expect(tablesOf(editor)[0]!.attrs.float).toBeNull();
+
+    // Invalid arguments decline
+    expect(editor.commands["table-properties-apply"](null as never)).toBe(false);
+    expect(editor.commands["table-properties-apply"]({ alignment: "invalid" as never })).toBe(
+      false,
+    );
   });
 
   it("cell-shading stamps the cell shading, clearing with none or null, supporting objects", () => {

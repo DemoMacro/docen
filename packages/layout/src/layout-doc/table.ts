@@ -64,6 +64,8 @@ export interface LayoutTable {
   /** w:tblPr/w:jc — the table box's placement inside the flow column. A table
    *  wider than the column centers into the margins (negative offset). */
   align?: "left" | "center" | "right";
+  /** w:tblInd — table indent in px from the leading margin edge. */
+  indentPx?: number;
   /** tblGrid column widths in px, scaled proportionally to the effective
    *  table width (Word scales the grid to tblW, never to the raw sum). */
   columnWidthsPx?: number[];

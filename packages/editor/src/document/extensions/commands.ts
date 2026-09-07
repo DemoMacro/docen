@@ -1,4 +1,4 @@
-import type { ImageAttrs } from "@docen/docx";
+import type { ImageAttrs, TableFloatOptions } from "@docen/docx";
 import {
   BULLET_GLYPHS,
   HIGHLIGHT_PALETTE_RGB,
@@ -105,7 +105,8 @@ declare module "@tiptap/core" {
       "select-table-cell": () => ReturnType;
       "select-table-column": () => ReturnType;
       "align-cell": (value?: string) => ReturnType;
-      "repeat-header-rows": () => ReturnType;
+      "repeat-header-rows": (value?: boolean) => ReturnType;
+      "cant-split": (value?: boolean) => ReturnType;
       "cell-shading": (value?: unknown) => ReturnType;
       "cell-borders": (value?: unknown) => ReturnType;
       "set-cell-insets": (value?: unknown) => ReturnType;
@@ -126,6 +127,10 @@ declare module "@tiptap/core" {
       "cell-margins": (value?: string) => ReturnType;
       "cell-width": (value?: string) => ReturnType;
       "cell-height": (value?: string) => ReturnType;
+      "table-alignment": (value: "left" | "center" | "right") => ReturnType;
+      "table-text-wrapping": (
+        value: "none" | "around" | boolean | TableFloatOptions | null,
+      ) => ReturnType;
       "table-properties-apply": (patch?: TablePropertiesPatch) => ReturnType;
       link: (href?: string) => ReturnType;
       style: (styleId?: string) => ReturnType;
@@ -211,6 +216,7 @@ export const WIRED_DISPATCH: ReadonlySet<string> = new Set([
   "select-table-column",
   "align-cell",
   "repeat-header-rows",
+  "cant-split",
   "cell-shading",
   "cell-borders",
   "set-cell-insets",
@@ -229,6 +235,9 @@ export const WIRED_DISPATCH: ReadonlySet<string> = new Set([
   "cell-margins",
   "cell-width",
   "cell-height",
+  "table-alignment",
+  "table-text-wrapping",
+  "table-properties-apply",
   "text-direction",
   "convert-to-text",
   "link",
@@ -349,15 +358,24 @@ export interface ParagraphDialogPatch {
 }
 
 /**
- * What the Table Properties dialog commits on OK — the table tab's geometry
- * (alignment and left indent in twips), stamped onto the caret's table by
+ * What the Table Properties dialog or programmatic caller commits on apply —
+ * the table tab's geometry (alignment, left indent, float/wrapping) and row
+ * properties (cantSplit, tableHeader), stamped onto the caret's table by
  * {@link documentCommands.table-properties-apply}.
  */
 export interface TablePropertiesPatch {
   /** w:jc table alignment — "left" commits null (OOXML's default). */
-  alignment: "left" | "center" | "right";
+  alignment?: "left" | "center" | "right";
   /** w:tblInd left indent in twips; 0 commits null. */
-  indent: number;
+  indent?: number;
+  /** w:cantSplit row protection flag on targeted rows. */
+  cantSplit?: boolean;
+  /** w:tblHeader repeat header rows flag on targeted rows. */
+  tableHeader?: boolean;
+  /** w:tblpPr text wrapping ("none" clears float, "around" enables float). */
+  textWrapping?: "none" | "around";
+  /** w:tblpPr floating options directly. */
+  float?: TableFloatOptions | null;
 }
 
 /**
@@ -2278,19 +2296,44 @@ export const DocumentCommands = Extension.create({
           }
           return true;
         },
-      // Word's Repeat Header Rows — one press marks the whole pick (the
-      // selected rows gain or lose tblHeader together, the anchor row's
-      // current state deciding which way).
+      // Word's Repeat Header Rows — marks the whole pick (the selected rows
+      // gain or lose tblHeader together, either to an explicit boolean or
+      // toggling based on the anchor row's current state).
       "repeat-header-rows":
-        () =>
+        (value) =>
         ({ state, dispatch }) => {
           const targets = tableTargets(state);
           if (!targets) return false;
           if (dispatch) {
             const firstRow = Math.min(...targets.rows);
-            const next = !(targets.tableNode.child(firstRow)!.attrs.tableHeader as boolean);
+            const current = !!(targets.tableNode.child(firstRow)!.attrs.tableHeader as boolean);
+            const next = typeof value === "boolean" ? value : !current;
             const tr = state.tr;
-            stampRows(tr, targets, (row) => ({ ...row.attrs, tableHeader: next }));
+            stampRows(tr, targets, (row) => ({
+              ...row.attrs,
+              tableHeader: next,
+            }));
+            dispatch(tr.scrollIntoView());
+          }
+          return true;
+        },
+      // Word's CantSplit / Row pagination protection — marks the whole pick
+      // (the selected rows gain or lose cantSplit together, either to an
+      // explicit boolean or toggling based on the anchor row's current state).
+      "cant-split":
+        (value) =>
+        ({ state, dispatch }) => {
+          const targets = tableTargets(state);
+          if (!targets) return false;
+          if (dispatch) {
+            const firstRow = Math.min(...targets.rows);
+            const current = !!(targets.tableNode.child(firstRow)!.attrs.cantSplit as boolean);
+            const next = typeof value === "boolean" ? value : !current;
+            const tr = state.tr;
+            stampRows(tr, targets, (row) => ({
+              ...row.attrs,
+              cantSplit: next ? true : null,
+            }));
             dispatch(tr.scrollIntoView());
           }
           return true;
@@ -3022,21 +3065,13 @@ export const DocumentCommands = Extension.create({
           }
           return true;
         },
-      // Table Properties dialog's OK — writes the caret table's w:jc
-      // alignment and w:tblInd indent in one transaction ("left" and 0
-      // commit null, OOXML's absent-attribute default).
-      "table-properties-apply":
-        (patch) =>
+      // Word's Table Alignment: left (null in OOXML), center, right
+      "table-alignment":
+        (alignment) =>
         ({ state, dispatch }) => {
-          if (
-            !patch ||
-            (patch.alignment !== "left" &&
-              patch.alignment !== "center" &&
-              patch.alignment !== "right") ||
-            typeof patch.indent !== "number" ||
-            patch.indent < 0
-          )
+          if (alignment !== "left" && alignment !== "center" && alignment !== "right") {
             return false;
+          }
           const anchor = tableAncestry(state);
           if (!anchor) return false;
           const { $from } = state.selection;
@@ -3046,11 +3081,126 @@ export const DocumentCommands = Extension.create({
               state.tr
                 .setNodeMarkup($from.before(anchor.tableAt), undefined, {
                   ...tableNode.attrs,
-                  alignment: patch.alignment === "left" ? null : patch.alignment,
-                  indent: patch.indent > 0 ? Math.round(patch.indent) : null,
+                  alignment: alignment === "left" ? null : alignment,
                 })
                 .scrollIntoView(),
             );
+          }
+          return true;
+        },
+      // Word's Table Text Wrapping: none (inline / float null) vs around (floating / float object)
+      "table-text-wrapping":
+        (wrapping) =>
+        ({ state, dispatch }) => {
+          const anchor = tableAncestry(state);
+          if (!anchor) return false;
+          const { $from } = state.selection;
+          const tableNode = $from.node(anchor.tableAt);
+
+          let nextFloat: Record<string, unknown> | null = null;
+          if (wrapping === "around" || wrapping === true) {
+            nextFloat = (tableNode.attrs.float as Record<string, unknown> | null) ?? {
+              horizontalAnchor: "margin",
+              verticalAnchor: "paragraph",
+            };
+          } else if (wrapping === "none" || wrapping === false || wrapping === null) {
+            nextFloat = null;
+          } else if (wrapping !== undefined && typeof wrapping === "object") {
+            nextFloat = wrapping as Record<string, unknown>;
+          } else {
+            return false;
+          }
+
+          if (dispatch) {
+            dispatch(
+              state.tr
+                .setNodeMarkup($from.before(anchor.tableAt), undefined, {
+                  ...tableNode.attrs,
+                  float: nextFloat,
+                })
+                .scrollIntoView(),
+            );
+          }
+          return true;
+        },
+      // Table Properties dialog's OK / programmatic table properties patch —
+      // writes table-level (alignment, indent, text wrapping/float) and row-level
+      // (cantSplit, tableHeader) in one clean transaction.
+      "table-properties-apply":
+        (patch) =>
+        ({ state, dispatch }) => {
+          if (!patch || typeof patch !== "object") return false;
+          const anchor = tableAncestry(state);
+          if (!anchor) return false;
+          const { $from } = state.selection;
+          const tableNode = $from.node(anchor.tableAt);
+
+          const nextAttrs: Record<string, unknown> = { ...tableNode.attrs };
+          let changedTable = false;
+
+          if (patch.alignment !== undefined) {
+            if (
+              patch.alignment === "left" ||
+              patch.alignment === "center" ||
+              patch.alignment === "right"
+            ) {
+              nextAttrs.alignment = patch.alignment === "left" ? null : patch.alignment;
+              changedTable = true;
+            } else {
+              return false;
+            }
+          }
+
+          if (patch.indent !== undefined) {
+            if (typeof patch.indent === "number" && patch.indent >= 0) {
+              nextAttrs.indent = patch.indent > 0 ? Math.round(patch.indent) : null;
+              changedTable = true;
+            } else {
+              return false;
+            }
+          }
+
+          if (patch.textWrapping !== undefined) {
+            if (patch.textWrapping === "around") {
+              nextAttrs.float = (tableNode.attrs.float as Record<string, unknown> | null) ?? {
+                horizontalAnchor: "margin",
+                verticalAnchor: "paragraph",
+              };
+              changedTable = true;
+            } else if (patch.textWrapping === "none") {
+              nextAttrs.float = null;
+              changedTable = true;
+            } else {
+              return false;
+            }
+          }
+
+          if (patch.float !== undefined) {
+            nextAttrs.float = patch.float ?? null;
+            changedTable = true;
+          }
+
+          if (dispatch) {
+            const tr = state.tr;
+            if (changedTable) {
+              tr.setNodeMarkup($from.before(anchor.tableAt), undefined, nextAttrs);
+            }
+            const targets = tableTargets(state);
+            if (targets) {
+              if (patch.cantSplit !== undefined) {
+                stampRows(tr, targets, (row) => ({
+                  ...row.attrs,
+                  cantSplit: patch.cantSplit ? true : null,
+                }));
+              }
+              if (patch.tableHeader !== undefined) {
+                stampRows(tr, targets, (row) => ({
+                  ...row.attrs,
+                  tableHeader: patch.tableHeader ? true : null,
+                }));
+              }
+            }
+            dispatch(tr.scrollIntoView());
           }
           return true;
         },

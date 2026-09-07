@@ -1534,6 +1534,7 @@ export function tableContextTabs(scope?: Element): RibbonTab[] {
         ]),
         group("data", [
           btn("table-repeat-headers", "repeat-header-rows", { size: "large" }),
+          btn("cant-split", "cant-split", { size: "large" }),
           btn("list", "convert-to-text", { size: "large" }),
         ]),
       ],
