@@ -566,6 +566,51 @@ describe("merge / split table commands", () => {
     expect(row.childCount).toBe(1);
     expect(row.child(0).attrs.columnSpan).toBe(3);
   });
+
+  it("merge-cells preserves paragraph content from merged cells", () => {
+    const editor = build();
+    editor.commands["insert-table"]();
+    caretInCell(editor, 0, 0);
+    editor.view.dispatch(editor.state.tr.insertText("Alpha"));
+    caretInCell(editor, 0, 1);
+    editor.view.dispatch(editor.state.tr.insertText("Beta"));
+    selectCells(editor, 0, 0, 0, 1);
+    expect(editor.commands["merge-cells"]()).toBe(true);
+    const masterCell = tablesOf(editor)[0]!.child(0).child(0);
+    expect(masterCell.childCount).toBe(2);
+    expect(masterCell.child(0).textContent).toBe("Alpha");
+    expect(masterCell.child(1).textContent).toBe("Beta");
+  });
+
+  it("merge-cells works on tables with preexisting merged cells", () => {
+    const editor = build();
+    editor.commands["insert-table"]();
+    // Merge cells 0 and 1 in row 0
+    selectCells(editor, 0, 0, 0, 1);
+    expect(editor.commands["merge-cells"]()).toBe(true);
+    // Now merge cells 0 and 1 in row 1
+    selectCells(editor, 1, 0, 1, 1);
+    expect(editor.commands["merge-cells"]()).toBe(true);
+    const table = tablesOf(editor)[0]!;
+    expect(table.child(0).childCount).toBe(2);
+    expect(table.child(1).childCount).toBe(2);
+  });
+
+  it("split-cell unmerges vertical merge and restores all continuation cells", () => {
+    const editor = build();
+    editor.commands["insert-table"]();
+    selectCells(editor, 0, 0, 1, 0);
+    expect(editor.commands["merge-cells"]()).toBe(true);
+    const tableBefore = tablesOf(editor)[0]!;
+    expect(tableBefore.child(1).child(0).attrs.verticalMerge).toBe("continue");
+
+    // Split cell at row 0, col 0
+    caretInCell(editor, 0, 0);
+    expect(editor.commands["split-cell"]()).toBe(true);
+    const tableAfter = tablesOf(editor)[0]!;
+    expect(tableAfter.child(0).child(0).attrs.verticalMerge).toBeFalsy();
+    expect(tableAfter.child(1).child(0).attrs.verticalMerge).toBeFalsy();
+  });
 });
 
 describe("cell size / autofit commands", () => {
