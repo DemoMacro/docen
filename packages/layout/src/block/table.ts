@@ -175,7 +175,7 @@ export function layoutTable(
         ? (containerWidth - tableWidth) / 2
         : table.align === "right"
           ? containerWidth - tableWidth
-          : undefined,
+          : (table.indentPx ?? undefined),
     heightPx,
     borders: table.borders,
     rows,

@@ -222,6 +222,7 @@ const RIBBON_ICONS: Record<string, string> = {
   "distribute-rows": arrowMaximizeVertical,
   "distribute-columns": arrowExpand,
   "table-repeat-headers": tableArrowRepeatAll,
+  "cant-split": tableSimple,
   "table-properties": tableSettings,
   "table-stack-above": tableStackAbove,
   "table-stack-below": tableStackBelow,

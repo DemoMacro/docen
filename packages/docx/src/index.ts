@@ -10,7 +10,7 @@ export { docxExtensions, type JSONContent, type AnyExtension } from "./core";
 // Re-export the OOXML section-properties type (page size/margin/orientation +
 // document grid) so the editor layer can type section geometry without a direct
 // @office-open/docx dependency.
-export type { SectionPropertiesOptions } from "@office-open/docx";
+export type { SectionPropertiesOptions, TableFloatOptions } from "@office-open/docx";
 // Re-export the engine's section-geometry defaults (MS Office zh-CN "Normal":
 // A4 + top/bottom 1440tw, left/right 1800tw) so editor-side geometry fallbacks
 // — content-width for image capping, page measurement — reuse the SAME defaults
