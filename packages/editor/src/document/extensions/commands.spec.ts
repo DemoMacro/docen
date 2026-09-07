@@ -230,6 +230,39 @@ describe("table row / column commands", () => {
     expect(tableAfterCol.child(0).child(1).textContent).toBe("");
   });
 
+  it("insert-row-at and insert-column-at insert at specific indices", () => {
+    const editor = build();
+    editor.commands["insert-table"]();
+    expect(tablesOf(editor)[0]!.childCount).toBe(3);
+
+    // Insert row at index 1
+    caretInCell(editor, 0, 0);
+    expect(editor.commands["insert-row-at"](1)).toBe(true);
+    expect(tablesOf(editor)[0]!.childCount).toBe(4);
+
+    // Insert column at index 2
+    expect(editor.commands["insert-column-at"](2)).toBe(true);
+    const table = tablesOf(editor)[0]!;
+    for (let r = 0; r < table.childCount; r += 1) {
+      expect(table.child(r).childCount).toBe(4);
+    }
+  });
+
+  it("set-table-column-widths and set-table-row-height update attributes", () => {
+    const editor = build();
+    editor.commands["insert-table"]();
+    caretInCell(editor, 0, 0);
+
+    expect(editor.commands["set-table-column-widths"]([1500, 2500, 3000])).toBe(true);
+    expect(tablesOf(editor)[0]!.attrs.columnWidths).toEqual([1500, 2500, 3000]);
+
+    expect(editor.commands["set-table-row-height"](1, { rule: "atLeast", value: 600 })).toBe(true);
+    expect(tablesOf(editor)[0]!.child(1).attrs.height).toEqual({
+      rule: "atLeast",
+      value: 600,
+    });
+  });
+
   it("delete-row removes the caret's row; the last row deletes the table", () => {
     const editor = build();
     editor.commands["insert-table"]();
@@ -532,6 +565,51 @@ describe("merge / split table commands", () => {
     const row = tablesOf(editor)[0]!.child(0);
     expect(row.childCount).toBe(1);
     expect(row.child(0).attrs.columnSpan).toBe(3);
+  });
+
+  it("merge-cells preserves paragraph content from merged cells", () => {
+    const editor = build();
+    editor.commands["insert-table"]();
+    caretInCell(editor, 0, 0);
+    editor.view.dispatch(editor.state.tr.insertText("Alpha"));
+    caretInCell(editor, 0, 1);
+    editor.view.dispatch(editor.state.tr.insertText("Beta"));
+    selectCells(editor, 0, 0, 0, 1);
+    expect(editor.commands["merge-cells"]()).toBe(true);
+    const masterCell = tablesOf(editor)[0]!.child(0).child(0);
+    expect(masterCell.childCount).toBe(2);
+    expect(masterCell.child(0).textContent).toBe("Alpha");
+    expect(masterCell.child(1).textContent).toBe("Beta");
+  });
+
+  it("merge-cells works on tables with preexisting merged cells", () => {
+    const editor = build();
+    editor.commands["insert-table"]();
+    // Merge cells 0 and 1 in row 0
+    selectCells(editor, 0, 0, 0, 1);
+    expect(editor.commands["merge-cells"]()).toBe(true);
+    // Now merge cells 0 and 1 in row 1
+    selectCells(editor, 1, 0, 1, 1);
+    expect(editor.commands["merge-cells"]()).toBe(true);
+    const table = tablesOf(editor)[0]!;
+    expect(table.child(0).childCount).toBe(2);
+    expect(table.child(1).childCount).toBe(2);
+  });
+
+  it("split-cell unmerges vertical merge and restores all continuation cells", () => {
+    const editor = build();
+    editor.commands["insert-table"]();
+    selectCells(editor, 0, 0, 1, 0);
+    expect(editor.commands["merge-cells"]()).toBe(true);
+    const tableBefore = tablesOf(editor)[0]!;
+    expect(tableBefore.child(1).child(0).attrs.verticalMerge).toBe("continue");
+
+    // Split cell at row 0, col 0
+    caretInCell(editor, 0, 0);
+    expect(editor.commands["split-cell"]()).toBe(true);
+    const tableAfter = tablesOf(editor)[0]!;
+    expect(tableAfter.child(0).child(0).attrs.verticalMerge).toBeFalsy();
+    expect(tableAfter.child(1).child(0).attrs.verticalMerge).toBeFalsy();
   });
 });
 

@@ -11,10 +11,10 @@ import type { Node as PMNode, ResolvedPos } from "@tiptap/pm/model";
 import type { Mark } from "@tiptap/pm/model";
 import type { EditorState } from "@tiptap/pm/state";
 import type { Transaction } from "@tiptap/pm/state";
-import { NodeSelection, TextSelection } from "@tiptap/pm/state";
+import { NodeSelection, Selection, TextSelection } from "@tiptap/pm/state";
 import { DocAttrStep } from "@tiptap/pm/transform";
 
-import { CellSelection, cellsInRect } from "../canvas/cell-selection";
+import { CellSelection, cellsInRect, gridColOf, spanOf } from "../canvas/cell-selection";
 
 /**
  * Document editor commands (Office.js-style "add-in commands") as native
@@ -88,8 +88,16 @@ declare module "@tiptap/core" {
       // Table context commands (the Table Design / Layout contextual tabs).
       "insert-row-above": () => ReturnType;
       "insert-row-below": () => ReturnType;
+      "insert-row-at": (index: number, tablePos?: number) => ReturnType;
       "insert-column-left": () => ReturnType;
       "insert-column-right": () => ReturnType;
+      "insert-column-at": (index: number, tablePos?: number) => ReturnType;
+      "set-table-column-widths": (widths: number[], tablePos?: number) => ReturnType;
+      "set-table-row-height": (
+        rowIndex: number,
+        height: { rule: "atLeast" | "exact"; value: number } | null,
+        tablePos?: number,
+      ) => ReturnType;
       "delete-row": () => ReturnType;
       "delete-column": () => ReturnType;
       "select-table": () => ReturnType;
@@ -186,8 +194,12 @@ export const WIRED_DISPATCH: ReadonlySet<string> = new Set([
   "delete-table",
   "insert-row-above",
   "insert-row-below",
+  "insert-row-at",
   "insert-column-left",
   "insert-column-right",
+  "insert-column-at",
+  "set-table-column-widths",
+  "set-table-row-height",
   "delete-row",
   "delete-column",
   "select-table",
@@ -714,7 +726,7 @@ export function tableAncestry(state: EditorState): {
 
 /** {@link tableAncestry} for an arbitrary position — Merge Cells resolves the
  *  selection's two ends independently. */
-function ancestryAt($pos: ResolvedPos): {
+export function ancestryAt($pos: ResolvedPos): {
   tableAt: number;
   rowAt: number;
   cellAt: number;
@@ -1603,6 +1615,41 @@ export const DocumentCommands = Extension.create({
           }
           return true;
         },
+      // Insert an empty row at a specific row index (0..nRows).
+      "insert-row-at":
+        (rowIndex: number, targetTablePos?: number) =>
+        ({ state, dispatch }) => {
+          let tablePos = targetTablePos;
+          let tableNode: PMNode | null = null;
+          if (tablePos != null) {
+            tableNode = state.doc.nodeAt(tablePos);
+          } else {
+            const anchor = tableAncestry(state);
+            if (!anchor) return false;
+            tablePos = state.selection.$from.before(anchor.tableAt);
+            tableNode = state.selection.$from.node(anchor.tableAt);
+          }
+          if (!tableNode || tablePos == null || tableNode.childCount === 0) return false;
+          if (dispatch) {
+            const tr = state.tr;
+            const templateIdx = Math.min(rowIndex > 0 ? rowIndex - 1 : 0, tableNode.childCount - 1);
+            const templateRow = tableNode.child(templateIdx);
+            const emptyCells: PMNode[] = [];
+            templateRow.forEach((cell) => {
+              const para = state.schema.nodes.paragraph.create();
+              emptyCells.push(cell.type.createAndFill(cell.attrs, [para])!);
+            });
+            const newRow = templateRow.type.create(templateRow.attrs, emptyCells);
+            let insertPos = tablePos + 1;
+            for (let r = 0; r < Math.min(rowIndex, tableNode.childCount); r += 1) {
+              insertPos += tableNode.child(r).nodeSize;
+            }
+            tr.insert(insertPos, newRow);
+            tr.setSelection(TextSelection.near(tr.doc.resolve(insertPos + 2)));
+            dispatch(tr.scrollIntoView());
+          }
+          return true;
+        },
       // One empty cell per row, copied from each row's cell attrs at the current column
       // index. Bottom-up keeps positions valid as earlier edits shift later ones.
       "insert-column-right":
@@ -1631,6 +1678,12 @@ export const DocumentCommands = Extension.create({
               if (r === $from.index(anchor.rowAt)) {
                 targetCellPos = cellPos;
               }
+            }
+            if (Array.isArray(tableNode.attrs.columnWidths)) {
+              const widths = [...(tableNode.attrs.columnWidths as number[])];
+              const w = widths[cellIndex] ?? 2880;
+              widths.splice(cellIndex + 1, 0, w);
+              tr.setNodeMarkup(tablePos, undefined, { ...tableNode.attrs, columnWidths: widths });
             }
             if (targetCellPos > 0) {
               tr.setSelection(TextSelection.near(tr.doc.resolve(targetCellPos + 1)));
@@ -1666,10 +1719,122 @@ export const DocumentCommands = Extension.create({
                 targetCellPos = cellPos;
               }
             }
+            if (Array.isArray(tableNode.attrs.columnWidths)) {
+              const widths = [...(tableNode.attrs.columnWidths as number[])];
+              const w = widths[cellIndex] ?? 2880;
+              widths.splice(cellIndex, 0, w);
+              tr.setNodeMarkup(tablePos, undefined, { ...tableNode.attrs, columnWidths: widths });
+            }
             if (targetCellPos > 0) {
               tr.setSelection(TextSelection.near(tr.doc.resolve(targetCellPos + 1)));
             }
             dispatch(tr.scrollIntoView());
+          }
+          return true;
+        },
+      // Insert a column at a specific column index (0..nCols).
+      "insert-column-at":
+        (colIndex: number, targetTablePos?: number) =>
+        ({ state, dispatch }) => {
+          let tablePos = targetTablePos;
+          let tableNode: PMNode | null = null;
+          if (tablePos != null) {
+            tableNode = state.doc.nodeAt(tablePos);
+          } else {
+            const anchor = tableAncestry(state);
+            if (!anchor) return false;
+            tablePos = state.selection.$from.before(anchor.tableAt);
+            tableNode = state.selection.$from.node(anchor.tableAt);
+          }
+          if (!tableNode || tablePos == null || tableNode.childCount === 0) return false;
+          if (dispatch) {
+            const tr = state.tr;
+            let targetCellPos = -1;
+            for (let r = tableNode.childCount - 1; r >= 0; r -= 1) {
+              const rowNode = tableNode.child(r);
+              let rowPos = tablePos + 1;
+              for (let i = 0; i < r; i += 1) rowPos += tableNode.child(i).nodeSize;
+              const idx = Math.min(colIndex, rowNode.childCount);
+              let cellPos = rowPos + 1;
+              for (let c = 0; c < idx; c += 1) cellPos += rowNode.child(c).nodeSize;
+              const templateIdx = Math.min(colIndex > 0 ? colIndex - 1 : 0, rowNode.childCount - 1);
+              const template = rowNode.child(templateIdx);
+              const para = state.schema.nodes.paragraph.create();
+              const emptyCell = template.type.createAndFill(template.attrs, [para])!;
+              tr.insert(cellPos, emptyCell);
+              if (r === 0) targetCellPos = cellPos;
+            }
+            if (Array.isArray(tableNode.attrs.columnWidths)) {
+              const widths = [...(tableNode.attrs.columnWidths as number[])];
+              const w = widths[colIndex - 1] ?? widths[colIndex] ?? 2880;
+              widths.splice(colIndex, 0, w);
+              tr.setNodeMarkup(tablePos, undefined, { ...tableNode.attrs, columnWidths: widths });
+            }
+            if (targetCellPos > 0) {
+              tr.setSelection(TextSelection.near(tr.doc.resolve(targetCellPos + 1)));
+            }
+            dispatch(tr.scrollIntoView());
+          }
+          return true;
+        },
+      // Set table column widths directly on the table node.
+      "set-table-column-widths":
+        (widths: number[], targetTablePos?: number) =>
+        ({ state, dispatch }) => {
+          let tablePos = targetTablePos;
+          let tableNode: PMNode | null = null;
+          if (tablePos != null) {
+            tableNode = state.doc.nodeAt(tablePos);
+          } else {
+            const anchor = tableAncestry(state);
+            if (!anchor) return false;
+            tablePos = state.selection.$from.before(anchor.tableAt);
+            tableNode = state.selection.$from.node(anchor.tableAt);
+          }
+          if (!tableNode || tablePos == null) return false;
+          if (dispatch) {
+            dispatch(
+              state.tr
+                .setNodeMarkup(tablePos, undefined, {
+                  ...tableNode.attrs,
+                  columnWidths: widths,
+                })
+                .scrollIntoView(),
+            );
+          }
+          return true;
+        },
+      // Set height on a specific table row.
+      "set-table-row-height":
+        (
+          rowIndex: number,
+          height: { rule: "atLeast" | "exact"; value: number } | null,
+          targetTablePos?: number,
+        ) =>
+        ({ state, dispatch }) => {
+          let tablePos = targetTablePos;
+          let tableNode: PMNode | null = null;
+          if (tablePos != null) {
+            tableNode = state.doc.nodeAt(tablePos);
+          } else {
+            const anchor = tableAncestry(state);
+            if (!anchor) return false;
+            tablePos = state.selection.$from.before(anchor.tableAt);
+            tableNode = state.selection.$from.node(anchor.tableAt);
+          }
+          if (!tableNode || tablePos == null || rowIndex >= tableNode.childCount) return false;
+          if (dispatch) {
+            let rowPos = tablePos + 1;
+            for (let r = 0; r < rowIndex; r += 1) rowPos += tableNode.child(r).nodeSize;
+            const rowNode = state.doc.nodeAt(rowPos)!;
+            dispatch(
+              state.tr
+                .setNodeMarkup(rowPos, undefined, {
+                  ...rowNode.attrs,
+                  height,
+                })
+                .scrollIntoView(),
+            );
           }
           return true;
         },
@@ -1719,6 +1884,13 @@ export const DocumentCommands = Extension.create({
               let cellPos = rowPos + 1;
               for (let c = 0; c < idx; c += 1) cellPos += rowNode.child(c).nodeSize;
               tr.delete(cellPos, cellPos + rowNode.child(idx).nodeSize);
+            }
+            if (Array.isArray(tableNode.attrs.columnWidths)) {
+              const widths = [...(tableNode.attrs.columnWidths as number[])];
+              if (cellIndex < widths.length) {
+                widths.splice(cellIndex, 1);
+                tr.setNodeMarkup(tablePos, undefined, { ...tableNode.attrs, columnWidths: widths });
+              }
             }
             dispatch(tr.scrollIntoView());
           }
@@ -2012,6 +2184,9 @@ export const DocumentCommands = Extension.create({
       // "continue" (their content stays put — the layout folds continue
       // cells into the restart cell, so nothing is lost). Grid math is
       // cellIndex-approximate, so a span-mismatched row is left untouched.
+      // Word's Merge Cells over the selection's bounding rectangle.
+      // Rebuilds merged rows with proper OOXML columnSpan and verticalMerge ("restart" / "continue"),
+      // while preserving all paragraphs and blocks from every merged cell in the master cell.
       "merge-cells":
         () =>
         ({ state, dispatch }) => {
@@ -2028,68 +2203,249 @@ export const DocumentCommands = Extension.create({
           const toA = ancestryAt($to);
           if (!fromA || !toA || fromA.rowAt < 0 || toA.rowAt < 0) return false;
           if ($from.before(fromA.tableAt) !== $to.before(toA.tableAt)) return false;
+
+          const tablePos = $from.before(fromA.tableAt);
           const tableNode = $from.node(fromA.tableAt);
-          const grid = (tableNode.attrs.columnWidths as number[] | null)?.length ?? 0;
-          const c1 = Math.min($from.index(fromA.rowAt), $to.index(toA.rowAt));
-          const c2 = Math.max($from.index(fromA.rowAt), $to.index(toA.rowAt));
-          const rowFrom = Math.min($from.index(fromA.tableAt), $to.index(toA.tableAt));
-          const rowTo = Math.max($from.index(fromA.tableAt), $to.index(toA.tableAt));
+
+          const rA = { row: $from.index(fromA.tableAt), cell: $from.index(fromA.rowAt) };
+          const rH = { row: $to.index(toA.tableAt), cell: $to.index(toA.rowAt) };
+          const rowFrom = Math.min(rA.row, rH.row);
+          const rowTo = Math.max(rA.row, rH.row);
+          const c1 = Math.min(rA.cell, rH.cell);
+          const c2 = Math.max(rA.cell, rH.cell);
           if (rowFrom === rowTo && c1 === c2) return false;
+
+          const anchorRowNode = tableNode.child(rA.row);
+          const headRowNode = tableNode.child(rH.row);
+          const colFrom = Math.min(
+            gridColOf(anchorRowNode, rA.cell),
+            gridColOf(headRowNode, rH.cell),
+          );
+          const colTo = Math.max(
+            gridColOf(anchorRowNode, rA.cell) + spanOf(anchorRowNode.child(rA.cell)!),
+            gridColOf(headRowNode, rH.cell) + spanOf(headRowNode.child(rH.cell)!),
+          );
+
+          const totalCols = colTo - colFrom;
+          const totalRows = rowTo - rowFrom + 1;
+          if (totalCols <= 1 && totalRows <= 1) return false;
+
           if (dispatch) {
-            const tablePos = $from.before(fromA.tableAt);
-            // Row indices into the table's children — the ancestry depths are
-            // not indexes (a depth-2 rowAt would address the last row).
+            // 1. Collect all non-empty block content from all merged cells in row-major order
+            const collectedBlocks: PMNode[] = [];
+            for (let r = rowFrom; r <= rowTo; r += 1) {
+              const rowNode = tableNode.child(r);
+              let cCol = 0;
+              for (let c = 0; c < rowNode.childCount; c += 1) {
+                const cell = rowNode.child(c);
+                const span = spanOf(cell);
+                const cEnd = cCol + span;
+                if (cCol < colTo && cEnd > colFrom) {
+                  cell.forEach((child) => {
+                    if (child.isTextblock && child.content.size === 0) return;
+                    collectedBlocks.push(child);
+                  });
+                }
+                cCol = cEnd;
+              }
+            }
+            if (collectedBlocks.length === 0) {
+              collectedBlocks.push(state.schema.nodes.paragraph.create());
+            }
+
+            // 2. Rebuild rows bottom-up so document positions remain stable
             const tr = state.tr;
             for (let r = rowTo; r >= rowFrom; r -= 1) {
               const rowNode = tableNode.child(r);
-              // Bottom-up keeps positions valid as earlier deletions shift
-              // later ones; a row that doesn't match the grid exactly (a
-              // previously merged one) is skipped rather than corrupted.
-              if (grid > 0 && rowNode.childCount !== grid) continue;
               let rowPos = tablePos + 1;
               for (let i = 0; i < r; i += 1) rowPos += tableNode.child(i).nodeSize;
-              const last = Math.min(c2, rowNode.childCount - 1);
-              if (c1 > last) continue;
-              let basePos = rowPos + 1;
-              for (let c = 0; c < c1; c += 1) basePos += rowNode.child(c).nodeSize;
-              const base = rowNode.child(c1);
-              tr.setNodeMarkup(basePos, undefined, {
-                ...base.attrs,
-                columnSpan: last > c1 ? last - c1 + 1 : null,
-                verticalMerge: r > rowFrom ? "continue" : base.attrs.verticalMerge,
-              });
-              for (let c = last; c > c1; c -= 1) {
-                let cellPos = rowPos + 1;
-                for (let cc = 0; cc < c; cc += 1) cellPos += rowNode.child(cc).nodeSize;
-                tr.delete(cellPos, cellPos + rowNode.child(c).nodeSize);
+
+              const newCells: PMNode[] = [];
+              let cCol = 0;
+              let mergedInserted = false;
+
+              for (let c = 0; c < rowNode.childCount; c += 1) {
+                const cell = rowNode.child(c);
+                const span = spanOf(cell);
+                const cEnd = cCol + span;
+
+                if (cEnd <= colFrom || cCol >= colTo) {
+                  newCells.push(cell);
+                } else {
+                  if (!mergedInserted) {
+                    mergedInserted = true;
+                    if (r === rowFrom) {
+                      const masterAttrs = {
+                        ...cell.attrs,
+                        columnSpan: totalCols > 1 ? totalCols : null,
+                        verticalMerge: null,
+                      };
+                      newCells.push(cell.type.create(masterAttrs, collectedBlocks));
+                    } else {
+                      const contAttrs = {
+                        ...cell.attrs,
+                        columnSpan: totalCols > 1 ? totalCols : null,
+                        verticalMerge: "continue",
+                      };
+                      newCells.push(
+                        cell.type.create(contAttrs, [state.schema.nodes.paragraph.create()]),
+                      );
+                    }
+                  }
+                }
+                cCol = cEnd;
               }
+
+              const newRow = rowNode.type.create(rowNode.attrs, newCells);
+              tr.replaceWith(rowPos, rowPos + rowNode.nodeSize, newRow);
             }
+
+            // 3. Set selection in the master cell
+            let masterPos = tablePos + 1;
+            for (let i = 0; i < rowFrom; i += 1) {
+              masterPos += tr.doc.nodeAt(tablePos)!.child(i).nodeSize;
+            }
+            let cellPos = masterPos + 1;
+            const updatedRow = tr.doc.nodeAt(tablePos)!.child(rowFrom);
+            let curCol = 0;
+            for (let c = 0; c < updatedRow.childCount; c += 1) {
+              const cell = updatedRow.child(c);
+              if (curCol === colFrom) break;
+              curCol += spanOf(cell);
+              cellPos += cell.nodeSize;
+            }
+            const sel = Selection.findFrom(tr.doc.resolve(cellPos + 1), 1, true);
+            if (sel) tr.setSelection(sel);
             dispatch(tr.scrollIntoView());
           }
           return true;
         },
-      // Word's Split Cells without the dialog: a merged cell (columnSpan or
-      // verticalMerge) returns to its own single grid cell, empty twins
-      // taking the spanned columns. The dialog's rows×cols form is not built.
+      // Word's Split Cells: splits horizontally merged (columnSpan > 1) and/or
+      // vertically merged ("restart" / "continue") cells back to individual grid cells.
       "split-cell":
         () =>
         ({ state, dispatch }) => {
           const anchor = tableAncestry(state);
-          if (!anchor || anchor.cellAt < 0) return false;
+          if (!anchor || anchor.cellAt < 0 || anchor.rowAt < 0 || anchor.tableAt < 0) return false;
           const { $from } = state.selection;
+          const tableNode = $from.node(anchor.tableAt);
+          const tablePos = $from.before(anchor.tableAt);
           const cell = $from.node(anchor.cellAt);
-          const span = (cell.attrs.columnSpan as number | null) ?? 1;
-          if (span < 2 && !cell.attrs.verticalMerge) return false;
+          const span = spanOf(cell);
+          const vMerge = cell.attrs.verticalMerge as string | null | undefined;
+
+          const curRowIdx = $from.index(anchor.tableAt);
+          const curCellIdx = $from.index(anchor.rowAt);
+          const targetCol = gridColOf(tableNode.child(curRowIdx), curCellIdx);
+
+          let hasContinueBelow = false;
+          if (curRowIdx + 1 < tableNode.childCount) {
+            const nextRow = tableNode.child(curRowIdx + 1);
+            let cCol = 0;
+            for (let c = 0; c < nextRow.childCount; c += 1) {
+              const cNode = nextRow.child(c);
+              if (cCol === targetCol && cNode.attrs.verticalMerge === "continue") {
+                hasContinueBelow = true;
+                break;
+              }
+              cCol += spanOf(cNode);
+            }
+          }
+
+          const isVerticalMerge = vMerge === "restart" || vMerge === "continue" || hasContinueBelow;
+
+          if (span <= 1 && !isVerticalMerge) return false;
+
           if (dispatch) {
-            const cellPos = $from.before(anchor.cellAt);
-            const tr = state.tr.setNodeMarkup(cellPos, undefined, {
-              ...cell.attrs,
-              columnSpan: null,
-              verticalMerge: null,
-            });
-            const blank = cell.type.create(null, state.schema.nodes.paragraph.create());
-            for (let i = 0; i < span - 1; i += 1) {
-              tr.insert(cellPos + cell.nodeSize, blank);
+            const tr = state.tr;
+
+            if (isVerticalMerge) {
+              let restartRowIdx = curRowIdx;
+              if (vMerge === "continue") {
+                for (let r = curRowIdx - 1; r >= 0; r -= 1) {
+                  const row = tableNode.child(r);
+                  let col = 0;
+                  for (let c = 0; c < row.childCount; c += 1) {
+                    const cNode = row.child(c);
+                    if (col === targetCol) {
+                      if (cNode.attrs.verticalMerge !== "continue") {
+                        restartRowIdx = r;
+                      }
+                      break;
+                    }
+                    col += spanOf(cNode);
+                  }
+                  if (restartRowIdx !== curRowIdx) break;
+                }
+              }
+
+              const affectedRowIndices: number[] = [restartRowIdx];
+              for (let r = restartRowIdx + 1; r < tableNode.childCount; r += 1) {
+                const row = tableNode.child(r);
+                let col = 0;
+                let isContinue = false;
+                for (let c = 0; c < row.childCount; c += 1) {
+                  const cNode = row.child(c);
+                  if (col === targetCol) {
+                    if (cNode.attrs.verticalMerge === "continue") {
+                      isContinue = true;
+                    }
+                    break;
+                  }
+                  col += spanOf(cNode);
+                }
+                if (isContinue) {
+                  affectedRowIndices.push(r);
+                } else {
+                  break;
+                }
+              }
+
+              for (let i = affectedRowIndices.length - 1; i >= 0; i -= 1) {
+                const r = affectedRowIndices[i]!;
+                const rowNode = tableNode.child(r);
+                let rowPos = tablePos + 1;
+                for (let j = 0; j < r; j += 1) rowPos += tableNode.child(j).nodeSize;
+
+                const newCells: PMNode[] = [];
+                let col = 0;
+                for (let c = 0; c < rowNode.childCount; c += 1) {
+                  const cNode = rowNode.child(c);
+                  const cSpan = spanOf(cNode);
+                  if (col === targetCol) {
+                    const unmergedAttrs = {
+                      ...cNode.attrs,
+                      columnSpan: null,
+                      verticalMerge: null,
+                    };
+                    newCells.push(cNode.type.create(unmergedAttrs, cNode.content));
+                    for (let s = 1; s < cSpan; s += 1) {
+                      newCells.push(
+                        cNode.type.create(
+                          { ...cNode.attrs, columnSpan: null, verticalMerge: null },
+                          [state.schema.nodes.paragraph.create()],
+                        ),
+                      );
+                    }
+                  } else {
+                    newCells.push(cNode);
+                  }
+                  col += cSpan;
+                }
+                const newRow = rowNode.type.create(rowNode.attrs, newCells);
+                tr.replaceWith(rowPos, rowPos + rowNode.nodeSize, newRow);
+              }
+            } else if (span > 1) {
+              const cellPos = $from.before(anchor.cellAt);
+              tr.setNodeMarkup(cellPos, undefined, {
+                ...cell.attrs,
+                columnSpan: null,
+                verticalMerge: null,
+              });
+              const blank = cell.type.create(null, [state.schema.nodes.paragraph.create()]);
+              for (let i = 0; i < span - 1; i += 1) {
+                tr.insert(cellPos + cell.nodeSize, blank);
+              }
             }
             dispatch(tr.scrollIntoView());
           }
