@@ -107,6 +107,9 @@ declare module "@tiptap/core" {
       "align-cell": (value?: string) => ReturnType;
       "repeat-header-rows": () => ReturnType;
       "cell-shading": (value?: unknown) => ReturnType;
+      "cell-borders": (value?: unknown) => ReturnType;
+      "set-cell-insets": (value?: unknown) => ReturnType;
+      "set-cell-vertical-align": (value: "top" | "center" | "bottom" | null) => ReturnType;
       "text-direction": () => ReturnType;
       "convert-to-text": () => ReturnType;
       "table-style": (value?: string) => ReturnType;
@@ -209,6 +212,9 @@ export const WIRED_DISPATCH: ReadonlySet<string> = new Set([
   "align-cell",
   "repeat-header-rows",
   "cell-shading",
+  "cell-borders",
+  "set-cell-insets",
+  "set-cell-vertical-align",
   "table-style",
   "table-borders",
   "toggle-table-look",
@@ -698,7 +704,7 @@ function isThemeColor(value: unknown): value is ThemeColorValue {
  *  carries themeFill bindings, a bare hex stores fill. undefined = unrecognized
  *  value (command declines). */
 function shadingStamp(value: unknown): Record<string, unknown> | null | undefined {
-  if (value === "none") return null;
+  if (value === "none" || value === null) return null;
   if (isThemeColor(value)) {
     const shading: Record<string, unknown> = {
       fill: value.val,
@@ -710,6 +716,13 @@ function shadingStamp(value: unknown): Record<string, unknown> | null | undefine
     return shading;
   }
   if (typeof value === "string" && value) return { fill: value, type: "clear" };
+  if (typeof value === "object" && value !== null && "fill" in value) {
+    const obj = value as Record<string, unknown>;
+    return {
+      type: "clear",
+      ...obj,
+    };
+  }
   return undefined;
 }
 
@@ -736,18 +749,21 @@ export function ancestryAt($pos: ResolvedPos): {
   let rowAt = -1;
   let cellAt = -1;
   for (let d = $pos.depth; d > 0; d -= 1) {
-    const node = $pos.node(d);
-    if (node.type === table && tableAt < 0) tableAt = d;
-    else if (node.type === tableRow && rowAt < 0) rowAt = d;
-    else if (node.type === tableCell && cellAt < 0) cellAt = d;
+    const t = $pos.node(d).type;
+    if (t === tableCell && cellAt < 0) cellAt = d;
+    else if (t === tableRow && rowAt < 0) rowAt = d;
+    else if (t === table && tableAt < 0) tableAt = d;
   }
-  return tableAt < 0 ? null : { tableAt, rowAt, cellAt };
+  return tableAt >= 0 ? { tableAt, rowAt, cellAt } : null;
 }
 
-/** The selection's table targets — every cell a CellSelection crosses, or the
- *  caret's enclosing cell. A CellSelection's `$from` sits at a cell's START
- *  (inside the row, not the cell), so {@link tableAncestry} reads `cellAt:
- *  -1` there and every cell-level command would decline — this is the one
+/** The cell targets of a table selection: when a {@link CellSelection} is
+ *  active, all cells inside its rectangular bounds; otherwise the single cell
+ *  holding the text selection. Both carry the enclosing table's node and
+ *  document position, plus the distinct rows and columns the selection touches.
+ *
+ *  `tableAncestry` only looks up the `$from` path — on a CellSelection `depth -
+ *  1` there and every cell-level command would decline — this is the one
  *  resolver the cell/row/column-level commands share. Cell stamps carry their
  *  table-child row index and grid column; the row/column commands read
  *  `rows`/`cols` (Word: a whole-pick height lands on every picked row, a
@@ -755,7 +771,7 @@ export function ancestryAt($pos: ResolvedPos): {
 function tableTargets(state: EditorState): {
   tablePos: number;
   tableNode: PMNode;
-  cells: { pos: number; node: PMNode }[];
+  cells: { pos: number; node: PMNode; row: number; col: number }[];
   rows: Set<number>;
   cols: Set<number>;
 } | null {
@@ -773,7 +789,7 @@ function tableTargets(state: EditorState): {
     anchorCell = selection.$from.before(anchor.cellAt);
     tablePos = selection.$from.before(anchor.tableAt);
   }
-  const cells: { pos: number; node: PMNode }[] = [];
+  const cells: { pos: number; node: PMNode; row: number; col: number }[] = [];
   const rows = new Set<number>();
   const cols = new Set<number>();
   cellsInRect(
@@ -781,9 +797,10 @@ function tableTargets(state: EditorState): {
     anchorCell,
     isCell ? selection.headCell : anchorCell,
     (node, pos, row, col) => {
-      cells.push({ pos, node });
+      cells.push({ pos, node, row, col });
       rows.add(row);
-      cols.add(col);
+      const span = spanOf(node);
+      for (let c = col; c < col + span; c += 1) cols.add(c);
     },
   );
   const tableNode = state.doc.nodeAt(tablePos);
@@ -941,6 +958,33 @@ const CELL_MARGIN_PRESETS: Readonly<Record<string, Record<string, unknown> | nul
     left: { size: 288, type: "twips" },
   },
 };
+
+/** Parse cell insets / margins from a preset name, direct numbers, or side spec. */
+function parseCellInsets(value: unknown): Record<string, unknown> | null | undefined {
+  if (value === null || value === "default") return null;
+  if (typeof value === "string") {
+    return CELL_MARGIN_PRESETS.hasOwnProperty(value) ? CELL_MARGIN_PRESETS[value] : undefined;
+  }
+  if (typeof value === "number") {
+    const side = { size: Math.round(value), type: "twips" };
+    return { top: side, bottom: side, left: side, right: side };
+  }
+  if (typeof value === "object" && value !== null) {
+    const raw = value as Record<string, unknown>;
+    const toMarginSide = (v: unknown) => {
+      if (typeof v === "number") return { size: Math.round(v), type: "twips" };
+      if (typeof v === "object" && v !== null && "size" in v) return v;
+      return undefined;
+    };
+    const margins: Record<string, unknown> = {};
+    if ("top" in raw) margins.top = toMarginSide(raw.top);
+    if ("bottom" in raw) margins.bottom = toMarginSide(raw.bottom);
+    if ("left" in raw) margins.left = toMarginSide(raw.left);
+    if ("right" in raw) margins.right = toMarginSide(raw.right);
+    return margins;
+  }
+  return undefined;
+}
 
 // ── Cell Size / AutoFit measurement helpers ──────────────────────────────────
 
@@ -1105,6 +1149,117 @@ function stampTableBorders(
         .scrollIntoView(),
     );
   }
+  return true;
+}
+
+/** Apply borders preset or custom borders to targeted cells. */
+function applyCellBorders(
+  state: EditorState,
+  dispatch: ((tr: Transaction) => void) | undefined,
+  value: unknown,
+): boolean {
+  const targets = tableTargets(state);
+  if (!targets) return false;
+
+  if (value === "none" || value === null) {
+    if (dispatch) {
+      const tr = state.tr;
+      for (const { pos, node: cell } of targets.cells) {
+        tr.setNodeMarkup(pos, undefined, { ...cell.attrs, borders: null });
+      }
+      dispatch(tr.scrollIntoView());
+    }
+    return true;
+  }
+
+  let edge: { style: string; size: number; color: string } = GRID_BORDER;
+  let preset: string | undefined;
+  let directBorders: Record<string, unknown> | undefined;
+
+  if (typeof value === "string") {
+    preset = value;
+  } else if (typeof value === "object" && value !== null) {
+    const obj = value as Record<string, unknown>;
+    if ("border" in obj && typeof obj.border === "object" && obj.border !== null) {
+      edge = { ...GRID_BORDER, ...(obj.border as Record<string, unknown>) };
+    }
+    if ("preset" in obj && typeof obj.preset === "string") {
+      preset = obj.preset;
+    } else if ("side" in obj && typeof obj.side === "string") {
+      preset = obj.side;
+    } else if ("top" in obj || "bottom" in obj || "left" in obj || "right" in obj) {
+      directBorders = obj;
+    }
+  }
+
+  if (!preset && !directBorders) return false;
+
+  if (dispatch) {
+    const minRow = Math.min(...targets.rows);
+    const maxRow = Math.max(...targets.rows);
+    const minCol = Math.min(...targets.cols);
+    const maxCol = Math.max(...targets.cols);
+    const tr = state.tr;
+
+    for (const { pos, node: cell, row, col } of targets.cells) {
+      const span = spanOf(cell);
+      const cellEndCol = col + span - 1;
+      const current = (cell.attrs.borders ?? {}) as Record<string, unknown>;
+      let next: Record<string, unknown>;
+
+      if (directBorders) {
+        next = { ...current, ...directBorders };
+      } else {
+        next = { ...current };
+        switch (preset) {
+          case "all":
+            next.top = edge;
+            next.bottom = edge;
+            next.left = edge;
+            next.right = edge;
+            break;
+          case "outside":
+            if (row === minRow) next.top = edge;
+            if (row === maxRow) next.bottom = edge;
+            if (col === minCol) next.left = edge;
+            if (cellEndCol === maxCol) next.right = edge;
+            break;
+          case "inside":
+            if (row > minRow) next.top = edge;
+            if (row < maxRow) next.bottom = edge;
+            if (col > minCol) next.left = edge;
+            if (cellEndCol < maxCol) next.right = edge;
+            break;
+          case "insideHorizontal":
+            if (row > minRow) next.top = edge;
+            if (row < maxRow) next.bottom = edge;
+            break;
+          case "insideVertical":
+            if (col > minCol) next.left = edge;
+            if (cellEndCol < maxCol) next.right = edge;
+            break;
+          case "top":
+            if (row === minRow) next.top = edge;
+            break;
+          case "bottom":
+            if (row === maxRow) next.bottom = edge;
+            break;
+          case "left":
+            if (col === minCol) next.left = edge;
+            break;
+          case "right":
+            if (cellEndCol === maxCol) next.right = edge;
+            break;
+          default:
+            return false;
+        }
+      }
+
+      tr.setNodeMarkup(pos, undefined, { ...cell.attrs, borders: next });
+    }
+    dispatch(tr.scrollIntoView());
+  }
+
   return true;
 }
 
@@ -1686,7 +1841,10 @@ export const DocumentCommands = Extension.create({
               tr.setNodeMarkup(tablePos, undefined, { ...tableNode.attrs, columnWidths: widths });
             }
             if (targetCellPos > 0) {
-              tr.setSelection(TextSelection.near(tr.doc.resolve(targetCellPos + 1)));
+              const sel =
+                Selection.findFrom(tr.doc.resolve(targetCellPos + 1), 1, true) ??
+                TextSelection.near(tr.doc.resolve(targetCellPos + 2));
+              tr.setSelection(sel);
             }
             dispatch(tr.scrollIntoView());
           }
@@ -1726,7 +1884,10 @@ export const DocumentCommands = Extension.create({
               tr.setNodeMarkup(tablePos, undefined, { ...tableNode.attrs, columnWidths: widths });
             }
             if (targetCellPos > 0) {
-              tr.setSelection(TextSelection.near(tr.doc.resolve(targetCellPos + 1)));
+              const sel =
+                Selection.findFrom(tr.doc.resolve(targetCellPos + 1), 1, true) ??
+                TextSelection.near(tr.doc.resolve(targetCellPos + 2));
+              tr.setSelection(sel);
             }
             dispatch(tr.scrollIntoView());
           }
@@ -1771,7 +1932,10 @@ export const DocumentCommands = Extension.create({
               tr.setNodeMarkup(tablePos, undefined, { ...tableNode.attrs, columnWidths: widths });
             }
             if (targetCellPos > 0) {
-              tr.setSelection(TextSelection.near(tr.doc.resolve(targetCellPos + 1)));
+              const sel =
+                Selection.findFrom(tr.doc.resolve(targetCellPos + 1), 1, true) ??
+                TextSelection.near(tr.doc.resolve(targetCellPos + 2));
+              tr.setSelection(sel);
             }
             dispatch(tr.scrollIntoView());
           }
@@ -1919,10 +2083,15 @@ export const DocumentCommands = Extension.create({
       "select-table-row":
         () =>
         ({ state, dispatch }) => {
-          const anchor = tableAncestry(state);
-          if (!anchor || anchor.cellAt < 0) return false;
+          let cellPos: number;
+          if (state.selection instanceof CellSelection) {
+            cellPos = state.selection.anchorCell;
+          } else {
+            const anchor = tableAncestry(state);
+            if (!anchor || anchor.cellAt < 0) return false;
+            cellPos = state.selection.$from.before(anchor.cellAt);
+          }
           if (dispatch) {
-            const cellPos = state.selection.$from.before(anchor.cellAt);
             dispatch(
               state.tr
                 .setSelection(CellSelection.rowSelection(state.doc.resolve(cellPos)) as never)
@@ -1934,17 +2103,18 @@ export const DocumentCommands = Extension.create({
       "select-table-cell":
         () =>
         ({ state, dispatch }) => {
-          const anchor = tableAncestry(state);
-          if (!anchor || anchor.cellAt < 0) return false;
+          let cellPos: number;
+          if (state.selection instanceof CellSelection) {
+            cellPos = state.selection.anchorCell;
+          } else {
+            const anchor = tableAncestry(state);
+            if (!anchor || anchor.cellAt < 0) return false;
+            cellPos = state.selection.$from.before(anchor.cellAt);
+          }
           if (dispatch) {
-            const { $from } = state.selection;
-            const cellPos = $from.before(anchor.cellAt);
-            const cell = $from.node(anchor.cellAt);
             dispatch(
               state.tr
-                .setSelection(
-                  TextSelection.create(state.doc, cellPos + 1, cellPos + cell.nodeSize - 1),
-                )
+                .setSelection(new CellSelection(state.doc.resolve(cellPos)) as never)
                 .scrollIntoView(),
             );
           }
@@ -1955,10 +2125,15 @@ export const DocumentCommands = Extension.create({
       "select-table-column":
         () =>
         ({ state, dispatch }) => {
-          const anchor = tableAncestry(state);
-          if (!anchor || anchor.cellAt < 0) return false;
+          let cellPos: number;
+          if (state.selection instanceof CellSelection) {
+            cellPos = state.selection.anchorCell;
+          } else {
+            const anchor = tableAncestry(state);
+            if (!anchor || anchor.cellAt < 0) return false;
+            cellPos = state.selection.$from.before(anchor.cellAt);
+          }
           if (dispatch) {
-            const cellPos = state.selection.$from.before(anchor.cellAt);
             dispatch(
               state.tr
                 .setSelection(CellSelection.colSelection(state.doc.resolve(cellPos)) as never)
@@ -2012,6 +2187,45 @@ export const DocumentCommands = Extension.create({
               tr.setNodeMarkup(pos, undefined, {
                 ...cell.attrs,
                 margins: CELL_MARGIN_PRESETS[value],
+              });
+            }
+            dispatch(tr.scrollIntoView());
+          }
+          return true;
+        },
+      "set-cell-insets":
+        (value) =>
+        ({ state, dispatch }) => {
+          const parsed = parseCellInsets(value);
+          if (parsed === undefined) return false;
+          const targets = tableTargets(state);
+          if (!targets) return false;
+          if (dispatch) {
+            const tr = state.tr;
+            for (const { pos, node: cell } of targets.cells) {
+              tr.setNodeMarkup(pos, undefined, {
+                ...cell.attrs,
+                margins: parsed,
+              });
+            }
+            dispatch(tr.scrollIntoView());
+          }
+          return true;
+        },
+      "set-cell-vertical-align":
+        (value) =>
+        ({ state, dispatch }) => {
+          if (value !== "top" && value !== "center" && value !== "bottom" && value !== null) {
+            return false;
+          }
+          const targets = tableTargets(state);
+          if (!targets) return false;
+          if (dispatch) {
+            const tr = state.tr;
+            for (const { pos, node: cell } of targets.cells) {
+              tr.setNodeMarkup(pos, undefined, {
+                ...cell.attrs,
+                verticalAlign: value,
               });
             }
             dispatch(tr.scrollIntoView());
@@ -2118,12 +2332,21 @@ export const DocumentCommands = Extension.create({
           }
           return true;
         },
+      "cell-borders":
+        (value) =>
+        ({ state, dispatch }) => {
+          return applyCellBorders(state, dispatch, value);
+        },
       // Border-side presets on the table (value space matches the Home
-      // paragraph-border menu).
+      // paragraph-border menu). When CellSelection is active, delegates to
+      // applyCellBorders to style the selected cells.
       "table-borders":
         (value) =>
         ({ state, dispatch }) => {
           if (typeof value !== "string") return false;
+          if (state.selection instanceof CellSelection) {
+            return applyCellBorders(state, dispatch, value);
+          }
           const anchor = tableAncestry(state);
           if (!anchor) return false;
           const current = (state.selection.$from.node(anchor.tableAt).attrs.borders ??

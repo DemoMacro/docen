@@ -318,7 +318,7 @@ describe("table cell property commands", () => {
     expect(tablesOf(editor)[0]!.child(1).attrs.tableHeader).toBe(false);
   });
 
-  it("cell-shading stamps the cell shading, clearing with none", () => {
+  it("cell-shading stamps the cell shading, clearing with none or null, supporting objects", () => {
     const editor = build();
     editor.commands["insert-table"]();
     caretInCell(editor, 0, 0);
@@ -327,8 +327,116 @@ describe("table cell property commands", () => {
       fill: "FFEE88",
       type: "clear",
     });
+    expect(editor.commands["cell-shading"]({ fill: "AABBCC" })).toBe(true);
+    expect(firstNodeOf(editor, "tableCell").attrs.shading).toEqual({
+      fill: "AABBCC",
+      type: "clear",
+    });
+    expect(editor.commands["cell-shading"](null)).toBe(true);
+    expect(firstNodeOf(editor, "tableCell").attrs.shading).toBeNull();
     expect(editor.commands["cell-shading"]("none")).toBe(true);
     expect(firstNodeOf(editor, "tableCell").attrs.shading).toBeFalsy();
+  });
+
+  it("cell-borders stamps border presets and custom borders on active cell and CellSelection", () => {
+    const editor = build();
+    editor.commands["insert-table"]();
+    caretInCell(editor, 0, 0);
+
+    // Single cell "all"
+    expect(editor.commands["cell-borders"]("all")).toBe(true);
+    expect(firstNodeOf(editor, "tableCell").attrs.borders).toEqual({
+      top: GRID,
+      bottom: GRID,
+      left: GRID,
+      right: GRID,
+    });
+
+    // Single cell "none" clears
+    expect(editor.commands["cell-borders"]("none")).toBe(true);
+    expect(firstNodeOf(editor, "tableCell").attrs.borders).toBeNull();
+
+    // Custom border edge
+    expect(
+      editor.commands["cell-borders"]({
+        preset: "top",
+        border: { style: "double", size: 8, color: "FF0000" },
+      }),
+    ).toBe(true);
+    expect((firstNodeOf(editor, "tableCell").attrs.borders as Record<string, unknown>).top).toEqual(
+      {
+        style: "double",
+        size: 8,
+        color: "FF0000",
+      },
+    );
+
+    // Multi-cell CellSelection with "outside" borders
+    caretInCell(editor, 0, 0);
+    editor.commands["select-table-column"](); // selects col 0 across rows 0, 1, 2
+    expect(editor.state.selection instanceof CellSelection).toBe(true);
+
+    expect(editor.commands["cell-borders"]("outside")).toBe(true);
+    const table = tablesOf(editor)[0]!;
+    // Row 0 col 0: top and left
+    const cell0 = table.child(0).child(0).attrs.borders as Record<string, unknown>;
+    expect(cell0.top).toEqual(GRID);
+    expect(cell0.left).toEqual(GRID);
+    // Row 2 col 0: bottom and left
+    const cell2 = table.child(2).child(0).attrs.borders as Record<string, unknown>;
+    expect(cell2.bottom).toEqual(GRID);
+    expect(cell2.left).toEqual(GRID);
+
+    // table-borders delegates to applyCellBorders when CellSelection is active
+    expect(editor.commands["table-borders"]("all")).toBe(true);
+    const tableAll = tablesOf(editor)[0]!;
+    const cell0All = tableAll.child(0).child(0).attrs.borders as Record<string, unknown>;
+    expect(cell0All.top).toEqual(GRID);
+    expect(cell0All.bottom).toEqual(GRID);
+    expect(cell0All.left).toEqual(GRID);
+    expect(cell0All.right).toEqual(GRID);
+  });
+
+  it("set-cell-insets stamps margins presets, numbers, and custom objects", () => {
+    const editor = build();
+    editor.commands["insert-table"]();
+    caretInCell(editor, 0, 0);
+
+    expect(editor.commands["set-cell-insets"]("narrow")).toBe(true);
+    expect(firstNodeOf(editor, "tableCell").attrs.margins).toEqual({
+      top: { size: 0, type: "twips" },
+      right: { size: 108, type: "twips" },
+      bottom: { size: 0, type: "twips" },
+      left: { size: 108, type: "twips" },
+    });
+
+    expect(editor.commands["set-cell-insets"](144)).toBe(true);
+    expect(firstNodeOf(editor, "tableCell").attrs.margins).toEqual({
+      top: { size: 144, type: "twips" },
+      right: { size: 144, type: "twips" },
+      bottom: { size: 144, type: "twips" },
+      left: { size: 144, type: "twips" },
+    });
+
+    expect(editor.commands["set-cell-insets"]("default")).toBe(true);
+    expect(firstNodeOf(editor, "tableCell").attrs.margins).toBeNull();
+  });
+
+  it("set-cell-vertical-align stamps vertical alignment independently", () => {
+    const editor = build();
+    editor.commands["insert-table"]();
+    caretInCell(editor, 0, 0);
+
+    expect(editor.commands["set-cell-vertical-align"]("bottom")).toBe(true);
+    expect(firstNodeOf(editor, "tableCell").attrs.verticalAlign).toBe("bottom");
+
+    expect(editor.commands["set-cell-vertical-align"]("center")).toBe(true);
+    expect(firstNodeOf(editor, "tableCell").attrs.verticalAlign).toBe("center");
+
+    expect(editor.commands["set-cell-vertical-align"](null)).toBe(true);
+    expect(firstNodeOf(editor, "tableCell").attrs.verticalAlign).toBeNull();
+
+    expect(editor.commands["set-cell-vertical-align"]("invalid" as never)).toBe(false);
   });
 
   it("table-style applies a preset's borders and conditional fills", () => {
@@ -406,11 +514,17 @@ describe("select-table-column / convert-to-text", () => {
     const texts: string[] = [];
     sel.forEachCell((node) => texts.push(node.textContent));
     expect(texts).toHaveLength(3);
-    // Outside a table both decline.
+
+    // select-table-cell selects single cell as CellSelection
+    expect(editor.commands["select-table-cell"]()).toBe(true);
+    expect(editor.state.selection instanceof CellSelection).toBe(true);
+
+    // Outside a table they decline.
     editor.commands.setContent({ type: "doc", content: [{ type: "paragraph" }] });
     editor.commands.setTextSelection(2);
     expect(editor.commands["select-table-row"]()).toBe(false);
     expect(editor.commands["select-table-column"]()).toBe(false);
+    expect(editor.commands["select-table-cell"]()).toBe(false);
   });
 
   it("select-table selects every cell (not a NodeSelection — Backspace must empty cells, not erase the table)", () => {
