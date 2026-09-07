@@ -40,6 +40,16 @@ import { CellSelection, cellAt, inSameTable } from "./cell-selection";
 import { CropOverlay } from "./drawing-editor/crop-overlay";
 import { DrawingOverlay } from "./drawing-editor/overlay";
 import { followLink, installLinkHover, type LinkHit } from "./link-hover";
+import {
+  calcColumnResize,
+  calcRowResize,
+  calcTableScale,
+  hitTableElements,
+  PX_TO_TWIPS,
+  TWIPS_TO_PX,
+  type TableHit,
+} from "./table-geometry";
+import { TableCanvasOverlay } from "./table-overlay";
 
 /** A grapheme-boundary segmenter shared by the delete translations — surrogate
  *  pairs, combining marks, and emoji must delete as one user-perceived
@@ -995,21 +1005,286 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     gripEl.style.display = "block";
   };
 
+  type TableDrag =
+    | {
+        kind: "col";
+        zone: TableZone;
+        tablePos: number;
+        colIndex: number;
+        startX: number;
+        originEdgeX: number;
+        initialWidths: number[];
+        shiftKey: boolean;
+      }
+    | {
+        kind: "row";
+        zone: TableZone;
+        tablePos: number;
+        rowIndex: number;
+        startY: number;
+        originEdgeY: number;
+        initialHeightTwips: number;
+        altKey: boolean;
+      }
+    | {
+        kind: "corner";
+        zone: TableZone;
+        tablePos: number;
+        startX: number;
+        startY: number;
+        initialWidthPx: number;
+        initialHeightPx: number;
+        initialWidths: number[];
+      }
+    | null;
+
+  let tableDrag: TableDrag = null;
+  let tableHoverHit: TableHit | null = null;
+  let tableHoverZone: TableZone | null = null;
+
+  const tableOverlay = new TableCanvasOverlay({
+    scale: () => opts.scale?.() ?? 1,
+    insertColumnAt: (colIndex, tablePos) => {
+      main.editor.commands["insert-column-at"](colIndex, tablePos);
+    },
+    insertRowAt: (rowIndex, tablePos) => {
+      main.editor.commands["insert-row-at"](rowIndex, tablePos);
+    },
+    onCornerDown: (e) => {
+      if (tableHoverZone) {
+        startTableCornerResize(tableHoverZone, e);
+      }
+    },
+  });
+  opts.host.append(tableOverlay.el);
+
+  const startTableColResize = (zone: TableZone, colIndex: number, event: MouseEvent): void => {
+    const tablePos = zone.tablePos;
+    if (tablePos == null) return;
+    const tableNode = main.editor.state.doc.nodeAt(tablePos);
+    if (!tableNode) return;
+    const initialWidths: number[] = [];
+    if (Array.isArray(tableNode.attrs.columnWidths) && tableNode.attrs.columnWidths.length > 0) {
+      initialWidths.push(...(tableNode.attrs.columnWidths as number[]));
+    } else {
+      for (let c = 0; c < zone.colEdges.length - 1; c += 1) {
+        initialWidths.push(Math.round((zone.colEdges[c + 1]! - zone.colEdges[c]!) * PX_TO_TWIPS));
+      }
+    }
+    const scale = opts.scale?.() ?? 1;
+    const originEdgeX = zone.xPx + zone.colEdges[colIndex]!;
+    tableDrag = {
+      kind: "col",
+      zone,
+      tablePos,
+      colIndex,
+      startX: event.clientX,
+      originEdgeX,
+      initialWidths,
+      shiftKey: event.shiftKey,
+    };
+    tableOverlay.showColGuideline(originEdgeX, zone.yPx, zone.heightPx, scale);
+  };
+
+  const startTableRowResize = (zone: TableZone, rowIndex: number, event: MouseEvent): void => {
+    const tablePos = zone.tablePos;
+    if (tablePos == null) return;
+    const tableNode = main.editor.state.doc.nodeAt(tablePos);
+    if (!tableNode || rowIndex - 1 >= tableNode.childCount) return;
+    const rowNode = tableNode.child(rowIndex - 1);
+    const h = rowNode.attrs.height as { value?: number } | null;
+    let initialHeightTwips = 0;
+    if (h && typeof h.value === "number" && h.value > 0) {
+      initialHeightTwips = h.value;
+    } else {
+      initialHeightTwips = Math.round(
+        (zone.rowEdges[rowIndex]! - zone.rowEdges[rowIndex - 1]!) * PX_TO_TWIPS,
+      );
+    }
+    const scale = opts.scale?.() ?? 1;
+    const originEdgeY = zone.yPx + zone.rowEdges[rowIndex]!;
+    tableDrag = {
+      kind: "row",
+      zone,
+      tablePos,
+      rowIndex,
+      startY: event.clientY,
+      originEdgeY,
+      initialHeightTwips,
+      altKey: event.altKey,
+    };
+    tableOverlay.showRowGuideline(zone.xPx, originEdgeY, zone.widthPx, scale);
+  };
+
+  const startTableCornerResize = (zone: TableZone, event: MouseEvent): void => {
+    const tablePos = zone.tablePos;
+    if (tablePos == null) return;
+    const tableNode = main.editor.state.doc.nodeAt(tablePos);
+    if (!tableNode) return;
+    const initialWidths: number[] = [];
+    if (Array.isArray(tableNode.attrs.columnWidths) && tableNode.attrs.columnWidths.length > 0) {
+      initialWidths.push(...(tableNode.attrs.columnWidths as number[]));
+    } else {
+      for (let c = 0; c < zone.colEdges.length - 1; c += 1) {
+        initialWidths.push(Math.round((zone.colEdges[c + 1]! - zone.colEdges[c]!) * PX_TO_TWIPS));
+      }
+    }
+    const scale = opts.scale?.() ?? 1;
+    tableDrag = {
+      kind: "corner",
+      zone,
+      tablePos,
+      startX: event.clientX,
+      startY: event.clientY,
+      initialWidthPx: zone.widthPx,
+      initialHeightPx: zone.heightPx,
+      initialWidths,
+    };
+    tableOverlay.showBoxGuideline(zone.xPx, zone.yPx, zone.widthPx, zone.heightPx, scale);
+  };
+
+  const updateTableDrag = (event: MouseEvent): void => {
+    if (!tableDrag) return;
+    const scale = opts.scale?.() ?? 1;
+    if (tableDrag.kind === "col") {
+      const dxPx = (event.clientX - tableDrag.startX) / scale;
+      const dxTwips = Math.round(dxPx * PX_TO_TWIPS);
+      const nextWidths = calcColumnResize(tableDrag.initialWidths, tableDrag.colIndex, dxTwips, {
+        shiftKey: event.shiftKey || tableDrag.shiftKey,
+      });
+      let curEdgeX = tableDrag.zone.xPx;
+      for (let i = 0; i < tableDrag.colIndex; i += 1) {
+        curEdgeX += (nextWidths[i] ?? 0) * TWIPS_TO_PX;
+      }
+      tableOverlay.showColGuideline(curEdgeX, tableDrag.zone.yPx, tableDrag.zone.heightPx, scale);
+    } else if (tableDrag.kind === "row") {
+      const dyPx = (event.clientY - tableDrag.startY) / scale;
+      const dyTwips = Math.round(dyPx * PX_TO_TWIPS);
+      const res = calcRowResize(tableDrag.initialHeightTwips, dyTwips, {
+        isAlt: event.altKey || tableDrag.altKey,
+      });
+      const newHeightPx = res.value * TWIPS_TO_PX;
+      const curEdgeY =
+        tableDrag.zone.yPx + tableDrag.zone.rowEdges[tableDrag.rowIndex - 1]! + newHeightPx;
+      tableOverlay.showRowGuideline(tableDrag.zone.xPx, curEdgeY, tableDrag.zone.widthPx, scale);
+    } else if (tableDrag.kind === "corner") {
+      const dxPx = (event.clientX - tableDrag.startX) / scale;
+      const dyPx = (event.clientY - tableDrag.startY) / scale;
+      const curWidthPx = Math.max(48, tableDrag.initialWidthPx + dxPx);
+      const curHeightPx = Math.max(24, tableDrag.initialHeightPx + dyPx);
+      tableOverlay.showBoxGuideline(
+        tableDrag.zone.xPx,
+        tableDrag.zone.yPx,
+        curWidthPx,
+        curHeightPx,
+        scale,
+      );
+    }
+  };
+
+  const finishTableDrag = (event: MouseEvent): void => {
+    if (!tableDrag) return;
+    const scale = opts.scale?.() ?? 1;
+    const drag = tableDrag;
+    tableDrag = null;
+    tableOverlay.hideGuideline();
+    tableOverlay.hideBoxGuideline();
+    opts.host.style.cursor = "";
+
+    if (drag.kind === "col") {
+      const dxPx = (event.clientX - drag.startX) / scale;
+      const dxTwips = Math.round(dxPx * PX_TO_TWIPS);
+      const finalWidths = calcColumnResize(drag.initialWidths, drag.colIndex, dxTwips, {
+        shiftKey: event.shiftKey || drag.shiftKey,
+      });
+      main.editor.commands["set-table-column-widths"](finalWidths, drag.tablePos);
+    } else if (drag.kind === "row") {
+      const dyPx = (event.clientY - drag.startY) / scale;
+      const dyTwips = Math.round(dyPx * PX_TO_TWIPS);
+      const res = calcRowResize(drag.initialHeightTwips, dyTwips, {
+        isAlt: event.altKey || drag.altKey,
+      });
+      main.editor.commands["set-table-row-height"](drag.rowIndex - 1, res, drag.tablePos);
+    } else if (drag.kind === "corner") {
+      const dxPx = (event.clientX - drag.startX) / scale;
+      const scaleX = Math.max(0.1, (drag.initialWidthPx + dxPx) / drag.initialWidthPx);
+      const finalWidths = calcTableScale(drag.initialWidths, scaleX);
+      main.editor.commands["set-table-column-widths"](finalWidths, drag.tablePos);
+    }
+  };
+
   /** The hover pass — mousemoves outside a drag resolve against the active
    *  page's table zones (innermost zone wins on nested tables). */
   const hoverTableGrip = (event: MouseEvent): void => {
     grip.kind = null;
     grip.zone = null;
     grip.index = -1;
+    tableHoverHit = null;
+    tableHoverZone = null;
     const s = active();
     if (s.map?.valid && !story) {
       const hit = hitPage(event.clientX, event.clientY);
       // The bars live just outside the zone — widen the zone test to the
       // grip window (the strips reach ~14px past the table's edges).
-      const zone = hit
-        ? s.map.tableZoneAt(story ? 0 : hit.page, hit.lx, hit.ly, GRIP_WINDOW + 2)
-        : null;
+      const zone = hit ? s.map.tableZoneAt(story ? 0 : hit.page, hit.lx, hit.ly, 24) : null;
       if (hit && zone) {
+        const frame = opts.pageHost?.(framePage(s, zone.page)) ?? null;
+        if (frame) tableOverlay.attachTo(frame);
+        const scale = opts.scale?.() ?? 1;
+
+        // Check table interactive elements (borders, corner, quick-insert)
+        const hitElem = hitTableElements(zone, hit.lx, hit.ly);
+        if (hitElem) {
+          tableHoverHit = hitElem;
+          tableHoverZone = zone;
+          if (hitElem.kind === "col-border") {
+            opts.host.style.cursor = "col-resize";
+            tableOverlay.showCorner(zone, scale);
+            tableOverlay.hideQuickCol();
+            tableOverlay.hideQuickRow();
+          } else if (hitElem.kind === "row-border") {
+            opts.host.style.cursor = "row-resize";
+            tableOverlay.showCorner(zone, scale);
+            tableOverlay.hideQuickCol();
+            tableOverlay.hideQuickRow();
+          } else if (hitElem.kind === "corner-handle") {
+            opts.host.style.cursor = "nwse-resize";
+            tableOverlay.showCorner(zone, scale);
+            tableOverlay.hideQuickCol();
+            tableOverlay.hideQuickRow();
+          } else if (hitElem.kind === "quick-col") {
+            opts.host.style.cursor = "default";
+            tableOverlay.showQuickCol(zone, hitElem.colIndex, scale);
+            tableOverlay.hideQuickRow();
+            tableOverlay.showCorner(zone, scale);
+          } else if (hitElem.kind === "quick-row") {
+            opts.host.style.cursor = "default";
+            tableOverlay.showQuickRow(zone, hitElem.rowIndex, scale);
+            tableOverlay.hideQuickCol();
+            tableOverlay.showCorner(zone, scale);
+          }
+        } else {
+          if (
+            opts.host.style.cursor === "col-resize" ||
+            opts.host.style.cursor === "row-resize" ||
+            opts.host.style.cursor === "nwse-resize"
+          ) {
+            opts.host.style.cursor = "";
+          }
+          tableOverlay.hideQuickCol();
+          tableOverlay.hideQuickRow();
+          const inTable =
+            hit.lx >= zone.xPx &&
+            hit.lx <= zone.xPx + zone.widthPx &&
+            hit.ly >= zone.yPx &&
+            hit.ly <= zone.yPx + zone.heightPx;
+          if (inTable) {
+            tableOverlay.showCorner(zone, scale);
+          } else {
+            tableOverlay.hideCorner();
+          }
+        }
+
         const lx = hit.lx - zone.xPx;
         const ly = hit.ly - zone.yPx;
         // The corner square wins the top-left overlap with the row strip.
@@ -1039,7 +1314,18 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
           // but only the corner window itself clicks it; here a click edits.
           grip.zone = zone;
         }
+      } else {
+        tableOverlay.hideAll();
+        if (
+          opts.host.style.cursor === "col-resize" ||
+          opts.host.style.cursor === "row-resize" ||
+          opts.host.style.cursor === "nwse-resize"
+        ) {
+          opts.host.style.cursor = "";
+        }
       }
+    } else {
+      tableOverlay.hideAll();
     }
     placeGrip();
   };
@@ -1183,9 +1469,27 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     posAtClient: (x, y) => posAtClient(x, y),
     linkAt,
   });
-  opts.host.addEventListener("mouseleave", linkHover.hide);
+  opts.host.addEventListener("mouseleave", () => {
+    linkHover.hide();
+    if (!tableDrag) {
+      tableOverlay.hideQuickCol();
+      tableOverlay.hideQuickRow();
+      tableHoverHit = null;
+      if (
+        opts.host.style.cursor === "col-resize" ||
+        opts.host.style.cursor === "row-resize" ||
+        opts.host.style.cursor === "nwse-resize"
+      ) {
+        opts.host.style.cursor = "";
+      }
+    }
+  });
 
   const onMouseMove = (event: MouseEvent): void => {
+    if (tableDrag != null) {
+      updateTableDrag(event);
+      return;
+    }
     if (dragAnchor == null) {
       hoverTableGrip(event);
       linkHover.onMove(event);
@@ -1207,14 +1511,26 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     const head = posAtClient(event.clientX, event.clientY, true);
     if (head != null) setDragSelection(dragAnchor, head);
   };
-  const onMouseUp = (): void => {
+  const onMouseUp = (event: MouseEvent): void => {
+    if (tableDrag != null) {
+      finishTableDrag(event);
+    }
     dragAnchor = null;
     dragMoved = false;
     dragStart = null;
     stopDragAutoScroll();
   };
+  const onDocKeyDown = (event: KeyboardEvent): void => {
+    if (event.key === "Escape" && tableDrag) {
+      tableDrag = null;
+      tableOverlay.hideGuideline();
+      tableOverlay.hideBoxGuideline();
+      opts.host.style.cursor = "";
+    }
+  };
   document.addEventListener("mousemove", onMouseMove);
   document.addEventListener("mouseup", onMouseUp);
+  document.addEventListener("keydown", onDocKeyDown);
 
   /** Enter a furniture story: a second viewless editor over the slot's
    *  JSON, a caret map over its laid stack (wrapped as one pseudo page
@@ -1385,6 +1701,20 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     // a click that lands without a prior move reaching the strip.
     if (!story) {
       hoverTableGrip(event);
+      if (tableHoverHit && tableHoverZone) {
+        if (tableHoverHit.kind === "col-border") {
+          startTableColResize(tableHoverZone, tableHoverHit.colIndex, event);
+          return;
+        }
+        if (tableHoverHit.kind === "row-border") {
+          startTableRowResize(tableHoverZone, tableHoverHit.rowIndex, event);
+          return;
+        }
+        if (tableHoverHit.kind === "corner-handle") {
+          startTableCornerResize(tableHoverZone, event);
+          return;
+        }
+      }
       if (grip.kind) {
         applyGrip();
         ta.focus();
@@ -2451,6 +2781,8 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       opts.host.removeEventListener("mousedown", takeFocus);
       document.removeEventListener("mousemove", onMouseMove);
       document.removeEventListener("mouseup", onMouseUp);
+      document.removeEventListener("keydown", onDocKeyDown);
+      tableOverlay.destroy();
       drawingOverlay.hide();
       drawingOverlay.el.remove();
       for (const el of selectionLayer) el.remove();
