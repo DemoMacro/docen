@@ -44,20 +44,20 @@ export function inSameTable(a: ResolvedPos, b: ResolvedPos): boolean {
 
 /** The (row, cell) sibling indexes of a cell position within its table —
  *  cellAt's resolve sits in the row layer, so depth is the row depth. */
-const rowCellOf = ($cell: ResolvedPos): { row: number; cell: number } => ({
+export const rowCellOf = ($cell: ResolvedPos): { row: number; cell: number } => ({
   row: $cell.index($cell.depth - 1),
   cell: $cell.index($cell.depth),
 });
 
 /** A cell's columnSpan — 1 unless the schema attr carries a wider one. */
-const spanOf = (cell: PmNode): number => {
+export const spanOf = (cell: PmNode): number => {
   const span = cell.attrs.columnSpan as unknown;
   return typeof span === "number" && span > 1 ? span : 1;
 };
 
 /** The grid column a row's cell sibling starts at — the spans of its
  *  preceding siblings (a spanning cell covers its columns). */
-const gridColOf = (rowNode: PmNode, cellIndex: number): number => {
+export const gridColOf = (rowNode: PmNode, cellIndex: number): number => {
   let col = 0;
   for (let i = 0; i < cellIndex; i += 1) col += spanOf(rowNode.child(i)!);
   return col;

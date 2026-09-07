@@ -425,6 +425,7 @@ describe("projectDocumentOptions blocks", () => {
         {
           table: {
             width: { size: 50, type: "percent" },
+            indent: { size: 720, type: "twips" },
             columnWidths: [3000, 1500],
             margins: { left: { size: 108, type: "twips" }, right: { size: 108, type: "twips" } },
             rows: [
@@ -449,6 +450,7 @@ describe("projectDocumentOptions blocks", () => {
     const table = blocks[0];
     if (table?.kind !== "table") throw new Error("expected table");
     expect(table.width).toEqual({ type: "percent", percent: 50 });
+    expect(table.indentPx).toBe(48);
     expect(table.columnWidthsPx).toEqual([200, 100]); // twips ÷ 15
     expect(table.cellInsets).toEqual({ left: 108 / 15, right: 108 / 15 });
     const row = table.rows[0];

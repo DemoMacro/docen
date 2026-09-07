@@ -1,4 +1,4 @@
-import type { ImageAttrs } from "@docen/docx";
+import type { ImageAttrs, TableFloatOptions } from "@docen/docx";
 import {
   BULLET_GLYPHS,
   HIGHLIGHT_PALETTE_RGB,
@@ -11,10 +11,10 @@ import type { Node as PMNode, ResolvedPos } from "@tiptap/pm/model";
 import type { Mark } from "@tiptap/pm/model";
 import type { EditorState } from "@tiptap/pm/state";
 import type { Transaction } from "@tiptap/pm/state";
-import { NodeSelection, TextSelection } from "@tiptap/pm/state";
+import { NodeSelection, Selection, TextSelection } from "@tiptap/pm/state";
 import { DocAttrStep } from "@tiptap/pm/transform";
 
-import { CellSelection, cellsInRect } from "../canvas/cell-selection";
+import { CellSelection, cellsInRect, gridColOf, spanOf } from "../canvas/cell-selection";
 
 /**
  * Document editor commands (Office.js-style "add-in commands") as native
@@ -88,8 +88,16 @@ declare module "@tiptap/core" {
       // Table context commands (the Table Design / Layout contextual tabs).
       "insert-row-above": () => ReturnType;
       "insert-row-below": () => ReturnType;
+      "insert-row-at": (index: number, tablePos?: number) => ReturnType;
       "insert-column-left": () => ReturnType;
       "insert-column-right": () => ReturnType;
+      "insert-column-at": (index: number, tablePos?: number) => ReturnType;
+      "set-table-column-widths": (widths: number[], tablePos?: number) => ReturnType;
+      "set-table-row-height": (
+        rowIndex: number,
+        height: { rule: "atLeast" | "exact"; value: number } | null,
+        tablePos?: number,
+      ) => ReturnType;
       "delete-row": () => ReturnType;
       "delete-column": () => ReturnType;
       "select-table": () => ReturnType;
@@ -97,8 +105,12 @@ declare module "@tiptap/core" {
       "select-table-cell": () => ReturnType;
       "select-table-column": () => ReturnType;
       "align-cell": (value?: string) => ReturnType;
-      "repeat-header-rows": () => ReturnType;
+      "repeat-header-rows": (value?: boolean) => ReturnType;
+      "cant-split": (value?: boolean) => ReturnType;
       "cell-shading": (value?: unknown) => ReturnType;
+      "cell-borders": (value?: unknown) => ReturnType;
+      "set-cell-insets": (value?: unknown) => ReturnType;
+      "set-cell-vertical-align": (value: "top" | "center" | "bottom" | null) => ReturnType;
       "text-direction": () => ReturnType;
       "convert-to-text": () => ReturnType;
       "table-style": (value?: string) => ReturnType;
@@ -115,7 +127,17 @@ declare module "@tiptap/core" {
       "cell-margins": (value?: string) => ReturnType;
       "cell-width": (value?: string) => ReturnType;
       "cell-height": (value?: string) => ReturnType;
+      "table-alignment": (value: "left" | "center" | "right") => ReturnType;
+      "table-text-wrapping": (
+        value: "none" | "around" | boolean | TableFloatOptions | null,
+      ) => ReturnType;
       "table-properties-apply": (patch?: TablePropertiesPatch) => ReturnType;
+      "convert-text-to-table": (options?: ConvertTextToTableOptions | string) => ReturnType;
+      "sort-table": (options?: SortTableOptions | "asc" | "desc") => ReturnType;
+      "table-formula": (options?: TableFormulaOptions | string) => ReturnType;
+      "table-cell-spacing": (
+        value?: number | string | { size: number; type?: string } | null,
+      ) => ReturnType;
       link: (href?: string) => ReturnType;
       style: (styleId?: string) => ReturnType;
       "modify-style": (patch?: ModifyStylePatch) => ReturnType;
@@ -186,8 +208,12 @@ export const WIRED_DISPATCH: ReadonlySet<string> = new Set([
   "delete-table",
   "insert-row-above",
   "insert-row-below",
+  "insert-row-at",
   "insert-column-left",
   "insert-column-right",
+  "insert-column-at",
+  "set-table-column-widths",
+  "set-table-row-height",
   "delete-row",
   "delete-column",
   "select-table",
@@ -196,7 +222,11 @@ export const WIRED_DISPATCH: ReadonlySet<string> = new Set([
   "select-table-column",
   "align-cell",
   "repeat-header-rows",
+  "cant-split",
   "cell-shading",
+  "cell-borders",
+  "set-cell-insets",
+  "set-cell-vertical-align",
   "table-style",
   "table-borders",
   "toggle-table-look",
@@ -211,8 +241,15 @@ export const WIRED_DISPATCH: ReadonlySet<string> = new Set([
   "cell-margins",
   "cell-width",
   "cell-height",
+  "table-alignment",
+  "table-text-wrapping",
+  "table-properties-apply",
   "text-direction",
   "convert-to-text",
+  "convert-text-to-table",
+  "sort-table",
+  "table-formula",
+  "table-cell-spacing",
   "link",
   "style",
   "modify-style",
@@ -331,15 +368,54 @@ export interface ParagraphDialogPatch {
 }
 
 /**
- * What the Table Properties dialog commits on OK — the table tab's geometry
- * (alignment and left indent in twips), stamped onto the caret's table by
+ * What the Table Properties dialog or programmatic caller commits on apply —
+ * the table tab's geometry (alignment, left indent, float/wrapping) and row
+ * properties (cantSplit, tableHeader), stamped onto the caret's table by
  * {@link documentCommands.table-properties-apply}.
  */
 export interface TablePropertiesPatch {
   /** w:jc table alignment — "left" commits null (OOXML's default). */
-  alignment: "left" | "center" | "right";
+  alignment?: "left" | "center" | "right";
   /** w:tblInd left indent in twips; 0 commits null. */
-  indent: number;
+  indent?: number;
+  /** w:cantSplit row protection flag on targeted rows. */
+  cantSplit?: boolean;
+  /** w:tblHeader repeat header rows flag on targeted rows. */
+  tableHeader?: boolean;
+  /** w:tblpPr text wrapping ("none" clears float, "around" enables float). */
+  textWrapping?: "none" | "around";
+  /** w:tblpPr floating options directly. */
+  float?: TableFloatOptions | null;
+  /** w:tblCellSpacing cell spacing in twips, universal measure string, or object. */
+  cellSpacing?: number | string | { size: number; type?: string } | null;
+}
+
+/** Options for {@link documentCommands.convert-text-to-table}. */
+export interface ConvertTextToTableOptions {
+  /** Delimiter to split columns by. If omitted, auto-detected (\t, ,, ;, |). */
+  delimiter?: string | RegExp;
+  /** If true, the first row is marked as tableHeader. */
+  hasHeader?: boolean;
+}
+
+/** Options for {@link documentCommands.sort-table}. */
+export interface SortTableOptions {
+  /** 0-based column index to sort by. Defaults to active cell's column. */
+  column?: number;
+  /** Sort order. Defaults to "asc". */
+  order?: "asc" | "desc";
+  /** Whether row 0 is treated as a table header (not sorted).
+   * Defaults to whether row 0 has tableHeader: true. */
+  hasHeader?: boolean;
+}
+
+/** Options for {@link documentCommands.table-formula}. */
+export interface TableFormulaOptions {
+  /** The formula string, e.g. "=SUM(ABOVE)", "=AVERAGE(LEFT)", "=COUNT(A1:B3)", etc.
+   * If omitted, auto-picks =SUM(ABOVE) or =SUM(LEFT) based on adjacent numbers. */
+  formula?: string;
+  /** Optional number format or prefix/suffix. */
+  numberFormat?: string;
 }
 
 /**
@@ -686,7 +762,7 @@ function isThemeColor(value: unknown): value is ThemeColorValue {
  *  carries themeFill bindings, a bare hex stores fill. undefined = unrecognized
  *  value (command declines). */
 function shadingStamp(value: unknown): Record<string, unknown> | null | undefined {
-  if (value === "none") return null;
+  if (value === "none" || value === null) return null;
   if (isThemeColor(value)) {
     const shading: Record<string, unknown> = {
       fill: value.val,
@@ -698,6 +774,13 @@ function shadingStamp(value: unknown): Record<string, unknown> | null | undefine
     return shading;
   }
   if (typeof value === "string" && value) return { fill: value, type: "clear" };
+  if (typeof value === "object" && value !== null && "fill" in value) {
+    const obj = value as Record<string, unknown>;
+    return {
+      type: "clear",
+      ...obj,
+    };
+  }
   return undefined;
 }
 
@@ -714,7 +797,7 @@ export function tableAncestry(state: EditorState): {
 
 /** {@link tableAncestry} for an arbitrary position — Merge Cells resolves the
  *  selection's two ends independently. */
-function ancestryAt($pos: ResolvedPos): {
+export function ancestryAt($pos: ResolvedPos): {
   tableAt: number;
   rowAt: number;
   cellAt: number;
@@ -724,18 +807,21 @@ function ancestryAt($pos: ResolvedPos): {
   let rowAt = -1;
   let cellAt = -1;
   for (let d = $pos.depth; d > 0; d -= 1) {
-    const node = $pos.node(d);
-    if (node.type === table && tableAt < 0) tableAt = d;
-    else if (node.type === tableRow && rowAt < 0) rowAt = d;
-    else if (node.type === tableCell && cellAt < 0) cellAt = d;
+    const t = $pos.node(d).type;
+    if (t === tableCell && cellAt < 0) cellAt = d;
+    else if (t === tableRow && rowAt < 0) rowAt = d;
+    else if (t === table && tableAt < 0) tableAt = d;
   }
-  return tableAt < 0 ? null : { tableAt, rowAt, cellAt };
+  return tableAt >= 0 ? { tableAt, rowAt, cellAt } : null;
 }
 
-/** The selection's table targets — every cell a CellSelection crosses, or the
- *  caret's enclosing cell. A CellSelection's `$from` sits at a cell's START
- *  (inside the row, not the cell), so {@link tableAncestry} reads `cellAt:
- *  -1` there and every cell-level command would decline — this is the one
+/** The cell targets of a table selection: when a {@link CellSelection} is
+ *  active, all cells inside its rectangular bounds; otherwise the single cell
+ *  holding the text selection. Both carry the enclosing table's node and
+ *  document position, plus the distinct rows and columns the selection touches.
+ *
+ *  `tableAncestry` only looks up the `$from` path — on a CellSelection `depth -
+ *  1` there and every cell-level command would decline — this is the one
  *  resolver the cell/row/column-level commands share. Cell stamps carry their
  *  table-child row index and grid column; the row/column commands read
  *  `rows`/`cols` (Word: a whole-pick height lands on every picked row, a
@@ -743,7 +829,7 @@ function ancestryAt($pos: ResolvedPos): {
 function tableTargets(state: EditorState): {
   tablePos: number;
   tableNode: PMNode;
-  cells: { pos: number; node: PMNode }[];
+  cells: { pos: number; node: PMNode; row: number; col: number }[];
   rows: Set<number>;
   cols: Set<number>;
 } | null {
@@ -761,7 +847,7 @@ function tableTargets(state: EditorState): {
     anchorCell = selection.$from.before(anchor.cellAt);
     tablePos = selection.$from.before(anchor.tableAt);
   }
-  const cells: { pos: number; node: PMNode }[] = [];
+  const cells: { pos: number; node: PMNode; row: number; col: number }[] = [];
   const rows = new Set<number>();
   const cols = new Set<number>();
   cellsInRect(
@@ -769,9 +855,10 @@ function tableTargets(state: EditorState): {
     anchorCell,
     isCell ? selection.headCell : anchorCell,
     (node, pos, row, col) => {
-      cells.push({ pos, node });
+      cells.push({ pos, node, row, col });
       rows.add(row);
-      cols.add(col);
+      const span = spanOf(node);
+      for (let c = col; c < col + span; c += 1) cols.add(c);
     },
   );
   const tableNode = state.doc.nodeAt(tablePos);
@@ -930,6 +1017,33 @@ const CELL_MARGIN_PRESETS: Readonly<Record<string, Record<string, unknown> | nul
   },
 };
 
+/** Parse cell insets / margins from a preset name, direct numbers, or side spec. */
+function parseCellInsets(value: unknown): Record<string, unknown> | null | undefined {
+  if (value === null || value === "default") return null;
+  if (typeof value === "string") {
+    return CELL_MARGIN_PRESETS.hasOwnProperty(value) ? CELL_MARGIN_PRESETS[value] : undefined;
+  }
+  if (typeof value === "number") {
+    const side = { size: Math.round(value), type: "twips" };
+    return { top: side, bottom: side, left: side, right: side };
+  }
+  if (typeof value === "object" && value !== null) {
+    const raw = value as Record<string, unknown>;
+    const toMarginSide = (v: unknown) => {
+      if (typeof v === "number") return { size: Math.round(v), type: "twips" };
+      if (typeof v === "object" && v !== null && "size" in v) return v;
+      return undefined;
+    };
+    const margins: Record<string, unknown> = {};
+    if ("top" in raw) margins.top = toMarginSide(raw.top);
+    if ("bottom" in raw) margins.bottom = toMarginSide(raw.bottom);
+    if ("left" in raw) margins.left = toMarginSide(raw.left);
+    if ("right" in raw) margins.right = toMarginSide(raw.right);
+    return margins;
+  }
+  return undefined;
+}
+
 // ── Cell Size / AutoFit measurement helpers ──────────────────────────────────
 
 /** A UniversalMeasure string ("1.5cm") or bare number string → twips; number
@@ -969,6 +1083,52 @@ function measureTextTwip(text: string): number {
 
 /** Word's smallest usable column — 0.5" — also the AutoFit floor. */
 const MIN_COL_TWIP = 720;
+
+/** Total number of grid columns across all rows in tableNode (span-aware). */
+function tableGridColumns(tableNode: PMNode): number {
+  if (Array.isArray(tableNode.attrs.columnWidths) && tableNode.attrs.columnWidths.length > 0) {
+    return tableNode.attrs.columnWidths.length;
+  }
+  let maxCols = 0;
+  for (let r = 0; r < tableNode.childCount; r += 1) {
+    const row = tableNode.child(r);
+    let cols = 0;
+    for (let c = 0; c < row.childCount; c += 1) {
+      cols += spanOf(row.child(c));
+    }
+    maxCols = Math.max(maxCols, cols);
+  }
+  return maxCols;
+}
+
+/** Computes the available text body width in twips from the document's sectionProperties. */
+function availableTextWidthTwips(state: EditorState): number {
+  let sectPr: Record<string, unknown> | undefined;
+  const from = state.selection.from;
+  state.doc.descendants((node, nodePos) => {
+    if (nodePos + node.nodeSize <= from) return true;
+    if (node.type.name === "paragraph" && node.attrs.sectionProperties) {
+      sectPr = node.attrs.sectionProperties as Record<string, unknown>;
+      return false;
+    }
+    return true;
+  });
+  if (!sectPr) {
+    sectPr = (state.doc.attrs as { sectionProperties?: Record<string, unknown> })
+      ?.sectionProperties;
+  }
+  const pageSize = (
+    sectPr?.pageSize && typeof sectPr.pageSize === "object" ? sectPr.pageSize : {}
+  ) as Record<string, unknown>;
+  const pageMargin = (
+    sectPr?.pageMargin && typeof sectPr.pageMargin === "object" ? sectPr.pageMargin : {}
+  ) as Record<string, unknown>;
+  const pageWidth = typeof pageSize.width === "number" ? pageSize.width : 12240;
+  const marginLeft = typeof pageMargin.left === "number" ? pageMargin.left : 1440;
+  const marginRight = typeof pageMargin.right === "number" ? pageMargin.right : 1440;
+  const textWidth = pageWidth - (marginLeft + marginRight);
+  return textWidth > 0 ? textWidth : 9360;
+}
 
 type TableBordersLike = Record<string, { style: string; size: number; color: string } | undefined>;
 const GRID_BORDER = { style: "single", size: 4, color: "auto" };
@@ -1093,6 +1253,117 @@ function stampTableBorders(
         .scrollIntoView(),
     );
   }
+  return true;
+}
+
+/** Apply borders preset or custom borders to targeted cells. */
+function applyCellBorders(
+  state: EditorState,
+  dispatch: ((tr: Transaction) => void) | undefined,
+  value: unknown,
+): boolean {
+  const targets = tableTargets(state);
+  if (!targets) return false;
+
+  if (value === "none" || value === null) {
+    if (dispatch) {
+      const tr = state.tr;
+      for (const { pos, node: cell } of targets.cells) {
+        tr.setNodeMarkup(pos, undefined, { ...cell.attrs, borders: null });
+      }
+      dispatch(tr.scrollIntoView());
+    }
+    return true;
+  }
+
+  let edge: { style: string; size: number; color: string } = GRID_BORDER;
+  let preset: string | undefined;
+  let directBorders: Record<string, unknown> | undefined;
+
+  if (typeof value === "string") {
+    preset = value;
+  } else if (typeof value === "object" && value !== null) {
+    const obj = value as Record<string, unknown>;
+    if ("border" in obj && typeof obj.border === "object" && obj.border !== null) {
+      edge = { ...GRID_BORDER, ...(obj.border as Record<string, unknown>) };
+    }
+    if ("preset" in obj && typeof obj.preset === "string") {
+      preset = obj.preset;
+    } else if ("side" in obj && typeof obj.side === "string") {
+      preset = obj.side;
+    } else if ("top" in obj || "bottom" in obj || "left" in obj || "right" in obj) {
+      directBorders = obj;
+    }
+  }
+
+  if (!preset && !directBorders) return false;
+
+  if (dispatch) {
+    const minRow = Math.min(...targets.rows);
+    const maxRow = Math.max(...targets.rows);
+    const minCol = Math.min(...targets.cols);
+    const maxCol = Math.max(...targets.cols);
+    const tr = state.tr;
+
+    for (const { pos, node: cell, row, col } of targets.cells) {
+      const span = spanOf(cell);
+      const cellEndCol = col + span - 1;
+      const current = (cell.attrs.borders ?? {}) as Record<string, unknown>;
+      let next: Record<string, unknown>;
+
+      if (directBorders) {
+        next = { ...current, ...directBorders };
+      } else {
+        next = { ...current };
+        switch (preset) {
+          case "all":
+            next.top = edge;
+            next.bottom = edge;
+            next.left = edge;
+            next.right = edge;
+            break;
+          case "outside":
+            if (row === minRow) next.top = edge;
+            if (row === maxRow) next.bottom = edge;
+            if (col === minCol) next.left = edge;
+            if (cellEndCol === maxCol) next.right = edge;
+            break;
+          case "inside":
+            if (row > minRow) next.top = edge;
+            if (row < maxRow) next.bottom = edge;
+            if (col > minCol) next.left = edge;
+            if (cellEndCol < maxCol) next.right = edge;
+            break;
+          case "insideHorizontal":
+            if (row > minRow) next.top = edge;
+            if (row < maxRow) next.bottom = edge;
+            break;
+          case "insideVertical":
+            if (col > minCol) next.left = edge;
+            if (cellEndCol < maxCol) next.right = edge;
+            break;
+          case "top":
+            if (row === minRow) next.top = edge;
+            break;
+          case "bottom":
+            if (row === maxRow) next.bottom = edge;
+            break;
+          case "left":
+            if (col === minCol) next.left = edge;
+            break;
+          case "right":
+            if (cellEndCol === maxCol) next.right = edge;
+            break;
+          default:
+            return false;
+        }
+      }
+
+      tr.setNodeMarkup(pos, undefined, { ...cell.attrs, borders: next });
+    }
+    dispatch(tr.scrollIntoView());
+  }
+
   return true;
 }
 
@@ -1603,6 +1874,41 @@ export const DocumentCommands = Extension.create({
           }
           return true;
         },
+      // Insert an empty row at a specific row index (0..nRows).
+      "insert-row-at":
+        (rowIndex: number, targetTablePos?: number) =>
+        ({ state, dispatch }) => {
+          let tablePos = targetTablePos;
+          let tableNode: PMNode | null = null;
+          if (tablePos != null) {
+            tableNode = state.doc.nodeAt(tablePos);
+          } else {
+            const anchor = tableAncestry(state);
+            if (!anchor) return false;
+            tablePos = state.selection.$from.before(anchor.tableAt);
+            tableNode = state.selection.$from.node(anchor.tableAt);
+          }
+          if (!tableNode || tablePos == null || tableNode.childCount === 0) return false;
+          if (dispatch) {
+            const tr = state.tr;
+            const templateIdx = Math.min(rowIndex > 0 ? rowIndex - 1 : 0, tableNode.childCount - 1);
+            const templateRow = tableNode.child(templateIdx);
+            const emptyCells: PMNode[] = [];
+            templateRow.forEach((cell) => {
+              const para = state.schema.nodes.paragraph.create();
+              emptyCells.push(cell.type.createAndFill(cell.attrs, [para])!);
+            });
+            const newRow = templateRow.type.create(templateRow.attrs, emptyCells);
+            let insertPos = tablePos + 1;
+            for (let r = 0; r < Math.min(rowIndex, tableNode.childCount); r += 1) {
+              insertPos += tableNode.child(r).nodeSize;
+            }
+            tr.insert(insertPos, newRow);
+            tr.setSelection(TextSelection.near(tr.doc.resolve(insertPos + 2)));
+            dispatch(tr.scrollIntoView());
+          }
+          return true;
+        },
       // One empty cell per row, copied from each row's cell attrs at the current column
       // index. Bottom-up keeps positions valid as earlier edits shift later ones.
       "insert-column-right":
@@ -1632,8 +1938,17 @@ export const DocumentCommands = Extension.create({
                 targetCellPos = cellPos;
               }
             }
+            if (Array.isArray(tableNode.attrs.columnWidths)) {
+              const widths = [...(tableNode.attrs.columnWidths as number[])];
+              const w = widths[cellIndex] ?? 2880;
+              widths.splice(cellIndex + 1, 0, w);
+              tr.setNodeMarkup(tablePos, undefined, { ...tableNode.attrs, columnWidths: widths });
+            }
             if (targetCellPos > 0) {
-              tr.setSelection(TextSelection.near(tr.doc.resolve(targetCellPos + 1)));
+              const sel =
+                Selection.findFrom(tr.doc.resolve(targetCellPos + 1), 1, true) ??
+                TextSelection.near(tr.doc.resolve(targetCellPos + 2));
+              tr.setSelection(sel);
             }
             dispatch(tr.scrollIntoView());
           }
@@ -1666,10 +1981,128 @@ export const DocumentCommands = Extension.create({
                 targetCellPos = cellPos;
               }
             }
+            if (Array.isArray(tableNode.attrs.columnWidths)) {
+              const widths = [...(tableNode.attrs.columnWidths as number[])];
+              const w = widths[cellIndex] ?? 2880;
+              widths.splice(cellIndex, 0, w);
+              tr.setNodeMarkup(tablePos, undefined, { ...tableNode.attrs, columnWidths: widths });
+            }
             if (targetCellPos > 0) {
-              tr.setSelection(TextSelection.near(tr.doc.resolve(targetCellPos + 1)));
+              const sel =
+                Selection.findFrom(tr.doc.resolve(targetCellPos + 1), 1, true) ??
+                TextSelection.near(tr.doc.resolve(targetCellPos + 2));
+              tr.setSelection(sel);
             }
             dispatch(tr.scrollIntoView());
+          }
+          return true;
+        },
+      // Insert a column at a specific column index (0..nCols).
+      "insert-column-at":
+        (colIndex: number, targetTablePos?: number) =>
+        ({ state, dispatch }) => {
+          let tablePos = targetTablePos;
+          let tableNode: PMNode | null = null;
+          if (tablePos != null) {
+            tableNode = state.doc.nodeAt(tablePos);
+          } else {
+            const anchor = tableAncestry(state);
+            if (!anchor) return false;
+            tablePos = state.selection.$from.before(anchor.tableAt);
+            tableNode = state.selection.$from.node(anchor.tableAt);
+          }
+          if (!tableNode || tablePos == null || tableNode.childCount === 0) return false;
+          if (dispatch) {
+            const tr = state.tr;
+            let targetCellPos = -1;
+            for (let r = tableNode.childCount - 1; r >= 0; r -= 1) {
+              const rowNode = tableNode.child(r);
+              let rowPos = tablePos + 1;
+              for (let i = 0; i < r; i += 1) rowPos += tableNode.child(i).nodeSize;
+              const idx = Math.min(colIndex, rowNode.childCount);
+              let cellPos = rowPos + 1;
+              for (let c = 0; c < idx; c += 1) cellPos += rowNode.child(c).nodeSize;
+              const templateIdx = Math.min(colIndex > 0 ? colIndex - 1 : 0, rowNode.childCount - 1);
+              const template = rowNode.child(templateIdx);
+              const para = state.schema.nodes.paragraph.create();
+              const emptyCell = template.type.createAndFill(template.attrs, [para])!;
+              tr.insert(cellPos, emptyCell);
+              if (r === 0) targetCellPos = cellPos;
+            }
+            if (Array.isArray(tableNode.attrs.columnWidths)) {
+              const widths = [...(tableNode.attrs.columnWidths as number[])];
+              const w = widths[colIndex - 1] ?? widths[colIndex] ?? 2880;
+              widths.splice(colIndex, 0, w);
+              tr.setNodeMarkup(tablePos, undefined, { ...tableNode.attrs, columnWidths: widths });
+            }
+            if (targetCellPos > 0) {
+              const sel =
+                Selection.findFrom(tr.doc.resolve(targetCellPos + 1), 1, true) ??
+                TextSelection.near(tr.doc.resolve(targetCellPos + 2));
+              tr.setSelection(sel);
+            }
+            dispatch(tr.scrollIntoView());
+          }
+          return true;
+        },
+      // Set table column widths directly on the table node.
+      "set-table-column-widths":
+        (widths: number[], targetTablePos?: number) =>
+        ({ state, dispatch }) => {
+          let tablePos = targetTablePos;
+          let tableNode: PMNode | null = null;
+          if (tablePos != null) {
+            tableNode = state.doc.nodeAt(tablePos);
+          } else {
+            const anchor = tableAncestry(state);
+            if (!anchor) return false;
+            tablePos = state.selection.$from.before(anchor.tableAt);
+            tableNode = state.selection.$from.node(anchor.tableAt);
+          }
+          if (!tableNode || tablePos == null) return false;
+          if (dispatch) {
+            dispatch(
+              state.tr
+                .setNodeMarkup(tablePos, undefined, {
+                  ...tableNode.attrs,
+                  columnWidths: widths,
+                })
+                .scrollIntoView(),
+            );
+          }
+          return true;
+        },
+      // Set height on a specific table row.
+      "set-table-row-height":
+        (
+          rowIndex: number,
+          height: { rule: "atLeast" | "exact"; value: number } | null,
+          targetTablePos?: number,
+        ) =>
+        ({ state, dispatch }) => {
+          let tablePos = targetTablePos;
+          let tableNode: PMNode | null = null;
+          if (tablePos != null) {
+            tableNode = state.doc.nodeAt(tablePos);
+          } else {
+            const anchor = tableAncestry(state);
+            if (!anchor) return false;
+            tablePos = state.selection.$from.before(anchor.tableAt);
+            tableNode = state.selection.$from.node(anchor.tableAt);
+          }
+          if (!tableNode || tablePos == null || rowIndex >= tableNode.childCount) return false;
+          if (dispatch) {
+            let rowPos = tablePos + 1;
+            for (let r = 0; r < rowIndex; r += 1) rowPos += tableNode.child(r).nodeSize;
+            const rowNode = state.doc.nodeAt(rowPos)!;
+            dispatch(
+              state.tr
+                .setNodeMarkup(rowPos, undefined, {
+                  ...rowNode.attrs,
+                  height,
+                })
+                .scrollIntoView(),
+            );
           }
           return true;
         },
@@ -1720,6 +2153,13 @@ export const DocumentCommands = Extension.create({
               for (let c = 0; c < idx; c += 1) cellPos += rowNode.child(c).nodeSize;
               tr.delete(cellPos, cellPos + rowNode.child(idx).nodeSize);
             }
+            if (Array.isArray(tableNode.attrs.columnWidths)) {
+              const widths = [...(tableNode.attrs.columnWidths as number[])];
+              if (cellIndex < widths.length) {
+                widths.splice(cellIndex, 1);
+                tr.setNodeMarkup(tablePos, undefined, { ...tableNode.attrs, columnWidths: widths });
+              }
+            }
             dispatch(tr.scrollIntoView());
           }
           return true;
@@ -1747,10 +2187,15 @@ export const DocumentCommands = Extension.create({
       "select-table-row":
         () =>
         ({ state, dispatch }) => {
-          const anchor = tableAncestry(state);
-          if (!anchor || anchor.cellAt < 0) return false;
+          let cellPos: number;
+          if (state.selection instanceof CellSelection) {
+            cellPos = state.selection.anchorCell;
+          } else {
+            const anchor = tableAncestry(state);
+            if (!anchor || anchor.cellAt < 0) return false;
+            cellPos = state.selection.$from.before(anchor.cellAt);
+          }
           if (dispatch) {
-            const cellPos = state.selection.$from.before(anchor.cellAt);
             dispatch(
               state.tr
                 .setSelection(CellSelection.rowSelection(state.doc.resolve(cellPos)) as never)
@@ -1762,17 +2207,18 @@ export const DocumentCommands = Extension.create({
       "select-table-cell":
         () =>
         ({ state, dispatch }) => {
-          const anchor = tableAncestry(state);
-          if (!anchor || anchor.cellAt < 0) return false;
+          let cellPos: number;
+          if (state.selection instanceof CellSelection) {
+            cellPos = state.selection.anchorCell;
+          } else {
+            const anchor = tableAncestry(state);
+            if (!anchor || anchor.cellAt < 0) return false;
+            cellPos = state.selection.$from.before(anchor.cellAt);
+          }
           if (dispatch) {
-            const { $from } = state.selection;
-            const cellPos = $from.before(anchor.cellAt);
-            const cell = $from.node(anchor.cellAt);
             dispatch(
               state.tr
-                .setSelection(
-                  TextSelection.create(state.doc, cellPos + 1, cellPos + cell.nodeSize - 1),
-                )
+                .setSelection(new CellSelection(state.doc.resolve(cellPos)) as never)
                 .scrollIntoView(),
             );
           }
@@ -1783,10 +2229,15 @@ export const DocumentCommands = Extension.create({
       "select-table-column":
         () =>
         ({ state, dispatch }) => {
-          const anchor = tableAncestry(state);
-          if (!anchor || anchor.cellAt < 0) return false;
+          let cellPos: number;
+          if (state.selection instanceof CellSelection) {
+            cellPos = state.selection.anchorCell;
+          } else {
+            const anchor = tableAncestry(state);
+            if (!anchor || anchor.cellAt < 0) return false;
+            cellPos = state.selection.$from.before(anchor.cellAt);
+          }
           if (dispatch) {
-            const cellPos = state.selection.$from.before(anchor.cellAt);
             dispatch(
               state.tr
                 .setSelection(CellSelection.colSelection(state.doc.resolve(cellPos)) as never)
@@ -1846,19 +2297,83 @@ export const DocumentCommands = Extension.create({
           }
           return true;
         },
-      // Word's Repeat Header Rows — one press marks the whole pick (the
-      // selected rows gain or lose tblHeader together, the anchor row's
-      // current state deciding which way).
+      "set-cell-insets":
+        (value) =>
+        ({ state, dispatch }) => {
+          const parsed = parseCellInsets(value);
+          if (parsed === undefined) return false;
+          const targets = tableTargets(state);
+          if (!targets) return false;
+          if (dispatch) {
+            const tr = state.tr;
+            for (const { pos, node: cell } of targets.cells) {
+              tr.setNodeMarkup(pos, undefined, {
+                ...cell.attrs,
+                margins: parsed,
+              });
+            }
+            dispatch(tr.scrollIntoView());
+          }
+          return true;
+        },
+      "set-cell-vertical-align":
+        (value) =>
+        ({ state, dispatch }) => {
+          if (value !== "top" && value !== "center" && value !== "bottom" && value !== null) {
+            return false;
+          }
+          const targets = tableTargets(state);
+          if (!targets) return false;
+          if (dispatch) {
+            const tr = state.tr;
+            for (const { pos, node: cell } of targets.cells) {
+              tr.setNodeMarkup(pos, undefined, {
+                ...cell.attrs,
+                verticalAlign: value,
+              });
+            }
+            dispatch(tr.scrollIntoView());
+          }
+          return true;
+        },
+      // Word's Repeat Header Rows — marks the whole pick (the selected rows
+      // gain or lose tblHeader together, either to an explicit boolean or
+      // toggling based on the anchor row's current state).
       "repeat-header-rows":
-        () =>
+        (value) =>
         ({ state, dispatch }) => {
           const targets = tableTargets(state);
           if (!targets) return false;
           if (dispatch) {
             const firstRow = Math.min(...targets.rows);
-            const next = !(targets.tableNode.child(firstRow)!.attrs.tableHeader as boolean);
+            const current = !!(targets.tableNode.child(firstRow)!.attrs.tableHeader as boolean);
+            const next = typeof value === "boolean" ? value : !current;
             const tr = state.tr;
-            stampRows(tr, targets, (row) => ({ ...row.attrs, tableHeader: next }));
+            stampRows(tr, targets, (row) => ({
+              ...row.attrs,
+              tableHeader: next,
+            }));
+            dispatch(tr.scrollIntoView());
+          }
+          return true;
+        },
+      // Word's CantSplit / Row pagination protection — marks the whole pick
+      // (the selected rows gain or lose cantSplit together, either to an
+      // explicit boolean or toggling based on the anchor row's current state).
+      "cant-split":
+        (value) =>
+        ({ state, dispatch }) => {
+          const targets = tableTargets(state);
+          if (!targets) return false;
+          if (dispatch) {
+            const firstRow = Math.min(...targets.rows);
+            const current = !!(targets.tableNode.child(firstRow)!.attrs.cantSplit as boolean);
+            const next = typeof value === "boolean" ? value : !current;
+            const tr = state.tr;
+            stampRows(tr, targets, (row) => ({
+              ...row.attrs,
+              cantSplit: next ? true : null,
+            }));
             dispatch(tr.scrollIntoView());
           }
           return true;
@@ -1946,12 +2461,21 @@ export const DocumentCommands = Extension.create({
           }
           return true;
         },
+      "cell-borders":
+        (value) =>
+        ({ state, dispatch }) => {
+          return applyCellBorders(state, dispatch, value);
+        },
       // Border-side presets on the table (value space matches the Home
-      // paragraph-border menu).
+      // paragraph-border menu). When CellSelection is active, delegates to
+      // applyCellBorders to style the selected cells.
       "table-borders":
         (value) =>
         ({ state, dispatch }) => {
           if (typeof value !== "string") return false;
+          if (state.selection instanceof CellSelection) {
+            return applyCellBorders(state, dispatch, value);
+          }
           const anchor = tableAncestry(state);
           if (!anchor) return false;
           const current = (state.selection.$from.node(anchor.tableAt).attrs.borders ??
@@ -2006,12 +2530,440 @@ export const DocumentCommands = Extension.create({
           }
           return true;
         },
+      // Word's "Convert Text to Table": converts delimited text into a structured
+      // table with automatic delimiter detection (tabs, commas, semicolons, pipes).
+      "convert-text-to-table":
+        (options) =>
+        ({ state, dispatch }) => {
+          if (tableAncestry(state)) return false;
+
+          const opts: ConvertTextToTableOptions =
+            typeof options === "string" ? { delimiter: options } : (options ?? {});
+
+          const { from, to } = state.selection;
+          const $from = state.doc.resolve(from);
+          const $to = state.doc.resolve(to);
+
+          const lines: string[] = [];
+          let startPos: number;
+          let endPos: number;
+
+          if ($from.sameParent($to) && $from.parent.isTextblock) {
+            startPos = $from.before();
+            endPos = $from.after();
+            const text = state.selection.empty
+              ? $from.parent.textContent
+              : state.doc.textBetween(from, to, "\n");
+            for (const l of text.split(/\r?\n/)) {
+              lines.push(l);
+            }
+          } else {
+            const startIndex = $from.index(0);
+            const endIndex = Math.min(
+              state.doc.childCount,
+              Math.max(startIndex + 1, $to.index(0) + ($to.parentOffset > 0 ? 1 : 0)),
+            );
+
+            let pos = 0;
+            for (let i = 0; i < startIndex; i += 1) {
+              pos += state.doc.child(i).nodeSize;
+            }
+            startPos = pos;
+            for (let i = startIndex; i < endIndex; i += 1) {
+              const child = state.doc.child(i);
+              pos += child.nodeSize;
+              const text = child.textContent;
+              for (const l of text.split(/\r?\n/)) {
+                lines.push(l);
+              }
+            }
+            endPos = pos;
+          }
+
+          while (lines.length > 1 && !lines[lines.length - 1]!.trim()) {
+            lines.pop();
+          }
+          if (!lines.length || (lines.length === 1 && !lines[0]!.trim())) {
+            return false;
+          }
+
+          let delimiter = opts.delimiter;
+          if (!delimiter) {
+            if (lines.some((l) => l.includes("\t"))) {
+              delimiter = "\t";
+            } else if (lines.some((l) => l.includes(","))) {
+              delimiter = ",";
+            } else if (lines.some((l) => l.includes(";"))) {
+              delimiter = ";";
+            } else if (lines.some((l) => l.includes("|"))) {
+              delimiter = "|";
+            } else {
+              delimiter = "\t";
+            }
+          }
+
+          const rawRows = lines.map((line) => {
+            if (delimiter === "|") {
+              let trimmed = line.trim();
+              if (trimmed.startsWith("|")) trimmed = trimmed.slice(1);
+              if (trimmed.endsWith("|")) trimmed = trimmed.slice(0, -1);
+              return trimmed.split("|").map((p) => p.trim());
+            }
+            if (typeof delimiter === "string") {
+              return line.split(delimiter).map((p) => p.trim());
+            }
+            return line.split(delimiter).map((p) => p.trim());
+          });
+
+          const maxCols = Math.max(1, ...rawRows.map((r) => r.length));
+          const { table, tableRow, tableCell, paragraph } = state.schema.nodes;
+          const rows: PMNode[] = [];
+
+          for (let r = 0; r < rawRows.length; r += 1) {
+            const parts = rawRows[r]!;
+            const cells: PMNode[] = [];
+            for (let c = 0; c < maxCols; c += 1) {
+              const text = parts[c] ?? "";
+              const p = text ? paragraph.create(null, state.schema.text(text)) : paragraph.create();
+              cells.push(tableCell.create(null, [p]));
+            }
+            const isHeader = Boolean(opts.hasHeader && r === 0);
+            rows.push(tableRow.create(isHeader ? { tableHeader: true } : null, cells));
+          }
+
+          const tableNode = table.create(
+            {
+              borders: TABLE_GRID_BORDERS,
+            },
+            rows,
+          );
+
+          if (dispatch) {
+            const tr = state.tr.replaceWith(startPos, endPos, tableNode);
+            tr.setSelection(TextSelection.near(tr.doc.resolve(startPos + 2)));
+            dispatch(tr.scrollIntoView());
+          }
+          return true;
+        },
+      // Word's Sort inside Table: sorts table rows by active or specified column,
+      // preserving header rows (tableHeader: true) with natural locale and numeric comparison.
+      "sort-table":
+        (options) =>
+        ({ state, dispatch }) => {
+          const targets = tableTargets(state);
+          if (!targets) return false;
+          const { tableNode, tablePos } = targets;
+          if (tableNode.childCount < 2) return false;
+
+          const colIndex =
+            typeof options === "object" && typeof options?.column === "number"
+              ? options.column
+              : (targets.cols.values().next().value ?? 0);
+          const order =
+            (typeof options === "string" ? options : options?.order) === "desc" ? "desc" : "asc";
+
+          const row0 = tableNode.child(0);
+          const hasHeader =
+            typeof options === "object" && options?.hasHeader !== undefined
+              ? Boolean(options.hasHeader)
+              : Boolean(row0.attrs.tableHeader);
+
+          const startRow = hasHeader ? 1 : 0;
+          if (tableNode.childCount - startRow < 2) return false;
+
+          const allRows: PMNode[] = [];
+          tableNode.forEach((r) => allRows.push(r));
+
+          const headerRows = allRows.slice(0, startRow);
+          const dataRows = allRows.slice(startRow);
+
+          const getCellText = (row: PMNode, targetCol: number): string => {
+            let col = 0;
+            for (let c = 0; c < row.childCount; c += 1) {
+              const cell = row.child(c);
+              const span = spanOf(cell);
+              if (targetCol >= col && targetCol < col + span) {
+                return cell.textContent.trim();
+              }
+              col += span;
+            }
+            return "";
+          };
+
+          const sortedRows = [...dataRows].sort((a, b) => {
+            const textA = getCellText(a, colIndex);
+            const textB = getCellText(b, colIndex);
+            const cmp = textA.localeCompare(textB, undefined, {
+              numeric: true,
+              sensitivity: "base",
+            });
+            return order === "desc" ? -cmp : cmp;
+          });
+
+          const newRows = [...headerRows, ...sortedRows];
+          if (dispatch) {
+            const newTable = tableNode.type.create(tableNode.attrs, newRows);
+            const tr = state.tr.replaceWith(tablePos, tablePos + tableNode.nodeSize, newTable);
+            dispatch(tr.scrollIntoView());
+          }
+          return true;
+        },
+      // Word's Formula in Table: evaluates =SUM(ABOVE), =SUM(LEFT), =AVERAGE(...),
+      // =COUNT(...), =MIN(...), =MAX(...), =PRODUCT(...) and writes formatted result into active cell.
+      "table-formula":
+        (options) =>
+        ({ state, dispatch }) => {
+          const targets = tableTargets(state);
+          if (!targets) return false;
+          const { tableNode, cells } = targets;
+          const activeCellTarget = cells[0];
+          if (!activeCellTarget) return false;
+
+          const activeRow = activeCellTarget.row;
+          const activeCol = activeCellTarget.col;
+          const numRows = tableNode.childCount;
+
+          const grid: (PMNode | null)[][] = [];
+          for (let r = 0; r < numRows; r += 1) {
+            const rowNode = tableNode.child(r);
+            grid[r] = [];
+            let col = 0;
+            for (let c = 0; c < rowNode.childCount; c += 1) {
+              const cellNode = rowNode.child(c);
+              const span = spanOf(cellNode);
+              for (let s = 0; s < span; s += 1) {
+                grid[r]![col + s] = cellNode;
+              }
+              col += span;
+            }
+          }
+
+          const extractNumber = (cell: PMNode | null | undefined): number | null => {
+            if (!cell) return null;
+            const text = cell.textContent.trim();
+            if (!text) return null;
+            const cleaned = text.replace(/[$€£¥, ]/g, "");
+            if (cleaned.endsWith("%")) {
+              const n = Number(cleaned.slice(0, -1));
+              return Number.isFinite(n) ? n / 100 : null;
+            }
+            if (cleaned.startsWith("(") && cleaned.endsWith(")")) {
+              const n = Number(cleaned.slice(1, -1));
+              return Number.isFinite(n) ? -n : null;
+            }
+            const n = Number(cleaned);
+            return Number.isFinite(n) ? n : null;
+          };
+
+          let formulaStr: string;
+          if (typeof options === "string") {
+            formulaStr = options;
+          } else if (options?.formula) {
+            formulaStr = options.formula;
+          } else {
+            let hasAbove = false;
+            if (activeRow > 0 && extractNumber(grid[activeRow - 1]?.[activeCol]) !== null) {
+              hasAbove = true;
+            }
+            let hasLeft = false;
+            if (activeCol > 0 && extractNumber(grid[activeRow]?.[activeCol - 1]) !== null) {
+              hasLeft = true;
+            }
+            if (hasAbove) {
+              formulaStr = "=SUM(ABOVE)";
+            } else if (hasLeft) {
+              formulaStr = "=SUM(LEFT)";
+            } else {
+              formulaStr = "=SUM(ABOVE)";
+            }
+          }
+
+          const rawExpr = formulaStr.trim().replace(/^=/, "").trim();
+
+          const parseCoord = (coord: string): { r: number; c: number } | null => {
+            const m = /^([A-Za-z]+)(\d+)$/.exec(coord.trim());
+            if (!m) return null;
+            const colLetters = m[1]!.toUpperCase();
+            let c = 0;
+            for (let i = 0; i < colLetters.length; i += 1) {
+              c = c * 26 + (colLetters.charCodeAt(i) - 64);
+            }
+            c -= 1;
+            const r = parseInt(m[2]!, 10) - 1;
+            return { r, c };
+          };
+
+          const parseRange = (rangeStr: string): number[] => {
+            const nums: number[] = [];
+            const parts = rangeStr.split(",").map((p) => p.trim());
+            for (const part of parts) {
+              const upper = part.toUpperCase();
+              if (upper === "ABOVE") {
+                for (let r = activeRow - 1; r >= 0; r -= 1) {
+                  const val = extractNumber(grid[r]?.[activeCol]);
+                  if (val !== null) nums.push(val);
+                  else break;
+                }
+              } else if (upper === "LEFT") {
+                for (let c = activeCol - 1; c >= 0; c -= 1) {
+                  const val = extractNumber(grid[activeRow]?.[c]);
+                  if (val !== null) nums.push(val);
+                  else break;
+                }
+              } else if (upper === "BELOW") {
+                for (let r = activeRow + 1; r < numRows; r += 1) {
+                  const val = extractNumber(grid[r]?.[activeCol]);
+                  if (val !== null) nums.push(val);
+                  else break;
+                }
+              } else if (upper === "RIGHT") {
+                const maxC = grid[activeRow]?.length ?? 0;
+                for (let c = activeCol + 1; c < maxC; c += 1) {
+                  const val = extractNumber(grid[activeRow]?.[c]);
+                  if (val !== null) nums.push(val);
+                  else break;
+                }
+              } else if (upper.includes(":")) {
+                const [fromStr, toStr] = upper.split(":");
+                const fromCoord = parseCoord(fromStr!);
+                const toCoord = parseCoord(toStr!);
+                if (fromCoord && toCoord) {
+                  const rMin = Math.min(fromCoord.r, toCoord.r);
+                  const rMax = Math.max(fromCoord.r, toCoord.r);
+                  const cMin = Math.min(fromCoord.c, toCoord.c);
+                  const cMax = Math.max(fromCoord.c, toCoord.c);
+                  for (let r = rMin; r <= rMax; r += 1) {
+                    for (let c = cMin; c <= cMax; c += 1) {
+                      const val = extractNumber(grid[r]?.[c]);
+                      if (val !== null) nums.push(val);
+                    }
+                  }
+                }
+              } else {
+                const coord = parseCoord(upper);
+                if (coord) {
+                  const val = extractNumber(grid[coord.r]?.[coord.c]);
+                  if (val !== null) nums.push(val);
+                }
+              }
+            }
+            return nums;
+          };
+
+          let calculatedVal = 0;
+          const fnMatch = /^(SUM|AVERAGE|COUNT|MIN|MAX|PRODUCT)\s*\((.*?)\)$/i.exec(rawExpr);
+          if (fnMatch) {
+            const fnName = fnMatch[1]!.toUpperCase();
+            const args = fnMatch[2]!;
+            const nums = parseRange(args);
+            switch (fnName) {
+              case "SUM":
+                calculatedVal = nums.reduce((acc, v) => acc + v, 0);
+                break;
+              case "AVERAGE":
+                calculatedVal = nums.length ? nums.reduce((acc, v) => acc + v, 0) / nums.length : 0;
+                break;
+              case "COUNT":
+                calculatedVal = nums.length;
+                break;
+              case "MIN":
+                calculatedVal = nums.length ? Math.min(...nums) : 0;
+                break;
+              case "MAX":
+                calculatedVal = nums.length ? Math.max(...nums) : 0;
+                break;
+              case "PRODUCT":
+                calculatedVal = nums.length ? nums.reduce((acc, v) => acc * v, 1) : 0;
+                break;
+            }
+          } else {
+            const evalExpr = rawExpr.replace(/[A-Za-z]+\d+/g, (match) => {
+              const coord = parseCoord(match);
+              if (!coord) return "0";
+              const val = extractNumber(grid[coord.r]?.[coord.c]);
+              return String(val ?? 0);
+            });
+            if (!/^[\d+\-*/.() ]+$/.test(evalExpr)) {
+              return false;
+            }
+            const tokens = evalExpr.match(/\d+(?:\.\d+)?|[+\-*/()]/g) || [];
+            let pos = 0;
+            const parsePrimary = (): number => {
+              const token = tokens[pos];
+              if (token === "(") {
+                pos += 1;
+                const val = parseExpr();
+                if (tokens[pos] === ")") pos += 1;
+                return val;
+              }
+              if (token === "-") {
+                pos += 1;
+                return -parsePrimary();
+              }
+              if (token === "+") {
+                pos += 1;
+                return parsePrimary();
+              }
+              pos += 1;
+              return Number(token) || 0;
+            };
+            const parseFactor = (): number => {
+              let left = parsePrimary();
+              while (pos < tokens.length && (tokens[pos] === "*" || tokens[pos] === "/")) {
+                const op = tokens[pos++];
+                const right = parsePrimary();
+                if (op === "*") left *= right;
+                else if (op === "/") left = right !== 0 ? left / right : 0;
+              }
+              return left;
+            };
+            const parseExpr = (): number => {
+              let left = parseFactor();
+              while (pos < tokens.length && (tokens[pos] === "+" || tokens[pos] === "-")) {
+                const op = tokens[pos++];
+                const right = parseFactor();
+                if (op === "+") left += right;
+                else if (op === "-") left -= right;
+              }
+              return left;
+            };
+            calculatedVal = parseExpr();
+          }
+
+          let resultText = String(calculatedVal);
+          if (Number.isFinite(calculatedVal)) {
+            if (Number.isInteger(calculatedVal)) {
+              resultText = calculatedVal.toString();
+            } else {
+              resultText = Number(calculatedVal.toFixed(4)).toString();
+            }
+          }
+
+          if (dispatch) {
+            const cellNode = activeCellTarget.node;
+            const p = state.schema.nodes.paragraph.create(
+              null,
+              resultText ? state.schema.text(resultText) : undefined,
+            );
+            const tr = state.tr.replaceWith(
+              activeCellTarget.pos + 1,
+              activeCellTarget.pos + cellNode.nodeSize - 1,
+              p,
+            );
+            tr.setSelection(TextSelection.near(tr.doc.resolve(activeCellTarget.pos + 2)));
+            dispatch(tr.scrollIntoView());
+          }
+          return true;
+        },
       // Word's Merge Cells over the selection's bounding rectangle. Each
       // spanned row folds its cells into one: the row's first cell takes
       // columnSpan = width, rows below the first take verticalMerge
       // "continue" (their content stays put — the layout folds continue
       // cells into the restart cell, so nothing is lost). Grid math is
       // cellIndex-approximate, so a span-mismatched row is left untouched.
+      // Word's Merge Cells over the selection's bounding rectangle.
+      // Rebuilds merged rows with proper OOXML columnSpan and verticalMerge ("restart" / "continue"),
+      // while preserving all paragraphs and blocks from every merged cell in the master cell.
       "merge-cells":
         () =>
         ({ state, dispatch }) => {
@@ -2028,68 +2980,249 @@ export const DocumentCommands = Extension.create({
           const toA = ancestryAt($to);
           if (!fromA || !toA || fromA.rowAt < 0 || toA.rowAt < 0) return false;
           if ($from.before(fromA.tableAt) !== $to.before(toA.tableAt)) return false;
+
+          const tablePos = $from.before(fromA.tableAt);
           const tableNode = $from.node(fromA.tableAt);
-          const grid = (tableNode.attrs.columnWidths as number[] | null)?.length ?? 0;
-          const c1 = Math.min($from.index(fromA.rowAt), $to.index(toA.rowAt));
-          const c2 = Math.max($from.index(fromA.rowAt), $to.index(toA.rowAt));
-          const rowFrom = Math.min($from.index(fromA.tableAt), $to.index(toA.tableAt));
-          const rowTo = Math.max($from.index(fromA.tableAt), $to.index(toA.tableAt));
+
+          const rA = { row: $from.index(fromA.tableAt), cell: $from.index(fromA.rowAt) };
+          const rH = { row: $to.index(toA.tableAt), cell: $to.index(toA.rowAt) };
+          const rowFrom = Math.min(rA.row, rH.row);
+          const rowTo = Math.max(rA.row, rH.row);
+          const c1 = Math.min(rA.cell, rH.cell);
+          const c2 = Math.max(rA.cell, rH.cell);
           if (rowFrom === rowTo && c1 === c2) return false;
+
+          const anchorRowNode = tableNode.child(rA.row);
+          const headRowNode = tableNode.child(rH.row);
+          const colFrom = Math.min(
+            gridColOf(anchorRowNode, rA.cell),
+            gridColOf(headRowNode, rH.cell),
+          );
+          const colTo = Math.max(
+            gridColOf(anchorRowNode, rA.cell) + spanOf(anchorRowNode.child(rA.cell)!),
+            gridColOf(headRowNode, rH.cell) + spanOf(headRowNode.child(rH.cell)!),
+          );
+
+          const totalCols = colTo - colFrom;
+          const totalRows = rowTo - rowFrom + 1;
+          if (totalCols <= 1 && totalRows <= 1) return false;
+
           if (dispatch) {
-            const tablePos = $from.before(fromA.tableAt);
-            // Row indices into the table's children — the ancestry depths are
-            // not indexes (a depth-2 rowAt would address the last row).
+            // 1. Collect all non-empty block content from all merged cells in row-major order
+            const collectedBlocks: PMNode[] = [];
+            for (let r = rowFrom; r <= rowTo; r += 1) {
+              const rowNode = tableNode.child(r);
+              let cCol = 0;
+              for (let c = 0; c < rowNode.childCount; c += 1) {
+                const cell = rowNode.child(c);
+                const span = spanOf(cell);
+                const cEnd = cCol + span;
+                if (cCol < colTo && cEnd > colFrom) {
+                  cell.forEach((child) => {
+                    if (child.isTextblock && child.content.size === 0) return;
+                    collectedBlocks.push(child);
+                  });
+                }
+                cCol = cEnd;
+              }
+            }
+            if (collectedBlocks.length === 0) {
+              collectedBlocks.push(state.schema.nodes.paragraph.create());
+            }
+
+            // 2. Rebuild rows bottom-up so document positions remain stable
             const tr = state.tr;
             for (let r = rowTo; r >= rowFrom; r -= 1) {
               const rowNode = tableNode.child(r);
-              // Bottom-up keeps positions valid as earlier deletions shift
-              // later ones; a row that doesn't match the grid exactly (a
-              // previously merged one) is skipped rather than corrupted.
-              if (grid > 0 && rowNode.childCount !== grid) continue;
               let rowPos = tablePos + 1;
               for (let i = 0; i < r; i += 1) rowPos += tableNode.child(i).nodeSize;
-              const last = Math.min(c2, rowNode.childCount - 1);
-              if (c1 > last) continue;
-              let basePos = rowPos + 1;
-              for (let c = 0; c < c1; c += 1) basePos += rowNode.child(c).nodeSize;
-              const base = rowNode.child(c1);
-              tr.setNodeMarkup(basePos, undefined, {
-                ...base.attrs,
-                columnSpan: last > c1 ? last - c1 + 1 : null,
-                verticalMerge: r > rowFrom ? "continue" : base.attrs.verticalMerge,
-              });
-              for (let c = last; c > c1; c -= 1) {
-                let cellPos = rowPos + 1;
-                for (let cc = 0; cc < c; cc += 1) cellPos += rowNode.child(cc).nodeSize;
-                tr.delete(cellPos, cellPos + rowNode.child(c).nodeSize);
+
+              const newCells: PMNode[] = [];
+              let cCol = 0;
+              let mergedInserted = false;
+
+              for (let c = 0; c < rowNode.childCount; c += 1) {
+                const cell = rowNode.child(c);
+                const span = spanOf(cell);
+                const cEnd = cCol + span;
+
+                if (cEnd <= colFrom || cCol >= colTo) {
+                  newCells.push(cell);
+                } else {
+                  if (!mergedInserted) {
+                    mergedInserted = true;
+                    if (r === rowFrom) {
+                      const masterAttrs = {
+                        ...cell.attrs,
+                        columnSpan: totalCols > 1 ? totalCols : null,
+                        verticalMerge: null,
+                      };
+                      newCells.push(cell.type.create(masterAttrs, collectedBlocks));
+                    } else {
+                      const contAttrs = {
+                        ...cell.attrs,
+                        columnSpan: totalCols > 1 ? totalCols : null,
+                        verticalMerge: "continue",
+                      };
+                      newCells.push(
+                        cell.type.create(contAttrs, [state.schema.nodes.paragraph.create()]),
+                      );
+                    }
+                  }
+                }
+                cCol = cEnd;
               }
+
+              const newRow = rowNode.type.create(rowNode.attrs, newCells);
+              tr.replaceWith(rowPos, rowPos + rowNode.nodeSize, newRow);
             }
+
+            // 3. Set selection in the master cell
+            let masterPos = tablePos + 1;
+            for (let i = 0; i < rowFrom; i += 1) {
+              masterPos += tr.doc.nodeAt(tablePos)!.child(i).nodeSize;
+            }
+            let cellPos = masterPos + 1;
+            const updatedRow = tr.doc.nodeAt(tablePos)!.child(rowFrom);
+            let curCol = 0;
+            for (let c = 0; c < updatedRow.childCount; c += 1) {
+              const cell = updatedRow.child(c);
+              if (curCol === colFrom) break;
+              curCol += spanOf(cell);
+              cellPos += cell.nodeSize;
+            }
+            const sel = Selection.findFrom(tr.doc.resolve(cellPos + 1), 1, true);
+            if (sel) tr.setSelection(sel);
             dispatch(tr.scrollIntoView());
           }
           return true;
         },
-      // Word's Split Cells without the dialog: a merged cell (columnSpan or
-      // verticalMerge) returns to its own single grid cell, empty twins
-      // taking the spanned columns. The dialog's rows×cols form is not built.
+      // Word's Split Cells: splits horizontally merged (columnSpan > 1) and/or
+      // vertically merged ("restart" / "continue") cells back to individual grid cells.
       "split-cell":
         () =>
         ({ state, dispatch }) => {
           const anchor = tableAncestry(state);
-          if (!anchor || anchor.cellAt < 0) return false;
+          if (!anchor || anchor.cellAt < 0 || anchor.rowAt < 0 || anchor.tableAt < 0) return false;
           const { $from } = state.selection;
+          const tableNode = $from.node(anchor.tableAt);
+          const tablePos = $from.before(anchor.tableAt);
           const cell = $from.node(anchor.cellAt);
-          const span = (cell.attrs.columnSpan as number | null) ?? 1;
-          if (span < 2 && !cell.attrs.verticalMerge) return false;
+          const span = spanOf(cell);
+          const vMerge = cell.attrs.verticalMerge as string | null | undefined;
+
+          const curRowIdx = $from.index(anchor.tableAt);
+          const curCellIdx = $from.index(anchor.rowAt);
+          const targetCol = gridColOf(tableNode.child(curRowIdx), curCellIdx);
+
+          let hasContinueBelow = false;
+          if (curRowIdx + 1 < tableNode.childCount) {
+            const nextRow = tableNode.child(curRowIdx + 1);
+            let cCol = 0;
+            for (let c = 0; c < nextRow.childCount; c += 1) {
+              const cNode = nextRow.child(c);
+              if (cCol === targetCol && cNode.attrs.verticalMerge === "continue") {
+                hasContinueBelow = true;
+                break;
+              }
+              cCol += spanOf(cNode);
+            }
+          }
+
+          const isVerticalMerge = vMerge === "restart" || vMerge === "continue" || hasContinueBelow;
+
+          if (span <= 1 && !isVerticalMerge) return false;
+
           if (dispatch) {
-            const cellPos = $from.before(anchor.cellAt);
-            const tr = state.tr.setNodeMarkup(cellPos, undefined, {
-              ...cell.attrs,
-              columnSpan: null,
-              verticalMerge: null,
-            });
-            const blank = cell.type.create(null, state.schema.nodes.paragraph.create());
-            for (let i = 0; i < span - 1; i += 1) {
-              tr.insert(cellPos + cell.nodeSize, blank);
+            const tr = state.tr;
+
+            if (isVerticalMerge) {
+              let restartRowIdx = curRowIdx;
+              if (vMerge === "continue") {
+                for (let r = curRowIdx - 1; r >= 0; r -= 1) {
+                  const row = tableNode.child(r);
+                  let col = 0;
+                  for (let c = 0; c < row.childCount; c += 1) {
+                    const cNode = row.child(c);
+                    if (col === targetCol) {
+                      if (cNode.attrs.verticalMerge !== "continue") {
+                        restartRowIdx = r;
+                      }
+                      break;
+                    }
+                    col += spanOf(cNode);
+                  }
+                  if (restartRowIdx !== curRowIdx) break;
+                }
+              }
+
+              const affectedRowIndices: number[] = [restartRowIdx];
+              for (let r = restartRowIdx + 1; r < tableNode.childCount; r += 1) {
+                const row = tableNode.child(r);
+                let col = 0;
+                let isContinue = false;
+                for (let c = 0; c < row.childCount; c += 1) {
+                  const cNode = row.child(c);
+                  if (col === targetCol) {
+                    if (cNode.attrs.verticalMerge === "continue") {
+                      isContinue = true;
+                    }
+                    break;
+                  }
+                  col += spanOf(cNode);
+                }
+                if (isContinue) {
+                  affectedRowIndices.push(r);
+                } else {
+                  break;
+                }
+              }
+
+              for (let i = affectedRowIndices.length - 1; i >= 0; i -= 1) {
+                const r = affectedRowIndices[i]!;
+                const rowNode = tableNode.child(r);
+                let rowPos = tablePos + 1;
+                for (let j = 0; j < r; j += 1) rowPos += tableNode.child(j).nodeSize;
+
+                const newCells: PMNode[] = [];
+                let col = 0;
+                for (let c = 0; c < rowNode.childCount; c += 1) {
+                  const cNode = rowNode.child(c);
+                  const cSpan = spanOf(cNode);
+                  if (col === targetCol) {
+                    const unmergedAttrs = {
+                      ...cNode.attrs,
+                      columnSpan: null,
+                      verticalMerge: null,
+                    };
+                    newCells.push(cNode.type.create(unmergedAttrs, cNode.content));
+                    for (let s = 1; s < cSpan; s += 1) {
+                      newCells.push(
+                        cNode.type.create(
+                          { ...cNode.attrs, columnSpan: null, verticalMerge: null },
+                          [state.schema.nodes.paragraph.create()],
+                        ),
+                      );
+                    }
+                  } else {
+                    newCells.push(cNode);
+                  }
+                  col += cSpan;
+                }
+                const newRow = rowNode.type.create(rowNode.attrs, newCells);
+                tr.replaceWith(rowPos, rowPos + rowNode.nodeSize, newRow);
+              }
+            } else if (span > 1) {
+              const cellPos = $from.before(anchor.cellAt);
+              tr.setNodeMarkup(cellPos, undefined, {
+                ...cell.attrs,
+                columnSpan: null,
+                verticalMerge: null,
+              });
+              const blank = cell.type.create(null, [state.schema.nodes.paragraph.create()]);
+              for (let i = 0; i < span - 1; i += 1) {
+                tr.insert(cellPos + cell.nodeSize, blank);
+              }
             }
             dispatch(tr.scrollIntoView());
           }
@@ -2133,7 +3266,7 @@ export const DocumentCommands = Extension.create({
         },
       // Word's AutoFit Contents: each column shrinks to its widest cell's
       // content (a character-count heuristic — see measureTextTwip) without
-      // growing past the current grid. Span-free tables only.
+      // growing past the current grid. Supports tables with merged cells.
       "autofit-contents":
         () =>
         ({ state, dispatch }) => {
@@ -2141,24 +3274,42 @@ export const DocumentCommands = Extension.create({
           if (!anchor) return false;
           const { $from } = state.selection;
           const tableNode = $from.node(anchor.tableAt);
-          const widths = tableNode.attrs.columnWidths as number[] | null;
-          if (!widths || widths.length === 0) return false;
-          const cols = widths.length;
+          const cols = tableGridColumns(tableNode);
+          if (cols === 0) return false;
+
+          const existingWidths = (tableNode.attrs.columnWidths as number[] | null) ?? [];
+
+          // Compute widest content for each grid column
+          const colWidest = Array.from<number>({ length: cols }).fill(0);
           for (let r = 0; r < tableNode.childCount; r += 1) {
             const row = tableNode.child(r);
-            if (row.childCount !== cols) return false;
-            for (let c = 0; c < cols; c += 1) {
+            let col = 0;
+            for (let c = 0; c < row.childCount; c += 1) {
               const cell = row.child(c);
-              if (cell.attrs.columnSpan || cell.attrs.verticalMerge) return false;
+              const span = spanOf(cell);
+              if (cell.attrs.verticalMerge === "continue") {
+                col += span;
+                continue;
+              }
+              const textLen = measureTextTwip(cell.textContent);
+              if (span === 1) {
+                if (col < cols) {
+                  colWidest[col] = Math.max(colWidest[col], textLen);
+                }
+              } else {
+                const perCol = Math.round(textLen / span);
+                for (let s = 0; s < span && col + s < cols; s += 1) {
+                  colWidest[col + s] = Math.max(colWidest[col + s], perCol);
+                }
+              }
+              col += span;
             }
           }
+
           if (dispatch) {
-            const next = widths.map((w, c) => {
-              let widest = 0;
-              for (let r = 0; r < tableNode.childCount; r += 1) {
-                widest = Math.max(widest, measureTextTwip(tableNode.child(r).child(c).textContent));
-              }
-              return Math.max(MIN_COL_TWIP, Math.min(w, widest));
+            const next = colWidest.map((widest, c) => {
+              const currentW = existingWidths[c] ?? 2880;
+              return Math.max(MIN_COL_TWIP, Math.min(currentW, widest));
             });
             dispatch(
               state.tr
@@ -2173,20 +3324,25 @@ export const DocumentCommands = Extension.create({
           return true;
         },
       // Word's AutoFit Window: the grid scales proportionally to the page's
-      // text width (the host resolves that from the layout flow and passes it
-      // as the twip value). A table without a grid starts from equal columns.
+      // text width (or an explicitly provided twip value). A table without a
+      // grid starts from equal columns.
       "autofit-window":
         (value) =>
         ({ state, dispatch }) => {
           const anchor = tableAncestry(state);
           if (!anchor) return false;
-          const total = Number(value);
-          if (!Number.isFinite(total) || total <= 0) return false;
+          let total: number;
+          if (value !== undefined) {
+            total = Number(value);
+            if (!Number.isFinite(total) || total <= 0) return false;
+          } else {
+            total = availableTextWidthTwips(state);
+          }
           const { $from } = state.selection;
           const tableNode = $from.node(anchor.tableAt);
           const widths =
             (tableNode.attrs.columnWidths as number[] | null)?.filter((w) => w > 0) ?? [];
-          const cols = Math.max(widths.length, tableNode.child(0)?.childCount ?? 0);
+          const cols = Math.max(widths.length, tableGridColumns(tableNode));
           if (cols === 0) return false;
           if (dispatch) {
             const sum = widths.reduce((a, b) => a + b, 0);
@@ -2229,8 +3385,9 @@ export const DocumentCommands = Extension.create({
           }
           return true;
         },
-      // Word's Distribute Columns: the grid splits its total evenly (the last
-      // column absorbs the rounding remainder so the sum is exact).
+      // Word's Distribute Columns: the grid splits its width evenly. When a
+      // CellSelection spans multiple columns, distributes only the selected
+      // columns; otherwise distributes all columns table-wide.
       "distribute-columns":
         () =>
         ({ state, dispatch }) => {
@@ -2238,18 +3395,36 @@ export const DocumentCommands = Extension.create({
           if (!anchor) return false;
           const { $from } = state.selection;
           const tableNode = $from.node(anchor.tableAt);
-          const cols = tableNode.child(0)?.childCount ?? 0;
-          if (cols === 0) return false;
+          const totalCols = tableGridColumns(tableNode);
+          if (totalCols === 0) return false;
+
           let widths = tableNode.attrs.columnWidths as number[] | null;
-          if (!widths || widths.length === 0) {
-            widths = Array.from({ length: cols }, () => 2880);
+          if (!widths || widths.length !== totalCols) {
+            widths = Array.from({ length: totalCols }, () => 2880);
           }
+
+          const targets = tableTargets(state);
+          const isCell = state.selection instanceof CellSelection;
+          const hasSubsetCols =
+            isCell && targets && targets.cols.size > 1 && targets.cols.size < totalCols;
+
           if (dispatch) {
-            const sum = widths.reduce((a, b) => a + b, 0);
-            const even = Math.floor(sum / cols);
-            const next = Array.from({ length: cols }, (_, c) =>
-              c === cols - 1 ? sum - even * (cols - 1) : even,
-            );
+            const next = [...widths];
+            if (hasSubsetCols && targets) {
+              const selectedCols = Array.from(targets.cols).sort((a, b) => a - b);
+              const sum = selectedCols.reduce((acc, c) => acc + (widths![c] ?? 2880), 0);
+              const even = Math.floor(sum / selectedCols.length);
+              selectedCols.forEach((c, i) => {
+                next[c] =
+                  i === selectedCols.length - 1 ? sum - even * (selectedCols.length - 1) : even;
+              });
+            } else {
+              const sum = widths.reduce((a, b) => a + b, 0);
+              const even = Math.floor(sum / totalCols);
+              for (let c = 0; c < totalCols; c += 1) {
+                next[c] = c === totalCols - 1 ? sum - even * (totalCols - 1) : even;
+              }
+            }
             dispatch(
               state.tr
                 .setNodeMarkup($from.before(anchor.tableAt), undefined, {
@@ -2261,48 +3436,67 @@ export const DocumentCommands = Extension.create({
           }
           return true;
         },
-      // Word's Distribute Rows: the selected rows' declared heights split
-      // their total evenly (the last row absorbs the rounding remainder); a
-      // bare caret (or a single-row pick) applies table-wide, like Distribute
-      // Columns. Rows without a declared height stay auto — there is nothing
-      // to redistribute from, so at least two rows need one.
+      // Word's Distribute Rows: the targeted rows' heights split their total evenly.
+      // If a CellSelection spans multiple rows, distributes only those rows;
+      // otherwise distributes all rows in the table. Rows without a declared
+      // height use an appropriate default (~400 twips).
       "distribute-rows":
         () =>
         ({ state, dispatch }) => {
-          const fromA = ancestryAt(state.selection.$from);
-          const toA = ancestryAt(state.selection.$to);
-          if (!fromA || !toA || fromA.rowAt < 0 || toA.rowAt < 0) return false;
-          const { $from, $to } = state.selection;
-          if ($from.before(fromA.tableAt) !== $to.before(toA.tableAt)) return false;
-          const tableNode = $from.node(fromA.tableAt);
-          const tablePos = $from.before(fromA.tableAt);
-          const rowFrom = $from.index(fromA.tableAt);
-          const rowTo = $to.index(toA.tableAt);
-          const last = rowFrom === rowTo ? tableNode.childCount - 1 : rowTo;
-          // Ancestry depths are not indexes — resolve row positions by child
-          // offsets (the merge-cells pattern); markup writes keep positions
-          // stable, so a forward walk stays valid.
-          const rows: { pos: number; height: number }[] = [];
-          let rowPos = tablePos + 1;
-          for (let r = 0; r <= last; r += 1) {
+          const anchor = tableAncestry(state);
+          if (!anchor) return false;
+          const { $from } = state.selection;
+          const tableNode = $from.node(anchor.tableAt);
+          const tablePos = $from.before(anchor.tableAt);
+          const totalRows = tableNode.childCount;
+          if (totalRows < 2) return false;
+
+          const targets = tableTargets(state);
+          const isCell = state.selection instanceof CellSelection;
+          const selectedRowIndices =
+            isCell && targets && targets.rows.size > 1
+              ? Array.from(targets.rows).sort((a, b) => a - b)
+              : Array.from({ length: totalRows }, (_, i) => i);
+
+          if (selectedRowIndices.length < 2) return false;
+
+          const DEFAULT_ROW_HEIGHT = 400;
+          let declaredCount = 0;
+          let declaredSum = 0;
+
+          const rowInfos: { pos: number; rowIdx: number; height: number }[] = [];
+          let curPos = tablePos + 1;
+          for (let r = 0; r < totalRows; r += 1) {
             const row = tableNode.child(r);
-            const h = row.attrs.height as { value?: unknown } | null;
-            if (r >= rowFrom && h && typeof h.value === "number" && h.value > 0) {
-              rows.push({ pos: rowPos, height: h.value });
+            if (selectedRowIndices.includes(r)) {
+              const h = row.attrs.height as { value?: unknown } | null;
+              const hasVal = h && typeof h.value === "number" && h.value > 0;
+              const val = hasVal ? (h.value as number) : DEFAULT_ROW_HEIGHT;
+              if (hasVal) {
+                declaredCount += 1;
+                declaredSum += val;
+              }
+              rowInfos.push({ pos: curPos, rowIdx: r, height: val });
             }
-            rowPos += row.nodeSize;
+            curPos += row.nodeSize;
           }
-          if (rows.length < 2) return false;
+
           if (dispatch) {
-            const sum = rows.reduce((a, b) => a + b.height, 0);
-            const even = Math.floor(sum / rows.length);
+            const totalSum =
+              declaredCount > 0
+                ? declaredSum + (rowInfos.length - declaredCount) * DEFAULT_ROW_HEIGHT
+                : rowInfos.length * DEFAULT_ROW_HEIGHT;
+            const even = Math.floor(totalSum / rowInfos.length);
             const tr = state.tr;
-            rows.forEach(({ pos }, i) => {
+
+            rowInfos.forEach(({ pos }, i) => {
               const row = tr.doc.nodeAt(pos)!;
+              const hValue =
+                i === rowInfos.length - 1 ? totalSum - even * (rowInfos.length - 1) : even;
               tr.setNodeMarkup(pos, undefined, {
                 ...row.attrs,
                 height: {
-                  value: i === rows.length - 1 ? sum - even * (rows.length - 1) : even,
+                  value: hValue,
                   rule: "atLeast",
                 },
               });
@@ -2336,21 +3530,13 @@ export const DocumentCommands = Extension.create({
           }
           return true;
         },
-      // Table Properties dialog's OK — writes the caret table's w:jc
-      // alignment and w:tblInd indent in one transaction ("left" and 0
-      // commit null, OOXML's absent-attribute default).
-      "table-properties-apply":
-        (patch) =>
+      // Word's Table Alignment: left (null in OOXML), center, right
+      "table-alignment":
+        (alignment) =>
         ({ state, dispatch }) => {
-          if (
-            !patch ||
-            (patch.alignment !== "left" &&
-              patch.alignment !== "center" &&
-              patch.alignment !== "right") ||
-            typeof patch.indent !== "number" ||
-            patch.indent < 0
-          )
+          if (alignment !== "left" && alignment !== "center" && alignment !== "right") {
             return false;
+          }
           const anchor = tableAncestry(state);
           if (!anchor) return false;
           const { $from } = state.selection;
@@ -2360,9 +3546,181 @@ export const DocumentCommands = Extension.create({
               state.tr
                 .setNodeMarkup($from.before(anchor.tableAt), undefined, {
                   ...tableNode.attrs,
-                  alignment: patch.alignment === "left" ? null : patch.alignment,
-                  indent: patch.indent > 0 ? Math.round(patch.indent) : null,
+                  alignment: alignment === "left" ? null : alignment,
                 })
+                .scrollIntoView(),
+            );
+          }
+          return true;
+        },
+      // Word's Table Text Wrapping: none (inline / float null) vs around (floating / float object)
+      "table-text-wrapping":
+        (wrapping) =>
+        ({ state, dispatch }) => {
+          const anchor = tableAncestry(state);
+          if (!anchor) return false;
+          const { $from } = state.selection;
+          const tableNode = $from.node(anchor.tableAt);
+
+          let nextFloat: Record<string, unknown> | null = null;
+          if (wrapping === "around" || wrapping === true) {
+            nextFloat = (tableNode.attrs.float as Record<string, unknown> | null) ?? {
+              horizontalAnchor: "margin",
+              verticalAnchor: "paragraph",
+            };
+          } else if (wrapping === "none" || wrapping === false || wrapping === null) {
+            nextFloat = null;
+          } else if (wrapping !== undefined && typeof wrapping === "object") {
+            nextFloat = wrapping as Record<string, unknown>;
+          } else {
+            return false;
+          }
+
+          if (dispatch) {
+            dispatch(
+              state.tr
+                .setNodeMarkup($from.before(anchor.tableAt), undefined, {
+                  ...tableNode.attrs,
+                  float: nextFloat,
+                })
+                .scrollIntoView(),
+            );
+          }
+          return true;
+        },
+      // Table Properties dialog's OK / programmatic table properties patch —
+      // writes table-level (alignment, indent, text wrapping/float) and row-level
+      // (cantSplit, tableHeader) in one clean transaction.
+      "table-properties-apply":
+        (patch) =>
+        ({ state, dispatch }) => {
+          if (!patch || typeof patch !== "object") return false;
+          const anchor = tableAncestry(state);
+          if (!anchor) return false;
+          const { $from } = state.selection;
+          const tableNode = $from.node(anchor.tableAt);
+
+          const nextAttrs: Record<string, unknown> = { ...tableNode.attrs };
+          let changedTable = false;
+
+          if (patch.alignment !== undefined) {
+            if (
+              patch.alignment === "left" ||
+              patch.alignment === "center" ||
+              patch.alignment === "right"
+            ) {
+              nextAttrs.alignment = patch.alignment === "left" ? null : patch.alignment;
+              changedTable = true;
+            } else {
+              return false;
+            }
+          }
+
+          if (patch.indent !== undefined) {
+            if (typeof patch.indent === "number" && patch.indent >= 0) {
+              nextAttrs.indent = patch.indent > 0 ? Math.round(patch.indent) : null;
+              changedTable = true;
+            } else {
+              return false;
+            }
+          }
+
+          if (patch.textWrapping !== undefined) {
+            if (patch.textWrapping === "around") {
+              nextAttrs.float = (tableNode.attrs.float as Record<string, unknown> | null) ?? {
+                horizontalAnchor: "margin",
+                verticalAnchor: "paragraph",
+              };
+              changedTable = true;
+            } else if (patch.textWrapping === "none") {
+              nextAttrs.float = null;
+              changedTable = true;
+            } else {
+              return false;
+            }
+          }
+
+          if (patch.float !== undefined) {
+            nextAttrs.float = patch.float ?? null;
+            changedTable = true;
+          }
+
+          if (patch.cellSpacing !== undefined) {
+            if (
+              patch.cellSpacing === null ||
+              patch.cellSpacing === 0 ||
+              patch.cellSpacing === "0"
+            ) {
+              nextAttrs.cellSpacing = null;
+              changedTable = true;
+            } else if (typeof patch.cellSpacing === "number") {
+              nextAttrs.cellSpacing =
+                patch.cellSpacing > 0
+                  ? { size: Math.round(patch.cellSpacing), type: "twips" }
+                  : null;
+              changedTable = true;
+            } else if (typeof patch.cellSpacing === "string") {
+              const parsed = parseMeasureTwip(patch.cellSpacing);
+              nextAttrs.cellSpacing =
+                parsed !== null && parsed > 0 ? { size: Math.round(parsed), type: "twips" } : null;
+              changedTable = true;
+            } else if (typeof patch.cellSpacing === "object") {
+              nextAttrs.cellSpacing = patch.cellSpacing;
+              changedTable = true;
+            }
+          }
+
+          if (dispatch) {
+            const tr = state.tr;
+            if (changedTable) {
+              tr.setNodeMarkup($from.before(anchor.tableAt), undefined, nextAttrs);
+            }
+            const targets = tableTargets(state);
+            if (targets) {
+              if (patch.cantSplit !== undefined) {
+                stampRows(tr, targets, (row) => ({
+                  ...row.attrs,
+                  cantSplit: patch.cantSplit ? true : null,
+                }));
+              }
+              if (patch.tableHeader !== undefined) {
+                stampRows(tr, targets, (row) => ({
+                  ...row.attrs,
+                  tableHeader: patch.tableHeader ? true : null,
+                }));
+              }
+            }
+            dispatch(tr.scrollIntoView());
+          }
+          return true;
+        },
+      // Table cell spacing (w:tblCellSpacing) — sets cell spacing twips on the enclosing table node.
+      "table-cell-spacing":
+        (value) =>
+        ({ state, dispatch }) => {
+          const anchor = tableAncestry(state);
+          if (!anchor) return false;
+          let spacing: { size: number; type?: string } | null = null;
+          if (value === null || value === undefined || value === 0 || value === "0") {
+            spacing = null;
+          } else if (typeof value === "number") {
+            spacing = value > 0 ? { size: Math.round(value), type: "twips" } : null;
+          } else if (typeof value === "string") {
+            const parsed = parseMeasureTwip(value);
+            spacing =
+              parsed !== null && parsed > 0 ? { size: Math.round(parsed), type: "twips" } : null;
+          } else if (typeof value === "object" && "size" in (value as object)) {
+            spacing = value as { size: number; type?: string };
+          } else {
+            return false;
+          }
+          if (dispatch) {
+            const { $from } = state.selection;
+            const tablePos = $from.before(anchor.tableAt);
+            const tableNode = $from.node(anchor.tableAt);
+            dispatch(
+              state.tr
+                .setNodeMarkup(tablePos, undefined, { ...tableNode.attrs, cellSpacing: spacing })
                 .scrollIntoView(),
             );
           }
@@ -2516,11 +3874,14 @@ export const DocumentCommands = Extension.create({
             .run();
         },
       // Sort the sibling blocks covered by the selection in ascending text
-      // order (locale-aware, numeric). Only same-parent block sequences are
-      // reorderable — mirroring Word Sort on a paragraph/list range.
+      // order (locale-aware, numeric). When selection is inside a table,
+      // delegates to Word table sorting (sort-table).
       sort:
         () =>
-        ({ state, chain }) => {
+        ({ state, chain, commands }) => {
+          if (tableAncestry(state)) {
+            return commands["sort-table"]();
+          }
           const { selection, doc } = state;
           const { from, to, empty } = selection;
           if (empty) return false;

@@ -230,6 +230,39 @@ describe("table row / column commands", () => {
     expect(tableAfterCol.child(0).child(1).textContent).toBe("");
   });
 
+  it("insert-row-at and insert-column-at insert at specific indices", () => {
+    const editor = build();
+    editor.commands["insert-table"]();
+    expect(tablesOf(editor)[0]!.childCount).toBe(3);
+
+    // Insert row at index 1
+    caretInCell(editor, 0, 0);
+    expect(editor.commands["insert-row-at"](1)).toBe(true);
+    expect(tablesOf(editor)[0]!.childCount).toBe(4);
+
+    // Insert column at index 2
+    expect(editor.commands["insert-column-at"](2)).toBe(true);
+    const table = tablesOf(editor)[0]!;
+    for (let r = 0; r < table.childCount; r += 1) {
+      expect(table.child(r).childCount).toBe(4);
+    }
+  });
+
+  it("set-table-column-widths and set-table-row-height update attributes", () => {
+    const editor = build();
+    editor.commands["insert-table"]();
+    caretInCell(editor, 0, 0);
+
+    expect(editor.commands["set-table-column-widths"]([1500, 2500, 3000])).toBe(true);
+    expect(tablesOf(editor)[0]!.attrs.columnWidths).toEqual([1500, 2500, 3000]);
+
+    expect(editor.commands["set-table-row-height"](1, { rule: "atLeast", value: 600 })).toBe(true);
+    expect(tablesOf(editor)[0]!.child(1).attrs.height).toEqual({
+      rule: "atLeast",
+      value: 600,
+    });
+  });
+
   it("delete-row removes the caret's row; the last row deletes the table", () => {
     const editor = build();
     editor.commands["insert-table"]();
@@ -274,7 +307,7 @@ describe("table cell property commands", () => {
     expect(firstNodeOf(editor, "tableCell").child(0).attrs.alignment).toBe("center");
   });
 
-  it("repeat-header-rows toggles the row's tblHeader flag", () => {
+  it("repeat-header-rows toggles the row's tblHeader flag and supports explicit boolean", () => {
     const editor = build();
     editor.commands["insert-table"]();
     caretInCell(editor, 1, 0);
@@ -283,9 +316,335 @@ describe("table cell property commands", () => {
     expect(tablesOf(editor)[0]!.child(1).attrs.tableHeader).toBe(true);
     expect(editor.commands["repeat-header-rows"]()).toBe(true);
     expect(tablesOf(editor)[0]!.child(1).attrs.tableHeader).toBe(false);
+    expect(editor.commands["repeat-header-rows"](true)).toBe(true);
+    expect(tablesOf(editor)[0]!.child(1).attrs.tableHeader).toBe(true);
+    expect(editor.commands["repeat-header-rows"](false)).toBe(true);
+    expect(tablesOf(editor)[0]!.child(1).attrs.tableHeader).toBe(false);
   });
 
-  it("cell-shading stamps the cell shading, clearing with none", () => {
+  it("cant-split toggles and explicitly sets row cantSplit flag, supporting CellSelection", () => {
+    const editor = build();
+    editor.commands["insert-table"]();
+    caretInCell(editor, 1, 0);
+    expect(tablesOf(editor)[0]!.child(1).attrs.cantSplit).toBeFalsy();
+    expect(editor.commands["cant-split"]()).toBe(true);
+    expect(tablesOf(editor)[0]!.child(1).attrs.cantSplit).toBe(true);
+    expect(editor.commands["cant-split"]()).toBe(true);
+    expect(tablesOf(editor)[0]!.child(1).attrs.cantSplit).toBeFalsy();
+    expect(editor.commands["cant-split"](true)).toBe(true);
+    expect(tablesOf(editor)[0]!.child(1).attrs.cantSplit).toBe(true);
+    expect(editor.commands["cant-split"](false)).toBe(true);
+    expect(tablesOf(editor)[0]!.child(1).attrs.cantSplit).toBeFalsy();
+
+    // With CellSelection across multiple rows
+    let r0Pos = -1;
+    let r1Pos = -1;
+    editor.state.doc.descendants((node, pos) => {
+      if (node.type.name === "table") {
+        r0Pos = pos + 2;
+        r1Pos = pos + 1 + node.child(0).nodeSize + 1;
+        return false;
+      }
+      return true;
+    });
+    editor.view.dispatch(
+      editor.state.tr.setSelection(
+        new CellSelection(editor.state.doc.resolve(r0Pos), editor.state.doc.resolve(r1Pos)),
+      ),
+    );
+    expect(editor.commands["cant-split"](true)).toBe(true);
+    expect(tablesOf(editor)[0]!.child(0).attrs.cantSplit).toBe(true);
+    expect(tablesOf(editor)[0]!.child(1).attrs.cantSplit).toBe(true);
+  });
+
+  it("table-alignment sets left (null), center, and right alignment on table", () => {
+    const editor = build();
+    editor.commands["insert-table"]();
+    caretInCell(editor, 0, 0);
+
+    expect(editor.commands["table-alignment"]("center")).toBe(true);
+    expect(tablesOf(editor)[0]!.attrs.alignment).toBe("center");
+
+    expect(editor.commands["table-alignment"]("right")).toBe(true);
+    expect(tablesOf(editor)[0]!.attrs.alignment).toBe("right");
+
+    expect(editor.commands["table-alignment"]("left")).toBe(true);
+    expect(tablesOf(editor)[0]!.attrs.alignment).toBeNull();
+
+    expect(editor.commands["table-alignment"]("bogus" as never)).toBe(false);
+  });
+
+  it("table-text-wrapping toggles around and none and accepts custom float", () => {
+    const editor = build();
+    editor.commands["insert-table"]();
+    caretInCell(editor, 0, 0);
+
+    expect(editor.commands["table-text-wrapping"]("around")).toBe(true);
+    expect(tablesOf(editor)[0]!.attrs.float).toEqual({
+      horizontalAnchor: "margin",
+      verticalAnchor: "paragraph",
+    });
+
+    expect(editor.commands["table-text-wrapping"]("none")).toBe(true);
+    expect(tablesOf(editor)[0]!.attrs.float).toBeNull();
+
+    expect(
+      editor.commands["table-text-wrapping"]({
+        horizontalAnchor: "page",
+        verticalAnchor: "margin",
+      }),
+    ).toBe(true);
+    expect(tablesOf(editor)[0]!.attrs.float).toEqual({
+      horizontalAnchor: "page",
+      verticalAnchor: "margin",
+    });
+  });
+
+  it("table-properties-apply applies partial and full patches", () => {
+    const editor = build();
+    editor.commands["insert-table"]();
+    caretInCell(editor, 0, 0);
+
+    // Full patch like Table Properties dialog
+    expect(
+      editor.commands["table-properties-apply"]({
+        alignment: "center",
+        indent: 720,
+        textWrapping: "around",
+        cantSplit: true,
+      }),
+    ).toBe(true);
+    expect(tablesOf(editor)[0]!.attrs.alignment).toBe("center");
+    expect(tablesOf(editor)[0]!.attrs.indent).toBe(720);
+    expect(tablesOf(editor)[0]!.attrs.float).toEqual({
+      horizontalAnchor: "margin",
+      verticalAnchor: "paragraph",
+    });
+    expect(tablesOf(editor)[0]!.child(0).attrs.cantSplit).toBe(true);
+
+    // Partial patch updating only alignment
+    expect(editor.commands["table-properties-apply"]({ alignment: "left" })).toBe(true);
+    expect(tablesOf(editor)[0]!.attrs.alignment).toBeNull();
+    // indent preserved
+    expect(tablesOf(editor)[0]!.attrs.indent).toBe(720);
+
+    // Partial patch clearing wrapping
+    expect(editor.commands["table-properties-apply"]({ textWrapping: "none" })).toBe(true);
+    expect(tablesOf(editor)[0]!.attrs.float).toBeNull();
+
+    // Invalid arguments decline
+    expect(editor.commands["table-properties-apply"](null as never)).toBe(false);
+    expect(editor.commands["table-properties-apply"]({ alignment: "invalid" as never })).toBe(
+      false,
+    );
+  });
+
+  it("table-cell-spacing sets cell spacing and clears it, and works via table-properties-apply", () => {
+    const editor = build();
+    editor.commands["insert-table"]();
+    caretInCell(editor, 0, 0);
+
+    expect(editor.commands["table-cell-spacing"](120)).toBe(true);
+    expect(tablesOf(editor)[0]!.attrs.cellSpacing).toEqual({ size: 120, type: "twips" });
+
+    // Universal measure string
+    expect(editor.commands["table-cell-spacing"]("10pt")).toBe(true);
+    expect(tablesOf(editor)[0]!.attrs.cellSpacing).toEqual({ size: 200, type: "twips" });
+
+    // Object
+    expect(editor.commands["table-cell-spacing"]({ size: 80, type: "twips" })).toBe(true);
+    expect(tablesOf(editor)[0]!.attrs.cellSpacing).toEqual({ size: 80, type: "twips" });
+
+    // Clear with 0 or null
+    expect(editor.commands["table-cell-spacing"](0)).toBe(true);
+    expect(tablesOf(editor)[0]!.attrs.cellSpacing).toBeNull();
+
+    // Via table-properties-apply
+    expect(editor.commands["table-properties-apply"]({ cellSpacing: 160 })).toBe(true);
+    expect(tablesOf(editor)[0]!.attrs.cellSpacing).toEqual({ size: 160, type: "twips" });
+    expect(editor.commands["table-properties-apply"]({ cellSpacing: null })).toBe(true);
+    expect(tablesOf(editor)[0]!.attrs.cellSpacing).toBeNull();
+  });
+
+  it("convert-text-to-table converts delimited text to table with auto-delimiter and headers", () => {
+    const editor = build();
+    editor.commands.setContent({
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [
+            {
+              type: "text",
+              text: "HeaderA\tHeaderB\nVal1\tVal2\nVal3\tVal4",
+            },
+          ],
+        },
+      ],
+    });
+    editor.commands.setTextSelection(2);
+    expect(editor.commands["convert-text-to-table"]({ hasHeader: true })).toBe(true);
+
+    const tables = tablesOf(editor);
+    expect(tables.length).toBe(1);
+    const table = tables[0]!;
+    expect(table.childCount).toBe(3);
+    // Header row
+    expect(table.child(0).attrs.tableHeader).toBe(true);
+    expect(table.child(0).child(0).textContent).toBe("HeaderA");
+    expect(table.child(0).child(1).textContent).toBe("HeaderB");
+    // Data rows
+    expect(table.child(1).child(0).textContent).toBe("Val1");
+    expect(table.child(1).child(1).textContent).toBe("Val2");
+    expect(table.child(2).child(0).textContent).toBe("Val3");
+    expect(table.child(2).child(1).textContent).toBe("Val4");
+
+    // Returns false if already inside a table
+    expect(editor.commands["convert-text-to-table"]()).toBe(false);
+
+    // Comma-separated conversion with padding across multiple paragraphs
+    const editor2 = build();
+    editor2.commands.setContent({
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [{ type: "text", text: "Col1, Col2, Col3" }],
+        },
+        {
+          type: "paragraph",
+          content: [{ type: "text", text: "Row2_1, Row2_2" }],
+        },
+      ],
+    });
+    // Select across both paragraphs
+    editor2.commands.setTextSelection({ from: 1, to: 25 });
+    expect(editor2.commands["convert-text-to-table"]()).toBe(true);
+    const table2 = tablesOf(editor2)[0]!;
+    expect(table2.childCount).toBe(2);
+    expect(table2.child(0).childCount).toBe(3);
+    expect(table2.child(1).childCount).toBe(3);
+    expect(table2.child(1).child(2).textContent).toBe("");
+  });
+
+  it("sort-table and sort inside table sort rows by column respecting headers and numeric values", () => {
+    const editor = build();
+    editor.commands.setContent({
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [
+            {
+              type: "text",
+              text: "Item\tPrice\nApple\t10\nBanana\t2\nCherry\t100",
+            },
+          ],
+        },
+      ],
+    });
+    editor.commands.setTextSelection(2);
+    expect(editor.commands["convert-text-to-table"]({ hasHeader: true })).toBe(true);
+
+    // Active cell in row 1 col 1 ("10")
+    caretInCell(editor, 1, 1);
+
+    // Sort ascending by price: 2, 10, 100
+    expect(editor.commands["sort-table"]({ column: 1, order: "asc" })).toBe(true);
+    let table = tablesOf(editor)[0]!;
+    expect(table.child(0).child(0).textContent).toBe("Item"); // Header preserved
+    expect(table.child(1).child(0).textContent).toBe("Banana");
+    expect(table.child(1).child(1).textContent).toBe("2");
+    expect(table.child(2).child(0).textContent).toBe("Apple");
+    expect(table.child(2).child(1).textContent).toBe("10");
+    expect(table.child(3).child(0).textContent).toBe("Cherry");
+    expect(table.child(3).child(1).textContent).toBe("100");
+
+    // Sort descending by price: 100, 10, 2
+    expect(editor.commands["sort-table"]({ column: 1, order: "desc" })).toBe(true);
+    table = tablesOf(editor)[0]!;
+    expect(table.child(1).child(0).textContent).toBe("Cherry");
+    expect(table.child(2).child(0).textContent).toBe("Apple");
+    expect(table.child(3).child(0).textContent).toBe("Banana");
+
+    // sort command delegates to sort-table inside table
+    caretInCell(editor, 1, 0); // inside col 0 ("Item")
+    expect(editor.commands.sort()).toBe(true);
+    table = tablesOf(editor)[0]!;
+    // Alphabetical order: Apple, Banana, Cherry
+    expect(table.child(1).child(0).textContent).toBe("Apple");
+    expect(table.child(2).child(0).textContent).toBe("Banana");
+    expect(table.child(3).child(0).textContent).toBe("Cherry");
+  });
+
+  it("table-formula evaluates SUM, AVERAGE, COUNT, cell references, and auto-detects formula", () => {
+    const editor = build();
+    editor.commands.setContent({
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [
+            {
+              type: "text",
+              text: "Score\n10\n20\n30\n0",
+            },
+          ],
+        },
+      ],
+    });
+    editor.commands.setTextSelection(2);
+    expect(editor.commands["convert-text-to-table"]({ hasHeader: true })).toBe(true);
+
+    // Table has 5 rows: Header, 10, 20, 30, 0
+    caretInCell(editor, 4, 0);
+
+    // Auto formula detects numbers above -> =SUM(ABOVE) -> 10 + 20 + 30 = 60
+    expect(editor.commands["table-formula"]()).toBe(true);
+    let table = tablesOf(editor)[0]!;
+    expect(table.child(4).child(0).textContent).toBe("60");
+
+    // Explicit =AVERAGE(ABOVE) -> (10 + 20 + 30) / 3 = 20
+    expect(editor.commands["table-formula"]("=AVERAGE(ABOVE)")).toBe(true);
+    table = tablesOf(editor)[0]!;
+    expect(table.child(4).child(0).textContent).toBe("20");
+
+    // Explicit =COUNT(ABOVE) -> 3
+    expect(editor.commands["table-formula"]("=COUNT(ABOVE)")).toBe(true);
+    table = tablesOf(editor)[0]!;
+    expect(table.child(4).child(0).textContent).toBe("3");
+
+    // Cell reference formula: =A2+A3 -> 10 + 20 = 30
+    expect(editor.commands["table-formula"]("=A2+A3")).toBe(true);
+    table = tablesOf(editor)[0]!;
+    expect(table.child(4).child(0).textContent).toBe("30");
+
+    // Currency handling: table with left row numbers
+    const editor2 = build();
+    editor2.commands.setContent({
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [
+            {
+              type: "text",
+              text: "Qty, Rate, Total\n5, $20.00, 0",
+            },
+          ],
+        },
+      ],
+    });
+    editor2.commands.setTextSelection(2);
+    expect(editor2.commands["convert-text-to-table"]({ hasHeader: true })).toBe(true);
+    caretInCell(editor2, 1, 2); // Row 1, Col 2 (Total cell)
+    // Auto formula detects numbers to left -> =SUM(LEFT) -> 5 + 20 = 25
+    expect(editor2.commands["table-formula"]()).toBe(true);
+    const table2 = tablesOf(editor2)[0]!;
+    expect(table2.child(1).child(2).textContent).toBe("25");
+  });
+
+  it("cell-shading stamps the cell shading, clearing with none or null, supporting objects", () => {
     const editor = build();
     editor.commands["insert-table"]();
     caretInCell(editor, 0, 0);
@@ -294,8 +653,116 @@ describe("table cell property commands", () => {
       fill: "FFEE88",
       type: "clear",
     });
+    expect(editor.commands["cell-shading"]({ fill: "AABBCC" })).toBe(true);
+    expect(firstNodeOf(editor, "tableCell").attrs.shading).toEqual({
+      fill: "AABBCC",
+      type: "clear",
+    });
+    expect(editor.commands["cell-shading"](null)).toBe(true);
+    expect(firstNodeOf(editor, "tableCell").attrs.shading).toBeNull();
     expect(editor.commands["cell-shading"]("none")).toBe(true);
     expect(firstNodeOf(editor, "tableCell").attrs.shading).toBeFalsy();
+  });
+
+  it("cell-borders stamps border presets and custom borders on active cell and CellSelection", () => {
+    const editor = build();
+    editor.commands["insert-table"]();
+    caretInCell(editor, 0, 0);
+
+    // Single cell "all"
+    expect(editor.commands["cell-borders"]("all")).toBe(true);
+    expect(firstNodeOf(editor, "tableCell").attrs.borders).toEqual({
+      top: GRID,
+      bottom: GRID,
+      left: GRID,
+      right: GRID,
+    });
+
+    // Single cell "none" clears
+    expect(editor.commands["cell-borders"]("none")).toBe(true);
+    expect(firstNodeOf(editor, "tableCell").attrs.borders).toBeNull();
+
+    // Custom border edge
+    expect(
+      editor.commands["cell-borders"]({
+        preset: "top",
+        border: { style: "double", size: 8, color: "FF0000" },
+      }),
+    ).toBe(true);
+    expect((firstNodeOf(editor, "tableCell").attrs.borders as Record<string, unknown>).top).toEqual(
+      {
+        style: "double",
+        size: 8,
+        color: "FF0000",
+      },
+    );
+
+    // Multi-cell CellSelection with "outside" borders
+    caretInCell(editor, 0, 0);
+    editor.commands["select-table-column"](); // selects col 0 across rows 0, 1, 2
+    expect(editor.state.selection instanceof CellSelection).toBe(true);
+
+    expect(editor.commands["cell-borders"]("outside")).toBe(true);
+    const table = tablesOf(editor)[0]!;
+    // Row 0 col 0: top and left
+    const cell0 = table.child(0).child(0).attrs.borders as Record<string, unknown>;
+    expect(cell0.top).toEqual(GRID);
+    expect(cell0.left).toEqual(GRID);
+    // Row 2 col 0: bottom and left
+    const cell2 = table.child(2).child(0).attrs.borders as Record<string, unknown>;
+    expect(cell2.bottom).toEqual(GRID);
+    expect(cell2.left).toEqual(GRID);
+
+    // table-borders delegates to applyCellBorders when CellSelection is active
+    expect(editor.commands["table-borders"]("all")).toBe(true);
+    const tableAll = tablesOf(editor)[0]!;
+    const cell0All = tableAll.child(0).child(0).attrs.borders as Record<string, unknown>;
+    expect(cell0All.top).toEqual(GRID);
+    expect(cell0All.bottom).toEqual(GRID);
+    expect(cell0All.left).toEqual(GRID);
+    expect(cell0All.right).toEqual(GRID);
+  });
+
+  it("set-cell-insets stamps margins presets, numbers, and custom objects", () => {
+    const editor = build();
+    editor.commands["insert-table"]();
+    caretInCell(editor, 0, 0);
+
+    expect(editor.commands["set-cell-insets"]("narrow")).toBe(true);
+    expect(firstNodeOf(editor, "tableCell").attrs.margins).toEqual({
+      top: { size: 0, type: "twips" },
+      right: { size: 108, type: "twips" },
+      bottom: { size: 0, type: "twips" },
+      left: { size: 108, type: "twips" },
+    });
+
+    expect(editor.commands["set-cell-insets"](144)).toBe(true);
+    expect(firstNodeOf(editor, "tableCell").attrs.margins).toEqual({
+      top: { size: 144, type: "twips" },
+      right: { size: 144, type: "twips" },
+      bottom: { size: 144, type: "twips" },
+      left: { size: 144, type: "twips" },
+    });
+
+    expect(editor.commands["set-cell-insets"]("default")).toBe(true);
+    expect(firstNodeOf(editor, "tableCell").attrs.margins).toBeNull();
+  });
+
+  it("set-cell-vertical-align stamps vertical alignment independently", () => {
+    const editor = build();
+    editor.commands["insert-table"]();
+    caretInCell(editor, 0, 0);
+
+    expect(editor.commands["set-cell-vertical-align"]("bottom")).toBe(true);
+    expect(firstNodeOf(editor, "tableCell").attrs.verticalAlign).toBe("bottom");
+
+    expect(editor.commands["set-cell-vertical-align"]("center")).toBe(true);
+    expect(firstNodeOf(editor, "tableCell").attrs.verticalAlign).toBe("center");
+
+    expect(editor.commands["set-cell-vertical-align"](null)).toBe(true);
+    expect(firstNodeOf(editor, "tableCell").attrs.verticalAlign).toBeNull();
+
+    expect(editor.commands["set-cell-vertical-align"]("invalid" as never)).toBe(false);
   });
 
   it("table-style applies a preset's borders and conditional fills", () => {
@@ -373,11 +840,17 @@ describe("select-table-column / convert-to-text", () => {
     const texts: string[] = [];
     sel.forEachCell((node) => texts.push(node.textContent));
     expect(texts).toHaveLength(3);
-    // Outside a table both decline.
+
+    // select-table-cell selects single cell as CellSelection
+    expect(editor.commands["select-table-cell"]()).toBe(true);
+    expect(editor.state.selection instanceof CellSelection).toBe(true);
+
+    // Outside a table they decline.
     editor.commands.setContent({ type: "doc", content: [{ type: "paragraph" }] });
     editor.commands.setTextSelection(2);
     expect(editor.commands["select-table-row"]()).toBe(false);
     expect(editor.commands["select-table-column"]()).toBe(false);
+    expect(editor.commands["select-table-cell"]()).toBe(false);
   });
 
   it("select-table selects every cell (not a NodeSelection — Backspace must empty cells, not erase the table)", () => {
@@ -533,6 +1006,51 @@ describe("merge / split table commands", () => {
     expect(row.childCount).toBe(1);
     expect(row.child(0).attrs.columnSpan).toBe(3);
   });
+
+  it("merge-cells preserves paragraph content from merged cells", () => {
+    const editor = build();
+    editor.commands["insert-table"]();
+    caretInCell(editor, 0, 0);
+    editor.view.dispatch(editor.state.tr.insertText("Alpha"));
+    caretInCell(editor, 0, 1);
+    editor.view.dispatch(editor.state.tr.insertText("Beta"));
+    selectCells(editor, 0, 0, 0, 1);
+    expect(editor.commands["merge-cells"]()).toBe(true);
+    const masterCell = tablesOf(editor)[0]!.child(0).child(0);
+    expect(masterCell.childCount).toBe(2);
+    expect(masterCell.child(0).textContent).toBe("Alpha");
+    expect(masterCell.child(1).textContent).toBe("Beta");
+  });
+
+  it("merge-cells works on tables with preexisting merged cells", () => {
+    const editor = build();
+    editor.commands["insert-table"]();
+    // Merge cells 0 and 1 in row 0
+    selectCells(editor, 0, 0, 0, 1);
+    expect(editor.commands["merge-cells"]()).toBe(true);
+    // Now merge cells 0 and 1 in row 1
+    selectCells(editor, 1, 0, 1, 1);
+    expect(editor.commands["merge-cells"]()).toBe(true);
+    const table = tablesOf(editor)[0]!;
+    expect(table.child(0).childCount).toBe(2);
+    expect(table.child(1).childCount).toBe(2);
+  });
+
+  it("split-cell unmerges vertical merge and restores all continuation cells", () => {
+    const editor = build();
+    editor.commands["insert-table"]();
+    selectCells(editor, 0, 0, 1, 0);
+    expect(editor.commands["merge-cells"]()).toBe(true);
+    const tableBefore = tablesOf(editor)[0]!;
+    expect(tableBefore.child(1).child(0).attrs.verticalMerge).toBe("continue");
+
+    // Split cell at row 0, col 0
+    caretInCell(editor, 0, 0);
+    expect(editor.commands["split-cell"]()).toBe(true);
+    const tableAfter = tablesOf(editor)[0]!;
+    expect(tableAfter.child(0).child(0).attrs.verticalMerge).toBeFalsy();
+    expect(tableAfter.child(1).child(0).attrs.verticalMerge).toBeFalsy();
+  });
 });
 
 describe("cell size / autofit commands", () => {
@@ -566,6 +1084,133 @@ describe("cell size / autofit commands", () => {
     gridTable(editor, [720, 1440]);
     expect(editor.commands["distribute-columns"]()).toBe(true);
     expect(tablesOf(editor)[0]!.attrs.columnWidths).toEqual([1080, 1080]);
+  });
+
+  it("autofit-window without arguments scales to available text width", () => {
+    const editor = build();
+    gridTable(editor, [720, 1440]);
+    expect(editor.commands["autofit-window"]()).toBe(true);
+    const widths = tablesOf(editor)[0]!.attrs.columnWidths as number[];
+    expect(widths).toHaveLength(2);
+    expect(widths[0] + widths[1]).toBe(9360);
+    expect(widths[0]).toBe(3120);
+    expect(widths[1]).toBe(6240);
+  });
+
+  it("autofit-contents works on tables with merged cells", () => {
+    const editor = build();
+    editor.commands["insert-table"](); // 3 cols
+    // Merge row 0 col 0 and 1
+    caretInCell(editor, 0, 0);
+    selectCells(editor, 0, 0, 0, 1);
+    expect(editor.commands["merge-cells"]()).toBe(true);
+
+    // Call autofit-contents
+    expect(editor.commands["autofit-contents"]()).toBe(true);
+    const widths = tablesOf(editor)[0]!.attrs.columnWidths as number[];
+    expect(widths).toHaveLength(3);
+    for (const w of widths) {
+      expect(w).toBeGreaterThanOrEqual(720);
+    }
+  });
+
+  it("distribute-columns distributes only selected columns when CellSelection covers a subset", () => {
+    const editor = build();
+    editor.commands.setContent({
+      type: "doc",
+      content: [
+        {
+          type: "table",
+          attrs: { columnWidths: [1000, 2000, 4000, 1000] },
+          content: [
+            {
+              type: "tableRow",
+              content: [
+                { type: "tableCell", content: [{ type: "paragraph" }] },
+                { type: "tableCell", content: [{ type: "paragraph" }] },
+                { type: "tableCell", content: [{ type: "paragraph" }] },
+                { type: "tableCell", content: [{ type: "paragraph" }] },
+              ],
+            },
+            {
+              type: "tableRow",
+              content: [
+                { type: "tableCell", content: [{ type: "paragraph" }] },
+                { type: "tableCell", content: [{ type: "paragraph" }] },
+                { type: "tableCell", content: [{ type: "paragraph" }] },
+                { type: "tableCell", content: [{ type: "paragraph" }] },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    // Select columns 1 and 2
+    selectCells(editor, 0, 1, 1, 2);
+    // Find cell positions for CellSelection:
+    let cell1Pos = -1;
+    let cell2Pos = -1;
+    editor.state.doc.descendants((node, pos) => {
+      if (node.type.name === "tableRow") {
+        if (cell1Pos < 0) {
+          cell1Pos = pos + 1 + node.child(0).nodeSize; // row 0 col 1
+        } else if (cell2Pos < 0) {
+          cell2Pos = pos + 1 + node.child(0).nodeSize + node.child(1).nodeSize; // row 1 col 2
+        }
+      }
+    });
+    editor.view.dispatch(
+      editor.state.tr.setSelection(
+        new CellSelection(editor.state.doc.resolve(cell1Pos), editor.state.doc.resolve(cell2Pos)),
+      ),
+    );
+    expect(editor.state.selection instanceof CellSelection).toBe(true);
+
+    expect(editor.commands["distribute-columns"]()).toBe(true);
+    // Cols 1 and 2 (sum 6000) are distributed evenly (3000, 3000), cols 0 and 3 are untouched (1000)
+    expect(tablesOf(editor)[0]!.attrs.columnWidths).toEqual([1000, 3000, 3000, 1000]);
+  });
+
+  it("distribute-rows equalizes row heights across table and supports CellSelection", () => {
+    const editor = build();
+    editor.commands["insert-table"]();
+    caretInCell(editor, 0, 0);
+
+    // Initial rows have null heights
+    expect(editor.commands["distribute-rows"]()).toBe(true);
+    const table = tablesOf(editor)[0]!;
+    expect(table.childCount).toBe(3);
+    for (let r = 0; r < table.childCount; r += 1) {
+      expect(table.child(r).attrs.height).toEqual({ value: 400, rule: "atLeast" });
+    }
+
+    // Set custom heights
+    expect(editor.commands["set-table-row-height"](0, { value: 300, rule: "atLeast" })).toBe(true);
+    expect(editor.commands["set-table-row-height"](1, { value: 700, rule: "atLeast" })).toBe(true);
+
+    // Select rows 0 and 1
+    let r0Pos = -1;
+    let r1Pos = -1;
+    editor.state.doc.descendants((node, pos) => {
+      if (node.type.name === "tableRow") {
+        if (r0Pos < 0) r0Pos = pos + 1;
+        else if (r1Pos < 0) r1Pos = pos + 1;
+      }
+    });
+    editor.view.dispatch(
+      editor.state.tr.setSelection(
+        new CellSelection(editor.state.doc.resolve(r0Pos), editor.state.doc.resolve(r1Pos)),
+      ),
+    );
+
+    expect(editor.commands["distribute-rows"]()).toBe(true);
+    const tableAfter = tablesOf(editor)[0]!;
+    // Rows 0 and 1 (300 + 700 = 1000) distribute to 500 each
+    expect(tableAfter.child(0).attrs.height).toEqual({ value: 500, rule: "atLeast" });
+    expect(tableAfter.child(1).attrs.height).toEqual({ value: 500, rule: "atLeast" });
+    // Row 2 untouched at 400
+    expect(tableAfter.child(2).attrs.height).toEqual({ value: 400, rule: "atLeast" });
   });
 
   it("cell-width writes the caret column's width, accepting measures", () => {

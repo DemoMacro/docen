@@ -96,6 +96,25 @@ const template = html<DocenTablePropertiesDialog>`
           <span class="unit" ${ref("cmUnit")}></span>
         </div>
       </div>
+      <div class="row">
+        <div class="field">
+          <label ${ref("wrappingLabel")}></label>
+          <fluent-dropdown type="combobox" appearance="outline" ${ref("wrappingSel")}>
+            <fluent-listbox popover="manual" tabindex="-1">
+              <fluent-option value="none"></fluent-option>
+              <fluent-option value="around"></fluent-option>
+            </fluent-listbox>
+            <input
+              slot="control"
+              role="combobox"
+              aria-haspopup="listbox"
+              type="combobox"
+              size="1"
+              style="width:100%;box-sizing:border-box"
+            />
+          </fluent-dropdown>
+        </div>
+      </div>
     </div>
     <div slot="action">
       <fluent-button ${ref("cancelBtn")} @click="${(x) => x.hide()}"></fluent-button>
@@ -132,6 +151,8 @@ class DocenTablePropertiesDialog extends FASTElement {
   @observable alignmentSel?: FluentDropdown;
   @observable indentLabel?: HTMLElement;
   @observable indentInput?: FluentTextInput;
+  @observable wrappingLabel?: HTMLElement;
+  @observable wrappingSel?: FluentDropdown;
   @observable cmUnit?: HTMLElement;
   @observable okBtn?: HTMLElement;
   @observable cancelBtn?: HTMLElement;
@@ -163,6 +184,7 @@ class DocenTablePropertiesDialog extends FASTElement {
       const tw = typeof attrs.indent === "number" ? attrs.indent : 0;
       this.indentInput.value = String(Math.round((tw / CM_TO_TWIPS) * 100) / 100);
     }
+    pick(this.wrappingSel, attrs.float ? "around" : "none");
     // Preferred width is read-only: the column grid (columnWidths + autofit)
     // owns the geometry — mirroring it here would create a second writer.
     if (this.widthInput) {
@@ -185,6 +207,7 @@ class DocenTablePropertiesDialog extends FASTElement {
     const patch: TablePropertiesPatch = {
       alignment: (pickedValue(this.alignmentSel) ?? "left") as TablePropertiesPatch["alignment"],
       indent: Number.isFinite(cm) && cm > 0 ? Math.round(cm * CM_TO_TWIPS) : 0,
+      textWrapping: (pickedValue(this.wrappingSel) ?? "none") as "none" | "around",
     };
     this.$emit("table-properties:ok", patch);
     this.hide();
@@ -198,6 +221,7 @@ class DocenTablePropertiesDialog extends FASTElement {
     if (this.widthUnit) this.widthUnit.textContent = t("tableDialog.cm", this);
     if (this.alignmentLabel) this.alignmentLabel.textContent = t("tableDialog.alignment", this);
     if (this.indentLabel) this.indentLabel.textContent = t("tableDialog.indent", this);
+    if (this.wrappingLabel) this.wrappingLabel.textContent = t("tableDialog.wrapping", this);
     if (this.cmUnit) this.cmUnit.textContent = t("tableDialog.cm", this);
     if (this.okBtn) this.okBtn.textContent = t("options.ok", this);
     if (this.cancelBtn) this.cancelBtn.textContent = t("options.cancel", this);
@@ -206,6 +230,11 @@ class DocenTablePropertiesDialog extends FASTElement {
       left.textContent = t("ribbon.cmd.align-left", this);
       center.textContent = t("ribbon.cmd.align-center", this);
       right.textContent = t("ribbon.cmd.align-right", this);
+    }
+    if (this.wrappingSel) {
+      const [none, around] = this.wrappingSel.querySelectorAll("fluent-option");
+      if (none) none.textContent = t("tableDialog.wrappingNone", this);
+      if (around) around.textContent = t("tableDialog.wrappingAround", this);
     }
   }
 }
