@@ -2,10 +2,18 @@
 
 # Docen
 
-![GitHub](https://img.shields.io/github/license/DemoMacro/docen)
+[English](./README.md) | [简体中文](./README.zh-CN.md)
+
+[![npm downloads](https://img.shields.io/npm/dm/docen)](https://www.npmjs.com/package/docen)
+[![GitHub Stars](https://img.shields.io/github/stars/DemoMacro/docen)](https://github.com/DemoMacro/docen/stargazers)
+![GitHub License](https://img.shields.io/github/license/DemoMacro/docen)
 [![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg)](https://www.contributor-covenant.org/version/2/1/code_of_conduct/)
 
-> Universal document format converter and canvas DOCX editor built on TipTap/ProseMirror and LeaferJS, with comprehensive TypeScript support. Convert between Markdown and DOCX through a unified Tiptap JSON model; render and edit documents on a canvas that matches MS Office layout.
+> A canvas DOCX editor that renders and edits with MS Office layout fidelity in the browser — built on TipTap/ProseMirror and LeaferJS — plus headless Markdown ⇄ DOCX conversion through a unified Tiptap JSON model. Fully typed; no server required.
+
+[Live Demo](https://docen.office-open.com/) · [Discussions](https://github.com/DemoMacro/docen/discussions) · [Report Issues](https://github.com/DemoMacro/docen/issues)
+
+⭐ **If Docen is useful to you, a star helps other developers find it.**
 
 ![Docen Editor](./assets/editor-demo.png)
 
@@ -25,7 +33,7 @@
 
 ## Quick Start
 
-### Universal Converter (`docen`)
+### Headless Conversion (`docen`)
 
 For seamless conversion between Markdown, plain text, and DOCX through a single unified API:
 
@@ -168,6 +176,10 @@ We welcome contributions! See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full 
 ## Support & Community
 
 - 📫 [Report Issues](https://github.com/DemoMacro/docen/issues)
+- 💬 [Discussions](https://github.com/DemoMacro/docen/discussions) — questions, ideas, and show-and-tell
+
+If Docen is useful to you, a [⭐ star](https://github.com/DemoMacro/docen/stargazers) helps other developers find it.
+
 - 📚 [docen Documentation](./packages/docen/README.md)
 - 📚 [@docen/vue Documentation](./packages/vue/README.md)
 - 📚 [@docen/editor Documentation](./packages/editor/README.md)

@@ -4,11 +4,11 @@
 ![npm downloads](https://img.shields.io/npm/dw/docen)
 ![npm license](https://img.shields.io/npm/l/docen)
 
-> Universal document toolkit — one package for headless Markdown/DOCX conversion AND the full `<docen-document>` web-component editor (via the `docen/editor` subpath).
+> The full `<docen-document>` canvas web-component editor plus headless Markdown/DOCX conversion — one package (editor available via the `docen/editor` subpath).
 
 ## Features
 
-- 🔄 **Universal Format Support** - Seamless conversion between Markdown and DOCX (styled HTML is accepted as paste input)
+- 🔄 **Markdown ⇄ DOCX Conversion** - Seamless bidirectional conversion (styled HTML is accepted as paste input)
 - 🎯 **Unified API** - Consistent, intuitive interface across all format conversions
 - 📦 **All-in-One Package** - Single dependency for both headless conversion AND the full `<docen-document>` editor (via `docen/editor`)
 - 🔧 **Built on TipTap** - Powered by the robust TipTap/ProseMirror ecosystem

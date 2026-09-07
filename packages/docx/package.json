@@ -10,6 +10,7 @@
     "markdown",
     "microsoft-word",
     "office",
+    "ooxml",
     "rich-text",
     "tiptap",
     "typescript",
@@ -67,8 +68,8 @@
   },
   "dependencies": {
     "@docen/layout": "workspace:*",
-    "@office-open/core": "0.14.2",
-    "@office-open/docx": "0.14.2",
+    "@office-open/core": "0.14.3",
+    "@office-open/docx": "0.14.3",
     "@tiptap/core": "3.29.2",
     "@tiptap/extension-link": "3.29.2",
     "@tiptap/markdown": "3.29.2",
