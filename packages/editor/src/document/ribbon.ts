@@ -9,6 +9,7 @@ import type {
   RibbonControlSize,
   RibbonGallery,
   RibbonGroup,
+  RibbonInput,
   RibbonLayout,
   RibbonMenu,
   RibbonMenuItem,
@@ -817,6 +818,12 @@ function buildControl(c: RibbonControl, scope: Element): HTMLElement {
       if (c.comboboxSize === "short") el.setAttribute("size", "short");
       return el;
     }
+    case "input": {
+      const el = document.createElement("docen-ribbon-input");
+      applyBase(el, c, scope);
+      if (c.value != null) el.setAttribute("value", c.value);
+      return el;
+    }
     case "color-picker": {
       const el = document.createElement("docen-color-picker");
       applyBase(el, c, scope);
@@ -916,6 +923,13 @@ const combo = (
   items,
   ...(o.source ? { source: o.source } : {}),
   ...(o.comboboxSize ? { comboboxSize: o.comboboxSize } : {}),
+});
+
+/** A plain typeable measure box (no drop-down) — Word's Size groups. */
+const input = (event: string, value: string): RibbonInput => ({
+  type: "input",
+  event,
+  value,
 });
 
 const picker = (
@@ -1697,26 +1711,6 @@ export function equationContextTab(): RibbonTab {
   };
 }
 
-/** The picture-size presets behind the Picture Format tab's Height/Width
- *  boxes (the unit system follows the locale, same as Cell Size). */
-const pictureSizeItems = (scope?: Element): string =>
-  JSON.stringify(
-    (useCmUnits(scope)
-      ? ([
-          ["2 厘米", "2cm"],
-          ["5 厘米", "5cm"],
-          ["10 厘米", "10cm"],
-          ["15 厘米", "15cm"],
-        ] as const)
-      : ([
-          ['1"', "1in"],
-          ['2"', "2in"],
-          ['4"', "4in"],
-          ['6"', "6in"],
-        ] as const)
-    ).map(([text, value]) => ({ text, value })),
-  );
-
 /** The Accessibility group — Alt Text through the size-and-position dialog,
  *  shared by every drawing contextual tab. */
 const accessibilityGroup = (): RibbonGroup =>
@@ -1750,24 +1744,13 @@ const arrangeGroup = (): RibbonGroup =>
   ]);
 
 /** The Size group — the numeric Height/Width boxes every drawing tab shares;
- *  pictures add the crop split (a shape has no crop). The boxes read empty
- *  (the contextual tab builds once per entry, so a live value would go
- *  stale); a typed measure commits the dimension. `scope` is the i18n scope
- *  the unit-system presets resolve against. */
-const sizeGroup = (
-  id: "picture-size" | "shape-size",
-  scope: Element | undefined,
-  withCrop: boolean,
-): RibbonGroup =>
+ *  pictures add the crop split (a shape has no crop). The host mirrors the
+ *  selected drawing's extent into the boxes per transaction (#syncDrawingSize);
+ *  a typed measure commits the dimension (a bare number reads in the locale's
+ *  unit system — #onCommand qualifies it before dispatch). */
+const sizeGroup = (id: "picture-size" | "shape-size", withCrop: boolean): RibbonGroup =>
   group(id, [
-    col([
-      combo("drawing-height", "", parsedItems(pictureSizeItems(scope)), {
-        comboboxSize: "short",
-      }),
-      combo("drawing-width", "", parsedItems(pictureSizeItems(scope)), {
-        comboboxSize: "short",
-      }),
-    ]),
+    col([input("drawing-height", ""), input("drawing-width", "")]),
     ...(withCrop
       ? [
           split(
@@ -1790,9 +1773,8 @@ const sizeGroup = (
  *  dialog), Arrange (the Layout tab's floating-drawing commands), and Size
  *  (the numeric Height/Width boxes + the crop split). Marked `contextual` so
  *  {@link ribbonTabs} excludes it from the static render; the host appends it
- *  via {@link buildContextualTab} as the selection enters/leaves a picture.
- *  `scope` is the i18n scope the unit-system presets resolve against. */
-export function pictureFormatTab(scope?: Element): RibbonTab {
+ *  via {@link buildContextualTab} as the selection enters/leaves a picture. */
+export function pictureFormatTab(): RibbonTab {
   return {
     id: "picture-format",
     label: tab("picture-format"),
@@ -1834,7 +1816,7 @@ export function pictureFormatTab(scope?: Element): RibbonTab {
       ]),
       accessibilityGroup(),
       arrangeGroup(),
-      sizeGroup("picture-size", scope, true),
+      sizeGroup("picture-size", true),
     ],
   };
 }
@@ -1844,8 +1826,8 @@ export function pictureFormatTab(scope?: Element): RibbonTab {
  *  the Shadow effects menu); Insert Shapes and the WordArt group grey until
  *  their commands land; Accessibility, Arrange, and Size are live (their
  *  commands accept all three drawing kinds). Marked `contextual` like the
- *  picture tab; `scope` is the i18n scope the unit presets resolve against. */
-export function shapeFormatTab(scope?: Element): RibbonTab {
+ *  picture tab. */
+export function shapeFormatTab(): RibbonTab {
   return {
     id: "shape-format",
     label: tab("shape-format"),
@@ -1894,7 +1876,7 @@ export function shapeFormatTab(scope?: Element): RibbonTab {
       ]),
       accessibilityGroup(),
       arrangeGroup(),
-      sizeGroup("shape-size", scope, false),
+      sizeGroup("shape-size", false),
     ],
   };
 }

@@ -715,8 +715,9 @@ class DocenDocument extends AddinHost<Editor> {
       this.#syncContextTabs();
       // After #syncContextTabs: the first transaction that enters a table is
       // also the one that appends the Table Layout panel — the combos only
-      // exist from that pass on.
+      // exist from that pass on. The drawing Size combos ride the same pass.
       this.#syncCellSize();
+      this.#syncDrawingSize();
       this.#updateStatus();
     };
     editor.on("transaction", sync);
@@ -2440,6 +2441,7 @@ class DocenDocument extends AddinHost<Editor> {
     this.#contextTabIds.clear();
     this.#syncContextTabs();
     this.#syncCellSize();
+    this.#syncDrawingSize();
     this.#renderPanes();
   }
 
@@ -2776,6 +2778,42 @@ class DocenDocument extends AddinHost<Editor> {
     }
   }
 
+  /** Mirror the selected drawing's live width/height into the Picture/Shape
+   *  Format Size combos — Word behavior: the boxes report the selection's
+   *  extent in the locale's unit system and follow every resize. Runs on
+   *  every chrome re-stamp and transaction (via #setupFontSync). */
+  #syncDrawingSize(): void {
+    const root = this.shadowRoot;
+    const widthEl = root?.querySelector('docen-ribbon-input[event="drawing-width"]');
+    const heightEl = root?.querySelector('docen-ribbon-input[event="drawing-height"]');
+    const editor = this.editor;
+    if ((!widthEl && !heightEl) || !editor) return;
+    const sel = editor.state.selection;
+    if (!(sel instanceof NodeSelection)) return;
+    const name = sel.node.type.name;
+    const attrs = sel.node.attrs as Record<string, unknown>;
+    // An image's extent lives in px attrs (15 tw to the px at 96 DPI); a
+    // shape/group's in its payload transformation EMU (635 to the tw).
+    let pair: { w: unknown; h: unknown; tw: (v: number) => number } | null = null;
+    if (name === "image") pair = { w: attrs.width, h: attrs.height, tw: (v) => v * 15 };
+    else if (name === "wpsShape" || name === "wpgGroup") {
+      const t = (attrs[name] as Record<string, unknown> | undefined)?.transformation as
+        | Record<string, unknown>
+        | undefined;
+      pair = { w: t?.width, h: t?.height, tw: (v) => v / 635 };
+    }
+    if (!pair) return;
+    const scope = root?.querySelector("docen-workspace") ?? this;
+    const show = (el: Element | null | undefined, v: unknown): void => {
+      el?.setAttribute(
+        "value",
+        typeof v === "number" && v > 0 ? formatMeasureTwip(pair!.tw(v), scope) : "",
+      );
+    };
+    show(widthEl, pair.w);
+    show(heightEl, pair.h);
+  }
+
   /** Contextual tab ids currently appended to the ribbon (Word's Table Tools).
    *  Non-empty ⇔ the selection is inside a table; #syncContextTabs diffs this
    *  against that fact so the per-transaction pass is a cheap equality check. */
@@ -2799,8 +2837,8 @@ class DocenDocument extends AddinHost<Editor> {
     if (this.editor) {
       const state = this.editor.state;
       const drawing = drawingSelectionKind(state);
-      if (drawing === "picture") want.set("picture-format", pictureFormatTab(scope));
-      else if (drawing) want.set("shape-format", shapeFormatTab(scope));
+      if (drawing === "picture") want.set("picture-format", pictureFormatTab());
+      else if (drawing) want.set("shape-format", shapeFormatTab());
       if (tableAncestry(state)) for (const tab of tableContextTabs(scope)) want.set(tab.id, tab);
       else if (mathAtomAt(state)) want.set("equation", equationContextTab());
     }
@@ -4761,7 +4799,25 @@ class DocenDocument extends AddinHost<Editor> {
     const commands = target.commands as unknown as Record<string, (value?: string) => unknown>;
     const cmd = commands[name];
     if (typeof cmd === "function") {
-      cmd(value);
+      // Word's measure boxes read a bare number in the locale's unit system —
+      // "5" beside "4.39 厘米" means 5cm. The commands parse bare numbers as
+      // twips, so qualify before dispatch; "0" (cell-height's auto) and
+      // unit-suffixed text pass through untouched.
+      let arg = value;
+      if (
+        typeof value === "string" &&
+        (name === "drawing-width" ||
+          name === "drawing-height" ||
+          name === "cell-width" ||
+          name === "cell-height")
+      ) {
+        const n = Number(value.trim());
+        if (value.trim() !== "" && Number.isFinite(n) && n > 0) {
+          const scope = this.shadowRoot?.querySelector("docen-workspace") ?? this;
+          arg = `${value.trim()}${useCmUnits(scope) ? "cm" : "in"}`;
+        }
+      }
+      cmd(arg);
       if (name === "next-change" || name === "previous-change") {
         this.#bridge?.scrollIntoView(target.state.selection.from);
       }

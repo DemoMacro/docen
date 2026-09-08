@@ -1030,6 +1030,11 @@ describe("drawing-width / drawing-height", () => {
     expect(editor.commands["drawing-width"]("-3cm")).toBe(false);
     expect(editor.commands["drawing-height"]("wide")).toBe(false);
     expect(editor.commands["drawing-height"]()).toBe(false);
+    // A bare "1" parses as 1 twip (0.07px) — it must decline rather than
+    // round to a zero-width extent (the ribbon qualifies bare numbers in the
+    // locale's unit before dispatch; this guards the command's own floor).
+    expect(editor.commands["drawing-width"]("1")).toBe(false);
+    expect(firstNodeOf(editor, "image").attrs.width).toBe(10);
   });
 });
 

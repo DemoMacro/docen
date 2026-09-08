@@ -7,6 +7,7 @@ export { default as DocenRibbonToggleButton } from "./ribbon-toggle-button";
 export { default as DocenRibbonMenu } from "./ribbon-menu";
 export { default as DocenRibbonSplitButton } from "./ribbon-split-button";
 export { default as DocenRibbonCombobox } from "./ribbon-combobox";
+export { default as DocenRibbonInput } from "./ribbon-input";
 export { default as DocenColorPicker } from "./color-picker";
 export { default as DocenRibbonGallery } from "./gallery";
 export { registerIcon, ribbonIcon } from "./icons";

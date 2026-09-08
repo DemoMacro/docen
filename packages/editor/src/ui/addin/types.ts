@@ -88,6 +88,14 @@ export interface RibbonCombobox extends RibbonControlBase {
   comboboxSize?: "short" | "normal";
 }
 
+/** Word's plain numeric box (the Picture/Shape Format Size group, the Table
+ *  Layout Cell Size group) — a typeable measure with no drop-down. Enter or
+ *  blur commits `command` with the box text as `value`. */
+export interface RibbonInput extends RibbonControlBase {
+  type: "input";
+  value?: string;
+}
+
 /** A swatch popover + "More Colors" picker (font color / paragraph shading).
  *  `palette: "highlight"` swaps the popover for Word's fixed highlighter
  *  palette (swatches emit ST_HighlightColor tokens). `panel: "outline"` turns
@@ -129,6 +137,7 @@ export type RibbonControl =
   | RibbonMenu
   | RibbonSplit
   | RibbonCombobox
+  | RibbonInput
   | RibbonColorPicker
   | RibbonGallery
   | RibbonSeparator;

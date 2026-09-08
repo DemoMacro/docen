@@ -1220,10 +1220,14 @@ function applyFloatingExtras(
   if (tw == null || tw <= 0) return false;
   const sel = state.selection;
   if (!(sel instanceof NodeSelection)) return false;
-  const emu = Math.round((tw / 15) * 9525); // 15 twips to the px, 9525 to the EMU
+  // 96-DPI px is the finest granularity an extent stores — a measure under
+  // half a px would round to a zero extent (an invisible drawing).
+  const px = Math.round(tw / 15); // 15 twips to the px at 96 DPI
+  if (px <= 0) return false;
+  const emu = px * 9525; // 9525 to the EMU
   if (sel.node.type.name === "image") {
     const attrs = { ...sel.node.attrs };
-    attrs[axis] = Math.round(tw / 15); // 15 twips to the px at 96 DPI
+    attrs[axis] = px;
     tr.setNodeMarkup(sel.from, undefined, attrs);
     tr.setSelection(NodeSelection.create(tr.doc, sel.from) as never);
     return true;
