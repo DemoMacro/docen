@@ -23,6 +23,7 @@ import { Box, Ellipse, Group, Line, Path, Rect, Text, type IGroup } from "leafer
 import type { PaintColumn, PaintContext } from "./context";
 import { paintDrawing, paintMembers, recordDrawingHit } from "./drawing";
 import { addCroppedImage, addDecodedImage } from "./image";
+import { strokePropsOf } from "./line";
 
 /** OOXML ST_HighlightColor tokens → Word's highlight palette, #RRGGBB. */
 const HIGHLIGHT_COLOR: Record<string, string> = {
@@ -583,16 +584,30 @@ export function paintParagraph(
           // the extent — a srcRect leaves records reaching past the box and
           // GDI never lets metafile ink out of the playback rect. Leafer's
           // Group ignores `overflow` (a Box-only data getter clips children),
-          // so the clip holder must be a Box.
+          // so the clip holder must be a Box. A pixel filter has no single
+          // bitmap to composite here (registered gap); the alpha modulate
+          // still fades the replay through the holder's opacity.
           const holder = new Box({
             x: ox,
             y: oy,
             width: item.widthPx,
             height: item.heightPx,
             overflow: "hide",
+            ...(inline.opacity != null ? { opacity: inline.opacity } : {}),
           });
           paintMembers(holder, inline.members, 0, 0, ctx);
           target.add(holder);
+          if (inline.line)
+            target.add(
+              new Rect({
+                x: ox,
+                y: oy,
+                width: item.widthPx,
+                height: item.heightPx,
+                ...strokePropsOf(inline.line),
+                strokeAlign: "center",
+              }),
+            );
         } else if (inline.src && inline.crop) {
           // A cropped flat source (a:srcRect): the visible remainder fills
           // the extent box — the whole source would stretch into it.
@@ -605,12 +620,36 @@ export function paintParagraph(
             item.widthPx,
             item.heightPx,
             ctx,
+            undefined,
+            undefined,
+            {
+              filter: inline.filter,
+              opacity: inline.opacity,
+              shadow: inline.shadow,
+              line: inline.line,
+            },
           );
         } else if (inline.src) {
           // An uncropped flat source: a first decode lands after the stage's
           // eager render, so the slot-and-rerender dance keeps the frame from
           // staying blank (same protocol the floating drawing members use).
-          addDecodedImage(target, inline.src, ox, oy, item.widthPx, item.heightPx, ctx);
+          addDecodedImage(
+            target,
+            inline.src,
+            ox,
+            oy,
+            item.widthPx,
+            item.heightPx,
+            ctx,
+            undefined,
+            undefined,
+            {
+              filter: inline.filter,
+              opacity: inline.opacity,
+              shadow: inline.shadow,
+              line: inline.line,
+            },
+          );
         } else {
           // Linked-only picture (no bytes in the package): an empty frame.
           target.add(
@@ -620,8 +659,8 @@ export function paintParagraph(
               width: item.widthPx,
               height: item.heightPx,
               fill: "#f3f3f3",
-              stroke: "#c4c4c4",
-              strokeWidth: 1,
+              ...(inline.line ? strokePropsOf(inline.line) : { stroke: "#c4c4c4", strokeWidth: 1 }),
+              strokeAlign: "center",
             }),
           );
         }

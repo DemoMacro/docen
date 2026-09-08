@@ -14,7 +14,7 @@ import {
 
 import { mergeStyleChain } from "../../style-cascade";
 import type { ProjectContext } from "./context";
-import { cropOf } from "./drawing";
+import { cropOf, outlineOf, pictureAdjustOf } from "./drawing";
 import { isRecord, measureEmu, num, str, unescapeXml, type Rec } from "./guards";
 import { metafileMembers, pictureSrc } from "./media";
 import { romanNumeral } from "./numbering";
@@ -262,6 +262,8 @@ export function projectRuns(
       // into its frame mapping — dropping it stretches the WHOLE source into
       // the extent box.
       const members = metafileMembers(pic, widthPx, heightPx, cropOf(pic));
+      const adjust = pictureAdjustOf(pic);
+      const line = outlineOf(pic.outline);
       out.push({
         kind: "picture",
         widthPx,
@@ -272,6 +274,10 @@ export function projectRuns(
         // a:xfrm @rot (degrees) — Word tilts inline pictures about the
         // extent's center just like floating ones.
         ...(typeof tr.rotation === "number" && tr.rotation !== 0 ? { rotation: tr.rotation } : {}),
+        ...(adjust?.filter ? { filter: adjust.filter } : {}),
+        ...(adjust?.opacity != null ? { opacity: adjust.opacity } : {}),
+        ...(adjust?.shadow ? { shadow: adjust.shadow } : {}),
+        ...(line ? { line } : {}),
       });
     }
   };

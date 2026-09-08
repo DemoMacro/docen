@@ -7,6 +7,7 @@ import {
   type LayoutDrawing,
   type LayoutDrawingAnchor,
   type LayoutDrawingMember,
+  type LayoutDrawingShadow,
   type LayoutParagraph,
 } from "@docen/layout";
 import type { CustomGeometryOptions } from "@office-open/core/drawing";
@@ -41,8 +42,9 @@ function fillOpacityOf(fill: unknown): number | undefined {
 /** Outline stroke (a:ln): px width + color + the line-dressing tokens the
  *  painter maps (cap/join full-word, dash the OOXML prstDash token). A
  *  gradient stroke flattens to its middle stop's color — the painter strokes
- *  flat colors, and a line's gradient averages visually to its middle. */
-function outlineOf(outline: unknown):
+ *  flat colors, and a line's gradient averages visually to its middle.
+ *  Shared by shape members and picture borders (inline + floating). */
+export function outlineOf(outline: unknown):
   | {
       px: number;
       color?: string;
@@ -73,6 +75,73 @@ function outlineOf(outline: unknown):
 
 /** The gradient stop closest to the middle position — the flattest honest
  *  color for a gradient the painter cannot stroke. */
+/** A picture's adjustment effects → the renderer description: the percent
+ *  blip effects (luminance/hsl/grayscale/blur) map into a CSS-filter
+ *  composite string; the shape's outer shadow resolves distance+direction
+ *  into a px offset. The alpha modulate comes back separately (the leaf
+ *  fades natively, no pixels); the color-mapping effects the filter grammar
+ *  cannot express (duotone, bi-level, tint, color replace) stay unprojected. */
+export function pictureAdjustOf(
+  pic: Rec,
+): { filter?: string; opacity?: number; shadow?: LayoutDrawingShadow } | undefined {
+  const effects = pic.blipEffects;
+  if (!isRecord(effects) && !isRecord(pic.effects)) return undefined;
+  const css: string[] = [];
+  let opacity: number | undefined;
+  if (isRecord(effects)) {
+    const lum = isRecord(effects.luminance) ? effects.luminance : undefined;
+    if (lum) {
+      const bright = num(lum.bright);
+      const contrast = num(lum.contrast);
+      if (bright) css.push(`brightness(${(1 + bright / 100).toFixed(2)})`);
+      if (contrast) css.push(`contrast(${(1 + contrast / 100).toFixed(2)})`);
+    }
+    const hsl = isRecord(effects.hsl) ? effects.hsl : undefined;
+    if (hsl) {
+      const hue = num(hsl.hue);
+      const saturation = num(hsl.saturation);
+      if (hue) css.push(`hue-rotate(${hue}deg)`);
+      if (saturation) css.push(`saturate(${(1 + saturation / 100).toFixed(2)})`);
+    }
+    if (effects.grayscale === true) css.push("grayscale(1)");
+    const blur = isRecord(effects.blur) ? num(effects.blur.radius) : undefined;
+    if (blur) css.push(`blur(${emuToPx(blur).toFixed(1)}px)`);
+    const alpha = isRecord(effects.alphaModulateFixed)
+      ? num(effects.alphaModulateFixed.amount)
+      : undefined;
+    if (alpha != null && alpha < 100) opacity = Math.max(0, alpha / 100);
+  }
+  const shdw = isRecord(pic.effects) ? pic.effects.outerShadow : undefined;
+  const shadow = isRecord(shdw) ? shadowOf(shdw) : undefined;
+  if (!css.length && opacity == null && shadow == null) return undefined;
+  return {
+    ...(css.length ? { filter: css.join(" ") } : {}),
+    ...(opacity != null ? { opacity } : {}),
+    ...(shadow ? { shadow } : {}),
+  };
+}
+
+/** a:outerShdw → the Leafer element shadow: dist+dir resolve into the px
+ *  offset (DrawingML measures clockwise from the 3-o'clock direction, and
+ *  screen y grows downward, so x = dist·cos, y = dist·sin directly). */
+function shadowOf(v: Rec): LayoutDrawingShadow | undefined {
+  const dist = num(v.distance);
+  const dir = num(v.direction) ?? 0;
+  const blur = num(v.blurRadius);
+  const x = dist != null ? Math.cos((dir * Math.PI) / 180) * emuToPx(dist) : 0;
+  const y = dist != null ? Math.sin((dir * Math.PI) / 180) * emuToPx(dist) : 0;
+  const color = colorOf(v.color);
+  const alpha = isRecord(v.color) ? num((v.color.transforms as Rec | undefined)?.alpha) : undefined;
+  if (!x && !y && !blur && !color) return undefined;
+  return {
+    x,
+    y,
+    blur: blur != null ? emuToPx(blur) : 0,
+    ...(color ? { color } : {}),
+    ...(alpha != null && alpha < 100 ? { opacity: Math.max(0, alpha / 100) } : {}),
+  };
+}
+
 function midStopOf(gradient: unknown): string | undefined {
   const stops = isRecord(gradient) && Array.isArray(gradient.stops) ? gradient.stops : undefined;
   if (!stops) return undefined;
@@ -616,6 +685,8 @@ function projectFloatingPicture(pic: Rec): LayoutDrawing | undefined {
     height,
   );
   const crop = cropOf(pic);
+  const adjust = pictureAdjustOf(pic);
+  const line = outlineOf(pic.outline);
   return {
     anchor,
     width,
@@ -642,6 +713,10 @@ function projectFloatingPicture(pic: Rec): LayoutDrawing | undefined {
         height,
         src: pictureSrc(pic as { type?: unknown; data?: unknown }),
         crop,
+        ...(adjust?.filter ? { filter: adjust.filter } : {}),
+        ...(adjust?.opacity != null ? { opacity: adjust.opacity } : {}),
+        ...(adjust?.shadow ? { shadow: adjust.shadow } : {}),
+        ...(line ? { line } : {}),
       },
     ],
   };

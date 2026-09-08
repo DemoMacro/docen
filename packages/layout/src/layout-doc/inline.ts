@@ -1,5 +1,5 @@
 import type { FontSlots } from "../font";
-import type { LayoutDrawingMember } from "./drawing";
+import type { LayoutDrawingLine, LayoutDrawingMember, LayoutDrawingShadow } from "./drawing";
 
 export interface LayoutTextStyle {
   family: string | FontSlots;
@@ -138,4 +138,14 @@ export type LayoutInline =
       /** Clockwise spin of the box about its center, degrees (a:xfrm @rot) —
        * the extent stays put, the painted content tilts inside it. */
       rotation?: number;
+      /** Pixel-adjustment filter, CSS filter syntax (`brightness(1.2)
+       * saturate(0.4)`) — the projection mapped the picture's blip effects
+       * into it; the renderer composites the source through it. */
+      filter?: string;
+      /** Fill opacity 0-1 (the blip alpha modulate); absent → opaque. */
+      opacity?: number;
+      /** The shape's outer shadow (pic:spPr a:effectLst a:outerShdw). */
+      shadow?: LayoutDrawingShadow;
+      /** The picture's outline stroke (pic:spPr a:ln) — Word's picture border. */
+      line?: LayoutDrawingLine;
     };

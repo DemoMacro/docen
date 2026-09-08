@@ -1,4 +1,4 @@
-import type { LayoutDrawingMember } from "@docen/layout";
+import type { LayoutDrawingLine, LayoutDrawingMember, LayoutDrawingShadow } from "@docen/layout";
 import {
   Image as LeaferImage,
   ImageManager,
@@ -9,6 +9,48 @@ import {
 } from "leafer-ui";
 
 import type { PaintContext } from "./context";
+import { strokePropsOf } from "./line";
+
+/** The projected blip adjustments riding a picture: a CSS-filter composite
+ *  description (the luminance/hsl/grayscale/blur effects), the shape's outer
+ *  shadow as a native Leafer element effect, the alpha modulate as fill
+ *  opacity, and the picture border. All optional; absent = plain. */
+interface PictureAdjust {
+  filter?: string;
+  opacity?: number;
+  shadow?: LayoutDrawingShadow;
+  line?: LayoutDrawingLine;
+}
+
+/** Leafer's IShadowEffect carries the alpha inside the color (no opacity
+ *  field) — the projected hex + a:alpha percent becomes an rgba() string. */
+function shadowColorOf(shadow: LayoutDrawingShadow): string {
+  const hex = shadow.color ?? "000000";
+  if (shadow.opacity == null || shadow.opacity >= 1) return `#${hex}`;
+  const r = parseInt(hex.slice(0, 2), 16);
+  const g = parseInt(hex.slice(2, 4), 16);
+  const b = parseInt(hex.slice(4, 6), 16);
+  return `rgba(${r},${g},${b},${shadow.opacity})`;
+}
+
+/** The shape's outer shadow as the native Leafer element effect — zoom-aware
+ *  (the EffectModule scales by the world matrix), no offscreen composite.
+ *  The element `blur` stays a CSS-filter composite instead: the EffectModule
+ *  ships a blur branch but nothing in the web bundle dispatches to it, and
+ *  the @leafer-in/filter plugin registers no processors (a bare registry). */
+function effectsOf(adjust: PictureAdjust): Partial<LeaferImage> {
+  if (!adjust.shadow) return {};
+  return {
+    shadow: [
+      {
+        x: adjust.shadow.x,
+        y: adjust.shadow.y,
+        ...(adjust.shadow.blur ? { blur: adjust.shadow.blur } : {}),
+        color: shadowColorOf(adjust.shadow),
+      },
+    ],
+  };
+}
 
 /** Leafer evicts a decoded image larger than its 4MP cache threshold the
  *  moment a paint's use count drops back to zero (ImageManager.recycle →
@@ -70,6 +112,7 @@ function plainImageLeaf(
   height: number,
   flipH?: boolean,
   flipV?: boolean,
+  adjust?: PictureAdjust,
 ): LeaferImage {
   return new LeaferImage({
     url: src,
@@ -81,6 +124,13 @@ function plainImageLeaf(
     // to the far edge first makes the reflection cover the original box.
     ...(flipH ? { scaleX: -1 } : {}),
     ...(flipV ? { scaleY: -1 } : {}),
+    // The alpha modulate rides on the leaf (zero pixel cost); the native
+    // shadow rides the EffectModule (zoom-aware); the border strokes the
+    // bitmap's edge — Image extends Rect, so Leafer paints it centered on
+    // the box like Word's picture border.
+    ...(adjust?.opacity != null ? { opacity: adjust.opacity } : {}),
+    ...(adjust ? effectsOf(adjust) : {}),
+    ...(adjust?.line ? strokePropsOf(adjust.line) : {}),
   });
 }
 
@@ -102,9 +152,10 @@ function placeImage(
   flipH?: boolean,
   flipV?: boolean,
   slot?: Rect,
+  adjust?: PictureAdjust,
 ): void {
   if (image.ready) {
-    const leaf = plainImageLeaf(src, x, y, width, height, flipH, flipV);
+    const leaf = plainImageLeaf(src, x, y, width, height, flipH, flipV, adjust);
     if (slot) swapSlot(tree, slot, leaf, ctx);
     else tree.add(leaf);
     return;
@@ -115,7 +166,7 @@ function placeImage(
     // A repaint since the decode started cleared the tree (slot included) —
     // that repaint's own request now owns the paint-order slot.
     if (!held.parent) return;
-    swapSlot(tree, held, plainImageLeaf(src, x, y, width, height, flipH, flipV), ctx);
+    swapSlot(tree, held, plainImageLeaf(src, x, y, width, height, flipH, flipV, adjust), ctx);
   });
 }
 
@@ -133,7 +184,11 @@ function swapSlot(tree: IGroup, slot: Rect, leaf: LeaferImage, ctx: PaintContext
 }
 
 /** A decoded-plain picture at a box. Shared by drawing members and inline
- *  picture atoms. */
+ *  picture atoms. A `filter` adjustment composites once through an offscreen
+ *  canvas (`ctx.filter` — the CSS filter syntax the projection emitted from
+ *  the blip effects) and caches as a derived picture, so every repaint after
+ *  the first is plain; opacity, the native shadow, and the border ride the
+ *  leaf. */
 export function addDecodedImage(
   tree: IGroup,
   src: string,
@@ -144,8 +199,38 @@ export function addDecodedImage(
   ctx: PaintContext,
   flipH?: boolean,
   flipV?: boolean,
+  adjust?: PictureAdjust,
 ): void {
-  placeImage(tree, pinImage(src), src, x, y, width, height, ctx, flipH, flipV);
+  if (adjust?.filter) {
+    addDerivedImage(
+      tree,
+      `filter|${src}|${adjust.filter}`,
+      (deliver) => {
+        const el = new Image();
+        el.onload = () => {
+          const canvas = document.createElement("canvas");
+          canvas.width = el.naturalWidth;
+          canvas.height = el.naturalHeight;
+          const c2d = canvas.getContext("2d")!;
+          c2d.filter = adjust.filter!;
+          c2d.drawImage(el, 0, 0);
+          deliver(canvas.toDataURL("image/png"));
+        };
+        el.onerror = () => deliver(undefined);
+        el.src = src;
+      },
+      x,
+      y,
+      width,
+      height,
+      ctx,
+      flipH,
+      flipV,
+      adjust,
+    );
+    return;
+  }
+  placeImage(tree, pinImage(src), src, x, y, width, height, ctx, flipH, flipV, undefined, adjust);
 }
 
 export function addPlainImage(
@@ -155,7 +240,12 @@ export function addPlainImage(
   my: number,
   ctx: PaintContext,
 ): void {
-  addDecodedImage(tree, m.src!, mx, my, m.width, m.height, ctx, m.flipH, m.flipV);
+  addDecodedImage(tree, m.src!, mx, my, m.width, m.height, ctx, m.flipH, m.flipV, {
+    filter: m.filter,
+    opacity: m.opacity,
+    shadow: m.shadow,
+    line: m.line,
+  });
 }
 
 /** A derived composite (a cropped view or a blended run) joined at a box:
@@ -176,10 +266,24 @@ function addDerivedImage(
   ctx: PaintContext,
   flipH?: boolean,
   flipV?: boolean,
+  adjust?: PictureAdjust,
 ): void {
   const cached = derivedImages.get(fingerprint);
   if (cached) {
-    placeImage(tree, pinImage(cached), cached, x, y, width, height, ctx, flipH, flipV);
+    placeImage(
+      tree,
+      pinImage(cached),
+      cached,
+      x,
+      y,
+      width,
+      height,
+      ctx,
+      flipH,
+      flipV,
+      undefined,
+      adjust,
+    );
     return;
   }
   const slot = new Rect({ x, y, width, height });
@@ -193,7 +297,7 @@ function addDerivedImage(
       return;
     }
     cacheDerived(fingerprint, url);
-    placeImage(tree, pinImage(url), url, x, y, width, height, ctx, flipH, flipV, slot);
+    placeImage(tree, pinImage(url), url, x, y, width, height, ctx, flipH, flipV, slot, adjust);
   };
   produce(deliver, slot);
 }
@@ -351,8 +455,10 @@ function maskedContent(
 
 /** A cropped picture (a:srcRect): Leafer paints whole sources only, so the
  *  sub-region renders through an offscreen canvas copy. Mirrors flip the
- *  cropped result (the xfrm flip applies to the blip, post-crop). Shared by
- *  drawing members and inline picture atoms. */
+ *  cropped result (the xfrm flip applies to the blip, post-crop); a pixel
+ *  filter composites into the same copy pass (the crop runs first, the
+ *  filter sees the cropped view). Shared by drawing members and inline
+ *  picture atoms. */
 export function addCroppedImage(
   tree: IGroup,
   src: string,
@@ -364,8 +470,9 @@ export function addCroppedImage(
   ctx: PaintContext,
   flipH?: boolean,
   flipV?: boolean,
+  adjust?: PictureAdjust,
 ): void {
-  const fingerprint = `crop|${src}|${crop.left},${crop.top},${crop.right},${crop.bottom}`;
+  const fingerprint = `crop|${src}|${crop.left},${crop.top},${crop.right},${crop.bottom}|${adjust?.filter ?? ""}`;
   addDerivedImage(
     tree,
     fingerprint,
@@ -379,7 +486,9 @@ export function addCroppedImage(
         const canvas = document.createElement("canvas");
         canvas.width = sw;
         canvas.height = sh;
-        canvas.getContext("2d")?.drawImage(el, sx, sy, sw, sh, 0, 0, sw, sh);
+        const c2d = canvas.getContext("2d")!;
+        if (adjust?.filter) c2d.filter = adjust.filter;
+        c2d.drawImage(el, sx, sy, sw, sh, 0, 0, sw, sh);
         deliver(canvas.toDataURL("image/png"));
       };
       el.onerror = () => deliver(undefined);
@@ -392,5 +501,6 @@ export function addCroppedImage(
     ctx,
     flipH,
     flipV,
+    adjust,
   );
 }

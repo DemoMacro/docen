@@ -13,6 +13,17 @@ export interface LayoutDrawingLine {
   dash?: string;
 }
 
+/** One member's outer shadow (a:outerShdw): the offset resolved from
+ *  distance+direction into px, the blur radius px, the shadow color hex and
+ *  its opacity 0-1 (the color's a:alpha). */
+export interface LayoutDrawingShadow {
+  x: number;
+  y: number;
+  blur: number;
+  color?: string;
+  opacity?: number;
+}
+
 /** One absolutely-positioned member of a floating drawing. Coordinates and
  *  sizes are px in the drawing's own box (top-left corner the origin) — the
  *  adapter already resolved the group's child coordinate space (chOff/chExt
@@ -35,6 +46,15 @@ export type LayoutDrawingMember =
       /** Source rectangle crop (a:srcRect): the painted region is the
        *  visible remainder of the image edge. */
       crop?: LayoutPictureCrop;
+      /** Pixel-adjustment filter, CSS filter syntax — the projection mapped
+       *  the picture's blip effects into it (see the inline picture). */
+      filter?: string;
+      /** Fill opacity 0-1 (the blip alpha modulate); absent → opaque. */
+      opacity?: number;
+      /** The shape's outer shadow (pic:spPr a:effectLst a:outerShdw). */
+      shadow?: LayoutDrawingShadow;
+      /** The picture's outline stroke (pic:spPr a:ln) — Word's picture border. */
+      line?: LayoutDrawingLine;
     }
   | {
       kind: "shape";

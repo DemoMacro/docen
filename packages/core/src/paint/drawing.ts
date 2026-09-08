@@ -11,48 +11,7 @@ import { Box, Ellipse, Group, Path as LeaferPath, Rect, type IGroup } from "leaf
 import { paintBlock } from "../painter";
 import type { DrawingHitBox, PaintColumn, PaintContext } from "./context";
 import { addBlendedPictureRun, addCroppedImage, addPlainImage } from "./image";
-/** OOXML prstDash tokens → dash patterns in px (line-width units, the host's
- *  preset line styles); unlisted tokens render solid. */
-const PRSTDASH_PATTERN: Record<string, number[]> = {
-  dot: [1, 3],
-  // A 1px-on/1px-off antialiased hairline blends to a faint tint — Word's
-  // sysDot boxes read as clear 2px dots at hairline widths (user-verified).
-  sysDot: [2, 2],
-  dash: [4, 3],
-  sysDash: [4, 2],
-  dashDot: [4, 3, 1, 3],
-  sysDashDot: [4, 2, 1, 2],
-  dashDotDot: [4, 3, 1, 3, 1, 3],
-  sysDashDotDot: [4, 2, 1, 2, 1, 2],
-  lgDash: [12, 3],
-  lgDashDot: [12, 3, 1, 3],
-  lgDashDotDot: [12, 3, 1, 3, 1, 3],
-};
-/** One member's outline as Leafer stroke props: hex color (ink when absent),
- *  the 1.5 px floor that keeps dashed hairlines from vanishing in their gaps,
- *  and the dressing Leafer spells differently (cap/join — a flat cap has no
- *  Leafer counterpart and stays unset). Shared by path members and
- *  paintShapeBox; strokeAlign stays at the call sites (closed shapes need the
- *  explicit center, open paths already default to it). */
-function strokePropsOf(
-  line:
-    | {
-        px: number;
-        color?: string;
-        cap?: "round" | "square" | "flat";
-        join?: "round" | "bevel" | "miter";
-        dash?: string;
-      }
-    | undefined,
-) {
-  return {
-    stroke: line ? (line.color ? `#${line.color}` : "#000000") : undefined,
-    strokeWidth: line?.px != null && line.dash ? Math.max(line.px, 1.5) : line?.px,
-    strokeCap: line?.cap === "round" || line?.cap === "square" ? line.cap : undefined,
-    strokeJoin: line?.join === "round" || line?.join === "bevel" ? line.join : undefined,
-    dashPattern: line?.dash ? PRSTDASH_PATTERN[line.dash] : undefined,
-  };
-}
+import { strokePropsOf } from "./line";
 function drawingBoxOf(
   drawing: LayoutDrawing,
   x: number,
@@ -197,23 +156,27 @@ export function paintDrawing(
       height: drawing.height,
       overflow: "hide",
     });
-    paintMembers(holder, drawing.members, 0, 0, ctx);
+    paintMembers(holder, drawing.members, 0, 0, ctx, host);
     target.add(holder);
   } else {
-    paintMembers(target, drawing.members, ox, oy, ctx);
+    // A rotated drawing spins in a group — its text lines' screen geometry no
+    // longer matches the stack, so the caret map gets no stack to register.
+    paintMembers(target, drawing.members, ox, oy, ctx, drawing.rotation ? undefined : host);
   }
 }
 
 /** The members of a drawing box (or of an inline picture's metafile replay),
  *  each positioned at its own offset inside the box origin. Shared by the
  *  anchored-drawing and the inline-picture paths — the member shapes are the
- *  same; only the box origin differs. */
+ *  same; only the box origin differs. `host` (an anchored drawing only) lets
+ *  an editable text-box member register its laid stack with the caret map. */
 export function paintMembers(
   tree: IGroup,
   members: readonly LayoutDrawingMember[],
   boxX: number,
   boxY: number,
   ctx: PaintContext,
+  host?: DrawingHost,
 ): void {
   // A drawing box is a complete little scene: its members paint in full
   // whichever pass anchors the box. A behind-doc watermark's text still lays
@@ -253,7 +216,12 @@ export function paintMembers(
     }
     if (m.kind === "picture") {
       if (m.src && m.crop) {
-        addCroppedImage(tree, m.src, m.crop, mx, my, m.width, m.height, ctx, m.flipH, m.flipV);
+        addCroppedImage(tree, m.src, m.crop, mx, my, m.width, m.height, ctx, m.flipH, m.flipV, {
+          filter: m.filter,
+          opacity: m.opacity,
+          shadow: m.shadow,
+          line: m.line,
+        });
       } else if (m.src) {
         addPlainImage(tree, m, mx, my, ctx);
       } else {
@@ -264,8 +232,8 @@ export function paintMembers(
             width: m.width,
             height: m.height,
             fill: "#f3f3f3",
-            stroke: "#c4c4c4",
-            strokeWidth: 1,
+            ...(m.line ? strokePropsOf(m.line) : { stroke: "#c4c4c4", strokeWidth: 1 }),
+            strokeAlign: "center",
           }),
         );
       }
@@ -328,6 +296,19 @@ export function paintMembers(
           : m.height;
         const slack = boxH - (m.insets?.top ?? 0) - (m.insets?.bottom ?? 0) - laid.heightPx;
         oy += m.anchor === "center" ? Math.max(0, slack / 2) : Math.max(0, slack);
+      }
+      // An editable body registers its laid stack with the caret map (a double
+      // click edits the text in place). Excluded: metafile text (drawn GDI
+      // art — nowrap), rotated stacks (group-space geometry) and group
+      // interiors (no drawing host to re-find the PM node through).
+      if (host && !m.nowrap && !m.rotation && ctx.shapeTextStacks) {
+        ctx.shapeTextStacks.push({
+          page: ctx.pageIndex,
+          host: { para: host.para, index: host.index },
+          xPx: mx + left,
+          yPx: my + oy,
+          items: laid.stack,
+        });
       }
       // Metafile text is drawn art replayed from GDI records, not editable
       // story rows: its strings carry no paragraph marks, so the marks pass

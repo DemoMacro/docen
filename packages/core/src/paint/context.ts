@@ -1,5 +1,6 @@
 import type {
   FontMetrics,
+  LaidOutBlock,
   LaidOutParagraph,
   ProjectedColumns,
   ProjectedFlowBox,
@@ -28,6 +29,21 @@ export interface DrawingHitBox {
   /** Clockwise rotation of the box about its center, degrees — the click's
    *  hit test un-rotates the point into the box's own space. */
   rotation?: number;
+}
+
+/** One editable text-box stack (a wps txbx member's laid paragraphs),
+ *  page-local px — the caret map registers its lines against the shape's PM
+ *  content so a double click edits the text in place. `host` re-finds the
+ *  wpsShape node (the same identity a drawing hit box carries). Metafile text
+ *  (drawn GDI art, `nowrap`) and rotated stacks paint but never register. */
+export interface ShapeTextStack {
+  page: number;
+  host: { para: LaidOutParagraph; index: number };
+  /** The insets box origin the blocks stack from. */
+  xPx: number;
+  yPx: number;
+  /** The laid blocks as stackBlocks returned them. */
+  items: readonly { yPx: number; block: LaidOutBlock }[];
 }
 
 /** One line-number label on this page — content-flow yPx (the painter adds
@@ -70,6 +86,9 @@ export interface PaintContext {
   /** Accumulates this page's drawing boxes as the body pass paints them —
    *  the stage turns the list into its click hit table. */
   hitBoxes?: DrawingHitBox[];
+  /** Accumulates this page's editable text-box stacks the same way — the
+   *  bridge registers them with the caret map (double-click-to-edit). */
+  shapeTextStacks?: ShapeTextStack[];
   /** In-front floats park here instead of painting inside their anchor
    *  paragraph: Word stacks them above ALL text (an anchor earlier in the
    *  flow must not let later paragraphs paint over the float), so the stage
