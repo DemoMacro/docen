@@ -1,5 +1,14 @@
 // @vitest-environment node
-import { Document, Image, Paragraph, Table, TableCell, TableRow, WpsShape } from "@docen/docx";
+import {
+  Document,
+  Image,
+  Paragraph,
+  Table,
+  TableCell,
+  TableRow,
+  WpgGroup,
+  WpsShape,
+} from "@docen/docx";
 import { Editor, Node as TextNode, type Editor as EditorType } from "@docen/docx/core";
 import { NodeSelection } from "@tiptap/pm/state";
 import { describe, expect, it } from "vitest";
@@ -20,6 +29,7 @@ const EXTENSIONS = [
   TableCell,
   Image,
   WpsShape,
+  WpgGroup,
   DocumentCommands,
 ];
 
@@ -1514,5 +1524,315 @@ describe("normalizeParagraphAlignment", () => {
     expect(normalizeParagraphAlignment(undefined)).toBe("left");
     expect(normalizeParagraphAlignment(null)).toBe("left");
     expect(normalizeParagraphAlignment("invalid")).toBe("left");
+  });
+});
+
+describe("drawing-group / drawing-ungroup", () => {
+  const EMU = 9525;
+
+  /** Two floating images at known page boxes: (200,100) 120×90 and (400,160)
+   *  60×60 — union (200,100) 260×120, the first image at the union's origin. */
+  const buildTwoFloats = (): EditorType =>
+    new Editor({
+      element: null,
+      extensions: EXTENSIONS,
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [
+              {
+                type: "image",
+                attrs: {
+                  src: "data:,",
+                  width: 120,
+                  height: 90,
+                  floating: {
+                    horizontalPosition: { relative: "page", offset: 200 * EMU },
+                    verticalPosition: { relative: "page", offset: 100 * EMU },
+                  },
+                },
+              },
+              {
+                type: "image",
+                attrs: {
+                  src: "data:,",
+                  width: 60,
+                  height: 60,
+                  floating: {
+                    horizontalPosition: { relative: "page", offset: 400 * EMU },
+                    verticalPosition: { relative: "page", offset: 160 * EMU },
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+  /** Document positions and page boxes of every floating image, in order. */
+  const floatMembers = (
+    editor: EditorType,
+  ): { pos: number; box: { x: number; y: number; width: number; height: number } }[] => {
+    const out: { pos: number; box: { x: number; y: number; width: number; height: number } }[] = [];
+    editor.state.doc.descendants((node, pos) => {
+      if (node.type.name !== "image") return true;
+      const floating = (node.attrs as Record<string, unknown>).floating as
+        | { horizontalPosition?: { offset?: number }; verticalPosition?: { offset?: number } }
+        | undefined;
+      if (!floating?.horizontalPosition?.offset || !floating.verticalPosition?.offset) return true;
+      out.push({
+        pos,
+        box: {
+          x: floating.horizontalPosition.offset / EMU,
+          y: floating.verticalPosition.offset / EMU,
+          width: (node.attrs as Record<string, unknown>).width as number,
+          height: (node.attrs as Record<string, unknown>).height as number,
+        },
+      });
+      return true;
+    });
+    return out;
+  };
+
+  const payloadOf = (
+    members: { pos: number; box: { x: number; y: number; width: number; height: number } }[],
+  ): string => JSON.stringify({ members });
+
+  it("groups two floats into a fresh 1:1 group at their union", () => {
+    const editor = buildTwoFloats();
+    const members = floatMembers(editor);
+    expect(editor.commands["drawing-group"](payloadOf(members))).toBe(true);
+
+    const group = firstNodeOf(editor, "wpgGroup");
+    const g = group.attrs.wpgGroup as Record<string, unknown>;
+    // The union is the group's extent, 1:1 with its own child space.
+    expect(g.transformation).toEqual({ width: 260 * EMU, height: 120 * EMU });
+    expect(g.childOffsetX).toBe(0);
+    expect(g.childOffsetY).toBe(0);
+    expect(g.childExtentWidth).toBe(260 * EMU);
+    expect(g.childExtentHeight).toBe(120 * EMU);
+    // The anchor (first image, at the union's origin) keeps its offsets.
+    const floating = g.floating as Record<string, any>;
+    expect(floating.horizontalPosition.offset).toBe(200 * EMU);
+    expect(floating.verticalPosition.offset).toBe(100 * EMU);
+
+    // Both members ride the child space; neither keeps a floating.
+    const imgs: AnyNode[] = [];
+    editor.state.doc.descendants((node) => {
+      if (node.type.name === "image") {
+        imgs.push(node as unknown as AnyNode);
+        return false;
+      }
+      return true;
+    });
+    expect(imgs.map((n) => n.attrs.groupXfrm)).toEqual([
+      { x: 0, y: 0, cx: 120 * EMU, cy: 90 * EMU },
+      { x: 200 * EMU, y: 60 * EMU, cx: 60 * EMU, cy: 60 * EMU },
+    ]);
+    expect(imgs.every((n) => n.attrs.floating == null)).toBe(true);
+    // The group lands selected (NodeSelection), ready to drag.
+    expect(editor.state.selection instanceof NodeSelection).toBe(true);
+  });
+
+  it("ungroup returns every member to its pre-group position (round-trip)", () => {
+    const editor = buildTwoFloats();
+    const before = floatMembers(editor);
+    expect(editor.commands["drawing-group"](payloadOf(before))).toBe(true);
+    expect(editor.commands["drawing-ungroup"]()).toBe(true);
+
+    // The two floats are back as standalone nodes at their original offsets
+    // (±1 EMU of the px rounding through the child space) and sizes.
+    const after = floatMembers(editor);
+    expect(after).toHaveLength(2);
+    for (let i = 0; i < 2; i += 1) {
+      expect(Math.abs(after[i]!.box.x * EMU - before[i]!.box.x * EMU)).toBeLessThanOrEqual(1);
+      expect(Math.abs(after[i]!.box.y * EMU - before[i]!.box.y * EMU)).toBeLessThanOrEqual(1);
+      expect(after[i]!.box.width).toBe(before[i]!.box.width);
+      expect(after[i]!.box.height).toBe(before[i]!.box.height);
+    }
+    // No group survives; the first member lands selected.
+    let groups = 0;
+    editor.state.doc.descendants((node) => {
+      if (node.type.name === "wpgGroup") groups += 1;
+    });
+    expect(groups).toBe(0);
+    expect(editor.state.selection instanceof NodeSelection).toBe(true);
+  });
+
+  it("groups a floating shape through its payload and frees it back", () => {
+    const editor = new Editor({
+      element: null,
+      extensions: EXTENSIONS,
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [
+              {
+                type: "image",
+                attrs: {
+                  src: "data:,",
+                  width: 100,
+                  height: 50,
+                  floating: {
+                    horizontalPosition: { relative: "page", offset: 0 },
+                    verticalPosition: { relative: "page", offset: 0 },
+                  },
+                },
+              },
+              {
+                type: "wpsShape",
+                attrs: {
+                  wpsShape: {
+                    transformation: { width: 50 * EMU, height: 50 * EMU },
+                    floating: {
+                      horizontalPosition: { relative: "page", offset: 150 * EMU },
+                      verticalPosition: { relative: "page", offset: 25 * EMU },
+                    },
+                  },
+                },
+                content: [{ type: "paragraph" }],
+              },
+            ],
+          },
+        ],
+      },
+    });
+    // Page boxes: image (0,0) 100×50, shape (150,25) 50×50 — union (0,0) 200×75.
+    const payload = JSON.stringify({
+      members: [
+        { pos: 1, box: { x: 0, y: 0, width: 100, height: 50 } },
+        { pos: 2, box: { x: 150, y: 25, width: 50, height: 50 } },
+      ],
+    });
+    expect(editor.commands["drawing-group"](payload)).toBe(true);
+    const shape = firstNodeOf(editor, "wpsShape");
+    const ws = shape.attrs.wpsShape as Record<string, any>;
+    // Child-space offset form; no floating on the payload.
+    expect(ws.transformation.offset).toEqual({ left: 150 * EMU, top: 25 * EMU });
+    expect(ws.transformation.width).toBe(50 * EMU);
+    expect(ws.floating).toBeUndefined();
+
+    expect(editor.commands["drawing-ungroup"]()).toBe(true);
+    const freed = firstNodeOf(editor, "wpsShape").attrs.wpsShape as Record<string, any>;
+    expect(freed.transformation.offset).toBeUndefined();
+    expect(freed.transformation.width).toBe(50 * EMU);
+    expect(freed.floating.horizontalPosition.offset).toBe(150 * EMU);
+    expect(freed.floating.verticalPosition.offset).toBe(25 * EMU);
+  });
+
+  it("declines a single member, a non-floating pos, and an align-anchored anchor", () => {
+    const editor = buildTwoFloats();
+    const members = floatMembers(editor);
+    expect(editor.commands["drawing-group"](JSON.stringify({ members: [members[0]!] }))).toBe(
+      false,
+    );
+    // A paragraph pos (0) carries no floating drawing.
+    expect(
+      editor.commands["drawing-group"](
+        JSON.stringify({ members: [members[0]!, { pos: 0, box: members[1]!.box }] }),
+      ),
+    ).toBe(false);
+    expect(editor.commands["drawing-group"]("not json")).toBe(false);
+    expect(editor.commands["drawing-group"]()).toBe(false);
+
+    const aligned = buildTwoFloats();
+    const list = floatMembers(aligned);
+    // Re-anchor the first float on an align — the union has no base to sit on.
+    aligned.commands.command(({ tr, dispatch }) => {
+      if (dispatch) {
+        tr.setNodeMarkup(list[0]!.pos, undefined, {
+          ...(aligned.state.doc.nodeAt(list[0]!.pos)!.attrs as Record<string, unknown>),
+          floating: {
+            horizontalPosition: { relative: "margin", align: "right" },
+            verticalPosition: { relative: "page", offset: 100 * EMU },
+          },
+        });
+      }
+      return true;
+    });
+    expect(aligned.commands["drawing-group"](payloadOf(floatMembers(aligned)))).toBe(false);
+  });
+
+  it("declines ungroup without a floating group selected", () => {
+    const editor = buildTwoFloats();
+    const members = floatMembers(editor);
+    editor.commands["drawing-group"](payloadOf(members));
+    // Drop to a caret — no NodeSelection.
+    editor.commands.setTextSelection(1);
+    expect(editor.commands["drawing-ungroup"]()).toBe(false);
+  });
+});
+
+describe("drawing-distribute", () => {
+  const EMU = 9525;
+
+  /** Three same-size floats at x = 100 / 250 / 700 (uneven gaps 50 and 350). */
+  const buildThree = (): EditorType =>
+    new Editor({
+      element: null,
+      extensions: EXTENSIONS,
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [100, 250, 700].map((x) => ({
+              type: "image",
+              attrs: {
+                src: "data:,",
+                width: 100,
+                height: 100,
+                floating: {
+                  horizontalPosition: { relative: "page", offset: x * EMU },
+                  verticalPosition: { relative: "page", offset: 0 },
+                },
+              },
+            })),
+          },
+        ],
+      },
+    });
+
+  const xOf = (editor: EditorType): number[] => {
+    const out: number[] = [];
+    editor.state.doc.descendants((node) => {
+      if (node.type.name === "image") {
+        const f = (node.attrs as Record<string, any>).floating;
+        out.push(f.horizontalPosition.offset / EMU);
+      }
+    });
+    return out;
+  };
+
+  it("equalizes the gaps; the outer two hold still", () => {
+    const editor = buildThree();
+    // span (800 − 100) = 700, sizes 300 → gap (700 − 300) / 2 = 200 → 100 / 400 / 700.
+    const members = xOf(editor).map((x, i) => ({
+      pos: i + 1,
+      box: { x, y: 0, width: 100, height: 100 },
+    }));
+    expect(editor.commands["drawing-distribute"]("h", JSON.stringify({ members }))).toBe(true);
+    expect(xOf(editor)).toEqual([100, 400, 700]);
+  });
+
+  it("declines an unknown axis, a bad payload, or a single member", () => {
+    const editor = buildThree();
+    const members = xOf(editor).map((x, i) => ({
+      pos: i + 1,
+      box: { x, y: 0, width: 100, height: 100 },
+    }));
+    expect(editor.commands["drawing-distribute"]("diagonal", JSON.stringify({ members }))).toBe(
+      false,
+    );
+    expect(editor.commands["drawing-distribute"]("h", "not json")).toBe(false);
+    expect(editor.commands["drawing-distribute"]("h")).toBe(false);
+    expect(
+      editor.commands["drawing-distribute"]("h", JSON.stringify({ members: [members[0]!] })),
+    ).toBe(false);
   });
 });

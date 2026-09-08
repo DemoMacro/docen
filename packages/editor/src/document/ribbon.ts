@@ -349,10 +349,13 @@ const indentItems = (): string =>
     { text: opt("decrease-indent"), value: "decrease", event: "indent-decrease" },
   ]);
 
+// Word's Group menu. The host event is the group command (the primary item
+// inherits it); Ungroup overrides with its own — it needs no multi-selection,
+// just a selected floating group.
 const groupItems = (): string =>
   JSON.stringify([
     { text: cmd("group"), value: "group" },
-    { text: opt("ungroup"), value: "ungroup" },
+    { text: opt("ungroup"), value: "ungroup", event: "drawing-ungroup" },
   ]);
 
 const rotateItems = (): string =>
@@ -431,8 +434,8 @@ const transparencyItems = (): string => {
 };
 
 // Word's Align menu: both axes' margin alignment plus the two distributes.
-// The distributes need multi-selection (batch: group loop), so they stay
-// greyed until then — Word greys them on a single selection too.
+// The distributes act on the multi-selection (the primary + Shift+Click set);
+// the command declines below two members.
 const alignObjectsItems = (): string =>
   JSON.stringify([
     { text: cmd("align-left"), value: "left" },
@@ -441,8 +444,8 @@ const alignObjectsItems = (): string =>
     { text: opt("align-top"), value: "top" },
     { text: opt("align-middle"), value: "middle" },
     { text: opt("align-bottom"), value: "bottom" },
-    { text: opt("distribute-h"), value: "distribute-h", disabled: true },
-    { text: opt("distribute-v"), value: "distribute-v", disabled: true },
+    { text: opt("distribute-h"), value: "h", event: "drawing-distribute" },
+    { text: opt("distribute-v"), value: "v", event: "drawing-distribute" },
   ]);
 
 // References > Add Text: the TOC levels (Word's menu minus the missing-level
@@ -1178,7 +1181,7 @@ const layoutTab = (): RibbonTab =>
         row([btn("orientation", "bring-forward"), btn("orientation", "send-backward")]),
       ]),
       menu("align-left", "align-objects", parsedItems(alignObjectsItems()), { size: "large" }),
-      menu("group-objects", "group", parsedItems(groupItems()), { size: "large" }),
+      menu("group-objects", "drawing-group", parsedItems(groupItems()), { size: "large" }),
       menu("rotate", "rotate", parsedItems(rotateItems()), { size: "large" }),
     ]),
   ]);
@@ -1709,7 +1712,7 @@ const arrangeGroup = (): RibbonGroup =>
       row([btn("orientation", "bring-forward"), btn("orientation", "send-backward")]),
     ]),
     menu("align-left", "align-objects", parsedItems(alignObjectsItems()), { size: "large" }),
-    menu("group-objects", "group", parsedItems(groupItems()), { size: "large" }),
+    menu("group-objects", "drawing-group", parsedItems(groupItems()), { size: "large" }),
     menu("rotate", "rotate", parsedItems(rotateItems()), { size: "large" }),
     btn("selection-pane", "selection-pane", { size: "large" }),
   ]);

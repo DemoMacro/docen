@@ -13,7 +13,10 @@ import type { DrawingHit } from "./target";
  *  document state beyond the selection they manage. */
 export interface DrawingGesturesHost {
   editor(): Editor;
-  drawingSelection(hit: DrawingHit): number | null;
+  /** `enter` marks the entry double click on a group — the member hit
+   *  resolves to the member instead of the group (Word: the second click
+   *  enters the group). */
+  drawingSelection(hit: DrawingHit, enter?: boolean): number | null;
   drawingBoxOf(
     para: unknown,
     index: number,
@@ -39,6 +42,11 @@ export class DrawingGestures {
    *  re-resolves from the stage table, and a drawing that no longer paints
    *  drops the selection. */
   #sel: DrawingHit | null = null;
+  /** The Shift+Click multi-selection beyond the primary: floating drawings
+   *  framed lightly, consumed by group/distribute/align (Word's multi-object
+   *  selection). A doc change re-validates in place(). */
+  #multi: DrawingHit[] = [];
+  #multiBoxes: HTMLDivElement[] = [];
 
   constructor(host: DrawingGesturesHost) {
     this.#host = host;
@@ -103,10 +111,11 @@ export class DrawingGestures {
   /** Select the drawing a click hit: the NodeSelection lands first, then the
    *  frame shows. A member hit that resolved to the group (the group was not
    *  entered — Word's first click selects the whole group) frames the group's
-   *  box, not the member's. False when the PM side cannot pair the hit (the
-   *  caller falls through to text placement). */
-  select(hit: DrawingHit): boolean {
-    const nodePos = this.#host.drawingSelection(hit);
+   *  box, not the member's. `enter` (the entry double click) targets the
+   *  member instead. False when the PM side cannot pair the hit (the caller
+   *  falls through to text placement). */
+  select(hit: DrawingHit, enter = false): boolean {
+    const nodePos = this.#host.drawingSelection(hit, enter);
     const node = nodePos != null ? this.#host.editor().state.doc.nodeAt(nodePos) : null;
     if (nodePos == null || !node) return false;
     this.#host.editor().commands.command(({ state, dispatch }) => {
@@ -119,6 +128,50 @@ export class DrawingGestures {
         : hit;
     this.place();
     return true;
+  }
+
+  /** Word's Shift+Click multi-selection: toggle a floating drawing in/out of
+   *  the set beyond the primary (which keeps the frame). With nothing framed
+   *  yet the click just selects — the primary starts the set. False when the
+   *  hit cannot pair to the PM side or its node is not floating (inline art
+   *  rides the text stream); the caller falls through to the plain click. */
+  toggleMulti(hit: DrawingHit): boolean {
+    const nodePos = this.#host.drawingSelection(hit);
+    const node = nodePos != null ? this.#host.editor().state.doc.nodeAt(nodePos) : null;
+    if (nodePos == null || !node) return false;
+    const attrs = node.attrs as Record<string, unknown>;
+    const carrier =
+      node.type.name === "image"
+        ? attrs.floating
+        : node.type.name === "wpsShape"
+          ? (attrs.wpsShape as Record<string, unknown> | undefined)?.floating
+          : node.type.name === "wpgGroup"
+            ? (attrs.wpgGroup as Record<string, unknown> | undefined)?.floating
+            : null;
+    if (!carrier) return false;
+    if (!this.#sel) return this.select(hit);
+    const i = this.#multi.findIndex((m) => sameHit(m, hit));
+    if (i >= 0) this.#multi.splice(i, 1);
+    else this.#multi.push(hit);
+    this.place();
+    return true;
+  }
+
+  /** The multi-selection's members for the group/distribute payloads: the
+   *  primary plus every toggled member, each with its PM position and page
+   *  box. Null when fewer than two resolve (nothing to group or distribute). */
+  multiPayload():
+    | { pos: number; box: { x: number; y: number; width: number; height: number } }[]
+    | null {
+    const all = [this.#sel, ...this.#multi].filter((hit): hit is DrawingHit => hit != null);
+    const members: { pos: number; box: { x: number; y: number; width: number; height: number } }[] =
+      [];
+    for (const hit of all) {
+      const pos = this.#host.drawingSelection(hit);
+      if (pos == null) continue;
+      members.push({ pos, box: { x: hit.x, y: hit.y, width: hit.width, height: hit.height } });
+    }
+    return members.length >= 2 ? members : null;
   }
 
   /** Re-place the frame against the fresh geometry (after a re-render or a
@@ -136,15 +189,49 @@ export class DrawingGestures {
     const frame = this.#sel ? this.#host.pageHost(this.#sel.page) : null;
     if (!this.#sel || !frame) {
       this.#overlay.hide();
-      return;
+    } else {
+      if (frame !== this.#overlay.el.parentElement) frame.append(this.#overlay.el);
+      this.#overlay.refresh(this.#sel, this.#sel.rotation);
     }
-    if (frame !== this.#overlay.el.parentElement) frame.append(this.#overlay.el);
-    this.#overlay.refresh(this.#sel, this.#sel.rotation);
+    this.#placeMulti();
+  }
+
+  /** Re-resolve the multi-selection against the fresh geometry and redraw the
+   *  light frames (a member that no longer paints, or one that became the
+   *  primary, drops out). */
+  #placeMulti(): void {
+    this.#multi = this.#multi
+      .map((hit) => this.#host.drawingBoxOf(hit.para, hit.index, hit.kind, hit.childPath))
+      .filter((hit): hit is DrawingHit => hit != null && !(this.#sel && sameHit(hit, this.#sel)));
+    for (const el of this.#multiBoxes) el.remove();
+    this.#multiBoxes = [];
+    if (!this.#multi.length) return;
+    const scale = this.#host.scale();
+    for (const hit of this.#multi) {
+      const host = this.#host.pageHost(hit.page);
+      if (!host) continue;
+      const el = document.createElement("div");
+      Object.assign(el.style, {
+        position: "absolute",
+        left: `${hit.x * scale}px`,
+        top: `${hit.y * scale}px`,
+        width: `${hit.width * scale}px`,
+        height: `${hit.height * scale}px`,
+        border: "1px solid #2b7cd3",
+        pointerEvents: "none",
+        zIndex: "6",
+      } satisfies Partial<CSSStyleDeclaration>);
+      host.append(el);
+      this.#multiBoxes.push(el);
+    }
   }
 
   /** Drop the selection state (the frame itself hides on the next place). */
   clear(): void {
     this.#sel = null;
+    this.#multi = [];
+    for (const el of this.#multiBoxes) el.remove();
+    this.#multiBoxes = [];
   }
 
   /** Enter crop mode on the selected image (the context menu's Crop). False
@@ -192,6 +279,7 @@ export class DrawingGestures {
   }
 
   destroy(): void {
+    this.clear();
     this.#overlay.hide();
     this.#overlay.el.remove();
     this.#crop.el.remove();
@@ -272,4 +360,16 @@ export class DrawingGestures {
     if (nodePos == null) return;
     this.#host.editor().commands["rotate-drawing"](JSON.stringify(delta));
   }
+}
+
+/** Two hits identify the same drawing: same host paragraph, drawing index,
+ *  kind, and group-member path. */
+function sameHit(a: DrawingHit, b: DrawingHit): boolean {
+  const path = (p?: readonly number[]): string => (p ?? []).join(",");
+  return (
+    a.para === b.para &&
+    a.index === b.index &&
+    a.kind === b.kind &&
+    path(a.childPath) === path(b.childPath)
+  );
 }

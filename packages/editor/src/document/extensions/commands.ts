@@ -7,6 +7,7 @@ import {
   ORDERED_FORMATS,
 } from "@docen/docx";
 import { Extension } from "@docen/docx/core";
+import { EMU_PER_PX } from "@docen/layout";
 import type { Node as PMNode, ResolvedPos } from "@tiptap/pm/model";
 import type { Mark } from "@tiptap/pm/model";
 import type { EditorState } from "@tiptap/pm/state";
@@ -14,6 +15,7 @@ import type { Transaction } from "@tiptap/pm/state";
 import { NodeSelection, TextSelection } from "@tiptap/pm/state";
 import { DocAttrStep } from "@tiptap/pm/transform";
 
+import { freshChildEmu, memberEmuOf, unionBox, type Box } from "../../drawing";
 import { CellSelection, cellsInRect } from "../canvas/cell-selection";
 
 /**
@@ -157,6 +159,13 @@ declare module "@tiptap/core" {
       rotate: (value?: string) => ReturnType;
       position: (value?: string) => ReturnType;
       "align-objects": (value?: string) => ReturnType;
+      // Group/Ungroup/Distribute — the Arrange group's multi-selection
+      // actions. payload is JSON {members: [{pos, box}]} with the member page
+      // boxes in px (the multi-selection overlay's hit boxes); distribute's
+      // value is "h" | "v".
+      "drawing-group": (payload?: string) => ReturnType;
+      "drawing-ungroup": () => ReturnType;
+      "drawing-distribute": (value?: string, payload?: string) => ReturnType;
     };
   }
 }
@@ -266,6 +275,9 @@ export const WIRED_DISPATCH: ReadonlySet<string> = new Set([
   "rotate",
   "position",
   "align-objects",
+  "drawing-group",
+  "drawing-ungroup",
+  "drawing-distribute",
   // Review tab revision tracking (the docenTrackChanges extension).
   "track-changes",
   "accept-change",
@@ -853,17 +865,28 @@ function floatingDrawingAt(
 ): { pos: number; attrs: Record<string, unknown>; kind: "image" | "shape" | "group" } | null {
   const sel = state.selection;
   if (!(sel instanceof NodeSelection)) return null;
-  const attrs = sel.node.attrs as Record<string, unknown>;
-  if (sel.node.type.name === "image") {
-    return attrs.floating ? { pos: sel.from, attrs, kind: "image" } : null;
+  return drawingAtPos(state.doc, sel.from);
+}
+
+/** The floating drawing at a document position — floatingDrawingAt's by-pos
+ *  form, for the multi-selection payload (no NodeSelection involved). */
+function drawingAtPos(
+  doc: PMNode,
+  pos: number,
+): { pos: number; attrs: Record<string, unknown>; kind: "image" | "shape" | "group" } | null {
+  const node = doc.nodeAt(pos);
+  if (!node) return null;
+  const attrs = node.attrs as Record<string, unknown>;
+  if (node.type.name === "image") {
+    return attrs.floating ? { pos, attrs, kind: "image" } : null;
   }
-  if (sel.node.type.name === "wpsShape") {
+  if (node.type.name === "wpsShape") {
     const shape = attrs.wpsShape as Record<string, unknown> | null;
-    return shape?.floating ? { pos: sel.from, attrs, kind: "shape" } : null;
+    return shape?.floating ? { pos, attrs, kind: "shape" } : null;
   }
-  if (sel.node.type.name === "wpgGroup") {
+  if (node.type.name === "wpgGroup") {
     const group = attrs.wpgGroup as Record<string, unknown> | null;
-    return group?.floating ? { pos: sel.from, attrs, kind: "group" } : null;
+    return group?.floating ? { pos, attrs, kind: "group" } : null;
   }
   return null;
 }
@@ -928,6 +951,180 @@ function stampFloating(
   floating: Record<string, unknown>,
 ): boolean {
   return stampAttrs(tr, target, withFloating(target, floating));
+}
+
+/** A floating whose offsets moved by (dx, dy) EMU — group/ungroup/distribute's
+ *  shared write. The caller guarantees both offsets are numbers. */
+function offsetFloating(
+  floating: Record<string, unknown>,
+  dx: number,
+  dy: number,
+): Record<string, unknown> {
+  const h = { ...(floating.horizontalPosition as Record<string, unknown>) };
+  const v = { ...(floating.verticalPosition as Record<string, unknown>) };
+  h.offset = (h.offset as number) + dx;
+  v.offset = (v.offset as number) + dy;
+  return { ...floating, horizontalPosition: h, verticalPosition: v };
+}
+
+// ── Group/Ungroup member mapping (Word's Group/Ungroup on a selection) ──────
+
+/** One member's attrs re-homed into a fresh group's child space: the image's
+ *  EMU box moves to groupXfrm (its floating dropped), the shape's
+ *  transformation becomes the child-space offset form, a nested group's
+ *  payload flips to the GroupMediaData child-space transformation. Everything
+ *  else (src/crop/fill/body) rides along untouched. */
+function memberInGroupAttrs(
+  kind: "image" | "shape" | "group",
+  attrs: Record<string, unknown>,
+  child: { x: number; y: number; cx: number; cy: number },
+): Record<string, unknown> {
+  if (kind === "image") {
+    const next: Record<string, unknown> = { ...attrs, groupXfrm: child };
+    delete next.floating;
+    return next;
+  }
+  if (kind === "shape") {
+    const shape = { ...(attrs.wpsShape as Record<string, unknown>) };
+    delete shape.floating;
+    shape.transformation = {
+      ...(shape.transformation as Record<string, unknown> | undefined),
+      offset: { left: child.x, top: child.y },
+      width: child.cx,
+      height: child.cy,
+    };
+    return { ...attrs, wpsShape: shape };
+  }
+  // A nested group: GroupOptions form (transformation {width,height} +
+  // floating) → GroupMediaData child form (offset.emus + emus), its own
+  // chOff/chExt preserved — the member's inner space is untouched.
+  const px = (emu: number): number => Math.round(emu / EMU_PER_PX);
+  const { transformation: _t, floating: _f, ...rest } = attrs.wpgGroup as Record<string, unknown>;
+  return {
+    ...attrs,
+    wpgGroup: {
+      ...rest,
+      transformation: {
+        offset: { emus: { x: child.x, y: child.y }, pixels: { x: px(child.x), y: px(child.y) } },
+        emus: { x: child.cx, y: child.cy },
+        pixels: { x: px(child.cx), y: px(child.cy) },
+      },
+    },
+  };
+}
+
+/** A member node's child-space EMU box — the group-child geometry each member
+ *  kind carries (image: groupXfrm; shape: transformation.offset; nested group:
+ *  the MediaDataTransformation pair). Null for members whose payload cannot
+ *  carry geometry (passthrough atoms). */
+function childBoxOf(member: PMNode): { x: number; y: number; cx: number; cy: number } | null {
+  const attrs = member.attrs as Record<string, unknown>;
+  if (member.type.name === "image") {
+    const xfrm = attrs.groupXfrm as { x: number; y: number; cx: number; cy: number } | undefined;
+    return xfrm && Number.isFinite(xfrm.cx) && Number.isFinite(xfrm.cy) ? xfrm : null;
+  }
+  if (member.type.name === "wpsShape") {
+    const t = (attrs.wpsShape as Record<string, unknown>)?.transformation as
+      | { offset?: { left?: number; top?: number }; width?: unknown; height?: unknown }
+      | undefined;
+    const cx = parseMeasureEmu(t?.width);
+    const cy = parseMeasureEmu(t?.height);
+    if (!t || cx == null || cy == null) return null;
+    return { x: t.offset?.left ?? 0, y: t.offset?.top ?? 0, cx, cy };
+  }
+  if (member.type.name === "wpgGroup") {
+    const t = (attrs.wpgGroup as Record<string, unknown>)?.transformation as
+      | { offset?: { emus?: { x?: number; y?: number } }; emus?: { x?: number; y?: number } }
+      | undefined;
+    if (typeof t?.emus?.x !== "number" || typeof t.emus.y !== "number") return null;
+    return { x: t.offset?.emus?.x ?? 0, y: t.offset?.emus?.y ?? 0, cx: t.emus.x, cy: t.emus.y };
+  }
+  return null;
+}
+
+/** Ungroup's reverse of memberInGroupAttrs: one member node back to a
+ *  standalone floating node, sized `back.cx × back.cy` EMU and anchored
+ *  `back.(dx,dy)` EMU from the group's own floating (it lands where the group
+ *  drew it — Word's Ungroup keeps positions). Null for a member with no
+ *  standalone carrier (chart/content-part passthrough atoms) — the command
+ *  declines rather than dropping members. */
+function memberOutNode(
+  member: PMNode,
+  groupFloating: Record<string, unknown>,
+  back: { dx: number; dy: number; cx: number; cy: number },
+): PMNode | null {
+  const attrs = member.attrs as Record<string, unknown>;
+  const floating = offsetFloating(groupFloating, back.dx, back.dy);
+  if (member.type.name === "image") {
+    if (!attrs.groupXfrm) return null;
+    const next: Record<string, unknown> = {
+      ...attrs,
+      width: Math.round(back.cx / EMU_PER_PX),
+      height: Math.round(back.cy / EMU_PER_PX),
+      floating,
+    };
+    delete next.groupXfrm;
+    return member.type.create(next, member.content, member.marks);
+  }
+  if (member.type.name === "wpsShape") {
+    const shape = { ...(attrs.wpsShape as Record<string, unknown>) };
+    const t = { ...(shape.transformation as Record<string, unknown>) };
+    delete t.offset;
+    t.width = back.cx;
+    t.height = back.cy;
+    shape.transformation = t;
+    shape.floating = floating;
+    return member.type.create({ ...attrs, wpsShape: shape }, member.content, member.marks);
+  }
+  if (member.type.name === "wpgGroup") {
+    // Back to the GroupOptions form: extent from the mapped size, floating
+    // from the group's, its own chOff/chExt preserved.
+    const { transformation: _t, ...rest } = attrs.wpgGroup as Record<string, unknown>;
+    return member.type.create(
+      {
+        ...attrs,
+        wpgGroup: { ...rest, transformation: { width: back.cx, height: back.cy }, floating },
+      },
+      member.content,
+      member.marks,
+    );
+  }
+  return null;
+}
+
+/** The multi-selection payload group and distribute share: JSON
+ *  {members: [{pos, box}]} with page-px boxes (the multi-selection overlay's
+ *  hit boxes), every member a floating drawing. Sorted by document position —
+ *  group replaces at the first; distribute re-sorts per axis. */
+function multiMembersOf(
+  state: EditorState,
+  payload: string | undefined,
+): { target: NonNullable<ReturnType<typeof drawingAtPos>>; box: Box }[] | null {
+  if (!payload) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(payload);
+  } catch {
+    return null;
+  }
+  const members = (parsed as { members?: unknown } | null)?.members;
+  if (!Array.isArray(members) || members.length < 2) return null;
+  const out: { target: NonNullable<ReturnType<typeof drawingAtPos>>; box: Box }[] = [];
+  for (const m of members) {
+    const { pos, box } = (m ?? {}) as { pos?: unknown; box?: Partial<Box> };
+    const dims = box && [box.x, box.y, box.width, box.height];
+    if (
+      typeof pos !== "number" ||
+      !dims ||
+      dims.some((n) => typeof n !== "number" || !Number.isFinite(n))
+    )
+      return null;
+    const target = drawingAtPos(state.doc, pos);
+    if (!target) return null;
+    out.push({ target, box: box as Box });
+  }
+  out.sort((a, b) => a.target.pos - b.target.pos);
+  return out;
 }
 
 /** The Size-and-Position dialog's Floating half — position bases, layout
@@ -1210,6 +1407,28 @@ function parseMeasureTwip(v: unknown): number | null {
   const m = /^(-?[\d.]+)\s*(pt|pc|in|mm|cm|px)$/.exec(v.trim());
   if (!m) return null;
   const unit = MEASURE_TWIP_UNITS.find(([u]) => u === m[2]);
+  return unit ? Number(m[1]) * unit[1] : null;
+}
+
+/** parseMeasureEmu — parseMeasureTwip's EMU twin, for the DrawingML length
+ *  fields (shape/group transformation widths, which may arrive as a
+ *  UniversalMeasure string "5cm" or a bare EMU number). */
+const MEASURE_EMU_UNITS: ReadonlyArray<readonly [string, number]> = [
+  ["pt", 12700],
+  ["pc", 152400],
+  ["in", 914400],
+  ["mm", 36000],
+  ["cm", 360000],
+  ["px", 9525],
+];
+function parseMeasureEmu(v: unknown): number | null {
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  if (typeof v !== "string") return null;
+  const bare = Number(v);
+  if (Number.isFinite(bare)) return bare;
+  const m = /^(-?[\d.]+)\s*(pt|pc|in|mm|cm|px)$/.exec(v.trim());
+  if (!m) return null;
+  const unit = MEASURE_EMU_UNITS.find(([u]) => u === m[2]);
   return unit ? Number(m[1]) * unit[1] : null;
 }
 
@@ -3464,6 +3683,169 @@ export const DocumentCommands = Extension.create({
             ...(h != null ? { horizontalPosition: { relative: "margin", align: h } } : {}),
             ...(v != null ? { verticalPosition: { relative: "margin", align: v } } : {}),
           });
+        },
+      // Word's Group on a multi-selection: one wpgGroup node replaces the
+      // members (at the document-first member's position — the anchor that
+      // contributes the floating). The fresh group is 1:1 (chOff 0, chExt =
+      // ext), so first grouping is lossless; the anchor's offsets shift by
+      // the union's top-left minus the anchor's box, keeping the union where
+      // its members sat on the page.
+      "drawing-group":
+        (payload?) =>
+        ({ state, tr }) => {
+          const members = multiMembersOf(state, payload);
+          if (!members) return false;
+          const anchor = members[0]!;
+          const anchorFloating = floatingOf(anchor.target);
+          const h = anchorFloating.horizontalPosition as Record<string, unknown> | undefined;
+          const v = anchorFloating.verticalPosition as Record<string, unknown> | undefined;
+          // An align-anchored float has no offset to shift the union onto —
+          // decline rather than inventing a base.
+          if (typeof h?.offset !== "number" || typeof v?.offset !== "number") return false;
+          const union = unionBox(members.map((m) => m.box));
+          const emu = (n: number): number => Math.round(n * EMU_PER_PX);
+          const groupNode = state.schema.nodes.wpgGroup.create(
+            {
+              wpgGroup: {
+                transformation: { width: emu(union.width), height: emu(union.height) },
+                floating: offsetFloating(
+                  anchorFloating,
+                  emu(union.x - anchor.box.x),
+                  emu(union.y - anchor.box.y),
+                ),
+                childOffsetX: 0,
+                childOffsetY: 0,
+                childExtentWidth: emu(union.width),
+                childExtentHeight: emu(union.height),
+              },
+            },
+            members.map(({ target, box }) => {
+              const node = state.doc.nodeAt(target.pos)!;
+              return node.type.create(
+                memberInGroupAttrs(
+                  target.kind,
+                  node.attrs as Record<string, unknown>,
+                  freshChildEmu(box, union),
+                ),
+                node.content,
+                node.marks,
+              );
+            }),
+          );
+          // Delete the non-anchor members first (descending — positions stay
+          // valid), then replace the anchor in place.
+          for (let i = members.length - 1; i >= 1; i -= 1) {
+            const { target } = members[i]!;
+            const node = state.doc.nodeAt(target.pos)!;
+            tr.delete(target.pos, target.pos + node.nodeSize);
+          }
+          const anchorNode = state.doc.nodeAt(anchor.target.pos)!;
+          tr.replaceWith(anchor.target.pos, anchor.target.pos + anchorNode.nodeSize, groupNode);
+          tr.setSelection(NodeSelection.create(tr.doc, anchor.target.pos));
+          return true;
+        },
+      // Word's Ungroup on a floating group: each member returns to a
+      // standalone floating node at the position the group drew it (the
+      // group's offsets plus the child-space position through ext/chExt).
+      // Pure attrs — no page geometry. Passthrough members (charts, content
+      // parts) have no standalone carrier, so such a group declines.
+      // Word fires it from inside an entered group too — a member's
+      // NodeSelection resolves to its nearest wpgGroup ancestor (one level).
+      "drawing-ungroup":
+        () =>
+        ({ state, tr }) => {
+          let target = floatingDrawingAt(state);
+          if ((!target || target.kind !== "group") && state.selection instanceof NodeSelection) {
+            const $from = state.doc.resolve(state.selection.from);
+            for (let d = $from.depth; d > 0; d--) {
+              if ($from.node(d).type.name === "wpgGroup") {
+                target = drawingAtPos(state.doc, $from.before(d));
+                break;
+              }
+            }
+          }
+          if (!target || target.kind !== "group") return false;
+          const group = target.attrs.wpgGroup as Record<string, unknown>;
+          const t = (group.transformation ?? {}) as Record<string, unknown>;
+          const extW = parseMeasureEmu(t.width);
+          const extH = parseMeasureEmu(t.height);
+          if (extW == null || extH == null) return false;
+          const chW = group.childExtentWidth;
+          const chH = group.childExtentHeight;
+          const chExt =
+            typeof chW === "number" && chW > 0 && typeof chH === "number" && chH > 0
+              ? { x: chW, y: chH }
+              : undefined;
+          const chOff = {
+            x: typeof group.childOffsetX === "number" ? group.childOffsetX : 0,
+            y: typeof group.childOffsetY === "number" ? group.childOffsetY : 0,
+          };
+          const floating = floatingOf(target);
+          const h = floating.horizontalPosition as Record<string, unknown> | undefined;
+          const v = floating.verticalPosition as Record<string, unknown> | undefined;
+          if (typeof h?.offset !== "number" || typeof v?.offset !== "number") return false;
+          const groupNode = state.doc.nodeAt(target.pos)!;
+          const out: PMNode[] = [];
+          const members: PMNode[] = [];
+          groupNode.forEach((child) => members.push(child));
+          for (const member of members) {
+            const child = childBoxOf(member);
+            if (!child) return false;
+            const node = memberOutNode(
+              member,
+              floating,
+              memberEmuOf(child, chOff, { x: extW, y: extH }, chExt),
+            );
+            if (!node) return false;
+            out.push(node);
+          }
+          tr.replaceWith(target.pos, target.pos + groupNode.nodeSize, out);
+          tr.setSelection(NodeSelection.create(tr.doc, target.pos));
+          return true;
+        },
+      // Word's Distribute Horizontally/Vertically: equal gaps between the
+      // selected drawings' page boxes (the outer two hold still, the middles
+      // re-space). Deltas are differences, so page-px × EMU_PER_PX lands
+      // straight onto the floating offsets regardless of each anchor base.
+      // payload is JSON {members: [{pos, box}]} (the host assembles it from
+      // the multi-selection overlay; the ribbon dispatch carries only "h"/"v").
+      "drawing-distribute":
+        (value, payload) =>
+        ({ state, tr }) => {
+          if (value !== "h" && value !== "v") return false;
+          const members = multiMembersOf(state, payload);
+          if (!members) return false;
+          const axis: "x" | "y" = value === "h" ? "x" : "y";
+          const span: "width" | "height" = value === "h" ? "width" : "height";
+          const sorted = [...members].sort((a, b) => a.box[axis] - b.box[axis]);
+          const first = sorted[0]!;
+          const last = sorted[sorted.length - 1]!;
+          const gap =
+            (last.box[axis] +
+              last.box[span] -
+              first.box[axis] -
+              sorted.reduce((sum, m) => sum + m.box[span], 0)) /
+            (sorted.length - 1);
+          let cursor = first.box[axis];
+          for (const { target, box } of sorted) {
+            const delta = Math.round((cursor - box[axis]) * EMU_PER_PX);
+            if (delta !== 0) {
+              const floating = floatingOf(target);
+              const h = floating.horizontalPosition as Record<string, unknown> | undefined;
+              const v = floating.verticalPosition as Record<string, unknown> | undefined;
+              if (typeof h?.offset !== "number" || typeof v?.offset !== "number") return false;
+              stampFloating(
+                tr,
+                target,
+                offsetFloating(floating, value === "h" ? delta : 0, value === "v" ? delta : 0),
+              );
+            }
+            cursor += box[span] + gap;
+          }
+          // Keep the multi-selection's anchor (the document-first member)
+          // selected — stampFloating left the last moved member selected.
+          tr.setSelection(NodeSelection.create(tr.doc, members[0]!.target.pos));
+          return true;
         },
     };
   },

@@ -29,14 +29,17 @@ export interface DrawingDocxHost {
  *  (projectDrawings' run order = the paragraph's content order), "inline"
  *  counts the paragraph's non-floating images (the line items' picture
  *  order). A hit with a childPath targets a group member: it resolves to
- *  the member only while the group is entered (the selection sits inside
- *  the group's span — Word: a click selects the group until then). */
+ *  the member only while the group is entered (the NodeSelection sits on a
+ *  member INSIDE the group — selecting the group itself does not enter it,
+ *  or grouping would leave the next click stuck on a member) or the click
+ *  is the entry double click (`enterGroup`). */
 export function drawingNodePos(
   host: DrawingDocxHost,
   para: unknown,
   index: number,
   kind: "drawing" | "inline",
   childPath?: readonly number[],
+  enterGroup?: boolean,
 ): number | null {
   const innerPos = host.posOfPara(para);
   if (innerPos == null) return null;
@@ -58,7 +61,9 @@ export function drawingNodePos(
   const group = host.doc.nodeAt(hit);
   if (!group) return null;
   const sel = host.selection;
-  const inside = sel instanceof NodeSelection && sel.from >= hit && sel.from < hit + group.nodeSize;
+  const inside =
+    enterGroup ||
+    (sel instanceof NodeSelection && sel.from > hit && sel.from < hit + group.nodeSize);
   if (!inside) return hit;
   return descendGroupChild(host.doc, hit, childPath) ?? hit;
 }

@@ -1075,7 +1075,8 @@ class DocenDocument extends AddinHost<Editor> {
       // NodeSelection (projectDrawings collects drawings in run order, the
       // same order the paragraph's content carries the nodes).
       drawingAt: (page, lx, ly) => this.#stage?.drawingAt(page, lx, ly) ?? null,
-      drawingSelection: (hit) => this.#drawingNodePos(hit.para, hit.index, hit.kind, hit.childPath),
+      drawingSelection: (hit, enter) =>
+        this.#drawingNodePos(hit.para, hit.index, hit.kind, hit.childPath, enter),
       shapeTextStacks: () => this.#stage?.allShapeTextStacks() ?? [],
       shapeResolve: (host) => {
         const pos = this.#drawingNodePos(host.para, host.index, "drawing");
@@ -1664,6 +1665,7 @@ class DocenDocument extends AddinHost<Editor> {
     index: number,
     kind: "drawing" | "inline",
     childPath?: readonly number[],
+    enterGroup?: boolean,
   ): number | null {
     const bridge = this.#bridge;
     if (!bridge) return null;
@@ -1677,6 +1679,7 @@ class DocenDocument extends AddinHost<Editor> {
       index,
       kind,
       childPath,
+      enterGroup,
     );
   }
 
@@ -3988,6 +3991,20 @@ class DocenDocument extends AddinHost<Editor> {
     // Word Count (ribbon Review → Proofing) → the statistics dialog.
     if (name === "word-count") {
       this.#showWordCount();
+      return;
+    }
+    // Word's Group / Distribute act on the drawing multi-selection — the
+    // ribbon event carries no members, so the bridge's Shift+Click set (the
+    // primary plus the toggled members) assembles the payload here. Ungroup
+    // needs no payload and rides the wired command directly.
+    if (name === "drawing-group" || name === "drawing-distribute") {
+      const editor = this.#bridge?.activeEditor() ?? this.editor;
+      const members = this.#bridge?.drawingMulti();
+      if (editor && members) {
+        const payload = JSON.stringify({ members });
+        if (name === "drawing-group") editor.commands["drawing-group"](payload);
+        else editor.commands["drawing-distribute"](value, payload);
+      }
       return;
     }
     // The QAT history flyout's entries arrive as undo/redo carrying their step

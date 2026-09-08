@@ -233,6 +233,7 @@ export const ribbonEn: AdditionalLanguage = {
     "ribbon.cmd.selection-pane": "Selection Pane",
     "ribbon.cmd.drawing-height": "Height",
     "ribbon.cmd.drawing-width": "Width",
+    "ribbon.cmd.drawing-group": "Group",
     "ribbon.cmd.crop": "Crop",
     // --- Commands: Shape Format (contextual) ---
     "ribbon.cmd.edit-shape": "Edit Shape",
@@ -1302,6 +1303,7 @@ export const ribbonZhCN: AdditionalLanguage = {
     "ribbon.cmd.selection-pane": "选择窗格",
     "ribbon.cmd.drawing-height": "高度",
     "ribbon.cmd.drawing-width": "宽度",
+    "ribbon.cmd.drawing-group": "组合",
     "ribbon.cmd.crop": "裁剪",
     // --- Commands: Shape Format (contextual) ---
     "ribbon.cmd.edit-shape": "编辑形状",

@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
 
-import { cropFullBox, handleAt, resizeBox, resizeCrop, rotateDelta, type Box } from "./geometry";
+import {
+  cropFullBox,
+  freshChildEmu,
+  handleAt,
+  memberEmuOf,
+  resizeBox,
+  resizeCrop,
+  rotateDelta,
+  unionBox,
+  type Box,
+} from "./geometry";
 
 const box: Box = { x: 100, y: 80, width: 200, height: 100 };
 
@@ -138,5 +148,76 @@ describe("resizeCrop", () => {
     const next = resizeCrop(crop, "w", 5, 0, 0, 0);
     expect(next.left + next.right).toBeLessThanOrEqual(0.9);
     expect(next.left).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe("unionBox", () => {
+  it("bounds every member", () => {
+    expect(
+      unionBox([
+        { x: 100, y: 80, width: 200, height: 100 },
+        { x: 50, y: 150, width: 120, height: 60 },
+      ]),
+    ).toEqual({ x: 50, y: 80, width: 250, height: 130 });
+  });
+});
+
+describe("freshChildEmu / memberEmuOf round-trip", () => {
+  const members: Box[] = [
+    { x: 400, y: 300, width: 200, height: 100 },
+    { x: 350, y: 350, width: 120, height: 60 },
+  ];
+  const union = unionBox(members);
+  const EMU = 9525;
+
+  it("maps each member to its EMU offset from the union's top-left", () => {
+    expect(freshChildEmu(members[0]!, union)).toEqual({
+      x: 50 * EMU,
+      y: 0,
+      cx: 200 * EMU,
+      cy: 100 * EMU,
+    });
+    expect(freshChildEmu(members[1]!, union)).toEqual({
+      x: 0,
+      y: 50 * EMU,
+      cx: 120 * EMU,
+      cy: 60 * EMU,
+    });
+  });
+
+  it("reverses exactly on a fresh 1:1 group (chOff 0, chExt = ext)", () => {
+    // Group the members, then ungroup: every child comes back to its page
+    // position within 1 EMU of rounding.
+    const ext = { x: union.width * EMU, y: union.height * EMU };
+    for (const m of members) {
+      const child = freshChildEmu(m, union);
+      const back = memberEmuOf(child, { x: 0, y: 0 }, ext, ext);
+      expect(Math.abs(back.dx - (m.x - union.x) * EMU)).toBeLessThanOrEqual(1);
+      expect(Math.abs(back.dy - (m.y - union.y) * EMU)).toBeLessThanOrEqual(1);
+      expect(Math.abs(back.cx - m.width * EMU)).toBeLessThanOrEqual(1);
+      expect(Math.abs(back.cy - m.height * EMU)).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it("scales through a non-1:1 child space (ext ≠ chExt)", () => {
+    // A Word-authored group with chExt half its display extent: child EMU
+    // covers the same area at half the page scale.
+    const back = memberEmuOf(
+      { x: 100000, y: 0, cx: 95250, cy: 95250 },
+      { x: 50000, y: 0 },
+      { x: 190500, y: 190500 },
+      { x: 95250, y: 95250 },
+    );
+    expect(back).toEqual({ dx: 100000, dy: 0, cx: 190500, cy: 190500 });
+  });
+
+  it("treats a missing chExt as 1:1 (the projection's childScale convention)", () => {
+    const back = memberEmuOf(
+      { x: 100000, y: 50000, cx: 9525, cy: 9525 },
+      { x: 100000, y: 50000 },
+      { x: 190500, y: 190500 },
+      undefined,
+    );
+    expect(back).toEqual({ dx: 0, dy: 0, cx: 9525, cy: 9525 });
   });
 });

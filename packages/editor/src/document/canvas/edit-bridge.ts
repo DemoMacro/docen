@@ -152,13 +152,17 @@ export interface EditBridgeOptions {
    *  cannot pair the host, e.g. a furniture story paragraph). A hit with a
    *  `childPath` targets a group member: the resolver decides between the
    *  member node (the group is entered) and the group itself (Word: a click
-   *  selects the group until then). */
-  drawingSelection?: (hit: {
-    para: unknown;
-    index: number;
-    kind: "drawing" | "inline";
-    childPath?: readonly number[];
-  }) => number | null;
+   *  selects the group until then). `enter` marks the entry double click —
+   *  the member resolves even when the group was not entered yet. */
+  drawingSelection?: (
+    hit: {
+      para: unknown;
+      index: number;
+      kind: "drawing" | "inline";
+      childPath?: readonly number[];
+    },
+    enter?: boolean,
+  ) => number | null;
   /** Re-resolves a selected drawing's painted box after a re-render (the
    *  selection drops when the drawing no longer paints). `childPath` matches
    *  a group member's box. */
@@ -241,6 +245,12 @@ export interface EditBridge {
    *  crop handles; Enter / a press outside commits, Esc cancels. False when
    *  the selection isn't a source-carrying image. */
   enterCropMode(): boolean;
+  /** The multi-selection's members (primary + Shift+Click set) with their PM
+   *  positions and page boxes — the host assembles the group/distribute
+   *  payloads from it. Null when fewer than two resolve. */
+  drawingMulti():
+    | { pos: number; box: { x: number; y: number; width: number; height: number } }[]
+    | null;
   /** The selection's last-line rect against its page frame — frame-relative
    * screen px (zoom applied), the anchor a floating comment compose positions
    * at (Word hangs the reply box in the margin beside the anchored text).
@@ -749,7 +759,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
    *  surface; the bridge keeps only the hit chains that route into it. */
   const draw = new DrawingGestures({
     editor: () => main.editor,
-    drawingSelection: (hit) => opts.drawingSelection?.(hit) ?? null,
+    drawingSelection: (hit, enter) => opts.drawingSelection?.(hit, enter) ?? null,
     drawingBoxOf: (para, index, kind, childPath) =>
       opts.drawingBoxOf?.(para, index, kind, childPath) ?? null,
     pageHost: (page) => opts.pageHost?.(page) ?? null,
@@ -1246,6 +1256,14 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     // any other click drops a standing drawing selection first.
     const drawHit = hit && opts.drawingAt ? opts.drawingAt(hit.page, hit.lx, hit.ly) : null;
     if (drawHit) {
+      // Word: Shift+Click toggles a floating drawing into the multi-selection
+      // (the group/distribute/align set) — a hit it declines (inline art, an
+      // unpairable box) falls through to the plain click paths below.
+      if (event.shiftKey && draw.toggleMulti(drawHit)) {
+        ta.focus();
+        ta.value = "";
+        return;
+      }
       // Word: a press on the already-selected offset-anchored floating
       // drawing starts a move drag (the frame trails the pointer, release
       // writes the new offsets); the drawing itself stays put until the
@@ -1286,8 +1304,10 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       // A drawing the PM side cannot pair (furniture-anchored art whose host
       // paragraph lives outside the main doc, a stale box after a re-layout)
       // must not swallow the click — fall through to the text placement
-      // (Word: body clicks pass through header-anchored shapes).
-      if (draw.select(drawHit)) {
+      // (Word: body clicks pass through header-anchored shapes). A double
+      // click enters a group (the member hit targets the member); a single
+      // click keeps selecting the group as a whole.
+      if (draw.select(drawHit, dbl)) {
         ta.focus();
         ta.value = "";
         return;
@@ -2269,6 +2289,9 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     },
     enterCropMode(): boolean {
       return draw.enterCropMode();
+    },
+    drawingMulti() {
+      return draw.multiPayload();
     },
     commentAnchorRect(from, to) {
       // Comments anchor main-doc text — a furniture story's geometry cannot

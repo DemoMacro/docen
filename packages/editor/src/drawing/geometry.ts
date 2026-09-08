@@ -1,9 +1,11 @@
 /**
  * Drawing-editor geometry — the format-independent math behind the selection
  * frame: which resize handle a pointer grabbed, and what the box becomes when
- * that handle drags. Pure functions on plain rects; the host adapter turns the
- * resulting box back into document attrs (docx today, pptx/xlsx tomorrow).
+ * that handle drags; plus the group/ungroup child-space mapping. Pure
+ * functions on plain rects; the host adapter turns the resulting box back
+ * into document attrs (docx today, pptx/xlsx tomorrow).
  */
+import { EMU_PER_PX } from "@docen/layout";
 
 export type HandleId = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
 
@@ -193,4 +195,60 @@ export function resizeCrop(
  *  MAX − MIN of the axis visible. */
 function clampCrop(value: number, opposite: number, min: number, max: number): number {
   return Math.min(Math.max(value, 0), Math.max(0, max - opposite - min));
+}
+
+// ── Group/ungroup child-space mapping (Word's Group/Ungroup math) ──────────
+
+/** The bounding box around every member — the fresh group's page box. */
+export function unionBox(boxes: readonly Box[]): Box {
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  for (const b of boxes) {
+    x0 = Math.min(x0, b.x);
+    y0 = Math.min(y0, b.y);
+    x1 = Math.max(x1, b.x + b.width);
+    y1 = Math.max(y1, b.y + b.height);
+  }
+  return { x: x0, y: y0, width: x1 - x0, height: y1 - y0 };
+}
+
+/** A member's child-space EMU box for a FRESH group (Word's Group on a
+ *  multi-selection): the new group is 1:1 — chOff 0 and chExt equal to the
+ *  group's own extent — so a child coordinate is just the member's offset
+ *  from the union's top-left in EMU. First grouping is therefore lossless.
+ *  Page px in, EMU out. */
+export function freshChildEmu(
+  box: Box,
+  union: Box,
+): { x: number; y: number; cx: number; cy: number } {
+  const emu = (n: number): number => Math.round(n * EMU_PER_PX);
+  return {
+    x: emu(box.x - union.x),
+    y: emu(box.y - union.y),
+    cx: emu(box.width),
+    cy: emu(box.height),
+  };
+}
+
+/** Ungroup's reverse mapping: a member's offset from the group's own top-left
+ *  and its size, both in the group's EMU extent space. The child space maps
+ *  onto the page through k = ext/chExt per axis (a missing or zero chExt
+ *  means 1:1 — the same convention the projection's childScale applies);
+ *  everything is attrs-resident, so ungroup needs no page geometry. */
+export function memberEmuOf(
+  child: { x: number; y: number; cx: number; cy: number },
+  chOff: { x: number; y: number },
+  ext: { x: number; y: number },
+  chExt: { x: number; y: number } | undefined,
+): { dx: number; dy: number; cx: number; cy: number } {
+  const kx = chExt && chExt.x > 0 ? ext.x / chExt.x : 1;
+  const ky = chExt && chExt.y > 0 ? ext.y / chExt.y : 1;
+  return {
+    dx: Math.round((child.x - chOff.x) * kx),
+    dy: Math.round((child.y - chOff.y) * ky),
+    cx: Math.round(child.cx * kx),
+    cy: Math.round(child.cy * ky),
+  };
 }
