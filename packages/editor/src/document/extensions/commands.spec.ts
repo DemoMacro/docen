@@ -1473,6 +1473,89 @@ describe("drawing-crop-reset", () => {
   });
 });
 
+describe("drawing-crop-aspect", () => {
+  it("squares a landscape picture with 1:1, trimming the sides only", () => {
+    // 166×150: the frame is wider than square, so 1:1 keeps the full height
+    // and insets left/right by (1 − 150/166)/2 ≈ 0.0482 of the source.
+    const editor = new Editor({
+      element: null,
+      extensions: EXTENSIONS,
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [{ type: "image", attrs: { src: "data:,", width: 166, height: 150 } }],
+          },
+        ],
+      },
+    });
+    selectFloat(editor);
+    expect(editor.commands["drawing-crop-aspect"]("1:1")).toBe(true);
+    const attrs = firstNodeOf(editor, "image").attrs as Record<string, unknown>;
+    expect(attrs.crop).toEqual({ left: 4819, top: 0, right: 4819, bottom: 0 });
+    expect(attrs.width).toBe(150);
+    expect(attrs.height).toBe(150);
+    expect(editor.state.selection instanceof NodeSelection).toBe(true);
+  });
+
+  it("trims the sides for a portrait target on a landscape frame", () => {
+    const editor = new Editor({
+      element: null,
+      extensions: EXTENSIONS,
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [{ type: "image", attrs: { src: "data:,", width: 200, height: 100 } }],
+          },
+        ],
+      },
+    });
+    selectFloat(editor);
+    expect(editor.commands["drawing-crop-aspect"]("2:3")).toBe(true);
+    const attrs = firstNodeOf(editor, "image").attrs as Record<string, unknown>;
+    // frame 2.0 vs target 2/3 → the height keeps, the width drops to 1/3 →
+    // inset (1 − 1/3)/2 = 1/3 on each side.
+    expect(attrs.crop).toEqual({ left: 33333, top: 0, right: 33333, bottom: 0 });
+    expect(attrs.width).toBe(67);
+    expect(attrs.height).toBe(100);
+  });
+
+  it("fits within the already-kept region (a second ratio converges)", () => {
+    const editor = buildWithFloat({
+      horizontalPosition: { relative: "margin", offset: 1000 },
+      verticalPosition: { relative: "paragraph", offset: 2000 },
+    });
+    selectFloat(editor);
+    expect(editor.commands["drawing-crop-apply"]({ left: 0.2, top: 0, right: 0, bottom: 0 })).toBe(
+      true,
+    );
+    // Kept region is 80% wide × full high; the 10×8 extent's frame ratio is
+    // 0.8 < 1 → the width keeps, the height drops to 0.8 → inset 0.1 top and
+    // bottom (the kept left band stays).
+    expect(editor.commands["drawing-crop-aspect"]("1:1")).toBe(true);
+    const attrs = firstNodeOf(editor, "image").attrs as Record<string, unknown>;
+    expect(attrs.crop).toEqual({ left: 20000, top: 10000, right: 0, bottom: 10000 });
+    expect(attrs.width).toBe(8);
+    expect(attrs.height).toBe(8);
+  });
+
+  it("declines malformed ratios and non-image selections", () => {
+    const editor = buildWithFloat({
+      horizontalPosition: { relative: "margin", offset: 1000 },
+      verticalPosition: { relative: "paragraph", offset: 2000 },
+    });
+    expect(editor.commands["drawing-crop-aspect"]("square")).toBe(false);
+    expect(editor.commands["drawing-crop-aspect"]()).toBe(false);
+    selectFloat(editor);
+    expect(editor.commands["drawing-crop-aspect"]("0:3")).toBe(false);
+    editor.commands.setTextSelection(1);
+    expect(editor.commands["drawing-crop-aspect"]("1:1")).toBe(false);
+  });
+});
+
 describe("listLevelStepPatch", () => {
   it("steps bullet level within 0-8 bounds", () => {
     expect(listLevelStepPatch({ bullet: { level: 2 } }, -1)).toEqual({ bullet: { level: 1 } });

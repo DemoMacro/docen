@@ -1743,6 +1743,36 @@ const arrangeGroup = (): RibbonGroup =>
     btn("selection-pane", "selection-pane", { size: "large" }),
   ]);
 
+/** The Crop split's drop-down — Word's Crop menu flattened: the crop action,
+ *  Word's eight Aspect Ratio presets (Word nests them in a Portrait/Landscape
+ *  submenu the flat menu cannot express, so they list in Word's order), and
+ *  the reset. The ratio texts assemble a localized lead with the plain
+ *  "W:H" (the picture-correction pattern). */
+const cropMenuItems = (): RibbonMenuItem[] => {
+  const zh = resolveLang().toLowerCase().startsWith("zh");
+  const portrait = zh ? "纵向" : "Portrait";
+  const landscape = zh ? "横向" : "Landscape";
+  const ratio = (lead: string, r: string): RibbonMenuItem => ({
+    text: `${lead} ${r}`,
+    value: r,
+    event: "drawing-crop-aspect",
+  });
+  return [
+    { text: "ribbon.cmd.crop", event: "drawing-crop" },
+    { text: "-" },
+    ratio(portrait, "2:3"),
+    ratio(portrait, "3:4"),
+    ratio(portrait, "3:5"),
+    ratio(portrait, "4:5"),
+    ratio(landscape, "1:1"),
+    ratio(landscape, "4:3"),
+    ratio(landscape, "5:3"),
+    ratio(landscape, "16:9"),
+    { text: "-" },
+    { text: "context.crop-reset", event: "drawing-crop-reset" },
+  ];
+};
+
 /** The Size group — the numeric Height/Width boxes every drawing tab shares;
  *  pictures add the crop split (a shape has no crop). The host mirrors the
  *  selected drawing's extent into the boxes per transaction (#syncDrawingSize);
@@ -1753,15 +1783,10 @@ const sizeGroup = (id: "picture-size" | "shape-size", withCrop: boolean): Ribbon
     col([input("drawing-height", ""), input("drawing-width", "")]),
     ...(withCrop
       ? [
-          split(
-            "crop",
-            "drawing-crop",
-            [
-              { text: "ribbon.cmd.crop", event: "drawing-crop" },
-              { text: "context.crop-reset", event: "drawing-crop-reset" },
-            ],
-            { size: "large", label: "ribbon.cmd.crop" },
-          ),
+          split("crop", "drawing-crop", cropMenuItems(), {
+            size: "large",
+            label: "ribbon.cmd.crop",
+          }),
         ]
       : []),
   ]);

@@ -136,6 +136,8 @@ declare module "@tiptap/core" {
       "drawing-properties-apply": (patch?: DrawingPropertiesPatch) => ReturnType;
       "drawing-crop-apply": (patch?: DrawingCropPatch) => ReturnType;
       "drawing-crop-reset": () => ReturnType;
+      // Word's Crop → Aspect Ratio presets — a "W:H" ratio string.
+      "drawing-crop-aspect": (value?: string) => ReturnType;
       // Picture Format tab's Size boxes — a measure string ("5cm"/"2in"/…).
       "drawing-width": (value?: string) => ReturnType;
       "drawing-height": (value?: string) => ReturnType;
@@ -259,6 +261,7 @@ export const WIRED_DISPATCH: ReadonlySet<string> = new Set([
   "drawing-properties-apply",
   "drawing-crop-apply",
   "drawing-crop-reset",
+  "drawing-crop-aspect",
   "drawing-width",
   "drawing-height",
   "picture-correction",
@@ -1204,6 +1207,46 @@ function applyFloatingExtras(
   tr.setNodeMarkup(sel.from, undefined, attrs);
   tr.setSelection(NodeSelection.create(tr.doc, sel.from) as never);
   return true;
+}
+
+/** Word's Crop → Aspect Ratio preset — the shared body of
+ *  drawing-crop-aspect. Fits the largest centered rect of the "W:H" ratio
+ *  inside the picture's kept region: the kept fractions are source-space but
+ *  the ratio applies to the content's pixel proportions, so the frame's
+ *  display extent (which follows the kept region at the unchanged source
+ *  scale) supplies the proportion bridge between the two spaces. */ function applyCropAspect(
+  state: EditorState,
+  tr: Transaction,
+  value?: string,
+): boolean {
+  const sel = state.selection;
+  if (!(sel instanceof NodeSelection) || sel.node.type.name !== "image") return false;
+  const m = /^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/.exec((value ?? "").trim());
+  if (!m) return false;
+  const target = Number(m[1]) / Number(m[2]);
+  const attrs = sel.node.attrs as Record<string, unknown>;
+  if (typeof attrs.width !== "number" || typeof attrs.height !== "number") return false;
+  const frame = attrs.width / attrs.height;
+  if (!(frame > 0) || !Number.isFinite(frame) || !(target > 0)) return false;
+  const frac = (v: unknown): number =>
+    typeof v === "number" && Number.isFinite(v) ? v / 100000 : 0;
+  const prev = (attrs.crop ?? {}) as Record<string, unknown>;
+  const cl = frac(prev.left);
+  const ct = frac(prev.top);
+  const cr = frac(prev.right);
+  const cb = frac(prev.bottom);
+  const keptW = 1 - cl - cr;
+  const keptH = 1 - ct - cb;
+  if (keptW <= 0 || keptH <= 0) return false;
+  // A wider-than-target frame trims the sides; a taller one trims top/bottom.
+  const newW = frame > target ? (keptW * target) / frame : keptW;
+  const newH = frame > target ? keptH : (keptH * frame) / target;
+  return applyCropPatch(state, tr, {
+    left: cl + (keptW - newW) / 2,
+    right: cr + (keptW - newW) / 2,
+    top: ct + (keptH - newH) / 2,
+    bottom: cb + (keptH - newH) / 2,
+  });
 }
 
 /** Stamp one dimension onto the selected drawing — the shared body of the
@@ -3316,6 +3359,13 @@ export const DocumentCommands = Extension.create({
         () =>
         ({ state, tr }) =>
           applyCropPatch(state, tr, { left: 0, top: 0, right: 0, bottom: 0 }),
+      // Word's Crop → Aspect Ratio presets ("1:1", "2:3", …) — the largest
+      // centered rect of the ratio inside the kept region, applied through
+      // the same crop patch (extent follows the kept fractions).
+      "drawing-crop-aspect":
+        (value) =>
+        ({ state, tr }) =>
+          applyCropAspect(state, tr, value),
       // The Picture Format tab's Height/Width boxes: the selected image
       // resizes to the typed measure ("5cm"/"2in"/"120px") — inline and
       // floating pictures alike.
