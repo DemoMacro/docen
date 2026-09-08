@@ -1,5 +1,6 @@
 import type { Editor } from "@docen/docx/core";
 import { EMU_PER_PX } from "@docen/layout";
+import type { Node as PmNode } from "@tiptap/pm/model";
 import { NodeSelection } from "@tiptap/pm/state";
 
 import { CropOverlay } from "./crop-overlay";
@@ -8,9 +9,10 @@ import type { DrawingHit } from "./target";
 
 /** What the gestures need from their host: the viewless editor (its state and
  *  commands), the PM position a hit resolves to, the re-resolved painted box
- *  after a re-render, the page frames the overlays mount in, and the zoom
- *  factor (semantic page px → screen px). All injected — the gestures own no
- *  document state beyond the selection they manage. */
+ *  after a re-render, the page frames the overlays mount in, the zoom factor
+ *  (semantic page px → screen px), and the paragraph a drop re-anchors to.
+ *  All injected — the gestures own no document state beyond the selection
+ *  they manage. */
 export interface DrawingGesturesHost {
   editor(): Editor;
   /** `enter` marks the entry double click on a group — the member hit
@@ -25,6 +27,15 @@ export interface DrawingGesturesHost {
   ): DrawingHit | null;
   pageHost(page: number): HTMLElement | null;
   scale(): number;
+  /** The paragraph a dragged float's drop point lands on, with its block
+   *  top and column left as page-local px (the fresh anchor base for the
+   *  paragraph/column offsets). Null when the host cannot resolve. */
+  anchorParagraphAt(
+    page: number,
+    x: number,
+    y: number,
+    width: number,
+  ): { pos: number; topPx: number; columnLeftPx: number } | null;
 }
 
 /**
@@ -102,6 +113,12 @@ export class DrawingGestures {
     return this.#floatingAnchors() != null;
   }
 
+  /** The hit's PM node position, null when the host cannot pair it (the
+   *  caller falls back to its own handling). */
+  nodePosOf(hit: DrawingHit): number | null {
+    return this.#host.drawingSelection(hit);
+  }
+
   /** Begin a move drag from a pointerdown on the selected drawing itself (the
    *  bridge owns that hit chain). */
   beginMove(clientX: number, clientY: number): void {
@@ -139,16 +156,7 @@ export class DrawingGestures {
     const nodePos = this.#host.drawingSelection(hit);
     const node = nodePos != null ? this.#host.editor().state.doc.nodeAt(nodePos) : null;
     if (nodePos == null || !node) return false;
-    const attrs = node.attrs as Record<string, unknown>;
-    const carrier =
-      node.type.name === "image"
-        ? attrs.floating
-        : node.type.name === "wpsShape"
-          ? (attrs.wpsShape as Record<string, unknown> | undefined)?.floating
-          : node.type.name === "wpgGroup"
-            ? (attrs.wpgGroup as Record<string, unknown> | undefined)?.floating
-            : null;
-    if (!carrier) return false;
+    if (!this.#floatingOf(node)) return false;
     if (!this.#sel) return this.select(hit);
     const i = this.#multi.findIndex((m) => sameHit(m, hit));
     if (i >= 0) this.#multi.splice(i, 1);
@@ -294,19 +302,39 @@ export class DrawingGestures {
   } | null {
     const sel = this.#host.editor().state.selection;
     if (!(sel instanceof NodeSelection)) return null;
-    const attrs = sel.node.attrs as Record<string, unknown>;
-    const floating =
-      sel.node.type.name === "image"
-        ? (attrs.floating as Record<string, unknown> | null)
-        : ((attrs.wpsShape as Record<string, unknown> | null | undefined)?.floating as Record<
-            string,
-            unknown
-          > | null);
+    const floating = this.#floatingOf(sel.node);
     if (!floating) return null;
     return {
       h: floating.horizontalPosition as Record<string, unknown> | undefined,
       v: floating.verticalPosition as Record<string, unknown> | undefined,
     };
+  }
+
+  /** A node's floating attrs carrier (null on any non-floating node) — the
+   *  position anchors a pointer drag moves. */
+  #floatingOf(node: PmNode): Record<string, unknown> | null {
+    const attrs = node.attrs as Record<string, unknown>;
+    const carrier =
+      node.type.name === "image"
+        ? attrs.floating
+        : node.type.name === "wpsShape"
+          ? (attrs.wpsShape as Record<string, unknown> | undefined)?.floating
+          : node.type.name === "wpgGroup"
+            ? (attrs.wpgGroup as Record<string, unknown> | undefined)?.floating
+            : null;
+    return (carrier as Record<string, unknown> | null | undefined) ?? null;
+  }
+
+  /** The node's attrs with the floating carrier swapped — other attrs and the
+   *  carrier's non-anchor fields pass through untouched. */
+  #withFloating(node: PmNode, floating: Record<string, unknown>): Record<string, unknown> {
+    const attrs = { ...node.attrs } as Record<string, unknown>;
+    if (node.type.name === "image") attrs.floating = floating;
+    else if (node.type.name === "wpsShape")
+      attrs.wpsShape = { ...(attrs.wpsShape as Record<string, unknown>), floating };
+    else if (node.type.name === "wpgGroup")
+      attrs.wpgGroup = { ...(attrs.wpgGroup as Record<string, unknown>), floating };
+    return attrs;
   }
 
   /** A handle drag's box: the selected image's px attrs resize in place,
@@ -330,16 +358,62 @@ export class DrawingGestures {
     });
   }
 
-  /** A body drag's offset: an offset-anchored float adds the drag delta to
-   *  its offsets; an align-anchored one has none to add to — the drop lands
-   *  absolute, page-anchored, at the dragged spot (Word: dragging breaks the
-   *  alignment, the drawn result doesn't shift). */
+  /** A body drag's offset. The drop re-anchors first (Word: dragging an
+   *  object moves its anchor into the paragraph under it) — a float left on
+   *  a host paragraph far from its resting place paints over text the flow
+   *  already placed above the drop site, which the engine's forward-only
+   *  wrap zones cannot dodge. Re-anchoring puts the host paragraph at the
+   *  drop site, so the zones register where the float actually paints and
+   *  the surrounding text wraps. A drop on the same paragraph (or an
+   *  unresolvable one) keeps the anchors: an offset-anchored float adds the
+   *  delta to its offsets; an align-anchored one has none to add to — the
+   *  drop lands absolute, page-anchored, at the dragged spot (Word:
+   *  dragging breaks the alignment, the drawn result doesn't shift). */
   #applyOffset(dx: number, dy: number): void {
     if (!this.#sel) return;
     const nodePos = this.#host.drawingSelection(this.#sel);
     if (nodePos == null) return;
     const hEmu = Math.round(dx * EMU_PER_PX);
     const vEmu = Math.round(dy * EMU_PER_PX);
+    const editor = this.#host.editor();
+    const node = editor.state.doc.nodeAt(nodePos);
+    const floating = node ? this.#floatingOf(node) : null;
+    if (node && floating) {
+      const dropX = this.#sel.x + dx;
+      const dropY = this.#sel.y + dy;
+      const anchor = this.#host.anchorParagraphAt(this.#sel.page, dropX, dropY, this.#sel.width);
+      // The drawing's parent block unchanged — the anchors stay put.
+      if (anchor && anchor.pos !== editor.state.doc.resolve(nodePos).before() + 1) {
+        const h = floating.horizontalPosition as Record<string, unknown> | undefined;
+        const nextFloating = {
+          ...floating,
+          horizontalPosition:
+            h?.relative === "column"
+              ? {
+                  relative: "column",
+                  offset: Math.round((dropX - anchor.columnLeftPx) * EMU_PER_PX),
+                }
+              : { relative: "page", offset: Math.round(dropX * EMU_PER_PX) },
+          verticalPosition: {
+            relative: "paragraph",
+            offset: Math.round((dropY - anchor.topPx) * EMU_PER_PX),
+          },
+        };
+        const attrs = this.#withFloating(node, nextFloating);
+        editor.commands.command(({ tr, dispatch }) => {
+          tr.delete(nodePos, nodePos + node.nodeSize);
+          const insertPos = tr.mapping.map(anchor.pos);
+          // Node.copy takes CONTENT, not attrs — node.type.create is the
+          // attrs-carrying rebuild. The cast bridges the dual PM d.ts
+          // identity (same runtime instance) — see the module's other casts.
+          tr.insert(insertPos, node.type.create(attrs as never));
+          tr.setSelection(NodeSelection.create(tr.doc, insertPos) as never);
+          dispatch?.(tr as never);
+          return true;
+        });
+        return;
+      }
+    }
     const anchors = this.#floatingAnchors();
     if (typeof anchors?.h?.offset === "number" && typeof anchors.v?.offset === "number") {
       this.#host.editor().commands["move-drawing"](JSON.stringify({ h: hEmu, v: vEmu }));

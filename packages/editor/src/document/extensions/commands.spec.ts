@@ -734,6 +734,36 @@ describe("arrange — floating drawings", () => {
     expect(editor.commands.wrap("bogus")).toBe(false);
   });
 
+  it("converts an inline picture to floating on Word's column/paragraph anchor", () => {
+    const editor = new Editor({
+      element: null,
+      extensions: EXTENSIONS,
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [{ type: "image", attrs: { src: "data:,", width: 10, height: 10 } }],
+          },
+        ],
+      },
+    });
+    selectFirstNode(editor, "image");
+    expect(editor.commands.wrap("square")).toBe(true);
+    const floating = firstNodeOf(editor, "image").attrs.floating as Record<string, unknown>;
+    // positionH has no "paragraph" token (ST_RelFromH) — Word's keep-position
+    // conversion anchors the column horizontally, the paragraph vertically,
+    // and Square carries 0.125" side distances.
+    expect(floating.horizontalPosition).toEqual({ relative: "column", offset: 0 });
+    expect(floating.verticalPosition).toEqual({ relative: "paragraph", offset: 0 });
+    expect(floating.wrap).toEqual({ type: "square" });
+    expect(floating.margins).toEqual({ left: 114300, right: 114300 });
+    expect(floating.behindDocument).toBe(false);
+    // "In Line with Text" drops the floating payload (Word's back-conversion).
+    expect(editor.commands.wrap("inline")).toBe(true);
+    expect(firstNodeOf(editor, "image").attrs.floating).toBeFalsy();
+  });
+
   it("rotate steps image rotation and toggles the tri-state flips", () => {
     const editor = build();
     floatDoc(editor);

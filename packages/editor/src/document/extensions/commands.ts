@@ -3630,8 +3630,11 @@ export const DocumentCommands = Extension.create({
             if (!(sel instanceof NodeSelection) || sel.node.type.name !== "image") return false;
             const attrs = sel.node.attrs as Record<string, unknown>;
             if (attrs.floating) return false;
+            // positionH has no "paragraph" token (ST_RelFromH) — Word's
+            // keep-position conversion anchors the column horizontally, the
+            // paragraph vertically, with Square's 0.125" side distances.
             const floating: Record<string, unknown> = {
-              horizontalPosition: { relative: "paragraph", offset: 0 },
+              horizontalPosition: { relative: "column", offset: 0 },
               verticalPosition: { relative: "paragraph", offset: 0 },
               behindDocument: false,
             };
@@ -3639,6 +3642,9 @@ export const DocumentCommands = Extension.create({
               floating.behindDocument = value === "behind";
             } else if (value === "square" || value === "tight" || value === "through") {
               floating.wrap = { type: value };
+              // Word's Square conversion distances: 0.125" left/right, none
+              // above/below (Top-and-Bottom carries no side distances).
+              floating.margins = { left: 114300, right: 114300 };
             } else if (value === "top-bottom") {
               floating.wrap = { type: "topAndBottom" };
             } else {

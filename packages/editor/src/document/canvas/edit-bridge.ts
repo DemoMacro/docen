@@ -764,6 +764,8 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       opts.drawingBoxOf?.(para, index, kind, childPath) ?? null,
     pageHost: (page) => opts.pageHost?.(page) ?? null,
     scale: () => opts.scale?.() ?? 1,
+    anchorParagraphAt: (page, x, y, width) =>
+      main.map?.valid ? main.map.anchorParagraphAt(page, x, y, width) : null,
   });
   draw.mount(opts.host);
 
@@ -1158,14 +1160,28 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
   // Word's entry click: a DOUBLE click on a furniture band opens its story
   // (single clicks there are inert); while a story is active, clicks inside
   // its band position the story caret and any other click closes it.
-  let lastClick: { t: number; x: number; y: number; count: number } | null = null;
-  const clickCount = (event: MouseEvent): number => {
+  let lastClick: { t: number; x: number; y: number; count: number; key: string } | null = null;
+  // Identity tags for the opaque hit paragraphs — template-stringifying them
+  // directly collapses every paragraph onto "[object Object]", blurring the
+  // double-click window across drawings.
+  const paraTags = new WeakMap<object, number>();
+  let paraTagSeq = 0;
+  const tagOf = (para: unknown): number => {
+    let tag = paraTags.get(para as object);
+    if (tag == null) paraTags.set(para as object, (tag = ++paraTagSeq));
+    return tag;
+  };
+  // The double-click window counts clicks on the SAME target — a click that
+  // moved between the body and a drawing (or between drawings) restarts, so
+  // an edit-session click followed by a shape click never reads as a double.
+  const clickCount = (event: MouseEvent, key: string): number => {
     const again =
       lastClick != null &&
+      lastClick.key === key &&
       event.timeStamp - lastClick.t < 500 &&
       Math.hypot(event.clientX - lastClick.x, event.clientY - lastClick.y) < 4;
     const count = again ? lastClick!.count + 1 : 1;
-    lastClick = { t: event.timeStamp, x: event.clientX, y: event.clientY, count };
+    lastClick = { t: event.timeStamp, x: event.clientX, y: event.clientY, count, key };
     return count;
   };
   const takeFocus = (event: MouseEvent): void => {
@@ -1189,10 +1205,14 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     const hostRect = opts.inputHost.getBoundingClientRect();
     ta.style.left = `${event.clientX - hostRect.left}px`;
     ta.style.top = `${event.clientY - hostRect.top}px`;
-    const clicks = clickCount(event);
-    const dbl = clicks >= 2;
     const storyCfg = opts.story;
     const hit = hitPage(event.clientX, event.clientY);
+    const drawHit = hit && opts.drawingAt ? opts.drawingAt(hit.page, hit.lx, hit.ly) : null;
+    const clicks = clickCount(
+      event,
+      drawHit ? `${tagOf(drawHit.para)}/${drawHit.index}/${drawHit.kind}` : "text",
+    );
+    const dbl = clicks >= 2;
     if (storyCfg && hit) {
       const header = storyCfg.geometry("header", hit.page);
       const footer = storyCfg.geometry("footer", hit.page);
@@ -1254,7 +1274,6 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     // Body editing (the main story). A click landing on a drawing grabs it
     // (Word's picture selection) instead of dropping a caret behind the art;
     // any other click drops a standing drawing selection first.
-    const drawHit = hit && opts.drawingAt ? opts.drawingAt(hit.page, hit.lx, hit.ly) : null;
     if (drawHit) {
       // Word: Shift+Click toggles a floating drawing into the multi-selection
       // (the group/distribute/align set) — a hit it declines (inline art, an
@@ -1263,6 +1282,49 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
         ta.focus();
         ta.value = "";
         return;
+      }
+      // Word: a double click on a text-carrying shape enters its text body;
+      // while a shape is being edited a click inside it moves the caret, and
+      // a double click on a plain shape still just selects. "Editing" means
+      // the caret sits strictly INSIDE the shape's span — a NodeSelection on
+      // the shape (a fresh insert, Escape's exit) or a selection resting on
+      // the span edge is selection state, so the next click selects (Word's
+      // single-click-selects), never silently re-enters. The double click is
+      // judged BEFORE the move press: it is an instant verdict (the second
+      // tap inside 500ms), while a move only commits on a real drag.
+      const pmSel = main.editor.state.selection;
+      const span = main.map?.shapeAtPos(pmSel.from) ?? null;
+      const editing =
+        span && pmSel instanceof TextSelection && pmSel.from > span.from ? span : null;
+      if (dbl || editing) {
+        const pos =
+          main.map?.posAtShapePoint(drawHit.page, drawHit.x, drawHit.y, editing ?? undefined) ??
+          null;
+        if (pos != null) {
+          draw.clear();
+          draw.place();
+          setSel(pos);
+          ta.focus();
+          ta.value = "";
+          return;
+        }
+        // A double click whose point the map cannot place (the shape's stack
+        // failed to re-register after a relayout) still enters the text body:
+        // fall back to the first caret position inside the hit shape rather
+        // than dropping a body caret under the art.
+        if (dbl) {
+          const nodePos = draw.nodePosOf(drawHit);
+          const node = nodePos != null ? main.editor.state.doc.nodeAt(nodePos) : null;
+          if (nodePos != null && node?.type.name === "wpsShape" && node.textContent) {
+            const inner = TextSelection.near(main.editor.state.doc.resolve(nodePos + 1), 1).from;
+            draw.clear();
+            draw.place();
+            setSel(inner);
+            ta.focus();
+            ta.value = "";
+            return;
+          }
+        }
       }
       // Word: a press on the already-selected offset-anchored floating
       // drawing starts a move drag (the frame trails the pointer, release
@@ -1282,24 +1344,6 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
         ta.focus();
         ta.value = "";
         return;
-      }
-      // Word: a double click on a text-carrying shape enters its text body;
-      // while a shape is being edited a click inside it moves the caret, and
-      // a double click on a plain shape still just selects. A miss (the
-      // frame's edge, a shape the map cannot pair) keeps the drawing path.
-      const editing = main.map?.shapeAtPos(main.editor.state.selection.from) ?? null;
-      if (dbl || editing) {
-        const pos =
-          main.map?.posAtShapePoint(drawHit.page, drawHit.x, drawHit.y, editing ?? undefined) ??
-          null;
-        if (pos != null) {
-          draw.clear();
-          draw.place();
-          setSel(pos);
-          ta.focus();
-          ta.value = "";
-          return;
-        }
       }
       // A drawing the PM side cannot pair (furniture-anchored art whose host
       // paragraph lives outside the main doc, a stale box after a re-layout)

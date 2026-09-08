@@ -52,6 +52,12 @@ interface LineEntry {
   yPx: number;
   /** Page-local x of the line's first glyph (indents applied). */
   xPx: number;
+  /** Page-local top of the laid block the line came from — a split
+   *  paragraph's continuation segments each carry their own block origin. */
+  blockTopPx: number;
+  /** Page-local column-left of the laid block (the flow column's edge,
+   *  indents excluded). */
+  columnLeftPx: number;
   /** Per-item justified stretch-interval ends (null on unjustified lines) —
    *  the same intervals the painter stretches to. */
   intervals: number[] | null;
@@ -479,8 +485,13 @@ export class CaretMap {
         const tb = tbs[j];
         if (!tb) break;
         // A drift (the laid text the projection derived vs the PM content)
-        // leaves the laid block unmapped rather than mispairing the rest.
-        if (norm(laidText(item.para)) !== norm(tb.node.textContent)) continue;
+        // leaves the laid block unmapped rather than mispairing the rest. A
+        // single-block stack still pairs by position — a placeholder text or
+        // a relayout race must not orphan the shape's only paragraph (its
+        // double-click entry would then fall through to the body forever).
+        if (norm(laidText(item.para)) !== norm(tb.node.textContent)) {
+          if (laid.length !== 1 || tbs.length !== 1) continue;
+        }
         j++;
         const paraEntry: ParaEntry = {
           page: item.page,
@@ -622,6 +633,8 @@ export class CaretMap {
         line,
         yPx: entry.yPx + line.yPx,
         xPx,
+        blockTopPx: entry.yPx,
+        columnLeftPx: entry.xPx,
         intervals: justifiedIntervals(line),
         startChar,
         endChar: startChar + chars,
@@ -645,6 +658,46 @@ export class CaretMap {
    *  a split paragraph's continuation blocks all resolve to the same entry. */
   posOfPara(para: LaidOutParagraph): number | null {
     return this.paras.find((p) => p.lines.some((l) => l.para === para))?.innerPos ?? null;
+  }
+
+  /** The paragraph a dragged float's drop point re-anchors to (Word: dragging
+   *  an object moves its anchor into the paragraph under it). Among the
+   *  page's flow lines whose horizontal span meets the dropped box, the band
+   *  containing the drop y wins, else the nearest line below (a float riding
+   *  above its anchor is Word's common negative-offset state), else the last
+   *  line above. Null when nothing overlaps horizontally — the caller keeps
+   *  the drawing on its existing anchors. */
+  anchorParagraphAt(
+    page: number,
+    x: number,
+    y: number,
+    width: number,
+  ): { pos: number; topPx: number; columnLeftPx: number } | null {
+    const anchorOf = (entry: LineEntry) => ({
+      pos: entry.owner.innerPos,
+      topPx: entry.blockTopPx,
+      columnLeftPx: entry.columnLeftPx,
+    });
+    let below: LineEntry | null = null;
+    let belowDist = Infinity;
+    let above: LineEntry | null = null;
+    let aboveBottom = -Infinity;
+    for (const entry of this.lines) {
+      if (entry.page !== page) continue;
+      const top = entry.yPx;
+      const bottom = top + entry.line.heightPx;
+      if (!(entry.xPx < x + width && entry.xPx + (entry.line.maxWidthPx ?? 0) > x)) continue;
+      if (y >= top && y <= bottom) return anchorOf(entry);
+      if (top > y && top - y < belowDist) {
+        belowDist = top - y;
+        below = entry;
+      }
+      if (bottom <= y && bottom > aboveBottom) {
+        aboveBottom = bottom;
+        above = entry;
+      }
+    }
+    return below ? anchorOf(below) : above ? anchorOf(above) : null;
   }
 
   /** A click's page-local coordinates → the nearest doc position. Clamping
