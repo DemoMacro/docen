@@ -10,6 +10,7 @@
  * locale change.
  */
 
+import { pinImage } from "@docen/core";
 import {
   compileDocument,
   defaultParagraphStyleId,
@@ -4194,6 +4195,26 @@ class DocenDocument extends AddinHost<Editor> {
     // replaces it at the same frame size (Picture Format > Adjust).
     if (name === "change-picture") {
       this.#pictureInput?.click();
+      return;
+    }
+    // Reset Picture and Size — the natural size is a decode only the
+    // browser-side painter can read (the paint's pin table), so resolve the
+    // selected picture's decoded dimensions here and pass them in. An
+    // unpinned or undecoded source degrades to the plain Reset Picture.
+    if (name === "reset-picture-size") {
+      const target = this.#bridge?.activeEditor() ?? editor;
+      const sel = target.state.selection;
+      const src =
+        sel instanceof NodeSelection && sel.node.type.name === "image"
+          ? (sel.node.attrs as { src?: unknown }).src
+          : undefined;
+      const image = typeof src === "string" && src ? pinImage(src) : undefined;
+      const natural =
+        image?.ready && image.width > 0 && image.height > 0
+          ? { width: image.width, height: image.height }
+          : undefined;
+      this.#bridge?.focus();
+      target.commands["reset-picture-size"](natural);
       return;
     }
     // Formatting marks toggle — canvas-side marks are a later milestone; the

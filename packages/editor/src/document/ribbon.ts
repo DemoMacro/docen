@@ -1773,6 +1773,14 @@ const cropMenuItems = (): RibbonMenuItem[] => {
   ];
 };
 
+/** The Reset Picture split's drop-down — Word's two variants: the plain
+ *  discard (adjustments/border/effects/crop) and the one that also restores
+ *  the source's natural size. */
+const resetPictureItems = (): RibbonMenuItem[] => [
+  { text: "ribbon.cmd.reset-picture", event: "reset-picture" },
+  { text: "ribbon.cmd.reset-picture-size", event: "reset-picture-size" },
+];
+
 /** The Size group — the numeric Height/Width boxes every drawing tab shares;
  *  pictures add the crop split (a shape has no crop). The host mirrors the
  *  selected drawing's extent into the boxes per transaction (#syncDrawingSize);
@@ -1806,9 +1814,11 @@ export function pictureFormatTab(): RibbonTab {
     contextual: true,
     groups: [
       // Word's Adjust group — the pixel tools the projection reads: the
-      // correction/color/transparency presets write blipEffects, Reset Picture
-      // clears them. Remove Background, Artistic Effects, Compress and Change
-      // Picture stay greyed (no pixel-recompression pipeline yet).
+      // correction/color/transparency presets write blipEffects; Reset
+      // Picture discards every picture change (adjustments, border, effects,
+      // crop — the split's second item also restores the natural size).
+      // Remove Background, Artistic Effects, and Compress stay greyed (no
+      // pixel-recompression pipeline yet).
       group("picture-adjust", [
         btn("remove-background", "remove-background", { size: "large" }),
         col([
@@ -1819,7 +1829,7 @@ export function pictureFormatTab(): RibbonTab {
             menu("transparency", "picture-transparency", parsedItems(transparencyItems())),
             btn("compress-pictures", "compress-pictures"),
             btn("change-picture", "change-picture"),
-            btn("reset-picture", "reset-picture"),
+            split("reset-picture", "reset-picture", resetPictureItems()),
           ]),
         ]),
       ]),

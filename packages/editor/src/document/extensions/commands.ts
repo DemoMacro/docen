@@ -149,6 +149,7 @@ declare module "@tiptap/core" {
       "picture-transparency": (value?: string) => ReturnType;
       "picture-border": (value?: string) => ReturnType;
       "reset-picture": () => ReturnType;
+      "reset-picture-size": (natural?: { width: number; height: number }) => ReturnType;
       "change-picture": (src?: string) => ReturnType;
       "shape-fill": (value?: string) => ReturnType;
       "shape-outline": (value?: string) => ReturnType;
@@ -269,6 +270,7 @@ export const WIRED_DISPATCH: ReadonlySet<string> = new Set([
   "picture-transparency",
   "picture-border",
   "reset-picture",
+  "reset-picture-size",
   "change-picture",
   "shape-fill",
   "shape-outline",
@@ -1168,6 +1170,39 @@ function applyFloatingExtras(
   return next;
 }
 
+/** Trade the picture's extent by a crop patch's kept fractions (new = old ×
+ *  fNew/fOld per axis — Word's crop keeps the source scale, so the extent
+ *  tracks the kept region) and stamp/delete attrs.crop: the all-zero patch
+ *  grows the frame back to the full source, which is both Reset Crop and
+ *  Reset Picture's crop discard. A degenerate fraction (a fOld of 0 from a
+ *  hostile file, a non-positive fNew from a raw command call) leaves that
+ *  axis alone. */
+function tradeCropExtent(
+  attrs: Record<string, unknown>,
+  left: number,
+  top: number,
+  right: number,
+  bottom: number,
+): void {
+  const num = (v: unknown): number | null =>
+    typeof v === "number" && Number.isFinite(v) ? v : null;
+  const raw = (fraction: number): number => Math.round(fraction * 100000);
+  const crop = { left: raw(left), top: raw(top), right: raw(right), bottom: raw(bottom) };
+  const keptOf = (a: unknown, b: unknown): number =>
+    1 - (num(a) ?? 0) / 100000 - (num(b) ?? 0) / 100000;
+  const prev = (attrs.crop ?? {}) as Record<string, unknown>;
+  const fOldW = keptOf(prev.left, prev.right);
+  const fOldH = keptOf(prev.top, prev.bottom);
+  const fNewW = 1 - left - right;
+  const fNewH = 1 - top - bottom;
+  if (fOldW > 0 && fNewW > 0 && typeof attrs.width === "number")
+    attrs.width = Math.round((attrs.width * fNewW) / fOldW);
+  if (fOldH > 0 && fNewH > 0 && typeof attrs.height === "number")
+    attrs.height = Math.round((attrs.height * fNewH) / fOldH);
+  if (crop.left === 0 && crop.top === 0 && crop.right === 0 && crop.bottom === 0) delete attrs.crop;
+  else attrs.crop = crop;
+}
+
 /** Stamp the crop patch onto the selected image — the shared body of
  *  drawing-crop-apply (the crop overlay's commit) and drawing-crop-reset. */ function applyCropPatch(
   state: EditorState,
@@ -1183,27 +1218,8 @@ function applyFloatingExtras(
   const right = num(patch.right);
   const bottom = num(patch.bottom);
   if (left == null || top == null || right == null || bottom == null) return false;
-  const raw = (fraction: number): number => Math.round(fraction * 100000);
-  const crop = { left: raw(left), top: raw(top), right: raw(right), bottom: raw(bottom) };
   const attrs = { ...sel.node.attrs };
-  // Word's crop resizes the picture to the kept region at the unchanged
-  // source scale — the extent trades kept fractions (new = old × fNew/fOld),
-  // and the all-zero reset grows the frame back to the full source the same
-  // way. A degenerate fraction (a fOld of 0 from a hostile file, a non-positive
-  // fNew from a raw command call) leaves that axis alone.
-  const keptOf = (a: unknown, b: unknown): number =>
-    1 - (num(a) ?? 0) / 100000 - (num(b) ?? 0) / 100000;
-  const prev = (attrs.crop ?? {}) as Record<string, unknown>;
-  const fOldW = keptOf(prev.left, prev.right);
-  const fOldH = keptOf(prev.top, prev.bottom);
-  const fNewW = 1 - left - right;
-  const fNewH = 1 - top - bottom;
-  if (fOldW > 0 && fNewW > 0 && typeof attrs.width === "number")
-    attrs.width = Math.round((attrs.width * fNewW) / fOldW);
-  if (fOldH > 0 && fNewH > 0 && typeof attrs.height === "number")
-    attrs.height = Math.round((attrs.height * fNewH) / fOldH);
-  if (crop.left === 0 && crop.top === 0 && crop.right === 0 && crop.bottom === 0) delete attrs.crop;
-  else attrs.crop = crop;
+  tradeCropExtent(attrs, left, top, right, bottom);
   tr.setNodeMarkup(sel.from, undefined, attrs);
   tr.setSelection(NodeSelection.create(tr.doc, sel.from) as never);
   return true;
@@ -1310,6 +1326,17 @@ function patchPicture(
   tr.setNodeMarkup(sel.from, undefined, attrs);
   tr.setSelection(NodeSelection.create(tr.doc, sel.from) as never);
   return true;
+}
+
+/** The changes Reset Picture discards: the blip adjustments, the border, the
+ *  effect list, and the crop (traded back to the full source — the extent
+ *  math reads the old fractions, so this must run before the field is
+ *  gone, which tradeCropExtent itself arranges). */
+function resetPictureChanges(attrs: Record<string, unknown>): void {
+  delete attrs.blipEffects;
+  delete attrs.outline;
+  delete attrs.effects;
+  tradeCropExtent(attrs, 0, 0, 0, 0);
 }
 
 /** Merge a blipEffects mutation into the image's attrs, pruning emptied
@@ -3473,14 +3500,37 @@ export const DocumentCommands = Extension.create({
             attrs.outline = outline;
           });
         },
-      // Word's Reset Picture: clear the adjustments and the border. The crop
-      // keeps its own command (Reset Crop) and the extent is untouched.
+      // Word's Reset Picture: discard every change made to the picture — the
+      // adjustments (blipEffects), the border, the effect list (the shadow),
+      // and the crop (the frame grows back through the crop trade — the same
+      // geometry Reset Crop takes; clearing the field alone would strand the
+      // shrunken frame). Size, rotation, flips, and the anchor stay — those
+      // are Reset Picture and Size's to touch.
       "reset-picture":
         () =>
         ({ state, tr }) =>
+          patchPicture(state, tr, resetPictureChanges),
+      // Word's Reset Picture and Size: the discard above plus the extent back
+      // at the source's natural size. The command layer cannot read a decode
+      // (that lives in the browser-side painter), so the host's dispatcher
+      // resolves the selected picture's decoded dimensions and passes them in
+      // — the change-picture pattern. Without them the command degrades to
+      // the plain Reset Picture.
+      "reset-picture-size":
+        (natural?: { width: number; height: number }) =>
+        ({ state, tr }) =>
           patchPicture(state, tr, (attrs) => {
-            delete attrs.blipEffects;
-            delete attrs.outline;
+            resetPictureChanges(attrs);
+            if (
+              natural &&
+              natural.width > 0 &&
+              natural.height > 0 &&
+              Number.isFinite(natural.width) &&
+              Number.isFinite(natural.height)
+            ) {
+              attrs.width = Math.round(natural.width);
+              attrs.height = Math.round(natural.height);
+            }
           }),
       // Shape Fill: the palette picker's hex (or "none") writing the shape's
       // solid fill. A noFill type reads as unfilled in the projection and
