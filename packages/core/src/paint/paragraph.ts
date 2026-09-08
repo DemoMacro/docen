@@ -578,6 +578,22 @@ export function paintParagraph(
           ox = -item.widthPx / 2;
           oy = -item.heightPx / 2;
         }
+        if (inline.flipH || inline.flipV) {
+          // A mirrored picture rides a negative-scale group inside (any)
+          // spinner — the origin shifts to the far edge so the mirrored
+          // content lands back inside the extent (the floating drawing's
+          // mirror trick), and the paint calls re-anchor to its origin.
+          const mirror = new Group({
+            x: inline.flipH ? ox + item.widthPx : ox,
+            y: inline.flipV ? oy + item.heightPx : oy,
+            ...(inline.flipH ? { scaleX: -1 } : {}),
+            ...(inline.flipV ? { scaleY: -1 } : {}),
+          });
+          target.add(mirror);
+          target = mirror;
+          ox = 0;
+          oy = 0;
+        }
         if (inline.members) {
           // A metafile source replayed into members (WMF vector layers): the
           // structured scene paints in place of the flat image, clipped to

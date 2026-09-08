@@ -260,6 +260,89 @@ describe("projectDocumentOptions style cascade", () => {
     });
   });
 
+  it("carries a picture's a:xfrm flips into the inline and anchored projections", () => {
+    // positionH has no "paragraph" token (ST_RelFromH) — column is the
+    // horizontal base Word's own conversion writes.
+    const floating = {
+      horizontalPosition: { relative: "column", offset: 0 } satisfies HorizontalPositionOptions,
+      verticalPosition: { relative: "paragraph", offset: 0 } satisfies VerticalPositionOptions,
+    };
+    const { blocks } = oneSection(
+      doc([
+        {
+          paragraph: {
+            children: [
+              {
+                picture: {
+                  type: "png",
+                  data: "x",
+                  transformation: {
+                    width: 609600,
+                    height: 457200,
+                    flipHorizontal: true,
+                    flipVertical: true,
+                  },
+                },
+              },
+              {
+                picture: {
+                  type: "png",
+                  data: "x",
+                  floating,
+                  transformation: { width: 609600, height: 457200, flipHorizontal: true },
+                },
+              },
+            ],
+          },
+        },
+      ]),
+    );
+    const para = blocks[0];
+    if (para?.kind !== "paragraph") throw new Error("expected paragraph");
+    expect(para.inline[0]).toMatchObject({ flipH: true, flipV: true });
+    expect(para.drawings?.[0]).toMatchObject({ flipH: true });
+    expect(para.drawings?.[0]?.flipV).toBeUndefined();
+  });
+
+  it("carries a wps shape's transformation flips into the anchored projection", () => {
+    const { blocks } = oneSection(
+      doc([
+        {
+          paragraph: {
+            children: [
+              {
+                wpsShape: {
+                  children: [],
+                  transformation: {
+                    width: 914400,
+                    height: 914400,
+                    flipVertical: true,
+                  },
+                  geometry: "ellipse",
+                  fill: { type: "solid", color: "4472C4" },
+                  floating: {
+                    horizontalPosition: {
+                      relative: "column",
+                      offset: 0,
+                    } satisfies HorizontalPositionOptions,
+                    verticalPosition: {
+                      relative: "paragraph",
+                      offset: 0,
+                    } satisfies VerticalPositionOptions,
+                  },
+                },
+              },
+            ],
+          },
+        },
+      ]),
+    );
+    const para = blocks[0];
+    if (para?.kind !== "paragraph") throw new Error("expected paragraph");
+    expect(para.drawings?.[0]).toMatchObject({ flipV: true });
+    expect(para.drawings?.[0]?.flipH).toBeUndefined();
+  });
+
   it("projects run color and underline/strike decorations", () => {
     const { blocks } = oneSection(
       doc([

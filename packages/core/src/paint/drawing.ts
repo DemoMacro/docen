@@ -135,6 +135,22 @@ export function paintDrawing(
     ox = -drawing.width / 2;
     oy = -drawing.height / 2;
   }
+  if (drawing.flipH || drawing.flipV) {
+    // A mirrored drawing rides a negative-scale group inside (any) spinner:
+    // the origin shifts to the far edge so the mirrored content lands back
+    // inside the same extent box (the plainImageLeaf flip trick), and the
+    // members re-anchor to the group's own origin.
+    const mirror = new Group({
+      x: drawing.flipH ? ox + drawing.width : ox,
+      y: drawing.flipV ? oy + drawing.height : oy,
+      ...(drawing.flipH ? { scaleX: -1 } : {}),
+      ...(drawing.flipV ? { scaleY: -1 } : {}),
+    });
+    target.add(mirror);
+    target = mirror;
+    ox = 0;
+    oy = 0;
+  }
   if (drawing.clipMembers) {
     // A srcRect-cropped metafile replay reaches past the extent (GDI clips
     // metafile playback to the rect); wps text boxes must NOT clip — their
@@ -150,9 +166,17 @@ export function paintDrawing(
     paintMembers(holder, drawing.members, 0, 0, ctx, host);
     target.add(holder);
   } else {
-    // A rotated drawing spins in a group — its text lines' screen geometry no
-    // longer matches the stack, so the caret map gets no stack to register.
-    paintMembers(target, drawing.members, ox, oy, ctx, drawing.rotation ? undefined : host);
+    // A rotated or mirrored drawing transforms in a group — its text lines'
+    // screen geometry no longer matches the stack, so the caret map gets no
+    // stack to register.
+    paintMembers(
+      target,
+      drawing.members,
+      ox,
+      oy,
+      ctx,
+      drawing.rotation || drawing.flipH || drawing.flipV ? undefined : host,
+    );
   }
 }
 

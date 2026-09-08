@@ -3697,8 +3697,9 @@ export const DocumentCommands = Extension.create({
             }
             return stampAttrs(tr, target, attrs);
           }
-          const shape = { ...(target.attrs.wpsShape as Record<string, unknown>) };
-          const t = { ...((shape.transformation ?? {}) as Record<string, unknown>) };
+          const key = target.kind === "group" ? "wpgGroup" : "wpsShape";
+          const payload = { ...(target.attrs[key] as Record<string, unknown>) };
+          const t = { ...((payload.transformation ?? {}) as Record<string, unknown>) };
           if (step !== 0) {
             const rotation = typeof t.rotation === "number" ? t.rotation : 0;
             t.rotation = (((rotation + step) % 360) + 360) % 360;
@@ -3709,8 +3710,8 @@ export const DocumentCommands = Extension.create({
           } else {
             return false;
           }
-          shape.transformation = t;
-          return stampAttrs(tr, target, { ...target.attrs, wpsShape: shape });
+          payload.transformation = t;
+          return stampAttrs(tr, target, { ...target.attrs, [key]: payload });
         },
       // Word's Position gallery: the nine-cell grid stamps margin-relative
       // align tokens on both axes. A fresh position object per stamp — align

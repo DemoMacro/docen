@@ -722,6 +722,8 @@ function projectFloatingPicture(pic: Rec): LayoutDrawing | undefined {
     ...(zIndex != null ? { zIndex } : {}),
     distances,
     ...(typeof tr.rotation === "number" && tr.rotation ? { rotation: tr.rotation } : {}),
+    ...(tr.flipHorizontal === true ? { flipH: true } : {}),
+    ...(tr.flipVertical === true ? { flipV: true } : {}),
     // A srcRect-cropped metafile replay reaches past the extent — flag it so
     // the painter clips (GDI playback semantics); the flat member never does.
     ...(crop ? { clipMembers: true } : {}),
@@ -773,6 +775,8 @@ function projectWpsShapeRun(wps: Rec, ctx: ProjectContext): LayoutDrawing | unde
     ...(zIndex != null ? { zIndex } : {}),
     distances,
     ...(typeof tr.rotation === "number" && tr.rotation ? { rotation: tr.rotation } : {}),
+    ...(tr.flipHorizontal === true ? { flipH: true } : {}),
+    ...(tr.flipVertical === true ? { flipV: true } : {}),
   };
 }
 

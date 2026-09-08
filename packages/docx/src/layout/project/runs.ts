@@ -274,6 +274,8 @@ export function projectRuns(
         // a:xfrm @rot (degrees) — Word tilts inline pictures about the
         // extent's center just like floating ones.
         ...(typeof tr.rotation === "number" && tr.rotation !== 0 ? { rotation: tr.rotation } : {}),
+        ...(tr.flipHorizontal === true ? { flipH: true } : {}),
+        ...(tr.flipVertical === true ? { flipV: true } : {}),
         ...(adjust?.filter ? { filter: adjust.filter } : {}),
         ...(adjust?.opacity != null ? { opacity: adjust.opacity } : {}),
         ...(adjust?.shadow ? { shadow: adjust.shadow } : {}),

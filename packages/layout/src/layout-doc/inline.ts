@@ -138,6 +138,10 @@ export type LayoutInline =
       /** Clockwise spin of the box about its center, degrees (a:xfrm @rot) —
        * the extent stays put, the painted content tilts inside it. */
       rotation?: number;
+      /** Mirrored content (a:xfrm @flipH/@flipV) — the glyphs of the picture
+       * mirror inside the extent box, which stays put. */
+      flipH?: boolean;
+      flipV?: boolean;
       /** Pixel-adjustment filter, CSS filter syntax (`brightness(1.2)
        * saturate(0.4)`) — the projection mapped the picture's blip effects
        * into it; the renderer composites the source through it. */

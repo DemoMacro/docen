@@ -1637,6 +1637,19 @@ describe("drawing-group / drawing-ungroup", () => {
     expect(editor.state.selection instanceof NodeSelection).toBe(true);
   });
 
+  it("rotate on a group writes wpgGroup, not a phantom wpsShape payload", () => {
+    const editor = buildTwoFloats();
+    const members = floatMembers(editor);
+    expect(editor.commands["drawing-group"](payloadOf(members))).toBe(true);
+    // The group command lands it selected — rotate targets that selection.
+    expect(editor.commands.rotate("flip-v")).toBe(true);
+    const group = firstNodeOf(editor, "wpgGroup");
+    expect((group.attrs.wpgGroup as Record<string, unknown>).transformation).toMatchObject({
+      flipVertical: true,
+    });
+    expect("wpsShape" in group.attrs).toBe(false);
+  });
+
   it("ungroup returns every member to its pre-group position (round-trip)", () => {
     const editor = buildTwoFloats();
     const before = floatMembers(editor);

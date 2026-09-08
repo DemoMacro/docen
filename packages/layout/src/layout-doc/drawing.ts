@@ -217,6 +217,10 @@ export interface LayoutDrawing {
    *  (a:xfrm @rot). The flow's wrap box stays the unrotated extent — Word
    *  wraps text by the extent, not the rotated ink. */
   rotation?: number;
+  /** Mirrored content (a:xfrm @flipH/@flipV) — the members paint through a
+   *  mirrored group; the box itself stays put, like rotation. */
+  flipH?: boolean;
+  flipV?: boolean;
 }
 
 /** One anchor axis's position against its reference box — the shared
