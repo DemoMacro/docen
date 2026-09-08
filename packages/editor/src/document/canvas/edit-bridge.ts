@@ -41,6 +41,7 @@ import { CellSelection, cellAt, inSameTable } from "./cell-selection";
 import { CropOverlay } from "./drawing-editor/crop-overlay";
 import { DrawingOverlay } from "./drawing-editor/overlay";
 import { followLink, installLinkHover, type LinkHit } from "./link-hover";
+import { sameChildPath } from "./stage";
 
 /** A grapheme-boundary segmenter shared by the delete translations — surrogate
  *  pairs, combining marks, and emoji must delete as one user-perceived
@@ -149,21 +150,36 @@ export interface EditBridgeOptions {
   drawingAt?: (page: number, lx: number, ly: number) => DrawingHit | null;
   /** The PM node selection for a drawing hit — resolves the host paragraph
    *  position and the index-th drawing node inside it (null when the map
-   *  cannot pair the host, e.g. a furniture story paragraph). */
+   *  cannot pair the host, e.g. a furniture story paragraph). A hit with a
+   *  `childPath` targets a group member: the resolver decides between the
+   *  member node (the group is entered) and the group itself (Word: a click
+   *  selects the group until then). */
   drawingSelection?: (hit: {
     para: unknown;
     index: number;
     kind: "drawing" | "inline";
+    childPath?: readonly number[];
   }) => number | null;
   /** Re-resolves a selected drawing's painted box after a re-render (the
-   *  selection drops when the drawing no longer paints). */
-  drawingBoxOf?: (para: unknown, index: number, kind: "drawing" | "inline") => DrawingHit | null;
+   *  selection drops when the drawing no longer paints). `childPath` matches
+   *  a group member's box. */
+  drawingBoxOf?: (
+    para: unknown,
+    index: number,
+    kind: "drawing" | "inline",
+    childPath?: readonly number[],
+  ) => DrawingHit | null;
   /** The paint pass's editable text-box stacks — registered with each fresh
    *  caret map so a double click edits the shape's text in place. */
   shapeTextStacks?: () => readonly ShapeTextStack[];
   /** Re-finds the wpsShape node a text-box stack belongs to (the stack's
-   *  host paragraph + drawing index — the same identity a hit box carries). */
-  shapeResolve?: (host: { para: unknown; index: number }) => { pos: number; node: PMNode } | null;
+   *  host paragraph + drawing index — the same identity a hit box carries;
+   *  `childPath` drills into a group's interior member). */
+  shapeResolve?: (host: {
+    para: unknown;
+    index: number;
+    childPath?: readonly number[];
+  }) => { pos: number; node: PMNode } | null;
   /** Ctrl+Click on a `#name` link — the host resolves the bookmark anchor and
    *  scrolls it into view (followLink only opens external URLs). Absent,
    *  internal anchors are inert. */
@@ -177,7 +193,8 @@ export interface EditBridgeOptions {
 }
 
 /** A drawing's painted box plus its identity — how a click hit it and how the
- *  box re-resolves after a re-render (host laid paragraph + drawing index). */
+ *  box re-resolves after a re-render (host laid paragraph + drawing index).
+ *  `childPath` marks a group member's box. */
 interface DrawingHit {
   page: number;
   para: unknown;
@@ -187,6 +204,8 @@ interface DrawingHit {
   y: number;
   width: number;
   height: number;
+  /** The hit group member's index path (absent = the drawing's own box). */
+  childPath?: readonly number[];
   /** Clockwise degrees — the selection frame tilts with the drawing. */
   rotation?: number;
 }
@@ -864,7 +883,13 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
 
   const placeDrawingSel = (): void => {
     if (selDrawing) {
-      const fresh = opts.drawingBoxOf?.(selDrawing.para, selDrawing.index, selDrawing.kind) ?? null;
+      const fresh =
+        opts.drawingBoxOf?.(
+          selDrawing.para,
+          selDrawing.index,
+          selDrawing.kind,
+          selDrawing.childPath,
+        ) ?? null;
       selDrawing = fresh;
     }
     const frame = selDrawing ? (opts.pageHost?.(selDrawing.page) ?? null) : null;
@@ -878,12 +903,19 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
 
   const selectDrawing = (hit: DrawingHit): boolean => {
     const nodePos = opts.drawingSelection?.(hit) ?? null;
-    if (nodePos == null || !main.editor.state.doc.nodeAt(nodePos)) return false;
+    const node = nodePos != null ? main.editor.state.doc.nodeAt(nodePos) : null;
+    if (nodePos == null || !node) return false;
     main.editor.commands.command(({ state, dispatch }) => {
       dispatch?.(state.tr.setSelection(NodeSelection.create(state.doc, nodePos) as never));
       return true;
     });
-    selDrawing = hit;
+    // A member hit that resolved to the group (the group was not entered —
+    // Word's first click selects the whole group) frames the group's box,
+    // not the member's.
+    selDrawing =
+      hit.childPath && node.type.name === "wpgGroup"
+        ? (opts.drawingBoxOf?.(hit.para, hit.index, hit.kind) ?? hit)
+        : hit;
     placeDrawingSel();
     return true;
   };
@@ -1414,7 +1446,8 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
         selDrawing &&
         drawHit.para === selDrawing.para &&
         drawHit.index === selDrawing.index &&
-        drawHit.kind === selDrawing.kind;
+        drawHit.kind === selDrawing.kind &&
+        sameChildPath(drawHit.childPath, selDrawing.childPath);
       if (same && drawingOverlay.active && movableFloating()) {
         drawingOverlay.beginMove(event.clientX, event.clientY);
         ta.focus();

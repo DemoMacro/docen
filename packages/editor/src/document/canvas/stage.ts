@@ -158,6 +158,17 @@ export interface CanvasStageContext {
   };
 }
 
+/** Value equality for a member hit box's childPath — each paint re-allocates
+ *  the arrays, so a box re-resolved after a re-render must match by content. */
+export function sameChildPath(
+  a: readonly number[] | undefined,
+  b: readonly number[] | undefined,
+): boolean {
+  if (a === b) return true;
+  if (!a || !b || a.length !== b.length) return false;
+  return a.every((v, i) => v === b[i]);
+}
+
 export class CanvasStage {
   readonly shell: HTMLElement;
   private readonly slots: PageSlot[] = [];
@@ -1252,10 +1263,23 @@ export class CanvasStage {
 
   /** The painted box of a paragraph's index-th drawing across pages — the
    *  selection overlay's geometry source (a re-render may have moved the
-   *  host paragraph, and with it the drawing, onto another page). */
-  drawingBoxOf(para: unknown, index: number, kind: DrawingHitBox["kind"]): DrawingHitBox | null {
+   *  host paragraph, and with it the drawing, onto another page). `childPath`
+   *  matches a group member's box by value (each paint re-allocates the
+   *  arrays); absent matches the drawing's own box. */
+  drawingBoxOf(
+    para: unknown,
+    index: number,
+    kind: DrawingHitBox["kind"],
+    childPath?: readonly number[],
+  ): DrawingHitBox | null {
     for (const boxes of this.hitBoxes.values()) {
-      const b = boxes.find((box) => box.para === para && box.index === index && box.kind === kind);
+      const b = boxes.find(
+        (box) =>
+          box.para === para &&
+          box.index === index &&
+          box.kind === kind &&
+          sameChildPath(box.childPath, childPath),
+      );
       if (b) return b;
     }
     return null;

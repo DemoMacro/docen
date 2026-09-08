@@ -38,6 +38,7 @@ export const ribbonEn: AdditionalLanguage = {
     "ribbon.tab.header-footer-tools": "Header & Footer",
     "ribbon.tab.equation": "Equation",
     "ribbon.tab.picture-format": "Picture Format",
+    "ribbon.tab.shape-format": "Shape Format",
     // --- Groups: Home ---
     "ribbon.group.clipboard": "Clipboard",
     "ribbon.group.font": "Font",
@@ -58,6 +59,11 @@ export const ribbonEn: AdditionalLanguage = {
     "ribbon.group.picture-adjust": "Adjust",
     "ribbon.group.picture-styles": "Picture Styles",
     "ribbon.group.picture-size": "Size",
+    // --- Groups: Shape Format (contextual) ---
+    "ribbon.group.insert-shapes": "Insert Shapes",
+    "ribbon.group.shape-styles": "Shape Styles",
+    "ribbon.group.wordart-styles": "WordArt Styles",
+    "ribbon.group.shape-size": "Size",
     // --- Groups: Design ---
     "ribbon.group.document-formatting": "Document Formatting",
     "ribbon.group.page-background": "Page Background",
@@ -228,6 +234,19 @@ export const ribbonEn: AdditionalLanguage = {
     "ribbon.cmd.drawing-height": "Height",
     "ribbon.cmd.drawing-width": "Width",
     "ribbon.cmd.crop": "Crop",
+    // --- Commands: Shape Format (contextual) ---
+    "ribbon.cmd.edit-shape": "Edit Shape",
+    "ribbon.cmd.shape-styles": "Shape Styles",
+    "ribbon.cmd.shape-fill": "Shape Fill",
+    "ribbon.cmd.shape-outline": "Shape Outline",
+    "ribbon.cmd.shape-effects": "Shape Effects",
+    "ribbon.cmd.wordart-styles": "WordArt Styles",
+    "ribbon.cmd.text-fill": "Text Fill",
+    "ribbon.cmd.text-outline": "Text Outline",
+    "ribbon.cmd.text-effects": "Text Effects",
+    "ribbon.cmd.shape-text-direction": "Text Direction",
+    "ribbon.cmd.align-text": "Align Text",
+    "ribbon.cmd.text-link": "Create Link",
     // --- Commands: Design ---
     "ribbon.cmd.theme": "Themes",
     "ribbon.cmd.colors": "Colors",
@@ -1071,6 +1090,7 @@ export const ribbonZhCN: AdditionalLanguage = {
     "ribbon.tab.header-footer-tools": "页眉和页脚",
     "ribbon.tab.equation": "公式",
     "ribbon.tab.picture-format": "图片格式",
+    "ribbon.tab.shape-format": "形状格式",
     // --- Groups: Home ---
     "ribbon.group.clipboard": "剪贴板",
     "ribbon.group.font": "字体",
@@ -1089,6 +1109,11 @@ export const ribbonZhCN: AdditionalLanguage = {
     "ribbon.group.picture-adjust": "调整",
     "ribbon.group.picture-styles": "图片样式",
     "ribbon.group.picture-size": "大小",
+    // --- Groups: Shape Format (contextual) ---
+    "ribbon.group.insert-shapes": "插入形状",
+    "ribbon.group.shape-styles": "形状样式",
+    "ribbon.group.wordart-styles": "艺术字样式",
+    "ribbon.group.shape-size": "大小",
     // --- Groups: Design ---
     "ribbon.group.document-formatting": "文档格式",
     "ribbon.group.page-background": "页面背景",
@@ -1259,6 +1284,19 @@ export const ribbonZhCN: AdditionalLanguage = {
     "ribbon.cmd.drawing-height": "高度",
     "ribbon.cmd.drawing-width": "宽度",
     "ribbon.cmd.crop": "裁剪",
+    // --- Commands: Shape Format (contextual) ---
+    "ribbon.cmd.edit-shape": "编辑形状",
+    "ribbon.cmd.shape-styles": "形状样式",
+    "ribbon.cmd.shape-fill": "形状填充",
+    "ribbon.cmd.shape-outline": "形状轮廓",
+    "ribbon.cmd.shape-effects": "形状效果",
+    "ribbon.cmd.wordart-styles": "艺术字样式",
+    "ribbon.cmd.text-fill": "文本填充",
+    "ribbon.cmd.text-outline": "文本轮廓",
+    "ribbon.cmd.text-effects": "文本效果",
+    "ribbon.cmd.shape-text-direction": "文字方向",
+    "ribbon.cmd.align-text": "对齐文本",
+    "ribbon.cmd.text-link": "创建链接",
     // --- Commands: Design ---
     "ribbon.cmd.theme": "主题",
     "ribbon.cmd.colors": "颜色",

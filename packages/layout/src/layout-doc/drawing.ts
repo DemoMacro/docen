@@ -27,7 +27,10 @@ export interface LayoutDrawingShadow {
 /** One absolutely-positioned member of a floating drawing. Coordinates and
  *  sizes are px in the drawing's own box (top-left corner the origin) — the
  *  adapter already resolved the group's child coordinate space (chOff/chExt
- *  scaling). */
+ *  scaling). `childPath` is the member's index path through the group's
+ *  children (nested groups extend it) — the painter hands it to the member
+ *  hit box so a click drills into the owning PM content; absent on members
+ *  that are not a group child (a standalone shape's single member). */
 export type LayoutDrawingMember =
   | {
       kind: "picture";
@@ -35,6 +38,7 @@ export type LayoutDrawingMember =
       y: number;
       width: number;
       height: number;
+      childPath?: readonly number[];
       /** Renderer media source (data URL); absent → an empty frame. */
       src?: string;
       /** Metafile raster-op emulation blend (SRCPAINT → screen,
@@ -62,6 +66,7 @@ export type LayoutDrawingMember =
       y: number;
       width: number;
       height: number;
+      childPath?: readonly number[];
       /** Preset geometry (a:prstGeom @prst). The renderer maps the presets it
        *  knows and skips the rest; custom geometry stays unprojected. */
       preset?: string;
@@ -79,6 +84,7 @@ export type LayoutDrawingMember =
       y: number;
       width: number;
       height: number;
+      childPath?: readonly number[];
       /** SVG path data in box coordinates (0,0 … width,height) — the adapter
        *  scaled the geometry's own space (custGeom path w/h) into the box. */
       d: string;
@@ -95,6 +101,7 @@ export type LayoutDrawingMember =
       y: number;
       width: number;
       height: number;
+      childPath?: readonly number[];
       /** The shape's own solid fill, hex RRGGBB; absent → no fill (a plain
        *  wps:txbx draws its spPr fill under the text). */
       fill?: string;

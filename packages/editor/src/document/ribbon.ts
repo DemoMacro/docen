@@ -1701,6 +1701,72 @@ const pictureSizeItems = (scope?: Element): string =>
     ).map(([text, value]) => ({ text, value })),
   );
 
+/** The Accessibility group — Alt Text through the size-and-position dialog,
+ *  shared by every drawing contextual tab. */
+const accessibilityGroup = (): RibbonGroup =>
+  group("accessibility", [
+    {
+      type: "button",
+      icon: "alt-text",
+      label: "ribbon.cmd.alt-text",
+      event: "drawing-properties",
+      size: "large",
+    },
+  ]);
+
+/** The Arrange group — the Layout tab's floating-drawing commands, repeated
+ *  verbatim on each drawing contextual tab (Word repeats them across the
+ *  Picture/Shape Format tabs). Position/Wrap apply to floating drawings
+ *  only, matching Word's inline grey-out at the command layer. */
+const arrangeGroup = (): RibbonGroup =>
+  group("arrange", [
+    col([
+      row([
+        menu("orientation", "position", parsedItems(positionItems())),
+        menu("wrap", "wrap", parsedItems(wrapItems())),
+      ]),
+      row([btn("orientation", "bring-forward"), btn("orientation", "send-backward")]),
+    ]),
+    menu("align-left", "align-objects", parsedItems(alignObjectsItems()), { size: "large" }),
+    menu("group-objects", "group", parsedItems(groupItems()), { size: "large" }),
+    menu("rotate", "rotate", parsedItems(rotateItems()), { size: "large" }),
+    btn("selection-pane", "selection-pane", { size: "large" }),
+  ]);
+
+/** The Size group — the numeric Height/Width boxes every drawing tab shares;
+ *  pictures add the crop split (a shape has no crop). The boxes read empty
+ *  (the contextual tab builds once per entry, so a live value would go
+ *  stale); a typed measure commits the dimension. `scope` is the i18n scope
+ *  the unit-system presets resolve against. */
+const sizeGroup = (
+  id: "picture-size" | "shape-size",
+  scope: Element | undefined,
+  withCrop: boolean,
+): RibbonGroup =>
+  group(id, [
+    col([
+      combo("drawing-height", "", parsedItems(pictureSizeItems(scope)), {
+        comboboxSize: "short",
+      }),
+      combo("drawing-width", "", parsedItems(pictureSizeItems(scope)), {
+        comboboxSize: "short",
+      }),
+    ]),
+    ...(withCrop
+      ? [
+          split(
+            "crop",
+            "drawing-crop",
+            [
+              { text: "ribbon.cmd.crop", event: "drawing-crop" },
+              { text: "context.crop-reset", event: "drawing-crop-reset" },
+            ],
+            { size: "large", label: "ribbon.cmd.crop" },
+          ),
+        ]
+      : []),
+  ]);
+
 /** Word's Picture Tools — the contextual tab while a picture carries the
  *  selection. Groups mirror Word's Picture Format tab: Adjust (the pixel
  *  tools the engine doesn't model yet — greys until the image-tools batch),
@@ -1746,54 +1812,63 @@ export function pictureFormatTab(scope?: Element): RibbonTab {
           ]),
         ]),
       ]),
-      // Alt Text — the size-and-position dialog already carries the field.
-      group("accessibility", [
-        {
-          type: "button",
-          icon: "alt-text",
-          label: "ribbon.cmd.alt-text",
-          event: "drawing-properties",
-          size: "large",
-        },
+      accessibilityGroup(),
+      arrangeGroup(),
+      sizeGroup("picture-size", scope, true),
+    ],
+  };
+}
+
+/** Word's Drawing Tools — the contextual tab while a shape or a group
+ *  carries the selection. Insert Shapes and the style/WordArt/Text groups
+ *  grey until the shape-style commands land (the fill/outline/effect menus
+ *  and text direction); Accessibility, Arrange, and Size are live (their
+ *  commands accept all three drawing kinds). Marked `contextual` like the
+ *  picture tab; `scope` is the i18n scope the unit presets resolve against. */
+export function shapeFormatTab(scope?: Element): RibbonTab {
+  return {
+    id: "shape-format",
+    label: tab("shape-format"),
+    contextual: true,
+    groups: [
+      // The shape gallery + Edit Shape / Draw Text Box — shape insertion is a
+      // later batch, so the whole group greys.
+      group("insert-shapes", [
+        btn("ink-shape", "shapes", { size: "large" }),
+        col([grid([btn("format-painter", "edit-shape"), btn("text-box", "text-box")])]),
       ]),
-      // Arrange — the Layout tab's Arrange group verbatim (Word repeats the
-      // floating-drawing commands here); Position/Wrap apply to floating
-      // drawings only, matching Word's inline grey-out at the command layer.
-      group("arrange", [
+      group("shape-styles", [
+        btn("picture-styles", "shape-styles", { size: "large" }),
         col([
-          row([
-            menu("orientation", "position", parsedItems(positionItems())),
-            menu("wrap", "wrap", parsedItems(wrapItems())),
+          grid([
+            btn("page-color", "shape-fill"),
+            btn("page-border", "shape-outline"),
+            btn("artistic-effects", "shape-effects"),
           ]),
-          row([btn("orientation", "bring-forward"), btn("orientation", "send-backward")]),
         ]),
-        menu("align-left", "align-objects", parsedItems(alignObjectsItems()), { size: "large" }),
-        menu("group-objects", "group", parsedItems(groupItems()), { size: "large" }),
-        menu("rotate", "rotate", parsedItems(rotateItems()), { size: "large" }),
-        btn("selection-pane", "selection-pane", { size: "large" }),
       ]),
-      // Size — Word stacks Height over Width, with the crop split beside.
-      // The boxes read empty (the contextual tab builds once per entry, so a
-      // live value would go stale); a typed measure commits the dimension.
-      group("picture-size", [
+      group("wordart-styles", [
+        btn("picture-styles", "wordart-styles", { size: "large" }),
         col([
-          combo("drawing-height", "", parsedItems(pictureSizeItems(scope)), {
-            comboboxSize: "short",
-          }),
-          combo("drawing-width", "", parsedItems(pictureSizeItems(scope)), {
-            comboboxSize: "short",
-          }),
+          grid([
+            btn("font-color", "text-fill"),
+            btn("page-border", "text-outline"),
+            btn("text-effects", "text-effects"),
+          ]),
         ]),
-        split(
-          "crop",
-          "drawing-crop",
-          [
-            { text: "ribbon.cmd.crop", event: "drawing-crop" },
-            { text: "context.crop-reset", event: "drawing-crop-reset" },
-          ],
-          { size: "large", label: "ribbon.cmd.crop" },
-        ),
       ]),
+      group("text", [
+        col([
+          grid([
+            btn("text-direction", "shape-text-direction"),
+            btn("align-distribute", "align-text"),
+            btn("text-link", "text-link"),
+          ]),
+        ]),
+      ]),
+      accessibilityGroup(),
+      arrangeGroup(),
+      sizeGroup("shape-size", scope, false),
     ],
   };
 }

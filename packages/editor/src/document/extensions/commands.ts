@@ -840,12 +840,13 @@ function stampRows(
 // ── Floating drawing helpers (the Arrange commands' shared target) ───────────
 
 /** The selected floating drawing — a NodeSelection on a floating image (its
- *  `floating` attr set) or a wps shape (floating inside its `wpsShape`
- *  payload); the stage's hit boxes produce exactly these. Null on any other
- *  selection, so Arrange greys out through editor.can(). */
+ *  `floating` attr set), a wps shape (floating inside its `wpsShape` payload),
+ *  or a wpg group (inside `wpgGroup`); the stage's hit boxes produce exactly
+ *  these. Null on any other selection, so Arrange greys out through
+ *  editor.can(). */
 function floatingDrawingAt(
   state: EditorState,
-): { pos: number; attrs: Record<string, unknown>; kind: "image" | "shape" } | null {
+): { pos: number; attrs: Record<string, unknown>; kind: "image" | "shape" | "group" } | null {
   const sel = state.selection;
   if (!(sel instanceof NodeSelection)) return null;
   const attrs = sel.node.attrs as Record<string, unknown>;
@@ -856,19 +857,24 @@ function floatingDrawingAt(
     const shape = attrs.wpsShape as Record<string, unknown> | null;
     return shape?.floating ? { pos: sel.from, attrs, kind: "shape" } : null;
   }
+  if (sel.node.type.name === "wpgGroup") {
+    const group = attrs.wpgGroup as Record<string, unknown> | null;
+    return group?.floating ? { pos: sel.from, attrs, kind: "group" } : null;
+  }
   return null;
 }
 
 /** The drawing's Floating object (image: a flat attr; shape: inside the
- *  wpsShape payload). */
+ *  wpsShape payload; group: inside wpgGroup). */
 function floatingOf(
   target: NonNullable<ReturnType<typeof floatingDrawingAt>>,
 ): Record<string, unknown> {
-  return (
+  const carrier =
     target.kind === "image"
       ? target.attrs.floating
-      : (target.attrs.wpsShape as Record<string, unknown>).floating
-  ) as Record<string, unknown>;
+      : (target.attrs[target.kind === "shape" ? "wpsShape" : "wpgGroup"] as Record<string, unknown>)
+          .floating;
+  return carrier as Record<string, unknown>;
 }
 
 /** The inline picture under a NodeSelection — Word's Rotate menu works on
@@ -883,17 +889,17 @@ function inlineImageAt(
 }
 
 /** Write a Floating back onto the drawing, shallow-copying the carrier the
- *  way PM immutability requires (image: flat; shape: the wpsShape payload). */
+ *  way PM immutability requires (image: flat; shape/group: the payload). */
 function withFloating(
   target: NonNullable<ReturnType<typeof floatingDrawingAt>>,
   floating: Record<string, unknown>,
 ): Record<string, unknown> {
-  return target.kind === "image"
-    ? { ...target.attrs, floating }
-    : {
-        ...target.attrs,
-        wpsShape: { ...(target.attrs.wpsShape as Record<string, unknown>), floating },
-      };
+  if (target.kind === "image") return { ...target.attrs, floating };
+  const key = target.kind === "shape" ? "wpsShape" : "wpgGroup";
+  return {
+    ...target.attrs,
+    [key]: { ...(target.attrs[key] as Record<string, unknown>), floating },
+  };
 }
 
 /** Stamp the next Floating onto the drawing (one markup write, no scroll —
@@ -983,9 +989,11 @@ function applyFloatingExtras(
   return true;
 }
 
-/** Stamp one dimension onto the selected image — the shared body of the
- *  Picture Format tab's Height/Width boxes (a measure string converted at
- *  96 DPI; inline and floating pictures resize alike). */ function applyImageSize(
+/** Stamp one dimension onto the selected drawing — the shared body of the
+ *  Picture/Shape Format tabs' Height/Width boxes (a measure string converted
+ *  at 96 DPI). An image (inline or floating) sizes in px attrs; a shape/group
+ *  payload in EMU — a group's extent change scales its members through the
+ *  child coordinate space (Word's group resize). */ function applyImageSize(
   state: EditorState,
   tr: Transaction,
   axis: "width" | "height",
@@ -994,9 +1002,23 @@ function applyFloatingExtras(
   const tw = parseMeasureTwip(value);
   if (tw == null || tw <= 0) return false;
   const sel = state.selection;
-  if (!(sel instanceof NodeSelection) || sel.node.type.name !== "image") return false;
-  const attrs = { ...sel.node.attrs };
-  attrs[axis] = Math.round(tw / 15); // 15 twips to the px at 96 DPI
+  if (!(sel instanceof NodeSelection)) return false;
+  const emu = Math.round((tw / 15) * 9525); // 15 twips to the px, 9525 to the EMU
+  if (sel.node.type.name === "image") {
+    const attrs = { ...sel.node.attrs };
+    attrs[axis] = Math.round(tw / 15); // 15 twips to the px at 96 DPI
+    tr.setNodeMarkup(sel.from, undefined, attrs);
+    tr.setSelection(NodeSelection.create(tr.doc, sel.from) as never);
+    return true;
+  }
+  if (sel.node.type.name !== "wpsShape" && sel.node.type.name !== "wpgGroup") return false;
+  const key = sel.node.type.name === "wpsShape" ? "wpsShape" : "wpgGroup";
+  const attrs = { ...sel.node.attrs } as Record<string, unknown>;
+  const payload = { ...(attrs[key] as Record<string, unknown>) };
+  const t = { ...((payload.transformation ?? {}) as Record<string, unknown>) };
+  t[axis] = emu;
+  payload.transformation = t;
+  attrs[key] = payload;
   tr.setNodeMarkup(sel.from, undefined, attrs);
   tr.setSelection(NodeSelection.create(tr.doc, sel.from) as never);
   return true;
@@ -2961,20 +2983,23 @@ export const DocumentCommands = Extension.create({
           }
           const target = floatingDrawingAt(state);
           if (!target) return false;
-          const shape = target.attrs.wpsShape as Record<string, unknown>;
+          const key = target.kind === "shape" ? "wpsShape" : "wpgGroup";
+          const payload = target.attrs[key] as Record<string, unknown>;
           const transformation = {
-            ...(shape.transformation as Record<string, unknown> | undefined),
+            ...(payload.transformation as Record<string, unknown> | undefined),
           };
           const current = transformation.rotation;
           transformation.rotation = (typeof current === "number" ? current : 0) + delta;
           return stampAttrs(tr, target, {
             ...target.attrs,
-            wpsShape: { ...shape, transformation },
+            [key]: { ...payload, transformation },
           });
         },
       // The Size-and-Position dialog's OK: absolute geometry in centimeters
       // (the dialog's display unit), converted to each carrier's native unit —
-      // an image sizes in px and offsets in EMU, a shape payload in EMU.
+      // an image sizes in px and offsets in EMU, a shape/group payload in EMU
+      // (a group's extent change scales its members through the child
+      // coordinate space — walkGroup's childScale, Word's group resize).
       "drawing-properties-apply":
         (patch?) =>
         ({ state, tr }) => {
@@ -3008,15 +3033,16 @@ export const DocumentCommands = Extension.create({
               floating: applyFloatingExtras(floatingOf(target), patch, offsetHCm, offsetVCm),
             });
           }
-          const shape = { ...(target.attrs.wpsShape as Record<string, unknown>) };
-          const t = { ...((shape.transformation ?? {}) as Record<string, unknown>) };
+          const key = target.kind === "shape" ? "wpsShape" : "wpgGroup";
+          const payload = { ...(target.attrs[key] as Record<string, unknown>) };
+          const t = { ...((payload.transformation ?? {}) as Record<string, unknown>) };
           if (widthCm != null) t.width = cmTo(widthCm, EMU_PER_CM);
           if (heightCm != null) t.height = cmTo(heightCm, EMU_PER_CM);
           if (rotationDeg != null) t.rotation = rotationDeg;
-          shape.transformation = t;
-          // The shape's offsets ride the same Floating object as an image's.
-          shape.floating = applyFloatingExtras(floatingOf(target), patch, offsetHCm, offsetVCm);
-          return stampAttrs(tr, target, { ...target.attrs, wpsShape: shape });
+          payload.transformation = t;
+          // The shape/group offsets ride the same Floating object as an image's.
+          payload.floating = applyFloatingExtras(floatingOf(target), patch, offsetHCm, offsetVCm);
+          return stampAttrs(tr, target, { ...target.attrs, [key]: payload });
         },
       // The crop overlay's commit: the selected image's new a:srcRect insets
       // as source fractions, stored as the raw ST_Percentage ints the attrs

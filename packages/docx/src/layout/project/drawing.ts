@@ -434,8 +434,10 @@ function walkGroup(
   out: LayoutDrawingMember[],
   ctx: ProjectContext,
   mirrors?: readonly GroupMirror[],
+  path: readonly number[] = [],
 ): void {
-  for (const child of group.children) {
+  for (let i = 0; i < group.children.length; i++) {
+    const child = group.children[i]!;
     const t: MediaDataTransformation = child.transformation;
     const off = t.offset?.emus;
     if (!off) continue;
@@ -447,6 +449,9 @@ function walkGroup(
       if (m.h) x = 2 * m.x + m.width - x - width;
       if (m.v) y = 2 * m.y + m.height - y - height;
     }
+    // The member's index path through the group children (nested groups
+    // extend it) — how the PM side re-finds the child node from a member hit.
+    const childPath = [...path, i];
 
     // Nested wpg group: flatten in place — its members land in this drawing's
     // box through the composed mapping (Word renders the group tree unrolled).
@@ -473,6 +478,7 @@ function walkGroup(
         out,
         ctx,
         own ? [...(mirrors ?? []), own] : mirrors,
+        childPath,
       );
       continue;
     }
@@ -482,7 +488,7 @@ function walkGroup(
       // non-object data skips the member (absence over corrupt geometry).
       if (child.data == null || typeof child.data !== "object") continue;
       const member = wpsMemberOf(child.data, x, y, width, height, ctx);
-      if (member) out.push(member);
+      if (member) out.push({ ...member, childPath });
     } else {
       // Everything else is treated as a picture member: real media children
       // carry bytes; chart/contentPart children have none and pictureSrc
@@ -491,7 +497,7 @@ function walkGroup(
       // box (replay members are box-relative).
       const replay = metafileMembers(child, width, height, cropOf(child));
       if (replay) {
-        out.push(...replay.map((m) => ({ ...m, x: m.x + x, y: m.y + y })));
+        out.push(...replay.map((m) => ({ ...m, x: m.x + x, y: m.y + y, childPath })));
       } else {
         out.push({
           kind: "picture",
@@ -499,6 +505,7 @@ function walkGroup(
           y,
           width,
           height,
+          childPath,
           src: pictureSrc(child),
           flipH: t.flipHorizontal === true || undefined,
           flipV: t.flipVertical === true || undefined,

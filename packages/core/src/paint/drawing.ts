@@ -188,6 +188,24 @@ export function paintMembers(
     const m = members[i];
     const mx = boxX + m.x;
     const my = boxY + m.y;
+    // A group member registers its own hit box (painted after the group's, so
+    // the member wins the click — whether that selects the member or falls
+    // back to the group is the editor's state call). `host` gates it: inline
+    // picture replays carry no host, and a rotated drawing's members paint in
+    // spinner space where their box geometry no longer matches the page.
+    if (host && m.childPath) {
+      ctx.hitBoxes?.push({
+        page: ctx.pageIndex,
+        x: mx,
+        y: my,
+        width: m.width,
+        height: m.height,
+        para: host.para,
+        index: host.index,
+        kind: "drawing",
+        childPath: m.childPath,
+      });
+    }
     if (m.kind === "picture" && m.src && !m.crop) {
       // A masked GDI blt sequence (SRCPAINT then SRCAND halves) composites
       // against the metafile's own backdrop. The run is flattened into one
@@ -299,12 +317,13 @@ export function paintMembers(
       }
       // An editable body registers its laid stack with the caret map (a double
       // click edits the text in place). Excluded: metafile text (drawn GDI
-      // art — nowrap), rotated stacks (group-space geometry) and group
-      // interiors (no drawing host to re-find the PM node through).
+      // art — nowrap) and rotated stacks (group-space geometry). A group
+      // interior registers too — the host's childPath re-finds the member's
+      // wpsShape node.
       if (host && !m.nowrap && !m.rotation && ctx.shapeTextStacks) {
         ctx.shapeTextStacks.push({
           page: ctx.pageIndex,
-          host: { para: host.para, index: host.index },
+          host: { para: host.para, index: host.index, childPath: m.childPath },
           xPx: mx + left,
           yPx: my + oy,
           items: laid.stack,

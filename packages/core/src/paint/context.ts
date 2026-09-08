@@ -26,6 +26,13 @@ export interface DrawingHitBox {
    *  that sequence); "inline" — a picture line item (index counts the
    *  paragraph's inline pictures). The PM side re-finds the node per kind. */
   kind: "drawing" | "inline";
+  /** A group member's index path through the wpgGroup's PM content (absent =
+   *  the drawing's own box, or a rotated drawing's member whose geometry the
+   *  hit test cannot un-map). Painted after the group box, so the member
+   *  wins the click; whether it selects the member or the group is the
+   *  editor's state call (Word: a click selects the group until it is
+   *  entered). */
+  childPath?: readonly number[];
   /** Clockwise rotation of the box about its center, degrees — the click's
    *  hit test un-rotates the point into the box's own space. */
   rotation?: number;
@@ -34,11 +41,12 @@ export interface DrawingHitBox {
 /** One editable text-box stack (a wps txbx member's laid paragraphs),
  *  page-local px — the caret map registers its lines against the shape's PM
  *  content so a double click edits the text in place. `host` re-finds the
- *  wpsShape node (the same identity a drawing hit box carries). Metafile text
- *  (drawn GDI art, `nowrap`) and rotated stacks paint but never register. */
+ *  wpsShape node (the same identity a drawing hit box carries; `childPath`
+ *  drills into a group's interior). Metafile text (drawn GDI art, `nowrap`)
+ *  and rotated stacks paint but never register. */
 export interface ShapeTextStack {
   page: number;
-  host: { para: LaidOutParagraph; index: number };
+  host: { para: LaidOutParagraph; index: number; childPath?: readonly number[] };
   /** The insets box origin the blocks stack from. */
   xPx: number;
   yPx: number;

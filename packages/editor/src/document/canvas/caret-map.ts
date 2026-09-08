@@ -452,7 +452,11 @@ export class CaretMap {
    *  inert, like an unmapped flow paragraph. Call right after construction. */
   registerShapeStacks(
     stacks: readonly ShapeTextStack[],
-    resolveShape: (host: { para: LaidOutParagraph; index: number }) => {
+    resolveShape: (host: {
+      para: LaidOutParagraph;
+      index: number;
+      childPath?: readonly number[];
+    }) => {
       pos: number;
       node: PmNode;
     } | null,
