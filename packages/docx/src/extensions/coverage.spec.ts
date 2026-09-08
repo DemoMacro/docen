@@ -181,8 +181,24 @@ const INLINE_FIXTURES: Record<keyof typeof PARAGRAPH_CHILD_DISPOSITIONS, () => P
   wpsShape: () => ({
     wpsShape: { children: [{ text: "box" }], transformation: { width: 100, height: 60 } },
   }),
+  // One wps member in child-space form (MediaDataTransformation). EMU values
+  // divide cleanly to px (95250 = 10px) so the pixels track survives the
+  // resolve↔compile unit conversion verbatim.
   wpgGroup: () => ({
-    wpgGroup: { children: [], transformation: { width: 100, height: 60 } },
+    wpgGroup: {
+      transformation: { width: 100, height: 60 },
+      children: [
+        {
+          type: "wps",
+          transformation: {
+            offset: { pixels: { x: 0, y: 0 }, emus: { x: 0, y: 0 } },
+            pixels: { x: 10, y: 10 },
+            emus: { x: 95250, y: 95250 },
+          },
+          data: { children: ["member"], geometry: "rect" },
+        },
+      ],
+    },
   }),
 
   // Passthrough branches. Fixtures with children exercise the run-catch-all
@@ -336,10 +352,20 @@ const INLINE_EDITABLE: InlineEditable = {
   },
   wpgGroup: {
     marker: "wpgGroup",
-    probe: (out) =>
-      expect(out).toEqual({
-        wpgGroup: { children: [], transformation: { width: 100, height: 60 } },
-      }),
+    probe: (out) => {
+      const group = (
+        out as {
+          wpgGroup: {
+            transformation?: { width?: number };
+            children?: { type?: string; data?: { children?: string[] } }[];
+          };
+        }
+      ).wpgGroup;
+      expect(group.transformation?.width).toBe(100);
+      expect(group.children?.[0]?.type).toBe("wps");
+      // the member body collapses back to the string shorthand.
+      expect(group.children?.[0]?.data?.children?.[0]).toBe("member");
+    },
   },
 };
 

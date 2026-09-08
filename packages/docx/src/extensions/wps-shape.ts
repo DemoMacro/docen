@@ -58,9 +58,11 @@ const attrWpsShape = () => ({
 /** ParagraphChild `{ wpsShape: {...} }` → wpsShape node. Mirrors the old
  *  DocxManager wpsShape branch: the shape's text body (children) becomes PM
  *  content (one node per paragraph); geometry/styling ride on attrs.wpsShape.
- *  Each paragraph's defRPr (para.run) is merged into its runs then dropped — it
- *  is the box's default run-properties, not the ¶-mark rPr (see inline note). */
-function resolveWpsShape(ws: WpsBranch["wpsShape"], ctx: ResolveContext): JSONContent {
+ *  Each paragraph's defRPr (para.run) is merged into its runs then dropped —
+ *  it is the box's default run-properties, not the ¶-mark rPr (see inline
+ *  note). Shared with group-members: a wpg group's wps child resolves through
+ *  the same path (its child-space box becomes the transformation). */
+export function resolveWpsShape(ws: WpsBranch["wpsShape"], ctx: ResolveContext): JSONContent {
   const content: JSONContent[] = [];
   if (ws?.children) {
     for (const child of ws.children) {

@@ -75,7 +75,7 @@ export const PARAGRAPH_CHILD_DISPOSITIONS = {
   pageBreak: { editable: "pageBreak node" },
   columnBreak: { editable: "columnBreak node" },
   wpsShape: { editable: "wpsShape node (text body editable, geometry opaque)" },
-  wpgGroup: { editable: "wpgGroup node (whole tree opaque)" },
+  wpgGroup: { editable: "wpgGroup node (members editable, chart/contentPart members opaque)" },
   bookmarkStart: { passthrough: "inlinePassthrough atom (name exposed for TOC anchors)" },
   bookmarkEnd: { passthrough: "inlinePassthrough atom" },
   bookmark: { passthrough: "inlinePassthrough atom" },

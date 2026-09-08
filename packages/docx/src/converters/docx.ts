@@ -22,11 +22,13 @@ import type {
   StylesOptions,
   TableOfContentsOptions,
   RubyPropertiesOptions,
+  GroupChildMediaData,
 } from "@office-open/docx";
 import { flattenExtensions, getExtensionField, getSchema } from "@tiptap/core";
 
 import type { Extensions, JSONContent } from "../core";
 import { docxExtensions } from "../core";
+import { memberNodeToGroupChild } from "../extensions/group-members";
 import { buildListLevels, isGeneratedListReference } from "../extensions/list-numbering";
 import type { ParseBlockRule, ParseInlineRule, ResolveContext } from "../extensions/types";
 import { prepareDocument, type PrepareStep } from "./prepare";
@@ -796,31 +798,30 @@ export class DocxManager {
           break;
         }
         case "wpgGroup": {
+          // attrs.wpgGroup is GroupOptions minus children; the member sequence
+          // compiles back through group-members (reverse of resolveGroupOptions).
           // Same .d.ts gap as tab:true above — office-open consumes a wpgGroup
           // run but lists the branch only in TrackChangeChild, not here.
           const wpgGroup = node.attrs?.wpgGroup;
-          if (wpgGroup) children.push({ wpgGroup } as unknown as ParagraphChild);
+          if (wpgGroup) {
+            const members: GroupChildMediaData[] = [];
+            for (const member of node.content ?? []) {
+              const child = memberNodeToGroupChild(member, (n) => this.compileShapeBody(n));
+              if (child) members.push(child);
+            }
+            children.push({
+              wpgGroup: { ...wpgGroup, children: members },
+            } as unknown as ParagraphChild);
+          }
           break;
         }
         case "wpsShape": {
-          // Editable text body: compile each content paragraph back to a
-          // ParagraphOptions and reattach under wpsShape.children. Mirrors the
-          // tocField compile (compileSectionChild → unwrap .paragraph).
+          // Editable text body: compileShapeBody (shared with the wpg group
+          // member compile) rebuilds wpsShape.children.
           // Same .d.ts gap as tab:true above for the ParagraphChild union.
           const geometry = (node.attrs?.wpsShape ?? {}) as Record<string, unknown>;
-          const body: (ParagraphOptions | string)[] = [];
-          for (const child of node.content ?? []) {
-            const compiled = this.compileSectionChild(child);
-            if (!compiled) continue;
-            const items = Array.isArray(compiled) ? compiled : [compiled];
-            for (const it of items) {
-              if (it && typeof it === "object" && "paragraph" in (it as object)) {
-                body.push((it as { paragraph: ParagraphOptions | string }).paragraph);
-              }
-            }
-          }
           children.push({
-            wpsShape: { ...geometry, children: body },
+            wpsShape: { ...geometry, children: this.compileShapeBody(node) },
           } as unknown as ParagraphChild);
           break;
         }
@@ -828,6 +829,25 @@ export class DocxManager {
     }
 
     return children;
+  }
+
+  /** Compile a wpsShape node's editable body (PM content) back to the
+   *  ParagraphOptions list ShapeCoreOptions.children carries — each content
+   *  paragraph through compileSectionChild, unwrapping .paragraph. Shared by
+   *  the standalone wpsShape case and the wpg group member compile. */
+  private compileShapeBody(node: JSONContent): (ParagraphOptions | string)[] {
+    const body: (ParagraphOptions | string)[] = [];
+    for (const child of node.content ?? []) {
+      const compiled = this.compileSectionChild(child);
+      if (!compiled) continue;
+      const items = Array.isArray(compiled) ? compiled : [compiled];
+      for (const it of items) {
+        if (it && typeof it === "object" && "paragraph" in (it as object)) {
+          body.push((it as { paragraph: ParagraphOptions | string }).paragraph);
+        }
+      }
+    }
+    return body;
   }
 
   private compileTextNode(node: JSONContent, children: ParagraphChild[]): void {

@@ -75,6 +75,26 @@ function decodedBytesOf(attrs: object, src: string): Uint8Array | undefined {
   }
 }
 
+/** src → the embedded media {type, bytes}: a registered blob: URL resolves
+ *  through the media registry (the bytes never left); a data URL decodes
+ *  through the shared attrs-identity cache. Shared by renderDocx and the
+ *  wpg-group member compile (group-members). */
+export function mediaOfSrc(
+  attrs: object,
+  src: string | undefined,
+): { type: string; bytes: Uint8Array } | undefined {
+  const media = src ? mediaBytesOf(src) : undefined;
+  if (media) return { type: media.type, bytes: media.bytes };
+  if (src?.startsWith("data:image/")) {
+    const match = src.match(/^data:image\/([\w.+-]+);base64,/);
+    if (match) {
+      const bytes = decodedBytesOf(attrs, src);
+      if (bytes) return { type: match[1] === "jpeg" ? "jpg" : match[1], bytes };
+    }
+  }
+  return undefined;
+}
+
 /**
  * Tiptap JSON image node → CorePictureOptions-shaped object.
  *
@@ -91,16 +111,10 @@ export function renderDocx(node: JSONContent): Record<string, unknown> | null {
   // cache so the projection downstream sees a stable bytes identity across
   // transactions.
   const src = attrs.src as string | undefined;
-  const media = src ? mediaBytesOf(src) : undefined;
+  const media = mediaOfSrc(attrs, src);
   if (media) {
     imageOpts.type = media.type;
     imageOpts.data = media.bytes;
-  } else if (src?.startsWith("data:image/")) {
-    const match = src.match(/^data:image\/([\w.+-]+);base64,/);
-    if (match) {
-      imageOpts.type = match[1] === "jpeg" ? "jpg" : match[1];
-      imageOpts.data = decodedBytesOf(attrs, src);
-    }
   }
 
   // Cannot generate an image run without embedded data (external URLs need pre-fetching)
@@ -377,6 +391,12 @@ export const Image = Node.create({
           }
         },
       },
+
+      // Group-membership only (group-members): the image's box in the wpg
+      // group's child coordinate space, EMU, verbatim — width/height attrs
+      // are px for the shared image UI; this is the fidelity channel the
+      // member compile reads back. Null at the paragraph top level.
+      groupXfrm: attrDataJson("data-group-xfrm"),
 
       // 0.9.7+ round-trip fidelity fields. office-open parses + stringifies
       // each; we carry them verbatim as JSON in data-* attrs.
