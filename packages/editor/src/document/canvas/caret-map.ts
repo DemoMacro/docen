@@ -252,6 +252,15 @@ function collectLayoutParas(
   }
 }
 
+/** A page's laid paragraphs in paint order (the same pre-order walk the
+ *  painter's hit boxes record their hosts against) — the stage's link between
+ *  box host references and a relayout's fresh paragraph objects. */
+export function collectPageParas(page: FlowPage): LaidOutParagraph[] {
+  const laid: { page: number; para: LaidOutParagraph; xPx: number; yPx: number }[] = [];
+  collectLayoutParas(page.items, 0, 0, 0, laid, null, null);
+  return laid.map((l) => l.para);
+}
+
 export class CaretMap {
   readonly valid: boolean;
   private readonly paras: ParaEntry[] = [];

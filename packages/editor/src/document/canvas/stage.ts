@@ -35,10 +35,11 @@ import type {
  * owns and injects its own page styles; it wires into <docen-document> only
  * after the editing milestones (M-R2+) land.
  */
-import type { FlowPage, FontMetrics, LaidOutStackItem } from "@docen/layout";
+import type { FlowPage, FontMetrics, LaidOutParagraph, LaidOutStackItem } from "@docen/layout";
 import { stackBlocks, TextMeasurer } from "@docen/layout";
 import { App, Debug, Group, Line, Rect, Text, type IGroup } from "leafer-ui";
 
+import { collectPageParas } from "./caret-map";
 import { computeLineNumbers } from "./line-numbers";
 
 const PAGE_GAP = 24;
@@ -834,9 +835,48 @@ export class CanvasStage {
       // layers survive (see repaint).
       if (slot.app && dirty?.[index] !== false) {
         this.repaint(slot.app, index, dirty != null);
+      } else if (slot.app) {
+        this.#relinkHitParas(slot.app, index);
       }
     }
   }
+
+  /** A clean page keeps its painted canvas AND its hit boxes, but the
+   *  relayout re-objected every paragraph — the caret map (rebuilt from the
+   *  fresh generation each render) resolves a click's box through its host
+   *  reference, so a drawing on a page the edit never touched would stop
+   *  being selectable. The old and new paragraph lists are structurally
+   *  isomorphic (deepEq judged the page clean) and share the painter's walk
+   *  order, so position pairs them: re-point each box's host at the fresh
+   *  object. A diverged list (a mid-open re-walk re-laid the page; the
+   *  slice-sync marks pages clean without comparing anything) cannot pair —
+   *  repaint the page, which rebuilds boxes and hosts against one
+   *  generation. */
+  #relinkHitParas(app: App, index: number): void {
+    const fresh = collectPageParas(this.pages[index]!);
+    const old = this.#hitParas.get(index);
+    this.#hitParas.set(index, fresh);
+    if (!old || old.length !== fresh.length) {
+      this.repaint(app, index, true);
+      return;
+    }
+    // The incremental walk's slices re-sync the same page objects — nothing
+    // to re-point (and the map build below would be wasted per slice).
+    if (old[0] === fresh[0]) return;
+    const swap = new Map(old.map((p, k) => [p, fresh[k]!]));
+    for (const b of this.hitBoxes.get(index) ?? []) {
+      const p = swap.get(b.para);
+      if (p) b.para = p;
+    }
+    for (const s of this.shapeTextStacks.get(index) ?? []) {
+      const p = swap.get(s.host.para);
+      if (p) s.host.para = p;
+    }
+  }
+
+  /** The paragraph list each page's hit boxes were painted against — the
+   *  relink's old-generation side. */
+  readonly #hitParas = new Map<number, LaidOutParagraph[]>();
 
   /** Which furniture slot a page displays — the edit story's data source
    *  (an absent first/even slot falls back to default at pick time). */
@@ -1105,6 +1145,7 @@ export class CanvasStage {
       app.forceRender();
       this.hitBoxes.set(index, hitBoxes);
       this.shapeTextStacks.set(index, shapeTextStacks);
+      this.#hitParas.set(index, collectPageParas(this.pages[index]!));
       return;
     }
 
@@ -1204,6 +1245,7 @@ export class CanvasStage {
     app.forceRender();
     this.hitBoxes.set(index, hitBoxes);
     this.shapeTextStacks.set(index, shapeTextStacks);
+    this.#hitParas.set(index, collectPageParas(this.pages[index]!));
   }
 
   /** Paint the floats both passes parked in the queue — after the pass's

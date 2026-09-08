@@ -15,7 +15,7 @@ vi.stubGlobal("document", {
   createElement: (tag: string) => (tag === "canvas" ? { getContext: () => fakeCtx } : {}),
 } as unknown as Document);
 
-const { CaretMap } = await import("./caret-map");
+const { CaretMap, collectPageParas } = await import("./caret-map");
 
 // Tiptap's schema needs the plain text node (same trick as the TOC spec).
 const Text = TextNode.create({ name: "text", group: "inline" });
@@ -73,6 +73,26 @@ const fakePara = (
 
 const pageOf = (blocks: Record<string, unknown>[]): FlowPage[] =>
   [{ items: blocks.map((block, i) => ({ yPx: i * 50, block })) }] as unknown as FlowPage[];
+
+describe("collectPageParas", () => {
+  it("returns the laid paragraph objects themselves in paint order", () => {
+    // The stage relinks a clean page's drawing hit boxes by paragraph
+    // IDENTITY (box.para === old[k]) — the walk must hand back the very
+    // blocks the painter recorded hosts against, not positional wrappers,
+    // or every relink silently pairs nothing and drawings on untouched
+    // pages stop being selectable after one edit elsewhere.
+    const a = fakePara([{ text: "a", xPx: 0, yPx: 0, maxWidthPx: 100 }]);
+    const b = fakePara([{ text: "b", xPx: 0, yPx: 0, maxWidthPx: 100 }]);
+    const nested = fakePara([{ text: "n", xPx: 0, yPx: 0, maxWidthPx: 100 }]);
+    const group = { kind: "group", children: [{ yPx: 0, block: nested }] };
+    const pages = pageOf([a, group, b]);
+    const paras = collectPageParas(pages[0]!);
+    expect(paras).toHaveLength(3);
+    expect(paras[0]).toBe(a);
+    expect(paras[1]).toBe(nested);
+    expect(paras[2]).toBe(b);
+  });
+});
 
 describe("CaretMap click boundaries", () => {
   it("pairs each boundary x with its own doc position (click a full character off)", () => {
