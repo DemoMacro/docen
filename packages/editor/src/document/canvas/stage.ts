@@ -1292,6 +1292,16 @@ export class CanvasStage {
     return [...this.hitBoxes.values()].flat();
   }
 
+  /** The page's in-front float boxes (page-local px) — the spelling overlay
+   *  clips its squiggles against these: a front-of-text picture covers the
+   *  text and its wave (Word keeps only the selection and caret above front
+   *  floats, and those overlays stay whole). */
+  frontFloatBoxes(page: number): Array<{ x: number; y: number; width: number; height: number }> {
+    return (this.hitBoxes.get(page) ?? [])
+      .filter((b) => b.kind === "drawing" && !b.behind)
+      .map(({ x, y, width, height }) => ({ x, y, width, height }));
+  }
+
   /** Both furniture stacks for a page's slot, at their page positions —
    *  distances come from the page's own section. The paint context clears
    *  the body flow's grid pitch: the header/footer story keeps natural line

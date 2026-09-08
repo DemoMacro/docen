@@ -33,6 +33,10 @@ export interface DrawingHitBox {
    *  editor's state call (Word: a click selects the group until it is
    *  entered). */
   childPath?: readonly number[];
+  /** A behind-doc float's box — only the in-front band covers the text layer,
+   *  so overlays that must yield to front floats (spelling squiggles) skip
+   *  these boxes. */
+  behind?: boolean;
   /** Clockwise rotation of the box about its center, degrees — the click's
    *  hit test un-rotates the point into the box's own space. */
   rotation?: number;

@@ -116,6 +116,7 @@ export function paintDrawing(
     index: host.index,
     kind: "drawing",
     ...(drawing.rotation ? { rotation: drawing.rotation } : {}),
+    ...(ctx.layer === "behind" ? { behind: true } : {}),
   });
   // The members' target and origin: the page tree at the box origin — or, on
   // a rotated drawing, a group parked at the box CENTER carrying the angle
@@ -219,6 +220,7 @@ export function paintMembers(
         index: host.index,
         kind: "drawing",
         childPath: m.childPath,
+        ...(ctx.layer === "behind" ? { behind: true } : {}),
       });
     }
     if (m.kind === "picture" && m.src && !m.crop) {

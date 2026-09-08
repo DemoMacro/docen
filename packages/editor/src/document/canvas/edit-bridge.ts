@@ -141,6 +141,10 @@ export interface EditBridgeOptions {
    *  written in screen px inside zoom-sized frames; hit-testing converts the
    *  other way. Defaults to 1 (unzoomed). */
   scale?: () => number;
+  /** The page's in-front float boxes (page-local px) — squiggles clip against
+   *  them: a front-of-text picture covers the text and its spelling wave
+   *  (Word keeps only the selection and caret above front floats). */
+  frontFloats?: (page: number) => Array<{ x: number; y: number; width: number; height: number }>;
   /** Header/footer edit stories — absent, the furniture bands are inert. */
   story?: EditBridgeStory;
   /** Drawing hit-test (page-local px) — the stage's painted-box table. A hit
@@ -560,12 +564,48 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
    *  the dictionary check (debounced per transaction) and hands the issue
    *  ranges here; each becomes one thin div hugging the line's baseline
    *  with a red wave drawn by a repeating SVG. zIndex 2 keeps squiggles
-   *  under search matches, selection, and caret. */
+   *  under search matches, selection, and caret. A squiggle an in-front
+   *  float covers keeps only its visible strips — Word hides the wave under
+   *  a front-of-text picture, while the selection and caret stay whole. */
   const spellingLayer: HTMLDivElement[] = [];
   const SQUIGGLE =
     "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='3'%3E" +
     "%3Cpath d='M0 2.5 L1.5 0.5 L3 2.5 L4.5 0.5 L6 2.5' fill='none' stroke='%23e81123'/%3E%3C/svg%3E\")";
   let spellingIssues: Array<{ from: number; to: number }> = [];
+
+  /** `r` minus every hole it meets — axis-aligned leftovers only (a 3px-tall
+   *  squiggle cut by a float box keeps its left/right strips; a fully
+   *  covered one vanishes). */
+  const rectMinus = (
+    r: { x: number; y: number; width: number; height: number },
+    holes: readonly { x: number; y: number; width: number; height: number }[],
+  ): Array<{ x: number; y: number; width: number; height: number }> => {
+    let parts = [r];
+    for (const h of holes) {
+      const next: typeof parts = [];
+      for (const p of parts) {
+        const hx0 = Math.max(p.x, h.x);
+        const hx1 = Math.min(p.x + p.width, h.x + h.width);
+        const hy0 = Math.max(p.y, h.y);
+        const hy1 = Math.min(p.y + p.height, h.y + h.height);
+        if (hx0 >= hx1 || hy0 >= hy1) {
+          next.push(p);
+          continue;
+        }
+        if (hy0 > p.y) next.push({ x: p.x, y: p.y, width: p.width, height: hy0 - p.y });
+        if (hy1 < p.y + p.height) {
+          next.push({ x: p.x, y: hy1, width: p.width, height: p.y + p.height - hy1 });
+        }
+        if (hx0 > p.x) next.push({ x: p.x, y: hy0, width: hx0 - p.x, height: hy1 - hy0 });
+        if (hx1 < p.x + p.width) {
+          next.push({ x: hx1, y: hy0, width: p.x + p.width - hx1, height: hy1 - hy0 });
+        }
+      }
+      parts = next;
+    }
+    return parts;
+  };
+
   const placeSpelling = (): void => {
     for (const el of spellingLayer) el.remove();
     spellingLayer.length = 0;
@@ -576,19 +616,23 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       for (const r of s.map.selectionRects(issue.from, issue.to)) {
         const frame = opts.pageHost?.(framePage(s, r.page));
         if (!frame) continue;
-        const el = document.createElement("div");
-        Object.assign(el.style, {
-          position: "absolute",
-          background: `${SQUIGGLE} repeat-x`,
-          pointerEvents: "none",
-          zIndex: "2",
-          left: `${r.xPx * scale}px`,
-          top: `${(r.yPx + r.heightPx) * scale - 3}px`,
-          width: `${r.widthPx * scale}px`,
-          height: "3px",
-        } satisfies Partial<CSSStyleDeclaration>);
-        frame.append(el);
-        spellingLayer.push(el);
+        const wave = { x: r.xPx, y: r.yPx + r.heightPx - 3, width: r.widthPx, height: 3 };
+        const holes = opts.frontFloats?.(r.page) ?? [];
+        for (const g of holes.length ? rectMinus(wave, holes) : [wave]) {
+          const el = document.createElement("div");
+          Object.assign(el.style, {
+            position: "absolute",
+            background: `${SQUIGGLE} repeat-x`,
+            pointerEvents: "none",
+            zIndex: "2",
+            left: `${g.x * scale}px`,
+            top: `${g.y * scale}px`,
+            width: `${g.width * scale}px`,
+            height: `${g.height * scale}px`,
+          } satisfies Partial<CSSStyleDeclaration>);
+          frame.append(el);
+          spellingLayer.push(el);
+        }
       }
     }
   };
