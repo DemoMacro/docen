@@ -208,12 +208,57 @@ export interface LayoutDrawing {
   rotation?: number;
 }
 
+/** One anchor axis's position against its reference box — the shared
+ *  resolution behind both the painter's page placement and the flow's wrap
+ *  zones: center aligns inside, right/bottom flush to the far edge, left/top
+ *  at the near edge; otherwise the offset (px, or a fraction of the extent)
+ *  from the leading edge. */
+export function anchorAxisPos(
+  spec: { offsetPx?: number; percent?: number; align?: string },
+  base: number,
+  extent: number,
+  size: number,
+): number {
+  if (spec.align === "center") return base + (extent - size) / 2;
+  if (spec.align === "right" || spec.align === "bottom") return base + extent - size;
+  if (spec.align) return base; // left / top
+  if (spec.percent != null) return base + spec.percent * extent;
+  return base + (spec.offsetPx ?? 0);
+}
+
+/** Page/margin anchor geometry for {@link wrapEffectsOf}, translated into the
+ *  caller's own coordinate spaces: Y as the flow measures it (origin = the
+ *  content box's top edge) and X within the current column (origin = the
+ *  column's left edge). `flowZeroPx` is the flow-Y origin expressed in the
+ *  caller's Y space — 0 for the flow's own zone registry, −startY for a
+ *  paragraph's self-zones (paragraph-local space). Absent, only
+ *  paragraph/column anchors wrap (a table cell has no page). */
+export interface WrapPageGeometry {
+  /** The flow-Y origin in the caller's Y space (see above). */
+  flowZeroPx: number;
+  /** Content-box height px — the topMargin/margin reference box [0, h]. */
+  contentHeightPx: number;
+  /** Content-box width px — the rightMargin edge's position in content-box X. */
+  contentWidthPx: number;
+  /** Page-box extent px (page-anchored offsets/percents resolve against it). */
+  pageWidthPx: number;
+  pageHeightPx: number;
+  /** The content box's page-absolute top/left — places the page box in the
+   *  flow's Y space (page top = −contentTopPx) and the column's X space. */
+  contentTopPx: number;
+  contentLeftPx: number;
+  /** The current column's left edge in content-box px (0 single-column). */
+  columnLeftPx: number;
+}
+
 /** A drawing's wrap box: its extent grown by the anchor's wrap distances,
  *  clipped to the column. Both zone builders (the flow's post-anchor zones
  *  and the anchor paragraph's own self-zones) share this so the square/
  *  tight/topAndBottom paddings stay in lockstep. `boxTopPx` is the drawing's
- *  own top in the caller's Y space; the distances pad top and bottom around
- *  it. `inCell` applies Word's layoutInCell containment: a cell-anchored
+ *  own top and `offsetX` its left edge in the caller's column X space — both
+ *  already resolved against the anchor's reference boxes (see
+ *  {@link wrapEffectsOf}); the distances pad top and bottom around the top.
+ *  `inCell` applies Word's layoutInCell containment: a cell-anchored
  *  object never extends past its cell — an offset that overflows the cell's
  *  right edge shifts the whole box left to touch it (the wrap zone follows
  *  the shifted box). Body floats keep their raw offset (they may hang into
@@ -223,7 +268,8 @@ export function drawingWrapBox(
   d: LayoutDrawing,
   boxTopPx: number,
   columnWidth: number,
-  inCell = false,
+  inCell: boolean,
+  offsetX: number,
 ):
   | {
       widthPx: number;
@@ -236,8 +282,8 @@ export function drawingWrapBox(
   | undefined {
   const left = d.distances?.left ?? 0;
   const offset = inCell
-    ? Math.min(Math.max(d.anchor.horizontal.offsetPx ?? 0, 0), Math.max(0, columnWidth - d.width))
-    : (d.anchor.horizontal.offsetPx ?? 0);
+    ? Math.min(Math.max(offsetX, 0), Math.max(0, columnWidth - d.width))
+    : offsetX;
   const x0 = offset - left;
   const start = Math.max(x0, 0);
   const widthPx =
@@ -270,21 +316,54 @@ export function drawingWrapBox(
  *  Zones shrink the lines they overlap; bands (topAndBottom, or a square box
  *  covering the full column) clear everything in their band — callers that
  *  cannot dodge a band mid-stack (a paragraph's own lines, a table cell)
- *  drop them. Column/margin/page-anchored and wrapNone drawings produce
- *  neither. */
+ *  drop them. Every anchor basis wraps when `page` carries the geometry
+ *  (the painter's own reference boxes, translated); without it only the
+ *  in-flow paragraph/column pair does. wrapNone drawings produce neither. */
 export function wrapEffectsOf(
   drawings: readonly LayoutDrawing[] | undefined,
   baseY: number,
   columnWidth: number,
-  inCell = false,
+  inCell: boolean,
+  page?: WrapPageGeometry,
 ): { zones: LayoutFloatZone[]; bands: LayoutFloatZone[] } {
   const zones: LayoutFloatZone[] = [];
   const bands: LayoutFloatZone[] = [];
   for (const d of drawings ?? []) {
     if (!d.wrap) continue;
     const { horizontal: h, vertical: v } = d.anchor;
-    if (v.relative !== "paragraph" || h.relative !== "column") continue;
-    const box = drawingWrapBox(d, baseY + (v.offsetPx ?? 0), columnWidth, inCell);
+    // Each axis's reference box in the caller's spaces — the painter's
+    // drawingBoxOf computes the same bases page-absolute; these stay in the
+    // flow's body-origin Y and the column's X so zones compare against lines
+    // directly. A missing `page` leaves only the in-flow pair.
+    const vRef =
+      v.relative === "paragraph"
+        ? { base: baseY, extent: 0 }
+        : page
+          ? v.relative === "page"
+            ? { base: page.flowZeroPx - page.contentTopPx, extent: page.pageHeightPx }
+            : v.relative === "bottomMargin"
+              ? { base: page.flowZeroPx + page.contentHeightPx, extent: 0 }
+              : { base: page.flowZeroPx, extent: page.contentHeightPx }
+          : null;
+    if (!vRef) continue;
+    const hRef =
+      h.relative === "column"
+        ? { base: 0, extent: columnWidth }
+        : page
+          ? h.relative === "page"
+            ? { base: -page.contentLeftPx - page.columnLeftPx, extent: page.pageWidthPx }
+            : h.relative === "rightMargin"
+              ? { base: page.contentWidthPx - page.columnLeftPx, extent: 0 }
+              : { base: -page.columnLeftPx, extent: 0 }
+          : null;
+    if (!hRef) continue;
+    const box = drawingWrapBox(
+      d,
+      anchorAxisPos(v, vRef.base, vRef.extent, d.height),
+      columnWidth,
+      inCell,
+      anchorAxisPos(h, hRef.base, hRef.extent, d.width),
+    );
     if (!box) continue;
     const zone: LayoutFloatZone = {
       widthPx: box.widthPx,

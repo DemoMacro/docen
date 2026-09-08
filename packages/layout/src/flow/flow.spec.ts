@@ -915,6 +915,102 @@ describe("layoutFlow float wraps", () => {
     expect(head.drawings).toHaveLength(1);
     expect(tail.drawings).toBeUndefined();
   });
+
+  // ── page/margin anchor bases (the page box the projection spreads in) ──
+
+  /** A 400×600 page whose content box sits at (50, 60) — 300 wide, the flow's
+   *  own box (single column, so the column's left = the content box's). */
+  const PAGE = { pageWidthPx: 400, pageHeightPx: 600, contentLeftPx: 50, contentTopPx: 60 };
+  const flowPaged = (blocks: LayoutBlock[], contentHeightPx: number) =>
+    layoutFlow(blocks, { contentWidthPx: 300, contentHeightPx, ...PAGE }, measurer);
+
+  it("wraps beside a page-anchored square (offsets from the page box)", () => {
+    // Page offsets (50, 80) land at column x 0 and flow y 20 → the zone
+    // [20, 100] over [0, 200] (text packs right of it, the wider side). The
+    // anchor's line 1 (0-20) clears it and packs 37 atoms, lines 2-3 wrap
+    // beside the box (12 atoms each); the next paragraph (y 60-100) wraps
+    // through the same registered zone.
+    const d: NonNullable<LayoutParagraph["drawings"]>[number] = {
+      anchor: {
+        horizontal: { relative: "page", offsetPx: 50 },
+        vertical: { relative: "page", offsetPx: 80 },
+      },
+      width: 200,
+      height: 80,
+      members: [],
+      wrap: "square",
+    };
+    const pages = flowPaged([wrapPara(50, { drawings: [d] }), wrapPara(24)], 480);
+    const [anchor, body] = paras(pages)[0];
+    expect(anchor.lines).toHaveLength(3);
+    expect(anchor.lines[0]!.maxWidthPx).toBe(300);
+    expect(anchor.lines[1]!.maxWidthPx).toBe(100);
+    expect(body.lines).toHaveLength(2);
+    expect(body.lines[0]!.maxWidthPx).toBe(100);
+  });
+
+  it("wraps beside a margin-aligned square (the Position gallery shape)", () => {
+    // leftMargin+left pins x at the content box's left edge (column x 0),
+    // topMargin+top pins y at the content top (flow y 0) — the anchor's very
+    // first line wraps beside the 200px box.
+    const d: NonNullable<LayoutParagraph["drawings"]>[number] = {
+      anchor: {
+        horizontal: { relative: "leftMargin", align: "left" },
+        vertical: { relative: "topMargin", align: "top" },
+      },
+      width: 200,
+      height: 40,
+      members: [],
+      wrap: "square",
+    };
+    const pages = flowPaged([wrapPara(24, { drawings: [d] })], 480);
+    const [anchor] = paras(pages)[0];
+    expect(anchor.lines).toHaveLength(2);
+    expect(anchor.lines[0]!.maxWidthPx).toBe(100);
+  });
+
+  it("resolves a page anchor's align/percent against the page box", () => {
+    // Horizontal center of the 400px page puts the 200px box at page x 100 →
+    // column x 50 (the zone's left strip [0, 50) packs the text — 6 atoms);
+    // vertical 25% of the 600px page → page y 150 → flow y 90, zone
+    // [90, 130]. The body (y 40) packs lines 1-2 (40-80) full, lines 3-5
+    // beside the box, and the tail past the zone at full width.
+    const d: NonNullable<LayoutParagraph["drawings"]>[number] = {
+      anchor: {
+        horizontal: { relative: "page", align: "center" },
+        vertical: { relative: "page", percent: 0.25 },
+      },
+      width: 200,
+      height: 40,
+      members: [],
+      wrap: "square",
+    };
+    const pages = flowPaged([para(2, { drawings: [d] }), wrapPara(112)], 480);
+    const [, body] = paras(pages)[0];
+    expect(body.lines).toHaveLength(6);
+    expect(body.lines[1]!.maxWidthPx).toBe(300);
+    expect(body.lines[2]!.maxWidthPx).toBe(50);
+    expect(body.lines[5]!.maxWidthPx).toBe(300);
+  });
+
+  it("keeps a page-anchored box painter-only without page geometry", () => {
+    // No page box in the opts (a furniture stack, a hand-built flow): the
+    // old whitelist holds — only the paragraph/column pair wraps.
+    const d: NonNullable<LayoutParagraph["drawings"]>[number] = {
+      anchor: {
+        horizontal: { relative: "page", offsetPx: 100 },
+        vertical: { relative: "page", offsetPx: 80 },
+      },
+      width: 200,
+      height: 40,
+      members: [],
+      wrap: "square",
+    };
+    const pages = flow([wrapPara(24, { drawings: [d] }), wrapPara(24)], 480);
+    const [anchor, body] = paras(pages)[0];
+    expect(anchor.lines).toHaveLength(1);
+    expect(body.lines[0]!.maxWidthPx).toBe(300);
+  });
 });
 
 describe("layoutFlowSections", () => {

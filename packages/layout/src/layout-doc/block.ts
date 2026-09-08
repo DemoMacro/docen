@@ -1,4 +1,4 @@
-import type { LayoutDrawing, LayoutFloatZone } from "./drawing";
+import type { LayoutDrawing, LayoutFloatZone, WrapPageGeometry } from "./drawing";
 import type { LayoutInline, LayoutTextStyle } from "./inline";
 import type { LayoutTable } from "./table";
 
@@ -176,4 +176,9 @@ export interface LayoutBlockContext {
   /** This block's top Y within the flow — pairs with floatZones to derive
    *  each line's band. */
   startY?: number;
+  /** Page geometry for a paragraph's own wrapping drawings with page/margin
+   *  anchors (WrapPageGeometry in drawing.ts) — the flow threads its
+   *  section's page box with `startY` as the translation; absent (a table
+   *  cell, a furniture stack), only paragraph/column anchors wrap. */
+  wrapPage?: WrapPageGeometry;
 }

@@ -64,8 +64,12 @@ export function stackBlocks(
   // page; a cell never splits, so its list needs no page scoping.
   const cellZones: LayoutFloatZone[] | undefined = ctx?.inTable ? [] : undefined;
   for (const block of blocks) {
+    // wrapPage drops with the cell: page-anchored wrap zones translate
+    // through flow Y, and a cell's startY is cell-local — inside a cell only
+    // paragraph/column anchors wrap (Word's layoutInCell keeps a page-anchored
+    // object out of the cell's own flow).
     const blockCtx: LayoutBlockContext | undefined = cellZones
-      ? { ...ctx, floatZones: cellZones, startY: heightPx }
+      ? { ...ctx, floatZones: cellZones, startY: heightPx, wrapPage: undefined }
       : ctx;
     const out = layoutBlock(block, width, blockCtx, measurer);
     const before = out.kind === "paragraph" ? out.beforePx : 0;

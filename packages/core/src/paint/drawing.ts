@@ -1,4 +1,5 @@
 import {
+  anchorAxisPos,
   stackBlocks,
   TextMeasurer,
   type LaidOutParagraph,
@@ -43,22 +44,10 @@ function drawingBoxOf(
         : drawing.anchor.vertical.relative === "bottomMargin"
           ? { top: flow.contentTopPx + flow.contentHeightPx, height: 0 }
           : { top: flow.contentTopPx, height: flow.contentHeightPx };
-  // Axis position: align inside the reference box, else the offset (px, or a
-  // fraction of the reference extent) from its leading edge.
-  const axisPos = (
-    spec: { offsetPx?: number; percent?: number; align?: string },
-    base: number,
-    extent: number,
-    size: number,
-  ): number => {
-    if (spec.align === "center") return base + (extent - size) / 2;
-    if (spec.align === "right" || spec.align === "bottom") return base + extent - size;
-    if (spec.align) return base; // left / top
-    if (spec.percent != null) return base + spec.percent * extent;
-    return base + (spec.offsetPx ?? 0);
-  };
-  let boxX = axisPos(drawing.anchor.horizontal, hBox.left, hBox.width, drawing.width);
-  const boxY = axisPos(drawing.anchor.vertical, vBox.top, vBox.height, drawing.height);
+  // Axis position — the shared resolution (the flow's wrap zones compute the
+  // same bases, so painter placement and text avoidance cannot drift).
+  let boxX = anchorAxisPos(drawing.anchor.horizontal, hBox.left, hBox.width, drawing.width);
+  const boxY = anchorAxisPos(drawing.anchor.vertical, vBox.top, vBox.height, drawing.height);
   // Word's layoutInCell: a cell-anchored object never extends past its cell —
   // an offset that overflows the right edge shifts the whole box left to touch
   // it (the wrap zones shifted with it at layout time). Body floats keep

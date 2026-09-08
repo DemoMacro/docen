@@ -25,6 +25,7 @@ import {
   type LayoutFloatZone,
   type ProjectedColumns,
   wrapEffectsOf,
+  type WrapPageGeometry,
 } from "../layout-doc";
 import type {
   LaidOutBlock,
@@ -74,6 +75,14 @@ export interface FlowPageInsets {
 export interface FlowOptions {
   contentWidthPx: number;
   contentHeightPx: number;
+  /** Page-box geometry for page/margin-anchored wrap zones: the paper extent
+   *  and the content box's page-absolute top/left (the projection spreads its
+   *  ProjectedFlowBox in, which already carries these). Absent → only
+   *  paragraph/column-anchored drawings wrap. */
+  pageWidthPx?: number;
+  pageHeightPx?: number;
+  contentLeftPx?: number;
+  contentTopPx?: number;
   /** Section document-grid pitch (threads into every block layout). */
   linePitchPx?: number;
   /** w:adjustLineHeightInTable (settings.xml compat) — lets table cell lines
@@ -371,7 +380,31 @@ class Flow {
       onGrid: true,
       floatZones: this.zones.length > 0 ? this.zones : undefined,
       startY: this.y,
+      wrapPage: this.wrapPage,
     };
+  }
+
+  /** The wrap-zone page geometry in the flow's own Y space (origin = the
+   *  content-box top) and the current column's X — the section's page box
+   *  when the projection carried it. Paragraph self-zones re-derive with
+   *  their own −startY translation (paragraph-local Y). */
+  private get wrapPage(): WrapPageGeometry | undefined {
+    const { pageWidthPx, pageHeightPx, contentLeftPx, contentTopPx } = this.opts;
+    return pageWidthPx != null &&
+      pageHeightPx != null &&
+      contentLeftPx != null &&
+      contentTopPx != null
+      ? {
+          flowZeroPx: 0,
+          contentHeightPx: this.opts.contentHeightPx,
+          contentWidthPx: this.opts.contentWidthPx,
+          pageWidthPx,
+          pageHeightPx,
+          contentLeftPx,
+          contentTopPx,
+          columnLeftPx: this.col.xPx,
+        }
+      : undefined;
   }
 
   private getLaidFootnote(
@@ -736,13 +769,21 @@ class Flow {
   }
 
   /** Turn the anchor paragraph's wrapped drawings into flow effects: a
-   *  paragraph-anchored box offset into the column either shrinks the lines
-   *  it overlaps (a zone) or clears its whole band (topAndBottom / a box
-   *  covering the full column width). The box grows by the anchor's wrap
-   *  distances first (distL/R/T/B), so text keeps its Word gap. Margin/
-   *  page-anchored and aligned boxes stay painter-only (registered gaps). */
+   *  wrapping box either shrinks the lines it overlaps (a zone) or clears its
+   *  whole band (topAndBottom / a box covering the full column width). Every
+   *  anchor basis resolves — paragraph/column in the flow's own spaces, page/
+   *  margin through the section's page box (wrapPage). The box grows by the
+   *  anchor's wrap distances first (distL/R/T/B), so text keeps its Word gap.
+   *  The zone's X space is the anchor paragraph's own column (multi-column
+   *  flows register per column); a box hanging into a margin clips there. */
   private registerFloats(laid: Extract<LaidOutBlock, { kind: "paragraph" }>, yPx: number): void {
-    const { zones, bands } = wrapEffectsOf(laid.drawings, yPx, this.opts.contentWidthPx);
+    const { zones, bands } = wrapEffectsOf(
+      laid.drawings,
+      yPx,
+      this.col.widthPx,
+      false,
+      this.wrapPage,
+    );
     this.zones.push(...zones);
     this.bands.push(...bands);
   }

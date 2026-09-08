@@ -64,16 +64,24 @@ export function layoutParagraph(
 
   const usable = Math.max(0, width - (para.indent?.leftPx ?? 0) - (para.indent?.rightPx ?? 0));
 
-  // The anchor paragraph wraps beside its own square floats: the drawings'
-  // offsets are paragraph-relative by definition, so their zones feed the
-  // packer in paragraph-relative Y (the flow's — or the table cell's —
-  // absolute zones cover every later paragraph). The box grows by the
-  // anchor's wrap distances first (distL/R/T/B), matching the flow's zone
-  // padding. Full-column boxes and topAndBottom clears are bands — the
-  // packer cannot skip a mid-paragraph band, so they stay flow-only.
-  // Table cells qualify too (Word's layoutInCell): a cell-anchored float
-  // wraps the cell's text, and inside a cell `column` IS the cell's column.
-  const selfZones: LayoutFloatZone[] = wrapEffectsOf(para.drawings, 0, width, inTable).zones;
+  // The anchor paragraph wraps beside its own square floats: paragraph/
+  // column anchors are paragraph-relative by definition, so their zones feed
+  // the packer in paragraph-relative Y (the flow's — or the table cell's —
+  // absolute zones cover every later paragraph); page/margin anchors resolve
+  // through ctx.wrapPage with −startY translating flow Y into the local
+  // space. The box grows by the anchor's wrap distances first
+  // (distL/R/T/B), matching the flow's zone padding. Full-column boxes and
+  // topAndBottom clears are bands — the packer cannot skip a mid-paragraph
+  // band, so they stay flow-only. Table cells qualify too (Word's
+  // layoutInCell): a cell-anchored float wraps the cell's text, and inside a
+  // cell `column` IS the cell's column (wrapPage never reaches a cell).
+  const selfZones: LayoutFloatZone[] = wrapEffectsOf(
+    para.drawings,
+    0,
+    width,
+    inTable,
+    ctx?.wrapPage && ctx.startY != null ? { ...ctx.wrapPage, flowZeroPx: -ctx.startY } : undefined,
+  ).zones;
 
   const packed = packLines(para.inline, {
     measurer,
