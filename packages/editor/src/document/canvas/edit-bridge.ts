@@ -19,7 +19,7 @@ import {
   type JSONContent,
 } from "@docen/docx";
 import { Editor } from "@docen/docx/core";
-import { EMU_PER_PX, type FlowPage } from "@docen/layout";
+import type { FlowPage } from "@docen/layout";
 import { UndoRedo } from "@tiptap/extensions";
 import {
   joinBackward,
@@ -33,13 +33,12 @@ import { Fragment, type Node as PMNode, Slice } from "@tiptap/pm/model";
 import { NodeSelection, TextSelection } from "@tiptap/pm/state";
 import { getMatchHighlights } from "prosemirror-search";
 
+import { DrawingGestures, type DrawingHit } from "../../drawing";
 import { listLevelStepPatch } from "../extensions/commands";
 import { KEYBOARD_SHORTCUTS } from "../extensions/keymap";
 import { autocorrectOf } from "./autocorrect";
 import { CaretMap, type TableZone } from "./caret-map";
 import { CellSelection, cellAt, inSameTable } from "./cell-selection";
-import { CropOverlay } from "./drawing-editor/crop-overlay";
-import { DrawingOverlay } from "./drawing-editor/overlay";
 import { followLink, installLinkHover, type LinkHit } from "./link-hover";
 import { sameChildPath } from "./stage";
 
@@ -190,24 +189,6 @@ export interface EditBridgeOptions {
   /** A keyboard paste landed rich content (the docen slice or styled HTML
    *  lane) — the host shows Word's paste-options bar over the pasted text. */
   onRichPaste?: (source: { kind: "slice" | "html"; raw: string; text: string }) => void;
-}
-
-/** A drawing's painted box plus its identity — how a click hit it and how the
- *  box re-resolves after a re-render (host laid paragraph + drawing index).
- *  `childPath` marks a group member's box. */
-interface DrawingHit {
-  page: number;
-  para: unknown;
-  index: number;
-  kind: "drawing" | "inline";
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  /** The hit group member's index path (absent = the drawing's own box). */
-  childPath?: readonly number[];
-  /** Clockwise degrees — the selection frame tilts with the drawing. */
-  rotation?: number;
 }
 
 export interface EditBridge {
@@ -608,8 +589,8 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     placeSpelling();
     // A selection that stopped being the drawing's NodeSelection (arrow keys,
     // a command, undo) drops the selection box — the box mirrors the PM state.
-    if (selDrawing && !(main.editor.state.selection instanceof NodeSelection)) {
-      selDrawing = null;
+    if (draw.selected && !(main.editor.state.selection instanceof NodeSelection)) {
+      draw.clear();
     }
     const s = active();
     if (!mapFresh(s)) {
@@ -762,196 +743,25 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     dragMoved = false;
   };
 
-  /** The selected drawing — Word's picture selection. The hit box carries
-   *  the laid host paragraph + its drawing index (how the PM node was found);
-   *  after a re-render the box re-resolves from the stage table, and a
-   *  drawing that no longer paints drops the selection. */
-  let selDrawing: DrawingHit | null = null;
-
-  /** The drawing-editor adapter: what a dragged box means. The box is
-   *  page-local px at scale 1; the PM node's width/height attrs are px too,
-   *  so the write-back is a direct setNodeMarkup (inline pictures size
-   *  through the same attrs; a re-render re-anchors the frame via
-   *  drawingBoxOf). A body drag moves the drawing: the px delta converts to
-   *  EMU (the floating attrs' unit) and lands through the engine's
-   *  move-drawing command, which adds it to the current offsets. */
-  const drawingOverlay = new DrawingOverlay({
+  /** The drawing selection state machine — the selection frame and crop
+   *  overlays plus their write-backs (resize/move/rotate/crop land through
+   *  the engine's drawing commands). Injected with this bridge's host
+   *  surface; the bridge keeps only the hit chains that route into it. */
+  const draw = new DrawingGestures({
+    editor: () => main.editor,
+    drawingSelection: (hit) => opts.drawingSelection?.(hit) ?? null,
+    drawingBoxOf: (para, index, kind, childPath) =>
+      opts.drawingBoxOf?.(para, index, kind, childPath) ?? null,
+    pageHost: (page) => opts.pageHost?.(page) ?? null,
     scale: () => opts.scale?.() ?? 1,
-    applyBox: (box) => {
-      if (!selDrawing) return;
-      const nodePos = opts.drawingSelection?.(selDrawing) ?? null;
-      if (nodePos == null) return;
-      const editor = main.editor;
-      if (!editor.state.doc.nodeAt(nodePos)) return;
-      editor.commands.command(({ tr, dispatch }) => {
-        // A setNodeMarkup that changes attrs demotes a NodeSelection to a
-        // caret (PM maps the selection across the node's replace step);
-        // re-create it so the resize keeps the drawing selected — Word's
-        // picture stays selected after a handle drag.
-        tr.setNodeMarkup(nodePos, undefined, {
-          ...editor.state.doc.nodeAt(nodePos)!.attrs,
-          width: box.width,
-          height: box.height,
-        }).setSelection(NodeSelection.create(tr.doc, nodePos) as never);
-        dispatch?.(tr as never);
-        return true;
-      });
-    },
-    applyOffset: (dx, dy) => {
-      if (!selDrawing) return;
-      const nodePos = opts.drawingSelection?.(selDrawing) ?? null;
-      if (nodePos == null) return;
-      const hEmu = Math.round(dx * EMU_PER_PX);
-      const vEmu = Math.round(dy * EMU_PER_PX);
-      // An offset-anchored float adds the drag delta to its offsets; an
-      // align-anchored one has none to add to — the drop lands absolute,
-      // page-anchored, at the dragged spot (Word: dragging breaks the
-      // alignment, the drawn result doesn't shift).
-      const anchors = selectedFloatingAnchors();
-      if (typeof anchors?.h?.offset === "number" && typeof anchors.v?.offset === "number") {
-        main.editor.commands["move-drawing"](JSON.stringify({ h: hEmu, v: vEmu }));
-        return;
-      }
-      main.editor.commands["place-drawing"](
-        JSON.stringify({
-          h: Math.round(selDrawing.x * EMU_PER_PX) + hEmu,
-          v: Math.round(selDrawing.y * EMU_PER_PX) + vEmu,
-        }),
-      );
-    },
-    applyRotation: (delta) => {
-      if (!selDrawing) return;
-      const nodePos = opts.drawingSelection?.(selDrawing) ?? null;
-      if (nodePos == null) return;
-      main.editor.commands["rotate-drawing"](JSON.stringify(delta));
-    },
   });
-  opts.host.append(drawingOverlay.el);
-
-  // The crop layer: the selected image's source shows in full with black
-  // crop handles; a commit writes the dragged insets through the crop
-  // command (fractions — the command converts to the attrs' raw ints). It
-  // displaces the selection frame while on — its handles share the frame's
-  // grip points, and a resize landing under a crop drag would re-render and
-  // kill the mode — so exiting hands the frame back through onExit.
-  const cropOverlay = new CropOverlay({
-    scale: () => opts.scale?.() ?? 1,
-    applyCrop: (crop) => {
-      if (!selDrawing) return;
-      const nodePos = opts.drawingSelection?.(selDrawing) ?? null;
-      if (nodePos == null) return;
-      main.editor.commands["drawing-crop-apply"](JSON.parse(JSON.stringify(crop)));
-    },
-    onExit: () => placeDrawingSel(),
-  });
-  opts.host.append(cropOverlay.el);
-
-  /** Enter crop mode on the selected image (the context menu's Crop). False
-   *  when the selection frame isn't showing or the node carries no source —
-   *  shapes and source-less images have nothing to crop. */
-  const enterCropMode = (): boolean => {
-    if (!selDrawing || cropOverlay.active) return false;
-    const nodePos = opts.drawingSelection?.(selDrawing) ?? null;
-    const node = nodePos != null ? main.editor.state.doc.nodeAt(nodePos) : null;
-    const attrs = node?.attrs as Record<string, unknown> | undefined;
-    const src = typeof attrs?.src === "string" ? attrs.src : null;
-    if (!src) return false;
-    // The layer positions page-locally, like the selection frame — mount in
-    // the drawing's page frame.
-    const frame = opts.pageHost?.(selDrawing.page) ?? null;
-    if (!frame) return false;
-    if (frame !== cropOverlay.el.parentElement) frame.append(cropOverlay.el);
-    drawingOverlay.hide();
-    // The attrs carry the raw ST_Percentage ints (100000 = 100%) — the same
-    // contract breach cropOf reads through; divide back to fractions here.
-    const raw = (attrs?.crop ?? {}) as Record<string, unknown>;
-    const fraction = (v: unknown): number =>
-      typeof v === "number" && Number.isFinite(v) ? v / 100000 : 0;
-    cropOverlay.show(
-      selDrawing,
-      selDrawing.rotation ?? 0,
-      {
-        left: fraction(raw.left),
-        top: fraction(raw.top),
-        right: fraction(raw.right),
-        bottom: fraction(raw.bottom),
-      },
-      src,
-    );
-    return true;
-  };
-
-  const placeDrawingSel = (): void => {
-    if (selDrawing) {
-      const fresh =
-        opts.drawingBoxOf?.(
-          selDrawing.para,
-          selDrawing.index,
-          selDrawing.kind,
-          selDrawing.childPath,
-        ) ?? null;
-      selDrawing = fresh;
-    }
-    const frame = selDrawing ? (opts.pageHost?.(selDrawing.page) ?? null) : null;
-    if (!selDrawing || !frame) {
-      drawingOverlay.hide();
-      return;
-    }
-    if (frame !== drawingOverlay.el.parentElement) frame.append(drawingOverlay.el);
-    drawingOverlay.refresh(selDrawing, selDrawing.rotation);
-  };
-
-  const selectDrawing = (hit: DrawingHit): boolean => {
-    const nodePos = opts.drawingSelection?.(hit) ?? null;
-    const node = nodePos != null ? main.editor.state.doc.nodeAt(nodePos) : null;
-    if (nodePos == null || !node) return false;
-    main.editor.commands.command(({ state, dispatch }) => {
-      dispatch?.(state.tr.setSelection(NodeSelection.create(state.doc, nodePos) as never));
-      return true;
-    });
-    // A member hit that resolved to the group (the group was not entered —
-    // Word's first click selects the whole group) frames the group's box,
-    // not the member's.
-    selDrawing =
-      hit.childPath && node.type.name === "wpgGroup"
-        ? (opts.drawingBoxOf?.(hit.para, hit.index, hit.kind) ?? hit)
-        : hit;
-    placeDrawingSel();
-    return true;
-  };
+  draw.mount(opts.host);
 
   /** A viewport point → the active story's doc position (furniture stories
    *  map through their single pseudo page). Clamping drags resolve the
    *  nearest line regardless of distance — a drag overshooting past the
    *  last line's band must keep extending to the line's end (Word), not
    *  stall the selection mid-line. */
-  /** The selected floating drawing's position anchors (null on any other
-   *  selection) — any float can start a pointer drag; whether the drop adds
-   *  a delta or lands absolute depends on the anchor shape. */
-  const selectedFloatingAnchors = (): {
-    h: Record<string, unknown> | undefined;
-    v: Record<string, unknown> | undefined;
-  } | null => {
-    const sel = main.editor.state.selection;
-    if (!(sel instanceof NodeSelection)) return null;
-    const attrs = sel.node.attrs as Record<string, unknown>;
-    const floating =
-      sel.node.type.name === "image"
-        ? (attrs.floating as Record<string, unknown> | null)
-        : ((attrs.wpsShape as Record<string, unknown> | null | undefined)?.floating as Record<
-            string,
-            unknown
-          > | null);
-    if (!floating) return null;
-    return {
-      h: floating.horizontalPosition as Record<string, unknown> | undefined,
-      v: floating.verticalPosition as Record<string, unknown> | undefined,
-    };
-  };
-
-  /** Whether the selection is a floating drawing a pointer drag can move. */
-  const movableFloating = (): boolean => selectedFloatingAnchors() != null;
-
   const posAtClient = (clientX: number, clientY: number, clamp = false): number | null => {
     const s = active();
     const hit = hitPage(clientX, clientY);
@@ -1442,14 +1252,15 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       // drag commits. Any other press (another drawing, an align-anchored
       // float, or the same one after a re-layout cleared the frame) just
       // selects.
+      const sel = draw.selected;
       const same =
-        selDrawing &&
-        drawHit.para === selDrawing.para &&
-        drawHit.index === selDrawing.index &&
-        drawHit.kind === selDrawing.kind &&
-        sameChildPath(drawHit.childPath, selDrawing.childPath);
-      if (same && drawingOverlay.active && movableFloating()) {
-        drawingOverlay.beginMove(event.clientX, event.clientY);
+        sel &&
+        drawHit.para === sel.para &&
+        drawHit.index === sel.index &&
+        drawHit.kind === sel.kind &&
+        sameChildPath(drawHit.childPath, sel.childPath);
+      if (same && draw.frameActive && draw.movableFloating()) {
+        draw.beginMove(event.clientX, event.clientY);
         ta.focus();
         ta.value = "";
         return;
@@ -1464,8 +1275,8 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
           main.map?.posAtShapePoint(drawHit.page, drawHit.x, drawHit.y, editing ?? undefined) ??
           null;
         if (pos != null) {
-          selDrawing = null;
-          placeDrawingSel();
+          draw.clear();
+          draw.place();
           setSel(pos);
           ta.focus();
           ta.value = "";
@@ -1476,14 +1287,14 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       // paragraph lives outside the main doc, a stale box after a re-layout)
       // must not swallow the click — fall through to the text placement
       // (Word: body clicks pass through header-anchored shapes).
-      if (selectDrawing(drawHit)) {
+      if (draw.select(drawHit)) {
         ta.focus();
         ta.value = "";
         return;
       }
     }
-    selDrawing = null;
-    placeDrawingSel();
+    draw.clear();
+    draw.place();
     const pos = posAtClient(event.clientX, event.clientY);
     if (pos != null) {
       // Word's Ctrl+Click follows the link instead of dropping a caret; a
@@ -1894,9 +1705,9 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
           if (dispatch) dispatch(state.tr.deleteSelection());
           return true;
         });
-        if (selDrawing != null) {
-          selDrawing = null;
-          placeDrawingSel();
+        if (draw.selected != null) {
+          draw.clear();
+          draw.place();
         }
         return;
       }
@@ -2032,17 +1843,17 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     switch (event.key) {
       case "ArrowLeft":
         event.preventDefault();
-        if (selDrawing != null) {
-          selDrawing = null;
-          placeDrawingSel();
+        if (draw.selected != null) {
+          draw.clear();
+          draw.place();
         }
         apply(hStep(active().editor.state, head(), -1, event.ctrlKey || event.metaKey), extend);
         break;
       case "ArrowRight":
         event.preventDefault();
-        if (selDrawing != null) {
-          selDrawing = null;
-          placeDrawingSel();
+        if (draw.selected != null) {
+          draw.clear();
+          draw.place();
         }
         apply(hStep(active().editor.state, head(), 1, event.ctrlKey || event.metaKey), extend);
         break;
@@ -2117,10 +1928,10 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
           });
           return;
         }
-        if (selDrawing != null) {
+        if (draw.selected != null) {
           event.preventDefault();
-          selDrawing = null;
-          placeDrawingSel();
+          draw.clear();
+          draw.place();
           return;
         }
         if (story) {
@@ -2381,7 +2192,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       if (stacks.length)
         main.map.registerShapeStacks(stacks, (host) => opts.shapeResolve?.(host) ?? null);
       main.pageCount = pages.length;
-      placeDrawingSel();
+      draw.place();
       placeCaret();
     },
     updateStoryMap(stack, band): void {
@@ -2454,10 +2265,10 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       const hit = hitPage(clientX, clientY);
       if (!hit || !opts.drawingAt) return false;
       const drawHit = opts.drawingAt(story ? 0 : hit.page, hit.lx, hit.ly);
-      return drawHit ? selectDrawing(drawHit) : false;
+      return drawHit ? draw.select(drawHit) : false;
     },
     enterCropMode(): boolean {
-      return enterCropMode();
+      return draw.enterCropMode();
     },
     commentAnchorRect(from, to) {
       // Comments anchor main-doc text — a furniture story's geometry cannot
@@ -2500,10 +2311,10 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       ta.focus();
     },
     replaceOverlays(): void {
-      // A re-render under an open crop layer orphans its geometry — drop the
-      // mode (the drag commits through Enter/click, never mid-transaction).
-      if (cropOverlay.active) cropOverlay.cancel();
-      placeDrawingSel();
+      // A re-render under an open crop layer orphans its geometry — the
+      // drawing layer drops the mode and re-places its overlays (the drag
+      // commits through Enter/click, never mid-transaction).
+      draw.replaceOverlays();
       placeCaret();
     },
     /** Hand the host's fresh spell-check results to the overlay (the check
@@ -2523,8 +2334,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       opts.host.removeEventListener("mousedown", takeFocus);
       document.removeEventListener("mousemove", onMouseMove);
       document.removeEventListener("mouseup", onMouseUp);
-      drawingOverlay.hide();
-      drawingOverlay.el.remove();
+      draw.destroy();
       for (const el of selectionLayer) el.remove();
       for (const el of searchLayer) el.remove();
       for (const el of spellingLayer) el.remove();
