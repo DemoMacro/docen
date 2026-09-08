@@ -808,6 +808,10 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       opts.drawingBoxOf?.(para, index, kind, childPath) ?? null,
     pageHost: (page) => opts.pageHost?.(page) ?? null,
     scale: () => opts.scale?.() ?? 1,
+    pageAtPoint: (clientX, clientY) => {
+      const hit = hitPage(clientX, clientY);
+      return hit ? { page: hit.page, x: hit.lx, y: hit.ly } : null;
+    },
     anchorParagraphAt: (page, x, y, width) =>
       main.map?.valid ? main.map.anchorParagraphAt(page, x, y, width) : null,
   });
