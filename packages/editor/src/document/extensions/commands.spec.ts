@@ -1836,3 +1836,95 @@ describe("drawing-distribute", () => {
     ).toBe(false);
   });
 });
+
+describe("shape-effects / shape-text-direction", () => {
+  /** A floating wps text-box shape, node-selected — the Shape Styles and
+   *  Text group commands' target (they write attrs wherever the shape sits,
+   *  floating being one of the places). */
+  const buildWithShape = (): EditorType => {
+    const editor = build();
+    editor.commands.setContent({
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [
+            {
+              type: "wpsShape",
+              attrs: {
+                wpsShape: {
+                  geometry: "rect",
+                  transformation: { width: 200000, height: 120000 },
+                  floating: {
+                    horizontalPosition: { relative: "column", offset: 0 },
+                    verticalPosition: { relative: "paragraph", offset: 0 },
+                  },
+                },
+              },
+              // The editable textbox body — the node is content:"block+".
+              content: [{ type: "paragraph" }],
+            },
+          ],
+        },
+      ],
+    } as never);
+    let pos = -1;
+    editor.state.doc.descendants((node, nodePos) => {
+      if (node.type.name === "wpsShape") {
+        pos = nodePos;
+        return false;
+      }
+      return true;
+    });
+    editor.commands.setNodeSelection(pos);
+    return editor;
+  };
+
+  const shapeOf = (editor: EditorType): Record<string, unknown> =>
+    firstNodeOf(editor, "wpsShape").attrs.wpsShape as Record<string, unknown>;
+
+  it("shape-effects stamps the gallery preset outer shadow and clears it", () => {
+    const editor = buildWithShape();
+    expect(editor.commands["shape-effects"]("shadow-lower-right")).toBe(true);
+    expect(shapeOf(editor).effects).toEqual({
+      outerShadow: {
+        distance: 25400,
+        direction: 45,
+        blurRadius: 38100,
+        color: { value: "000000", transforms: { alpha: 60 } },
+      },
+    });
+    // The shape stays selected (the menu can repeat).
+    expect(editor.state.selection instanceof NodeSelection).toBe(true);
+    // "none" drops the emptied effects object — no husk group behind.
+    expect(editor.commands["shape-effects"]("none")).toBe(true);
+    expect(shapeOf(editor).effects).toBeUndefined();
+    // Clearing again declines (nothing to clear) without touching the doc.
+    expect(editor.commands["shape-effects"]("none")).toBe(false);
+  });
+
+  it("shape-effects declines unknown picks and non-shape selections", () => {
+    const editor = buildWithShape();
+    expect(editor.commands["shape-effects"]("glow")).toBe(false);
+    editor.commands.setTextSelection(1);
+    expect(editor.commands["shape-effects"]("shadow-right")).toBe(false);
+  });
+
+  it("shape-text-direction stamps and clears bodyPr @vert", () => {
+    const editor = buildWithShape();
+    expect(editor.commands["shape-text-direction"]("vertical")).toBe(true);
+    expect(shapeOf(editor).bodyProperties).toEqual({ vertical: "vertical" });
+    expect(editor.commands["shape-text-direction"]("vertical270")).toBe(true);
+    expect(shapeOf(editor).bodyProperties).toEqual({ vertical: "vertical270" });
+    // "horizontal" is the cleared state — an emptied bodyProperties drops off.
+    expect(editor.commands["shape-text-direction"]("horizontal")).toBe(true);
+    expect(shapeOf(editor).bodyProperties).toBeUndefined();
+    expect(editor.commands["shape-text-direction"]("horizontal")).toBe(false);
+  });
+
+  it("shape-text-direction declines unknown tokens", () => {
+    const editor = buildWithShape();
+    expect(editor.commands["shape-text-direction"]("eastAsianVertical")).toBe(false);
+    expect(editor.commands["shape-text-direction"]()).toBe(false);
+  });
+});

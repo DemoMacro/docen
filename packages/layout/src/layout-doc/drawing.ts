@@ -77,6 +77,8 @@ export type LayoutDrawingMember =
       opacity?: number;
       /** Outline stroke: width in px + hex color (absent color → ink). */
       line?: LayoutDrawingLine;
+      /** The shape's outer shadow (spPr a:effectLst a:outerShdw). */
+      shadow?: LayoutDrawingShadow;
     }
   | {
       kind: "path";
@@ -94,6 +96,8 @@ export type LayoutDrawingMember =
       fill?: string;
       /** Outline stroke (a:ln): width px + hex color + cap/join/dash. */
       line?: LayoutDrawingLine;
+      /** The path's outer shadow (spPr a:effectLst a:outerShdw). */
+      shadow?: LayoutDrawingShadow;
     }
   | {
       kind: "textBox";
@@ -131,6 +135,13 @@ export type LayoutDrawingMember =
        *  metafile vertical text: a rotated GDI world transform lays runs down
        *  a column; shaping stays horizontal, the paint rotates. */
       rotation?: number;
+      /** bodyPr @vert — the body lays out against the transposed column (the
+       *  box height) and rotates into place: "vertical" reads top-down with
+       *  columns advancing right-to-left, "vertical270" bottom-up with columns
+       *  left-to-right (Word's "Rotate all text 90°/270°"). */
+      textVertical?: "vertical" | "vertical270";
+      /** The shape's outer shadow (spPr a:effectLst a:outerShdw). */
+      shadow?: LayoutDrawingShadow;
       /** The box's content as projected blocks — the renderer stacks them
        *  inside the box (the flow never sees them; the drawing wraps none). */
       blocks: LayoutBlock[];

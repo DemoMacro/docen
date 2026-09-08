@@ -150,6 +150,8 @@ declare module "@tiptap/core" {
       "change-picture": (src?: string) => ReturnType;
       "shape-fill": (value?: string) => ReturnType;
       "shape-outline": (value?: string) => ReturnType;
+      "shape-effects": (value?: string) => ReturnType;
+      "shape-text-direction": (value?: string) => ReturnType;
       // Arrange — floating drawings (z-order, wrap, rotation, position).
       "bring-forward": () => ReturnType;
       "send-backward": () => ReturnType;
@@ -267,6 +269,8 @@ export const WIRED_DISPATCH: ReadonlySet<string> = new Set([
   "change-picture",
   "shape-fill",
   "shape-outline",
+  "shape-effects",
+  "shape-text-direction",
   "bring-forward",
   "send-backward",
   "bring-to-front",
@@ -1383,6 +1387,19 @@ const CELL_MARGIN_PRESETS: Readonly<Record<string, Record<string, unknown> | nul
     bottom: { size: 0, type: "twips" },
     left: { size: 288, type: "twips" },
   },
+};
+
+/** The Shadow gallery's direction picks → DrawingML clockwise degrees
+ *  (a:outerShdw @dir, measured from the 3-o'clock position). */
+const SHADOW_DIRECTIONS: Readonly<Record<string, number>> = {
+  "shadow-right": 0,
+  "shadow-lower-right": 45,
+  "shadow-bottom": 90,
+  "shadow-lower-left": 135,
+  "shadow-left": 180,
+  "shadow-upper-left": 225,
+  "shadow-top": 270,
+  "shadow-upper-right": 315,
 };
 
 // ── Cell Size / AutoFit measurement helpers ──────────────────────────────────
@@ -3461,6 +3478,64 @@ export const DocumentCommands = Extension.create({
             } else return false;
             shape.outline = outline;
           }
+          return stampAttrs(tr, target, { ...target.attrs, wpsShape: shape });
+        },
+      // Shape Effects: Word's Shadow section — "none" clears, a direction
+      // pick stamps the preset outer shadow (Word's default offset/blur
+      // geometry, 60%-opaque black ink). The other effect families (glow,
+      // soft edges, bevel, 3-D) have no painter mapping yet and stay greyed
+      // at the menu; an emptied effects object drops off the attrs.
+      "shape-effects":
+        (value) =>
+        ({ state, tr }) => {
+          const target = shapeAt(state);
+          if (!target) return false;
+          const v = String(value ?? "");
+          const shape: Record<string, unknown> = {
+            ...(target.attrs.wpsShape as Record<string, unknown>),
+          };
+          const effects = { ...((shape.effects ?? {}) as Record<string, unknown>) };
+          if (v === "none") {
+            if (!("outerShadow" in effects)) return false;
+            delete effects.outerShadow;
+          } else {
+            const dir = SHADOW_DIRECTIONS[v];
+            if (dir == null) return false;
+            effects.outerShadow = {
+              distance: 25400,
+              direction: dir,
+              blurRadius: 38100,
+              color: { value: "000000", transforms: { alpha: 60 } },
+            };
+          }
+          if (Object.keys(effects).length === 0) delete shape.effects;
+          else shape.effects = effects;
+          return stampAttrs(tr, target, { ...target.attrs, wpsShape: shape });
+        },
+      // Word's Text Direction menu: "horizontal" clears bodyPr @vert (the
+      // OOXML absent-attribute default), "vertical"/"vertical270" stamp the
+      // rotated layouts (Rotate all text 90°/270°). The stacked variants
+      // (eastAsianVert…) need per-glyph upright layout the renderer has no
+      // model for — greyed at the menu.
+      "shape-text-direction":
+        (value) =>
+        ({ state, tr }) => {
+          const target = shapeAt(state);
+          if (!target) return false;
+          if (value !== "horizontal" && value !== "vertical" && value !== "vertical270")
+            return false;
+          const shape: Record<string, unknown> = {
+            ...(target.attrs.wpsShape as Record<string, unknown>),
+          };
+          const body = { ...((shape.bodyProperties ?? {}) as Record<string, unknown>) };
+          if (value === "horizontal") {
+            if (!("vertical" in body)) return false;
+            delete body.vertical;
+          } else {
+            body.vertical = value;
+          }
+          if (Object.keys(body).length === 0) delete shape.bodyProperties;
+          else shape.bodyProperties = body;
           return stampAttrs(tr, target, { ...target.attrs, wpsShape: shape });
         },
       // Swap the source (the Change Picture flow's commit; the file-picker

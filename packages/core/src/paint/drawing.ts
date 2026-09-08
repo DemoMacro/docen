@@ -5,13 +5,15 @@ import {
   type LaidOutParagraph,
   type LayoutBlockContext,
   type LayoutDrawing,
+  type LayoutDrawingLine,
   type LayoutDrawingMember,
+  type LayoutDrawingShadow,
 } from "@docen/layout";
 import { Box, Ellipse, Group, Path as LeaferPath, Rect, type IGroup } from "leafer-ui";
 
 import { paintBlock } from "../painter";
 import type { DrawingHitBox, PaintColumn, PaintContext } from "./context";
-import { addBlendedPictureRun, addCroppedImage, addPlainImage } from "./image";
+import { addBlendedPictureRun, addCroppedImage, addPlainImage, shadowEffectOf } from "./image";
 import { strokePropsOf } from "./line";
 function drawingBoxOf(
   drawing: LayoutDrawing,
@@ -262,6 +264,7 @@ export function paintMembers(
           ...(m.fill && !m.line ? { stroke: `#${m.fill}`, strokeWidth: 1 } : {}),
           // Leafer spells the SVG fill-rule attribute `windingRule`.
           windingRule: m.fillRule,
+          ...shadowEffectOf(m.shadow),
         }),
       );
     } else if (m.kind === "shape") {
@@ -275,10 +278,14 @@ export function paintMembers(
       const measurer = new TextMeasurer(ctx.metrics);
       const left = m.insets?.left ?? 0;
       // Metafile runs carry nowrap: GDI draws the string as-is, so the width
-      // re-fit must not re-break it into phantom lines.
+      // re-fit must not re-break it into phantom lines. A vertical body
+      // (bodyPr @vert) lays out against the transposed column — the box
+      // height less the top/bottom insets (see the textVertical branch).
       const inner = m.nowrap
         ? Number.POSITIVE_INFINITY
-        : Math.max(0, m.width - left - (m.insets?.right ?? 0));
+        : m.textVertical
+          ? Math.max(0, m.height - (m.insets?.top ?? 0) - (m.insets?.bottom ?? 0))
+          : Math.max(0, m.width - left - (m.insets?.right ?? 0));
       // A text box shares its STORY's doc grid with the surrounding text: a
       // body box snaps to the section grid and centers its grid rows
       // (onGrid — the half-leading the reference renders), while a
@@ -294,7 +301,7 @@ export function paintMembers(
           : undefined;
       const laid = stackBlocks(m.blocks, inner, grid, measurer);
       let oy = m.insets?.top ?? 0;
-      if (m.anchor === "center" || m.anchor === "bottom") {
+      if (!m.textVertical && (m.anchor === "center" || m.anchor === "bottom")) {
         // spAutoFit shrinks the drawn box to the text, so slack resolves
         // against the fitted height — an oversized declared extent (stale
         // cy from a template) must not push the text down/center the box.
@@ -306,10 +313,11 @@ export function paintMembers(
       }
       // An editable body registers its laid stack with the caret map (a double
       // click edits the text in place). Excluded: metafile text (drawn GDI
-      // art — nowrap) and rotated stacks (group-space geometry). A group
-      // interior registers too — the host's childPath re-finds the member's
-      // wpsShape node.
-      if (host && !m.nowrap && !m.rotation && ctx.shapeTextStacks) {
+      // art — nowrap) and rotated/vertical stacks (group-space geometry — the
+      // caret map has no transposed position model yet). A group interior
+      // registers too — the host's childPath re-finds the member's wpsShape
+      // node.
+      if (host && !m.nowrap && !m.rotation && !m.textVertical && ctx.shapeTextStacks) {
         ctx.shapeTextStacks.push({
           page: ctx.pageIndex,
           host: { para: host.para, index: host.index, childPath: m.childPath },
@@ -342,6 +350,35 @@ export function paintMembers(
         const dy = pivot ? 0 : -m.height / 2;
         for (const item of laid.stack) {
           paintBlock(group, item.block, left + dx, oy + dy + item.yPx, tctx, {
+            width: inner,
+            inCell: true,
+            shapeText: true,
+          });
+        }
+        tree.add(group);
+      } else if (m.textVertical) {
+        // bodyPr @vert: the body shaped horizontally (against the transposed
+        // column = the box height) rotates into place. "vertical" (Word's
+        // Rotate all text 90°) reads top-down with columns advancing
+        // right-to-left — the group anchors the first column's top-right text
+        // origin and the clockwise 90° swing lays each laid line down and each
+        // next column left. "vertical270" reads bottom-up with columns
+        // left-to-right — anchored at the bottom-left origin, swung counter-
+        // clockwise. `oy` above was skipped, as the rotation branch skips it.
+        const vert = m.textVertical === "vertical";
+        const rIns = m.insets?.right ?? 0;
+        const bIns = m.insets?.bottom ?? 0;
+        // Vertical anchoring resolves along the column-stack direction (the
+        // box width's slack over the laid stack height).
+        const slack = Math.max(0, m.width - left - rIns - laid.heightPx);
+        const lead = m.anchor === "center" ? slack / 2 : m.anchor === "bottom" ? slack : 0;
+        const group = new Group({
+          x: vert ? mx + m.width - rIns - lead : mx + left + lead,
+          y: vert ? my + (m.insets?.top ?? 0) : my + m.height - bIns,
+          rotation: vert ? 90 : -90,
+        });
+        for (const item of laid.stack) {
+          paintBlock(group, item.block, 0, item.yPx, tctx, {
             width: inner,
             inCell: true,
             shapeText: true,
@@ -384,7 +421,8 @@ function paintShapeBox(
     preset?: string;
     fill?: string;
     opacity?: number;
-    line?: { px: number; color?: string; dash?: string };
+    line?: LayoutDrawingLine | { px: number; color?: string; dash?: string };
+    shadow?: LayoutDrawingShadow;
   },
   rectFallback: boolean,
 ): void {
@@ -408,6 +446,7 @@ function paintShapeBox(
     height: box.height,
     fill,
     ...strokePropsOf(box.line),
+    ...shadowEffectOf(box.shadow),
     // Closed shapes default to an inside stroke, under which Leafer's dash
     // pass paints nothing — center stroke renders the dashPattern.
     strokeAlign: "center",

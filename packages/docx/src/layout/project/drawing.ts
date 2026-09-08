@@ -111,8 +111,7 @@ export function pictureAdjustOf(
       : undefined;
     if (alpha != null && alpha < 100) opacity = Math.max(0, alpha / 100);
   }
-  const shdw = isRecord(pic.effects) ? pic.effects.outerShadow : undefined;
-  const shadow = isRecord(shdw) ? shadowOf(shdw) : undefined;
+  const shadow = outerShadowOf(pic.effects);
   if (!css.length && opacity == null && shadow == null) return undefined;
   return {
     ...(css.length ? { filter: css.join(" ") } : {}),
@@ -140,6 +139,13 @@ function shadowOf(v: Rec): LayoutDrawingShadow | undefined {
     ...(color ? { color } : {}),
     ...(alpha != null && alpha < 100 ? { opacity: Math.max(0, alpha / 100) } : {}),
   };
+}
+
+/** An effects list's outer shadow (a:effectLst a:outerShdw), shared by the
+ *  picture adjustment and the shape-member projections. */
+function outerShadowOf(effects: unknown): LayoutDrawingShadow | undefined {
+  const shdw = isRecord(effects) ? effects.outerShadow : undefined;
+  return isRecord(shdw) ? shadowOf(shdw) : undefined;
 }
 
 function midStopOf(gradient: unknown): string | undefined {
@@ -290,6 +296,7 @@ function wpsMemberOf(
   if (!isRecord(data)) return null;
   const fill = solidFillOf(data.fill);
   const line = outlineOf(data.outline);
+  const shadow = outerShadowOf(data.effects);
   // 0.13.0 renamed ShapeCoreOptions.presetGeometry → geometry and widened it to
   // the ShapeType token shorthand | PresetGeometryOptions.
   const preset =
@@ -346,6 +353,13 @@ function wpsMemberOf(
       // VerticalAnchor is already full-word ("top"/"center"/"bottom");
       // justify/distribute stretch to the box — treated as top until then.
       anchor: bodyPr.anchor === "center" || bodyPr.anchor === "bottom" ? bodyPr.anchor : "top",
+      // bodyPr @vert — only the two rotated layouts project (the stacked
+      // variants need per-glyph upright layout the renderer has no model
+      // for); they render as horizontal, a registered gap.
+      ...(bodyPr.vertical === "vertical" || bodyPr.vertical === "vertical270"
+        ? { textVertical: bodyPr.vertical }
+        : {}),
+      ...(shadow ? { shadow } : {}),
       // a:spAutoFit: Word draws the box shrunk to its text — the declared
       // extent's height is stale and must not drive vertical centering.
       ...(bodyPr.spAutoFit === true ? { autoFit: true } : {}),
@@ -370,13 +384,15 @@ function wpsMemberOf(
       d: `M 0 0 L ${Math.round(width * 100) / 100} ${Math.round(height * 100) / 100}`,
       fill,
       line,
+      ...(shadow ? { shadow } : {}),
     };
   }
   if (preset == null) {
     const d = data.customGeometry
       ? customGeometryPath(data.customGeometry as CustomGeometryOptions, width, height)
       : undefined;
-    if (d) return { kind: "path", x, y, width, height, d, fill, line };
+    if (d)
+      return { kind: "path", x, y, width, height, d, fill, line, ...(shadow ? { shadow } : {}) };
     return null;
   }
   const opacity = fillOpacityOf(data.fill);
@@ -390,6 +406,7 @@ function wpsMemberOf(
     fill,
     ...(opacity != null ? { opacity } : {}),
     line,
+    ...(shadow ? { shadow } : {}),
   };
 }
 

@@ -37,19 +37,26 @@ function shadowColorOf(shadow: LayoutDrawingShadow): string {
  *  (the EffectModule scales by the world matrix), no offscreen composite.
  *  The element `blur` stays a CSS-filter composite instead: the EffectModule
  *  ships a blur branch but nothing in the web bundle dispatches to it, and
- *  the @leafer-in/filter plugin registers no processors (a bare registry). */
-function effectsOf(adjust: PictureAdjust): Partial<LeaferImage> {
-  if (!adjust.shadow) return {};
+ *  the @leafer-in/filter plugin registers no processors (a bare registry).
+ *  Shared by pictures and shape members. */
+export function shadowEffectOf(shadow: LayoutDrawingShadow | undefined): {
+  shadow?: [{ x: number; y: number; blur?: number; color: string }];
+} {
+  if (!shadow) return {};
   return {
     shadow: [
       {
-        x: adjust.shadow.x,
-        y: adjust.shadow.y,
-        ...(adjust.shadow.blur ? { blur: adjust.shadow.blur } : {}),
-        color: shadowColorOf(adjust.shadow),
+        x: shadow.x,
+        y: shadow.y,
+        ...(shadow.blur ? { blur: shadow.blur } : {}),
+        color: shadowColorOf(shadow),
       },
     ],
   };
+}
+
+function effectsOf(adjust: PictureAdjust): Partial<LeaferImage> {
+  return shadowEffectOf(adjust.shadow);
 }
 
 /** Leafer evicts a decoded image larger than its 4MP cache threshold the
