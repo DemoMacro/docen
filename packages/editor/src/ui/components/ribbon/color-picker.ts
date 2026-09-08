@@ -51,6 +51,48 @@ const STANDARD_COLORS: readonly string[] = [
   "7030A0",
 ];
 
+// ── Outline panel (Word's Picture Border / Shape Outline) ──
+// The popover adds Weight / Dashes sub-views whose picks emit `width:` /
+// `dash:` values — the same value space the outline command merges onto one
+// outline object, so a color pick, a weight pick, and a dash pick each commit
+// independently like Word's menu sections.
+
+/** Word's Weight ladder (points; the command converts to EMU). */
+const OUTLINE_WEIGHTS: readonly number[] = [0.25, 0.5, 0.75, 1, 1.5, 2.25, 3, 4.5, 6];
+
+/** Word's Dashes list → a:ST_PresetLineDashVal tokens. The i18n key names the
+ *  label; the token rides into the command value verbatim. */
+const OUTLINE_DASHES: readonly { key: string; token: string }[] = [
+  { key: "dash-solid", token: "solid" },
+  { key: "dash-round-dot", token: "roundDot" },
+  { key: "dash-square-dot", token: "sysDot" },
+  { key: "dash-square-dash", token: "sysDash" },
+  { key: "dash-line", token: "dash" },
+  { key: "dash-dot-dash", token: "dashDot" },
+  { key: "dash-long-dash", token: "lgDash" },
+  { key: "dash-long-dot-dash", token: "lgDashDot" },
+  { key: "dash-long-dot-dot-dash", token: "lgDashDotDot" },
+];
+
+/** A fractional point size as Word writes it ("1½ pt", "¼ pt"). */
+function weightLabel(pt: number): string {
+  const frac =
+    pt === 0.25
+      ? "¼"
+      : pt === 0.5
+        ? "½"
+        : pt === 0.75
+          ? "¾"
+          : pt === 1.5
+            ? "1½"
+            : pt === 2.25
+              ? "2¼"
+              : pt === 4.5
+                ? "4½"
+                : String(pt);
+  return `${frac} pt`;
+}
+
 /** A pickable color: a bare upper-hex string (standard/recent/custom) or a
  *  theme-semantic object whose val is the resolved RGB and themeColor/tint/shade
  *  ride along into the DOCX so Word keeps the color theme-bound. */
@@ -415,6 +457,119 @@ const styles = css`
   .cp-back:hover {
     background: var(--docen-color-hover, rgba(0, 0, 0, 0.06));
   }
+  /* The outline panel's Weight / Dashes navigators — styled like More Colors,
+     stacked under it (Word lists Weight and Dashes below the palette). */
+  .cp-subnav {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 4px 6px;
+    margin: 4px 0 0;
+    border: 1px solid var(--docen-color-divider, #c7c7c7);
+    background: #fff;
+    cursor: pointer;
+    font-size: 12px;
+    text-align: start;
+    border-radius: 3px;
+  }
+  .cp-subnav:hover {
+    background: var(--docen-color-hover, rgba(0, 0, 0, 0.06));
+  }
+  /* Sub-view header: title + back arrow. */
+  .cp-subhead {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin: 0 0 4px;
+    font-size: 12px;
+  }
+  button.cp-return {
+    appearance: none;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    padding: 2px 6px;
+    margin-inline-start: auto;
+    font-size: 12px;
+    color: inherit;
+    border-radius: 3px;
+  }
+  button.cp-return:hover {
+    background: var(--docen-color-hover, rgba(0, 0, 0, 0.06));
+  }
+  /* Weight / dash rows: a live-preview line over the label. */
+  .cp-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 4px 6px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    font-size: 12px;
+    text-align: start;
+    border-radius: 3px;
+  }
+  .cp-row:hover {
+    background: var(--docen-color-hover, rgba(0, 0, 0, 0.06));
+  }
+  .cp-row .cp-line {
+    flex: 1;
+    min-width: 96px;
+    background: currentColor;
+  }
+  .cp-row .cp-row-label {
+    min-width: 86px;
+    text-align: end;
+  }
+  /* Dash previews — one repeating gradient per a:prstDash token. */
+  .cp-line[data-dash="roundDot"] {
+    background: radial-gradient(circle, currentColor 1.3px, transparent 1.4px) repeat-x center / 7px
+      2.6px;
+  }
+  .cp-line[data-dash="sysDot"] {
+    background: repeating-linear-gradient(90deg, currentColor 0 1px, transparent 1px 5px);
+  }
+  .cp-line[data-dash="sysDash"] {
+    background: repeating-linear-gradient(90deg, currentColor 0 3px, transparent 3px 7px);
+  }
+  .cp-line[data-dash="dash"] {
+    background: repeating-linear-gradient(90deg, currentColor 0 6px, transparent 6px 10px);
+  }
+  .cp-line[data-dash="dashDot"] {
+    background: repeating-linear-gradient(
+      90deg,
+      currentColor 0 6px,
+      transparent 6px 8px,
+      currentColor 8px 10px,
+      transparent 10px 15px
+    );
+  }
+  .cp-line[data-dash="lgDash"] {
+    background: repeating-linear-gradient(90deg, currentColor 0 10px, transparent 10px 15px);
+  }
+  .cp-line[data-dash="lgDashDot"] {
+    background: repeating-linear-gradient(
+      90deg,
+      currentColor 0 10px,
+      transparent 10px 12px,
+      currentColor 12px 14px,
+      transparent 14px 20px
+    );
+  }
+  .cp-line[data-dash="lgDashDotDot"] {
+    background: repeating-linear-gradient(
+      90deg,
+      currentColor 0 10px,
+      transparent 10px 12px,
+      currentColor 12px 13.5px,
+      transparent 13.5px 15px,
+      currentColor 15px 16.5px,
+      transparent 16.5px 22px
+    );
+  }
 `;
 
 const template = html<DocenColorPicker>`
@@ -444,6 +599,13 @@ const template = html<DocenColorPicker>`
       ></div>
       <div class="cp-swatches cp-hidden" part="recent" ${ref("recentEl")}></div>
       <button type="button" class="cp-more" part="more" ${ref("moreBtn")}></button>
+      <button
+        type="button"
+        class="cp-subnav cp-hidden"
+        part="weight-nav"
+        ${ref("weightNav")}
+      ></button>
+      <button type="button" class="cp-subnav cp-hidden" part="dash-nav" ${ref("dashNav")}></button>
     </div>
     <div class="cp-custom cp-hidden" ${ref("customEl")}>
       <div class="cp-sv" ${ref("sv")}>
@@ -475,6 +637,18 @@ const template = html<DocenColorPicker>`
         <button type="button" class="cp-apply" part="apply" ${ref("applyBtn")}></button>
       </div>
     </div>
+    <div class="cp-weights cp-hidden" ${ref("weightsEl")}>
+      <div class="cp-subhead">
+        <span data-i18n="weight"></span>
+        <button type="button" class="cp-return" ${ref("weightBack")}>‹</button>
+      </div>
+    </div>
+    <div class="cp-dashes cp-hidden" ${ref("dashesEl")}>
+      <div class="cp-subhead">
+        <span data-i18n="dashes"></span>
+        <button type="button" class="cp-return" ${ref("dashBack")}>‹</button>
+      </div>
+    </div>
   </div>
   <fluent-tooltip anchor="target" positioning="top" ${ref("tooltipEl")}>
     <span class="rb-tip">${(x) => x.tooltipText}</span>
@@ -504,6 +678,10 @@ class DocenColorPicker extends FASTElement {
    *  emit ST_HighlightColor tokens — hex is illegal in w:highlight); the
    *  default theme palette emits theme-semantic objects. */
   @attr palette?: "theme" | "highlight";
+  /** "outline" turns the popover into Word's Picture Border / Shape Outline
+   *  panel: swatches emit `color:`-prefixed values and Weight / Dashes
+   *  sub-views join the popover (picks emit `width:` / `dash:` values). */
+  @attr panel?: "color" | "outline";
 
   @observable btn?: HTMLElement;
   @observable caret?: HTMLElement;
@@ -524,6 +702,12 @@ class DocenColorPicker extends FASTElement {
   @observable backBtn?: HTMLElement;
   @observable iconSlot?: HTMLSpanElement;
   @observable tooltipEl?: HTMLElement;
+  @observable weightNav?: HTMLElement;
+  @observable dashNav?: HTMLElement;
+  @observable weightsEl?: HTMLElement;
+  @observable dashesEl?: HTMLElement;
+  @observable weightBack?: HTMLElement;
+  @observable dashBack?: HTMLElement;
 
   readonly anchorId = `--cp-${++seq}`;
   #bar?: HTMLElement;
@@ -539,6 +723,9 @@ class DocenColorPicker extends FASTElement {
   }
   get isHighlight(): boolean {
     return this.palette === "highlight";
+  }
+  get isOutline(): boolean {
+    return this.panel === "outline";
   }
   /** Icon-only hides the visible label (it still feeds the tooltip). */
   get visibleLabel(): string {
@@ -619,6 +806,12 @@ class DocenColorPicker extends FASTElement {
       this.#syncCustom();
     });
     this.sv?.addEventListener("pointerdown", (event) => this.#onSvPointerDown(event));
+    // Outline panel: the two navigators and their back arrows. The rows are
+    // rebuilt by #renderOutlinePanels (also re-run on locale change).
+    this.weightNav?.addEventListener("click", () => this.#showSub("weights"));
+    this.dashNav?.addEventListener("click", () => this.#showSub("dashes"));
+    this.weightBack?.addEventListener("click", () => this.#showPicker());
+    this.dashBack?.addEventListener("click", () => this.#showPicker());
     this.#applyI18n();
     this.#obsLang = observeLang(() => this.#applyI18n());
   }
@@ -645,13 +838,19 @@ class DocenColorPicker extends FASTElement {
     const value = lastColor.get(this.eventName) ?? this.#defaultHex();
     rememberColor(this.eventName, value);
     this.#refreshBar();
-    this.#emit(value);
+    this.#emit(this.#colorValue(value));
   }
 
   #pick(value: ColorValue): void {
     rememberColor(this.eventName, value);
     this.#refreshBar();
-    this.#emit(value);
+    this.#emit(this.#colorValue(value));
+  }
+
+  /** The emitted color value — the outline panel prefixes `color:` so the
+   *  command's value space (color:/width:/dash:) stays one grammar. */
+  #colorValue(value: ColorValue): ColorValue {
+    return this.isOutline ? `color:${valOf(value)}` : value;
   }
 
   #open(): void {
@@ -668,7 +867,17 @@ class DocenColorPicker extends FASTElement {
 
   #showPicker(): void {
     this.customEl?.classList.add("cp-hidden");
+    this.weightsEl?.classList.add("cp-hidden");
+    this.dashesEl?.classList.add("cp-hidden");
     this.picker?.classList.remove("cp-hidden");
+  }
+
+  /** Swap to one of the outline panel's sub-views (Weight / Dashes). */
+  #showSub(which: "weights" | "dashes"): void {
+    this.picker?.classList.add("cp-hidden");
+    this.customEl?.classList.add("cp-hidden");
+    this.weightsEl?.classList.toggle("cp-hidden", which !== "weights");
+    this.dashesEl?.classList.toggle("cp-hidden", which !== "dashes");
   }
 
   #showCustom(): void {
@@ -845,7 +1054,11 @@ class DocenColorPicker extends FASTElement {
   }
 
   #applyI18n(): void {
-    if (this.noneBtn) this.noneBtn.textContent = t("ribbon.opt.no-color", this);
+    if (this.noneBtn)
+      this.noneBtn.textContent = t(
+        this.isOutline ? "ribbon.opt.no-outline" : "ribbon.opt.no-color",
+        this,
+      );
     if (this.moreBtn) this.moreBtn.textContent = t("ribbon.opt.more-colors", this);
     if (this.applyBtn) this.applyBtn.textContent = t("ribbon.opt.color-ok", this);
     if (this.backBtn) this.backBtn.textContent = t("ribbon.opt.color-back", this);
@@ -853,6 +1066,61 @@ class DocenColorPicker extends FASTElement {
       el.textContent = t("ribbon.opt." + (el.dataset.i18n ?? ""), this);
     });
     if (this.caret) this.caret.setAttribute("aria-label", t("ribbon.opt.more-colors", this));
+    if (this.weightNav) this.weightNav.textContent = t("ribbon.opt.weight", this);
+    if (this.dashNav) this.dashNav.textContent = t("ribbon.opt.dashes", this);
+    this.#renderOutlinePanels();
+  }
+
+  /** Build the outline panel's sub-view rows (Weight / Dashes). Rebuilt on
+   *  locale change — the dash labels are translated while the weight labels
+   *  are Word's point fractions. */
+  #renderOutlinePanels(): void {
+    if (!this.isOutline) return;
+    this.weightNav?.classList.remove("cp-hidden");
+    this.dashNav?.classList.remove("cp-hidden");
+    if (this.weightsEl) {
+      this.weightsEl.querySelectorAll(".cp-row").forEach((row) => row.remove());
+      for (const pt of OUTLINE_WEIGHTS) {
+        const row = document.createElement("button");
+        row.type = "button";
+        row.className = "cp-row";
+        const line = document.createElement("span");
+        line.className = "cp-line";
+        // The row's line height previews the point size (min 1px to stay
+        // visible — a ¼ pt line is sub-pixel at 96 dpi).
+        line.style.height = `${Math.max(1, Math.round(pt * 1.333))}px`;
+        const label = document.createElement("span");
+        label.className = "cp-row-label";
+        label.textContent = weightLabel(pt);
+        row.append(line, label);
+        row.addEventListener("click", () => {
+          this.#hide();
+          this.#emit(`width:${pt}`);
+        });
+        this.weightsEl.append(row);
+      }
+    }
+    if (this.dashesEl) {
+      this.dashesEl.querySelectorAll(".cp-row").forEach((row) => row.remove());
+      for (const { key, token } of OUTLINE_DASHES) {
+        const row = document.createElement("button");
+        row.type = "button";
+        row.className = "cp-row";
+        const line = document.createElement("span");
+        line.className = "cp-line";
+        line.dataset.dash = token;
+        line.style.height = "2.5px";
+        const label = document.createElement("span");
+        label.className = "cp-row-label";
+        label.textContent = t(`ribbon.opt.${key}`, this);
+        row.append(line, label);
+        row.addEventListener("click", () => {
+          this.#hide();
+          this.#emit(`dash:${token}`);
+        });
+        this.dashesEl.append(row);
+      }
+    }
   }
 
   #emit(value?: ColorValue): void {

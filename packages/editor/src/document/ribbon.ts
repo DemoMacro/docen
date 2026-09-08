@@ -430,46 +430,19 @@ const transparencyItems = (): string => {
   );
 };
 
-// Word's border menu sections — an outline color with the 1 pt default, the
-// weights, and the dashed styles — each commit independently onto the same
-// outline object.
-const PICTURE_BORDER_COLORS: [string, string, string][] = [
-  ["000000", "黑色", "Black"],
-  ["FFFFFF", "白色", "White"],
-  ["C00000", "深红", "Dark Red"],
-  ["ED7D31", "橙色", "Orange"],
-  ["FFC000", "金色", "Gold"],
-  ["70AD47", "绿色", "Green"],
-  ["4472C4", "蓝色", "Blue"],
-  ["7030A0", "紫色", "Purple"],
-];
-
-const pictureBorderItems = (): string => {
-  const zh = resolveLang().toLowerCase().startsWith("zh");
-  return JSON.stringify([
-    { text: zh ? "无轮廓" : "No Outline", value: "none" },
-    { text: "-" },
-    ...PICTURE_BORDER_COLORS.map(([hex, cn, en]) => ({
-      text: zh ? cn : en,
-      value: `color:${hex}`,
-    })),
-    { text: "-" },
-    ...[0.25, 1, 2.25, 3.5].map((pt) => ({
-      text: `${zh ? "粗细" : "Weight"}: ${pt} pt`,
-      value: `width:${pt}`,
-    })),
-    { text: "-" },
-    { text: zh ? "实线" : "Solid Line", value: "dash:solid" },
-    { text: zh ? "方点" : "Square Dot", value: "dash:sysDot" },
-    { text: zh ? "方划线" : "Square Dash", value: "dash:sysDash" },
-  ]);
-};
-
+// Word's Align menu: both axes' margin alignment plus the two distributes.
+// The distributes need multi-selection (batch: group loop), so they stay
+// greyed until then — Word greys them on a single selection too.
 const alignObjectsItems = (): string =>
   JSON.stringify([
     { text: cmd("align-left"), value: "left" },
     { text: cmd("align-center"), value: "center" },
     { text: cmd("align-right"), value: "right" },
+    { text: opt("align-top"), value: "top" },
+    { text: opt("align-middle"), value: "middle" },
+    { text: opt("align-bottom"), value: "bottom" },
+    { text: opt("distribute-h"), value: "distribute-h", disabled: true },
+    { text: opt("distribute-v"), value: "distribute-v", disabled: true },
   ]);
 
 // References > Add Text: the TOC levels (Word's menu minus the missing-level
@@ -814,6 +787,7 @@ function buildControl(c: RibbonControl, scope: Element): HTMLElement {
       applyBase(el, c, scope);
       if (c.defaultColor) el.setAttribute("default-color", c.defaultColor);
       if (c.palette) el.setAttribute("palette", c.palette);
+      if (c.panel) el.setAttribute("panel", c.panel);
       return el;
     }
     case "gallery": {
@@ -913,15 +887,22 @@ const picker = (
   icon: string,
   event: string,
   defaultColor: string,
-  o: { palette?: "theme" | "highlight" } = {},
+  o: {
+    palette?: "theme" | "highlight";
+    panel?: "color" | "outline";
+    /** Show the label beside the icon (Word's border/fill buttons in the
+     *  drawing tabs carry text; the font/shading pickers stay icon-only). */
+    withLabel?: boolean;
+  } = {},
 ): RibbonColorPicker => ({
   type: "color-picker",
   icon,
   event,
   label: cmd(event),
   defaultColor,
-  iconOnly: true,
+  iconOnly: !o.withLabel,
   ...(o.palette ? { palette: o.palette } : {}),
+  ...(o.panel ? { panel: o.panel } : {}),
 });
 
 const group = (
@@ -1802,11 +1783,15 @@ export function pictureFormatTab(scope?: Element): RibbonTab {
       ]),
       group("picture-styles", [
         // The Quick Styles gallery + Effects/Layout — the styled picture
-        // rendering is a later batch; Border (the outline merge) is wired.
+        // rendering is a later batch; Border is Word's outline panel (palette
+        // + Weight / Dashes sub-views committing onto one outline object).
         btn("picture-styles", "picture-styles", { size: "large" }),
         col([
           grid([
-            menu("border", "picture-border", parsedItems(pictureBorderItems())),
+            picker("border", "picture-border", "000000", {
+              panel: "outline",
+              withLabel: true,
+            }),
             btn("text-effects", "picture-effects"),
             btn("smartart", "picture-layout"),
           ]),
@@ -1838,11 +1823,17 @@ export function shapeFormatTab(scope?: Element): RibbonTab {
         col([grid([btn("format-painter", "edit-shape"), btn("text-box", "text-box")])]),
       ]),
       group("shape-styles", [
+        // Fill is the theme palette picker; Outline is Word's outline panel
+        // (palette + Weight / Dashes) — both commit onto the shape's attrs.
+        // Effects stays greyed until the effect commands land.
         btn("picture-styles", "shape-styles", { size: "large" }),
         col([
           grid([
-            btn("page-color", "shape-fill"),
-            btn("page-border", "shape-outline"),
+            picker("page-color", "shape-fill", "4472C4", { withLabel: true }),
+            picker("page-border", "shape-outline", "000000", {
+              panel: "outline",
+              withLabel: true,
+            }),
             btn("artistic-effects", "shape-effects"),
           ]),
         ]),

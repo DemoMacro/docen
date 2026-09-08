@@ -146,6 +146,8 @@ declare module "@tiptap/core" {
       "picture-border": (value?: string) => ReturnType;
       "reset-picture": () => ReturnType;
       "change-picture": (src?: string) => ReturnType;
+      "shape-fill": (value?: string) => ReturnType;
+      "shape-outline": (value?: string) => ReturnType;
       // Arrange — floating drawings (z-order, wrap, rotation, position).
       "bring-forward": () => ReturnType;
       "send-backward": () => ReturnType;
@@ -254,6 +256,8 @@ export const WIRED_DISPATCH: ReadonlySet<string> = new Set([
   "picture-border",
   "reset-picture",
   "change-picture",
+  "shape-fill",
+  "shape-outline",
   "bring-forward",
   "send-backward",
   "bring-to-front",
@@ -886,6 +890,18 @@ function inlineImageAt(
   if (!(sel instanceof NodeSelection) || sel.node.type.name !== "image") return null;
   const attrs = sel.node.attrs as Record<string, unknown>;
   return attrs.floating ? null : { pos: sel.from, attrs, kind: "image" };
+}
+
+/** The selected wps shape — standalone or a group member. Style commands
+ *  (fill/outline) write its attrs wherever it sits, unlike the Arrange
+ *  commands which need a floating carrier. */
+function shapeAt(
+  state: EditorState,
+): { pos: number; attrs: Record<string, unknown>; kind: "shape" } | null {
+  const sel = state.selection;
+  if (!(sel instanceof NodeSelection) || sel.node.type.name !== "wpsShape") return null;
+  const attrs = sel.node.attrs as Record<string, unknown>;
+  return attrs.wpsShape ? { pos: sel.from, attrs, kind: "shape" } : null;
 }
 
 /** Write a Floating back onto the drawing, shallow-copying the carrier the
@@ -3176,6 +3192,58 @@ export const DocumentCommands = Extension.create({
             delete attrs.blipEffects;
             delete attrs.outline;
           }),
+      // Shape Fill: the palette picker's hex (or "none") writing the shape's
+      // solid fill. A noFill type reads as unfilled in the projection and
+      // serializes <a:noFill>.
+      "shape-fill":
+        (value) =>
+        ({ state, tr }) => {
+          const target = shapeAt(state);
+          if (!target) return false;
+          const v = String(value ?? "");
+          const shape = { ...(target.attrs.wpsShape as Record<string, unknown>) };
+          if (v === "none") shape.fill = { type: "noFill" };
+          else if (/^[0-9A-F]{6}$/i.test(v)) shape.fill = { type: "solid", color: v.toUpperCase() };
+          else return false;
+          return stampAttrs(tr, target, { ...target.attrs, wpsShape: shape });
+        },
+      // Shape Outline: same value grammar and incremental-merge semantics as
+      // picture-border (none / color: / width: / dash:), onto the shape's own
+      // outline. A width or dash on an uncolored outline defaults to black —
+      // the projection has no theme-outline fallback to inherit.
+      "shape-outline":
+        (value) =>
+        ({ state, tr }) => {
+          const target = shapeAt(state);
+          if (!target) return false;
+          const v = String(value ?? "");
+          const shape = { ...(target.attrs.wpsShape as Record<string, unknown>) };
+          if (v === "none") {
+            shape.outline = { type: "noFill" };
+          } else {
+            const outline = { ...((shape.outline ?? {}) as Record<string, unknown>) };
+            outline.type = "solid";
+            if (v.startsWith("color:")) {
+              const color = v.slice(6).toUpperCase();
+              if (!/^[0-9A-F]{6}$/.test(color)) return false;
+              outline.color = color;
+              if (typeof outline.width !== "number") outline.width = 12700;
+            } else if (v.startsWith("width:")) {
+              const pt = Number(v.slice(6));
+              if (!Number.isFinite(pt) || pt <= 0 || pt > 12) return false;
+              outline.width = Math.round(pt * 12700);
+              if (typeof outline.color !== "string") outline.color = "000000";
+            } else if (v.startsWith("dash:")) {
+              // "solid" is the no-dash reset (prstDash has no solid token).
+              const dash = v.slice(5);
+              if (dash === "solid") delete outline.dash;
+              else outline.dash = dash;
+              if (typeof outline.color !== "string") outline.color = "000000";
+            } else return false;
+            shape.outline = outline;
+          }
+          return stampAttrs(tr, target, { ...target.attrs, wpsShape: shape });
+        },
       // Swap the source (the Change Picture flow's commit; the file-picker
       // side reads the file into a data URL at the UI layer). The frame keeps
       // its size — the new source stretches into it — and the crop resets
@@ -3367,25 +3435,34 @@ export const DocumentCommands = Extension.create({
             verticalPosition: { relative: "margin", align: spec.v },
           });
         },
-      // The Align menu: horizontal alignment within the margins (the single
-      // axis of the position gallery).
+      // The Align menu: Word's both-axes margin alignment — the horizontal
+      // trio (the primary face defaults to left) and the vertical trio, each
+      // stamping its own axis and leaving the other untouched. The two
+      // distributes need multi-selection and stay greyed at the menu layer.
       "align-objects":
         (value) =>
         ({ state, tr }) => {
-          // No value = the split's primary face — Word defaults it to left
-          // (the button's icon); an unknown value declines.
-          const align =
+          const h =
             value === "center" || value === "right"
               ? value
               : value === "left" || value == null || value === ""
                 ? "left"
                 : null;
-          if (!align) return false;
+          // The menu says "middle" (Word's label); OOXML's vertical token is
+          // "center" — same translation the position gallery's rows make.
+          const v =
+            h == null && (value === "top" || value === "middle" || value === "bottom")
+              ? value === "middle"
+                ? "center"
+                : value
+              : null;
+          if (h == null && v == null) return false;
           const target = floatingDrawingAt(state);
           if (!target) return false;
           return stampFloating(tr, target, {
             ...floatingOf(target),
-            horizontalPosition: { relative: "margin", align },
+            ...(h != null ? { horizontalPosition: { relative: "margin", align: h } } : {}),
+            ...(v != null ? { verticalPosition: { relative: "margin", align: v } } : {}),
           });
         },
     };

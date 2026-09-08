@@ -90,11 +90,15 @@ export interface RibbonCombobox extends RibbonControlBase {
 
 /** A swatch popover + "More Colors" picker (font color / paragraph shading).
  *  `palette: "highlight"` swaps the popover for Word's fixed highlighter
- *  palette (swatches emit ST_HighlightColor tokens). */
+ *  palette (swatches emit ST_HighlightColor tokens). `panel: "outline"` turns
+ *  it into Word's Picture Border / Shape Outline panel: the swatches emit
+ *  `color:`-prefixed values and the popover adds Weight / Dashes sub-views
+ *  (each pick emits `width:` / `dash:` values the outline command merges). */
 export interface RibbonColorPicker extends RibbonControlBase {
   type: "color-picker";
   defaultColor?: string;
   palette?: "theme" | "highlight";
+  panel?: "color" | "outline";
 }
 
 /** Word's gallery control — a strip of icon-over-label thumbnails plus a More
