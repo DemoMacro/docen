@@ -133,9 +133,24 @@ declare module "@tiptap/core" {
       "rotate-drawing": (value?: string) => ReturnType;
       "drawing-properties-apply": (patch?: DrawingPropertiesPatch) => ReturnType;
       "drawing-crop-apply": (patch?: DrawingCropPatch) => ReturnType;
+      "drawing-crop-reset": () => ReturnType;
+      // Picture Format tab's Size boxes — a measure string ("5cm"/"2in"/…).
+      "drawing-width": (value?: string) => ReturnType;
+      "drawing-height": (value?: string) => ReturnType;
+      // Picture Format > Adjust — the pixel-adjustment presets. The values
+      // are the ribbon menu's value strings ("bright:40", "saturation:66",
+      // "50", "color:FF0000" / "width:2.25" / "dash:sysDot" / "none").
+      "picture-correction": (value?: string) => ReturnType;
+      "picture-color": (value?: string) => ReturnType;
+      "picture-transparency": (value?: string) => ReturnType;
+      "picture-border": (value?: string) => ReturnType;
+      "reset-picture": () => ReturnType;
+      "change-picture": (src?: string) => ReturnType;
       // Arrange — floating drawings (z-order, wrap, rotation, position).
       "bring-forward": () => ReturnType;
       "send-backward": () => ReturnType;
+      "bring-to-front": () => ReturnType;
+      "send-to-back": () => ReturnType;
       wrap: (value?: string) => ReturnType;
       rotate: (value?: string) => ReturnType;
       position: (value?: string) => ReturnType;
@@ -230,8 +245,19 @@ export const WIRED_DISPATCH: ReadonlySet<string> = new Set([
   "rotate-drawing",
   "drawing-properties-apply",
   "drawing-crop-apply",
+  "drawing-crop-reset",
+  "drawing-width",
+  "drawing-height",
+  "picture-correction",
+  "picture-color",
+  "picture-transparency",
+  "picture-border",
+  "reset-picture",
+  "change-picture",
   "bring-forward",
   "send-backward",
+  "bring-to-front",
+  "send-to-back",
   "wrap",
   "rotate",
   "position",
@@ -350,21 +376,38 @@ export interface TablePropertiesPatch {
  */
 export interface DrawingPropertiesPatch {
   /** The drawing box width in cm (px for an image, EMU for a shape payload). */
-  widthCm: number;
+  widthCm?: number;
   /** The drawing box height in cm. */
-  heightCm: number;
+  heightCm?: number;
   /** Clockwise rotation about the box center, degrees. */
-  rotationDeg: number;
+  rotationDeg?: number;
   /** Horizontal offset from the anchor's horizontal base, cm → EMU. */
-  offsetHCm: number;
+  offsetHCm?: number;
   /** Vertical offset from the anchor's vertical base, cm → EMU. */
-  offsetVCm: number;
+  offsetVCm?: number;
+  /** The replacement text (Word's Alt Text); empty clears it. Images only —
+   *  a shape payload carries no alt-text field today. */
+  altText?: string;
+  /** The horizontal position base (an ST_RelFromH token: column/margin/page). */
+  relativeH?: string;
+  /** The vertical position base (an ST_RelFromV token: paragraph/line/margin/page). */
+  relativeV?: string;
+  /** Whether other floating drawings may overlap this one. */
+  allowOverlap?: boolean;
+  /** Whether the drawing keeps its table-cell layout behavior. */
+  layoutInCell?: boolean;
+  /** Whether the anchor moves with its paragraph (Word's Lock anchor). */
+  lockAnchor?: boolean;
+  /** The wrap distances (Word's Distance from text), cm → EMU. */
+  distanceCm?: { top: number; bottom: number; left: number; right: number };
 }
 
 /**
  * What the crop mode commits — the selected image's a:srcRect insets as
  * fractions of the source (0.1 = 10% off that edge), stamped by {@link
- * documentCommands.drawing-crop-apply}. An all-zero set clears the crop.
+ * documentCommands.drawing-crop-apply}. The extent resizes to the kept
+ * region at the unchanged source scale. An all-zero set clears the crop
+ * (and grows the extent back to the full source).
  */
 export interface DrawingCropPatch {
   /** Left inset as a source fraction (0.1 = 10% cropped off the left). */
@@ -828,6 +871,17 @@ function floatingOf(
   ) as Record<string, unknown>;
 }
 
+/** The inline picture under a NodeSelection — Word's Rotate menu works on
+ *  embedded images too (only shapes are floating-only here). */
+function inlineImageAt(
+  state: EditorState,
+): { pos: number; attrs: Record<string, unknown>; kind: "image" } | null {
+  const sel = state.selection;
+  if (!(sel instanceof NodeSelection) || sel.node.type.name !== "image") return null;
+  const attrs = sel.node.attrs as Record<string, unknown>;
+  return attrs.floating ? null : { pos: sel.from, attrs, kind: "image" };
+}
+
 /** Write a Floating back onto the drawing, shallow-copying the carrier the
  *  way PM immutability requires (image: flat; shape: the wpsShape payload). */
 function withFloating(
@@ -852,6 +906,172 @@ function stampFloating(
   floating: Record<string, unknown>,
 ): boolean {
   return stampAttrs(tr, target, withFloating(target, floating));
+}
+
+/** The Size-and-Position dialog's Floating half — position bases, layout
+ *  flags, wrap distances, and the anchor offsets — folded onto a fresh copy
+ *  of the drawing's Floating (the image and shape branches share it). */
+function applyFloatingExtras(
+  floating: Record<string, unknown>,
+  patch: DrawingPropertiesPatch,
+  offsetHCm: number | null,
+  offsetVCm: number | null,
+): Record<string, unknown> {
+  const EMU_PER_CM = 360000;
+  const next = { ...floating };
+  const hPos = { ...(floating.horizontalPosition as Record<string, unknown> | undefined) };
+  const vPos = { ...(floating.verticalPosition as Record<string, unknown> | undefined) };
+  if (offsetHCm != null) hPos.offset = Math.round(offsetHCm * EMU_PER_CM);
+  if (offsetVCm != null) vPos.offset = Math.round(offsetVCm * EMU_PER_CM);
+  if (typeof patch.relativeH === "string") hPos.relative = patch.relativeH;
+  if (typeof patch.relativeV === "string") vPos.relative = patch.relativeV;
+  next.horizontalPosition = hPos;
+  next.verticalPosition = vPos;
+  if (typeof patch.allowOverlap === "boolean") next.allowOverlap = patch.allowOverlap;
+  if (typeof patch.layoutInCell === "boolean") next.layoutInCell = patch.layoutInCell;
+  if (typeof patch.lockAnchor === "boolean") next.lockAnchor = patch.lockAnchor;
+  if (patch.distanceCm && typeof patch.distanceCm === "object") {
+    const emu = (v: number): number => Math.round(v * EMU_PER_CM);
+    next.margins = {
+      top: emu(patch.distanceCm.top),
+      bottom: emu(patch.distanceCm.bottom),
+      left: emu(patch.distanceCm.left),
+      right: emu(patch.distanceCm.right),
+    };
+  }
+  return next;
+}
+
+/** Stamp the crop patch onto the selected image — the shared body of
+ *  drawing-crop-apply (the crop overlay's commit) and drawing-crop-reset. */ function applyCropPatch(
+  state: EditorState,
+  tr: Transaction,
+  patch: DrawingCropPatch,
+): boolean {
+  const sel = state.selection;
+  if (!(sel instanceof NodeSelection) || sel.node.type.name !== "image") return false;
+  const num = (v: unknown): number | null =>
+    typeof v === "number" && Number.isFinite(v) ? v : null;
+  const left = num(patch.left);
+  const top = num(patch.top);
+  const right = num(patch.right);
+  const bottom = num(patch.bottom);
+  if (left == null || top == null || right == null || bottom == null) return false;
+  const raw = (fraction: number): number => Math.round(fraction * 100000);
+  const crop = { left: raw(left), top: raw(top), right: raw(right), bottom: raw(bottom) };
+  const attrs = { ...sel.node.attrs };
+  // Word's crop resizes the picture to the kept region at the unchanged
+  // source scale — the extent trades kept fractions (new = old × fNew/fOld),
+  // and the all-zero reset grows the frame back to the full source the same
+  // way. A degenerate fraction (a fOld of 0 from a hostile file, a non-positive
+  // fNew from a raw command call) leaves that axis alone.
+  const keptOf = (a: unknown, b: unknown): number =>
+    1 - (num(a) ?? 0) / 100000 - (num(b) ?? 0) / 100000;
+  const prev = (attrs.crop ?? {}) as Record<string, unknown>;
+  const fOldW = keptOf(prev.left, prev.right);
+  const fOldH = keptOf(prev.top, prev.bottom);
+  const fNewW = 1 - left - right;
+  const fNewH = 1 - top - bottom;
+  if (fOldW > 0 && fNewW > 0 && typeof attrs.width === "number")
+    attrs.width = Math.round((attrs.width * fNewW) / fOldW);
+  if (fOldH > 0 && fNewH > 0 && typeof attrs.height === "number")
+    attrs.height = Math.round((attrs.height * fNewH) / fOldH);
+  if (crop.left === 0 && crop.top === 0 && crop.right === 0 && crop.bottom === 0) delete attrs.crop;
+  else attrs.crop = crop;
+  tr.setNodeMarkup(sel.from, undefined, attrs);
+  tr.setSelection(NodeSelection.create(tr.doc, sel.from) as never);
+  return true;
+}
+
+/** Stamp one dimension onto the selected image — the shared body of the
+ *  Picture Format tab's Height/Width boxes (a measure string converted at
+ *  96 DPI; inline and floating pictures resize alike). */ function applyImageSize(
+  state: EditorState,
+  tr: Transaction,
+  axis: "width" | "height",
+  value: unknown,
+): boolean {
+  const tw = parseMeasureTwip(value);
+  if (tw == null || tw <= 0) return false;
+  const sel = state.selection;
+  if (!(sel instanceof NodeSelection) || sel.node.type.name !== "image") return false;
+  const attrs = { ...sel.node.attrs };
+  attrs[axis] = Math.round(tw / 15); // 15 twips to the px at 96 DPI
+  tr.setNodeMarkup(sel.from, undefined, attrs);
+  tr.setSelection(NodeSelection.create(tr.doc, sel.from) as never);
+  return true;
+}
+
+/** ── Picture Format > Adjust ──
+ *  The pixel-adjustment commands retarget the selected image, merging into
+ *  the attrs.blipEffects / attrs.outline office-open objects the projection
+ *  reads (blipEffects → the pixel filter and opacity, outline → the border
+ *  stroke). A preset equal to "no adjustment" deletes its field and an
+ *  emptied effects object drops off the attrs, so flipping between Word's
+ *  presets never leaves husk groups behind. */
+
+/** Stamp the selected image's attrs through `mutate`, keeping the
+ *  NodeSelection. False when the selection is not an image. */
+function patchPicture(
+  state: EditorState,
+  tr: Transaction,
+  mutate: (attrs: Record<string, unknown>) => void,
+): boolean {
+  const sel = state.selection;
+  if (!(sel instanceof NodeSelection) || sel.node.type.name !== "image") return false;
+  const attrs = { ...sel.node.attrs };
+  mutate(attrs);
+  tr.setNodeMarkup(sel.from, undefined, attrs);
+  tr.setSelection(NodeSelection.create(tr.doc, sel.from) as never);
+  return true;
+}
+
+/** Merge a blipEffects mutation into the image's attrs, pruning emptied
+ *  effect groups and a fully-cleared effects object (absent reads as
+ *  unadjusted downstream). */
+function patchBlipEffects(
+  attrs: Record<string, unknown>,
+  patch: (blip: Record<string, unknown>) => void,
+): void {
+  const blip = { ...((attrs.blipEffects ?? {}) as Record<string, unknown>) };
+  patch(blip);
+  for (const key of ["luminance", "hsl", "alphaModulateFixed"]) {
+    const group = blip[key];
+    if (group != null && typeof group === "object" && Object.keys(group).length === 0)
+      delete blip[key];
+  }
+  if (Object.keys(blip).length === 0) delete attrs.blipEffects;
+  else attrs.blipEffects = blip;
+}
+
+/** The extreme zIndex among the document's floating drawings that share the
+ *  target's band (behind / in front of text), excluding the target itself.
+ *  Bring-to-front sends max + 1, send-to-back min − 1; the identities read as
+ *  "no competitor" when the band holds the target alone (−1 maxes below any
+ *  z, ∞ mins above the clamped floor), so both commands no-op there. */
+function bandExtreme(
+  state: EditorState,
+  target: NonNullable<ReturnType<typeof floatingDrawingAt>>,
+  max: boolean,
+): number {
+  const behind = floatingOf(target).behindDocument === true;
+  let extreme = max ? -1 : Number.POSITIVE_INFINITY;
+  state.doc.descendants((node, pos) => {
+    if (pos === target.pos) return;
+    const attrs = node.attrs as Record<string, unknown>;
+    const floating =
+      node.type.name === "image"
+        ? (attrs.floating as Record<string, unknown> | undefined)
+        : node.type.name === "wpsShape"
+          ? ((attrs.wpsShape as Record<string, unknown> | null | undefined)?.floating as
+              | Record<string, unknown>
+              | undefined)
+          : undefined;
+    if (!floating || (floating.behindDocument === true) !== behind) return;
+    if (typeof floating.zIndex !== "number") return;
+    extreme = max ? Math.max(extreme, floating.zIndex) : Math.min(extreme, floating.zIndex);
+  });
+  return extreme;
 }
 
 /** {@link stampFloating} for a full attrs object (rotate rewrites the image's
@@ -2776,18 +2996,17 @@ export const DocumentCommands = Extension.create({
             if (widthCm != null) attrs.width = cmTo(widthCm, PX_PER_CM);
             if (heightCm != null) attrs.height = cmTo(heightCm, PX_PER_CM);
             if (rotationDeg != null) attrs.rotation = rotationDeg;
-            const floating = { ...floatingOf(target) };
-            const hPos = {
-              ...(floating.horizontalPosition as Record<string, unknown> | undefined),
-            };
-            const vPos = {
-              ...(floating.verticalPosition as Record<string, unknown> | undefined),
-            };
-            if (offsetHCm != null) hPos.offset = cmTo(offsetHCm, EMU_PER_CM);
-            if (offsetVCm != null) vPos.offset = cmTo(offsetVCm, EMU_PER_CM);
-            floating.horizontalPosition = hPos;
-            floating.verticalPosition = vPos;
-            return stampAttrs(tr, target, { ...attrs, floating });
+            // The replacement text rides the image's title attr (altText
+            // description on export); empty clears it. A shape payload has no
+            // alt-text field, so the dialog's field only lands on images.
+            if (typeof patch.altText === "string") {
+              if (patch.altText) attrs.title = patch.altText;
+              else delete attrs.title;
+            }
+            return stampAttrs(tr, target, {
+              ...attrs,
+              floating: applyFloatingExtras(floatingOf(target), patch, offsetHCm, offsetVCm),
+            });
           }
           const shape = { ...(target.attrs.wpsShape as Record<string, unknown>) };
           const t = { ...((shape.transformation ?? {}) as Record<string, unknown>) };
@@ -2796,45 +3015,154 @@ export const DocumentCommands = Extension.create({
           if (rotationDeg != null) t.rotation = rotationDeg;
           shape.transformation = t;
           // The shape's offsets ride the same Floating object as an image's.
-          if (offsetHCm == null && offsetVCm == null)
-            return stampAttrs(tr, target, { ...target.attrs, wpsShape: shape });
-          const floating = { ...floatingOf(target) };
-          const hPos = { ...(floating.horizontalPosition as Record<string, unknown> | undefined) };
-          const vPos = { ...(floating.verticalPosition as Record<string, unknown> | undefined) };
-          if (offsetHCm != null) hPos.offset = cmTo(offsetHCm, EMU_PER_CM);
-          if (offsetVCm != null) vPos.offset = cmTo(offsetVCm, EMU_PER_CM);
-          floating.horizontalPosition = hPos;
-          floating.verticalPosition = vPos;
-          shape.floating = floating;
+          shape.floating = applyFloatingExtras(floatingOf(target), patch, offsetHCm, offsetVCm);
           return stampAttrs(tr, target, { ...target.attrs, wpsShape: shape });
         },
       // The crop overlay's commit: the selected image's new a:srcRect insets
       // as source fractions, stored as the raw ST_Percentage ints the attrs
       // carry (office-open's parse emits raw ints despite the documented
-      // integer percent — mirror cropOf's /100000 read side). All zero clears.
+      // integer percent — mirror cropOf's /100000 read side). The extent
+      // follows the kept region (Word's crop). All zero clears.
       "drawing-crop-apply":
         (patch?) =>
+        ({ state, tr }) =>
+          patch && typeof patch === "object" ? applyCropPatch(state, tr, patch) : false,
+      // The context menu's Reset Crop — the same all-zero patch that clears
+      // the a:srcRect, so the picture shows its full source again and the
+      // extent grows back to it (the crop scale is preserved).
+      "drawing-crop-reset":
+        () =>
+        ({ state, tr }) =>
+          applyCropPatch(state, tr, { left: 0, top: 0, right: 0, bottom: 0 }),
+      // The Picture Format tab's Height/Width boxes: the selected image
+      // resizes to the typed measure ("5cm"/"2in"/"120px") — inline and
+      // floating pictures alike.
+      "drawing-width":
+        (value) =>
+        ({ state, tr }) =>
+          applyImageSize(state, tr, "width", value),
+      "drawing-height":
+        (value) =>
+        ({ state, tr }) =>
+          applyImageSize(state, tr, "height", value),
+      // ── Picture Format > Adjust（更正/颜色/透明度/边框/重置） ──
+
+      // Corrections: "bright:N" / "contrast:N" (percent points — the attr
+      // keys are office-open's LuminanceEffectOptions names; Word's
+      // sharpen/soften presets ride the same dialog and stay unmodeled). 0
+      // clears the field — the preset grid's "0% (normal)" is a reset.
+      "picture-correction":
+        (value) =>
         ({ state, tr }) => {
-          if (!patch || typeof patch !== "object") return false;
-          const sel = state.selection;
-          if (!(sel instanceof NodeSelection) || sel.node.type.name !== "image") return false;
-          const num = (v: unknown): number | null =>
-            typeof v === "number" && Number.isFinite(v) ? v : null;
-          const left = num(patch.left);
-          const top = num(patch.top);
-          const right = num(patch.right);
-          const bottom = num(patch.bottom);
-          if (left == null || top == null || right == null || bottom == null) return false;
-          const raw = (fraction: number): number => Math.round(fraction * 100000);
-          const crop = { left: raw(left), top: raw(top), right: raw(right), bottom: raw(bottom) };
-          const attrs = { ...sel.node.attrs };
-          if (crop.left === 0 && crop.top === 0 && crop.right === 0 && crop.bottom === 0)
-            delete attrs.crop;
-          else attrs.crop = crop;
-          tr.setNodeMarkup(sel.from, undefined, attrs);
-          tr.setSelection(NodeSelection.create(tr.doc, sel.from) as never);
-          return true;
+          const [kind, raw] = String(value ?? "").split(":");
+          if (kind !== "bright" && kind !== "contrast") return false;
+          const amount = Number(raw);
+          if (!Number.isFinite(amount) || amount < -100 || amount > 100) return false;
+          return patchPicture(state, tr, (attrs) =>
+            patchBlipEffects(attrs, (blip) => {
+              const lum = { ...((blip.luminance ?? {}) as Record<string, unknown>) };
+              if (amount === 0) delete lum[kind];
+              else lum[kind] = Math.round(amount);
+              blip.luminance = lum;
+            }),
+          );
         },
+      // Color: "saturation:N" (Word's saturation label %; the attrs carry the
+      // offset from the neutral 100%) or "none" (no recolor — clears the
+      // recolor fields).
+      "picture-color":
+        (value) =>
+        ({ state, tr }) => {
+          const v = String(value ?? "");
+          return patchPicture(state, tr, (attrs) =>
+            patchBlipEffects(attrs, (blip) => {
+              if (v === "none") {
+                delete blip.hsl;
+                delete blip.grayscale;
+                return;
+              }
+              if (!v.startsWith("saturation:")) return;
+              const percent = Number(v.slice("saturation:".length));
+              if (!Number.isFinite(percent) || percent < 0 || percent > 200) return;
+              const hsl = { ...((blip.hsl ?? {}) as Record<string, unknown>) };
+              const points = Math.round(percent) - 100;
+              if (points === 0) delete hsl.saturation;
+              else hsl.saturation = points;
+              blip.hsl = hsl;
+            }),
+          );
+        },
+      // Transparency: "0".."100" percent (the menu speaks transparency; the
+      // attrs carry the alpha modulate — the OPACITY — so 50% transparency
+      // writes amount 50). 0 restores fully opaque and drops the field.
+      "picture-transparency":
+        (value) =>
+        ({ state, tr }) => {
+          const percent = Number(value);
+          if (!Number.isFinite(percent) || percent < 0 || percent > 100) return false;
+          return patchPicture(state, tr, (attrs) =>
+            patchBlipEffects(attrs, (blip) => {
+              const amount = Math.round(100 - percent);
+              if (amount >= 100) delete blip.alphaModulateFixed;
+              else blip.alphaModulateFixed = { amount };
+            }),
+          );
+        },
+      // Border: "none", "color:RRGGBB", "width:P" (points) or "dash:token" —
+      // incremental merges onto one outline object, like Word's menu sections
+      // which each commit independently. A bare color picks the 1 pt default
+      // Word starts with.
+      "picture-border":
+        (value) =>
+        ({ state, tr }) => {
+          const v = String(value ?? "");
+          return patchPicture(state, tr, (attrs) => {
+            if (v === "none") {
+              delete attrs.outline;
+              return;
+            }
+            const outline = { ...((attrs.outline ?? {}) as Record<string, unknown>) };
+            outline.type = "solid";
+            if (v.startsWith("color:")) {
+              const color = v.slice(6).toUpperCase();
+              if (!/^[0-9A-F]{6}$/.test(color)) return;
+              outline.color = color;
+              if (typeof outline.width !== "number") outline.width = 12700;
+            } else if (v.startsWith("width:")) {
+              const pt = Number(v.slice(6));
+              if (!Number.isFinite(pt) || pt <= 0 || pt > 12) return;
+              outline.width = Math.round(pt * 12700); // EMU to the point
+            } else if (v.startsWith("dash:")) {
+              // "solid" is the no-dash reset (prstDash has no solid token).
+              const dash = v.slice(5);
+              if (dash === "solid") delete outline.dash;
+              else outline.dash = dash;
+            } else return;
+            attrs.outline = outline;
+          });
+        },
+      // Word's Reset Picture: clear the adjustments and the border. The crop
+      // keeps its own command (Reset Crop) and the extent is untouched.
+      "reset-picture":
+        () =>
+        ({ state, tr }) =>
+          patchPicture(state, tr, (attrs) => {
+            delete attrs.blipEffects;
+            delete attrs.outline;
+          }),
+      // Swap the source (the Change Picture flow's commit; the file-picker
+      // side reads the file into a data URL at the UI layer). The frame keeps
+      // its size — the new source stretches into it — and the crop resets
+      // (a srcRect described the old source's edges, Word resets on swap).
+      "change-picture":
+        (src) =>
+        ({ state, tr }) =>
+          typeof src === "string" && src
+            ? patchPicture(state, tr, (attrs) => {
+                attrs.src = src;
+                delete attrs.crop;
+              })
+            : false,
       // ── Arrange — floating drawings (the Layout tab's Arrange group) ──
       // Every command targets the selected floating drawing (a floating
       // image or a wps shape); on any other selection they decline, so the
@@ -2865,15 +3193,82 @@ export const DocumentCommands = Extension.create({
             zIndex: Math.max(0, (typeof floating.zIndex === "number" ? floating.zIndex : 0) - 1),
           });
         },
-      // Word's Wrap Text menu: In Front of Text / Behind Text clear the wrap
-      // (wrapNone) and set behindDoc; the four wrap styles stamp the type
-      // and drop behindDoc (Word 2013+ honors it for wrapNone anchors only).
+      // Word's Bring to Front / Send to Back: jump to the band's extreme z —
+      // one past the document's highest (lowest) same-band relativeHeight,
+      // never moving away from an extreme already held (the max/max, min/min
+      // guards keep a repeated click a no-op). Clamped at 0 (ST_RelativeHeight
+      // is unsigned); a clamp tie falls back to document order in the painter.
+      "bring-to-front":
+        () =>
+        ({ state, tr }) => {
+          const target = floatingDrawingAt(state);
+          if (!target) return false;
+          const floating = floatingOf(target);
+          const current = typeof floating.zIndex === "number" ? floating.zIndex : 0;
+          const next = Math.max(current, bandExtreme(state, target, true) + 1);
+          return next === current
+            ? false
+            : stampFloating(tr, target, { ...floating, zIndex: next });
+        },
+      "send-to-back":
+        () =>
+        ({ state, tr }) => {
+          const target = floatingDrawingAt(state);
+          if (!target) return false;
+          const floating = floatingOf(target);
+          const current = typeof floating.zIndex === "number" ? floating.zIndex : 0;
+          const next = Math.min(current, Math.max(0, bandExtreme(state, target, false) - 1));
+          return next === current
+            ? false
+            : stampFloating(tr, target, { ...floating, zIndex: next });
+        },
+      // Word's Wrap Text menu: In Line with Text turns a floating drawing
+      // inline (the floating payload is dropped); In Front of Text / Behind
+      // Text clear the wrap (wrapNone) and set behindDoc; the four wrap styles
+      // stamp the type and drop behindDoc (Word 2013+ honors it for wrapNone
+      // anchors only). An inline picture taking a flow style turns floating in
+      // place — anchored to its own paragraph with no offset (Word's
+      // keep-position conversion; shapes decline, their inline form is a
+      // different node shape).
       wrap:
         (value) =>
         ({ state, tr }) => {
           const target = floatingDrawingAt(state);
-          if (!target) return false;
+          if (!target) {
+            // Inline drawing: "inline" is a no-op (Word greys the row); a
+            // flow style converts — image only.
+            if (value === "inline") return false;
+            const sel = state.selection;
+            if (!(sel instanceof NodeSelection) || sel.node.type.name !== "image") return false;
+            const attrs = sel.node.attrs as Record<string, unknown>;
+            if (attrs.floating) return false;
+            const floating: Record<string, unknown> = {
+              horizontalPosition: { relative: "paragraph", offset: 0 },
+              verticalPosition: { relative: "paragraph", offset: 0 },
+              behindDocument: false,
+            };
+            if (value === "front" || value === "behind") {
+              floating.behindDocument = value === "behind";
+            } else if (value === "square" || value === "tight" || value === "through") {
+              floating.wrap = { type: value };
+            } else if (value === "top-bottom") {
+              floating.wrap = { type: "topAndBottom" };
+            } else {
+              return false;
+            }
+            return stampAttrs(tr, { pos: sel.from, attrs, kind: "image" }, { ...attrs, floating });
+          }
           const floating = { ...floatingOf(target) };
+          if (value === "inline") {
+            const attrs = { ...target.attrs };
+            if (target.kind === "image") delete attrs.floating;
+            else {
+              const shape = { ...(attrs.wpsShape as Record<string, unknown>) };
+              delete shape.floating;
+              attrs.wpsShape = shape;
+            }
+            return stampAttrs(tr, target, attrs);
+          }
           if (value === "front" || value === "behind") {
             delete floating.wrap;
             floating.behindDocument = value === "behind";
@@ -2889,14 +3284,15 @@ export const DocumentCommands = Extension.create({
           return stampFloating(tr, target, floating);
         },
       // Word's Rotate menu: right/left step the rotation 90° (OOXML rot is
-      // clockwise-positive); the flips toggle the mirror flags. The attrs
-      // live in two places — an image carries rotation/flipH/flipV on its
-      // top level (a tri-state: null omits, true/false emit explicit bytes),
-      // a shape mirrors them inside its transformation.
+      // clockwise-positive); the flips toggle the mirror flags. Inline
+      // pictures rotate too (Word keeps them inline). The attrs live in two
+      // places — an image carries rotation/flipH/flipV on its top level (a
+      // tri-state: null omits, true/false emit explicit bytes), a shape
+      // mirrors them inside its transformation.
       rotate:
         (value) =>
         ({ state, tr }) => {
-          const target = floatingDrawingAt(state);
+          const target = floatingDrawingAt(state) ?? inlineImageAt(state);
           if (!target) return false;
           const step = value === "right" ? 90 : value === "left" ? -90 : 0;
           if (target.kind === "image") {

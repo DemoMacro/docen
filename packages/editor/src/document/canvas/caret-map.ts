@@ -6,6 +6,7 @@
 // back to a page-local caret box; justified items scale the natural advances
 // into their stretch interval exactly as the painter does.
 
+import type { ShapeTextStack } from "@docen/core";
 import {
   cssFontOf,
   familyOfSlot,
@@ -81,10 +82,37 @@ interface ParaEntry {
    *  caret boundary, a selection edge and a dot share one lattice). */
   fullText: string;
   srcCursor: number;
+  /** The PM span of the enclosing text-box shape (a registered wps txbx
+   *  paragraph) — clicks only map into it once its shape is in edit mode,
+   *  and a full-document range (Ctrl+A) must not sweep the text up. */
+  shape?: { from: number; to: number };
 }
 
 const measureCanvas: HTMLCanvasElement | null =
   typeof document !== "undefined" ? document.createElement("canvas") : null;
+
+/** Rendered text of a laid paragraph (inline runs concatenated), whitespace
+ *  collapsed — the zip's resync signal when the two sides drift apart. */
+const norm = (s: string): string => s.replace(/\s+/g, "");
+const laidText = (para: LaidOutParagraph): string => {
+  let text = "";
+  for (const line of para.lines) {
+    for (const item of line.items) if (item.kind === "text") text += item.text;
+  }
+  return norm(text);
+};
+/** The paragraph's run text — the source the gap walk matches items against
+ *  (its whitespace is what pretext trimmed into the gaps). Every non-text
+ *  inline marks its source position with one U+FFFC placeholder. */
+const runTextOf = (para: LaidOutParagraph): string => {
+  let text = "";
+  for (const inline of para.inline) {
+    text += inline.kind === "text" ? inline.text : "￼";
+  }
+  return text;
+};
+const sameSpan = (a: { from: number; to: number }, b: { from: number; to: number }): boolean =>
+  a.from === b.from && a.to === b.to;
 
 /** A PM inline atom the layout projects as a laid box (an embedded picture,
  *  a math placeholder) — Word's "in line with text" graphic. It owns one
@@ -222,6 +250,9 @@ export class CaretMap {
   readonly valid: boolean;
   private readonly paras: ParaEntry[] = [];
   private readonly lines: LineEntry[] = [];
+  /** Registered text-box lines (a wps txbx's laid paragraphs) — consulted
+   *  only for the shape in edit mode, never by the body click map. */
+  private readonly shapeLines: LineEntry[] = [];
   /** Cell grid boxes keyed by the cell's PM position — the cell selection's
    *  whole-slot highlight, and the geometry the selection bars resolve a
    *  clicked column/row back to a PM cell from. One cell may paint in several
@@ -264,28 +295,6 @@ export class CaretMap {
       }
       return true;
     });
-    // Rendered text of a laid paragraph (inline runs concatenated) — the
-    // resync signal when the two sides drift apart.
-    const norm = (s: string): string => s.replace(/\s+/g, "");
-    const laidText = (para: LaidOutParagraph): string => {
-      let text = "";
-      for (const line of para.lines) {
-        for (const item of line.items) if (item.kind === "text") text += item.text;
-      }
-      return norm(text);
-    };
-    // The paragraph's run text — the source the gap walk matches items
-    // against (its whitespace is what pretext trimmed into the gaps). Every
-    // non-text inline marks its source position with one U+FFFC placeholder,
-    // so whitespace between two atoms attributes to the atom it precedes
-    // (pictures edge to edge are selectable, the collapsed run included).
-    const runTextOf = (para: LaidOutParagraph): string => {
-      let text = "";
-      for (const inline of para.inline) {
-        text += inline.kind === "text" ? inline.text : "￼";
-      }
-      return text;
-    };
     // True zip: walk the laid blocks, consuming one PM textblock per logical
     // paragraph. Three drifts must not invalidate the whole map:
     // 1. PM textblocks the flow never lays (floating-table cells paint in the
@@ -434,6 +443,111 @@ export class CaretMap {
     }
   }
 
+  /** Register the paint pass's editable text-box stacks (a wps txbx's laid
+   *  paragraphs) against their PM content. The flow zip never sees them — the
+   *  stack paints from the drawing box, not the page flow — so each stack's
+   *  laid paragraphs pair with the wpsShape's textblocks directly (document
+   *  order on both sides, a text mismatch skips the laid block). A stack the
+   *  host cannot pair (a furniture-anchored shape) stays unregistered and
+   *  inert, like an unmapped flow paragraph. Call right after construction. */
+  registerShapeStacks(
+    stacks: readonly ShapeTextStack[],
+    resolveShape: (host: { para: LaidOutParagraph; index: number }) => {
+      pos: number;
+      node: PmNode;
+    } | null,
+  ): void {
+    for (const stack of stacks) {
+      const shape = resolveShape(stack.host);
+      if (!shape || !shape.node.content.size) continue;
+      const laid: { page: number; para: LaidOutParagraph; xPx: number; yPx: number }[] = [];
+      collectLayoutParas(stack.items, stack.page, stack.xPx, stack.yPx, laid, null, null);
+      const tbs: { node: PmNode; pos: number }[] = [];
+      shape.node.descendants((child, rel) => {
+        if (child.isTextblock) {
+          tbs.push({ node: child, pos: shape.pos + 1 + rel });
+          return false;
+        }
+        return true;
+      });
+      let j = 0;
+      for (const item of laid) {
+        const tb = tbs[j];
+        if (!tb) break;
+        // A drift (the laid text the projection derived vs the PM content)
+        // leaves the laid block unmapped rather than mispairing the rest.
+        if (norm(laidText(item.para)) !== norm(tb.node.textContent)) continue;
+        j++;
+        const paraEntry: ParaEntry = {
+          page: item.page,
+          para: item.para,
+          innerPos: tb.pos + 1,
+          node: tb.node,
+          lines: [],
+          chars: 0,
+          fullText: runTextOf(item.para),
+          srcCursor: 0,
+          shape: { from: shape.pos, to: shape.pos + shape.node.nodeSize },
+        };
+        this.paras.push(paraEntry);
+        this.appendLines(paraEntry, item);
+      }
+    }
+  }
+
+  /** The PM span of the text box the position sits inside (null outside one)
+   *  — the edit-mode gate: clicks and Escape consult it to decide whether a
+   *  drawing hit means "select the shape" or "move the caret within". */
+  shapeAtPos(pos: number): { from: number; to: number } | null {
+    return (
+      this.paras.find((p) => p.shape && pos >= p.shape.from && pos <= p.shape.to)?.shape ?? null
+    );
+  }
+
+  /** A page-local point inside a registered text box → the doc position.
+   *  Unscoped (a double click entering the shape) it maps anywhere in any
+   *  stack; scoped (a click while editing) only the given shape's lines
+   *  compete, and a miss keeps the drawing selection intact. */
+  posAtShapePoint(
+    page: number,
+    x: number,
+    y: number,
+    scope?: { from: number; to: number },
+  ): number | null {
+    let bestDist = Infinity;
+    const band: LineEntry[] = [];
+    for (const entry of this.shapeLines) {
+      if (entry.page !== page) continue;
+      if (scope && !(entry.owner.shape && sameSpan(entry.owner.shape, scope))) continue;
+      const within = y >= entry.yPx && y <= entry.yPx + entry.line.heightPx;
+      const dist = within
+        ? 0
+        : Math.min(Math.abs(y - entry.yPx), Math.abs(y - (entry.yPx + entry.line.heightPx)));
+      if (dist > 40) continue;
+      if (dist < bestDist) {
+        bestDist = dist;
+        band.length = 0;
+      }
+      if (dist === bestDist) band.push(entry);
+    }
+    if (!band.length) return null;
+    const inside = band.find((entry) => {
+      const items = entry.line.items;
+      const last = items[items.length - 1];
+      const right = entry.xPx + (last ? last.xPx + last.widthPx : (entry.line.maxWidthPx ?? 0));
+      return x >= entry.xPx && x <= right;
+    });
+    let hit = inside ?? null;
+    if (!hit) {
+      for (const entry of band) {
+        if (entry.xPx <= x) hit = entry;
+        else break;
+      }
+      hit ??= band[0]!;
+    }
+    return this.posInLine(hit, x);
+  }
+
   /** Append one laid block's lines to a ParaEntry (startChar continues from
    *  the accumulated count; a continuation block's first line is not the
    *  paragraph's first line — no first-line indent re-application). */
@@ -511,7 +625,11 @@ export class CaretMap {
         gapStarts,
       };
       paraEntry.lines.push(lineEntry);
-      this.lines.push(lineEntry);
+      // Shape lines live beside the flow lines: the click map only consults
+      // them for the shape being edited (a stack inside a floating text box
+      // must never win a body click that happens to land nearby).
+      if (paraEntry.shape) this.shapeLines.push(lineEntry);
+      else this.lines.push(lineEntry);
       startChar += chars;
     });
     paraEntry.chars = startChar;
@@ -704,7 +822,22 @@ export class CaretMap {
    *  final line) stops at that glyph, like Word. */
   selectionRects(from: number, to: number): SelectionRect[] {
     const rects: SelectionRect[] = [];
+    // A text box highlights only when the range lives entirely inside it (an
+    // in-shape selection); any other range — a body drag crossing the shape's
+    // anchor, Ctrl+A — never sweeps the shape's text up, and the shape's host
+    // paragraph (whose position range CONTAINS the shape) stays out of the way
+    // while the shape is being edited.
+    const activeShape = this.paras.find((p) => p.shape && from >= p.shape.from && to <= p.shape.to);
     this.paras.forEach((entry, paraIndex) => {
+      if (entry.shape) {
+        if (entry !== activeShape) return;
+      } else if (
+        activeShape?.shape &&
+        entry.innerPos <= activeShape.shape.from &&
+        entry.innerPos + entry.node.content.size >= activeShape.shape.to
+      ) {
+        return;
+      }
       const start = Math.max(from, entry.innerPos);
       const end = Math.min(to, entry.innerPos + entry.node.content.size);
       // An empty paragraph's position range is degenerate ([innerPos,
@@ -983,9 +1116,15 @@ export class CaretMap {
 
   /** The paragraph/line/collapsed-offset a doc position lands in. */
   private locate(pos: number): { entry: ParaEntry; offset: number; line: LineEntry } | null {
-    const entry = this.paras.find(
-      (p) => pos >= p.innerPos && pos <= p.innerPos + p.node.content.size,
-    );
+    // Deepest match wins: a registered text-box paragraph's position range
+    // sits INSIDE its host paragraph's (the wpsShape is an inline child), so
+    // the narrower entry is the one the position actually belongs to.
+    let entry: ParaEntry | null = null;
+    for (const p of this.paras) {
+      if (pos >= p.innerPos && pos <= p.innerPos + p.node.content.size) {
+        if (!entry || p.node.content.size < entry.node.content.size) entry = p;
+      }
+    }
     if (!entry) return null;
     const offset = this.charOfPos(entry, pos);
     // A non-empty line's end offset belongs to that line (clicking past the

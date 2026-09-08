@@ -10,6 +10,7 @@
 // captureTransaction) crashes — so every translation here goes through pure
 // PM state commands.
 
+import type { ShapeTextStack } from "@docen/core";
 import {
   docxExtensions,
   parseHTMLBody,
@@ -157,6 +158,12 @@ export interface EditBridgeOptions {
   /** Re-resolves a selected drawing's painted box after a re-render (the
    *  selection drops when the drawing no longer paints). */
   drawingBoxOf?: (para: unknown, index: number, kind: "drawing" | "inline") => DrawingHit | null;
+  /** The paint pass's editable text-box stacks — registered with each fresh
+   *  caret map so a double click edits the shape's text in place. */
+  shapeTextStacks?: () => readonly ShapeTextStack[];
+  /** Re-finds the wpsShape node a text-box stack belongs to (the stack's
+   *  host paragraph + drawing index — the same identity a hit box carries). */
+  shapeResolve?: (host: { para: unknown; index: number }) => { pos: number; node: PMNode } | null;
   /** Ctrl+Click on a `#name` link — the host resolves the bookmark anchor and
    *  scrolls it into view (followLink only opens external URLs). Absent,
    *  internal anchors are inert. */
@@ -1414,6 +1421,24 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
         ta.value = "";
         return;
       }
+      // Word: a double click on a text-carrying shape enters its text body;
+      // while a shape is being edited a click inside it moves the caret, and
+      // a double click on a plain shape still just selects. A miss (the
+      // frame's edge, a shape the map cannot pair) keeps the drawing path.
+      const editing = main.map?.shapeAtPos(main.editor.state.selection.from) ?? null;
+      if (dbl || editing) {
+        const pos =
+          main.map?.posAtShapePoint(drawHit.page, drawHit.x, drawHit.y, editing ?? undefined) ??
+          null;
+        if (pos != null) {
+          selDrawing = null;
+          placeDrawingSel();
+          setSel(pos);
+          ta.focus();
+          ta.value = "";
+          return;
+        }
+      }
       // A drawing the PM side cannot pair (furniture-anchored art whose host
       // paragraph lives outside the main doc, a stale box after a re-layout)
       // must not swallow the click — fall through to the text placement
@@ -2048,6 +2073,17 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
         break;
       // Leaving a furniture story (Word: Esc = Close Header and Footer).
       case "Escape":
+        if (editable && main.map?.shapeAtPos(main.editor.state.selection.from)) {
+          // Leaving a text box's edit mode selects the whole shape (Word) —
+          // the span's `from` IS the wpsShape node's position.
+          event.preventDefault();
+          const span = main.map.shapeAtPos(main.editor.state.selection.from)!;
+          main.editor.commands.command(({ state, dispatch }) => {
+            dispatch?.(state.tr.setSelection(NodeSelection.create(state.doc, span.from) as never));
+            return true;
+          });
+          return;
+        }
         if (selDrawing != null) {
           event.preventDefault();
           selDrawing = null;
@@ -2308,6 +2344,9 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
         main.editor.state.doc,
         (page) => pageOrigin(page) ?? { contentLeftPx: 0, contentTopPx: 0 },
       );
+      const stacks = opts.shapeTextStacks?.() ?? [];
+      if (stacks.length)
+        main.map.registerShapeStacks(stacks, (host) => opts.shapeResolve?.(host) ?? null);
       main.pageCount = pages.length;
       placeDrawingSel();
       placeCaret();

@@ -9,6 +9,7 @@ import {
   type DrawingHitBox,
   type LineNumberMark,
   type PaintContext,
+  type ShapeTextStack,
 } from "@docen/core";
 import type {
   LayoutBlock,
@@ -1072,10 +1073,14 @@ export class CanvasStage {
     // (behind-doc floats included — the earlier pass painted them, this one
     // records where).
     const hitBoxes: DrawingHitBox[] = [];
+    // ...and every editable text-box stack for the caret map (double-click
+    // text-box editing).
+    const shapeTextStacks: ShapeTextStack[] = [];
 
     const layers = keepFurniture && !this.storyEdit ? this.slots[index]!.layers : null;
     if (layers) {
       ctx.hitBoxes = hitBoxes;
+      ctx.shapeTextStacks = shapeTextStacks;
       layers.behind.clear();
       paintScene(layers.behind, items, ctx);
       paintGridlines(layers.behind, ctx);
@@ -1088,6 +1093,7 @@ export class CanvasStage {
       this.#flushDrawings(ctx);
       app.forceRender();
       this.hitBoxes.set(index, hitBoxes);
+      this.shapeTextStacks.set(index, shapeTextStacks);
       return;
     }
 
@@ -1139,6 +1145,7 @@ export class CanvasStage {
       paintGridlines(pageLayers.behind, ctx);
       ctx.layer = "body";
       ctx.hitBoxes = hitBoxes;
+      ctx.shapeTextStacks = shapeTextStacks;
       if (this.showsFurniture) {
         this.paintFurniture(
           pageLayers.furnitureBehind,
@@ -1157,6 +1164,7 @@ export class CanvasStage {
       this.slots[index]!.layers = pageLayers;
     } else {
       ctx.hitBoxes = hitBoxes;
+      ctx.shapeTextStacks = shapeTextStacks;
       paintScene(tree, items, ctx);
       paintLineNumbers(tree, ctx);
       paintColumnSeparators(tree, ctx);
@@ -1184,6 +1192,7 @@ export class CanvasStage {
     // and never picks the page back up.
     app.forceRender();
     this.hitBoxes.set(index, hitBoxes);
+    this.shapeTextStacks.set(index, shapeTextStacks);
   }
 
   /** Paint the floats both passes parked in the queue — after the pass's
@@ -1206,6 +1215,15 @@ export class CanvasStage {
   /** The page's drawing boxes as the body pass painted them — the click
    *  hit table (empty until the page repaints at least once). */
   private readonly hitBoxes = new Map<number, DrawingHitBox[]>();
+
+  /** The pages' editable text-box stacks, keyed like {@link hitBoxes} — the
+   *  bridge registers them with the caret map after each relayout. */
+  private readonly shapeTextStacks = new Map<number, ShapeTextStack[]>();
+
+  /** Every painted text-box stack, paint order (the caret map's feed). */
+  allShapeTextStacks(): ShapeTextStack[] {
+    return [...this.shapeTextStacks.values()].flat();
+  }
 
   /** The topmost drawing whose painted box contains the page-local point
    *  (null when none does) — later-painted wins, Word's z-click. A rotated
@@ -1274,7 +1292,13 @@ export class CanvasStage {
       // banner would enter the table unpairable and swallow every body
       // click landing on it (Word: body clicks pass through header-anchored
       // shapes; entering the header is the band double-click, not a hit).
-      const storyCtx: PaintContext = { ...ctx, flow: storyFlow, layer, hitBoxes: undefined };
+      const storyCtx: PaintContext = {
+        ...ctx,
+        flow: storyFlow,
+        layer,
+        hitBoxes: undefined,
+        shapeTextStacks: undefined,
+      };
       if (header) {
         paintFurnitureStack(
           layer === "behind" ? behind : body,

@@ -1,13 +1,17 @@
 // Draw (inking) + Insert illustration extras — Fluent System Icons
+import accessibility from "@fluentui/svg-icons/icons/accessibility_24_regular.svg?raw";
 import apps from "@fluentui/svg-icons/icons/apps_24_regular.svg?raw";
 import arrowAutofitContent from "@fluentui/svg-icons/icons/arrow_autofit_content_24_regular.svg?raw";
 import arrowBidirectionalUpDown from "@fluentui/svg-icons/icons/arrow_bidirectional_up_down_24_regular.svg?raw";
 import arrowExpand from "@fluentui/svg-icons/icons/arrow_expand_24_regular.svg?raw";
 import arrowMaximizeVertical from "@fluentui/svg-icons/icons/arrow_maximize_vertical_24_regular.svg?raw";
+import arrowMinimize from "@fluentui/svg-icons/icons/arrow_minimize_24_regular.svg?raw";
 import arrowRedo from "@fluentui/svg-icons/icons/arrow_redo_24_regular.svg?raw";
 import arrowRepeatAll from "@fluentui/svg-icons/icons/arrow_repeat_all_24_regular.svg?raw";
 import arrowRotateClockwise from "@fluentui/svg-icons/icons/arrow_rotate_clockwise_24_regular.svg?raw";
+import arrowRotateCounterclockwise from "@fluentui/svg-icons/icons/arrow_rotate_counterclockwise_24_regular.svg?raw";
 import arrowSort from "@fluentui/svg-icons/icons/arrow_sort_24_regular.svg?raw";
+import arrowSwap from "@fluentui/svg-icons/icons/arrow_swap_24_regular.svg?raw";
 import arrowSync from "@fluentui/svg-icons/icons/arrow_sync_24_regular.svg?raw";
 import arrowUndo from "@fluentui/svg-icons/icons/arrow_undo_24_regular.svg?raw";
 import board from "@fluentui/svg-icons/icons/board_24_regular.svg?raw";
@@ -15,6 +19,7 @@ import bookmark from "@fluentui/svg-icons/icons/bookmark_24_regular.svg?raw";
 import borderAll from "@fluentui/svg-icons/icons/border_all_24_regular.svg?raw";
 import borderOutside from "@fluentui/svg-icons/icons/border_outside_24_regular.svg?raw";
 import box from "@fluentui/svg-icons/icons/box_24_regular.svg?raw";
+import brightnessHigh from "@fluentui/svg-icons/icons/brightness_high_24_regular.svg?raw";
 import calculator from "@fluentui/svg-icons/icons/calculator_24_regular.svg?raw";
 import calendarLtr from "@fluentui/svg-icons/icons/calendar_ltr_24_regular.svg?raw";
 import chartMultiple from "@fluentui/svg-icons/icons/chart_multiple_24_regular.svg?raw";
@@ -22,12 +27,14 @@ import checkmarkCircle from "@fluentui/svg-icons/icons/checkmark_circle_24_regul
 import chevronDown from "@fluentui/svg-icons/icons/chevron_down_24_regular.svg?raw";
 import clearFormatting from "@fluentui/svg-icons/icons/clear_formatting_24_regular.svg?raw";
 import clipboardPaste from "@fluentui/svg-icons/icons/clipboard_paste_24_regular.svg?raw";
+import color from "@fluentui/svg-icons/icons/color_24_regular.svg?raw";
 import colorBackground from "@fluentui/svg-icons/icons/color_background_24_regular.svg?raw";
 import colorFill from "@fluentui/svg-icons/icons/color_fill_24_regular.svg?raw";
 import column from "@fluentui/svg-icons/icons/column_24_regular.svg?raw";
 import comment from "@fluentui/svg-icons/icons/comment_24_regular.svg?raw";
 import commentAdd from "@fluentui/svg-icons/icons/comment_add_24_regular.svg?raw";
 import copy from "@fluentui/svg-icons/icons/copy_24_regular.svg?raw";
+import crop from "@fluentui/svg-icons/icons/crop_24_regular.svg?raw";
 import cube from "@fluentui/svg-icons/icons/cube_24_regular.svg?raw";
 import cut from "@fluentui/svg-icons/icons/cut_24_regular.svg?raw";
 import designIdeas from "@fluentui/svg-icons/icons/design_ideas_24_regular.svg?raw";
@@ -41,12 +48,15 @@ import documentPageBreak from "@fluentui/svg-icons/icons/document_page_break_24_
 import documentPrint from "@fluentui/svg-icons/icons/document_print_24_regular.svg?raw";
 import edit from "@fluentui/svg-icons/icons/edit_24_regular.svg?raw";
 import eraser from "@fluentui/svg-icons/icons/eraser_24_regular.svg?raw";
+import eye from "@fluentui/svg-icons/icons/eye_24_regular.svg?raw";
+import filter from "@fluentui/svg-icons/icons/filter_24_regular.svg?raw";
 import folderOpen from "@fluentui/svg-icons/icons/folder_open_24_regular.svg?raw";
 import grid from "@fluentui/svg-icons/icons/grid_24_regular.svg?raw";
 import groupList from "@fluentui/svg-icons/icons/group_list_24_regular.svg?raw";
 import highlight from "@fluentui/svg-icons/icons/highlight_24_regular.svg?raw";
 import image from "@fluentui/svg-icons/icons/image_24_regular.svg?raw";
 import imageAdd from "@fluentui/svg-icons/icons/image_add_24_regular.svg?raw";
+import imageEdit from "@fluentui/svg-icons/icons/image_edit_24_regular.svg?raw";
 import lasso from "@fluentui/svg-icons/icons/lasso_24_regular.svg?raw";
 import link from "@fluentui/svg-icons/icons/link_24_regular.svg?raw";
 import lockShield from "@fluentui/svg-icons/icons/lock_shield_24_regular.svg?raw";
@@ -56,6 +66,7 @@ import numberSymbol from "@fluentui/svg-icons/icons/number_symbol_24_regular.svg
 import orientation from "@fluentui/svg-icons/icons/orientation_24_regular.svg?raw";
 import pageFit from "@fluentui/svg-icons/icons/page_fit_24_regular.svg?raw";
 import paintBrush from "@fluentui/svg-icons/icons/paint_brush_24_regular.svg?raw";
+import paintBucket from "@fluentui/svg-icons/icons/paint_bucket_24_regular.svg?raw";
 import pen from "@fluentui/svg-icons/icons/pen_24_regular.svg?raw";
 import penDismiss from "@fluentui/svg-icons/icons/pen_dismiss_24_regular.svg?raw";
 import people from "@fluentui/svg-icons/icons/people_24_regular.svg?raw";
@@ -63,6 +74,7 @@ import question from "@fluentui/svg-icons/icons/question_24_regular.svg?raw";
 import ruler from "@fluentui/svg-icons/icons/ruler_24_regular.svg?raw";
 import save from "@fluentui/svg-icons/icons/save_24_regular.svg?raw";
 import search from "@fluentui/svg-icons/icons/search_24_regular.svg?raw";
+import selectAllOff from "@fluentui/svg-icons/icons/select_all_off_24_regular.svg?raw";
 import shapes from "@fluentui/svg-icons/icons/shapes_24_regular.svg?raw";
 import share from "@fluentui/svg-icons/icons/share_24_regular.svg?raw";
 import table from "@fluentui/svg-icons/icons/table_24_regular.svg?raw";
@@ -256,6 +268,20 @@ const RIBBON_ICONS: Record<string, string> = {
   rotate: arrowRotateClockwise,
   "group-objects": groupList,
   wrap: textWrap,
+  // Picture Format context tab — the Adjust group's pixel tools, the styles
+  // group, and the Size group's crop.
+  "remove-background": imageEdit,
+  corrections: brightnessHigh,
+  "picture-color": color,
+  "artistic-effects": filter,
+  transparency: eye,
+  "compress-pictures": arrowMinimize,
+  "change-picture": arrowSwap,
+  "reset-picture": arrowRotateCounterclockwise,
+  "picture-styles": paintBucket,
+  crop,
+  "alt-text": accessibility,
+  "selection-pane": selectAllOff,
   // References
   toc: textBulletListTree,
   footnote: textFootnote,

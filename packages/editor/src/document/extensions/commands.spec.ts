@@ -671,6 +671,39 @@ describe("arrange — floating drawings", () => {
     ).toMatchObject({ zIndex: 0 });
   });
 
+  it("bring-to-front tops the band, send-to-back floors it, both no-op at the extreme", () => {
+    const editor = build();
+    floatDoc(editor);
+    // The shape (z=1) jumps past the image (z=2); a second click holds.
+    selectFirstNode(editor, "wpsShape");
+    expect(editor.commands["bring-to-front"]()).toBe(true);
+    expect(
+      (firstNodeOf(editor, "wpsShape").attrs.wpsShape as Record<string, unknown>).floating,
+    ).toMatchObject({ zIndex: 3 });
+    expect(editor.commands["bring-to-front"]()).toBe(false);
+    // Against the raised shape (z=3) the image is already the floor — a
+    // second drawing (shape back at z=1) exercises the actual drop.
+    const other = build();
+    floatDoc(other);
+    selectFirstNode(other, "image");
+    expect(other.commands["send-to-back"]()).toBe(true);
+    expect(firstNodeOf(other, "image").attrs.floating).toMatchObject({ zIndex: 0 });
+    expect(other.commands["send-to-back"]()).toBe(false);
+  });
+
+  it("bring-to-front / send-to-back stay within the drawing's band", () => {
+    const editor = build();
+    floatDoc(editor);
+    // Move the shape behind text — its z=1 no longer bounds the front band.
+    selectFirstNode(editor, "wpsShape");
+    editor.commands.wrap("behind");
+    selectFirstNode(editor, "image");
+    // Alone in the front band, both extremes hold at the current z.
+    expect(editor.commands["send-to-back"]()).toBe(false);
+    expect(editor.commands["bring-to-front"]()).toBe(false);
+    expect(firstNodeOf(editor, "image").attrs.floating).toMatchObject({ zIndex: 2 });
+  });
+
   it("wrap stamps the wrap type; front/behind clear it and set behindDoc", () => {
     const editor = build();
     floatDoc(editor);
@@ -911,6 +944,55 @@ describe("move-drawing", () => {
   });
 });
 
+describe("drawing-width / drawing-height", () => {
+  const FLOATING = {
+    horizontalPosition: { relative: "margin", offset: 1000 },
+    verticalPosition: { relative: "paragraph", offset: 2000 },
+  };
+
+  it("stamps the typed measure as the selected picture's px extent", () => {
+    const editor = buildWithFloat(FLOATING);
+    selectFloat(editor);
+    // 1cm ≈ 37.8px → 38; 1440 twips (1") = 96px.
+    expect(editor.commands["drawing-width"]("1cm")).toBe(true);
+    expect(editor.commands["drawing-height"]("1in")).toBe(true);
+    const image = firstNodeOf(editor, "image");
+    expect(image.attrs.width).toBe(38);
+    expect(image.attrs.height).toBe(96);
+    // The resize keeps the picture selected (Word's box stays active).
+    expect(editor.state.selection instanceof NodeSelection).toBe(true);
+  });
+
+  it("resizes an inline picture (no floating carrier required)", () => {
+    const editor = new Editor({
+      element: null,
+      extensions: EXTENSIONS,
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [{ type: "image", attrs: { src: "data:,", width: 10, height: 10 } }],
+          },
+        ],
+      },
+    });
+    selectFloat(editor);
+    expect(editor.commands["drawing-width"]("120px")).toBe(true);
+    expect(firstNodeOf(editor, "image").attrs.width).toBe(120);
+  });
+
+  it("declines non-positive or malformed measures and non-image selections", () => {
+    const editor = buildWithFloat(FLOATING);
+    expect(editor.commands["drawing-width"]("5cm")).toBe(false);
+    selectFloat(editor);
+    expect(editor.commands["drawing-width"]("0")).toBe(false);
+    expect(editor.commands["drawing-width"]("-3cm")).toBe(false);
+    expect(editor.commands["drawing-height"]("wide")).toBe(false);
+    expect(editor.commands["drawing-height"]()).toBe(false);
+  });
+});
+
 describe("rotate-drawing", () => {
   const FLOATING = {
     horizontalPosition: { relative: "margin", offset: 1000 },
@@ -1082,6 +1164,134 @@ describe("drawing-properties-apply", () => {
     expect((floating.horizontalPosition as Record<string, unknown>).offset).toBe(4572000);
   });
 
+  it("stamps and clears the alt text (the image's title attr)", () => {
+    const editor = buildWithFloat(FLOATING);
+    selectFloat(editor);
+    // The command applies whatever the patch carries (the dialog sends only
+    // its changed fields); the geometry values are irrelevant here — the
+    // assertions read only the title.
+    const patch = {
+      widthCm: 0,
+      heightCm: 0,
+      rotationDeg: 0,
+      offsetHCm: 0,
+      offsetVCm: 0,
+    };
+    expect(editor.commands["drawing-properties-apply"]({ ...patch, altText: "XX项目效果图" })).toBe(
+      true,
+    );
+    expect(firstNodeOf(editor, "image").attrs.title).toBe("XX项目效果图");
+    // An empty field clears the text (the attr drops, defaulting to null).
+    expect(editor.commands["drawing-properties-apply"]({ ...patch, altText: "" })).toBe(true);
+    expect(firstNodeOf(editor, "image").attrs.title).toBeNull();
+  });
+
+  it("keeps the stored EMU offsets a partial patch omits", () => {
+    // The dialog sends only the fields the user changed — an untouched
+    // offset must not round-trip through the two-decimal cm display (a
+    // 2000-EMU offset would land as 3600).
+    const editor = buildWithFloat(FLOATING);
+    selectFloat(editor);
+    expect(editor.commands["drawing-properties-apply"]({ lockAnchor: true })).toBe(true);
+    const floating = firstNodeOf(editor, "image").attrs.floating as Record<string, unknown>;
+    expect((floating.horizontalPosition as Record<string, unknown>).offset).toBe(4572000);
+    expect((floating.verticalPosition as Record<string, unknown>).offset).toBe(95250);
+    expect(floating.lockAnchor).toBe(true);
+    // Untouched wrap distances don't materialize a zero margins object.
+    expect(floating.margins).toBeUndefined();
+  });
+
+  it("stamps the position bases, layout flags, and wrap distances", () => {
+    const editor = buildWithFloat(FLOATING);
+    selectFloat(editor);
+    // The command applies whatever the patch carries; only the floating
+    // extras matter to the assertions.
+    const patch = {
+      widthCm: 0,
+      heightCm: 0,
+      rotationDeg: 0,
+      offsetHCm: 0,
+      offsetVCm: 0,
+      relativeH: "page",
+      relativeV: "page",
+      allowOverlap: false,
+      layoutInCell: true,
+      lockAnchor: true,
+      distanceCm: { top: 0.13, bottom: 0.25, left: 0.13, right: 0.25 },
+    };
+    expect(editor.commands["drawing-properties-apply"](patch)).toBe(true);
+    const floating = firstNodeOf(editor, "image").attrs.floating as Record<string, unknown>;
+    expect(floating.horizontalPosition).toEqual({ relative: "page", offset: 0 });
+    expect(floating.verticalPosition).toEqual({ relative: "page", offset: 0 });
+    // The flags land verbatim; the distances become the EMU margins
+    // (0.13cm ≈ 46800 EMU, 0.25cm = 90000).
+    expect(floating.allowOverlap).toBe(false);
+    expect(floating.layoutInCell).toBe(true);
+    expect(floating.lockAnchor).toBe(true);
+    expect(floating.margins).toEqual({ top: 46800, bottom: 90000, left: 46800, right: 90000 });
+  });
+
+  it("rides the shape payload with the same extras", () => {
+    const editor = new Editor({
+      element: null,
+      extensions: EXTENSIONS,
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [
+              {
+                type: "wpsShape",
+                attrs: {
+                  wpsShape: {
+                    transformation: { width: 100, height: 80 },
+                    floating: {
+                      horizontalPosition: { relative: "column", offset: 1000 },
+                      verticalPosition: { relative: "paragraph", offset: 2000 },
+                    },
+                  },
+                },
+                // The editable textbox body — the node is content:"block+".
+                content: [{ type: "paragraph" }],
+              },
+            ],
+          },
+        ],
+      },
+    });
+    let shapePos = -1;
+    editor.state.doc.descendants((node, nodePos) => {
+      if (node.type.name === "wpsShape") {
+        shapePos = nodePos;
+        return false;
+      }
+      return true;
+    });
+    editor.commands.setNodeSelection(shapePos);
+    const patch = {
+      widthCm: 0,
+      heightCm: 0,
+      rotationDeg: 0,
+      offsetHCm: 0,
+      offsetVCm: 0,
+      relativeH: "line",
+      relativeV: "margin",
+      allowOverlap: true,
+      layoutInCell: false,
+      lockAnchor: false,
+      distanceCm: { top: 0.1, bottom: 0.1, left: 0.1, right: 0.1 },
+    };
+    expect(editor.commands["drawing-properties-apply"](patch)).toBe(true);
+    const floating = (firstNodeOf(editor, "wpsShape").attrs.wpsShape as Record<string, unknown>)
+      .floating as Record<string, unknown>;
+    expect(floating.horizontalPosition).toEqual({ relative: "line", offset: 0 });
+    expect(floating.verticalPosition).toEqual({ relative: "margin", offset: 0 });
+    expect(floating.allowOverlap).toBe(true);
+    expect(floating.layoutInCell).toBe(false);
+    expect(floating.margins).toEqual({ top: 36000, bottom: 36000, left: 36000, right: 36000 });
+  });
+
   it("declines without a floating drawing selected", () => {
     const editor = buildWithFloat(FLOATING);
     expect(editor.commands["drawing-properties-apply"]({ rotationDeg: 1 } as never)).toBe(false);
@@ -1104,6 +1314,26 @@ describe("drawing-crop-apply", () => {
     // value space cropOf reads back with a /100000.
     expect(attrs.crop).toEqual({ left: 10000, top: 25000, right: 5000, bottom: 0 });
     expect(editor.state.selection instanceof NodeSelection).toBe(true);
+  });
+
+  it("resizes the extent to the kept region at the source scale", () => {
+    const editor = buildWithFloat({
+      horizontalPosition: { relative: "margin", offset: 1000 },
+      verticalPosition: { relative: "paragraph", offset: 2000 },
+    });
+    selectFloat(editor);
+    expect(editor.commands["drawing-crop-apply"]({ left: 0.2, top: 0, right: 0, bottom: 0 })).toBe(
+      true,
+    );
+    let attrs = firstNodeOf(editor, "image").attrs as Record<string, unknown>;
+    expect(attrs.width).toBe(8); // 10 × (1 − 0.2) at the unchanged scale
+    expect(attrs.height).toBe(10);
+    // A second crop trades kept fractions against the previous extent.
+    expect(editor.commands["drawing-crop-apply"]({ left: 0.1, top: 0, right: 0, bottom: 0 })).toBe(
+      true,
+    );
+    attrs = firstNodeOf(editor, "image").attrs as Record<string, unknown>;
+    expect(attrs.width).toBe(9); // 8 × 0.9 / 0.8
   });
 
   it("clears the crop on an all-zero set", () => {
@@ -1154,6 +1384,47 @@ describe("drawing-crop-apply", () => {
     selectFloat(editor);
     expect(editor.commands["drawing-crop-apply"]({ left: 0.1 } as never)).toBe(false);
     expect(editor.commands["drawing-crop-apply"]()).toBe(false);
+  });
+});
+
+describe("drawing-crop-reset", () => {
+  it("clears the selected image's crop with the all-zero patch", () => {
+    const editor = buildWithFloat({
+      horizontalPosition: { relative: "margin", offset: 1000 },
+      verticalPosition: { relative: "paragraph", offset: 2000 },
+    });
+    selectFloat(editor);
+    expect(
+      editor.commands["drawing-crop-apply"]({ left: 0.1, top: 0, right: 0.05, bottom: 0 }),
+    ).toBe(true);
+    expect(editor.commands["drawing-crop-reset"]()).toBe(true);
+    // The schema's attr default reads back as null once the key is gone.
+    expect(firstNodeOf(editor, "image").attrs.crop).toBeNull();
+    expect(editor.state.selection instanceof NodeSelection).toBe(true);
+  });
+
+  it("grows the extent back to the full source", () => {
+    const editor = buildWithFloat({
+      horizontalPosition: { relative: "margin", offset: 1000 },
+      verticalPosition: { relative: "paragraph", offset: 2000 },
+    });
+    selectFloat(editor);
+    expect(editor.commands["drawing-crop-apply"]({ left: 0, top: 0, right: 0, bottom: 0.5 })).toBe(
+      true,
+    );
+    expect((firstNodeOf(editor, "image").attrs as Record<string, unknown>).height).toBe(5);
+    expect(editor.commands["drawing-crop-reset"]()).toBe(true);
+    const attrs = firstNodeOf(editor, "image").attrs as Record<string, unknown>;
+    expect(attrs.height).toBe(10);
+    expect(attrs.width).toBe(10);
+  });
+
+  it("declines without an image selected", () => {
+    const editor = buildWithFloat({
+      horizontalPosition: { relative: "margin", offset: 1000 },
+      verticalPosition: { relative: "paragraph", offset: 2000 },
+    });
+    expect(editor.commands["drawing-crop-reset"]()).toBe(false);
   });
 });
 

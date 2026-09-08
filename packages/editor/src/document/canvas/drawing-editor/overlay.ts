@@ -175,7 +175,8 @@ export class DrawingOverlay {
     const scale = this.#callbacks.scale();
     const dx = (event.clientX - drag.startX) / scale;
     const dy = (event.clientY - drag.startY) / scale;
-    const next = resizeBox(drag.origin, drag.handle, dx, dy);
+    // Shift locks the ratio on an edge drag (corners lock by default).
+    const next = resizeBox(drag.origin, drag.handle, dx, dy, undefined, event.shiftKey);
     this.#box = next;
     this.#place();
   }

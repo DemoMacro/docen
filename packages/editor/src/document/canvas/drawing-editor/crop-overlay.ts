@@ -105,6 +105,19 @@ export class CropOverlay {
     this.#rotation = rotation;
     this.#crop = { ...crop };
     this.#origin = { ...crop };
+    // The full-source rectangle, derived once at entry and frozen for the
+    // whole session — Word's model: the source preview stays anchored while
+    // the frame edges chase the pointer. Re-deriving it per drag would pin
+    // the frame onto the visible box (the edge stops following the mouse and
+    // the preview grows the opposite way instead).
+    const w = 1 - crop.left - crop.right;
+    const h = 1 - crop.top - crop.bottom;
+    this.#full = {
+      x: box.x - box.width * (w > 0 ? crop.left / w : 0),
+      y: box.y - box.height * (h > 0 ? crop.top / h : 0),
+      width: w > 0 ? box.width / w : box.width,
+      height: h > 0 ? box.height / h : box.height,
+    };
     this.#img.src = src;
     this.el.style.display = "block";
     this.#place();
@@ -146,22 +159,15 @@ export class CropOverlay {
     this.#callbacks.onExit?.();
   }
 
-  /** Lay the layer out over the full-source rectangle: everything inside is
-   *  percent-of-source positioned, so one outer geometry write re-places the
-   *  preview, the shades, the frame, and the handles together. */
+  /** Lay the layer out over the frozen full-source rectangle: everything
+   *  inside is percent-of-source positioned, so one outer geometry write
+   *  re-places the preview, the shades, the frame, and the handles together. */
   #place(): void {
-    const box = this.#box;
+    const full = this.#full;
     const crop = this.#crop;
-    if (!box || !crop) return;
+    if (!full || !crop) return;
     const w = 1 - crop.left - crop.right;
     const h = 1 - crop.top - crop.bottom;
-    const full: Box = {
-      x: box.x - box.width * (w > 0 ? crop.left / w : 0),
-      y: box.y - box.height * (h > 0 ? crop.top / h : 0),
-      width: w > 0 ? box.width / w : box.width,
-      height: h > 0 ? box.height / h : box.height,
-    };
-    this.#full = full;
     const scale = this.#callbacks.scale() || 1;
     this.el.style.left = `${full.x * scale}px`;
     this.el.style.top = `${full.y * scale}px`;

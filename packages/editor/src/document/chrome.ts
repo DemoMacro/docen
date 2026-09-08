@@ -254,5 +254,6 @@ export const documentTemplate = html`
   <docen-find-replace-dialog></docen-find-replace-dialog>
   <input type="file" id="file-input" accept=".docx,.md,.markdown" hidden />
   <input type="file" id="image-input" accept="image/*" hidden />
+  <input type="file" id="picture-input" accept="image/*" hidden />
   <input type="file" id="text-input" accept=".txt,.md,.markdown,text/plain" hidden />
 `;

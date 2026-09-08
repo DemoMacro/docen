@@ -63,6 +63,23 @@ describe("resizeBox", () => {
     expect(next.x).toBe(-10);
     expect(next.width).toBe(70);
   });
+
+  it("keeps the ratio from the dragged edge's midpoint when locked (Shift)", () => {
+    // East drag: width drives, height follows, centered on the west edge.
+    const east = resizeBox(box, "e", 50, 0, 24, true);
+    expect(east).toEqual({ x: 75, y: 68, width: 250, height: 125 });
+    // North drag: height drives, width follows, centered on the south edge.
+    const north = resizeBox(box, "n", 0, -20, 24, true);
+    expect(north).toEqual({ x: 80, y: 70, width: 240, height: 120 });
+  });
+
+  it("clamps a locked edge drag to the minimum without breaking the ratio", () => {
+    const next = resizeBox(box, "s", 0, -500, 24, true);
+    expect(next.width / next.height).toBeCloseTo(2);
+    expect(next.height).toBe(24);
+    expect(next.x).toBe(100 + (200 - 48) / 2);
+    expect(next.y).toBe(80 + (100 - 24) / 2);
+  });
 });
 
 describe("rotateDelta", () => {

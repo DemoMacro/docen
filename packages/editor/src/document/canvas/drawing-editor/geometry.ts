@@ -51,8 +51,16 @@ const positive = (n: number): number => Math.max(1, Math.round(n));
 /** The box after dragging `handle` by (dx, dy). The opposite edge/corner stays
  *  anchored (Word: dragging a handle keeps the rest of the frame put). Corner
  *  drags keep the aspect ratio (Word's default for pictures); edges resize one
- *  axis freely. */
-export function resizeBox(box: Box, handle: HandleId, dx: number, dy: number, min = 24): Box {
+ *  axis freely — unless `lock` (Word's Shift-resize), which keeps the ratio
+ *  from the dragged edge's midpoint. */
+export function resizeBox(
+  box: Box,
+  handle: HandleId,
+  dx: number,
+  dy: number,
+  min = 24,
+  lock = false,
+): Box {
   const west = handle.includes("w");
   const east = handle.includes("e");
   const north = handle.includes("n");
@@ -84,6 +92,19 @@ export function resizeBox(box: Box, handle: HandleId, dx: number, dy: number, mi
     }
     if (west) x = box.x + box.width - width;
     if (north) y = box.y + box.height - height;
+  } else if (lock) {
+    // Shift-locked edge drag: the dragged axis drives, the other follows the
+    // box ratio, centered on the dragged edge (its midpoint holds still).
+    const ratio = box.height / box.width;
+    if (north || south) {
+      height = Math.max(height, min);
+      width = height / ratio;
+    } else {
+      width = Math.max(width, min);
+      height = width * ratio;
+    }
+    x = box.x + (box.width - width) / 2;
+    y = box.y + (box.height - height) / 2;
   }
 
   // Below the minimum, clamp the moving edge to the minimum size instead of

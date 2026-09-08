@@ -114,6 +114,7 @@ import {
   equationContextTab,
   formatMeasureTwip,
   headerFooterContextTab,
+  pictureFormatTab,
   renderRibbonFromSchema,
   ribbonActions,
   ribbonTabs,
@@ -203,6 +204,13 @@ function mathAtomAt(state: EditorState): { node: PMNode; pos: number } | null {
     }
   }
   return null;
+}
+
+/** The picture under a NodeSelection — the Picture Format context tab's
+ *  trigger (shapes wait for the shape-format batch). */
+function pictureSelection(state: EditorState): boolean {
+  const sel = state.selection;
+  return sel instanceof NodeSelection && sel.node.type.name === "image";
 }
 
 /**
@@ -322,6 +330,7 @@ class DocenDocument extends AddinHost<Editor> {
   #flow?: ProjectedFlowBox;
   #fileInput?: HTMLInputElement;
   #imageInput?: HTMLInputElement;
+  #pictureInput?: HTMLInputElement;
   /** Cached doc nodeSize + Office-style word count so caret-move transactions
    *  don't re-walk the whole document (recomputed only when content changes). */
   #lastDocSize = -1;
@@ -936,6 +945,7 @@ class DocenDocument extends AddinHost<Editor> {
 
     this.#fileInput = this.shadowRoot!.querySelector<HTMLInputElement>("#file-input")!;
     this.#imageInput = this.shadowRoot!.querySelector<HTMLInputElement>("#image-input")!;
+    this.#pictureInput = this.shadowRoot!.querySelector<HTMLInputElement>("#picture-input")!;
     this.#renderChrome();
     // Once attributes: initial task-pane visibility (Office `setStartupBehavior`
     // equivalent). Absent → closed; present → open. Read once on connect —
@@ -1071,6 +1081,13 @@ class DocenDocument extends AddinHost<Editor> {
       // same order the paragraph's content carries the nodes).
       drawingAt: (page, lx, ly) => this.#stage?.drawingAt(page, lx, ly) ?? null,
       drawingSelection: (hit) => this.#drawingNodePos(hit.para, hit.index, hit.kind),
+      shapeTextStacks: () => this.#stage?.allShapeTextStacks() ?? [],
+      shapeResolve: (host) => {
+        const pos = this.#drawingNodePos(host.para, host.index, "drawing");
+        const doc = this.#bridge?.editor.state.doc;
+        const node = pos != null && doc ? doc.nodeAt(pos) : null;
+        return pos != null && node ? { pos, node } : null;
+      },
       drawingBoxOf: (para, index, kind) => {
         const stage = this.#stage;
         const hit = stage?.drawingBoxOf(para, index, kind) ?? null;
@@ -1113,6 +1130,7 @@ class DocenDocument extends AddinHost<Editor> {
     this.shadowRoot!.addEventListener("click", this.#onHistoryClick as EventListener);
     this.#fileInput.addEventListener("change", this.#onFileChange);
     this.#imageInput.addEventListener("change", this.#onImageChange);
+    this.#pictureInput.addEventListener("change", this.#onPictureChange);
     // Outline (Headings tab) → jump to the clicked heading.
     this.shadowRoot!.querySelector("docen-outline")?.addEventListener(
       "outline:select",
@@ -1675,12 +1693,25 @@ class DocenDocument extends AddinHost<Editor> {
     const offsetCm = (v: unknown): number => Math.round((num(v) / EMU_PER_CM) * 100) / 100;
     const hPos = floating.horizontalPosition as Record<string, unknown> | undefined;
     const vPos = floating.verticalPosition as Record<string, unknown> | undefined;
+    const margins = floating.margins as Record<string, unknown> | undefined;
     return {
       widthCm: cm(shape ? num(t.width) : num(attrs.width)),
       heightCm: cm(shape ? num(t.height) : num(attrs.height)),
       rotationDeg: num(shape ? t.rotation : attrs.rotation),
       offsetHCm: offsetCm(hPos?.offset),
       offsetVCm: offsetCm(vPos?.offset),
+      relativeH: typeof hPos?.relative === "string" ? hPos.relative : "column",
+      relativeV: typeof vPos?.relative === "string" ? vPos.relative : "paragraph",
+      allowOverlap: floating.allowOverlap === true,
+      layoutInCell: floating.layoutInCell !== false,
+      lockAnchor: floating.lockAnchor === true,
+      distanceCm: {
+        top: offsetCm(margins?.top),
+        bottom: offsetCm(margins?.bottom),
+        left: offsetCm(margins?.left),
+        right: offsetCm(margins?.right),
+      },
+      altText: typeof attrs.title === "string" ? attrs.title : "",
     };
   }
 
@@ -1691,6 +1722,14 @@ class DocenDocument extends AddinHost<Editor> {
     if (!(sel instanceof NodeSelection) || sel.node.type.name !== "image") return null;
     const src = sel.node.attrs.src;
     return typeof src === "string" && src ? { src } : null;
+  }
+
+  /** Whether the selected image actually carries an a:srcRect crop (Reset
+   *  Crop's enable — resetting an uncropped picture is a no-op). */
+  #selectedImageHasCrop(): boolean {
+    const sel = this.editor?.state.selection;
+    if (!(sel instanceof NodeSelection) || sel.node.type.name !== "image") return false;
+    return sel.node.attrs.crop != null;
   }
 
   /** The active view, normalized (an unknown attr value reads as print). */
@@ -2034,6 +2073,7 @@ class DocenDocument extends AddinHost<Editor> {
     this.shadowRoot?.removeEventListener("change", this.#onChange as EventListener);
     this.#fileInput?.removeEventListener("change", this.#onFileChange);
     this.#imageInput?.removeEventListener("change", this.#onImageChange);
+    this.#pictureInput?.removeEventListener("change", this.#onPictureChange);
     this.shadowRoot
       ?.querySelector("docen-outline")
       ?.removeEventListener("outline:select", this.#navigation.onOutlineSelect as EventListener);
@@ -2735,11 +2775,13 @@ class DocenDocument extends AddinHost<Editor> {
     const ribbon = root?.querySelector("docen-ribbon");
     if (!root || !tablist || !ribbon) return;
     const scope = root.querySelector("docen-workspace") ?? this;
-    // The tab ids the current selection calls for (Word's one context set —
-    // a table selection and a math selection never coexist).
+    // The tab ids the current selection calls for (a picture selection and a
+    // math selection never coexist; a picture inside a table keeps both —
+    // Word's Table Tools stay up with Picture Tools).
     const want = new Map<string, RibbonTab>();
     if (this.editor) {
       const state = this.editor.state;
+      if (pictureSelection(state)) want.set("picture-format", pictureFormatTab(scope));
       if (tableAncestry(state)) for (const tab of tableContextTabs(scope)) want.set(tab.id, tab);
       else if (mathAtomAt(state)) want.set("equation", equationContextTab());
     }
@@ -2753,8 +2795,21 @@ class DocenDocument extends AddinHost<Editor> {
       tablist.setAttribute("activeid", DEFAULT_RIBBON_TAB);
     for (const id of present) {
       if (want.has(id)) continue;
-      tablist.querySelector(`#${id}`)?.remove();
-      ribbon.querySelector(`docen-ribbon-panel[value="${id}"]`)?.remove();
+      // A retiring panel's Fluent controls may be mid-teardown in their own
+      // blur handlers (clicking away from a combobox detaches its popover,
+      // then the selection transaction lands here) — the removal races that
+      // cleanup, so a node lost along the way is fine. The tab goes last so
+      // it still retires even when the panel's teardown throws.
+      try {
+        ribbon.querySelector(`docen-ribbon-panel[value="${id}"]`)?.remove();
+      } catch {
+        /* the blur handler already tore it down */
+      }
+      try {
+        tablist.querySelector(`#${id}`)?.remove();
+      } catch {
+        /* the blur handler already tore it down */
+      }
     }
     // Append the fresh arrivals and activate them (Word drops you on the tab).
     let firstNew: string | null = null;
@@ -3505,6 +3560,8 @@ class DocenDocument extends AddinHost<Editor> {
       items.push({ text: "-" });
       items.push({ text: t("context.bring-forward", this), event: "bring-forward" });
       items.push({ text: t("context.send-backward", this), event: "send-backward" });
+      items.push({ text: t("context.bring-to-front", this), event: "bring-to-front" });
+      items.push({ text: t("context.send-to-back", this), event: "send-to-back" });
       // The numeric layout dialog needs an offset-anchored floating drawing —
       // an inline picture has no offset to edit.
       items.push({
@@ -3517,6 +3574,12 @@ class DocenDocument extends AddinHost<Editor> {
         text: t("context.crop", this),
         event: "drawing-crop",
         ...(this.#selectedImage() ? {} : { disabled: true }),
+      });
+      // Reset Crop — only meaningful when the picture actually carries one.
+      items.push({
+        text: t("context.crop-reset", this),
+        event: "drawing-crop-reset",
+        ...(this.#selectedImageHasCrop() ? {} : { disabled: true }),
       });
       items.push({ text: "-" });
       items.push({ text: t("context.delete-picture", this), event: "delete-picture" });
@@ -3952,7 +4015,12 @@ class DocenDocument extends AddinHost<Editor> {
       return;
     }
     // Page setup actions write sectionProperties; the transaction re-renders.
-    // "more"/"custom" open the Page Setup dialog instead of a preset.
+    // "more"/"custom" open the Page Setup dialog instead of a preset; the
+    // Page Setup group's dialog-box launcher opens the same dialog.
+    if (name === "page-setup-dialog") {
+      this.#sections.openPageSetup();
+      return;
+    }
     if (name === "page-size") {
       if (value === "more") this.#sections.openPageSetup();
       else this.#sections.setPageSize(value);
@@ -4048,6 +4116,12 @@ class DocenDocument extends AddinHost<Editor> {
     // Picture needs a file picker — open it, then insert the chosen image.
     if (name === "insert-picture") {
       this.#imageInput?.click();
+      return;
+    }
+    // Change Picture — a picker over the selected image; the picked source
+    // replaces it at the same frame size (Picture Format > Adjust).
+    if (name === "change-picture") {
+      this.#pictureInput?.click();
       return;
     }
     // Formatting marks toggle — canvas-side marks are a later milestone; the
@@ -4864,6 +4938,22 @@ class DocenDocument extends AddinHost<Editor> {
         });
       };
       img.src = src;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  /** Swap the selected image's source for the picked file (Change Picture):
+   *  the frame keeps its size, the crop resets — the command side owns both. */
+  readonly #onPictureChange = (event: Event): void => {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = "";
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (): void => {
+      if (typeof reader.result !== "string") return;
+      this.#bridge?.focus();
+      this.editor?.commands["change-picture"](reader.result);
     };
     reader.readAsDataURL(file);
   };

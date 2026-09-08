@@ -363,10 +363,12 @@ const rotateItems = (): string =>
     { text: opt("flip-horizontal"), value: "flip-h" },
   ]);
 
-// The Arrange group's floating-drawing menus: Wrap Text (Word's six) and the
-// Position gallery's nine-cell grid (option texts reuse the 9-grid keys).
+// The Arrange group's floating-drawing menus: Wrap Text (Word's menu — In Line
+// with Text first, then the five text-flow styles) and the Position gallery's
+// nine-cell grid (option texts reuse the 9-grid keys).
 const wrapItems = (): string =>
   JSON.stringify([
+    { text: opt("wrap-inline"), value: "inline" },
     { text: opt("wrap-front"), value: "front" },
     { text: opt("wrap-behind"), value: "behind" },
     { text: opt("wrap-square"), value: "square" },
@@ -382,6 +384,86 @@ const positionItems = (): string =>
       value: cell,
     })),
   );
+
+// Picture Format > Adjust: Word's preset grids flattened into menus. The
+// labels assemble a localized lead word with the plain percent (the font-
+// size ladder's pattern); the values are the picture-correction /
+// picture-color / picture-transparency / picture-border command values.
+const PICTURE_PRESET_LEVELS = [40, 20, 0, -20, -40];
+
+const correctionItems = (): string => {
+  const zh = resolveLang().toLowerCase().startsWith("zh");
+  const pct = (n: number): string => `${n > 0 ? "+" : ""}${n}%`;
+  const lead = zh ? "亮度" : "Brightness";
+  const lead2 = zh ? "对比度" : "Contrast";
+  return JSON.stringify([
+    ...PICTURE_PRESET_LEVELS.map((n) => ({
+      text: `${lead}: ${pct(n)}`,
+      value: `bright:${n}`,
+    })),
+    { text: "-" },
+    ...PICTURE_PRESET_LEVELS.map((n) => ({
+      text: `${lead2}: ${pct(n)}`,
+      value: `contrast:${n}`,
+    })),
+  ]);
+};
+
+const pictureColorItems = (): string => {
+  const zh = resolveLang().toLowerCase().startsWith("zh");
+  const lead = zh ? "饱和度" : "Saturation";
+  return JSON.stringify([
+    { text: zh ? "没有重新着色" : "No Recolor", value: "none" },
+    { text: "-" },
+    ...[0, 33, 66, 100, 200].map((n) => ({
+      text: `${lead}: ${n}%`,
+      value: `saturation:${n}`,
+    })),
+  ]);
+};
+
+const transparencyItems = (): string => {
+  const zh = resolveLang().toLowerCase().startsWith("zh");
+  const lead = zh ? "透明度" : "Transparency";
+  return JSON.stringify(
+    [0, 15, 30, 50, 65, 80, 95].map((n) => ({ text: `${lead}: ${n}%`, value: String(n) })),
+  );
+};
+
+// Word's border menu sections — an outline color with the 1 pt default, the
+// weights, and the dashed styles — each commit independently onto the same
+// outline object.
+const PICTURE_BORDER_COLORS: [string, string, string][] = [
+  ["000000", "黑色", "Black"],
+  ["FFFFFF", "白色", "White"],
+  ["C00000", "深红", "Dark Red"],
+  ["ED7D31", "橙色", "Orange"],
+  ["FFC000", "金色", "Gold"],
+  ["70AD47", "绿色", "Green"],
+  ["4472C4", "蓝色", "Blue"],
+  ["7030A0", "紫色", "Purple"],
+];
+
+const pictureBorderItems = (): string => {
+  const zh = resolveLang().toLowerCase().startsWith("zh");
+  return JSON.stringify([
+    { text: zh ? "无轮廓" : "No Outline", value: "none" },
+    { text: "-" },
+    ...PICTURE_BORDER_COLORS.map(([hex, cn, en]) => ({
+      text: zh ? cn : en,
+      value: `color:${hex}`,
+    })),
+    { text: "-" },
+    ...[0.25, 1, 2.25, 3.5].map((pt) => ({
+      text: `${zh ? "粗细" : "Weight"}: ${pt} pt`,
+      value: `width:${pt}`,
+    })),
+    { text: "-" },
+    { text: zh ? "实线" : "Solid Line", value: "dash:solid" },
+    { text: zh ? "方点" : "Square Dot", value: "dash:sysDot" },
+    { text: zh ? "方划线" : "Square Dash", value: "dash:sysDash" },
+  ]);
+};
 
 const alignObjectsItems = (): string =>
   JSON.stringify([
@@ -1047,25 +1129,21 @@ const drawTab = (): RibbonTab =>
 
 const designTab = (): RibbonTab =>
   tabNode("design", [
-    group(
-      "document-formatting",
-      [
-        // The paint-brush glyph doubles here: a style set is Word's "apply a
-        // formatting theme to the document" action.
-        split("format-painter", "style-set", parsedItems(styleSetItems()), { size: "large" }),
-        btn("theme", "theme", { size: "large" }),
-        btn("font-color", "colors", { size: "large" }),
-        btn("text-font", "fonts", { size: "large" }),
-        btn("text-effects", "effects", { size: "large" }),
-        col([
-          grid([
-            menu("line-spacing", "paragraph-spacing", parsedItems(paragraphSpacingItems())),
-            btn("page-border", "set-default"),
-          ]),
+    group("document-formatting", [
+      // The paint-brush glyph doubles here: a style set is Word's "apply a
+      // formatting theme to the document" action.
+      split("format-painter", "style-set", parsedItems(styleSetItems()), { size: "large" }),
+      btn("theme", "theme", { size: "large" }),
+      btn("font-color", "colors", { size: "large" }),
+      btn("text-font", "fonts", { size: "large" }),
+      btn("text-effects", "effects", { size: "large" }),
+      col([
+        grid([
+          menu("line-spacing", "paragraph-spacing", parsedItems(paragraphSpacingItems())),
+          btn("page-border", "set-default"),
         ]),
-      ],
-      "themes-dialog",
-    ),
+      ]),
+    ]),
     group("page-background", [
       split("watermark", "watermark", parsedItems(watermarkItems()), { size: "large" }),
       {
@@ -1113,14 +1191,14 @@ const layoutTab = (): RibbonTab =>
     group("arrange", [
       col([
         row([
-          split("orientation", "position", parsedItems(positionItems())),
-          split("wrap", "wrap", parsedItems(wrapItems())),
+          menu("orientation", "position", parsedItems(positionItems())),
+          menu("wrap", "wrap", parsedItems(wrapItems())),
         ]),
         row([btn("orientation", "bring-forward"), btn("orientation", "send-backward")]),
       ]),
-      split("align-left", "align-objects", parsedItems(alignObjectsItems()), { size: "large" }),
-      split("group-objects", "group", parsedItems(groupItems()), { size: "large" }),
-      split("rotate", "rotate", parsedItems(rotateItems()), { size: "large" }),
+      menu("align-left", "align-objects", parsedItems(alignObjectsItems()), { size: "large" }),
+      menu("group-objects", "group", parsedItems(groupItems()), { size: "large" }),
+      menu("rotate", "rotate", parsedItems(rotateItems()), { size: "large" }),
     ]),
   ]);
 
@@ -1597,6 +1675,123 @@ export function equationContextTab(): RibbonTab {
             event: "insert-symbol",
             value: char,
           })),
+        ),
+      ]),
+    ],
+  };
+}
+
+/** The picture-size presets behind the Picture Format tab's Height/Width
+ *  boxes (the unit system follows the locale, same as Cell Size). */
+const pictureSizeItems = (scope?: Element): string =>
+  JSON.stringify(
+    (useCmUnits(scope)
+      ? ([
+          ["2 厘米", "2cm"],
+          ["5 厘米", "5cm"],
+          ["10 厘米", "10cm"],
+          ["15 厘米", "15cm"],
+        ] as const)
+      : ([
+          ['1"', "1in"],
+          ['2"', "2in"],
+          ['4"', "4in"],
+          ['6"', "6in"],
+        ] as const)
+    ).map(([text, value]) => ({ text, value })),
+  );
+
+/** Word's Picture Tools — the contextual tab while a picture carries the
+ *  selection. Groups mirror Word's Picture Format tab: Adjust (the pixel
+ *  tools the engine doesn't model yet — greys until the image-tools batch),
+ *  Picture Styles, Accessibility (Alt Text rides the size-and-position
+ *  dialog), Arrange (the Layout tab's floating-drawing commands), and Size
+ *  (the numeric Height/Width boxes + the crop split). Marked `contextual` so
+ *  {@link ribbonTabs} excludes it from the static render; the host appends it
+ *  via {@link buildContextualTab} as the selection enters/leaves a picture.
+ *  `scope` is the i18n scope the unit-system presets resolve against. */
+export function pictureFormatTab(scope?: Element): RibbonTab {
+  return {
+    id: "picture-format",
+    label: tab("picture-format"),
+    contextual: true,
+    groups: [
+      // Word's Adjust group — the pixel tools the projection reads: the
+      // correction/color/transparency presets write blipEffects, Reset Picture
+      // clears them. Remove Background, Artistic Effects, Compress and Change
+      // Picture stay greyed (no pixel-recompression pipeline yet).
+      group("picture-adjust", [
+        btn("remove-background", "remove-background", { size: "large" }),
+        col([
+          grid([
+            menu("corrections", "picture-correction", parsedItems(correctionItems())),
+            menu("picture-color", "picture-color", parsedItems(pictureColorItems())),
+            btn("artistic-effects", "artistic-effects"),
+            menu("transparency", "picture-transparency", parsedItems(transparencyItems())),
+            btn("compress-pictures", "compress-pictures"),
+            btn("change-picture", "change-picture"),
+            btn("reset-picture", "reset-picture"),
+          ]),
+        ]),
+      ]),
+      group("picture-styles", [
+        // The Quick Styles gallery + Effects/Layout — the styled picture
+        // rendering is a later batch; Border (the outline merge) is wired.
+        btn("picture-styles", "picture-styles", { size: "large" }),
+        col([
+          grid([
+            menu("border", "picture-border", parsedItems(pictureBorderItems())),
+            btn("text-effects", "picture-effects"),
+            btn("smartart", "picture-layout"),
+          ]),
+        ]),
+      ]),
+      // Alt Text — the size-and-position dialog already carries the field.
+      group("accessibility", [
+        {
+          type: "button",
+          icon: "alt-text",
+          label: "ribbon.cmd.alt-text",
+          event: "drawing-properties",
+          size: "large",
+        },
+      ]),
+      // Arrange — the Layout tab's Arrange group verbatim (Word repeats the
+      // floating-drawing commands here); Position/Wrap apply to floating
+      // drawings only, matching Word's inline grey-out at the command layer.
+      group("arrange", [
+        col([
+          row([
+            menu("orientation", "position", parsedItems(positionItems())),
+            menu("wrap", "wrap", parsedItems(wrapItems())),
+          ]),
+          row([btn("orientation", "bring-forward"), btn("orientation", "send-backward")]),
+        ]),
+        menu("align-left", "align-objects", parsedItems(alignObjectsItems()), { size: "large" }),
+        menu("group-objects", "group", parsedItems(groupItems()), { size: "large" }),
+        menu("rotate", "rotate", parsedItems(rotateItems()), { size: "large" }),
+        btn("selection-pane", "selection-pane", { size: "large" }),
+      ]),
+      // Size — Word stacks Height over Width, with the crop split beside.
+      // The boxes read empty (the contextual tab builds once per entry, so a
+      // live value would go stale); a typed measure commits the dimension.
+      group("picture-size", [
+        col([
+          combo("drawing-height", "", parsedItems(pictureSizeItems(scope)), {
+            comboboxSize: "short",
+          }),
+          combo("drawing-width", "", parsedItems(pictureSizeItems(scope)), {
+            comboboxSize: "short",
+          }),
+        ]),
+        split(
+          "crop",
+          "drawing-crop",
+          [
+            { text: "ribbon.cmd.crop", event: "drawing-crop" },
+            { text: "context.crop-reset", event: "drawing-crop-reset" },
+          ],
+          { size: "large", label: "ribbon.cmd.crop" },
         ),
       ]),
     ],

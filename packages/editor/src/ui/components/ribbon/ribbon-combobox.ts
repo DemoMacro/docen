@@ -119,6 +119,23 @@ class DocenRibbonCombobox extends FASTElement {
     this.renderItems();
     this.syncValue();
     this.dd?.addEventListener("change", () => this.emit());
+    // Fluent's combobox only fires `change` when an option is picked — typed
+    // free text (a font name, a measure like "5cm") would never commit. Enter
+    // commits the current control text the way the picked option does: capture
+    // beats Fluent's own Enter handling (which resets the control) and reads
+    // the text before it goes. The control sits in the shadow tree, so the
+    // real target comes off the event path.
+    this.addEventListener(
+      "keydown",
+      (e: KeyboardEvent) => {
+        const target = e.composedPath()[0] as HTMLElement | undefined;
+        if (e.key !== "Enter" || target?.tagName !== "INPUT") return;
+        e.preventDefault();
+        e.stopPropagation();
+        this.emit();
+      },
+      true,
+    );
     if (this.source === "local-fonts") void this.loadLocalFonts();
   }
 

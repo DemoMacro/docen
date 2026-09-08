@@ -188,6 +188,12 @@ export const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   // attrs (the commit arrives via table-properties:ok → table-properties-apply,
   // which rewrites the table's w:jc alignment and w:tblInd indent).
   "table-properties",
+  // Drawing Properties (Alt Text) opens the size-and-position dialog for the
+  // selected drawing (inline pictures are declined in #onCommand — no state);
+  // Crop enters the crop-mode gesture. Shared by the context menu and the
+  // Picture Format context tab's Accessibility group / Size split.
+  "drawing-properties",
+  "drawing-crop",
   // Footnote prompts for the note text, references the caret and appends the
   // note body to documentExtras.footnotes. Equation drops a placeholder
   // math template (the gallery's fraction/script/radical/sum/integral) at
