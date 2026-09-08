@@ -68,8 +68,8 @@
   },
   "dependencies": {
     "@docen/layout": "workspace:*",
-    "@office-open/core": "0.14.4",
-    "@office-open/docx": "0.14.4",
+    "@office-open/core": "0.14.5",
+    "@office-open/docx": "0.14.5",
     "@tiptap/core": "3.29.2",
     "@tiptap/extension-link": "3.29.2",
     "@tiptap/markdown": "3.29.2",

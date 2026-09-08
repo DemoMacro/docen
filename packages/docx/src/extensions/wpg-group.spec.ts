@@ -140,10 +140,10 @@ describe("wpgGroup member round-trip", () => {
     expect(JSON.stringify(member.content)).toContain("member");
   });
 
-  // Blocked until @office-open/docx ships the fresh-group media-name fix
-  // (office-open da107d4f): 0.14.4 emits r:embed="{undefined}" for a group
-  // picture child with no fileName, so picture members never parse back.
-  describe.skip("picture member round-trip (blocked on @office-open/docx upgrade)", () => {
+  // Needs @office-open/docx ≥0.14.5 (office-open da107d4f): earlier emits
+  // r:embed="{undefined}" for a group picture child with no fileName, so
+  // picture members never parse back.
+  describe("picture member round-trip", () => {
     it("restores a picture member's groupXfrm box and flip", () => {
       const json = parseDOCXSync(generateDOCXSync(groupDoc([imageMember()])) as Uint8Array);
       const member = firstGroup(json).content![0];
