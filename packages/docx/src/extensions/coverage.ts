@@ -54,7 +54,7 @@ export const SECTION_CHILD_DISPOSITIONS = {
   table: { editable: "Table.parseDocxBlock" },
   toc: { editable: "tocField node (entries editable, field switches opaque)" },
   textbox: { passthrough: "block Passthrough atom" },
-  sdt: { passthrough: "block Passthrough atom" },
+  sdt: { editable: "sdtBlock node (content editable, control settings verbatim)" },
   altChunk: { passthrough: "block Passthrough atom" },
   customXml: { passthrough: "block Passthrough atom" },
   bookmarkStart: { passthrough: "block Passthrough atom" },
@@ -121,7 +121,7 @@ export const PARAGRAPH_CHILD_DISPOSITIONS = {
   bdo: { passthrough: "inlinePassthrough atom" },
   smartTag: { passthrough: "inlinePassthrough atom" },
   customXml: { passthrough: "inlinePassthrough atom" },
-  sdt: { passthrough: "inlinePassthrough atom" },
+  sdt: { editable: "sdtInline node (content editable, control settings verbatim)" },
   subDoc: { passthrough: "inlinePassthrough atom" },
   rawXml: { passthrough: "inlinePassthrough atom" },
 } satisfies Record<ParagraphChildTag, Disposition>;

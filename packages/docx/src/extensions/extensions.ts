@@ -10,6 +10,7 @@ import { PageBreak } from "./page-break";
 import { Paragraph } from "./paragraph";
 import { Passthrough, InlinePassthrough } from "./passthrough";
 import { Ruby } from "./ruby";
+import { SdtBlock, SdtInline } from "./sdt";
 import { SectionBreak } from "./section-break";
 import { Tab } from "./tab";
 import { Table } from "./table";
@@ -51,6 +52,8 @@ export const tiptapNodeExtensions: AnyExtension[] = [
   Passthrough,
   InlinePassthrough,
   TocField,
+  SdtBlock,
+  SdtInline,
   Image,
   WpgGroup,
   WpsShape,
@@ -118,4 +121,5 @@ export { WpgGroup } from "./wpg-group";
 export { WpsShape } from "./wps-shape";
 export { Passthrough, InlinePassthrough } from "./passthrough";
 export { TocField } from "./toc-field";
+export { SdtBlock, SdtInline } from "./sdt";
 export { Tab } from "./tab";

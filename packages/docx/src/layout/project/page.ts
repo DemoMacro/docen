@@ -45,10 +45,30 @@ export function projectChild(
   if ("paragraph" in child) return projectParagraphBlocks(child.paragraph, ctx);
   if ("table" in child) return projectTable(child.table, ctx);
   if ("toc" in child) return projectToc(child.toc, ctx);
+  if ("sdt" in child) return projectSdt(child.sdt, ctx);
   if ("bookmarkStart" in child || "bookmarkEnd" in child) return null;
-  // sdt, textbox, altChunk, customXml, rawXml → a labeled box.
+  // textbox, altChunk, customXml, rawXml → a labeled box.
   const label = Object.keys(child)[0];
   return { kind: "placeholder", heightPx: PLACEHOLDER_PX, label };
+}
+
+/** A content control is transparent in the flow: its children project as
+ *  plain blocks (Word's default view shows the content bare, no chrome). No
+ *  or empty children → placeholder — an empty control still reserves its
+ *  line, like Word's empty w:sdtContent. */
+function projectSdt(sdt: unknown, ctx: ProjectContext): LayoutBlock | LayoutBlock[] | null {
+  const children = isRecord(sdt) && Array.isArray(sdt.children) ? sdt.children : [];
+  const blocks: LayoutBlock[] = [];
+  for (const entry of children) {
+    if (!isRecord(entry)) continue;
+    const projected = projectChild(entry as SectionChild, ctx);
+    if (!projected) continue;
+    if (Array.isArray(projected)) blocks.push(...projected);
+    else blocks.push(projected);
+  }
+  return blocks.length > 0
+    ? blocks
+    : { kind: "placeholder", heightPx: PLACEHOLDER_PX, label: "sdt" };
 }
 
 /** A rendered TOC is plain paragraphs (TOC1-9 styles, tab + page number) —

@@ -130,6 +130,19 @@ const SECTION_EDITABLE: SectionEditable = {
       expect(toc.entries[0].paragraph).toBe("entry");
     },
   },
+  sdt: {
+    node: "sdtBlock",
+    probe: (compiled) => {
+      const sdt = (
+        compiled[0] as {
+          sdt: { properties: { tag?: string }; children: unknown[] };
+        }
+      ).sdt;
+      expect(sdt.properties.tag).toBe("other");
+      // The content paragraph collapses to the string shorthand.
+      expect(sdt.children[0]).toEqual({ paragraph: "x" });
+    },
+  },
 };
 
 describe("SectionChild dispositions", () => {
@@ -365,6 +378,15 @@ const INLINE_EDITABLE: InlineEditable = {
       expect(group.children?.[0]?.type).toBe("wps");
       // the member body collapses back to the string shorthand.
       expect(group.children?.[0]?.data?.children?.[0]).toBe("member");
+    },
+  },
+  sdt: {
+    marker: "sdtInline",
+    probe: (out) => {
+      const sdt = (out as { sdt: { properties: { alias?: string }; children?: unknown[] } }).sdt;
+      expect(sdt.properties.alias).toBe("inline-sdt");
+      // The bare-string child resolves to a text node and compiles back a run.
+      expect(sdt.children?.[0]).toEqual({ text: "body" });
     },
   },
 };

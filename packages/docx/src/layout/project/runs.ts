@@ -293,6 +293,14 @@ export function projectRuns(
         continue;
       }
       if (!isRecord(child)) continue;
+      // A content control is transparent in the run walk: its children project
+      // as plain runs under the same preset (the control's properties are
+      // metadata, not run formatting — Word's default view shows the content
+      // bare).
+      if (isRecord(child.sdt) && Array.isArray(child.sdt.children)) {
+        pushRuns(child.sdt.children as readonly unknown[], preset);
+        continue;
+      }
       // Comment range markers are zero-width: a start opens tinting for every
       // text atom after it, an end closes it. The set lives across paragraphs
       // (the caller's walk), matching Word's range semantics.

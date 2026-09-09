@@ -23,6 +23,8 @@ import type {
   TableOfContentsOptions,
   RubyPropertiesOptions,
   GroupChildMediaData,
+  SdtBlockOptions,
+  SdtRunOptions,
 } from "@office-open/docx";
 import { flattenExtensions, getExtensionField, getSchema } from "@tiptap/core";
 
@@ -566,6 +568,31 @@ export class DocxManager {
         }
         return { toc: { ...options, entries } };
       }
+      case "sdtBlock": {
+        // Content-control container (reverse of the sdt block rule): children
+        // walk the shared SectionChild dispatch; the control settings ride
+        // attrs verbatim.
+        const sdtChildren: SectionChild[] = [];
+        for (const child of node.content ?? []) {
+          const compiled = this.compileSectionChild(child);
+          if (!compiled) continue;
+          pushAll(sdtChildren, compiled);
+        }
+        const attrs = (node.attrs ?? {}) as {
+          properties?: SdtBlockOptions["properties"];
+          endProperties?: SdtBlockOptions["endProperties"];
+        };
+        return {
+          sdt: {
+            properties: attrs.properties ?? ({} as SdtBlockOptions["properties"]),
+            // SdtBlockOptions.children is typed narrower (BlockContentChild[])
+            // than what CT_SdtContent actually allows; the stringify runtime
+            // dispatches the full SectionChild set (ctx.stringifyChild).
+            children: sdtChildren as NonNullable<SdtBlockOptions["children"]>,
+            ...(attrs.endProperties ? { endProperties: attrs.endProperties } : {}),
+          },
+        };
+      }
       case "passthrough": {
         // Opaque SectionChild (rawXml/bookmark/toc/textbox/…) round-tripped verbatim.
         const data = (node.attrs?.data as string) ?? "{}";
@@ -830,6 +857,23 @@ export class DocxManager {
           } catch {
             /* malformed JSON — drop */
           }
+          break;
+        }
+        case "sdtInline": {
+          // Content-control container (reverse of the sdt inline rule); the
+          // control settings ride attrs verbatim.
+          const attrs = (node.attrs ?? {}) as {
+            properties?: SdtRunOptions["properties"];
+            endProperties?: SdtRunOptions["endProperties"];
+          };
+          const inline = this.compileInlineContent(node.content);
+          children.push({
+            sdt: {
+              properties: attrs.properties ?? ({} as SdtRunOptions["properties"]),
+              ...(inline.length > 0 ? { children: inline } : {}),
+              ...(attrs.endProperties ? { endProperties: attrs.endProperties } : {}),
+            },
+          });
           break;
         }
         case "image": {
