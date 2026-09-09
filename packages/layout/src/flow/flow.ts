@@ -22,9 +22,10 @@ import { fitExtentPx } from "../block/geometry";
 import {
   type LayoutBlock,
   type LayoutBlockContext,
+  type LayoutDrawing,
   type LayoutFloatZone,
   type ProjectedColumns,
-  wrapEffectsOf,
+  wrapEffectOf,
   type WrapPageGeometry,
 } from "../layout-doc";
 import type {
@@ -328,13 +329,15 @@ class Flow {
    *  boundary (Word anchors the box to the page its paragraph lands on). */
   private readonly bands: LayoutFloatZone[] = [];
   /** Every float effect derived on the page being filled, tagged with the
-   *  column it was derived in (floats are box-local) and the laid block that
-   *  owns it — the page replay replaces a re-committed anchor's entries. */
+   *  column it was derived in (floats are box-local) and the drawing that
+   *  owns it — the projection's drawing objects are shared references, so a
+   *  replayed anchor paragraph re-committing finds its entries by them and
+   *  the first resolution stands. */
   private readonly pageEffects: {
     colIndex: number;
     zone: LayoutFloatZone;
     band: boolean;
-    src: LaidOutBlock;
+    src: LayoutDrawing;
   }[] = [];
   /** What flowed into the page being filled, in order — raw blocks re-wrap
    *  on replay; pre-laid ops (keepNext pulls, split tails that opened this
@@ -827,30 +830,38 @@ class Flow {
    *  The zone's X space is the anchor paragraph's own column (multi-column
    *  flows register per column); a box hanging into a margin clips there.
    *
-   *  A zone reaching above its anchor paragraph points at lines already laid
-   *  (a negative paragraph offset — the drawing hangs over earlier text), so
+   *  A float resolves once per page: the anchor paragraph's first commit
+   *  registers the effect and pins the drawing to its resolved box. A zone
+   *  reaching above its anchor paragraph points at lines already laid (a
+   *  negative paragraph offset — the drawing hangs over earlier text), so
    *  the page replays once with the registry seeded: earlier paragraphs then
    *  wrap beside it too. Word's forward-only anchoring cannot express this;
    *  the two-pass resolution follows W3C CSS Exclusions' processing model —
    *  resolve exclusion positions first, lay out against the complete
-   *  context, never re-resolve. */
+   *  context, never re-resolve. The replay moves the anchor (wrapped lines
+   *  stack taller), but the pin holds paint on the box the text wrapped
+   *  around — the re-committed drawings are the projection's shared objects
+   *  and their entries are already registered, so neither moves. */
   private registerFloats(laid: Extract<LaidOutBlock, { kind: "paragraph" }>, yPx: number): void {
-    const { zones, bands } = wrapEffectsOf(
-      laid.drawings,
-      yPx,
-      this.col.widthPx,
-      false,
-      this.wrapPage,
-    );
+    const zones: LayoutFloatZone[] = [];
+    const bands: LayoutFloatZone[] = [];
+    for (const d of laid.drawings ?? []) {
+      const e = wrapEffectOf(d, yPx, this.col.widthPx, false, this.wrapPage);
+      if (!e) continue;
+      // First commit on this page owns the resolution — a replayed anchor
+      // re-committing here must not stack a second box beside the seeded one
+      // or drag its pin off the wrapped box.
+      if (this.pageEffects.some((ep) => ep.src === d)) continue;
+      d.pinned = e.pin;
+      if (e.zone) {
+        zones.push(e.zone);
+        this.pageEffects.push({ colIndex: this.colIndex, zone: e.zone, band: false, src: d });
+      } else if (e.band) {
+        bands.push(e.band);
+        this.pageEffects.push({ colIndex: this.colIndex, zone: e.band, band: true, src: d });
+      }
+    }
     if (zones.length === 0 && bands.length === 0) return;
-    // The anchor owns its entries: a replay re-commits it at a possibly moved
-    // y — replace rather than stack a second box beside the seeded one.
-    for (let i = this.pageEffects.length - 1; i >= 0; i--)
-      if (this.pageEffects[i]!.src === laid) this.pageEffects.splice(i, 1);
-    for (const zone of zones)
-      this.pageEffects.push({ colIndex: this.colIndex, zone, band: false, src: laid });
-    for (const zone of bands)
-      this.pageEffects.push({ colIndex: this.colIndex, zone, band: true, src: laid });
     this.syncColumnEffects();
     if (this.locked || this.opts.unbounded) return;
     if (!this.retroactive(zones, bands, yPx)) return;

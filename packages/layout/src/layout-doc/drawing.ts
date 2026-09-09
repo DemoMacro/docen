@@ -221,6 +221,12 @@ export interface LayoutDrawing {
    *  mirrored group; the box itself stays put, like rotation. */
   flipH?: boolean;
   flipV?: boolean;
+  /** The box the flow pinned at the drawing's first resolution — page-space
+   *  px. The two-pass wrap resolves a float's position once (W3C CSS
+   *  Exclusions): when the page replay moves the anchor paragraph, the box
+   *  the text wrapped around stays put and the painter paints there instead
+   *  of re-resolving the anchor axes. Absent = resolve at paint time. */
+  pinned?: { x: number; y: number };
 }
 
 /** One anchor axis's position against its reference box — the shared
@@ -326,6 +332,68 @@ export function drawingWrapBox(
   };
 }
 
+/** One drawing's wrap effect in the caller's spaces (`baseY` = the anchor
+ *  paragraph's top; 0 for paragraph-relative zones) plus its resolved box —
+ *  the shared resolution behind the flow's zone registry and the painter's
+ *  placement. Every anchor basis resolves when `page` carries the geometry
+ *  (the painter's own reference boxes, translated); without it only the
+ *  in-flow paragraph/column pair does. `pin` is the drawing's own box
+ *  converted to page space (absent without `page`); `zone`/`band` exist only
+ *  for wrapping drawings whose box meets the column. */
+export function wrapEffectOf(
+  d: LayoutDrawing,
+  baseY: number,
+  columnWidth: number,
+  inCell: boolean,
+  page?: WrapPageGeometry,
+): { pin?: { x: number; y: number }; zone?: LayoutFloatZone; band?: LayoutFloatZone } | undefined {
+  const { horizontal: h, vertical: v } = d.anchor;
+  // Each axis's reference box in the caller's spaces — the painter's
+  // drawingBoxOf computes the same bases page-absolute; these stay in the
+  // flow's body-origin Y and the column's X so zones compare against lines
+  // directly. A missing `page` leaves only the in-flow pair.
+  const vRef =
+    v.relative === "paragraph"
+      ? { base: baseY, extent: 0 }
+      : page
+        ? v.relative === "page"
+          ? { base: page.flowZeroPx - page.contentTopPx, extent: page.pageHeightPx }
+          : v.relative === "bottomMargin"
+            ? { base: page.flowZeroPx + page.contentHeightPx, extent: 0 }
+            : { base: page.flowZeroPx, extent: page.contentHeightPx }
+        : null;
+  if (!vRef) return undefined;
+  const hRef =
+    h.relative === "column"
+      ? { base: 0, extent: columnWidth }
+      : page
+        ? h.relative === "page"
+          ? { base: -page.contentLeftPx - page.columnLeftPx, extent: page.pageWidthPx }
+          : h.relative === "rightMargin"
+            ? { base: page.contentWidthPx - page.columnLeftPx, extent: 0 }
+            : { base: -page.columnLeftPx, extent: 0 }
+        : null;
+  if (!hRef) return undefined;
+  const leftPx = anchorAxisPos(h, hRef.base, hRef.extent, d.width);
+  const topPx = anchorAxisPos(v, vRef.base, vRef.extent, d.height);
+  const pin = page
+    ? { x: page.contentLeftPx + page.columnLeftPx + leftPx, y: page.contentTopPx + topPx }
+    : undefined;
+  if (!d.wrap) return { pin };
+  const box = drawingWrapBox(d, topPx, columnWidth, inCell, leftPx);
+  if (!box) return { pin };
+  const zone: LayoutFloatZone = {
+    widthPx: box.widthPx,
+    topPx: box.topPx,
+    bottomPx: box.bottomPx,
+    x0Px: box.x0Px,
+    ...(box.textAfter ? { textAfter: true } : {}),
+    ...(box.contour ? { contour: box.contour } : {}),
+  };
+  if (d.wrap === "topAndBottom" || box.widthPx >= columnWidth - 1) return { pin, band: zone };
+  return { pin, zone };
+}
+
 /** A paragraph's wrapping drawings as flow effects in the caller's Y space
  *  (`baseY` = the anchor paragraph's top; 0 for paragraph-relative zones).
  *  Zones shrink the lines they overlap; bands (topAndBottom, or a square box
@@ -344,52 +412,10 @@ export function wrapEffectsOf(
   const zones: LayoutFloatZone[] = [];
   const bands: LayoutFloatZone[] = [];
   for (const d of drawings ?? []) {
-    if (!d.wrap) continue;
-    const { horizontal: h, vertical: v } = d.anchor;
-    // Each axis's reference box in the caller's spaces — the painter's
-    // drawingBoxOf computes the same bases page-absolute; these stay in the
-    // flow's body-origin Y and the column's X so zones compare against lines
-    // directly. A missing `page` leaves only the in-flow pair.
-    const vRef =
-      v.relative === "paragraph"
-        ? { base: baseY, extent: 0 }
-        : page
-          ? v.relative === "page"
-            ? { base: page.flowZeroPx - page.contentTopPx, extent: page.pageHeightPx }
-            : v.relative === "bottomMargin"
-              ? { base: page.flowZeroPx + page.contentHeightPx, extent: 0 }
-              : { base: page.flowZeroPx, extent: page.contentHeightPx }
-          : null;
-    if (!vRef) continue;
-    const hRef =
-      h.relative === "column"
-        ? { base: 0, extent: columnWidth }
-        : page
-          ? h.relative === "page"
-            ? { base: -page.contentLeftPx - page.columnLeftPx, extent: page.pageWidthPx }
-            : h.relative === "rightMargin"
-              ? { base: page.contentWidthPx - page.columnLeftPx, extent: 0 }
-              : { base: -page.columnLeftPx, extent: 0 }
-          : null;
-    if (!hRef) continue;
-    const box = drawingWrapBox(
-      d,
-      anchorAxisPos(v, vRef.base, vRef.extent, d.height),
-      columnWidth,
-      inCell,
-      anchorAxisPos(h, hRef.base, hRef.extent, d.width),
-    );
-    if (!box) continue;
-    const zone: LayoutFloatZone = {
-      widthPx: box.widthPx,
-      topPx: box.topPx,
-      bottomPx: box.bottomPx,
-      x0Px: box.x0Px,
-      ...(box.textAfter ? { textAfter: true } : {}),
-      ...(box.contour ? { contour: box.contour } : {}),
-    };
-    if (d.wrap === "topAndBottom" || box.widthPx >= columnWidth - 1) bands.push(zone);
-    else zones.push(zone);
+    const e = wrapEffectOf(d, baseY, columnWidth, inCell, page);
+    if (!e) continue;
+    if (e.zone) zones.push(e.zone);
+    else if (e.band) bands.push(e.band);
   }
   return { zones, bands };
 }

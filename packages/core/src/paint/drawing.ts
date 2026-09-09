@@ -23,6 +23,10 @@ function drawingBoxOf(
   col?: PaintColumn,
 ): { x: number; y: number } {
   const { flow } = ctx;
+  // The flow pinned this box at the drawing's first resolution (the two-pass
+  // wrap): the page replay can move the anchor paragraph, but the box the
+  // text wrapped around stays put — paint there, not at the moved anchor.
+  if (drawing.pinned) return { ...drawing.pinned };
   // The reference box each axis resolves against: the content box (column /
   // topMargin), the page box, an edge (leftMargin/rightMargin/bottomMargin),
   // or — vertically — the anchor paragraph's own top (extent 0: offsets and

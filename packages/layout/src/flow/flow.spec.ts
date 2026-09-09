@@ -1331,4 +1331,34 @@ describe("layoutFlow float wraps — retroactive replay", () => {
     expect(page2[0]!.lines.map((l) => l.maxWidthPx)).toEqual([300, 300]); // above the reach
     expect(page2[1]!.lines.map((l) => l.maxWidthPx)).toEqual([100, 100]); // wrapped on replay
   });
+
+  it("pins a replayed float's paint box to its first resolution, not the moved anchor", () => {
+    // The zone [0, 40) opens over both of the body paragraph's lines; the
+    // replay wraps them beside the box (12 atoms a line) and the anchor lands
+    // at y 140 — 100px below where it resolved. Paint must not follow: the
+    // box the text wrapped around IS the first-resolution box, so the flow
+    // pins the drawing to it (page space: 50 + 0, 60 + 0) and the painter
+    // skips anchor resolution when a pin is present.
+    const d = drawing(0, -40, 200, 40, "square");
+    const pages = layoutFlow(
+      [wrapPara(74), para(1, { drawings: [d] })],
+      {
+        contentWidthPx: 300,
+        contentHeightPx: 480,
+        pageWidthPx: 400,
+        pageHeightPx: 600,
+        contentLeftPx: 50,
+        contentTopPx: 60,
+      },
+      measurer,
+    );
+    expect(pages).toHaveLength(1);
+    const [body, anchor] = paras(pages)[0];
+    // Lines inside the zone wrap beside the box; the overflow lines below it
+    // pack full width again.
+    expect(body.lines.map((l) => l.maxWidthPx)).toEqual([100, 100, 300, 300]);
+    expect(anchor.lines).toHaveLength(1);
+    expect(pages[0]!.items[1]!.yPx).toBe(80); // the anchor really did move
+    expect(d.pinned).toEqual({ x: 50, y: 60 });
+  });
 });
