@@ -147,6 +147,26 @@ function extractCoreProperties(docOpts: DocumentOptions): DocxCoreProperties | n
 }
 
 /**
+ * Whether a rawPart's data still has a legal DataType shape. Persistence that
+ * serializes the JSON (autosave, v-model) destroys non-JSON values — a
+ * Uint8Array comes back as a `{"0": …}` plain object — and such corrupted
+ * bytes must not reach office-open's media reader on the next save. Binaries
+ * held in memory (Uint8Array/ArrayBuffer/DataView, plus Blob/ReadableStream)
+ * and JSON-native strings/number arrays pass.
+ */
+function isLegalDataType(value: unknown): boolean {
+  if (typeof value === "string") return true;
+  if (Array.isArray(value)) return value.every((n) => typeof n === "number");
+  return (
+    value instanceof Uint8Array ||
+    value instanceof ArrayBuffer ||
+    ArrayBuffer.isView(value) ||
+    value instanceof Blob ||
+    value instanceof ReadableStream
+  );
+}
+
+/**
  * Header/footer slot shapes for the two sides of the round-trip:
  * - {@link SectionHeaderFooterGroup} — persistence side (SectionChild[] per
  *   slot); matches SectionOptions.headers/footers.
@@ -313,15 +333,14 @@ export class DocxManager {
     const bibliography = (docAttrs.bibliography ?? undefined) as
       | DocumentOptions["bibliography"]
       | undefined;
-    // Merge source numbering definitions (custom bullet/number markers) with
-    // any regenerated ordered-list definitions; drop originals shadowed by a
-    // regenerated reference to avoid duplicates.
-    const origNumberingConfig =
-      (
-        docAttrs.numbering as
-          | { abstractNumberings?: { reference: string; levels: LevelsOptions[] }[] }
-          | undefined
-      )?.abstractNumberings ?? [];
+    // Source numbering carries verbatim from resolve: the pic-bullet
+    // definitions, the cleanup id, and the abstract definitions themselves
+    // (instances, overrides, aliases). Only abstractNumberings is rebuilt
+    // below — the merge of source definitions with regenerated ordered-list
+    // definitions; drop originals shadowed by a regenerated reference to
+    // avoid duplicates.
+    const sourceNumbering = (docAttrs.numbering ?? undefined) as DocumentOptions["numbering"];
+    const origNumberingConfig = sourceNumbering?.abstractNumberings ?? [];
     // Register a generated reference's definition unless the source numbering
     // already carries one (an editor-created list re-toggling a round-tripped
     // reference must not shadow the original marker definition).
@@ -334,14 +353,35 @@ export class DocxManager {
     // Direct concatenation: the loop above skips every reference the source
     // numbering already carries, so the two lists never intersect.
     const numberingConfig = [...origNumberingConfig, ...this.numberingConfigs];
+    // rawParts entries whose bytes a JSON round-trip already corrupted (see
+    // isLegalDataType) drop on a copy — the theme part regenerates from
+    // scratch without its rawPart — and the input attrs stay untouched
+    // (compile never mutates its input).
+    let extras = documentExtras;
+    const sourceParts = extras?.rawParts;
+    if (
+      extras &&
+      Array.isArray(sourceParts) &&
+      sourceParts.some((part) => !isLegalDataType(part?.data))
+    ) {
+      const legal = sourceParts.filter((part) => isLegalDataType(part?.data));
+      const { rawParts: _dropped, ...rest } = extras;
+      extras = legal.length > 0 ? { ...rest, rawParts: legal } : rest;
+    }
+    let numbering: DocumentOptions["numbering"];
+    if (numberingConfig.length > 0) {
+      numbering = { ...sourceNumbering, abstractNumberings: numberingConfig };
+    } else if (sourceNumbering) {
+      numbering = sourceNumbering;
+    }
     return {
       sections,
       ...(styles ? { styles } : {}),
       ...core,
       ...(background ? { background } : {}),
       ...(bibliography ? { bibliography } : {}),
-      ...documentExtras,
-      ...(numberingConfig.length > 0 ? { numbering: { abstractNumberings: numberingConfig } } : {}),
+      ...extras,
+      ...(numbering ? { numbering } : {}),
     };
   }
 
