@@ -53,7 +53,7 @@ export const SECTION_CHILD_DISPOSITIONS = {
   paragraph: { editable: "Paragraph/Heading nodes" },
   table: { editable: "Table.parseDocxBlock" },
   toc: { editable: "tocField node (entries editable, field switches opaque)" },
-  textbox: { passthrough: "block Passthrough atom" },
+  textbox: { editable: "textbox node (content editable, VML style verbatim)" },
   sdt: { editable: "sdtBlock node (content editable, control settings verbatim)" },
   altChunk: { passthrough: "block Passthrough atom" },
   customXml: { passthrough: "block Passthrough atom" },

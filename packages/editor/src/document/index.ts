@@ -3147,22 +3147,22 @@ class DocenDocument extends AddinHost<Editor> {
   /** Word Count (Review tab) — compute the document statistics twice (Word's
    *  dialog shape): the body alone, and with textboxes + footnotes/endnotes
    *  folded back in — the dialog's "include" toggle (default ON) switches
-   *  between the two readouts. Textboxes are wpsShape subtrees in the body;
-   *  the notes live in the documentExtras channels. */
+   *  between the two readouts. Textboxes are wpsShape subtrees and textbox
+   *  nodes in the body; the notes live in the documentExtras channels. */
   #showWordCount(): void {
     const editor = this.editor;
     const dialog = this.shadowRoot?.querySelector("docen-word-count-dialog") as
       | (HTMLElement & { stats?: string; statsExtra?: string; show(): void })
       | undefined;
     if (!editor || !dialog) return;
-    // Walk the doc once: paragraphs/text under a wpsShape subtree are the
-    // textbox bucket, everything else the body bucket.
+    // Walk the doc once: paragraphs/text under a wpsShape subtree or inside a
+    // textbox node are the textbox bucket, everything else the body bucket.
     let bodyText = "";
     let bodyParas = 0;
     let shapeText = "";
     let shapeParas = 0;
     const walk = (node: PMNode, inShape: boolean): void => {
-      const shape = inShape || node.type.name === "wpsShape";
+      const shape = inShape || node.type.name === "wpsShape" || node.type.name === "textbox";
       if (node.type.name === "paragraph") {
         if (shape) {
           shapeParas++;

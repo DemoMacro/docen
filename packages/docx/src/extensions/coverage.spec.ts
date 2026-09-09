@@ -143,6 +143,20 @@ const SECTION_EDITABLE: SectionEditable = {
       expect(sdt.children[0]).toEqual({ paragraph: "x" });
     },
   },
+  textbox: {
+    node: "textbox",
+    probe: (compiled) => {
+      const box = (
+        compiled[0] as {
+          textbox: { text?: string; children: unknown[] };
+        }
+      ).textbox;
+      // The residual paragraph option rides the box verbatim; the content
+      // paragraph collapses to the string shorthand.
+      expect(box.text).toBe("box");
+      expect(box.children[0]).toEqual({ paragraph: "in-box" });
+    },
+  },
 };
 
 describe("SectionChild dispositions", () => {

@@ -46,18 +46,23 @@ export function projectChild(
   if ("table" in child) return projectTable(child.table, ctx);
   if ("toc" in child) return projectToc(child.toc, ctx);
   if ("sdt" in child) return projectSdt(child.sdt, ctx);
+  if ("textbox" in child) return projectTextbox(child.textbox, ctx);
   if ("bookmarkStart" in child || "bookmarkEnd" in child) return null;
-  // textbox, altChunk, customXml, rawXml → a labeled box.
+  // altChunk, customXml, rawXml → a labeled box.
   const label = Object.keys(child)[0];
   return { kind: "placeholder", heightPx: PLACEHOLDER_PX, label };
 }
 
-/** A content control is transparent in the flow: its children project as
- *  plain blocks (Word's default view shows the content bare, no chrome). No
- *  or empty children → placeholder — an empty control still reserves its
- *  line, like Word's empty w:sdtContent. */
-function projectSdt(sdt: unknown, ctx: ProjectContext): LayoutBlock | LayoutBlock[] | null {
-  const children = isRecord(sdt) && Array.isArray(sdt.children) ? sdt.children : [];
+/** Children of a transparent container → plain blocks (recursed through the
+ *  child dispatch), or a labeled placeholder when nothing projects — the
+ *  container still reserves its line. */
+function projectChildStream(
+  container: unknown,
+  label: string,
+  ctx: ProjectContext,
+): LayoutBlock | LayoutBlock[] | null {
+  const children =
+    isRecord(container) && Array.isArray(container.children) ? container.children : [];
   const blocks: LayoutBlock[] = [];
   for (const entry of children) {
     if (!isRecord(entry)) continue;
@@ -66,9 +71,20 @@ function projectSdt(sdt: unknown, ctx: ProjectContext): LayoutBlock | LayoutBloc
     if (Array.isArray(projected)) blocks.push(...projected);
     else blocks.push(projected);
   }
-  return blocks.length > 0
-    ? blocks
-    : { kind: "placeholder", heightPx: PLACEHOLDER_PX, label: "sdt" };
+  return blocks.length > 0 ? blocks : { kind: "placeholder", heightPx: PLACEHOLDER_PX, label };
+}
+
+/** A content control is transparent in the flow: its children project as
+ *  plain blocks (Word's default view shows the content bare, no chrome). */
+function projectSdt(sdt: unknown, ctx: ProjectContext): LayoutBlock | LayoutBlock[] | null {
+  return projectChildStream(sdt, "sdt", ctx);
+}
+
+/** A legacy VML text box is transparent in the flow too: its w:txbxContent
+ *  children project as plain blocks. Floating the box at its VML position is
+ *  a rendering concern for later — the text itself must not vanish. */
+function projectTextbox(box: unknown, ctx: ProjectContext): LayoutBlock | LayoutBlock[] | null {
+  return projectChildStream(box, "textbox", ctx);
 }
 
 /** A rendered TOC is plain paragraphs (TOC1-9 styles, tab + page number) —

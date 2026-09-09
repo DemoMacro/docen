@@ -2,14 +2,13 @@ import { Node } from "../core";
 
 /**
  * Passthrough — block atom carrying an opaque {@link SectionChild} that has
- * no native Tiptap representation (rawXml, bookmarkStart/End, textbox,
- * altChunk, subDoc, customXml).
+ * no native Tiptap representation (rawXml, bookmarkStart/End, altChunk,
+ * subDoc, customXml).
  *
  * The full SectionChild is stored as JSON in `attrs.data` so the DOCX→JSON→DOCX
  * round-trip stays byte-faithful: office-open's stringify handles the inner
- * structure verbatim (including a textbox's nested children, which remain as
- * structured ParagraphOptions inside the blob rather than editable Tiptap
- * nodes). The node is not editable; the canvas paints its placeholder.
+ * structure verbatim. The node is not editable; the canvas paints its
+ * placeholder.
  *
  * DOCX serialization is inlined in DocxManager (compile/resolve read/write
  * `attrs.data` directly), so no renderDocx/parseDocx is needed here.

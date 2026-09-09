@@ -593,8 +593,22 @@ export class DocxManager {
           },
         };
       }
+      case "textbox": {
+        // VML text box (reverse of the textbox block rule): the box data rides
+        // attrs verbatim; children walk the shared SectionChild dispatch. The
+        // branch type is an inline intersection in SectionChild — extract it.
+        type TextboxBranch = Extract<SectionChild, { textbox: unknown }>;
+        const box = (node.attrs?.textbox ?? {}) as Omit<TextboxBranch["textbox"], "children">;
+        const boxChildren: SectionChild[] = [];
+        for (const child of node.content ?? []) {
+          const compiled = this.compileSectionChild(child);
+          if (!compiled) continue;
+          pushAll(boxChildren, compiled);
+        }
+        return { textbox: { ...box, children: boxChildren } };
+      }
       case "passthrough": {
-        // Opaque SectionChild (rawXml/bookmark/toc/textbox/…) round-tripped verbatim.
+        // Opaque SectionChild (rawXml/bookmark/toc/altChunk/…) round-tripped verbatim.
         const data = (node.attrs?.data as string) ?? "{}";
         try {
           return JSON.parse(data) as SectionChild;
@@ -1098,7 +1112,7 @@ export class DocxManager {
       return this.resolveParagraph(child.paragraph);
     }
     // rawXml (incl. aggregated TOC field), generic SDT, bookmarkStart/End,
-    // textbox, altChunk, subDoc, customXml — no native Tiptap node. Carry the
+    // altChunk, subDoc, customXml — no native Tiptap node. Carry the
     // SectionChild verbatim so the round-trip is byte-faithful.
     return this.resolvePassthrough(child);
   }

@@ -17,6 +17,7 @@ import { Table } from "./table";
 import { TableCell } from "./table-cell";
 import { TableRow } from "./table-row";
 import { TextStyle } from "./text-style";
+import { Textbox } from "./textbox";
 import { TocField } from "./toc-field";
 import { Insertion, Deletion } from "./track-change";
 import { WpgGroup } from "./wpg-group";
@@ -54,6 +55,7 @@ export const tiptapNodeExtensions: AnyExtension[] = [
   TocField,
   SdtBlock,
   SdtInline,
+  Textbox,
   Image,
   WpgGroup,
   WpsShape,
@@ -122,4 +124,5 @@ export { WpsShape } from "./wps-shape";
 export { Passthrough, InlinePassthrough } from "./passthrough";
 export { TocField } from "./toc-field";
 export { SdtBlock, SdtInline } from "./sdt";
+export { Textbox } from "./textbox";
 export { Tab } from "./tab";
