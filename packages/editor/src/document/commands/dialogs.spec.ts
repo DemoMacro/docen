@@ -1,8 +1,14 @@
-import { Document, InlinePassthrough, Paragraph } from "@docen/docx";
+import { Document, InlinePassthrough, Paragraph, type JSONContent } from "@docen/docx";
 import { Editor, Node as TextNode, type Editor as EditorType } from "@docen/docx/core";
 import { describe, expect, it } from "vitest";
 
 import { DialogCommands, type DialogsHost } from "./dialogs";
+
+const fieldAtom = (branch: object): JSONContent =>
+  ({
+    type: "inlinePassthrough",
+    attrs: { data: JSON.stringify(branch) },
+  }) as JSONContent;
 
 // Tiptap's schema needs the plain text node; the engine builds the same shape
 // internally (tiptapNodeExtensions) but does not export it standalone.
@@ -121,5 +127,103 @@ describe("DialogCommands note commits", () => {
       editor.state.doc.attrs.documentExtras as { footnotes: Array<Record<string, unknown>> }
     ).footnotes;
     expect(notes.map((n) => n.id)).toEqual([1]);
+  });
+});
+
+// Field tests: layout 1 "ab" | 3 NUMCHARS atom | 4 "c".
+const buildField = (): EditorType =>
+  new Editor({
+    element: null,
+    extensions: [Document, Paragraph, Text, InlinePassthrough],
+    content: {
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [
+            { type: "text", text: "ab" },
+            fieldAtom({ simpleField: { instruction: "NUMCHARS", cachedValue: "9" } }),
+            { type: "text", text: "c" },
+          ],
+        },
+      ],
+    },
+  });
+
+describe("DialogCommands field targets", () => {
+  it("resolves the field atom from both sides of the caret", () => {
+    const editor = buildField();
+    const dialogs = new DialogCommands(host(editor));
+    editor.commands.setTextSelection(4); // right after the atom
+    const hit = dialogs.fieldTarget();
+    expect(hit?.pos).toBe(3);
+    expect(hit?.ref).toEqual({
+      kind: "simpleField",
+      instruction: "NUMCHARS",
+      result: "9",
+    });
+    editor.commands.setTextSelection(3); // right at the atom
+    expect(dialogs.fieldTarget()?.pos).toBe(3);
+    editor.commands.setTextSelection(2); // plain text — nothing
+    expect(dialogs.fieldTarget()).toBeNull();
+  });
+});
+
+describe("DialogCommands field commits", () => {
+  it("update re-derives the cached value from the live text", () => {
+    const editor = buildField();
+    const dialogs = new DialogCommands(host(editor));
+    editor.commands.setTextSelection(4);
+    dialogs.fieldUpdateAtSelection();
+    const node = editor.state.doc.nodeAt(3);
+    expect(JSON.parse(String(node?.attrs.data))).toEqual({
+      simpleField: { instruction: "NUMCHARS", cachedValue: "3" },
+    });
+  });
+
+  it("dialog OK on a fresh dialog seeds an evaluated field at the caret", () => {
+    const editor = buildField();
+    const dialogs = new DialogCommands(host(editor));
+    editor.commands.setTextSelection(2);
+    dialogs.fieldInsert(); // clears the (unset) edit target — insert mode
+    dialogs.onFieldOk({ detail: { instruction: 'DATE \\@ "yyyy"' } } as unknown as Event);
+    const seeded = JSON.parse(String(editor.state.doc.nodeAt(2)?.attrs.data));
+    expect(seeded.simpleField.instruction).toBe('DATE \\@ "yyyy"');
+    expect(seeded.simpleField.cachedValue).toBe("2026");
+  });
+
+  it("dialog OK after edit rewrites the atom's instruction in place", () => {
+    const editor = buildField();
+    const dialogs = new DialogCommands(host(editor));
+    editor.commands.setTextSelection(4);
+    dialogs.fieldEditAtSelection();
+    dialogs.onFieldOk({ detail: { instruction: 'DATE \\@ "yy"' } } as unknown as Event);
+    const node = editor.state.doc.nodeAt(3);
+    expect(JSON.parse(String(node?.attrs.data))).toEqual({
+      simpleField: { instruction: 'DATE \\@ "yy"', cachedValue: "26" },
+    });
+  });
+
+  it("checkbox toggle flips checked and keeps the rest of the branch", () => {
+    const editor = new Editor({
+      element: null,
+      extensions: [Document, Paragraph, Text, InlinePassthrough],
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [fieldAtom({ formField: { checkBox: { checked: false, size: 20 } } })],
+          },
+        ],
+      },
+    });
+    const dialogs = new DialogCommands(host(editor));
+    editor.commands.setTextSelection(1);
+    expect(dialogs.fieldTarget()?.ref.kind).toBe("formField");
+    dialogs.fieldToggleCheckboxAtSelection();
+    expect(JSON.parse(String(editor.state.doc.nodeAt(1)?.attrs.data))).toEqual({
+      formField: { checkBox: { checked: true, size: 20 } },
+    });
   });
 });

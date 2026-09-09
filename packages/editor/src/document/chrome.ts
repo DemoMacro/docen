@@ -241,6 +241,7 @@ export const documentTemplate = html`
   <docen-define-list-dialog part="define-list"></docen-define-list-dialog>
   <docen-caption-dialog part="caption"></docen-caption-dialog>
   <docen-note-dialog part="note"></docen-note-dialog>
+  <docen-field-dialog part="field"></docen-field-dialog>
   <docen-cross-reference-dialog part="cross-reference"></docen-cross-reference-dialog>
   <docen-sources-dialog part="sources"></docen-sources-dialog>
   <docen-recipients-dialog part="recipients"></docen-recipients-dialog>

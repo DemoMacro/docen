@@ -6,6 +6,7 @@ import { TextSelection } from "@tiptap/pm/state";
 import { DocAttrStep } from "@tiptap/pm/transform";
 
 import type { FontDialogPatch } from "../../ui/components/workspace/font-dialog";
+import { textCounter, wordCounter } from "../addin";
 import type {
   DrawingPropertiesPatch,
   ParagraphDialogPatch,
@@ -13,6 +14,7 @@ import type {
 } from "../extensions/commands";
 import { collectListReferences } from "../extensions/commands";
 import { noteRefId } from "../extensions/notes";
+import { evaluateField, fieldRef, type FieldContext, type FieldRef } from "../fields";
 
 /** One footnote/endnote body entry in documentExtras (`{ id, children }` with
  *  office-open's nested `paragraph`/run shapes — edited only as opaque text
@@ -54,8 +56,9 @@ export interface DialogsHost {
  * The Home/References dialog commits, split out of the host element: the
  * paragraph/font/table-properties patches, the proofing language, the Chinese
  * layout pair (phonetic guide, two lines in one), the multilevel list
- * definition, and the caption/cross-reference/bookmark field seeds — see the
- * matching *-dialog.ts components for the UI side.
+ * definition, the caption/cross-reference/bookmark field seeds, and the
+ * general field insert/update pair — see the matching *-dialog.ts components
+ * for the UI side.
  */
 export class DialogCommands {
   constructor(private readonly host: DialogsHost) {}
@@ -874,5 +877,164 @@ export class DialogCommands {
         .insert(editor.state.selection.from, ref)
         .setDocAttribute("documentExtras", documentExtras),
     );
+  }
+
+  // ── Fields (域) ──
+  // Fields ride the inlinePassthrough atom (attrs.data = the office-open
+  // simpleField/complexField/formField branch); the painter already renders
+  // them, so the editing surface here is insert (Field dialog), edit (the
+  // same dialog prefilled), update (re-derive the cache, Word's F9), and the
+  // form-field checkbox flip.
+
+  /** The field atom under the caret — the caret sits right after a
+   *  right-click collapse, so the atom starting at the caret and the one
+   *  ending just before it both count. */
+  fieldTarget(): { pos: number; branch: Record<string, unknown>; ref: FieldRef } | null {
+    const editor = this.#target();
+    if (!editor) return null;
+    const { from } = editor.state.selection;
+    for (const at of [from, from - 1]) {
+      if (at < 0) continue;
+      const node = editor.state.doc.nodeAt(at);
+      if (!node || node.type.name !== "inlinePassthrough") continue;
+      const data = node.attrs.data;
+      if (typeof data !== "string") continue;
+      try {
+        const branch = JSON.parse(data) as Record<string, unknown>;
+        const ref = fieldRef(branch);
+        if (ref) return { pos: at, branch, ref };
+      } catch {
+        /* malformed atom JSON — not a field */
+      }
+    }
+    return null;
+  }
+
+  /** Insert → Field: open the dialog empty. */
+  fieldInsert(): void {
+    this.#fieldTarget = null;
+    this.#fieldDialog()?.show();
+  }
+
+  /** Context menu → 编辑域: prefill the dialog with the field's instruction;
+   *  the commit rewrites it in place and re-derives the cached value. */
+  fieldEditAtSelection(): void {
+    const hit = this.fieldTarget();
+    if (!hit?.ref.instruction) return;
+    this.#fieldTarget = hit.pos;
+    this.#fieldDialog()?.show(hit.ref.instruction);
+  }
+
+  /** Context menu → 更新域 (Word's F9): re-derive the cached value from the
+   *  live document. Dynamic fields (PAGE/NUMPAGES — the painter resolves them
+   *  per page) and fields the engine can't evaluate keep their cache. */
+  fieldUpdateAtSelection(): void {
+    const editor = this.#target();
+    const hit = this.fieldTarget();
+    if (!editor || !hit) return;
+    const value = evaluateField(hit.ref.instruction ?? "", this.#fieldContext(editor));
+    if (value == null) return;
+    const patch = hit.ref.kind === "simpleField" ? { cachedValue: value } : { result: value };
+    const next = this.#patchField(hit.branch, hit.ref.kind, patch);
+    if (!next) return;
+    editor.view.dispatch(editor.state.tr.setNodeAttribute(hit.pos, "data", JSON.stringify(next)));
+  }
+
+  /** Context menu → checkbox toggle: flip the form field's checked flag (the
+   *  painter re-renders the box from it). */
+  fieldToggleCheckboxAtSelection(): void {
+    const editor = this.#target();
+    const hit = this.fieldTarget();
+    if (!editor || hit?.ref.kind !== "formField") return;
+    const form = hit.branch.formField as { checkBox?: Record<string, unknown> } | undefined;
+    if (!form?.checkBox) return;
+    const next = {
+      ...hit.branch,
+      formField: { ...form, checkBox: { ...form.checkBox, checked: !hit.ref.checked } },
+    };
+    editor.view.dispatch(editor.state.tr.setNodeAttribute(hit.pos, "data", JSON.stringify(next)));
+  }
+
+  readonly onFieldOk = (event: Event): void => {
+    const { instruction } = (event as CustomEvent<{ instruction?: string }>).detail ?? {};
+    const pos = this.#fieldTarget;
+    this.#fieldTarget = null;
+    const editor = this.#target();
+    if (!editor || !instruction) return;
+    if (pos != null) {
+      // Edit: rewrite the atom's instruction, carrying the rest of the branch
+      // through; the cache re-derives, keeping the old value for instructions
+      // the engine can't evaluate.
+      const node = editor.state.doc.nodeAt(pos);
+      const data = node?.attrs.data;
+      if (!node || node.type.name !== "inlinePassthrough" || typeof data !== "string") return;
+      try {
+        const branch = JSON.parse(data) as Record<string, unknown>;
+        const ref = fieldRef(branch);
+        if (!ref || ref.kind === "formField") return;
+        const value = evaluateField(instruction, this.#fieldContext(editor)) ?? ref.result ?? "";
+        const patch =
+          ref.kind === "simpleField"
+            ? { instruction, cachedValue: value }
+            : { instruction, result: value };
+        const next = this.#patchField(branch, ref.kind, patch);
+        if (next)
+          editor.view.dispatch(editor.state.tr.setNodeAttribute(pos, "data", JSON.stringify(next)));
+      } catch {
+        /* malformed atom JSON — nothing to rewrite */
+      }
+      return;
+    }
+    // Insert: a simple field at the caret. PAGE/NUMPAGES cache nothing (the
+    // painter resolves them per page); an unevaluable instruction caches an
+    // empty result, honestly blank until Word/our updater fills it.
+    const seed = editor.schema.nodeFromJSON({
+      type: "inlinePassthrough",
+      attrs: {
+        data: JSON.stringify({
+          simpleField: {
+            instruction,
+            cachedValue: evaluateField(instruction, this.#fieldContext(editor)) ?? "",
+          },
+        }),
+      },
+    } as JSONContent);
+    editor.view.dispatch(editor.state.tr.insert(editor.state.selection.from, seed));
+    this.host.bridge()?.focus();
+  };
+
+  /** The pending edit target between fieldEditAtSelection and the dialog's OK
+   *  (a modal dialog — one pending atom at a time; null = insert mode). */
+  #fieldTarget: number | null | undefined;
+
+  #fieldDialog(): { show(prefill?: string): void } | null | undefined {
+    return this.host.element().shadowRoot?.querySelector("docen-field-dialog") as
+      | { show(prefill?: string): void }
+      | null
+      | undefined;
+  }
+
+  /** Field evaluation context from the live document — the body text backs
+   *  NUMWORDS/NUMCHARS (the status bar's counters; notes stay out, Word's
+   *  default). Core properties have no home in the editor's JSON, so the
+   *  document-information fields keep their cached values on update. */
+  #fieldContext(editor: Editor): FieldContext {
+    const doc = editor.state.doc;
+    const text = doc.textBetween(0, doc.content.size, "\n", "");
+    return { now: new Date(), words: wordCounter(text), chars: textCounter(text) };
+  }
+
+  /** The branch with the field's flat shape patched (simpleField's
+   *  cachedValue / complexField's instruction+result); null for form fields,
+   *  which the dialog doesn't edit. */
+  #patchField(
+    branch: Record<string, unknown>,
+    kind: FieldRef["kind"],
+    patch: Record<string, unknown>,
+  ): Record<string, unknown> | null {
+    if (kind === "formField") return null;
+    const field = branch[kind];
+    if (!field || typeof field !== "object") return null;
+    return { ...branch, [kind]: { ...(field as Record<string, unknown>), ...patch } };
   }
 }

@@ -27,6 +27,7 @@ import checkmarkCircle from "@fluentui/svg-icons/icons/checkmark_circle_24_regul
 import chevronDown from "@fluentui/svg-icons/icons/chevron_down_24_regular.svg?raw";
 import clearFormatting from "@fluentui/svg-icons/icons/clear_formatting_24_regular.svg?raw";
 import clipboardPaste from "@fluentui/svg-icons/icons/clipboard_paste_24_regular.svg?raw";
+import code from "@fluentui/svg-icons/icons/code_24_regular.svg?raw";
 import color from "@fluentui/svg-icons/icons/color_24_regular.svg?raw";
 import colorBackground from "@fluentui/svg-icons/icons/color_background_24_regular.svg?raw";
 import colorFill from "@fluentui/svg-icons/icons/color_fill_24_regular.svg?raw";
@@ -253,6 +254,7 @@ const RIBBON_ICONS: Record<string, string> = {
   "page-number": numberSymbol,
   "text-box": textField,
   wordart: textEffects,
+  "insert-field": code,
   "text-effects": textEffects,
   equation: calculator,
   symbol: symbolOmega,

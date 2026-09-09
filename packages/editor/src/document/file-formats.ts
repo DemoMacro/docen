@@ -199,6 +199,13 @@ export const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   // math template (the gallery's fraction/script/radical/sum/integral) at
   // the caret.
   "insert-footnote",
+  // Field opens the field dialog (Insert → Text group; the commit arrives via
+  // field:ok). The context menu's Update/Edit Field act on the atom under the
+  // caret (update = Word's F9); the checkbox flip is the form-field variant.
+  "insert-field",
+  "update-field",
+  "edit-field",
+  "toggle-field-checkbox",
   "equation",
   // Page Color writes the doc-level w:background (doc.attrs.background) from
   // the color-picker's palette value. Page Borders stamps a w:pgBorders

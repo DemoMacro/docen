@@ -1126,6 +1126,7 @@ const insertTab = (): RibbonTab =>
     group("text", [
       btn("text-box", "text-box", { size: "large" }),
       btn("wordart", "wordart", { size: "large" }),
+      btn("insert-field", "insert-field", { size: "large" }),
       btn("date-time", "date-time", { size: "large" }),
       menu("object", "object", parsedItems(objectItems()), { size: "large" }),
     ]),

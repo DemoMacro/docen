@@ -1272,6 +1272,13 @@ class DocenDocument extends AddinHost<Editor> {
       "note:ok",
       this.#dialogs.onNoteOk as EventListener,
     );
+    // Field dialog — insert a field atom at the caret (or rewrite the
+    // referenced field's instruction + cache, when opened from the context
+    // menu).
+    this.shadowRoot!.querySelector("docen-field-dialog")?.addEventListener(
+      "field:ok",
+      this.#dialogs.onFieldOk as EventListener,
+    );
     // Cross-reference dialog — seed a cached REF/PAGEREF field at the caret.
     this.shadowRoot!.querySelector("docen-cross-reference-dialog")?.addEventListener(
       "cross-ref:ok",
@@ -2138,6 +2145,9 @@ class DocenDocument extends AddinHost<Editor> {
     this.shadowRoot
       ?.querySelector("docen-note-dialog")
       ?.removeEventListener("note:ok", this.#dialogs.onNoteOk as EventListener);
+    this.shadowRoot
+      ?.querySelector("docen-field-dialog")
+      ?.removeEventListener("field:ok", this.#dialogs.onFieldOk as EventListener);
     this.shadowRoot
       ?.querySelector("docen-cross-reference-dialog")
       ?.removeEventListener("cross-ref:ok", this.#dialogs.onCrossRefOk as EventListener);
@@ -3732,6 +3742,21 @@ class DocenDocument extends AddinHost<Editor> {
       items.push({ text: t(`context.delete-${noun}`, this), event: "delete-note" });
       items.push({ text: "-" });
     }
+    // A right-click on a field atom offers update (Word's F9) / edit; a form
+    // checkbox offers the flip instead (nothing to update).
+    const field = this.#dialogs.fieldTarget();
+    if (field) {
+      if (field.ref.kind === "formField") {
+        items.push({
+          text: t(field.ref.checked ? "context.uncheck" : "context.check", this),
+          event: "toggle-field-checkbox",
+        });
+      } else {
+        items.push({ text: t("context.update-field", this), event: "update-field" });
+        items.push({ text: t("context.edit-field", this), event: "edit-field" });
+      }
+      items.push({ text: "-" });
+    }
     items.push({ text: t("context.select-all", this), event: "select" });
     if (inTable) {
       items.push({ text: "-" });
@@ -4474,6 +4499,25 @@ class DocenDocument extends AddinHost<Editor> {
     }
     if (name === "delete-note") {
       this.#dialogs.noteDeleteAtSelection();
+      return;
+    }
+    // Field — open the Field dialog (Insert → Text → Explore Quick Parts →
+    // Field); the commit arrives via field:ok. The context-menu entries act
+    // on the field atom under the caret (update = Word's F9).
+    if (name === "insert-field") {
+      this.#dialogs.fieldInsert();
+      return;
+    }
+    if (name === "update-field") {
+      this.#dialogs.fieldUpdateAtSelection();
+      return;
+    }
+    if (name === "edit-field") {
+      this.#dialogs.fieldEditAtSelection();
+      return;
+    }
+    if (name === "toggle-field-checkbox") {
+      this.#dialogs.fieldToggleCheckboxAtSelection();
       return;
     }
     // Equation — insert one placeholder math template at the caret (Word's
