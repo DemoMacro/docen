@@ -1262,3 +1262,73 @@ describe("layoutFlow footnotes", () => {
     expect(pages[0].footnotes?.yPx).toBe(200 - 57);
   });
 });
+
+// A zone hanging ABOVE its anchor paragraph (negative offset) points at
+// lines the flow already laid — the page replays once with the float
+// registry seeded (W3C CSS Exclusions processing model: resolve exclusion
+// positions, lay out against the complete context, never re-resolve).
+describe("layoutFlow float wraps — retroactive replay", () => {
+  it("wraps lines laid BEFORE the anchor paragraph when its zone hangs above it", () => {
+    // The anchor's zone [20, 50) reaches up over the first paragraph's
+    // lower two lines — those pack beside it (100px usable), its first line
+    // and the paragraph after the anchor stay full width.
+    const pages = flow(
+      [para(3), para(1, { drawings: [drawing(0, -40, 200, 30, "square")] }), para(3)],
+      300,
+    );
+    expect(pages).toHaveLength(1);
+    const [above, anchor, below] = paras(pages)[0];
+    expect(above.lines.map((l) => l.maxWidthPx)).toEqual([300, 100, 100]);
+    expect(anchor.lines[0]!.maxWidthPx).toBe(300);
+    for (const line of below.lines) expect(line.maxWidthPx).toBe(300);
+  });
+
+  it("keeps the forward path single-pass: a zone at its anchor never rewinds", () => {
+    // The zone [20, 40) opens exactly where the next paragraph starts, so
+    // nothing sits above it — the first pass already wraps every line it
+    // touches and no replay may disturb the earlier paragraph.
+    const pages = flow([para(1, { drawings: [drawing(0, 20, 200, 20, "square")] }), para(3)], 300);
+    expect(pages).toHaveLength(1);
+    const [anchor, body] = paras(pages)[0];
+    expect(anchor.lines[0]!.maxWidthPx).toBe(300);
+    expect(body.lines.map((l) => l.maxWidthPx)).toEqual([100, 300, 300]);
+  });
+
+  it("replays a page whose queue opens with keepNext-pulled blocks (pre-laid ops)", () => {
+    // Page 1: one plain paragraph, then a keepNext one; the keepLines block
+    // after it cannot fit and pulls the keeper to page 2. The anchor that
+    // follows reaches 30px up over that page's content — the replay must
+    // place the pulled block (a pre-laid op, its raw lived on page 1) again.
+    const pages = flow(
+      [
+        para(2),
+        para(2, { keepNext: true }),
+        para(2, { keepLines: true }),
+        para(1, { drawings: [drawing(0, -30, 200, 15, "square")] }),
+      ],
+      110,
+    );
+    expect(pages).toHaveLength(2);
+    const page2 = paras(pages)[1];
+    expect(page2).toHaveLength(3); // pulled keeper + keepLines + anchor
+    expect(page2[0].lines.map((l) => l.maxWidthPx)).toEqual([300, 300]); // above the reach
+    expect(page2[1].lines.map((l) => l.maxWidthPx)).toEqual([100, 100]); // wrapped on replay
+  });
+
+  it("records a split tail that opened the page, or the replay drops it", () => {
+    // A 7-line paragraph splits 5+2 across the page edge; the tail's raw
+    // block sits on page 1's queue, so page 2 must record the tail itself.
+    // The anchor's zone [55, 70) then reaches over the body paragraph's
+    // lines — the replay re-wraps them without dropping the tail.
+    const pages = flow(
+      [para(7), para(2), para(1, { drawings: [drawing(0, -25, 200, 15, "square")] })],
+      100,
+    );
+    expect(pages).toHaveLength(2);
+    expect(paras(pages)[0][0].lines).toHaveLength(5);
+    const page2 = paras(pages)[1];
+    expect(page2.map((p) => p.lines.length)).toEqual([2, 2, 1]); // tail + body + anchor
+    expect(page2[0]!.lines.map((l) => l.maxWidthPx)).toEqual([300, 300]); // above the reach
+    expect(page2[1]!.lines.map((l) => l.maxWidthPx)).toEqual([100, 100]); // wrapped on replay
+  });
+});

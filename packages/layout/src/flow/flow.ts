@@ -318,15 +318,36 @@ class Flow {
   /** Zero-based index of the page being filled — picks the slot's insets. */
   private pageIndex = 0;
   /** Partial-overlap float zones (wrap square/tight): lines inside the band
-   *  wrap beside the box. Registered when the anchor paragraph commits — the
-   *  anchor paragraph's own lines wrap via the paragraph module's self-zones,
-   *  these cover every later paragraph on the page. */
+   *  wrap beside the box. A per-column view of {@link pageEffects} — the
+   *  anchor paragraph's own lines wrap via the paragraph module's
+   *  self-zones, these cover every other paragraph on the page. */
   private readonly zones: LayoutFloatZone[] = [];
   /** Full-width cleared bands (wrap topAndBottom, or a square box covering
    *  the whole column): no text inside; blocks split at the band top and
    *  resume below it. Both lists are page-local — floats never cross a page
    *  boundary (Word anchors the box to the page its paragraph lands on). */
   private readonly bands: LayoutFloatZone[] = [];
+  /** Every float effect derived on the page being filled, tagged with the
+   *  column it was derived in (floats are box-local) and the laid block that
+   *  owns it — the page replay replaces a re-committed anchor's entries. */
+  private readonly pageEffects: {
+    colIndex: number;
+    zone: LayoutFloatZone;
+    band: boolean;
+    src: LaidOutBlock;
+  }[] = [];
+  /** What flowed into the page being filled, in order — raw blocks re-wrap
+   *  on replay; pre-laid ops (keepNext pulls, split tails that opened this
+   *  page) re-place as-is, their raws living on earlier pages' queues. */
+  private readonly pageOps: ({ raw: LayoutBlock } | { laid: LaidOutBlock })[] = [];
+  /** Inside a page replay: float positions came from the first resolution
+   *  (W3C CSS Exclusions — exclusions are not re-processed, which breaks the
+   *  circular dependency) and registration never triggers another replay. */
+  private locked = false;
+  /** Bumped on every page open — lets a split tail detect that it crossed
+   *  into a fresh page (its raw stays on the old page's queue, so the new
+   *  page records the tail itself, or a replay there would drop it). */
+  private pageSeq = 0;
   /** The page's column boxes (content-box-relative x + width, w:cols) and
    *  the index being filled — a single-column flow carries one full-width
    *  box and every column branch below short-circuits. */
@@ -541,6 +562,7 @@ class Flow {
       this.pages.push(alignPageVertical({ items: this.items.splice(0), footnotes }, this.opts));
     }
     this.pageIndex = this.pages.length;
+    this.pageSeq++;
     this.colIndex = 0;
     this.y = this.insets().topPx;
     this.prevAfter = 0;
@@ -548,6 +570,9 @@ class Flow {
     this.autoBreak = auto;
     this.zones.length = 0;
     this.bands.length = 0;
+    this.pageEffects.length = 0;
+    this.pageOps.length = 0;
+    this.locked = false;
     this.pageFootnoteIds.length = 0;
     this.pageFootnoteHeight = 0;
   }
@@ -564,8 +589,16 @@ class Flow {
     this.colIndex += 1;
     this.y = this.insets().topPx;
     this.prevAfter = 0;
+    this.syncColumnEffects();
+  }
+
+  /** Rebuild the current column's zones/bands from the page registry —
+   *  floats are box-local, so a column sees only effects derived in it. */
+  private syncColumnEffects(): void {
     this.zones.length = 0;
     this.bands.length = 0;
+    for (const e of this.pageEffects)
+      if (e.colIndex === this.colIndex) (e.band ? this.bands : this.zones).push(e.zone);
   }
 
   finish(): FlowPage[] {
@@ -623,6 +656,7 @@ class Flow {
       return;
     }
     if (block.kind === "pageBreak") {
+      this.pageOps.push({ raw: block });
       const laid = layoutBlock(block, this.opts.contentWidthPx, this.ctx, this.measurer);
       // A break row the page's last line cannot hold collapses into the page
       // bottom (zero height — the marker still paints at the edge): the page
@@ -637,6 +671,7 @@ class Flow {
     if (block.kind === "columnBreak") {
       // A column break closes the column committing nothing (Word paints no
       // marker row); in a one-column flow newColumn closes the page instead.
+      this.pageOps.push({ raw: block });
       this.newColumn();
       return;
     }
@@ -644,6 +679,9 @@ class Flow {
     // Web Layout has no page edge to force).
     if (block.kind === "paragraph" && block.pageBreakBefore && !this.opts.unbounded) this.newPage();
 
+    // The page replay queue: raws re-wrap, and push's overflow path records
+    // the keepNext pulls it moves here as pre-laid ops.
+    this.pageOps.push({ raw: block });
     const laid = layoutBlock(block, this.col.widthPx, this.ctx, this.measurer);
     if (this.tryPlace(laid)) return;
     // Blocked by a band rather than the page bottom: resume below the band.
@@ -679,10 +717,17 @@ class Flow {
     }
     // Nothing fit here: blocks placed before this one with keepNext move
     // along (a heading stays with the paragraph that follows it). The pulled
-    // blocks precede this one — re-place them first, then this block.
+    // blocks precede this one — re-place them first, then this block. The
+    // replay queue follows: pulled blocks re-place as pre-laid ops (their
+    // raws were consumed on the previous page), then this block re-records
+    // (newPage cleared it with the sealed page).
     const pulled = this.pullKeepNext();
     this.newPage(true);
-    for (const kept of pulled) this.pushLaid(kept);
+    for (const kept of pulled) {
+      this.pageOps.push({ laid: kept });
+      this.pushLaid(kept);
+    }
+    this.pageOps.push({ raw: block });
     // Re-lay on the fresh page: float zones are page-local, so the lines
     // laid against the old page's zones/y are stale here.
     const fresh = layoutBlock(block, this.col.widthPx, this.ctx, this.measurer);
@@ -749,7 +794,12 @@ class Flow {
     if (k > 0 || midDepth != null) {
       const [head, tail] = splitLaid(laid, k, midDepth);
       this.commit(head, before);
+      // A tail that continues on this page replays from its raw block (the
+      // split re-derives deterministically); one that opened a fresh page
+      // must record itself there — its raw sits on the old page's queue.
+      const page = this.pageSeq;
       this.pushLaid(tail);
+      if (this.pageSeq !== page) this.pageOps.push({ laid: tail });
       return true;
     }
     return false;
@@ -775,7 +825,15 @@ class Flow {
    *  margin through the section's page box (wrapPage). The box grows by the
    *  anchor's wrap distances first (distL/R/T/B), so text keeps its Word gap.
    *  The zone's X space is the anchor paragraph's own column (multi-column
-   *  flows register per column); a box hanging into a margin clips there. */
+   *  flows register per column); a box hanging into a margin clips there.
+   *
+   *  A zone reaching above its anchor paragraph points at lines already laid
+   *  (a negative paragraph offset — the drawing hangs over earlier text), so
+   *  the page replays once with the registry seeded: earlier paragraphs then
+   *  wrap beside it too. Word's forward-only anchoring cannot express this;
+   *  the two-pass resolution follows W3C CSS Exclusions' processing model —
+   *  resolve exclusion positions first, lay out against the complete
+   *  context, never re-resolve. */
   private registerFloats(laid: Extract<LaidOutBlock, { kind: "paragraph" }>, yPx: number): void {
     const { zones, bands } = wrapEffectsOf(
       laid.drawings,
@@ -784,8 +842,55 @@ class Flow {
       false,
       this.wrapPage,
     );
-    this.zones.push(...zones);
-    this.bands.push(...bands);
+    if (zones.length === 0 && bands.length === 0) return;
+    // The anchor owns its entries: a replay re-commits it at a possibly moved
+    // y — replace rather than stack a second box beside the seeded one.
+    for (let i = this.pageEffects.length - 1; i >= 0; i--)
+      if (this.pageEffects[i]!.src === laid) this.pageEffects.splice(i, 1);
+    for (const zone of zones)
+      this.pageEffects.push({ colIndex: this.colIndex, zone, band: false, src: laid });
+    for (const zone of bands)
+      this.pageEffects.push({ colIndex: this.colIndex, zone, band: true, src: laid });
+    this.syncColumnEffects();
+    if (this.locked || this.opts.unbounded) return;
+    if (!this.retroactive(zones, bands, yPx)) return;
+    this.replayPage();
+  }
+
+  /** Whether any fresh effect starts above its anchor paragraph while this
+   *  column holds content above it — the only way a zone points at
+   *  already-placed lines. */
+  private retroactive(zones: LayoutFloatZone[], bands: LayoutFloatZone[], yPx: number): boolean {
+    let above = false;
+    for (let i = 0; i < this.items.length - 1; i++) {
+      const it = this.items[i]!;
+      if (it.yPx < yPx - 0.01 && (this.cols.length === 1 || it.xPx === this.col.xPx)) {
+        above = true;
+        break;
+      }
+    }
+    if (!above) return false;
+    const top = this.insets().topPx;
+    return [...zones, ...bands].some((z) => z.topPx < yPx - 0.01 && z.bottomPx > top);
+  }
+
+  /** Re-lay the page from its op queue with the float registry seeded —
+   *  earlier paragraphs now wrap beside the zone that reached up over them.
+   *  The replay never triggers another one (locked): positions lock to the
+   *  first resolution, one pass per page. */
+  private replayPage(): void {
+    const ops = this.pageOps.splice(0);
+    this.items.length = 0;
+    this.y = this.insets().topPx;
+    this.prevAfter = 0;
+    this.firstOnPage = true;
+    this.resyncFootnotes();
+    this.syncColumnEffects();
+    this.locked = true;
+    for (const op of ops) {
+      if ("raw" in op) this.push(op.raw);
+      else this.pushLaid(op.laid);
+    }
   }
 
   /** Detach the trailing run of placed keepNext blocks (cascades through the
