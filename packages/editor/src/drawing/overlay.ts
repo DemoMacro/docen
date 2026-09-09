@@ -14,14 +14,13 @@ import { HANDLES, resizeBox, rotateDelta, type Box, type HandleId } from "./geom
 /** Host-provided I/O: read the scale (page px → screen px), and apply a box
  *  the user dragged to. `applyBox` returns false to reject (e.g. a read-only
  *  doc) — the frame snaps back on the next show/refresh. `applyOffset` moves
- *  the drawing by a drag delta (a floating drawing's move), with the release
- *  point's client coordinates so the host can resolve the drop page;
- *  `applyRotation` spins it by a handle-swept delta (degrees, clockwise);
- *  absent, the frame stays put on a body drag. */
+ *  the drawing by a drag delta (a floating drawing's move, committed once on
+ *  release); `applyRotation` spins it by a handle-swept delta (degrees,
+ *  clockwise); absent, the frame stays put on a body drag. */
 export interface DrawingOverlayCallbacks {
   scale(): number;
   applyBox(box: Box): void;
-  applyOffset?(dx: number, dy: number, clientX?: number, clientY?: number): void;
+  applyOffset?(dx: number, dy: number): void;
   applyRotation?(delta: number): void;
 }
 
@@ -240,27 +239,23 @@ export class DrawingOverlay {
     const startY = clientY;
     const origin = { ...this.#box };
     let moved = false;
-    let last: Box = origin;
-    let lastX = clientX;
-    let lastY = clientY;
+    let dx = 0;
+    let dy = 0;
     const scale = (): number => this.#callbacks.scale() || 1;
     const onMove = (event: PointerEvent): void => {
-      const dx = (event.clientX - startX) / scale();
-      const dy = (event.clientY - startY) / scale();
       if (!moved && Math.hypot(event.clientX - startX, event.clientY - startY) < MOVE_THRESHOLD)
         return;
       moved = true;
-      lastX = event.clientX;
-      lastY = event.clientY;
-      last = { ...origin, x: origin.x + dx, y: origin.y + dy };
-      this.#box = last;
+      dx = (event.clientX - startX) / scale();
+      dy = (event.clientY - startY) / scale();
+      this.#box = { ...origin, x: origin.x + dx, y: origin.y + dy };
       this.#place();
     };
     const onUp = (): void => {
       document.removeEventListener("pointermove", onMove);
       document.removeEventListener("pointerup", onUp);
       document.removeEventListener("pointercancel", onUp);
-      if (moved) this.#callbacks.applyOffset?.(last.x - origin.x, last.y - origin.y, lastX, lastY);
+      if (moved) this.#callbacks.applyOffset?.(dx, dy);
     };
     document.addEventListener("pointermove", onMove);
     document.addEventListener("pointerup", onUp);

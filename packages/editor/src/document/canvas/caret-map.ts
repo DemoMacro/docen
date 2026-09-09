@@ -669,46 +669,6 @@ export class CaretMap {
     return this.paras.find((p) => p.lines.some((l) => l.para === para))?.innerPos ?? null;
   }
 
-  /** The paragraph a dragged float's drop point re-anchors to (Word: dragging
-   *  an object moves its anchor into the paragraph under it). Among the
-   *  page's flow lines whose horizontal span meets the dropped box, the band
-   *  containing the drop y wins, else the nearest line below (a float riding
-   *  above its anchor is Word's common negative-offset state), else the last
-   *  line above. Null when nothing overlaps horizontally — the caller keeps
-   *  the drawing on its existing anchors. */
-  anchorParagraphAt(
-    page: number,
-    x: number,
-    y: number,
-    width: number,
-  ): { pos: number; topPx: number; columnLeftPx: number } | null {
-    const anchorOf = (entry: LineEntry) => ({
-      pos: entry.owner.innerPos,
-      topPx: entry.blockTopPx,
-      columnLeftPx: entry.columnLeftPx,
-    });
-    let below: LineEntry | null = null;
-    let belowDist = Infinity;
-    let above: LineEntry | null = null;
-    let aboveBottom = -Infinity;
-    for (const entry of this.lines) {
-      if (entry.page !== page) continue;
-      const top = entry.yPx;
-      const bottom = top + entry.line.heightPx;
-      if (!(entry.xPx < x + width && entry.xPx + (entry.line.maxWidthPx ?? 0) > x)) continue;
-      if (y >= top && y <= bottom) return anchorOf(entry);
-      if (top > y && top - y < belowDist) {
-        belowDist = top - y;
-        below = entry;
-      }
-      if (bottom <= y && bottom > aboveBottom) {
-        aboveBottom = bottom;
-        above = entry;
-      }
-    }
-    return below ? anchorOf(below) : above ? anchorOf(above) : null;
-  }
-
   /** A click's page-local coordinates → the nearest doc position. Clamping
    *  (drag extends) drops the distance cap: the overshoot past a line's band
    *  resolves to that nearest line, so dragging below the last line selects

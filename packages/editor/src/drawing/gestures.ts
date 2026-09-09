@@ -9,10 +9,9 @@ import type { DrawingHit } from "./target";
 
 /** What the gestures need from their host: the viewless editor (its state and
  *  commands), the PM position a hit resolves to, the re-resolved painted box
- *  after a re-render, the page frames the overlays mount in, the zoom factor
- *  (semantic page px → screen px), and the paragraph a drop re-anchors to.
- *  All injected — the gestures own no document state beyond the selection
- *  they manage. */
+ *  after a re-render, the page frames the overlays mount in, and the zoom
+ *  factor (semantic page px → screen px). All injected — the gestures own no
+ *  document state beyond the selection they manage. */
 export interface DrawingGesturesHost {
   editor(): Editor;
   /** `enter` marks the entry double click on a group — the member hit
@@ -27,19 +26,6 @@ export interface DrawingGesturesHost {
   ): DrawingHit | null;
   pageHost(page: number): HTMLElement | null;
   scale(): number;
-  /** The page a pointer position sits over, with the point as page-local px
-   *  at scale 1 (the drop resolution's frame — a drag may cross pages, and
-   *  only the host knows the pages' screen geometry). Null off the pages. */
-  pageAtPoint(clientX: number, clientY: number): { page: number; x: number; y: number } | null;
-  /** The paragraph a dragged float's drop point lands on, with its block
-   *  top and column left as page-local px (the fresh anchor base for the
-   *  paragraph/column offsets). Null when the host cannot resolve. */
-  anchorParagraphAt(
-    page: number,
-    x: number,
-    y: number,
-    width: number,
-  ): { pos: number; topPx: number; columnLeftPx: number } | null;
 }
 
 /**
@@ -75,7 +61,7 @@ export class DrawingGestures {
     this.#overlay = new DrawingOverlay({
       scale: () => this.#host.scale(),
       applyBox: (box) => this.#applyBox(box),
-      applyOffset: (dx, dy, clientX, clientY) => this.#applyOffset(dx, dy, clientX, clientY),
+      applyOffset: (dx, dy) => this.#applyOffset(dx, dy),
       applyRotation: (delta) => this.#applyRotation(delta),
     });
     // The crop layer: the selected image's source shows in full with black
@@ -329,18 +315,6 @@ export class DrawingGestures {
     return (carrier as Record<string, unknown> | null | undefined) ?? null;
   }
 
-  /** The node's attrs with the floating carrier swapped — other attrs and the
-   *  carrier's non-anchor fields pass through untouched. */
-  #withFloating(node: PmNode, floating: Record<string, unknown>): Record<string, unknown> {
-    const attrs = { ...node.attrs } as Record<string, unknown>;
-    if (node.type.name === "image") attrs.floating = floating;
-    else if (node.type.name === "wpsShape")
-      attrs.wpsShape = { ...(attrs.wpsShape as Record<string, unknown>), floating };
-    else if (node.type.name === "wpgGroup")
-      attrs.wpgGroup = { ...(attrs.wpgGroup as Record<string, unknown>), floating };
-    return attrs;
-  }
-
   /** A handle drag's box: the selected image's px attrs resize in place,
    *  keeping the NodeSelection (a setNodeMarkup that changes attrs demotes a
    *  NodeSelection to a caret — re-create it so the resize keeps the drawing
@@ -362,77 +336,17 @@ export class DrawingGestures {
     });
   }
 
-  /** A body drag's offset. The drop re-anchors first (Word: dragging an
-   *  object moves its anchor into the paragraph under it) — a float left on
-   *  a host paragraph far from its resting place paints over text the flow
-   *  already placed above the drop site, which the engine's forward-only
-   *  wrap zones cannot dodge. Re-anchoring puts the host paragraph at the
-   *  drop site, so the zones register where the float actually paints and
-   *  the surrounding text wraps. The release point resolves to the page it
-   *  sits on (a drag may cross pages — the origin page plus a page-local
-   *  delta is a coordinate from another frame, which used to push the float
-   *  past the page bottom where nothing paints it); every drop quantity —
-   *  page, drop point, anchor top — shares that resolved frame. A drop on
-   *  the same paragraph (or an unresolvable one) keeps the anchors: an
-   *  offset-anchored float adds the delta to its offsets; an align-anchored
-   *  one has none to add to — the drop lands absolute, page-anchored, at
-   *  the dragged spot (Word: dragging breaks the alignment, the drawn
-   *  result doesn't shift). A cross-page drop that resolves no anchor (or
-   *  no page at all) commits nothing — the drawing stays put rather than
-   *  sliding off-page. */
-  #applyOffset(dx: number, dy: number, clientX?: number, clientY?: number): void {
+  /** A body drag's offset: an offset-anchored float adds the drag delta to
+   *  its offsets; an align-anchored one has none to add to — the drop lands
+   *  absolute, page-anchored, at the dragged spot (Word: dragging breaks the
+   *  alignment, the drawn result doesn't shift). The release commits once,
+   *  so the whole drag is ONE undo step and no re-layout runs mid-drag. */
+  #applyOffset(dx: number, dy: number): void {
     if (!this.#sel) return;
     const nodePos = this.#host.drawingSelection(this.#sel);
     if (nodePos == null) return;
     const hEmu = Math.round(dx * EMU_PER_PX);
     const vEmu = Math.round(dy * EMU_PER_PX);
-    const target =
-      clientX == null || clientY == null ? null : this.#host.pageAtPoint(clientX, clientY);
-    const page = target?.page ?? this.#sel.page;
-    const dropX = target?.x ?? this.#sel.x + dx;
-    const dropY = target?.y ?? this.#sel.y + dy;
-    const crossPage = page !== this.#sel.page;
-    const editor = this.#host.editor();
-    const node = editor.state.doc.nodeAt(nodePos);
-    const floating = node ? this.#floatingOf(node) : null;
-    if (node && floating) {
-      const anchor = this.#host.anchorParagraphAt(page, dropX, dropY, this.#sel.width);
-      // The drawing's parent block unchanged (a cross-page drop re-anchors
-      // even onto its own paragraph — the offset base moved to the new page).
-      if (anchor && (crossPage || anchor.pos !== editor.state.doc.resolve(nodePos).before() + 1)) {
-        const h = floating.horizontalPosition as Record<string, unknown> | undefined;
-        const nextFloating = {
-          ...floating,
-          horizontalPosition:
-            h?.relative === "column"
-              ? {
-                  relative: "column",
-                  offset: Math.round((dropX - anchor.columnLeftPx) * EMU_PER_PX),
-                }
-              : { relative: "page", offset: Math.round(dropX * EMU_PER_PX) },
-          verticalPosition: {
-            relative: "paragraph",
-            offset: Math.round((dropY - anchor.topPx) * EMU_PER_PX),
-          },
-        };
-        const attrs = this.#withFloating(node, nextFloating);
-        editor.commands.command(({ tr, dispatch }) => {
-          tr.delete(nodePos, nodePos + node.nodeSize);
-          const insertPos = tr.mapping.map(anchor.pos);
-          // Node.copy takes CONTENT, not attrs — node.type.create is the
-          // attrs-carrying rebuild. The cast bridges the dual PM d.ts
-          // identity (same runtime instance) — see the module's other casts.
-          tr.insert(insertPos, node.type.create(attrs as never));
-          tr.setSelection(NodeSelection.create(tr.doc, insertPos) as never);
-          dispatch?.(tr as never);
-          return true;
-        });
-        return;
-      }
-    }
-    // A cross-page drop that fell through re-anchoring has no same-frame
-    // delta to add — committing the raw dy would push the float off-page.
-    if (crossPage || target == null) return;
     const anchors = this.#floatingAnchors();
     if (typeof anchors?.h?.offset === "number" && typeof anchors.v?.offset === "number") {
       this.#host.editor().commands["move-drawing"](JSON.stringify({ h: hEmu, v: vEmu }));
