@@ -12,6 +12,24 @@ import type {
   TablePropertiesPatch,
 } from "../extensions/commands";
 import { collectListReferences } from "../extensions/commands";
+import { noteRefId } from "../extensions/notes";
+
+/** One footnote/endnote body entry in documentExtras (`{ id, children }` with
+ *  office-open's nested `paragraph`/run shapes — edited only as opaque text
+ *  here). */
+interface NoteEntry {
+  id?: number;
+  children?: unknown;
+  [key: string]: unknown;
+}
+
+/** The slice of documentExtras the note commands touch. */
+interface NoteExtras {
+  footnotes?: NoteEntry[];
+  endnotes?: NoteEntry[];
+  contentTypes?: { overrides?: Array<{ partName?: string; contentType?: string }> };
+  [key: string]: unknown;
+}
 
 /** The dialog commands' view of the host — resolved per call so the controller
  *  can be built before a document opens (the editor and the story bridge both
@@ -617,4 +635,244 @@ export class DialogCommands {
     target.view.dispatch(target.state.tr.insert(from, target.schema.nodeFromJSON(seed)));
     this.host.bridge()?.focus();
   };
+
+  // ── Footnote/endnote bodies ──
+  // Note content lives in doc attrs documentExtras.footnotes/endnotes —
+  // outside the PM doc — so the body has no caret of its own: the dialog is
+  // the editing surface, the reference atom in the text is the anchor, and
+  // the NotesCleanup extension prunes bodies whose last reference is deleted.
+
+  /** The reference atom under the caret — the caret sits right after a
+   *  right-click collapse, so the atom starting at the caret and the one
+   *  ending just before it both count. */
+  noteTarget(): { kind: "footnote" | "endnote"; id: number; pos: number } | null {
+    const editor = this.host.editor();
+    if (!editor) return null;
+    const { from } = editor.state.selection;
+    for (const at of [from, from - 1]) {
+      if (at < 0) continue;
+      const node = editor.state.doc.nodeAt(at);
+      if (!node || node.type.name !== "inlinePassthrough") continue;
+      const data = node.attrs.data;
+      if (typeof data !== "string") continue;
+      try {
+        const ref = noteRefId(JSON.parse(data) as Record<string, unknown>);
+        if (ref?.id == null) continue;
+        return {
+          kind: ref.kind === "endnoteReference" ? "endnote" : "footnote",
+          id: ref.id,
+          pos: at,
+        };
+      } catch {
+        /* malformed atom JSON — not a note reference */
+      }
+    }
+    return null;
+  }
+
+  /** The note's plain text — one line per note paragraph (the textarea's
+   *  model); only text branches speak, the note-number marker stays silent. */
+  #noteTextOf(children: unknown): string {
+    const paragraphText = (p: unknown): string => {
+      if (typeof p === "string") return p;
+      if (!p || typeof p !== "object") return "";
+      const runs = (p as { children?: unknown }).children;
+      if (!Array.isArray(runs)) return "";
+      let text = "";
+      for (const run of runs) {
+        if (typeof run === "string") text += run;
+        else if (
+          run &&
+          typeof run === "object" &&
+          typeof (run as { text?: unknown }).text === "string"
+        )
+          text += (run as { text: string }).text;
+      }
+      return text;
+    };
+    if (!Array.isArray(children)) return "";
+    const lines: string[] = [];
+    for (const child of children) {
+      if (typeof child === "string") {
+        lines.push(child);
+      } else if (child && typeof child === "object" && "paragraph" in child) {
+        lines.push(paragraphText((child as { paragraph: unknown }).paragraph));
+      } else {
+        lines.push(paragraphText(child));
+      }
+    }
+    return lines.join("\n");
+  }
+
+  /** Rebuild the note body from textarea lines — each line becomes a
+   *  paragraph in the original first paragraph's style, the leading
+   *  note-number marker run kept on the first (Word's canonical note body;
+   *  a missing marker is re-injected by the notes stringify on export). */
+  #noteChildrenOf(text: string, previous: unknown): unknown[] {
+    const first = Array.isArray(previous) ? previous[0] : undefined;
+    const firstParagraph =
+      first && typeof first === "object" && "paragraph" in first
+        ? (first as { paragraph: unknown }).paragraph
+        : first;
+    const style =
+      firstParagraph && typeof firstParagraph === "object"
+        ? (firstParagraph as { style?: unknown }).style
+        : undefined;
+    const firstRuns = (
+      firstParagraph && typeof firstParagraph === "object"
+        ? (firstParagraph as { children?: unknown }).children
+        : undefined
+    ) as unknown[] | undefined;
+    const marker = (firstRuns ?? []).find(
+      (run) =>
+        run &&
+        typeof run === "object" &&
+        ((run as Record<string, unknown>).footnoteRef === true ||
+          (run as Record<string, unknown>).endnoteRef === true),
+    );
+    return text.split("\n").map((line, i) => ({
+      ...(style != null ? { style } : {}),
+      children: [...(i === 0 && marker ? [marker] : []), ...(line ? [{ text: line }] : [])],
+    }));
+  }
+
+  /** Insert → Footnote/Endnote: open the dialog empty; the commit (onNoteOk's
+   *  insert branch) drops the reference atom at the caret and appends the
+   *  note body to documentExtras. */
+  noteInsert(kind: "footnote" | "endnote"): void {
+    this.#noteTarget = null;
+    this.#noteDialog()?.show(kind, "");
+  }
+
+  /** Context menu → 编辑脚注/尾注: prefill the dialog with the referenced
+   *  note's text; the commit rewrites that note's body in place. */
+  noteEditAtSelection(): void {
+    const target = this.noteTarget();
+    if (!target) return;
+    const note = this.#noteOf(target.kind, target.id);
+    this.#noteTarget = target;
+    this.#noteDialog()?.show(target.kind, note ? this.#noteTextOf(note.children) : "");
+  }
+
+  /** Context menu → 删除脚注/尾注: delete the reference atom (Word deletes a
+   *  note by deleting its reference); the cleanup extension prunes the body
+   *  when its last reference is gone. */
+  noteDeleteAtSelection(): void {
+    const editor = this.host.editor();
+    const target = this.noteTarget();
+    if (!editor || !target) return;
+    editor.view.dispatch(editor.state.tr.delete(target.pos, target.pos + 1));
+  }
+
+  readonly onNoteOk = (event: Event): void => {
+    const { kind, text } =
+      (event as CustomEvent<{ kind?: "footnote" | "endnote"; text?: string }>).detail ?? {};
+    if ((kind !== "footnote" && kind !== "endnote") || text == null) return;
+    const editing = this.#noteTarget;
+    this.#noteTarget = null;
+    const editor = this.host.editor();
+    if (!editor) return;
+    if (editing) {
+      this.#rewriteNote(kind, editing.id, text);
+      return;
+    }
+    if (!text) return;
+    this.#insertNoteBody(kind, text);
+  };
+
+  /** The pending edit target between noteEditAtSelection and the dialog's OK
+   *  (a modal dialog — one pending target at a time; null = insert mode). */
+  #noteTarget: { kind: "footnote" | "endnote"; id: number; pos: number } | null | undefined;
+
+  #noteDialog(): { show(kind: "footnote" | "endnote", text: string): void } | null | undefined {
+    return this.host.element().shadowRoot?.querySelector("docen-note-dialog") as
+      | { show(kind: "footnote" | "endnote", text: string): void }
+      | null
+      | undefined;
+  }
+
+  #extras(): NoteExtras {
+    const editor = this.host.editor();
+    return (editor?.state.doc.attrs.documentExtras ?? {}) as NoteExtras;
+  }
+
+  #noteOf(kind: "footnote" | "endnote", id: number): NoteEntry | undefined {
+    const extras = this.#extras();
+    return (kind === "endnote" ? extras.endnotes : extras.footnotes)?.find(
+      (note) => note.id === id,
+    );
+  }
+
+  /** The edit commit: swap the referenced note's body for the rebuilt lines
+   *  (one attrs transaction — the projection repaints the page-bottom note). */
+  #rewriteNote(kind: "footnote" | "endnote", id: number, text: string): void {
+    const editor = this.host.editor();
+    if (!editor) return;
+    const channel = kind === "endnote" ? "endnotes" : "footnotes";
+    const extras = this.#extras();
+    const notes = extras[channel] ?? [];
+    let swapped = false;
+    const next = notes.map((note) => {
+      if (note.id !== id) return note;
+      swapped = true;
+      return { ...note, children: this.#noteChildrenOf(text, note.children) };
+    });
+    if (!swapped) return;
+    editor.view.dispatch(
+      editor.state.tr.setDocAttribute("documentExtras", { ...extras, [channel]: next }),
+    );
+  }
+
+  /** The insert commit (the old #insertNote, dialog-fed): a reference atom at
+   *  the caret plus the note body — Word's canonical *Text paragraph leading
+   *  with the note-number marker run — and the content-types override the
+   *  packer needs for the first note of a kind. */
+  #insertNoteBody(kind: "footnote" | "endnote", text: string): void {
+    const editor = this.host.editor();
+    if (!editor) return;
+    const channel = `${kind}s` as "footnotes" | "endnotes";
+    const extras = this.#extras();
+    const notes = extras[channel] ?? [];
+    const id = notes.reduce((max, note) => Math.max(max, Number(note.id ?? 0)), 0) + 1;
+    const Note = kind === "footnote" ? "FootnoteText" : "EndnoteText";
+    const ref = editor.schema.nodeFromJSON({
+      type: "inlinePassthrough",
+      attrs: { data: JSON.stringify({ [`${kind}Reference`]: id }) },
+    } as JSONContent);
+    const documentExtras: NoteExtras = {
+      ...extras,
+      [channel]: [
+        ...notes,
+        {
+          id,
+          // One *Text paragraph per textarea line, the note-number marker run
+          // leading the first (the seed supplies both — the builder lifts them).
+          children: this.#noteChildrenOf(text, [
+            { style: Note, children: [{ [`${kind}Ref`]: true }] },
+          ]),
+        },
+      ],
+    };
+    const partName = `/word/${channel}.xml`;
+    if (
+      extras.contentTypes &&
+      !extras.contentTypes.overrides?.some((o) => o.partName === partName)
+    ) {
+      documentExtras.contentTypes = {
+        ...extras.contentTypes,
+        overrides: [
+          ...(extras.contentTypes.overrides ?? []),
+          {
+            partName,
+            contentType: `application/vnd.openxmlformats-officedocument.wordprocessingml.${channel}+xml`,
+          },
+        ],
+      };
+    }
+    editor.view.dispatch(
+      editor.state.tr
+        .insert(editor.state.selection.from, ref)
+        .setDocAttribute("documentExtras", documentExtras),
+    );
+  }
 }

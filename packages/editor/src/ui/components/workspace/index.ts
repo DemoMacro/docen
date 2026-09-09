@@ -27,6 +27,7 @@ export { default as DocenPhoneticDialog } from "./phonetic-dialog";
 export { default as DocenTwoInOneDialog } from "./two-in-one-dialog";
 export { default as DocenDefineListDialog } from "./define-list-dialog";
 export { default as DocenCaptionDialog } from "./caption-dialog";
+export { default as DocenNoteDialog } from "./note-dialog";
 export { default as DocenCrossReferenceDialog } from "./cross-reference-dialog";
 export { default as DocenSourcesDialog } from "./sources-dialog";
 export { default as DocenRecipientsDialog } from "./recipients-dialog";

@@ -5,6 +5,7 @@ import { search } from "prosemirror-search";
 import { type DocenAddin, type DocenHost } from "../ui";
 import { DocumentCommands } from "./extensions/commands";
 import { IndexCommands } from "./extensions/index-commands";
+import { NotesCleanup } from "./extensions/notes";
 import { Outline, type OutlineAnchor } from "./extensions/outline";
 import { TocCommands } from "./extensions/toc";
 import { TrackChanges } from "./extensions/track-changes";
@@ -68,6 +69,9 @@ export function createDocumentExtensions(opts: {
     // Review tab revision tracking: the toggle + live edit marking, and the
     // accept/reject/navigation commands the ribbon buttons dispatch.
     TrackChanges,
+    // Footnote/endnote orphan cleanup: deleting a reference prunes its
+    // documentExtras body in the same dispatch (one undo restores both).
+    NotesCleanup,
     // References tab TOC: insert/refresh a tocField built from the doc's
     // headings (page numbers arrive per dispatch via the host's bridge).
     TocCommands,
