@@ -1489,15 +1489,23 @@ const MEASURE_TWIP_UNITS: ReadonlyArray<readonly [string, number]> = [
   ["mm", 1440 / 25.4],
   ["cm", 1440 / 2.54],
   ["px", 15],
+  // The Chinese unit words Word's zh boxes display and accept typed
+  // ("5 厘米" in the Size boxes).
+  ["磅", 20],
+  ["派卡", 240],
+  ["英寸", 1440],
+  ["毫米", 1440 / 25.4],
+  ["厘米", 1440 / 2.54],
+  ["像素", 15],
 ];
 function parseMeasureTwip(v: unknown): number | null {
   if (typeof v === "number") return Number.isFinite(v) ? v : null;
   if (typeof v !== "string") return null;
   const bare = Number(v);
   if (Number.isFinite(bare)) return bare;
-  const m = /^(-?[\d.]+)\s*(pt|pc|in|mm|cm|px)$/.exec(v.trim());
+  const m = /^(-?[\d.]+)\s*(\S+)$/.exec(v.trim());
   if (!m) return null;
-  const unit = MEASURE_TWIP_UNITS.find(([u]) => u === m[2]);
+  const unit = MEASURE_TWIP_UNITS.find(([u]) => u.toLowerCase() === m[2]!.toLowerCase());
   return unit ? Number(m[1]) * unit[1] : null;
 }
 
@@ -1511,15 +1519,21 @@ const MEASURE_EMU_UNITS: ReadonlyArray<readonly [string, number]> = [
   ["mm", 36000],
   ["cm", 360000],
   ["px", 9525],
+  ["磅", 12700],
+  ["派卡", 152400],
+  ["英寸", 914400],
+  ["毫米", 36000],
+  ["厘米", 360000],
+  ["像素", 9525],
 ];
 function parseMeasureEmu(v: unknown): number | null {
   if (typeof v === "number") return Number.isFinite(v) ? v : null;
   if (typeof v !== "string") return null;
   const bare = Number(v);
   if (Number.isFinite(bare)) return bare;
-  const m = /^(-?[\d.]+)\s*(pt|pc|in|mm|cm|px)$/.exec(v.trim());
+  const m = /^(-?[\d.]+)\s*(\S+)$/.exec(v.trim());
   if (!m) return null;
-  const unit = MEASURE_EMU_UNITS.find(([u]) => u === m[2]);
+  const unit = MEASURE_EMU_UNITS.find(([u]) => u.toLowerCase() === m[2]!.toLowerCase());
   return unit ? Number(m[1]) * unit[1] : null;
 }
 
