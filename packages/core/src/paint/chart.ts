@@ -1,6 +1,8 @@
 import type { LayoutDrawingMember } from "@docen/layout";
 import { Ellipse, Group, Path as LeaferPath, Rect, Text, type IGroup } from "leafer-ui";
 
+import type { ChartHitContext, ChartPartHit, ChartPartShape } from "./context";
+
 // ── chart member painter ──
 //
 // Draws a `kind: "chart"` member from its verbatim ChartSpaceOptions payload
@@ -139,6 +141,21 @@ function label(
   );
 }
 
+/** Gap between neighboring legend entries in a horizontal row. */
+const LEGEND_GAP = 24;
+
+/** The painted width of a label, for centering a legend row — the hidden
+ *  canvas the break-row marks measure with (node-safe: without a document,
+ *  a per-character estimate). */
+let legendCtx: CanvasRenderingContext2D | null | undefined;
+function measureLabelWidth(text: string, px: number): number {
+  legendCtx ??=
+    typeof document === "undefined" ? null : document.createElement("canvas").getContext("2d");
+  if (!legendCtx) return text.length * px;
+  legendCtx.font = `${px}px sans-serif`;
+  return legendCtx.measureText(text).width;
+}
+
 /** One straight hairline. */
 function segment(
   tree: IGroup,
@@ -177,7 +194,12 @@ interface PlotBox {
 
 // ── value-axis charts (column / bar / line / area) ──
 
-function paintValueChart(tree: IGroup, model: ChartModel, plot: PlotBox): void {
+/** A chart sub-element's hit registration — the box and any shape arrive in
+ *  chart-local coordinates, the hit table is page-local (the registrar in
+ *  {@link paintChartMember} folds the origin in). */
+type ElementReg = (part: ChartPartHit, x: number, y: number, width: number, height: number) => void;
+
+function paintValueChart(tree: IGroup, model: ChartModel, plot: PlotBox, reg?: ElementReg): void {
   const horizontal = model.type === "bar";
   const all = model.series.map(valuesOf);
   const flat = all.flat();
@@ -239,15 +261,15 @@ function paintValueChart(tree: IGroup, model: ChartModel, plot: PlotBox): void {
     const isArea = model.type === "area";
     if (isLine || isArea) {
       const pts = vals
-        .map((v, c) => [plot.x + (c + 0.5) * band, toPx(v)] as const)
-        .filter(([x]) => x >= plot.x && x <= plot.x + plot.width);
+        .map((v, c) => ({ x: plot.x + (c + 0.5) * band, y: toPx(v), c }))
+        .filter((p) => p.x >= plot.x && p.x <= plot.x + plot.width);
       if (pts.length === 0) return;
-      const d = pts.map(([x, y], i) => `${i === 0 ? "M" : "L"} ${x} ${y}`).join(" ");
+      const d = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
       if (isArea) {
         const base = toPx(Math.max(bounds.min, 0));
         tree.add(
           new LeaferPath({
-            path: `${d} L ${pts[pts.length - 1]![0]} ${base} L ${pts[0]![0]} ${base} Z`,
+            path: `${d} L ${pts[pts.length - 1]!.x} ${base} L ${pts[0]!.x} ${base} Z`,
             fill: `#${fill}`,
             opacity: 0.55,
           }),
@@ -257,9 +279,30 @@ function paintValueChart(tree: IGroup, model: ChartModel, plot: PlotBox): void {
         new LeaferPath({ path: d, stroke: `#${fill}`, strokeWidth: 2, strokeJoin: "round" }),
       );
       if (model.markers) {
-        for (const [x, y] of pts) {
-          tree.add(new Ellipse({ x: x - 3, y: y - 3, width: 6, height: 6, fill: `#${fill}` }));
+        for (const p of pts) {
+          tree.add(new Ellipse({ x: p.x - 3, y: p.y - 3, width: 6, height: 6, fill: `#${fill}` }));
         }
+      }
+      if (reg) {
+        // The series shape first, the data points after — the click's
+        // topmost-last scan makes a point win over the line it sits on.
+        const xs = pts.map((p) => p.x);
+        const ys = pts.map((p) => p.y);
+        reg(
+          {
+            series: si,
+            shape: {
+              kind: "poly",
+              pts: pts.map((p) => [p.x, p.y] as [number, number]),
+              ...(isArea ? { closed: true } : { width: 10 }),
+            },
+          },
+          Math.min(...xs),
+          Math.min(...ys),
+          Math.max(...xs) - Math.min(...xs),
+          Math.max(...ys) - Math.min(...ys),
+        );
+        for (const p of pts) reg({ series: si, point: p.c }, p.x - 4, p.y - 4, 8, 8);
       }
       return;
     }
@@ -274,38 +317,36 @@ function paintValueChart(tree: IGroup, model: ChartModel, plot: PlotBox): void {
         const to = toPx(below + v);
         const y0 = Math.min(from, to);
         const h = Math.abs(p - toPx(below));
-        tree.add(
-          horizontal
-            ? new Rect({ x: y0, y: plot.y + c * band, width: h, height: band, fill: `#${fill}` })
-            : new Rect({ x: plot.x + c * band, y: y0, width: band, height: h, fill: `#${fill}` }),
-        );
+        const bar = horizontal
+          ? { x: y0, y: plot.y + c * band, width: h, height: band }
+          : { x: plot.x + c * band, y: y0, width: band, height: h };
+        tree.add(new Rect({ ...bar, fill: `#${fill}` }));
+        reg?.({ series: si, point: c }, bar.x, bar.y, bar.width, bar.height);
         return;
       }
       const offset = si * slot;
-      tree.add(
-        horizontal
-          ? new Rect({
-              x: Math.min(base, p),
-              y: plot.y + c * band + offset + slot * 0.1,
-              width: Math.abs(p - base),
-              height: slot * 0.8,
-              fill: `#${fill}`,
-            })
-          : new Rect({
-              x: plot.x + c * band + offset + slot * 0.1,
-              y: Math.min(base, p),
-              width: slot * 0.8,
-              height: Math.abs(p - base),
-              fill: `#${fill}`,
-            }),
-      );
+      const bar = horizontal
+        ? {
+            x: Math.min(base, p),
+            y: plot.y + c * band + offset + slot * 0.1,
+            width: Math.abs(p - base),
+            height: slot * 0.8,
+          }
+        : {
+            x: plot.x + c * band + offset + slot * 0.1,
+            y: Math.min(base, p),
+            width: slot * 0.8,
+            height: Math.abs(p - base),
+          };
+      tree.add(new Rect({ ...bar, fill: `#${fill}` }));
+      reg?.({ series: si, point: c }, bar.x, bar.y, bar.width, bar.height);
     });
   });
 }
 
 // ── pie / doughnut ──
 
-function paintPie(tree: IGroup, model: ChartModel, plot: PlotBox): void {
+function paintPie(tree: IGroup, model: ChartModel, plot: PlotBox, reg?: ElementReg): void {
   const series = model.series[0];
   if (!series) return;
   const vals = valuesOf(series);
@@ -332,6 +373,7 @@ function paintPie(tree: IGroup, model: ChartModel, plot: PlotBox): void {
           fill: `#${seriesFillOf(series, i)}`,
         }),
       );
+      reg?.({ series: 0, point: i }, cx - r, cy - r, r * 2, r * 2);
       return;
     }
     const large = sweep > 180 ? 1 : 0;
@@ -359,12 +401,23 @@ function paintPie(tree: IGroup, model: ChartModel, plot: PlotBox): void {
         strokeWidth: 1,
       }),
     );
+    reg?.(
+      {
+        series: 0,
+        point: i,
+        shape: { kind: "wedge", cx, cy, r, a0, a1, ...(hole ? { hole } : {}) },
+      },
+      cx - r,
+      cy - r,
+      r * 2,
+      r * 2,
+    );
   });
 }
 
 // ── scatter ──
 
-function paintScatter(tree: IGroup, model: ChartModel, plot: PlotBox): void {
+function paintScatter(tree: IGroup, model: ChartModel, plot: PlotBox, reg?: ElementReg): void {
   const pairs = model.series.map(scatterPairs);
   const flat = pairs.flat();
   if (flat.length === 0) return;
@@ -396,6 +449,7 @@ function paintScatter(tree: IGroup, model: ChartModel, plot: PlotBox): void {
           fill: `#${fill}`,
         }),
       );
+      reg?.({ series: si, point: pi }, px(xv) - 4.5, py(pair.y[pi]) - 4.5, 9, 9);
     });
   });
 }
@@ -433,43 +487,82 @@ function paintPlaceholder(tree: IGroup, model: ChartModel, plot: PlotBox): void 
 
 // ── legend / title ──
 
-function paintLegend(tree: IGroup, model: ChartModel, box: PlotBox): void {
+function paintLegend(tree: IGroup, model: ChartModel, box: PlotBox, reg?: ElementReg): void {
   const vertical = model.legendPosition === "right" || model.legendPosition === "left";
+  // A pie's legend lists its categories (Word colors each point individually),
+  // not the single series every pie has.
+  const pie = model.type === "pie" || model.type === "doughnut";
+  const entries = pie
+    ? model.categories.map((name, i) => ({
+        name,
+        fill: model.series[0] ? seriesFillOf(model.series[0]!, i) : ACCENTS[i % ACCENTS.length]!,
+        point: i,
+      }))
+    : model.series.map((series, si) => ({
+        name: str(series.name) ?? `系列${si + 1}`,
+        fill: seriesFillOf(series, si),
+        point: -1,
+      }));
   if (vertical) {
     const x = model.legendPosition === "left" ? box.x : box.x + box.width - 84;
-    model.series.forEach((series, si) => {
-      const y = box.y + si * 20 + 6;
-      tree.add(new Rect({ x, y, width: 10, height: 10, fill: `#${seriesFillOf(series, si)}` }));
-      label(tree, str(series.name) ?? `系列${si + 1}`, x + 14, y + 5, LABEL_PX - 1, "left", 66);
+    // Word centers the legend block vertically against the plot area.
+    const top = box.y + Math.max(0, (box.height - entries.length * 20) / 2);
+    entries.forEach((entry, i) => {
+      const y = top + i * 20;
+      tree.add(new Rect({ x, y: y + 5, width: 10, height: 10, fill: `#${entry.fill}` }));
+      label(tree, entry.name, x + 14, y + 10, LABEL_PX - 1, "left", 66);
+      reg?.(
+        { series: 0, legend: true, ...(entry.point >= 0 ? { point: entry.point } : {}) },
+        x,
+        y,
+        84,
+        20,
+      );
     });
     return;
   }
+  // Word lays a horizontal legend as one row of entries at natural width —
+  // swatch then label — centered as a whole in its band, never spread
+  // edge-to-edge.
   const y = model.legendPosition === "top" ? box.y : box.y + box.height - 18;
-  const slot = model.series.length > 0 ? box.width / model.series.length : box.width;
-  model.series.forEach((series, si) => {
-    const x = box.x + si * slot;
-    tree.add(
-      new Rect({ x, y: y + 6, width: 10, height: 10, fill: `#${seriesFillOf(series, si)}` }),
+  const widths = entries.map((e) => 14 + measureLabelWidth(e.name, LABEL_PX - 1));
+  const total =
+    widths.reduce((sum, w) => sum + w, 0) + LEGEND_GAP * Math.max(0, entries.length - 1);
+  let x = box.x + Math.max(0, (box.width - total) / 2);
+  entries.forEach((entry, i) => {
+    const w = widths[i]!;
+    tree.add(new Rect({ x, y: y + 6, width: 10, height: 10, fill: `#${entry.fill}` }));
+    label(tree, entry.name, x + 14, y + 11, LABEL_PX - 1, "left");
+    reg?.(
+      { series: 0, legend: true, ...(entry.point >= 0 ? { point: entry.point } : {}) },
+      x,
+      y,
+      w,
+      20,
     );
-    label(
-      tree,
-      str(series.name) ?? `系列${si + 1}`,
-      x + 14,
-      y + 11,
-      LABEL_PX - 1,
-      "left",
-      slot - 18,
-    );
+    x += w + LEGEND_GAP;
   });
+}
+
+/** A chart sub-element's shape re-based from chart-local to page-local px
+ *  (the hit table lives in page coordinates, the painter paints in the
+ *  chart's own). */
+function offsetShape(shape: ChartPartShape, dx: number, dy: number): ChartPartShape {
+  if (shape.kind === "wedge") return { ...shape, cx: shape.cx + dx, cy: shape.cy + dy };
+  return { ...shape, pts: shape.pts.map(([px, py]) => [px + dx, py + dy] as [number, number]) };
 }
 
 // ── entry ──
 
 /** Paint one chart member: title band, legend strip, then the plot. The
- *  whole chart renders inside the member's extent box. */
+ *  whole chart renders inside the member's extent box. With `hits` the
+ *  sub-elements register their click boxes (bars, points, wedges, the
+ *  series line, legend entries, the title band) — Word's second-stage chart
+ *  selection reads them once the chart is framed. */
 export function paintChartMember(
   tree: IGroup,
   m: Extract<LayoutDrawingMember, { kind: "chart" }>,
+  hits?: ChartHitContext,
 ): void {
   const model = isRecord(m.chart) ? readModel(m.chart) : undefined;
   if (!model || model.series.length === 0) {
@@ -490,31 +583,57 @@ export function paintChartMember(
   }
   const chart = new Group({ x: m.x, y: m.y, width: m.width, height: m.height });
   tree.add(chart);
+  const reg: ElementReg | undefined = hits
+    ? (part, x, y, width, height) =>
+        hits.ctx.hitBoxes?.push({
+          page: hits.ctx.pageIndex,
+          x: hits.ox + m.x + x,
+          y: hits.oy + m.y + y,
+          width,
+          height,
+          para: hits.para,
+          index: hits.index,
+          kind: hits.kind,
+          chartPart: part.shape
+            ? { ...part, shape: offsetShape(part.shape, hits.ox + m.x, hits.oy + m.y) }
+            : part,
+          ...(hits.ctx.layer === "behind" ? { behind: true } : {}),
+        })
+    : undefined;
   let top = 0;
   if (model.title) {
-    label(chart, model.title, m.width / 2, top + 4, TITLE_PX, "center", m.width);
+    // No width box: the title renders at its natural size anchored center —
+    // Word never truncates a chart title, so nothing here may clip it. The
+    // label's verticalAlign lift (~6px of ink above the y anchor) is budgeted
+    // into the y so the glyphs clear the chart's top clip (inline charts paint
+    // inside a clipped holder box — ink above y=0 is cut).
+    label(chart, model.title, m.width / 2, top + 10, TITLE_PX, "center");
+    reg?.({ title: true }, 0, 0, m.width, TITLE_PX + 8);
     top += TITLE_PX + 8;
   }
+  const pie = model.type === "pie" || model.type === "doughnut";
+  // A pie's legend (its categories) shows on the single series too — Word
+  // defaults every pie to a legend; other charts need a second series.
   const legendSize =
-    model.legend && model.series.length > 1
+    model.legend && (pie || model.series.length > 1)
       ? model.legendPosition === "right" || model.legendPosition === "left"
         ? { w: 84, h: 0 }
         : { w: 0, h: 20 }
       : { w: 0, h: 0 };
   const legendBox: PlotBox | undefined =
     legendSize.w || legendSize.h
-      ? model.legendPosition === "left" || model.legendPosition === "top"
-        ? { x: 0, y: 0, width: legendSize.w || m.width, height: legendSize.h || m.height }
-        : {
-            x: legendSize.w ? m.width - legendSize.w : 0,
-            y: m.height - legendSize.h,
-            width: legendSize.w || m.width,
-            height: legendSize.h || m.height,
-          }
+      ? {
+          // The band anchors to the edge it names — a top band sits below the
+          // title — and the cross-axis spans the chart.
+          x: model.legendPosition === "right" ? m.width - legendSize.w : 0,
+          y: model.legendPosition === "bottom" ? m.height - legendSize.h : top,
+          width: legendSize.w || m.width,
+          height: legendSize.h || m.height,
+        }
       : undefined;
   const plot: PlotBox = {
     x: (legendBox && model.legendPosition === "left" ? legendSize.w : 0) + 44,
-    y: top + 6,
+    y: top + (legendBox && model.legendPosition === "top" ? legendSize.h : 0) + 6,
     width:
       m.width -
       44 -
@@ -528,20 +647,20 @@ export function paintChartMember(
       (legendBox && model.legendPosition === "bottom" ? legendSize.h : 0) -
       (legendBox && model.legendPosition === "top" ? legendSize.h : 0),
   };
-  if (legendBox) paintLegend(chart, model, legendBox);
+  if (legendBox) paintLegend(chart, model, legendBox, reg);
   switch (model.type) {
     case "column":
     case "bar":
     case "line":
     case "area":
-      paintValueChart(chart, model, plot);
+      paintValueChart(chart, model, plot, reg);
       break;
     case "pie":
     case "doughnut":
-      paintPie(chart, model, plot);
+      paintPie(chart, model, plot, reg);
       break;
     case "scatter":
-      paintScatter(chart, model, plot);
+      paintScatter(chart, model, plot, reg);
       break;
     default:
       paintPlaceholder(chart, model, plot);

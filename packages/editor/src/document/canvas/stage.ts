@@ -1,4 +1,5 @@
 import {
+  chartShapeHit,
   paintColumnSeparators,
   paintFootnotes,
   paintFurnitureStack,
@@ -1281,7 +1282,9 @@ export class CanvasStage {
   /** The topmost drawing whose painted box contains the page-local point
    *  (null when none does) — later-painted wins, Word's z-click. A rotated
    *  box hit-tests in its own space: the point un-rotates about the box
-   *  center before the rectangle check. */
+   *  center before the rectangle check. A chart sub-element with an exact
+   *  shape (a pie wedge, a series line) hit-tests the shape, not the
+   *  bounding rectangle. */
   drawingAt(page: number, lx: number, ly: number): DrawingHitBox | null {
     const boxes = this.hitBoxes.get(page);
     if (!boxes) return null;
@@ -1297,6 +1300,10 @@ export class CanvasStage {
         const dy = ly - cy;
         px = cx + dx * Math.cos(rad) - dy * Math.sin(rad);
         py = cy + dx * Math.sin(rad) + dy * Math.cos(rad);
+      }
+      if (b.chartPart?.shape) {
+        if (chartShapeHit(b.chartPart.shape, px, py)) return b;
+        continue;
       }
       if (px >= b.x && px <= b.x + b.width && py >= b.y && py <= b.y + b.height) return b;
     }
@@ -1334,13 +1341,22 @@ export class CanvasStage {
     return [...this.hitBoxes.values()].flat();
   }
 
+  /** One drawing's chart sub-element boxes, fresh geometry (the sub-selection
+   *  highlight re-reads them on every place — a re-render re-objects the
+   *  boxes, so the identity match goes by the hit's host/index/kind). */
+  chartPartBoxesOf(para: unknown, index: number, kind: DrawingHitBox["kind"]): DrawingHitBox[] {
+    return [...this.hitBoxes.values()]
+      .flat()
+      .filter((b) => b.para === para && b.index === index && b.kind === kind && b.chartPart);
+  }
+
   /** The page's in-front float boxes (page-local px) — the spelling overlay
    *  clips its squiggles against these: a front-of-text picture covers the
    *  text and its wave (Word keeps only the selection and caret above front
    *  floats, and those overlays stay whole). */
   frontFloatBoxes(page: number): Array<{ x: number; y: number; width: number; height: number }> {
     return (this.hitBoxes.get(page) ?? [])
-      .filter((b) => b.kind === "drawing" && !b.behind)
+      .filter((b) => b.kind === "drawing" && !b.behind && !b.chartPart)
       .map(({ x, y, width, height }) => ({ x, y, width, height }));
   }
 

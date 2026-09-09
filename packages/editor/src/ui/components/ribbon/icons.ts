@@ -38,6 +38,7 @@ import copy from "@fluentui/svg-icons/icons/copy_24_regular.svg?raw";
 import crop from "@fluentui/svg-icons/icons/crop_24_regular.svg?raw";
 import cube from "@fluentui/svg-icons/icons/cube_24_regular.svg?raw";
 import cut from "@fluentui/svg-icons/icons/cut_24_regular.svg?raw";
+import dataAreaRegular from "@fluentui/svg-icons/icons/data_area_24_regular.svg?raw";
 import designIdeas from "@fluentui/svg-icons/icons/design_ideas_24_regular.svg?raw";
 import diagram from "@fluentui/svg-icons/icons/diagram_24_regular.svg?raw";
 import dismiss from "@fluentui/svg-icons/icons/dismiss_24_regular.svg?raw";
@@ -246,6 +247,7 @@ const RIBBON_ICONS: Record<string, string> = {
   shapes,
   smartart: diagram,
   chart: chartMultiple,
+  "data-area": dataAreaRegular,
   hyperlink: link,
   link,
   bookmark,

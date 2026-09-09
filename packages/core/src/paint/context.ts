@@ -40,6 +40,87 @@ export interface DrawingHitBox {
   /** Clockwise rotation of the box about its center, degrees — the click's
    *  hit test un-rotates the point into the box's own space. */
   rotation?: number;
+  /** A chart sub-element the box selects inside the framed chart (Word's
+   *  two-stage: the first click selects the chart, the next lands on the
+   *  plot). Present only on boxes the chart painter registered. */
+  chartPart?: ChartPartHit;
+}
+
+/** One chart sub-element's exact geometry when it is not a rectangle (a pie
+ *  wedge, a series line) — page-local px; the hit box's rect stays the
+ *  bounding box. A wedge is the sector between the two angles (radii `r`
+ *  outer, `hole` inner); a poly is the point run, hit-tested as a corridor
+ *  of `width` around the segments or, when `closed`, as the polygon. */
+export type ChartPartShape =
+  | { kind: "wedge"; cx: number; cy: number; r: number; a0: number; a1: number; hole?: number }
+  | { kind: "poly"; pts: [number, number][]; width?: number; closed?: boolean };
+
+/** A chart sub-element a click can select inside the framed chart.
+ *  `series`/`point` index the chart payload's series array and a series'
+ *  values; `legend` marks a legend entry (it selects its series, like
+ *  Word's); `title` the title band. */
+export interface ChartPartHit {
+  series?: number;
+  point?: number;
+  legend?: boolean;
+  title?: boolean;
+  shape?: ChartPartShape;
+}
+
+/** The exact-shape hit test behind {@link ChartPartShape}. */
+export function chartShapeHit(shape: ChartPartShape, x: number, y: number): boolean {
+  if (shape.kind === "wedge") {
+    const dx = x - shape.cx;
+    const dy = y - shape.cy;
+    const d = Math.hypot(dx, dy);
+    if (d > shape.r || (shape.hole != null && d < shape.hole)) return false;
+    if (shape.a1 - shape.a0 >= Math.PI * 2) return true;
+    let a = Math.atan2(dy, dx);
+    const twoPi = Math.PI * 2;
+    while (a < shape.a0) a += twoPi;
+    return a <= shape.a1;
+  }
+  const pts = shape.pts;
+  if (!shape.closed) {
+    const half = (shape.width ?? 10) / 2;
+    for (let i = 1; i < pts.length; i++) {
+      const [x0, y0] = pts[i - 1]!;
+      const [x1, y1] = pts[i]!;
+      const dx = x1 - x0;
+      const dy = y1 - y0;
+      const t =
+        dx === 0 && dy === 0
+          ? 0
+          : Math.max(0, Math.min(1, ((x - x0) * dx + (y - y0) * dy) / (dx * dx + dy * dy)));
+      if (Math.hypot(x - (x0 + t * dx), y - (y0 + t * dy)) <= half) return true;
+    }
+    return false;
+  }
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const [xi, yi] = pts[i]!;
+    const [xj, yj] = pts[j]!;
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+/** What the chart painter needs to register sub-element hit boxes — the
+ *  paint context (page, layer, the accumulation list) plus the host identity
+ *  a click resolves through. Absent for rotated/mirrored drawings: their
+ *  members paint in spinner space whose geometry the hit test cannot
+ *  un-map. */
+export interface ChartHitContext {
+  ctx: PaintContext;
+  para: LaidOutParagraph;
+  index: number;
+  kind: DrawingHitBox["kind"];
+  /** The member space's page origin. A holder Box (inline pictures, clipped
+   *  drawings) positions members tree-local while sitting at (ox,oy) on the
+   *  page, so registered boxes add it back; direct painters carry the origin
+   *  in the member position and pass 0. */
+  ox: number;
+  oy: number;
 }
 
 /** One editable text-box stack (a wps txbx member's laid paragraphs),

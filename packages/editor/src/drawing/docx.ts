@@ -2,15 +2,18 @@ import type { Node as PMNode } from "@tiptap/pm/model";
 import { NodeSelection, type EditorState, type Selection } from "@tiptap/pm/state";
 
 /** The drawing under a NodeSelection — which context tab its selection calls
- *  for: "picture" (Picture Tools), "shape"/"group" (Drawing Tools). Null on
- *  any other selection (text, table, math, …). */
-export function drawingSelectionKind(state: EditorState): "picture" | "shape" | "group" | null {
+ *  for: "picture" (Picture Tools), "shape"/"group" (Drawing Tools),
+ *  "chart" (Chart Tools). Null on any other selection (text, table, math, …). */
+export function drawingSelectionKind(
+  state: EditorState,
+): "picture" | "shape" | "group" | "chart" | null {
   const sel = state.selection;
   if (!(sel instanceof NodeSelection)) return null;
   const name = sel.node.type.name;
   if (name === "image") return "picture";
   if (name === "wpsShape") return "shape";
   if (name === "wpgGroup") return "group";
+  if (name === "chart") return "chart";
   return null;
 }
 
@@ -25,14 +28,14 @@ export interface DrawingDocxHost {
 
 /** The PM node position of a drawing hit's target — the host paragraph's
  *  inner position via the caret map, then the index-th node of the hit's
- *  kind: "drawing" counts floating pictures + wps shapes + wpg groups
- *  (projectDrawings' run order = the paragraph's content order), "inline"
- *  counts the paragraph's non-floating images (the line items' picture
- *  order). A hit with a childPath targets a group member: it resolves to
- *  the member only while the group is entered (the NodeSelection sits on a
- *  member INSIDE the group — selecting the group itself does not enter it,
- *  or grouping would leave the next click stuck on a member) or the click
- *  is the entry double click (`enterGroup`). */
+ *  kind: "drawing" counts floating pictures + wps shapes + wpg groups +
+ *  floating charts (projectDrawings' run order = the paragraph's content
+ *  order), "inline" counts the paragraph's non-floating images and charts
+ *  (the line items' picture order). A hit with a childPath targets a group
+ *  member: it resolves to the member only while the group is entered (the
+ *  NodeSelection sits on a member INSIDE the group — selecting the group
+ *  itself does not enter it, or grouping would leave the next click stuck
+ *  on a member) or the click is the entry double click (`enterGroup`). */
 export function drawingNodePos(
   host: DrawingDocxHost,
   para: unknown,
@@ -45,15 +48,19 @@ export function drawingNodePos(
   if (innerPos == null) return null;
   const parentNode = host.doc.nodeAt(innerPos - 1);
   if (!parentNode) return null;
+  const floating = (child: PMNode): boolean => {
+    if (child.type.name === "image") return child.attrs.floating != null;
+    if (child.type.name === "chart")
+      return (child.attrs.chart as Record<string, unknown> | null)?.floating != null;
+    return false;
+  };
   let seen = 0;
   let hit = -1;
   parentNode.forEach((child, offset) => {
     const target =
       kind === "drawing"
-        ? child.type.name === "wpsShape" ||
-          child.type.name === "wpgGroup" ||
-          (child.type.name === "image" && child.attrs.floating != null)
-        : child.type.name === "image" && child.attrs.floating == null;
+        ? child.type.name === "wpsShape" || child.type.name === "wpgGroup" || floating(child)
+        : (child.type.name === "image" || child.type.name === "chart") && !floating(child);
     if (target && hit < 0 && seen++ === index) hit = innerPos + offset;
   });
   if (hit < 0) return null;

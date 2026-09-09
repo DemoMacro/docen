@@ -242,6 +242,7 @@ export const documentTemplate = html`
   <docen-caption-dialog part="caption"></docen-caption-dialog>
   <docen-note-dialog part="note"></docen-note-dialog>
   <docen-field-dialog part="field"></docen-field-dialog>
+  <docen-chart-data-dialog part="chart-data"></docen-chart-data-dialog>
   <docen-cross-reference-dialog part="cross-reference"></docen-cross-reference-dialog>
   <docen-sources-dialog part="sources"></docen-sources-dialog>
   <docen-recipients-dialog part="recipients"></docen-recipients-dialog>

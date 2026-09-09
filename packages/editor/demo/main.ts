@@ -241,6 +241,68 @@ const demoDocument = (): JSONContent => ({
         },
       ],
     },
+    {
+      type: "paragraph",
+      attrs: { heading: "Heading2" },
+      content: [t("Charts")],
+    },
+    {
+      type: "paragraph",
+      content: [
+        t(
+          "An inline chart below paints through the same pipeline: click it once for the frame, then again on a bar or the legend — Word's two-stage selection (Delete removes the selected series; Edit Data on the Chart Design tab rewrites the grid).",
+        ),
+      ],
+    },
+    {
+      type: "paragraph",
+      attrs: { alignment: "center" },
+      content: [
+        {
+          type: "chart",
+          attrs: {
+            chart: {
+              type: "column",
+              title: "Quarterly Revenue",
+              categories: ["Q1", "Q2", "Q3", "Q4"],
+              series: [
+                { name: "Revenue", values: [12, 18, 15, 22] },
+                { name: "Costs", values: [8, 11, 9, 13] },
+              ],
+              showLegend: true,
+              legendPosition: "bottom",
+              transformation: { width: 4572000, height: 2743200 },
+            },
+          },
+        },
+      ],
+    },
+    // A floating chart anchors like the floating picture above (wrap none,
+    // EMU offsets) — it drags with the same overlay gesture.
+    {
+      type: "paragraph",
+      content: [
+        {
+          type: "chart",
+          attrs: {
+            chart: {
+              type: "pie",
+              title: "Market Share",
+              categories: ["Alpha", "Beta", "Gamma"],
+              series: [{ name: "Share", values: [45, 30, 25] }],
+              showLegend: true,
+              legendPosition: "right",
+              transformation: { width: 3657600, height: 2743200 },
+              floating: {
+                horizontalPosition: { relative: "margin", offset: 1828800 },
+                verticalPosition: { relative: "paragraph", offset: 95250 },
+                wrap: { type: "none" },
+              },
+            },
+          },
+        },
+      ],
+    },
     // Section break — an explicit next-page section break; the next section
     // starts on a fresh page.
     {

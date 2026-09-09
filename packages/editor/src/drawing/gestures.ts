@@ -24,6 +24,10 @@ export interface DrawingGesturesHost {
     kind: "drawing" | "inline",
     childPath?: readonly number[],
   ): DrawingHit | null;
+  /** A chart's sub-element boxes with fresh geometry (the sub-selection
+   *  highlight re-reads them on every place — a re-render re-objects the
+   *  boxes, so deleted series drop out and moved ones follow). */
+  chartPartBoxes(para: unknown, index: number, kind: "drawing" | "inline"): DrawingHit[];
   /** The paragraph under a page-local drop point: its content-end insertion
    *  position and laid box origin — the drop re-anchor's target. Null on
    *  bare geometry (margin, furniture) where no paragraph can host one. */
@@ -95,14 +99,18 @@ export class DrawingGestures {
    *  left lands at the release point minus this offset, on either side of
    *  a page crossing. */
   #grab: { x: number; y: number } | null = null;
+  /** The chart sub-selection inside the framed chart (Word's second stage):
+   *  UI state only — the PM selection stays the chart's NodeSelection, and
+   *  Delete/Esc read it (a series delete, the point→series→chart stepdown). */
+  #chartPart: { series?: number; point?: number; title?: boolean } | null = null;
+  #chartShapes: SVGSVGElement[] = [];
 
   constructor(host: DrawingGesturesHost) {
     this.#host = host;
     // The drawing-editor adapter: what a dragged box means. The box is
-    // page-local px at scale 1; the PM node's width/height attrs are px too,
-    // so the write-back is a direct setNodeMarkup (inline pictures size
-    // through the same attrs; a re-render re-anchors the frame via
-    // drawingBoxOf). A body drag moves the drawing: the px delta converts to
+    // page-local px at scale 1; a resize lands through the engine's
+    // drawing-width/height commands, which own the per-kind size carriers. A
+    // body drag moves the drawing: the px delta converts to
     // EMU (the floating attrs' unit) and lands through the engine's
     // move-drawing command, which adds it to the current offsets.
     this.#overlay = new DrawingOverlay({
@@ -157,20 +165,146 @@ export class DrawingGestures {
   }
 
   /** Begin a move drag from a pointerdown on the selected drawing itself (the
-   *  bridge owns that hit chain). */
-  beginMove(clientX: number, clientY: number): void {
+   *  bridge owns that hit chain). A release with no real drag behind it calls
+   *  `onClick` instead of committing — a press that might have been a drag
+   *  still lands as a click when the pointer never travelled. */
+  beginMove(clientX: number, clientY: number, onClick?: () => void): void {
     const down = this.#sel ? this.#host.pageAtPoint(clientX, clientY) : null;
     this.#grab = down && this.#sel ? { x: down.x - this.#sel.x, y: down.y - this.#sel.y } : null;
-    this.#overlay.beginMove(clientX, clientY);
+    this.#overlay.beginMove(clientX, clientY, onClick);
+  }
+
+  /** Whether the framed selection is this chart — the bridge's gate for a
+   *  second-stage click on one of its sub-element hits. */
+  chartPartOn(hit: DrawingHit): boolean {
+    return (
+      this.#sel != null &&
+      this.#sel.para === hit.para &&
+      this.#sel.index === hit.index &&
+      this.#sel.kind === hit.kind
+    );
+  }
+
+  /** Word's two-stage chart click: with the chart framed, a plot element
+   *  click selects its series first, then the point (the same point again
+   *  keeps it); a legend entry selects its series; the title selects
+   *  itself. The chart's own frame stays. */
+  selectChartPart(hit: DrawingHit): void {
+    const p = hit.chartPart;
+    if (!p) return;
+    if (p.title) {
+      this.#chartPart = { title: true };
+    } else {
+      const cur = this.#chartPart;
+      const series = p.series!;
+      this.#chartPart =
+        cur?.series === series && cur.point != null
+          ? cur // the already-selected point again — Word keeps it
+          : cur?.series === series && p.point != null
+            ? { series, point: p.point }
+            : { series };
+    }
+    this.#placeChartPart();
+  }
+
+  /** Escape's step down through the sub-selection: a point returns to its
+   *  series, a series or the title back to the bare chart frame. True while
+   *  a sub-selection was showing (the caller keeps the chart selected). */
+  escapeChartPart(): boolean {
+    if (!this.#chartPart) return false;
+    if (this.#chartPart.point != null) {
+      this.#chartPart = { series: this.#chartPart.series };
+      this.#placeChartPart();
+      return true;
+    }
+    this.#dropChartPart();
+    return true;
+  }
+
+  /** The sub-selected series (Delete removes it — Word), null on a title
+   *  selection or nothing. */
+  chartSeriesSelected(): number | null {
+    return this.#chartPart?.point == null && this.#chartPart?.series != null
+      ? this.#chartPart.series
+      : null;
+  }
+
+  /** Any chart sub-element is sub-selected — Delete's gate: the chart holds
+   *  the NodeSelection, so an unhandled Delete would eat the whole chart. */
+  get chartPartSelected(): boolean {
+    return this.#chartPart != null;
+  }
+
+  /** Whether the chart's title is the sub-selection (Delete clears it). */
+  chartTitleSelected(): boolean {
+    return this.#chartPart?.title === true;
+  }
+
+  /** Word: removing the sub-selected series (or clearing the title) drops
+   *  the sub-selection — the chart keeps its frame instead of a phantom
+   *  highlight landing on the next series. */
+  clearChartPart(): void {
+    this.#dropChartPart();
+  }
+
+  /** Redraw the sub-selection highlight from the stage's fresh boxes — one
+   *  SVG per element, the exact shape when the element has one (a wedge, a
+   *  series line). Elements that no longer paint (a deleted series) drop
+   *  the sub-selection. */
+  #placeChartPart(): void {
+    for (const el of this.#chartShapes) el.remove();
+    this.#chartShapes = [];
+    const sel = this.#sel;
+    const part = this.#chartPart;
+    if (!sel || !part) return;
+    const scale = this.#host.scale();
+    const boxes = this.#host.chartPartBoxes(sel.para, sel.index, sel.kind).filter((b) => {
+      const p = b.chartPart;
+      if (!p) return false;
+      return part.title
+        ? p.title === true
+        : p.series === part.series && !p.legend && (part.point == null || p.point === part.point);
+    });
+    if (!boxes.length) {
+      this.#chartPart = null;
+      return;
+    }
+    for (const b of boxes) {
+      const host = this.#host.pageHost(b.page);
+      if (!host) continue;
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("viewBox", `${b.x} ${b.y} ${b.width} ${b.height}`);
+      Object.assign(svg.style, {
+        position: "absolute",
+        left: `${b.x * scale}px`,
+        top: `${b.y * scale}px`,
+        width: `${b.width * scale}px`,
+        height: `${b.height * scale}px`,
+        overflow: "visible",
+        pointerEvents: "none",
+        zIndex: "6",
+      } satisfies Partial<CSSStyleDeclaration>);
+      svg.append(chartPartShapeEl(b));
+      host.append(svg);
+      this.#chartShapes.push(svg);
+    }
+  }
+
+  #dropChartPart(): void {
+    this.#chartPart = null;
+    for (const el of this.#chartShapes) el.remove();
+    this.#chartShapes = [];
   }
 
   /** Select the drawing a click hit: the NodeSelection lands first, then the
    *  frame shows. A member hit that resolved to the group (the group was not
    *  entered — Word's first click selects the whole group) frames the group's
    *  box, not the member's. `enter` (the entry double click) targets the
-   *  member instead. False when the PM side cannot pair the hit (the caller
-   *  falls through to text placement). */
+   *  member instead. A chart sub-element hit frames the chart's own box
+   *  (Word: the first click selects the whole chart). False when the PM side
+   *  cannot pair the hit (the caller falls through to text placement). */
   select(hit: DrawingHit, enter = false): boolean {
+    this.#dropChartPart();
     const nodePos = this.#host.drawingSelection(hit, enter);
     const node = nodePos != null ? this.#host.editor().state.doc.nodeAt(nodePos) : null;
     if (nodePos == null || !node) return false;
@@ -179,7 +313,7 @@ export class DrawingGestures {
       return true;
     });
     this.#sel =
-      hit.childPath && node.type.name === "wpgGroup"
+      (hit.childPath && node.type.name === "wpgGroup") || hit.chartPart
         ? (this.#host.drawingBoxOf(hit.para, hit.index, hit.kind) ?? hit)
         : hit;
     this.place();
@@ -242,6 +376,7 @@ export class DrawingGestures {
       this.#overlay.refresh(this.#sel, this.#sel.rotation);
     }
     this.#placeMulti();
+    this.#placeChartPart();
   }
 
   /** Re-resolve the multi-selection against the fresh geometry and redraw the
@@ -278,6 +413,7 @@ export class DrawingGestures {
   clear(): void {
     this.#sel = null;
     this.#multi = [];
+    this.#dropChartPart();
     for (const el of this.#multiBoxes) el.remove();
     this.#multiBoxes = [];
   }
@@ -361,29 +497,26 @@ export class DrawingGestures {
           ? (attrs.wpsShape as Record<string, unknown> | undefined)?.floating
           : node.type.name === "wpgGroup"
             ? (attrs.wpgGroup as Record<string, unknown> | undefined)?.floating
-            : null;
+            : node.type.name === "chart"
+              ? (attrs.chart as Record<string, unknown> | undefined)?.floating
+              : null;
     return (carrier as Record<string, unknown> | null | undefined) ?? null;
   }
 
-  /** A handle drag's box: the selected image's px attrs resize in place,
-   *  keeping the NodeSelection (a setNodeMarkup that changes attrs demotes a
-   *  NodeSelection to a caret — re-create it so the resize keeps the drawing
-   *  selected, Word's picture stays selected after a handle drag). */
+  /** A handle drag's box: the drawing resizes through the host's size
+   *  commands — they own the per-kind carriers (the image's px attrs, a
+   *  shape/group/chart's transformation EMU) and keep the NodeSelection (a
+   *  setNodeMarkup that changes attrs demotes it to a caret; Word's drawing
+   *  stays selected after a handle drag). Both axes chain into one
+   *  transaction, so the resize is a single undo step. */
   #applyBox(box: { x: number; y: number; width: number; height: number }): void {
     if (!this.#sel) return;
-    const nodePos = this.#host.drawingSelection(this.#sel);
-    if (nodePos == null) return;
-    const editor = this.#host.editor();
-    if (!editor.state.doc.nodeAt(nodePos)) return;
-    editor.commands.command(({ tr, dispatch }) => {
-      tr.setNodeMarkup(nodePos, undefined, {
-        ...editor.state.doc.nodeAt(nodePos)!.attrs,
-        width: box.width,
-        height: box.height,
-      }).setSelection(NodeSelection.create(tr.doc, nodePos) as never);
-      dispatch?.(tr as never);
-      return true;
-    });
+    this.#host
+      .editor()
+      .chain()
+      ["drawing-width"](`${Math.round(box.width)}px`)
+      ["drawing-height"](`${Math.round(box.height)}px`)
+      .run();
   }
 
   /** A body drag's offset: the release point resolves the drop page first —
@@ -553,5 +686,73 @@ function sameHit(a: DrawingHit, b: DrawingHit): boolean {
     a.index === b.index &&
     a.kind === b.kind &&
     path(a.childPath) === path(b.childPath)
+  );
+}
+
+const CHART_PART_TINT = "rgba(43,124,211,.18)";
+const CHART_PART_EDGE = "#2b7cd3";
+
+/** The sub-selection highlight for one element box: the exact shape when the
+ *  element has one (a wedge's arc path, a series line), the box rectangle
+ *  otherwise. Coordinates are page-local px — the SVG's viewBox carries the
+ *  box offset, so the shape mounts untransformed. */
+function chartPartShapeEl(box: DrawingHit): SVGElement {
+  const shape = box.chartPart?.shape;
+  if (!shape) {
+    const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    rect.setAttribute("x", String(box.x));
+    rect.setAttribute("y", String(box.y));
+    rect.setAttribute("width", String(box.width));
+    rect.setAttribute("height", String(box.height));
+    rect.setAttribute("fill", CHART_PART_TINT);
+    rect.setAttribute("stroke", CHART_PART_EDGE);
+    rect.setAttribute("stroke-width", "1.5");
+    return rect;
+  }
+  if (shape.kind === "poly" && !shape.closed) {
+    const line = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
+    line.setAttribute("points", shape.pts.map(([x, y]) => `${x},${y}`).join(" "));
+    line.setAttribute("fill", "none");
+    line.setAttribute("stroke", CHART_PART_EDGE);
+    line.setAttribute("stroke-width", "2.5");
+    line.setAttribute("stroke-linejoin", "round");
+    return line;
+  }
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute(
+    "d",
+    shape.kind === "wedge"
+      ? wedgePath(shape.cx, shape.cy, shape.r, shape.a0, shape.a1, shape.hole)
+      : `${shape.pts.map(([x, y], i) => `${i === 0 ? "M" : "L"} ${x} ${y}`).join(" ")} Z`,
+  );
+  path.setAttribute("fill", CHART_PART_TINT);
+  path.setAttribute("stroke", CHART_PART_EDGE);
+  path.setAttribute("stroke-width", "1.5");
+  return path;
+}
+
+/** The wedge outline: the outer arc closed at the center — or, with a hole,
+ *  the annular sector the painter draws. */
+function wedgePath(
+  cx: number,
+  cy: number,
+  r: number,
+  a0: number,
+  a1: number,
+  hole?: number,
+): string {
+  const x0 = cx + r * Math.cos(a0);
+  const y0 = cy + r * Math.sin(a0);
+  const x1 = cx + r * Math.cos(a1);
+  const y1 = cy + r * Math.sin(a1);
+  const large = a1 - a0 > Math.PI ? 1 : 0;
+  if (!hole) return `M ${cx} ${cy} L ${x0} ${y0} A ${r} ${r} 0 ${large} 1 ${x1} ${y1} Z`;
+  const hx0 = cx + hole * Math.cos(a0);
+  const hy0 = cy + hole * Math.sin(a0);
+  const hx1 = cx + hole * Math.cos(a1);
+  const hy1 = cy + hole * Math.sin(a1);
+  return (
+    `M ${x0} ${y0} A ${r} ${r} 0 ${large} 1 ${x1} ${y1} ` +
+    `L ${hx1} ${hy1} A ${hole} ${hole} 0 ${large} 0 ${hx0} ${hy0} Z`
   );
 }

@@ -108,8 +108,10 @@ function evenSplit(text: string): [string, string] {
  *  ParagraphChild union is wide and its runtime shapes are looser still
  *  (compile pushes `{text, …rPr}` run forms), so each leg is validated rather
  *  than trusted.
- *  Known-but-unprojected inline atoms (tab, chart, math, fields) carry no box
- *  yet — they render as absence, a registered gap to close type by type. */
+ *  The remaining inline atoms project as their own kinds: tab/break as zero
+ *  width, charts through the picture member-replay channel, fields dynamic
+ *  or re-hydrated from cached results, math as a labeled placeholder slot
+ *  (no OMML layout engine yet). */
 export function projectRuns(
   runs: readonly unknown[],
   chainRPr: Rec,

@@ -206,6 +206,9 @@ export const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   "update-field",
   "edit-field",
   "toggle-field-checkbox",
+  // Chart Design's Edit Data opens the data-grid dialog (the commit arrives
+  // via chart:ok → the chart-data-apply command).
+  "chart-edit-data",
   "equation",
   // Page Color writes the doc-level w:background (doc.attrs.background) from
   // the color-picker's palette value. Page Borders stamps a w:pgBorders

@@ -86,6 +86,7 @@ declare module "@tiptap/core" {
       "section-break-next": () => ReturnType;
       "section-break-continuous": () => ReturnType;
       "insert-table": (options?: InsertTableOptions) => ReturnType;
+      chart: () => ReturnType;
       "delete-table": () => ReturnType;
       // Table context commands (the Table Design / Layout contextual tabs).
       "insert-row-above": () => ReturnType;
@@ -156,6 +157,14 @@ declare module "@tiptap/core" {
       "shape-outline": (value?: string) => ReturnType;
       "shape-effects": (value?: string) => ReturnType;
       "shape-text-direction": (value?: string) => ReturnType;
+      // Chart Design tab — the type token (column/bar/line/area/pie/doughnut/
+      // scatter), the legend placement ("none" or a LegendPosition), and the
+      // Edit Data dialog's commit (JSON {title?, categories?, series?}).
+      "chart-type": (value?: string) => ReturnType;
+      "chart-legend": (value?: string) => ReturnType;
+      "chart-data-apply": (value?: string) => ReturnType;
+      // value is the series index to remove (the plot's sub-selected series).
+      "chart-series-delete": (value?: string) => ReturnType;
       // Arrange — floating drawings (z-order, wrap, rotation, position).
       "bring-forward": () => ReturnType;
       "send-backward": () => ReturnType;
@@ -215,6 +224,7 @@ export const WIRED_DISPATCH: ReadonlySet<string> = new Set([
   "section-break-next",
   "section-break-continuous",
   "insert-table",
+  "chart",
   "delete-table",
   "insert-row-above",
   "insert-row-below",
@@ -278,6 +288,10 @@ export const WIRED_DISPATCH: ReadonlySet<string> = new Set([
   "shape-outline",
   "shape-effects",
   "shape-text-direction",
+  "chart-type",
+  "chart-legend",
+  "chart-data-apply",
+  "chart-series-delete",
   "bring-forward",
   "send-backward",
   "bring-to-front",
@@ -427,6 +441,21 @@ export interface DrawingPropertiesPatch {
   lockAnchor?: boolean;
   /** The wrap distances (Word's Distance from text), cm → EMU. */
   distanceCm?: { top: number; bottom: number; left: number; right: number };
+}
+
+/**
+ * What the Edit Data dialog commits on OK — the grid's title/category/series
+ * values, stamped onto the selected chart by the chart-data-apply command.
+ * The chart payload's other fields (type, legend, anchor) ride through
+ * untouched.
+ */
+export interface ChartDataPatch {
+  /** The chart title text; empty clears it. */
+  title?: string;
+  /** The category axis labels, one per plotted row. */
+  categories: string[];
+  /** One entry per series — the legend name and its values. */
+  series: { name: string; values: number[] }[];
 }
 
 /**
@@ -868,12 +897,16 @@ function stampRows(
 
 /** The selected floating drawing — a NodeSelection on a floating image (its
  *  `floating` attr set), a wps shape (floating inside its `wpsShape` payload),
- *  or a wpg group (inside `wpgGroup`); the stage's hit boxes produce exactly
- *  these. Null on any other selection, so Arrange greys out through
- *  editor.can(). */
-function floatingDrawingAt(
-  state: EditorState,
-): { pos: number; attrs: Record<string, unknown>; kind: "image" | "shape" | "group" } | null {
+ *  a wpg group (inside `wpgGroup`), or a chart (inside `chart`); the stage's
+ *  hit boxes produce exactly these. Null on any other selection, so Arrange
+ *  greys out through editor.can(). */
+type FloatingDrawing = {
+  pos: number;
+  attrs: Record<string, unknown>;
+  kind: "image" | "shape" | "group" | "chart";
+};
+
+function floatingDrawingAt(state: EditorState): FloatingDrawing | null {
   const sel = state.selection;
   if (!(sel instanceof NodeSelection)) return null;
   return drawingAtPos(state.doc, sel.from);
@@ -881,10 +914,7 @@ function floatingDrawingAt(
 
 /** The floating drawing at a document position — floatingDrawingAt's by-pos
  *  form, for the multi-selection payload (no NodeSelection involved). */
-function drawingAtPos(
-  doc: PMNode,
-  pos: number,
-): { pos: number; attrs: Record<string, unknown>; kind: "image" | "shape" | "group" } | null {
+function drawingAtPos(doc: PMNode, pos: number): FloatingDrawing | null {
   const node = doc.nodeAt(pos);
   if (!node) return null;
   const attrs = node.attrs as Record<string, unknown>;
@@ -899,19 +929,24 @@ function drawingAtPos(
     const group = attrs.wpgGroup as Record<string, unknown> | null;
     return group?.floating ? { pos, attrs, kind: "group" } : null;
   }
+  if (node.type.name === "chart") {
+    const chart = attrs.chart as Record<string, unknown> | null;
+    return chart?.floating ? { pos, attrs, kind: "chart" } : null;
+  }
   return null;
 }
 
-/** The drawing's Floating object (image: a flat attr; shape: inside the
- *  wpsShape payload; group: inside wpgGroup). */
-function floatingOf(
-  target: NonNullable<ReturnType<typeof floatingDrawingAt>>,
-): Record<string, unknown> {
+/** Where each non-image kind carries its Floating object (the chart's rides
+ *  its own payload). */
+const FLOATING_CARRIER = { shape: "wpsShape", group: "wpgGroup", chart: "chart" } as const;
+
+/** The drawing's Floating object (image: a flat attr; shape/group/chart:
+ *  inside their payload). */
+function floatingOf(target: FloatingDrawing): Record<string, unknown> {
   const carrier =
     target.kind === "image"
       ? target.attrs.floating
-      : (target.attrs[target.kind === "shape" ? "wpsShape" : "wpgGroup"] as Record<string, unknown>)
-          .floating;
+      : (target.attrs[FLOATING_CARRIER[target.kind]] as Record<string, unknown>).floating;
   return carrier as Record<string, unknown>;
 }
 
@@ -938,14 +973,40 @@ function shapeAt(
   return attrs.wpsShape ? { pos: sel.from, attrs, kind: "shape" } : null;
 }
 
+/** The selected chart node — inline or floating alike: the type/legend/data
+ *  edits write the chart payload wherever the chart sits. */
+function chartAt(
+  state: EditorState,
+): { pos: number; attrs: Record<string, unknown>; chart: Record<string, unknown> } | null {
+  const sel = state.selection;
+  if (!(sel instanceof NodeSelection) || sel.node.type.name !== "chart") return null;
+  const attrs = sel.node.attrs as Record<string, unknown>;
+  return attrs.chart
+    ? { pos: sel.from, attrs, chart: attrs.chart as Record<string, unknown> }
+    : null;
+}
+
+/** Stamp the patched chart payload back onto the chart node, restoring the
+ *  NodeSelection the way the Arrange commands do (the markup write collapses
+ *  it — the tab must stay so the edit can repeat). */
+function stampChart(
+  tr: Transaction,
+  target: NonNullable<ReturnType<typeof chartAt>>,
+  chart: Record<string, unknown>,
+): boolean {
+  tr.setNodeMarkup(target.pos, undefined, { ...target.attrs, chart });
+  tr.setSelection(NodeSelection.create(tr.doc, target.pos));
+  return true;
+}
+
 /** Write a Floating back onto the drawing, shallow-copying the carrier the
- *  way PM immutability requires (image: flat; shape/group: the payload). */
+ *  way PM immutability requires (image: flat; shape/group/chart: the payload). */
 function withFloating(
   target: NonNullable<ReturnType<typeof floatingDrawingAt>>,
   floating: Record<string, unknown>,
 ): Record<string, unknown> {
   if (target.kind === "image") return { ...target.attrs, floating };
-  const key = target.kind === "shape" ? "wpsShape" : "wpgGroup";
+  const key = FLOATING_CARRIER[target.kind];
   return {
     ...target.attrs,
     [key]: { ...(target.attrs[key] as Record<string, unknown>), floating },
@@ -983,13 +1044,15 @@ function offsetFloating(
 /** One member's attrs re-homed into a fresh group's child space: the image's
  *  EMU box moves to groupXfrm (its floating dropped), the shape's
  *  transformation becomes the child-space offset form, a nested group's
- *  payload flips to the GroupMediaData child-space transformation. Everything
- *  else (src/crop/fill/body) rides along untouched. */
+ *  payload flips to the GroupMediaData child-space transformation. A chart
+ *  has no standalone in-group carrier yet — null declines the grouping.
+ *  Everything else (src/crop/fill/body) rides along untouched. */
 function memberInGroupAttrs(
-  kind: "image" | "shape" | "group",
+  kind: "image" | "shape" | "group" | "chart",
   attrs: Record<string, unknown>,
   child: { x: number; y: number; cx: number; cy: number },
-): Record<string, unknown> {
+): Record<string, unknown> | null {
+  if (kind === "chart") return null;
   if (kind === "image") {
     const next: Record<string, unknown> = { ...attrs, groupXfrm: child };
     delete next.floating;
@@ -1293,7 +1356,18 @@ function tradeCropExtent(
     tr.setSelection(NodeSelection.create(tr.doc, sel.from) as never);
     return true;
   }
-  if (sel.node.type.name !== "wpsShape" && sel.node.type.name !== "wpgGroup") return false;
+  if (sel.node.type.name !== "wpsShape" && sel.node.type.name !== "wpgGroup") {
+    if (sel.node.type.name !== "chart") return false;
+    const attrs = { ...sel.node.attrs } as Record<string, unknown>;
+    const chart = { ...(attrs.chart as Record<string, unknown>) };
+    const t = { ...((chart.transformation ?? {}) as Record<string, unknown>) };
+    t[axis] = emu;
+    chart.transformation = t;
+    attrs.chart = chart;
+    tr.setNodeMarkup(sel.from, undefined, attrs);
+    tr.setSelection(NodeSelection.create(tr.doc, sel.from) as never);
+    return true;
+  }
   const key = sel.node.type.name === "wpsShape" ? "wpsShape" : "wpgGroup";
   const attrs = { ...sel.node.attrs } as Record<string, unknown>;
   const payload = { ...(attrs[key] as Record<string, unknown>) };
@@ -1556,6 +1630,22 @@ const MIN_COL_TWIP = 720;
 
 type TableBordersLike = Record<string, { style: string; size: number; color: string } | undefined>;
 const GRID_BORDER = { style: "single", size: 4, color: "auto" };
+
+/** Word's Insert Chart default: a clustered column frame with the same
+ *  sample data Word seeds (Edit Data rewrites it), at Word's 5" × 3" extent
+ *  (EMU — the chart payload's transformation is EMU, like every drawing). */
+const DEFAULT_CHART = {
+  type: "column",
+  categories: ["Category 1", "Category 2", "Category 3", "Category 4"],
+  series: [
+    { name: "Series 1", values: [4.3, 2.5, 3.5, 4.5] },
+    { name: "Series 2", values: [2.4, 4.4, 1.8, 2.8] },
+    { name: "Series 3", values: [2, 2, 3, 5] },
+  ],
+  showLegend: true,
+  legendPosition: "bottom",
+  transformation: { width: 4572000, height: 2743200 },
+};
 const NO_BORDER = { style: "none", size: 0, color: "auto" };
 
 /** A Table Styles gallery preset: the border set plus the conditional fills —
@@ -2124,6 +2214,17 @@ export const DocumentCommands = Extension.create({
             tr.setSelection(TextSelection.near(tr.doc.resolve(pos + 2)));
             dispatch(tr.scrollIntoView());
           }
+          return true;
+        },
+      // Insert Chart — Word's default frame (clustered column, sample data,
+      // 5" × 3") as an inline atom at the caret. The Edit Data dialog and the
+      // chart-format tab rewrite the payload from here.
+      chart:
+        () =>
+        ({ state, dispatch }) => {
+          const node = state.schema.nodes.chart.create({ chart: { ...DEFAULT_CHART } });
+          if (!node) return false;
+          if (dispatch) dispatch(state.tr.replaceSelectionWith(node).scrollIntoView());
           return true;
         },
       // Delete the enclosing table (Word's right-click "Delete Table"). The
@@ -3373,6 +3474,10 @@ export const DocumentCommands = Extension.create({
           }
           const target = floatingDrawingAt(state);
           if (!target) return false;
+          // The chart painter draws no transformation rotation yet — declining
+          // is the honest response (the handles still move the chart via
+          // move-drawing).
+          if (target.kind === "chart") return false;
           const key = target.kind === "shape" ? "wpsShape" : "wpgGroup";
           const payload = target.attrs[key] as Record<string, unknown>;
           const transformation = {
@@ -3423,14 +3528,15 @@ export const DocumentCommands = Extension.create({
               floating: applyFloatingExtras(floatingOf(target), patch, offsetHCm, offsetVCm),
             });
           }
-          const key = target.kind === "shape" ? "wpsShape" : "wpgGroup";
+          const key = FLOATING_CARRIER[target.kind];
           const payload = { ...(target.attrs[key] as Record<string, unknown>) };
           const t = { ...((payload.transformation ?? {}) as Record<string, unknown>) };
           if (widthCm != null) t.width = cmTo(widthCm, EMU_PER_CM);
           if (heightCm != null) t.height = cmTo(heightCm, EMU_PER_CM);
           if (rotationDeg != null) t.rotation = rotationDeg;
           payload.transformation = t;
-          // The shape/group offsets ride the same Floating object as an image's.
+          // The shape/group/chart offsets ride the same Floating object as an
+          // image's.
           payload.floating = applyFloatingExtras(floatingOf(target), patch, offsetHCm, offsetVCm);
           return stampAttrs(tr, target, { ...target.attrs, [key]: payload });
         },
@@ -3706,6 +3812,88 @@ export const DocumentCommands = Extension.create({
           else shape.bodyProperties = body;
           return stampAttrs(tr, target, { ...target.attrs, wpsShape: shape });
         },
+      // ── Chart Design — type / legend / data (the contextual tab) ────────
+      // Chart Type: value is the ChartType token the renderer draws (the
+      // placeholder-only types grey out at the menu). Pie/doughnut/scatter
+      // have no series grouping — a hand-me-down stacked flag from the
+      // previous type would mis-shape them, so it clears.
+      "chart-type":
+        (value) =>
+        ({ state, tr }) => {
+          const target = chartAt(state);
+          if (!target || !value) return false;
+          const chart: Record<string, unknown> = { ...target.chart, type: value };
+          if (value === "pie" || value === "doughnut" || value === "scatter") delete chart.grouping;
+          return stampChart(tr, target, chart);
+        },
+      // Legend: "none" hides it (showLegend false — the painter's presence
+      // check), any other value is the LegendPosition with showLegend forced.
+      "chart-legend":
+        (value) =>
+        ({ state, tr }) => {
+          const target = chartAt(state);
+          if (!target || !value) return false;
+          const chart = { ...target.chart };
+          if (value === "none") {
+            chart.showLegend = false;
+            delete chart.legendPosition;
+          } else {
+            chart.showLegend = true;
+            chart.legendPosition = value;
+          }
+          return stampChart(tr, target, chart);
+        },
+      // Edit Data dialog's commit — JSON {title?, categories?, series?}.
+      // Absent optional fields keep the chart's current ones; an empty title
+      // string clears it (the painter drops an empty title anyway).
+      "chart-data-apply":
+        (value) =>
+        ({ state, tr }) => {
+          const target = chartAt(state);
+          if (!target || !value) return false;
+          let parsed: {
+            title?: string;
+            categories?: string[];
+            series?: { name?: string; values?: number[] }[];
+          };
+          try {
+            parsed = JSON.parse(value);
+          } catch {
+            return false;
+          }
+          const chart = { ...target.chart };
+          if (parsed.title != null) {
+            if (parsed.title) chart.title = parsed.title;
+            else delete chart.title;
+          }
+          if (parsed.categories) chart.categories = parsed.categories;
+          if (parsed.series)
+            chart.series = parsed.series.map((s, i) => {
+              const prev = (
+                target.chart.series as { name?: string; values?: number[] }[] | undefined
+              )?.[i];
+              return {
+                ...prev,
+                name: s.name ?? prev?.name ?? `Series ${i + 1}`,
+                values: s.values ?? prev?.values ?? [],
+              };
+            });
+          return stampChart(tr, target, chart);
+        },
+      // Delete Key on a sub-selected series (Word): the series leaves the
+      // chart, the categories stay for the survivors. The last series
+      // declines — an empty plot has nothing left to edit.
+      "chart-series-delete":
+        (value) =>
+        ({ state, tr }) => {
+          const target = chartAt(state);
+          const index = Number.parseInt(value ?? "", 10);
+          if (!target || !Number.isInteger(index)) return false;
+          const series = [...((target.chart.series as unknown[] | undefined) ?? [])];
+          if (index < 0 || index >= series.length || series.length <= 1) return false;
+          series.splice(index, 1);
+          return stampChart(tr, target, { ...target.chart, series });
+        },
       // Swap the source (the Change Picture flow's commit; the file-picker
       // side reads the file into a data URL at the UI layer). The frame keeps
       // its size — the new source stretches into it — and the crop resets
@@ -3954,6 +4142,16 @@ export const DocumentCommands = Extension.create({
           if (typeof h?.offset !== "number" || typeof v?.offset !== "number") return false;
           const union = unionBox(members.map((m) => m.box));
           const emu = (n: number): number => Math.round(n * EMU_PER_PX);
+          const childAttrs = members.map(({ target, box }) => {
+            const node = state.doc.nodeAt(target.pos)!;
+            return memberInGroupAttrs(
+              target.kind,
+              node.attrs as Record<string, unknown>,
+              freshChildEmu(box, union),
+            );
+          });
+          // A chart member has no in-group carrier — decline the grouping.
+          if (childAttrs.some((a) => a == null)) return false;
           const groupNode = state.schema.nodes.wpgGroup.create(
             {
               wpgGroup: {
@@ -3969,17 +4167,9 @@ export const DocumentCommands = Extension.create({
                 childExtentHeight: emu(union.height),
               },
             },
-            members.map(({ target, box }) => {
+            members.map(({ target }, i) => {
               const node = state.doc.nodeAt(target.pos)!;
-              return node.type.create(
-                memberInGroupAttrs(
-                  target.kind,
-                  node.attrs as Record<string, unknown>,
-                  freshChildEmu(box, union),
-                ),
-                node.content,
-                node.marks,
-              );
+              return node.type.create(childAttrs[i]!, node.content, node.marks);
             }),
           );
           // Delete the non-anchor members first (descending — positions stay

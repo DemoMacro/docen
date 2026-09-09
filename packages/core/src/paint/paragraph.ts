@@ -181,7 +181,7 @@ export function paintParagraph(
     }
     let index = 0;
     for (const drawing of para.drawings ?? []) {
-      const host = { para, index: index++ };
+      const host = { para, index: index++, kind: "drawing" as const };
       if (!drawing.behind) continue;
       // Deferred like the body band: the stage sorts the queue by
       // relativeHeight, so same-band stacking follows the z-order.
@@ -611,7 +611,24 @@ export function paintParagraph(
             overflow: "hide",
             ...(inline.opacity != null ? { opacity: inline.opacity } : {}),
           });
-          paintMembers(holder, inline.members, 0, 0, ctx);
+          paintMembers(
+            holder,
+            inline.members,
+            0,
+            0,
+            ctx,
+            // The chart member's sub-elements register under this box's own
+            // identity (an inline chart's second-stage click resolves through
+            // the same k-th inline sequence). A transformed picture paints in
+            // spinner space — no page-space geometry to register.
+            inline.rotation || inline.flipH || inline.flipV
+              ? undefined
+              : { para, index: inlinePicIndex - 1, kind: "inline" },
+            // The holder sits at (ox,oy) on the page while members paint
+            // tree-local — chart boxes register in page space.
+            ox,
+            oy,
+          );
           target.add(holder);
           if (inline.line)
             target.add(
@@ -712,7 +729,7 @@ export function paintParagraph(
   // painted by the earlier pass included (their boxes are just as clickable).
   let hitIndex = 0;
   for (const drawing of para.drawings ?? []) {
-    const host = { para, index: hitIndex++ };
+    const host = { para, index: hitIndex++, kind: "drawing" as const };
     if (drawing.behind) {
       if (ctx.hitBoxes) recordDrawingHit(drawing, x, y, ctx, ctx.hitBoxes, host);
       continue;

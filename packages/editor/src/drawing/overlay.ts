@@ -232,9 +232,10 @@ export class DrawingOverlay {
    *  (the bridge owns that hit chain). The frame trails the pointer via
    *  document-level listeners — the gesture starts on the canvas, not this
    *  element — and a release past {@link MOVE_THRESHOLD} commits as an
-   *  offset; a plain click (no real move) leaves everything untouched, so
-   *  clicking the selection keeps it (Word). */
-  beginMove(clientX: number, clientY: number): void {
+   *  offset; a plain click (no real move) commits nothing and instead calls
+   *  `onClick`, so a press that might drag can still fall back to the
+   *  selection meaning of a click (Word). */
+  beginMove(clientX: number, clientY: number, onClick?: () => void): void {
     if (!this.#box) return;
     const startX = clientX;
     const startY = clientY;
@@ -257,6 +258,7 @@ export class DrawingOverlay {
       document.removeEventListener("pointerup", onUp);
       document.removeEventListener("pointercancel", onUp);
       if (moved) this.#callbacks.applyOffset?.(dx, dy, event.clientX, event.clientY);
+      else onClick?.();
     };
     document.addEventListener("pointermove", onMove);
     document.addEventListener("pointerup", onUp);

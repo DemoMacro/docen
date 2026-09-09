@@ -34,11 +34,13 @@ import { NodeSelection, TextSelection } from "@tiptap/pm/state";
 import { getMatchHighlights } from "prosemirror-search";
 
 import { DrawingGestures, type DrawingHit } from "../../drawing";
+import { t } from "../../ui/i18n/localize";
 import { listLevelStepPatch } from "../extensions/commands";
 import { KEYBOARD_SHORTCUTS } from "../extensions/keymap";
 import { autocorrectOf } from "./autocorrect";
 import { CaretMap, type TableZone } from "./caret-map";
 import { CellSelection, cellAt, inSameTable } from "./cell-selection";
+import { installChartHover, type ChartTip } from "./chart-hover";
 import { followLink, installLinkHover, type LinkHit } from "./link-hover";
 import { sameChildPath } from "./stage";
 
@@ -176,6 +178,11 @@ export interface EditBridgeOptions {
     kind: "drawing" | "inline",
     childPath?: readonly number[],
   ) => DrawingHit | null;
+  /** A framed chart's sub-element boxes with fresh geometry — the
+   *  sub-selection highlight re-reads them on every placement (a re-render
+   *  re-objects the boxes, so a deleted series drops out and moved ones
+   *  follow). */
+  chartPartBoxes?: (para: unknown, index: number, kind: "drawing" | "inline") => DrawingHit[];
   /** The paint pass's editable text-box stacks — registered with each fresh
    *  caret map so a double click edits the shape's text in place. */
   shapeTextStacks?: () => readonly ShapeTextStack[];
@@ -488,7 +495,10 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
   /** The selection highlight — one translucent div per crossed line, rebuilt
    *  on every placement (selections span few lines; rebuild beats diffing).
    *  A cell selection highlights each cell's whole grid box instead (Word's
-   *  cell highlight covers the slot, insets included). */
+   *  cell highlight covers the slot, insets included). A node selection (a
+   *  picked drawing) highlights nothing: the drawing's selection frame owns
+   *  the look, and a range sweep across the atom paints a line box wider
+   *  than the drawing — Word shows no text highlight under it. */
   const selectionLayer: HTMLDivElement[] = [];
   const placeSelection = (): void => {
     for (const el of selectionLayer) el.remove();
@@ -500,7 +510,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     const rects =
       sel instanceof CellSelection
         ? s.map.cellSelectionRects(sel)
-        : sel.from === sel.to
+        : sel instanceof NodeSelection || sel.from === sel.to
           ? []
           : s.map.selectionRects(sel.from, sel.to);
     for (const r of rects) {
@@ -806,6 +816,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     drawingSelection: (hit, enter) => opts.drawingSelection?.(hit, enter) ?? null,
     drawingBoxOf: (para, index, kind, childPath) =>
       opts.drawingBoxOf?.(para, index, kind, childPath) ?? null,
+    chartPartBoxes: (para, index, kind) => opts.chartPartBoxes?.(para, index, kind) ?? [],
     // The drop re-anchor's target: the paragraph under the drop point, as its
     // content-end insertion position plus laid box origin (the re-anchor's
     // offset seed). Clamped: a drop into the top/bottom margin or a band the
@@ -1136,6 +1147,8 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     linkAt,
   });
   opts.host.addEventListener("mouseleave", linkHover.hide);
+  const chartHover = installChartHover({ host: opts.inputHost });
+  opts.host.addEventListener("mouseleave", chartHover.hide);
 
   // The pointer cursor's single owner — Word's cursors per surface: a
   // floating drawing shows the four-headed move arrow, an inline picture the
@@ -1152,7 +1165,9 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     const drawHit = hit && opts.drawingAt ? opts.drawingAt(hit.page, hit.lx, hit.ly) : null;
     let want = "";
     if (drawHit) {
-      want = drawHit.kind === "drawing" ? "move" : "default";
+      // A chart sub-element reads as selectable content, not a movable
+      // object — the plain arrow until the drag gestures reach it.
+      want = drawHit.chartPart ? "default" : drawHit.kind === "drawing" ? "move" : "default";
     } else {
       const pos = posAtClient(event.clientX, event.clientY);
       const link = pos != null ? linkAt(pos) : null;
@@ -1161,10 +1176,37 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     opts.host.style.cursor = want;
   };
 
+  // The hovered chart element's ScreenTip data — the series/point read off
+  // the chart node the hit pairs with (null off-chart or unpairable).
+  const chartTipAt = (event: MouseEvent): ChartTip | null => {
+    const hit = story ? null : hitPage(event.clientX, event.clientY);
+    const drawHit = hit && opts.drawingAt ? opts.drawingAt(hit.page, hit.lx, hit.ly) : null;
+    const part = drawHit?.chartPart;
+    if (!drawHit || !part || part.title || part.series == null) return null;
+    const nodePos = draw.nodePosOf(drawHit);
+    const node = nodePos != null ? main.editor.state.doc.nodeAt(nodePos) : null;
+    const chart = node?.attrs?.chart as Record<string, unknown> | undefined;
+    if (!chart) return null;
+    const series = (
+      chart.series as { name?: string; values?: number[]; xValues?: number[] }[] | undefined
+    )?.[part.series];
+    const at = part.point ?? -1;
+    return {
+      name: series?.name ?? `${t("chart.series", opts.inputHost)} ${part.series + 1}`,
+      ...(part.point != null
+        ? {
+            category: (chart.categories as string[] | undefined)?.[at],
+            value: series?.values?.[at] ?? series?.xValues?.[at],
+          }
+        : {}),
+    };
+  };
+
   const onMouseMove = (event: MouseEvent): void => {
     if (dragAnchor == null) {
       hoverTableGrip(event);
       linkHover.onMove(event);
+      chartHover.onMove(chartTipAt(event), event.clientX, event.clientY);
       applyCursor(event);
       return;
     }
@@ -1459,7 +1501,21 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
         drawHit.index === sel.index &&
         drawHit.kind === sel.kind &&
         sameChildPath(drawHit.childPath, sel.childPath);
-      if (same && draw.frameActive && draw.movableFloating()) {
+      const movable = same && draw.frameActive && draw.movableFloating();
+      // Word's two-stage chart selection: with the chart framed, a click on
+      // a plot element selects it (the series, then the point) — but a drag
+      // from a plot element moves the whole floating chart like any drawing,
+      // so the press arms the shared move gesture and the sub-selection only
+      // lands on a clean click. The frame's dead space keeps the plain move.
+      if (drawHit.chartPart && draw.chartPartOn(drawHit)) {
+        if (movable)
+          draw.beginMove(event.clientX, event.clientY, () => draw.selectChartPart(drawHit));
+        else draw.selectChartPart(drawHit);
+        ta.focus();
+        ta.value = "";
+        return;
+      }
+      if (movable) {
         draw.beginMove(event.clientX, event.clientY);
         ta.focus();
         ta.value = "";
@@ -1870,6 +1926,26 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     pageEl.scrollIntoView({ block: "nearest", behavior: "auto" });
   };
 
+  // Word: Delete/Backspace on a chart sub-selection edits it — remove the
+  // sub-selected series, clear a sub-selected title; a sub-selected data
+  // point declines (the number model has no gaps to collapse). False on a
+  // bare frame, where the keys keep their node/text meaning.
+  const chartSubDelete = (): boolean => {
+    const series = draw.chartSeriesSelected();
+    if (series != null) {
+      // The command declines on the last series (the model needs one) — the
+      // sub-selection only drops when the removal actually happened.
+      if (active().editor.commands["chart-series-delete"](String(series))) draw.clearChartPart();
+      return true;
+    }
+    if (draw.chartTitleSelected()) {
+      active().editor.commands["chart-data-apply"]('{"title":""}');
+      draw.clearChartPart();
+      return true;
+    }
+    return draw.chartPartSelected;
+  };
+
   const onKeyDown = (event: KeyboardEvent): void => {
     // The IME owns the keyboard during composition (candidate navigation,
     // commit keys) — our caret moves would cancel it mid-word.
@@ -1885,6 +1961,10 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       const sel = active().editor.state.selection;
       if (sel instanceof NodeSelection) {
         event.preventDefault();
+        // A chart sub-selection parks the NodeSelection on the chart node —
+        // the keys edit the sub-selection (above); only a bare frame deletes
+        // the node itself.
+        if (sel.node.type.name === "chart" && chartSubDelete()) return;
         active().editor.commands.command(({ state, dispatch }) => {
           if (dispatch) dispatch(state.tr.deleteSelection());
           return true;
@@ -2112,10 +2192,21 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
           });
           return;
         }
+        // Word's chart stepdown: point → series → the bare chart frame.
+        if (draw.escapeChartPart()) {
+          event.preventDefault();
+          return;
+        }
         if (draw.selected != null) {
           event.preventDefault();
           draw.clear();
           draw.place();
+          // Word: Escape at the bare frame deselects entirely — the drawing
+          // must not keep holding an invisible NodeSelection.
+          const pmSel = active().editor.state.selection;
+          if (pmSel instanceof NodeSelection) {
+            setSel(TextSelection.near(active().editor.state.doc.resolve(pmSel.from)).from);
+          }
           return;
         }
         if (story) {

@@ -2,12 +2,13 @@ import type { JSONContent } from "@docen/docx";
 import { buildCustomMultilevelLevels, nextMultilevelReference } from "@docen/docx";
 import type { Editor } from "@docen/docx/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
-import { TextSelection } from "@tiptap/pm/state";
+import { NodeSelection, TextSelection } from "@tiptap/pm/state";
 import { DocAttrStep } from "@tiptap/pm/transform";
 
 import type { FontDialogPatch } from "../../ui/components/workspace/font-dialog";
 import { textCounter, wordCounter } from "../addin";
 import type {
+  ChartDataPatch,
   DrawingPropertiesPatch,
   ParagraphDialogPatch,
   TablePropertiesPatch,
@@ -137,6 +138,33 @@ export class DialogCommands {
     target?.commands["drawing-properties-apply"]?.(patch);
     this.host.bridge()?.focus();
   };
+
+  /** Chart Design tab → Edit Data — open the grid dialog prefilled from the
+   *  selected chart's payload. Modal: the NodeSelection stays on the chart
+   *  while the dialog is up, so the commit rides the chart-data-apply
+   *  command (no pending-position bookkeeping needed). */
+  chartEditAtSelection(): void {
+    const target = this.#target();
+    const sel = target?.state.selection;
+    if (!sel || !(sel instanceof NodeSelection) || sel.node.type.name !== "chart") return;
+    this.#chartDialog()?.show(sel.node.attrs.chart as Record<string, unknown> | null);
+  }
+
+  /** Edit Data dialog 确定 — stamp the grid's values onto the selected chart. */
+  readonly onChartOk = (event: Event): void => {
+    const { patch } = (event as CustomEvent<{ patch?: ChartDataPatch }>).detail ?? {};
+    if (!patch) return;
+    const target = this.#target();
+    target?.commands["chart-data-apply"]?.(JSON.stringify(patch));
+    this.host.bridge()?.focus();
+  };
+
+  #chartDialog(): { show(chart: Record<string, unknown> | null): void } | null | undefined {
+    return this.host.element().shadowRoot?.querySelector("docen-chart-data-dialog") as
+      | { show(chart: Record<string, unknown> | null): void }
+      | null
+      | undefined;
+  }
 
   /** Language dialog 确定 — commit the selection's proofing language
    *  (w:lang). With a bare caret the setting rides the run the caret sits in

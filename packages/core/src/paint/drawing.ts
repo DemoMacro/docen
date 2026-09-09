@@ -93,10 +93,14 @@ export function recordDrawingHit(
  *  stacks its own paragraphs inside its insets (the same stackBlocks the
  *  header/footer furniture uses). */
 /** Which paragraph carries a drawing, and its position among that paragraph's
- *  drawings (run order — how the PM side re-finds the node). */
+ *  drawings (run order — how the PM side re-finds the node). `kind` says
+ *  which hit sequence the position counts ("drawing" = floating, "inline" =
+ *  the paragraph's inline pictures/charts — an inline chart member's
+ *  sub-elements register under it too). */
 interface DrawingHost {
   para: LaidOutParagraph;
   index: number;
+  kind: "drawing" | "inline";
 }
 
 export function paintDrawing(
@@ -169,7 +173,7 @@ export function paintDrawing(
       height: drawing.height,
       overflow: "hide",
     });
-    paintMembers(holder, drawing.members, 0, 0, ctx, host);
+    paintMembers(holder, drawing.members, 0, 0, ctx, host, ox, oy);
     target.add(holder);
   } else {
     // A rotated or mirrored drawing transforms in a group — its text lines'
@@ -190,7 +194,11 @@ export function paintDrawing(
  *  each positioned at its own offset inside the box origin. Shared by the
  *  anchored-drawing and the inline-picture paths — the member shapes are the
  *  same; only the box origin differs. `host` (an anchored drawing only) lets
- *  an editable text-box member register its laid stack with the caret map. */
+ *  an editable text-box member register its laid stack with the caret map.
+ *  `originX/Y` is the holder's page origin when members paint tree-local into
+ *  a holder Box: chart hit boxes register in page space and add it back.
+ *  Members painted directly at the box origin already carry it in their
+ *  position, so the default 0 is right there. */
 export function paintMembers(
   tree: IGroup,
   members: readonly LayoutDrawingMember[],
@@ -198,6 +206,8 @@ export function paintMembers(
   boxY: number,
   ctx: PaintContext,
   host?: DrawingHost,
+  originX = 0,
+  originY = 0,
 ): void {
   // A drawing box is a complete little scene: its members paint in full
   // whichever pass anchors the box. A behind-doc watermark's text still lays
@@ -223,7 +233,7 @@ export function paintMembers(
         height: m.height,
         para: host.para,
         index: host.index,
-        kind: "drawing",
+        kind: host.kind,
         childPath: m.childPath,
         ...(ctx.layer === "behind" ? { behind: true } : {}),
       });
@@ -299,7 +309,17 @@ export function paintMembers(
         }),
       );
     } else if (m.kind === "chart") {
-      paintChartMember(tree, { ...m, x: mx, y: my });
+      // The sub-element boxes ride the host gate (a rotated drawing's members
+      // paint in spinner space — no page-space geometry to register) and skip
+      // group interiors: a chart inside a group selects as the member through
+      // its own childPath box, Word's group granularity.
+      paintChartMember(
+        tree,
+        { ...m, x: mx, y: my },
+        host && !m.childPath
+          ? { ctx, para: host.para, index: host.index, kind: host.kind, ox: originX, oy: originY }
+          : undefined,
+      );
     } else if (m.kind === "shape") {
       paintShapeBox(tree, { ...m, x: mx, y: my }, false);
     } else {

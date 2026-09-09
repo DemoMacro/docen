@@ -113,6 +113,7 @@ import { mergeSectionProperties } from "./page-setup";
 import {
   buildContextualTab,
   DEFAULT_RIBBON_TAB,
+  chartDesignTab,
   equationContextTab,
   formatMeasureTwip,
   headerFooterContextTab,
@@ -1080,6 +1081,7 @@ class DocenDocument extends AddinHost<Editor> {
       drawingAt: (page, lx, ly) => this.#stage?.drawingAt(page, lx, ly) ?? null,
       drawingSelection: (hit, enter) =>
         this.#drawingNodePos(hit.para, hit.index, hit.kind, hit.childPath, enter),
+      chartPartBoxes: (para, index, kind) => this.#stage?.chartPartBoxesOf(para, index, kind) ?? [],
       shapeTextStacks: () => this.#stage?.allShapeTextStacks() ?? [],
       shapeResolve: (host) => {
         const pos = this.#drawingNodePos(host.para, host.index, "drawing");
@@ -1108,6 +1110,7 @@ class DocenDocument extends AddinHost<Editor> {
             .drawingBoxes()
             .find(
               (box) =>
+                !box.chartPart &&
                 this.#drawingNodePos(box.para, box.index, box.kind, box.childPath) === sel.from,
             ) ?? null
         );
@@ -1278,6 +1281,11 @@ class DocenDocument extends AddinHost<Editor> {
     this.shadowRoot!.querySelector("docen-field-dialog")?.addEventListener(
       "field:ok",
       this.#dialogs.onFieldOk as EventListener,
+    );
+    // Chart data dialog — the Edit Data grid's commit (Chart Design tab).
+    this.shadowRoot!.querySelector("docen-chart-data-dialog")?.addEventListener(
+      "chart:ok",
+      this.#dialogs.onChartOk as EventListener,
     );
     // Cross-reference dialog — seed a cached REF/PAGEREF field at the caret.
     this.shadowRoot!.querySelector("docen-cross-reference-dialog")?.addEventListener(
@@ -2149,6 +2157,9 @@ class DocenDocument extends AddinHost<Editor> {
       ?.querySelector("docen-field-dialog")
       ?.removeEventListener("field:ok", this.#dialogs.onFieldOk as EventListener);
     this.shadowRoot
+      ?.querySelector("docen-chart-data-dialog")
+      ?.removeEventListener("chart:ok", this.#dialogs.onChartOk as EventListener);
+    this.shadowRoot
       ?.querySelector("docen-cross-reference-dialog")
       ?.removeEventListener("cross-ref:ok", this.#dialogs.onCrossRefOk as EventListener);
     this.shadowRoot
@@ -2814,10 +2825,10 @@ class DocenDocument extends AddinHost<Editor> {
     const name = sel.node.type.name;
     const attrs = sel.node.attrs as Record<string, unknown>;
     // An image's extent lives in px attrs (15 tw to the px at 96 DPI); a
-    // shape/group's in its payload transformation EMU (635 to the tw).
+    // shape/group/chart's in its payload transformation EMU (635 to the tw).
     let pair: { w: unknown; h: unknown; tw: (v: number) => number } | null = null;
     if (name === "image") pair = { w: attrs.width, h: attrs.height, tw: (v) => v * 15 };
-    else if (name === "wpsShape" || name === "wpgGroup") {
+    else if (name === "wpsShape" || name === "wpgGroup" || name === "chart") {
       const t = (attrs[name] as Record<string, unknown> | undefined)?.transformation as
         | Record<string, unknown>
         | undefined;
@@ -2859,6 +2870,7 @@ class DocenDocument extends AddinHost<Editor> {
       const state = this.editor.state;
       const drawing = drawingSelectionKind(state);
       if (drawing === "picture") want.set("picture-format", pictureFormatTab());
+      else if (drawing === "chart") want.set("chart-design", chartDesignTab());
       else if (drawing) want.set("shape-format", shapeFormatTab());
       if (tableAncestry(state)) for (const tab of tableContextTabs(scope)) want.set(tab.id, tab);
       else if (mathAtomAt(state)) want.set("equation", equationContextTab());
@@ -4514,6 +4526,12 @@ class DocenDocument extends AddinHost<Editor> {
     }
     if (name === "edit-field") {
       this.#dialogs.fieldEditAtSelection();
+      return;
+    }
+    // Chart — open the Edit Data grid (Chart Design tab → Data group); the
+    // commit arrives via chart:ok → the chart-data-apply command.
+    if (name === "chart-edit-data") {
+      this.#dialogs.chartEditAtSelection();
       return;
     }
     if (name === "toggle-field-checkbox") {
