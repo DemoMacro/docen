@@ -1328,20 +1328,24 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
         ta.value = "";
         return;
       }
-      if ((inHeader || inFooter) && !dbl) {
+      // A band click on an OBJECT routes by the object's story instead (a
+      // body-anchored float dragged into the band is still a body object —
+      // Word grabs it; the band owns only its empty regions): fall through
+      // to the drawing chains below.
+      if ((inHeader || inFooter) && !dbl && !drawHit) {
         // A single click on a band does nothing (Word), but must not blur
         // into a body position under it.
         ta.focus();
         ta.value = "";
         return;
       }
-      if (inHeader && header) {
+      if (inHeader && header && !drawHit) {
         enterStory("header", hit.page, header);
         ta.focus();
         ta.value = "";
         return;
       }
-      if (inFooter && footer) {
+      if (inFooter && footer && !drawHit) {
         enterStory("footer", hit.page, footer);
         ta.focus();
         ta.value = "";
