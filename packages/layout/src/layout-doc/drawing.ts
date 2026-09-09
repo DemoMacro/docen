@@ -100,6 +100,18 @@ export type LayoutDrawingMember =
       shadow?: LayoutDrawingShadow;
     }
   | {
+      kind: "chart";
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      childPath?: readonly number[];
+      /** The chart space model (office-open's ChartSpaceOptions) verbatim —
+       *  the renderer's chart painter consumes it directly; the engine never
+       *  reads beyond the box. */
+      chart: unknown;
+    }
+  | {
       kind: "textBox";
       x: number;
       y: number;

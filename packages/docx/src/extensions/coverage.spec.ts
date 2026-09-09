@@ -208,6 +208,14 @@ const INLINE_FIXTURES: Record<keyof typeof PARAGRAPH_CHILD_DISPOSITIONS, () => P
   wpsShape: () => ({
     wpsShape: { children: [{ text: "box" }], transformation: { width: 100, height: 60 } },
   }),
+  chart: () => ({
+    chart: {
+      type: "column",
+      categories: ["Q1", "Q2"],
+      series: [{ name: "Sales", values: [120, 90] }],
+      transformation: { width: 100, height: 60 },
+    },
+  }),
   // One wps member in child-space form (MediaDataTransformation). EMU values
   // divide cleanly to px (95250 = 10px) so the pixels track survives the
   // resolve↔compile unit conversion verbatim.
@@ -234,13 +242,6 @@ const INLINE_FIXTURES: Record<keyof typeof PARAGRAPH_CHILD_DISPOSITIONS, () => P
   bookmarkStart: () => ({ bookmarkStart: { id: 1, name: "bm" } }),
   bookmarkEnd: () => ({ bookmarkEnd: { id: 1 } }),
   bookmark: () => ({ bookmark: { name: "bm" } }),
-  chart: () => ({
-    chart: {
-      type: "bar",
-      series: [{ values: [1, 2] }],
-      transformation: { width: 100, height: 60 },
-    },
-  }),
   smartArt: () => ({ smartArt: { nodes: [], transformation: { width: 100, height: 60 } } }),
   math: () => ({ math: { display: true } }),
   symbolRun: () => ({ symbolRun: { char: "§" } }),
@@ -375,6 +376,14 @@ const INLINE_EDITABLE: InlineEditable = {
       expect(shape.transformation?.width).toBe(100);
       // the body paragraph collapses to the string shorthand.
       expect(shape.children?.[0]).toBe("box");
+    },
+  },
+  chart: {
+    marker: "chart",
+    probe: (out) => {
+      const chart = (out as { chart: { type?: string; series?: { values?: number[] }[] } }).chart;
+      expect(chart.type).toBe("column");
+      expect(chart.series?.[0]?.values).toEqual([120, 90]);
     },
   },
   wpgGroup: {

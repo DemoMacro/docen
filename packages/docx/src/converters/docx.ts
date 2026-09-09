@@ -895,6 +895,13 @@ export class DocxManager {
           if (imageRun) children.push(imageRun);
           break;
         }
+        case "chart": {
+          // Verbatim ChartOptions (ChartSpaceOptions + anchor fields) — reverse
+          // of the chart inline rule. Same reflection as image.
+          const chartRun = this.nodeRender.get(node.type)?.(node) ?? null;
+          if (chartRun) children.push(chartRun);
+          break;
+        }
         case "wpgGroup": {
           // attrs.wpgGroup is GroupOptions minus children; the member sequence
           // compiles back through group-members (reverse of resolveGroupOptions).

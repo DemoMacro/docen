@@ -506,6 +506,13 @@ function walkGroup(
       if (child.data == null || typeof child.data !== "object") continue;
       const member = wpsMemberOf(child.data, x, y, width, height, ctx);
       if (member) out.push({ ...member, childPath });
+    } else if (child.type === "chart") {
+      // The group child carries the bare ChartSpaceOptions (chartOptions) —
+      // the transformation lives on the member itself.
+      const data = (child as { chartOptions?: unknown }).chartOptions;
+      if (data != null && typeof data === "object") {
+        out.push({ kind: "chart", x, y, width, height, childPath, chart: data });
+      }
     } else {
       // Everything else is treated as a picture member: real media children
       // carry bytes; chart/contentPart children have none and pictureSrc
@@ -780,9 +787,41 @@ function projectWpsShapeRun(wps: Rec, ctx: ProjectContext): LayoutDrawing | unde
   };
 }
 
+/** One chart run (ChartOptions flattened on attrs.chart) → a single-member
+ *  drawing. The chart paints inside its extent box; the anchor spec resolves
+ *  exactly like a shape's (floating) or stays inline (the inline-picture
+ *  path handles that — here only the floating arm projects). */
+function projectChartRun(chart: Rec): LayoutDrawing | undefined {
+  const tr = isRecord(chart.transformation) ? chart.transformation : {};
+  const w = measureEmu(tr.width);
+  const h = measureEmu(tr.height);
+  if (w == null || h == null || w <= 0 || h <= 0) return undefined;
+  if (!isRecord(chart.floating)) return undefined;
+  const { anchor, wrap, wrapSide, contour, behind, zIndex, distances } = drawingAnchorOf(
+    chart.floating,
+    emuToPx(w),
+    emuToPx(h),
+  );
+  return {
+    anchor,
+    width: emuToPx(w),
+    height: emuToPx(h),
+    members: [{ kind: "chart", x: 0, y: 0, width: emuToPx(w), height: emuToPx(h), chart }],
+    wrap,
+    wrapSide,
+    ...(contour ? { contour } : {}),
+    behind,
+    ...(zIndex != null ? { zIndex } : {}),
+    distances,
+    ...(typeof tr.rotation === "number" && tr.rotation ? { rotation: tr.rotation } : {}),
+    ...(tr.flipHorizontal === true ? { flipH: true } : {}),
+    ...(tr.flipVertical === true ? { flipV: true } : {}),
+  };
+}
+
 /** Collect the anchored drawing runs of one paragraph (top level and one
  *  nested run level — a drawing rides its own w:r): wpg groups, wps shapes,
- *  and floating pictures. Non-floating pictures stay inline atoms. */
+ *  charts, and floating pictures. Non-floating pictures stay inline atoms. */
 export function projectDrawings(runs: readonly unknown[], ctx: ProjectContext): LayoutDrawing[] {
   const out: LayoutDrawing[] = [];
   const each = (run: Rec): void => {
@@ -792,6 +831,10 @@ export function projectDrawings(runs: readonly unknown[], ctx: ProjectContext): 
     }
     if (isRecord(run.wpsShape)) {
       const d = projectWpsShapeRun(run.wpsShape, ctx);
+      if (d) out.push(d);
+    }
+    if (isRecord(run.chart)) {
+      const d = projectChartRun(run.chart);
       if (d) out.push(d);
     }
     if (isRecord(run.picture) && isRecord(run.picture.floating)) {

@@ -1,6 +1,7 @@
 import { Node as TiptapNode } from "@tiptap/core";
 
 import type { AnyExtension } from "../core";
+import { Chart } from "./chart";
 import { ColumnBreak } from "./column-break";
 import { Document } from "./document";
 import { Image } from "./image";
@@ -56,6 +57,7 @@ export const tiptapNodeExtensions: AnyExtension[] = [
   SdtBlock,
   SdtInline,
   Textbox,
+  Chart,
   Image,
   WpgGroup,
   WpsShape,
@@ -113,6 +115,7 @@ export { SectionBreak } from "./section-break";
 export { Table } from "./table";
 export { TableRow } from "./table-row";
 export { TableCell } from "./table-cell";
+export { Chart } from "./chart";
 export { Image } from "./image";
 export { Link } from "./link";
 export { Ruby } from "./ruby";

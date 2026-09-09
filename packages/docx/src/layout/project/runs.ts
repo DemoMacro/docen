@@ -370,6 +370,30 @@ export function projectRuns(
         });
       }
       if (isRecord(child.picture)) pushPicture(child.picture);
+      if (isRecord(child.chart)) {
+        // An inline chart paints through the picture box's member replay
+        // channel (same contract as a metafile replay): the box measures from
+        // the transformation, the renderer's chart painter draws the member.
+        // A floating chart is an anchored drawing (projectDrawings) — skipped
+        // here to avoid double-rendering.
+        const chart = child.chart;
+        const tr = isRecord(chart.transformation) ? chart.transformation : {};
+        const w = measureEmu(tr.width);
+        const h = measureEmu(tr.height);
+        if (w != null && h != null && !isRecord(chart.floating)) {
+          const widthPx = emuToPx(w);
+          const heightPx = emuToPx(h);
+          out.push({
+            kind: "picture",
+            widthPx,
+            heightPx,
+            members: [{ kind: "chart", x: 0, y: 0, width: widthPx, height: heightPx, chart }],
+            ...(typeof tr.rotation === "number" && tr.rotation !== 0
+              ? { rotation: tr.rotation }
+              : {}),
+          });
+        }
+      }
       if (isRecord(child.complexField)) pushField(child.complexField, rPr);
       if (isRecord(child.simpleField)) pushField(child.simpleField, rPr);
       if (isRecord(child.hyperlink) && Array.isArray(child.hyperlink.children)) {

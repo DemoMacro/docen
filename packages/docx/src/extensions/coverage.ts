@@ -79,7 +79,7 @@ export const PARAGRAPH_CHILD_DISPOSITIONS = {
   bookmarkStart: { passthrough: "inlinePassthrough atom (name exposed for TOC anchors)" },
   bookmarkEnd: { passthrough: "inlinePassthrough atom" },
   bookmark: { passthrough: "inlinePassthrough atom" },
-  chart: { passthrough: "inlinePassthrough atom" },
+  chart: { editable: "chart node (ChartSpaceOptions verbatim; data/type adjustments ride attrs)" },
   smartArt: { passthrough: "inlinePassthrough atom" },
   math: { passthrough: "inlinePassthrough atom" },
   symbolRun: { passthrough: "inlinePassthrough atom" },

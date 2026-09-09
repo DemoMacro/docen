@@ -12,6 +12,7 @@ import {
 import { Box, Ellipse, Group, Path as LeaferPath, Rect, type IGroup } from "leafer-ui";
 
 import { paintBlock } from "../painter";
+import { paintChartMember } from "./chart";
 import type { DrawingHitBox, PaintColumn, PaintContext } from "./context";
 import { addBlendedPictureRun, addCroppedImage, addPlainImage, shadowEffectOf } from "./image";
 import { strokePropsOf } from "./line";
@@ -297,6 +298,8 @@ export function paintMembers(
           ...shadowEffectOf(m.shadow),
         }),
       );
+    } else if (m.kind === "chart") {
+      paintChartMember(tree, { ...m, x: mx, y: my });
     } else if (m.kind === "shape") {
       paintShapeBox(tree, { ...m, x: mx, y: my }, false);
     } else {
