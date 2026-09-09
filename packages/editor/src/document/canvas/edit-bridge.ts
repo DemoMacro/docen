@@ -1137,10 +1137,35 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
   });
   opts.host.addEventListener("mouseleave", linkHover.hide);
 
+  // The pointer cursor's single owner — Word's cursors per surface: a
+  // floating drawing shows the four-headed move arrow, an inline picture the
+  // plain arrow (never the text I-beam — an object is not text), a link the
+  // hand, the text surface the I-beam (the canvas's stylesheet rule; writing
+  // "" falls back to it). One writer computing the final value per move —
+  // two writers with their own memory leave stale blanks behind each other
+  // (the link tooltip's hide cleared the move cursor every move once, and
+  // the drawing side's "unchanged, skip" memory never rewrote it). A
+  // furniture story deactivates the body's objects, so their cursors go
+  // with it (the story's own links keep the hand).
+  const applyCursor = (event: MouseEvent): void => {
+    const hit = story ? null : hitPage(event.clientX, event.clientY);
+    const drawHit = hit && opts.drawingAt ? opts.drawingAt(hit.page, hit.lx, hit.ly) : null;
+    let want = "";
+    if (drawHit) {
+      want = drawHit.kind === "drawing" ? "move" : "default";
+    } else {
+      const pos = posAtClient(event.clientX, event.clientY);
+      const link = pos != null ? linkAt(pos) : null;
+      if (link?.href) want = "pointer";
+    }
+    opts.host.style.cursor = want;
+  };
+
   const onMouseMove = (event: MouseEvent): void => {
     if (dragAnchor == null) {
       hoverTableGrip(event);
       linkHover.onMove(event);
+      applyCursor(event);
       return;
     }
     if (

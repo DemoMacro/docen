@@ -54,14 +54,11 @@ export function installLinkHover(deps: LinkHoverDeps): {
 
   let shownHref: string | null = null;
 
-  // Word's hand cursor over a link — the editing caret stays an I-beam
-  // everywhere else (Ctrl+Click still means "follow" while editing).
-  const setCursor = (on: boolean): void => {
-    deps.host.style.cursor = on ? "pointer" : "";
-  };
+  // The pointer cursor itself is owned by the bridge's hover pass — two
+  // writers on the same element leave stale blanks behind each other (this
+  // tooltip's hide used to clear it every move). Here: tooltip only.
 
   const hide = (): void => {
-    setCursor(false);
     if (shownHref == null) return;
     shownHref = null;
     tip.style.display = "none";
@@ -74,7 +71,6 @@ export function installLinkHover(deps: LinkHoverDeps): {
       hide();
       return;
     }
-    setCursor(true);
     const hostRect = deps.host.getBoundingClientRect();
     const hrefChanged = link.href !== shownHref;
     if (hrefChanged) {
