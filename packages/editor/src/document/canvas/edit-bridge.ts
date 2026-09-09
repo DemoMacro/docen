@@ -682,13 +682,13 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
   };
   main.editor.on("selectionUpdate", placeCaret);
 
-  /** A viewport point → the hit page and its page-local coordinates (in
-   *  semantic page px — the caret map knows nothing of the zoom). Pure frame
-   *  geometry: story routing decides what a hit means. */
+  /** A viewport point → the hit page, its page-local coordinates, and its
+   *  rect (in semantic page px — the caret map knows nothing of the zoom).
+   *  Pure frame geometry: story routing decides what a hit means. */
   const hitPage = (
     clientX: number,
     clientY: number,
-  ): { page: number; lx: number; ly: number } | null => {
+  ): { page: number; lx: number; ly: number; w: number; h: number } | null => {
     const hostRect = opts.host.getBoundingClientRect();
     const x = clientX - hostRect.left;
     const y = clientY - hostRect.top;
@@ -700,7 +700,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       const lx = x - (r.left - hostRect.left);
       const ly = y - (r.top - hostRect.top);
       if (lx >= 0 && ly >= 0 && lx < r.width && ly < r.height) {
-        return { page: p, lx: lx / scale, ly: ly / scale };
+        return { page: p, lx: lx / scale, ly: ly / scale, w: r.width / scale, h: r.height / scale };
       }
     }
     return null;
@@ -806,6 +806,55 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     drawingSelection: (hit, enter) => opts.drawingSelection?.(hit, enter) ?? null,
     drawingBoxOf: (para, index, kind, childPath) =>
       opts.drawingBoxOf?.(para, index, kind, childPath) ?? null,
+    // The drop re-anchor's target: the paragraph under the drop point, as its
+    // content-end insertion position plus laid box origin (the re-anchor's
+    // offset seed). Clamped: a drop into the top/bottom margin or a band the
+    // wrap zone just emptied has no line under it within the unclamped
+    // distance cap — the nearest line's paragraph hosts the re-anchor.
+    paragraphAt: (page, x, y) => {
+      if (story || !main.map?.valid) return null;
+      const pos = main.map.posAtPoint(page, x, y, true);
+      if (pos == null) return null;
+      const doc = main.editor.state.doc;
+      const $pos = doc.resolve(pos);
+      let depth = $pos.depth;
+      while (depth > 0 && $pos.node(depth).type.name !== "paragraph") depth--;
+      if (depth === 0) return null;
+      const paraPos = $pos.before(depth);
+      const para = doc.nodeAt(paraPos);
+      if (!para) return null;
+      const rect = main.map.caretRect(paraPos + 1);
+      if (!rect) return null;
+      return { contentPos: paraPos + para.nodeSize - 1, xPx: rect.xPx, yPx: rect.yPx };
+    },
+    // The drop page for a drag that may have crossed pages: only the host
+    // knows the pages' screen geometry. Null off the pages — the drop
+    // commits nothing rather than guessing a frame.
+    pageAtPoint: (clientX, clientY) => {
+      const hit = hitPage(clientX, clientY);
+      return hit ? { page: hit.page, x: hit.lx, y: hit.ly, w: hit.w, h: hit.h } : null;
+    },
+    // A drop whose paragraph sits in another table cell than the anchor's
+    // (out of the cell, across cells, or into one) must re-home: the cell
+    // clamp pins the box, so offsets can't express the move. Both sides
+    // resolve as the innermost cell around the position — a drawing anchored
+    // in the body vs a drop inside a table crosses just the same (Word).
+    crossesCell: (hit, page, x, y) => {
+      if (story || !main.map?.valid) return false;
+      const cellPos = (pos: number): number | null => {
+        const $pos = main.editor.state.doc.resolve(pos);
+        for (let d = $pos.depth; d > 0; d--) {
+          const type = $pos.node(d).type.name;
+          if (type === "tableCell" || type === "tableHeader") return $pos.before(d);
+        }
+        return null;
+      };
+      const anchor = opts.drawingSelection?.(hit) ?? null;
+      if (anchor == null) return false;
+      const drop = main.map.posAtPoint(page, x, y, true);
+      if (drop == null) return false;
+      return cellPos(anchor) !== cellPos(drop);
+    },
     pageHost: (page) => opts.pageHost?.(page) ?? null,
     scale: () => opts.scale?.() ?? 1,
   });

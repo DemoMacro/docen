@@ -132,6 +132,7 @@ declare module "@tiptap/core" {
       "position-picture": (value?: string) => ReturnType;
       "move-drawing": (value?: string) => ReturnType;
       "place-drawing": (value?: string) => ReturnType;
+      "reanchor-drawing": (value?: string) => ReturnType;
       "rotate-drawing": (value?: string) => ReturnType;
       "drawing-properties-apply": (patch?: DrawingPropertiesPatch) => ReturnType;
       "drawing-crop-apply": (patch?: DrawingCropPatch) => ReturnType;
@@ -258,6 +259,7 @@ export const WIRED_DISPATCH: ReadonlySet<string> = new Set([
   "position-picture",
   "move-drawing",
   "place-drawing",
+  "reanchor-drawing",
   "rotate-drawing",
   "drawing-properties-apply",
   "drawing-crop-apply",
@@ -3299,6 +3301,54 @@ export const DocumentCommands = Extension.create({
             horizontalPosition: { relative: "page", offset: parsed.h },
             verticalPosition: { relative: "page", offset: parsed.v },
           });
+        },
+      // Re-home a dragged floating drawing to the paragraph under the drop
+      // point (Word re-anchors on drag): value is JSON { to, h, v } — `to` a
+      // content position inside the target paragraph, {h, v} the drawing's
+      // new offsets in EMU. A drop far above/below the anchor pushes the
+      // anchor paragraph itself off its page when the wrap zone re-flows, and
+      // the drawing then pins where the anchor landed instead of where it was
+      // dropped — anchoring beside the drop keeps the layout stable. One
+      // transaction: delete + insert + selection restore.
+      "reanchor-drawing":
+        (value?) =>
+        ({ state, tr }) => {
+          if (!value) return false;
+          const target = floatingDrawingAt(state);
+          if (!target) return false;
+          let parsed: { to?: number; h?: number; v?: number };
+          try {
+            parsed = JSON.parse(value) as { to?: number; h?: number; v?: number };
+          } catch {
+            return false;
+          }
+          if (typeof parsed.to !== "number") return false;
+          const node = tr.doc.nodeAt(target.pos);
+          if (!node) return false;
+          const floating = floatingOf(target);
+          const h = floating.horizontalPosition as Record<string, unknown> | undefined;
+          const v = floating.verticalPosition as Record<string, unknown> | undefined;
+          if (!h || !v) return false;
+          // Validate the drop target before touching the tr: the command
+          // manager dispatches the transaction regardless of the command's
+          // return value, so a decline after the delete would still land it
+          // and the drawing would vanish.
+          if (parsed.to < 0 || parsed.to > state.doc.content.size) return false;
+          if (state.doc.resolve(parsed.to).parent.type.name !== "paragraph") return false;
+          const next = {
+            ...floating,
+            horizontalPosition:
+              typeof h.offset === "number" ? { ...h, offset: parsed.h ?? h.offset } : h,
+            verticalPosition:
+              typeof v.offset === "number" ? { ...v, offset: parsed.v ?? v.offset } : v,
+          };
+          const moved = node.type.create(withFloating(target, next), node.content);
+          tr.delete(target.pos, target.pos + node.nodeSize);
+          const at = tr.mapping.map(parsed.to, -1);
+          tr.insert(at, moved);
+          tr.setSelection(NodeSelection.create(tr.doc, at) as never);
+          tr.setMeta("scrollIntoView", false);
+          return true;
         },
       // Rotate the selected drawing by a handle-swept delta: value is the
       // degrees to add to the drawing's current rotation (clockwise; image:

@@ -15,12 +15,13 @@ import { HANDLES, resizeBox, rotateDelta, type Box, type HandleId } from "./geom
  *  the user dragged to. `applyBox` returns false to reject (e.g. a read-only
  *  doc) — the frame snaps back on the next show/refresh. `applyOffset` moves
  *  the drawing by a drag delta (a floating drawing's move, committed once on
- *  release); `applyRotation` spins it by a handle-swept delta (degrees,
- *  clockwise); absent, the frame stays put on a body drag. */
+ *  release, with the release point's client coordinates so the host can
+ *  resolve the drop page); `applyRotation` spins it by a handle-swept delta
+ *  (degrees, clockwise); absent, the frame stays put on a body drag. */
 export interface DrawingOverlayCallbacks {
   scale(): number;
   applyBox(box: Box): void;
-  applyOffset?(dx: number, dy: number): void;
+  applyOffset?(dx: number, dy: number, clientX?: number, clientY?: number): void;
   applyRotation?(delta: number): void;
 }
 
@@ -251,11 +252,11 @@ export class DrawingOverlay {
       this.#box = { ...origin, x: origin.x + dx, y: origin.y + dy };
       this.#place();
     };
-    const onUp = (): void => {
+    const onUp = (event: PointerEvent): void => {
       document.removeEventListener("pointermove", onMove);
       document.removeEventListener("pointerup", onUp);
       document.removeEventListener("pointercancel", onUp);
-      if (moved) this.#callbacks.applyOffset?.(dx, dy);
+      if (moved) this.#callbacks.applyOffset?.(dx, dy, event.clientX, event.clientY);
     };
     document.addEventListener("pointermove", onMove);
     document.addEventListener("pointerup", onUp);

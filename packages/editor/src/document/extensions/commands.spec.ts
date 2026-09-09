@@ -984,6 +984,93 @@ describe("move-drawing", () => {
   });
 });
 
+describe("reanchor-drawing", () => {
+  /** Two paragraphs; the floating picture hangs off the second so the
+   *  re-anchor's natural direction is upward (the drop above the anchor). */
+  const buildTwoPara = (): EditorType =>
+    new Editor({
+      element: null,
+      extensions: EXTENSIONS,
+      content: {
+        type: "doc",
+        content: [
+          { type: "paragraph", content: [{ type: "text", text: "甲" }] },
+          {
+            type: "paragraph",
+            content: [
+              {
+                type: "image",
+                attrs: {
+                  src: "data:,",
+                  width: 10,
+                  height: 10,
+                  floating: {
+                    horizontalPosition: { relative: "column", offset: 0 },
+                    verticalPosition: { relative: "paragraph", offset: 0 },
+                    wrap: { type: "square" },
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+  const imagePos = (editor: EditorType): number => {
+    let pos = -1;
+    editor.state.doc.descendants((node, nodePos) => {
+      if (node.type.name === "image" && pos < 0) {
+        pos = nodePos;
+        return false;
+      }
+      return true;
+    });
+    return pos;
+  };
+
+  it("re-homes to the target paragraph, seeds the offsets, keeps the selection", () => {
+    const editor = buildTwoPara();
+    selectFloat(editor);
+    // The image sits in the second paragraph (pos 4); content pos 2 is the
+    // first paragraph's content end.
+    expect(imagePos(editor)).toBe(4);
+    expect(editor.commands["reanchor-drawing"](JSON.stringify({ to: 2, h: 500, v: -700 }))).toBe(
+      true,
+    );
+    const pos = imagePos(editor);
+    expect(pos).toBe(2);
+    const node = editor.state.doc.nodeAt(pos)!;
+    const floating = node.attrs.floating as Record<string, unknown>;
+    expect(floating.horizontalPosition).toEqual({ relative: "column", offset: 500 });
+    expect(floating.verticalPosition).toEqual({ relative: "paragraph", offset: -700 });
+    // The rest of the payload rides along (only the offsets are re-seeded).
+    expect(floating.wrap).toEqual({ type: "square" });
+    // The moved drawing stays selected (Word's picture stays grabbed).
+    expect(editor.state.selection instanceof NodeSelection).toBe(true);
+    expect(editor.state.selection.from).toBe(2);
+  });
+
+  it("declines when the target position is not inside a paragraph", () => {
+    const editor = buildTwoPara();
+    selectFloat(editor);
+    // Position 3 is the paragraph boundary — the doc itself, not a
+    // paragraph. The command refuses and the document stays untouched.
+    expect(editor.commands["reanchor-drawing"](JSON.stringify({ to: 3, h: 1, v: 1 }))).toBe(false);
+    expect(imagePos(editor)).toBe(4);
+  });
+
+  it("declines with no floating drawing selected or a bad payload", () => {
+    const editor = buildTwoPara();
+    editor.commands.setTextSelection(2);
+    expect(editor.commands["reanchor-drawing"](JSON.stringify({ to: 2, h: 1, v: 1 }))).toBe(false);
+    selectFloat(editor);
+    expect(editor.commands["reanchor-drawing"]("not json")).toBe(false);
+    expect(editor.commands["reanchor-drawing"](JSON.stringify({ h: 1, v: 1 }))).toBe(false);
+    expect(editor.commands["reanchor-drawing"]()).toBe(false);
+  });
+});
+
 describe("drawing-width / drawing-height", () => {
   const FLOATING = {
     horizontalPosition: { relative: "margin", offset: 1000 },

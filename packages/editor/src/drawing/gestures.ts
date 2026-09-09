@@ -24,6 +24,29 @@ export interface DrawingGesturesHost {
     kind: "drawing" | "inline",
     childPath?: readonly number[],
   ): DrawingHit | null;
+  /** The paragraph under a page-local drop point: its content-end insertion
+   *  position and laid box origin — the drop re-anchor's target. Null on
+   *  bare geometry (margin, furniture) where no paragraph can host one. */
+  paragraphAt(
+    page: number,
+    x: number,
+    y: number,
+  ): { contentPos: number; xPx: number; yPx: number } | null;
+  /** The page a pointer position sits over, with the point as page-local px
+   *  at scale 1 plus the page's own rect (the drop resolution's frame — a
+   *  drag may cross pages, and only the host knows the pages' screen
+   *  geometry). Null off the pages. */
+  pageAtPoint(
+    clientX: number,
+    clientY: number,
+  ): { page: number; x: number; y: number; w: number; h: number } | null;
+  /** Whether the drop point resolves to a different table cell than the
+   *  selected drawing's anchor paragraph (out of the cell, across cells, or
+   *  into one): the cell-anchored box's layoutInCell clamp pins it at the
+   *  cell, eating any committed offset — the drop re-homes beside the point
+   *  instead (Word re-anchors on drag). Absent: no cell tracking, drops keep
+   *  the anchors. */
+  crossesCell?(hit: DrawingHit, page: number, x: number, y: number): boolean;
   pageHost(page: number): HTMLElement | null;
   scale(): number;
 }
@@ -48,6 +71,30 @@ export class DrawingGestures {
    *  selection). A doc change re-validates in place(). */
   #multi: DrawingHit[] = [];
   #multiBoxes: HTMLDivElement[] = [];
+  /** A move drag awaiting its landing check: the drop's delta writes against
+   *  the pre-drag layout, but re-wrapping shifts the anchor paragraph, so the
+   *  painted box lands off the drop point by that shift. place() measures the
+   *  painted box after the re-layout and re-commits the residue as another
+   *  delta (Word corrects the offset against the final anchor the same way).
+   *  Page-local px, the page the drop targeted, whether the anchor was
+   *  re-homed, the passes spent, the painted box at the last commit, and the
+   *  last committed delta (a commit that paints no movement is being eaten
+   *  by a clamp — a cell-anchored box pinned at its cell's edge — and the
+   *  delta retreats instead of piling onto a stuck box). */
+  #dropCorrection: {
+    x: number;
+    y: number;
+    page: number;
+    tries: number;
+    reanchored: boolean;
+    box?: { x: number; y: number };
+    last?: { h: number; v: number };
+  } | null = null;
+  /** Where the grab point sat inside the drawing (page-local px): Word's
+   *  drag keeps that offset — the drawing trails the pointer, so its top
+   *  left lands at the release point minus this offset, on either side of
+   *  a page crossing. */
+  #grab: { x: number; y: number } | null = null;
 
   constructor(host: DrawingGesturesHost) {
     this.#host = host;
@@ -61,7 +108,7 @@ export class DrawingGestures {
     this.#overlay = new DrawingOverlay({
       scale: () => this.#host.scale(),
       applyBox: (box) => this.#applyBox(box),
-      applyOffset: (dx, dy) => this.#applyOffset(dx, dy),
+      applyOffset: (dx, dy, clientX, clientY) => this.#applyOffset(dx, dy, clientX, clientY),
       applyRotation: (delta) => this.#applyRotation(delta),
     });
     // The crop layer: the selected image's source shows in full with black
@@ -112,6 +159,8 @@ export class DrawingGestures {
   /** Begin a move drag from a pointerdown on the selected drawing itself (the
    *  bridge owns that hit chain). */
   beginMove(clientX: number, clientY: number): void {
+    const down = this.#sel ? this.#host.pageAtPoint(clientX, clientY) : null;
+    this.#grab = down && this.#sel ? { x: down.x - this.#sel.x, y: down.y - this.#sel.y } : null;
     this.#overlay.beginMove(clientX, clientY);
   }
 
@@ -184,6 +233,7 @@ export class DrawingGestures {
           this.#sel.childPath,
         ) ?? null;
     }
+    if (this.#dropCorrection) this.#correctDrop();
     const frame = this.#sel ? this.#host.pageHost(this.#sel.page) : null;
     if (!this.#sel || !frame) {
       this.#overlay.hide();
@@ -336,28 +386,153 @@ export class DrawingGestures {
     });
   }
 
-  /** A body drag's offset: an offset-anchored float adds the drag delta to
-   *  its offsets; an align-anchored one has none to add to — the drop lands
-   *  absolute, page-anchored, at the dragged spot (Word: dragging breaks the
-   *  alignment, the drawn result doesn't shift). The release commits once,
-   *  so the whole drag is ONE undo step and no re-layout runs mid-drag. */
-  #applyOffset(dx: number, dy: number): void {
+  /** A body drag's offset: the release point resolves the drop page first —
+   *  a drag may cross pages, and the raw delta is a coordinate from the
+   *  origin page's frame, so committing it against the old anchor pushes the
+   *  drawing past its page top where nothing paints it (it "vanishes").
+   *  Every drop quantity is the release point minus the grab offset (the
+   *  drawing trails the pointer — Word), which on the same page is algebra
+   *  equal to the plain delta. The drop box clamps into the page rect first
+   *  — Word's drag keeps the drawing on its page, and a commit whose box
+   *  paints off-page can never be corrected (there is no painted box left
+   *  to measure), so it must not land. A cross-page drop, or one landing in
+   *  a different table cell than the anchor, re-homes beside the drop point
+   *  instead (Word re-anchors on drag; the cell clamp eats offsets).
+   *  Otherwise the drop keeps the anchors: an offset-anchored float takes
+   *  the bounded delta toward the clamped target, an align-anchored one
+   *  lands absolute at the dragged spot (Word: dragging breaks the
+   *  alignment, the drawn result doesn't shift). A release off every page
+   *  commits nothing. The release commits once, so the whole drag is ONE
+   *  undo step. */
+  #applyOffset(_dx: number, _dy: number, clientX?: number, clientY?: number): void {
     if (!this.#sel) return;
     const nodePos = this.#host.drawingSelection(this.#sel);
     if (nodePos == null) return;
-    const hEmu = Math.round(dx * EMU_PER_PX);
-    const vEmu = Math.round(dy * EMU_PER_PX);
+    const target =
+      clientX == null || clientY == null ? null : this.#host.pageAtPoint(clientX, clientY);
+    if (!target) return;
+    const dropX = Math.min(
+      Math.max(target.x - (this.#grab?.x ?? 0), 0),
+      Math.max(0, target.w - this.#sel.width),
+    );
+    const dropY = Math.min(
+      Math.max(target.y - (this.#grab?.y ?? 0), 0),
+      Math.max(0, target.h - this.#sel.height),
+    );
+    if (
+      target.page !== this.#sel.page ||
+      this.#host.crossesCell?.(this.#sel, target.page, target.x, target.y)
+    ) {
+      this.#reanchorDrop(target, dropX, dropY);
+      return;
+    }
     const anchors = this.#floatingAnchors();
     if (typeof anchors?.h?.offset === "number" && typeof anchors.v?.offset === "number") {
-      this.#host.editor().commands["move-drawing"](JSON.stringify({ h: hEmu, v: vEmu }));
+      // Same-page algebra: the clamped target minus the current painted box
+      // is the delta toward it — bounded by the page, unlike the raw pointer
+      // delta (the re-wrap may shift the anchor; the correction settles it).
+      const h = Math.round((dropX - this.#sel.x) * EMU_PER_PX);
+      const v = Math.round((dropY - this.#sel.y) * EMU_PER_PX);
+      this.#dropCorrection = {
+        x: dropX,
+        y: dropY,
+        page: target.page,
+        tries: 0,
+        reanchored: false,
+        box: { x: this.#sel.x, y: this.#sel.y },
+        last: { h, v },
+      };
+      this.#host.editor().commands["move-drawing"](JSON.stringify({ h, v }));
       return;
     }
     this.#host.editor().commands["place-drawing"](
       JSON.stringify({
-        h: Math.round(this.#sel.x * EMU_PER_PX) + hEmu,
-        v: Math.round(this.#sel.y * EMU_PER_PX) + vEmu,
+        h: Math.round(dropX * EMU_PER_PX),
+        v: Math.round(dropY * EMU_PER_PX),
       }),
     );
+  }
+
+  /** Re-home the drawing beside a drop point (Word re-anchors on drag): a
+   *  cross-page drop, or one whose paragraph sits in a different table cell
+   *  than the anchor. The anchor paragraph becomes the drop point's nearest
+   *  paragraph and the offsets are seeded from that paragraph's laid origin,
+   *  then the correction loop settles the residual as usual. Null when no
+   *  paragraph can host the drawing — the caller commits nothing. */
+  #reanchorDrop(
+    target: { page: number; x: number; y: number },
+    dropX: number,
+    dropY: number,
+  ): void {
+    const at = this.#host.paragraphAt(target.page, target.x, target.y);
+    if (!at) return;
+    this.#dropCorrection = {
+      x: dropX,
+      y: dropY,
+      page: target.page,
+      tries: 0,
+      reanchored: true,
+    };
+    this.#host.editor().commands["reanchor-drawing"](
+      JSON.stringify({
+        to: at.contentPos,
+        h: Math.round((dropX - at.xPx) * EMU_PER_PX),
+        v: Math.round((dropY - at.yPx) * EMU_PER_PX),
+      }),
+    );
+  }
+
+  /** The landing check after a move-drawing drop: measure the painted box
+   *  against the drop point and re-commit the residue. The corrected offset
+   *  re-wraps the page around a box already at the drop point, so the anchor
+   *  settles and the residue is zero on the next pass — bounded anyway, an
+   *  unterminated layout gap must not loop the correction. A box on another
+   *  page than the drop means the re-wrap pushed the anchor paragraph itself
+   *  off its page; the drawing then re-homes beside the drop point (Word
+   *  re-anchors on drag), once — further cross-page drift just gives up. */
+  #correctDrop(): void {
+    const c = this.#dropCorrection!;
+    if (!this.#sel) {
+      this.#dropCorrection = null;
+      return;
+    }
+    if (this.#sel.page !== c.page) {
+      if (c.reanchored || c.tries > 0) {
+        this.#dropCorrection = null;
+        return;
+      }
+      this.#reanchorDrop(c, c.x, c.y);
+      return;
+    }
+    const rx = c.x - this.#sel.x;
+    const ry = c.y - this.#sel.y;
+    if (Math.hypot(rx, ry) < 1 || c.tries >= 3) {
+      this.#dropCorrection = null;
+      return;
+    }
+    // A commit that painted no movement is being eaten by a clamp (a
+    // cell-anchored box pinned inside its cell, Word's layoutInCell) —
+    // repeating the residue only piles offsets onto a stuck box. With the
+    // anchor kept, the last delta retreats so the attrs land back where the
+    // paint sits; a re-homed anchor can only give up (its seed was
+    // page-clamped, so the residue stays bounded by the anchor's shift).
+    if (c.box && Math.hypot(c.box.x - this.#sel.x, c.box.y - this.#sel.y) < 1) {
+      if (!c.reanchored && c.last) {
+        this.#host
+          .editor()
+          .commands["move-drawing"](JSON.stringify({ h: -c.last.h, v: -c.last.v }));
+      }
+      this.#dropCorrection = null;
+      return;
+    }
+    c.box = { x: this.#sel.x, y: this.#sel.y };
+    c.last = { h: Math.round(rx * EMU_PER_PX), v: Math.round(ry * EMU_PER_PX) };
+    c.tries++;
+    this.#host
+      .editor()
+      .commands["move-drawing"](
+        JSON.stringify({ h: Math.round(rx * EMU_PER_PX), v: Math.round(ry * EMU_PER_PX) }),
+      );
   }
 
   /** A rotate handle's swept delta (degrees, clockwise). */
