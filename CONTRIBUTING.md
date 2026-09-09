@@ -104,6 +104,9 @@ The rendering pipeline (projection → layout → paint) is described in [CLAUDE
 - **Projection is pure** — reads persisted attrs (+ the style cascade), emits `LayoutDoc` geometry. No Leafer types, no DOM.
 - **Painter is dumb** — maps `LayoutDoc` to Leafer elements 1:1. If something renders at the wrong place, fix the projection or the engine, not the painter.
 - **Page model** — fixed-height pages and the Word stacking rules are engine semantics (`@docen/layout`) — change them there, once.
+- **One wrapping context per page** — float zones register into a page-level registry (`pageEffects`), and each column derives its zones/bands from it. Never push into a column's `zones`/`bands` directly; a replay rebuilds them from the registry.
+- **Resolve once, consume everywhere** — a float's position locks at its first resolution (W3C CSS Exclusions processing model). Re-resolving a paragraph-anchored zone against the replayed layout oscillates; if a wrap result looks stale, widen the trigger or the registry, don't add a second replay.
+- **Replays go through the op queue** — anything that flowed into the page (`push` raws, keepNext pulls, split tails that open a page) must be recorded in `pageOps`, or the page replay drops it. New block-placement paths add their op there.
 
 ## Pull Request Checklist
 
