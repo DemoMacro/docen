@@ -802,13 +802,18 @@ export class DocxManager {
     // onto cell sides lacking their own tcBorder. A side equal to the table's
     // insideH/V is the inherited one — drop it so the regenerated docx keeps
     // tblBorders.insideH/V instead of duplicating as tcBorders on every cell.
+    // The side drops land on a COPY: the opts' borders object is shared with
+    // the live editor attrs, and deleting its sides in place would strip the
+    // document model on every render (an explicit stroke equal to the table
+    // grid would vanish from the cells that carry it).
     if ((insideH || insideV) && cellOpts.borders) {
-      const b = cellOpts.borders as Record<string, BorderOptions | undefined>;
+      const b = { ...(cellOpts.borders as Record<string, BorderOptions | undefined>) };
       if (insideH && sameBorder(b.top, insideH)) delete b.top;
       if (insideH && sameBorder(b.bottom, insideH)) delete b.bottom;
       if (insideV && sameBorder(b.left, insideV)) delete b.left;
       if (insideV && sameBorder(b.right, insideV)) delete b.right;
       if (Object.keys(b).length === 0) delete cellOpts.borders;
+      else cellOpts.borders = b;
     }
 
     // A cell may contain ANY block (nested table/list/…), not just
