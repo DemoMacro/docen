@@ -1,3 +1,4 @@
+import type { ChartOptions, ChartSeriesData } from "@docen/docx";
 import { FASTElement, css, customElement, html, observable, ref } from "@microsoft/fast-element";
 
 import type { ChartDataPatch } from "../../../document/extensions/commands";
@@ -115,14 +116,19 @@ class DocenChartDataDialog extends FASTElement {
   /** Prefill from the chart payload — the series carry the columns, the
    *  categories (or the first series' value count for the category-less
    *  scatter layout) the rows. */
-  show(chart: Record<string, unknown> | null): void {
-    const categories = (chart?.categories as string[] | undefined) ?? [];
-    const series = (chart?.series as { name?: string; values?: number[] }[] | undefined) ?? [];
-    if (this.titleInput) this.titleInput.value = (chart?.title as string | undefined) ?? "";
+  show(chart: ChartOptions | null): void {
+    const categories = chart?.categories ?? [];
+    // The grid edits category series; scatter/bubble series (no values field)
+    // don't show — their data lives in xValues/yValues/bubbleSize.
+    const series = (chart?.series ?? []).filter((s): s is ChartSeriesData => "values" in s);
+    // A round-tripped title can be the rich object form — the flat grid
+    // edits the plain string only.
+    if (this.titleInput)
+      this.titleInput.value = typeof chart?.title === "string" ? chart.title : "";
     this.#categories = [...categories];
     this.#series = series.map((s) => ({
       name: s.name ?? "",
-      values: [...(s.values ?? [])],
+      values: [...s.values],
     }));
     if (!this.#series.length) this.#series.push({ name: "", values: [] });
     this.#render();

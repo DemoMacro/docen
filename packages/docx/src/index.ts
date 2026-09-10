@@ -11,6 +11,13 @@ export { docxExtensions, type JSONContent, type AnyExtension } from "./core";
 // document grid) so the editor layer can type section geometry without a direct
 // @office-open/docx dependency.
 export type { SectionPropertiesOptions } from "@office-open/docx";
+// Re-export the chart payload type: the chart node's attrs.chart IS a
+// ChartOptions verbatim (extensions/chart.ts), and the editor's command layer
+// edits it as one — same rationale as SectionPropertiesOptions above. The
+// @office-open/docx barrel doesn't re-export the core chart value-domain
+// names, so they come straight from @office-open/core (already a dependency).
+export type { ChartOptions } from "@office-open/docx";
+export type { ChartType, ChartSeriesData, LegendPosition } from "@office-open/core";
 // Re-export the engine's section-geometry defaults (MS Office zh-CN "Normal":
 // A4 + top/bottom 1440tw, left/right 1800tw) so editor-side geometry fallbacks
 // — content-width for image capping, page measurement — reuse the SAME defaults

@@ -1,4 +1,4 @@
-import type { JSONContent } from "@docen/docx";
+import type { ChartOptions, JSONContent } from "@docen/docx";
 import { buildCustomMultilevelLevels, nextMultilevelReference } from "@docen/docx";
 import type { Editor } from "@docen/docx/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
@@ -147,7 +147,7 @@ export class DialogCommands {
     const target = this.#target();
     const sel = target?.state.selection;
     if (!sel || !(sel instanceof NodeSelection) || sel.node.type.name !== "chart") return;
-    this.#chartDialog()?.show(sel.node.attrs.chart as Record<string, unknown> | null);
+    this.#chartDialog()?.show((sel.node.attrs.chart as ChartOptions | null) ?? null);
   }
 
   /** Edit Data dialog 确定 — stamp the grid's values onto the selected chart. */
@@ -159,9 +159,9 @@ export class DialogCommands {
     this.host.bridge()?.focus();
   };
 
-  #chartDialog(): { show(chart: Record<string, unknown> | null): void } | null | undefined {
+  #chartDialog(): { show(chart: ChartOptions | null): void } | null | undefined {
     return this.host.element().shadowRoot?.querySelector("docen-chart-data-dialog") as
-      | { show(chart: Record<string, unknown> | null): void }
+      | { show(chart: ChartOptions | null): void }
       | null
       | undefined;
   }

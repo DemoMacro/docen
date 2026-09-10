@@ -1,4 +1,4 @@
-import type { ImageAttrs } from "@docen/docx";
+import type { ChartOptions, ChartType, ImageAttrs, LegendPosition } from "@docen/docx";
 import {
   BULLET_GLYPHS,
   HIGHLIGHT_PALETTE_RGB,
@@ -1002,17 +1002,23 @@ function shapeAt(
   return attrs.wpsShape ? { pos: sel.from, attrs, kind: "shape" } : null;
 }
 
+/** The chart types whose series carry a grouping (w:bar/line/area families +
+ *  stock's OHLC lanes) — the rest have none to hand down. */
+const GROUPING_CHART_TYPES: readonly ChartType[] = ["column", "bar", "line", "area", "stock"];
+
 /** The selected chart node — inline or floating alike: the type/legend/data
- *  edits write the chart payload wherever the chart sits. */
-function chartAt(
-  state: EditorState,
-): { pos: number; attrs: Record<string, unknown>; chart: Record<string, unknown> } | null {
+ *  edits write the chart payload wherever the chart sits. attrs.chart is a
+ *  ChartOptions verbatim (the chart node's contract), typed here so every
+ *  command below edits real fields instead of Record lookups. */
+function chartAt(state: EditorState): {
+  pos: number;
+  attrs: Record<string, unknown>;
+  chart: ChartOptions;
+} | null {
   const sel = state.selection;
   if (!(sel instanceof NodeSelection) || sel.node.type.name !== "chart") return null;
   const attrs = sel.node.attrs as Record<string, unknown>;
-  return attrs.chart
-    ? { pos: sel.from, attrs, chart: attrs.chart as Record<string, unknown> }
-    : null;
+  return attrs.chart ? { pos: sel.from, attrs, chart: attrs.chart as ChartOptions } : null;
 }
 
 /** Stamp the patched chart payload back onto the chart node, restoring the
@@ -1021,7 +1027,7 @@ function chartAt(
 function stampChart(
   tr: Transaction,
   target: NonNullable<ReturnType<typeof chartAt>>,
-  chart: Record<string, unknown>,
+  chart: ChartOptions,
 ): boolean {
   tr.setNodeMarkup(target.pos, undefined, { ...target.attrs, chart });
   tr.setSelection(NodeSelection.create(tr.doc, target.pos));
@@ -3851,8 +3857,9 @@ export const DocumentCommands = Extension.create({
         ({ state, tr }) => {
           const target = chartAt(state);
           if (!target || !value) return false;
-          const chart: Record<string, unknown> = { ...target.chart, type: value };
-          if (!["column", "bar", "line", "area", "stock"].includes(value)) delete chart.grouping;
+          const type = value as ChartType;
+          const chart = { ...target.chart, type };
+          if (!GROUPING_CHART_TYPES.includes(chart.type)) delete chart.grouping;
           return stampChart(tr, target, chart);
         },
       // Legend: "none" hides it (showLegend false — the painter's presence
@@ -3868,7 +3875,7 @@ export const DocumentCommands = Extension.create({
             delete chart.legendPosition;
           } else {
             chart.showLegend = true;
-            chart.legendPosition = value;
+            chart.legendPosition = value as LegendPosition;
           }
           return stampChart(tr, target, chart);
         },
@@ -3897,16 +3904,19 @@ export const DocumentCommands = Extension.create({
           }
           if (parsed.categories) chart.categories = parsed.categories;
           if (parsed.series)
+            // The grid edits category-series values only; a scatter/bubble
+            // series (xValues/yValues/bubbleSize) keeps its shape untouched —
+            // giving it a values field would make the painter's valuesOf
+            // read it as a category series.
             chart.series = parsed.series.map((s, i) => {
-              const prev = (
-                target.chart.series as { name?: string; values?: number[] }[] | undefined
-              )?.[i];
+              const prev = target.chart.series?.[i];
+              if (prev && !("values" in prev)) return prev;
               return {
                 ...prev,
                 name: s.name ?? prev?.name ?? `Series ${i + 1}`,
-                values: s.values ?? prev?.values ?? [],
+                values: s.values ?? ("values" in prev ? [...prev.values] : []),
               };
-            });
+            }) as ChartOptions["series"];
           return stampChart(tr, target, chart);
         },
       // Delete Key on a sub-selected series (Word): the series leaves the
@@ -3918,10 +3928,15 @@ export const DocumentCommands = Extension.create({
           const target = chartAt(state);
           const index = Number.parseInt(value ?? "", 10);
           if (!target || !Number.isInteger(index)) return false;
-          const series = [...((target.chart.series as unknown[] | undefined) ?? [])];
+          const series = [...(target.chart.series ?? [])];
           if (index < 0 || index >= series.length || series.length <= 1) return false;
           series.splice(index, 1);
-          return stampChart(tr, target, { ...target.chart, series });
+          // A mutable copy of the series union doesn't assign back to the
+          // union-of-arrays — the write is the boundary.
+          return stampChart(tr, target, {
+            ...target.chart,
+            series: series as ChartOptions["series"],
+          });
         },
       // The plot's value-drag commit (Excel's drag-a-point editing): JSON
       // {series, point, value} writes one data point, everything else stays.
@@ -3944,12 +3959,16 @@ export const DocumentCommands = Extension.create({
             !Number.isFinite(v)
           )
             return false;
-          const prev = (target.chart.series as { values?: number[] }[] | undefined)?.[series!];
-          if (!prev || point! < 0 || point! >= (prev.values?.length ?? 0)) return false;
-          const next = (prev.values ?? []).map((old, pi) => (pi === point ? v : old));
-          const all = [...((target.chart.series as { values?: number[] }[] | undefined) ?? [])];
+          const prev = target.chart.series?.[series!];
+          if (!prev || !("values" in prev)) return false;
+          if (point! < 0 || point! >= prev.values.length) return false;
+          const next = prev.values.map((old, pi) => (pi === point ? v : old));
+          const all = [...(target.chart.series ?? [])];
           all[series!] = { ...prev, values: next };
-          return stampChart(tr, target, { ...target.chart, series: all });
+          return stampChart(tr, target, {
+            ...target.chart,
+            series: all as ChartOptions["series"],
+          });
         },
       // Swap the source (the Change Picture flow's commit; the file-picker
       // side reads the file into a data URL at the UI layer). The frame keeps
