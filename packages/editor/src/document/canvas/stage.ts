@@ -82,6 +82,10 @@ interface PageSlot {
   /** Continuous pages (web/read) only: the viewport window the canvas
    *  currently renders — the frame itself is as tall as the whole page. */
   win?: { idx: number; heightPx: number };
+  /** A paint-time flag (marks/gridlines/view mode) flipped after this
+   *  page's last paint: it lives outside the viewport, so the scroll
+   *  observer repaints it before it can scroll into view. */
+  stale?: boolean;
 }
 
 /** One section's laid furniture slots — [default, first, even]. */
@@ -216,10 +220,18 @@ export class CanvasStage {
         for (const record of records) {
           const slot = this.slots.find((s) => s.el === record.target);
           if (!slot) continue;
-          if (record.isIntersecting) this.ensure(slot);
-          else if (slot.app) {
+          if (record.isIntersecting) {
+            this.ensure(slot);
+            // A paint-time flag flipped while this page lived outside the
+            // viewport — repaint it before it can scroll into view.
+            if (slot.stale && slot.app) {
+              slot.stale = false;
+              this.repaint(slot.app, this.slots.indexOf(slot));
+            }
+          } else if (slot.app) {
             slot.app.destroy();
             slot.app = null;
+            slot.stale = false;
             // The layers belonged to the destroyed tree — drop the stale
             // reference so the next paint rebuilds rather than addressing
             // groups of a dead App.
@@ -307,6 +319,38 @@ export class CanvasStage {
     this.applyZoom();
   }
 
+  /** Repaint the pages the viewport can see right now; the rest of the live
+   *  IO band is flagged `stale` and repainted by the scroll observer before
+   *  it can scroll into view. A paint-flag flip on a 1000+ page document
+   *  must not pay the whole ±150% band synchronously — the click repaints
+   *  the visible page(s) only, scrolling picks up the rest. */
+  #repaintViewFlagStaleRest(): void {
+    // The scroll root is resolved live: the stage can be re-mounted after
+    // construction (HMR, view rebuilds), and a detached cached root's rect
+    // reads all-zero — every page would read stale and the click would
+    // repaint nothing.
+    const root =
+      (this.#scrollRoot?.isConnected ?? false)
+        ? this.#scrollRoot
+        : (this.shell.closest("docen-document-area") ?? this.shell.parentElement);
+    const rootRect = root?.getBoundingClientRect();
+    for (const [index, slot] of this.slots.entries()) {
+      if (!slot.app) continue;
+      const r = slot.el.getBoundingClientRect();
+      if (
+        !rootRect ||
+        (r.top < rootRect.bottom &&
+          r.bottom > rootRect.top &&
+          r.left < rootRect.right &&
+          r.right > rootRect.left)
+      ) {
+        this.repaint(slot.app, index);
+      } else {
+        slot.stale = true;
+      }
+    }
+  }
+
   /** Formatting marks (Word's ¶ toggle) — a paint-time flag: flipping it
    *  repaints every live page with marks drawn (or dropped). */
   #showMarks = false;
@@ -314,9 +358,7 @@ export class CanvasStage {
   setShowMarks(on: boolean): void {
     if (on === this.#showMarks) return;
     this.#showMarks = on;
-    for (const [index, slot] of this.slots.entries()) {
-      if (slot.app) this.repaint(slot.app, index);
-    }
+    this.#repaintViewFlagStaleRest();
   }
 
   /** Document-grid overlay (Word's View → Gridlines) — a paint-time flag like
@@ -330,9 +372,7 @@ export class CanvasStage {
   setShowGridlines(on: boolean): void {
     if (on === this.#showGridlines) return;
     this.#showGridlines = on;
-    for (const [index, slot] of this.slots.entries()) {
-      if (slot.app) this.repaint(slot.app, index);
-    }
+    this.#repaintViewFlagStaleRest();
   }
 
   /** The document view (Word's View tab): print = paginated pages with
@@ -352,9 +392,7 @@ export class CanvasStage {
     const wasContinuous = this.#viewMode === "web" || this.#viewMode === "read";
     this.#viewMode = mode;
     if ((mode === "web" || mode === "read") !== wasContinuous) this.#toggleWindowScroll();
-    for (const [index, slot] of this.slots.entries()) {
-      if (slot.app) this.repaint(slot.app, index);
-    }
+    this.#repaintViewFlagStaleRest();
   }
 
   get viewMode(): "print" | "draft" | "web" | "read" {
@@ -416,9 +454,7 @@ export class CanvasStage {
     }
     this.ctx.marksLabels = labels;
     if (!this.#showMarks) return;
-    for (const [index, slot] of this.slots.entries()) {
-      if (slot.app) this.repaint(slot.app, index);
-    }
+    this.#repaintViewFlagStaleRest();
   }
 
   private applyZoom(): void {
@@ -929,9 +965,7 @@ export class CanvasStage {
    *  page (the boundary is an interaction affordance, never printed). */
   setStoryEdit(edit: { kind: "header" | "footer"; label: string } | null): void {
     this.storyEdit = edit;
-    for (const [index, slot] of this.slots.entries()) {
-      if (slot.app) this.repaint(slot.app, index);
-    }
+    this.#repaintViewFlagStaleRest();
   }
 
   private storyEdit: { kind: "header" | "footer"; label: string } | null = null;
