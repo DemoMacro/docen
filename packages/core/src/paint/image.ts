@@ -93,13 +93,28 @@ export function pinImage(url: string): ILeaferImage {
  *  and repaints happen per transaction — caching the derived url by content
  *  fingerprint turns every repaint after the first into a plain picture. */
 const derivedImages = new Map<string, string>();
-const DERIVED_LIMIT = 64;
+/** String-length budget instead of an entry cap: a 1000+ page document holds
+ *  hundreds of derived composites (masked GDI runs, cropped views), and an
+ *  entry-capped LRU turns every full repaint into a re-encode storm — the
+ *  canvas → toDataURL pass is the single most expensive pixel op per member
+ *  (profiler: ~20% of a flag-flip repaint on a 1.5 GB document). */
+const DERIVED_BUDGET = 192 * 1024 * 1024;
+let derivedBytes = 0;
 
 function cacheDerived(fingerprint: string, url: string): void {
-  if (derivedImages.size >= DERIVED_LIMIT) {
-    derivedImages.delete(derivedImages.keys().next().value!);
+  const prev = derivedImages.get(fingerprint);
+  if (prev !== undefined) {
+    derivedBytes -= prev.length;
+    derivedImages.delete(fingerprint);
   }
+  derivedBytes += url.length;
   derivedImages.set(fingerprint, url);
+  while (derivedBytes > DERIVED_BUDGET && derivedImages.size > 1) {
+    const oldest = derivedImages.keys().next().value!;
+    derivedBytes -= derivedImages.get(oldest)!.length;
+    derivedImages.delete(oldest);
+    if (oldest === fingerprint) break;
+  }
 }
 
 /** Release the pins at stage teardown — Leafer's own recycle then evicts the
