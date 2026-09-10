@@ -22,7 +22,7 @@ import { twipToPx } from "@docen/layout";
 import type { DocumentOptions, SectionPropertiesOptions } from "@office-open/docx";
 
 import { indexCharacterStyles } from "../style-cascade";
-import type { ProjectContext } from "./project/context";
+import type { MarkupDisplay, ProjectContext } from "./project/context";
 import { isRecord, type BodyParagraph } from "./project/guards";
 import { indexNumberings } from "./project/numbering";
 import {
@@ -92,8 +92,12 @@ function projectNoteBlocks(
 /** Project a full DocumentOptions into the engine's input: one
  *  {@link ProjectedSection} per document section plus the page background
  *  (document-wide). Sections paginate in order — see
- *  `layoutFlowSections` in @docen/layout. */
-export function projectDocumentOptions(doc: DocumentOptions): {
+ *  `layoutFlowSections` in @docen/layout. `markup` applies Word's Display for
+ *  Review state to the tracked-changes projection (omitted = all marks show). */
+export function projectDocumentOptions(
+  doc: DocumentOptions,
+  markup?: MarkupDisplay,
+): {
   sections: ProjectedSection[];
   background?: ProjectedPageBackground;
 } {
@@ -105,6 +109,7 @@ export function projectDocumentOptions(doc: DocumentOptions): {
     openComments: new Set(),
     footnoteOrdinals: new Map(),
     endnoteOrdinals: new Map(),
+    ...(markup ? { markup } : {}),
     // The document-wide tab grid (w:defaultTabStop, twips); Word's 720 default
     // applies when settings omit it (the engine carries that fallback).
     defaultTabStopPx:

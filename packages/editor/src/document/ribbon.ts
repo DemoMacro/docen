@@ -134,18 +134,39 @@ const caseItems = (): string =>
 
 // Word's Accept / Reject splits (Review → Tracking): the face accepts or
 // rejects the selected revision and moves to the next; the drop-down repeats
-// that and adds the accept/reject-all sweep. ("Accept All Changes Shown"
-// needs the markup view filter — stays out until that exists.)
+// that, adds the accept/reject-all sweep, and — Word's order — the
+// "…All Changes Shown" sweep scoped to the markup view's author filter.
 const acceptItems = (): string =>
   JSON.stringify([
     { text: opt("accept-and-next"), event: "accept-change" },
+    { text: opt("accept-all-changes-shown"), event: "accept-all-changes-shown" },
     { text: opt("accept-all-changes"), event: "accept-all-changes" },
   ]);
 
 const rejectItems = (): string =>
   JSON.stringify([
     { text: opt("reject-and-next"), event: "reject-change" },
+    { text: opt("reject-all-changes-shown"), event: "reject-all-changes-shown" },
     { text: opt("reject-all-changes"), event: "reject-all-changes" },
+  ]);
+
+// Word's Display for Review drop-down (Review → Tracking): the four markup
+// views. The host re-stamps label + checked to match the live state (the
+// #syncEditModeMenu pattern — the static stamp below is the default "simple").
+const displayItems = (): string =>
+  JSON.stringify([
+    { text: opt("simple-marks"), event: "display-for-review", value: "simple", checked: true },
+    { text: opt("all-marks"), event: "display-for-review", value: "all" },
+    { text: opt("no-marks"), event: "display-for-review", value: "none" },
+    { text: opt("original-marks"), event: "display-for-review", value: "original" },
+  ]);
+
+// Word's Specific People drop-down: the document's reviewers plus the "all"
+// clearing entry. Author names are document data (w:ins/@w:author), not i18n.
+const reviewerItems = (authors?: readonly string[]): string =>
+  JSON.stringify([
+    { text: opt("all-reviewers"), event: "review-specific-people", value: "all", checked: true },
+    ...(authors ?? []).map((a) => ({ text: a, event: "review-specific-people", value: a })),
   ]);
 
 // Word's Chinese Layout (中文版式) drop-down in the Paragraph group — both
@@ -709,6 +730,9 @@ export type RibbonTabId = (typeof RIBBON_TAB_IDS)[number];
 export interface RibbonOptions {
   /** Whitelist of tab ids to render; omitted/empty = all tabs (back-compat). */
   tabs?: readonly RibbonTabId[];
+  /** The document's revision authors (w:ins/@w:author values, document order)
+   *  — fills the markup view's Specific People menu; absent/empty greys it. */
+  revisionAuthors?: readonly string[];
 }
 
 /**
@@ -1029,7 +1053,7 @@ export function ribbonTabs(styles?: StylesOptions | null, opts: RibbonOptions = 
   if (show("layout")) tabs.push(layoutTab());
   if (show("references")) tabs.push(referencesTab());
   if (show("mailings")) tabs.push(mailingsTab());
-  if (show("review")) tabs.push(reviewTab());
+  if (show("review")) tabs.push(reviewTab(opts.revisionAuthors));
   if (show("view")) tabs.push(viewTab());
   return tabs;
 }
@@ -1335,7 +1359,7 @@ const mailingsTab = (): RibbonTab =>
     ]),
   ]);
 
-const reviewTab = (): RibbonTab =>
+const reviewTab = (authors?: readonly string[]): RibbonTab =>
   tabNode("review", [
     group("proofing", [
       btn("spell-check", "spell-check", { size: "large" }),
@@ -1356,6 +1380,10 @@ const reviewTab = (): RibbonTab =>
       btn("group-objects", "track-changes", { size: "large" }),
       split("accept", "accept-change", parsedItems(acceptItems()), { size: "large" }),
       split("close", "reject-change", parsedItems(rejectItems()), { size: "large" }),
+      split("eye", "display-for-review", parsedItems(displayItems()), { size: "large" }),
+      menu("people", "review-specific-people", parsedItems(reviewerItems(authors)), {
+        size: "large",
+      }),
       col([grid([btn("align-left", "previous-change"), btn("align-right", "next-change")])]),
       btn("reviewing-pane", "reviewing-pane", { size: "large" }),
     ]),

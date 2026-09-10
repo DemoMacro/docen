@@ -189,6 +189,8 @@ interface RevisionRange {
   to: number;
   type: "insertion" | "deletion";
   id: unknown;
+  /** The record's author (w:ins/@w:author) — the display filter's key. */
+  author: string;
 }
 
 /** One revision as the reviewing pane lists it: the range plus the record's
@@ -248,14 +250,25 @@ function revisionRanges(doc: PMNode): RevisionRange[] {
     const to = pos + node.nodeSize;
     const last = out[out.length - 1];
     const id = (mark.attrs as { id?: unknown }).id;
+    const author = (mark.attrs as { author?: string }).author ?? "";
     if (last && last.type === mark.type.name && last.id === id && last.to === from) {
       last.to = to;
     } else {
-      out.push({ from, to, type: mark.type.name as "insertion" | "deletion", id });
+      out.push({ from, to, type: mark.type.name as "insertion" | "deletion", id, author });
     }
     return true;
   });
   return out;
+}
+
+/** Word's "…All Changes Shown" scope: the revisions whose author sits in the
+ *  display filter (undefined/empty filter = every revision). */
+function shownRanges(
+  ranges: RevisionRange[],
+  authors: readonly string[] | undefined,
+): RevisionRange[] {
+  if (!authors || authors.length === 0) return ranges;
+  return ranges.filter((r) => r.author !== "" && authors.includes(r.author));
 }
 
 /** The revision a command acts on: the one overlapping the selection (an empty
@@ -362,6 +375,36 @@ export const TrackChanges = Extension.create({
           dispatch(tr);
           return true;
         },
+      // Word's "Accept/Reject All Changes Shown" — the same sweep scoped to
+      // the display filter's authors (the host passes the current list).
+      "accept-all-changes-shown":
+        (authors?: string[]) =>
+        ({ state, tr, dispatch }) => {
+          const ranges = shownRanges(revisionRanges(state.doc), authors);
+          if (ranges.length === 0) return false;
+          if (!dispatch) return true;
+          for (const r of [...ranges].reverse()) {
+            if (r.type === "insertion") tr.removeMark(r.from, r.to, state.schema.marks.insertion!);
+            else tr.delete(r.from, r.to);
+          }
+          tr.setMeta(skipTrackingKey, true);
+          dispatch(tr);
+          return true;
+        },
+      "reject-all-changes-shown":
+        (authors?: string[]) =>
+        ({ state, tr, dispatch }) => {
+          const ranges = shownRanges(revisionRanges(state.doc), authors);
+          if (ranges.length === 0) return false;
+          if (!dispatch) return true;
+          for (const r of [...ranges].reverse()) {
+            if (r.type === "insertion") tr.delete(r.from, r.to);
+            else tr.removeMark(r.from, r.to, state.schema.marks.deletion!);
+          }
+          tr.setMeta(skipTrackingKey, true);
+          dispatch(tr);
+          return true;
+        },
       "previous-change":
         () =>
         ({ state, tr, dispatch }) => {
@@ -396,6 +439,8 @@ declare module "@tiptap/core" {
       "accept-all-changes": () => ReturnType;
       "reject-change": (id?: string) => ReturnType;
       "reject-all-changes": () => ReturnType;
+      "accept-all-changes-shown": (authors?: string[]) => ReturnType;
+      "reject-all-changes-shown": (authors?: string[]) => ReturnType;
       "previous-change": () => ReturnType;
       "next-change": () => ReturnType;
     };

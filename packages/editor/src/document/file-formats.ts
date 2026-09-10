@@ -249,6 +249,14 @@ export const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   // Review → Reviewing Pane toggles the revisions pane (the card actions
   // dispatch the engine's by-id accept/reject commands).
   "reviewing-pane",
+  // Word's Display for Review: the four markup views re-project the document
+  // (the host carries the state and passes it to the layout projection);
+  // Specific People scopes the view to one reviewer's revisions. The two
+  // "…All Changes Shown" sweeps need the same filter as their argument.
+  "display-for-review",
+  "review-specific-people",
+  "accept-all-changes-shown",
+  "reject-all-changes-shown",
   // Text Box / Shapes insert a standalone wps shape run (Shapes reads the
   // gallery preset from the split item's value).
   "text-box",

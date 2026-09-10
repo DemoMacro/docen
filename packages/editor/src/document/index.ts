@@ -105,8 +105,6 @@ import { SpellingCommands } from "./commands/spelling";
 import type { StylesInspectorData, StylesPaneState } from "./components/styles-pane";
 import { pagesToPdf } from "./export-pdf";
 import type { ModifyStylePatch } from "./extensions/commands";
-// Side-effect import: registers the ribbon/header translation tables.
-import "./i18n";
 import {
   floatingDrawingAt,
   inlineDrawingAt,
@@ -114,6 +112,9 @@ import {
   tableAncestry,
   WIRED_DISPATCH,
 } from "./extensions/commands";
+// Side-effect import: registers the ribbon/header translation tables.
+import "./i18n";
+import { collectRevisions } from "./extensions/track-changes";
 import { LOCAL_HANDLED, READONLY_LIVE, SAVE_FORMATS, detectOpenFormat } from "./file-formats";
 import { mergeSectionProperties } from "./page-setup";
 import { compressPictureSrc, pickTransparentColor, type CropRect } from "./pixels";
@@ -385,6 +386,11 @@ class DocenDocument extends AddinHost<Editor> {
    *  anchor page the story edits in place on. */
   #storyKind: StoryKind | null = null;
   #storyPage = -1;
+  /** Word's Display for Review state (Review → Tracking): how tracked changes
+   *  project onto the canvas, optionally scoped to one reviewer's revisions.
+   *  Pure display state — the marks in the document are untouched. */
+  #markupView: "simple" | "all" | "none" | "original" = "simple";
+  #markupAuthors: string[] | null = null;
 
   /** The underlying Tiptap Editor (undefined before connect / after disconnect).
    *  Exposed so a host (the @docen/vue adapter, or any parent element) can drive
@@ -1845,7 +1851,15 @@ class DocenDocument extends AddinHost<Editor> {
    *  section's furniture ONCE (the insets and the painter's bands share the
    *  pass) → assemble the flow inputs. Pure preparation — no pagination. */
   #projectFlowSections(doc: JSONContent): ProjectedFlowInputs {
-    const { sections, background } = projectDocumentOptions(compileDocument(this.#mergedView(doc)));
+    const { sections, background } = projectDocumentOptions(
+      compileDocument(this.#mergedView(doc)),
+      // Word's Display for Review: "simple" is also the all-marks projection
+      // minus the review chrome Word draws outside the flow, so only an
+      // actual filter needs the non-default pass.
+      this.#markupView !== "simple" || this.#markupAuthors
+        ? { view: this.#markupView, authors: this.#markupAuthors ?? undefined }
+        : undefined,
+    );
     const stageSections: (ProjectedSection & CanvasStageSection)[] = sections.map((section) => ({
       ...section,
     }));
@@ -2475,7 +2489,10 @@ class DocenDocument extends AddinHost<Editor> {
     // ribbonTabs; external add-ins layer their own tabs on top via
     // mergeRibbonSchema. The default add-in contributes no ribbon, so without
     // extra add-ins this is just the built-in set.
-    const tabs = [...ribbonTabs(styles), ...mergeRibbonSchema(this.addins)];
+    const tabs = [
+      ...ribbonTabs(styles, { revisionAuthors: this.#revisionAuthors() }),
+      ...mergeRibbonSchema(this.addins),
+    ];
     const ribbonEl = root.querySelector("docen-ribbon")!;
     // Pass the workspace as the i18n scope so labels resolve against
     // `<docen-workspace lang>` (forwarded from `<docen-document lang>`)
@@ -2502,6 +2519,7 @@ class DocenDocument extends AddinHost<Editor> {
     this.#applyRibbonGreying();
     this.#syncEditModeMenu();
     this.#syncStoryMenus();
+    this.#syncMarkupMenus();
     // The ribbon DOM was rebuilt from scratch — drop the stale context-tab
     // tracking, then re-append them if the selection is inside a table.
     this.#contextTabIds.clear();
@@ -2760,6 +2778,74 @@ class DocenDocument extends AddinHost<Editor> {
         },
       ]),
     );
+  }
+
+  /** The document's revision authors (w:ins/@w:author, document order,
+   *  deduped) — the Specific People menu's entries. */
+  #revisionAuthors(): string[] {
+    if (!this.editor) return [];
+    const seen = new Set<string>();
+    for (const r of collectRevisions(this.editor.state.doc)) {
+      if (r.author !== "") seen.add(r.author);
+    }
+    return [...seen];
+  }
+
+  /** Re-stamp the Review → Tracking display controls so label + checked match
+   *  the live Display for Review state (the #syncEditModeMenu pattern — runs
+   *  on every chrome re-stamp, right after the greying pass). */
+  #syncMarkupMenus(): void {
+    const root = this.shadowRoot;
+    const display = root?.querySelector('docen-ribbon-split-button[event="display-for-review"]');
+    if (!display) return;
+    const view = this.#markupView;
+    const viewKey = {
+      simple: "simple-marks",
+      all: "all-marks",
+      none: "no-marks",
+      original: "original-marks",
+    }[view];
+    display.setAttribute("label", t(`ribbon.opt.${viewKey}`, this));
+    display.setAttribute(
+      "items",
+      JSON.stringify(
+        (
+          [
+            ["simple", "simple-marks"],
+            ["all", "all-marks"],
+            ["none", "no-marks"],
+            ["original", "original-marks"],
+          ] as const
+        ).map(([value, key]) => ({
+          text: t(`ribbon.opt.${key}`, this),
+          event: "display-for-review",
+          value,
+          checked: value === view,
+        })),
+      ),
+    );
+    const authors = this.#revisionAuthors();
+    const filtered = this.#markupAuthors;
+    display
+      .closest("docen-ribbon-group")
+      ?.querySelector<HTMLElement>('docen-ribbon-menu[event="review-specific-people"]')
+      ?.setAttribute(
+        "items",
+        JSON.stringify([
+          {
+            text: t("ribbon.opt.all-reviewers", this),
+            event: "review-specific-people",
+            value: "all",
+            checked: filtered == null,
+          },
+          ...authors.map((a) => ({
+            text: a,
+            event: "review-specific-people",
+            value: a,
+            checked: filtered?.includes(a) ?? false,
+          })),
+        ]),
+      );
   }
 
   /** Re-stamp the Header/Footer split drop-downs with live checked flags —
@@ -4829,6 +4915,30 @@ class DocenDocument extends AddinHost<Editor> {
     // reviewing pane listing every tracked change).
     if (name === "reviewing-pane") {
       this.#togglePane("revisions");
+      return;
+    }
+    // Word's Display for Review: switch the tracked-changes projection and
+    // re-render (the marks in the document are untouched — display only).
+    if (name === "display-for-review") {
+      if (value === "simple" || value === "all" || value === "none" || value === "original") {
+        this.#markupView = value;
+        this.#renderDoc(this.getJSON());
+        this.#syncMarkupMenus();
+      }
+      return;
+    }
+    // Word's Specific People: scope the display to one reviewer ("all" clears
+    // the filter). An author outside the filter renders as accepted (Word).
+    if (name === "review-specific-people" && value) {
+      this.#markupAuthors = value === "all" ? null : [value];
+      this.#renderDoc(this.getJSON());
+      this.#syncMarkupMenus();
+      return;
+    }
+    // The "…All Changes Shown" sweeps accept/reject exactly what the display
+    // filter shows (every revision when no filter is set).
+    if (name === "accept-all-changes-shown" || name === "reject-all-changes-shown") {
+      this.editor?.commands[name]?.(this.#markupAuthors ?? undefined);
       return;
     }
     // Text Box / Shapes — insert a floating wps shape run (Shapes reads its

@@ -13,7 +13,7 @@ import {
 } from "@docen/layout";
 
 import { mergeStyleChain } from "../../style-cascade";
-import type { ProjectContext } from "./context";
+import type { MarkupDisplay, ProjectContext } from "./context";
 import { cropOf, outlineOf, pictureAdjustOf } from "./drawing";
 import { isRecord, measureEmu, num, str, unescapeXml, type Rec } from "./guards";
 import { metafileMembers, pictureSrc } from "./media";
@@ -28,6 +28,18 @@ import { fontAttr, toFamily, runStyleOf } from "./styles";
  *  style (w:rStyle), which the cascade resolves per run. */
 const INSERTION_DISPLAY = { underline: { type: "single" }, color: "FF0000" } as const;
 const DELETION_DISPLAY = { strike: true, color: "FF0000" } as const;
+
+/** One revision mark's effective view under the display state: a mark whose
+ *  author sits outside the filter renders as accepted ("none") no matter the
+ *  view; simple/no-markup share the accepted rendering. */
+function effectiveView(markup: MarkupDisplay | undefined, mark: Rec): "all" | "none" | "original" {
+  const view = markup?.view ?? "all";
+  const authors = markup?.authors;
+  if (view === "simple" || view === "none") return "none";
+  if (!authors || authors.length === 0) return view;
+  const author = str(mark.author) ?? "";
+  return author !== "" && authors.includes(author) ? view : "none";
+}
 
 /** A footnote/endnote reference's note id — the bare number form (`{
  *  footnoteReference: 1 }` / `{ endnoteReference: 1 }`) or the option object
@@ -402,10 +414,21 @@ export function projectRuns(
         pushRuns(child.hyperlink.children, preset);
       }
       if (isRecord(child.insertion) && Array.isArray(child.insertion.children)) {
-        pushRuns(child.insertion.children, { ...preset, ...INSERTION_DISPLAY });
+        // Word's Display for Review: a revision outside the author filter (or
+        // in simple/no-markup view) shows as accepted — plain text; the
+        // original view drops shown insertions entirely.
+        const eff = effectiveView(ctx.markup, child.insertion);
+        if (eff !== "original") {
+          pushRuns(
+            child.insertion.children,
+            eff === "all" ? { ...preset, ...INSERTION_DISPLAY } : preset,
+          );
+        }
       }
       if (isRecord(child.deletion) && Array.isArray(child.deletion.children)) {
-        pushRuns(child.deletion.children, { ...preset, ...DELETION_DISPLAY });
+        const eff = effectiveView(ctx.markup, child.deletion);
+        if (eff === "all") pushRuns(child.deletion.children, { ...preset, ...DELETION_DISPLAY });
+        else if (eff === "original") pushRuns(child.deletion.children, preset);
       }
       if (Array.isArray(child.children)) pushRuns(child.children, preset);
     }

@@ -3,6 +3,16 @@ import type { StylesOptions } from "@office-open/docx";
 import type { StyleEntry } from "../../style-cascade";
 import type { NumberingIndex } from "./numbering";
 
+/** Word's "Display for Review" state — how tracked changes project.
+ *  "simple"/"none" show the accepted result (marks hidden), "all" shows every
+ *  mark, "original" shows the pre-revision text. `authors` limits mark
+ *  display to the listed reviewers — other authors' revisions render as
+ *  accepted regardless of the view (undefined/empty = every author). */
+export interface MarkupDisplay {
+  view: "simple" | "all" | "none" | "original";
+  authors?: readonly string[];
+}
+
 /** Per-document projection context, resolved once and threaded down. */
 export interface ProjectContext {
   styles: StylesOptions | undefined;
@@ -33,4 +43,7 @@ export interface ProjectContext {
   /** The ordinal of the footnote/endnote currently being projected, so its
    *  footnoteRef/endnoteRef mark runs pick up the matching note number. */
   currentNoteOrdinal?: number;
+  /** The tracked-changes display state (Word's Display for Review); absent =
+   *  every mark projects (the round-trip-faithful default). */
+  markup?: MarkupDisplay;
 }
