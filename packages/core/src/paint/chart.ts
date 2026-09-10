@@ -223,6 +223,19 @@ function paintValueChart(tree: IGroup, model: ChartModel, plot: PlotBox, reg?: E
     horizontal
       ? plot.x + ((v - bounds.min) / (bounds.max - bounds.min)) * plot.width
       : plot.y + plot.height - ((v - bounds.min) / (bounds.max - bounds.min)) * plot.height;
+  // The px → value inverse the editor's value-drag gesture reads (Excel's
+  // drag-a-point editing). percentStacked bars paint shares, not the raw
+  // values a drag would write, so they stay fixed.
+  const span = bounds.max - bounds.min;
+  const valueDrag =
+    model.grouping === "percentStacked"
+      ? undefined
+      : horizontal
+        ? { a: bounds.min - (plot.x * span) / plot.width, b: span / plot.width, horizontal: true }
+        : {
+            a: bounds.min + ((plot.y + plot.height) * span) / plot.height,
+            b: -span / plot.height,
+          };
 
   // Value axis ticks + gridlines (the category axis shares its baseline).
   const ticks: number[] = [];
@@ -302,7 +315,7 @@ function paintValueChart(tree: IGroup, model: ChartModel, plot: PlotBox, reg?: E
           Math.max(...xs) - Math.min(...xs),
           Math.max(...ys) - Math.min(...ys),
         );
-        for (const p of pts) reg({ series: si, point: p.c }, p.x - 4, p.y - 4, 8, 8);
+        for (const p of pts) reg({ series: si, point: p.c, valueDrag }, p.x - 4, p.y - 4, 8, 8);
       }
       return;
     }
@@ -321,7 +334,7 @@ function paintValueChart(tree: IGroup, model: ChartModel, plot: PlotBox, reg?: E
           ? { x: y0, y: plot.y + c * band, width: h, height: band }
           : { x: plot.x + c * band, y: y0, width: band, height: h };
         tree.add(new Rect({ ...bar, fill: `#${fill}` }));
-        reg?.({ series: si, point: c }, bar.x, bar.y, bar.width, bar.height);
+        reg?.({ series: si, point: c, valueDrag }, bar.x, bar.y, bar.width, bar.height);
         return;
       }
       const offset = si * slot;
@@ -339,7 +352,7 @@ function paintValueChart(tree: IGroup, model: ChartModel, plot: PlotBox, reg?: E
             height: Math.abs(p - base),
           };
       tree.add(new Rect({ ...bar, fill: `#${fill}` }));
-      reg?.({ series: si, point: c }, bar.x, bar.y, bar.width, bar.height);
+      reg?.({ series: si, point: c, valueDrag }, bar.x, bar.y, bar.width, bar.height);
     });
   });
 }
@@ -584,7 +597,16 @@ export function paintChartMember(
   const chart = new Group({ x: m.x, y: m.y, width: m.width, height: m.height });
   tree.add(chart);
   const reg: ElementReg | undefined = hits
-    ? (part, x, y, width, height) =>
+    ? (part, x, y, width, height) => {
+        // The value-drag map reads page-local px but its affine coefficients
+        // are chart-local: value = a + b·(page − origin), so the origin rides
+        // into the intercept as −b·origin — the same fold the box and the
+        // exact shapes get here.
+        const drag = part.valueDrag;
+        const origin = drag && drag.horizontal ? hits.ox + m.x : hits.oy + m.y;
+        const chartPart = drag
+          ? { ...part, valueDrag: { ...drag, a: drag.a - drag.b * origin } }
+          : part;
         hits.ctx.hitBoxes?.push({
           page: hits.ctx.pageIndex,
           x: hits.ox + m.x + x,
@@ -594,11 +616,12 @@ export function paintChartMember(
           para: hits.para,
           index: hits.index,
           kind: hits.kind,
-          chartPart: part.shape
-            ? { ...part, shape: offsetShape(part.shape, hits.ox + m.x, hits.oy + m.y) }
-            : part,
+          chartPart: chartPart.shape
+            ? { ...chartPart, shape: offsetShape(chartPart.shape, hits.ox + m.x, hits.oy + m.y) }
+            : chartPart,
           ...(hits.ctx.layer === "behind" ? { behind: true } : {}),
-        })
+        });
+      }
     : undefined;
   let top = 0;
   if (model.title) {

@@ -58,13 +58,19 @@ export type ChartPartShape =
 /** A chart sub-element a click can select inside the framed chart.
  *  `series`/`point` index the chart payload's series array and a series'
  *  values; `legend` marks a legend entry (it selects its series, like
- *  Word's); `title` the title band. */
+ *  Word's); `title` the title band. `valueDrag` marks the element as
+ *  draggable to change its value (Excel): a linear page-local px → value
+ *  map, `value = a + b·px`, reading the pointer's y on vertical charts
+ *  and x on horizontal ones (`horizontal`). Present on clustered/stacked
+ *  bars and line/area points; absent where a drag has no meaning (pie
+ *  wedges, percentStacked shares, scatter). */
 export interface ChartPartHit {
   series?: number;
   point?: number;
   legend?: boolean;
   title?: boolean;
   shape?: ChartPartShape;
+  valueDrag?: { a: number; b: number; horizontal?: boolean };
 }
 
 /** The exact-shape hit test behind {@link ChartPartShape}. */

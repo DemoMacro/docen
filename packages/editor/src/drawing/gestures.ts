@@ -28,6 +28,9 @@ export interface DrawingGesturesHost {
    *  highlight re-reads them on every place — a re-render re-objects the
    *  boxes, so deleted series drop out and moved ones follow). */
   chartPartBoxes(para: unknown, index: number, kind: "drawing" | "inline"): DrawingHit[];
+  /** The value-drag gesture's commit — write one data point of the
+   *  sub-selected chart (Excel's drag-a-point editing). */
+  applyChartValue(series: number, point: number, value: number): void;
   /** The paragraph under a page-local drop point: its content-end insertion
    *  position and laid box origin — the drop re-anchor's target. Null on
    *  bare geometry (margin, furniture) where no paragraph can host one. */
@@ -172,6 +175,131 @@ export class DrawingGestures {
     const down = this.#sel ? this.#host.pageAtPoint(clientX, clientY) : null;
     this.#grab = down && this.#sel ? { x: down.x - this.#sel.x, y: down.y - this.#sel.y } : null;
     this.#overlay.beginMove(clientX, clientY, onClick);
+  }
+
+  /** Excel's drag-a-point editing: a press on a bar or line point whose hit
+   *  carries a `valueDrag` map reshapes it live (a ghost of the bar/point
+   *  plus the value readout) and writes the value on release. A press that
+   *  never travels lands as `onClick` — the sub-selection meaning of a clean
+   *  click; Escape cancels. False when the hit isn't value-draggable (the
+   *  caller keeps its move/click routing). */
+  beginValueDrag(hit: DrawingHit, clientX: number, clientY: number, onClick?: () => void): boolean {
+    const part = hit.chartPart;
+    const drag = part?.valueDrag;
+    if (!drag || part.series == null || part.point == null) return false;
+    const down = this.#host.pageAtPoint(clientX, clientY);
+    if (!down) return false;
+    const series = part.series;
+    const point = part.point;
+    const vertical = !drag.horizontal;
+    // The zero-value px (the bar/area baseline) straight from the map.
+    const baseline = -drag.a / drag.b;
+    let moved = false;
+    let preview: HTMLElement | null = null;
+    let label: HTMLElement | null = null;
+    const frame = this.#host.pageHost(down.page);
+    const scale = this.#host.scale() || 1;
+    const dropPreview = (): void => {
+      preview?.remove();
+      label?.remove();
+      preview = null;
+      label = null;
+    };
+    const cleanup = (): void => {
+      dropPreview();
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      document.removeEventListener("pointercancel", onUp);
+      document.removeEventListener("keydown", onKey, true);
+    };
+    const onMove = (e: PointerEvent): void => {
+      if (!moved && Math.hypot(e.clientX - clientX, e.clientY - clientY) < 3) return;
+      const at = this.#host.pageAtPoint(e.clientX, e.clientY);
+      if (!at || at.page !== down.page) return; // the value only reads on the chart's page
+      moved = true;
+      if (!frame) return;
+      if (!preview) {
+        preview = document.createElement("div");
+        Object.assign(preview.style, {
+          position: "absolute",
+          background: "rgba(43,124,211,.3)",
+          border: "1.5px solid #2b7cd3",
+          boxSizing: "border-box",
+          pointerEvents: "none",
+          zIndex: "6",
+        } satisfies Partial<CSSStyleDeclaration>);
+        label = document.createElement("div");
+        Object.assign(label.style, {
+          position: "absolute",
+          background: "#fff",
+          border: "1px solid #d0d7e5",
+          borderRadius: "3px",
+          padding: "1px 6px",
+          font: "12px system-ui",
+          color: "#1f2328",
+          whiteSpace: "nowrap",
+          pointerEvents: "none",
+          zIndex: "7",
+        } satisfies Partial<CSSStyleDeclaration>);
+        frame.append(preview, label);
+      }
+      const value = drag.a + drag.b * (drag.horizontal ? at.x : at.y);
+      const v = Math.round(value * 100) / 100;
+      if (hit.width <= 8 && hit.height <= 8) {
+        // A line/area point (the painter's 8×8 marker box) rides the pointer
+        // at its own x; bars reshape between the baseline and it.
+        const cx = hit.x + hit.width / 2;
+        Object.assign(preview.style, {
+          left: `${(cx - 4) * scale}px`,
+          top: `${(at.y - 4) * scale}px`,
+          width: `${8 * scale}px`,
+          height: `${8 * scale}px`,
+          borderRadius: "50%",
+        } satisfies Partial<CSSStyleDeclaration>);
+      } else if (vertical) {
+        Object.assign(preview.style, {
+          left: `${hit.x * scale}px`,
+          width: `${hit.width * scale}px`,
+          top: `${Math.min(at.y, baseline) * scale}px`,
+          height: `${Math.abs(at.y - baseline) * scale}px`,
+          borderRadius: "0",
+        } satisfies Partial<CSSStyleDeclaration>);
+      } else {
+        Object.assign(preview.style, {
+          top: `${hit.y * scale}px`,
+          height: `${hit.height * scale}px`,
+          left: `${Math.min(at.x, baseline) * scale}px`,
+          width: `${Math.abs(at.x - baseline) * scale}px`,
+          borderRadius: "0",
+        } satisfies Partial<CSSStyleDeclaration>);
+      }
+      label!.textContent = String(v);
+      label!.style.left = `${at.x * scale + 14}px`;
+      label!.style.top = `${at.y * scale - 24}px`;
+    };
+    const onUp = (e: PointerEvent): void => {
+      const travelled = moved;
+      cleanup();
+      if (!travelled) {
+        onClick?.();
+        return;
+      }
+      const at = this.#host.pageAtPoint(e.clientX, e.clientY);
+      if (!at || at.page !== down.page) return;
+      const value = drag.a + drag.b * (drag.horizontal ? at.x : at.y);
+      this.#host.applyChartValue(series, point, Math.round(value * 100) / 100);
+    };
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopPropagation();
+      cleanup();
+    };
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+    document.addEventListener("pointercancel", onUp);
+    document.addEventListener("keydown", onKey, true);
+    return true;
   }
 
   /** Whether the framed selection is this chart — the bridge's gate for a

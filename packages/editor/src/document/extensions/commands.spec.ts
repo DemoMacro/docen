@@ -816,6 +816,54 @@ describe("arrange — floating drawings", () => {
     });
   });
 
+  it("chart-value-apply writes one data point and declines bad targets", () => {
+    const editor = new Editor({
+      element: null,
+      extensions: EXTENSIONS,
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [
+              {
+                type: "chart",
+                attrs: {
+                  chart: {
+                    transformation: { width: 200, height: 120 },
+                    categories: ["Q1", "Q2"],
+                    series: [
+                      { name: "Revenue", values: [12, 18] },
+                      { name: "Costs", values: [8, 11] },
+                    ],
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      } as never,
+    });
+    selectFirstNode(editor, "chart");
+    // A clean write: the dragged point changes, its neighbours stay.
+    expect(
+      editor.commands["chart-value-apply"](JSON.stringify({ series: 1, point: 0, value: 9.5 })),
+    ).toBe(true);
+    const chart = firstNodeOf(editor, "chart").attrs.chart as {
+      series: { name: string; values: number[] }[];
+    };
+    expect(chart.series[1]).toEqual({ name: "Costs", values: [9.5, 11] });
+    expect(chart.series[0]).toEqual({ name: "Revenue", values: [12, 18] });
+    // Out-of-range indices and junk payloads decline.
+    expect(
+      editor.commands["chart-value-apply"](JSON.stringify({ series: 2, point: 0, value: 1 })),
+    ).toBe(false);
+    expect(
+      editor.commands["chart-value-apply"](JSON.stringify({ series: 0, point: 5, value: 1 })),
+    ).toBe(false);
+    expect(editor.commands["chart-value-apply"]("not json")).toBe(false);
+  });
+
   it("rotate steps image rotation and toggles the tri-state flips", () => {
     const editor = build();
     floatDoc(editor);

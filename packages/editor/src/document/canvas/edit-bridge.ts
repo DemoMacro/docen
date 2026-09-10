@@ -868,6 +868,13 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     },
     pageHost: (page) => opts.pageHost?.(page) ?? null,
     scale: () => opts.scale?.() ?? 1,
+    // The value-drag commit: one data point on the chart the NodeSelection
+    // holds (the gesture only arms while the chart is framed).
+    applyChartValue: (series, point, value) => {
+      const sel = main.editor.state.selection;
+      if (!(sel instanceof NodeSelection) || sel.node.type.name !== "chart") return;
+      main.editor.commands["chart-value-apply"](JSON.stringify({ series, point, value }));
+    },
   });
   draw.mount(opts.host);
 
@@ -1508,7 +1515,16 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       // so the press arms the shared move gesture and the sub-selection only
       // lands on a clean click. The frame's dead space keeps the plain move.
       if (drawHit.chartPart && draw.chartPartOn(drawHit)) {
-        if (movable)
+        // A value-draggable element (a bar, a line point) drags to change its
+        // value (Excel); a clean click still sub-selects. Everything else
+        // moves the chart like any drawing, sub-selecting on a plain click.
+        if (
+          draw.beginValueDrag(drawHit, event.clientX, event.clientY, () =>
+            draw.selectChartPart(drawHit),
+          )
+        ) {
+          // the gesture owns the press
+        } else if (movable)
           draw.beginMove(event.clientX, event.clientY, () => draw.selectChartPart(drawHit));
         else draw.selectChartPart(drawHit);
         ta.focus();

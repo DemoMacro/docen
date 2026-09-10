@@ -165,6 +165,9 @@ declare module "@tiptap/core" {
       "chart-data-apply": (value?: string) => ReturnType;
       // value is the series index to remove (the plot's sub-selected series).
       "chart-series-delete": (value?: string) => ReturnType;
+      // The plot's value-drag commit — JSON {series, point, value} writing one
+      // data point (Excel's drag-a-point editing).
+      "chart-value-apply": (value?: string) => ReturnType;
       // Arrange — floating drawings (z-order, wrap, rotation, position).
       "bring-forward": () => ReturnType;
       "send-backward": () => ReturnType;
@@ -292,6 +295,7 @@ export const WIRED_DISPATCH: ReadonlySet<string> = new Set([
   "chart-legend",
   "chart-data-apply",
   "chart-series-delete",
+  "chart-value-apply",
   "bring-forward",
   "send-backward",
   "bring-to-front",
@@ -3918,6 +3922,34 @@ export const DocumentCommands = Extension.create({
           if (index < 0 || index >= series.length || series.length <= 1) return false;
           series.splice(index, 1);
           return stampChart(tr, target, { ...target.chart, series });
+        },
+      // The plot's value-drag commit (Excel's drag-a-point editing): JSON
+      // {series, point, value} writes one data point, everything else stays.
+      "chart-value-apply":
+        (value) =>
+        ({ state, tr }) => {
+          const target = chartAt(state);
+          if (!target || !value) return false;
+          let parsed: { series?: number; point?: number; value?: number };
+          try {
+            parsed = JSON.parse(value);
+          } catch {
+            return false;
+          }
+          const { series, point, value: v } = parsed;
+          if (
+            !Number.isInteger(series) ||
+            !Number.isInteger(point) ||
+            typeof v !== "number" ||
+            !Number.isFinite(v)
+          )
+            return false;
+          const prev = (target.chart.series as { values?: number[] }[] | undefined)?.[series!];
+          if (!prev || point! < 0 || point! >= (prev.values?.length ?? 0)) return false;
+          const next = (prev.values ?? []).map((old, pi) => (pi === point ? v : old));
+          const all = [...((target.chart.series as { values?: number[] }[] | undefined) ?? [])];
+          all[series!] = { ...prev, values: next };
+          return stampChart(tr, target, { ...target.chart, series: all });
         },
       // Swap the source (the Change Picture flow's commit; the file-picker
       // side reads the file into a data URL at the UI layer). The frame keeps
