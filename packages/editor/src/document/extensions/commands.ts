@@ -898,15 +898,15 @@ function stampRows(
 /** The selected floating drawing — a NodeSelection on a floating image (its
  *  `floating` attr set), a wps shape (floating inside its `wpsShape` payload),
  *  a wpg group (inside `wpgGroup`), or a chart (inside `chart`); the stage's
- *  hit boxes produce exactly these. Null on any other selection, so Arrange
- *  greys out through editor.can(). */
-type FloatingDrawing = {
+ *  hit boxes produce exactly these. The ribbon's dynamic pass greys the
+ *  Arrange controls against this (and the inline twins below). */
+export type FloatingDrawing = {
   pos: number;
   attrs: Record<string, unknown>;
   kind: "image" | "shape" | "group" | "chart";
 };
 
-function floatingDrawingAt(state: EditorState): FloatingDrawing | null {
+export function floatingDrawingAt(state: EditorState): FloatingDrawing | null {
   const sel = state.selection;
   if (!(sel instanceof NodeSelection)) return null;
   return drawingAtPos(state.doc, sel.from);
@@ -950,15 +950,40 @@ function floatingOf(target: FloatingDrawing): Record<string, unknown> {
   return carrier as Record<string, unknown>;
 }
 
-/** The inline picture under a NodeSelection — Word's Rotate menu works on
- *  embedded images too (only shapes are floating-only here). */
-function inlineImageAt(
-  state: EditorState,
-): { pos: number; attrs: Record<string, unknown>; kind: "image" } | null {
+/** The inline drawing under a NodeSelection — any of the four kinds whose
+ *  payload lacks a Floating object. Word's Wrap Text and Position galleries
+ *  also serve these: taking one converts the drawing to a floating one
+ *  anchored to its own paragraph (keep-position). */
+export function inlineDrawingAt(state: EditorState): FloatingDrawing | null {
   const sel = state.selection;
-  if (!(sel instanceof NodeSelection) || sel.node.type.name !== "image") return null;
+  if (!(sel instanceof NodeSelection)) return null;
   const attrs = sel.node.attrs as Record<string, unknown>;
-  return attrs.floating ? null : { pos: sel.from, attrs, kind: "image" };
+  const pos = sel.from;
+  switch (sel.node.type.name) {
+    case "image":
+      return attrs.floating ? null : { pos, attrs, kind: "image" };
+    case "wpsShape": {
+      const shape = attrs.wpsShape as Record<string, unknown> | null;
+      return shape && !shape.floating ? { pos, attrs, kind: "shape" } : null;
+    }
+    case "wpgGroup": {
+      const group = attrs.wpgGroup as Record<string, unknown> | null;
+      return group && !group.floating ? { pos, attrs, kind: "group" } : null;
+    }
+    case "chart": {
+      const chart = attrs.chart as Record<string, unknown> | null;
+      return chart && !chart.floating ? { pos, attrs, kind: "chart" } : null;
+    }
+    default:
+      return null;
+  }
+}
+
+/** The inline picture under a NodeSelection — Word's Rotate menu works on
+ *  embedded images too (shapes and charts don't rotate inline). */
+export function inlineImageAt(state: EditorState): FloatingDrawing | null {
+  const inline = inlineDrawingAt(state);
+  return inline?.kind === "image" ? inline : null;
 }
 
 /** The selected wps shape — standalone or a group member. Style commands
@@ -3970,22 +3995,20 @@ export const DocumentCommands = Extension.create({
       // inline (the floating payload is dropped); In Front of Text / Behind
       // Text clear the wrap (wrapNone) and set behindDoc; the four wrap styles
       // stamp the type and drop behindDoc (Word 2013+ honors it for wrapNone
-      // anchors only). An inline picture taking a flow style turns floating in
+      // anchors only). An inline drawing taking a flow style turns floating in
       // place — anchored to its own paragraph with no offset (Word's
-      // keep-position conversion; shapes decline, their inline form is a
-      // different node shape).
+      // keep-position conversion; every kind converts, the floating lands in
+      // its own carrier).
       wrap:
         (value) =>
         ({ state, tr }) => {
           const target = floatingDrawingAt(state);
           if (!target) {
             // Inline drawing: "inline" is a no-op (Word greys the row); a
-            // flow style converts — image only.
+            // flow style converts.
             if (value === "inline") return false;
-            const sel = state.selection;
-            if (!(sel instanceof NodeSelection) || sel.node.type.name !== "image") return false;
-            const attrs = sel.node.attrs as Record<string, unknown>;
-            if (attrs.floating) return false;
+            const inline = inlineDrawingAt(state);
+            if (!inline) return false;
             // positionH has no "paragraph" token (ST_RelFromH) — Word's
             // keep-position conversion anchors the column horizontally, the
             // paragraph vertically, with Square's 0.125" side distances.
@@ -4006,7 +4029,7 @@ export const DocumentCommands = Extension.create({
             } else {
               return false;
             }
-            return stampAttrs(tr, { pos: sel.from, attrs, kind: "image" }, { ...attrs, floating });
+            return stampFloating(tr, inline, floating);
           }
           const floating = { ...floatingOf(target) };
           if (value === "inline") {
@@ -4078,13 +4101,16 @@ export const DocumentCommands = Extension.create({
       // Word's Position gallery: the nine-cell grid stamps margin-relative
       // align tokens on both axes. A fresh position object per stamp — align
       // and offset are mutually exclusive, so a stale offset must not
-      // survive next to the new align.
+      // survive next to the new align. An inline drawing takes a cell by
+      // converting to a floating one first (Word's gallery converts on
+      // click), which is just this stamp — the inline payload carries no
+      // Floating to preserve.
       position:
         (value) =>
         ({ state, tr }) => {
           const spec = POSITION_ALIGN[value ?? ""];
           if (!spec) return false;
-          const target = floatingDrawingAt(state);
+          const target = floatingDrawingAt(state) ?? inlineDrawingAt(state);
           if (!target) return false;
           return stampFloating(tr, target, {
             ...floatingOf(target),

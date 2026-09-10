@@ -1,5 +1,6 @@
 // @vitest-environment node
 import {
+  Chart,
   Document,
   Image,
   Paragraph,
@@ -30,6 +31,7 @@ const EXTENSIONS = [
   Image,
   WpsShape,
   WpgGroup,
+  Chart,
   DocumentCommands,
 ];
 
@@ -762,6 +764,56 @@ describe("arrange — floating drawings", () => {
     // "In Line with Text" drops the floating payload (Word's back-conversion).
     expect(editor.commands.wrap("inline")).toBe(true);
     expect(firstNodeOf(editor, "image").attrs.floating).toBeFalsy();
+  });
+
+  it("converts inline shapes and charts to floating on wrap and position", () => {
+    const editor = new Editor({
+      element: null,
+      extensions: EXTENSIONS,
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [
+              {
+                type: "wpsShape",
+                attrs: { wpsShape: { transformation: { width: 100, height: 80 } } },
+                content: [{ type: "paragraph" }],
+              },
+            ],
+          },
+          {
+            type: "paragraph",
+            content: [
+              { type: "chart", attrs: { chart: { transformation: { width: 200, height: 120 } } } },
+            ],
+          },
+        ],
+      } as never,
+    });
+    // Wrap Text converts the inline chart — the floating lands inside the
+    // chart payload, on Word's keep-position anchor.
+    selectFirstNode(editor, "chart");
+    expect(editor.commands.wrap("square")).toBe(true);
+    expect(
+      (firstNodeOf(editor, "chart").attrs.chart as Record<string, unknown>).floating,
+    ).toMatchObject({
+      horizontalPosition: { relative: "column", offset: 0 },
+      verticalPosition: { relative: "paragraph", offset: 0 },
+      wrap: { type: "square" },
+    });
+    // Position converts the inline shape and stamps the gallery cell.
+    selectFirstNode(editor, "wpsShape");
+    // Inline shapes and charts don't rotate (Word greys Rotate for them).
+    expect(editor.commands.rotate("right")).toBe(false);
+    expect(editor.commands.position("mc")).toBe(true);
+    expect(
+      (firstNodeOf(editor, "wpsShape").attrs.wpsShape as Record<string, unknown>).floating,
+    ).toMatchObject({
+      horizontalPosition: { relative: "margin", align: "center" },
+      verticalPosition: { relative: "margin", align: "center" },
+    });
   });
 
   it("rotate steps image rotation and toggles the tri-state flips", () => {

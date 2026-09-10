@@ -107,7 +107,13 @@ import { pagesToPdf } from "./export-pdf";
 // Side-effect import: registers the ribbon/header translation tables.
 import "./i18n";
 import type { ModifyStylePatch } from "./extensions/commands";
-import { tableAncestry, WIRED_DISPATCH } from "./extensions/commands";
+import {
+  floatingDrawingAt,
+  inlineDrawingAt,
+  inlineImageAt,
+  tableAncestry,
+  WIRED_DISPATCH,
+} from "./extensions/commands";
 import { LOCAL_HANDLED, READONLY_LIVE, SAVE_FORMATS, detectOpenFormat } from "./file-formats";
 import { mergeSectionProperties } from "./page-setup";
 import {
@@ -228,6 +234,24 @@ export type TaskPaneId =
  * Carried on {@link docen:taskpane-visibility-change} event details.
  */
 export type VisibilityMode = "taskpane" | "hidden";
+
+/** Arrange events that serve floating drawings only — with anything else
+ *  selected (or just a caret) their commands decline. */
+const FLOATING_ONLY = new Set([
+  "align-objects",
+  "bring-forward",
+  "send-backward",
+  "bring-to-front",
+  "send-to-back",
+]);
+
+/** Arrange events that also serve an inline drawing — wrap and position
+ *  convert it to a floating one (Word's galleries convert on click). */
+const FLOATING_OR_INLINE = new Set(["wrap", "position"]);
+
+/** Rotate also serves an inline picture; inline shapes and charts don't
+ *  rotate. */
+const FLOATING_OR_INLINE_IMAGE = new Set(["rotate"]);
 
 @customElement({ name: "docen-document", template: documentTemplate, styles: documentStyles })
 class DocenDocument extends AddinHost<Editor> {
@@ -720,6 +744,9 @@ class DocenDocument extends AddinHost<Editor> {
       // exist from that pass on. The drawing Size combos ride the same pass.
       this.#syncCellSize();
       this.#syncDrawingSize();
+      // Selection-sensitive greying: the arrange group's liveness depends on
+      // what the selection points at, which no static pass sees.
+      this.#syncArrangeGreying();
       this.#updateStatus();
     };
     editor.on("transaction", sync);
@@ -2643,6 +2670,47 @@ class DocenDocument extends AddinHost<Editor> {
       ribbon
         .querySelectorAll<HTMLElement>(`[event="${event}"]`)
         .forEach((el) => el.toggleAttribute("disabled", !hasSource));
+    }
+    // The ribbon DOM here is fresh (rebuilt or extended) — force the arrange
+    // pass to re-read the selection instead of trusting the diff cache.
+    this.#arrangeGrey = null;
+    this.#syncArrangeGreying();
+  }
+
+  /** The previous arrange pass's selection class (floating "f" / inline "i"),
+   *  so the per-transaction sync touches the DOM only on a change; null
+   *  forces a re-run (a fresh ribbon DOM starts un-greyed). */
+  #arrangeGrey: string | null = null;
+
+  /** Word greys the Arrange group by selection: Align/z-order need a floating
+   *  drawing, Wrap Text and Position also serve an inline drawing (they
+   *  convert it), Rotate also an inline picture. The static pass can't see
+   *  the selection, so this runs per transaction (and after every ribbon
+   *  re-stamp). */
+  #syncArrangeGreying(): void {
+    const ribbon = this.shadowRoot?.querySelector("docen-ribbon");
+    if (!ribbon || !this.editor) return;
+    const state = this.editor.state;
+    const floating = floatingDrawingAt(state) != null;
+    const inlineImage = !floating && inlineImageAt(state) != null;
+    const inlineDrawing = !floating && !inlineImage && inlineDrawingAt(state) != null;
+    const key = `${floating ? "f" : ""}${inlineImage ? "i" : ""}${inlineDrawing ? "d" : ""}`;
+    if (key === this.#arrangeGrey) return;
+    this.#arrangeGrey = key;
+    for (const el of ribbon.querySelectorAll<HTMLElement>(
+      "docen-ribbon-button[event], docen-ribbon-menu[event], docen-ribbon-split-button[event]",
+    )) {
+      const event = el.getAttribute("event") ?? "";
+      const live = FLOATING_ONLY.has(event)
+        ? floating
+        : FLOATING_OR_INLINE.has(event)
+          ? floating || inlineImage || inlineDrawing
+          : FLOATING_OR_INLINE_IMAGE.has(event)
+            ? floating || inlineImage
+            : null;
+      // Events outside the two sets keep the static pass's decision.
+      if (live == null) continue;
+      el.toggleAttribute("disabled", !live);
     }
   }
 
