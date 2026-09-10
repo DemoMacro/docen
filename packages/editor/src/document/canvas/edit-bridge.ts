@@ -204,6 +204,13 @@ export interface EditBridgeOptions {
   /** A keyboard paste landed rich content (the docen slice or styled HTML
    *  lane) — the host shows Word's paste-options bar over the pasted text. */
   onRichPaste?: (source: { kind: "slice" | "html"; raw: string; text: string }) => void;
+  /** The border painter's armed state (Table Design → Draw Border). While
+   *  active the canvas presses start edge sweeps instead of text selection. */
+  borderPaint?: () => { active: boolean; eraser: boolean };
+  /** A finished sweep — every crossed table edge (cell pos + side, both
+   *  collapse halves of an interior line included) for the host to commit as
+   *  one paint/erase command. */
+  applyBorderPaint?: (sides: { pos: number; side: "top" | "bottom" | "left" | "right" }[]) => void;
 }
 
 export interface EditBridge {
@@ -1066,6 +1073,12 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
   let dragMoved = false;
   let dragStart: { x: number; y: number } | null = null;
 
+  // Border-painter sweep (Table Design → Draw Border): a press on a table
+  // edge collects every edge crossed before release, deduped by cell+side —
+  // re-crossing the same line in one drag paints it once.
+  let borderSweep: Map<string, { pos: number; side: "top" | "bottom" | "left" | "right" }> | null =
+    null;
+
   // Drag auto-scroll (Word): a drag resting in the scroll container's
   // top/bottom edge hot zone keeps the document scrolling so the selection
   // reaches content outside the viewport — without it the last line below
@@ -1173,6 +1186,13 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
   // furniture story deactivates the body's objects, so their cursors go
   // with it (the story's own links keep the hand).
   const applyCursor = (event: MouseEvent): void => {
+    // The armed painter owns the cursor: crosshair for the pen, the dense
+    // cell cross for the eraser (Word's pencil/eraser, CSS-native).
+    const paint = story ? null : opts.borderPaint?.();
+    if (paint?.active) {
+      opts.host.style.cursor = paint.eraser ? "cell" : "crosshair";
+      return;
+    }
     const hit = story ? null : hitPage(event.clientX, event.clientY);
     const drawHit = hit && opts.drawingAt ? opts.drawingAt(hit.page, hit.lx, hit.ly) : null;
     let want = "";
@@ -1215,6 +1235,12 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
   };
 
   const onMouseMove = (event: MouseEvent): void => {
+    if (borderSweep) {
+      const hit = story ? null : hitPage(event.clientX, event.clientY);
+      const edges = hit ? main.map?.tableEdgeAt(hit.page, hit.lx, hit.ly) : null;
+      if (edges) for (const s of edges.sides) borderSweep.set(`${s.pos}:${s.side}`, s);
+      return;
+    }
     if (dragAnchor == null) {
       hoverTableGrip(event);
       linkHover.onMove(event);
@@ -1239,6 +1265,12 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     if (head != null) setDragSelection(dragAnchor, head);
   };
   const onMouseUp = (): void => {
+    if (borderSweep) {
+      const sides = [...borderSweep.values()];
+      borderSweep = null;
+      if (sides.length) opts.applyBorderPaint?.(sides);
+      return;
+    }
     dragAnchor = null;
     dragMoved = false;
     dragStart = null;
@@ -1462,6 +1494,20 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       }
     } else if (story) {
       leaveStory();
+    }
+    // The border painter's press (Table Design → Draw Border): a hit on a
+    // table edge starts a sweep — moves collect further crossed edges, the
+    // release commits them as one command. A press off any edge falls
+    // through (the painter paints nothing outside a table).
+    if (!story && opts.borderPaint?.().active && hit) {
+      const edges = main.map?.tableEdgeAt(hit.page, hit.lx, hit.ly) ?? null;
+      if (edges) {
+        borderSweep = new Map();
+        for (const s of edges.sides) borderSweep.set(`${s.pos}:${s.side}`, s);
+        ta.focus();
+        ta.value = "";
+        return;
+      }
     }
     // A grip click selects Word-style (column strip / row strip / corner
     // square) instead of dropping a caret. The hover state is refreshed for

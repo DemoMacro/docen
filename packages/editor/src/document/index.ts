@@ -391,6 +391,17 @@ class DocenDocument extends AddinHost<Editor> {
    *  Pure display state — the marks in the document are untouched. */
   #markupView: "simple" | "all" | "none" | "original" = "simple";
   #markupAuthors: string[] | null = null;
+  /** Table Design → Draw Border: the pen in tcBorders form (style token,
+   *  size in eighth-points, color) plus the armed paint/erase mode. While
+   *  armed the canvas presses sweep table edges instead of selecting. */
+  #pen: { style: string; size: number; color: string } = {
+    style: "single",
+    size: 4,
+    color: "auto",
+  };
+  #borderPainting = false;
+  #borderErase = false;
+  #borderPaintKeyOff?: () => void;
 
   /** The underlying Tiptap Editor (undefined before connect / after disconnect).
    *  Exposed so a host (the @docen/vue adapter, or any parent element) can drive
@@ -732,6 +743,26 @@ class DocenDocument extends AddinHost<Editor> {
     this.#painterOff = undefined;
     this.#painterKeyOff?.();
     this.#painterKeyOff = undefined;
+  }
+
+  /** Arm the border painter (Table Design → Draw Border): canvas presses
+   *  sweep table edges until Esc or a re-click disarms (the keydown follows
+   *  the format painter's arm-while-armed lifecycle). */
+  #armBorderPainter(erase: boolean): void {
+    this.#borderPainting = true;
+    this.#borderErase = erase;
+    const onKey = (event: Event): void => {
+      if ((event as KeyboardEvent).key === "Escape") this.#stopBorderPainting();
+    };
+    this.addEventListener("keydown", onKey);
+    this.#borderPaintKeyOff = () => this.removeEventListener("keydown", onKey);
+  }
+
+  #stopBorderPainting(): void {
+    this.#borderPainting = false;
+    this.#borderErase = false;
+    this.#borderPaintKeyOff?.();
+    this.#borderPaintKeyOff = undefined;
   }
 
   /** Mirror the font name / size and paragraph style at the caret into the
@@ -1151,6 +1182,19 @@ class DocenDocument extends AddinHost<Editor> {
       },
       // `#name` links are bookmark anchors — the host owns the in-page jump.
       onInternalAnchor: (name) => this.#jumpToBookmark(name),
+      // The border painter's armed state and its commit (Table Design →
+      // Draw Border): a sweep's crossed edges ride one paint/erase command,
+      // the pen merged from the host's pen state.
+      borderPaint: () => ({ active: this.#borderPainting, eraser: this.#borderErase }),
+      applyBorderPaint: (sides) => {
+        const editor = this.#bridge?.activeEditor() ?? this.editor;
+        if (!editor || !this.#borderPainting || !sides.length) return;
+        if (this.#borderErase) {
+          editor.commands["erase-cell-border"](JSON.stringify({ sides }));
+        } else {
+          editor.commands["paint-cell-border"](JSON.stringify({ sides, pen: this.#pen }));
+        }
+      },
     });
     if (this.getAttribute("editable") === "false") this.#bridge.editor.setEditable(false);
     // First paint + caret map feed (transactions re-render via the bridge's
@@ -2293,6 +2337,7 @@ class DocenDocument extends AddinHost<Editor> {
     this.#fontSyncCleanup = undefined;
     clearTimeout(this.#autosaveTimer);
     this.#stopFormatPainter();
+    this.#stopBorderPainting();
     this.#navigation.dispose();
     this.#spelling.dispose();
     this.#bridge?.destroy();
@@ -4253,6 +4298,31 @@ class DocenDocument extends AddinHost<Editor> {
     // eyedropper — the next press on a picture samples its pixel.
     if (name === "picture-transparent-pick") {
       this.#armTransparentPick();
+      return;
+    }
+    // Table Design → Draw Border: the pen pickers stamp the host pen state;
+    // the painter split arms the sweep — the face toggles the pen, the
+    // drop-down's eraser toggles the erase half (one painter at a time).
+    if (name === "pen-style" && typeof value === "string") {
+      this.#pen = { ...this.#pen, style: value };
+      return;
+    }
+    if (name === "pen-size") {
+      const size = Number(value);
+      if (Number.isFinite(size) && size > 0) this.#pen = { ...this.#pen, size };
+      return;
+    }
+    if (name === "pen-color" && typeof value === "string") {
+      this.#pen = { ...this.#pen, color: value };
+      return;
+    }
+    if (name === "border-painter") {
+      const erase = value === "eraser";
+      if (this.#borderPainting && this.#borderErase === erase) {
+        this.#stopBorderPainting();
+      } else {
+        this.#armBorderPainter(erase);
+      }
       return;
     }
     // Word's Group / Distribute act on the drawing multi-selection — the

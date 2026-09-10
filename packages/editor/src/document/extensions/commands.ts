@@ -106,6 +106,8 @@ declare module "@tiptap/core" {
       "convert-to-text": () => ReturnType;
       "table-style": (value?: string) => ReturnType;
       "table-borders": (value?: string) => ReturnType;
+      "paint-cell-border": (value?: unknown) => ReturnType;
+      "erase-cell-border": (value?: unknown) => ReturnType;
       "toggle-table-look": (value?: string) => ReturnType;
       "merge-cells": () => ReturnType;
       "split-cell": () => ReturnType;
@@ -249,6 +251,8 @@ export const WIRED_DISPATCH: ReadonlySet<string> = new Set([
   "cell-shading",
   "table-style",
   "table-borders",
+  "paint-cell-border",
+  "erase-cell-border",
   "toggle-table-look",
   "merge-cells",
   "split-cell",
@@ -1669,7 +1673,10 @@ function measureTextTwip(text: string): number {
 /** Word's smallest usable column — 0.5" — also the AutoFit floor. */
 const MIN_COL_TWIP = 720;
 
-type TableBordersLike = Record<string, { style: string; size: number; color: string } | undefined>;
+type TableBordersLike = Record<
+  string,
+  { style: string; size?: number; color?: string } | undefined
+>;
 const GRID_BORDER = { style: "single", size: 4, color: "auto" };
 
 /** Word's Insert Chart default: a clustered column frame with the same
@@ -1773,6 +1780,83 @@ function tableBordersStamp(
     borders[value] = GRID_BORDER;
   }
   return borders;
+}
+
+/** One tcBorders side in cell-attrs form (size in eighth-points). */
+type BorderPen = { style: string; size: number; color: string };
+
+/** A crossed table edge from the canvas edge hit test — the cell position
+ *  plus which of its sides the sweep touched (interior lines arrive twice,
+ *  once per collapse half). */
+type BorderSweepSide = { pos: number; side: "top" | "bottom" | "left" | "right" };
+
+type BorderSweep = { sides: BorderSweepSide[]; pen: BorderPen | undefined };
+
+function parseBorderSweep(value: unknown, eraser: boolean): BorderSweep | undefined {
+  if (typeof value !== "string") return undefined;
+  let parsed: { sides?: unknown; pen?: unknown };
+  try {
+    parsed = JSON.parse(value) as typeof parsed;
+  } catch {
+    return undefined;
+  }
+  if (!Array.isArray(parsed.sides)) return undefined;
+  const sides: BorderSweepSide[] = [];
+  for (const item of parsed.sides) {
+    const side = item as Partial<BorderSweepSide>;
+    if (
+      typeof side.pos !== "number" ||
+      (side.side !== "top" &&
+        side.side !== "bottom" &&
+        side.side !== "left" &&
+        side.side !== "right")
+    ) {
+      return undefined;
+    }
+    sides.push({ pos: side.pos, side: side.side });
+  }
+  if (eraser) return { sides, pen: undefined };
+  const pen = parsed.pen as Partial<BorderPen> | undefined;
+  if (
+    !pen ||
+    typeof pen.style !== "string" ||
+    typeof pen.size !== "number" ||
+    typeof pen.color !== "string"
+  ) {
+    return undefined;
+  }
+  return { sides, pen: { style: pen.style, size: pen.size, color: pen.color } };
+}
+
+/** Stamp every swept side in ONE transaction — a sweep is a single undo step.
+ *  Erasing stamps `w:val="nil"` on the side; painting merges the pen into the
+ *  cell's existing per-side borders. */
+function applyBorderSweep(
+  state: EditorState,
+  dispatch: ((tr: Transaction) => void) | undefined,
+  sides: BorderSweepSide[],
+  pen: BorderPen | undefined,
+): boolean {
+  if (!sides.length) return false;
+  if (!dispatch) return true;
+  const tr = state.tr;
+  const stamped = new Map<number, TableBordersLike>();
+  for (const { pos, side } of sides) {
+    const cell = tr.doc.nodeAt(pos);
+    if (!cell || cell.type.name !== "tableCell") continue;
+    const borders = stamped.get(pos) ?? {
+      ...(cell.attrs.borders as TableBordersLike | null),
+    };
+    borders[side] = pen ?? { style: "nil" };
+    stamped.set(pos, borders);
+  }
+  for (const [pos, borders] of stamped) {
+    const cell = tr.doc.nodeAt(pos);
+    if (!cell) continue;
+    tr.setNodeMarkup(pos, undefined, { ...cell.attrs, borders });
+  }
+  dispatch(tr.scrollIntoView());
+  return true;
 }
 
 /** Delete the table at `pos` (size `size`) and park the caret where it stood
@@ -2683,6 +2767,28 @@ export const DocumentCommands = Extension.create({
           const current = (state.selection.$from.node(anchor.tableAt).attrs.borders ??
             null) as TableBordersLike | null;
           return stampTableBorders(state, dispatch, tableBordersStamp(value, current));
+        },
+      // The border painter's commit (Table Design → Draw Border): one sweep —
+      // a press-drag across table edges — paints every crossed boundary in ONE
+      // transaction. `sides` carries the cell positions from the canvas edge
+      // hit test (both collapse halves of an interior line ride along), the
+      // pen in OOXML tcBorders form (size in eighth-points). An edge off any
+      // cell box declines — the painter paints nothing outside a table.
+      "paint-cell-border":
+        (value) =>
+        ({ state, dispatch }) => {
+          const sweep = parseBorderSweep(value, false);
+          if (!sweep) return false;
+          return applyBorderSweep(state, dispatch, sweep.sides, sweep.pen);
+        },
+      // The painter's eraser half: the same sweep stamps w:val="nil" — Word's
+      // "the line is gone", which the collapse renders as no edge.
+      "erase-cell-border":
+        (value) =>
+        ({ state, dispatch }) => {
+          const sweep = parseBorderSweep(value, true);
+          if (!sweep) return false;
+          return applyBorderSweep(state, dispatch, sweep.sides, undefined);
         },
       // Word's Text Direction button: one press turns the whole pick to one
       // direction (tbRl ↔ unset, the anchor cell's state deciding). The attr

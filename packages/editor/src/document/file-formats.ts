@@ -257,6 +257,13 @@ export const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   "review-specific-people",
   "accept-all-changes-shown",
   "reject-all-changes-shown",
+  // Table Design → Draw Border: the pen pickers stamp the host's pen state;
+  // the painter split arms the paint/erase mode (the sweep itself rides the
+  // wired paint-cell-border / erase-cell-border commands).
+  "pen-style",
+  "pen-size",
+  "pen-color",
+  "border-painter",
   // Text Box / Shapes insert a standalone wps shape run (Shapes reads the
   // gallery preset from the split item's value).
   "text-box",

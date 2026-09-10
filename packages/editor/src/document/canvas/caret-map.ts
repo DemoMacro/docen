@@ -1003,6 +1003,86 @@ export class CaretMap {
     return hit;
   }
 
+  /** The table edge nearest a page-local point, if one sits within `tol` px —
+   *  the border painter's hit test. Returns every cell side the boundary is
+   *  SHARED with (a cell box edge equals the neighbor's opposite edge), so one
+   *  sweep paints both w:tcBorders halves of an interior line the way Word's
+   *  collapse resolves it. The nearest boundary wins; boxes from the same cell
+   *  repeated across pages match by page. */
+  tableEdgeAt(
+    page: number,
+    x: number,
+    y: number,
+    tol = 4,
+  ): { sides: { pos: number; side: "top" | "bottom" | "left" | "right" }[] } | null {
+    let best: {
+      dist: number;
+      sides: { pos: number; side: "top" | "bottom" | "left" | "right" }[];
+    } | null = null;
+    for (const [pos, rects] of this.cellBoxes) {
+      for (const r of rects) {
+        if (r.page !== page) continue;
+        const right = r.xPx + r.widthPx;
+        const bottom = r.yPx + r.heightPx;
+        const inY = y >= r.yPx - tol && y <= bottom + tol;
+        const inX = x >= r.xPx - tol && x <= right + tol;
+        // Candidate (distance, side) pairs — one box yields at most two (a
+        // corner point picks the nearer axis).
+        const edges: [number, "top" | "bottom" | "left" | "right"][] = [];
+        if (inY) {
+          edges.push([Math.abs(x - r.xPx), "left"], [Math.abs(x - right), "right"]);
+        }
+        if (inX) {
+          edges.push([Math.abs(y - r.yPx), "top"], [Math.abs(y - bottom), "bottom"]);
+        }
+        for (const [dist, side] of edges) {
+          if (dist > tol) continue;
+          if (best && dist >= best.dist) continue;
+          const sides: { pos: number; side: "top" | "bottom" | "left" | "right" }[] = [
+            { pos, side },
+          ];
+          // The shared interior line: the neighbor box whose opposite edge
+          // sits on the same boundary over the same span paints with it (the
+          // rim edges have no neighbor and stay single-sided).
+          const thisBox = { x: r.xPx, y: r.yPx, right, bottom };
+          for (const [npos, nrects] of this.cellBoxes) {
+            if (npos === pos) continue;
+            for (const n of nrects) {
+              if (n.page !== page) continue;
+              // The neighbor's OPPOSITE edge sits on this boundary (the cell
+              // above's bottom equals my top) — a same-edge test would match
+              // same-row cells, which the span overlap already excludes.
+              if (side === "left") {
+                if (Math.abs(n.xPx + n.widthPx - thisBox.x) > tol) continue;
+                if (n.yPx >= thisBox.bottom || n.yPx + n.heightPx <= thisBox.y) continue;
+              } else if (side === "right") {
+                if (Math.abs(n.xPx - thisBox.right) > tol) continue;
+                if (n.yPx >= thisBox.bottom || n.yPx + n.heightPx <= thisBox.y) continue;
+              } else if (side === "top") {
+                if (Math.abs(n.yPx + n.heightPx - thisBox.y) > tol) continue;
+                if (n.xPx >= thisBox.right || n.xPx + n.widthPx <= thisBox.x) continue;
+              } else {
+                if (Math.abs(n.yPx - thisBox.bottom) > tol) continue;
+                if (n.xPx >= thisBox.right || n.xPx + n.widthPx <= thisBox.x) continue;
+              }
+              const opposite =
+                side === "left"
+                  ? "right"
+                  : side === "right"
+                    ? "left"
+                    : side === "top"
+                      ? "bottom"
+                      : "top";
+              sides.push({ pos: npos, side: opposite });
+            }
+          }
+          best = { dist, sides };
+        }
+      }
+    }
+    return best ? { sides: best.sides } : null;
+  }
+
   /** The x-resolved position within one line (round to the nearest boundary). */
   private posInLine(entry: LineEntry, x: number): number | null {
     let char = entry.startChar;

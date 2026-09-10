@@ -231,6 +231,53 @@ const borderItems = (): string =>
     { text: opt("borders-shading"), value: "borders-shading" },
   ]);
 
+// Word's Draw Border pen (Table Design → Draw Border): style tokens reuse the
+// Borders and Shading style names; the width ladder is Word's point sizes with
+// the emitted value in eighth-points (tcBorders @w:sz).
+const PEN_STYLES: readonly string[] = [
+  "single",
+  "dotted",
+  "dashed",
+  "dashSmallGap",
+  "dotDash",
+  "double",
+  "thick",
+  "wave",
+];
+const penStyleItems = (): string =>
+  JSON.stringify(
+    PEN_STYLES.map((style) => ({
+      text: `bordersShading.style-${style}`,
+      event: "pen-style",
+      value: style,
+      ...(style === "single" ? { checked: true } : {}),
+    })),
+  );
+
+const PEN_SIZES: ReadonlyArray<readonly [string, number]> = [
+  ["pen-quarter-point", 2],
+  ["pen-half-point", 4],
+  ["pen-three-quarter-point", 6],
+  ["pen-one-point", 8],
+  ["pen-one-half-point", 12],
+  ["pen-two-quarter-point", 18],
+  ["pen-three-point", 24],
+];
+const penSizeItems = (): string =>
+  JSON.stringify(
+    PEN_SIZES.map(([key, eighths], i) => ({
+      text: opt(key),
+      event: "pen-size",
+      value: String(eighths),
+      ...(i === 1 ? { checked: true } : {}),
+    })),
+  );
+
+// The border painter split: the face toggles the armed pen; the drop-down
+// holds Word's erase half (the same sweep, w:val="nil").
+const borderPainterItems = (): string =>
+  JSON.stringify([{ text: opt("border-eraser"), event: "border-painter", value: "eraser" }]);
+
 const findItems = (): string =>
   JSON.stringify([
     { text: opt("find"), value: "find" },
@@ -1644,12 +1691,15 @@ export function tableContextTabs(scope?: Element): RibbonTab[] {
           split("border", "table-borders", parsedItems(borderItems()), { size: "large" }),
         ]),
         group("draw-border", [
-          // Word's Draw Border tools — the canvas has no border-painting
-          // interaction yet, so the group greys until then.
-          btn("pen", "pen-style", { size: "large" }),
-          btn("font-size", "pen-size", { size: "large" }),
-          btn("font-color", "pen-color", { size: "large" }),
-          btn("format-painter", "border-painter", { size: "large" }),
+          // Word's Draw Border tools: the pen pickers stamp the host's pen
+          // state; the painter split arms the sweep (face) and holds the
+          // eraser (drop-down).
+          split("pen", "pen-style", parsedItems(penStyleItems()), { size: "large" }),
+          split("font-size", "pen-size", parsedItems(penSizeItems()), { size: "large" }),
+          picker("font-color", "pen-color", "000000"),
+          split("format-painter", "border-painter", parsedItems(borderPainterItems()), {
+            size: "large",
+          }),
           btn("gridlines", "toggle-gridlines", { size: "large" }),
         ]),
       ],
