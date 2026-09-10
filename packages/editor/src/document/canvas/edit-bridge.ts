@@ -504,92 +504,159 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
   const mapFresh = (s: Story): s is Story & { map: CaretMap } =>
     s.map?.valid === true && s.mapDoc === s.editor.state.doc;
 
-  /** The selection highlight — one translucent div per crossed line, rebuilt
-   *  on every placement (selections span few lines; rebuild beats diffing).
+  /** One pooled overlay strip: final CSS values, compared against the pool
+   *  entry so an unchanged placement writes nothing (the per-keystroke
+   *  placeCaret cascade must cost zero DOM mutations). */
+  interface OverlayRect {
+    page: number;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    background: string;
+  }
+
+  interface PoolEntry {
+    el: HTMLDivElement;
+    frame: HTMLElement;
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+    background: string;
+  }
+
+  /** Place rects into a layer's element pool, reusing divs in order: entries
+   *  past the new count are removed, geometry/background changes rewrite the
+   *  style in place, everything else is left untouched. */
+  const pooledPlace = (
+    pool: PoolEntry[],
+    rects: OverlayRect[],
+    base: Partial<CSSStyleDeclaration>,
+  ): void => {
+    const scale = opts.scale?.() ?? 1;
+    const placed = rects
+      .map((r) => ({ r, frame: opts.pageHost?.(r.page) ?? null }))
+      .filter((p): p is { r: OverlayRect; frame: HTMLElement } => p.frame !== null);
+    for (let i = placed.length; i < pool.length; i++) pool[i]!.el.remove();
+    pool.length = placed.length;
+    for (const [i, p] of placed.entries()) {
+      const left = p.r.x * scale;
+      const top = p.r.y * scale;
+      const width = p.r.width * scale;
+      const height = p.r.height * scale;
+      let entry = pool[i];
+      if (!entry) {
+        // Sentinel-recorded values force the new div through the write path
+        // below — the pool tracks what was last written, not what is wanted.
+        entry = {
+          el: document.createElement("div"),
+          frame: p.frame,
+          left: NaN,
+          top: NaN,
+          width: NaN,
+          height: NaN,
+          background: "",
+        };
+        pool[i] = entry;
+        p.frame.append(entry.el);
+      } else if (entry.frame !== p.frame) {
+        p.frame.append(entry.el);
+        entry.frame = p.frame;
+      }
+      if (
+        entry.left !== left ||
+        entry.top !== top ||
+        entry.width !== width ||
+        entry.height !== height ||
+        entry.background !== p.r.background
+      ) {
+        Object.assign(entry.el.style, base, {
+          position: "absolute",
+          pointerEvents: "none",
+          background: p.r.background,
+          left: `${left}px`,
+          top: `${top}px`,
+          width: `${width}px`,
+          height: `${height}px`,
+        });
+        Object.assign(entry, { left, top, width, height, background: p.r.background });
+      }
+    }
+  };
+
+  /** The selection highlight — one translucent div per crossed line, kept in
+   *  a pool so an unchanged selection costs nothing (the placement runs on
+   *  every caret move, not just selection changes).
    *  A cell selection highlights each cell's whole grid box instead (Word's
    *  cell highlight covers the slot, insets included). A node selection (a
    *  picked drawing) highlights nothing: the drawing's selection frame owns
    *  the look, and a range sweep across the atom paints a line box wider
    *  than the drawing — Word shows no text highlight under it. */
-  const selectionLayer: HTMLDivElement[] = [];
+  const selectionPool: PoolEntry[] = [];
   const placeSelection = (): void => {
-    for (const el of selectionLayer) el.remove();
-    selectionLayer.length = 0;
     const s = active();
-    const sel = s.editor.state.selection;
-    if (!mapFresh(s)) return;
-    const scale = opts.scale?.() ?? 1;
-    const rects =
-      sel instanceof CellSelection
-        ? s.map.cellSelectionRects(sel)
-        : sel instanceof NodeSelection || sel.from === sel.to
-          ? []
-          : s.map.selectionRects(sel.from, sel.to);
-    for (const r of rects) {
-      const frame = opts.pageHost?.(framePage(s, r.page));
-      if (!frame) continue;
-      const el = document.createElement("div");
-      Object.assign(el.style, {
-        position: "absolute",
-        background: "rgba(0,120,215,.25)",
-        pointerEvents: "none",
-        zIndex: "4",
-        left: `${r.xPx * scale}px`,
-        top: `${r.yPx * scale}px`,
-        width: `${r.widthPx * scale}px`,
-        height: `${r.heightPx * scale}px`,
-      } satisfies Partial<CSSStyleDeclaration>);
-      frame.append(el);
-      selectionLayer.push(el);
+    const rects: OverlayRect[] = [];
+    if (mapFresh(s)) {
+      const sel = s.editor.state.selection;
+      const spans =
+        sel instanceof CellSelection
+          ? s.map.cellSelectionRects(sel)
+          : sel instanceof NodeSelection || sel.from === sel.to
+            ? []
+            : s.map.selectionRects(sel.from, sel.to);
+      for (const r of spans)
+        rects.push({
+          page: framePage(s, r.page),
+          x: r.xPx,
+          y: r.yPx,
+          width: r.widthPx,
+          height: r.heightPx,
+          background: "rgba(0,120,215,.25)",
+        });
     }
+    pooledPlace(selectionPool, rects, { zIndex: "4" });
   };
 
-  /** Search-match highlights — the same overlay pattern as the selection
-   *  layer: prosemirror-search owns the matches (PM decorations), and each
-   *  match range becomes one translucent div per crossed line. The active
-   *  match — findNext/replaceNext select it, so it is the match overlapping
-   *  the selection — gets the deeper tint. zIndex 3 keeps every match under
-   *  the selection (4) and caret (5); an empty query matches nothing, so the
+  /** Search-match highlights — the selection layer's pooled pattern:
+   *  prosemirror-search owns the matches (PM decorations), and each match
+   *  range becomes one translucent div per crossed line. The active match —
+   *  findNext/replaceNext select it, so it is the match overlapping the
+   *  selection — gets the deeper tint. zIndex 3 keeps every match under the
+   *  selection (4) and caret (5); an empty query matches nothing, so the
    *  layer is simply empty. */
-  const searchLayer: HTMLDivElement[] = [];
+  const searchPool: PoolEntry[] = [];
   const placeSearch = (): void => {
-    for (const el of searchLayer) el.remove();
-    searchLayer.length = 0;
     const s = active();
-    if (!mapFresh(s)) return;
-    const sel = s.editor.state.selection;
-    const scale = opts.scale?.() ?? 1;
-    for (const deco of getMatchHighlights(s.editor.state).find()) {
-      const { from, to } = deco as { from: number; to: number };
-      const activeMatch = from <= sel.to && sel.from <= to;
-      for (const r of s.map.selectionRects(from, to)) {
-        const frame = opts.pageHost?.(framePage(s, r.page));
-        if (!frame) continue;
-        const el = document.createElement("div");
-        Object.assign(el.style, {
-          position: "absolute",
-          background: activeMatch ? "rgba(255,141,35,.7)" : "rgba(255,213,79,.45)",
-          pointerEvents: "none",
-          zIndex: "3",
-          left: `${r.xPx * scale}px`,
-          top: `${r.yPx * scale}px`,
-          width: `${r.widthPx * scale}px`,
-          height: `${r.heightPx * scale}px`,
-        } satisfies Partial<CSSStyleDeclaration>);
-        frame.append(el);
-        searchLayer.push(el);
+    const rects: OverlayRect[] = [];
+    if (mapFresh(s)) {
+      const sel = s.editor.state.selection;
+      for (const deco of getMatchHighlights(s.editor.state).find()) {
+        const { from, to } = deco as { from: number; to: number };
+        const activeMatch = from <= sel.to && sel.from <= to;
+        for (const r of s.map.selectionRects(from, to))
+          rects.push({
+            page: framePage(s, r.page),
+            x: r.xPx,
+            y: r.yPx,
+            width: r.widthPx,
+            height: r.heightPx,
+            background: activeMatch ? "rgba(255,141,35,.7)" : "rgba(255,213,79,.45)",
+          });
       }
     }
+    pooledPlace(searchPool, rects, { zIndex: "3" });
   };
 
-  /** Spelling squiggles — the search layer's pattern again: the host runs
-   *  the dictionary check (debounced per transaction) and hands the issue
-   *  ranges here; each becomes one thin div hugging the line's baseline
-   *  with a red wave drawn by a repeating SVG. zIndex 2 keeps squiggles
-   *  under search matches, selection, and caret. A squiggle an in-front
-   *  float covers keeps only its visible strips — Word hides the wave under
-   *  a front-of-text picture, while the selection and caret stay whole. */
-  const spellingLayer: HTMLDivElement[] = [];
+  /** Spelling squiggles — the search layer's pooled pattern again: the host
+   *  runs the dictionary check (debounced per transaction) and hands the
+   *  issue ranges here; each becomes one thin div hugging the line's
+   *  baseline with a red wave drawn by a repeating SVG. zIndex 2 keeps
+   *  squiggles under search matches, selection, and caret. A squiggle an
+   *  in-front float covers keeps only its visible strips — Word hides the
+   *  wave under a front-of-text picture, while the selection and caret stay
+   *  whole. */
+  const spellingPool: PoolEntry[] = [];
   const SQUIGGLE =
     "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='3'%3E" +
     "%3Cpath d='M0 2.5 L1.5 0.5 L3 2.5 L4.5 0.5 L6 2.5' fill='none' stroke='%23e81123'/%3E%3C/svg%3E\")";
@@ -629,34 +696,26 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
   };
 
   const placeSpelling = (): void => {
-    for (const el of spellingLayer) el.remove();
-    spellingLayer.length = 0;
     const s = active();
-    if (!mapFresh(s) || spellingIssues.length === 0) return;
-    const scale = opts.scale?.() ?? 1;
-    for (const issue of spellingIssues) {
-      for (const r of s.map.selectionRects(issue.from, issue.to)) {
-        const frame = opts.pageHost?.(framePage(s, r.page));
-        if (!frame) continue;
-        const wave = { x: r.xPx, y: r.yPx + r.heightPx - 3, width: r.widthPx, height: 3 };
-        const holes = opts.frontFloats?.(r.page) ?? [];
-        for (const g of holes.length ? rectMinus(wave, holes) : [wave]) {
-          const el = document.createElement("div");
-          Object.assign(el.style, {
-            position: "absolute",
-            background: `${SQUIGGLE} repeat-x`,
-            pointerEvents: "none",
-            zIndex: "2",
-            left: `${g.x * scale}px`,
-            top: `${g.y * scale}px`,
-            width: `${g.width * scale}px`,
-            height: `${g.height * scale}px`,
-          } satisfies Partial<CSSStyleDeclaration>);
-          frame.append(el);
-          spellingLayer.push(el);
+    const rects: OverlayRect[] = [];
+    if (mapFresh(s)) {
+      for (const issue of spellingIssues) {
+        for (const r of s.map.selectionRects(issue.from, issue.to)) {
+          const wave = { x: r.xPx, y: r.yPx + r.heightPx - 3, width: r.widthPx, height: 3 };
+          const holes = opts.frontFloats?.(r.page) ?? [];
+          for (const g of holes.length ? rectMinus(wave, holes) : [wave])
+            rects.push({
+              page: framePage(s, r.page),
+              x: g.x,
+              y: g.y,
+              width: g.width,
+              height: g.height,
+              background: `${SQUIGGLE} repeat-x`,
+            });
         }
       }
     }
+    pooledPlace(spellingPool, rects, { zIndex: "2" });
   };
 
   const placeCaret = (): void => {
@@ -2720,9 +2779,9 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       document.removeEventListener("mousemove", onMouseMove);
       document.removeEventListener("mouseup", onMouseUp);
       draw.destroy();
-      for (const el of selectionLayer) el.remove();
-      for (const el of searchLayer) el.remove();
-      for (const el of spellingLayer) el.remove();
+      pooledPlace(selectionPool, [], {});
+      pooledPlace(searchPool, [], {});
+      pooledPlace(spellingPool, [], {});
       ta.remove();
       caret.remove();
     },
