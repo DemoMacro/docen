@@ -3843,8 +3843,8 @@ export const DocumentCommands = Extension.create({
         },
       // ── Chart Design — type / legend / data (the contextual tab) ────────
       // Chart Type: value is the ChartType token the renderer draws (the
-      // placeholder-only types grey out at the menu). Pie/doughnut/scatter
-      // have no series grouping — a hand-me-down stacked flag from the
+      // unmodeled types grey out at the menu). Pie/doughnut/scatter/bubble/
+      // radar have no series grouping — a hand-me-down stacked flag from the
       // previous type would mis-shape them, so it clears.
       "chart-type":
         (value) =>
@@ -3852,7 +3852,7 @@ export const DocumentCommands = Extension.create({
           const target = chartAt(state);
           if (!target || !value) return false;
           const chart: Record<string, unknown> = { ...target.chart, type: value };
-          if (value === "pie" || value === "doughnut" || value === "scatter") delete chart.grouping;
+          if (!["column", "bar", "line", "area", "stock"].includes(value)) delete chart.grouping;
           return stampChart(tr, target, chart);
         },
       // Legend: "none" hides it (showLegend false — the painter's presence

@@ -61,16 +61,23 @@ export type ChartPartShape =
  *  Word's); `title` the title band. `valueDrag` marks the element as
  *  draggable to change its value (Excel): a linear page-local px → value
  *  map, `value = a + b·px`, reading the pointer's y on vertical charts
- *  and x on horizontal ones (`horizontal`). Present on clustered/stacked
- *  bars and line/area points; absent where a drag has no meaning (pie
- *  wedges, percentStacked shares, scatter). */
+ *  and x on horizontal ones (`horizontal`) — or, when `radial` is set, the
+ *  pointer's distance from that center, `value = a + b·dist`. Present on
+ *  clustered/stacked bars, line/area points and radar vertices; absent
+ *  where a drag has no meaning (pie wedges, percentStacked shares,
+ *  scatter, bubbles, stock). */
 export interface ChartPartHit {
   series?: number;
   point?: number;
   legend?: boolean;
   title?: boolean;
   shape?: ChartPartShape;
-  valueDrag?: { a: number; b: number; horizontal?: boolean };
+  valueDrag?: {
+    a: number;
+    b: number;
+    horizontal?: boolean;
+    radial?: { cx: number; cy: number };
+  };
 }
 
 /** The exact-shape hit test behind {@link ChartPartShape}. */

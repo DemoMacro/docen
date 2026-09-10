@@ -51,6 +51,12 @@ interface ChartModel {
   legend: boolean;
   legendPosition: string;
   holeSize: number;
+  /** "standard" | "marker" | "filled" (radar polygons). */
+  radarStyle: string;
+  /** Bubble size scale, percent (100 = default max radius). */
+  bubbleScale: number;
+  /** What bubbleSize maps to: "area" (sqrt) or "width" (linear). */
+  sizeRepresents: string;
 }
 
 function readModel(chart: Rec): ChartModel | undefined {
@@ -79,6 +85,9 @@ function readModel(chart: Rec): ChartModel | undefined {
     legend,
     legendPosition: str(chart.legendPosition) ?? "bottom",
     holeSize: num(chart.holeSize) ?? 50,
+    radarStyle: str(chart.radarStyle) ?? "standard",
+    bubbleScale: num(chart.bubbleScale) ?? 100,
+    sizeRepresents: str(chart.sizeRepresents) ?? "area",
   };
 }
 
@@ -164,12 +173,13 @@ function segment(
   x1: number,
   y1: number,
   color: string,
+  width = 1,
 ): void {
   tree.add(
     new LeaferPath({
       path: `M ${x0} ${y0} L ${x1} ${y1}`,
       stroke: color,
-      strokeWidth: 1,
+      strokeWidth: width,
     }),
   );
 }
@@ -440,14 +450,7 @@ function paintScatter(tree: IGroup, model: ChartModel, plot: PlotBox, reg?: Elem
   const by = niceBounds(Math.min(0, ...ys), Math.max(0, ...ys));
   const px = (v: number) => plot.x + ((v - bx.min) / (bx.max - bx.min)) * plot.width;
   const py = (v: number) => plot.y + plot.height - ((v - by.min) / (by.max - by.min)) * plot.height;
-  for (const t of ticksOf(bx)) {
-    segment(tree, px(t), plot.y, px(t), plot.y + plot.height, GRID_LINE);
-    label(tree, fmtTick(t), px(t), plot.y + plot.height + 4, LABEL_PX - 1, "center");
-  }
-  for (const t of ticksOf(by)) {
-    segment(tree, plot.x, py(t), plot.x + plot.width, py(t), GRID_LINE);
-    label(tree, fmtTick(t), plot.x - 6, py(t), LABEL_PX - 1, "right");
-  }
+  xyGrid(tree, bx, by, plot, px, py);
   model.series.forEach((series, si) => {
     const fill = seriesFillOf(series, si);
     const pair = pairs[si];
@@ -473,7 +476,201 @@ const ticksOf = (b: { min: number; max: number; step: number }): number[] => {
   return out;
 };
 
-// ── placeholder (radar / stock / surface / ofPie / bubble — unmodeled) ──
+/** The scatter/bubble value grid: one hairline + tick label per nice step
+ *  on both axes. */
+function xyGrid(
+  tree: IGroup,
+  bx: { min: number; max: number; step: number },
+  by: { min: number; max: number; step: number },
+  plot: PlotBox,
+  px: (v: number) => number,
+  py: (v: number) => number,
+): void {
+  for (const t of ticksOf(bx)) {
+    segment(tree, px(t), plot.y, px(t), plot.y + plot.height, GRID_LINE);
+    label(tree, fmtTick(t), px(t), plot.y + plot.height + 4, LABEL_PX - 1, "center");
+  }
+  for (const t of ticksOf(by)) {
+    segment(tree, plot.x, py(t), plot.x + plot.width, py(t), GRID_LINE);
+    label(tree, fmtTick(t), plot.x - 6, py(t), LABEL_PX - 1, "right");
+  }
+}
+
+// ── radar ──
+
+/** Radar (c:radar): a polygonal web — one vertex per category on the
+ *  inscribed circle, series as closed polygons over it (Word's web lines).
+ *  Value maps linearly to the radius; a vertex carries a radial value-drag
+ *  (Excel drags the vertex along its spoke). */
+function paintRadar(tree: IGroup, model: ChartModel, plot: PlotBox, reg?: ElementReg): void {
+  const all = model.series.map(valuesOf);
+  const flat = all.flat();
+  if (flat.length === 0) return;
+  const catCount = Math.max(model.categories.length, ...all.map((v) => v.length), 3);
+  const cx = plot.x + plot.width / 2;
+  const cy = plot.y + plot.height / 2;
+  const radius = Math.min(plot.width, plot.height) / 2;
+  const bounds = niceBounds(Math.min(0, ...flat), Math.max(0, ...flat));
+  const span = bounds.max - bounds.min;
+  const pointAt = (c: number, v: number): [number, number] => {
+    const angle = (Math.PI * 2 * c) / catCount - Math.PI / 2;
+    const r = (Math.max(0, v - bounds.min) / span) * radius;
+    return [cx + r * Math.cos(angle), cy + r * Math.sin(angle)];
+  };
+  // Concentric polygon rings per tick; spokes from the center to the outer
+  // ring's vertices; category labels just outside those vertices.
+  for (const t of ticksOf(bounds)) {
+    const ring = Array.from({ length: catCount }, (_, c) => pointAt(c, t));
+    tree.add(
+      new LeaferPath({
+        path: `M ${ring.map(([x, y]) => `${x} ${y}`).join(" L ")} Z`,
+        stroke: GRID_LINE,
+        strokeWidth: 1,
+      }),
+    );
+  }
+  const outer = Array.from({ length: catCount }, (_, c) => {
+    const angle = (Math.PI * 2 * c) / catCount - Math.PI / 2;
+    const [x, y] = pointAt(c, bounds.max);
+    return { x, y, angle };
+  });
+  for (const v of outer) segment(tree, cx, cy, v.x, v.y, GRID_LINE);
+  const drag = { a: bounds.min, b: span / radius, radial: { cx, cy } };
+  model.series.forEach((series, si) => {
+    const vals = all[si];
+    if (!vals) return;
+    const pts = Array.from({ length: catCount }, (_, c) => pointAt(c, vals[c] ?? bounds.min));
+    const d = `M ${pts.map(([x, y]) => `${x} ${y}`).join(" L ")} Z`;
+    const fill = seriesFillOf(series, si);
+    if (model.radarStyle === "filled") {
+      tree.add(new LeaferPath({ path: d, fill: `#${fill}`, opacity: 0.55 }));
+    } else {
+      tree.add(
+        new LeaferPath({ path: d, stroke: `#${fill}`, strokeWidth: 2, strokeJoin: "round" }),
+      );
+      if (model.radarStyle === "marker") {
+        for (const [x, y] of pts) {
+          tree.add(new Ellipse({ x: x - 3, y: y - 3, width: 6, height: 6, fill: `#${fill}` }));
+        }
+      }
+    }
+    pts.forEach(([x, y], c) =>
+      reg?.({ series: si, point: c, valueDrag: drag }, x - 4, y - 4, 8, 8),
+    );
+  });
+  outer.forEach((v, c) =>
+    label(
+      tree,
+      model.categories[c] ?? String(c + 1),
+      v.x + 12 * Math.cos(v.angle),
+      v.y + 12 * Math.sin(v.angle),
+      LABEL_PX - 1,
+      "center",
+    ),
+  );
+}
+
+// ── bubble ──
+
+/** Bubble (c:bubble): scatter points whose radius encodes c:bubbleSize —
+ *  proportionally to the value (c:sizeRepresents "width") or to its square
+ *  root (the default "area"), the largest at `bubbleScale`% of a quarter of
+ *  the plot's short side. No value drag: the radius is a second value, not
+ *  the y the pointer would move. */
+function paintBubble(tree: IGroup, model: ChartModel, plot: PlotBox, reg?: ElementReg): void {
+  const series = model.series.map((s, si) => {
+    const p = scatterPairs(s);
+    // Re-typed from a category chart the series carries values only — index
+    // the categories instead of dropping the series.
+    if (p.x.length === 0) p.x = p.y.map((_, c) => c);
+    const raw = Array.isArray(s.bubbleSize)
+      ? s.bubbleSize.filter((v): v is number => typeof v === "number")
+      : [];
+    const sizes = p.y.map((_, c) => raw[c] ?? 1);
+    return { p, sizes, fill: seriesFillOf(s, si) };
+  });
+  const pts = series.flatMap((s) => s.p.x.map((x, c) => ({ x, y: s.p.y[c], s: s.sizes[c] })));
+  if (pts.length === 0) return;
+  const xs = pts.map((d) => d.x);
+  const ys = pts.map((d) => d.y);
+  const bx = niceBounds(Math.min(...xs), Math.max(...xs));
+  const by = niceBounds(Math.min(0, ...ys), Math.max(0, ...ys));
+  const px = (v: number) => plot.x + ((v - bx.min) / (bx.max - bx.min)) * plot.width;
+  const py = (v: number) => plot.y + plot.height - ((v - by.min) / (by.max - by.min)) * plot.height;
+  xyGrid(tree, bx, by, plot, px, py);
+  const maxSize = Math.max(...pts.map((d) => d.s), 0);
+  const maxR = ((Math.min(plot.width, plot.height) / 4) * model.bubbleScale) / 100;
+  const radiusOf = (s: number): number =>
+    model.sizeRepresents === "width"
+      ? (maxR * s) / (maxSize || 1)
+      : maxR * Math.sqrt(s / (maxSize || 1));
+  series.forEach((s, si) => {
+    s.p.x.forEach((xv, c) => {
+      const r = radiusOf(s.sizes[c]);
+      const x = px(xv);
+      const y = py(s.p.y[c]);
+      tree.add(
+        new Ellipse({
+          x: x - r,
+          y: y - r,
+          width: r * 2,
+          height: r * 2,
+          fill: `#${s.fill}`,
+          opacity: 0.75,
+        }),
+      );
+      reg?.({ series: si, point: c }, x - r - 1, y - r - 1, r * 2 + 2, r * 2 + 2);
+    });
+  });
+}
+
+// ── stock ──
+
+/** Stock (c:stock): the series order is the data slots — open/high/low/close
+ *  (four series) or high/low/close (three, no left ticks). Each category
+ *  draws a high–low spine with the open/close ticks reaching left/right
+ *  (Word's high-low-close and open-high-low-close line stocks). No sub-hits:
+ *  the data edits through the Edit Data dialog. */
+function paintStock(tree: IGroup, model: ChartModel, plot: PlotBox): void {
+  const all = model.series.map(valuesOf);
+  const flat = all.flat();
+  if (flat.length === 0) return;
+  const catCount = Math.max(model.categories.length, ...all.map((v) => v.length), 1);
+  const bounds = niceBounds(Math.min(0, ...flat), Math.max(0, ...flat));
+  const py = (v: number) =>
+    plot.y + plot.height - ((v - bounds.min) / (bounds.max - bounds.min)) * plot.height;
+  for (const t of ticksOf(bounds)) {
+    segment(tree, plot.x, py(t), plot.x + plot.width, py(t), GRID_LINE);
+    label(tree, fmtTick(t), plot.x - 6, py(t), LABEL_PX - 1, "right");
+  }
+  const band = plot.width / catCount;
+  const four = all.length >= 4;
+  const high = (four ? all[1] : all[0]) ?? [];
+  const low = (four ? all[2] : all[1]) ?? [];
+  const close = (four ? all[3] : all[2]) ?? [];
+  const open = four ? (all[0] ?? []) : undefined;
+  for (let c = 0; c < catCount; c++) {
+    const cx = plot.x + (c + 0.5) * band;
+    const hi = high[c];
+    const lo = low[c];
+    if (hi == null || lo == null) continue;
+    segment(tree, cx, py(hi), cx, py(lo), "#595959", 1.5);
+    const tick = band * 0.18;
+    if (open && open[c] != null)
+      segment(tree, cx - tick, py(open[c]), cx, py(open[c]), "#595959", 1.5);
+    if (close[c] != null) segment(tree, cx, py(close[c]), cx + tick, py(close[c]), "#595959", 1.5);
+    label(
+      tree,
+      model.categories[c] ?? String(c + 1),
+      cx,
+      plot.y + plot.height + 4,
+      LABEL_PX - 1,
+      "center",
+    );
+  }
+}
+
+// ── placeholder (surface / ofPie — unmodeled) ──
 
 function paintPlaceholder(tree: IGroup, model: ChartModel, plot: PlotBox): void {
   tree.add(
@@ -601,12 +798,23 @@ export function paintChartMember(
         // The value-drag map reads page-local px but its affine coefficients
         // are chart-local: value = a + b·(page − origin), so the origin rides
         // into the intercept as −b·origin — the same fold the box and the
-        // exact shapes get here.
+        // exact shapes get here. A radial map is translation-invariant in a/b;
+        // its center is a position and folds the origin directly.
         const drag = part.valueDrag;
-        const origin = drag && drag.horizontal ? hits.ox + m.x : hits.oy + m.y;
-        const chartPart = drag
-          ? { ...part, valueDrag: { ...drag, a: drag.a - drag.b * origin } }
-          : part;
+        let chartPart = part;
+        if (drag) {
+          const dx = hits.ox + m.x;
+          const dy = hits.oy + m.y;
+          chartPart = drag.radial
+            ? {
+                ...part,
+                valueDrag: {
+                  ...drag,
+                  radial: { cx: drag.radial.cx + dx, cy: drag.radial.cy + dy },
+                },
+              }
+            : { ...part, valueDrag: { ...drag, a: drag.a - drag.b * (drag.horizontal ? dx : dy) } };
+        }
         hits.ctx.hitBoxes?.push({
           page: hits.ctx.pageIndex,
           x: hits.ox + m.x + x,
@@ -684,6 +892,15 @@ export function paintChartMember(
       break;
     case "scatter":
       paintScatter(chart, model, plot, reg);
+      break;
+    case "radar":
+      paintRadar(chart, model, plot, reg);
+      break;
+    case "bubble":
+      paintBubble(chart, model, plot, reg);
+      break;
+    case "stock":
+      paintStock(chart, model, plot);
       break;
     default:
       paintPlaceholder(chart, model, plot);

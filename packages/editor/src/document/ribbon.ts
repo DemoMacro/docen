@@ -412,11 +412,11 @@ const chartTypeItems = (): string =>
     { text: opt("chart-type.doughnut"), value: "doughnut" },
     { text: opt("chart-type.scatter"), value: "scatter" },
     { text: "-" },
-    { text: opt("chart-type.radar"), value: "radar", disabled: true },
-    { text: opt("chart-type.stock"), value: "stock", disabled: true },
+    { text: opt("chart-type.radar"), value: "radar" },
+    { text: opt("chart-type.stock"), value: "stock" },
     { text: opt("chart-type.surface"), value: "surface", disabled: true },
     { text: opt("chart-type.of-pie"), value: "ofPie", disabled: true },
-    { text: opt("chart-type.bubble"), value: "bubble", disabled: true },
+    { text: opt("chart-type.bubble"), value: "bubble" },
   ]);
 
 /** The Legend placement drop-down — "none" plus LegendPosition's four sides. */

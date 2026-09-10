@@ -194,6 +194,12 @@ export class DrawingGestures {
     const vertical = !drag.horizontal;
     // The zero-value px (the bar/area baseline) straight from the map.
     const baseline = -drag.a / drag.b;
+    // The pointer px → value map: linear on the dragged axis, or the
+    // pointer's distance from the center for a radar vertex.
+    const valueAt = (at: { x: number; y: number }): number =>
+      drag.radial
+        ? drag.a + drag.b * Math.hypot(at.x - drag.radial.cx, at.y - drag.radial.cy)
+        : drag.a + drag.b * (drag.horizontal ? at.x : at.y);
     let moved = false;
     let preview: HTMLElement | null = null;
     let label: HTMLElement | null = null;
@@ -243,12 +249,12 @@ export class DrawingGestures {
         } satisfies Partial<CSSStyleDeclaration>);
         frame.append(preview, label);
       }
-      const value = drag.a + drag.b * (drag.horizontal ? at.x : at.y);
-      const v = Math.round(value * 100) / 100;
+      const v = Math.round(valueAt(at) * 100) / 100;
       if (hit.width <= 8 && hit.height <= 8) {
         // A line/area point (the painter's 8×8 marker box) rides the pointer
-        // at its own x; bars reshape between the baseline and it.
-        const cx = hit.x + hit.width / 2;
+        // at its own x — a radar vertex rides it in both axes; bars reshape
+        // between the baseline and it.
+        const cx = drag.radial ? at.x : hit.x + hit.width / 2;
         Object.assign(preview.style, {
           left: `${(cx - 4) * scale}px`,
           top: `${(at.y - 4) * scale}px`,
@@ -286,8 +292,7 @@ export class DrawingGestures {
       }
       const at = this.#host.pageAtPoint(e.clientX, e.clientY);
       if (!at || at.page !== down.page) return;
-      const value = drag.a + drag.b * (drag.horizontal ? at.x : at.y);
-      this.#host.applyChartValue(series, point, Math.round(value * 100) / 100);
+      this.#host.applyChartValue(series, point, Math.round(valueAt(at) * 100) / 100);
     };
     const onKey = (e: KeyboardEvent): void => {
       if (e.key !== "Escape") return;
