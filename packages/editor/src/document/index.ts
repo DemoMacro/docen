@@ -79,18 +79,18 @@ import {
   type StorySlot,
 } from "./canvas/edit-bridge";
 import { deepEq, dirtyPagesOf } from "./canvas/page-eq";
-// Side-effect: register the document-specific UI components moved out of the
-// shared ui/ barrel — <docen-format-pane> (properties fallback),
-// <docen-outline> (navigation Headings tab), <docen-styles-pane> (Styles).
-import "./components/format-pane";
-import "./components/outline";
-import "./components/styles-pane";
 import {
   CanvasStage,
   type CanvasStageSection,
   type LaidFurnitureSection,
   layFurnitureSections,
 } from "./canvas/stage";
+// Side-effect: register the document-specific UI components moved out of the
+// shared ui/ barrel — <docen-format-pane> (properties fallback),
+// <docen-outline> (navigation Headings tab), <docen-styles-pane> (Styles).
+import "./components/format-pane";
+import "./components/outline";
+import "./components/styles-pane";
 import { documentStyles, documentTemplate, escapeHtml } from "./chrome";
 import { ClipboardCommands } from "./commands/clipboard";
 import { CommentsCommands } from "./commands/comments";
@@ -104,9 +104,9 @@ import { SectionCommands } from "./commands/sections";
 import { SpellingCommands } from "./commands/spelling";
 import type { StylesInspectorData, StylesPaneState } from "./components/styles-pane";
 import { pagesToPdf } from "./export-pdf";
+import type { ModifyStylePatch } from "./extensions/commands";
 // Side-effect import: registers the ribbon/header translation tables.
 import "./i18n";
-import type { ModifyStylePatch } from "./extensions/commands";
 import {
   floatingDrawingAt,
   inlineDrawingAt,
@@ -116,6 +116,7 @@ import {
 } from "./extensions/commands";
 import { LOCAL_HANDLED, READONLY_LIVE, SAVE_FORMATS, detectOpenFormat } from "./file-formats";
 import { mergeSectionProperties } from "./page-setup";
+import { compressPictureSrc, pickTransparentColor, type CropRect } from "./pixels";
 import {
   buildContextualTab,
   DEFAULT_RIBBON_TAB,
@@ -1313,6 +1314,12 @@ class DocenDocument extends AddinHost<Editor> {
     this.shadowRoot!.querySelector("docen-chart-data-dialog")?.addEventListener(
       "chart:ok",
       this.#dialogs.onChartOk as EventListener,
+    );
+    // Compress Pictures — the OK path re-encodes the selected picture's
+    // pixels (the picture-pixels command swaps the source in).
+    this.shadowRoot!.querySelector("docen-compress-pictures-dialog")?.addEventListener(
+      "compress:ok",
+      this.#onCompressOk as EventListener,
     );
     // Cross-reference dialog — seed a cached REF/PAGEREF field at the caret.
     this.shadowRoot!.querySelector("docen-cross-reference-dialog")?.addEventListener(
@@ -3229,6 +3236,76 @@ class DocenDocument extends AddinHost<Editor> {
    *  folded back in — the dialog's "include" toggle (default ON) switches
    *  between the two readouts. Textboxes are wpsShape subtrees and textbox
    *  nodes in the body; the notes live in the documentExtras channels. */
+  // ── Picture pixel tools (Picture Format → Adjust) ──
+
+  /** The selected picture's attrs, or null when the selection isn't one. */
+  #selectedPictureAttrs(): Record<string, unknown> | null {
+    const editor = this.editor;
+    if (!editor) return null;
+    const sel = editor.state.selection;
+    if (!(sel instanceof NodeSelection) || sel.node.type.name !== "image") return null;
+    return sel.node.attrs as Record<string, unknown>;
+  }
+
+  #showCompressPictures(): void {
+    const dialog = this.shadowRoot?.querySelector("docen-compress-pictures-dialog") as
+      | (HTMLElement & { show(): void })
+      | undefined;
+    if (!this.#selectedPictureAttrs() || !dialog) return;
+    dialog.show();
+  }
+
+  readonly #onCompressOk = (
+    event: CustomEvent<{ ppi: number | null; dropCrop: boolean }>,
+  ): void => {
+    const editor = this.editor;
+    const attrs = this.#selectedPictureAttrs();
+    if (!editor || !attrs || typeof attrs.src !== "string") return;
+    const { ppi, dropCrop } = event.detail ?? { ppi: 220, dropCrop: false };
+    // The resample size is the display size at the target ppi (the frame
+    // keeps its CSS size — only the pixel density changes); "keep current
+    // resolution" re-encodes without resampling. Never upscales.
+    const width = typeof attrs.width === "number" ? attrs.width : 400;
+    const height = typeof attrs.height === "number" ? attrs.height : 300;
+    const target =
+      ppi == null ? { width, height } : { width: (width / 96) * ppi, height: (height / 96) * ppi };
+    void compressPictureSrc(attrs.src, target, attrs.crop as CropRect | undefined, dropCrop)
+      .then((src) => {
+        editor.commands["picture-pixels"](JSON.stringify({ src, dropCrop }));
+      })
+      .catch(() => {
+        /* a source that no longer decodes keeps the current one */
+      });
+  };
+
+  /** Arm the canvas eyedropper: the next press on a picture re-encodes it
+   *  with the sampled color cleared (Word's Set Transparent Color). */
+  #armTransparentPick(): void {
+    const bridge = this.#bridge;
+    const editor = this.editor;
+    if (!bridge || !editor) return;
+    bridge.setTransparentPick((hit, nx, ny) => {
+      const pos = this.#drawingNodePos(hit.para, hit.index, hit.kind, hit.childPath);
+      if (pos == null) return;
+      const node = editor.state.doc.nodeAt(pos);
+      if (!node || node.type.name !== "image" || typeof node.attrs.src !== "string") return;
+      void pickTransparentColor(
+        node.attrs.src as string,
+        nx,
+        ny,
+        node.attrs.crop as CropRect | undefined,
+      )
+        .then((src) => {
+          // patchPicture re-checks the selection, so a press elsewhere in
+          // between simply declines the swap.
+          editor.commands["picture-pixels"](JSON.stringify({ src }));
+        })
+        .catch(() => {
+          /* an undecodable source keeps the current pixels */
+        });
+    });
+  }
+
   #showWordCount(): void {
     const editor = this.editor;
     const dialog = this.shadowRoot?.querySelector("docen-word-count-dialog") as
@@ -4079,6 +4156,17 @@ class DocenDocument extends AddinHost<Editor> {
     // Word Count (ribbon Review → Proofing) → the statistics dialog.
     if (name === "word-count") {
       this.#showWordCount();
+      return;
+    }
+    // Compress Pictures (Picture Format → Adjust) → the compression dialog.
+    if (name === "compress-pictures") {
+      this.#showCompressPictures();
+      return;
+    }
+    // Set Transparent Color (Picture Format → Color menu): arm the canvas
+    // eyedropper — the next press on a picture samples its pixel.
+    if (name === "picture-transparent-pick") {
+      this.#armTransparentPick();
       return;
     }
     // Word's Group / Distribute act on the drawing multi-selection — the

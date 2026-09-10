@@ -153,6 +153,11 @@ declare module "@tiptap/core" {
       "reset-picture": () => ReturnType;
       "reset-picture-size": (natural?: { width: number; height: number }) => ReturnType;
       "change-picture": (src?: string) => ReturnType;
+      // The pixel tools' commit (Compress Pictures / Set Transparent Color):
+      // a JSON `{ src, dropCrop? }` — the pixels are re-encoded at the UI
+      // layer, this only swaps the source (and drops the srcRect when the
+      // crop was baked in).
+      "picture-pixels": (value?: string) => ReturnType;
       "shape-fill": (value?: string) => ReturnType;
       "shape-outline": (value?: string) => ReturnType;
       "shape-effects": (value?: string) => ReturnType;
@@ -287,6 +292,7 @@ export const WIRED_DISPATCH: ReadonlySet<string> = new Set([
   "reset-picture",
   "reset-picture-size",
   "change-picture",
+  "picture-pixels",
   "shape-fill",
   "shape-outline",
   "shape-effects",
@@ -3983,6 +3989,23 @@ export const DocumentCommands = Extension.create({
                 delete attrs.crop;
               })
             : false,
+      // The pixel tools' commit (see the type above): unlike change-picture
+      // the crop survives unless the payload says it was baked in.
+      "picture-pixels":
+        (value) =>
+        ({ state, tr }) => {
+          let parsed: { src?: unknown; dropCrop?: unknown };
+          try {
+            parsed = JSON.parse(String(value ?? ""));
+          } catch {
+            return false;
+          }
+          if (typeof parsed.src !== "string" || !parsed.src) return false;
+          return patchPicture(state, tr, (attrs) => {
+            attrs.src = parsed.src as string;
+            if (parsed.dropCrop === true) delete attrs.crop;
+          });
+        },
       // ── Arrange — floating drawings (the Layout tab's Arrange group) ──
       // Every command targets the selected floating drawing (a floating
       // image or a wps shape); on any other selection they decline, so the

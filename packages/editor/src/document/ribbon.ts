@@ -485,6 +485,15 @@ const pictureColorItems = (): string => {
       text: `${lead}: ${n}%`,
       value: `saturation:${n}`,
     })),
+    { text: "-" },
+    {
+      // Word's Set Transparent Color: arms the eyedropper (the next canvas
+      // press samples the clicked picture's pixel) — a local host action,
+      // not a command value.
+      text: zh ? "设置透明色" : "Set Transparent Color",
+      value: "transparent-pick",
+      event: "picture-transparent-pick",
+    },
   ]);
 };
 
@@ -1861,8 +1870,8 @@ export function pictureFormatTab(): RibbonTab {
       // correction/color/transparency presets write blipEffects; Reset
       // Picture discards every picture change (adjustments, border, effects,
       // crop — the split's second item also restores the natural size).
-      // Remove Background, Artistic Effects, and Compress stay greyed (no
-      // pixel-recompression pipeline yet).
+      // Remove Background and Artistic Effects stay greyed (no model for
+      // them); Compress re-encodes the selected picture's pixels.
       group("picture-adjust", [
         btn("remove-background", "remove-background", { size: "large" }),
         col([

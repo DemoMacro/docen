@@ -101,6 +101,11 @@ export const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   // Fill Effects opens the page-picture-fill dialog (Design → Page Color
   // group); the OK path rides the fill-effects:ok event.
   "fill-effects",
+  // Picture pixel tools: Compress Pictures opens its dialog (the OK path
+  // rides `picture-pixels`); Set Transparent Color arms the canvas
+  // eyedropper (the bridge samples the press and the host re-encodes).
+  "compress-pictures",
+  "picture-transparent-pick",
   // Spelling opens the proofing pane (Review → Spelling & Grammar); the
   // check itself and the pane actions are host state (#runSpellCheck).
   "spell-check",

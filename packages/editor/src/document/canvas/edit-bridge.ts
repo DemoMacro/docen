@@ -256,6 +256,11 @@ export interface EditBridge {
    *  crop handles; Enter / a press outside commits, Esc cancels. False when
    *  the selection isn't a source-carrying image. */
   enterCropMode(): boolean;
+  /** Arm Set Transparent Color: the next canvas press on a drawing samples
+   *  the pixel under the pointer (display-normalized 0..1) and calls back
+   *  instead of running the select chains; a press off any drawing disarms
+   *  and clicks through. Pass null to disarm (Esc does too). */
+  setTransparentPick(onPick: ((hit: DrawingHit, nx: number, ny: number) => void) | null): void;
   /** The multi-selection's members (primary + Shift+Click set) with their PM
    *  positions and page boxes — the host assembles the group/distribute
    *  payloads from it. Null when fewer than two resolve. */
@@ -1349,6 +1354,10 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     lastClick = { t: event.timeStamp, x: event.clientX, y: event.clientY, count, key };
     return count;
   };
+  // The armed Set Transparent Color callback (null = disarmed) — see
+  // setTransparentPick in the public surface.
+  let transparentPick: ((hit: DrawingHit, nx: number, ny: number) => void) | null = null;
+
   const takeFocus = (event: MouseEvent): void => {
     // Overlay widgets (the floating comment compose) own their focus — a
     // click inside one must not be dragged back to the input textarea.
@@ -1373,6 +1382,32 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     const storyCfg = opts.story;
     const hit = hitPage(event.clientX, event.clientY);
     const drawHit = hit && opts.drawingAt ? opts.drawingAt(hit.page, hit.lx, hit.ly) : null;
+    // Set Transparent Color: the armed pick samples the clicked drawing's
+    // pixel instead of running the select chains (Word's eyedropper press);
+    // a press off any drawing disarms and falls through as a plain click.
+    if (transparentPick && drawHit && hit) {
+      const onPick = transparentPick;
+      transparentPick = null;
+      // Un-rotate the point into the box's own space (the hit test's
+      // formula), then normalize against the painted box.
+      let px = hit.lx;
+      let py = hit.ly;
+      if (drawHit.rotation) {
+        const rad = (-drawHit.rotation * Math.PI) / 180;
+        const cx = drawHit.x + drawHit.width / 2;
+        const cy = drawHit.y + drawHit.height / 2;
+        const dx = px - cx;
+        const dy = py - cy;
+        px = cx + dx * Math.cos(rad) - dy * Math.sin(rad);
+        py = cy + dx * Math.sin(rad) + dy * Math.cos(rad);
+      }
+      const nx = Math.min(Math.max((px - drawHit.x) / drawHit.width, 0), 1);
+      const ny = Math.min(Math.max((py - drawHit.y) / drawHit.height, 0), 1);
+      onPick(drawHit, nx, ny);
+      ta.focus();
+      ta.value = "";
+      return;
+    }
     const clicks = clickCount(
       event,
       drawHit ? `${tagOf(drawHit.para)}/${drawHit.index}/${drawHit.kind}` : "text",
@@ -2197,6 +2232,13 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
         break;
       // Leaving a furniture story (Word: Esc = Close Header and Footer).
       case "Escape":
+        // The armed Set Transparent Color pick is the shallowest mode — Esc
+        // disarms it before any other Escape meaning (Word).
+        if (transparentPick) {
+          transparentPick = null;
+          event.preventDefault();
+          return;
+        }
         if (editable && main.map?.shapeAtPos(main.editor.state.selection.from)) {
           // Leaving a text box's edit mode selects the whole shape (Word) —
           // the span's `from` IS the wpsShape node's position.
@@ -2560,6 +2602,9 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     },
     enterCropMode(): boolean {
       return draw.enterCropMode();
+    },
+    setTransparentPick(onPick) {
+      transparentPick = onPick;
     },
     drawingMulti() {
       return draw.multiPayload();
