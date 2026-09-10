@@ -776,6 +776,10 @@ function buildControlOrLayout(c: RibbonControlOrLayout, scope: Element): HTMLEle
 function buildLayout(l: RibbonLayout, scope: Element): HTMLElement {
   const el = document.createElement("div");
   el.className = l.layout === "column" ? "rb-col" : l.layout === "row" ? "rb-row" : "rb-grid";
+  if (l.layout === "grid" && l.columns) {
+    el.dataset.columns = "";
+    el.style.setProperty("--rb-grid-cols", String(l.columns));
+  }
   for (const c of l.controls) el.append(buildControlOrLayout(c, scope));
   return el;
 }
@@ -891,9 +895,10 @@ const row = (controls: readonly RibbonControlOrLayout[]): RibbonLayout => ({
   layout: "row",
   controls,
 });
-const grid = (controls: readonly RibbonControlOrLayout[]): RibbonLayout => ({
+const grid = (controls: readonly RibbonControlOrLayout[], columns?: number): RibbonLayout => ({
   type: "layout",
   layout: "grid",
+  ...(columns ? { columns } : {}),
   controls,
 });
 const sep = (): RibbonSeparator => ({ type: "separator" });
@@ -1761,13 +1766,18 @@ const accessibilityGroup = (): RibbonGroup =>
  *  only, matching Word's inline grey-out at the command layer. */
 const arrangeGroup = (): RibbonGroup =>
   group("arrange", [
-    col([
-      row([
+    // Word lays these four as a 2×2 grid with shared column tracks — the
+    // second column starts at one x even though the top row's dropdowns
+    // measure wider than the bottom row's buttons.
+    grid(
+      [
         menu("orientation", "position", parsedItems(positionItems())),
         menu("wrap", "wrap", parsedItems(wrapItems())),
-      ]),
-      row([btn("orientation", "bring-forward"), btn("orientation", "send-backward")]),
-    ]),
+        btn("orientation", "bring-forward"),
+        btn("orientation", "send-backward"),
+      ],
+      2,
+    ),
     menu("align-left", "align-objects", parsedItems(alignObjectsItems()), { size: "large" }),
     menu("group-objects", "drawing-group", parsedItems(groupItems()), { size: "large" }),
     menu("rotate", "rotate", parsedItems(rotateItems()), { size: "large" }),

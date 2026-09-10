@@ -50,6 +50,17 @@ export const documentStyles = css`
     gap: 2px;
     align-content: start;
   }
+  /* data-columns — an N-per-row grid whose rows share column tracks, so the
+       second column of a 2×2 group starts at one x regardless of how each
+       row's own controls measure. Controls keep their natural width. */
+  .rb-grid[data-columns] {
+    grid-template-rows: none;
+    grid-template-columns: repeat(var(--rb-grid-cols, 2), minmax(0, max-content));
+    grid-auto-flow: row;
+  }
+  .rb-grid[data-columns] > * {
+    justify-self: start;
+  }
   .rb-vsep {
     width: 1px;
     align-self: stretch;

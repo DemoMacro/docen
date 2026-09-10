@@ -148,6 +148,10 @@ export type RibbonControl =
 export interface RibbonLayout {
   type: "layout";
   layout: "column" | "row" | "grid";
+  /** Grid only — items per row in row flow, the rows sharing column tracks
+   *  (a 2×2 arrange group: the second column starts at one x). Without it
+   *  the grid flows as ≤3-row columns. */
+  columns?: number;
   controls: readonly RibbonControlOrLayout[];
 }
 

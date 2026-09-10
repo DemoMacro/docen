@@ -42,6 +42,17 @@ const styles = css`
   fluent-menu-button {
     min-height: 26px;
   }
+  /* Fluent pads a menu button 12px, centers its content, and forces a 96px
+     min-width — a short label floats ~11px right of the sibling
+     <docen-ribbon-button>s (6px inset + 6px inter-slot gap) and the box
+     overhangs its text. Match the button metrics, pin the content left,
+     and let the label size the control. */
+  :host(:not([size="large"])) fluent-menu-button {
+    justify-content: flex-start;
+    min-width: 0;
+    padding: 0 6px;
+    column-gap: 6px;
+  }
   .rb-label {
     font-size: 12px;
   }
