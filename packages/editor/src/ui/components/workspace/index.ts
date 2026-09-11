@@ -12,6 +12,7 @@ export { default as DocenCommandSearch } from "./command-search";
 export { default as DocenOptionsDialog } from "./options-dialog";
 export { default as DocenWordCountDialog } from "./word-count-dialog";
 export { default as DocenSymbolDialog } from "./symbol-dialog";
+export { default as DocenMeasureInput } from "./measure-input";
 export { default as DocenParagraphDialog } from "./paragraph-dialog";
 export { default as DocenPageSetupDialog } from "./page-setup-dialog";
 export { default as DocenTableDialog } from "./table-dialog";

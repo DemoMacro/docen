@@ -186,11 +186,18 @@ export async function registerComponents(): Promise<void> {
   // combobox at least 160px wide. The control exposes no `part`, so the override
   // is merged into the composed styles at registration (css`` can interpolate
   // the original ElementStyles) — lets the combobox shrink to a font-size width.
+  // The slotted input needs min-width 0 too: its intrinsic (size-attribute)
+  // width is the flex floor, and FAST rebuilds the element so consumer
+  // inline styles never survive — a narrow combobox would overflow and clip
+  // its chevron.
   await defineElement(Dropdown, {
     name: "fluent-dropdown",
     template: DropdownTemplate,
     styles: css`
       ${DropdownStyles} .control {
+        min-width: 0;
+      }
+      ::slotted(input) {
         min-width: 0;
       }
     `,

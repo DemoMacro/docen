@@ -10,6 +10,10 @@ import {
 
 import type { DrawingPropertiesPatch } from "../../../document/extensions/commands";
 import { observeLang, t } from "../../i18n/localize";
+import { measureToCm } from "./measure-input";
+// Registration happens through the workspace index's re-export (a type-only
+// import here would let esbuild elide the module and drop the side effect).
+import type DocenMeasureInput from "./measure-input";
 
 const styles = css`
   :host {
@@ -80,19 +84,17 @@ const template = html<DocenDrawingPropertiesDialog>`
       <div class="row">
         <div class="field">
           <label ${ref("widthLabel")}></label>
-          <fluent-text-input ${ref("widthInput")} type="number" step="any"></fluent-text-input>
-          <span class="unit">cm</span>
+          <docen-measure-input units="cm mm in pt" ${ref("widthInput")}></docen-measure-input>
         </div>
         <div class="field">
           <label ${ref("heightLabel")}></label>
-          <fluent-text-input ${ref("heightInput")} type="number" step="any"></fluent-text-input>
-          <span class="unit">cm</span>
+          <docen-measure-input units="cm mm in pt" ${ref("heightInput")}></docen-measure-input>
         </div>
       </div>
       <div class="row">
         <div class="field">
           <label ${ref("rotationLabel")}></label>
-          <fluent-text-input ${ref("rotationInput")} type="number" step="any"></fluent-text-input>
+          <docen-measure-input no-unit ${ref("rotationInput")}></docen-measure-input>
           <span class="unit">°</span>
         </div>
       </div>
@@ -113,8 +115,7 @@ const template = html<DocenDrawingPropertiesDialog>`
               style="width:100%;box-sizing:border-box"
             />
           </fluent-dropdown>
-          <fluent-text-input ${ref("horizontalInput")} type="number" step="any"></fluent-text-input>
-          <span class="unit">cm</span>
+          <docen-measure-input units="cm mm in pt" ${ref("horizontalInput")}></docen-measure-input>
         </div>
       </div>
       <div class="row">
@@ -133,8 +134,7 @@ const template = html<DocenDrawingPropertiesDialog>`
               style="width:100%;box-sizing:border-box"
             />
           </fluent-dropdown>
-          <fluent-text-input ${ref("verticalInput")} type="number" step="any"></fluent-text-input>
-          <span class="unit">cm</span>
+          <docen-measure-input units="cm mm in pt" ${ref("verticalInput")}></docen-measure-input>
         </div>
       </div>
       <div class="heading" ${ref("layoutHeading")}></div>
@@ -156,25 +156,21 @@ const template = html<DocenDrawingPropertiesDialog>`
       <div class="row">
         <div class="field">
           <label ${ref("topLabel")}></label>
-          <fluent-text-input ${ref("topInput")} type="number" step="any"></fluent-text-input>
-          <span class="unit">cm</span>
+          <docen-measure-input units="cm mm in pt" ${ref("topInput")}></docen-measure-input>
         </div>
         <div class="field">
           <label ${ref("bottomLabel")}></label>
-          <fluent-text-input ${ref("bottomInput")} type="number" step="any"></fluent-text-input>
-          <span class="unit">cm</span>
+          <docen-measure-input units="cm mm in pt" ${ref("bottomInput")}></docen-measure-input>
         </div>
       </div>
       <div class="row">
         <div class="field">
           <label ${ref("leftLabel")}></label>
-          <fluent-text-input ${ref("leftInput")} type="number" step="any"></fluent-text-input>
-          <span class="unit">cm</span>
+          <docen-measure-input units="cm mm in pt" ${ref("leftInput")}></docen-measure-input>
         </div>
         <div class="field">
           <label ${ref("rightLabel")}></label>
-          <fluent-text-input ${ref("rightInput")} type="number" step="any"></fluent-text-input>
-          <span class="unit">cm</span>
+          <docen-measure-input units="cm mm in pt" ${ref("rightInput")}></docen-measure-input>
         </div>
       </div>
       <div class="heading" ${ref("altTextHeading")}></div>
@@ -198,6 +194,10 @@ const template = html<DocenDrawingPropertiesDialog>`
 /** A `fluent-text-input` widget plus its string value accessor (the value
  *  lives on the `value` property, like a native input). */
 type FluentTextInput = HTMLElement & { value: string; disabled: boolean };
+
+/** The measured boxes (DocenMeasureInput) share the text input's value
+ *  surface minus the disabled flag this dialog never sets. */
+type MeasureBox = Pick<DocenMeasureInput, "value" | "unit">;
 
 /** The prefill shape the host derives from the selected drawing: everything
  *  already in centimeters (the dialog's display unit), rotation in degrees. */
@@ -233,17 +233,17 @@ class DocenDrawingPropertiesDialog extends FASTElement {
   @observable dialogEl?: HTMLElement & { heading?: string; show(): void; hide(): void };
   @observable sizeHeading?: HTMLElement;
   @observable widthLabel?: HTMLElement;
-  @observable widthInput?: FluentTextInput;
+  @observable widthInput?: MeasureBox;
   @observable heightLabel?: HTMLElement;
-  @observable heightInput?: FluentTextInput;
+  @observable heightInput?: MeasureBox;
   @observable rotationLabel?: HTMLElement;
-  @observable rotationInput?: FluentTextInput;
+  @observable rotationInput?: MeasureBox;
   @observable positionHeading?: HTMLElement;
   @observable horizontalLabel?: HTMLElement;
-  @observable horizontalInput?: FluentTextInput;
+  @observable horizontalInput?: MeasureBox;
   @observable relativeHDropdown?: HTMLElement & { value: string | null };
   @observable verticalLabel?: HTMLElement;
-  @observable verticalInput?: FluentTextInput;
+  @observable verticalInput?: MeasureBox;
   @observable relativeVDropdown?: HTMLElement & { value: string | null };
   @observable layoutHeading?: HTMLElement;
   @observable allowOverlapBox?: HTMLElement & { checked: boolean };
@@ -251,13 +251,13 @@ class DocenDrawingPropertiesDialog extends FASTElement {
   @observable lockAnchorBox?: HTMLElement & { checked: boolean };
   @observable distanceHeading?: HTMLElement;
   @observable topLabel?: HTMLElement;
-  @observable topInput?: FluentTextInput;
+  @observable topInput?: MeasureBox;
   @observable bottomLabel?: HTMLElement;
-  @observable bottomInput?: FluentTextInput;
+  @observable bottomInput?: MeasureBox;
   @observable leftLabel?: HTMLElement;
-  @observable leftInput?: FluentTextInput;
+  @observable leftInput?: MeasureBox;
   @observable rightLabel?: HTMLElement;
-  @observable rightInput?: FluentTextInput;
+  @observable rightInput?: MeasureBox;
   @observable altTextHeading?: HTMLElement;
   @observable altTextInput?: FluentTextInput;
   @observable okBtn?: HTMLElement;
@@ -301,8 +301,8 @@ class DocenDrawingPropertiesDialog extends FASTElement {
         right: round(state.distanceCm.right),
       },
     };
-    const set = (input: FluentTextInput | undefined, cm: number): void => {
-      if (input) input.value = String(round(cm));
+    const set = (input: MeasureBox | undefined, cm: number): void => {
+      if (input) input.value = round(cm);
     };
     set(this.widthInput, state.widthCm);
     set(this.heightInput, state.heightCm);
@@ -332,9 +332,14 @@ class DocenDrawingPropertiesDialog extends FASTElement {
    *  (the current base survives). Only the fields the user changed ride the
    *  patch; untouched ones keep their stored value un-rounded. */
   applyProperties(): void {
-    const num = (input: FluentTextInput | undefined): number | undefined => {
-      const v = Number(input?.value);
-      return Number.isFinite(v) && v >= 0 ? Math.round(v * 100) / 100 : undefined;
+    // A measured box rides its picked unit; the patch stays centimeter-based
+    // (the host's writer is untouched), so the value resolves before it lands.
+    const num = (input: MeasureBox | undefined): number | undefined => {
+      if (input == null) return undefined;
+      const v = input.value;
+      if (v == null) return undefined;
+      const cm = measureToCm(v, input.unit);
+      return cm >= 0 ? Math.round(cm * 100) / 100 : undefined;
     };
     const rel = (raw: string | null | undefined, bases: readonly string[]): string | undefined =>
       typeof raw === "string" && (bases as readonly string[]).includes(raw) ? raw : undefined;
@@ -350,8 +355,8 @@ class DocenDrawingPropertiesDialog extends FASTElement {
     };
     put("widthCm", num(this.widthInput));
     put("heightCm", num(this.heightInput));
-    const rotationDeg = Number(this.rotationInput?.value);
-    if (Number.isFinite(rotationDeg)) put("rotationDeg", rotationDeg);
+    const rotationDeg = this.rotationInput?.value;
+    if (rotationDeg != null && Number.isFinite(rotationDeg)) put("rotationDeg", rotationDeg);
     put("offsetHCm", num(this.horizontalInput));
     put("offsetVCm", num(this.verticalInput));
     put("relativeH", rel(this.relativeHDropdown?.value, H_BASES));

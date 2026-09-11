@@ -380,15 +380,24 @@ export function normalizeParagraphAlignment(raw: unknown): string {
 export interface ParagraphDialogPatch {
   alignment: string;
   outlineLevel: number | null;
+  // Each slot carries either the twip value or its char/line twin (hundredths)
+  // — the twin is undefined and clears the other, so switching units commits
+  // (the char/line field outranks its twip twin on both render and export).
   indent: {
     left?: number;
+    leftChars?: number;
     right?: number;
+    rightChars?: number;
     firstLine?: number;
+    firstLineChars?: number;
     hanging?: number;
+    hangingChars?: number;
   };
   spacing: {
     before?: number;
+    beforeLines?: number;
     after?: number;
+    afterLines?: number;
     line?: number;
     lineRule?: "auto" | "atLeast" | "exact";
   };
@@ -1768,7 +1777,7 @@ const MEASURE_TWIP_UNITS: ReadonlyArray<readonly [string, number]> = [
   ["厘米", 1440 / 2.54],
   ["像素", 15],
 ];
-function parseMeasureTwip(v: unknown): number | null {
+export function parseMeasureTwip(v: unknown): number | null {
   if (typeof v === "number") return Number.isFinite(v) ? v : null;
   if (typeof v !== "string") return null;
   const bare = Number(v);

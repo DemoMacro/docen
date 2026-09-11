@@ -3,6 +3,10 @@ import { FASTElement, css, customElement, html, observable, ref } from "@microso
 import type { TablePropertiesPatch } from "../../../document/extensions/commands";
 import { observeLang, t } from "../../i18n/localize";
 import { pick, pickedValue, type FluentDropdown } from "./fluent-combo";
+import { measureToCm } from "./measure-input";
+// Registration happens through the workspace index's re-export (a type-only
+// import here would let esbuild elide the module and drop the side effect).
+import type DocenMeasureInput from "./measure-input";
 
 const CM_TO_TWIPS = 567;
 
@@ -87,13 +91,7 @@ const template = html<DocenTablePropertiesDialog>`
         </div>
         <div class="field">
           <label ${ref("indentLabel")}></label>
-          <fluent-text-input
-            ${ref("indentInput")}
-            type="number"
-            step="any"
-            min="0"
-          ></fluent-text-input>
-          <span class="unit" ${ref("cmUnit")}></span>
+          <docen-measure-input units="cm mm in pt" ${ref("indentInput")}></docen-measure-input>
         </div>
       </div>
     </div>
@@ -111,6 +109,10 @@ const template = html<DocenTablePropertiesDialog>`
 /** A `fluent-text-input` widget plus its string value accessor (the value
  *  lives on the `value` property, like a native input). */
 type FluentTextInput = HTMLElement & { value: string; disabled: boolean };
+
+/** The indent box's measure surface (value + unit; the dialog never needs
+ *  its disabled flag). */
+type MeasureBox = Pick<DocenMeasureInput, "value" | "unit">;
 
 /**
  * `<docen-table-properties-dialog>` — the Word "Table Properties" dialog's
@@ -131,8 +133,7 @@ class DocenTablePropertiesDialog extends FASTElement {
   @observable alignmentLabel?: HTMLElement;
   @observable alignmentSel?: FluentDropdown;
   @observable indentLabel?: HTMLElement;
-  @observable indentInput?: FluentTextInput;
-  @observable cmUnit?: HTMLElement;
+  @observable indentInput?: MeasureBox;
   @observable okBtn?: HTMLElement;
   @observable cancelBtn?: HTMLElement;
 
@@ -161,7 +162,7 @@ class DocenTablePropertiesDialog extends FASTElement {
     );
     if (this.indentInput) {
       const tw = typeof attrs.indent === "number" ? attrs.indent : 0;
-      this.indentInput.value = String(Math.round((tw / CM_TO_TWIPS) * 100) / 100);
+      this.indentInput.value = Math.round((tw / CM_TO_TWIPS) * 100) / 100;
     }
     // Preferred width is read-only: the column grid (columnWidths + autofit)
     // owns the geometry — mirroring it here would create a second writer.
@@ -181,10 +182,13 @@ class DocenTablePropertiesDialog extends FASTElement {
   /** Template-visible OK handler (FAST templates live outside the class, so a
    *  `#`-private method can't be referenced from the binding). */
   applyProperties(): void {
-    const cm = Number(this.indentInput?.value);
+    // The indent resolves from its picked unit into the patch's centimeters.
+    const box = this.indentInput;
+    const v = box?.value;
+    const cm = box != null && v != null ? measureToCm(v, box.unit) : 0;
     const patch: TablePropertiesPatch = {
       alignment: (pickedValue(this.alignmentSel) ?? "left") as TablePropertiesPatch["alignment"],
-      indent: Number.isFinite(cm) && cm > 0 ? Math.round(cm * CM_TO_TWIPS) : 0,
+      indent: cm > 0 ? Math.round(cm * CM_TO_TWIPS) : 0,
     };
     this.$emit("table-properties:ok", patch);
     this.hide();
@@ -198,7 +202,6 @@ class DocenTablePropertiesDialog extends FASTElement {
     if (this.widthUnit) this.widthUnit.textContent = t("tableDialog.cm", this);
     if (this.alignmentLabel) this.alignmentLabel.textContent = t("tableDialog.alignment", this);
     if (this.indentLabel) this.indentLabel.textContent = t("tableDialog.indent", this);
-    if (this.cmUnit) this.cmUnit.textContent = t("tableDialog.cm", this);
     if (this.okBtn) this.okBtn.textContent = t("options.ok", this);
     if (this.cancelBtn) this.cancelBtn.textContent = t("options.cancel", this);
     if (this.alignmentSel) {

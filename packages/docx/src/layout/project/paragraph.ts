@@ -87,9 +87,19 @@ export function projectParagraph(p: BodyParagraph, ctx: ProjectContext): LayoutP
   const direct: Rec = isRecord(pPr.spacing) ? pPr.spacing : {};
   const styleSp: Rec = isRecord(chainPPr.spacing) ? chainPPr.spacing : {};
   const docSp: Rec = isRecord(docPPr.spacing) ? docPPr.spacing : {};
+  // Word's *Lines spacing unit (hundredths of a line) beats its twip twin and
+  // resolves against one line — the grid pitch on a gridded page, else the
+  // single-spaced line height. The pitch lives in the section projection, so
+  // the approximation here rides the engine's empirical single-line factor
+  // (the DengXian word ratio) over the paragraph's default run size.
+  const spacingPx = (linesKey: string, twipKey: string): number => {
+    const lines = num(pick([direct, styleSp, docSp], linesKey));
+    if (lines != null) return (lines / 100) * defaultTextStyle.sizePx * 1.4;
+    return twipToPx(measureTwip(pick([direct, styleSp, docSp], twipKey)) ?? 0);
+  };
   const spacing: LayoutSpacing = {
-    beforePx: twipToPx(measureTwip(pick([direct, styleSp, docSp], "before")) ?? 0),
-    afterPx: twipToPx(measureTwip(pick([direct, styleSp, docSp], "after")) ?? 0),
+    beforePx: spacingPx("beforeLines", "before"),
+    afterPx: spacingPx("afterLines", "after"),
     lineHeight: toLineHeight(
       measureTwip(pick([direct, styleSp, docSp], "line")),
       pick([direct, styleSp, docSp], "lineRule"),
@@ -156,9 +166,12 @@ export function projectParagraph(p: BodyParagraph, ctx: ProjectContext): LayoutP
     if (styleTw != null) return styleTw;
     return charsPx(pick([sInd, docInd], "firstLineChars"));
   })();
+  const rightPx =
+    charsPx(dInd.rightChars ?? dInd.endChars) ??
+    twipToPx(measureTwip(ind("right") ?? ind("end")) ?? 0);
   const indent = {
     leftPx: leftPx || undefined,
-    rightPx: twipToPx(measureTwip(ind("right") ?? ind("end")) ?? 0) || undefined,
+    rightPx: rightPx || undefined,
     firstLinePx,
   };
 

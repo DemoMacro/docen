@@ -2,9 +2,13 @@ import { FASTElement, css, customElement, html, observable, ref } from "@microso
 
 import {
   normalizeParagraphAlignment,
+  parseMeasureTwip,
   type ParagraphDialogPatch,
 } from "../../../document/extensions/commands";
 import { observeLang, t } from "../../i18n/localize";
+// Registration happens through the workspace index's re-export (a type-only
+// import here would let esbuild elide the module and drop the side effect).
+import type DocenMeasureInput from "./measure-input";
 
 /** Line-spacing select values — multiples encode as w:line 240ths under
  *  "auto"; atLeast/exactly carry points in the value input. */
@@ -75,7 +79,7 @@ const styles = css`
     width: 100%;
     box-sizing: border-box;
   }
-  fluent-text-input {
+  docen-measure-input {
     min-width: 0;
     flex: 1 1 auto;
   }
@@ -157,13 +161,7 @@ const template = html<DocenParagraphDialog>`
         <div class="para-heading" ${ref("indentHeading")}></div>
         <div class="field">
           <label ${ref("leftLabel")}></label>
-          <fluent-text-input
-            ${ref("leftInput")}
-            type="number"
-            step="any"
-            min="0"
-          ></fluent-text-input>
-          <span class="unit" ${ref("ptA")}></span>
+          <docen-measure-input units="char pt mm cm in" ${ref("leftInput")}></docen-measure-input>
         </div>
         <div class="field">
           <label ${ref("specialLabel")}></label>
@@ -171,7 +169,7 @@ const template = html<DocenParagraphDialog>`
             type="combobox"
             appearance="outline"
             ${ref("specialDropdown")}
-            @change="${(x) => x.syncSpecialEnabled()}"
+            @change="${(x) => x.onSpecialChange()}"
           >
             <fluent-listbox popover="manual" tabindex="-1">
               <fluent-option value="none"></fluent-option>
@@ -190,34 +188,16 @@ const template = html<DocenParagraphDialog>`
         </div>
         <div class="field">
           <label ${ref("rightLabel")}></label>
-          <fluent-text-input
-            ${ref("rightInput")}
-            type="number"
-            step="any"
-            min="0"
-          ></fluent-text-input>
-          <span class="unit" ${ref("ptB")}></span>
+          <docen-measure-input units="char pt mm cm in" ${ref("rightInput")}></docen-measure-input>
         </div>
         <div class="field">
           <label ${ref("specialValLabel")}></label>
-          <fluent-text-input
-            ${ref("specialVal")}
-            type="number"
-            step="any"
-            min="0"
-          ></fluent-text-input>
-          <span class="unit" ${ref("ptC")}></span>
+          <docen-measure-input units="char pt mm cm in" ${ref("specialVal")}></docen-measure-input>
         </div>
         <div class="para-heading" ${ref("spacingHeading")}></div>
         <div class="field">
           <label ${ref("beforeLabel")}></label>
-          <fluent-text-input
-            ${ref("beforeInput")}
-            type="number"
-            step="any"
-            min="0"
-          ></fluent-text-input>
-          <span class="unit" ${ref("ptD")}></span>
+          <docen-measure-input units="line pt mm cm in" ${ref("beforeInput")}></docen-measure-input>
         </div>
         <div class="field">
           <label ${ref("lineLabel")}></label>
@@ -247,17 +227,11 @@ const template = html<DocenParagraphDialog>`
         </div>
         <div class="field">
           <label ${ref("afterLabel")}></label>
-          <fluent-text-input
-            ${ref("afterInput")}
-            type="number"
-            step="any"
-            min="0"
-          ></fluent-text-input>
-          <span class="unit" ${ref("ptE")}></span>
+          <docen-measure-input units="line pt mm cm in" ${ref("afterInput")}></docen-measure-input>
         </div>
         <div class="field">
           <label ${ref("lineValLabel")}></label>
-          <fluent-text-input ${ref("lineVal")} type="number" step="any" min="0"></fluent-text-input>
+          <docen-measure-input no-unit ${ref("lineVal")}></docen-measure-input>
           <span class="unit" ${ref("ptF")}></span>
         </div>
       </div>
@@ -355,10 +329,6 @@ const template = html<DocenParagraphDialog>`
   </docen-dialog>
 `;
 
-/** A `fluent-text-input` widget plus its string value accessor (the value
- *  lives on the `value` property, like a native input). */
-type FluentTextInput = HTMLElement & { value: string; disabled: boolean };
-
 /** A checkbox widget. The rendered state follows `checked`; `currentChecked`
  *  is a separate slot only user clicks keep in sync. */
 type FluentCheckbox = HTMLElement & { checked?: boolean };
@@ -394,22 +364,22 @@ class DocenParagraphDialog extends FASTElement {
   @observable outlineDropdown?: FluentDropdown;
   @observable indentHeading?: HTMLElement;
   @observable leftLabel?: HTMLElement;
-  @observable leftInput?: FluentTextInput;
+  @observable leftInput?: DocenMeasureInput;
   @observable rightLabel?: HTMLElement;
-  @observable rightInput?: FluentTextInput;
+  @observable rightInput?: DocenMeasureInput;
   @observable specialLabel?: HTMLElement;
   @observable specialDropdown?: FluentDropdown;
   @observable specialValLabel?: HTMLElement;
-  @observable specialVal?: FluentTextInput;
+  @observable specialVal?: DocenMeasureInput;
   @observable spacingHeading?: HTMLElement;
   @observable beforeLabel?: HTMLElement;
-  @observable beforeInput?: FluentTextInput;
+  @observable beforeInput?: DocenMeasureInput;
   @observable afterLabel?: HTMLElement;
-  @observable afterInput?: FluentTextInput;
+  @observable afterInput?: DocenMeasureInput;
   @observable lineLabel?: HTMLElement;
   @observable lineDropdown?: FluentDropdown;
   @observable lineValLabel?: HTMLElement;
-  @observable lineVal?: FluentTextInput;
+  @observable lineVal?: DocenMeasureInput;
   @observable pageBreaksHeading?: HTMLElement;
   @observable widow?: FluentCheckbox;
   @observable keepNext?: FluentCheckbox;
@@ -440,11 +410,6 @@ class DocenParagraphDialog extends FASTElement {
   @observable taDropdown?: FluentDropdown;
   @observable okBtn?: HTMLElement;
   @observable cancelBtn?: HTMLElement;
-  @observable ptA?: HTMLElement;
-  @observable ptB?: HTMLElement;
-  @observable ptC?: HTMLElement;
-  @observable ptD?: HTMLElement;
-  @observable ptE?: HTMLElement;
   @observable ptF?: HTMLElement;
 
   #unobserveLang?: () => void;
@@ -469,13 +434,19 @@ class DocenParagraphDialog extends FASTElement {
   show(attrs: Record<string, unknown> = {}): void {
     const indent = (attrs.indent ?? {}) as {
       left?: number;
+      leftChars?: number;
       right?: number;
+      rightChars?: number;
       firstLine?: number;
+      firstLineChars?: number;
       hanging?: number;
+      hangingChars?: number;
     };
     const spacing = (attrs.spacing ?? {}) as {
       before?: number;
+      beforeLines?: number;
       after?: number;
+      afterLines?: number;
       line?: number;
       lineRule?: string;
     };
@@ -484,23 +455,29 @@ class DocenParagraphDialog extends FASTElement {
       const level = typeof attrs.outlineLevel === "number" ? attrs.outlineLevel : -1;
       this.outlineDropdown.value = String(Math.max(-1, Math.min(8, level)));
     }
-    if (this.leftInput) this.leftInput.value = this.#pt(indent.left);
-    if (this.rightInput) this.rightInput.value = this.#pt(indent.right);
+    this.#setMeasure(this.leftInput, indent.left, indent.leftChars, "char");
+    this.#setMeasure(this.rightInput, indent.right, indent.rightChars, "char");
     let special = "none";
-    if (indent.firstLine) special = "firstLine";
-    else if (indent.hanging) special = "hanging";
+    if (indent.firstLine || indent.firstLineChars) special = "firstLine";
+    else if (indent.hanging || indent.hangingChars) special = "hanging";
     if (this.specialDropdown) this.specialDropdown.value = special;
-    if (this.specialVal) {
-      this.specialVal.value =
-        special === "firstLine"
-          ? this.#pt(indent.firstLine)
-          : special === "hanging"
-            ? this.#pt(indent.hanging)
-            : "";
-    }
+    this.#setMeasure(
+      this.specialVal,
+      special === "firstLine"
+        ? indent.firstLine
+        : special === "hanging"
+          ? indent.hanging
+          : undefined,
+      special === "firstLine"
+        ? indent.firstLineChars
+        : special === "hanging"
+          ? indent.hangingChars
+          : undefined,
+      "char",
+    );
     this.syncSpecialEnabled();
-    if (this.beforeInput) this.beforeInput.value = this.#pt(spacing.before);
-    if (this.afterInput) this.afterInput.value = this.#pt(spacing.after);
+    this.#setMeasure(this.beforeInput, spacing.before, spacing.beforeLines, "line");
+    this.#setMeasure(this.afterInput, spacing.after, spacing.afterLines, "line");
     this.#prefillLine(spacing);
     this.#check(this.widow, attrs.widowControl, true);
     this.#check(this.keepNext, attrs.keepNext, false);
@@ -557,6 +534,18 @@ class DocenParagraphDialog extends FASTElement {
       this.specialVal.disabled = this.specialDropdown.value === "none";
   }
 
+  /** Word pre-fills the value when the special indent first leaves "none",
+   *  so the box commits a real indent instead of the pre-filled zero. */
+  onSpecialChange(): void {
+    this.syncSpecialEnabled();
+    const choice = this.specialDropdown?.value;
+    const box = this.specialVal;
+    if ((choice === "firstLine" || choice === "hanging") && box && !box.value) {
+      box.value = 2;
+      box.unit = "char";
+    }
+  }
+
   /** Template-visible OK handler (FAST templates live outside the class, so a
    *  `#`-private method can't be referenced from the binding). */
   applyParagraph(): void {
@@ -567,18 +556,31 @@ class DocenParagraphDialog extends FASTElement {
     // "Body Text" (-1) commits null — w:outlineLvl has no -1; absence IS
     // body text. Level 0 is a legal level and must survive.
     const outline = Number(this.outlineDropdown?.value ?? "-1");
+    const leftParts = this.#commitParts(this.leftInput);
+    const rightParts = this.#commitParts(this.rightInput);
+    const beforeParts = this.#commitParts(this.beforeInput);
+    const afterParts = this.#commitParts(this.afterInput);
     const patch: ParagraphDialogPatch = {
       alignment: normalizeParagraphAlignment(alignment),
       outlineLevel: outline >= 0 ? outline : null,
       indent: {
-        left: this.#twips(this.leftInput?.value),
-        right: this.#twips(this.rightInput?.value),
-        // firstLine and hanging are mutually exclusive — the unchosen one
-        // clears the other (OOXML rejects both on one paragraph).
+        left: leftParts?.twips,
+        leftChars: leftParts?.hundredths,
+        right: rightParts?.twips,
+        rightChars: rightParts?.hundredths,
+        // firstLine and hanging are mutually exclusive — the unchosen pair
+        // clears (OOXML rejects both on one paragraph).
         firstLine: undefined,
+        firstLineChars: undefined,
         hanging: undefined,
+        hangingChars: undefined,
       },
-      spacing: {},
+      spacing: {
+        before: beforeParts?.twips,
+        beforeLines: beforeParts?.hundredths,
+        after: afterParts?.twips,
+        afterLines: afterParts?.hundredths,
+      },
       widowControl: this.widow?.checked ?? true,
       keepNext: this.keepNext?.checked ?? false,
       keepLines: this.keepLines?.checked ?? false,
@@ -593,48 +595,77 @@ class DocenParagraphDialog extends FASTElement {
       textAlignment: TA_VALUES.includes(ta) ? ta : "auto",
     };
     const special = this.specialDropdown?.value;
-    if (special === "firstLine") patch.indent.firstLine = this.#twips(this.specialVal?.value);
-    else if (special === "hanging") patch.indent.hanging = this.#twips(this.specialVal?.value);
+    const specialParts = this.#commitParts(this.specialVal);
+    if (special === "firstLine") {
+      patch.indent.firstLine = specialParts?.twips;
+      patch.indent.firstLineChars = specialParts?.hundredths;
+    } else if (special === "hanging") {
+      patch.indent.hanging = specialParts?.twips;
+      patch.indent.hangingChars = specialParts?.hundredths;
+    }
     const choice = (this.lineDropdown?.value ?? "single") as LineSpacingChoice;
-    if (choice === "single") patch.spacing = { line: 240, lineRule: "auto" };
-    else if (choice === "lines15") patch.spacing = { line: 360, lineRule: "auto" };
-    else if (choice === "double") patch.spacing = { line: 480, lineRule: "auto" };
-    else if (choice === "multiple")
-      patch.spacing = {
-        line: Math.round((this.#num(this.lineVal?.value) || 1) * LINE_PER_MULTIPLE),
-        lineRule: "auto",
-      };
-    else if (choice === "atLeast")
-      patch.spacing = {
-        line: Math.round(this.#num(this.lineVal?.value) * PT_TO_TWIPS),
-        lineRule: "atLeast",
-      };
-    else
-      patch.spacing = {
-        line: Math.round(this.#num(this.lineVal?.value) * PT_TO_TWIPS),
-        lineRule: "exact",
-      };
-    patch.spacing.before = this.#twips(this.beforeInput?.value);
-    patch.spacing.after = this.#twips(this.afterInput?.value);
+    // The line rule writes its own keys; the before/after slots above stay.
+    if (choice === "single") {
+      patch.spacing.line = 240;
+      patch.spacing.lineRule = "auto";
+    } else if (choice === "lines15") {
+      patch.spacing.line = 360;
+      patch.spacing.lineRule = "auto";
+    } else if (choice === "double") {
+      patch.spacing.line = 480;
+      patch.spacing.lineRule = "auto";
+    } else if (choice === "multiple") {
+      patch.spacing.line = Math.round((this.lineVal?.value ?? 1) * LINE_PER_MULTIPLE);
+      patch.spacing.lineRule = "auto";
+    } else if (choice === "atLeast") {
+      patch.spacing.line = Math.round((this.lineVal?.value ?? 0) * PT_TO_TWIPS);
+      patch.spacing.lineRule = "atLeast";
+    } else {
+      patch.spacing.line = Math.round((this.lineVal?.value ?? 0) * PT_TO_TWIPS);
+      patch.spacing.lineRule = "exact";
+    }
     this.$emit("paragraph:ok", patch);
     this.hide();
+  }
+
+  /** Prefills a measure box: the char/line twin wins (the count is what the
+   *  user typed — Word shows the same), else the twip value in points, else
+   *  the box's zero with its default unit. */
+  #setMeasure(
+    box: DocenMeasureInput | undefined,
+    twips: number | undefined,
+    hundredths: number | undefined,
+    defaultUnit: "char" | "line",
+  ): void {
+    if (!box) return;
+    if (typeof hundredths === "number") {
+      box.value = hundredths / 100;
+      box.unit = defaultUnit;
+    } else if (typeof twips === "number") {
+      box.value = twips / PT_TO_TWIPS;
+      box.unit = "pt";
+    } else {
+      box.value = 0;
+      box.unit = defaultUnit;
+    }
+  }
+
+  /** A box's committed value pair: char/line units ride their own OOXML twins
+   *  (hundredths — a font-relative count, not a length), every other unit
+   *  resolves through the shared measure table into twips. Null = blank box. */
+  #commitParts(box: DocenMeasureInput | undefined): { twips?: number; hundredths?: number } | null {
+    const v = box?.value;
+    if (box == null || v == null) return null;
+    const unit = box.unit;
+    if (unit === "char" || unit === "line") return { hundredths: Math.round(v * 100) };
+    const twips = parseMeasureTwip(`${v}${unit}`);
+    return { twips: Math.round(twips ?? v * PT_TO_TWIPS) };
   }
 
   /** Twips → points, rounded to 2 decimals for the input. */
   #pt(twips?: number): string {
     if (typeof twips !== "number") return "";
     return String(Math.round((twips / PT_TO_TWIPS) * 100) / 100);
-  }
-
-  #twips(pt?: string): number | undefined {
-    if (pt === undefined || pt === "") return undefined;
-    const n = Number(pt);
-    return Number.isFinite(n) ? Math.round(n * PT_TO_TWIPS) : undefined;
-  }
-
-  #num(v?: string): number {
-    const n = Number(v);
-    return Number.isFinite(n) ? n : 0;
   }
 
   #prefillLine(spacing: { line?: number; lineRule?: string }): void {
@@ -658,7 +689,7 @@ class DocenParagraphDialog extends FASTElement {
       }
     }
     this.lineDropdown.value = choice;
-    if (this.lineVal) this.lineVal.value = val;
+    if (this.lineVal) this.lineVal.value = val === "" ? null : Number(val);
     this.syncSpecialEnabled();
   }
 
@@ -680,12 +711,12 @@ class DocenParagraphDialog extends FASTElement {
     if (this.leftLabel) this.leftLabel.textContent = t("paragraph.left", this);
     if (this.rightLabel) this.rightLabel.textContent = t("paragraph.right", this);
     if (this.specialLabel) this.specialLabel.textContent = t("paragraph.special", this);
-    if (this.specialValLabel) this.specialValLabel.textContent = t("paragraph.value", this);
+    if (this.specialValLabel) this.specialValLabel.textContent = t("paragraph.indentValue", this);
     if (this.spacingHeading) this.spacingHeading.textContent = t("paragraph.spacingHeading", this);
     if (this.beforeLabel) this.beforeLabel.textContent = t("paragraph.before", this);
     if (this.afterLabel) this.afterLabel.textContent = t("paragraph.after", this);
     if (this.lineLabel) this.lineLabel.textContent = t("paragraph.lineSpacing", this);
-    if (this.lineValLabel) this.lineValLabel.textContent = t("paragraph.setValue", this);
+    if (this.lineValLabel) this.lineValLabel.textContent = t("paragraph.lineValue", this);
     if (this.pageBreaksHeading)
       this.pageBreaksHeading.textContent = t("paragraph.pageBreaksHeading", this);
     if (this.widowLabel) this.widowLabel.textContent = t("paragraph.widowControl", this);
@@ -711,9 +742,6 @@ class DocenParagraphDialog extends FASTElement {
     if (this.textAlignLabel) this.textAlignLabel.textContent = t("paragraph.textAlignLabel", this);
     if (this.okBtn) this.okBtn.textContent = t("options.ok", this);
     if (this.cancelBtn) this.cancelBtn.textContent = t("options.cancel", this);
-    // The unit chips (磅) after each measurement input.
-    for (const el of [this.ptA, this.ptB, this.ptC, this.ptD, this.ptE])
-      if (el) el.textContent = t("paragraph.pt", this);
     // Drop-down option labels (alignment reuses the ribbon's entries).
     this.#labelOptions(this.alignDropdown, [
       t("ribbon.cmd.align-left", this),
