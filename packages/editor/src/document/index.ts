@@ -1206,6 +1206,7 @@ class DocenDocument extends AddinHost<Editor> {
     if (this.getAttribute("editable") === "false") this.#bridge.editor.setEditable(false);
     // First paint + caret map feed (transactions re-render via the bridge's
     // raf-merged onDoc from here on).
+    this.#snapshotStyles();
     this.#renderDoc(initialDoc);
 
     // Mirror the caret's font/size into the ribbon comboboxes (Word behavior).
@@ -2187,8 +2188,6 @@ class DocenDocument extends AddinHost<Editor> {
     this.#revisions.syncRevisionsPane();
     this.#spelling.schedule();
     this.#syncStatusLanguage();
-    // The style-set gallery's "document default" restores from here.
-    this.#snapshotStyles();
   }
 
   /** The previous render's flow result — the diff base for the next one. */
@@ -5882,6 +5881,11 @@ class DocenDocument extends AddinHost<Editor> {
       // An empty document has no markup target — render directly.
       this.#renderDoc(editor.getJSON());
     }
+    // The style-set gallery's "document default" restores the styles model the
+    // document loaded with — captured at this load boundary (state settled),
+    // never per layout, or the preset commands' own re-renders would overwrite
+    // the snapshot and the restore would replay the current state.
+    this.#snapshotStyles();
   }
 
   /** Last textblock/leaf block (deepest, rightmost) for the #loadDoc re-stamp

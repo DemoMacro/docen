@@ -3441,13 +3441,42 @@ export const DocumentCommands = Extension.create({
           if (!preset) return false;
           const styles = { ...((tr.doc.attrs.styles ?? {}) as Record<string, unknown>) };
           const defaults = { ...((styles.default ?? {}) as Record<string, unknown>) };
+          const list = [...((styles.paragraphStyles ?? []) as Record<string, unknown>[])];
           for (const [key, runPatch] of Object.entries(preset)) {
-            const entry = { ...((defaults[key] ?? {}) as Record<string, unknown>) };
-            entry.run = {
-              ...((entry.run ?? {}) as Record<string, unknown>),
-              ...(runPatch as Record<string, unknown>),
-            };
-            defaults[key] = entry;
+            // "document" is the docDefaults run itself — write it there.
+            if (key === "document") {
+              const doc = { ...((defaults.document ?? {}) as Record<string, unknown>) };
+              doc.run = {
+                ...((doc.run ?? {}) as Record<string, unknown>),
+                ...(runPatch as Record<string, unknown>),
+              };
+              defaults.document = doc;
+              continue;
+            }
+            const id = key.charAt(0).toUpperCase() + key.slice(1);
+            const at = list.findIndex((ps) => ps.id === id);
+            if (at >= 0) {
+              // Same rule as modify-style: an explicit definition wins — patch
+              // it and drop the built-in slot. The built-in slot never reaches
+              // styles.xml on export (the roundTripped path emits
+              // paragraphStyles verbatim), so parking the patch there diverges
+              // Word from the rendered page.
+              const entry = { ...list[at] };
+              entry.run = {
+                ...((entry.run ?? {}) as Record<string, unknown>),
+                ...(runPatch as Record<string, unknown>),
+              };
+              list[at] = entry;
+              styles.paragraphStyles = list;
+              delete defaults[key];
+            } else {
+              const entry = { ...((defaults[key] ?? {}) as Record<string, unknown>) };
+              entry.run = {
+                ...((entry.run ?? {}) as Record<string, unknown>),
+                ...(runPatch as Record<string, unknown>),
+              };
+              defaults[key] = entry;
+            }
           }
           styles.default = defaults;
           tr.step(new DocAttrStep("styles", styles));
