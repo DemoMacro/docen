@@ -1,3 +1,4 @@
+import { type WhiteSpaceMode } from "./analysis.js";
 import {
   measureNaturalWidth,
   prepareWithSegments,
@@ -7,10 +8,15 @@ import {
 import { type LineBreakCursor, stepPreparedLineGeometry } from "./line-break.js";
 import { buildLineTextFromRange, getLineTextCache } from "./line-text.js";
 
-// Helper for rich-text inline flow under `white-space: normal`.
-// It keeps the core layout API low-level while taking over the boring shared
-// work that rich inline demos kept reimplementing in userland:
-// - collapsed boundary whitespace across item boundaries
+// Helper for rich-text inline flow. Under `white-space: normal` (default) it
+// collapses boundary whitespace into inter-item gaps, CSS-style. Under
+// `pre-wrap` every space stays a real glyph with its own advance inside the
+// item's text, so word processors can paint one mark per space; the line
+// breaker keeps preserved spaces at line start and hangs them past the wrap
+// width at line end. It keeps the core layout API low-level while
+// taking over the boring shared work that rich inline demos kept
+// reimplementing in userland:
+// - collapsed boundary whitespace across item boundaries (normal mode)
 // - atomic inline boxes like pills
 // - per-item extra horizontal chrome such as padding/borders
 
@@ -153,7 +159,15 @@ function endsInsideFirstSegment(segmentIndex: number, graphemeIndex: number): bo
   return segmentIndex === 0 && graphemeIndex > 0;
 }
 
-export function prepareRichInline(items: RichInlineItem[]): PreparedRichInline {
+export type RichInlineOptions = {
+  whiteSpace?: WhiteSpaceMode; // Defaults to `normal` (boundary collapsing)
+};
+
+export function prepareRichInline(
+  items: RichInlineItem[],
+  options?: RichInlineOptions,
+): PreparedRichInline {
+  const preserveSpaces = options?.whiteSpace === "pre-wrap";
   const preparedItems: PreparedRichInlineItem[] = [];
   const itemsBySourceItemIndex = Array.from<PreparedRichInlineItem | undefined>({
     length: items.length,
@@ -164,11 +178,21 @@ export function prepareRichInline(items: RichInlineItem[]): PreparedRichInline {
   for (let index = 0; index < items.length; index++) {
     const item = items[index]!;
     const letterSpacing = item.letterSpacing ?? 0;
-    const hasLeadingWhitespace = LEADING_COLLAPSIBLE_BOUNDARY_RE.test(item.text);
-    const hasTrailingWhitespace = TRAILING_COLLAPSIBLE_BOUNDARY_RE.test(item.text);
-    const trimmedText = item.text
-      .replace(LEADING_COLLAPSIBLE_BOUNDARY_RE, "")
-      .replace(TRAILING_COLLAPSIBLE_BOUNDARY_RE, "");
+    // Preserve mode keeps every space in the text verbatim: no boundary trim
+    // (the line breaker keeps preserved spaces at line start and hangs them
+    // at line end), so hasLeading/hasTrailing stay false and
+    // pendingGapWidth/gapBefore stay 0 — there is no collapsed gap to pay.
+    const hasLeadingWhitespace = preserveSpaces
+      ? false
+      : LEADING_COLLAPSIBLE_BOUNDARY_RE.test(item.text);
+    const hasTrailingWhitespace = preserveSpaces
+      ? false
+      : TRAILING_COLLAPSIBLE_BOUNDARY_RE.test(item.text);
+    const trimmedText = preserveSpaces
+      ? item.text
+      : item.text
+          .replace(LEADING_COLLAPSIBLE_BOUNDARY_RE, "")
+          .replace(TRAILING_COLLAPSIBLE_BOUNDARY_RE, "");
 
     if (trimmedText.length === 0) {
       // docen-local: an empty-text atom (extraWidth only, e.g. an inline image)
@@ -211,7 +235,13 @@ export function prepareRichInline(items: RichInlineItem[]): PreparedRichInline {
     const prepared = prepareWithSegments(
       trimmedText,
       item.font,
-      letterSpacing === 0 ? undefined : { letterSpacing },
+      preserveSpaces
+        ? letterSpacing === 0
+          ? { whiteSpace: "pre-wrap" }
+          : { whiteSpace: "pre-wrap", letterSpacing }
+        : letterSpacing === 0
+          ? undefined
+          : { letterSpacing },
     );
     const wholeLine = prepareWholeItemLine(prepared);
     if (wholeLine === null) {

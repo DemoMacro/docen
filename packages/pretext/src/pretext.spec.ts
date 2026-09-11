@@ -13,6 +13,7 @@ import {
   layoutNextRichInlineLineRange,
   materializeRichInlineLineRange,
   prepareRichInline,
+  walkRichInlineLineRanges,
 } from "./rich-inline";
 
 installFakeCanvas();
@@ -90,5 +91,78 @@ describe.sequential("vendored empty-text atom retention", () => {
     expect(line.fragments).toHaveLength(2);
     expect(line.fragments[1]!.gapBefore).toBe(4); // 16px em / 4
     expect(line.width).toBe(50); // 16 text + 4 gap + 30 extra
+  });
+});
+
+describe.sequential("rich inline pre-wrap (preserved spaces)", () => {
+  // The fake's advances at 16px: CJK 16, latin 8, space 4.
+  it("keeps every space of a run as its own advance", () => {
+    const prepared = prepareRichInline([{ text: "a  b", font: FONT }], {
+      whiteSpace: "pre-wrap",
+    });
+    const range = layoutNextRichInlineLineRange(prepared, 200);
+    const line = materializeRichInlineLineRange(prepared, range!);
+    // "a  b" = 8 + 4 + 4 + 8 — both spaces paid, none collapsed into a gap.
+    expect(line.fragments).toHaveLength(1);
+    expect(line.fragments[0]!.gapBefore).toBe(0);
+    expect(line.fragments[0]!.text).toBe("a  b");
+    expect(line.width).toBe(24);
+  });
+
+  it("lays a whitespace-only item as a real text fragment", () => {
+    const prepared = prepareRichInline([{ text: "  ", font: FONT }], {
+      whiteSpace: "pre-wrap",
+    });
+    const range = layoutNextRichInlineLineRange(prepared, 200);
+    const line = materializeRichInlineLineRange(prepared, range!);
+    expect(line.fragments).toHaveLength(1);
+    expect(line.fragments[0]!.text).toBe("  ");
+    expect(line.width).toBe(8);
+  });
+
+  it("keeps the inter-item space inside the item's text, not a gap", () => {
+    const prepared = prepareRichInline(
+      [
+        { text: "甲", font: FONT },
+        { text: " 乙", font: FONT },
+      ],
+      { whiteSpace: "pre-wrap" },
+    );
+    const range = layoutNextRichInlineLineRange(prepared, 200);
+    const line = materializeRichInlineLineRange(prepared, range!);
+    expect(line.fragments).toHaveLength(2);
+    expect(line.fragments[1]!.text).toBe(" 乙");
+    expect(line.fragments[1]!.gapBefore).toBe(0);
+    expect(line.width).toBe(36); // 16 + 4 + 16 (CJK)
+  });
+
+  it("hangs line-trailing preserved spaces past the wrap width", () => {
+    // maxWidth 18 fits "ab" (16); the trailing spaces exceed it but hang —
+    // Word/CSS pre-wrap keeps them on the line instead of pushing them to
+    // the next line's start (where they would be consumed in normal mode).
+    const prepared = prepareRichInline([{ text: "ab   cd", font: FONT }], {
+      whiteSpace: "pre-wrap",
+    });
+    const line1 = layoutNextRichInlineLineRange(prepared, 18);
+    expect(line1).not.toBeNull();
+    const l1 = materializeRichInlineLineRange(prepared, line1!);
+    expect(l1.fragments[0]!.text).toBe("ab   ");
+    const line2 = layoutNextRichInlineLineRange(prepared, 18, line1!.end);
+    expect(line2).not.toBeNull();
+    const l2 = materializeRichInlineLineRange(prepared, line2!);
+    expect(l2.fragments[0]!.text).toBe("cd");
+  });
+
+  it("terminates on a longer-than-line space run without looping", () => {
+    // A space run is ONE segment and preserved spaces hang past the fit
+    // limit, so an over-long run rides one line (known limit — inner breaks
+    // are a text-segment feature). The walk must still terminate boundedly.
+    const prepared = prepareRichInline([{ text: `a${" ".repeat(200)}`, font: FONT }], {
+      whiteSpace: "pre-wrap",
+    });
+    let lineCount = 0;
+    walkRichInlineLineRanges(prepared, 100, () => lineCount++);
+    expect(lineCount).toBeGreaterThanOrEqual(1);
+    expect(lineCount).toBeLessThan(210);
   });
 });
