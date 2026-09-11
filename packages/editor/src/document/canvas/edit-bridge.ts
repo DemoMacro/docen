@@ -20,6 +20,7 @@ import {
 } from "@docen/docx";
 import { Editor } from "@docen/docx/core";
 import type { FlowPage } from "@docen/layout";
+import paintBrushSvg from "@fluentui/svg-icons/icons/paint_brush_24_regular.svg?raw";
 import { UndoRedo } from "@tiptap/extensions";
 import {
   joinBackward,
@@ -43,6 +44,20 @@ import { CellSelection, cellAt, inSameTable } from "./cell-selection";
 import { installChartHover, type ChartTip } from "./chart-hover";
 import { followLink, installLinkHover, type LinkHit } from "./link-hover";
 import { sameChildPath } from "./stage";
+
+/** Word's format-painter cursor: the text I-beam with the paint brush riding
+ *  its lower right, as an SVG data URL (hot spot on the I-beam's insertion
+ *  point). Fluent's own brush path scales into the corner. */
+const FORMAT_PAINTER_CURSOR = (() => {
+  const path = /d="([^"]+)"/.exec(paintBrushSvg)?.[1] ?? "";
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24">` +
+    `<path d="M5 1.5v9M3.2 1.5h3.6M3.2 10.5h3.6" stroke="#000" stroke-width="1.5"` +
+    ` fill="none" stroke-linecap="round"/>` +
+    `<g transform="translate(9 9) scale(.58)"><path d="${path}" fill="#000"/></g>` +
+    `</svg>`;
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}") 5 2, text`;
+})();
 
 /** A grapheme-boundary segmenter shared by the delete translations — surrogate
  *  pairs, combining marks, and emoji must delete as one user-perceived
@@ -207,6 +222,9 @@ export interface EditBridgeOptions {
   /** The border painter's armed state (Table Design → Draw Border). While
    *  active the canvas presses start edge sweeps instead of text selection. */
   borderPaint?: () => { active: boolean; eraser: boolean };
+  /** The format painter's armed state (Home → Format Painter) — owns the
+   *  cursor (Word's brush I-beam) until the paint lands or Esc disarms. */
+  formatPaint?: () => boolean;
   /** A finished sweep — every crossed table edge (cell pos + side, both
    *  collapse halves of an interior line included) for the host to commit as
    *  one paint/erase command. */
@@ -1246,10 +1264,15 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
   // with it (the story's own links keep the hand).
   const applyCursor = (event: MouseEvent): void => {
     // The armed painter owns the cursor: crosshair for the pen, the dense
-    // cell cross for the eraser (Word's pencil/eraser, CSS-native).
+    // cell cross for the eraser (Word's pencil/eraser, CSS-native), the
+    // brush I-beam for the format painter.
     const paint = story ? null : opts.borderPaint?.();
     if (paint?.active) {
       opts.host.style.cursor = paint.eraser ? "cell" : "crosshair";
+      return;
+    }
+    if (!story && opts.formatPaint?.()) {
+      opts.host.style.cursor = FORMAT_PAINTER_CURSOR;
       return;
     }
     const hit = story ? null : hitPage(event.clientX, event.clientY);

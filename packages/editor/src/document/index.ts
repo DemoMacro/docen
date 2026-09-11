@@ -658,8 +658,9 @@ class DocenDocument extends AddinHost<Editor> {
     bridge.scrollIntoView(pos);
   }
 
-  /** Format Painter: a click captures the selection's run marks + paragraph
-   *  formatting and arms a one-shot pointerup; the next non-empty selection
+  /** Format Painter: a click captures the marks + paragraph formatting at the
+   *  caret/selection and arms a one-shot pointerup; the next selection (or a
+   *  tapped paragraph — Word paints the whole paragraph under a bare click)
    *  receives both and disarms. A double click arms sticky mode — every
    *  following selection paints until Esc or another painter click (Word's
    *  format painter). A click while armed cancels. */
@@ -677,11 +678,11 @@ class DocenDocument extends AddinHost<Editor> {
       return;
     }
     const editor = this.#bridge?.activeEditor() ?? this.editor;
-    if (!editor || editor.state.selection.empty) return;
-    // Probe one character into the selection: $from sits on the boundary,
-    // and ResolvedPos.marks() reads the character BEFORE the position — the
-    // first selected character's marks (e.g. bold stamped on [from,to))
-    // would be lost.
+    if (!editor) return;
+    // Probe one character in: $from sits on the boundary, and
+    // ResolvedPos.marks() reads the character BEFORE the position — the first
+    // selected (or caret-following) character's marks (e.g. bold stamped on
+    // [from,to)) would be lost. Word captures at the bare caret too.
     this.#painterMarks = editor.state.doc.resolve(editor.state.selection.from + 1).marks();
     const $from = editor.state.selection.$from;
     if ($from.parent.type.name === "paragraph") {
@@ -696,13 +697,14 @@ class DocenDocument extends AddinHost<Editor> {
     }
     this.#painterSticky = rapid;
     this.toggleAttribute("format-painter", true);
+    // Arming runs outside any transaction (the lit state rides the attribute,
+    // and #syncFormatButtons only fires per transaction).
+    this.#syncFormatButtons();
     const onUp = (): void => {
       const ed = this.#bridge?.activeEditor() ?? this.editor;
       if (ed) this.#applyFormatPainter(ed);
       if (this.#painterSticky) {
-        // Stay armed: re-arm for the next selection. A bare caret click
-        // (empty selection) consumes this listener without painting, exactly
-        // like Word's sticky painter ignoring navigation clicks.
+        // Stay armed: re-arm for the next selection/paragraph click.
         this.addEventListener("pointerup", onUp, { once: true });
         this.#painterOff = () => this.removeEventListener("pointerup", onUp);
       } else {
@@ -718,14 +720,23 @@ class DocenDocument extends AddinHost<Editor> {
     this.#painterKeyOff = () => this.removeEventListener("keydown", onKey);
   }
 
-  /** Stamp the captured marks + paragraph attrs onto the current selection. */
+  /** Stamp the captured marks + paragraph attrs onto the current selection —
+   *  a bare click (no drag) paints the whole paragraph under the caret. */
   #applyFormatPainter(ed: Editor): void {
     const { from, to, empty } = ed.state.selection;
-    if (empty || (!this.#painterMarks && !this.#painterPara)) return;
+    if (!this.#painterMarks && !this.#painterPara) return;
+    let markFrom = from;
+    let markTo = to;
+    if (empty) {
+      const $pos = ed.state.doc.resolve(from);
+      if ($pos.parent.type.name !== "paragraph") return;
+      markFrom = $pos.start();
+      markTo = $pos.end();
+    }
     const tr = ed.state.tr;
-    for (const mark of this.#painterMarks ?? []) tr.addMark(from, to, mark);
+    for (const mark of this.#painterMarks ?? []) tr.addMark(markFrom, markTo, mark);
     if (this.#painterPara) {
-      ed.state.doc.nodesBetween(from, to, (node, pos) => {
+      ed.state.doc.nodesBetween(markFrom, markTo, (node, pos) => {
         if (node.type.name !== "paragraph") return;
         const next: Record<string, unknown> = { ...this.#painterPara! };
         // The target keeps its own section-close markers.
@@ -744,6 +755,9 @@ class DocenDocument extends AddinHost<Editor> {
     this.#painterPara = null;
     this.#painterSticky = false;
     this.removeAttribute("format-painter");
+    // The disarm may land outside a transaction (Esc, a bare click) — the
+    // apply path's transaction fires the sync itself, this covers the rest.
+    this.#syncFormatButtons();
     this.#painterOff?.();
     this.#painterOff = undefined;
     this.#painterKeyOff?.();
@@ -1193,6 +1207,7 @@ class DocenDocument extends AddinHost<Editor> {
       // Draw Border): a sweep's crossed edges ride one paint/erase command,
       // the pen merged from the host's pen state.
       borderPaint: () => ({ active: this.#borderPainting, eraser: this.#borderErase }),
+      formatPaint: () => this.hasAttribute("format-painter"),
       applyBorderPaint: (sides) => {
         const editor = this.#bridge?.activeEditor() ?? this.editor;
         if (!editor || !this.#borderPainting || !sides.length) return;
@@ -2803,6 +2818,10 @@ class DocenDocument extends AddinHost<Editor> {
     const rows: [string, boolean][] = [
       ...formatToggleStatesOf(state),
       ["show-marks", this.hasAttribute("show-marks")],
+      // The format painter lights while armed (Word: the button stays lit
+      // until the paint lands / sticky mode ends) — the host attribute is
+      // its truth, same as show-marks.
+      ["format-painter", this.hasAttribute("format-painter")],
     ];
     for (const [event, on] of rows) {
       for (const el of this.shadowRoot?.querySelectorAll<HTMLElement>(

@@ -1130,7 +1130,7 @@ const homeTab = (styles?: StylesOptions | null): RibbonTab =>
         col([
           btn("cut", "cut", { iconOnly: true }),
           btn("copy", "copy", { iconOnly: true }),
-          btn("format-painter", "format-painter", { iconOnly: true }),
+          btn("format-painter", "format-painter", { iconOnly: true, toggle: true }),
         ]),
       ],
       "clipboard-dialog",
