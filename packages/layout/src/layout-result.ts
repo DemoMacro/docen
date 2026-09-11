@@ -171,6 +171,10 @@ export interface LaidOutParagraph {
   /** ¶-mark strut size in px (w:pPr/w:rPr/w:sz) — the formatting marks' size
    *  fallback on a textless line. */
   markSizePx?: number;
+  /** The paragraph's text kept every space as a real glyph (no whitespace
+   *  collapse) — the painter paints one mark dot per space and the caret map
+   *  treats each as its own cell; absent on collapse-mode paragraphs. */
+  preserveSpaces?: boolean;
   /** w:suppressLineNumbers — the paragraph's lines render but do not count
    *  toward the section's line numbering. */
   suppressLineNumbers?: boolean;

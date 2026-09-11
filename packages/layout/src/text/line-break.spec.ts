@@ -120,11 +120,14 @@ describe("packLines", () => {
     expect(textsOf(lines[1])).toBe("cd");
   });
 
-  it("collapses the boundary space on a soft wrap across inlines", () => {
-    // "aaaa" = 32px; the trailing inline's leading space collapses at wrap.
+  it("keeps the boundary space on a soft wrap across inlines", () => {
+    // "aaaa" = 32px; the trailing inline's leading space misses the fit at
+    // the wrap — normal mode would consume it, pre-wrap keeps it at the
+    // next line's start: the lines concatenated still read the source text.
     const lines = pack([text("aaaa"), text(" bbbb")], 32.5);
-    expect(lines).toHaveLength(2);
-    expect(textsOf(lines[1])).toBe("bbbb");
+    expect(lines.length).toBeGreaterThan(1);
+    expect(textsOf(lines[0])).toBe("aaaa");
+    expect(lines.map(textsOf).join("")).toBe("aaaa bbbb");
   });
 
   it("packs pictures as atoms and wraps them like characters", () => {
@@ -239,34 +242,33 @@ describe("packLines", () => {
   });
 });
 
-describe("packLines inter-run gaps", () => {
-  it("keeps the inter-run space's advance between two runs", () => {
-    // A run ending in a space hands the space to the NEXT run's gapBefore
-    // (pretext trims boundary whitespace into gaps); that gap moves the next
-    // run's x — without it a recolored word hugs the word before it (the
-    // space between runs vanished, though the same space inside one run
-    // never did).
+describe("packLines inter-run spaces", () => {
+  it("keeps the inter-run space's advance inside the first run's slice", () => {
+    // Pre-wrap pays the run's trailing space inside its own text slice, so
+    // the next run starts flush after the paid advance (no collapsed gap) —
+    // the spacing survives recoloring either word.
     const lines = pack([text("re-flows "), text("the")], 200);
     expect(lines).toHaveLength(1);
     const texts = lines[0].items.filter(
       (i): i is Extract<LaidOutLineItem, { kind: "text" }> => i.kind === "text",
     );
     expect(texts).toHaveLength(2);
-    const gap = texts[1].xPx - (texts[0].xPx + texts[0].widthPx);
-    expect(gap).toBeCloseTo(4, 5); // one space at the synthetic em/4
+    expect(texts[0].text).toBe("re-flows ");
+    expect(texts[1].xPx - (texts[0].xPx + texts[0].widthPx)).toBeCloseTo(0, 5);
   });
 
-  it("keeps a leading-space run's gap too", () => {
+  it("keeps a leading-space run's space in its own slice too", () => {
     // The mirror case: the second run OPENS with the space (a selection
-    // that started before it). The gap precedes the run's own glyphs.
+    // that started before it) — it rides the run's slice (one caret cell,
+    // one mark dot) instead of a collapsed gap.
     const lines = pack([text("re-flows"), text(" the")], 200);
     expect(lines).toHaveLength(1);
     const texts = lines[0].items.filter(
       (i): i is Extract<LaidOutLineItem, { kind: "text" }> => i.kind === "text",
     );
     expect(texts).toHaveLength(2);
-    const gap = texts[1].xPx - (texts[0].xPx + texts[0].widthPx);
-    expect(gap).toBeCloseTo(4, 5);
+    expect(texts[1].text).toBe(" the");
+    expect(texts[1].xPx - (texts[0].xPx + texts[0].widthPx)).toBeCloseTo(0, 5);
   });
 });
 

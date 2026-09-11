@@ -196,6 +196,7 @@ export function layoutParagraph(
     indent: para.indent,
     drawings: para.drawings,
     markSizePx: para.markSizePx,
+    preserveSpaces: true,
     sectionEnd: para.sectionEnd,
   };
 }
@@ -212,7 +213,10 @@ function trailingHang(
   const src = inline[last.inlineIndex];
   if (src?.kind !== "text") return 0;
   const trail = /\s+$/.exec(last.text)?.[0];
-  return trail ? measurer.analyze(trail, src.style).naturalPx : 0;
+  // Measured like the breaker charges it (same whitespace mode): under
+  // pre-wrap a line-trailing run keeps every space, and its true advance —
+  // not a strut-height stand-in — is what justification must not stretch.
+  return trail ? measurer.widthOf(trail, src.style, "pre-wrap") : 0;
 }
 
 /** Stretch one wrapped line to its packed width: the slack after the last

@@ -161,6 +161,12 @@ const SQUEEZE_MAX = 0.04;
 const preparedCache = new Map<string, PreparedRichInline>();
 const PREPARED_CACHE_LIMIT = 4000;
 
+/** The packer's whitespace mode: Word never collapses a space for display —
+ *  every space keeps its advance inside the item text (one mark dot, one
+ *  caret cell each), and the breaker keeps preserved spaces at line start
+ *  and hangs them past the wrap width at line end. */
+const DOCEN_WHITE_SPACE = "pre-wrap" as const;
+
 /** One tab/break-delimited stretch of the inline flow. */
 interface FlowGroup {
   /** RichInlineItem[i] originates from inline[itemInline[i]]. */
@@ -195,8 +201,8 @@ function groupOf(
       // wider half (each set in half the run's size) plus the brackets.
       const half = { ...item.style, sizePx: item.style.sizePx / 2 };
       let widthPx = Math.max(
-        measurer.widthOf(item.combine.first, half),
-        measurer.widthOf(item.combine.second, half),
+        measurer.widthOf(item.combine.first, half, DOCEN_WHITE_SPACE),
+        measurer.widthOf(item.combine.second, half, DOCEN_WHITE_SPACE),
       );
       if (item.combine.bracket) widthPx += item.style.sizePx * 0.6;
       items.push({ text: "", font: "1px serif", break: "never", extraWidth: widthPx });
@@ -228,9 +234,13 @@ function groupOf(
         `${it.text}\x00${it.font}\x00${it.letterSpacing ?? ""}\x00${it.break ?? ""}\x00${it.extraWidth ?? ""}`,
     )
     .join("\x01");
-  let prepared = preparedCache.get(key);
+  // The mode rides outside the per-item key (single packer-wide constant
+  // today) but is part of it so a future second mode cannot hit stale
+  // entries prepared under the other one.
+  const cacheKey = `${key}\x01${DOCEN_WHITE_SPACE}`;
+  let prepared = preparedCache.get(cacheKey);
   if (!prepared) {
-    prepared = prepareRichInline(items);
+    prepared = prepareRichInline(items, { whiteSpace: DOCEN_WHITE_SPACE });
     // Evict one oldest entry (Map iteration = insertion order) instead of
     // clearing wholesale — a clear wipes the warm working set mid-pass and
     // every subsequent prepare re-pays the full segmentation.
@@ -238,7 +248,7 @@ function groupOf(
       const oldest = preparedCache.keys().next().value;
       if (oldest != null) preparedCache.delete(oldest);
     }
-    preparedCache.set(key, prepared);
+    preparedCache.set(cacheKey, prepared);
   }
   return { itemInline, items, prepared, ...closer, followingPx: 0 };
 }
@@ -520,7 +530,9 @@ function advanceOfGrapheme(ch: string, font: string, letterSpacing?: number): nu
   const key = `${ch}\x00${font}\x00${letterSpacing ?? 0}`;
   let w = closerAdvanceCache.get(key);
   if (w === undefined) {
-    const prepared = prepareRichInline([{ text: ch, font, letterSpacing }]);
+    const prepared = prepareRichInline([{ text: ch, font, letterSpacing }], {
+      whiteSpace: DOCEN_WHITE_SPACE,
+    });
     w = measureRichInlineStats(prepared, 1e9).maxLineWidth;
     closerAdvanceCache.set(key, w);
   }

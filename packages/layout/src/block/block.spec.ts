@@ -165,6 +165,22 @@ describe("layoutParagraph line-height semantics", () => {
     if (out.kind === "paragraph") expect(out.heightPx).toBeCloseTo(NATURAL, 4);
   });
 
+  it("stamps preserveSpaces on paragraphs and pays a space run's advances", () => {
+    // Two spaces survive as paid glyphs: "a  b" = 8 + 4 + 4 + 8 at the fake
+    // metrics (the collapsed world would pay one 4px space instead).
+    const out = layoutBlock(
+      para({ inline: [{ kind: "text", text: "a  b", style: latin }] }),
+      500,
+      undefined,
+      measurer,
+    );
+    if (out.kind === "paragraph") {
+      expect(out.preserveSpaces).toBe(true);
+      expect(out.lines[0].items[0]).toMatchObject({ kind: "text", text: "a  b" });
+      expect(out.lines[0].items[0].widthPx).toBe(24);
+    }
+  });
+
   it("sizes an empty paragraph at the ¶-mark strut (no grid pitch)", () => {
     const out = layoutBlock(
       para({ inline: [], markSizePx: 24 }),
