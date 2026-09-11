@@ -4,6 +4,7 @@ import {
   paintFootnotes,
   paintFurnitureStack,
   paintGridlines,
+  paintItem,
   paintLineNumbers,
   paintScene,
   releasePinnedImages,
@@ -13,6 +14,7 @@ import {
   type ShapeTextStack,
 } from "@docen/core";
 import type {
+  FlowItem,
   LayoutBlock,
   ProjectedColumns,
   ProjectedFlowBox,
@@ -41,6 +43,7 @@ import { stackBlocks, TextMeasurer } from "@docen/layout";
 import { App, Debug, Group, Line, Rect, Text, type IGroup } from "leafer-ui";
 
 import { collectPageParas } from "./caret-map";
+import { diffFlowItems } from "./item-diff";
 import { computeLineNumbers } from "./line-numbers";
 
 const PAGE_GAP = 24;
@@ -60,7 +63,11 @@ export interface LaidFurnitureSlot {
 /** A page's persistent paint layers, in z-order. The two furniture groups
  *  survive body-only repaints — headers/footers are per-section constants in
  *  Word, and re-creating their image leaves on every keystroke re-decode gap
- *  that reads as header flicker while deleting. */
+ *  that reads as header flicker while deleting. The body paints as one group
+ *  per flow item plus an overlay group, so a body-only repaint can diff the
+ *  items (unchanged ones translate, keeping Leafer's pattern/image caches
+ *  warm) while the cheap tails (line numbers, separators, footnotes, floats)
+ *  repaint whole. */
 interface PageLayers {
   /** Body behind-text floats (under furniture). */
   behind: Group;
@@ -68,8 +75,19 @@ interface PageLayers {
   furnitureBehind: Group;
   /** Header/footer stories. */
   furnitureBody: Group;
-  /** Body content plus its deferred in-front floats. */
+  /** Body content: the per-item groups, then the overlay. */
   body: Group;
+  /** One group per flow item, positioned at the item's page position. */
+  items: Group[];
+  /** Line numbers, column separators, footnotes, deferred floats — rebuilt
+   *  whole on every body paint. */
+  overlay: Group;
+  /** The flow items the item groups were painted from (the diff's old side). */
+  lastItems: readonly FlowItem[];
+  /** Each item's hit-box / text-stack counts, in item order — how the
+   *  incremental path carries the kept items' boxes over. */
+  itemHitCounts: number[];
+  itemStackCounts: number[];
 }
 
 /** One page slot: its DOM frame, its Leafer App, and the layers its last
@@ -1171,16 +1189,10 @@ export class CanvasStage {
       paintScene(layers.behind, items, ctx);
       paintGridlines(layers.behind, ctx);
       ctx.layer = "body";
-      layers.body.clear();
-      paintScene(layers.body, items, ctx);
-      paintLineNumbers(layers.body, ctx);
-      paintColumnSeparators(layers.body, ctx);
-      paintFootnotes(layers.body, this.pages[index]?.footnotes, ctx);
-      this.#flushDrawings(ctx);
+      this.paintBodyItems(layers, items, ctx, hitBoxes, shapeTextStacks);
       app.forceRender();
       this.hitBoxes.set(index, hitBoxes);
       this.shapeTextStacks.set(index, shapeTextStacks);
-      this.#hitParas.set(index, collectPageParas(this.pages[index]!));
       return;
     }
 
@@ -1221,6 +1233,11 @@ export class CanvasStage {
         furnitureBehind: new Group(),
         furnitureBody: new Group(),
         body: new Group(),
+        items: [],
+        overlay: new Group(),
+        lastItems: [],
+        itemHitCounts: [],
+        itemStackCounts: [],
       };
       tree.add([
         pageLayers.behind,
@@ -1243,11 +1260,7 @@ export class CanvasStage {
           furniture,
         );
       }
-      paintScene(pageLayers.body, items, ctx);
-      paintLineNumbers(pageLayers.body, ctx);
-      paintColumnSeparators(pageLayers.body, ctx);
-      paintFootnotes(pageLayers.body, this.pages[index]?.footnotes, ctx);
-      this.#flushDrawings(ctx);
+      this.paintBodyItems(pageLayers, items, ctx, hitBoxes, shapeTextStacks);
       this.slots[index]!.layers = pageLayers;
     } else {
       ctx.hitBoxes = hitBoxes;
@@ -1273,6 +1286,9 @@ export class CanvasStage {
         this.paintFurniture(tree, tree, slotIndex, ctx, flow, furniture);
       }
       this.paintStoryBoundary(tree, ctx, flow);
+      // The flat path paints through paintScene, not paintBodyItems — refresh
+      // the paragraph list here (the per-item paths refresh inside it).
+      this.#hitParas.set(index, collectPageParas(this.pages[index]!));
     }
     // Render eagerly: Leafer's change-driven scheduling stalls when the App
     // was created while its view was offscreen (an IO callback during mount)
@@ -1280,7 +1296,6 @@ export class CanvasStage {
     app.forceRender();
     this.hitBoxes.set(index, hitBoxes);
     this.shapeTextStacks.set(index, shapeTextStacks);
-    this.#hitParas.set(index, collectPageParas(this.pages[index]!));
   }
 
   /** Paint the floats both passes parked in the queue — after the pass's
@@ -1298,6 +1313,126 @@ export class CanvasStage {
       for (const entry of band) entry.paint();
     }
     queue.length = 0;
+  }
+
+  /** The body pass over per-item groups: items whose laid block is unchanged
+   *  translate their existing group (Leafer's pattern and image caches stay
+   *  warm — the tree-clear behind the #1192 repaint hotspot), changed items
+   *  repaint in place, and the overlay group (line numbers, column
+   *  separators, footnotes, deferred floats) repaints whole. A different item
+   *  count rebuilds every group. Kept items' hit boxes ride over from the
+   *  previous generation with their old paragraph references; the refresh
+   *  re-points them, and a page whose paragraph list cannot be paired
+   *  (paragraphs added or removed) falls back to a full rebuild, whose boxes
+   *  come out fresh-referenced. */
+  private paintBodyItems(
+    layers: PageLayers,
+    items: readonly FlowItem[],
+    ctx: PaintContext,
+    hitBoxes: DrawingHitBox[],
+    shapeTextStacks: ShapeTextStack[],
+  ): void {
+    const { flow } = ctx;
+    const ops = diffFlowItems(layers.lastItems, items);
+    if (!ops || layers.items.length !== items.length) {
+      // A full rebuild also recovers the incremental fallback below (its
+      // carried-over boxes would otherwise double with these).
+      hitBoxes.length = 0;
+      shapeTextStacks.length = 0;
+      layers.body.clear();
+      layers.items = items.map(() => new Group());
+      layers.overlay = new Group();
+      layers.body.add([...layers.items, layers.overlay]);
+      layers.itemHitCounts = [];
+      layers.itemStackCounts = [];
+      ctx.floatsTarget = { behind: layers.behind, body: layers.overlay };
+      for (const [i, item] of items.entries()) {
+        const g = layers.items[i]!;
+        g.x = flow.contentLeftPx + (item.xPx ?? 0);
+        g.y = flow.contentTopPx + item.yPx;
+        ctx.origin = { x: g.x, y: g.y };
+        const before = hitBoxes.length;
+        const beforeStacks = shapeTextStacks.length;
+        paintItem(g, item, ctx);
+        layers.itemHitCounts.push(hitBoxes.length - before);
+        layers.itemStackCounts.push(shapeTextStacks.length - beforeStacks);
+      }
+      layers.lastItems = items;
+      this.#refreshHitParas(ctx.pageIndex, hitBoxes, shapeTextStacks);
+      this.#paintOverlay(layers, ctx);
+      return;
+    }
+    // Incremental: the kept boxes ride over (counted per item), the repainted
+    // ones are produced fresh by their paintItem walk.
+    const stale = hitBoxes.splice(0, hitBoxes.length);
+    const staleStacks = shapeTextStacks.splice(0, shapeTextStacks.length);
+    ctx.floatsTarget = { behind: layers.behind, body: layers.overlay };
+    for (const [i, op] of ops.entries()) {
+      const item = items[i]!;
+      const g = layers.items[i]!;
+      if (op.kind === "keep") {
+        // Absolute reposition, not +=dy — self-heals accumulated rounding.
+        g.y = flow.contentTopPx + item.yPx;
+        hitBoxes.push(...stale.splice(0, layers.itemHitCounts[i]!));
+        shapeTextStacks.push(...staleStacks.splice(0, layers.itemStackCounts[i]!));
+        continue;
+      }
+      const before = hitBoxes.length;
+      const beforeStacks = shapeTextStacks.length;
+      g.clear();
+      ctx.origin = {
+        x: flow.contentLeftPx + (item.xPx ?? 0),
+        y: flow.contentTopPx + item.yPx,
+      };
+      paintItem(g, item, ctx);
+      layers.itemHitCounts[i] = hitBoxes.length - before;
+      layers.itemStackCounts[i] = shapeTextStacks.length - beforeStacks;
+    }
+    layers.lastItems = items;
+    if (!this.#refreshHitParas(ctx.pageIndex, hitBoxes, shapeTextStacks)) {
+      // The page's paragraph list is not isomorphic — pairing is impossible.
+      // One full rebuild re-anchors every box against a single generation.
+      this.paintBodyItems(layers, items, ctx, hitBoxes, shapeTextStacks);
+      return;
+    }
+    this.#paintOverlay(layers, ctx);
+  }
+
+  /** The body overlay tail — line numbers, column separators, footnotes,
+   *  then the deferred floats (the flush draws them last, above everything
+   *  Word stacks them above). */
+  #paintOverlay(layers: PageLayers, ctx: PaintContext): void {
+    layers.overlay.clear();
+    paintLineNumbers(layers.overlay, ctx);
+    paintColumnSeparators(layers.overlay, ctx);
+    paintFootnotes(layers.overlay, this.pages[ctx.pageIndex]?.footnotes, ctx);
+    this.#flushDrawings(ctx);
+  }
+
+  /** Refresh the page's paragraph list after a body paint, re-pointing the
+   *  surviving hit boxes' hosts at the fresh generation (the relayout
+   *  re-objected every paragraph — same pairing #relinkHitParas performs for
+   *  clean pages). Returns false when the lists are not isomorphic. */
+  #refreshHitParas(
+    index: number,
+    hitBoxes: DrawingHitBox[],
+    shapeTextStacks: ShapeTextStack[],
+  ): boolean {
+    const fresh = collectPageParas(this.pages[index]!);
+    const old = this.#hitParas.get(index);
+    this.#hitParas.set(index, fresh);
+    if (!old || old.length !== fresh.length) return false;
+    if (old[0] === fresh[0]) return true;
+    const swap = new Map(old.map((p, k) => [p, fresh[k]!]));
+    for (const b of hitBoxes) {
+      const p = swap.get(b.para);
+      if (p) b.para = p;
+    }
+    for (const s of shapeTextStacks) {
+      const p = swap.get(s.host.para);
+      if (p) s.host.para = p;
+    }
+    return true;
   }
 
   /** The page's drawing boxes as the body pass painted them — the click
