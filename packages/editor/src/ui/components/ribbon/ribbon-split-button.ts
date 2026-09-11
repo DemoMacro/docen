@@ -31,6 +31,11 @@ const styles = css`
   fluent-button[slot="primary-action"] {
     min-height: 26px;
   }
+  /* The lit primary paints on the fluent-button host — its subtle control is
+     transparent, so the fill shows through across the whole face. */
+  :host([pressed]) fluent-button[slot="primary-action"] {
+    background-color: var(--colorSubtleBackgroundSelected, rgba(0, 0, 0, 0.06));
+  }
   .rb-label,
   :host([size="small"]) .rb-label {
     font-size: 12px;
@@ -149,6 +154,11 @@ class DocenRibbonSplitButton extends FASTElement {
   /** The primary has no action of its own (Word's AutoFit: the face is just
    *  the menu's carrier) — a click opens the drop-down instead of emitting. */
   @attr({ attribute: "primary-opens-menu", mode: "boolean" }) primaryOpensMenu?: boolean;
+  /** Host-lit primary (Word's live Underline/Bullets/Numbering faces): the
+   *  host re-stamps it from the caret/selection. A plain fluent-button has no
+   *  pressed affordance and FAST's ToggleButton press() flips inside its click
+   *  handler (unstoppable), so the visual rides this host attribute instead. */
+  @attr({ mode: "boolean" }) pressed?: boolean;
 
   @observable primary?: HTMLElement;
   @observable caret?: HTMLElement;

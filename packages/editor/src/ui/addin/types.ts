@@ -80,6 +80,9 @@ export interface RibbonMenu extends RibbonControlBase {
 export interface RibbonSplit extends RibbonControlBase {
   type: "split";
   items: RibbonMenuItem[];
+  /** The host presses the primary while its format is live at the
+   *  caret/selection (Word's lit Underline/Bullets/Numbering faces). */
+  toggle?: boolean;
 }
 
 export interface RibbonCombobox extends RibbonControlBase {

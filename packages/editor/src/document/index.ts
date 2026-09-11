@@ -2807,7 +2807,10 @@ class DocenDocument extends AddinHost<Editor> {
     ];
     for (const [event, on] of rows) {
       for (const el of this.shadowRoot?.querySelectorAll<HTMLElement>(
-        `docen-ribbon-toggle-button[event="${event}"]`,
+        // A lit row may land on a plain toggle (bold) or on a split whose
+        // primary carries the face ([pressed-face] guards the rest — underline
+        // / bullet / ordered lists are the only opt-ins today).
+        `docen-ribbon-toggle-button[event="${event}"], docen-ribbon-split-button[pressed-face][event="${event}"]`,
       ) ?? []) {
         el.toggleAttribute("pressed", on);
       }

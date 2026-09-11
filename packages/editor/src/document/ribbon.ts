@@ -923,6 +923,9 @@ function buildControl(c: RibbonControl, scope: Element): HTMLElement {
       const el = document.createElement("docen-ribbon-split-button");
       applyBase(el, c, scope);
       el.setAttribute("items", JSON.stringify(translateItems(c.items ?? [], scope)));
+      // Opt the face into the host's lit sync; pressed itself is the sync's
+      // write, not the render's (single writer keeps render idempotent).
+      if (c.toggle) el.setAttribute("pressed-face", "");
       return el;
     }
     case "combobox": {
@@ -1003,7 +1006,7 @@ const split = (
   icon: string,
   event: string,
   items: RibbonMenuItem[],
-  o: { size?: "large"; iconOnly?: boolean; label?: string } = {},
+  o: { size?: "large"; iconOnly?: boolean; label?: string; toggle?: boolean } = {},
 ): RibbonSplit => ({
   type: "split",
   icon,
@@ -1012,6 +1015,7 @@ const split = (
   items,
   ...(o.size ? { size: o.size } : {}),
   ...(o.iconOnly ? { iconOnly: true } : {}),
+  ...(o.toggle ? { toggle: true } : {}),
 });
 
 const menu = (
@@ -1148,7 +1152,10 @@ const homeTab = (styles?: StylesOptions | null): RibbonTab =>
           row([
             btn("bold", "bold", { iconOnly: true, toggle: true }),
             btn("italic", "italic", { iconOnly: true, toggle: true }),
-            split("underline", "underline", parsedItems(underlineItems()), { iconOnly: true }),
+            split("underline", "underline", parsedItems(underlineItems()), {
+              iconOnly: true,
+              toggle: true,
+            }),
             btn("strike", "strike", { iconOnly: true, toggle: true }),
             btn("superscript", "superscript", { iconOnly: true, toggle: true }),
             btn("subscript", "subscript", { iconOnly: true, toggle: true }),
@@ -1167,8 +1174,14 @@ const homeTab = (styles?: StylesOptions | null): RibbonTab =>
       [
         col([
           row([
-            split("list", "bullet-list", parsedItems(bulletItems()), { iconOnly: true }),
-            split("numbering", "ordered-list", parsedItems(numberItems()), { iconOnly: true }),
+            split("list", "bullet-list", parsedItems(bulletItems()), {
+              iconOnly: true,
+              toggle: true,
+            }),
+            split("numbering", "ordered-list", parsedItems(numberItems()), {
+              iconOnly: true,
+              toggle: true,
+            }),
             split("multilevel", "multilevel-list", parsedItems(multilevelItems()), {
               iconOnly: true,
             }),

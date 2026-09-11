@@ -1114,18 +1114,33 @@ function alignmentOf(state: EditorState): string | null {
   return paras.every(({ node }) => read(node) === value) ? value : null;
 }
 
+/** Whether every selected paragraph already sits in the given list kind —
+ *  Word lights the Bullets/Numbering face while the caret/selection lives in
+ *  that list, regardless of the marker variant (the variants live in the
+ *  split's menu, and the face reflects the list kind). */
+function listKindOf(state: EditorState, kind: "bullet" | "ordered"): boolean {
+  const blocks = selectedParagraphs(state);
+  if (blocks.length === 0) return false;
+  return blocks.every(
+    ({ node }) => listStateOf(node.attrs as Record<string, unknown>).kind === kind,
+  );
+}
+
 /** The Home-tab format toggles' current state as [ribbon event, lit] rows —
  *  marks by their mark name (the ribbon `event` IS the mark name), alignment
- *  by the shared paragraph attr. */
+ *  by the shared paragraph attr, the list split faces by the shared kind. */
 export function formatToggleStatesOf(state: EditorState): [string, boolean][] {
   const alignment = alignmentOf(state);
   return [
     ["bold", markToggledOf(state, "bold")],
     ["italic", markToggledOf(state, "italic")],
+    ["underline", markToggledOf(state, "underline")],
     ["strike", markToggledOf(state, "strike")],
     ["superscript", markToggledOf(state, "superscript")],
     ["subscript", markToggledOf(state, "subscript")],
     ["code", markToggledOf(state, "code")],
+    ["bullet-list", listKindOf(state, "bullet")],
+    ["ordered-list", listKindOf(state, "ordered")],
     ["align-left", alignment === "left"],
     ["align-center", alignment === "center"],
     ["align-right", alignment === "right"],
