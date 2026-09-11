@@ -1316,7 +1316,7 @@ const designTab = (): RibbonTab =>
         defaultColor: "FFFFFF",
         size: "large",
       },
-      btn("image", "fill-effects", { size: "large" }),
+      btn("fill-effects", "fill-effects", { size: "large" }),
       split("page-border", "page-border", parsedItems(pageBorderItems()), { size: "large" }),
     ]),
   ]);

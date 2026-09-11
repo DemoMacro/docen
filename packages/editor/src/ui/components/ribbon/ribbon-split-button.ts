@@ -52,7 +52,9 @@ const styles = css`
     flex-direction: column;
     justify-content: flex-start;
     min-width: 0;
-    max-width: 90px;
+    /* Wide enough for a 7-glyph CJK label on one line (7×11px + 24px
+       padding); narrower caps clipped the last glyph off 6-char labels. */
+    max-width: 104px;
     min-height: 56px;
     padding: 4px 12px;
   }

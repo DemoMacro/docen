@@ -42,7 +42,9 @@ const styles = css`
     border: 1px solid transparent;
     background: transparent;
     box-sizing: border-box;
-    width: 68px;
+    /* 76px keeps a 7-glyph CJK caption on one line (7×10px + 4px padding);
+       68px clipped the last glyph onto its own row. */
+    width: 76px;
     padding: 3px 2px;
     margin: 0;
     cursor: pointer;
@@ -118,7 +120,7 @@ const styles = css`
   }
   .rb-gallery-grid {
     display: grid;
-    grid-template-columns: repeat(var(--rbg-columns, 3), 68px);
+    grid-template-columns: repeat(var(--rbg-columns, 3), 76px);
     gap: 2px;
   }
 `;

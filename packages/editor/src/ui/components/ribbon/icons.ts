@@ -266,6 +266,7 @@ const RIBBON_ICONS: Record<string, string> = {
   theme: colorBackground,
   watermark: watermarkIcon,
   "page-color": colorFill,
+  "fill-effects": paintBucket,
   "page-border": borderAll,
   // Layout
   orientation,
