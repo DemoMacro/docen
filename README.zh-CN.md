@@ -9,13 +9,22 @@
 ![GitHub License](https://img.shields.io/github/license/DemoMacro/docen)
 [![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg)](https://www.contributor-covenant.org/version/2/1/code_of_conduct/)
 
-> 画布 DOCX 编辑器——在浏览器中以 MS Office 的排版保真度渲染并编辑文档，基于 TipTap/ProseMirror 与 LeaferJS 构建——并内置经统一 Tiptap JSON 模型的 headless Markdown ⇄ DOCX 转换。全量类型，无需服务器。
+> Docen 是面向现代 Web 的高保真、高性能 Office 文档编辑器。画布排版在浏览器中提供接近 Microsoft Office / WPS Office 的排版、布局与编辑体验，GB 级大型文档也能流畅打开，全程无需服务器；幻灯片与表格编辑能力也将逐步到来。
+>
+> 基于 TipTap/ProseMirror 与 LeaferJS 构建，内置经统一 Tiptap JSON 模型的 headless Markdown ⇄ DOCX 转换。全量类型。
 
 [在线演示](https://docen.office-open.com/) · [讨论区](https://github.com/DemoMacro/docen/discussions) · [报告问题](https://github.com/DemoMacro/docen/issues)
 
 ⭐ **如果 Docen 对你有用，一个 star 能帮更多开发者发现它。**
 
-![Docen 编辑器](./assets/editor-demo.png)
+![Docen 编辑器](./assets/editor-demo.zh-CN.png)
+
+## 为什么选择 Docen？
+
+- **逼近 Word 的排版保真** —— 分页引擎遵循 Word 的堆叠规则（文档网格、表格跨页与标题行重复、图文环绕），画布逐页忠实还原排版结果。
+- **GB 级大文档，流畅自如** —— 增量布局边读边排、媒体惰性加载、重绘按需增量，1 GB 以上的文档打开与滚动依然流畅。
+- **现代 Web，零服务器** —— 标准化的 Web Components 与类型化的 Vue 3 适配器，一切都在浏览器端完成。
+- **headless 转换开箱即用** —— 经统一的 Tiptap JSON 模型完成 Markdown ⇄ DOCX 转换，用不用编辑器都可以。
 
 ## 包
 

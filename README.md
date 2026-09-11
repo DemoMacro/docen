@@ -9,13 +9,22 @@
 ![GitHub License](https://img.shields.io/github/license/DemoMacro/docen)
 [![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg)](https://www.contributor-covenant.org/version/2/1/code_of_conduct/)
 
-> A canvas DOCX editor that renders and edits with MS Office layout fidelity in the browser — built on TipTap/ProseMirror and LeaferJS — plus headless Markdown ⇄ DOCX conversion through a unified Tiptap JSON model. Fully typed; no server required.
+> Docen is a high-fidelity, high-performance Office document editor for the modern web. Canvas typesetting brings the typesetting, layout, and editing experience of Microsoft Office / WPS Office to the browser, and gigabyte-scale documents open fluently — no server required. Presentation slides and spreadsheet editing are on the roadmap.
+>
+> Built on TipTap/ProseMirror and LeaferJS, with headless Markdown ⇄ DOCX conversion through a unified Tiptap JSON model. Fully typed.
 
 [Live Demo](https://docen.office-open.com/) · [Discussions](https://github.com/DemoMacro/docen/discussions) · [Report Issues](https://github.com/DemoMacro/docen/issues)
 
 ⭐ **If Docen is useful to you, a star helps other developers find it.**
 
 ![Docen Editor](./assets/editor-demo.png)
+
+## Why Docen?
+
+- **True-to-Word fidelity** — a pagination engine that follows Word's stacking rules (document grid, table page breaks with repeated headers, text wrapping around floats) and a canvas painter that draws the result faithfully, page by page.
+- **Gigabyte-scale documents, smooth** — incremental layout slices pages as you read, media loads lazily, and repaints stay incremental, so even 1 GB+ documents open and scroll without freezing.
+- **Modern web, zero server** — standards-based web components with a typed Vue 3 adapter; everything runs client-side, in any modern browser.
+- **Headless conversion included** — Markdown ⇄ DOCX through one unified Tiptap JSON model, usable with or without the editor.
 
 ## Packages
 
