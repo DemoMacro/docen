@@ -4728,12 +4728,40 @@ class DocenDocument extends AddinHost<Editor> {
     if (name === "paragraph-dialog") {
       const target = this.#bridge?.activeEditor() ?? editor;
       const node = target?.state.selection.$from.parent;
-      if (node?.type.name === "paragraph") {
+      if (target && node?.type.name === "paragraph") {
+        // Effective values (direct attrs over the style chain over docDefaults
+        // — Word's cascade) drive the prefill: the unit boxes are never empty,
+        // and a blind commit must not overwrite an inherited indent or spacing
+        // (docDefaults' 8pt after) with an explicit 0.
+        const styles = this.#docStyles(target);
+        const byId = styles ? indexParagraphStyles(styles) : new Map();
+        const attrs = node.attrs as Record<string, unknown>;
+        const chain = mergeStyleChain(
+          byId,
+          (typeof attrs.style === "string" && attrs.style) || defaultParagraphStyleId(styles),
+        ).paragraph;
+        const ddParagraph = ((
+          styles?.default as { document?: { paragraph?: Record<string, unknown> } } | undefined
+        )?.document?.paragraph ?? {}) as Record<string, unknown>;
+        const effective = { ...attrs };
+        for (const key of ["indent", "spacing"] as const) {
+          const inherited = {
+            ...(typeof ddParagraph[key] === "object" && ddParagraph[key] ? ddParagraph[key] : {}),
+            ...(typeof chain[key] === "object" && chain[key] ? (chain[key] as object) : {}),
+          };
+          const direct = attrs[key];
+          effective[key] = Object.keys(inherited).length
+            ? {
+                ...inherited,
+                ...(typeof direct === "object" && direct ? direct : {}),
+              }
+            : direct;
+        }
         (
           this.shadowRoot?.querySelector("docen-paragraph-dialog") as {
             show(attrs?: Record<string, unknown>): void;
           } | null
-        )?.show(node.attrs as Record<string, unknown>);
+        )?.show(effective);
       }
       return;
     }
