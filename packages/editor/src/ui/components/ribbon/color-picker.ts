@@ -355,8 +355,10 @@ const styles = css`
     outline: 1.5px solid #333;
     outline-offset: 0;
   }
+  /* Utility class — must beat any later layout rule (e.g. .cp-subnav's
+     display:block), or the Weight/Dashes navs leak onto every palette. */
   .cp-hidden {
-    display: none;
+    display: none !important;
   }
   /* Custom color view — opened by "More Colors", lives inside the same
      anchored popover so it never jumps to the viewport corner (the native
