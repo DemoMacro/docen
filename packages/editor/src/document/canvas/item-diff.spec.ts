@@ -47,4 +47,24 @@ describe("diffFlowItems", () => {
     const next = [item(0, { t: "a" }, 0)];
     expect(diffFlowItems(prev, next)).toEqual([{ kind: "keep", index: 0 }]);
   });
+
+  it("repaints a paragraph carrying floating drawings even when unchanged", () => {
+    const floats = { kind: "paragraph", drawings: [{ behind: false }] };
+    const prev = [item(0, floats), item(10, { t: "b" })];
+    const next = [item(0, { ...floats, drawings: [{ behind: false }] }), item(10, { t: "b" })];
+    expect(diffFlowItems(prev, next)).toEqual([
+      { kind: "repaint", index: 0 },
+      { kind: "keep", index: 1 },
+    ]);
+  });
+
+  it("repaints a group whose nested paragraph carries floating drawings", () => {
+    const group = {
+      kind: "group",
+      children: [{ yPx: 0, block: { kind: "paragraph", drawings: [{}] } }],
+    };
+    const prev = [item(0, group)];
+    const next = [item(0, JSON.parse(JSON.stringify(group)))];
+    expect(diffFlowItems(prev, next)).toEqual([{ kind: "repaint", index: 0 }]);
+  });
 });
