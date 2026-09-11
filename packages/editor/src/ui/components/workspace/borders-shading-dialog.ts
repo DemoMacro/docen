@@ -57,8 +57,11 @@ const styles = css`
   :host {
     display: contents;
   }
-  docen-dialog::part(dialog) {
-    width: min(400px, 92vw);
+  /* Word's dialog is a near-square ~420 logical px; the shell reads these via
+     the docen-dialog width channel (::part width rules never reach FAST's
+     fixed-positioned native surface). */
+  docen-dialog {
+    --dialog-max-width: min(460px, 92vw);
   }
   .body {
     padding: 8px 4px 4px;
@@ -93,46 +96,64 @@ const styles = css`
     width: 100%;
     box-sizing: border-box;
   }
-  .presets {
-    display: flex;
-    gap: 6px;
+  /* Word's two-column tab: the preset list stands vertical on the left, the
+     style widgets + preview stack on the right. */
+  .border-grid {
+    display: grid;
+    grid-template-columns: 104px 1fr;
+    gap: 4px 14px;
   }
-  .presets button {
-    flex: 1;
+  .preset-list {
     display: flex;
     flex-direction: column;
+    gap: 2px;
+  }
+  .preset-list button {
+    display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 8px;
     font: inherit;
-    font-size: 11px;
-    padding: 6px 2px;
+    font-size: 12px;
+    padding: 4px 6px;
     background: none;
-    border: 1px solid var(--docen-color-divider, #e1e1e1);
+    border: 1px solid transparent;
     border-radius: 4px;
     cursor: pointer;
     color: inherit;
+    text-align: left;
   }
-  .presets button[aria-pressed="true"] {
+  .preset-list button[aria-pressed="true"] {
     border-color: var(--docen-color-brand, #0078d4);
-    background: color-mix(in srgb, var(--docen-color-brand, #0078d4) 8%, transparent);
+    background: color-mix(in srgb, var(--docen-color-brand, #0078d4) 10%, transparent);
   }
-  .presets .box {
-    width: 28px;
-    height: 20px;
+  .preset-list .box {
+    flex: none;
+    width: 26px;
+    height: 18px;
     border: 1px solid #6e6e6e;
   }
-  .presets .box.shadow {
+  .preset-list .box.shadow {
     border-bottom-width: 3px;
     border-right-width: 3px;
   }
-  .presets .box.none {
+  .preset-list .box.none {
     border-style: dotted;
+  }
+  .preset-col,
+  .widget-col {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+  }
+  .apply-row {
+    margin-top: 12px;
   }
   .preview {
     display: grid;
     grid-template-columns: 16px 1fr 16px;
     grid-template-rows: 16px 1fr 16px;
-    height: 90px;
+    height: 88px;
     background: var(--docen-color-hover, rgba(0, 0, 0, 0.02));
   }
   .preview .edge {
@@ -182,102 +203,116 @@ const template = html<DocenBordersShadingDialog>`
         <fluent-tab id="bs-tab-shading" ${ref("shadingTabBtn")}></fluent-tab>
       </fluent-tablist>
       <div ${ref("borderPage")}>
-        <div class="heading" ${ref("settingHeading")}></div>
-        <div class="presets">
-          <button @click="${(x) => x.applyPreset("none")}" ${ref("presetNone")}>
-            <span class="box none"></span><span ${ref("presetNoneLabel")}></span>
-          </button>
-          <button @click="${(x) => x.applyPreset("box")}" ${ref("presetBox")}>
-            <span class="box"></span><span ${ref("presetBoxLabel")}></span>
-          </button>
-          <button @click="${(x) => x.applyPreset("shadow")}" ${ref("presetShadow")}>
-            <span class="box shadow"></span><span ${ref("presetShadowLabel")}></span>
-          </button>
+        <div class="border-grid">
+          <div class="preset-col">
+            <div class="heading" ${ref("settingHeading")}></div>
+            <div class="preset-list">
+              <button @click="${(x) => x.applyPreset("none")}" ${ref("presetNone")}>
+                <span class="box none"></span><span ${ref("presetNoneLabel")}></span>
+              </button>
+              <button @click="${(x) => x.applyPreset("box")}" ${ref("presetBox")}>
+                <span class="box"></span><span ${ref("presetBoxLabel")}></span>
+              </button>
+              <button @click="${(x) => x.applyPreset("shadow")}" ${ref("presetShadow")}>
+                <span class="box shadow"></span><span ${ref("presetShadowLabel")}></span>
+              </button>
+            </div>
+          </div>
+          <div class="widget-col">
+            <div class="field">
+              <label ${ref("styleLabel")}></label>
+              <fluent-dropdown
+                type="combobox"
+                appearance="outline"
+                ${ref("styleSel")}
+                @change="${(x) => x.syncStyle()}"
+              >
+                <fluent-listbox popover="manual" tabindex="-1"></fluent-listbox>
+                <input
+                  slot="control"
+                  role="combobox"
+                  aria-haspopup="listbox"
+                  type="combobox"
+                  size="1"
+                  style="width:100%;box-sizing:border-box"
+                />
+              </fluent-dropdown>
+            </div>
+            <div class="row">
+              <div class="field">
+                <label ${ref("colorLabel")}></label>
+                <fluent-dropdown
+                  type="combobox"
+                  appearance="outline"
+                  ${ref("colorSel")}
+                  @change="${(x) => x.syncColor()}"
+                >
+                  <fluent-listbox popover="manual" tabindex="-1"></fluent-listbox>
+                  <input
+                    slot="control"
+                    role="combobox"
+                    aria-haspopup="listbox"
+                    type="combobox"
+                    size="1"
+                    style="width:100%;box-sizing:border-box"
+                  />
+                </fluent-dropdown>
+              </div>
+              <div class="field">
+                <label ${ref("widthLabel")}></label>
+                <fluent-dropdown
+                  type="combobox"
+                  appearance="outline"
+                  ${ref("widthSel")}
+                  @change="${(x) => x.syncWidth()}"
+                >
+                  <fluent-listbox popover="manual" tabindex="-1"></fluent-listbox>
+                  <input
+                    slot="control"
+                    role="combobox"
+                    aria-haspopup="listbox"
+                    type="combobox"
+                    size="1"
+                    style="width:100%;box-sizing:border-box"
+                  />
+                </fluent-dropdown>
+              </div>
+            </div>
+            <div class="heading" ${ref("previewHeading")}></div>
+            <div class="preview">
+              <span></span>
+              <button
+                class="edge"
+                ${ref("edgeTop")}
+                @click="${(x) => x.toggleEdge("top")}"
+              ></button>
+              <span></span>
+              <button
+                class="edge"
+                ${ref("edgeLeft")}
+                @click="${(x) => x.toggleEdge("left")}"
+              ></button>
+              <span></span>
+              <button
+                class="edge"
+                ${ref("edgeRight")}
+                @click="${(x) => x.toggleEdge("right")}"
+              ></button>
+              <span></span>
+              <button
+                class="edge"
+                ${ref("edgeBottom")}
+                @click="${(x) => x.toggleEdge("bottom")}"
+              ></button>
+              <span></span>
+            </div>
+          </div>
         </div>
-        <div class="row">
-          <div class="field">
-            <label ${ref("styleLabel")}></label>
-            <fluent-dropdown
-              type="combobox"
-              appearance="outline"
-              ${ref("styleSel")}
-              @change="${(x) => x.syncStyle()}"
-            >
-              <fluent-listbox popover="manual" tabindex="-1"></fluent-listbox>
-              <input
-                slot="control"
-                role="combobox"
-                aria-haspopup="listbox"
-                type="combobox"
-                size="1"
-                style="width:100%;box-sizing:border-box"
-              />
-            </fluent-dropdown>
-          </div>
-          <div class="field">
-            <label ${ref("colorLabel")}></label>
-            <fluent-dropdown
-              type="combobox"
-              appearance="outline"
-              ${ref("colorSel")}
-              @change="${(x) => x.syncColor()}"
-            >
-              <fluent-listbox popover="manual" tabindex="-1"></fluent-listbox>
-              <input
-                slot="control"
-                role="combobox"
-                aria-haspopup="listbox"
-                type="combobox"
-                size="1"
-                style="width:100%;box-sizing:border-box"
-              />
-            </fluent-dropdown>
-          </div>
-        </div>
-        <div class="row">
-          <div class="field">
-            <label ${ref("widthLabel")}></label>
-            <fluent-dropdown
-              type="combobox"
-              appearance="outline"
-              ${ref("widthSel")}
-              @change="${(x) => x.syncWidth()}"
-            >
-              <fluent-listbox popover="manual" tabindex="-1"></fluent-listbox>
-              <input
-                slot="control"
-                role="combobox"
-                aria-haspopup="listbox"
-                type="combobox"
-                size="1"
-                style="width:100%;box-sizing:border-box"
-              />
-            </fluent-dropdown>
-          </div>
+        <div class="row apply-row">
           <div class="field">
             <label ${ref("applyToLabel")}></label>
             <span ${ref("applyToValue")}></span>
           </div>
-        </div>
-        <div class="heading" ${ref("previewHeading")}></div>
-        <div class="preview">
-          <span></span>
-          <button class="edge" ${ref("edgeTop")} @click="${(x) => x.toggleEdge("top")}"></button>
-          <span></span>
-          <button class="edge" ${ref("edgeLeft")} @click="${(x) => x.toggleEdge("left")}"></button>
-          <span></span>
-          <button
-            class="edge"
-            ${ref("edgeRight")}
-            @click="${(x) => x.toggleEdge("right")}"
-          ></button>
-          <span></span>
-          <button
-            class="edge"
-            ${ref("edgeBottom")}
-            @click="${(x) => x.toggleEdge("bottom")}"
-          ></button>
-          <span></span>
         </div>
       </div>
       <p class="hint hidden" ${ref("pageHint")}></p>

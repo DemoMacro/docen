@@ -185,9 +185,31 @@ class DocenDialog extends FASTElement {
       // ESC (cancel→close) dismisses the modal behind our back — keep the
       // `open` attribute in sync (fluent's toggle event no-ops the same way).
       native.addEventListener("close", this.#nativeCloseHandler);
+      this.#injectWidthChannel(native);
     };
     apply();
   }
+
+  /** FAST hard-codes the surface at `width:100%; max-width:600px` inside its
+   *  shadow, so every dialog renders 600px wide no matter what ::part rules
+   *  say (the host is display:contents — width rules never reach the native
+   *  fixed-positioned <dialog>). Custom properties inherit across the shadow
+   *  boundary, so one un-layered rule reading them (un-layered beats FAST's
+   *  @layer base) turns --dialog-width/--dialog-max-width on <docen-dialog>
+   *  into the public sizing channel. */
+  #injectWidthChannel(native: HTMLDialogElement): void {
+    const root = native.getRootNode();
+    if (!(root instanceof ShadowRoot) || root.adoptedStyleSheets.includes(this.#widthSheet)) return;
+    root.adoptedStyleSheets = [...root.adoptedStyleSheets, this.#widthSheet];
+  }
+
+  readonly #widthSheet = (() => {
+    const sheet = new CSSStyleSheet();
+    sheet.replaceSync(
+      "dialog{width:var(--dialog-width,100%);max-width:var(--dialog-max-width,600px)}",
+    );
+    return sheet;
+  })();
 
   /** Find the body's title row (the drag handle) once fluent upgrades. */
   #resolveTitleBar(): void {
