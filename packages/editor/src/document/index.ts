@@ -108,6 +108,7 @@ import type { ModifyStylePatch } from "./extensions/commands";
 import {
   chartMenuValueOf,
   floatingDrawingAt,
+  formatToggleStatesOf,
   inlineDrawingAt,
   inlineImageAt,
   positionMenuValueOf,
@@ -789,6 +790,7 @@ class DocenDocument extends AddinHost<Editor> {
       // Selection-sensitive greying: the arrange group's liveness depends on
       // what the selection points at, which no static pass sees.
       this.#syncArrangeGreying();
+      this.#syncFormatButtons();
       this.#syncDrawingMenus();
       this.#updateStatus();
     };
@@ -2576,6 +2578,7 @@ class DocenDocument extends AddinHost<Editor> {
     this.#syncContextTabs();
     this.#syncCellSize();
     this.#syncDrawingSize();
+    this.#syncFormatButtons();
     this.#syncDrawingMenus();
     this.#renderPanes();
   }
@@ -2787,6 +2790,27 @@ class DocenDocument extends AddinHost<Editor> {
       // Events outside the two sets keep the static pass's decision.
       if (live == null) continue;
       el.toggleAttribute("disabled", !live);
+    }
+  }
+
+  /** Re-stamp the Home tab's format toggles (Bold/Italic/…/alignment) against
+   *  the caret/selection — Word's lit buttons. Runs per transaction after
+   *  #syncArrangeGreying; toggleAttribute is a no-op on a same-value attr, so
+   *  an unchanged state doesn't re-fire the component. `show-marks` is a
+   *  chrome flag, not an editor state — the host attribute is its truth. */
+  #syncFormatButtons(): void {
+    const state = this.editor?.state;
+    if (!state) return;
+    const rows: [string, boolean][] = [
+      ...formatToggleStatesOf(state),
+      ["show-marks", this.hasAttribute("show-marks")],
+    ];
+    for (const [event, on] of rows) {
+      for (const el of this.shadowRoot?.querySelectorAll<HTMLElement>(
+        `docen-ribbon-toggle-button[event="${event}"]`,
+      ) ?? []) {
+        el.toggleAttribute("pressed", on);
+      }
     }
   }
 

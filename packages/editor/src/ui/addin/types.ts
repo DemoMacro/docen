@@ -56,6 +56,10 @@ export interface RibbonControlBase {
 
 export interface RibbonButton extends RibbonControlBase {
   type: "button";
+  /** Render as a two-state toggle (`docen-ribbon-toggle-button`): the host
+   *  presses it while the format it toggles is live at the caret/selection
+   *  (Word's lit Bold/Italic/… buttons). */
+  toggle?: boolean;
 }
 
 /** A labelled checkbox (Office.js manifest `CheckBox`) — Word's Table Style

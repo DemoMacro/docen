@@ -1066,6 +1066,74 @@ export function chartMenuValueOf(state: EditorState): { type: string; legend: st
   };
 }
 
+// ── Format toggle readers — the ribbon's lit buttons (Word's pressed Bold/
+// Italic/…) mirror these; same key space their commands write, read beside
+// them so a write-side change can't strand the read side ────────────────────
+
+/** Whether the next `toggleMark(name)` click would REMOVE the mark —
+ *  ProseMirror's own toggle predicate: a bare cursor reads the stored marks
+ *  (or the cursor's marks), a range reads any covered run carrying it.
+ *  Mirroring the toggle is what makes a lit button mean "the next click
+ *  clears". */
+function markToggledOf(state: EditorState, name: string): boolean {
+  const type = state.schema.marks[name];
+  if (!type) return false;
+  const { selection } = state;
+  // $cursor is a TextSelection getter, not on the base Selection — narrow.
+  const cursor = selection instanceof TextSelection ? selection.$cursor : null;
+  if (selection.empty && !cursor) return false;
+  // isInSet yields the Mark or undefined — coerce, or a host-side
+  // toggleAttribute(name, undefined) flips instead of clearing.
+  if (cursor) return !!type.isInSet(state.storedMarks ?? cursor.marks());
+  let has = false;
+  for (const range of selection.ranges) {
+    if (has) break;
+    // Selection ranges carry resolved positions ($from.pos/$to.pos).
+    state.doc.nodesBetween(range.$from.pos, range.$to.pos, (node) => {
+      if (type.isInSet(node.marks)) has = true;
+      return !has;
+    });
+  }
+  return has;
+}
+
+/** The alignment every selected paragraph shares ("left" when unset); null
+ *  when they disagree — no align button lights, Word's mixed state. A bare
+ *  cursor reads just the paragraph under it. */
+function alignmentOf(state: EditorState): string | null {
+  const read = (node: PMNode): string => {
+    const a = (node.attrs as Record<string, unknown>).alignment;
+    return typeof a === "string" ? a : "left";
+  };
+  const paras = selectedParagraphs(state);
+  if (paras.length === 0) {
+    const { parent } = state.selection.$from;
+    return parent.type.name === "paragraph" ? read(parent) : null;
+  }
+  const value = read(paras[0].node);
+  return paras.every(({ node }) => read(node) === value) ? value : null;
+}
+
+/** The Home-tab format toggles' current state as [ribbon event, lit] rows —
+ *  marks by their mark name (the ribbon `event` IS the mark name), alignment
+ *  by the shared paragraph attr. */
+export function formatToggleStatesOf(state: EditorState): [string, boolean][] {
+  const alignment = alignmentOf(state);
+  return [
+    ["bold", markToggledOf(state, "bold")],
+    ["italic", markToggledOf(state, "italic")],
+    ["strike", markToggledOf(state, "strike")],
+    ["superscript", markToggledOf(state, "superscript")],
+    ["subscript", markToggledOf(state, "subscript")],
+    ["code", markToggledOf(state, "code")],
+    ["align-left", alignment === "left"],
+    ["align-center", alignment === "center"],
+    ["align-right", alignment === "right"],
+    ["justify", alignment === "both"],
+    ["justify-distribute", alignment === "distribute"],
+  ];
+}
+
 /** The selected wps shape — standalone or a group member. Style commands
  *  (fill/outline) write its attrs wherever it sits, unlike the Arrange
  *  commands which need a floating carrier. */

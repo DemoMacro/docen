@@ -901,7 +901,9 @@ function buildControl(c: RibbonControl, scope: Element): HTMLElement {
       return el;
     }
     case "button": {
-      const el = document.createElement("docen-ribbon-button");
+      const el = document.createElement(
+        c.toggle ? "docen-ribbon-toggle-button" : "docen-ribbon-button",
+      );
       applyBase(el, c, scope);
       return el;
     }
@@ -986,7 +988,7 @@ const sep = (): RibbonSeparator => ({ type: "separator" });
 const btn = (
   icon: string,
   event: string,
-  o: { size?: "large"; iconOnly?: boolean } = {},
+  o: { size?: "large"; iconOnly?: boolean; toggle?: boolean } = {},
 ): RibbonButton => ({
   type: "button",
   icon,
@@ -994,6 +996,7 @@ const btn = (
   label: cmd(event),
   ...(o.size ? { size: o.size } : {}),
   ...(o.iconOnly ? { iconOnly: true } : {}),
+  ...(o.toggle ? { toggle: true } : {}),
 });
 
 const split = (
@@ -1143,12 +1146,12 @@ const homeTab = (styles?: StylesOptions | null): RibbonTab =>
             btn("clear-format", "clear-format", { iconOnly: true }),
           ]),
           row([
-            btn("bold", "bold", { iconOnly: true }),
-            btn("italic", "italic", { iconOnly: true }),
+            btn("bold", "bold", { iconOnly: true, toggle: true }),
+            btn("italic", "italic", { iconOnly: true, toggle: true }),
             split("underline", "underline", parsedItems(underlineItems()), { iconOnly: true }),
-            btn("strike", "strike", { iconOnly: true }),
-            btn("superscript", "superscript", { iconOnly: true }),
-            btn("subscript", "subscript", { iconOnly: true }),
+            btn("strike", "strike", { iconOnly: true, toggle: true }),
+            btn("superscript", "superscript", { iconOnly: true, toggle: true }),
+            btn("subscript", "subscript", { iconOnly: true, toggle: true }),
             sep(),
             btn("phonetic-guide", "phonetic-guide", { iconOnly: true }),
             sep(),
@@ -1175,14 +1178,14 @@ const homeTab = (styles?: StylesOptions | null): RibbonTab =>
               iconOnly: true,
             }),
             btn("sort", "sort", { iconOnly: true }),
-            btn("show-marks", "show-marks", { iconOnly: true }),
+            btn("show-marks", "show-marks", { iconOnly: true, toggle: true }),
           ]),
           row([
-            btn("align-left", "align-left", { iconOnly: true }),
-            btn("align-center", "align-center", { iconOnly: true }),
-            btn("align-right", "align-right", { iconOnly: true }),
-            btn("justify", "justify", { iconOnly: true }),
-            btn("align-distribute", "justify-distribute", { iconOnly: true }),
+            btn("align-left", "align-left", { iconOnly: true, toggle: true }),
+            btn("align-center", "align-center", { iconOnly: true, toggle: true }),
+            btn("align-right", "align-right", { iconOnly: true, toggle: true }),
+            btn("justify", "justify", { iconOnly: true, toggle: true }),
+            btn("align-distribute", "justify-distribute", { iconOnly: true, toggle: true }),
             sep(),
             split("line-spacing", "line-spacing", parsedItems(spacingItems()), { iconOnly: true }),
             picker("shading", "shading", "FFFF00"),
