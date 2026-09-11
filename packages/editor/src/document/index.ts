@@ -5764,9 +5764,17 @@ class DocenDocument extends AddinHost<Editor> {
 
   /** Common load path for openDOCX/openMarkdown: adopt a filename, replace the
    *  whole doc node. The #loadDoc wake-up transaction re-renders the canvas
-   *  through the bridge. */
+   *  through the bridge. A doc without sectionProperties (parseMarkdown
+   *  output, hand-built JSON) lacks the document-level defaults too — doc
+   *  styles, page geometry, docGrid — so every heading renders as plain body
+   *  text. Normalize on the way in, same gate as setJSON: a parseDOCX payload
+   *  carries its own styles/section properties and is left untouched
+   *  (normalizeDocument keeps existing attrs keys). */
   #applyOpenedJSON(json: JSONContent, filename?: string): void {
     if (filename) this.setAttribute("filename", filename);
+    if (!(json.attrs as { sectionProperties?: unknown } | undefined)?.sectionProperties) {
+      json = normalizeDocument(json);
+    }
     this.#loadDoc(json);
   }
 
