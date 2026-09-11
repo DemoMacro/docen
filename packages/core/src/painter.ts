@@ -8,7 +8,7 @@
  */
 import type { FlowItem, LaidOutBlock, LaidOutFootnoteArea, LaidOutStackItem } from "@docen/layout";
 import { columnBoxesOf } from "@docen/layout";
-import { Line, Rect, Text, type IGroup } from "leafer-ui";
+import { Group, Line, Rect, Text, type IGroup } from "leafer-ui";
 
 import type { PaintColumn, PaintContext } from "./paint/context";
 import { paintBreakRow, paintParagraph } from "./paint/paragraph";
@@ -21,30 +21,48 @@ export * from "./paint/table";
 export * from "./paint/paragraph";
 
 export function paintScene(tree: IGroup, items: readonly FlowItem[], ctx: PaintContext): void {
+  // One content-positioned group holds the item leaves (origin = the content
+  // box origin) — per-item repaint hangs the same walk on per-item groups at
+  // their flow positions instead (see paintItem). Deferred floats still land
+  // page-local in the caller's tree, so the target rides the context.
+  const content = new Group({ x: ctx.flow.contentLeftPx, y: ctx.flow.contentTopPx });
+  tree.add(content);
+  const ictx: PaintContext = {
+    ...ctx,
+    origin: { x: ctx.flow.contentLeftPx, y: ctx.flow.contentTopPx },
+    floatsTarget: { behind: tree, body: tree },
+  };
+  for (const item of items) paintItem(content, item, ictx);
+}
+
+/** Paint one flow item relative to the group content hangs from (ctx.origin —
+ *  paintScene pins it at the content box, per-item repaint at the item's flow
+ *  position): leaves land group-local, so an unchanged item repaints by a
+ *  group translation alone. */
+export function paintItem(tree: IGroup, item: FlowItem, ctx: PaintContext): void {
+  const x = ctx.flow.contentLeftPx + (item.xPx ?? 0) - (ctx.origin?.x ?? 0);
+  const y = ctx.flow.contentTopPx + item.yPx - (ctx.origin?.y ?? 0);
   const cols = columnBoxesOf(ctx.flow.contentWidthPx, ctx.columns);
-  for (const item of items) {
-    const x = ctx.flow.contentLeftPx + (item.xPx ?? 0);
-    paintBlock(
-      tree,
-      item.block,
-      x,
-      ctx.flow.contentTopPx + item.yPx,
-      ctx,
-      // A multi-column item paints within its column box: shading fills,
-      // paragraph borders and the break rows' rules span the column, not the
-      // whole content width (the table walk threads its cell width the same
-      // way). The interval match survives float drift between the flow's
-      // stamped x and the boxes recomputed here.
-      item.xPx != null
-        ? {
-            width:
-              cols.find((c) => item.xPx! >= c.xPx - 0.01 && item.xPx! < c.xPx + c.widthPx)
-                ?.widthPx ?? cols[0]!.widthPx,
-            inCell: false,
-          }
-        : undefined,
-    );
-  }
+  paintBlock(
+    tree,
+    item.block,
+    x,
+    y,
+    ctx,
+    // A multi-column item paints within its column box: shading fills,
+    // paragraph borders and the break rows' rules span the column, not the
+    // whole content width (the table walk threads its cell width the same
+    // way). The interval match survives float drift between the flow's
+    // stamped x and the boxes recomputed here.
+    item.xPx != null
+      ? {
+          width:
+            cols.find((c) => item.xPx! >= c.xPx - 0.01 && item.xPx! < c.xPx + c.widthPx)?.widthPx ??
+            cols[0]!.widthPx,
+          inCell: false,
+        }
+      : undefined,
+  );
 }
 
 /** Paint the document grid (Word's View → Gridlines): one horizontal rule

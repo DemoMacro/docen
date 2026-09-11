@@ -158,6 +158,9 @@ export function paintParagraph(
   ctx: PaintContext,
   col?: PaintColumn,
 ): void {
+  const origin = ctx.origin;
+  const offX = origin?.x ?? 0;
+  const offY = origin?.y ?? 0;
   // The paragraph's right edge: the column/cell width when one was threaded
   // down (a table cell's content box, a w:cols column), else the full content
   // width. Shading, borders and the marks rules all stop here.
@@ -184,10 +187,22 @@ export function paintParagraph(
       const host = { para, index: index++, kind: "drawing" as const };
       if (!drawing.behind) continue;
       // Deferred like the body band: the stage sorts the queue by
-      // relativeHeight, so same-band stacking follows the z-order.
-      const paint = (): void => paintDrawing(tree, drawing, x, y, ctx, col, host);
-      if (ctx.deferredDrawings)
-        ctx.deferredDrawings.push({ z: drawing.zIndex ?? 0, layer: "behind", paint });
+      // relativeHeight, so same-band stacking follows the z-order. The queue
+      // executes page-local into the page-level float target, so the closure
+      // re-bases the paragraph-local (x,y) and clears the origin.
+      const deferred = ctx.deferredDrawings;
+      const floats = deferred && ctx.floatsTarget?.behind;
+      const paint = (): void =>
+        paintDrawing(
+          floats ?? tree,
+          drawing,
+          floats ? x + offX : x,
+          floats ? y + offY : y,
+          floats && origin ? { ...ctx, origin: undefined } : ctx,
+          col,
+          host,
+        );
+      if (deferred) deferred.push({ z: drawing.zIndex ?? 0, layer: "behind", paint });
       else paint();
     }
     return;
@@ -550,8 +565,8 @@ export function paintParagraph(
         // re-finds the same k-th non-floating image node.
         ctx.hitBoxes?.push({
           page: ctx.pageIndex,
-          x: lineX + item.xPx,
-          y: baselineY - item.heightPx,
+          x: lineX + item.xPx + offX,
+          y: baselineY - item.heightPx + offY,
           width: item.widthPx,
           height: item.heightPx,
           para,
@@ -624,10 +639,11 @@ export function paintParagraph(
             inline.rotation || inline.flipH || inline.flipV
               ? undefined
               : { para, index: inlinePicIndex - 1, kind: "inline" },
-            // The holder sits at (ox,oy) on the page while members paint
-            // tree-local — chart boxes register in page space.
-            ox,
-            oy,
+            // The holder sits at (ox,oy) in paint space while members paint
+            // tree-local — chart boxes register in page space, so the origin
+            // rides along (paintMembers adds it to the exported boxes).
+            ox + offX,
+            oy + offY,
           );
           target.add(holder);
           if (inline.line)
@@ -734,9 +750,21 @@ export function paintParagraph(
       if (ctx.hitBoxes) recordDrawingHit(drawing, x, y, ctx, ctx.hitBoxes, host);
       continue;
     }
-    const paint = (): void => paintDrawing(tree, drawing, x, y, ctx, col, host);
-    if (ctx.deferredDrawings)
-      ctx.deferredDrawings.push({ z: drawing.zIndex ?? 0, layer: "body", paint });
+    // In-front floats defer to the queue the stage executes page-local into
+    // the page-level float target — same re-basing as the behind band above.
+    const deferred = ctx.deferredDrawings;
+    const floats = deferred && ctx.floatsTarget?.body;
+    const paint = (): void =>
+      paintDrawing(
+        floats ?? tree,
+        drawing,
+        floats ? x + offX : x,
+        floats ? y + offY : y,
+        floats && origin ? { ...ctx, origin: undefined } : ctx,
+        col,
+        host,
+      );
+    if (deferred) deferred.push({ z: drawing.zIndex ?? 0, layer: "body", paint });
     else paint();
   }
 }

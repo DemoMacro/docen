@@ -8,6 +8,7 @@ import type {
   ProjectedPageBackground,
   ProjectedPageFurniture,
 } from "@docen/layout";
+import type { IGroup } from "leafer-ui";
 
 /** One hit-testable drawing box, page-local px — what a click needs to grab a
  *  drawing (Word: clicking a picture selects it). `para` is the laid host
@@ -185,6 +186,16 @@ export interface PaintContext {
   pageIndex: number;
   pageCount: number;
   layer: "behind" | "body";
+  /** The page position of the group painted content hangs from: leaves take
+   *  group-local coordinates while exported geometry (hit boxes, text stacks,
+   *  deferred floats) stays page-local — a per-item group can then move by
+   *  translation alone. Absent = the group sits at the page origin. */
+  origin?: { x: number; y: number };
+  /** The page-level groups deferred floats paint into: the stage's z-sorting
+   *  queue executes them after the body pass, so a float anchored to any
+   *  paragraph must land page-local above/below every item group. Absent =
+   *  floats paint inside the caller's tree (furniture stacks). */
+  floatsTarget?: { behind?: IGroup; body?: IGroup };
   /** Forces a frame after an async image insert: Leafer's change-driven
    *  scheduling stalls on apps created while offscreen (see stage.repaint),
    *  so a decode completing after repaint would otherwise never show. */

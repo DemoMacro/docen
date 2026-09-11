@@ -75,7 +75,8 @@ export function recordDrawingHit(
   boxes: DrawingHitBox[],
   host: DrawingHost,
 ): void {
-  const box = drawingBoxOf(drawing, x, y, ctx);
+  const origin = ctx.origin;
+  const box = drawingBoxOf(drawing, x + (origin?.x ?? 0), y + (origin?.y ?? 0), ctx);
   boxes.push({
     page: ctx.pageIndex,
     x: box.x,
@@ -112,13 +113,18 @@ export function paintDrawing(
   col: PaintColumn | undefined,
   host: DrawingHost,
 ): void {
-  const box = drawingBoxOf(drawing, x, y, ctx, col);
-  const boxX = box.x;
-  const boxY = box.y;
+  // The anchor resolves against page-local positions (the flow's absolute
+  // bases and the caller's anchor-paragraph position), while the members
+  // paint group-local below — ctx.origin is the gap between the two.
+  const offX = ctx.origin?.x ?? 0;
+  const offY = ctx.origin?.y ?? 0;
+  const box = drawingBoxOf(drawing, x + offX, y + offY, ctx, col);
+  const boxX = box.x - offX;
+  const boxY = box.y - offY;
   ctx.hitBoxes?.push({
     page: ctx.pageIndex,
-    x: boxX,
-    y: boxY,
+    x: box.x,
+    y: box.y,
     width: drawing.width,
     height: drawing.height,
     para: host.para,
@@ -173,7 +179,9 @@ export function paintDrawing(
       height: drawing.height,
       overflow: "hide",
     });
-    paintMembers(holder, drawing.members, 0, 0, ctx, host, ox, oy);
+    // The holder's page origin rides along: chart boxes register in page
+    // space while the members paint tree-local inside the clip box.
+    paintMembers(holder, drawing.members, 0, 0, ctx, host, ox + offX, oy + offY);
     target.add(holder);
   } else {
     // A rotated or mirrored drawing transforms in a group — its text lines'
@@ -227,8 +235,8 @@ export function paintMembers(
     if (host && m.childPath) {
       ctx.hitBoxes?.push({
         page: ctx.pageIndex,
-        x: mx,
-        y: my,
+        x: mx + (ctx.origin?.x ?? 0),
+        y: my + (ctx.origin?.y ?? 0),
         width: m.width,
         height: m.height,
         para: host.para,
@@ -317,7 +325,14 @@ export function paintMembers(
         tree,
         { ...m, x: mx, y: my },
         host && !m.childPath
-          ? { ctx, para: host.para, index: host.index, kind: host.kind, ox: originX, oy: originY }
+          ? {
+              ctx,
+              para: host.para,
+              index: host.index,
+              kind: host.kind,
+              ox: originX + (ctx.origin?.x ?? 0),
+              oy: originY + (ctx.origin?.y ?? 0),
+            }
           : undefined,
       );
     } else if (m.kind === "shape") {
@@ -374,8 +389,8 @@ export function paintMembers(
         ctx.shapeTextStacks.push({
           page: ctx.pageIndex,
           host: { para: host.para, index: host.index, childPath: m.childPath },
-          xPx: mx + left,
-          yPx: my + oy,
+          xPx: mx + left + (ctx.origin?.x ?? 0),
+          yPx: my + oy + (ctx.origin?.y ?? 0),
           items: laid.stack,
         });
       }
