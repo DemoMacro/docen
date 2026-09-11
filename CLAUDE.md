@@ -8,6 +8,7 @@
 - **`@docen/vue`** — Vue 3 adapter for `@docen/editor`: a typed `<DocenDocument>` component (`v-model` content + `v-slot="{ editor }"` + template-ref expose). `vue` is a peer dependency and `@docen/editor` a regular dependency, so the Vue surface stays isolated from the framework-neutral core.
 - **`@docen/editor`** — multi-editor assembly: a Fluent UI host (`<docen-workspace>` + UI surfaces) shared by editor elements `<docen-document>` (today) and `<docen-presentation>`/`<docen-workbook>` (future); all UI surfaces (title-bar/ribbon/status-bar/panes) and engine extensions are contributed by **add-ins** (Office.js-style). Bundles the `@docen/docx` engine; owns the canvas stage, painting, and caret/selection mapping.
 - **`@docen/docx`** — the engine: Tiptap DOCX schema + converters + custom extensions + the layout projection (Tiptap JSON → LayoutDoc, incl. WMF/EMF+ metafile replay). No UI.
+- **`@docen/markdown`** — the format-agnostic Markdown syntax layer: parses Markdown into a neutral IR (heading/nested lists/tables/quotes/inline marks) and renders it back. Format packages implement `MarkdownMapper<T>` to bind their own model; `@docen/docx` ships the reference mapper and re-exports the one-argument `parseMarkdown`/`generateMarkdown`.
 - **`@docen/layout`** — the layout engine: block/flow/text measurement and pagination producing a paginated `LayoutDoc`. Pure computation, no DOM, no editor types.
 - **`@docen/pretext`** — vendored fork of `@chenglou/pretext` 0.0.8 (text measurement & line breaking), maintained in-tree because docen's Word/CJK `edit == render` fixes (CJK canvas→DOM advance correction, empty-text atom retention) are deeper than a patch file carries. Consumed by `@docen/layout` (line breaking) and `@docen/editor` (paginator measurement).
 - **`@docen/core`** — the scene painter package: LayoutDoc → LeaferJS tree, consumed by the editors' canvas stages. No layout decisions, no editing semantics.
@@ -46,7 +47,7 @@ parseDOCX(buffer) → JSONContent                       // DOCX → Tiptap JSON
 generateDOCX<T>(json, options?) → Promise<OutputByType[T]>   // prepare + compile + generateDocument
 generateDOCXSync<T>(json, packer?) → OutputByType[T]         // sync; no prepare
 generateDOCXStream(json, options?) → Promise<ReadableStream>
-parseMarkdown / generateMarkdown                       // the second conversion format
+parseMarkdown / generateMarkdown                       // Markdown ↔ Tiptap JSON, via the @docen/markdown IR + mapper
 
 // Paste input (input-only; no HTML output exists)
 parseHTMLBody(body, schema) → JSONContent             // text/html clipboard → Tiptap JSON

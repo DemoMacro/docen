@@ -35,6 +35,7 @@
 | [@docen/editor](./packages/editor/README.md)                | ![npm](https://img.shields.io/npm/v/@docen/editor)      | 组装层——Fluent UI 宿主 + docx 引擎，产出 `<docen-document>`             |
 | [@docen/docx](./packages/docx/README.md)                    | ![npm](https://img.shields.io/npm/v/@docen/docx)        | DOCX 引擎——Tiptap schema + 转换器 + 排版投影，由 @office-open/docx 驱动 |
 | [@docen/layout](./packages/layout/README.md)                | ![npm](https://img.shields.io/npm/v/@docen/layout)      | 分页引擎——测量 → 分页 LayoutDoc，Word 的堆叠规则                        |
+| [@docen/markdown](./packages/markdown/README.md)            | ![npm](https://img.shields.io/npm/v/@docen/markdown)    | Markdown 语法层——中性 IR + 渲染器，各格式以 mapper 绑定自己的模型       |
 | [@docen/pretext](./packages/pretext/README.md)              | ![npm](https://img.shields.io/npm/v/@docen/pretext)     | @chenglou/pretext 的 vendored fork——CJK 测量修正 + Word/CJK 排版修复    |
 | [@docen/core](./packages/core/README.md)                    | ![npm](https://img.shields.io/npm/v/@docen/core)        | 场景绘制器——LayoutDoc → LeaferJS 树，供画布编辑器使用                   |
 | [leafer-x-metafile](./packages/leafer-x-metafile/README.md) | ![npm](https://img.shields.io/npm/v/leafer-x-metafile)  | 零依赖 WMF/EMF+ 图元文件回放 → 中立 drawing 成员                        |

@@ -263,7 +263,7 @@ All conversions go through TipTap JSON as the intermediate format, ensuring cons
 - **@docen/docx** - DOCX / Markdown converters built on the DocxManager architecture (full surface via `docen/docx`)
 - **@docen/editor** - Fluent UI shell + docx engine → `<docen-document>` (exposed via the `docen/editor` subpath)
 - **@office-open/docx** - Native OOXML parse/generate (`parseDocument`, `generateDocument`, `patchDocument`)
-- **@tiptap/markdown** - Markdown serialization (via @docen/docx)
+- **@docen/markdown** - Format-agnostic Markdown syntax layer — the IR + renderer behind `parseMarkdown`/`generateMarkdown`
 
 ## Comparison with Alternatives
 
