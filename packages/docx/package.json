@@ -68,11 +68,11 @@
   },
   "dependencies": {
     "@docen/layout": "workspace:*",
+    "@docen/markdown": "workspace:*",
     "@office-open/core": "0.14.5",
     "@office-open/docx": "0.14.5",
     "@tiptap/core": "3.31.3",
     "@tiptap/extension-link": "3.31.3",
-    "@tiptap/markdown": "3.31.3",
     "@tiptap/pm": "3.31.3",
     "image-meta": "0.2.2",
     "leafer-x-metafile": "workspace:*"

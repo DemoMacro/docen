@@ -52,14 +52,17 @@ const LEVEL_GLYPH_CYCLE = ["●", "○", "■"];
 
 /** Build nine ordered levels; level 0 carries `format`, deeper levels decimal
  *  (Word's library lists only restyle the top level). Each level restarts at 1
- *  and indents like Word's built-in lists (0.5" per level, 0.25" hanging). */
+ *  (a level override via `levelStarts` — imported lists numbering from a
+ *  custom value) and indents like Word's built-in lists (0.5" per level,
+ *  0.25" hanging). */
 export function buildOrderedLevels(
   format: LevelsOptions["format"] = LevelFormat.DECIMAL,
+  levelStarts?: ReadonlyMap<number, number>,
 ): LevelsOptions[] {
   return Array.from({ length: 9 }, (_, level): LevelsOptions => ({
     level,
     format: level === 0 ? format : LevelFormat.DECIMAL,
-    start: 1,
+    start: levelStarts?.get(level) ?? 1,
     text: ORDERED_LEVEL_TEXT[level],
     paragraph: {
       indent: { left: 720 * (level + 1), hanging: 360 },

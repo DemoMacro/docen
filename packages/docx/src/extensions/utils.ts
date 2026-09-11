@@ -44,10 +44,12 @@ export const SECTION_ATTR_KEYS = new Set<string>(SECTION_CLOSE_KEYS);
 // exist nowhere in office-open (typos, retired fields).
 
 /** Attr keys layered on top of the office-open mirror: the section-close
- *  markers (SECTION_ATTR_KEYS). Every other office-open paragraph property —
- *  including heading/style/bullet/numbering/thematicBreak, once owned by the
- *  deleted heading/list nodes — is mirrored verbatim. */
-type EditorParagraphAttrKey = (typeof SECTION_CLOSE_KEYS)[number];
+ *  markers (SECTION_ATTR_KEYS) and docen-only round-trip fields with no
+ *  OOXML paragraph counterpart (renderDocx skips them). Every other
+ *  office-open paragraph property — including heading/style/bullet/numbering/
+ *  thematicBreak, once owned by the deleted heading/list nodes — is mirrored
+ *  verbatim. */
+type EditorParagraphAttrKey = (typeof SECTION_CLOSE_KEYS)[number] | "codeLanguage";
 
 /** The full attr key set the paragraph node declares. */
 type ParagraphAttrKey = EditorParagraphAttrKey | keyof ParagraphPropertiesOptionsBase;
@@ -150,6 +152,9 @@ export function docxParagraphAttrs() {
     cnfStyle: attrNative(),
     // Round-trip marker for a bare <w:pPr/> (element presence is fidelity).
     emptyProperties: attrNative(),
+    // Markdown code-fence info string (```ts) riding the JSON — docen-only,
+    // no OOXML paragraph counterpart; renderDocx skips it.
+    codeLanguage: attrNative(),
     // Mirror contract: every office-open paragraph property + editor key
     // declared, nothing else (see ParagraphAttrKey).
   } satisfies Record<ParagraphAttrKey, DocxAttrSpec>;

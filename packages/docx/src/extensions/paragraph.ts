@@ -1,6 +1,6 @@
 import type { ParagraphOptions, StylesOptions } from "@office-open/docx";
 import { Node as TiptapNode } from "@tiptap/core";
-import type { JSONContent, MarkdownRendererHelpers, RenderContext } from "@tiptap/core";
+import type { JSONContent } from "@tiptap/core";
 
 import { indexParagraphStyles } from "../style-cascade";
 import { HTML_ORDERED_TEMP } from "./list-numbering";
@@ -30,7 +30,7 @@ export const HEADING_COMPILE_MAP: Record<number, string> = {
   9: "Heading9",
 };
 
-const HEADING_PARSE_MAP: Record<string, number> = {
+export const HEADING_PARSE_MAP: Record<string, number> = {
   Heading1: 1,
   Heading2: 2,
   Heading3: 3,
@@ -110,6 +110,10 @@ export function renderDocx(node: JSONContent): Record<string, unknown> {
     // Runtime-only attrs the TableOfContents extension injects on each heading
     // (id / data-toc-id) are regenerated on every load — never persist them.
     if (key === "id" || key === "data-toc-id") continue;
+    // docen-only round-trip data with no OOXML paragraph counterpart (the
+    // markdown code-fence info string) — keeps the JSON lossless but must not
+    // reach ParagraphOptions.
+    if (key === "codeLanguage") continue;
     opts[key] = value;
   }
   return opts;
@@ -216,30 +220,4 @@ export const Paragraph = TiptapNode.create({
 
   renderDocx,
   parseDocx,
-
-  // Markdown serialization: a heading paragraph renders as "#{level} text"; a
-  // thematic-break paragraph as "---"; a blockquote-styled paragraph gets the
-  // "> " prefix (Word's quote = the built-in IntenseQuote paragraph style); a
-  // "Code"-styled paragraph renders as a fenced code block; everything else
-  // keeps the upstream paragraph semantics (empty paragraphs emit the &nbsp;
-  // empty-paragraph marker between consecutive empties).
-  renderMarkdown: (node: JSONContent, h: MarkdownRendererHelpers, ctx: RenderContext): string => {
-    const attrs = (node.attrs ?? {}) as {
-      heading?: string | null;
-      style?: string | null;
-      thematicBreak?: boolean | null;
-    };
-    if (attrs.thematicBreak) return "---";
-    const level = attrs.heading ? HEADING_PARSE_MAP[attrs.heading] : undefined;
-    const content = h.renderChildren(Array.isArray(node.content) ? node.content : []);
-    if (level) return `${"#".repeat(level)} ${content}`;
-    if (!node.content || node.content.length === 0) {
-      const prev = ctx?.previousNode;
-      const prevIsEmptyParagraph =
-        prev?.type === "paragraph" && (!prev.content || prev.content.length === 0);
-      return prevIsEmptyParagraph ? "&nbsp;" : "";
-    }
-    if (attrs.style === "Code") return `\`\`\`\n${content}\n\`\`\``;
-    return attrs.style === "IntenseQuote" ? `> ${content}` : content;
-  },
 });
