@@ -97,7 +97,7 @@ export const docxExtensions: AnyExtension[] = [...tiptapNodeExtensions, ...tipta
 export { Bold, Code, Highlight, Italic, Strike, Subscript, Superscript, Underline } from "./marks";
 export { Document, createDocument } from "./document";
 export { Paragraph } from "./paragraph";
-export { detectHeadingLevel } from "./paragraph";
+export { detectHeadingLevel, HEADING_COMPILE_MAP } from "./paragraph";
 // Flat list model: generated numbering references + level builders shared by
 // compile (definition registration) and the editor list commands.
 export {

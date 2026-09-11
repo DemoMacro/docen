@@ -16,6 +16,8 @@ import {
   parseHTMLBody,
   DOCEN_CLIP_MIME,
   selectionSlicePayload,
+  HEADING_COMPILE_MAP,
+  nextOrderedReference,
   type JSONContent,
 } from "@docen/docx";
 import { Editor } from "@docen/docx/core";
@@ -36,13 +38,14 @@ import { getMatchHighlights } from "prosemirror-search";
 
 import { DrawingGestures, type DrawingHit } from "../../drawing";
 import { t } from "../../ui/i18n/localize";
-import { listLevelStepPatch } from "../extensions/commands";
+import { collectListReferences, listLevelStepPatch } from "../extensions/commands";
 import { KEYBOARD_SHORTCUTS } from "../extensions/keymap";
 import { autocorrectOf } from "./autocorrect";
 import { CaretMap, type TableZone } from "./caret-map";
 import { CellSelection, cellAt, inSameTable } from "./cell-selection";
 import { installChartHover, type ChartTip } from "./chart-hover";
 import { followLink, installLinkHover, type LinkHit } from "./link-hover";
+import { blockRuleOf, enterRuleOf, inlineRuleOf, isHyphenRun } from "./markdown-input";
 import { sameChildPath } from "./stage";
 
 /** Word's format-painter cursor: the text I-beam with the paint brush riding
@@ -225,6 +228,10 @@ export interface EditBridgeOptions {
   /** The format painter's armed state (Home → Format Painter) — owns the
    *  cursor (Word's brush I-beam) until the paint lands or Esc disarms. */
   formatPaint?: () => boolean;
+  /** The Markdown input mode (Options → Markdown input). While on, the typed
+   *  leg applies the markdown block/inline conversions before autocorrect
+   *  sees the character. Read per keystroke, so the toggle lands mid-session. */
+  markdown?: () => boolean;
   /** A finished sweep — every crossed table edge (cell pos + side, both
    *  collapse halves of an interior line included) for the host to commit as
    *  one paint/erase command. */
@@ -1903,19 +1910,81 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
         if (!event.data) break;
         // Autocorrect rides the typed leg only — the last character before
         // the caret decides the smart quote's side, and a boundary character
-        // corrects the word behind it. IME/paste/spell legs skip this.
+        // corrects the word behind it. IME/paste/spell legs skip this. The
+        // Markdown input mode preempts it on the same leg: a block sequence
+        // or a closed inline delimiter converts instead, and a leading
+        // hyphen run stays literal (the horizontal-rule sequence must
+        // survive autocorrect's em-dash rewrite). Off-mode autocorrect
+        // behaves exactly as before.
         const s = active();
-        const $from = s.editor.state.selection.$from;
+        const sel = s.editor.state.selection;
+        const $from = sel.$from;
         const textBefore = $from.parent.textBetween(0, $from.parentOffset);
-        const fix = autocorrectOf(event.data, textBefore);
-        if (fix) {
+        const md = !sel.empty ? false : (opts.markdown?.() ?? false);
+        const block = md ? blockRuleOf(event.data, textBefore) : null;
+        const inline = !block && md ? inlineRuleOf(event.data, textBefore) : null;
+        if (block) {
           s.editor.commands.command(({ state, dispatch }) => {
-            const { from, to } = state.selection;
-            dispatch?.(state.tr.insertText(fix.text, from - fix.back, to));
+            const { from } = state.selection;
+            const attrs = $from.parent.attrs as Record<string, unknown>;
+            const target: Record<string, unknown> = {
+              ...attrs,
+              heading: null,
+              style: null,
+              bullet: null,
+              numbering: null,
+              thematicBreak: null,
+            };
+            if (block.kind === "heading") target.heading = HEADING_COMPILE_MAP[block.level];
+            else if (block.kind === "quote") target.style = "IntenseQuote";
+            else if (block.kind === "bullet") target.bullet = { level: 0 };
+            else {
+              target.numbering = {
+                reference: nextOrderedReference(
+                  collectListReferences(state.doc),
+                  (state.doc.attrs as { numbering?: unknown }).numbering,
+                ),
+                level: 0,
+                start: block.start,
+              };
+            }
+            const tr = state.tr;
+            tr.insertText("", from - textBefore.length, from);
+            tr.setNodeMarkup($from.before(), undefined, target);
+            dispatch?.(tr.scrollIntoView());
             return true;
           });
-        } else {
+        } else if (inline) {
+          s.editor.commands.command(({ state, dispatch }) => {
+            const { from, to } = state.selection;
+            const base = from - textBefore.length;
+            const openStart = base + inline.openStart;
+            const tr = state.tr;
+            // The typed character is never inserted: the closing delimiter
+            // loses only its earlier half (already in textBefore).
+            tr.insertText("", from - (inline.openLen - 1), to);
+            tr.insertText("", openStart, openStart + inline.openLen);
+            tr.addMark(
+              openStart,
+              openStart + inline.innerLen,
+              state.schema.marks[inline.mark]!.create(),
+            );
+            dispatch?.(tr.scrollIntoView());
+            return true;
+          });
+        } else if (md && event.data === "-" && isHyphenRun(textBefore)) {
           insertText(event.data);
+        } else {
+          const fix = autocorrectOf(event.data, textBefore);
+          if (fix) {
+            s.editor.commands.command(({ state, dispatch }) => {
+              const { from, to } = state.selection;
+              dispatch?.(state.tr.insertText(fix.text, from - fix.back, to));
+              return true;
+            });
+          } else {
+            insertText(event.data);
+          }
         }
         break;
       }
@@ -1925,7 +1994,12 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       // bullet/numbering on every Enter — so the split re-applies the
       // paragraph's attrs (minus the section-close markers, which belong to
       // the paragraph closing the section). An EMPTY list paragraph exits the
-      // list instead (Word: Enter on an empty item ends the list).
+      // list instead (Word: Enter on an empty item ends the list), and an
+      // empty Code paragraph exits the code style the same way. With the
+      // Markdown input mode on, a paragraph whose whole text is an opening
+      // code fence converts to a Code paragraph instead of splitting, and a
+      // horizontal-rule line converts to a thematic break followed by a fresh
+      // paragraph for the caret.
       case "insertParagraph":
       case "insertLineBreak":
         active().editor.commands.command(({ state, dispatch }) => {
@@ -1945,6 +2019,44 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
               }),
             );
             return true;
+          }
+          if (attrs.style === "Code" && empty && parent.content.size === 0) {
+            dispatch?.(
+              state.tr.setNodeMarkup($from.before(), undefined, {
+                ...attrs,
+                style: null,
+                codeLanguage: null,
+              }),
+            );
+            return true;
+          }
+          if (opts.markdown?.() ?? false) {
+            const fence = enterRuleOf(parent.textContent);
+            if (fence?.kind === "code") {
+              const tr = state.tr;
+              // The fence line itself never becomes code content.
+              tr.delete($from.start(), $from.end());
+              tr.setNodeMarkup($from.before(), undefined, {
+                ...attrs,
+                style: "Code",
+                codeLanguage: fence.language,
+              });
+              dispatch?.(tr.scrollIntoView());
+              return true;
+            }
+            if (fence?.kind === "hr" && dispatch) {
+              const tr = state.tr;
+              tr.delete($from.start(), $from.end());
+              tr.setNodeMarkup($from.before(), undefined, { ...attrs, thematicBreak: true });
+              const carried = { ...attrs };
+              delete carried.sectionProperties;
+              delete carried.sectionHeaders;
+              delete carried.sectionFooters;
+              delete carried.thematicBreak;
+              tr.split(tr.mapping.map($from.pos), 1, [{ type: parent.type, attrs: carried }]);
+              dispatch(tr.scrollIntoView());
+              return true;
+            }
           }
           if (dispatch) {
             const tr = state.tr;

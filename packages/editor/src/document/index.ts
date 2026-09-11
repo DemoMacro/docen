@@ -280,6 +280,9 @@ class DocenDocument extends AddinHost<Editor> {
   @attr view?: string;
 
   #bridge?: EditBridge;
+  /** The Markdown input mode (Options → Markdown) — session-level, like the
+   *  spelling toggle: the bridge reads it per keystroke via a getter. */
+  #markdown = true;
   /** References-tab commands (citations/bibliography/index marking), split
    *  out of this class — see commands/references.ts. */
   readonly #spelling = new SpellingCommands({
@@ -1124,6 +1127,7 @@ class DocenDocument extends AddinHost<Editor> {
       inputHost: this.shadowRoot!.querySelector<HTMLElement>(".input-layer")!,
       content: initialDoc,
       onDoc: (json) => this.#renderDoc(json),
+      markdown: () => this.#markdown,
       pageHost: (page) => this.#stage?.slotAt(page)?.parentElement ?? null,
       extensions: [...docxExtensions, ...(defaultAddin.extensions ?? [])],
       scale: () => this.#stage?.scale() ?? 1,
@@ -5377,12 +5381,13 @@ class DocenDocument extends AddinHost<Editor> {
         break;
       case "options": {
         // Filename menu → open the Options dialog (UI language + theme +
-        // spell-as-you-type).
+        // spell-as-you-type + Markdown input).
         const optionsEl = this.shadowRoot?.querySelector("docen-options-dialog");
         if (optionsEl) {
           optionsEl.setAttribute("locale", this.lang || document.documentElement.lang || "zh-CN");
           optionsEl.setAttribute("theme", this.theme ?? "light");
           optionsEl.setAttribute("proofing", String(this.#spelling.enabled()));
+          optionsEl.setAttribute("markdown", String(this.#markdown));
           (optionsEl as unknown as { show?: () => void }).show?.();
         }
         break;
@@ -5434,8 +5439,15 @@ class DocenDocument extends AddinHost<Editor> {
 
   /** Options dialog 确定 — commit the UI language + theme. */
   readonly #onOptionsOk = (event: Event): void => {
-    const { lang, theme, spellcheck } =
-      (event as CustomEvent<{ lang?: string; theme?: string; spellcheck?: boolean }>).detail ?? {};
+    const { lang, theme, spellcheck, markdown } =
+      (
+        event as CustomEvent<{
+          lang?: string;
+          theme?: string;
+          spellcheck?: boolean;
+          markdown?: boolean;
+        }>
+      ).detail ?? {};
     if (lang && this.getAttribute("lang") !== lang) {
       this.setAttribute("lang", lang);
       this.#emitLangChange(lang);
@@ -5445,6 +5457,7 @@ class DocenDocument extends AddinHost<Editor> {
       this.#emitThemeChange(theme);
     }
     if (typeof spellcheck === "boolean") this.#spelling.setEnabled(spellcheck);
+    if (typeof markdown === "boolean") this.#markdown = markdown;
   };
 
   /** Notify external listeners (framework wrappers like @docen/vue) when the

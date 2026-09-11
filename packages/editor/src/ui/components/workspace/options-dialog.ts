@@ -122,6 +122,10 @@ const template = html<DocenOptionsDialog>`
         <div class="opt-heading" ${ref("spellHeadingEl")}></div>
         <fluent-checkbox ${ref("spellBox")}></fluent-checkbox>
       </div>
+      <div class="opt-field">
+        <div class="opt-heading" ${ref("markdownHeadingEl")}></div>
+        <fluent-checkbox ${ref("markdownBox")}></fluent-checkbox>
+      </div>
     </div>
     <div slot="action" class="opt-actions">
       <fluent-button
@@ -155,8 +159,9 @@ type ComboboxLike = {
  * on `<docen-dialog>` for
  * the modal shell (backdrop / Esc / show).
  *
- * The host seeds the current values via `locale` / `theme` / `proofing`, calls
- * `show()`, and listens for `options:ok { lang, theme, spellcheck }` (确定).
+ * The host seeds the current values via `locale` / `theme` / `proofing` /
+ * `markdown`, calls `show()`, and listens for
+ * `options:ok { lang, theme, spellcheck, markdown }` (确定).
  * Cancel / Esc just close.
  * State commits atomically on OK (Office behavior — not live).
  *
@@ -172,6 +177,9 @@ class DocenOptionsDialog extends FASTElement {
   /** Whether spell-as-you-type runs ("true"/"false") — the Proofing section's
    *  checkbox pre-fills from it. Absent = on. */
   @attr proofing?: string;
+  /** Whether the Markdown input mode is on ("true"/"false") — the Markdown
+   *  section's checkbox pre-fills from it. Absent = on. */
+  @attr markdown?: string;
 
   @observable dialogEl?: HTMLElement & { heading?: string; show(): void; hide(): void };
   @observable headingEl?: HTMLElement;
@@ -184,6 +192,8 @@ class DocenOptionsDialog extends FASTElement {
   @observable themeInput?: HTMLInputElement;
   @observable spellHeadingEl?: HTMLElement;
   @observable spellBox?: HTMLElement & { checked?: boolean };
+  @observable markdownHeadingEl?: HTMLElement;
+  @observable markdownBox?: HTMLElement & { checked?: boolean };
   @observable okBtn?: HTMLElement;
   @observable cancelBtn?: HTMLElement;
   /** Pickable locales — refreshed when a locale is registered at runtime. */
@@ -233,6 +243,7 @@ class DocenOptionsDialog extends FASTElement {
     // The checkbox writes `checked` directly — programmatic currentChecked
     // never renders (the prefill/read-back rule).
     if (this.spellBox) this.spellBox.checked = this.proofing !== "false";
+    if (this.markdownBox) this.markdownBox.checked = this.markdown !== "false";
     this.#syncCombobox(
       this.dropdown as unknown as ComboboxLike | undefined,
       this.listbox,
@@ -259,6 +270,7 @@ class DocenOptionsDialog extends FASTElement {
           lang: this.#langLocal,
           theme: this.#themeLocal,
           spellcheck: this.spellBox?.checked !== false,
+          markdown: this.markdownBox?.checked !== false,
         },
       }),
     );
@@ -285,6 +297,8 @@ class DocenOptionsDialog extends FASTElement {
     if (this.themeHeadingEl) this.themeHeadingEl.textContent = t("options.theme", this);
     if (this.spellHeadingEl) this.spellHeadingEl.textContent = t("options.proofing", this);
     if (this.spellBox) this.spellBox.textContent = t("options.spellAsYouType", this);
+    if (this.markdownHeadingEl) this.markdownHeadingEl.textContent = t("options.markdown", this);
+    if (this.markdownBox) this.markdownBox.textContent = t("options.markdownInput", this);
     if (this.okBtn) this.okBtn.textContent = t("options.ok", this);
     if (this.cancelBtn) this.cancelBtn.textContent = t("options.cancel", this);
   }
