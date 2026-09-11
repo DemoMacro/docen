@@ -6092,6 +6092,8 @@ class DocenDocument extends AddinHost<Editor> {
     if (this.hasAttribute("show-marks") === on) return;
     this.toggleAttribute("show-marks", on);
     this.#stage?.setShowMarks(on);
+    // Marks toggling rides no transaction — re-stamp the ribbon lit state.
+    this.#syncFormatButtons();
     this.dispatchEvent(
       new CustomEvent("docen:marks-change", {
         bubbles: true,

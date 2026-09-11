@@ -111,6 +111,14 @@ class DocenRibbonToggleButton extends FASTElement {
     this.syncPressed();
   }
 
+  // Fluent's own press() self-flip is a second writer fighting the sync — it
+  // fires after the command round-trip and re-flips the value the host just
+  // stamped, leaving the lit state out of phase with the flag. Neutralize it
+  // per instance so syncPressed stays the only writer of Fluent's pressed.
+  toggleBtnChanged(): void {
+    if (this.toggleBtn) (this.toggleBtn as { press?: () => void }).press = () => {};
+  }
+
   connectedCallback(): void {
     super.connectedCallback();
     this.syncIconSlot();
@@ -140,7 +148,8 @@ class DocenRibbonToggleButton extends FASTElement {
 
   onClick(): void {
     if (this.disabled) return;
-    // Defer until Fluent has toggled its internal pressed state for this click.
+    // Defer past the rest of this click's listeners so the host's sync write
+    // doesn't re-enter the same event dispatch.
     queueMicrotask(() => this.emit());
   }
 
