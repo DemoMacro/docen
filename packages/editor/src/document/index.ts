@@ -167,6 +167,9 @@ const AUTOSAVE_MAX_CHARS = 4_000_000;
 /** Layout budget per incremental render slice (ms) — the open path lays
  *  sealed pages for this long, then yields a frame to the browser. */
 const LAYOUT_SLICE_MS = 12;
+/** Double-click window (ms) — the format painter's sticky toggle and the
+ *  bare-click stroke deferral both track the system double-click time. */
+const PAINTER_DOUBLE_CLICK_MS = 500;
 
 /** The projection half's output — the flow inputs both the synchronous drain
  *  and the incremental walk lay. */
@@ -383,6 +386,7 @@ class DocenDocument extends AddinHost<Editor> {
   #painterKeyOff?: () => void;
   #painterSticky = false;
   #painterClickAt = 0;
+  #painterStrokeTimer?: ReturnType<typeof setTimeout>;
   /** Current zoom level (percent) applied by the page stage's slot sizing. */
   #zoom = 100;
   /** Cached unwrapped JSON (host.getJSON result). Invalidated on every user/doc
@@ -669,7 +673,7 @@ class DocenDocument extends AddinHost<Editor> {
    *  format painter). A click while armed cancels. */
   #toggleFormatPainter(): void {
     const now = performance.now();
-    const rapid = now - this.#painterClickAt < 500;
+    const rapid = now - this.#painterClickAt < PAINTER_DOUBLE_CLICK_MS;
     this.#painterClickAt = now;
     if (this.#painterMarks) {
       if (rapid) {
@@ -708,20 +712,48 @@ class DocenDocument extends AddinHost<Editor> {
     // leaves the stroke armed, so the button's click stays the sole toggle
     // (its pointerup would otherwise consume the stroke before the click can
     // toggle, and a second, unhurried click could never cancel).
+    const paintStroke = (ed: Editor): void => {
+      this.#applyFormatPainter(ed);
+      // Sticky stays armed for the next selection/paragraph click.
+      if (!this.#painterSticky) this.#stopFormatPainter();
+    };
     const onUp = (event: PointerEvent): void => {
       if (!event.composedPath().some((n) => (n as HTMLElement).localName === "docen-document-area"))
         return;
       const ed = this.#bridge?.activeEditor() ?? this.editor;
-      if (ed) this.#applyFormatPainter(ed);
-      // Sticky stays armed for the next selection/paragraph click.
-      if (!this.#painterSticky) this.#stopFormatPainter();
+      if (!ed) return;
+      // A stroke over a selection paints it at once. A bare click defers
+      // past the double-click window: the first press of a word-select
+      // double click still reads the bare caret, and painting that whole
+      // paragraph would bury the word the second press selects. Any new
+      // press (the double click's own) drops the pending stroke; a quiet
+      // window applies Word's whole-paragraph paint.
+      clearTimeout(this.#painterStrokeTimer);
+      if (!ed.state.selection.empty) {
+        paintStroke(ed);
+        return;
+      }
+      this.#painterStrokeTimer = setTimeout(() => {
+        this.#painterStrokeTimer = undefined;
+        if (!this.#painterMarks && !this.#painterPara) return;
+        const cur = this.#bridge?.activeEditor() ?? this.editor;
+        if (cur) paintStroke(cur);
+      }, PAINTER_DOUBLE_CLICK_MS);
+    };
+    const onDown = (): void => {
+      clearTimeout(this.#painterStrokeTimer);
+      this.#painterStrokeTimer = undefined;
     };
     const onKey = (event: Event): void => {
       if ((event as KeyboardEvent).key === "Escape") this.#stopFormatPainter();
     };
+    this.addEventListener("pointerdown", onDown);
     this.addEventListener("pointerup", onUp);
     this.addEventListener("keydown", onKey);
-    this.#painterOff = () => this.removeEventListener("pointerup", onUp);
+    this.#painterOff = () => {
+      this.removeEventListener("pointerdown", onDown);
+      this.removeEventListener("pointerup", onUp);
+    };
     this.#painterKeyOff = () => this.removeEventListener("keydown", onKey);
   }
 
@@ -756,6 +788,8 @@ class DocenDocument extends AddinHost<Editor> {
   }
 
   #stopFormatPainter(): void {
+    clearTimeout(this.#painterStrokeTimer);
+    this.#painterStrokeTimer = undefined;
     this.#painterMarks = null;
     this.#painterPara = null;
     this.#painterSticky = false;
