@@ -120,6 +120,10 @@ export interface LaidOutLine {
   /** The source inline the line's content ends at — a coarse split-point
    *  marker for page breaking. */
   endInlineIndex: number;
+  /** The paragraph's last content line (every group consumed, no hard-break
+   *  end) — the only line that carries the paragraph-end mark. Undefined on
+   *  wrapped middles and soft-break lines. */
+  final?: boolean;
   items: LaidOutLineItem[];
   /** The line's content width (the justification stretch target) — items are
    *  re-spaced so the last one ends here. Undefined on unjustified lines. */

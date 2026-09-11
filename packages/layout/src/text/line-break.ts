@@ -50,6 +50,10 @@ export interface PackedLine {
   /** The source inline the line's content ends at (the last fragment's
    *  origin); a coarse split-point marker for page breaking. */
   endInlineIndex: number;
+  /** The paragraph's last content line: every group is consumed and the line
+   *  doesn't end at a hard break. Only this line carries the paragraph-end
+   *  mark (Word's ¶/↵) — wrapped lines are breakless middles, not ends. */
+  final?: boolean;
   /** The width this line packed against (after indent/zone reductions). */
   maxWidthPx: number;
   /** Resolved height (resolver, floored by pictures on the line and — when
@@ -822,9 +826,15 @@ export function packLines(inline: LayoutInline[], opts: PackLinesOptions): Packe
       continue;
     }
 
+    // The paragraph's last content line: nothing broke mid-group (a wrapped
+    // middle), every group is consumed, and the line doesn't end at a hard
+    // break — a soft-break line is a logical-line end, not the paragraph's.
+    const final = !brokeMidGroup && done.every(Boolean) && inline[endInlineIndex]?.kind !== "break";
+
     lines.push({
       items: lineItems,
       endInlineIndex,
+      ...(final ? { final } : {}),
       maxWidthPx: maxWidth,
       heightPx: height,
       naturalPx,

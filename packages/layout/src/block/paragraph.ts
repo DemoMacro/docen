@@ -106,6 +106,7 @@ export function layoutParagraph(
     packed.push({
       items: [],
       endInlineIndex: 0,
+      final: true,
       maxWidthPx: usable,
       heightPx: strutPx,
       naturalPx: strutNatural,
@@ -165,6 +166,7 @@ export function layoutParagraph(
       advanceScale: line.advanceScale,
       firstLineIndentPx: i === 0 ? para.indent?.firstLinePx : undefined,
       endInlineIndex: line.endInlineIndex,
+      final: line.final,
       items: line.items,
       // Carried on every line (not just justified ones) — the wrap width is
       // the selection highlight's right edge (Word highlights to the wrap

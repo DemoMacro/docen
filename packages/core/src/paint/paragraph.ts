@@ -919,11 +919,12 @@ function paintLineMarks(
     );
   }
   // Line-end marks: the bent arrow on every line end (a soft break or the
-  // paragraph's end — a page-split tail only marks when the text really ends
-  // there); a section-end paragraph paints the double rule instead. An empty
-  // paragraph's lone strut line always marks.
+  // paragraph's final line — the layout flags it, since a single-run
+  // paragraph wraps mid-inline where no inline index can tell ends from
+  // middles); a section-end paragraph paints the double rule instead. An
+  // empty paragraph's lone strut line always marks.
   const endInline = para.inline[line.endInlineIndex];
-  const paragraphEnd = para.inline.length === 0 || line.endInlineIndex >= para.inline.length - 1;
+  const paragraphEnd = para.inline.length === 0 || line.final === true;
   if (!paragraphEnd && endInline?.kind !== "break") return;
   const last = line.items[line.items.length - 1];
   // An empty line paints no items — its ↵ mark rides the alignment's share of
