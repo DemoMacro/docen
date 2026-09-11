@@ -194,6 +194,10 @@ export function paintDrawing(
       oy,
       ctx,
       drawing.rotation || drawing.flipH || drawing.flipV ? undefined : host,
+      // Members paint directly at mx = boxX + m.x — their position already
+      // carries the box origin, so the page-space top-up is just ctx.origin.
+      offX,
+      offY,
     );
   }
 }
@@ -203,10 +207,11 @@ export function paintDrawing(
  *  anchored-drawing and the inline-picture paths — the member shapes are the
  *  same; only the box origin differs. `host` (an anchored drawing only) lets
  *  an editable text-box member register its laid stack with the caret map.
- *  `originX/Y` is the holder's page origin when members paint tree-local into
- *  a holder Box: chart hit boxes register in page space and add it back.
- *  Members painted directly at the box origin already carry it in their
- *  position, so the default 0 is right there. */
+ *  `originX/Y` is the page-space offset the member's own position does NOT
+ *  carry: holder-painted members (clip box, inline replay) position
+ *  tree-local, so callers pass the holder's page origin; members painted
+ *  directly at mx = boxX + m.x already carry it and pass ctx.origin alone.
+ *  Chart hit boxes register in page space and use it verbatim. */
 export function paintMembers(
   tree: IGroup,
   members: readonly LayoutDrawingMember[],
@@ -330,8 +335,11 @@ export function paintMembers(
               para: host.para,
               index: host.index,
               kind: host.kind,
-              ox: originX + (ctx.origin?.x ?? 0),
-              oy: originY + (ctx.origin?.y ?? 0),
+              // originX/Y already is the holder's page origin (the callers
+              // fold ctx.origin in) — adding it again would shift every
+              // sub-element box by the content inset.
+              ox: originX,
+              oy: originY,
             }
           : undefined,
       );
