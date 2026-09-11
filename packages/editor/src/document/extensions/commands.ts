@@ -1000,6 +1000,72 @@ export function inlineImageAt(state: EditorState): FloatingDrawing | null {
   return inline?.kind === "image" ? inline : null;
 }
 
+// ── Stateful menu readers — the ribbon's checked rows mirror these (the same
+// key space their commands write, kept beside them so a write-side change
+// can't strand the read side) ────────────────────────────────────────────────
+
+/** The Wrap Text menu's current row: "inline" for an inline drawing; a
+ *  floating one resolves its wrap style (topAndBottom → "top-bottom"), with
+ *  wrapNone reading through behindDocument — behind → "behind", else "front"
+ *  (the band semantics the layout projection shares). Null without a drawing
+ *  selection, so no row checks. */
+export function wrapMenuValueOf(state: EditorState): string | null {
+  const floating = floatingDrawingAt(state);
+  if (!floating) return inlineDrawingAt(state) ? "inline" : null;
+  const f = floatingOf(floating);
+  const wrap = f.wrap as Record<string, unknown> | undefined;
+  const type = typeof wrap?.type === "string" ? wrap.type : null;
+  if (type === "topAndBottom") return "top-bottom";
+  if (type != null && type !== "none") return type; // square / tight / through
+  return f.behindDocument === true ? "behind" : "front";
+}
+
+/** The Position gallery's current cell (tl…br) — the margin-relative align
+ *  pair both axes stamp together. Null for an inline drawing, offset anchors
+ *  (a dragged float, Word's "custom position"), or no selection — no cell
+ *  checks, Word's gallery does the same. */
+export function positionMenuValueOf(state: EditorState): string | null {
+  const floating = floatingDrawingAt(state);
+  if (!floating) return null;
+  const f = floatingOf(floating);
+  const h = f.horizontalPosition as Record<string, unknown> | undefined;
+  const v = f.verticalPosition as Record<string, unknown> | undefined;
+  if (h?.relative !== "margin" || v?.relative !== "margin") return null;
+  if (h.offset != null || v.offset != null) return null;
+  const cell = Object.entries(POSITION_ALIGN).find(
+    ([, spec]) => spec.h === h.align && spec.v === v.align,
+  );
+  return cell?.[0] ?? null;
+}
+
+/** The shape Text Direction menu's current row — bodyProperties' vert token
+ *  verbatim ("vertical"/"vertical270"); the cleared state reads "horizontal"
+ *  (the command deletes the token for it). Null without a shape selection. */
+export function textDirectionMenuValueOf(state: EditorState): string | null {
+  const target = shapeAt(state);
+  if (!target) return null;
+  const shape = target.attrs.wpsShape as Record<string, unknown> | null;
+  const body = shape?.bodyProperties as Record<string, unknown> | undefined;
+  const vert = body?.vertical;
+  return vert === "vertical" || vert === "vertical270" ? vert : "horizontal";
+}
+
+/** The Chart Design menus' current rows — the chart's type token, and the
+ *  legend placement ("none" when hidden; the painter's bottom default when
+ *  position is absent). Null without a chart selection. */
+export function chartMenuValueOf(state: EditorState): { type: string; legend: string } | null {
+  const target = chartAt(state);
+  if (!target) return null;
+  const series = Array.isArray(target.chart.series) ? target.chart.series : [];
+  const shown =
+    target.chart.showLegend === true ||
+    (target.chart.showLegend === undefined && series.length > 1);
+  return {
+    type: target.chart.type,
+    legend: shown ? (target.chart.legendPosition ?? "bottom") : "none",
+  };
+}
+
 /** The selected wps shape — standalone or a group member. Style commands
  *  (fill/outline) write its attrs wherever it sits, unlike the Arrange
  *  commands which need a floating carrier. */

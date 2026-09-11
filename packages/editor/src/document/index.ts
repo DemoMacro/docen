@@ -106,10 +106,14 @@ import type { StylesInspectorData, StylesPaneState } from "./components/styles-p
 import { pagesToPdf } from "./export-pdf";
 import type { ModifyStylePatch } from "./extensions/commands";
 import {
+  chartMenuValueOf,
   floatingDrawingAt,
   inlineDrawingAt,
   inlineImageAt,
+  positionMenuValueOf,
   tableAncestry,
+  textDirectionMenuValueOf,
+  wrapMenuValueOf,
   WIRED_DISPATCH,
 } from "./extensions/commands";
 // Side-effect import: registers the ribbon/header translation tables.
@@ -785,6 +789,7 @@ class DocenDocument extends AddinHost<Editor> {
       // Selection-sensitive greying: the arrange group's liveness depends on
       // what the selection points at, which no static pass sees.
       this.#syncArrangeGreying();
+      this.#syncDrawingMenus();
       this.#updateStatus();
     };
     editor.on("transaction", sync);
@@ -2571,6 +2576,7 @@ class DocenDocument extends AddinHost<Editor> {
     this.#syncContextTabs();
     this.#syncCellSize();
     this.#syncDrawingSize();
+    this.#syncDrawingMenus();
     this.#renderPanes();
   }
 
@@ -2786,14 +2792,52 @@ class DocenDocument extends AddinHost<Editor> {
 
   /** A composite control's parsed `items` attribute (menu variants), empty on
    *  malformed JSON so a typo greys the control rather than crashing. */
-  #ribbonMenuItems(el: HTMLElement): { disabled?: boolean; event?: string }[] {
+  #ribbonMenuItems(el: HTMLElement): {
+    checked?: boolean;
+    disabled?: boolean;
+    event?: string;
+    value?: string;
+  }[] {
     try {
       return JSON.parse(el.getAttribute("items") ?? "[]") as {
+        checked?: boolean;
         disabled?: boolean;
         event?: string;
+        value?: string;
       }[];
     } catch {
       return [];
+    }
+  }
+
+  /** Re-stamp the drawing state menus' checked rows against the selection —
+   *  Wrap Text / Position (picture and shape tabs), Chart Type / Legend, and
+   *  the shape Text Direction menu report the drawing's current mode (Word's
+   *  checked gallery row). Runs per transaction after #syncContextTabs (the
+   *  menus only exist while a drawing tab is stamped) — a same-value
+   *  setAttribute fires no attr-changed callback, so an unchanged state
+   *  doesn't re-render the menu. */
+  #syncDrawingMenus(): void {
+    const state = this.editor?.state;
+    if (!state) return;
+    const chart = chartMenuValueOf(state);
+    const rows: [event: string, value: string | null][] = [
+      ["wrap", wrapMenuValueOf(state)],
+      ["position", positionMenuValueOf(state)],
+      ["chart-type", chart?.type ?? null],
+      ["chart-legend", chart?.legend ?? null],
+      ["shape-text-direction", textDirectionMenuValueOf(state)],
+    ];
+    for (const [event, value] of rows) {
+      for (const el of this.shadowRoot?.querySelectorAll<HTMLElement>(
+        `docen-ribbon-menu[event="${event}"]`,
+      ) ?? []) {
+        const items = this.#ribbonMenuItems(el).map((item) =>
+          item.value == null ? item : { ...item, checked: item.value === value },
+        );
+        const json = JSON.stringify(items);
+        if (json !== el.getAttribute("items")) el.setAttribute("items", json);
+      }
     }
   }
 

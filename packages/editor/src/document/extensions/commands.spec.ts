@@ -15,7 +15,15 @@ import { NodeSelection } from "@tiptap/pm/state";
 import { describe, expect, it } from "vitest";
 
 import { CellSelection } from "../canvas/cell-selection";
-import { DocumentCommands, listLevelStepPatch, normalizeParagraphAlignment } from "./commands";
+import {
+  chartMenuValueOf,
+  DocumentCommands,
+  listLevelStepPatch,
+  normalizeParagraphAlignment,
+  positionMenuValueOf,
+  textDirectionMenuValueOf,
+  wrapMenuValueOf,
+} from "./commands";
 
 // Tiptap's schema needs the plain text node (same trick as the TOC spec).
 const Text = TextNode.create({ name: "text", group: "inline" });
@@ -814,6 +822,87 @@ describe("arrange — floating drawings", () => {
       horizontalPosition: { relative: "margin", align: "center" },
       verticalPosition: { relative: "margin", align: "center" },
     });
+  });
+
+  it("position stamps margin-relative aligns and the reader resolves the cell", () => {
+    const editor = build();
+    floatDoc(editor);
+    selectFirstNode(editor, "image");
+    // The offset anchor (column/paragraph) is a custom position — no cell.
+    expect(positionMenuValueOf(editor.state)).toBeNull();
+    expect(editor.commands.position("tc")).toBe(true);
+    expect(positionMenuValueOf(editor.state)).toBe("tc");
+    // A margin cell on the shape resolves from its align pair.
+    selectFirstNode(editor, "wpsShape");
+    expect(editor.commands.position("br")).toBe(true);
+    expect(positionMenuValueOf(editor.state)).toBe("br");
+  });
+
+  it("the menu readers resolve each drawing state the commands stamp", () => {
+    const editor = build();
+    floatDoc(editor);
+    // No drawing selected — nothing checks.
+    expect(wrapMenuValueOf(editor.state)).toBeNull();
+    expect(textDirectionMenuValueOf(editor.state)).toBeNull();
+    selectFirstNode(editor, "image");
+    // The fixture float carries no wrap — front of text.
+    expect(wrapMenuValueOf(editor.state)).toBe("front");
+    expect(editor.commands.wrap("behind")).toBe(true);
+    expect(wrapMenuValueOf(editor.state)).toBe("behind");
+    expect(editor.commands.wrap("top-bottom")).toBe(true);
+    expect(wrapMenuValueOf(editor.state)).toBe("top-bottom");
+    // A hand-authored wrapNone (the demo's floating payload shape) reads
+    // through to front — the band the layout projection paints it in.
+    selectFirstNode(editor, "wpsShape");
+    expect(wrapMenuValueOf(editor.state)).toBe("front");
+    // The shape's cleared body reads horizontal; the command stamps vert.
+    expect(textDirectionMenuValueOf(editor.state)).toBe("horizontal");
+    expect(editor.commands["shape-text-direction"]("vertical")).toBe(true);
+    expect(textDirectionMenuValueOf(editor.state)).toBe("vertical");
+    expect(editor.commands["shape-text-direction"]("horizontal")).toBe(true);
+    expect(textDirectionMenuValueOf(editor.state)).toBe("horizontal");
+  });
+
+  it("chart readers mirror the painter's legend default", () => {
+    const editor = new Editor({
+      element: null,
+      extensions: EXTENSIONS,
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [
+              {
+                type: "chart",
+                attrs: {
+                  chart: {
+                    transformation: { width: 200, height: 120 },
+                    type: "column",
+                    categories: ["Q1", "Q2"],
+                    series: [
+                      { name: "Revenue", values: [12, 18] },
+                      { name: "Costs", values: [8, 11] },
+                    ],
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      } as never,
+    });
+    // Nothing checks without a chart selection.
+    expect(chartMenuValueOf(editor.state)).toBeNull();
+    selectFirstNode(editor, "chart");
+    // Two series and no showLegend — the painter shows a bottom legend.
+    expect(chartMenuValueOf(editor.state)).toEqual({ type: "column", legend: "bottom" });
+    expect(editor.commands["chart-legend"]("right")).toBe(true);
+    expect(chartMenuValueOf(editor.state)).toEqual({ type: "column", legend: "right" });
+    expect(editor.commands["chart-legend"]("none")).toBe(true);
+    expect(chartMenuValueOf(editor.state)).toEqual({ type: "column", legend: "none" });
+    expect(editor.commands["chart-type"]("line")).toBe(true);
+    expect(chartMenuValueOf(editor.state)).toEqual({ type: "line", legend: "none" });
   });
 
   it("chart-value-apply writes one data point and declines bad targets", () => {
