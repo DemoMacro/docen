@@ -27,20 +27,19 @@ function runBlock(run: MetafileTextRun): LayoutBlock {
  *  wrap into paragraph blocks). Members come from the replay cache and are
  *  shared by reference — the projection treats them as read-only. */
 export function toLayoutMembers(members: MetafileMember[]): LayoutDrawingMember[] {
-  return members.map(
-    (member): LayoutDrawingMember =>
-      member.kind === "textBox"
-        ? {
-            kind: "textBox",
-            x: member.x,
-            y: member.y,
-            width: member.width,
-            height: member.height,
-            ...(member.nowrap ? { nowrap: true } : {}),
-            ...(member.insets ? { insets: member.insets } : {}),
-            ...(member.rotation ? { rotation: member.rotation } : {}),
-            blocks: member.runs.map(runBlock),
-          }
-        : member,
+  return members.map((member): LayoutDrawingMember =>
+    member.kind === "textBox"
+      ? {
+          kind: "textBox",
+          x: member.x,
+          y: member.y,
+          width: member.width,
+          height: member.height,
+          ...(member.nowrap ? { nowrap: true } : {}),
+          ...(member.insets ? { insets: member.insets } : {}),
+          ...(member.rotation ? { rotation: member.rotation } : {}),
+          blocks: member.runs.map(runBlock),
+        }
+      : member,
   );
 }

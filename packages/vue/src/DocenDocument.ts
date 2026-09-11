@@ -261,8 +261,7 @@ export const DocenDocument = defineComponent({
         emit("update:modelValue", raw);
       };
       clearTimeout(emitTimer);
-      if (props.debounce <= 0)
-        emitJSON(); // synchronous (tests)
+      if (props.debounce <= 0) emitJSON(); // synchronous (tests)
       else emitTimer = setTimeout(emitJSON, props.debounce);
     }
 

@@ -43,6 +43,6 @@
   },
   "dependencies": {
     "@docen/layout": "workspace:*",
-    "leafer-ui": "2.2.9"
+    "leafer-ui": "2.2.10"
   }
 }

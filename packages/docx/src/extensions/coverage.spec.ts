@@ -87,11 +87,13 @@ const SECTION_FIXTURES: Record<keyof typeof SECTION_CHILD_DISPOSITIONS, () => Se
  *  probe on the compile side (editor-equivalent rewrites are allowed — the
  *  branch identity and a representative field must survive). */
 type SectionEditable = {
-  [K in keyof typeof SECTION_CHILD_DISPOSITIONS as (typeof SECTION_CHILD_DISPOSITIONS)[K] extends {
-    editable: string;
-  }
-    ? K
-    : never]: {
+  [
+    K in keyof typeof SECTION_CHILD_DISPOSITIONS as (typeof SECTION_CHILD_DISPOSITIONS)[K] extends {
+      editable: string;
+    }
+      ? K
+      : never
+  ]: {
     node: string;
     probe: (compiled: SectionChild[]) => void;
   };
@@ -297,11 +299,13 @@ const INLINE_FIXTURES: Record<keyof typeof PARAGRAPH_CHILD_DISPOSITIONS, () => P
 };
 
 type InlineEditable = {
-  [K in keyof typeof PARAGRAPH_CHILD_DISPOSITIONS as (typeof PARAGRAPH_CHILD_DISPOSITIONS)[K] extends {
-    editable: string;
-  }
-    ? K
-    : never]: {
+  [
+    K in keyof typeof PARAGRAPH_CHILD_DISPOSITIONS as (typeof PARAGRAPH_CHILD_DISPOSITIONS)[K] extends {
+      editable: string;
+    }
+      ? K
+      : never
+  ]: {
     marker: string;
     probe: (out: ParagraphChild | undefined) => void;
   };

@@ -56,35 +56,29 @@ const LEVEL_GLYPH_CYCLE = ["●", "○", "■"];
 export function buildOrderedLevels(
   format: LevelsOptions["format"] = LevelFormat.DECIMAL,
 ): LevelsOptions[] {
-  return Array.from(
-    { length: 9 },
-    (_, level): LevelsOptions => ({
-      level,
-      format: level === 0 ? format : LevelFormat.DECIMAL,
-      start: 1,
-      text: ORDERED_LEVEL_TEXT[level],
-      paragraph: {
-        indent: { left: 720 * (level + 1), hanging: 360 },
-      },
-    }),
-  );
+  return Array.from({ length: 9 }, (_, level): LevelsOptions => ({
+    level,
+    format: level === 0 ? format : LevelFormat.DECIMAL,
+    start: 1,
+    text: ORDERED_LEVEL_TEXT[level],
+    paragraph: {
+      indent: { left: 720 * (level + 1), hanging: 360 },
+    },
+  }));
 }
 
 /** Build nine bullet levels mirroring Word's built-in bullet indentation
  *  (0.5" per level, 0.25" hanging) and its glyph cycle (●/○/■); the variant
  *  glyph rides level 0. */
 export function buildBulletLevels(glyph = "●"): LevelsOptions[] {
-  return Array.from(
-    { length: 9 },
-    (_, level): LevelsOptions => ({
-      level,
-      format: LevelFormat.BULLET,
-      text: level === 0 ? glyph : LEVEL_GLYPH_CYCLE[level % 3],
-      paragraph: {
-        indent: { left: 720 * (level + 1), hanging: 360 },
-      },
-    }),
-  );
+  return Array.from({ length: 9 }, (_, level): LevelsOptions => ({
+    level,
+    format: LevelFormat.BULLET,
+    text: level === 0 ? glyph : LEVEL_GLYPH_CYCLE[level % 3],
+    paragraph: {
+      indent: { left: 720 * (level + 1), hanging: 360 },
+    },
+  }));
 }
 
 // ── Multilevel List Library (多级列表样式库) ─────────────────────────────────
