@@ -139,6 +139,12 @@ importers:
 
   packages/leafer-x-metafile: {}
 
+  packages/markdown:
+    dependencies:
+      marked:
+        specifier: 17.0.6
+        version: 17.0.6
+
   packages/pretext: {}
 
   packages/vue:

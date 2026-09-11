@@ -1,0 +1,48 @@
+{
+  "name": "@docen/markdown",
+  "version": "0.7.0",
+  "description": "Format-agnostic Markdown syntax layer for docen — parses Markdown into a neutral document IR and renders it back, with a mapper interface for each format package to bind its own model",
+  "keywords": [
+    "commonmark",
+    "conversion",
+    "docen",
+    "gfm",
+    "markdown",
+    "md",
+    "tiptap"
+  ],
+  "homepage": "https://github.com/DemoMacro/docen#readme",
+  "bugs": {
+    "url": "https://github.com/DemoMacro/docen/issues"
+  },
+  "license": "MIT",
+  "author": {
+    "name": "Demo Macro",
+    "email": "abc@imst.xyz",
+    "url": "https://www.demomacro.com/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DemoMacro/docen.git"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "dist/index.mjs",
+  "types": "dist/index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    }
+  },
+  "scripts": {
+    "dev": "basis build --stub",
+    "build": "vp pack",
+    "prepack": "pnpm build"
+  },
+  "dependencies": {
+    "marked": "17.0.6"
+  }
+}
