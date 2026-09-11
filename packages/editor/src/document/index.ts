@@ -703,21 +703,23 @@ class DocenDocument extends AddinHost<Editor> {
     // Arming runs outside any transaction (the lit state rides the attribute,
     // and #syncFormatButtons only fires per transaction).
     this.#syncFormatButtons();
-    const onUp = (): void => {
+    // Word paints on a document press, not a chrome press: a pointerup over
+    // the ribbon, title bar, or panes — this painter's own button included —
+    // leaves the stroke armed, so the button's click stays the sole toggle
+    // (its pointerup would otherwise consume the stroke before the click can
+    // toggle, and a second, unhurried click could never cancel).
+    const onUp = (event: PointerEvent): void => {
+      if (!event.composedPath().some((n) => (n as HTMLElement).localName === "docen-document-area"))
+        return;
       const ed = this.#bridge?.activeEditor() ?? this.editor;
       if (ed) this.#applyFormatPainter(ed);
-      if (this.#painterSticky) {
-        // Stay armed: re-arm for the next selection/paragraph click.
-        this.addEventListener("pointerup", onUp, { once: true });
-        this.#painterOff = () => this.removeEventListener("pointerup", onUp);
-      } else {
-        this.#stopFormatPainter();
-      }
+      // Sticky stays armed for the next selection/paragraph click.
+      if (!this.#painterSticky) this.#stopFormatPainter();
     };
     const onKey = (event: Event): void => {
       if ((event as KeyboardEvent).key === "Escape") this.#stopFormatPainter();
     };
-    this.addEventListener("pointerup", onUp, { once: true });
+    this.addEventListener("pointerup", onUp);
     this.addEventListener("keydown", onKey);
     this.#painterOff = () => this.removeEventListener("pointerup", onUp);
     this.#painterKeyOff = () => this.removeEventListener("keydown", onKey);
