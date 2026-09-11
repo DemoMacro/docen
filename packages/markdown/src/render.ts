@@ -1,4 +1,4 @@
-import type { MdAlignment, MdBlock, MdInline, MdListItem, MdMark, MdTableRow } from "./types";
+import type { MdBlock, MdInline, MdMark, MdTableRow } from "./types";
 
 /** Characters that always change structure mid-line when literal. */
 const ALWAYS_SPECIAL = /([\\`*_[\]<>])/g;
