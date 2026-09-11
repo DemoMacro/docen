@@ -308,6 +308,19 @@ export async function registerComponents(): Promise<void> {
       :host([role="menuitemcheckbox"]) .content {
         grid-column: 3 / -1;
       }
+      /* Fluent paints the focus ring whenever an item matches :focus-visible,
+         and a pointer-opened menu parks script focus on its first item —
+         Chromium matches :focus-visible for script focus inside popovers, so
+         every mouse-opened dropdown showed a ring on row 1 (Word shows none).
+         Suppress it; the list-level keydown wiring (appendMenuItems) re-marks
+         items once the keyboard drives the menu, restoring the ring there. */
+      :host(:focus-visible) {
+        outline: none;
+      }
+      :host([data-kbd-nav]:focus-visible) {
+        outline: 2px solid var(--colorStrokeFocus2, #000);
+        border-radius: var(--borderRadiusMedium, 4px);
+      }
     `,
   });
   await defineElement(MenuList, MenuListDefinition);

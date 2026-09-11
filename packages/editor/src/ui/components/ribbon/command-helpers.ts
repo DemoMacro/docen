@@ -101,6 +101,32 @@ interface MenuItemLike {
   disabled?: boolean;
 }
 
+/** A menu list wired by `appendMenuItems` (the wiring is idempotent across
+ *  re-renders of the same list). */
+const kbdFocusWired = new WeakSet<HTMLElement>();
+
+/** Keydown anywhere in the list marks its items so the focus ring suppressed
+ *  by the registry's fluent-menu-item override (a pointer-opened menu parks
+ *  focus on row 1 with no ring — Word's look) comes back for keyboard
+ *  navigation; closing the popover clears the marks for the next opening. */
+export function wireMenuKeyboardFocusRing(list: HTMLElement): void {
+  if (kbdFocusWired.has(list)) return;
+  kbdFocusWired.add(list);
+  const items = (): Element[] => [...list.querySelectorAll(":scope > fluent-menu-item")];
+  list.addEventListener(
+    "keydown",
+    () => {
+      for (const item of items()) item.setAttribute("data-kbd-nav", "");
+    },
+    true,
+  );
+  list.addEventListener("toggle", (event) => {
+    if ((event as ToggleEvent).newState === "closed") {
+      for (const item of items()) item.removeAttribute("data-kbd-nav");
+    }
+  });
+}
+
 /** Append `items` as `<fluent-menu-item>`s into `list`, replacing its children.
  *  A `change` on any item routes to `onSelect(item)`. `checked` items render as
  *  `role="menuitemradio"` with Fluent's own checkmark (or `menuitemcheckbox`
@@ -121,6 +147,7 @@ export function appendMenuItems<T extends MenuItemLike>(
   onSelect: (item: T) => void,
   options?: { multiple?: boolean },
 ): void {
+  wireMenuKeyboardFocusRing(list);
   list.replaceChildren();
   const pickList = items.some((item) => item.checked);
   for (const item of items) {

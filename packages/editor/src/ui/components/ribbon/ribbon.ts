@@ -9,6 +9,7 @@ import {
 } from "@microsoft/fast-element";
 
 import { observeLang, t } from "../../i18n";
+import { wireMenuKeyboardFocusRing } from "./command-helpers";
 
 // Per-instance CSS anchor name so the display-options menu right-aligns to its
 // own trigger (and does not collide with another ribbon instance's).
@@ -326,6 +327,9 @@ class DocenRibbon extends FASTElement {
   #renderDisplayOptions(): void {
     const list = this.doList;
     if (!list) return;
+    // Self-built items (not appendMenuItems) — still wire the keyboard focus
+    // ring so keyboard navigation behaves like every other menu.
+    wireMenuKeyboardFocusRing(list);
     const MODES = [
       { mode: "auto-hide", key: "ribbon.opt.auto-hide" },
       { mode: "tabs-only", key: "ribbon.opt.tabs-only" },
