@@ -190,6 +190,79 @@ describe("CaretMap trimmed-space boundaries", () => {
   });
 });
 
+describe("CaretMap preserved-space boundaries", () => {
+  // Pre-wrap layout: the spaces ride INSIDE the item text as real glyphs
+  // (each with its own advance), so the collapsed-gap walk finds no gap to
+  // hand out — the character lattice comes straight off the per-grapheme
+  // placement, one caret boundary per space.
+  it("gives every preserved space its own caret boundary", () => {
+    // "a  b" at 10px/grapheme: a@0..10, sp@10..20, sp@20..30, b@30..40.
+    const { doc } = buildDoc(["a  b"]);
+    const map = new CaretMap(
+      pageOf([fakePara([{ text: "a  b", xPx: 0, yPx: 0, maxWidthPx: 100 }])]) as never,
+      doc,
+      () => ({ contentLeftPx: 0, contentTopPx: 0 }),
+    );
+    expect(map.valid).toBe(true);
+    expect(map.caretRect(2)?.xPx).toBe(10); // after "a" = space 1's left edge
+    expect(map.caretRect(3)?.xPx).toBe(20); // between the two spaces
+    expect(map.caretRect(4)?.xPx).toBe(30); // space 2's right edge = "b"
+    expect(map.caretRect(5)?.xPx).toBe(40); // the line's advance sum
+    // A click inside either space lands on ITS OWN left boundary.
+    expect(map.posAtPoint(0, 15, 5)).toBe(2);
+    expect(map.posAtPoint(0, 25, 5)).toBe(3);
+  });
+
+  it("keeps the lattice exact across a run boundary too", () => {
+    // The space run opens the second laid slice ("a" + "  b"): the gap walk
+    // mis-aligns there (it skips the leading spaces before matching), and
+    // its fallback — charging item.text.length alone — is already the exact
+    // character count under pre-wrap.
+    const { doc } = buildDoc(["a  b"]);
+    const para = {
+      kind: "paragraph",
+      heightPx: 20,
+      beforePx: 0,
+      afterPx: 0,
+      inline: [{ kind: "text", text: "a  b", style: { sizePx: 16, family: "Test" } }],
+      lines: [
+        {
+          yPx: 0,
+          heightPx: 20,
+          naturalPx: 16,
+          items: [
+            { kind: "text", text: "a", xPx: 0, widthPx: 10, inlineIndex: 0 },
+            { kind: "text", text: "  b", xPx: 30, widthPx: 30, inlineIndex: 0 },
+          ],
+          maxWidthPx: 100,
+        },
+      ],
+    };
+    const map = new CaretMap(pageOf([para]) as never, doc, () => ({
+      contentLeftPx: 0,
+      contentTopPx: 0,
+    }));
+    expect(map.caretRect(2)?.xPx).toBe(10); // "a" end = space 1's left edge
+    expect(map.caretRect(3)?.xPx).toBe(40); // space 1's right = space 2's left
+    expect(map.caretRect(4)?.xPx).toBe(50); // "b" start
+    // A click inside space 2 lands on its own left boundary.
+    expect(map.posAtPoint(0, 45, 5)).toBe(3);
+  });
+
+  it("stretches the selection through the spaces at their true advances", () => {
+    const { doc } = buildDoc(["a  b"]);
+    const map = new CaretMap(
+      pageOf([fakePara([{ text: "a  b", xPx: 0, yPx: 0, maxWidthPx: 100 }])]) as never,
+      doc,
+      () => ({ contentLeftPx: 0, contentTopPx: 0 }),
+    );
+    const rects = map.selectionRects(0, doc.content.size);
+    // Every glyph crossed — spaces included — pays its own advance (40px),
+    // not a gap reconstruction; the document's last line stops at text.
+    expect(rects[0]).toMatchObject({ xPx: 0, widthPx: 40 });
+  });
+});
+
 describe("CaretMap selection rectangles", () => {
   it("stretches fully crossed lines to the wrap edge; the last line stops at text", () => {
     const { doc } = buildDoc(["ab", "cde"]);
