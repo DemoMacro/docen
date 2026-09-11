@@ -1215,6 +1215,9 @@ const homeTab = (styles?: StylesOptions | null): RibbonTab =>
       [col([combo("style", "Normal", parsedItems(styleItems(styles)))])],
       "styles-pane",
     ),
+    // Markdown input mode — a typing-mode flag, not a document command
+    // (Word has no counterpart; this is docen's own input surface).
+    group("markdown", [btn("markdown-input", "markdown-input", { size: "large", toggle: true })]),
     group(
       "editing",
       [

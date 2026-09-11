@@ -63,6 +63,7 @@ import lasso from "@fluentui/svg-icons/icons/lasso_24_regular.svg?raw";
 import link from "@fluentui/svg-icons/icons/link_24_regular.svg?raw";
 import lockShield from "@fluentui/svg-icons/icons/lock_shield_24_regular.svg?raw";
 import mail from "@fluentui/svg-icons/icons/mail_24_regular.svg?raw";
+import markdown from "@fluentui/svg-icons/icons/markdown_24_regular.svg?raw";
 import numberRow from "@fluentui/svg-icons/icons/number_row_24_regular.svg?raw";
 import numberSymbol from "@fluentui/svg-icons/icons/number_symbol_24_regular.svg?raw";
 import orientation from "@fluentui/svg-icons/icons/orientation_24_regular.svg?raw";
@@ -205,6 +206,7 @@ const RIBBON_ICONS: Record<string, string> = {
   "indent-increase": textIndentIncrease,
   sort: arrowSort,
   "show-marks": textBulletListSquare,
+  "markdown-input": markdown,
   "line-spacing": textLineSpacing,
   shading: colorFill,
   border: borderAll,

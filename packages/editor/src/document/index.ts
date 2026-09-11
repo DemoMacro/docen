@@ -2826,6 +2826,9 @@ class DocenDocument extends AddinHost<Editor> {
       // until the paint lands / sticky mode ends) — the host attribute is
       // its truth, same as show-marks.
       ["format-painter", this.hasAttribute("format-painter")],
+      // Markdown input mode — the host flag is its truth (the Options
+      // dialog writes it without a click, so the sync re-stamps both ways).
+      ["markdown-input", this.#markdown],
     ];
     for (const [event, on] of rows) {
       for (const el of this.shadowRoot?.querySelectorAll<HTMLElement>(
@@ -4608,6 +4611,14 @@ class DocenDocument extends AddinHost<Editor> {
       this.setShowMarks(!this.getShowMarks());
       return;
     }
+    // Markdown input mode toggle — the same flag the Options dialog writes;
+    // the bridge reads it per keystroke.
+    if (name === "markdown-input") {
+      this.#markdown = !this.#markdown;
+      // The click may land outside any transaction — re-stamp the lit state.
+      this.#syncFormatButtons();
+      return;
+    }
     // TOC insert/update — commands take the bridge's pageOf (entry page
     // numbers come from the canvas caret map; 0-based → Word's 1-based) and
     // the content-width tab stop. Inserting repaginates, so insert re-runs
@@ -5457,7 +5468,11 @@ class DocenDocument extends AddinHost<Editor> {
       this.#emitThemeChange(theme);
     }
     if (typeof spellcheck === "boolean") this.#spelling.setEnabled(spellcheck);
-    if (typeof markdown === "boolean") this.#markdown = markdown;
+    if (typeof markdown === "boolean") {
+      this.#markdown = markdown;
+      // No transaction rides an options commit — re-stamp the ribbon toggle.
+      this.#syncFormatButtons();
+    }
   };
 
   /** Notify external listeners (framework wrappers like @docen/vue) when the

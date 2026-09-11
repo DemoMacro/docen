@@ -52,6 +52,9 @@ const styles = css`
     text-align: center;
     line-height: 1.2;
     white-space: normal;
+    /* A mixed Latin+CJK label ("Markdown 输入") wraps at the space, never
+       mid-CJK-word. */
+    word-break: keep-all;
     overflow-wrap: break-word;
   }
 `;

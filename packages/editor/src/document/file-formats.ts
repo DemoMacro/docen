@@ -88,6 +88,9 @@ export const LOCAL_HANDLED: ReadonlySet<string> = new Set([
   // Home → Clipboard group launcher — the Office Clipboard pane.
   "clipboard-dialog",
   "show-marks",
+  // Markdown input mode — a host typing-mode flag (the bridge reads it per
+  // keystroke); no editor command behind it.
+  "markdown-input",
   "copy",
   "cut",
   "paste",

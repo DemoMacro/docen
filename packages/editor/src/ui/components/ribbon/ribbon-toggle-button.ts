@@ -12,6 +12,34 @@ import { COMMAND_HOST_STYLE, renderIcon } from "./command-helpers";
 
 const styles = css`
   ${COMMAND_HOST_STYLE}
+  /* size="large" — Office large button: icon stacked over label (column),
+     larger glyph. Same geometry as the plain button's large size (70px row,
+     104px label cap) so the two sit level in one group row. */
+  :host([size="large"]) {
+    flex-shrink: 0;
+  }
+  :host([size="large"]) fluent-toggle-button {
+    flex-direction: column;
+    justify-content: flex-start;
+    min-width: 0;
+    max-width: 104px;
+    min-height: 70px;
+    padding: 4px 12px;
+  }
+  :host([size="large"]) .rb-icon svg {
+    width: 32px;
+    height: 32px;
+  }
+  :host([size="large"]) .rb-label {
+    font-size: 11px;
+    text-align: center;
+    line-height: 1.2;
+    white-space: normal;
+    /* A mixed Latin+CJK label ("Markdown 输入") wraps at the space, never
+       mid-CJK-word. */
+    word-break: keep-all;
+    overflow-wrap: break-word;
+  }
 `;
 
 const template = html<DocenRibbonToggleButton>`
@@ -77,9 +105,8 @@ class DocenRibbonToggleButton extends FASTElement {
     this.syncIconSlot();
   }
 
-  // pressed is synced imperatively (not via binding): the user clicks Fluent's
-  // button to flip its internal pressed, and a one-way binding would re-push
-  // the stale host value on the next render and clobber that flip.
+  // pressed is synced imperatively (not via binding): the host flag is the one
+  // truth, and a one-way binding would race the sync on every transaction.
   pressedChanged(): void {
     this.syncPressed();
   }

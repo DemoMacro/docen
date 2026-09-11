@@ -45,6 +45,7 @@ export const ribbonEn: AdditionalLanguage = {
     "ribbon.group.font": "Font",
     "ribbon.group.paragraph": "Paragraph",
     "ribbon.group.styles": "Styles",
+    "ribbon.group.markdown": "Markdown",
     "ribbon.group.editing": "Editing",
     // --- Groups: Insert ---
     "ribbon.group.pages": "Pages",
@@ -148,6 +149,7 @@ export const ribbonEn: AdditionalLanguage = {
     "ribbon.cmd.indent-increase": "Increase Indent",
     "ribbon.cmd.sort": "Sort",
     "ribbon.cmd.show-marks": "Show/Hide ¶",
+    "ribbon.cmd.markdown-input": "Markdown input",
     "ribbon.cmd.align-left": "Align Left",
     "ribbon.cmd.align-center": "Center",
     "ribbon.cmd.align-right": "Align Right",
@@ -1218,6 +1220,7 @@ export const ribbonZhCN: AdditionalLanguage = {
     "ribbon.group.font": "字体",
     "ribbon.group.paragraph": "段落",
     "ribbon.group.styles": "样式",
+    "ribbon.group.markdown": "Markdown",
     "ribbon.group.editing": "编辑",
     // --- Groups: Insert ---
     "ribbon.group.pages": "页面",
@@ -1318,6 +1321,7 @@ export const ribbonZhCN: AdditionalLanguage = {
     "ribbon.cmd.indent-increase": "增加缩进",
     "ribbon.cmd.sort": "排序",
     "ribbon.cmd.show-marks": "显示/隐藏编辑标记",
+    "ribbon.cmd.markdown-input": "Markdown 输入",
     "ribbon.cmd.align-left": "左对齐",
     "ribbon.cmd.align-center": "居中",
     "ribbon.cmd.align-right": "右对齐",
