@@ -1064,6 +1064,7 @@ const picker = (
     /** Show the label beside the icon (Word's border/fill buttons in the
      *  drawing tabs carry text; the font/shading pickers stay icon-only). */
     withLabel?: boolean;
+    size?: "large";
   } = {},
 ): RibbonColorPicker => ({
   type: "color-picker",
@@ -1072,6 +1073,7 @@ const picker = (
   label: cmd(event),
   defaultColor,
   iconOnly: !o.withLabel,
+  ...(o.size ? { size: o.size } : {}),
   ...(o.palette ? { palette: o.palette } : {}),
   ...(o.panel ? { panel: o.panel } : {}),
 });
@@ -1712,7 +1714,7 @@ export function tableContextTabs(scope?: Element): RibbonTab[] {
           // eraser (drop-down).
           split("pen", "pen-style", parsedItems(penStyleItems()), { size: "large" }),
           split("font-size", "pen-size", parsedItems(penSizeItems()), { size: "large" }),
-          picker("font-color", "pen-color", "000000"),
+          picker("font-color", "pen-color", "000000", { withLabel: true, size: "large" }),
           split("format-painter", "border-painter", parsedItems(borderPainterItems()), {
             size: "large",
           }),
