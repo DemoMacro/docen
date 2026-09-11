@@ -1,7 +1,9 @@
 import {
+  cssFontOf,
   familyOfSlot,
   gridPadOf,
   isCjkCodeUnit,
+  itemGlyphLayout,
   justifiedIntervals,
   justifyPerGrapheme,
   leaferBaselinePadPx,
@@ -855,50 +857,101 @@ function paintLineMarks(
   // together.
   const baselineY = lineY + lineBaselineDepthPx(line, sizePx);
 
-  // Space dots: Word centers a dim dot in each space. Pretext trims the
-  // inter-word spaces out of the laid items — they live on as the gaps
-  // between them — so the dots are placed from the source text: the shared
-  // gap walk (the caret map's character lattice runs the same one) counts
-  // the whitespace each item consumed, and the dots paint centered in the
-  // gap between the two caret boundaries flanking the space (the previous
-  // item's laid end and this item's x). Dot, caret and selection edges
-  // therefore share one geometry on natural, justified and squeezed lines
-  // alike, and a dot can never drift with the stretch. Radius clamps to the
-  // gap's per-space share; an atom (tab/picture) between the items or a
-  // line-leading trim paints nothing.
-  const gaps = marks.broken ? null : lineSpaceGaps(line, marks.fullText, marks.cursor);
-  if (!gaps || !gaps.matched) marks.broken = true;
-  else {
-    marks.cursor = gaps.next;
-    let prevEndPx: number | null = null;
-    let prevIndex = -2;
+  // Space dots: Word centers a dim dot in each space.
+  if (para.preserveSpaces) {
+    // Preserved spaces: every space is a real glyph inside the item's text
+    // (the layout charged its advance), so the dots read their geometry
+    // straight off the item's glyph placement — the same itemGlyphLayout
+    // model the caret map's lattice and the painter's Text share, fed the
+    // item's justify-stretch or compressPunctuation interval — one dot per
+    // space at the space's own glyph center, on natural, justified and
+    // squeezed lines alike. No source-text walk remains: item.text is the
+    // source slice verbatim.
+    const rights = justifiedIntervals(line);
     for (const [itemIndex, item] of line.items.entries()) {
       if (item.kind !== "text") continue;
-      const spaces = gaps.spaces[itemIndex]!;
       const src = para.inline[item.inlineIndex];
-      if (spaces > 0 && prevEndPx != null && src?.kind === "text" && prevIndex === itemIndex - 1) {
-        const span = item.xPx - prevEndPx;
-        if (span >= 2) {
-          const fill = src.style.color ? `#${src.style.color}` : color;
-          for (let j = 0; j < spaces; j++) {
-            const r = Math.min(sizePx * 0.075, (span / spaces) * 0.35);
-            const cx = prevEndPx + (span * (j + 0.5)) / spaces;
-            tree.add(
-              new Ellipse({
-                x: lineX + cx - r,
-                y: baselineY - sizePx * 0.3 - r,
-                width: r * 2,
-                height: r * 2,
-                fill,
-                opacity: SPACE_DOT_OPACITY,
-                hittable: false,
-              }),
-            );
+      if (src?.kind !== "text") continue;
+      const intervalPx = rights ? rights[itemIndex]! - item.xPx : undefined;
+      const interval = intervalPx ?? (line.advanceScale != null ? item.widthPx : undefined);
+      const font = cssFontOf(
+        src.style,
+        familyOfSlot(src.style.family, isCjkCodeUnit(item.text, 0)),
+      );
+      const layout = itemGlyphLayout(item.text, font, src.style.letterSpacingPx, interval);
+      const fill = src.style.color ? `#${src.style.color}` : color;
+      let at = 0;
+      for (let g = 0; g < layout.xs.length; g++) {
+        const slice = item.text.slice(at, at + layout.lens[g]!);
+        at += layout.lens[g]!;
+        if (slice !== " " && slice !== "　") continue;
+        const w = layout.widths[g]!;
+        const r = Math.min(sizePx * 0.075, w * 0.35);
+        const cx = item.xPx + layout.xs[g]! + w / 2;
+        tree.add(
+          new Ellipse({
+            x: lineX + cx - r,
+            y: baselineY - sizePx * 0.3 - r,
+            width: r * 2,
+            height: r * 2,
+            fill,
+            opacity: SPACE_DOT_OPACITY,
+            hittable: false,
+          }),
+        );
+      }
+    }
+  } else {
+    // Collapsed spaces: pretext trims the inter-word spaces out of the laid
+    // items — they live on as the gaps between them — so the dots are placed
+    // from the source text: the shared gap walk (the caret map's character
+    // lattice runs the same one) counts the whitespace each item consumed,
+    // and the dots paint centered in the gap between the two caret
+    // boundaries flanking the space (the previous item's laid end and this
+    // item's x). Dot, caret and selection edges therefore share one geometry
+    // on natural, justified and squeezed lines alike, and a dot can never
+    // drift with the stretch. Radius clamps to the gap's per-space share; an
+    // atom (tab/picture) between the items or a line-leading trim paints
+    // nothing.
+    const gaps = marks.broken ? null : lineSpaceGaps(line, marks.fullText, marks.cursor);
+    if (!gaps || !gaps.matched) marks.broken = true;
+    else {
+      marks.cursor = gaps.next;
+      let prevEndPx: number | null = null;
+      let prevIndex = -2;
+      for (const [itemIndex, item] of line.items.entries()) {
+        if (item.kind !== "text") continue;
+        const spaces = gaps.spaces[itemIndex]!;
+        const src = para.inline[item.inlineIndex];
+        if (
+          spaces > 0 &&
+          prevEndPx != null &&
+          src?.kind === "text" &&
+          prevIndex === itemIndex - 1
+        ) {
+          const span = item.xPx - prevEndPx;
+          if (span >= 2) {
+            const fill = src.style.color ? `#${src.style.color}` : color;
+            for (let j = 0; j < spaces; j++) {
+              const r = Math.min(sizePx * 0.075, (span / spaces) * 0.35);
+              const cx = prevEndPx + (span * (j + 0.5)) / spaces;
+              tree.add(
+                new Ellipse({
+                  x: lineX + cx - r,
+                  y: baselineY - sizePx * 0.3 - r,
+                  width: r * 2,
+                  height: r * 2,
+                  fill,
+                  opacity: SPACE_DOT_OPACITY,
+                  hittable: false,
+                }),
+              );
+            }
           }
         }
+        prevEndPx = item.xPx + item.widthPx;
+        prevIndex = itemIndex;
       }
-      prevEndPx = item.xPx + item.widthPx;
-      prevIndex = itemIndex;
     }
   }
   // Tab arrows sit at the tab's start (Word draws the arrow leading the hop).
