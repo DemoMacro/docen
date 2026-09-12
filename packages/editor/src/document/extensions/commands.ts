@@ -355,6 +355,9 @@ export interface InsertTableOptions {
 export interface ModifyStylePatch {
   /** The styleId to modify (e.g. "Normal", "Heading1", a custom id). */
   id: string;
+  /** A new display name (the w:name) — renamed styles show as-is everywhere;
+   *  the command skips the rename when another style owns the name. */
+  name?: string;
   basedOn: string | null;
   /** The style applied to the next paragraph typed after this one. */
   next: string | null;
@@ -366,6 +369,20 @@ export interface ModifyStylePatch {
   underline: boolean;
   /** Hex without "#", or null for the automatic (text) color. */
   color: string | null;
+  // --- The paragraph block (the dialog's alignment/line-spacing/indent and
+  // --- spacing steppers). null clears back to inherit, a value writes it.
+  alignment?: string | null;
+  /** Line spacing in twips of a single line: 240 / 360 / 480 (auto rule). */
+  lineSpacing?: number | null;
+  indentLeft?: number | null;
+  indentRight?: number | null;
+  /** Space before / after in twips. */
+  spacingBefore?: number | null;
+  spacingAfter?: number | null;
+  /** Show the style in the gallery (w:quickFormat); undefined = untouched. */
+  quickFormat?: boolean;
+  /** Re-define on direct format (w:autoRedefine); undefined = untouched. */
+  autoRedefine?: boolean;
 }
 
 const ALIGN_VALUES = ["left", "center", "right", "both", "distribute"] as const;
@@ -555,10 +572,10 @@ const STYLE_SET_PRESETS: Readonly<Record<string, Readonly<Record<string, unknown
   },
 };
 
-/** Copy a style entry with the Modify Style dialog's chain pointers and run
- *  formatting applied. `null` fields are cleared (inherit again); the JSON
- *  round-trip drops the undefined holes the clearing leaves behind and keeps
- *  the stamped model structured-cloneable. */
+/** Copy a style entry with the Modify Style dialog's chain pointers, run
+ *  formatting and paragraph block applied. `null` fields are cleared (inherit
+ *  again); the JSON round-trip drops the undefined holes the clearing leaves
+ *  behind and keeps the stamped model structured-cloneable. */
 function withModifyStylePatch(
   entry: Record<string, unknown>,
   patch: ModifyStylePatch,
@@ -578,6 +595,51 @@ function withModifyStylePatch(
   else delete out.basedOn;
   if (patch.next) out.next = patch.next;
   else delete out.next;
+  if (patch.name) out.name = patch.name;
+  if (patch.quickFormat !== undefined) out.quickFormat = patch.quickFormat;
+  if (patch.autoRedefine !== undefined) out.autoRedefine = patch.autoRedefine;
+  const hasParagraph =
+    patch.alignment !== undefined ||
+    patch.lineSpacing !== undefined ||
+    patch.indentLeft !== undefined ||
+    patch.indentRight !== undefined ||
+    patch.spacingBefore !== undefined ||
+    patch.spacingAfter !== undefined;
+  if (hasParagraph) {
+    const paragraph = { ...((out.paragraph ?? {}) as Record<string, unknown>) };
+    if (patch.alignment !== undefined) paragraph.alignment = patch.alignment ?? undefined;
+    if (
+      patch.lineSpacing !== undefined ||
+      patch.spacingBefore !== undefined ||
+      patch.spacingAfter !== undefined
+    ) {
+      const spacing = { ...((paragraph.spacing ?? {}) as Record<string, unknown>) };
+      if (patch.lineSpacing !== undefined) {
+        // A multiple rule travels with its line value; clearing both lets the
+        // style inherit the chain's spacing again.
+        spacing.line = patch.lineSpacing ?? undefined;
+        spacing.lineRule = patch.lineSpacing ? "auto" : undefined;
+      }
+      if (patch.spacingBefore !== undefined) spacing.before = patch.spacingBefore ?? undefined;
+      if (patch.spacingAfter !== undefined) spacing.after = patch.spacingAfter ?? undefined;
+      paragraph.spacing = spacing;
+    }
+    if (patch.indentLeft !== undefined || patch.indentRight !== undefined) {
+      const indent = { ...((paragraph.indent ?? {}) as Record<string, unknown>) };
+      if (patch.indentLeft !== undefined) indent.left = patch.indentLeft ?? undefined;
+      if (patch.indentRight !== undefined) indent.right = patch.indentRight ?? undefined;
+      paragraph.indent = indent;
+    }
+    // A fully cleared container prunes away (an attribute-less w:spacing /
+    // w:indent on export is noise, not semantics) — "empty" means no defined
+    // value; the undefined holes only leave via the round-trip below.
+    for (const key of ["spacing", "indent"] as const) {
+      const block = paragraph[key] as Record<string, unknown> | undefined;
+      if (block !== undefined && !Object.values(block).some((v) => v !== undefined))
+        delete paragraph[key];
+    }
+    out.paragraph = paragraph;
+  }
   return JSON.parse(JSON.stringify(out)) as Record<string, unknown>;
 }
 
@@ -3524,9 +3586,27 @@ export const DocumentCommands = Extension.create({
         (patch) =>
         ({ tr }) => {
           if (!patch?.id) return false;
+          const styleId = patch.id;
           const styles = { ...((tr.doc.attrs.styles ?? {}) as Record<string, unknown>) };
+          // A rename may not collide with another style's name (Word refuses
+          // the same way) — the rest of the patch still applies.
+          if (patch.name) {
+            const newName = patch.name;
+            const taken = [
+              ...((styles.paragraphStyles ?? []) as Record<string, unknown>[]),
+              // The built-in slots (document = docDefaults, nameless, never matches).
+              ...Object.values((styles.default ?? {}) as Record<string, unknown>),
+            ].some(
+              (s) =>
+                (s as Record<string, unknown>).id !== styleId &&
+                typeof (s as Record<string, unknown>).name === "string" &&
+                ((s as Record<string, unknown>).name as string).toLowerCase() ===
+                  newName.toLowerCase(),
+            );
+            if (taken) patch = { ...patch, name: undefined };
+          }
           const list = ((styles.paragraphStyles ?? []) as Record<string, unknown>[]).slice();
-          const at = list.findIndex((s) => s.id === patch.id);
+          const at = list.findIndex((s) => s.id === styleId);
           // A built-in style may ALSO live under default.<key> (style sets
           // write there) — the pStyle id is the key with its first letter
           // upper-cased (Heading1 → heading1). The style index lets an

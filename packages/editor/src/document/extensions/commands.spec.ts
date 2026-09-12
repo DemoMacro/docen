@@ -2431,3 +2431,209 @@ describe("style-target patch commands", () => {
     editor.destroy();
   });
 });
+
+describe("modify-style command", () => {
+  /** A minimal Modify Style patch (the dialog always commits every field);
+   *  tests override the slots they assert on. */
+  const patch = (over: Record<string, unknown> = {}) => ({
+    id: "Heading1",
+    basedOn: null,
+    next: null,
+    font: null,
+    size: null,
+    bold: false,
+    italic: false,
+    underline: false,
+    color: null,
+    ...over,
+  });
+
+  it("stamps the run block and the paragraph block on an explicit entry", () => {
+    const editor = new Editor({
+      element: null,
+      extensions: EXTENSIONS,
+      content: {
+        type: "doc",
+        attrs: {
+          styles: {
+            paragraphStyles: [
+              {
+                id: "Heading1",
+                name: "heading 1",
+                run: { font: "Georgia", size: 16 },
+                paragraph: { keepNext: true },
+              },
+            ],
+          },
+        },
+        content: [{ type: "paragraph" }],
+      },
+    });
+    editor.commands.setTextSelection(1);
+    expect(
+      editor.commands["modify-style"](
+        patch({
+          name: "My Heading",
+          font: "Arial",
+          size: 18,
+          bold: true,
+          underline: true,
+          color: "C00000",
+          basedOn: "Normal",
+          next: "Normal",
+          alignment: "center",
+          lineSpacing: 360,
+          indentLeft: 240,
+          spacingBefore: 120,
+          quickFormat: false,
+          autoRedefine: true,
+        }),
+      ),
+    ).toBe(true);
+    const entry = (
+      editor.state.doc.attrs.styles as {
+        paragraphStyles: Array<Record<string, unknown>>;
+      }
+    ).paragraphStyles[0];
+    // size travels with its complex-script twin (Word writes the pair).
+    expect(entry.run).toEqual({
+      font: "Arial",
+      size: 18,
+      sizeComplexScript: 18,
+      bold: true,
+      italic: false,
+      underline: { type: "single" },
+      color: "C00000",
+    });
+    expect(entry.name).toBe("My Heading");
+    expect(entry.basedOn).toBe("Normal");
+    expect(entry.next).toBe("Normal");
+    expect(entry.quickFormat).toBe(false);
+    expect(entry.autoRedefine).toBe(true);
+    expect(entry.paragraph).toEqual({
+      keepNext: true,
+      alignment: "center",
+      spacing: { line: 360, lineRule: "auto", before: 120 },
+      indent: { left: 240 },
+    });
+    editor.destroy();
+  });
+
+  it("null fields clear back to inherit (the JSON round-trip drops them)", () => {
+    const editor = new Editor({
+      element: null,
+      extensions: EXTENSIONS,
+      content: {
+        type: "doc",
+        attrs: {
+          styles: {
+            paragraphStyles: [
+              {
+                id: "Heading1",
+                name: "heading 1",
+                paragraph: {
+                  alignment: "center",
+                  spacing: { line: 360, lineRule: "auto", before: 120 },
+                  indent: { left: 240, right: 480 },
+                },
+              },
+            ],
+          },
+        },
+        content: [{ type: "paragraph" }],
+      },
+    });
+    editor.commands.setTextSelection(1);
+    expect(
+      editor.commands["modify-style"](
+        patch({ alignment: null, lineSpacing: null, indentLeft: null, spacingBefore: null }),
+      ),
+    ).toBe(true);
+    const entry = (
+      editor.state.doc.attrs.styles as {
+        paragraphStyles: Array<Record<string, unknown>>;
+      }
+    ).paragraphStyles[0];
+    // Untouched slots (the right indent) stay; a fully cleared container
+    // (the spacing) prunes away.
+    expect(entry.paragraph).toEqual({ indent: { right: 480 } });
+    editor.destroy();
+  });
+
+  it("skips the paragraph block when no paragraph field is present", () => {
+    const editor = new Editor({
+      element: null,
+      extensions: EXTENSIONS,
+      content: {
+        type: "doc",
+        attrs: {
+          styles: {
+            paragraphStyles: [
+              { id: "Heading1", name: "heading 1", paragraph: { keepLines: true } },
+            ],
+          },
+        },
+        content: [{ type: "paragraph" }],
+      },
+    });
+    editor.commands.setTextSelection(1);
+    expect(editor.commands["modify-style"](patch({ bold: true }))).toBe(true);
+    const entry = (
+      editor.state.doc.attrs.styles as {
+        paragraphStyles: Array<Record<string, unknown>>;
+      }
+    ).paragraphStyles[0];
+    expect(entry.paragraph).toEqual({ keepLines: true });
+    editor.destroy();
+  });
+
+  it("drops a rename that collides with another style (case-insensitively)", () => {
+    const editor = new Editor({
+      element: null,
+      extensions: EXTENSIONS,
+      content: {
+        type: "doc",
+        attrs: {
+          styles: {
+            paragraphStyles: [
+              { id: "Heading1", name: "heading 1" },
+              { id: "Custom", name: "Body Text" },
+            ],
+            default: { heading2: { name: "heading 2" } },
+          },
+        },
+        content: [{ type: "paragraph" }],
+      },
+    });
+    editor.commands.setTextSelection(1);
+    // Collides with Custom's explicit name — the rename is refused; the rest
+    // of the patch still applied.
+    expect(editor.commands["modify-style"](patch({ name: "body text", bold: true }))).toBe(true);
+    let styles = editor.state.doc.attrs.styles as {
+      paragraphStyles: Array<Record<string, unknown>>;
+    };
+    expect(styles.paragraphStyles[0].name).toBe("heading 1");
+    expect((styles.paragraphStyles[0].run as Record<string, unknown>).bold).toBe(true);
+    // The built-in slot's name blocks the same way.
+    expect(editor.commands["modify-style"](patch({ name: "Heading 2" }))).toBe(true);
+    styles = editor.state.doc.attrs.styles as {
+      paragraphStyles: Array<Record<string, unknown>>;
+    };
+    expect(styles.paragraphStyles[0].name).toBe("heading 1");
+    editor.destroy();
+  });
+
+  it("writes a built-in defaults slot and stamps the id as its name", () => {
+    const editor = build();
+    editor.commands.setTextSelection(1);
+    expect(editor.commands["modify-style"](patch({ id: "Heading2", size: 20 }))).toBe(true);
+    const styles = editor.state.doc.attrs.styles as {
+      default?: Record<string, Record<string, unknown>>;
+    };
+    const entry = styles.default?.heading2;
+    expect(entry?.name).toBe("Heading2");
+    // The two-state B/I/U buttons always commit explicitly (bold/italic too).
+    expect(entry?.run).toEqual({ size: 20, sizeComplexScript: 20, bold: false, italic: false });
+    editor.destroy();
+  });
+});
