@@ -1,4 +1,9 @@
-import { quickStyles, type StylesOptions } from "@docen/docx";
+import {
+  quickStyles,
+  resolveFontName,
+  type RunStylePropertiesOptions,
+  type StylesOptions,
+} from "@docen/docx";
 
 import type {
   RibbonButton,
@@ -69,28 +74,46 @@ const sizeItems = (): string => {
 };
 
 /** Minimal built-in set shown when a document carries no styles.xml (e.g. a
- *  blank editor) so the Styles gallery is never empty. */
-const FALLBACK_STYLE_ITEMS = (): string =>
-  JSON.stringify([
-    { text: opt("normal"), value: "Normal" },
-    { text: opt("heading-1"), value: "Heading1" },
-    { text: opt("heading-2"), value: "Heading2" },
-    { text: opt("heading-3"), value: "Heading3" },
-    { text: opt("title"), value: "Title" },
-  ]);
+ *  blank editor) so the Styles gallery is never empty — no cascade info to
+ *  preview, so the cards render plain. */
+const FALLBACK_STYLE_ITEMS = (): RibbonMenuItem[] => [
+  { text: t(opt("normal")), preview: { text: t(opt("normal")) }, value: "Normal" },
+  { text: t(opt("heading-1")), preview: { text: t(opt("heading-1")) }, value: "Heading1" },
+  { text: t(opt("heading-2")), preview: { text: t(opt("heading-2")) }, value: "Heading2" },
+  { text: t(opt("heading-3")), preview: { text: t(opt("heading-3")) }, value: "Heading3" },
+  { text: t(opt("title")), preview: { text: t(opt("title")) }, value: "Title" },
+];
 
-/** Build the Styles gallery items from the loaded document's styles.xml model:
- *  named paragraph styles (Normal + any custom) first, then the built-in named
- *  styles nested under `default` (title/heading1-9). Display text is the style's
- *  own `name` from the model (falling back to its id); the value is the pStyle
- *  id, which round-trips via the paragraph `style` attr. */
-const styleItems = (styles?: StylesOptions | null): string => {
-  // quickStyles() returns the document's quickFormat paragraph styles (Word's
-  // Quick Styles gallery behavior), ordered by uiPriority. The value is the
-  // pStyle id, which round-trips via the Paragraph/Heading styleId attr.
+/** Inline CSS previewing a style's own character formatting: the Styles
+ *  gallery renders each card's label in the style's font/size/color (Word's
+ *  Quick Styles thumbnails). Sizes clamp so a Title still fits the card row. */
+const stylePreviewCss = (run?: RunStylePropertiesOptions): string | undefined => {
+  if (!run) return undefined;
+  const parts: string[] = [];
+  const family = resolveFontName(run.font);
+  if (family) parts.push(`font-family:${family}`);
+  if (typeof run.size === "number" && run.size > 0)
+    parts.push(`font-size:${Math.min(Math.max(run.size * 0.85, 8), 15)}pt`);
+  if (run.bold) parts.push("font-weight:700");
+  if (run.italic) parts.push("font-style:italic");
+  // HexColorOrAuto is the hex string or "auto"; theme-color objects have no
+  // single CSS equivalent, so they render default-ink like Word's gallery does.
+  if (typeof run.color === "string" && run.color !== "auto") parts.push(`color:#${run.color}`);
+  return parts.length > 0 ? parts.join(";") : undefined;
+};
+
+/** Build the Styles gallery (Word's Quick Styles strip): quickFormat paragraph
+ *  styles by uiPriority, each card showing the style's own name in its own
+ *  character formatting. The value is the pStyle id, which round-trips via the
+ *  paragraph `style` attr. */
+const styleGalleryItems = (styles?: StylesOptions | null): RibbonMenuItem[] => {
   const entries = quickStyles(styles);
   if (entries.length === 0) return FALLBACK_STYLE_ITEMS();
-  return JSON.stringify(entries.map((e) => ({ text: e.name, value: e.id })));
+  return entries.map((e) => ({
+    text: e.name,
+    preview: { text: e.name, css: stylePreviewCss(e.run) },
+    value: e.id,
+  }));
 };
 
 const pasteItems = (): string =>
@@ -1212,7 +1235,16 @@ const homeTab = (styles?: StylesOptions | null): RibbonTab =>
     ),
     group(
       "styles",
-      [col([combo("style", "Normal", parsedItems(styleItems(styles)))])],
+      [
+        col([
+          {
+            type: "gallery",
+            event: "style",
+            items: styleGalleryItems(styles),
+            visibleCount: 3,
+          },
+        ]),
+      ],
       "styles-pane",
     ),
     // Markdown input mode — a typing-mode flag, not a document command

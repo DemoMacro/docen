@@ -29,6 +29,10 @@ export interface RibbonMenuItem {
   /** Docen icon key rendered in the item's `start` slot (e.g. a gallery
    *  drop-down showing each preset's thumbnail beside its name). */
   icon?: string;
+  /** Gallery preview card: the entry's own text rendered in its own character
+   *  formatting (`css` is inline CSS, e.g. the Styles gallery showing each
+   *  style name in the style's font/size/color). Replaces icon+text display. */
+  preview?: { text: string; css?: string };
   value?: string;
   event?: string;
   checked?: boolean;

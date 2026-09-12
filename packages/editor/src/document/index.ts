@@ -560,7 +560,7 @@ class DocenDocument extends AddinHost<Editor> {
       search?.focus();
       return;
     }
-    // Ctrl+Shift+S focuses the Styles box (Word's Apply Styles shortcut).
+    // Ctrl+Shift+S focuses the Styles gallery (Word's Apply Styles shortcut).
     if (
       (event.ctrlKey || event.metaKey) &&
       event.shiftKey &&
@@ -568,7 +568,7 @@ class DocenDocument extends AddinHost<Editor> {
     ) {
       event.preventDefault();
       (
-        this.shadowRoot?.querySelector('docen-ribbon-combobox[event="style"]') as HTMLElement | null
+        this.shadowRoot?.querySelector('docen-ribbon-gallery[event="style"]') as HTMLElement | null
       )?.focus();
       return;
     }
@@ -930,16 +930,16 @@ class DocenDocument extends AddinHost<Editor> {
     return null;
   }
 
-  /** Mirror the paragraph style at the caret into the Styles gallery combobox —
-   *  its value is the current paragraph's style id (the HeadingLevel literal
+  /** Mirror the paragraph style at the caret into the Styles gallery — its
+   *  value is the current paragraph's style id (the HeadingLevel literal
    *  carried on `heading` for heading paragraphs, the pStyle id on `style`
-   *  otherwise, or "Normal" when the paragraph carries none). The combobox
-   *  matches the value against its gallery items to show the style's name. */
+   *  otherwise, or "Normal" when the paragraph carries none). The gallery
+   *  outlines the entry matching the value (Word's applied-style card). */
   #syncStyleControl(): void {
     const editor = this.editor;
     if (!editor) return;
     const value = this.#currentStyleId(editor) || "Normal";
-    const cb = this.shadowRoot?.querySelector<HTMLElement>('docen-ribbon-combobox[event="style"]');
+    const cb = this.shadowRoot?.querySelector<HTMLElement>('docen-ribbon-gallery[event="style"]');
     if (cb && cb.getAttribute("value") !== value) cb.setAttribute("value", value);
     // The Styles pane's highlight follows the caret's paragraph style.
     const pane = this.shadowRoot?.querySelector("docen-styles-pane") as
