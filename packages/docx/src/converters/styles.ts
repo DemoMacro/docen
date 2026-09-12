@@ -26,9 +26,10 @@ export type { StylesOptions };
 
 // ── Quick Styles gallery selection ──────────────────────────────────────────
 
-/** A gallery-ready paragraph-style entry for the Styles combobox. `run` rides
- *  along so the ribbon can render each entry's preview in the style's own
- *  character formatting (Word's Quick Styles gallery thumbnails). */
+/** A gallery-ready paragraph-style entry for the Styles combobox. `run` is the
+ *  *effective* character formatting (basedOn chain merged, docDefaults filling
+ *  the gaps) so the ribbon can render each entry's preview exactly as the
+ *  style renders in the document (Word's Quick Styles gallery thumbnails). */
 export interface QuickStyleEntry {
   id: string;
   name: string;
@@ -68,13 +69,20 @@ export function quickStyles(styles: StylesOptions | null | undefined): QuickStyl
   type Candidate = QuickStyleEntry & { uiPriority: number; quick: boolean };
   const all: Candidate[] = [];
   const seen = new Set<string>();
+  const index = indexParagraphStyles(styles);
+  const docRun = styles.default?.document?.run as RunStylePropertiesOptions | undefined;
   const push = (id: string, style: StyleEntry): void => {
     if (seen.has(id)) return;
     seen.add(id);
+    // Effective run: the basedOn chain merged, docDefaults filling the gaps —
+    // Word's gallery previews the style as it renders, not its raw entry.
     all.push({
       id,
       name: style.name || id,
-      run: style.run,
+      run: cleanAttrs({
+        ...docRun,
+        ...mergeStyleChain(index, id).run,
+      }) as RunStylePropertiesOptions,
       uiPriority: style.uiPriority ?? 9999,
       quick: !!style.quickFormat,
     });
