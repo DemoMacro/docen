@@ -165,4 +165,42 @@ describe.sequential("rich inline pre-wrap (preserved spaces)", () => {
     expect(lineCount).toBeGreaterThanOrEqual(1);
     expect(lineCount).toBeLessThan(210);
   });
+
+  it("wraps a whole word that cannot fit after a preserved-space run boundary", () => {
+    // The boundary space lives inside the previous item's text (gapBefore is
+    // 0 under pre-wrap); the next item's word wider than the leftover must
+    // move to a fresh line whole, never grapheme-split to pad the old line.
+    const prepared = prepareRichInline(
+      [
+        { text: "aaa", font: FONT },
+        { text: " ", font: FONT },
+        { text: "bbbb", font: FONT },
+      ],
+      { whiteSpace: "pre-wrap" },
+    );
+    const lines: string[] = [];
+    walkRichInlineLineRanges(prepared, 36, (range) => {
+      const line = materializeRichInlineLineRange(prepared, range);
+      lines.push(line.fragments.map((f) => f.text).join(""));
+    });
+    expect(lines).toEqual(["aaa ", "bbbb"]);
+  });
+
+  it("wraps a whole word at a spaceless CJK-latin item boundary", () => {
+    // Same guard with no boundary space at all: a partial first-segment end
+    // is itself the word-boundary signal, gap or not.
+    const prepared = prepareRichInline(
+      [
+        { text: "甲乙", font: FONT },
+        { text: "ccc", font: FONT },
+      ],
+      { whiteSpace: "pre-wrap" },
+    );
+    const lines: string[] = [];
+    walkRichInlineLineRanges(prepared, 44, (range) => {
+      const line = materializeRichInlineLineRange(prepared, range);
+      lines.push(line.fragments.map((f) => f.text).join(""));
+    });
+    expect(lines).toEqual(["甲乙", "ccc"]);
+  });
 });

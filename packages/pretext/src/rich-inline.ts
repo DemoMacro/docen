@@ -384,13 +384,14 @@ function stepRichInlineLine(
 
     // If the only thing we can fit after paying the boundary gap is a partial
     // slice of the item's first segment, prefer wrapping before the item so we
-    // keep whole-word-style boundaries when they exist. But once the current
-    // line can consume a real breakable unit from the item, stay greedy and
-    // keep filling the line.
+    // keep whole-word-style boundaries when they exist. Under pre-wrap the
+    // boundary space lives inside the previous item's text, so gapBefore is 0 —
+    // the partial-first-segment end is itself the word-boundary signal. But
+    // once the current line can consume a real breakable unit from the item,
+    // stay greedy and keep filling the line.
     if (
       lineWidth > 0 &&
       atItemStart &&
-      gapBefore > 0 &&
       endsInsideFirstSegment(lineEnd.segmentIndex, lineEnd.graphemeIndex)
     ) {
       const freshLineEnd: LineBreakCursor = { segmentIndex: 0, graphemeIndex: 0 };
