@@ -285,8 +285,13 @@ class DocenFontDialog extends FASTElement {
   }
 
   /** Prefill every field from the selection's run state (the host reads the
-   *  marks; absent values mean "inherited" and leave the combo blank). */
-  show(state: FontDialogPatch): void {
+   *  marks; absent values mean "inherited" and leave the combo blank).
+   *  `styleId` opens the dialog in the Modify Style dialog's Format > Font
+   *  mode: the fields prefill from that style's definition and OK retargets
+   *  the style (the host reads the `data-for-style` marker on `font:ok`). */
+  show(state: FontDialogPatch, opts?: { styleId?: string }): void {
+    if (opts?.styleId) this.dataset.forStyle = opts.styleId;
+    else delete this.dataset.forStyle;
     this.#fillCombos();
     this.#pick(this.fontSel, state.font ?? "");
     const style =

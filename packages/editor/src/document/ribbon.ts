@@ -93,8 +93,10 @@ const FALLBACK_STYLE_ITEMS = (css?: string): RibbonMenuItem[] => {
 
 /** Inline CSS previewing a style's own character formatting: the Styles
  *  gallery renders each card's label in the style's font/size/color (Word's
- *  Quick Styles thumbnails). Sizes clamp so a Title still fits the card row. */
-const stylePreviewCss = (run?: RunStylePropertiesOptions): string | undefined => {
+ *  Quick Styles thumbnails) and the Modify Style dialog's preview area renders
+ *  its sample text the same way. Sizes clamp so a Title still fits the card
+ *  row. Exported for the host, which passes it into the dialog state. */
+export const stylePreviewCss = (run?: RunStylePropertiesOptions): string | undefined => {
   if (!run) return undefined;
   const parts: string[] = [];
   const family = resolveFontName(run.font);

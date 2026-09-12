@@ -72,6 +72,8 @@ declare module "@tiptap/core" {
       "line-spacing": (mult?: string) => ReturnType;
       "paragraph-dialog-apply": (patch?: ParagraphDialogPatch) => ReturnType;
       "paragraph-dialog-default": (patch?: ParagraphDialogPatch) => ReturnType;
+      "style-paragraph-patch": (arg?: { id: string; patch: ParagraphDialogPatch }) => ReturnType;
+      "style-run-patch": (arg?: { id: string; props: Record<string, unknown> }) => ReturnType;
       shading: (value?: unknown) => ReturnType;
       "font-color": (value?: unknown) => ReturnType;
       border: (side?: string) => ReturnType;
@@ -580,7 +582,8 @@ function withModifyStylePatch(
 }
 
 /** The Paragraph dialog's patch as a style-definition paragraph block — the
- *  "Set As Default" commit lands on the Normal style's w:pPr. Renames the two
+ *  style-target commits (Set As Default / the Modify Style dialog's Format >
+ *  Paragraph) land on the target style's w:pPr. Renames the two
  *  engine-side keys the dialog patch spells differently. The indent/spacing
  *  objects spread verbatim (their undefined slots ARE the clear semantics —
  *  an absent key serializes no element, so the style inherits docDefaults). */
@@ -607,6 +610,36 @@ function paragraphPatchAsStyleProps(patch: ParagraphDialogPatch): Record<string,
     autoSpaceEastAsianText: patch.autoSpaceDN,
     textAlignment: patch.textAlignment,
   };
+}
+
+/** Stamp a style-definition block (the style's `run` or `paragraph` props)
+ *  onto one style — the explicit-entry rule every style writer follows: patch
+ *  the paragraphStyles entry when the style has one, else its built-in
+ *  defaults slot (Heading1 → heading1), so the explicit definition shadows
+ *  the built-in in exactly one place. */
+function applyStyleProps(
+  styles: Record<string, unknown>,
+  id: string,
+  props: Record<string, unknown>,
+  slot: "run" | "paragraph",
+): void {
+  const list = ((styles.paragraphStyles ?? []) as Record<string, unknown>[]).slice();
+  const defaults = { ...((styles.default ?? {}) as Record<string, unknown>) };
+  const key = id.charAt(0).toLowerCase() + id.slice(1);
+  const at = list.findIndex((s) => s.id === id);
+  if (at >= 0) {
+    const entry = { ...list[at] };
+    entry[slot] = { ...((entry[slot] ?? {}) as Record<string, unknown>), ...props };
+    list[at] = entry;
+    styles.paragraphStyles = list;
+    delete defaults[key];
+  } else {
+    const entry = { ...((defaults[key] ?? {}) as Record<string, unknown>) };
+    if (entry.name === undefined) entry.name = id;
+    entry[slot] = { ...((entry[slot] ?? {}) as Record<string, unknown>), ...props };
+    defaults[key] = entry;
+  }
+  styles.default = defaults;
 }
 
 /** HeadingLevel literals the style gallery recognizes as headings. */
@@ -2341,31 +2374,35 @@ export const DocumentCommands = Extension.create({
       // The Paragraph dialog's Set As Default — the committed patch becomes
       // the Normal style's paragraph definition, so every paragraph that
       // doesn't override it (today's and future ones) picks the values up
-      // through the style chain. Same explicit-entry rule as modify-style:
-      // patch the paragraphStyles entry when Normal has one, else the
-      // built-in defaults slot.
+      // through the style chain. Same explicit-entry rule as modify-style.
       "paragraph-dialog-default":
         (patch) =>
         ({ tr }) => {
           if (!patch) return false;
-          const paragraph = paragraphPatchAsStyleProps(patch);
           const styles = { ...((tr.doc.attrs.styles ?? {}) as Record<string, unknown>) };
-          const list = ((styles.paragraphStyles ?? []) as Record<string, unknown>[]).slice();
-          const defaults = { ...((styles.default ?? {}) as Record<string, unknown>) };
-          const at = list.findIndex((s) => s.id === "Normal");
-          if (at >= 0) {
-            const entry = { ...list[at] };
-            entry.paragraph = { ...((entry.paragraph ?? {}) as object), ...paragraph };
-            list[at] = entry;
-            styles.paragraphStyles = list;
-            delete defaults.normal;
-          } else {
-            const entry = { ...((defaults.normal ?? {}) as Record<string, unknown>) };
-            if (entry.name === undefined) entry.name = "Normal";
-            entry.paragraph = { ...((entry.paragraph ?? {}) as object), ...paragraph };
-            defaults.normal = entry;
-          }
-          styles.default = defaults;
+          applyStyleProps(styles, "Normal", paragraphPatchAsStyleProps(patch), "paragraph");
+          tr.step(new DocAttrStep("styles", styles));
+          return true;
+        },
+      // The Modify Style dialog's Format buttons — the Font/Paragraph dialogs
+      // opened with a style target commit onto that style's own definition
+      // (its w:pPr / w:rPr) instead of the selection, so every paragraph of
+      // the style re-flows through the same DocAttrStep (rides undo).
+      "style-paragraph-patch":
+        (arg) =>
+        ({ tr }) => {
+          if (!arg?.id || !arg.patch) return false;
+          const styles = { ...((tr.doc.attrs.styles ?? {}) as Record<string, unknown>) };
+          applyStyleProps(styles, arg.id, paragraphPatchAsStyleProps(arg.patch), "paragraph");
+          tr.step(new DocAttrStep("styles", styles));
+          return true;
+        },
+      "style-run-patch":
+        (arg) =>
+        ({ tr }) => {
+          if (!arg?.id || !arg.props) return false;
+          const styles = { ...((tr.doc.attrs.styles ?? {}) as Record<string, unknown>) };
+          applyStyleProps(styles, arg.id, arg.props, "run");
           tr.step(new DocAttrStep("styles", styles));
           return true;
         },

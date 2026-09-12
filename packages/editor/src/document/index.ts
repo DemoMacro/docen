@@ -104,7 +104,7 @@ import { SectionCommands } from "./commands/sections";
 import { SpellingCommands } from "./commands/spelling";
 import type { StylesInspectorData, StylesPaneState } from "./components/styles-pane";
 import { pagesToPdf } from "./export-pdf";
-import type { ModifyStylePatch } from "./extensions/commands";
+import type { ModifyStylePatch, ParagraphDialogPatch } from "./extensions/commands";
 import {
   chartMenuValueOf,
   floatingDrawingAt,
@@ -237,6 +237,53 @@ const BUILT_IN_STYLE_KEYS: Readonly<Record<string, string>> = {
   intensequote: "styleName.intenseQuote",
   listparagraph: "styleName.listParagraph",
 };
+
+/** The style's run definition as the Font dialog's prefill (the Format >
+ *  Font open — absent values leave the combo blank, inherit-again). */
+function fontPatchOfRun(run: Record<string, unknown>): FontDialogPatch {
+  const underline = run.underline as { type?: unknown; color?: unknown } | undefined;
+  return {
+    font: typeof run.font === "string" ? run.font : null,
+    size: typeof run.size === "number" ? String(run.size) : null,
+    bold: run.bold === true,
+    italic: run.italic === true,
+    underlineStyle: typeof underline?.type === "string" ? underline.type : null,
+    underlineColor: typeof underline?.color === "string" ? underline.color : null,
+    strike: run.strike === true,
+    doubleStrike: run.doubleStrike === true,
+    superscript: run.vertAlign === "superscript",
+    subscript: run.vertAlign === "subscript",
+    smallCaps: run.smallCaps === true,
+    allCaps: run.caps === true,
+    hidden: run.vanish === true,
+  };
+}
+
+/** The Font dialog's commit as a style-definition run block — the Format >
+ *  Font write maps dialog fields onto the w:rPr children (unchecked = the
+ *  field drops out, the style inherits again). */
+function fontRunPropsOf(patch: FontDialogPatch): Record<string, unknown> {
+  const size = patch.size ? Number(patch.size) : undefined;
+  return {
+    font: patch.font ?? undefined,
+    size,
+    sizeComplexScript: size,
+    bold: patch.bold || undefined,
+    italic: patch.italic || undefined,
+    underline: patch.underlineStyle
+      ? {
+          type: patch.underlineStyle,
+          ...(patch.underlineColor ? { color: patch.underlineColor } : {}),
+        }
+      : undefined,
+    strike: patch.strike || undefined,
+    doubleStrike: patch.doubleStrike || undefined,
+    smallCaps: patch.smallCaps || undefined,
+    caps: patch.allCaps || undefined,
+    vertAlign: patch.superscript ? "superscript" : patch.subscript ? "subscript" : undefined,
+    vanish: patch.hidden || undefined,
+  };
+}
 
 /** The inlinePassthrough carrying a math payload at the selection — the
  *  equation context tab's trigger. A caret hugging the atom (before or after)
@@ -1088,8 +1135,78 @@ class DocenDocument extends AddinHost<Editor> {
       italic: run.italic === true,
       underline: underline?.type != null,
       color: typeof run.color === "string" ? run.color : null,
+      // The gallery's merged effective run (basedOn chain + docDefaults) is
+      // also the preview's formatting — same source, same CSS.
+      previewCss: styleGalleryItems(styles).find((item) => item.value === id)?.preview?.css,
     });
   }
+
+  /** The Modify Style dialog's Format > Font/Paragraph — open that dialog in
+   *  style mode: the fields prefill from the style's own definition and OK
+   *  retargets the style (`data-for-style` marker read by the OK routers).
+   *  The Modify Style dialog stays open underneath (both are native modal
+   *  dialogs; closing the child restores it, mid-edit fields intact). */
+  #openStyleFormat(id: string, target: "font" | "paragraph"): void {
+    const editor = this.editor;
+    if (!editor || !id) return;
+    const styles = this.#docStyles(editor);
+    const style = styles ? indexParagraphStyles(styles).get(id) : undefined;
+    if (target === "paragraph") {
+      const dialog = this.shadowRoot?.querySelector("docen-paragraph-dialog") as
+        | (HTMLElement & {
+            show(attrs?: Record<string, unknown>, opts?: { styleId?: string }): void;
+          })
+        | null;
+      // StyleEntry unions the paragraph/character shapes — the w:pPr block
+      // only exists on the paragraph side.
+      const paragraph = (style as { paragraph?: Record<string, unknown> } | undefined)?.paragraph;
+      dialog?.show(paragraph ?? {}, { styleId: id });
+    } else {
+      const dialog = this.shadowRoot?.querySelector("docen-font-dialog") as
+        | (HTMLElement & { show(state: FontDialogPatch, opts?: { styleId?: string }): void })
+        | null;
+      dialog?.show(fontPatchOfRun((style?.run ?? {}) as Record<string, unknown>), { styleId: id });
+    }
+  }
+
+  /** The Paragraph dialog's OK — a style-target open (Format > Paragraph)
+   *  restamps the style's definition; the regular open stamps the selection
+   *  (DialogCommands' path). */
+  readonly #onParagraphDialogOk = (event: Event): void => {
+    const patch = (event as CustomEvent<ParagraphDialogPatch>).detail;
+    const dialog = this.shadowRoot?.querySelector("docen-paragraph-dialog");
+    const styleId = dialog?.getAttribute("data-for-style") ?? null;
+    if (styleId && patch) {
+      dialog?.removeAttribute("data-for-style");
+      this.editor?.commands["style-paragraph-patch"]({ id: styleId, patch });
+      this.#renderStylesPane();
+      this.#bridge?.focus();
+      return;
+    }
+    this.#dialogs.onParagraphOk(event as CustomEvent<ParagraphDialogPatch>);
+  };
+
+  /** The Font dialog's OK — the style-target twin of #onParagraphDialogOk. */
+  readonly #onFontDialogOk = (event: Event): void => {
+    const patch = (event as CustomEvent<FontDialogPatch>).detail;
+    const dialog = this.shadowRoot?.querySelector("docen-font-dialog");
+    const styleId = dialog?.getAttribute("data-for-style") ?? null;
+    if (styleId && patch) {
+      dialog?.removeAttribute("data-for-style");
+      this.editor?.commands["style-run-patch"]({ id: styleId, props: fontRunPropsOf(patch) });
+      this.#renderStylesPane();
+      this.#bridge?.focus();
+      return;
+    }
+    this.#dialogs.onFontOk(event as CustomEvent<FontDialogPatch>);
+  };
+
+  /** A ribbon gallery's right-click — only the Styles gallery routes it
+   *  today: Modify the right-clicked style (Word's gallery context entry). */
+  readonly #onItemContext = (event: Event): void => {
+    const detail = (event as CustomEvent<{ event?: string; value?: string }>).detail;
+    if (detail?.event === "style" && detail.value) this.#openModifyStyle(detail.value);
+  };
 
   /** Capture the opened styles model (called from #renderDoc). */
   #snapshotStyles(): void {
@@ -1325,6 +1442,9 @@ class DocenDocument extends AddinHost<Editor> {
     // on the shadow root so non-composed Fluent events (menu-item "change")
     // reach us, not just composed ones (ribbon "command").
     this.shadowRoot!.addEventListener("command", this.#onCommand as EventListener);
+    // Ribbon gallery right-click (Word's gallery context entry) — only the
+    // Styles gallery routes it today: Modify the right-clicked style.
+    this.shadowRoot!.addEventListener("item-context", this.#onItemContext as EventListener);
     this.shadowRoot!.addEventListener("change", this.#onChange as EventListener);
     // Right-click → Word's context menu. Captured on the shadow root so the
     // items are built before <docen-context-menu>'s own capture handler opens
@@ -1388,6 +1508,13 @@ class DocenDocument extends AddinHost<Editor> {
         this.#renderStylesPane();
         this.#bridge?.focus();
       }) as EventListener,
+    );
+    // Modify Style dialog's Format > Font/Paragraph — open that dialog
+    // against the style being modified (the detail carries its id).
+    this.shadowRoot!.querySelector("docen-modify-style-dialog")?.addEventListener(
+      "modify-style:format",
+      ((event: CustomEvent<{ id: string; target: "font" | "paragraph" }>) =>
+        this.#openStyleFormat(event.detail.id, event.detail.target)) as EventListener,
     );
     // Click a Results entry → jump to that match (delegated on the container).
     this.shadowRoot!.querySelector(".search-results")?.addEventListener(
@@ -1523,10 +1650,11 @@ class DocenDocument extends AddinHost<Editor> {
       "symbol:insert",
       this.#onSymbolInsert as EventListener,
     );
-    // Paragraph dialog — stamp the committed patch onto the selection.
+    // Paragraph dialog — stamp the committed patch onto the selection (or the
+    // targeted style when opened through the Modify Style dialog's Format).
     this.shadowRoot!.querySelector("docen-paragraph-dialog")?.addEventListener(
       "paragraph:ok",
-      this.#dialogs.onParagraphOk as EventListener,
+      this.#onParagraphDialogOk as EventListener,
     );
     // Paragraph dialog's Set As Default — the patch lands on the Normal style.
     this.shadowRoot!.querySelector("docen-paragraph-dialog")?.addEventListener(
@@ -1565,10 +1693,11 @@ class DocenDocument extends AddinHost<Editor> {
       "paste-special:ok",
       this.#onPasteSpecialOk as EventListener,
     );
-    // Font dialog — stamp the committed run state onto the selection.
+    // Font dialog — stamp the committed run state onto the selection (or the
+    // targeted style when opened through the Modify Style dialog's Format).
     this.shadowRoot!.querySelector("docen-font-dialog")?.addEventListener(
       "font:ok",
-      this.#dialogs.onFontOk as EventListener,
+      this.#onFontDialogOk as EventListener,
     );
     // Table Properties dialog — rewrite the caret table's alignment/indent.
     this.shadowRoot!.querySelector("docen-table-properties-dialog")?.addEventListener(
@@ -2323,6 +2452,7 @@ class DocenDocument extends AddinHost<Editor> {
     this.#unobserveLang?.();
     this.#unobserveLang = undefined;
     this.shadowRoot?.removeEventListener("command", this.#onCommand as EventListener);
+    this.shadowRoot?.removeEventListener("item-context", this.#onItemContext as EventListener);
     this.shadowRoot?.removeEventListener("change", this.#onChange as EventListener);
     this.#fileInput?.removeEventListener("change", this.#onFileChange);
     this.#imageInput?.removeEventListener("change", this.#onImageChange);
@@ -2391,7 +2521,7 @@ class DocenDocument extends AddinHost<Editor> {
       ?.removeEventListener("symbol:insert", this.#onSymbolInsert as EventListener);
     this.shadowRoot
       ?.querySelector("docen-paragraph-dialog")
-      ?.removeEventListener("paragraph:ok", this.#dialogs.onParagraphOk as EventListener);
+      ?.removeEventListener("paragraph:ok", this.#onParagraphDialogOk as EventListener);
     this.shadowRoot
       ?.querySelector("docen-paragraph-dialog")
       ?.removeEventListener("paragraph:default", this.#dialogs.onParagraphDefault as EventListener);
@@ -2400,7 +2530,7 @@ class DocenDocument extends AddinHost<Editor> {
       ?.removeEventListener("paste-special:ok", this.#onPasteSpecialOk as EventListener);
     this.shadowRoot
       ?.querySelector("docen-font-dialog")
-      ?.removeEventListener("font:ok", this.#dialogs.onFontOk as EventListener);
+      ?.removeEventListener("font:ok", this.#onFontDialogOk as EventListener);
     this.shadowRoot
       ?.querySelector("docen-table-properties-dialog")
       ?.removeEventListener(

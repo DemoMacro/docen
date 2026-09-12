@@ -2335,3 +2335,99 @@ describe("shape-effects / shape-text-direction", () => {
     expect(editor.commands["shape-text-direction"]()).toBe(false);
   });
 });
+
+describe("style-target patch commands", () => {
+  /** The styles model after a command, narrowed to what the assertions read. */
+  const stylesOf = (editor: EditorType) =>
+    editor.state.doc.attrs.styles as {
+      paragraphStyles?: Array<Record<string, unknown>>;
+      default?: Record<string, Record<string, unknown>>;
+    };
+
+  /** A minimal Paragraph-dialog patch (the dialog always commits every
+   *  field); tests override the slots they assert on. */
+  const paraPatch = (over: Record<string, unknown> = {}) => ({
+    alignment: "left",
+    outlineLevel: null,
+    indent: {},
+    spacing: {},
+    mirrorIndents: false,
+    adjustRightInd: true,
+    snapToGrid: true,
+    contextualSpacing: false,
+    widowControl: true,
+    keepNext: false,
+    keepLines: false,
+    pageBreakBefore: false,
+    suppressLineNumbers: false,
+    suppressAutoHyphens: false,
+    kinsoku: true,
+    wordWrap: false,
+    overflowPunct: true,
+    autoSpaceDE: true,
+    autoSpaceDN: true,
+    textAlignment: "auto",
+    ...over,
+  });
+
+  it("style-run-patch creates the built-in defaults slot", () => {
+    const editor = build();
+    editor.commands.setTextSelection(1);
+    expect(
+      editor.commands["style-run-patch"]({
+        id: "Heading1",
+        props: { font: "Georgia", size: 16, bold: true, italic: undefined },
+      }),
+    ).toBe(true);
+    const entry = stylesOf(editor).default?.heading1;
+    expect(entry?.name).toBe("Heading1");
+    // undefined props drop out (toEqual ignores undefined slots) — the style
+    // keeps inheriting them.
+    expect(entry?.run).toEqual({ font: "Georgia", size: 16, bold: true });
+    editor.destroy();
+  });
+
+  it("style-paragraph-patch prefers the explicit entry and drops the shadow", () => {
+    // An explicit Heading1 definition (as modify-style writes it) shadowing
+    // the built-in defaults slot.
+    const editor = new Editor({
+      element: null,
+      extensions: EXTENSIONS,
+      content: {
+        type: "doc",
+        attrs: {
+          styles: {
+            paragraphStyles: [{ id: "Heading1", name: "heading 1", run: { bold: true } }],
+            default: { heading1: { name: "heading 1", run: { bold: true } } },
+          },
+        },
+        content: [{ type: "paragraph" }],
+      },
+    });
+    editor.commands.setTextSelection(1);
+    expect(
+      editor.commands["style-paragraph-patch"]({
+        id: "Heading1",
+        patch: paraPatch({ alignment: "center", spacing: { before: 240 } }),
+      }),
+    ).toBe(true);
+    const styles = stylesOf(editor);
+    const entry = (styles.paragraphStyles ?? []).find((s) => s.id === "Heading1");
+    const paragraph = (entry?.paragraph ?? {}) as Record<string, unknown>;
+    expect(paragraph.alignment).toBe("center");
+    expect(paragraph.spacing).toEqual({ before: 240 });
+    // The run the entry already carried survives, and the shadowed built-in
+    // is gone (the explicit definition is the one definition).
+    expect(((entry?.run ?? {}) as Record<string, unknown>).bold).toBe(true);
+    expect(styles.default?.heading1).toBeUndefined();
+    editor.destroy();
+  });
+
+  it("declines without a target style", () => {
+    const editor = build();
+    editor.commands.setTextSelection(1);
+    expect(editor.commands["style-run-patch"]({ id: "", props: {} })).toBe(false);
+    expect(editor.commands["style-run-patch"]()).toBe(false);
+    editor.destroy();
+  });
+});

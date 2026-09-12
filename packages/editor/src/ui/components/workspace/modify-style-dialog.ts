@@ -3,6 +3,7 @@ import { FASTElement, css, customElement, html, observable, ref } from "@microso
 import type { ModifyStylePatch } from "../../../document/extensions/commands";
 import { FONT_NAMES, FONT_SIZES_CN, FONT_SIZES_PT } from "../../../document/font-lists";
 import { observeLang, resolveLang, t } from "../../i18n/localize";
+import { appendMenuItems } from "../ribbon/command-helpers";
 
 /** A paragraph style as the basedOn/next drop-downs list it. */
 export interface StyleChoice {
@@ -12,10 +13,13 @@ export interface StyleChoice {
 
 /** The prefill the host passes to `show()`: the patch fields read from the
  *  style's current definition, plus the display data the dialog can't reach
- *  (the style's own name and the full paragraph-style list). */
+ *  (the style's own name and the full paragraph-style list) and the merged
+ *  formatting preview CSS. */
 export interface ModifyStyleState extends ModifyStylePatch {
   name: string;
   choices: StyleChoice[];
+  /** Inline CSS for the preview's sample text (the style's effective run). */
+  previewCss?: string;
 }
 
 const styles = css`
@@ -68,6 +72,23 @@ const styles = css`
     align-items: center;
     gap: 6px;
     cursor: pointer;
+  }
+  .preview {
+    border: 1px solid var(--neutral-stroke-rest, #d1d1d1);
+    border-radius: 4px;
+    padding: 6px 10px 8px;
+  }
+  .preview > label {
+    font-size: 12px;
+    opacity: 0.7;
+  }
+  .preview-text {
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  .format-row {
+    display: flex;
   }
 `;
 
@@ -168,6 +189,16 @@ const template = html<DocenModifyStyleDialog>`
           <span ${ref("underlineLabel")}></span>
         </label>
       </div>
+      <div class="preview">
+        <label ${ref("previewLabel")}></label>
+        <div class="preview-text" ${ref("previewText")}></div>
+      </div>
+      <div class="format-row">
+        <fluent-menu ${ref("formatMenu")}>
+          <fluent-button slot="trigger" appearance="outline" ${ref("formatBtn")}></fluent-button>
+          <fluent-menu-list focusgroup="menu" ${ref("formatList")}></fluent-menu-list>
+        </fluent-menu>
+      </div>
     </div>
     <div slot="action">
       <fluent-button ${ref("cancelBtn")} @click="${(x) => x.hide()}"></fluent-button>
@@ -251,6 +282,11 @@ class DocenModifyStyleDialog extends FASTElement {
   @observable boldLabel?: HTMLElement;
   @observable italicLabel?: HTMLElement;
   @observable underlineLabel?: HTMLElement;
+  @observable previewLabel?: HTMLElement;
+  @observable previewText?: HTMLElement;
+  @observable formatMenu?: HTMLElement;
+  @observable formatBtn?: HTMLElement;
+  @observable formatList?: HTMLElement;
   @observable okBtn?: HTMLElement;
   @observable cancelBtn?: HTMLElement;
 
@@ -261,7 +297,11 @@ class DocenModifyStyleDialog extends FASTElement {
   connectedCallback(): void {
     super.connectedCallback();
     this.#applyLabels();
-    this.#unobserveLang = observeLang(() => this.#applyLabels());
+    this.#fillFormatMenu();
+    this.#unobserveLang = observeLang(() => {
+      this.#applyLabels();
+      this.#fillFormatMenu();
+    });
   }
 
   disconnectedCallback(): void {
@@ -273,6 +313,10 @@ class DocenModifyStyleDialog extends FASTElement {
   show(state: ModifyStyleState): void {
     this.#id = state.id;
     if (this.nameValue) this.nameValue.textContent = state.name;
+    if (this.previewText) {
+      this.previewText.textContent = state.name;
+      this.previewText.style.cssText = state.previewCss ?? "";
+    }
     this.#fillChoices(this.basedOnSel, state.choices, state.basedOn ?? "", true);
     this.#fillChoices(this.nextSel, state.choices, state.next ?? "", true);
     this.#fillCombos(state);
@@ -284,6 +328,27 @@ class DocenModifyStyleDialog extends FASTElement {
 
   hide(): void {
     this.dialogEl?.hide();
+  }
+
+  /** Template-visible Format menu handler — opens the Font/Paragraph dialogs
+   *  against this style (the host stamps their patch onto the definition). */
+  applyFormat(target: "font" | "paragraph"): void {
+    (this.formatMenu as unknown as { closeMenu?: () => void } | undefined)?.closeMenu?.();
+    this.$emit("modify-style:format", { id: this.#id, target });
+  }
+
+  /** The Format button's two entries (Word's list; Tabs/Border/Numbering are
+   *  honest gaps today). Re-filled per language. */
+  #fillFormatMenu(): void {
+    if (!this.formatList) return;
+    appendMenuItems(
+      this.formatList,
+      [
+        { text: t("modifyStyleDialog.formatFont", this), value: "font" },
+        { text: t("modifyStyleDialog.formatParagraph", this), value: "paragraph" },
+      ],
+      (item) => this.applyFormat(item.value as "font" | "paragraph"),
+    );
   }
 
   /** Template-visible OK handler (FAST templates live outside the class, so a
@@ -378,6 +443,8 @@ class DocenModifyStyleDialog extends FASTElement {
     if (this.boldLabel) this.boldLabel.textContent = t("fontDialog.fsBold", this);
     if (this.italicLabel) this.italicLabel.textContent = t("fontDialog.fsItalic", this);
     if (this.underlineLabel) this.underlineLabel.textContent = t("fontDialog.underline", this);
+    if (this.previewLabel) this.previewLabel.textContent = t("modifyStyleDialog.preview", this);
+    if (this.formatBtn) this.formatBtn.textContent = t("modifyStyleDialog.format", this);
     if (this.okBtn) this.okBtn.textContent = t("options.ok", this);
     if (this.cancelBtn) this.cancelBtn.textContent = t("options.cancel", this);
     for (const sel of [this.basedOnSel, this.nextSel]) {

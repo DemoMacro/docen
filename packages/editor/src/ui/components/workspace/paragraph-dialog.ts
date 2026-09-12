@@ -463,8 +463,15 @@ class DocenParagraphDialog extends FASTElement {
   /** Prefill every field from the caret paragraph's attrs (verbatim PM
    *  mirror of ParagraphPropertiesOptionsBase). Absent values fall back to
    *  Word's defaults (left alignment, single spacing, widow control on,
-   *  kinsoku/overflow/auto-spacing on). */
-  show(attrs: Record<string, unknown> = {}): void {
+   *  kinsoku/overflow/auto-spacing on). `styleId` opens the dialog in the
+   *  Modify Style dialog's Format > Paragraph mode: the fields prefill from
+   *  that style's definition and OK retargets the style (the host reads the
+   *  `data-for-style` marker on `paragraph:ok`) — Word hides Set As Default
+   *  there, the commit itself already is the style write. */
+  show(attrs: Record<string, unknown> = {}, opts?: { styleId?: string }): void {
+    if (opts?.styleId) this.dataset.forStyle = opts.styleId;
+    else delete this.dataset.forStyle;
+    if (this.defaultBtn) this.defaultBtn.style.display = opts?.styleId ? "none" : "";
     const indent = (attrs.indent ?? {}) as {
       left?: number;
       leftChars?: number;

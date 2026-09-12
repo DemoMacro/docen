@@ -188,7 +188,8 @@ const template = html<DocenRibbonGallery>`
  * — Word's ribbon gallery control: the first `visible-count` entries as
  * icon-over-label thumbnails in a strip, then a narrow More bar whose
  * drop-down shows every entry in the same compound shape as a grid. Clicking
- * an entry (strip or drop-down) emits `command { event, value }`.
+ * an entry (strip or drop-down) emits `command { event, value }`; right-click
+ * emits `item-context { event, value }` (Word's gallery context entry).
  */
 @customElement({ name: "docen-ribbon-gallery", template, styles })
 class DocenRibbonGallery extends FASTElement {
@@ -306,6 +307,19 @@ class DocenRibbonGallery extends FASTElement {
       (this.pop as unknown as { hidePopover?(): void }).hidePopover?.();
       this.dispatchEvent(
         new CustomEvent("command", {
+          bubbles: true,
+          composed: true,
+          detail: { event: this.eventName, value: item.value, source: this },
+        }),
+      );
+    });
+    // Right-click a card — Word's gallery context entry (Modify Style… for
+    // the Styles gallery). The host routes by `event` + `value`.
+    btn.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      (this.pop as unknown as { hidePopover?(): void }).hidePopover?.();
+      this.dispatchEvent(
+        new CustomEvent("item-context", {
           bubbles: true,
           composed: true,
           detail: { event: this.eventName, value: item.value, source: this },
