@@ -2,6 +2,7 @@ import type { LayoutBlock } from "@docen/layout";
 import type {
   DocumentOptions,
   HorizontalPositionOptions,
+  ParagraphChild,
   ParagraphStyleOptions,
   SectionChild,
   SectionPropertiesOptions,
@@ -1947,5 +1948,84 @@ describe("projectDocumentOptions page background", () => {
       expect(p.indent?.leftPx).toBe(48);
       expect(p.indent?.firstLinePx).toBe(-48);
     }
+  });
+});
+
+describe("projectDocumentOptions preset geometry", () => {
+  const floatingShape = (geometry: unknown, extra: Record<string, unknown> = {}) => ({
+    wpsShape: {
+      children: [],
+      transformation: { width: 914400, height: 914400 },
+      geometry,
+      ...extra,
+      floating: {
+        horizontalPosition: { relative: "column", offset: 0 } satisfies HorizontalPositionOptions,
+        verticalPosition: { relative: "paragraph", offset: 0 } satisfies VerticalPositionOptions,
+      },
+    },
+  });
+  const firstMember = (geometry: unknown, extra: Record<string, unknown> = {}) => {
+    const { blocks } = oneSection(
+      doc([
+        // The geometry argument is a test variable, not a literal — the
+        // ParagraphChild narrowing is asserted by the members it projects.
+        { paragraph: { children: [floatingShape(geometry, extra) as ParagraphChild] } },
+      ]),
+    );
+    const para = blocks[0];
+    if (para?.kind !== "paragraph") throw new Error("expected paragraph");
+    return para.drawings?.[0]?.members ?? [];
+  };
+
+  it("expands a non-box preset into a path member through the evaluator", () => {
+    const [member] = firstMember("star5", { fill: { type: "solid", color: "FF0000" } });
+    if (member?.kind !== "path") throw new Error("expected path member");
+    // star5 at 96×96px — the upright star's tip touches the top-edge midpoint,
+    // its lower outer points the bottom edge.
+    expect(member.width).toBeCloseTo(96, 5);
+    expect(member.d).toBe(
+      "M 0 36.67 L 36.67 36.67 L 48 0 L 59.33 36.67 L 96 36.67 L 66.33 59.33 L 77.67 96 L 48 73.34 L 18.33 96 L 29.67 59.33 Z",
+    );
+    expect(member.fill).toBe("FF0000");
+  });
+
+  it("keeps the box-like presets as shape members", () => {
+    const [member] = firstMember("rect");
+    expect(member?.kind).toBe("shape");
+    const [roundRect] = firstMember("roundRect");
+    expect(roundRect?.kind).toBe("shape");
+  });
+
+  it("applies the document's avLst overrides over the preset defaults", () => {
+    const [member] = firstMember({
+      preset: "triangle",
+      adjustmentValues: [{ name: "adj", formula: "val 25000" }],
+    });
+    if (member?.kind !== "path") throw new Error("expected path member");
+    // adj 25000 moves the apex from the midpoint (48) to a quarter (24).
+    expect(member.d).toMatch(/^M 0 96 L 24 0/);
+  });
+
+  it("falls back to the shape member for unknown preset tokens", () => {
+    const [member] = firstMember("bogusPreset");
+    expect(member?.kind).toBe("shape");
+    expect(member).toMatchObject({ preset: "bogusPreset" });
+  });
+
+  it("splits a multi-path preset into fill-only and stroke-only members", () => {
+    // can: the silhouette path carries fill only, the rim path stroke only —
+    // and the stroke layer paints only when the shape declares an outline.
+    const members = firstMember("can", {
+      fill: { type: "solid", color: "4472C4" },
+      outline: { width: 12700, type: "solidFill", color: { value: "1F3864" } },
+    });
+    expect(members).toHaveLength(2);
+    if (members[0]?.kind !== "path" || members[1]?.kind !== "path") {
+      throw new Error("expected path members");
+    }
+    expect(members[0]).toMatchObject({ fill: "4472C4" });
+    expect(members[0].line).toBeUndefined();
+    expect(members[1].fill).toBeUndefined();
+    expect(members[1].line).toMatchObject({ color: "1F3864" });
   });
 });

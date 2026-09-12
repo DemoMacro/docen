@@ -75,6 +75,12 @@ describe("presetShapePaths", () => {
     // Unscaled output would carry raw 43200-space literals — a factor-432 excursion.
   });
 
+  it("tolerates double spaces in the ECMA guide formulas (star5's svc)", () => {
+    // The spec source separates two operands with two spaces; a naive split
+    // would coerce the empty token to 0 and collapse the star's hub.
+    expect(presetShapePaths("star5", 100, 100)?.[0].d).toMatch(/^M 0 38\.2 L 38\.2 38\.2 L 50 0 /);
+  });
+
   it("returns undefined for unknown presets", () => {
     expect(presetShapePaths("bogus", 100, 100)).toBeUndefined();
     expect(presetShapePaths("textNoShape", 100, 100)).toBeUndefined();

@@ -10,9 +10,11 @@ import {
   type LayoutDrawingShadow,
   type LayoutParagraph,
 } from "@docen/layout";
+import type { GeometryGuide } from "@office-open/core";
 import type { CustomGeometryOptions } from "@office-open/core/drawing";
 import type { GroupChildMediaData, GroupOptions, MediaDataTransformation } from "@office-open/docx";
 
+import { arcToSegments, presetShapePaths } from "../geometry/preset-shape";
 import type { ProjectContext } from "./context";
 import { colorOf, isRecord, measureEmu, num, str, type BodyParagraph, type Rec } from "./guards";
 import { metafileMembers, pictureSrc } from "./media";
@@ -216,9 +218,11 @@ function coord(v: unknown): number {
 
 /** a:custGeom pathLst → SVG path data scaled from the path's own space
  *  (path @w/@h) into the member box. moveTo/lineTo/quadBezTo/cubicBezTo/close
- *  convert directly; arcTo (elliptical-by-angle) is a registered gap — the
- *  command drops until a canvas arc mapping lands. The command union is the
- *  parse contract, so a token mismatch fails at compile time, not silently. */
+ *  convert directly; arcTo (elliptical-by-angle) emits cubic segments through
+ *  the shared arc converter — the current point (tracked in box coordinates;
+ *  close returns it to the subpath's start) is on the ellipse at the start
+ *  angle, which is what the converter derives its center from. The command
+ *  union is the parse contract, so a token mismatch fails at compile time. */
 function customGeometryPath(
   cg: CustomGeometryOptions,
   width: number,
@@ -231,28 +235,65 @@ function customGeometryPath(
     const sy = p.h ? height / p.h : 1;
     const x = (v: string): number => r2(coord(v) * sx);
     const y = (v: string): number => r2(coord(v) * sy);
+    // Current point + subpath start in box coordinates (arcTo needs the
+    // current point; close hands it back the subpath's start).
+    let cx = 0;
+    let cy = 0;
+    let startX = 0;
+    let startY = 0;
     for (const cmd of p.commands) {
       switch (cmd.command) {
         case "moveTo":
-          parts.push(`M ${x(cmd.point.x)} ${y(cmd.point.y)}`);
+          cx = x(cmd.point.x);
+          cy = y(cmd.point.y);
+          startX = cx;
+          startY = cy;
+          parts.push(`M ${cx} ${cy}`);
           break;
         case "lineTo":
-          parts.push(`L ${x(cmd.point.x)} ${y(cmd.point.y)}`);
+          cx = x(cmd.point.x);
+          cy = y(cmd.point.y);
+          parts.push(`L ${cx} ${cy}`);
           break;
         case "quadBezTo":
           parts.push(
             `Q ${x(cmd.points[0].x)} ${y(cmd.points[0].y)} ${x(cmd.points[1].x)} ${y(cmd.points[1].y)}`,
           );
+          cx = x(cmd.points[1].x);
+          cy = y(cmd.points[1].y);
           break;
         case "cubicBezTo":
           parts.push(
             `C ${x(cmd.points[0].x)} ${y(cmd.points[0].y)} ${x(cmd.points[1].x)} ${y(cmd.points[1].y)} ${x(cmd.points[2].x)} ${y(cmd.points[2].y)}`,
           );
+          cx = x(cmd.points[2].x);
+          cy = y(cmd.points[2].y);
           break;
         case "close":
           parts.push("Z");
+          cx = startX;
+          cy = startY;
           break;
-        // arcTo — registered gap.
+        case "arcTo": {
+          // Angles are 1/60000 degree (DrawingML's ST_Angle); radii scale
+          // with their axis — an axis-aligned ellipse stays axis-aligned.
+          const rx = coord(cmd.widthRadius) * sx;
+          const ry = coord(cmd.heightRadius) * sy;
+          const st = ((coord(cmd.startAngle) / 60000) * Math.PI) / 180;
+          const sw = ((coord(cmd.sweepAngle) / 60000) * Math.PI) / 180;
+          const segments = arcToSegments(cx, cy, rx, ry, st, sw);
+          for (const seg of segments) {
+            parts.push(
+              `C ${r2(seg.c1x)} ${r2(seg.c1y)} ${r2(seg.c2x)} ${r2(seg.c2y)} ${r2(seg.x)} ${r2(seg.y)}`,
+            );
+          }
+          const end = segments[segments.length - 1];
+          if (end) {
+            cx = end.x;
+            cy = end.y;
+          }
+          break;
+        }
       }
     }
   }
@@ -280,11 +321,12 @@ interface GroupMirror {
   height: number;
 }
 
-/** One wps shape (group child data or a standalone WpsShapeOptions run) → a
- *  drawing member at `x,y` sized `width×height`. A shape with txbx content
- *  is a text box: its paragraphs project as blocks (full style cascade) for
- *  the renderer to stack in the box. An empty children array is a shape
- *  without text, not an empty box. */
+/** One wps shape (group child data or a standalone WpsShapeOptions run) → the
+ *  drawing members at `x,y` sized `width×height` (a multi-path preset yields
+ *  one member per spec path — a shape's fill-only and stroke-only layers paint
+ *  separately). A shape with txbx content is a text box: its paragraphs
+ *  project as blocks (full style cascade) for the renderer to stack in the
+ *  box. An empty children array is a shape without text, not an empty box. */
 function wpsMemberOf(
   data: unknown,
   x: number,
@@ -292,19 +334,24 @@ function wpsMemberOf(
   width: number,
   height: number,
   ctx: ProjectContext,
-): LayoutDrawingMember | null {
-  if (!isRecord(data)) return null;
+): LayoutDrawingMember[] {
+  if (!isRecord(data)) return [];
   const fill = solidFillOf(data.fill);
   const line = outlineOf(data.outline);
   const shadow = outerShadowOf(data.effects);
   // 0.13.0 renamed ShapeCoreOptions.presetGeometry → geometry and widened it to
-  // the ShapeType token shorthand | PresetGeometryOptions.
+  // the ShapeType token shorthand | PresetGeometryOptions (whose
+  // adjustmentValues override the preset's default guide values).
   const preset =
     typeof data.geometry === "string"
       ? data.geometry
       : isRecord(data.geometry)
         ? str(data.geometry.preset)
         : undefined;
+  const adjustments =
+    isRecord(data.geometry) && Array.isArray(data.geometry.adjustmentValues)
+      ? (data.geometry.adjustmentValues as readonly GeometryGuide[])
+      : undefined;
   const children = Array.isArray(data.children) ? data.children : [];
   // The shape's own a:xfrm @rot (degrees) — Word's diagonal watermark.
   const rotation = isRecord(data.transformation) ? num(data.transformation.rotation) : undefined;
@@ -321,93 +368,121 @@ function wpsMemberOf(
       const block = projectParagraph(p as BodyParagraph, ctx);
       if (block) blocks.push(block);
     }
-    return {
-      kind: "textBox",
-      x,
-      y,
-      width,
-      height,
-      ...(rotation != null && rotation !== 0 ? { rotation } : {}),
-      // The shape's own spPr paint — a txbx box draws under its text even
-      // when the body is empty (Word's plain text box). The preset travels
-      // with it: a text-carrying ellipse paints as an ellipse.
-      ...(preset ? { preset } : {}),
-      ...(fill ? { fill } : {}),
-      ...(line
-        ? {
-            line: {
-              px: line.px,
-              ...(line.color ? { color: line.color } : {}),
-              ...(line.cap ? { cap: line.cap } : {}),
-              ...(line.join ? { join: line.join } : {}),
-              ...(line.dash ? { dash: line.dash } : {}),
-            },
-          }
-        : {}),
-      insets: {
-        left: ins(bodyPr.lIns, BODY_INSET_EMU.left),
-        top: ins(bodyPr.tIns, BODY_INSET_EMU.top),
-        right: ins(bodyPr.rIns, BODY_INSET_EMU.right),
-        bottom: ins(bodyPr.bIns, BODY_INSET_EMU.bottom),
+    return [
+      {
+        kind: "textBox",
+        x,
+        y,
+        width,
+        height,
+        ...(rotation != null && rotation !== 0 ? { rotation } : {}),
+        // The shape's own spPr paint — a txbx box draws under its text even
+        // when the body is empty (Word's plain text box). The preset travels
+        // with it: a text-carrying ellipse paints as an ellipse.
+        ...(preset ? { preset } : {}),
+        ...(fill ? { fill } : {}),
+        ...(line
+          ? {
+              line: {
+                px: line.px,
+                ...(line.color ? { color: line.color } : {}),
+                ...(line.cap ? { cap: line.cap } : {}),
+                ...(line.join ? { join: line.join } : {}),
+                ...(line.dash ? { dash: line.dash } : {}),
+              },
+            }
+          : {}),
+        insets: {
+          left: ins(bodyPr.lIns, BODY_INSET_EMU.left),
+          top: ins(bodyPr.tIns, BODY_INSET_EMU.top),
+          right: ins(bodyPr.rIns, BODY_INSET_EMU.right),
+          bottom: ins(bodyPr.bIns, BODY_INSET_EMU.bottom),
+        },
+        // VerticalAnchor is already full-word ("top"/"center"/"bottom");
+        // justify/distribute stretch to the box — treated as top until then.
+        anchor: bodyPr.anchor === "center" || bodyPr.anchor === "bottom" ? bodyPr.anchor : "top",
+        // bodyPr @vert — only the two rotated layouts project (the stacked
+        // variants need per-glyph upright layout the renderer has no model
+        // for); they render as horizontal, a registered gap.
+        ...(bodyPr.vertical === "vertical" || bodyPr.vertical === "vertical270"
+          ? { textVertical: bodyPr.vertical }
+          : {}),
+        ...(shadow ? { shadow } : {}),
+        // a:spAutoFit: Word draws the box shrunk to its text — the declared
+        // extent's height is stale and must not drive vertical centering.
+        ...(bodyPr.spAutoFit === true ? { autoFit: true } : {}),
+        // bodyPr @compatLnSpc is deliberately not threaded: Word's own layout
+        // engine ignores it for wps text boxes (the txbxContent is laid out by
+        // the standard paragraph rules — grid snap and half-leading included;
+        // pixel-verified against the reference render), so the attribute only
+        // matters to PowerPoint-native consumers.
+        blocks,
       },
-      // VerticalAnchor is already full-word ("top"/"center"/"bottom");
-      // justify/distribute stretch to the box — treated as top until then.
-      anchor: bodyPr.anchor === "center" || bodyPr.anchor === "bottom" ? bodyPr.anchor : "top",
-      // bodyPr @vert — only the two rotated layouts project (the stacked
-      // variants need per-glyph upright layout the renderer has no model
-      // for); they render as horizontal, a registered gap.
-      ...(bodyPr.vertical === "vertical" || bodyPr.vertical === "vertical270"
-        ? { textVertical: bodyPr.vertical }
-        : {}),
-      ...(shadow ? { shadow } : {}),
-      // a:spAutoFit: Word draws the box shrunk to its text — the declared
-      // extent's height is stale and must not drive vertical centering.
-      ...(bodyPr.spAutoFit === true ? { autoFit: true } : {}),
-      // bodyPr @compatLnSpc is deliberately not threaded: Word's own layout
-      // engine ignores it for wps text boxes (the txbxContent is laid out by
-      // the standard paragraph rules — grid snap and half-leading included;
-      // pixel-verified against the reference render), so the attribute only
-      // matters to PowerPoint-native consumers.
-      blocks,
-    };
+    ];
   }
   // Straight connector (a straight line across its box) and custom
   // geometry both project to path members; the box-like presets stay
   // shape members.
   if (preset === "line") {
-    return {
-      kind: "path",
-      x,
-      y,
-      width,
-      height,
-      d: `M 0 0 L ${Math.round(width * 100) / 100} ${Math.round(height * 100) / 100}`,
-      fill,
-      line,
-      ...(shadow ? { shadow } : {}),
-    };
+    return [
+      {
+        kind: "path",
+        x,
+        y,
+        width,
+        height,
+        d: `M 0 0 L ${Math.round(width * 100) / 100} ${Math.round(height * 100) / 100}`,
+        fill,
+        line,
+        ...(shadow ? { shadow } : {}),
+      },
+    ];
   }
   if (preset == null) {
     const d = data.customGeometry
       ? customGeometryPath(data.customGeometry as CustomGeometryOptions, width, height)
       : undefined;
     if (d)
-      return { kind: "path", x, y, width, height, d, fill, line, ...(shadow ? { shadow } : {}) };
-    return null;
+      return [{ kind: "path", x, y, width, height, d, fill, line, ...(shadow ? { shadow } : {}) }];
+    return [];
+  }
+  // Every non-box preset expands through the ECMA-376 evaluator into one
+  // path member per spec path — the painter has no native geometry for
+  // them, and a preset's fill-only/stroke-only layers must paint
+  // separately (fill "none" paths carry no fill; stroke=false paths carry
+  // no outline). An unknown token falls through to the shape member —
+  // today's behavior for tokens the data module doesn't define.
+  if (preset !== "rect" && preset !== "roundRect" && preset !== "ellipse") {
+    const outlines = presetShapePaths(preset, width, height, adjustments);
+    if (outlines) {
+      return outlines.map((o) => ({
+        kind: "path" as const,
+        x,
+        y,
+        width,
+        height,
+        d: o.d,
+        ...(o.fill && fill ? { fill } : {}),
+        ...(o.stroke && line ? { line } : {}),
+        ...(shadow ? { shadow } : {}),
+      }));
+    }
   }
   const opacity = fillOpacityOf(data.fill);
-  return {
-    kind: "shape",
-    x,
-    y,
-    width,
-    height,
-    preset,
-    fill,
-    ...(opacity != null ? { opacity } : {}),
-    line,
-    ...(shadow ? { shadow } : {}),
-  };
+  return [
+    {
+      kind: "shape",
+      x,
+      y,
+      width,
+      height,
+      preset,
+      fill,
+      ...(opacity != null ? { opacity } : {}),
+      line,
+      ...(shadow ? { shadow } : {}),
+    },
+  ];
 }
 
 /** One group level's child-space → drawing-box-px mapping, threaded through
@@ -504,8 +579,9 @@ function walkGroup(
       // Published 0.12.3 parse bug stringified nested shape data — a
       // non-object data skips the member (absence over corrupt geometry).
       if (child.data == null || typeof child.data !== "object") continue;
-      const member = wpsMemberOf(child.data, x, y, width, height, ctx);
-      if (member) out.push({ ...member, childPath });
+      for (const member of wpsMemberOf(child.data, x, y, width, height, ctx)) {
+        out.push({ ...member, childPath });
+      }
     } else if (child.type === "chart") {
       // The group child carries the bare ChartSpaceOptions (chartOptions) —
       // the transformation lives on the member itself.
@@ -763,8 +839,8 @@ function projectWpsShapeRun(wps: Rec, ctx: ProjectContext): LayoutDrawing | unde
   const w = measureEmu(tr.width);
   const h = measureEmu(tr.height);
   if (w == null || h == null || w <= 0 || h <= 0) return undefined;
-  const member = wpsMemberOf(wps, 0, 0, emuToPx(w), emuToPx(h), ctx);
-  if (!member) return undefined;
+  const members = wpsMemberOf(wps, 0, 0, emuToPx(w), emuToPx(h), ctx);
+  if (members.length === 0) return undefined;
   const { anchor, wrap, wrapSide, contour, behind, zIndex, distances } = drawingAnchorOf(
     wps.floating,
     emuToPx(w),
@@ -774,7 +850,7 @@ function projectWpsShapeRun(wps: Rec, ctx: ProjectContext): LayoutDrawing | unde
     anchor,
     width: emuToPx(w),
     height: emuToPx(h),
-    members: [member],
+    members,
     wrap,
     wrapSide,
     ...(contour ? { contour } : {}),

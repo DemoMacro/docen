@@ -107,9 +107,12 @@ const value = (token: string, guides: Guides): number => {
   return guides.get(token) ?? 0;
 };
 
-// "name op operand…" — evaluates against the current guides and binds the name.
+// "name op operand…" — evaluates against the current guides and binds the
+// name. Whitespace-tolerant split: the ECMA source has double-space quirks
+// (star5's svc) and document avLst strings are arbitrary XML attribute text —
+// Number("") would silently coerce a missing operand to 0.
 const guide = (entry: string, guides: Guides): void => {
-  const tokens = entry.split(" ");
+  const tokens = entry.trim().split(/\s+/);
   const op = tokens[1] ?? "val";
   const a = value(tokens[2] ?? "0", guides);
   guides.set(
@@ -119,6 +122,54 @@ const guide = (entry: string, guides: Guides): void => {
 };
 
 const r2 = (v: number): string => String(Math.round(v * 100) / 100);
+
+/** One cubic segment of an elliptical arc approximation (end point + controls),
+ *  in the caller's coordinate space. */
+export interface ArcSegment {
+  readonly c1x: number;
+  readonly c1y: number;
+  readonly c2x: number;
+  readonly c2y: number;
+  readonly x: number;
+  readonly y: number;
+}
+
+/** arcTo's cubic approximation: the current point (ax,ay) sits on the ellipse
+ *  at the start angle, so the center follows from it; sweeps over 90° split
+ *  into equal segments (κ = 4/3·tan(step/4) control offset). Angles in radians.
+ *  Shared by the preset evaluator and the custGeom projection. */
+export function arcToSegments(
+  ax: number,
+  ay: number,
+  rx: number,
+  ry: number,
+  start: number,
+  sweep: number,
+): readonly ArcSegment[] {
+  const cx = ax - rx * Math.cos(start);
+  const cy = ay - ry * Math.sin(start);
+  const segments = Math.ceil(Math.abs(sweep) / (Math.PI / 2));
+  const step = segments ? sweep / segments : 0;
+  const k = (4 / 3) * Math.tan(step / 4);
+  const out: ArcSegment[] = [];
+  for (let s = 1; s <= segments; s++) {
+    const t0 = start + step * (s - 1);
+    const t1 = start + step * s;
+    const x0 = cx + rx * Math.cos(t0);
+    const y0 = cy + ry * Math.sin(t0);
+    const x1 = cx + rx * Math.cos(t1);
+    const y1 = cy + ry * Math.sin(t1);
+    out.push({
+      c1x: x0 + k * -rx * Math.sin(t0),
+      c1y: y0 + k * ry * Math.cos(t0),
+      c2x: x1 - k * -rx * Math.sin(t1),
+      c2y: y1 - k * ry * Math.cos(t1),
+      x: x1,
+      y: y1,
+    });
+  }
+  return out;
+}
 
 // One path's token stream → SVG `d`. Coordinates are evaluated in the path
 // space (frame) and stretched to the box; arcTo derives its center from the
@@ -168,23 +219,11 @@ const pathData = (
         const ry = value(tokens[i++], guides);
         const st = (value(tokens[i++], guides) / DEG) * (Math.PI / 180);
         const sw = (value(tokens[i++], guides) / DEG) * (Math.PI / 180);
-        // The current point is on the ellipse at stAng — the center follows.
-        const cx = x - rx * Math.cos(st);
-        const cy = y - ry * Math.sin(st);
-        const segments = Math.ceil(Math.abs(sw) / (Math.PI / 2));
-        const step = segments ? sw / segments : 0;
-        const k = (4 / 3) * Math.tan(step / 4);
-        for (let s = 1; s <= segments; s++) {
-          const t0 = st + step * (s - 1);
-          const t1 = st + step * s;
-          const x1 = cx + rx * Math.cos(t0);
-          const y1 = cy + ry * Math.sin(t0);
-          x = cx + rx * Math.cos(t1);
-          y = cy + ry * Math.sin(t1);
+        for (const seg of arcToSegments(x, y, rx, ry, st, sw)) {
           d += " C";
-          d += ` ${r2((x1 + k * -rx * Math.sin(t0)) * sx)} ${r2((y1 + k * ry * Math.cos(t0)) * sy)}`;
-          d += ` ${r2((x - k * -rx * Math.sin(t1)) * sx)} ${r2((y - k * ry * Math.cos(t1)) * sy)}`;
-          xy(x, y);
+          d += ` ${r2(seg.c1x * sx)} ${r2(seg.c1y * sy)}`;
+          d += ` ${r2(seg.c2x * sx)} ${r2(seg.c2y * sy)}`;
+          xy(seg.x, seg.y);
         }
         break;
       }
@@ -217,7 +256,7 @@ export function presetShapePaths(
   for (const entry of def.av) guide(entry, guides);
   for (const { name, formula: fmla } of adjustmentValues ?? []) {
     if (!name) continue;
-    const tokens = fmla.split(" ");
+    const tokens = fmla.trim().split(/\s+/);
     guides.set(
       name,
       formula(
