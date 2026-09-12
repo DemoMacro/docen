@@ -13,7 +13,7 @@ import { attrNative, cssToTwip, type DocxAttrSpec } from "./utils";
  * value; widthBefore/widthAfter as TableWidthProperties; etc.). DOCX round-trip
  * is near-identity: renderDocx/parseDocx pass attrs through (omitting the
  * `cells` structural key that DocxManager owns). CSS conversion happens only
- * in renderHTML.
+ * in parseHTML (paste input).
  */
 
 // ── DOCX serialization (near-identity: attrs mirror TableRowPropertiesOptionsBase) ──

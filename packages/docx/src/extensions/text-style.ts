@@ -50,7 +50,7 @@ type RunAttrKey = keyof RunPropertiesOptions;
 /** Scalar OOXML run properties with no CSS equivalent — stored verbatim via
  *  attrNative (default null, renderDocx/parseDocx pass through). Spread into
  *  docxRunAttrs below, where the satisfies guard pins the whole run mirror to
- *  keyof RunStylePropertiesOptions. */
+ *  RunAttrKey. */
 const NATIVE_RUN_ATTRS = {
   // Three-state booleans (true/false/null) that have no dedicated mark — ride
   // TextStyle for round-trip + the layout cascade. bold/italic are defined
