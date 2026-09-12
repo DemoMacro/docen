@@ -1,4 +1,5 @@
 import {
+  presetShapePaths,
   quickStyles,
   resolveFontName,
   type RunStylePropertiesOptions,
@@ -779,15 +780,275 @@ const equationItems = (): string =>
     { text: opt("equation-integral"), value: "integral" },
   ]);
 
-/** The Shapes gallery — the presets the canvas paints today (box presets,
- *  ellipse, straight line); values are the ST_ShapeType tokens verbatim. */
-const shapeItems = (): string =>
-  JSON.stringify([
-    { text: opt("shape-rect"), value: "rect", event: "shapes" },
-    { text: opt("shape-round-rect"), value: "roundRect", event: "shapes" },
-    { text: opt("shape-ellipse"), value: "ellipse", event: "shapes" },
-    { text: opt("shape-line"), value: "line", event: "shapes" },
-  ]);
+/** Word's Shapes picker: category headings + the ST_ShapeType preset each
+ *  card inserts, in the picker's order. Only tokens with an ECMA geometry
+ *  definition are listed — a definition-less preset (upArrow, lineInv, …)
+ *  has no preview and no path projection, so surfacing it would be a blank
+ *  card and a silently-degraded insert. */
+const SHAPE_CATEGORIES: readonly { key: string; tokens: readonly string[] }[] = [
+  {
+    key: "lines",
+    tokens: [
+      "line",
+      "straightConnector1",
+      "bentConnector2",
+      "bentConnector3",
+      "bentConnector4",
+      "bentConnector5",
+      "curvedConnector2",
+      "curvedConnector3",
+      "curvedConnector4",
+      "curvedConnector5",
+    ],
+  },
+  {
+    key: "rectangles",
+    tokens: [
+      "rect",
+      "roundRect",
+      "round1Rect",
+      "round2SameRect",
+      "round2DiagRect",
+      "snip1Rect",
+      "snip2SameRect",
+      "snip2DiagRect",
+      "snipRoundRect",
+    ],
+  },
+  {
+    key: "basic",
+    tokens: [
+      "ellipse",
+      "triangle",
+      "rtTriangle",
+      "parallelogram",
+      "trapezoid",
+      "diamond",
+      "pentagon",
+      "hexagon",
+      "heptagon",
+      "octagon",
+      "decagon",
+      "dodecagon",
+      "pie",
+      "chord",
+      "teardrop",
+      "frame",
+      "halfFrame",
+      "corner",
+      "diagStripe",
+      "plus",
+      "plaque",
+      "can",
+      "cube",
+      "bevel",
+      "donut",
+      "noSmoking",
+      "blockArc",
+      "foldedCorner",
+      "arc",
+      "heart",
+      "lightningBolt",
+      "sun",
+      "moon",
+      "smileyFace",
+      "cloud",
+      "leftBracket",
+      "rightBracket",
+      "bracketPair",
+      "leftBrace",
+      "rightBrace",
+      "bracePair",
+      "funnel",
+      "gear6",
+      "gear9",
+      "chartPlus",
+      "chartStar",
+      "chartX",
+    ],
+  },
+  {
+    key: "block-arrows",
+    tokens: [
+      "rightArrow",
+      "leftArrow",
+      "downArrow",
+      "leftRightArrow",
+      "upDownArrow",
+      "quadArrow",
+      "leftUpArrow",
+      "leftRightUpArrow",
+      "bentArrow",
+      "bentUpArrow",
+      "uturnArrow",
+      "circularArrow",
+      "leftCircularArrow",
+      "leftRightCircularArrow",
+      "curvedRightArrow",
+      "curvedLeftArrow",
+      "curvedUpArrow",
+      "curvedDownArrow",
+      "homePlate",
+      "stripedRightArrow",
+      "notchedRightArrow",
+      "chevron",
+      "swooshArrow",
+    ],
+  },
+  {
+    key: "equation",
+    tokens: ["mathPlus", "mathMinus", "mathMultiply", "mathDivide", "mathEqual", "mathNotEqual"],
+  },
+  {
+    key: "flowchart",
+    tokens: [
+      "flowChartProcess",
+      "flowChartAlternateProcess",
+      "flowChartDecision",
+      "flowChartInputOutput",
+      "flowChartPredefinedProcess",
+      "flowChartInternalStorage",
+      "flowChartDocument",
+      "flowChartMultidocument",
+      "flowChartTerminator",
+      "flowChartPreparation",
+      "flowChartManualInput",
+      "flowChartManualOperation",
+      "flowChartConnector",
+      "flowChartOffpageConnector",
+      "flowChartPunchedCard",
+      "flowChartPunchedTape",
+      "flowChartSummingJunction",
+      "flowChartOr",
+      "flowChartCollate",
+      "flowChartSort",
+      "flowChartExtract",
+      "flowChartMerge",
+      "flowChartOnlineStorage",
+      "flowChartOfflineStorage",
+      "flowChartMagneticTape",
+      "flowChartMagneticDisk",
+      "flowChartMagneticDrum",
+      "flowChartDisplay",
+      "flowChartDelay",
+    ],
+  },
+  {
+    key: "stars",
+    tokens: [
+      "star4",
+      "star5",
+      "star6",
+      "star7",
+      "star8",
+      "star10",
+      "star12",
+      "star16",
+      "star24",
+      "star32",
+      "irregularSeal1",
+      "irregularSeal2",
+      "ribbon",
+      "ribbon2",
+      "leftRightRibbon",
+      "ellipseRibbon",
+      "ellipseRibbon2",
+      "verticalScroll",
+      "horizontalScroll",
+      "wave",
+      "doubleWave",
+    ],
+  },
+  {
+    key: "callouts",
+    tokens: [
+      "wedgeRectCallout",
+      "wedgeRoundRectCallout",
+      "wedgeEllipseCallout",
+      "cloudCallout",
+      "callout1",
+      "callout2",
+      "callout3",
+      "accentCallout1",
+      "accentCallout2",
+      "accentCallout3",
+      "borderCallout1",
+      "borderCallout2",
+      "borderCallout3",
+      "accentBorderCallout1",
+      "accentBorderCallout2",
+      "accentBorderCallout3",
+      "downArrowCallout",
+      "leftArrowCallout",
+      "rightArrowCallout",
+      "upArrowCallout",
+      "leftRightArrowCallout",
+      "upDownArrowCallout",
+      "quadArrowCallout",
+    ],
+  },
+  {
+    key: "action-buttons",
+    tokens: [
+      "actionButtonBackPrevious",
+      "actionButtonForwardNext",
+      "actionButtonBeginning",
+      "actionButtonEnd",
+      "actionButtonHome",
+      "actionButtonInformation",
+      "actionButtonReturn",
+      "actionButtonMovie",
+      "actionButtonDocument",
+      "actionButtonSound",
+      "actionButtonHelp",
+      "actionButtonBlank",
+    ],
+  },
+];
+
+/** A shape card's thumbnail: the preset's outlines evaluated at 100×100 —
+ *  pale-accent fill over a mid-accent stroke (Word's picker colors). */
+function shapePreviewSvg(token: string): string {
+  const parts = (presetShapePaths(token, 100, 100) ?? []).map(
+    (o) =>
+      `<path d="${o.d}" fill="${o.fill ? "#DEEBF7" : "none"}" stroke="${
+        o.stroke ? "#2E75B6" : "none"
+      }" stroke-width="6" stroke-linejoin="round"/>`,
+  );
+  return `<svg viewBox="-8 -8 116 116" xmlns="http://www.w3.org/2000/svg">${parts.join("")}</svg>`;
+}
+
+let shapeIconsRegistered = false;
+function ensureShapeIcons(): void {
+  if (shapeIconsRegistered) return;
+  for (const { tokens } of SHAPE_CATEGORIES) {
+    for (const token of tokens) registerIcon(`shape-${token}`, shapePreviewSvg(token));
+  }
+  shapeIconsRegistered = true;
+}
+
+/** Word's Shapes gallery: four pinned cards in the closed strip, the More bar
+ *  expanding every category as heading rows + shape cards in the drop-down. */
+const shapeGallery = (): RibbonGallery => {
+  ensureShapeIcons();
+  const items: RibbonMenuItem[] = [
+    { text: opt("shape-rect"), icon: "shape-rect", value: "rect" },
+    { text: opt("shape-roundRect"), icon: "shape-roundRect", value: "roundRect" },
+    { text: opt("shape-ellipse"), icon: "shape-ellipse", value: "ellipse" },
+    { text: opt("shape-line"), icon: "shape-line", value: "line" },
+  ];
+  for (const { key, tokens } of SHAPE_CATEGORIES) {
+    items.push({ text: `ribbon.cat.shapes-${key}`, header: true, value: key });
+    items.push(
+      ...tokens.map((token) => ({
+        text: opt(`shape-${token}`),
+        icon: `shape-${token}`,
+        value: token,
+      })),
+    );
+  }
+  return { type: "gallery", event: "shapes", items, visibleCount: 4 };
+};
 
 // --- Tabs --------------------------------------------------------------------
 
@@ -1286,7 +1547,7 @@ const insertTab = (): RibbonTab =>
     group("illustrations", [
       btn("picture", "insert-picture", { size: "large" }),
       btn("online-picture", "online-picture", { size: "large" }),
-      split("shapes", "shapes", parsedItems(shapeItems()), { size: "large" }),
+      shapeGallery(),
       btn("icon-library", "icons", { size: "large" }),
       btn("3d-model", "3d-model", { size: "large" }),
       btn("smartart", "smartart", { size: "large" }),

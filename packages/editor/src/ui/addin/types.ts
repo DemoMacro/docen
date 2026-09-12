@@ -26,6 +26,9 @@ export interface RibbonMenuItem {
   /** Display text — an i18n key resolved via `t()` at render time (a plain
    *  string also works; `t()` returns it unchanged if no key matches). */
   text: string;
+  /** Gallery-only: render as a full-width non-clickable category heading
+   *  (Word's Shapes drop-down groups cards under Lines / Basic Shapes / …). */
+  header?: boolean;
   /** Docen icon key rendered in the item's `start` slot (e.g. a gallery
    *  drop-down showing each preset's thumbnail beside its name). */
   icon?: string;

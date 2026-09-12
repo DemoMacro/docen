@@ -17,6 +17,7 @@
  * Font names and point sizes are data, not UI copy, so they stay untranslated.
  */
 import { type AdditionalLanguage, registerTranslation } from "../ui";
+import { SHAPE_LABELS } from "./i18n-shapes";
 
 export const ribbonEn: AdditionalLanguage = {
   languageTag: "en",
@@ -560,11 +561,17 @@ export const ribbonEn: AdditionalLanguage = {
     "ribbon.opt.page-num-top": "Top of Page",
     "ribbon.opt.page-num-bottom": "Bottom of Page",
     "ribbon.opt.remove-page-numbers": "Remove Page Numbers",
-    // --- Shapes gallery (values are ST_ShapeType tokens) ---
-    "ribbon.opt.shape-rect": "Rectangle",
-    "ribbon.opt.shape-round-rect": "Rounded Rectangle",
-    "ribbon.opt.shape-ellipse": "Ellipse",
-    "ribbon.opt.shape-line": "Line",
+    // --- Shapes gallery: category headings (shape names come from
+    //     i18n-shapes.ts, exploded into ribbon.opt.shape-<token> keys below) ---
+    "ribbon.cat.shapes-lines": "Lines",
+    "ribbon.cat.shapes-rectangles": "Rectangles",
+    "ribbon.cat.shapes-basic": "Basic Shapes",
+    "ribbon.cat.shapes-block-arrows": "Block Arrows",
+    "ribbon.cat.shapes-equation": "Equation Shapes",
+    "ribbon.cat.shapes-flowchart": "Flowchart",
+    "ribbon.cat.shapes-stars": "Stars and Banners",
+    "ribbon.cat.shapes-callouts": "Callouts",
+    "ribbon.cat.shapes-action-buttons": "Action Buttons",
     // --- Outline panel (Picture Border / Shape Outline) ---
     "ribbon.opt.no-outline": "No Outline",
     "ribbon.opt.weight": "Weight",
@@ -1774,11 +1781,17 @@ export const ribbonZhCN: AdditionalLanguage = {
     "ribbon.opt.page-num-top": "页面顶端",
     "ribbon.opt.page-num-bottom": "页面底端",
     "ribbon.opt.remove-page-numbers": "删除页码",
-    // --- 形状库（value 为 ST_ShapeType token） ---
-    "ribbon.opt.shape-rect": "矩形",
-    "ribbon.opt.shape-round-rect": "圆角矩形",
-    "ribbon.opt.shape-ellipse": "椭圆",
-    "ribbon.opt.shape-line": "直线",
+    // --- 形状库分类标题（形状名来自 i18n-shapes.ts，在下方展开为
+    //     ribbon.opt.shape-<token> 键） ---
+    "ribbon.cat.shapes-lines": "线条",
+    "ribbon.cat.shapes-rectangles": "矩形",
+    "ribbon.cat.shapes-basic": "基本形状",
+    "ribbon.cat.shapes-block-arrows": "箭头总汇",
+    "ribbon.cat.shapes-equation": "公式形状",
+    "ribbon.cat.shapes-flowchart": "流程图",
+    "ribbon.cat.shapes-stars": "星与旗帜",
+    "ribbon.cat.shapes-callouts": "标注",
+    "ribbon.cat.shapes-action-buttons": "动作按钮",
     // --- 轮廓面板（图片边框 / 形状轮廓） ---
     "ribbon.opt.no-outline": "无轮廓",
     "ribbon.opt.weight": "粗细",
@@ -2449,5 +2462,19 @@ export const ribbonZhCN: AdditionalLanguage = {
 };
 
 // Register on import so the locale is available before the ribbon renders.
-registerTranslation(ribbonEn);
-registerTranslation(ribbonZhCN);
+// Shape names live as [en, zh-CN] pairs in i18n-shapes.ts (372 literal keys
+// would drown these hand-maintained tables) and explode into
+// ribbon.opt.shape-<token> keys here, at the single registration point.
+const shapeKeys = (index: 0 | 1): Record<string, string> =>
+  Object.fromEntries(
+    Object.entries(SHAPE_LABELS).map(([token, names]) => [
+      `ribbon.opt.shape-${token}`,
+      names[index],
+    ]),
+  );
+
+registerTranslation({ ...ribbonEn, translations: { ...ribbonEn.translations, ...shapeKeys(0) } });
+registerTranslation({
+  ...ribbonZhCN,
+  translations: { ...ribbonZhCN.translations, ...shapeKeys(1) },
+});

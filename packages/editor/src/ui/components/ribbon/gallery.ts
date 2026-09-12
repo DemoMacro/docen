@@ -13,8 +13,11 @@ import { COMMAND_HOST_STYLE, renderIcon } from "./command-helpers";
 /** One gallery entry — icon thumbnail over a short label (the compound
  *  button shape); `value` rides the emitted command detail. A `preview` entry
  *  renders text in its own formatting instead of an icon (the Styles gallery's
- *  thumbnails show the style name in the style's own font/size/color). */
+ *  thumbnails show the style name in the style's own font/size/color). A
+ *  `header` entry is a full-width non-clickable category heading (the Shapes
+ *  drop-down's Lines / Basic Shapes / … rows). */
 export interface RibbonGalleryItem {
+  header?: boolean;
   icon?: string;
   text?: string;
   value?: string;
@@ -127,6 +130,16 @@ const styles = css`
     overflow: hidden;
     white-space: nowrap;
     line-height: 1.15;
+  }
+  /* Category heading inside the drop-down grid — spans every column, not a
+     card (Word's Shapes groups: Lines, Basic Shapes, …). */
+  .rb-gheader {
+    grid-column: 1 / -1;
+    padding: 6px 4px 2px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--docen-color-secondary, #595959);
+    text-align: start;
   }
   /* The expanded gallery — pinned to the control's own width and overlaid on
      its top edge (Word's More gallery covers the strip: the first card row
@@ -260,9 +273,15 @@ class DocenRibbonGallery extends FASTElement {
     const items = this.parsedItems;
     // The drop-down lays out the same per-row count as the strip, so its
     // first row lines up with the visible entries and opening reads as the
-    // strip growing taller rather than a detached card.
+    // strip growing taller rather than a detached card. Headers are drop-down
+    // furniture — the closed strip only ever shows cards.
     this.grid.style.setProperty("--rbg-columns", String(this.visible));
-    this.strip.replaceChildren(...items.slice(0, this.visible).map((item) => this.#entry(item)));
+    this.strip.replaceChildren(
+      ...items
+        .filter((item) => !item.header)
+        .slice(0, this.visible)
+        .map((item) => this.#entry(item)),
+    );
     this.grid.replaceChildren(...items.map((item) => this.#entry(item)));
     this.#highlightCurrent();
   }
@@ -279,7 +298,13 @@ class DocenRibbonGallery extends FASTElement {
     }
   }
 
-  #entry(item: RibbonGalleryItem): HTMLButtonElement {
+  #entry(item: RibbonGalleryItem): HTMLElement {
+    if (item.header) {
+      const head = document.createElement("div");
+      head.className = "rb-gheader";
+      head.textContent = item.text ?? "";
+      return head;
+    }
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "rb-gallery-item";
