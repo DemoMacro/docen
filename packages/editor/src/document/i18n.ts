@@ -1193,8 +1193,16 @@ export const ribbonEn: AdditionalLanguage = {
     "styleName.heading2": "Heading 2",
     "styleName.heading3": "Heading 3",
     "styleName.heading4": "Heading 4",
+    "styleName.heading5": "Heading 5",
+    "styleName.heading6": "Heading 6",
+    "styleName.heading7": "Heading 7",
+    "styleName.heading8": "Heading 8",
+    "styleName.heading9": "Heading 9",
     "styleName.title": "Title",
     "styleName.subtitle": "Subtitle",
+    "styleName.quote": "Quote",
+    "styleName.intenseQuote": "Intense Quote",
+    "styleName.listParagraph": "List Paragraph",
   },
 };
 
@@ -2369,8 +2377,16 @@ export const ribbonZhCN: AdditionalLanguage = {
     "styleName.heading2": "标题 2",
     "styleName.heading3": "标题 3",
     "styleName.heading4": "标题 4",
+    "styleName.heading5": "标题 5",
+    "styleName.heading6": "标题 6",
+    "styleName.heading7": "标题 7",
+    "styleName.heading8": "标题 8",
+    "styleName.heading9": "标题 9",
     "styleName.title": "标题",
     "styleName.subtitle": "副标题",
+    "styleName.quote": "引用",
+    "styleName.intenseQuote": "明显引用",
+    "styleName.listParagraph": "列表段落",
   },
 };
 

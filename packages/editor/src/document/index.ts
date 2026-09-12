@@ -134,6 +134,7 @@ import {
   renderRibbonFromSchema,
   ribbonActions,
   ribbonTabs,
+  styleGalleryItems,
   shapeFormatTab,
   tableContextTabs,
   useCmUnits,
@@ -225,8 +226,16 @@ const BUILT_IN_STYLE_KEYS: Readonly<Record<string, string>> = {
   heading2: "styleName.heading2",
   heading3: "styleName.heading3",
   heading4: "styleName.heading4",
+  heading5: "styleName.heading5",
+  heading6: "styleName.heading6",
+  heading7: "styleName.heading7",
+  heading8: "styleName.heading8",
+  heading9: "styleName.heading9",
   title: "styleName.title",
   subtitle: "styleName.subtitle",
+  quote: "styleName.quote",
+  intensequote: "styleName.intenseQuote",
+  listparagraph: "styleName.listParagraph",
 };
 
 /** The inlinePassthrough carrying a math payload at the selection — the
@@ -941,12 +950,33 @@ class DocenDocument extends AddinHost<Editor> {
     const value = this.#currentStyleId(editor) || "Normal";
     const cb = this.shadowRoot?.querySelector<HTMLElement>('docen-ribbon-gallery[event="style"]');
     if (cb && cb.getAttribute("value") !== value) cb.setAttribute("value", value);
+    // The cards carry each style's effective formatting, so the items must
+    // track the document's styles model — the ribbon template bakes one
+    // snapshot at build time (usually before the document loads). Rebuild only
+    // when the model object is replaced (load / style-set switch / modify
+    // style): the identity guard keeps caret-only transactions from
+    // recomputing the basedOn merges.
+    const styles = this.#docStyles(editor);
+    if (cb && styles && styles !== this.#galleryStyles) {
+      this.#galleryStyles = styles;
+      const items = styleGalleryItems(styles).map((item) => {
+        const text = this.#styleDisplayName(item.value ?? "", item.text);
+        // The card renders preview.text (the label inside the card), item.text
+        // is the menu/tooltip name — both follow the same display naming.
+        return { ...item, text, preview: { ...item.preview, text } };
+      });
+      cb.setAttribute("items", JSON.stringify(items));
+    }
     // The Styles pane's highlight follows the caret's paragraph style.
     const pane = this.shadowRoot?.querySelector("docen-styles-pane") as
       | (HTMLElement & { setCurrent(id: string): void })
       | null;
     pane?.setCurrent(value);
   }
+
+  /** The styles model identity currently rendered into the Styles gallery —
+   *  skips the rebuild until the model object is replaced. */
+  #galleryStyles?: StylesOptions;
 
   // ── Styles pane / Modify Style dialog / Style Inspector ──────────────────
 

@@ -74,15 +74,22 @@ const sizeItems = (): string => {
 };
 
 /** Minimal built-in set shown when a document carries no styles.xml (e.g. a
- *  blank editor) so the Styles gallery is never empty — no cascade info to
- *  preview, so the cards render plain. */
-const FALLBACK_STYLE_ITEMS = (): RibbonMenuItem[] => [
-  { text: t(opt("normal")), preview: { text: t(opt("normal")) }, value: "Normal" },
-  { text: t(opt("heading-1")), preview: { text: t(opt("heading-1")) }, value: "Heading1" },
-  { text: t(opt("heading-2")), preview: { text: t(opt("heading-2")) }, value: "Heading2" },
-  { text: t(opt("heading-3")), preview: { text: t(opt("heading-3")) }, value: "Heading3" },
-  { text: t(opt("title")), preview: { text: t(opt("title")) }, value: "Title" },
-];
+ *  blank editor) so the Styles gallery is never empty — the cards still carry
+ *  the document defaults' formatting so they match the rendered text. */
+const FALLBACK_STYLE_ITEMS = (css?: string): RibbonMenuItem[] => {
+  const entry = (key: string, value: string): RibbonMenuItem => ({
+    text: t(opt(key)),
+    preview: css ? { text: t(opt(key)), css } : { text: t(opt(key)) },
+    value,
+  });
+  return [
+    entry("normal", "Normal"),
+    entry("heading-1", "Heading1"),
+    entry("heading-2", "Heading2"),
+    entry("heading-3", "Heading3"),
+    entry("title", "Title"),
+  ];
+};
 
 /** Inline CSS previewing a style's own character formatting: the Styles
  *  gallery renders each card's label in the style's font/size/color (Word's
@@ -96,19 +103,22 @@ const stylePreviewCss = (run?: RunStylePropertiesOptions): string | undefined =>
     parts.push(`font-size:${Math.min(Math.max(run.size * 0.85, 8), 15)}pt`);
   if (run.bold) parts.push("font-weight:700");
   if (run.italic) parts.push("font-style:italic");
-  // HexColorOrAuto is the hex string or "auto"; theme-color objects have no
-  // single CSS equivalent, so they render default-ink like Word's gallery does.
-  if (typeof run.color === "string" && run.color !== "auto") parts.push(`color:#${run.color}`);
+  // HexColorOrAuto: the hex string, "auto" (default ink), or a theme-color
+  // reference whose `val` is the resolved literal — preview it either way.
+  const color = typeof run.color === "string" ? run.color : run.color?.val;
+  if (typeof color === "string" && color !== "auto") parts.push(`color:#${color}`);
   return parts.length > 0 ? parts.join(";") : undefined;
 };
 
 /** Build the Styles gallery (Word's Quick Styles strip): quickFormat paragraph
  *  styles by uiPriority, each card showing the style's own name in its own
  *  character formatting. The value is the pStyle id, which round-trips via the
- *  paragraph `style` attr. */
-const styleGalleryItems = (styles?: StylesOptions | null): RibbonMenuItem[] => {
+ *  paragraph `style` attr. Exported so the host can rebuild the items when the
+ *  document's styles model changes (the ribbon template bakes one snapshot). */
+export const styleGalleryItems = (styles?: StylesOptions | null): RibbonMenuItem[] => {
   const entries = quickStyles(styles);
-  if (entries.length === 0) return FALLBACK_STYLE_ITEMS();
+  if (entries.length === 0)
+    return FALLBACK_STYLE_ITEMS(stylePreviewCss(styles?.default?.document?.run ?? undefined));
   return entries.map((e) => ({
     text: e.name,
     preview: { text: e.name, css: stylePreviewCss(e.run) },
