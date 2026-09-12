@@ -652,7 +652,12 @@ const template = html<DocenColorPicker>`
       </div>
     </div>
   </div>
-  <fluent-tooltip anchor="target" positioning="top" ${ref("tooltipEl")}>
+  <fluent-tooltip
+    anchor="target"
+    positioning="top"
+    ?hidden="${(x) => !x.tooltipText}"
+    ${ref("tooltipEl")}
+  >
     <span class="rb-tip">${(x) => x.tooltipText}</span>
   </fluent-tooltip>
 `;
@@ -676,6 +681,9 @@ class DocenColorPicker extends FASTElement {
   @attr tooltip?: string;
   @attr({ attribute: "default-color" }) defaultColor?: string;
   @attr({ attribute: "icon-only", mode: "boolean" }) iconOnly?: boolean;
+  /** Drop the split behavior: the primary button opens the palette too (a
+   *  form context has no "re-apply the last color" shortcut to offer). */
+  @attr({ attribute: "no-split", mode: "boolean" }) noSplit?: boolean;
   /** "highlight" renders Word's fixed 16-color highlighter palette (swatches
    *  emit ST_HighlightColor tokens — hex is illegal in w:highlight); the
    *  default theme palette emits theme-semantic objects. */
@@ -777,10 +785,12 @@ class DocenColorPicker extends FASTElement {
     this.addEventListener("mousedown", onMousedown, { capture: true });
     this.#focusCleanup = () =>
       this.removeEventListener("mousedown", onMousedown, { capture: true });
-    // Primary click re-applies the last-used color (Office split behavior).
+    // Primary click re-applies the last-used color (Office split behavior);
+    // a no-split picker opens the palette instead.
     this.btn?.addEventListener("click", (event) => {
       event.stopPropagation();
-      this.#applyLast();
+      if (this.noSplit) this.#open();
+      else this.#applyLast();
     });
     // Caret opens the palette (popover=auto handles light-dismiss on outside click).
     this.caret?.addEventListener("click", (event) => {

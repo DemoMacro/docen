@@ -1,6 +1,23 @@
 // Font data shared by the ribbon font group and the Font dialog — names and
 // point sizes are data, not UI copy, so they stay untranslated.
 
+/** The CJK faces the Modify Style dialog's 中/英 toggle lists — Word keeps a
+ *  separate Chinese-font picker alongside the Latin one. */
+export const CJK_FONT_NAMES = [
+  "宋体",
+  "新宋体",
+  "黑体",
+  "楷体",
+  "仿宋",
+  "等线",
+  "Microsoft YaHei",
+  "微软雅黑 Light",
+  "幼圆",
+  "隶书",
+  "华文行楷",
+  "华文楷体",
+];
+
 /** Fallback font list shown when the Local Font Access API is unavailable or
  *  denied — includes common CJK faces so a zh host still sees familiar names. */
 export const FONT_NAMES = [

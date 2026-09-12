@@ -1,9 +1,15 @@
 import { FASTElement, css, customElement, html, observable, ref } from "@microsoft/fast-element";
 
 import type { ModifyStylePatch } from "../../../document/extensions/commands";
-import { FONT_NAMES, FONT_SIZES_CN, FONT_SIZES_PT } from "../../../document/font-lists";
+import {
+  CJK_FONT_NAMES,
+  FONT_NAMES,
+  FONT_SIZES_CN,
+  FONT_SIZES_PT,
+} from "../../../document/font-lists";
 import { observeLang, resolveLang, t } from "../../i18n/localize";
-import { appendMenuItems } from "../ribbon/command-helpers";
+import { appendMenuItems, renderIcon } from "../ribbon/command-helpers";
+import { opt, pick, pickLadder, pickedValue, type FluentDropdown } from "./fluent-combo";
 
 /** A paragraph style as the basedOn/next drop-downs list it. */
 export interface StyleChoice {
@@ -13,21 +19,26 @@ export interface StyleChoice {
 
 /** The prefill the host passes to `show()`: the patch fields read from the
  *  style's current definition, plus the display data the dialog can't reach
- *  (the style's own name and the full paragraph-style list) and the merged
- *  formatting preview CSS. */
+ *  (the style's own name, the full paragraph-style list), the merged
+ *  formatting preview CSS and the localized format-summary line. */
 export interface ModifyStyleState extends ModifyStylePatch {
   name: string;
   choices: StyleChoice[];
   /** Inline CSS for the preview's sample text (the style's effective run). */
   previewCss?: string;
+  /** The effective-format summary shown under the preview (host-composed). */
+  description?: string;
 }
 
 const styles = css`
   :host {
     display: contents;
   }
-  docen-dialog::part(dialog) {
-    width: min(460px, 92vw);
+  /* The shell reads the width via the docen-dialog channel (::part width
+     rules never reach FAST's fixed-positioned native surface). 552px wraps
+     the format row at its ribbon-width controls plus the dialog chrome. */
+  docen-dialog {
+    --dialog-width: min(552px, 94vw);
   }
   .body {
     padding: 8px 4px 4px;
@@ -36,42 +47,110 @@ const styles = css`
     gap: 10px;
     font-size: 13px;
   }
+  .section-label {
+    font-weight: 600;
+    opacity: 0.8;
+  }
+  /* The properties block: one grid, so the labels share a column and every
+     control starts at the same x with the same width. The label text alone
+     spreads across its run — the trailing colon rides right after it, out
+     of the justification. */
+  .props {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 8px 12px;
+    align-items: center;
+  }
+  .props > label {
+    display: flex;
+    white-space: nowrap;
+  }
+  .props > label .fill {
+    flex: 1;
+    text-align: justify;
+    text-align-last: justify;
+  }
   .row {
     display: flex;
     align-items: center;
-    gap: 10px;
-  }
-  .field {
-    display: flex;
-    align-items: center;
     gap: 6px;
-    flex: 1 1 0;
+  }
+  /* The properties controls fill their grid column. The format row's
+     comboboxes take the ribbon's fixed widths — the font box 120px and the
+     size box the short 112px, same as the ribbon's font/size pair — so the
+     dialog hugs its content instead of stretching one control. */
+  .props > fluent-dropdown {
+    width: 100%;
     min-width: 0;
   }
-  .field > label {
-    white-space: nowrap;
-  }
-  fluent-dropdown {
+  .row > fluent-dropdown {
     min-width: 0;
-    flex: 1 1 auto;
+    flex: none;
+  }
+  fluent-dropdown.font-sel {
+    width: 120px;
+  }
+  fluent-dropdown.size-sel {
+    width: 112px;
+  }
+  fluent-dropdown.scope-sel {
+    flex: none;
+    width: 88px;
+    margin-inline-start: auto;
   }
   fluent-dropdown input {
     width: 100%;
     box-sizing: border-box;
   }
-  .name {
-    font-weight: 600;
+  fluent-text-input {
     flex: 1 1 auto;
+    min-width: 0;
+    /* FAST caps the input at 400px — the name row must fill the dialog. */
+    max-width: none;
   }
-  .checks {
-    display: flex;
-    gap: 16px;
+  /* The comboboxes open upward — over the properties block, not over the
+     format rows below (the listbox popover is anchored by FAST; the outer
+     tree's rule beats the component's :host placement). */
+  fluent-listbox[popover] {
+    inset-block-start: auto;
+    inset-block-end: anchor(top);
   }
-  .check-field {
+  /* The compact format controls — subtle (borderless, the ribbon's look);
+     light-DOM glyphs, so the size is owned here. */
+  fluent-toggle-button.mini {
+    min-width: 30px;
+    min-height: 30px;
+    padding: 0 4px;
+    flex: none;
+  }
+  fluent-toggle-button.mini svg {
+    display: block;
+    width: 16px;
+    height: 16px;
+  }
+  .para-row {
     display: flex;
     align-items: center;
-    gap: 6px;
-    cursor: pointer;
+    gap: 4px;
+    flex-wrap: wrap;
+  }
+  .sep {
+    width: 1px;
+    height: 18px;
+    background: var(--neutral-stroke-rest, #d1d1d1);
+    flex: none;
+  }
+  /* The Format trigger's chevron — slotted into the button's end slot, so
+     the host's flex centering (and its column-gap) aligns it with the label
+     instead of riding the text baseline one line up. */
+  .fmt-caret {
+    display: inline-flex;
+  }
+  .fmt-caret svg {
+    display: block;
+    width: 12px;
+    height: 12px;
+    fill: currentColor;
   }
   .preview {
     border: 1px solid var(--neutral-stroke-rest, #d1d1d1);
@@ -87,120 +166,178 @@ const styles = css`
     white-space: nowrap;
     overflow: hidden;
   }
-  .format-row {
+  .desc {
+    font-size: 11px;
+    opacity: 0.65;
+    line-height: 1.4;
+  }
+  .checks {
     display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .check-field {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+  }
+  .scope-row {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  /* The action footer: Format on the far left, Cancel/OK on the right. */
+  .actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+  }
+  .actions > .spacer {
+    flex: 1;
   }
 `;
 
 const template = html<DocenModifyStyleDialog>`
   <docen-dialog ${ref("dialogEl")}>
     <div class="body">
+      <div class="section-label" ${ref("propsLabel")}></div>
+      <div class="props">
+        <label ${ref("nameLabel")}></label>
+        <fluent-text-input appearance="outline" ${ref("nameInput")}></fluent-text-input>
+        <label ${ref("typeLabel")}></label>
+        <fluent-dropdown type="combobox" appearance="outline" ${ref("typeSel")}>
+          <fluent-listbox popover="manual" tabindex="-1"></fluent-listbox>
+          <input
+            slot="control"
+            role="combobox"
+            aria-haspopup="listbox"
+            type="combobox"
+            size="1"
+            style="width:100%;box-sizing:border-box"
+          />
+        </fluent-dropdown>
+        <label ${ref("basedOnLabel")}></label>
+        <fluent-dropdown type="combobox" appearance="outline" ${ref("basedOnSel")}>
+          <fluent-listbox popover="manual" tabindex="-1"></fluent-listbox>
+          <input
+            slot="control"
+            role="combobox"
+            aria-haspopup="listbox"
+            type="combobox"
+            size="1"
+            style="width:100%;box-sizing:border-box"
+          />
+        </fluent-dropdown>
+        <label ${ref("nextLabel")}></label>
+        <fluent-dropdown type="combobox" appearance="outline" ${ref("nextSel")}>
+          <fluent-listbox popover="manual" tabindex="-1"></fluent-listbox>
+          <input
+            slot="control"
+            role="combobox"
+            aria-haspopup="listbox"
+            type="combobox"
+            size="1"
+            style="width:100%;box-sizing:border-box"
+          />
+        </fluent-dropdown>
+      </div>
+      <div class="section-label" ${ref("formatLabel")}></div>
       <div class="row">
-        <div class="field">
-          <label ${ref("nameLabel")}></label>
-          <span class="name" ${ref("nameValue")}></span>
-        </div>
+        <fluent-dropdown type="combobox" appearance="outline" class="font-sel" ${ref("fontSel")}>
+          <fluent-listbox popover="manual" tabindex="-1"></fluent-listbox>
+          <input
+            slot="control"
+            role="combobox"
+            aria-haspopup="listbox"
+            type="combobox"
+            size="1"
+            style="width:100%;box-sizing:border-box"
+          />
+        </fluent-dropdown>
+        <fluent-dropdown type="combobox" appearance="outline" class="size-sel" ${ref("sizeSel")}>
+          <fluent-listbox popover="manual" tabindex="-1"></fluent-listbox>
+          <input
+            slot="control"
+            role="combobox"
+            aria-haspopup="listbox"
+            type="combobox"
+            size="1"
+            style="width:100%;box-sizing:border-box"
+          />
+        </fluent-dropdown>
+        <fluent-toggle-button
+          class="mini"
+          appearance="subtle"
+          ${ref("boldBtn")}
+          @click="${(x) => x.pressMini("bold")}"
+        ></fluent-toggle-button>
+        <fluent-toggle-button
+          class="mini"
+          appearance="subtle"
+          ${ref("italicBtn")}
+          @click="${(x) => x.pressMini("italic")}"
+        ></fluent-toggle-button>
+        <fluent-toggle-button
+          class="mini"
+          appearance="subtle"
+          ${ref("underlineBtn")}
+          @click="${(x) => x.pressMini("underline")}"
+        ></fluent-toggle-button>
+        <docen-color-picker
+          icon="font-color"
+          event="modify-style-color"
+          no-split
+          ${ref("colorPick")}
+        ></docen-color-picker>
+        <fluent-dropdown type="combobox" appearance="outline" class="scope-sel" ${ref("scopeSel")}>
+          <fluent-listbox popover="manual" tabindex="-1"></fluent-listbox>
+          <input
+            slot="control"
+            role="combobox"
+            aria-haspopup="listbox"
+            type="combobox"
+            size="1"
+            style="width:100%;box-sizing:border-box"
+          />
+        </fluent-dropdown>
       </div>
-      <div class="row">
-        <div class="field">
-          <label ${ref("basedOnLabel")}></label>
-          <fluent-dropdown type="combobox" appearance="outline" ${ref("basedOnSel")}>
-            <fluent-listbox popover="manual" tabindex="-1"></fluent-listbox>
-            <input
-              slot="control"
-              role="combobox"
-              aria-haspopup="listbox"
-              type="combobox"
-              size="1"
-              style="width:100%;box-sizing:border-box"
-            />
-          </fluent-dropdown>
-        </div>
-        <div class="field">
-          <label ${ref("nextLabel")}></label>
-          <fluent-dropdown type="combobox" appearance="outline" ${ref("nextSel")}>
-            <fluent-listbox popover="manual" tabindex="-1"></fluent-listbox>
-            <input
-              slot="control"
-              role="combobox"
-              aria-haspopup="listbox"
-              type="combobox"
-              size="1"
-              style="width:100%;box-sizing:border-box"
-            />
-          </fluent-dropdown>
-        </div>
-      </div>
-      <div class="row">
-        <div class="field">
-          <label ${ref("fontLabel")}></label>
-          <fluent-dropdown type="combobox" appearance="outline" ${ref("fontSel")}>
-            <fluent-listbox popover="manual" tabindex="-1"></fluent-listbox>
-            <input
-              slot="control"
-              role="combobox"
-              aria-haspopup="listbox"
-              type="combobox"
-              size="1"
-              style="width:100%;box-sizing:border-box"
-            />
-          </fluent-dropdown>
-        </div>
-        <div class="field">
-          <label ${ref("sizeLabel")}></label>
-          <fluent-dropdown type="combobox" appearance="outline" ${ref("sizeSel")}>
-            <fluent-listbox popover="manual" tabindex="-1"></fluent-listbox>
-            <input
-              slot="control"
-              role="combobox"
-              aria-haspopup="listbox"
-              type="combobox"
-              size="1"
-              style="width:100%;box-sizing:border-box"
-            />
-          </fluent-dropdown>
-        </div>
-        <div class="field">
-          <label ${ref("colorLabel")}></label>
-          <fluent-dropdown type="combobox" appearance="outline" ${ref("colorSel")}>
-            <fluent-listbox popover="manual" tabindex="-1"></fluent-listbox>
-            <input
-              slot="control"
-              role="combobox"
-              aria-haspopup="listbox"
-              type="combobox"
-              size="1"
-              style="width:100%;box-sizing:border-box"
-            />
-          </fluent-dropdown>
-        </div>
-      </div>
-      <div class="checks">
-        <label class="check-field">
-          <fluent-checkbox part="bold" ${ref("bold")}></fluent-checkbox>
-          <span ${ref("boldLabel")}></span>
-        </label>
-        <label class="check-field">
-          <fluent-checkbox part="italic" ${ref("italic")}></fluent-checkbox>
-          <span ${ref("italicLabel")}></span>
-        </label>
-        <label class="check-field">
-          <fluent-checkbox part="underline" ${ref("underline")}></fluent-checkbox>
-          <span ${ref("underlineLabel")}></span>
-        </label>
-      </div>
+      <div class="para-row" ${ref("paraRow")}></div>
       <div class="preview">
         <label ${ref("previewLabel")}></label>
         <div class="preview-text" ${ref("previewText")}></div>
       </div>
-      <div class="format-row">
-        <fluent-menu ${ref("formatMenu")}>
-          <fluent-button slot="trigger" appearance="outline" ${ref("formatBtn")}></fluent-button>
-          <fluent-menu-list focusgroup="menu" ${ref("formatList")}></fluent-menu-list>
-        </fluent-menu>
+      <div class="desc" ${ref("descLabel")}></div>
+      <div class="checks">
+        <label class="check-field">
+          <fluent-checkbox part="quick" ${ref("quickCheck")}></fluent-checkbox>
+          <span ${ref("quickCheckLabel")}></span>
+        </label>
+        <label class="check-field">
+          <fluent-checkbox part="auto" ${ref("autoCheck")}></fluent-checkbox>
+          <span ${ref("autoCheckLabel")}></span>
+        </label>
+      </div>
+      <div class="scope-row">
+        <label class="check-field">
+          <fluent-radio name="modify-style-scope" ${ref("scopeDoc")}></fluent-radio>
+          <span ${ref("scopeDocLabel")}></span>
+        </label>
+        <label class="check-field">
+          <fluent-radio name="modify-style-scope" disabled ${ref("scopeTemplate")}></fluent-radio>
+          <span ${ref("scopeTemplateLabel")}></span>
+        </label>
       </div>
     </div>
-    <div slot="action">
+    <div slot="action" class="actions">
+      <fluent-menu ${ref("formatMenu")}>
+        <fluent-button slot="trigger" appearance="outline" ${ref("formatBtn")}>
+          <span ${ref("formatBtnLabel")}></span>
+        </fluent-button>
+        <fluent-menu-list focusgroup="menu" ${ref("formatList")}></fluent-menu-list>
+      </fluent-menu>
+      <span class="spacer"></span>
       <fluent-button ${ref("cancelBtn")} @click="${(x) => x.hide()}"></fluent-button>
       <fluent-button
         appearance="accent"
@@ -211,96 +348,118 @@ const template = html<DocenModifyStyleDialog>`
   </docen-dialog>
 `;
 
-/** A checkbox widget. The rendered state follows `checked`; `currentChecked`
- *  is a separate slot only user clicks keep in sync. */
+/** A checkbox/radio widget. The rendered state follows `checked`; writing
+ *  `currentChecked` alone doesn't render (a user click syncs both). */
 type FluentCheckbox = HTMLElement & { checked?: boolean };
 
-/** A `fluent-dropdown` combobox plus its picked value (null = none). */
-type FluentDropdown = HTMLElement & { value: string | null };
+/** Word's alignment single-pick group: patch value, icon, tooltip key. */
+const ALIGN_GROUP: ReadonlyArray<readonly [string, string, string]> = [
+  ["left", "align-left", "ribbon.cmd.align-left"],
+  ["center", "align-center", "ribbon.cmd.align-center"],
+  ["right", "align-right", "ribbon.cmd.align-right"],
+  ["both", "justify", "ribbon.cmd.justify"],
+];
 
-/** One `fluent-option` — the attr form mirrors the static template options
- *  (an absent value attr would fall back to the option's text). */
-function opt(text: string, value: string): HTMLElement {
-  const el = document.createElement("fluent-option");
-  el.textContent = text;
-  el.setAttribute("value", value);
-  return el;
-}
-
-/** Programmatically pick the option carrying `value`. The FAST `value`
- *  setter ignores options it hasn't indexed yet (freshly appended ones), so
- *  set `selected` on the option itself — that syncs the property and the
- *  control input immediately. */
-function pick(listbox: HTMLElement | null, value: string): void {
-  if (!listbox) return;
-  const option = [
-    ...listbox.querySelectorAll<HTMLElement & { selected?: boolean }>("fluent-option"),
-  ].find((o) => o.getAttribute("value") === value);
-  if (option) option.selected = true;
-}
-
-/** Word's text-color dropdown for the dialog (automatic + the standard row). */
-const TEXT_COLORS: ReadonlyArray<readonly [string, string]> = [
-  ["000000", "color-black"],
-  ["800000", "color-darkRed"],
-  ["008000", "color-green"],
-  ["000080", "color-darkBlue"],
-  ["FF0000", "color-red"],
-  ["FF00FF", "color-magenta"],
-  ["FFFF00", "color-yellow"],
-  ["00FFFF", "color-cyan"],
+/** The line-spacing single-pick group: twips-of-a-line, the three-bar glyph
+ *  (wider bar gaps = the larger multiple), tooltip key. */
+const LINE_GROUP: ReadonlyArray<readonly [number, string, string]> = [
+  [240, "M2 4.5h12M2 8h12M2 11.5h12", "modifyStyleDialog.lineSingle"],
+  [360, "M2 3.5h12M2 8h12M2 12.5h12", "modifyStyleDialog.line15"],
+  [480, "M2 2.5h12M2 8h12M2 13.5h12", "modifyStyleDialog.lineDouble"],
 ];
 
 /**
- * `<docen-modify-style-dialog>` — the Word "Modify Style" dialog: the style's
- * chain pointers (based on / next-paragraph style) and the run formatting the
- * styles pane edits (font, size, color, bold/italic/underline). The host
- * prefills from the style's definition via `show(state)`; OK emits
- * `modify-style:ok` with a {@link ModifyStylePatch} for the host to stamp
- * through the `modify-style` command (Cancel / Esc just close). Rides on
- * `<docen-dialog>` for the modal shell; the drop-downs are `<fluent-dropdown>`
- * comboboxes filled dynamically per style.
+ * `<docen-modify-style-dialog>` — the Word "Modify Style" dialog in its
+ * two-block layout: the style's properties (name / type / based on /
+ * next-paragraph style) and its formatting (a font + size pair, B/I/U, a
+ * color picker and a font-scope dropdown; a paragraph row of alignment and
+ * line-spacing toggles), then the preview, the effective-format summary, the
+ * gallery/auto-update flags and the scope radios. All controls are Fluent
+ * widgets in the ribbon's subtle (borderless) style. OK emits
+ * `modify-style:ok` with a full {@link ModifyStylePatch} for the host to
+ * stamp through the `modify-style` command; Cancel / Esc just close. The
+ * Format button opens the Font/Paragraph dialogs against the same style
+ * (Tabs/Border/Numbering are honest gaps today).
  */
 @customElement({ name: "docen-modify-style-dialog", template, styles })
 class DocenModifyStyleDialog extends FASTElement {
   @observable dialogEl?: HTMLElement & { heading?: string; show(): void; hide(): void };
+  @observable propsLabel?: HTMLElement;
   @observable nameLabel?: HTMLElement;
-  @observable nameValue?: HTMLElement;
+  @observable nameInput?: HTMLElement & { value?: string };
+  @observable typeLabel?: HTMLElement;
+  @observable typeSel?: FluentDropdown;
   @observable basedOnLabel?: HTMLElement;
   @observable basedOnSel?: FluentDropdown;
   @observable nextLabel?: HTMLElement;
   @observable nextSel?: FluentDropdown;
-  @observable fontLabel?: HTMLElement;
+  @observable formatLabel?: HTMLElement;
   @observable fontSel?: FluentDropdown;
-  @observable sizeLabel?: HTMLElement;
   @observable sizeSel?: FluentDropdown;
-  @observable colorLabel?: HTMLElement;
-  @observable colorSel?: FluentDropdown;
-  @observable bold?: FluentCheckbox;
-  @observable italic?: FluentCheckbox;
-  @observable underline?: FluentCheckbox;
-  @observable boldLabel?: HTMLElement;
-  @observable italicLabel?: HTMLElement;
-  @observable underlineLabel?: HTMLElement;
+  @observable boldBtn?: HTMLElement;
+  @observable italicBtn?: HTMLElement;
+  @observable underlineBtn?: HTMLElement;
+  @observable colorPick?: HTMLElement;
+  @observable scopeSel?: FluentDropdown;
+  @observable paraRow?: HTMLElement;
   @observable previewLabel?: HTMLElement;
   @observable previewText?: HTMLElement;
+  @observable descLabel?: HTMLElement;
+  @observable quickCheck?: FluentCheckbox;
+  @observable quickCheckLabel?: HTMLElement;
+  @observable autoCheck?: FluentCheckbox;
+  @observable autoCheckLabel?: HTMLElement;
+  @observable scopeDoc?: HTMLElement;
+  @observable scopeDocLabel?: HTMLElement;
+  @observable scopeTemplate?: HTMLElement;
+  @observable scopeTemplateLabel?: HTMLElement;
   @observable formatMenu?: HTMLElement;
   @observable formatBtn?: HTMLElement;
+  @observable formatBtnLabel?: HTMLElement;
   @observable formatList?: HTMLElement;
   @observable okBtn?: HTMLElement;
   @observable cancelBtn?: HTMLElement;
 
   /** The style being modified — re-emitted with the patch on OK. */
   #id = "";
+  /** The show-time display name — a name edit only rides the patch when it
+   *  actually changed (an untouched name never shadows the built-in). */
+  #originalName = "";
+  /** The state `show()` received — the CJK/Latin toggle re-fills from it. */
+  #state?: ModifyStyleState;
+  // The pending format block, edited in place and committed on OK.
+  #bold = false;
+  #italic = false;
+  #underline = false;
+  #color: string | null = null;
+  #alignment: string | null = null;
+  #lineSpacing: number | null = null;
+  #indentLeft: number | null = null;
+  #indentRight: number | null = null;
+  #spacingBefore: number | null = null;
+  #spacingAfter: number | null = null;
+  /** The font-list scope the middle dropdown filters by (All covers both). */
+  #fontScope = "all";
   #unobserveLang?: () => void;
 
   connectedCallback(): void {
     super.connectedCallback();
+    // The B/I/U glyphs (the template slots stay empty); the host owns the
+    // pressed state on them, same as the paragraph-row toggles.
+    for (const btn of [this.boldBtn, this.italicBtn, this.underlineBtn]) {
+      if (btn) (btn as unknown as { press?: () => void }).press = () => {};
+    }
+    if (this.boldBtn) renderIcon(this.boldBtn, "bold");
+    if (this.italicBtn) renderIcon(this.italicBtn, "italic");
+    if (this.underlineBtn) renderIcon(this.underlineBtn, "underline");
+    this.#bindColorPicker();
     this.#applyLabels();
     this.#fillFormatMenu();
+    this.#buildParaRow();
     this.#unobserveLang = observeLang(() => {
       this.#applyLabels();
       this.#fillFormatMenu();
+      this.#buildParaRow();
     });
   }
 
@@ -312,17 +471,37 @@ class DocenModifyStyleDialog extends FASTElement {
 
   show(state: ModifyStyleState): void {
     this.#id = state.id;
-    if (this.nameValue) this.nameValue.textContent = state.name;
+    this.#state = state;
+    this.#originalName = state.name;
+    this.#fontScope = "all";
+    this.#bold = state.bold === true;
+    this.#italic = state.italic === true;
+    this.#underline = state.underline === true;
+    this.#color = state.color ?? null;
+    if (this.nameInput) this.nameInput.value = state.name;
     if (this.previewText) {
       this.previewText.textContent = state.name;
       this.previewText.style.cssText = state.previewCss ?? "";
     }
+    if (this.descLabel) this.descLabel.textContent = state.description ?? "";
     this.#fillChoices(this.basedOnSel, state.choices, state.basedOn ?? "", true);
     this.#fillChoices(this.nextSel, state.choices, state.next ?? "", true);
-    this.#fillCombos(state);
-    if (this.bold) this.bold.checked = state.bold;
-    if (this.italic) this.italic.checked = state.italic;
-    if (this.underline) this.underline.checked = state.underline;
+    this.#fillType();
+    this.#fillScopeCombo();
+    this.#fillCombos();
+    this.#setPressed(this.boldBtn, this.#bold);
+    this.#setPressed(this.italicBtn, this.#italic);
+    this.#setPressed(this.underlineBtn, this.#underline);
+    if (this.colorPick) this.colorPick.setAttribute("default-color", state.color || "000000");
+    this.#alignment = state.alignment ?? null;
+    this.#lineSpacing = state.lineSpacing ?? null;
+    this.#indentLeft = state.indentLeft ?? null;
+    this.#indentRight = state.indentRight ?? null;
+    this.#spacingBefore = state.spacingBefore ?? null;
+    this.#spacingAfter = state.spacingAfter ?? null;
+    this.#buildParaRow();
+    if (this.quickCheck) this.quickCheck.checked = state.quickFormat ?? true;
+    if (this.autoCheck) this.autoCheck.checked = state.autoRedefine ?? false;
     this.dialogEl?.show();
   }
 
@@ -337,8 +516,70 @@ class DocenModifyStyleDialog extends FASTElement {
     this.$emit("modify-style:format", { id: this.#id, target });
   }
 
-  /** The Format button's two entries (Word's list; Tabs/Border/Numbering are
-   *  honest gaps today). Re-filled per language. */
+  /** Template-visible scope pick — refills the font list, keeping the
+   *  current pick (pickLadder re-adds off-list values). */
+  onScopeChange(): void {
+    const value = pickedValue(this.scopeSel);
+    if (value === "cjk" || value === "latin" || value === "all") this.#fontScope = value;
+    this.#fillFontCombo();
+  }
+
+  /** Template-visible OK handler (FAST templates live outside the class, so a
+   *  `#`-private method can't be referenced from the binding). */
+  applyPatch(): void {
+    const name = this.nameInput?.value?.trim() ?? "";
+    const patch: ModifyStylePatch = {
+      id: this.#id,
+      // null (the blank "(inherit)" option) commits null — inherit again.
+      basedOn: pickedValue(this.basedOnSel),
+      next: pickedValue(this.nextSel),
+      font: pickedValue(this.fontSel),
+      size: pickedValue(this.sizeSel) ? Number(pickedValue(this.sizeSel)) : null,
+      bold: this.#bold,
+      italic: this.#italic,
+      underline: this.#underline,
+      color: this.#color,
+      alignment: this.#alignment,
+      lineSpacing: this.#lineSpacing,
+      indentLeft: this.#indentLeft,
+      indentRight: this.#indentRight,
+      spacingBefore: this.#spacingBefore,
+      spacingAfter: this.#spacingAfter,
+      quickFormat: this.quickCheck?.checked ?? undefined,
+      autoRedefine: this.autoCheck?.checked ?? undefined,
+    };
+    if (name && name !== this.#originalName) patch.name = name;
+    this.$emit("modify-style:ok", patch);
+    this.hide();
+  }
+
+  /** Template-visible B/I/U press — the host flips the state and the visual
+   *  itself (FAST's own flip is neutralized below; two writers would race). */
+  pressMini(which: "bold" | "italic" | "underline"): void {
+    const btn =
+      which === "bold" ? this.boldBtn : which === "italic" ? this.italicBtn : this.underlineBtn;
+    const on = !((btn as unknown as { pressed?: boolean } | undefined)?.pressed === true);
+    this.#setPressed(btn, on);
+    if (which === "bold") this.#bold = on;
+    else if (which === "italic") this.#italic = on;
+    else this.#underline = on;
+  }
+
+  /** The color picker's command — "none" clears to the automatic color; a
+   *  theme pick carries a val fallback (the resolved hex), which is what the
+   *  patch stores. */
+  readonly #onColor = (event: Event): void => {
+    const v = (event as CustomEvent).detail?.value as string | { val?: string } | undefined;
+    this.#color = v == null || v === "none" ? null : typeof v === "string" ? v : (v.val ?? null);
+  };
+
+  #bindColorPicker(): void {
+    if (!this.colorPick || this.colorPick.dataset.bound) return;
+    this.colorPick.dataset.bound = "1";
+    this.colorPick.addEventListener("command", this.#onColor);
+  }
+
+  /** The Format button's two entries (Word's list). Re-filled per language. */
   #fillFormatMenu(): void {
     if (!this.formatList) return;
     appendMenuItems(
@@ -351,38 +592,57 @@ class DocenModifyStyleDialog extends FASTElement {
     );
   }
 
-  /** Template-visible OK handler (FAST templates live outside the class, so a
-   *  `#`-private method can't be referenced from the binding). */
-  applyPatch(): void {
-    const patch: ModifyStylePatch = {
-      id: this.#id,
-      // null (the blank "(inherit)" option) commits null — inherit again.
-      basedOn: this.#picked(this.basedOnSel),
-      next: this.#picked(this.nextSel),
-      font: this.#picked(this.fontSel),
-      size: this.#picked(this.sizeSel) ? Number(this.#picked(this.sizeSel)) : null,
-      bold: this.bold?.checked ?? false,
-      italic: this.italic?.checked ?? false,
-      underline: this.underline?.checked ?? false,
-      color: this.#picked(this.colorSel),
-    };
-    this.$emit("modify-style:ok", patch);
-    this.hide();
+  /** The type dropdown is display-only today: every style the dialog edits is
+   *  a paragraph style; a one-option list reads as fixed without needing a
+   *  disabled mode on the combobox. */
+  #fillType(): void {
+    const listbox = this.typeSel?.querySelector("fluent-listbox");
+    if (!listbox) return;
+    listbox.replaceChildren(opt(t("modifyStyleDialog.typeParagraph", this), "paragraph"));
+    pick(listbox.parentElement as FluentDropdown, "paragraph");
   }
 
-  /** The dropdown's picked value. A user pick syncs the FAST `value`
-   *  property; a programmatic prefill may leave it "" (the control input
-   *  still shows the text) — fall back to the input so prefill-then-OK
-   *  round-trips. */
-  #picked(dd: FluentDropdown | undefined): string | null {
-    if (!dd) return null;
-    const input = dd.querySelector('input[slot="control"]') as HTMLInputElement | null;
-    return dd.value || input?.value.trim() || null;
+  /** The font list — the faces under the current scope (All merges both
+   *  sets, CJK first). */
+  #fillFontCombo(): void {
+    const listbox = this.fontSel?.querySelector("fluent-listbox");
+    if (!listbox) return;
+    const names =
+      this.#fontScope === "cjk"
+        ? CJK_FONT_NAMES
+        : this.#fontScope === "latin"
+          ? FONT_NAMES
+          : [...new Set([...CJK_FONT_NAMES, ...FONT_NAMES])];
+    listbox.replaceChildren(...names.map((name) => opt(name, name)));
+    pickLadder(this.fontSel, this.#state?.font ?? "");
   }
 
-  /** The listbox a dropdown's options live in. */
-  #listbox(sel: FluentDropdown | undefined): HTMLElement | null {
-    return sel?.querySelector("fluent-listbox") ?? null;
+  /** The scope dropdown's three entries; re-filled per language. */
+  #fillScopeCombo(): void {
+    const listbox = this.scopeSel?.querySelector("fluent-listbox");
+    if (!listbox) return;
+    listbox.replaceChildren(
+      opt(t("modifyStyleDialog.allFonts", this), "all"),
+      opt(t("modifyStyleDialog.cjkFonts", this), "cjk"),
+      opt(t("modifyStyleDialog.latinFonts", this), "latin"),
+    );
+    pick(this.scopeSel, this.#fontScope);
+  }
+
+  #fillCombos(): void {
+    const state = this.#state;
+    const listBoxes = [this.fontSel, this.sizeSel].map((s) => s?.querySelector("fluent-listbox"));
+    if (listBoxes.some((b) => !b)) return;
+    const [, sizeBox] = listBoxes;
+    this.#fillFontCombo();
+    const zh = resolveLang(this).toLowerCase().startsWith("zh");
+    const size = state?.size != null ? String(state.size) : "";
+    const ladder = [
+      ...(zh ? FONT_SIZES_CN.map(([name, pt]) => opt(`${name} (${pt})`, String(pt))) : []),
+      ...FONT_SIZES_PT.map((pt) => opt(String(pt), String(pt))),
+    ];
+    sizeBox!.replaceChildren(...ladder);
+    pickLadder(this.sizeSel, size);
   }
 
   /** The basedOn/next lists: every paragraph style, headed by a blank
@@ -393,7 +653,7 @@ class DocenModifyStyleDialog extends FASTElement {
     picked: string,
     blank: boolean,
   ): void {
-    const listbox = this.#listbox(sel);
+    const listbox = sel?.querySelector("fluent-listbox");
     if (!listbox) return;
     const options: HTMLElement[] = [];
     if (blank) options.push(opt(t("modifyStyleDialog.inherit", this), ""));
@@ -401,58 +661,134 @@ class DocenModifyStyleDialog extends FASTElement {
     if (picked && !options.some((o) => o.getAttribute("value") === picked))
       options.splice(blank ? 1 : 0, 0, opt(picked, picked));
     listbox.replaceChildren(...options);
-    pick(listbox, picked);
+    pick(sel, picked);
   }
 
-  #fillCombos(state: ModifyStyleState): void {
-    const listBoxes = [this.fontSel, this.sizeSel, this.colorSel].map((s) => this.#listbox(s));
-    if (listBoxes.some((b) => !b)) return;
-    const [fontBox, sizeBox, colorBox] = listBoxes;
-    const fontValue = state.font ?? "";
-    fontBox!.replaceChildren(
-      ...FONT_NAMES.map((name) => opt(name, name)),
-      ...(fontValue && !FONT_NAMES.includes(fontValue) ? [opt(fontValue, fontValue)] : []),
-    );
-    pick(fontBox, fontValue);
-    const zh = resolveLang(this).toLowerCase().startsWith("zh");
-    const size = state.size != null ? String(state.size) : "";
-    const ladder = [
-      ...(zh ? FONT_SIZES_CN.map(([name, pt]) => opt(`${name} (${pt})`, String(pt))) : []),
-      ...FONT_SIZES_PT.map((pt) => opt(String(pt), String(pt))),
-    ];
-    sizeBox!.replaceChildren(
-      ...ladder,
-      ...(size && !ladder.some((o) => o.getAttribute("value") === size) ? [opt(size, size)] : []),
-    );
-    pick(sizeBox, size);
-    colorBox!.replaceChildren(
-      opt(t("fontDialog.colorAuto", this), ""),
-      ...TEXT_COLORS.map(([hex, key]) => opt(t(`fontDialog.${key}`, this), hex)),
-    );
-    pick(colorBox, state.color ?? "");
+  /** Write a toggle button's Fluent-owned pressed state (the show-time seed;
+   *  a user click flips it directly and the click handlers read it back). */
+  #setPressed(el: HTMLElement | null | undefined, on: boolean): void {
+    if (el) (el as unknown as { pressed?: boolean }).pressed = on;
+  }
+
+  /** One single-pick toggle button (an icon or an inline SVG glyph). The
+   *  host owns `pressed`: FAST binds its own flip on connect, i.e. *after*
+   *  these listeners (bound pre-append), so its late flip would overwrite
+   *  the state this dialog just recorded. */
+  #iconToggle(icon: string, title: string, bars?: HTMLElement): HTMLElement {
+    const b = document.createElement("fluent-toggle-button");
+    b.className = "mini";
+    b.setAttribute("appearance", "subtle");
+    b.title = title;
+    (b as unknown as { press?: () => void }).press = () => {};
+    if (bars) b.append(bars);
+    else renderIcon(b, icon);
+    return b;
+  }
+
+  /** The three-bar line-spacing glyph — wider bar gaps read as the larger
+   *  multiple (Word's ladder icons). */
+  #barsSvg(path: string): HTMLElement {
+    const span = document.createElement("span");
+    span.innerHTML =
+      `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">` +
+      `<path d="${path}" fill="none" stroke="currentColor" stroke-width="1.3" ` +
+      `stroke-linecap="round"/></svg>`;
+    return span;
+  }
+
+  /** The paragraph row: alignment (single-pick icons) and line spacing
+   *  (single-pick three-bar glyphs). Indents and spacing have no inline
+   *  entries — they stay with the Format > Paragraph dialog. Rebuilt per
+   *  show() and per language. */
+  #buildParaRow(): void {
+    const row = this.paraRow;
+    if (!row) return;
+    row.replaceChildren();
+    // Alignment — one live single-pick group; the host flips `pressed` itself
+    // (press() is neutralized in #iconToggle, so this is the only writer).
+    for (const [value, icon, titleKey] of ALIGN_GROUP) {
+      const b = this.#iconToggle(icon, t(titleKey, this));
+      b.dataset.value = value;
+      this.#setPressed(b, this.#alignment === value);
+      b.addEventListener("click", () => {
+        const on = !((b as unknown as { pressed?: boolean }).pressed === true);
+        this.#setPressed(b, on);
+        for (const other of ALIGN_GROUP)
+          if (other[0] !== value)
+            this.#setPressed(row.querySelector(`[data-value="${other[0]}"]`), false);
+        this.#alignment = on ? value : null;
+      });
+      row.append(b);
+    }
+    row.append(this.#separator());
+    // Line spacing — the same single-pick semantics in line multiples.
+    for (const [value, path, titleKey] of LINE_GROUP) {
+      const b = this.#iconToggle("", t(titleKey, this), this.#barsSvg(path));
+      b.dataset.line = String(value);
+      this.#setPressed(b, this.#lineSpacing === value);
+      b.addEventListener("click", () => {
+        const on = !((b as unknown as { pressed?: boolean }).pressed === true);
+        this.#setPressed(b, on);
+        for (const other of LINE_GROUP)
+          if (other[0] !== value)
+            this.#setPressed(row.querySelector(`[data-line="${other[0]}"]`), false);
+        this.#lineSpacing = on ? value : null;
+      });
+      row.append(b);
+    }
+  }
+
+  #separator(): HTMLElement {
+    const sep = document.createElement("div");
+    sep.className = "sep";
+    return sep;
+  }
+
+  /** A properties-block label: the text spreads justified, the trailing
+   *  colon (any language) follows it unstretched. */
+  #propsLabel(el: HTMLElement | undefined, key: string): void {
+    if (!el) return;
+    const raw = t(key, this);
+    const match = raw.match(/^(.*?)([：:])\s*$/);
+    const fill = document.createElement("span");
+    fill.className = "fill";
+    fill.textContent = match ? match[1] : raw;
+    el.replaceChildren(fill, match ? match[2] : "");
   }
 
   #applyLabels(): void {
     if (this.dialogEl) this.dialogEl.heading = t("modifyStyleDialog.title", this);
-    if (this.nameLabel) this.nameLabel.textContent = t("modifyStyleDialog.name", this);
-    if (this.basedOnLabel) this.basedOnLabel.textContent = t("modifyStyleDialog.basedOn", this);
-    if (this.nextLabel) this.nextLabel.textContent = t("modifyStyleDialog.next", this);
-    if (this.fontLabel) this.fontLabel.textContent = t("fontDialog.font", this);
-    if (this.sizeLabel) this.sizeLabel.textContent = t("fontDialog.size", this);
-    if (this.colorLabel) this.colorLabel.textContent = t("modifyStyleDialog.color", this);
-    if (this.boldLabel) this.boldLabel.textContent = t("fontDialog.fsBold", this);
-    if (this.italicLabel) this.italicLabel.textContent = t("fontDialog.fsItalic", this);
-    if (this.underlineLabel) this.underlineLabel.textContent = t("fontDialog.underline", this);
+    if (this.propsLabel) this.propsLabel.textContent = t("modifyStyleDialog.props", this);
+    this.#propsLabel(this.nameLabel, "modifyStyleDialog.name");
+    this.#propsLabel(this.typeLabel, "modifyStyleDialog.type");
+    this.#propsLabel(this.basedOnLabel, "modifyStyleDialog.basedOn");
+    this.#propsLabel(this.nextLabel, "modifyStyleDialog.next");
+    if (this.formatLabel) this.formatLabel.textContent = t("modifyStyleDialog.formatSection", this);
+    this.#fillScopeCombo();
     if (this.previewLabel) this.previewLabel.textContent = t("modifyStyleDialog.preview", this);
-    if (this.formatBtn) this.formatBtn.textContent = t("modifyStyleDialog.format", this);
+    if (this.quickCheckLabel)
+      this.quickCheckLabel.textContent = t("modifyStyleDialog.quickGallery", this);
+    if (this.autoCheckLabel)
+      this.autoCheckLabel.textContent = t("modifyStyleDialog.autoUpdate", this);
+    if (this.scopeDocLabel) this.scopeDocLabel.textContent = t("modifyStyleDialog.scopeDoc", this);
+    if (this.scopeTemplateLabel)
+      this.scopeTemplateLabel.textContent = t("modifyStyleDialog.scopeTemplate", this);
+    if (this.formatBtnLabel) this.formatBtnLabel.textContent = t("modifyStyleDialog.format", this);
+    if (this.formatBtn && !this.formatBtn.querySelector(".fmt-caret")) {
+      const caret = document.createElement("span");
+      caret.className = "fmt-caret";
+      // The end slot makes the caret a host-level flex item — centered like
+      // the label (the default slot rides .content's inline baseline).
+      caret.slot = "end";
+      renderIcon(caret, "caret");
+      this.formatBtn.append(caret);
+    }
     if (this.okBtn) this.okBtn.textContent = t("options.ok", this);
     if (this.cancelBtn) this.cancelBtn.textContent = t("options.cancel", this);
     for (const sel of [this.basedOnSel, this.nextSel]) {
       const blank = sel?.querySelector("fluent-option");
       if (blank) blank.textContent = t("modifyStyleDialog.inherit", this);
     }
-    const auto = this.colorSel?.querySelector("fluent-option");
-    if (auto) auto.textContent = t("fontDialog.colorAuto", this);
   }
 }
 

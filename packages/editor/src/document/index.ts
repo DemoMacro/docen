@@ -24,8 +24,10 @@ import {
   parseDOCX,
   parseMarkdown,
   prepareDocument,
+  resolveFontName,
   type JSONContent,
   type SectionPropertiesOptions,
+  type StyleEntry,
   type StylesOptions,
 } from "@docen/docx";
 import type { Editor } from "@docen/docx/core";
@@ -236,6 +238,27 @@ const BUILT_IN_STYLE_KEYS: Readonly<Record<string, string>> = {
   quote: "styleName.quote",
   intensequote: "styleName.intenseQuote",
   listparagraph: "styleName.listParagraph",
+};
+
+/** The OOXML w:name each built-in style ships with — a style whose explicit
+ *  name differs (case-insensitively) was renamed and shows that name as-is;
+ *  the untouched defaults keep localizing. */
+const BUILT_IN_DEFAULT_NAMES: Readonly<Record<string, string>> = {
+  normal: "Normal",
+  heading1: "heading 1",
+  heading2: "heading 2",
+  heading3: "heading 3",
+  heading4: "heading 4",
+  heading5: "heading 5",
+  heading6: "heading 6",
+  heading7: "heading 7",
+  heading8: "heading 8",
+  heading9: "heading 9",
+  title: "Title",
+  subtitle: "Subtitle",
+  quote: "Quote",
+  intensequote: "Intense Quote",
+  listparagraph: "List Paragraph",
 };
 
 /** The style's run definition as the Font dialog's prefill (the Format >
@@ -969,7 +992,18 @@ class DocenDocument extends AddinHost<Editor> {
    *  (BUILT_IN_STYLE_KEYS), everything else shows the document's own name
    *  (the id as the fallback). */
   #styleDisplayName(id: string, name: unknown): string {
-    const builtin = BUILT_IN_STYLE_KEYS[id.toLowerCase()];
+    const key = id.toLowerCase();
+    const builtin = BUILT_IN_STYLE_KEYS[key];
+    // A renamed built-in (explicit name off the OOXML default) shows as-is;
+    // otherwise the built-in key localizes.
+    const def = BUILT_IN_DEFAULT_NAMES[key];
+    if (
+      def &&
+      typeof name === "string" &&
+      name.trim() &&
+      name.trim().toLowerCase() !== def.toLowerCase()
+    )
+      return name.trim();
     if (builtin) return t(builtin, this);
     return typeof name === "string" && name ? name : id;
   }
@@ -1120,25 +1154,94 @@ class DocenDocument extends AddinHost<Editor> {
     const style = byId.get(id);
     const run = (style?.run ?? {}) as Record<string, unknown>;
     const underline = run.underline as { type?: unknown } | undefined;
+    // The w:pPr block only exists on the paragraph side of the StyleEntry union.
+    const paragraph = (style as { paragraph?: Record<string, unknown> } | undefined)?.paragraph;
+    const spacing = (paragraph?.spacing ?? {}) as Record<string, unknown>;
+    const indent = (paragraph?.indent ?? {}) as Record<string, unknown>;
     const choices: StyleChoice[] = [...byId.entries()]
       .map(([cid, cs]) => ({ id: cid, name: this.#styleDisplayName(cid, cs.name) }))
       .sort((a, b) => a.name.localeCompare(b.name));
-    dialog.show({
+    const color = run.color as string | { val?: unknown } | undefined;
+    // The line buttons are multiples (240ths of a line); the atLeast/exact
+    // rules have no button and stay blank (the Paragraph dialog edits them).
+    const lineMultiple = spacing.lineRule == null || spacing.lineRule === "auto";
+    const state: ModifyStyleState = {
       id,
       name: this.#styleDisplayName(id, style?.name),
       choices,
       basedOn: (style?.basedOn as string | undefined) ?? null,
       next: (style?.next as string | undefined) ?? null,
-      font: typeof run.font === "string" ? run.font : null,
+      font: resolveFontName(run.font),
       size: typeof run.size === "number" ? run.size : null,
       bold: run.bold === true,
       italic: run.italic === true,
       underline: underline?.type != null,
-      color: typeof run.color === "string" ? run.color : null,
+      color: typeof color === "string" ? color : typeof color?.val === "string" ? color.val : null,
+      alignment: (paragraph?.alignment as string | undefined) ?? null,
+      lineSpacing: lineMultiple && typeof spacing.line === "number" ? spacing.line : null,
+      indentLeft: typeof indent.left === "number" ? indent.left : null,
+      indentRight: typeof indent.right === "number" ? indent.right : null,
+      spacingBefore: typeof spacing.before === "number" ? spacing.before : null,
+      spacingAfter: typeof spacing.after === "number" ? spacing.after : null,
+      quickFormat: (style as { quickFormat?: boolean } | undefined)?.quickFormat === true,
+      autoRedefine: (style as { autoRedefine?: boolean } | undefined)?.autoRedefine === true,
       // The gallery's merged effective run (basedOn chain + docDefaults) is
       // also the preview's formatting — same source, same CSS.
       previewCss: styleGalleryItems(styles).find((item) => item.value === id)?.preview?.css,
-    });
+    };
+    state.description = this.#styleDescription(state, byId);
+    dialog.show(state);
+  }
+
+  /** The description under the preview — the style's own definition read out
+   *  the way Word's description box does: the basedOn/next pointers, then the
+   *  comma list of the formatting this dialog edits. */
+  #styleDescription(state: ModifyStyleState, byId: Map<string, StyleEntry>): string {
+    const styleName = (sid: string | null): string | null => {
+      if (!sid) return null;
+      const entry = byId.get(sid);
+      return entry ? this.#styleDisplayName(sid, entry.name) : sid;
+    };
+    const lines: string[] = [];
+    const basedOn = styleName(state.basedOn);
+    const next = styleName(state.next);
+    if (basedOn) lines.push(`${t("modifyStyleDialog.basedOn", this)} ${basedOn}`);
+    if (next) lines.push(`${t("modifyStyleDialog.next", this)} ${next}`);
+    const parts: string[] = [];
+    if (state.font) parts.push(state.font);
+    if (state.size != null) parts.push(`${state.size} ${t("unit.pt", this)}`);
+    if (state.bold) parts.push(t("ribbon.cmd.bold", this));
+    if (state.italic) parts.push(t("ribbon.cmd.italic", this));
+    if (state.underline) parts.push(t("ribbon.cmd.underline", this));
+    if (state.color) parts.push(`#${state.color}`);
+    const alignKeys: Record<string, string> = {
+      center: "ribbon.cmd.align-center",
+      right: "ribbon.cmd.align-right",
+      both: "ribbon.cmd.justify",
+      left: "ribbon.cmd.align-left",
+    };
+    if (state.alignment) parts.push(t(alignKeys[state.alignment] ?? "ribbon.cmd.align-left", this));
+    const lineKeys: Record<number, string> = {
+      240: "modifyStyleDialog.lineSingle",
+      360: "modifyStyleDialog.line15",
+      480: "modifyStyleDialog.lineDouble",
+    };
+    if (state.lineSpacing != null) {
+      const key = lineKeys[state.lineSpacing];
+      parts.push(
+        key ? t(key, this) : `${state.lineSpacing / 240} ${t("modifyStyleDialog.lineTimes", this)}`,
+      );
+    }
+    if (state.spacingBefore != null)
+      parts.push(
+        `${t("modifyStyleDialog.before", this)} ${state.spacingBefore / 20} ${t("unit.pt", this)}`,
+      );
+    if (state.spacingAfter != null)
+      parts.push(
+        `${t("modifyStyleDialog.after", this)} ${state.spacingAfter / 20} ${t("unit.pt", this)}`,
+      );
+    if (parts.length) lines.push(parts.join(", "));
+    return lines.join("\n");
   }
 
   /** The Modify Style dialog's Format > Font/Paragraph — open that dialog in
