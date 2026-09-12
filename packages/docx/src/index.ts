@@ -86,5 +86,10 @@ export {
   type StyleEntry,
 } from "./style-cascade";
 
+// Preset geometry evaluator (ECMA-376 prstGeom → SVG path data), shared by the
+// layout projection (non-box shapes become path members) and the editor's
+// shapes gallery (live SVG previews) so both render from one evaluator.
+export { presetShapePaths, type PresetShapeOutline } from "./layout/geometry/preset-shape";
+
 // Types
 export type * from "./types";
