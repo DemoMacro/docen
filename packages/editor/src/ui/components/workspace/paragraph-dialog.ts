@@ -97,6 +97,11 @@ const styles = css`
     gap: 6px;
     cursor: pointer;
   }
+  /* The Indents-and-Spacing checkboxes span both grid columns (Word stacks
+     them full-width under the group they belong to). */
+  .check-span {
+    grid-column: 1 / -1;
+  }
   .hidden {
     display: none;
   }
@@ -194,6 +199,14 @@ const template = html<DocenParagraphDialog>`
           <label ${ref("specialValLabel")}></label>
           <docen-measure-input units="char pt mm cm in" ${ref("specialVal")}></docen-measure-input>
         </div>
+        <label class="check-field check-span">
+          <fluent-checkbox part="mirror-indents" ${ref("mirrorIndents")}></fluent-checkbox>
+          <span ${ref("mirrorIndentsLabel")}></span>
+        </label>
+        <label class="check-field check-span">
+          <fluent-checkbox part="adjust-right" ${ref("adjustRightInd")}></fluent-checkbox>
+          <span ${ref("adjustRightIndLabel")}></span>
+        </label>
         <div class="para-heading" ${ref("spacingHeading")}></div>
         <div class="field">
           <label ${ref("beforeLabel")}></label>
@@ -234,6 +247,14 @@ const template = html<DocenParagraphDialog>`
           <docen-measure-input no-unit ${ref("lineVal")}></docen-measure-input>
           <span class="unit" ${ref("ptF")}></span>
         </div>
+        <label class="check-field check-span">
+          <fluent-checkbox part="contextual-spacing" ${ref("contextualSpacing")}></fluent-checkbox>
+          <span ${ref("contextualSpacingLabel")}></span>
+        </label>
+        <label class="check-field check-span">
+          <fluent-checkbox part="snap-to-grid" ${ref("snapToGrid")}></fluent-checkbox>
+          <span ${ref("snapToGridLabel")}></span>
+        </label>
       </div>
 
       <div class="page hidden" ${ref("breaksPage")}>
@@ -319,6 +340,7 @@ const template = html<DocenParagraphDialog>`
       </div>
     </div>
     <div slot="action">
+      <fluent-button ${ref("defaultBtn")} @click="${(x) => x.applyAsDefault()}"></fluent-button>
       <fluent-button ${ref("cancelBtn")} @click="${(x) => x.hide()}"></fluent-button>
       <fluent-button
         appearance="accent"
@@ -343,8 +365,10 @@ type FluentDropdown = HTMLElement & { value: string | null };
  * (kinsoku/word-wrap/overflow punctuation, Asian auto-spacing, vertical text
  * alignment). The host prefills from the caret paragraph's attrs via
  * `show(attrs)`; OK emits `paragraph:ok` with a full {@link ParagraphDialogPatch}
- * for the host to stamp onto every selected paragraph (`paragraph-dialog-apply`).
- * Cancel / Esc just close. Rides on `<docen-dialog>` for the modal shell; all
+ * for the host to stamp onto every selected paragraph (`paragraph-dialog-apply`);
+ * Set As Default emits the same patch as `paragraph:default` (the host writes
+ * it onto the Normal style instead). Cancel / Esc just close. Rides on
+ * `<docen-dialog>` for the modal shell; all
  * drop-downs are `<fluent-dropdown>` comboboxes (the fixed option lists).
  */
 @customElement({ name: "docen-paragraph-dialog", template, styles })
@@ -380,6 +404,14 @@ class DocenParagraphDialog extends FASTElement {
   @observable lineDropdown?: FluentDropdown;
   @observable lineValLabel?: HTMLElement;
   @observable lineVal?: DocenMeasureInput;
+  @observable mirrorIndents?: FluentCheckbox;
+  @observable mirrorIndentsLabel?: HTMLElement;
+  @observable adjustRightInd?: FluentCheckbox;
+  @observable adjustRightIndLabel?: HTMLElement;
+  @observable snapToGrid?: FluentCheckbox;
+  @observable snapToGridLabel?: HTMLElement;
+  @observable contextualSpacing?: FluentCheckbox;
+  @observable contextualSpacingLabel?: HTMLElement;
   @observable pageBreaksHeading?: HTMLElement;
   @observable widow?: FluentCheckbox;
   @observable keepNext?: FluentCheckbox;
@@ -408,6 +440,7 @@ class DocenParagraphDialog extends FASTElement {
   @observable autoSpaceDNLabel?: HTMLElement;
   @observable textAlignLabel?: HTMLElement;
   @observable taDropdown?: FluentDropdown;
+  @observable defaultBtn?: HTMLElement;
   @observable okBtn?: HTMLElement;
   @observable cancelBtn?: HTMLElement;
   @observable ptF?: HTMLElement;
@@ -479,6 +512,10 @@ class DocenParagraphDialog extends FASTElement {
     this.#setMeasure(this.beforeInput, spacing.before, spacing.beforeLines, "line");
     this.#setMeasure(this.afterInput, spacing.after, spacing.afterLines, "line");
     this.#prefillLine(spacing);
+    this.#check(this.mirrorIndents, attrs.mirrorIndents, false);
+    this.#check(this.adjustRightInd, attrs.adjustRightInd, true);
+    this.#check(this.snapToGrid, attrs.snapToGrid, true);
+    this.#check(this.contextualSpacing, attrs.contextualSpacing, false);
     this.#check(this.widow, attrs.widowControl, true);
     this.#check(this.keepNext, attrs.keepNext, false);
     this.#check(this.keepLines, attrs.keepLines, false);
@@ -549,6 +586,22 @@ class DocenParagraphDialog extends FASTElement {
   /** Template-visible OK handler (FAST templates live outside the class, so a
    *  `#`-private method can't be referenced from the binding). */
   applyParagraph(): void {
+    const patch = this.#buildPatch();
+    if (!patch) return;
+    this.$emit("paragraph:ok", patch);
+    this.hide();
+  }
+
+  /** Set As Default — the same patch the OK button commits, but the host
+   *  stamps it onto the Normal style instead of the selection. */
+  applyAsDefault(): void {
+    const patch = this.#buildPatch();
+    if (!patch) return;
+    this.$emit("paragraph:default", patch);
+    this.hide();
+  }
+
+  #buildPatch(): ParagraphDialogPatch {
     // Comboboxes allow free typing, so an unmatched value falls back to the
     // Word default rather than stamping an unknown token.
     const alignment = String(this.alignDropdown?.value ?? "left");
@@ -581,6 +634,10 @@ class DocenParagraphDialog extends FASTElement {
         after: afterParts?.twips,
         afterLines: afterParts?.hundredths,
       },
+      mirrorIndents: this.mirrorIndents?.checked ?? false,
+      adjustRightInd: this.adjustRightInd?.checked ?? true,
+      snapToGrid: this.snapToGrid?.checked ?? true,
+      contextualSpacing: this.contextualSpacing?.checked ?? false,
       widowControl: this.widow?.checked ?? true,
       keepNext: this.keepNext?.checked ?? false,
       keepLines: this.keepLines?.checked ?? false,
@@ -624,8 +681,7 @@ class DocenParagraphDialog extends FASTElement {
       patch.spacing.line = Math.round((this.lineVal?.value ?? 0) * PT_TO_TWIPS);
       patch.spacing.lineRule = "exact";
     }
-    this.$emit("paragraph:ok", patch);
-    this.hide();
+    return patch;
   }
 
   /** Prefills a measure box: the char/line twin wins (the count is what the
@@ -717,6 +773,14 @@ class DocenParagraphDialog extends FASTElement {
     if (this.afterLabel) this.afterLabel.textContent = t("paragraph.after", this);
     if (this.lineLabel) this.lineLabel.textContent = t("paragraph.lineSpacing", this);
     if (this.lineValLabel) this.lineValLabel.textContent = t("paragraph.lineValue", this);
+    if (this.mirrorIndentsLabel)
+      this.mirrorIndentsLabel.textContent = t("paragraph.mirrorIndents", this);
+    if (this.adjustRightIndLabel)
+      this.adjustRightIndLabel.textContent = t("paragraph.adjustRightInd", this);
+    if (this.snapToGridLabel) this.snapToGridLabel.textContent = t("paragraph.snapToGrid", this);
+    if (this.contextualSpacingLabel)
+      this.contextualSpacingLabel.textContent = t("paragraph.contextualSpacing", this);
+    if (this.defaultBtn) this.defaultBtn.textContent = t("paragraph.setDefault", this);
     if (this.pageBreaksHeading)
       this.pageBreaksHeading.textContent = t("paragraph.pageBreaksHeading", this);
     if (this.widowLabel) this.widowLabel.textContent = t("paragraph.widowControl", this);

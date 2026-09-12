@@ -71,6 +71,7 @@ declare module "@tiptap/core" {
       "indent-decrease": () => ReturnType;
       "line-spacing": (mult?: string) => ReturnType;
       "paragraph-dialog-apply": (patch?: ParagraphDialogPatch) => ReturnType;
+      "paragraph-dialog-default": (patch?: ParagraphDialogPatch) => ReturnType;
       shading: (value?: unknown) => ReturnType;
       "font-color": (value?: unknown) => ReturnType;
       border: (side?: string) => ReturnType;
@@ -401,6 +402,11 @@ export interface ParagraphDialogPatch {
     line?: number;
     lineRule?: "auto" | "atLeast" | "exact";
   };
+  // The Indents-and-Spacing tab's grid/style checkboxes.
+  mirrorIndents: boolean;
+  adjustRightInd: boolean;
+  snapToGrid: boolean;
+  contextualSpacing: boolean;
   widowControl: boolean;
   keepNext: boolean;
   keepLines: boolean;
@@ -571,6 +577,36 @@ function withModifyStylePatch(
   if (patch.next) out.next = patch.next;
   else delete out.next;
   return JSON.parse(JSON.stringify(out)) as Record<string, unknown>;
+}
+
+/** The Paragraph dialog's patch as a style-definition paragraph block — the
+ *  "Set As Default" commit lands on the Normal style's w:pPr. Renames the two
+ *  engine-side keys the dialog patch spells differently. The indent/spacing
+ *  objects spread verbatim (their undefined slots ARE the clear semantics —
+ *  an absent key serializes no element, so the style inherits docDefaults). */
+function paragraphPatchAsStyleProps(patch: ParagraphDialogPatch): Record<string, unknown> {
+  return {
+    alignment: patch.alignment,
+    outlineLevel: patch.outlineLevel === null ? undefined : patch.outlineLevel,
+    indent: { ...patch.indent },
+    spacing: { ...patch.spacing },
+    mirrorIndents: patch.mirrorIndents,
+    adjustRightInd: patch.adjustRightInd,
+    snapToGrid: patch.snapToGrid,
+    contextualSpacing: patch.contextualSpacing,
+    widowControl: patch.widowControl,
+    keepNext: patch.keepNext,
+    keepLines: patch.keepLines,
+    pageBreakBefore: patch.pageBreakBefore,
+    suppressLineNumbers: patch.suppressLineNumbers,
+    suppressAutoHyphens: patch.suppressAutoHyphens,
+    kinsoku: patch.kinsoku,
+    wordWrap: patch.wordWrap,
+    overflowPunctuation: patch.overflowPunct,
+    autoSpaceDE: patch.autoSpaceDE,
+    autoSpaceEastAsianText: patch.autoSpaceDN,
+    textAlignment: patch.textAlignment,
+  };
 }
 
 /** HeadingLevel literals the style gallery recognizes as headings. */
@@ -2281,6 +2317,10 @@ export const DocumentCommands = Extension.create({
             attrs.outlineLevel = patch.outlineLevel ?? undefined;
             attrs.indent = { ...((attrs.indent ?? {}) as object), ...patch.indent };
             attrs.spacing = { ...((attrs.spacing ?? {}) as object), ...patch.spacing };
+            attrs.mirrorIndents = patch.mirrorIndents;
+            attrs.adjustRightInd = patch.adjustRightInd;
+            attrs.snapToGrid = patch.snapToGrid;
+            attrs.contextualSpacing = patch.contextualSpacing;
             attrs.widowControl = patch.widowControl;
             attrs.keepNext = patch.keepNext;
             attrs.keepLines = patch.keepLines;
@@ -2297,6 +2337,37 @@ export const DocumentCommands = Extension.create({
             touched = true;
           }
           return touched;
+        },
+      // The Paragraph dialog's Set As Default — the committed patch becomes
+      // the Normal style's paragraph definition, so every paragraph that
+      // doesn't override it (today's and future ones) picks the values up
+      // through the style chain. Same explicit-entry rule as modify-style:
+      // patch the paragraphStyles entry when Normal has one, else the
+      // built-in defaults slot.
+      "paragraph-dialog-default":
+        (patch) =>
+        ({ tr }) => {
+          if (!patch) return false;
+          const paragraph = paragraphPatchAsStyleProps(patch);
+          const styles = { ...((tr.doc.attrs.styles ?? {}) as Record<string, unknown>) };
+          const list = ((styles.paragraphStyles ?? []) as Record<string, unknown>[]).slice();
+          const defaults = { ...((styles.default ?? {}) as Record<string, unknown>) };
+          const at = list.findIndex((s) => s.id === "Normal");
+          if (at >= 0) {
+            const entry = { ...list[at] };
+            entry.paragraph = { ...((entry.paragraph ?? {}) as object), ...paragraph };
+            list[at] = entry;
+            styles.paragraphStyles = list;
+            delete defaults.normal;
+          } else {
+            const entry = { ...((defaults.normal ?? {}) as Record<string, unknown>) };
+            if (entry.name === undefined) entry.name = "Normal";
+            entry.paragraph = { ...((entry.paragraph ?? {}) as object), ...paragraph };
+            defaults.normal = entry;
+          }
+          styles.default = defaults;
+          tr.step(new DocAttrStep("styles", styles));
+          return true;
         },
       // Shading follows Word's selection split: a text selection paints only
       // the selected runs (character shading via the textStyle mark); a bare

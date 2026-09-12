@@ -76,6 +76,15 @@ export class DialogCommands {
     target?.commands["paragraph-dialog-apply"]?.(patch);
   };
 
+  /** Paragraph dialog's Set As Default — write the patch onto the Normal
+   *  style, so every paragraph inheriting it picks the values up. */
+  readonly onParagraphDefault = (event: CustomEvent<ParagraphDialogPatch | undefined>): void => {
+    const patch = event.detail;
+    if (!patch) return;
+    const target = this.#target();
+    target?.commands["paragraph-dialog-default"]?.(patch);
+  };
+
   // The Font dialog's OK — the patch is the selection's absolute run state
   // (Office commits the dialog atomically): everything lands in ONE chained
   // transaction, so a single undo reverts the whole dialog. (Separate

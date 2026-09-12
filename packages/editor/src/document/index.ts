@@ -171,6 +171,30 @@ const LAYOUT_SLICE_MS = 12;
  *  bare-click stroke deferral both track the system double-click time. */
 const PAINTER_DOUBLE_CLICK_MS = 500;
 
+/** Scalar paragraph properties the Paragraph dialog consumes — the slots the
+ *  prefill cascade picks up from the style chain and docDefaults when the
+ *  paragraph's own attrs leave them unset. Mirrors the dialog's patch keys. */
+const PARAGRAPH_FLAG_KEYS = [
+  "alignment",
+  "outlineLevel",
+  "mirrorIndents",
+  "adjustRightInd",
+  "snapToGrid",
+  "contextualSpacing",
+  "widowControl",
+  "keepNext",
+  "keepLines",
+  "pageBreakBefore",
+  "suppressLineNumbers",
+  "suppressAutoHyphens",
+  "kinsoku",
+  "wordWrap",
+  "overflowPunct",
+  "autoSpaceDE",
+  "autoSpaceDN",
+  "textAlignment",
+] as const;
+
 /** The projection half's output — the flow inputs both the synchronous drain
  *  and the incremental walk lay. */
 interface ProjectedFlowInputs {
@@ -1474,6 +1498,11 @@ class DocenDocument extends AddinHost<Editor> {
       "paragraph:ok",
       this.#dialogs.onParagraphOk as EventListener,
     );
+    // Paragraph dialog's Set As Default — the patch lands on the Normal style.
+    this.shadowRoot!.querySelector("docen-paragraph-dialog")?.addEventListener(
+      "paragraph:default",
+      this.#dialogs.onParagraphDefault as EventListener,
+    );
     // Page Setup dialog — write the committed geometry into the current
     // section (the Custom Margins / More Paper Sizes entries open it).
     this.shadowRoot!.querySelector("docen-page-setup-dialog")?.addEventListener(
@@ -2333,6 +2362,9 @@ class DocenDocument extends AddinHost<Editor> {
     this.shadowRoot
       ?.querySelector("docen-paragraph-dialog")
       ?.removeEventListener("paragraph:ok", this.#dialogs.onParagraphOk as EventListener);
+    this.shadowRoot
+      ?.querySelector("docen-paragraph-dialog")
+      ?.removeEventListener("paragraph:default", this.#dialogs.onParagraphDefault as EventListener);
     this.shadowRoot
       ?.querySelector("docen-paste-special-dialog")
       ?.removeEventListener("paste-special:ok", this.#onPasteSpecialOk as EventListener);
@@ -4826,6 +4858,13 @@ class DocenDocument extends AddinHost<Editor> {
                 ...(typeof direct === "object" && direct ? direct : {}),
               }
             : direct;
+        }
+        // Scalar paragraph flags cascade the same way: a null attrs slot is the
+        // schema's "unset", so an explicit value on the style chain or in
+        // docDefaults must win over the dialog's spec-default fallback.
+        for (const key of PARAGRAPH_FLAG_KEYS) {
+          const direct = attrs[key];
+          effective[key] = direct ?? chain?.[key] ?? ddParagraph[key];
         }
         (
           this.shadowRoot?.querySelector("docen-paragraph-dialog") as {
