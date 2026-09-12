@@ -41,6 +41,23 @@ function effectiveView(markup: MarkupDisplay | undefined, mark: Rec): "all" | "n
   return author !== "" && authors.includes(author) ? view : "none";
 }
 
+/** Memo for complex-field result XML tokenization, keyed by the verbatim
+ *  string. The projection re-runs per transaction and a TOC-dense document
+ *  re-tokenizes the same cached results every keystroke; the XML only changes
+ *  when the field updates. Cleared wholesale at the cap — distinct result
+ *  strings per document are few. */
+const FIELD_TOKEN_CACHE_CAP = 64;
+const fieldTokenCache = new Map<string, string[]>();
+
+function fieldResultTokens(xml: string): string[] {
+  const cached = fieldTokenCache.get(xml);
+  if (cached) return cached;
+  if (fieldTokenCache.size >= FIELD_TOKEN_CACHE_CAP) fieldTokenCache.clear();
+  const tokens = xml.match(/<w:(fldChar|instrText|tab|t)\b[^>]*(?:\/>|>([\s\S]*?)<\/w:\1>)/g) ?? [];
+  fieldTokenCache.set(xml, tokens);
+  return tokens;
+}
+
 /** A footnote/endnote reference's note id — the bare number form (`{
  *  footnoteReference: 1 }` / `{ endnoteReference: 1 }`) or the option object
  *  form (`{ id }`); anything else is not one. */
@@ -169,6 +186,7 @@ export function projectRuns(
   };
   const pushText = (text: string, rPr: Rec): void => {
     if (!text) return;
+    // Read per atom — openComments mutates as the walk opens/closes ranges.
     const commentIds =
       openComments && openComments.size > 0 ? [...openComments].sort((a, b) => a - b) : undefined;
     // Two-lines-in-one (双行合一 / 合并字符): the run packs into two
@@ -211,8 +229,7 @@ export function projectRuns(
   const pushFieldResultRuns = (xml: string, rPr: Rec): void => {
     // Stack of nested fields, each "instr" until its separate, then "result".
     const stack: ("instr" | "result")[] = [];
-    const tokens =
-      xml.match(/<w:(fldChar|instrText|tab|t)\b[^>]*(?:\/>|>([\s\S]*?)<\/w:\1>)/g) ?? [];
+    const tokens = fieldResultTokens(xml);
     for (const tk of tokens) {
       if (tk.startsWith("<w:fldChar")) {
         const type = /w:fldCharType="(\w+)"/.exec(tk)?.[1];

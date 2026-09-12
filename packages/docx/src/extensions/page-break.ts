@@ -1,4 +1,5 @@
 import type { ParagraphChild } from "@office-open/docx";
+import type { Node as PMNode } from "@tiptap/pm/model";
 import { Plugin, TextSelection } from "@tiptap/pm/state";
 
 import { Node } from "../core";
@@ -56,26 +57,54 @@ export const PageBreak = Node.create({
       new Plugin({
         appendTransaction: (transactions, _oldState, newState) => {
           if (!transactions.some((tr) => tr.docChanged)) return null;
+          // Only textblocks touching a changed range can hold a newly-landed
+          // trailing pageBreak — a whole-document rescan per transaction is
+          // wasted work on large docs. Each step's [fromB, toB) is mapped
+          // through its transaction's remaining steps, then forward through
+          // every later transaction, landing in newState coordinates. A join
+          // (paragraph merge) reports the boundary position, so ±1 pulls the
+          // merged textblock into the scan.
           const doc = newState.doc;
+          const ranges: { from: number; to: number }[] = [];
+          for (let t = 0; t < transactions.length; t++) {
+            const tr = transactions[t];
+            if (!tr.docChanged) continue;
+            for (let i = 0; i < tr.mapping.maps.length; i++) {
+              const rest = tr.mapping.slice(i + 1);
+              tr.mapping.maps[i].forEach((_fromA, _toA, fromB, toB) => {
+                let from = rest.map(fromB, -1);
+                let to = rest.map(toB, 1);
+                for (let j = t + 1; j < transactions.length; j++) {
+                  if (!transactions[j].docChanged) continue;
+                  from = transactions[j].mapping.map(from, -1);
+                  to = transactions[j].mapping.map(to, 1);
+                }
+                ranges.push({ from, to });
+              });
+            }
+          }
           const tr = newState.tr;
-          const splits: number[] = [];
-          doc.descendants((node, pos) => {
-            if (!node.isTextblock) return;
+          const splits = new Set<number>();
+          const scan = (node: PMNode, pos: number): boolean => {
+            if (!node.isTextblock) return true;
             const last = node.childCount - 1;
             node.forEach((child, offset, index) => {
               if (child.type.name === "pageBreak" && index < last) {
                 // `pos` is the paragraph's start (before <p>); content begins at
                 // pos+1, so the doc position right after this pageBreak atom is
                 // pos + 1 + offset + nodeSize.
-                splits.push(pos + 1 + offset + child.nodeSize);
+                splits.add(pos + 1 + offset + child.nodeSize);
               }
             });
             return false;
-          });
-          if (splits.length === 0) return null;
+          };
+          for (const { from, to } of ranges) {
+            doc.nodesBetween(Math.max(0, from - 1), Math.min(doc.content.size, to + 1), scan);
+          }
+          if (splits.size === 0) return null;
           // Split from the end backward so earlier positions stay valid.
-          splits.sort((a, b) => b - a);
-          for (const splitPos of splits) tr.split(splitPos, 1);
+          const ordered = [...splits].sort((a, b) => b - a);
+          for (const splitPos of ordered) tr.split(splitPos, 1);
           tr.setSelection(newState.selection.map(tr.doc, tr.mapping));
           return tr;
         },

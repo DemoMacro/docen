@@ -36,20 +36,36 @@ export function pStyleIdFromKey(key: string): string {
  *  type="paragraph") — the implicit style applied to every paragraph WITHOUT an
  *  explicit pStyle. OOXML renders a pStyle-less paragraph as this style (usually
  *  "Normal"). Searched in `paragraphStyles` and the built-in named styles nested
- *  under `default` (key → pStyle id). null when the document declares none. */
+ *  under `default` (key → pStyle id). null when the document declares none.
+ *  WeakMap-cached per styles object like the indexes — the projection asks for
+ *  the default style of every pStyle-less paragraph, per transaction. */
+const defaultParagraphStyleCache = new WeakMap<StylesOptions, string | null>();
+
 export function defaultParagraphStyleId(styles: StylesOptions | null | undefined): string | null {
   if (!styles) return null;
+  const cached = defaultParagraphStyleCache.get(styles);
+  if (cached !== undefined) return cached;
+  let result: string | null = null;
   for (const ps of styles.paragraphStyles ?? []) {
     // `default` (w:default="1") is on the runtime shape but not the public
     // StyleOptions type — read it loosely.
-    if ((ps as { default?: boolean }).default) return ps.id;
+    if ((ps as { default?: boolean }).default) {
+      result = ps.id;
+      break;
+    }
   }
-  const defaults = styles.default as unknown as Record<string, StyleEntry | undefined>;
-  for (const [key, style] of Object.entries(defaults ?? {})) {
-    if (key === "document" || !style) continue;
-    if ((style as { default?: boolean }).default) return pStyleIdFromKey(key);
+  if (result === null) {
+    const defaults = styles.default as unknown as Record<string, StyleEntry | undefined>;
+    for (const [key, style] of Object.entries(defaults ?? {})) {
+      if (key === "document" || !style) continue;
+      if ((style as { default?: boolean }).default) {
+        result = pStyleIdFromKey(key);
+        break;
+      }
+    }
   }
-  return null;
+  defaultParagraphStyleCache.set(styles, result);
+  return result;
 }
 
 /** Build an id → style-entry index over every paragraph style: the explicit
