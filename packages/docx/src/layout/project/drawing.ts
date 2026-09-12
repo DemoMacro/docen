@@ -368,6 +368,19 @@ function wpsMemberOf(
       const block = projectParagraph(p as BodyParagraph, ctx);
       if (block) blocks.push(block);
     }
+    // A non-box preset paints its evaluated silhouette instead of the plain
+    // rectangle (Word's prstGeom under the body). The fill layers merge into
+    // one d (a donut's subpaths share the fill); with none, the stroke-only
+    // preset carries its outline path (line, arc).
+    const outlines =
+      preset && preset !== "rect" && preset !== "roundRect" && preset !== "ellipse"
+        ? presetShapePaths(preset, width, height, adjustments)
+        : undefined;
+    const silhouette = outlines
+      ? (outlines.some((o) => o.fill) ? outlines.filter((o) => o.fill) : outlines)
+          .map((o) => o.d)
+          .join(" ")
+      : undefined;
     return [
       {
         kind: "textBox",
@@ -380,6 +393,7 @@ function wpsMemberOf(
         // when the body is empty (Word's plain text box). The preset travels
         // with it: a text-carrying ellipse paints as an ellipse.
         ...(preset ? { preset } : {}),
+        ...(silhouette ? { d: silhouette } : {}),
         ...(fill ? { fill } : {}),
         ...(line
           ? {

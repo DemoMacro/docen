@@ -495,6 +495,9 @@ function paintShapeBox(
     width: number;
     height: number;
     preset?: string;
+    /** The preset's evaluated silhouette (SVG path d) — paints instead of
+     *  the plain rectangle when present (a non-box shape carrying text). */
+    d?: string;
     fill?: string;
     opacity?: number;
     line?: LayoutDrawingLine | { px: number; color?: string; dash?: string };
@@ -502,6 +505,29 @@ function paintShapeBox(
   },
   rectFallback: boolean,
 ): void {
+  // An evaluated silhouette beats the box fallbacks — a star carrying text
+  // is a star, not a rectangle behind the text.
+  if (box.d) {
+    tree.add(
+      new LeaferPath({
+        x: box.x,
+        y: box.y,
+        width: box.width,
+        height: box.height,
+        path: box.d,
+        fill: box.fill
+          ? box.opacity != null
+            ? rgbaOf(box.fill, box.opacity)
+            : `#${box.fill}`
+          : undefined,
+        ...strokePropsOf(box.line),
+        strokeAlign: "center",
+        windingRule: "nonzero",
+        ...shadowEffectOf(box.shadow),
+      }),
+    );
+    return;
+  }
   if (
     box.preset != null &&
     box.preset !== "rect" &&

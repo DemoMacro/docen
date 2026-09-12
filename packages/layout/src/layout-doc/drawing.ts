@@ -129,6 +129,10 @@ export type LayoutDrawingMember =
       /** Preset geometry (a:prstGeom @prst) — a txbx can live in any shape
        *  (a text-carrying ellipse); the box paints in that shape. */
       preset?: string;
+      /** The preset's evaluated silhouette (SVG path d, page-local 0..w×0..h).
+       *  A non-box preset paints this outline instead of the plain rectangle
+       *  (fill-layer paths merged; a stroke-only preset carries its path). */
+      d?: string;
       /** Text insets px (wps:bodyPr lIns/tIns/rIns/bIns, DrawingML defaults
        *  applied by the adapter). */
       insets?: { left?: number; top?: number; right?: number; bottom?: number };
