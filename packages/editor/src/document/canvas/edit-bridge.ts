@@ -21,7 +21,7 @@ import {
   type JSONContent,
 } from "@docen/docx";
 import { Editor } from "@docen/docx/core";
-import type { FlowPage } from "@docen/layout";
+import { EMU_PER_PX, type FlowPage } from "@docen/layout";
 import paintBrushSvg from "@fluentui/svg-icons/icons/paint_brush_24_regular.svg?raw";
 import { UndoRedo } from "@tiptap/extensions";
 import {
@@ -228,6 +228,23 @@ export interface EditBridgeOptions {
   /** The format painter's armed state (Home → Format Painter) — owns the
    *  cursor (Word's brush I-beam) until the paint lands or Esc disarms. */
   formatPaint?: () => boolean;
+  /** The Shapes drawer's armed preset (Insert → Shapes gallery pick), or null
+   *  when disarmed. While armed, page presses drag a ghost rectangle instead
+   *  of selecting (Word's drag-to-draw); the drawer stays armed across draws. */
+  shapeDraw?: () => string | null;
+  /** A finished draw — the ghost rectangle in page-local semantic px (already
+   *  clamped to the page; a bare click arrives as the default-size rect
+   *  centered on the press). The host inserts the preset there; the drawer
+   *  stays armed (Word's continuous draw). */
+  applyShapeDraw?: (rect: {
+    page: number;
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    flipH?: boolean;
+    flipV?: boolean;
+  }) => void;
   /** The Markdown input mode (Options → Markdown input). While on, the typed
    *  leg applies the markdown block/inline conversions before autocorrect
    *  sees the character. Read per keystroke, so the toggle lands mid-session. */
@@ -1163,6 +1180,65 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
   let borderSweep: Map<string, { pos: number; side: "top" | "bottom" | "left" | "right" }> | null =
     null;
 
+  // Shapes-drawer ghost (Insert → Shapes, armed): a page press floats a
+  // rectangle that follows the pointer, release inserts the preset at it.
+  // The press page's frame is pinned as its offset from the input host —
+  // a drag crossing the page edge stays on the press page (clamped), like
+  // Word's draw; the offset stays valid while the surface scrolls.
+  const shapeGhostEl = document.createElement("div");
+  shapeGhostEl.style.cssText =
+    "position:absolute;display:none;pointer-events:none;z-index:30;" +
+    "border:1px solid var(--docen-color-primary, #2b579a);" +
+    "background:rgba(43,87,154,0.06);";
+  // Line presets (line, straightConnector1) track the pointer as a segment,
+  // not a rect — Word's pencil for the Lines group.
+  const shapeLineEl = document.createElement("div");
+  shapeLineEl.style.cssText =
+    "position:absolute;display:none;pointer-events:none;z-index:30;height:0;" +
+    "border-top:2px solid var(--docen-color-primary, #2b579a);transform-origin:0 0;";
+  let shapeGhost: {
+    page: number;
+    fx: number;
+    fy: number;
+    fw: number;
+    fh: number;
+    scale: number;
+    sx: number;
+    sy: number;
+    /** The press point in page-local semantic px — the ghost's anchor. */
+    ax: number;
+    ay: number;
+    moved: boolean;
+    /** Line presets ghost a segment anchored at the press, not a rect. */
+    line: boolean;
+  } | null = null;
+  const hideShapeGhost = (): void => {
+    shapeGhostEl.style.display = "none";
+    shapeLineEl.style.display = "none";
+  };
+  /** Paint the ghost at a page-local semantic px rect. */
+  const showShapeGhost = (x: number, y: number, w: number, h: number): void => {
+    const g = shapeGhost;
+    if (!g) return;
+    shapeGhostEl.style.left = `${g.fx + x * g.scale}px`;
+    shapeGhostEl.style.top = `${g.fy + y * g.scale}px`;
+    shapeGhostEl.style.width = `${w * g.scale}px`;
+    shapeGhostEl.style.height = `${h * g.scale}px`;
+    shapeGhostEl.style.display = "block";
+  };
+  /** Paint the line ghost as the segment press → pointer. */
+  const showShapeGhostLine = (x1: number, y1: number): void => {
+    const g = shapeGhost;
+    if (!g) return;
+    const dx = (x1 - g.ax) * g.scale;
+    const dy = (y1 - g.ay) * g.scale;
+    shapeLineEl.style.left = `${g.fx + g.ax * g.scale}px`;
+    shapeLineEl.style.top = `${g.fy + g.ay * g.scale}px`;
+    shapeLineEl.style.width = `${Math.hypot(dx, dy)}px`;
+    shapeLineEl.style.transform = `rotate(${(Math.atan2(dy, dx) * 180) / Math.PI}deg)`;
+    shapeLineEl.style.display = "block";
+  };
+
   // Drag auto-scroll (Word): a drag resting in the scroll container's
   // top/bottom edge hot zone keeps the document scrolling so the selection
   // reaches content outside the viewport — without it the last line below
@@ -1270,6 +1346,11 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
   // furniture story deactivates the body's objects, so their cursors go
   // with it (the story's own links keep the hand).
   const applyCursor = (event: MouseEvent): void => {
+    // The armed Shapes drawer owns the cursor outright (Word's fine-plus).
+    if (!story && opts.shapeDraw?.()) {
+      opts.host.style.cursor = "crosshair";
+      return;
+    }
     // The armed painter owns the cursor: crosshair for the pen, the dense
     // cell cross for the eraser (Word's pencil/eraser, CSS-native), the
     // brush I-beam for the format painter.
@@ -1324,6 +1405,25 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
   };
 
   const onMouseMove = (event: MouseEvent): void => {
+    if (shapeGhost) {
+      const g = shapeGhost;
+      if (!g.moved && Math.hypot(event.clientX - g.sx, event.clientY - g.sy) < 3) return;
+      g.moved = true;
+      // Pointer → page-local semantic px on the pinned press page, clamped.
+      const px = Math.min(Math.max(g.ax + (event.clientX - g.sx) / g.scale, 0), g.fw / g.scale);
+      const py = Math.min(Math.max(g.ay + (event.clientY - g.sy) / g.scale, 0), g.fh / g.scale);
+      if (g.line) {
+        showShapeGhostLine(px, py);
+      } else {
+        showShapeGhost(
+          Math.min(g.ax, px),
+          Math.min(g.ay, py),
+          Math.abs(px - g.ax),
+          Math.abs(py - g.ay),
+        );
+      }
+      return;
+    }
     if (borderSweep) {
       const hit = story ? null : hitPage(event.clientX, event.clientY);
       const edges = hit ? main.map?.tableEdgeAt(hit.page, hit.lx, hit.ly) : null;
@@ -1353,7 +1453,71 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     const head = posAtClient(event.clientX, event.clientY, true);
     if (head != null) setDragSelection(dragAnchor, head);
   };
-  const onMouseUp = (): void => {
+  const onMouseUp = (event: MouseEvent): void => {
+    if (shapeGhost) {
+      const g = shapeGhost;
+      shapeGhost = null;
+      hideShapeGhost();
+      const px = Math.min(Math.max(g.ax + (event.clientX - g.sx) / g.scale, 0), g.fw / g.scale);
+      const py = Math.min(Math.max(g.ay + (event.clientY - g.sy) / g.scale, 0), g.fh / g.scale);
+      let rect: {
+        page: number;
+        x: number;
+        y: number;
+        w: number;
+        h: number;
+        flipH?: boolean;
+        flipV?: boolean;
+      };
+      if (g.moved && (Math.abs(px - g.ax) >= 1 || Math.abs(py - g.ay) >= 1)) {
+        rect = {
+          page: g.page,
+          x: Math.min(g.ax, px),
+          y: Math.min(g.ay, py),
+          w: Math.abs(px - g.ax),
+          h: Math.abs(py - g.ay),
+          ...(g.line
+            ? {
+                // The preset path runs corner to corner from the top-left;
+                // a segment dragged the other way mirrors it.
+                ...(px < g.ax ? { flipH: true } : {}),
+                ...(py < g.ay ? { flipV: true } : {}),
+              }
+            : {}),
+        };
+      } else if (g.line) {
+        // A bare click on a line preset: Word's default 2" horizontal rule
+        // starting at the press point (no second endpoint).
+        rect = {
+          page: g.page,
+          x: Math.min(
+            Math.max(g.ax - 1828800 / EMU_PER_PX / 2, 0),
+            Math.max(g.fw / g.scale - 1828800 / EMU_PER_PX, 0),
+          ),
+          y: g.ay,
+          w: 1828800 / EMU_PER_PX,
+          h: 0,
+        };
+      } else {
+        // A bare click: Word's default 2"×1.2" centered on the press.
+        const w = 1828800 / EMU_PER_PX;
+        const h = 1097280 / EMU_PER_PX;
+        rect = {
+          page: g.page,
+          x: Math.min(Math.max(g.ax - w / 2, 0), Math.max(g.fw / g.scale - w, 0)),
+          y: Math.min(Math.max(g.ay - h / 2, 0), Math.max(g.fh / g.scale - h, 0)),
+          w,
+          h,
+        };
+      }
+      // Anchor the run: the caret drops at the press point first (the
+      // floating offset is page-absolute — the anchor only picks the
+      // paragraph, and the story the press belongs to).
+      const pos = posAtClient(g.sx, g.sy, true);
+      if (pos != null) setSel(pos);
+      opts.applyShapeDraw?.(rect);
+      return;
+    }
     if (borderSweep) {
       const sides = [...borderSweep.values()];
       borderSweep = null;
@@ -1528,6 +1692,35 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       ta.focus();
       ta.value = "";
       return;
+    }
+    // The armed Shapes drawer is the shallowest press (Word's drag-to-draw):
+    // a left press on a page starts a ghost rectangle; every selection chain
+    // below waits until the drawer is disarmed. Stays armed across draws.
+    const drawPreset = event.button === 0 ? opts.shapeDraw?.() : null;
+    if (drawPreset && hit) {
+      const frame = opts.pageHost?.(hit.page);
+      if (frame) {
+        const fr = frame.getBoundingClientRect();
+        const inputRect = opts.inputHost.getBoundingClientRect();
+        const scale = opts.scale?.() ?? 1;
+        shapeGhost = {
+          page: hit.page,
+          fx: fr.left - inputRect.left,
+          fy: fr.top - inputRect.top,
+          fw: fr.width,
+          fh: fr.height,
+          scale,
+          sx: event.clientX,
+          sy: event.clientY,
+          ax: hit.lx,
+          ay: hit.ly,
+          moved: false,
+          line: drawPreset === "line" || drawPreset === "straightConnector1",
+        };
+        ta.focus();
+        ta.value = "";
+        return;
+      }
     }
     const clicks = clickCount(
       event,
@@ -2750,6 +2943,8 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
   ta.addEventListener("copy", onCopy);
   ta.addEventListener("cut", onCut);
   opts.inputHost.append(ta);
+  opts.inputHost.append(shapeGhostEl);
+  opts.inputHost.append(shapeLineEl);
 
   return {
     editor,
@@ -2919,6 +3114,8 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       pooledPlace(spellingPool, [], {});
       ta.remove();
       caret.remove();
+      shapeGhostEl.remove();
+      shapeLineEl.remove();
     },
   };
 }

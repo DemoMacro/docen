@@ -40,6 +40,7 @@ import {
 } from "@docen/docx/layout";
 import {
   browserFontMetrics,
+  EMU_PER_PX,
   layoutFlowSections,
   layoutSectionsIncremental,
   TextMeasurer,
@@ -518,6 +519,12 @@ class DocenDocument extends AddinHost<Editor> {
   #borderErase = false;
   #borderPaintKeyOff?: () => void;
 
+  /** Insert → Shapes: the armed preset token (null = disarmed). While armed
+   *  the canvas presses drag a ghost rectangle and insert the preset at it
+   *  (Word's drag-to-draw); Esc disarms, draws keep it armed. */
+  #armedShape: string | null = null;
+  #armedShapeKeyOff?: () => void;
+
   /** The underlying Tiptap Editor (undefined before connect / after disconnect).
    *  Exposed so a host (the @docen/vue adapter, or any parent element) can drive
    *  commands programmatically — setContent / getJSON / chain / ... — without
@@ -789,6 +796,9 @@ class DocenDocument extends AddinHost<Editor> {
     }
     const editor = this.#bridge?.activeEditor() ?? this.editor;
     if (!editor) return;
+    // One canvas tool at a time — arming this brush puts the others down.
+    this.#stopShapeDrawing();
+    this.#stopBorderPainting();
     // Probe one character in: $from sits on the boundary, and
     // ResolvedPos.marks() reads the character BEFORE the position — the first
     // selected (or caret-following) character's marks (e.g. bold stamped on
@@ -910,6 +920,9 @@ class DocenDocument extends AddinHost<Editor> {
    *  sweep table edges until Esc or a re-click disarms (the keydown follows
    *  the format painter's arm-while-armed lifecycle). */
   #armBorderPainter(erase: boolean): void {
+    // One canvas tool at a time — arming this brush puts the others down.
+    this.#stopShapeDrawing();
+    this.#stopFormatPainter();
     this.#borderPainting = true;
     this.#borderErase = erase;
     const onKey = (event: Event): void => {
@@ -924,6 +937,31 @@ class DocenDocument extends AddinHost<Editor> {
     this.#borderErase = false;
     this.#borderPaintKeyOff?.();
     this.#borderPaintKeyOff = undefined;
+  }
+
+  /** Arm the Shapes drawer (Insert → Shapes pick): the next canvas press
+   *  draws and disarms. The keydown captures — before a draw an Escape only
+   *  means "put the pencil down", not the bridge's selection Escapes
+   *  underneath. */
+  #armShapeDrawer(preset: string): void {
+    // One canvas tool at a time — arming the drawer puts the brushes down.
+    this.#stopFormatPainter();
+    this.#stopBorderPainting();
+    this.#armedShape = preset;
+    const onKey = (event: Event): void => {
+      if ((event as KeyboardEvent).key === "Escape") {
+        event.stopPropagation();
+        this.#stopShapeDrawing();
+      }
+    };
+    this.addEventListener("keydown", onKey, true);
+    this.#armedShapeKeyOff = () => this.removeEventListener("keydown", onKey, true);
+  }
+
+  #stopShapeDrawing(): void {
+    this.#armedShape = null;
+    this.#armedShapeKeyOff?.();
+    this.#armedShapeKeyOff = undefined;
   }
 
   /** Mirror the font name / size and paragraph style at the caret into the
@@ -1522,6 +1560,16 @@ class DocenDocument extends AddinHost<Editor> {
       // the pen merged from the host's pen state.
       borderPaint: () => ({ active: this.#borderPainting, eraser: this.#borderErase }),
       formatPaint: () => this.hasAttribute("format-painter"),
+      // The Shapes drawer (Insert → Shapes): the armed preset rides the ghost
+      // drag; the commit lands the shape run at the rect (page-local px).
+      shapeDraw: () => this.#armedShape,
+      applyShapeDraw: (rect) => {
+        const preset = this.#armedShape ?? "rect";
+        // Word's default: one draw returns the pointer to the selection tool
+        // (consecutive draws need another Shapes pick, or Esc never fires).
+        this.#stopShapeDrawing();
+        this.#insertShapeAt(preset, rect);
+      },
       applyBorderPaint: (sides) => {
         const editor = this.#bridge?.activeEditor() ?? this.editor;
         if (!editor || !this.#borderPainting || !sides.length) return;
@@ -2694,6 +2742,7 @@ class DocenDocument extends AddinHost<Editor> {
     clearTimeout(this.#autosaveTimer);
     this.#stopFormatPainter();
     this.#stopBorderPainting();
+    this.#stopShapeDrawing();
     this.#navigation.dispose();
     this.#spelling.dispose();
     this.#bridge?.destroy();
@@ -4497,24 +4546,53 @@ class DocenDocument extends AddinHost<Editor> {
   };
 
   /** Insert → Text Box / Shapes: a standalone wps shape run, floating
-   *  wrap-none and centered on the page (Word's insertion behavior). The
-   *  text box carries Word's plain look — white fill, accent-1 hairline —
-   *  and an editable empty body (the PM `content`); a gallery shape carries
-   *  its preset geometry with the accent fill instead. */
-  #insertShape(preset: string | undefined): void {
+   *  wrap-none. Without a rect (Text Box, and the drawer's landing spot for
+   *  a bare click it cannot resolve) the shape centers on the page at Word's
+   *  2" × 1.2" default; a draw rect (page-local px) fixes both. The text box
+   *  carries Word's plain look — white fill, accent-1 hairline — and an
+   *  editable empty body (the PM `content`); a gallery shape carries its
+   *  preset geometry with the accent fill instead. */
+  #insertShapeAt(
+    preset: string | undefined,
+    rect?: {
+      page: number;
+      x: number;
+      y: number;
+      w: number;
+      h: number;
+      flipH?: boolean;
+      flipV?: boolean;
+    },
+  ): void {
     // Insert into the story the caret lives in — a header/footer story must
     // receive the shape, not the stale main-doc selection behind it.
     const editor = this.#bridge?.activeEditor() ?? this.editor;
     if (!editor) return;
-    const geometry: Record<string, unknown> = {
-      // Word's plain text box default: 2" × 1.2".
-      transformation: { width: 1828800, height: 1097280 },
-      floating: {
-        horizontalPosition: { relative: "page", align: "center" },
-        verticalPosition: { relative: "page", align: "center" },
-        wrap: { type: "none" },
-      },
-    };
+    const geometry: Record<string, unknown> = rect
+      ? {
+          transformation: {
+            width: Math.max(1, Math.round(rect.w * EMU_PER_PX)),
+            height: Math.max(1, Math.round(rect.h * EMU_PER_PX)),
+            // A line drawn right-to-left / bottom-to-top mirrors its diagonal
+            // (the preset path always runs corner to corner, top-left first).
+            ...(rect.flipH ? { flipHorizontal: true } : {}),
+            ...(rect.flipV ? { flipVertical: true } : {}),
+          },
+          floating: {
+            horizontalPosition: { relative: "page", offset: Math.round(rect.x * EMU_PER_PX) },
+            verticalPosition: { relative: "page", offset: Math.round(rect.y * EMU_PER_PX) },
+            wrap: { type: "none" },
+          },
+        }
+      : {
+          // Word's plain text box default: 2" × 1.2".
+          transformation: { width: 1828800, height: 1097280 },
+          floating: {
+            horizontalPosition: { relative: "page", align: "center" },
+            verticalPosition: { relative: "page", align: "center" },
+            wrap: { type: "none" },
+          },
+        };
     if (preset) {
       geometry.geometry = preset;
       // The theme's accent-1 pair (fill + its darkened outline) — the same
@@ -5481,10 +5559,15 @@ class DocenDocument extends AddinHost<Editor> {
       this.editor?.commands[name]?.(this.#markupAuthors ?? undefined);
       return;
     }
-    // Text Box / Shapes — insert a floating wps shape run (Shapes reads its
-    // preset from the gallery item's value; the text box has no preset).
-    if (name === "text-box" || name === "shapes") {
-      this.#insertShape(name === "shapes" ? (value ?? "rect") : undefined);
+    // Text Box — insert a centered floating wps text box. Shapes — arm the
+    // drawer with the picked preset (Word's drag-to-draw: the canvas commits
+    // the draw through applyShapeDraw, which disarms — one pick, one shape).
+    if (name === "text-box") {
+      this.#insertShapeAt(undefined);
+      return;
+    }
+    if (name === "shapes") {
+      this.#armShapeDrawer(value ?? "rect");
       return;
     }
     // Insert → Pages menu: a cover block at the document start, or two page
