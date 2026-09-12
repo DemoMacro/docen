@@ -1,4 +1,9 @@
-import type { BorderOptions, ParagraphOptions, StylesOptions } from "@office-open/docx";
+import type {
+  BorderOptions,
+  ParagraphOptions,
+  RunStylePropertiesOptions,
+  StylesOptions,
+} from "@office-open/docx";
 import type { JSONContent } from "@tiptap/core";
 
 import type { ResolveContext } from "../extensions/types";
@@ -21,10 +26,13 @@ export type { StylesOptions };
 
 // ── Quick Styles gallery selection ──────────────────────────────────────────
 
-/** A gallery-ready paragraph-style entry for the Styles combobox. */
+/** A gallery-ready paragraph-style entry for the Styles combobox. `run` rides
+ *  along so the ribbon can render each entry's preview in the style's own
+ *  character formatting (Word's Quick Styles gallery thumbnails). */
 export interface QuickStyleEntry {
   id: string;
   name: string;
+  run?: RunStylePropertiesOptions;
 }
 
 /** The `DefaultStylesOptions` keys whose values are character styles, not
@@ -66,6 +74,7 @@ export function quickStyles(styles: StylesOptions | null | undefined): QuickStyl
     all.push({
       id,
       name: style.name || id,
+      run: style.run,
       uiPriority: style.uiPriority ?? 9999,
       quick: !!style.quickFormat,
     });
@@ -86,7 +95,7 @@ export function quickStyles(styles: StylesOptions | null | undefined): QuickStyl
   // No quickFormat flags at all (some LibreOffice-generated files): the same
   // priority order over every paragraph style keeps the gallery non-empty.
   const listed = quick.length > 0 ? quick : [...all].sort(byPriority);
-  return listed.map(({ id, name }) => ({ id, name }));
+  return listed.map(({ id, name, run }) => ({ id, name, run }));
 }
 
 /** Resolve the effective run-level properties (font name, size in points) at the
