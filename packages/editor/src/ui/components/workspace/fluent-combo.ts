@@ -36,6 +36,16 @@ export function pick(sel: FluentDropdown | undefined | null, value: string): voi
   if (input) input.value = option.textContent ?? "";
 }
 
+/** Pick a value that may fall outside the preset ladder (a document's own
+ *  font or size): a miss prepends it as a temporary option, then picks. */
+export function pickLadder(sel: FluentDropdown | undefined | null, value: string): void {
+  if (!sel) return;
+  const listbox = listboxOf(sel);
+  if (value && !listbox?.querySelector(`fluent-option[value="${CSS.escape(value)}"]`))
+    listbox?.prepend(opt(value, value));
+  pick(sel, value);
+}
+
 /** The dropdown's picked value. A user pick syncs the FAST `value`
  *  property; a programmatic prefill may leave it "" (the control input
  *  still shows the text) — fall back to the input so prefill-then-OK

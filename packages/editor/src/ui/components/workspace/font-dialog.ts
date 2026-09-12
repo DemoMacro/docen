@@ -7,7 +7,7 @@ import {
   UNDERLINE_STYLES,
 } from "../../../document/font-lists";
 import { observeLang, resolveLang, t } from "../../i18n/localize";
-import { listboxOf, opt, pick, pickedValue, type FluentDropdown } from "./fluent-combo";
+import { listboxOf, opt, pick, pickLadder, pickedValue, type FluentDropdown } from "./fluent-combo";
 
 /**
  * What the Font dialog commits on OK — every field always present (Office
@@ -393,16 +393,8 @@ class DocenFontDialog extends FASTElement {
 
   /** Pick a value, adding a temporary option when it's off the preset ladder. */
   #pick(sel: FluentDropdown | undefined, value: string): void {
-    const listbox = listboxOf(sel);
-    if (!sel || !listbox) return;
-    if (
-      value &&
-      ![...listbox.querySelectorAll("fluent-option")].some((o) => o.getAttribute("value") === value)
-    ) {
-      listbox.prepend(opt(value, value));
-    }
-    pick(sel, value);
-    sel.dataset.picked = value;
+    pickLadder(sel, value);
+    if (sel) sel.dataset.picked = value;
   }
 
   #check(box: FluentCheckbox | undefined, value: boolean): void {
