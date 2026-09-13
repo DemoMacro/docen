@@ -445,7 +445,9 @@ class DocenDocument extends AddinHost<Editor> {
   /** References-tab commands (citations/bibliography/index marking), split
    *  out of this class — see commands/references.ts. */
   readonly #spelling = new SpellingCommands({
-    editor: () => this.editor,
+    // Word checks the story being edited, not the body — route through the
+    // bridge's active story so run/replace/right-click follow it.
+    editor: () => this.#bridge?.activeEditor() ?? this.editor,
     bridge: () => this.#bridge,
     element: () => this,
   });
@@ -1559,6 +1561,12 @@ class DocenDocument extends AddinHost<Editor> {
             label: t(kind === "header" ? "story.header" : "story.footer", this),
           });
           this.#showHeaderFooterContextTab();
+          // Word re-checks against the story being edited. entered() runs
+          // before the bridge registers the story (the strut's onDoc needs
+          // the story kind set), so the check must wait out the synchronous
+          // entry — by then the active editor is the story, or (rolled back
+          // entry) the body again.
+          queueMicrotask(() => this.#spelling.run());
         },
         onDoc: (kind, slot, json) => this.#renderStoryFurniture(kind, slot, json),
         exit: ({ kind, slot, json, dirty }) => this.#exitStory(kind, slot, json, dirty),
@@ -2034,6 +2042,10 @@ class DocenDocument extends AddinHost<Editor> {
       band ? stage.furnitureStack(kind, this.#storyPage) : null,
       band ?? { top: 0, bottom: 0, paintY: 0 },
     );
+    // The story's transactions never cross the main editor, so the render
+    // tail that schedules the body's re-check never runs for them — schedule
+    // here (debounced; the check reads the active story).
+    this.#spelling.schedule();
   }
 
   /** The doc position of the paragraph closing the given section (0-based —
@@ -2106,6 +2118,8 @@ class DocenDocument extends AddinHost<Editor> {
     this.#storyKind = null;
     if (dirty) this.#persistStory(kind, slot, json, this.#storyPage);
     this.#storyPage = -1;
+    // Back to the body's issues (the persist above re-laid the doc first).
+    this.#spelling.run();
   }
 
   /** Write a slots group through a transaction: the group lives on the

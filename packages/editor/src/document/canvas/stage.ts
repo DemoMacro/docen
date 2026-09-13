@@ -1265,6 +1265,10 @@ export class CanvasStage {
     } else {
       ctx.hitBoxes = hitBoxes;
       ctx.shapeTextStacks = shapeTextStacks;
+      // The body text must still lay under the veil: paintScene with layer
+      // "behind" only emits shading and behind floats (paintParagraph returns
+      // before glyphs), which blanked the page instead of graying it.
+      ctx.layer = "body";
       paintScene(tree, items, ctx);
       paintLineNumbers(tree, ctx);
       paintColumnSeparators(tree, ctx);

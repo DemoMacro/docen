@@ -1640,6 +1640,11 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     }
     attachTransactions(s);
     story = s;
+    // The body's issue ranges are meaningless against the story's caret map
+    // — clear them now; the host's re-check (queued on entered) refills the
+    // pool against the active story.
+    spellingIssues = [];
+    pooledPlace(spellingPool, [], {});
     // The caret enters at the story's end (Word drops you after the text) —
     // the last textblock's end, not the doc's outer boundary (no caret there).
     setSel(TextSelection.atEnd(s.editor.state.doc).from);
