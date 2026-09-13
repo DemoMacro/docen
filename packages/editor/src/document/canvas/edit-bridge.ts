@@ -1637,6 +1637,10 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
         contentLeftPx: origin?.contentLeftPx ?? 0,
         contentTopPx: band.paintY,
       }));
+      // The entry selection places the caret synchronously, and mapFresh
+      // gates on mapDoc pairing the live doc — left null here the caret
+      // would stay hidden until the first keystroke re-answers the map.
+      s.mapDoc = s.editor.state.doc;
     }
     attachTransactions(s);
     story = s;
