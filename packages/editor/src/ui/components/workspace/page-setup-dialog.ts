@@ -16,6 +16,22 @@ export interface PageSetupValues {
   size: { width: number; height: number };
   /** Section vertical alignment (w:vAlign). */
   verticalAlign: "top" | "center" | "both" | "bottom";
+  /** Binding gutter width in cm (w:pgMar gutter) — 0 = none. */
+  gutter?: number;
+  /** Header/footer distance from the page edge in cm (w:pgMar header/footer). */
+  headerDistance?: number;
+  footerDistance?: number;
+  /** First-page-different header/footer (w:titlePg). */
+  titlePage?: boolean;
+  /** Section start (w:type) — "nextPage" is Word's omitted default. */
+  sectionStart?: "nextPage" | "continuous" | "oddPage" | "evenPage";
+  /** Document grid (w:docGrid): behavior + lines per page; the lines ↔
+   *  linePitch conversion needs the page's usable height, so it stays on the
+   *  host. */
+  grid?: {
+    type?: "default" | "lines" | "linesAndChars" | "snapToChars";
+    linesPerPage?: number;
+  };
 }
 
 /** Word's defaults (Normal margins on A4) for absent prefill fields. */
@@ -24,6 +40,8 @@ const DEFAULTS = {
   side: 3.18,
   width: 21,
   height: 29.7,
+  header: 1.5,
+  footer: 1.75,
 } as const;
 
 const styles = css`
@@ -64,6 +82,12 @@ const styles = css`
   }
   .unit {
     white-space: nowrap;
+  }
+  .check-field {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
   }
 `;
 
@@ -115,6 +139,18 @@ const template = html<DocenPageSetupDialog>`
           <span class="unit"></span>
         </div>
       </div>
+      <div class="row">
+        <div class="field">
+          <label ${ref("gutterLabel")}></label>
+          <fluent-text-input
+            ${ref("gutterInput")}
+            type="number"
+            step="any"
+            min="0"
+          ></fluent-text-input>
+          <span class="unit"></span>
+        </div>
+      </div>
       <div class="setup-heading" ${ref("sizeHeading")}></div>
       <div class="row">
         <div class="field">
@@ -152,6 +188,80 @@ const template = html<DocenPageSetupDialog>`
           </fluent-dropdown>
         </div>
       </div>
+      <div class="setup-heading" ${ref("layoutHeading")}></div>
+      <div class="row">
+        <div class="field">
+          <label ${ref("sectionStartLabel")}></label>
+          <fluent-dropdown type="combobox" appearance="outline" ${ref("sectionStartDropdown")}>
+            <fluent-listbox popover="manual" tabindex="-1">
+              <fluent-option value="nextPage"></fluent-option>
+              <fluent-option value="continuous"></fluent-option>
+              <fluent-option value="oddPage"></fluent-option>
+              <fluent-option value="evenPage"></fluent-option>
+            </fluent-listbox>
+            <input slot="control" role="combobox" aria-readonly="true" readonly />
+          </fluent-dropdown>
+        </div>
+      </div>
+      <div class="row">
+        <div class="field">
+          <label ${ref("headerLabel")}></label>
+          <fluent-text-input
+            ${ref("headerInput")}
+            type="number"
+            step="any"
+            min="0"
+          ></fluent-text-input>
+          <span class="unit"></span>
+        </div>
+        <div class="field">
+          <label ${ref("footerLabel")}></label>
+          <fluent-text-input
+            ${ref("footerInput")}
+            type="number"
+            step="any"
+            min="0"
+          ></fluent-text-input>
+          <span class="unit"></span>
+        </div>
+      </div>
+      <!-- fluent-checkbox has no default label slot (indicator slots only) —
+           the label span sits outside, the wrapping <label> routes clicks. -->
+      <label class="check-field">
+        <fluent-checkbox ${ref("titlePageBox")}></fluent-checkbox>
+        <span ${ref("titlePageLabel")}></span>
+      </label>
+      <div class="setup-heading" ${ref("gridHeading")}></div>
+      <div class="row">
+        <div class="field">
+          <label ${ref("gridTypeLabel")}></label>
+          <fluent-dropdown
+            type="combobox"
+            appearance="outline"
+            ${ref("gridTypeDropdown")}
+            @change="${(x) => x.onGridTypeChange()}"
+          >
+            <fluent-listbox popover="manual" tabindex="-1">
+              <fluent-option value="default"></fluent-option>
+              <fluent-option value="lines"></fluent-option>
+              <fluent-option value="linesAndChars"></fluent-option>
+              <fluent-option value="snapToChars"></fluent-option>
+            </fluent-listbox>
+            <input slot="control" role="combobox" aria-readonly="true" readonly />
+          </fluent-dropdown>
+        </div>
+      </div>
+      <div class="row">
+        <div class="field">
+          <label ${ref("linesLabel")}></label>
+          <fluent-text-input
+            ${ref("linesInput")}
+            type="number"
+            step="1"
+            min="1"
+          ></fluent-text-input>
+        </div>
+      </div>
     </div>
     <div slot="action">
       <fluent-button ${ref("cancelBtn")} @click="${(x) => x.hide()}"></fluent-button>
@@ -165,12 +275,13 @@ const template = html<DocenPageSetupDialog>`
 `;
 
 /**
- * `<docen-page-setup-dialog>` — the Word "Page Setup" geometry fields (margins
- * plus paper size, in centimeters). Opened by the Margins menu's Custom Margins
- * and the Size menu's More Paper Sizes items; the host prefills from the
- * current section via `show(values)` and commits via `page-setup:ok`. Gutter,
- * header/footer distance and the layout tabs stay out until the engine
- * consumes them. Rides on `<docen-dialog>` for the modal shell.
+ * `<docen-page-setup-dialog>` — the Word "Page Setup" geometry fields: margins
+ * + gutter, paper size, vertical alignment, the layout group (section start,
+ * header/footer distances, first-page-different), and the document grid
+ * (behavior + lines per page) — all in centimeters. Opened by the Margins
+ * menu's Custom Margins and the Size menu's More Paper Sizes items; the host
+ * prefills from the current section via `show(values)` and commits via
+ * `page-setup:ok`. Rides on `<docen-dialog>` for the modal shell.
  */
 @customElement({ name: "docen-page-setup-dialog", template, styles })
 class DocenPageSetupDialog extends FASTElement {
@@ -184,6 +295,8 @@ class DocenPageSetupDialog extends FASTElement {
   @observable leftInput?: FluentTextInput;
   @observable rightLabel?: HTMLElement;
   @observable rightInput?: FluentTextInput;
+  @observable gutterLabel?: HTMLElement;
+  @observable gutterInput?: FluentTextInput;
   @observable sizeHeading?: HTMLElement;
   @observable widthLabel?: HTMLElement;
   @observable widthInput?: FluentTextInput;
@@ -191,6 +304,20 @@ class DocenPageSetupDialog extends FASTElement {
   @observable heightInput?: FluentTextInput;
   @observable verticalAlignLabel?: HTMLElement;
   @observable verticalAlignDropdown?: FluentDropdown;
+  @observable layoutHeading?: HTMLElement;
+  @observable sectionStartLabel?: HTMLElement;
+  @observable sectionStartDropdown?: FluentDropdown;
+  @observable headerLabel?: HTMLElement;
+  @observable headerInput?: FluentTextInput;
+  @observable footerLabel?: HTMLElement;
+  @observable footerInput?: FluentTextInput;
+  @observable titlePageBox?: HTMLElement & { checked?: boolean };
+  @observable titlePageLabel?: HTMLElement;
+  @observable gridHeading?: HTMLElement;
+  @observable gridTypeLabel?: HTMLElement;
+  @observable gridTypeDropdown?: FluentDropdown;
+  @observable linesLabel?: HTMLElement;
+  @observable linesInput?: FluentTextInput;
   @observable okBtn?: HTMLElement;
   @observable cancelBtn?: HTMLElement;
 
@@ -215,6 +342,12 @@ class DocenPageSetupDialog extends FASTElement {
       margins?: Partial<PageSetupValues["margins"]>;
       size?: Partial<PageSetupValues["size"]>;
       verticalAlign?: PageSetupValues["verticalAlign"];
+      gutter?: number;
+      headerDistance?: number;
+      footerDistance?: number;
+      titlePage?: boolean;
+      sectionStart?: NonNullable<PageSetupValues["sectionStart"]>;
+      grid?: NonNullable<PageSetupValues["grid"]>;
     } = {},
   ): void {
     const margins = values.margins ?? {};
@@ -223,16 +356,36 @@ class DocenPageSetupDialog extends FASTElement {
     if (this.bottomInput) this.bottomInput.value = this.#cm(margins.bottom, DEFAULTS.margin);
     if (this.leftInput) this.leftInput.value = this.#cm(margins.left, DEFAULTS.side);
     if (this.rightInput) this.rightInput.value = this.#cm(margins.right, DEFAULTS.side);
+    if (this.gutterInput) this.gutterInput.value = this.#cm(values.gutter ?? 0, 0);
     if (this.widthInput) this.widthInput.value = this.#cm(size.width, DEFAULTS.width);
     if (this.heightInput) this.heightInput.value = this.#cm(size.height, DEFAULTS.height);
     if (this.verticalAlignDropdown)
       this.verticalAlignDropdown.value = values.verticalAlign ?? "top";
+    if (this.sectionStartDropdown)
+      this.sectionStartDropdown.value = values.sectionStart ?? "nextPage";
+    if (this.headerInput) this.headerInput.value = this.#cm(values.headerDistance, DEFAULTS.header);
+    if (this.footerInput) this.footerInput.value = this.#cm(values.footerDistance, DEFAULTS.footer);
+    if (this.titlePageBox) this.titlePageBox.checked = values.titlePage === true;
+    const gridType = values.grid?.type ?? "lines";
+    if (this.gridTypeDropdown) this.gridTypeDropdown.value = gridType;
+    if (this.linesInput) {
+      this.linesInput.value =
+        typeof values.grid?.linesPerPage === "number" && values.grid.linesPerPage > 0
+          ? String(Math.round(values.grid.linesPerPage))
+          : "";
+      this.linesInput.disabled = gridType === "default";
+    }
     this.dialogEl?.show();
   }
 
   hide(): void {
     this.dialogEl?.hide();
   }
+
+  /** "No grid" has no lines to speak of — disable the per-page-lines input. */
+  readonly onGridTypeChange = (): void => {
+    if (this.linesInput) this.linesInput.disabled = this.gridTypeDropdown?.value === "default";
+  };
 
   /** Template-visible OK handler (FAST templates live outside the class, so a
    *  `#`-private method can't be referenced from the binding). */
@@ -253,7 +406,31 @@ class DocenPageSetupDialog extends FASTElement {
     )
       ? (vAlign as PageSetupValues["verticalAlign"])
       : "top";
-    this.$emit("page-setup:ok", { margins, size, verticalAlign });
+    const gutter = this.#nonNeg(this.gutterInput?.value);
+    // The dropdowns only offer their own tokens — the value reads back
+    // closed, no wider validation needed.
+    const sectionStart = (this.sectionStartDropdown?.value ?? "nextPage") as NonNullable<
+      PageSetupValues["sectionStart"]
+    >;
+    const gridType = (this.gridTypeDropdown?.value ?? "lines") as NonNullable<
+      PageSetupValues["grid"]
+    >["type"];
+    // A cleared lines field keeps the document's current pitch (undefined).
+    const lines = Number(this.linesInput?.value);
+    this.$emit("page-setup:ok", {
+      margins,
+      size,
+      verticalAlign,
+      gutter,
+      headerDistance: this.#num(this.headerInput?.value, DEFAULTS.header),
+      footerDistance: this.#num(this.footerInput?.value, DEFAULTS.footer),
+      titlePage: this.titlePageBox?.checked === true,
+      sectionStart,
+      grid: {
+        type: gridType,
+        linesPerPage: Number.isFinite(lines) && lines > 0 ? Math.round(lines) : undefined,
+      },
+    } satisfies PageSetupValues);
     this.hide();
   }
 
@@ -267,6 +444,12 @@ class DocenPageSetupDialog extends FASTElement {
     const n = Number(v);
     // A cleared or garbage field keeps the prefill rather than committing 0.
     return Number.isFinite(n) && n > 0 ? n : fallback;
+  }
+
+  /** Gutter accepts 0 (no binding allowance); a cleared field stays 0. */
+  #nonNeg(v: string | undefined): number {
+    const n = Number(v);
+    return Number.isFinite(n) && n >= 0 ? n : 0;
   }
 
   #labelOptions(dropdown: FluentDropdown | undefined, labels: string[]): void {
@@ -284,6 +467,7 @@ class DocenPageSetupDialog extends FASTElement {
     if (this.bottomLabel) this.bottomLabel.textContent = t("pageSetup.bottom", this);
     if (this.leftLabel) this.leftLabel.textContent = t("pageSetup.left", this);
     if (this.rightLabel) this.rightLabel.textContent = t("pageSetup.right", this);
+    if (this.gutterLabel) this.gutterLabel.textContent = t("pageSetup.gutter", this);
     if (this.widthLabel) this.widthLabel.textContent = t("pageSetup.width", this);
     if (this.heightLabel) this.heightLabel.textContent = t("pageSetup.height", this);
     if (this.verticalAlignLabel)
@@ -294,6 +478,27 @@ class DocenPageSetupDialog extends FASTElement {
       t("pageSetup.vAlignBoth", this),
       t("pageSetup.vAlignBottom", this),
     ]);
+    if (this.layoutHeading) this.layoutHeading.textContent = t("pageSetup.layout", this);
+    if (this.sectionStartLabel)
+      this.sectionStartLabel.textContent = t("pageSetup.sectionStart", this);
+    this.#labelOptions(this.sectionStartDropdown, [
+      t("pageSetup.startNextPage", this),
+      t("pageSetup.startContinuous", this),
+      t("pageSetup.startOddPage", this),
+      t("pageSetup.startEvenPage", this),
+    ]);
+    if (this.headerLabel) this.headerLabel.textContent = t("pageSetup.header", this);
+    if (this.footerLabel) this.footerLabel.textContent = t("pageSetup.footer", this);
+    if (this.titlePageLabel) this.titlePageLabel.textContent = t("pageSetup.titlePage", this);
+    if (this.gridHeading) this.gridHeading.textContent = t("pageSetup.grid", this);
+    if (this.gridTypeLabel) this.gridTypeLabel.textContent = t("pageSetup.gridType", this);
+    this.#labelOptions(this.gridTypeDropdown, [
+      t("pageSetup.gridNone", this),
+      t("pageSetup.gridLines", this),
+      t("pageSetup.gridLinesAndChars", this),
+      t("pageSetup.gridSnapToChars", this),
+    ]);
+    if (this.linesLabel) this.linesLabel.textContent = t("pageSetup.linesPerPage", this);
     if (this.okBtn) this.okBtn.textContent = t("options.ok", this);
     if (this.cancelBtn) this.cancelBtn.textContent = t("options.cancel", this);
     // The unit chips after each input share one text.

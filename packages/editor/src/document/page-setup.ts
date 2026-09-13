@@ -73,7 +73,12 @@ export function mergeSectionProperties(
     // Present-but-undefined clears verticalAlign (the dialog's "top" — Word
     // drops w:vAlign); an absent key keeps the base.
     ...("verticalAlign" in patch ? { verticalAlign: patch.verticalAlign } : {}),
+    // Same drop-the-attribute rule for the section start (Word drops w:type —
+    // omitted reads as "newPage") and the first-page header/footer toggle.
+    ...("type" in patch ? { type: patch.type } : {}),
+    ...("titlePage" in patch ? { titlePage: patch.titlePage } : {}),
     pageSize: mergeGroup(base?.pageSize, patch.pageSize),
     pageMargin: mergeGroup(base?.pageMargin, patch.pageMargin),
+    grid: mergeGroup(base?.grid, patch.grid),
   };
 }

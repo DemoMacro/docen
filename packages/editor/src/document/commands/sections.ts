@@ -251,12 +251,28 @@ export class SectionCommands {
     // properties object — narrow to the object form before reading fields.
     const margin = cur?.pageMargin && typeof cur.pageMargin === "object" ? cur.pageMargin : {};
     const size = cur?.pageSize && typeof cur.pageSize === "object" ? cur.pageSize : {};
+    const grid = cur?.grid && typeof cur.grid === "object" ? cur.grid : undefined;
+    // PageMargin fields may be UniversalMeasure strings the dialog doesn't
+    // parse — narrow to the number form for the usable-height budget.
+    const numTw = (v: number | string | undefined, d: number): number =>
+      typeof v === "number" ? v : d;
+    const heightTw = typeof size.height === "number" ? size.height : 16838;
+    const usableTw = heightTw - numTw(margin.top, 1440) - numTw(margin.bottom, 1440);
+    // Lines per page from the pitch (twips → lines); absent pitch falls back
+    // to Word's CJK default (312 twips).
+    const pitchTw = typeof grid?.linePitch === "number" ? grid.linePitch : 312;
     (
       this.host.element().shadowRoot?.querySelector("docen-page-setup-dialog") as {
         show(values?: {
           margins?: Partial<PageSetupValues["margins"]>;
           size?: Partial<PageSetupValues["size"]>;
           verticalAlign?: PageSetupValues["verticalAlign"];
+          gutter?: number;
+          headerDistance?: number;
+          footerDistance?: number;
+          titlePage?: boolean;
+          sectionStart?: NonNullable<PageSetupValues["sectionStart"]>;
+          grid?: NonNullable<PageSetupValues["grid"]>;
         }): void;
       } | null
     )?.show({
@@ -268,6 +284,20 @@ export class SectionCommands {
       },
       size: { width: cm(size.width), height: cm(size.height) },
       verticalAlign: cur?.verticalAlign ?? "top",
+      gutter: cm(margin.gutter) ?? 0,
+      headerDistance: cm(margin.header) ?? 1.5,
+      footerDistance: cm(margin.footer) ?? 1.75,
+      titlePage: cur?.titlePage === true,
+      // "nextColumn" exists in OOXML but has no dropdown slot — Word's Layout
+      // tab offers the same four; it falls back to the nextPage default.
+      sectionStart:
+        cur?.type === "continuous" || cur?.type === "oddPage" || cur?.type === "evenPage"
+          ? cur.type
+          : "nextPage",
+      grid: {
+        type: grid?.type ?? "lines",
+        linesPerPage: pitchTw > 0 ? Math.round(usableTw / pitchTw) : undefined,
+      },
     });
   }
 
@@ -410,16 +440,34 @@ export class SectionCommands {
     const values = event.detail;
     if (!values) return;
     const twip = (cm: number): number => convertMillimetersToTwip(cm * 10);
-    const { margins, size, verticalAlign } = values;
+    const { margins, size, verticalAlign, gutter, grid } = values;
+    // Lines per page → line pitch over the usable page height (the same
+    // budget the dialog's prefill divides); a cleared field keeps the
+    // section's current pitch.
+    const cur = this.currentSectionProperties();
+    const curGrid = cur?.grid && typeof cur.grid === "object" ? cur.grid : undefined;
+    const usableTw = twip(size.height) - twip(margins.top) - twip(margins.bottom);
+    const pitchTw =
+      typeof grid?.linesPerPage === "number" && grid.linesPerPage > 0
+        ? Math.round(usableTw / grid.linesPerPage)
+        : (curGrid?.linePitch ?? 312);
     this.updateSectionGeometry({
       pageMargin: {
         top: twip(margins.top),
         bottom: twip(margins.bottom),
         left: twip(margins.left),
         right: twip(margins.right),
+        gutter: twip(gutter ?? 0),
+        header: twip(values.headerDistance ?? 1.5),
+        footer: twip(values.footerDistance ?? 1.75),
       },
       pageSize: { width: twip(size.width), height: twip(size.height) },
       verticalAlign: verticalAlign === "top" ? undefined : verticalAlign,
+      // Omitted w:type reads as "nextPage" (Word drops the attribute); "no
+      // grid" clears w:docGrid entirely (Word's 无网格).
+      type: values.sectionStart === "nextPage" ? undefined : values.sectionStart,
+      titlePage: values.titlePage === true,
+      grid: grid?.type === "default" ? false : { type: grid?.type, linePitch: pitchTw },
     });
   };
 }

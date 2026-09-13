@@ -157,6 +157,9 @@ export function projectFlowBox(properties: unknown): ProjectedFlowBox {
   const bottom = side(m.bottom, 1440);
   const left = side(m.left, 1800);
   const right = side(m.right, 1800);
+  // The binding gutter always rides the left edge here — Word flips it for
+  // mirror margins / RTL gutters, neither of which the projection models.
+  const gutter = side(m.gutter, 0);
   const grid: Rec = isRecord(sp.grid) ? sp.grid : {};
   const pitchTw = measureTwip(grid.linePitch);
   const linePitchPx =
@@ -164,9 +167,9 @@ export function projectFlowBox(properties: unknown): ProjectedFlowBox {
   return {
     pageWidthPx: twipToPx(width),
     pageHeightPx: twipToPx(height),
-    contentWidthPx: twipToPx(width) - left - right,
+    contentWidthPx: twipToPx(width) - left - right - gutter,
     contentHeightPx: twipToPx(height) - top - bottom,
-    contentLeftPx: left,
+    contentLeftPx: left + gutter,
     contentTopPx: top,
     linePitchPx,
     // Word's "both" (justified vertical stretch) is unmodeled — it flows as top.
