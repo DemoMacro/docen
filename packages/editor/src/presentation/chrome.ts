@@ -46,12 +46,13 @@ export const presentationStyles = css`
     box-sizing: border-box;
   }
   /* The slide surface — document-area is the scroll container; this wrapper
-     centers the Leafer stage like the document's page column. No cursor
-     styling: there is no text caret to point at yet. */
+     centers the Leafer stage like the document's page column. It anchors the
+     selection overlay (position:relative), so the slide-top gap is a margin:
+     an absolutely positioned child measures from the padding box edge. */
   .docen-canvas {
+    position: relative;
     width: fit-content;
-    margin: 0 auto;
-    padding: 32px 0;
+    margin: 32px auto 0;
   }
   .stage canvas {
     display: block;

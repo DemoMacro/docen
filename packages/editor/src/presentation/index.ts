@@ -10,12 +10,20 @@
  * engine transactions) rides on this base in later batches.
  */
 
-import { parsePresentation, projectPresentation, type ProjectedPresentation } from "@docen/pptx";
+import {
+  parsePresentation,
+  projectPresentation,
+  type PresentationOptions,
+  type ProjectedPresentation,
+  type SlideChild,
+} from "@docen/pptx";
 import { customElement, observable } from "@microsoft/fast-element";
 import type { DataType } from "@office-open/core";
 import { App, type IGroup } from "leafer-ui";
 
 import { renderRibbonFromSchema } from "../document/ribbon";
+import type { Box } from "../drawing/geometry";
+import { DrawingOverlay } from "../drawing/overlay";
 import {
   AddinHost,
   applyTheme,
@@ -27,6 +35,7 @@ import {
   t,
 } from "../ui";
 import { escapeHtml, presentationStyles, presentationTemplate } from "./chrome";
+import { hitSlide, offsetChild, resizeChild, slideHits } from "./hit-test";
 import { presentationRibbonTabs } from "./ribbon";
 import { paintSlideDeck, SLIDE_GAP_PX, THUMB_GAP_PX, THUMB_WIDTH_PX } from "./slides-panel";
 // Side-effect: register the presentation translation tables.
@@ -45,11 +54,15 @@ const WIRED_COMMANDS: ReadonlySet<string> = new Set(["zoom-in", "zoom-out", "zoo
   styles: presentationStyles,
 })
 class DocenPresentation extends AddinHost {
+  /** The parsed deck — the editable model the gestures write back into. */
+  #presJson: PresentationOptions | null = null;
   #pres: ProjectedPresentation | null = null;
   #app: App | null = null;
   #thumbApp: App | null = null;
   #thumbScale = 1;
   #zoom = 100;
+  #overlay: DrawingOverlay | null = null;
+  #selection: { slide: number; child: number } | null = null;
   #langObserver?: MutationObserver;
   #unsubLang?: () => void;
   #scrollRaf?: number;
@@ -84,6 +97,16 @@ class DocenPresentation extends AddinHost {
       ?.addEventListener("change", this.#onFileChange as EventListener);
     this.#area()?.addEventListener("scroll", this.#onScroll);
     this.thumbStrip?.addEventListener("click", this.#onThumbClick);
+    this.#stage.addEventListener("pointerdown", this.#onStagePointerDown);
+    document.addEventListener("keydown", this.#onKeyDown);
+    // The selection frame lives over the slide surface (the canvas element
+    // Leafer mounts is recreated per deck render — the overlay survives it).
+    this.#overlay = new DrawingOverlay({
+      scale: () => this.#zoom / 100,
+      applyBox: (box) => this.#applyGesture((child) => resizeChild(child, box)),
+      applyOffset: (dx, dy) => this.#applyGesture((child) => offsetChild(child, dx, dy)),
+    });
+    this.#canvasHost().append(this.#overlay.el);
     // Locale switches re-stamp the chrome (header + ribbon labels).
     this.#unsubLang = observeLang(() => this.#renderChrome());
     this.#renderChrome();
@@ -106,6 +129,10 @@ class DocenPresentation extends AddinHost {
       ?.removeEventListener("change", this.#onFileChange as EventListener);
     this.#area()?.removeEventListener("scroll", this.#onScroll);
     this.thumbStrip?.removeEventListener("click", this.#onThumbClick);
+    this.#stage.removeEventListener("pointerdown", this.#onStagePointerDown);
+    document.removeEventListener("keydown", this.#onKeyDown);
+    this.#overlay?.el.remove();
+    this.#overlay = null;
     if (this.#scrollRaf != null) cancelAnimationFrame(this.#scrollRaf);
     this.#app?.destroy();
     this.#app = null;
@@ -118,6 +145,7 @@ class DocenPresentation extends AddinHost {
    *  connect. */
   async openPresentation(data: DataType): Promise<void> {
     const pres = await parsePresentation(data);
+    this.#presJson = pres;
     this.#pres = projectPresentation(pres);
     if (!this.shadowRoot) return;
     this.#renderDeck();
@@ -126,7 +154,10 @@ class DocenPresentation extends AddinHost {
 
   /** Drop the open deck and reset the chrome. */
   closePresentation(): void {
+    this.#presJson = null;
     this.#pres = null;
+    this.#selection = null;
+    this.#overlay?.hide();
     this.removeAttribute("filename");
     if (!this.shadowRoot) return;
     this.#app?.destroy();
@@ -286,10 +317,23 @@ class DocenPresentation extends AddinHost {
     this.#syncSlideIndicator();
   }
 
-  /** CSS zoom keeps the strip's layout box in step with the painted size, so
-   *  the document-area's scroll range tracks the zoom level. */
+  /** The zoom IS the layout: the stage's CSS box sizes to the scaled strip
+   *  and the tree paints in unzoomed slide px behind a matching scale — no
+   *  CSS zoom, so the overlay layer and its handles stay screen-sized and
+   *  the canvas bitmap stays 1:1 sharp at every level (the document
+   *  editor's zoom model). */
   #applyZoom(): void {
-    (this.#stage.style as CSSStyleDeclaration & { zoom?: string }).zoom = String(this.#zoom / 100);
+    const s = this.#zoom / 100;
+    const pres = this.#pres;
+    const strip = pres ? pres.slides.length * (pres.heightPx + SLIDE_GAP_PX) + SLIDE_GAP_PX : 0;
+    this.#stage.style.width = `${pres ? pres.widthPx * s : 0}px`;
+    this.#stage.style.height = `${strip * s}px`;
+    const tree = this.#app?.tree as IGroup | undefined;
+    if (tree) tree.scale = { x: s, y: s };
+    if (this.#selection) {
+      const box = this.#selectedBox();
+      if (box) this.#overlay?.refresh(box);
+    }
   }
 
   // ── Slide strip ──────────────────────────────────────────────────────────
@@ -323,14 +367,11 @@ class DocenPresentation extends AddinHost {
   #renderDeck(): void {
     const pres = this.#pres;
     if (!pres) return;
-    // Fresh tree per open — slides are static until the editing engine lands.
+    // Fresh tree per open — slide content only changes through the gesture
+    // write-back path, which repaints through the same pipeline.
     this.#app?.destroy();
     const stage = this.#stage;
     stage.replaceChildren();
-    const stripHeight = pres.slides.length * (pres.heightPx + SLIDE_GAP_PX) + SLIDE_GAP_PX;
-    stage.style.width = `${pres.widthPx}px`;
-    stage.style.height = `${stripHeight}px`;
-    this.#applyZoom();
     const app = new App({
       view: stage,
       fill: "transparent",
@@ -340,9 +381,86 @@ class DocenPresentation extends AddinHost {
     });
     this.#app = app;
     paintSlideDeck(app.tree as unknown as IGroup, pres, () => app.forceRender());
+    this.#applyZoom();
     this.#renderThumbnails();
     this.#syncSlideIndicator();
   }
+
+  // ── Slide-object selection ───────────────────────────────────────────────
+
+  /** The wrapper that anchors the overlay (the stage itself is cleared per
+   *  deck render, so the overlay must not live inside it). */
+  #canvasHost(): HTMLElement {
+    return this.shadowRoot!.querySelector<HTMLElement>(".docen-canvas")!;
+  }
+
+  /** Slide-absolute box of the current selection (strip space: slide-local
+   *  box plus the slide's offset in the strip). */
+  #selectedBox(): Box | null {
+    const sel = this.#selection;
+    const presJson = this.#presJson;
+    if (!sel || !presJson) return null;
+    const slide = presJson.slides?.[sel.slide];
+    const hit = slideHits(slide ?? {}).find((h) => h.child === sel.child);
+    if (!hit) return null;
+    const pres = this.#pres!;
+    return {
+      x: hit.box.x,
+      y: hit.box.y + sel.slide * (pres.heightPx + SLIDE_GAP_PX) + SLIDE_GAP_PX,
+      width: hit.box.width,
+      height: hit.box.height,
+    };
+  }
+
+  /** Select a slide object (or clear). The frame shows the strip-space box;
+   *  rotation rides later with the projection's rotation support. */
+  #select(sel: { slide: number; child: number } | null): void {
+    this.#selection = sel;
+    if (!sel) return this.#overlay?.hide();
+    const box = this.#selectedBox();
+    if (box) this.#overlay?.show(box);
+    else this.#overlay?.hide();
+  }
+
+  /** Commit a drag gesture to the source child, re-project, and repaint. */
+  #applyGesture(edit: (child: SlideChild) => void): void {
+    const sel = this.#selection;
+    const slide = this.#presJson?.slides?.[sel?.slide ?? -1];
+    const child = slide?.children?.[sel!.child];
+    if (!child) return;
+    edit(child);
+    this.#pres = projectPresentation(this.#presJson!);
+    this.#renderDeck();
+    // The paint restarted under the same selection — the frame snaps to the
+    // written-back geometry (and rejects itself if the box vanished).
+    const box = this.#selectedBox();
+    if (box) this.#overlay?.refresh(box);
+    else this.#select(null);
+  }
+
+  readonly #onStagePointerDown = (event: PointerEvent): void => {
+    const pres = this.#pres;
+    const presJson = this.#presJson;
+    if (!pres || !presJson || event.button !== 0) return;
+    const rect = this.#stage.getBoundingClientRect();
+    if (rect.width === 0) return;
+    const x = ((event.clientX - rect.left) / rect.width) * pres.widthPx;
+    const stripY =
+      ((event.clientY - rect.top) / rect.height) *
+      (pres.slides.length * (pres.heightPx + SLIDE_GAP_PX) + SLIDE_GAP_PX);
+    const slide = Math.floor(stripY / (pres.heightPx + SLIDE_GAP_PX));
+    if (slide < 0 || slide >= pres.slides.length) return;
+    const localY = stripY - slide * (pres.heightPx + SLIDE_GAP_PX) - SLIDE_GAP_PX;
+    const child = hitSlide(slideHits(presJson.slides?.[slide] ?? {}), x, localY);
+    if (child < 0) return this.#select(null);
+    if (this.#selection?.slide === slide && this.#selection.child === child)
+      return this.#overlay?.beginMove(event.clientX, event.clientY);
+    this.#select({ slide, child });
+  };
+
+  readonly #onKeyDown = (event: KeyboardEvent): void => {
+    if (event.key === "Escape" && this.#selection) this.#select(null);
+  };
 
   // ── Thumbnails panel ─────────────────────────────────────────────────────
 
