@@ -127,6 +127,7 @@ import textUnderline from "@fluentui/svg-icons/icons/text_underline_24_regular.s
 import textWrap from "@fluentui/svg-icons/icons/text_wrap_24_regular.svg?raw";
 import appLogo from "@fluentui/svg-icons/icons/window_apps_24_regular.svg?raw";
 import zoomIn from "@fluentui/svg-icons/icons/zoom_in_24_regular.svg?raw";
+import zoomOut from "@fluentui/svg-icons/icons/zoom_out_24_regular.svg?raw";
 
 // The Fluent set has no omega glyph — Word's Symbol command paints one, so it
 // is drawn here as a stroked path (fill none keeps the container's
@@ -309,6 +310,7 @@ const RIBBON_ICONS: Record<string, string> = {
   gridlines: grid,
   grid,
   "zoom-in": zoomIn,
+  "zoom-out": zoomOut,
   // Header actions (workspace)
   new: documentAdd,
   "reviewing-pane": documentBulletList,

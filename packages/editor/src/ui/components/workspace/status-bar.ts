@@ -211,7 +211,7 @@ const template = html<DocenStatusBar>`
     <span class="lang-text" ${ref("langBtn")}></span>
   </span>
   <span class="zoom">
-    <span class="views">
+    <span class="views" ${ref("viewsEl")}>
       <button type="button" class="view-btn" data-view="reading">
         <svg
           viewBox="0 0 16 16"
@@ -280,7 +280,9 @@ const template = html<DocenStatusBar>`
  * `<docen-status-bar>` — Word's bottom status bar: a left cluster (caret
  * section, "Page X of Y", word count) and a right zoom control (− / slider / +
  * / percent). Numeric state arrives as attributes (`section` / `page` / `total`
- * / `words` / `zoom`); the labels are localized here. Zoom interaction emits
+ * / `words` / `zoom`); the labels are localized here. Every item renders only
+ * when its attribute is stamped — a host without a surface (the presentation
+ * host has no section/spell nouns) leaves it out. Zoom interaction emits
  * `zoom:change { zoom }` (percent, 10–500) for the host to apply.
  */
 @customElement({ name: "docen-status-bar", template, styles })
@@ -288,6 +290,10 @@ class DocenStatusBar extends FASTElement {
   @attr section?: string;
   @attr page?: string;
   @attr total?: string;
+  /** Full localized template for the page indicator, overriding the built-in
+   *  "Page {page} of {total}" — a host with different page nouns stamps its
+   *  own (the presentation element passes "Slide {page} of {total}"). */
+  @attr pageLabel?: string;
   @attr words?: string;
   @attr zoom?: string;
   /** The active document view — "read" | "print" | "web" | "draft" — drives
@@ -304,6 +310,7 @@ class DocenStatusBar extends FASTElement {
   @observable sectionEl?: HTMLElement;
   @observable pagesEl?: HTMLElement;
   @observable wordsEl?: HTMLElement;
+  @observable viewsEl?: HTMLElement;
   @observable slider?: HTMLInputElement;
   @observable pctEl?: HTMLElement;
   @observable outBtn?: HTMLButtonElement;
@@ -320,6 +327,9 @@ class DocenStatusBar extends FASTElement {
     this.#renderPages();
   }
   totalChanged(): void {
+    this.#renderPages();
+  }
+  pageLabelChanged(): void {
     this.#renderPages();
   }
   wordsChanged(): void {
@@ -390,8 +400,10 @@ class DocenStatusBar extends FASTElement {
   }
 
   /** The view buttons' pressed state mirrors the host's active view (none
-   *  pressed in Draft — Word's status bar has no Draft button to light). */
+   *  pressed in Draft — Word's status bar has no Draft button to light). An
+   *  unstamped view hides the cluster (hosts without view surfaces). */
   #syncViewPressed(): void {
+    if (this.viewsEl) this.viewsEl.style.display = this.view == null ? "none" : "";
     const active =
       this.view === "read"
         ? "reading"
@@ -435,9 +447,10 @@ class DocenStatusBar extends FASTElement {
   }
 
   /** The book's check/cross face + localized tooltip mirror the host's
-   *  proofing state. */
+   *  proofing state; an unstamped state hides the book. */
   #syncSpellState(): void {
     if (!this.spellBtn) return;
+    this.spellBtn.style.display = this.proofing == null ? "none" : "";
     this.spellBtn.dataset.state = this.proofing === "issues" ? "issues" : "ok";
     this.spellBtn.title = t("status.spelling", this);
   }
@@ -465,26 +478,32 @@ class DocenStatusBar extends FASTElement {
   }
 
   #renderSection(): void {
+    // Hosts render exactly what they stamp — an unstamped attr collapses its
+    // item (the presentation host has no section/word nouns).
     if (this.sectionEl)
-      this.sectionEl.textContent = t("status.section", this).replace(
-        "{n}",
-        String(Number(this.section ?? 1)),
-      );
+      this.sectionEl.textContent =
+        this.section == null
+          ? ""
+          : t("status.section", this).replace("{n}", String(Number(this.section)));
   }
 
   #renderPages(): void {
-    if (this.pagesEl)
-      this.pagesEl.textContent = t("status.page-of", this)
-        .replace("{page}", String(Number(this.page || 1)))
-        .replace("{total}", String(Number(this.total || 1)));
+    if (!this.pagesEl) return;
+    if (this.page == null) {
+      this.pagesEl.textContent = "";
+      return;
+    }
+    this.pagesEl.textContent = (this.pageLabel || t("status.page-of", this))
+      .replace("{page}", String(Number(this.page)))
+      .replace("{total}", String(Number(this.total || 1)));
   }
 
   #renderWords(): void {
     if (this.wordsEl)
-      this.wordsEl.textContent = t("status.words", this).replace(
-        "{n}",
-        String(Number(this.words ?? 0)),
-      );
+      this.wordsEl.textContent =
+        this.words == null
+          ? ""
+          : t("status.words", this).replace("{n}", String(Number(this.words)));
   }
 
   #renderZoom(): void {
