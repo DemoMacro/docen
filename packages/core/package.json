@@ -31,6 +31,10 @@
   "main": "dist/index.mjs",
   "types": "dist/index.d.mts",
   "exports": {
+    "./geometry": {
+      "types": "./dist/geometry/index.d.mts",
+      "import": "./dist/geometry/index.mjs"
+    },
     ".": {
       "types": "./dist/index.d.mts",
       "import": "./dist/index.mjs"
@@ -43,6 +47,7 @@
   },
   "dependencies": {
     "@docen/layout": "workspace:*",
+    "@office-open/core": "0.14.5",
     "leafer-ui": "2.2.10"
   }
 }

@@ -67,6 +67,7 @@
     "prepack": "pnpm build"
   },
   "dependencies": {
+    "@docen/core": "workspace:*",
     "@docen/layout": "workspace:*",
     "@docen/markdown": "workspace:*",
     "@office-open/core": "0.14.5",

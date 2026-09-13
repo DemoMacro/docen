@@ -88,8 +88,9 @@ export {
 
 // Preset geometry evaluator (ECMA-376 prstGeom → SVG path data), shared by the
 // layout projection (non-box shapes become path members) and the editor's
-// shapes gallery (live SVG previews) so both render from one evaluator.
-export { presetShapePaths, type PresetShapeOutline } from "./layout/geometry/preset-shape";
+// shapes gallery (live SVG previews) so both render from one evaluator. The
+// evaluator itself is format-neutral and lives in @docen/core.
+export { presetShapePaths, type PresetShapeOutline } from "@docen/core/geometry";
 
 // Types
 export type * from "./types";

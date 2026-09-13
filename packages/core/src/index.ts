@@ -10,4 +10,5 @@
  * @module
  */
 
+export * from "./geometry/preset-shape";
 export * from "./painter";
