@@ -30,6 +30,7 @@ export { default as DocenDefineListDialog } from "./define-list-dialog";
 export { default as DocenCaptionDialog } from "./caption-dialog";
 export { default as DocenNoteDialog } from "./note-dialog";
 export { default as DocenNoteSettingsDialog } from "./note-settings-dialog";
+export { default as DocenLineNumbersDialog } from "./line-numbers-dialog";
 export { default as DocenFieldDialog } from "./field-dialog";
 export { default as DocenChartDataDialog } from "./chart-data-dialog";
 export { default as DocenCompressPicturesDialog } from "./compress-pictures-dialog";

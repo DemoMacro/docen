@@ -87,7 +87,9 @@ describe("computeLineNumbers", () => {
       [section({ lineNumbers: { ...CONFIG, countBy: 2, start: 10 } })],
       [0],
     );
-    expect(out.get(0)!.map((m) => m.num)).toEqual([11, 13]);
+    // The first line carries `start` itself, then every countBy-th line
+    // after — lines 1/3/5 paint 10/12/14.
+    expect(out.get(0)!.map((m) => m.num)).toEqual([10, 12, 14]);
   });
 
   it("restart resets per page (newPage) or runs on (continuous)", () => {

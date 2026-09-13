@@ -427,14 +427,14 @@ const breaksItems = (): string =>
 
 // Word's Line Numbers menu: the numbering mode writes w:lnNumType on the
 // current section; the trailing options entry opens Word's Line Numbering
-// dialog (start-at / count-by / distance) — greyed until that dialog exists.
+// dialog (start-at / count-by / distance).
 const lineNumbersItems = (): string =>
   JSON.stringify([
     { text: opt("no-line-numbers"), value: "none", event: "line-numbers" },
     { text: opt("continuous-line-numbers"), value: "continuous", event: "line-numbers" },
     { text: opt("restart-each-page"), value: "newPage", event: "line-numbers" },
     { text: opt("restart-each-section"), value: "newSection", event: "line-numbers" },
-    { text: opt("line-numbering-options"), value: "options", disabled: true },
+    { text: opt("line-numbering-options"), value: "options", event: "line-numbers" },
   ]);
 
 // Word's Hyphenation menu. The layout engine has no hyphenation dictionary or

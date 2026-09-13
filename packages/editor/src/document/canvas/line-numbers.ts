@@ -64,7 +64,9 @@ export function computeLineNumbers(
         const numbered = firstColRight == null || (item.xPx ?? 0) < firstColRight;
         for (const line of item.block.lines) {
           counter += 1;
-          if (numbered && counter % countBy === 0) {
+          // Word numbers the restart's FIRST line `start`, then paints every
+          // countBy-th line after it — the phase anchors on line 1, not 0.
+          if (numbered && (counter - 1) % countBy === 0) {
             // The label's glyphs hang on the line's baseline like its text:
             // the mark depth minus Leafer's own 0.85 × size element anchor,
             // so the painted baseline lands exactly on the shared

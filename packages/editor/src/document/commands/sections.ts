@@ -3,6 +3,7 @@ import { convertMillimetersToTwip, sectionPageSizeDefaults } from "@docen/docx";
 import type { Editor } from "@docen/docx/core";
 
 import type { ColumnsValues } from "../../ui/components/workspace/columns-dialog";
+import type { LineNumbersValues } from "../../ui/components/workspace/line-numbers-dialog";
 import type { PageSetupValues } from "../../ui/components/workspace/page-setup-dialog";
 import type { BorderSideState, BordersDialogPatch } from "../extensions/commands";
 import { MARGINS, PAPER_SIZES, marginTwipsFromCss, mergeSectionProperties } from "../page-setup";
@@ -228,14 +229,62 @@ export class SectionCommands {
 
   /** Line numbering mode for the current section (w:lnNumType) — Word's
    *  Layout → Line Numbers menu. "none" clears the numbering; the restart
-   *  modes map to w:lnNumType's @w:restart values. */
+   *  modes map to w:lnNumType's @w:restart values. The rest of the lnNumType
+   *  (start/countBy/distance from the options dialog) survives the toggle,
+   *  with Word's countBy 1 seeding a fresh numbering. */
   setLineNumbers(mode: "none" | "continuous" | "newPage" | "newSection"): void {
     this.mutateCurrentSection((cur) => ({
       ...cur,
       lineNumberType:
-        mode === "none" ? undefined : { ...cur?.lineNumberType, countBy: 1, restart: mode },
+        mode === "none" ? undefined : { countBy: 1, ...cur?.lineNumberType, restart: mode },
     }));
   }
+
+  /** Open the Line Numbering Options dialog prefilled from the current
+   *  section's w:lnNumType (the Line Numbers menu's options entry). */
+  openLineNumbersOptions(): void {
+    const cur = this.currentSectionProperties()?.lineNumberType;
+    const atLeast = (v: number | string | undefined): number | undefined =>
+      typeof v === "number" && v >= 1 ? v : undefined;
+    (
+      this.host.element().shadowRoot?.querySelector("docen-line-numbers-dialog") as {
+        show(values?: Partial<LineNumbersValues>): void;
+      } | null
+    )?.show({
+      start: atLeast(cur?.start) ?? 1,
+      countBy: atLeast(cur?.countBy) ?? 1,
+      // Twips → centimeters; absent distance = Word's auto margin placement.
+      distance:
+        typeof cur?.distance === "number" && cur.distance > 0
+          ? Math.round(((cur.distance * 2.54) / 1440) * 100) / 100
+          : undefined,
+      restart:
+        cur?.restart === "newPage" || cur?.restart === "newSection" ? cur.restart : "continuous",
+    });
+  }
+
+  /** The Line Numbering Options dialog's OK — write start/countBy/restart and
+   *  the centimeters-converted distance back onto the current section's
+   *  w:lnNumType; the transaction re-renders (the painter draws the numbers).
+   *  A cleared distance removes the attribute (Word's 自动). */
+  readonly onLineNumbersOk = (event: CustomEvent<LineNumbersValues | undefined>): void => {
+    const values = event.detail;
+    if (!values) return;
+    this.mutateCurrentSection((cur) => {
+      const next: SectionPropertiesOptions["lineNumberType"] = {
+        ...cur?.lineNumberType,
+        start: Math.max(1, Math.round(values.start) || 1),
+        countBy: Math.max(1, Math.round(values.countBy) || 1),
+        restart: values.restart,
+      };
+      if (values.distance != null && values.distance > 0) {
+        next.distance = convertMillimetersToTwip(values.distance * 10);
+      } else {
+        delete next.distance;
+      }
+      return { ...cur, lineNumberType: next };
+    });
+  };
 
   /** Open the Page Setup dialog prefilled from the current section's geometry
    *  in centimeters (the Margins menu's Custom Margins and the Size menu's

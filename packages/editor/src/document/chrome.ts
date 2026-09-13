@@ -253,6 +253,7 @@ export const documentTemplate = html`
   <docen-caption-dialog part="caption"></docen-caption-dialog>
   <docen-note-dialog part="note"></docen-note-dialog>
   <docen-note-settings-dialog part="note-settings"></docen-note-settings-dialog>
+  <docen-line-numbers-dialog part="line-numbers"></docen-line-numbers-dialog>
   <docen-field-dialog part="field"></docen-field-dialog>
   <docen-chart-data-dialog part="chart-data"></docen-chart-data-dialog>
   <docen-compress-pictures-dialog part="compress-pictures"></docen-compress-pictures-dialog>

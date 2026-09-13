@@ -1696,6 +1696,11 @@ class DocenDocument extends AddinHost<Editor> {
       "note-settings:ok",
       this.onNoteSettingsOk as EventListener,
     );
+    // Line Numbering Options dialog — ok (current section's w:lnNumType).
+    this.shadowRoot!.querySelector("docen-line-numbers-dialog")?.addEventListener(
+      "line-numbers:ok",
+      this.#sections.onLineNumbersOk as EventListener,
+    );
     // Document Inspector (检查问题) — the findings dialog's removal buttons.
     this.shadowRoot!.querySelector("docen-inspect-dialog")?.addEventListener(
       "inspect:clear-comments",
@@ -2642,6 +2647,9 @@ class DocenDocument extends AddinHost<Editor> {
     this.shadowRoot
       ?.querySelector("docen-note-settings-dialog")
       ?.removeEventListener("note-settings:ok", this.onNoteSettingsOk as EventListener);
+    this.shadowRoot
+      ?.querySelector("docen-line-numbers-dialog")
+      ?.removeEventListener("line-numbers:ok", this.#sections.onLineNumbersOk as EventListener);
     this.shadowRoot
       ?.querySelector("docen-status-bar")
       ?.removeEventListener("language:open", this.#onLanguageOpen as EventListener);
@@ -4942,9 +4950,11 @@ class DocenDocument extends AddinHost<Editor> {
       return;
     }
     // Line Numbers menu (the Layout tab): the mode writes w:lnNumType's
-    // restart on the current section; "none" clears the numbering.
+    // restart on the current section; "none" clears the numbering; the
+    // options entry opens the Line Numbering Options dialog.
     if (name === "line-numbers") {
-      if (
+      if (value === "options") this.#sections.openLineNumbersOptions();
+      else if (
         value === "none" ||
         value === "continuous" ||
         value === "newPage" ||
