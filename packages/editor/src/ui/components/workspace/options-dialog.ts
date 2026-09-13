@@ -18,10 +18,28 @@ interface ThemeOption {
   label: string;
 }
 
+/** The "Document" section's seed/commit shape — the host converts between
+ *  twips and cm, the dialog speaks human units only. */
+export interface DocumentSettings {
+  /** Default tab stop in cm — undefined leaves the document's value untouched. */
+  defaultTabStop?: number;
+  /** Update fields when the document opens. */
+  updateFields?: boolean;
+  /** office-open protection token ("none" = unrestricted). */
+  protection?: string;
+  /** Word compatibility mode version (15 = 2013+, 14 = 2010, 12 = 2007). */
+  compatVersion?: number;
+}
+
 // Per-instance CSS anchor names so each dropdown's listbox popover floats
 // under its own control — without it, Fluent's default strands the popover at
 // the viewport corner (same race as <docen-ribbon-combobox>).
 let seq = 0;
+
+// Protection tokens in listbox order — #applyLabels pairs them with i18n.
+const protectionKeys = ["none", "readOnly", "trackedChanges", "comments", "forms"];
+// OOXML version → release year, for the compat labels' i18n keys.
+const compatYears: Record<string, string> = { "15": "2013", "14": "2010", "12": "2007" };
 
 const styles = css`
   :host {
@@ -43,6 +61,25 @@ const styles = css`
   }
   .opt-heading {
     font-weight: 600;
+  }
+  .opt-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .opt-row label {
+    flex: none;
+    min-width: 96px;
+  }
+  .opt-row > *:not(label) {
+    flex: 1;
+    min-width: 0;
+  }
+  .check-field {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
   }
   fluent-dropdown {
     width: 100%;
@@ -120,11 +157,59 @@ const template = html<DocenOptionsDialog>`
       </div>
       <div class="opt-field">
         <div class="opt-heading" ${ref("spellHeadingEl")}></div>
-        <fluent-checkbox ${ref("spellBox")}></fluent-checkbox>
+        <!-- fluent-checkbox has no default label slot (indicator slots only) —
+             the label span sits outside, the wrapping <label> routes clicks. -->
+        <label class="check-field">
+          <fluent-checkbox ${ref("spellBox")}></fluent-checkbox>
+          <span ${ref("spellLabelEl")}></span>
+        </label>
       </div>
       <div class="opt-field">
         <div class="opt-heading" ${ref("markdownHeadingEl")}></div>
-        <fluent-checkbox ${ref("markdownBox")}></fluent-checkbox>
+        <label class="check-field">
+          <fluent-checkbox ${ref("markdownBox")}></fluent-checkbox>
+          <span ${ref("markdownLabelEl")}></span>
+        </label>
+      </div>
+      <div class="opt-field">
+        <div class="opt-heading" ${ref("docHeadingEl")}></div>
+        <div class="opt-row">
+          <label ${ref("tabLabelEl")}></label>
+          <fluent-text-input
+            ${ref("tabInput")}
+            type="number"
+            step="any"
+            min="0"
+          ></fluent-text-input>
+        </div>
+        <label class="check-field">
+          <fluent-checkbox ${ref("updateFieldsBox")}></fluent-checkbox>
+          <span ${ref("updateFieldsLabelEl")}></span>
+        </label>
+        <div class="opt-row">
+          <label ${ref("protectionLabelEl")}></label>
+          <fluent-dropdown type="combobox" appearance="outline" ${ref("protectionDropdown")}>
+            <fluent-listbox popover="manual" tabindex="-1" ${ref("protectionListbox")}>
+              <fluent-option value="none"></fluent-option>
+              <fluent-option value="readOnly"></fluent-option>
+              <fluent-option value="trackedChanges"></fluent-option>
+              <fluent-option value="comments"></fluent-option>
+              <fluent-option value="forms"></fluent-option>
+            </fluent-listbox>
+            <input slot="control" role="combobox" aria-readonly="true" readonly />
+          </fluent-dropdown>
+        </div>
+        <div class="opt-row">
+          <label ${ref("compatLabelEl")}></label>
+          <fluent-dropdown type="combobox" appearance="outline" ${ref("compatDropdown")}>
+            <fluent-listbox popover="manual" tabindex="-1" ${ref("compatListbox")}>
+              <fluent-option value="15"></fluent-option>
+              <fluent-option value="14"></fluent-option>
+              <fluent-option value="12"></fluent-option>
+            </fluent-listbox>
+            <input slot="control" role="combobox" aria-readonly="true" readonly />
+          </fluent-dropdown>
+        </div>
       </div>
     </div>
     <div slot="action" class="opt-actions">
@@ -155,13 +240,16 @@ type ComboboxLike = {
  * so a locale added via `registerTranslation` or an add-in's `localizationInfo`
  * appears here with no further wiring), theme (the built-in Fluent web /
  * teams / high-contrast themes, plus any registered via registerTheme), and
- * the spell-as-you-type toggle (Proofing). Rides
+ * the spell-as-you-type toggle (Proofing). The "Document" section edits the
+ * open document's settings.xml-level options (tab stop / field update /
+ * editing restrictions / compatibility mode) seeded via the `document`
+ * property. Rides
  * on `<docen-dialog>` for
  * the modal shell (backdrop / Esc / show).
  *
  * The host seeds the current values via `locale` / `theme` / `proofing` /
- * `markdown`, calls `show()`, and listens for
- * `options:ok { lang, theme, spellcheck, markdown }` (确定).
+ * `markdown` / `document`, calls `show()`, and listens for
+ * `options:ok { lang, theme, spellcheck, markdown, document }` (确定).
  * Cancel / Esc just close.
  * State commits atomically on OK (Office behavior — not live).
  *
@@ -192,8 +280,23 @@ class DocenOptionsDialog extends FASTElement {
   @observable themeInput?: HTMLInputElement;
   @observable spellHeadingEl?: HTMLElement;
   @observable spellBox?: HTMLElement & { checked?: boolean };
+  @observable spellLabelEl?: HTMLElement;
   @observable markdownHeadingEl?: HTMLElement;
   @observable markdownBox?: HTMLElement & { checked?: boolean };
+  @observable markdownLabelEl?: HTMLElement;
+  /** The document settings seed — the host assigns it before show(). */
+  @observable document?: DocumentSettings;
+  @observable docHeadingEl?: HTMLElement;
+  @observable tabLabelEl?: HTMLElement;
+  @observable tabInput?: HTMLInputElement & { value: string };
+  @observable updateFieldsBox?: HTMLElement & { checked?: boolean };
+  @observable updateFieldsLabelEl?: HTMLElement;
+  @observable protectionLabelEl?: HTMLElement;
+  @observable protectionDropdown?: HTMLElement & { value: string };
+  @observable protectionListbox?: HTMLElement;
+  @observable compatLabelEl?: HTMLElement;
+  @observable compatDropdown?: HTMLElement & { value: string };
+  @observable compatListbox?: HTMLElement;
   @observable okBtn?: HTMLElement;
   @observable cancelBtn?: HTMLElement;
   /** Pickable locales — refreshed when a locale is registered at runtime. */
@@ -244,6 +347,12 @@ class DocenOptionsDialog extends FASTElement {
     // never renders (the prefill/read-back rule).
     if (this.spellBox) this.spellBox.checked = this.proofing !== "false";
     if (this.markdownBox) this.markdownBox.checked = this.markdown !== "false";
+    const d = this.document;
+    if (this.tabInput)
+      this.tabInput.value = d?.defaultTabStop != null ? String(d.defaultTabStop) : "";
+    if (this.updateFieldsBox) this.updateFieldsBox.checked = d?.updateFields === true;
+    if (this.protectionDropdown) this.protectionDropdown.value = d?.protection ?? "none";
+    if (this.compatDropdown) this.compatDropdown.value = String(d?.compatVersion ?? 15);
     this.#syncCombobox(
       this.dropdown as unknown as ComboboxLike | undefined,
       this.listbox,
@@ -262,6 +371,7 @@ class DocenOptionsDialog extends FASTElement {
   }
 
   readonly onOk = (): void => {
+    const tab = this.tabInput ? Number.parseFloat(this.tabInput.value) : Number.NaN;
     this.dispatchEvent(
       new CustomEvent("options:ok", {
         bubbles: true,
@@ -271,6 +381,12 @@ class DocenOptionsDialog extends FASTElement {
           theme: this.#themeLocal,
           spellcheck: this.spellBox?.checked !== false,
           markdown: this.markdownBox?.checked !== false,
+          document: {
+            defaultTabStop: Number.isFinite(tab) ? tab : undefined,
+            updateFields: this.updateFieldsBox?.checked === true,
+            protection: this.protectionDropdown?.value ?? "none",
+            compatVersion: Number(this.compatDropdown?.value ?? 15),
+          } satisfies DocumentSettings,
         },
       }),
     );
@@ -296,9 +412,25 @@ class DocenOptionsDialog extends FASTElement {
     if (this.headingEl) this.headingEl.textContent = t("options.uiLanguage", this);
     if (this.themeHeadingEl) this.themeHeadingEl.textContent = t("options.theme", this);
     if (this.spellHeadingEl) this.spellHeadingEl.textContent = t("options.proofing", this);
-    if (this.spellBox) this.spellBox.textContent = t("options.spellAsYouType", this);
+    if (this.spellLabelEl) this.spellLabelEl.textContent = t("options.spellAsYouType", this);
     if (this.markdownHeadingEl) this.markdownHeadingEl.textContent = t("options.markdown", this);
-    if (this.markdownBox) this.markdownBox.textContent = t("options.markdownInput", this);
+    if (this.markdownLabelEl) this.markdownLabelEl.textContent = t("options.markdownInput", this);
+    if (this.docHeadingEl) this.docHeadingEl.textContent = t("options.document", this);
+    if (this.tabLabelEl) this.tabLabelEl.textContent = t("options.defaultTabStop", this);
+    if (this.updateFieldsLabelEl)
+      this.updateFieldsLabelEl.textContent = t("options.updateFields", this);
+    if (this.protectionLabelEl) this.protectionLabelEl.textContent = t("options.protection", this);
+    if (this.compatLabelEl) this.compatLabelEl.textContent = t("options.compat", this);
+    this.protectionListbox?.querySelectorAll("fluent-option").forEach((opt, i) => {
+      opt.textContent = t(`options.protection.${protectionKeys[i]}`, this);
+    });
+    // The compatibility labels key off the release year (readable i18n); the
+    // option values stay the OOXML version numbers.
+    this.compatListbox?.querySelectorAll("fluent-option").forEach((opt) => {
+      const v = opt.getAttribute("value");
+      const year = v ? compatYears[v] : undefined;
+      if (v && year) opt.textContent = t(`options.compat.${year}`, this);
+    });
     if (this.okBtn) this.okBtn.textContent = t("options.ok", this);
     if (this.cancelBtn) this.cancelBtn.textContent = t("options.cancel", this);
   }

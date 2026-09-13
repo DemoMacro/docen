@@ -13,6 +13,7 @@
 import { pinImage } from "@docen/core";
 import {
   compileDocument,
+  convertMillimetersToTwip,
   defaultParagraphStyleId,
   docxExtensions,
   effectiveRunProps,
@@ -390,6 +391,10 @@ class DocenDocument extends AddinHost<Editor> {
   /** The Markdown input mode (Options → Markdown) — session-level, like the
    *  spelling toggle: the bridge reads it per keystroke via a getter. */
   #markdown = true;
+  /** Whether the document's settings.xml carries a read-only editing
+   *  restriction (Options → Document). Folds into every editable
+   *  computation — never a second setEditable writer. */
+  #docProtected = false;
   /** References-tab commands (citations/bibliography/index marking), split
    *  out of this class — see commands/references.ts. */
   readonly #spelling = new SpellingCommands({
@@ -2274,15 +2279,22 @@ class DocenDocument extends AddinHost<Editor> {
     const mode = this.#viewMode();
     this.#stage?.setViewMode(mode);
     this.#syncReadChrome(mode === "read");
-    if (this.editor) {
-      const editable = this.editable !== "false" && mode !== "read";
-      if (this.editor.isEditable !== editable) {
-        this.editor.setEditable(editable);
-        this.#syncEditModeMenu();
-      }
-    }
+    this.#syncEditable();
     this.#renderDoc(this.getJSON());
     this.#updateStatus();
+  }
+
+  /** The one editable computation: host attr ∧ view mode ∧ document
+   *  protection. Every path that derives editability from state calls this —
+   *  protection changes just flip #docProtected and re-run it. */
+  #syncEditable(): void {
+    if (!this.editor) return;
+    const editable =
+      this.editable !== "false" && this.#viewMode() !== "read" && !this.#docProtected;
+    if (this.editor.isEditable !== editable) {
+      this.editor.setEditable(editable);
+      this.#syncEditModeMenu();
+    }
   }
 
   /** Read Mode trims the chrome to the document (Word hides the ribbon and
@@ -2566,12 +2578,8 @@ class DocenDocument extends AddinHost<Editor> {
     if (this.#stage.viewMode !== p.viewMode) {
       this.#stage.setViewMode(p.viewMode);
       this.#syncReadChrome(p.viewMode === "read");
-      if (this.editor) {
-        const editable = this.editable !== "false" && p.viewMode !== "read";
-        this.editor.setEditable(editable);
-        this.#syncEditModeMenu();
-      }
     }
+    this.#syncEditable();
     return this.#stage;
   }
 
@@ -4956,9 +4964,10 @@ class DocenDocument extends AddinHost<Editor> {
     const editor = this.editor;
     if (!editor) return;
     // Edit / View mode — toggle the editor's editable state (tab-row "Editing"
-    // menu); then re-stamp the menu so its label + checked item follow.
+    // menu); then re-stamp the menu so its label + checked item follow. A
+    // read-only protected document stays protected in Editing mode.
     if (name === "edit-mode") {
-      editor.setEditable(value !== "view");
+      editor.setEditable(value !== "view" && !this.#docProtected);
       this.#syncEditModeMenu();
       return;
     }
@@ -5813,13 +5822,25 @@ class DocenDocument extends AddinHost<Editor> {
         break;
       case "options": {
         // Filename menu → open the Options dialog (UI language + theme +
-        // spell-as-you-type + Markdown input).
+        // spell-as-you-type + Markdown input + the document settings).
         const optionsEl = this.shadowRoot?.querySelector("docen-options-dialog");
         if (optionsEl) {
           optionsEl.setAttribute("locale", this.lang || document.documentElement.lang || "zh-CN");
           optionsEl.setAttribute("theme", this.theme ?? "light");
           optionsEl.setAttribute("proofing", String(this.#spelling.enabled()));
           optionsEl.setAttribute("markdown", String(this.#markdown));
+          // The Document section seeds from the settings.xml slice; the tab
+          // stop converts twips → cm (round-trip of convertMillimetersToTwip).
+          const s = this.#documentSettings();
+          (optionsEl as unknown as { document?: unknown }).document = {
+            defaultTabStop:
+              typeof s.defaultTabStop === "number"
+                ? Math.round((s.defaultTabStop / (1440 / 2.54)) * 100) / 100
+                : undefined,
+            updateFields: s.updateFields === true,
+            protection: (s.documentProtection as { edit?: string } | undefined)?.edit ?? "none",
+            compatVersion: (s.compatibility as { version?: number } | undefined)?.version ?? 15,
+          };
           (optionsEl as unknown as { show?: () => void }).show?.();
         }
         break;
@@ -5869,17 +5890,29 @@ class DocenDocument extends AddinHost<Editor> {
       ?.setAttribute("language", proofingLanguageName(this.#caretLanguage().value));
   }
 
-  /** Options dialog 确定 — commit the UI language + theme. */
+  /** Options dialog 确定 — commit the UI language + theme + the document
+   *  settings. */
   readonly #onOptionsOk = (event: Event): void => {
-    const { lang, theme, spellcheck, markdown } =
-      (
-        event as CustomEvent<{
-          lang?: string;
-          theme?: string;
-          spellcheck?: boolean;
-          markdown?: boolean;
-        }>
-      ).detail ?? {};
+    const {
+      lang,
+      theme,
+      spellcheck,
+      markdown,
+      document: docSettings,
+    } = (
+      event as CustomEvent<{
+        lang?: string;
+        theme?: string;
+        spellcheck?: boolean;
+        markdown?: boolean;
+        document?: {
+          defaultTabStop?: number;
+          updateFields?: boolean;
+          protection?: string;
+          compatVersion?: number;
+        };
+      }>
+    ).detail ?? {};
     if (lang && this.getAttribute("lang") !== lang) {
       this.setAttribute("lang", lang);
       this.#emitLangChange(lang);
@@ -5894,7 +5927,58 @@ class DocenDocument extends AddinHost<Editor> {
       // No transaction rides an options commit — re-stamp the ribbon toggle.
       this.#syncFormatButtons();
     }
+    if (docSettings) this.#applyDocumentSettings(docSettings);
   };
+
+  /** Options → Document commit: fold the dialog's values into
+   *  documentExtras.settings (the same channel every settings toggle uses) and
+   *  re-derive editability. The tab stop rides the layout projection, so a
+   *  change needs the transaction; a no-change OK skips it to avoid planting
+   *  an undo step. */
+  #applyDocumentSettings(d: {
+    defaultTabStop?: number;
+    updateFields?: boolean;
+    protection?: string;
+    compatVersion?: number;
+  }): void {
+    const editor = this.editor;
+    if (!editor) return;
+    const prev = this.#documentSettings();
+    const prevTab = typeof prev.defaultTabStop === "number" ? prev.defaultTabStop : undefined;
+    const prevProtection = (prev.documentProtection as { edit?: string } | undefined)?.edit;
+    const prevCompat = (prev.compatibility as { version?: number } | undefined)?.version;
+    // Empty tab input = untouched (undefined survives the round-trip compare).
+    const tabTwip =
+      d.defaultTabStop != null ? convertMillimetersToTwip(d.defaultTabStop * 10) : prevTab;
+    if (
+      tabTwip !== prevTab ||
+      d.updateFields !== (prev.updateFields === true) ||
+      d.protection !== (prevProtection ?? "none") ||
+      d.compatVersion !== (prevCompat ?? 15)
+    ) {
+      const attrs = (editor.state.doc.attrs ?? {}) as { documentExtras?: Record<string, unknown> };
+      const extras = attrs.documentExtras ?? {};
+      const settings: Record<string, unknown> = { ...prev };
+      if (tabTwip != null) settings.defaultTabStop = tabTwip;
+      if (d.updateFields) settings.updateFields = true;
+      else delete settings.updateFields;
+      if (d.protection === "none") delete settings.documentProtection;
+      else settings.documentProtection = { edit: d.protection };
+      settings.compatibility = {
+        ...(prev.compatibility as object | undefined),
+        version: d.compatVersion,
+      };
+      editor.view.dispatch(
+        editor.state.tr.setDocAttribute("documentExtras", { ...extras, settings }),
+      );
+    }
+    // Protection folds into #syncEditable's formula; a tracked-changes
+    // restriction additionally forces revision tracking on (Word "start
+    // enforcement" behavior).
+    this.#docProtected = d.protection === "readOnly";
+    if (d.protection === "trackedChanges") editor.commands["track-changes"](true);
+    this.#syncEditable();
+  }
 
   /** Notify external listeners (framework wrappers like @docen/vue) when the
    *  locale changes from inside the host — status-bar toggle or Options OK.
@@ -6390,6 +6474,26 @@ class DocenDocument extends AddinHost<Editor> {
     // never per layout, or the preset commands' own re-renders would overwrite
     // the snapshot and the restore would replay the current state.
     this.#snapshotStyles();
+    // Document settings ride documentExtras.settings — re-read the protection
+    // at this load boundary (a previous document's state must not leak), then
+    // re-derive editability. Word also forces revision tracking on when a
+    // document opens under a tracked-changes restriction.
+    const settings = this.#documentSettings();
+    const protection = (settings.documentProtection as { edit?: string } | undefined)?.edit;
+    this.#docProtected = protection === "readOnly";
+    if (protection === "trackedChanges") {
+      editor.commands["track-changes"](true);
+    }
+    this.#syncEditable();
+  }
+
+  /** The open document's settings.xml slice, as stored in
+   *  doc.attrs.documentExtras.settings (the toggleSectionFlag channel). */
+  #documentSettings(): Record<string, unknown> {
+    const attrs = (this.editor?.state.doc.attrs ?? {}) as {
+      documentExtras?: { settings?: Record<string, unknown> };
+    };
+    return attrs.documentExtras?.settings ?? {};
   }
 
   /** Last textblock/leaf block (deepest, rightmost) for the #loadDoc re-stamp
