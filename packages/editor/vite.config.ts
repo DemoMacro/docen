@@ -15,7 +15,7 @@ export default defineConfig({
       "src/ui/**/*",
       "src/document/**/*",
       "src/workbook.ts",
-      "src/presentation.ts",
+      "src/presentation/**/*",
       // Co-located vitest specs live under src/ but must not ship in dist
       // (they import vitest and would resurface as stale suites in test runs).
       "!src/**/*.spec.ts",

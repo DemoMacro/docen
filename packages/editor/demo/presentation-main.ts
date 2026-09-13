@@ -1,17 +1,10 @@
 /**
- * Presentation demo entry — mounts `<docen-presentation>` (viewer route:
- * parse → project → LeaferJS slides) with a file opener.
+ * Presentation demo entry — mounts `<docen-presentation>` (workspace route:
+ * title-bar/ribbon/status-bar chrome + parse → project → LeaferJS slides).
+ * Files open through the element's own title-bar menu.
  */
-import { registerComponents, type DocenPresentation } from "@docen/editor";
+import { registerComponents } from "@docen/editor";
 
 void registerComponents().then(() => {
-  const el = document.createElement("docen-presentation") as DocenPresentation;
-  document.body.append(el);
-
-  const file = document.querySelector<HTMLInputElement>("#file")!;
-  file.addEventListener("change", () => {
-    const picked = file.files?.[0];
-    if (!picked) return;
-    void picked.arrayBuffer().then((buffer) => el.openPresentation(buffer));
-  });
+  document.body.append(document.createElement("docen-presentation"));
 });
