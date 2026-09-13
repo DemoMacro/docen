@@ -14,7 +14,7 @@ import type { GeometryGuide } from "@office-open/core";
 import type { CustomGeometryOptions } from "@office-open/core/drawing";
 import type { GroupChildMediaData, GroupOptions, MediaDataTransformation } from "@office-open/docx";
 
-import { arcToSegments, presetShapePaths } from "../geometry/preset-shape";
+import { arcToSegments, presetShapePaths, presetShapeTextRect } from "../geometry/preset-shape";
 import type { ProjectContext } from "./context";
 import { colorOf, isRecord, measureEmu, num, str, type BodyParagraph, type Rec } from "./guards";
 import { metafileMembers, pictureSrc } from "./media";
@@ -29,6 +29,15 @@ const BODY_INSET_EMU = { left: 91440, right: 91440, top: 45720, bottom: 45720 };
  *  picture) carries no paintable flat color → undefined. */
 function solidFillOf(fill: unknown): string | undefined {
   return isRecord(fill) && fill.type === "solid" ? colorOf(fill.color) : undefined;
+}
+
+/** A straight-line preset's segment: the box diagonal, corner to corner
+ *  (top-left first). The xfrm flips are NOT baked in here — the painter's
+ *  mirror group is the single flip consumer (baking them in too would mirror
+ *  twice and cancel the flip out). */
+function linePathData(width: number, height: number): string {
+  const p = (v: number): string => String(Math.round(v * 100) / 100);
+  return `M 0 0 L ${p(width)} ${p(height)}`;
 }
 
 /** Solid-fill opacity from the color's alpha transform (integer percent,
@@ -53,6 +62,8 @@ export function outlineOf(outline: unknown):
       cap?: "round" | "square" | "flat";
       join?: "round" | "bevel" | "miter";
       dash?: string;
+      headEnd?: { type: string; px: number };
+      tailEnd?: { type: string; px: number };
     }
   | undefined {
   if (!isRecord(outline) || outline.type === "noFill") return undefined;
@@ -72,7 +83,161 @@ export function outlineOf(outline: unknown):
     cap,
     join,
     dash: str(outline.dash),
+    headEnd: lineEndOf(outline.headEnd, emuToPx(widthEmu)),
+    tailEnd: lineEndOf(outline.tailEnd, emuToPx(widthEmu)),
   };
+}
+
+/** A line end (a:headEnd/a:tailEnd) → the arrow type plus its resolved length
+ *  in px: DrawingML sizes the arrow in stroke widths (sm/med/lg length over
+ *  sm/med/lg width — POI's ArrowScale), med/med ≈ 3× the stroke. "none" (the
+ *  schema default) stays undefined. */
+function lineEndOf(end: unknown, linePx: number): { type: string; px: number } | undefined {
+  if (!isRecord(end)) return undefined;
+  const type = str(end.type);
+  if (!type || type === "none") return undefined;
+  const len = end.length === "small" ? 2 : end.length === "large" ? 4.5 : 3;
+  const wide = end.width === "small" ? 0.8 : end.width === "large" ? 1.25 : 1;
+  return { type, px: linePx * len * wide };
+}
+
+/** One line-end arrow expanded into its own paintable path (box-local px).
+ *  triangle/stealth/diamond/oval fill the line color; "arrow" is the open
+ *  chevron, stroked. Returns undefined for types without geometry. */
+function lineEndMember(
+  end: { type: string; px: number },
+  ex: number,
+  ey: number,
+  ux: number,
+  uy: number,
+  color: string | undefined,
+  linePx: number,
+): LayoutDrawingMember | undefined {
+  const L = end.px;
+  const W = L * 0.42;
+  const nx = -uy;
+  const ny = ux;
+  const stroke = { px: Math.max(1, linePx), ...(color ? { color } : {}) };
+  // Polygon vertices (box-local): tip plus the trailing points per shape.
+  let pts: [number, number][];
+  let closed = true;
+  switch (end.type) {
+    case "triangle":
+      pts = [
+        [ex, ey],
+        [ex - ux * L + nx * W, ey - uy * L + ny * W],
+        [ex - ux * L - nx * W, ey - uy * L - ny * W],
+      ];
+      break;
+    case "stealth":
+      pts = [
+        [ex, ey],
+        [ex - ux * L + nx * W, ey - uy * L + ny * W],
+        [ex - ux * L * 0.5, ey - uy * L * 0.5],
+        [ex - ux * L - nx * W, ey - uy * L - ny * W],
+      ];
+      break;
+    case "diamond":
+      pts = [
+        [ex, ey],
+        [ex - ux * L * 0.5 + nx * W, ey - uy * L * 0.5 + ny * W],
+        [ex - ux * L, ey - uy * L],
+        [ex - ux * L * 0.5 - nx * W, ey - uy * L * 0.5 - ny * W],
+      ];
+      break;
+    case "oval":
+      pts = [[ex - ux * L * 0.5, ey - uy * L * 0.5]];
+      break;
+    case "arrow":
+      // The open chevron: two strokes meeting at the tip.
+      pts = [
+        [ex - ux * L + nx * W, ey - uy * L + ny * W],
+        [ex, ey],
+        [ex - ux * L - nx * W, ey - uy * L - ny * W],
+      ];
+      closed = false;
+      break;
+    default:
+      return undefined;
+  }
+  const box = (() => {
+    const xs = pts.map((q) => q[0]);
+    const ys = pts.map((q) => q[1]);
+    if (end.type === "oval") {
+      return {
+        x: xs[0] - W,
+        y: ys[0] - W,
+        width: W * 2,
+        height: W * 2,
+      };
+    }
+    return {
+      x: Math.min(...xs),
+      y: Math.min(...ys),
+      width: Math.max(...xs) - Math.min(...xs),
+      height: Math.max(...ys) - Math.min(...ys),
+    };
+  })();
+  const p = (v: number): string => String(Math.round(v * 100) / 100);
+  const at = (q: [number, number]): string => `${p(q[0] - box.x)} ${p(q[1] - box.y)}`;
+  let d: string;
+  if (end.type === "oval") {
+    // A circle of radius W — four cubic segments (κ = 0.5523).
+    const [cx, cy] = pts[0];
+    const k = W * 0.5523;
+    const rx = cx - box.x;
+    const ry = cy - box.y;
+    d =
+      `M ${p(rx + W)} ${p(ry)}` +
+      ` C ${p(rx + W)} ${p(ry + k)} ${p(rx + k)} ${p(ry + W)} ${p(rx)} ${p(ry + W)}` +
+      ` C ${p(rx - k)} ${p(ry + W)} ${p(rx - W)} ${p(ry + k)} ${p(rx - W)} ${p(ry)}` +
+      ` C ${p(rx - W)} ${p(ry - k)} ${p(rx - k)} ${p(ry - W)} ${p(rx)} ${p(ry - W)}` +
+      ` C ${p(rx + k)} ${p(ry - W)} ${p(rx + W)} ${p(ry - k)} ${p(rx + W)} ${p(ry)} Z`;
+  } else {
+    d = `M ${at(pts[0])}${pts
+      .slice(1)
+      .map((q) => ` L ${at(q)}`)
+      .join("")}${closed ? " Z" : ""}`;
+  }
+  return {
+    kind: "path",
+    x: box.x,
+    y: box.y,
+    width: box.width,
+    height: box.height,
+    d,
+    ...(end.type === "arrow" ? (color ? { line: stroke } : {}) : color ? { fill: color } : {}),
+  };
+}
+
+/** The straight-line member's line-end arrows: expanded into their own fill
+ *  members at both ends of the segment (Word's a:headEnd/a:tailEnd). */
+function lineEndMembersOf(
+  line:
+    | {
+        color?: string;
+        px: number;
+        headEnd?: { type: string; px: number };
+        tailEnd?: { type: string; px: number };
+      }
+    | undefined,
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+): LayoutDrawingMember[] {
+  if (!line) return [];
+  const len = Math.hypot(x1 - x0, y1 - y0);
+  if (len < 1e-6) return [];
+  const ux = (x1 - x0) / len;
+  const uy = (y1 - y0) / len;
+  const head = line.headEnd
+    ? lineEndMember(line.headEnd, x0, y0, -ux, -uy, line.color, line.px)
+    : undefined;
+  const tail = line.tailEnd
+    ? lineEndMember(line.tailEnd, x1, y1, ux, uy, line.color, line.px)
+    : undefined;
+  return [...(head ? [head] : []), ...(tail ? [tail] : [])];
 }
 
 /** The gradient stop closest to the middle position — the flattest honest
@@ -354,6 +519,8 @@ function wpsMemberOf(
       : undefined;
   const children = Array.isArray(data.children) ? data.children : [];
   // The shape's own a:xfrm @rot (degrees) — Word's diagonal watermark.
+  // The xfrm flips stay unprojected here: the LayoutDrawing's flipH/flipV
+  // (threaded below) hand them to the painter's single mirror group.
   const rotation = isRecord(data.transformation) ? num(data.transformation.rotation) : undefined;
   if (children.length > 0) {
     const bodyPr = isRecord(data.bodyProperties) ? data.bodyProperties : {};
@@ -371,9 +538,12 @@ function wpsMemberOf(
     // A non-box preset paints its evaluated silhouette instead of the plain
     // rectangle (Word's prstGeom under the body). The fill layers merge into
     // one d (a donut's subpaths share the fill); with none, the stroke-only
-    // preset carries its outline path (line, arc).
-    const outlines =
-      preset && preset !== "rect" && preset !== "roundRect" && preset !== "ellipse"
+    // preset carries its outline path (line, arc). A straight line skips the
+    // evaluator — its d is the box diagonal.
+    const straight = preset === "line" || preset === "straightConnector1";
+    const outlines = straight
+      ? [{ d: linePathData(width, height), fill: false, stroke: true }]
+      : preset && preset !== "rect" && preset !== "roundRect" && preset !== "ellipse"
         ? presetShapePaths(preset, width, height, adjustments)
         : undefined;
     const silhouette = outlines
@@ -381,6 +551,10 @@ function wpsMemberOf(
           .map((o) => o.d)
           .join(" ")
       : undefined;
+    // A straight line's arrows ride beside the text member (they fill the
+    // line color, so they cannot merge into the silhouette's paint) at the
+    // unflipped diagonal's corners — the painter's mirror group flips them.
+    const arrows = straight ? lineEndMembersOf(line, 0, 0, width, height) : [];
     return [
       {
         kind: "textBox",
@@ -406,12 +580,19 @@ function wpsMemberOf(
               },
             }
           : {}),
-        insets: {
-          left: ins(bodyPr.lIns, BODY_INSET_EMU.left),
-          top: ins(bodyPr.tIns, BODY_INSET_EMU.top),
-          right: ins(bodyPr.rIns, BODY_INSET_EMU.right),
-          bottom: ins(bodyPr.bIns, BODY_INSET_EMU.bottom),
-        },
+        insets: (() => {
+          // Word stacks the text inside the preset's text rectangle (the ECMA
+          // "rect" guides — a circle keeps its words off the rim); the bodyPr
+          // insets apply on top of that shrink. Presets without a rect
+          // definition (the plain box) evaluate to undefined: zero extra.
+          const tr = preset ? presetShapeTextRect(preset, width, height, adjustments) : undefined;
+          return {
+            left: ins(bodyPr.lIns, BODY_INSET_EMU.left) + (tr ? Math.max(0, tr.l) : 0),
+            top: ins(bodyPr.tIns, BODY_INSET_EMU.top) + (tr ? Math.max(0, tr.t) : 0),
+            right: ins(bodyPr.rIns, BODY_INSET_EMU.right) + (tr ? Math.max(0, width - tr.r) : 0),
+            bottom: ins(bodyPr.bIns, BODY_INSET_EMU.bottom) + (tr ? Math.max(0, height - tr.b) : 0),
+          };
+        })(),
         // VerticalAnchor is already full-word ("top"/"center"/"bottom");
         // justify/distribute stretch to the box — treated as top until then.
         anchor: bodyPr.anchor === "center" || bodyPr.anchor === "bottom" ? bodyPr.anchor : "top",
@@ -432,12 +613,13 @@ function wpsMemberOf(
         // matters to PowerPoint-native consumers.
         blocks,
       },
+      ...arrows,
     ];
   }
   // Straight connector (a straight line across its box) and custom
   // geometry both project to path members; the box-like presets stay
   // shape members.
-  if (preset === "line") {
+  if (preset === "line" || preset === "straightConnector1") {
     return [
       {
         kind: "path",
@@ -445,11 +627,14 @@ function wpsMemberOf(
         y,
         width,
         height,
-        d: `M 0 0 L ${Math.round(width * 100) / 100} ${Math.round(height * 100) / 100}`,
+        d: linePathData(width, height),
         fill,
         line,
         ...(shadow ? { shadow } : {}),
       },
+      // The unflipped diagonal's corners — the painter's mirror group flips
+      // the whole member set (segment and arrows alike) in one group.
+      ...lineEndMembersOf(line, 0, 0, width, height),
     ];
   }
   if (preset == null) {

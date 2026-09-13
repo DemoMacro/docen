@@ -2028,4 +2028,70 @@ describe("projectDocumentOptions preset geometry", () => {
     expect(members[1].fill).toBeUndefined();
     expect(members[1].line).toMatchObject({ color: "1F3864" });
   });
+
+  it("expands a straight line's head/tail arrows into their own members", () => {
+    const members = firstMember("line", {
+      fill: { type: "none" },
+      outline: {
+        width: 12700,
+        type: "solidFill",
+        color: { value: "2F528F" },
+        headEnd: { type: "arrow" },
+        tailEnd: { type: "triangle" },
+      },
+    });
+    // The segment plus one member per stamped end.
+    expect(members).toHaveLength(3);
+    if (members[1]?.kind !== "path" || members[2]?.kind !== "path") {
+      throw new Error("expected arrow path members");
+    }
+    // Tail triangle at the segment's far corner (no flips → width,height);
+    // filled with the line color — a separate member because the paint differs.
+    expect(members[2].fill).toBe("2F528F");
+    expect(members[2].x + members[2].width).toBeCloseTo(96, 1);
+    expect(members[2].y + members[2].height).toBeCloseTo(96, 1);
+    // Head open chevron at the origin corner: stroked, not filled.
+    expect(members[1].fill).toBeUndefined();
+    expect(members[1].line).toMatchObject({ color: "2F528F", px: 1.3333333333333333 });
+    expect(members[1].x).toBeLessThanOrEqual(0.01);
+    expect(members[1].y).toBeLessThanOrEqual(0.01);
+  });
+
+  it("keeps the arrows beside the text member when the shape carries a body", () => {
+    // The editor's drag-drawn line inserts with an empty paragraph body, so
+    // the arrows must survive the text-box branch too. The xfrm flips stay
+    // out of the local geometry (the painter's mirror group owns them) — a
+    // flipped line projects the same members as an unflipped one.
+    const outline = {
+      width: 12700,
+      type: "solidFill" as const,
+      color: { value: "2F528F" },
+      headEnd: { type: "arrow" },
+      tailEnd: { type: "triangle" },
+    };
+    const flipped = firstMember("line", {
+      children: [{ type: "paragraph" } as never],
+      transformation: { width: 914400, height: 914400, flipVertical: true },
+      outline,
+    });
+    const plain = firstMember("line", {
+      children: [{ type: "paragraph" } as never],
+      transformation: { width: 914400, height: 914400 },
+      outline,
+    });
+    expect(flipped).toEqual(plain);
+    expect(flipped[0]?.kind).toBe("textBox");
+    expect(flipped).toHaveLength(3);
+    if (flipped[1]?.kind !== "path" || flipped[2]?.kind !== "path") {
+      throw new Error("expected arrow path members");
+    }
+    // Head chevron at the origin corner (stroked), tail triangle at the far
+    // corner (filled with the line color).
+    expect(flipped[1].fill).toBeUndefined();
+    expect(flipped[1].x).toBeLessThanOrEqual(0.01);
+    expect(flipped[1].y).toBeLessThanOrEqual(0.01);
+    expect(flipped[2].fill).toBe("2F528F");
+    expect(flipped[2].x + flipped[2].width).toBeCloseTo(96, 1);
+    expect(flipped[2].y + flipped[2].height).toBeCloseTo(96, 1);
+  });
 });

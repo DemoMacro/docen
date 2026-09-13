@@ -11,6 +11,11 @@ export interface LayoutDrawingLine {
   cap?: "round" | "square" | "flat";
   join?: "round" | "bevel" | "miter";
   dash?: string;
+  /** a:ln a:headEnd/a:tailEnd — the arrow type token plus its resolved
+   *  length in px (scaled from the stroke width). The projection expands
+   *  these into their own fill members; stroke consumers may ignore them. */
+  headEnd?: { type: string; px: number };
+  tailEnd?: { type: string; px: number };
 }
 
 /** One member's outer shadow (a:outerShdw): the offset resolved from

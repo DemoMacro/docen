@@ -250,6 +250,59 @@ export function presetShapePaths(
   height: number,
   adjustmentValues?: readonly GeometryGuide[],
 ): PresetShapeOutline[] | undefined {
+  const guides = presetGuides(preset, width, height, adjustmentValues);
+  if (!guides) return undefined;
+  const def = PRESET_SHAPE_DEFS[preset];
+  return def.paths
+    .filter((p) => p.fill === "norm" || p.fill === "none")
+    .map((p) => ({
+      d: pathData(p, guides, width, height),
+      fill: p.fill === "norm",
+      stroke: p.stroke,
+    }));
+}
+
+/** The preset's text rectangle (the ECMA-376 `rect` guides) — where the shape
+ *  stacks its text, in box coordinates. */
+export interface PresetShapeTextRect {
+  readonly l: number;
+  readonly t: number;
+  readonly r: number;
+  readonly b: number;
+}
+
+/**
+ * Evaluate a preset's text rectangle (`rect: "l t r b"` guide names) at the
+ * given box size, honoring document avLst overrides.
+ *
+ * @param preset - `a:prstGeom` token; unknown tokens or box-defined presets without a rect return undefined.
+ * @returns Corner coordinates in the caller's unit.
+ */
+export function presetShapeTextRect(
+  preset: string,
+  width: number,
+  height: number,
+  adjustmentValues?: readonly GeometryGuide[],
+): PresetShapeTextRect | undefined {
+  const def = PRESET_SHAPE_DEFS[preset];
+  if (!def?.rect) return undefined;
+  const guides = presetGuides(preset, width, height, adjustmentValues);
+  if (!guides) return undefined;
+  const [l, t, r, b] = def.rect
+    .trim()
+    .split(/\s+/)
+    .map((n) => value(n, guides));
+  return { l, t, r, b };
+}
+
+/** The shared guide frame: built-ins, the preset's av defaults, the document's
+ *  avLst overrides, then the gdLst — everything downstream evaluation reads. */
+function presetGuides(
+  preset: string,
+  width: number,
+  height: number,
+  adjustmentValues?: readonly GeometryGuide[],
+): Map<string, number> | undefined {
   const def = PRESET_SHAPE_DEFS[preset];
   if (!def) return undefined;
   const guides = builtIns(width, height);
@@ -268,11 +321,5 @@ export function presetShapePaths(
     );
   }
   for (const entry of def.gd) guide(entry, guides);
-  return def.paths
-    .filter((p) => p.fill === "norm" || p.fill === "none")
-    .map((p) => ({
-      d: pathData(p, guides, width, height),
-      fill: p.fill === "norm",
-      stroke: p.stroke,
-    }));
+  return guides;
 }

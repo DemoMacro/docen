@@ -2,7 +2,7 @@
 import type { GeometryGuide } from "@office-open/core";
 import { describe, expect, it } from "vitest";
 
-import { presetShapePaths } from "./preset-shape";
+import { presetShapePaths, presetShapeTextRect } from "./preset-shape";
 import { PRESET_SHAPE_DEFS } from "./preset-shape-data";
 
 // Golden d strings are hand-derived from the ECMA-376 definitions (100×100
@@ -99,5 +99,22 @@ describe("presetShapePaths", () => {
       // Degenerate boxes must not throw or produce non-finite coordinates.
       expect(presetShapePaths(preset, 0, 0), preset).toBeDefined();
     }
+  });
+});
+
+describe("presetShapeTextRect", () => {
+  it("evaluates the ellipse's inscribed text rectangle", () => {
+    // The 45-degree contact points: each side insets w*(1-cos45°)/2 = 14.64
+    // at 100px — Word keeps an ellipse's words off the rim.
+    const tr = presetShapeTextRect("ellipse", 100, 100)!;
+    expect(tr.l).toBeCloseTo((100 * (1 - Math.SQRT2 / 2)) / 2, 9);
+    expect(tr.t).toBeCloseTo(tr.l, 9);
+    expect(tr.r).toBeCloseTo(100 - tr.l, 9);
+    expect(tr.b).toBeCloseTo(100 - tr.t, 9);
+  });
+
+  it("returns undefined for presets without a rect definition", () => {
+    expect(presetShapeTextRect("rect", 100, 50)).toBeUndefined();
+    expect(presetShapeTextRect("bogus", 100, 50)).toBeUndefined();
   });
 });
