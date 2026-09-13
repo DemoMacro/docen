@@ -31,11 +31,19 @@ export default defineConfig({
       // Each subpath export maps to its own source entry. @docen/docx is NOT
       // aliased: editor's source imports it by package name → dist, so docx src
       // changes still need `pnpm --filter @docen/docx build`.
+      // The geometry subpath must alias BEFORE the bare package: alias keys
+      // prefix-match, and the bare entry would otherwise rewrite
+      // "@docen/core/geometry" into "<entry>/geometry", a path that resolves
+      // to nothing.
+      "@docen/core/geometry": fileURLToPath(
+        new URL("../core/src/geometry/index.ts", import.meta.url),
+      ),
       "@docen/core": fileURLToPath(new URL("../core/src/index.ts", import.meta.url)),
       // The layout engine serves from source too: the canvas demo imports it
       // directly, and @docen/docx's dist (not aliased) bare-imports it from
       // its layout/ subpath — this alias resolves both without pre-bundling.
       "@docen/layout": fileURLToPath(new URL("../layout/src/index.ts", import.meta.url)),
+      "@docen/pptx": fileURLToPath(new URL("../pptx/src/index.ts", import.meta.url)),
       "@docen/editor": fileURLToPath(new URL("./src/index.ts", import.meta.url)),
     },
   },

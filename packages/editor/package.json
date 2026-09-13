@@ -74,6 +74,7 @@
     "@docen/core": "workspace:*",
     "@docen/docx": "workspace:*",
     "@docen/layout": "workspace:*",
+    "@docen/pptx": "workspace:*",
     "@docen/pretext": "workspace:*",
     "@fluentui/svg-icons": "1.1.340",
     "@fluentui/tokens": "1.0.0-alpha.24",

@@ -97,6 +97,9 @@ importers:
       '@docen/layout':
         specifier: workspace:*
         version: link:../layout
+      '@docen/pptx':
+        specifier: workspace:*
+        version: link:../pptx
       '@docen/pretext':
         specifier: workspace:*
         version: link:../pretext
