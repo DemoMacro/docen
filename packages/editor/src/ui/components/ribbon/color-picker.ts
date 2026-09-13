@@ -74,6 +74,32 @@ const OUTLINE_DASHES: readonly { key: string; token: string }[] = [
   { key: "dash-long-dot-dot-dash", token: "lgDashDotDot" },
 ];
 
+/** Word's Arrows list → a:ST_LineEndType tokens. The i18n key names the
+ *  label; the token rides into the command value verbatim. */
+const OUTLINE_ARROWS: readonly { key: string; token: string }[] = [
+  { key: "arrow-none", token: "none" },
+  { key: "arrow-triangle", token: "triangle" },
+  { key: "arrow-stealth", token: "stealth" },
+  { key: "arrow-diamond", token: "diamond" },
+  { key: "arrow-oval", token: "oval" },
+  { key: "arrow-open", token: "arrow" },
+];
+
+/** A stub line with the arrow type at its right end — the same shapes the
+ *  projection expands (filled heads; the open chevron strokes). */
+function arrowPreview(type: string): string {
+  const ln = `<line x1="1" y1="7" x2="17" y2="7" stroke="currentColor" stroke-width="1.6"/>`;
+  const heads: Record<string, string> = {
+    none: "",
+    triangle: `<path d="M17 2 L26 7 L17 12 Z" fill="currentColor"/>`,
+    stealth: `<path d="M17 2.5 L26 7 L17 11.5 L20.5 7 Z" fill="currentColor"/>`,
+    diamond: `<path d="M17 7 L21.5 2.5 L26 7 L21.5 11.5 Z" fill="currentColor"/>`,
+    oval: `<circle cx="21.5" cy="7" r="4.5" fill="currentColor"/>`,
+    arrow: `<path d="M19 2 L26 7 L19 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>`,
+  };
+  return `<svg viewBox="0 0 28 14" width="28" height="14" aria-hidden="true">${ln}${heads[type] ?? ""}</svg>`;
+}
+
 /** A fractional point size as Word writes it ("1½ pt", "¼ pt"). */
 function weightLabel(pt: number): string {
   const frac =
@@ -608,6 +634,12 @@ const template = html<DocenColorPicker>`
         ${ref("weightNav")}
       ></button>
       <button type="button" class="cp-subnav cp-hidden" part="dash-nav" ${ref("dashNav")}></button>
+      <button
+        type="button"
+        class="cp-subnav cp-hidden"
+        part="arrow-nav"
+        ${ref("arrowsNav")}
+      ></button>
     </div>
     <div class="cp-custom cp-hidden" ${ref("customEl")}>
       <div class="cp-sv" ${ref("sv")}>
@@ -649,6 +681,12 @@ const template = html<DocenColorPicker>`
       <div class="cp-subhead">
         <span data-i18n="dashes"></span>
         <button type="button" class="cp-return" ${ref("dashBack")}>‹</button>
+      </div>
+    </div>
+    <div class="cp-arrows cp-hidden" ${ref("arrowsEl")}>
+      <div class="cp-subhead">
+        <span data-i18n="arrows"></span>
+        <button type="button" class="cp-return" ${ref("arrowsBack")}>‹</button>
       </div>
     </div>
   </div>
@@ -714,10 +752,13 @@ class DocenColorPicker extends FASTElement {
   @observable tooltipEl?: HTMLElement;
   @observable weightNav?: HTMLElement;
   @observable dashNav?: HTMLElement;
+  @observable arrowsNav?: HTMLElement;
   @observable weightsEl?: HTMLElement;
   @observable dashesEl?: HTMLElement;
+  @observable arrowsEl?: HTMLElement;
   @observable weightBack?: HTMLElement;
   @observable dashBack?: HTMLElement;
+  @observable arrowsBack?: HTMLElement;
 
   readonly anchorId = `--cp-${++seq}`;
   #bar?: HTMLElement;
@@ -822,8 +863,10 @@ class DocenColorPicker extends FASTElement {
     // rebuilt by #renderOutlinePanels (also re-run on locale change).
     this.weightNav?.addEventListener("click", () => this.#showSub("weights"));
     this.dashNav?.addEventListener("click", () => this.#showSub("dashes"));
+    this.arrowsNav?.addEventListener("click", () => this.#showSub("arrows"));
     this.weightBack?.addEventListener("click", () => this.#showPicker());
     this.dashBack?.addEventListener("click", () => this.#showPicker());
+    this.arrowsBack?.addEventListener("click", () => this.#showPicker());
     this.#applyI18n();
     this.#obsLang = observeLang(() => this.#applyI18n());
   }
@@ -881,15 +924,17 @@ class DocenColorPicker extends FASTElement {
     this.customEl?.classList.add("cp-hidden");
     this.weightsEl?.classList.add("cp-hidden");
     this.dashesEl?.classList.add("cp-hidden");
+    this.arrowsEl?.classList.add("cp-hidden");
     this.picker?.classList.remove("cp-hidden");
   }
 
-  /** Swap to one of the outline panel's sub-views (Weight / Dashes). */
-  #showSub(which: "weights" | "dashes"): void {
+  /** Swap to one of the outline panel's sub-views (Weight / Dashes / Arrows). */
+  #showSub(which: "weights" | "dashes" | "arrows"): void {
     this.picker?.classList.add("cp-hidden");
     this.customEl?.classList.add("cp-hidden");
     this.weightsEl?.classList.toggle("cp-hidden", which !== "weights");
     this.dashesEl?.classList.toggle("cp-hidden", which !== "dashes");
+    this.arrowsEl?.classList.toggle("cp-hidden", which !== "arrows");
   }
 
   #showCustom(): void {
@@ -1080,16 +1125,18 @@ class DocenColorPicker extends FASTElement {
     if (this.caret) this.caret.setAttribute("aria-label", t("ribbon.opt.more-colors", this));
     if (this.weightNav) this.weightNav.textContent = t("ribbon.opt.weight", this);
     if (this.dashNav) this.dashNav.textContent = t("ribbon.opt.dashes", this);
+    if (this.arrowsNav) this.arrowsNav.textContent = t("ribbon.opt.arrows", this);
     this.#renderOutlinePanels();
   }
 
-  /** Build the outline panel's sub-view rows (Weight / Dashes). Rebuilt on
-   *  locale change — the dash labels are translated while the weight labels
-   *  are Word's point fractions. */
+  /** Build the outline panel's sub-view rows (Weight / Dashes / Arrows).
+   *  Rebuilt on locale change — the dash/arrow labels are translated while the
+   *  weight labels are Word's point fractions. */
   #renderOutlinePanels(): void {
     if (!this.isOutline) return;
     this.weightNav?.classList.remove("cp-hidden");
     this.dashNav?.classList.remove("cp-hidden");
+    this.arrowsNav?.classList.remove("cp-hidden");
     if (this.weightsEl) {
       this.weightsEl.querySelectorAll(".cp-row").forEach((row) => row.remove());
       for (const pt of OUTLINE_WEIGHTS) {
@@ -1131,6 +1178,40 @@ class DocenColorPicker extends FASTElement {
           this.#emit(`dash:${token}`);
         });
         this.dashesEl.append(row);
+      }
+    }
+    if (this.arrowsEl) {
+      this.arrowsEl.querySelectorAll(".cp-row").forEach((row) => row.remove());
+      // Two sections — the line's begin/end. A begin-type row mirrors the
+      // preview so the head sits on the left, where it lands on the shape.
+      const sections: { key: string; prefix: string; mirror: boolean }[] = [
+        { key: "begin-type", prefix: "head", mirror: true },
+        { key: "end-type", prefix: "tail", mirror: false },
+      ];
+      for (const { key, prefix, mirror } of sections) {
+        const head = document.createElement("div");
+        head.className = "cp-section";
+        head.dataset.i18n = key;
+        this.arrowsEl.append(head);
+        for (const { key: typeKey, token } of OUTLINE_ARROWS) {
+          const row = document.createElement("button");
+          row.type = "button";
+          row.className = "cp-row";
+          const mark = document.createElement("span");
+          mark.className = "cp-line";
+          mark.innerHTML = mirror
+            ? arrowPreview(token).replace("<svg", '<svg style="transform:scaleX(-1)"')
+            : arrowPreview(token);
+          const label = document.createElement("span");
+          label.className = "cp-row-label";
+          label.textContent = t(`ribbon.opt.${typeKey}`, this);
+          row.append(mark, label);
+          row.addEventListener("click", () => {
+            this.#hide();
+            this.#emit(`${prefix}:${token}`);
+          });
+          this.arrowsEl.append(row);
+        }
       }
     }
   }

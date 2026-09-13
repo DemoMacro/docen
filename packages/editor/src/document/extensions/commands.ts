@@ -4173,7 +4173,9 @@ export const DocumentCommands = Extension.create({
               return;
             }
             const outline = { ...((attrs.outline ?? {}) as Record<string, unknown>) };
-            outline.type = "solid";
+            // No type stamp here: a bare color IS the solid-fill signal — the
+            // engine's stringify infers solidFill from it (a hand-written
+            // type:"solid" is an illegal line-fill token and drops the color).
             if (v.startsWith("color:")) {
               const color = v.slice(6).toUpperCase();
               if (!/^[0-9A-F]{6}$/.test(color)) return;
@@ -4254,7 +4256,9 @@ export const DocumentCommands = Extension.create({
             shape.outline = { type: "noFill" };
           } else {
             const outline = { ...((shape.outline ?? {}) as Record<string, unknown>) };
-            outline.type = "solid";
+            // No type stamp here: a bare color IS the solid-fill signal — the
+            // engine's stringify infers solidFill from it (a hand-written
+            // type:"solid" is an illegal line-fill token and drops the color).
             if (v.startsWith("color:")) {
               const color = v.slice(6).toUpperCase();
               if (!/^[0-9A-F]{6}$/.test(color)) return false;
@@ -4270,6 +4274,15 @@ export const DocumentCommands = Extension.create({
               const dash = v.slice(5);
               if (dash === "solid") delete outline.dash;
               else outline.dash = dash;
+              if (typeof outline.color !== "string") outline.color = "000000";
+            } else if (v.startsWith("head:") || v.startsWith("tail:")) {
+              // A line-end arrow pick stamps the type token; the size tiers
+              // stay at the DrawingML defaults (Word's menu has no size UI
+              // either). "none" is the per-end reset.
+              const which = v.startsWith("head:") ? "headEnd" : "tailEnd";
+              const type = v.slice(5);
+              if (type === "none") delete outline[which];
+              else outline[which] = { type };
               if (typeof outline.color !== "string") outline.color = "000000";
             } else return false;
             shape.outline = outline;
