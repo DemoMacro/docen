@@ -286,6 +286,18 @@ export class SectionCommands {
     });
   };
 
+  /** The Normal pitch — docDefaults' run size in points (Word's zh-CN default
+   *  五号 = 10.5 pt when unset). The document grid's character pitch measures
+   *  its w:charSpace delta (1/4096 pt) against this base. */
+  #normalPitchPt(): number {
+    const editor = this.host.editor();
+    const styles = (editor ? editor.state.doc.attrs.styles : null) as {
+      default?: { document?: { run?: { size?: number } } };
+    } | null;
+    const size = styles?.default?.document?.run?.size;
+    return typeof size === "number" && size > 0 ? size : 10.5;
+  }
+
   /** Open the Page Setup dialog prefilled from the current section's geometry
    *  in centimeters (the Margins menu's Custom Margins and the Size menu's
    *  More Paper Sizes entries). */
@@ -306,10 +318,22 @@ export class SectionCommands {
     const numTw = (v: number | string | undefined, d: number): number =>
       typeof v === "number" ? v : d;
     const heightTw = typeof size.height === "number" ? size.height : 16838;
+    const widthTw = typeof size.width === "number" ? size.width : 11906;
     const usableTw = heightTw - numTw(margin.top, 1440) - numTw(margin.bottom, 1440);
-    // Lines per page from the pitch (twips → lines); absent pitch falls back
-    // to Word's CJK default (312 twips).
+    // Lines per page from the pitch (twips → lines, floored — Word's zh A4
+    // default is 44, not the rounded 45); absent pitch falls back to Word's
+    // CJK default (312 twips).
     const pitchTw = typeof grid?.linePitch === "number" ? grid.linePitch : 312;
+    // Characters per line from w:charSpace — the grid's character pitch is
+    // the Normal font pitch plus a delta in 1/4096 pt
+    // (charsPerLine = floor(textWidth / (pitch + charSpace/4096))); an absent
+    // charSpace means the Normal pitch itself (Word's zh A4 default = 39).
+    const charSpace = typeof grid?.charSpace === "number" ? grid.charSpace : 0;
+    const textWidthPt = (widthTw - numTw(margin.left, 1440) - numTw(margin.right, 1440)) / 20;
+    const charsPerLine = Math.max(
+      1,
+      Math.floor(textWidthPt / (this.#normalPitchPt() + charSpace / 4096)),
+    );
     (
       this.host.element().shadowRoot?.querySelector("docen-page-setup-dialog") as {
         show(values?: {
@@ -345,7 +369,8 @@ export class SectionCommands {
           : "nextPage",
       grid: {
         type: grid?.type ?? "lines",
-        linesPerPage: pitchTw > 0 ? Math.round(usableTw / pitchTw) : undefined,
+        charsPerLine,
+        linesPerPage: pitchTw > 0 ? Math.floor(usableTw / pitchTw) : undefined,
       },
     });
   }
@@ -492,14 +517,33 @@ export class SectionCommands {
     const { margins, size, verticalAlign, gutter, grid } = values;
     // Lines per page → line pitch over the usable page height (the same
     // budget the dialog's prefill divides); a cleared field keeps the
-    // section's current pitch.
+    // section's current pitch. A count the prefill would have derived from
+    // the current pitch keeps that pitch untouched — dividing it back would
+    // drift the stored value a few twips on every OK.
     const cur = this.currentSectionProperties();
     const curGrid = cur?.grid && typeof cur.grid === "object" ? cur.grid : undefined;
     const usableTw = twip(size.height) - twip(margins.top) - twip(margins.bottom);
-    const pitchTw =
-      typeof grid?.linesPerPage === "number" && grid.linesPerPage > 0
-        ? Math.round(usableTw / grid.linesPerPage)
-        : (curGrid?.linePitch ?? 312);
+    let pitchTw = curGrid?.linePitch ?? 312;
+    if (
+      typeof grid?.linesPerPage === "number" &&
+      grid.linesPerPage > 0 &&
+      grid.linesPerPage !== Math.floor(usableTw / pitchTw)
+    ) {
+      pitchTw = Math.round(usableTw / grid.linesPerPage);
+    }
+    // Characters per line → w:charSpace, the delta from the Normal font pitch
+    // in 1/4096 pt over the usable width. Floored (Word's pairing): only then
+    // does floor(textWidth / (pitch + charSpace/4096)) read the same count
+    // back — rounding here drops the next reopen to chars−1. Only the
+    // char-grid behaviors carry it — a lines-only grid serializes without
+    // w:charSpace (Word's 只指定行网格), so the explicit undefined also strips
+    // a stale value.
+    const charsOk = grid?.type === "linesAndChars" || grid?.type === "snapToChars";
+    const textWidthPt = (twip(size.width) - twip(margins.left) - twip(margins.right)) / 20;
+    const charSpace =
+      charsOk && grid?.charsPerLine != null && grid.charsPerLine > 0
+        ? Math.floor((textWidthPt / grid.charsPerLine - this.#normalPitchPt()) * 4096)
+        : undefined;
     this.updateSectionGeometry({
       pageMargin: {
         top: twip(margins.top),
@@ -516,7 +560,7 @@ export class SectionCommands {
       // grid" clears w:docGrid entirely (Word's 无网格).
       type: values.sectionStart === "nextPage" ? undefined : values.sectionStart,
       titlePage: values.titlePage === true,
-      grid: grid?.type === "default" ? false : { type: grid?.type, linePitch: pitchTw },
+      grid: grid?.type === "default" ? false : { type: grid?.type, linePitch: pitchTw, charSpace },
     });
   };
 }

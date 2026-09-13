@@ -699,7 +699,10 @@ export const ribbonEn: AdditionalLanguage = {
     "pageSetup.gridLines": "Specify line grid only",
     "pageSetup.gridLinesAndChars": "Specify line and character grid",
     "pageSetup.gridSnapToChars": "Align text to character grid",
+    "pageSetup.charsPerLine": "Characters per line:",
     "pageSetup.linesPerPage": "Lines per page:",
+    "pageSetup.chars": "chars",
+    "pageSetup.lines": "lines",
     // --- Insert Table (hover grid + classic dialog shape) ---
     "tableGrid.title": "Insert Table",
     "tableGrid.columns": "Number of columns:",
@@ -1975,7 +1978,10 @@ export const ribbonZhCN: AdditionalLanguage = {
     "pageSetup.gridLines": "只指定行网格",
     "pageSetup.gridLinesAndChars": "指定行和字符网格",
     "pageSetup.gridSnapToChars": "文字对齐字符网格",
+    "pageSetup.charsPerLine": "每行字符数：",
     "pageSetup.linesPerPage": "每页行数：",
+    "pageSetup.chars": "字符",
+    "pageSetup.lines": "行",
     // --- 插入表格（悬停网格 + 经典对话框） ---
     "tableGrid.title": "插入表格",
     "tableGrid.columns": "列数：",

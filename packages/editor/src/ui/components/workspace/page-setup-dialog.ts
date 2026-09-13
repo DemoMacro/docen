@@ -25,11 +25,12 @@ export interface PageSetupValues {
   titlePage?: boolean;
   /** Section start (w:type) — "nextPage" is Word's omitted default. */
   sectionStart?: "nextPage" | "continuous" | "oddPage" | "evenPage";
-  /** Document grid (w:docGrid): behavior + lines per page; the lines ↔
-   *  linePitch conversion needs the page's usable height, so it stays on the
-   *  host. */
+  /** Document grid (w:docGrid): behavior + the per-line/per-page counts; the
+   *  lines ↔ linePitch and chars ↔ charSpace conversions need the page's
+   *  usable box and the Normal font pitch, so they stay on the host. */
   grid?: {
     type?: "default" | "lines" | "linesAndChars" | "snapToChars";
+    charsPerLine?: number;
     linesPerPage?: number;
   };
 }
@@ -80,7 +81,8 @@ const styles = css`
     min-width: 0;
     flex: 1 1 auto;
   }
-  .unit {
+  .unit,
+  .count-unit {
     white-space: nowrap;
   }
   .check-field {
@@ -253,6 +255,18 @@ const template = html<DocenPageSetupDialog>`
       </div>
       <div class="row">
         <div class="field">
+          <label ${ref("charsLabel")}></label>
+          <fluent-text-input
+            ${ref("charsInput")}
+            type="number"
+            step="1"
+            min="1"
+          ></fluent-text-input>
+          <span class="count-unit" ${ref("charsUnit")}></span>
+        </div>
+      </div>
+      <div class="row">
+        <div class="field">
           <label ${ref("linesLabel")}></label>
           <fluent-text-input
             ${ref("linesInput")}
@@ -260,6 +274,7 @@ const template = html<DocenPageSetupDialog>`
             step="1"
             min="1"
           ></fluent-text-input>
+          <span class="count-unit" ${ref("linesUnit")}></span>
         </div>
       </div>
     </div>
@@ -278,7 +293,8 @@ const template = html<DocenPageSetupDialog>`
  * `<docen-page-setup-dialog>` — the Word "Page Setup" geometry fields: margins
  * + gutter, paper size, vertical alignment, the layout group (section start,
  * header/footer distances, first-page-different), and the document grid
- * (behavior + lines per page) — all in centimeters. Opened by the Margins
+ * (behavior + the per-line/per-page counts) — measurements in centimeters.
+ * Opened by the Margins
  * menu's Custom Margins and the Size menu's More Paper Sizes items; the host
  * prefills from the current section via `show(values)` and commits via
  * `page-setup:ok`. Rides on `<docen-dialog>` for the modal shell.
@@ -316,8 +332,12 @@ class DocenPageSetupDialog extends FASTElement {
   @observable gridHeading?: HTMLElement;
   @observable gridTypeLabel?: HTMLElement;
   @observable gridTypeDropdown?: FluentDropdown;
+  @observable charsLabel?: HTMLElement;
+  @observable charsInput?: FluentTextInput;
+  @observable charsUnit?: HTMLElement;
   @observable linesLabel?: HTMLElement;
   @observable linesInput?: FluentTextInput;
+  @observable linesUnit?: HTMLElement;
   @observable okBtn?: HTMLElement;
   @observable cancelBtn?: HTMLElement;
 
@@ -368,6 +388,15 @@ class DocenPageSetupDialog extends FASTElement {
     if (this.titlePageBox) this.titlePageBox.checked = values.titlePage === true;
     const gridType = values.grid?.type ?? "lines";
     if (this.gridTypeDropdown) this.gridTypeDropdown.value = gridType;
+    // "No grid" grays both counts; a lines-only grid has no per-line count
+    // (the char grid is what defines "per line").
+    const charsOk = gridType === "linesAndChars" || gridType === "snapToChars";
+    if (this.charsInput) {
+      const chars = values.grid?.charsPerLine;
+      this.charsInput.value =
+        typeof chars === "number" && chars > 0 ? String(Math.round(chars)) : "";
+      this.charsInput.disabled = !charsOk;
+    }
     if (this.linesInput) {
       this.linesInput.value =
         typeof values.grid?.linesPerPage === "number" && values.grid.linesPerPage > 0
@@ -382,9 +411,13 @@ class DocenPageSetupDialog extends FASTElement {
     this.dialogEl?.hide();
   }
 
-  /** "No grid" has no lines to speak of — disable the per-page-lines input. */
+  /** Mirror Word's enablement: "no grid" grays both counts; a lines-only
+   *  grid grays the per-line count. */
   readonly onGridTypeChange = (): void => {
-    if (this.linesInput) this.linesInput.disabled = this.gridTypeDropdown?.value === "default";
+    const gridType = this.gridTypeDropdown?.value;
+    if (this.charsInput)
+      this.charsInput.disabled = gridType !== "linesAndChars" && gridType !== "snapToChars";
+    if (this.linesInput) this.linesInput.disabled = gridType === "default";
   };
 
   /** Template-visible OK handler (FAST templates live outside the class, so a
@@ -415,7 +448,10 @@ class DocenPageSetupDialog extends FASTElement {
     const gridType = (this.gridTypeDropdown?.value ?? "lines") as NonNullable<
       PageSetupValues["grid"]
     >["type"];
-    // A cleared lines field keeps the document's current pitch (undefined).
+    // A cleared count field keeps the document's current pitch/charSpace
+    // (undefined) rather than committing 0. A grayed per-line field keeps
+    // its stale value — the host only commits chars when the grid uses them.
+    const chars = Number(this.charsInput?.value);
     const lines = Number(this.linesInput?.value);
     this.$emit("page-setup:ok", {
       margins,
@@ -428,6 +464,7 @@ class DocenPageSetupDialog extends FASTElement {
       sectionStart,
       grid: {
         type: gridType,
+        charsPerLine: Number.isFinite(chars) && chars > 0 ? Math.round(chars) : undefined,
         linesPerPage: Number.isFinite(lines) && lines > 0 ? Math.round(lines) : undefined,
       },
     } satisfies PageSetupValues);
@@ -498,10 +535,14 @@ class DocenPageSetupDialog extends FASTElement {
       t("pageSetup.gridLinesAndChars", this),
       t("pageSetup.gridSnapToChars", this),
     ]);
+    if (this.charsLabel) this.charsLabel.textContent = t("pageSetup.charsPerLine", this);
+    if (this.charsUnit) this.charsUnit.textContent = t("pageSetup.chars", this);
     if (this.linesLabel) this.linesLabel.textContent = t("pageSetup.linesPerPage", this);
+    if (this.linesUnit) this.linesUnit.textContent = t("pageSetup.lines", this);
     if (this.okBtn) this.okBtn.textContent = t("options.ok", this);
     if (this.cancelBtn) this.cancelBtn.textContent = t("options.cancel", this);
-    // The unit chips after each input share one text.
+    // The cm unit chips after each input share one text; the grid count
+    // units are stamped via their refs (they are not cm).
     for (const el of this.shadowRoot?.querySelectorAll<HTMLElement>(".unit") ?? [])
       el.textContent = t("pageSetup.cm", this);
   }
