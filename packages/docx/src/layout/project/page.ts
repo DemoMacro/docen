@@ -179,6 +179,28 @@ export function projectFlowBox(properties: unknown): ProjectedFlowBox {
   };
 }
 
+/** A section's header/footer slot group as carried on SectionOptions — the
+ *  headers and footers shapes are identical, so one type serves both. */
+type FurnitureSlotGroup = NonNullable<SectionOptions["headers"]>;
+
+/** Word: a section lacking a header/footer reference is linked to the
+ *  previous section's — resolve the effective slots forward per slot, so a
+ *  section that defines only `first` still inherits `default`/`even`. The
+ *  result feeds projection only; the document JSON keeps the reference-less
+ *  shape (absence is the XML's own inheritance semantics on export). */
+export function inheritFurnitureSlots(
+  own: FurnitureSlotGroup | undefined,
+  prev: FurnitureSlotGroup | undefined,
+): FurnitureSlotGroup | undefined {
+  if (own == null) return prev;
+  if (prev == null) return own;
+  return {
+    default: own.default ?? prev.default,
+    first: own.first ?? prev.first,
+    even: own.even ?? prev.even,
+  };
+}
+
 /** Project a section's headers/footers. An absent slot stays undefined (the
  *  painter falls back per OOXML: page 1 without titlePage and even pages
  *  without evenAndOddHeaders both use `default`). */

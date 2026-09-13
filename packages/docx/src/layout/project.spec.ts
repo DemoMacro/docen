@@ -757,6 +757,39 @@ describe("projectDocumentOptions fields and furniture", () => {
     expect(furniture.footerDistancePx).toBeCloseTo(850 / 15, 5);
   });
 
+  it("inherits the previous section's header/footer slots when a section lacks its own", () => {
+    const multi: DocumentOptions = {
+      styles,
+      sections: [
+        {
+          children: [],
+          headers: { default: [{ paragraph: { children: ["h0"] } }] },
+          footers: {
+            default: [{ paragraph: { children: ["f0"] } }],
+            first: [{ paragraph: { children: ["f0-first"] } }],
+          },
+        },
+        // No slots of its own — every slot links to the previous section.
+        { children: [] },
+        // An own slot breaks that one link; the rest stay linked.
+        { children: [], headers: { first: [{ paragraph: { children: ["h2-first"] } }] } },
+      ],
+    };
+    const sections = projectDocumentOptions(multi).sections;
+    // Section 1 shows section 0's slots verbatim.
+    expect(JSON.stringify(sections[1]!.furniture.footer)).toContain("f0");
+    expect(JSON.stringify(sections[1]!.furniture.header)).toContain("h0");
+    expect(JSON.stringify(sections[1]!.furniture.firstFooter)).toContain("f0-first");
+    // Section 2 keeps its own first header and inherits the rest through the
+    // chain (section 1's effective slots carry section 0's content).
+    expect(JSON.stringify(sections[2]!.furniture.firstHeader)).toContain("h2-first");
+    expect(JSON.stringify(sections[2]!.furniture.header)).toContain("h0");
+    expect(JSON.stringify(sections[2]!.furniture.footer)).toContain("f0");
+    // A slot the whole chain leaves undefined stays undefined.
+    expect(sections[0]!.furniture.evenFooter).toBeUndefined();
+    expect(sections[2]!.furniture.evenFooter).toBeUndefined();
+  });
+
   it("projects w:pgBorders per side with display, offset and z-order", () => {
     const { pageBorders } = oneSection({
       styles,

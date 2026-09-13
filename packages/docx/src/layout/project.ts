@@ -27,6 +27,7 @@ import type { MarkupDisplay, ProjectContext } from "./project/context";
 import { isRecord, type BodyParagraph } from "./project/guards";
 import { indexNumberings } from "./project/numbering";
 import {
+  inheritFurnitureSlots,
   projectChild,
   projectColumns,
   projectFlowBox,
@@ -156,7 +157,16 @@ export function projectDocumentOptions(
   const fnDefs = footnoteDefinitions.size > 0 ? footnoteDefinitions : undefined;
   const enDefs = endnoteDefinitions.size > 0 ? endnoteDefinitions : undefined;
 
+  // Word: a section without a header/footer reference shows the previous
+  // section's — carry the effective slots forward so projection, page insets
+  // and story bands all see the linked content.
+  let prevHeaders: ReturnType<typeof inheritFurnitureSlots>;
+  let prevFooters: ReturnType<typeof inheritFurnitureSlots>;
   const sections: ProjectedSection[] = (doc.sections ?? []).map((section, i) => {
+    const headers = inheritFurnitureSlots(section.headers, prevHeaders);
+    const footers = inheritFurnitureSlots(section.footers, prevFooters);
+    prevHeaders = headers;
+    prevFooters = footers;
     const blocks = sectionBlocks[i] ?? [];
     // A non-final section's last paragraph carries the sectPr — Word paints
     // its mark row as "─────分节符(下一页)─────". The final section's sectPr
@@ -179,7 +189,7 @@ export function projectDocumentOptions(
           typeof doc.settings?.compatibility === "object" &&
           doc.settings.compatibility.adjustLineHeightInTable === true,
       },
-      furniture: projectPageFurniture(section, doc),
+      furniture: projectPageFurniture({ ...section, headers, footers }, doc),
       pageBorders: projectPageBorders(section.properties),
       lineNumbers: projectLineNumbers(section.properties),
       pageNumbering: projectPageNumbering(section.properties),

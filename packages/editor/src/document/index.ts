@@ -1992,20 +1992,29 @@ class DocenDocument extends AddinHost<Editor> {
 
   /** The story's source JSON — the section owning `page` holds the slots
    *  (Word: the band double-clicked edits that page's section, regardless of
-   *  where the caret sits); an absent slot falls back to the default slot's
-   *  (what the page displays until the edit breaks the tie). */
+   *  where the caret sits); a section without stamped slots is linked to the
+   *  previous one, so the walk merges the first content found per slot, and
+   *  an absent slot falls back to the default slot's (what the page displays
+   *  until the edit breaks the tie). */
   #readStorySource(kind: StoryKind, slot: StorySlot, page: number): JSONContent[] {
     const editor = this.editor;
     if (!editor) return [];
-    const pos = this.#sectPrPosOfSection(this.#sectionOfPage[page] ?? 0);
-    const attrs =
-      pos >= 0
-        ? (editor.state.doc.nodeAt(pos)?.attrs as Record<string, unknown> | undefined)
-        : (editor.state.doc.attrs as Record<string, unknown> | undefined);
-    const group = attrs?.[this.#slotsKeyOf(kind)] as
-      | { default?: JSONContent[]; first?: JSONContent[]; even?: JSONContent[] }
-      | undefined;
-    return group?.[slot] ?? group?.default ?? [];
+    const merged: { default?: JSONContent[]; first?: JSONContent[]; even?: JSONContent[] } = {};
+    for (let i = this.#sectionOfPage[page] ?? 0; i >= 0; i--) {
+      const pos = this.#sectPrPosOfSection(i);
+      const attrs =
+        pos >= 0
+          ? (editor.state.doc.nodeAt(pos)?.attrs as Record<string, unknown> | undefined)
+          : (editor.state.doc.attrs as Record<string, unknown> | undefined);
+      const group = attrs?.[this.#slotsKeyOf(kind)] as
+        | { default?: JSONContent[]; first?: JSONContent[]; even?: JSONContent[] }
+        | undefined;
+      if (!group) continue;
+      merged.default ??= group.default;
+      merged.first ??= group.first;
+      merged.even ??= group.even;
+    }
+    return merged[slot] ?? merged.default ?? [];
   }
 
   /** A story keystroke's render path: patch the slot into a copy of the doc
