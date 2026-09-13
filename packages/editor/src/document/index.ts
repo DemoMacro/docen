@@ -267,6 +267,49 @@ const BUILT_IN_DEFAULT_NAMES: Readonly<Record<string, string>> = {
   listparagraph: "List Paragraph",
 };
 
+/** Patch a section's header/footer slot inside the doc JSON tree — the
+ *  section owns its slots on the paragraph closing it (the Nth
+ *  sectionProperties paragraph in document order, the same address
+ *  #readStorySource reads and #persistStory writes). Returns undefined when
+ *  that paragraph doesn't exist (the final section closes at the body end —
+ *  its slots live on the doc attrs). Copies along the walked path only; the
+ *  editor state's objects are shared and must not mutate. */
+function patchSectionSlots(
+  root: JSONContent,
+  sectionIndex: number,
+  key: "sectionHeaders" | "sectionFooters",
+  slot: StorySlot,
+  content: JSONContent[],
+): JSONContent | undefined {
+  let remaining = sectionIndex;
+  const walk = (node: JSONContent): JSONContent | undefined => {
+    if (node.type === "paragraph") {
+      const attrs = (node.attrs ?? {}) as Record<string, unknown>;
+      if (attrs.sectionProperties != null) {
+        if (remaining === 0) {
+          const group = (attrs[key] ?? {}) as Record<string, unknown>;
+          return {
+            ...node,
+            attrs: { ...attrs, [key]: { ...group, [slot]: content } },
+          };
+        }
+        remaining--;
+      }
+    }
+    if (!Array.isArray(node.content)) return undefined;
+    for (let i = 0; i < node.content.length; i++) {
+      const patched = walk(node.content[i]!);
+      if (patched) {
+        const children = node.content.slice();
+        children[i] = patched;
+        return { ...node, content: children };
+      }
+    }
+    return undefined;
+  };
+  return walk(root);
+}
+
 /** The style's run definition as the Font dialog's prefill (the Format >
  *  Font open — absent values leave the combo blank, inherit-again). */
 function fontPatchOfRun(run: Record<string, unknown>): FontDialogPatch {
@@ -1960,13 +2003,27 @@ class DocenDocument extends AddinHost<Editor> {
     const stage = this.#stage;
     if (!bridge || !stage || this.#storyKind !== kind) return;
     const raw = bridge.editor.getJSON();
-    // getJSON()'s attrs object IS the live PM attrs (Node.toJSON carries it by
-    // reference) — patch a shallow copy or the editor state would mutate
-    // without a transaction (no render, no undo, no docen:change).
-    const attrs = { ...(raw.attrs as Record<string, unknown>) };
     const key = this.#slotsKeyOf(kind);
-    attrs[key] = { ...(attrs[key] as object | undefined), [slot]: json };
-    const run = this.#projectAndLayout({ ...raw, attrs } as JSONContent);
+    // The story edits the section its anchor page belongs to (Word: the band
+    // double-clicked) — patch that section's slots, not the doc's: a doc-level
+    // write compiles into the LAST section, and a mid-document story would
+    // never reach the stack the band reads. getJSON()'s objects carry live PM
+    // attrs by reference — patchSectionSlots copies along the walked path, so
+    // the editor state never mutates without a transaction (no render, no
+    // undo, no docen:change).
+    const sectionIndex = this.#sectionOfPage[this.#storyPage] ?? 0;
+    const patched = patchSectionSlots(raw, sectionIndex, key, slot, json);
+    const doc = patched ?? {
+      ...raw,
+      attrs: {
+        ...(raw.attrs as Record<string, unknown>),
+        [key]: {
+          ...((raw.attrs as Record<string, unknown>)[key] as object | undefined),
+          [slot]: json,
+        },
+      },
+    };
+    const run = this.#projectAndLayout(doc);
     this.#pages = run.pages;
     this.#sectionOfPage = run.sectionOfPage;
     this.#flow = run.sections[0]?.flow;

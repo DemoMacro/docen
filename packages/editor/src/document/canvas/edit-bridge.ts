@@ -1607,7 +1607,14 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     if (!geo.stack) {
       storyCfg.onDoc(kind, geo.slot, initial);
       const refreshed = storyCfg.geometry(kind, page);
-      if (!refreshed?.band || !refreshed.stack) return false;
+      if (!refreshed?.band || !refreshed.stack) {
+        // entered() already switched the host's edit chrome on — a story whose
+        // strut cannot lay must roll it back or the UI strands in edit mode
+        // with no story registered (typing has no editor and Esc routes
+        // through `story`, which stays null).
+        storyCfg.exit({ kind, slot: geo.slot, json: initial, dirty: false });
+        return false;
+      }
       geo = refreshed;
     }
     const s = makeStory(
