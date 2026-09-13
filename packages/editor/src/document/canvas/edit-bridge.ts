@@ -18,6 +18,7 @@ import {
   selectionSlicePayload,
   HEADING_COMPILE_MAP,
   nextOrderedReference,
+  presetShapePaths,
   type JSONContent,
 } from "@docen/docx";
 import { Editor } from "@docen/docx/core";
@@ -1196,6 +1197,17 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
   shapeLineEl.style.cssText =
     "position:absolute;display:none;pointer-events:none;z-index:30;height:0;" +
     "border-top:2px solid var(--docen-color-primary, #2b579a);transform-origin:0 0;";
+  // Every other preset ghosts its real outline — the same evaluator the
+  // shapes gallery previews use, so the drag previews the circle/star the
+  // draw will land instead of a box. Unknown tokens fall back to the rect.
+  const shapePresetEl = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  shapePresetEl.style.cssText =
+    "position:absolute;display:none;pointer-events:none;z-index:30;overflow:visible;";
+  const shapePresetPathEl = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  shapePresetPathEl.style.cssText =
+    "fill:rgba(43,87,154,0.06);stroke:var(--docen-color-primary, #2b579a);" +
+    "stroke-width:1;vector-effect:non-scaling-stroke;";
+  shapePresetEl.append(shapePresetPathEl);
   let shapeGhost: {
     page: number;
     fx: number;
@@ -1209,12 +1221,14 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     ax: number;
     ay: number;
     moved: boolean;
-    /** Line presets ghost a segment anchored at the press, not a rect. */
+    /** The armed preset token (line presets ghost a segment, not a rect). */
+    preset: string;
     line: boolean;
   } | null = null;
   const hideShapeGhost = (): void => {
     shapeGhostEl.style.display = "none";
     shapeLineEl.style.display = "none";
+    shapePresetEl.style.display = "none";
   };
   /** Paint the ghost at a page-local semantic px rect. */
   const showShapeGhost = (x: number, y: number, w: number, h: number): void => {
@@ -1237,6 +1251,31 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
     shapeLineEl.style.width = `${Math.hypot(dx, dy)}px`;
     shapeLineEl.style.transform = `rotate(${(Math.atan2(dy, dx) * 180) / Math.PI}deg)`;
     shapeLineEl.style.display = "block";
+  };
+  /** Paint the ghost as the preset's real outline. False = unknown token, the
+   *  rect ghost shows instead. */
+  const hideShapeGhostPreset = (): void => {
+    shapePresetEl.style.display = "none";
+  };
+  const showShapeGhostPreset = (
+    preset: string,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+  ): boolean => {
+    const g = shapeGhost;
+    if (!g || w <= 0 || h <= 0) return false;
+    const paths = presetShapePaths(preset, w, h);
+    if (!paths?.length) return false;
+    shapePresetEl.style.left = `${g.fx + x * g.scale}px`;
+    shapePresetEl.style.top = `${g.fy + y * g.scale}px`;
+    shapePresetEl.style.width = `${w * g.scale}px`;
+    shapePresetEl.style.height = `${h * g.scale}px`;
+    shapePresetEl.setAttribute("viewBox", `0 0 ${w} ${h}`);
+    shapePresetPathEl.setAttribute("d", paths.map((p) => p.d).join(" "));
+    shapePresetEl.style.display = "block";
+    return true;
   };
 
   // Drag auto-scroll (Word): a drag resting in the scroll container's
@@ -1414,7 +1453,16 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       const py = Math.min(Math.max(g.ay + (event.clientY - g.sy) / g.scale, 0), g.fh / g.scale);
       if (g.line) {
         showShapeGhostLine(px, py);
-      } else {
+      } else if (
+        !showShapeGhostPreset(
+          g.preset,
+          Math.min(g.ax, px),
+          Math.min(g.ay, py),
+          Math.abs(px - g.ax),
+          Math.abs(py - g.ay),
+        )
+      ) {
+        hideShapeGhostPreset();
         showShapeGhost(
           Math.min(g.ax, px),
           Math.min(g.ay, py),
@@ -1715,6 +1763,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
           ax: hit.lx,
           ay: hit.ly,
           moved: false,
+          preset: drawPreset,
           line: drawPreset === "line" || drawPreset === "straightConnector1",
         };
         ta.focus();
@@ -2945,6 +2994,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
   opts.inputHost.append(ta);
   opts.inputHost.append(shapeGhostEl);
   opts.inputHost.append(shapeLineEl);
+  opts.inputHost.append(shapePresetEl);
 
   return {
     editor,
@@ -3116,6 +3166,7 @@ export function mountEditBridge(opts: EditBridgeOptions): EditBridge {
       caret.remove();
       shapeGhostEl.remove();
       shapeLineEl.remove();
+      shapePresetEl.remove();
     },
   };
 }
