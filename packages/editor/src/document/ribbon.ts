@@ -747,12 +747,27 @@ const storyMenuItems = (kind: "header" | "footer"): string =>
     { text: opt("odd-even"), value: "odd-even" },
   ]);
 
-/** The Page Number split's drop-down: placement (the main button is the
- *  Word default, bottom of page) plus removal. */
+/** The Page Number split's drop-down — Word's sections as one flat list
+ *  (`-` items render as the group rules): top-of-page presets, bottom-of-page
+ *  presets, current-position presets, and removal. */
 const pageNumberItems = (): string =>
   JSON.stringify([
-    { text: opt("page-num-top"), value: "top" },
-    { text: opt("page-num-bottom"), value: "bottom" },
+    { text: opt("page-top-left"), value: "page-top-left" },
+    { text: opt("page-top-center"), value: "page-top-center" },
+    { text: opt("page-top-right"), value: "page-top-right" },
+    { text: opt("page-top-bar"), value: "page-top-bar" },
+    { text: "-" },
+    { text: opt("page-bottom-left"), value: "page-bottom-left" },
+    { text: opt("page-bottom-center"), value: "page-bottom-center" },
+    { text: opt("page-bottom-right"), value: "page-bottom-right" },
+    { text: opt("page-bottom-bar"), value: "page-bottom-bar" },
+    { text: "-" },
+    { text: opt("page-cur-plain"), value: "cur-plain" },
+    { text: opt("page-cur-page-of"), value: "cur-page-of" },
+    { text: opt("page-cur-page-total"), value: "cur-page-total" },
+    { text: opt("page-cur-dash"), value: "cur-dash" },
+    { text: opt("page-cur-slash"), value: "cur-slash" },
+    { text: "-" },
     { text: opt("remove-page-numbers"), value: "remove-numbers" },
   ]);
 

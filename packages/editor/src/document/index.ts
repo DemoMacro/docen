@@ -129,6 +129,7 @@ import {
 import "./i18n";
 import { collectRevisions } from "./extensions/track-changes";
 import { LOCAL_HANDLED, READONLY_LIVE, SAVE_FORMATS, detectOpenFormat } from "./file-formats";
+import { pageNumberInlinePreset, pageNumberStoryPreset } from "./page-number";
 import { mergeSectionProperties } from "./page-setup";
 import { compressPictureSrc, pickTransparentColor, type CropRect } from "./pixels";
 import {
@@ -5250,21 +5251,33 @@ class DocenDocument extends AddinHost<Editor> {
         );
       return;
     }
-    // Page Number — seed a PAGE field at the chosen story's end (Word's
-    // default is bottom of page); the story stays open so the user can
-    // adjust, and the normal exit persists the slots.
+    // Page Number — the split's main button is Word's default (bottom of
+    // page, centered). Top/bottom placements open the story and REPLACE its
+    // content with the preset paragraph (picking a placement states the
+    // intent outright; undo keeps the previous furniture reachable), and the
+    // normal exit persists the slots. Current-position presets splice into
+    // the caret's paragraph — the active story when one is open, else the
+    // body.
     if (name === "page-number") {
-      if (value === "remove-numbers") {
+      const placement = value ?? "page-bottom-center";
+      if (placement === "remove-numbers") {
         this.#removePageNumbers();
         return;
       }
+      if (placement.startsWith("cur-")) {
+        (this.#bridge?.activeEditor() ?? editor).commands.insertContent(
+          pageNumberInlinePreset(placement),
+        );
+        return;
+      }
       const page = this.#bridge?.pageOf(editor.state.selection.from);
-      const seed: JSONContent = {
-        type: "inlinePassthrough",
-        attrs: { data: JSON.stringify({ simpleField: { instruction: "PAGE" } }) },
-      };
-      if (page != null) {
-        this.#bridge?.enterStory(value === "top" ? "header" : "footer", page, seed);
+      if (
+        page != null &&
+        this.#bridge?.enterStory(placement.startsWith("page-top") ? "header" : "footer", page)
+      ) {
+        (this.#bridge.activeEditor() ?? editor).commands.setContent(
+          pageNumberStoryPreset(placement),
+        );
       }
       return;
     }
