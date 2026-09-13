@@ -1,9 +1,9 @@
 // The presentation element's static chrome: the shadow-root stylesheet and
 // template. Mirrors the document chrome's shape — a <docen-workspace> shell
-// with the slide surface in the default slot — trimmed to the surfaces the
-// presentation editor fills today (no task panes or dialogs yet).
+// with the thumbnails panel in the start pane and the slide surface in the
+// default slot.
 
-import { css, html } from "@microsoft/fast-element";
+import { css, html, ref } from "@microsoft/fast-element";
 
 export { escapeHtml } from "../document/chrome";
 
@@ -12,6 +12,38 @@ export const presentationStyles = css`
     display: flex;
     flex-direction: column;
     height: 100%;
+  }
+  /* The thumbnails rail (PowerPoint's slide panel): a fixed column of small
+     deck previews; hidden until a deck opens. The selection frame is an
+     absolutely positioned sibling of the thumbnail canvas — the canvas is
+     one Leafer surface for the whole deck, so the frame moves by transform. */
+  .slides-panel {
+    width: 188px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    background: var(--docen-color-bg, #fff);
+    border-inline-end: 1px solid var(--docen-color-divider, #e1e1e1);
+  }
+  .slides-panel[hidden] {
+    display: none;
+  }
+  .thumb-strip {
+    position: relative;
+    margin: 12px auto;
+    width: fit-content;
+  }
+  .thumb-stage canvas {
+    display: block;
+    cursor: pointer;
+  }
+  .thumb-selection {
+    position: absolute;
+    inset-inline: 0;
+    top: 0;
+    height: 0;
+    border: 2px solid var(--docen-color-accent, #0f6cbd);
+    pointer-events: none;
+    box-sizing: border-box;
   }
   /* The slide surface — document-area is the scroll container; this wrapper
      centers the Leafer stage like the document's page column. No cursor
@@ -26,10 +58,23 @@ export const presentationStyles = css`
   }
 `;
 
-export const presentationTemplate = html`
+/** The element surface the template binds to — the ref targets only. The
+ *  element class structurally matches it (the observables carry the nodes). */
+interface PresentationTemplateRefs extends HTMLElement {
+  thumbStrip?: HTMLElement;
+  thumbSelection?: HTMLElement;
+}
+
+export const presentationTemplate = html<PresentationTemplateRefs>`
   <docen-workspace>
     <docen-title-bar slot="header" part="header"></docen-title-bar>
     <docen-ribbon slot="ribbon" part="ribbon"></docen-ribbon>
+    <div class="slides-panel" slot="task-pane-start" part="slides-panel" hidden>
+      <div class="thumb-strip" ${ref("thumbStrip")}>
+        <div class="thumb-stage"></div>
+        <div class="thumb-selection" ${ref("thumbSelection")}></div>
+      </div>
+    </div>
     <docen-document-area>
       <div class="docen-canvas" part="page">
         <div class="stage"></div>

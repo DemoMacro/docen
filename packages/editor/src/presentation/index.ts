@@ -10,12 +10,10 @@
  * engine transactions) rides on this base in later batches.
  */
 
-import { paintMembers } from "@docen/core";
-import { browserFontMetrics } from "@docen/layout";
 import { parsePresentation, projectPresentation, type ProjectedPresentation } from "@docen/pptx";
-import { customElement } from "@microsoft/fast-element";
+import { customElement, observable } from "@microsoft/fast-element";
 import type { DataType } from "@office-open/core";
-import { App, Group, Rect, type IGroup } from "leafer-ui";
+import { App, type IGroup } from "leafer-ui";
 
 import { renderRibbonFromSchema } from "../document/ribbon";
 import {
@@ -30,11 +28,9 @@ import {
 } from "../ui";
 import { escapeHtml, presentationStyles, presentationTemplate } from "./chrome";
 import { presentationRibbonTabs } from "./ribbon";
+import { paintSlideDeck, SLIDE_GAP_PX, THUMB_GAP_PX, THUMB_WIDTH_PX } from "./slides-panel";
 // Side-effect: register the presentation translation tables.
 import "./i18n";
-
-/** Gap between consecutive slides, px. */
-const SLIDE_GAP_PX = 24;
 
 const ZOOM_MIN = 10;
 const ZOOM_MAX = 500;
@@ -51,10 +47,16 @@ const WIRED_COMMANDS: ReadonlySet<string> = new Set(["zoom-in", "zoom-out", "zoo
 class DocenPresentation extends AddinHost {
   #pres: ProjectedPresentation | null = null;
   #app: App | null = null;
+  #thumbApp: App | null = null;
+  #thumbScale = 1;
   #zoom = 100;
   #langObserver?: MutationObserver;
   #unsubLang?: () => void;
   #scrollRaf?: number;
+
+  /** Template refs into the thumbnails panel (see chrome.ts). */
+  @observable thumbStrip?: HTMLElement;
+  @observable thumbSelection?: HTMLElement;
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -81,6 +83,7 @@ class DocenPresentation extends AddinHost {
       .querySelector<HTMLInputElement>("#file-input")
       ?.addEventListener("change", this.#onFileChange as EventListener);
     this.#area()?.addEventListener("scroll", this.#onScroll);
+    this.thumbStrip?.addEventListener("click", this.#onThumbClick);
     // Locale switches re-stamp the chrome (header + ribbon labels).
     this.#unsubLang = observeLang(() => this.#renderChrome());
     this.#renderChrome();
@@ -102,9 +105,12 @@ class DocenPresentation extends AddinHost {
       ?.querySelector<HTMLInputElement>("#file-input")
       ?.removeEventListener("change", this.#onFileChange as EventListener);
     this.#area()?.removeEventListener("scroll", this.#onScroll);
+    this.thumbStrip?.removeEventListener("click", this.#onThumbClick);
     if (this.#scrollRaf != null) cancelAnimationFrame(this.#scrollRaf);
     this.#app?.destroy();
     this.#app = null;
+    this.#thumbApp?.destroy();
+    this.#thumbApp = null;
   }
 
   /** Parse a .pptx payload, paint every slide, and stamp the chrome (filename
@@ -125,7 +131,10 @@ class DocenPresentation extends AddinHost {
     if (!this.shadowRoot) return;
     this.#app?.destroy();
     this.#app = null;
+    this.#thumbApp?.destroy();
+    this.#thumbApp = null;
     this.#stage.replaceChildren();
+    this.shadowRoot.querySelector<HTMLElement>(".slides-panel")?.setAttribute("hidden", "");
     const bar = this.#statusBar();
     if (bar) {
       bar.removeAttribute("page");
@@ -308,6 +317,7 @@ class DocenPresentation extends AddinHost {
     bar.setAttribute("page", String(index + 1));
     bar.setAttribute("total", String(pres.slides.length));
     bar.setAttribute("pageLabel", t("ppt.status.slide-of", this));
+    this.#syncThumbSelection(index);
   }
 
   #renderDeck(): void {
@@ -329,39 +339,73 @@ class DocenPresentation extends AddinHost {
       wheel: { disabled: true },
     });
     this.#app = app;
-    const tree = app.tree as unknown as IGroup;
-    let y = SLIDE_GAP_PX;
-    for (let i = 0; i < pres.slides.length; i++) {
-      const slide = pres.slides[i]!;
-      const slideGroup = new Group({ x: 0, y });
-      slideGroup.add(
-        new Rect({
-          width: pres.widthPx,
-          height: pres.heightPx,
-          fill: slide.background ? `#${slide.background}` : "#ffffff",
-          stroke: "#c4c4c4",
-          strokeWidth: 1,
-        }),
-      );
-      paintMembers(slideGroup, slide.members, 0, 0, {
-        metrics: browserFontMetrics,
-        flow: {
-          pageWidthPx: pres.widthPx,
-          pageHeightPx: pres.heightPx,
-          contentWidthPx: pres.widthPx,
-          contentHeightPx: pres.heightPx,
-          contentLeftPx: 0,
-          contentTopPx: 0,
-        },
-        pageIndex: i,
-        pageCount: pres.slides.length,
-        layer: "body",
-        rerender: () => app.forceRender(),
-      });
-      tree.add(slideGroup);
-      y += pres.heightPx + SLIDE_GAP_PX;
-    }
+    paintSlideDeck(app.tree as unknown as IGroup, pres, () => app.forceRender());
+    this.#renderThumbnails();
     this.#syncSlideIndicator();
+  }
+
+  // ── Thumbnails panel ─────────────────────────────────────────────────────
+
+  /** The rail shows the whole deck on one scaled Leafer surface — same paint
+   *  loop as the main strip, shrunk through the tree's scale. One canvas
+   *  keeps the panel cheap; the selection frame is a DOM sibling that moves
+   *  by transform. */
+  #renderThumbnails(): void {
+    const pres = this.#pres;
+    const strip = this.thumbStrip;
+    const stage = this.shadowRoot?.querySelector<HTMLDivElement>(".thumb-stage");
+    const panel = this.shadowRoot?.querySelector<HTMLElement>(".slides-panel");
+    if (!pres || !strip || !stage || !panel) return;
+    panel.removeAttribute("hidden");
+    this.#thumbApp?.destroy();
+    stage.replaceChildren();
+    const scale = THUMB_WIDTH_PX / pres.widthPx;
+    this.#thumbScale = scale;
+    const thumbHeight = pres.heightPx * scale;
+    stage.style.width = `${THUMB_WIDTH_PX}px`;
+    stage.style.height = `${pres.slides.length * thumbHeight + (pres.slides.length - 1) * THUMB_GAP_PX}px`;
+    const app = new App({
+      view: stage,
+      fill: "transparent",
+      tree: { type: "design" },
+      move: { disabled: true },
+      wheel: { disabled: true },
+    });
+    this.#thumbApp = app;
+    const tree = app.tree as unknown as IGroup;
+    tree.scale = { x: scale, y: scale };
+    // Screen-space gaps stay outside the scale: the pitch passes the thumbnail
+    // gap divided by the scale so spacing survives the coordinate shrink.
+    paintSlideDeck(tree, pres, () => app.forceRender(), pres.heightPx + THUMB_GAP_PX / scale, 0);
+  }
+
+  /** Click a thumbnail → bring that slide to the top of the viewport. */
+  readonly #onThumbClick = (event: MouseEvent): void => {
+    const pres = this.#pres;
+    const strip = this.thumbStrip;
+    if (!pres || !strip) return;
+    const rect = strip.getBoundingClientRect();
+    const pitch = pres.heightPx * this.#thumbScale + THUMB_GAP_PX;
+    const index = Math.floor((event.clientY - rect.top) / pitch);
+    this.#revealSlide(Math.max(0, Math.min(pres.slides.length - 1, index)));
+  };
+
+  #revealSlide(index: number): void {
+    const pres = this.#pres;
+    const area = this.#area();
+    if (!pres || !area) return;
+    const pitch = (pres.heightPx + SLIDE_GAP_PX) * (this.#zoom / 100);
+    area.scrollTo({ top: index * pitch, behavior: "smooth" });
+  }
+
+  /** Move the panel's selection frame onto the active slide. */
+  #syncThumbSelection(index: number): void {
+    const pres = this.#pres;
+    const frame = this.thumbSelection;
+    if (!pres || !frame) return;
+    const thumbHeight = pres.heightPx * this.#thumbScale;
+    frame.style.height = `${thumbHeight}px`;
+    frame.style.transform = `translateY(${index * (thumbHeight + THUMB_GAP_PX)}px)`;
   }
 
   #pickFile(): void {
