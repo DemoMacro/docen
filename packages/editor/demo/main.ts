@@ -304,11 +304,44 @@ const demoDocument = (): JSONContent => ({
       ],
     },
     // Section break — an explicit next-page section break; the next section
-    // starts on a fresh page.
+    // starts on a fresh page. The closing paragraph also carries this
+    // section's header/footer slots: a slogan header (Word's classic
+    // bottom-ruled header line) and a centered PAGE-field footer. Section 2
+    // defines none, so its pages render bare — one more per-section demo.
     {
       type: "paragraph",
       attrs: {
         sectionProperties: { grid: { linePitch: 312, type: "lines" } },
+        sectionHeaders: {
+          default: [
+            {
+              type: "paragraph",
+              attrs: {
+                alignment: "center",
+                border: { bottom: { style: "single", size: 4, color: "8496B0", space: 4 } },
+              },
+              content: [
+                t("docen · canvas typesetting, Word-faithful output", [
+                  { type: "textStyle", attrs: { color: "595959" } },
+                ]),
+              ],
+            },
+          ],
+        },
+        sectionFooters: {
+          default: [
+            {
+              type: "paragraph",
+              attrs: { alignment: "center" },
+              content: [
+                {
+                  type: "inlinePassthrough",
+                  attrs: { data: JSON.stringify({ simpleField: { instruction: "PAGE" } }) },
+                },
+              ],
+            },
+          ],
+        },
       },
       content: [],
     },
