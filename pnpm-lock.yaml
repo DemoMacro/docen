@@ -151,6 +151,21 @@ importers:
         specifier: 17.0.6
         version: 17.0.6
 
+  packages/pptx:
+    dependencies:
+      '@docen/core':
+        specifier: workspace:*
+        version: link:../core
+      '@docen/layout':
+        specifier: workspace:*
+        version: link:../layout
+      '@office-open/core':
+        specifier: 0.14.5
+        version: 0.14.5
+      '@office-open/pptx':
+        specifier: 0.14.5
+        version: 0.14.5
+
   packages/pretext: {}
 
   packages/vue:
@@ -874,6 +889,9 @@ packages:
 
   '@office-open/docx@0.14.5':
     resolution: {integrity: sha512-Gh70MDb8Ub7GPfeN/AtTFGBchmyS533bo8L1TW9mESCEq4qqC3SId0E9uEK+ijFa9oPSX3MGMeLLdlZDdMnClw==}
+
+  '@office-open/pptx@0.14.5':
+    resolution: {integrity: sha512-bJ1FSsIyZD+ZL2QzhntgTWYZ4DM69rlAkFLAVtUklIOrzLCK1EItqbNQVbz5BYowuEWIlpn/orKMXpUuasZAOw==}
 
   '@office-open/xml@0.14.5':
     resolution: {integrity: sha512-GKtxGhzB3YObLx9deHVfdDK/haIbIH3RjjSJT1lMVtBNoHw2tRtvL6X2CLyacL1JDmHVTIrxlXjV5l+4ZIuRAw==}
@@ -3586,6 +3604,11 @@ snapshots:
       fflate: 0.8.3
 
   '@office-open/docx@0.14.5':
+    dependencies:
+      '@office-open/core': 0.14.5
+      '@office-open/xml': 0.14.5
+
+  '@office-open/pptx@0.14.5':
     dependencies:
       '@office-open/core': 0.14.5
       '@office-open/xml': 0.14.5

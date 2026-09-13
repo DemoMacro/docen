@@ -1,0 +1,48 @@
+{
+  "name": "@docen/pptx",
+  "version": "0.0.1",
+  "description": "The PPTX engine for docen editors — parse presentations into the canonical Options model and project slides into drawing members for the canvas",
+  "keywords": [
+    "docen",
+    "office",
+    "ooxml",
+    "powerpoint",
+    "pptx"
+  ],
+  "homepage": "https://github.com/DemoMacro/docen#readme",
+  "bugs": {
+    "url": "https://github.com/DemoMacro/docen/issues"
+  },
+  "license": "MIT",
+  "author": {
+    "name": "Demo Macro",
+    "email": "abc@imst.xyz",
+    "url": "https://www.demomacro.com/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DemoMacro/docen.git"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "dist/index.mjs",
+  "types": "dist/index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    }
+  },
+  "scripts": {
+    "build": "vp pack",
+    "prepack": "pnpm build"
+  },
+  "dependencies": {
+    "@docen/core": "workspace:*",
+    "@docen/layout": "workspace:*",
+    "@office-open/core": "0.14.5",
+    "@office-open/pptx": "0.14.5"
+  }
+}
