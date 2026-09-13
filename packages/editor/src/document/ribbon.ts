@@ -1681,9 +1681,11 @@ const referencesTab = (): RibbonTab =>
       split("multilevel", "add-text", parsedItems(addTextItems()), { size: "large" }),
       split("sync", "update-toc", parsedItems(updateTocItems()), { size: "large" }),
     ]),
-    group("footnotes", [
-      split("footnote", "insert-footnote", parsedItems(footnoteItems()), { size: "large" }),
-    ]),
+    group(
+      "footnotes",
+      [split("footnote", "insert-footnote", parsedItems(footnoteItems()), { size: "large" })],
+      "note-settings-dialog",
+    ),
     group("citations", [
       btn("comment-add", "insert-citation", { size: "large" }),
       btn("people", "manage-sources", { size: "large" }),

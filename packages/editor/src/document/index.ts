@@ -74,6 +74,10 @@ import type { FontDialogPatch } from "../ui/components/workspace/font-dialog";
 import { proofingLanguageName } from "../ui/components/workspace/language-dialog";
 import type { LinkValues } from "../ui/components/workspace/link-dialog";
 import type { StyleChoice, ModifyStyleState } from "../ui/components/workspace/modify-style-dialog";
+import type {
+  NoteKindSettings,
+  NoteSettingsValues,
+} from "../ui/components/workspace/note-settings-dialog";
 import type { WordCountStats } from "../ui/components/workspace/word-count-dialog";
 import { createDefaultAddin, textCounter, wordCounter } from "./addin";
 import {
@@ -1687,6 +1691,11 @@ class DocenDocument extends AddinHost<Editor> {
       "options:ok",
       this.#onOptionsOk as EventListener,
     );
+    // Footnote/endnote settings dialog — ok (document-level numbering).
+    this.shadowRoot!.querySelector("docen-note-settings-dialog")?.addEventListener(
+      "note-settings:ok",
+      this.onNoteSettingsOk as EventListener,
+    );
     // Document Inspector (检查问题) — the findings dialog's removal buttons.
     this.shadowRoot!.querySelector("docen-inspect-dialog")?.addEventListener(
       "inspect:clear-comments",
@@ -2630,6 +2639,9 @@ class DocenDocument extends AddinHost<Editor> {
     this.shadowRoot
       ?.querySelector("docen-options-dialog")
       ?.removeEventListener("options:ok", this.#onOptionsOk as EventListener);
+    this.shadowRoot
+      ?.querySelector("docen-note-settings-dialog")
+      ?.removeEventListener("note-settings:ok", this.onNoteSettingsOk as EventListener);
     this.shadowRoot
       ?.querySelector("docen-status-bar")
       ?.removeEventListener("language:open", this.#onLanguageOpen as EventListener);
@@ -4899,6 +4911,12 @@ class DocenDocument extends AddinHost<Editor> {
       this.#sections.openPageSetup();
       return;
     }
+    // References → footnotes group launcher: the Word Footnote and Endnote
+    // dialog (document-level numbering settings).
+    if (name === "note-settings-dialog") {
+      this.#openNoteSettings();
+      return;
+    }
     if (name === "page-size") {
       if (value === "more") this.#sections.openPageSetup();
       else this.#sections.setPageSize(value);
@@ -5979,6 +5997,84 @@ class DocenDocument extends AddinHost<Editor> {
     if (d.protection === "trackedChanges") editor.commands["track-changes"](true);
     this.#syncEditable();
   }
+
+  /** References → footnotes group launcher: the Word Footnote and Endnote
+   *  dialog, prefilled from documentExtras.settings (Word's defaults for
+   *  absent fields: footnotes 1,2,3 at page bottom; endnotes i,ii,iii at
+   *  section end). */
+  #openNoteSettings(): void {
+    const s = this.#documentSettings();
+    const fn = (s.footnoteProperties ?? {}) as Record<string, unknown>;
+    const en = (s.endnoteProperties ?? {}) as Record<string, unknown>;
+    const start = (v: unknown): number => (typeof v === "number" && v >= 1 ? v : 1);
+    (
+      this.shadowRoot?.querySelector("docen-note-settings-dialog") as {
+        show(values?: {
+          footnote?: Partial<NoteKindSettings>;
+          endnote?: Partial<NoteKindSettings>;
+        }): void;
+      } | null
+    )?.show({
+      footnote: {
+        pos: fn.pos === "beneathText" ? "beneathText" : "pageBottom",
+        numFmt: typeof fn.numFmt === "string" ? fn.numFmt : "decimal",
+        numStart: start(fn.numStart),
+        numRestart:
+          fn.numRestart === "eachSect" || fn.numRestart === "eachPage"
+            ? fn.numRestart
+            : "continuous",
+      },
+      endnote: {
+        pos: en.pos === "docEnd" ? "docEnd" : "sectEnd",
+        numFmt: typeof en.numFmt === "string" ? en.numFmt : "lowerRoman",
+        numStart: start(en.numStart),
+        numRestart:
+          en.numRestart === "eachSect" || en.numRestart === "eachPage"
+            ? en.numRestart
+            : "continuous",
+      },
+    });
+  }
+
+  /** The footnote/endnote dialog's OK — fold both kinds into
+   *  documentExtras.settings (w:footnotePr/w:endnotePr on export). The canvas
+   *  paints Word's default ordinal formats only, so these ride the export
+   *  path like the Options dialog's compatibility version; fields the dialog
+   *  doesn't own (format, footnotes/endnotes separators) survive the fold. A
+   *  no-change OK skips the transaction (no undo step). */
+  readonly onNoteSettingsOk = (event: Event): void => {
+    const v = (event as CustomEvent<NoteSettingsValues | undefined>).detail;
+    if (!v) return;
+    const prev = this.#documentSettings();
+    const prevFn = prev.footnoteProperties as Record<string, unknown> | undefined;
+    const prevEn = prev.endnoteProperties as Record<string, unknown> | undefined;
+    // Only the four fields the dialog owns decide "changed" — parsed
+    // documents may carry extra fields (format, separators) that must not
+    // force a dispatch nor get dropped.
+    const fnChanged =
+      !prevFn ||
+      prevFn.pos !== v.footnote.pos ||
+      prevFn.numFmt !== v.footnote.numFmt ||
+      prevFn.numStart !== v.footnote.numStart ||
+      prevFn.numRestart !== v.footnote.numRestart;
+    const enChanged =
+      !prevEn ||
+      prevEn.pos !== v.endnote.pos ||
+      prevEn.numFmt !== v.endnote.numFmt ||
+      prevEn.numStart !== v.endnote.numStart ||
+      prevEn.numRestart !== v.endnote.numRestart;
+    if (!fnChanged && !enChanged) return;
+    const editor = this.editor;
+    if (!editor) return;
+    const attrs = (editor.state.doc.attrs ?? {}) as { documentExtras?: Record<string, unknown> };
+    const extras = attrs.documentExtras ?? {};
+    const settings: Record<string, unknown> = { ...prev };
+    if (fnChanged) settings.footnoteProperties = { ...prevFn, ...v.footnote };
+    if (enChanged) settings.endnoteProperties = { ...prevEn, ...v.endnote };
+    editor.view.dispatch(
+      editor.state.tr.setDocAttribute("documentExtras", { ...extras, settings }),
+    );
+  };
 
   /** Notify external listeners (framework wrappers like @docen/vue) when the
    *  locale changes from inside the host — status-bar toggle or Options OK.
