@@ -4,9 +4,13 @@ import type { Editor } from "@docen/docx/core";
 
 import type { ColumnsValues } from "../../ui/components/workspace/columns-dialog";
 import type { LineNumbersValues } from "../../ui/components/workspace/line-numbers-dialog";
+import type { PageNumberFormatValues } from "../../ui/components/workspace/page-number-format-dialog";
 import type { PageSetupValues } from "../../ui/components/workspace/page-setup-dialog";
 import type { BorderSideState, BordersDialogPatch } from "../extensions/commands";
 import { MARGINS, PAPER_SIZES, marginTwipsFromCss, mergeSectionProperties } from "../page-setup";
+
+/** The w:pgNumType subtree (non-nullable form for building a replacement). */
+type PageNumberTypeOptions = NonNullable<SectionPropertiesOptions["pageNumberType"]>;
 
 /** The section commands' view of the host — resolved per call so the
  *  controller can be built before a document opens. */
@@ -283,6 +287,47 @@ export class SectionCommands {
         delete next.distance;
       }
       return { ...cur, lineNumberType: next };
+    });
+  };
+
+  /** Open the Page Number Format dialog prefilled from the current section's
+   *  w:pgNumType (the Page Number menu's format entry). */
+  openPageNumberFormat(): void {
+    const cur = this.currentSectionProperties()?.pageNumberType;
+    (
+      this.host.element().shadowRoot?.querySelector("docen-page-number-format-dialog") as {
+        show(values?: Partial<PageNumberFormatValues>): void;
+      } | null
+    )?.show({
+      format: typeof cur?.format === "string" ? cur.format : "decimal",
+      // An absent start is Word's continue-from-previous.
+      continueFromPrevious: cur?.start == null,
+      start: typeof cur?.start === "number" && cur.start >= 0 ? cur.start : 1,
+    });
+  }
+
+  /** The Page Number Format dialog's OK — write the w:numFmt token and, when
+   *  the user picked start-at, the restart number onto the current section's
+   *  w:pgNumType; continue-from-previous removes the start (the absent
+   *  w:start is Word's continue semantics). The transaction re-renders every
+   *  page (footers paint the numbers). */
+  readonly onPageNumberFormatOk = (
+    event: CustomEvent<PageNumberFormatValues | undefined>,
+  ): void => {
+    const values = event.detail;
+    if (!values) return;
+    this.mutateCurrentSection((cur) => {
+      const next: PageNumberTypeOptions = {
+        ...cur?.pageNumberType,
+        // The dropdown speaks the w:numFmt token verbatim.
+        format: values.format as PageNumberTypeOptions["format"],
+      };
+      if (values.continueFromPrevious) {
+        delete next.start;
+      } else {
+        next.start = Math.max(0, Math.round(values.start) || 0);
+      }
+      return { ...cur, pageNumberType: next };
     });
   };
 

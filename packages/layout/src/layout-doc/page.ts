@@ -99,6 +99,18 @@ export interface ProjectedLineNumbers {
   distancePx: number | null;
 }
 
+/** Page numbering projected for the PAGE field (w:pgNumType): the number
+ *  format token and the restart value this section's first page shows.
+ *  Absent from a section = decimal numbers continuing the previous section. */
+export interface ProjectedPageNumbering {
+  /** The first number this section's opening page shows (w:start); absent =
+   *  numbering continues from the previous section. */
+  start?: number;
+  /** The w:numFmt token the number renders in (1,2,3 / i,ii,iii / ①,②,③…);
+   *  absent = decimal. */
+  format?: string;
+}
+
 /** Section columns projected for the flow (w:cols): the page's content box
  *  splits into `count` columns the flow fills left to right before paging.
  *  Absent from a section = one full-width column (the default). */

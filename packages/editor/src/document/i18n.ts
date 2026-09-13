@@ -571,6 +571,7 @@ export const ribbonEn: AdditionalLanguage = {
     "ribbon.opt.page-cur-page-total": "Page X of Y",
     "ribbon.opt.page-cur-dash": "— X —",
     "ribbon.opt.page-cur-slash": "X / Y",
+    "ribbon.opt.page-num-format": "Format Page Numbers…",
     "ribbon.opt.remove-page-numbers": "Remove Page Numbers",
     // --- Shapes gallery: category headings (shape names come from
     //     i18n-shapes.ts, exploded into ribbon.opt.shape-<token> keys below) ---
@@ -748,6 +749,11 @@ export const ribbonEn: AdditionalLanguage = {
     "lineNumbers.auto": "Auto",
     "lineNumbers.countBy": "Count by:",
     "lineNumbers.restart": "Numbering:",
+    "pageNumFmt.title": "Page Number Format",
+    "pageNumFmt.format": "Number format:",
+    "pageNumFmt.numbering": "Page numbering",
+    "pageNumFmt.continue": "Continue from previous section",
+    "pageNumFmt.startAt": "Start at:",
     "context.edit-footnote": "Edit Footnote…",
     "context.edit-endnote": "Edit Endnote…",
     "context.delete-footnote": "Delete Footnote",
@@ -1862,6 +1868,7 @@ export const ribbonZhCN: AdditionalLanguage = {
     "ribbon.opt.page-cur-page-total": "第 X 页，共 Y 页",
     "ribbon.opt.page-cur-dash": "— X —",
     "ribbon.opt.page-cur-slash": "X / Y",
+    "ribbon.opt.page-num-format": "设置页码格式…",
     "ribbon.opt.remove-page-numbers": "删除页码",
     // --- 形状库分类标题（形状名来自 i18n-shapes.ts，在下方展开为
     //     ribbon.opt.shape-<token> 键） ---
@@ -2038,6 +2045,11 @@ export const ribbonZhCN: AdditionalLanguage = {
     "lineNumbers.auto": "自动",
     "lineNumbers.countBy": "编号间隔：",
     "lineNumbers.restart": "编号方式：",
+    "pageNumFmt.title": "页码格式",
+    "pageNumFmt.format": "编号格式：",
+    "pageNumFmt.numbering": "页码编号",
+    "pageNumFmt.continue": "续前节",
+    "pageNumFmt.startAt": "起始值：",
     "context.edit-footnote": "编辑脚注…",
     "context.edit-endnote": "编辑尾注…",
     "context.delete-footnote": "删除脚注",

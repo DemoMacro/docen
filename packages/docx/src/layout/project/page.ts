@@ -12,6 +12,7 @@ import {
   type ProjectedPageBorder,
   type ProjectedPageBorders,
   type ProjectedPageFurniture,
+  type ProjectedPageNumbering,
 } from "@docen/layout";
 import type { DocumentOptions, SectionChild, SectionOptions } from "@office-open/docx";
 
@@ -377,6 +378,24 @@ export function projectLineNumbers(properties: unknown): ProjectedLineNumbers | 
     start: num(raw.start) ?? 1,
     restart: raw.restart === "continuous" || raw.restart === "newSection" ? raw.restart : "newPage",
     distancePx: distance == null ? null : twipToPx(distance),
+  };
+}
+
+/** Project a section's w:pgNumType for the PAGE field: the restart number and
+ *  the w:numFmt token the numbers render in. Absent or empty projects to
+ *  undefined (decimal numbers continuing the previous section). */
+export function projectPageNumbering(properties: unknown): ProjectedPageNumbering | undefined {
+  const raw =
+    isRecord(properties) && isRecord(properties.pageNumberType)
+      ? (properties.pageNumberType as Rec)
+      : null;
+  if (!raw) return undefined;
+  const start = num(raw.start);
+  const format = str(raw.format);
+  if (start == null && !format) return undefined;
+  return {
+    ...(start != null ? { start } : {}),
+    ...(format ? { format } : {}),
   };
 }
 

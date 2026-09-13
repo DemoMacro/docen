@@ -768,6 +768,7 @@ const pageNumberItems = (): string =>
     { text: opt("page-cur-dash"), value: "cur-dash" },
     { text: opt("page-cur-slash"), value: "cur-slash" },
     { text: "-" },
+    { text: opt("page-num-format"), value: "format" },
     { text: opt("remove-page-numbers"), value: "remove-numbers" },
   ]);
 

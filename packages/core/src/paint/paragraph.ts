@@ -1,6 +1,7 @@
 import {
   cssFontOf,
   familyOfSlot,
+  formatNumber,
   gridPadOf,
   isCjkCodeUnit,
   itemGlyphLayout,
@@ -397,10 +398,12 @@ export function paintParagraph(
           continue;
         }
         // A page-number field paints its live value; the measured `text` was
-        // only a placeholder.
+        // only a placeholder. PAGE renders in the section's w:pgNumType
+        // format at the restart-adjusted value (the ctx carries the offset
+        // between shown and physical numbers).
         const label =
           inline.field === "page"
-            ? String(ctx.pageIndex + 1)
+            ? formatNumber(ctx.pageNumber?.fmt, ctx.pageIndex + 1 + (ctx.pageNumber?.offset ?? 0))
             : inline.field === "numPages"
               ? String(ctx.pageCount)
               : item.text;

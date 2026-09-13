@@ -17,6 +17,7 @@ import type {
   ProjectedPageBackground,
   ProjectedPageBorders,
   ProjectedPageFurniture,
+  ProjectedPageNumbering,
 } from "@docen/layout";
 import { twipToPx } from "@docen/layout";
 import type { DocumentOptions, SectionPropertiesOptions } from "@office-open/docx";
@@ -33,6 +34,7 @@ import {
   projectPageBackground,
   projectPageBorders,
   projectPageFurniture,
+  projectPageNumbering,
 } from "./project/page";
 import { projectParagraph } from "./project/paragraph";
 import { projectTable } from "./project/table";
@@ -47,6 +49,9 @@ export interface ProjectedSection {
   pageBorders?: ProjectedPageBorders;
   /** The section's line numbering (w:lnNumType), absent when none. */
   lineNumbers?: ProjectedLineNumbers;
+  /** The section's page numbering (w:pgNumType), absent when the section
+   *  continues the previous one's decimal numbers. */
+  pageNumbering?: ProjectedPageNumbering;
   /** The section's columns (w:cols), absent for a single-column section. */
   columns?: ProjectedColumns;
   /** The section break type (sectPr @w:type): a "continuous" section merges
@@ -177,6 +182,7 @@ export function projectDocumentOptions(
       furniture: projectPageFurniture(section, doc),
       pageBorders: projectPageBorders(section.properties),
       lineNumbers: projectLineNumbers(section.properties),
+      pageNumbering: projectPageNumbering(section.properties),
       columns: projectColumns(section.properties),
       type: section.properties?.type,
       footnoteDefinitions: fnDefs,

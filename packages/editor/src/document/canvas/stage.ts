@@ -23,6 +23,7 @@ import type {
   ProjectedPageBorder,
   ProjectedPageBorders,
   ProjectedPageFurniture,
+  ProjectedPageNumbering,
 } from "@docen/layout";
 /**
  * Canvas stage — the page layer of the canvas document component.
@@ -120,6 +121,9 @@ export interface CanvasStageSection {
   pageBorders?: ProjectedPageBorders;
   /** The section's line numbering (w:lnNumType), absent when none. */
   lineNumbers?: ProjectedLineNumbers;
+  /** The section's page numbering (w:pgNumType), absent when the section
+   *  continues the previous one's decimal numbers. */
+  pageNumbering?: ProjectedPageNumbering;
   /** The section's columns (w:cols), absent for a single-column section. */
   columns?: ProjectedColumns;
   /** Headers/footers for this section's pages (absent = none). */
@@ -136,6 +140,28 @@ export interface CanvasStageSection {
 
 /** [default, first, even] slot pick order. */
 const FURNITURE_SLOTS = [0, 1, 2] as const;
+
+/** Per-section PAGE field offsets (shown number − physical page number): a
+ *  w:start section restarts the count on its first physical page; later
+ *  sections without a start continue the same skew. */
+function computePageNumberOffsets(
+  sections: readonly CanvasStageSection[],
+  sectionOfPage: readonly number[],
+): number[] {
+  const firstPageOf = new Map<number, number>();
+  sectionOfPage.forEach((s, p) => {
+    if (!firstPageOf.has(s)) firstPageOf.set(s, p);
+  });
+  const offsets: number[] = [];
+  let offset = 0;
+  sections.forEach((section, s) => {
+    const first = firstPageOf.get(s);
+    const start = section.pageNumbering?.start;
+    if (start != null && first != null) offset = start - 1 - first;
+    offsets[s] = offset;
+  });
+  return offsets;
+}
 
 /** Lay every furniture slot once, at its section's content width — the
  *  single pass both consumers share. No grid context: Word keeps
@@ -201,6 +227,9 @@ export class CanvasStage {
   /** Per-page line-number labels (sync's one-pass count; empty pages of
    *  unnumbered sections carry an empty list). */
   private lineNumberMarks = new Map<number, LineNumberMark[]>();
+  /** Per-section PAGE field offsets (sync's one-pass chain of the w:start
+   *  restarts). */
+  private pageNumberOffsets: number[] = [];
 
   /** The section a page belongs to (its flow box + furniture). */
   private sectionAt(page: number): CanvasStageSection {
@@ -838,6 +867,7 @@ export class CanvasStage {
     // Line numbers count across pages (continuous runs through page breaks)
     // — one pass over the whole flow, keyed by page for the per-page paint.
     this.lineNumberMarks = computeLineNumbers(pages, sections, sectionOfPage);
+    this.pageNumberOffsets = computePageNumberOffsets(sections, sectionOfPage);
 
     while (this.slots.length < pages.length) {
       // New slots clone the size of the section their page belongs to.
@@ -1149,7 +1179,7 @@ export class CanvasStage {
     const win = this.windowOf(index);
     tree.y = win ? -win.idx * WINDOW_PX * this.factor : 0;
     // This page paints with its OWN section's box + furniture.
-    const { flow, furniture, lineNumbers, columns } = this.sectionAt(index);
+    const { flow, furniture, lineNumbers, columns, pageNumbering } = this.sectionAt(index);
     const marks = this.lineNumberMarks.get(index);
     const ctx: PaintContext = {
       metrics: this.ctx.metrics,
@@ -1170,6 +1200,14 @@ export class CanvasStage {
       deferredDrawings: [],
       columns,
       ...(lineNumbers && marks?.length ? { lineNumbers: { config: lineNumbers, marks } } : {}),
+      ...(pageNumbering
+        ? {
+            pageNumber: {
+              offset: this.pageNumberOffsets[this.ctx.sectionOfPage[index] ?? 0] ?? 0,
+              fmt: pageNumbering.format,
+            },
+          }
+        : {}),
     };
     const slotIndex = this.slotOf(index);
     const items = this.pages[index]?.items ?? [];

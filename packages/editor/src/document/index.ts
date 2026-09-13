@@ -1753,6 +1753,11 @@ class DocenDocument extends AddinHost<Editor> {
       "line-numbers:ok",
       this.#sections.onLineNumbersOk as EventListener,
     );
+    // Page Number Format dialog — ok (current section's w:pgNumType).
+    this.shadowRoot!.querySelector("docen-page-number-format-dialog")?.addEventListener(
+      "page-number-format:ok",
+      this.#sections.onPageNumberFormatOk as EventListener,
+    );
     // Document Inspector (检查问题) — the findings dialog's removal buttons.
     this.shadowRoot!.querySelector("docen-inspect-dialog")?.addEventListener(
       "inspect:clear-comments",
@@ -2570,6 +2575,7 @@ class DocenDocument extends AddinHost<Editor> {
       prev.sections.some((s, i) => !deepEq(s.flow, run.sections[i]!.flow)) ||
       prev.sections.some((s, i) => !deepEq(s.furniture, run.sections[i]!.furniture)) ||
       prev.sections.some((s, i) => !deepEq(s.lineNumbers, run.sections[i]!.lineNumbers)) ||
+      prev.sections.some((s, i) => !deepEq(s.pageNumbering, run.sections[i]!.pageNumbering)) ||
       prev.sections.some((s, i) => !deepEq(s.columns, run.sections[i]!.columns));
     const dirty = structural ? undefined : dirtyPagesOf(prev.pages, run.pages);
     stage.sync(run.pages, run.sections, run.sectionOfPage, run.background, dirty);
@@ -5262,6 +5268,10 @@ class DocenDocument extends AddinHost<Editor> {
       const placement = value ?? "page-bottom-center";
       if (placement === "remove-numbers") {
         this.#removePageNumbers();
+        return;
+      }
+      if (placement === "format") {
+        this.#sections.openPageNumberFormat();
         return;
       }
       if (placement.startsWith("cur-")) {

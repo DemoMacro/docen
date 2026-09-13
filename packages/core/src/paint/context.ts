@@ -182,6 +182,11 @@ export interface PaintContext {
   /** The page's section columns (w:cols) — separator lines paint between
    *  them when `separate` is set. Absent = single column, nothing to draw. */
   columns?: ProjectedColumns;
+  /** This page's page numbering (w:pgNumType): the offset between the shown
+   *  number and the physical index (start − section's first page) and the
+   *  w:numFmt token the PAGE field renders in. Absent = decimal numbers
+   *  continuing the previous section. */
+  pageNumber?: { offset: number; fmt?: string };
   background?: ProjectedPageBackground;
   pageIndex: number;
   pageCount: number;

@@ -1,4 +1,5 @@
 export * from "./units";
+export * from "./numbering-format";
 export * from "./font";
 export * from "./layout-doc";
 export * from "./layout-result";

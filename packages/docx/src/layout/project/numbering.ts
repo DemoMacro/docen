@@ -1,8 +1,12 @@
 // Numbering (list) resolution: the reference → levels index built once per
-// projection, and the w:numFmt display formatting (decimal, roman, CJK
-// numerals, letters) that substitutes a level's %k placeholders.
+// projection. The w:numFmt display formatting itself (decimal, roman, CJK
+// numerals, letters, kana, …) is layout's numbering-format module — the same
+// renderer the page-number field consumes — re-exported here for the
+// projection's substitution sites.
 
 import { isRecord, measureTwip, num, str, type Rec } from "./guards";
+
+export { formatNumber as formatListNumber, romanNumeral } from "@docen/layout";
 
 // ── numbering (list) resolution ──
 
@@ -67,91 +71,5 @@ export function indexNumberings(numbering: unknown): NumberingIndex {
 }
 
 // ── list-number formats (w:numFmt) ──
-
-const CJK_DIGITS = ["零", "一", "二", "三", "四", "五", "六", "七", "八", "九"];
-const CJK_UNITS = ["", "十", "百", "千"];
-
-/** chineseCounting composition (零 fill between non-zero groups; the 10-19
- *  range drops the leading 一). */
-function chineseNumeral(n: number): string {
-  if (n < 1 || n > 9999) return String(n);
-  const digits: number[] = [];
-  for (let rest = n; rest > 0; rest = Math.floor(rest / 10)) digits.unshift(rest % 10);
-  let out = "";
-  let zeroPending = false;
-  digits.forEach((d, i) => {
-    const unit = CJK_UNITS[digits.length - 1 - i];
-    if (d === 0) {
-      if (out) zeroPending = true;
-      return;
-    }
-    if (zeroPending) {
-      out += CJK_DIGITS[0];
-      zeroPending = false;
-    }
-    // 10-19 is 十X, not 一十X.
-    if (!(d === 1 && unit === "十" && digits.length === 2)) out += CJK_DIGITS[d];
-    out += unit;
-  });
-  return out;
-}
-
-const ROMAN_PAIRS: [number, string][] = [
-  [1000, "M"],
-  [900, "CM"],
-  [500, "D"],
-  [400, "CD"],
-  [100, "C"],
-  [90, "XC"],
-  [50, "L"],
-  [40, "XL"],
-  [10, "X"],
-  [9, "IX"],
-  [5, "V"],
-  [4, "IV"],
-  [1, "I"],
-];
-
-export function romanNumeral(n: number, upper: boolean): string {
-  let rest = n;
-  let out = "";
-  for (const [value, glyph] of ROMAN_PAIRS) {
-    while (rest >= value) {
-      out += glyph;
-      rest -= value;
-    }
-  }
-  return upper ? out : out.toLowerCase();
-}
-
-/** 1→a…26→z, 27→aa (spreadsheet-style, Word's letter numbering). */
-function letterNumeral(n: number, upper: boolean): string {
-  let out = "";
-  let rest = n;
-  while (rest > 0) {
-    rest--;
-    out = String.fromCharCode(97 + (rest % 26)) + out;
-    rest = Math.floor(rest / 26);
-  }
-  return upper ? out.toUpperCase() : out;
-}
-
-/** One level's counter under its w:numFmt. Unsupported formats render decimal. */
-export function formatListNumber(format: string, n: number): string {
-  switch (format) {
-    case "lowerLetter":
-      return letterNumeral(n, false);
-    case "upperLetter":
-      return letterNumeral(n, true);
-    case "lowerRoman":
-      return romanNumeral(n, false);
-    case "upperRoman":
-      return romanNumeral(n, true);
-    case "chineseCounting":
-    case "chineseLegalSimplified":
-    case "japaneseCounting":
-      return chineseNumeral(n);
-    default:
-      return String(n);
-  }
-}
+// The formatter lives in @docen/layout (numbering-format.ts) — re-exported
+// above alongside the romanNumeral helper the footnote ordinals use.
