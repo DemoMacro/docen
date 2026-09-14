@@ -37,14 +37,17 @@ import {
 } from "../ui";
 import { escapeHtml, presentationStyles, presentationTemplate } from "./chrome";
 import {
+  firstRunSizeOf,
   insertSlideAt,
   makePicture,
   makeTextBox,
   setParagraphAlignment,
   setRunFont,
   setRunSize,
+  shapeTextOf,
   toggleRunFlag,
   toggleRunStyle,
+  writeShapeText,
 } from "./commands";
 import {
   captureGeometry,
@@ -148,6 +151,9 @@ class DocenPresentation extends AddinHost {
   #zoom = 100;
   #overlay: DrawingOverlay | null = null;
   #selection: { slide: number; child: number } | null = null;
+  /** The in-place shape-text editor: the textarea floats over the shape while
+   *  it holds the session (its position; the text is read back on exit). */
+  #textEditor: HTMLTextAreaElement | null = null;
   #edits: DeckEdit[] = [];
   #editIndex = -1;
   #langObserver?: MutationObserver;
@@ -188,6 +194,7 @@ class DocenPresentation extends AddinHost {
     this.#area()?.addEventListener("scroll", this.#onScroll);
     this.thumbStrip?.addEventListener("click", this.#onThumbClick);
     this.#stage.addEventListener("pointerdown", this.#onStagePointerDown);
+    this.#stage.addEventListener("dblclick", this.#onStageDblClick);
     document.addEventListener("keydown", this.#onKeyDown);
     // The selection frame lives over the slide surface (the canvas element
     // Leafer mounts is recreated per deck render — the overlay survives it).
@@ -224,6 +231,7 @@ class DocenPresentation extends AddinHost {
     this.#area()?.removeEventListener("scroll", this.#onScroll);
     this.thumbStrip?.removeEventListener("click", this.#onThumbClick);
     this.#stage.removeEventListener("pointerdown", this.#onStagePointerDown);
+    this.#stage.removeEventListener("dblclick", this.#onStageDblClick);
     document.removeEventListener("keydown", this.#onKeyDown);
     this.#overlay?.el.remove();
     this.#overlay = null;
@@ -242,6 +250,7 @@ class DocenPresentation extends AddinHost {
     this.#presJson = pres;
     // A fresh deck starts clean: the previous deck's edit closures and
     // selection must not survive the swap.
+    this.#exitTextEditing(false);
     this.#selection = null;
     this.#edits = [];
     this.#editIndex = -1;
@@ -258,6 +267,7 @@ class DocenPresentation extends AddinHost {
   closePresentation(): void {
     this.#presJson = null;
     this.#pres = null;
+    this.#exitTextEditing(false);
     this.#selection = null;
     this.#edits = [];
     this.#editIndex = -1;
@@ -541,11 +551,98 @@ class DocenPresentation extends AddinHost {
 
   /** Select a slide object (or clear). The frame shows the strip-space box. */
   #select(sel: { slide: number; child: number } | null): void {
+    if (this.#textEditor) this.#exitTextEditing(true);
     this.#selection = sel;
     if (!sel) return this.#overlay?.hide();
     const hit = this.#selectedBox();
     if (hit) this.#overlay?.show(hit.box, hit.rotation);
     else this.#overlay?.hide();
+  }
+
+  /** Double-click on a shape: float a textarea over its text area and hand
+   *  the session to it (PowerPoint's in-place text edit). The overlay's
+   *  resize handles step aside for the duration. */
+  #enterTextEditing(): void {
+    const sel = this.#selection;
+    const pres = this.#pres;
+    const presJson = this.#presJson;
+    const child = presJson?.slides?.[sel?.slide ?? -1]?.children?.[sel?.child ?? -1];
+    const text = child ? shapeTextOf(child) : null;
+    if (!sel || !pres || !presJson || !child || text === null) return;
+    const hit = slideHits(presJson.slides?.[sel.slide] ?? {}).find((h) => h.child === sel.child);
+    if (!hit) return;
+    const scale = this.#zoom / 100;
+    const stripY = hit.box.y + sel.slide * (pres.heightPx + SLIDE_GAP_PX) + SLIDE_GAP_PX;
+    const editor = document.createElement("textarea");
+    editor.className = "shape-text-editor";
+    editor.value = text;
+    Object.assign(editor.style, {
+      left: `${hit.box.x * scale}px`,
+      top: `${stripY * scale}px`,
+      width: `${hit.box.width * scale}px`,
+      height: `${hit.box.height * scale}px`,
+      fontSize: `${((firstRunSizeOf(child) * 4) / 3) * scale}px`,
+    });
+    editor.addEventListener("keydown", (event) => {
+      // Escape leaves the edit (committing); typing keys stay in the textarea.
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        this.#exitTextEditing(true);
+      }
+      event.stopPropagation();
+    });
+    editor.addEventListener("input", () => {
+      // Grow with the text so multi-line entries stay visible (PowerPoint's
+      // box autofit — height only, the width is the shape's).
+      editor.style.height = "auto";
+      editor.style.height = `${editor.scrollHeight}px`;
+    });
+    this.#canvasHost().append(editor);
+    editor.focus();
+    editor.select();
+    this.#textEditor = editor;
+    this.#overlay?.hide();
+  }
+
+  /** Leave the text edit. `write` commits the textarea's text back into the
+   *  shape (an undo-able edit when it changed); plain exits just drop it. */
+  #exitTextEditing(write: boolean): void {
+    const editor = this.#textEditor;
+    this.#textEditor = null;
+    editor?.remove();
+    const sel = this.#selection;
+    const child = this.#presJson?.slides?.[sel?.slide ?? -1]?.children?.[sel?.child ?? -1];
+    if (editor && write && sel && child && "shape" in child) {
+      const shape = child.shape;
+      const text = editor.value;
+      if (text !== shapeTextOf(child) && shape.textBody) {
+        const before = structuredClone(shape.textBody);
+        if (writeShapeText(child, text)) {
+          const after = structuredClone(shape.textBody);
+          this.#pushEdit({
+            undo: () => {
+              shape.textBody = structuredClone(before);
+              this.#reproject(sel.slide);
+            },
+            redo: () => {
+              shape.textBody = structuredClone(after);
+              this.#reproject(sel.slide);
+            },
+          });
+          this.#reproject(sel.slide);
+        }
+      }
+    }
+    this.#restoreOverlay();
+  }
+
+  /** The selection frame returns after the editor steps aside (a committed
+   *  write-back refreshes it through #reproject; a no-op exit restores the
+   *  pre-edit frame itself). */
+  #restoreOverlay(): void {
+    if (this.#textEditor || !this.#selection) return;
+    const hit = this.#selectedBox();
+    if (hit) this.#overlay?.show(hit.box, hit.rotation);
   }
 
   /** Re-project and repaint after a source edit (gestures, delete, undo,
@@ -626,12 +723,16 @@ class DocenPresentation extends AddinHost {
 
   #undo(): void {
     if (this.#editIndex < 0) return;
+    // An in-flight text edit commits first, so undo revokes it (the freshest
+    // step) rather than the step before — the user's intent either way.
+    this.#exitTextEditing(true);
     this.#edits[this.#editIndex--]!.undo();
     this.#syncQat();
   }
 
   #redo(): void {
     if (this.#editIndex >= this.#edits.length - 1) return;
+    this.#exitTextEditing(true);
     this.#edits[++this.#editIndex]!.redo();
     this.#syncQat();
   }
@@ -739,6 +840,9 @@ class DocenPresentation extends AddinHost {
    *  undo pair clones the whole body (geometry snapshots don't reach text);
    *  a command that changed nothing records nothing. */
   #applyTextFormat(name: string, value?: string): void {
+    // Format lands on the committed text: an in-flight edit writes back
+    // first, or the exit-time write-back would clobber the format.
+    this.#exitTextEditing(true);
     const sel = this.#selection;
     const child = this.#presJson?.slides?.[sel?.slide ?? -1]?.children?.[sel?.child ?? -1];
     if (!child || !("shape" in child)) return;
@@ -825,14 +929,40 @@ class DocenPresentation extends AddinHost {
     if (slide < 0 || slide >= pres.slides.length) return;
     const localY = stripY - slide * (pres.heightPx + SLIDE_GAP_PX) - SLIDE_GAP_PX;
     const child = hitSlide(slideHits(presJson.slides?.[slide] ?? {}), x, localY);
+    // A press outside the shape under edit leaves the edit (Word's rule);
+    // one inside just moves the caret — the textarea keeps the session.
+    if (this.#textEditor) {
+      if (this.#selection?.slide !== slide || this.#selection.child !== child) this.#select(null);
+      return;
+    }
     if (child < 0) return this.#select(null);
     if (this.#selection?.slide === slide && this.#selection.child === child)
       return this.#overlay?.beginMove(event.clientX, event.clientY);
     this.#select({ slide, child });
   };
 
+  readonly #onStageDblClick = (): void => {
+    if (this.#textEditor) return;
+    this.#enterTextEditing();
+  };
+
   readonly #onKeyDown = (event: KeyboardEvent): void => {
+    // Inside the text edit the textarea owns every key: Enter/Delete type,
+    // its Escape handler commits and leaves; undo is the browser's (the
+    // textarea's own typing history).
+    if (this.#textEditor) return;
     if (event.key === "Escape" && this.#selection) return this.#select(null);
+    if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === "z") {
+      event.preventDefault();
+      return this.#undo();
+    }
+    if (
+      (event.ctrlKey || event.metaKey) &&
+      (event.key.toLowerCase() === "y" || (event.shiftKey && event.key.toLowerCase() === "z"))
+    ) {
+      event.preventDefault();
+      return this.#redo();
+    }
     if ((event.key === "Delete" || event.key === "Backspace") && this.#selection) {
       event.preventDefault();
       this.#deleteSelected();

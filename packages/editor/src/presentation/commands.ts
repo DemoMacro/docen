@@ -111,6 +111,53 @@ export function insertSlideAt(deck: PresentationOptions, at: number): void {
   (deck.slides ??= []).splice(at + 1, 0, { children: [] });
 }
 
+/** The shape's text body as plain lines (paragraphs joined by \n), or null
+ *  when the child carries no text body. */
+export function shapeTextOf(child: SlideChild): string | null {
+  if (!("shape" in child) || !child.shape.textBody) return null;
+  return paragraphsOf(child.shape.textBody)
+    .map((paragraph) =>
+      runsOf(paragraph)
+        .map((run) => run.text)
+        .join(""),
+    )
+    .join("\n");
+}
+
+/** Write plain lines back into the shape's text body — one paragraph per
+ *  line, each keeping the original paragraph's alignment and the style
+ *  attributes of its first run. Returns false when the child has no text
+ *  body (the caller's edit records nothing). */
+export function writeShapeText(child: SlideChild, text: string): boolean {
+  if (!("shape" in child) || !child.shape.textBody) return false;
+  const body = child.shape.textBody;
+  const previous = paragraphsOf(body);
+  const lines = text.split("\n");
+  const next = lines.map((line, i) => {
+    const old = previous[i];
+    const style = runsOf(previous[i] ?? {})[0];
+    const run: TextRunOptions = { text: line };
+    if (style) {
+      const { text: _dropped, ...attrs } = style;
+      Object.assign(run, attrs);
+    }
+    return { properties: old?.properties ? { ...old.properties } : undefined, children: [run] };
+  });
+  body.paragraphs = next;
+  delete body.text;
+  return true;
+}
+
+/** The body's first run font size in points (PowerPoint's 18pt default) —
+ *  the in-place text editor's only typographic nod. */
+export function firstRunSizeOf(child: SlideChild): number {
+  if (!("shape" in child) || !child.shape.textBody) return 18;
+  for (const run of runsIn(child.shape.textBody)) {
+    if (typeof run.size === "number" && run.size > 0) return run.size;
+  }
+  return 18;
+}
+
 const emu = (px: number): number => Math.round(px * EMU_PER_PX);
 
 /** A centered text-box shape for a slide of the given size — white fill and

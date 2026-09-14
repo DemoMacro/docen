@@ -57,6 +57,24 @@ export const presentationStyles = css`
   .stage canvas {
     display: block;
   }
+  /* The in-place shape text editor: a bare textarea floating over the shape
+     (same layer as the selection overlay), framed like it so the edit reads
+     as belonging to the shape. */
+  .shape-text-editor {
+    position: absolute;
+    z-index: 6;
+    box-sizing: border-box;
+    margin: 0;
+    padding: 2px 4px;
+    background: rgba(255, 255, 255, 0.92);
+    border: 1.5px solid #2b7cd3;
+    outline: none;
+    resize: none;
+    overflow: hidden;
+    font-family: inherit;
+    line-height: 1.2;
+    white-space: pre;
+  }
 `;
 
 /** The element surface the template binds to — the ref targets only. The

@@ -5,18 +5,24 @@ import type { TextBodyOptions } from "@office-open/core/drawing";
 import { describe, expect, it } from "vitest";
 
 import {
+  firstRunSizeOf,
   insertSlideAt,
   makePicture,
   makeTextBox,
   setParagraphAlignment,
   setRunFont,
   setRunSize,
+  shapeTextOf,
   toggleRunFlag,
   toggleRunStyle,
+  writeShapeText,
 } from "./commands";
 
 const bodyOf = (paragraphs: unknown[]): TextBodyOptions =>
   ({ paragraphs }) as unknown as TextBodyOptions;
+
+const shapeChild = (body: unknown): SlideChild =>
+  ({ shape: { textBody: body } }) as unknown as SlideChild;
 
 type ShapeVariant = Extract<SlideChild, { shape: unknown }>["shape"];
 type PictureVariant = Extract<SlideChild, { picture: unknown }>["picture"];
@@ -124,6 +130,66 @@ describe("insertSlideAt", () => {
     const deck: PresentationOptions = {};
     insertSlideAt(deck, 0);
     expect(deck.slides).toHaveLength(1);
+  });
+});
+
+describe("shapeTextOf / writeShapeText", () => {
+  it("reads paragraphs as \\n-joined lines", () => {
+    const child = shapeChild(
+      bodyOf([{ children: [{ text: "a" }] }, { children: [{ text: "b" }] }]),
+    );
+    expect(shapeTextOf(child)).toBe("a\nb");
+  });
+
+  it("reads through the text and string sugar", () => {
+    expect(shapeTextOf(shapeChild({ text: "hi" }))).toBe("hi");
+    expect(shapeTextOf(shapeChild(bodyOf(["one", "two"])))).toBe("one\ntwo");
+  });
+
+  it("returns null for children without a text body", () => {
+    const { picture } = makePicture(100, 100, 10, 10, "data:", "png") as {
+      picture: PictureVariant;
+    };
+    expect(shapeTextOf({ picture } as unknown as SlideChild)).toBeNull();
+  });
+
+  it("writes one paragraph per line, keeping alignment and first-run style", () => {
+    const child = shapeChild(
+      bodyOf([
+        { properties: { alignment: "center" }, children: [{ text: "old", bold: true, size: 24 }] },
+      ]),
+    );
+    expect(writeShapeText(child, "one\ntwo")).toBe(true);
+    const body = (child as { shape: { textBody: TextBodyOptions } }).shape.textBody;
+    const paragraphs = body.paragraphs as {
+      properties?: { alignment?: string };
+      children: { text: string; bold?: boolean; size?: number }[];
+    }[];
+    expect(paragraphs).toHaveLength(2);
+    expect(paragraphs[0]!.properties?.alignment).toBe("center");
+    expect(paragraphs[0]!.children[0]).toMatchObject({ text: "one", bold: true, size: 24 });
+    // A paragraph beyond the originals carries no inherited style.
+    expect(paragraphs[1]!.children[0]).toEqual({ text: "two" });
+  });
+
+  it("clears the text sugar after writing", () => {
+    const child = shapeChild({ text: "before" });
+    writeShapeText(child, "after");
+    const body = (child as { shape: { textBody: TextBodyOptions } }).shape.textBody;
+    expect(body.text).toBeUndefined();
+    expect(shapeTextOf(child)).toBe("after");
+  });
+});
+
+describe("firstRunSizeOf", () => {
+  it("returns the first run's size", () => {
+    const child = shapeChild(bodyOf([{ children: [{ text: "a", size: 32 }] }]));
+    expect(firstRunSizeOf(child)).toBe(32);
+  });
+
+  it("falls back to 18pt when unset or absent", () => {
+    expect(firstRunSizeOf(shapeChild(bodyOf([{ children: [{ text: "a" }] }])))).toBe(18);
+    expect(firstRunSizeOf(makeTextBox(100, 100))).toBe(18);
   });
 });
 
