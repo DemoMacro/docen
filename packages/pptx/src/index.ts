@@ -3,6 +3,7 @@
 // members the core painter paints.
 
 export {
+  generatePresentation,
   parsePresentation,
   parsePresentationSync,
   type PresentationOptions,

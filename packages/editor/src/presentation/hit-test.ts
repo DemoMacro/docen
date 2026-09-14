@@ -122,3 +122,47 @@ function transformOf(
   if ("group" in child) return child.group;
   return undefined;
 }
+
+// ── undo snapshots ──
+
+/** The child's addressable geometry fields, verbatim (EMU numbers or
+ *  measure strings — restore writes them back untouched). */
+export interface GeometrySnapshot {
+  x?: unknown;
+  y?: unknown;
+  width?: unknown;
+  height?: unknown;
+  x1?: unknown;
+  y1?: unknown;
+  x2?: unknown;
+  y2?: unknown;
+}
+
+/** Copy the geometry fields an edit may touch. */
+export function captureGeometry(child: SlideChild): GeometrySnapshot {
+  if ("line" in child || "connector" in child) {
+    const o = "line" in child ? child.line : child.connector;
+    return { x1: o.x1, y1: o.y1, x2: o.x2, y2: o.y2 };
+  }
+  const t = transformOf(child);
+  return t ? { x: t.x, y: t.y, width: t.width, height: t.height } : {};
+}
+
+/** Write a snapshot's fields back (the undo/redo leg). Snapshots hold the
+ *  fields verbatim, so each write casts back to the field's own type. */
+export function restoreGeometry(child: SlideChild, snap: GeometrySnapshot): void {
+  if ("line" in child || "connector" in child) {
+    const o = "line" in child ? child.line : child.connector;
+    o.x1 = snap.x1 as typeof o.x1;
+    o.y1 = snap.y1 as typeof o.y1;
+    o.x2 = snap.x2 as typeof o.x2;
+    o.y2 = snap.y2 as typeof o.y2;
+    return;
+  }
+  const t = transformOf(child);
+  if (!t) return;
+  t.x = snap.x as typeof t.x;
+  t.y = snap.y as typeof t.y;
+  t.width = snap.width as typeof t.width;
+  t.height = snap.height as typeof t.height;
+}

@@ -11,6 +11,7 @@
  */
 
 import {
+  generatePresentation,
   parsePresentation,
   projectPresentation,
   type PresentationOptions,
@@ -35,7 +36,14 @@ import {
   t,
 } from "../ui";
 import { escapeHtml, presentationStyles, presentationTemplate } from "./chrome";
-import { hitSlide, offsetChild, resizeChild, slideHits } from "./hit-test";
+import {
+  captureGeometry,
+  hitSlide,
+  offsetChild,
+  resizeChild,
+  restoreGeometry,
+  slideHits,
+} from "./hit-test";
 import { presentationRibbonTabs } from "./ribbon";
 import { paintSlideDeck, SLIDE_GAP_PX, THUMB_GAP_PX, THUMB_WIDTH_PX } from "./slides-panel";
 // Side-effect: register the presentation translation tables.
@@ -44,9 +52,26 @@ import "./i18n";
 const ZOOM_MIN = 10;
 const ZOOM_MAX = 500;
 
+/** Undo steps kept before the oldest falls off. */
+const EDIT_LIMIT = 50;
+
+/** One reversible edit: closures over the touched child with the before and
+ *  after values captured (no document snapshots — the deck holds media). */
+interface DeckEdit {
+  undo(): void;
+  redo(): void;
+}
+
 /** Commands with a live handler — everything else greys out (the honest
  *  ribbon). Add-in commands join this set at render time. */
-const WIRED_COMMANDS: ReadonlySet<string> = new Set(["zoom-in", "zoom-out", "zoom-100"]);
+const WIRED_COMMANDS: ReadonlySet<string> = new Set([
+  "zoom-in",
+  "zoom-out",
+  "zoom-100",
+  "undo",
+  "redo",
+  "save-as",
+]);
 
 @customElement({
   name: "docen-presentation",
@@ -63,6 +88,8 @@ class DocenPresentation extends AddinHost {
   #zoom = 100;
   #overlay: DrawingOverlay | null = null;
   #selection: { slide: number; child: number } | null = null;
+  #edits: DeckEdit[] = [];
+  #editIndex = -1;
   #langObserver?: MutationObserver;
   #unsubLang?: () => void;
   #scrollRaf?: number;
@@ -146,6 +173,11 @@ class DocenPresentation extends AddinHost {
   async openPresentation(data: DataType): Promise<void> {
     const pres = await parsePresentation(data);
     this.#presJson = pres;
+    // A fresh deck starts clean: the previous deck's edit closures and
+    // selection must not survive the swap.
+    this.#selection = null;
+    this.#edits = [];
+    this.#editIndex = -1;
     this.#pres = projectPresentation(pres);
     if (!this.shadowRoot) return;
     this.#renderDeck();
@@ -157,6 +189,8 @@ class DocenPresentation extends AddinHost {
     this.#presJson = null;
     this.#pres = null;
     this.#selection = null;
+    this.#edits = [];
+    this.#editIndex = -1;
     this.#overlay?.hide();
     this.removeAttribute("filename");
     if (!this.shadowRoot) return;
@@ -227,16 +261,16 @@ class DocenPresentation extends AddinHost {
       : initial
         ? `<span class="avatar">${initial}</span>`
         : "";
-    // QAT save/undo/redo render disabled-honest: the engine behind them lands
-    // with the editing batches.
+    // QAT undo/redo follow the edit stack; save stays disabled-honest (the
+    // file lives on disk — Save As carries the edits out).
     const qat = [
-      { id: "save", icon: "save" },
-      { id: "undo", icon: "undo" },
-      { id: "redo", icon: "redo" },
+      { id: "save", icon: "save", disabled: true },
+      { id: "undo", icon: "undo", disabled: this.#editIndex < 0 },
+      { id: "redo", icon: "redo", disabled: this.#editIndex >= this.#edits.length - 1 },
     ]
       .map(
         (c) =>
-          `<docen-ribbon-button icon="${c.icon}" label="${t(`ppt.header.${c.id}`, this)}" event="${c.id}" icon-only disabled></docen-ribbon-button>`,
+          `<docen-ribbon-button icon="${c.icon}" label="${t(`ppt.header.${c.id}`, this)}" event="${c.id}" icon-only${c.disabled ? " disabled" : ""}></docen-ribbon-button>`,
       )
       .join("");
     return `
@@ -255,7 +289,7 @@ class DocenPresentation extends AddinHost {
                 <fluent-divider role="separator" aria-orientation="horizontal" orientation="horizontal"></fluent-divider>
                 <fluent-menu-item data-event="open">${t("ppt.header.open", this)}</fluent-menu-item>
                 <fluent-divider role="separator" aria-orientation="horizontal" orientation="horizontal"></fluent-divider>
-                <fluent-menu-item data-event="save-as" disabled>${t("ppt.header.save-as", this)}</fluent-menu-item>
+                <fluent-menu-item data-event="save-as"${this.#presJson ? "" : " disabled"}>${t("ppt.header.save-as", this)}</fluent-menu-item>
                 <fluent-menu-item data-event="print" disabled>${t("ppt.header.print", this)}</fluent-menu-item>
                 <fluent-divider role="separator" aria-orientation="horizontal" orientation="horizontal"></fluent-divider>
                 <fluent-menu-item data-event="close">${t("ppt.header.close", this)}</fluent-menu-item>
@@ -290,6 +324,7 @@ class DocenPresentation extends AddinHost {
   readonly #onChange = (event: Event): void => {
     const name = (event.target as HTMLElement)?.dataset?.event;
     if (name === "open") this.#pickFile();
+    else if (name === "save-as") void this.#saveAs();
     else if (name === "close") this.closePresentation();
   };
 
@@ -301,6 +336,9 @@ class DocenPresentation extends AddinHost {
     if (name === "zoom-in") this.#setZoom(this.#zoom + 10);
     else if (name === "zoom-out") this.#setZoom(this.#zoom - 10);
     else if (name === "zoom-100") this.#setZoom(100);
+    else if (name === "undo") this.#undo();
+    else if (name === "redo") this.#redo();
+    else if (name === "save-as") void this.#saveAs();
   };
 
   readonly #onZoomChange = (event: Event): void => {
@@ -422,20 +460,106 @@ class DocenPresentation extends AddinHost {
     else this.#overlay?.hide();
   }
 
-  /** Commit a drag gesture to the source child, re-project, and repaint. */
+  /** Re-project and repaint after a source edit (gestures, delete, undo,
+   *  redo — the one paint path every mutation funnels through). */
+  #reproject(): void {
+    if (!this.#presJson) return;
+    this.#pres = projectPresentation(this.#presJson);
+    this.#renderDeck();
+    // The paint restarted under the same selection — the frame snaps to the
+    // current geometry (and rejects itself if the box vanished).
+    const box = this.#selectedBox();
+    if (box) this.#overlay?.refresh(box);
+    else this.#select(null);
+  }
+
+  /** Record a reversible edit; a new edit truncates the redo branch. */
+  #pushEdit(edit: DeckEdit): void {
+    this.#edits.length = this.#editIndex + 1;
+    this.#edits.push(edit);
+    if (this.#edits.length > EDIT_LIMIT) this.#edits.shift();
+    this.#editIndex = this.#edits.length - 1;
+    this.#syncQat();
+  }
+
+  /** Commit a drag gesture to the source child, record it, and repaint. */
   #applyGesture(edit: (child: SlideChild) => void): void {
     const sel = this.#selection;
     const slide = this.#presJson?.slides?.[sel?.slide ?? -1];
     const child = slide?.children?.[sel!.child];
     if (!child) return;
+    const before = captureGeometry(child);
     edit(child);
-    this.#pres = projectPresentation(this.#presJson!);
-    this.#renderDeck();
-    // The paint restarted under the same selection — the frame snaps to the
-    // written-back geometry (and rejects itself if the box vanished).
-    const box = this.#selectedBox();
-    if (box) this.#overlay?.refresh(box);
-    else this.#select(null);
+    const after = captureGeometry(child);
+    this.#pushEdit({
+      undo: () => {
+        restoreGeometry(child, before);
+        this.#reproject();
+      },
+      redo: () => {
+        restoreGeometry(child, after);
+        this.#reproject();
+      },
+    });
+    this.#reproject();
+  }
+
+  /** Remove the selected object; undo re-splices the same child back. */
+  #deleteSelected(): void {
+    const sel = this.#selection;
+    const slide = this.#presJson?.slides?.[sel?.slide ?? -1];
+    const children = slide?.children;
+    if (!sel || !children) return;
+    const [child] = children.splice(sel.child, 1);
+    if (!child) return;
+    this.#select(null);
+    this.#pushEdit({
+      undo: () => {
+        children.splice(sel.child, 0, child);
+        this.#reproject();
+      },
+      redo: () => {
+        children.splice(sel.child, 1);
+        this.#reproject();
+      },
+    });
+    this.#reproject();
+  }
+
+  #undo(): void {
+    if (this.#editIndex < 0) return;
+    this.#edits[this.#editIndex--]!.undo();
+    this.#syncQat();
+  }
+
+  #redo(): void {
+    if (this.#editIndex >= this.#edits.length - 1) return;
+    this.#edits[++this.#editIndex]!.redo();
+    this.#syncQat();
+  }
+
+  /** Stamp the header's undo/redo buttons from the edit-stack position. */
+  #syncQat(): void {
+    const root = this.shadowRoot;
+    if (!root) return;
+    const undo = root.querySelector<HTMLElement>("docen-title-bar [event='undo']");
+    const redo = root.querySelector<HTMLElement>("docen-title-bar [event='redo']");
+    if (!undo || !redo) return;
+    const canUndo = this.#editIndex >= 0;
+    const canRedo = this.#editIndex < this.#edits.length - 1;
+    undo.toggleAttribute("disabled", !canUndo);
+    redo.toggleAttribute("disabled", !canRedo);
+  }
+
+  /** Generate the edited deck and hand it to the browser as a download. */
+  async #saveAs(): Promise<void> {
+    if (!this.#presJson) return;
+    const blob = await generatePresentation(this.#presJson, { type: "blob" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = this.getAttribute("filename") ?? "presentation.pptx";
+    link.click();
+    URL.revokeObjectURL(link.href);
   }
 
   readonly #onStagePointerDown = (event: PointerEvent): void => {
@@ -459,7 +583,11 @@ class DocenPresentation extends AddinHost {
   };
 
   readonly #onKeyDown = (event: KeyboardEvent): void => {
-    if (event.key === "Escape" && this.#selection) this.#select(null);
+    if (event.key === "Escape" && this.#selection) return this.#select(null);
+    if ((event.key === "Delete" || event.key === "Backspace") && this.#selection) {
+      event.preventDefault();
+      this.#deleteSelected();
+    }
   };
 
   // ── Thumbnails panel ─────────────────────────────────────────────────────
