@@ -37,6 +37,16 @@ import {
 } from "../ui";
 import { escapeHtml, presentationStyles, presentationTemplate } from "./chrome";
 import {
+  insertSlideAt,
+  makePicture,
+  makeTextBox,
+  setParagraphAlignment,
+  setRunFont,
+  setRunSize,
+  toggleRunFlag,
+  toggleRunStyle,
+} from "./commands";
+import {
   captureGeometry,
   hitSlide,
   offsetChild,
@@ -56,6 +66,45 @@ const ZOOM_MAX = 500;
 /** Undo steps kept before the oldest falls off. */
 const EDIT_LIMIT = 50;
 
+/** Text/paragraph commands over the selected shape (font/size carry the
+ *  combobox value through detail.value). */
+const TEXT_FORMAT_COMMANDS: ReadonlySet<string> = new Set([
+  "bold",
+  "italic",
+  "underline",
+  "strike",
+  "font-face",
+  "font-size",
+  "align-left",
+  "align-center",
+  "align-right",
+  "justify",
+]);
+
+/** Ribbon alignment command → TextAlignment value. */
+const ALIGNMENTS: ReadonlyMap<string, "left" | "center" | "right" | "justify"> = new Map([
+  ["align-left", "left"],
+  ["align-center", "center"],
+  ["align-right", "right"],
+  ["justify", "justify"],
+]);
+
+/** Browser MIME → the JSON picture type (pptx's supported raster set). */
+const PICTURE_TYPES: ReadonlyMap<string, "png" | "jpg" | "gif" | "bmp"> = new Map([
+  ["image/png", "png"],
+  ["image/jpeg", "jpg"],
+  ["image/gif", "gif"],
+  ["image/bmp", "bmp"],
+]);
+
+const readFileAsDataURL = (file: File): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+
 /** One reversible edit: closures over the touched child with the before and
  *  after values captured (no document snapshots — the deck holds media). */
 interface DeckEdit {
@@ -72,6 +121,10 @@ const WIRED_COMMANDS: ReadonlySet<string> = new Set([
   "undo",
   "redo",
   "save-as",
+  "new-slide",
+  "text-box",
+  "insert-picture",
+  ...TEXT_FORMAT_COMMANDS,
 ]);
 
 @customElement({
@@ -123,6 +176,9 @@ class DocenPresentation extends AddinHost {
     root
       .querySelector<HTMLInputElement>("#file-input")
       ?.addEventListener("change", this.#onFileChange as EventListener);
+    root
+      .querySelector<HTMLInputElement>("#picture-input")
+      ?.addEventListener("change", this.#onPictureChange as EventListener);
     this.#area()?.addEventListener("scroll", this.#onScroll);
     this.thumbStrip?.addEventListener("click", this.#onThumbClick);
     this.#stage.addEventListener("pointerdown", this.#onStagePointerDown);
@@ -156,6 +212,9 @@ class DocenPresentation extends AddinHost {
     this.shadowRoot
       ?.querySelector<HTMLInputElement>("#file-input")
       ?.removeEventListener("change", this.#onFileChange as EventListener);
+    this.shadowRoot
+      ?.querySelector<HTMLInputElement>("#picture-input")
+      ?.removeEventListener("change", this.#onPictureChange as EventListener);
     this.#area()?.removeEventListener("scroll", this.#onScroll);
     this.thumbStrip?.removeEventListener("click", this.#onThumbClick);
     this.#stage.removeEventListener("pointerdown", this.#onStagePointerDown);
@@ -344,6 +403,10 @@ class DocenPresentation extends AddinHost {
     else if (name === "undo") this.#undo();
     else if (name === "redo") this.#redo();
     else if (name === "save-as") void this.#saveAs();
+    else if (name === "new-slide") this.#insertSlide();
+    else if (name === "text-box") this.#insertTextBox();
+    else if (name === "insert-picture") this.#pickPicture();
+    else if (TEXT_FORMAT_COMMANDS.has(name)) this.#applyTextFormat(name, event.detail?.value);
   };
 
   readonly #onZoomChange = (event: Event): void => {
@@ -548,6 +611,157 @@ class DocenPresentation extends AddinHost {
     if (this.#editIndex >= this.#edits.length - 1) return;
     this.#edits[++this.#editIndex]!.redo();
     this.#syncQat();
+  }
+
+  // ── Ribbon commands ──────────────────────────────────────────────────────
+
+  /** The slide ribbon commands target: the selected object's slide, else the
+   *  slide at the viewport center (the status bar's rule). */
+  #activeSlideIndex(): number {
+    const pres = this.#pres;
+    if (!pres || pres.slides.length === 0) return 0;
+    if (this.#selection) return this.#selection.slide;
+    const area = this.#area();
+    if (!area) return 0;
+    const scale = this.#zoom / 100;
+    const pitch = (pres.heightPx + SLIDE_GAP_PX) * scale;
+    const center = area.scrollTop + area.clientHeight / 2 - SLIDE_GAP_PX * scale;
+    return Math.max(0, Math.min(pres.slides.length - 1, Math.floor(center / pitch)));
+  }
+
+  /** New blank slide after the active one. Structural — the selection drops
+   *  (child indices stay per-slide, but the viewport lands on the new page). */
+  #insertSlide(): void {
+    const presJson = this.#presJson;
+    if (!presJson) return;
+    const at = this.#activeSlideIndex();
+    insertSlideAt(presJson, at);
+    this.#select(null);
+    this.#pushEdit({
+      undo: () => {
+        presJson.slides?.splice(at + 1, 1);
+        this.#select(null);
+        this.#reproject();
+      },
+      redo: () => {
+        insertSlideAt(presJson, at);
+        this.#select(null);
+        this.#reproject();
+      },
+    });
+    this.#reproject();
+    this.#revealSlide(at + 1);
+  }
+
+  /** Append a child on top of the active slide and select it; undo splices
+   *  it back out by index (per-slide, so slide-level inserts can't shift it). */
+  #insertChild(child: SlideChild): void {
+    const presJson = this.#presJson;
+    if (!presJson) return;
+    const slide = this.#activeSlideIndex();
+    const host = presJson.slides?.[slide];
+    if (!host) return;
+    const children = (host.children ??= []);
+    const index = children.length;
+    children.push(child);
+    this.#pushEdit({
+      undo: () => {
+        children.splice(index, 1);
+        this.#select(null);
+        this.#reproject();
+      },
+      redo: () => {
+        children.splice(index, 0, child);
+        this.#select({ slide, child: index });
+        this.#reproject();
+      },
+    });
+    this.#select({ slide, child: index });
+    this.#reproject();
+  }
+
+  #insertTextBox(): void {
+    const pres = this.#pres;
+    if (!pres) return;
+    this.#insertChild(makeTextBox(pres.widthPx, pres.heightPx));
+  }
+
+  #pickPicture(): void {
+    this.shadowRoot?.querySelector<HTMLInputElement>("#picture-input")?.click();
+  }
+
+  /** File-input picture path: read the file as a data URL, measure its
+   *  natural size, and drop a centered picture child on the active slide. */
+  readonly #onPictureChange = async (event: Event): Promise<void> => {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = "";
+    const pres = this.#pres;
+    const type = file ? PICTURE_TYPES.get(file.type) : undefined;
+    if (!file || !pres || !type) return;
+    const data = await readFileAsDataURL(file);
+    const image = new Image();
+    image.src = data;
+    try {
+      await image.decode();
+    } catch {
+      return;
+    }
+    this.#insertChild(
+      makePicture(pres.widthPx, pres.heightPx, image.naturalWidth, image.naturalHeight, data, type),
+    );
+  };
+
+  /** Apply a font/paragraph command to the selected shape's text body. The
+   *  undo pair clones the whole body (geometry snapshots don't reach text);
+   *  a command that changed nothing records nothing. */
+  #applyTextFormat(name: string, value?: string): void {
+    const sel = this.#selection;
+    const child = this.#presJson?.slides?.[sel?.slide ?? -1]?.children?.[sel?.child ?? -1];
+    if (!child || !("shape" in child)) return;
+    const shape = child.shape;
+    const body = shape.textBody;
+    if (!body) return;
+    const before = structuredClone(body);
+    switch (name) {
+      case "bold":
+        toggleRunFlag(body, "bold");
+        break;
+      case "italic":
+        toggleRunFlag(body, "italic");
+        break;
+      case "underline":
+        toggleRunStyle(body, "underline", "single");
+        break;
+      case "strike":
+        toggleRunStyle(body, "strike", "singleStrike");
+        break;
+      case "font-face":
+        if (value) setRunFont(body, value);
+        break;
+      case "font-size": {
+        const size = Number(value);
+        if (Number.isFinite(size) && size > 0) setRunSize(body, size);
+        break;
+      }
+      default: {
+        const alignment = ALIGNMENTS.get(name);
+        if (alignment) setParagraphAlignment(body, alignment);
+      }
+    }
+    if (JSON.stringify(body) === JSON.stringify(before)) return;
+    const after = structuredClone(body);
+    this.#pushEdit({
+      undo: () => {
+        shape.textBody = structuredClone(before);
+        this.#reproject();
+      },
+      redo: () => {
+        shape.textBody = structuredClone(after);
+        this.#reproject();
+      },
+    });
+    this.#reproject();
   }
 
   /** Stamp the header's undo/redo buttons from the edit-stack position. */

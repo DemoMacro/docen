@@ -430,15 +430,26 @@ function pictureMember(
   const crop = cropOf(pic.sourceRectangle);
   const line = outlineOf(pic.outline);
   const shadow = outerShadowOf(pic.effects);
+  // The base contract allows three data shapes: a data URL passes through
+  // verbatim, bare base64 and bytes get the mime wrapper (none exists for
+  // emf/wmf — nothing the browser could decode anyway).
+  const src =
+    typeof pic.data === "string"
+      ? pic.data.startsWith("data:")
+        ? pic.data
+        : mime
+          ? `data:${mime};base64,${pic.data}`
+          : undefined
+      : mime && pic.data instanceof Uint8Array
+        ? `data:${mime};base64,${base64Of(pic.data)}`
+        : undefined;
   return {
     kind: "picture",
     x: t.sx * emuOf(pic.x) + t.dx,
     y: t.sy * emuOf(pic.y) + t.dy,
     width: t.sx * emuOf(pic.width),
     height: t.sy * emuOf(pic.height),
-    ...(mime && pic.data instanceof Uint8Array
-      ? { src: `data:${mime};base64,${base64Of(pic.data)}` }
-      : {}),
+    ...(src ? { src } : {}),
     ...(pic.flipHorizontal ? { flipH: true } : {}),
     ...(pic.flipVertical ? { flipV: true } : {}),
     ...(pic.rotation ? { rotation: pic.rotation } : {}),

@@ -84,4 +84,5 @@ export const presentationTemplate = html<PresentationTemplateRefs>`
     <docen-status-bar slot="status" part="status"></docen-status-bar>
   </docen-workspace>
   <input type="file" id="file-input" accept=".pptx" hidden />
+  <input type="file" id="picture-input" accept="image/png,image/jpeg,image/gif,image/bmp" hidden />
 `;
