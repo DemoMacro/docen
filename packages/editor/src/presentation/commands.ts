@@ -5,7 +5,7 @@
 // commands always walk real run objects, the same expansion stringify does.
 
 import { EMU_PER_PX } from "@docen/layout";
-import type { PresentationOptions, SlideChild } from "@docen/pptx";
+import type { PresentationOptions, SlideChild, SlideOptions } from "@docen/pptx";
 // Text/paragraph types come from @office-open/core/drawing — @docen/pptx's
 // re-export surface doesn't carry them yet.
 import type {
@@ -109,6 +109,31 @@ export function setParagraphAlignment(body: TextBodyOptions, alignment: TextAlig
 /** Insert a blank slide after `at` (the PowerPoint new-slide position). */
 export function insertSlideAt(deck: PresentationOptions, at: number): void {
   (deck.slides ??= []).splice(at + 1, 0, { children: [] });
+}
+
+/** Remove the slide at `at`; returns the removed slide, or null when `at`
+ *  falls outside the deck. */
+export function deleteSlideAt(deck: PresentationOptions, at: number): SlideOptions | null {
+  const [removed] = (deck.slides ??= []).splice(at, 1);
+  return removed ?? null;
+}
+
+/** Deep-clone the slide at `at` and insert the copy right after it; returns
+ *  the copy's index, or -1 when `at` falls outside the deck. */
+export function duplicateSlideAt(deck: PresentationOptions, at: number): number {
+  const source = deck.slides?.[at];
+  if (!source) return -1;
+  const copy = structuredClone(source);
+  deck.slides!.splice(at + 1, 0, copy);
+  return at + 1;
+}
+
+/** Move the child at `from` to `to` within the slide's children (z order —
+ *  later children paint on top). Both indices clamp into range. */
+export function reorderChild(children: SlideChild[], from: number, to: number): void {
+  const clamped = Math.max(0, Math.min(to, children.length - 1));
+  const [moved] = children.splice(from, 1);
+  if (moved) children.splice(clamped, 0, moved);
 }
 
 /** The shape's text body as plain lines (paragraphs joined by \n), or null

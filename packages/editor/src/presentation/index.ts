@@ -37,10 +37,13 @@ import {
 } from "../ui";
 import { escapeHtml, presentationStyles, presentationTemplate } from "./chrome";
 import {
+  deleteSlideAt,
+  duplicateSlideAt,
   firstRunSizeOf,
   insertSlideAt,
   makePicture,
   makeTextBox,
+  reorderChild,
   setParagraphAlignment,
   setRunFont,
   setRunSize,
@@ -71,6 +74,9 @@ import "./i18n";
 
 const ZOOM_MIN = 10;
 const ZOOM_MAX = 500;
+
+/** The drawing grid pitch: PowerPoint's 0.5" grid in slide px (96/inch). */
+const GRID_PITCH_PX = 48;
 
 /** Undo steps kept before the oldest falls off. */
 const EDIT_LIMIT = 50;
@@ -131,8 +137,13 @@ const WIRED_COMMANDS: ReadonlySet<string> = new Set([
   "redo",
   "save-as",
   "new-slide",
+  "delete-slide",
+  "duplicate-slide",
   "text-box",
   "insert-picture",
+  "bring-front",
+  "send-back",
+  "gridlines",
   ...TEXT_FORMAT_COMMANDS,
 ]);
 
@@ -154,6 +165,8 @@ class DocenPresentation extends AddinHost {
   /** The in-place shape-text editor: the textarea floats over the shape while
    *  it holds the session (its position; the text is read back on exit). */
   #textEditor: HTMLTextAreaElement | null = null;
+  /** Drawing gridlines visibility (a view state — not part of the deck). */
+  #gridlines = false;
   #edits: DeckEdit[] = [];
   #editIndex = -1;
   #langObserver?: MutationObserver;
@@ -163,6 +176,7 @@ class DocenPresentation extends AddinHost {
   /** Template refs into the thumbnails panel (see chrome.ts). */
   @observable thumbStrip?: HTMLElement;
   @observable thumbSelection?: HTMLElement;
+  @observable gridlines?: HTMLElement;
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -420,8 +434,13 @@ class DocenPresentation extends AddinHost {
     else if (name === "redo") this.#redo();
     else if (name === "save-as") void this.#saveAs();
     else if (name === "new-slide") this.#insertSlide();
+    else if (name === "delete-slide") this.#deleteSlide();
+    else if (name === "duplicate-slide") this.#duplicateSlide();
     else if (name === "text-box") this.#insertTextBox();
     else if (name === "insert-picture") this.#pickPicture();
+    else if (name === "bring-front") this.#reorderSelected("front");
+    else if (name === "send-back") this.#reorderSelected("back");
+    else if (name === "gridlines") this.#toggleGridlines();
     else if (TEXT_FORMAT_COMMANDS.has(name)) this.#applyTextFormat(name, event.detail?.value);
   };
 
@@ -452,6 +471,11 @@ class DocenPresentation extends AddinHost {
     this.#stage.style.height = `${strip * s}px`;
     const tree = this.#app?.tree as IGroup | undefined;
     if (tree) tree.scale = { x: s, y: s };
+    // PowerPoint's 0.5" grid, in slide px, scaled with the zoom.
+    this.gridlines?.style.setProperty(
+      "background-size",
+      `${GRID_PITCH_PX * s}px ${GRID_PITCH_PX * s}px`,
+    );
     if (this.#selection) {
       const hit = this.#selectedBox();
       if (hit) this.#overlay?.refresh(hit.box, hit.rotation);
@@ -777,6 +801,86 @@ class DocenPresentation extends AddinHost {
     this.#revealSlide(at + 1);
   }
 
+  /** Remove the active slide (the last one stays — the painter has no empty
+   *  deck to draw). Structural: full repaint, selection drops, and undo
+   *  re-splices the same slide object back at its index. */
+  #deleteSlide(): void {
+    const presJson = this.#presJson;
+    if (!presJson || (presJson.slides?.length ?? 0) <= 1) return;
+    const at = this.#activeSlideIndex();
+    const removed = deleteSlideAt(presJson, at);
+    if (!removed) return;
+    this.#select(null);
+    this.#pushEdit({
+      undo: () => {
+        presJson.slides?.splice(at, 0, removed);
+        this.#select(null);
+        this.#reproject();
+        this.#revealSlide(at);
+      },
+      redo: () => {
+        presJson.slides?.splice(at, 1);
+        this.#select(null);
+        this.#reproject();
+        this.#revealSlide(Math.max(0, at - 1));
+      },
+    });
+    this.#reproject();
+    this.#revealSlide(Math.max(0, at - 1));
+  }
+
+  /** Deep-clone the active slide right after it; undo removes the copy. */
+  #duplicateSlide(): void {
+    const presJson = this.#presJson;
+    if (!presJson) return;
+    const at = this.#activeSlideIndex();
+    const copyAt = duplicateSlideAt(presJson, at);
+    if (copyAt < 0) return;
+    const copy = presJson.slides?.[copyAt];
+    this.#select(null);
+    this.#pushEdit({
+      undo: () => {
+        presJson.slides?.splice(copyAt, 1);
+        this.#select(null);
+        this.#reproject();
+        this.#revealSlide(at);
+      },
+      redo: () => {
+        if (copy) presJson.slides?.splice(copyAt, 0, copy);
+        this.#select(null);
+        this.#reproject();
+        this.#revealSlide(copyAt);
+      },
+    });
+    this.#reproject();
+    this.#revealSlide(copyAt);
+  }
+
+  /** Move the selected object to the top (front) or bottom (back) of its
+   *  slide's z order; the selection follows the object. */
+  #reorderSelected(to: "front" | "back"): void {
+    const sel = this.#selection;
+    const children = this.#presJson?.slides?.[sel?.slide ?? -1]?.children;
+    if (!sel || !children || children.length < 2) return;
+    const from = sel.child;
+    const moved = to === "front" ? children.length - 1 : 0;
+    reorderChild(children, from, moved);
+    this.#select({ slide: sel.slide, child: moved });
+    this.#pushEdit({
+      undo: () => {
+        reorderChild(children, moved, from);
+        this.#select({ slide: sel.slide, child: from });
+        this.#reproject(sel.slide);
+      },
+      redo: () => {
+        reorderChild(children, from, moved);
+        this.#select({ slide: sel.slide, child: moved });
+        this.#reproject(sel.slide);
+      },
+    });
+    this.#reproject(sel.slide);
+  }
+
   /** Append a child on top of the active slide and select it; undo splices
    *  it back out by index (per-slide, so slide-level inserts can't shift it). */
   #insertChild(child: SlideChild): void {
@@ -808,6 +912,21 @@ class DocenPresentation extends AddinHost {
     const pres = this.#pres;
     if (!pres) return;
     this.#insertChild(makeTextBox(pres.widthPx, pres.heightPx));
+  }
+
+  /** Toggle the drawing gridlines — a pure view state, no undo step. */
+  #toggleGridlines(): void {
+    this.#gridlines = !this.#gridlines;
+    if (this.gridlines) {
+      this.gridlines.hidden = !this.#gridlines;
+      if (this.#gridlines) {
+        const s = this.#zoom / 100;
+        this.gridlines.style.setProperty(
+          "background-size",
+          `${GRID_PITCH_PX * s}px ${GRID_PITCH_PX * s}px`,
+        );
+      }
+    }
   }
 
   #pickPicture(): void {

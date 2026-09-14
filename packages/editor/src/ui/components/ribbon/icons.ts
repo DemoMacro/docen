@@ -35,6 +35,7 @@ import column from "@fluentui/svg-icons/icons/column_24_regular.svg?raw";
 import comment from "@fluentui/svg-icons/icons/comment_24_regular.svg?raw";
 import commentAdd from "@fluentui/svg-icons/icons/comment_add_24_regular.svg?raw";
 import copy from "@fluentui/svg-icons/icons/copy_24_regular.svg?raw";
+import copyAdd from "@fluentui/svg-icons/icons/copy_add_24_regular.svg?raw";
 import crop from "@fluentui/svg-icons/icons/crop_24_regular.svg?raw";
 import cube from "@fluentui/svg-icons/icons/cube_24_regular.svg?raw";
 import cursor from "@fluentui/svg-icons/icons/cursor_24_regular.svg?raw";
@@ -62,6 +63,8 @@ import image from "@fluentui/svg-icons/icons/image_24_regular.svg?raw";
 import imageAdd from "@fluentui/svg-icons/icons/image_add_24_regular.svg?raw";
 import imageEdit from "@fluentui/svg-icons/icons/image_edit_24_regular.svg?raw";
 import lasso from "@fluentui/svg-icons/icons/lasso_24_regular.svg?raw";
+import layer from "@fluentui/svg-icons/icons/layer_24_regular.svg?raw";
+import layerDiagonal from "@fluentui/svg-icons/icons/layer_diagonal_24_regular.svg?raw";
 import link from "@fluentui/svg-icons/icons/link_24_regular.svg?raw";
 import lockShield from "@fluentui/svg-icons/icons/lock_shield_24_regular.svg?raw";
 import mail from "@fluentui/svg-icons/icons/mail_24_regular.svg?raw";
@@ -84,6 +87,7 @@ import search from "@fluentui/svg-icons/icons/search_24_regular.svg?raw";
 import selectAllOff from "@fluentui/svg-icons/icons/select_all_off_24_regular.svg?raw";
 import shapes from "@fluentui/svg-icons/icons/shapes_24_regular.svg?raw";
 import share from "@fluentui/svg-icons/icons/share_24_regular.svg?raw";
+import slideEraser from "@fluentui/svg-icons/icons/slide_eraser_24_regular.svg?raw";
 import slideMultiple from "@fluentui/svg-icons/icons/slide_multiple_24_regular.svg?raw";
 import slidePlay from "@fluentui/svg-icons/icons/slide_play_24_regular.svg?raw";
 import slideTextCursor from "@fluentui/svg-icons/icons/slide_text_cursor_24_regular.svg?raw";
@@ -360,6 +364,11 @@ const RIBBON_ICONS: Record<string, string> = {
   normal: documentOnePage,
   "slide-sorter": slideMultiple,
   notes: note,
+  // Presentation slide management and object layering
+  "delete-slide": slideEraser,
+  "duplicate-slide": copyAdd,
+  "bring-front": layerDiagonal,
+  "send-back": layer,
 };
 
 /** Raw SVG markup for a known icon name, else `null`. */

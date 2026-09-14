@@ -49,6 +49,11 @@ export function presentationRibbonTabs(): RibbonTab[] {
         group("slides", [
           btn("new-slide", cmd("new-slide"), { icon: "new", size: "large" }),
           columnOf(
+            btn("delete-slide", cmd("delete-slide"), { icon: "delete-slide", iconOnly: true }),
+            btn("duplicate-slide", cmd("duplicate-slide"), {
+              icon: "duplicate-slide",
+              iconOnly: true,
+            }),
             btn("layout", cmd("layout"), { icon: "page-size", iconOnly: true }),
             btn("reset", cmd("reset"), { icon: "sync", iconOnly: true }),
             btn("section", cmd("section"), { icon: "columns", iconOnly: true }),
@@ -96,7 +101,10 @@ export function presentationRibbonTabs(): RibbonTab[] {
         ]),
         group("drawing", [
           btn("shapes", cmd("shapes"), { icon: "shapes", size: "large" }),
-          columnOf(btn("arrange", cmd("arrange"), { icon: "group-objects", iconOnly: true })),
+          columnOf(
+            btn("bring-front", cmd("bring-front"), { icon: "bring-front", iconOnly: true }),
+            btn("send-back", cmd("send-back"), { icon: "send-back", iconOnly: true }),
+          ),
         ]),
         group("editing", [
           columnOf(

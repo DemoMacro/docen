@@ -5,10 +5,13 @@ import type { TextBodyOptions } from "@office-open/core/drawing";
 import { describe, expect, it } from "vitest";
 
 import {
+  deleteSlideAt,
+  duplicateSlideAt,
   firstRunSizeOf,
   insertSlideAt,
   makePicture,
   makeTextBox,
+  reorderChild,
   setParagraphAlignment,
   setRunFont,
   setRunSize,
@@ -130,6 +133,57 @@ describe("insertSlideAt", () => {
     const deck: PresentationOptions = {};
     insertSlideAt(deck, 0);
     expect(deck.slides).toHaveLength(1);
+  });
+});
+
+describe("deleteSlideAt / duplicateSlideAt", () => {
+  it("removes the slide and returns it", () => {
+    const gone = { children: [] };
+    const deck: PresentationOptions = { slides: [{ children: [] }, gone] };
+    expect(deleteSlideAt(deck, 1)).toBe(gone);
+    expect(deck.slides).toHaveLength(1);
+  });
+
+  it("returns null outside the deck", () => {
+    const deck: PresentationOptions = { slides: [{ children: [] }] };
+    expect(deleteSlideAt(deck, 5)).toBeNull();
+  });
+
+  it("duplicates deep — the copy shares no child objects", () => {
+    const deck: PresentationOptions = {
+      slides: [{ children: [{ shape: { textBody: { text: "hi" } } }] }],
+    };
+    const copyAt = duplicateSlideAt(deck, 0);
+    expect(copyAt).toBe(1);
+    expect(deck.slides).toHaveLength(2);
+    expect(deck.slides![1]).not.toBe(deck.slides![0]);
+    expect(deck.slides![1]!.children![0]).not.toBe(deck.slides![0]!.children![0]);
+  });
+
+  it("returns -1 outside the deck", () => {
+    expect(duplicateSlideAt({}, 0)).toBe(-1);
+  });
+});
+
+describe("reorderChild", () => {
+  const items = (): SlideChild[] => ["a", "b", "c"] as unknown as SlideChild[];
+
+  it("moves a child to the top (last paints on top)", () => {
+    const children = items();
+    reorderChild(children, 0, 2);
+    expect(children).toEqual(["b", "c", "a"]);
+  });
+
+  it("moves a child to the bottom", () => {
+    const children = items();
+    reorderChild(children, 2, 0);
+    expect(children).toEqual(["c", "a", "b"]);
+  });
+
+  it("clamps the target index", () => {
+    const children = items();
+    reorderChild(children, 0, 99);
+    expect(children).toEqual(["b", "c", "a"]);
   });
 });
 

@@ -57,6 +57,20 @@ export const presentationStyles = css`
   .stage canvas {
     display: block;
   }
+  /* The drawing gridlines: a non-interactive checker over the whole slide
+     strip, sized per-zoom from the host (PowerPoint's 0.5" grid). */
+  .gridlines {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    pointer-events: none;
+    background-image:
+      linear-gradient(to right, rgba(102, 102, 102, 0.28) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(102, 102, 102, 0.28) 1px, transparent 1px);
+  }
+  .gridlines[hidden] {
+    display: none;
+  }
   /* The in-place shape text editor: a bare textarea floating over the shape
      (same layer as the selection overlay), framed like it so the edit reads
      as belonging to the shape. */
@@ -82,6 +96,7 @@ export const presentationStyles = css`
 interface PresentationTemplateRefs extends HTMLElement {
   thumbStrip?: HTMLElement;
   thumbSelection?: HTMLElement;
+  gridlines?: HTMLElement;
 }
 
 export const presentationTemplate = html<PresentationTemplateRefs>`
@@ -97,6 +112,7 @@ export const presentationTemplate = html<PresentationTemplateRefs>`
     <docen-document-area>
       <div class="docen-canvas" part="page">
         <div class="stage"></div>
+        <div class="gridlines" ${ref("gridlines")} hidden></div>
       </div>
     </docen-document-area>
     <docen-status-bar slot="status" part="status"></docen-status-bar>
