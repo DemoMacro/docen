@@ -56,7 +56,13 @@ import {
   slideHits,
 } from "./hit-test";
 import { presentationRibbonTabs } from "./ribbon";
-import { paintSlideDeck, SLIDE_GAP_PX, THUMB_GAP_PX, THUMB_WIDTH_PX } from "./slides-panel";
+import {
+  paintSlideDeck,
+  repaintSlideAt,
+  SLIDE_GAP_PX,
+  THUMB_GAP_PX,
+  THUMB_WIDTH_PX,
+} from "./slides-panel";
 // Side-effect: register the presentation translation tables.
 import "./i18n";
 
@@ -470,7 +476,10 @@ class DocenPresentation extends AddinHost {
     this.#syncThumbSelection(index);
   }
 
-  #renderDeck(): void {
+  /** Repaint the deck. With `slide` set (a single-slide edit), only that
+   *  slide's group swaps out — the rest of the strip stays untouched; without
+   *  it the whole tree repaints (open, structural slide changes). */
+  #renderDeck(slide?: number): void {
     const pres = this.#pres;
     if (!pres) return;
     // One Leafer app per connection; deck repaints clear the tree in place —
@@ -482,10 +491,22 @@ class DocenPresentation extends AddinHost {
       move: { disabled: true },
       wheel: { disabled: true },
     });
-    this.#app.tree.clear();
-    paintSlideDeck(this.#app.tree as unknown as IGroup, pres, () => this.#app?.forceRender());
+    const tree = this.#app.tree as unknown as IGroup;
+    if (slide !== undefined && tree.children.length === pres.slides.length) {
+      repaintSlideAt(
+        tree,
+        pres,
+        slide,
+        () => this.#app?.forceRender(),
+        pres.heightPx + SLIDE_GAP_PX,
+        SLIDE_GAP_PX,
+      );
+    } else {
+      tree.clear();
+      paintSlideDeck(tree, pres, () => this.#app?.forceRender());
+    }
     this.#applyZoom();
-    this.#renderThumbnails();
+    this.#renderThumbnails(slide);
     this.#syncSlideIndicator();
   }
 
@@ -528,11 +549,13 @@ class DocenPresentation extends AddinHost {
   }
 
   /** Re-project and repaint after a source edit (gestures, delete, undo,
-   *  redo — the one paint path every mutation funnels through). */
-  #reproject(): void {
+   *  redo — the one paint path every mutation funnels through). `slide`
+   *  scopes the repaint to the one slide the edit touched; structural edits
+   *  (slide insert/delete) omit it and repaint the whole deck. */
+  #reproject(slide?: number): void {
     if (!this.#presJson) return;
     this.#pres = projectPresentation(this.#presJson);
-    this.#renderDeck();
+    this.#renderDeck(slide);
     // The paint restarted under the same selection — the frame snaps to the
     // current geometry (and rejects itself if the box vanished).
     const hit = this.#selectedBox();
@@ -569,14 +592,14 @@ class DocenPresentation extends AddinHost {
     this.#pushEdit({
       undo: () => {
         restoreGeometry(child, before);
-        this.#reproject();
+        this.#reproject(sel!.slide);
       },
       redo: () => {
         restoreGeometry(child, after);
-        this.#reproject();
+        this.#reproject(sel!.slide);
       },
     });
-    this.#reproject();
+    this.#reproject(sel!.slide);
   }
 
   /** Remove the selected object; undo re-splices the same child back. */
@@ -591,14 +614,14 @@ class DocenPresentation extends AddinHost {
     this.#pushEdit({
       undo: () => {
         children.splice(sel.child, 0, child);
-        this.#reproject();
+        this.#reproject(sel.slide);
       },
       redo: () => {
         children.splice(sel.child, 1);
-        this.#reproject();
+        this.#reproject(sel.slide);
       },
     });
-    this.#reproject();
+    this.#reproject(sel.slide);
   }
 
   #undo(): void {
@@ -668,16 +691,16 @@ class DocenPresentation extends AddinHost {
       undo: () => {
         children.splice(index, 1);
         this.#select(null);
-        this.#reproject();
+        this.#reproject(slide);
       },
       redo: () => {
         children.splice(index, 0, child);
         this.#select({ slide, child: index });
-        this.#reproject();
+        this.#reproject(slide);
       },
     });
     this.#select({ slide, child: index });
-    this.#reproject();
+    this.#reproject(slide);
   }
 
   #insertTextBox(): void {
@@ -754,14 +777,14 @@ class DocenPresentation extends AddinHost {
     this.#pushEdit({
       undo: () => {
         shape.textBody = structuredClone(before);
-        this.#reproject();
+        this.#reproject(sel!.slide);
       },
       redo: () => {
         shape.textBody = structuredClone(after);
-        this.#reproject();
+        this.#reproject(sel!.slide);
       },
     });
-    this.#reproject();
+    this.#reproject(sel!.slide);
   }
 
   /** Stamp the header's undo/redo buttons from the edit-stack position. */
@@ -821,18 +844,37 @@ class DocenPresentation extends AddinHost {
   /** The rail shows the whole deck on one scaled Leafer surface — same paint
    *  loop as the main strip, shrunk through the tree's scale. One canvas
    *  keeps the panel cheap; the selection frame is a DOM sibling that moves
-   *  by transform. */
-  #renderThumbnails(): void {
+   *  by transform. A `slide` argument swaps just that thumbnail; without it
+   *  the surface rebuilds (deck swap, structural slide changes). */
+  #renderThumbnails(slide?: number): void {
     const pres = this.#pres;
     const strip = this.thumbStrip;
     const stage = this.shadowRoot?.querySelector<HTMLDivElement>(".thumb-stage");
     const panel = this.shadowRoot?.querySelector<HTMLElement>(".slides-panel");
     if (!pres || !strip || !stage || !panel) return;
     panel.removeAttribute("hidden");
-    this.#thumbApp?.destroy();
-    stage.replaceChildren();
     const scale = THUMB_WIDTH_PX / pres.widthPx;
     this.#thumbScale = scale;
+    // Screen-space gaps stay outside the scale: the pitch passes the thumbnail
+    // gap divided by the scale so spacing survives the coordinate shrink.
+    const pitch = pres.heightPx + THUMB_GAP_PX / scale;
+    if (
+      slide !== undefined &&
+      this.#thumbApp &&
+      (this.#thumbApp.tree as unknown as IGroup).children.length === pres.slides.length
+    ) {
+      repaintSlideAt(
+        this.#thumbApp.tree as unknown as IGroup,
+        pres,
+        slide,
+        () => this.#thumbApp?.forceRender(),
+        pitch,
+        0,
+      );
+      return;
+    }
+    this.#thumbApp?.destroy();
+    stage.replaceChildren();
     const thumbHeight = pres.heightPx * scale;
     stage.style.width = `${THUMB_WIDTH_PX}px`;
     stage.style.height = `${pres.slides.length * thumbHeight + (pres.slides.length - 1) * THUMB_GAP_PX}px`;
@@ -846,9 +888,7 @@ class DocenPresentation extends AddinHost {
     this.#thumbApp = app;
     const tree = app.tree as unknown as IGroup;
     tree.scale = { x: scale, y: scale };
-    // Screen-space gaps stay outside the scale: the pitch passes the thumbnail
-    // gap divided by the scale so spacing survives the coordinate shrink.
-    paintSlideDeck(tree, pres, () => app.forceRender(), pres.heightPx + THUMB_GAP_PX / scale, 0);
+    paintSlideDeck(tree, pres, () => app.forceRender(), pitch, 0);
   }
 
   /** Click a thumbnail → bring that slide to the top of the viewport. */

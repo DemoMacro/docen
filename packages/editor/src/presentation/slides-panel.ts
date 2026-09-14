@@ -15,6 +15,43 @@ export const THUMB_WIDTH_PX = 160;
 /** Visual gap between thumbnails, px (screen space, not slide space). */
 export const THUMB_GAP_PX = 12;
 
+/** Paint one slide (background + members) as a group at strip position `y`.
+ *  `index` feeds the paint context's page bookkeeping. */
+export function paintSlideGroup(
+  pres: ProjectedPresentation,
+  slide: ProjectedPresentation["slides"][number],
+  y: number,
+  rerender: () => void,
+  index: number,
+): Group {
+  const slideGroup = new Group({ x: 0, y });
+  slideGroup.add(
+    new Rect({
+      width: pres.widthPx,
+      height: pres.heightPx,
+      fill: slide.background ? `#${slide.background}` : "#ffffff",
+      stroke: "#c4c4c4",
+      strokeWidth: 1,
+    }),
+  );
+  paintMembers(slideGroup, slide.members, 0, 0, {
+    metrics: browserFontMetrics,
+    flow: {
+      pageWidthPx: pres.widthPx,
+      pageHeightPx: pres.heightPx,
+      contentWidthPx: pres.widthPx,
+      contentHeightPx: pres.heightPx,
+      contentLeftPx: 0,
+      contentTopPx: 0,
+    },
+    pageIndex: index,
+    pageCount: pres.slides.length,
+    layer: "body",
+    rerender,
+  });
+  return slideGroup;
+}
+
 /** Paint every slide into `tree` top-down. `pitch`/`yStart` are in slide
  *  coordinates: the main strip uses the slide height + its px gap, the
  *  thumbnails pass their gap divided by the tree scale so the visual
@@ -26,35 +63,22 @@ export function paintSlideDeck(
   yPitch = pres.heightPx + SLIDE_GAP_PX,
   yStart = SLIDE_GAP_PX,
 ): void {
-  let y = yStart;
   for (let i = 0; i < pres.slides.length; i++) {
-    const slide = pres.slides[i]!;
-    const slideGroup = new Group({ x: 0, y });
-    slideGroup.add(
-      new Rect({
-        width: pres.widthPx,
-        height: pres.heightPx,
-        fill: slide.background ? `#${slide.background}` : "#ffffff",
-        stroke: "#c4c4c4",
-        strokeWidth: 1,
-      }),
-    );
-    paintMembers(slideGroup, slide.members, 0, 0, {
-      metrics: browserFontMetrics,
-      flow: {
-        pageWidthPx: pres.widthPx,
-        pageHeightPx: pres.heightPx,
-        contentWidthPx: pres.widthPx,
-        contentHeightPx: pres.heightPx,
-        contentLeftPx: 0,
-        contentTopPx: 0,
-      },
-      pageIndex: i,
-      pageCount: pres.slides.length,
-      layer: "body",
-      rerender,
-    });
-    tree.add(slideGroup);
-    y += yPitch;
+    tree.add(paintSlideGroup(pres, pres.slides[i]!, yStart + i * yPitch, rerender, i));
   }
+}
+
+/** Replace slide `index`'s group with a fresh paint of the same slide.
+ *  Slides never overlap, so appending (rather than re-inserting at the old
+ *  position) keeps the visual order intact. */
+export function repaintSlideAt(
+  tree: IGroup,
+  pres: ProjectedPresentation,
+  index: number,
+  rerender: () => void,
+  yPitch: number,
+  yStart: number,
+): void {
+  tree.children[index]?.remove();
+  tree.add(paintSlideGroup(pres, pres.slides[index]!, yStart + index * yPitch, rerender, index));
 }
