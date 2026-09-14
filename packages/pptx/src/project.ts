@@ -1,12 +1,12 @@
 // The PPTX projection: PresentationOptions → flat slide-absolute drawing
 // members the core painter paints. Batch 1 covers the vector surface —
-// shapes, pictures, lines/connectors, groups and shape text — through the
-// same format-neutral extraction helpers the docx projection shares
-// (@docen/core/geometry). Batch gaps: table/chart/smartart/media-frame
-// children (no painter yet), a shape's text stays unspun when the shape
-// itself rotates, group-level rotation, connector presets whose endpoints
-// run reversed, live field evaluation — each lands with its follow-up
-// batch.
+// shapes, pictures, lines/connectors, groups, shape text and chart frames —
+// through the same format-neutral extraction helpers the docx projection
+// shares (@docen/core/geometry). Batch gaps: table/smartart/media-frame
+// children (no member kind / painter wiring yet), a shape's text stays
+// unspun when the shape itself rotates, group-level rotation, connector
+// presets whose endpoints run reversed, live field evaluation — each lands
+// with its follow-up batch.
 
 import {
   colorOf,
@@ -151,6 +151,17 @@ function childMembers(
       );
     } else if ("group" in child) {
       out.push(...groupMembers(child.group, t, [...prefix, i]));
+    } else if ("chart" in child) {
+      const c = child.chart;
+      out.push({
+        kind: "chart",
+        x: t.sx * emuOf(c.x) + t.dx,
+        y: t.sy * emuOf(c.y) + t.dy,
+        width: t.sx * emuOf(c.width),
+        height: t.sy * emuOf(c.height),
+        ...(cp ? { childPath: cp } : {}),
+        chart: c,
+      });
     }
   });
   return out;
