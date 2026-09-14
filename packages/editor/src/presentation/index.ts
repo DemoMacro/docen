@@ -11,6 +11,12 @@
  */
 
 import {
+  browserFontMetrics,
+  familyOfSlot,
+  leaferBaselinePadPx,
+  type LayoutDrawingMember,
+} from "@docen/layout";
+import {
   generatePresentation,
   parsePresentation,
   projectPresentation,
@@ -103,6 +109,20 @@ const ALIGNMENTS: ReadonlyMap<string, "left" | "center" | "right" | "justify"> =
   ["align-right", "right"],
   ["justify", "justify"],
 ]);
+
+/** Projected paragraph alignment → the CSS text-align the edit overlay uses
+ *  (distribute reads as justified — CSS has no separate token). */
+const TEXT_ALIGN_OF: Record<string, string> = {
+  left: "left",
+  center: "center",
+  right: "right",
+  both: "justify",
+  distribute: "justify",
+};
+
+/** The core painter's default ink — colorless runs keep the same gray in
+ *  the edit overlay instead of the browser's pure black. */
+const TEXT_INK = "#1b1b1b";
 
 /** Browser MIME → the JSON picture type (pptx's supported raster set). */
 const PICTURE_TYPES: ReadonlyMap<string, "png" | "jpg" | "gif" | "bmp"> = new Map([
@@ -585,7 +605,10 @@ class DocenPresentation extends AddinHost {
 
   /** Double-click on a shape: float a textarea over its text area and hand
    *  the session to it (PowerPoint's in-place text edit). The overlay's
-   *  resize handles step aside for the duration. */
+   *  resize handles step aside for the duration. The textarea styles from
+   *  the projected member the canvas painted (insets, first-run face, first
+   *  paragraph's align, the shape's fill) so the edit state reads like the
+   *  render state. */
   #enterTextEditing(): void {
     const sel = this.#selection;
     const pres = this.#pres;
@@ -597,16 +620,115 @@ class DocenPresentation extends AddinHost {
     if (!hit) return;
     const scale = this.#zoom / 100;
     const stripY = hit.box.y + sel.slide * (pres.heightPx + SLIDE_GAP_PX) + SLIDE_GAP_PX;
+    // The projected text-box member for this shape: top-level boxes project
+    // with the same slide-absolute geometry slideHits derives, so box
+    // equality identifies it.
+    const member = pres.slides[sel.slide]?.members.find(
+      (m): m is Extract<LayoutDrawingMember, { kind: "textBox" }> => {
+        if (m.kind !== "textBox") return false;
+        return (
+          m.x === hit.box.x &&
+          m.y === hit.box.y &&
+          m.width === hit.box.width &&
+          m.height === hit.box.height
+        );
+      },
+    );
+    // The member's first paragraph (its own blocks are the layout block
+    // union; a text box only ever carries paragraphs) and its insets —
+    // normalized, the layout type leaves every edge optional.
+    const para = member?.blocks[0];
+    const first = para?.kind === "paragraph" ? para : undefined;
+    // The first text run carries the face the overlay renders (a break-only
+    // paragraph falls to the strut style).
+    const run =
+      first && (first.inline.find((i) => i.kind === "text")?.style ?? first.defaultTextStyle);
+    const ins = member?.insets && {
+      left: member.insets.left ?? 0,
+      top: member.insets.top ?? 0,
+      right: member.insets.right ?? 0,
+      bottom: member.insets.bottom ?? 0,
+    };
+    // The painted stack advances lines by the engine's normal line height and
+    // hangs shape-text glyphs at 0.85 em below the line top (the painter's
+    // shape-text model). The overlay reproduces both: an explicit line-height
+    // sized from the same metric source the paint context uses, plus a
+    // baseline correction that moves the CSS baseline (half-leading + font
+    // ascent) onto the painted depth — CSS offers no direct baseline control.
+    const face = run ? familyOfSlot(run.family, false) : "";
+    const linePx = run
+      ? browserFontMetrics.normalRatio({
+          family: face,
+          bold: run.bold === true,
+          italic: run.italic === true,
+        }) * run.sizePx
+      : 0;
+    const baselineShift = ((): number => {
+      if (!run) return 0;
+      const probe = document.createElement("canvas").getContext("2d");
+      if (!probe) return 0;
+      probe.font = `${run.italic ? "italic " : ""}${run.bold ? "700 " : ""}${run.sizePx * scale}px ${JSON.stringify(face)}`;
+      const m = probe.measureText("Ag");
+      if (!(m.fontBoundingBoxAscent > 0)) return 0;
+      const cssBaseline =
+        (linePx * scale - m.fontBoundingBoxAscent - m.fontBoundingBoxDescent) / 2 +
+        m.fontBoundingBoxAscent;
+      return leaferBaselinePadPx(run.sizePx) * scale - cssBaseline;
+    })();
     const editor = document.createElement("textarea");
     editor.className = "shape-text-editor";
+    // The rows=2 default inflates scrollHeight to two lines — the slack math
+    // (and every grow pass) must measure the real content.
+    editor.rows = 1;
     editor.value = text;
     Object.assign(editor.style, {
       left: `${hit.box.x * scale}px`,
       top: `${stripY * scale}px`,
       width: `${hit.box.width * scale}px`,
       height: `${hit.box.height * scale}px`,
-      fontSize: `${((firstRunSizeOf(child) * 4) / 3) * scale}px`,
+      ...(run && ins
+        ? {
+            padding: `${ins.top * scale}px ${ins.right * scale}px ${ins.bottom * scale}px ${ins.left * scale}px`,
+            ...(member?.fill ? { background: `#${member.fill}` } : {}),
+            fontFamily: JSON.stringify(run.family),
+            fontSize: `${run.sizePx * scale}px`,
+            lineHeight: `${linePx * scale}px`,
+            textAlign: TEXT_ALIGN_OF[first!.align ?? "left"] ?? "left",
+            color: run.color ? `#${run.color}` : TEXT_INK,
+            ...(run.bold ? { fontWeight: "bold" } : {}),
+            ...(run.italic ? { fontStyle: "italic" } : {}),
+          }
+        : { fontSize: `${((firstRunSizeOf(child) * 4) / 3) * scale}px` }),
     });
+    // Keep the text visible as it grows. The baseline correction rides the
+    // top inset in every branch; top-anchored boxes grow the frame (height
+    // only, the width is the shape's), center/bottom re-run the painter's
+    // slack math — the stack starts at the top inset plus half (or all) of
+    // the leftover inner height, and overflow spills below the box like the
+    // painted stack does.
+    const frame = 3; // the edit frame's top+bottom borders
+    const syncLayout = (): void => {
+      if (!member || !ins) {
+        editor.style.height = "auto";
+        editor.style.height = `${editor.scrollHeight + frame}px`;
+        return;
+      }
+      editor.style.height = "auto";
+      editor.style.paddingTop = `${ins.top * scale + baselineShift}px`;
+      if (member.anchor === "top") {
+        editor.style.height = `${editor.scrollHeight + frame}px`;
+        return;
+      }
+      const padTB = (ins.top + ins.bottom) * scale;
+      const content = editor.scrollHeight - padTB;
+      const slack = member.autoFit ? 0 : hit.box.height * scale - frame - padTB - content;
+      if (slack >= 0) {
+        editor.style.height = `${hit.box.height * scale}px`;
+        editor.style.paddingTop = `${ins.top * scale + baselineShift + (member.anchor === "center" ? slack / 2 : slack)}px`;
+      } else {
+        editor.style.height = `${content + padTB + frame}px`;
+      }
+    };
     editor.addEventListener("keydown", (event) => {
       // Escape leaves the edit (committing); typing keys stay in the textarea.
       if (event.key === "Escape") {
@@ -615,13 +737,11 @@ class DocenPresentation extends AddinHost {
       }
       event.stopPropagation();
     });
-    editor.addEventListener("input", () => {
-      // Grow with the text so multi-line entries stay visible (PowerPoint's
-      // box autofit — height only, the width is the shape's).
-      editor.style.height = "auto";
-      editor.style.height = `${editor.scrollHeight}px`;
-    });
+    editor.addEventListener("input", syncLayout);
     this.#canvasHost().append(editor);
+    // Measure with the element in the tree — the first pass sizes a
+    // top-anchored frame and shifts center/bottom onto the painted baseline.
+    syncLayout();
     editor.focus();
     editor.select();
     this.#textEditor = editor;

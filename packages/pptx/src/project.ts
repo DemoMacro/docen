@@ -9,7 +9,6 @@
 // with its follow-up batch.
 
 import {
-  colorOf,
   fillOpacityOf,
   lineEndMembersOf,
   linePathData,
@@ -370,6 +369,10 @@ function textBoxMember(body: TextBodyOptions, paint: ShapePaint): LayoutDrawingM
       .map((o) => o.d)
       .join(" ") || undefined;
   const bp = body.bodyProperties;
+  // The top-level sugar fields merge into bodyProperties on stringify (an
+  // explicit bodyProperties field wins) — the projection reads the same
+  // merge so authoring-shaped bodies anchor like their parsed form.
+  const anchor = bp?.anchor ?? body.anchor;
   const ins = (v: unknown, def: number) => emuToPx(measureEmu(v) ?? def);
   // Text stacks inside the preset's text rectangle (a circle keeps its words
   // off the rim); the bodyPr insets apply on top of that shrink.
@@ -393,11 +396,11 @@ function textBoxMember(body: TextBodyOptions, paint: ShapePaint): LayoutDrawingM
       right: ins(bp?.rIns, BODY_INSET_EMU.right) + (tr ? Math.max(0, w - tr.r) : 0),
       bottom: ins(bp?.bIns, BODY_INSET_EMU.bottom) + (tr ? Math.max(0, h - tr.b) : 0),
     },
-    anchor: bp?.anchor === "center" || bp?.anchor === "bottom" ? bp.anchor : "top",
+    anchor: anchor === "center" || anchor === "bottom" ? anchor : "top",
     ...(bp?.vertical === "vertical" || bp?.vertical === "vertical270"
       ? { textVertical: bp.vertical }
       : {}),
-    ...(bp?.spAutoFit === true ? { autoFit: true } : {}),
+    ...(bp?.spAutoFit === true || body.autoFit === "shape" ? { autoFit: true } : {}),
     blocks: textBlocks(body),
   };
 }
@@ -604,7 +607,9 @@ function textBlocks(body: TextBodyOptions): LayoutParagraph[] {
 
 function runStyle(rp: TextCharacterPropertiesOptions | undefined): LayoutTextStyle {
   const family = familyOf(rp?.font);
-  const color = colorOf(rp?.fill);
+  // FillOptions (parse emits {type:"solid", color}) — colorOf alone only
+  // reads the bare-string/flat-color shapes and would drop every parsed run.
+  const color = solidFillOf(rp?.fill);
   return {
     family: family ?? DEFAULT_FAMILY,
     sizePx: rp?.size != null ? ptToPx(rp.size) : DEFAULT_SIZE_PX,
