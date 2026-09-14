@@ -251,6 +251,32 @@ export function paintMembers(
         ...(ctx.layer === "behind" ? { behind: true } : {}),
       });
     }
+    // A rotated member spins about its box center in a parked group (the
+    // rotated-drawing pivot trick): the content re-enters centered, and no
+    // host rides along — spinner space has no page-space geometry to
+    // register. A member's spin rides its own box, never the whole scene.
+    // (The metafile textBox keeps its own rotate-about-origin semantic;
+    // charts don't carry a member spin yet.)
+    if (m.kind !== "textBox" && m.kind !== "chart" && m.rotation) {
+      const spinner = new Group({
+        x: mx + m.width / 2,
+        y: my + m.height / 2,
+        rotation: m.rotation,
+      });
+      tree.add(spinner);
+      const { rotation: _spin, ...unspun } = m;
+      paintMembers(
+        spinner,
+        [unspun],
+        -m.x - m.width / 2,
+        -m.y - m.height / 2,
+        mctx,
+        undefined,
+        originX,
+        originY,
+      );
+      continue;
+    }
     if (m.kind === "picture" && m.src && !m.crop) {
       // A masked GDI blt sequence (SRCPAINT then SRCAND halves) composites
       // against the metafile's own backdrop. The run is flattened into one

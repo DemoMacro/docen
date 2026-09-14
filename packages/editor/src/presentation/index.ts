@@ -42,6 +42,7 @@ import {
   offsetChild,
   resizeChild,
   restoreGeometry,
+  rotateChild,
   slideHits,
 } from "./hit-test";
 import { presentationRibbonTabs } from "./ribbon";
@@ -130,8 +131,9 @@ class DocenPresentation extends AddinHost {
     // Leafer mounts is recreated per deck render — the overlay survives it).
     this.#overlay = new DrawingOverlay({
       scale: () => this.#zoom / 100,
-      applyBox: (box) => this.#applyGesture((child) => resizeChild(child, box)),
+      applyBox: (box) => this.#applyGesture((child) => resizeChild(child, this.#slideBoxOf(box))),
       applyOffset: (dx, dy) => this.#applyGesture((child) => offsetChild(child, dx, dy)),
+      applyRotation: (delta) => this.#applyGesture((child) => rotateChild(child, delta)),
     });
     this.#canvasHost().append(this.#overlay.el);
     // Locale switches re-stamp the chrome (header + ribbon labels).
@@ -179,7 +181,10 @@ class DocenPresentation extends AddinHost {
     this.#edits = [];
     this.#editIndex = -1;
     this.#pres = projectPresentation(pres);
-    if (!this.shadowRoot) return;
+    // The base class attaches an empty shadowRoot ahead of connect, so
+    // shadowRoot presence does not mean the template stamped — same bail
+    // #renderChrome does until connectedCallback renders the stored deck.
+    if (!this.shadowRoot?.querySelector(".stage")) return;
     this.#renderDeck();
     this.#renderChrome();
   }
@@ -193,7 +198,7 @@ class DocenPresentation extends AddinHost {
     this.#editIndex = -1;
     this.#overlay?.hide();
     this.removeAttribute("filename");
-    if (!this.shadowRoot) return;
+    if (!this.shadowRoot?.querySelector(".stage")) return;
     this.#app?.destroy();
     this.#app = null;
     this.#thumbApp?.destroy();
@@ -369,8 +374,8 @@ class DocenPresentation extends AddinHost {
     const tree = this.#app?.tree as IGroup | undefined;
     if (tree) tree.scale = { x: s, y: s };
     if (this.#selection) {
-      const box = this.#selectedBox();
-      if (box) this.#overlay?.refresh(box);
+      const hit = this.#selectedBox();
+      if (hit) this.#overlay?.refresh(hit.box, hit.rotation);
     }
   }
 
@@ -405,20 +410,17 @@ class DocenPresentation extends AddinHost {
   #renderDeck(): void {
     const pres = this.#pres;
     if (!pres) return;
-    // Fresh tree per open — slide content only changes through the gesture
-    // write-back path, which repaints through the same pipeline.
-    this.#app?.destroy();
-    const stage = this.#stage;
-    stage.replaceChildren();
-    const app = new App({
-      view: stage,
+    // One Leafer app per connection; deck repaints clear the tree in place —
+    // destroy + recreate blanks the canvas for a frame on every gesture.
+    this.#app ??= new App({
+      view: this.#stage,
       fill: "transparent",
       tree: { type: "design" },
       move: { disabled: true },
       wheel: { disabled: true },
     });
-    this.#app = app;
-    paintSlideDeck(app.tree as unknown as IGroup, pres, () => app.forceRender());
+    this.#app.tree.clear();
+    paintSlideDeck(this.#app.tree as unknown as IGroup, pres, () => this.#app?.forceRender());
     this.#applyZoom();
     this.#renderThumbnails();
     this.#syncSlideIndicator();
@@ -433,8 +435,8 @@ class DocenPresentation extends AddinHost {
   }
 
   /** Slide-absolute box of the current selection (strip space: slide-local
-   *  box plus the slide's offset in the strip). */
-  #selectedBox(): Box | null {
+   *  box plus the slide's offset in the strip) plus its spin. */
+  #selectedBox(): { box: Box; rotation: number } | null {
     const sel = this.#selection;
     const presJson = this.#presJson;
     if (!sel || !presJson) return null;
@@ -443,20 +445,22 @@ class DocenPresentation extends AddinHost {
     if (!hit) return null;
     const pres = this.#pres!;
     return {
-      x: hit.box.x,
-      y: hit.box.y + sel.slide * (pres.heightPx + SLIDE_GAP_PX) + SLIDE_GAP_PX,
-      width: hit.box.width,
-      height: hit.box.height,
+      box: {
+        x: hit.box.x,
+        y: hit.box.y + sel.slide * (pres.heightPx + SLIDE_GAP_PX) + SLIDE_GAP_PX,
+        width: hit.box.width,
+        height: hit.box.height,
+      },
+      rotation: hit.rotation,
     };
   }
 
-  /** Select a slide object (or clear). The frame shows the strip-space box;
-   *  rotation rides later with the projection's rotation support. */
+  /** Select a slide object (or clear). The frame shows the strip-space box. */
   #select(sel: { slide: number; child: number } | null): void {
     this.#selection = sel;
     if (!sel) return this.#overlay?.hide();
-    const box = this.#selectedBox();
-    if (box) this.#overlay?.show(box);
+    const hit = this.#selectedBox();
+    if (hit) this.#overlay?.show(hit.box, hit.rotation);
     else this.#overlay?.hide();
   }
 
@@ -468,9 +472,17 @@ class DocenPresentation extends AddinHost {
     this.#renderDeck();
     // The paint restarted under the same selection — the frame snaps to the
     // current geometry (and rejects itself if the box vanished).
-    const box = this.#selectedBox();
-    if (box) this.#overlay?.refresh(box);
+    const hit = this.#selectedBox();
+    if (hit) this.#overlay?.refresh(hit.box, hit.rotation);
     else this.#select(null);
+  }
+
+  /** Strip-space box → slide-local: drop the slide's strip offset (the
+   *  inverse of #selectedBox) so resize write-back lands on the slide. */
+  #slideBoxOf(box: Box): Box {
+    const pitch = (this.#pres?.heightPx ?? 0) + SLIDE_GAP_PX;
+    const offset = (this.#selection?.slide ?? 0) * pitch + SLIDE_GAP_PX;
+    return { ...box, y: box.y - offset };
   }
 
   /** Record a reversible edit; a new edit truncates the redo branch. */

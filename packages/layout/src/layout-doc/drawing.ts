@@ -44,6 +44,10 @@ export type LayoutDrawingMember =
       width: number;
       height: number;
       childPath?: readonly number[];
+      /** Clockwise rotation of the box about its center, degrees — a slide
+       *  object's own spin (a:xfrm @rot). The painter parks the member in a
+       *  rotated group so the content spins with it. */
+      rotation?: number;
       /** Renderer media source (data URL); absent → an empty frame. */
       src?: string;
       /** Metafile raster-op emulation blend (SRCPAINT → screen,
@@ -72,6 +76,10 @@ export type LayoutDrawingMember =
       width: number;
       height: number;
       childPath?: readonly number[];
+      /** Clockwise rotation of the box about its center, degrees — a slide
+       *  object's own spin (a:xfrm @rot). The painter parks the member in a
+       *  rotated group so the content spins with it. */
+      rotation?: number;
       /** Preset geometry (a:prstGeom @prst). The renderer maps the presets it
        *  knows and skips the rest; custom geometry stays unprojected. */
       preset?: string;
@@ -92,6 +100,10 @@ export type LayoutDrawingMember =
       width: number;
       height: number;
       childPath?: readonly number[];
+      /** Clockwise rotation of the box about its center, degrees — a slide
+       *  object's own spin (a:xfrm @rot). The painter parks the member in a
+       *  rotated group so the content spins with it. */
+      rotation?: number;
       /** SVG path data in box coordinates (0,0 … width,height) — the adapter
        *  scaled the geometry's own space (custGeom path w/h) into the box. */
       d: string;

@@ -3,9 +3,10 @@
 // shapes, pictures, lines/connectors, groups and shape text — through the
 // same format-neutral extraction helpers the docx projection shares
 // (@docen/core/geometry). Batch gaps: table/chart/smartart/media-frame
-// children (no painter yet), member rotation, connector presets whose
-// endpoints run reversed, live field evaluation — each lands with its
-// follow-up batch.
+// children (no painter yet), a shape's text stays unspun when the shape
+// itself rotates, group-level rotation, connector presets whose endpoints
+// run reversed, live field evaluation — each lands with its follow-up
+// batch.
 
 import {
   colorOf,
@@ -208,6 +209,7 @@ interface ShapePaint {
   opacity?: number;
   line?: LayoutDrawingLine;
   shadow?: LayoutDrawingShadow;
+  rotation?: number;
   childPath?: readonly number[];
 }
 
@@ -226,6 +228,7 @@ function shapeMembers(
     opacity: fillOpacityOf(shape.properties?.fill),
     line: outlineOf(shape.properties?.outline),
     shadow: outerShadowOf(shape.properties?.effects),
+    ...(shape.rotation ? { rotation: shape.rotation } : {}),
     ...(childPath ? { childPath } : {}),
   };
   // A text-carrying shape projects its body (PowerPoint writes an empty a:p
@@ -233,7 +236,20 @@ function shapeMembers(
   if (hasText(shape.textBody)) {
     return [textBoxMember(shape.textBody, paint)];
   }
-  const { x, y, w, h, preset, adjustments, fill, opacity, line, shadow, childPath: cp } = paint;
+  const {
+    x,
+    y,
+    w,
+    h,
+    preset,
+    adjustments,
+    fill,
+    opacity,
+    line,
+    shadow,
+    rotation,
+    childPath: cp,
+  } = paint;
 
   // Box presets (or none) paint as the plain shape member the renderer knows.
   if (!preset || BOX_PRESETS.has(preset)) {
@@ -249,6 +265,7 @@ function shapeMembers(
         ...(opacity != null ? { opacity } : {}),
         ...(line ? { line } : {}),
         ...(shadow ? { shadow } : {}),
+        ...(rotation ? { rotation } : {}),
         ...(cp ? { childPath: cp } : {}),
       },
     ];
@@ -266,12 +283,14 @@ function shapeMembers(
         d: linePathData(w, h),
         ...(line ? { line } : {}),
         ...(shadow ? { shadow } : {}),
+        ...(rotation ? { rotation } : {}),
         ...(cp ? { childPath: cp } : {}),
       },
       ...lineEndMembersOf(line, 0, 0, w, h).map((m) => ({
         ...m,
         x: m.x + x,
         y: m.y + y,
+        ...(rotation ? { rotation } : {}),
         ...(cp ? { childPath: cp } : {}),
       })),
     ];
@@ -292,6 +311,7 @@ function shapeMembers(
         ...(opacity != null ? { opacity } : {}),
         ...(line ? { line } : {}),
         ...(shadow ? { shadow } : {}),
+        ...(rotation ? { rotation } : {}),
         ...(cp ? { childPath: cp } : {}),
       },
     ];
@@ -307,6 +327,7 @@ function shapeMembers(
     ...(o.fill && opacity != null ? { opacity } : {}),
     ...(o.stroke && line ? { line } : {}),
     ...(shadow ? { shadow } : {}),
+    ...(rotation ? { rotation } : {}),
     ...(cp ? { childPath: cp } : {}),
   }));
 }
@@ -420,6 +441,7 @@ function pictureMember(
       : {}),
     ...(pic.flipHorizontal ? { flipH: true } : {}),
     ...(pic.flipVertical ? { flipV: true } : {}),
+    ...(pic.rotation ? { rotation: pic.rotation } : {}),
     ...(crop ? { crop } : {}),
     ...(line ? { line } : {}),
     ...(shadow ? { shadow } : {}),

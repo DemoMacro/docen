@@ -13,11 +13,14 @@ import type { SlideChild, SlideOptions } from "@docen/pptx";
 
 import type { Box } from "../drawing/geometry";
 
-/** One selectable top-level object: its slide-absolute box plus the index
- *  into the slide's source children. */
+/** One selectable top-level object: its slide-absolute box (plus spin) and
+ *  the index into the slide's source children. */
 export interface SlideHit {
   child: number;
   box: Box;
+  /** Clockwise degrees about the box center (the overlay's rotate handle
+   *  shows this angle); endpoint-model children never spin. */
+  rotation: number;
 }
 
 /** A measure field to px (the projection's own conversion). */
@@ -31,7 +34,7 @@ export function slideHits(slide: SlideOptions): SlideHit[] {
   const hits: SlideHit[] = [];
   (slide.children ?? []).forEach((child, i) => {
     const box = childBox(child);
-    if (box) hits.push({ child: i, box });
+    if (box) hits.push({ child: i, box, rotation: rotationOf(child) });
   });
   return hits;
 }
@@ -116,11 +119,44 @@ export function resizeChild(child: SlideChild, box: Box): void {
 
 function transformOf(
   child: SlideChild,
-): { x?: unknown; y?: unknown; width?: unknown; height?: unknown } | undefined {
+): { x?: unknown; y?: unknown; width?: unknown; height?: unknown; rotation?: number } | undefined {
   if ("shape" in child) return child.shape;
   if ("picture" in child) return child.picture;
   if ("group" in child) return child.group;
   return undefined;
+}
+
+/** The child's own spin in degrees (transform children only). */
+function rotationOf(child: SlideChild): number {
+  return transformOf(child)?.rotation ?? 0;
+}
+
+/** Spin a child's box about its center by a degree delta. Transform
+ *  children accumulate the spin; lines rotate their endpoints around the
+ *  bounding-box center (the endpoint model has no angle of its own). */
+export function rotateChild(child: SlideChild, delta: number): void {
+  if ("line" in child || "connector" in child) {
+    const o = "line" in child ? child.line : child.connector;
+    const cx = (px(o.x1) + px(o.x2)) / 2;
+    const cy = (px(o.y1) + px(o.y2)) / 2;
+    const rad = (delta * Math.PI) / 180;
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
+    const spin = (x: number, y: number): { x: number; y: number } => ({
+      x: cx + (x - cx) * cos - (y - cy) * sin,
+      y: cy + (x - cx) * sin + (y - cy) * cos,
+    });
+    const a = spin(px(o.x1), px(o.y1));
+    const b = spin(px(o.x2), px(o.y2));
+    o.x1 = emu(a.x);
+    o.y1 = emu(a.y);
+    o.x2 = emu(b.x);
+    o.y2 = emu(b.y);
+    return;
+  }
+  const t = transformOf(child);
+  if (!t) return;
+  t.rotation = Math.round(((t.rotation ?? 0) + delta) * 100) / 100;
 }
 
 // ── undo snapshots ──
@@ -136,6 +172,7 @@ export interface GeometrySnapshot {
   y1?: unknown;
   x2?: unknown;
   y2?: unknown;
+  rotation?: number;
 }
 
 /** Copy the geometry fields an edit may touch. */
@@ -145,7 +182,7 @@ export function captureGeometry(child: SlideChild): GeometrySnapshot {
     return { x1: o.x1, y1: o.y1, x2: o.x2, y2: o.y2 };
   }
   const t = transformOf(child);
-  return t ? { x: t.x, y: t.y, width: t.width, height: t.height } : {};
+  return t ? { x: t.x, y: t.y, width: t.width, height: t.height, rotation: t.rotation } : {};
 }
 
 /** Write a snapshot's fields back (the undo/redo leg). Snapshots hold the
@@ -165,4 +202,5 @@ export function restoreGeometry(child: SlideChild, snap: GeometrySnapshot): void
   t.y = snap.y as typeof t.y;
   t.width = snap.width as typeof t.width;
   t.height = snap.height as typeof t.height;
+  t.rotation = snap.rotation;
 }
