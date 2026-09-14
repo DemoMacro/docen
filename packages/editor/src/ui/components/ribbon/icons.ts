@@ -37,6 +37,7 @@ import commentAdd from "@fluentui/svg-icons/icons/comment_add_24_regular.svg?raw
 import copy from "@fluentui/svg-icons/icons/copy_24_regular.svg?raw";
 import crop from "@fluentui/svg-icons/icons/crop_24_regular.svg?raw";
 import cube from "@fluentui/svg-icons/icons/cube_24_regular.svg?raw";
+import cursor from "@fluentui/svg-icons/icons/cursor_24_regular.svg?raw";
 import cut from "@fluentui/svg-icons/icons/cut_24_regular.svg?raw";
 import dataAreaRegular from "@fluentui/svg-icons/icons/data_area_24_regular.svg?raw";
 import designIdeas from "@fluentui/svg-icons/icons/design_ideas_24_regular.svg?raw";
@@ -46,6 +47,7 @@ import documentAdd from "@fluentui/svg-icons/icons/document_add_24_regular.svg?r
 import documentBulletList from "@fluentui/svg-icons/icons/document_bullet_list_24_regular.svg?raw";
 import documentFooter from "@fluentui/svg-icons/icons/document_footer_24_regular.svg?raw";
 import documentHeader from "@fluentui/svg-icons/icons/document_header_24_regular.svg?raw";
+import documentOnePage from "@fluentui/svg-icons/icons/document_one_page_24_regular.svg?raw";
 import documentPageBreak from "@fluentui/svg-icons/icons/document_page_break_24_regular.svg?raw";
 import documentPrint from "@fluentui/svg-icons/icons/document_print_24_regular.svg?raw";
 import edit from "@fluentui/svg-icons/icons/edit_24_regular.svg?raw";
@@ -64,8 +66,10 @@ import link from "@fluentui/svg-icons/icons/link_24_regular.svg?raw";
 import lockShield from "@fluentui/svg-icons/icons/lock_shield_24_regular.svg?raw";
 import mail from "@fluentui/svg-icons/icons/mail_24_regular.svg?raw";
 import markdown from "@fluentui/svg-icons/icons/markdown_24_regular.svg?raw";
+import note from "@fluentui/svg-icons/icons/note_24_regular.svg?raw";
 import numberRow from "@fluentui/svg-icons/icons/number_row_24_regular.svg?raw";
 import numberSymbol from "@fluentui/svg-icons/icons/number_symbol_24_regular.svg?raw";
+import options from "@fluentui/svg-icons/icons/options_24_regular.svg?raw";
 import orientation from "@fluentui/svg-icons/icons/orientation_24_regular.svg?raw";
 import pageFit from "@fluentui/svg-icons/icons/page_fit_24_regular.svg?raw";
 import paintBrush from "@fluentui/svg-icons/icons/paint_brush_24_regular.svg?raw";
@@ -80,6 +84,13 @@ import search from "@fluentui/svg-icons/icons/search_24_regular.svg?raw";
 import selectAllOff from "@fluentui/svg-icons/icons/select_all_off_24_regular.svg?raw";
 import shapes from "@fluentui/svg-icons/icons/shapes_24_regular.svg?raw";
 import share from "@fluentui/svg-icons/icons/share_24_regular.svg?raw";
+import slideMultiple from "@fluentui/svg-icons/icons/slide_multiple_24_regular.svg?raw";
+import slidePlay from "@fluentui/svg-icons/icons/slide_play_24_regular.svg?raw";
+import slideTextCursor from "@fluentui/svg-icons/icons/slide_text_cursor_24_regular.svg?raw";
+import slideTransition from "@fluentui/svg-icons/icons/slide_transition_24_regular.svg?raw";
+import speaker from "@fluentui/svg-icons/icons/speaker_1_24_regular.svg?raw";
+import star from "@fluentui/svg-icons/icons/star_24_regular.svg?raw";
+import starAdd from "@fluentui/svg-icons/icons/star_add_24_regular.svg?raw";
 import table from "@fluentui/svg-icons/icons/table_24_regular.svg?raw";
 import tableAdd from "@fluentui/svg-icons/icons/table_add_24_regular.svg?raw";
 import tableArrowRepeatAll from "@fluentui/svg-icons/icons/table_arrow_repeat_all_24_regular.svg?raw";
@@ -125,6 +136,7 @@ import textSubscript from "@fluentui/svg-icons/icons/text_subscript_24_regular.s
 import textSuperscript from "@fluentui/svg-icons/icons/text_superscript_24_regular.svg?raw";
 import textUnderline from "@fluentui/svg-icons/icons/text_underline_24_regular.svg?raw";
 import textWrap from "@fluentui/svg-icons/icons/text_wrap_24_regular.svg?raw";
+import video from "@fluentui/svg-icons/icons/video_24_regular.svg?raw";
 import appLogo from "@fluentui/svg-icons/icons/window_apps_24_regular.svg?raw";
 import zoomIn from "@fluentui/svg-icons/icons/zoom_in_24_regular.svg?raw";
 import zoomOut from "@fluentui/svg-icons/icons/zoom_out_24_regular.svg?raw";
@@ -335,6 +347,19 @@ const RIBBON_ICONS: Record<string, string> = {
   "online-picture": imageAdd,
   "icon-library": apps,
   "3d-model": cube,
+  // Presentation (pptx) tabs — shapes/media, draw tools, show and views
+  cursor,
+  video,
+  audio: speaker,
+  transition: slideTransition,
+  animate: star,
+  "add-animation": starAdd,
+  "from-beginning": slidePlay,
+  "from-current": slideTextCursor,
+  "set-up-show": options,
+  normal: documentOnePage,
+  "slide-sorter": slideMultiple,
+  notes: note,
 };
 
 /** Raw SVG markup for a known icon name, else `null`. */
