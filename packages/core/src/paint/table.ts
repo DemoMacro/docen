@@ -146,8 +146,9 @@ const DASH_PATTERN: Record<string, number[]> = {
 
 /** Draw one collapsed edge centered on its boundary: a stroked Line (dash
  *  styles apply to strokes, not fills); double/triple split the width into
- *  parallel strokes. */
-function drawEdge(
+ *  parallel strokes. Shared with the graphic-frame table painter (the same
+ *  visual language — hairline lift, dash map, multi-stroke composites). */
+export function drawEdge(
   tree: IGroup,
   ex: number,
   ey: number,

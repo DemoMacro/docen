@@ -4,8 +4,8 @@
 // children instead: each paintable child contributes one hit box in
 // slide-absolute px, and edits write the child's geometry fields back in
 // EMU. Paintable = what the projection draws today (shape/picture/line/
-// connector/group); unpainted variants stay unselectable until their
-// painter lands.
+// connector/group/table/chart); unpainted variants stay unselectable until
+// their painter lands.
 
 import { measureEmu } from "@docen/core/geometry";
 import { EMU_PER_PX, emuToPx } from "@docen/layout";
@@ -65,14 +65,7 @@ function childBox(child: SlideChild): Box | null {
       height: Math.abs(y2 - y1),
     };
   }
-  const t =
-    "shape" in child
-      ? child.shape
-      : "picture" in child
-        ? child.picture
-        : "group" in child
-          ? child.group
-          : undefined;
+  const t = transformOf(child);
   if (!t) return null;
   return { x: px(t.x), y: px(t.y), width: px(t.width), height: px(t.height) };
 }
@@ -123,7 +116,15 @@ function transformOf(
   if ("shape" in child) return child.shape;
   if ("picture" in child) return child.picture;
   if ("group" in child) return child.group;
+  if ("table" in child) return child.table;
+  if ("chart" in child) return child.chart;
   return undefined;
+}
+
+/** Whether the child carries a rotation field (a:xfrm @rot) — table and
+ *  chart frames have none, so the rotate gesture must not write one. */
+function rotatable(child: SlideChild): boolean {
+  return "shape" in child || "picture" in child || "group" in child;
 }
 
 /** The child's own spin in degrees (transform children only). */
@@ -155,7 +156,7 @@ export function rotateChild(child: SlideChild, delta: number): void {
     return;
   }
   const t = transformOf(child);
-  if (!t) return;
+  if (!t || !rotatable(child)) return;
   t.rotation = Math.round(((t.rotation ?? 0) + delta) * 100) / 100;
 }
 

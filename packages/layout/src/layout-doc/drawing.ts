@@ -129,6 +129,20 @@ export type LayoutDrawingMember =
       chart: unknown;
     }
   | {
+      kind: "table";
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      childPath?: readonly number[];
+      /** A graphic-frame table (a:tbl) normalized to px by the projection:
+       *  resolved column widths, row heights and origin cells (merges
+       *  collapsed to grid coordinates + spans) each carrying fill, borders,
+       *  insets and laid text blocks — the renderer's frame-table painter
+       *  consumes it structurally; the engine never reads beyond the box. */
+      table: unknown;
+    }
+  | {
       kind: "textBox";
       x: number;
       y: number;

@@ -14,6 +14,7 @@ import { Box, Ellipse, Group, Path as LeaferPath, Rect, type IGroup } from "leaf
 import { paintBlock } from "../painter";
 import { paintChartMember } from "./chart";
 import type { DrawingHitBox, PaintColumn, PaintContext } from "./context";
+import { paintFrameTable } from "./frame-table";
 import { addBlendedPictureRun, addCroppedImage, addPlainImage, shadowEffectOf } from "./image";
 import { strokePropsOf } from "./line";
 function drawingBoxOf(
@@ -256,8 +257,8 @@ export function paintMembers(
     // host rides along — spinner space has no page-space geometry to
     // register. A member's spin rides its own box, never the whole scene.
     // (The metafile textBox keeps its own rotate-about-origin semantic;
-    // charts don't carry a member spin yet.)
-    if (m.kind !== "textBox" && m.kind !== "chart" && m.rotation) {
+    // charts and tables don't carry a member spin yet.)
+    if (m.kind !== "textBox" && m.kind !== "chart" && m.kind !== "table" && m.rotation) {
       const spinner = new Group({
         x: mx + m.width / 2,
         y: my + m.height / 2,
@@ -369,6 +370,8 @@ export function paintMembers(
             }
           : undefined,
       );
+    } else if (m.kind === "table") {
+      paintFrameTable(tree, { ...m, x: mx, y: my }, mctx);
     } else if (m.kind === "shape") {
       paintShapeBox(tree, { ...m, x: mx, y: my }, false);
     } else {

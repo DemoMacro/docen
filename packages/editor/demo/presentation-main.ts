@@ -162,6 +162,49 @@ const demoDeck = (): PresentationOptions => ({
         { shape: rectCard(6.2, 3.1, 1.6, 1.6, "70AD47") },
       ],
     },
+    // Graphic-frame table — spans, fills, cell borders, margins, anchors.
+    {
+      children: [
+        { shape: textCard("Tables", 28, "262626", 0.55) },
+        {
+          table: {
+            x: inEMU(0.9),
+            y: inEMU(1.7),
+            width: inEMU(11),
+            columnWidths: [inEMU(3.4), inEMU(3.8), inEMU(3.8)],
+            rows: [
+              {
+                cells: [
+                  { text: "Region", fill: "4472C4" },
+                  { text: "Q1", fill: "4472C4", verticalAlign: "center" },
+                  { text: "Q2", fill: "4472C4", verticalAlign: "center" },
+                ],
+              },
+              {
+                cells: [{ text: "North", columnSpan: 2, fill: "E8F0FE" }, { text: "128" }],
+              },
+              {
+                cells: [
+                  {
+                    text: "Merged",
+                    rowSpan: 2,
+                    fill: "FFF2CC",
+                    verticalAlign: "center",
+                    borders: {
+                      left: { width: "2pt", color: "C00000" },
+                      right: { width: "1pt", color: "C00000", dashStyle: "dash" },
+                    },
+                  },
+                  { text: "South", margins: { left: 300000 } },
+                  { text: "97", verticalAlign: "bottom" },
+                ],
+              },
+              { cells: [{ text: "West" }, { text: "64" }] },
+            ],
+          },
+        },
+      ],
+    },
   ],
 });
 

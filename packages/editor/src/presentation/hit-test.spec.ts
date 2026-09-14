@@ -24,12 +24,13 @@ describe("slideHits", () => {
           line: { x1: px(0), y1: px(30), x2: px(40), y2: px(10) },
         },
         { picture: { x: px(5), y: px(5), width: px(8), height: px(8), data: "", type: "png" } },
+        { table: { x: px(1), y: px(2), width: px(60), height: px(30), rows: [] } },
         // Unpainted variants contribute no hit box.
-        { table: { rows: [] } },
+        { smartart: {} },
       ],
     } as unknown as SlideOptions;
     const hits = slideHits(slide);
-    expect(hits.map((h) => h.child)).toEqual([0, 1, 2]);
+    expect(hits.map((h) => h.child)).toEqual([0, 1, 2, 3]);
     expect(hits[0]!.box).toEqual({ x: 10, y: 20, width: 100, height: 50 });
     // A line's box spans its endpoints' bounding rectangle.
     expect(hits[1]!.box).toEqual({ x: 0, y: 10, width: 40, height: 20 });
@@ -109,6 +110,14 @@ describe("rotateChild", () => {
     expect(child.line.y1).toBe(px(10));
     expect(child.line.x2).toBe(px(0));
     expect(child.line.y2).toBe(px(10));
+  });
+
+  it("never spins the spin-less frames", () => {
+    // Table/chart frames carry no a:xfrm @rot — the gesture must not invent
+    // the field.
+    const child = { table: { x: px(0), y: px(0), width: px(10), height: px(10), rows: [] } };
+    rotateChild(child, 45);
+    expect("rotation" in child.table).toBe(false);
   });
 
   it("captures and restores the spin", () => {
