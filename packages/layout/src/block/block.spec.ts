@@ -538,6 +538,30 @@ describe("layoutTable", () => {
     // 60:140:0 scaled to 200.
     expect(out.columnWidthsPx[1]).toBeCloseTo(140, 4);
   });
+
+  it("positions table with alignment or indentPx", () => {
+    const table: LayoutTable = {
+      kind: "table",
+      width: { type: "px", px: 100 },
+      columnWidthsPx: [100],
+      rows: [{ cells: [{ blocks: [] }] }],
+    };
+    const left = layoutBlock(table, 200, undefined, measurer);
+    if (left.kind !== "table") throw new Error("expected table");
+    expect(left.offsetXPx).toBeUndefined();
+
+    const center = layoutBlock({ ...table, align: "center" }, 200, undefined, measurer);
+    if (center.kind !== "table") throw new Error("expected table");
+    expect(center.offsetXPx).toBe((200 - 100) / 2);
+
+    const right = layoutBlock({ ...table, align: "right" }, 200, undefined, measurer);
+    if (right.kind !== "table") throw new Error("expected table");
+    expect(right.offsetXPx).toBe(200 - 100);
+
+    const indented = layoutBlock({ ...table, indentPx: 35 }, 200, undefined, measurer);
+    if (indented.kind !== "table") throw new Error("expected table");
+    expect(indented.offsetXPx).toBe(35);
+  });
 });
 
 describe("layoutTable cell float wraps", () => {
