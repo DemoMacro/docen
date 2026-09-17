@@ -653,18 +653,24 @@ class DocenPresentation extends AddinHost {
     };
   }
 
+  /** The slide child at a member path under a group child — undefined when
+   *  the path dangles or stops above the leaf. */
+  #childAt(child: SlideChild, path: readonly number[] | undefined): SlideChild | undefined {
+    let node = child;
+    for (const i of path ?? []) {
+      if (!("group" in node)) return undefined;
+      node = node.group.children?.[i]!;
+      if (!node) return undefined;
+    }
+    return node;
+  }
+
   /** The selected slide object: the child itself, or the group-nested member
    *  the selection descended into. */
   #selectedChild(): SlideChild | undefined {
     const sel = this.#selection;
-    let child = this.#presJson?.slides?.[sel?.slide ?? -1]?.children?.[sel?.child ?? -1];
-    if (!child) return undefined;
-    for (const i of sel?.member ?? []) {
-      if (!("group" in child)) return undefined;
-      child = child.group.children?.[i];
-      if (!child) return undefined;
-    }
-    return child;
+    const child = this.#presJson?.slides?.[sel?.slide ?? -1]?.children?.[sel?.child ?? -1];
+    return child ? this.#childAt(child, sel?.member) : undefined;
   }
 
   /** The child-space → px scale under the current member selection (identity
@@ -886,8 +892,8 @@ class DocenPresentation extends AddinHost {
 
   /** The selected table's projected member and source table (payload cast —
    *  the layout member carries `table` as unknown). Origin equality
-   *  identifies the member: a top-level frame projects from the same x/y
-   *  the hit test reads. */
+   *  identifies the member: a top-level frame projects from the same x/y the
+   *  hit test reads, a group member from the group walk's box. */
   #tableMemberOf(): {
     slide: number;
     table: TableOptions;
@@ -897,13 +903,21 @@ class DocenPresentation extends AddinHost {
     const pres = this.#pres;
     const presJson = this.#presJson;
     if (!sel || !pres || !presJson) return null;
-    const child = presJson.slides?.[sel.slide]?.children?.[sel.child];
+    const child = this.#selectedChild();
     if (!child || !("table" in child)) return null;
-    const hit = slideHits(presJson.slides?.[sel.slide] ?? {}).find((h) => h.child === sel.child);
-    if (!hit) return null;
+    let origin: { x: number; y: number } | null = null;
+    if (sel.member) {
+      const group = presJson.slides?.[sel.slide]?.children?.[sel.child];
+      const m = group && memberByPath(group, sel.member);
+      if (m) origin = m;
+    } else {
+      const hit = slideHits(presJson.slides?.[sel.slide] ?? {}).find((h) => h.child === sel.child);
+      if (hit) origin = hit.box;
+    }
+    if (!origin) return null;
     const member = pres.slides[sel.slide]?.members.find(
       (m): m is LayoutDrawingMember & { kind: "table" } =>
-        m.kind === "table" && m.x === hit.box.x && m.y === hit.box.y,
+        m.kind === "table" && m.x === origin!.x && m.y === origin!.y,
     );
     if (!member) return null;
     return {
@@ -1050,8 +1064,7 @@ class DocenPresentation extends AddinHost {
    *  session's row/col slot back to the cell object. */
   #editedCell(at = this.#tableEdit): TableCellOptions | null {
     if (!at) return null;
-    const sel = this.#selection;
-    const child = this.#presJson?.slides?.[sel?.slide ?? -1]?.children?.[sel?.child ?? -1];
+    const child = this.#selectedChild();
     if (!child || !("table" in child)) return null;
     return (
       tableGridOf(child.table).origins.find((o) => o.row === at.row && o.col === at.col)?.cell ??
@@ -1579,6 +1592,13 @@ class DocenPresentation extends AddinHost {
         child >= 0 ? this.#presJson!.slides?.[point.slide]?.children?.[child] : undefined;
       if (child >= 0 && target && "table" in target)
         return this.#enterTableCellEditing(point.x, point.y);
+      // A group's table member opens its cell edit — the first click of the
+      // double-click already descended into the member.
+      if (child >= 0 && target && "group" in target) {
+        const hit = memberAt(target, point.x, point.y);
+        const leaf = hit && this.#childAt(target, hit.path);
+        if (hit && leaf && "table" in leaf) return this.#enterTableCellEditing(point.x, point.y);
+      }
     }
     this.#enterTextEditing();
   };
