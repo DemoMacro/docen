@@ -1,10 +1,11 @@
 import { EMU_PER_PX } from "@docen/layout";
-import type { PresentationOptions, SlideChild } from "@docen/pptx";
-import type { TextBodyOptions } from "@office-open/core/drawing";
+import type { PresentationOptions, SlideChild, TableCellOptions } from "@docen/pptx";
+import type { ParagraphDescriptorOptions, TextBodyOptions } from "@office-open/core/drawing";
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 
 import {
+  cellTextOf,
   deleteSlideAt,
   duplicateSlideAt,
   firstRunSizeOf,
@@ -18,8 +19,22 @@ import {
   shapeTextOf,
   toggleRunFlag,
   toggleRunStyle,
+  writeCellText,
   writeShapeText,
 } from "./commands";
+
+type Run = {
+  text: string;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: string;
+  strike?: string;
+  font?: string;
+  size?: number;
+};
+type Para = { properties?: { alignment?: string; level?: number }; children?: (Run | string)[] };
+const paras = (paragraphs: Para[]): ParagraphDescriptorOptions[] =>
+  paragraphs as unknown as ParagraphDescriptorOptions[];
 
 const bodyOf = (paragraphs: unknown[]): TextBodyOptions =>
   ({ paragraphs }) as unknown as TextBodyOptions;
@@ -27,19 +42,21 @@ const bodyOf = (paragraphs: unknown[]): TextBodyOptions =>
 const shapeChild = (body: unknown): SlideChild =>
   ({ shape: { textBody: body } }) as unknown as SlideChild;
 
+const cellOf = (children: unknown[]): TableCellOptions =>
+  ({ children }) as unknown as TableCellOptions;
+
 type ShapeVariant = Extract<SlideChild, { shape: unknown }>["shape"];
 type PictureVariant = Extract<SlideChild, { picture: unknown }>["picture"];
 
 describe("toggleRunFlag", () => {
   it("applies the flag to every run", () => {
-    const body = bodyOf([{ children: [{ text: "a" }, { text: "b", bold: true }] }]);
-    toggleRunFlag(body, "bold");
-    const runs = body.paragraphs as { children: { text: string; bold?: boolean }[] }[];
-    expect(runs[0]!.children.map((r) => r.bold)).toEqual([true, true]);
+    const paragraphs = paras([{ children: [{ text: "a" }, { text: "b", bold: true }] }]);
+    toggleRunFlag(paragraphs, "bold");
+    expect(paragraphs[0]!.children!.map((r) => (r as Run).bold)).toEqual([true, true]);
   });
 
   it("clears the flag when every run carries it", () => {
-    const body = bodyOf([
+    const paragraphs = paras([
       {
         children: [
           { text: "a", bold: true },
@@ -47,55 +64,49 @@ describe("toggleRunFlag", () => {
         ],
       },
     ]);
-    toggleRunFlag(body, "bold");
-    const runs = body.paragraphs as { children: { bold?: boolean }[] }[];
-    expect(runs[0]!.children.map((r) => r.bold)).toEqual([undefined, undefined]);
+    toggleRunFlag(paragraphs, "bold");
+    expect(paragraphs[0]!.children!.map((r) => (r as Run).bold)).toEqual([undefined, undefined]);
   });
 
-  it("works through string sugar", () => {
-    const body = { text: "hi" } as unknown as TextBodyOptions;
-    toggleRunFlag(body, "italic");
-    const runs = (body.paragraphs as { children: { text: string; italic?: boolean }[] }[])[0]!
-      .children;
-    expect(runs).toEqual([{ text: "hi", italic: true }]);
+  it("works through paragraph text sugar", () => {
+    const paragraphs = paras([{ text: "hi" } as unknown as Para]);
+    toggleRunFlag(paragraphs, "italic");
+    expect(paragraphs[0]!.children).toEqual([{ text: "hi", italic: true }]);
   });
 
-  it("leaves an empty body unchanged", () => {
-    const body = bodyOf([{ children: [] }]);
-    toggleRunFlag(body, "bold");
-    expect((body.paragraphs as { children: unknown[] }[])[0]!.children).toEqual([]);
+  it("leaves paragraphs without runs unchanged", () => {
+    const paragraphs = paras([{ children: [] }]);
+    toggleRunFlag(paragraphs, "bold");
+    expect(paragraphs[0]!.children).toEqual([]);
   });
 });
 
 describe("toggleRunStyle", () => {
   it("toggles underline on and back off", () => {
-    const body = bodyOf([{ children: [{ text: "a" }] }]);
-    toggleRunStyle(body, "underline", "single");
-    const run = () =>
-      (body.paragraphs as { children: { underline?: string }[] }[])[0]!.children[0]!;
+    const paragraphs = paras([{ children: [{ text: "a" }] }]);
+    toggleRunStyle(paragraphs, "underline", "single");
+    const run = () => paragraphs[0]!.children![0] as Run;
     expect(run().underline).toBe("single");
-    toggleRunStyle(body, "underline", "single");
+    toggleRunStyle(paragraphs, "underline", "single");
     expect(run().underline).toBeUndefined();
   });
 
   it("treats the explicit off token as not applied", () => {
-    const body = bodyOf([{ children: [{ text: "a", strike: "noStrike" }] }]);
-    toggleRunStyle(body, "strike", "singleStrike");
-    const run = (body.paragraphs as { children: { strike?: string }[] }[])[0]!.children[0]!;
-    expect(run.strike).toBe("singleStrike");
+    const paragraphs = paras([{ children: [{ text: "a", strike: "noStrike" }] }]);
+    toggleRunStyle(paragraphs, "strike", "singleStrike");
+    expect((paragraphs[0]!.children![0] as Run).strike).toBe("singleStrike");
   });
 });
 
 describe("run setters", () => {
   it("sets font and size on every run", () => {
-    const body = bodyOf([
+    const paragraphs = paras([
       { children: [{ text: "a" }] },
       { children: [{ text: "b" }, { text: "c" }] },
     ]);
-    setRunFont(body, "Arial");
-    setRunSize(body, 18);
-    const runs = body.paragraphs as { children: { font?: string; size?: number }[] }[];
-    expect(runs.map((p) => p.children.map((r) => [r.font, r.size]))).toEqual([
+    setRunFont(paragraphs, "Arial");
+    setRunSize(paragraphs, 18);
+    expect(paragraphs.map((p) => (p.children as Run[]).map((r) => [r.font, r.size]))).toEqual([
       [["Arial", 18]],
       [
         ["Arial", 18],
@@ -107,17 +118,18 @@ describe("run setters", () => {
 
 describe("setParagraphAlignment", () => {
   it("writes the alignment into each paragraph's properties", () => {
-    const body = bodyOf([{ children: [{ text: "a" }] }, { properties: { alignment: "left" } }]);
-    setParagraphAlignment(body, "center");
-    const paragraphs = body.paragraphs as { properties?: { alignment?: string } }[];
+    const paragraphs = paras([
+      { children: [{ text: "a" }] },
+      { properties: { alignment: "left" } },
+    ] as Para[]);
+    setParagraphAlignment(paragraphs, "center");
     expect(paragraphs.map((p) => p.properties?.alignment)).toEqual(["center", "center"]);
   });
 
   it("keeps existing paragraph properties", () => {
-    const body = bodyOf([{ properties: { level: 2 } }]);
-    setParagraphAlignment(body, "right");
-    const paragraph = (body.paragraphs as { properties?: Record<string, unknown> }[])[0]!;
-    expect(paragraph.properties).toMatchObject({ level: 2, alignment: "right" });
+    const paragraphs = paras([{ properties: { level: 2 } }] as Para[]);
+    setParagraphAlignment(paragraphs, "right");
+    expect(paragraphs[0]!.properties).toMatchObject({ level: 2, alignment: "right" });
   });
 });
 
@@ -232,6 +244,41 @@ describe("shapeTextOf / writeShapeText", () => {
     const body = (child as { shape: { textBody: TextBodyOptions } }).shape.textBody;
     expect(body.text).toBeUndefined();
     expect(shapeTextOf(child)).toBe("after");
+  });
+});
+
+describe("cellTextOf / writeCellText", () => {
+  it("reads the cell's paragraphs as \\n-joined lines", () => {
+    const cell = cellOf([{ children: [{ text: "a" }] }, { children: [{ text: "b" }] }]);
+    expect(cellTextOf(cell)).toBe("a\nb");
+  });
+
+  it("reads through the text and string sugar", () => {
+    expect(cellTextOf({ text: "hi" } as unknown as TableCellOptions)).toBe("hi");
+    expect(cellTextOf(cellOf(["one", "two"]))).toBe("one\ntwo");
+  });
+
+  it("writes one paragraph per line, keeping alignment and first-run style", () => {
+    const cell = cellOf([
+      { properties: { alignment: "center" }, children: [{ text: "old", bold: true, size: 24 }] },
+    ]);
+    writeCellText(cell, "one\ntwo");
+    const paragraphs = cell.children as {
+      properties?: { alignment?: string };
+      children: { text: string; bold?: boolean; size?: number }[];
+    }[];
+    expect(paragraphs).toHaveLength(2);
+    expect(paragraphs[0]!.properties?.alignment).toBe("center");
+    expect(paragraphs[0]!.children[0]).toMatchObject({ text: "one", bold: true, size: 24 });
+    // A paragraph beyond the originals carries no inherited style.
+    expect(paragraphs[1]!.children[0]).toEqual({ text: "two" });
+    expect(cell.text).toBeUndefined();
+  });
+
+  it("round-trips empty text", () => {
+    const cell = cellOf([]);
+    writeCellText(cell, "");
+    expect(cellTextOf(cell)).toBe("");
   });
 });
 

@@ -17,24 +17,27 @@ import type {
   UnderlineStyle,
 } from "@office-open/core/drawing";
 
-/** The body's paragraphs as real objects, consuming sugar as needed. */
-function paragraphsOf(body: TextBodyOptions): ParagraphDescriptorOptions[] {
-  const paragraphs = (body.paragraphs ??=
-    body.text !== undefined ? [{ children: [{ text: body.text }] }] : []);
-  delete body.text;
+/** Normalize the paragraphs in place: string items and paragraph-level text
+ *  sugar both become real children. */
+function paragraphsOf(paragraphs: ParagraphDescriptorOptions[]): ParagraphDescriptorOptions[] {
   for (let i = 0; i < paragraphs.length; i++) {
-    const p = paragraphs[i]!;
-    if (typeof p === "string") {
-      paragraphs[i] = { children: [{ text: p }] };
-      continue;
-    }
+    let p = paragraphs[i]!;
+    if (typeof p === "string") p = paragraphs[i] = { children: [{ text: p }] };
     // Paragraph-level text sugar (input-only) expands to a one-run paragraph.
     if (p.children === undefined && typeof p.text === "string") {
       p.children = [{ text: p.text }];
       delete p.text;
     }
   }
-  return paragraphs as ParagraphDescriptorOptions[];
+  return paragraphs;
+}
+
+/** The body's paragraphs as real objects, consuming the body's text sugar. */
+export function bodyParagraphsOf(body: TextBodyOptions): ParagraphDescriptorOptions[] {
+  const paragraphs = (body.paragraphs ??=
+    body.text !== undefined ? [{ children: [{ text: body.text }] }] : []);
+  delete body.text;
+  return paragraphsOf(paragraphs as ParagraphDescriptorOptions[]);
 }
 
 /** The paragraph's text runs as real objects — string children expand;
@@ -51,28 +54,27 @@ function runsOf(paragraph: ParagraphDescriptorOptions): TextRunOptions[] {
   );
 }
 
-function runsIn(body: TextBodyOptions): TextRunOptions[] {
+function runsIn(paragraphs: ParagraphDescriptorOptions[]): TextRunOptions[] {
   const runs: TextRunOptions[] = [];
-  for (const paragraph of paragraphsOf(body)) runs.push(...runsOf(paragraph));
+  for (const paragraph of paragraphsOf(paragraphs)) runs.push(...runsOf(paragraph));
   return runs;
 }
 
 /** The cell's paragraphs as real objects, consuming the cell's text sugar. */
-function cellParagraphsOf(cell: TableCellOptions): ParagraphDescriptorOptions[] {
+export function cellParagraphsOf(cell: TableCellOptions): ParagraphDescriptorOptions[] {
   const paragraphs = (cell.children ??=
     cell.text !== undefined ? [{ children: [{ text: cell.text }] }] : []);
   delete cell.text;
-  for (let i = 0; i < paragraphs.length; i++) {
-    const p = paragraphs[i]!;
-    if (typeof p === "string") paragraphs[i] = { children: [{ text: p }] };
-  }
-  return paragraphs as ParagraphDescriptorOptions[];
+  return paragraphsOf(paragraphs as ParagraphDescriptorOptions[]);
 }
 
 /** Word's toggle: a flag every run already carries is cleared, otherwise it
  *  is applied. No runs — no change. */
-export function toggleRunFlag(body: TextBodyOptions, flag: "bold" | "italic"): void {
-  const runs = runsIn(body);
+export function toggleRunFlag(
+  paragraphs: ParagraphDescriptorOptions[],
+  flag: "bold" | "italic",
+): void {
+  const runs = runsIn(paragraphs);
   if (runs.length === 0) return;
   const on = runs.every((run) => run[flag] === true);
   for (const run of runs) {
@@ -84,11 +86,11 @@ export function toggleRunFlag(body: TextBodyOptions, flag: "bold" | "italic"): v
 /** Toggle an underline/strike style: every run carrying a live value clears,
  *  otherwise the "on" style lands. */
 export function toggleRunStyle(
-  body: TextBodyOptions,
+  paragraphs: ParagraphDescriptorOptions[],
   key: "underline" | "strike",
   on: UnderlineStyle | StrikeStyle,
 ): void {
-  const runs = runsIn(body);
+  const runs = runsIn(paragraphs);
   if (runs.length === 0) return;
   const off = key === "underline" ? "none" : "noStrike";
   const applied = runs.every((run) => {
@@ -101,19 +103,22 @@ export function toggleRunStyle(
   }
 }
 
-export function setRunFont(body: TextBodyOptions, font: string): void {
-  for (const run of runsIn(body)) run.font = font;
+export function setRunFont(paragraphs: ParagraphDescriptorOptions[], font: string): void {
+  for (const run of runsIn(paragraphs)) run.font = font;
 }
 
 /** Run font size in points (the JSON's own unit). */
-export function setRunSize(body: TextBodyOptions, size: number): void {
-  for (const run of runsIn(body)) run.size = size;
+export function setRunSize(paragraphs: ParagraphDescriptorOptions[], size: number): void {
+  for (const run of runsIn(paragraphs)) run.size = size;
 }
 
 /** Set every paragraph's horizontal alignment (PowerPoint's align buttons
  *  assign, they don't toggle). */
-export function setParagraphAlignment(body: TextBodyOptions, alignment: TextAlignment): void {
-  for (const paragraph of paragraphsOf(body)) {
+export function setParagraphAlignment(
+  paragraphs: ParagraphDescriptorOptions[],
+  alignment: TextAlignment,
+): void {
+  for (const paragraph of paragraphsOf(paragraphs)) {
     paragraph.properties = { ...paragraph.properties, alignment };
   }
 }
@@ -181,7 +186,7 @@ function paragraphsFromLines(
  *  text body. */
 export function shapeTextOf(child: SlideChild): string | null {
   if (!("shape" in child) || !child.shape.textBody) return null;
-  return linesOf(paragraphsOf(child.shape.textBody));
+  return linesOf(bodyParagraphsOf(child.shape.textBody));
 }
 
 /** Write plain lines back into the shape's text body. Returns false when the
@@ -189,7 +194,7 @@ export function shapeTextOf(child: SlideChild): string | null {
 export function writeShapeText(child: SlideChild, text: string): boolean {
   if (!("shape" in child) || !child.shape.textBody) return false;
   const body = child.shape.textBody;
-  body.paragraphs = paragraphsFromLines(paragraphsOf(body), text.split("\n"));
+  body.paragraphs = paragraphsFromLines(bodyParagraphsOf(body), text.split("\n"));
   delete body.text;
   return true;
 }
@@ -210,7 +215,7 @@ export function writeCellText(cell: TableCellOptions, text: string): void {
  *  the in-place text editor's only typographic nod. */
 export function firstRunSizeOf(child: SlideChild): number {
   if (!("shape" in child) || !child.shape.textBody) return 18;
-  for (const run of runsIn(child.shape.textBody)) {
+  for (const run of runsIn(bodyParagraphsOf(child.shape.textBody))) {
     if (typeof run.size === "number" && run.size > 0) return run.size;
   }
   return 18;

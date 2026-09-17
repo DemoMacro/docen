@@ -47,6 +47,8 @@ import {
 } from "../ui";
 import { escapeHtml, presentationStyles, presentationTemplate } from "./chrome";
 import {
+  bodyParagraphsOf,
+  cellParagraphsOf,
   cellTextOf,
   deleteSlideAt,
   duplicateSlideAt,
@@ -988,6 +990,19 @@ class DocenPresentation extends AddinHost {
     this.#overlay?.hide();
   }
 
+  /** The source cell a table edit session points at — the grid walk maps the
+   *  session's row/col slot back to the cell object. */
+  #editedCell(at = this.#tableEdit): TableCellOptions | null {
+    if (!at) return null;
+    const sel = this.#selection;
+    const child = this.#presJson?.slides?.[sel?.slide ?? -1]?.children?.[sel?.child ?? -1];
+    if (!child || !("table" in child)) return null;
+    return (
+      tableGridOf(child.table).origins.find((o) => o.row === at.row && o.col === at.col)?.cell ??
+      null
+    );
+  }
+
   /** Leave the cell edit: `write` commits the textarea's text into the cell
    *  (an undo-able edit when it changed — the cell mutates in place, so the
    *  undo pair swaps its own keys back). */
@@ -998,11 +1013,7 @@ class DocenPresentation extends AddinHost {
     this.#tableEdit = null;
     editor?.remove();
     const sel = this.#selection;
-    const child = this.#presJson?.slides?.[sel?.slide ?? -1]?.children?.[sel?.child ?? -1];
-    const cell =
-      editor && write && sel && child && "table" in child && at
-        ? tableGridOf(child.table).origins.find((o) => o.row === at.row && o.col === at.col)?.cell
-        : undefined;
+    const cell = editor && write ? this.#editedCell(at) : null;
     if (cell) {
       const text = editor!.value;
       if (text !== cellTextOf(cell)) {
@@ -1349,55 +1360,62 @@ class DocenPresentation extends AddinHost {
     );
   };
 
-  /** Apply a font/paragraph command to the selected shape's text body. The
-   *  undo pair clones the whole body (geometry snapshots don't reach text);
-   *  a command that changed nothing records nothing. */
+  /** Apply a font/paragraph command to the text under edit: the cell a table
+   *  edit session was in, else the selected shape's text body. The undo pair
+   *  swaps the whole target back (geometry snapshots don't reach text); a
+   *  command that changed nothing records nothing. */
   #applyTextFormat(name: string, value?: string): void {
     // Format lands on the committed text: an in-flight edit writes back
     // first, or the exit-time write-back would clobber the format.
+    const at = this.#tableEdit;
     this.#exitTextEditing(true);
     const sel = this.#selection;
     const child = this.#presJson?.slides?.[sel?.slide ?? -1]?.children?.[sel?.child ?? -1];
-    if (!child || !("shape" in child)) return;
-    const shape = child.shape;
-    const body = shape.textBody;
-    if (!body) return;
-    const before = structuredClone(body);
+    const cell = at ? this.#editedCell(at) : null;
+    const body = cell || !child || !("shape" in child) ? null : (child.shape.textBody ?? null);
+    if (!cell && !body) return;
+    const target = cell ?? body!;
+    const paragraphs = cell ? cellParagraphsOf(cell) : bodyParagraphsOf(body!);
+    const before = structuredClone(target);
     switch (name) {
       case "bold":
-        toggleRunFlag(body, "bold");
+        toggleRunFlag(paragraphs, "bold");
         break;
       case "italic":
-        toggleRunFlag(body, "italic");
+        toggleRunFlag(paragraphs, "italic");
         break;
       case "underline":
-        toggleRunStyle(body, "underline", "single");
+        toggleRunStyle(paragraphs, "underline", "single");
         break;
       case "strike":
-        toggleRunStyle(body, "strike", "singleStrike");
+        toggleRunStyle(paragraphs, "strike", "singleStrike");
         break;
       case "font-face":
-        if (value) setRunFont(body, value);
+        if (value) setRunFont(paragraphs, value);
         break;
       case "font-size": {
         const size = Number(value);
-        if (Number.isFinite(size) && size > 0) setRunSize(body, size);
+        if (Number.isFinite(size) && size > 0) setRunSize(paragraphs, size);
         break;
       }
       default: {
         const alignment = ALIGNMENTS.get(name);
-        if (alignment) setParagraphAlignment(body, alignment);
+        if (alignment) setParagraphAlignment(paragraphs, alignment);
       }
     }
-    if (JSON.stringify(body) === JSON.stringify(before)) return;
-    const after = structuredClone(body);
+    if (JSON.stringify(target) === JSON.stringify(before)) return;
+    const after = structuredClone(target);
+    const restore = (snap: typeof before): void => {
+      for (const key of Object.keys(target) as (keyof typeof target)[]) delete target[key];
+      Object.assign(target, snap);
+    };
     this.#pushEdit({
       undo: () => {
-        shape.textBody = structuredClone(before);
+        restore(before);
         this.#reproject(sel!.slide);
       },
       redo: () => {
-        shape.textBody = structuredClone(after);
+        restore(after);
         this.#reproject(sel!.slide);
       },
     });
