@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>@docen/editor — presentation demo</title>
+    <title>@docen/editor — document demo</title>
     <style>
       html,
       body {
@@ -16,14 +16,14 @@
           sans-serif;
         color: #3b3b3b;
       }
-      docen-presentation {
+      /* The document component fills the viewport. */
+      .demo-doc {
         display: flex;
-        flex: 1;
-        min-height: 0;
+        height: 100%;
       }
     </style>
   </head>
   <body>
-    <script type="module" src="/demo/presentation.ts"></script>
+    <script type="module" src="/demo/document.ts"></script>
   </body>
 </html>

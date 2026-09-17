@@ -3,7 +3,7 @@
  * `<docen-document>` component (canvas route: chrome + LeaferJS pages + the
  * viewless editing bridge).
  *
- * Layout is a full-height flex column (declared in index.html).
+ * Layout is a full-height flex column (declared in document.html).
  */
 // Any named import from @docen/editor evaluates the module, which defines
 // the <docen-document> custom element (the @customElement decorator).
