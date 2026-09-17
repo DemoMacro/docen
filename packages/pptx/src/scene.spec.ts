@@ -1,7 +1,8 @@
-import type { PresentationOptions } from "@office-open/pptx";
+import type { PresentationOptions, SlideChild } from "@office-open/pptx";
 import { describe, expect, it } from "vitest";
 
 import { projectPresentation } from "./scene";
+import { memberAt, memberByPath } from "./scene/walk";
 
 const project = (pres: PresentationOptions) => projectPresentation(pres);
 
@@ -266,6 +267,63 @@ describe("groups", () => {
       height: 50,
       childPath: [0, 0],
     });
+  });
+
+  it("hits members and resolves them by path in slide-absolute px", () => {
+    const child: SlideChild = {
+      group: {
+        x: 2540000,
+        y: 1905000,
+        width: 5080000,
+        height: 3810000,
+        childOffsetX: 0,
+        childOffsetY: 0,
+        childExtentWidth: 2540000,
+        childExtentHeight: 1905000,
+        children: [
+          {
+            shape: {
+              x: 0,
+              y: 0,
+              width: 1270000,
+              height: 952500,
+              properties: { geometry: "rect", fill: "FF0000" },
+            },
+          },
+          {
+            shape: {
+              x: 1270000,
+              y: 952500,
+              width: 1270000,
+              height: 952500,
+              properties: { geometry: "rect", fill: "00B050" },
+            },
+          },
+        ],
+      },
+    };
+    // The 2× scale maps the red child onto the group's top-left quadrant
+    // (266.67,200 → 533.33,400 in slide px).
+    const red = memberAt(child, 400, 300);
+    expect(red).toMatchObject({
+      path: [0],
+      x: 2540000 / 9525,
+      y: 200,
+      width: 2540000 / 9525,
+      height: 200,
+    });
+    expect(red?.scale).toEqual({ sx: 2, sy: 2 });
+    // The point between the two members hits nothing (the group itself).
+    expect(memberAt(child, 400, 500)).toBeNull();
+    const green = memberByPath(child, [1]);
+    expect(green).toMatchObject({
+      path: [1],
+      x: 5080000 / 9525,
+      y: 400,
+      width: 2540000 / 9525,
+      height: 200,
+    });
+    expect(memberByPath(child, [9])).toBeNull();
   });
 });
 
