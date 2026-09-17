@@ -12,7 +12,7 @@ import {
 } from "@docen/layout";
 import type { TableCellOptions, TableOptions } from "@office-open/docx";
 
-import { indexTableStyles } from "../../style-cascade";
+import { indexTableStyles } from "../style-cascade";
 import type { ProjectContext } from "./context";
 import { eighthPtToPx, isRecord, measureTwip, num, type LayoutCell, type Rec } from "./guards";
 import { projectChild } from "./page";

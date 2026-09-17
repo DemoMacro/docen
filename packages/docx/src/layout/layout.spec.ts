@@ -11,7 +11,7 @@ import type {
 } from "@office-open/docx";
 import { describe, expect, it } from "vitest";
 
-import { projectDocumentOptions, projectFlowBox } from "./project";
+import { projectDocument, projectFlowBox } from "./document";
 
 // The adapter's contract mirrors the persistence model it consumes:
 // per-field cascade (direct pPr → style chain → docDefaults), unit
@@ -59,9 +59,9 @@ const doc = (
 });
 
 /** Single-section documents: the first (only) projected section. */
-const oneSection = (doc: DocumentOptions) => projectDocumentOptions(doc).sections[0]!;
+const oneSection = (doc: DocumentOptions) => projectDocument(doc).sections[0]!;
 
-describe("projectDocumentOptions style cascade", () => {
+describe("projectDocument style cascade", () => {
   it("resolves spacing/indent per field through the whole cascade", () => {
     const { blocks } = oneSection(doc([{ paragraph: { children: ["hi"] } }]));
     const para = blocks[0];
@@ -435,7 +435,7 @@ describe("projectDocumentOptions style cascade", () => {
   });
 });
 
-describe("projectDocumentOptions blocks", () => {
+describe("projectDocument blocks", () => {
   it("splits a paragraph at run-level page breaks into pageBreak blocks", () => {
     const { blocks } = oneSection(
       doc([
@@ -703,7 +703,7 @@ describe("projectDocumentOptions blocks", () => {
   });
 });
 
-describe("projectDocumentOptions fields and furniture", () => {
+describe("projectDocument fields and furniture", () => {
   it("projects PAGE/NUMPAGES fields as dynamic atoms and other fields as cached text", () => {
     const { blocks } = oneSection(
       doc([
@@ -775,7 +775,7 @@ describe("projectDocumentOptions fields and furniture", () => {
         { children: [], headers: { first: [{ paragraph: { children: ["h2-first"] } }] } },
       ],
     };
-    const sections = projectDocumentOptions(multi).sections;
+    const sections = projectDocument(multi).sections;
     // Section 1 shows section 0's slots verbatim.
     expect(JSON.stringify(sections[1]!.furniture.footer)).toContain("f0");
     expect(JSON.stringify(sections[1]!.furniture.header)).toContain("h0");
@@ -838,7 +838,7 @@ describe("projectDocumentOptions fields and furniture", () => {
   });
 });
 
-describe("projectDocumentOptions drawings", () => {
+describe("projectDocument drawings", () => {
   it("projects a wpg group into an anchored drawing with resolved child space", () => {
     const px = (emu: number): number => emu / 9525;
     const { blocks } = oneSection(
@@ -1546,9 +1546,9 @@ describe("projectFlowBox", () => {
   });
 });
 
-describe("projectDocumentOptions inline containers", () => {
+describe("projectDocument inline containers", () => {
   const paraOf = (children: SectionChild[]): LayoutBlock[] =>
-    projectDocumentOptions(doc(children)).sections[0]!.blocks;
+    projectDocument(doc(children)).sections[0]!.blocks;
 
   it("styles hyperlink runs through the Hyperlink character style, not the container", () => {
     const blocks = paraOf([
@@ -1662,7 +1662,7 @@ describe("projectDocumentOptions inline containers", () => {
   });
 });
 
-describe("projectDocumentOptions comment ranges", () => {
+describe("projectDocument comment ranges", () => {
   const textsOf = (blocks: LayoutBlock[]): { text: string; commentIds?: number[] }[] => {
     const out: { text: string; commentIds?: number[] }[] = [];
     for (const b of blocks) {
@@ -1743,7 +1743,7 @@ describe("projectDocumentOptions comment ranges", () => {
   });
 });
 
-describe("projectDocumentOptions footnote references", () => {
+describe("projectDocument footnote references", () => {
   const textItems = (blocks: LayoutBlock[]): { text: string; verticalAlign?: string }[] => {
     const out: { text: string; verticalAlign?: string }[] = [];
     for (const b of blocks) {
@@ -1813,7 +1813,7 @@ describe("projectDocumentOptions footnote references", () => {
   });
 });
 
-describe("projectDocumentOptions endnote references", () => {
+describe("projectDocument endnote references", () => {
   const textItems = (blocks: LayoutBlock[]): { text: string; verticalAlign?: string }[] => {
     const out: { text: string; verticalAlign?: string }[] = [];
     for (const b of blocks) {
@@ -1867,7 +1867,7 @@ describe("projectDocumentOptions endnote references", () => {
   });
 
   it("projects footnote definitions with matching footnoteRef mark numbers", () => {
-    const projected = projectDocumentOptions({
+    const projected = projectDocument({
       sections: [
         {
           children: [
@@ -1915,7 +1915,7 @@ describe("projectDocumentOptions endnote references", () => {
   });
 });
 
-describe("projectDocumentOptions page background", () => {
+describe("projectDocument page background", () => {
   /** Minimal 8x8 1bpp BMP: BFHEADER + INFOHEADER + 2-entry palette +
    * 4-byte-padded rows. `rows` are top-down bit strings ("11000000"); rows
    * past the array end read as zero. */
@@ -1946,7 +1946,7 @@ describe("projectDocumentOptions page background", () => {
 
   it("averages a pattern tile into one flat color by bit coverage", () => {
     // One row "11000000": 2 set bits of 64 → coverage 1/32.
-    const projected = projectDocumentOptions({
+    const projected = projectDocument({
       ...doc([]),
       background: backgroundOf(tileBmp(["11000000"])),
     } as DocumentOptions).background;
@@ -1955,7 +1955,7 @@ describe("projectDocumentOptions page background", () => {
   });
 
   it("keeps a plain w:color background untouched", () => {
-    const projected = projectDocumentOptions({
+    const projected = projectDocument({
       ...doc([]),
       background: backgroundOf(tileBmp([])),
     } as DocumentOptions).background;
@@ -1964,7 +1964,7 @@ describe("projectDocumentOptions page background", () => {
   });
 
   it("passes negative firstLine twips through unclamped", () => {
-    const projected = projectDocumentOptions(
+    const projected = projectDocument(
       doc([
         {
           paragraph: {
@@ -1984,7 +1984,7 @@ describe("projectDocumentOptions page background", () => {
   });
 });
 
-describe("projectDocumentOptions preset geometry", () => {
+describe("projectDocument preset geometry", () => {
   const floatingShape = (geometry: unknown, extra: Record<string, unknown> = {}) => ({
     wpsShape: {
       children: [],

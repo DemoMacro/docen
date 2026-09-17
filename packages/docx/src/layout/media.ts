@@ -6,7 +6,7 @@
 import type { LayoutDrawingMember } from "@docen/layout";
 import { emfPlusMembers, wmfMembers, wmfDibFallback, type SourceCrop } from "leafer-x-metafile";
 
-import { toLayoutMembers } from "../metafile-members";
+import { toLayoutMembers } from "./metafile-members";
 
 // ── picture media (renderer passthrough) ──
 

@@ -1890,7 +1890,7 @@ const SHADOW_DIRECTIONS: Readonly<Record<string, number>> = {
 
 /** A UniversalMeasure string ("1.5cm") or bare number string → twips; number
  *  passes through as twips already. Mirrors the engine's UM table
- *  (docx/src/layout/project/guards.ts measureTwip) — the value spaces are the
+ *  (docx/src/layout/guards.ts measureTwip) — the value spaces are the
  *  office-open length fields. */
 const MEASURE_TWIP_UNITS: ReadonlyArray<readonly [string, number]> = [
   ["pt", 20],

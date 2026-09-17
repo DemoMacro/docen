@@ -23,9 +23,9 @@ import { twipToPx } from "@docen/layout";
 import type { DocumentOptions, SectionPropertiesOptions } from "@office-open/docx";
 
 import { indexCharacterStyles } from "../style-cascade";
-import type { MarkupDisplay, ProjectContext } from "./project/context";
-import { isRecord, type BodyParagraph } from "./project/guards";
-import { indexNumberings } from "./project/numbering";
+import type { MarkupDisplay, ProjectContext } from "./context";
+import { isRecord, type BodyParagraph } from "./guards";
+import { indexNumberings } from "./numbering";
 import {
   inheritFurnitureSlots,
   projectChild,
@@ -36,11 +36,11 @@ import {
   projectPageBorders,
   projectPageFurniture,
   projectPageNumbering,
-} from "./project/page";
-import { projectParagraph } from "./project/paragraph";
-import { projectTable } from "./project/table";
+} from "./page";
+import { projectParagraph } from "./paragraph";
+import { projectTable } from "./table";
 
-export { projectFlowBox } from "./project/page";
+export { projectFlowBox } from "./page";
 
 export interface ProjectedSection {
   blocks: LayoutBlock[];
@@ -100,7 +100,7 @@ function projectNoteBlocks(
  *  (document-wide). Sections paginate in order — see
  *  `layoutFlowSections` in @docen/layout. `markup` applies Word's Display for
  *  Review state to the tracked-changes projection (omitted = all marks show). */
-export function projectDocumentOptions(
+export function projectDocument(
   doc: DocumentOptions,
   markup?: MarkupDisplay,
 ): {

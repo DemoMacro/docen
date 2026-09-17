@@ -2,7 +2,7 @@ import { generateDocumentSync } from "@office-open/docx";
 import { describe, expect, it } from "vitest";
 
 import { compileDocument, parseDOCXSync } from "../converters/docx";
-import { projectDocumentOptions, type ProjectedSection } from "../layout/project";
+import { projectDocument, type ProjectedSection } from "../layout";
 import { parseDocxBlock } from "./table";
 import { parseDocx as parseCellDocx, renderDocx as renderCellDocx } from "./table-cell";
 import type { ResolveContext } from "./types";
@@ -15,8 +15,8 @@ const ctx = {
 } as unknown as ResolveContext;
 
 /** Single-section documents: the first (only) projected section. */
-const oneSection = (doc: Parameters<typeof projectDocumentOptions>[0]): ProjectedSection =>
-  projectDocumentOptions(doc).sections[0]!;
+const oneSection = (doc: Parameters<typeof projectDocument>[0]): ProjectedSection =>
+  projectDocument(doc).sections[0]!;
 
 describe("flat table grid", () => {
   it("passes cell structural attrs through verbatim (columnSpan/verticalMerge)", () => {

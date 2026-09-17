@@ -16,8 +16,8 @@ import {
 } from "@docen/layout";
 import type { DocumentOptions, SectionChild, SectionOptions } from "@office-open/docx";
 
-import { resolvePageSize } from "../../extensions/utils";
-import { indexCharacterStyles } from "../../style-cascade";
+import { resolvePageSize } from "../extensions/utils";
+import { indexCharacterStyles } from "../style-cascade";
 import type { ProjectContext } from "./context";
 import {
   PLACEHOLDER_PX,

@@ -1,7 +1,7 @@
 import type { PresentationOptions } from "@office-open/pptx";
 import { describe, expect, it } from "vitest";
 
-import { projectPresentation } from "./project";
+import { projectPresentation } from "./scene";
 
 const project = (pres: PresentationOptions) => projectPresentation(pres);
 

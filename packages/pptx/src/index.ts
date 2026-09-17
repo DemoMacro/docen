@@ -11,4 +11,4 @@ export {
   type SlideChild,
   type SlideSize,
 } from "@office-open/pptx";
-export { projectPresentation, type ProjectedPresentation, type ProjectedSlide } from "./project";
+export { projectPresentation, type ProjectedPresentation, type ProjectedSlide } from "./scene";

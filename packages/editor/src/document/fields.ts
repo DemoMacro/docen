@@ -5,7 +5,7 @@
  * everything here is plain JSON in, plain JSON out; nothing touches the PM doc.
  *
  * The catalog lists the fields this editor can stand behind: the painter
- * already renders their cached values (layout/project/runs.ts pushField) and
+ * already renders their cached values (layout/runs.ts pushField) and
  * `evaluateField` can re-derive those values for 更新域 (F9). Anything the
  * engine neither evaluates nor renders dynamically is left out — a field that
  * shows a stale number is worse than no field.

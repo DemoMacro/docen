@@ -12,7 +12,7 @@ import {
   type LayoutTextStyle,
 } from "@docen/layout";
 
-import { mergeStyleChain } from "../../style-cascade";
+import { mergeStyleChain } from "../style-cascade";
 import type { MarkupDisplay, ProjectContext } from "./context";
 import { cropOf, outlineOf, pictureAdjustOf } from "./drawing";
 import { isRecord, measureEmu, num, str, unescapeXml, type Rec } from "./guards";

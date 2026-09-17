@@ -33,7 +33,7 @@ import {
 } from "@docen/docx";
 import type { Editor } from "@docen/docx/core";
 import {
-  projectDocumentOptions,
+  projectDocument,
   type ProjectedFlowBox,
   type ProjectedPageBackground,
   type ProjectedPageFurniture,
@@ -2409,7 +2409,7 @@ class DocenDocument extends AddinHost<Editor> {
    *  section's furniture ONCE (the insets and the painter's bands share the
    *  pass) → assemble the flow inputs. Pure preparation — no pagination. */
   #projectFlowSections(doc: JSONContent): ProjectedFlowInputs {
-    const { sections, background } = projectDocumentOptions(
+    const { sections, background } = projectDocument(
       compileDocument(this.#mergedView(doc)),
       // Word's Display for Review: "simple" is also the all-marks projection
       // minus the review chrome Word draws outside the flow, so only an

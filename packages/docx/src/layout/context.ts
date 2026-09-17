@@ -1,6 +1,6 @@
 import type { StylesOptions } from "@office-open/docx";
 
-import type { StyleEntry } from "../../style-cascade";
+import type { StyleEntry } from "../style-cascade";
 import type { NumberingIndex } from "./numbering";
 
 /** Word's "Display for Review" state — how tracked changes project.

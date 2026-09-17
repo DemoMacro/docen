@@ -5,12 +5,8 @@
 import type { LayoutParagraph, LayoutTextStyle } from "@docen/layout";
 import type { StylesOptions } from "@office-open/docx";
 
-import { resolveRFonts } from "../../extensions/utils";
-import {
-  defaultParagraphStyleId,
-  indexParagraphStyles,
-  mergeStyleChain,
-} from "../../style-cascade";
+import { resolveRFonts } from "../extensions/utils";
+import { defaultParagraphStyleId, indexParagraphStyles, mergeStyleChain } from "../style-cascade";
 import { colorOf, isRecord, measureTwip, num, str, type Rec } from "./guards";
 
 // ── style cascade (direct pPr → style chain → docDefaults) ──
