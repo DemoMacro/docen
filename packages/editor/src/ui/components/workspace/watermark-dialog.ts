@@ -3,6 +3,7 @@ import { FASTElement, css, customElement, html, observable, ref } from "@microso
 import { FONT_NAMES } from "../../../document/font-lists";
 import type { WatermarkPictureSpec, WatermarkTextSpec } from "../../../document/watermark";
 import { observeLang, t } from "../../i18n/localize";
+import { SWATCH_COLORS } from "./color-swatches";
 import { listboxOf, opt, pick, pickedValue, type FluentDropdown } from "./fluent-combo";
 
 /** The picture-scale ladder (Word's 缩放 list; "auto" fits the box width). */
@@ -18,17 +19,7 @@ const SCALES: Array<[string, number | "auto"]> = [
 const TEXT_SIZES = [24, 32, 40, 48, 72, 96];
 
 /** auto + the eight standard colors, keyed to the Font dialog's color names. */
-const COLORS: Array<[string, string | null]> = [
-  ["auto", null],
-  ["000000", "colorBlack"],
-  ["800000", "colorDarkRed"],
-  ["008000", "colorGreen"],
-  ["000080", "colorDarkBlue"],
-  ["FF0000", "colorRed"],
-  ["FF00FF", "colorMagenta"],
-  ["FFFF00", "colorYellow"],
-  ["00FFFF", "colorCyan"],
-];
+const COLORS: ReadonlyArray<readonly [string, string | null]> = [["auto", null], ...SWATCH_COLORS];
 
 const styles = css`
   :host {

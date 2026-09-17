@@ -41,9 +41,11 @@ import {
 } from "@docen/docx/layout";
 import {
   browserFontMetrics,
+  EMU_PER_CM,
   EMU_PER_PX,
   layoutFlowSections,
   layoutSectionsIncremental,
+  PX_PER_CM,
   TextMeasurer,
   twipToPx,
   type FlowPage,
@@ -2316,8 +2318,6 @@ class DocenDocument extends AddinHost<Editor> {
       unknown
     > | null;
     if (!floating) return null;
-    const EMU_PER_CM = 360000;
-    const PX_PER_CM = 96 / 2.54;
     const sizeDiv = payload ? EMU_PER_CM : PX_PER_CM;
     const t = (payload?.transformation ?? {}) as Record<string, unknown>;
     const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);

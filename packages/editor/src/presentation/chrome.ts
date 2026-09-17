@@ -5,7 +5,14 @@
 
 import { css, html, ref } from "@microsoft/fast-element";
 
-export { escapeHtml } from "../document/chrome";
+/** Escape a host-supplied string for safe interpolation into innerHTML. The
+ *  `filename` attribute comes from a user-selected File.name, which can
+ *  contain markup — without escaping it flows into #renderHeader's template
+ *  and executes. */
+export const escapeHtml = (s: string): string =>
+  s.replace(/[&<>"']/g, (c) =>
+    c === "&" ? "&amp;" : c === "<" ? "&lt;" : c === ">" ? "&gt;" : c === '"' ? "&quot;" : "&#39;",
+  );
 
 export const presentationStyles = css`
   :host {

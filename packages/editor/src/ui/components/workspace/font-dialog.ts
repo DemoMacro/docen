@@ -7,6 +7,7 @@ import {
   UNDERLINE_STYLES,
 } from "../../../document/font-lists";
 import { observeLang, resolveLang, t } from "../../i18n/localize";
+import { SWATCH_COLORS } from "./color-swatches";
 import { listboxOf, opt, pick, pickLadder, pickedValue, type FluentDropdown } from "./fluent-combo";
 
 /**
@@ -36,18 +37,8 @@ export interface FontDialogPatch {
   hidden: boolean;
 }
 
-/** Word's underline color dropdown (Automatic + the standard color row) — the
- *  keys are the `fontDialog.color*` i18n suffixes. */
-const UNDERLINE_COLORS: ReadonlyArray<readonly [string, string]> = [
-  ["000000", "colorBlack"],
-  ["800000", "colorDarkRed"],
-  ["008000", "colorGreen"],
-  ["000080", "colorDarkBlue"],
-  ["FF0000", "colorRed"],
-  ["FF00FF", "colorMagenta"],
-  ["FFFF00", "colorYellow"],
-  ["00FFFF", "colorCyan"],
-];
+/** Word's underline color dropdown (Automatic + the standard color row). */
+const UNDERLINE_COLORS = SWATCH_COLORS;
 
 const styles = css`
   :host {

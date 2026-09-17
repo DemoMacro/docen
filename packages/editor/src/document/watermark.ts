@@ -4,6 +4,7 @@
 // again.
 
 import type { JSONContent } from "@docen/docx";
+import { EMU_PER_PX } from "@docen/layout";
 
 import { t } from "../ui";
 
@@ -172,8 +173,8 @@ export function pictureWatermarkPara(
   spec: WatermarkPictureSpec,
   natural: { w: number; h: number },
 ): JSONContent {
-  // "auto" fits the 7.5" box width; px = EMU / 9525 for the Tiptap attrs.
-  const boxPx = 6858000 / 9525;
+  // "auto" fits the 7.5" box width; px = EMU / EMU_PER_PX for the Tiptap attrs.
+  const boxPx = 6858000 / EMU_PER_PX;
   const scale =
     spec.scale === "auto" || spec.scale == null ? Math.min(1, boxPx / natural.w) : spec.scale;
   const width = Math.round(natural.w * scale);

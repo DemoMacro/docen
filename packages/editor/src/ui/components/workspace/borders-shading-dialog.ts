@@ -2,6 +2,7 @@ import { FASTElement, css, customElement, html, observable, ref } from "@microso
 
 import type { BorderSideState, BordersDialogPatch } from "../../../document/extensions/commands";
 import { observeLang, t } from "../../i18n/localize";
+import { SWATCH_COLORS } from "./color-swatches";
 import { listboxOf, opt, pick, pickedValue, type FluentDropdown } from "./fluent-combo";
 
 /** OOXML border `size` is eighths of a point; the picker lists Word's standard
@@ -28,18 +29,10 @@ const LINE_STYLES = [
   "thick",
 ] as const;
 
-/** The palette row: Word's standard colors (auto = the text ink) — the keys
- *  are the `fontDialog.color*` i18n suffixes. */
-const COLORS: Array<[string | null, string]> = [
+/** The palette row: Word's standard colors (auto = the text ink). */
+const COLORS: ReadonlyArray<readonly [string | null, string]> = [
   [null, "colorAuto"],
-  ["000000", "colorBlack"],
-  ["800000", "colorDarkRed"],
-  ["008000", "colorGreen"],
-  ["000080", "colorDarkBlue"],
-  ["FF0000", "colorRed"],
-  ["FF00FF", "colorMagenta"],
-  ["FFFF00", "colorYellow"],
-  ["00FFFF", "colorCyan"],
+  ...SWATCH_COLORS,
 ];
 
 /** One tab's full style state — the two border tabs keep independent sides

@@ -10,6 +10,10 @@ export const TWIP_TO_PX = 4 / 3 / 20;
 // 1 px = 9525 EMU (914400 EMU/inch ÷ 96 px/inch). Drawing offsets/margins are EMU.
 export const EMU_PER_PX = 9525;
 
+// Same inch chain against cm/inch: 1 cm = 360000 EMU, 1 cm = 96/2.54 px.
+export const EMU_PER_CM = 360000;
+export const PX_PER_CM = 96 / 2.54;
+
 export const ptToPx = (pt: number): number => pt * PT_TO_PX;
 export const twipToPx = (twip: number): number => twip * TWIP_TO_PX;
 export const emuToPx = (emu: number): number => emu / EMU_PER_PX;

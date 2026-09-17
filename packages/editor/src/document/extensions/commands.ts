@@ -7,7 +7,7 @@ import {
   ORDERED_FORMATS,
 } from "@docen/docx";
 import { Extension } from "@docen/docx/core";
-import { EMU_PER_PX } from "@docen/layout";
+import { EMU_PER_CM, EMU_PER_PX, PX_PER_CM } from "@docen/layout";
 import type { Node as PMNode, ResolvedPos } from "@tiptap/pm/model";
 import type { Mark } from "@tiptap/pm/model";
 import type { EditorState } from "@tiptap/pm/state";
@@ -1544,7 +1544,6 @@ function applyFloatingExtras(
   offsetHCm: number | null,
   offsetVCm: number | null,
 ): Record<string, unknown> {
-  const EMU_PER_CM = 360000;
   const next = { ...floating };
   const hPos = { ...(floating.horizontalPosition as Record<string, unknown> | undefined) };
   const vPos = { ...(floating.verticalPosition as Record<string, unknown> | undefined) };
@@ -1682,7 +1681,7 @@ function tradeCropExtent(
   // half a px would round to a zero extent (an invisible drawing).
   const px = Math.round(tw / 15); // 15 twips to the px at 96 DPI
   if (px <= 0) return false;
-  const emu = px * 9525; // 9525 to the EMU
+  const emu = px * EMU_PER_PX;
   if (sel.node.type.name === "image") {
     const attrs = { ...sel.node.attrs };
     attrs[axis] = px;
@@ -4024,8 +4023,6 @@ export const DocumentCommands = Extension.create({
           const target = floatingDrawingAt(state);
           if (!target) return false;
           const cmTo = (v: number, factor: number): number => Math.round(v * factor);
-          const PX_PER_CM = 96 / 2.54;
-          const EMU_PER_CM = 360000;
           const num = (v: unknown): number | null =>
             typeof v === "number" && Number.isFinite(v) ? v : null;
           const widthCm = num(patch.widthCm);
