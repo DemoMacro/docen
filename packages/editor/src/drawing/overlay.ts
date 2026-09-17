@@ -95,7 +95,7 @@ export class DrawingOverlay {
     this.el.append(rot);
     this.el.addEventListener("pointermove", (e) => this.#onPointerMove(e));
     for (const kind of ["pointerup", "pointercancel"] as const)
-      this.el.addEventListener(kind, () => this.#onDragEnd());
+      this.el.addEventListener(kind, (e) => this.#onDragEnd(e));
   }
 
   /** Show the frame over `box` (page-local px at scale 1), tilted by
@@ -182,11 +182,23 @@ export class DrawingOverlay {
     this.#place();
   }
 
-  #onDragEnd(): void {
+  #onDragEnd(event?: PointerEvent): void {
     const drag = this.#drag;
     if (!drag || !this.#box) return;
     this.#drag = null;
     this.#endEscCancel();
+    // A sub-threshold wiggle is a click, not a resize: committing it would
+    // nudge the box by a couple of pixels invisible to the user (and leave a
+    // no-op step on the host's undo stack). Snap the frame back to the drag's
+    // origin so a stray handle click leaves nothing behind.
+    if (
+      event &&
+      Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < MOVE_THRESHOLD
+    ) {
+      this.#box = { ...drag.origin };
+      this.#place();
+      return;
+    }
     this.#callbacks.applyBox(this.#box);
   }
 
