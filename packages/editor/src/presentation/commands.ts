@@ -5,7 +5,7 @@
 // commands always walk real run objects, the same expansion stringify does.
 
 import { EMU_PER_PX } from "@docen/layout";
-import type { PresentationOptions, SlideChild, SlideOptions } from "@docen/pptx";
+import type { PresentationOptions, SlideChild, SlideOptions, TableCellOptions } from "@docen/pptx";
 // Text/paragraph types come from @office-open/core/drawing — @docen/pptx's
 // re-export surface doesn't carry them yet.
 import type {
@@ -55,6 +55,18 @@ function runsIn(body: TextBodyOptions): TextRunOptions[] {
   const runs: TextRunOptions[] = [];
   for (const paragraph of paragraphsOf(body)) runs.push(...runsOf(paragraph));
   return runs;
+}
+
+/** The cell's paragraphs as real objects, consuming the cell's text sugar. */
+function cellParagraphsOf(cell: TableCellOptions): ParagraphDescriptorOptions[] {
+  const paragraphs = (cell.children ??=
+    cell.text !== undefined ? [{ children: [{ text: cell.text }] }] : []);
+  delete cell.text;
+  for (let i = 0; i < paragraphs.length; i++) {
+    const p = paragraphs[i]!;
+    if (typeof p === "string") paragraphs[i] = { children: [{ text: p }] };
+  }
+  return paragraphs as ParagraphDescriptorOptions[];
 }
 
 /** Word's toggle: a flag every run already carries is cleared, otherwise it
@@ -136,11 +148,9 @@ export function reorderChild(children: SlideChild[], from: number, to: number): 
   if (moved) children.splice(clamped, 0, moved);
 }
 
-/** The shape's text body as plain lines (paragraphs joined by \n), or null
- *  when the child carries no text body. */
-export function shapeTextOf(child: SlideChild): string | null {
-  if (!("shape" in child) || !child.shape.textBody) return null;
-  return paragraphsOf(child.shape.textBody)
+/** The paragraphs' text as plain lines (joined by \n). */
+function linesOf(paragraphs: ParagraphDescriptorOptions[]): string {
+  return paragraphs
     .map((paragraph) =>
       runsOf(paragraph)
         .map((run) => run.text)
@@ -149,16 +159,13 @@ export function shapeTextOf(child: SlideChild): string | null {
     .join("\n");
 }
 
-/** Write plain lines back into the shape's text body — one paragraph per
- *  line, each keeping the original paragraph's alignment and the style
- *  attributes of its first run. Returns false when the child has no text
- *  body (the caller's edit records nothing). */
-export function writeShapeText(child: SlideChild, text: string): boolean {
-  if (!("shape" in child) || !child.shape.textBody) return false;
-  const body = child.shape.textBody;
-  const previous = paragraphsOf(body);
-  const lines = text.split("\n");
-  const next = lines.map((line, i) => {
+/** One paragraph per line: each keeps the original paragraph's properties
+ *  (alignment et al) and the style attributes of its first run. */
+function paragraphsFromLines(
+  previous: ParagraphDescriptorOptions[],
+  lines: string[],
+): ParagraphDescriptorOptions[] {
+  return lines.map((line, i) => {
     const old = previous[i];
     const style = runsOf(previous[i] ?? {})[0];
     const run: TextRunOptions = { text: line };
@@ -168,9 +175,35 @@ export function writeShapeText(child: SlideChild, text: string): boolean {
     }
     return { properties: old?.properties ? { ...old.properties } : undefined, children: [run] };
   });
-  body.paragraphs = next;
+}
+
+/** The shape's text body as plain lines, or null when the child carries no
+ *  text body. */
+export function shapeTextOf(child: SlideChild): string | null {
+  if (!("shape" in child) || !child.shape.textBody) return null;
+  return linesOf(paragraphsOf(child.shape.textBody));
+}
+
+/** Write plain lines back into the shape's text body. Returns false when the
+ *  child has no text body (the caller's edit records nothing). */
+export function writeShapeText(child: SlideChild, text: string): boolean {
+  if (!("shape" in child) || !child.shape.textBody) return false;
+  const body = child.shape.textBody;
+  body.paragraphs = paragraphsFromLines(paragraphsOf(body), text.split("\n"));
   delete body.text;
   return true;
+}
+
+/** The cell's text as plain lines. */
+export function cellTextOf(cell: TableCellOptions): string {
+  return linesOf(cellParagraphsOf(cell));
+}
+
+/** Write plain lines back into the cell (the shape side of the same
+ *  contract — see writeShapeText). */
+export function writeCellText(cell: TableCellOptions, text: string): void {
+  cell.children = paragraphsFromLines(cellParagraphsOf(cell), text.split("\n"));
+  delete cell.text;
 }
 
 /** The body's first run font size in points (PowerPoint's 18pt default) —
@@ -179,6 +212,16 @@ export function firstRunSizeOf(child: SlideChild): number {
   if (!("shape" in child) || !child.shape.textBody) return 18;
   for (const run of runsIn(child.shape.textBody)) {
     if (typeof run.size === "number" && run.size > 0) return run.size;
+  }
+  return 18;
+}
+
+/** The cell's first run font size in points (the same 18pt fallback). */
+export function firstCellRunSizeOf(cell: TableCellOptions): number {
+  for (const paragraph of cellParagraphsOf(cell)) {
+    for (const run of runsOf(paragraph)) {
+      if (typeof run.size === "number" && run.size > 0) return run.size;
+    }
   }
   return 18;
 }

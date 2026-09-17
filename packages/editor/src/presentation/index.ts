@@ -14,15 +14,19 @@ import {
   browserFontMetrics,
   familyOfSlot,
   leaferBaselinePadPx,
+  type LayoutBlock,
   type LayoutDrawingMember,
 } from "@docen/layout";
 import {
   generatePresentation,
   parsePresentation,
   projectPresentation,
+  tableGridOf,
   type PresentationOptions,
   type ProjectedPresentation,
   type SlideChild,
+  type TableOptions,
+  type TableCellOptions,
 } from "@docen/pptx";
 import { customElement, observable } from "@microsoft/fast-element";
 import type { DataType } from "@office-open/core";
@@ -43,8 +47,10 @@ import {
 } from "../ui";
 import { escapeHtml, presentationStyles, presentationTemplate } from "./chrome";
 import {
+  cellTextOf,
   deleteSlideAt,
   duplicateSlideAt,
+  firstCellRunSizeOf,
   firstRunSizeOf,
   insertSlideAt,
   makePicture,
@@ -56,6 +62,7 @@ import {
   shapeTextOf,
   toggleRunFlag,
   toggleRunStyle,
+  writeCellText,
   writeShapeText,
 } from "./commands";
 import {
@@ -147,6 +154,28 @@ interface DeckEdit {
   redo(): void;
 }
 
+/** The projected table member's payload as the editor reads it (the layout
+ *  type carries `table` as unknown; this is the pptx projection's shape —
+ *  see tableMember in @docen/pptx). */
+interface TableCellView {
+  col: number;
+  row: number;
+  spanW: number;
+  spanH: number;
+  anchor?: "top" | "center" | "bottom";
+  marginsPx: { left: number; top: number; right: number; bottom: number };
+  blocks: LayoutBlock[];
+}
+
+interface TableMemberView {
+  x: number;
+  y: number;
+  table: {
+    columnWidthsPx: number[];
+    rows: { heightPx: number; cells: TableCellView[] }[];
+  };
+}
+
 /** Commands with a live handler — everything else greys out (the honest
  *  ribbon). Add-in commands join this set at render time. */
 const WIRED_COMMANDS: ReadonlySet<string> = new Set([
@@ -185,6 +214,9 @@ class DocenPresentation extends AddinHost {
   /** The in-place shape-text editor: the textarea floats over the shape while
    *  it holds the session (its position; the text is read back on exit). */
   #textEditor: HTMLTextAreaElement | null = null;
+  /** The table cell under the in-place edit (grid row/col — the session
+   *  itself lives in #textEditor; null there means a shape text edit). */
+  #tableEdit: { row: number; col: number } | null = null;
   /** Drawing gridlines visibility (a view state — not part of the deck). */
   #gridlines = false;
   #edits: DeckEdit[] = [];
@@ -663,18 +695,16 @@ class DocenPresentation extends AddinHost {
           italic: run.italic === true,
         }) * run.sizePx
       : 0;
-    const baselineShift = ((): number => {
-      if (!run) return 0;
-      const probe = document.createElement("canvas").getContext("2d");
-      if (!probe) return 0;
-      probe.font = `${run.italic ? "italic " : ""}${run.bold ? "700 " : ""}${run.sizePx * scale}px ${JSON.stringify(face)}`;
-      const m = probe.measureText("Ag");
-      if (!(m.fontBoundingBoxAscent > 0)) return 0;
-      const cssBaseline =
-        (linePx * scale - m.fontBoundingBoxAscent - m.fontBoundingBoxDescent) / 2 +
-        m.fontBoundingBoxAscent;
-      return leaferBaselinePadPx(run.sizePx) * scale - cssBaseline;
-    })();
+    const baselineShift = run
+      ? this.#baselineShiftOf(
+          face,
+          run.bold === true,
+          run.italic === true,
+          run.sizePx,
+          linePx,
+          scale,
+        )
+      : 0;
     const editor = document.createElement("textarea");
     editor.className = "shape-text-editor";
     // The rows=2 default inflates scrollHeight to two lines — the slack math
@@ -752,8 +782,10 @@ class DocenPresentation extends AddinHost {
   }
 
   /** Leave the text edit. `write` commits the textarea's text back into the
-   *  shape (an undo-able edit when it changed); plain exits just drop it. */
+   *  shape (an undo-able edit when it changed); plain exits just drop it.
+   *  A table cell session dispatches to its own exit. */
   #exitTextEditing(write: boolean): void {
+    if (this.#tableEdit) return this.#exitTableCellEditing(write);
     const editor = this.#textEditor;
     this.#textEditor = null;
     editor?.remove();
@@ -790,6 +822,245 @@ class DocenPresentation extends AddinHost {
     if (this.#textEditor || !this.#selection) return;
     const hit = this.#selectedBox();
     if (hit) this.#overlay?.show(hit.box, hit.rotation);
+  }
+
+  // ── Table cell editing ─────────────────────────────────────────────────
+
+  /** The selected table's projected member and source table (payload cast —
+   *  the layout member carries `table` as unknown). Origin equality
+   *  identifies the member: a top-level frame projects from the same x/y
+   *  the hit test reads. */
+  #tableMemberOf(): {
+    slide: number;
+    table: TableOptions;
+    member: TableMemberView;
+  } | null {
+    const sel = this.#selection;
+    const pres = this.#pres;
+    const presJson = this.#presJson;
+    if (!sel || !pres || !presJson) return null;
+    const child = presJson.slides?.[sel.slide]?.children?.[sel.child];
+    if (!child || !("table" in child)) return null;
+    const hit = slideHits(presJson.slides?.[sel.slide] ?? {}).find((h) => h.child === sel.child);
+    if (!hit) return null;
+    const member = pres.slides[sel.slide]?.members.find(
+      (m): m is LayoutDrawingMember & { kind: "table" } =>
+        m.kind === "table" && m.x === hit.box.x && m.y === hit.box.y,
+    );
+    if (!member) return null;
+    return {
+      slide: sel.slide,
+      table: child.table,
+      member: member as unknown as TableMemberView,
+    };
+  }
+
+  /** The cell whose painted rect contains the slide-local point — bands from
+   *  the member's column widths and declared row heights, a span folding its
+   *  merged slots onto the origin cell. Returns the cell with its rect. */
+  #cellRectAt(
+    member: TableMemberView,
+    x: number,
+    y: number,
+  ): { cell: TableCellView; x: number; y: number; width: number; height: number } | null {
+    const colX = [0];
+    for (const w of member.table.columnWidthsPx) colX.push(colX[colX.length - 1]! + w);
+    const rowY = [0];
+    for (const row of member.table.rows) rowY.push(rowY[rowY.length - 1]! + row.heightPx);
+    const spanEnd = (v: number[], i: number, n: number): number =>
+      v[Math.min(i + n, v.length - 1)]!;
+    const lx = x - member.x;
+    const ly = y - member.y;
+    for (const cell of member.table.rows.flatMap((r) => r.cells)) {
+      const x0 = colX[Math.min(cell.col, colX.length - 1)]!;
+      const y0 = rowY[Math.min(cell.row, rowY.length - 1)]!;
+      const x1 = spanEnd(colX, cell.col, cell.spanW);
+      const y1 = spanEnd(rowY, cell.row, cell.spanH);
+      if (lx >= x0 && lx < x1 && ly >= y0 && ly < y1)
+        return { cell, x: member.x + x0, y: member.y + y0, width: x1 - x0, height: y1 - y0 };
+    }
+    return null;
+  }
+
+  /** Float a textarea over one cell of the selected table (PowerPoint's
+   *  in-place cell edit): insets, face, paragraph alignment and vertical
+   *  anchor come from the painted cell; the text writes back on exit, and a
+   *  click on another cell moves the session there. */
+  #enterTableCellEditing(x: number, y: number): void {
+    const found = this.#tableMemberOf();
+    if (!found) return;
+    const rect = this.#cellRectAt(found.member, x, y);
+    if (!rect) return;
+    const cell = rect.cell;
+    const source = tableGridOf(found.table).origins.find(
+      (o) => o.row === cell.row && o.col === cell.col,
+    )?.cell;
+    if (!source) return;
+    const pres = this.#pres!;
+    const scale = this.#zoom / 100;
+    const stripY = rect.y + found.slide * (pres.heightPx + SLIDE_GAP_PX) + SLIDE_GAP_PX;
+    // The cell's first text run styles the editor — the same projected-block
+    // read the shape editor does.
+    const para = cell.blocks[0];
+    const first = para?.kind === "paragraph" ? para : undefined;
+    const run =
+      first && (first.inline.find((i) => i.kind === "text")?.style ?? first.defaultTextStyle);
+    const face = run ? familyOfSlot(run.family, false) : "";
+    const linePx = run
+      ? browserFontMetrics.normalRatio({
+          family: face,
+          bold: run.bold === true,
+          italic: run.italic === true,
+        }) * run.sizePx
+      : 0;
+    const baselineShift = run
+      ? this.#baselineShiftOf(
+          face,
+          run.bold === true,
+          run.italic === true,
+          run.sizePx,
+          linePx,
+          scale,
+        )
+      : 0;
+    const m = cell.marginsPx;
+    const anchor = cell.anchor ?? "top";
+    const editor = document.createElement("textarea");
+    editor.className = "shape-text-editor";
+    editor.rows = 1;
+    editor.value = cellTextOf(source);
+    Object.assign(editor.style, {
+      left: `${rect.x * scale}px`,
+      top: `${stripY * scale}px`,
+      width: `${rect.width * scale}px`,
+      height: `${rect.height * scale}px`,
+      padding: `${m.top * scale}px ${m.right * scale}px ${m.bottom * scale}px ${m.left * scale}px`,
+      ...(run
+        ? {
+            fontFamily: JSON.stringify(face),
+            fontSize: `${run.sizePx * scale}px`,
+            lineHeight: `${linePx * scale}px`,
+            textAlign: TEXT_ALIGN_OF[first!.align ?? "left"] ?? "left",
+            color: run.color ? `#${run.color}` : TEXT_INK,
+            ...(run.bold ? { fontWeight: "bold" } : {}),
+            ...(run.italic ? { fontStyle: "italic" } : {}),
+          }
+        : { fontSize: `${((firstCellRunSizeOf(source) * 4) / 3) * scale}px` }),
+    });
+    // Overflow grows the frame downward (the top-anchored shape rule); a
+    // center/bottom cell re-runs the painter's slack math so the stack sits
+    // where the paint puts it. On commit the row grows to fit — the same
+    // growth every re-projection applies.
+    const frame = 3; // the edit frame's top+bottom borders
+    const syncLayout = (): void => {
+      editor.style.height = "auto";
+      editor.style.paddingTop = `${m.top * scale + baselineShift}px`;
+      const boxH = rect.height * scale;
+      if (anchor === "top") {
+        editor.style.height = `${Math.max(boxH, editor.scrollHeight + frame)}px`;
+        return;
+      }
+      const padTB = (m.top + m.bottom) * scale;
+      const content = editor.scrollHeight - padTB;
+      const slack = boxH - frame - padTB - content;
+      if (slack >= 0) {
+        editor.style.height = `${boxH}px`;
+        editor.style.paddingTop = `${m.top * scale + baselineShift + (anchor === "center" ? slack / 2 : slack)}px`;
+      } else {
+        editor.style.height = `${content + padTB + frame}px`;
+      }
+    };
+    editor.addEventListener("keydown", (event) => {
+      // Escape leaves the edit (committing); typing keys stay in the textarea.
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        this.#exitTextEditing(true);
+      }
+      event.stopPropagation();
+    });
+    editor.addEventListener("input", syncLayout);
+    this.#canvasHost().append(editor);
+    syncLayout();
+    editor.focus();
+    editor.select();
+    this.#textEditor = editor;
+    this.#tableEdit = { row: cell.row, col: cell.col };
+    this.#overlay?.hide();
+  }
+
+  /** Leave the cell edit: `write` commits the textarea's text into the cell
+   *  (an undo-able edit when it changed — the cell mutates in place, so the
+   *  undo pair swaps its own keys back). */
+  #exitTableCellEditing(write: boolean): void {
+    const editor = this.#textEditor;
+    const at = this.#tableEdit;
+    this.#textEditor = null;
+    this.#tableEdit = null;
+    editor?.remove();
+    const sel = this.#selection;
+    const child = this.#presJson?.slides?.[sel?.slide ?? -1]?.children?.[sel?.child ?? -1];
+    const cell =
+      editor && write && sel && child && "table" in child && at
+        ? tableGridOf(child.table).origins.find((o) => o.row === at.row && o.col === at.col)?.cell
+        : undefined;
+    if (cell) {
+      const text = editor!.value;
+      if (text !== cellTextOf(cell)) {
+        const before = structuredClone(cell);
+        writeCellText(cell, text);
+        const after = structuredClone(cell);
+        const restore = (snap: TableCellOptions): void => {
+          for (const key of Object.keys(cell) as (keyof TableCellOptions)[]) delete cell[key];
+          Object.assign(cell, snap);
+        };
+        this.#pushEdit({
+          undo: () => {
+            restore(before);
+            this.#reproject(sel!.slide);
+          },
+          redo: () => {
+            restore(after);
+            this.#reproject(sel!.slide);
+          },
+        });
+        this.#reproject(sel!.slide);
+      }
+    }
+    this.#restoreOverlay();
+  }
+
+  /** A click on another cell of the table under edit: commit the current
+   *  cell and float the editor over the new one (PowerPoint's cell hop). */
+  #moveTableCellEditing(x: number, y: number): void {
+    const found = this.#tableMemberOf();
+    const rect = found ? this.#cellRectAt(found.member, x, y) : null;
+    if (!rect) return this.#exitTextEditing(true);
+    if (this.#tableEdit?.row === rect.cell.row && this.#tableEdit.col === rect.cell.col) return;
+    this.#exitTextEditing(true);
+    this.#enterTableCellEditing(x, y);
+  }
+
+  /** The padding-top correction that moves a textarea's CSS baseline onto
+   *  the painted depth: the painted stack hangs shape-text glyphs
+   *  leaferBaselinePadPx below the line top while CSS centers the
+   *  half-leading box. 0 when the browser can't measure. */
+  #baselineShiftOf(
+    face: string,
+    bold: boolean,
+    italic: boolean,
+    sizePx: number,
+    linePx: number,
+    scale: number,
+  ): number {
+    const probe = document.createElement("canvas").getContext("2d");
+    if (!probe) return 0;
+    probe.font = `${italic ? "italic " : ""}${bold ? "700 " : ""}${sizePx * scale}px ${JSON.stringify(face)}`;
+    const m = probe.measureText("Ag");
+    if (!(m.fontBoundingBoxAscent > 0)) return 0;
+    const cssBaseline =
+      (linePx * scale - m.fontBoundingBoxAscent - m.fontBoundingBoxDescent) / 2 +
+      m.fontBoundingBoxAscent;
+    return leaferBaselinePadPx(sizePx) * scale - cssBaseline;
   }
 
   /** Re-project and repaint after a source edit (gestures, delete, undo,
@@ -1157,34 +1428,64 @@ class DocenPresentation extends AddinHost {
     URL.revokeObjectURL(link.href);
   }
 
-  readonly #onStagePointerDown = (event: PointerEvent): void => {
+  /** The pointer position as slide-local coordinates — which slide, x/y in
+   *  slide px — or null when the pointer is outside the deck strip. */
+  #stagePointOf(event: PointerEvent | MouseEvent): { slide: number; x: number; y: number } | null {
     const pres = this.#pres;
-    const presJson = this.#presJson;
-    if (!pres || !presJson || event.button !== 0) return;
+    if (!pres) return null;
     const rect = this.#stage.getBoundingClientRect();
-    if (rect.width === 0) return;
+    if (rect.width === 0) return null;
     const x = ((event.clientX - rect.left) / rect.width) * pres.widthPx;
     const stripY =
       ((event.clientY - rect.top) / rect.height) *
       (pres.slides.length * (pres.heightPx + SLIDE_GAP_PX) + SLIDE_GAP_PX);
     const slide = Math.floor(stripY / (pres.heightPx + SLIDE_GAP_PX));
-    if (slide < 0 || slide >= pres.slides.length) return;
-    const localY = stripY - slide * (pres.heightPx + SLIDE_GAP_PX) - SLIDE_GAP_PX;
-    const child = hitSlide(slideHits(presJson.slides?.[slide] ?? {}), x, localY);
-    // A press outside the shape under edit leaves the edit (Word's rule);
-    // one inside just moves the caret — the textarea keeps the session.
+    if (slide < 0 || slide >= pres.slides.length) return null;
+    return { slide, x, y: stripY - slide * (pres.heightPx + SLIDE_GAP_PX) - SLIDE_GAP_PX };
+  }
+
+  readonly #onStagePointerDown = (event: PointerEvent): void => {
+    const presJson = this.#presJson;
+    if (!presJson || event.button !== 0) return;
+    const point = this.#stagePointOf(event);
+    if (!point) return;
+    const child = hitSlide(slideHits(presJson.slides?.[point.slide] ?? {}), point.x, point.y);
+    // A press outside the object under edit leaves the edit (Word's rule);
+    // one inside just moves the caret — the textarea keeps the session. In a
+    // table edit a press on another cell of the same table hops there.
     if (this.#textEditor) {
-      if (this.#selection?.slide !== slide || this.#selection.child !== child) this.#select(null);
+      if (this.#selection?.slide !== point.slide || this.#selection.child !== child)
+        this.#select(null);
+      else if (this.#tableEdit) {
+        // The hop re-focuses the cell editor; the pointerdown's default focus
+        // move runs after this handler and would steal the caret back.
+        event.preventDefault();
+        this.#moveTableCellEditing(point.x, point.y);
+      }
       return;
     }
     if (child < 0) return this.#select(null);
-    if (this.#selection?.slide === slide && this.#selection.child === child)
+    if (this.#selection?.slide === point.slide && this.#selection.child === child)
       return this.#overlay?.beginMove(event.clientX, event.clientY);
-    this.#select({ slide, child });
+    this.#select({ slide: point.slide, child });
   };
 
-  readonly #onStageDblClick = (): void => {
+  readonly #onStageDblClick = (event: MouseEvent): void => {
     if (this.#textEditor) return;
+    const point = this.#presJson ? this.#stagePointOf(event) : null;
+    // A table under the pointer opens its cell edit; anything else opens the
+    // shape text edit (the first click of the double-click selected it).
+    if (point) {
+      const child = hitSlide(
+        slideHits(this.#presJson!.slides?.[point.slide] ?? {}),
+        point.x,
+        point.y,
+      );
+      const target =
+        child >= 0 ? this.#presJson!.slides?.[point.slide]?.children?.[child] : undefined;
+      if (child >= 0 && target && "table" in target)
+        return this.#enterTableCellEditing(point.x, point.y);
+    }
     this.#enterTextEditing();
   };
 
