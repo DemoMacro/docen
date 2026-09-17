@@ -212,6 +212,13 @@ describe("shapeTextOf / writeShapeText", () => {
     expect(shapeTextOf(shapeChild(bodyOf(["one", "two"])))).toBe("one\ntwo");
   });
 
+  it("reads a soft break as a line separator", () => {
+    const child = shapeChild(
+      bodyOf([{ children: [{ text: "a" }, { break: true }, { text: "b" }] }]),
+    );
+    expect(shapeTextOf(child)).toBe("a\nb");
+  });
+
   it("returns null for children without a text body", () => {
     const { picture } = makePicture(100, 100, 10, 10, "data:", "png") as {
       picture: PictureVariant;

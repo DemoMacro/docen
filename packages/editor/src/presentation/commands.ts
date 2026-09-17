@@ -13,6 +13,7 @@ import type {
   StrikeStyle,
   TextAlignment,
   TextBodyOptions,
+  TextBreakOptions,
   TextRunOptions,
   UnderlineStyle,
 } from "@office-open/core/drawing";
@@ -153,15 +154,22 @@ export function reorderChild(children: SlideChild[], from: number, to: number): 
   if (moved) children.splice(clamped, 0, moved);
 }
 
+/** The paragraph's text: runs concatenated, a soft break (a:br) reading as a
+ *  \n — the plain-lines view can't tell a break from a paragraph split, so a
+ *  written-back break downgrades to one (same visible lines). */
+function paragraphTextOf(paragraph: ParagraphDescriptorOptions): string {
+  let text = "";
+  for (const child of paragraph.children ?? []) {
+    if (typeof child === "string") text += child;
+    else if ("text" in child && typeof child.text === "string") text += child.text;
+    else if ((child as TextBreakOptions).break === true) text += "\n";
+  }
+  return text;
+}
+
 /** The paragraphs' text as plain lines (joined by \n). */
 function linesOf(paragraphs: ParagraphDescriptorOptions[]): string {
-  return paragraphs
-    .map((paragraph) =>
-      runsOf(paragraph)
-        .map((run) => run.text)
-        .join(""),
-    )
-    .join("\n");
+  return paragraphs.map((paragraph) => paragraphTextOf(paragraph)).join("\n");
 }
 
 /** One paragraph per line: each keeps the original paragraph's properties
