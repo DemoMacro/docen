@@ -10,5 +10,8 @@ export {
   type SlideOptions,
   type SlideChild,
   type SlideSize,
+  type TableOptions,
+  type TableCellOptions,
 } from "@office-open/pptx";
 export { projectPresentation, type ProjectedPresentation, type ProjectedSlide } from "./scene";
+export { tableGridOf, type CellOrigin } from "./scene/tables";

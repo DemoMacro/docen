@@ -47,25 +47,27 @@ function borderEdgeOf(b: CellBorderOptions): LayoutBorderEdge | undefined {
   };
 }
 
-export function tableMember(
-  table: TableOptions,
-  t: Xform,
-  childPath: readonly number[] | undefined,
-): LayoutDrawingMember {
-  // Resolve the grid: every cell lands on the cursor. A "restart" merge field
-  // is the parser's spelling of the raw @hMerge/@vMerge="1" absorbed slot and
-  // consumes its cursor position; slots a rowSpan claims with no source cell
-  // (authoring omits the continuation) are skipped via coverage bookkeeping.
-  // An explicit "continue" (the raw ="0" not-merged cell) is a real cell.
+/** One source cell at its grid slot (the addressing an editor needs to map
+ *  a painted cell back to the object an edit writes into). */
+export interface CellOrigin {
+  cell: TableCellOptions;
+  row: number;
+  col: number;
+  spanW: number;
+  spanH: number;
+}
+
+/** The table's grid walk: source cells at their slots plus the column count
+ *  the walk landed on. Every cell lands on the cursor. A "restart" merge
+ *  field is the parser's spelling of the raw @hMerge/@vMerge="1" absorbed
+ *  slot and consumes its cursor position; slots a rowSpan claims with no
+ *  source cell (authoring omits the continuation) are skipped via coverage
+ *  bookkeeping. An explicit "continue" (the raw ="0" not-merged cell) is a
+ *  real cell. */
+export function tableGridOf(table: TableOptions): { origins: CellOrigin[]; columns: number } {
   const nRows = table.rows.length;
   const covered: Set<number>[] = table.rows.map(() => new Set<number>());
-  const origins: {
-    cell: TableCellOptions;
-    row: number;
-    col: number;
-    spanW: number;
-    spanH: number;
-  }[] = [];
+  const origins: CellOrigin[] = [];
   let nCols = 0;
   table.rows.forEach((row, r) => {
     let col = 0;
@@ -84,6 +86,15 @@ export function tableMember(
       nCols = Math.max(nCols, col);
     }
   });
+  return { origins, columns: nCols };
+}
+
+export function tableMember(
+  table: TableOptions,
+  t: Xform,
+  childPath: readonly number[] | undefined,
+): LayoutDrawingMember {
+  const { origins, columns: nCols } = tableGridOf(table);
 
   // Declared column widths win; a table without them splits the frame evenly.
   const widths = table.columnWidths?.length
@@ -91,6 +102,7 @@ export function tableMember(
     : Array.from({ length: nCols }, () => (t.sx * emuOf(table.width)) / Math.max(1, nCols));
 
   const frameBorders = table.borders;
+  const nRows = table.rows.length;
   const rows = table.rows.map((row, r) => ({
     heightPx: t.sy * emuOf(row.height),
     cells: origins
