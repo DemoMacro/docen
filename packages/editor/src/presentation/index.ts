@@ -700,23 +700,26 @@ class DocenPresentation extends AddinHost {
           }
         : { fontSize: `${((firstRunSizeOf(child) * 4) / 3) * scale}px` }),
     });
-    // Keep the text visible as it grows. The baseline correction rides the
-    // top inset in every branch; top-anchored boxes grow the frame (height
-    // only, the width is the shape's), center/bottom re-run the painter's
-    // slack math — the stack starts at the top inset plus half (or all) of
-    // the leftover inner height, and overflow spills below the box like the
-    // painted stack does.
+    // Keep the text visible as it grows, and keep the box recognizable as it
+    // doesn't: the edit frame starts at the shape's full height (a short text
+    // must not shrink the fill/border rectangle under the user — PowerPoint
+    // keeps the frame too) and only grows past it when the text overflows.
+    // The baseline correction rides the top inset in every branch; top-anchored
+    // boxes grow the frame (height only, the width is the shape's), center/
+    // bottom re-run the painter's slack math — the stack starts at the top
+    // inset plus half (or all) of the leftover inner height, and overflow
+    // spills below the box like the painted stack does.
     const frame = 3; // the edit frame's top+bottom borders
     const syncLayout = (): void => {
       if (!member || !ins) {
         editor.style.height = "auto";
-        editor.style.height = `${editor.scrollHeight + frame}px`;
+        editor.style.height = `${Math.max(hit.box.height * scale, editor.scrollHeight + frame)}px`;
         return;
       }
       editor.style.height = "auto";
       editor.style.paddingTop = `${ins.top * scale + baselineShift}px`;
       if (member.anchor === "top") {
-        editor.style.height = `${editor.scrollHeight + frame}px`;
+        editor.style.height = `${Math.max(hit.box.height * scale, editor.scrollHeight + frame)}px`;
         return;
       }
       const padTB = (ins.top + ins.bottom) * scale;
