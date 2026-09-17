@@ -22,6 +22,8 @@ import {
   parsePresentation,
   projectPresentation,
   tableGridOf,
+  memberAt,
+  memberByPath,
   type PresentationOptions,
   type ProjectedPresentation,
   type SlideChild,
@@ -141,6 +143,9 @@ const PICTURE_TYPES: ReadonlyMap<string, "png" | "jpg" | "gif" | "bmp"> = new Ma
   ["image/bmp", "bmp"],
 ]);
 
+const pathsEqual = (a: readonly number[], b: readonly number[]): boolean =>
+  a.length === b.length && a.every((v, i) => v === b[i]);
+
 const readFileAsDataURL = (file: File): Promise<string> =>
   new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -212,7 +217,9 @@ class DocenPresentation extends AddinHost {
   #thumbScale = 1;
   #zoom = 100;
   #overlay: DrawingOverlay | null = null;
-  #selection: { slide: number; child: number } | null = null;
+  /** The selected object: the slide child, or — with `member` set — the
+   *  group-nested member it descended into (child indexes under the group). */
+  #selection: { slide: number; child: number; member?: number[] } | null = null;
   /** The in-place shape-text editor: the textarea floats over the shape while
    *  it holds the session (its position; the text is read back on exit). */
   #textEditor: HTMLTextAreaElement | null = null;
@@ -268,9 +275,22 @@ class DocenPresentation extends AddinHost {
     // Leafer mounts is recreated per deck render — the overlay survives it).
     this.#overlay = new DrawingOverlay({
       scale: () => this.#zoom / 100,
-      applyBox: (box) => this.#applyGesture((child) => resizeChild(child, this.#slideBoxOf(box))),
-      applyOffset: (dx, dy) => this.#applyGesture((child) => offsetChild(child, dx, dy)),
-      applyRotation: (delta) => this.#applyGesture((child) => rotateChild(child, delta)),
+      applyBox: (box) => {
+        // A group member's frame is display-only this round — resize needs
+        // the member's scaled geometry write-back, so the drag snaps back.
+        if (this.#selection?.member) return;
+        this.#applyGesture((child) => resizeChild(child, this.#slideBoxOf(box)));
+      },
+      applyOffset: (dx, dy) => {
+        // A member drag moves in child space: the group scale divides the
+        // slide-px delta before it lands on the member's own fields.
+        const s = this.#memberScale();
+        this.#applyGesture((child) => offsetChild(child, dx / s.sx, dy / s.sy));
+      },
+      applyRotation: (delta) => {
+        if (this.#selection?.member) return;
+        this.#applyGesture((child) => rotateChild(child, delta));
+      },
     });
     this.#canvasHost().append(this.#overlay.el);
     // Locale switches re-stamp the chrome (header + ribbon labels).
@@ -607,28 +627,57 @@ class DocenPresentation extends AddinHost {
   }
 
   /** Slide-absolute box of the current selection (strip space: slide-local
-   *  box plus the slide's offset in the strip) plus its spin. */
+   *  box plus the slide's offset in the strip) plus its spin. A member
+   *  selection shows the member's own box (unspun this round). */
   #selectedBox(): { box: Box; rotation: number } | null {
     const sel = this.#selection;
     const presJson = this.#presJson;
     if (!sel || !presJson) return null;
     const slide = presJson.slides?.[sel.slide];
+    const pres = this.#pres!;
+    const stripY = sel.slide * (pres.heightPx + SLIDE_GAP_PX) + SLIDE_GAP_PX;
+    if (sel.member) {
+      const group = slide?.children?.[sel.child];
+      const m = group && memberByPath(group, sel.member);
+      if (!m) return null;
+      return {
+        box: { x: m.x, y: m.y + stripY, width: m.width, height: m.height },
+        rotation: 0,
+      };
+    }
     const hit = slideHits(slide ?? {}).find((h) => h.child === sel.child);
     if (!hit) return null;
-    const pres = this.#pres!;
     return {
-      box: {
-        x: hit.box.x,
-        y: hit.box.y + sel.slide * (pres.heightPx + SLIDE_GAP_PX) + SLIDE_GAP_PX,
-        width: hit.box.width,
-        height: hit.box.height,
-      },
+      box: { x: hit.box.x, y: hit.box.y + stripY, width: hit.box.width, height: hit.box.height },
       rotation: hit.rotation,
     };
   }
 
+  /** The selected slide object: the child itself, or the group-nested member
+   *  the selection descended into. */
+  #selectedChild(): SlideChild | undefined {
+    const sel = this.#selection;
+    let child = this.#presJson?.slides?.[sel?.slide ?? -1]?.children?.[sel?.child ?? -1];
+    if (!child) return undefined;
+    for (const i of sel?.member ?? []) {
+      if (!("group" in child)) return undefined;
+      child = child.group.children?.[i];
+      if (!child) return undefined;
+    }
+    return child;
+  }
+
+  /** The child-space → px scale under the current member selection (identity
+   *  at top level). */
+  #memberScale(): { sx: number; sy: number } {
+    const sel = this.#selection;
+    if (!sel?.member?.length) return { sx: 1, sy: 1 };
+    const group = this.#presJson?.slides?.[sel.slide]?.children?.[sel.child];
+    return (group && memberByPath(group, sel.member))?.scale ?? { sx: 1, sy: 1 };
+  }
+
   /** Select a slide object (or clear). The frame shows the strip-space box. */
-  #select(sel: { slide: number; child: number } | null): void {
+  #select(sel: { slide: number; child: number; member?: number[] } | null): void {
     if (this.#textEditor) this.#exitTextEditing(true);
     this.#selection = sel;
     if (!sel) return this.#overlay?.hide();
@@ -647,24 +696,31 @@ class DocenPresentation extends AddinHost {
     const sel = this.#selection;
     const pres = this.#pres;
     const presJson = this.#presJson;
-    const child = presJson?.slides?.[sel?.slide ?? -1]?.children?.[sel?.child ?? -1];
+    const child = this.#selectedChild();
     const text = child ? shapeTextOf(child) : null;
     if (!sel || !pres || !presJson || !child || text === null) return;
-    const hit = slideHits(presJson.slides?.[sel.slide] ?? {}).find((h) => h.child === sel.child);
-    if (!hit) return;
+    // The edit anchor: a member's box comes from the group walk, a top-level
+    // child's from the slide's hit list.
+    let box: Box | null = null;
+    if (sel.member) {
+      const group = presJson.slides?.[sel.slide]?.children?.[sel.child];
+      const m = group && memberByPath(group, sel.member);
+      if (m) box = { x: m.x, y: m.y, width: m.width, height: m.height };
+    } else {
+      const hit = slideHits(presJson.slides?.[sel.slide] ?? {}).find((h) => h.child === sel.child);
+      box = hit?.box ?? null;
+    }
+    if (!box) return;
     const scale = this.#zoom / 100;
-    const stripY = hit.box.y + sel.slide * (pres.heightPx + SLIDE_GAP_PX) + SLIDE_GAP_PX;
-    // The projected text-box member for this shape: top-level boxes project
-    // with the same slide-absolute geometry slideHits derives, so box
+    const stripY = box.y + sel.slide * (pres.heightPx + SLIDE_GAP_PX) + SLIDE_GAP_PX;
+    // The projected text-box member for this shape: boxes project with the
+    // same slide-absolute geometry (groups fold their affine in), so box
     // equality identifies it.
     const member = pres.slides[sel.slide]?.members.find(
       (m): m is Extract<LayoutDrawingMember, { kind: "textBox" }> => {
         if (m.kind !== "textBox") return false;
         return (
-          m.x === hit.box.x &&
-          m.y === hit.box.y &&
-          m.width === hit.box.width &&
-          m.height === hit.box.height
+          m.x === box!.x && m.y === box!.y && m.width === box!.width && m.height === box!.height
         );
       },
     );
@@ -714,10 +770,10 @@ class DocenPresentation extends AddinHost {
     editor.rows = 1;
     editor.value = text;
     Object.assign(editor.style, {
-      left: `${hit.box.x * scale}px`,
+      left: `${box.x * scale}px`,
       top: `${stripY * scale}px`,
-      width: `${hit.box.width * scale}px`,
-      height: `${hit.box.height * scale}px`,
+      width: `${box.width * scale}px`,
+      height: `${box.height * scale}px`,
       ...(run && ins
         ? {
             padding: `${ins.top * scale}px ${ins.right * scale}px ${ins.bottom * scale}px ${ins.left * scale}px`,
@@ -745,20 +801,20 @@ class DocenPresentation extends AddinHost {
     const syncLayout = (): void => {
       if (!member || !ins) {
         editor.style.height = "auto";
-        editor.style.height = `${Math.max(hit.box.height * scale, editor.scrollHeight + frame)}px`;
+        editor.style.height = `${Math.max(box.height * scale, editor.scrollHeight + frame)}px`;
         return;
       }
       editor.style.height = "auto";
       editor.style.paddingTop = `${ins.top * scale + baselineShift}px`;
       if (member.anchor === "top") {
-        editor.style.height = `${Math.max(hit.box.height * scale, editor.scrollHeight + frame)}px`;
+        editor.style.height = `${Math.max(box.height * scale, editor.scrollHeight + frame)}px`;
         return;
       }
       const padTB = (ins.top + ins.bottom) * scale;
       const content = editor.scrollHeight - padTB;
-      const slack = member.autoFit ? 0 : hit.box.height * scale - frame - padTB - content;
+      const slack = member.autoFit ? 0 : box.height * scale - frame - padTB - content;
       if (slack >= 0) {
-        editor.style.height = `${hit.box.height * scale}px`;
+        editor.style.height = `${box.height * scale}px`;
         editor.style.paddingTop = `${ins.top * scale + baselineShift + (member.anchor === "center" ? slack / 2 : slack)}px`;
       } else {
         editor.style.height = `${content + padTB + frame}px`;
@@ -792,7 +848,7 @@ class DocenPresentation extends AddinHost {
     this.#textEditor = null;
     editor?.remove();
     const sel = this.#selection;
-    const child = this.#presJson?.slides?.[sel?.slide ?? -1]?.children?.[sel?.child ?? -1];
+    const child = this.#selectedChild();
     if (editor && write && sel && child && "shape" in child) {
       const shape = child.shape;
       const text = editor.value;
@@ -1106,26 +1162,30 @@ class DocenPresentation extends AddinHost {
     this.#syncQat();
   }
 
-  /** Commit a drag gesture to the source child, record it, and repaint. */
+  /** Commit a drag gesture to the selected object (a child or a group
+   *  member), record it, and repaint. */
   #applyGesture(edit: (child: SlideChild) => void): void {
     const sel = this.#selection;
-    const slide = this.#presJson?.slides?.[sel?.slide ?? -1];
-    const child = slide?.children?.[sel!.child];
-    if (!child) return;
+    const child = this.#selectedChild();
+    if (!sel || !child) return;
     const before = captureGeometry(child);
     edit(child);
     const after = captureGeometry(child);
     this.#pushEdit({
       undo: () => {
         restoreGeometry(child, before);
-        this.#reproject(sel!.slide);
+        this.#reproject(sel.slide);
       },
       redo: () => {
         restoreGeometry(child, after);
-        this.#reproject(sel!.slide);
+        this.#reproject(sel.slide);
       },
     });
-    this.#reproject(sel!.slide);
+    this.#reproject(sel.slide);
+    // Re-frame the overlay on the committed geometry: a member drag displays
+    // the raw slide delta, but the write-back divides it by the group scale,
+    // so the drag-end frame no longer matches where the member landed.
+    this.#select(sel);
   }
 
   /** Remove the selected object; undo re-splices the same child back. */
@@ -1370,7 +1430,7 @@ class DocenPresentation extends AddinHost {
     const at = this.#tableEdit;
     this.#exitTextEditing(true);
     const sel = this.#selection;
-    const child = this.#presJson?.slides?.[sel?.slide ?? -1]?.children?.[sel?.child ?? -1];
+    const child = this.#selectedChild();
     const cell = at ? this.#editedCell(at) : null;
     const body = cell || !child || !("shape" in child) ? null : (child.shape.textBody ?? null);
     if (!cell && !body) return;
@@ -1483,8 +1543,24 @@ class DocenPresentation extends AddinHost {
       return;
     }
     if (child < 0) return this.#select(null);
-    if (this.#selection?.slide === point.slide && this.#selection.child === child)
+    const target = presJson.slides?.[point.slide]?.children?.[child];
+    const sameObject = this.#selection?.slide === point.slide && this.#selection.child === child;
+    // The selected group: a press on a member descends into it (PowerPoint's
+    // second click); a member press selects or drags, a press on empty group
+    // canvas falls back to the group itself.
+    if (sameObject && target && "group" in target) {
+      const hit = memberAt(target, point.x, point.y);
+      const member = this.#selection?.member;
+      if (member) {
+        if (hit && pathsEqual(hit.path, member))
+          return this.#overlay?.beginMove(event.clientX, event.clientY);
+        if (hit) return this.#select({ slide: point.slide, child, member: hit.path });
+        return this.#select({ slide: point.slide, child });
+      }
+      if (hit) return this.#select({ slide: point.slide, child, member: hit.path });
       return this.#overlay?.beginMove(event.clientX, event.clientY);
+    }
+    if (sameObject) return this.#overlay?.beginMove(event.clientX, event.clientY);
     this.#select({ slide: point.slide, child });
   };
 
@@ -1512,7 +1588,17 @@ class DocenPresentation extends AddinHost {
     // its Escape handler commits and leaves; undo is the browser's (the
     // textarea's own typing history).
     if (this.#textEditor) return;
-    if (event.key === "Escape" && this.#selection) return this.#select(null);
+    if (event.key === "Escape" && this.#selection) {
+      // A member selection climbs back to its group before leaving it.
+      if (this.#selection.member) {
+        this.#selection = { slide: this.#selection.slide, child: this.#selection.child };
+        const hit = this.#selectedBox();
+        if (hit) this.#overlay?.show(hit.box, hit.rotation);
+        else this.#overlay?.hide();
+        return;
+      }
+      return this.#select(null);
+    }
     if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === "z") {
       event.preventDefault();
       return this.#undo();
@@ -1524,7 +1610,13 @@ class DocenPresentation extends AddinHost {
       event.preventDefault();
       return this.#redo();
     }
-    if ((event.key === "Delete" || event.key === "Backspace") && this.#selection) {
+    if (
+      (event.key === "Delete" || event.key === "Backspace") &&
+      this.#selection &&
+      // A member Delete would splice inside the group — not wired yet, and
+      // falling through would remove the whole group under the user.
+      !this.#selection.member
+    ) {
       event.preventDefault();
       this.#deleteSelected();
     }
