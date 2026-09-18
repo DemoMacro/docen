@@ -29,7 +29,7 @@ import type { CustomGeometryOptions } from "@office-open/core/drawing";
 import type { GroupChildMediaData, GroupOptions, MediaDataTransformation } from "@office-open/docx";
 
 import type { ProjectContext } from "./context";
-import { colorOf, isRecord, measureEmu, num, str, type BodyParagraph, type Rec } from "./guards";
+import { isRecord, measureEmu, num, str, type BodyParagraph, type Rec } from "./guards";
 import { metafileMembers, pictureSrc } from "./media";
 import { projectParagraph } from "./paragraph";
 

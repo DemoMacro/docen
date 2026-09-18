@@ -7,7 +7,7 @@
 
 // Local consumers (measureTwip below) need the value binding, not just the
 // re-export — import and re-export stay separate statements.
-import { isRecord, num } from "@docen/core/geometry";
+import { num } from "@docen/core/geometry";
 import { ptToPx, type LayoutTable } from "@docen/layout";
 import type { ParagraphOptions } from "@office-open/docx";
 
