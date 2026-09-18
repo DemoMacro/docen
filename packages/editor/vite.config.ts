@@ -47,6 +47,18 @@ export default defineConfig({
       "@docen/editor": fileURLToPath(new URL("./src/index.ts", import.meta.url)),
     },
   },
+  // The production demo bundle (vp build) only picks up index.html by
+  // default — every demo page must be listed as an input or it 404s once
+  // the bundle is deployed.
+  build: {
+    rollupOptions: {
+      input: {
+        main: fileURLToPath(new URL("./index.html", import.meta.url)),
+        document: fileURLToPath(new URL("./document.html", import.meta.url)),
+        presentation: fileURLToPath(new URL("./presentation.html", import.meta.url)),
+      },
+    },
+  },
   server: {
     open: true,
   },
