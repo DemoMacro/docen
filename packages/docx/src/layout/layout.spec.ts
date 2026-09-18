@@ -569,6 +569,30 @@ describe("projectDocument blocks", () => {
     expect(table.indentPx).toBe(48); // 720 twips ÷ 15 = 48px
   });
 
+  it("keeps negative table indents and drops non-dxa ones", () => {
+    const build = (indent: Record<string, unknown>): number | undefined => {
+      const { blocks } = oneSection(
+        doc([
+          {
+            table: {
+              indent,
+              columnWidths: [1500],
+              rows: [{ cells: [{ children: [{ paragraph: { children: ["x"] } }] }] }],
+            } as never,
+          },
+        ]),
+      );
+      const table = blocks[0];
+      if (table?.kind !== "table") throw new Error("expected table");
+      return table.indentPx;
+    };
+    // Negative indents are legal (the table reaches into the leading margin).
+    expect(build({ size: -720, type: "twips" })).toBe(-48);
+    // Only dxa carries an absolute position — percent is not a twip count.
+    expect(build({ size: 5000, type: "percent" })).toBeUndefined();
+    expect(build({ type: "nil" })).toBeUndefined();
+  });
+
   it("projects cell border colors, shading fills, and table-level borders", () => {
     const stylesWithTable: StylesOptions = {
       ...styles,

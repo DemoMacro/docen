@@ -200,9 +200,16 @@ export function projectTable(t: TableOptions, ctx: ProjectContext): LayoutTable 
   const columnWidthsPx = t.columnWidths?.map((w) => twipToPx(measureTwip(w) ?? 0));
   const styleTable = t.style ? indexTableStyles(ctx.styles).get(t.style)?.table : undefined;
   const alignment = t.alignment ?? styleTable?.alignment;
-  const indentRaw = isRecord(t.indent) ? (t.indent.size ?? t.indent.value) : t.indent;
-  const indentTwips = measureTwip(indentRaw);
-  const indentPx = indentTwips != null && indentTwips > 0 ? twipToPx(indentTwips) : undefined;
+  // w:tblInd — only dxa carries an absolute indent (auto/nil are no-ops,
+  // percent has no px position); Word allows negatives (the table reaches
+  // into the leading margin).
+  const indentType = isRecord(t.indent) ? t.indent.type : undefined;
+  const indentRaw = isRecord(t.indent) ? t.indent.size : undefined;
+  const indentTwips =
+    indentType === "auto" || indentType === "nil" || indentType === "percent"
+      ? undefined
+      : measureTwip(indentRaw);
+  const indentPx = indentTwips ? twipToPx(indentTwips) : undefined;
   return {
     kind: "table",
     width: toTableWidth(t.width),
