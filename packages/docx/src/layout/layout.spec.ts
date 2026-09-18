@@ -552,6 +552,23 @@ describe("projectDocument blocks", () => {
     expect(para.inline[0]).toMatchObject({ kind: "text", text: "c" });
   });
 
+  it("projects table indent (w:tblInd) to indentPx", () => {
+    const { blocks } = oneSection(
+      doc([
+        {
+          table: {
+            indent: { size: 720, type: "twips" },
+            columnWidths: [1500],
+            rows: [{ cells: [{ children: [{ paragraph: { children: ["indented"] } }] }] }],
+          },
+        },
+      ]),
+    );
+    const table = blocks[0];
+    if (table?.kind !== "table") throw new Error("expected table");
+    expect(table.indentPx).toBe(48); // 720 twips ÷ 15 = 48px
+  });
+
   it("projects cell border colors, shading fills, and table-level borders", () => {
     const stylesWithTable: StylesOptions = {
       ...styles,

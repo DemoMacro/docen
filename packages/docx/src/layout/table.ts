@@ -200,6 +200,9 @@ export function projectTable(t: TableOptions, ctx: ProjectContext): LayoutTable 
   const columnWidthsPx = t.columnWidths?.map((w) => twipToPx(measureTwip(w) ?? 0));
   const styleTable = t.style ? indexTableStyles(ctx.styles).get(t.style)?.table : undefined;
   const alignment = t.alignment ?? styleTable?.alignment;
+  const indentRaw = isRecord(t.indent) ? (t.indent.size ?? t.indent.value) : t.indent;
+  const indentTwips = measureTwip(indentRaw);
+  const indentPx = indentTwips != null && indentTwips > 0 ? twipToPx(indentTwips) : undefined;
   return {
     kind: "table",
     width: toTableWidth(t.width),
@@ -210,6 +213,7 @@ export function projectTable(t: TableOptions, ctx: ProjectContext): LayoutTable 
         : alignment === "right" || alignment === "end"
           ? "right"
           : undefined,
+    indentPx,
     columnWidthsPx: columnWidthsPx && columnWidthsPx.length > 0 ? columnWidthsPx : undefined,
     cellInsets: toCellInsets(t.margins) ?? WORD_DEFAULT_CELL_INSETS,
     borders: toTableBorders(t.borders, styleTable),
