@@ -26,6 +26,7 @@ import {
   memberByPath,
   type PresentationOptions,
   type ProjectedPresentation,
+  type SlideOptions,
   type SlideChild,
   type TableOptions,
   type TableCellOptions,
@@ -218,6 +219,8 @@ const WIRED_COMMANDS: ReadonlySet<string> = new Set([
   "insert-picture",
   "insert-table",
   "shapes",
+  "format-background",
+  "slide-size",
   "bring-front",
   "send-back",
   "gridlines",
@@ -534,6 +537,8 @@ class DocenPresentation extends AddinHost {
     else if (name === "text-box") this.#insertTextBox();
     else if (name === "insert-table") this.#insertTable();
     else if (name === "shapes" && event.detail?.value) this.#insertShape(event.detail.value);
+    else if (name === "format-background") this.#setBackground(event.detail?.value);
+    else if (name === "slide-size") this.#toggleSlideSize();
     else if (name === "insert-picture") this.#pickPicture();
     else if (name === "bring-front") this.#reorderSelected("front");
     else if (name === "send-back") this.#reorderSelected("back");
@@ -1427,6 +1432,57 @@ class DocenPresentation extends AddinHost {
     const pres = this.#pres;
     if (!pres) return;
     this.#insertChild(makeShape(pres.widthPx, pres.heightPx, geometry as ShapeType));
+  }
+
+  /** The color picker's pick: paint the active slide's background solid.
+   *  Swatches arrive as color:RRGGBB; anything else (no-fill tokens) has no
+   *  background meaning yet and is dropped. */
+  #setBackground(value?: string): void {
+    const presJson = this.#presJson;
+    if (!presJson || !value?.startsWith("color:")) return;
+    const color = value.slice(6).toUpperCase();
+    if (!/^[0-9A-F]{6}$/.test(color)) return;
+    const slide = this.#activeSlideIndex();
+    const host = presJson.slides?.[slide];
+    if (!host) return;
+    const before = host.background;
+    const after = { fill: { type: "solid", color } } as SlideOptions["background"];
+    host.background = structuredClone(after);
+    this.#pushEdit({
+      undo: () => {
+        host.background = before;
+        this.#reproject(slide);
+      },
+      redo: () => {
+        host.background = structuredClone(after);
+        this.#reproject(slide);
+      },
+    });
+    this.#reproject(slide);
+  }
+
+  /** Cycle the deck between the two named sizes (16:9 ↔ 4:3). Content keeps
+   *  its absolute geometry — the canvas re-frames around it. */
+  #toggleSlideSize(): void {
+    const presJson = this.#presJson;
+    if (!presJson) return;
+    const before = presJson.size ?? "16:9";
+    const after = before === "16:9" ? "4:3" : "16:9";
+    presJson.size = after;
+    this.#pushEdit({
+      undo: () => {
+        presJson.size = before;
+        this.#reproject();
+        this.#applyZoom();
+      },
+      redo: () => {
+        presJson.size = after;
+        this.#reproject();
+        this.#applyZoom();
+      },
+    });
+    this.#reproject();
+    this.#applyZoom();
   }
 
   /** Toggle the drawing gridlines — a pure view state, no undo step. */

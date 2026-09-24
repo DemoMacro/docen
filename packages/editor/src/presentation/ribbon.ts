@@ -295,10 +295,13 @@ export function presentationRibbonTabs(): RibbonTab[] {
           columnOf(btn("variants", cmd("variants"), { icon: "page-color", iconOnly: true })),
         ]),
         group("customize", [
-          btn("format-background", cmd("format-background"), {
+          {
+            type: "color-picker",
+            event: "format-background",
+            label: cmd("format-background"),
             icon: "page-color",
             size: "large",
-          }),
+          },
           columnOf(btn("slide-size", cmd("slide-size"), { icon: "page-size", iconOnly: true })),
         ]),
       ],
