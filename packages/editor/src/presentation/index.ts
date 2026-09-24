@@ -70,12 +70,14 @@ import {
   setRunFont,
   setRunSize,
   shapeTextOf,
+  slideNotesOf,
   toggleBullet,
   toggleNumbering,
   toggleRunFlag,
   toggleRunStyle,
   writeCellText,
   writeShapeText,
+  writeSlideNotes,
 } from "./commands";
 import {
   captureGeometry,
@@ -236,6 +238,8 @@ const WIRED_COMMANDS: ReadonlySet<string> = new Set([
   "gridlines",
   "find",
   "replace",
+  "notes",
+  "normal",
   ...TEXT_FORMAT_COMMANDS,
 ]);
 
@@ -272,6 +276,9 @@ class DocenPresentation extends AddinHost {
   #findCase = false;
   #findHits: FindHit[] = [];
   #findAt = -1;
+  /** The slide the notes textarea currently carries (the commit target —
+   *  the viewport may move while the session is open). */
+  #notesSlideIndex = 0;
   #langObserver?: MutationObserver;
   #unsubLang?: () => void;
   #scrollRaf?: number;
@@ -280,6 +287,9 @@ class DocenPresentation extends AddinHost {
   @observable thumbStrip?: HTMLElement;
   @observable thumbSelection?: HTMLElement;
   @observable gridlines?: HTMLElement;
+  /** The speaker-notes pane (chrome.ts): the pane wrapper and its textarea. */
+  @observable notesPane?: HTMLElement;
+  @observable notesEditor?: HTMLTextAreaElement;
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -390,6 +400,9 @@ class DocenPresentation extends AddinHost {
     this.#selection = null;
     this.#edits = [];
     this.#editIndex = -1;
+    // The notes session restarts on the fresh deck's first slide.
+    this.#notesSlideIndex = 0;
+    this.#syncNotesPane(0);
     this.#pres = projectPresentation(pres);
     // The base class attaches an empty shadowRoot ahead of connect, so
     // shadowRoot presence does not mean the template stamped — same bail
@@ -409,6 +422,10 @@ class DocenPresentation extends AddinHost {
     this.#editIndex = -1;
     this.#overlay?.hide();
     this.removeAttribute("filename");
+    // The notes session dies with the deck.
+    if (this.notesPane) this.notesPane.hidden = true;
+    if (this.notesEditor) this.notesEditor.value = "";
+    this.#notesSlideIndex = 0;
     if (!this.shadowRoot?.querySelector(".stage")) return;
     this.#app?.destroy();
     this.#app = null;
@@ -464,6 +481,7 @@ class DocenPresentation extends AddinHost {
       | (HTMLElement & { setTabs(tabs: readonly unknown[], scope: Element | null): void })
       | null;
     searchEl?.setTabs(tabs, root.querySelector("docen-workspace"));
+    this.notesEditor?.setAttribute("placeholder", t("ppt.notes.placeholder", this));
     this.#applyRibbonGreying();
   }
 
@@ -536,9 +554,12 @@ class DocenPresentation extends AddinHost {
 
   // ── Events ───────────────────────────────────────────────────────────────
 
-  /** Title-bar menu items carry their action in `data-event`. */
+  /** Title-bar menu items carry their action in `data-event`; the notes
+   *  textarea's change (its blur commit) routes to the notes session. */
   readonly #onChange = (event: Event): void => {
-    const name = (event.target as HTMLElement)?.dataset?.event;
+    const target = event.target as HTMLElement;
+    if (target === this.notesEditor) return this.#commitNotes();
+    const name = target?.dataset?.event;
     if (name === "open") this.#pickFile();
     else if (name === "save-as") void this.#saveAs();
     else if (name === "close") this.closePresentation();
@@ -568,6 +589,8 @@ class DocenPresentation extends AddinHost {
     else if (name === "send-back") this.#reorderSelected("back");
     else if (name === "gridlines") this.#toggleGridlines();
     else if (name === "find" || name === "replace") this.#findDialog()?.show();
+    else if (name === "notes") this.#toggleNotes();
+    else if (name === "normal") this.#enterNormalView();
     else if (TEXT_FORMAT_COMMANDS.has(name)) this.#applyTextFormat(name, event.detail?.value);
   };
 
@@ -635,6 +658,7 @@ class DocenPresentation extends AddinHost {
     bar.setAttribute("total", String(pres.slides.length));
     bar.setAttribute("pageLabel", t("ppt.status.slide-of", this));
     this.#syncThumbSelection(index);
+    this.#syncNotesPane(index);
   }
 
   /** Repaint the deck. With `slide` set (a single-slide edit), only that
@@ -1667,6 +1691,58 @@ class DocenPresentation extends AddinHost {
         );
       }
     }
+  }
+
+  // ── Notes pane ───────────────────────────────────────────────────────────
+
+  /** Show/hide the speaker-notes pane (a view state — the deck is untouched
+   *  until the textarea commits). */
+  #toggleNotes(): void {
+    const pane = this.notesPane;
+    if (!pane) return;
+    pane.hidden = !pane.hidden;
+    if (!pane.hidden) this.#syncNotesPane(this.#activeSlideIndex());
+  }
+
+  /** The Normal view: back to the default surface — the notes pane closes
+   *  (later view states fold in here). */
+  #enterNormalView(): void {
+    if (this.notesPane) this.notesPane.hidden = true;
+  }
+
+  /** Point the textarea at the slide: a no-op while the session is open (the
+   *  mid-edit viewport moves must not clobber the text under the caret). */
+  #syncNotesPane(index: number): void {
+    const pane = this.notesPane;
+    const editor = this.notesEditor;
+    if (!pane || !editor || pane.hidden) return;
+    if (document.activeElement === editor) return;
+    this.#notesSlideIndex = index;
+    editor.value = slideNotesOf(this.#presJson?.slides?.[index] ?? {});
+  }
+
+  /** The textarea's blur commit: write the plain text back to the slide it
+   *  was opened for (no repaint — notes don't project onto the canvas) as
+   *  one reversible edit. */
+  #commitNotes(): void {
+    const slide = this.#presJson?.slides?.[this.#notesSlideIndex];
+    const editor = this.notesEditor;
+    if (!slide || !editor) return;
+    const before = slideNotesOf(slide);
+    const after = editor.value;
+    if (after === before) return;
+    writeSlideNotes(slide, after);
+    this.#pushEdit({
+      undo: () => {
+        writeSlideNotes(slide, before);
+        this.#syncNotesPane(this.#notesSlideIndex);
+      },
+      redo: () => {
+        writeSlideNotes(slide, after);
+        this.#syncNotesPane(this.#notesSlideIndex);
+      },
+    });
+    this.#syncNotesPane(this.#notesSlideIndex);
   }
 
   #pickPicture(): void {

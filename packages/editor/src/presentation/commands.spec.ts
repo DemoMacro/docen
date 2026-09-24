@@ -1,5 +1,5 @@
 import { EMU_PER_PX } from "@docen/layout";
-import type { PresentationOptions, SlideChild, TableCellOptions } from "@docen/pptx";
+import type { PresentationOptions, SlideChild, SlideOptions, TableCellOptions } from "@docen/pptx";
 import type { ParagraphDescriptorOptions, TextBodyOptions } from "@office-open/core/drawing";
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
@@ -20,12 +20,14 @@ import {
   setRunFont,
   setRunSize,
   shapeTextOf,
+  slideNotesOf,
   toggleBullet,
   toggleNumbering,
   toggleRunFlag,
   toggleRunStyle,
   writeCellText,
   writeShapeText,
+  writeSlideNotes,
 } from "./commands";
 
 type Run = {
@@ -411,5 +413,27 @@ describe("makeShape", () => {
     expect(shape.x).toBe(Math.round(((1280 - 192) / 2) * EMU_PER_PX));
     expect(shape.properties).toMatchObject({ geometry: "star5", fill: "FFFFFF" });
     expect(shape.textBody).toBeDefined();
+  });
+});
+
+describe("slide notes", () => {
+  it("reads the string shorthand and the structured text sugar", () => {
+    expect(slideNotesOf({ notes: "spoken" })).toBe("spoken");
+    expect(slideNotesOf({ notes: { text: "structured" } })).toBe("structured");
+    expect(slideNotesOf({})).toBe("");
+  });
+
+  it("writes the shorthand, upgrades nothing, and clears", () => {
+    const plain: SlideOptions = {};
+    writeSlideNotes(plain, "a");
+    expect(plain.notes).toBe("a");
+    writeSlideNotes(plain, "");
+    expect("notes" in plain).toBe(false);
+
+    const structured: SlideOptions = { notes: { text: "old" } };
+    writeSlideNotes(structured, "new");
+    expect(structured.notes).toEqual({ text: "new" });
+    writeSlideNotes(structured, "");
+    expect(structured.notes).toEqual({});
   });
 });

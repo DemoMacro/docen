@@ -299,6 +299,24 @@ export function firstCellRunSizeOf(cell: TableCellOptions): number {
   return 18;
 }
 
+/** The slide's speaker notes as plain text (the string shorthand, or the
+ *  structured notes slide's text sugar). */
+export function slideNotesOf(slide: SlideOptions): string {
+  return typeof slide.notes === "string" ? slide.notes : (slide.notes?.text ?? "");
+}
+
+/** Write the speaker notes back: the string shorthand for the plain case,
+ *  the structured object's text sugar when the slide already carries one
+ *  (stringify prefers that object's structured path, so the edit is
+ *  best-effort there). */
+export function writeSlideNotes(slide: SlideOptions, text: string): void {
+  if (slide.notes && typeof slide.notes === "object") {
+    if (text) slide.notes.text = text;
+    else delete slide.notes.text;
+  } else if (text) slide.notes = text;
+  else delete slide.notes;
+}
+
 const emu = (px: number): number => Math.round(px * EMU_PER_PX);
 
 /** A centered text-box shape for a slide of the given size — white fill and

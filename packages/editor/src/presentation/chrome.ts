@@ -97,6 +97,30 @@ export const presentationStyles = css`
     line-height: normal;
     white-space: pre-wrap;
   }
+  /* The speaker-notes pane (PowerPoint's notes window): centered under the
+     slide strip inside the same scroll area, so it follows the visible
+     slide. The textarea holds the plain-notes session. */
+  .notes-pane {
+    width: fit-content;
+    margin: 20px auto 40px;
+  }
+  .notes-pane textarea {
+    display: block;
+    width: 480px;
+    min-height: 96px;
+    box-sizing: border-box;
+    padding: 8px 12px;
+    background: var(--docen-color-bg, #fff);
+    border: 1px solid var(--docen-color-divider, #e1e1e1);
+    border-radius: 4px;
+    color: var(--docen-color-fg, #1b1b1b);
+    font: inherit;
+    resize: vertical;
+  }
+  .notes-pane textarea:focus {
+    border-color: transparent;
+    outline: 1.5px solid #2b7cd3;
+  }
 `;
 
 /** The element surface the template binds to — the ref targets only. The
@@ -105,6 +129,8 @@ interface PresentationTemplateRefs extends HTMLElement {
   thumbStrip?: HTMLElement;
   thumbSelection?: HTMLElement;
   gridlines?: HTMLElement;
+  notesPane?: HTMLElement;
+  notesEditor?: HTMLTextAreaElement;
 }
 
 export const presentationTemplate = html<PresentationTemplateRefs>`
@@ -121,6 +147,9 @@ export const presentationTemplate = html<PresentationTemplateRefs>`
       <div class="docen-canvas" part="page">
         <div class="stage"></div>
         <div class="gridlines" ${ref("gridlines")} hidden></div>
+      </div>
+      <div class="notes-pane" ${ref("notesPane")} hidden>
+        <textarea ${ref("notesEditor")} rows="4" spellcheck="false" aria-label="notes"></textarea>
       </div>
     </docen-document-area>
     <docen-status-bar slot="status" part="status"></docen-status-bar>

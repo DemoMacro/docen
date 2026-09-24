@@ -137,6 +137,8 @@ export const presentationEn: AdditionalLanguage = {
     "ppt.ribbon.cmd.zoom-in": "Zoom In",
     "ppt.ribbon.cmd.zoom-out": "Zoom Out",
     "ppt.ribbon.cmd.zoom-100": "Zoom to 100%",
+    // --- Notes pane ---
+    "ppt.notes.placeholder": "Click to add notes",
     // --- Status bar ---
     "ppt.status.slide-of": "Slide {page} of {total}",
   },
@@ -269,6 +271,8 @@ export const presentationZhCN: AdditionalLanguage = {
     "ppt.ribbon.cmd.zoom-in": "放大",
     "ppt.ribbon.cmd.zoom-out": "缩小",
     "ppt.ribbon.cmd.zoom-100": "缩放到 100%",
+    // --- 备注窗格 ---
+    "ppt.notes.placeholder": "单击此处添加备注",
     // --- 状态栏 ---
     "ppt.status.slide-of": "第 {page} 张，共 {total} 张",
   },
