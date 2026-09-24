@@ -121,6 +121,24 @@ export const presentationStyles = css`
     border-color: transparent;
     outline: 1.5px solid #2b7cd3;
   }
+  /* The presenting state: every chrome surface steps aside, the slide strip
+     fills the viewport on black, and the page gaps read as letterboxing. */
+  docen-workspace.presenting {
+    background: #000;
+  }
+  docen-workspace.presenting docen-title-bar,
+  docen-workspace.presenting docen-ribbon,
+  docen-workspace.presenting docen-status-bar,
+  docen-workspace.presenting .slides-panel,
+  docen-workspace.presenting .notes-pane {
+    display: none !important;
+  }
+  docen-workspace.presenting docen-document-area {
+    background: #000;
+  }
+  docen-workspace.presenting .docen-canvas {
+    margin: 0 auto;
+  }
 `;
 
 /** The element surface the template binds to — the ref targets only. The

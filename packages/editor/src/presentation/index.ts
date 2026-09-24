@@ -249,6 +249,8 @@ const WIRED_COMMANDS: ReadonlySet<string> = new Set([
   "effect-options",
   "apply-to-all",
   "hyperlink",
+  "from-beginning",
+  "from-current",
   ...TEXT_FORMAT_COMMANDS,
 ]);
 
@@ -288,6 +290,11 @@ class DocenPresentation extends AddinHost {
   /** The slide the notes textarea currently carries (the commit target —
    *  the viewport may move while the session is open). */
   #notesSlideIndex = 0;
+  /** The slideshow state: which slide is up and the zoom to restore. */
+  #presenting = false;
+  #showingSlide = 0;
+  #savedZoom = 100;
+  #showWheelAt = 0;
   #langObserver?: MutationObserver;
   #unsubLang?: () => void;
   #scrollRaf?: number;
@@ -333,6 +340,8 @@ class DocenPresentation extends AddinHost {
     root
       .querySelector("docen-link-dialog")
       ?.addEventListener("link:ok", this.#onLinkOk as EventListener);
+    document.addEventListener("fullscreenchange", this.#onFullscreenChange);
+    this.#area()?.addEventListener("wheel", this.#onShowWheel, { passive: false });
     this.#area()?.addEventListener("scroll", this.#onScroll);
     this.thumbStrip?.addEventListener("click", this.#onThumbClick);
     this.#stage.addEventListener("pointerdown", this.#onStagePointerDown);
@@ -389,6 +398,8 @@ class DocenPresentation extends AddinHost {
     this.shadowRoot
       ?.querySelector("docen-link-dialog")
       ?.removeEventListener("link:ok", this.#onLinkOk as EventListener);
+    document.removeEventListener("fullscreenchange", this.#onFullscreenChange);
+    this.#area()?.removeEventListener("wheel", this.#onShowWheel);
     this.#area()?.removeEventListener("scroll", this.#onScroll);
     this.thumbStrip?.removeEventListener("click", this.#onThumbClick);
     this.#stage.removeEventListener("pointerdown", this.#onStagePointerDown);
@@ -469,6 +480,10 @@ class DocenPresentation extends AddinHost {
 
   #statusBar(): HTMLElement | null {
     return this.shadowRoot?.querySelector<HTMLElement>("docen-status-bar") ?? null;
+  }
+
+  #workspaceEl(): HTMLElement | null {
+    return this.shadowRoot?.querySelector("docen-workspace") ?? null;
   }
 
   /** Stamp the header + ribbon markup for the active locale (re-run on lang
@@ -612,6 +627,8 @@ class DocenPresentation extends AddinHost {
       this.#setTransitionSpeed(event.detail.value);
     } else if (name === "apply-to-all") this.#applyTransitionToAll();
     else if (name === "hyperlink") this.#openLinkDialog();
+    else if (name === "from-beginning") this.#startShow("beginning");
+    else if (name === "from-current") this.#startShow("current");
     else if (TEXT_FORMAT_COMMANDS.has(name)) this.#applyTextFormat(name, event.detail?.value);
   };
 
@@ -1833,6 +1850,67 @@ class DocenPresentation extends AddinHost {
     restore(slides.map(() => after));
   }
 
+  // ── Slide show ───────────────────────────────────────────────────────────
+
+  /** Enter the presenting state: the chrome steps aside, the zoom fits one
+   *  slide to the viewport, and the browser goes fullscreen when allowed (a
+   *  denied request only means the window stays windowed). */
+  #startShow(from: "beginning" | "current"): void {
+    const pres = this.#pres;
+    if (!pres || this.#presenting) return;
+    this.#exitTextEditing(true);
+    this.#presenting = true;
+    this.#savedZoom = this.#zoom;
+    this.#workspaceEl()?.classList.add("presenting");
+    const area = this.#area();
+    if (area) {
+      const fit = Math.floor(((area.clientHeight - SLIDE_GAP_PX) / pres.heightPx) * 100);
+      this.#setZoom(Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, fit)));
+    }
+    this.#gotoShowSlide(from === "beginning" ? 0 : this.#activeSlideIndex());
+    void this.#workspaceEl()
+      ?.requestFullscreen?.()
+      .catch(() => {});
+  }
+
+  /** Leave the presenting state and restore the zoom and viewport. */
+  #endShow(): void {
+    if (!this.#presenting) return;
+    this.#presenting = false;
+    this.#workspaceEl()?.classList.remove("presenting");
+    if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
+    this.#setZoom(this.#savedZoom);
+    this.#revealSlide(this.#showingSlide);
+  }
+
+  /** Jump to a slide (clamped) with an instant scroll — the slideshow's own
+   *  paging has no smooth travel. */
+  #gotoShowSlide(index: number): void {
+    const pres = this.#pres;
+    const area = this.#area();
+    if (!pres || !area) return;
+    this.#showingSlide = Math.max(0, Math.min(pres.slides.length - 1, index));
+    const pitch = (pres.heightPx + SLIDE_GAP_PX) * (this.#zoom / 100);
+    area.scrollTo({ top: this.#showingSlide * pitch, behavior: "instant" as ScrollBehavior });
+    this.#syncSlideIndicator();
+  }
+
+  /** Wheel paging in the show, throttled — one notch is one slide. */
+  #onShowWheel = (event: WheelEvent): void => {
+    if (!this.#presenting) return;
+    event.preventDefault();
+    const now = performance.now();
+    if (now - this.#showWheelAt < 300) return;
+    this.#showWheelAt = now;
+    this.#gotoShowSlide(this.#showingSlide + (event.deltaY > 0 ? 1 : -1));
+  };
+
+  /** The browser's Escape leaves fullscreen ahead of us — fold the show up
+   *  with it instead of stranding a windowed show behind a stale state. */
+  readonly #onFullscreenChange = (): void => {
+    if (!document.fullscreenElement) this.#endShow();
+  };
+
   #pickPicture(): void {
     this.shadowRoot?.querySelector<HTMLInputElement>("#picture-input")?.click();
   }
@@ -2082,6 +2160,11 @@ class DocenPresentation extends AddinHost {
   }
 
   readonly #onStagePointerDown = (event: PointerEvent): void => {
+    // A click advances the show (PowerPoint's rule) — no gestures inside.
+    if (this.#presenting) {
+      if (event.button === 0) this.#gotoShowSlide(this.#showingSlide + 1);
+      return;
+    }
     const presJson = this.#presJson;
     if (!presJson || event.button !== 0) return;
     const point = this.#stagePointOf(event);
@@ -2150,6 +2233,25 @@ class DocenPresentation extends AddinHost {
   };
 
   readonly #onKeyDown = (event: KeyboardEvent): void => {
+    // The show owns the keyboard while presenting: arrow/space paging,
+    // Escape leaving. Everything else falls through.
+    if (this.#presenting) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        this.#endShow();
+      } else if (["ArrowRight", "ArrowDown", "PageDown", " "].includes(event.key)) {
+        event.preventDefault();
+        this.#gotoShowSlide(this.#showingSlide + 1);
+      } else if (["ArrowLeft", "ArrowUp", "PageUp"].includes(event.key)) {
+        event.preventDefault();
+        this.#gotoShowSlide(this.#showingSlide - 1);
+      } else if (event.key === "Home") {
+        this.#gotoShowSlide(0);
+      } else if (event.key === "End") {
+        this.#gotoShowSlide((this.#pres?.slides.length ?? 1) - 1);
+      }
+      return;
+    }
     // Inside the text edit the textarea owns every key: Enter/Delete type,
     // its Escape handler commits and leaves; undo is the browser's (the
     // textarea's own typing history).
