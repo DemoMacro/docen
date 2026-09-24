@@ -27,7 +27,7 @@ const splitBtn = (
   event: string,
   label: string,
   items: RibbonMenuItem[],
-  opts: { icon?: string; iconOnly?: boolean } = {},
+  opts: { icon?: string; size?: RibbonControlSize; iconOnly?: boolean } = {},
 ): RibbonSplit => ({ type: "split", event, label, items, ...opts });
 
 const group = (id: string, controls: readonly RibbonControlOrLayout[]): RibbonGroup => ({
@@ -153,6 +153,23 @@ const shapesGallery = (): RibbonControlOrLayout => ({
     })),
   ]),
 });
+
+/** The transitions gallery: the common effects plus none (clears the
+ *  slide's transition). Values are the TransitionType tokens. */
+const TRANSITIONS = [
+  "none",
+  "fade",
+  "push",
+  "wipe",
+  "split",
+  "blinds",
+  "checker",
+  "dissolve",
+  "circle",
+  "wheel",
+  "zoom",
+  "random",
+] as const;
 
 export function presentationRibbonTabs(): RibbonTab[] {
   return [
@@ -311,9 +328,24 @@ export function presentationRibbonTabs(): RibbonTab[] {
       label: "ppt.ribbon.tab.transitions",
       groups: [
         group("transition-to-slide", [
-          btn("transition", cmd("transition"), { icon: "transition", size: "large" }),
+          splitBtn(
+            "transition",
+            cmd("transition"),
+            TRANSITIONS.map((value) => ({
+              text: `ppt.ribbon.transition.${value}`,
+              value,
+            })),
+            { icon: "transition", size: "large" },
+          ),
           columnOf(
-            btn("effect-options", cmd("effect-options")),
+            splitBtn(
+              "effect-options",
+              cmd("effect-options"),
+              ["slow", "medium", "fast"].map((value) => ({
+                text: `ppt.ribbon.effectOptions.${value}`,
+                value,
+              })),
+            ),
             btn("apply-to-all", cmd("apply-to-all"), { icon: "repeat", iconOnly: true }),
           ),
         ]),

@@ -30,6 +30,8 @@ import {
   type SlideChild,
   type TableOptions,
   type TableCellOptions,
+  type TransitionOptions,
+  type TransitionType,
 } from "@docen/pptx";
 import { customElement, observable } from "@microsoft/fast-element";
 import type { DataType } from "@office-open/core";
@@ -240,6 +242,9 @@ const WIRED_COMMANDS: ReadonlySet<string> = new Set([
   "replace",
   "notes",
   "normal",
+  "transition",
+  "effect-options",
+  "apply-to-all",
   ...TEXT_FORMAT_COMMANDS,
 ]);
 
@@ -591,6 +596,10 @@ class DocenPresentation extends AddinHost {
     else if (name === "find" || name === "replace") this.#findDialog()?.show();
     else if (name === "notes") this.#toggleNotes();
     else if (name === "normal") this.#enterNormalView();
+    else if (name === "transition" && event.detail?.value) this.#setTransition(event.detail.value);
+    else if (name === "effect-options" && event.detail?.value) {
+      this.#setTransitionSpeed(event.detail.value);
+    } else if (name === "apply-to-all") this.#applyTransitionToAll();
     else if (TEXT_FORMAT_COMMANDS.has(name)) this.#applyTextFormat(name, event.detail?.value);
   };
 
@@ -1743,6 +1752,73 @@ class DocenPresentation extends AddinHost {
       },
     });
     this.#syncNotesPane(this.#notesSlideIndex);
+  }
+
+  // ── Transitions ──────────────────────────────────────────────────────────
+
+  /** The gallery's pick on the active slide: the effect token lands as the
+   *  slide's transition; none clears it (playback-only — nothing paints). */
+  #setTransition(value: string): void {
+    const host = this.#presJson?.slides?.[this.#activeSlideIndex()];
+    if (!host) return;
+    const before = host.transition;
+    const after: TransitionOptions = { type: value as TransitionType };
+    // Picking the live effect again records nothing.
+    if (typeof before === "object" ? before?.type === value : value === "none") return;
+    if (value === "none") delete host.transition;
+    else host.transition = structuredClone(after);
+    this.#pushEdit({
+      undo: () => {
+        if (before === undefined) delete host.transition;
+        else host.transition = structuredClone(before);
+      },
+      redo: () => {
+        host.transition = structuredClone(after);
+      },
+    });
+  }
+
+  /** Effect options' speed pick on the active slide's transition. A slide
+   *  without a live transition (or carrying a verbatim extension string)
+   *  has nothing to tune. */
+  #setTransitionSpeed(value: string): void {
+    const host = this.#presJson?.slides?.[this.#activeSlideIndex()];
+    const speed = value === "slow" || value === "fast" ? value : "medium";
+    if (!host || typeof host.transition !== "object") return;
+    const before = host.transition;
+    const after: TransitionOptions = { ...before, speed };
+    if (JSON.stringify(after) === JSON.stringify(before)) return;
+    host.transition = structuredClone(after);
+    this.#pushEdit({
+      undo: () => {
+        host.transition = structuredClone(before);
+      },
+      redo: () => {
+        host.transition = structuredClone(after);
+      },
+    });
+  }
+
+  /** Copy the active slide's transition onto every slide (PowerPoint's
+   *  Apply To All) as one reversible edit. */
+  #applyTransitionToAll(): void {
+    const presJson = this.#presJson;
+    const slides = presJson?.slides;
+    if (!slides) return;
+    const after = structuredClone(slides[this.#activeSlideIndex()]?.transition);
+    const before = slides.map((slide) => structuredClone(slide.transition));
+    const restore = (values: (TransitionOptions | string | undefined)[]): void => {
+      slides.forEach((slide, i) => {
+        const value = values[i];
+        if (value === undefined) delete slide.transition;
+        else slide.transition = value;
+      });
+    };
+    this.#pushEdit({
+      undo: () => restore(before),
+      redo: () => restore(slides.map(() => structuredClone(after))),
+    });
+    restore(slides.map(() => after));
   }
 
   #pickPicture(): void {
