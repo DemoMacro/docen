@@ -33,7 +33,7 @@ import {
 } from "@docen/pptx";
 import { customElement, observable } from "@microsoft/fast-element";
 import type { DataType } from "@office-open/core";
-import type { ShapeType } from "@office-open/core/drawing";
+import type { ShapeType, TextRunOptions } from "@office-open/core/drawing";
 import { App, type IGroup } from "leafer-ui";
 
 import { renderRibbonFromSchema } from "../document/ribbon";
@@ -54,6 +54,7 @@ import {
   bodyParagraphsOf,
   cellParagraphsOf,
   cellTextOf,
+  childRunsOf,
   deleteSlideAt,
   duplicateSlideAt,
   firstCellRunSizeOf,
@@ -181,6 +182,15 @@ interface DeckEdit {
   redo(): void;
 }
 
+/** One findable occurrence: the run carrying it, where it sits in the run's
+ *  text, and the slide/child the reveal selects. */
+interface FindHit {
+  slide: number;
+  child: number;
+  run: TextRunOptions;
+  start: number;
+}
+
 /** The projected table member's payload as the editor reads it (the layout
  *  type carries `table` as unknown; this is the pptx projection's shape —
  *  see tableMember in @docen/pptx). */
@@ -224,6 +234,8 @@ const WIRED_COMMANDS: ReadonlySet<string> = new Set([
   "bring-front",
   "send-back",
   "gridlines",
+  "find",
+  "replace",
   ...TEXT_FORMAT_COMMANDS,
 ]);
 
@@ -254,6 +266,12 @@ class DocenPresentation extends AddinHost {
   #gridlines = false;
   #edits: DeckEdit[] = [];
   #editIndex = -1;
+  /** The find session: the query the hit list was scanned for and the cursor
+   *  in it — the dialog-level highlight PowerPoint's find keeps. */
+  #findQuery = "";
+  #findCase = false;
+  #findHits: FindHit[] = [];
+  #findAt = -1;
   #langObserver?: MutationObserver;
   #unsubLang?: () => void;
   #scrollRaf?: number;
@@ -290,6 +308,9 @@ class DocenPresentation extends AddinHost {
     root
       .querySelector<HTMLInputElement>("#picture-input")
       ?.addEventListener("change", this.#onPictureChange as EventListener);
+    root
+      .querySelector("docen-find-replace-dialog")
+      ?.addEventListener("find-replace:action", this.#onFindReplace as EventListener);
     this.#area()?.addEventListener("scroll", this.#onScroll);
     this.thumbStrip?.addEventListener("click", this.#onThumbClick);
     this.#stage.addEventListener("pointerdown", this.#onStagePointerDown);
@@ -340,6 +361,9 @@ class DocenPresentation extends AddinHost {
     this.shadowRoot
       ?.querySelector<HTMLInputElement>("#picture-input")
       ?.removeEventListener("change", this.#onPictureChange as EventListener);
+    this.shadowRoot
+      ?.querySelector("docen-find-replace-dialog")
+      ?.removeEventListener("find-replace:action", this.#onFindReplace as EventListener);
     this.#area()?.removeEventListener("scroll", this.#onScroll);
     this.thumbStrip?.removeEventListener("click", this.#onThumbClick);
     this.#stage.removeEventListener("pointerdown", this.#onStagePointerDown);
@@ -543,6 +567,7 @@ class DocenPresentation extends AddinHost {
     else if (name === "bring-front") this.#reorderSelected("front");
     else if (name === "send-back") this.#reorderSelected("back");
     else if (name === "gridlines") this.#toggleGridlines();
+    else if (name === "find" || name === "replace") this.#findDialog()?.show();
     else if (TEXT_FORMAT_COMMANDS.has(name)) this.#applyTextFormat(name, event.detail?.value);
   };
 
@@ -1483,6 +1508,150 @@ class DocenPresentation extends AddinHost {
     });
     this.#reproject();
     this.#applyZoom();
+  }
+
+  // ── Find and replace ─────────────────────────────────────────────────────
+
+  #findDialog(): (Element & { show(): void }) | null {
+    return this.shadowRoot?.querySelector("docen-find-replace-dialog") ?? null;
+  }
+
+  /** Every occurrence of the query in the deck's live text — shapes' text
+   *  bodies and table cells (the two writable text homes). Matching stays
+   *  within one run; a stretch split across runs is a later batch. */
+  #scanFind(query: string, caseSensitive: boolean): FindHit[] {
+    const needle = caseSensitive ? query : query.toLowerCase();
+    const hits: FindHit[] = [];
+    if (!needle) return hits;
+    this.#presJson?.slides?.forEach((slide, slideIndex) => {
+      (slide.children ?? []).forEach((child, childIndex) => {
+        for (const run of childRunsOf(child)) {
+          const text = run.text ?? "";
+          const hay = caseSensitive ? text : text.toLowerCase();
+          for (
+            let at = hay.indexOf(needle);
+            at >= 0;
+            at = hay.indexOf(needle, at + needle.length)
+          ) {
+            hits.push({ slide: slideIndex, child: childIndex, run, start: at });
+          }
+        }
+      });
+    });
+    return hits;
+  }
+
+  readonly #onFindReplace = (event: Event): void => {
+    const detail = (event as CustomEvent).detail as {
+      action?: string;
+      find?: string;
+      replace?: string;
+      caseSensitive?: boolean;
+    };
+    const query = detail.find ?? "";
+    const replacement = detail.replace ?? "";
+    const caseSensitive = detail.caseSensitive === true;
+    if (detail.action === "find-next") this.#findNext(query, caseSensitive);
+    else if (detail.action === "replace-next") this.#replaceNext(query, replacement, caseSensitive);
+    else if (detail.action === "replace-all") this.#replaceAll(query, replacement, caseSensitive);
+  };
+
+  /** Advance to the next occurrence (wrapping), rescanning when the query or
+   *  the case option moved off the cached scan; select the carrying object
+   *  and bring its slide into view. */
+  #findNext(query: string, caseSensitive: boolean): void {
+    if (query !== this.#findQuery || caseSensitive !== this.#findCase) {
+      this.#findQuery = query;
+      this.#findCase = caseSensitive;
+      this.#findHits = this.#scanFind(query, caseSensitive);
+      this.#findAt = -1;
+    }
+    if (this.#findHits.length === 0) return;
+    this.#findAt = (this.#findAt + 1) % this.#findHits.length;
+    this.#revealHit(this.#findHits[this.#findAt]!);
+  }
+
+  /** Replace the highlighted occurrence and land the cursor on the next one;
+   *  with no live highlight — or one an edit has moved — the first match is
+   *  the one replaced. */
+  #replaceNext(query: string, replacement: string, caseSensitive: boolean): void {
+    this.#findQuery = query;
+    this.#findCase = caseSensitive;
+    this.#findHits = this.#scanFind(query, caseSensitive);
+    if (this.#findHits.length === 0) {
+      this.#findAt = -1;
+      return;
+    }
+    // A cached cursor only counts when its stretch still matches (the deck
+    // may have been edited since the scan).
+    const needle = caseSensitive ? query : query.toLowerCase();
+    const live = this.#findHits[this.#findAt];
+    const text = live?.run.text ?? "";
+    const hay = caseSensitive ? text : text.toLowerCase();
+    if (!live || hay.slice(live.start, live.start + needle.length) !== needle) this.#findAt = 0;
+    const hit = this.#findHits[Math.min(this.#findAt, this.#findHits.length - 1)]!;
+    const anchor = { slide: hit.slide, child: hit.child };
+    this.#replaceHits([hit], query, replacement);
+    this.#findHits = this.#scanFind(query, caseSensitive);
+    // The cursor continues after the replacement — a query contained in its
+    // own replacement must not re-catch the stretch just written.
+    this.#seekFind(anchor, { run: hit.run, until: hit.start + replacement.length });
+  }
+
+  /** Replace every occurrence in one undo step. */
+  #replaceAll(query: string, replacement: string, caseSensitive: boolean): void {
+    const hits = this.#scanFind(query, caseSensitive);
+    if (hits.length === 0) return;
+    this.#findQuery = query;
+    this.#findCase = caseSensitive;
+    this.#replaceHits(hits, query, replacement);
+    this.#findHits = [];
+    this.#findAt = -1;
+  }
+
+  /** Write the replacement at each hit (back-to-front, so later starts in the
+   *  same run stay valid) as one reversible edit and repaint the touched
+   *  slides. Only the touched runs are snapshotted — the deck holds media. */
+  #replaceHits(hits: FindHit[], query: string, replacement: string): void {
+    const touched = new Map<TextRunOptions, { before: string; after: string }>();
+    for (const hit of [...hits].reverse()) {
+      const text = hit.run.text ?? "";
+      hit.run.text = text.slice(0, hit.start) + replacement + text.slice(hit.start + query.length);
+      // The first touch of a run records its original text; later touches in
+      // the same run only refresh the result.
+      touched.set(hit.run, { before: touched.get(hit.run)?.before ?? text, after: hit.run.text });
+    }
+    const slides = new Set(hits.map((hit) => hit.slide));
+    const edits = [...touched];
+    const apply = (side: "before" | "after"): void => {
+      for (const [run, touch] of edits) run.text = touch[side];
+      for (const slide of slides) this.#reproject(slide);
+    };
+    this.#pushEdit({ undo: () => apply("before"), redo: () => apply("after") });
+    apply("after");
+  }
+
+  /** Put the cursor on the first hit at or after the anchor child (wrapping
+   *  to the list's head) and reveal it. `except` drops one run's stretch —
+   *  the replacement a replace-next just wrote. */
+  #seekFind(
+    anchor: { slide: number; child: number },
+    except?: { run: TextRunOptions; until: number },
+  ): void {
+    this.#findAt = this.#findHits.findIndex((hit) => {
+      if (hit.slide < anchor.slide) return false;
+      if (hit.slide === anchor.slide && hit.child < anchor.child) return false;
+      if (except && hit.run === except.run && hit.start < except.until) return false;
+      return true;
+    });
+    if (this.#findAt < 0) this.#findAt = this.#findHits.length - 1;
+    const hit = this.#findHits[this.#findAt];
+    if (hit) this.#revealHit(hit);
+  }
+
+  #revealHit(hit: FindHit): void {
+    this.#select({ slide: hit.slide, child: hit.child });
+    this.#revealSlide(hit.slide);
   }
 
   /** Toggle the drawing gridlines — a pure view state, no undo step. */

@@ -57,10 +57,28 @@ function runsOf(paragraph: ParagraphDescriptorOptions): TextRunOptions[] {
   );
 }
 
-function runsIn(paragraphs: ParagraphDescriptorOptions[]): TextRunOptions[] {
+/** Every real text run of the paragraphs, in order (the find engine walks
+ *  these; the formatting commands format through the same walk). */
+export function runsIn(paragraphs: ParagraphDescriptorOptions[]): TextRunOptions[] {
   const runs: TextRunOptions[] = [];
   for (const paragraph of paragraphsOf(paragraphs)) runs.push(...runsOf(paragraph));
   return runs;
+}
+
+/** Every real text run of a slide child — a shape's text body, or the cells
+ *  of its table. Other child kinds carry no text. */
+export function childRunsOf(child: SlideChild): TextRunOptions[] {
+  if ("shape" in child) {
+    return child.shape.textBody ? runsIn(bodyParagraphsOf(child.shape.textBody)) : [];
+  }
+  if ("table" in child) {
+    const runs: TextRunOptions[] = [];
+    for (const row of child.table.rows ?? []) {
+      for (const cell of row.cells ?? []) runs.push(...runsIn(cellParagraphsOf(cell)));
+    }
+    return runs;
+  }
+  return [];
 }
 
 /** The cell's paragraphs as real objects, consuming the cell's text sugar. */
