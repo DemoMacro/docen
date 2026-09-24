@@ -9,6 +9,7 @@ import type { PresentationOptions, SlideChild, SlideOptions, TableCellOptions } 
 // Text/paragraph types come from @office-open/core/drawing — @docen/pptx's
 // re-export surface doesn't carry them yet.
 import type {
+  BulletOptions,
   ParagraphDescriptorOptions,
   StrikeStyle,
   TextAlignment,
@@ -106,6 +107,46 @@ export function toggleRunStyle(
 
 export function setRunFont(paragraphs: ParagraphDescriptorOptions[], font: string): void {
   for (const run of runsIn(paragraphs)) run.font = font;
+}
+
+/** The paragraph's live bullet (a real glyph or numbering — buNone and the
+ *  absent default are both "off"). */
+const liveBulletOf = (paragraph: ParagraphDescriptorOptions): boolean => {
+  const bullet = paragraph.properties?.bullet;
+  return bullet != null && bullet.type !== "none";
+};
+
+/** PowerPoint's list toggles: every paragraph carrying a live bullet clears,
+ *  otherwise the default lands — the run-flag toggle at paragraph grain. */
+function toggleBulletKind(paragraphs: ParagraphDescriptorOptions[], on: BulletOptions): void {
+  const targets = paragraphsOf(paragraphs);
+  if (targets.length === 0) return;
+  const applied = targets.every(liveBulletOf);
+  for (const paragraph of targets) {
+    if (applied) delete paragraph.properties?.bullet;
+    else paragraph.properties = { ...paragraph.properties, bullet: { ...on } };
+  }
+}
+
+/** The Bullets button: the default round bullet (a:buChar, glyph rendered by
+ *  the projection's default). */
+export function toggleBullet(paragraphs: ParagraphDescriptorOptions[]): void {
+  toggleBulletKind(paragraphs, { type: "char" });
+}
+
+/** The Numbering button: the default arabic-with-period autonumber scheme. */
+export function toggleNumbering(paragraphs: ParagraphDescriptorOptions[]): void {
+  toggleBulletKind(paragraphs, { type: "autoNum" });
+}
+
+/** Line spacing as a percentage over every paragraph (100 = single). */
+export function setLineSpacingPercent(
+  paragraphs: ParagraphDescriptorOptions[],
+  percent: number,
+): void {
+  for (const paragraph of paragraphsOf(paragraphs)) {
+    paragraph.properties = { ...paragraph.properties, lineSpacingPercent: percent };
+  }
 }
 
 /** Run font size in points (the JSON's own unit). */

@@ -1,7 +1,9 @@
+import { EMU_PER_PX } from "@docen/layout";
 import type { PresentationOptions, SlideChild } from "@office-open/pptx";
 import { describe, expect, it } from "vitest";
 
 import { projectPresentation } from "./scene";
+import { textBlocks } from "./scene/text";
 import { memberAt, memberByPath } from "./scene/walk";
 
 const project = (pres: PresentationOptions) => projectPresentation(pres);
@@ -362,5 +364,60 @@ describe("pictures and background", () => {
       slides: [{ background: { fill: { type: "solid", color: "0B57D0" } } }],
     });
     expect(slides[0]!.background).toBe("0B57D0");
+  });
+});
+
+describe("text bullet projection", () => {
+  const bodyOf = (paragraphs: unknown[]) => ({ paragraphs }) as never;
+
+  it("prepends a synthetic bullet glyph with PowerPoint's hanging indent", () => {
+    const blocks = textBlocks(
+      bodyOf([{ properties: { bullet: { type: "char" } }, children: ["first"] }]),
+    );
+    const marker = blocks[0]!.inline[0]! as { text: string; synthetic?: boolean };
+    const hop = blocks[0]!.inline[1]! as { kind: string };
+    expect(marker).toMatchObject({ text: "•", synthetic: true });
+    expect(hop).toMatchObject({ kind: "tab" });
+    expect(blocks[0]!.indent).toEqual({
+      leftPx: 342900 / EMU_PER_PX,
+      firstLinePx: -342900 / EMU_PER_PX,
+    });
+  });
+
+  it("numbers consecutive autoNum paragraphs and restarts after plain text", () => {
+    const blocks = textBlocks(
+      bodyOf([
+        { properties: { bullet: { type: "autoNum" } }, children: ["a"] },
+        { properties: { bullet: { type: "autoNum", format: "alphaLcPeriod" } }, children: ["b"] },
+        { children: ["plain"] },
+        { properties: { bullet: { type: "autoNum" } }, children: ["c"] },
+      ]),
+    );
+    const textOf = (block: (typeof blocks)[number]) => (block.inline[0] as { text?: string }).text;
+    expect(textOf(blocks[0]!)).toBe("1.");
+    expect(textOf(blocks[1]!)).toBe("a.");
+    // The plain paragraph broke the series — the next list restarts at one.
+    expect(textOf(blocks[3]!)).toBe("1.");
+  });
+
+  it("lands indentLevel on a deeper marL", () => {
+    const blocks = textBlocks(
+      bodyOf([{ properties: { bullet: { type: "char" }, indentLevel: 1 }, children: ["x"] }]),
+    );
+    expect(blocks[0]!.indent).toEqual({
+      leftPx: (342900 + 457200) / EMU_PER_PX,
+      firstLinePx: -(342900 + 457200) / EMU_PER_PX,
+    });
+  });
+
+  it("projects line spacing as an exact or multiple line height", () => {
+    const blocks = textBlocks(
+      bodyOf([
+        { properties: { lineSpacingPercent: 150 }, children: ["a"] },
+        { properties: { lineSpacingPoints: 24 }, children: ["b"] },
+      ]),
+    );
+    expect(blocks[0]!.spacing?.lineHeight).toEqual({ rule: "multiple", factor: 1.5 });
+    expect(blocks[1]!.spacing?.lineHeight).toEqual({ rule: "exact", px: 32 });
   });
 });

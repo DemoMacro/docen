@@ -60,10 +60,13 @@ import {
   makePicture,
   makeTextBox,
   reorderChild,
+  setLineSpacingPercent,
   setParagraphAlignment,
   setRunFont,
   setRunSize,
   shapeTextOf,
+  toggleBullet,
+  toggleNumbering,
   toggleRunFlag,
   toggleRunStyle,
   writeCellText,
@@ -99,7 +102,8 @@ const GRID_PITCH_PX = 48;
 const EDIT_LIMIT = 50;
 
 /** Text/paragraph commands over the selected shape (font/size carry the
- *  combobox value through detail.value). */
+ *  combobox value through detail.value; line-spacing's menu items carry
+ *  "1.0"-style multipliers). */
 const TEXT_FORMAT_COMMANDS: ReadonlySet<string> = new Set([
   "bold",
   "italic",
@@ -111,6 +115,18 @@ const TEXT_FORMAT_COMMANDS: ReadonlySet<string> = new Set([
   "align-center",
   "align-right",
   "justify",
+  "list",
+  "numbering",
+  "line-spacing",
+]);
+
+/** Line-spacing menu multiplier → the lineSpacingPercent the JSON carries. */
+const LINE_SPACING_OF: ReadonlyMap<string, number> = new Map([
+  ["1.0", 100],
+  ["1.5", 150],
+  ["2.0", 200],
+  ["2.5", 250],
+  ["3.0", 300],
 ]);
 
 /** Ribbon alignment command → TextAlignment value. */
@@ -659,8 +675,9 @@ class DocenPresentation extends AddinHost {
     let node = child;
     for (const i of path ?? []) {
       if (!("group" in node)) return undefined;
-      node = node.group.children?.[i]!;
-      if (!node) return undefined;
+      const next = node.group.children?.[i];
+      if (!next) return undefined;
+      node = next;
     }
     return node;
   }
@@ -1474,6 +1491,12 @@ class DocenPresentation extends AddinHost {
       default: {
         const alignment = ALIGNMENTS.get(name);
         if (alignment) setParagraphAlignment(paragraphs, alignment);
+        else if (name === "list") toggleBullet(paragraphs);
+        else if (name === "numbering") toggleNumbering(paragraphs);
+        else if (name === "line-spacing") {
+          const percent = LINE_SPACING_OF.get(value ?? "");
+          if (percent != null) setLineSpacingPercent(paragraphs, percent);
+        }
       }
     }
     if (JSON.stringify(target) === JSON.stringify(before)) return;

@@ -10,6 +10,8 @@ import type {
   RibbonControlOrLayout,
   RibbonControlSize,
   RibbonGroup,
+  RibbonMenuItem,
+  RibbonSplit,
   RibbonTab,
 } from "../ui";
 
@@ -20,6 +22,13 @@ const btn = (
   label: string,
   opts: { icon?: string; size?: RibbonControlSize; iconOnly?: boolean } = {},
 ): RibbonButton => ({ type: "button", event, label, ...opts });
+
+const splitBtn = (
+  event: string,
+  label: string,
+  items: RibbonMenuItem[],
+  opts: { icon?: string; iconOnly?: boolean } = {},
+): RibbonSplit => ({ type: "split", event, label, items, ...opts });
 
 const group = (id: string, controls: readonly RibbonControlOrLayout[]): RibbonGroup => ({
   id,
@@ -81,7 +90,15 @@ export function presentationRibbonTabs(): RibbonTab[] {
               btn("italic", cmd("italic"), { icon: "italic", iconOnly: true }),
               btn("underline", cmd("underline"), { icon: "underline", iconOnly: true }),
               btn("strike", cmd("strike"), { icon: "strike", iconOnly: true }),
-              btn("line-spacing", cmd("line-spacing"), { icon: "line-spacing", iconOnly: true }),
+              splitBtn(
+                "line-spacing",
+                cmd("line-spacing"),
+                ["1.0", "1.5", "2.0", "2.5", "3.0"].map((value) => ({
+                  text: `ppt.ribbon.lineSpacing.${value}`,
+                  value,
+                })),
+                { icon: "line-spacing", iconOnly: true },
+              ),
             ),
           ),
         ]),

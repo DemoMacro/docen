@@ -13,10 +13,13 @@ import {
   makePicture,
   makeTextBox,
   reorderChild,
+  setLineSpacingPercent,
   setParagraphAlignment,
   setRunFont,
   setRunSize,
   shapeTextOf,
+  toggleBullet,
+  toggleNumbering,
   toggleRunFlag,
   toggleRunStyle,
   writeCellText,
@@ -32,7 +35,15 @@ type Run = {
   font?: string;
   size?: number;
 };
-type Para = { properties?: { alignment?: string; level?: number }; children?: (Run | string)[] };
+type Para = {
+  properties?: {
+    alignment?: string;
+    level?: number;
+    bullet?: { type: string; char?: string };
+    lineSpacingPercent?: number;
+  };
+  children?: (Run | string)[];
+};
 const paras = (paragraphs: Para[]): ParagraphDescriptorOptions[] =>
   paragraphs as unknown as ParagraphDescriptorOptions[];
 
@@ -47,6 +58,49 @@ const cellOf = (children: unknown[]): TableCellOptions =>
 
 type ShapeVariant = Extract<SlideChild, { shape: unknown }>["shape"];
 type PictureVariant = Extract<SlideChild, { picture: unknown }>["picture"];
+
+describe("toggleBullet / toggleNumbering", () => {
+  it("applies the default bullet to every paragraph", () => {
+    const paragraphs = paras([{ children: ["a"] }, { children: ["b"] }]);
+    toggleBullet(paragraphs);
+    expect(paragraphs.map((p) => p.properties?.bullet)).toEqual([
+      { type: "char" },
+      { type: "char" },
+    ]);
+  });
+
+  it("clears the bullet when every paragraph carries one", () => {
+    const paragraphs = paras([
+      { properties: { bullet: { type: "char", char: "•" } }, children: ["a"] },
+      { properties: { bullet: { type: "autoNum" } }, children: ["b"] },
+    ]);
+    toggleBullet(paragraphs);
+    expect(paragraphs.map((p) => p.properties?.bullet)).toEqual([undefined, undefined]);
+  });
+
+  it("counts buNone as off and applies over it", () => {
+    const paragraphs = paras([{ properties: { bullet: { type: "none" } }, children: ["a"] }]);
+    toggleNumbering(paragraphs);
+    expect(paragraphs[0]!.properties!.bullet).toEqual({ type: "autoNum" });
+  });
+
+  it("applies numbering onto a mixed selection", () => {
+    const paragraphs = paras([
+      { children: ["a"] },
+      { properties: { bullet: { type: "char" } }, children: ["b"] },
+    ]);
+    toggleNumbering(paragraphs);
+    expect(paragraphs.map((p) => p.properties?.bullet?.type)).toEqual(["autoNum", "autoNum"]);
+  });
+});
+
+describe("setLineSpacingPercent", () => {
+  it("stamps the percentage over every paragraph", () => {
+    const paragraphs = paras([{ children: ["a"] }, { children: ["b"] }]);
+    setLineSpacingPercent(paragraphs, 150);
+    expect(paragraphs.map((p) => p.properties?.lineSpacingPercent)).toEqual([150, 150]);
+  });
+});
 
 describe("toggleRunFlag", () => {
   it("applies the flag to every run", () => {
