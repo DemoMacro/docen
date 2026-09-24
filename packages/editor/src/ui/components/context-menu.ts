@@ -1,8 +1,14 @@
 import { appendMenuItems } from "./ribbon/command-helpers";
 import type { RibbonMenuItem } from "./ribbon/ribbon-menu";
 
-const template = document.createElement("template");
-template.innerHTML = `
+// Lazily built on first connect — a module-load grab would throw in any
+// DOM-less import (node specs, SSR) instead of waiting for a real document.
+let template: HTMLTemplateElement | null = null;
+
+const menuTemplate = (): HTMLTemplateElement => {
+  if (!template) {
+    template = document.createElement("template");
+    template.innerHTML = `
   <style>
     :host { display: flex; flex-direction: column; }
     /* The trigger wraps the slotted workspace and fills the host so it stays a
@@ -13,6 +19,9 @@ template.innerHTML = `
     <div part="trigger" slot="trigger"><slot></slot></div>
     <fluent-menu-list focusgroup="menu" part="list"></fluent-menu-list>
   </fluent-menu>`;
+  }
+  return template;
+};
 
 /**
  * `<docen-context-menu items='[{...}]'>…editor content…</docen-context-menu>` —
@@ -43,7 +52,7 @@ class DocenContextMenu extends HTMLElement {
 
   connectedCallback(): void {
     if (!this.shadowRoot) {
-      this.attachShadow({ mode: "open" }).append(template.content.cloneNode(true));
+      this.attachShadow({ mode: "open" }).append(menuTemplate().content.cloneNode(true));
     }
     this.#menu = this.shadowRoot!.querySelector("fluent-menu")!;
     this.#list = this.shadowRoot!.querySelector("fluent-menu-list")!;
