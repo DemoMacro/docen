@@ -11,6 +11,7 @@ import type { PresentationOptions, SlideChild, SlideOptions, TableCellOptions } 
 import type {
   BulletOptions,
   ParagraphDescriptorOptions,
+  ShapeType,
   StrikeStyle,
   TextAlignment,
   TextBodyOptions,
@@ -294,6 +295,28 @@ export function makeTextBox(slideWidthPx: number, slideHeightPx: number): SlideC
       width: emu(width),
       height: emu(height),
       properties: { geometry: "rect", fill: "FFFFFF", outline: { width: "1pt", color: "808080" } },
+      textBody: { text: "" },
+    },
+  };
+}
+
+/** PowerPoint's fresh 2"-square preset shape, centered, in the same white +
+ *  hairline dressing as the text box (an empty text body keeps double-click
+ *  text editing available). */
+export function makeShape(
+  slideWidthPx: number,
+  slideHeightPx: number,
+  geometry: ShapeType,
+): SlideChild {
+  const width = Math.min(192, slideWidthPx * 0.25);
+  const height = Math.min(192, slideHeightPx * 0.25);
+  return {
+    shape: {
+      x: emu((slideWidthPx - width) / 2),
+      y: emu((slideHeightPx - height) / 2),
+      width: emu(width),
+      height: emu(height),
+      properties: { geometry, fill: "FFFFFF", outline: { width: "1pt", color: "808080" } },
       textBody: { text: "" },
     },
   };

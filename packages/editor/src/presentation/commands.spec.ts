@@ -11,6 +11,7 @@ import {
   firstRunSizeOf,
   insertSlideAt,
   makePicture,
+  makeShape,
   makeTable,
   makeTextBox,
   reorderChild,
@@ -400,5 +401,15 @@ describe("makeTable", () => {
     expect(table.rows).toHaveLength(3);
     expect(table.rows[0]!.cells).toHaveLength(3);
     expect(table.x).toBe(Math.round(((1280 - 768) / 2) * EMU_PER_PX));
+  });
+});
+
+describe("makeShape", () => {
+  it('centers a fresh 2" shape carrying the preset geometry', () => {
+    const { shape } = makeShape(1280, 720, "star5") as { shape: ShapeVariant };
+    expect(shape.width).toBe(Math.round(192 * EMU_PER_PX));
+    expect(shape.x).toBe(Math.round(((1280 - 192) / 2) * EMU_PER_PX));
+    expect(shape.properties).toMatchObject({ geometry: "star5", fill: "FFFFFF" });
+    expect(shape.textBody).toBeDefined();
   });
 });

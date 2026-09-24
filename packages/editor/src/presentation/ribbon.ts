@@ -48,6 +48,112 @@ const rowOf = (...controls: readonly RibbonControlOrLayout[]): RibbonControlOrLa
   controls,
 });
 
+/** The Shapes gallery, grouped the way PowerPoint's drop-down is. Items carry
+ *  the prstGeom token as their value; the host inserts a fresh 2" shape of
+ *  that geometry. */
+const SHAPE_GROUPS: readonly { header: string; shapes: readonly string[] }[] = [
+  {
+    header: "Rectangles",
+    shapes: ["rect", "roundRect", "snip1Rect", "snip2SameRect", "snip2DiagRect", "round1Rect"],
+  },
+  {
+    header: "Basic Shapes",
+    shapes: [
+      "triangle",
+      "rtTriangle",
+      "ellipse",
+      "diamond",
+      "parallelogram",
+      "trapezoid",
+      "pentagon",
+      "hexagon",
+      "heptagon",
+      "octagon",
+      "decagon",
+      "dodecagon",
+      "pie",
+      "chord",
+      "teardrop",
+      "smileyFace",
+      "sun",
+      "moon",
+      "cloud",
+      "heart",
+      "lightningBolt",
+      "arc",
+      "donut",
+      "noSmoking",
+      "blockArc",
+      "plus",
+      "plaque",
+    ],
+  },
+  {
+    header: "Block Arrows",
+    shapes: [
+      "rightArrow",
+      "leftArrow",
+      "upArrow",
+      "downArrow",
+      "leftRightArrow",
+      "upDownArrow",
+      "quadArrow",
+      "bentArrow",
+      "uturnArrow",
+      "circularArrow",
+    ],
+  },
+  {
+    header: "Stars and Banners",
+    shapes: [
+      "star4",
+      "star5",
+      "star6",
+      "star8",
+      "star10",
+      "star12",
+      "star16",
+      "star24",
+      "star32",
+      "irregularSeal1",
+      "irregularSeal2",
+      "ribbon",
+      "ribbon2",
+    ],
+  },
+  {
+    header: "Callouts",
+    shapes: [
+      "wedgeRectCallout",
+      "wedgeRoundRectCallout",
+      "wedgeEllipseCallout",
+      "cloudCallout",
+      "borderCallout1",
+      "borderCallout2",
+    ],
+  },
+  {
+    header: "Flowchart",
+    shapes: ["flowChartProcess", "flowChartDecision", "flowChartTerminator", "flowChartConnector"],
+  },
+];
+
+const shapesGallery = (): RibbonControlOrLayout => ({
+  type: "gallery",
+  event: "shapes",
+  label: cmd("shapes"),
+  icon: "shapes",
+  size: "large",
+  visibleCount: 8,
+  items: SHAPE_GROUPS.flatMap(({ header, shapes }) => [
+    { text: header, header: true },
+    ...shapes.map((token) => ({
+      text: token.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/^./, (c) => c.toUpperCase()),
+      value: token,
+    })),
+  ]),
+});
+
 export function presentationRibbonTabs(): RibbonTab[] {
   return [
     {
@@ -117,7 +223,7 @@ export function presentationRibbonTabs(): RibbonTab[] {
           ),
         ]),
         group("drawing", [
-          btn("shapes", cmd("shapes"), { icon: "shapes", size: "large" }),
+          shapesGallery(),
           columnOf(
             btn("bring-front", cmd("bring-front"), { icon: "bring-front", iconOnly: true }),
             btn("send-back", cmd("send-back"), { icon: "send-back", iconOnly: true }),
@@ -146,7 +252,7 @@ export function presentationRibbonTabs(): RibbonTab[] {
           btn("online-picture", cmd("online-picture"), { icon: "online-picture", size: "large" }),
         ]),
         group("illustrations", [
-          btn("shapes", cmd("shapes"), { icon: "shapes", size: "large" }),
+          shapesGallery(),
           btn("smartart", cmd("smartart"), { icon: "smartart", size: "large" }),
           btn("chart", cmd("chart"), { icon: "chart", size: "large" }),
           btn("3d-model", cmd("3d-model"), { icon: "3d-model", size: "large" }),

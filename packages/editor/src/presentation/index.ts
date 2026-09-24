@@ -32,6 +32,7 @@ import {
 } from "@docen/pptx";
 import { customElement, observable } from "@microsoft/fast-element";
 import type { DataType } from "@office-open/core";
+import type { ShapeType } from "@office-open/core/drawing";
 import { App, type IGroup } from "leafer-ui";
 
 import { renderRibbonFromSchema } from "../document/ribbon";
@@ -58,6 +59,7 @@ import {
   firstRunSizeOf,
   insertSlideAt,
   makePicture,
+  makeShape,
   makeTable,
   makeTextBox,
   reorderChild,
@@ -215,6 +217,7 @@ const WIRED_COMMANDS: ReadonlySet<string> = new Set([
   "text-box",
   "insert-picture",
   "insert-table",
+  "shapes",
   "bring-front",
   "send-back",
   "gridlines",
@@ -530,6 +533,7 @@ class DocenPresentation extends AddinHost {
     else if (name === "duplicate-slide") this.#duplicateSlide();
     else if (name === "text-box") this.#insertTextBox();
     else if (name === "insert-table") this.#insertTable();
+    else if (name === "shapes" && event.detail?.value) this.#insertShape(event.detail.value);
     else if (name === "insert-picture") this.#pickPicture();
     else if (name === "bring-front") this.#reorderSelected("front");
     else if (name === "send-back") this.#reorderSelected("back");
@@ -1416,6 +1420,13 @@ class DocenPresentation extends AddinHost {
     const pres = this.#pres;
     if (!pres) return;
     this.#insertChild(makeTable(pres.widthPx, pres.heightPx));
+  }
+
+  /** The Shapes gallery's pick: the value is the prstGeom token. */
+  #insertShape(geometry: string): void {
+    const pres = this.#pres;
+    if (!pres) return;
+    this.#insertChild(makeShape(pres.widthPx, pres.heightPx, geometry as ShapeType));
   }
 
   /** Toggle the drawing gridlines — a pure view state, no undo step. */
