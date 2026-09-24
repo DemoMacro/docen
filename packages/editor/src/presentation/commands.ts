@@ -10,6 +10,7 @@ import type { PresentationOptions, SlideChild, SlideOptions, TableCellOptions } 
 // re-export surface doesn't carry them yet.
 import type {
   BulletOptions,
+  NonVisualDrawingPropertiesOptions,
   ParagraphDescriptorOptions,
   ShapeType,
   StrikeStyle,
@@ -79,6 +80,16 @@ export function childRunsOf(child: SlideChild): TextRunOptions[] {
     return runs;
   }
   return [];
+}
+
+/** The child's cNvPr surface (name/hidden) — a table carries none. */
+export function nonVisualOf(child: SlideChild): NonVisualDrawingPropertiesOptions | null {
+  if ("shape" in child) return child.shape;
+  if ("picture" in child) return child.picture;
+  if ("line" in child) return child.line;
+  if ("connector" in child) return child.connector;
+  if ("group" in child) return child.group;
+  return null;
 }
 
 /** The cell's paragraphs as real objects, consuming the cell's text sugar. */

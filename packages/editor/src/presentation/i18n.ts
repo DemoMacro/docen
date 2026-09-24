@@ -155,6 +155,14 @@ export const presentationEn: AdditionalLanguage = {
     "ppt.ribbon.cmd.zoom-100": "Zoom to 100%",
     // --- Notes pane ---
     "ppt.notes.placeholder": "Click to add notes",
+    // --- Selection pane ---
+    "ppt.select.title": "Selection Pane",
+    "ppt.select.shape": "Shape",
+    "ppt.select.picture": "Picture",
+    "ppt.select.line": "Line",
+    "ppt.select.connector": "Connector",
+    "ppt.select.group": "Group",
+    "ppt.select.table": "Table",
     // --- Status bar ---
     "ppt.status.slide-of": "Slide {page} of {total}",
   },
@@ -305,6 +313,14 @@ export const presentationZhCN: AdditionalLanguage = {
     "ppt.ribbon.cmd.zoom-100": "缩放到 100%",
     // --- 备注窗格 ---
     "ppt.notes.placeholder": "单击此处添加备注",
+    // --- 选择窗格 ---
+    "ppt.select.title": "选择窗格",
+    "ppt.select.shape": "形状",
+    "ppt.select.picture": "图片",
+    "ppt.select.line": "直线",
+    "ppt.select.connector": "连接符",
+    "ppt.select.group": "组合",
+    "ppt.select.table": "表格",
     // --- 状态栏 ---
     "ppt.status.slide-of": "第 {page} 张，共 {total} 张",
   },

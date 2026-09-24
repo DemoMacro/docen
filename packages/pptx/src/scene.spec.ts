@@ -365,6 +365,57 @@ describe("pictures and background", () => {
     });
     expect(slides[0]!.background).toBe("0B57D0");
   });
+
+  it("drops cNvPr-hidden children from the projection", () => {
+    const { slides } = project({
+      slides: [
+        {
+          children: [
+            {
+              shape: {
+                x: 0,
+                y: 0,
+                width: 952500,
+                height: 952500,
+                name: "visible",
+                properties: { geometry: "rect", fill: "FF0000" },
+              },
+            },
+            {
+              shape: {
+                x: 952500,
+                y: 0,
+                width: 952500,
+                height: 952500,
+                name: "ghost",
+                hidden: true,
+                properties: { geometry: "rect", fill: "00FF00" },
+              },
+            },
+            {
+              table: {
+                x: 0,
+                y: 1905000,
+                width: 1905000,
+                height: 952500,
+                columnWidths: [952500, 952500],
+                rows: [
+                  {
+                    height: 952500,
+                    cells: [{ text: "a" }, { text: "b" }],
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    });
+    // The visible shape and the table paint; the hidden one drops out.
+    expect(slides[0]!.members).toHaveLength(2);
+    expect(slides[0]!.members.filter((m) => m.kind === "shape")).toHaveLength(1);
+    expect(slides[0]!.members.filter((m) => m.kind === "table")).toHaveLength(1);
+  });
 });
 
 describe("text bullet projection", () => {

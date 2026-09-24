@@ -139,6 +139,63 @@ export const presentationStyles = css`
   docen-workspace.presenting .docen-canvas {
     margin: 0 auto;
   }
+  /* The selection pane (PowerPoint's Selection pane): the active slide's
+     object list, one row per child with an eye toggle and a name. */
+  .select-pane {
+    width: 224px;
+    display: flex;
+    flex-direction: column;
+    background: var(--docen-color-bg, #fff);
+    border-inline-start: 1px solid var(--docen-color-divider, #e1e1e1);
+  }
+  .select-pane[hidden] {
+    display: none;
+  }
+  .select-head {
+    padding: 10px 12px 6px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--docen-color-fg-muted, #616161);
+  }
+  .select-list {
+    overflow-y: auto;
+    padding: 0 6px 12px;
+  }
+  .select-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 6px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .select-row:hover {
+    background: rgba(0, 0, 0, 0.05);
+  }
+  .select-row[data-active="true"] {
+    background: var(--docen-color-accent-soft, #e8f0fe);
+  }
+  .select-row[data-hidden="true"] .select-name {
+    opacity: 0.45;
+    font-style: italic;
+  }
+  .select-name {
+    flex: 1 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .select-eye {
+    flex: 0 0 auto;
+    border: none;
+    background: none;
+    cursor: pointer;
+    padding: 2px 4px;
+    font-size: 13px;
+    line-height: 1;
+    color: inherit;
+  }
 `;
 
 /** The element surface the template binds to — the ref targets only. The
@@ -149,6 +206,7 @@ interface PresentationTemplateRefs extends HTMLElement {
   gridlines?: HTMLElement;
   notesPane?: HTMLElement;
   notesEditor?: HTMLTextAreaElement;
+  selectList?: HTMLElement;
 }
 
 export const presentationTemplate = html<PresentationTemplateRefs>`
@@ -161,6 +219,10 @@ export const presentationTemplate = html<PresentationTemplateRefs>`
         <div class="thumb-selection" ${ref("thumbSelection")}></div>
       </div>
     </div>
+    <aside class="select-pane" slot="task-pane-end" part="select-pane" hidden>
+      <div class="select-head"></div>
+      <div class="select-list" ${ref("selectList")}></div>
+    </aside>
     <docen-document-area>
       <div class="docen-canvas" part="page">
         <div class="stage"></div>

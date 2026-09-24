@@ -59,6 +59,7 @@ import {
   cellTextOf,
   childRunsOf,
   deleteSlideAt,
+  nonVisualOf,
   duplicateSlideAt,
   firstCellRunSizeOf,
   firstRunSizeOf,
@@ -254,6 +255,7 @@ const WIRED_COMMANDS: ReadonlySet<string> = new Set([
   "from-current",
   "slide-number",
   "date-time",
+  "select",
   ...TEXT_FORMAT_COMMANDS,
 ]);
 
@@ -309,6 +311,8 @@ class DocenPresentation extends AddinHost {
   /** The speaker-notes pane (chrome.ts): the pane wrapper and its textarea. */
   @observable notesPane?: HTMLElement;
   @observable notesEditor?: HTMLTextAreaElement;
+  /** The selection pane's object list (chrome.ts). */
+  @observable selectList?: HTMLElement;
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -344,6 +348,7 @@ class DocenPresentation extends AddinHost {
       .querySelector("docen-link-dialog")
       ?.addEventListener("link:ok", this.#onLinkOk as EventListener);
     document.addEventListener("fullscreenchange", this.#onFullscreenChange);
+    this.selectList?.addEventListener("click", this.#onSelectListClick);
     this.#area()?.addEventListener("wheel", this.#onShowWheel, { passive: false });
     this.#area()?.addEventListener("scroll", this.#onScroll);
     this.thumbStrip?.addEventListener("click", this.#onThumbClick);
@@ -402,6 +407,7 @@ class DocenPresentation extends AddinHost {
       ?.querySelector("docen-link-dialog")
       ?.removeEventListener("link:ok", this.#onLinkOk as EventListener);
     document.removeEventListener("fullscreenchange", this.#onFullscreenChange);
+    this.selectList?.removeEventListener("click", this.#onSelectListClick);
     this.#area()?.removeEventListener("wheel", this.#onShowWheel);
     this.#area()?.removeEventListener("scroll", this.#onScroll);
     this.thumbStrip?.removeEventListener("click", this.#onThumbClick);
@@ -633,6 +639,7 @@ class DocenPresentation extends AddinHost {
     else if (name === "from-beginning") this.#startShow("beginning");
     else if (name === "from-current") this.#startShow("current");
     else if (name === "slide-number" || name === "date-time") this.#insertFieldBox(name);
+    else if (name === "select") this.#toggleSelectionPane();
     else if (TEXT_FORMAT_COMMANDS.has(name)) this.#applyTextFormat(name, event.detail?.value);
   };
 
@@ -701,6 +708,7 @@ class DocenPresentation extends AddinHost {
     bar.setAttribute("pageLabel", t("ppt.status.slide-of", this));
     this.#syncThumbSelection(index);
     this.#syncNotesPane(index);
+    this.#renderSelectionPane();
   }
 
   /** Repaint the deck. With `slide` set (a single-slide edit), only that
@@ -806,10 +814,13 @@ class DocenPresentation extends AddinHost {
   #select(sel: { slide: number; child: number; member?: number[] } | null): void {
     if (this.#textEditor) this.#exitTextEditing(true);
     this.#selection = sel;
-    if (!sel) return this.#overlay?.hide();
-    const hit = this.#selectedBox();
-    if (hit) this.#overlay?.show(hit.box, hit.rotation);
-    else this.#overlay?.hide();
+    if (!sel) this.#overlay?.hide();
+    else {
+      const hit = this.#selectedBox();
+      if (hit) this.#overlay?.show(hit.box, hit.rotation);
+      else this.#overlay?.hide();
+    }
+    this.#renderSelectionPane();
   }
 
   /** Double-click on a shape: float a textarea over its text area and hand
@@ -1276,6 +1287,7 @@ class DocenPresentation extends AddinHost {
     const hit = this.#selectedBox();
     if (hit) this.#overlay?.refresh(hit.box, hit.rotation);
     else this.#select(null);
+    this.#renderSelectionPane();
   }
 
   /** Strip-space box → slide-local: drop the slide's strip offset (the
@@ -1934,6 +1946,94 @@ class DocenPresentation extends AddinHost {
   readonly #onFullscreenChange = (): void => {
     if (!document.fullscreenElement) this.#endShow();
   };
+
+  // ── Selection pane ───────────────────────────────────────────────────────
+
+  #selectionPane(): HTMLElement | null {
+    return this.shadowRoot?.querySelector(".select-pane") ?? null;
+  }
+
+  /** Show/hide the pane (a view state — the list re-stamps when it shows). */
+  #toggleSelectionPane(): void {
+    const pane = this.#selectionPane();
+    if (!pane) return;
+    pane.hidden = !pane.hidden;
+    if (!pane.hidden) this.#renderSelectionPane();
+  }
+
+  /** The selection pane's row label: the cNvPr name when the child carries
+   *  one, else the localized kind plus its position. */
+  #childLabel(child: SlideChild, index: number): { label: string; hidden: boolean } {
+    const nv = nonVisualOf(child);
+    const kind =
+      "shape" in child
+        ? "shape"
+        : "picture" in child
+          ? "picture"
+          : "line" in child
+            ? "line"
+            : "connector" in child
+              ? "connector"
+              : "group" in child
+                ? "group"
+                : "table";
+    const name = nv?.name?.trim();
+    return {
+      label: name || `${t(`ppt.select.${kind}`, this)} ${index + 1}`,
+      hidden: nv?.hidden === true,
+    };
+  }
+
+  /** Stamp the active slide's object list. A no-op while the pane is hidden —
+   *  every refresh trigger re-runs this when it shows. */
+  #renderSelectionPane(): void {
+    const pane = this.#selectionPane();
+    const list = this.selectList;
+    if (!pane || pane.hidden || !list) return;
+    const head = pane.querySelector<HTMLElement>(".select-head");
+    if (head) head.textContent = t("ppt.select.title", this);
+    const slide = this.#activeSlideIndex();
+    const children = this.#presJson?.slides?.[slide]?.children ?? [];
+    list.innerHTML = children
+      .map((child, i) => {
+        const { label, hidden } = this.#childLabel(child, i);
+        const active =
+          this.#selection?.slide === slide &&
+          this.#selection.child === i &&
+          !this.#selection.member;
+        return `<div class="select-row" data-child="${i}" data-hidden="${hidden}"${active ? ' data-active="true"' : ""}><button class="select-eye" data-eye="${i}">${hidden ? "○" : "●"}</button><span class="select-name">${escapeHtml(label)}</span></div>`;
+      })
+      .join("");
+  }
+
+  readonly #onSelectListClick = (event: Event): void => {
+    const target = event.target as HTMLElement;
+    const eye = target.closest<HTMLElement>("[data-eye]");
+    if (eye) return this.#toggleChildHidden(Number(eye.dataset.eye));
+    const row = target.closest<HTMLElement>("[data-child]");
+    if (!row) return;
+    const slide = this.#activeSlideIndex();
+    this.#select({ slide, child: Number(row.dataset.child) });
+    this.#revealSlide(slide);
+  };
+
+  /** The eye toggle: cNvPr @hidden on the child (tables have no surface and
+   *  stay put) as one reversible edit — hidden objects drop out of the paint. */
+  #toggleChildHidden(index: number): void {
+    const slide = this.#activeSlideIndex();
+    const child = this.#presJson?.slides?.[slide]?.children?.[index];
+    const nv = child ? nonVisualOf(child) : null;
+    if (!nv) return;
+    const before = nv.hidden === true;
+    const apply = (hidden: boolean): void => {
+      if (hidden) nv.hidden = true;
+      else delete nv.hidden;
+      this.#reproject(slide);
+      this.#renderSelectionPane();
+    };
+    this.#pushEdit({ undo: () => apply(before), redo: () => apply(!before) });
+    apply(!before);
+  }
 
   #pickPicture(): void {
     this.shadowRoot?.querySelector<HTMLInputElement>("#picture-input")?.click();

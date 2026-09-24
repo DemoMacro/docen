@@ -11,6 +11,24 @@ import { pictureMember } from "./pictures";
 import { shapeMembers } from "./shapes";
 import { tableMember } from "./tables";
 
+/** The child's cNvPr `@hidden` (a graphicFrame table has no cNvPr surface —
+ *  it always shows). Hidden objects drop out of every projection. */
+function hiddenOf(child: SlideChild): boolean {
+  const nv =
+    "shape" in child
+      ? child.shape
+      : "picture" in child
+        ? child.picture
+        : "line" in child
+          ? child.line
+          : "connector" in child
+            ? child.connector
+            : "group" in child
+              ? child.group
+              : undefined;
+  return nv?.hidden === true;
+}
+
 export function childMembers(
   children: readonly SlideChild[],
   t: Xform,
@@ -18,6 +36,7 @@ export function childMembers(
 ): LayoutDrawingMember[] {
   const out: LayoutDrawingMember[] = [];
   children.forEach((child, i) => {
+    if (hiddenOf(child)) return;
     // The group-address path only exists below a group — a slide's own
     // members have nothing above them to address into.
     const cp = prefix.length > 0 ? [...prefix, i] : undefined;
