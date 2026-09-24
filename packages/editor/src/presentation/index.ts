@@ -67,6 +67,7 @@ import {
   makeShape,
   makeTable,
   makeTextBox,
+  makeFieldBox,
   reorderChild,
   runsIn,
   setLineSpacingPercent,
@@ -251,6 +252,8 @@ const WIRED_COMMANDS: ReadonlySet<string> = new Set([
   "hyperlink",
   "from-beginning",
   "from-current",
+  "slide-number",
+  "date-time",
   ...TEXT_FORMAT_COMMANDS,
 ]);
 
@@ -629,6 +632,7 @@ class DocenPresentation extends AddinHost {
     else if (name === "hyperlink") this.#openLinkDialog();
     else if (name === "from-beginning") this.#startShow("beginning");
     else if (name === "from-current") this.#startShow("current");
+    else if (name === "slide-number" || name === "date-time") this.#insertFieldBox(name);
     else if (TEXT_FORMAT_COMMANDS.has(name)) this.#applyTextFormat(name, event.detail?.value);
   };
 
@@ -1506,6 +1510,26 @@ class DocenPresentation extends AddinHost {
     const pres = this.#pres;
     if (!pres) return;
     this.#insertChild(makeTextBox(pres.widthPx, pres.heightPx));
+  }
+
+  /** The footer field inserts (slide number bottom-right, date-time bottom-
+   *  left): an a:fld box whose cached text shows the live value now — the
+   *  file's field re-evaluates per slide in a real renderer. */
+  #insertFieldBox(name: string): void {
+    const pres = this.#pres;
+    if (!pres) return;
+    const page = this.#activeSlideIndex() + 1;
+    const child =
+      name === "slide-number"
+        ? makeFieldBox(pres.widthPx, pres.heightPx, "slidenum", String(page), "right")
+        : makeFieldBox(
+            pres.widthPx,
+            pres.heightPx,
+            "datetimeFigureOut",
+            new Date().toLocaleDateString(),
+            "left",
+          );
+    this.#insertChild(child);
   }
 
   #insertTable(): void {

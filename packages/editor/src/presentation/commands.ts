@@ -359,6 +359,39 @@ export function makeShape(
   };
 }
 
+/** A footer field box (the a:fld token plus its cached display text — the
+ *  file's field re-evaluates per slide in a real renderer). Anchored bottom
+ *  corner: `align: "right"` hugs the right edge, anything else the left. */
+export function makeFieldBox(
+  slideWidthPx: number,
+  slideHeightPx: number,
+  type: string,
+  text: string,
+  align: "left" | "right",
+): SlideChild {
+  const width = slideWidthPx * 0.2;
+  const height = Math.round(0.4 * 96);
+  const margin = Math.round(0.25 * 96);
+  const x = align === "right" ? slideWidthPx - width - margin : margin;
+  return {
+    shape: {
+      x: emu(x),
+      y: emu(slideHeightPx - height - margin),
+      width: emu(width),
+      height: emu(height),
+      properties: { geometry: "rect", fill: { type: "none" } },
+      textBody: {
+        paragraphs: [
+          {
+            properties: { alignment: align },
+            children: [{ type, text }],
+          },
+        ],
+      },
+    },
+  };
+}
+
 /** A picture child centered on a slide of the given size, scaled down to fit
  *  within half the slide (never upscaled). */
 export function makePicture(

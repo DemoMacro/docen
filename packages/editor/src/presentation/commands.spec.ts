@@ -14,6 +14,7 @@ import {
   makeShape,
   makeTable,
   makeTextBox,
+  makeFieldBox,
   reorderChild,
   setLineSpacingPercent,
   setParagraphAlignment,
@@ -413,6 +414,27 @@ describe("makeShape", () => {
     expect(shape.x).toBe(Math.round(((1280 - 192) / 2) * EMU_PER_PX));
     expect(shape.properties).toMatchObject({ geometry: "star5", fill: "FFFFFF" });
     expect(shape.textBody).toBeDefined();
+  });
+});
+
+describe("makeFieldBox", () => {
+  it("anchors the slide number field bottom-right with its cached text", () => {
+    const { shape } = makeFieldBox(1280, 720, "slidenum", "3", "right") as { shape: ShapeVariant };
+    expect(shape.x).toBeGreaterThan((1280 / 2) * EMU_PER_PX);
+    expect(shape.y).toBeGreaterThan((720 / 2) * EMU_PER_PX);
+    expect(shape.properties).toMatchObject({ geometry: "rect", fill: { type: "none" } });
+    const paragraph = (shape.textBody as { paragraphs: Para[] }).paragraphs[0]!;
+    expect(paragraph.properties?.alignment).toBe("right");
+    expect(paragraph.children?.[0]).toEqual({ type: "slidenum", text: "3" });
+  });
+
+  it("anchors the date-time field bottom-left", () => {
+    const { shape } = makeFieldBox(1280, 720, "datetimeFigureOut", "9/25/2026", "left") as {
+      shape: ShapeVariant;
+    };
+    expect(shape.x).toBeLessThan((1280 / 2) * EMU_PER_PX);
+    const paragraph = (shape.textBody as { paragraphs: Para[] }).paragraphs[0]!;
+    expect(paragraph.children?.[0]).toMatchObject({ type: "datetimeFigureOut" });
   });
 });
 
