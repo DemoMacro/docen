@@ -1,4 +1,5 @@
 import {
+  cssFamilyOf,
   cssFontOf,
   familyOfSlot,
   formatNumber,
@@ -297,7 +298,11 @@ export function paintParagraph(
       const inline: LayoutInline | undefined = para.inline[item.inlineIndex];
       if (!inline) continue;
       if (item.kind === "text" && inline.kind === "text") {
-        const family = familyOf(inline.style, item.text);
+        // Painted Texts carry the same quoted family + serif fallback list
+        // cssFontOf measures with (see cssFamilyOf) — a bare family name
+        // would paint a missing face in the browser's default font while
+        // layout positioned the items on serif advances.
+        const family = cssFamilyOf(familyOf(inline.style, item.text));
         const intervalPx = rights ? rights[itemIndex]! - item.xPx : undefined;
         // A squeezed line (advanceScale — Word's compressPunctuation)
         // compresses its pure-CJK glyphs to the item's already-scaled width:

@@ -207,6 +207,18 @@ export function familyOfSlot(family: string | FontSlots, isCjk: boolean): string
   return (isCjk ? (family.eastAsia ?? family.latin) : (family.latin ?? family.eastAsia)) ?? "";
 }
 
+/** The CSS family list one face resolves through — `"Family", serif`. Both
+ *  measurement (pretext's canvas) and painting (the painter's Leafer Text,
+ *  which concatenates fontFamily into its canvas font verbatim) must carry
+ *  the same quoted fallback: a bare family name resolves a missing face to
+ *  the browser's default font while measurement falls back to serif — two
+ *  different faces with different glyph advances, so the painted text drifts
+ *  from the laid positions (character overlap on font-missing machines,
+ *  macOS against Word's font set being the visible case). */
+export function cssFamilyOf(family: string): string {
+  return family ? `"${family.replace(/"/g, '\\"')}", serif` : "serif";
+}
+
 /** A CSS font shorthand for one script segment — the string pretext measures
  *  with (canvas measureText) and the painter draws with (LeaferJS), so the
  *  two can never drift apart. */
@@ -215,7 +227,7 @@ export function cssFontOf(style: LayoutTextStyle, family: string): string {
   if (style.italic) parts.push("italic");
   if (style.bold) parts.push("bold");
   parts.push(`${vertAlignedSizePx(style)}px`);
-  parts.push(family ? `"${family.replace(/"/g, '\\"')}", serif` : "serif");
+  parts.push(cssFamilyOf(family));
   return parts.join(" ");
 }
 
