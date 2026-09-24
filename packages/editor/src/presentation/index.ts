@@ -1895,6 +1895,9 @@ class DocenPresentation extends AddinHost {
     const pres = this.#pres;
     if (!pres || this.#presenting) return;
     this.#exitTextEditing(true);
+    // The show runs chrome-free: the selection frame and its handles step
+    // aside with everything else.
+    this.#select(null);
     this.#presenting = true;
     this.#savedZoom = this.#zoom;
     this.#workspaceEl()?.classList.add("presenting");

@@ -130,6 +130,7 @@ export const presentationStyles = css`
   docen-workspace.presenting docen-ribbon,
   docen-workspace.presenting docen-status-bar,
   docen-workspace.presenting .slides-panel,
+  docen-workspace.presenting .select-pane,
   docen-workspace.presenting .notes-pane {
     display: none !important;
   }
