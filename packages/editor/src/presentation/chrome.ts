@@ -157,4 +157,5 @@ export const presentationTemplate = html<PresentationTemplateRefs>`
   <input type="file" id="file-input" accept=".pptx" hidden />
   <input type="file" id="picture-input" accept="image/png,image/jpeg,image/gif,image/bmp" hidden />
   <docen-find-replace-dialog></docen-find-replace-dialog>
+  <docen-link-dialog></docen-link-dialog>
 `;

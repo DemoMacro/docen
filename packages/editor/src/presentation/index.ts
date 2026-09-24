@@ -35,7 +35,7 @@ import {
 } from "@docen/pptx";
 import { customElement, observable } from "@microsoft/fast-element";
 import type { DataType } from "@office-open/core";
-import type { ShapeType, TextRunOptions } from "@office-open/core/drawing";
+import type { ShapeType, TextBodyOptions, TextRunOptions } from "@office-open/core/drawing";
 import { App, type IGroup } from "leafer-ui";
 
 import { renderRibbonFromSchema } from "../document/ribbon";
@@ -51,6 +51,7 @@ import {
   resolveTheme,
   t,
 } from "../ui";
+import type { LinkValues } from "../ui/components/workspace/link-dialog";
 import { escapeHtml, presentationStyles, presentationTemplate } from "./chrome";
 import {
   bodyParagraphsOf,
@@ -67,6 +68,7 @@ import {
   makeTable,
   makeTextBox,
   reorderChild,
+  runsIn,
   setLineSpacingPercent,
   setParagraphAlignment,
   setRunFont,
@@ -246,6 +248,7 @@ const WIRED_COMMANDS: ReadonlySet<string> = new Set([
   "transition",
   "effect-options",
   "apply-to-all",
+  "hyperlink",
   ...TEXT_FORMAT_COMMANDS,
 ]);
 
@@ -327,6 +330,9 @@ class DocenPresentation extends AddinHost {
     root
       .querySelector("docen-find-replace-dialog")
       ?.addEventListener("find-replace:action", this.#onFindReplace as EventListener);
+    root
+      .querySelector("docen-link-dialog")
+      ?.addEventListener("link:ok", this.#onLinkOk as EventListener);
     this.#area()?.addEventListener("scroll", this.#onScroll);
     this.thumbStrip?.addEventListener("click", this.#onThumbClick);
     this.#stage.addEventListener("pointerdown", this.#onStagePointerDown);
@@ -380,6 +386,9 @@ class DocenPresentation extends AddinHost {
     this.shadowRoot
       ?.querySelector("docen-find-replace-dialog")
       ?.removeEventListener("find-replace:action", this.#onFindReplace as EventListener);
+    this.shadowRoot
+      ?.querySelector("docen-link-dialog")
+      ?.removeEventListener("link:ok", this.#onLinkOk as EventListener);
     this.#area()?.removeEventListener("scroll", this.#onScroll);
     this.thumbStrip?.removeEventListener("click", this.#onThumbClick);
     this.#stage.removeEventListener("pointerdown", this.#onStagePointerDown);
@@ -602,6 +611,7 @@ class DocenPresentation extends AddinHost {
     else if (name === "effect-options" && event.detail?.value) {
       this.#setTransitionSpeed(event.detail.value);
     } else if (name === "apply-to-all") this.#applyTransitionToAll();
+    else if (name === "hyperlink") this.#openLinkDialog();
     else if (TEXT_FORMAT_COMMANDS.has(name)) this.#applyTextFormat(name, event.detail?.value);
   };
 
@@ -1956,6 +1966,79 @@ class DocenPresentation extends AddinHost {
       },
     });
     this.#reproject(sel!.slide);
+  }
+
+  // ── Hyperlink ────────────────────────────────────────────────────────────
+
+  /** The shared link dialog over the text under edit (the cell a table edit
+   *  was in, else the selected shape's body). PowerPoint applies the address
+   *  to the object's whole text. */
+  #openLinkDialog(): void {
+    const runs = this.#runsUnderEdit();
+    if (!runs) return;
+    const existing = runs.map((run) => run.hyperlink?.url).find((url) => url != null);
+    (
+      this.shadowRoot?.querySelector("docen-link-dialog") as {
+        show(values?: Partial<LinkValues>): void;
+      } | null
+    )?.show({ href: existing });
+  }
+
+  readonly #onLinkOk = (event: Event): void => {
+    // The same target rule as the format commands; an in-flight edit writes
+    // back first, or the exit-time write-back would clobber the link.
+    const at = this.#tableEdit;
+    this.#exitTextEditing(true);
+    const sel = this.#selection;
+    const cell = at ? this.#editedCell(at) : null;
+    const body = cell ? null : this.#selectedShapeBody();
+    if (!cell && !body) return;
+    const target = cell ?? body!;
+    const runs = runsIn(cell ? cellParagraphsOf(cell) : bodyParagraphsOf(body!));
+    const href = ((event as CustomEvent<LinkValues>).detail?.href ?? "").trim();
+    // The dialog's placeholder is not an address; an empty one removes.
+    const address = !href || href === "https://" ? undefined : href;
+    const before = structuredClone(target);
+    for (const run of runs) {
+      if (address) run.hyperlink = { url: address };
+      else delete run.hyperlink;
+    }
+    if (JSON.stringify(target) === JSON.stringify(before)) return;
+    const after = structuredClone(target);
+    const restore = (snap: typeof before): void => {
+      for (const key of Object.keys(target) as (keyof typeof target)[]) delete target[key];
+      Object.assign(target, snap);
+    };
+    this.#pushEdit({
+      undo: () => {
+        restore(before);
+        this.#reproject(sel!.slide);
+      },
+      redo: () => {
+        restore(after);
+        this.#reproject(sel!.slide);
+      },
+    });
+    this.#reproject(sel!.slide);
+  };
+
+  /** The live text runs under edit — the table cell's paragraphs or the
+   *  selected shape's body. Null when there is no text target. */
+  #runsUnderEdit(at = this.#tableEdit): TextRunOptions[] | null {
+    if (at) {
+      const cell = this.#editedCell(at);
+      return cell ? runsIn(cellParagraphsOf(cell)) : null;
+    }
+    const body = this.#selectedShapeBody();
+    return body ? runsIn(bodyParagraphsOf(body)) : null;
+  }
+
+  /** The selected shape's text body, or null (groups' members are a later
+   *  batch — same rule as the format commands). */
+  #selectedShapeBody(): TextBodyOptions | null {
+    const child = this.#selectedChild();
+    if (!child || !("shape" in child) || !child.shape.textBody) return null;
+    return child.shape.textBody;
   }
 
   /** Stamp the header's undo/redo buttons from the edit-stack position. */
