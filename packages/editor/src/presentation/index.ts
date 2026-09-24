@@ -226,6 +226,7 @@ const WIRED_COMMANDS: ReadonlySet<string> = new Set([
   "undo",
   "redo",
   "save-as",
+  "paste",
   "new-slide",
   "delete-slide",
   "duplicate-slide",
@@ -594,6 +595,7 @@ class DocenPresentation extends AddinHost {
     else if (name === "send-back") this.#reorderSelected("back");
     else if (name === "gridlines") this.#toggleGridlines();
     else if (name === "find" || name === "replace") this.#findDialog()?.show();
+    else if (name === "paste") void this.#pasteFromClipboard();
     else if (name === "notes") this.#toggleNotes();
     else if (name === "normal") this.#enterNormalView();
     else if (name === "transition" && event.detail?.value) this.#setTransition(event.detail.value);
@@ -1831,9 +1833,16 @@ class DocenPresentation extends AddinHost {
     const input = event.target as HTMLInputElement;
     const file = input.files?.[0];
     input.value = "";
+    if (file) await this.#insertImageFile(file);
+  };
+
+  /** Read an image payload as a data URL, measure it, and drop a centered
+   *  picture child on the active slide — the file-input and clipboard paths
+   *  converge here. */
+  async #insertImageFile(file: File): Promise<void> {
     const pres = this.#pres;
-    const type = file ? PICTURE_TYPES.get(file.type) : undefined;
-    if (!file || !pres || !type) return;
+    const type = PICTURE_TYPES.get(file.type);
+    if (!pres || !type) return;
     const data = await readFileAsDataURL(file);
     const image = new Image();
     image.src = data;
@@ -1845,7 +1854,41 @@ class DocenPresentation extends AddinHost {
     this.#insertChild(
       makePicture(pres.widthPx, pres.heightPx, image.naturalWidth, image.naturalHeight, data, type),
     );
-  };
+  }
+
+  /** The paste command: the clipboard's leading image lands as a picture
+   *  child, plain text as a seeded text box. A denied read is silent — the
+   *  browser's permission state, not ours, owns the failure. */
+  async #pasteFromClipboard(): Promise<void> {
+    const pres = this.#pres;
+    if (!pres) return;
+    const readClipboard = async (): Promise<{ image?: File; text?: string } | null> => {
+      try {
+        const items = await navigator.clipboard.read();
+        for (const item of items) {
+          const mime = item.types.find((t) => PICTURE_TYPES.has(t));
+          if (mime)
+            return { image: new File([await item.getType(mime)], "clipboard", { type: mime }) };
+          if (item.types.includes("text/plain")) {
+            const text = (await (await item.getType("text/plain")).text()).slice(0, 10000);
+            return { text };
+          }
+        }
+        return null;
+      } catch {
+        try {
+          return { text: (await navigator.clipboard.readText()).slice(0, 10000) || undefined };
+        } catch {
+          return null;
+        }
+      }
+    };
+    const payload = await readClipboard();
+    if (!payload) return;
+    if (payload.image) await this.#insertImageFile(payload.image);
+    else if (payload.text)
+      this.#insertChild(makeTextBox(pres.widthPx, pres.heightPx, payload.text));
+  }
 
   /** Apply a font/paragraph command to the text under edit: the cell a table
    *  edit session was in, else the selected shape's text body. The undo pair

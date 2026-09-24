@@ -320,8 +320,9 @@ export function writeSlideNotes(slide: SlideOptions, text: string): void {
 const emu = (px: number): number => Math.round(px * EMU_PER_PX);
 
 /** A centered text-box shape for a slide of the given size — white fill and
- *  a hairline border keep an empty box visible on the canvas. */
-export function makeTextBox(slideWidthPx: number, slideHeightPx: number): SlideChild {
+ *  a hairline border keep an empty box visible on the canvas. `text` seeds
+ *  the body (the paste path). */
+export function makeTextBox(slideWidthPx: number, slideHeightPx: number, text = ""): SlideChild {
   const width = slideWidthPx * 0.4;
   const height = slideHeightPx * 0.15;
   return {
@@ -331,7 +332,7 @@ export function makeTextBox(slideWidthPx: number, slideHeightPx: number): SlideC
       width: emu(width),
       height: emu(height),
       properties: { geometry: "rect", fill: "FFFFFF", outline: { width: "1pt", color: "808080" } },
-      textBody: { text: "" },
+      textBody: { text },
     },
   };
 }
