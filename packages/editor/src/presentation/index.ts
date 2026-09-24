@@ -58,6 +58,7 @@ import {
   firstRunSizeOf,
   insertSlideAt,
   makePicture,
+  makeTable,
   makeTextBox,
   reorderChild,
   setLineSpacingPercent,
@@ -213,6 +214,7 @@ const WIRED_COMMANDS: ReadonlySet<string> = new Set([
   "duplicate-slide",
   "text-box",
   "insert-picture",
+  "insert-table",
   "bring-front",
   "send-back",
   "gridlines",
@@ -527,6 +529,7 @@ class DocenPresentation extends AddinHost {
     else if (name === "delete-slide") this.#deleteSlide();
     else if (name === "duplicate-slide") this.#duplicateSlide();
     else if (name === "text-box") this.#insertTextBox();
+    else if (name === "insert-table") this.#insertTable();
     else if (name === "insert-picture") this.#pickPicture();
     else if (name === "bring-front") this.#reorderSelected("front");
     else if (name === "send-back") this.#reorderSelected("back");
@@ -1407,6 +1410,12 @@ class DocenPresentation extends AddinHost {
     const pres = this.#pres;
     if (!pres) return;
     this.#insertChild(makeTextBox(pres.widthPx, pres.heightPx));
+  }
+
+  #insertTable(): void {
+    const pres = this.#pres;
+    if (!pres) return;
+    this.#insertChild(makeTable(pres.widthPx, pres.heightPx));
   }
 
   /** Toggle the drawing gridlines — a pure view state, no undo step. */

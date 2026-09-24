@@ -11,6 +11,7 @@ import {
   firstRunSizeOf,
   insertSlideAt,
   makePicture,
+  makeTable,
   makeTextBox,
   reorderChild,
   setLineSpacingPercent,
@@ -387,5 +388,17 @@ describe("makePicture", () => {
     };
     expect(picture.width).toBe(100 * EMU_PER_PX);
     expect(picture.height).toBe(80 * EMU_PER_PX);
+  });
+});
+
+describe("makeTable", () => {
+  it("centers a 3×3 grid at 60% width with equal columns", () => {
+    type TableVariant = Extract<SlideChild, { table: unknown }>["table"];
+    const { table } = makeTable(1280, 720) as { table: TableVariant };
+    const widthEmu = Math.round(1280 * 0.6 * EMU_PER_PX);
+    expect(table.columnWidths).toEqual([widthEmu / 3, widthEmu / 3, widthEmu / 3]);
+    expect(table.rows).toHaveLength(3);
+    expect(table.rows[0]!.cells).toHaveLength(3);
+    expect(table.x).toBe(Math.round(((1280 - 768) / 2) * EMU_PER_PX));
   });
 });
