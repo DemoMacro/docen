@@ -1024,7 +1024,7 @@ const SHAPE_CATEGORIES: readonly { key: string; tokens: readonly string[] }[] = 
 
 /** A shape card's thumbnail: the preset's outlines evaluated at 100×100 —
  *  pale-accent fill over a mid-accent stroke (Word's picker colors). */
-function shapePreviewSvg(token: string): string {
+export function shapePreviewSvg(token: string): string {
   const parts = (presetShapePaths(token, 100, 100) ?? []).map(
     (o) =>
       `<path d="${o.d}" fill="${o.fill ? "#DEEBF7" : "none"}" stroke="${
@@ -1035,12 +1035,23 @@ function shapePreviewSvg(token: string): string {
 }
 
 let shapeIconsRegistered = false;
-function ensureShapeIcons(): void {
+/** Register `shape-<token>` gallery thumbnails for the document's preset
+ *  categories (idempotent). The presentation editor stamps its own token
+ *  set through ensureShapePreviewIcons. */
+export function ensureShapeIcons(): void {
   if (shapeIconsRegistered) return;
   for (const { tokens } of SHAPE_CATEGORIES) {
     for (const token of tokens) registerIcon(`shape-${token}`, shapePreviewSvg(token));
   }
   shapeIconsRegistered = true;
+}
+
+/** Register `shape-<token>` thumbnails for an arbitrary preset token set —
+ *  the shared icon machinery behind both editors' Shapes galleries (re-run
+ *  is free: registerIcon replaces in place). */
+export function ensureShapePreviewIcons(tokens: Iterable<string>): void {
+  ensureShapeIcons();
+  for (const token of tokens) registerIcon(`shape-${token}`, shapePreviewSvg(token));
 }
 
 /** Word's Shapes gallery: four pinned cards in the closed strip, the More bar

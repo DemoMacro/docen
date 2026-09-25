@@ -5,6 +5,7 @@
 // as wiring lands batch by batch. External add-ins layer more tabs/groups on
 // top via mergeRibbonSchema, exactly like the document editor.
 
+import { ensureShapePreviewIcons } from "../document/ribbon";
 import type {
   RibbonButton,
   RibbonControlOrLayout,
@@ -138,21 +139,42 @@ const SHAPE_GROUPS: readonly { header: string; shapes: readonly string[] }[] = [
   },
 ];
 
-const shapesGallery = (): RibbonControlOrLayout => ({
-  type: "gallery",
-  event: "shapes",
-  label: cmd("shapes"),
-  icon: "shapes",
-  size: "large",
-  visibleCount: 8,
-  items: SHAPE_GROUPS.flatMap(({ header, shapes }) => [
+const shapesGallery = (): RibbonControlOrLayout => {
+  ensureShapePreviewIcons(SHAPE_GROUPS.flatMap(({ shapes }) => shapes));
+  return {
+    type: "gallery",
+    event: "shapes",
+    label: cmd("shapes"),
+    icon: "shapes",
+    size: "large",
+    visibleCount: 6,
+    items: SHAPE_GROUPS.flatMap(({ header, shapes }) => [
+      { text: header, header: true },
+      ...shapes.map((token) => ({
+        text: token.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/^./, (c) => c.toUpperCase()),
+        icon: `shape-${token}`,
+        value: token,
+      })),
+    ]),
+  };
+};
+
+/** Insert's Shapes picker: a large split whose drop-down lists every
+ *  category with previewed shape cards (PowerPoint keeps the inline gallery
+ *  on Home and a picker here — an inline strip this size overflows the
+ *  Illustrations group and pushes its neighbors off the tab). */
+const shapesPicker = (): RibbonControlOrLayout => {
+  const items: RibbonMenuItem[] = SHAPE_GROUPS.flatMap(({ header, shapes }) => [
     { text: header, header: true },
     ...shapes.map((token) => ({
       text: token.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/^./, (c) => c.toUpperCase()),
+      icon: `shape-${token}`,
       value: token,
     })),
-  ]),
-});
+  ]);
+  ensureShapePreviewIcons(SHAPE_GROUPS.flatMap(({ shapes }) => shapes));
+  return splitBtn("shapes", cmd("shapes"), items, { icon: "shapes", size: "large" });
+};
 
 /** The transitions gallery: the common effects plus none (clears the
  *  slide's transition). Values are the TransitionType tokens. */
@@ -186,10 +208,10 @@ export function presentationRibbonTabs(): RibbonTab[] {
               icon: "duplicate-slide",
               iconOnly: true,
             }),
-            btn("layout", cmd("layout"), { icon: "page-size", iconOnly: true }),
-            btn("reset", cmd("reset"), { icon: "sync", iconOnly: true }),
-            btn("section", cmd("section"), { icon: "columns", iconOnly: true }),
           ),
+          btn("layout", cmd("layout"), { icon: "page-size", size: "large" }),
+          btn("reset", cmd("reset"), { icon: "sync", size: "large" }),
+          btn("section", cmd("section"), { icon: "columns", size: "large" }),
         ]),
         group("font", [
           columnOf(
@@ -241,19 +263,13 @@ export function presentationRibbonTabs(): RibbonTab[] {
         ]),
         group("drawing", [
           shapesGallery(),
-          columnOf(
-            btn("bring-front", cmd("bring-front"), { icon: "bring-front", iconOnly: true }),
-            btn("send-back", cmd("send-back"), { icon: "send-back", iconOnly: true }),
-          ),
+          btn("bring-front", cmd("bring-front"), { icon: "bring-front", size: "large" }),
+          btn("send-back", cmd("send-back"), { icon: "send-back", size: "large" }),
         ]),
         group("editing", [
-          columnOf(
-            rowOf(
-              btn("find", cmd("find"), { icon: "search", iconOnly: true }),
-              btn("replace", cmd("replace"), { icon: "replace", iconOnly: true }),
-              btn("select", cmd("select"), { icon: "selection-pane", iconOnly: true }),
-            ),
-          ),
+          btn("find", cmd("find"), { icon: "search", size: "large" }),
+          btn("replace", cmd("replace"), { icon: "replace", size: "large" }),
+          btn("select", cmd("select"), { icon: "selection-pane", size: "large" }),
         ]),
       ],
     },
@@ -269,7 +285,7 @@ export function presentationRibbonTabs(): RibbonTab[] {
           btn("online-picture", cmd("online-picture"), { icon: "online-picture", size: "large" }),
         ]),
         group("illustrations", [
-          shapesGallery(),
+          shapesPicker(),
           btn("smartart", cmd("smartart"), { icon: "smartart", size: "large" }),
           btn("chart", cmd("chart"), { icon: "chart", size: "large" }),
           btn("3d-model", cmd("3d-model"), { icon: "3d-model", size: "large" }),
@@ -277,11 +293,13 @@ export function presentationRibbonTabs(): RibbonTab[] {
         group("links", [btn("hyperlink", cmd("hyperlink"), { icon: "hyperlink", size: "large" })]),
         group("text", [
           btn("text-box", cmd("text-box"), { icon: "text-box", size: "large" }),
+          btn("header-footer", cmd("header-footer"), { icon: "header", size: "large" }),
           btn("wordart", cmd("wordart"), { icon: "wordart", size: "large" }),
           columnOf(
-            btn("header-footer", cmd("header-footer"), { icon: "header", iconOnly: true }),
             btn("date-time", cmd("date-time"), { icon: "date-time", iconOnly: true }),
             btn("slide-number", cmd("slide-number"), { icon: "page-number", iconOnly: true }),
+          ),
+          columnOf(
             btn("object", cmd("object"), { icon: "object", iconOnly: true }),
             btn("symbol", cmd("symbol"), { icon: "symbol", iconOnly: true }),
           ),
@@ -297,9 +315,9 @@ export function presentationRibbonTabs(): RibbonTab[] {
       label: "ppt.ribbon.tab.draw",
       groups: [
         group("tools", [
-          btn("draw-select", cmd("draw-select"), { icon: "cursor" }),
-          btn("draw-pen", cmd("draw-pen"), { icon: "action-pen" }),
-          btn("draw-eraser", cmd("draw-eraser"), { icon: "eraser" }),
+          btn("draw-select", cmd("draw-select"), { icon: "cursor", size: "large" }),
+          btn("draw-pen", cmd("draw-pen"), { icon: "action-pen", size: "large" }),
+          btn("draw-eraser", cmd("draw-eraser"), { icon: "eraser", size: "large" }),
         ]),
       ],
     },
@@ -309,7 +327,7 @@ export function presentationRibbonTabs(): RibbonTab[] {
       groups: [
         group("themes", [
           btn("themes", cmd("themes"), { icon: "theme", size: "large" }),
-          columnOf(btn("variants", cmd("variants"), { icon: "page-color", iconOnly: true })),
+          btn("variants", cmd("variants"), { icon: "page-color", size: "large" }),
         ]),
         group("customize", [
           {
@@ -319,7 +337,7 @@ export function presentationRibbonTabs(): RibbonTab[] {
             icon: "page-color",
             size: "large",
           },
-          columnOf(btn("slide-size", cmd("slide-size"), { icon: "page-size", iconOnly: true })),
+          btn("slide-size", cmd("slide-size"), { icon: "page-size", size: "large" }),
         ]),
       ],
     },
@@ -337,17 +355,16 @@ export function presentationRibbonTabs(): RibbonTab[] {
             })),
             { icon: "transition", size: "large" },
           ),
-          columnOf(
-            splitBtn(
-              "effect-options",
-              cmd("effect-options"),
-              ["slow", "medium", "fast"].map((value) => ({
-                text: `ppt.ribbon.effectOptions.${value}`,
-                value,
-              })),
-            ),
-            btn("apply-to-all", cmd("apply-to-all"), { icon: "repeat", iconOnly: true }),
+          splitBtn(
+            "effect-options",
+            cmd("effect-options"),
+            ["slow", "medium", "fast"].map((value) => ({
+              text: `ppt.ribbon.effectOptions.${value}`,
+              value,
+            })),
+            { size: "large" },
           ),
+          btn("apply-to-all", cmd("apply-to-all"), { icon: "repeat", size: "large" }),
         ]),
       ],
     },
@@ -357,12 +374,10 @@ export function presentationRibbonTabs(): RibbonTab[] {
       groups: [
         group("animation", [
           btn("animate", cmd("animate"), { icon: "animate", size: "large" }),
-          columnOf(
-            btn("animation-pane", cmd("animation-pane"), {
-              icon: "selection-pane",
-              iconOnly: true,
-            }),
-          ),
+          btn("animation-pane", cmd("animation-pane"), {
+            icon: "selection-pane",
+            size: "large",
+          }),
         ]),
         group("advanced-animation", [
           btn("add-animation", cmd("add-animation"), { icon: "add-animation", size: "large" }),
@@ -375,7 +390,7 @@ export function presentationRibbonTabs(): RibbonTab[] {
       groups: [
         group("start-slide-show", [
           btn("from-beginning", cmd("from-beginning"), { icon: "from-beginning", size: "large" }),
-          columnOf(btn("from-current", cmd("from-current"), { icon: "from-current" })),
+          btn("from-current", cmd("from-current"), { icon: "from-current", size: "large" }),
         ]),
         group("set-up", [
           btn("set-up-show", cmd("set-up-show"), { icon: "set-up-show", size: "large" }),
@@ -391,9 +406,7 @@ export function presentationRibbonTabs(): RibbonTab[] {
         ]),
         group("comments", [
           btn("new-comment", cmd("new-comment"), { icon: "comment-add", size: "large" }),
-          columnOf(
-            btn("show-comments", cmd("show-comments"), { icon: "comment-add", iconOnly: true }),
-          ),
+          btn("show-comments", cmd("show-comments"), { icon: "comment-add", size: "large" }),
         ]),
       ],
     },
@@ -403,12 +416,10 @@ export function presentationRibbonTabs(): RibbonTab[] {
       groups: [
         group("presentation-views", [
           btn("normal", cmd("normal"), { icon: "normal", size: "large" }),
-          columnOf(
-            btn("slide-sorter", cmd("slide-sorter"), { icon: "slide-sorter" }),
-            btn("notes", cmd("notes"), { icon: "notes" }),
-          ),
+          btn("slide-sorter", cmd("slide-sorter"), { icon: "slide-sorter", size: "large" }),
+          btn("notes", cmd("notes"), { icon: "notes", size: "large" }),
         ]),
-        group("show", [btn("gridlines", cmd("gridlines"), { icon: "gridlines", iconOnly: true })]),
+        group("show", [btn("gridlines", cmd("gridlines"), { icon: "gridlines", size: "large" })]),
         // Zoom is the one wired group: the stage scales with it.
         group("zoom", [
           columnOf(
