@@ -39,7 +39,13 @@ import {
 } from "@docen/pptx";
 import { customElement, observable } from "@microsoft/fast-element";
 import type { DataType } from "@office-open/core";
-import type { ShapeType, TextBodyOptions, TextRunOptions } from "@office-open/core/drawing";
+import type {
+  RunFont,
+  ShapeType,
+  TextBodyOptions,
+  TextFont,
+  TextRunOptions,
+} from "@office-open/core/drawing";
 import { App, type IGroup } from "leafer-ui";
 
 import { renderRibbonFromSchema } from "../document/ribbon";
@@ -830,6 +836,7 @@ class DocenPresentation extends AddinHost {
       else this.#overlay?.hide();
     }
     this.#renderSelectionPane();
+    this.#syncTextFormatControls();
   }
 
   /** Double-click on a shape: float a textarea over its text area and hand
@@ -1023,6 +1030,7 @@ class DocenPresentation extends AddinHost {
     this.#textEditor = editor;
     this.#textEditBefore = body ? structuredClone(body) : null;
     this.#overlay?.hide();
+    this.#syncTextFormatControls();
   }
 
   /** Leave the text edit. The session's keystrokes have written through into
@@ -1063,6 +1071,7 @@ class DocenPresentation extends AddinHost {
       }
     }
     this.#restoreOverlay();
+    this.#syncTextFormatControls();
   }
 
   /** The selection frame returns after the editor steps aside (a committed
@@ -1293,6 +1302,7 @@ class DocenPresentation extends AddinHost {
       }
     }
     this.#restoreOverlay();
+    this.#syncTextFormatControls();
   }
 
   /** A click on another cell of the table under edit: commit the current
@@ -2226,6 +2236,7 @@ class DocenPresentation extends AddinHost {
       },
     });
     this.#reproject(sel!.slide);
+    this.#syncTextFormatControls();
   }
 
   // ── Hyperlink ────────────────────────────────────────────────────────────
@@ -2312,6 +2323,34 @@ class DocenPresentation extends AddinHost {
     const canRedo = this.#editIndex < this.#edits.length - 1;
     undo.toggleAttribute("disabled", !canUndo);
     redo.toggleAttribute("disabled", !canRedo);
+  }
+
+  /** Stamp the font face/size comboboxes from the text under edit — the
+   *  document editor's selection sync at this editor's grain: the common
+   *  value across the target's runs, blank when mixed or no target. Runs
+   *  without explicit props read as the projection's painted defaults
+   *  (Calibri 18pt), so the boxes show what the canvas would draw. */
+  #syncTextFormatControls(): void {
+    const root = this.shadowRoot;
+    if (!root) return;
+    const faceOf = (font: RunFont | undefined): string => {
+      if (typeof font === "string") return font || "Calibri";
+      const face = (f: TextFont | undefined): string | undefined =>
+        typeof f === "string" ? f || undefined : f?.typeface;
+      return face(font?.latin) ?? face(font?.eastAsia) ?? "Calibri";
+    };
+    const runs = this.#runsUnderEdit() ?? [];
+    const common = (values: string[]): string =>
+      values.length > 0 && values.every((v) => v === values[0]) ? values[0] : "";
+    const face = common(runs.map((run) => faceOf(run.font)));
+    const size = common(runs.map((run) => String(run.size ?? 18)));
+    for (const [event, value] of [
+      ["font-face", face],
+      ["font-size", size],
+    ] as const) {
+      const box = root.querySelector<HTMLElement>(`docen-ribbon-combobox[event='${event}']`);
+      if (box && box.getAttribute("value") !== value) box.setAttribute("value", value);
+    }
   }
 
   /** Generate the edited deck and hand it to the browser as a download. */
