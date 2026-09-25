@@ -81,14 +81,16 @@ export const presentationStyles = css`
   /* The in-place shape text editor: a bare textarea floating over the shape
      (same layer as the selection overlay), framed like it so the edit reads
      as belonging to the shape. The projection member supplies the real
-     insets/face/color per shape — these are the bare-box fallbacks. */
+     insets/face/color per shape — these are the bare-box fallbacks. Opaque:
+     while the session is open the overlay IS the text surface; translucency
+     would ghost the canvas painting through it. */
   .shape-text-editor {
     position: absolute;
     z-index: 6;
     box-sizing: border-box;
     margin: 0;
     padding: 4.8px 9.6px;
-    background: rgba(255, 255, 255, 0.92);
+    background: #fff;
     border: 1.5px solid #2b7cd3;
     outline: none;
     resize: none;

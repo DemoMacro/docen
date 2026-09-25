@@ -10,10 +10,13 @@
  * engine transactions) rides on this base in later batches.
  */
 
+import { measureEmu, solidFillOf } from "@docen/core/geometry";
 import {
   browserFontMetrics,
+  EMU_PER_PX,
   familyOfSlot,
   leaferBaselinePadPx,
+  ptToPx,
   type LayoutBlock,
   type LayoutDrawingMember,
 } from "@docen/layout";
@@ -24,6 +27,7 @@ import {
   tableGridOf,
   memberAt,
   memberByPath,
+  textBlocks,
   type PresentationOptions,
   type ProjectedPresentation,
   type SlideOptions,
@@ -62,7 +66,6 @@ import {
   nonVisualOf,
   duplicateSlideAt,
   firstCellRunSizeOf,
-  firstRunSizeOf,
   insertSlideAt,
   makePicture,
   makeShape,
@@ -277,8 +280,14 @@ class DocenPresentation extends AddinHost {
    *  group-nested member it descended into (child indexes under the group). */
   #selection: { slide: number; child: number; member?: number[] } | null = null;
   /** The in-place shape-text editor: the textarea floats over the shape while
-   *  it holds the session (its position; the text is read back on exit). */
+   *  it holds the session; every keystroke writes through into the shape, so
+   *  the text lives in the model as it is typed. */
   #textEditor: HTMLTextAreaElement | null = null;
+  /** The edited shape's text body as it entered the session — the undo
+   *  baseline the exit compares against. */
+  #textEditBefore: TextBodyOptions | null = null;
+  /** The pending write-through frame (canceled by a commit-path exit). */
+  #textEditRaf = 0;
   /** The table cell under the in-place edit (grid row/col — the session
    *  itself lives in #textEditor; null there means a shape text edit). */
   #tableEdit: { row: number; col: number } | null = null;
@@ -825,10 +834,14 @@ class DocenPresentation extends AddinHost {
 
   /** Double-click on a shape: float a textarea over its text area and hand
    *  the session to it (PowerPoint's in-place text edit). The overlay's
-   *  resize handles step aside for the duration. The textarea styles from
-   *  the projected member the canvas painted (insets, first-run face, first
-   *  paragraph's align, the shape's fill) so the edit state reads like the
-   *  render state. */
+   *  resize handles step aside for the duration. The overlay styles from
+   *  the projected textBox member the canvas painted (insets, first-run
+   *  face, the shape's fill); an empty body projects no member, so the
+   *  fallback re-derives the same values through textBlocks — the
+   *  projection's own defaults, never the overlay's assumptions. Every
+   *  keystroke writes through into the shape (raf-merged), so the canvas
+   *  repaints the typed text under the opaque overlay and the model never
+   *  drifts from what the user sees. */
   #enterTextEditing(): void {
     const sel = this.#selection;
     const pres = this.#pres;
@@ -852,7 +865,8 @@ class DocenPresentation extends AddinHost {
     const stripY = box.y + sel.slide * (pres.heightPx + SLIDE_GAP_PX) + SLIDE_GAP_PX;
     // The projected text-box member for this shape: boxes project with the
     // same slide-absolute geometry (groups fold their affine in), so box
-    // equality identifies it.
+    // equality identifies it. An empty body projects none — the fallbacks
+    // below resolve the same styles from the child itself.
     const member = pres.slides[sel.slide]?.members.find(
       (m): m is Extract<LayoutDrawingMember, { kind: "textBox" }> => {
         if (m.kind !== "textBox") return false;
@@ -861,69 +875,81 @@ class DocenPresentation extends AddinHost {
         );
       },
     );
-    // The member's first paragraph (its own blocks are the layout block
-    // union; a text box only ever carries paragraphs) and its insets —
-    // normalized, the layout type leaves every edge optional.
-    const para = member?.blocks[0];
-    const first = para?.kind === "paragraph" ? para : undefined;
-    // The first text run carries the face the overlay renders (a break-only
-    // paragraph falls to the strut style).
-    const run =
-      first && (first.inline.find((i) => i.kind === "text")?.style ?? first.defaultTextStyle);
-    const ins = member?.insets && {
-      left: member.insets.left ?? 0,
-      top: member.insets.top ?? 0,
-      right: member.insets.right ?? 0,
-      bottom: member.insets.bottom ?? 0,
-    };
+    const body = "shape" in child ? child.shape.textBody : undefined;
+    const bp = body?.bodyProperties;
+    const anchorOf = (value: string | undefined): "top" | "center" | "bottom" =>
+      value === "center" || value === "bottom" ? value : "top";
+    // a:bodyPr's DrawingML default insets (0.1" sides, 0.05" top/bottom) —
+    // the same defaults the projection's textBox member applies.
+    const insOf = (v: unknown, def: number): number => (measureEmu(v) ?? def) / EMU_PER_PX;
+    const ins = member
+      ? {
+          left: member.insets?.left ?? 0,
+          top: member.insets?.top ?? 0,
+          right: member.insets?.right ?? 0,
+          bottom: member.insets?.bottom ?? 0,
+        }
+      : {
+          left: insOf(bp?.lIns, 91440),
+          top: insOf(bp?.tIns, 45720),
+          right: insOf(bp?.rIns, 91440),
+          bottom: insOf(bp?.bIns, 45720),
+        };
+    const anchor = member?.anchor ?? anchorOf(bp?.anchor ?? body?.anchor);
+    const autoFit = member?.autoFit === true;
+    const fill =
+      member?.fill ?? solidFillOf("shape" in child ? child.shape.properties?.fill : undefined);
+    // The first paragraph's text-run style — the member's blocks when the
+    // projection made one, else textBlocks' resolution of the same body (its
+    // defaults ARE the painted defaults). The bare constant covers a body
+    // with no paragraphs at all.
+    const blocks = member?.blocks ?? (body ? textBlocks(body) : []);
+    const first = blocks[0]?.kind === "paragraph" ? blocks[0] : undefined;
+    const run = first?.inline.find((i) => i.kind === "text")?.style ??
+      first?.defaultTextStyle ?? { family: "Calibri", sizePx: ptToPx(18) };
     // The painted stack advances lines by the engine's normal line height and
     // hangs shape-text glyphs at 0.85 em below the line top (the painter's
     // shape-text model). The overlay reproduces both: an explicit line-height
     // sized from the same metric source the paint context uses, plus a
     // baseline correction that moves the CSS baseline (half-leading + font
     // ascent) onto the painted depth — CSS offers no direct baseline control.
-    const face = run ? familyOfSlot(run.family, false) : "";
-    const linePx = run
-      ? browserFontMetrics.normalRatio({
-          family: face,
-          bold: run.bold === true,
-          italic: run.italic === true,
-        }) * run.sizePx
-      : 0;
-    const baselineShift = run
-      ? this.#baselineShiftOf(
-          face,
-          run.bold === true,
-          run.italic === true,
-          run.sizePx,
-          linePx,
-          scale,
-        )
-      : 0;
+    const face = familyOfSlot(run.family, false);
+    const linePx =
+      browserFontMetrics.normalRatio({
+        family: face,
+        bold: run.bold === true,
+        italic: run.italic === true,
+      }) * run.sizePx;
+    const baselineShift = this.#baselineShiftOf(
+      face,
+      run.bold === true,
+      run.italic === true,
+      run.sizePx,
+      linePx,
+      scale,
+    );
     const editor = document.createElement("textarea");
     editor.className = "shape-text-editor";
     // The rows=2 default inflates scrollHeight to two lines — the slack math
     // (and every grow pass) must measure the real content.
     editor.rows = 1;
     editor.value = text;
+    // Opaque: while the session is open this overlay IS the text surface —
+    // translucency would ghost the canvas painting through it.
     Object.assign(editor.style, {
       left: `${box.x * scale}px`,
       top: `${stripY * scale}px`,
       width: `${box.width * scale}px`,
       height: `${box.height * scale}px`,
-      ...(run && ins
-        ? {
-            padding: `${ins.top * scale}px ${ins.right * scale}px ${ins.bottom * scale}px ${ins.left * scale}px`,
-            ...(member?.fill ? { background: `#${member.fill}` } : {}),
-            fontFamily: JSON.stringify(run.family),
-            fontSize: `${run.sizePx * scale}px`,
-            lineHeight: `${linePx * scale}px`,
-            textAlign: TEXT_ALIGN_OF[first!.align ?? "left"] ?? "left",
-            color: run.color ? `#${run.color}` : TEXT_INK,
-            ...(run.bold ? { fontWeight: "bold" } : {}),
-            ...(run.italic ? { fontStyle: "italic" } : {}),
-          }
-        : { fontSize: `${((firstRunSizeOf(child) * 4) / 3) * scale}px` }),
+      padding: `${ins.top * scale}px ${ins.right * scale}px ${ins.bottom * scale}px ${ins.left * scale}px`,
+      ...(fill ? { background: `#${fill}` } : {}),
+      fontFamily: JSON.stringify(run.family),
+      fontSize: `${run.sizePx * scale}px`,
+      lineHeight: `${linePx * scale}px`,
+      textAlign: TEXT_ALIGN_OF[first?.align ?? "left"] ?? "left",
+      color: run.color ? `#${run.color}` : TEXT_INK,
+      ...(run.bold ? { fontWeight: "bold" } : {}),
+      ...(run.italic ? { fontStyle: "italic" } : {}),
     });
     // Keep the text visible as it grows, and keep the box recognizable as it
     // doesn't: the edit frame starts at the shape's full height (a short text
@@ -936,26 +962,37 @@ class DocenPresentation extends AddinHost {
     // spills below the box like the painted stack does.
     const frame = 3; // the edit frame's top+bottom borders
     const syncLayout = (): void => {
-      if (!member || !ins) {
-        editor.style.height = "auto";
-        editor.style.height = `${Math.max(box.height * scale, editor.scrollHeight + frame)}px`;
-        return;
-      }
       editor.style.height = "auto";
       editor.style.paddingTop = `${ins.top * scale + baselineShift}px`;
-      if (member.anchor === "top") {
+      if (anchor === "top") {
         editor.style.height = `${Math.max(box.height * scale, editor.scrollHeight + frame)}px`;
         return;
       }
       const padTB = (ins.top + ins.bottom) * scale;
       const content = editor.scrollHeight - padTB;
-      const slack = member.autoFit ? 0 : box.height * scale - frame - padTB - content;
+      const slack = autoFit ? 0 : box.height * scale - frame - padTB - content;
       if (slack >= 0) {
         editor.style.height = `${box.height * scale}px`;
-        editor.style.paddingTop = `${ins.top * scale + baselineShift + (member.anchor === "center" ? slack / 2 : slack)}px`;
+        editor.style.paddingTop = `${ins.top * scale + baselineShift + (anchor === "center" ? slack / 2 : slack)}px`;
       } else {
         editor.style.height = `${content + padTB + frame}px`;
       }
+    };
+    // The write-through: the typed text lands in the shape (raf-merged) and
+    // the slide reprojects — the canvas under the overlay paints exactly the
+    // session's text. IME composition waits for the commit event (partial
+    // pinyin must not hit the model mid-session).
+    let composing = false;
+    let lastWritten = text;
+    const writeThrough = (): void => {
+      if (composing || this.#textEditRaf) return;
+      this.#textEditRaf = requestAnimationFrame(() => {
+        this.#textEditRaf = 0;
+        if (this.#textEditor !== editor || editor.value === lastWritten) return;
+        lastWritten = editor.value;
+        writeShapeText(child, editor.value);
+        this.#reproject(sel.slide);
+      });
     };
     editor.addEventListener("keydown", (event) => {
       // Escape leaves the edit (committing); typing keys stay in the textarea.
@@ -965,7 +1002,18 @@ class DocenPresentation extends AddinHost {
       }
       event.stopPropagation();
     });
-    editor.addEventListener("input", syncLayout);
+    editor.addEventListener("input", () => {
+      syncLayout();
+      writeThrough();
+    });
+    editor.addEventListener("compositionstart", () => {
+      composing = true;
+    });
+    editor.addEventListener("compositionend", () => {
+      composing = false;
+      syncLayout();
+      writeThrough();
+    });
     this.#canvasHost().append(editor);
     // Measure with the element in the tree — the first pass sizes a
     // top-anchored frame and shifts center/bottom onto the painted baseline.
@@ -973,38 +1021,45 @@ class DocenPresentation extends AddinHost {
     editor.focus();
     editor.select();
     this.#textEditor = editor;
+    this.#textEditBefore = body ? structuredClone(body) : null;
     this.#overlay?.hide();
   }
 
-  /** Leave the text edit. `write` commits the textarea's text back into the
-   *  shape (an undo-able edit when it changed); plain exits just drop it.
-   *  A table cell session dispatches to its own exit. */
+  /** Leave the text edit. The session's keystrokes have written through into
+   *  the shape, so `write` only records the undo step (the entry body vs
+   *  now) and repaints once, synchronously — the pending raf's final state
+   *  is flushed first so the recorded "after" is the text the user sees.
+   *  Plain exits just drop the overlay. A table cell session dispatches to
+   *  its own exit. */
   #exitTextEditing(write: boolean): void {
     if (this.#tableEdit) return this.#exitTableCellEditing(write);
     const editor = this.#textEditor;
     this.#textEditor = null;
+    if (this.#textEditRaf) {
+      cancelAnimationFrame(this.#textEditRaf);
+      this.#textEditRaf = 0;
+    }
     editor?.remove();
     const sel = this.#selection;
     const child = this.#selectedChild();
-    if (editor && write && sel && child && "shape" in child) {
+    const before = this.#textEditBefore;
+    this.#textEditBefore = null;
+    if (editor && write && sel && child && "shape" in child && before && child.shape.textBody) {
       const shape = child.shape;
-      const text = editor.value;
-      if (text !== shapeTextOf(child) && shape.textBody) {
-        const before = structuredClone(shape.textBody);
-        if (writeShapeText(child, text)) {
-          const after = structuredClone(shape.textBody);
-          this.#pushEdit({
-            undo: () => {
-              shape.textBody = structuredClone(before);
-              this.#reproject(sel.slide);
-            },
-            redo: () => {
-              shape.textBody = structuredClone(after);
-              this.#reproject(sel.slide);
-            },
-          });
-          this.#reproject(sel.slide);
-        }
+      if (editor.value !== shapeTextOf(child)) writeShapeText(child, editor.value);
+      const after = structuredClone(shape.textBody);
+      if (JSON.stringify(before) !== JSON.stringify(after)) {
+        this.#pushEdit({
+          undo: () => {
+            shape.textBody = structuredClone(before);
+            this.#reproject(sel.slide);
+          },
+          redo: () => {
+            shape.textBody = structuredClone(after);
+            this.#reproject(sel.slide);
+          },
+        });
+        this.#reproject(sel.slide);
       }
     }
     this.#restoreOverlay();
