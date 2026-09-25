@@ -10,6 +10,9 @@
 // captureTransaction) crashes — so every translation here goes through pure
 // PM state commands.
 
+// Leafer ships animate() as a stub that only logs — the caret blink needs
+// the real tween plugin registered.
+import "@leafer-in/animate";
 import type { ShapeTextStack } from "@docen/core";
 import {
   docxExtensions,

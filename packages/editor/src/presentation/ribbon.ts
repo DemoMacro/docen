@@ -193,6 +193,14 @@ const TRANSITIONS = [
   "random",
 ] as const;
 
+/** The Animate / Add Animation splits' presets: the entrance effects the
+ *  show playback tweens, plus none (clears the shape's entry). Values are
+ *  the AnimationType tokens. */
+const ANIMATIONS = ["none", "appear", "fade", "fly", "zoom"] as const;
+
+const animationItems = (): RibbonMenuItem[] =>
+  ANIMATIONS.map((value) => ({ text: `ppt.ribbon.animate.${value}`, value }));
+
 export function presentationRibbonTabs(): RibbonTab[] {
   return [
     {
@@ -373,14 +381,20 @@ export function presentationRibbonTabs(): RibbonTab[] {
       label: "ppt.ribbon.tab.animations",
       groups: [
         group("animation", [
-          btn("animate", cmd("animate"), { icon: "animate", size: "large" }),
+          splitBtn("animate", cmd("animate"), animationItems(), {
+            icon: "animate",
+            size: "large",
+          }),
           btn("animation-pane", cmd("animation-pane"), {
             icon: "selection-pane",
             size: "large",
           }),
         ]),
         group("advanced-animation", [
-          btn("add-animation", cmd("add-animation"), { icon: "add-animation", size: "large" }),
+          splitBtn("add-animation", cmd("add-animation"), animationItems(), {
+            icon: "add-animation",
+            size: "large",
+          }),
         ]),
       ],
     },

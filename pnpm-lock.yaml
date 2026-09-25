@@ -112,6 +112,9 @@ importers:
       '@fluentui/web-components':
         specifier: 3.1.3
         version: 3.1.3(@microsoft/fast-element@3.0.3)(@microsoft/focusgroup-polyfill@1.5.0)
+      '@leafer-in/animate':
+        specifier: 2.2.10
+        version: 2.2.10(@leafer-in/color@2.2.10(@leafer-in/interface@2.2.10(@leafer-ui/interface@2.2.10)(@leafer/interface@2.2.10))(@leafer-ui/draw@2.2.10)(@leafer-ui/interface@2.2.10))(@leafer-in/interface@2.2.10(@leafer-ui/interface@2.2.10)(@leafer/interface@2.2.10))(@leafer-ui/draw@2.2.10)(@leafer-ui/interface@2.2.10)
       '@microsoft/fast-element':
         specifier: 3.0.3
         version: 3.0.3
@@ -625,6 +628,14 @@ packages:
 
   '@leafer-editor/web@2.2.10':
     resolution: {integrity: sha512-jwcr40vjZy4bckoWButrdElkBDAIbW5OX5xGx/xLrNMcZERYZT9x3lwY9b9XBx7Jat7Rg81FIevRgrfaT1NoOQ==}
+
+  '@leafer-in/animate@2.2.10':
+    resolution: {integrity: sha512-KN7JdP0esYgd6LuUhSYxQBsDMGdAmdouI6DOVOtH45+S723G9MYOD5xhkjC05DFMa1YirUqUrNDM00Ymf5px/w==}
+    peerDependencies:
+      '@leafer-in/color': ^2.2.10
+      '@leafer-in/interface': ^2.2.10
+      '@leafer-ui/draw': ^2.2.10
+      '@leafer-ui/interface': ^2.2.10
 
   '@leafer-in/arrow@2.2.10':
     resolution: {integrity: sha512-HuSTLtan0xqDyACMjagPadF/TcLTzwegIWgcwxn9CuZh8LMYRrUEkSlUC9YuZfVqHnpiLtUgcXBM8pJrIfJrjg==}
@@ -3215,6 +3226,13 @@ snapshots:
       - '@leafer-in/editor'
       - '@leafer-ui/interface'
       - '@leafer/interface'
+
+  '@leafer-in/animate@2.2.10(@leafer-in/color@2.2.10(@leafer-in/interface@2.2.10(@leafer-ui/interface@2.2.10)(@leafer/interface@2.2.10))(@leafer-ui/draw@2.2.10)(@leafer-ui/interface@2.2.10))(@leafer-in/interface@2.2.10(@leafer-ui/interface@2.2.10)(@leafer/interface@2.2.10))(@leafer-ui/draw@2.2.10)(@leafer-ui/interface@2.2.10)':
+    dependencies:
+      '@leafer-in/color': 2.2.10(@leafer-in/interface@2.2.10(@leafer-ui/interface@2.2.10)(@leafer/interface@2.2.10))(@leafer-ui/draw@2.2.10)(@leafer-ui/interface@2.2.10)
+      '@leafer-in/interface': 2.2.10(@leafer-ui/interface@2.2.10)(@leafer/interface@2.2.10)
+      '@leafer-ui/draw': 2.2.10
+      '@leafer-ui/interface': 2.2.10
 
   '@leafer-in/arrow@2.2.10(@leafer-in/interface@2.2.10(@leafer-ui/interface@2.2.10)(@leafer/interface@2.2.10))(@leafer-ui/draw@2.2.10)(@leafer-ui/interface@2.2.10)':
     dependencies:

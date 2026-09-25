@@ -14,6 +14,7 @@ export {
   type TableCellOptions,
   type TransitionOptions,
   type TransitionType,
+  type SlideAnimation,
 } from "@office-open/pptx";
 export { projectPresentation, type ProjectedPresentation, type ProjectedSlide } from "./scene";
 export { textBlocks } from "./scene";

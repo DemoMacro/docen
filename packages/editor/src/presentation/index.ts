@@ -36,6 +36,7 @@ import {
   type TableCellOptions,
   type TransitionOptions,
   type TransitionType,
+  type SlideAnimation,
 } from "@docen/pptx";
 import { customElement, observable } from "@microsoft/fast-element";
 import type { DataType } from "@office-open/core";
@@ -46,6 +47,9 @@ import type {
   TextFont,
   TextRunOptions,
 } from "@office-open/core/drawing";
+// Leafer ships animate() as a stub that only logs — the show's entrance
+// tweens need the real plugin registered.
+import "@leafer-in/animate";
 import { App, type IGroup } from "leafer-ui";
 
 import { renderRibbonFromSchema } from "../document/ribbon";
@@ -159,6 +163,10 @@ const ALIGNMENTS: ReadonlyMap<string, "left" | "center" | "right" | "justify"> =
   ["justify", "justify"],
 ]);
 
+/** The Animate split's presets: the AnimationType tokens the show playback
+ *  maps onto Leafer's own tweening (appear = instant, no tween). */
+const ANIMATION_PRESETS: ReadonlySet<string> = new Set(["appear", "fade", "fly", "zoom"]);
+
 /** Projected paragraph alignment → the CSS text-align the edit overlay uses
  *  (distribute reads as justified — CSS has no separate token). */
 const TEXT_ALIGN_OF: Record<string, string> = {
@@ -262,6 +270,8 @@ const WIRED_COMMANDS: ReadonlySet<string> = new Set([
   "hyperlink",
   "from-beginning",
   "from-current",
+  "animate",
+  "add-animation",
   "slide-number",
   "date-time",
   "select",
@@ -653,7 +663,9 @@ class DocenPresentation extends AddinHost {
     else if (name === "hyperlink") this.#openLinkDialog();
     else if (name === "from-beginning") this.#startShow("beginning");
     else if (name === "from-current") this.#startShow("current");
-    else if (name === "slide-number" || name === "date-time") this.#insertFieldBox(name);
+    else if (name === "animate" || name === "add-animation") {
+      this.#applyAnimation(event.detail?.value);
+    } else if (name === "slide-number" || name === "date-time") this.#insertFieldBox(name);
     else if (name === "select") this.#toggleSelectionPane();
     else if (TEXT_FORMAT_COMMANDS.has(name)) this.#applyTextFormat(name, event.detail?.value);
   };
@@ -1951,6 +1963,48 @@ class DocenPresentation extends AddinHost {
     restore(slides.map(() => after));
   }
 
+  /** The Animate split's pick on the selected object: one entrance preset as
+   *  a SlideAnimation addressed by the shape's cNvPr name (an unnamed shape
+   *  takes one unique among its siblings — the file format resolves names to
+   *  spTgt ids at compile time). "none" clears the shape's entry; a pick that
+   *  changes nothing records nothing. */
+  #applyAnimation(value?: string): void {
+    const preset = value ?? "fade";
+    if (preset !== "none" && !ANIMATION_PRESETS.has(preset)) return;
+    const sel = this.#selection;
+    const host = this.#presJson?.slides?.[sel?.slide ?? -1];
+    const child = host?.children?.[sel?.child ?? -1];
+    const nv = child ? nonVisualOf(child) : null;
+    if (!host || !nv) return;
+    const taken = new Set(
+      (host.children ?? [])
+        .map((c) => nonVisualOf(c)?.name?.trim())
+        .filter((n): n is string => !!n),
+    );
+    let name = nv.name?.trim();
+    if (!name) {
+      let n = (sel?.child ?? 0) + 1;
+      while (taken.has((name = `Shape ${n}`))) n++;
+      nv.name = name;
+    }
+    const before = host.animations;
+    const entries = Array.isArray(before) ? before : [];
+    const kept = entries.filter((e) => typeof e === "object" && e.shapeName !== name);
+    const after: SlideAnimation[] | undefined =
+      preset === "none"
+        ? kept.length > 0
+          ? kept
+          : undefined
+        : [...kept, { type: preset as SlideAnimation["type"], shapeName: name }];
+    if (JSON.stringify(before) === JSON.stringify(after)) return;
+    const restore = (value: SlideAnimation[] | string | undefined): void => {
+      if (value === undefined) delete host.animations;
+      else host.animations = structuredClone(value);
+    };
+    this.#pushEdit({ undo: () => restore(before), redo: () => restore(after) });
+    restore(after);
+  }
+
   // ── Slide show ───────────────────────────────────────────────────────────
 
   /** Enter the presenting state: the chrome steps aside, the zoom fits one
@@ -1971,6 +2025,10 @@ class DocenPresentation extends AddinHost {
       const fit = Math.floor(((area.clientHeight - SLIDE_GAP_PX) / pres.heightPx) * 100);
       this.#setZoom(Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, fit)));
     }
+    // A full repaint first: the show's animations address elements by their
+    // place in the tree's child order, and the partial repaints'
+    // remove-and-append has long since shuffled that order.
+    this.#renderDeck();
     this.#gotoShowSlide(from === "beginning" ? 0 : this.#activeSlideIndex());
     void this.#workspaceEl()
       ?.requestFullscreen?.()
@@ -1988,7 +2046,7 @@ class DocenPresentation extends AddinHost {
   }
 
   /** Jump to a slide (clamped) with an instant scroll — the slideshow's own
-   *  paging has no smooth travel. */
+   *  paging has no smooth travel — and play its entrance animations. */
   #gotoShowSlide(index: number): void {
     const pres = this.#pres;
     const area = this.#area();
@@ -1997,6 +2055,65 @@ class DocenPresentation extends AddinHost {
     const pitch = (pres.heightPx + SLIDE_GAP_PX) * (this.#zoom / 100);
     area.scrollTo({ top: this.#showingSlide * pitch, behavior: "instant" as ScrollBehavior });
     this.#syncSlideIndicator();
+    this.#playShowAnimations(this.#showingSlide);
+  }
+
+  /** Play a slide's entrance animations in the live show: each entry tweens
+   *  the elements its shape paints, in listed order with a stagger. Members
+   *  collect by containment (a simple member sits at the shape's box, a
+   *  rotated one at its center, a text body scatters its lines inside it),
+   *  so the paint shape never has to be mirrored here; effects outside the
+   *  preset set play as a fade. */
+  #playShowAnimations(index: number): void {
+    const slide = this.#presJson?.slides?.[index];
+    const entries = slide?.animations;
+    const slideGroup = (this.#app?.tree as unknown as IGroup | undefined)?.children[index] as
+      | IGroup
+      | undefined;
+    if (!slide || !slideGroup || !Array.isArray(entries) || entries.length === 0) return;
+    const hits = slideHits(slide);
+    const inBox = (box: Box, x: number, y: number): boolean =>
+      x >= box.x - 1 && x <= box.x + box.width + 1 && y >= box.y - 1 && y <= box.y + box.height + 1;
+    let delay = 0;
+    for (const entry of entries) {
+      // Entrances only: a parsed exit/emphasis entry waits for a follow-up
+      // batch rather than playing backwards.
+      if (entry.class === "exit" || entry.class === "emphasis" || entry.class === "mediaCall")
+        continue;
+      const hit = entry.shapeName
+        ? hits.find((h) => nonVisualOf(slide.children![h.child]!)?.name === entry.shapeName)
+        : undefined;
+      if (!hit) continue;
+      const duration = entry.duration ?? 500;
+      const options = { duration, delay, jump: true, easing: "ease-out" as const };
+      for (const el of slideGroup.children.filter(
+        // An unpainted element carries no position — NaN fails the box test.
+        (member, i) => i > 0 && inBox(hit.box, member.x ?? NaN, member.y ?? NaN),
+      )) {
+        const top = el.y ?? 0;
+        if (entry.type === "fly") {
+          el.animate(
+            [
+              { y: top + hit.box.height / 3, opacity: 0 },
+              { y: top, opacity: 1 },
+            ],
+            options,
+          );
+        } else if (entry.type === "zoom") {
+          el.around = "center";
+          el.animate(
+            [
+              { scale: 0.3, opacity: 0 },
+              { scale: 1, opacity: 1 },
+            ],
+            options,
+          );
+        } else if (entry.type !== "appear") {
+          el.animate([{ opacity: 0 }, { opacity: 1 }], options);
+        }
+      }
+      delay += duration;
+    }
   }
 
   /** Wheel paging in the show, throttled — one notch is one slide. */
