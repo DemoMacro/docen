@@ -658,6 +658,62 @@ describe("pictures and background", () => {
     expect(slides[0]!.background).toEqual({ kind: "image", src: pngSrc });
   });
 
+  it("tiles a pattern fill's preset geometry and colors", () => {
+    const { slides } = project({
+      slides: [
+        {
+          background: {
+            fill: {
+              type: "pattern",
+              pattern: "cross",
+              foregroundColor: "FF0000",
+              backgroundColor: { type: "solid", color: "00FF00" },
+            },
+          },
+        },
+      ],
+    } as never);
+    const background = slides[0]!.background;
+    if (background?.kind !== "image") throw new Error("expected a pattern image");
+    const svg = decodeURIComponent(background.src.split(",")[1]!);
+    expect(svg).toContain('pattern id="pattern"');
+    expect(svg).toContain('patternUnits="userSpaceOnUse"');
+    expect(svg).toContain('fill="#FF0000"');
+    expect(svg).toContain('fill="#00FF00"');
+    expect(svg).toContain('d="M0 .5H8 M.5 0V8"');
+  });
+
+  it("resolves phClr and theme colors in a bgRef pattern", () => {
+    const { slides } = project({
+      masters: [
+        {
+          theme: {
+            colorScheme: { dark1: "111111" },
+            formatScheme: {
+              backgroundFillStyles: [
+                {
+                  type: "pattern",
+                  pattern: "diagonalCross",
+                  foregroundColor: { type: "solid", color: { value: "phClr" } },
+                  backgroundColor: { type: "solid", color: { value: "tx1" } },
+                },
+              ],
+              fillStyles: [],
+              lineStyles: [],
+              effectStyles: [],
+            },
+          },
+        },
+      ] as never,
+      slides: [{ background: { reference: { index: 1001, color: "AA0000" } } }],
+    } as never);
+    const background = slides[0]!.background;
+    if (background?.kind !== "image") throw new Error("expected a pattern image");
+    const svg = decodeURIComponent(background.src.split(",")[1]!);
+    expect(svg).toContain('fill="#AA0000"');
+    expect(svg).toContain('fill="#111111"');
+  });
+
   it("resolves a bgRef through the theme's background fill styles", () => {
     const { slides } = project({
       masters: [

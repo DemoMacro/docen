@@ -18,6 +18,7 @@ import { DEFAULT_COLOR_MAPPING } from "@office-open/core/theme";
 import type { PresentationOptions, SlideOptions } from "@office-open/pptx";
 
 import { IDENTITY } from "./geometry";
+import { patternBackgroundOf } from "./pattern-background";
 import { pictureSrcOf } from "./pictures";
 import { regionsOf, type ThemeColors } from "./table-style";
 import { childMembers } from "./walk";
@@ -33,8 +34,7 @@ export interface ProjectedPresentation {
 
 /** One projected slide. */
 export interface ProjectedSlide {
-  /** The slide's background paint; absent → the painter's page default.
-   *  Pattern fills and bgRef style-matrix inheritance stay unprojected. */
+  /** The slide's background paint; absent → the painter's page default. */
   background?: ProjectedSlideBackground;
   /** Slide-absolute drawing members, paint order = document order. */
   members: LayoutDrawingMember[];
@@ -59,11 +59,12 @@ export type ProjectedSlideBackground =
 export function projectPresentation(pres: PresentationOptions): ProjectedPresentation {
   const { widthPx, heightPx } = slideSizePx(pres.size);
   const context = tableContextOf(pres);
+  const size = { widthPx, heightPx };
   return {
     widthPx,
     heightPx,
     slides: (pres.slides ?? []).map((slide, index) =>
-      projectSlide(slide, index + 1, pres.slides?.length, context, pres.masters),
+      projectSlide(slide, index + 1, pres.slides?.length, context, pres.masters, size),
     ),
   };
 }
@@ -148,8 +149,9 @@ function projectSlide(
   slideCount: number | undefined,
   context: ThemeContext,
   masters: PresentationOptions["masters"],
+  size: { widthPx: number; heightPx: number },
 ): ProjectedSlide {
-  const background = slideBackgroundOf(slide, masters, context);
+  const background = slideBackgroundOf(slide, masters, context, size);
   return {
     ...(background ? { background } : {}),
     members: childMembers(slide.children ?? [], IDENTITY, [], {
@@ -167,11 +169,13 @@ function slideBackgroundOf(
   slide: SlideOptions,
   masters: PresentationOptions["masters"],
   context: ThemeContext,
+  size: { widthPx: number; heightPx: number },
 ): ProjectedSlideBackground | undefined {
   const background = slide.background ?? masters?.[0]?.background;
   if (!background) return undefined;
-  if (background.fill) return backgroundOf(background.fill);
-  if (background.reference) return bgRefFill(background.reference, context);
+  if (background.fill) return backgroundOf(background.fill, size.widthPx, size.heightPx);
+  if (background.reference)
+    return bgRefFill(background.reference, context, size.widthPx, size.heightPx);
   return undefined;
 }
 
@@ -181,6 +185,8 @@ function slideBackgroundOf(
 function bgRefFill(
   reference: StyleMatrixReferenceOptions,
   context: ThemeContext,
+  widthPx: number,
+  heightPx: number,
 ): ProjectedSlideBackground | undefined {
   const style =
     context.backgroundFillStyles[
@@ -188,7 +194,7 @@ function bgRefFill(
     ];
   if (!style) return undefined;
   const phClr = styleColorOf(reference.color, context, undefined);
-  return backgroundOf(resolveFillColors(style, phClr, context));
+  return backgroundOf(resolveFillColors(style, phClr, context), widthPx, heightPx);
 }
 
 /** One EG_ColorChoice → hex: hex strings pass, scheme tokens resolve through
@@ -246,16 +252,31 @@ function resolveFillColors(
   if (fill.type === "pattern") {
     return {
       ...fill,
-      foregroundColor: styleColorOf(fill.foregroundColor, context, phClr) ?? fill.foregroundColor,
-      backgroundColor: styleColorOf(fill.backgroundColor, context, phClr) ?? fill.backgroundColor,
+      foregroundColor: patternColorOf(fill.foregroundColor, context, phClr) as never,
+      backgroundColor: patternColorOf(fill.backgroundColor, context, phClr) as never,
     };
   }
   return fill;
 }
 
-/** A p:bg fill → the projected paint. Solid/gradient/picture land; pattern
- *  fills and the other exotics keep the painter's default. */
-function backgroundOf(fill: FillOptions): ProjectedSlideBackground | undefined {
+/** One pattern fill's color wrapper or raw color choice → the resolver. */
+function patternColorOf(
+  value: unknown,
+  context: ThemeContext,
+  phClr: string | undefined,
+): string | undefined {
+  if (value && typeof value === "object" && "type" in value && value.type === "solid") {
+    return styleColorOf((value as unknown as { color: unknown }).color, context, phClr);
+  }
+  return styleColorOf(value, context, phClr);
+}
+
+/** A p:bg fill → the projected paint; exotic fills keep the painter's default. */
+function backgroundOf(
+  fill: FillOptions,
+  widthPx: number,
+  heightPx: number,
+): ProjectedSlideBackground | undefined {
   if (typeof fill === "string") {
     const color = solidFillOf(fill);
     return color ? { kind: "solid", color } : undefined;
@@ -293,6 +314,10 @@ function backgroundOf(fill: FillOptions): ProjectedSlideBackground | undefined {
   }
   if (fill.type === "blip") {
     const src = pictureSrcOf(fill.data, fill.imageType);
+    return src ? { kind: "image", src } : undefined;
+  }
+  if (fill.type === "pattern") {
+    const src = patternBackgroundOf(fill, widthPx, heightPx);
     return src ? { kind: "image", src } : undefined;
   }
   return undefined;
