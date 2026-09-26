@@ -783,6 +783,31 @@ describe("pictures and background", () => {
     });
   });
 
+  it("evaluates phClr transforms in a bgRef fill", () => {
+    const { slides } = project({
+      masters: [
+        {
+          theme: {
+            colorScheme: { accent1: "FF0000" },
+            formatScheme: {
+              backgroundFillStyles: [
+                {
+                  type: "solid",
+                  color: { value: "phClr", transforms: { lumMod: 20, lumOff: 80 } },
+                },
+              ],
+              fillStyles: [],
+              lineStyles: [],
+              effectStyles: [],
+            },
+          },
+        },
+      ] as never,
+      slides: [{ background: { reference: { index: 1001, color: { value: "accent1" } } } }],
+    });
+    expect(slides[0]!.background).toEqual({ kind: "solid", color: "FFCCCC" });
+  });
+
   it("inherits the master's bgRef when the slide declares no background", () => {
     const { slides } = project({
       masters: [

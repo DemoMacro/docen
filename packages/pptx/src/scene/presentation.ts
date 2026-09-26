@@ -11,12 +11,13 @@
 
 import { measureEmu, solidFillOf } from "@docen/core/geometry";
 import { emuToPx, type LayoutDrawingMember } from "@docen/layout";
-import type { FillOptions } from "@office-open/core/drawing";
+import type { ColorTransformOptions, FillOptions } from "@office-open/core/drawing";
 import type { StyleMatrixReferenceOptions } from "@office-open/core/drawing";
 import type { ColorMappingOptions } from "@office-open/core/theme";
 import { DEFAULT_COLOR_MAPPING } from "@office-open/core/theme";
 import type { PresentationOptions, SlideOptions } from "@office-open/pptx";
 
+import { transformColor } from "./color-transform";
 import { IDENTITY } from "./geometry";
 import { patternBackgroundOf } from "./pattern-background";
 import { pictureSrcOf } from "./pictures";
@@ -173,7 +174,12 @@ function slideBackgroundOf(
 ): ProjectedSlideBackground | undefined {
   const background = slide.background ?? masters?.[0]?.background;
   if (!background) return undefined;
-  if (background.fill) return backgroundOf(background.fill, size.widthPx, size.heightPx);
+  if (background.fill)
+    return backgroundOf(
+      resolveFillColors(background.fill, undefined, context),
+      size.widthPx,
+      size.heightPx,
+    );
   if (background.reference)
     return bgRefFill(background.reference, context, size.widthPx, size.heightPx);
   return undefined;
@@ -199,8 +205,7 @@ function bgRefFill(
 
 /** One EG_ColorChoice → hex: hex strings pass, scheme tokens resolve through
  * the master's color map into the theme's scheme, phClr takes the style
- * reference's color. Transforms (lumMod and friends) stay unprojected — the
- * base color paints. */
+ * reference's color, then evaluates its color-transform list. */
 function styleColorOf(
   color: unknown,
   context: ThemeContext,
@@ -209,13 +214,16 @@ function styleColorOf(
   if (typeof color === "string") return color.replace("#", "").toUpperCase();
   if (color && typeof color === "object" && "value" in color && typeof color.value === "string") {
     const token = color.value;
-    if (token === "phClr") return phClr;
+    if (token === "phClr")
+      return phClr ? transformColor(phClr, transformsOf(color)).color : undefined;
+    if (/^[0-9A-F]{6}$/i.test(token)) return transformColor(token, transformsOf(color)).color;
     // The raw clrMap tokens spell the first four slots short (bg1/tx1/bg2/tx2);
     // the parsed color map keys them long (background1/text1/…).
     const key =
       { bg1: "background1", tx1: "text1", bg2: "background2", tx2: "text2" }[token] ?? token;
     const slot = (context.colorMapping as unknown as Record<string, string>)[key] ?? token;
-    return context.themeColors?.[slot as keyof ThemeColors];
+    const hex = context.themeColors?.[slot as keyof ThemeColors];
+    return hex ? transformColor(hex, transformsOf(color)).color : undefined;
   }
   return undefined;
 }
@@ -231,7 +239,7 @@ function resolveFillColors(
   if (fill.type === "solid") {
     return {
       ...fill,
-      color: styleColorOf(fill.color, context, phClr) ?? (fill.color as never),
+      color: colorChoiceOf(fill.color, context, phClr) as never,
     };
   }
   if (fill.type === "gradient") {
@@ -252,15 +260,15 @@ function resolveFillColors(
   if (fill.type === "pattern") {
     return {
       ...fill,
-      foregroundColor: patternColorOf(fill.foregroundColor, context, phClr) as never,
-      backgroundColor: patternColorOf(fill.backgroundColor, context, phClr) as never,
+      foregroundColor: colorChoiceOf(fill.foregroundColor, context, phClr) as never,
+      backgroundColor: colorChoiceOf(fill.backgroundColor, context, phClr) as never,
     };
   }
   return fill;
 }
 
-/** One pattern fill's color wrapper or raw color choice → the resolver. */
-function patternColorOf(
+/** A SolidFillOptions wrapper or raw EG_ColorChoice → the resolver. */
+function colorChoiceOf(
   value: unknown,
   context: ThemeContext,
   phClr: string | undefined,
@@ -269,6 +277,14 @@ function patternColorOf(
     return styleColorOf((value as unknown as { color: unknown }).color, context, phClr);
   }
   return styleColorOf(value, context, phClr);
+}
+
+function transformsOf(color: unknown): ColorTransformOptions | undefined {
+  if (!color || typeof color !== "object" || !("transforms" in color)) return undefined;
+  const transforms = (color as { transforms?: unknown }).transforms;
+  return transforms && typeof transforms === "object"
+    ? (transforms as ColorTransformOptions)
+    : undefined;
 }
 
 /** A p:bg fill → the projected paint; exotic fills keep the painter's default. */

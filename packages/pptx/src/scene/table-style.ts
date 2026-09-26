@@ -10,8 +10,11 @@ import type {
   TableStyleRegion,
   ThemeableLineStyleOptions,
 } from "@office-open/core/drawing";
+import type { ColorTransformOptions } from "@office-open/core/drawing";
 import type { ColorSchemeOptions } from "@office-open/core/theme";
 import type { TableOptions } from "@office-open/pptx";
+
+import { transformColor } from "./color-transform";
 
 /** One clrScheme slot's value spelling (hex string or a sysClr object). */
 type SchemeColorValue = NonNullable<ColorSchemeOptions["accent1"]>;
@@ -523,7 +526,7 @@ function gridRegions(): TableStyleRegions {
   };
 }
 
-/** A raw fill choice (a:srgbClr or a:schemeClr with lum/tint children) →
+/** A raw fill choice (a:srgbClr or a:schemeClr with transform children) →
  *  the hex the painter paints; unresolvable fills drop out. */
 function fillOf(raw: string, theme: ThemeColors | undefined): string | undefined {
   const srgb = /srgbClr\s+val="([0-9a-fA-F]{6})"/.exec(raw);
@@ -531,16 +534,13 @@ function fillOf(raw: string, theme: ThemeColors | undefined): string | undefined
   const scheme = /schemeClr\s+val="(\w+)"/.exec(raw);
   if (!scheme) return undefined;
   const base = schemeTokenOf(scheme[1]!, theme, DEFAULT_ACCENT);
-  // The common "lighter variation" spelling: lumMod 20% + lumOff 80% ≈ tint 0.8.
-  if (/lumMod\s+val="20000"/.test(raw) && /lumOff\s+val="80000"/.test(raw))
-    return shadeOf(base, 0.8);
-  if (/lumMod\s+val="40000"/.test(raw) && /lumOff\s+val="60000"/.test(raw))
-    return shadeOf(base, 0.6);
-  const tint = /tint\s+val="(\d+)"/.exec(raw);
-  if (tint) return shadeOf(base, Number(tint[1]) / 100000);
-  const shade = /shade\s+val="(\d+)"/.exec(raw);
-  if (shade) return shadeOf(base, -Number(shade[1]) / 100000);
-  return base;
+  const transforms: Record<string, number | boolean> = {};
+  const child = /<a:(\w+)(?:\s+val="(-?\d+)")?\s*\/>/g;
+  for (const [, name, value] of raw.matchAll(child)) {
+    if (!name || name === "srgbClr" || name === "schemeClr") continue;
+    transforms[name as keyof ColorTransformOptions] = value == null ? true : Number(value) / 1000;
+  }
+  return transformColor(base, transforms as ColorTransformOptions).color;
 }
 
 function lineOf(line: ThemeableLineStyleOptions, theme: ThemeColors | undefined) {
