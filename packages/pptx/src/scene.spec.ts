@@ -1062,9 +1062,91 @@ describe("table style projection", () => {
     const [header, band1, band2] = table.rows.map((row) => row.cells);
     expect(header![0]).toMatchObject({ fill: "FF0000" });
     expect(inlineStyleOf(header![0]!)).toMatchObject({ bold: true, color: "FFFFFF" });
-    // Data rows alternate the light-accent bands; inside rules are white.
-    expect(band1![0]).toMatchObject({ fill: "FFCCCC", borders: { top: { color: "FFFFFF" } } });
-    expect(band2![0]).toMatchObject({ fill: "FF9999" });
+    // Medium Style 2 tints its base body by 20% and its first band by 40%.
+    expect(band1![0]).toMatchObject({ fill: "FF6666", borders: { top: { color: "FFFFFF" } } });
+    expect(band2![0]).toMatchObject({ fill: "FF3333" });
+  });
+
+  it("applies a derived Medium Style 2 GUID to its replacement accent", () => {
+    const table = tableOf({
+      masters: [{ theme: { colorScheme: { accent1: "FF0000", accent2: "00FF00" } } }] as never,
+      slides: [
+        {
+          children: [
+            tableChild({
+              ...grid,
+              tableStyleId: "{21E4AEA4-8DFA-4A89-87EB-49C32662AFE0}",
+              firstRow: true,
+              bandRow: true,
+            }),
+          ],
+        },
+      ],
+    });
+    const [header, band1, band2] = table.rows.map((row) => row.cells);
+    expect(header![0]).toMatchObject({ fill: "00FF00" });
+    expect(band1![0]).toMatchObject({ fill: "66FF66" });
+    expect(band2![0]).toMatchObject({ fill: "33FF33" });
+  });
+
+  it("resolves Light Style 1 and Dark Style 1 accent variants", () => {
+    const theme = { colorScheme: { accent2: "00AA00", accent3: "0000AA" } };
+    const light = tableOf({
+      masters: [{ theme }] as never,
+      slides: [
+        {
+          children: [
+            tableChild({
+              ...grid,
+              tableStyleId: "{0E3FDE45-AF77-4B5C-9715-49D594BDF05E}",
+              firstRow: true,
+            }),
+          ],
+        },
+      ],
+    });
+    expect(light.rows[0]!.cells[0]!.fill).toBeUndefined();
+    expect(light.rows[0]!.cells[0]!.borders).toMatchObject({ top: { color: "00AA00" } });
+
+    const dark = tableOf({
+      masters: [{ theme }] as never,
+      slides: [
+        {
+          children: [
+            tableChild({
+              ...grid,
+              tableStyleId: "{D03447BB-5D67-496B-8E87-E561075AD55C}",
+              firstRow: true,
+            }),
+          ],
+        },
+      ],
+    });
+    expect(dark.rows[0]!.cells[0]).toMatchObject({ fill: "0000AA" });
+    expect(dark.rows[1]!.cells[0]).toMatchObject({ fill: "3333BB" });
+    expect(inlineStyleOf(dark.rows[0]!.cells[0]!)).toMatchObject({ bold: true, color: "FFFFFF" });
+  });
+
+  it("keeps Dark Style 2's two-accent derivation split by region", () => {
+    const table = tableOf({
+      masters: [{ theme: { colorScheme: { accent1: "FF0000", accent2: "00FF00" } } }] as never,
+      slides: [
+        {
+          children: [
+            tableChild({
+              ...grid,
+              tableStyleId: "{0660B408-B3CF-4A94-85FC-2B1E0A45F4A2}",
+              firstRow: true,
+              bandRow: true,
+            }),
+          ],
+        },
+      ],
+    });
+    const [header, band1, band2] = table.rows.map((row) => row.cells);
+    expect(header![0]).toMatchObject({ fill: "00FF00" });
+    expect(band1![0]).toMatchObject({ fill: "FF6666" });
+    expect(band2![0]).toMatchObject({ fill: "FF3333" });
   });
 
   it("keeps the no-style GUID bare but honors explicit cell fills", () => {
