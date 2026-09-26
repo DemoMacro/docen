@@ -791,6 +791,38 @@ describe("media frame projection", () => {
     });
   });
 
+  it("carries the playable data URL for the browser-decodable formats", () => {
+    const video: SlideChild = {
+      video: {
+        x: 0,
+        y: 0,
+        width: 1905000,
+        height: 952500,
+        data: new Uint8Array([1, 2, 3]),
+        type: "mp4",
+      },
+    } as unknown as SlideChild;
+    const { slides } = project({ slides: [{ children: [video] }] });
+    expect(slides[0]!.members[0]).toMatchObject({
+      playable: { src: "data:video/mp4;base64,AQID", mime: "video/mp4" },
+    });
+  });
+
+  it("keeps the exotic containers unplayable", () => {
+    const video: SlideChild = {
+      video: {
+        x: 0,
+        y: 0,
+        width: 1905000,
+        height: 952500,
+        data: new Uint8Array([1, 2, 3]),
+        type: "wmv",
+      },
+    } as unknown as SlideChild;
+    const { slides } = project({ slides: [{ children: [video] }] });
+    expect(slides[0]!.members[0]).not.toHaveProperty("playable");
+  });
+
   it("gives audio without a poster the stable dark-player payload", () => {
     const audio: SlideChild = {
       audio: {

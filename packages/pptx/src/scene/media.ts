@@ -1,6 +1,7 @@
 // Media frame (p:pic with a:videoFile / a:audioFile) projection. The bytes
 // stay in the source model for round-trip; the canvas carries the poster and
-// enough identity to paint a stable player while native playback lands.
+// enough identity to paint a stable player, plus the playable data URL for
+// the browser-decodable formats (wmv/avi/wma have no browser decoder).
 
 import type { LayoutDrawingMember } from "@docen/layout";
 import type { AudioFrameOptions, VideoFrameOptions } from "@office-open/pptx";
@@ -10,6 +11,15 @@ import { emuOf, type Xform } from "./geometry";
 const POSTER_MIME: Record<string, string> = {
   png: "image/png",
   jpg: "image/jpeg",
+};
+
+/** The container formats the browser can play, by media family. */
+const PLAYABLE_MIME: Partial<Record<string, string>> = {
+  mp4: "video/mp4",
+  mov: "video/quicktime",
+  mp3: "audio/mpeg",
+  wav: "audio/wav",
+  aac: "audio/aac",
 };
 
 function base64Of(bytes: Uint8Array): string {
@@ -37,6 +47,17 @@ export function mediaMember(
   childPath: readonly number[] | undefined,
 ): LayoutDrawingMember {
   const src = posterUrlOf(options.poster, options.posterType);
+  const playableMime = PLAYABLE_MIME[options.type ?? ""];
+  const playableSrc =
+    playableMime && options.data != null
+      ? typeof options.data === "string"
+        ? options.data.startsWith("data:")
+          ? options.data
+          : `data:${playableMime};base64,${options.data}`
+        : options.data instanceof Uint8Array
+          ? `data:${playableMime};base64,${base64Of(options.data)}`
+          : undefined
+      : undefined;
   return {
     kind: "mediaFrame",
     x: t.sx * emuOf(options.x) + t.dx,
@@ -47,5 +68,6 @@ export function mediaMember(
     media,
     ...(src ? { src } : {}),
     ...(options.fileName ? { fileName: options.fileName } : {}),
+    ...(playableSrc && playableMime ? { playable: { src: playableSrc, mime: playableMime } } : {}),
   };
 }

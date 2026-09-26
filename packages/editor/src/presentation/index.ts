@@ -114,6 +114,7 @@ import {
   rotateChild,
   slideHits,
 } from "./hit-test";
+import { MediaPlayer, type MediaPlayback } from "./media-player";
 import { presentationRibbonTabs } from "./ribbon";
 import {
   paintSlideDeck,
@@ -321,6 +322,7 @@ class DocenPresentation extends AddinHost {
   #zoom = 100;
   #overlay: DrawingOverlay | null = null;
   #shapeDrawer: ShapeDrawer | null = null;
+  #mediaPlayer: MediaPlayer | null = null;
   /** The selected object: the slide child, or — with `member` set — the
    *  group-nested member it descended into (child indexes under the group). */
   #selection: { slide: number; child: number; member?: number[] } | null = null;
@@ -447,6 +449,7 @@ class DocenPresentation extends AddinHost {
       },
     });
     this.#canvasHost().append(this.#overlay.el);
+    this.#mediaPlayer = new MediaPlayer(this.#canvasHost());
     // Shapes/Text Box arm this drag-to-draw tool. The host maps the pointer
     // to the pinned slide frame, so a sweep can start and land on any slide.
     this.#shapeDrawer = new ShapeDrawer(
@@ -519,6 +522,8 @@ class DocenPresentation extends AddinHost {
     document.removeEventListener("keydown", this.#onKeyDown);
     this.#overlay?.el.remove();
     this.#overlay = null;
+    this.#mediaPlayer?.destroy();
+    this.#mediaPlayer = null;
     if (this.#scrollRaf != null) cancelAnimationFrame(this.#scrollRaf);
     this.#app?.destroy();
     this.#app = null;
@@ -791,6 +796,9 @@ class DocenPresentation extends AddinHost {
   // ── Slide strip ──────────────────────────────────────────────────────────
 
   #onScroll = (): void => {
+    // A scrolled strip strands the media overlay (its screen box is a
+    // snapshot) — playback yields to the scroll, like PowerPoint's editor.
+    this.#mediaPlayer?.hide();
     if (this.#scrollRaf != null) return;
     this.#scrollRaf = requestAnimationFrame(() => {
       this.#scrollRaf = undefined;
@@ -824,6 +832,7 @@ class DocenPresentation extends AddinHost {
   #renderDeck(slide?: number): void {
     const pres = this.#pres;
     if (!pres) return;
+    this.#mediaPlayer?.hide();
     // One Leafer app per connection; deck repaints clear the tree in place —
     // destroy + recreate blanks the canvas for a frame on every gesture.
     this.#app ??= new App({
@@ -2152,6 +2161,7 @@ class DocenPresentation extends AddinHost {
     const pres = this.#pres;
     const area = this.#area();
     if (!pres || !area) return;
+    this.#mediaPlayer?.hide();
     this.#showingSlide = Math.max(0, Math.min(pres.slides.length - 1, index));
     const pitch = (pres.heightPx + SLIDE_GAP_PX) * (this.#zoom / 100);
     area.scrollTo({ top: this.#showingSlide * pitch, behavior: "instant" as ScrollBehavior });
@@ -2632,9 +2642,54 @@ class DocenPresentation extends AddinHost {
     return { slide, x, y: stripY - slide * (pres.heightPx + SLIDE_GAP_PX) - SLIDE_GAP_PX };
   }
 
+  /** The playable media frame under the slide point, resolved to the screen
+   * box its overlay player docks at — null when the point hits nothing
+   * playable. */
+  #mediaPlaybackAt(point: { slide: number; x: number; y: number }): MediaPlayback | null {
+    const pres = this.#pres;
+    if (!pres) return null;
+    const member = pres.slides[point.slide]?.members.find(
+      (m) =>
+        m.kind === "mediaFrame" &&
+        m.playable &&
+        point.x >= m.x &&
+        point.x <= m.x + m.width &&
+        point.y >= m.y &&
+        point.y <= m.y + m.height,
+    );
+    if (!member || member.kind !== "mediaFrame" || !member.playable) return null;
+    const surfaceRect = this.#canvasHost().getBoundingClientRect();
+    const stageRect = this.#stage.getBoundingClientRect();
+    if (stageRect.width === 0) return null;
+    const scale = stageRect.width / pres.widthPx;
+    return {
+      media: member.media,
+      src: member.playable.src,
+      x: stageRect.left - surfaceRect.left + member.x * scale,
+      y:
+        stageRect.top -
+        surfaceRect.top +
+        (point.slide * (pres.heightPx + SLIDE_GAP_PX) + SLIDE_GAP_PX) * scale +
+        member.y * scale,
+      width: member.width * scale,
+      height: member.height * scale,
+    };
+  }
+
   readonly #onStagePointerDown = (event: PointerEvent): void => {
     // A click advances the show (PowerPoint's rule) — no gestures inside.
     if (this.#presenting) {
+      // A click on a playable frame toggles its playback instead of the
+      // advance — the media rule outranks the slide rule.
+      const point = event.button === 0 ? this.#stagePointOf(event) : null;
+      const playback = point ? this.#mediaPlaybackAt(point) : null;
+      if (playback) {
+        const player = this.#mediaPlayer;
+        if (player?.isOpenFor(playback.src)) player.toggle();
+        else player?.show(playback);
+        return;
+      }
+      this.#mediaPlayer?.hide();
       if (event.button === 0) this.#gotoShowSlide(this.#showingSlide + 1);
       return;
     }
@@ -2686,6 +2741,10 @@ class DocenPresentation extends AddinHost {
     // A table under the pointer opens its cell edit; anything else opens the
     // shape text edit (the first click of the double-click selected it).
     if (point) {
+      // Double-click on a playable media frame opens native playback (the
+      // canvas poster keeps painting beneath the floating controls).
+      const playback = this.#mediaPlaybackAt(point);
+      if (playback) return this.#mediaPlayer?.show(playback);
       const child = hitSlide(
         slideHits(this.#presJson!.slides?.[point.slide] ?? {}),
         point.x,

@@ -192,6 +192,10 @@ export type LayoutDrawingMember =
       src?: string;
       /** Source file name shown in the stable fallback. */
       fileName?: string;
+      /** The media bytes as a browser-decodable data URL plus its MIME —
+       *  the formats the browser can actually play (mp4/mov/mp3/wav/aac);
+       *  absent for the exotic containers (wmv/avi/wma) and CD audio. */
+      playable?: { src: string; mime: string };
     }
   | {
       kind: "textBox";
