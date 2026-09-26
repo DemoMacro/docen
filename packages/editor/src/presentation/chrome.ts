@@ -239,6 +239,7 @@ export const presentationTemplate = html<PresentationTemplateRefs>`
   </docen-workspace>
   <input type="file" id="file-input" accept=".pptx" hidden />
   <input type="file" id="picture-input" accept="image/png,image/jpeg,image/gif,image/bmp" hidden />
+  <input type="file" id="media-input" accept=".mp4,.mov,.wmv,.avi,.mp3,.wav,.wma,.aac" hidden />
   <docen-find-replace-dialog></docen-find-replace-dialog>
   <docen-link-dialog></docen-link-dialog>
 `;

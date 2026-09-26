@@ -24,7 +24,7 @@ import type { TextBodyOptions } from "@office-open/core/drawing";
 import type { ShapeOptions } from "@office-open/pptx";
 
 import { BOX_PRESETS, STRAIGHT_PRESETS, emuOf, geometryOf, type Xform } from "./geometry";
-import { textBlocks } from "./text";
+import { textBlocks, type TextFieldContext } from "./text";
 
 // DrawingML bodyPr default insets (lIns/rIns 0.1", tIns/bIns 0.05").
 const BODY_INSET_EMU = { left: 91440, top: 45720, right: 91440, bottom: 45720 };
@@ -48,6 +48,7 @@ export function shapeMembers(
   shape: ShapeOptions,
   t: Xform,
   childPath: readonly number[] | undefined,
+  context: TextFieldContext = {},
 ): LayoutDrawingMember[] {
   const paint: ShapePaint = {
     x: t.sx * emuOf(shape.x) + t.dx,
@@ -65,7 +66,7 @@ export function shapeMembers(
   // A text-carrying shape projects its body (PowerPoint writes an empty a:p
   // into every bare shape — only non-empty content makes a text box).
   if (hasText(shape.textBody)) {
-    return [textBoxMember(shape.textBody, paint)];
+    return [textBoxMember(shape.textBody, paint, context)];
   }
   const {
     x,
@@ -173,7 +174,11 @@ function hasText(body: TextBodyOptions | undefined): body is TextBodyOptions {
   );
 }
 
-function textBoxMember(body: TextBodyOptions, paint: ShapePaint): LayoutDrawingMember {
+function textBoxMember(
+  body: TextBodyOptions,
+  paint: ShapePaint,
+  context: TextFieldContext,
+): LayoutDrawingMember {
   const { w, h, preset, adjustments } = paint;
   const straight = preset != null && STRAIGHT_PRESETS.has(preset);
   // A non-box preset paints its evaluated silhouette under the text (a text
@@ -211,6 +216,7 @@ function textBoxMember(body: TextBodyOptions, paint: ShapePaint): LayoutDrawingM
     ...(paint.line ? { line: paint.line } : {}),
     ...(paint.shadow ? { shadow: paint.shadow } : {}),
     ...(paint.childPath ? { childPath: paint.childPath } : {}),
+    ...(paint.rotation ? { rotation: paint.rotation, rotationAbout: "center" as const } : {}),
     insets: {
       left: ins(bp?.lIns, BODY_INSET_EMU.left) + (tr ? Math.max(0, tr.l) : 0),
       top: ins(bp?.tIns, BODY_INSET_EMU.top) + (tr ? Math.max(0, tr.t) : 0),
@@ -222,6 +228,6 @@ function textBoxMember(body: TextBodyOptions, paint: ShapePaint): LayoutDrawingM
       ? { textVertical: bp.vertical }
       : {}),
     ...(bp?.spAutoFit === true || body.autoFit === "shape" ? { autoFit: true } : {}),
-    blocks: textBlocks(body),
+    blocks: textBlocks(body, context),
   };
 }

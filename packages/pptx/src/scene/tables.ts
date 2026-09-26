@@ -6,7 +6,8 @@ import { emuToPx, type LayoutBorderEdge, type LayoutDrawingMember } from "@docen
 import type { CellBorderOptions, TableOptions, TableCellOptions } from "@office-open/pptx";
 
 import { emuOf, type Xform } from "./geometry";
-import { textBlocks } from "./text";
+import { regionRulesAt, resolveTableStyle } from "./table-style";
+import { textBlocks, type TextFieldContext } from "./text";
 
 // DrawingML table cell default margins (marL/marR 0.1", marT/marB 0.05" —
 // the same insets a bodyPr carries).
@@ -93,8 +94,10 @@ export function tableMember(
   table: TableOptions,
   t: Xform,
   childPath: readonly number[] | undefined,
+  context: TextFieldContext = {},
 ): LayoutDrawingMember {
   const { origins, columns: nCols } = tableGridOf(table);
+  const style = resolveTableStyle(table, context.themeColors, context.tableStyles);
 
   // Declared column widths win; a table without them splits the frame evenly.
   const widths = table.columnWidths?.length
@@ -103,19 +106,42 @@ export function tableMember(
 
   const frameBorders = table.borders;
   const nRows = table.rows.length;
+  /** Style edges for one slot: rim edges from the region's own tokens, the
+   *  inside tokens between cells. */
+  const styleEdge = (
+    rules: ReturnType<typeof regionRulesAt>,
+    edge: "top" | "right" | "bottom" | "left",
+    r: number,
+    c: number,
+    spanW: number,
+    spanH: number,
+  ) => {
+    const b = rules.borders;
+    if (!b) return undefined;
+    if (edge === "top") return r === 0 ? b.top : b.insideH;
+    if (edge === "bottom") return r + spanH >= nRows ? b.bottom : b.insideH;
+    if (edge === "left") return c === 0 ? b.left : b.insideV;
+    return c + spanW >= nCols ? b.right : b.insideV;
+  };
   const rows = table.rows.map((row, r) => ({
     heightPx: t.sy * emuOf(row.height),
     cells: origins
       .filter((o) => o.row === r)
       .map(({ cell, col, spanW, spanH }) => {
-        const fill = solidFillOf(cell.fill);
+        const rules = regionRulesAt(style, r, col, nRows, nCols);
+        const fill = solidFillOf(cell.fill) ?? rules.fill;
         const opacity = fillOpacityOf(cell.fill);
-        const borders = {
-          ...(cell.borders?.top ? { top: borderEdgeOf(cell.borders.top) } : {}),
-          ...(cell.borders?.right ? { right: borderEdgeOf(cell.borders.right) } : {}),
-          ...(cell.borders?.bottom ? { bottom: borderEdgeOf(cell.borders.bottom) } : {}),
-          ...(cell.borders?.left ? { left: borderEdgeOf(cell.borders.left) } : {}),
+        const edge = (key: "top" | "right" | "bottom" | "left") =>
+          cell.borders?.[key]
+            ? borderEdgeOf(cell.borders[key])
+            : styleEdge(rules, key, r, col, spanW, spanH);
+        const edges = {
+          top: edge("top"),
+          right: edge("right"),
+          bottom: edge("bottom"),
+          left: edge("left"),
         };
+        const borders = Object.fromEntries(Object.entries(edges).filter(([, v]) => v));
         // Frame-level borders spread onto the rim cells (the stringify side's
         // distributeBorders contract) where the cell declares none of its own.
         if (frameBorders) {
@@ -146,7 +172,19 @@ export function tableMember(
             right: m(cell.margins?.right, CELL_INSET_EMU.right),
             bottom: m(cell.margins?.bottom, CELL_INSET_EMU.bottom),
           },
-          blocks: textBlocks({ paragraphs: cell.children, text: cell.text }),
+          blocks: (() => {
+            const blocks = textBlocks({ paragraphs: cell.children, text: cell.text }, context);
+            if (!rules.bold && !rules.textColor) return blocks;
+            for (const block of blocks) {
+              if (block.kind !== "paragraph") continue;
+              for (const inline of block.inline) {
+                if (inline.kind !== "text") continue;
+                if (rules.bold) inline.style.bold = true;
+                if (rules.textColor) inline.style.color = rules.textColor;
+              }
+            }
+            return blocks;
+          })(),
         };
       }),
   }));

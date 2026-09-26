@@ -15,6 +15,9 @@ import {
   makeTable,
   makeTextBox,
   makeFieldBox,
+  makeLine,
+  makeMediaFrame,
+  makeSmartArt,
   reorderChild,
   setLineSpacingPercent,
   setParagraphAlignment,
@@ -375,6 +378,33 @@ describe("makeTextBox", () => {
   });
 });
 
+describe("draw-to-place helpers", () => {
+  it("lands a text box on the drawn frame", () => {
+    const { shape } = makeTextBox(1280, 720, "hello", {
+      x: 40,
+      y: 60,
+      w: 200,
+      h: 80,
+    }) as { shape: ShapeVariant };
+    expect(shape.x).toBe(40 * EMU_PER_PX);
+    expect(shape.y).toBe(60 * EMU_PER_PX);
+    expect(shape.width).toBe(200 * EMU_PER_PX);
+    expect(shape.height).toBe(80 * EMU_PER_PX);
+  });
+
+  it("creates a straight line from endpoint direction", () => {
+    const { line } = makeLine("line", { x: 30, y: 20, w: 120, h: 70 }) as {
+      line: { x1: number; y1: number; x2: number; y2: number };
+    };
+    expect(line).toMatchObject({
+      x1: 30 * EMU_PER_PX,
+      y1: 20 * EMU_PER_PX,
+      x2: 150 * EMU_PER_PX,
+      y2: 90 * EMU_PER_PX,
+    });
+  });
+});
+
 describe("makePicture", () => {
   it("scales a large image into half the slide, centered", () => {
     const { picture } = makePicture(1280, 720, 2560, 1440, "data:", "png") as {
@@ -407,6 +437,60 @@ describe("makeTable", () => {
   });
 });
 
+describe("makeSmartArt", () => {
+  it("centers a four-step process diagram with real data-model nodes", () => {
+    type SmartArtVariant = Extract<SlideChild, { smartart: unknown }>["smartart"];
+    const { smartart } = makeSmartArt(1280, 720) as { smartart: SmartArtVariant };
+    expect(smartart.layout).toBe("process1");
+    expect(smartart.nodes.map((node) => node.text)).toEqual([
+      "Discover",
+      "Design",
+      "Build",
+      "Launch",
+    ]);
+    expect(smartart.width).toBe(Math.round(768 * EMU_PER_PX));
+    expect(smartart.height).toBe(Math.round(720 * 0.48 * EMU_PER_PX));
+    expect(smartart.x).toBe(Math.round(256 * EMU_PER_PX));
+  });
+});
+
+describe("makeMediaFrame", () => {
+  it("centers native video bytes in a 16:9 frame", () => {
+    const { video } = makeMediaFrame(
+      1280,
+      720,
+      "video",
+      new Uint8Array([1]),
+      "mp4",
+      "clip.mp4",
+    ) as {
+      video: {
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+        type: string;
+        fileName?: string;
+      };
+    };
+    expect(video.type).toBe("mp4");
+    expect(video.fileName).toBe("clip.mp4");
+    expect(video.width).toBe(Math.round(640 * EMU_PER_PX));
+    expect(video.height).toBe(Math.round(360 * EMU_PER_PX));
+    expect(video.x).toBe(Math.round(320 * EMU_PER_PX));
+    expect(video.y).toBe(Math.round(180 * EMU_PER_PX));
+  });
+
+  it("uses the shorter audio frame", () => {
+    const { audio } = makeMediaFrame(1280, 720, "audio", new Uint8Array([1]), "mp3") as {
+      audio: { width: number; height: number; type: string };
+    };
+    expect(audio.type).toBe("mp3");
+    expect(audio.width).toBe(Math.round(384 * EMU_PER_PX));
+    expect(audio.height).toBe(Math.round(80 * EMU_PER_PX));
+  });
+});
+
 describe("makeShape", () => {
   it('centers a fresh 2" shape carrying the preset geometry', () => {
     const { shape } = makeShape(1280, 720, "star5") as { shape: ShapeVariant };
@@ -414,6 +498,19 @@ describe("makeShape", () => {
     expect(shape.x).toBe(Math.round(((1280 - 192) / 2) * EMU_PER_PX));
     expect(shape.properties).toMatchObject({ geometry: "star5", fill: "FFFFFF" });
     expect(shape.textBody).toBeDefined();
+  });
+
+  it("uses the drawn rectangle for drag-to-draw insertion", () => {
+    const { shape } = makeShape(1280, 720, "star5", {
+      x: 50,
+      y: 70,
+      w: 160,
+      h: 90,
+    }) as { shape: ShapeVariant };
+    expect(shape.x).toBe(50 * EMU_PER_PX);
+    expect(shape.y).toBe(70 * EMU_PER_PX);
+    expect(shape.width).toBe(160 * EMU_PER_PX);
+    expect(shape.height).toBe(90 * EMU_PER_PX);
   });
 });
 

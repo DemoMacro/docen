@@ -38,13 +38,15 @@ export function endpointMembers(
   const ly1 = y1 <= y2 ? 0 : h;
   const d = `M ${p(lx1)} ${p(ly1)} L ${p(w - lx1)} ${p(h - ly1)}`;
   const cp = () => (childPath ? { childPath } : {});
+  const flips = () => ({
+    ...(x1 > x2 ? { flipH: true } : {}),
+    ...(y1 > y2 ? { flipV: true } : {}),
+  });
 
-  // A bent/elbow connector expands through the evaluator — but an evaluated
-  // path always runs (0,0)→(w,h), and a reversed endpoint pair would need a
-  // mirror the member model has no slot for, so those stay the diagonal
-  // (registered gap).
+  // A bent/elbow connector expands through the evaluator. Its normalized
+  // path runs (0,0)→(w,h); reversed endpoint pairs become mirrors.
   const outlines =
-    g.preset && !STRAIGHT_PRESETS.has(g.preset) && x1 <= x2 && y1 <= y2
+    g.preset && !STRAIGHT_PRESETS.has(g.preset)
       ? presetShapePaths(g.preset, w, h, g.adjustments)
       : undefined;
   if (outlines) {
@@ -55,6 +57,7 @@ export function endpointMembers(
       width: w,
       height: h,
       d: part.d,
+      ...flips(),
       ...(part.fill && fill ? { fill } : {}),
       ...(part.stroke && line ? { line } : {}),
       ...(shadow ? { shadow } : {}),

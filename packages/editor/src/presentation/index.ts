@@ -27,6 +27,8 @@ import {
   tableGridOf,
   memberAt,
   memberByPath,
+  offsetMemberByPath,
+  resizeMemberByPath,
   textBlocks,
   type PresentationOptions,
   type ProjectedPresentation,
@@ -55,6 +57,7 @@ import { App, type IGroup } from "leafer-ui";
 import { renderRibbonFromSchema } from "../document/ribbon";
 import type { Box } from "../drawing/geometry";
 import { DrawingOverlay } from "../drawing/overlay";
+import { ShapeDrawer, type ShapeDrawRect } from "../drawing/shape-drawer";
 import {
   AddinHost,
   applyTheme,
@@ -82,6 +85,9 @@ import {
   makeTable,
   makeTextBox,
   makeFieldBox,
+  makeLine,
+  makeMediaFrame,
+  makeSmartArt,
   reorderChild,
   runsIn,
   setLineSpacingPercent,
@@ -102,6 +108,7 @@ import {
   captureGeometry,
   hitSlide,
   offsetChild,
+  rotationOf,
   resizeChild,
   restoreGeometry,
   rotateChild,
@@ -189,6 +196,25 @@ const PICTURE_TYPES: ReadonlyMap<string, "png" | "jpg" | "gif" | "bmp"> = new Ma
   ["image/bmp", "bmp"],
 ]);
 
+/** A media file extension → its source-model family and type. */
+const MEDIA_FILE_TYPES: ReadonlyMap<
+  string,
+  { media: "video" | "audio"; type: "mp4" | "mov" | "wmv" | "avi" | "mp3" | "wav" | "wma" | "aac" }
+> = new Map(
+  (
+    [
+      ["mp4", "video", "mp4"],
+      ["mov", "video", "mov"],
+      ["wmv", "video", "wmv"],
+      ["avi", "video", "avi"],
+      ["mp3", "audio", "mp3"],
+      ["wav", "audio", "wav"],
+      ["wma", "audio", "wma"],
+      ["aac", "audio", "aac"],
+    ] as const
+  ).map(([extension, media, type]) => [extension, { media, type }]),
+);
+
 const pathsEqual = (a: readonly number[], b: readonly number[]): boolean =>
   a.length === b.length && a.every((v, i) => v === b[i]);
 
@@ -253,6 +279,8 @@ const WIRED_COMMANDS: ReadonlySet<string> = new Set([
   "duplicate-slide",
   "text-box",
   "insert-picture",
+  "video",
+  "audio",
   "insert-table",
   "shapes",
   "format-background",
@@ -292,6 +320,7 @@ class DocenPresentation extends AddinHost {
   #thumbScale = 1;
   #zoom = 100;
   #overlay: DrawingOverlay | null = null;
+  #shapeDrawer: ShapeDrawer | null = null;
   /** The selected object: the slide child, or — with `member` set — the
    *  group-nested member it descended into (child indexes under the group). */
   #selection: { slide: number; child: number; member?: number[] } | null = null;
@@ -367,6 +396,9 @@ class DocenPresentation extends AddinHost {
       .querySelector<HTMLInputElement>("#picture-input")
       ?.addEventListener("change", this.#onPictureChange as EventListener);
     root
+      .querySelector<HTMLInputElement>("#media-input")
+      ?.addEventListener("change", this.#onMediaChange as EventListener);
+    root
       .querySelector("docen-find-replace-dialog")
       ?.addEventListener("find-replace:action", this.#onFindReplace as EventListener);
     root
@@ -377,7 +409,9 @@ class DocenPresentation extends AddinHost {
     this.#area()?.addEventListener("wheel", this.#onShowWheel, { passive: false });
     this.#area()?.addEventListener("scroll", this.#onScroll);
     this.thumbStrip?.addEventListener("click", this.#onThumbClick);
-    this.#stage.addEventListener("pointerdown", this.#onStagePointerDown);
+    // Capture: Leafer's own app view can consume a pointer before bubbling;
+    // the editor must get first refusal for an armed drag-to-draw tool.
+    this.#stage.addEventListener("pointerdown", this.#onStagePointerDown, true);
     this.#stage.addEventListener("dblclick", this.#onStageDblClick);
     document.addEventListener("keydown", this.#onKeyDown);
     // The selection frame lives over the slide surface (the canvas element
@@ -385,23 +419,62 @@ class DocenPresentation extends AddinHost {
     this.#overlay = new DrawingOverlay({
       scale: () => this.#zoom / 100,
       applyBox: (box) => {
-        // A group member's frame is display-only this round — resize needs
-        // the member's scaled geometry write-back, so the drag snaps back.
-        if (this.#selection?.member) return;
-        this.#applyGesture((child) => resizeChild(child, this.#slideBoxOf(box)));
+        const selection = this.#selection;
+        const member = selection?.member;
+        const group = member
+          ? this.#presJson?.slides?.[selection.slide]?.children?.[selection.child]
+          : undefined;
+        this.#applyGesture(() =>
+          member && group
+            ? resizeMemberByPath(group, member, this.#slideBoxOf(box))
+            : resizeChild(this.#selectedChild()!, this.#slideBoxOf(box)),
+        );
       },
       applyOffset: (dx, dy) => {
-        // A member drag moves in child space: the group scale divides the
-        // slide-px delta before it lands on the member's own fields.
-        const s = this.#memberScale();
-        this.#applyGesture((child) => offsetChild(child, dx / s.sx, dy / s.sy));
+        // The walk folds ancestor scales and spins into one inverse mapping.
+        const selection = this.#selection;
+        const member = selection?.member;
+        const group = member
+          ? this.#presJson?.slides?.[selection.slide]?.children?.[selection.child]
+          : undefined;
+        this.#applyGesture(() => {
+          if (member && group) offsetMemberByPath(group, member, dx, dy);
+          else offsetChild(this.#selectedChild()!, dx, dy);
+        });
       },
       applyRotation: (delta) => {
-        if (this.#selection?.member) return;
         this.#applyGesture((child) => rotateChild(child, delta));
       },
     });
     this.#canvasHost().append(this.#overlay.el);
+    // Shapes/Text Box arm this drag-to-draw tool. The host maps the pointer
+    // to the pinned slide frame, so a sweep can start and land on any slide.
+    this.#shapeDrawer = new ShapeDrawer(
+      {
+        frameAt: (clientX, clientY) => {
+          const pres = this.#pres;
+          const point = this.#stagePointOf({ clientX, clientY } as PointerEvent);
+          if (!pres || !point) return null;
+          const surfaceRect = this.#canvasHost().getBoundingClientRect();
+          const stageRect = this.#stage.getBoundingClientRect();
+          if (stageRect.width === 0 || stageRect.height === 0) return null;
+          const scale = stageRect.width / pres.widthPx;
+          return {
+            slide: point.slide,
+            left: stageRect.left - surfaceRect.left,
+            top:
+              stageRect.top -
+              surfaceRect.top +
+              (point.slide * (pres.heightPx + SLIDE_GAP_PX) + SLIDE_GAP_PX) * scale,
+            width: pres.widthPx,
+            height: pres.heightPx,
+            scale,
+          };
+        },
+        apply: (preset, rect) => this.#insertDrawnShape(preset, rect),
+      },
+      this.#canvasHost(),
+    );
     // Locale switches re-stamp the chrome (header + ribbon labels).
     this.#unsubLang = observeLang(() => this.#renderChrome());
     this.#renderChrome();
@@ -410,6 +483,8 @@ class DocenPresentation extends AddinHost {
 
   disconnectedCallback(): void {
     super.disconnectedCallback();
+    this.#shapeDrawer?.destroy();
+    this.#shapeDrawer = null;
     this.#langObserver?.disconnect();
     this.#langObserver = undefined;
     this.#unsubLang?.();
@@ -425,6 +500,9 @@ class DocenPresentation extends AddinHost {
     this.shadowRoot
       ?.querySelector<HTMLInputElement>("#picture-input")
       ?.removeEventListener("change", this.#onPictureChange as EventListener);
+    this.shadowRoot
+      ?.querySelector<HTMLInputElement>("#media-input")
+      ?.removeEventListener("change", this.#onMediaChange as EventListener);
     this.shadowRoot
       ?.querySelector("docen-find-replace-dialog")
       ?.removeEventListener("find-replace:action", this.#onFindReplace as EventListener);
@@ -645,7 +723,7 @@ class DocenPresentation extends AddinHost {
     else if (name === "duplicate-slide") this.#duplicateSlide();
     else if (name === "text-box") this.#insertTextBox();
     else if (name === "insert-table") this.#insertTable();
-    else if (name === "shapes" && event.detail?.value) this.#insertShape(event.detail.value);
+    else if (name === "shapes") this.#armShape(event.detail?.value);
     else if (name === "format-background") this.#setBackground(event.detail?.value);
     else if (name === "slide-size") this.#toggleSlideSize();
     else if (name === "insert-picture") this.#pickPicture();
@@ -666,6 +744,8 @@ class DocenPresentation extends AddinHost {
     else if (name === "animate" || name === "add-animation") {
       this.#applyAnimation(event.detail?.value);
     } else if (name === "slide-number" || name === "date-time") this.#insertFieldBox(name);
+    else if (name === "smartart") this.#insertSmartArt();
+    else if (name === "video" || name === "audio") this.#pickMedia();
     else if (name === "select") this.#toggleSelectionPane();
     else if (TEXT_FORMAT_COMMANDS.has(name)) this.#applyTextFormat(name, event.detail?.value);
   };
@@ -796,7 +876,7 @@ class DocenPresentation extends AddinHost {
       if (!m) return null;
       return {
         box: { x: m.x, y: m.y + stripY, width: m.width, height: m.height },
-        rotation: 0,
+        rotation: m.rotation,
       };
     }
     const hit = slideHits(slide ?? {}).find((h) => h.child === sel.child);
@@ -826,15 +906,6 @@ class DocenPresentation extends AddinHost {
     const sel = this.#selection;
     const child = this.#presJson?.slides?.[sel?.slide ?? -1]?.children?.[sel?.child ?? -1];
     return child ? this.#childAt(child, sel?.member) : undefined;
-  }
-
-  /** The child-space → px scale under the current member selection (identity
-   *  at top level). */
-  #memberScale(): { sx: number; sy: number } {
-    const sel = this.#selection;
-    if (!sel?.member?.length) return { sx: 1, sy: 1 };
-    const group = this.#presJson?.slides?.[sel.slide]?.children?.[sel.child];
-    return (group && memberByPath(group, sel.member))?.scale ?? { sx: 1, sy: 1 };
   }
 
   /** Select a slide object (or clear). The frame shows the strip-space box. */
@@ -922,7 +993,15 @@ class DocenPresentation extends AddinHost {
     // projection made one, else textBlocks' resolution of the same body (its
     // defaults ARE the painted defaults). The bare constant covers a body
     // with no paragraphs at all.
-    const blocks = member?.blocks ?? (body ? textBlocks(body) : []);
+    const blocks =
+      member?.blocks ??
+      (body
+        ? textBlocks(body, {
+            slideNumber: sel.slide + 1,
+            slideCount: this.#presJson?.slides?.length ?? 0,
+            now: new Date(),
+          })
+        : []);
     const first = blocks[0]?.kind === "paragraph" ? blocks[0] : undefined;
     const run = first?.inline.find((i) => i.kind === "text")?.style ??
       first?.defaultTextStyle ?? { family: "Calibri", sizePx: ptToPx(18) };
@@ -933,6 +1012,7 @@ class DocenPresentation extends AddinHost {
     // baseline correction that moves the CSS baseline (half-leading + font
     // ascent) onto the painted depth — CSS offers no direct baseline control.
     const face = familyOfSlot(run.family, false);
+    const rotation = this.#selectedBox()?.rotation ?? rotationOf(child);
     const linePx =
       browserFontMetrics.normalRatio({
         family: face,
@@ -967,6 +1047,8 @@ class DocenPresentation extends AddinHost {
       lineHeight: `${linePx * scale}px`,
       textAlign: TEXT_ALIGN_OF[first?.align ?? "left"] ?? "left",
       color: run.color ? `#${run.color}` : TEXT_INK,
+      transformOrigin: `${(box.width * scale) / 2}px ${(box.height * scale) / 2}px`,
+      ...(rotation ? { transform: `rotate(${rotation}deg)` } : {}),
       ...(run.bold ? { fontWeight: "bold" } : {}),
       ...(run.italic ? { fontStyle: "italic" } : {}),
     });
@@ -1570,10 +1652,10 @@ class DocenPresentation extends AddinHost {
 
   /** Append a child on top of the active slide and select it; undo splices
    *  it back out by index (per-slide, so slide-level inserts can't shift it). */
-  #insertChild(child: SlideChild): void {
+  #insertChild(child: SlideChild, slideAt = this.#activeSlideIndex()): void {
     const presJson = this.#presJson;
     if (!presJson) return;
-    const slide = this.#activeSlideIndex();
+    const slide = slideAt;
     const host = presJson.slides?.[slide];
     if (!host) return;
     const children = (host.children ??= []);
@@ -1595,10 +1677,24 @@ class DocenPresentation extends AddinHost {
     this.#reproject(slide);
   }
 
+  /** Text Box enters drag mode; the draw lands the body on the exact slide. */
   #insertTextBox(): void {
+    this.#shapeDrawer?.arm("text-box");
+  }
+
+  /** Commit a completed drawer sweep: normal presets use the drawn frame,
+   *  straight tokens use endpoint children so direction survives. */
+  #insertDrawnShape(preset: string, rect: ShapeDrawRect): void {
     const pres = this.#pres;
     if (!pres) return;
-    this.#insertChild(makeTextBox(pres.widthPx, pres.heightPx));
+    const placement = { x: rect.x, y: rect.y, w: rect.w, h: rect.h };
+    const child =
+      preset === "text-box"
+        ? makeTextBox(pres.widthPx, pres.heightPx, "", placement)
+        : preset === "line" || preset === "straightConnector1"
+          ? makeLine(preset, placement)
+          : makeShape(pres.widthPx, pres.heightPx, preset as ShapeType, placement);
+    this.#insertChild(child, rect.slide);
   }
 
   /** The footer field inserts (slide number bottom-right, date-time bottom-
@@ -1627,11 +1723,16 @@ class DocenPresentation extends AddinHost {
     this.#insertChild(makeTable(pres.widthPx, pres.heightPx));
   }
 
-  /** The Shapes gallery's pick: the value is the prstGeom token. */
-  #insertShape(geometry: string): void {
+  #insertSmartArt(): void {
     const pres = this.#pres;
     if (!pres) return;
-    this.#insertChild(makeShape(pres.widthPx, pres.heightPx, geometry as ShapeType));
+    this.#insertChild(makeSmartArt(pres.widthPx, pres.heightPx));
+  }
+
+  /** The Shapes gallery's pick arms the drawer; the value is the prstGeom
+   *  token (the main button draws the default rectangle). */
+  #armShape(geometry?: string): void {
+    this.#shapeDrawer?.arm(geometry ?? "rect");
   }
 
   /** The color picker's pick: paint the active slide's background solid.
@@ -2161,7 +2262,15 @@ class DocenPresentation extends AddinHost {
               ? "connector"
               : "group" in child
                 ? "group"
-                : "table";
+                : "chart" in child
+                  ? "chart"
+                  : "smartart" in child
+                    ? "smartart"
+                    : "video" in child
+                      ? "video"
+                      : "audio" in child
+                        ? "audio"
+                        : "table";
     const name = nv?.name?.trim();
     return {
       label: name || `${t(`ppt.select.${kind}`, this)} ${index + 1}`,
@@ -2223,6 +2332,32 @@ class DocenPresentation extends AddinHost {
   #pickPicture(): void {
     this.shadowRoot?.querySelector<HTMLInputElement>("#picture-input")?.click();
   }
+
+  #pickMedia(): void {
+    this.shadowRoot?.querySelector<HTMLInputElement>("#media-input")?.click();
+  }
+
+  /** File-input media path: native bytes enter the source model unchanged;
+   *  the projection supplies the stable poster/player canvas. */
+  readonly #onMediaChange = async (event: Event): Promise<void> => {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = "";
+    const pres = this.#pres;
+    const extension = file?.name.split(".").pop()?.toLowerCase() ?? "";
+    const spec = MEDIA_FILE_TYPES.get(extension);
+    if (!file || !pres || !spec) return;
+    this.#insertChild(
+      makeMediaFrame(
+        pres.widthPx,
+        pres.heightPx,
+        spec.media,
+        new Uint8Array(await file.arrayBuffer()),
+        spec.type,
+        file.name,
+      ),
+    );
+  };
 
   /** File-input picture path: read the file as a data URL, measure its
    *  natural size, and drop a centered picture child on the active slide. */
@@ -2503,6 +2638,7 @@ class DocenPresentation extends AddinHost {
       if (event.button === 0) this.#gotoShowSlide(this.#showingSlide + 1);
       return;
     }
+    if (this.#shapeDrawer?.armed && this.#shapeDrawer.startFromPointer(event)) return;
     const presJson = this.#presJson;
     if (!presJson || event.button !== 0) return;
     const point = this.#stagePointOf(event);
@@ -2594,6 +2730,10 @@ class DocenPresentation extends AddinHost {
     // its Escape handler commits and leaves; undo is the browser's (the
     // textarea's own typing history).
     if (this.#textEditor) return;
+    if (event.key === "Escape" && this.#shapeDrawer?.armed) {
+      this.#shapeDrawer.disarm();
+      return;
+    }
     if (event.key === "Escape" && this.#selection) {
       // A member selection climbs back to its group before leaving it.
       if (this.#selection.member) {

@@ -89,6 +89,9 @@ export function nonVisualOf(child: SlideChild): NonVisualDrawingPropertiesOption
   if ("line" in child) return child.line;
   if ("connector" in child) return child.connector;
   if ("group" in child) return child.group;
+  if ("smartart" in child) return child.smartart;
+  if ("video" in child) return child.video;
+  if ("audio" in child) return child.audio;
   return null;
 }
 
@@ -333,13 +336,18 @@ const emu = (px: number): number => Math.round(px * EMU_PER_PX);
 /** A centered text-box shape for a slide of the given size — white fill and
  *  a hairline border keep an empty box visible on the canvas. `text` seeds
  *  the body (the paste path). */
-export function makeTextBox(slideWidthPx: number, slideHeightPx: number, text = ""): SlideChild {
-  const width = slideWidthPx * 0.4;
-  const height = slideHeightPx * 0.15;
+export function makeTextBox(
+  slideWidthPx: number,
+  slideHeightPx: number,
+  text = "",
+  placement?: ShapePlacement,
+): SlideChild {
+  const width = placement?.w ?? slideWidthPx * 0.4;
+  const height = placement?.h ?? slideHeightPx * 0.15;
   return {
     shape: {
-      x: emu((slideWidthPx - width) / 2),
-      y: emu((slideHeightPx - height) / 2),
+      x: emu(placement?.x ?? (slideWidthPx - width) / 2),
+      y: emu(placement?.y ?? (slideHeightPx - height) / 2),
       width: emu(width),
       height: emu(height),
       properties: { geometry: "rect", fill: "FFFFFF", outline: { width: "1pt", color: "808080" } },
@@ -355,17 +363,40 @@ export function makeShape(
   slideWidthPx: number,
   slideHeightPx: number,
   geometry: ShapeType,
+  placement?: ShapePlacement,
 ): SlideChild {
-  const width = Math.min(192, slideWidthPx * 0.25);
-  const height = Math.min(192, slideHeightPx * 0.25);
+  const width = placement?.w ?? Math.min(192, slideWidthPx * 0.25);
+  const height = placement?.h ?? Math.min(192, slideHeightPx * 0.25);
   return {
     shape: {
-      x: emu((slideWidthPx - width) / 2),
-      y: emu((slideHeightPx - height) / 2),
+      x: emu(placement?.x ?? (slideWidthPx - width) / 2),
+      y: emu(placement?.y ?? (slideHeightPx - height) / 2),
       width: emu(width),
       height: emu(height),
       properties: { geometry, fill: "FFFFFF", outline: { width: "1pt", color: "808080" } },
       textBody: { text: "" },
+    },
+  };
+}
+
+/** A drag-to-draw landing rectangle in slide px. */
+export interface ShapePlacement {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** A straight line/connector from a drawn segment; direction is carried by
+ *  the endpoint pair, matching the OOXML endpoint model. */
+export function makeLine(preset: "line" | "straightConnector1", rect: ShapePlacement): SlideChild {
+  return {
+    line: {
+      x1: emu(rect.x),
+      y1: emu(rect.y),
+      x2: emu(rect.x + rect.w),
+      y2: emu(rect.y + rect.h),
+      properties: { outline: { width: "1pt", color: "808080" } },
     },
   };
 }
@@ -454,4 +485,47 @@ export function makeTable(slideWidthPx: number, slideHeightPx: number): SlideChi
       })),
     },
   };
+}
+
+/** A fresh four-step process SmartArt, centered at PowerPoint's common 60% ×
+ *  48% frame. The nodes use the file's real data model; rendering starts with
+ *  the stable painter fallback and can grow into full DGM layout later. */
+export function makeSmartArt(slideWidthPx: number, slideHeightPx: number): SlideChild {
+  const width = slideWidthPx * 0.6;
+  const height = slideHeightPx * 0.48;
+  return {
+    smartart: {
+      x: emu((slideWidthPx - width) / 2),
+      y: emu((slideHeightPx - height) / 2),
+      width: emu(width),
+      height: emu(height),
+      layout: "process1",
+      nodes: [{ text: "Discover" }, { text: "Design" }, { text: "Build" }, { text: "Launch" }],
+    },
+  };
+}
+
+/** A centered media frame from a browser file read. PowerPoint keeps native
+ *  bytes in the package; this inserts the same source model so rendering and
+ *  export share one payload. */
+export function makeMediaFrame(
+  slideWidthPx: number,
+  slideHeightPx: number,
+  media: "video" | "audio",
+  data: Uint8Array,
+  type: "mp4" | "mov" | "wmv" | "avi" | "mp3" | "wav" | "wma" | "aac",
+  fileName?: string,
+): SlideChild {
+  const width = slideWidthPx * (media === "video" ? 0.5 : 0.3);
+  const height = media === "video" ? Math.round((width * 9) / 16) : Math.round(80);
+  const frame = {
+    x: emu((slideWidthPx - width) / 2),
+    y: emu((slideHeightPx - height) / 2),
+    width: emu(width),
+    height: emu(height),
+    data,
+    type,
+    ...(fileName ? { fileName } : {}),
+  };
+  return (media === "video" ? { video: frame } : { audio: frame }) as SlideChild;
 }

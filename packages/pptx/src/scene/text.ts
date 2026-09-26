@@ -19,6 +19,8 @@ import type {
   TextParagraphPropertiesOptions,
 } from "@office-open/core/drawing";
 
+import type { TableStyleRegions, ThemeColors } from "./table-style";
+
 // TextAlignment → the layout's align tokens: justify's spellings land on
 // "both", the distributed pair on "distribute".
 const ALIGN_MAP = {
@@ -69,9 +71,25 @@ const autonumMarkerOf = (format: string | undefined, n: number): string => {
   return formatNumber(fmt, n) + suffix;
 };
 
+/** Slide-level values needed to evaluate a field when its cached text is
+ *  stale; all values are optional so standalone bodies keep using their cache. */
+export interface TextFieldContext {
+  slideNumber?: number;
+  slideCount?: number;
+  now?: Date;
+  /** Theme color slots (accent1…); table styles resolve schemeClr fills. */
+  themeColors?: ThemeColors;
+  /** The presentation's custom table styles (p:tblStyleLst), keyed by
+   * upper-cased style GUID. */
+  tableStyles?: Record<string, TableStyleRegions>;
+}
+
 /** A body's paragraphs as projected blocks; the paragraph shape (not the
  *  LayoutBlock union) so consumers read align/spacing directly. */
-export function textBlocks(body: TextBodyOptions): LayoutParagraph[] {
+export function textBlocks(
+  body: TextBodyOptions,
+  context: TextFieldContext = {},
+): LayoutParagraph[] {
   const paragraphs = body.paragraphs ?? (body.text != null ? [body.text] : []);
   // Live autonumbering counters, keyed by scheme; a non-list paragraph
   // breaks every run (PowerPoint restarts the series after plain text).
@@ -87,9 +105,11 @@ export function textBlocks(body: TextBodyOptions): LayoutParagraph[] {
       } else if ("break" in kid) {
         inline.push({ kind: "break" });
       } else if ("type" in kid) {
-        // a:fld paints its cached display text; live evaluation (slidenum,
-        // datetime) lands with a field engine — batch gap.
-        inline.push({ kind: "text", text: kid.text ?? "", style: runStyle(kid.properties) });
+        inline.push({
+          kind: "text",
+          text: fieldTextOf(kid.type, kid.text, context),
+          style: runStyle(kid.properties),
+        });
       } else {
         inline.push({ kind: "text", text: kid.text ?? "", style: runStyle(kid) });
       }
@@ -140,6 +160,20 @@ export function textBlocks(body: TextBodyOptions): LayoutParagraph[] {
       ...(inline.length === 0 ? { defaultTextStyle: runStyle(undefined) } : {}),
     };
   });
+}
+
+/** Evaluate the two footer fields PowerPoint puts in common decks; unknown or
+ *  unevaluated fields keep their cached display text. */
+function fieldTextOf(
+  type: string,
+  cachedText: string | undefined,
+  context: TextFieldContext,
+): string {
+  if (type === "slidenum" && context.slideNumber != null) return String(context.slideNumber);
+  if (type === "datetimeFigureOut" && context.now) {
+    return `${context.now.getMonth() + 1}/${context.now.getDate()}/${context.now.getFullYear()}`;
+  }
+  return cachedText ?? "";
 }
 
 /** The bullet marker as a synthetic inline pair (glyph + tab hop), or null

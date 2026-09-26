@@ -168,6 +168,10 @@ export const presentationEn: AdditionalLanguage = {
     "ppt.select.connector": "Connector",
     "ppt.select.group": "Group",
     "ppt.select.table": "Table",
+    "ppt.select.chart": "Chart",
+    "ppt.select.smartart": "SmartArt",
+    "ppt.select.video": "Video",
+    "ppt.select.audio": "Audio",
     // --- Status bar ---
     "ppt.status.slide-of": "Slide {page} of {total}",
   },
@@ -331,6 +335,10 @@ export const presentationZhCN: AdditionalLanguage = {
     "ppt.select.connector": "连接符",
     "ppt.select.group": "组合",
     "ppt.select.table": "表格",
+    "ppt.select.chart": "图表",
+    "ppt.select.smartart": "SmartArt",
+    "ppt.select.video": "视频",
+    "ppt.select.audio": "音频",
     // --- 状态栏 ---
     "ppt.status.slide-of": "第 {page} 张，共 {total} 张",
   },

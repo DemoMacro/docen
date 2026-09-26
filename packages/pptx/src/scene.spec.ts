@@ -4,9 +4,16 @@ import { describe, expect, it } from "vitest";
 
 import { projectPresentation } from "./scene";
 import { textBlocks } from "./scene/text";
-import { memberAt, memberByPath } from "./scene/walk";
+import { memberAt, memberByPath, offsetMemberByPath, resizeMemberByPath } from "./scene/walk";
 
 const project = (pres: PresentationOptions) => projectPresentation(pres);
+
+function groupChildOf(child: SlideChild, index: number) {
+  if (!("group" in child)) throw new Error("expected a group child");
+  const member = child.group.children?.[index];
+  if (!member) throw new Error("expected a group member");
+  return member;
+}
 
 // 1×1 transparent PNG.
 const png = new Uint8Array([
@@ -148,6 +155,34 @@ describe("shapes", () => {
     expect(br).toEqual({ kind: "break" });
     expect(text).toMatchObject({ kind: "text", text: "world" });
   });
+
+  it("keeps a text-carrying shape's rotation on its whole text box", () => {
+    const { slides } = project({
+      slides: [
+        {
+          children: [
+            {
+              shape: {
+                x: 0,
+                y: 0,
+                width: 952500,
+                height: 952500,
+                rotation: 30,
+                properties: { geometry: "rect" },
+                textBody: { paragraphs: [{ text: "Spin" }] },
+              },
+            },
+          ],
+        },
+      ],
+    });
+    const [member] = slides[0]!.members;
+    expect(member).toMatchObject({
+      kind: "textBox",
+      rotation: 30,
+      rotationAbout: "center",
+    });
+  });
 });
 
 describe("lines and connectors", () => {
@@ -222,6 +257,56 @@ describe("lines and connectors", () => {
     expect(members[1]!.kind).toBe("path");
     // The arrow sits at the line's far end, its own fill member.
     expect(members[1]!.x).toBeGreaterThan(90);
+  });
+
+  it("mirrors bent connectors when endpoint pairs run reversed", () => {
+    const connector = (x1: number, y1: number, x2: number, y2: number) => ({
+      connector: {
+        x1,
+        y1,
+        x2,
+        y2,
+        properties: { geometry: "bentConnector3" as const, outline: { width: 12700 } },
+      },
+    });
+    const { slides } = project({
+      slides: [
+        {
+          children: [
+            connector(0, 0, 1905000, 952500),
+            connector(1905000, 952500, 0, 0),
+            connector(0, 952500, 1905000, 0),
+          ],
+        },
+      ],
+    });
+    const [forward, reversed, vertical] = slides[0]!.members;
+    const pathDataOf = (member: typeof forward | undefined) => {
+      if (member?.kind !== "path") throw new Error("expected a path member");
+      return member.d;
+    };
+    expect(forward).toMatchObject({ kind: "path", x: 0, y: 0, width: 200, height: 100 });
+    expect("flipH" in forward && forward.flipH).toBe(false);
+    expect("flipV" in forward && forward.flipV).toBe(false);
+    expect(reversed).toMatchObject({
+      kind: "path",
+      x: 0,
+      y: 0,
+      width: 200,
+      height: 100,
+      flipH: true,
+      flipV: true,
+    });
+    expect(pathDataOf(reversed)).toBe(pathDataOf(forward));
+    expect(vertical).toMatchObject({
+      kind: "path",
+      x: 0,
+      y: 0,
+      width: 200,
+      height: 100,
+      flipV: true,
+    });
+    expect("flipH" in vertical && vertical.flipH).toBe(false);
   });
 });
 
@@ -326,6 +411,157 @@ describe("groups", () => {
       height: 200,
     });
     expect(memberByPath(child, [9])).toBeNull();
+
+    // The dragged slide-space box divides back through the group's 2×
+    // affine before landing on the member's own child-space geometry.
+    resizeMemberByPath(child, [1], { x: 600, y: 300, width: 300, height: 150 });
+    const resized = groupChildOf(child, 1);
+    if (!("shape" in resized)) throw new Error("expected a shape member");
+    expect(resized.shape).toMatchObject({
+      x: (500 / 3) * 9525,
+      y: 50 * 9525,
+      width: 150 * 9525,
+      height: 75 * 9525,
+    });
+    expect(memberByPath(child, [1])).toMatchObject({
+      x: 600,
+      y: 300,
+      width: 300,
+      height: 150,
+    });
+  });
+
+  it("resizes a line member through the group map without flipping it", () => {
+    const child: SlideChild = {
+      group: {
+        x: 0,
+        y: 0,
+        width: 5080000,
+        height: 3810000,
+        childOffsetX: 0,
+        childOffsetY: 0,
+        childExtentWidth: 2540000,
+        childExtentHeight: 1905000,
+        children: [
+          {
+            line: {
+              x1: 0,
+              y1: 0,
+              x2: 1270000,
+              y2: 952500,
+            },
+          },
+        ],
+      },
+    };
+    resizeMemberByPath(child, [0], { x: 100, y: 50, width: 300, height: 150 });
+    const line = groupChildOf(child, 0);
+    if (!("line" in line)) throw new Error("expected a line member");
+    expect(line.line).toMatchObject({
+      x1: 50 * 9525,
+      y1: 25 * 9525,
+      x2: 200 * 9525,
+      y2: 100 * 9525,
+    });
+  });
+
+  it("folds a group's rotation into each flattened member", () => {
+    const { slides } = project({
+      slides: [
+        {
+          children: [
+            {
+              group: {
+                x: 0,
+                y: 0,
+                width: 1905000,
+                height: 952500,
+                childOffsetX: 0,
+                childOffsetY: 0,
+                childExtentWidth: 1905000,
+                childExtentHeight: 952500,
+                rotation: 90,
+                children: [
+                  {
+                    shape: {
+                      x: 0,
+                      y: 0,
+                      width: 952500,
+                      height: 952500,
+                      properties: { geometry: "rect", fill: "FF0000" },
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    });
+    const [member] = slides[0]!.members;
+    expect(member).toMatchObject({
+      x: 50,
+      y: -50,
+      width: 100,
+      height: 100,
+      rotation: 90,
+    });
+  });
+
+  it("hits, moves and resizes a member inside a rotated group", () => {
+    const child: SlideChild = {
+      group: {
+        x: 1905000,
+        y: 952500,
+        width: 1905000,
+        height: 952500,
+        childOffsetX: 0,
+        childOffsetY: 0,
+        childExtentWidth: 1905000,
+        childExtentHeight: 952500,
+        rotation: 90,
+        children: [
+          {
+            shape: {
+              x: 476250,
+              y: 238125,
+              width: 952500,
+              height: 476250,
+              properties: { geometry: "rect" },
+            },
+          },
+        ],
+      },
+    };
+    const hit = memberAt(child, 300, 150);
+    expect(hit).toMatchObject({
+      path: [0],
+      x: 250,
+      y: 125,
+      width: 100,
+      height: 50,
+      rotation: 90,
+      groupRotation: 90,
+    });
+    expect(memberByPath(child, [0])).toEqual(hit);
+
+    offsetMemberByPath(child, [0], 10, 20);
+    const moved = groupChildOf(child, 0);
+    if (!("shape" in moved)) throw new Error("expected a shape member");
+    expect(moved.shape).toMatchObject({
+      x: 70 * 9525,
+      y: 15 * 9525,
+    });
+
+    resizeMemberByPath(child, [0], { x: 260, y: 145, width: 100, height: 50 });
+    const resized = groupChildOf(child, 0);
+    if (!("shape" in resized)) throw new Error("expected a shape member");
+    expect(resized.shape).toMatchObject({
+      x: 70 * 9525,
+      y: 15 * 9525,
+      width: 100 * 9525,
+      height: 50 * 9525,
+    });
   });
 });
 
@@ -470,5 +706,237 @@ describe("text bullet projection", () => {
     );
     expect(blocks[0]!.spacing?.lineHeight).toEqual({ rule: "multiple", factor: 1.5 });
     expect(blocks[1]!.spacing?.lineHeight).toEqual({ rule: "exact", px: 32 });
+  });
+});
+
+describe("media frame projection", () => {
+  it("wraps the poster in a browser URL and preserves the media family", () => {
+    const video: SlideChild = {
+      video: {
+        x: 0,
+        y: 0,
+        width: 1905000,
+        height: 952500,
+        data: new Uint8Array([1, 2, 3]),
+        type: "mp4",
+        poster: new Uint8Array([1, 2, 3]),
+        posterType: "png",
+        fileName: "clip.mp4",
+      },
+    } as unknown as SlideChild;
+    const { slides } = project({ slides: [{ children: [video] }] });
+    expect(slides[0]!.members[0]).toMatchObject({
+      kind: "mediaFrame",
+      media: "video",
+      width: 200,
+      height: 100,
+      src: "data:image/png;base64,AQID",
+      fileName: "clip.mp4",
+    });
+  });
+
+  it("gives audio without a poster the stable dark-player payload", () => {
+    const audio: SlideChild = {
+      audio: {
+        x: 0,
+        y: 0,
+        width: 1905000,
+        height: 476250,
+        type: "mp3",
+        fileName: "voice.mp3",
+      },
+    } as unknown as SlideChild;
+    const { slides } = project({ slides: [{ children: [audio] }] });
+    expect(slides[0]!.members[0]).toMatchObject({
+      kind: "mediaFrame",
+      media: "audio",
+      height: 50,
+      fileName: "voice.mp3",
+    });
+    expect(slides[0]!.members[0]).not.toHaveProperty("src");
+  });
+});
+
+describe("smartart fallback projection", () => {
+  const smartart: SlideChild = {
+    smartart: {
+      x: 0,
+      y: 0,
+      width: 4762500,
+      height: 1905000,
+      layout: "process1",
+      nodes: [{ text: "Start" }, { text: "Middle" }, { text: "End" }],
+    },
+  } as unknown as SlideChild;
+
+  it("projects the diagram family and node tree", () => {
+    const { slides } = project({ slides: [{ children: [smartart] }] });
+    expect(slides[0]!.members).toHaveLength(1);
+    expect(slides[0]!.members[0]).toMatchObject({
+      kind: "smartArt",
+      width: 500,
+      height: 200,
+      layout: "process1",
+      nodes: [{ text: "Start" }, { text: "Middle" }, { text: "End" }],
+    });
+  });
+
+  it("addresses nested diagram members through their group path", () => {
+    const child: SlideChild = {
+      group: {
+        x: 0,
+        y: 0,
+        width: 9525000,
+        height: 1905000,
+        childOffsetX: 0,
+        childOffsetY: 0,
+        childExtentWidth: 4762500,
+        childExtentHeight: 1905000,
+        children: [smartart],
+      },
+    };
+    const hit = memberAt(child, 600, 100);
+    expect(hit).toMatchObject({ path: [0], x: 0, y: 0, width: 1000, height: 200 });
+  });
+});
+describe("live field projection", () => {
+  const fieldBody = (type: string, cached: string) =>
+    ({ paragraphs: [{ children: [{ type, text: cached }] }] }) as never;
+
+  it("evaluates slide numbers per projected slide", () => {
+    const shape = (number: string): SlideChild =>
+      ({
+        shape: {
+          x: 0,
+          y: 0,
+          width: 952500,
+          height: 952500,
+          textBody: {
+            paragraphs: [{ children: [{ type: "slidenum", text: number }] }],
+          },
+        },
+      }) as never;
+    const { slides } = project({
+      slides: [{ children: [shape("7")] }, { children: [shape("7")] }],
+    });
+    const textOf = (index: number) => {
+      const box = slides[index]!.members[0]!;
+      if (box.kind !== "textBox") throw new Error("expected a text box");
+      const paragraph = box.blocks[0];
+      if (paragraph?.kind !== "paragraph") throw new Error("expected a paragraph");
+      return paragraph.inline[0]!;
+    };
+    expect(textOf(0)).toMatchObject({ text: "1" });
+    expect(textOf(1)).toMatchObject({ text: "2" });
+  });
+
+  it("formats the current date and keeps unknown field caches", () => {
+    const date = textBlocks(fieldBody("datetimeFigureOut", "cached"), {
+      now: new Date(2026, 8, 27),
+    })[0]!.inline[0]!;
+    const unknown = textBlocks(fieldBody("custom", "cached"))[0]!.inline[0]!;
+    expect(date).toMatchObject({ text: "9/27/2026" });
+    expect(unknown).toMatchObject({ text: "cached" });
+  });
+});
+
+describe("table style projection", () => {
+  const tableChild = (table: Record<string, unknown>): SlideChild => ({ table }) as never;
+  const tableOf = (pres: PresentationOptions) => {
+    const { slides } = project(pres);
+    const member = slides[0]!.members[0]!;
+    if (member.kind !== "table") throw new Error("expected a table member");
+    return member.table as {
+      rows: {
+        cells: {
+          fill?: string;
+          borders?: Record<string, unknown>;
+          blocks: { kind: string; inline?: { kind: string; style?: unknown }[] }[];
+        }[];
+      }[];
+    };
+  };
+  const inlineStyleOf = (cell: {
+    blocks: { kind: string; inline?: { kind: string; style?: unknown }[] }[];
+  }) => {
+    const block = cell.blocks[0]!;
+    if (block.kind !== "paragraph" || !block.inline) throw new Error("expected a paragraph");
+    return block.inline[0]!.style;
+  };
+  const grid = {
+    x: 0,
+    y: 0,
+    width: 1905000,
+    height: 2857500,
+    columnWidths: [952500, 952500],
+    rows: [
+      { height: 952500, cells: [{ text: "h1" }, { text: "h2" }] },
+      { height: 952500, cells: [{ text: "a" }, { text: "b" }] },
+      { height: 952500, cells: [{ text: "c" }, { text: "d" }] },
+    ],
+  };
+
+  it("applies the themed default family to a flagged table", () => {
+    const table = tableOf({
+      masters: [{ theme: { colorScheme: { accent1: "FF0000" } } }] as never,
+      slides: [{ children: [tableChild({ ...grid, firstRow: true, bandRow: true })] }],
+    });
+    const [header, band1, band2] = table.rows.map((row) => row.cells);
+    expect(header![0]).toMatchObject({ fill: "FF0000" });
+    expect(inlineStyleOf(header![0]!)).toMatchObject({ bold: true, color: "FFFFFF" });
+    // Data rows alternate the light-accent bands; inside rules are white.
+    expect(band1![0]).toMatchObject({ fill: "FFCCCC", borders: { top: { color: "FFFFFF" } } });
+    expect(band2![0]).toMatchObject({ fill: "FF9999" });
+  });
+
+  it("keeps the no-style GUID bare but honors explicit cell fills", () => {
+    const table = tableOf({
+      slides: [
+        {
+          children: [
+            tableChild({
+              ...grid,
+              tableStyleId: "{2D5ABB26-0587-4C30-8999-92F81FD0307C}",
+              firstRow: true,
+              bandRow: true,
+              rows: [
+                {
+                  height: 952500,
+                  cells: [{ text: "h", fill: { type: "solid", color: "00FF00" } }, { text: "h2" }],
+                },
+                { height: 952500, cells: [{ text: "a" }, { text: "b" }] },
+              ],
+            }),
+          ],
+        },
+      ],
+    });
+    const [header, body] = table.rows.map((row) => row.cells);
+    expect(header![0]).toMatchObject({ fill: "00FF00" });
+    expect(body![0]!.fill).toBeUndefined();
+    expect(body![0]!.borders).toBeUndefined();
+  });
+
+  it("resolves a tblStyleLst entry by GUID and layers the flags", () => {
+    const guid = "{11111111-2222-3333-4444-555555555555}";
+    const table = tableOf({
+      tableStyles: {
+        defaultStyleId: guid,
+        styles: [
+          {
+            styleId: guid,
+            styleName: "Custom",
+            regions: {
+              wholeTbl: { cell: { fill: '<a:srgbClr val="EEEEEE"/>' } },
+              firstRow: { cell: { fill: '<a:srgbClr val="222222"/>' } },
+            },
+          },
+        ],
+      },
+      slides: [{ children: [tableChild({ ...grid, tableStyleId: guid, firstRow: true })] }],
+    });
+    const [header, body] = table.rows.map((row) => row.cells);
+    expect(header![0]).toMatchObject({ fill: "222222" });
+    expect(body![0]).toMatchObject({ fill: "EEEEEE" });
   });
 });

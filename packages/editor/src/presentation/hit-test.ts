@@ -4,8 +4,8 @@
 // children instead: each paintable child contributes one hit box in
 // slide-absolute px, and edits write the child's geometry fields back in
 // EMU. Paintable = what the projection draws today (shape/picture/line/
-// connector/group/table/chart); unpainted variants stay unselectable until
-// their painter lands.
+// connector/group/table/chart/smartart/video/audio); unpainted variants stay
+// unselectable until their painter lands.
 
 import { measureEmu } from "@docen/core/geometry";
 import { EMU_PER_PX, emuToPx } from "@docen/layout";
@@ -118,6 +118,9 @@ function transformOf(
   if ("group" in child) return child.group;
   if ("table" in child) return child.table;
   if ("chart" in child) return child.chart;
+  if ("smartart" in child) return child.smartart;
+  if ("video" in child) return child.video;
+  if ("audio" in child) return child.audio;
   return undefined;
 }
 
@@ -128,7 +131,7 @@ function rotatable(child: SlideChild): boolean {
 }
 
 /** The child's own spin in degrees (transform children only). */
-function rotationOf(child: SlideChild): number {
+export function rotationOf(child: SlideChild): number {
   return transformOf(child)?.rotation ?? 0;
 }
 

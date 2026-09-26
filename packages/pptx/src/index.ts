@@ -17,6 +17,12 @@ export {
   type SlideAnimation,
 } from "@office-open/pptx";
 export { projectPresentation, type ProjectedPresentation, type ProjectedSlide } from "./scene";
-export { textBlocks } from "./scene";
+export { textBlocks, type TextFieldContext } from "./scene";
 export { tableGridOf, type CellOrigin } from "./scene/tables";
-export { memberAt, memberByPath, type MemberHit } from "./scene/walk";
+export {
+  memberAt,
+  memberByPath,
+  offsetMemberByPath,
+  resizeMemberByPath,
+  type MemberHit,
+} from "./scene/walk";

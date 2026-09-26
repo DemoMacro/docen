@@ -3,6 +3,12 @@ import type { LayoutPictureCrop } from "./inline";
 
 // ── floating drawings (anchored shape groups) ──
 
+/** A parsed SmartArt data-model node; children preserve the diagram tree. */
+export interface LayoutSmartArtNode {
+  text?: string;
+  children?: readonly LayoutSmartArtNode[];
+}
+
 /** One member's outline stroke (a:ln): width px + hex color plus the line-
  *  dressing tokens (cap/join full-word, dash the prstDash token). */
 export interface LayoutDrawingLine {
@@ -109,6 +115,9 @@ export type LayoutDrawingMember =
       d: string;
       /** Fill rule for self-intersecting outlines (wmf SetPolyFillMode). */
       fillRule?: "evenodd" | "nonzero";
+      /** Mirrored connector geometry (endpoint order resolved into flips). */
+      flipH?: boolean;
+      flipV?: boolean;
       /** Solid fill, hex RRGGBB; absent → no fill. */
       fill?: string;
       /** Outline stroke (a:ln): width px + hex color + cap/join/dash. */
@@ -123,6 +132,9 @@ export type LayoutDrawingMember =
       width: number;
       height: number;
       childPath?: readonly number[];
+      /** Clockwise spin about the member's center (a group ancestor's spin
+       *  folds into it; charts carry no separate a:xfrm @rot member spin). */
+      rotation?: number;
       /** The chart space model (office-open's ChartSpaceOptions) verbatim —
        *  the renderer's chart painter consumes it directly; the engine never
        *  reads beyond the box. */
@@ -135,12 +147,51 @@ export type LayoutDrawingMember =
       width: number;
       height: number;
       childPath?: readonly number[];
+      /** Clockwise spin about the member's center (a group ancestor's spin
+       *  folds into it; graphic-frame tables carry no separate member spin). */
+      rotation?: number;
       /** A graphic-frame table (a:tbl) normalized to px by the projection:
        *  resolved column widths, row heights and origin cells (merges
        *  collapsed to grid coordinates + spans) each carrying fill, borders,
        *  insets and laid text blocks — the renderer's frame-table painter
        *  consumes it structurally; the engine never reads beyond the box. */
       table: unknown;
+    }
+  | {
+      kind: "smartArt";
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      childPath?: readonly number[];
+      /** Clockwise spin about the member's center (a group ancestor's spin
+       *  folds into it; graphic-frame SmartArt carries no member spin). */
+      rotation?: number;
+      /** The diagram family (`dgm:dataModel @loTypeId`); unknown families
+       *  use the painter's stable grid fallback. */
+      layout?: string;
+      /** The parsed SmartArt node tree — the fallback paints its labels and
+       *  shape hierarchy, not the full PowerPoint layout engine. */
+      nodes: readonly LayoutSmartArtNode[];
+    }
+  | {
+      kind: "mediaFrame";
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      childPath?: readonly number[];
+      /** Clockwise spin about the member's center (a group ancestor's spin
+       *  folds into it; media frames carry no member spin). */
+      rotation?: number;
+      /** The playable media family; the painter uses it for the fallback
+       *  badge and playback affordance. */
+      media: "video" | "audio";
+      /** The poster frame as a browser-decodable URL; absent → painter's
+       *  stable dark player fallback. */
+      src?: string;
+      /** Source file name shown in the stable fallback. */
+      fileName?: string;
     }
   | {
       kind: "textBox";
@@ -182,6 +233,10 @@ export type LayoutDrawingMember =
        *  metafile vertical text: a rotated GDI world transform lays runs down
        *  a column; shaping stays horizontal, the paint rotates. */
       rotation?: number;
+      /** Rotate `rotation` about the box center instead of the metafile's
+       *  legacy box-origin pivot — a PPTX shape's silhouette and text spin
+       *  together as one object. */
+      rotationAbout?: "center";
       /** bodyPr @vert — the body lays out against the transposed column (the
        *  box height) and rotates into place: "vertical" reads top-down with
        *  columns advancing right-to-left, "vertical270" bottom-up with columns

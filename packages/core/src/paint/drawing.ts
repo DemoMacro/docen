@@ -17,6 +17,8 @@ import type { DrawingHitBox, PaintColumn, PaintContext } from "./context";
 import { paintFrameTable } from "./frame-table";
 import { addBlendedPictureRun, addCroppedImage, addPlainImage, shadowEffectOf } from "./image";
 import { strokePropsOf } from "./line";
+import { paintMediaFrame } from "./media-frame";
+import { paintSmartArt } from "./smartart";
 function drawingBoxOf(
   drawing: LayoutDrawing,
   x: number,
@@ -256,9 +258,10 @@ export function paintMembers(
     // rotated-drawing pivot trick): the content re-enters centered, and no
     // host rides along — spinner space has no page-space geometry to
     // register. A member's spin rides its own box, never the whole scene.
-    // (The metafile textBox keeps its own rotate-about-origin semantic;
-    // charts and tables don't carry a member spin yet.)
-    if (m.kind !== "textBox" && m.kind !== "chart" && m.kind !== "table" && m.rotation) {
+    // (The metafile textBox keeps its own rotate-about-origin semantic.)
+    const memberSpin =
+      m.kind === "textBox" ? (m.rotationAbout === "center" ? m.rotation : undefined) : m.rotation;
+    if (memberSpin) {
       const spinner = new Group({
         x: mx + m.width / 2,
         y: my + m.height / 2,
@@ -266,9 +269,11 @@ export function paintMembers(
       });
       tree.add(spinner);
       const { rotation: _spin, ...unspun } = m;
+      const unrotated =
+        "rotationAbout" in unspun ? (({ rotationAbout: _pivot, ...rest }) => rest)(unspun) : unspun;
       paintMembers(
         spinner,
-        [unspun],
+        [unrotated],
         -m.x - m.width / 2,
         -m.y - m.height / 2,
         mctx,
@@ -328,26 +333,38 @@ export function paintMembers(
         );
       }
     } else if (m.kind === "path") {
-      tree.add(
-        new LeaferPath({
-          x: mx,
-          y: my,
-          width: m.width,
-          height: m.height,
-          // Leafer's Path takes SVG path data under `path` (its `data` holds
-          // the parsed command array — a string there paints nothing).
-          path: m.d,
-          fill: m.fill ? `#${m.fill}` : undefined,
-          ...strokePropsOf(m.line),
-          // Adjacent same-color fills share their edge and the rasterizer
-          // leaves a 1px antialiasing seam between them — a hairline in the
-          // fill color closes it (an outlined member keeps its own stroke).
-          ...(m.fill && !m.line ? { stroke: `#${m.fill}`, strokeWidth: 1 } : {}),
-          // Leafer spells the SVG fill-rule attribute `windingRule`.
-          windingRule: m.fillRule,
-          ...shadowEffectOf(m.shadow),
-        }),
-      );
+      const path = new LeaferPath({
+        x: mx,
+        y: my,
+        width: m.width,
+        height: m.height,
+        // Leafer's Path takes SVG path data under `path` (its `data` holds
+        // the parsed command array — a string there paints nothing).
+        path: m.d,
+        fill: m.fill ? `#${m.fill}` : undefined,
+        ...strokePropsOf(m.line),
+        // Adjacent same-color fills share their edge and the rasterizer
+        // leaves a 1px antialiasing seam between them — a hairline in the
+        // fill color closes it (an outlined member keeps its own stroke).
+        ...(m.fill && !m.line ? { stroke: `#${m.fill}`, strokeWidth: 1 } : {}),
+        // Leafer spells the SVG fill-rule attribute `windingRule`.
+        windingRule: m.fillRule,
+        ...shadowEffectOf(m.shadow),
+      });
+      if (m.flipH || m.flipV) {
+        const mirror = new Group({
+          x: m.flipH ? mx + m.width : mx,
+          y: m.flipV ? my + m.height : my,
+          ...(m.flipH ? { scaleX: -1 } : {}),
+          ...(m.flipV ? { scaleY: -1 } : {}),
+        });
+        path.x = 0;
+        path.y = 0;
+        mirror.add(path);
+        tree.add(mirror);
+      } else {
+        tree.add(path);
+      }
     } else if (m.kind === "chart") {
       // The sub-element boxes ride the host gate (a rotated drawing's members
       // paint in spinner space — no page-space geometry to register) and skip
@@ -372,6 +389,10 @@ export function paintMembers(
       );
     } else if (m.kind === "table") {
       paintFrameTable(tree, { ...m, x: mx, y: my }, mctx);
+    } else if (m.kind === "smartArt") {
+      paintSmartArt(tree, { ...m, x: mx, y: my });
+    } else if (m.kind === "mediaFrame") {
+      paintMediaFrame(tree, { ...m, x: mx, y: my }, mctx);
     } else if (m.kind === "shape") {
       paintShapeBox(tree, { ...m, x: mx, y: my }, false);
     } else {

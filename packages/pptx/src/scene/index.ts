@@ -7,4 +7,4 @@ export {
   type ProjectedPresentation,
   type ProjectedSlide,
 } from "./presentation";
-export { textBlocks } from "./text";
+export { textBlocks, type TextFieldContext } from "./text";

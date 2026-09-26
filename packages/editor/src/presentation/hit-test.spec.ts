@@ -24,14 +24,34 @@ describe("slideHits", () => {
           line: { x1: px(0), y1: px(30), x2: px(40), y2: px(10) },
         },
         { picture: { x: px(5), y: px(5), width: px(8), height: px(8), data: "", type: "png" } },
-        { table: { x: px(1), y: px(2), width: px(60), height: px(30), rows: [] } },
+        {
+          table: {
+            x: px(1),
+            y: px(2),
+            width: px(60),
+            height: px(30),
+            rows: [],
+          },
+        },
+        {
+          video: {
+            x: px(8),
+            y: px(6),
+            width: px(50),
+            height: px(30),
+            data: new Uint8Array(),
+            type: "mp4",
+          },
+        },
         // Unpainted variants contribute no hit box.
-        { smartart: {} },
+        { smartart: { x: px(3), y: px(4), width: px(70), height: px(40), nodes: [] } },
       ],
     } as unknown as SlideOptions;
     const hits = slideHits(slide);
-    expect(hits.map((h) => h.child)).toEqual([0, 1, 2, 3]);
+    expect(hits.map((h) => h.child)).toEqual([0, 1, 2, 3, 4, 5]);
     expect(hits[0]!.box).toEqual({ x: 10, y: 20, width: 100, height: 50 });
+    expect(hits[4]!.box).toEqual({ x: 8, y: 6, width: 50, height: 30 });
+    expect(hits[5]!.box).toEqual({ x: 3, y: 4, width: 70, height: 40 });
     // A line's box spans its endpoints' bounding rectangle.
     expect(hits[1]!.box).toEqual({ x: 0, y: 10, width: 40, height: 20 });
   });

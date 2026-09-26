@@ -7,6 +7,7 @@
  */
 export * from "./target";
 export * from "./gestures";
+export * from "./shape-drawer";
 export * from "./docx";
 export * from "./geometry";
 export * from "./overlay";

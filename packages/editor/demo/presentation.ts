@@ -205,6 +205,56 @@ const demoDeck = (): PresentationOptions => ({
         },
       ],
     },
+    // Table styles — the tblPr flags resolving through the themed default
+    // family (header fill, white bold text, light-accent banding) and the
+    // no-style grid GUID as the bare comparison.
+    {
+      children: [
+        { shape: textCard("Table styles", 28, "262626", 0.55) },
+        {
+          table: {
+            x: inEMU(0.9),
+            y: inEMU(1.7),
+            width: inEMU(11),
+            columnWidths: [inEMU(3.7), inEMU(3.7), inEMU(3.6)],
+            firstRow: true,
+            bandRow: true,
+            rows: [
+              {
+                cells: [{ text: "Region" }, { text: "Q1" }, { text: "Q2" }],
+              },
+              {
+                cells: [{ text: "North" }, { text: "128" }, { text: "116" }],
+              },
+              {
+                cells: [{ text: "South" }, { text: "97" }, { text: "105" }],
+              },
+              {
+                cells: [{ text: "West" }, { text: "64" }, { text: "71" }],
+              },
+            ],
+          },
+        },
+        {
+          table: {
+            x: inEMU(0.9),
+            y: inEMU(5),
+            width: inEMU(11),
+            height: inEMU(1.6),
+            columnWidths: [inEMU(3.7), inEMU(3.7), inEMU(3.6)],
+            tableStyleId: "{5940675A-B579-460E-94D1-54222C63F5DA}",
+            rows: [
+              {
+                cells: [{ text: "No Style, Table Grid" }, { text: "a" }, { text: "b" }],
+              },
+              {
+                cells: [{ text: "keeps the plain grid" }, { text: "c" }, { text: "d" }],
+              },
+            ],
+          },
+        },
+      ],
+    },
   ],
 });
 
