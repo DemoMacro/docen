@@ -5,6 +5,7 @@ import {
   type LaidOutParagraph,
   type LayoutBlockContext,
   type LayoutDrawing,
+  type LayoutDrawingFill,
   type LayoutDrawingLine,
   type LayoutDrawingMember,
   type LayoutDrawingShadow,
@@ -341,12 +342,14 @@ export function paintMembers(
         // Leafer's Path takes SVG path data under `path` (its `data` holds
         // the parsed command array — a string there paints nothing).
         path: m.d,
-        fill: m.fill ? `#${m.fill}` : undefined,
+        fill: paintFillOf(m.fill),
         ...strokePropsOf(m.line),
         // Adjacent same-color fills share their edge and the rasterizer
         // leaves a 1px antialiasing seam between them — a hairline in the
         // fill color closes it (an outlined member keeps its own stroke).
-        ...(m.fill && !m.line ? { stroke: `#${m.fill}`, strokeWidth: 1 } : {}),
+        ...(typeof m.fill === "string" && m.fill && !m.line
+          ? { stroke: `#${m.fill}`, strokeWidth: 1 }
+          : {}),
         // Leafer spells the SVG fill-rule attribute `windingRule`.
         windingRule: m.fillRule,
         ...shadowEffectOf(m.shadow),
@@ -532,6 +535,18 @@ function rgbaOf(hex: string, opacity: number): string {
   return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${opacity})`;
 }
 
+/** Legacy hex fills keep the separate opacity channel; gradient/image paints
+ *  carry their own color alpha and pass to Leafer unchanged. */
+function paintFillOf(
+  fill: LayoutDrawingFill | undefined,
+  opacity?: number,
+): string | Record<string, unknown> | undefined {
+  if (!fill) return undefined;
+  if (typeof fill !== "string") return fill;
+  if (opacity != null) return rgbaOf(fill, opacity);
+  return `#${fill}`;
+}
+
 /** One box-like shape's own paint — preset silhouette + solid fill + outline
  *  stroke. Shared by standalone shape members and text-box shapes (a txbx is
  *  a shape carrying text; Word paints its prstGeom under the body). Unknown
@@ -548,7 +563,7 @@ function paintShapeBox(
     /** The preset's evaluated silhouette (SVG path d) — paints instead of
      *  the plain rectangle when present (a non-box shape carrying text). */
     d?: string;
-    fill?: string;
+    fill?: LayoutDrawingFill;
     opacity?: number;
     line?: LayoutDrawingLine | { px: number; color?: string; dash?: string };
     shadow?: LayoutDrawingShadow;
@@ -565,11 +580,7 @@ function paintShapeBox(
         width: box.width,
         height: box.height,
         path: box.d,
-        fill: box.fill
-          ? box.opacity != null
-            ? rgbaOf(box.fill, box.opacity)
-            : `#${box.fill}`
-          : undefined,
+        fill: paintFillOf(box.fill, box.opacity),
         ...strokePropsOf(box.line),
         strokeAlign: "center",
         windingRule: "nonzero",
@@ -586,11 +597,7 @@ function paintShapeBox(
   ) {
     if (!rectFallback) return;
   }
-  const fill = box.fill
-    ? box.opacity != null
-      ? rgbaOf(box.fill, box.opacity)
-      : `#${box.fill}`
-    : undefined;
+  const fill = paintFillOf(box.fill, box.opacity);
   const common = {
     x: box.x,
     y: box.y,

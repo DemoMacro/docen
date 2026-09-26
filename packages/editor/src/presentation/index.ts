@@ -1050,7 +1050,7 @@ class DocenPresentation extends AddinHost {
       width: `${box.width * scale}px`,
       height: `${box.height * scale}px`,
       padding: `${ins.top * scale}px ${ins.right * scale}px ${ins.bottom * scale}px ${ins.left * scale}px`,
-      ...(fill ? { background: `#${fill}` } : {}),
+      ...(typeof fill === "string" && fill ? { background: `#${fill}` } : {}),
       fontFamily: JSON.stringify(run.family),
       fontSize: `${run.sizePx * scale}px`,
       lineHeight: `${linePx * scale}px`,

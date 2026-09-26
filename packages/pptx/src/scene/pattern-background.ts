@@ -178,6 +178,19 @@ export function patternBackgroundOf(
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
+/** One tile as a repeatable image for shape fills. */
+export function patternTileSrcOf(fill: PatternFill): string {
+  const foreground = colorOf(fill.foregroundColor) ?? "000000";
+  const background = colorOf(fill.backgroundColor);
+  const svg = [
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${TILE}" height="${TILE}" viewBox="0 0 ${TILE} ${TILE}">`,
+    background ? `<rect width="${TILE}" height="${TILE}" fill="#${background}"/>` : "",
+    `<g fill="#${foreground}" stroke="#${foreground}">${tileOf(fill.pattern)}</g>`,
+    "</svg>",
+  ].join("");
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
 function colorOf(value: unknown): string | undefined {
   if (typeof value === "string") return value.replace("#", "").toUpperCase();
   if (!value || typeof value !== "object") return undefined;

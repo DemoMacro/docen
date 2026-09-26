@@ -18,6 +18,7 @@ import type {
   TextFont,
   TextParagraphPropertiesOptions,
 } from "@office-open/core/drawing";
+import type { ColorMappingOptions } from "@office-open/core/theme";
 
 import type { TableStyleRegions, ThemeColors } from "./table-style";
 
@@ -79,6 +80,8 @@ export interface TextFieldContext {
   now?: Date;
   /** Theme color slots (accent1…); table styles resolve schemeClr fills. */
   themeColors?: ThemeColors;
+  /** The master's clrMap; shape fills resolve short scheme tokens through it. */
+  colorMapping?: ColorMappingOptions;
   /** The presentation's custom table styles (p:tblStyleLst), keyed by
    * upper-cased style GUID. */
   tableStyles?: Record<string, TableStyleRegions>;

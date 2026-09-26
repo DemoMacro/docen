@@ -3,7 +3,6 @@
 // evaluator — and a text-carrying shape projects its body instead.
 
 import {
-  fillOpacityOf,
   lineEndMembersOf,
   linePathData,
   measureEmu,
@@ -11,10 +10,10 @@ import {
   outerShadowOf,
   presetShapePaths,
   presetShapeTextRect,
-  solidFillOf,
 } from "@docen/core/geometry";
 import {
   emuToPx,
+  type LayoutDrawingFill,
   type LayoutDrawingLine,
   type LayoutDrawingMember,
   type LayoutDrawingShadow,
@@ -24,6 +23,7 @@ import type { TextBodyOptions } from "@office-open/core/drawing";
 import type { ShapeOptions } from "@office-open/pptx";
 
 import { BOX_PRESETS, STRAIGHT_PRESETS, emuOf, geometryOf, type Xform } from "./geometry";
+import { shapeFillOf } from "./shape-fill";
 import { textBlocks, type TextFieldContext } from "./text";
 
 // DrawingML bodyPr default insets (lIns/rIns 0.1", tIns/bIns 0.05").
@@ -36,7 +36,7 @@ interface ShapePaint {
   h: number;
   preset?: string;
   adjustments?: readonly GeometryGuide[];
-  fill?: string;
+  fill?: LayoutDrawingFill;
   opacity?: number;
   line?: LayoutDrawingLine;
   shadow?: LayoutDrawingShadow;
@@ -56,8 +56,12 @@ export function shapeMembers(
     w: t.sx * emuOf(shape.width),
     h: t.sy * emuOf(shape.height),
     ...geometryOf(shape.properties?.geometry),
-    fill: solidFillOf(shape.properties?.fill),
-    opacity: fillOpacityOf(shape.properties?.fill),
+    ...shapeFillOf(
+      shape.properties?.fill,
+      t.sx * emuOf(shape.width),
+      t.sy * emuOf(shape.height),
+      context,
+    ),
     line: outlineOf(shape.properties?.outline),
     shadow: outerShadowOf(shape.properties?.effects),
     ...(shape.rotation ? { rotation: shape.rotation } : {}),

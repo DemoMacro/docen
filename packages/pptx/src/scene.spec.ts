@@ -565,6 +565,89 @@ describe("groups", () => {
   });
 });
 
+describe("shape fills", () => {
+  it("projects a gradient fill as renderer-native stops", () => {
+    const { slides } = project({
+      slides: [
+        {
+          children: [
+            {
+              shape: {
+                x: 0,
+                y: 0,
+                width: 952500,
+                height: 952500,
+                properties: {
+                  geometry: "rect",
+                  fill: {
+                    type: "gradient",
+                    angle: 90,
+                    stops: [
+                      { position: 0, color: { type: "solid", color: "FF0000" } },
+                      { position: 1, color: "FFFFFF" },
+                    ],
+                  },
+                },
+              },
+            },
+          ],
+        },
+      ],
+    } as never);
+    expect(slides[0]!.members[0]).toMatchObject({
+      kind: "shape",
+      fill: {
+        type: "linear",
+        from: { x: 50, y: 0 },
+        to: { x: 50, y: 100 },
+        stops: [
+          { offset: 0, color: "#FF0000" },
+          { offset: 1, color: "#FFFFFF" },
+        ],
+      },
+    });
+  });
+
+  it("projects a theme-colored pattern fill as a tiled image", () => {
+    const { slides } = project({
+      masters: [{ theme: { colorScheme: { accent1: "FF0000" } } }] as never,
+      slides: [
+        {
+          children: [
+            {
+              shape: {
+                x: 0,
+                y: 0,
+                width: 952500,
+                height: 952500,
+                properties: {
+                  geometry: "rect",
+                  fill: {
+                    type: "pattern",
+                    pattern: "cross",
+                    foregroundColor: { type: "solid", color: { value: "accent1" } },
+                    backgroundColor: "FFFFFF",
+                  },
+                },
+              },
+            },
+          ],
+        },
+      ],
+    } as never);
+    const member = slides[0]!.members[0]!;
+    if (member.kind !== "shape") throw new Error("expected a shape");
+    const fill = member.fill;
+    if (typeof fill !== "object" || fill.type !== "image")
+      throw new Error("expected a pattern paint");
+    expect(fill).toMatchObject({ type: "image", mode: "repeat", repeat: true });
+    const svg = decodeURIComponent(fill.url.split(",")[1]!);
+    expect(svg).toContain('fill="#FF0000"');
+    expect(svg).toContain('fill="#FFFFFF"');
+    expect(svg).toContain('d="M0 .5H8 M.5 0V8"');
+  });
+});
+
 describe("pictures and background", () => {
   it("projects a picture with src, crop and flips", () => {
     const { slides } = project({

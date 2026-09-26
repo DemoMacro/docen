@@ -3,6 +3,24 @@ import type { LayoutPictureCrop } from "./inline";
 
 // ── floating drawings (anchored shape groups) ──
 
+/** A projected drawing fill: the legacy solid hex, a renderer-native gradient,
+ *  or a tiled/stretched image (picture and preset-pattern fills). */
+export type LayoutDrawingFill =
+  | string
+  | {
+      type: "linear";
+      from: { x: number; y: number };
+      to: { x: number; y: number };
+      stops: { offset: number; color: string }[];
+    }
+  | {
+      type: "radial";
+      from: { x: number; y: number };
+      to: { x: number; y: number };
+      stops: { offset: number; color: string }[];
+    }
+  | { type: "image"; url: string; mode: "stretch" | "repeat"; repeat?: true };
+
 /** A parsed SmartArt data-model node; children preserve the diagram tree. */
 export interface LayoutSmartArtNode {
   text?: string;
@@ -89,8 +107,7 @@ export type LayoutDrawingMember =
       /** Preset geometry (a:prstGeom @prst). The renderer maps the presets it
        *  knows and skips the rest; custom geometry stays unprojected. */
       preset?: string;
-      /** Solid fill, hex RRGGBB; absent → no fill. */
-      fill?: string;
+      fill?: LayoutDrawingFill;
       /** Fill opacity 0-1 (the solid color's a:alpha percent ÷ 100);
        *  absent → fully opaque. Fades the fill only, never the stroke. */
       opacity?: number;
@@ -118,8 +135,7 @@ export type LayoutDrawingMember =
       /** Mirrored connector geometry (endpoint order resolved into flips). */
       flipH?: boolean;
       flipV?: boolean;
-      /** Solid fill, hex RRGGBB; absent → no fill. */
-      fill?: string;
+      fill?: LayoutDrawingFill;
       /** Outline stroke (a:ln): width px + hex color + cap/join/dash. */
       line?: LayoutDrawingLine;
       /** The path's outer shadow (spPr a:effectLst a:outerShdw). */
@@ -204,9 +220,9 @@ export type LayoutDrawingMember =
       width: number;
       height: number;
       childPath?: readonly number[];
-      /** The shape's own solid fill, hex RRGGBB; absent → no fill (a plain
+      /** The shape's own paint; absent → no fill (a plain
        *  wps:txbx draws its spPr fill under the text). */
-      fill?: string;
+      fill?: LayoutDrawingFill;
       /** Fill opacity 0-1 (the solid color's a:alpha percent ÷ 100). */
       opacity?: number;
       /** The shape's outline stroke (a:ln). Word draws the txbx box even
