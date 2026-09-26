@@ -11,9 +11,11 @@
 
 import { measureEmu, solidFillOf } from "@docen/core/geometry";
 import { emuToPx, type LayoutDrawingMember } from "@docen/layout";
+import type { FillOptions } from "@office-open/core/drawing";
 import type { PresentationOptions, SlideOptions } from "@office-open/pptx";
 
 import { IDENTITY } from "./geometry";
+import { pictureSrcOf } from "./pictures";
 import { regionsOf, type ThemeColors } from "./table-style";
 import { childMembers } from "./walk";
 
@@ -28,12 +30,25 @@ export interface ProjectedPresentation {
 
 /** One projected slide. */
 export interface ProjectedSlide {
-  /** The slide's solid background fill, hex RRGGBB; absent → the painter's
-   *  page default. Gradient/picture backgrounds stay unprojected (batch gap). */
-  background?: string;
+  /** The slide's background paint; absent → the painter's page default.
+   *  Pattern fills and bgRef style-matrix inheritance stay unprojected. */
+  background?: ProjectedSlideBackground;
   /** Slide-absolute drawing members, paint order = document order. */
   members: LayoutDrawingMember[];
 }
+
+/** The background forms the painter renders: a solid hex, a gradient's
+ *  stops with its linear angle (degrees, OOXML clockwise-from-east) or radial
+ *  path, or a picture fill's data URL. */
+export type ProjectedSlideBackground =
+  | { kind: "solid"; color: string }
+  | {
+      kind: "gradient";
+      stops: { color: string; position: number }[];
+      angle?: number;
+      path?: "shape" | "circle" | "rect";
+    }
+  | { kind: "image"; src: string };
 
 /** Project a parsed presentation into the paintable shape: sizes are resolved
  *  to px and every slide's children flatten into members. Pure — the input is
@@ -122,7 +137,7 @@ function projectSlide(
   },
 ): ProjectedSlide {
   return {
-    ...(slide.background ? { background: solidFillOf(slide.background.fill) } : {}),
+    ...(slide.background?.fill ? { background: backgroundOf(slide.background.fill) } : {}),
     members: childMembers(slide.children ?? [], IDENTITY, [], {
       slideNumber,
       slideCount,
@@ -130,4 +145,49 @@ function projectSlide(
       ...context,
     }),
   };
+}
+
+/** A p:bg fill → the projected paint. Solid/gradient/picture land; pattern
+ *  fills and the other exotics keep the painter's default. */
+function backgroundOf(fill: FillOptions): ProjectedSlideBackground | undefined {
+  if (typeof fill === "string") {
+    const color = solidFillOf(fill);
+    return color ? { kind: "solid", color } : undefined;
+  }
+  if (fill.type === "solid") {
+    const color = solidFillOf(fill.color);
+    return color ? { kind: "solid", color } : undefined;
+  }
+  if (fill.type === "gradient") {
+    const opts = "options" in fill ? fill.options : fill;
+    // Stop colors follow the core color shape (a hex string or a
+    // {value} record) — not the docen solid-fill wrapper solidFillOf reads.
+    const stopColor = (c: unknown) =>
+      typeof c === "string"
+        ? c.replace("#", "").toUpperCase()
+        : c && typeof c === "object" && "value" in c && typeof c.value === "string"
+          ? c.value.replace("#", "").toUpperCase()
+          : undefined;
+    const stops = opts.stops
+      .map((stop) => ({ color: stopColor(stop.color) ?? "", position: stop.position }))
+      .filter((stop) => stop.color !== "");
+    if (stops.length < 2) return undefined;
+    // The shorthand carries angle/path at the top level; the full options
+    // form nests them inside shade (linear vs path).
+    const shorthand = "options" in fill ? undefined : fill;
+    const shade = opts && typeof opts === "object" && "shade" in opts ? opts.shade : undefined;
+    const angle = shorthand?.angle ?? (shade && "angle" in shade ? shade.angle : undefined);
+    const path = shorthand?.path ?? (shade && "path" in shade ? shade.path : undefined);
+    return {
+      kind: "gradient",
+      stops,
+      ...(angle !== undefined ? { angle } : {}),
+      ...(path ? { path } : {}),
+    };
+  }
+  if (fill.type === "blip") {
+    const src = pictureSrcOf(fill.data, fill.imageType);
+    return src ? { kind: "image", src } : undefined;
+  }
+  return undefined;
 }

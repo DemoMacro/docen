@@ -16,7 +16,12 @@ export {
   type TransitionType,
   type SlideAnimation,
 } from "@office-open/pptx";
-export { projectPresentation, type ProjectedPresentation, type ProjectedSlide } from "./scene";
+export {
+  projectPresentation,
+  type ProjectedPresentation,
+  type ProjectedSlideBackground,
+  type ProjectedSlide,
+} from "./scene";
 export { textBlocks, type TextFieldContext } from "./scene";
 export { tableGridOf, type CellOrigin } from "./scene/tables";
 export {

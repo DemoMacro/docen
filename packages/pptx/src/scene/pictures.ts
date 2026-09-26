@@ -24,6 +24,21 @@ function base64Of(bytes: Uint8Array): string {
   return btoa(bin);
 }
 
+/** The base contract's three data shapes → the data URL the painter loads;
+ *  emf/wmf have no browser decoder, so they resolve to undefined. */
+export function pictureSrcOf(data: unknown, type: string | undefined): string | undefined {
+  const mime = PIC_MIME[type ?? ""];
+  return typeof data === "string"
+    ? data.startsWith("data:")
+      ? data
+      : mime
+        ? `data:${mime};base64,${data}`
+        : undefined
+    : mime && data instanceof Uint8Array
+      ? `data:${mime};base64,${base64Of(data)}`
+      : undefined;
+}
+
 /** a:srcRect integer-percent insets → the crop fractions the member carries;
  *  an all-zero rect is no crop. */
 function cropOf(sr: SourceRectangleOptions | undefined): LayoutPictureCrop | undefined {
@@ -40,24 +55,10 @@ export function pictureMember(
   t: Xform,
   childPath: readonly number[] | undefined,
 ): LayoutDrawingMember | undefined {
-  // emf/wmf have no browser decoder — an empty frame (registered gap).
-  const mime = PIC_MIME[pic.type];
   const crop = cropOf(pic.sourceRectangle);
   const line = outlineOf(pic.outline);
   const shadow = outerShadowOf(pic.effects);
-  // The base contract allows three data shapes: a data URL passes through
-  // verbatim, bare base64 and bytes get the mime wrapper (none exists for
-  // emf/wmf — nothing the browser could decode anyway).
-  const src =
-    typeof pic.data === "string"
-      ? pic.data.startsWith("data:")
-        ? pic.data
-        : mime
-          ? `data:${mime};base64,${pic.data}`
-          : undefined
-      : mime && pic.data instanceof Uint8Array
-        ? `data:${mime};base64,${base64Of(pic.data)}`
-        : undefined;
+  const src = pictureSrcOf(pic.data, pic.type);
   return {
     kind: "picture",
     x: t.sx * emuOf(pic.x) + t.dx,

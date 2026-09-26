@@ -5,7 +5,7 @@
 
 import { paintMembers } from "@docen/core";
 import { browserFontMetrics } from "@docen/layout";
-import type { ProjectedPresentation } from "@docen/pptx";
+import type { ProjectedPresentation, ProjectedSlideBackground } from "@docen/pptx";
 import { Group, Rect, type IGroup } from "leafer-ui";
 
 /** Gap between consecutive slides in the main strip, px. */
@@ -14,6 +14,47 @@ export const SLIDE_GAP_PX = 24;
 export const THUMB_WIDTH_PX = 160;
 /** Visual gap between thumbnails, px (screen space, not slide space). */
 export const THUMB_GAP_PX = 12;
+
+/** The slide's background → the Leafer fill: solid hex, a linear/radial
+ *  gradient (OOXML's angle is clockwise from east, screen y-down — the same
+ *  sweep), or the picture fill stretched over the slide (PowerPoint's
+ *  default picture background behavior). */
+function slideFillOf(
+  bg: ProjectedSlideBackground | undefined,
+  widthPx: number,
+  heightPx: number,
+): string | Record<string, unknown> {
+  if (!bg) return "#ffffff";
+  if (bg.kind === "solid") return `#${bg.color}`;
+  if (bg.kind === "image") return { type: "image", url: bg.src, mode: "stretch" };
+  const stops = bg.stops.map((stop) => ({ offset: stop.position, color: `#${stop.color}` }));
+  if (bg.path) {
+    // Radial: the focus sits center, the rim reaches the box edge (the
+    // "to" point sets the radius).
+    return {
+      type: "radial",
+      from: { x: widthPx / 2, y: heightPx / 2 },
+      to: { x: widthPx / 2, y: heightPx },
+      stops,
+    };
+  }
+  const theta = ((bg.angle ?? 0) * Math.PI) / 180;
+  // The gradient line spans the full box: its length is the box extents
+  // projected on the direction.
+  const length = widthPx * Math.abs(Math.cos(theta)) + heightPx * Math.abs(Math.sin(theta));
+  return {
+    type: "linear",
+    from: {
+      x: widthPx / 2 - (Math.cos(theta) * length) / 2,
+      y: heightPx / 2 - (Math.sin(theta) * length) / 2,
+    },
+    to: {
+      x: widthPx / 2 + (Math.cos(theta) * length) / 2,
+      y: heightPx / 2 + (Math.sin(theta) * length) / 2,
+    },
+    stops,
+  };
+}
 
 /** Paint one slide (background + members) as a group at strip position `y`.
  *  `index` feeds the paint context's page bookkeeping. */
@@ -29,7 +70,7 @@ export function paintSlideGroup(
     new Rect({
       width: pres.widthPx,
       height: pres.heightPx,
-      fill: slide.background ? `#${slide.background}` : "#ffffff",
+      fill: slideFillOf(slide.background, pres.widthPx, pres.heightPx),
       stroke: "#c4c4c4",
       strokeWidth: 1,
     }),

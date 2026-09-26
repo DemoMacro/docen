@@ -5,6 +5,7 @@
 export {
   projectPresentation,
   type ProjectedPresentation,
+  type ProjectedSlideBackground,
   type ProjectedSlide,
 } from "./presentation";
 export { textBlocks, type TextFieldContext } from "./text";

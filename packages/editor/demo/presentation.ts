@@ -255,6 +255,70 @@ const demoDeck = (): PresentationOptions => ({
         },
       ],
     },
+    // Background fills — a linear gradient slide and a radial one; the
+    // default solid path stays the plain first slide.
+    {
+      background: {
+        fill: {
+          type: "gradient",
+          angle: 45,
+          stops: [
+            { position: 0, color: "1F3864" },
+            { position: 1, color: "4472C4" },
+          ],
+        },
+      },
+      children: [
+        {
+          shape: {
+            x: inEMU(1.3),
+            y: inEMU(3),
+            width: inEMU(10.4),
+            height: inEMU(1.2),
+            textBody: {
+              anchor: "center",
+              paragraphs: [
+                {
+                  children: [{ text: "Gradient background", size: 40, bold: true, fill: "FFFFFF" }],
+                },
+              ],
+            },
+          },
+        },
+      ],
+    },
+    {
+      background: {
+        fill: {
+          type: "gradient",
+          options: {
+            stops: [
+              { position: 0, color: { value: "FFFFFF" } },
+              { position: 1, color: { value: "FFD966" } },
+            ],
+            shade: { path: "circle" },
+          },
+        },
+      },
+      children: [
+        {
+          shape: {
+            x: inEMU(1.3),
+            y: inEMU(3),
+            width: inEMU(10.4),
+            height: inEMU(1.2),
+            textBody: {
+              anchor: "center",
+              paragraphs: [
+                {
+                  children: [{ text: "Radial background", size: 40, bold: true, fill: "1F3864" }],
+                },
+              ],
+            },
+          },
+        },
+      ],
+    },
   ],
 });
 

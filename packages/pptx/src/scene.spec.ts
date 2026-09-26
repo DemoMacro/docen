@@ -599,7 +599,63 @@ describe("pictures and background", () => {
     const { slides } = project({
       slides: [{ background: { fill: { type: "solid", color: "0B57D0" } } }],
     });
-    expect(slides[0]!.background).toBe("0B57D0");
+    expect(slides[0]!.background).toEqual({ kind: "solid", color: "0B57D0" });
+  });
+
+  it("projects a linear gradient's stops and angle", () => {
+    const { slides } = project({
+      slides: [
+        {
+          background: {
+            fill: {
+              type: "gradient",
+              angle: 90,
+              stops: [
+                { position: 0, color: "0B57D0" },
+                { position: 1, color: "FFFFFF" },
+              ],
+            },
+          },
+        },
+      ],
+    });
+    expect(slides[0]!.background).toEqual({
+      kind: "gradient",
+      angle: 90,
+      stops: [
+        { color: "0B57D0", position: 0 },
+        { color: "FFFFFF", position: 1 },
+      ],
+    });
+  });
+
+  it("projects the gradient options form's path shade", () => {
+    const { slides } = project({
+      slides: [
+        {
+          background: {
+            fill: {
+              type: "gradient",
+              options: {
+                stops: [
+                  { position: 0, color: { value: "112233" } },
+                  { position: 1, color: { value: "FFFFFF" } },
+                ],
+                shade: { path: "circle" },
+              },
+            },
+          },
+        },
+      ],
+    });
+    expect(slides[0]!.background).toMatchObject({ kind: "gradient", path: "circle" });
+  });
+
+  it("projects a picture background to a data URL", () => {
+    const { slides } = project({
+      slides: [{ background: { fill: { type: "blip", data: png, imageType: "png" } } }],
+    } as never);
+    expect(slides[0]!.background).toEqual({ kind: "image", src: pngSrc });
   });
 
   it("drops cNvPr-hidden children from the projection", () => {
