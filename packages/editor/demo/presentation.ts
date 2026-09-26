@@ -57,10 +57,36 @@ const rectCard = (x: number, y: number, w: number, h: number, fill: string): Sha
   properties: { geometry: "rect", fill },
 });
 
+// The demo master's theme: the background fill styles the slides' bgRef
+// references resolve through (a flat color and a fade into the accent).
+const demoTheme = {
+  colorScheme: { accent1: "4472C4", dark1: "262626", light1: "FFFFFF" },
+  formatScheme: {
+    backgroundFillStyles: [
+      { type: "solid", color: { value: "phClr" } },
+      {
+        type: "gradient",
+        shade: { angle: 90 },
+        stops: [
+          { position: 0, color: { value: "phClr" } },
+          { position: 1, color: { value: "accent1" } },
+        ],
+      },
+      { type: "solid", color: { value: "phClr" } },
+    ],
+    fillStyles: [],
+    lineStyles: [],
+    effectStyles: [],
+  },
+};
+
 const demoDeck = (): PresentationOptions => ({
+  masters: [{ name: "demo", theme: demoTheme }] as PresentationOptions["masters"],
   slides: [
     // Title slide — accent bar, big title, subtitle.
     {
+      // The bgRef resolves through the master's fade style (white → accent).
+      background: { reference: { index: 1002, color: { value: "bg1" } } },
       children: [
         {
           shape: {

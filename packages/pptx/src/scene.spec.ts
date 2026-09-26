@@ -658,6 +658,96 @@ describe("pictures and background", () => {
     expect(slides[0]!.background).toEqual({ kind: "image", src: pngSrc });
   });
 
+  it("resolves a bgRef through the theme's background fill styles", () => {
+    const { slides } = project({
+      masters: [
+        {
+          theme: {
+            colorScheme: { light1: "F8F9FA", accent1: "0B57D0" },
+            formatScheme: {
+              backgroundFillStyles: [
+                { type: "solid", color: { value: "phClr" } },
+                {
+                  type: "gradient",
+                  shade: { angle: 90 },
+                  stops: [
+                    { position: 0, color: { value: "phClr" } },
+                    { position: 1, color: { value: "accent1" } },
+                  ],
+                },
+              ],
+              fillStyles: [],
+              lineStyles: [],
+              effectStyles: [],
+            },
+          },
+        },
+      ] as never,
+      slides: [{ background: { reference: { index: 1001, color: { value: "bg1" } } } }],
+    });
+    // 1001 → the first bg style; its phClr takes the reference's color, and
+    // bg1 maps (through the default color map) to the theme's light1.
+    expect(slides[0]!.background).toEqual({ kind: "solid", color: "F8F9FA" });
+  });
+
+  it("resolves the second bg style's gradient with phClr stops", () => {
+    const { slides } = project({
+      masters: [
+        {
+          theme: {
+            colorScheme: { accent1: "112233", accent2: "EEDDCC" },
+            formatScheme: {
+              backgroundFillStyles: [
+                { type: "solid", color: { value: "phClr" } },
+                {
+                  type: "gradient",
+                  shade: { angle: 90 },
+                  stops: [
+                    { position: 0, color: { value: "phClr" } },
+                    { position: 1, color: { value: "accent2" } },
+                  ],
+                },
+              ],
+              fillStyles: [],
+              lineStyles: [],
+              effectStyles: [],
+            },
+          },
+        },
+      ] as never,
+      slides: [{ background: { reference: { index: 1002, color: { value: "accent1" } } } }],
+    });
+    expect(slides[0]!.background).toEqual({
+      kind: "gradient",
+      angle: 90,
+      stops: [
+        { color: "112233", position: 0 },
+        { color: "EEDDCC", position: 1 },
+      ],
+    });
+  });
+
+  it("inherits the master's bgRef when the slide declares no background", () => {
+    const { slides } = project({
+      masters: [
+        {
+          background: { reference: { index: 1001, color: { value: "tx1" } } },
+          theme: {
+            colorScheme: { dark1: "1A1A1A" },
+            formatScheme: {
+              backgroundFillStyles: [{ type: "solid", color: { value: "phClr" } }],
+              fillStyles: [],
+              lineStyles: [],
+              effectStyles: [],
+            },
+          },
+        },
+      ] as never,
+      slides: [{}],
+    });
+    expect(slides[0]!.background).toEqual({ kind: "solid", color: "1A1A1A" });
+  });
+
   it("drops cNvPr-hidden children from the projection", () => {
     const { slides } = project({
       slides: [

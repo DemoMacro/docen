@@ -12,6 +12,9 @@
 import { measureEmu, solidFillOf } from "@docen/core/geometry";
 import { emuToPx, type LayoutDrawingMember } from "@docen/layout";
 import type { FillOptions } from "@office-open/core/drawing";
+import type { StyleMatrixReferenceOptions } from "@office-open/core/drawing";
+import type { ColorMappingOptions } from "@office-open/core/theme";
+import { DEFAULT_COLOR_MAPPING } from "@office-open/core/theme";
 import type { PresentationOptions, SlideOptions } from "@office-open/pptx";
 
 import { IDENTITY } from "./geometry";
@@ -60,18 +63,25 @@ export function projectPresentation(pres: PresentationOptions): ProjectedPresent
     widthPx,
     heightPx,
     slides: (pres.slides ?? []).map((slide, index) =>
-      projectSlide(slide, index + 1, pres.slides?.length, context),
+      projectSlide(slide, index + 1, pres.slides?.length, context, pres.masters),
     ),
   };
 }
 
-/** The theme/table-style context every slide's projection shares: the first
- * master's color scheme plus the tblStyleLst entries keyed by GUID. */
-function tableContextOf(pres: PresentationOptions): {
+/** The theme bits the projection resolves against: scheme colors, the bg
+ * fill style list, and the token → slot color map (the master's clrMap). */
+interface ThemeContext {
   themeColors?: ThemeColors;
   tableStyles?: Record<string, ReturnType<typeof regionsOf>>;
-} {
-  const scheme = pres.masters?.[0]?.theme?.colorScheme;
+  backgroundFillStyles: FillOptions[];
+  colorMapping: ColorMappingOptions;
+}
+
+/** The theme/table-style context every slide's projection shares: the first
+ * master's color scheme plus the tblStyleLst entries keyed by GUID. */
+function tableContextOf(pres: PresentationOptions): ThemeContext {
+  const master = pres.masters?.[0];
+  const scheme = master?.theme?.colorScheme;
   const keys = [
     "dark1",
     "light1",
@@ -99,7 +109,12 @@ function tableContextOf(pres: PresentationOptions): {
         ]),
       )
     : undefined;
-  return { themeColors, tableStyles };
+  return {
+    themeColors,
+    tableStyles,
+    backgroundFillStyles: master?.theme?.formatScheme?.backgroundFillStyles ?? [],
+    colorMapping: { ...DEFAULT_COLOR_MAPPING, ...master?.colorMapping },
+  };
 }
 
 /** One theme slot's hex (a string value or a sysClr's lastClr). */
@@ -131,13 +146,12 @@ function projectSlide(
   slide: SlideOptions,
   slideNumber: number,
   slideCount: number | undefined,
-  context: {
-    themeColors?: ThemeColors;
-    tableStyles?: Record<string, ReturnType<typeof regionsOf>>;
-  },
+  context: ThemeContext,
+  masters: PresentationOptions["masters"],
 ): ProjectedSlide {
+  const background = slideBackgroundOf(slide, masters, context);
   return {
-    ...(slide.background?.fill ? { background: backgroundOf(slide.background.fill) } : {}),
+    ...(background ? { background } : {}),
     members: childMembers(slide.children ?? [], IDENTITY, [], {
       slideNumber,
       slideCount,
@@ -145,6 +159,98 @@ function projectSlide(
       ...context,
     }),
   };
+}
+
+/** The slide's background paint: its own fill/reference, or the master's
+ * (slides inherit the master background when they declare none). */
+function slideBackgroundOf(
+  slide: SlideOptions,
+  masters: PresentationOptions["masters"],
+  context: ThemeContext,
+): ProjectedSlideBackground | undefined {
+  const background = slide.background ?? masters?.[0]?.background;
+  if (!background) return undefined;
+  if (background.fill) return backgroundOf(background.fill);
+  if (background.reference) return bgRefFill(background.reference, context);
+  return undefined;
+}
+
+/** A p:bgRef style-matrix reference → the theme's background fill style at
+ * the index (bgFillStyleLst addresses from 1001), its phClr placeholders
+ * replaced with the reference's color. */
+function bgRefFill(
+  reference: StyleMatrixReferenceOptions,
+  context: ThemeContext,
+): ProjectedSlideBackground | undefined {
+  const style =
+    context.backgroundFillStyles[
+      reference.index >= 1001 ? reference.index - 1001 : reference.index
+    ];
+  if (!style) return undefined;
+  const phClr = styleColorOf(reference.color, context, undefined);
+  return backgroundOf(resolveFillColors(style, phClr, context));
+}
+
+/** One EG_ColorChoice → hex: hex strings pass, scheme tokens resolve through
+ * the master's color map into the theme's scheme, phClr takes the style
+ * reference's color. Transforms (lumMod and friends) stay unprojected — the
+ * base color paints. */
+function styleColorOf(
+  color: unknown,
+  context: ThemeContext,
+  phClr: string | undefined,
+): string | undefined {
+  if (typeof color === "string") return color.replace("#", "").toUpperCase();
+  if (color && typeof color === "object" && "value" in color && typeof color.value === "string") {
+    const token = color.value;
+    if (token === "phClr") return phClr;
+    // The raw clrMap tokens spell the first four slots short (bg1/tx1/bg2/tx2);
+    // the parsed color map keys them long (background1/text1/…).
+    const key =
+      { bg1: "background1", tx1: "text1", bg2: "background2", tx2: "text2" }[token] ?? token;
+    const slot = (context.colorMapping as unknown as Record<string, string>)[key] ?? token;
+    return context.themeColors?.[slot as keyof ThemeColors];
+  }
+  return undefined;
+}
+
+/** Replace every phClr/scheme color in a style-matrix fill with its resolved
+ * hex (a shallow structural walk — the fill shapes the projection reads). */
+function resolveFillColors(
+  fill: FillOptions,
+  phClr: string | undefined,
+  context: ThemeContext,
+): FillOptions {
+  if (typeof fill === "string") return fill;
+  if (fill.type === "solid") {
+    return {
+      ...fill,
+      color: styleColorOf(fill.color, context, phClr) ?? (fill.color as never),
+    };
+  }
+  if (fill.type === "gradient") {
+    const resolveStops = <T extends { position: number; color: unknown }>(
+      stops: readonly T[],
+    ): T[] =>
+      stops.map(
+        (stop) => ({ ...stop, color: styleColorOf(stop.color, context, phClr) ?? stop.color }) as T,
+      );
+    if ("options" in fill) {
+      return {
+        type: "gradient",
+        options: { ...fill.options, stops: resolveStops(fill.options.stops) },
+      };
+    }
+    return { ...fill, stops: resolveStops(fill.stops) } as FillOptions;
+  }
+  if (fill.type === "pattern") {
+    return {
+      ...fill,
+      foregroundColor: styleColorOf(fill.foregroundColor, context, phClr) ?? fill.foregroundColor,
+      backgroundColor: styleColorOf(fill.backgroundColor, context, phClr) ?? fill.backgroundColor,
+    };
+  }
+  return fill;
 }
 
 /** A p:bg fill → the projected paint. Solid/gradient/picture land; pattern
