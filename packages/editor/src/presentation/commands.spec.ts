@@ -61,6 +61,8 @@ const bodyOf = (paragraphs: unknown[]): TextBodyOptions =>
 const shapeChild = (body: unknown): SlideChild =>
   ({ shape: { textBody: body } }) as unknown as SlideChild;
 
+const shapeOf = (body: unknown): ShapeVariant => ({ textBody: body }) as unknown as ShapeVariant;
+
 const cellOf = (children: unknown[]): TableCellOptions =>
   ({ children }) as unknown as TableCellOptions;
 
@@ -263,39 +265,32 @@ describe("reorderChild", () => {
 
 describe("shapeTextOf / writeShapeText", () => {
   it("reads paragraphs as \\n-joined lines", () => {
-    const child = shapeChild(
-      bodyOf([{ children: [{ text: "a" }] }, { children: [{ text: "b" }] }]),
-    );
-    expect(shapeTextOf(child)).toBe("a\nb");
+    const shape = shapeOf(bodyOf([{ children: [{ text: "a" }] }, { children: [{ text: "b" }] }]));
+    expect(shapeTextOf(shape)).toBe("a\nb");
   });
 
   it("reads through the text and string sugar", () => {
-    expect(shapeTextOf(shapeChild({ text: "hi" }))).toBe("hi");
-    expect(shapeTextOf(shapeChild(bodyOf(["one", "two"])))).toBe("one\ntwo");
+    expect(shapeTextOf(shapeOf({ text: "hi" }))).toBe("hi");
+    expect(shapeTextOf(shapeOf(bodyOf(["one", "two"])))).toBe("one\ntwo");
   });
 
   it("reads a soft break as a line separator", () => {
-    const child = shapeChild(
-      bodyOf([{ children: [{ text: "a" }, { break: true }, { text: "b" }] }]),
-    );
-    expect(shapeTextOf(child)).toBe("a\nb");
+    const shape = shapeOf(bodyOf([{ children: [{ text: "a" }, { break: true }, { text: "b" }] }]));
+    expect(shapeTextOf(shape)).toBe("a\nb");
   });
 
-  it("returns null for children without a text body", () => {
-    const { picture } = makePicture(100, 100, 10, 10, "data:", "png") as {
-      picture: PictureVariant;
-    };
-    expect(shapeTextOf({ picture } as unknown as SlideChild)).toBeNull();
+  it("returns null for shapes without a text body", () => {
+    expect(shapeTextOf({} as ShapeVariant)).toBeNull();
   });
 
   it("writes one paragraph per line, keeping alignment and first-run style", () => {
-    const child = shapeChild(
+    const shape = shapeOf(
       bodyOf([
         { properties: { alignment: "center" }, children: [{ text: "old", bold: true, size: 24 }] },
       ]),
     );
-    expect(writeShapeText(child, "one\ntwo")).toBe(true);
-    const body = (child as { shape: { textBody: TextBodyOptions } }).shape.textBody;
+    expect(writeShapeText(shape, "one\ntwo")).toBe(true);
+    const body = shape.textBody as TextBodyOptions;
     const paragraphs = body.paragraphs as {
       properties?: { alignment?: string };
       children: { text: string; bold?: boolean; size?: number }[];
@@ -308,11 +303,11 @@ describe("shapeTextOf / writeShapeText", () => {
   });
 
   it("clears the text sugar after writing", () => {
-    const child = shapeChild({ text: "before" });
-    writeShapeText(child, "after");
-    const body = (child as { shape: { textBody: TextBodyOptions } }).shape.textBody;
+    const shape = shapeOf({ text: "before" });
+    writeShapeText(shape, "after");
+    const body = shape.textBody as TextBodyOptions;
     expect(body.text).toBeUndefined();
-    expect(shapeTextOf(child)).toBe("after");
+    expect(shapeTextOf(shape)).toBe("after");
   });
 });
 

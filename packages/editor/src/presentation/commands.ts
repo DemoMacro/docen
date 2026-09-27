@@ -20,6 +20,7 @@ import type {
   TextRunOptions,
   UnderlineStyle,
 } from "@office-open/core/drawing";
+import type { ShapeOptions } from "@office-open/pptx";
 
 /** Normalize the paragraphs in place: string items and paragraph-level text
  *  sugar both become real children. */
@@ -264,18 +265,17 @@ function paragraphsFromLines(
   });
 }
 
-/** The shape's text body as plain lines, or null when the child carries no
- *  text body. */
-export function shapeTextOf(child: SlideChild): string | null {
-  if (!("shape" in child) || !child.shape.textBody) return null;
-  return linesOf(bodyParagraphsOf(child.shape.textBody));
+/** The shape's text body as plain lines, or null when it carries no body. */
+export function shapeTextOf(shape: ShapeOptions): string | null {
+  if (!shape.textBody) return null;
+  return linesOf(bodyParagraphsOf(shape.textBody));
 }
 
 /** Write plain lines back into the shape's text body. Returns false when the
- *  child has no text body (the caller's edit records nothing). */
-export function writeShapeText(child: SlideChild, text: string): boolean {
-  if (!("shape" in child) || !child.shape.textBody) return false;
-  const body = child.shape.textBody;
+ *  shape has no body (the caller's edit records nothing). */
+export function writeShapeText(shape: ShapeOptions, text: string): boolean {
+  if (!shape.textBody) return false;
+  const body = shape.textBody;
   body.paragraphs = paragraphsFromLines(bodyParagraphsOf(body), text.split("\n"));
   delete body.text;
   return true;

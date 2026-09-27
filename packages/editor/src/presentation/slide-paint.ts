@@ -5,11 +5,19 @@
 
 import { paintMembers } from "@docen/core";
 import { browserFontMetrics } from "@docen/layout";
-import type { ProjectedPresentation, ProjectedSlideBackground } from "@docen/pptx";
+import type {
+  ProjectedSlideMember,
+  ProjectedPresentation,
+  ProjectedSlide,
+  ProjectedSlideBackground,
+} from "@docen/pptx";
 import { Group, Rect, type IGroup } from "leafer-ui";
+
+import { memberBatches, paintSignature } from "./slide-diff";
 
 /** Gap between consecutive slides in the main strip, px. */
 export const SLIDE_GAP_PX = 24;
+
 /** Thumbnail surface width, px — the panel's fixed column width. */
 export const THUMB_WIDTH_PX = 160;
 /** Visual gap between thumbnails, px (screen space, not slide space). */
@@ -19,6 +27,32 @@ export const THUMB_GAP_PX = 12;
  *  transform has already resolved to rgba(). */
 function cssColorOf(color: string): string {
   return /^rgba\(/i.test(color) ? color : `#${color}`;
+}
+
+function paintMemberBatch(
+  slideGroup: IGroup,
+  batch: readonly ProjectedSlideMember[],
+  pres: ProjectedPresentation,
+  rerender: () => void,
+  index: number,
+): void {
+  const group = new Group();
+  slideGroup.add(group);
+  paintMembers(group, batch, 0, 0, {
+    metrics: browserFontMetrics,
+    flow: {
+      pageWidthPx: pres.widthPx,
+      pageHeightPx: pres.heightPx,
+      contentWidthPx: pres.widthPx,
+      contentHeightPx: pres.heightPx,
+      contentLeftPx: 0,
+      contentTopPx: 0,
+    },
+    pageIndex: index,
+    pageCount: pres.slides.length,
+    layer: "body",
+    rerender,
+  });
 }
 
 /** The slide's background → the Leafer fill: solid hex, a linear/radial
@@ -40,7 +74,10 @@ function slideFillOf(
       ...bg.tile,
     };
   }
-  const stops = bg.stops.map((stop) => ({ offset: stop.position, color: cssColorOf(stop.color) }));
+  const stops = bg.stops.map((stop) => ({
+    offset: stop.position / 100,
+    color: cssColorOf(stop.color),
+  }));
   if (bg.path) {
     // Radial: the focus sits center, the rim reaches the box edge (the
     // "to" point sets the radius).
@@ -71,7 +108,7 @@ function slideFillOf(
 
 /** Paint one slide (background + members) as a group at strip position `y`.
  *  `index` feeds the paint context's page bookkeeping. */
-export function paintSlideGroup(
+function paintSlideGroup(
   pres: ProjectedPresentation,
   slide: ProjectedPresentation["slides"][number],
   y: number,
@@ -88,22 +125,46 @@ export function paintSlideGroup(
       strokeWidth: 1,
     }),
   );
-  paintMembers(slideGroup, slide.members, 0, 0, {
-    metrics: browserFontMetrics,
-    flow: {
-      pageWidthPx: pres.widthPx,
-      pageHeightPx: pres.heightPx,
-      contentWidthPx: pres.widthPx,
-      contentHeightPx: pres.heightPx,
-      contentLeftPx: 0,
-      contentTopPx: 0,
-    },
-    pageIndex: index,
-    pageCount: pres.slides.length,
-    layer: "body",
-    rerender,
-  });
+  for (const batch of memberBatches(slide.members)) {
+    paintMemberBatch(slideGroup, batch, pres, rerender, index);
+  }
   return slideGroup;
+}
+
+/** Replace one slide while reusing Leafer nodes whose projected paint is
+ *  unchanged. Children are grouped by source-child index, so moving one
+ *  textbox does not repaint unrelated pictures, tables, charts or backgrounds. */
+export function repaintSlide(
+  tree: IGroup,
+  pres: ProjectedPresentation,
+  index: number,
+  rerender: () => void,
+  y: number,
+  previous?: ProjectedSlide,
+): void {
+  const slide = pres.slides[index]!;
+  const oldGroup = tree.children[index] as IGroup | undefined;
+  const oldBatches = previous ? memberBatches(previous.members) : [];
+  const newBatches = memberBatches(slide.members);
+  const backgroundChanged =
+    !oldGroup ||
+    !previous ||
+    oldBatches.length !== newBatches.length ||
+    oldGroup.children.length !== oldBatches.length + 1 ||
+    paintSignature(previous.background) !== paintSignature(slide.background);
+  if (backgroundChanged) {
+    oldGroup?.remove();
+    tree.add(paintSlideGroup(pres, slide, y, rerender, index));
+    return;
+  }
+  oldGroup!.y = y;
+  newBatches.forEach((batch, batchIndex) => {
+    const old = oldGroup!.children[batchIndex + 1] as IGroup | undefined;
+    const unchanged = old && paintSignature(batch) === paintSignature(oldBatches[batchIndex] ?? []);
+    if (unchanged) return;
+    old?.remove();
+    paintMemberBatch(oldGroup!, batch, pres, rerender, index);
+  });
 }
 
 /** Paint every slide into `tree` top-down. `pitch`/`yStart` are in slide
@@ -120,19 +181,4 @@ export function paintSlideDeck(
   for (let i = 0; i < pres.slides.length; i++) {
     tree.add(paintSlideGroup(pres, pres.slides[i]!, yStart + i * yPitch, rerender, i));
   }
-}
-
-/** Replace slide `index`'s group with a fresh paint of the same slide.
- *  Slides never overlap, so appending (rather than re-inserting at the old
- *  position) keeps the visual order intact. */
-export function repaintSlideAt(
-  tree: IGroup,
-  pres: ProjectedPresentation,
-  index: number,
-  rerender: () => void,
-  yPitch: number,
-  yStart: number,
-): void {
-  tree.children[index]?.remove();
-  tree.add(paintSlideGroup(pres, pres.slides[index]!, yStart + index * yPitch, rerender, index));
 }

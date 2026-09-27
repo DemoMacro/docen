@@ -94,16 +94,14 @@ import {
   setParagraphAlignment,
   setRunFont,
   setRunSize,
-  shapeTextOf,
   slideNotesOf,
   toggleBullet,
   toggleNumbering,
   toggleRunFlag,
   toggleRunStyle,
-  writeCellText,
-  writeShapeText,
   writeSlideNotes,
 } from "./commands";
+import { DeckHistory } from "./deck-history";
 import {
   captureGeometry,
   hitSlide,
@@ -116,13 +114,15 @@ import {
 } from "./hit-test";
 import { MediaPlayer, type MediaPlayback } from "./media-player";
 import { presentationRibbonTabs } from "./ribbon";
+import { changedSlides } from "./slide-diff";
 import {
   paintSlideDeck,
-  repaintSlideAt,
   SLIDE_GAP_PX,
+  repaintSlide,
   THUMB_GAP_PX,
   THUMB_WIDTH_PX,
-} from "./slides-panel";
+} from "./slide-paint";
+import { textOf, writeText, type TextEditSource } from "./text-session";
 // Side-effect: register the presentation translation tables.
 import "./i18n";
 
@@ -131,9 +131,6 @@ const ZOOM_MAX = 500;
 
 /** The drawing grid pitch: PowerPoint's 0.5" grid in slide px (96/inch). */
 const GRID_PITCH_PX = 48;
-
-/** Undo steps kept before the oldest falls off. */
-const EDIT_LIMIT = 50;
 
 /** Text/paragraph commands over the selected shape (font/size carry the
  *  combobox value through detail.value; line-spacing's menu items carry
@@ -316,6 +313,12 @@ class DocenPresentation extends AddinHost {
   /** The parsed deck — the editable model the gestures write back into. */
   #presJson: PresentationOptions | null = null;
   #pres: ProjectedPresentation | null = null;
+  /** The projection backing the current main-strip nodes; member diffs pair
+   *  old and new batches against it. */
+  #renderedMainPres: ProjectedPresentation | null = null;
+  /** The thumbnail projection backing its current nodes; thumbnail repaints
+   *  use it to pair source-child batches just like the main strip. */
+  #renderedThumbPres: ProjectedPresentation | null = null;
   #app: App | null = null;
   #thumbApp: App | null = null;
   #thumbScale = 1;
@@ -340,8 +343,10 @@ class DocenPresentation extends AddinHost {
   #tableEdit: { row: number; col: number } | null = null;
   /** Drawing gridlines visibility (a view state — not part of the deck). */
   #gridlines = false;
-  #edits: DeckEdit[] = [];
-  #editIndex = -1;
+  readonly #history = new DeckHistory();
+  /** Changed projected slides since the previous paint; undefined forces a
+   *  full paint. The next render consumes and clears it. */
+  #changedSlides?: Set<number>;
   /** The find session: the query the hit list was scanned for and the cursor
    *  in it — the dialog-level highlight PowerPoint's find keeps. */
   #findQuery = "";
@@ -536,23 +541,24 @@ class DocenPresentation extends AddinHost {
    *  connect. */
   async openPresentation(data: DataType): Promise<void> {
     const pres = await parsePresentation(data);
-    this.#presJson = pres;
-    // A fresh deck starts clean: the previous deck's edit closures and
-    // selection must not survive the swap.
-    this.#exitTextEditing(false);
-    this.#selection = null;
-    this.#edits = [];
-    this.#editIndex = -1;
-    // The notes session restarts on the fresh deck's first slide.
-    this.#notesSlideIndex = 0;
-    this.#syncNotesPane(0);
-    this.#pres = projectPresentation(pres);
-    // The base class attaches an empty shadowRoot ahead of connect, so
-    // shadowRoot presence does not mean the template stamped — same bail
-    // #renderChrome does until connectedCallback renders the stored deck.
-    if (!this.shadowRoot?.querySelector(".stage")) return;
-    this.#renderDeck();
-    this.#renderChrome();
+    this.#setPresentation(pres);
+  }
+
+  /** DocenHost surface: the editable deck is plain, structured JSON. A copy
+   *  keeps host-side mutation from bypassing the editor's history/rendering. */
+  getContent(): PresentationOptions | null {
+    return this.#presJson ? structuredClone(this.#presJson) : null;
+  }
+
+  setContent(content: unknown): void {
+    if (!content || typeof content !== "object" || Array.isArray(content)) return;
+    this.#setPresentation(structuredClone(content) as PresentationOptions);
+  }
+
+  /** Generate the current model for a host that owns persistence. */
+  async savePresentation(): Promise<Uint8Array> {
+    if (!this.#presJson) throw new Error("No presentation is open");
+    return generatePresentation(this.#presJson, { type: "uint8array" });
   }
 
   /** Drop the open deck and reset the chrome. */
@@ -561,8 +567,7 @@ class DocenPresentation extends AddinHost {
     this.#pres = null;
     this.#exitTextEditing(false);
     this.#selection = null;
-    this.#edits = [];
-    this.#editIndex = -1;
+    this.#history.clear();
     this.#overlay?.hide();
     this.removeAttribute("filename");
     // The notes session dies with the deck.
@@ -582,6 +587,24 @@ class DocenPresentation extends AddinHost {
       bar.removeAttribute("total");
       bar.removeAttribute("pageLabel");
     }
+    this.#renderChrome();
+  }
+
+  /** Install a new deck and reset all per-deck edit state. */
+  #setPresentation(pres: PresentationOptions): void {
+    this.#presJson = pres;
+    this.#exitTextEditing(false);
+    this.#selection = null;
+    this.#history.clear();
+    this.#notesSlideIndex = 0;
+    this.#syncNotesPane(0);
+    this.#pres = projectPresentation(pres);
+    this.#changedSlides = undefined;
+    // The base class attaches an empty shadowRoot ahead of connect, so
+    // shadowRoot presence does not mean the template stamped — same bail
+    // #renderChrome does until connectedCallback renders the stored deck.
+    if (!this.shadowRoot?.querySelector(".stage")) return;
+    this.#renderDeck();
     this.#renderChrome();
   }
 
@@ -646,8 +669,8 @@ class DocenPresentation extends AddinHost {
     // file lives on disk — Save As carries the edits out).
     const qat = [
       { id: "save", icon: "save", disabled: true },
-      { id: "undo", icon: "undo", disabled: this.#editIndex < 0 },
-      { id: "redo", icon: "redo", disabled: this.#editIndex >= this.#edits.length - 1 },
+      { id: "undo", icon: "undo", disabled: !this.#history.canUndo },
+      { id: "redo", icon: "redo", disabled: !this.#history.canRedo },
     ]
       .map(
         (c) =>
@@ -826,6 +849,16 @@ class DocenPresentation extends AddinHost {
     this.#renderSelectionPane();
   }
 
+  /** Public zoom surface aligned with `<docen-document>`: callers don't need
+   *  to know the ribbon event or status-bar attribute behind the control. */
+  setZoom(pct: number): void {
+    this.#setZoom(pct);
+  }
+
+  getZoom(): number {
+    return this.#zoom;
+  }
+
   /** Repaint the deck. With `slide` set (a single-slide edit), only that
    *  slide's group swaps out — the rest of the strip stays untouched; without
    *  it the whole tree repaints (open, structural slide changes). */
@@ -843,22 +876,31 @@ class DocenPresentation extends AddinHost {
       wheel: { disabled: true },
     });
     const tree = this.#app.tree as unknown as IGroup;
-    if (slide !== undefined && tree.children.length === pres.slides.length) {
-      repaintSlideAt(
+    const slideChanged = slide === undefined || this.#consumeSlideChange(slide);
+    if (slideChanged && slide !== undefined && tree.children.length === pres.slides.length) {
+      repaintSlide(
         tree,
         pres,
         slide,
         () => this.#app?.forceRender(),
-        pres.heightPx + SLIDE_GAP_PX,
-        SLIDE_GAP_PX,
+        SLIDE_GAP_PX + slide * (pres.heightPx + SLIDE_GAP_PX),
+        this.#renderedMainPres?.slides[slide],
       );
     } else {
       tree.clear();
       paintSlideDeck(tree, pres, () => this.#app?.forceRender());
     }
     this.#applyZoom();
-    this.#renderThumbnails(slide);
+    this.#renderThumbnails(slideChanged ? slide : undefined);
     this.#syncSlideIndicator();
+    if (slideChanged || slide === undefined) this.#renderedMainPres = pres;
+  }
+
+  /** Whether slide `index` needs a repaint; first paints consume an undefined
+   *  diff as “all changed”. */
+  #consumeSlideChange(index: number): boolean {
+    const changed = this.#changedSlides;
+    return !changed || changed.has(index);
   }
 
   // ── Slide-object selection ───────────────────────────────────────────────
@@ -946,7 +988,9 @@ class DocenPresentation extends AddinHost {
     const pres = this.#pres;
     const presJson = this.#presJson;
     const child = this.#selectedChild();
-    const text = child ? shapeTextOf(child) : null;
+    const source: TextEditSource | null =
+      child && "shape" in child ? { kind: "shape", child: child.shape } : null;
+    const text = source ? textOf(source) : null;
     if (!sel || !pres || !presJson || !child || text === null) return;
     // The edit anchor: a member's box comes from the group walk, a top-level
     // child's from the slide's hit list.
@@ -1100,7 +1144,7 @@ class DocenPresentation extends AddinHost {
         this.#textEditRaf = 0;
         if (this.#textEditor !== editor || editor.value === lastWritten) return;
         lastWritten = editor.value;
-        writeShapeText(child, editor.value);
+        writeText(source!, editor.value);
         this.#reproject(sel.slide);
       });
     };
@@ -1157,7 +1201,8 @@ class DocenPresentation extends AddinHost {
     this.#textEditBefore = null;
     if (editor && write && sel && child && "shape" in child && before && child.shape.textBody) {
       const shape = child.shape;
-      if (editor.value !== shapeTextOf(child)) writeShapeText(child, editor.value);
+      const source: TextEditSource = { kind: "shape", child: child.shape };
+      if (editor.value !== textOf(source)) writeText(source, editor.value);
       const after = structuredClone(shape.textBody);
       if (JSON.stringify(before) !== JSON.stringify(after)) {
         this.#pushEdit({
@@ -1382,10 +1427,10 @@ class DocenPresentation extends AddinHost {
     const sel = this.#selection;
     const cell = editor && write ? this.#editedCell(at) : null;
     if (cell) {
-      const text = editor!.value;
-      if (text !== cellTextOf(cell)) {
+      const source: TextEditSource = { kind: "cell", cell };
+      if (editor!.value !== textOf(source)) {
         const before = structuredClone(cell);
-        writeCellText(cell, text);
+        writeText(source, editor!.value);
         const after = structuredClone(cell);
         const restore = (snap: TableCellOptions): void => {
           for (const key of Object.keys(cell) as (keyof TableCellOptions)[]) delete cell[key];
@@ -1448,8 +1493,11 @@ class DocenPresentation extends AddinHost {
    *  (slide insert/delete) omit it and repaint the whole deck. */
   #reproject(slide?: number): void {
     if (!this.#presJson) return;
+    const previous = this.#pres;
     this.#pres = projectPresentation(this.#presJson);
+    this.#changedSlides = changedSlides(previous, this.#pres);
     this.#renderDeck(slide);
+    this.#changedSlides = undefined;
     // The paint restarted under the same selection — the frame snaps to the
     // current geometry (and rejects itself if the box vanished).
     const hit = this.#selectedBox();
@@ -1468,10 +1516,7 @@ class DocenPresentation extends AddinHost {
 
   /** Record a reversible edit; a new edit truncates the redo branch. */
   #pushEdit(edit: DeckEdit): void {
-    this.#edits.length = this.#editIndex + 1;
-    this.#edits.push(edit);
-    if (this.#edits.length > EDIT_LIMIT) this.#edits.shift();
-    this.#editIndex = this.#edits.length - 1;
+    this.#history.push(edit);
     this.#syncQat();
   }
 
@@ -1524,18 +1569,18 @@ class DocenPresentation extends AddinHost {
   }
 
   #undo(): void {
-    if (this.#editIndex < 0) return;
+    if (!this.#history.canUndo) return;
+    this.#history.undo();
     // An in-flight text edit commits first, so undo revokes it (the freshest
     // step) rather than the step before — the user's intent either way.
     this.#exitTextEditing(true);
-    this.#edits[this.#editIndex--]!.undo();
     this.#syncQat();
   }
 
   #redo(): void {
-    if (this.#editIndex >= this.#edits.length - 1) return;
+    if (!this.#history.canRedo) return;
+    this.#history.redo();
     this.#exitTextEditing(true);
-    this.#edits[++this.#editIndex]!.redo();
     this.#syncQat();
   }
 
@@ -2581,8 +2626,8 @@ class DocenPresentation extends AddinHost {
     const undo = root.querySelector<HTMLElement>("docen-title-bar [event='undo']");
     const redo = root.querySelector<HTMLElement>("docen-title-bar [event='redo']");
     if (!undo || !redo) return;
-    const canUndo = this.#editIndex >= 0;
-    const canRedo = this.#editIndex < this.#edits.length - 1;
+    const canUndo = this.#history.canUndo;
+    const canRedo = this.#history.canRedo;
     undo.toggleAttribute("disabled", !canUndo);
     redo.toggleAttribute("disabled", !canRedo);
   }
@@ -2618,7 +2663,10 @@ class DocenPresentation extends AddinHost {
   /** Generate the edited deck and hand it to the browser as a download. */
   async #saveAs(): Promise<void> {
     if (!this.#presJson) return;
-    const blob = await generatePresentation(this.#presJson, { type: "blob" });
+    const bytes = await this.savePresentation();
+    const blob = new Blob([bytes as BlobPart], {
+      type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
     link.download = this.getAttribute("filename") ?? "presentation.pptx";
@@ -2851,17 +2899,19 @@ class DocenPresentation extends AddinHost {
       this.#thumbApp &&
       (this.#thumbApp.tree as unknown as IGroup).children.length === pres.slides.length
     ) {
-      repaintSlideAt(
+      repaintSlide(
         this.#thumbApp.tree as unknown as IGroup,
         pres,
         slide,
         () => this.#thumbApp?.forceRender(),
-        pitch,
-        0,
+        slide * pitch,
+        this.#renderedThumbPres?.slides[slide],
       );
+      this.#renderedThumbPres = pres;
       return;
     }
     this.#thumbApp?.destroy();
+    this.#renderedThumbPres = null;
     stage.replaceChildren();
     const thumbHeight = pres.heightPx * scale;
     stage.style.width = `${THUMB_WIDTH_PX}px`;
@@ -2877,6 +2927,7 @@ class DocenPresentation extends AddinHost {
     const tree = app.tree as unknown as IGroup;
     tree.scale = { x: scale, y: scale };
     paintSlideDeck(tree, pres, () => app.forceRender(), pitch, 0);
+    this.#renderedThumbPres = pres;
   }
 
   /** Click a thumbnail → bring that slide to the top of the viewport. */
