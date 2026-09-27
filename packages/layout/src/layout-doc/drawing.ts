@@ -49,6 +49,9 @@ export interface LayoutSmartArtNode {
 export interface LayoutDrawingLine {
   px: number;
   color?: string;
+  /** A renderer-native stroke paint for a:ln gradient/pattern fills; solid
+   *  fills keep the legacy `color` contract. */
+  stroke?: LayoutDrawingFill;
   cap?: "round" | "square" | "flat";
   join?: "round" | "bevel" | "miter";
   dash?: string;

@@ -6,7 +6,6 @@ import {
   lineEndMembersOf,
   linePathData,
   measureEmu,
-  outlineOf,
   outerShadowOf,
   presetShapePaths,
   presetShapeTextRect,
@@ -23,7 +22,7 @@ import type { TextBodyOptions } from "@office-open/core/drawing";
 import type { ShapeOptions } from "@office-open/pptx";
 
 import { BOX_PRESETS, STRAIGHT_PRESETS, emuOf, geometryOf, type Xform } from "./geometry";
-import { shapeFillOf } from "./shape-fill";
+import { outlineLineOf, shapeFillOf } from "./shape-fill";
 import { textBlocks, type TextFieldContext } from "./text";
 
 // DrawingML bodyPr default insets (lIns/rIns 0.1", tIns/bIns 0.05").
@@ -62,7 +61,12 @@ export function shapeMembers(
       t.sy * emuOf(shape.height),
       context,
     ),
-    line: outlineOf(shape.properties?.outline),
+    line: outlineLineOf(
+      shape.properties?.outline,
+      t.sx * emuOf(shape.width),
+      t.sy * emuOf(shape.height),
+      context,
+    ),
     shadow: outerShadowOf(shape.properties?.effects),
     ...(shape.rotation ? { rotation: shape.rotation } : {}),
     ...(childPath ? { childPath } : {}),

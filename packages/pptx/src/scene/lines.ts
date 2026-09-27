@@ -3,7 +3,6 @@
 
 import {
   lineEndMembersOf,
-  outlineOf,
   outerShadowOf,
   presetShapePaths,
   solidFillOf,
@@ -13,12 +12,15 @@ import type { GeometryGuide } from "@office-open/core";
 import type { ConnectorOptions, LineShapeOptions } from "@office-open/pptx";
 
 import { STRAIGHT_PRESETS, emuOf, type Xform } from "./geometry";
+import { outlineLineOf } from "./shape-fill";
+import type { TextFieldContext } from "./text";
 
 export function endpointMembers(
   o: LineShapeOptions | ConnectorOptions,
   t: Xform,
   childPath: readonly number[] | undefined,
   g: { preset?: string; adjustments?: readonly GeometryGuide[] },
+  context: TextFieldContext = {},
 ): LayoutDrawingMember[] {
   const x1 = emuOf(o.x1);
   const y1 = emuOf(o.y1);
@@ -28,7 +30,7 @@ export function endpointMembers(
   const y = t.sy * Math.min(y1, y2) + t.dy;
   const w = t.sx * Math.abs(x2 - x1);
   const h = t.sy * Math.abs(y2 - y1);
-  const line = outlineOf(o.properties?.outline);
+  const line = outlineLineOf(o.properties?.outline, w, h, context);
   const fill = solidFillOf(o.properties?.fill);
   const shadow = outerShadowOf(o.properties?.effects);
   const p = (v: number): string => String(Math.round(v * 100) / 100);

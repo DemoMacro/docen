@@ -54,10 +54,10 @@ export function childMembers(
     if ("shape" in child) {
       out.push(...shapeMembers(child.shape, t, cp, context));
     } else if ("picture" in child) {
-      const m = pictureMember(child.picture, t, cp);
+      const m = pictureMember(child.picture, t, cp, context);
       if (m) out.push(m);
     } else if ("line" in child) {
-      out.push(...endpointMembers(child.line, t, cp, {}));
+      out.push(...endpointMembers(child.line, t, cp, {}, context));
     } else if ("connector" in child) {
       out.push(
         ...endpointMembers(
@@ -65,6 +65,7 @@ export function childMembers(
           t,
           cp,
           geometryOf(child.connector.properties?.geometry),
+          context,
         ),
       );
     } else if ("group" in child) {

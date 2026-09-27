@@ -584,7 +584,7 @@ describe("shape fills", () => {
                     angle: 90,
                     stops: [
                       { position: 0, color: { type: "solid", color: "FF0000" } },
-                      { position: 1, color: "FFFFFF" },
+                      { position: 100, color: "FFFFFF" },
                     ],
                   },
                 },

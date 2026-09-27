@@ -1,12 +1,14 @@
 // Picture (p:pic) projection: data shapes to data URLs, source-rectangle
 // crops to fractions, plus the outline/shadow dressing.
 
-import { outlineOf, outerShadowOf } from "@docen/core/geometry";
+import { outerShadowOf } from "@docen/core/geometry";
 import type { LayoutDrawingMember, LayoutPictureCrop } from "@docen/layout";
 import type { SourceRectangleOptions } from "@office-open/core/drawing";
 import type { PictureOptions } from "@office-open/pptx";
 
 import { emuOf, type Xform } from "./geometry";
+import { outlineLineOf } from "./shape-fill";
+import type { TextFieldContext } from "./text";
 
 const PIC_MIME: Record<string, string> = {
   png: "image/png",
@@ -54,17 +56,20 @@ export function pictureMember(
   pic: PictureOptions,
   t: Xform,
   childPath: readonly number[] | undefined,
+  context: TextFieldContext = {},
 ): LayoutDrawingMember | undefined {
   const crop = cropOf(pic.sourceRectangle);
-  const line = outlineOf(pic.outline);
+  const width = t.sx * emuOf(pic.width);
+  const height = t.sy * emuOf(pic.height);
+  const line = outlineLineOf(pic.outline, width, height, context);
   const shadow = outerShadowOf(pic.effects);
   const src = pictureSrcOf(pic.data, pic.type);
   return {
     kind: "picture",
     x: t.sx * emuOf(pic.x) + t.dx,
     y: t.sy * emuOf(pic.y) + t.dy,
-    width: t.sx * emuOf(pic.width),
-    height: t.sy * emuOf(pic.height),
+    width,
+    height,
     ...(src ? { src } : {}),
     ...(pic.flipHorizontal ? { flipH: true } : {}),
     ...(pic.flipVertical ? { flipV: true } : {}),

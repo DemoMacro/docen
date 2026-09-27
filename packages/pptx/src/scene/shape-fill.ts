@@ -1,8 +1,14 @@
 /** Office fill options → the renderer-native paint carried by drawing
  *  members: solid hex, Leafer gradients, or repeatable/stretched images. */
 
-import type { LayoutDrawingFill } from "@docen/layout";
-import type { ColorTransformOptions, FillOptions } from "@office-open/core/drawing";
+import { outlineOf } from "@docen/core/geometry";
+import type { LayoutDrawingFill, LayoutDrawingLine } from "@docen/layout";
+import type {
+  ColorTransformOptions,
+  FillOptions,
+  OutlineFillProperties,
+  OutlineOptions,
+} from "@office-open/core/drawing";
 import type { ColorMappingOptions } from "@office-open/core/theme";
 
 import { tilePaintOf } from "./blip-tile";
@@ -73,7 +79,7 @@ function gradientPaintOf(
   };
   const stops = options.stops
     .map((stop) => ({
-      offset: stop.position,
+      offset: stop.position / 100,
       color: colorPaintOf(stop.color, context),
     }))
     .filter((stop): stop is { offset: number; color: string } => stop.color != null);
@@ -149,4 +155,38 @@ export function shapeFillOf(
       : {}),
   });
   return { fill: { type: "image", url: paint, mode: "repeat", repeat: true } };
+}
+
+/** Map an a:ln fill to the same renderer-native paint used by shape fills. */
+function outlinePaintOf(
+  outline: OutlineFillProperties | undefined,
+  width: number,
+  height: number,
+  context: FillContext = {},
+): LayoutDrawingFill | undefined {
+  if (!outline) return undefined;
+  if (outline.type === "solidFill" || outline.color != null)
+    return colorPaintOf(outline.color ?? "000000", context);
+  if (outline.type === "gradFill" && outline.gradientFill)
+    return shapeFillOf({ type: "gradient", options: outline.gradientFill }, width, height, context)
+      .fill;
+  if (outline.type === "pattFill" && outline.patternFill)
+    return shapeFillOf({ type: "pattern", ...outline.patternFill }, width, height, context).fill;
+  return undefined;
+}
+
+/** One a:ln outline as the native stroke paint the painter can hand to
+ *  Leafer directly; solid strokes keep the shared line contract. */
+export function outlineLineOf(
+  outline: OutlineOptions | undefined,
+  width: number,
+  height: number,
+  context: FillContext = {},
+): LayoutDrawingLine | undefined {
+  const line = outlineOf(outline);
+  if (!line) return undefined;
+  const stroke = outlinePaintOf(outline, width, height, context);
+  return stroke && (typeof stroke !== "string" || stroke.startsWith("rgba"))
+    ? { ...line, stroke }
+    : line;
 }

@@ -1,3 +1,5 @@
+import type { LayoutDrawingFill, LayoutDrawingLine } from "@docen/layout";
+
 /** OOXML prstDash tokens → dash patterns in px (line-width units, the host's
  *  preset line styles); unlisted tokens render solid. */
 const PRSTDASH_PATTERN: Record<string, number[]> = {
@@ -23,21 +25,28 @@ const PRSTDASH_PATTERN: Record<string, number[]> = {
  *  and picture borders; strokeAlign stays at the call sites (closed shapes
  *  need the explicit center, open paths already default to it). */
 export function strokePropsOf(
-  line:
-    | {
-        px: number;
-        color?: string;
-        cap?: "round" | "square" | "flat";
-        join?: "round" | "bevel" | "miter";
-        dash?: string;
-      }
-    | undefined,
+  line: Pick<LayoutDrawingLine, "px" | "color" | "stroke" | "cap" | "join" | "dash"> | undefined,
 ) {
+  const paint = strokePaintOf(line);
   return {
-    stroke: line ? (line.color ? `#${line.color}` : "#000000") : undefined,
+    stroke: paint,
     strokeWidth: line?.px != null && line.dash ? Math.max(line.px, 1.5) : line?.px,
     strokeCap: line?.cap === "round" || line?.cap === "square" ? line.cap : undefined,
     strokeJoin: line?.join === "round" || line?.join === "bevel" ? line.join : undefined,
     dashPattern: line?.dash ? PRSTDASH_PATTERN[line.dash] : undefined,
   };
+}
+
+function strokePaintOf(
+  line: Pick<LayoutDrawingLine, "color" | "stroke"> | undefined,
+): LayoutDrawingFill | undefined {
+  if (!line) return undefined;
+  if (line.stroke) {
+    return typeof line.stroke === "string" ? cssColorOf(line.stroke) : line.stroke;
+  }
+  return line.color ? `#${line.color}` : "#000000";
+}
+
+function cssColorOf(color: string): string {
+  return /^#|^rgba\(/i.test(color) ? color : `#${color}`;
 }
