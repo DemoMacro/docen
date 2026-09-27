@@ -35,9 +35,10 @@ function paintMemberBatch(
   pres: ProjectedPresentation,
   rerender: () => void,
   index: number,
+  at?: number,
 ): void {
   const group = new Group();
-  slideGroup.add(group);
+  slideGroup.addAt(group, at ?? slideGroup.children.length);
   paintMembers(group, batch, 0, 0, {
     metrics: browserFontMetrics,
     flow: {
@@ -153,8 +154,11 @@ export function repaintSlide(
     oldGroup.children.length !== oldBatches.length + 1 ||
     paintSignature(previous.background) !== paintSignature(slide.background);
   if (backgroundChanged) {
+    const oldIndex = oldGroup ? tree.children.indexOf(oldGroup) : -1;
     oldGroup?.remove();
-    tree.add(paintSlideGroup(pres, slide, y, rerender, index));
+    const group = paintSlideGroup(pres, slide, y, rerender, index);
+    if (oldIndex < 0) tree.add(group);
+    else tree.addAt(group, oldIndex);
     return;
   }
   oldGroup!.y = y;
@@ -163,7 +167,7 @@ export function repaintSlide(
     const unchanged = old && paintSignature(batch) === paintSignature(oldBatches[batchIndex] ?? []);
     if (unchanged) return;
     old?.remove();
-    paintMemberBatch(oldGroup!, batch, pres, rerender, index);
+    paintMemberBatch(oldGroup!, batch, pres, rerender, index, batchIndex + 1);
   });
 }
 
