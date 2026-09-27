@@ -44,10 +44,11 @@ export function childMembers(
   t: Xform,
   prefix: readonly number[],
   context: TextFieldContext = {},
-): LayoutDrawingMember[] {
-  const out: LayoutDrawingMember[] = [];
+): ProjectedSlideMember[] {
+  const out: ProjectedSlideMember[] = [];
   children.forEach((child, i) => {
     if (hiddenOf(child)) return;
+    const start = out.length;
     // The group-address path only exists below a group — a slide's own
     // members have nothing above them to address into.
     const cp = prefix.length > 0 ? [...prefix, i] : undefined;
@@ -90,9 +91,16 @@ export function childMembers(
         chart: c,
       });
     }
+    for (let index = start; index < out.length; index++) {
+      out[index]!.sourceChildIndex = i;
+    }
   });
   return out;
 }
+
+/** One paintable member tagged with the index of the slide child that
+ *  projected it; the painter batches and diffs members by that tag. */
+export type ProjectedSlideMember = LayoutDrawingMember & { sourceChildIndex?: number };
 
 function groupMembers(
   group: GroupOptions,

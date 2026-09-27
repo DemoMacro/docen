@@ -10,7 +10,7 @@
 // entries); native media playback stays with its follow-up batch.
 
 import { measureEmu, solidFillOf } from "@docen/core/geometry";
-import { emuToPx, type LayoutDrawingMember } from "@docen/layout";
+import { emuToPx } from "@docen/layout";
 import type {
   ColorTransformOptions,
   FillOptions,
@@ -27,7 +27,7 @@ import { IDENTITY } from "./geometry";
 import { patternBackgroundOf } from "./pattern-background";
 import { pictureSrcOf } from "./pictures";
 import { regionsOf, type ThemeColors } from "./table-style";
-import { childMembers } from "./walk";
+import { childMembers, type ProjectedSlideMember } from "./walk";
 
 /** One projected presentation: the slide size plus each slide's members. */
 export interface ProjectedPresentation {
@@ -43,7 +43,7 @@ export interface ProjectedSlide {
   /** The slide's background paint; absent → the painter's page default. */
   background?: ProjectedSlideBackground;
   /** Slide-absolute drawing members, paint order = document order. */
-  members: LayoutDrawingMember[];
+  members: ProjectedSlideMember[];
 }
 
 /** The background forms the painter renders: a solid hex, a gradient's
@@ -91,6 +91,7 @@ export function projectPresentation(pres: PresentationOptions): ProjectedPresent
     ),
   };
 }
+export type { ProjectedSlideMember };
 
 /** The theme bits the projection resolves against: scheme colors, the bg
  * fill style list, and the token → slot color map (the master's clrMap). */

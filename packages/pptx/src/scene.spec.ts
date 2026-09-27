@@ -70,6 +70,7 @@ describe("shapes", () => {
         width: 200,
         height: 100,
         preset: "roundRect",
+        sourceChildIndex: 0,
         fill: "FF0000",
         line: { px: expect.closeTo(1.333, 2), color: "000000" },
       },

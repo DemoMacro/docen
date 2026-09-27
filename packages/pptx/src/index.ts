@@ -21,6 +21,7 @@ export {
   type ProjectedPresentation,
   type ProjectedSlideBackground,
   type ProjectedSlide,
+  type ProjectedSlideMember,
 } from "./scene";
 export { textBlocks, type TextFieldContext } from "./scene";
 export { tableGridOf, type CellOrigin } from "./scene/tables";
