@@ -91,7 +91,7 @@ export const presentationStyles = css`
     margin: 0;
     padding: 4.8px 9.6px;
     background: #fff;
-    border: 1.5px solid #2b7cd3;
+    box-shadow: inset 0 0 0 1.5px #2b7cd3;
     outline: none;
     resize: none;
     overflow: hidden;

@@ -18,6 +18,7 @@ import {
   leaferBaselinePadPx,
   ptToPx,
   type LayoutBlock,
+  type LayoutDrawingFill,
   type LayoutDrawingMember,
 } from "@docen/layout";
 import {
@@ -122,6 +123,12 @@ import {
   THUMB_GAP_PX,
   THUMB_WIDTH_PX,
 } from "./slide-paint";
+import {
+  disposeTextAreaMirror,
+  measureTextAreaContent,
+  slideFillStyle,
+  textBoxFillStyle,
+} from "./text-overlay";
 import { textOf, writeText, type TextEditSource } from "./text-session";
 // Side-effect: register the presentation translation tables.
 import "./i18n";
@@ -1040,7 +1047,7 @@ class DocenPresentation extends AddinHost {
         };
     const anchor = member?.anchor ?? anchorOf(bp?.anchor ?? body?.anchor);
     const autoFit = member?.autoFit === true;
-    const fill =
+    const fill: LayoutDrawingFill | undefined =
       member?.fill ?? solidFillOf("shape" in child ? child.shape.properties?.fill : undefined);
     // The first paragraph's text-run style — the member's blocks when the
     // projection made one, else textBlocks' resolution of the same body (its
@@ -1088,13 +1095,16 @@ class DocenPresentation extends AddinHost {
     editor.value = text;
     // Opaque: while the session is open this overlay IS the text surface —
     // translucency would ghost the canvas painting through it.
+    const slide = pres.slides[sel.slide]!;
+    const fillStyle = fill
+      ? textBoxFillStyle(fill, member?.opacity)
+      : slideFillStyle(slide.background, pres.widthPx, pres.heightPx);
     Object.assign(editor.style, {
       left: `${box.x * scale}px`,
       top: `${stripY * scale}px`,
       width: `${box.width * scale}px`,
       height: `${box.height * scale}px`,
       padding: `${ins.top * scale}px ${ins.right * scale}px ${ins.bottom * scale}px ${ins.left * scale}px`,
-      ...(typeof fill === "string" && fill ? { background: `#${fill}` } : {}),
       fontFamily: JSON.stringify(run.family),
       fontSize: `${run.sizePx * scale}px`,
       lineHeight: `${linePx * scale}px`,
@@ -1105,6 +1115,7 @@ class DocenPresentation extends AddinHost {
       ...(run.bold ? { fontWeight: "bold" } : {}),
       ...(run.italic ? { fontStyle: "italic" } : {}),
     });
+    Object.assign(editor.style, fillStyle);
     // Keep the text visible as it grows, and keep the box recognizable as it
     // doesn't: the edit frame starts at the shape's full height (a short text
     // must not shrink the fill/border rectangle under the user — PowerPoint
@@ -1114,23 +1125,25 @@ class DocenPresentation extends AddinHost {
     // bottom re-run the painter's slack math — the stack starts at the top
     // inset plus half (or all) of the leftover inner height, and overflow
     // spills below the box like the painted stack does.
-    const frame = 3; // the edit frame's top+bottom borders
     const syncLayout = (): void => {
       editor.style.height = "auto";
       editor.style.paddingTop = `${ins.top * scale + baselineShift}px`;
       if (anchor === "top") {
-        editor.style.height = `${Math.max(box.height * scale, editor.scrollHeight + frame)}px`;
+        const content = measureTextAreaContent(editor);
+        editor.style.height = `${Math.max(box.height * scale, content + (ins.top + ins.bottom) * scale)}px`;
+        editor.scrollTop = 0;
         return;
       }
       const padTB = (ins.top + ins.bottom) * scale;
-      const content = editor.scrollHeight - padTB;
-      const slack = autoFit ? 0 : box.height * scale - frame - padTB - content;
+      const content = measureTextAreaContent(editor);
+      const slack = autoFit ? 0 : box.height * scale - padTB - content;
       if (slack >= 0) {
         editor.style.height = `${box.height * scale}px`;
         editor.style.paddingTop = `${ins.top * scale + baselineShift + (anchor === "center" ? slack / 2 : slack)}px`;
       } else {
-        editor.style.height = `${content + padTB + frame}px`;
+        editor.style.height = `${content + padTB}px`;
       }
+      editor.scrollTop = 0;
     };
     // The write-through: the typed text lands in the shape (raf-merged) and
     // the slide reprojects — the canvas under the overlay paints exactly the
@@ -1195,6 +1208,7 @@ class DocenPresentation extends AddinHost {
       this.#textEditRaf = 0;
     }
     editor?.remove();
+    disposeTextAreaMirror(editor);
     const sel = this.#selection;
     const child = this.#selectedChild();
     const before = this.#textEditBefore;
@@ -1366,24 +1380,26 @@ class DocenPresentation extends AddinHost {
     // center/bottom cell re-runs the painter's slack math so the stack sits
     // where the paint puts it. On commit the row grows to fit — the same
     // growth every re-projection applies.
-    const frame = 3; // the edit frame's top+bottom borders
     const syncLayout = (): void => {
       editor.style.height = "auto";
       editor.style.paddingTop = `${m.top * scale + baselineShift}px`;
       const boxH = rect.height * scale;
+      const padTB = (m.top + m.bottom) * scale;
       if (anchor === "top") {
-        editor.style.height = `${Math.max(boxH, editor.scrollHeight + frame)}px`;
+        const topContent = measureTextAreaContent(editor);
+        editor.style.height = `${Math.max(boxH, topContent + padTB)}px`;
+        editor.scrollTop = 0;
         return;
       }
-      const padTB = (m.top + m.bottom) * scale;
-      const content = editor.scrollHeight - padTB;
-      const slack = boxH - frame - padTB - content;
+      const content = measureTextAreaContent(editor);
+      const slack = boxH - padTB - content;
       if (slack >= 0) {
         editor.style.height = `${boxH}px`;
         editor.style.paddingTop = `${m.top * scale + baselineShift + (anchor === "center" ? slack / 2 : slack)}px`;
       } else {
-        editor.style.height = `${content + padTB + frame}px`;
+        editor.style.height = `${content + padTB}px`;
       }
+      editor.scrollTop = 0;
     };
     editor.addEventListener("keydown", (event) => {
       // Escape leaves the edit (committing); typing keys stay in the textarea.
@@ -1424,6 +1440,7 @@ class DocenPresentation extends AddinHost {
     this.#textEditor = null;
     this.#tableEdit = null;
     editor?.remove();
+    disposeTextAreaMirror(editor);
     const sel = this.#selection;
     const cell = editor && write ? this.#editedCell(at) : null;
     if (cell) {
