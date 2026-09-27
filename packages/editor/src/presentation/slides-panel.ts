@@ -15,6 +15,12 @@ export const THUMB_WIDTH_PX = 160;
 /** Visual gap between thumbnails, px (screen space, not slide space). */
 export const THUMB_GAP_PX = 12;
 
+/** A projected background color → CSS: canonical hex gains #; an alpha
+ *  transform has already resolved to rgba(). */
+function cssColorOf(color: string): string {
+  return /^rgba\(/i.test(color) ? color : `#${color}`;
+}
+
 /** The slide's background → the Leafer fill: solid hex, a linear/radial
  *  gradient (OOXML's angle is clockwise from east, screen y-down — the same
  *  sweep), or the picture fill stretched over the slide (PowerPoint's
@@ -25,9 +31,9 @@ function slideFillOf(
   heightPx: number,
 ): string | Record<string, unknown> {
   if (!bg) return "#ffffff";
-  if (bg.kind === "solid") return `#${bg.color}`;
+  if (bg.kind === "solid") return cssColorOf(bg.color);
   if (bg.kind === "image") return { type: "image", url: bg.src, mode: "stretch" };
-  const stops = bg.stops.map((stop) => ({ offset: stop.position, color: `#${stop.color}` }));
+  const stops = bg.stops.map((stop) => ({ offset: stop.position, color: cssColorOf(stop.color) }));
   if (bg.path) {
     // Radial: the focus sits center, the rim reaches the box edge (the
     // "to" point sets the radius).

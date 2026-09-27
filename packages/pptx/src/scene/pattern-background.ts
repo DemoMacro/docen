@@ -160,16 +160,16 @@ export function patternBackgroundOf(
   widthPx: number,
   heightPx: number,
 ): string | undefined {
-  const foreground = colorOf(fill.foregroundColor) ?? "000000";
-  const background = colorOf(fill.backgroundColor);
+  const foreground = cssColorOf(fill.foregroundColor) ?? "#000000";
+  const background = cssColorOf(fill.backgroundColor);
   const tile = tileOf(fill.pattern);
   const svg = [
     '<svg xmlns="http://www.w3.org/2000/svg"',
     `width="${widthPx}" height="${heightPx}" viewBox="0 0 ${widthPx} ${heightPx}">`,
     "<defs>",
     `<pattern id="pattern" width="${TILE}" height="${TILE}" patternUnits="userSpaceOnUse">`,
-    background ? `<rect width="${TILE}" height="${TILE}" fill="#${background}"/>` : "",
-    `<g fill="#${foreground}" stroke="#${foreground}">${tile}</g>`,
+    background ? `<rect width="${TILE}" height="${TILE}" fill="${background}"/>` : "",
+    `<g fill="${foreground}" stroke="${foreground}">${tile}</g>`,
     "</pattern>",
     "</defs>",
     '<rect width="100%" height="100%" fill="url(#pattern)"/>',
@@ -180,19 +180,22 @@ export function patternBackgroundOf(
 
 /** One tile as a repeatable image for shape fills. */
 export function patternTileSrcOf(fill: PatternFill): string {
-  const foreground = colorOf(fill.foregroundColor) ?? "000000";
-  const background = colorOf(fill.backgroundColor);
+  const foreground = cssColorOf(fill.foregroundColor) ?? "#000000";
+  const background = cssColorOf(fill.backgroundColor);
   const svg = [
     `<svg xmlns="http://www.w3.org/2000/svg" width="${TILE}" height="${TILE}" viewBox="0 0 ${TILE} ${TILE}">`,
-    background ? `<rect width="${TILE}" height="${TILE}" fill="#${background}"/>` : "",
-    `<g fill="#${foreground}" stroke="#${foreground}">${tileOf(fill.pattern)}</g>`,
+    background ? `<rect width="${TILE}" height="${TILE}" fill="${background}"/>` : "",
+    `<g fill="${foreground}" stroke="${foreground}">${tileOf(fill.pattern)}</g>`,
     "</svg>",
   ].join("");
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
 function colorOf(value: unknown): string | undefined {
-  if (typeof value === "string") return value.replace("#", "").toUpperCase();
+  if (typeof value === "string") {
+    if (/^rgba\(/i.test(value.trim())) return value.trim();
+    return value.replace("#", "").toUpperCase();
+  }
   if (!value || typeof value !== "object") return undefined;
   const solid = value as { type?: string; color?: unknown };
   if (solid.type !== "solid") return undefined;
@@ -202,4 +205,10 @@ function colorOf(value: unknown): string | undefined {
     return typeof value === "string" ? value.replace("#", "").toUpperCase() : undefined;
   }
   return undefined;
+}
+
+/** SVG accepts the resolved alpha paint directly; canonical hex needs #. */
+function cssColorOf(value: unknown): string | undefined {
+  const color = colorOf(value);
+  return color && /^rgba\(/i.test(color) ? color : color ? `#${color}` : undefined;
 }

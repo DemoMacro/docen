@@ -44,8 +44,8 @@ function colorOf(value: unknown, context: FillContext): string | undefined {
   return base ? transformColor(base, transformsOf(value)).color : undefined;
 }
 
-function alphaOf(value: unknown): number | undefined {
-  const base = baseColorOf(value, {});
+function alphaOf(value: unknown, context: FillContext = {}): number | undefined {
+  const base = baseColorOf(value, context);
   if (!base) return undefined;
   return transformColor(base, transformsOf(value)).alpha;
 }
@@ -53,7 +53,7 @@ function alphaOf(value: unknown): number | undefined {
 function colorPaintOf(value: unknown, context: FillContext): string | undefined {
   const hex = colorOf(value, context);
   if (!hex) return undefined;
-  const alpha = alphaOf(value);
+  const alpha = alphaOf(value, context);
   if (alpha == null || alpha >= 1) return `#${hex}`;
   const raw = Number.parseInt(hex, 16);
   return `rgba(${(raw >> 16) & 255}, ${(raw >> 8) & 255}, ${raw & 255}, ${alpha})`;
@@ -118,7 +118,7 @@ export function shapeFillOf(
   if (fill.type === "solid") {
     const color = colorOf(fill.color, context);
     if (!color) return {};
-    const alpha = alphaOf(fill.color);
+    const alpha = alphaOf(fill.color, context);
     return {
       fill: color,
       ...(alpha != null && alpha < 1 ? { opacity: alpha } : {}),
@@ -133,10 +133,10 @@ export function shapeFillOf(
   const paint = patternTileSrcOf({
     ...pattern,
     ...(pattern.foregroundColor != null
-      ? { foregroundColor: colorOf(pattern.foregroundColor, context) }
+      ? { foregroundColor: colorPaintOf(pattern.foregroundColor, context) }
       : {}),
     ...(pattern.backgroundColor != null
-      ? { backgroundColor: colorOf(pattern.backgroundColor, context) }
+      ? { backgroundColor: colorPaintOf(pattern.backgroundColor, context) }
       : {}),
   });
   return { fill: { type: "image", url: paint, mode: "repeat", repeat: true } };

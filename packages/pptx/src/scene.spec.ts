@@ -646,6 +646,66 @@ describe("shape fills", () => {
     expect(svg).toContain('fill="#FFFFFF"');
     expect(svg).toContain('d="M0 .5H8 M.5 0V8"');
   });
+
+  it("carries color alpha through shape and background paints", () => {
+    const { slides } = project({
+      masters: [{ theme: { colorScheme: { accent1: "FF0000" } } }] as never,
+      slides: [
+        {
+          background: {
+            fill: { type: "solid", color: { value: "FF0000", transforms: { alpha: 25 } } },
+          },
+          children: [
+            {
+              shape: {
+                x: 0,
+                y: 0,
+                width: 952500,
+                height: 952500,
+                properties: {
+                  geometry: "rect",
+                  fill: {
+                    type: "pattern",
+                    pattern: "cross",
+                    foregroundColor: { value: "accent1", transforms: { alpha: 50 } },
+                    backgroundColor: "FFFFFF",
+                  },
+                },
+              },
+            },
+          ],
+        },
+        {
+          background: {
+            fill: {
+              type: "gradient",
+              angle: 90,
+              stops: [
+                { position: 0, color: { value: "FF0000", transforms: { alpha: 75 } } },
+                { position: 1, color: "FFFFFF" },
+              ],
+            },
+          },
+        },
+      ],
+    } as never);
+    expect(slides[0]!.background).toEqual({
+      kind: "solid",
+      color: "rgba(255, 0, 0, 0.25)",
+    });
+    const member = slides[0]!.members[0]!;
+    if (member.kind !== "shape" || typeof member.fill !== "object" || member.fill.type !== "image")
+      throw new Error("expected a pattern paint");
+    const svg = decodeURIComponent(member.fill.url.split(",")[1]!);
+    expect(svg).toContain('fill="rgba(255, 0, 0, 0.5)"');
+    expect(slides[1]!.background).toMatchObject({
+      kind: "gradient",
+      stops: [
+        { color: "rgba(255, 0, 0, 0.75)", position: 0 },
+        { color: "FFFFFF", position: 1 },
+      ],
+    });
+  });
 });
 
 describe("pictures and background", () => {
