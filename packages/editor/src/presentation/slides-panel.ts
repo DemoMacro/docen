@@ -32,7 +32,14 @@ function slideFillOf(
 ): string | Record<string, unknown> {
   if (!bg) return "#ffffff";
   if (bg.kind === "solid") return cssColorOf(bg.color);
-  if (bg.kind === "image") return { type: "image", url: bg.src, mode: "stretch" };
+  if (bg.kind === "image") {
+    if (!bg.tile) return { type: "image", url: bg.src, mode: "stretch" };
+    return {
+      type: "image",
+      url: bg.src,
+      ...bg.tile,
+    };
+  }
   const stops = bg.stops.map((stop) => ({ offset: stop.position, color: cssColorOf(stop.color) }));
   if (bg.path) {
     // Radial: the focus sits center, the rim reaches the box edge (the

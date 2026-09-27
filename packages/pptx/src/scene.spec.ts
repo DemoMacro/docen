@@ -738,6 +738,75 @@ describe("pictures and background", () => {
     });
   });
 
+  it("projects blip tile transforms for shapes and backgrounds", () => {
+    const { slides } = project({
+      slides: [
+        {
+          children: [
+            {
+              picture: {
+                type: "png",
+                data: png,
+                x: 0,
+                y: 0,
+                width: 952500,
+                height: 952500,
+              },
+            },
+            {
+              shape: {
+                x: 0,
+                y: 0,
+                width: 952500,
+                height: 952500,
+                properties: {
+                  geometry: "rect",
+                  fill: {
+                    type: "blip",
+                    data: png,
+                    imageType: "png",
+                    tile: {
+                      tx: 9525,
+                      ty: 19050,
+                      sx: 50,
+                      sy: 150,
+                      alignment: "bottomRight",
+                    },
+                  },
+                },
+              },
+            },
+          ],
+        },
+        {
+          background: {
+            fill: {
+              type: "blip",
+              data: png,
+              imageType: "png",
+              tile: { sx: 25, alignment: "topRight" },
+            },
+          },
+        },
+      ],
+    } as never);
+    expect(slides[0]!.members[1]).toMatchObject({
+      kind: "shape",
+      fill: {
+        type: "image",
+        mode: "repeat",
+        repeat: true,
+        scale: { x: 0.5, y: 1.5 },
+        offset: { x: 1, y: 2 },
+        align: "bottom-right",
+      },
+    });
+    expect(slides[1]!.background).toMatchObject({
+      kind: "image",
+      tile: { scale: { x: 0.25, y: 1 }, align: "top-right" },
+    });
+  });
+
   it("carries the slide's solid background", () => {
     const { slides } = project({
       slides: [{ background: { fill: { type: "solid", color: "0B57D0" } } }],

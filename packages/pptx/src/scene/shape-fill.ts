@@ -5,6 +5,7 @@ import type { LayoutDrawingFill } from "@docen/layout";
 import type { ColorTransformOptions, FillOptions } from "@office-open/core/drawing";
 import type { ColorMappingOptions } from "@office-open/core/theme";
 
+import { tilePaintOf } from "./blip-tile";
 import { transformColor } from "./color-transform";
 import { patternTileSrcOf } from "./pattern-background";
 import { pictureSrcOf } from "./pictures";
@@ -127,7 +128,15 @@ export function shapeFillOf(
   if (fill.type === "gradient") return { fill: gradientPaintOf(fill, width, height, context) };
   if (fill.type === "blip") {
     const url = pictureSrcOf(fill.data, fill.imageType);
-    return url ? { fill: { type: "image", url, mode: "stretch" } } : {};
+    if (!url) return {};
+    if (!fill.tile) return { fill: { type: "image", url, mode: "stretch" } };
+    return {
+      fill: {
+        type: "image",
+        url,
+        ...tilePaintOf(fill.tile),
+      },
+    };
   }
   const pattern = fill as Extract<FillOptions, { type: "pattern" }>;
   const paint = patternTileSrcOf({

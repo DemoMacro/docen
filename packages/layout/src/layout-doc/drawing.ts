@@ -19,7 +19,24 @@ export type LayoutDrawingFill =
       to: { x: number; y: number };
       stops: { offset: number; color: string }[];
     }
-  | { type: "image"; url: string; mode: "stretch" | "repeat"; repeat?: true };
+  | {
+      type: "image";
+      url: string;
+      mode: "stretch" | "repeat";
+      repeat?: true;
+      scale?: { x: number; y: number };
+      offset?: { x: number; y: number };
+      align?:
+        | "top-left"
+        | "top"
+        | "top-right"
+        | "left"
+        | "center"
+        | "right"
+        | "bottom-left"
+        | "bottom"
+        | "bottom-right";
+    };
 
 /** A parsed SmartArt data-model node; children preserve the diagram tree. */
 export interface LayoutSmartArtNode {

@@ -21,6 +21,7 @@ import type { ColorMappingOptions } from "@office-open/core/theme";
 import { DEFAULT_COLOR_MAPPING } from "@office-open/core/theme";
 import type { PresentationOptions, SlideOptions } from "@office-open/pptx";
 
+import { tilePaintOf } from "./blip-tile";
 import { transformColor, type ResolvedColor } from "./color-transform";
 import { IDENTITY } from "./geometry";
 import { patternBackgroundOf } from "./pattern-background";
@@ -56,7 +57,24 @@ export type ProjectedSlideBackground =
       angle?: number;
       path?: "shape" | "circle" | "rect";
     }
-  | { kind: "image"; src: string };
+  | {
+      kind: "image";
+      src: string;
+      tile?: {
+        scale?: { x: number; y: number };
+        offset?: { x: number; y: number };
+        align?:
+          | "top-left"
+          | "top"
+          | "top-right"
+          | "left"
+          | "center"
+          | "right"
+          | "bottom-left"
+          | "bottom"
+          | "bottom-right";
+      };
+    };
 
 /** Project a parsed presentation into the paintable shape: sizes are resolved
  *  to px and every slide's children flatten into members. Pure — the input is
@@ -360,7 +378,13 @@ function backgroundOf(
   }
   if (fill.type === "blip") {
     const src = pictureSrcOf(fill.data, fill.imageType);
-    return src ? { kind: "image", src } : undefined;
+    if (!src) return undefined;
+    if (!fill.tile) return { kind: "image", src };
+    return {
+      kind: "image",
+      src,
+      tile: tilePaintOf(fill.tile),
+    };
   }
   if (fill.type === "pattern") {
     const src = patternBackgroundOf(fill, widthPx, heightPx);
