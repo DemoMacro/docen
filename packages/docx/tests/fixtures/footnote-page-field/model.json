@@ -1,0 +1,100 @@
+{
+  "styles": {
+    "paragraphStyles": [
+      {
+        "id": "Normal",
+        "default": true,
+        "paragraph": { "spacing": { "line": 360, "lineRule": "auto" } },
+        "run": {
+          "size": 21,
+          "font": { "ascii": "Times New Roman", "hAnsi": "Times New Roman", "eastAsia": "SimSun" }
+        }
+      },
+      {
+        "id": "FootnoteText",
+        "basedOn": "Normal",
+        "paragraph": { "spacing": { "line": 240, "lineRule": "auto" } },
+        "run": { "size": 18 }
+      }
+    ],
+    "default": { "document": { "run": { "size": 21 } } }
+  },
+  "sections": [
+    {
+      "properties": {
+        "pageSize": { "width": 11906, "height": 16838 },
+        "pageMargin": { "top": 1440, "bottom": 1440, "left": 1800, "right": 1800 }
+      },
+      "footers": {
+        "default": [
+          {
+            "paragraph": {
+              "alignment": "center",
+              "children": [
+                { "text": "第 " },
+                { "complexField": { "instruction": " PAGE ", "result": "1" } },
+                { "text": " 页" }
+              ]
+            }
+          }
+        ]
+      },
+      "children": [
+        {
+          "paragraph": {
+            "children": [
+              { "text": "第一条 " },
+              { "footnoteReference": 2 },
+              { "text": "本规定自 2026 年 9 月 1 日起施行。" }
+            ]
+          }
+        },
+        {
+          "paragraph": {
+            "children": [
+              { "text": "当前页码：" },
+              { "complexField": { "instruction": " PAGE \\* MERGEFORMAT ", "result": "1" } },
+              { "text": "，共 " },
+              { "complexField": { "instruction": " NUMPAGES ", "result": "1" } },
+              { "text": " 页。创建日期：" },
+              { "simpleField": { "instruction": " CREATEDATE ", "cachedValue": "2026-09-01" } }
+            ]
+          }
+        },
+        {
+          "paragraph": {
+            "children": [
+              { "text": "第二条 " },
+              { "footnoteReference": 1 },
+              { "text": "脚注编号按首次引用顺序编号。" }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "footnotes": [
+    {
+      "id": 1,
+      "children": [
+        {
+          "paragraph": {
+            "style": "FootnoteText",
+            "children": [{ "footnoteRef": true }, { "text": " 第二条的说明文本。" }]
+          }
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "children": [
+        {
+          "paragraph": {
+            "style": "FootnoteText",
+            "children": [{ "footnoteRef": true }, { "text": " 第一条的说明文本。" }]
+          }
+        }
+      ]
+    }
+  ]
+}

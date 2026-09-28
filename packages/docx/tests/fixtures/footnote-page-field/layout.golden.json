@@ -1,0 +1,420 @@
+{
+  "sections": [
+    {
+      "blocks": [
+        {
+          "defaultTextStyle": {
+            "family": {
+              "eastAsia": "SimSun",
+              "latin": "Times New Roman"
+            },
+            "sizePx": 28
+          },
+          "indent": {},
+          "inline": [
+            {
+              "kind": "text",
+              "style": {
+                "family": {
+                  "eastAsia": "SimSun",
+                  "latin": "Times New Roman"
+                },
+                "sizePx": 28
+              },
+              "text": "第一条 "
+            },
+            {
+              "kind": "text",
+              "noteRef": {
+                "id": 2,
+                "kind": "footnote",
+                "ordinal": 1
+              },
+              "style": {
+                "family": {
+                  "eastAsia": "SimSun",
+                  "latin": "Times New Roman"
+                },
+                "sizePx": 28,
+                "verticalAlign": "superscript"
+              },
+              "text": "1"
+            },
+            {
+              "kind": "text",
+              "style": {
+                "family": {
+                  "eastAsia": "SimSun",
+                  "latin": "Times New Roman"
+                },
+                "sizePx": 28
+              },
+              "text": "本规定自 2026 年 9 月 1 日起施行。"
+            }
+          ],
+          "keepLines": false,
+          "keepNext": false,
+          "kind": "paragraph",
+          "pageBreakBefore": false,
+          "snapToGrid": null,
+          "spacing": {
+            "afterPx": 0,
+            "beforePx": 0,
+            "lineHeight": {
+              "factor": 1.5,
+              "rule": "multiple"
+            }
+          },
+          "suppressLineNumbers": false,
+          "widowControl": true
+        },
+        {
+          "defaultTextStyle": {
+            "family": {
+              "eastAsia": "SimSun",
+              "latin": "Times New Roman"
+            },
+            "sizePx": 28
+          },
+          "indent": {},
+          "inline": [
+            {
+              "kind": "text",
+              "style": {
+                "family": {
+                  "eastAsia": "SimSun",
+                  "latin": "Times New Roman"
+                },
+                "sizePx": 28
+              },
+              "text": "当前页码："
+            },
+            {
+              "field": "page",
+              "kind": "text",
+              "style": {
+                "family": {
+                  "eastAsia": "SimSun",
+                  "latin": "Times New Roman"
+                },
+                "sizePx": 28
+              },
+              "text": "0"
+            },
+            {
+              "kind": "text",
+              "style": {
+                "family": {
+                  "eastAsia": "SimSun",
+                  "latin": "Times New Roman"
+                },
+                "sizePx": 28
+              },
+              "text": "，共 "
+            },
+            {
+              "field": "numPages",
+              "kind": "text",
+              "style": {
+                "family": {
+                  "eastAsia": "SimSun",
+                  "latin": "Times New Roman"
+                },
+                "sizePx": 28
+              },
+              "text": "0"
+            },
+            {
+              "kind": "text",
+              "style": {
+                "family": {
+                  "eastAsia": "SimSun",
+                  "latin": "Times New Roman"
+                },
+                "sizePx": 28
+              },
+              "text": " 页。创建日期："
+            },
+            {
+              "kind": "text",
+              "style": {
+                "family": {
+                  "eastAsia": "SimSun",
+                  "latin": "Times New Roman"
+                },
+                "sizePx": 28
+              },
+              "text": "2026-09-01"
+            }
+          ],
+          "keepLines": false,
+          "keepNext": false,
+          "kind": "paragraph",
+          "pageBreakBefore": false,
+          "snapToGrid": null,
+          "spacing": {
+            "afterPx": 0,
+            "beforePx": 0,
+            "lineHeight": {
+              "factor": 1.5,
+              "rule": "multiple"
+            }
+          },
+          "suppressLineNumbers": false,
+          "widowControl": true
+        },
+        {
+          "defaultTextStyle": {
+            "family": {
+              "eastAsia": "SimSun",
+              "latin": "Times New Roman"
+            },
+            "sizePx": 28
+          },
+          "indent": {},
+          "inline": [
+            {
+              "kind": "text",
+              "style": {
+                "family": {
+                  "eastAsia": "SimSun",
+                  "latin": "Times New Roman"
+                },
+                "sizePx": 28
+              },
+              "text": "第二条 "
+            },
+            {
+              "kind": "text",
+              "noteRef": {
+                "id": 1,
+                "kind": "footnote",
+                "ordinal": 2
+              },
+              "style": {
+                "family": {
+                  "eastAsia": "SimSun",
+                  "latin": "Times New Roman"
+                },
+                "sizePx": 28,
+                "verticalAlign": "superscript"
+              },
+              "text": "2"
+            },
+            {
+              "kind": "text",
+              "style": {
+                "family": {
+                  "eastAsia": "SimSun",
+                  "latin": "Times New Roman"
+                },
+                "sizePx": 28
+              },
+              "text": "脚注编号按首次引用顺序编号。"
+            }
+          ],
+          "keepLines": false,
+          "keepNext": false,
+          "kind": "paragraph",
+          "pageBreakBefore": false,
+          "snapToGrid": null,
+          "spacing": {
+            "afterPx": 0,
+            "beforePx": 0,
+            "lineHeight": {
+              "factor": 1.5,
+              "rule": "multiple"
+            }
+          },
+          "suppressLineNumbers": false,
+          "widowControl": true
+        }
+      ],
+      "flow": {
+        "adjustLinesInTable": false,
+        "contentHeightPx": 930.5333333333333,
+        "contentLeftPx": 120,
+        "contentTopPx": 96,
+        "contentWidthPx": 553.7333333333333,
+        "pageHeightPx": 1122.5333333333333,
+        "pageWidthPx": 793.7333333333333
+      },
+      "footnoteDefinitions": {
+        "1": [
+          {
+            "defaultTextStyle": {
+              "family": {
+                "eastAsia": "SimSun",
+                "latin": "Times New Roman"
+              },
+              "sizePx": 24
+            },
+            "indent": {},
+            "inline": [
+              {
+                "kind": "text",
+                "style": {
+                  "family": {
+                    "eastAsia": "SimSun",
+                    "latin": "Times New Roman"
+                  },
+                  "sizePx": 24,
+                  "verticalAlign": "superscript"
+                },
+                "text": "2"
+              },
+              {
+                "kind": "text",
+                "style": {
+                  "family": {
+                    "eastAsia": "SimSun",
+                    "latin": "Times New Roman"
+                  },
+                  "sizePx": 24
+                },
+                "text": " 第二条的说明文本。"
+              }
+            ],
+            "keepLines": false,
+            "keepNext": false,
+            "kind": "paragraph",
+            "pageBreakBefore": false,
+            "snapToGrid": null,
+            "spacing": {
+              "afterPx": 0,
+              "beforePx": 0,
+              "lineHeight": {
+                "factor": 1,
+                "rule": "multiple"
+              }
+            },
+            "suppressLineNumbers": false,
+            "widowControl": true
+          }
+        ],
+        "2": [
+          {
+            "defaultTextStyle": {
+              "family": {
+                "eastAsia": "SimSun",
+                "latin": "Times New Roman"
+              },
+              "sizePx": 24
+            },
+            "indent": {},
+            "inline": [
+              {
+                "kind": "text",
+                "style": {
+                  "family": {
+                    "eastAsia": "SimSun",
+                    "latin": "Times New Roman"
+                  },
+                  "sizePx": 24,
+                  "verticalAlign": "superscript"
+                },
+                "text": "1"
+              },
+              {
+                "kind": "text",
+                "style": {
+                  "family": {
+                    "eastAsia": "SimSun",
+                    "latin": "Times New Roman"
+                  },
+                  "sizePx": 24
+                },
+                "text": " 第一条的说明文本。"
+              }
+            ],
+            "keepLines": false,
+            "keepNext": false,
+            "kind": "paragraph",
+            "pageBreakBefore": false,
+            "snapToGrid": null,
+            "spacing": {
+              "afterPx": 0,
+              "beforePx": 0,
+              "lineHeight": {
+                "factor": 1,
+                "rule": "multiple"
+              }
+            },
+            "suppressLineNumbers": false,
+            "widowControl": true
+          }
+        ]
+      },
+      "furniture": {
+        "evenAndOddHeaders": false,
+        "footer": [
+          {
+            "align": "center",
+            "defaultTextStyle": {
+              "family": {
+                "eastAsia": "SimSun",
+                "latin": "Times New Roman"
+              },
+              "sizePx": 28
+            },
+            "indent": {},
+            "inline": [
+              {
+                "kind": "text",
+                "style": {
+                  "family": {
+                    "eastAsia": "SimSun",
+                    "latin": "Times New Roman"
+                  },
+                  "sizePx": 28
+                },
+                "text": "第 "
+              },
+              {
+                "field": "page",
+                "kind": "text",
+                "style": {
+                  "family": {
+                    "eastAsia": "SimSun",
+                    "latin": "Times New Roman"
+                  },
+                  "sizePx": 28
+                },
+                "text": "0"
+              },
+              {
+                "kind": "text",
+                "style": {
+                  "family": {
+                    "eastAsia": "SimSun",
+                    "latin": "Times New Roman"
+                  },
+                  "sizePx": 28
+                },
+                "text": " 页"
+              }
+            ],
+            "keepLines": false,
+            "keepNext": false,
+            "kind": "paragraph",
+            "pageBreakBefore": false,
+            "snapToGrid": null,
+            "spacing": {
+              "afterPx": 0,
+              "beforePx": 0,
+              "lineHeight": {
+                "factor": 1.5,
+                "rule": "multiple"
+              }
+            },
+            "suppressLineNumbers": false,
+            "widowControl": true
+          }
+        ],
+        "footerDistancePx": 48,
+        "headerDistancePx": 48,
+        "titlePage": false
+      }
+    }
+  ]
+}
