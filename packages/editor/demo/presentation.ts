@@ -66,10 +66,10 @@ const demoTheme = {
       { type: "solid", color: { value: "phClr" } },
       {
         type: "gradient",
-        shade: { angle: 90 },
+        angle: 90,
         stops: [
           { position: 0, color: { value: "phClr" } },
-          { position: 1, color: { value: "accent1" } },
+          { position: 100, color: { value: "accent1" } },
         ],
       },
       { type: "solid", color: { value: "phClr" } },
