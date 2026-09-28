@@ -1,15 +1,19 @@
 /**
- * Field catalog + evaluation — the insert/update face of Word's field dialog
- * (插入 → 域). Fields ride the `inlinePassthrough` atom (`attrs.data` carrying
- * the office-open `simpleField`/`complexField`/`formField` branch verbatim), so
- * everything here is plain JSON in, plain JSON out; nothing touches the PM doc.
+ * Field catalog + evaluator registry — the insert/update face of Word's field
+ * dialog (插入 → 域). Fields ride the `inlinePassthrough` atom (`attrs.data`
+ * carrying the office-open `simpleField`/`complexField`/`formField` branch
+ * verbatim), so everything here is plain JSON in, plain JSON out; nothing
+ * touches the PM doc.
  *
- * The catalog lists the fields this editor can stand behind: the painter
- * already renders their cached values (layout/runs.ts pushField) and
- * `evaluateField` can re-derive those values for 更新域 (F9). Anything the
- * engine neither evaluates nor renders dynamically is left out — a field that
- * shows a stale number is worse than no field.
+ * The catalog lists the insertable fields; {@link FIELD_EVALUATORS} re-derives
+ * any field's value from a {@link FieldContext} — the edit-time update
+ * commands (F9 / Update All Fields) and the render pass's live numbering
+ * fields both go through {@link resolveField}. A null result means the context
+ * cannot provide the value; the caller keeps the cached result, Word's
+ * unresolved-field behavior (cached, else empty).
  */
+
+import { formatNumber } from "@docen/layout";
 
 /** One insertable field: the OOXML name and its default instruction (what the
  *  dialog's field-code box prefills). Field names stay English — Word's field
@@ -54,6 +58,8 @@ export const FIELD_CATEGORIES: readonly FieldCategory[] = [
       plain("SUBJECT"),
       plain("KEYWORDS"),
       plain("COMMENTS"),
+      plain("FILENAME"),
+      plain("REVNUM"),
       plain("NUMCHARS"),
       plain("NUMWORDS"),
     ],
@@ -62,9 +68,12 @@ export const FIELD_CATEGORIES: readonly FieldCategory[] = [
     key: "numbering",
     fields: [
       // Dynamic in the painter (resolved per page) — the cached value is just
-      // the measuring placeholder Word also caches.
+      // the measuring placeholder Word also caches. SECTION/SECTIONPAGES are
+      // re-resolved by the render pass against the current pagination.
       plain("PAGE"),
       plain("NUMPAGES"),
+      plain("SECTION"),
+      plain("SECTIONPAGES"),
     ],
   },
 ];
@@ -111,16 +120,115 @@ export function fieldRef(branch: Record<string, unknown>): FieldRef | null {
   return null;
 }
 
-/** What 更新域 needs to re-derive a value. */
+/** What 更新域 needs to re-derive a value. Every part is optional so the same
+ *  evaluator registry serves the edit-time update commands (document state
+ *  only) and the render pass (page frame included). */
 export interface FieldContext {
-  /** "Now" for DATE/TIME (injected — evaluation must stay testable). */
+  /** "Now" for DATE/TIME (injected — evaluation must stay testable). The
+   *  render pass creates one Date per render so a single render is stable. */
   now?: Date;
   /** The doc's core properties (creator/title/subject/keywords/comments/
-   *  created/modified) backing the document-information fields. */
+   *  created/modified/lastPrinted/revision) backing the document-information
+   *  fields. */
   core?: Record<string, unknown>;
   /** The document's word and character totals (Word's NUMWORDS/NUMCHARS). */
   words?: number;
   chars?: number;
+  /** The open document's name, backing FILENAME. */
+  filename?: string;
+  /** The revision number (REVNUM) — core.xml cp:revision. */
+  revision?: number;
+  /** Custom document properties (DOCPROPERTY), name → value. */
+  customProperties?: ReadonlyMap<string, string>;
+  /** REF/PAGEREF targets: bookmark name → its inner text and start page. */
+  bookmarks?: ReadonlyMap<string, FieldBookmark>;
+  /** SEQ label → the ordinal this occurrence takes; the update walk assigns
+   *  them in document order (each label restarts at 1). */
+  sequences?: ReadonlyMap<string, number>;
+  /** The rendered page frame (PAGE/NUMPAGES/SECTION/SECTIONPAGES/PAGEREF).
+   *  Absent = no pagination at hand; page-dependent fields keep their cache. */
+  frame?: FieldFrame;
+}
+
+/** One page slice of the pagination result, as the field evaluators read it. */
+export interface FieldFrame {
+  /** 1-based page number as shown (the section's w:pgNumType restart applied). */
+  page?: number;
+  /** Total pages in the document. */
+  pageCount?: number;
+  /** 1-based section number. */
+  section?: number;
+  /** Pages in the field's section. */
+  sectionPages?: number;
+  /** The section's w:numFmt token (absent = decimal). */
+  pageFormat?: string;
+}
+
+/** One REF/PAGEREF target: the bookmark's inner text (REF) and the displayed
+ *  page its bookmark start sits on (PAGEREF). `page` is the section-numbering
+ *  number (restart applied), `pageFormat` the target section's w:numFmt token
+ *  — a bookmark crossing into another section formats with its own. */
+export interface FieldBookmark {
+  text?: string;
+  page?: number;
+  pageFormat?: string;
+}
+
+/** A parsed instruction: the field name plus its positional arguments and
+ *  switches (`\* MERGEFORMAT`, `\@ "yyyy/M/d"`, `\h`). Quoted strings stay
+ *  whole; a switch consumes the next token as its value. */
+export interface ParsedFieldInstruction {
+  /** The uppercase field name (first token). */
+  name: string;
+  /** The instruction verbatim, trimmed. */
+  raw: string;
+  /** Positional arguments after the name (`REF _Ref1`, `SEQ 图` → ["_Ref1"]),
+   *  switch tokens and their values excluded. */
+  args: string[];
+  /** Switch values keyed without the backslash: `*` → "MERGEFORMAT",
+   *  `@` → "yyyy/M/d", `#` → "0", `h` → "" (a flag switch). */
+  switches: Record<string, string>;
+}
+
+export function parseFieldInstruction(instruction: string): ParsedFieldInstruction {
+  const raw = instruction.trim();
+  const tokens: string[] = [];
+  let current = "";
+  let quoted = false;
+  for (const ch of raw) {
+    if (ch === '"') {
+      quoted = !quoted;
+      continue;
+    }
+    if (!quoted && (ch === " " || ch === "\t")) {
+      if (current) {
+        tokens.push(current);
+        current = "";
+      }
+      continue;
+    }
+    current += ch;
+  }
+  if (current) tokens.push(current);
+  const name = (tokens[0] ?? "").toUpperCase();
+  const args: string[] = [];
+  const switches: Record<string, string> = {};
+  for (let i = 1; i < tokens.length; i++) {
+    const token = tokens[i]!;
+    if (!token.startsWith("\\") || token.length < 2) {
+      args.push(token);
+      continue;
+    }
+    const key = token[1]!;
+    const next = tokens[i + 1];
+    if (next && !next.startsWith("\\")) {
+      switches[key] = next;
+      i += 1;
+    } else {
+      switches[key] = "";
+    }
+  }
+  return { name, raw, args, switches };
 }
 
 /** Formats `d` per a Word date picture (`\@ "yyyy年M月d日"`): the common
@@ -166,44 +274,188 @@ export function formatDate(d: Date, picture: string): string {
   return out;
 }
 
-/** Re-derive the cached value of an updatable field, or null when this field
- *  is either dynamic in the painter (PAGE/NUMPAGES) or not understood — the
- *  caller keeps the existing cache in that case. */
-export function evaluateField(instruction: string, ctx: FieldContext): string | null {
-  const code = instruction.trim();
-  const picture = /\\@\s*"([^"]*)"/.exec(code)?.[1];
-  const name = (picture ? code.slice(0, code.indexOf(`\\@`)) : code).trim().toUpperCase();
-  const now = ctx.now ?? new Date();
-  const str = (v: unknown): string | null =>
-    typeof v === "string" ? v : typeof v === "number" ? String(v) : null;
-  switch (name) {
-    case "DATE":
-      return formatDate(now, picture ?? "yyyy/M/d");
-    case "TIME":
-      return formatDate(now, picture ?? "H:mm:ss");
-    case "CREATEDATE":
-    case "SAVEDATE": {
-      const raw = ctx.core?.[name === "CREATEDATE" ? "created" : "modified"];
-      const d = typeof raw === "string" || raw instanceof Date ? new Date(raw as string) : null;
-      return d && !Number.isNaN(d.getTime()) ? formatDate(d, picture ?? "yyyy/M/d H:mm") : null;
-    }
-    case "AUTHOR":
-      return str(ctx.core?.creator);
-    case "TITLE":
-      return str(ctx.core?.title);
-    case "SUBJECT":
-      return str(ctx.core?.subject);
-    case "KEYWORDS":
-      return str(ctx.core?.keywords);
-    case "COMMENTS":
-      return str(ctx.core?.description);
-    case "NUMWORDS":
-      return ctx.words != null ? String(ctx.words) : null;
-    case "NUMCHARS":
-      return ctx.chars != null ? String(ctx.chars) : null;
-    default:
-      return null;
+/** The shared string coercion for core-property values (a serialized core
+ *  object may carry numbers/strings; anything else is absent). */
+const str = (v: unknown): string | null =>
+  typeof v === "string" ? v : typeof v === "number" ? String(v) : null;
+
+/** A numeric context value as a finite number, or null when absent/malformed
+ *  (a garbage revision must not paint "NaN"). Strings must parse to a finite
+ *  number; booleans/null/objects/NaN/Infinity are absent. */
+export function finiteNumber(v: unknown): number | null {
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  if (typeof v === "string" && v.trim() !== "") {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
   }
+  return null;
+}
+
+/** A core-property date as a Date, or null when absent/malformed. */
+function coreDate(v: unknown): Date | null {
+  if (v instanceof Date) return v;
+  if (typeof v === "string" || typeof v === "number") {
+    const d = new Date(v);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  return null;
+}
+
+/** Date/time pictures — Word's defaults for the bare field names. */
+const DATE_PICTURES: Record<string, string> = {
+  DATE: "yyyy/M/d",
+  TIME: "H:mm:ss",
+  CREATEDATE: "yyyy/M/d H:mm",
+  SAVEDATE: "yyyy/M/d H:mm",
+  PRINTDATE: "yyyy/M/d",
+};
+
+const dateEvaluator =
+  (key: "created" | "modified" | "lastPrinted", fallback: string): FieldEvaluator =>
+  (field, ctx) => {
+    const d = coreDate(ctx.core?.[key]);
+    return d ? formatDate(d, field.switches["@"] ?? fallback) : null;
+  };
+
+/** DOCPROPERTY name → value from a `documentExtras` slice's round-tripped
+ *  office-open `{ name, value }` entries; undefined when none. */
+export function customPropertiesOf(
+  extras: Record<string, unknown> | undefined,
+): ReadonlyMap<string, string> | undefined {
+  const raw = extras?.customProperties;
+  if (!Array.isArray(raw)) return undefined;
+  const map = new Map<string, string>();
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const { name, value } = entry as { name?: unknown; value?: unknown };
+    if (typeof name !== "string" || value == null) continue;
+    map.set(name, variantText(value));
+  }
+  return map.size > 0 ? map : undefined;
+}
+
+/** A custom-property variant as its display text (string/number/boolean pass,
+ *  dates ISO-format; anything else is its JSON). */
+function variantText(value: unknown): string {
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean")
+    return String(value);
+  if (value instanceof Date) return value.toISOString();
+  return JSON.stringify(value);
+}
+
+/** Fields whose value is a pure function of the live pagination — the render
+ *  pass re-resolves these after every layout (Word keeps page numbers live
+ *  through pagination). Everything else is update-time: F9 / Update All
+ *  Fields / w:updateFields on open keeps the last result, Word's behavior. */
+export const LIVE_FIELD_NAMES: ReadonlySet<string> = new Set([
+  "PAGE",
+  "NUMPAGES",
+  "SECTION",
+  "SECTIONPAGES",
+]);
+
+/** INFO <argument> aliases — the document-information names Word's INFO
+ *  field forwards to the same evaluators. */
+const INFO_ALIASES: Record<string, string> = {
+  author: "AUTHOR",
+  title: "TITLE",
+  subject: "SUBJECT",
+  keywords: "KEYWORDS",
+  comments: "COMMENTS",
+  createdate: "CREATEDATE",
+  savedate: "SAVEDATE",
+  printdate: "PRINTDATE",
+  filename: "FILENAME",
+  numpages: "NUMPAGES",
+  numwords: "NUMWORDS",
+  numchars: "NUMCHARS",
+  revnum: "REVNUM",
+  date: "DATE",
+  time: "TIME",
+};
+
+/** The evaluator registry, keyed by field name. A null result means "this
+ *  field has no value in this context" — the caller keeps the cached result
+ *  (Word's unresolved-field behavior is the cached value, else empty). */
+export type FieldEvaluator = (field: ParsedFieldInstruction, ctx: FieldContext) => string | null;
+
+export const FIELD_EVALUATORS: Readonly<Record<string, FieldEvaluator>> = {
+  PAGE: (_field, ctx) =>
+    ctx.frame?.page != null ? formatNumber(ctx.frame.pageFormat, ctx.frame.page) : null,
+  NUMPAGES: (_field, ctx) => (ctx.frame?.pageCount != null ? String(ctx.frame.pageCount) : null),
+  SECTION: (_field, ctx) =>
+    ctx.frame?.section != null ? formatNumber(ctx.frame.pageFormat, ctx.frame.section) : null,
+  SECTIONPAGES: (_field, ctx) =>
+    ctx.frame?.sectionPages != null
+      ? formatNumber(ctx.frame.pageFormat, ctx.frame.sectionPages)
+      : null,
+  DATE: (field, ctx) =>
+    formatDate(ctx.now ?? new Date(), field.switches["@"] ?? DATE_PICTURES.DATE!),
+  TIME: (field, ctx) =>
+    formatDate(ctx.now ?? new Date(), field.switches["@"] ?? DATE_PICTURES.TIME!),
+  CREATEDATE: dateEvaluator("created", DATE_PICTURES.CREATEDATE!),
+  SAVEDATE: dateEvaluator("modified", DATE_PICTURES.SAVEDATE!),
+  PRINTDATE: dateEvaluator("lastPrinted", DATE_PICTURES.PRINTDATE!),
+  AUTHOR: (_field, ctx) => str(ctx.core?.creator),
+  TITLE: (_field, ctx) => str(ctx.core?.title),
+  SUBJECT: (_field, ctx) => str(ctx.core?.subject),
+  KEYWORDS: (_field, ctx) => str(ctx.core?.keywords),
+  COMMENTS: (_field, ctx) => str(ctx.core?.description),
+  FILENAME: (_field, ctx) => ctx.filename ?? null,
+  REVNUM: (_field, ctx) => {
+    const revision = finiteNumber(ctx.revision) ?? finiteNumber(ctx.core?.revision);
+    return revision != null ? String(revision) : null;
+  },
+  NUMWORDS: (_field, ctx) => (ctx.words != null ? String(ctx.words) : null),
+  NUMCHARS: (_field, ctx) => (ctx.chars != null ? String(ctx.chars) : null),
+  REF: (field, ctx) => {
+    const bookmark = field.args[0] ? ctx.bookmarks?.get(field.args[0]) : undefined;
+    return bookmark?.text != null ? bookmark.text : null;
+  },
+  PAGEREF: (field, ctx) => {
+    const bookmark = field.args[0] ? ctx.bookmarks?.get(field.args[0]) : undefined;
+    if (bookmark?.page == null) return null;
+    // The bookmark's own section numbering wins — a cross-section reference
+    // formats with the target page's numFmt, not the field's.
+    return formatNumber(bookmark.pageFormat ?? ctx.frame?.pageFormat, bookmark.page);
+  },
+  SEQ: (field, ctx) => {
+    const ordinal = field.args[0] ? ctx.sequences?.get(field.args[0]) : undefined;
+    return ordinal != null ? String(ordinal) : null;
+  },
+  DOCPROPERTY: (field, ctx) => {
+    const name = field.args[0];
+    if (!name || !ctx.customProperties) return null;
+    const exact = ctx.customProperties.get(name);
+    if (exact != null) return exact;
+    const lower = name.toLowerCase();
+    for (const [key, value] of ctx.customProperties) {
+      if (key.toLowerCase() === lower) return value;
+    }
+    return null;
+  },
+  INFO: (field, ctx) => {
+    const alias = INFO_ALIASES[(field.args[0] ?? "").toLowerCase()];
+    const evaluator = alias ? FIELD_EVALUATORS[alias] : undefined;
+    if (!evaluator) return null;
+    return evaluator({ ...field, name: alias! }, ctx);
+  },
+};
+
+/** Re-derive a field's value from the document state, or null when this
+ *  context cannot provide it (no pagination for PAGE/NUMPAGES, no bookmark
+ *  for REF/PAGEREF, unknown instruction) — the caller keeps the cached
+ *  result in that case. */
+export function resolveField(instruction: string, ctx: FieldContext): string | null {
+  const field = parseFieldInstruction(instruction);
+  const evaluator = FIELD_EVALUATORS[field.name];
+  return evaluator ? evaluator(field, ctx) : null;
+}
+
+/** Re-derive the cached value of an updatable field, or null when this field
+ *  is not understood in this context — the caller keeps the existing cache. */
+export function evaluateField(instruction: string, ctx: FieldContext): string | null {
+  return resolveField(instruction, ctx);
 }
 
 /** The default instruction of a field name (the dialog's list pick → the

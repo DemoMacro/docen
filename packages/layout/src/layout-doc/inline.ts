@@ -1,4 +1,5 @@
 import type { FontSlots } from "../font";
+import { formatNumber } from "../numbering-format";
 import type { LayoutDrawingLine, LayoutDrawingMember, LayoutDrawingShadow } from "./drawing";
 
 export interface LayoutTextStyle {
@@ -94,6 +95,17 @@ export type LayoutInline =
       text: string;
       style: LayoutTextStyle;
       field?: "page" | "numPages";
+      /** The field instruction verbatim (`PAGE \* MERGEFORMAT`, `AUTHOR`,
+       *  `REF _Ref123 \h`) — set on every w:fldSimple / complexField atom. */
+      instruction?: string;
+      /** The cached result the document stored (simpleField @w:cachedValue /
+       *  complexField result). `text` mirrors it except on the dynamic page
+       *  markers, whose text is the measuring placeholder. */
+      result?: string;
+      /** The live value the render pass resolved against the paginated
+       *  document (real page/section numbers) — paint prefers it over `text`.
+       *  Absent = the field was not resolved this render (cached value shows). */
+      resolved?: string;
       /** Ids of the comments whose range covers this atom (w:commentRangeStart
        *  /commentRangeEnd): the painter tints the text's box (sorted, unique).
        *  Pure paint metadata — measuring and wrapping ignore it. */
@@ -153,3 +165,28 @@ export type LayoutInline =
       /** The picture's outline stroke (pic:spPr a:ln) — Word's picture border. */
       line?: LayoutDrawingLine;
     };
+
+/** A text atom's painted label — the shared field-display contract the
+ *  projection, the render resolve pass and the painter all read: the render
+ *  pass's `resolved` value wins, then the live page-number value for the
+ *  dynamic markers (furniture atoms the page flow never resolved), else the
+ *  measured text (the cached result, or the instruction under Alt+F9 — code
+ *  atoms carry neither `resolved` nor a marker). */
+export function fieldLabelOf(
+  inline: LayoutInline & { kind: "text" },
+  page: {
+    pageIndex: number;
+    pageCount: number;
+    pageNumber?: { fmt?: string; offset?: number };
+  },
+  measured: string,
+): string {
+  return (
+    inline.resolved ??
+    (inline.field === "page"
+      ? formatNumber(page.pageNumber?.fmt, page.pageIndex + 1 + (page.pageNumber?.offset ?? 0))
+      : inline.field === "numPages"
+        ? String(page.pageCount)
+        : measured)
+  );
+}

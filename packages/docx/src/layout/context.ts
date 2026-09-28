@@ -46,4 +46,8 @@ export interface ProjectContext {
   /** The tracked-changes display state (Word's Display for Review); absent =
    *  every mark projects (the round-trip-faithful default). */
   markup?: MarkupDisplay;
+  /** Word's field-code display (Alt+F9): every field projects its instruction
+   *  verbatim instead of its cached result — no dynamic page atoms, no
+   *  re-hydrated result runs. */
+  showFieldCodes?: boolean;
 }

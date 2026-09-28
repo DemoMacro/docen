@@ -25,6 +25,7 @@ import {
   type LayoutDrawing,
   type LayoutFloatZone,
   type ProjectedColumns,
+  type ProjectedPageNumbering,
   wrapEffectOf,
   type WrapPageGeometry,
 } from "../layout-doc";
@@ -188,6 +189,30 @@ export interface SectionedFlowPages {
   pages: FlowPage[];
   /** Global page index → section index (parallel to `pages`). */
   sectionOfPage: number[];
+}
+
+/** Per-section page-number offsets: the signed skew between a page's physical
+ *  index and the number the section's w:pgNumType shows (`start` restarts the
+ *  count on the section's first physical page; later sections without a start
+ *  continue the same skew). The single source the PAGE field's paint context
+ *  and the render pass's numbering fields both read. */
+export function computePageNumberOffsets(
+  sections: readonly { pageNumbering?: ProjectedPageNumbering }[],
+  sectionOfPage: readonly number[],
+): number[] {
+  const firstPageOf = new Map<number, number>();
+  sectionOfPage.forEach((s, p) => {
+    if (!firstPageOf.has(s)) firstPageOf.set(s, p);
+  });
+  const offsets: number[] = [];
+  let offset = 0;
+  sections.forEach((section, s) => {
+    const first = firstPageOf.get(s);
+    const start = section.pageNumbering?.start;
+    if (start != null && first != null) offset = start - 1 - first;
+    offsets[s] = offset;
+  });
+  return offsets;
 }
 
 /** Lay a multi-section document into one continuous page list. Each section

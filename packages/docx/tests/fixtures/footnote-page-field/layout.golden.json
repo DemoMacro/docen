@@ -91,7 +91,9 @@
             },
             {
               "field": "page",
+              "instruction": "PAGE \\* MERGEFORMAT",
               "kind": "text",
+              "result": "1",
               "style": {
                 "family": {
                   "eastAsia": "SimSun",
@@ -114,7 +116,9 @@
             },
             {
               "field": "numPages",
+              "instruction": "NUMPAGES",
               "kind": "text",
+              "result": "1",
               "style": {
                 "family": {
                   "eastAsia": "SimSun",
@@ -136,7 +140,9 @@
               "text": " 页。创建日期："
             },
             {
+              "instruction": "CREATEDATE",
               "kind": "text",
+              "result": "2026-09-01",
               "style": {
                 "family": {
                   "eastAsia": "SimSun",
@@ -372,7 +378,9 @@
               },
               {
                 "field": "page",
+                "instruction": "PAGE",
                 "kind": "text",
+                "result": "1",
                 "style": {
                   "family": {
                     "eastAsia": "SimSun",
