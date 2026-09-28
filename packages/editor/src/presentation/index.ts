@@ -1098,7 +1098,11 @@ class DocenPresentation extends AddinHost {
     const slide = pres.slides[sel.slide]!;
     const fillStyle = fill
       ? textBoxFillStyle(fill, member?.opacity)
-      : slideFillStyle(slide.background, pres.widthPx, pres.heightPx);
+      : slideFillStyle(slide.background, pres.widthPx, pres.heightPx, {
+          x: box.x,
+          y: box.y,
+          scale,
+        });
     Object.assign(editor.style, {
       left: `${box.x * scale}px`,
       top: `${stripY * scale}px`,

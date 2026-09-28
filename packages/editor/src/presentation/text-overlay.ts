@@ -30,6 +30,17 @@ export function textBoxFillStyle(
   }
 
   const scale = fill.scale ?? { x: 1, y: 1 };
+  // The painter stretches a plain image over the member box; the textarea is
+  // that box, so 100% 100% is the faithful translation (intrinsic-size auto
+  // would repaint the canvas's stretch as an untiled natural-size image).
+  if (fill.mode !== "repeat") {
+    return {
+      backgroundColor: base,
+      backgroundImage: `url("${fill.url.replaceAll('"', "%22")}")`,
+      backgroundRepeat: "no-repeat",
+      backgroundSize: "100% 100%",
+    };
+  }
   const at = cssAlignmentOf(fill.align);
   return {
     backgroundColor: base,
@@ -108,42 +119,83 @@ export function disposeTextAreaMirror(editor: HTMLTextAreaElement | null): void 
   if (editor) textMirrors.delete(editor);
 }
 
+/** The edit surface's viewport onto the slide: its box origin in slide px
+ *  plus the zoom scale turning slide px into CSS px. */
+export interface SlideFrame {
+  x: number;
+  y: number;
+  scale: number;
+}
+
 /** A shape without its own fill is transparent over the slide; the opaque
- *  edit surface has to inherit that slide paint rather than assuming white. */
+ *  edit surface has to inherit that slide paint rather than assuming white.
+ *  The paint anchors to the slide, not the textarea — CSS gradients and
+ *  backgrounds resolve against the element box, so the slide-space geometry
+ *  is re-expressed as the slice this box covers (frame), in element px. */
 export function slideFillStyle(
   background: ProjectedSlideBackground | undefined,
   width: number,
   height: number,
+  frame?: SlideFrame,
 ): Partial<CSSStyleDeclaration> {
   if (!background) return { backgroundColor: "#FFFFFF" };
   if (background.kind === "solid") return { backgroundColor: cssColor(background.color) };
+  const s = frame?.scale ?? 1;
+  const originX = (frame?.x ?? 0) * s;
+  const originY = (frame?.y ?? 0) * s;
   if (background.kind === "image") {
     const tile = background.tile;
+    if (!tile) {
+      // The canvas stretches a plain picture fill over the whole slide; the
+      // textarea shows exactly the slice its box covers.
+      return {
+        backgroundColor: "#FFFFFF",
+        backgroundImage: `url("${background.src.replaceAll('"', "%22")}")`,
+        backgroundPosition: `${-originX}px ${-originY}px`,
+        backgroundRepeat: "no-repeat",
+        backgroundSize: `${width * s}px ${height * s}px`,
+      };
+    }
     return {
       backgroundColor: "#FFFFFF",
       backgroundImage: `url("${background.src.replaceAll('"', "%22")}")`,
-      backgroundPosition: tile?.offset ? `${tile.offset.x}px ${tile.offset.y}px` : "center",
-      backgroundRepeat: tile ? "repeat" : "no-repeat",
-      backgroundSize: tile?.scale
-        ? `${tile.scale.x * 100}% ${tile.scale.y * 100}%`
-        : tile
-          ? "auto"
-          : "100% 100%",
+      backgroundPosition: `${(tile.offset?.x ?? 0) * s - originX}px ${(tile.offset?.y ?? 0) * s - originY}px`,
+      backgroundRepeat: "repeat",
+      backgroundSize: `${(tile.scale?.x ?? 1) * 100}% ${(tile.scale?.y ?? 1) * 100}%`,
     };
   }
 
-  const stops = background.stops
-    .map((stop) => `${cssColor(stop.color)} ${stop.position}%`)
-    .join(", ");
+  const stopsPx = (lengthPx: number): string =>
+    background.stops
+      .map((stop) => `${cssColor(stop.color)} ${((stop.position / 100) * lengthPx).toFixed(2)}px`)
+      .join(", ");
   if (background.path) {
+    // Radial: the canvas paints center → bottom-edge radius; re-center that
+    // circle on the box's view of the slide.
+    const radius = (height / 2) * s;
+    const centerX = (width / 2) * s - originX;
+    const centerY = (height / 2) * s - originY;
     return {
       backgroundColor: "#FFFFFF",
-      backgroundImage: `radial-gradient(circle at 50% 50%, ${stops})`,
+      backgroundImage: `radial-gradient(circle ${radius.toFixed(2)}px at ${centerX.toFixed(2)}px ${centerY.toFixed(2)}px, ${stopsPx(radius)})`,
     };
   }
+  // Linear: project the box's top-left onto the slide's gradient line and
+  // hang px stops off that offset — CSS px stops extrapolate past the
+  // gradient line, so the box shows exactly its slice of the slide's fade.
   const angle = (((90 + (background.angle ?? 0)) % 360) + 360) % 360;
-  void width;
-  void height;
+  const theta = ((background.angle ?? 0) * Math.PI) / 180;
+  const length = width * Math.abs(Math.cos(theta)) + height * Math.abs(Math.sin(theta));
+  const startX = width / 2 - (Math.cos(theta) * length) / 2;
+  const startY = height / 2 - (Math.sin(theta) * length) / 2;
+  const boxOffset =
+    ((frame?.x ?? 0) - startX) * Math.cos(theta) + ((frame?.y ?? 0) - startY) * Math.sin(theta);
+  const stops = background.stops
+    .map(
+      (stop) =>
+        `${cssColor(stop.color)} ${(((stop.position / 100) * length - boxOffset) * s).toFixed(2)}px`,
+    )
+    .join(", ");
   return {
     backgroundColor: "#FFFFFF",
     backgroundImage: `linear-gradient(${angle.toFixed(4)}deg, ${stops})`,
