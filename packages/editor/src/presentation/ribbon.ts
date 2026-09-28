@@ -5,6 +5,8 @@
 // as wiring lands batch by batch. External add-ins layer more tabs/groups on
 // top via mergeRibbonSchema, exactly like the document editor.
 
+import type { SlideAnimation, TransitionType } from "@docen/pptx";
+
 import { ensureShapePreviewIcons } from "../document/ribbon";
 import type {
   RibbonButton,
@@ -176,10 +178,9 @@ const shapesPicker = (): RibbonControlOrLayout => {
   return splitBtn("shapes", cmd("shapes"), items, { icon: "shapes", size: "large" });
 };
 
-/** The transitions gallery: the common effects plus none (clears the
- *  slide's transition). Values are the TransitionType tokens. */
-const TRANSITIONS = [
-  "none",
+/** The transition tokens the gallery offers — compiler-checked against the
+ *  office-open TransitionType union so a renamed token breaks the build. */
+const TRANSITION_TYPES = [
   "fade",
   "push",
   "wipe",
@@ -191,12 +192,31 @@ const TRANSITIONS = [
   "wheel",
   "zoom",
   "random",
-] as const;
+] as const satisfies readonly TransitionType[];
+
+/** The transitions gallery: the typed tokens plus none (clears the slide's
+ *  transition). */
+const TRANSITIONS = ["none", ...TRANSITION_TYPES] as const;
+
+/** The gallery's transition tokens, as the runtime set #setTransition
+ *  validates the ribbon value against before it touches the model. */
+export const TRANSITION_PRESETS: ReadonlySet<TransitionType> = new Set(TRANSITION_TYPES);
 
 /** The Animate / Add Animation splits' presets: the entrance effects the
  *  show playback tweens, plus none (clears the shape's entry). Values are
  *  the AnimationType tokens. */
-const ANIMATIONS = ["none", "appear", "fade", "fly", "zoom"] as const;
+const ANIMATION_TYPES = [
+  "appear",
+  "fade",
+  "fly",
+  "zoom",
+] as const satisfies readonly SlideAnimation["type"][];
+
+const ANIMATIONS = ["none", ...ANIMATION_TYPES] as const;
+
+/** The entrance presets, as the runtime set #applyAnimation validates
+ *  against — the same tokens the show playback tweens. */
+export const ANIMATION_PRESETS: ReadonlySet<SlideAnimation["type"]> = new Set(ANIMATION_TYPES);
 
 const animationItems = (): RibbonMenuItem[] =>
   ANIMATIONS.map((value) => ({ text: `ppt.ribbon.animate.${value}`, value }));

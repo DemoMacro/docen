@@ -114,7 +114,7 @@ import {
   slideHits,
 } from "./hit-test";
 import { MediaPlayer, type MediaPlayback } from "./media-player";
-import { presentationRibbonTabs } from "./ribbon";
+import { ANIMATION_PRESETS, presentationRibbonTabs, TRANSITION_PRESETS } from "./ribbon";
 import { changedSlides } from "./slide-diff";
 import {
   paintSlideDeck,
@@ -174,10 +174,6 @@ const ALIGNMENTS: ReadonlyMap<string, "left" | "center" | "right" | "justify"> =
   ["align-right", "right"],
   ["justify", "justify"],
 ]);
-
-/** The Animate split's presets: the AnimationType tokens the show playback
- *  maps onto Leafer's own tweening (appear = instant, no tween). */
-const ANIMATION_PRESETS: ReadonlySet<string> = new Set(["appear", "fade", "fly", "zoom"]);
 
 /** Projected paragraph alignment → the CSS text-align the edit overlay uses
  *  (distribute reads as justified — CSS has no separate token). */
@@ -2080,6 +2076,7 @@ class DocenPresentation extends AddinHost {
     const host = this.#presJson?.slides?.[this.#activeSlideIndex()];
     if (!host) return;
     const before = host.transition;
+    if (value !== "none" && !TRANSITION_PRESETS.has(value as TransitionType)) return;
     const after: TransitionOptions = { type: value as TransitionType };
     // Picking the live effect again records nothing.
     if (typeof before === "object" ? before?.type === value : value === "none") return;
@@ -2146,7 +2143,7 @@ class DocenPresentation extends AddinHost {
    *  changes nothing records nothing. */
   #applyAnimation(value?: string): void {
     const preset = value ?? "fade";
-    if (preset !== "none" && !ANIMATION_PRESETS.has(preset)) return;
+    if (preset !== "none" && !ANIMATION_PRESETS.has(preset as SlideAnimation["type"])) return;
     const sel = this.#selection;
     const host = this.#presJson?.slides?.[sel?.slide ?? -1];
     const child = host?.children?.[sel?.child ?? -1];

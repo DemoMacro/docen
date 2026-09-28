@@ -123,6 +123,16 @@ export function toggleRunFlag(
  *  otherwise the "on" style lands. */
 export function toggleRunStyle(
   paragraphs: ParagraphDescriptorOptions[],
+  key: "underline",
+  on: UnderlineStyle,
+): void;
+export function toggleRunStyle(
+  paragraphs: ParagraphDescriptorOptions[],
+  key: "strike",
+  on: StrikeStyle,
+): void;
+export function toggleRunStyle(
+  paragraphs: ParagraphDescriptorOptions[],
   key: "underline" | "strike",
   on: UnderlineStyle | StrikeStyle,
 ): void {
@@ -133,9 +143,16 @@ export function toggleRunStyle(
     const value = run[key];
     return value !== undefined && value !== off;
   });
-  for (const run of runs) {
-    if (applied) delete run[key];
-    else run[key] = on as never;
+  if (key === "underline") {
+    for (const run of runs) {
+      if (applied) delete run.underline;
+      else run.underline = on as UnderlineStyle;
+    }
+  } else {
+    for (const run of runs) {
+      if (applied) delete run.strike;
+      else run.strike = on as StrikeStyle;
+    }
   }
 }
 
