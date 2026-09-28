@@ -14,6 +14,7 @@ import { emuToPx } from "@docen/layout";
 import type {
   ColorTransformOptions,
   FillOptions,
+  GradientStopOptions,
   SolidFillOptions,
 } from "@office-open/core/drawing";
 import type { StyleMatrixReferenceOptions } from "@office-open/core/drawing";
@@ -26,7 +27,7 @@ import { transformColor, type ResolvedColor } from "./color-transform";
 import { IDENTITY } from "./geometry";
 import { patternBackgroundOf } from "./pattern-background";
 import { pictureSrcOf } from "./pictures";
-import { regionsOf, type ThemeColors } from "./table-style";
+import { regionsOf, SCHEME_SLOTS, type ThemeColors } from "./table-style";
 import { childMembers, type ProjectedSlideMember } from "./walk";
 
 /** One projected presentation: the slide size plus each slide's members. */
@@ -107,23 +108,11 @@ interface ThemeContext {
 function tableContextOf(pres: PresentationOptions): ThemeContext {
   const master = pres.masters?.[0];
   const scheme = master?.theme?.colorScheme;
-  const keys = [
-    "dark1",
-    "light1",
-    "dark2",
-    "light2",
-    "accent1",
-    "accent2",
-    "accent3",
-    "accent4",
-    "accent5",
-    "accent6",
-  ] as const;
   const themeColors: ThemeColors | undefined = scheme
     ? Object.fromEntries(
-        keys
-          .map((key) => [key, themeColorOf(scheme[key])] as const)
-          .filter((entry): entry is [(typeof keys)[number], string] => entry[1] !== undefined),
+        SCHEME_SLOTS.map((key) => [key, themeColorOf(scheme[key])] as const).filter(
+          (entry): entry is [(typeof SCHEME_SLOTS)[number], string] => entry[1] !== undefined,
+        ),
       )
     : undefined;
   const tableStyles = pres.tableStyles?.styles?.length
@@ -230,7 +219,7 @@ function bgRefFill(
  * the master's color map into the theme's scheme, phClr takes the style
  * reference's color, then evaluates its color-transform list. */
 function resolvedStyleColorOf(
-  color: unknown,
+  color: string | SolidFillOptions | undefined,
   context: ThemeContext,
   phClr: string | undefined,
 ): ResolvedColor | undefined {
@@ -238,15 +227,15 @@ function resolvedStyleColorOf(
     const hex = color.replace("#", "").toUpperCase();
     return /^[0-9A-F]{6}$/.test(hex) ? { color: hex, alpha: 1 } : undefined;
   }
-  if (color && typeof color === "object" && "value" in color && typeof color.value === "string") {
+  // scRGB/hsl carry channels instead of a token — they resolve to nothing here.
+  if (color && "value" in color) {
     const token = color.value;
     if (token === "phClr") return phClr ? transformColor(phClr, transformsOf(color)) : undefined;
     if (/^[0-9A-F]{6}$/i.test(token)) return transformColor(token, transformsOf(color));
     // The raw clrMap tokens spell the first four slots short (bg1/tx1/bg2/tx2);
     // the parsed color map keys them long (background1/text1/…).
-    const key =
-      { bg1: "background1", tx1: "text1", bg2: "background2", tx2: "text2" }[token] ?? token;
-    const slot = (context.colorMapping as unknown as Record<string, string>)[key] ?? token;
+    const key = LONG_COLOR_TOKEN[token] ?? token;
+    const slot = context.colorMapping[key as keyof ColorMappingOptions] ?? token;
     const hex = context.themeColors?.[slot as keyof ThemeColors];
     return hex ? transformColor(hex, transformsOf(color)) : undefined;
   }
@@ -254,7 +243,7 @@ function resolvedStyleColorOf(
 }
 
 function styleColorOf(
-  color: unknown,
+  color: string | SolidFillOptions | undefined,
   context: ThemeContext,
   phClr: string | undefined,
 ): string | undefined {
@@ -262,7 +251,7 @@ function styleColorOf(
 }
 
 function stylePaintOf(
-  color: unknown,
+  color: string | SolidFillOptions | undefined,
   context: ThemeContext,
   phClr: string | undefined,
 ): string | undefined {
@@ -272,6 +261,14 @@ function stylePaintOf(
   const raw = Number.parseInt(resolved.color, 16);
   return `rgba(${(raw >> 16) & 255}, ${(raw >> 8) & 255}, ${raw & 255}, ${resolved.alpha})`;
 }
+
+/** The clrMap's short slot spellings → the parsed color map's long keys. */
+const LONG_COLOR_TOKEN: Record<string, string> = {
+  bg1: "background1",
+  tx1: "text1",
+  bg2: "background2",
+  tx2: "text2",
+};
 
 /** Replace every phClr/scheme color in a style-matrix fill with its resolved
  * hex (a shallow structural walk — the fill shapes the projection reads). */
@@ -284,11 +281,11 @@ function resolveFillColors(
   if (fill.type === "solid") {
     return {
       ...fill,
-      color: colorChoiceOf(fill.color, context, phClr) as never,
+      color: stylePaintOf(fill.color, context, phClr) ?? fill.color,
     };
   }
   if (fill.type === "gradient") {
-    const resolveStops = <T extends { position: number; color: unknown }>(
+    const resolveStops = <T extends { position: number; color: string | SolidFillOptions }>(
       stops: readonly T[],
     ): T[] =>
       stops.map(
@@ -305,31 +302,18 @@ function resolveFillColors(
   if (fill.type === "pattern") {
     return {
       ...fill,
-      foregroundColor: colorChoiceOf(fill.foregroundColor, context, phClr) as never,
-      backgroundColor: colorChoiceOf(fill.backgroundColor, context, phClr) as never,
+      foregroundColor: stylePaintOf(fill.foregroundColor, context, phClr) ?? fill.foregroundColor,
+      backgroundColor: stylePaintOf(fill.backgroundColor, context, phClr) ?? fill.backgroundColor,
     };
   }
   return fill;
 }
 
 /** A SolidFillOptions wrapper or raw EG_ColorChoice → the resolver. */
-function colorChoiceOf(
-  value: unknown,
-  context: ThemeContext,
-  phClr: string | undefined,
-): string | undefined {
-  if (value && typeof value === "object" && "type" in value && value.type === "solid") {
-    return stylePaintOf((value as unknown as { color: unknown }).color, context, phClr);
-  }
-  return stylePaintOf(value, context, phClr);
-}
-
-function transformsOf(color: unknown): ColorTransformOptions | undefined {
-  if (!color || typeof color !== "object" || !("transforms" in color)) return undefined;
-  const transforms = (color as { transforms?: unknown }).transforms;
-  return transforms && typeof transforms === "object"
-    ? (transforms as ColorTransformOptions)
-    : undefined;
+function transformsOf(
+  color: string | SolidFillOptions | undefined,
+): ColorTransformOptions | undefined {
+  return typeof color === "object" ? color.transforms : undefined;
 }
 
 /** A p:bg fill → the projected paint; exotic fills keep the painter's default. */
@@ -350,15 +334,14 @@ function backgroundOf(
     const opts = "options" in fill ? fill.options : fill;
     // Stop colors follow the core color shape (a hex string or a
     // {value} record) — not the docen solid-fill wrapper solidFillOf reads.
-    const stopColor = (c: unknown) => {
-      if (typeof c === "string") {
-        const paint = c.trim();
+    const stopColor = (color: GradientStopOptions["color"]) => {
+      if (typeof color === "string") {
+        const paint = color.trim();
         if (/^rgba\(/i.test(paint)) return paint;
         return paint.replace("#", "").toUpperCase();
       }
-      return c && typeof c === "object" && "value" in c && typeof c.value === "string"
-        ? c.value.replace("#", "").toUpperCase()
-        : undefined;
+      if (!color || !("value" in color) || typeof color.value !== "string") return undefined;
+      return color.value.replace("#", "").toUpperCase();
     };
     const stops = opts.stops
       .map((stop) => ({ color: stopColor(stop.color) ?? "", position: stop.position }))

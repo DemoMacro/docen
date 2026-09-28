@@ -584,7 +584,7 @@ describe("shape fills", () => {
                     type: "gradient",
                     angle: 90,
                     stops: [
-                      { position: 0, color: { type: "solid", color: "FF0000" } },
+                      { position: 0, color: "FF0000" },
                       { position: 100, color: "FFFFFF" },
                     ],
                   },
@@ -626,7 +626,7 @@ describe("shape fills", () => {
                   fill: {
                     type: "pattern",
                     pattern: "cross",
-                    foregroundColor: { type: "solid", color: { value: "accent1" } },
+                    foregroundColor: { value: "accent1" },
                     backgroundColor: "FFFFFF",
                   },
                 },
@@ -880,7 +880,7 @@ describe("pictures and background", () => {
               type: "pattern",
               pattern: "cross",
               foregroundColor: "FF0000",
-              backgroundColor: { type: "solid", color: "00FF00" },
+              backgroundColor: "00FF00",
             },
           },
         },
@@ -907,8 +907,8 @@ describe("pictures and background", () => {
                 {
                   type: "pattern",
                   pattern: "diagonalCross",
-                  foregroundColor: { type: "solid", color: { value: "phClr" } },
-                  backgroundColor: { type: "solid", color: { value: "tx1" } },
+                  foregroundColor: { value: "phClr" },
+                  backgroundColor: { value: "tx1" },
                 },
               ],
               fillStyles: [],

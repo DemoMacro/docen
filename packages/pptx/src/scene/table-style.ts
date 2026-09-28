@@ -49,22 +49,24 @@ export interface ResolvedTableStyle {
   regions: TableStyleRegions;
 }
 
-/** The theme color slots table styles resolve schemeClr tokens against. */
-export type ThemeColors = Partial<
-  Record<
-    | "dark1"
-    | "light1"
-    | "dark2"
-    | "light2"
-    | "accent1"
-    | "accent2"
-    | "accent3"
-    | "accent4"
-    | "accent5"
-    | "accent6",
-    string
-  >
->;
+/** The theme color slots the projection resolves schemeClr tokens against —
+ *  the resolved hex per the office-open color scheme's own slot set. */
+export type ThemeColors = Partial<Record<Exclude<keyof ColorSchemeOptions, "name">, string>>;
+
+/** The scheme slots the projection reads, typed against the office-open
+ *  color scheme so a renamed slot breaks compilation here, not at runtime. */
+export const SCHEME_SLOTS = [
+  "dark1",
+  "light1",
+  "dark2",
+  "light2",
+  "accent1",
+  "accent2",
+  "accent3",
+  "accent4",
+  "accent5",
+  "accent6",
+] as const satisfies readonly (keyof ThemeColors)[];
 
 const WHITE = "FFFFFF";
 const BLACK = "000000";
@@ -120,7 +122,8 @@ function schemeTokenOf(token: string, theme: ThemeColors | undefined, fallback: 
   const normalized = token
     .replace(/^dk1$/i, "dark1")
     .replace(/^lt1$/i, "light1")
-    .replace(/^(tx1|bg1)$/i, "light1")
+    .replace(/^tx1$/i, "dark1")
+    .replace(/^bg1$/i, "light1")
     .replace(/^(dk2|tx2)$/i, "dark2")
     .replace(/^(lt2|bg2)$/i, "light2");
   return themeColorOf(theme?.[normalized as keyof ThemeColors], fallback);

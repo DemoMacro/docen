@@ -2,7 +2,8 @@
  *  the painter's single image-background contract while preserving the tiled
  *  geometry and both pattern colors. */
 
-import type { FillOptions } from "@office-open/core/drawing";
+import type { FillOptions, SolidFillOptions } from "@office-open/core/drawing";
+import type { HexColor } from "@office-open/core/util";
 
 type PatternFill = Extract<FillOptions, { type: "pattern" }>;
 
@@ -191,24 +192,20 @@ export function patternTileSrcOf(fill: PatternFill): string {
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
-function colorOf(value: unknown): string | undefined {
+function colorOf(value: HexColor | SolidFillOptions | undefined): string | undefined {
   if (typeof value === "string") {
     if (/^rgba\(/i.test(value.trim())) return value.trim();
     return value.replace("#", "").toUpperCase();
   }
-  if (!value || typeof value !== "object") return undefined;
-  const solid = value as { type?: string; color?: unknown };
-  if (solid.type !== "solid") return undefined;
-  if (typeof solid.color === "string") return solid.color.replace("#", "").toUpperCase();
-  if (solid.color && typeof solid.color === "object" && "value" in solid.color) {
-    const value = (solid.color as { value?: unknown }).value;
-    return typeof value === "string" ? value.replace("#", "").toUpperCase() : undefined;
-  }
-  return undefined;
+  // scRGB/hsl carry channels instead of a token — they resolve to nothing here.
+  if (!value || !("value" in value)) return undefined;
+  if (typeof value.value !== "string") return undefined;
+  if (/^rgba\(/i.test(value.value.trim())) return value.value.trim();
+  return value.value.replace("#", "").toUpperCase();
 }
 
 /** SVG accepts the resolved alpha paint directly; canonical hex needs #. */
-function cssColorOf(value: unknown): string | undefined {
+function cssColorOf(value: HexColor | SolidFillOptions | undefined): string | undefined {
   const color = colorOf(value);
   return color && /^rgba\(/i.test(color) ? color : color ? `#${color}` : undefined;
 }

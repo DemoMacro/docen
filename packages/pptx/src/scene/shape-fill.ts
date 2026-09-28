@@ -6,8 +6,10 @@ import type { LayoutDrawingFill, LayoutDrawingLine } from "@docen/layout";
 import type {
   ColorTransformOptions,
   FillOptions,
+  GradientFillOptions,
   OutlineFillProperties,
   OutlineOptions,
+  SolidFillOptions,
 } from "@office-open/core/drawing";
 import type { ColorMappingOptions } from "@office-open/core/theme";
 
@@ -22,42 +24,59 @@ interface FillContext {
   colorMapping?: ColorMappingOptions;
 }
 
-/** A raw EG_ColorChoice / SolidFillOptions → base hex (transforms ignored). */
-function baseColorOf(value: unknown, context: FillContext): string | undefined {
+/** A raw EG_ColorChoice (a hex string or an office-open color option) →
+ *  base hex (transforms ignored). */
+function baseColorOf(
+  value: string | SolidFillOptions | undefined,
+  context: FillContext,
+): string | undefined {
   if (typeof value === "string") return value.replace("#", "").toUpperCase();
-  if (!value || typeof value !== "object") return undefined;
-  const solid = value as { type?: unknown; color?: unknown; value?: unknown };
-  if (solid.type === "solid") return baseColorOf(solid.color, context);
-  if (typeof solid.value !== "string") return undefined;
-  const token = solid.value;
+  if (!value) return undefined;
+  // scRGB/hsl carry channels instead of a token — they resolve to nothing here.
+  if (!("value" in value)) return undefined;
+  const token = value.value;
   if (/^[0-9A-F]{6}$/i.test(token)) return token.toUpperCase();
-  const mapping = (context.colorMapping ?? {}) as unknown as Record<string, string>;
-  const key =
-    { bg1: "background1", tx1: "text1", bg2: "background2", tx2: "text2" }[token] ?? token;
-  const slot = mapping[key] ?? token;
+  const mapping = context.colorMapping;
+  const key = LONG_COLOR_TOKEN[token] ?? token;
+  const slot = mapping?.[key as keyof ColorMappingOptions] ?? token;
   return context.themeColors?.[slot as keyof ThemeColors];
 }
 
-function transformsOf(value: unknown): ColorTransformOptions | undefined {
-  if (!value || typeof value !== "object" || !("transforms" in value)) return undefined;
-  const transforms = (value as { transforms?: unknown }).transforms;
-  return transforms && typeof transforms === "object"
-    ? (transforms as ColorTransformOptions)
-    : undefined;
+/** The clrMap's short slot spellings → the parsed color map's long keys. */
+const LONG_COLOR_TOKEN: Record<string, string> = {
+  bg1: "background1",
+  tx1: "text1",
+  bg2: "background2",
+  tx2: "text2",
+};
+
+function transformsOf(
+  value: string | SolidFillOptions | undefined,
+): ColorTransformOptions | undefined {
+  return typeof value === "object" ? value.transforms : undefined;
 }
 
-function colorOf(value: unknown, context: FillContext): string | undefined {
+function colorOf(
+  value: string | SolidFillOptions | undefined,
+  context: FillContext,
+): string | undefined {
   const base = baseColorOf(value, context);
   return base ? transformColor(base, transformsOf(value)).color : undefined;
 }
 
-function alphaOf(value: unknown, context: FillContext = {}): number | undefined {
+function alphaOf(
+  value: string | SolidFillOptions | undefined,
+  context: FillContext = {},
+): number | undefined {
   const base = baseColorOf(value, context);
   if (!base) return undefined;
   return transformColor(base, transformsOf(value)).alpha;
 }
 
-function colorPaintOf(value: unknown, context: FillContext): string | undefined {
+function colorPaintOf(
+  value: string | SolidFillOptions | undefined,
+  context: FillContext,
+): string | undefined {
   const hex = colorOf(value, context);
   if (!hex) return undefined;
   const alpha = alphaOf(value, context);
@@ -73,10 +92,7 @@ function gradientPaintOf(
   context: FillContext,
 ): LayoutDrawingFill | undefined {
   const shorthand = "options" in fill ? undefined : fill;
-  const options = ("options" in fill ? fill.options : fill) as {
-    stops: readonly { position: number; color: unknown }[];
-    shade?: unknown;
-  };
+  const options: GradientFillOptions = "options" in fill ? fill.options : fill;
   const stops = options.stops
     .map((stop) => ({
       offset: stop.position / 100,
@@ -84,9 +100,9 @@ function gradientPaintOf(
     }))
     .filter((stop): stop is { offset: number; color: string } => stop.color != null);
   if (stops.length < 2) return undefined;
-  const shade = options.shade as Record<string, unknown> | undefined;
-  const shadeAngle = shade && "angle" in shade ? (shade.angle as number | undefined) : undefined;
-  const path = shorthand?.path ?? (shade && "path" in shade ? (shade.path as string) : undefined);
+  const shade = options.shade;
+  const shadeAngle = shade && "angle" in shade ? shade.angle : undefined;
+  const path = shorthand?.path ?? (shade && "path" in shade ? shade.path : undefined);
   const angle = shorthand?.angle ?? shadeAngle;
   if (path) {
     return {
@@ -144,7 +160,7 @@ export function shapeFillOf(
       },
     };
   }
-  const pattern = fill as Extract<FillOptions, { type: "pattern" }>;
+  const pattern = fill;
   const paint = patternTileSrcOf({
     ...pattern,
     ...(pattern.foregroundColor != null
