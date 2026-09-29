@@ -1348,6 +1348,28 @@ describe("table style projection", () => {
     ],
   };
 
+  it("expands zero-height auto rows across the frame extent", () => {
+    const { slides } = project({
+      slides: [
+        {
+          children: [
+            tableChild({
+              ...grid,
+              rows: [
+                { height: 0, cells: [{ text: "a" }, { text: "b" }] },
+                { height: 0, cells: [{ text: "c" }, { text: "d" }] },
+              ],
+            }),
+          ],
+        },
+      ],
+    });
+    const member = slides[0]!.members[0]!;
+    if (member.kind !== "table") throw new Error("expected a table member");
+    const table = member.table as { rows: { heightPx: number }[] };
+    expect(table.rows.map((row) => row.heightPx)).toEqual([150, 150]);
+  });
+
   it("applies the themed default family to a flagged table", () => {
     const table = tableOf({
       masters: [{ theme: { colorScheme: { accent1: "FF0000" } } }] as never,

@@ -123,8 +123,17 @@ export function tableMember(
     if (edge === "left") return c === 0 ? b.left : b.insideV;
     return c + spanW >= nCols ? b.right : b.insideV;
   };
+  // OOXML permits h="0" for auto-sized rows. PowerPoint still lays the frame
+  // out over its graphicFrame extent; keep that geometry for painting and the
+  // editor's cell hit-testing instead of collapsing every row onto y=0.
+  const frameHeightPx = t.sy * emuOf(table.height);
+  const declaredHeights = table.rows.map((row) => t.sy * emuOf(row.height));
+  const autoRows = declaredHeights.filter((height) => height <= 0).length;
+  const fixedHeightPx = declaredHeights.reduce((sum, height) => sum + Math.max(0, height), 0);
+  const autoHeightPx =
+    frameHeightPx > fixedHeightPx && autoRows > 0 ? (frameHeightPx - fixedHeightPx) / autoRows : 0;
   const rows = table.rows.map((row, r) => ({
-    heightPx: t.sy * emuOf(row.height),
+    heightPx: declaredHeights[r]! > 0 ? declaredHeights[r]! : autoHeightPx,
     cells: origins
       .filter((o) => o.row === r)
       .map(({ cell, col, spanW, spanH }) => {
@@ -194,7 +203,7 @@ export function tableMember(
     x: t.sx * emuOf(table.x) + t.dx,
     y: t.sy * emuOf(table.y) + t.dy,
     width: widths.reduce((a, w) => a + w, 0),
-    height: t.sy * emuOf(table.height),
+    height: frameHeightPx,
     ...(childPath ? { childPath } : {}),
     table: { columnWidthsPx: widths, rows },
   };
