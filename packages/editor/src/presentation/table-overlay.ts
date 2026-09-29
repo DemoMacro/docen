@@ -73,7 +73,14 @@ export class TableSelectionOverlay {
 
   #placeHighlights(): void {
     const member = this.#member;
-    const rects = member && this.#selection ? tableSelectionRects(member, this.#selection) : [];
+    if (!member || !this.#selection) {
+      this.#highlights.forEach((el) => {
+        el.style.display = "none";
+      });
+      return;
+    }
+    const origin = member;
+    const rects = tableSelectionRects(member, this.#selection);
     while (this.#highlights.length < rects.length) {
       const rect = document.createElement("div");
       Object.assign(rect.style, {
@@ -93,8 +100,8 @@ export class TableSelectionOverlay {
       }
       Object.assign(el.style, {
         display: "block",
-        left: `${rect.x * scale}px`,
-        top: `${(rect.y + this.#stripY) * scale}px`,
+        left: `${(rect.x - origin.x) * scale}px`,
+        top: `${(rect.y - origin.y) * scale}px`,
         width: `${rect.width * scale}px`,
         height: `${rect.height * scale}px`,
       });
