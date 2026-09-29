@@ -123,6 +123,14 @@ import {
   THUMB_GAP_PX,
   THUMB_WIDTH_PX,
 } from "./slide-paint";
+import { TableSelectionOverlay } from "./table-overlay";
+import {
+  tableSelectionCells,
+  tableCellAt,
+  tableCellNearAt,
+  tableSelectionFor,
+  type TableSelectionRange,
+} from "./table-selection";
 import {
   disposeTextAreaMirror,
   measureTextAreaContent,
@@ -327,11 +335,15 @@ class DocenPresentation extends AddinHost {
   #thumbScale = 1;
   #zoom = 100;
   #overlay: DrawingOverlay | null = null;
+  #tableOverlay: TableSelectionOverlay | null = null;
   #shapeDrawer: ShapeDrawer | null = null;
   #mediaPlayer: MediaPlayer | null = null;
   /** The selected object: the slide child, or — with `member` set — the
    *  group-nested member it descended into (child indexes under the group). */
   #selection: { slide: number; child: number; member?: number[] } | null = null;
+  /** Word's cross-cell selection for the selected table (grid row/col pairs;
+   *  null collapses the selection to the cell next entered). */
+  #tableSelection: TableSelectionRange | null = null;
   /** The in-place shape-text editor: the textarea floats over the shape while
    *  it holds the session; every keystroke writes through into the shape, so
    *  the text lives in the model as it is typed. */
@@ -460,6 +472,11 @@ class DocenPresentation extends AddinHost {
       },
     });
     this.#canvasHost().append(this.#overlay.el);
+    this.#tableOverlay = new TableSelectionOverlay({
+      scale: () => this.#zoom / 100,
+      selectGrip: (kind, index) => this.#selectTableGrip(kind, index),
+    });
+    this.#canvasHost().append(this.#tableOverlay.el);
     this.#mediaPlayer = new MediaPlayer(this.#canvasHost());
     // Shapes/Text Box arm this drag-to-draw tool. The host maps the pointer
     // to the pinned slide frame, so a sweep can start and land on any slide.
@@ -533,6 +550,8 @@ class DocenPresentation extends AddinHost {
     document.removeEventListener("keydown", this.#onKeyDown);
     this.#overlay?.el.remove();
     this.#overlay = null;
+    this.#tableOverlay?.el.remove();
+    this.#tableOverlay = null;
     this.#mediaPlayer?.destroy();
     this.#mediaPlayer = null;
     if (this.#scrollRaf != null) cancelAnimationFrame(this.#scrollRaf);
@@ -969,14 +988,83 @@ class DocenPresentation extends AddinHost {
   #select(sel: { slide: number; child: number; member?: number[] } | null): void {
     if (this.#textEditor) this.#exitTextEditing(true);
     this.#selection = sel;
-    if (!sel) this.#overlay?.hide();
-    else {
-      const hit = this.#selectedBox();
-      if (hit) this.#overlay?.show(hit.box, hit.rotation);
-      else this.#overlay?.hide();
-    }
+    this.#syncSelectionOverlays();
     this.#renderSelectionPane();
     this.#syncTextFormatControls();
+  }
+
+  /** Keep exactly one selection surface alive: tables get Word's cell grips
+   *  and highlights; every other drawing keeps the transform frame. */
+  #syncSelectionOverlays(): void {
+    const table = this.#selection ? this.#tableMemberOf() : null;
+    if (table) {
+      this.#tableOverlay?.show(table.member, this.#tableStripY(table.slide), this.#tableSelection);
+      this.#overlay?.hide();
+      return;
+    }
+    this.#tableOverlay?.hide();
+    this.#tableSelection = null;
+    const hit = this.#selection ? this.#selectedBox() : null;
+    if (hit) this.#overlay?.show(hit.box, hit.rotation);
+    else this.#overlay?.hide();
+  }
+
+  /** The slide's top offset in the strip (slide-local y → overlay y). */
+  #tableStripY(slide: number): number {
+    const pres = this.#pres!;
+    return slide * (pres.heightPx + SLIDE_GAP_PX) + SLIDE_GAP_PX;
+  }
+
+  /** Set the grid pair and repaint only the table's cell highlights. */
+  #setTableSelection(range: TableSelectionRange | null): void {
+    this.#tableSelection = range;
+    this.#tableOverlay?.setSelection(range);
+  }
+
+  /** A grip click commits the current cell first, then widens Word-style:
+   *  top strips select columns, left strips rows, the corner selects all. */
+  #selectTableGrip(kind: "row" | "col" | "table", index = 0): void {
+    if (this.#textEditor) this.#exitTextEditing(true);
+    const table = this.#tableMemberOf();
+    const range = table ? tableSelectionFor(table.member, kind, index) : null;
+    if (range) this.#setTableSelection(range);
+  }
+
+  /** Word's cell-selection Delete: clear content from every selected origin,
+   *  while the grid and its formatting survive. */
+  #clearSelectedTableCells(): void {
+    const table = this.#tableMemberOf();
+    const range = this.#tableSelection;
+    if (!table || !range) return;
+    const origins = tableGridOf(table.table).origins;
+    const selected = tableSelectionCells(table.member, range)
+      .map(
+        ({ row, col }) => origins.find((origin) => origin.row === row && origin.col === col)?.cell,
+      )
+      .filter((cell): cell is TableCellOptions => Boolean(cell));
+    const before = selected.map((cell) => ({
+      cell,
+      text: cell.text,
+      children: structuredClone(cell.children),
+    }));
+    if (before.every(({ cell }) => textOf({ kind: "cell", cell }) === "")) return;
+    for (const { cell } of before) writeText({ kind: "cell", cell }, "");
+    this.#pushEdit({
+      undo: () => {
+        for (const snapshot of before) {
+          delete snapshot.cell.text;
+          delete snapshot.cell.children;
+          if (snapshot.text !== undefined) snapshot.cell.text = snapshot.text;
+          if (snapshot.children !== undefined) snapshot.cell.children = snapshot.children;
+        }
+        this.#reproject(table.slide);
+      },
+      redo: () => {
+        for (const { cell } of before) writeText({ kind: "cell", cell }, "");
+        this.#reproject(table.slide);
+      },
+    });
+    this.#reproject(table.slide);
   }
 
   /** Double-click on a shape: float a textarea over its text area and hand
@@ -1244,8 +1332,7 @@ class DocenPresentation extends AddinHost {
    *  pre-edit frame itself). */
   #restoreOverlay(): void {
     if (this.#textEditor || !this.#selection) return;
-    const hit = this.#selectedBox();
-    if (hit) this.#overlay?.show(hit.box, hit.rotation);
+    this.#syncSelectionOverlays();
   }
 
   // ── Table cell editing ─────────────────────────────────────────────────
@@ -1295,34 +1382,20 @@ class DocenPresentation extends AddinHost {
     x: number,
     y: number,
   ): { cell: TableCellView; x: number; y: number; width: number; height: number } | null {
-    const colX = [0];
-    for (const w of member.table.columnWidthsPx) colX.push(colX[colX.length - 1]! + w);
-    const rowY = [0];
-    for (const row of member.table.rows) rowY.push(rowY[rowY.length - 1]! + row.heightPx);
-    const spanEnd = (v: number[], i: number, n: number): number =>
-      v[Math.min(i + n, v.length - 1)]!;
-    const lx = x - member.x;
-    const ly = y - member.y;
-    for (const cell of member.table.rows.flatMap((r) => r.cells)) {
-      const x0 = colX[Math.min(cell.col, colX.length - 1)]!;
-      const y0 = rowY[Math.min(cell.row, rowY.length - 1)]!;
-      const x1 = spanEnd(colX, cell.col, cell.spanW);
-      const y1 = spanEnd(rowY, cell.row, cell.spanH);
-      if (lx >= x0 && lx < x1 && ly >= y0 && ly < y1)
-        return { cell, x: member.x + x0, y: member.y + y0, width: x1 - x0, height: y1 - y0 };
-    }
-    return null;
+    const rect = tableCellAt(member, x, y);
+    return rect ? { ...rect, cell: rect.cell as TableCellView } : null;
   }
 
   /** Float a textarea over one cell of the selected table (PowerPoint's
    *  in-place cell edit): insets, face, paragraph alignment and vertical
    *  anchor come from the painted cell; the text writes back on exit, and a
    *  click on another cell moves the session there. */
-  #enterTableCellEditing(x: number, y: number): void {
+  #enterTableCellEditing(x: number, y: number, range?: TableSelectionRange): void {
     const found = this.#tableMemberOf();
     if (!found) return;
     const rect = this.#cellRectAt(found.member, x, y);
     if (!rect) return;
+    this.#setTableSelection(range ?? { anchor: rect.cell, head: rect.cell });
     const cell = rect.cell;
     const source = tableGridOf(found.table).origins.find(
       (o) => o.row === cell.row && o.col === cell.col,
@@ -1509,13 +1582,46 @@ class DocenPresentation extends AddinHost {
 
   /** A click on another cell of the table under edit: commit the current
    *  cell and float the editor over the new one (PowerPoint's cell hop). */
-  #moveTableCellEditing(x: number, y: number): void {
+  #moveTableCellEditing(x: number, y: number, range?: TableSelectionRange): void {
     const found = this.#tableMemberOf();
     const rect = found ? this.#cellRectAt(found.member, x, y) : null;
     if (!rect) return this.#exitTextEditing(true);
     if (this.#tableEdit?.row === rect.cell.row && this.#tableEdit.col === rect.cell.col) return;
     this.#exitTextEditing(true);
-    this.#enterTableCellEditing(x, y);
+    this.#enterTableCellEditing(x, y, range);
+  }
+
+  /** Cross-cell drag: the anchor stays where the press started and every new
+   *  grid slot under the pointer extends the selection. The editor hops with
+   *  the head, exactly as DOCX changes the text caret inside a cell drag. */
+  #startTableCellDrag(
+    event: PointerEvent,
+    found: { slide: number; table: TableOptions; member: TableMemberView },
+  ): void {
+    if (!found) return;
+    const drag = { startX: event.clientX, startY: event.clientY, moved: false };
+    const onMove = (move: PointerEvent): void => {
+      const anchor = this.#tableSelection?.anchor;
+      if (!anchor) return;
+      if (!drag.moved && Math.hypot(move.clientX - drag.startX, move.clientY - drag.startY) < 3)
+        return;
+      drag.moved = true;
+      const point = this.#stagePointOf(move);
+      if (!point || point.slide !== found.slide) return;
+      const head = tableCellNearAt(found.member, point.x, point.y);
+      if (!head) return;
+      if (head.cell.row === anchor.row && head.cell.col === anchor.col) return;
+      this.#setTableSelection({ anchor, head: head.cell });
+      this.#moveTableCellEditing(head.x + 1, head.y + 1, { anchor, head: head.cell });
+    };
+    const onUp = (): void => {
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      document.removeEventListener("pointercancel", onUp);
+    };
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+    document.addEventListener("pointercancel", onUp);
   }
 
   /** The padding-top correction that moves a textarea's CSS baseline onto
@@ -1552,10 +1658,10 @@ class DocenPresentation extends AddinHost {
     this.#changedSlides = changedSlides(previous, this.#pres);
     this.#renderDeck(slide);
     this.#changedSlides = undefined;
-    // The paint restarted under the same selection — the frame snaps to the
-    // current geometry (and rejects itself if the box vanished).
-    const hit = this.#selectedBox();
-    if (hit) this.#overlay?.refresh(hit.box, hit.rotation);
+    // The paint restarted under the same selection — the table highlights or
+    // transform frame snaps to the current geometry (and rejects itself if
+    // the box vanished).
+    if (this.#selectedBox()) this.#syncSelectionOverlays();
     else this.#select(null);
     this.#renderSelectionPane();
   }
@@ -2812,12 +2918,39 @@ class DocenPresentation extends AddinHost {
         // The hop re-focuses the cell editor; the pointerdown's default focus
         // move runs after this handler and would steal the caret back.
         event.preventDefault();
+        const table = this.#tableMemberOf();
+        const rect = table ? this.#cellRectAt(table.member, point.x, point.y) : null;
+        if (table && rect) {
+          this.#setTableSelection({ anchor: rect.cell, head: rect.cell });
+          this.#startTableCellDrag(event, table);
+        }
         this.#moveTableCellEditing(point.x, point.y);
       }
       return;
     }
     if (child < 0) return this.#select(null);
     const target = presJson.slides?.[point.slide]?.children?.[child];
+    // A table body opens Word's cell edit on the first press; its grips are
+    // the only way to ask for a row/column/whole-table selection. Nested
+    // tables descend into their member before resolving the projected grid.
+    const nested = target && "group" in target ? memberAt(target, point.x, point.y) : null;
+    const nestedLeaf = nested && this.#childAt(target!, nested.path);
+    const tableLeaf = target && "table" in target ? target : nestedLeaf;
+    if (tableLeaf && "table" in tableLeaf) {
+      this.#select({
+        slide: point.slide,
+        child,
+        ...(target && "group" in target && nested ? { member: nested.path } : {}),
+      });
+      const table = this.#tableMemberOf();
+      const rect = table ? this.#cellRectAt(table.member, point.x, point.y) : null;
+      if (!table || !rect) return;
+      event.preventDefault();
+      this.#setTableSelection({ anchor: rect.cell, head: rect.cell });
+      this.#enterTableCellEditing(point.x, point.y);
+      this.#startTableCellDrag(event, table);
+      return;
+    }
     const sameObject = this.#selection?.slide === point.slide && this.#selection.child === child;
     // The selected group: a press on a member descends into it (PowerPoint's
     // second click); a member press selects or drags, a press on empty group
@@ -2926,6 +3059,7 @@ class DocenPresentation extends AddinHost {
       !this.#selection.member
     ) {
       event.preventDefault();
+      if (this.#tableSelection) return this.#clearSelectedTableCells();
       this.#deleteSelected();
     }
   };
