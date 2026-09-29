@@ -99,6 +99,17 @@ export const presentationStyles = css`
     line-height: normal;
     white-space: pre-wrap;
   }
+  /* A table cell edit follows the DOCX input model: the canvas remains the
+     visual table and the textarea is only the keyboard/IME bridge. Keeping
+     the text transparent prevents ghost-doubling over the projected text. */
+  .table-cell-editor {
+    background: transparent;
+    box-shadow: none;
+    color: transparent;
+  }
+  .table-cell-editor::selection {
+    background: rgba(43, 124, 211, 0.22);
+  }
   /* The speaker-notes pane (PowerPoint's notes window): centered under the
      slide strip inside the same scroll area, so it follows the visible
      slide. The textarea holds the plain-notes session. */

@@ -344,6 +344,9 @@ class DocenPresentation extends AddinHost {
   /** The table cell under the in-place edit (grid row/col — the session
    *  itself lives in #textEditor; null there means a shape text edit). */
   #tableEdit: { row: number; col: number } | null = null;
+  /** The edited cell as it entered the session — live write-through mutates
+   *  the cell in place, so this baseline is what the undo pair restores. */
+  #tableEditBefore: TableCellOptions | null = null;
   /** Drawing gridlines visibility (a view state — not part of the deck). */
   #gridlines = false;
   readonly #history = new DeckHistory();
@@ -1355,7 +1358,7 @@ class DocenPresentation extends AddinHost {
     const m = cell.marginsPx;
     const anchor = cell.anchor ?? "top";
     const editor = document.createElement("textarea");
-    editor.className = "shape-text-editor";
+    editor.className = "shape-text-editor table-cell-editor";
     editor.rows = 1;
     editor.value = cellTextOf(source);
     Object.assign(editor.style, {
@@ -1370,11 +1373,16 @@ class DocenPresentation extends AddinHost {
             fontSize: `${run.sizePx * scale}px`,
             lineHeight: `${linePx * scale}px`,
             textAlign: TEXT_ALIGN_OF[first!.align ?? "left"] ?? "left",
-            color: run.color ? `#${run.color}` : TEXT_INK,
+            color: "transparent",
+            caretColor: run.color ? `#${run.color}` : TEXT_INK,
             ...(run.bold ? { fontWeight: "bold" } : {}),
             ...(run.italic ? { fontStyle: "italic" } : {}),
           }
-        : { fontSize: `${((firstCellRunSizeOf(source) * 4) / 3) * scale}px` }),
+        : {
+            color: "transparent",
+            fontSize: `${((firstCellRunSizeOf(source) * 4) / 3) * scale}px`,
+            caretColor: TEXT_INK,
+          }),
     });
     // Overflow grows the frame downward (the top-anchored shape rule); a
     // center/bottom cell re-runs the painter's slack math so the stack sits
@@ -1409,14 +1417,38 @@ class DocenPresentation extends AddinHost {
       }
       event.stopPropagation();
     });
-    editor.addEventListener("input", syncLayout);
+    let composing = false;
+    let lastWritten = editor.value;
+    const writeThrough = (): void => {
+      if (composing || this.#textEditRaf) return;
+      this.#textEditRaf = requestAnimationFrame(() => {
+        this.#textEditRaf = 0;
+        if (this.#textEditor !== editor || editor.value === lastWritten) return;
+        lastWritten = editor.value;
+        writeText({ kind: "cell", cell: source }, editor.value);
+        this.#reproject(found.slide);
+      });
+    };
+    editor.addEventListener("input", () => {
+      syncLayout();
+      writeThrough();
+    });
+    editor.addEventListener("compositionstart", () => {
+      composing = true;
+    });
+    editor.addEventListener("compositionend", () => {
+      composing = false;
+      syncLayout();
+      writeThrough();
+    });
     this.#canvasHost().append(editor);
     syncLayout();
     editor.focus();
     editor.select();
     this.#textEditor = editor;
     this.#tableEdit = { row: cell.row, col: cell.col };
-    this.#overlay?.hide();
+    this.#tableEditBefore = structuredClone(source);
+    this.#restoreOverlay();
   }
 
   /** The source cell a table edit session points at — the grid walk maps the
@@ -1439,16 +1471,21 @@ class DocenPresentation extends AddinHost {
     const at = this.#tableEdit;
     this.#textEditor = null;
     this.#tableEdit = null;
+    if (this.#textEditRaf) {
+      cancelAnimationFrame(this.#textEditRaf);
+      this.#textEditRaf = 0;
+    }
     editor?.remove();
     disposeTextAreaMirror(editor);
     const sel = this.#selection;
+    const before = this.#tableEditBefore;
+    this.#tableEditBefore = null;
     const cell = editor && write ? this.#editedCell(at) : null;
-    if (cell) {
+    if (cell && before) {
       const source: TextEditSource = { kind: "cell", cell };
-      if (editor!.value !== textOf(source)) {
-        const before = structuredClone(cell);
-        writeText(source, editor!.value);
-        const after = structuredClone(cell);
+      if (editor!.value !== textOf(source)) writeText(source, editor!.value);
+      const after = structuredClone(cell);
+      if (JSON.stringify(before) !== JSON.stringify(after)) {
         const restore = (snap: TableCellOptions): void => {
           for (const key of Object.keys(cell) as (keyof TableCellOptions)[]) delete cell[key];
           Object.assign(cell, snap);
