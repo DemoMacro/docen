@@ -496,6 +496,10 @@ class DocenPresentation extends AddinHost {
   #themesDialog: HTMLDialogElement | null = null;
   #variantsDialog: HTMLDialogElement | null = null;
   #layoutDialog: HTMLDialogElement | null = null;
+  #objectDialog: HTMLDialogElement | null = null;
+  #objectLink = false;
+  #objectAutoUpdate = false;
+  #objectShowAsIcon = true;
   #langObserver?: MutationObserver;
   #unsubLang?: () => void;
   #scrollRaf?: number;
@@ -758,6 +762,7 @@ class DocenPresentation extends AddinHost {
     this.#themesDialog = null;
     this.#variantsDialog = null;
     this.#layoutDialog = null;
+    this.#objectDialog = null;
     this.#wordArtDialog = null;
     this.#spellDialog = null;
     this.#syncNotesPane(0);
@@ -4401,7 +4406,70 @@ class DocenPresentation extends AddinHost {
   }
 
   #pickObject(): void {
-    this.shadowRoot?.querySelector<HTMLInputElement>("#object-input")?.click();
+    if (!this.#pres || this.#objectDialog?.open) return;
+    const dialog = document.createElement("dialog");
+    dialog.className = "insert-dialog";
+    dialog.innerHTML = `
+      <div class="dialog-head"><strong>${escapeHtml(t("ppt.object.title", this))}</strong><button data-dialog-close>×</button></div>
+      <div class="dialog-body">
+        <fieldset class="object-source">
+          <legend>${escapeHtml(t("ppt.object.source", this))}</legend>
+          <label><input type="radio" name="object-source" value="embed" checked> ${escapeHtml(t("ppt.object.embed", this))}</label>
+          <label><input type="radio" name="object-source" value="link"> ${escapeHtml(t("ppt.object.link", this))}</label>
+        </fieldset>
+        <label class="dialog-field" data-object-mode="embed"><span>${escapeHtml(t("ppt.object.file", this))}</span><input id="object-file-name" readonly placeholder="${escapeHtml(t("ppt.object.choose", this))}"></label>
+        <label class="dialog-field" data-object-mode="link" hidden><span>${escapeHtml(t("ppt.object.url", this))}</span><input id="object-url" placeholder="https://example.com/report.xlsx"></label>
+        <label class="hf-option"><input id="object-icon" type="checkbox" checked> ${escapeHtml(t("ppt.object.show-as-icon", this))}</label>
+        <label class="hf-option" data-object-auto hidden><input id="object-auto" type="checkbox"> ${escapeHtml(t("ppt.object.auto-update", this))}</label>
+      </div>
+      <div class="dialog-actions"><button data-dialog-cancel>${escapeHtml(t("ppt.dialog.cancel", this))}</button><button data-object-pick>${escapeHtml(t("ppt.dialog.insert", this))}</button></div>
+    `;
+    dialog.addEventListener("change", (event) => {
+      const target = event.target as HTMLInputElement;
+      if (target.name === "object-source") {
+        const link = target.value === "link";
+        this.#objectLink = link;
+        for (const item of dialog.querySelectorAll<HTMLElement>("[data-object-mode]"))
+          item.hidden = (item.dataset.objectMode === "link") !== link;
+        dialog.querySelector<HTMLElement>("[data-object-auto]")!.hidden = !link;
+      } else if (target.id === "object-file") {
+        const file = target.files?.[0];
+        if (dialog.querySelector<HTMLInputElement>("#object-file-name") && file)
+          dialog.querySelector<HTMLInputElement>("#object-file-name")!.value = file.name;
+      }
+    });
+    dialog.addEventListener("click", async (event) => {
+      const target = event.target as HTMLElement;
+      if (target.closest("[data-dialog-close]") || target.closest("[data-dialog-cancel]"))
+        return dialog.close();
+      if (!target.closest("[data-object-pick]")) return;
+      const showAsIcon = dialog.querySelector<HTMLInputElement>("#object-icon")?.checked === true;
+      this.#objectShowAsIcon = showAsIcon;
+      this.#objectAutoUpdate =
+        dialog.querySelector<HTMLInputElement>("#object-auto")?.checked === true;
+      if (this.#objectLink) {
+        const url = dialog.querySelector<HTMLInputElement>("#object-url")?.value.trim();
+        if (!url) return;
+        const name = decodeURIComponent(url.split(/[?#]/)[0]!.split("/").pop() || "Object");
+        this.#insertChild(
+          makeObject(
+            this.#pres!.widthPx,
+            this.#pres!.heightPx,
+            new Uint8Array(),
+            await objectIconDataUrl(name),
+            name,
+            objectProgIdOf(name),
+            { url, autoUpdate: this.#objectAutoUpdate },
+            showAsIcon,
+          ),
+        );
+        dialog.close();
+        return;
+      }
+      this.shadowRoot?.querySelector<HTMLInputElement>("#object-input")?.click();
+    });
+    this.#showModalDialog(dialog, () => (this.#objectDialog = null));
+    this.#objectDialog = dialog;
   }
 
   /** File-input object path: native bytes enter the real OLE embed; the
@@ -4421,8 +4489,11 @@ class DocenPresentation extends AddinHost {
         icon,
         file.name,
         objectProgIdOf(file.name),
+        undefined,
+        this.#objectShowAsIcon,
       ),
     );
+    this.#objectDialog?.close();
   };
 
   /** File-input media path: native bytes enter the source model unchanged;

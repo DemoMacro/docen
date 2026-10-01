@@ -611,6 +611,8 @@ export function makeObject(
   iconData: string,
   sourceName: string,
   progId = "Package",
+  link?: { url: string; autoUpdate?: boolean },
+  showAsIcon = true,
 ): SlideChild {
   const size = 96;
   return {
@@ -621,10 +623,10 @@ export function makeObject(
       height: emu(size),
       name: sourceName,
       progId,
-      showAsIcon: true,
+      showAsIcon,
       imageWidth: emu(size),
       imageHeight: emu(size),
-      embed: { data },
+      ...(link ? { link } : { embed: { data } }),
       iconImage: { data: iconData, type: "png" },
     },
   };

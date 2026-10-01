@@ -529,6 +529,24 @@ export const presentationStyles = css`
     background: transparent;
     color: inherit;
   }
+  .object-source {
+    display: grid;
+    gap: 8px;
+    padding: 10px 12px;
+    border: 1px solid var(--docen-color-divider, #e1e1e1);
+    border-radius: 4px;
+    font-size: 13px;
+  }
+  .object-source legend {
+    padding-inline: 4px;
+    font-size: 12px;
+    color: var(--docen-color-fg-muted, #616161);
+  }
+  .object-source label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
   .hf-option {
     display: flex;
     align-items: center;

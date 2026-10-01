@@ -481,6 +481,23 @@ describe("makeObject", () => {
     expect(objectProgIdOf("Archive.zip")).toBe("CompressedFolder");
     expect(objectProgIdOf("Model.xyz")).toBe("Package");
   });
+
+  it("links a remote source without embedding empty bytes", () => {
+    type OleVariant = Extract<SlideChild, { ole: unknown }>["ole"];
+    const { ole } = makeObject(
+      1280,
+      720,
+      new Uint8Array(),
+      "data:image/png;base64,AAA",
+      "Report.xlsx",
+      "Excel.Sheet.12",
+      { url: "https://example.com/Report.xlsx", autoUpdate: true },
+      false,
+    ) as { ole: OleVariant };
+    expect(ole.link).toEqual({ url: "https://example.com/Report.xlsx", autoUpdate: true });
+    expect(ole.embed).toBeUndefined();
+    expect(ole.showAsIcon).toBe(false);
+  });
 });
 
 describe("makeSmartArt", () => {
