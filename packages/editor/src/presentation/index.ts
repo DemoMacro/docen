@@ -346,6 +346,7 @@ const WIRED_COMMANDS: ReadonlySet<string> = new Set([
   "wordart",
   "online-picture",
   "section",
+  "header-footer",
   ...TEXT_FORMAT_COMMANDS,
 ]);
 
@@ -449,6 +450,7 @@ class DocenPresentation extends AddinHost {
   #wordArtDialog: HTMLDialogElement | null = null;
   #commentsDialog: HTMLDialogElement | null = null;
   #sectionDialog: HTMLDialogElement | null = null;
+  #headerFooterDialog: HTMLDialogElement | null = null;
   #onlinePictureDialog: HTMLDialogElement | null = null;
   #langObserver?: MutationObserver;
   #unsubLang?: () => void;
@@ -882,6 +884,7 @@ class DocenPresentation extends AddinHost {
     else if (name === "wordart") this.#openWordArtDialog();
     else if (name === "online-picture") this.#openOnlinePictureDialog();
     else if (name === "section") this.#openSectionDialog();
+    else if (name === "header-footer") this.#openHeaderFooterDialog();
     else if (name === "video" || name === "audio") this.#pickMedia();
     else if (name === "select") this.#toggleSelectionPane();
     else if (name === "draw-select") this.#armDrawTool("select");
@@ -2421,6 +2424,82 @@ class DocenPresentation extends AddinHost {
     this.#pushEdit({
       undo: () => apply(before),
       redo: () => apply(section),
+    });
+  }
+
+  /** Header/footer visibility instantiates real dt/ftr/sldNum placeholders on
+   *  save; the model stays the single source, so children never duplicate it. */
+  #openHeaderFooterDialog(): void {
+    if (!this.#pres || this.#headerFooterDialog?.open) return;
+    const slide = this.#presJson?.slides?.[this.#activeSlideIndex()];
+    if (!slide) return;
+    const options = slide.headerFooter ?? {};
+    const footerText = typeof options.footer === "string" ? options.footer : "";
+    const dialog = document.createElement("dialog");
+    dialog.className = "insert-dialog";
+    dialog.innerHTML = `
+      <div class="dialog-head"><strong>${escapeHtml(t("ppt.header-footer.title", this))}</strong><button data-dialog-close>×</button></div>
+      <div class="dialog-body">
+        <label class="hf-option"><input id="hf-date" type="checkbox" ${options.dateTime ? "checked" : ""}><span>${escapeHtml(t("ppt.header-footer.date", this))}</span></label>
+        <label class="hf-option"><input id="hf-number" type="checkbox" ${options.slideNumber ? "checked" : ""}><span>${escapeHtml(t("ppt.header-footer.number", this))}</span></label>
+        <label class="hf-option"><input id="hf-footer" type="checkbox" ${options.footer ? "checked" : ""}><span>${escapeHtml(t("ppt.header-footer.footer", this))}</span></label>
+        <label class="dialog-field"><span>${escapeHtml(t("ppt.header-footer.text", this))}</span><input id="hf-text" value="${escapeHtml(footerText)}" placeholder="${escapeHtml(t("ppt.header-footer.placeholder", this))}"></label>
+      </div>
+      <div class="dialog-actions">
+        <button data-hf-all>${escapeHtml(t("ppt.header-footer.apply-all", this))}</button>
+        <button data-dialog-cancel>${escapeHtml(t("ppt.dialog.cancel", this))}</button>
+        <button data-hf-apply>${escapeHtml(t("ppt.header-footer.apply", this))}</button>
+      </div>
+    `;
+    const read = (): { dateTime?: boolean; slideNumber?: boolean; footer?: string | boolean } => {
+      const date = dialog.querySelector<HTMLInputElement>("#hf-date")?.checked ?? false;
+      const number = dialog.querySelector<HTMLInputElement>("#hf-number")?.checked ?? false;
+      const enabled = dialog.querySelector<HTMLInputElement>("#hf-footer")?.checked ?? false;
+      const text = dialog.querySelector<HTMLInputElement>("#hf-text")?.value.trim() ?? "";
+      return {
+        ...(date ? { dateTime: true } : {}),
+        ...(number ? { slideNumber: true } : {}),
+        ...(enabled ? { footer: text || true } : {}),
+      };
+    };
+    dialog.addEventListener("click", (event) => {
+      const target = event.target as HTMLElement;
+      if (target.closest("[data-dialog-close]") || target.closest("[data-dialog-cancel]"))
+        return dialog.close();
+      if (target.closest("[data-hf-apply]")) {
+        this.#setSlideHeaderFooter(read(), false);
+        dialog.close();
+      }
+      if (target.closest("[data-hf-all]")) {
+        this.#setSlideHeaderFooter(read(), true);
+        dialog.close();
+      }
+    });
+    this.#showModalDialog(dialog, () => (this.#headerFooterDialog = null));
+    this.#headerFooterDialog = dialog;
+  }
+
+  #setSlideHeaderFooter(
+    value: { dateTime?: boolean; slideNumber?: boolean; footer?: string | boolean },
+    all: boolean,
+  ): void {
+    const presJson = this.#presJson;
+    const at = this.#activeSlideIndex();
+    const slides = presJson?.slides;
+    if (!slides?.length) return;
+    const targets = all ? slides.map((_, index) => index) : [at];
+    const before = slides.map((slide) => structuredClone(slide.headerFooter));
+    const apply = (snapshot: (typeof before)[number], index: number): void => {
+      const slide = slides[index]!;
+      if (snapshot) slide.headerFooter = structuredClone(snapshot);
+      else delete slide.headerFooter;
+    };
+    before.forEach((snapshot, index) => apply(snapshot, index));
+    targets.forEach((index) => apply(value, index));
+    const finalAfter = slides.map((slide) => structuredClone(slide.headerFooter));
+    this.#pushEdit({
+      undo: () => before.forEach((snapshot, index) => apply(snapshot, index)),
+      redo: () => finalAfter.forEach((snapshot, index) => apply(snapshot, index)),
     });
   }
 

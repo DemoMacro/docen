@@ -514,6 +514,18 @@ export const presentationStyles = css`
     background: transparent;
     color: inherit;
   }
+  .hf-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+  }
+  .hf-option input {
+    width: 16px;
+    height: 16px;
+    margin: 0;
+    accent-color: var(--docen-color-primary, #2b579a);
+  }
   .symbol-grid {
     display: grid;
     grid-template-columns: repeat(8, 1fr);
