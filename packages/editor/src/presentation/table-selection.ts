@@ -52,8 +52,8 @@ function cellRectAt(
 ): TableCellRect {
   const x = member.x + colEdges[Math.min(cell.col, colEdges.length - 1)]!;
   const y = member.y + rowEdges[Math.min(cell.row, rowEdges.length - 1)]!;
-  const right = colEdges[Math.min(cell.col + cell.spanW, colEdges.length - 1)]!;
-  const bottom = rowEdges[Math.min(cell.row + cell.spanH, rowEdges.length - 1)]!;
+  const right = member.x + colEdges[Math.min(cell.col + cell.spanW, colEdges.length - 1)]!;
+  const bottom = member.y + rowEdges[Math.min(cell.row + cell.spanH, rowEdges.length - 1)]!;
   return { cell, x, y, width: right - x, height: bottom - y };
 }
 

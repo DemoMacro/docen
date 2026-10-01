@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   tableCellAt,
   tableCellNearAt,
+  tableSelectionRects,
   tableSelectionCells,
   tableSelectionFor,
   type TableSelectionView,
@@ -38,6 +39,20 @@ describe("pptx table selection", () => {
     expect(tableCellAt(member, 41, 31)?.cell).toEqual({ row: 0, col: 1, spanW: 2, spanH: 1 });
     expect(tableCellAt(member, 21, 51)?.cell).toEqual({ row: 1, col: 0, spanW: 2, spanH: 1 });
     expect(tableCellAt(member, 10, 40)).toBeNull();
+    expect(
+      tableSelectionRects(member, {
+        anchor: { row: 0, col: 0 },
+        head: { row: 0, col: 0 },
+      }),
+    ).toEqual([
+      {
+        cell: { row: 0, col: 0, spanW: 1, spanH: 1 },
+        x: 20,
+        y: 30,
+        width: 10,
+        height: 10,
+      },
+    ]);
   });
 
   it("extends a cross-cell drag across whole merged slots", () => {
