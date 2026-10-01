@@ -460,6 +460,7 @@ class DocenPresentation extends AddinHost {
   #onlinePictureDialog: HTMLDialogElement | null = null;
   #themesDialog: HTMLDialogElement | null = null;
   #variantsDialog: HTMLDialogElement | null = null;
+  #layoutDialog: HTMLDialogElement | null = null;
   #langObserver?: MutationObserver;
   #unsubLang?: () => void;
   #scrollRaf?: number;
@@ -703,6 +704,19 @@ class DocenPresentation extends AddinHost {
     this.#selection = null;
     this.#history.clear();
     this.#notesSlideIndex = 0;
+    // Transient dialogs hold closures over the previous deck's model — the
+    // swap would leave them editing a detached copy.
+    for (const dialog of this.shadowRoot?.querySelectorAll<HTMLDialogElement>("dialog[open]") ?? [])
+      dialog.close();
+    this.#symbolDialog = null;
+    this.#onlinePictureDialog = null;
+    this.#sectionDialog = null;
+    this.#headerFooterDialog = null;
+    this.#themesDialog = null;
+    this.#variantsDialog = null;
+    this.#layoutDialog = null;
+    this.#wordArtDialog = null;
+    this.#spellDialog = null;
     this.#syncNotesPane(0);
     this.#pres = projectPresentation(pres);
     this.#changedSlides = undefined;
@@ -896,6 +910,7 @@ class DocenPresentation extends AddinHost {
     else if (name === "header-footer") this.#openHeaderFooterDialog();
     else if (name === "themes") this.#openThemesDialog();
     else if (name === "variants") this.#openVariantsDialog();
+    else if (name === "layout") this.#openLayoutPanel();
     else if (name === "reset") this.#resetSlideToLayout();
     else if (name === "video" || name === "audio") this.#pickMedia();
     else if (name === "select") this.#toggleSelectionPane();
@@ -2570,6 +2585,95 @@ class DocenPresentation extends AddinHost {
       },
     });
     this.#reproject();
+  }
+
+  /** PowerPoint's Layout gallery: switching the slide's layout also re-seats
+   *  the placeholders it inherits (the same walk Reset runs). The gallery
+   *  lists the master's real layouts — the compiler keys slide→layout by
+   *  type/name, so offering absent layouts would silently keep the old part. */
+  #openLayoutPanel(): void {
+    if (!this.#pres || this.#layoutDialog?.open) return;
+    const presJson = this.#presJson;
+    const slideIndex = this.#activeSlideIndex();
+    const slide = presJson?.slides?.[slideIndex];
+    if (!presJson || !slide) return;
+    const master =
+      presJson.masters?.find((m) => m.name === (slide.master ?? m.name)) ?? presJson.masters?.[0];
+    const fromMaster = (master?.layouts ?? [])
+      .map((candidate) => ({ key: candidate.type ?? candidate.name ?? "", name: candidate.name }))
+      .filter((candidate) => candidate.key !== "");
+    const LAYOUTS =
+      fromMaster.length > 0
+        ? fromMaster
+        : [
+            "title",
+            "titleOnly",
+            "blank",
+            "text",
+            "twoColumnText",
+            "object",
+            "sectionHeader",
+            "twoObjects",
+            "objectAndText",
+            "pictureText",
+            "clipArtAndText",
+            "twoTextAndTwoObjects",
+            "verticalText",
+            "verticalTitleAndText",
+            "chart",
+            "table",
+          ].map((key) => ({ key, name: undefined as string | undefined }));
+    const dialog = document.createElement("dialog");
+    dialog.className = "insert-dialog";
+    dialog.innerHTML = `
+      <div class="dialog-head"><strong>${escapeHtml(t("ppt.layout.title", this))}</strong><button data-dialog-close>×</button></div>
+      <div class="dialog-body"><div class="layout-grid">
+        ${LAYOUTS.map(
+          (layout) => `
+          <button class="layout-card${slide.layout === layout.key ? " current" : ""}" data-layout="${escapeHtml(layout.key)}">
+            <span class="layout-name">${escapeHtml(layout.name ?? t(`ppt.layout.type.${layout.key}`, this))}</span>
+          </button>`,
+        ).join("")}
+      </div></div>
+      <div class="dialog-actions"><button data-dialog-cancel>${escapeHtml(t("ppt.dialog.cancel", this))}</button></div>
+    `;
+    dialog.addEventListener("click", (event) => {
+      const target = event.target as HTMLElement;
+      if (target.closest("[data-dialog-close]") || target.closest("[data-dialog-cancel]"))
+        return dialog.close();
+      const type = target.closest("[data-layout]")?.getAttribute("data-layout") ?? undefined;
+      if (!type || type === slide.layout) return;
+      const before = slide.layout;
+      const apply = (value: string | undefined): void => {
+        if (value) slide.layout = value;
+        else delete slide.layout;
+      };
+      const reseat = (): void => {
+        const target = master?.layouts?.find(
+          (candidate) => candidate.type === slide.layout || candidate.name === slide.layout,
+        );
+        for (const item of resetSlidePlaceholders(slide, target, master)) {
+          Object.assign(item.child.shape, item.after);
+        }
+      };
+      apply(type);
+      reseat();
+      this.#pushEdit({
+        undo: () => {
+          apply(before);
+          this.#reproject(slideIndex);
+        },
+        redo: () => {
+          apply(type);
+          reseat();
+          this.#reproject(slideIndex);
+        },
+      });
+      this.#reproject(slideIndex);
+      dialog.close();
+    });
+    this.#showModalDialog(dialog, () => (this.#layoutDialog = null));
+    this.#layoutDialog = dialog;
   }
 
   /** Word's Reset: every placeholder child returns to the inherited

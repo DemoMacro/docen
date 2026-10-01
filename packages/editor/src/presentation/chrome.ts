@@ -574,6 +574,29 @@ export const presentationStyles = css`
     font-size: 12px;
     opacity: 0.7;
   }
+  .layout-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+  }
+  .layout-card {
+    padding: 10px 6px;
+    border: 1px solid var(--docen-color-divider, #d1d1d1);
+    border-radius: 6px;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    text-align: center;
+    font-size: 12px;
+  }
+  .layout-card:hover {
+    border-color: var(--docen-color-primary, #2b579a);
+  }
+  .layout-card.current {
+    border-color: var(--docen-color-primary, #2b579a);
+    color: var(--docen-color-primary, #2b579a);
+    font-weight: 600;
+  }
   dialog.comments-dialog {
     width: min(440px, calc(100vw - 48px));
     padding: 0;
