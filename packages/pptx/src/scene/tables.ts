@@ -106,9 +106,10 @@ export function tableMember(
   const style = resolveTableStyle(table, context.themeColors, context.tableStyles);
 
   // Declared column widths win; a table without them splits the frame evenly.
-  const widths = table.columnWidths?.length
-    ? table.columnWidths.map((w) => t.sx * emuOf(w))
-    : Array.from({ length: nCols }, () => (t.sx * emuOf(table.width)) / Math.max(1, nCols));
+  const widths =
+    table.columnWidths?.length === nCols
+      ? table.columnWidths.map((w) => t.sx * emuOf(w))
+      : Array.from({ length: nCols }, () => (t.sx * emuOf(table.width)) / Math.max(1, nCols));
 
   const frameBorders = table.borders;
   const nRows = table.rows.length;

@@ -1372,6 +1372,34 @@ describe("table style projection", () => {
     expect(table.rows.map((row) => row.heightPx)).toEqual([0, 0]);
   });
 
+  it("splits the frame over the walked grid when declared columns mismatch", () => {
+    const { slides } = project({
+      slides: [
+        {
+          children: [
+            tableChild({
+              ...grid,
+              columnWidths: [952500],
+              rows: [
+                {
+                  height: 952500,
+                  cells: [{ text: "wide", columnSpan: 2 }, { text: "right" }],
+                },
+              ],
+            }),
+          ],
+        },
+      ],
+    });
+    const member = slides[0]!.members[0]!;
+    if (member.kind !== "table") throw new Error("expected a table member");
+    const table = member.table as { columnWidthsPx: number[] };
+    expect(table.columnWidthsPx).toHaveLength(3);
+    expect(table.columnWidthsPx[0]).toBeCloseTo(200 / 3, 7);
+    expect(table.columnWidthsPx[1]).toBeCloseTo(200 / 3, 7);
+    expect(table.columnWidthsPx[2]).toBeCloseTo(200 / 3, 7);
+  });
+
   it("renders an unstyled table as PowerPoint's plain grid", () => {
     const table = tableOf({
       masters: [{ theme: { colorScheme: { accent1: "FF0000" } } }] as never,
