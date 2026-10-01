@@ -336,6 +336,8 @@ const WIRED_COMMANDS: ReadonlySet<string> = new Set([
   "slide-number",
   "date-time",
   "select",
+  "draw-select",
+  "draw-eraser",
   "smartart",
   "symbol",
   "wordart",
@@ -365,6 +367,7 @@ class DocenPresentation extends AddinHost {
   #overlay: DrawingOverlay | null = null;
   #tableOverlay: TableSelectionOverlay | null = null;
   #shapeDrawer: ShapeDrawer | null = null;
+  #drawTool: "select" | "eraser" | null = null;
   #mediaPlayer: MediaPlayer | null = null;
   /** The selected object: the slide child, or — with `member` set — the
    *  group-nested member it descended into (child indexes under the group). */
@@ -872,6 +875,8 @@ class DocenPresentation extends AddinHost {
     else if (name === "online-picture") this.#openOnlinePictureDialog();
     else if (name === "video" || name === "audio") this.#pickMedia();
     else if (name === "select") this.#toggleSelectionPane();
+    else if (name === "draw-select") this.#armDrawTool("select");
+    else if (name === "draw-eraser") this.#armDrawTool("eraser");
     else if (TEXT_FORMAT_COMMANDS.has(name)) this.#applyTextFormat(name, event.detail?.value);
   };
 
@@ -2382,6 +2387,61 @@ class DocenPresentation extends AddinHost {
     this.#shapeDrawer?.arm(geometry ?? "rect");
   }
 
+  /** Draw-tab tools own the surface cursor: select restores the normal
+   *  gestures, eraser removes top-level objects under a click or drag. */
+  #armDrawTool(tool: "select" | "eraser"): void {
+    this.#drawTool = tool;
+    this.#shapeDrawer?.disarm();
+    this.#stage.style.cursor = tool === "eraser" ? "cell" : "";
+  }
+
+  /** Erase every top-level object the drag touches; each removal records its
+   *  own undo step, matching PowerPoint's stroke-wise object erasure. */
+  #startEraser(event: PointerEvent): void {
+    const presJson = this.#presJson;
+    if (!presJson) return;
+    const point = this.#stagePointOf(event);
+    if (!point) return;
+    event.preventDefault();
+    const eraseAt = (x: number, y: number): void => {
+      const slide = presJson.slides?.[point.slide];
+      if (!slide) return;
+      const hit = hitSlide(slideHits(slide), x, y);
+      if (hit < 0) return;
+      const selection = this.#selection;
+      const children = slide.children;
+      const child = children?.[hit];
+      if (!children || !child) return;
+      children.splice(hit, 1);
+      if (selection?.slide === point.slide && selection.child === hit) this.#select(null);
+      this.#pushEdit({
+        undo: () => {
+          children.splice(hit, 0, child);
+          this.#reproject(point.slide);
+        },
+        redo: () => {
+          children.splice(hit, 1);
+          this.#reproject(point.slide);
+        },
+      });
+      this.#reproject(point.slide);
+    };
+    eraseAt(point.x, point.y);
+    const onMove = (move: PointerEvent): void => {
+      const next = this.#stagePointOf(move);
+      if (!next || next.slide !== point.slide) return;
+      eraseAt(next.x, next.y);
+    };
+    const stop = (): void => {
+      document.removeEventListener("pointermove", onMove, { capture: true });
+      document.removeEventListener("pointerup", stop, { capture: true });
+      document.removeEventListener("pointercancel", stop, { capture: true });
+    };
+    document.addEventListener("pointermove", onMove, { capture: true });
+    document.addEventListener("pointerup", stop, { capture: true });
+    document.addEventListener("pointercancel", stop, { capture: true });
+  }
+
   /** The color picker's pick: paint the active slide's background solid.
    *  Swatches arrive as color:RRGGBB; anything else (no-fill tokens) has no
    *  background meaning yet and is dropped. */
@@ -3816,6 +3876,7 @@ class DocenPresentation extends AddinHost {
       return;
     }
     if (this.#shapeDrawer?.armed && this.#shapeDrawer.startFromPointer(event)) return;
+    if (this.#drawTool === "eraser" && event.button === 0) return this.#startEraser(event);
     const presJson = this.#presJson;
     if (!presJson || event.button !== 0) return;
     const point = this.#stagePointOf(event);
@@ -3952,6 +4013,7 @@ class DocenPresentation extends AddinHost {
       this.#shapeDrawer.disarm();
       return;
     }
+    if (event.key === "Escape" && this.#drawTool) return this.#armDrawTool("select");
     if (event.key === "Escape" && this.#selection) {
       // A member selection climbs back to its group before leaving it.
       if (this.#selection.member) {
