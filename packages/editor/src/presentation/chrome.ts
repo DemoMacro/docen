@@ -104,6 +104,7 @@ export const presentationStyles = css`
      the text transparent prevents ghost-doubling over the projected text. */
   .table-cell-editor {
     background: transparent;
+    border: 0;
     box-shadow: none;
     color: transparent;
   }

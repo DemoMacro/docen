@@ -1392,7 +1392,13 @@ class DocenPresentation extends AddinHost {
    *  in-place cell edit): insets, face, paragraph alignment and vertical
    *  anchor come from the painted cell; the text writes back on exit, and a
    *  click on another cell moves the session there. */
-  #enterTableCellEditing(x: number, y: number, range?: TableSelectionRange): void {
+  #enterTableCellEditing(
+    x: number,
+    y: number,
+    range?: TableSelectionRange,
+    caret?: { clientX: number; clientY: number },
+    selectAll = false,
+  ): void {
     const found = this.#tableMemberOf();
     if (!found) return;
     const rect = this.#cellRectAt(found.member, x, y);
@@ -1485,7 +1491,14 @@ class DocenPresentation extends AddinHost {
       editor.scrollTop = 0;
     };
     editor.addEventListener("keydown", (event) => {
-      // Escape leaves the edit (committing); typing keys stay in the textarea.
+      // Escape leaves the edit (committing); Tab walks cells like DOCX and
+      // every other key stays in the textarea's native text session.
+      if (event.key === "Tab") {
+        event.stopPropagation();
+        event.preventDefault();
+        this.#moveTableCellEditor(event.shiftKey ? -1 : 1);
+        return;
+      }
       if (event.key === "Escape") {
         event.stopPropagation();
         this.#exitTextEditing(true);
@@ -1519,7 +1532,9 @@ class DocenPresentation extends AddinHost {
     this.#canvasHost().append(editor);
     syncLayout();
     editor.focus();
-    editor.select();
+    if (selectAll) editor.select();
+    else if (caret) this.#placeTableCellCaret(editor, caret.clientX, caret.clientY);
+    else editor.setSelectionRange(editor.value.length, editor.value.length);
     this.#textEditor = editor;
     this.#tableEdit = { row: cell.row, col: cell.col };
     this.#tableEditBefore = structuredClone(source);
@@ -1584,13 +1599,68 @@ class DocenPresentation extends AddinHost {
 
   /** A click on another cell of the table under edit: commit the current
    *  cell and float the editor over the new one (PowerPoint's cell hop). */
-  #moveTableCellEditing(x: number, y: number, range?: TableSelectionRange): void {
+  #moveTableCellEditing(
+    x: number,
+    y: number,
+    range?: TableSelectionRange,
+    options?: { caret?: { clientX: number; clientY: number }; selectAll?: boolean },
+  ): void {
     const found = this.#tableMemberOf();
     const rect = found ? this.#cellRectAt(found.member, x, y) : null;
     if (!rect) return this.#exitTextEditing(true);
     if (this.#tableEdit?.row === rect.cell.row && this.#tableEdit.col === rect.cell.col) return;
     this.#exitTextEditing(true);
-    this.#enterTableCellEditing(x, y, range);
+    this.#enterTableCellEditing(x, y, range, options?.caret, options?.selectAll);
+  }
+
+  /** DOCX's Tab/Shift+Tab: move to the next/previous origin cell and select
+   *  that cell's content so typing replaces it. */
+  #moveTableCellEditor(delta: number): void {
+    const found = this.#tableMemberOf();
+    const at = this.#tableEdit;
+    if (!found || !at) return;
+    const origins = tableGridOf(found.table).origins;
+    const current = origins.findIndex((origin) => origin.row === at.row && origin.col === at.col);
+    const target = origins[current + delta];
+    if (!target) return this.#exitTextEditing(true);
+    const point = this.#tableCellCenter(found.member, target);
+    this.#moveTableCellEditing(point.x, point.y, undefined, { selectAll: true });
+  }
+
+  /** A grid cell's slide-local center — enough for the origin-resolving cell
+   *  hit test, including merged cells. */
+  #tableCellCenter(
+    member: TableMemberView,
+    cell: { row: number; col: number; spanW: number; spanH: number },
+  ): { x: number; y: number } {
+    const left = member.table.columnWidthsPx
+      .slice(0, cell.col)
+      .reduce((sum, width) => sum + width, 0);
+    const width = member.table.columnWidthsPx
+      .slice(cell.col, cell.col + cell.spanW)
+      .reduce((sum, width) => sum + width, 0);
+    const top = member.table.rows.slice(0, cell.row).reduce((sum, row) => sum + row.heightPx, 0);
+    const height = member.table.rows
+      .slice(cell.row, cell.row + cell.spanH)
+      .reduce((sum, row) => sum + row.heightPx, 0);
+    return { x: member.x + left + width / 2, y: member.y + top + height / 2 };
+  }
+
+  /** Put the native textarea caret where the pointer met the canvas. The
+   *  browser resolves text offsets for the just-focused control; a fallback
+   *  leaves the caret at the text end rather than DOCX's odd select-all. */
+  #placeTableCellCaret(editor: HTMLTextAreaElement, clientX: number, clientY: number): void {
+    const position = document.caretPositionFromPoint?.(clientX, clientY);
+    if (position?.offsetNode === editor && typeof position.offset === "number") {
+      editor.setSelectionRange(position.offset, position.offset);
+      return;
+    }
+    const range = document.caretRangeFromPoint?.(clientX, clientY);
+    if (range?.startContainer === editor && typeof range.startOffset === "number") {
+      editor.setSelectionRange(range.startOffset, range.startOffset);
+      return;
+    }
+    editor.setSelectionRange(editor.value.length, editor.value.length);
   }
 
   /** Cross-cell drag: the anchor stays where the press started and every new
@@ -1614,7 +1684,14 @@ class DocenPresentation extends AddinHost {
       if (!head) return;
       if (head.cell.row === anchor.row && head.cell.col === anchor.col) return;
       this.#setTableSelection({ anchor, head: head.cell });
-      this.#moveTableCellEditing(head.x + 1, head.y + 1, { anchor, head: head.cell });
+      this.#moveTableCellEditing(
+        head.x + 1,
+        head.y + 1,
+        { anchor, head: head.cell },
+        {
+          caret: { clientX: move.clientX, clientY: move.clientY },
+        },
+      );
     };
     const onUp = (): void => {
       document.removeEventListener("pointermove", onMove);
@@ -2957,7 +3034,9 @@ class DocenPresentation extends AddinHost {
           this.#setTableSelection({ anchor: rect.cell, head: rect.cell });
           this.#startTableCellDrag(event, table);
         }
-        this.#moveTableCellEditing(point.x, point.y);
+        this.#moveTableCellEditing(point.x, point.y, undefined, {
+          caret: { clientX: event.clientX, clientY: event.clientY },
+        });
       }
       return;
     }
@@ -2980,7 +3059,10 @@ class DocenPresentation extends AddinHost {
       if (!table || !rect) return;
       event.preventDefault();
       this.#setTableSelection({ anchor: rect.cell, head: rect.cell });
-      this.#enterTableCellEditing(point.x, point.y);
+      this.#enterTableCellEditing(point.x, point.y, undefined, {
+        clientX: event.clientX,
+        clientY: event.clientY,
+      });
       this.#startTableCellDrag(event, table);
       return;
     }
@@ -3022,13 +3104,20 @@ class DocenPresentation extends AddinHost {
       const target =
         child >= 0 ? this.#presJson!.slides?.[point.slide]?.children?.[child] : undefined;
       if (child >= 0 && target && "table" in target)
-        return this.#enterTableCellEditing(point.x, point.y);
+        return this.#enterTableCellEditing(point.x, point.y, undefined, {
+          clientX: event.clientX,
+          clientY: event.clientY,
+        });
       // A group's table member opens its cell edit — the first click of the
       // double-click already descended into the member.
       if (child >= 0 && target && "group" in target) {
         const hit = memberAt(target, point.x, point.y);
         const leaf = hit && this.#childAt(target, hit.path);
-        if (hit && leaf && "table" in leaf) return this.#enterTableCellEditing(point.x, point.y);
+        if (hit && leaf && "table" in leaf)
+          return this.#enterTableCellEditing(point.x, point.y, undefined, {
+            clientX: event.clientX,
+            clientY: event.clientY,
+          });
       }
     }
     this.#enterTextEditing();
