@@ -97,6 +97,7 @@ import {
   makeTextBox,
   makeFieldBox,
   makeLine,
+  makePenStroke,
   makeMediaFrame,
   makeSmartArt,
   makeChart,
@@ -347,6 +348,7 @@ const WIRED_COMMANDS: ReadonlySet<string> = new Set([
   "select",
   "draw-select",
   "draw-eraser",
+  "draw-pen",
   "smartart",
   "chart",
   "symbol",
@@ -379,7 +381,7 @@ class DocenPresentation extends AddinHost {
   #overlay: DrawingOverlay | null = null;
   #tableOverlay: TableSelectionOverlay | null = null;
   #shapeDrawer: ShapeDrawer | null = null;
-  #drawTool: "select" | "eraser" | null = null;
+  #drawTool: "select" | "eraser" | "pen" | null = null;
   #mediaPlayer: MediaPlayer | null = null;
   /** The selected object: the slide child, or — with `member` set — the
    *  group-nested member it descended into (child indexes under the group). */
@@ -920,6 +922,7 @@ class DocenPresentation extends AddinHost {
     else if (name === "select") this.#toggleSelectionPane();
     else if (name === "draw-select") this.#armDrawTool("select");
     else if (name === "draw-eraser") this.#armDrawTool("eraser");
+    else if (name === "draw-pen") this.#armDrawTool("pen");
     else if (TEXT_FORMAT_COMMANDS.has(name)) this.#applyTextFormat(name, event.detail?.value);
   };
 
@@ -3068,10 +3071,70 @@ class DocenPresentation extends AddinHost {
 
   /** Draw-tab tools own the surface cursor: select restores the normal
    *  gestures, eraser removes top-level objects under a click or drag. */
-  #armDrawTool(tool: "select" | "eraser"): void {
+  #armDrawTool(tool: "select" | "eraser" | "pen"): void {
     this.#drawTool = tool;
     this.#shapeDrawer?.disarm();
-    this.#stage.style.cursor = tool === "eraser" ? "cell" : "";
+    this.#stage.style.cursor = tool === "eraser" ? "cell" : tool === "pen" ? "crosshair" : "";
+  }
+
+  /** Pen captures a literal point sequence and commits one OOXML custGeom
+   *  shape; the preview is a throwaway SVG over the canvas, while the model
+   *  only sees the real vector freeform at pointer-up. */
+  #startPen(event: PointerEvent): void {
+    const pres = this.#pres;
+    const start = this.#stagePointOf(event);
+    if (!pres || !start) return;
+    event.preventDefault();
+    const points = [{ x: start.x, y: start.y }];
+    const host = this.#canvasHost();
+    const stageRect = this.#stage.getBoundingClientRect();
+    const hostRect = host.getBoundingClientRect();
+    const scale = stageRect.width / pres.widthPx;
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    svg.append(path);
+    Object.assign(svg.style, {
+      position: "absolute",
+      left: `${stageRect.left - hostRect.left}px`,
+      top: `${stageRect.top - hostRect.top + (start.slide * (pres.heightPx + SLIDE_GAP_PX) + SLIDE_GAP_PX) * scale}px`,
+      width: `${pres.widthPx * scale}px`,
+      height: `${pres.heightPx * scale}px`,
+      overflow: "visible",
+      pointerEvents: "none",
+      zIndex: "30",
+    } satisfies Partial<CSSStyleDeclaration>);
+    Object.assign(path.style, {
+      fill: "none",
+      stroke: "#262626",
+      strokeWidth: `${1.333 * scale}px`,
+      strokeLinecap: "round",
+      strokeLinejoin: "round",
+    } satisfies Partial<CSSStyleDeclaration>);
+    host.append(svg);
+    const paint = (): void => {
+      path.setAttribute(
+        "d",
+        points.map((point, index) => `${index ? "L" : "M"} ${point.x} ${point.y}`).join(" "),
+      );
+    };
+    paint();
+    const onMove = (move: PointerEvent): void => {
+      const next = this.#stagePointOf(move);
+      if (!next || next.slide !== start.slide) return;
+      points.push({ x: next.x, y: next.y });
+      paint();
+    };
+    const stop = (): void => {
+      document.removeEventListener("pointermove", onMove, { capture: true });
+      document.removeEventListener("pointerup", stop, { capture: true });
+      document.removeEventListener("pointercancel", stop, { capture: true });
+      svg.remove();
+      const stroke = makePenStroke(points);
+      if (stroke) this.#insertChild(stroke, start.slide);
+    };
+    document.addEventListener("pointermove", onMove, { capture: true });
+    document.addEventListener("pointerup", stop, { capture: true });
+    document.addEventListener("pointercancel", stop, { capture: true });
   }
 
   /** Erase every top-level object the drag touches; each removal records its
@@ -4556,6 +4619,7 @@ class DocenPresentation extends AddinHost {
     }
     if (this.#shapeDrawer?.armed && this.#shapeDrawer.startFromPointer(event)) return;
     if (this.#drawTool === "eraser" && event.button === 0) return this.#startEraser(event);
+    if (this.#drawTool === "pen" && event.button === 0) return this.#startPen(event);
     const presJson = this.#presJson;
     if (!presJson || event.button !== 0) return;
     const point = this.#stagePointOf(event);

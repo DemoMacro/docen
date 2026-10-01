@@ -16,6 +16,7 @@ import {
   makeTextBox,
   makeFieldBox,
   makeLine,
+  makePenStroke,
   makeMediaFrame,
   makeSmartArt,
   makeChart,
@@ -593,6 +594,51 @@ describe("makeShape", () => {
     expect(shape.y).toBe(70 * EMU_PER_PX);
     expect(shape.width).toBe(160 * EMU_PER_PX);
     expect(shape.height).toBe(90 * EMU_PER_PX);
+  });
+});
+
+describe("makePenStroke", () => {
+  it("writes a literal freeform custGeom path", () => {
+    const { shape } = makePenStroke([
+      { x: 20, y: 30 },
+      { x: 80, y: 90 },
+    ]) as { shape: ShapeVariant };
+    expect(shape.x).toBe(20 * EMU_PER_PX);
+    expect(shape.y).toBe(30 * EMU_PER_PX);
+    expect(shape.width).toBe(60 * EMU_PER_PX);
+    expect(shape.height).toBe(60 * EMU_PER_PX);
+    const geometry = (
+      shape.properties as {
+        customGeometry: {
+          pathList: {
+            w: number;
+            h: number;
+            fill: string;
+            stroke: boolean;
+            commands: { command: string; point?: { x: string; y: string } }[];
+          }[];
+        };
+      }
+    ).customGeometry;
+    const path = geometry.pathList[0]!;
+    expect(path).toMatchObject({
+      w: 60 * EMU_PER_PX,
+      h: 60 * EMU_PER_PX,
+      fill: "none",
+      stroke: true,
+    });
+    expect(path.commands[0]).toMatchObject({
+      command: "moveTo",
+      point: { x: "0", y: "0" },
+    });
+    expect(path.commands[1]).toMatchObject({
+      command: "lineTo",
+      point: { x: String(60 * EMU_PER_PX), y: String(60 * EMU_PER_PX) },
+    });
+  });
+
+  it("rejects a tap without a stroke segment", () => {
+    expect(makePenStroke([{ x: 1, y: 2 }])).toBeNull();
   });
 });
 

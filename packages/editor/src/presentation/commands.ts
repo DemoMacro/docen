@@ -11,6 +11,7 @@ import type { ColorSchemeOptions, FontSchemeOptions } from "@office-open/core";
 // re-export surface doesn't carry them yet.
 import type {
   BulletOptions,
+  CustomGeometryOptions,
   NonVisualDrawingPropertiesOptions,
   ParagraphDescriptorOptions,
   ShapeType,
@@ -466,6 +467,53 @@ export function makeLine(preset: "line" | "straightConnector1", rect: ShapePlace
       x2: emu(rect.x + rect.w),
       y2: emu(rect.y + rect.h),
       properties: { outline: { width: "1pt", color: "808080" } },
+    },
+  };
+}
+
+/** PowerPoint's pen stroke: one literal custGeom path, so the ink stays a
+ *  vector shape and re-opens as a freeform instead of a rasterized picture. */
+export function makePenStroke(points: readonly { x: number; y: number }[]): SlideChild | null {
+  if (points.length < 2) return null;
+  const x = Math.min(...points.map((point) => point.x));
+  const y = Math.min(...points.map((point) => point.y));
+  const width = Math.max(...points.map((point) => point.x)) - x;
+  const height = Math.max(...points.map((point) => point.y)) - y;
+  const boxWidth = emu(Math.max(width, 1));
+  const boxHeight = emu(Math.max(height, 1));
+  const local = points.map((point) => ({
+    x: emu(point.x - x),
+    y: emu(point.y - y),
+  }));
+  const customGeometry: CustomGeometryOptions = {
+    pathList: [
+      {
+        w: boxWidth,
+        h: boxHeight,
+        fill: "none",
+        stroke: true,
+        extrusionOk: false,
+        commands: [
+          { command: "moveTo", point: { x: String(local[0]!.x), y: String(local[0]!.y) } },
+          ...local.slice(1).map((point) => ({
+            command: "lineTo" as const,
+            point: { x: String(point.x), y: String(point.y) },
+          })),
+        ],
+      },
+    ],
+  };
+  return {
+    shape: {
+      x: emu(x),
+      y: emu(y),
+      width: boxWidth,
+      height: boxHeight,
+      properties: {
+        customGeometry,
+        fill: { type: "none" },
+        outline: { width: 12700, color: "262626" },
+      },
     },
   };
 }

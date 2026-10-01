@@ -18,9 +18,10 @@ import {
   type LayoutDrawingShadow,
 } from "@docen/layout";
 import type { GeometryGuide } from "@office-open/core";
-import type { TextBodyOptions } from "@office-open/core/drawing";
+import type { CustomGeometryOptions, TextBodyOptions } from "@office-open/core/drawing";
 import type { ShapeOptions } from "@office-open/pptx";
 
+import { customGeometryOutlines } from "./custom-geometry";
 import { BOX_PRESETS, STRAIGHT_PRESETS, emuOf, geometryOf, type Xform } from "./geometry";
 import { outlineLineOf, shapeFillOf } from "./shape-fill";
 import { textBlocks, type TextFieldContext } from "./text";
@@ -35,6 +36,7 @@ interface ShapePaint {
   h: number;
   preset?: string;
   adjustments?: readonly GeometryGuide[];
+  custom?: CustomGeometryOptions;
   fill?: LayoutDrawingFill;
   opacity?: number;
   line?: LayoutDrawingLine;
@@ -55,6 +57,7 @@ export function shapeMembers(
     w: t.sx * emuOf(shape.width),
     h: t.sy * emuOf(shape.height),
     ...geometryOf(shape.properties?.geometry),
+    ...(shape.properties?.customGeometry ? { custom: shape.properties.customGeometry } : {}),
     ...shapeFillOf(
       shape.properties?.fill,
       t.sx * emuOf(shape.width),
@@ -83,6 +86,7 @@ export function shapeMembers(
     h,
     preset,
     adjustments,
+    custom,
     fill,
     opacity,
     line,
@@ -92,6 +96,25 @@ export function shapeMembers(
   } = paint;
 
   // Box presets (or none) paint as the plain shape member the renderer knows.
+  if (custom) {
+    const customOutlines = customGeometryOutlines(custom, w, h);
+    if (customOutlines.length > 0) {
+      return customOutlines.map((outline) => ({
+        kind: "path" as const,
+        x,
+        y,
+        width: w,
+        height: h,
+        d: outline.d,
+        ...(outline.fill && fill ? { fill } : {}),
+        ...(outline.fill && opacity != null ? { opacity } : {}),
+        ...(outline.stroke && line ? { line } : {}),
+        ...(shadow ? { shadow } : {}),
+        ...(rotation ? { rotation } : {}),
+        ...(cp ? { childPath: cp } : {}),
+      }));
+    }
+  }
   if (!preset || BOX_PRESETS.has(preset)) {
     return [
       {
@@ -110,6 +133,8 @@ export function shapeMembers(
       },
     ];
   }
+  // Custom geometry owns the silhouette before any preset fallback. Literal
+  // path coordinates expand directly; paths can fill, stroke, or both.
   // A straight line paints the box diagonal; the stroke's end arrows expand
   // into their own fill members beside it.
   if (STRAIGHT_PRESETS.has(preset)) {
@@ -187,16 +212,18 @@ function textBoxMember(
   paint: ShapePaint,
   context: TextFieldContext,
 ): LayoutDrawingMember {
-  const { w, h, preset, adjustments } = paint;
+  const { w, h, preset, adjustments, custom } = paint;
   const straight = preset != null && STRAIGHT_PRESETS.has(preset);
   // A non-box preset paints its evaluated silhouette under the text (a text
   // ellipse stays an ellipse); the fill layers merge into one d. A straight
   // line skips the evaluator — its d is the box diagonal.
   const outlines = straight
     ? [{ d: linePathData(w, h), fill: false, stroke: true }]
-    : preset && !BOX_PRESETS.has(preset)
-      ? presetShapePaths(preset, w, h, adjustments)
-      : undefined;
+    : custom
+      ? customGeometryOutlines(custom, w, h)
+      : preset && !BOX_PRESETS.has(preset)
+        ? presetShapePaths(preset, w, h, adjustments)
+        : undefined;
   const silhouette =
     outlines
       ?.filter((o) => o.fill)

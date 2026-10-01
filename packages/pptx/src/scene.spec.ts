@@ -186,6 +186,59 @@ describe("shapes", () => {
   });
 });
 
+describe("custom geometry", () => {
+  it("projects literal custGeom paths as scalable outlines", () => {
+    const { slides } = project({
+      slides: [
+        {
+          children: [
+            {
+              shape: {
+                x: 0,
+                y: 0,
+                width: 10 * EMU_PER_PX,
+                height: 5 * EMU_PER_PX,
+                properties: {
+                  customGeometry: {
+                    pathList: [
+                      {
+                        w: 10 * EMU_PER_PX,
+                        h: 5 * EMU_PER_PX,
+                        fill: "none",
+                        stroke: true,
+                        commands: [
+                          { command: "moveTo", point: { x: "0", y: "0" } },
+                          {
+                            command: "lineTo",
+                            point: { x: String(10 * EMU_PER_PX), y: String(5 * EMU_PER_PX) },
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  fill: { type: "none" },
+                  outline: { width: 12700, color: "262626" },
+                },
+              },
+            },
+          ],
+        },
+      ],
+    });
+    expect(slides[0]?.members).toEqual([
+      expect.objectContaining({
+        kind: "path",
+        x: 0,
+        y: 0,
+        width: 10,
+        height: 5,
+        d: expect.stringContaining("L 10.000 5.000"),
+        line: expect.objectContaining({ color: "262626", px: 4 / 3 }),
+      }),
+    ]);
+  });
+});
+
 describe("lines and connectors", () => {
   it("encodes endpoint direction in the diagonal", () => {
     const { slides } = project({

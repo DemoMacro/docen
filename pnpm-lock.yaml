@@ -166,11 +166,11 @@ importers:
         specifier: workspace:*
         version: link:../layout
       '@office-open/core':
-        specifier: 0.14.5
-        version: 0.14.5
+        specifier: 0.14.6
+        version: 0.14.6
       '@office-open/pptx':
-        specifier: 0.14.5
-        version: 0.14.5
+        specifier: 0.14.6
+        version: 0.14.6
 
   packages/pretext: {}
 
@@ -560,17 +560,27 @@ packages:
     resolution: {integrity: sha512-oN+QwyX7VSHotibwubG3kpzbwKrfnyR6OOO+3Nk/53ADL7FmgHHz4TgrbaYKvvOw09u6QTx0oiH1cNCIOuN0CQ==}
     engines: {node: '>= 20.19.0'}
 
+  '@noble/hashes@2.4.0':
+    resolution: {integrity: sha512-X5XaVWZIBCT7HHZGm5I7ZQXDwLG+bGXuSrMQAW+7Zvl87h1kmc1ZB1VSRJcpUfoUrGQp4Fkoxm5kZ+Ms+aW+eA==}
+    engines: {node: '>= 20.19.0'}
+
   '@office-open/core@0.14.5':
     resolution: {integrity: sha512-3GsM8I+8g5s4EkR9YDpwPCJGLsR14gxBa0DxaE8X+z39Mfc1xs/FCQcBE8sRP1t40ufMdG5yeCQDY9+KgKnV7A==}
+
+  '@office-open/core@0.14.6':
+    resolution: {integrity: sha512-2nYvbuNO6QXt/srix5a/VtbLsbm6ZjzsrWRFGpdU+ls8ywFiYX/bvtrSc7N5GhRDMvCDYuqTS8z+KQ3Jtvy/Qg==}
 
   '@office-open/docx@0.14.5':
     resolution: {integrity: sha512-Gh70MDb8Ub7GPfeN/AtTFGBchmyS533bo8L1TW9mESCEq4qqC3SId0E9uEK+ijFa9oPSX3MGMeLLdlZDdMnClw==}
 
-  '@office-open/pptx@0.14.5':
-    resolution: {integrity: sha512-bJ1FSsIyZD+ZL2QzhntgTWYZ4DM69rlAkFLAVtUklIOrzLCK1EItqbNQVbz5BYowuEWIlpn/orKMXpUuasZAOw==}
+  '@office-open/pptx@0.14.6':
+    resolution: {integrity: sha512-spU6sSbabrbANl+OKYCw3EPi4oL1vlXGvpt/RdU/fT40EEa2SI3akGE3TFloPfksi/gWwPbFYLOOl6WYpZFfsA==}
 
   '@office-open/xml@0.14.5':
     resolution: {integrity: sha512-GKtxGhzB3YObLx9deHVfdDK/haIbIH3RjjSJT1lMVtBNoHw2tRtvL6X2CLyacL1JDmHVTIrxlXjV5l+4ZIuRAw==}
+
+  '@office-open/xml@0.14.6':
+    resolution: {integrity: sha512-pGRBuwyS2piyofaTZbCfDszRL5Yma7g2fqBIxGV7R7Qoxzb3Jx8ToklS5iGKmrtBHuDxRMX12vRhuml0fgP5JA==}
 
   '@oxc-project/runtime@0.148.0':
     resolution: {integrity: sha512-0ExYgJZv8+nFuoV0T/xzX5ZyXFXwkHJFJg9LWTwhqgRLpe+IzBLirvyYKSdS8mPofTBKAjDYIA2o84xh5BHXew==}
@@ -2762,10 +2772,18 @@ snapshots:
 
   '@noble/hashes@2.3.0': {}
 
+  '@noble/hashes@2.4.0': {}
+
   '@office-open/core@0.14.5':
     dependencies:
       '@noble/hashes': 2.3.0
       '@office-open/xml': 0.14.5
+      fflate: 0.8.3
+
+  '@office-open/core@0.14.6':
+    dependencies:
+      '@noble/hashes': 2.4.0
+      '@office-open/xml': 0.14.6
       fflate: 0.8.3
 
   '@office-open/docx@0.14.5':
@@ -2773,12 +2791,14 @@ snapshots:
       '@office-open/core': 0.14.5
       '@office-open/xml': 0.14.5
 
-  '@office-open/pptx@0.14.5':
+  '@office-open/pptx@0.14.6':
     dependencies:
-      '@office-open/core': 0.14.5
-      '@office-open/xml': 0.14.5
+      '@office-open/core': 0.14.6
+      '@office-open/xml': 0.14.6
 
   '@office-open/xml@0.14.5': {}
+
+  '@office-open/xml@0.14.6': {}
 
   '@oxc-project/runtime@0.148.0': {}
 
