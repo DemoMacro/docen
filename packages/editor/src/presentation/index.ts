@@ -1198,6 +1198,12 @@ class DocenPresentation extends AddinHost {
   /** DOCX's hover pass: one table grip resolves and paints at a time, so the
    *  table no longer carries a permanent fence of invisible hit boxes. */
   readonly #onStagePointerMove = (event: PointerEvent): void => {
+    // A live cell edit owns the caret; the table-wide hover square would sit
+    // on top of the text session as an unrelated little frame.
+    if (this.#textEditor) {
+      this.#tableOverlay?.hover(Number.NaN, Number.NaN);
+      return;
+    }
     if (!this.#selection) return;
     const table = this.#tableMemberOf();
     const point = this.#stagePointOf(event);
@@ -1681,6 +1687,9 @@ class DocenPresentation extends AddinHost {
         // Typing collapses the block to the caret (Word's rule) — the
         // leftover highlights would otherwise ghost over the edited cell.
         if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
+          this.#clearSelectedTableCells();
+          editor.value = "";
+          this.#layoutTableCellEditor(editor);
           this.#setTableSelection(null);
         }
       }
@@ -2044,6 +2053,7 @@ class DocenPresentation extends AddinHost {
   #startTableCellDrag(
     event: PointerEvent,
     found: { slide: number; table: TableOptions; member: TableMemberView },
+    onTap?: () => void,
   ): void {
     if (!found) return;
     const origin = this.#tableEdit;
@@ -2072,6 +2082,7 @@ class DocenPresentation extends AddinHost {
       document.removeEventListener("pointerup", onUp, { capture: true });
       document.removeEventListener("pointercancel", onUp, { capture: true });
       this.#syncTableCellTextSelection();
+      if (!drag.moved) onTap?.();
     };
     document.addEventListener("pointermove", onMove, { capture: true });
     document.addEventListener("pointerup", onUp, { capture: true });
@@ -4760,6 +4771,17 @@ class DocenPresentation extends AddinHost {
       const rect = table ? this.#cellRectAt(table.member, point.x, point.y) : null;
       if (!table || !rect) return;
       event.preventDefault();
+      // With a live block selection, the press is Word's extend-selection
+      // gesture; only a release without movement collapses to a caret.
+      if (this.#tableSelection) {
+        this.#startTableCellDrag(event, table, () =>
+          this.#enterTableCellEditing(point.x, point.y, undefined, {
+            clientX: event.clientX,
+            clientY: event.clientY,
+          }),
+        );
+        return;
+      }
       this.#enterTableCellEditing(point.x, point.y, undefined, {
         clientX: event.clientX,
         clientY: event.clientY,
