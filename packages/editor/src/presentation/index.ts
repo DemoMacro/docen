@@ -137,7 +137,7 @@ import {
   slideFillStyle,
   textBoxFillStyle,
 } from "./text-overlay";
-import { textOf, writeText, type TextEditSource } from "./text-session";
+import { formatText, textOf, writeText, type TextEditSource } from "./text-session";
 // Side-effect: register the presentation translation tables.
 import "./i18n";
 
@@ -2643,6 +2643,16 @@ class DocenPresentation extends AddinHost {
    *  swaps the whole target back (geometry snapshots don't reach text); a
    *  command that changed nothing records nothing. */
   #applyTextFormat(name: string, value?: string): void {
+    // A live textarea's selection addresses styled ranges; capture it before
+    // the write-back/exit because focus changes can move the native selection.
+    const editor = this.#textEditor;
+    const selection =
+      editor == null
+        ? null
+        : {
+            start: editor.selectionStart ?? 0,
+            end: editor.selectionEnd ?? editor.selectionStart ?? 0,
+          };
     // Format lands on the committed text: an in-flight edit writes back
     // first, or the exit-time write-back would clobber the format.
     const at = this.#tableEdit;
@@ -2655,38 +2665,59 @@ class DocenPresentation extends AddinHost {
     const target = cell ?? body!;
     const paragraphs = cell ? cellParagraphsOf(cell) : bodyParagraphsOf(body!);
     const before = structuredClone(target);
-    switch (name) {
-      case "bold":
-        toggleRunFlag(paragraphs, "bold");
-        break;
-      case "italic":
-        toggleRunFlag(paragraphs, "italic");
-        break;
-      case "underline":
-        toggleRunStyle(paragraphs, "underline", "single");
-        break;
-      case "strike":
-        toggleRunStyle(paragraphs, "strike", "singleStrike");
-        break;
-      case "font-face":
-        if (value) setRunFont(paragraphs, value);
-        break;
-      case "font-size": {
-        const size = Number(value);
-        if (Number.isFinite(size) && size > 0) setRunSize(paragraphs, size);
-        break;
-      }
-      default: {
-        const alignment = ALIGNMENTS.get(name);
-        if (alignment) setParagraphAlignment(paragraphs, alignment);
-        else if (name === "list") toggleBullet(paragraphs);
-        else if (name === "numbering") toggleNumbering(paragraphs);
-        else if (name === "line-spacing") {
-          const percent = LINE_SPACING_OF.get(value ?? "");
-          if (percent != null) setLineSpacingPercent(paragraphs, percent);
+    let applied = false;
+    if (selection) {
+      const source: TextEditSource = cell
+        ? { kind: "cell", cell }
+        : { kind: "shape", child: (child as Extract<SlideChild, { shape: unknown }>).shape };
+      applied = formatText(source, selection.start, selection.end, name, value);
+    } else {
+      switch (name) {
+        case "bold":
+          toggleRunFlag(paragraphs, "bold");
+          applied = true;
+          break;
+        case "italic":
+          toggleRunFlag(paragraphs, "italic");
+          applied = true;
+          break;
+        case "underline":
+          toggleRunStyle(paragraphs, "underline", "single");
+          applied = true;
+          break;
+        case "strike":
+          toggleRunStyle(paragraphs, "strike", "singleStrike");
+          applied = true;
+          break;
+        case "font-face":
+          if (value) setRunFont(paragraphs, value);
+          applied = Boolean(value);
+          break;
+        case "font-size": {
+          const size = Number(value);
+          if (Number.isFinite(size) && size > 0) setRunSize(paragraphs, size);
+          applied = Number.isFinite(size) && size > 0;
+          break;
+        }
+        default: {
+          const alignment = ALIGNMENTS.get(name);
+          if (alignment) setParagraphAlignment(paragraphs, alignment);
+          else if (name === "list") toggleBullet(paragraphs);
+          else if (name === "numbering") toggleNumbering(paragraphs);
+          else if (name === "line-spacing") {
+            const percent = LINE_SPACING_OF.get(value ?? "");
+            if (percent != null) setLineSpacingPercent(paragraphs, percent);
+          }
+          applied = Boolean(
+            alignment ||
+            name === "list" ||
+            name === "numbering" ||
+            LINE_SPACING_OF.has(value ?? ""),
+          );
         }
       }
     }
+    if (!applied) return;
     if (JSON.stringify(target) === JSON.stringify(before)) return;
     const after = structuredClone(target);
     const restore = (snap: typeof before): void => {
