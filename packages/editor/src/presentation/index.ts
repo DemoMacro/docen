@@ -303,9 +303,11 @@ const WIRED_COMMANDS: ReadonlySet<string> = new Set([
   "replace",
   "notes",
   "normal",
+  "slide-sorter",
   "transition",
   "effect-options",
   "apply-to-all",
+  "animation-pane",
   "hyperlink",
   "from-beginning",
   "from-current",
@@ -371,6 +373,9 @@ class DocenPresentation extends AddinHost {
   } | null = null;
   /** Drawing gridlines visibility (a view state — not part of the deck). */
   #gridlines = false;
+  /** The right task pane's current surface: PowerPoint's Selection and
+   *  Animation panes share the same docking edge. */
+  #rightPane: "animation" | "select" | null = null;
   readonly #history = new DeckHistory();
   /** Changed projected slides since the previous paint; undefined forces a
    *  full paint. The next render consumes and clears it. */
@@ -389,6 +394,11 @@ class DocenPresentation extends AddinHost {
   #showingSlide = 0;
   #savedZoom = 100;
   #showWheelAt = 0;
+  /** PowerPoint's Slide Sorter: a modal browser over the existing thumbnail
+   *  paints, with drag-and-drop deck reordering. */
+  #slideSorter: HTMLDialogElement | null = null;
+  #sorterDragIndex = -1;
+  #sorterDragged = false;
   #langObserver?: MutationObserver;
   #unsubLang?: () => void;
   #scrollRaf?: number;
@@ -797,7 +807,10 @@ class DocenPresentation extends AddinHost {
     else if (name === "find" || name === "replace") this.#findDialog()?.show();
     else if (name === "paste") void this.#pasteFromClipboard();
     else if (name === "notes") this.#toggleNotes();
-    else if (name === "normal") this.#enterNormalView();
+    else if (name === "normal") {
+      this.#slideSorter?.close();
+      this.#enterNormalView();
+    } else if (name === "slide-sorter") this.#toggleSlideSorter();
     else if (name === "transition" && event.detail?.value) this.#setTransition(event.detail.value);
     else if (name === "effect-options" && event.detail?.value) {
       this.#setTransitionSpeed(event.detail.value);
@@ -807,7 +820,8 @@ class DocenPresentation extends AddinHost {
     else if (name === "from-current") this.#startShow("current");
     else if (name === "animate" || name === "add-animation") {
       this.#applyAnimation(event.detail?.value);
-    } else if (name === "slide-number" || name === "date-time") this.#insertFieldBox(name);
+    } else if (name === "animation-pane") this.#toggleAnimationPane();
+    else if (name === "slide-number" || name === "date-time") this.#insertFieldBox(name);
     else if (name === "smartart") this.#insertSmartArt();
     else if (name === "video" || name === "audio") this.#pickMedia();
     else if (name === "select") this.#toggleSelectionPane();
@@ -1930,6 +1944,7 @@ class DocenPresentation extends AddinHost {
     // step) rather than the step before — the user's intent either way.
     this.#exitTextEditing(true);
     this.#syncQat();
+    this.#renderSlideSorter();
   }
 
   #redo(): void {
@@ -1937,6 +1952,7 @@ class DocenPresentation extends AddinHost {
     this.#history.redo();
     this.#exitTextEditing(true);
     this.#syncQat();
+    this.#renderSlideSorter();
   }
 
   // ── Ribbon commands ──────────────────────────────────────────────────────
@@ -2406,6 +2422,124 @@ class DocenPresentation extends AddinHost {
     this.#syncNotesPane(this.#notesSlideIndex);
   }
 
+  // ── Slide Sorter ────────────────────────────────────────────────────────
+
+  /** Reorder deck slides as one reversible structural edit. Selection and
+   *  panes reset because every child index after the removal point moves. */
+  #moveSlide(from: number, to: number): void {
+    const slides = this.#presJson?.slides;
+    if (
+      !slides ||
+      from === to ||
+      from < 0 ||
+      to < 0 ||
+      from >= slides.length ||
+      to >= slides.length
+    )
+      return;
+    const before = slides.map((slide) => structuredClone(slide));
+    const [moved] = slides.splice(from, 1);
+    if (!moved) return;
+    slides.splice(to, 0, moved);
+    const after = slides.map((slide) => structuredClone(slide));
+    const restore = (value: SlideOptions[]): void => {
+      slides.splice(0, slides.length, ...structuredClone(value));
+      this.#select(null);
+      this.#reproject();
+    };
+    this.#pushEdit({ undo: () => restore(before), redo: () => restore(after) });
+    restore(after);
+  }
+
+  /** Open Slide Sorter over cropped thumbnails of the existing Leafer
+   *  paint. The thumbnails already share the deck's render loop, so this
+   *  avoids a second painter while staying visually faithful. */
+  #toggleSlideSorter(): void {
+    if (this.#slideSorter?.open) return this.#slideSorter.close();
+    const pres = this.#pres;
+    if (!pres || pres.slides.length === 0) return;
+    const source = this.shadowRoot?.querySelector<HTMLCanvasElement>(".thumb-stage canvas");
+    if (!source) return;
+    const dialog = document.createElement("dialog");
+    dialog.className = "slide-sorter";
+    dialog.innerHTML = `<div class="sorter-head"><strong>${escapeHtml(t("ppt.sorter.title", this))}</strong><button data-sorter-close>×</button></div><div class="sorter-grid"></div>`;
+    const grid = dialog.querySelector<HTMLElement>(".sorter-grid")!;
+    const ratio = source.width / Math.max(1, source.clientWidth);
+    const sourceSlide = pres.heightPx * this.#thumbScale * ratio;
+    const sourceGap = THUMB_GAP_PX * ratio;
+    const width = 240;
+    for (let index = 0; index < pres.slides.length; index += 1) {
+      const card = document.createElement("figure");
+      card.className = "sorter-card";
+      card.draggable = true;
+      card.dataset.sortIndex = String(index);
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = Math.round(width * (pres.heightPx / pres.widthPx));
+      canvas
+        .getContext("2d")
+        ?.drawImage(
+          source,
+          0,
+          index * (sourceSlide + sourceGap),
+          source.width,
+          sourceSlide,
+          0,
+          0,
+          canvas.width,
+          canvas.height,
+        );
+      const label = document.createElement("figcaption");
+      label.textContent = String(index + 1);
+      card.append(canvas, label);
+      grid.append(card);
+    }
+    dialog.addEventListener("dragstart", (event) => {
+      const card = (event.target as HTMLElement).closest<HTMLElement>("[data-sort-index]");
+      this.#sorterDragIndex = card ? Number(card.dataset.sortIndex) : -1;
+      this.#sorterDragged = false;
+    });
+    dialog.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      event.dataTransfer!.dropEffect = "move";
+    });
+    dialog.addEventListener("drop", (event) => {
+      event.preventDefault();
+      const target = (event.target as HTMLElement).closest<HTMLElement>("[data-sort-index]");
+      const to = target ? Number(target.dataset.sortIndex) : -1;
+      if (this.#sorterDragIndex >= 0 && to >= 0 && this.#sorterDragIndex !== to) {
+        this.#sorterDragged = true;
+        this.#moveSlide(this.#sorterDragIndex, to);
+        this.#renderSlideSorter();
+        return;
+      }
+      this.#renderSlideSorter();
+    });
+    dialog.addEventListener("click", (event) => {
+      if ((event.target as HTMLElement).closest("[data-sorter-close]")) return dialog.close();
+      const card = (event.target as HTMLElement).closest<HTMLElement>("[data-sort-index]");
+      if (!card || this.#sorterDragged) return;
+      this.#sorterDragged = false;
+      dialog.close();
+      this.#revealSlide(Number(card.dataset.sortIndex));
+    });
+    dialog.addEventListener("close", () => {
+      this.#slideSorter = null;
+      dialog.remove();
+    });
+    this.shadowRoot?.append(dialog);
+    this.#slideSorter = dialog;
+    dialog.showModal();
+  }
+
+  /** Refresh an open sorter after an undo/redo or a drag reorder. */
+  #renderSlideSorter(): void {
+    if (this.#slideSorter?.open) {
+      this.#slideSorter.close();
+      requestAnimationFrame(() => this.#toggleSlideSorter());
+    }
+  }
+
   // ── Transitions ──────────────────────────────────────────────────────────
 
   /** The gallery's pick on the active slide: the effect token lands as the
@@ -2514,6 +2648,7 @@ class DocenPresentation extends AddinHost {
     };
     this.#pushEdit({ undo: () => restore(before), redo: () => restore(after) });
     restore(after);
+    if (this.#rightPane === "animation") this.#renderAnimationPane();
   }
 
   // ── Slide show ───────────────────────────────────────────────────────────
@@ -2654,8 +2789,21 @@ class DocenPresentation extends AddinHost {
   #toggleSelectionPane(): void {
     const pane = this.#selectionPane();
     if (!pane) return;
-    pane.hidden = !pane.hidden;
-    if (!pane.hidden) this.#renderSelectionPane();
+    const show = pane.hidden || this.#rightPane !== "select";
+    this.#rightPane = show ? "select" : null;
+    pane.hidden = !show;
+    if (show) this.#renderSelectionPane();
+  }
+
+  /** PowerPoint's Animation Pane: the active slide's effects in play order,
+   * with target selection and order/delete operations. */
+  #toggleAnimationPane(): void {
+    const pane = this.#selectionPane();
+    if (!pane) return;
+    const show = pane.hidden || this.#rightPane !== "animation";
+    this.#rightPane = show ? "animation" : null;
+    pane.hidden = !show;
+    if (show) this.#renderAnimationPane();
   }
 
   /** The selection pane's row label: the cNvPr name when the child carries
@@ -2695,6 +2843,7 @@ class DocenPresentation extends AddinHost {
     const pane = this.#selectionPane();
     const list = this.selectList;
     if (!pane || pane.hidden || !list) return;
+    if (this.#rightPane === "animation") return this.#renderAnimationPane();
     const head = pane.querySelector<HTMLElement>(".select-head");
     if (head) head.textContent = t("ppt.select.title", this);
     const slide = this.#activeSlideIndex();
@@ -2711,8 +2860,80 @@ class DocenPresentation extends AddinHost {
       .join("");
   }
 
+  /** One pane row per animation entry: target label, localized effect, and
+   *  the compact move/delete controls PowerPoint shows on hover. */
+  #renderAnimationPane(): void {
+    const pane = this.#selectionPane();
+    const list = this.selectList;
+    if (!pane || pane.hidden || !list) return;
+    const head = pane.querySelector<HTMLElement>(".select-head");
+    if (head) head.textContent = t("ppt.animation.title", this);
+    const slide = this.#activeSlideIndex();
+    const host = this.#presJson?.slides?.[slide];
+    const children = host?.children ?? [];
+    const entries = Array.isArray(host?.animations) ? host!.animations! : [];
+    list.innerHTML = entries
+      .map((entry, index) => {
+        const target = children.findIndex(
+          (child) => nonVisualOf(child)?.name?.trim() === entry.shapeName?.trim(),
+        );
+        const label =
+          target >= 0
+            ? this.#childLabel(children[target]!, target).label
+            : (entry.shapeName ?? t("ppt.animation.unnamed", this));
+        const effect = t(`ppt.ribbon.animate.${entry.type}`, this);
+        return `<div class="select-row" data-child="${target}" data-animation="${index}"><span class="select-name"><strong>${escapeHtml(label)}</strong><br>${escapeHtml(effect)}</span><span class="pane-actions"><button data-animation-move="${index}" data-direction="-1" title="${escapeHtml(t("ppt.animation.move-up", this))}">↑</button><button data-animation-move="${index}" data-direction="1" title="${escapeHtml(t("ppt.animation.move-down", this))}">↓</button><button data-animation-delete="${index}" title="${escapeHtml(t("ppt.animation.delete", this))}">×</button></span></div>`;
+      })
+      .join("");
+  }
+
+  /** Reorder one animation as a reversible slide-level edit. PowerPoint's
+   *  arrows move the highlighted entry; no-op at either end. */
+  #moveAnimation(index: number, delta: number): void {
+    const slideIndex = this.#activeSlideIndex();
+    const host = this.#presJson?.slides?.[slideIndex];
+    const entries = host?.animations;
+    const to = index + delta;
+    if (!host || !Array.isArray(entries) || to < 0 || to >= entries.length) return;
+    const before = structuredClone(entries);
+    const after = structuredClone(entries);
+    [after[index], after[to]] = [after[to]!, after[index]!];
+    const restore = (value: SlideAnimation[]): void => {
+      host.animations = structuredClone(value);
+      this.#renderAnimationPane();
+    };
+    this.#pushEdit({ undo: () => restore(before), redo: () => restore(after) });
+    restore(after);
+  }
+
+  /** Remove one animation entry; a named target stays in the deck because
+   *  its cNvPr may also be referenced by other effects or add-ins. */
+  #deleteAnimation(index: number): void {
+    const slideIndex = this.#activeSlideIndex();
+    const host = this.#presJson?.slides?.[slideIndex];
+    const entries = host?.animations;
+    if (!host || !Array.isArray(entries) || index < 0 || index >= entries.length) return;
+    const before = structuredClone(entries);
+    const after = before.filter((_, i) => i !== index);
+    const restore = (value: SlideAnimation[]): void => {
+      if (value.length === 0) delete host.animations;
+      else host.animations = structuredClone(value);
+      this.#renderAnimationPane();
+    };
+    this.#pushEdit({ undo: () => restore(before), redo: () => restore(after) });
+    restore(after);
+  }
+
   readonly #onSelectListClick = (event: Event): void => {
     const target = event.target as HTMLElement;
+    const move = target.closest<HTMLElement>("[data-animation-move]");
+    if (move)
+      return this.#moveAnimation(
+        Number(move.dataset.animationMove),
+        Number(move.dataset.direction),
+      );
+    const remove = target.closest<HTMLElement>("[data-animation-delete]");
+    if (remove) return this.#deleteAnimation(Number(remove.dataset.animationDelete));
     const eye = target.closest<HTMLElement>("[data-eye]");
     if (eye) return this.#toggleChildHidden(Number(eye.dataset.eye));
     const row = target.closest<HTMLElement>("[data-child]");

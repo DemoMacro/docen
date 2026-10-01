@@ -163,6 +163,13 @@ export const presentationEn: AdditionalLanguage = {
     // --- Selection pane ---
     "ppt.select.title": "Selection Pane",
     "ppt.select.shape": "Shape",
+    // --- Animation pane ---
+    "ppt.animation.title": "Animation Pane",
+    "ppt.animation.unnamed": "Unnamed object",
+    "ppt.animation.move-up": "Move Earlier",
+    "ppt.animation.move-down": "Move Later",
+    "ppt.animation.delete": "Remove",
+    "ppt.sorter.title": "Slide Sorter",
     "ppt.select.picture": "Picture",
     "ppt.select.line": "Line",
     "ppt.select.connector": "Connector",
@@ -330,6 +337,13 @@ export const presentationZhCN: AdditionalLanguage = {
     // --- 选择窗格 ---
     "ppt.select.title": "选择窗格",
     "ppt.select.shape": "形状",
+    // --- 动画窗格 ---
+    "ppt.animation.title": "动画窗格",
+    "ppt.animation.unnamed": "未命名对象",
+    "ppt.animation.move-up": "上移",
+    "ppt.animation.move-down": "下移",
+    "ppt.animation.delete": "删除",
+    "ppt.sorter.title": "幻灯片浏览",
     "ppt.select.picture": "图片",
     "ppt.select.line": "直线",
     "ppt.select.connector": "连接符",

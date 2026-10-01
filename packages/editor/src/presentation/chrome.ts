@@ -234,6 +234,90 @@ export const presentationStyles = css`
     line-height: 1;
     color: inherit;
   }
+  .pane-actions {
+    display: none;
+    flex: 0 0 auto;
+    gap: 2px;
+  }
+  .select-row:hover .pane-actions,
+  .select-row:focus-within .pane-actions {
+    display: flex;
+  }
+  .pane-actions button {
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: none;
+    border-radius: 3px;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    line-height: 1;
+  }
+  .pane-actions button:hover {
+    background: rgba(0, 0, 0, 0.08);
+  }
+  /* PowerPoint's Slide Sorter: large cards on a neutral surface; the native
+     dialog keeps Escape/close semantics without inventing another view state. */
+  dialog.slide-sorter {
+    width: min(1100px, calc(100vw - 64px));
+    height: min(760px, calc(100vh - 64px));
+    padding: 0;
+    border: 1px solid var(--docen-color-divider, #e1e1e1);
+    border-radius: 8px;
+    background: var(--docen-color-bg, #fff);
+    color: inherit;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.22);
+  }
+  .sorter-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--docen-color-divider, #e1e1e1);
+  }
+  .sorter-head button {
+    width: 28px;
+    height: 28px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    font-size: 18px;
+    line-height: 1;
+  }
+  .sorter-grid {
+    height: calc(100% - 53px);
+    overflow: auto;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 20px;
+    padding: 20px;
+    align-content: start;
+  }
+  .sorter-card {
+    margin: 0;
+    cursor: grab;
+    border: 1px solid var(--docen-color-divider, #e1e1e1);
+    border-radius: 6px;
+    overflow: hidden;
+    background: #fff;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  }
+  .sorter-card:active {
+    cursor: grabbing;
+  }
+  .sorter-card canvas {
+    display: block;
+    width: 100%;
+  }
+  .sorter-card figcaption {
+    padding: 8px 10px;
+    font-size: 12px;
+    text-align: center;
+    color: var(--docen-color-fg-muted, #616161);
+  }
 `;
 
 /** The element surface the template binds to — the ref targets only. The
