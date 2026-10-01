@@ -127,6 +127,7 @@ import { TableSelectionOverlay } from "./table-overlay";
 import {
   tableSelectionCells,
   tableCellAt,
+  tableSelectionRects,
   tableCellNearAt,
   tableSelectionFor,
   type TableSelectionRange,
@@ -360,6 +361,14 @@ class DocenPresentation extends AddinHost {
   /** The edited cell as it entered the session — live write-through mutates
    *  the cell in place, so this baseline is what the undo pair restores. */
   #tableEditBefore: TableCellOptions | null = null;
+  /** The painted geometry the floating cell editor follows; re-projection
+   *  refreshes it when auto row heights grow under live typing. */
+  #tableEditLayout: {
+    rect: { x: number; y: number; width: number; height: number };
+    margins: { left: number; top: number; right: number; bottom: number };
+    anchor: "top" | "center" | "bottom";
+    baselineShift: number;
+  } | null = null;
   /** Drawing gridlines visibility (a view state — not part of the deck). */
   #gridlines = false;
   readonly #history = new DeckHistory();
@@ -1403,7 +1412,7 @@ class DocenPresentation extends AddinHost {
     if (!found) return;
     const rect = this.#cellRectAt(found.member, x, y);
     if (!rect) return;
-    this.#setTableSelection(range ?? { anchor: rect.cell, head: rect.cell });
+    this.#setTableSelection(range ?? null);
     const cell = rect.cell;
     const source = tableGridOf(found.table).origins.find(
       (o) => o.row === cell.row && o.col === cell.col,
@@ -1465,31 +1474,6 @@ class DocenPresentation extends AddinHost {
             caretColor: TEXT_INK,
           }),
     });
-    // Overflow grows the frame downward (the top-anchored shape rule); a
-    // center/bottom cell re-runs the painter's slack math so the stack sits
-    // where the paint puts it. On commit the row grows to fit — the same
-    // growth every re-projection applies.
-    const syncLayout = (): void => {
-      editor.style.height = "auto";
-      editor.style.paddingTop = `${m.top * scale + baselineShift}px`;
-      const boxH = rect.height * scale;
-      const padTB = (m.top + m.bottom) * scale;
-      if (anchor === "top") {
-        const topContent = measureTextAreaContent(editor);
-        editor.style.height = `${Math.max(boxH, topContent + padTB)}px`;
-        editor.scrollTop = 0;
-        return;
-      }
-      const content = measureTextAreaContent(editor);
-      const slack = boxH - padTB - content;
-      if (slack >= 0) {
-        editor.style.height = `${boxH}px`;
-        editor.style.paddingTop = `${m.top * scale + baselineShift + (anchor === "center" ? slack / 2 : slack)}px`;
-      } else {
-        editor.style.height = `${content + padTB}px`;
-      }
-      editor.scrollTop = 0;
-    };
     editor.addEventListener("keydown", (event) => {
       // Escape leaves the edit (committing); Tab walks cells like DOCX and
       // every other key stays in the textarea's native text session.
@@ -1518,7 +1502,7 @@ class DocenPresentation extends AddinHost {
       });
     };
     editor.addEventListener("input", () => {
-      syncLayout();
+      this.#layoutTableCellEditor(editor);
       writeThrough();
     });
     editor.addEventListener("compositionstart", () => {
@@ -1526,11 +1510,17 @@ class DocenPresentation extends AddinHost {
     });
     editor.addEventListener("compositionend", () => {
       composing = false;
-      syncLayout();
+      this.#layoutTableCellEditor(editor);
       writeThrough();
     });
-    this.#canvasHost().append(editor);
-    syncLayout();
+    this.#stage.append(editor);
+    this.#tableEditLayout = {
+      rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+      margins: m,
+      anchor,
+      baselineShift,
+    };
+    this.#layoutTableCellEditor(editor);
     editor.focus();
     if (selectAll) editor.select();
     else if (caret) this.#placeTableCellCaret(editor, caret.clientX, caret.clientY);
@@ -1570,6 +1560,7 @@ class DocenPresentation extends AddinHost {
     const sel = this.#selection;
     const before = this.#tableEditBefore;
     this.#tableEditBefore = null;
+    this.#tableEditLayout = null;
     const cell = editor && write ? this.#editedCell(at) : null;
     if (cell && before) {
       const source: TextEditSource = { kind: "cell", cell };
@@ -1595,6 +1586,36 @@ class DocenPresentation extends AddinHost {
     }
     this.#restoreOverlay();
     this.#syncTextFormatControls();
+  }
+
+  /** Re-fit the floating editor after a projection refresh: the painted row
+   *  can grow while the textarea still carries the previous frame. */
+  #layoutTableCellEditor(editor: HTMLTextAreaElement): void {
+    const layout = this.#tableEditLayout;
+    if (!layout) return;
+    const scale = this.#zoom / 100;
+    const { rect, margins: m, anchor, baselineShift } = layout;
+    editor.style.left = `${rect.x * scale}px`;
+    editor.style.top = `${(rect.y + this.#tableStripY(this.#selection!.slide)) * scale}px`;
+    editor.style.width = `${rect.width * scale}px`;
+    editor.style.padding = `${m.top * scale}px ${m.right * scale}px ${m.bottom * scale}px ${m.left * scale}px`;
+    editor.style.height = "auto";
+    editor.style.paddingTop = `${m.top * scale + baselineShift}px`;
+    const boxHeight = rect.height * scale;
+    const paddingTB = (m.top + m.bottom) * scale;
+    const contentHeight = measureTextAreaContent(editor);
+    if (anchor === "top") {
+      editor.style.height = `${Math.max(boxHeight, contentHeight + paddingTB)}px`;
+    } else {
+      const slack = boxHeight - paddingTB - contentHeight;
+      if (slack >= 0) {
+        editor.style.height = `${boxHeight}px`;
+        editor.style.paddingTop = `${m.top * scale + baselineShift + (anchor === "center" ? slack / 2 : slack)}px`;
+      } else {
+        editor.style.height = `${contentHeight + paddingTB}px`;
+      }
+    }
+    editor.scrollTop = 0;
   }
 
   /** A click on another cell of the table under edit: commit the current
@@ -1660,7 +1681,71 @@ class DocenPresentation extends AddinHost {
       editor.setSelectionRange(range.startOffset, range.startOffset);
       return;
     }
-    editor.setSelectionRange(editor.value.length, editor.value.length);
+    const offset = this.#textOffsetAtPoint(editor, clientX, clientY);
+    editor.setSelectionRange(offset, offset);
+  }
+
+  /** The text offset at a viewport point when the browser can't resolve a
+   *  caret inside this shadow-DOM textarea: the control's own font/box is
+   *  cloned off-screen and per-character Range boxes pick the nearest side. */
+  #textOffsetAtPoint(editor: HTMLTextAreaElement, clientX: number, clientY: number): number {
+    const value = editor.value;
+    if (!value) return 0;
+    const style = getComputedStyle(editor);
+    const box = editor.getBoundingClientRect();
+    const mirror = document.createElement("div");
+    Object.assign(mirror.style, {
+      position: "fixed",
+      left: `${box.left}px`,
+      top: `${box.top}px`,
+      width: `${box.width}px`,
+      boxSizing: style.boxSizing,
+      padding: style.padding,
+      fontFamily: style.fontFamily,
+      fontSize: style.fontSize,
+      fontWeight: style.fontWeight,
+      fontStyle: style.fontStyle,
+      lineHeight: style.lineHeight,
+      letterSpacing: style.letterSpacing,
+      textAlign: style.textAlign,
+      whiteSpace: "pre-wrap",
+      overflowWrap: style.overflowWrap,
+      wordBreak: style.wordBreak,
+      tabSize: style.tabSize,
+      direction: style.direction,
+      visibility: "hidden",
+      pointerEvents: "none",
+    } satisfies Partial<CSSStyleDeclaration>);
+    mirror.textContent = value;
+    document.body.append(mirror);
+    const text = mirror.firstChild;
+    let best = 0;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    if (text) {
+      for (let index = 0; index < value.length; index += 1) {
+        const range = document.createRange();
+        range.setStart(text, index);
+        range.setEnd(text, index + 1);
+        const rect = range.getBoundingClientRect();
+        if (!rect.width && !rect.height) continue;
+        const verticalDistance =
+          clientY < rect.top
+            ? rect.top - clientY
+            : clientY > rect.bottom
+              ? clientY - rect.bottom
+              : 0;
+        const characterMiddle = rect.left + rect.width / 2;
+        const offset = clientX < characterMiddle ? index : index + 1;
+        const horizontalDistance = Math.abs(clientX - characterMiddle);
+        const distance = verticalDistance * 10000 + horizontalDistance;
+        if (distance < bestDistance) {
+          best = offset;
+          bestDistance = distance;
+        }
+      }
+    }
+    mirror.remove();
+    return best;
   }
 
   /** Cross-cell drag: the anchor stays where the press started and every new
@@ -1671,10 +1756,10 @@ class DocenPresentation extends AddinHost {
     found: { slide: number; table: TableOptions; member: TableMemberView },
   ): void {
     if (!found) return;
+    const origin = this.#tableEdit;
+    const textAnchor = this.#textEditor?.selectionStart ?? null;
     const drag = { startX: event.clientX, startY: event.clientY, moved: false };
     const onMove = (move: PointerEvent): void => {
-      const anchor = this.#tableSelection?.anchor;
-      if (!anchor) return;
       if (!drag.moved && Math.hypot(move.clientX - drag.startX, move.clientY - drag.startY) < 3)
         return;
       drag.moved = true;
@@ -1682,7 +1767,19 @@ class DocenPresentation extends AddinHost {
       if (!point || point.slide !== found.slide) return;
       const head = tableCellNearAt(found.member, point.x, point.y);
       if (!head) return;
-      if (head.cell.row === anchor.row && head.cell.col === anchor.col) return;
+      if (origin && head.cell.row === origin.row && head.cell.col === origin.col) {
+        const editor = this.#textEditor;
+        if (!editor || textAnchor == null) return;
+        this.#placeTableCellCaret(editor, move.clientX, move.clientY);
+        const headOffset = editor.selectionStart;
+        editor.setSelectionRange(
+          Math.min(textAnchor, headOffset),
+          Math.max(textAnchor, headOffset),
+        );
+        return;
+      }
+      const anchor = this.#tableSelection?.anchor ?? origin;
+      if (!anchor) return;
       this.#setTableSelection({ anchor, head: head.cell });
       this.#moveTableCellEditing(
         head.x + 1,
@@ -1694,13 +1791,13 @@ class DocenPresentation extends AddinHost {
       );
     };
     const onUp = (): void => {
-      document.removeEventListener("pointermove", onMove);
-      document.removeEventListener("pointerup", onUp);
-      document.removeEventListener("pointercancel", onUp);
+      document.removeEventListener("pointermove", onMove, { capture: true });
+      document.removeEventListener("pointerup", onUp, { capture: true });
+      document.removeEventListener("pointercancel", onUp, { capture: true });
     };
-    document.addEventListener("pointermove", onMove);
-    document.addEventListener("pointerup", onUp);
-    document.addEventListener("pointercancel", onUp);
+    document.addEventListener("pointermove", onMove, { capture: true });
+    document.addEventListener("pointerup", onUp, { capture: true });
+    document.addEventListener("pointercancel", onUp, { capture: true });
   }
 
   /** The padding-top correction that moves a textarea's CSS baseline onto
@@ -1742,6 +1839,25 @@ class DocenPresentation extends AddinHost {
     // the box vanished).
     if (this.#selectedBox()) this.#syncSelectionOverlays();
     else this.#select(null);
+    const tableEditor = this.#textEditor;
+    const at = this.#tableEdit;
+    if (tableEditor && at && this.#tableEditLayout) {
+      const member = this.#tableMemberOf()?.member;
+      const cell = member?.table.rows
+        .flatMap((row) => row.cells)
+        .find((cell) => cell.row === at.row && cell.col === at.col);
+      const rect =
+        member && cell ? tableSelectionRects(member, { anchor: cell, head: cell })[0] : null;
+      if (rect) {
+        this.#tableEditLayout.rect = {
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height,
+        };
+        this.#layoutTableCellEditor(tableEditor);
+      }
+    }
     this.#renderSelectionPane();
   }
 
@@ -3031,12 +3147,11 @@ class DocenPresentation extends AddinHost {
         const table = this.#tableMemberOf();
         const rect = table ? this.#cellRectAt(table.member, point.x, point.y) : null;
         if (table && rect) {
-          this.#setTableSelection({ anchor: rect.cell, head: rect.cell });
+          this.#moveTableCellEditing(point.x, point.y, undefined, {
+            caret: { clientX: event.clientX, clientY: event.clientY },
+          });
           this.#startTableCellDrag(event, table);
         }
-        this.#moveTableCellEditing(point.x, point.y, undefined, {
-          caret: { clientX: event.clientX, clientY: event.clientY },
-        });
       }
       return;
     }
@@ -3058,7 +3173,6 @@ class DocenPresentation extends AddinHost {
       const rect = table ? this.#cellRectAt(table.member, point.x, point.y) : null;
       if (!table || !rect) return;
       event.preventDefault();
-      this.#setTableSelection({ anchor: rect.cell, head: rect.cell });
       this.#enterTableCellEditing(point.x, point.y, undefined, {
         clientX: event.clientX,
         clientY: event.clientY,
