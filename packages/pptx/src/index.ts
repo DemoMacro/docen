@@ -9,6 +9,7 @@ export {
   type PresentationOptions,
   type SlideOptions,
   type SlideChild,
+  type SlideCommentOptions,
   type SlideSize,
   type TableOptions,
   type TableCellOptions,

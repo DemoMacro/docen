@@ -40,6 +40,7 @@ import {
   type TransitionOptions,
   type TransitionType,
   type SlideAnimation,
+  type SlideCommentOptions,
 } from "@docen/pptx";
 import { customElement, observable } from "@microsoft/fast-element";
 import type { DataType } from "@office-open/core";
@@ -323,6 +324,8 @@ const WIRED_COMMANDS: ReadonlySet<string> = new Set([
   "normal",
   "slide-sorter",
   "spell-check",
+  "new-comment",
+  "show-comments",
   "set-up-show",
   "transition",
   "effect-options",
@@ -443,6 +446,7 @@ class DocenPresentation extends AddinHost {
   #showSetupDialog: HTMLDialogElement | null = null;
   #symbolDialog: HTMLDialogElement | null = null;
   #wordArtDialog: HTMLDialogElement | null = null;
+  #commentsDialog: HTMLDialogElement | null = null;
   #onlinePictureDialog: HTMLDialogElement | null = null;
   #langObserver?: MutationObserver;
   #unsubLang?: () => void;
@@ -851,6 +855,8 @@ class DocenPresentation extends AddinHost {
     else if (name === "gridlines") this.#toggleGridlines();
     else if (name === "find" || name === "replace") this.#findDialog()?.show();
     else if (name === "spell-check") this.#openSpellCheck();
+    else if (name === "new-comment") this.#openCommentsDialog(true);
+    else if (name === "show-comments") this.#toggleCommentsDialog();
     else if (name === "paste") void this.#pasteFromClipboard();
     else if (name === "notes") this.#toggleNotes();
     else if (name === "normal") {
@@ -2380,6 +2386,165 @@ class DocenPresentation extends AddinHost {
     this.shadowRoot?.append(dialog);
     dialog.showModal();
   }
+
+  /** The active slide's comment list (the model persists through the real
+   *  commentAuthors/comment parts on save). */
+  #commentsOf(): { slide: SlideOptions; comments: SlideCommentOptions[] } | null {
+    const slide = this.#presJson?.slides?.[this.#activeSlideIndex()];
+    if (!slide) return null;
+    return { slide, comments: (slide.comments ??= []) };
+  }
+
+  /** A comment anchor at the selected object (or slide center), normalized to
+   *  EMU — PowerPoint anchors comments to the point the reviewer inspected. */
+  #commentAnchor(): { x: number; y: number } {
+    const pres = this.#pres;
+    const selected = this.#selection ? this.#selectedBox() : null;
+    const box = selected ? this.#slideBoxOf(selected.box) : null;
+    return {
+      x: Math.round((box ? box.x + box.width / 2 : (pres?.widthPx ?? 720) / 2) * EMU_PER_PX),
+      y: Math.round((box ? box.y + box.height / 2 : (pres?.heightPx ?? 405) / 2) * EMU_PER_PX),
+    };
+  }
+
+  #openCommentsDialog(focusDraft = false): void {
+    if (!this.#pres || this.#commentsDialog?.open) {
+      if (focusDraft) this.#commentsDialog?.querySelector("textarea")?.focus();
+      return;
+    }
+    const dialog = document.createElement("dialog");
+    dialog.className = "comments-dialog";
+    dialog.innerHTML = `
+      <div class="dialog-head"><strong>${escapeHtml(t("ppt.comments.title", this))}</strong><button data-dialog-close>×</button></div>
+      <div class="comments-body">
+        <label class="comment-draft"><textarea rows="3" placeholder="${escapeHtml(t("ppt.comments.placeholder", this))}"></textarea><button data-comment-post>${escapeHtml(t("ppt.comments.post", this))}</button></label>
+        <div class="comment-list"></div>
+      </div>
+    `;
+    dialog.querySelector(".comment-list")?.addEventListener("click", this.#onCommentsClick);
+    dialog.addEventListener("click", (event) => {
+      const target = event.target as HTMLElement;
+      if (target.closest("[data-dialog-close]") || target.closest("[data-dialog-cancel]"))
+        return dialog.close();
+      if (target.closest("[data-comment-post]")) {
+        const value = dialog.querySelector<HTMLTextAreaElement>("textarea")?.value.trim();
+        if (value) this.#addSlideComment(value);
+      }
+    });
+    this.#showModalDialog(dialog, () => (this.#commentsDialog = null));
+    this.#commentsDialog = dialog;
+    this.#renderCommentsDialog();
+    if (focusDraft) dialog.querySelector("textarea")?.focus();
+  }
+
+  #toggleCommentsDialog(): void {
+    if (this.#commentsDialog?.open) this.#commentsDialog.close();
+    else this.#openCommentsDialog();
+  }
+
+  #renderCommentsDialog(): void {
+    const dialog = this.#commentsDialog;
+    const found = this.#commentsOf();
+    const list = dialog?.querySelector<HTMLElement>(".comment-list");
+    if (!dialog || !found || !list) return;
+    if (found.comments.length === 0) {
+      list.innerHTML = `<p class="comment-empty">${escapeHtml(t("ppt.comments.empty", this))}</p>`;
+      return;
+    }
+    list.innerHTML = found.comments
+      .map((comment, index) => {
+        const author = escapeHtml(comment.author || t("ppt.comments.anonymous", this));
+        const date = escapeHtml(comment.date ?? "");
+        const text = escapeHtml(comment.text);
+        return `<article class="comment" data-comment-index="${index}"><header><strong>${author}</strong><time>${date}</time></header><p>${text}</p><footer><button data-comment-edit>${escapeHtml(t("ppt.comments.edit", this))}</button><button data-comment-delete>${escapeHtml(t("ppt.comments.delete", this))}</button></footer></article>`;
+      })
+      .join("");
+  }
+
+  #addSlideComment(text: string): void {
+    const found = this.#commentsOf();
+    if (!found || !text.trim()) return;
+    const author = this.getAttribute("user") || t("ppt.comments.anonymous", this);
+    const initials =
+      author
+        .split(/\s+/u)
+        .filter(Boolean)
+        .slice(0, 2)
+        .map((part) => part[0]!.toUpperCase())
+        .join("") || "A";
+    const comment: SlideCommentOptions = {
+      author,
+      initials,
+      text,
+      date: new Date().toLocaleString(),
+      ...this.#commentAnchor(),
+    };
+    const comments = found.comments;
+    comments.push(comment);
+    this.#pushEdit({
+      undo: () => {
+        comments.pop();
+        if (comments.length === 0) delete found.slide.comments;
+        this.#renderCommentsDialog();
+      },
+      redo: () => {
+        comments.push(comment);
+        this.#renderCommentsDialog();
+      },
+    });
+    const draft = this.#commentsDialog?.querySelector<HTMLTextAreaElement>("textarea");
+    if (draft) draft.value = "";
+    this.#renderCommentsDialog();
+  }
+
+  readonly #onCommentsClick = (event: Event): void => {
+    const target = event.target as HTMLElement;
+    const article = target.closest<HTMLElement>(".comment");
+    const index = Number(article?.dataset.commentIndex ?? -1);
+    const found = this.#commentsOf();
+    if (!article || !found || index < 0 || index >= found.comments.length) return;
+    if (target.closest("[data-comment-delete]")) {
+      const before = structuredClone(found.comments);
+      const [removed] = found.comments.splice(index, 1);
+      if (!removed) return;
+      if (found.comments.length === 0) delete found.slide.comments;
+      const after = structuredClone(found.comments);
+      this.#pushEdit({
+        undo: () => {
+          found.slide.comments = structuredClone(before);
+          this.#renderCommentsDialog();
+        },
+        redo: () => {
+          if (after.length === 0) delete found.slide.comments;
+          else found.slide.comments = structuredClone(after);
+          this.#renderCommentsDialog();
+        },
+      });
+      this.#renderCommentsDialog();
+      return;
+    }
+    if (target.closest("[data-comment-edit]")) {
+      const comment = found.comments[index]!;
+      const next = window.prompt(t("ppt.comments.prompt", this), comment.text)?.trim();
+      if (next == null || next === comment.text) return;
+      const before = comment.text;
+      comment.text = next;
+      comment.modified = true;
+      this.#pushEdit({
+        undo: () => {
+          comment.text = before;
+          if (!before) delete comment.modified;
+          this.#renderCommentsDialog();
+        },
+        redo: () => {
+          comment.text = next;
+          comment.modified = true;
+          this.#renderCommentsDialog();
+        },
+      });
+      this.#renderCommentsDialog();
+    }
+  };
 
   /** The Shapes gallery's pick arms the drawer; the value is the prstGeom
    *  token (the main button draws the default rectangle). */

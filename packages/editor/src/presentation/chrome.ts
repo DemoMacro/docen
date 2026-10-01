@@ -524,6 +524,74 @@ export const presentationStyles = css`
     padding: 0;
     font-size: 17px;
   }
+  dialog.comments-dialog {
+    width: min(440px, calc(100vw - 48px));
+    padding: 0;
+    border: 1px solid var(--docen-color-divider, #e1e1e1);
+    border-radius: 8px;
+    background: var(--docen-color-bg, #fff);
+    color: inherit;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.22);
+  }
+  .comments-body {
+    display: grid;
+    gap: 14px;
+    padding: 16px;
+  }
+  .comment-draft {
+    display: grid;
+    gap: 8px;
+  }
+  .comment-draft textarea {
+    box-sizing: border-box;
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--docen-color-divider, #d1d1d1);
+    border-radius: 4px;
+    background: transparent;
+    color: inherit;
+    resize: vertical;
+  }
+  .comment-draft button,
+  .comment footer button {
+    justify-self: start;
+    padding: 5px 10px;
+    border: 1px solid var(--docen-color-divider, #d1d1d1);
+    border-radius: 4px;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+  }
+  .comment-list {
+    display: grid;
+    gap: 10px;
+    max-height: min(44vh, 360px);
+    overflow: auto;
+  }
+  .comment-empty {
+    margin: 0;
+    color: var(--docen-color-fg-muted, #616161);
+  }
+  .comment {
+    padding: 10px 12px;
+    border: 1px solid var(--docen-color-divider, #e1e1e1);
+    border-radius: 6px;
+  }
+  .comment header {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 5px;
+  }
+  .comment p {
+    margin: 0 0 8px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .comment footer {
+    display: flex;
+    gap: 6px;
+  }
 `;
 
 /** The element surface the template binds to — the ref targets only. The
