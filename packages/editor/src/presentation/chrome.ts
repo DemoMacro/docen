@@ -109,30 +109,15 @@ export const presentationStyles = css`
     color: transparent;
   }
   .table-cell-editor::selection {
+    background: transparent;
+  }
+  /* The native caret stays in the textarea; the visible band is drawn above the
+     canvas because the bridge text itself is transparent. */
+  .table-text-selection {
+    position: absolute;
+    z-index: 5;
+    pointer-events: none;
     background: rgba(43, 124, 211, 0.22);
-  }
-  /* Word's table grips: the strips are invisible targets, while the select-all
-     corner stays discoverable outside the table's top-left corner. */
-  .table-grip {
-    transition: background 120ms ease;
-  }
-  .table-grip:hover {
-    background: rgba(15, 108, 189, 0.14);
-  }
-  .table-grip[data-grip-kind="table"] {
-    box-sizing: border-box;
-    background:
-      linear-gradient(to right, transparent 4px, #0f6cbd 4px, #0f6cbd 5.5px, transparent 5.5px),
-      linear-gradient(to bottom, transparent 4px, #0f6cbd 4px, #0f6cbd 5.5px, transparent 5.5px),
-      #fff;
-    border: 1px solid #0f6cbd;
-    border-radius: 2px;
-  }
-  .table-grip[data-grip-kind="table"]:hover {
-    background:
-      linear-gradient(to right, transparent 4px, #0f6cbd 4px, #0f6cbd 5.5px, transparent 5.5px),
-      linear-gradient(to bottom, transparent 4px, #0f6cbd 4px, #0f6cbd 5.5px, transparent 5.5px),
-      rgba(15, 108, 189, 0.08);
   }
   /* The speaker-notes pane (PowerPoint's notes window): centered under the
      slide strip inside the same scroll area, so it follows the visible

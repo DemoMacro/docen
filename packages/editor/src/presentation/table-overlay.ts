@@ -1,7 +1,9 @@
 import type { Box } from "../drawing/geometry";
 import {
+  tableGripAt,
   tableEdges,
   tableSelectionRects,
+  type TableGripHit,
   type TableSelectionRange,
   type TableSelectionView,
 } from "./table-selection";
@@ -21,7 +23,8 @@ export class TableSelectionOverlay {
   #stripY = 0;
   #selection: TableSelectionRange | null = null;
   #highlights: HTMLDivElement[] = [];
-  #grips: HTMLDivElement[] = [];
+  #grip: HTMLDivElement | null = null;
+  #gripHit: TableGripHit | null = null;
 
   constructor(callbacks: TableOverlayCallbacks) {
     this.#callbacks = callbacks;
@@ -29,7 +32,7 @@ export class TableSelectionOverlay {
     this.el.setAttribute("data-docen-overlay", "table-selection");
     Object.assign(this.el.style, {
       position: "absolute",
-      zIndex: "7",
+      zIndex: "8",
       pointerEvents: "none",
       display: "none",
     } satisfies Partial<CSSStyleDeclaration>);
@@ -51,8 +54,19 @@ export class TableSelectionOverlay {
   hide(): void {
     this.#member = null;
     this.#selection = null;
+    this.#gripHit = null;
     this.el.style.display = "none";
     this.#placeHighlights();
+    if (this.#grip) this.#grip.style.display = "none";
+  }
+
+  /** DOCX shows one grip at a time: the hover point resolves a strip, corner,
+   *  or table-wide square and the overlay paints just that target. */
+  hover(localX: number, localY: number): void {
+    const member = this.#member;
+    if (!member) return;
+    this.#gripHit = tableGripAt(member, member.x + localX, member.y + localY, true);
+    this.#placeGrip();
   }
 
   #place(): void {
@@ -68,7 +82,7 @@ export class TableSelectionOverlay {
       height: `${height * scale}px`,
     });
     this.#placeHighlights();
-    this.#placeGrips();
+    this.#placeGrip();
   }
 
   #placeHighlights(): void {
@@ -108,66 +122,65 @@ export class TableSelectionOverlay {
     });
   }
 
-  #placeGrips(): void {
+  #placeGrip(): void {
     const member = this.#member;
-    if (!member) return;
+    if (!member || !this.#gripHit) {
+      if (this.#grip) this.#grip.style.display = "none";
+      return;
+    }
     const { colEdges, rowEdges } = tableEdges(member);
     const scale = this.#callbacks.scale();
-    const wanted = colEdges.length - 1 + rowEdges.length - 1 + 1;
-    while (this.#grips.length < wanted) {
-      const grip = document.createElement("div");
-      grip.className = "table-grip";
-      grip.setAttribute("data-docen-overlay", "table-grip");
-      Object.assign(grip.style, {
-        position: "absolute",
-        pointerEvents: "auto",
-        background: "transparent",
-        cursor: "pointer",
-      } satisfies Partial<CSSStyleDeclaration>);
-      grip.addEventListener("pointerdown", (event) => {
+    if (!this.#grip) {
+      this.#grip = document.createElement("div");
+      this.#grip.setAttribute("data-docen-overlay", "table-grip");
+      this.#grip.innerHTML =
+        '<svg width="12" height="12" viewBox="0 0 12 12"><path d="M1 6h7M5 2l4 4-4 4z" fill="#454545"/></svg>' +
+        '<svg width="12" height="12" viewBox="0 0 12 12"><rect x="0.5" y="0.5" width="11" height="11" fill="#ffffff" stroke="#7f7f7f"/><path d="M6 1v10M1 6h10" stroke="#7f7f7f"/></svg>';
+      this.#grip.addEventListener("pointerdown", (event) => {
+        if (!this.#gripHit?.clickable) return;
         event.preventDefault();
         event.stopPropagation();
-        this.#callbacks.selectGrip(
-          grip.dataset.gripKind as "row" | "col" | "table",
-          grip.dataset.gripIndex ? Number(grip.dataset.gripIndex) : undefined,
-        );
+        this.#callbacks.selectGrip(this.#gripHit.kind, this.#gripHit.index);
       });
-      this.el.append(grip);
-      this.#grips.push(grip);
+      this.el.append(this.#grip);
     }
-    this.#grips.forEach((grip, index) => {
-      if (index < colEdges.length - 1) {
-        grip.dataset.gripKind = "col";
-        grip.dataset.gripIndex = String(index);
-        Object.assign(grip.style, {
-          left: `${colEdges[index]! * scale}px`,
-          top: `-${8 * scale}px`,
-          width: `${(colEdges[index + 1]! - colEdges[index]!) * scale}px`,
-          height: `${8 * scale}px`,
-        });
-        return;
-      }
-      const rowIndex = index - (colEdges.length - 1);
-      if (rowIndex < rowEdges.length - 1) {
-        grip.dataset.gripKind = "row";
-        grip.dataset.gripIndex = String(rowIndex);
-        Object.assign(grip.style, {
-          left: `-${8 * scale}px`,
-          top: `${rowEdges[rowIndex]! * scale}px`,
-          width: `${8 * scale}px`,
-          height: `${(rowEdges[rowIndex + 1]! - rowEdges[rowIndex]!) * scale}px`,
-        });
-        return;
-      }
-      grip.dataset.gripKind = "table";
-      delete grip.dataset.gripIndex;
-      Object.assign(grip.style, {
-        left: `-${10 * scale}px`,
-        top: `-${10 * scale}px`,
-        width: `${10 * scale}px`,
-        height: `${10 * scale}px`,
-        cursor: "crosshair",
-      });
-    });
+    const grip = this.#grip;
+    const hit = this.#gripHit;
+    const box =
+      hit.kind === "col"
+        ? {
+            left: `${colEdges[hit.index]! * scale}px`,
+            top: `-${14 * scale}px`,
+            width: `${(colEdges[hit.index + 1]! - colEdges[hit.index]!) * scale}px`,
+            height: `${12 * scale}px`,
+          }
+        : hit.kind === "row"
+          ? {
+              left: `-${14 * scale}px`,
+              top: `${rowEdges[hit.index]! * scale}px`,
+              width: `${12 * scale}px`,
+              height: `${(rowEdges[hit.index + 1]! - rowEdges[hit.index]!) * scale}px`,
+            }
+          : {
+              left: `-${13 * scale}px`,
+              top: `-${13 * scale}px`,
+              width: `${12 * scale}px`,
+              height: `${12 * scale}px`,
+            };
+    Object.assign(grip.style, {
+      ...box,
+      position: "absolute",
+      pointerEvents: hit.clickable ? "auto" : "none",
+      cursor: hit.clickable ? "pointer" : "default",
+      display: "block",
+      background: "transparent",
+    } satisfies Partial<CSSStyleDeclaration>);
+    const [arrow, grid] = Array.from(grip.children) as SVGElement[];
+    const rotate = hit.kind === "col" ? "rotate(90deg)" : "";
+    arrow?.setAttribute(
+      "style",
+      hit.kind === "table" ? "display:none" : `display:block;margin:auto;transform:${rotate}`,
+    );
+    grid?.setAttribute("style", hit.kind === "table" ? "display:block" : "display:none");
   }
 }

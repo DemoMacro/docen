@@ -25,6 +25,14 @@ export interface TableSelectionRange {
   head: { row: number; col: number };
 }
 
+export interface TableGripHit {
+  kind: "row" | "col" | "table";
+  index: number;
+  /** False for the table-wide hover preview: the square is visible, but only
+   *  the corner window clicks it. */
+  clickable: boolean;
+}
+
 export interface TableCellRect extends Box {
   cell: TableCellSlot;
 }
@@ -162,4 +170,36 @@ export function tableSelectionRects(
   range: TableSelectionRange,
 ): TableCellRect[] {
   return tableSelectionCells(member, range).map((cell) => cellRectAt(member, cell));
+}
+
+/** The Word table grip under a member-local point. `hover` keeps the select-all
+ *  square visible over the table body; a press requires one of the grip windows
+ *  so ordinary cell clicks remain editing gestures. */
+export function tableGripAt(
+  member: TableSelectionView,
+  x: number,
+  y: number,
+  hover = false,
+): TableGripHit | null {
+  const { colEdges, rowEdges } = tableEdges(member);
+  const right = colEdges[colEdges.length - 1]!;
+  const bottom = rowEdges[rowEdges.length - 1]!;
+  const lx = x - member.x;
+  const ly = y - member.y;
+  const inside = lx >= 0 && lx < right && ly >= 0 && ly < bottom;
+  if (lx >= -13 && lx <= 1 && ly >= -13 && ly <= 1)
+    return { kind: "table", index: 0, clickable: true };
+  if (ly >= -14 && ly <= 4 && lx > 0 && lx < right) {
+    const index = colEdges.findIndex(
+      (edge, index) => index < colEdges.length - 1 && lx >= edge && lx < colEdges[index + 1]!,
+    );
+    if (index >= 0) return { kind: "col", index, clickable: true };
+  }
+  if (lx >= -14 && lx <= 4 && ly > 0 && ly < bottom) {
+    const index = rowEdges.findIndex(
+      (edge, index) => index < rowEdges.length - 1 && ly >= edge && ly < rowEdges[index + 1]!,
+    );
+    if (index >= 0) return { kind: "row", index, clickable: true };
+  }
+  return hover && inside ? { kind: "table", index: 0, clickable: false } : null;
 }

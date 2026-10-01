@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  tableGripAt,
   tableCellAt,
   tableCellNearAt,
   tableSelectionRects,
@@ -79,5 +80,17 @@ describe("pptx table selection", () => {
       { row: 1, col: 2, spanW: 1, spanH: 1 },
     ]);
     expect(tableSelectionCells(member, tableSelectionFor(member, "table")!)).toHaveLength(4);
+  });
+
+  it("resolves Word's hover and press grip windows", () => {
+    expect(tableGripAt(member, 25, 25)).toMatchObject({ kind: "col", index: 0, clickable: true });
+    expect(tableGripAt(member, 10, 45)).toMatchObject({ kind: "row", index: 1, clickable: true });
+    expect(tableGripAt(member, 10, 20)).toMatchObject({ kind: "table", index: 0, clickable: true });
+    expect(tableGripAt(member, 40, 40, true)).toMatchObject({
+      kind: "table",
+      index: 0,
+      clickable: false,
+    });
+    expect(tableGripAt(member, 40, 40)).toBeNull();
   });
 });

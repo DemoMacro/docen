@@ -139,6 +139,7 @@ import {
 } from "./slide-paint";
 import { TableSelectionOverlay } from "./table-overlay";
 import {
+  tableGripAt,
   tableSelectionCells,
   tableCellAt,
   tableSelectionRects,
@@ -386,6 +387,7 @@ class DocenPresentation extends AddinHost {
   /** Word's cross-cell selection for the selected table (grid row/col pairs;
    *  null collapses the selection to the cell next entered). */
   #tableSelection: TableSelectionRange | null = null;
+  #tableTextSelection: HTMLDivElement[] = [];
   /** The in-place shape-text editor: the textarea floats over the shape while
    *  it holds the session; every keystroke writes through into the shape, so
    *  the text lives in the model as it is typed. */
@@ -512,6 +514,7 @@ class DocenPresentation extends AddinHost {
       .querySelector("docen-link-dialog")
       ?.addEventListener("link:ok", this.#onLinkOk as EventListener);
     document.addEventListener("fullscreenchange", this.#onFullscreenChange);
+    document.addEventListener("selectionchange", this.#onDocumentSelectionChange);
     this.selectList?.addEventListener("click", this.#onSelectListClick);
     this.#area()?.addEventListener("wheel", this.#onShowWheel, { passive: false });
     this.#area()?.addEventListener("scroll", this.#onScroll);
@@ -519,6 +522,7 @@ class DocenPresentation extends AddinHost {
     // Capture: Leafer's own app view can consume a pointer before bubbling;
     // the editor must get first refusal for an armed drag-to-draw tool.
     this.#stage.addEventListener("pointerdown", this.#onStagePointerDown, true);
+    this.#stage.addEventListener("pointermove", this.#onStagePointerMove);
     this.#stage.addEventListener("dblclick", this.#onStageDblClick);
     document.addEventListener("keydown", this.#onKeyDown);
     // The selection frame lives over the slide surface (the canvas element
@@ -1137,6 +1141,8 @@ class DocenPresentation extends AddinHost {
   #setTableSelection(range: TableSelectionRange | null): void {
     this.#tableSelection = range;
     this.#tableOverlay?.setSelection(range);
+    if (range) this.#clearTableCellTextSelection();
+    else this.#syncTableCellTextSelection();
   }
 
   /** A grip click commits the current cell first, then widens Word-style:
@@ -1147,6 +1153,24 @@ class DocenPresentation extends AddinHost {
     const range = table ? tableSelectionFor(table.member, kind, index) : null;
     if (range) this.#setTableSelection(range);
   }
+
+  /** DOCX's hover pass: one table grip resolves and paints at a time, so the
+   *  table no longer carries a permanent fence of invisible hit boxes. */
+  readonly #onStagePointerMove = (event: PointerEvent): void => {
+    if (!this.#selection) return;
+    const table = this.#tableMemberOf();
+    const point = this.#stagePointOf(event);
+    if (!table || !point || point.slide !== table.slide) {
+      this.#tableOverlay?.hover(Number.NaN, Number.NaN);
+      return;
+    }
+    this.#tableOverlay?.hover(point.x - table.member.x, point.y - table.member.y);
+  };
+
+  readonly #onDocumentSelectionChange = (): void => {
+    const editor = this.#textEditor;
+    if (editor?.classList.contains("table-cell-editor")) this.#syncTableCellTextSelection(editor);
+  };
 
   /** Word's cell-selection Delete: clear content from every selected origin,
    *  while the grid and its formatting survive. */
@@ -1646,6 +1670,7 @@ class DocenPresentation extends AddinHost {
     editor.addEventListener("input", () => {
       this.#layoutTableCellEditor(editor);
       writeThrough();
+      this.#syncTableCellTextSelection(editor);
     });
     editor.addEventListener("compositionstart", () => {
       composing = true;
@@ -1656,6 +1681,7 @@ class DocenPresentation extends AddinHost {
       writeThrough();
     });
     this.#stage.append(editor);
+    this.#clearTableCellTextSelection();
     this.#tableEditLayout = {
       rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
       margins: m,
@@ -1670,6 +1696,7 @@ class DocenPresentation extends AddinHost {
     this.#textEditor = editor;
     this.#tableEdit = { row: cell.row, col: cell.col };
     this.#tableEditBefore = structuredClone(source);
+    this.#syncTableCellTextSelection();
     this.#restoreOverlay();
   }
 
@@ -1728,6 +1755,7 @@ class DocenPresentation extends AddinHost {
     }
     this.#restoreOverlay();
     this.#syncTextFormatControls();
+    this.#clearTableCellTextSelection();
   }
 
   /** Re-fit the floating editor after a projection refresh: the painted row
@@ -1758,6 +1786,7 @@ class DocenPresentation extends AddinHost {
       }
     }
     editor.scrollTop = 0;
+    this.#syncTableCellTextSelection();
   }
 
   /** A click on another cell of the table under edit: commit the current
@@ -1825,6 +1854,84 @@ class DocenPresentation extends AddinHost {
     }
     const offset = this.#textOffsetAtPoint(editor, clientX, clientY);
     editor.setSelectionRange(offset, offset);
+  }
+
+  /** DOCX paints text selection in the canvas layer; the cell bridge's text is
+   *  transparent, so mirror the native selection into overlay bands instead. */
+  #syncTableCellTextSelection(editor = this.#textEditor): void {
+    if (
+      !editor ||
+      editor !== this.#textEditor ||
+      !this.#tableEdit ||
+      this.#tableSelection ||
+      editor.selectionStart === editor.selectionEnd
+    ) {
+      return this.#clearTableCellTextSelection();
+    }
+    const style = getComputedStyle(editor);
+    const box = editor.getBoundingClientRect();
+    const mirror = document.createElement("div");
+    mirror.setAttribute("aria-hidden", "true");
+    Object.assign(mirror.style, {
+      position: "fixed",
+      left: `${box.left}px`,
+      top: `${box.top}px`,
+      width: `${box.width}px`,
+      boxSizing: style.boxSizing,
+      padding: style.padding,
+      fontFamily: style.fontFamily,
+      fontSize: style.fontSize,
+      fontWeight: style.fontWeight,
+      fontStyle: style.fontStyle,
+      lineHeight: style.lineHeight,
+      letterSpacing: style.letterSpacing,
+      textAlign: style.textAlign,
+      whiteSpace: "pre-wrap",
+      overflowWrap: style.overflowWrap,
+      wordBreak: style.wordBreak,
+      tabSize: style.tabSize,
+      direction: style.direction,
+      visibility: "hidden",
+      pointerEvents: "none",
+    } satisfies Partial<CSSStyleDeclaration>);
+    mirror.textContent = editor.value;
+    document.body.append(mirror);
+    const text = mirror.firstChild;
+    const rects: DOMRect[] = [];
+    if (text && editor.selectionEnd > editor.selectionStart) {
+      const range = document.createRange();
+      range.setStart(text, editor.selectionStart);
+      range.setEnd(text, editor.selectionEnd);
+      rects.push(...range.getClientRects());
+    }
+    mirror.remove();
+    if (rects.length === 0) return this.#clearTableCellTextSelection();
+    const hostRect = this.#canvasHost().getBoundingClientRect();
+    while (this.#tableTextSelection.length < rects.length) {
+      const band = document.createElement("div");
+      band.className = "table-text-selection";
+      this.#canvasHost().append(band);
+      this.#tableTextSelection.push(band);
+    }
+    this.#tableTextSelection.forEach((band, index) => {
+      const rect = rects[index];
+      if (!rect || rect.width === 0 || rect.height === 0) {
+        band.style.display = "none";
+        return;
+      }
+      Object.assign(band.style, {
+        display: "block",
+        left: `${rect.left - hostRect.left}px`,
+        top: `${rect.top - hostRect.top}px`,
+        width: `${rect.width}px`,
+        height: `${rect.height}px`,
+      });
+    });
+  }
+
+  #clearTableCellTextSelection(): void {
+    for (const band of this.#tableTextSelection) band.remove();
+    this.#tableTextSelection = [];
   }
 
   /** The text offset at a viewport point when the browser can't resolve a
@@ -1920,6 +2027,7 @@ class DocenPresentation extends AddinHost {
           Math.min(textAnchor, headOffset),
           Math.max(textAnchor, headOffset),
         );
+        this.#syncTableCellTextSelection(editor);
         return;
       }
       if (!anchor) return;
@@ -4452,6 +4560,19 @@ class DocenPresentation extends AddinHost {
     if (!presJson || event.button !== 0) return;
     const point = this.#stagePointOf(event);
     if (!point) return;
+    // The selected table's grips outrank a live cell edit: DOCX can ask for a
+    // row/column/whole-table selection without first leaving the bridge.
+    const selectedTable = this.#tableMemberOf();
+    const grip =
+      selectedTable?.slide === point.slide
+        ? tableGripAt(selectedTable.member, point.x, point.y)
+        : null;
+    if (grip?.clickable) {
+      event.preventDefault();
+      event.stopPropagation();
+      this.#selectTableGrip(grip.kind, grip.index);
+      return;
+    }
     const child = hitSlide(slideHits(presJson.slides?.[point.slide] ?? {}), point.x, point.y);
     // A press outside the object under edit leaves the edit (Word's rule);
     // one inside just moves the caret — the textarea keeps the session. In a
@@ -4470,7 +4591,10 @@ class DocenPresentation extends AddinHost {
           const edit = this.#tableEdit!;
           if (edit.row === rect.cell.row && edit.col === rect.cell.col) {
             const editor = this.#textEditor;
-            if (editor) this.#placeTableCellCaret(editor, event.clientX, event.clientY);
+            if (editor) {
+              this.#placeTableCellCaret(editor, event.clientX, event.clientY);
+              this.#syncTableCellTextSelection(editor);
+            }
           } else {
             this.#moveTableCellEditing(point.x, point.y, undefined, {
               caret: { clientX: event.clientX, clientY: event.clientY },
