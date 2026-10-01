@@ -10,7 +10,7 @@
 // entries); native media playback stays with its follow-up batch.
 
 import { measureEmu, solidFillOf } from "@docen/core/geometry";
-import { emuToPx } from "@docen/layout";
+import { browserFontMetrics, emuToPx } from "@docen/layout";
 import type {
   ColorTransformOptions,
   FillOptions,
@@ -171,6 +171,7 @@ function projectSlide(
       slideNumber,
       slideCount,
       now: new Date(),
+      metrics: typeof document === "undefined" ? undefined : browserFontMetrics,
       ...context,
     }),
   };

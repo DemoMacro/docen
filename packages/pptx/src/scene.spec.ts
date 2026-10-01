@@ -1348,7 +1348,7 @@ describe("table style projection", () => {
     ],
   };
 
-  it("expands zero-height auto rows across the frame extent", () => {
+  it("leaves zero-height auto rows for the painter to grow", () => {
     const { slides } = project({
       slides: [
         {
@@ -1367,20 +1367,22 @@ describe("table style projection", () => {
     const member = slides[0]!.members[0]!;
     if (member.kind !== "table") throw new Error("expected a table member");
     const table = member.table as { rows: { heightPx: number }[] };
-    expect(table.rows.map((row) => row.heightPx)).toEqual([150, 150]);
+    // Projection has no browser canvas in Node; the painter repeats this
+    // layout with FontMetrics and grows both rows from cell content.
+    expect(table.rows.map((row) => row.heightPx)).toEqual([0, 0]);
   });
 
-  it("applies the themed default family to a flagged table", () => {
+  it("renders an unstyled table as PowerPoint's plain grid", () => {
     const table = tableOf({
       masters: [{ theme: { colorScheme: { accent1: "FF0000" } } }] as never,
       slides: [{ children: [tableChild({ ...grid, firstRow: true, bandRow: true })] }],
     });
     const [header, band1, band2] = table.rows.map((row) => row.cells);
-    expect(header![0]).toMatchObject({ fill: "FF0000" });
-    expect(inlineStyleOf(header![0]!)).toMatchObject({ bold: true, color: "FFFFFF" });
-    // Medium Style 2 tints its base body by 20% and its first band by 40%.
-    expect(band1![0]).toMatchObject({ fill: "FF6666", borders: { top: { color: "FFFFFF" } } });
-    expect(band2![0]).toMatchObject({ fill: "FF3333" });
+    expect(header![0]).toMatchObject({ borders: { top: { color: "000000" } } });
+    expect(header![0]!.fill).toBeUndefined();
+    expect(inlineStyleOf(header![0]!)).toEqual({ family: "Calibri", sizePx: 24 });
+    expect(band1![0]!.fill).toBeUndefined();
+    expect(band2![0]!.fill).toBeUndefined();
   });
 
   it("applies a derived Medium Style 2 GUID to its replacement accent", () => {

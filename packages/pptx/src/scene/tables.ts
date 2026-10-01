@@ -2,7 +2,13 @@
 // grid walk, frame-border distribution, and the painter's normalized payload.
 
 import { fillOpacityOf, measureEmu, outlineOf, solidFillOf } from "@docen/core/geometry";
-import { emuToPx, type LayoutBorderEdge, type LayoutDrawingMember } from "@docen/layout";
+import {
+  emuToPx,
+  stackBlocks,
+  TextMeasurer,
+  type LayoutBorderEdge,
+  type LayoutDrawingMember,
+} from "@docen/layout";
 import type { CellBorderOptions, TableOptions, TableCellOptions } from "@office-open/pptx";
 
 import { emuOf, type Xform } from "./geometry";
@@ -123,17 +129,43 @@ export function tableMember(
     if (edge === "left") return c === 0 ? b.left : b.insideV;
     return c + spanW >= nCols ? b.right : b.insideV;
   };
-  // OOXML permits h="0" for auto-sized rows. PowerPoint still lays the frame
-  // out over its graphicFrame extent; keep that geometry for painting and the
-  // editor's cell hit-testing instead of collapsing every row onto y=0.
-  const frameHeightPx = t.sy * emuOf(table.height);
   const declaredHeights = table.rows.map((row) => t.sy * emuOf(row.height));
-  const autoRows = declaredHeights.filter((height) => height <= 0).length;
-  const fixedHeightPx = declaredHeights.reduce((sum, height) => sum + Math.max(0, height), 0);
-  const autoHeightPx =
-    frameHeightPx > fixedHeightPx && autoRows > 0 ? (frameHeightPx - fixedHeightPx) / autoRows : 0;
+  const measurer = context.metrics ? new TextMeasurer(context.metrics) : undefined;
+  const rowNeed = table.rows.map(() => 0);
+  if (measurer) {
+    for (const origin of origins) {
+      const rules = regionRulesAt(style, origin.row, origin.col, nRows, nCols);
+      const innerWidth = Math.max(
+        1,
+        widths.slice(origin.col, origin.col + origin.spanW).reduce((sum, w) => sum + w, 0) -
+          emuToPx(measureEmu(origin.cell.margins?.left) ?? CELL_INSET_EMU.left) -
+          emuToPx(measureEmu(origin.cell.margins?.right) ?? CELL_INSET_EMU.right),
+      );
+      const blocks = textBlocks(
+        { paragraphs: origin.cell.children, text: origin.cell.text },
+        context,
+      );
+      for (const block of blocks) {
+        if (block.kind !== "paragraph") continue;
+        for (const inline of block.inline) {
+          if (inline.kind !== "text") continue;
+          if (rules.bold) inline.style.bold = true;
+          if (rules.textColor) inline.style.color = rules.textColor;
+        }
+      }
+      const need =
+        t.sy *
+        (stackBlocks(blocks, innerWidth, undefined, measurer).heightPx +
+          emuToPx(measureEmu(origin.cell.margins?.top) ?? CELL_INSET_EMU.top) +
+          emuToPx(measureEmu(origin.cell.margins?.bottom) ?? CELL_INSET_EMU.bottom));
+      const last = Math.min(origin.row + origin.spanH - 1, nRows - 1);
+      let declaredAbove = 0;
+      for (let r = origin.row; r < last; r++) declaredAbove += Math.max(0, declaredHeights[r]!);
+      rowNeed[last] = Math.max(rowNeed[last]!, need - declaredAbove);
+    }
+  }
   const rows = table.rows.map((row, r) => ({
-    heightPx: declaredHeights[r]! > 0 ? declaredHeights[r]! : autoHeightPx,
+    heightPx: Math.max(declaredHeights[r]!, rowNeed[r]!),
     cells: origins
       .filter((o) => o.row === r)
       .map(({ cell, col, spanW, spanH }) => {
@@ -203,7 +235,7 @@ export function tableMember(
     x: t.sx * emuOf(table.x) + t.dx,
     y: t.sy * emuOf(table.y) + t.dy,
     width: widths.reduce((a, w) => a + w, 0),
-    height: frameHeightPx,
+    height: rows.reduce((sum, row) => sum + row.heightPx, 0),
     ...(childPath ? { childPath } : {}),
     table: { columnWidthsPx: widths, rows },
   };

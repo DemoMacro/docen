@@ -616,8 +616,10 @@ export function resolveTableStyle(
   }
   const builtin = id ? BUILT_IN_STYLES[id] : undefined;
   if (builtin) return { flags, regions: builtinRegions(builtin, theme) };
-  // No styleId and unknown built-ins all land on PowerPoint's default look.
-  return { flags, regions: medium2(theme, 1) };
+  // An unstyled a:tbl is PowerPoint's plain black grid: no theme fill, no
+  // region overrides. The Medium Style 2 fallback painted bare office-open
+  // tables as if a style reference had been omitted but still applied.
+  return { flags, regions: gridRegions() };
 }
 
 /** The layered rules for one grid slot: wholeTbl base, then band, then the

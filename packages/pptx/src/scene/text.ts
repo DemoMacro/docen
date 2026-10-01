@@ -6,6 +6,7 @@ import {
   EMU_PER_PX,
   formatNumber,
   ptToPx,
+  type FontMetrics,
   type LayoutInline,
   type LayoutParagraph,
   type LayoutTextStyle,
@@ -85,6 +86,8 @@ export interface TextFieldContext {
   /** The presentation's custom table styles (p:tblStyleLst), keyed by
    * upper-cased style GUID. */
   tableStyles?: Record<string, TableStyleRegions>;
+  /** The layout metrics table auto-height uses before painting. */
+  metrics?: FontMetrics;
 }
 
 /** A body's paragraphs as projected blocks; the paragraph shape (not the
