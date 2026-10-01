@@ -4141,7 +4141,11 @@ class DocenPresentation extends AddinHost {
 
   /** The selection pane's row label: the cNvPr name when the child carries
    *  one, else the localized kind plus its position. */
-  #childLabel(child: SlideChild, index: number): { label: string; hidden: boolean } {
+  #childLabel(
+    child: SlideChild,
+    index: number,
+    path: readonly number[] = [],
+  ): { label: string; hidden: boolean } {
     const nv = nonVisualOf(child);
     const kind =
       "shape" in child
@@ -4166,8 +4170,9 @@ class DocenPresentation extends AddinHost {
                           ? "object"
                           : "table";
     const name = nv?.name?.trim();
+    const position = path.length > 0 ? path.at(-1)! + 1 : index + 1;
     return {
-      label: name || `${t(`ppt.select.${kind}`, this)} ${index + 1}`,
+      label: name || `${t(`ppt.select.${kind}`, this)} ${position}`,
       hidden: nv?.hidden === true,
     };
   }
@@ -4183,16 +4188,24 @@ class DocenPresentation extends AddinHost {
     if (head) head.textContent = t("ppt.select.title", this);
     const slide = this.#activeSlideIndex();
     const children = this.#presJson?.slides?.[slide]?.children ?? [];
-    list.innerHTML = children
-      .map((child, i) => {
-        const { label, hidden } = this.#childLabel(child, i);
-        const active =
-          this.#selection?.slide === slide &&
-          this.#selection.child === i &&
-          !this.#selection.member;
-        return `<div class="select-row" data-child="${i}" data-hidden="${hidden}"${active ? ' data-active="true"' : ""}><button class="select-eye" data-eye="${i}">${hidden ? "○" : "●"}</button><span class="select-name">${escapeHtml(label)}</span></div>`;
-      })
-      .join("");
+    const row = (child: SlideChild, root: number, path: readonly number[]): string => {
+      const { label, hidden } = this.#childLabel(child, root, path);
+      const member = path.join(".");
+      const active =
+        this.#selection?.slide === slide &&
+        this.#selection.child === root &&
+        pathsEqual(this.#selection.member ?? [], path);
+      const indent = `style="padding-inline-start:${16 + path.length * 18}px"`;
+      const memberAttr = path.length > 0 ? ` data-member="${member}"` : "";
+      const html = `<div class="select-row" data-child="${root}"${memberAttr} data-hidden="${hidden}"${active ? ' data-active="true"' : ""}${indent}><button class="select-eye" data-eye="${root}"${memberAttr}>${hidden ? "○" : "●"}</button><span class="select-name">${escapeHtml(label)}</span></div>`;
+      return "group" in child
+        ? html +
+            (child.group.children ?? [])
+              .map((item, index) => row(item, root, [...path, index]))
+              .join("")
+        : html;
+    };
+    list.innerHTML = children.map((child, index) => row(child, index, [])).join("");
   }
 
   /** One pane row per animation entry: target label, localized effect, and
@@ -4270,19 +4283,30 @@ class DocenPresentation extends AddinHost {
     const remove = target.closest<HTMLElement>("[data-animation-delete]");
     if (remove) return this.#deleteAnimation(Number(remove.dataset.animationDelete));
     const eye = target.closest<HTMLElement>("[data-eye]");
-    if (eye) return this.#toggleChildHidden(Number(eye.dataset.eye));
+    if (eye) return this.#toggleChildHidden(Number(eye.dataset.eye), this.#pathOf(eye));
     const row = target.closest<HTMLElement>("[data-child]");
     if (!row) return;
     const slide = this.#activeSlideIndex();
-    this.#select({ slide, child: Number(row.dataset.child) });
+    this.#select({
+      slide,
+      child: Number(row.dataset.child),
+      ...(row.dataset.member ? { member: this.#pathOf(row)! } : {}),
+    });
     this.#revealSlide(slide);
   };
 
+  /** A selection-pane path (`1.2`) as a fresh immutable member path. */
+  #pathOf(element: HTMLElement): number[] | undefined {
+    const value = element.dataset.member;
+    return value ? value.split(".").map(Number) : undefined;
+  }
+
   /** The eye toggle: cNvPr @hidden on the child (tables have no surface and
    *  stay put) as one reversible edit — hidden objects drop out of the paint. */
-  #toggleChildHidden(index: number): void {
+  #toggleChildHidden(index: number, path?: readonly number[]): void {
     const slide = this.#activeSlideIndex();
-    const child = this.#presJson?.slides?.[slide]?.children?.[index];
+    const root = this.#presJson?.slides?.[slide]?.children?.[index];
+    const child = root ? this.#childAt(root, path) : undefined;
     const nv = child ? nonVisualOf(child) : null;
     if (!nv) return;
     const before = nv.hidden === true;

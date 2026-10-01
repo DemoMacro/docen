@@ -19,6 +19,7 @@ import {
   makePenStroke,
   makeObject,
   makeMediaFrame,
+  nonVisualOf,
   makeSmartArt,
   makeChart,
   objectProgIdOf,
@@ -315,6 +316,19 @@ describe("shapeTextOf / writeShapeText", () => {
     const body = shape.textBody as TextBodyOptions;
     expect(body.text).toBeUndefined();
     expect(shapeTextOf(shape)).toBe("after");
+  });
+});
+
+describe("nonVisualOf", () => {
+  it("reads cNvPr from every drawing-backed child kind", () => {
+    const children = [
+      { table: { name: "Table", hidden: true, rows: [] } },
+      { chart: { name: "Chart" } },
+      { ole: { name: "Workbook", hidden: true } },
+    ] as unknown as SlideChild[];
+    expect(nonVisualOf(children[0]!)).toMatchObject({ name: "Table", hidden: true });
+    expect(nonVisualOf(children[1]!)).toMatchObject({ name: "Chart" });
+    expect(nonVisualOf(children[2]!)).toMatchObject({ name: "Workbook", hidden: true });
   });
 });
 

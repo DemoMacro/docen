@@ -89,12 +89,20 @@ export function childRunsOf(child: SlideChild): TextRunOptions[] {
 export function nonVisualOf(child: SlideChild): NonVisualDrawingPropertiesOptions | null {
   if ("shape" in child) return child.shape;
   if ("picture" in child) return child.picture;
+  if ("table" in child) return child.table;
+  if ("chart" in child)
+    return {
+      name: child.chart.name,
+      description: child.chart.description,
+      hidden: child.chart.hidden,
+    };
   if ("line" in child) return child.line;
   if ("connector" in child) return child.connector;
   if ("group" in child) return child.group;
   if ("smartart" in child) return child.smartart;
   if ("video" in child) return child.video;
   if ("audio" in child) return child.audio;
+  if ("ole" in child) return child.ole;
   return null;
 }
 
