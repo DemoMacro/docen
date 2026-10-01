@@ -1586,6 +1586,11 @@ class DocenPresentation extends AddinHost {
           this.#layoutTableCellEditor(editor);
           return;
         }
+        // Typing collapses the block to the caret (Word's rule) — the
+        // leftover highlights would otherwise ghost over the edited cell.
+        if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
+          this.#setTableSelection(null);
+        }
       }
       if (event.key === "Tab") {
         event.stopPropagation();
@@ -4181,15 +4186,22 @@ class DocenPresentation extends AddinHost {
       if (this.#selection?.slide !== point.slide || this.#selection.child !== child)
         this.#select(null);
       else if (this.#tableEdit) {
-        // The hop re-focuses the cell editor; the pointerdown's default focus
-        // move runs after this handler and would steal the caret back.
+        // The editor owns every press: preventing the default keeps the
+        // browser's native textarea drag-selection from racing the block
+        // selection, and the caret is placed by hand below.
         event.preventDefault();
         const table = this.#tableMemberOf();
         const rect = table ? this.#cellRectAt(table.member, point.x, point.y) : null;
         if (table && rect) {
-          this.#moveTableCellEditing(point.x, point.y, undefined, {
-            caret: { clientX: event.clientX, clientY: event.clientY },
-          });
+          const edit = this.#tableEdit!;
+          if (edit.row === rect.cell.row && edit.col === rect.cell.col) {
+            const editor = this.#textEditor;
+            if (editor) this.#placeTableCellCaret(editor, event.clientX, event.clientY);
+          } else {
+            this.#moveTableCellEditing(point.x, point.y, undefined, {
+              caret: { clientX: event.clientX, clientY: event.clientY },
+            });
+          }
           this.#startTableCellDrag(event, table);
         }
       }
