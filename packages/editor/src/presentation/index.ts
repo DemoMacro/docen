@@ -281,6 +281,7 @@ const WIRED_COMMANDS: ReadonlySet<string> = new Set([
   "zoom-100",
   "undo",
   "redo",
+  "save",
   "save-as",
   "paste",
   "new-slide",
@@ -690,10 +691,10 @@ class DocenPresentation extends AddinHost {
       : initial
         ? `<span class="avatar">${initial}</span>`
         : "";
-    // QAT undo/redo follow the edit stack; save stays disabled-honest (the
-    // file lives on disk — Save As carries the edits out).
+    // QAT undo/redo follow the edit stack; Save hands the browser the current
+    // package (the same Save As pipeline) whenever a deck is loaded.
     const qat = [
-      { id: "save", icon: "save", disabled: true },
+      { id: "save", icon: "save", disabled: !this.#presJson },
       { id: "undo", icon: "undo", disabled: !this.#history.canUndo },
       { id: "redo", icon: "redo", disabled: !this.#history.canRedo },
     ]
@@ -770,6 +771,7 @@ class DocenPresentation extends AddinHost {
     else if (name === "zoom-100") this.#setZoom(100);
     else if (name === "undo") this.#undo();
     else if (name === "redo") this.#redo();
+    else if (name === "save") void this.#saveAs();
     else if (name === "save-as") void this.#saveAs();
     else if (name === "new-slide") this.#insertSlide();
     else if (name === "delete-slide") this.#deleteSlide();
@@ -3081,6 +3083,10 @@ class DocenPresentation extends AddinHost {
     ) {
       event.preventDefault();
       return this.#redo();
+    }
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+      event.preventDefault();
+      return void this.#saveAs();
     }
     if (
       (event.key === "Delete" || event.key === "Backspace") &&
