@@ -97,7 +97,9 @@ import {
   makeTextBox,
   makeFieldBox,
   makeLine,
+  makeObject,
   makePenStroke,
+  objectProgIdOf,
   makeMediaFrame,
   makeSmartArt,
   makeChart,
@@ -262,6 +264,30 @@ const readFileAsDataURL = (file: File): Promise<string> =>
     reader.readAsDataURL(file);
   });
 
+/** Render the embedded object's browser-visible icon as a real PNG. The OLE
+ *  payload stays source bytes; this preview is only the `p:pic` the file
+ *  format requires. */
+async function objectIconDataUrl(sourceName: string): Promise<string> {
+  const extension = (sourceName.split(".").pop() ?? "FILE").toUpperCase().slice(0, 4);
+  const safeExtension = extension.replace(/[<>&"']/g, "");
+  const svg =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">' +
+    '<path d="M24 8h54l26 26v86a8 8 0 0 1-8 8H24a8 8 0 0 1-8-8V16a8 8 0 0 1 8-8z" fill="#fff" stroke="#9aa5b1" stroke-width="4"/>' +
+    '<path d="M78 8v26h26z" fill="#e8f0fe" stroke="#9aa5b1" stroke-width="4"/>' +
+    `<text x="64" y="86" font-family="Segoe UI, sans-serif" font-size="28" font-weight="600" fill="#4472c4" text-anchor="middle">${safeExtension}</text>` +
+    "</svg>";
+  const image = new Image();
+  image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+  await image.decode();
+  const canvas = document.createElement("canvas");
+  canvas.width = 128;
+  canvas.height = 128;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("canvas unavailable");
+  context.drawImage(image, 0, 0);
+  return canvas.toDataURL("image/png");
+}
+
 /** One reversible edit: closures over the touched child with the before and
  *  after values captured (no document snapshots — the deck holds media). */
 interface DeckEdit {
@@ -354,6 +380,7 @@ const WIRED_COMMANDS: ReadonlySet<string> = new Set([
   "symbol",
   "wordart",
   "online-picture",
+  "object",
   "section",
   "header-footer",
   "layout",
@@ -514,6 +541,9 @@ class DocenPresentation extends AddinHost {
       .querySelector<HTMLInputElement>("#media-input")
       ?.addEventListener("change", this.#onMediaChange as EventListener);
     root
+      .querySelector<HTMLInputElement>("#object-input")
+      ?.addEventListener("change", this.#onObjectChange as EventListener);
+    root
       .querySelector("docen-find-replace-dialog")
       ?.addEventListener("find-replace:action", this.#onFindReplace as EventListener);
     root
@@ -626,6 +656,9 @@ class DocenPresentation extends AddinHost {
     this.shadowRoot
       ?.querySelector<HTMLInputElement>("#media-input")
       ?.removeEventListener("change", this.#onMediaChange as EventListener);
+    this.shadowRoot
+      ?.querySelector<HTMLInputElement>("#object-input")
+      ?.removeEventListener("change", this.#onObjectChange as EventListener);
     this.shadowRoot
       ?.querySelector("docen-find-replace-dialog")
       ?.removeEventListener("find-replace:action", this.#onFindReplace as EventListener);
@@ -923,6 +956,7 @@ class DocenPresentation extends AddinHost {
     else if (name === "layout") this.#openLayoutPanel();
     else if (name === "reset") this.#resetSlideToLayout();
     else if (name === "video" || name === "audio") this.#pickMedia();
+    else if (name === "object") this.#pickObject();
     else if (name === "select") this.#toggleSelectionPane();
     else if (name === "draw-select") this.#armDrawTool("select");
     else if (name === "draw-eraser") this.#armDrawTool("eraser");
@@ -4092,7 +4126,9 @@ class DocenPresentation extends AddinHost {
                       ? "video"
                       : "audio" in child
                         ? "audio"
-                        : "table";
+                        : "ole" in child
+                          ? "object"
+                          : "table";
     const name = nv?.name?.trim();
     return {
       label: name || `${t(`ppt.select.${kind}`, this)} ${index + 1}`,
@@ -4231,6 +4267,31 @@ class DocenPresentation extends AddinHost {
   #pickMedia(): void {
     this.shadowRoot?.querySelector<HTMLInputElement>("#media-input")?.click();
   }
+
+  #pickObject(): void {
+    this.shadowRoot?.querySelector<HTMLInputElement>("#object-input")?.click();
+  }
+
+  /** File-input object path: native bytes enter the real OLE embed; the
+   *  generated icon is the `p:pic` PowerPoint needs to reopen the frame. */
+  readonly #onObjectChange = async (event: Event): Promise<void> => {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = "";
+    const pres = this.#pres;
+    if (!file || !pres) return;
+    const icon = await objectIconDataUrl(file.name);
+    this.#insertChild(
+      makeObject(
+        pres.widthPx,
+        pres.heightPx,
+        new Uint8Array(await file.arrayBuffer()),
+        icon,
+        file.name,
+        objectProgIdOf(file.name),
+      ),
+    );
+  };
 
   /** File-input media path: native bytes enter the source model unchanged;
    *  the projection supplies the stable poster/player canvas. */

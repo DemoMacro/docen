@@ -576,6 +576,52 @@ export function makePicture(
   };
 }
 
+/** PowerPoint's embedded-object icon: source bytes stay an OLE embed, while
+ *  the generated PNG is only the frame's `p:pic` preview. */
+const OBJECT_PROG_IDS: ReadonlyMap<string, string> = new Map([
+  ["doc", "Word.Document.8"],
+  ["docx", "Word.Document.12"],
+  ["xls", "Excel.Sheet.8"],
+  ["xlsx", "Excel.Sheet.12"],
+  ["ppt", "PowerPoint.Show.8"],
+  ["pptx", "PowerPoint.Show.12"],
+  ["pdf", "Acrobat.Document.DC"],
+  ["txt", "txtfile"],
+  ["zip", "CompressedFolder"],
+]);
+
+/** The registered OLE server most closely associated with a source file. */
+export function objectProgIdOf(sourceName: string): string {
+  const extension = sourceName.split(".").pop()?.toLowerCase() ?? "";
+  return OBJECT_PROG_IDS.get(extension) ?? "Package";
+}
+
+export function makeObject(
+  slideWidthPx: number,
+  slideHeightPx: number,
+  data: Uint8Array,
+  iconData: string,
+  sourceName: string,
+  progId = "Package",
+): SlideChild {
+  const size = 96;
+  return {
+    ole: {
+      x: emu((slideWidthPx - size) / 2),
+      y: emu((slideHeightPx - size) / 2),
+      width: emu(size),
+      height: emu(size),
+      name: sourceName,
+      progId,
+      showAsIcon: true,
+      imageWidth: emu(size),
+      imageHeight: emu(size),
+      embed: { data },
+      iconImage: { data: iconData, type: "png" },
+    },
+  };
+}
+
 /** PowerPoint's fresh 3×3 table: centered, 60% of the slide wide, equal
  *  columns, each row PowerPoint's fresh 0.35" height. The GUID is the
  *  built-in Medium Style 2 — Accent 1 that PowerPoint applies by default. */

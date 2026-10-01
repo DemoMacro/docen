@@ -119,6 +119,7 @@ function transformOf(
   if ("table" in child) return child.table;
   if ("chart" in child) return child.chart;
   if ("smartart" in child) return child.smartart;
+  if ("ole" in child) return child.ole;
   if ("video" in child) return child.video;
   if ("audio" in child) return child.audio;
   return undefined;

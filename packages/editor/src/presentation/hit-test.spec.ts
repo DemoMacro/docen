@@ -43,15 +43,26 @@ describe("slideHits", () => {
             type: "mp4",
           },
         },
+        {
+          ole: {
+            x: px(12),
+            y: px(14),
+            width: px(64),
+            height: px(32),
+            embed: { data: new Uint8Array() },
+            iconImage: { data: "", type: "png" },
+          },
+        },
         // Unpainted variants contribute no hit box.
         { smartart: { x: px(3), y: px(4), width: px(70), height: px(40), nodes: [] } },
       ],
     } as unknown as SlideOptions;
     const hits = slideHits(slide);
-    expect(hits.map((h) => h.child)).toEqual([0, 1, 2, 3, 4, 5]);
+    expect(hits.map((h) => h.child)).toEqual([0, 1, 2, 3, 4, 5, 6]);
     expect(hits[0]!.box).toEqual({ x: 10, y: 20, width: 100, height: 50 });
     expect(hits[4]!.box).toEqual({ x: 8, y: 6, width: 50, height: 30 });
-    expect(hits[5]!.box).toEqual({ x: 3, y: 4, width: 70, height: 40 });
+    expect(hits[5]!.box).toEqual({ x: 12, y: 14, width: 64, height: 32 });
+    expect(hits[6]!.box).toEqual({ x: 3, y: 4, width: 70, height: 40 });
     // A line's box spans its endpoints' bounding rectangle.
     expect(hits[1]!.box).toEqual({ x: 0, y: 10, width: 40, height: 20 });
   });
@@ -138,6 +149,9 @@ describe("rotateChild", () => {
     const child = { table: { x: px(0), y: px(0), width: px(10), height: px(10), rows: [] } };
     rotateChild(child, 45);
     expect("rotation" in child.table).toBe(false);
+    const ole = { ole: { x: px(0), y: px(0), width: px(10), height: px(10) } };
+    rotateChild(ole, 45);
+    expect("rotation" in ole.ole).toBe(false);
   });
 
   it("captures and restores the spin", () => {

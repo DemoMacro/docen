@@ -9,7 +9,7 @@ import type { GroupOptions, SlideChild } from "@office-open/pptx";
 import { IDENTITY, emuOf, geometryOf, type Xform } from "./geometry";
 import { endpointMembers } from "./lines";
 import { mediaMember } from "./media";
-import { pictureMember } from "./pictures";
+import { pictureMember, pictureSrcOf } from "./pictures";
 import { shapeMembers } from "./shapes";
 import { smartArtMember } from "./smartart";
 import { tableMember } from "./tables";
@@ -35,7 +35,9 @@ function hiddenOf(child: SlideChild): boolean {
                   ? child.video
                   : "audio" in child
                     ? child.audio
-                    : undefined;
+                    : "ole" in child
+                      ? child.ole
+                      : undefined;
   return nv?.hidden === true;
 }
 
@@ -90,6 +92,19 @@ export function childMembers(
         ...(cp ? { childPath: cp } : {}),
         chart: c,
       });
+    } else if ("ole" in child) {
+      const o = child.ole;
+      const src = o.iconImage ? pictureSrcOf(o.iconImage.data, o.iconImage.type) : undefined;
+      if (src)
+        out.push({
+          kind: "picture",
+          x: t.sx * emuOf(o.x) + t.dx,
+          y: t.sy * emuOf(o.y) + t.dy,
+          width: t.sx * emuOf(o.width),
+          height: t.sy * emuOf(o.height),
+          src,
+          ...(cp ? { childPath: cp } : {}),
+        });
     }
     for (let index = start; index < out.length; index++) {
       out[index]!.sourceChildIndex = i;

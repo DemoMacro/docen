@@ -17,9 +17,11 @@ import {
   makeFieldBox,
   makeLine,
   makePenStroke,
+  makeObject,
   makeMediaFrame,
   makeSmartArt,
   makeChart,
+  objectProgIdOf,
   reorderChild,
   setLineSpacingPercent,
   setParagraphAlignment,
@@ -434,6 +436,36 @@ describe("makeTable", () => {
     expect(table.rows).toHaveLength(3);
     expect(table.rows[0]!.cells).toHaveLength(3);
     expect(table.x).toBe(Math.round(((1280 - 768) / 2) * EMU_PER_PX));
+  });
+});
+
+describe("makeObject", () => {
+  it("embeds source bytes with a PowerPoint-style icon frame", () => {
+    type OleVariant = Extract<SlideChild, { ole: unknown }>["ole"];
+    const data = new Uint8Array([1, 2, 3]);
+    const { ole } = makeObject(
+      1280,
+      720,
+      data,
+      "data:image/png;base64,AAA",
+      "Report.xlsx",
+      "Excel.Sheet.12",
+    ) as { ole: OleVariant };
+    expect(ole.x).toBe(Math.round(((1280 - 96) / 2) * EMU_PER_PX));
+    expect(ole.y).toBe(Math.round(((720 - 96) / 2) * EMU_PER_PX));
+    expect(ole.width).toBe(96 * EMU_PER_PX);
+    expect(ole.height).toBe(96 * EMU_PER_PX);
+    expect(ole.name).toBe("Report.xlsx");
+    expect(ole.progId).toBe("Excel.Sheet.12");
+    expect(ole.showAsIcon).toBe(true);
+    expect(ole.embed?.data).toBe(data);
+    expect(ole.iconImage).toEqual({ data: "data:image/png;base64,AAA", type: "png" });
+  });
+
+  it("maps familiar documents to their registered OLE servers", () => {
+    expect(objectProgIdOf("Budget.xlsx")).toBe("Excel.Sheet.12");
+    expect(objectProgIdOf("Archive.zip")).toBe("CompressedFolder");
+    expect(objectProgIdOf("Model.xyz")).toBe("Package");
   });
 });
 

@@ -1,4 +1,5 @@
 import { EMU_PER_PX } from "@docen/layout";
+import { generatePresentation, parsePresentation } from "@docen/pptx";
 import type { PresentationOptions, SlideChild } from "@office-open/pptx";
 import { describe, expect, it } from "vitest";
 
@@ -1366,6 +1367,89 @@ describe("live field projection", () => {
 });
 
 describe("table style projection", () => {
+  it("round-trips a real OLE object through package bytes", async () => {
+    const source: PresentationOptions = {
+      slides: [
+        {
+          children: [
+            {
+              ole: {
+                x: 0,
+                y: 0,
+                width: 914400,
+                height: 914400,
+                name: "Report.xlsx",
+                progId: "Excel.Sheet.12",
+                showAsIcon: true,
+                embed: { data: new Uint8Array([1, 2, 3]) },
+                iconImage: { data: pngSrc, type: "png" },
+              },
+            },
+          ],
+        },
+      ],
+    };
+    const bytes = await generatePresentation(source, { type: "uint8array" });
+    const parsed = await parsePresentation(bytes);
+    const child = parsed.slides?.[0]?.children?.[0];
+    if (!child || !("ole" in child)) throw new Error("OLE child was lost");
+    expect(child.ole.name).toBe("Report.xlsx");
+    expect(child.ole.progId).toBe("Excel.Sheet.12");
+    expect(new Uint8Array(child.ole.embed?.data as ArrayBufferLike)).toEqual(
+      new Uint8Array([1, 2, 3]),
+    );
+    expect(child.ole.iconImage?.type).toBe("png");
+  });
+
+  it("projects an OLE object's required icon as its paint surface", () => {
+    const { slides } = project({
+      slides: [
+        {
+          children: [
+            {
+              ole: {
+                x: 0,
+                y: 0,
+                width: 914400,
+                height: 914400,
+                name: "Report.xlsx",
+                showAsIcon: true,
+                embed: { data: png },
+                iconImage: { data: pngSrc, type: "png" },
+              },
+            },
+          ],
+        },
+      ],
+    });
+    expect(slides[0]!.members).toEqual([
+      { kind: "picture", x: 0, y: 0, width: 96, height: 96, src: pngSrc, sourceChildIndex: 0 },
+    ]);
+  });
+
+  it("drops a hidden OLE object", () => {
+    const { slides } = project({
+      slides: [
+        {
+          children: [
+            {
+              ole: {
+                x: 0,
+                y: 0,
+                width: 914400,
+                height: 914400,
+                hidden: true,
+                embed: { data: png },
+                iconImage: { data: pngSrc, type: "png" },
+              },
+            },
+          ],
+        },
+      ],
+    });
+    expect(slides[0]!.members).toEqual([]);
+  });
+
   const tableChild = (table: Record<string, unknown>): SlideChild => ({ table }) as never;
   const tableOf = (pres: PresentationOptions) => {
     const { slides } = project(pres);

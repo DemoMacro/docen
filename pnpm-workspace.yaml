@@ -3,3 +3,5 @@ packages:
   - "!**/test/**"
 allowBuilds:
   esbuild: true
+patchedDependencies:
+  "@office-open/pptx@0.14.6": patches/@office-open__pptx@0.14.6.patch

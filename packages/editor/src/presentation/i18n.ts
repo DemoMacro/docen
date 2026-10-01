@@ -247,6 +247,7 @@ export const presentationEn: AdditionalLanguage = {
     "ppt.select.smartart": "SmartArt",
     "ppt.select.video": "Video",
     "ppt.select.audio": "Audio",
+    "ppt.select.object": "Object",
     // --- Status bar ---
     "ppt.status.slide-of": "Slide {page} of {total}",
   },
@@ -489,6 +490,7 @@ export const presentationZhCN: AdditionalLanguage = {
     "ppt.select.smartart": "SmartArt",
     "ppt.select.video": "视频",
     "ppt.select.audio": "音频",
+    "ppt.select.object": "对象",
     // --- 状态栏 ---
     "ppt.status.slide-of": "第 {page} 张，共 {total} 张",
   },

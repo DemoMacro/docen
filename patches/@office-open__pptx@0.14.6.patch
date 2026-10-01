@@ -1,0 +1,12 @@
+diff --git a/dist/index.mjs b/dist/index.mjs
+index 10e7e378ce58a4a47b21b22ae36f8b2b5439d12d..cff8efb5d677968afc25f83c4ac326bb53edf4dd 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -3563,6 +3563,7 @@ function parseGraphicFrameChild(el, ctx) {
+ 	const uri = attr(graphicData, "uri") ?? "";
+ 	if (uri.includes("/chart")) return { chart: chartDesc.parse(el, ctx) };
+ 	if (uri.includes("/diagram")) return { smartart: smartArtDesc.parse(el, ctx) };
++	if (uri.includes("/ole")) return { ole: oleDesc.parse(el, ctx) };
+ 	if (findChild(graphicData, "a:tbl")) return { table: tableDesc.parse(el, ctx) };
+ 	return { rawXml: stringifyElement(el) };
+ }

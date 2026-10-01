@@ -4,6 +4,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  '@office-open/pptx@0.14.6':
+    hash: 73f62f3b4683d34094445f613925d6ac2d0f95a803a3b1141750126d1d8bac57
+    path: patches/@office-open__pptx@0.14.6.patch
+
 importers:
 
   .:
@@ -170,7 +175,7 @@ importers:
         version: 0.14.6
       '@office-open/pptx':
         specifier: 0.14.6
-        version: 0.14.6
+        version: 0.14.6(patch_hash=73f62f3b4683d34094445f613925d6ac2d0f95a803a3b1141750126d1d8bac57)
 
   packages/pretext: {}
 
@@ -2791,7 +2796,7 @@ snapshots:
       '@office-open/core': 0.14.5
       '@office-open/xml': 0.14.5
 
-  '@office-open/pptx@0.14.6':
+  '@office-open/pptx@0.14.6(patch_hash=73f62f3b4683d34094445f613925d6ac2d0f95a803a3b1141750126d1d8bac57)':
     dependencies:
       '@office-open/core': 0.14.6
       '@office-open/xml': 0.14.6
