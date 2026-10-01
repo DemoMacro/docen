@@ -456,6 +456,74 @@ export const presentationStyles = css`
     color: inherit;
     cursor: pointer;
   }
+  dialog.insert-dialog {
+    width: min(520px, calc(100vw - 48px));
+    padding: 0;
+    border: 1px solid var(--docen-color-divider, #e1e1e1);
+    border-radius: 8px;
+    background: var(--docen-color-bg, #fff);
+    color: inherit;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.22);
+  }
+  .dialog-head,
+  .dialog-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 12px 16px;
+  }
+  .dialog-head {
+    border-bottom: 1px solid var(--docen-color-divider, #e1e1e1);
+  }
+  .dialog-head button,
+  .dialog-actions button,
+  .symbol-grid button {
+    border: 1px solid var(--docen-color-divider, #d1d1d1);
+    border-radius: 4px;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+  }
+  .dialog-head button {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: none;
+    font-size: 18px;
+  }
+  .dialog-actions button,
+  .symbol-grid button {
+    padding: 6px 12px;
+  }
+  .dialog-body {
+    padding: 16px;
+    display: grid;
+    gap: 14px;
+  }
+  .dialog-field {
+    display: grid;
+    gap: 5px;
+    font-size: 13px;
+  }
+  .dialog-field input {
+    min-width: 0;
+    padding: 7px 9px;
+    border: 1px solid var(--docen-color-divider, #d1d1d1);
+    border-radius: 4px;
+    background: transparent;
+    color: inherit;
+  }
+  .symbol-grid {
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    gap: 5px;
+  }
+  .symbol-grid button {
+    aspect-ratio: 1;
+    padding: 0;
+    font-size: 17px;
+  }
 `;
 
 /** The element surface the template binds to — the ref targets only. The

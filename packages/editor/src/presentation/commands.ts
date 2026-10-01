@@ -373,6 +373,57 @@ export function makeTextBox(
   };
 }
 
+/** A centered WordArt box: Impact-style display text with a transparent
+ *  frame so only the styled run is visible, like PowerPoint's fresh WordArt. */
+export function makeWordArt(slideWidthPx: number, slideHeightPx: number, text: string): SlideChild {
+  const width = slideWidthPx * 0.6;
+  const height = slideHeightPx * 0.18;
+  return {
+    shape: {
+      x: emu((slideWidthPx - width) / 2),
+      y: emu((slideHeightPx - height) / 2),
+      width: emu(width),
+      height: emu(height),
+      properties: { geometry: "rect", fill: { type: "none" } },
+      textBody: {
+        paragraphs: [
+          {
+            properties: { alignment: "center" },
+            children: [{ text, bold: true, size: 54, font: "Impact", fill: "1F6CBD" }],
+          },
+        ],
+      },
+    },
+  };
+}
+
+/** A centered, frameless symbol box. A Unicode font keeps the insertion
+ *  honest across the symbol grid's arrows, math, currency and dingbats. */
+export function makeSymbol(
+  slideWidthPx: number,
+  slideHeightPx: number,
+  symbol: string,
+): SlideChild {
+  const size = Math.min(160, slideWidthPx * 0.18);
+  return {
+    shape: {
+      x: emu((slideWidthPx - size) / 2),
+      y: emu((slideHeightPx - size) / 2),
+      width: emu(size),
+      height: emu(size),
+      properties: { geometry: "rect", fill: { type: "none" } },
+      textBody: {
+        paragraphs: [
+          {
+            properties: { alignment: "center" },
+            children: [{ text: symbol, size: 72, font: "Arial Unicode MS" }],
+          },
+        ],
+      },
+    },
+  };
+}
+
 /** PowerPoint's fresh 2"-square preset shape, centered, in the same white +
  *  hairline dressing as the text box (an empty text body keeps double-click
  *  text editing available). */

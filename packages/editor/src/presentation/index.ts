@@ -89,7 +89,9 @@ import {
   insertSlideAt,
   makePicture,
   makeShape,
+  makeSymbol,
   makeTable,
+  makeWordArt,
   makeTextBox,
   makeFieldBox,
   makeLine,
@@ -334,6 +336,10 @@ const WIRED_COMMANDS: ReadonlySet<string> = new Set([
   "slide-number",
   "date-time",
   "select",
+  "smartart",
+  "symbol",
+  "wordart",
+  "online-picture",
   ...TEXT_FORMAT_COMMANDS,
 ]);
 
@@ -432,6 +438,9 @@ class DocenPresentation extends AddinHost {
     timings: true,
   };
   #showSetupDialog: HTMLDialogElement | null = null;
+  #symbolDialog: HTMLDialogElement | null = null;
+  #wordArtDialog: HTMLDialogElement | null = null;
+  #onlinePictureDialog: HTMLDialogElement | null = null;
   #langObserver?: MutationObserver;
   #unsubLang?: () => void;
   #scrollRaf?: number;
@@ -858,6 +867,9 @@ class DocenPresentation extends AddinHost {
     } else if (name === "animation-pane") this.#toggleAnimationPane();
     else if (name === "slide-number" || name === "date-time") this.#insertFieldBox(name);
     else if (name === "smartart") this.#insertSmartArt();
+    else if (name === "symbol") this.#openSymbolDialog();
+    else if (name === "wordart") this.#openWordArtDialog();
+    else if (name === "online-picture") this.#openOnlinePictureDialog();
     else if (name === "video" || name === "audio") this.#pickMedia();
     else if (name === "select") this.#toggleSelectionPane();
     else if (TEXT_FORMAT_COMMANDS.has(name)) this.#applyTextFormat(name, event.detail?.value);
@@ -2189,6 +2201,153 @@ class DocenPresentation extends AddinHost {
     const pres = this.#pres;
     if (!pres) return;
     this.#insertChild(makeSmartArt(pres.widthPx, pres.heightPx));
+  }
+
+  /** A compact Unicode palette plus a direct character field. The insertion
+   *  is an ordinary shape, so the symbol stays editable and undoable. */
+  #openSymbolDialog(): void {
+    if (!this.#pres || this.#symbolDialog?.open) return;
+    const symbols = [
+      "×",
+      "÷",
+      "±",
+      "≤",
+      "≥",
+      "≠",
+      "∞",
+      "√",
+      "∑",
+      "π",
+      "©",
+      "®",
+      "™",
+      "°",
+      "→",
+      "←",
+      "↑",
+      "↓",
+      "★",
+      "☆",
+      "♥",
+      "✓",
+      "✗",
+      "•",
+    ];
+    const dialog = document.createElement("dialog");
+    dialog.className = "insert-dialog";
+    dialog.innerHTML = `
+      <div class="dialog-head"><strong>${escapeHtml(t("ppt.symbol.title", this))}</strong><button data-dialog-close>×</button></div>
+      <div class="dialog-body"><div class="symbol-grid">${symbols.map((symbol) => `<button data-symbol="${escapeHtml(symbol)}">${escapeHtml(symbol)}</button>`).join("")}</div><label class="dialog-field"><span>${escapeHtml(t("ppt.symbol.custom", this))}</span><input id="symbol-value" maxlength="8" value="©"></label></div>
+      <div class="dialog-actions"><button data-dialog-cancel>${escapeHtml(t("ppt.dialog.cancel", this))}</button><button data-symbol-insert>${escapeHtml(t("ppt.dialog.insert", this))}</button></div>
+    `;
+    dialog.addEventListener("click", (event) => {
+      const target = event.target as HTMLElement;
+      if (target.closest("[data-dialog-close]") || target.closest("[data-dialog-cancel]"))
+        return dialog.close();
+      const symbol = target.closest<HTMLElement>("[data-symbol]")?.dataset.symbol;
+      if (symbol) {
+        this.#insertChild(makeSymbol(this.#pres!.widthPx, this.#pres!.heightPx, symbol));
+        dialog.close();
+      } else if (target.closest("[data-symbol-insert]")) {
+        const value = dialog.querySelector<HTMLInputElement>("#symbol-value")?.value;
+        if (value) {
+          this.#insertChild(makeSymbol(this.#pres!.widthPx, this.#pres!.heightPx, value));
+          dialog.close();
+        }
+      }
+    });
+    this.#showModalDialog(dialog, () => (this.#symbolDialog = null));
+    this.#symbolDialog = dialog;
+  }
+
+  /** Fresh WordArt: a transparent, centered display-text box selected for
+   *  immediate in-place editing. */
+  #openWordArtDialog(): void {
+    if (!this.#pres || this.#wordArtDialog?.open) return;
+    const dialog = document.createElement("dialog");
+    dialog.className = "insert-dialog";
+    dialog.innerHTML = `
+      <div class="dialog-head"><strong>${escapeHtml(t("ppt.wordart.title", this))}</strong><button data-dialog-close>×</button></div>
+      <div class="dialog-body"><label class="dialog-field"><span>${escapeHtml(t("ppt.wordart.text", this))}</span><input id="wordart-value" value="${escapeHtml(t("ppt.wordart.default", this))}"></label></div>
+      <div class="dialog-actions"><button data-dialog-cancel>${escapeHtml(t("ppt.dialog.cancel", this))}</button><button data-wordart-insert>${escapeHtml(t("ppt.dialog.insert", this))}</button></div>
+    `;
+    dialog.addEventListener("click", (event) => {
+      const target = event.target as HTMLElement;
+      if (target.closest("[data-dialog-close]") || target.closest("[data-dialog-cancel]"))
+        return dialog.close();
+      if (target.closest("[data-wordart-insert]")) {
+        const value = dialog.querySelector<HTMLInputElement>("#wordart-value")?.value.trim();
+        if (value) {
+          this.#insertChild(makeWordArt(this.#pres!.widthPx, this.#pres!.heightPx, value));
+          dialog.close();
+        }
+      }
+    });
+    this.#showModalDialog(dialog, () => (this.#wordArtDialog = null));
+    this.#wordArtDialog = dialog;
+  }
+
+  /** Online pictures persist as real image bytes in the PPTX: the URL is
+   *  fetched, typed by MIME, converted to a data URL, measured and inserted. */
+  #openOnlinePictureDialog(): void {
+    if (!this.#pres || this.#onlinePictureDialog?.open) return;
+    const dialog = document.createElement("dialog");
+    dialog.className = "insert-dialog";
+    dialog.innerHTML = `
+      <div class="dialog-head"><strong>${escapeHtml(t("ppt.online-picture.title", this))}</strong><button data-dialog-close>×</button></div>
+      <div class="dialog-body"><label class="dialog-field"><span>${escapeHtml(t("ppt.online-picture.url", this))}</span><input id="online-picture-url" type="url" placeholder="https://"></label></div>
+      <div class="dialog-actions"><button data-dialog-cancel>${escapeHtml(t("ppt.dialog.cancel", this))}</button><button data-picture-insert>${escapeHtml(t("ppt.dialog.insert", this))}</button></div>
+    `;
+    dialog.addEventListener("click", async (event) => {
+      const target = event.target as HTMLElement;
+      if (target.closest("[data-dialog-close]") || target.closest("[data-dialog-cancel]"))
+        return dialog.close();
+      if (!target.closest("[data-picture-insert]")) return;
+      const url = dialog.querySelector<HTMLInputElement>("#online-picture-url")?.value.trim();
+      if (!url) return;
+      target.setAttribute("disabled", "");
+      try {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const blob = await response.blob();
+        const type = PICTURE_TYPES.get(blob.type);
+        if (!type) throw new Error(blob.type || "unsupported image");
+        const data = await readFileAsDataURL(new File([blob], "online-image", { type: blob.type }));
+        const image = new Image();
+        image.src = data;
+        await image.decode();
+        this.#insertChild(
+          makePicture(
+            this.#pres!.widthPx,
+            this.#pres!.heightPx,
+            image.naturalWidth,
+            image.naturalHeight,
+            data,
+            type,
+          ),
+        );
+        dialog.close();
+      } catch (error) {
+        window.alert(
+          `${t("ppt.online-picture.error", this)}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      } finally {
+        target.removeAttribute("disabled");
+      }
+    });
+    this.#showModalDialog(dialog, () => (this.#onlinePictureDialog = null));
+    this.#onlinePictureDialog = dialog;
+  }
+
+  /** Shared native-dialog lifecycle: close removes the node and clears the
+   *  host's handle, so HMR/undo cannot strand stale modal elements. */
+  #showModalDialog(dialog: HTMLDialogElement, onClose: () => void): void {
+    dialog.addEventListener("close", () => {
+      onClose();
+      dialog.remove();
+    });
+    this.shadowRoot?.append(dialog);
+    dialog.showModal();
   }
 
   /** The Shapes gallery's pick arms the drawer; the value is the prstGeom
