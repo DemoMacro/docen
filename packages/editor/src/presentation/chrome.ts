@@ -536,6 +536,44 @@ export const presentationStyles = css`
     padding: 0;
     font-size: 17px;
   }
+  .theme-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+  .theme-card {
+    display: grid;
+    gap: 6px;
+    justify-items: start;
+    padding: 10px;
+    border: 1px solid var(--docen-color-divider, #d1d1d1);
+    border-radius: 6px;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    text-align: left;
+  }
+  .theme-card:hover {
+    border-color: var(--docen-color-primary, #2b579a);
+  }
+  .theme-swatches {
+    display: flex;
+    gap: 3px;
+  }
+  .theme-swatches i {
+    width: 16px;
+    height: 16px;
+    border-radius: 3px;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+  }
+  .theme-name {
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .theme-fonts {
+    font-size: 12px;
+    opacity: 0.7;
+  }
   dialog.comments-dialog {
     width: min(440px, calc(100vw - 48px));
     padding: 0;

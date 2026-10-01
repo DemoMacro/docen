@@ -44,6 +44,7 @@ import {
 } from "@docen/pptx";
 import { customElement, observable } from "@microsoft/fast-element";
 import type { DataType } from "@office-open/core";
+import type { ColorSchemeOptions, FontSchemeOptions } from "@office-open/core";
 import type {
   RunFont,
   ShapeType,
@@ -98,6 +99,7 @@ import {
   makeLine,
   makeMediaFrame,
   makeSmartArt,
+  makeChart,
   reorderChild,
   runsIn,
   setLineSpacingPercent,
@@ -110,6 +112,9 @@ import {
   toggleRunFlag,
   toggleRunStyle,
   writeSlideNotes,
+  THEME_PRESETS,
+  variantSchemesOf,
+  resetSlidePlaceholders,
 } from "./commands";
 import { DeckHistory } from "./deck-history";
 import {
@@ -342,6 +347,7 @@ const WIRED_COMMANDS: ReadonlySet<string> = new Set([
   "draw-select",
   "draw-eraser",
   "smartart",
+  "chart",
   "symbol",
   "wordart",
   "online-picture",
@@ -452,6 +458,8 @@ class DocenPresentation extends AddinHost {
   #sectionDialog: HTMLDialogElement | null = null;
   #headerFooterDialog: HTMLDialogElement | null = null;
   #onlinePictureDialog: HTMLDialogElement | null = null;
+  #themesDialog: HTMLDialogElement | null = null;
+  #variantsDialog: HTMLDialogElement | null = null;
   #langObserver?: MutationObserver;
   #unsubLang?: () => void;
   #scrollRaf?: number;
@@ -850,6 +858,7 @@ class DocenPresentation extends AddinHost {
     else if (name === "duplicate-slide") this.#duplicateSlide();
     else if (name === "text-box") this.#insertTextBox();
     else if (name === "insert-table") this.#insertTable();
+    else if (name === "chart") this.#insertChart();
     else if (name === "shapes") this.#armShape(event.detail?.value);
     else if (name === "format-background") this.#setBackground(event.detail?.value);
     else if (name === "slide-size") this.#toggleSlideSize();
@@ -885,6 +894,9 @@ class DocenPresentation extends AddinHost {
     else if (name === "online-picture") this.#openOnlinePictureDialog();
     else if (name === "section") this.#openSectionDialog();
     else if (name === "header-footer") this.#openHeaderFooterDialog();
+    else if (name === "themes") this.#openThemesDialog();
+    else if (name === "variants") this.#openVariantsDialog();
+    else if (name === "reset") this.#resetSlideToLayout();
     else if (name === "video" || name === "audio") this.#pickMedia();
     else if (name === "select") this.#toggleSelectionPane();
     else if (name === "draw-select") this.#armDrawTool("select");
@@ -2251,6 +2263,12 @@ class DocenPresentation extends AddinHost {
     this.#insertChild(makeSmartArt(pres.widthPx, pres.heightPx));
   }
 
+  #insertChart(): void {
+    const pres = this.#pres;
+    if (!pres) return;
+    this.#insertChild(makeChart(pres.widthPx, pres.heightPx));
+  }
+
   /** A compact Unicode palette plus a direct character field. The insertion
    *  is an ordinary shape, so the symbol stays editable and undoable. */
   #openSymbolDialog(): void {
@@ -2430,6 +2448,158 @@ class DocenPresentation extends AddinHost {
       undo: () => apply(before),
       redo: () => apply(section),
     });
+  }
+
+  /** The accent swatch strip every theme card shows. */
+  #themeSwatches(scheme: ColorSchemeOptions): string {
+    const accents = [
+      scheme.accent1,
+      scheme.accent2,
+      scheme.accent3,
+      scheme.accent4,
+      scheme.accent5,
+      scheme.accent6,
+    ];
+    return accents
+      .map(
+        (color) =>
+          `<i style="background:#${typeof color === "string" ? color : (color?.lastClr ?? "FFFFFF")}"></i>`,
+      )
+      .join("");
+  }
+
+  /** The theme galleries write the master's real theme (colors, and the
+   *  presets' font pair too) — the projection reads that same scheme, so the
+   *  canvas repaints scheme-driven fills and table styles deck-wide. */
+  #openThemesDialog(): void {
+    if (!this.#pres || this.#themesDialog?.open) return;
+    const dialog = document.createElement("dialog");
+    dialog.className = "insert-dialog";
+    dialog.innerHTML = `
+      <div class="dialog-head"><strong>${escapeHtml(t("ppt.themes.title", this))}</strong><button data-dialog-close>×</button></div>
+      <div class="dialog-body"><div class="theme-grid">
+        ${THEME_PRESETS.map(
+          (preset) => `
+          <button class="theme-card" data-theme="${preset.id}">
+            <span class="theme-swatches">${this.#themeSwatches(preset.colorScheme)}</span>
+            <span class="theme-name">${escapeHtml(preset.colorScheme.name ?? preset.id)}</span>
+            <span class="theme-fonts">${escapeHtml(`${preset.fontScheme?.majorFont?.latin?.typeface ?? ""} / ${preset.fontScheme?.minorFont?.latin?.typeface ?? ""}`)}</span>
+          </button>`,
+        ).join("")}
+      </div></div>
+      <div class="dialog-actions"><button data-dialog-cancel>${escapeHtml(t("ppt.dialog.cancel", this))}</button></div>
+    `;
+    dialog.addEventListener("click", (event) => {
+      const target = event.target as HTMLElement;
+      if (target.closest("[data-dialog-close]") || target.closest("[data-dialog-cancel]"))
+        return dialog.close();
+      const id = target.closest("[data-theme]")?.getAttribute("data-theme");
+      const preset = THEME_PRESETS.find((candidate) => candidate.id === id);
+      if (preset) {
+        this.#applyThemeColors(preset.colorScheme, preset.fontScheme);
+        dialog.close();
+      }
+    });
+    this.#showModalDialog(dialog, () => (this.#themesDialog = null));
+    this.#themesDialog = dialog;
+  }
+
+  /** Variants recolor the deck's current scheme: the accents rotate so each
+   *  leads in turn, exactly four choices like PowerPoint's variant strip. */
+  #openVariantsDialog(): void {
+    if (!this.#pres || this.#variantsDialog?.open) return;
+    const current = this.#presJson?.masters?.[0]?.theme?.colorScheme;
+    if (!current) return;
+    const variants = variantSchemesOf(current);
+    const dialog = document.createElement("dialog");
+    dialog.className = "insert-dialog";
+    dialog.innerHTML = `
+      <div class="dialog-head"><strong>${escapeHtml(t("ppt.variants.title", this))}</strong><button data-dialog-close>×</button></div>
+      <div class="dialog-body"><div class="theme-grid">
+        ${variants
+          .map(
+            (variant, index) => `
+          <button class="theme-card" data-variant="${index}">
+            <span class="theme-swatches">${this.#themeSwatches(variant)}</span>
+            <span class="theme-name">${escapeHtml(variant.name ?? `#${index + 1}`)}</span>
+          </button>`,
+          )
+          .join("")}
+      </div></div>
+      <div class="dialog-actions"><button data-dialog-cancel>${escapeHtml(t("ppt.dialog.cancel", this))}</button></div>
+    `;
+    dialog.addEventListener("click", (event) => {
+      const target = event.target as HTMLElement;
+      if (target.closest("[data-dialog-close]") || target.closest("[data-dialog-cancel]"))
+        return dialog.close();
+      const index = Number(target.closest("[data-variant]")?.getAttribute("data-variant"));
+      const variant = variants[index];
+      if (variant) {
+        this.#applyThemeColors(variant);
+        dialog.close();
+      }
+    });
+    this.#showModalDialog(dialog, () => (this.#variantsDialog = null));
+    this.#variantsDialog = dialog;
+  }
+
+  /** Write one theme into the first master (creating the master entry when a
+   *  fresh deck has none — the compiler's implicit default master is the same
+   *  slot), with undo/redo swapping the whole previous theme back. */
+  #applyThemeColors(colorScheme: ColorSchemeOptions, fontScheme?: FontSchemeOptions): void {
+    const presJson = this.#presJson;
+    if (!presJson) return;
+    if (!presJson.masters) presJson.masters = [{}];
+    const master = presJson.masters[0]!;
+    const before = master.theme ? structuredClone(master.theme) : undefined;
+    const after = {
+      ...before,
+      colorScheme: structuredClone(colorScheme),
+      ...(fontScheme ? { fontScheme: structuredClone(fontScheme) } : {}),
+    };
+    master.theme = after;
+    this.#pushEdit({
+      undo: () => {
+        if (before) master.theme = structuredClone(before);
+        else delete master.theme;
+        this.#reproject();
+      },
+      redo: () => {
+        master.theme = structuredClone(after);
+        this.#reproject();
+      },
+    });
+    this.#reproject();
+  }
+
+  /** Word's Reset: every placeholder child returns to the inherited
+   *  position/size — the layout's placeholder geometry, falling back to the
+   *  master's when the layout placeholder has no xfrm of its own. Text is
+   *  untouched. */
+  #resetSlideToLayout(): void {
+    const presJson = this.#presJson;
+    const slideIndex = this.#activeSlideIndex();
+    const slide = presJson?.slides?.[slideIndex];
+    if (!presJson || !slide) return;
+    if (!slide.layout) return;
+    const master =
+      presJson.masters?.find((m) => m.name === (slide.master ?? m.name)) ?? presJson.masters?.[0];
+    const layout = master?.layouts?.find(
+      (candidate) => candidate.type === slide.layout || candidate.name === slide.layout,
+    );
+    const moved = resetSlidePlaceholders(slide, layout, master);
+    if (moved.length === 0) return;
+    this.#pushEdit({
+      undo: () => {
+        for (const item of moved) Object.assign(item.child.shape, item.before);
+        this.#reproject(slideIndex);
+      },
+      redo: () => {
+        for (const item of moved) Object.assign(item.child.shape, item.after);
+        this.#reproject(slideIndex);
+      },
+    });
+    this.#reproject(this.#activeSlideIndex());
   }
 
   /** Header/footer visibility instantiates real dt/ftr/sldNum placeholders on

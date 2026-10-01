@@ -18,6 +18,7 @@ import {
   makeLine,
   makeMediaFrame,
   makeSmartArt,
+  makeChart,
   reorderChild,
   setLineSpacingPercent,
   setParagraphAlignment,
@@ -32,6 +33,9 @@ import {
   writeCellText,
   writeShapeText,
   writeSlideNotes,
+  THEME_PRESETS,
+  variantSchemesOf,
+  resetSlidePlaceholders,
 } from "./commands";
 
 type Run = {
@@ -446,6 +450,89 @@ describe("makeSmartArt", () => {
     expect(smartart.width).toBe(Math.round(768 * EMU_PER_PX));
     expect(smartart.height).toBe(Math.round(720 * 0.48 * EMU_PER_PX));
     expect(smartart.x).toBe(Math.round(256 * EMU_PER_PX));
+  });
+});
+
+describe("makeChart", () => {
+  it("centers a real column-chart model at the shared 60% × 48% frame", () => {
+    type ChartVariant = Extract<SlideChild, { chart: unknown }>["chart"];
+    const { chart } = makeChart(1280, 720) as { chart: ChartVariant };
+    expect(chart.type).toBe("column");
+    expect(chart.categories).toHaveLength(4);
+    expect(chart.series).toHaveLength(2);
+    expect(chart.width).toBe(Math.round(768 * EMU_PER_PX));
+    expect(chart.height).toBe(Math.round(720 * 0.48 * EMU_PER_PX));
+    expect(chart.x).toBe(Math.round(256 * EMU_PER_PX));
+  });
+});
+
+describe("theme presets", () => {
+  it("ship complete Office palettes with font pairs", () => {
+    expect(THEME_PRESETS.length).toBeGreaterThanOrEqual(2);
+    for (const preset of THEME_PRESETS) {
+      expect(preset.colorScheme.accent1).toMatch(/^[0-9A-F]{6}$/);
+      expect(preset.colorScheme.accent6).toMatch(/^[0-9A-F]{6}$/);
+      expect(preset.fontScheme?.majorFont?.latin?.typeface).toBeTruthy();
+    }
+  });
+
+  it("derive four accent rotations from the current scheme", () => {
+    const base = THEME_PRESETS[0]!.colorScheme;
+    const variants = variantSchemesOf(base);
+    expect(variants).toHaveLength(4);
+    expect(variants[0]!.accent1).toBe(base.accent1);
+    expect(variants[1]!.accent1).toBe(base.accent2);
+    expect(variants[3]!.accent1).toBe(base.accent4);
+    for (const variant of variants) expect(variant.accent2).toBeTruthy();
+  });
+});
+
+describe("resetSlidePlaceholders", () => {
+  const slideChild = (placeholder: string, geometry: Record<string, number>) =>
+    ({ shape: { placeholder, textBody: { text: "keep" }, ...geometry } }) as never;
+
+  it("restores placeholder geometry from the layout, text untouched", () => {
+    const slide = {
+      children: [
+        slideChild("title", { x: 1, y: 2, width: 3, height: 4 }),
+        { shape: { x: 9, y: 9, width: 1, height: 1 } },
+      ],
+    } as never;
+    const layout = {
+      children: [slideChild("title", { x: 10, y: 20, width: 30, height: 40 })],
+    } as never;
+    const [moved] = resetSlidePlaceholders(slide, layout, undefined);
+    expect(moved).toBeDefined();
+    const shape = (
+      moved!.child as {
+        shape: { x: number; y: number; width: number; textBody?: { text: string } };
+      }
+    ).shape;
+    expect(shape.x).toBe(10);
+    expect(shape.y).toBe(20);
+    expect(shape.width).toBe(30);
+    expect(shape.textBody?.text).toBe("keep");
+    expect(moved!.before).toEqual({ x: 1, y: 2, width: 3, height: 4 });
+    // The non-placeholder child never moves.
+    const children = (slide as { children: { shape: { x: number } }[] }).children;
+    expect(children[1]!.shape.x).toBe(9);
+  });
+
+  it("falls back to the master when the layout placeholder carries no xfrm", () => {
+    const slide = { children: [slideChild("dt", { x: 1, y: 1 })] } as never;
+    const layout = { children: [{ shape: { placeholder: "dt" } }] } as never;
+    const master = {
+      children: [slideChild("dt", { x: 838200, y: 6356350 })],
+    } as never;
+    const [moved] = resetSlidePlaceholders(slide, layout, master);
+    const shape = (moved!.child as { shape: { x: number; y: number } }).shape;
+    expect(shape.x).toBe(838200);
+    expect(shape.y).toBe(6356350);
+  });
+
+  it("returns empty when nothing inherits", () => {
+    const slide = { children: [slideChild("title", { x: 1, y: 1 })] } as never;
+    expect(resetSlidePlaceholders(slide, undefined, undefined)).toEqual([]);
   });
 });
 

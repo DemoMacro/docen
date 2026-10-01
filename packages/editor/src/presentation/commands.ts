@@ -6,6 +6,7 @@
 
 import { EMU_PER_PX } from "@docen/layout";
 import type { PresentationOptions, SlideChild, SlideOptions, TableCellOptions } from "@docen/pptx";
+import type { ColorSchemeOptions, FontSchemeOptions } from "@office-open/core";
 // Text/paragraph types come from @office-open/core/drawing — @docen/pptx's
 // re-export surface doesn't carry them yet.
 import type {
@@ -20,7 +21,7 @@ import type {
   TextRunOptions,
   UnderlineStyle,
 } from "@office-open/core/drawing";
-import type { ShapeOptions } from "@office-open/pptx";
+import type { ChartOptions, ShapeOptions } from "@office-open/pptx";
 
 /** Normalize the paragraphs in place: string items and paragraph-level text
  *  sugar both become real children. */
@@ -571,6 +572,185 @@ export function makeSmartArt(slideWidthPx: number, slideHeightPx: number): Slide
       nodes: [{ text: "Discover" }, { text: "Design" }, { text: "Build" }, { text: "Launch" }],
     },
   };
+}
+
+/** PowerPoint's fresh chart: a clustered column with the sample quarterly
+ *  series, centered at the same 60% × 48% frame the other inserts share.
+ *  The payload is the real ChartOptions model — parse and export both read
+ *  it verbatim, so the chart round-trips like any hand-authored one. */
+export function makeChart(slideWidthPx: number, slideHeightPx: number): SlideChild {
+  const width = slideWidthPx * 0.6;
+  const height = slideHeightPx * 0.48;
+  const chart: ChartOptions = {
+    x: emu((slideWidthPx - width) / 2),
+    y: emu((slideHeightPx - height) / 2),
+    width: emu(width),
+    height: emu(height),
+    type: "column",
+    title: "Chart Title",
+    categories: ["Category 1", "Category 2", "Category 3", "Category 4"],
+    series: [
+      { name: "Series 1", values: [32, 28, 41, 36] },
+      { name: "Series 2", values: [18, 34, 25, 29] },
+    ],
+    showLegend: true,
+  };
+  return { chart };
+}
+
+/** A built-in theme preset: the real Office palette (the two shipped
+ *  defaults every Office install carries) plus its font pair — the model a
+ *  theme application writes into the master. */
+export interface ThemePreset {
+  id: string;
+  colorScheme: ColorSchemeOptions;
+  fontScheme?: FontSchemeOptions;
+}
+
+const officeFontPair = (major: string, minor: string): FontSchemeOptions => ({
+  majorFont: { latin: { typeface: major } },
+  minorFont: { latin: { typeface: minor } },
+});
+
+/** The Office palettes, verbatim from the theme parts Office ships. */
+export const THEME_PRESETS: readonly ThemePreset[] = [
+  {
+    id: "office",
+    colorScheme: {
+      name: "Office",
+      dark1: "000000",
+      light1: "FFFFFF",
+      dark2: "44546A",
+      light2: "E7E6E6",
+      accent1: "4472C4",
+      accent2: "ED7D31",
+      accent3: "A5A5A5",
+      accent4: "FFC000",
+      accent5: "5B9BD5",
+      accent6: "70AD47",
+      hyperlink: "0563C1",
+      followedHyperlink: "954F72",
+    },
+    fontScheme: officeFontPair("Calibri Light", "Calibri"),
+  },
+  {
+    id: "office-classic",
+    colorScheme: {
+      name: "Office 2007-2010",
+      dark1: "000000",
+      light1: "FFFFFF",
+      dark2: "1F497D",
+      light2: "EEECE1",
+      accent1: "4F81BD",
+      accent2: "C0504D",
+      accent3: "9BBB59",
+      accent4: "8064A2",
+      accent5: "4BACC6",
+      accent6: "F79646",
+      hyperlink: "096B9E",
+      followedHyperlink: "4F81BD",
+    },
+    fontScheme: officeFontPair("Cambria", "Calibri"),
+  },
+];
+
+const ACCENT_SLOTS = ["accent1", "accent2", "accent3", "accent4", "accent5", "accent6"] as const;
+
+/** The theme variants for one scheme: the accents rotated so each accent
+ *  leads in turn — the same recoloring role PowerPoint's Variants gallery
+ *  plays for the current theme, derived mechanically so every deck gets the
+ *  four variants its own colors define. */
+export function variantSchemesOf(scheme: ColorSchemeOptions): ColorSchemeOptions[] {
+  const accents = ACCENT_SLOTS.map((slot) => scheme[slot]);
+  return ACCENT_SLOTS.slice(0, 4).map((_, lead) => {
+    const rotated = accents.map((_, index) => accents[(index + lead) % accents.length]);
+    return {
+      ...scheme,
+      name: `${scheme.name ?? "Custom"} ${lead + 1}`,
+      ...Object.fromEntries(ACCENT_SLOTS.map((slot, index) => [slot, rotated[index]])),
+    } as ColorSchemeOptions;
+  });
+}
+
+/** One placeholder child Reset moved, with the undo pair's payloads: the
+ *  snapshot Reset returns to, and the inherited geometry it applies. */
+export interface PlaceholderReset {
+  child: SlideChild & { shape: ShapeOptions };
+  before: Partial<Pick<ShapeOptions, "x" | "y" | "width" | "height">>;
+  after: Partial<Pick<ShapeOptions, "x" | "y" | "width" | "height">>;
+}
+
+/** The layout's placeholder shapes by their type token — Reset's first
+ *  source. Placeholders without their own xfrm inherit the master's, so a
+ *  miss here falls through to {@link masterPlaceholdersOf}. */
+export function layoutPlaceholdersOf(layout: SlideOptions): Map<string, ShapeOptions> {
+  return placeholdersOf(layout.children ?? []);
+}
+
+/** The master's placeholder shapes — the inheritance chain's resolved
+ *  geometry, Reset's fallback when the layout placeholder has no xfrm. */
+export function masterPlaceholdersOf(
+  master: NonNullable<PresentationOptions["masters"]>[number],
+): Map<string, ShapeOptions> {
+  return placeholdersOf(master.children ?? []);
+}
+
+function placeholdersOf(children: SlideChild[]): Map<string, ShapeOptions> {
+  const map = new Map<string, ShapeOptions>();
+  for (const child of children) {
+    if ("shape" in child && typeof child.shape?.placeholder === "string")
+      map.set(child.shape.placeholder, child.shape);
+  }
+  return map;
+}
+
+/** Word's Reset over one slide: every placeholder child (walking groups)
+ *  takes the inherited position/size from the layout's placeholder, or the
+ *  master's when the layout has none — text and all other children stay
+ *  untouched. Returns the moves; an empty result means nothing inherited. */
+export function resetSlidePlaceholders(
+  slide: SlideOptions,
+  layout: SlideOptions | undefined,
+  master: NonNullable<PresentationOptions["masters"]>[number] | undefined,
+): PlaceholderReset[] {
+  const layoutMap = layout ? layoutPlaceholdersOf(layout) : new Map<string, ShapeOptions>();
+  const masterMap = master ? masterPlaceholdersOf(master) : new Map<string, ShapeOptions>();
+  const sourceOf = (type: string): ShapeOptions | undefined => {
+    const fromLayout = layoutMap.get(type);
+    if (fromLayout?.x !== undefined && fromLayout?.y !== undefined) return fromLayout;
+    const fromMaster = masterMap.get(type);
+    if (fromMaster?.x !== undefined && fromMaster?.y !== undefined) return fromMaster;
+    return undefined;
+  };
+  const moved: PlaceholderReset[] = [];
+  const walk = (children: SlideChild[]): void => {
+    for (const child of children) {
+      if ("group" in child) {
+        walk(child.group.children ?? []);
+        continue;
+      }
+      if (!("shape" in child) || typeof child.shape.placeholder !== "string") continue;
+      const source = sourceOf(child.shape.placeholder);
+      if (!source) continue;
+      const before = {
+        x: child.shape.x,
+        y: child.shape.y,
+        width: child.shape.width,
+        height: child.shape.height,
+      };
+      child.shape.x = source.x;
+      child.shape.y = source.y;
+      if (source.width !== undefined) child.shape.width = source.width;
+      if (source.height !== undefined) child.shape.height = source.height;
+      moved.push({
+        child,
+        before,
+        after: { x: source.x, y: source.y, width: source.width, height: source.height },
+      });
+    }
+  };
+  walk(slide.children ?? []);
+  return moved;
 }
 
 /** A centered media frame from a browser file read. PowerPoint keeps native
