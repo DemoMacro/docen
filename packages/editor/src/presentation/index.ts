@@ -1540,6 +1540,36 @@ class DocenPresentation extends AddinHost {
     editor.addEventListener("keydown", (event) => {
       // Escape leaves the edit (committing); Tab walks cells like DOCX and
       // every other key stays in the textarea's native text session.
+      if (this.#tableSelection) {
+        if (event.key === "Escape" || event.key === "Enter") {
+          event.preventDefault();
+          event.stopPropagation();
+          this.#setTableSelection(null);
+          return;
+        }
+        if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) {
+          event.preventDefault();
+          event.stopPropagation();
+          this.#setTableSelection(null);
+          const edge =
+            event.key === "ArrowLeft" || event.key === "ArrowUp" ? 0 : editor.value.length;
+          editor.setSelectionRange(edge, edge);
+          return;
+        }
+        if (
+          (event.key === "Delete" || event.key === "Backspace") &&
+          !event.ctrlKey &&
+          !event.metaKey &&
+          !event.altKey
+        ) {
+          event.preventDefault();
+          event.stopPropagation();
+          this.#clearSelectedTableCells();
+          editor.value = "";
+          this.#layoutTableCellEditor(editor);
+          return;
+        }
+      }
       if (event.key === "Tab") {
         event.stopPropagation();
         event.preventDefault();
@@ -1811,9 +1841,9 @@ class DocenPresentation extends AddinHost {
     return best;
   }
 
-  /** Cross-cell drag: the anchor stays where the press started and every new
-   *  grid slot under the pointer extends the selection. The editor hops with
-   *  the head, exactly as DOCX changes the text caret inside a cell drag. */
+  /** Cross-cell drag: the anchor cell keeps the edit session while every new
+   *  grid slot under the pointer extends a whole-cell selection; returning to
+   *  the anchor collapses back to the native text selection. */
   #startTableCellDrag(
     event: PointerEvent,
     found: { slide: number; table: TableOptions; member: TableMemberView },
@@ -1821,6 +1851,7 @@ class DocenPresentation extends AddinHost {
     if (!found) return;
     const origin = this.#tableEdit;
     const textAnchor = this.#textEditor?.selectionStart ?? null;
+    const anchor = origin ?? this.#tableSelection?.anchor ?? null;
     const drag = { startX: event.clientX, startY: event.clientY, moved: false };
     const onMove = (move: PointerEvent): void => {
       if (!drag.moved && Math.hypot(move.clientX - drag.startX, move.clientY - drag.startY) < 3)
@@ -1831,6 +1862,7 @@ class DocenPresentation extends AddinHost {
       const head = tableCellNearAt(found.member, point.x, point.y);
       if (!head) return;
       if (origin && head.cell.row === origin.row && head.cell.col === origin.col) {
+        if (this.#tableSelection) this.#setTableSelection(null);
         const editor = this.#textEditor;
         if (!editor || textAnchor == null) return;
         this.#placeTableCellCaret(editor, move.clientX, move.clientY);
@@ -1841,17 +1873,11 @@ class DocenPresentation extends AddinHost {
         );
         return;
       }
-      const anchor = this.#tableSelection?.anchor ?? origin;
       if (!anchor) return;
-      this.#setTableSelection({ anchor, head: head.cell });
-      this.#moveTableCellEditing(
-        head.x + 1,
-        head.y + 1,
-        { anchor, head: head.cell },
-        {
-          caret: { clientX: move.clientX, clientY: move.clientY },
-        },
-      );
+      this.#setTableSelection({
+        anchor,
+        head: { row: head.cell.row, col: head.cell.col },
+      });
     };
     const onUp = (): void => {
       document.removeEventListener("pointermove", onMove, { capture: true });
