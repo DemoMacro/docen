@@ -321,6 +321,7 @@ const WIRED_COMMANDS: ReadonlySet<string> = new Set([
   "normal",
   "slide-sorter",
   "spell-check",
+  "set-up-show",
   "transition",
   "effect-options",
   "apply-to-all",
@@ -420,6 +421,17 @@ class DocenPresentation extends AddinHost {
   #spellDialog: HTMLDialogElement | null = null;
   #spellIssues: PresentationSpellingIssue[] = [];
   #spellAt = 0;
+  /** Session-level Set Up Show settings; the PPTX presentation properties
+   *  part is not part of the public JSON yet. */
+  #showSetup = {
+    from: 1,
+    to: Number.POSITIVE_INFINITY,
+    loop: false,
+    narration: true,
+    animations: true,
+    timings: true,
+  };
+  #showSetupDialog: HTMLDialogElement | null = null;
   #langObserver?: MutationObserver;
   #unsubLang?: () => void;
   #scrollRaf?: number;
@@ -840,6 +852,7 @@ class DocenPresentation extends AddinHost {
     else if (name === "hyperlink") this.#openLinkDialog();
     else if (name === "from-beginning") this.#startShow("beginning");
     else if (name === "from-current") this.#startShow("current");
+    else if (name === "set-up-show") this.#openShowSetup();
     else if (name === "animate" || name === "add-animation") {
       this.#applyAnimation(event.detail?.value);
     } else if (name === "animation-pane") this.#toggleAnimationPane();
@@ -912,7 +925,9 @@ class DocenPresentation extends AddinHost {
     const scale = this.#zoom / 100;
     const pitch = (pres.heightPx + SLIDE_GAP_PX) * scale;
     const center = area.scrollTop + area.clientHeight / 2 - SLIDE_GAP_PX * scale;
-    const index = Math.max(0, Math.min(pres.slides.length - 1, Math.floor(center / pitch)));
+    const index = this.#presenting
+      ? this.#showingSlide
+      : Math.max(0, Math.min(pres.slides.length - 1, Math.floor(center / pitch)));
     bar.setAttribute("page", String(index + 1));
     bar.setAttribute("total", String(pres.slides.length));
     bar.setAttribute("pageLabel", t("ppt.status.slide-of", this));
@@ -2839,6 +2854,66 @@ class DocenPresentation extends AddinHost {
 
   // ── Slide show ───────────────────────────────────────────────────────────
 
+  /** PowerPoint's Set Up Show. The range and playback toggles govern the
+   *  live show; settings stay in the editor session until PPTX presentation
+   *  properties are exposed by the format package. */
+  #openShowSetup(): void {
+    const pres = this.#pres;
+    if (!pres || this.#showSetupDialog?.open) return;
+    const dialog = document.createElement("dialog");
+    dialog.className = "show-setup";
+    const last = pres.slides.length;
+    const setup = this.#showSetup;
+    const from = Math.min(setup.from, last);
+    const to = Math.min(Number.isFinite(setup.to) ? setup.to : last, last);
+    dialog.innerHTML = `
+      <div class="setup-head"><strong>${escapeHtml(t("ppt.setup.title", this))}</strong><button data-setup-action="cancel">×</button></div>
+      <div class="setup-body">
+        <fieldset><legend>${escapeHtml(t("ppt.setup.slides", this))}</legend>
+          <label><input type="radio" name="setup-range" value="all" ${setup.to === Number.POSITIVE_INFINITY ? "checked" : ""}> ${escapeHtml(t("ppt.setup.all", this))}</label>
+          <label class="range"><input type="radio" name="setup-range" value="range" ${Number.isFinite(setup.to) ? "checked" : ""}> <input id="setup-from" type="number" min="1" max="${last}" value="${from}"> <span>–</span> <input id="setup-to" type="number" min="1" max="${last}" value="${to}"></label>
+        </fieldset>
+        <fieldset><legend>${escapeHtml(t("ppt.setup.options", this))}</legend>
+          <label><input id="setup-loop" type="checkbox" ${setup.loop ? "checked" : ""}> ${escapeHtml(t("ppt.setup.loop", this))}</label>
+          <label><input id="setup-narration" type="checkbox" ${setup.narration ? "checked" : ""}> ${escapeHtml(t("ppt.setup.narration", this))}</label>
+          <label><input id="setup-animations" type="checkbox" ${setup.animations ? "checked" : ""}> ${escapeHtml(t("ppt.setup.animations", this))}</label>
+          <label><input id="setup-timings" type="checkbox" ${setup.timings ? "checked" : ""}> ${escapeHtml(t("ppt.setup.timings", this))}</label>
+        </fieldset>
+      </div>
+      <div class="setup-actions"><button data-setup-action="cancel">${escapeHtml(t("ppt.setup.cancel", this))}</button><button data-setup-action="ok">${escapeHtml(t("ppt.setup.ok", this))}</button></div>
+    `;
+    dialog.addEventListener("click", (event) => {
+      const action = (event.target as HTMLElement).closest<HTMLElement>("[data-setup-action]");
+      if (action?.dataset.setupAction === "ok") {
+        const range = dialog.querySelector<HTMLInputElement>(
+          'input[name="setup-range"]:checked',
+        )?.value;
+        const fromValue = Number(dialog.querySelector<HTMLInputElement>("#setup-from")?.value);
+        const toValue = Number(dialog.querySelector<HTMLInputElement>("#setup-to")?.value);
+        this.#showSetup = {
+          from: Math.max(1, Math.min(last, Number.isFinite(fromValue) ? fromValue : 1)),
+          to:
+            range === "range"
+              ? Math.max(1, Math.min(last, Number.isFinite(toValue) ? toValue : last))
+              : Number.POSITIVE_INFINITY,
+          loop: dialog.querySelector<HTMLInputElement>("#setup-loop")?.checked === true,
+          narration: dialog.querySelector<HTMLInputElement>("#setup-narration")?.checked !== true,
+          animations: dialog.querySelector<HTMLInputElement>("#setup-animations")?.checked !== true,
+          timings: dialog.querySelector<HTMLInputElement>("#setup-timings")?.checked !== false,
+        };
+        if (this.#showSetup.to < this.#showSetup.from) this.#showSetup.to = this.#showSetup.from;
+        dialog.close();
+      } else if (action?.dataset.setupAction === "cancel") dialog.close();
+    });
+    dialog.addEventListener("close", () => {
+      this.#showSetupDialog = null;
+      dialog.remove();
+    });
+    this.shadowRoot?.append(dialog);
+    this.#showSetupDialog = dialog;
+    dialog.showModal();
+  }
+
   /** Enter the presenting state: the chrome steps aside, the zoom fits one
    *  slide to the viewport, and the browser goes fullscreen when allowed (a
    *  denied request only means the window stays windowed). */
@@ -2861,7 +2936,7 @@ class DocenPresentation extends AddinHost {
     // place in the tree's child order, and the partial repaints'
     // remove-and-append has long since shuffled that order.
     this.#renderDeck();
-    this.#gotoShowSlide(from === "beginning" ? 0 : this.#activeSlideIndex());
+    this.#gotoShowSlide(from === "beginning" ? this.#showSetup.from - 1 : this.#activeSlideIndex());
     void this.#workspaceEl()
       ?.requestFullscreen?.()
       .catch(() => {});
@@ -2884,7 +2959,9 @@ class DocenPresentation extends AddinHost {
     const area = this.#area();
     if (!pres || !area) return;
     this.#mediaPlayer?.hide();
-    this.#showingSlide = Math.max(0, Math.min(pres.slides.length - 1, index));
+    const setupFrom = Math.max(0, this.#showSetup.from - 1);
+    const setupTo = Math.min(pres.slides.length - 1, this.#showSetup.to - 1);
+    this.#showingSlide = Math.max(setupFrom, Math.min(setupTo, index));
     const pitch = (pres.heightPx + SLIDE_GAP_PX) * (this.#zoom / 100);
     area.scrollTo({ top: this.#showingSlide * pitch, behavior: "instant" as ScrollBehavior });
     this.#syncSlideIndicator();
@@ -2903,7 +2980,14 @@ class DocenPresentation extends AddinHost {
     const slideGroup = (this.#app?.tree as unknown as IGroup | undefined)?.children[index] as
       | IGroup
       | undefined;
-    if (!slide || !slideGroup || !Array.isArray(entries) || entries.length === 0) return;
+    if (
+      !this.#showSetup.animations ||
+      !slide ||
+      !slideGroup ||
+      !Array.isArray(entries) ||
+      entries.length === 0
+    )
+      return;
     const hits = slideHits(slide);
     const inBox = (box: Box, x: number, y: number): boolean =>
       x >= box.x - 1 && x <= box.x + box.width + 1 && y >= box.y - 1 && y <= box.y + box.height + 1;
@@ -2947,6 +3031,17 @@ class DocenPresentation extends AddinHost {
       }
       delay += duration;
     }
+  }
+
+  /** Advance within the configured range; `loop` wraps back to its first
+   *  slide, otherwise the show stays on the last slide. */
+  #advanceShow(): void {
+    const pres = this.#pres;
+    if (!pres) return;
+    const last = Math.min(pres.slides.length - 1, this.#showSetup.to - 1);
+    if (this.#showingSlide >= last && this.#showSetup.loop)
+      this.#gotoShowSlide(Math.max(0, this.#showSetup.from - 1));
+    else this.#gotoShowSlide(this.#showingSlide + 1);
   }
 
   /** Wheel paging in the show, throttled — one notch is one slide. */
@@ -3532,7 +3627,7 @@ class DocenPresentation extends AddinHost {
         return;
       }
       this.#mediaPlayer?.hide();
-      if (event.button === 0) this.#gotoShowSlide(this.#showingSlide + 1);
+      if (event.button === 0) this.#advanceShow();
       return;
     }
     if (this.#shapeDrawer?.armed && this.#shapeDrawer.startFromPointer(event)) return;
@@ -3653,7 +3748,7 @@ class DocenPresentation extends AddinHost {
         this.#endShow();
       } else if (["ArrowRight", "ArrowDown", "PageDown", " "].includes(event.key)) {
         event.preventDefault();
-        this.#gotoShowSlide(this.#showingSlide + 1);
+        this.#advanceShow();
       } else if (["ArrowLeft", "ArrowUp", "PageUp"].includes(event.key)) {
         event.preventDefault();
         this.#gotoShowSlide(this.#showingSlide - 1);

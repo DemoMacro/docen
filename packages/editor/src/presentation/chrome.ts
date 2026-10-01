@@ -392,6 +392,70 @@ export const presentationStyles = css`
     flex-wrap: wrap;
     margin-top: auto;
   }
+  dialog.show-setup {
+    width: min(480px, calc(100vw - 48px));
+    padding: 0;
+    border: 1px solid var(--docen-color-divider, #e1e1e1);
+    border-radius: 8px;
+    background: var(--docen-color-bg, #fff);
+    color: inherit;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.22);
+  }
+  .setup-head,
+  .setup-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 12px 16px;
+  }
+  .setup-head {
+    border-bottom: 1px solid var(--docen-color-divider, #e1e1e1);
+  }
+  .setup-head button {
+    width: 28px;
+    height: 28px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    font-size: 18px;
+  }
+  .setup-body {
+    display: grid;
+    gap: 14px;
+    padding: 16px;
+  }
+  .setup-body fieldset {
+    display: grid;
+    gap: 8px;
+    border: 1px solid var(--docen-color-divider, #e1e1e1);
+    border-radius: 6px;
+    margin: 0;
+  }
+  .setup-body legend,
+  .setup-body label {
+    color: inherit;
+    font-size: 13px;
+  }
+  .setup-body .range input[type="number"] {
+    width: 64px;
+    padding: 4px 6px;
+    border: 1px solid var(--docen-color-divider, #d1d1d1);
+    border-radius: 4px;
+    background: transparent;
+    color: inherit;
+  }
+  .setup-actions button {
+    min-width: 76px;
+    padding: 6px 12px;
+    border: 1px solid var(--docen-color-divider, #d1d1d1);
+    border-radius: 4px;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+  }
 `;
 
 /** The element surface the template binds to — the ref targets only. The
