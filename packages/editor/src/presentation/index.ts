@@ -356,6 +356,10 @@ const WIRED_COMMANDS: ReadonlySet<string> = new Set([
   "online-picture",
   "section",
   "header-footer",
+  "layout",
+  "reset",
+  "themes",
+  "variants",
   ...TEXT_FORMAT_COMMANDS,
 ]);
 
