@@ -56,6 +56,12 @@ import "@leafer-in/animate";
 import { App, type IGroup } from "leafer-ui";
 
 import { renderRibbonFromSchema } from "../document/ribbon";
+import {
+  addSpellWord,
+  englishWords,
+  ignoreSpellWord,
+  spellSuggestions,
+} from "../document/spelling";
 import type { Box } from "../drawing/geometry";
 import { DrawingOverlay } from "../drawing/overlay";
 import { ShapeDrawer, type ShapeDrawRect } from "../drawing/shape-drawer";
@@ -198,6 +204,16 @@ const TEXT_ALIGN_OF: Record<string, string> = {
  *  the edit overlay instead of the browser's pure black. */
 const TEXT_INK = "#1b1b1b";
 
+/** One misspelling in a PPTX text home. Targets keep live model references,
+ *  so replacement writes through the same source used by in-place editing. */
+interface PresentationSpellingIssue {
+  slide: number;
+  word: string;
+  from: number;
+  to: number;
+  source: TextEditSource | { kind: "notes"; slide: SlideOptions };
+}
+
 /** Browser MIME → the JSON picture type (pptx's supported raster set). */
 const PICTURE_TYPES: ReadonlyMap<string, "png" | "jpg" | "gif" | "bmp"> = new Map([
   ["image/png", "png"],
@@ -304,6 +320,7 @@ const WIRED_COMMANDS: ReadonlySet<string> = new Set([
   "notes",
   "normal",
   "slide-sorter",
+  "spell-check",
   "transition",
   "effect-options",
   "apply-to-all",
@@ -399,6 +416,10 @@ class DocenPresentation extends AddinHost {
   #slideSorter: HTMLDialogElement | null = null;
   #sorterDragIndex = -1;
   #sorterDragged = false;
+  /** Review session state for PowerPoint's Spelling dialog. */
+  #spellDialog: HTMLDialogElement | null = null;
+  #spellIssues: PresentationSpellingIssue[] = [];
+  #spellAt = 0;
   #langObserver?: MutationObserver;
   #unsubLang?: () => void;
   #scrollRaf?: number;
@@ -805,6 +826,7 @@ class DocenPresentation extends AddinHost {
     else if (name === "send-back") this.#reorderSelected("back");
     else if (name === "gridlines") this.#toggleGridlines();
     else if (name === "find" || name === "replace") this.#findDialog()?.show();
+    else if (name === "spell-check") this.#openSpellCheck();
     else if (name === "paste") void this.#pasteFromClipboard();
     else if (name === "notes") this.#toggleNotes();
     else if (name === "normal") {
@@ -2538,6 +2560,170 @@ class DocenPresentation extends AddinHost {
       this.#slideSorter.close();
       requestAnimationFrame(() => this.#toggleSlideSorter());
     }
+  }
+
+  /** A western word candidate, mirroring the DOCX checker's first pass:
+   *  CJK, numbers, URLs and symbols are outside the built-in dictionary. */
+  #isSpellCandidate(word: string): boolean {
+    return /^[A-Za-z][A-Za-z'’-]*$/.test(word);
+  }
+
+  /** Scan editable shape, table-cell and notes text. Each issue keeps its
+   *  live model source so replacement reuses the editor's text writer. */
+  #findSpellingIssues(): PresentationSpellingIssue[] {
+    const presJson = this.#presJson;
+    if (!presJson?.slides) return [];
+    const segmenter = new Intl.Segmenter("en", { granularity: "word" });
+    const issues: PresentationSpellingIssue[] = [];
+    const addText = (
+      slide: number,
+      text: string,
+      source: PresentationSpellingIssue["source"],
+    ): void => {
+      for (const part of segmenter.segment(text)) {
+        const word = part.segment;
+        if (!part.isWordLike || !this.#isSpellCandidate(word)) continue;
+        const key = word.toLowerCase();
+        if (englishWords.has(key) || englishWords.has(word)) continue;
+        issues.push({ slide, word, from: part.index, to: part.index + word.length, source });
+      }
+    };
+    const visit = (slide: number, child: SlideChild): void => {
+      if ("shape" in child) {
+        addText(slide, textOf({ kind: "shape", child: child.shape }), {
+          kind: "shape",
+          child: child.shape,
+        });
+      }
+      if ("table" in child) {
+        for (const origin of tableGridOf(child.table).origins) {
+          addText(slide, textOf({ kind: "cell", cell: origin.cell }), {
+            kind: "cell",
+            cell: origin.cell,
+          });
+        }
+      }
+      if ("group" in child) for (const member of child.group.children ?? []) visit(slide, member);
+    };
+    presJson.slides.forEach((slide, index) => {
+      for (const child of slide.children ?? []) visit(index, child);
+      addText(index, slideNotesOf(slide), { kind: "notes", slide });
+    });
+    return issues;
+  }
+
+  /** Open/re-render Spelling. The dialog stays open when Ignore replaces the
+   *  active issue; it closes automatically when the deck is clean. */
+  #openSpellCheck(): void {
+    if (this.#spellDialog?.open) return this.#renderSpellDialog();
+    if (!this.#presJson) return;
+    this.#spellIssues = this.#findSpellingIssues();
+    this.#spellAt = Math.min(this.#spellAt, Math.max(0, this.#spellIssues.length - 1));
+    const dialog = document.createElement("dialog");
+    dialog.className = "spell-dialog";
+    dialog.addEventListener("click", (event) => {
+      const action = (event.target as HTMLElement).closest<HTMLElement>("[data-spell-action]");
+      if (!action) return;
+      const value = action.dataset.spellValue;
+      const kind = action.dataset.spellAction;
+      if (kind === "close") dialog.close();
+      else if (kind === "replace") this.#replaceSpellingIssue(value ?? "");
+      else if (kind === "ignore-once") this.#skipSpellingIssue(false);
+      else if (kind === "ignore-all") this.#skipSpellingIssue(true);
+      else if (kind === "add") addSpellWord(this.#spellIssues[this.#spellAt]?.word ?? "");
+      else if (kind === "nav")
+        this.#spellAt =
+          (this.#spellAt + Number(value) + this.#spellIssues.length) %
+          Math.max(1, this.#spellIssues.length);
+      this.#renderSpellDialog();
+    });
+    dialog.addEventListener("close", () => {
+      this.#spellDialog = null;
+      dialog.remove();
+    });
+    this.shadowRoot?.append(dialog);
+    this.#spellDialog = dialog;
+    this.#renderSpellDialog();
+    dialog.showModal();
+  }
+
+  #renderSpellDialog(): void {
+    const dialog = this.#spellDialog;
+    if (!dialog) return;
+    const issue = this.#spellIssues[this.#spellAt];
+    const suggestions = issue ? spellSuggestions(issue.word) : [];
+    dialog.innerHTML = `
+      <div class="spell-head"><strong>${escapeHtml(t("ppt.spell.title", this))}</strong><button data-spell-action="close">×</button></div>
+      <div class="spell-body">
+        ${
+          issue
+            ? `<span class="spell-counter">${escapeHtml(t("ppt.spell.counter", this))}</span><span class="spell-word">${escapeHtml(issue.word)}</span><span class="spell-section">${escapeHtml(t("ppt.spell.suggestions", this))}</span><div class="spell-suggestions">${suggestions.map((s) => `<button data-spell-action="replace" data-spell-value="${escapeHtml(s)}">${escapeHtml(s)}</button>`).join("") || `<span>${escapeHtml(t("ppt.spell.none", this))}</span>`}</div><div class="spell-actions"><button data-spell-action="ignore-once">${escapeHtml(t("ppt.spell.ignore-once", this))}</button><button data-spell-action="ignore-all">${escapeHtml(t("ppt.spell.ignore-all", this))}</button><button data-spell-action="add">${escapeHtml(t("ppt.spell.add", this))}</button></div>`
+            : `<div class="spell-clean">${escapeHtml(t("ppt.spell.clean", this))}</div>`
+        }
+      </div>
+      <div class="spell-nav"><button data-spell-action="nav" data-spell-value="-1">${escapeHtml(t("ppt.spell.previous", this))}</button><button data-spell-action="nav" data-spell-value="1">${escapeHtml(t("ppt.spell.next", this))}</button></div>
+    `;
+    dialog
+      .querySelector<HTMLElement>(".spell-counter")
+      ?.replaceChildren(`${this.#spellAt + 1} / ${this.#spellIssues.length}`);
+  }
+
+  /** Replace only the active occurrence. The model write is undoable; the
+   *  issue list is rebuilt after projection so positions stay authoritative. */
+  #replaceSpellingIssue(replacement: string): void {
+    const issue = this.#spellIssues[this.#spellAt];
+    if (!issue) return;
+    const source = issue.source;
+    if (source.kind === "notes") {
+      const before = slideNotesOf(source.slide);
+      const after = before.slice(0, issue.from) + replacement + before.slice(issue.to);
+      writeSlideNotes(source.slide, after);
+      this.#pushEdit({
+        undo: () => writeSlideNotes(source.slide, before),
+        redo: () => writeSlideNotes(source.slide, after),
+      });
+      this.#syncNotesPane(issue.slide);
+    } else {
+      const beforeText = textOf(source);
+      const afterText = beforeText.slice(0, issue.from) + replacement + beforeText.slice(issue.to);
+      const model = source.kind === "shape" ? source.child : source.cell;
+      const before = structuredClone(model);
+      writeText(source, afterText);
+      const after = structuredClone(model);
+      const restore = (value: typeof before): void => {
+        for (const key of Object.keys(model) as (keyof typeof model)[]) delete model[key];
+        Object.assign(model, value);
+      };
+      this.#pushEdit({
+        undo: () => {
+          restore(before);
+          this.#reproject(issue.slide);
+        },
+        redo: () => {
+          restore(after);
+          this.#reproject(issue.slide);
+        },
+      });
+      this.#reproject(issue.slide);
+    }
+    this.#spellIssues.splice(this.#spellAt, 1);
+    this.#spellAt = Math.min(this.#spellAt, Math.max(0, this.#spellIssues.length - 1));
+  }
+
+  /** Ignore Once keeps other occurrences active; Ignore All removes every
+   *  case-insensitive occurrence in this session via the shared dictionary. */
+  #skipSpellingIssue(all: boolean): void {
+    const issue = this.#spellIssues[this.#spellAt];
+    if (!issue) return;
+    if (all) {
+      ignoreSpellWord(issue.word);
+      this.#spellIssues = this.#spellIssues.filter(
+        (candidate) => candidate.word.toLowerCase() !== issue.word.toLowerCase(),
+      );
+    } else {
+      this.#spellIssues.splice(this.#spellAt, 1);
+    }
+    this.#spellAt = Math.min(this.#spellAt, Math.max(0, this.#spellIssues.length - 1));
   }
 
   // ── Transitions ──────────────────────────────────────────────────────────

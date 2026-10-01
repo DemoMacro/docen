@@ -7,6 +7,8 @@ import type { Node as PMNode } from "@tiptap/pm/model";
 
 import { englishWords } from "./spelling-dictionary";
 
+export { englishWords };
+
 /** One misspelling: the PM positions of the word (the overlay and the
  *  replace commands work in positions) plus its surface text. */
 export interface SpellingIssue {

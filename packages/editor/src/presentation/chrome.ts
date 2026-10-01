@@ -318,6 +318,80 @@ export const presentationStyles = css`
     text-align: center;
     color: var(--docen-color-fg-muted, #616161);
   }
+  dialog.spell-dialog {
+    width: min(440px, calc(100vw - 48px));
+    padding: 0;
+    border: 1px solid var(--docen-color-divider, #e1e1e1);
+    border-radius: 8px;
+    background: var(--docen-color-bg, #fff);
+    color: inherit;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.22);
+  }
+  .spell-head,
+  .spell-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 12px 16px;
+  }
+  .spell-head {
+    border-bottom: 1px solid var(--docen-color-divider, #e1e1e1);
+  }
+  .spell-nav {
+    border-top: 1px solid var(--docen-color-divider, #e1e1e1);
+  }
+  .spell-head button,
+  .spell-actions button,
+  .spell-suggestions button,
+  .spell-nav button {
+    border: 1px solid var(--docen-color-divider, #d1d1d1);
+    border-radius: 4px;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    padding: 6px 10px;
+  }
+  .spell-head button {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: none;
+    font-size: 18px;
+  }
+  .spell-body {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-height: 190px;
+    padding: 16px;
+  }
+  .spell-counter {
+    color: var(--docen-color-fg-muted, #616161);
+    font-size: 12px;
+  }
+  .spell-word {
+    color: #e81123;
+    font-size: 22px;
+    text-decoration: underline wavy #e81123;
+    text-underline-offset: 4px;
+  }
+  .spell-section,
+  .spell-clean {
+    color: var(--docen-color-fg-muted, #616161);
+  }
+  .spell-suggestions,
+  .spell-actions {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+  }
+  .spell-actions {
+    flex-direction: row;
+    flex-wrap: wrap;
+    margin-top: auto;
+  }
 `;
 
 /** The element surface the template binds to — the ref targets only. The
