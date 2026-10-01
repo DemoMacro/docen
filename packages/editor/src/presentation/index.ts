@@ -2009,7 +2009,6 @@ class DocenPresentation extends AddinHost {
   ): void {
     if (!found) return;
     const origin = this.#tableEdit;
-    const textAnchor = this.#textEditor?.selectionStart ?? null;
     const anchor = origin ?? this.#tableSelection?.anchor ?? null;
     const drag = { startX: event.clientX, startY: event.clientY, moved: false };
     const onMove = (move: PointerEvent): void => {
@@ -2022,15 +2021,6 @@ class DocenPresentation extends AddinHost {
       if (!head) return;
       if (origin && head.cell.row === origin.row && head.cell.col === origin.col) {
         if (this.#tableSelection) this.#setTableSelection(null);
-        const editor = this.#textEditor;
-        if (!editor || textAnchor == null) return;
-        this.#placeTableCellCaret(editor, move.clientX, move.clientY);
-        const headOffset = editor.selectionStart;
-        editor.setSelectionRange(
-          Math.min(textAnchor, headOffset),
-          Math.max(textAnchor, headOffset),
-        );
-        this.#syncTableCellTextSelection(editor);
         return;
       }
       if (!anchor) return;
@@ -2043,6 +2033,7 @@ class DocenPresentation extends AddinHost {
       document.removeEventListener("pointermove", onMove, { capture: true });
       document.removeEventListener("pointerup", onUp, { capture: true });
       document.removeEventListener("pointercancel", onUp, { capture: true });
+      this.#syncTableCellTextSelection();
     };
     document.addEventListener("pointermove", onMove, { capture: true });
     document.addEventListener("pointerup", onUp, { capture: true });
@@ -4645,21 +4636,13 @@ class DocenPresentation extends AddinHost {
       if (this.#selection?.slide !== point.slide || this.#selection.child !== child)
         this.#select(null);
       else if (this.#tableEdit) {
-        // The editor owns every press: preventing the default keeps the
-        // browser's native textarea drag-selection from racing the block
-        // selection, and the caret is placed by hand below.
-        event.preventDefault();
+        // The editor owns cross-cell drags, but a press in the same cell
+        // keeps the browser's native caret and text selection in charge.
         const table = this.#tableMemberOf();
         const rect = table ? this.#cellRectAt(table.member, point.x, point.y) : null;
         if (table && rect) {
           const edit = this.#tableEdit!;
-          if (edit.row === rect.cell.row && edit.col === rect.cell.col) {
-            const editor = this.#textEditor;
-            if (editor) {
-              this.#placeTableCellCaret(editor, event.clientX, event.clientY);
-              this.#syncTableCellTextSelection(editor);
-            }
-          } else {
+          if (edit.row !== rect.cell.row || edit.col !== rect.cell.col) {
             this.#moveTableCellEditing(point.x, point.y, undefined, {
               caret: { clientX: event.clientX, clientY: event.clientY },
             });

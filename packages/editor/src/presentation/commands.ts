@@ -577,28 +577,25 @@ export function makePicture(
 }
 
 /** PowerPoint's fresh 3×3 table: centered, 60% of the slide wide, equal
- *  columns, each row PowerPoint's fresh 0.35" height. Every edge carries a
- *  hairline border — an unstyled grid would paint invisible (the deck's
- *  table style lives in the theme part the editor doesn't resolve). */
+ *  columns, each row PowerPoint's fresh 0.35" height. The GUID is the
+ *  built-in Medium Style 2 — Accent 1 that PowerPoint applies by default. */
 export function makeTable(slideWidthPx: number, slideHeightPx: number): SlideChild {
   const rows = 3;
   const cols = 3;
   const width = slideWidthPx * 0.6;
   const rowHeight = Math.round(0.35 * 96);
-  const edge = { width: "1pt", color: "808080" } as const;
   return {
     table: {
       x: emu((slideWidthPx - width) / 2),
       y: emu((slideHeightPx - rowHeight * rows) / 2),
       width: emu(width),
       height: emu(rowHeight * rows),
+      firstRow: true,
       columnWidths: Array.from({ length: cols }, () => emu(width / cols)),
+      tableStyleId: "{5C22544A-7EE6-4342-B048-85BDC9FD1C3A}",
       rows: Array.from({ length: rows }, () => ({
         height: emu(rowHeight),
-        cells: Array.from({ length: cols }, () => ({
-          text: "",
-          borders: { top: edge, bottom: edge, left: edge, right: edge },
-        })),
+        cells: Array.from({ length: cols }, () => ({ text: "" })),
       })),
     },
   };
