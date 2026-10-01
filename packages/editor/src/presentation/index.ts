@@ -345,6 +345,7 @@ const WIRED_COMMANDS: ReadonlySet<string> = new Set([
   "symbol",
   "wordart",
   "online-picture",
+  "section",
   ...TEXT_FORMAT_COMMANDS,
 ]);
 
@@ -447,6 +448,7 @@ class DocenPresentation extends AddinHost {
   #symbolDialog: HTMLDialogElement | null = null;
   #wordArtDialog: HTMLDialogElement | null = null;
   #commentsDialog: HTMLDialogElement | null = null;
+  #sectionDialog: HTMLDialogElement | null = null;
   #onlinePictureDialog: HTMLDialogElement | null = null;
   #langObserver?: MutationObserver;
   #unsubLang?: () => void;
@@ -879,6 +881,7 @@ class DocenPresentation extends AddinHost {
     else if (name === "symbol") this.#openSymbolDialog();
     else if (name === "wordart") this.#openWordArtDialog();
     else if (name === "online-picture") this.#openOnlinePictureDialog();
+    else if (name === "section") this.#openSectionDialog();
     else if (name === "video" || name === "audio") this.#pickMedia();
     else if (name === "select") this.#toggleSelectionPane();
     else if (name === "draw-select") this.#armDrawTool("select");
@@ -2374,6 +2377,51 @@ class DocenPresentation extends AddinHost {
     });
     this.#showModalDialog(dialog, () => (this.#onlinePictureDialog = null));
     this.#onlinePictureDialog = dialog;
+  }
+
+  /** Slide sections are stored on each member slide; the compiler groups the
+   *  shared name into presentation.xml's sectionLst on save. */
+  #openSectionDialog(): void {
+    if (!this.#pres || this.#sectionDialog?.open) return;
+    const slide = this.#presJson?.slides?.[this.#activeSlideIndex()];
+    if (!slide) return;
+    const dialog = document.createElement("dialog");
+    dialog.className = "insert-dialog";
+    dialog.innerHTML = `
+      <div class="dialog-head"><strong>${escapeHtml(t("ppt.section.title", this))}</strong><button data-dialog-close>×</button></div>
+      <div class="dialog-body">
+        <label class="dialog-field"><span>${escapeHtml(t("ppt.section.name", this))}</span><input id="section-name" value="${escapeHtml(slide.section ?? "")}" placeholder="${escapeHtml(t("ppt.section.placeholder", this))}"></label>
+      </div>
+      <div class="dialog-actions"><button data-dialog-cancel>${escapeHtml(t("ppt.dialog.cancel", this))}</button><button data-section-save>${escapeHtml(t("ppt.dialog.insert", this))}</button></div>
+    `;
+    dialog.addEventListener("click", (event) => {
+      const target = event.target as HTMLElement;
+      if (target.closest("[data-dialog-close]") || target.closest("[data-dialog-cancel]"))
+        return dialog.close();
+      if (target.closest("[data-section-save]")) {
+        const value = dialog.querySelector<HTMLInputElement>("#section-name")?.value.trim();
+        this.#setSlideSection(value || undefined);
+        dialog.close();
+      }
+    });
+    this.#showModalDialog(dialog, () => (this.#sectionDialog = null));
+    this.#sectionDialog = dialog;
+    dialog.querySelector<HTMLInputElement>("#section-name")?.select();
+  }
+
+  #setSlideSection(section?: string): void {
+    const slide = this.#presJson?.slides?.[this.#activeSlideIndex()];
+    if (!slide || slide.section === section) return;
+    const before = slide.section;
+    const apply = (value?: string): void => {
+      if (value) slide.section = value;
+      else delete slide.section;
+    };
+    apply(section);
+    this.#pushEdit({
+      undo: () => apply(before),
+      redo: () => apply(section),
+    });
   }
 
   /** Shared native-dialog lifecycle: close removes the node and clears the
