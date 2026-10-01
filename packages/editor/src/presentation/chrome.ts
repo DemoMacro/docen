@@ -242,6 +242,36 @@ export const presentationStyles = css`
   .pane-actions button:hover {
     background: rgba(0, 0, 0, 0.08);
   }
+  .select-row:has(.animation-controls) {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    white-space: normal;
+  }
+  .animation-controls {
+    flex: 1 1 100%;
+    display: grid;
+    gap: 5px;
+    margin-top: 5px;
+  }
+  .animation-controls label {
+    display: grid;
+    grid-template-columns: 58px minmax(0, 1fr);
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--docen-color-fg-muted, #616161);
+  }
+  .animation-controls input,
+  .animation-controls select {
+    min-width: 0;
+    height: 24px;
+    padding: 0 4px;
+    border: 1px solid var(--docen-color-divider, #d9d9d9);
+    border-radius: 3px;
+    background: var(--docen-color-bg, #fff);
+    color: inherit;
+    font: inherit;
+  }
   /* PowerPoint's Slide Sorter: large cards on a neutral surface; the native
      dialog keeps Escape/close semantics without inventing another view state. */
   dialog.slide-sorter {

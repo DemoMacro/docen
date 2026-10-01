@@ -892,6 +892,15 @@ class DocenPresentation extends AddinHost {
   readonly #onChange = (event: Event): void => {
     const target = event.target as HTMLElement;
     if (target === this.notesEditor) return this.#commitNotes();
+    const animationControl = target.closest<HTMLElement>("[data-animation-setting]");
+    if (animationControl) {
+      this.#updateAnimationSetting(
+        Number(animationControl.dataset.animationIndex),
+        animationControl.dataset.animationSetting!,
+        (target as HTMLInputElement | HTMLSelectElement).value,
+      );
+      return;
+    }
     const name = target?.dataset?.event;
     if (name === "open") this.#pickFile();
     else if (name === "save-as") void this.#saveAs();
@@ -941,9 +950,9 @@ class DocenPresentation extends AddinHost {
     else if (name === "from-beginning") this.#startShow("beginning");
     else if (name === "from-current") this.#startShow("current");
     else if (name === "set-up-show") this.#openShowSetup();
-    else if (name === "animate" || name === "add-animation") {
-      this.#applyAnimation(event.detail?.value);
-    } else if (name === "animation-pane") this.#toggleAnimationPane();
+    else if (name === "animate") this.#applyAnimation(event.detail?.value, "replace");
+    else if (name === "add-animation") this.#applyAnimation(event.detail?.value, "add");
+    else if (name === "animation-pane") this.#toggleAnimationPane();
     else if (name === "slide-number" || name === "date-time") this.#insertFieldBox(name);
     else if (name === "smartart") this.#insertSmartArt();
     else if (name === "symbol") this.#openSymbolDialog();
@@ -3861,12 +3870,12 @@ class DocenPresentation extends AddinHost {
     restore(slides.map(() => after));
   }
 
-  /** The Animate split's pick on the selected object: one entrance preset as
-   *  a SlideAnimation addressed by the shape's cNvPr name (an unnamed shape
-   *  takes one unique among its siblings — the file format resolves names to
-   *  spTgt ids at compile time). "none" clears the shape's entry; a pick that
-   *  changes nothing records nothing. */
-  #applyAnimation(value?: string): void {
+  /** An Animation split's pick on the selected object. Animate replaces the
+   *  shape's effects; Add Animation appends another one, matching PowerPoint's
+   *  two commands. Entries address the shape by its cNvPr name (an unnamed
+   *  shape takes one unique among its siblings — the file format resolves
+   *  names to spTgt ids at compile time). */
+  #applyAnimation(value?: string, mode: "replace" | "add" = "replace"): void {
     const preset = value ?? "fade";
     if (preset !== "none" && !ANIMATION_PRESETS.has(preset as SlideAnimation["type"])) return;
     const sel = this.#selection;
@@ -3887,13 +3896,19 @@ class DocenPresentation extends AddinHost {
     }
     const before = host.animations;
     const entries = Array.isArray(before) ? before : [];
-    const kept = entries.filter((e) => typeof e === "object" && e.shapeName !== name);
-    const after: SlideAnimation[] | undefined =
-      preset === "none"
-        ? kept.length > 0
-          ? kept
-          : undefined
-        : [...kept, { type: preset as SlideAnimation["type"], shapeName: name }];
+    const other = entries.filter((entry) => entry.shapeName !== name);
+    const mine = entries.filter((entry) => entry.shapeName === name);
+    let after: SlideAnimation[] | undefined;
+    if (mode === "add" && preset === "none") {
+      const keptMine = mine.slice(0, -1);
+      after = [...other, ...keptMine];
+    } else if (mode === "add") {
+      after = [...entries, { type: preset, shapeName: name } as SlideAnimation];
+    } else {
+      after =
+        preset === "none" ? other : [...other, { type: preset, shapeName: name } as SlideAnimation];
+    }
+    if (after.length === 0) after = undefined;
     if (JSON.stringify(before) === JSON.stringify(after)) return;
     const restore = (value: SlideAnimation[] | string | undefined): void => {
       if (value === undefined) delete host.animations;
@@ -3902,6 +3917,35 @@ class DocenPresentation extends AddinHost {
     this.#pushEdit({ undo: () => restore(before), redo: () => restore(after) });
     restore(after);
     if (this.#rightPane === "animation") this.#renderAnimationPane();
+  }
+
+  /** Animation Pane timing controls: PowerPoint's Start / Duration / Delay
+   *  fields write the same official p:cTn attributes the compiler emits. */
+  #updateAnimationSetting(index: number, setting: string, value: string): void {
+    const host = this.#presJson?.slides?.[this.#activeSlideIndex()];
+    const entries = Array.isArray(host?.animations) ? host!.animations! : [];
+    const entry = entries[index];
+    if (!host || !entry || typeof entry !== "object") return;
+    const before = structuredClone(entry);
+    const after = structuredClone(entry);
+    if (setting === "trigger") {
+      if (value !== "onClick" && value !== "withPrevious" && value !== "afterPrevious") return;
+      after.trigger = value;
+    } else {
+      const seconds = Number(value);
+      if (!Number.isFinite(seconds) || seconds < 0) return;
+      const milliseconds = Math.round(seconds * 1000);
+      if (setting === "duration") after.duration = milliseconds;
+      else if (setting === "delay") after.delay = milliseconds;
+      else return;
+    }
+    if (JSON.stringify(before) === JSON.stringify(after)) return;
+    const restore = (next: SlideAnimation): void => {
+      entries[index] = structuredClone(next);
+      this.#renderAnimationPane();
+    };
+    this.#pushEdit({ undo: () => restore(before), redo: () => restore(after) });
+    restore(after);
   }
 
   // ── Slide show ───────────────────────────────────────────────────────────
@@ -4043,7 +4087,9 @@ class DocenPresentation extends AddinHost {
     const hits = slideHits(slide);
     const inBox = (box: Box, x: number, y: number): boolean =>
       x >= box.x - 1 && x <= box.x + box.width + 1 && y >= box.y - 1 && y <= box.y + box.height + 1;
-    let delay = 0;
+    let clickCursor = 0;
+    let lastStart = 0;
+    let lastEnd = 0;
     for (const entry of entries) {
       // Entrances only: a parsed exit/emphasis entry waits for a follow-up
       // batch rather than playing backwards.
@@ -4054,7 +4100,15 @@ class DocenPresentation extends AddinHost {
         : undefined;
       if (!hit) continue;
       const duration = entry.duration ?? 500;
-      const options = { duration, delay, jump: true, easing: "ease-out" as const };
+      const trigger = entry.trigger ?? "onClick";
+      const base =
+        trigger === "withPrevious"
+          ? lastStart
+          : trigger === "afterPrevious"
+            ? lastEnd
+            : clickCursor;
+      const startAt = base + (entry.delay ?? 0);
+      const options = { duration, delay: startAt, jump: true, easing: "ease-out" as const };
       for (const el of slideGroup.children.filter(
         // An unpainted element carries no position — NaN fails the box test.
         (member, i) => i > 0 && inBox(hit.box, member.x ?? NaN, member.y ?? NaN),
@@ -4081,7 +4135,9 @@ class DocenPresentation extends AddinHost {
           el.animate([{ opacity: 0 }, { opacity: 1 }], options);
         }
       }
-      delay += duration;
+      clickCursor = Math.max(clickCursor, startAt + duration);
+      lastStart = startAt;
+      lastEnd = startAt + duration;
     }
   }
 
@@ -4230,7 +4286,23 @@ class DocenPresentation extends AddinHost {
             ? this.#childLabel(children[target]!, target).label
             : (entry.shapeName ?? t("ppt.animation.unnamed", this));
         const effect = t(`ppt.ribbon.animate.${entry.type}`, this);
-        return `<div class="select-row" data-child="${target}" data-animation="${index}"><span class="select-name"><strong>${escapeHtml(label)}</strong><br>${escapeHtml(effect)}</span><span class="pane-actions"><button data-animation-move="${index}" data-direction="-1" title="${escapeHtml(t("ppt.animation.move-up", this))}">↑</button><button data-animation-move="${index}" data-direction="1" title="${escapeHtml(t("ppt.animation.move-down", this))}">↓</button><button data-animation-delete="${index}" title="${escapeHtml(t("ppt.animation.delete", this))}">×</button></span></div>`;
+        const active =
+          target >= 0 && this.#selection?.slide === slide && this.#selection.child === target;
+        const trigger = entry.trigger ?? "onClick";
+        const options: readonly SlideAnimation["trigger"][] = [
+          "onClick",
+          "withPrevious",
+          "afterPrevious",
+        ];
+        return `<div class="select-row" data-child="${target}" data-animation="${index}"${active ? ' data-active="true"' : ""}>
+          <span class="select-name"><strong>${escapeHtml(label)}</strong><br>${escapeHtml(effect)}</span>
+          <div class="animation-controls">
+            <label><span>${escapeHtml(t("ppt.animation.start", this))}</span><select data-animation-setting="trigger" data-animation-index="${index}">${options.map((option) => `<option value="${option}"${option === trigger ? " selected" : ""}>${escapeHtml(t(`ppt.animation.${option}`, this))}</option>`).join("")}</select></label>
+            <label><span>${escapeHtml(t("ppt.animation.duration", this))}</span><input type="number" min="0" step="0.1" value="${((entry.duration ?? 500) / 1000).toFixed(1)}" data-animation-setting="duration" data-animation-index="${index}"></label>
+            <label><span>${escapeHtml(t("ppt.animation.delay", this))}</span><input type="number" min="0" step="0.1" value="${((entry.delay ?? 0) / 1000).toFixed(1)}" data-animation-setting="delay" data-animation-index="${index}"></label>
+          </div>
+          <span class="pane-actions"><button data-animation-move="${index}" data-direction="-1" title="${escapeHtml(t("ppt.animation.move-up", this))}">↑</button><button data-animation-move="${index}" data-direction="1" title="${escapeHtml(t("ppt.animation.move-down", this))}">↓</button><button data-animation-delete="${index}" title="${escapeHtml(t("ppt.animation.delete", this))}">×</button></span>
+        </div>`;
       })
       .join("");
   }
