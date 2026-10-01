@@ -2179,22 +2179,41 @@ class DocenPresentation extends AddinHost {
     this.#select(sel);
   }
 
-  /** Remove the selected object; undo re-splices the same child back. */
-  #deleteSelected(): void {
+  /** The editable array behind the current selection: the slide for a top-level
+   *  child, or the nearest group container for a member path. */
+  #selectedChildren(): { children: SlideChild[]; index: number } | null {
     const sel = this.#selection;
     const slide = this.#presJson?.slides?.[sel?.slide ?? -1];
     const children = slide?.children;
-    if (!sel || !children) return;
-    const [child] = children.splice(sel.child, 1);
+    if (!sel || !children) return null;
+    if (!sel.member) return { children, index: sel.child };
+    let node: SlideChild | undefined = children[sel.child];
+    for (const index of sel.member.slice(0, -1)) {
+      if (!node || !("group" in node)) return null;
+      node = node.group.children?.[index];
+    }
+    if (!node || !("group" in node)) return null;
+    const members = node.group.children;
+    const index = sel.member[sel.member.length - 1] ?? -1;
+    return members && index >= 0 && index < members.length ? { children: members, index } : null;
+  }
+
+  /** Remove the selected object; undo re-splices the same child back. */
+  #deleteSelected(): void {
+    const sel = this.#selection;
+    const selected = this.#selectedChildren();
+    if (!sel || !selected) return;
+    const { children, index } = selected;
+    const [child] = children.splice(index, 1);
     if (!child) return;
     this.#select(null);
     this.#pushEdit({
       undo: () => {
-        children.splice(sel.child, 0, child);
+        children.splice(index, 0, child);
         this.#reproject(sel.slide);
       },
       redo: () => {
-        children.splice(sel.child, 1);
+        children.splice(index, 1);
         this.#reproject(sel.slide);
       },
     });
@@ -2318,21 +2337,27 @@ class DocenPresentation extends AddinHost {
    *  slide's z order; the selection follows the object. */
   #reorderSelected(to: "front" | "back"): void {
     const sel = this.#selection;
-    const children = this.#presJson?.slides?.[sel?.slide ?? -1]?.children;
-    if (!sel || !children || children.length < 2) return;
-    const from = sel.child;
+    const selected = this.#selectedChildren();
+    if (!sel || !selected || selected.children.length < 2) return;
+    const { children, index: from } = selected;
     const moved = to === "front" ? children.length - 1 : 0;
     reorderChild(children, from, moved);
-    this.#select({ slide: sel.slide, child: moved });
+    this.#select(
+      sel.member ? { ...sel, member: [...sel.member] } : { slide: sel.slide, child: moved },
+    );
     this.#pushEdit({
       undo: () => {
         reorderChild(children, moved, from);
-        this.#select({ slide: sel.slide, child: from });
+        this.#select(
+          sel.member ? { ...sel, member: [...sel.member] } : { slide: sel.slide, child: from },
+        );
         this.#reproject(sel.slide);
       },
       redo: () => {
         reorderChild(children, from, moved);
-        this.#select({ slide: sel.slide, child: moved });
+        this.#select(
+          sel.member ? { ...sel, member: [...sel.member] } : { slide: sel.slide, child: moved },
+        );
         this.#reproject(sel.slide);
       },
     });
@@ -4854,13 +4879,7 @@ class DocenPresentation extends AddinHost {
       event.preventDefault();
       return void this.#saveAs();
     }
-    if (
-      (event.key === "Delete" || event.key === "Backspace") &&
-      this.#selection &&
-      // A member Delete would splice inside the group — not wired yet, and
-      // falling through would remove the whole group under the user.
-      !this.#selection.member
-    ) {
+    if ((event.key === "Delete" || event.key === "Backspace") && this.#selection) {
       event.preventDefault();
       if (this.#tableSelection) return this.#clearSelectedTableCells();
       this.#deleteSelected();
