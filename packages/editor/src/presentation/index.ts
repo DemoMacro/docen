@@ -353,6 +353,10 @@ const WIRED_COMMANDS: ReadonlySet<string> = new Set([
   "slide-size",
   "bring-front",
   "send-back",
+  "bring-forward",
+  "send-backward",
+  "align-objects",
+  "selection-pane",
   "gridlines",
   "find",
   "replace",
@@ -441,6 +445,7 @@ class DocenPresentation extends AddinHost {
   /** Word's cross-cell selection for the selected table (grid row/col pairs;
    *  null collapses the selection to the cell next entered). */
   #tableSelection: TableSelectionRange | null = null;
+  #tableAnchor: { row: number; col: number } | null = null;
   #tableTextSelection: HTMLDivElement[] = [];
   #contextTabIds = new Set<string>();
   /** The in-place shape-text editor: the textarea floats over the shape while
@@ -996,8 +1001,10 @@ class DocenPresentation extends AddinHost {
     else if (name === "format-background") this.#setBackground(event.detail?.value);
     else if (name === "slide-size") this.#toggleSlideSize();
     else if (name === "insert-picture") this.#pickPicture();
-    else if (name === "bring-front") this.#reorderSelected("front");
-    else if (name === "send-back") this.#reorderSelected("back");
+    else if (name === "bring-front" || name === "bring-forward")
+      this.#reorderSelected(event.detail?.value === "front" ? "front" : "forward");
+    else if (name === "send-back" || name === "send-backward")
+      this.#reorderSelected(event.detail?.value === "back" ? "back" : "backward");
     else if (name === "gridlines") this.#toggleGridlines();
     else if (name === "find" || name === "replace") this.#findDialog()?.show();
     else if (name === "spell-check") this.#openSpellCheck();
@@ -1034,6 +1041,8 @@ class DocenPresentation extends AddinHost {
     else if (name === "video" || name === "audio") this.#pickMedia();
     else if (name === "object") this.#pickObject();
     else if (name === "select") this.#toggleSelectionPane();
+    else if (name === "selection-pane") this.#toggleSelectionPane();
+    else if (name === "align-objects") this.#alignSelectedObject(event.detail?.value);
     else if (name === "toggle-table-look") this.#toggleTableLook(event.detail?.value);
     else if (name === "table-style") this.#setTableStyle(event.detail?.value);
     else if (name === "cell-shading") this.#setTableCellShading(event.detail?.value);
@@ -1262,6 +1271,7 @@ class DocenPresentation extends AddinHost {
     }
     this.#tableOverlay?.hide();
     this.#tableSelection = null;
+    this.#tableAnchor = null;
     const hit = this.#selection ? this.#selectedBox() : null;
     if (hit) this.#overlay?.show(hit.box, hit.rotation);
     else this.#overlay?.hide();
@@ -1846,6 +1856,7 @@ class DocenPresentation extends AddinHost {
     else editor.setSelectionRange(editor.value.length, editor.value.length);
     this.#textEditor = editor;
     this.#tableEdit = { row: cell.row, col: cell.col };
+    this.#tableAnchor = { ...this.#tableEdit };
     this.#tableEditBefore = structuredClone(source);
     this.#syncTableCellSizeControls();
     this.#syncTableCellTextSelection();
@@ -2450,35 +2461,88 @@ class DocenPresentation extends AddinHost {
     this.#revealSlide(copyAt);
   }
 
-  /** Move the selected object to the top (front) or bottom (back) of its
-   *  slide's z order; the selection follows the object. */
-  #reorderSelected(to: "front" | "back"): void {
+  /** Move the selected object through PowerPoint's four z-order commands;
+   *  absolute moves land at either end and relative moves step one neighbor.
+   *  The selection address follows the moved object. */
+  #reorderSelected(to: "front" | "back" | "forward" | "backward"): void {
     const sel = this.#selection;
     const selected = this.#selectedChildren();
-    if (!sel || !selected || selected.children.length < 2) return;
+    if (!sel || !selected) return;
     const { children, index: from } = selected;
-    const moved = to === "front" ? children.length - 1 : 0;
+    const moved =
+      to === "front"
+        ? children.length - 1
+        : to === "back"
+          ? 0
+          : to === "forward"
+            ? Math.min(children.length - 1, from + 1)
+            : Math.max(0, from - 1);
+    if (moved === from) return;
     reorderChild(children, from, moved);
-    this.#select(
-      sel.member ? { ...sel, member: [...sel.member] } : { slide: sel.slide, child: moved },
-    );
+    const address = (): { slide: number; child: number; member?: number[] } => {
+      if (!sel.member) return { slide: sel.slide, child: moved };
+      const member = [...sel.member];
+      member[member.length - 1] = moved;
+      return { slide: sel.slide, child: sel.child, member };
+    };
+    this.#select(address());
     this.#pushEdit({
       undo: () => {
         reorderChild(children, moved, from);
-        this.#select(
-          sel.member ? { ...sel, member: [...sel.member] } : { slide: sel.slide, child: from },
-        );
+        const undoAddress = () => {
+          if (!sel.member) return { slide: sel.slide, child: from };
+          const member = [...sel.member];
+          member[member.length - 1] = from;
+          return { slide: sel.slide, child: sel.child, member };
+        };
+        this.#select(undoAddress());
         this.#reproject(sel.slide);
       },
       redo: () => {
         reorderChild(children, from, moved);
-        this.#select(
-          sel.member ? { ...sel, member: [...sel.member] } : { slide: sel.slide, child: moved },
-        );
+        this.#select(address());
         this.#reproject(sel.slide);
       },
     });
     this.#reproject(sel.slide);
+  }
+
+  /** Align a top-level object to the slide's edges/center. Group members keep
+   *  group-relative geometry, so they deliberately stay unsupported here. */
+  #alignSelectedObject(value?: string): void {
+    if (
+      value !== "left" &&
+      value !== "center" &&
+      value !== "right" &&
+      value !== "top" &&
+      value !== "middle" &&
+      value !== "bottom"
+    )
+      return;
+    const sel = this.#selection;
+    if (!sel || sel.member) return;
+    const slide = this.#presJson?.slides?.[sel.slide];
+    const child = this.#selectedChild();
+    const pres = this.#pres;
+    const hit = slide ? slideHits(slide).find((entry) => entry.child === sel.child) : null;
+    if (!child || !pres || !hit) return;
+    const dx =
+      value === "left"
+        ? -hit.box.x
+        : value === "center"
+          ? (pres.widthPx - hit.box.width) / 2 - hit.box.x
+          : value === "right"
+            ? pres.widthPx - hit.box.width - hit.box.x
+            : 0;
+    const dy =
+      value === "top"
+        ? -hit.box.y
+        : value === "middle"
+          ? (pres.heightPx - hit.box.height) / 2 - hit.box.y
+          : value === "bottom"
+            ? pres.heightPx - hit.box.height - hit.box.y
+            : 0;
+    this.#applyGesture((target) => offsetChild(target, dx, dy));
   }
 
   /** Append a child on top of the active slide and select it; undo splices
@@ -4619,9 +4683,54 @@ class DocenPresentation extends AddinHost {
    *  the cell under the text caret. */
   #tableActiveRange(): TableSelectionRange | null {
     if (this.#tableSelection) return this.#tableSelection;
-    return this.#tableEdit
-      ? { anchor: { ...this.#tableEdit }, head: { ...this.#tableEdit } }
+    return this.#tableAnchor
+      ? { anchor: { ...this.#tableAnchor }, head: { ...this.#tableAnchor } }
       : null;
+  }
+
+  /** Structural table commands commit the live cell first; PowerPoint keeps
+   *  the grid selection, but the floating textarea cannot survive an index
+   *  shift without pointing at the wrong cell. */
+  #commitCellBeforeTableStructure(): void {
+    if (this.#textEditor) this.#exitTableCellEditing(true);
+  }
+
+  /** Translate a selected rectangle after rows/columns are inserted/deleted. */
+  #shiftTableSelection(
+    range: TableSelectionRange,
+    axis: "row" | "col",
+    from: number,
+    count: number,
+    inserted: boolean,
+    before: boolean,
+  ): TableSelectionRange {
+    const move = (value: number): number => {
+      if (inserted) return before && value >= from ? value + count : value;
+      if (value < from) return value;
+      if (value < from + count) return from;
+      return value - count;
+    };
+    if (axis === "row")
+      return {
+        anchor: { ...range.anchor, row: move(range.anchor.row) },
+        head: { ...range.head, row: move(range.head.row) },
+      };
+    return {
+      anchor: { ...range.anchor, col: move(range.anchor.col) },
+      head: { ...range.head, col: move(range.head.col) },
+    };
+  }
+
+  /** Keep the active cell (even after its textarea exits) and any block
+   *  selection pointed at the post-structure grid. */
+  #preserveTableGridRange(range: TableSelectionRange): void {
+    const anchor = {
+      row: Math.min(range.anchor.row, range.head.row),
+      col: Math.min(range.anchor.col, range.head.col),
+    };
+    this.#tableAnchor = anchor;
+    if (this.#tableSelection) this.#setTableSelection(range);
+    else this.#syncTableCellSizeControls();
   }
 
   /** Insert a fresh PowerPoint row at the selection's near/far edge. */
@@ -4629,19 +4738,26 @@ class DocenPresentation extends AddinHost {
     const found = this.#tableMemberOf();
     const range = this.#tableActiveRange();
     if (!found || !range) return;
-    const row = Math.min(range.anchor.row, range.head.row);
-    const at = position === "above" ? row : Math.max(range.anchor.row, range.head.row) + 1;
-    const height = found.table.rows[row]?.height;
+    this.#commitCellBeforeTableStructure();
+    const fromRow = Math.min(range.anchor.row, range.head.row);
+    const toRow = Math.max(range.anchor.row, range.head.row);
+    const at = position === "above" ? fromRow : toRow + 1;
+    const count = toRow - fromRow + 1;
     this.#mutateSelectedTable((table) => {
-      table.rows.splice(at, 0, {
-        height,
-        cells: Array.from(
-          { length: table.columnWidths?.length ?? 3 },
-          () => ({ text: "" }) as TableCellOptions,
-        ),
-      });
+      for (let index = 0; index < count; index += 1) {
+        const height = found.table.rows[Math.min(at + index, found.table.rows.length - 1)]?.height;
+        table.rows.splice(at + index, 0, {
+          height,
+          cells: Array.from(
+            { length: table.columnWidths?.length ?? 3 },
+            () => ({ text: "" }) as TableCellOptions,
+          ),
+        });
+      }
     });
-    this.#setTableSelection(null);
+    this.#preserveTableGridRange(
+      this.#shiftTableSelection(range, "row", fromRow, count, true, position === "above"),
+    );
   }
 
   /** Insert a fresh column at the selection edge, cloning the official width. */
@@ -4649,14 +4765,23 @@ class DocenPresentation extends AddinHost {
     const found = this.#tableMemberOf();
     const range = this.#tableActiveRange();
     if (!found || !range) return;
-    const col = Math.min(range.anchor.col, range.head.col);
-    const at = position === "left" ? col : Math.max(range.anchor.col, range.head.col) + 1;
-    const width = found.table.columnWidths?.[col];
+    this.#commitCellBeforeTableStructure();
+    const fromCol = Math.min(range.anchor.col, range.head.col);
+    const toCol = Math.max(range.anchor.col, range.head.col);
+    const at = position === "left" ? fromCol : toCol + 1;
+    const count = toCol - fromCol + 1;
     this.#mutateSelectedTable((table) => {
-      for (const row of table.rows) row.cells.splice(at, 0, { text: "" });
-      if (table.columnWidths) table.columnWidths.splice(at, 0, width ?? table.columnWidths[0]);
+      for (let index = 0; index < count; index += 1) {
+        const width =
+          found.table.columnWidths?.[Math.min(at + index, (table.columnWidths?.length ?? 1) - 1)];
+        for (const row of table.rows) row.cells.splice(at + index, 0, { text: "" });
+        const widths = table.columnWidths;
+        if (widths) widths.splice(at + index, 0, width ?? widths[0]!);
+      }
     });
-    this.#setTableSelection(null);
+    this.#preserveTableGridRange(
+      this.#shiftTableSelection(range, "col", fromCol, count, true, position === "left"),
+    );
   }
 
   /** Delete the selected rows/columns; deleting the whole grid deletes the
@@ -4666,6 +4791,7 @@ class DocenPresentation extends AddinHost {
     const found = this.#tableMemberOf();
     const range = this.#tableActiveRange();
     if (!found || !range) return;
+    this.#commitCellBeforeTableStructure();
     const fromRow = Math.min(range.anchor.row, range.head.row);
     const toRow = Math.max(range.anchor.row, range.head.row);
     const fromCol = Math.min(range.anchor.col, range.head.col);
@@ -4699,7 +4825,23 @@ class DocenPresentation extends AddinHost {
       if (table.columnWidths)
         table.columnWidths = table.columnWidths.filter((_, col) => !selected.has(col));
     });
-    this.#setTableSelection(null);
+    const selection = this.#tableActiveRange();
+    if (!selection) return;
+    const selected = this.#tableGridSelection();
+    const overlap =
+      value === "rows"
+        ? fromRow <= selected!.toRow && toRow >= selected!.fromRow
+        : fromCol <= selected!.toCol && toCol >= selected!.fromCol;
+    if (overlap) {
+      this.#tableAnchor = null;
+      this.#setTableSelection(null);
+    } else {
+      this.#preserveTableGridRange(
+        value === "rows"
+          ? this.#shiftTableSelection(selection, "row", fromRow, toRow - fromRow + 1, false, false)
+          : this.#shiftTableSelection(selection, "col", fromCol, toCol - fromCol + 1, false, false),
+      );
+    }
   }
 
   /** Merge the selected origins into one rectangular `columnSpan`/`rowSpan`
@@ -4708,6 +4850,7 @@ class DocenPresentation extends AddinHost {
     const found = this.#tableMemberOf();
     const range = this.#tableActiveRange();
     if (!found || !range) return;
+    this.#commitCellBeforeTableStructure();
     const origins = tableGridOf(found.table).origins;
     const slots = tableSelectionCells(found.member, range)
       .map(({ row, col }) =>
@@ -4740,6 +4883,7 @@ class DocenPresentation extends AddinHost {
       else delete target.cell.rowSpan;
       if (text) writeText({ kind: "cell", cell: target.cell }, text);
     });
+    this.#tableAnchor = { row: target.row, col: target.col };
     this.#setTableSelection({
       anchor: { row: target.row, col: target.col },
       head: { row: target.row, col: target.col },
@@ -4753,6 +4897,7 @@ class DocenPresentation extends AddinHost {
     const found = this.#tableMemberOf();
     const range = this.#tableActiveRange();
     if (!found || !range) return;
+    this.#commitCellBeforeTableStructure();
     const at = {
       row: Math.min(range.anchor.row, range.head.row),
       col: Math.min(range.anchor.col, range.head.col),
@@ -4799,6 +4944,7 @@ class DocenPresentation extends AddinHost {
         row.cells = cells;
       });
     });
+    this.#tableAnchor = at;
     this.#setTableSelection({ anchor: at, head: at });
   }
 
@@ -5373,8 +5519,9 @@ class DocenPresentation extends AddinHost {
     const height = commonEmu(
       Array.from({ length: selection.toRow - selection.fromRow + 1 }, (_, index) => {
         const row = selection.fromRow + index;
+        const declaredHeight = found.table.rows[row]?.height;
         return (
-          found.table.rows[row]?.height ??
+          (declaredHeight && measureEmu(declaredHeight) ? declaredHeight : undefined) ??
           Math.round((found.member.table.rows[row]?.heightPx ?? 0) * (914400 / 96))
         );
       }),

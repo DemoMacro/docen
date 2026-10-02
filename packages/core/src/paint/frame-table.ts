@@ -98,6 +98,13 @@ export function paintFrameTable(
     }
   }
   const rowH = rows.map((row, r) => Math.max(row.heightPx, rowNeed[r]!));
+  // The projection is the editor's geometry source: an auto row starts at
+  // zero when FontMetrics is absent, but the browser painter measures its real
+  // height. Write that measured band back so grips, hit tests, Cell Size, and
+  // the floating cell editor agree with the pixels just painted.
+  rowH.forEach((height, index) => {
+    rows[index]!.heightPx = height;
+  });
   const rowY = [0];
   for (const h of rowH) rowY.push(rowY[rowY.length - 1]! + h);
 
