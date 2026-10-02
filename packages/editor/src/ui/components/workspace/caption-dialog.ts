@@ -1,5 +1,6 @@
 import { FASTElement, css, customElement, html, observable, ref } from "@microsoft/fast-element";
 
+import { formatSeqNumber } from "../../../document/fields";
 import { observeLang, t } from "../../i18n/localize";
 import { listboxOf, opt, pick, pickedValue, type FluentDropdown } from "./fluent-combo";
 
@@ -30,7 +31,7 @@ const styles = css`
     gap: 8px;
   }
   .row > label {
-    min-width: 76px;
+    min-width: 96px;
   }
   .row fluent-dropdown,
   .row fluent-text-input {
@@ -44,7 +45,8 @@ const styles = css`
 `;
 
 /** The caption's live preview line — Word's dialog keeps the caption shape in
- *  view while the fields change. `seq` stands in for the next SEQ number. */
+ *  view while the fields change. The number stands in for the next SEQ value
+ *  (the chapter segment stands in for the current chapter). */
 const template = html<DocenCaptionDialog>`
   <docen-dialog ${ref("dialogEl")}>
     <div class="body">
@@ -102,6 +104,88 @@ const template = html<DocenCaptionDialog>`
         <fluent-checkbox ${ref("excludeChk")} @change="${(x) => x.syncPreview()}"></fluent-checkbox>
         <span ${ref("excludeLabel")}></span>
       </label>
+      <div class="row">
+        <label ${ref("formatLabel")}></label>
+        <fluent-dropdown
+          type="combobox"
+          appearance="outline"
+          ${ref("formatSel")}
+          @change="${(x) => x.syncPreview()}"
+        >
+          <fluent-listbox popover="manual" tabindex="-1">
+            <fluent-option value="ARABIC">1, 2, 3, …</fluent-option>
+            <fluent-option value="ROMAN">I, II, III, …</fluent-option>
+            <fluent-option value="roman">i, ii, iii, …</fluent-option>
+            <fluent-option value="ALPHABETIC">A, B, C, …</fluent-option>
+            <fluent-option value="alphabetic">a, b, c, …</fluent-option>
+          </fluent-listbox>
+          <input
+            slot="control"
+            role="combobox"
+            aria-haspopup="listbox"
+            type="combobox"
+            size="1"
+            style="width:100%;box-sizing:border-box"
+          />
+        </fluent-dropdown>
+      </div>
+      <label class="row">
+        <fluent-checkbox ${ref("chapterChk")} @change="${(x) => x.syncPreview()}"></fluent-checkbox>
+        <span ${ref("chapterLabel")}></span>
+      </label>
+      <div class="row">
+        <label ${ref("chapterStyleLabel")}></label>
+        <fluent-dropdown
+          type="combobox"
+          appearance="outline"
+          ${ref("chapterStyleSel")}
+          @change="${(x) => x.syncPreview()}"
+        >
+          <fluent-listbox popover="manual" tabindex="-1">
+            <fluent-option value="1"></fluent-option>
+            <fluent-option value="2"></fluent-option>
+            <fluent-option value="3"></fluent-option>
+            <fluent-option value="4"></fluent-option>
+            <fluent-option value="5"></fluent-option>
+            <fluent-option value="6"></fluent-option>
+            <fluent-option value="7"></fluent-option>
+            <fluent-option value="8"></fluent-option>
+            <fluent-option value="9"></fluent-option>
+          </fluent-listbox>
+          <input
+            slot="control"
+            role="combobox"
+            aria-haspopup="listbox"
+            type="combobox"
+            size="1"
+            style="width:100%;box-sizing:border-box"
+          />
+        </fluent-dropdown>
+      </div>
+      <div class="row">
+        <label ${ref("separatorLabel")}></label>
+        <fluent-dropdown
+          type="combobox"
+          appearance="outline"
+          ${ref("separatorSel")}
+          @change="${(x) => x.syncPreview()}"
+        >
+          <fluent-listbox popover="manual" tabindex="-1">
+            <fluent-option value="hyphen"></fluent-option>
+            <fluent-option value="period"></fluent-option>
+            <fluent-option value="colon"></fluent-option>
+            <fluent-option value="emDash"></fluent-option>
+          </fluent-listbox>
+          <input
+            slot="control"
+            role="combobox"
+            aria-haspopup="listbox"
+            type="combobox"
+            size="1"
+            style="width:100%;box-sizing:border-box"
+          />
+        </fluent-dropdown>
+      </div>
     </div>
     <div slot="action">
       <fluent-button ${ref("cancelBtn")} @click="${(x) => x.hide()}"></fluent-button>
@@ -119,13 +203,24 @@ const template = html<DocenCaptionDialog>`
 type FluentCheckbox = HTMLElement & { checked?: boolean };
 type FluentTextInput = HTMLElement & { value: string };
 
+/** The separator ladder in template order — the tokens mirror w:caption@w:sep
+ *  (Word's "Use separator" list), the preview needs their character. */
+const SEPARATORS: readonly { token: string; char: string; key: string }[] = [
+  { token: "hyphen", char: "-", key: "caption.sep.hyphen" },
+  { token: "period", char: ".", key: "caption.sep.period" },
+  { token: "colon", char: ":", key: "caption.sep.colon" },
+  { token: "emDash", char: "\u2014", key: "caption.sep.emDash" },
+];
+
 /**
  * `<docen-caption-dialog>` — Word's Insert Caption dialog (题注): a live
  * preview of the caption shape, the label (Figure/Table/Equation — the label
  * written into the document follows the UI language, like Word's), the caption
- * text, the position relative to the anchored item, and the exclude-label
- * flag. Opened with `show()`; commits via `caption:ok`
- * `{ label, text, position, excludeLabel }` or cancels.
+ * text, the position relative to the anchored item, the exclude-label flag,
+ * the number format, and the chapter-number shape ("Include chapter number" +
+ * chapter-start heading level + separator). Opened with `show()`; commits via
+ * `caption:ok` `{ label, text, position, excludeLabel, format, chapterNumber,
+ * heading, sep }` or cancels.
  */
 @customElement({ name: "docen-caption-dialog", template, styles })
 class DocenCaptionDialog extends FASTElement {
@@ -139,6 +234,14 @@ class DocenCaptionDialog extends FASTElement {
   @observable positionSel?: FluentDropdown;
   @observable excludeChk?: FluentCheckbox;
   @observable excludeLabel?: HTMLElement;
+  @observable formatLabel?: HTMLElement;
+  @observable formatSel?: FluentDropdown;
+  @observable chapterChk?: FluentCheckbox;
+  @observable chapterLabel?: HTMLElement;
+  @observable chapterStyleLabel?: HTMLElement;
+  @observable chapterStyleSel?: FluentDropdown;
+  @observable separatorLabel?: HTMLElement;
+  @observable separatorSel?: FluentDropdown;
   @observable okBtn?: HTMLElement;
   @observable cancelBtn?: HTMLElement;
 
@@ -160,7 +263,11 @@ class DocenCaptionDialog extends FASTElement {
     this.#applyLabels();
     if (this.textInput) this.textInput.value = "";
     pick(this.positionSel, "below");
+    pick(this.formatSel, "ARABIC");
+    pick(this.chapterStyleSel, "1");
+    pick(this.separatorSel, "hyphen");
     if (this.excludeChk) this.excludeChk.checked = false;
+    if (this.chapterChk) this.chapterChk.checked = false;
     this.syncPreview();
     this.dialogEl?.show();
   }
@@ -176,7 +283,14 @@ class DocenCaptionDialog extends FASTElement {
     const label = pickedValue(this.labelSel) ?? "";
     const text = this.textInput?.value ?? "";
     const excluded = this.excludeChk?.checked ?? false;
-    const head = `${excluded ? "" : `${label} `}1`;
+    const format = this.formatSel?.value || "ARABIC";
+    const number = formatSeqNumber(format, 1);
+    // A chapter-numbered caption reads "chapter + separator + number" (the
+    // chapter stands in at 1; the separator is the picked one).
+    const separator = SEPARATORS.find((s) => s.token === this.separatorSel?.value)?.char ?? "-";
+    const head = `${excluded ? "" : `${label} `}${
+      this.chapterChk?.checked ? `1${separator}` : ""
+    }${number}`;
     this.previewEl.textContent = text ? `${head}: ${text}` : head;
   }
 
@@ -189,6 +303,10 @@ class DocenCaptionDialog extends FASTElement {
       text,
       position: pickedValue(this.positionSel) === "above" ? "above" : "below",
       excludeLabel: this.excludeChk?.checked ?? false,
+      format: this.formatSel?.value || "ARABIC",
+      chapterNumber: this.chapterChk?.checked ?? false,
+      heading: Number(this.chapterStyleSel?.value) || 1,
+      sep: this.separatorSel?.value || "hyphen",
     });
     this.hide();
   }
@@ -199,12 +317,32 @@ class DocenCaptionDialog extends FASTElement {
     if (this.textLabel) this.textLabel.textContent = t("caption.text", this);
     if (this.positionLabel) this.positionLabel.textContent = t("caption.position", this);
     if (this.excludeLabel) this.excludeLabel.textContent = t("caption.exclude", this);
+    if (this.formatLabel) this.formatLabel.textContent = t("caption.format", this);
+    if (this.chapterLabel) this.chapterLabel.textContent = t("caption.chapter", this);
+    if (this.chapterStyleLabel)
+      this.chapterStyleLabel.textContent = t("caption.chapterStyle", this);
+    if (this.separatorLabel) this.separatorLabel.textContent = t("caption.separator", this);
     if (this.okBtn) this.okBtn.textContent = t("options.ok", this);
     if (this.cancelBtn) this.cancelBtn.textContent = t("options.cancel", this);
     if (this.positionSel) {
       const [below, above] = this.positionSel.querySelectorAll("fluent-option");
       if (below) below.textContent = t("caption.below", this);
       if (above) above.textContent = t("caption.above", this);
+    }
+    // The chapter-start choices are the heading styles, localized like Word's
+    // ("Heading 1" / "标题 1"); values stay the 1-9 levels.
+    if (this.chapterStyleSel) {
+      const options = this.chapterStyleSel.querySelectorAll("fluent-option");
+      options.forEach((option, index) => {
+        option.textContent = t(`caption.heading${index + 1}`, this);
+      });
+    }
+    if (this.separatorSel) {
+      const options = this.separatorSel.querySelectorAll("fluent-option");
+      options.forEach((option, index) => {
+        const key = SEPARATORS[index]?.key;
+        if (key) option.textContent = t(key, this);
+      });
     }
     // The label options are rebuilt on language change: the option VALUE is
     // the label word written into the document, and Word writes it in the UI
