@@ -2,7 +2,7 @@ import {
   cssFamilyOf,
   cssFontOf,
   familyOfSlot,
-  formatNumber,
+  fieldLabelOf,
   gridPadOf,
   isCjkCodeUnit,
   itemGlyphLayout,
@@ -403,15 +403,10 @@ export function paintParagraph(
           continue;
         }
         // A page-number field paints its live value; the measured `text` was
-        // only a placeholder. PAGE renders in the section's w:pgNumType
-        // format at the restart-adjusted value (the ctx carries the offset
-        // between shown and physical numbers).
-        const label =
-          inline.field === "page"
-            ? formatNumber(ctx.pageNumber?.fmt, ctx.pageIndex + 1 + (ctx.pageNumber?.offset ?? 0))
-            : inline.field === "numPages"
-              ? String(ctx.pageCount)
-              : item.text;
+        // only a placeholder. fieldLabelOf prefers the render pass's resolved
+        // value, then the live page context (furniture/header fields the page
+        // flow does not carry), then the measured text (cache / field code).
+        const label = fieldLabelOf(inline, ctx, item.text);
         // Every run hangs on the LINE's one baseline: Leafer pins an
         // element's own baseline at 0.85 × its font size below the element
         // top, so the element top re-anchors by that share below the line

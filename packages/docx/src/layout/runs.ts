@@ -203,22 +203,46 @@ export function projectRuns(
   };
   /** A field (w:fldSimple / complexField): PAGE/NUMPAGES become dynamic atoms
    *  (the painter resolves the number per page — `text` is a measuring
-   *  placeholder); anything else renders its cached result. A structured
+   *  placeholder); anything else renders its cached result. Every field atom
+   *  carries its descriptor (instruction verbatim + cached result) so the
+   *  render pass can re-resolve it and Alt+F9 can show the code. A structured
    *  result (resultRunsXml — present when the result runs hold anything but
    *  plain text, e.g. a TOC hyperlink's tab + nested PAGEREF) is re-hydrated
    *  item by item; only then does the flat `result` string stand in. */
   const pushField = (field: Rec, rPr: Rec): void => {
-    const instr =
-      typeof field.instruction === "string" ? field.instruction.trim().toUpperCase() : "";
+    const raw = typeof field.instruction === "string" ? field.instruction.trim() : "";
+    const instr = raw.toUpperCase();
     const cached =
       typeof field.result === "string" ? field.result : (field.cachedValue as string | undefined);
     const style = textStyleOf(rPr);
-    if (instr.startsWith("PAGE") && !instr.startsWith("PAGES") && !instr.startsWith("PAGEREF")) {
-      out.push({ kind: "text", text: "0", style, field: "page" });
+    const descriptor = raw
+      ? { instruction: raw, ...(typeof cached === "string" ? { result: cached } : {}) }
+      : {};
+    if (ctx.showFieldCodes && raw) {
+      // Alt+F9: the instruction verbatim in place of every result.
+      out.push({ kind: "text", text: raw, style, ...descriptor });
+    } else if (
+      instr.startsWith("PAGE") &&
+      !instr.startsWith("PAGES") &&
+      !instr.startsWith("PAGEREF")
+    ) {
+      out.push({ kind: "text", text: "0", style, field: "page", ...descriptor });
     } else if (instr.startsWith("NUMPAGES")) {
-      out.push({ kind: "text", text: "0", style, field: "numPages" });
+      out.push({ kind: "text", text: "0", style, field: "numPages", ...descriptor });
     } else if (typeof field.resultRunsXml === "string") {
+      // A structured result (TOC entry, nested field) re-hydrates item by
+      // item and outranks the flat-result placeholder branches.
       pushFieldResultRuns(field.resultRunsXml, rPr);
+    } else if (/^SECTION(PAGES)?\b/.test(instr)) {
+      // The render pass re-resolves the section numbering live; keep a
+      // measuring placeholder when the document cached no result so the atom
+      // stays on a line the resolve walk visits.
+      out.push({ kind: "text", text: cached || "0", style, ...descriptor });
+    } else if (raw) {
+      // Emit the atom even for an empty cache: the render pass and the update
+      // commands resolve the field from its descriptor, and Word keeps the
+      // (empty) field mark too.
+      out.push({ kind: "text", text: cached ?? "", style, ...descriptor });
     } else if (cached) {
       pushText(cached, rPr);
     }

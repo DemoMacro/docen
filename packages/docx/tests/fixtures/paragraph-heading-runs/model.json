@@ -1,0 +1,92 @@
+{
+  "type": "doc",
+  "attrs": {
+    "styles": {
+      "paragraphStyles": [
+        {
+          "id": "Normal",
+          "default": true,
+          "paragraph": { "spacing": { "line": 360, "lineRule": "auto" } },
+          "run": {
+            "size": 24,
+            "font": { "ascii": "Times New Roman", "hAnsi": "Times New Roman", "eastAsia": "SimSun" }
+          }
+        },
+        {
+          "id": "Heading1",
+          "basedOn": "Normal",
+          "paragraph": { "spacing": { "before": 240, "after": 120 }, "keepNext": true },
+          "run": { "size": 32, "bold": true, "color": "2F5496" }
+        }
+      ],
+      "default": {
+        "document": {
+          "paragraph": { "spacing": { "after": 160 }, "indent": { "firstLineChars": 200 } },
+          "run": { "size": 21 }
+        }
+      }
+    },
+    "sectionProperties": {
+      "pageSize": { "width": 11906, "height": 16838 },
+      "pageMargin": { "top": 1440, "bottom": 1440, "left": 1800, "right": 1800 }
+    }
+  },
+  "content": [
+    {
+      "type": "paragraph",
+      "attrs": { "heading": "Heading1" },
+      "content": [{ "type": "text", "text": "1 总则" }]
+    },
+    {
+      "type": "paragraph",
+      "attrs": {
+        "alignment": "both",
+        "indent": { "firstLine": 480 },
+        "spacing": { "before": 120, "after": 240, "line": 400, "lineRule": "exact" }
+      },
+      "content": [
+        { "type": "text", "text": "本条", "marks": [{ "type": "bold" }] },
+        {
+          "type": "text",
+          "text": "规定",
+          "marks": [{ "type": "italic" }, { "type": "textStyle", "attrs": { "color": "C00000" } }]
+        },
+        { "type": "text", "text": "了排版", "marks": [{ "type": "underline" }] },
+        {
+          "type": "text",
+          "text": "基线",
+          "marks": [{ "type": "textStyle", "attrs": { "verticalAlign": "superscript" } }]
+        },
+        { "type": "text", "text": "与字号", "marks": [{ "type": "strike" }] },
+        {
+          "type": "text",
+          "text": "、字色",
+          "marks": [
+            {
+              "type": "textStyle",
+              "attrs": { "size": 28, "highlight": "yellow", "color": "0070C0" }
+            }
+          ]
+        },
+        { "type": "text", "text": "的解析。" }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "attrs": {
+        "alignment": "center",
+        "spacing": { "after": 0 },
+        "indent": { "left": 720, "right": 720, "firstLine": -720 }
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "悬挂缩进·居中段落",
+          "marks": [
+            { "type": "textStyle", "attrs": { "font": { "ascii": "Arial", "eastAsia": "SimHei" } } }
+          ]
+        }
+      ]
+    }
+  ]
+}

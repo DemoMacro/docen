@@ -15,7 +15,17 @@ import type {
 } from "../extensions/commands";
 import { collectListReferences } from "../extensions/commands";
 import { noteRefId } from "../extensions/notes";
-import { evaluateField, fieldRef, type FieldContext, type FieldRef } from "../fields";
+import {
+  customPropertiesOf,
+  evaluateField,
+  fieldRef,
+  finiteNumber,
+  parseFieldInstruction,
+  type FieldBookmark,
+  type FieldContext,
+  type FieldFrame,
+  type FieldRef,
+} from "../fields";
 
 /** One footnote/endnote body entry in documentExtras (`{ id, children }` with
  *  office-open's nested `paragraph`/run shapes — edited only as opaque text
@@ -51,6 +61,12 @@ export interface DialogsHost {
   /** Status-bar language mirror (Word shows the selection's language there) —
    *  re-run after the proofing-language commit. */
   syncStatusLanguage(): void;
+  /** The open document's filename (FILENAME fields). Absent headless. */
+  filename?: () => string | undefined;
+  /** The rendered page frame at a position (PAGE/NUMPAGES/SECTION/… and
+   *  PAGEREF) — the pagination's own view of the caret. Absent headless:
+   *  page-dependent fields keep their cached value. */
+  fieldFrame?: (pos: number) => FieldFrame | undefined;
 }
 
 /**
@@ -963,18 +979,71 @@ export class DialogCommands {
   }
 
   /** Context menu → 更新域 (Word's F9): re-derive the cached value from the
-   *  live document. Dynamic fields (PAGE/NUMPAGES — the painter resolves them
-   *  per page) and fields the engine can't evaluate keep their cache. */
+   *  live document. Page-dependent fields resolve against the host's pinned
+   *  pagination (`fieldFrame`); fields the context can't evaluate keep their
+   *  cache. */
   fieldUpdateAtSelection(): void {
     const editor = this.#target();
     const hit = this.fieldTarget();
     if (!editor || !hit) return;
-    const value = evaluateField(hit.ref.instruction ?? "", this.#fieldContext(editor));
+    const value = evaluateField(hit.ref.instruction ?? "", this.#fieldContext(editor, hit.pos));
     if (value == null) return;
     const patch = hit.ref.kind === "simpleField" ? { cachedValue: value } : { result: value };
     const next = this.#patchField(hit.branch, hit.ref.kind, patch);
     if (!next) return;
     editor.view.dispatch(editor.state.tr.setNodeAttribute(hit.pos, "data", JSON.stringify(next)));
+  }
+
+  /** Update All Fields (Word's select-all + F9): re-derive every field atom's
+   *  cached value in document order and commit the changes in one transaction.
+   *  SEQ occurrences take their own ordinal per label (the caption sequence),
+   *  REF/PAGEREF resolve through the bookmark table, and page-dependent fields
+   *  use the host's pinned pagination when it exists. Returns the number of
+   *  fields whose cache changed.
+   *
+   *  Limitation: a complex field whose result is structured (`resultRunsXml`
+   *  — TOC entries and nested fields) is patched on its flat `result` only;
+   *  paint keeps the structured runs, so such fields must be refreshed through
+   *  their own commands (the TOC updaters). Rewriting result XML here would
+   *  mean regenerating runs, not patching a cache. */
+  updateAllFields(): number {
+    const editor = this.#target();
+    if (!editor) return 0;
+    const base = this.#fieldBase(editor);
+    const sequences = new Map<string, number>();
+    const changes: { pos: number; data: string }[] = [];
+    editor.state.doc.descendants((node, pos) => {
+      if (node.type.name !== "inlinePassthrough") return true;
+      const data = node.attrs.data;
+      if (typeof data !== "string") return true;
+      let branch: Record<string, unknown>;
+      try {
+        branch = JSON.parse(data) as Record<string, unknown>;
+      } catch {
+        return true;
+      }
+      const ref = fieldRef(branch);
+      if (!ref?.instruction || ref.kind === "formField") return true;
+      const field = parseFieldInstruction(ref.instruction);
+      const context: FieldContext = { ...base, frame: this.#frameAt(editor, pos) };
+      if (field.name === "SEQ") {
+        const label = field.args[0] ?? "";
+        const ordinal = (sequences.get(label) ?? 0) + 1;
+        sequences.set(label, ordinal);
+        context.sequences = new Map([[label, ordinal]]);
+      }
+      const value = evaluateField(ref.instruction, context);
+      if (value == null || value === ref.result) return true;
+      const patch = ref.kind === "simpleField" ? { cachedValue: value } : { result: value };
+      const next = this.#patchField(branch, ref.kind, patch);
+      if (next) changes.push({ pos, data: JSON.stringify(next) });
+      return true;
+    });
+    if (changes.length === 0) return 0;
+    const tr = editor.state.tr;
+    for (const change of changes) tr.setNodeAttribute(change.pos, "data", change.data);
+    editor.view.dispatch(tr);
+    return changes.length;
   }
 
   /** Context menu → checkbox toggle: flip the form field's checked flag (the
@@ -1051,14 +1120,70 @@ export class DialogCommands {
       | undefined;
   }
 
+  /** The evaluation context slices every field update shares: the doc's core
+   *  properties (AUTHOR/TITLE/SUBJECT/KEYWORDS/COMMENTS/CREATEDATE/…), the
+   *  filename (FILENAME), the core revision (REVNUM), custom properties
+   *  (DOCPROPERTY), the bookmark table (REF/PAGEREF) and the live word/char
+   *  totals (NUMWORDS/NUMCHARS). The "now" clock is per call — an update
+   *  command is a moment, not a render. */
+  #fieldBase(editor: Editor): Omit<FieldContext, "frame" | "sequences"> {
+    const doc = editor.state.doc;
+    const attrs = (doc.attrs ?? {}) as {
+      core?: Record<string, unknown>;
+      documentExtras?: Record<string, unknown>;
+    };
+    const text = doc.textBetween(0, doc.content.size, "\n", "");
+    const revision = finiteNumber(attrs.core?.revision);
+    const filename = this.host.filename?.();
+    const customProperties = customPropertiesOf(attrs.documentExtras);
+    return {
+      now: new Date(),
+      core: attrs.core ?? {},
+      words: wordCounter(text),
+      chars: textCounter(text),
+      ...(filename != null ? { filename } : {}),
+      ...(revision != null ? { revision } : {}),
+      ...(customProperties ? { customProperties } : {}),
+      bookmarks: this.#bookmarks(editor),
+    };
+  }
+
+  /** REF/PAGEREF targets: each bookmark's inner text plus the DISPLAYED page
+   *  its start sits on (the host's page frame — restart and numFmt applied)
+   *  with that page's section format. Falls back to the bridge's physical page
+   *  only when no frame is available (headless); absent = the bookmark keeps
+   *  its cached value. */
+  #bookmarks(editor: Editor): ReadonlyMap<string, FieldBookmark> {
+    const map = new Map<string, FieldBookmark>();
+    for (const target of this.crossReferenceTargets()) {
+      const frame = this.#frameAt(editor, target.pos);
+      const physical = this.host.bridge()?.pageOf(target.pos);
+      const page = frame?.page ?? (typeof physical === "number" ? physical + 1 : undefined);
+      map.set(target.name, {
+        ...(target.text ? { text: target.text } : {}),
+        ...(page != null ? { page } : {}),
+        ...(frame?.pageFormat ? { pageFormat: frame.pageFormat } : {}),
+      });
+    }
+    return map;
+  }
+
+  /** The rendered page frame at a document position — the host's pagination
+   *  view (page number/count, section number/span, numFmt). Null headless, and
+   *  null inside a header/footer story: the host's page map is the body's, and
+   *  a story position maps to no page (page fields there keep their cache and
+   *  paint through the furniture's live page context instead). */
+  #frameAt(editor: Editor, pos?: number): FieldFrame | undefined {
+    if (editor !== this.host.editor()) return undefined;
+    return this.host.fieldFrame?.(pos ?? editor.state.selection.from);
+  }
+
   /** Field evaluation context from the live document — the body text backs
    *  NUMWORDS/NUMCHARS (the status bar's counters; notes stay out, Word's
-   *  default). Core properties have no home in the editor's JSON, so the
-   *  document-information fields keep their cached values on update. */
-  #fieldContext(editor: Editor): FieldContext {
-    const doc = editor.state.doc;
-    const text = doc.textBetween(0, doc.content.size, "\n", "");
-    return { now: new Date(), words: wordCounter(text), chars: textCounter(text) };
+   *  default), the core properties the document attrs carry, and the host's
+   *  pinned pagination for the page-dependent fields. */
+  #fieldContext(editor: Editor, pos?: number): FieldContext {
+    return { ...this.#fieldBase(editor), frame: this.#frameAt(editor, pos) };
   }
 
   /** The branch with the field's flat shape patched (simpleField's

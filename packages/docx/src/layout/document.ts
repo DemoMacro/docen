@@ -99,10 +99,12 @@ function projectNoteBlocks(
  *  {@link ProjectedSection} per document section plus the page background
  *  (document-wide). Sections paginate in order — see
  *  `layoutFlowSections` in @docen/layout. `markup` applies Word's Display for
- *  Review state to the tracked-changes projection (omitted = all marks show). */
+ *  Review state to the tracked-changes projection (omitted = all marks show);
+ *  `showFieldCodes` projects every field as its instruction text (Alt+F9). */
 export function projectDocument(
   doc: DocumentOptions,
   markup?: MarkupDisplay,
+  showFieldCodes?: boolean,
 ): {
   sections: ProjectedSection[];
   background?: ProjectedPageBackground;
@@ -116,6 +118,7 @@ export function projectDocument(
     footnoteOrdinals: new Map(),
     endnoteOrdinals: new Map(),
     ...(markup ? { markup } : {}),
+    ...(showFieldCodes ? { showFieldCodes: true } : {}),
     // The document-wide tab grid (w:defaultTabStop, twips); Word's 720 default
     // applies when settings omit it (the engine carries that fallback).
     defaultTabStopPx:

@@ -1,0 +1,365 @@
+{
+  "sections": [
+    {
+      "blocks": [
+        {
+          "defaultTextStyle": {
+            "family": {
+              "eastAsia": "SimSun",
+              "latin": "Times New Roman"
+            },
+            "sizePx": 28
+          },
+          "indent": {},
+          "inline": [
+            {
+              "kind": "text",
+              "style": {
+                "family": {
+                  "eastAsia": "SimSun",
+                  "latin": "Times New Roman"
+                },
+                "sizePx": 28
+              },
+              "text": "表 1 合并单元格与行属性"
+            }
+          ],
+          "keepLines": false,
+          "keepNext": false,
+          "kind": "paragraph",
+          "pageBreakBefore": false,
+          "snapToGrid": null,
+          "spacing": {
+            "afterPx": 8,
+            "beforePx": 0,
+            "lineHeight": {
+              "factor": 1.5,
+              "rule": "multiple"
+            }
+          },
+          "suppressLineNumbers": false,
+          "widowControl": true
+        },
+        {
+          "align": "center",
+          "borders": {
+            "bottom": {
+              "color": "000000",
+              "px": 0.6666666666666666,
+              "style": "single"
+            },
+            "insideHorizontal": {
+              "color": "000000",
+              "px": 0.6666666666666666,
+              "style": "single"
+            },
+            "insideVertical": {
+              "color": "000000",
+              "px": 0.6666666666666666,
+              "style": "single"
+            },
+            "left": {
+              "color": "000000",
+              "px": 0.6666666666666666,
+              "style": "single"
+            },
+            "right": {
+              "color": "000000",
+              "px": 0.6666666666666666,
+              "style": "single"
+            },
+            "top": {
+              "color": "000000",
+              "px": 0.6666666666666666,
+              "style": "single"
+            }
+          },
+          "cellInsets": {
+            "left": 7.2,
+            "right": 7.2
+          },
+          "columnWidthsPx": [160, 160, 160],
+          "kind": "table",
+          "layout": "autofit",
+          "rows": [
+            {
+              "cantSplit": true,
+              "cells": [
+                {
+                  "blocks": [
+                    {
+                      "align": "center",
+                      "defaultTextStyle": {
+                        "family": {
+                          "eastAsia": "SimSun",
+                          "latin": "Times New Roman"
+                        },
+                        "sizePx": 28
+                      },
+                      "indent": {},
+                      "inline": [
+                        {
+                          "kind": "text",
+                          "style": {
+                            "bold": true,
+                            "family": {
+                              "eastAsia": "SimSun",
+                              "latin": "Times New Roman"
+                            },
+                            "sizePx": 28
+                          },
+                          "text": "项目"
+                        }
+                      ],
+                      "keepLines": false,
+                      "keepNext": false,
+                      "kind": "paragraph",
+                      "pageBreakBefore": false,
+                      "snapToGrid": null,
+                      "spacing": {
+                        "afterPx": 0,
+                        "beforePx": 0,
+                        "lineHeight": {
+                          "factor": 1.5,
+                          "rule": "multiple"
+                        }
+                      },
+                      "suppressLineNumbers": false,
+                      "widowControl": true
+                    }
+                  ],
+                  "colspan": 2,
+                  "fill": "D9E2F3",
+                  "rowspan": 1,
+                  "verticalAlign": "center"
+                },
+                {
+                  "blocks": [
+                    {
+                      "align": "center",
+                      "defaultTextStyle": {
+                        "family": {
+                          "eastAsia": "SimSun",
+                          "latin": "Times New Roman"
+                        },
+                        "sizePx": 28
+                      },
+                      "indent": {},
+                      "inline": [
+                        {
+                          "kind": "text",
+                          "style": {
+                            "family": {
+                              "eastAsia": "SimSun",
+                              "latin": "Times New Roman"
+                            },
+                            "sizePx": 28
+                          },
+                          "text": "备注"
+                        }
+                      ],
+                      "keepLines": false,
+                      "keepNext": false,
+                      "kind": "paragraph",
+                      "pageBreakBefore": false,
+                      "snapToGrid": null,
+                      "spacing": {
+                        "afterPx": 0,
+                        "beforePx": 0,
+                        "lineHeight": {
+                          "factor": 1.5,
+                          "rule": "multiple"
+                        }
+                      },
+                      "suppressLineNumbers": false,
+                      "widowControl": true
+                    }
+                  ],
+                  "rowspan": 2,
+                  "verticalAlign": "center"
+                }
+              ],
+              "height": {
+                "px": 32,
+                "rule": "atLeast"
+              },
+              "tableHeader": true
+            },
+            {
+              "cantSplit": true,
+              "cells": [
+                {
+                  "blocks": [
+                    {
+                      "defaultTextStyle": {
+                        "family": {
+                          "eastAsia": "SimSun",
+                          "latin": "Times New Roman"
+                        },
+                        "sizePx": 28
+                      },
+                      "indent": {},
+                      "inline": [
+                        {
+                          "kind": "text",
+                          "style": {
+                            "family": {
+                              "eastAsia": "SimSun",
+                              "latin": "Times New Roman"
+                            },
+                            "sizePx": 28
+                          },
+                          "text": "甲项"
+                        }
+                      ],
+                      "keepLines": false,
+                      "keepNext": false,
+                      "kind": "paragraph",
+                      "pageBreakBefore": false,
+                      "snapToGrid": null,
+                      "spacing": {
+                        "afterPx": 0,
+                        "beforePx": 0,
+                        "lineHeight": {
+                          "factor": 1.5,
+                          "rule": "multiple"
+                        }
+                      },
+                      "suppressLineNumbers": false,
+                      "widowControl": true
+                    }
+                  ],
+                  "rowspan": 1
+                },
+                {
+                  "blocks": [
+                    {
+                      "defaultTextStyle": {
+                        "family": {
+                          "eastAsia": "SimSun",
+                          "latin": "Times New Roman"
+                        },
+                        "sizePx": 28
+                      },
+                      "indent": {},
+                      "inline": [
+                        {
+                          "kind": "text",
+                          "style": {
+                            "family": {
+                              "eastAsia": "SimSun",
+                              "latin": "Times New Roman"
+                            },
+                            "sizePx": 28
+                          },
+                          "text": "乙项"
+                        }
+                      ],
+                      "keepLines": false,
+                      "keepNext": false,
+                      "kind": "paragraph",
+                      "pageBreakBefore": false,
+                      "snapToGrid": null,
+                      "spacing": {
+                        "afterPx": 0,
+                        "beforePx": 0,
+                        "lineHeight": {
+                          "factor": 1.5,
+                          "rule": "multiple"
+                        }
+                      },
+                      "suppressLineNumbers": false,
+                      "widowControl": true
+                    }
+                  ],
+                  "rowspan": 1
+                }
+              ]
+            },
+            {
+              "cells": [
+                {
+                  "blocks": [
+                    {
+                      "defaultTextStyle": {
+                        "family": {
+                          "eastAsia": "SimSun",
+                          "latin": "Times New Roman"
+                        },
+                        "sizePx": 28
+                      },
+                      "indent": {
+                        "firstLinePx": 56
+                      },
+                      "inline": [
+                        {
+                          "kind": "text",
+                          "style": {
+                            "family": {
+                              "eastAsia": "SimSun",
+                              "latin": "Times New Roman"
+                            },
+                            "italic": true,
+                            "sizePx": 28
+                          },
+                          "text": "跨三列说明："
+                        },
+                        {
+                          "kind": "text",
+                          "style": {
+                            "family": {
+                              "eastAsia": "SimSun",
+                              "latin": "Times New Roman"
+                            },
+                            "sizePx": 28
+                          },
+                          "text": "行内文本随列宽换行。"
+                        }
+                      ],
+                      "keepLines": false,
+                      "keepNext": false,
+                      "kind": "paragraph",
+                      "pageBreakBefore": false,
+                      "snapToGrid": null,
+                      "spacing": {
+                        "afterPx": 0,
+                        "beforePx": 0,
+                        "lineHeight": {
+                          "factor": 1.5,
+                          "rule": "multiple"
+                        }
+                      },
+                      "suppressLineNumbers": false,
+                      "widowControl": true
+                    }
+                  ],
+                  "colspan": 3,
+                  "rowspan": 1
+                }
+              ]
+            }
+          ],
+          "width": {
+            "percent": 90,
+            "type": "percent"
+          }
+        }
+      ],
+      "flow": {
+        "adjustLinesInTable": false,
+        "contentHeightPx": 930.5333333333333,
+        "contentLeftPx": 120,
+        "contentTopPx": 96,
+        "contentWidthPx": 553.7333333333333,
+        "pageHeightPx": 1122.5333333333333,
+        "pageWidthPx": 793.7333333333333
+      },
+      "furniture": {
+        "evenAndOddHeaders": false,
+        "footerDistancePx": 48,
+        "headerDistancePx": 48,
+        "titlePage": false
+      }
+    }
+  ]
+}

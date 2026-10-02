@@ -41,6 +41,7 @@ import {
 } from "@docen/docx/layout";
 import {
   browserFontMetrics,
+  computePageNumberOffsets,
   EMU_PER_CM,
   EMU_PER_PX,
   layoutFlowSections,
@@ -130,6 +131,8 @@ import {
 // Side-effect import: registers the ribbon/header translation tables.
 import "./i18n";
 import { collectRevisions } from "./extensions/track-changes";
+import { liveFieldResolver, resolvePageFieldsBounded } from "./field-resolve";
+import { customPropertiesOf, finiteNumber, type FieldContext, type FieldFrame } from "./fields";
 import { LOCAL_HANDLED, READONLY_LIVE, SAVE_FORMATS, detectOpenFormat } from "./file-formats";
 import { pageNumberInlinePreset, pageNumberStoryPreset } from "./page-number";
 import { mergeSectionProperties } from "./page-setup";
@@ -179,6 +182,12 @@ const AUTOSAVE_MAX_CHARS = 4_000_000;
 /** Layout budget per incremental render slice (ms) — the open path lays
  *  sealed pages for this long, then yields a frame to the browser. */
 const LAYOUT_SLICE_MS = 12;
+/** Pagination-feedback budget: resolve passes per render. A pass rewrites the
+ *  measured text of non-numbering fields (SECTION/SECTIONPAGES) and re-lays;
+ *  the cap makes a field-value/pagination oscillation terminate (the last
+ *  resolution wins; page numbers themselves never feed back — their atoms
+ *  keep the measuring placeholder). See {@link resolvePageFieldsBounded}. */
+const FIELD_RESOLVE_PASSES = 3;
 /** Double-click window (ms) — the format painter's sticky toggle and the
  *  bare-click stroke deferral both track the system double-click time. */
 const PAINTER_DOUBLE_CLICK_MS = 500;
@@ -496,6 +505,8 @@ class DocenDocument extends AddinHost<Editor> {
     bridge: () => this.#bridge,
     element: () => this,
     syncStatusLanguage: () => this.#syncStatusLanguage(),
+    filename: () => this.filename,
+    fieldFrame: (pos) => this.#fieldFrame(pos),
   });
   /** "This section" commands (sectPr read/write, page setup presets, the
    *  page-setup/columns/borders dialogs), split out of this class — see
@@ -564,6 +575,14 @@ class DocenDocument extends AddinHost<Editor> {
    *  Pure display state — the marks in the document are untouched. */
   #markupView: "simple" | "all" | "none" | "original" = "simple";
   #markupAuthors: string[] | null = null;
+  /** Word's field-code display (Alt+F9): projects every field as its
+   *  instruction text instead of the cached result. Pure display state — the
+   *  document's field atoms are untouched. */
+  #fieldCodes = false;
+  /** A loaded document asked for w:updateFields (Options → Update fields on
+   *  open): consumed by the first completed render, when the bridge's page
+   *  map is fresh, to run one Update All Fields. */
+  #updateFieldsOnOpen = false;
   /** Table Design → Draw Border: the pen in tcBorders form (style token,
    *  size in eighth-points, color) plus the armed paint/erase mode. While
    *  armed the canvas presses sweep table edges instead of selecting. */
@@ -731,6 +750,14 @@ class DocenDocument extends AddinHost<Editor> {
     if (event.altKey && !event.ctrlKey && !event.metaKey && event.key === "=") {
       event.preventDefault();
       this.#insertEquation("plain");
+      return;
+    }
+    // F9 updates the field at the caret; Alt+F9 toggles field-code display
+    // (Word's Update Field / View Field Codes).
+    if (event.key === "F9") {
+      event.preventDefault();
+      if (event.altKey) this.toggleFieldCodes();
+      else this.#dialogs.fieldUpdateAtSelection();
       return;
     }
     if (!(event.ctrlKey || event.metaKey)) return;
@@ -2417,6 +2444,8 @@ class DocenDocument extends AddinHost<Editor> {
       this.#markupView !== "simple" || this.#markupAuthors
         ? { view: this.#markupView, authors: this.#markupAuthors ?? undefined }
         : undefined,
+      // Alt+F9: every field projects its instruction instead of the result.
+      this.#fieldCodes,
     );
     const stageSections: (ProjectedSection & CanvasStageSection)[] = sections.map((section) => ({
       ...section,
@@ -2510,8 +2539,85 @@ class DocenDocument extends AddinHost<Editor> {
     background?: ProjectedPageBackground;
   } {
     const projected = this.#projectFlowSections(doc);
-    const { pages, sectionOfPage } = this.#laySections(projected);
-    return { pages, sectionOfPage, sections: projected.sections, background: projected.background };
+    const resolved = this.#resolveFields(projected, this.#laySections(projected), doc);
+    return {
+      pages: resolved.pages,
+      sectionOfPage: resolved.sectionOfPage,
+      sections: projected.sections,
+      background: projected.background,
+    };
+  }
+
+  /** The per-render field context base: one fixed clock for the whole render
+   *  (DATE/TIME stay stable while a single layout settles) plus the document
+   *  state the evaluators read — core properties, filename, revision, custom
+   *  properties. Word/char counts are edit-time values (NUMWORDS/NUMCHARS are
+   *  not live fields), so the render base skips their text walk. */
+  #renderFieldBase(doc: JSONContent): Omit<FieldContext, "frame" | "sequences"> {
+    const attrs = (doc.attrs ?? {}) as {
+      core?: Record<string, unknown>;
+      documentExtras?: Record<string, unknown>;
+    };
+    const core = attrs.core ?? {};
+    const revision = finiteNumber(core.revision);
+    const custom = customPropertiesOf(attrs.documentExtras);
+    return {
+      now: new Date(),
+      core,
+      ...(this.filename != null && this.filename !== "" ? { filename: this.filename } : {}),
+      ...(revision != null ? { revision } : {}),
+      ...(custom ? { customProperties: custom } : {}),
+    };
+  }
+
+  /** The pagination-feedback loop: resolve the live numbering fields against
+   *  the pages just laid, and re-lay when a resolution rewrote measured text
+   *  (the resolved value changes where a field breaks). Bounded by
+   *  {@link FIELD_RESOLVE_PASSES}; returns the final pages plus the pages
+   *  whose painted field values changed (the incremental path repaints just
+   *  those). In field-code view (Alt+F9) the resolver resolves nothing, so
+   *  code atoms stay untouched and no re-layout rides the toggle. */
+  #resolveFields(
+    projected: ProjectedFlowInputs,
+    laid: { pages: FlowPage[]; sectionOfPage: number[] },
+    doc: JSONContent,
+  ): { pages: FlowPage[]; sectionOfPage: number[]; dirty?: number[] } {
+    return resolvePageFieldsBounded(
+      laid.pages,
+      projected.sections,
+      laid.sectionOfPage,
+      liveFieldResolver(this.#renderFieldBase(doc), this.#fieldCodes),
+      () => this.#laySections(projected),
+      FIELD_RESOLVE_PASSES,
+    );
+  }
+
+  /** The pagination's view of a document position — the FieldFrame the field
+   *  evaluators read (shown page number, page count, section number/span, the
+   *  section's numFmt). Undefined before the first layout or when the caret
+   *  map has no page for the position. */
+  #fieldFrame(pos: number): FieldFrame | undefined {
+    const pageIndex = this.#bridge?.pageOf(pos);
+    if (pageIndex == null || pageIndex < 0 || pageIndex >= this.#pages.length) return undefined;
+    const sections = this.#lastRun?.sections ?? [];
+    const section = this.#sectionOfPage[pageIndex] ?? 0;
+    const offsets = computePageNumberOffsets(sections, this.#sectionOfPage);
+    const sectionPages = this.#sectionOfPage.reduce((n, s) => (s === section ? n + 1 : n), 0);
+    const format = sections[section]?.pageNumbering?.format;
+    return {
+      page: pageIndex + 1 + (offsets[section] ?? 0),
+      pageCount: this.#pages.length,
+      section: section + 1,
+      sectionPages,
+      ...(format ? { pageFormat: format } : {}),
+    };
+  }
+
+  /** Alt+F9 — Word's field-code display: every field projects its instruction
+   *  text instead of its cached result until toggled back. */
+  toggleFieldCodes(): void {
+    this.#fieldCodes = !this.#fieldCodes;
+    this.#renderDoc(this.getJSON());
   }
 
   /** The page→section origin resolver the bridge's caret maps need (each
@@ -2540,10 +2646,10 @@ class DocenDocument extends AddinHost<Editor> {
     // laid. Any render landing mid-walk (a transaction, a view switch) bumps
     // the sequence; the walk drops and this entry re-runs from the top.
     if (!this.#lastRun && !projected.continuous) {
-      void this.#renderDocIncremental(projected, seq);
+      void this.#renderDocIncremental(projected, seq, doc);
       return;
     }
-    const laid = this.#laySections(projected);
+    const laid = this.#resolveFields(projected, this.#laySections(projected), doc);
     const run = {
       pages: laid.pages,
       sectionOfPage: laid.sectionOfPage,
@@ -2599,7 +2705,11 @@ class DocenDocument extends AddinHost<Editor> {
    *  the finished walk records the run and arms the panes without a second
    *  sync. A render starting mid-walk bumps the sequence and this walk just
    *  drops — that render re-projects and takes over. */
-  async #renderDocIncremental(projected: ProjectedFlowInputs, seq: number): Promise<void> {
+  async #renderDocIncremental(
+    projected: ProjectedFlowInputs,
+    seq: number,
+    doc: JSONContent,
+  ): Promise<void> {
     const stage = this.#armStage(projected);
     const pages: FlowPage[] = [];
     const sectionOfPage: number[] = [];
@@ -2635,16 +2745,31 @@ class DocenDocument extends AddinHost<Editor> {
       if (done) break;
       await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
     }
+    // The whole page list is known now: resolve the live numbering fields
+    // against it and repaint just the pages whose painted values changed. A
+    // resolution that rewrote measured text (SECTION/SECTIONPAGES width)
+    // re-lays synchronously — the pages array is then a fresh one.
+    const resolved = this.#resolveFields(projected, { pages, sectionOfPage }, doc);
+    if (seq !== this.#renderSeq || !this.isConnected) return;
+    const finalPages = resolved.pages;
+    const finalSectionOfPage = resolved.sectionOfPage;
+    const finalOrigin = this.#pageOriginOf(projected.sections, finalSectionOfPage);
+    if (finalPages !== pages) {
+      stage.sync(finalPages, projected.sections, finalSectionOfPage, projected.background);
+    } else if (resolved.dirty && resolved.dirty.length > 0) {
+      const dirty = finalPages.map((_, index) => resolved.dirty!.includes(index));
+      stage.sync(finalPages, projected.sections, finalSectionOfPage, projected.background, dirty);
+    }
     this.#lastRun = {
-      pages,
-      sectionOfPage,
+      pages: finalPages,
+      sectionOfPage: finalSectionOfPage,
       sections: projected.sections,
       background: projected.background,
       viewMode: projected.viewMode,
     };
-    this.#pages = pages;
-    this.#sectionOfPage = sectionOfPage;
-    this.#bridge?.updatePages(pages, origin);
+    this.#pages = finalPages;
+    this.#sectionOfPage = finalSectionOfPage;
+    this.#bridge?.updatePages(finalPages, finalOrigin);
     this.#afterLayout();
   }
 
@@ -2686,6 +2811,15 @@ class DocenDocument extends AddinHost<Editor> {
 
   /** The panes-and-status tail both render paths run after their final sync. */
   #afterLayout(): void {
+    // w:updateFields (Options → Update fields on open): one Update All Fields
+    // against the freshly pinned pagination. Deferred to this tail because the
+    // command's REF/PAGEREF lookups read the bridge's page map, which the
+    // just-finished render updated. It dispatches only when a cache changed —
+    // no render loop.
+    if (this.#updateFieldsOnOpen) {
+      this.#updateFieldsOnOpen = false;
+      this.#dialogs.updateAllFields();
+    }
     this.#updateStatus();
     this.#comments.syncCommentsPane();
     this.#revisions.syncRevisionsPane();
@@ -4633,6 +4767,7 @@ class DocenDocument extends AddinHost<Editor> {
       } else {
         items.push({ text: t("context.update-field", this), event: "update-field" });
         items.push({ text: t("context.edit-field", this), event: "edit-field" });
+        items.push({ text: t("context.update-all-fields", this), event: "update-all-fields" });
       }
       items.push({ text: "-" });
     }
@@ -5522,6 +5657,14 @@ class DocenDocument extends AddinHost<Editor> {
     }
     if (name === "update-field") {
       this.#dialogs.fieldUpdateAtSelection();
+      return;
+    }
+    if (name === "update-all-fields") {
+      this.#dialogs.updateAllFields();
+      return;
+    }
+    if (name === "toggle-field-codes") {
+      this.toggleFieldCodes();
       return;
     }
     if (name === "edit-field") {
@@ -6693,6 +6836,9 @@ class DocenDocument extends AddinHost<Editor> {
     if (protection === "trackedChanges") {
       editor.commands["track-changes"](true);
     }
+    // w:updateFields — Word updates fields when the document opens. Arm the
+    // flag here; the first completed render consumes it (fresh page map).
+    if (settings.updateFields === true) this.#updateFieldsOnOpen = true;
     this.#syncEditable();
   }
 

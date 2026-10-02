@@ -1,0 +1,134 @@
+{
+  "type": "doc",
+  "attrs": {
+    "styles": {
+      "paragraphStyles": [
+        {
+          "id": "Normal",
+          "default": true,
+          "paragraph": { "spacing": { "line": 360, "lineRule": "auto" } },
+          "run": {
+            "size": 21,
+            "font": { "ascii": "Times New Roman", "hAnsi": "Times New Roman", "eastAsia": "SimSun" }
+          }
+        }
+      ],
+      "tableStyles": [
+        {
+          "id": "TableGrid",
+          "table": {
+            "borders": {
+              "top": { "style": "single", "size": 4, "color": "000000" },
+              "bottom": { "style": "single", "size": 4, "color": "000000" },
+              "left": { "style": "single", "size": 4, "color": "000000" },
+              "right": { "style": "single", "size": 4, "color": "000000" },
+              "insideHorizontal": { "style": "single", "size": 4, "color": "000000" },
+              "insideVertical": { "style": "single", "size": 4, "color": "000000" }
+            }
+          }
+        }
+      ],
+      "default": { "document": { "run": { "size": 21 } } }
+    },
+    "sectionProperties": {
+      "pageSize": { "width": 11906, "height": 16838 },
+      "pageMargin": { "top": 1440, "bottom": 1440, "left": 1800, "right": 1800 }
+    }
+  },
+  "content": [
+    {
+      "type": "paragraph",
+      "attrs": { "spacing": { "after": 120 } },
+      "content": [{ "type": "text", "text": "表 1 合并单元格与行属性" }]
+    },
+    {
+      "type": "table",
+      "attrs": {
+        "style": "TableGrid",
+        "alignment": "center",
+        "width": { "size": 90, "type": "percent" },
+        "columnWidths": [2400, 2400, 2400],
+        "margins": {
+          "left": { "size": 108, "type": "twips" },
+          "right": { "size": 108, "type": "twips" }
+        }
+      },
+      "content": [
+        {
+          "type": "tableRow",
+          "attrs": {
+            "tableHeader": true,
+            "cantSplit": true,
+            "height": { "value": 480, "rule": "atLeast" }
+          },
+          "content": [
+            {
+              "type": "tableCell",
+              "attrs": {
+                "columnSpan": 2,
+                "shading": { "type": "clear", "fill": "D9E2F3" },
+                "verticalAlign": "center"
+              },
+              "content": [
+                {
+                  "type": "paragraph",
+                  "attrs": { "alignment": "center", "spacing": { "after": 0 } },
+                  "content": [{ "type": "text", "text": "项目", "marks": [{ "type": "bold" }] }]
+                }
+              ]
+            },
+            {
+              "type": "tableCell",
+              "attrs": { "verticalMerge": "restart", "verticalAlign": "center" },
+              "content": [
+                {
+                  "type": "paragraph",
+                  "attrs": { "alignment": "center", "spacing": { "after": 0 } },
+                  "content": [{ "type": "text", "text": "备注" }]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "tableRow",
+          "attrs": { "cantSplit": true },
+          "content": [
+            {
+              "type": "tableCell",
+              "content": [{ "type": "paragraph", "content": [{ "type": "text", "text": "甲项" }] }]
+            },
+            {
+              "type": "tableCell",
+              "content": [{ "type": "paragraph", "content": [{ "type": "text", "text": "乙项" }] }]
+            },
+            {
+              "type": "tableCell",
+              "attrs": { "verticalMerge": "continue" },
+              "content": [{ "type": "paragraph" }]
+            }
+          ]
+        },
+        {
+          "type": "tableRow",
+          "content": [
+            {
+              "type": "tableCell",
+              "attrs": { "columnSpan": 3 },
+              "content": [
+                {
+                  "type": "paragraph",
+                  "attrs": { "indent": { "firstLineChars": 200 }, "spacing": { "after": 0 } },
+                  "content": [
+                    { "type": "text", "text": "跨三列说明：", "marks": [{ "type": "italic" }] },
+                    { "type": "text", "text": "行内文本随列宽换行。" }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
