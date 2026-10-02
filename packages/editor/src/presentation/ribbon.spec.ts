@@ -89,17 +89,25 @@ describe("pptx ribbon icons", () => {
     }
   });
 
-  it("lays out table layout groups like Word", () => {
+  it("lays out table layout groups like PowerPoint", () => {
     const groups = Object.fromEntries(tableLayoutTab().groups.map((group) => [group.id, group]));
 
-    const inserts = layoutOf(groups["rows-columns"]!.controls[0]);
-    expect(inserts?.layout).toBe("row");
-    expect(
-      inserts?.controls.map((control) => (control.type === "layout" ? control.layout : "")),
-    ).toEqual(["column", "column"]);
+    expect(groups["table"]!.controls).toHaveLength(3);
+    expect(groups["table"]!.controls[2]).toMatchObject({
+      type: "split",
+      size: "large",
+      items: [{ value: "columns" }, { value: "rows" }, { value: "table" }],
+    });
 
-    const deletion = groups["delete"]!.controls[0];
-    expect(deletion).toMatchObject({ type: "split", size: "large" });
+    expect(groups["rows-columns"]!.controls[0]).toMatchObject({
+      type: "button",
+      size: "large",
+    });
+    const otherInserts = layoutOf(groups["rows-columns"]!.controls[1]);
+    expect(otherInserts?.layout).toBe("column");
+    expect(otherInserts?.controls).toHaveLength(3);
+    expect(otherInserts?.controls.every((control) => control.type === "button")).toBe(true);
+
     expect(groups["merge"]!.controls).toHaveLength(2);
     expect(
       groups["merge"]!.controls.every((control) => "size" in control && control.size === "large"),
@@ -112,12 +120,12 @@ describe("pptx ribbon icons", () => {
 
     expect(groups["cell-alignment"]!.controls).toHaveLength(3);
     expect(
-      groups["cell-alignment"]!.controls.every(
-        (control) => "size" in control && control.size === "large",
+      layoutOf(groups["cell-alignment"]!.controls[0])?.controls.map((control) =>
+        control.type === "layout" ? control.controls.length : 0,
       ),
-    ).toBe(true);
+    ).toEqual([3, 3]);
     expect(
-      groups["table-arrange"]!.controls.every(
+      controlsOf(groups["table-arrange"]!.controls).every(
         (control) => "size" in control && control.size === "large",
       ),
     ).toBe(true);

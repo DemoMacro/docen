@@ -381,6 +381,9 @@ const RIBBON_ICONS: Record<string, string> = {
   "duplicate-slide": copyAdd,
   "bring-front": layerDiagonal,
   "send-back": layer,
+  "bring-forward": layerDiagonal,
+  "send-backward": layer,
+  "align-objects": textAlignLeft,
 };
 
 /** Miniature slide previews for PowerPoint-style transition galleries. */

@@ -372,31 +372,26 @@ export function tableLayoutTab(): RibbonTab {
     label: "ppt.ribbon.tab.table-layout",
     contextual: true,
     groups: [
-      group("rows-columns", [
-        rowOf(
-          columnOf(
-            btn("insert-above", cmd("insert-above"), { icon: "table-stack-above", iconOnly: true }),
-            btn("insert-below", cmd("insert-below"), { icon: "table-stack-below", iconOnly: true }),
-          ),
-          columnOf(
-            btn("insert-left", cmd("insert-left"), { icon: "table-stack-left", iconOnly: true }),
-            btn("insert-right", cmd("insert-right"), {
-              icon: "table-stack-right",
-              iconOnly: true,
-            }),
-          ),
-        ),
-      ]),
-      group("delete", [
+      group("table", [
+        btn("select", cmd("select"), { icon: "selection-pane", size: "large" }),
+        btn("gridlines", cmd("gridlines"), { icon: "gridlines", size: "large" }),
         splitBtn(
           "delete-table",
           cmd("delete-table"),
           [
-            { text: "ppt.ribbon.tableDelete.rows", value: "rows" },
             { text: "ppt.ribbon.tableDelete.columns", value: "columns" },
+            { text: "ppt.ribbon.tableDelete.rows", value: "rows" },
             { text: "ppt.ribbon.tableDelete.table", value: "table" },
           ],
           { icon: "table-delete", size: "large" },
+        ),
+      ]),
+      group("rows-columns", [
+        btn("insert-above", cmd("insert-above"), { icon: "table-stack-above", size: "large" }),
+        columnOf(
+          btn("insert-below", cmd("insert-below"), { icon: "table-stack-below" }),
+          btn("insert-left", cmd("insert-left"), { icon: "table-stack-left" }),
+          btn("insert-right", cmd("insert-right"), { icon: "table-stack-right" }),
         ),
       ]),
       group("merge", [
@@ -410,30 +405,47 @@ export function tableLayoutTab(): RibbonTab {
             input("cell-width", "", { label: cmd("cell-width") }),
           ),
           columnOf(
-            btn("distribute-rows", cmd("distribute-rows"), {
-              icon: "distribute-rows",
-              iconOnly: true,
-            }),
-            btn("distribute-columns", cmd("distribute-columns"), {
-              icon: "distribute-columns",
-              iconOnly: true,
-            }),
+            btn("distribute-rows", cmd("distribute-rows"), { icon: "distribute-rows" }),
+            btn("distribute-columns", cmd("distribute-columns"), { icon: "distribute-columns" }),
           ),
         ),
       ]),
       group("cell-alignment", [
-        splitBtn(
-          "table-align",
-          cmd("table-align"),
-          [
-            { text: "ppt.ribbon.cmd.align-left", value: "left" },
-            { text: "ppt.ribbon.cmd.align-center", value: "center" },
-            { text: "ppt.ribbon.cmd.align-right", value: "right" },
-            { text: "ppt.ribbon.cmd.align-top", value: "top" },
-            { text: "ppt.ribbon.cmd.align-middle", value: "middle" },
-            { text: "ppt.ribbon.cmd.align-bottom", value: "bottom" },
-          ],
-          { icon: "align-center", size: "large" },
+        rowOf(
+          columnOf(
+            btn("table-align", cmd("table-align"), {
+              value: "left",
+              icon: "align-left",
+              iconOnly: true,
+            }),
+            btn("table-align", cmd("table-align"), {
+              value: "center",
+              icon: "align-center",
+              iconOnly: true,
+            }),
+            btn("table-align", cmd("table-align"), {
+              value: "right",
+              icon: "align-right",
+              iconOnly: true,
+            }),
+          ),
+          columnOf(
+            btn("table-align", cmd("table-align"), {
+              value: "top",
+              icon: "align-top",
+              iconOnly: true,
+            }),
+            btn("table-align", cmd("table-align"), {
+              value: "middle",
+              icon: "align-middle",
+              iconOnly: true,
+            }),
+            btn("table-align", cmd("table-align"), {
+              value: "bottom",
+              icon: "align-bottom",
+              iconOnly: true,
+            }),
+          ),
         ),
         splitBtn("text-direction", cmd("text-direction"), TEXT_DIRECTIONS, {
           icon: "text-direction",
@@ -445,8 +457,73 @@ export function tableLayoutTab(): RibbonTab {
         }),
       ]),
       group("table-arrange", [
-        btn("bring-front", cmd("bring-front"), { icon: "bring-front", size: "large" }),
-        btn("send-back", cmd("send-back"), { icon: "send-back", size: "large" }),
+        {
+          type: "layout",
+          layout: "grid",
+          columns: 2,
+          controls: [
+            splitBtn(
+              "bring-forward",
+              cmd("bring-forward"),
+              [
+                { text: "ppt.ribbon.cmd.bring-front", value: "front" },
+                { text: "ppt.ribbon.cmd.bring-forward", value: "forward" },
+              ],
+              { icon: "bring-forward", size: "large" },
+            ),
+            {
+              type: "menu",
+              event: "align-objects",
+              label: cmd("align-objects"),
+              icon: "align-left",
+              size: "large",
+              items: [
+                { text: "ppt.ribbon.cmd.align-left", value: "left" },
+                { text: "ppt.ribbon.cmd.align-center", value: "center" },
+                { text: "ppt.ribbon.cmd.align-right", value: "right" },
+                { text: "ppt.ribbon.cmd.align-top", value: "top" },
+                { text: "ppt.ribbon.cmd.align-middle", value: "middle" },
+                { text: "ppt.ribbon.cmd.align-bottom", value: "bottom" },
+                { text: "ppt.ribbon.cmd.distribute-horizontal", value: "horizontal" },
+                { text: "ppt.ribbon.cmd.distribute-vertical", value: "vertical" },
+              ],
+            },
+            splitBtn(
+              "send-backward",
+              cmd("send-backward"),
+              [
+                { text: "ppt.ribbon.cmd.send-back", value: "back" },
+                { text: "ppt.ribbon.cmd.send-backward", value: "backward" },
+              ],
+              { icon: "send-backward", size: "large" },
+            ),
+            {
+              type: "menu",
+              event: "drawing-group",
+              label: cmd("drawing-group"),
+              icon: "group-objects",
+              size: "large",
+              items: [{ text: "ppt.ribbon.cmd.group", value: "group" }],
+            },
+            btn("selection-pane", cmd("selection-pane"), {
+              icon: "selection-pane",
+              size: "large",
+            }),
+            {
+              type: "menu",
+              event: "rotate",
+              label: cmd("rotate"),
+              icon: "rotate",
+              size: "large",
+              items: [
+                { text: "ppt.ribbon.rotate.right", value: "90" },
+                { text: "ppt.ribbon.rotate.left", value: "-90" },
+                { text: "ppt.ribbon.rotate.flip-horizontal", value: "flip-horizontal" },
+                { text: "ppt.ribbon.rotate.flip-vertical", value: "flip-vertical" },
+              ],
+            },
+          ],
+        },
       ]),
     ],
   };
