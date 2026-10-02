@@ -421,7 +421,7 @@ export function paintParagraph(
         const baseY =
           lineY +
           (col?.shapeText
-            ? shapeTextPadPx(line) + leaferBaselinePadPx(ownSize)
+            ? shapeTextPadPx(line) + leaferBaselinePadPx(line.textEmPx ?? ownSize)
             : lineBaselineDepthPx(line, ownSize)) -
           leaferBaselinePadPx(ownSize) +
           (item.rubyLiftPx ?? 0) +

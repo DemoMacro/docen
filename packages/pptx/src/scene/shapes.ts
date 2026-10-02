@@ -23,7 +23,7 @@ import type { ShapeOptions } from "@office-open/pptx";
 
 import { customGeometryOutlines } from "./custom-geometry";
 import { BOX_PRESETS, STRAIGHT_PRESETS, emuOf, geometryOf, type Xform } from "./geometry";
-import { outlineLineOf, shapeFillOf } from "./shape-fill";
+import { outlineLineOf, shapeFillOf, styleOutlineOf } from "./shape-fill";
 import { textBlocks, type TextFieldContext } from "./text";
 
 // DrawingML bodyPr default insets (lIns/rIns 0.1", tIns/bIns 0.05").
@@ -51,6 +51,7 @@ export function shapeMembers(
   childPath: readonly number[] | undefined,
   context: TextFieldContext = {},
 ): LayoutDrawingMember[] {
+  const outline = styleOutlineOf(shape.properties?.outline, shape.style?.lineReference, context);
   const paint: ShapePaint = {
     x: t.sx * emuOf(shape.x) + t.dx,
     y: t.sy * emuOf(shape.y) + t.dy,
@@ -64,12 +65,7 @@ export function shapeMembers(
       t.sy * emuOf(shape.height),
       context,
     ),
-    line: outlineLineOf(
-      shape.properties?.outline,
-      t.sx * emuOf(shape.width),
-      t.sy * emuOf(shape.height),
-      context,
-    ),
+    line: outlineLineOf(outline, t.sx * emuOf(shape.width), t.sy * emuOf(shape.height), context),
     shadow: outerShadowOf(shape.properties?.effects),
     ...(shape.rotation ? { rotation: shape.rotation } : {}),
     ...(childPath ? { childPath } : {}),

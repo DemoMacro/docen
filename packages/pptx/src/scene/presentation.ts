@@ -16,11 +16,22 @@ import type {
   FillOptions,
   GradientStopOptions,
   SolidFillOptions,
+  ShapePropertiesOptions,
+  TextBodyOptions,
+  TextListStyleOptions,
+  TextStylesOptions,
 } from "@office-open/core/drawing";
 import type { StyleMatrixReferenceOptions } from "@office-open/core/drawing";
-import type { ColorMappingOptions } from "@office-open/core/theme";
+import type { ColorMappingOptions, ThemeOptions } from "@office-open/core/theme";
 import { DEFAULT_COLOR_MAPPING } from "@office-open/core/theme";
-import type { PresentationOptions, SlideOptions } from "@office-open/pptx";
+import {
+  resolvePlaceholder,
+  type LayoutDefinition,
+  type MasterDefinition,
+  type PresentationOptions,
+  type SlideChild,
+  type SlideOptions,
+} from "@office-open/pptx";
 
 import { tilePaintOf } from "./blip-tile";
 import { transformColor, type ResolvedColor } from "./color-transform";
@@ -28,6 +39,7 @@ import { IDENTITY } from "./geometry";
 import { patternBackgroundOf } from "./pattern-background";
 import { pictureSrcOf } from "./pictures";
 import { regionsOf, SCHEME_SLOTS, type ThemeColors } from "./table-style";
+import type { ThemeFonts } from "./text";
 import { childMembers, type ProjectedSlideMember } from "./walk";
 
 /** One projected presentation: the slide size plus each slide's members. */
@@ -39,10 +51,15 @@ export interface ProjectedPresentation {
   slides: ProjectedSlide[];
 }
 
+type TextLevelStyle = NonNullable<TextListStyleOptions["levels"]>[number];
+
 /** One projected slide. */
 export interface ProjectedSlide {
   /** The slide's background paint; absent → the painter's page default. */
   background?: ProjectedSlideBackground;
+  /** The slide's children with placeholder geometry and facets resolved for
+   *  selection and hit testing; layout templates are excluded. */
+  children: SlideChild[];
   /** Slide-absolute drawing members, paint order = document order. */
   members: ProjectedSlideMember[];
 }
@@ -82,13 +99,12 @@ export type ProjectedSlideBackground =
  *  not mutated, so callers may re-project on demand. */
 export function projectPresentation(pres: PresentationOptions): ProjectedPresentation {
   const { widthPx, heightPx } = slideSizePx(pres.size);
-  const context = tableContextOf(pres);
   const size = { widthPx, heightPx };
   return {
     widthPx,
     heightPx,
     slides: (pres.slides ?? []).map((slide, index) =>
-      projectSlide(slide, index + 1, pres.slides?.length, context, pres.masters, size),
+      projectSlide(pres, slide, index + 1, pres.slides?.length, pres.masters, size),
     ),
   };
 }
@@ -98,15 +114,22 @@ export type { ProjectedSlideMember };
  * fill style list, and the token → slot color map (the master's clrMap). */
 interface ThemeContext {
   themeColors?: ThemeColors;
+  themeFonts?: ThemeFonts;
   tableStyles?: Record<string, ReturnType<typeof regionsOf>>;
   backgroundFillStyles: FillOptions[];
+  lineStyles?: NonNullable<ThemeOptions["formatScheme"]>["lineStyles"];
   colorMapping: ColorMappingOptions;
+  textStyles?: TextStylesOptions;
 }
 
-/** The theme/table-style context every slide's projection shares: the first
- * master's color scheme plus the tblStyleLst entries keyed by GUID. */
-function tableContextOf(pres: PresentationOptions): ThemeContext {
-  const master = pres.masters?.[0];
+/** The theme/table-style context for a slide's owning master: its color and
+ * font schemes plus the tblStyleLst entries keyed by GUID. */
+function tableContextOf(
+  pres: PresentationOptions,
+  masterName: SlideOptions["master"],
+  masters: PresentationOptions["masters"],
+): ThemeContext {
+  const master = masters?.find((candidate) => candidate.name === masterName) ?? masters?.[0];
   const scheme = master?.theme?.colorScheme;
   const themeColors: ThemeColors | undefined = scheme
     ? Object.fromEntries(
@@ -115,6 +138,7 @@ function tableContextOf(pres: PresentationOptions): ThemeContext {
         ),
       )
     : undefined;
+  const themeFonts = themeFontsOf(master?.theme?.fontScheme);
   const tableStyles = pres.tableStyles?.styles?.length
     ? Object.fromEntries(
         pres.tableStyles.styles.map((style) => [
@@ -125,10 +149,33 @@ function tableContextOf(pres: PresentationOptions): ThemeContext {
     : undefined;
   return {
     themeColors,
+    themeFonts,
     tableStyles,
     backgroundFillStyles: master?.theme?.formatScheme?.backgroundFillStyles ?? [],
+    lineStyles: master?.theme?.formatScheme?.lineStyles,
     colorMapping: { ...DEFAULT_COLOR_MAPPING, ...master?.colorMapping },
+    textStyles: master?.textStyles,
   };
+}
+
+/** A font scheme's non-empty faces; the Office defaults leave ea/cs empty,
+ * and an empty face must fall through to the painter's default family. */
+function themeFontsOf(scheme: ThemeOptions["fontScheme"]): ThemeFonts | undefined {
+  if (!scheme) return undefined;
+  const faces = (collection: typeof scheme.majorFont): ThemeFonts["minor"] => {
+    if (!collection) return undefined;
+    const face = (font: { typeface?: string } | undefined): string | undefined =>
+      font?.typeface || undefined;
+    const out = {
+      latin: face(collection.latin),
+      eastAsian: face(collection.eastAsian),
+      complexScript: face(collection.complexScript),
+    };
+    return Object.values(out).some(Boolean) ? out : undefined;
+  };
+  const major = faces(scheme.majorFont);
+  const minor = faces(scheme.minorFont);
+  return major || minor ? { major, minor } : undefined;
 }
 
 /** One theme slot's hex (a string value or a sysClr's lastClr). */
@@ -157,23 +204,204 @@ function slideSizePx(size: PresentationOptions["size"]): { widthPx: number; heig
 }
 
 function projectSlide(
+  pres: PresentationOptions,
   slide: SlideOptions,
   slideNumber: number,
   slideCount: number | undefined,
-  context: ThemeContext,
   masters: PresentationOptions["masters"],
   size: { widthPx: number; heightPx: number },
 ): ProjectedSlide {
+  const context = tableContextOf(pres, slide.master, masters);
   const background = slideBackgroundOf(slide, masters, context, size);
+  const inheritedChildren = inheritedSlideChildrenOf(slide, masters);
+  const children = inheritPlaceholderGeometry(slide.children ?? [], slide, masters, context);
+  const textFieldContext = {
+    slideNumber,
+    slideCount,
+    now: new Date(),
+    metrics: typeof document === "undefined" ? undefined : browserFontMetrics,
+    ...context,
+  };
+  const inheritedMembers = childMembers(inheritedChildren, IDENTITY, [], textFieldContext).map(
+    (member) => {
+      delete member.sourceChildIndex;
+      return member as ProjectedSlideMember;
+    },
+  );
   return {
     ...(background ? { background } : {}),
-    members: childMembers(slide.children ?? [], IDENTITY, [], {
-      slideNumber,
-      slideCount,
-      now: new Date(),
-      metrics: typeof document === "undefined" ? undefined : browserFontMetrics,
-      ...context,
-    }),
+    children,
+    members: [...inheritedMembers, ...childMembers(children, IDENTITY, [], textFieldContext)],
+  };
+}
+
+/** Layout/master shapes drawn beneath a slide. Placeholder shapes are
+ * templates and do not render; layout non-placeholders always do, while the
+ * master layer respects both the layout's and slide's show-master flags. */
+function inheritedSlideChildrenOf(
+  slide: SlideOptions,
+  masters: PresentationOptions["masters"],
+): SlideChild[] {
+  const owner = masters?.find((master) => master.name === slide.master) ?? masters?.[0];
+  const layout = preferredLayoutOf(slide, owner);
+  const children = layout?.children ?? [];
+  const masterShapes = slide.showMasterShapes !== false && layout?.showMasterShapes !== false;
+  const masterChildren = masterShapes ? (owner?.children ?? []) : [];
+  return [...children, ...masterChildren].filter((child) => {
+    const shape = "shape" in child ? (child.shape as PlaceholderShape | undefined) : undefined;
+    return placeholderTypeOf(shape) === undefined;
+  });
+}
+
+interface PlaceholderShape {
+  placeholder?: string;
+  placeholderIndex?: number;
+  properties?: ShapePropertiesOptions;
+  hidden?: boolean;
+  style?: unknown;
+  x?: number | string;
+  y?: number | string;
+  width?: number | string;
+  height?: number | string;
+  textBody?: TextBodyOptions;
+}
+
+/** Resolve a slide shape's missing geometry from its layout placeholder.
+ * Office resolves the layout → master placeholder chain for position,
+ * shape facets, text defaults and `sz="0"`. */
+function inheritPlaceholderGeometry(
+  children: SlideChild[],
+  slide: SlideOptions,
+  masters: PresentationOptions["masters"],
+  context: ThemeContext,
+): SlideChild[] {
+  const owner = masters?.find((master) => master.name === slide.master) ?? masters?.[0];
+  const layout = preferredLayoutOf(slide, owner) ?? owner?.layouts?.[0];
+
+  return children.map((child) => {
+    const shape = "shape" in child ? (child.shape as PlaceholderShape | undefined) : undefined;
+    const placeholderType = placeholderTypeOf(shape);
+    if (!shape || !placeholderType) return child;
+
+    const resolved = resolvePlaceholder(placeholderType, layout, owner);
+    const next: PlaceholderShape = {
+      ...shape,
+      ...(resolved.hidden ? { hidden: true } : {}),
+    };
+    const facets = resolved.facets;
+    if (facets) {
+      next.properties = {
+        ...(facets.geometry ? { geometry: facets.geometry } : {}),
+        ...(facets.customGeometry ? { customGeometry: facets.customGeometry } : {}),
+        ...(facets.fill ? { fill: facets.fill } : {}),
+        ...(facets.outline ? { outline: facets.outline } : {}),
+        ...(facets.effects ? { effects: facets.effects } : {}),
+        ...(facets.scene3d ? { scene3d: facets.scene3d } : {}),
+        ...(facets.shape3d ? { shape3d: facets.shape3d } : {}),
+        ...shape.properties,
+      };
+      if (shape.style === undefined && facets.style) next.style = facets.style;
+    }
+
+    if (resolved.position) {
+      for (const field of ["x", "y", "width", "height"] as const) {
+        if (next[field] === undefined) next[field] = resolved.position[field];
+      }
+    }
+    if (shape.textBody) {
+      const inheritedStyles = placeholderTextStylesOf(placeholderType, context);
+      const templateBody = facets?.textBody;
+      next.textBody = {
+        ...shape.textBody,
+        bodyProperties: shape.textBody.bodyProperties ?? templateBody?.bodyProperties,
+        ...(shape.textBody.anchor == null && templateBody?.anchor != null
+          ? { anchor: templateBody.anchor }
+          : {}),
+        ...(shape.textBody.autoFit == null && templateBody?.autoFit != null
+          ? { autoFit: templateBody.autoFit }
+          : {}),
+        listStyle: mergeTextStyles(
+          mergeTextStyles(templateBody?.listStyle, inheritedStyles),
+          shape.textBody.listStyle,
+        ),
+      };
+    }
+
+    if (
+      !resolved.hidden &&
+      (next.x === undefined ||
+        next.y === undefined ||
+        next.width === undefined ||
+        next.height === undefined)
+    ) {
+      return child;
+    }
+    return { ...child, shape: next } as SlideChild;
+  });
+}
+
+function preferredLayoutOf(
+  slide: SlideOptions,
+  owner: MasterDefinition | undefined,
+): LayoutDefinition | undefined {
+  const layouts = owner?.layouts ?? [];
+  if (slide.layout == null) return undefined;
+  return layouts.find(
+    (layout) =>
+      (layout.layoutId != null && slide.layout === `layout:${layout.layoutId}`) ||
+      layout.type === slide.layout ||
+      layout.name === slide.layout ||
+      layout.matchingName === slide.layout,
+  );
+}
+
+function placeholderTypeOf(shape: PlaceholderShape | undefined): string | undefined {
+  return shape?.placeholder;
+}
+
+function placeholderTextStylesOf(
+  key: string | undefined,
+  context: ThemeContext,
+): TextListStyleOptions | undefined {
+  if (key === "title" || key === "ctrTitle") return context.textStyles?.title;
+  return context.textStyles?.body ?? context.textStyles?.other;
+}
+
+function mergeTextStyles(
+  explicit: TextListStyleOptions | undefined,
+  inherited: TextListStyleOptions | undefined,
+): TextListStyleOptions | undefined {
+  if (!inherited) return explicit;
+  if (!explicit) return inherited;
+  const levels = Math.max(explicit.levels?.length ?? 0, inherited.levels?.length ?? 0);
+  return {
+    ...inherited,
+    ...explicit,
+    defaultParagraph: explicit.defaultParagraph ?? inherited.defaultParagraph,
+    levels: Array.from(
+      { length: levels },
+      (_, level) =>
+        mergeParagraphStyle(
+          explicit.levels?.[level] ?? undefined,
+          inherited.levels?.[level] ?? undefined,
+        ) ?? null,
+    ),
+  };
+}
+
+function mergeParagraphStyle(
+  explicit: TextLevelStyle | undefined,
+  inherited: TextLevelStyle | undefined,
+): TextLevelStyle | undefined {
+  if (!inherited) return explicit;
+  if (!explicit) return inherited;
+  return {
+    ...inherited,
+    ...explicit,
+    defaultRunProperties: {
+      ...inherited.defaultRunProperties,
+      ...explicit.defaultRunProperties,
+    },
   };
 }
 
@@ -185,7 +413,9 @@ function slideBackgroundOf(
   context: ThemeContext,
   size: { widthPx: number; heightPx: number },
 ): ProjectedSlideBackground | undefined {
-  const background = slide.background ?? masters?.[0]?.background;
+  const owner = masters?.find((master) => master.name === slide.master) ?? masters?.[0];
+  const layout = preferredLayoutOf(slide, owner);
+  const background = slide.background ?? layout?.background ?? owner?.background;
   if (!background) return undefined;
   if (background.fill)
     return backgroundOf(

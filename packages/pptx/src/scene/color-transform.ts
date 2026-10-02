@@ -94,6 +94,20 @@ function gammaOf(rgb: Rgb, exponent: number): Rgb {
   return rgb.map((value) => (value / 255) ** exponent * 255) as Rgb;
 }
 
+function toScRgb(rgb: Rgb): Rgb {
+  return rgb.map((value) => {
+    const channel = value / 255;
+    return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+  }) as Rgb;
+}
+
+function toSRgb(scRgb: Rgb): Rgb {
+  return scRgb.map((channel) => {
+    const value = channel <= 0.0031308 ? channel * 12.92 : 1.055 * channel ** (1 / 2.4) - 0.055;
+    return value * 255;
+  }) as Rgb;
+}
+
 /** Evaluate every EG_ColorTransform key; alpha is returned separately so a
  *  fill's opacity never bleeds into its stroke. Unknown values are no-ops. */
 export function transformColor(
@@ -109,12 +123,12 @@ export function transformColor(
     switch (name) {
       case "tint": {
         const amount = percent(raw);
-        rgb = rgb.map((value) => value + (255 - value) * amount) as Rgb;
+        rgb = toSRgb(toScRgb(rgb).map((value) => 1 - (1 - value) * amount) as Rgb);
         break;
       }
       case "shade": {
         const amount = percent(raw, 1);
-        rgb = rgb.map((value) => value * amount) as Rgb;
+        rgb = toSRgb(toScRgb(rgb).map((value) => value * amount) as Rgb);
         break;
       }
       case "alpha":

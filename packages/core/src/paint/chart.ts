@@ -38,11 +38,94 @@ function seriesFillOf(series: Rec, index: number): string {
   return ACCENTS[index % ACCENTS.length]!;
 }
 
-/** A series carries its own explicit solid fill, which suppresses the point
- *  colors a lone bar series otherwise inherits from the Office palette. */
-function hasSeriesFill(series: Rec): boolean {
+/** Any explicit series fill suppresses Office's varied single-series bars. */
+function hasExplicitFill(series: Rec): boolean {
   const sp = isRecord(series.shapeProperties) ? series.shapeProperties : undefined;
-  return isRecord(sp?.fill) && sp.fill.type === "solid";
+  const fill = sp?.fill;
+  return isRecord(fill) && (fill.type === "solid" || fill.type === "gradient");
+}
+
+/** A solid stroke color from a series/marker shape, for combo lines. */
+function strokeColorOf(series: Rec, index: number): string {
+  const sp = isRecord(series.shapeProperties) ? series.shapeProperties : undefined;
+  const outline = isRecord(sp?.outline) ? sp!.outline : undefined;
+  const color = isRecord(outline?.color) ? str(outline!.color.hex) : str(outline?.color);
+  const fallback = ACCENTS[(index + 5) % ACCENTS.length]!;
+  return (typeof color === "string" ? color : fallback).replace("#", "").toUpperCase();
+}
+
+function strokePxOf(series: Rec): number {
+  const sp = isRecord(series.shapeProperties) ? series.shapeProperties : undefined;
+  const outline = isRecord(sp?.outline) ? sp!.outline : undefined;
+  const width = num(outline?.width);
+  return width == null || width < 1 ? 2 : Math.max(1, width / 9525);
+}
+
+/** A series or data-point fill as a renderer paint: explicit solid hex,
+ *  native linear gradient, or the Office accent cycle. */
+function chartFillOf(
+  series: Rec,
+  index: number,
+  point = index,
+  width = 1,
+  height = 1,
+): string | Record<string, unknown> {
+  const sp = isRecord(series.shapeProperties) ? series.shapeProperties : undefined;
+  const points = Array.isArray(series.dataPoints) ? series.dataPoints.filter(isRecord) : [];
+  const pointProperties = points.find((item) => num(item.index) === point);
+  const pointSp = isRecord(pointProperties?.shapeProperties)
+    ? pointProperties!.shapeProperties
+    : undefined;
+  const fill = pointSp?.fill ?? sp?.fill;
+  if (isRecord(fill) && fill.type === "solid") {
+    const color = isRecord(fill.color) ? (str(fill.color.hex) ?? fill.color) : str(fill.color);
+    if (typeof color === "string") return color.replace("#", "").toUpperCase();
+  }
+  if (isRecord(fill) && fill.type === "gradient") {
+    const options = isRecord(fill.options) ? fill.options : fill;
+    const stops = Array.isArray(options.stops)
+      ? options.stops
+          .map((stop) => {
+            if (!isRecord(stop)) return undefined;
+            const offset = num(stop.position);
+            const color = isRecord(stop.color)
+              ? (str(stop.color.hex) ?? stop.color)
+              : str(stop.color);
+            return offset == null || typeof color !== "string"
+              ? undefined
+              : { offset: offset / 100, color: `#${color.replace("#", "").toUpperCase()}` };
+          })
+          .filter(Boolean)
+      : [];
+    if (stops.length > 1) {
+      const shade = isRecord(options.shade) ? options.shade : undefined;
+      const angle = ((num(shade?.angle) ?? 0) * Math.PI) / 180;
+      const length = width * Math.abs(Math.cos(angle)) + height * Math.abs(Math.sin(angle));
+      return {
+        type: "linear",
+        from: {
+          x: width / 2 - (Math.cos(angle) * length) / 2,
+          y: height / 2 - (Math.sin(angle) * length) / 2,
+        },
+        to: {
+          x: width / 2 + (Math.cos(angle) * length) / 2,
+          y: height / 2 + (Math.sin(angle) * length) / 2,
+        },
+        stops,
+      };
+    }
+  }
+  if (isVariedBarChartModel(series, index)) return ACCENTS[point % ACCENTS.length]!;
+  return ACCENTS[index % ACCENTS.length]!;
+}
+
+function isVariedBarChartModel(series: Rec, index: number): boolean {
+  return (
+    index === 0 &&
+    Array.isArray(series.values) &&
+    series.values.length > 1 &&
+    hasExplicitFill(series) === false
+  );
 }
 
 /** Office varies a one-series bar's points through the accent palette, so its
@@ -52,7 +135,7 @@ function isVariedBarChart(model: ChartModel): boolean {
     (model.type === "bar" || model.type === "column") &&
     model.series.length === 1 &&
     model.categories.length > 1 &&
-    !hasSeriesFill(model.series[0]!)
+    !hasExplicitFill(model.series[0]!)
   );
 }
 
@@ -69,6 +152,8 @@ interface ChartModel {
   legend: boolean;
   legendPosition: string;
   holeSize: number;
+  /** Doughnut/first-slice start offset, degrees clockwise from 12 o'clock. */
+  firstSliceAngle: number;
   /** "standard" | "marker" | "filled" (radar polygons). */
   radarStyle: string;
   /** Bubble size scale, percent (100 = default max radius). */
@@ -79,6 +164,10 @@ interface ChartModel {
   gridlines: boolean;
   /** Cluster-to-cluster gap as a percentage of one bar width. */
   gapWidth: number;
+  /** Secondary plot groups (bar+line combos), in OOXML plot order. */
+  secondaryGroups: Rec[];
+  /** The verbatim axis records; dual value axes resolve combo scales. */
+  axes: Rec[];
 }
 
 function readModel(chart: Rec): ChartModel | undefined {
@@ -89,11 +178,21 @@ function readModel(chart: Rec): ChartModel | undefined {
     ? chart.categories.filter((c): c is string => typeof c === "string")
     : [];
   const axes = Array.isArray(chart.axes) ? chart.axes.filter(isRecord) : [];
+  const secondaryGroups = Array.isArray(chart.secondaryGroups)
+    ? chart.secondaryGroups.filter(isRecord)
+    : [];
   const valueAxis = axes.find((axis) => axis.kind === "value");
+  const legendSeries =
+    series.length +
+    secondaryGroups.reduce(
+      (count, group) =>
+        count + (Array.isArray(group.series) ? group.series.filter(isRecord).length : 0),
+      0,
+    );
   // A legend shows by default once the chart has more than one series to
   // distinguish (Word's c:autoTitleDeleted-style default; c:legend's absence
   // means the app default, not "off").
-  const legend = chart.showLegend === true || (chart.showLegend === undefined && series.length > 1);
+  const legend = chart.showLegend === true || (chart.showLegend === undefined && legendSeries > 1);
   return {
     type,
     categories,
@@ -109,6 +208,7 @@ function readModel(chart: Rec): ChartModel | undefined {
     legend,
     legendPosition: str(chart.legendPosition) ?? "right",
     holeSize: num(chart.holeSize) ?? 50,
+    firstSliceAngle: num(chart.firstSliceAngle) ?? 0,
     radarStyle: str(chart.radarStyle) ?? "standard",
     bubbleScale: num(chart.bubbleScale) ?? 100,
     sizeRepresents: str(chart.sizeRepresents) ?? "area",
@@ -117,6 +217,8 @@ function readModel(chart: Rec): ChartModel | undefined {
         ? false
         : valueAxis.majorGridlines === true || isRecord(valueAxis.majorGridlines),
     gapWidth: num(chart.gapWidth) ?? 150,
+    secondaryGroups,
+    axes,
   };
 }
 
@@ -139,12 +241,17 @@ function niceBounds(min: number, max: number): { min: number; max: number; step:
   }
   const raw = (max - min) / 5;
   const mag = Math.pow(10, Math.floor(Math.log10(raw)));
-  const step = ([1, 2, 5, 10] as const).map((m) => m * mag).find((s) => s >= raw) ?? 10 * mag;
+  // Office prefers the order of magnitude over the next 2×/5× family for
+  // just-over-a-power bounds (4981 → 6000 × 1000, not 6000 × 2000).
+  const step = raw <= 5 * mag ? mag : 10 * mag;
   let lo = Math.floor(min / step) * step;
   // Excel leaves an integer maximum on the next step (data max 5 -> axis
   // max 6); a fractional value still rounds up to the covering tick.
   const maxSpan = max - Math.floor(max) === 0 ? max + 1 : max;
-  let hi = Math.ceil(maxSpan / step) * step;
+  // An automatic scale leaves room above the largest positive value before
+  // rounding to the major unit; 4981 → 6000 and 5673 → 7000.
+  const headroom = max > 0 ? max * 1.1 : maxSpan;
+  let hi = Math.ceil(headroom / step) * step;
   if (min >= 0 && lo > 0) lo = 0;
   if (max <= 0 && hi < 0) hi = 0;
   return { min: lo, max: hi, step };
@@ -164,6 +271,7 @@ function label(
   size: number,
   align: "center" | "left" | "right",
   maxWidth?: number,
+  color: string = AXIS_TEXT,
 ): void {
   if (!text) return;
   const bx =
@@ -175,6 +283,7 @@ function label(
       text,
       fontSize: size,
       fill: AXIS_TEXT,
+      ...(color === AXIS_TEXT ? {} : { fill: color }),
       textAlign: align,
       verticalAlign: "middle",
       ...(maxWidth != null ? { width: maxWidth, overflow: "ellipsis" } : {}),
@@ -190,7 +299,14 @@ const LEGEND_GAP = 24;
 function legendWidthOf(model: ChartModel): number {
   const names = isVariedBarChart(model)
     ? model.categories
-    : model.series.map((series, si) => str(series.name) ?? `系列${si + 1}`);
+    : [
+        ...model.series.map((series, si) => str(series.name) ?? `系列${si + 1}`),
+        ...model.secondaryGroups.flatMap((group) =>
+          (Array.isArray(group.series) ? group.series.filter(isRecord) : []).map(
+            (series, si) => str(series.name) ?? `系列${si + 1}`,
+          ),
+        ),
+      ];
   const textWidth = Math.max(0, ...names.map((name) => measureLabelWidth(name, LABEL_PX - 1)));
   return Math.min(96, Math.max(40, textWidth + 28));
 }
@@ -246,6 +362,68 @@ interface PlotBox {
 
 // ── value-axis charts (column / bar / line / area) ──
 
+/** A series' enabled value labels. OOXML defaults every flag off. */
+function showsValueLabels(series: Rec): boolean {
+  const labels = isRecord(series.dataLabels) ? series.dataLabels : undefined;
+  return labels?.showVal === true;
+}
+
+/** A label's resolved fill after the PPTX projection theme pass; Word falls
+ *  back to axis gray when the label carries no explicit text fill. */
+function labelColorOf(series: Rec): string {
+  const labels = isRecord(series.dataLabels) ? series.dataLabels : undefined;
+  const text = isRecord(labels?.textProperties) ? labels!.textProperties : undefined;
+  const paragraphs = Array.isArray(text?.paragraphs) ? text!.paragraphs.filter(isRecord) : [];
+  const props = paragraphs
+    .map((paragraph) => (isRecord(paragraph.properties) ? paragraph.properties : undefined))
+    .find(Boolean);
+  const run = isRecord(props?.defaultRunProperties) ? props!.defaultRunProperties : undefined;
+  const fill = isRecord(run?.fill) ? run!.fill : undefined;
+  const color = isRecord(fill?.color) ? (str(fill!.color.hex) ?? fill!.color) : str(fill?.color);
+  return typeof color === "string" ? color.replace("#", "").toUpperCase() : AXIS_TEXT;
+}
+
+/** Values in chart-local units; percent labels are decimals in the model. */
+function formatChartValue(value: number, format: string | undefined): string {
+  if (format?.includes("%")) return `${Math.round(value * 10000) / 100}%`;
+  return `${Math.round(value * 100) / 100}`;
+}
+
+/** A value-axis record by its OOXML axis id. */
+function axisById(model: ChartModel, id: unknown): Rec | undefined {
+  return model.axes.find((axis) => num(axis.id) === num(id));
+}
+
+/** Explicit axis bounds honor the declared major unit; auto axes use the
+ *  painter's 1/2/5 covering scale. */
+function valueBoundsOf(values: number[], axis: Rec | undefined) {
+  const unit = num(axis?.majorUnit);
+  if (!unit || unit <= 0) return niceBounds(Math.min(0, ...values), Math.max(0, ...values));
+  const min = Math.min(0, ...values);
+  const max = Math.max(0, ...values);
+  const lower = Math.floor(min / unit) * unit;
+  const upper = Math.ceil(max / unit) * unit;
+  // Office leaves one major division of headroom on a signed axis; this also
+  // keeps dual combo axes on the same tick count as the primary scale.
+  return {
+    min: lower,
+    max: upper + unit,
+    step: unit,
+  };
+}
+
+/** A value-label's screen point for OOXML's bar label positions. */
+function barLabelPoint(
+  value: number,
+  base: number,
+  x: number,
+  y: number,
+  horizontal: boolean,
+): { x: number; y: number } {
+  const direction = value >= 0 ? 1 : -1;
+  return horizontal ? { x: x + direction * 8, y } : { x, y: y - direction * 8 };
+}
+
 /** A chart sub-element's hit registration — the box and any shape arrive in
  *  chart-local coordinates, the hit table is page-local (the registrar in
  *  {@link paintChartMember} folds the origin in). */
@@ -260,6 +438,12 @@ function paintValueChart(tree: IGroup, model: ChartModel, plot: PlotBox, reg?: E
   // Per-category stacks resolve against the stack total (percentStacked
   // normalizes it to 100); plain clusters use the raw data range.
   const catCount = Math.max(model.categories.length, ...all.map((v) => v.length), 1);
+  const primaryValueAxis = model.axes.find(
+    (axis) =>
+      axis.kind === "value" &&
+      axis.delete !== true &&
+      (axis.position === "left" || axis.position === "bottom"),
+  );
   let bounds: { min: number; max: number; step: number };
   if (stacked) {
     const totals: number[] = [];
@@ -269,7 +453,7 @@ function paintValueChart(tree: IGroup, model: ChartModel, plot: PlotBox, reg?: E
     }
     bounds = niceBounds(Math.min(0, ...totals), Math.max(0, ...totals));
   } else {
-    bounds = niceBounds(Math.min(0, ...flat), Math.max(0, ...flat));
+    bounds = valueBoundsOf(flat, primaryValueAxis);
   }
   const toPx = (v: number): number =>
     horizontal
@@ -299,13 +483,19 @@ function paintValueChart(tree: IGroup, model: ChartModel, plot: PlotBox, reg?: E
       label(tree, fmtTick(t), p, plot.y + plot.height + 4, LABEL_PX - 1, "center");
     } else {
       if (model.gridlines) segment(tree, plot.x, p, plot.x + plot.width, p, GRID_LINE);
-      label(tree, fmtTick(t), plot.x - 6, p, LABEL_PX - 1, "right");
+      label(
+        tree,
+        formatChartValue(t, str(primaryValueAxis?.numberFormat)),
+        plot.x - 6,
+        p,
+        LABEL_PX - 1,
+        "right",
+      );
     }
   }
   // Category axis: one band per category (labels under/left of the baseline).
   const band = (horizontal ? plot.height : plot.width) / catCount;
   const catAxisAt = toPx(Math.max(bounds.min, 0));
-  segment(tree, plot.x, plot.y, plot.x, plot.y + plot.height, AXIS_LINE);
   segment(tree, plot.x, catAxisAt, plot.x + plot.width, catAxisAt, AXIS_LINE);
   for (const t of ticks) {
     const p = toPx(t);
@@ -318,9 +508,23 @@ function paintValueChart(tree: IGroup, model: ChartModel, plot: PlotBox, reg?: E
   for (let c = 0; c < catCount; c++) {
     const center = (c + 0.5) * band;
     if (horizontal) {
-      segment(tree, catAxisAt, plot.y + center, catAxisAt - 4, plot.y + center, AXIS_LINE);
+      segment(
+        tree,
+        plot.x + plot.width,
+        plot.y + center,
+        plot.x + plot.width + 4,
+        plot.y + center,
+        AXIS_LINE,
+      );
     } else {
-      segment(tree, plot.x + center, catAxisAt, plot.x + center, catAxisAt + 4, AXIS_LINE);
+      segment(
+        tree,
+        plot.x + center,
+        plot.y + plot.height,
+        plot.x + center,
+        plot.y + plot.height + 4,
+        AXIS_LINE,
+      );
     }
     const text = model.categories[c] ?? String(c + 1);
     if (horizontal) {
@@ -328,7 +532,7 @@ function paintValueChart(tree: IGroup, model: ChartModel, plot: PlotBox, reg?: E
       label(tree, text, plot.x - 6, y, LABEL_PX - 1, "right");
     } else {
       const x = plot.x + (c + 0.5) * band;
-      label(tree, text, x, catAxisAt + 4, LABEL_PX - 1, "center", band);
+      label(tree, text, x, plot.y + plot.height + 10, LABEL_PX - 1, "center", band);
     }
   }
 
@@ -340,10 +544,11 @@ function paintValueChart(tree: IGroup, model: ChartModel, plot: PlotBox, reg?: E
   model.series.forEach((series, si) => {
     const vals = all[si]!;
     const fill = seriesFillOf(series, si);
-    const pointFill = (point: number): string =>
-      isVariedBarChart(model) && vals.length > 1 ? seriesFillOf(series, point) : fill;
+    const pointFill = (point: number, width = 1, height = 1): string | Record<string, unknown> =>
+      chartFillOf(series, si, point, width, height);
     const isLine = model.type === "line";
     const isArea = model.type === "area";
+    const lineColor = isLine ? strokeColorOf(series, si) : fill;
     if (isLine || isArea) {
       const pts = vals
         .map((v, c) => ({ x: plot.x + (c + 0.5) * band, y: toPx(v), c }))
@@ -361,11 +566,33 @@ function paintValueChart(tree: IGroup, model: ChartModel, plot: PlotBox, reg?: E
         );
       }
       tree.add(
-        new LeaferPath({ path: d, stroke: `#${fill}`, strokeWidth: 2, strokeJoin: "round" }),
+        new LeaferPath({
+          path: d,
+          ...(isArea ? {} : { fill: "transparent" }),
+          stroke: `#${lineColor}`,
+          strokeWidth: strokePxOf(series),
+          strokeJoin: "round",
+        }),
       );
       if (model.markers) {
         for (const p of pts) {
-          tree.add(new Ellipse({ x: p.x - 3, y: p.y - 3, width: 6, height: 6, fill: `#${fill}` }));
+          tree.add(
+            new Ellipse({ x: p.x - 3, y: p.y - 3, width: 6, height: 6, fill: `#${lineColor}` }),
+          );
+        }
+      }
+      if (showsValueLabels(series)) {
+        for (const p of pts) {
+          label(
+            tree,
+            formatChartValue(vals[p.c]!, str(series.formatCode)),
+            p.x,
+            p.y - 8,
+            LABEL_PX - 1,
+            "center",
+            undefined,
+            labelColorOf(series),
+          );
         }
       }
       if (reg) {
@@ -405,7 +632,35 @@ function paintValueChart(tree: IGroup, model: ChartModel, plot: PlotBox, reg?: E
         const bar = horizontal
           ? { x: y0, y: plot.y + c * band, width: h, height: band }
           : { x: plot.x + c * band, y: y0, width: band, height: h };
-        tree.add(new Rect({ ...bar, fill: `#${pointFill(c)}` }));
+        const paint = pointFill(c, horizontal ? bar.width : 0, horizontal ? 0 : bar.height);
+        tree.add(new Rect({ ...bar, fill: typeof paint === "string" ? `#${paint}` : paint }));
+        if (showsValueLabels(series)) {
+          const anchor = horizontal
+            ? barLabelPoint(
+                v,
+                base,
+                bar.x + (v >= 0 ? bar.width : 0),
+                bar.y + bar.height / 2,
+                horizontal,
+              )
+            : barLabelPoint(
+                v,
+                base,
+                bar.x + bar.width / 2,
+                bar.y + (v >= 0 ? 0 : bar.height),
+                horizontal,
+              );
+          label(
+            tree,
+            formatChartValue(v, str(series.formatCode)),
+            anchor.x,
+            anchor.y,
+            LABEL_PX - 1,
+            "center",
+            undefined,
+            labelColorOf(series),
+          );
+        }
         reg?.({ series: si, point: c, valueDrag }, bar.x, bar.y, bar.width, bar.height);
         return;
       }
@@ -423,7 +678,27 @@ function paintValueChart(tree: IGroup, model: ChartModel, plot: PlotBox, reg?: E
             width: slot,
             height: Math.abs(p - base),
           };
-      tree.add(new Rect({ ...bar, fill: `#${pointFill(c)}` }));
+      const paint = pointFill(c, bar.width, bar.height);
+      tree.add(new Rect({ ...bar, fill: typeof paint === "string" ? `#${paint}` : paint }));
+      if (showsValueLabels(series)) {
+        const anchor = barLabelPoint(
+          v,
+          base,
+          horizontal ? bar.x + (v >= 0 ? bar.width : 0) : bar.x + bar.width / 2,
+          horizontal ? bar.y + bar.height / 2 : bar.y + (v >= 0 ? 0 : bar.height),
+          horizontal,
+        );
+        label(
+          tree,
+          formatChartValue(v, str(series.formatCode)),
+          anchor.x,
+          anchor.y,
+          LABEL_PX - 1,
+          "center",
+          undefined,
+          labelColorOf(series),
+        );
+      }
       reg?.({ series: si, point: c, valueDrag }, bar.x, bar.y, bar.width, bar.height);
     });
   });
@@ -434,6 +709,10 @@ function paintValueChart(tree: IGroup, model: ChartModel, plot: PlotBox, reg?: E
 function paintPie(tree: IGroup, model: ChartModel, plot: PlotBox, reg?: ElementReg): void {
   const series = model.series[0];
   if (!series) return;
+  const piePaintOf = (point: number): string | Record<string, unknown> => {
+    const paint = chartFillOf(series, 0, point);
+    return typeof paint === "string" ? `#${paint}` : paint;
+  };
   const vals = valuesOf(series);
   const total = vals.reduce((a, b) => a + Math.max(0, b), 0);
   if (total <= 0) return;
@@ -441,7 +720,7 @@ function paintPie(tree: IGroup, model: ChartModel, plot: PlotBox, reg?: ElementR
   const cy = plot.y + plot.height / 2;
   const r = Math.min(plot.width, plot.height) / 2;
   const hole = model.type === "doughnut" ? (r * model.holeSize) / 100 : 0;
-  let angle = -90; // Word starts the first slice at 12 o'clock.
+  let angle = -90 + model.firstSliceAngle;
   vals.forEach((v, i) => {
     const sweep = (Math.max(0, v) / total) * 360;
     if (sweep <= 0) return;
@@ -449,39 +728,30 @@ function paintPie(tree: IGroup, model: ChartModel, plot: PlotBox, reg?: ElementR
     const a1 = ((angle + sweep) * Math.PI) / 180;
     angle += sweep;
     if (sweep >= 360) {
+      const paint = piePaintOf(i);
       tree.add(
         new Ellipse({
           x: cx - r,
           y: cy - r,
           width: r * 2,
           height: r * 2,
-          fill: `#${seriesFillOf(series, i)}`,
+          fill: typeof paint === "string" ? `#${paint}` : paint,
         }),
       );
       reg?.({ series: 0, point: i }, cx - r, cy - r, r * 2, r * 2);
       return;
     }
-    const large = sweep > 180 ? 1 : 0;
-    const x0 = cx + r * Math.cos(a0);
-    const y0 = cy + r * Math.sin(a0);
-    const x1 = cx + r * Math.cos(a1);
-    const y1 = cy + r * Math.sin(a1);
-    const d = hole
-      ? (() => {
-          const hx0 = cx + hole * Math.cos(a0);
-          const hy0 = cy + hole * Math.sin(a0);
-          const hx1 = cx + hole * Math.cos(a1);
-          const hy1 = cy + hole * Math.sin(a1);
-          return (
-            `M ${x0} ${y0} A ${r} ${r} 0 ${large} 1 ${x1} ${y1} ` +
-            `L ${hx1} ${hy1} A ${hole} ${hole} 0 ${large} 0 ${hx0} ${hy0} Z`
-          );
-        })()
-      : `M ${cx} ${cy} L ${x0} ${y0} A ${r} ${r} 0 ${large} 1 ${x1} ${y1} Z`;
+    const paint = piePaintOf(i);
+    const start = (a0 * 180) / Math.PI;
     tree.add(
-      new LeaferPath({
-        path: d,
-        fill: `#${seriesFillOf(series, i)}`,
+      new Ellipse({
+        x: cx - r,
+        y: cy - r,
+        width: r * 2,
+        height: r * 2,
+        ...(hole ? { innerRadius: hole / r } : {}),
+        ...(sweep < 360 ? { startAngle: start, endAngle: start + sweep } : {}),
+        fill: paint,
         stroke: "#FFFFFF",
         strokeWidth: 1,
       }),
@@ -732,6 +1002,112 @@ function paintStock(tree: IGroup, model: ChartModel, plot: PlotBox): void {
   }
 }
 
+/** Secondary combo plots share the primary category bands but use their own
+ *  value axis — OOXML's bar+line combo is a scatter group addressed to the
+ *  right axis. The line reads the series stroke; its labels use the right
+ *  axis' number format. */
+function paintSecondaryGroups(tree: IGroup, model: ChartModel, plot: PlotBox): void {
+  const catCount = Math.max(model.categories.length, 1);
+  const band = plot.width / catCount;
+  model.secondaryGroups.forEach((group) => {
+    const kind = str(group.type);
+    if (kind !== "scatter" && kind !== "line") return;
+    const series = Array.isArray(group.series) ? group.series.filter(isRecord) : [];
+    const allValues = series.flatMap(valuesOf);
+    const axis = axisById(model, Array.isArray(group.axisIds) ? group.axisIds[1] : undefined);
+    const bounds = valueBoundsOf(allValues, axis);
+    if (allValues.length > 0 && axis?.delete !== true) {
+      const py = (value: number) =>
+        plot.y + plot.height - ((value - bounds.min) / (bounds.max - bounds.min)) * plot.height;
+      for (const tick of ticksOf(bounds)) {
+        const y = py(tick);
+        segment(tree, plot.x + plot.width, y, plot.x + plot.width + 4, y, AXIS_LINE);
+        label(
+          tree,
+          formatChartValue(tick, str(axis?.numberFormat)),
+          plot.x + plot.width + 7,
+          y,
+          LABEL_PX - 1,
+          "left",
+        );
+      }
+    }
+    series.forEach((seriesItem) => {
+      const values = valuesOf(seriesItem);
+      if (values.length === 0) return;
+      const py = (value: number) =>
+        plot.y + plot.height - ((value - bounds.min) / (bounds.max - bounds.min)) * plot.height;
+      const color = strokeColorOf(seriesItem, 0);
+      const points = values.map((value, category) => ({
+        x: plot.x + (category + 0.5) * band,
+        y: py(value),
+        category,
+        value,
+      }));
+      const path =
+        group.smooth === true && points.length > 2
+          ? points
+              .map((point, index) => {
+                if (index === 0) return `M ${point.x} ${point.y}`;
+                const previous = points[index - 1]!;
+                const before = points[Math.max(0, index - 2)]!;
+                const after = points[Math.min(points.length - 1, index + 1)]!;
+                const control1 = {
+                  x: previous.x + (point.x - before.x) / 6,
+                  y: previous.y + (point.y - before.y) / 6,
+                };
+                const control2 = {
+                  x: point.x - (after.x - previous.x) / 6,
+                  y: point.y - (after.y - previous.y) / 6,
+                };
+                return `C ${control1.x} ${control1.y} ${control2.x} ${control2.y} ${point.x} ${point.y}`;
+              })
+              .join(" ")
+          : points.map((point, index) => `${index ? "L" : "M"} ${point.x} ${point.y}`).join(" ");
+      tree.add(
+        new LeaferPath({
+          path,
+          fill: "transparent",
+          stroke: `#${color}`,
+          strokeWidth: strokePxOf(seriesItem),
+          strokeCap: "round",
+          strokeJoin: "round",
+        }),
+      );
+      const marker = isRecord(seriesItem.marker) ? seriesItem.marker : undefined;
+      const showMarkers = group.markers === true || marker !== undefined;
+      if (showMarkers) {
+        const radius = Math.max(1.5, (num(marker?.size) ?? 5) * 0.7);
+        points.forEach((point) => {
+          tree.add(
+            new Ellipse({
+              x: point.x - radius,
+              y: point.y - radius,
+              width: radius * 2,
+              height: radius * 2,
+              fill: `#${color}`,
+            }),
+          );
+        });
+      }
+      if (showsValueLabels(seriesItem)) {
+        points.forEach((point) => {
+          label(
+            tree,
+            formatChartValue(point.value, str(axis?.numberFormat)),
+            point.x,
+            point.y - 8,
+            LABEL_PX - 1,
+            "center",
+            undefined,
+            labelColorOf(seriesItem),
+          );
+        });
+      }
+    });
+  });
+}
+
 // ── placeholder (surface / ofPie — unmodeled) ──
 
 function paintPlaceholder(tree: IGroup, model: ChartModel, plot: PlotBox): void {
@@ -764,18 +1140,42 @@ function paintLegend(tree: IGroup, model: ChartModel, box: PlotBox, reg?: Elemen
   // A pie's legend lists its categories (Word colors each point individually),
   // not the single series every pie has. A lone bar series does the same.
   const pie = model.type === "pie" || model.type === "doughnut";
-  const entries =
+  type LegendEntry = {
+    name: string;
+    fill: string | Record<string, unknown>;
+    line: boolean;
+    series: number;
+    point?: number;
+  };
+  const entries: LegendEntry[] =
     pie || isVariedBarChart(model)
       ? model.categories.map((name, i) => ({
           name,
-          fill: model.series[0] ? seriesFillOf(model.series[0]!, i) : ACCENTS[i % ACCENTS.length]!,
+          fill: model.series[0]
+            ? chartFillOf(model.series[0]!, 0, i, 10, 10)
+            : ACCENTS[i % ACCENTS.length]!,
+          line: false,
+          series: 0,
           point: i,
         }))
-      : model.series.map((series, si) => ({
-          name: str(series.name) ?? `系列${si + 1}`,
-          fill: seriesFillOf(series, si),
-          point: -1,
-        }));
+      : [
+          ...model.series.map((series, si) => ({
+            name: str(series.name) ?? `系列${si + 1}`,
+            fill: chartFillOf(series, si, si, 10, 10),
+            line: model.type === "line",
+            series: si,
+          })),
+          ...model.secondaryGroups.flatMap((group) =>
+            (Array.isArray(group.series) ? group.series.filter(isRecord) : []).map(
+              (series, si) => ({
+                name: str(series.name) ?? `系列${si + 1}`,
+                fill: strokeColorOf(series, si),
+                line: true,
+                series: model.series.length + si,
+              }),
+            ),
+          ),
+        ];
   if (vertical) {
     const width = Math.min(box.width, 96);
     const x = model.legendPosition === "left" ? box.x : box.x + box.width - width;
@@ -783,10 +1183,27 @@ function paintLegend(tree: IGroup, model: ChartModel, box: PlotBox, reg?: Elemen
     const top = box.y + Math.max(0, (box.height - entries.length * 20) / 2);
     entries.forEach((entry, i) => {
       const y = top + i * 20;
-      tree.add(new Rect({ x, y: y + 5, width: 10, height: 10, fill: `#${entry.fill}` }));
+      if (entry.line) {
+        if (typeof entry.fill !== "string") return;
+        segment(tree, x + 1, y + 10, x + 9, y + 10, `#${entry.fill}`, 2);
+      } else {
+        tree.add(
+          new Rect({
+            x,
+            y: y + 5,
+            width: 10,
+            height: 10,
+            fill: typeof entry.fill === "string" ? `#${entry.fill}` : entry.fill,
+          }),
+        );
+      }
       label(tree, entry.name, x + 14, y + 10, LABEL_PX - 1, "left", width - 14);
       reg?.(
-        { series: 0, legend: true, ...(entry.point >= 0 ? { point: entry.point } : {}) },
+        {
+          series: entry.series,
+          legend: true,
+          ...(entry.point != null && entry.point >= 0 ? { point: entry.point } : {}),
+        },
         x,
         y,
         width,
@@ -805,10 +1222,27 @@ function paintLegend(tree: IGroup, model: ChartModel, box: PlotBox, reg?: Elemen
   let x = box.x + Math.max(0, (box.width - total) / 2);
   entries.forEach((entry, i) => {
     const w = widths[i]!;
-    tree.add(new Rect({ x, y: y + 6, width: 10, height: 10, fill: `#${entry.fill}` }));
+    if (entry.line) {
+      if (typeof entry.fill !== "string") return;
+      segment(tree, x + 1, y + 11, x + 9, y + 11, `#${entry.fill}`, 2);
+    } else {
+      tree.add(
+        new Rect({
+          x,
+          y: y + 6,
+          width: 10,
+          height: 10,
+          fill: typeof entry.fill === "string" ? `#${entry.fill}` : entry.fill,
+        }),
+      );
+    }
     label(tree, entry.name, x + 14, y + 11, LABEL_PX - 1, "left");
     reg?.(
-      { series: 0, legend: true, ...(entry.point >= 0 ? { point: entry.point } : {}) },
+      {
+        series: entry.series,
+        legend: true,
+        ...(entry.point != null && entry.point >= 0 ? { point: entry.point } : {}),
+      },
       x,
       y,
       w,
@@ -908,8 +1342,13 @@ export function paintChartMember(
   const pie = model.type === "pie" || model.type === "doughnut";
   // A pie's legend (its categories) shows on the single series too — Word
   // defaults every pie to a legend; varied bar charts do the same.
+  const secondarySeriesCount = model.secondaryGroups.reduce(
+    (count, group) => count + (Array.isArray(group.series) ? group.series : []).length,
+    0,
+  );
   const legendSize =
-    model.legend && (pie || model.series.length > 1 || isVariedBarChart(model))
+    model.legend &&
+    (pie || model.series.length > 1 || secondarySeriesCount > 0 || isVariedBarChart(model))
       ? model.legendPosition === "right" || model.legendPosition === "left"
         ? { w: legendWidthOf(model), h: 0 }
         : { w: 0, h: 20 }
@@ -925,22 +1364,43 @@ export function paintChartMember(
           height: legendSize.h || m.height,
         }
       : undefined;
-  const plot: PlotBox = {
-    x: (legendBox && model.legendPosition === "left" ? legendSize.w : 0) + 28,
-    y: top + (legendBox && model.legendPosition === "top" ? legendSize.h : 0) + 6,
-    width:
-      m.width -
-      28 -
-      (legendBox && model.legendPosition === "right" ? 4 : 10) -
-      (legendBox && model.legendPosition === "right" ? legendSize.w : 0) -
-      (legendBox && model.legendPosition === "left" ? legendSize.w : 0),
-    height:
-      m.height -
-      top -
-      14 -
-      (legendBox && model.legendPosition === "bottom" ? legendSize.h : 0) -
-      (legendBox && model.legendPosition === "top" ? legendSize.h : 0),
-  };
+  // A pie/doughnut plot is the circle itself; only real title/legend
+  // furniture reserves space. Cartesian-chart side margins collapsed a real
+  // wide-but-short chart frame into a tiny ring.
+  const plot: PlotBox = pie
+    ? {
+        x: legendBox && model.legendPosition === "left" ? legendSize.w : 0,
+        y: top + (legendBox && model.legendPosition === "top" ? legendSize.h : 0),
+        width:
+          m.width -
+          (legendBox && model.legendPosition === "left" ? legendSize.w : 0) -
+          (legendBox && model.legendPosition === "right" ? legendSize.w : 0),
+        height:
+          m.height -
+          top -
+          (legendBox && model.legendPosition === "bottom" ? legendSize.h : 0) -
+          (legendBox && model.legendPosition === "top" ? legendSize.h : 0),
+      }
+    : {
+        x: (legendBox && model.legendPosition === "left" ? legendSize.w : 0) + 76,
+        y: top + (legendBox && model.legendPosition === "top" ? legendSize.h : 0) + 16,
+        width:
+          m.width -
+          76 -
+          (model.secondaryGroups.length > 0
+            ? 46
+            : legendBox && model.legendPosition === "right"
+              ? 4
+              : 10) -
+          (legendBox && model.legendPosition === "right" ? legendSize.w : 0) -
+          (legendBox && model.legendPosition === "left" ? legendSize.w : 0),
+        height:
+          m.height -
+          top -
+          70 -
+          (legendBox && model.legendPosition === "bottom" ? legendSize.h : 0) -
+          (legendBox && model.legendPosition === "top" ? legendSize.h : 0),
+      };
   if (model.title) {
     label(chart, model.title, plot.x + plot.width / 2, top + TITLE_PX / 2 + 2, TITLE_PX, "center");
   }
@@ -951,6 +1411,7 @@ export function paintChartMember(
     case "line":
     case "area":
       paintValueChart(chart, model, plot, reg);
+      paintSecondaryGroups(chart, model, plot);
       break;
     case "pie":
     case "doughnut":

@@ -1,7 +1,6 @@
 // Shape text projection: a bodyPr's paragraphs as the layout paragraphs the
 // painter stacks, with Word-compatible run/paragraph defaults.
 
-import { solidFillOf } from "@docen/core/geometry";
 import {
   EMU_PER_PX,
   formatNumber,
@@ -21,6 +20,7 @@ import type {
 } from "@office-open/core/drawing";
 import type { ColorMappingOptions } from "@office-open/core/theme";
 
+import { shapeFillOf } from "./shape-fill";
 import type { TableStyleRegions, ThemeColors } from "./table-style";
 
 // TextAlignment → the layout's align tokens: justify's spellings land on
@@ -81,6 +81,8 @@ export interface TextFieldContext {
   now?: Date;
   /** Theme color slots (accent1…); table styles resolve schemeClr fills. */
   themeColors?: ThemeColors;
+  /** The font scheme's faces; +mn/+mj run-font tokens resolve through it. */
+  themeFonts?: ThemeFonts;
   /** The master's clrMap; shape fills resolve short scheme tokens through it. */
   colorMapping?: ColorMappingOptions;
   /** The presentation's custom table styles (p:tblStyleLst), keyed by
@@ -102,22 +104,26 @@ export function textBlocks(
   const counters = new Map<string, number>();
   return paragraphs.map((p) => {
     const para = typeof p === "string" ? { text: p } : p;
-    const props = para.properties;
+    const explicit = para.properties;
+    const props = mergeParagraphProperties(
+      explicit,
+      inheritedParagraphProperties(body, explicit?.indentLevel ?? 0),
+    );
     const inline: LayoutInline[] = [];
     const kids = para.children ?? (para.text != null ? [para.text] : []);
     for (const kid of kids) {
       if (typeof kid === "string") {
-        inline.push({ kind: "text", text: kid, style: runStyle(undefined) });
+        inline.push({ kind: "text", text: kid, style: runStyle(undefined, context, props) });
       } else if ("break" in kid) {
         inline.push({ kind: "break" });
       } else if ("type" in kid) {
         inline.push({
           kind: "text",
           text: fieldTextOf(kid.type, kid.text, context),
-          style: runStyle(kid.properties),
+          style: runStyle(kid.properties, context, props),
         });
       } else {
-        inline.push({ kind: "text", text: kid.text ?? "", style: runStyle(kid) });
+        inline.push({ kind: "text", text: kid.text ?? "", style: runStyle(kid, context, props) });
       }
     }
     // The bullet/number marker rides the inline stream the docx projection's
@@ -127,29 +133,45 @@ export function textBlocks(
     const firstRun = inline.find(
       (part): part is Extract<LayoutInline, { kind: "text" }> => part.kind === "text",
     );
-    const marker = markerInline(props, firstRun?.style ?? runStyle(undefined), counters);
+    const marker = markerInline(
+      props,
+      firstRun?.style ?? runStyle(undefined, context, props),
+      counters,
+    );
     if (marker) inline.unshift(...marker);
-    const level = (props?.indentLevel ?? 0) * LEVEL_STEP_EMU;
+    const level = (props.indentLevel ?? 0) * LEVEL_STEP_EMU;
+    const referenceSizePx = Math.max(
+      0,
+      ...inline.flatMap((part) =>
+        part.kind === "text" && part.style.sizePx != null ? [part.style.sizePx] : [],
+      ),
+      firstRun?.style.sizePx ?? runStyle(undefined, context, props).sizePx ?? DEFAULT_SIZE_PX,
+    );
+    const lineSpacingPercent = props.lineSpacingPercent ?? 100;
     const listEmu = marker ? BULLET_MARL_EMU + level : null;
-    const leftEmu = props?.marginIndent ?? listEmu;
-    const firstEmu = props?.indent ?? (listEmu != null ? -listEmu : undefined);
+    const leftEmu = props.marginIndent ?? listEmu;
+    const firstEmu = props.indent ?? (listEmu != null ? -listEmu : undefined);
     return {
       kind: "paragraph",
       inline,
-      ...(props?.alignment ? { align: ALIGN_MAP[props.alignment] } : {}),
-      ...(props?.spaceBefore != null ||
-      props?.spaceAfter != null ||
-      props?.lineSpacingPoints != null ||
-      props?.lineSpacingPercent != null
+      ...(props.alignment ? { align: ALIGN_MAP[props.alignment] } : {}),
+      ...(props.spaceBefore != null ||
+      props.spaceAfter != null ||
+      props.lineSpacingPoints != null ||
+      props.lineSpacingPercent != null ||
+      inline.length > 0
         ? {
             spacing: {
               beforePx: ptToPx(props.spaceBefore ?? 0),
               afterPx: ptToPx(props.spaceAfter ?? 0),
               ...(props.lineSpacingPoints != null
                 ? { lineHeight: { rule: "exact", px: ptToPx(props.lineSpacingPoints) } }
-                : props.lineSpacingPercent != null
-                  ? { lineHeight: { rule: "multiple", factor: props.lineSpacingPercent / 100 } }
-                  : {}),
+                : {
+                    lineHeight: {
+                      rule: "exact",
+                      px: (referenceSizePx * 1.2 * lineSpacingPercent) / 100,
+                    },
+                  }),
             },
           }
         : {}),
@@ -163,9 +185,34 @@ export function textBlocks(
         : {}),
       // An empty paragraph renders as a blank line — the strut keeps its
       // height (the default style supplies the measuring font).
-      ...(inline.length === 0 ? { defaultTextStyle: runStyle(undefined) } : {}),
+      ...(inline.length === 0 ? { defaultTextStyle: runStyle(undefined, context, props) } : {}),
     };
   });
+}
+
+function inheritedParagraphProperties(
+  body: TextBodyOptions,
+  level: number,
+): TextParagraphPropertiesOptions | undefined {
+  return {
+    ...body.listStyle?.defaultParagraph,
+    ...body.listStyle?.levels?.[level ?? 0],
+  };
+}
+
+function mergeParagraphProperties(
+  explicit: TextParagraphPropertiesOptions | undefined,
+  inherited: TextParagraphPropertiesOptions | undefined,
+): TextParagraphPropertiesOptions {
+  if (!inherited) return explicit ?? {};
+  return {
+    ...inherited,
+    ...explicit,
+    defaultRunProperties: {
+      ...inherited.defaultRunProperties,
+      ...explicit?.defaultRunProperties,
+    },
+  };
 }
 
 /** Evaluate the two footer fields PowerPoint puts in common decks; unknown or
@@ -228,18 +275,30 @@ function markerInline(
   ];
 }
 
-function runStyle(rp: TextCharacterPropertiesOptions | undefined): LayoutTextStyle {
-  const family = familyOf(rp?.font);
+function runStyle(
+  rp: TextCharacterPropertiesOptions | undefined,
+  context: TextFieldContext,
+  paragraph: TextParagraphPropertiesOptions = {},
+): LayoutTextStyle {
+  const defaults = paragraph.defaultRunProperties;
+  const family = familyOf(rp?.font ?? defaults?.font, context);
   // FillOptions (parse emits {type:"solid", color}) — colorOf alone only
   // reads the bare-string/flat-color shapes and would drop every parsed run.
-  const color = solidFillOf(rp?.fill);
+  const fillContext = { themeColors: context.themeColors, colorMapping: context.colorMapping };
+  const paint = shapeFillOf(rp?.fill ?? defaults?.fill, 0, 0, fillContext).fill;
+  const color = typeof paint === "string" ? paint.replace("#", "") : undefined;
+  const size = rp?.size ?? defaults?.size;
+  const underline = rp?.underline ?? defaults?.underline;
   return {
     family: family ?? DEFAULT_FAMILY,
-    sizePx: rp?.size != null ? ptToPx(rp.size) : DEFAULT_SIZE_PX,
-    ...(rp?.bold ? { bold: true } : {}),
-    ...(rp?.italic ? { italic: true } : {}),
-    ...(rp?.underline && rp.underline !== "none" ? { underline: true } : {}),
-    ...(rp?.strike === "singleStrike" || rp?.strike === "doubleStrike"
+    sizePx: size != null ? ptToPx(size) : DEFAULT_SIZE_PX,
+    ...((rp?.bold ?? defaults?.bold) ? { bold: true } : {}),
+    ...((rp?.italic ?? defaults?.italic) ? { italic: true } : {}),
+    ...(underline && underline !== "none" ? { underline: true } : {}),
+    ...(rp?.strike === "singleStrike" ||
+    rp?.strike === "doubleStrike" ||
+    defaults?.strike === "singleStrike" ||
+    defaults?.strike === "doubleStrike"
       ? { strikethrough: true }
       : {}),
     ...(color ? { color } : {}),
@@ -248,9 +307,23 @@ function runStyle(rp: TextCharacterPropertiesOptions | undefined): LayoutTextSty
 
 /** A bare string sets latin + ea to the same face; the object form reads
  *  latin first, then eastAsia (each slot is a face string or a full font). */
-function familyOf(font: RunFont | undefined): string | undefined {
-  if (typeof font === "string") return font || undefined;
+/** The theme font scheme's faces, keyed the way a:rPr's +mn/+mj tokens
+ *  reference them. */
+export interface ThemeFonts {
+  major?: Partial<Record<"latin" | "eastAsian" | "complexScript", string>>;
+  minor?: Partial<Record<"latin" | "eastAsian" | "complexScript", string>>;
+}
+
+/** A run's font reference as a real family: the theme tokens (+mn-lt and
+ *  friends) resolve through the font scheme — the raw token is no family at
+ *  all, and feeding it to CSS measure/paint collapses wrapped lines. */
+function familyOf(font: RunFont | undefined, context: TextFieldContext): string | undefined {
   const face = (f: TextFont | undefined): string | undefined =>
     typeof f === "string" ? f || undefined : f?.typeface;
-  return face(font?.latin) ?? face(font?.eastAsia);
+  const reference = typeof font === "string" ? font : (face(font?.latin) ?? face(font?.eastAsia));
+  const token = /^\+(mn|mj)-(lt|ea|cs)$/.exec(reference ?? "");
+  if (!token) return reference || undefined;
+  const collection = token[1] === "mj" ? context.themeFonts?.major : context.themeFonts?.minor;
+  const slot = token[2] === "lt" ? "latin" : token[2] === "ea" ? "eastAsian" : "complexScript";
+  return collection?.[slot] || undefined;
 }

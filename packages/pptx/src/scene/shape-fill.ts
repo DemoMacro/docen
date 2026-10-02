@@ -12,6 +12,7 @@ import type {
   SolidFillOptions,
 } from "@office-open/core/drawing";
 import type { ColorMappingOptions } from "@office-open/core/theme";
+import type { ShapeOptions } from "@office-open/pptx";
 
 import { tilePaintOf } from "./blip-tile";
 import { transformColor } from "./color-transform";
@@ -22,6 +23,7 @@ import type { ThemeColors } from "./table-style";
 interface FillContext {
   themeColors?: ThemeColors;
   colorMapping?: ColorMappingOptions;
+  lineStyles?: OutlineOptions[];
 }
 
 /** A raw EG_ColorChoice (a hex string or an office-open color option) →
@@ -126,6 +128,20 @@ function gradientPaintOf(
     },
     stops,
   };
+}
+
+/** Merge a style-matrix line reference under an explicit outline: the shape's
+ * a:ln children win, while a width omitted by a:ln still comes from the theme
+ * line style (PowerPoint's default stroke width). */
+export function styleOutlineOf(
+  outline: OutlineOptions | undefined,
+  reference: NonNullable<NonNullable<ShapeOptions["style"]>["lineReference"]> | undefined,
+  context: FillContext,
+): OutlineOptions | undefined {
+  const style = reference && context.lineStyles?.[reference.index - 1];
+  if (!outline) return style;
+  if (!style) return outline;
+  return { ...style, ...outline, width: outline.width ?? style.width };
 }
 
 /** Map a shape's spPr fill; solid fills retain the old hex contract, while

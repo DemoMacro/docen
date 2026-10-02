@@ -10,15 +10,15 @@
  * engine transactions) rides on this base in later batches.
  */
 
-import { measureEmu, solidFillOf } from "@docen/core/geometry";
+import { measureEmu } from "@docen/core/geometry";
 import {
   browserFontMetrics,
   EMU_PER_PX,
+  cssFamilyOf,
   familyOfSlot,
   leaferBaselinePadPx,
   ptToPx,
   type LayoutBlock,
-  type LayoutDrawingFill,
   type LayoutDrawingMember,
 } from "@docen/layout";
 import {
@@ -152,12 +152,7 @@ import {
   tableSelectionFor,
   type TableSelectionRange,
 } from "./table-selection";
-import {
-  disposeTextAreaMirror,
-  measureTextAreaContent,
-  slideFillStyle,
-  textBoxFillStyle,
-} from "./text-overlay";
+import { disposeTextAreaMirror, measureTextAreaContent } from "./text-overlay";
 import { formatText, textOf, writeText, type TextEditSource } from "./text-session";
 // Side-effect: register the presentation translation tables.
 import "./i18n";
@@ -182,6 +177,9 @@ const TEXT_FORMAT_COMMANDS: ReadonlySet<string> = new Set([
   "align-center",
   "align-right",
   "justify",
+  "align-top",
+  "align-middle",
+  "align-bottom",
   "list",
   "numbering",
   "line-spacing",
@@ -202,6 +200,13 @@ const ALIGNMENTS: ReadonlyMap<string, "left" | "center" | "right" | "justify"> =
   ["align-center", "center"],
   ["align-right", "right"],
   ["justify", "justify"],
+]);
+
+/** Ribbon vertical-text command → DrawingML body anchor. */
+const VERTICAL_ALIGNMENTS: ReadonlyMap<string, "top" | "center" | "bottom"> = new Map([
+  ["align-top", "top"],
+  ["align-middle", "center"],
+  ["align-bottom", "bottom"],
 ]);
 
 /** Projected paragraph alignment → the CSS text-align the edit overlay uses
@@ -1194,6 +1199,13 @@ class DocenPresentation extends AddinHost {
     return !changed || changed.has(index);
   }
 
+  /** The projected children that selection and hit tests address. Source JSON
+   *  remains the edit/serialization tree; projection owns inherited geometry. */
+  #selectableSlide(index: number): SlideOptions | undefined {
+    const children = this.#pres?.slides[index]?.children;
+    return children ? { children } : this.#presJson?.slides?.[index];
+  }
+
   // ── Slide-object selection ───────────────────────────────────────────────
 
   /** The wrapper that anchors the overlay (the stage itself is cleared per
@@ -1209,11 +1221,10 @@ class DocenPresentation extends AddinHost {
     const sel = this.#selection;
     const presJson = this.#presJson;
     if (!sel || !presJson) return null;
-    const slide = presJson.slides?.[sel.slide];
     const pres = this.#pres!;
     const stripY = sel.slide * (pres.heightPx + SLIDE_GAP_PX) + SLIDE_GAP_PX;
     if (sel.member) {
-      const group = slide?.children?.[sel.child];
+      const group = presJson.slides?.[sel.slide]?.children?.[sel.child];
       const m = group && memberByPath(group, sel.member);
       if (!m) return null;
       return {
@@ -1221,10 +1232,17 @@ class DocenPresentation extends AddinHost {
         rotation: m.rotation,
       };
     }
-    const hit = slideHits(slide ?? {}).find((h) => h.child === sel.child);
+    const hit = slideHits({ children: this.#pres?.slides[sel.slide]?.children ?? [] }).find(
+      (h) => h.child === sel.child,
+    );
     if (!hit) return null;
     return {
-      box: { x: hit.box.x, y: hit.box.y + stripY, width: hit.box.width, height: hit.box.height },
+      box: {
+        x: hit.box.x,
+        y: hit.box.y + stripY,
+        width: hit.box.width,
+        height: hit.box.height,
+      },
       rotation: hit.rotation,
     };
   }
@@ -1389,8 +1407,9 @@ class DocenPresentation extends AddinHost {
       const m = group && memberByPath(group, sel.member);
       if (m) box = { x: m.x, y: m.y, width: m.width, height: m.height };
     } else {
-      const hit = slideHits(presJson.slides?.[sel.slide] ?? {}).find((h) => h.child === sel.child);
-      box = hit?.box ?? null;
+      const selected = this.#selectedBox();
+      const stripY = sel.slide * (pres.heightPx + SLIDE_GAP_PX) + SLIDE_GAP_PX;
+      box = selected ? { ...selected.box, y: selected.box.y - stripY } : null;
     }
     if (!box) return;
     const scale = this.#zoom / 100;
@@ -1429,8 +1448,6 @@ class DocenPresentation extends AddinHost {
         };
     const anchor = member?.anchor ?? anchorOf(bp?.anchor ?? body?.anchor);
     const autoFit = member?.autoFit === true;
-    const fill: LayoutDrawingFill | undefined =
-      member?.fill ?? solidFillOf("shape" in child ? child.shape.properties?.fill : undefined);
     // The first paragraph's text-run style — the member's blocks when the
     // projection made one, else textBlocks' resolution of the same body (its
     // defaults ARE the painted defaults). The bare constant covers a body
@@ -1455,17 +1472,29 @@ class DocenPresentation extends AddinHost {
     // ascent) onto the painted depth — CSS offers no direct baseline control.
     const face = familyOfSlot(run.family, false);
     const rotation = this.#selectedBox()?.rotation ?? rotationOf(child);
+    // Shape text paints a single DrawingML line height from its largest run;
+    // the textarea must consume the projected value, not the browser's font
+    // metric, or opening the session makes the first line jump.
+    const referenceSizePx = Math.max(
+      run.sizePx,
+      ...(first?.inline.flatMap((part) =>
+        part.kind === "text" && part.style.sizePx != null ? [part.style.sizePx] : [],
+      ) ?? []),
+    );
+    const lineHeight = first?.spacing?.lineHeight;
     const linePx =
-      browserFontMetrics.normalRatio({
-        family: face,
-        bold: run.bold === true,
-        italic: run.italic === true,
-      }) * run.sizePx;
+      lineHeight?.rule === "exact"
+        ? lineHeight.px
+        : browserFontMetrics.normalRatio({
+            family: face,
+            bold: run.bold === true,
+            italic: run.italic === true,
+          }) * run.sizePx;
     const baselineShift = this.#baselineShiftOf(
       face,
       run.bold === true,
       run.italic === true,
-      run.sizePx,
+      referenceSizePx,
       linePx,
       scale,
     );
@@ -1475,33 +1504,25 @@ class DocenPresentation extends AddinHost {
     // (and every grow pass) must measure the real content.
     editor.rows = 1;
     editor.value = text;
-    // Opaque: while the session is open this overlay IS the text surface —
-    // translucency would ghost the canvas painting through it.
-    const slide = pres.slides[sel.slide]!;
-    const fillStyle = fill
-      ? textBoxFillStyle(fill, member?.opacity)
-      : slideFillStyle(slide.background, pres.widthPx, pres.heightPx, {
-          x: box.x,
-          y: box.y,
-          scale,
-        });
+    // The canvas remains the visual surface; this textarea is only the
+    // caret/keyboard bridge, exactly like a table-cell edit.
     Object.assign(editor.style, {
       left: `${box.x * scale}px`,
       top: `${stripY * scale}px`,
       width: `${box.width * scale}px`,
       height: `${box.height * scale}px`,
       padding: `${ins.top * scale}px ${ins.right * scale}px ${ins.bottom * scale}px ${ins.left * scale}px`,
-      fontFamily: JSON.stringify(run.family),
+      fontFamily: cssFamilyOf(face),
       fontSize: `${run.sizePx * scale}px`,
       lineHeight: `${linePx * scale}px`,
       textAlign: TEXT_ALIGN_OF[first?.align ?? "left"] ?? "left",
-      color: run.color ? `#${run.color}` : TEXT_INK,
+      color: "transparent",
+      caretColor: run.color ? `#${run.color}` : TEXT_INK,
       transformOrigin: `${(box.width * scale) / 2}px ${(box.height * scale) / 2}px`,
       ...(rotation ? { transform: `rotate(${rotation}deg)` } : {}),
       ...(run.bold ? { fontWeight: "bold" } : {}),
       ...(run.italic ? { fontStyle: "italic" } : {}),
     });
-    Object.assign(editor.style, fillStyle);
     // Keep the text visible as it grows, and keep the box recognizable as it
     // doesn't: the edit frame starts at the shape's full height (a short text
     // must not shrink the fill/border rectangle under the user — PowerPoint
@@ -1653,7 +1674,9 @@ class DocenPresentation extends AddinHost {
       const m = group && memberByPath(group, sel.member);
       if (m) origin = m;
     } else {
-      const hit = slideHits(presJson.slides?.[sel.slide] ?? {}).find((h) => h.child === sel.child);
+      const hit = slideHits(this.#selectableSlide(sel.slide) ?? {}).find(
+        (h) => h.child === sel.child,
+      );
       if (hit) origin = hit.box;
     }
     if (!origin) return null;
@@ -1743,7 +1766,7 @@ class DocenPresentation extends AddinHost {
       padding: `${m.top * scale}px ${m.right * scale}px ${m.bottom * scale}px ${m.left * scale}px`,
       ...(run
         ? {
-            fontFamily: JSON.stringify(face),
+            fontFamily: cssFamilyOf(face),
             fontSize: `${run.sizePx * scale}px`,
             lineHeight: `${linePx * scale}px`,
             textAlign: TEXT_ALIGN_OF[first!.align ?? "left"] ?? "left",
@@ -2220,7 +2243,7 @@ class DocenPresentation extends AddinHost {
   ): number {
     const probe = document.createElement("canvas").getContext("2d");
     if (!probe) return 0;
-    probe.font = `${italic ? "italic " : ""}${bold ? "700 " : ""}${sizePx * scale}px ${JSON.stringify(face)}`;
+    probe.font = `${italic ? "italic " : ""}${bold ? "700 " : ""}${sizePx * scale}px ${cssFamilyOf(face)}`;
     const m = probe.measureText("Ag");
     if (!(m.fontBoundingBoxAscent > 0)) return 0;
     const cssBaseline =
@@ -2524,7 +2547,9 @@ class DocenPresentation extends AddinHost {
     const slide = this.#presJson?.slides?.[sel.slide];
     const child = this.#selectedChild();
     const pres = this.#pres;
-    const hit = slide ? slideHits(slide).find((entry) => entry.child === sel.child) : null;
+    const hit = slide
+      ? slideHits(this.#selectableSlide(sel.slide) ?? {}).find((entry) => entry.child === sel.child)
+      : null;
     if (!child || !pres || !hit) return;
     const dx =
       value === "left"
@@ -3383,7 +3408,7 @@ class DocenPresentation extends AddinHost {
     const eraseAt = (x: number, y: number): void => {
       const slide = presJson.slides?.[point.slide];
       if (!slide) return;
-      const hit = hitSlide(slideHits(slide), x, y);
+      const hit = hitSlide(slideHits(this.#selectableSlide(point.slide) ?? {}), x, y);
       if (hit < 0) return;
       const selection = this.#selection;
       const children = slide.children;
@@ -4245,7 +4270,7 @@ class DocenPresentation extends AddinHost {
       entries.length === 0
     )
       return;
-    const hits = slideHits(slide);
+    const hits = slideHits(this.#selectableSlide(index) ?? {});
     const inBox = (box: Box, x: number, y: number): boolean =>
       x >= box.x - 1 && x <= box.x + box.width + 1 && y >= box.y - 1 && y <= box.y + box.height + 1;
     let clickCursor = 0;
@@ -5314,7 +5339,11 @@ class DocenPresentation extends AddinHost {
     const paragraphs = cell ? cellParagraphsOf(cell) : bodyParagraphsOf(body!);
     const before = structuredClone(target);
     let applied = false;
-    if (selection) {
+    const verticalAlignment = VERTICAL_ALIGNMENTS.get(name);
+    if (verticalAlignment && body) {
+      body.bodyProperties = { ...body.bodyProperties, anchor: verticalAlignment };
+      applied = true;
+    } else if (selection) {
       const source: TextEditSource = cell
         ? { kind: "cell", cell }
         : { kind: "shape", child: (child as Extract<SlideChild, { shape: unknown }>).shape };
@@ -5578,6 +5607,32 @@ class DocenPresentation extends AddinHost {
     return { slide, x, y: stripY - slide * (pres.heightPx + SLIDE_GAP_PX) - SLIDE_GAP_PX };
   }
 
+  /** The visible object under a slide point. A group's bounding box is not
+   *  itself paint: skip it when no member is under the pointer so earlier
+   *  text and background objects stay selectable through its empty canvas. */
+  #hitChildAt(slideIndex: number, x: number, y: number): number {
+    const hits = slideHits(this.#selectableSlide(slideIndex) ?? {});
+    for (let index = hits.length - 1; index >= 0; index -= 1) {
+      const hit = hits[index]!;
+      const box = hit.box;
+      if (x < box.x || x > box.x + box.width || y < box.y || y > box.y + box.height) continue;
+      const child = this.#pres?.slides[slideIndex]?.children?.[hit.child];
+      if (
+        child &&
+        "group" in child &&
+        !memberAt(child, x, y) &&
+        !(
+          this.#selection?.slide === slideIndex &&
+          this.#selection.child === hit.child &&
+          !this.#selection.member
+        )
+      )
+        continue;
+      return hit.child;
+    }
+    return -1;
+  }
+
   /** The playable media frame under the slide point, resolved to the screen
    * box its overlay player docks at — null when the point hits nothing
    * playable. */
@@ -5649,7 +5704,7 @@ class DocenPresentation extends AddinHost {
       this.#selectTableGrip(grip.kind, grip.index);
       return;
     }
-    const child = hitSlide(slideHits(presJson.slides?.[point.slide] ?? {}), point.x, point.y);
+    const child = this.#hitChildAt(point.slide, point.x, point.y);
     // A press outside the object under edit leaves the edit (Word's rule);
     // one inside just moves the caret — the textarea keeps the session. In a
     // table edit a press on another cell of the same table hops there.
@@ -5746,11 +5801,7 @@ class DocenPresentation extends AddinHost {
       // canvas poster keeps painting beneath the floating controls).
       const playback = this.#mediaPlaybackAt(point);
       if (playback) return this.#mediaPlayer?.show(playback);
-      const child = hitSlide(
-        slideHits(this.#presJson!.slides?.[point.slide] ?? {}),
-        point.x,
-        point.y,
-      );
+      const child = hitSlide(slideHits(this.#selectableSlide(point.slide) ?? {}), point.x, point.y);
       const target =
         child >= 0 ? this.#presJson!.slides?.[point.slide]?.children?.[child] : undefined;
       if (child >= 0 && target && "table" in target)

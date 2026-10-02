@@ -84,23 +84,27 @@ export const presentationStyles = css`
   /* The in-place shape text editor: a bare textarea floating over the shape
      (same layer as the selection overlay), framed like it so the edit reads
      as belonging to the shape. The projection member supplies the real
-     insets/face/color per shape — these are the bare-box fallbacks. Opaque:
-     while the session is open the overlay IS the text surface; translucency
-     would ghost the canvas painting through it. */
+     insets/face per shape — these are the bare-box fallbacks. The canvas
+     remains the visual surface; the textarea is a transparent caret bridge so
+     DOM and Leafer cannot paint two different font engines over each other. */
   .shape-text-editor {
     position: absolute;
     z-index: 6;
     box-sizing: border-box;
     margin: 0;
     padding: 4.8px 9.6px;
-    background: #fff;
+    background: transparent;
     box-shadow: inset 0 0 0 1.5px #2b7cd3;
     outline: none;
     resize: none;
     overflow: hidden;
+    color: transparent;
     font-family: inherit;
     line-height: normal;
     white-space: pre-wrap;
+  }
+  .shape-text-editor::selection {
+    background: rgba(43, 124, 211, 0.22);
   }
   /* A table cell edit follows the DOCX input model: the canvas remains the
      visual table and the textarea is only the keyboard/IME bridge. Keeping

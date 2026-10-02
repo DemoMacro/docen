@@ -5976,6 +5976,31 @@ export const PRESET_SHAPE_DEFS: Record<string, PresetShapeDef> = {
     rect: "x1 vc x3 b",
     paths: [{ w: 0, h: 0, fill: "norm", stroke: true, d: "m l b l x2 t l r b x" }],
   },
+  upArrow: {
+    av: ["adj1 val 50000", "adj2 val 50000"],
+    gd: [
+      "maxAdj2 */ 100000 h ss",
+      "a1 pin 0 adj1 100000",
+      "a2 pin 0 adj2 maxAdj2",
+      "dy2 */ ss a2 100000",
+      "y2 +- t dy2 0",
+      "dx1 */ w a1 200000",
+      "x1 +- hc 0 dx1",
+      "x2 +- hc dx1 0",
+      "dy1 */ x1 dy2 wd2",
+      "y1 +- y2 0 dy1",
+    ],
+    rect: "x1 y1 x2 b",
+    paths: [
+      {
+        w: 0,
+        h: 0,
+        fill: "norm",
+        stroke: true,
+        d: "m l y2 l hc t l r y2 l x2 y2 l x2 b l x1 b l x1 y2 x",
+      },
+    ],
+  },
   upArrowCallout: {
     av: ["adj1 val 25000", "adj2 val 25000", "adj3 val 25000", "adj4 val 64977"],
     gd: [

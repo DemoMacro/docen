@@ -592,6 +592,9 @@ export function presentationRibbonTabs(): RibbonTab[] {
             rowOf(
               btn("list", cmd("list"), { icon: "list", iconOnly: true }),
               btn("numbering", cmd("numbering"), { icon: "numbering", iconOnly: true }),
+              btn("align-top", cmd("align-top"), { icon: "align-top", iconOnly: true }),
+              btn("align-middle", cmd("align-middle"), { icon: "align-middle", iconOnly: true }),
+              btn("align-bottom", cmd("align-bottom"), { icon: "align-bottom", iconOnly: true }),
             ),
           ),
         ]),

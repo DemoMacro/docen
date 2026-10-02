@@ -6,6 +6,7 @@ import type { LayoutDrawingMember } from "@docen/layout";
 import { EMU_PER_PX } from "@docen/layout";
 import type { GroupOptions, SlideChild } from "@office-open/pptx";
 
+import { resolveChartColors } from "./chart-colors";
 import { IDENTITY, emuOf, geometryOf, type Xform } from "./geometry";
 import { endpointMembers } from "./lines";
 import { mediaMember } from "./media";
@@ -90,7 +91,7 @@ export function childMembers(
         width: t.sx * emuOf(c.width),
         height: t.sy * emuOf(c.height),
         ...(cp ? { childPath: cp } : {}),
-        chart: c,
+        chart: resolveChartColors(c, context),
       });
     } else if ("ole" in child) {
       const o = child.ole;

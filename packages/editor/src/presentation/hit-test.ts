@@ -33,6 +33,27 @@ const emu = (v: number): number => Math.round(v * EMU_PER_PX);
 export function slideHits(slide: SlideOptions): SlideHit[] {
   const hits: SlideHit[] = [];
   (slide.children ?? []).forEach((child, i) => {
+    const nv =
+      "shape" in child
+        ? child.shape
+        : "picture" in child
+          ? child.picture
+          : "line" in child
+            ? child.line
+            : "connector" in child
+              ? child.connector
+              : "group" in child
+                ? child.group
+                : "smartart" in child
+                  ? child.smartart
+                  : "video" in child
+                    ? child.video
+                    : "audio" in child
+                      ? child.audio
+                      : "ole" in child
+                        ? child.ole
+                        : undefined;
+    if (nv?.hidden === true) return;
     const box = childBox(child);
     if (box) hits.push({ child: i, box, rotation: rotationOf(child) });
   });

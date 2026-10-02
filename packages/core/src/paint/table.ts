@@ -3,6 +3,11 @@ import { Line, Rect, type IGroup } from "leafer-ui";
 
 import { paintBlock } from "../painter";
 import type { PaintContext } from "./context";
+import {
+  collapsedBorderSegments,
+  type CollapsedBorderCell,
+  type CollapsedBorderDefaults,
+} from "./table-borders";
 
 export function paintTable(
   tree: IGroup,
@@ -55,119 +60,19 @@ export function drawCollapsedTableBorders(
   y: number,
   colX: readonly number[],
   rowY: readonly number[],
-  cells: readonly {
-    row: number;
-    col: number;
-    spanW: number;
-    spanH: number;
-    borders?: Partial<Record<"top" | "right" | "bottom" | "left", LayoutBorderEdge>>;
-  }[],
-  tableBorders?: {
-    top?: LayoutBorderEdge;
-    right?: LayoutBorderEdge;
-    bottom?: LayoutBorderEdge;
-    left?: LayoutBorderEdge;
-    insideHorizontal?: LayoutBorderEdge;
-    insideVertical?: LayoutBorderEdge;
-  },
+  cells: readonly CollapsedBorderCell[],
+  tableBorders?: CollapsedBorderDefaults,
 ): void {
-  const nRows = rowY.length - 1;
-  const nCols = colX.length - 1;
-  const occ = Array.from({ length: nRows }, (_, row) =>
-    Array.from({ length: nCols }, (_, col) =>
-      cells.find(
-        (cell) =>
-          cell.row <= row &&
-          row < cell.row + cell.spanH &&
-          cell.col <= col &&
-          col < cell.col + cell.spanW,
-      ),
-    ),
-  );
-  const tb = tableBorders;
-  /** A horizontal boundary (row edge `b`) at column `c`: the cell above ends
-   *  here, the cell below starts here. */
-  const pickH = (b: number, c: number): LayoutBorderEdge | undefined => {
-    const above = b > 0 ? occ[b - 1][c] : undefined;
-    const below = b < nRows ? occ[b][c] : undefined;
-    if (above && above === below) return undefined;
-    // An explicitly declared cell edge (w:tcBorders, nil included) suppresses
-    // the table-level default — Word resolves tcBorders over tblBorders
-    // outright; only cells silent on the edge fall back to the grid default.
-    const aboveEdge = above?.borders?.bottom;
-    const belowEdge = below?.borders?.top;
-    const def =
-      aboveEdge || belowEdge
-        ? undefined
-        : b === 0
-          ? tb?.top
-          : b === nRows
-            ? tb?.bottom
-            : tb?.insideHorizontal;
-    return heaviest(aboveEdge, heaviest(belowEdge, def));
-  };
-  /** A vertical boundary (column edge `b`) at row `r`. */
-  const pickV = (b: number, r: number): LayoutBorderEdge | undefined => {
-    const left = b > 0 ? occ[r][b - 1] : undefined;
-    const right = b < nCols ? occ[r][b] : undefined;
-    if (left && left === right) return undefined;
-    const leftEdge = left?.borders?.right;
-    const rightEdge = right?.borders?.left;
-    const def =
-      leftEdge || rightEdge
-        ? undefined
-        : b === 0
-          ? tb?.left
-          : b === nCols
-            ? tb?.right
-            : tb?.insideVertical;
-    return heaviest(leftEdge, heaviest(rightEdge, def));
-  };
-  for (let b = 0; b <= nRows; b++) {
-    let segStart = -1;
-    let seg: LayoutBorderEdge | undefined;
-    for (let c = 0; c <= nCols; c++) {
-      const winner = c < nCols ? pickH(b, c) : undefined;
-      if (seg && winner && sameEdge(seg, winner)) continue;
-      if (seg) {
-        drawEdge(tree, x + colX[segStart]!, y + rowY[b]!, colX[c]! - colX[segStart]!, true, seg);
-      }
-      seg = winner && edgeWeight(winner) > 0 ? winner : undefined;
-      segStart = seg ? c : -1;
-    }
+  for (const segment of collapsedBorderSegments(colX, rowY, cells, tableBorders)) {
+    drawEdge(
+      tree,
+      x + segment.x,
+      y + segment.y,
+      segment.lengthPx,
+      segment.horizontal,
+      segment.edge,
+    );
   }
-  for (let b = 0; b <= nCols; b++) {
-    let segStart = -1;
-    let seg: LayoutBorderEdge | undefined;
-    for (let r = 0; r <= nRows; r++) {
-      const winner = r < nRows ? pickV(b, r) : undefined;
-      if (seg && winner && sameEdge(seg, winner)) continue;
-      if (seg) {
-        drawEdge(tree, x + colX[b]!, y + rowY[segStart]!, rowY[r]! - rowY[segStart]!, false, seg);
-      }
-      seg = winner && edgeWeight(winner) > 0 ? winner : undefined;
-      segStart = seg ? r : -1;
-    }
-  }
-}
-
-/** One border edge's conflict weight: nil/none/absent carry none. */
-function edgeWeight(edge: LayoutBorderEdge | undefined): number {
-  return edge && edge.style && edge.style !== "nil" && edge.style !== "none" && edge.px != null
-    ? edge.px
-    : 0;
-}
-
-/** Word's border conflict resolution: the wider edge wins; ties keep `a`. */
-function heaviest(
-  a: LayoutBorderEdge | undefined,
-  b: LayoutBorderEdge | undefined,
-): LayoutBorderEdge | undefined {
-  return edgeWeight(b) > edgeWeight(a) ? b : a;
-}
-
-function sameEdge(a: LayoutBorderEdge, b: LayoutBorderEdge): boolean {
-  return a === b || (a.px === b.px && a.style === b.style && a.color === b.color);
 }
 
 /** dashPattern per OOXML border style (stroke-only in Leafer); styles without

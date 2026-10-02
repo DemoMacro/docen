@@ -62,6 +62,38 @@ describe("table grid", () => {
     ]);
   });
 
+  it("keeps explicit vMerge continuations on their covered grid slots", () => {
+    const grid = tableGridOf({
+      x: 0,
+      y: 0,
+      width: 1828800,
+      columnWidths: [457200, 457200, 457200, 457200],
+      rows: [
+        {
+          cells: [
+            { text: "a", rowSpan: 2 },
+            { text: "b", rowSpan: 2 },
+          ],
+        },
+        {
+          cells: [
+            { verticalMerge: "restart" },
+            { verticalMerge: "restart" },
+            { text: "c" },
+            { text: "d" },
+          ],
+        },
+      ],
+    });
+    expect(grid.columns).toBe(4);
+    expect(grid.origins).toEqual([
+      expect.objectContaining({ row: 0, col: 0, spanH: 2 }),
+      expect.objectContaining({ row: 0, col: 1, spanH: 2 }),
+      expect.objectContaining({ row: 1, col: 2 }),
+      expect.objectContaining({ row: 1, col: 3 }),
+    ]);
+  });
+
   it("projects a cell's official text direction onto its paint payload", () => {
     const { slides } = project({
       slides: [
@@ -96,6 +128,71 @@ describe("table grid", () => {
     };
     expect(table.rows[0]!.cells[0]!.textVertical).toBe("vertical");
     expect(table.rows[0]!.cells[1]!.textVertical).toBe("vertical270");
+  });
+
+  it("treats absorbed cells inside a declared span as duplicates, not columns", () => {
+    // The WPS spelling: the origin declares gridSpan and the region's own
+    // slots repeat hMerge="1" — the row must stay at the declared width.
+    const grid = tableGridOf({
+      x: 0,
+      y: 0,
+      width: 1828800,
+      columnWidths: [457200, 457200, 457200, 457200],
+      rows: [
+        {
+          cells: [
+            { text: "wide", columnSpan: 2 },
+            { horizontalMerge: "restart" },
+            { text: "right" },
+          ],
+        },
+        { cells: [{ text: "a" }, { text: "b" }, { text: "c" }, { text: "d" }] },
+      ],
+    });
+    expect(grid.columns).toBe(4);
+    expect(grid.origins).toEqual([
+      expect.objectContaining({ row: 0, col: 0, spanW: 2 }),
+      expect.objectContaining({ row: 0, col: 2, spanW: 1 }),
+      expect.objectContaining({ row: 1, col: 0 }),
+      expect.objectContaining({ row: 1, col: 1 }),
+      expect.objectContaining({ row: 1, col: 2 }),
+      expect.objectContaining({ row: 1, col: 3 }),
+    ]);
+  });
+
+  it("widens a span-less origin across its bare hMerge chain", () => {
+    const grid = tableGridOf({
+      x: 0,
+      y: 0,
+      width: 1828800,
+      columnWidths: [609600, 609600, 609600],
+      rows: [{ cells: [{ text: "origin" }, { horizontalMerge: "restart" }, { text: "tail" }] }],
+    });
+    expect(grid.columns).toBe(3);
+    expect(grid.origins).toEqual([
+      expect.objectContaining({ row: 0, col: 0, spanW: 2 }),
+      expect.objectContaining({ row: 0, col: 2, spanW: 1 }),
+    ]);
+  });
+
+  it("absorbs bare vMerge chains into the origin above", () => {
+    const grid = tableGridOf({
+      x: 0,
+      y: 0,
+      width: 914400,
+      columnWidths: [457200, 457200],
+      rows: [
+        { cells: [{ text: "top" }, { text: "x" }] },
+        { cells: [{ verticalMerge: "restart" }, { text: "y" }] },
+        { cells: [{ verticalMerge: "restart" }, { text: "z" }] },
+      ],
+    });
+    expect(grid.origins).toEqual([
+      expect.objectContaining({ row: 0, col: 0, spanH: 3 }),
+      expect.objectContaining({ row: 0, col: 1 }),
+      expect.objectContaining({ row: 1, col: 1 }),
+      expect.objectContaining({ row: 2, col: 1 }),
+    ]);
   });
 });
 
@@ -162,6 +259,192 @@ describe("shapes", () => {
     expect(members.some((m) => m.kind === "path" && m.fill === "FF0000")).toBe(true);
   });
 
+  it("inherits missing placeholder geometry from the matching layout", () => {
+    const slideChild: SlideChild = {
+      shape: {
+        placeholder: "title",
+        textBody: {
+          paragraphs: [
+            {
+              children: [
+                {
+                  text: "placeholder",
+                  fill: { type: "solid", color: { value: "accent1" } },
+                },
+              ],
+            },
+          ],
+        },
+      },
+    };
+    const pres = {
+      masters: [
+        {
+          name: "test",
+          theme: { colorScheme: { accent1: "112233" } } as never,
+          layouts: [
+            {
+              layoutId: 1,
+              placeholders: {
+                title: { x: 952500, y: 1905000, width: 1905000, height: 952500 },
+              },
+            },
+          ],
+        },
+      ],
+      slides: [{ master: "test", children: [slideChild] }],
+    } as PresentationOptions;
+
+    const { slides } = project(pres);
+    const member = slides[0]!.members[0]!;
+    expect(member).toMatchObject({
+      x: 952500 / EMU_PER_PX,
+      y: 1905000 / EMU_PER_PX,
+      width: 1905000 / EMU_PER_PX,
+      height: 952500 / EMU_PER_PX,
+    });
+    if (member.kind !== "textBox") throw new Error("expected a text box member");
+    const block = member.blocks[0] as unknown as {
+      inline: { text: string; style: { color?: string } }[];
+    };
+    const run = block.inline[0]!;
+    expect(run.text).toBe("placeholder");
+    expect(run.style.color).toBe("112233");
+    expect(slideChild.shape.x).toBeUndefined();
+  });
+
+  it("does not turn a plain shape into an object-placeholder inheritor", () => {
+    const { slides } = project({
+      masters: [
+        {
+          name: "test",
+          layouts: [
+            {
+              layoutId: 1,
+              placeholders: {
+                object: {
+                  x: 952500,
+                  y: 1905000,
+                  width: 1905000,
+                  height: 952500,
+                  textBody: {
+                    listStyle: {
+                      levels: [{ bullet: { type: "char" } }],
+                    },
+                  },
+                },
+              },
+            },
+          ],
+        },
+      ],
+      slides: [
+        {
+          master: "test",
+          children: [
+            {
+              shape: {
+                x: 952500,
+                y: 1905000,
+                width: 1905000,
+                height: 952500,
+                textBody: {
+                  paragraphs: [{ children: [{ text: "plain" }] }],
+                },
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    const member = slides[0]!.members[0]!;
+    if (member.kind !== "textBox") throw new Error("expected a text box member");
+    const block = member.blocks[0] as unknown as {
+      inline: { kind: string; text?: string }[];
+    };
+    expect(block.inline).toHaveLength(1);
+    expect(block.inline[0]).toMatchObject({ kind: "text", text: "plain" });
+  });
+
+  it("projects layout/master non-placeholders and inherits layout backgrounds", () => {
+    const { slides } = project({
+      masters: [
+        {
+          name: "test",
+          background: { fill: { type: "solid", color: "112233" } },
+          children: [
+            {
+              shape: {
+                x: 952500,
+                y: 0,
+                width: 952500,
+                height: 952500,
+                properties: { geometry: "rect", fill: "00FF00" },
+              },
+            },
+          ],
+          layouts: [
+            {
+              layoutId: 1,
+              children: [
+                {
+                  shape: {
+                    x: 0,
+                    y: 0,
+                    width: 952500,
+                    height: 952500,
+                    properties: { geometry: "rect", fill: "FF0000" },
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ] as never,
+      slides: [{ master: "test", layout: "layout:1" }],
+    });
+    expect(slides[0]!.background).toEqual({ kind: "solid", color: "112233" });
+    expect(slides[0]!.members).toMatchObject([{ fill: "FF0000" }, { fill: "00FF00" }]);
+  });
+
+  it("supplies a styleless outline width from the theme line style", () => {
+    const { slides } = project({
+      masters: [
+        {
+          name: "test",
+          theme: {
+            colorScheme: { accent1: "C00000" },
+            formatScheme: {
+              lineStyles: [{ width: 12700, color: { value: "accent1" } }],
+              fillStyles: [],
+              effectStyles: [],
+            },
+          },
+        },
+      ] as never,
+      slides: [
+        {
+          children: [
+            {
+              shape: {
+                x: 0,
+                y: 0,
+                width: 952500,
+                height: 952500,
+                properties: { geometry: "rect", outline: { color: "C00000" } },
+                style: { lineReference: { index: 1, color: { value: "accent1" } } },
+              },
+            },
+          ],
+        },
+      ],
+    });
+    expect(slides[0]!.members[0]).toMatchObject({
+      line: { px: 12700 / EMU_PER_PX, color: "C00000" },
+    });
+  });
+
   it("projects a text-carrying shape as a text box with silhouette and blocks", () => {
     const { slides } = project({
       slides: [
@@ -205,7 +488,11 @@ describe("shapes", () => {
     expect(tb.insets!.left).toBeGreaterThan(9.6);
     const para = tb.blocks[0]! as Extract<(typeof tb.blocks)[number], { kind: "paragraph" }>;
     expect(para.align).toBe("center");
-    expect(para.spacing).toEqual({ beforePx: 8, afterPx: 0 });
+    expect(para.spacing).toEqual({
+      beforePx: 8,
+      afterPx: 0,
+      lineHeight: { rule: "exact", px: 38.4 },
+    });
     expect(para.inline).toHaveLength(3);
     const [run, br, text] = para.inline;
     expect(run).toMatchObject({
@@ -421,6 +708,44 @@ describe("lines and connectors", () => {
       flipV: true,
     });
     expect("flipH" in vertical && vertical.flipH).toBe(false);
+  });
+
+  it("supplies a connector width from its theme line style", () => {
+    const { slides } = project({
+      masters: [
+        {
+          name: "test",
+          theme: {
+            colorScheme: { accent1: "C00000" },
+            formatScheme: {
+              lineStyles: [{ width: 25400, color: { value: "accent1" } }],
+              fillStyles: [],
+              effectStyles: [],
+            },
+          },
+        },
+      ] as never,
+      slides: [
+        {
+          children: [
+            {
+              connector: {
+                x1: 0,
+                y1: 0,
+                x2: 952500,
+                y2: 0,
+                properties: { geometry: "bentConnector3" as const, outline: { color: "C00000" } },
+                style: { lineReference: { index: 1, color: { value: "accent1" } } },
+              },
+            },
+          ],
+        },
+      ],
+    });
+    expect(slides[0]!.members[0]).toMatchObject({
+      kind: "path",
+      line: { px: 25400 / EMU_PER_PX, color: "C00000" },
+    });
   });
 });
 
@@ -1257,8 +1582,20 @@ describe("text bullet projection", () => {
         { properties: { lineSpacingPoints: 24 }, children: ["b"] },
       ]),
     );
-    expect(blocks[0]!.spacing?.lineHeight).toEqual({ rule: "multiple", factor: 1.5 });
+    expect(blocks[0]!.spacing?.lineHeight).toEqual({ rule: "exact", px: 43.2 });
     expect(blocks[1]!.spacing?.lineHeight).toEqual({ rule: "exact", px: 32 });
+  });
+});
+
+describe("theme font projection", () => {
+  it("resolves string theme font references through the owning master", () => {
+    const blocks = textBlocks(
+      { paragraphs: [{ children: [{ text: "表头", font: "+mn-ea" }] }] },
+      { themeFonts: { minor: { eastAsian: "Microsoft YaHei" } } },
+    );
+    expect(blocks[0]!.inline[0]).toMatchObject({
+      style: { family: "Microsoft YaHei" },
+    });
   });
 });
 
@@ -1740,5 +2077,78 @@ describe("table style projection", () => {
     const [header, body] = table.rows.map((row) => row.cells);
     expect(header![0]).toMatchObject({ fill: "222222" });
     expect(body![0]).toMatchObject({ fill: "EEEEEE" });
+  });
+
+  it("lets an explicit noFill cell override a styled fill", () => {
+    const guid = "{11111111-2222-3333-4444-555555555555}";
+    const table = tableOf({
+      tableStyles: {
+        defaultStyleId: guid,
+        styles: [
+          {
+            styleId: guid,
+            styleName: "Custom",
+            regions: { wholeTbl: { cell: { fill: '<a:srgbClr val="EEEEEE"/>' } } },
+          },
+        ],
+      },
+      slides: [
+        {
+          children: [
+            tableChild({
+              ...grid,
+              tableStyleId: guid,
+              rows: [
+                {
+                  height: 952500,
+                  cells: [{ text: "none", fill: { type: "none" } }, { text: "style" }],
+                },
+              ],
+            }),
+          ],
+        },
+      ],
+    });
+    expect(table.rows[0]!.cells[0]!.fill).toBeUndefined();
+    expect(table.rows[0]!.cells[1]!.fill).toBe("EEEEEE");
+  });
+
+  it("preserves an explicit gradient cell fill", () => {
+    const table = tableOf({
+      slides: [
+        {
+          children: [
+            tableChild({
+              ...grid,
+              rows: [
+                {
+                  height: 952500,
+                  cells: [
+                    {
+                      text: "gradient",
+                      fill: {
+                        type: "gradient",
+                        angle: 90,
+                        stops: [
+                          { position: 0, color: "FF0000" },
+                          { position: 100, color: "0000FF" },
+                        ],
+                      },
+                    },
+                  ],
+                },
+              ],
+            }),
+          ],
+        },
+      ],
+    });
+    expect(table.rows[0]!.cells[0]!.fill).toMatchObject({
+      type: "linear",
+      stops: [
+        { offset: 0, color: "#FF0000" },
+        { offset: 1, color: "#0000FF" },
+      ],
+    });
   });
 });

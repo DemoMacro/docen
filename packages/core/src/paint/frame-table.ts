@@ -4,6 +4,7 @@ import {
   type LaidOutStackItem,
   type LayoutBlock,
   type LayoutBorderEdge,
+  type LayoutDrawingFill,
 } from "@docen/layout";
 import { Group, Rect, type IGroup } from "leafer-ui";
 
@@ -26,7 +27,7 @@ interface FrameCell {
   row: number;
   spanW: number;
   spanH: number;
-  fill?: string;
+  fill?: string | LayoutDrawingFill;
   opacity?: number;
   borders?: Partial<Record<"top" | "right" | "bottom" | "left", LayoutBorderEdge>>;
   anchor?: "top" | "center" | "bottom";
@@ -120,7 +121,7 @@ export function paintFrameTable(
         y: member.y + rowY[cell.row]!,
         width: spanEnd(colX, cell.col, cell.spanW) - colX[cell.col]!,
         height: spanEnd(rowY, cell.row, cell.spanH) - rowY[cell.row]!,
-        fill: `#${cell.fill}`,
+        fill: typeof cell.fill === "string" ? `#${cell.fill}` : cell.fill,
         // A faded fill rides the element's own opacity — the cell Rect
         // carries no stroke of its own to keep opaque.
         ...(cell.opacity != null ? { opacity: cell.opacity } : {}),

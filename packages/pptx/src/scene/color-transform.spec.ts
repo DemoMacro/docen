@@ -4,13 +4,13 @@ import { transformColor } from "./color-transform";
 
 describe("DrawingML color transforms", () => {
   it("applies tint, shade, and source-order composition", () => {
-    expect(transformColor("FF0000", { tint: 40 })).toEqual({ color: "FF6666", alpha: 1 });
-    expect(transformColor("FF0000", { shade: 60 })).toEqual({ color: "990000", alpha: 1 });
+    expect(transformColor("FF0000", { tint: 40 })).toEqual({ color: "FFCBCB", alpha: 1 });
+    expect(transformColor("FF0000", { shade: 60 })).toEqual({ color: "CB0000", alpha: 1 });
     // 40% tint followed by 50% shade differs from the reverse composition.
     const tintShade = transformColor("FF0000", { tint: 40, shade: 50 }).color;
     const shadeTint = transformColor("FF0000", { shade: 50, tint: 40 }).color;
-    expect(tintShade).toBe("803333");
-    expect(shadeTint).toBe("B36666");
+    expect(tintShade).toBe("BC9595");
+    expect(shadeTint).toBe("E7CBCB");
   });
 
   it("evaluates hue, saturation, luminance, channel, and switch transforms", () => {

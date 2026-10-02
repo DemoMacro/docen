@@ -12,7 +12,7 @@ import type { GeometryGuide } from "@office-open/core";
 import type { ConnectorOptions, LineShapeOptions } from "@office-open/pptx";
 
 import { STRAIGHT_PRESETS, emuOf, type Xform } from "./geometry";
-import { outlineLineOf } from "./shape-fill";
+import { outlineLineOf, styleOutlineOf } from "./shape-fill";
 import type { TextFieldContext } from "./text";
 
 export function endpointMembers(
@@ -30,7 +30,8 @@ export function endpointMembers(
   const y = t.sy * Math.min(y1, y2) + t.dy;
   const w = t.sx * Math.abs(x2 - x1);
   const h = t.sy * Math.abs(y2 - y1);
-  const line = outlineLineOf(o.properties?.outline, w, h, context);
+  const outline = styleOutlineOf(o.properties?.outline, o.style?.lineReference, context);
+  const line = outlineLineOf(outline, w, h, context);
   const fill = solidFillOf(o.properties?.fill);
   const shadow = outerShadowOf(o.properties?.effects);
   const p = (v: number): string => String(Math.round(v * 100) / 100);

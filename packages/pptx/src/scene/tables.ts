@@ -1,17 +1,19 @@
 // Graphic-frame table (p:graphicFrame a:tbl) projection: the merge/coverage
 // grid walk, frame-border distribution, and the painter's normalized payload.
 
-import { fillOpacityOf, measureEmu, outlineOf, solidFillOf } from "@docen/core/geometry";
+import { fillOpacityOf, measureEmu, outlineOf } from "@docen/core/geometry";
 import {
   emuToPx,
   stackBlocks,
   TextMeasurer,
   type LayoutBorderEdge,
+  type LayoutDrawingFill,
   type LayoutDrawingMember,
 } from "@docen/layout";
 import type { CellBorderOptions, TableOptions, TableCellOptions } from "@office-open/pptx";
 
 import { emuOf, type Xform } from "./geometry";
+import { shapeFillOf } from "./shape-fill";
 import { regionRulesAt, resolveTableStyle } from "./table-style";
 import { textBlocks, type TextFieldContext } from "./text";
 
@@ -33,23 +35,58 @@ const BORDER_DASH: Record<string, string> = {
   lgDashDotDot: "dashDotDot",
 };
 
+/** A fill/color value (hex sugar or a scheme-color solid) as the bare hex
+ *  the painter's flat-color contract carries; anything else drops out. */
+function themedHexOf(value: unknown, context: TextFieldContext): string | undefined {
+  if (value == null) return undefined;
+  if (typeof value === "string" && !/^[0-9A-F]{6}$/i.test(value.replace("#", ""))) return undefined;
+  const paint = shapeFillOf(value as Parameters<typeof shapeFillOf>[0], 0, 0, {
+    themeColors: context.themeColors,
+    colorMapping: context.colorMapping,
+  });
+  const hex = typeof paint.fill === "string" ? paint.fill.replace("#", "") : undefined;
+  return hex != null && /^[0-9A-F]{6}$/i.test(hex) ? hex : undefined;
+}
+
+/** A cell's renderer-native fill: solid hexes stay compact while gradients,
+ * images, and patterns pass through as Leafer paints. */
+function cellFillOf(
+  value: TableCellOptions["fill"],
+  width: number,
+  height: number,
+  context: TextFieldContext,
+): string | LayoutDrawingFill | undefined | null {
+  if (typeof value === "object" && value.type === "none") return null;
+  return shapeFillOf(value, width, height, {
+    themeColors: context.themeColors,
+    colorMapping: context.colorMapping,
+  }).fill;
+}
+
 /** One cell border → the edge record the painter strokes. A noFill line (an
  *  explicitly erased edge) maps to nothing. */
-function borderEdgeOf(b: CellBorderOptions): LayoutBorderEdge | undefined {
+function borderEdgeOf(
+  b: CellBorderOptions,
+  context: TextFieldContext,
+): LayoutBorderEdge | undefined {
   if (b.outline) {
     const l = outlineOf(b.outline);
     if (!l) return { px: 0 };
+    const color =
+      themedHexOf(b.outline.color, context) ??
+      (l.color && /^[0-9A-F]{6}$/i.test(l.color) ? l.color : undefined);
     return {
       px: l.px,
-      ...(l.color ? { color: l.color } : {}),
+      ...(color ? { color } : {}),
       ...(l.dash && BORDER_DASH[l.dash] ? { style: BORDER_DASH[l.dash] } : {}),
     };
   }
+  const color = themedHexOf(b.color, context);
   // Sugar form: 1 pt when the width is unspecified (PowerPoint's table
   // border default).
   return {
     px: emuToPx(measureEmu(b.width) ?? 12700),
-    ...(solidFillOf(b.color) ? { color: solidFillOf(b.color) } : {}),
+    ...(color ? { color } : {}),
     ...(b.dashStyle && BORDER_DASH[b.dashStyle] ? { style: BORDER_DASH[b.dashStyle] } : {}),
   };
 }
@@ -79,7 +116,37 @@ export function tableGridOf(table: TableOptions): { origins: CellOrigin[]; colum
   table.rows.forEach((row, r) => {
     let col = 0;
     for (const cell of row.cells) {
-      if (cell.horizontalMerge === "restart" || cell.verticalMerge === "restart") {
+      const restartH = cell.horizontalMerge === "restart";
+      const restartV = cell.verticalMerge === "restart";
+      if (restartH) {
+        const coveredHere = covered[r]!.has(col);
+        while (covered[r]!.has(col)) col += 1;
+        if (!coveredHere) {
+          // An absorbed cell either duplicates a slot the origin's declared
+          // gridSpan already counts (the WPS spelling) or widens a span-less
+          // origin (the bare hMerge spelling); neither opens a new column.
+          const origin = origins.filter((o) => o.row === r && o.col + o.spanW === col).at(-1);
+          if (origin && col < origin.col + origin.spanW) {
+            // The declared span already owns this redundant continuation.
+          } else if (!origin) {
+            col += 1;
+          } else if (origin.spanW === 1) {
+            origin.spanW += 1;
+            col += 1;
+          }
+          nCols = Math.max(nCols, col);
+        }
+        continue;
+      }
+      if (restartV) {
+        // A present vMerge cell is an explicit continuation and keeps its own
+        // grid slot; coverage skipping is only for omitted continuation cells.
+        const origin = origins
+          .filter(
+            (o) => o.col === col && ((o.row <= r && r < o.row + o.spanH) || o.row + o.spanH === r),
+          )
+          .at(-1);
+        if (origin) origin.spanH = r - origin.row + 1;
         col += 1;
         nCols = Math.max(nCols, col);
         continue;
@@ -151,8 +218,9 @@ export function tableMember(
         if (block.kind !== "paragraph") continue;
         for (const inline of block.inline) {
           if (inline.kind !== "text") continue;
-          if (rules.bold) inline.style.bold = true;
-          if (rules.textColor) inline.style.color = rules.textColor;
+          if (rules.bold && inline.style.bold === undefined) inline.style.bold = true;
+          if (rules.textColor && inline.style.color === undefined)
+            inline.style.color = rules.textColor;
         }
       }
       const need =
@@ -186,11 +254,17 @@ export function tableMember(
       .filter((o) => o.row === r)
       .map(({ cell, col, spanW, spanH }) => {
         const rules = regionRulesAt(style, r, col, nRows, nCols);
-        const fill = solidFillOf(cell.fill) ?? rules.fill;
+        const explicitFill = cellFillOf(
+          cell.fill,
+          widths.slice(col, col + spanW).reduce((sum, width) => sum + width, 0),
+          declaredHeights.slice(r, r + spanH).reduce((sum, height) => sum + height, 0),
+          context,
+        );
+        const fill = explicitFill === null ? undefined : (explicitFill ?? rules.fill);
         const opacity = fillOpacityOf(cell.fill);
         const edge = (key: "top" | "right" | "bottom" | "left") => {
           const direct = cell.borders?.[key];
-          if (direct) return borderEdgeOf(direct);
+          if (direct) return borderEdgeOf(direct, context);
           if (
             (key === "top" && r === 0) ||
             (key === "right" && col + spanW >= nCols) ||
@@ -198,7 +272,7 @@ export function tableMember(
             (key === "left" && col === 0)
           ) {
             const frame = frameBorders?.[key];
-            if (frame) return borderEdgeOf(frame);
+            if (frame) return borderEdgeOf(frame, context);
           }
           return styleEdge(rules, key, r, col, spanW, spanH);
         };
@@ -242,8 +316,9 @@ export function tableMember(
               if (block.kind !== "paragraph") continue;
               for (const inline of block.inline) {
                 if (inline.kind !== "text") continue;
-                if (rules.bold) inline.style.bold = true;
-                if (rules.textColor) inline.style.color = rules.textColor;
+                if (rules.bold && inline.style.bold === undefined) inline.style.bold = true;
+                if (rules.textColor && inline.style.color === undefined)
+                  inline.style.color = rules.textColor;
               }
             }
             return blocks;
