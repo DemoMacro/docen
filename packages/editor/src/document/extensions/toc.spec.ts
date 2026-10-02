@@ -362,3 +362,65 @@ describe("heading TOC vs figure table isolation", () => {
     editor.destroy();
   });
 });
+
+describe("figure table with chapter-numbered captions", () => {
+  // The real Insert Caption field code once "Include chapter number" is on —
+  // the label regex must read past the \* and \s switches.
+  const chapterCaption = (
+    label: string,
+    text: string,
+    chapter: string,
+  ): Record<string, unknown> => ({
+    type: "paragraph",
+    attrs: { style: "Caption" },
+    content: [
+      { type: "text", text: `${label} ` },
+      {
+        type: "inlinePassthrough",
+        attrs: {
+          data: JSON.stringify({
+            simpleField: {
+              instruction: `SEQ ${label} \\* ARABIC \\s 1`,
+              cachedValue: `${chapter}-1`,
+            },
+          }),
+        },
+      },
+      { type: "text", text: `: ${text}` },
+    ],
+  });
+
+  it("keeps listing chapter-prefixed captions through insert and update", () => {
+    const editor = build(
+      docOf(
+        heading(1, "第一章"),
+        chapterCaption("Figure", "Alpha chart", "1"),
+        heading(1, "第二章"),
+        chapterCaption("Figure", "Beta chart", "2"),
+        caption("Table", "Grid"),
+      ),
+    );
+    editor.commands.setTextSelection(1);
+    expect(editor.commands["table-of-figures"](() => 4, undefined, "Figure")).toBe(true);
+    expect(entriesOf(editor).map((e) => e.text)).toEqual([
+      "Figure : Alpha chart",
+      "Figure : Beta chart",
+    ]);
+
+    // A new chapter-numbered caption joins the rebuilt table.
+    editor.commands.command(({ state, dispatch }) => {
+      const node = state.schema.nodeFromJSON(chapterCaption("Figure", "Gamma chart", "2"));
+      dispatch?.(state.tr.insert(state.doc.content.size - 1, node));
+      return true;
+    });
+    expect(editor.commands["update-figures"](() => 7)).toBe(true);
+    const entries = entriesOf(editor);
+    expect(entries.map((e) => e.text)).toEqual([
+      "Figure : Alpha chart",
+      "Figure : Beta chart",
+      "Figure : Gamma chart",
+    ]);
+    expect(entries.map((e) => e.page)).toEqual(["7", "7", "7"]);
+    editor.destroy();
+  });
+});

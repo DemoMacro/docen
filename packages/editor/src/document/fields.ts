@@ -143,8 +143,17 @@ export interface FieldContext {
   /** REF/PAGEREF targets: bookmark name → its inner text and start page. */
   bookmarks?: ReadonlyMap<string, FieldBookmark>;
   /** SEQ label → the ordinal this occurrence takes; the update walk assigns
-   *  them in document order (each label restarts at 1). */
+   *  them in document order (each label restarts at 1, and at a heading the
+   *  field's `\s` level marks). */
   sequences?: ReadonlyMap<string, number>;
+  /** SEQ `\s <level>` chapter numbers in effect at the field's position:
+   *  heading level (1-9) → the chapter number text (Word's "Include chapter
+   *  number"). Absent = no heading of that level precedes the field. */
+  chapters?: ReadonlyMap<number, string>;
+  /** Caption label → the character between the chapter number and the
+   *  sequence number (w:caption@w:sep, Word's "Use separator"). A label
+   *  without an entry uses the hyphen default. */
+  captionSeparators?: ReadonlyMap<string, string>;
   /** The rendered page frame (PAGE/NUMPAGES/SECTION/SECTIONPAGES/PAGEREF).
    *  Absent = no pagination at hand; page-dependent fields keep their cache. */
   frame?: FieldFrame;
@@ -379,6 +388,53 @@ const INFO_ALIASES: Record<string, string> = {
  *  (Word's unresolved-field behavior is the cached value, else empty). */
 export type FieldEvaluator = (field: ParsedFieldInstruction, ctx: FieldContext) => string | null;
 
+/** SEQ `\*` switch token → the number-format token {@link formatNumber}
+ *  renders, keyed by the canonical tokens the Insert Caption dialog writes
+ *  (the settings' w:numFmt values). Word's default (also the fallback for an
+ *  unknown switch) is ARABIC. */
+export const SEQ_NUMBER_FORMATS: Readonly<Record<string, string>> = {
+  ARABIC: "decimal",
+  ROMAN: "upperRoman",
+  roman: "lowerRoman",
+  ALPHABETIC: "upperLetter",
+  alphabetic: "lowerLetter",
+};
+
+/** Render one sequence ordinal under its `\*` switch — the caption number
+ *  (Word's Insert Caption format list). Word reads the switch word
+ *  case-insensitively and its casing picks the output case: Roman/ROMAN → I,
+ *  roman → i (ECMA's canonical uppercase is `Roman`); Alphabetic/ALPHABETIC →
+ *  A, alphabetic → a; Arabic is case-free decimal. An unknown switch falls
+ *  back to ARABIC. */
+export function formatSeqNumber(switchToken: string | undefined, ordinal: number): string {
+  const token = switchToken ?? "";
+  switch (token.toLowerCase()) {
+    case "roman":
+      return formatNumber(token === "roman" ? "lowerRoman" : "upperRoman", ordinal);
+    case "alphabetic":
+      return formatNumber(token === "alphabetic" ? "lowerLetter" : "upperLetter", ordinal);
+    default:
+      return formatNumber("decimal", ordinal);
+  }
+}
+
+/** The `\s` switch as a valid chapter level: an integer 1-9, or undefined —
+ *  Word ignores any other switch value. */
+export function seqChapterLevel(switchValue: string | undefined): number | undefined {
+  const level = finiteNumber(switchValue);
+  return level != null && Number.isInteger(level) && level >= 1 && level <= 9 ? level : undefined;
+}
+
+/** w:caption@w:sep token → the character between a chapter number and a SEQ
+ *  number (Word's "Use separator" list). */
+export const CAPTION_SEPARATOR_CHARS: Readonly<Record<string, string>> = {
+  hyphen: "-",
+  period: ".",
+  colon: ":",
+  emDash: "\u2014",
+  enDash: "\u2013",
+};
+
 export const FIELD_EVALUATORS: Readonly<Record<string, FieldEvaluator>> = {
   PAGE: (_field, ctx) =>
     ctx.frame?.page != null ? formatNumber(ctx.frame.pageFormat, ctx.frame.page) : null,
@@ -420,8 +476,25 @@ export const FIELD_EVALUATORS: Readonly<Record<string, FieldEvaluator>> = {
     return formatNumber(bookmark.pageFormat ?? ctx.frame?.pageFormat, bookmark.page);
   },
   SEQ: (field, ctx) => {
-    const ordinal = field.args[0] ? ctx.sequences?.get(field.args[0]) : undefined;
-    return ordinal != null ? String(ordinal) : null;
+    const label = field.args[0];
+    const ordinal = label ? ctx.sequences?.get(label) : undefined;
+    if (ordinal == null) return null;
+    const value = formatSeqNumber(field.switches["*"], ordinal);
+    // `\s <level>`: prefix the chapter number of the nearest preceding
+    // heading at that level (Word's "Include chapter number"). No heading yet
+    // → the plain sequence number, Word's no-chapter shape.
+    //
+    // Word interop deviation: Word renders a chapter-numbered caption as
+    // `STYLEREF <level> \s` + separator + `SEQ <label> \s <level>` — the
+    // STYLEREF prints the chapter, the SEQ only numbers (and resets). docen
+    // caches the chapter prefix inside the SEQ result, so an in-Word field
+    // update drops the prefix, and docen's Update All cannot refresh a real
+    // Word STYLEREF.
+    const level = seqChapterLevel(field.switches.s);
+    const chapter = level != null && label ? ctx.chapters?.get(level) : undefined;
+    if (chapter == null || !label) return value;
+    // Word's default separator is a hyphen when settings carry none.
+    return `${chapter}${ctx.captionSeparators?.get(label) ?? "-"}${value}`;
   },
   DOCPROPERTY: (field, ctx) => {
     const name = field.args[0];

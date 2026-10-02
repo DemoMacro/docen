@@ -159,6 +159,38 @@ describe("field evaluator registry", () => {
     expect(resolveField("SEQ 表", base)).toBeNull();
   });
 
+  it("formats SEQ per the \\* switch and prefixes the \\s chapter number", () => {
+    const ctx: FieldContext = {
+      ...base,
+      sequences: new Map([["Figure", 4]]),
+      chapters: new Map([[1, "2"]]),
+      captionSeparators: new Map([["Figure", ":"]]),
+    };
+    // Word's caption format list: the switch word is case-insensitive and its
+    // casing picks the output case (Roman/ROMAN → I, roman → i).
+    expect(resolveField("SEQ Figure \\* ARABIC", ctx)).toBe("4");
+    expect(resolveField("SEQ Figure \\* Arabic", ctx)).toBe("4");
+    expect(resolveField("SEQ Figure \\* roman", ctx)).toBe("iv");
+    expect(resolveField("SEQ Figure \\* Roman", ctx)).toBe("IV");
+    expect(resolveField("SEQ Figure \\* ROMAN", ctx)).toBe("IV");
+    expect(resolveField("SEQ Figure \\* alphabetic", ctx)).toBe("d");
+    expect(resolveField("SEQ Figure \\* Alphabetic", ctx)).toBe("D");
+    expect(resolveField("SEQ Figure \\* ALPHABETIC", ctx)).toBe("D");
+    // No switch (or an unknown one) is Word's ARABIC default.
+    expect(resolveField("SEQ Figure", ctx)).toBe("4");
+    expect(resolveField("SEQ Figure \\* BOGUS", ctx)).toBe("4");
+    // "Include chapter number": chapter + separator + formatted sequence.
+    expect(resolveField("SEQ Figure \\* ARABIC \\s 1", ctx)).toBe("2:4");
+    // A level with no chapter in context keeps the plain number; a malformed
+    // level is ignored entirely (Word's invalid-switch behavior).
+    expect(resolveField("SEQ Figure \\* ARABIC \\s 2", ctx)).toBe("4");
+    expect(resolveField("SEQ Figure \\* ARABIC \\s 1.5", ctx)).toBe("4");
+    // No caption separator setting → Word's hyphen default.
+    expect(
+      resolveField("SEQ Figure \\* ARABIC \\s 1", { ...ctx, captionSeparators: undefined }),
+    ).toBe("2-4");
+  });
+
   it("maps INFO arguments onto the information evaluators", () => {
     expect(resolveField("INFO Title", base)).toBe("年度报告");
     expect(resolveField("INFO NumPages", base)).toBe("12");

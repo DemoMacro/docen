@@ -1,5 +1,9 @@
-import type { ChartOptions, JSONContent } from "@docen/docx";
-import { buildCustomMultilevelLevels, nextMultilevelReference } from "@docen/docx";
+import type { ChartOptions, JSONContent, StylesOptions } from "@docen/docx";
+import {
+  buildCustomMultilevelLevels,
+  detectHeadingLevel,
+  nextMultilevelReference,
+} from "@docen/docx";
 import type { Editor } from "@docen/docx/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { NodeSelection, TextSelection } from "@tiptap/pm/state";
@@ -16,11 +20,14 @@ import type {
 import { collectListReferences } from "../extensions/commands";
 import { noteRefId } from "../extensions/notes";
 import {
+  CAPTION_SEPARATOR_CHARS,
   customPropertiesOf,
   evaluateField,
   fieldRef,
   finiteNumber,
   parseFieldInstruction,
+  seqChapterLevel,
+  SEQ_NUMBER_FORMATS,
   type FieldBookmark,
   type FieldContext,
   type FieldFrame,
@@ -42,6 +49,37 @@ interface NoteExtras {
   endnotes?: NoteEntry[];
   contentTypes?: { overrides?: Array<{ partName?: string; contentType?: string }> };
   [key: string]: unknown;
+}
+
+/** One caption label's settings entry (settings.xml `w:captions/w:caption`,
+ *  carried in documentExtras.settings) — the per-label chapter-number shape
+ *  Word persists alongside the inserted field. */
+interface CaptionSetting {
+  /** The label word (w:name). */
+  name: string;
+  /** Whether the label includes chapter numbers (w:chapNum). */
+  chapterNumber?: boolean;
+  /** The heading level chapters start at (w:heading, 1-9). */
+  heading?: number;
+  /** The chapter-number separator token (w:sep). */
+  sep?: string;
+  /** The label's number format (w:numFmt, ST_NumberFormat). */
+  numFmt?: string;
+}
+
+/** The SEQ numbering state computed in one document-order walk — what the
+ *  caption commit and Update All Fields read. */
+interface SeqWalk {
+  /** Field-atom position → the ordinal this occurrence takes. */
+  ordinals: Map<number, number>;
+  /** Field-atom position → the chapter number in effect for its `\s` level
+   *  (only when a heading of that level precedes the field). */
+  chapters: Map<number, string>;
+  /** Label → occurrences since its last reset (the state at the walk's end;
+   *  with a `before` bound, at that position). */
+  counts: Map<string, number>;
+  /** Heading level (1-9) → its chapter count at the walk's end. */
+  chapterCounts: number[];
 }
 
 /** The dialog commands' view of the host — resolved per call so the controller
@@ -508,25 +546,122 @@ export class DialogCommands {
     return max + 1;
   }
 
-  /** The next SEQ number for a caption label — one past the SEQ fields with
-   *  the same label already in the document (each label's sequence restarts
-   *  at 1; the fields carry the cached results the projection paints). */
-  #nextSeqNumber(target: Editor, label: string): number {
-    let count = 0;
-    target.state.doc.descendants((node) => {
-      if (node.type.name !== "inlinePassthrough") return true;
-      try {
-        const data = JSON.parse(String(node.attrs.data ?? "{}")) as {
-          simpleField?: { instruction?: string };
-        };
-        const tokens = (data.simpleField?.instruction ?? "").trim().split(/\s+/);
-        if (tokens[0]?.toUpperCase() === "SEQ" && tokens[1] === label) count++;
-      } catch {
-        // opaque verbatim blobs without field data — skip
+  /** The SEQ counters in one document-order walk. Word's rules: a heading
+   *  advances its level's chapter count (deeper levels reset), and a label
+   *  whose SEQ field carries `\s <level>` restarts its sequence at every
+   *  heading at or above that level — so captions renumber from the document
+   *  itself, not from their caches. The reset lands on the heading, before
+   *  any later field is visited: a `before` bound (the caption commit's
+   *  insertion point, F9's caret) must still see the pending reset of its
+   *  chapter, or the first caption of a new chapter would continue the
+   *  previous count.
+   *
+   *  The chapter number is the heading's occurrence ordinal: the runtime model
+   *  carries no heading number (list numbering is the projection's).
+   *  Continuous heading numbering matches Word; multilevel prefixes (`1.1`)
+   *  and unnumbered headings differ from Word's STYLEREF rendering. */
+  #seqWalk(editor: Editor, before?: number): SeqWalk {
+    const styles = (editor.state.doc.attrs as { styles?: StylesOptions }).styles;
+    const ordinals = new Map<number, number>();
+    const chapters = new Map<number, string>();
+    const counts = new Map<string, number>();
+    const chapterCounts = Array.from({ length: 10 }, () => 0);
+    // Label → the `\s` level of its most recent switched field: a heading at
+    // or above that level restarts the label's sequence. Recorded from the
+    // fields visited so far, so a heading resets every label whose sequence
+    // has already begun.
+    const resetLevels = new Map<string, number>();
+    editor.state.doc.descendants((node, pos) => {
+      if (before != null && pos >= before) return false;
+      if (node.type.name === "paragraph") {
+        const level = detectHeadingLevel(
+          {
+            heading: (node.attrs.heading as string) || undefined,
+            style: (node.attrs.style as string) || undefined,
+            outlineLevel: node.attrs.outlineLevel as number | undefined,
+          },
+          styles,
+        );
+        if (level != null) {
+          chapterCounts[level] = (chapterCounts[level] ?? 0) + 1;
+          for (let l = level + 1; l <= 9; l++) chapterCounts[l] = 0;
+          for (const [label, resetLevel] of resetLevels) {
+            if (resetLevel >= level) counts.delete(label);
+          }
+        }
+        return true;
       }
+      if (node.type.name !== "inlinePassthrough") return true;
+      const data = node.attrs.data;
+      if (typeof data !== "string") return true;
+      let field: ReturnType<typeof parseFieldInstruction>;
+      try {
+        const branch = JSON.parse(data) as Record<string, unknown>;
+        const ref = fieldRef(branch);
+        if (!ref?.instruction) return true;
+        field = parseFieldInstruction(ref.instruction);
+      } catch {
+        return true;
+      }
+      if (field.name !== "SEQ") return true;
+      const label = field.args[0];
+      if (!label) return true;
+      const level = seqChapterLevel(field.switches.s);
+      if (level != null) resetLevels.set(label, level);
+      const ordinal = (counts.get(label) ?? 0) + 1;
+      counts.set(label, ordinal);
+      ordinals.set(pos, ordinal);
+      if (level != null && chapterCounts[level]! > 0)
+        chapters.set(pos, String(chapterCounts[level]));
       return true;
     });
-    return count + 1;
+    return { ordinals, chapters, counts, chapterCounts };
+  }
+
+  /** The document's caption settings (settings.xml `w:captions`) — the
+   *  per-label chapter-number shape the caption commit persists. */
+  #captionSettings(editor: Editor): CaptionSetting[] {
+    const extras = (editor.state.doc.attrs ?? {}) as {
+      documentExtras?: { settings?: { captions?: { captions?: unknown } } };
+    };
+    const list = extras.documentExtras?.settings?.captions?.captions;
+    if (!Array.isArray(list)) return [];
+    return list.filter(
+      (entry): entry is CaptionSetting =>
+        !!entry && typeof entry === "object" && typeof (entry as CaptionSetting).name === "string",
+    );
+  }
+
+  /** The document's caption separators as characters: label → separator
+   *  (Word's "Use separator"). Labels with no setting keep the evaluator's
+   *  hyphen default. */
+  #captionSeparators(editor: Editor): ReadonlyMap<string, string> | undefined {
+    const map = new Map<string, string>();
+    for (const setting of this.#captionSettings(editor)) {
+      const char = setting.sep ? CAPTION_SEPARATOR_CHARS[setting.sep] : undefined;
+      if (char) map.set(setting.name, char);
+    }
+    return map.size > 0 ? map : undefined;
+  }
+
+  /** The caption settings with one label's entry upserted (w:caption) — the
+   *  rest of documentExtras/settings passes through verbatim. */
+  #patchCaptionSettings(editor: Editor, entry: CaptionSetting): Record<string, unknown> {
+    const extras = {
+      ...(editor.state.doc.attrs.documentExtras as Record<string, unknown> | undefined),
+    };
+    const settings = { ...(extras.settings as Record<string, unknown> | undefined) };
+    const captions = { ...(settings.captions as Record<string, unknown> | undefined) };
+    const list = Array.isArray(captions.captions)
+      ? ([...captions.captions] as Record<string, unknown>[])
+      : [];
+    const index = list.findIndex((c) => c?.name === entry.name);
+    if (index >= 0) list[index] = { ...list[index], ...entry };
+    else list.push({ ...entry });
+    captions.captions = list;
+    settings.captions = captions;
+    extras.settings = settings;
+    return extras;
   }
 
   /** The document's referenceable bookmarks for the cross-reference dialog —
@@ -581,17 +716,33 @@ export class DialogCommands {
   /** Caption dialog 确定 — seed a Caption-styled paragraph beside the caret's
    *  paragraph carrying the next SEQ field (cached, so the projection paints
    *  the number without field evaluation) wrapped in a _Ref bookmark pair
-   *  (the cross-reference target), in one transaction. The Caption style
-   *  definition joins the document styles when absent (compile passes
-   *  doc.attrs.styles straight through). */
+   *  (the cross-reference target), in one transaction. The field code carries
+   *  the picked number format (`\*`) and, with "Include chapter number", the
+   *  heading level (`\s`); the separator lands in the document's caption
+   *  settings (settings.xml `w:captions`), where the SEQ evaluator reads it —
+   *  Word's split between field code and document setting.
+   *
+   *  Word interop deviation: Word writes the chapter as a separate
+   *  `STYLEREF <level> \s` field and caches only the sequence number in the
+   *  SEQ result; docen folds the chapter prefix into the SEQ cache (the
+   *  projection paints a single field atom — see the SEQ evaluator). An
+   *  in-Word update therefore drops the prefix, and Update All cannot refresh
+   *  a real Word STYLEREF.
+   *
+   *  The Caption style definition joins the document styles when absent
+   *  (compile passes doc.attrs.styles straight through). */
   readonly onCaptionOk = (event: Event): void => {
-    const { label, text, position, excludeLabel } =
+    const { label, text, position, excludeLabel, chapterNumber, heading, sep, format } =
       (
         event as CustomEvent<{
           label?: string;
           text?: string;
           position?: string;
           excludeLabel?: boolean;
+          chapterNumber?: boolean;
+          heading?: number;
+          sep?: string;
+          format?: string;
         }>
       ).detail ?? {};
     const target = this.#target();
@@ -599,7 +750,35 @@ export class DialogCommands {
     const { state } = target;
     const $from = state.selection.$from;
     if ($from.parent.type.name !== "paragraph") return;
-    const seq = this.#nextSeqNumber(target, label);
+    const insertPos = position === "above" ? $from.before($from.depth) : $from.after($from.depth);
+    const level =
+      chapterNumber &&
+      typeof heading === "number" &&
+      Number.isInteger(heading) &&
+      heading >= 1 &&
+      heading <= 9
+        ? heading
+        : undefined;
+    const numberFormat = format && SEQ_NUMBER_FORMATS[format] ? format : "ARABIC";
+    const separatorToken = sep && CAPTION_SEPARATOR_CHARS[sep] ? sep : "hyphen";
+    const instruction = `SEQ ${label} \\* ${numberFormat}${level != null ? ` \\s ${level}` : ""}`;
+    // The sequence state at the insertion point — reset-aware, so a caption
+    // inserted mid-document carries the ordinal it will keep. The separator
+    // rides the context directly: the settings write below lands after the
+    // cached value is evaluated.
+    const walk = this.#seqWalk(target, insertPos);
+    const seq = (walk.counts.get(label) ?? 0) + 1;
+    const chapter =
+      level != null && walk.chapterCounts[level]! > 0
+        ? String(walk.chapterCounts[level])
+        : undefined;
+    const cachedValue =
+      evaluateField(instruction, {
+        ...this.#fieldBase(target),
+        captionSeparators: new Map([[label, CAPTION_SEPARATOR_CHARS[separatorToken]!]]),
+        sequences: new Map([[label, seq]]),
+        ...(chapter != null ? { chapters: new Map([[level!, chapter]]) } : {}),
+      }) ?? String(seq);
     const bookmarkId = this.nextBookmarkId(target);
     const name = `_Ref${String(bookmarkId).padStart(8, "0")}`;
     const seed = (data: object): JSONContent =>
@@ -616,15 +795,20 @@ export class DialogCommands {
       content: [
         seed({ bookmarkStart: { id: bookmarkId, name } }),
         ...(excludeLabel ? [] : [{ type: "text", text: `${label} ` }]),
-        seed({
-          simpleField: { instruction: `SEQ ${label} \\* ARABIC`, cachedValue: String(seq) },
-        }),
+        seed({ simpleField: { instruction, cachedValue } }),
         seed({ bookmarkEnd: { id: bookmarkId } }),
         ...(text ? [{ type: "text", text: `: ${text}` }] : []),
       ],
     };
     const styles = { ...((state.doc.attrs.styles ?? {}) as Record<string, unknown>) };
     const paragraphStyles = (styles.paragraphStyles ?? []) as { id?: string }[];
+    const nextExtras = this.#patchCaptionSettings(target, {
+      name: label,
+      chapterNumber: level != null,
+      ...(level != null ? { heading: level } : {}),
+      sep: separatorToken,
+      numFmt: SEQ_NUMBER_FORMATS[numberFormat] ?? "decimal",
+    });
     target
       .chain()
       .command(({ tr }) => {
@@ -646,12 +830,10 @@ export class DialogCommands {
             }),
           );
         }
-        // Doc attrs sit outside the position space, so the doc-attr step and
+        tr.step(new DocAttrStep("documentExtras", nextExtras));
+        // Doc attrs sit outside the position space, so the doc-attr steps and
         // the insertion below compose in either order.
-        tr.insert(
-          position === "above" ? $from.before($from.depth) : $from.after($from.depth),
-          target.schema.nodeFromJSON(caption),
-        );
+        tr.insert(insertPos, target.schema.nodeFromJSON(caption));
         return true;
       })
       .run();
@@ -986,7 +1168,10 @@ export class DialogCommands {
     const editor = this.#target();
     const hit = this.fieldTarget();
     if (!editor || !hit) return;
-    const value = evaluateField(hit.ref.instruction ?? "", this.#fieldContext(editor, hit.pos));
+    const value = evaluateField(
+      hit.ref.instruction ?? "",
+      this.#fieldContext(editor, hit.pos, hit.ref.instruction),
+    );
     if (value == null) return;
     const patch = hit.ref.kind === "simpleField" ? { cachedValue: value } : { result: value };
     const next = this.#patchField(hit.branch, hit.ref.kind, patch);
@@ -997,9 +1182,12 @@ export class DialogCommands {
   /** Update All Fields (Word's select-all + F9): re-derive every field atom's
    *  cached value in document order and commit the changes in one transaction.
    *  SEQ occurrences take their own ordinal per label (the caption sequence),
-   *  REF/PAGEREF resolve through the bookmark table, and page-dependent fields
-   *  use the host's pinned pagination when it exists. Returns the number of
-   *  fields whose cache changed.
+   *  restarting at each heading their `\s` switch names; `\*` formats the
+   *  number and `\s` prefixes the chapter number, so a deleted or moved
+   *  caption renumbers from the document itself. REF/PAGEREF resolve through
+   *  the bookmark table, and page-dependent fields use the host's pinned
+   *  pagination when it exists. Returns the number of fields whose cache
+   *  changed.
    *
    *  Limitation: a complex field whose result is structured (`resultRunsXml`
    *  — TOC entries and nested fields) is patched on its flat `result` only;
@@ -1010,7 +1198,7 @@ export class DialogCommands {
     const editor = this.#target();
     if (!editor) return 0;
     const base = this.#fieldBase(editor);
-    const sequences = new Map<string, number>();
+    const seq = this.#seqWalk(editor);
     const changes: { pos: number; data: string }[] = [];
     editor.state.doc.descendants((node, pos) => {
       if (node.type.name !== "inlinePassthrough") return true;
@@ -1027,10 +1215,12 @@ export class DialogCommands {
       const field = parseFieldInstruction(ref.instruction);
       const context: FieldContext = { ...base, frame: this.#frameAt(editor, pos) };
       if (field.name === "SEQ") {
-        const label = field.args[0] ?? "";
-        const ordinal = (sequences.get(label) ?? 0) + 1;
-        sequences.set(label, ordinal);
-        context.sequences = new Map([[label, ordinal]]);
+        const label = field.args[0];
+        const ordinal = label ? seq.ordinals.get(pos) : undefined;
+        if (label && ordinal != null) context.sequences = new Map([[label, ordinal]]);
+        const level = seqChapterLevel(field.switches.s);
+        const chapter = level != null ? seq.chapters.get(pos) : undefined;
+        if (level != null && chapter != null) context.chapters = new Map([[level, chapter]]);
       }
       const value = evaluateField(ref.instruction, context);
       if (value == null || value === ref.result) return true;
@@ -1078,7 +1268,10 @@ export class DialogCommands {
         const branch = JSON.parse(data) as Record<string, unknown>;
         const ref = fieldRef(branch);
         if (!ref || ref.kind === "formField") return;
-        const value = evaluateField(instruction, this.#fieldContext(editor)) ?? ref.result ?? "";
+        const value =
+          evaluateField(instruction, this.#fieldContext(editor, pos, instruction)) ??
+          ref.result ??
+          "";
         const patch =
           ref.kind === "simpleField"
             ? { instruction, cachedValue: value }
@@ -1100,7 +1293,11 @@ export class DialogCommands {
         data: JSON.stringify({
           simpleField: {
             instruction,
-            cachedValue: evaluateField(instruction, this.#fieldContext(editor)) ?? "",
+            cachedValue:
+              evaluateField(
+                instruction,
+                this.#fieldContext(editor, editor.state.selection.from, instruction),
+              ) ?? "",
           },
         }),
       },
@@ -1123,10 +1320,11 @@ export class DialogCommands {
   /** The evaluation context slices every field update shares: the doc's core
    *  properties (AUTHOR/TITLE/SUBJECT/KEYWORDS/COMMENTS/CREATEDATE/…), the
    *  filename (FILENAME), the core revision (REVNUM), custom properties
-   *  (DOCPROPERTY), the bookmark table (REF/PAGEREF) and the live word/char
-   *  totals (NUMWORDS/NUMCHARS). The "now" clock is per call — an update
-   *  command is a moment, not a render. */
-  #fieldBase(editor: Editor): Omit<FieldContext, "frame" | "sequences"> {
+   *  (DOCPROPERTY), the bookmark table (REF/PAGEREF), the caption separators
+   *  (SEQ chapter numbering) and the live word/char totals
+   *  (NUMWORDS/NUMCHARS). The "now" clock is per call — an update command is a
+   *  moment, not a render. */
+  #fieldBase(editor: Editor): Omit<FieldContext, "frame" | "sequences" | "chapters"> {
     const doc = editor.state.doc;
     const attrs = (doc.attrs ?? {}) as {
       core?: Record<string, unknown>;
@@ -1136,6 +1334,7 @@ export class DialogCommands {
     const revision = finiteNumber(attrs.core?.revision);
     const filename = this.host.filename?.();
     const customProperties = customPropertiesOf(attrs.documentExtras);
+    const captionSeparators = this.#captionSeparators(editor);
     return {
       now: new Date(),
       core: attrs.core ?? {},
@@ -1144,6 +1343,7 @@ export class DialogCommands {
       ...(filename != null ? { filename } : {}),
       ...(revision != null ? { revision } : {}),
       ...(customProperties ? { customProperties } : {}),
+      ...(captionSeparators ? { captionSeparators } : {}),
       bookmarks: this.#bookmarks(editor),
     };
   }
@@ -1181,9 +1381,25 @@ export class DialogCommands {
   /** Field evaluation context from the live document — the body text backs
    *  NUMWORDS/NUMCHARS (the status bar's counters; notes stay out, Word's
    *  default), the core properties the document attrs carry, and the host's
-   *  pinned pagination for the page-dependent fields. */
-  #fieldContext(editor: Editor, pos?: number): FieldContext {
-    return { ...this.#fieldBase(editor), frame: this.#frameAt(editor, pos) };
+   *  pinned pagination for the page-dependent fields. With an instruction,
+   *  a SEQ field also gets its live ordinal and `\s` chapter number at `pos`
+   *  (the position-bound walk applies the chapter's pending reset, so F9 and
+   *  edit agree with Update All Fields). */
+  #fieldContext(editor: Editor, pos?: number, instruction?: string): FieldContext {
+    const context: FieldContext = {
+      ...this.#fieldBase(editor),
+      frame: this.#frameAt(editor, pos),
+    };
+    if (!instruction) return context;
+    const field = parseFieldInstruction(instruction);
+    const label = field.name === "SEQ" ? field.args[0] : undefined;
+    if (!label) return context;
+    const walk = this.#seqWalk(editor, pos ?? editor.state.selection.from);
+    context.sequences = new Map([[label, (walk.counts.get(label) ?? 0) + 1]]);
+    const level = seqChapterLevel(field.switches.s);
+    if (level != null && walk.chapterCounts[level]! > 0)
+      context.chapters = new Map([[level, String(walk.chapterCounts[level])]]);
+    return context;
   }
 
   /** The branch with the field's flat shape patched (simpleField's
