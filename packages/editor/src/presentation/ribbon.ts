@@ -13,6 +13,7 @@ import type {
   RibbonControlOrLayout,
   RibbonControlSize,
   RibbonGroup,
+  RibbonInput,
   RibbonMenuItem,
   RibbonSplit,
   RibbonTab,
@@ -23,7 +24,7 @@ const cmd = (name: string): string => `ppt.ribbon.cmd.${name}`;
 const btn = (
   event: string,
   label: string,
-  opts: { icon?: string; size?: RibbonControlSize; iconOnly?: boolean } = {},
+  opts: { value?: string; icon?: string; size?: RibbonControlSize; iconOnly?: boolean } = {},
 ): RibbonButton => ({ type: "button", event, label, ...opts });
 
 const splitBtn = (
@@ -32,6 +33,12 @@ const splitBtn = (
   items: RibbonMenuItem[],
   opts: { icon?: string; size?: RibbonControlSize; iconOnly?: boolean } = {},
 ): RibbonSplit => ({ type: "split", event, label, items, ...opts });
+
+const input = (event: string, value: string): RibbonInput => ({
+  type: "input",
+  event,
+  value,
+});
 
 const group = (id: string, controls: readonly RibbonControlOrLayout[]): RibbonGroup => ({
   id,
@@ -220,6 +227,193 @@ export const ANIMATION_PRESETS: ReadonlySet<SlideAnimation["type"]> = new Set(AN
 
 const animationItems = (): RibbonMenuItem[] =>
   ANIMATIONS.map((value) => ({ text: `ppt.ribbon.animate.${value}`, value }));
+
+/** The style flags PowerPoint's Table Design checkbox grid exposes. */
+const TABLE_LOOK_FLAGS = [
+  "firstRow",
+  "lastRow",
+  "firstCol",
+  "lastCol",
+  "bandRow",
+  "bandCol",
+] as const;
+
+/** Built-in DrawingML style GUIDs the projector already resolves; values are
+ *  passed straight to the official `tableStyleId` field. */
+const TABLE_STYLES = [
+  { value: "{2D5ABB26-0587-4C30-8999-92F81FD0307C}", text: "ppt.ribbon.tableStyle.none" },
+  { value: "{5940675A-B579-460E-94D1-54222C63F5DA}", text: "ppt.ribbon.tableStyle.grid" },
+  { value: "{9D7B26C5-4107-4FEC-AEDC-1716B250A1EF}", text: "ppt.ribbon.tableStyle.light1" },
+  { value: "{5C22544A-7EE6-4342-B048-85BDC9FD1C3A}", text: "ppt.ribbon.tableStyle.medium2" },
+  { value: "{5202B0CA-FC54-4496-8BCA-5EF66A818D29}", text: "ppt.ribbon.tableStyle.dark2" },
+] satisfies RibbonMenuItem[];
+
+const TEXT_DIRECTIONS = [
+  { text: "ppt.ribbon.textDirection.horizontal", value: "horizontal" },
+  { text: "ppt.ribbon.textDirection.rotate90", value: "vertical" },
+  { text: "ppt.ribbon.textDirection.rotate270", value: "vertical270" },
+  { text: "ppt.ribbon.textDirection.stacked", value: "wordArtVertical" },
+] satisfies RibbonMenuItem[];
+
+const CELL_MARGINS = [
+  { text: "ppt.ribbon.cellMargin.normal", value: "normal" },
+  { text: "ppt.ribbon.cellMargin.none", value: "none" },
+  { text: "ppt.ribbon.cellMargin.narrow", value: "narrow" },
+  { text: "ppt.ribbon.cellMargin.wide", value: "wide" },
+] satisfies RibbonMenuItem[];
+
+export const TABLE_STYLE_IDS: ReadonlySet<string> = new Set(
+  TABLE_STYLES.map((style) => style.value),
+);
+
+const tableBorderItems = (): RibbonMenuItem[] =>
+  ["all", "outside", "none", "top", "bottom", "left", "right"].map((value) => ({
+    text: `ppt.ribbon.tableBorder.${value}`,
+    value,
+  }));
+
+/** PowerPoint's contextual Table Design tab. The host appends/removes it as
+ *  the selection enters/leaves a table, exactly like the product tab set. */
+export function tableDesignTab(): RibbonTab {
+  return {
+    id: "ppt-table-design",
+    label: "ppt.ribbon.tab.table-design",
+    contextual: true,
+    groups: [
+      group("table-style-options", [
+        {
+          type: "layout",
+          layout: "grid",
+          controls: TABLE_LOOK_FLAGS.map((flag) => ({
+            type: "checkbox",
+            event: "toggle-table-look",
+            value: flag,
+            label: `ppt.ribbon.tableLook.${flag}`,
+          })),
+        },
+      ]),
+      group("table-styles", [splitBtn("table-style", cmd("table-style"), [...TABLE_STYLES])]),
+      group("table-shading", [
+        {
+          type: "color-picker",
+          event: "cell-shading",
+          label: cmd("cell-shading"),
+          icon: "shading",
+          defaultColor: "FFFF00",
+          size: "large",
+        },
+      ]),
+      group("table-borders", [
+        splitBtn("table-borders", cmd("table-borders"), tableBorderItems(), { icon: "border" }),
+      ]),
+    ],
+  };
+}
+
+/** PowerPoint's contextual Table Layout tab: the structural commands that
+ *  operate on the live cell selection. */
+export function tableLayoutTab(): RibbonTab {
+  return {
+    id: "ppt-table-layout",
+    label: "ppt.ribbon.tab.table-layout",
+    contextual: true,
+    groups: [
+      group("rows-columns", [
+        columnOf(
+          rowOf(
+            btn("insert-above", cmd("insert-above"), { icon: "row-insert-above", iconOnly: true }),
+            btn("insert-below", cmd("insert-below"), { icon: "row-insert-below", iconOnly: true }),
+          ),
+          rowOf(
+            btn("insert-left", cmd("insert-left"), { icon: "column-insert-left", iconOnly: true }),
+            btn("insert-right", cmd("insert-right"), {
+              icon: "column-insert-right",
+              iconOnly: true,
+            }),
+          ),
+        ),
+      ]),
+      group("delete", [
+        splitBtn(
+          "delete-table",
+          cmd("delete-table"),
+          [
+            { text: "ppt.ribbon.tableDelete.rows", value: "rows" },
+            { text: "ppt.ribbon.tableDelete.columns", value: "columns" },
+            { text: "ppt.ribbon.tableDelete.table", value: "table" },
+          ],
+          { icon: "delete-slide" },
+        ),
+      ]),
+      group("merge", [
+        btn("merge-cells", cmd("merge-cells"), { icon: "merge-cells" }),
+        btn("split-cells", cmd("split-cells"), { icon: "split-cells" }),
+      ]),
+      group("cell-size", [
+        input("cell-height", ""),
+        input("cell-width", ""),
+        rowOf(
+          btn("distribute-rows", cmd("distribute-rows"), {
+            icon: "distribute-rows",
+            iconOnly: true,
+          }),
+          btn("distribute-columns", cmd("distribute-columns"), {
+            icon: "distribute-columns",
+            iconOnly: true,
+          }),
+        ),
+      ]),
+      group("cell-alignment", [
+        rowOf(
+          btn("table-align", cmd("align-left"), {
+            value: "left",
+            icon: "align-left",
+            iconOnly: true,
+          }),
+          btn("table-align", cmd("align-center"), {
+            value: "center",
+            icon: "align-center",
+            iconOnly: true,
+          }),
+          btn("table-align", cmd("align-right"), {
+            value: "right",
+            icon: "align-right",
+            iconOnly: true,
+          }),
+        ),
+        rowOf(
+          btn("table-align", cmd("align-top"), { value: "top", icon: "align-top", iconOnly: true }),
+          btn("table-align", cmd("align-middle"), {
+            value: "middle",
+            icon: "align-middle",
+            iconOnly: true,
+          }),
+          btn("table-align", cmd("align-bottom"), {
+            value: "bottom",
+            icon: "align-bottom",
+            iconOnly: true,
+          }),
+        ),
+        rowOf(
+          splitBtn("text-direction", cmd("text-direction"), TEXT_DIRECTIONS, {
+            icon: "text-direction",
+            iconOnly: true,
+          }),
+          splitBtn("cell-margins", cmd("cell-margins"), CELL_MARGINS, {
+            icon: "cell-margin",
+            iconOnly: true,
+          }),
+        ),
+      ]),
+      group("table-arrange", [
+        rowOf(
+          btn("bring-front", cmd("bring-front"), { icon: "bring-front", iconOnly: true }),
+          btn("send-back", cmd("send-back"), { icon: "send-back", iconOnly: true }),
+        ),
+      ]),
+    ],
+  };
+}
 
 export function presentationRibbonTabs(): RibbonTab[] {
   return [

@@ -647,6 +647,7 @@ export function makeTable(slideWidthPx: number, slideHeightPx: number): SlideChi
       width: emu(width),
       height: emu(rowHeight * rows),
       firstRow: true,
+      bandRow: true,
       columnWidths: Array.from({ length: cols }, () => emu(width / cols)),
       tableStyleId: "{5C22544A-7EE6-4342-B048-85BDC9FD1C3A}",
       rows: Array.from({ length: rows }, () => ({

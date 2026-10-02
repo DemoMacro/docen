@@ -13,11 +13,9 @@ export function paintTable(
 ): void {
   // w:jc: the whole grid (borders included) shifts as one box.
   x += table.offsetXPx ?? 0;
-  // The shared walk: boundaries, the occupancy grid, and every cell's
-  // content origin — the caret map consumes the same tableGridOf output.
-  const { colX, rowY, occ, cells } = tableGridOf(table);
-  const nRows = table.rows.length;
-  const nCols = table.columnWidthsPx.length;
+  // The shared walk: boundaries and every cell's content origin — the caret
+  // map consumes the same tableGridOf output.
+  const { colX, rowY, cells } = tableGridOf(table);
 
   for (const p of cells) {
     // Shading covers the merged box; content anchors to the start row (the
@@ -43,11 +41,50 @@ export function paintTable(
     }
   }
 
-  // Collapsed borders: every shared boundary resolves to its heaviest
-  // candidate — the two adjacent cells' own edges and the table-level default
-  // (rim edges for the grid's outline, inside edges between cells). Word's
-  // conflict rule is width-first; ties keep the earlier candidate.
-  const tb = table.borders;
+  drawCollapsedTableBorders(tree, x, y, colX, rowY, cells, table.borders);
+}
+
+/** Collapsed borders shared by flow and graphic-frame tables: every boundary
+ *  resolves to its heaviest candidate — the two adjacent cells' own edges and
+ *  the table-level default (rim edges for the grid's outline, inside edges
+ *  between cells). Word's conflict rule is width-first; ties keep the earlier
+ *  candidate. Contiguous slots with the same winner merge into one stroke. */
+export function drawCollapsedTableBorders(
+  tree: IGroup,
+  x: number,
+  y: number,
+  colX: readonly number[],
+  rowY: readonly number[],
+  cells: readonly {
+    row: number;
+    col: number;
+    spanW: number;
+    spanH: number;
+    borders?: Partial<Record<"top" | "right" | "bottom" | "left", LayoutBorderEdge>>;
+  }[],
+  tableBorders?: {
+    top?: LayoutBorderEdge;
+    right?: LayoutBorderEdge;
+    bottom?: LayoutBorderEdge;
+    left?: LayoutBorderEdge;
+    insideHorizontal?: LayoutBorderEdge;
+    insideVertical?: LayoutBorderEdge;
+  },
+): void {
+  const nRows = rowY.length - 1;
+  const nCols = colX.length - 1;
+  const occ = Array.from({ length: nRows }, (_, row) =>
+    Array.from({ length: nCols }, (_, col) =>
+      cells.find(
+        (cell) =>
+          cell.row <= row &&
+          row < cell.row + cell.spanH &&
+          cell.col <= col &&
+          col < cell.col + cell.spanW,
+      ),
+    ),
+  );
+  const tb = tableBorders;
   /** A horizontal boundary (row edge `b`) at column `c`: the cell above ends
    *  here, the cell below starts here. */
   const pickH = (b: number, c: number): LayoutBorderEdge | undefined => {
@@ -86,7 +123,6 @@ export function paintTable(
             : tb?.insideVertical;
     return heaviest(leftEdge, heaviest(rightEdge, def));
   };
-  // Contiguous boundary slots with an identical winner merge into one stroke.
   for (let b = 0; b <= nRows; b++) {
     let segStart = -1;
     let seg: LayoutBorderEdge | undefined;
@@ -94,7 +130,7 @@ export function paintTable(
       const winner = c < nCols ? pickH(b, c) : undefined;
       if (seg && winner && sameEdge(seg, winner)) continue;
       if (seg) {
-        drawEdge(tree, x + colX[segStart], y + rowY[b], colX[c] - colX[segStart], true, seg);
+        drawEdge(tree, x + colX[segStart]!, y + rowY[b]!, colX[c]! - colX[segStart]!, true, seg);
       }
       seg = winner && edgeWeight(winner) > 0 ? winner : undefined;
       segStart = seg ? c : -1;
@@ -107,7 +143,7 @@ export function paintTable(
       const winner = r < nRows ? pickV(b, r) : undefined;
       if (seg && winner && sameEdge(seg, winner)) continue;
       if (seg) {
-        drawEdge(tree, x + colX[b], y + rowY[segStart], rowY[r] - rowY[segStart], false, seg);
+        drawEdge(tree, x + colX[b]!, y + rowY[segStart]!, rowY[r]! - rowY[segStart]!, false, seg);
       }
       seg = winner && edgeWeight(winner) > 0 ? winner : undefined;
       segStart = seg ? r : -1;

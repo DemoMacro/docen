@@ -448,6 +448,8 @@ describe("makeTable", () => {
     const widthEmu = Math.round(1280 * 0.6 * EMU_PER_PX);
     expect(table.columnWidths).toEqual([widthEmu / 3, widthEmu / 3, widthEmu / 3]);
     expect(table.rows).toHaveLength(3);
+    expect(table.firstRow).toBe(true);
+    expect(table.bandRow).toBe(true);
     expect(table.rows[0]!.cells).toHaveLength(3);
     expect(table.x).toBe(Math.round(((1280 - 768) / 2) * EMU_PER_PX));
   });

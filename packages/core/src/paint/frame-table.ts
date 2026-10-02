@@ -5,11 +5,11 @@ import {
   type LayoutBlock,
   type LayoutBorderEdge,
 } from "@docen/layout";
-import { Rect, type IGroup } from "leafer-ui";
+import { Group, Rect, type IGroup } from "leafer-ui";
 
 import { paintBlock } from "../painter";
 import type { PaintContext } from "./context";
-import { drawEdge } from "./table";
+import { drawCollapsedTableBorders } from "./table";
 
 // ── graphic-frame table painter ──
 //
@@ -18,8 +18,8 @@ import { drawEdge } from "./table";
 // laid text blocks (consumed structurally, like the chart payload; this
 // package holds no office-open types). PowerPoint's model is explicit
 // geometry: column widths are fixed, a row height is a minimum the content
-// grows, and every cell paints its own declared edges (no Word-style border
-// collapse — the later cell's edge sits on top).
+// grows, and adjacent cell edges resolve through the same collapsed-border
+// painter as flow tables.
 
 interface FrameCell {
   col: number;
@@ -30,6 +30,7 @@ interface FrameCell {
   opacity?: number;
   borders?: Partial<Record<"top" | "right" | "bottom" | "left", LayoutBorderEdge>>;
   anchor?: "top" | "center" | "bottom";
+  textVertical?: "vertical" | "vertical270";
   marginsPx: { left: number; top: number; right: number; bottom: number };
   blocks: LayoutBlock[];
 }
@@ -71,15 +72,22 @@ export function paintFrameTable(
     heightPx: number;
   }[] = [];
   const rowNeed = rows.map(() => 0);
+  const declaredBandHeight = (cell: FrameCell): number =>
+    rows
+      .slice(cell.row, Math.min(cell.row + cell.spanH, rows.length))
+      .reduce((sum, row) => sum + row.heightPx, 0);
   for (const row of rows) {
     for (const cell of row.cells) {
-      const innerWidth = Math.max(
-        1,
-        (colX[cell.col + cell.spanW] ?? colX[colX.length - 1]!) -
-          colX[cell.col]! -
-          cell.marginsPx.left -
-          cell.marginsPx.right,
-      );
+      const bandHeight = declaredBandHeight(cell);
+      const innerWidth = cell.textVertical
+        ? Math.max(1, bandHeight - cell.marginsPx.top - cell.marginsPx.bottom)
+        : Math.max(
+            1,
+            (colX[cell.col + cell.spanW] ?? colX[colX.length - 1]!) -
+              colX[cell.col]! -
+              cell.marginsPx.left -
+              cell.marginsPx.right,
+          );
       const stacked = stackBlocks(cell.blocks, innerWidth, undefined, measurer);
       const need = stacked.heightPx + cell.marginsPx.top + cell.marginsPx.bottom;
       const last = Math.min(cell.row + cell.spanH - 1, rows.length - 1);
@@ -114,30 +122,60 @@ export function paintFrameTable(
   }
   for (const { cell, innerWidth, stack, heightPx } of laid) {
     const bandHeight = spanEnd(rowY, cell.row, cell.spanH) - rowY[cell.row]!;
+    const bandWidth = spanEnd(colX, cell.col, cell.spanW) - colX[cell.col]!;
     const slack = bandHeight - cell.marginsPx.top - cell.marginsPx.bottom - heightPx;
     const lead =
       slack > 0 ? (cell.anchor === "bottom" ? slack : cell.anchor === "center" ? slack / 2 : 0) : 0;
     const contentY = member.y + rowY[cell.row]! + cell.marginsPx.top + lead;
-    for (const item of stack) {
-      paintBlock(
-        tree,
-        item.block,
-        member.x + colX[cell.col]! + cell.marginsPx.left,
-        contentY + item.yPx,
-        ctx,
-        { width: innerWidth, inCell: true },
+    if (cell.textVertical) {
+      // The cell shapes against the transposed band and rotates into place,
+      // reusing the shape body's 90°/270° conventions. The laid-stack width
+      // resolves across the cell's horizontal slack.
+      const horizontalSlack = Math.max(
+        0,
+        bandWidth - cell.marginsPx.left - cell.marginsPx.right - heightPx,
       );
+      const lead =
+        cell.anchor === "center"
+          ? horizontalSlack / 2
+          : cell.anchor === "bottom"
+            ? horizontalSlack
+            : 0;
+      const clockwise = cell.textVertical === "vertical";
+      const group = new Group({
+        x: clockwise
+          ? member.x + colX[cell.col]! + bandWidth - cell.marginsPx.right - lead
+          : member.x + colX[cell.col]! + cell.marginsPx.left + lead,
+        y: clockwise
+          ? member.y + rowY[cell.row]! + cell.marginsPx.top
+          : member.y + rowY[cell.row]! + bandHeight - cell.marginsPx.bottom,
+        rotation: clockwise ? 90 : -90,
+      });
+      for (const item of stack)
+        paintBlock(group, item.block, 0, item.yPx, ctx, {
+          width: innerWidth,
+          inCell: true,
+        });
+      tree.add(group);
+    } else {
+      for (const item of stack) {
+        paintBlock(
+          tree,
+          item.block,
+          member.x + colX[cell.col]! + cell.marginsPx.left,
+          contentY + item.yPx,
+          ctx,
+          { width: innerWidth, inCell: true },
+        );
+      }
     }
   }
-  for (const { cell } of laid) {
-    if (!cell.borders) continue;
-    const x0 = member.x + colX[cell.col]!;
-    const y0 = member.y + rowY[cell.row]!;
-    const w = spanEnd(colX, cell.col, cell.spanW) - colX[cell.col]!;
-    const h = spanEnd(rowY, cell.row, cell.spanH) - rowY[cell.row]!;
-    if (cell.borders.top) drawEdge(tree, x0, y0, w, true, cell.borders.top);
-    if (cell.borders.bottom) drawEdge(tree, x0, y0 + h, w, true, cell.borders.bottom);
-    if (cell.borders.left) drawEdge(tree, x0, y0, h, false, cell.borders.left);
-    if (cell.borders.right) drawEdge(tree, x0 + w, y0, h, false, cell.borders.right);
-  }
+  drawCollapsedTableBorders(
+    tree,
+    member.x,
+    member.y,
+    colX,
+    rowY,
+    laid.map(({ cell }) => cell),
+  );
 }

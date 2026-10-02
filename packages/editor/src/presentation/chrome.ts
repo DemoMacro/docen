@@ -107,6 +107,7 @@ export const presentationStyles = css`
     border: 0;
     box-shadow: none;
     color: transparent;
+    user-select: text;
   }
   .table-cell-editor::selection {
     background: transparent;

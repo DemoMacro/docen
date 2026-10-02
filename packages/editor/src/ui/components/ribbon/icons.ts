@@ -1,5 +1,8 @@
 // Draw (inking) + Insert illustration extras — Fluent System Icons
 import accessibility from "@fluentui/svg-icons/icons/accessibility_24_regular.svg?raw";
+import alignCenterVertical from "@fluentui/svg-icons/icons/align_center_vertical_24_regular.svg?raw";
+import alignEndVertical from "@fluentui/svg-icons/icons/align_end_vertical_20_regular.svg?raw";
+import alignStartVertical from "@fluentui/svg-icons/icons/align_start_vertical_20_regular.svg?raw";
 import apps from "@fluentui/svg-icons/icons/apps_24_regular.svg?raw";
 import arrowAutofitContent from "@fluentui/svg-icons/icons/arrow_autofit_content_24_regular.svg?raw";
 import arrowBidirectionalUpDown from "@fluentui/svg-icons/icons/arrow_bidirectional_up_down_24_regular.svg?raw";
@@ -48,6 +51,7 @@ import documentAdd from "@fluentui/svg-icons/icons/document_add_24_regular.svg?r
 import documentBulletList from "@fluentui/svg-icons/icons/document_bullet_list_24_regular.svg?raw";
 import documentFooter from "@fluentui/svg-icons/icons/document_footer_24_regular.svg?raw";
 import documentHeader from "@fluentui/svg-icons/icons/document_header_24_regular.svg?raw";
+import documentMargins from "@fluentui/svg-icons/icons/document_margins_24_regular.svg?raw";
 import documentOnePage from "@fluentui/svg-icons/icons/document_one_page_24_regular.svg?raw";
 import documentPageBreak from "@fluentui/svg-icons/icons/document_page_break_24_regular.svg?raw";
 import documentPrint from "@fluentui/svg-icons/icons/document_print_24_regular.svg?raw";
@@ -217,6 +221,9 @@ const RIBBON_ICONS: Record<string, string> = {
   "align-right": textAlignRight,
   justify: textAlignJustify,
   "align-distribute": textAlignDistributed,
+  "align-top": alignStartVertical,
+  "align-middle": alignCenterVertical,
+  "align-bottom": alignEndVertical,
   list: textBulletList,
   numbering: numberRow,
   multilevel: textBulletListTree,
@@ -255,6 +262,7 @@ const RIBBON_ICONS: Record<string, string> = {
   autofit: arrowAutofitContent,
   "distribute-rows": arrowMaximizeVertical,
   "distribute-columns": arrowExpand,
+  "cell-margin": documentMargins,
   "table-repeat-headers": tableArrowRepeatAll,
   "table-formula": mathFormula,
   "table-properties": tableSettings,

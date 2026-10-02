@@ -1,5 +1,6 @@
 import { EMU_PER_PX } from "@docen/layout";
-import { generatePresentation, parsePresentation } from "@docen/pptx";
+import type { LayoutDrawingMember } from "@docen/layout";
+import { generatePresentation, parsePresentation, tableGridOf } from "@docen/pptx";
 import type { PresentationOptions, SlideChild } from "@office-open/pptx";
 import { describe, expect, it } from "vitest";
 
@@ -37,6 +38,64 @@ describe("slide size", () => {
       widthPx: 960,
       heightPx: 720,
     });
+  });
+});
+
+describe("table grid", () => {
+  it("reserves the full rectangle behind a merged origin", () => {
+    const grid = tableGridOf({
+      x: 0,
+      y: 0,
+      width: 1828800,
+      columnWidths: [914400, 914400],
+      rows: [
+        { cells: [{ text: "merged", columnSpan: 2, rowSpan: 2 }] },
+        { cells: [] },
+        { cells: [{ text: "a" }, { text: "b" }] },
+      ],
+    });
+    expect(grid.columns).toBe(2);
+    expect(grid.origins).toEqual([
+      expect.objectContaining({ row: 0, col: 0, spanW: 2, spanH: 2 }),
+      expect.objectContaining({ row: 2, col: 0, spanW: 1, spanH: 1 }),
+      expect.objectContaining({ row: 2, col: 1, spanW: 1, spanH: 1 }),
+    ]);
+  });
+
+  it("projects a cell's official text direction onto its paint payload", () => {
+    const { slides } = project({
+      slides: [
+        {
+          children: [
+            {
+              table: {
+                x: 0,
+                y: 0,
+                width: 1828800,
+                height: 914400,
+                columnWidths: [914400, 914400],
+                rows: [
+                  {
+                    height: 914400,
+                    cells: [
+                      { text: "90°", vertical: "vertical" },
+                      { text: "270°", vertical: "vertical270" },
+                    ],
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    });
+    const member = slides[0]!.members[0]!;
+    if (member.kind !== "table") throw new Error("expected a table member");
+    const table = (member as Extract<LayoutDrawingMember, { kind: "table" }>).table as {
+      rows: { cells: { textVertical?: string }[] }[];
+    };
+    expect(table.rows[0]!.cells[0]!.textVertical).toBe("vertical");
+    expect(table.rows[0]!.cells[1]!.textVertical).toBe("vertical270");
   });
 });
 

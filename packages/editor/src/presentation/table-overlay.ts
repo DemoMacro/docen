@@ -62,10 +62,11 @@ export class TableSelectionOverlay {
 
   /** DOCX shows one grip at a time: the hover point resolves a strip, corner,
    *  or table-wide square and the overlay paints just that target. */
-  hover(localX: number, localY: number): void {
+  hover(localX: number, localY: number, editing = false): void {
     const member = this.#member;
     if (!member) return;
     this.#gripHit = tableGripAt(member, member.x + localX, member.y + localY, true);
+    if (editing && this.#gripHit && !this.#gripHit.clickable) this.#gripHit = null;
     this.#placeGrip();
   }
 
@@ -100,7 +101,7 @@ export class TableSelectionOverlay {
       Object.assign(rect.style, {
         position: "absolute",
         pointerEvents: "none",
-        background: "rgba(0, 120, 215, 0.25)",
+        background: "rgba(0, 120, 215, 0.38)",
       } satisfies Partial<CSSStyleDeclaration>);
       this.el.append(rect);
       this.#highlights.push(rect);

@@ -38,7 +38,7 @@ const BORDER_DASH: Record<string, string> = {
 function borderEdgeOf(b: CellBorderOptions): LayoutBorderEdge | undefined {
   if (b.outline) {
     const l = outlineOf(b.outline);
-    if (!l) return undefined;
+    if (!l) return { px: 0 };
     return {
       px: l.px,
       ...(l.color ? { color: l.color } : {}),
@@ -87,7 +87,8 @@ export function tableGridOf(table: TableOptions): { origins: CellOrigin[]; colum
       while (covered[r]!.has(col)) col += 1;
       const spanW = cell.columnSpan ?? 1;
       const spanH = cell.rowSpan ?? 1;
-      for (let k = 1; k < spanH && r + k < nRows; k++) covered[r + k]!.add(col);
+      for (let dr = 1; dr < spanH && r + dr < nRows; dr += 1)
+        for (let dc = 0; dc < spanW; dc += 1) covered[r + dr]!.add(col + dc);
       origins.push({ cell, row: r, col, spanW, spanH });
       col += spanW;
       nCols = Math.max(nCols, col);
@@ -156,7 +157,21 @@ export function tableMember(
       }
       const need =
         t.sy *
-        (stackBlocks(blocks, innerWidth, undefined, measurer).heightPx +
+        (stackBlocks(
+          blocks,
+          origin.cell.vertical === "vertical" || origin.cell.vertical === "vertical270"
+            ? Math.max(
+                1,
+                declaredHeights
+                  .slice(origin.row, Math.min(origin.row + origin.spanH, nRows))
+                  .reduce((sum, height) => sum + height, 0) -
+                  emuToPx(measureEmu(origin.cell.margins?.top) ?? CELL_INSET_EMU.top) -
+                  emuToPx(measureEmu(origin.cell.margins?.bottom) ?? CELL_INSET_EMU.bottom),
+              )
+            : innerWidth,
+          undefined,
+          measurer,
+        ).heightPx +
           emuToPx(measureEmu(origin.cell.margins?.top) ?? CELL_INSET_EMU.top) +
           emuToPx(measureEmu(origin.cell.margins?.bottom) ?? CELL_INSET_EMU.bottom));
       const last = Math.min(origin.row + origin.spanH - 1, nRows - 1);
@@ -173,10 +188,20 @@ export function tableMember(
         const rules = regionRulesAt(style, r, col, nRows, nCols);
         const fill = solidFillOf(cell.fill) ?? rules.fill;
         const opacity = fillOpacityOf(cell.fill);
-        const edge = (key: "top" | "right" | "bottom" | "left") =>
-          cell.borders?.[key]
-            ? borderEdgeOf(cell.borders[key])
-            : styleEdge(rules, key, r, col, spanW, spanH);
+        const edge = (key: "top" | "right" | "bottom" | "left") => {
+          const direct = cell.borders?.[key];
+          if (direct) return borderEdgeOf(direct);
+          if (
+            (key === "top" && r === 0) ||
+            (key === "right" && col + spanW >= nCols) ||
+            (key === "bottom" && r + spanH >= nRows) ||
+            (key === "left" && col === 0)
+          ) {
+            const frame = frameBorders?.[key];
+            if (frame) return borderEdgeOf(frame);
+          }
+          return styleEdge(rules, key, r, col, spanW, spanH);
+        };
         const edges = {
           top: edge("top"),
           right: edge("right"),
@@ -184,18 +209,6 @@ export function tableMember(
           left: edge("left"),
         };
         const borders = Object.fromEntries(Object.entries(edges).filter(([, v]) => v));
-        // Frame-level borders spread onto the rim cells (the stringify side's
-        // distributeBorders contract) where the cell declares none of its own.
-        if (frameBorders) {
-          if (r === 0 && frameBorders.top && !borders.top)
-            borders.top = borderEdgeOf(frameBorders.top);
-          if (col + spanW >= nCols && frameBorders.right && !borders.right)
-            borders.right = borderEdgeOf(frameBorders.right);
-          if (r + spanH >= nRows && frameBorders.bottom && !borders.bottom)
-            borders.bottom = borderEdgeOf(frameBorders.bottom);
-          if (col === 0 && frameBorders.left && !borders.left)
-            borders.left = borderEdgeOf(frameBorders.left);
-        }
         const m = (v: unknown, def: number) => emuToPx(measureEmu(v) ?? def);
         return {
           col,
@@ -207,6 +220,14 @@ export function tableMember(
           ...(Object.keys(borders).length > 0 ? { borders } : {}),
           ...(cell.verticalAlign === "center" || cell.verticalAlign === "bottom"
             ? { anchor: cell.verticalAlign }
+            : {}),
+          ...(cell.vertical
+            ? {
+                textVertical:
+                  cell.vertical === "vertical270"
+                    ? ("vertical270" as const)
+                    : ("vertical" as const),
+              }
             : {}),
           marginsPx: {
             left: m(cell.margins?.left, CELL_INSET_EMU.left),

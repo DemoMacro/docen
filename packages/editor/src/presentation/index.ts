@@ -51,13 +51,14 @@ import type {
   TextBodyOptions,
   TextFont,
   TextRunOptions,
+  TextVertical,
 } from "@office-open/core/drawing";
 // Leafer ships animate() as a stub that only logs — the show's entrance
 // tweens need the real plugin registered.
 import "@leafer-in/animate";
 import { App, type IGroup } from "leafer-ui";
 
-import { renderRibbonFromSchema } from "../document/ribbon";
+import { buildContextualTab, renderRibbonFromSchema } from "../document/ribbon";
 import {
   addSpellWord,
   englishWords,
@@ -131,6 +132,7 @@ import {
   slideHits,
 } from "./hit-test";
 import { MediaPlayer, type MediaPlayback } from "./media-player";
+import { TABLE_STYLE_IDS, tableDesignTab, tableLayoutTab } from "./ribbon";
 import { ANIMATION_PRESETS, presentationRibbonTabs, TRANSITION_PRESETS } from "./ribbon";
 import { changedSlides } from "./slide-diff";
 import {
@@ -313,6 +315,7 @@ interface TableCellView {
   spanW: number;
   spanH: number;
   anchor?: "top" | "center" | "bottom";
+  textVertical?: "vertical" | "vertical270";
   marginsPx: { left: number; top: number; right: number; bottom: number };
   blocks: LayoutBlock[];
 }
@@ -387,6 +390,24 @@ const WIRED_COMMANDS: ReadonlySet<string> = new Set([
   "reset",
   "themes",
   "variants",
+  "toggle-table-look",
+  "table-style",
+  "cell-shading",
+  "table-borders",
+  "insert-above",
+  "insert-below",
+  "insert-left",
+  "insert-right",
+  "delete-table",
+  "merge-cells",
+  "split-cells",
+  "cell-height",
+  "cell-width",
+  "distribute-rows",
+  "distribute-columns",
+  "table-align",
+  "text-direction",
+  "cell-margins",
   ...TEXT_FORMAT_COMMANDS,
 ]);
 
@@ -421,6 +442,7 @@ class DocenPresentation extends AddinHost {
    *  null collapses the selection to the cell next entered). */
   #tableSelection: TableSelectionRange | null = null;
   #tableTextSelection: HTMLDivElement[] = [];
+  #contextTabIds = new Set<string>();
   /** The in-place shape-text editor: the textarea floats over the shape while
    *  it holds the session; every keystroke writes through into the shape, so
    *  the text lives in the model as it is typed. */
@@ -819,8 +841,10 @@ class DocenPresentation extends AddinHost {
       | (HTMLElement & { setTabs(tabs: readonly unknown[], scope: Element | null): void })
       | null;
     searchEl?.setTabs(tabs, root.querySelector("docen-workspace"));
+    this.#contextTabIds.clear();
     this.notesEditor?.setAttribute("placeholder", t("ppt.notes.placeholder", this));
     this.#applyRibbonGreying();
+    this.#syncContextTabs();
   }
 
   #renderHeader(): string {
@@ -882,12 +906,50 @@ class DocenPresentation extends AddinHost {
       for (const key of Object.keys(addin.commands ?? {})) wired.add(key);
     }
     for (const el of this.shadowRoot?.querySelectorAll<HTMLElement>(
-      "docen-ribbon-button[event], docen-ribbon-toggle-button[event], docen-ribbon-split-button[event], docen-ribbon-menu[event]",
+      "docen-ribbon-button[event], docen-ribbon-toggle-button[event], docen-ribbon-split-button[event], docen-ribbon-menu[event], docen-ribbon-input[event]",
     ) ?? []) {
       const event = el.getAttribute("event");
       if (!event || wired.has(event)) continue;
       el.setAttribute("disabled", "");
     }
+  }
+
+  /** PowerPoint's contextual table tabs: append/remove only when the selection
+   *  enters/leaves a table, without rebuilding the whole ribbon. */
+  #syncContextTabs(): void {
+    const root = this.shadowRoot;
+    const tablist = root?.querySelector("fluent-tablist");
+    const ribbon = root?.querySelector("docen-ribbon");
+    if (!root || !tablist || !ribbon) return;
+    const scope = root.querySelector("docen-workspace") ?? this;
+    const want = this.#tableMemberOf()
+      ? new Map([
+          ["ppt-table-design", tableDesignTab()],
+          ["ppt-table-layout", tableLayoutTab()],
+        ])
+      : new Map();
+    const present = this.#contextTabIds;
+    const changed = want.size !== present.size || [...want.keys()].some((id) => !present.has(id));
+    if (!changed) return;
+    const active = tablist.getAttribute("activeid") ?? "";
+    if (present.has(active) && !want.has(active)) tablist.setAttribute("activeid", "home");
+    for (const id of present) {
+      if (want.has(id)) continue;
+      ribbon.querySelector(`docen-ribbon-panel[value="${id}"]`)?.remove();
+      tablist.querySelector(`#${id}`)?.remove();
+    }
+    let firstNew: string | null = null;
+    for (const [id, tab] of want) {
+      if (present.has(id)) continue;
+      const built = buildContextualTab(tab, scope);
+      tablist.append(built.tab);
+      ribbon.append(built.panel);
+      firstNew = firstNew ?? id;
+    }
+    if (firstNew) tablist.setAttribute("activeid", firstNew);
+    present.clear();
+    for (const id of want.keys()) present.add(id);
+    this.#applyRibbonGreying();
   }
 
   // ── Events ───────────────────────────────────────────────────────────────
@@ -972,6 +1034,24 @@ class DocenPresentation extends AddinHost {
     else if (name === "video" || name === "audio") this.#pickMedia();
     else if (name === "object") this.#pickObject();
     else if (name === "select") this.#toggleSelectionPane();
+    else if (name === "toggle-table-look") this.#toggleTableLook(event.detail?.value);
+    else if (name === "table-style") this.#setTableStyle(event.detail?.value);
+    else if (name === "cell-shading") this.#setTableCellShading(event.detail?.value);
+    else if (name === "table-borders") this.#setTableCellBorders(event.detail?.value);
+    else if (name === "insert-above") this.#insertTableRow("above");
+    else if (name === "insert-below") this.#insertTableRow("below");
+    else if (name === "insert-left") this.#insertTableColumn("left");
+    else if (name === "insert-right") this.#insertTableColumn("right");
+    else if (name === "delete-table") this.#deleteTablePart(event.detail?.value);
+    else if (name === "merge-cells") this.#mergeSelectedTableCells();
+    else if (name === "split-cells") this.#splitSelectedTableCell();
+    else if (name === "cell-height") this.#setTableCellSize("height", event.detail?.value);
+    else if (name === "cell-width") this.#setTableCellSize("width", event.detail?.value);
+    else if (name === "distribute-rows") this.#distributeTableCells("rows");
+    else if (name === "distribute-columns") this.#distributeTableCells("columns");
+    else if (name === "table-align") this.#setTableCellAlignment(event.detail?.value);
+    else if (name === "text-direction") this.#setTableCellTextDirection(event.detail?.value);
+    else if (name === "cell-margins") this.#setTableCellMargins(event.detail?.value);
     else if (name === "draw-select") this.#armDrawTool("select");
     else if (name === "draw-eraser") this.#armDrawTool("eraser");
     else if (name === "draw-pen") this.#armDrawTool("pen");
@@ -1168,6 +1248,7 @@ class DocenPresentation extends AddinHost {
     this.#syncSelectionOverlays();
     this.#renderSelectionPane();
     this.#syncTextFormatControls();
+    this.#syncContextTabs();
   }
 
   /** Keep exactly one selection surface alive: tables get Word's cell grips
@@ -1212,12 +1293,8 @@ class DocenPresentation extends AddinHost {
   /** DOCX's hover pass: one table grip resolves and paints at a time, so the
    *  table no longer carries a permanent fence of invisible hit boxes. */
   readonly #onStagePointerMove = (event: PointerEvent): void => {
-    // A live cell edit owns the caret; the table-wide hover square would sit
-    // on top of the text session as an unrelated little frame.
-    if (this.#textEditor) {
-      this.#tableOverlay?.hover(Number.NaN, Number.NaN);
-      return;
-    }
+    // A live cell edit keeps the edge/corner grips, but its body hover square
+    // would read as an unrelated frame over the caret.
     if (!this.#selection) return;
     const table = this.#tableMemberOf();
     const point = this.#stagePointOf(event);
@@ -1225,7 +1302,11 @@ class DocenPresentation extends AddinHost {
       this.#tableOverlay?.hover(Number.NaN, Number.NaN);
       return;
     }
-    this.#tableOverlay?.hover(point.x - table.member.x, point.y - table.member.y);
+    this.#tableOverlay?.hover(
+      point.x - table.member.x,
+      point.y - table.member.y,
+      Boolean(this.#textEditor),
+    );
   };
 
   readonly #onDocumentSelectionChange = (): void => {
@@ -1665,6 +1746,11 @@ class DocenPresentation extends AddinHost {
             fontSize: `${((firstCellRunSizeOf(source) * 4) / 3) * scale}px`,
             caretColor: TEXT_INK,
           }),
+      ...(cell.textVertical
+        ? {
+            writingMode: cell.textVertical === "vertical270" ? "sideways-lr" : "vertical-rl",
+          }
+        : {}),
     });
     editor.addEventListener("keydown", (event) => {
       // Escape leaves the edit (committing); Tab walks cells like DOCX and
@@ -2070,6 +2156,10 @@ class DocenPresentation extends AddinHost {
     onTap?: () => void,
   ): void {
     if (!found) return;
+    // The cell-selection drag owns the gesture; without this the textarea's
+    // native selection drag suppresses the pointer stream and the highlight
+    // freezes at its first cell.
+    event.preventDefault();
     const origin = this.#tableEdit;
     const anchor = origin ?? this.#tableSelection?.anchor ?? null;
     const drag = { startX: event.clientX, startY: event.clientY, moved: false };
@@ -4397,6 +4487,471 @@ class DocenPresentation extends AddinHost {
     apply(!before);
   }
 
+  /** Every source cell under the current grid selection (all origins when no
+   *  block is active), so Table Design commands target PowerPoint's active
+   *  cell range rather than repainting an unrelated part of the table. */
+  #selectedTableCells(): { table: TableOptions; cells: TableCellOptions[] } | null {
+    const found = this.#tableMemberOf();
+    if (!found) return null;
+    const origins = tableGridOf(found.table).origins;
+    const cells = this.#tableSelection
+      ? tableSelectionCells(found.member, this.#tableSelection)
+          .map(
+            ({ row, col }) =>
+              origins.find((origin) => origin.row === row && origin.col === col)?.cell,
+          )
+          .filter((cell): cell is TableCellOptions => Boolean(cell))
+      : (() => {
+          const active = this.#editedCell();
+          return active ? [active] : origins.map((origin) => origin.cell);
+        })();
+    return cells.length > 0 ? { table: found.table, cells } : null;
+  }
+
+  /** Apply one reversible mutation to the selected table's official model. */
+  #mutateSelectedTable(apply: (table: TableOptions) => void): void {
+    const found = this.#tableMemberOf();
+    if (!found) return;
+    const table = found.table;
+    const before = structuredClone(table);
+    apply(table);
+    const after = structuredClone(table);
+    const restore = (value: TableOptions): void => {
+      for (const key of Object.keys(table) as (keyof TableOptions)[]) delete table[key];
+      Object.assign(table, value);
+      this.#reproject(found.slide);
+    };
+    this.#pushEdit({ undo: () => restore(before), redo: () => restore(after) });
+    this.#reproject(found.slide);
+  }
+
+  /** PowerPoint's Table Style Options: the six official tblLook flags. */
+  #toggleTableLook(value?: string): void {
+    if (
+      value !== "firstRow" &&
+      value !== "lastRow" &&
+      value !== "firstCol" &&
+      value !== "lastCol" &&
+      value !== "bandRow" &&
+      value !== "bandCol"
+    )
+      return;
+    this.#mutateSelectedTable((table) => {
+      if (table[value] === true) delete table[value];
+      else table[value] = true;
+    });
+  }
+
+  /** A built-in style reference; an inline custom style is retired because it
+   *  would outrank the selected PowerPoint style on the next projection. */
+  #setTableStyle(value?: string): void {
+    if (!value || !TABLE_STYLE_IDS.has(value)) return;
+    this.#mutateSelectedTable((table) => {
+      table.tableStyleId = value;
+      delete table.tableStyle;
+    });
+  }
+
+  /** Cell shading accepts the color picker's six-digit value; `none` is the
+   *  official way to remove the direct fill. */
+  #setTableCellShading(value?: string): void {
+    const selected = this.#selectedTableCells();
+    if (!selected) return;
+    this.#mutateSelectedTable((table) => {
+      const origins = new Set(tableGridOf(table).origins.map((origin) => origin.cell));
+      for (const cell of selected.cells) {
+        if (!origins.has(cell)) continue;
+        if (value?.toLowerCase() === "none") delete cell.fill;
+        else if (value && /^[0-9a-f]{6}$/i.test(value)) cell.fill = value.toUpperCase();
+      }
+    });
+  }
+
+  /** Ribbon border picks write the same official cell edge model the canvas
+   *  paints; outside borders stay on the table frame, sides target cells. */
+  #setTableCellBorders(value?: string): void {
+    if (
+      value !== "all" &&
+      value !== "outside" &&
+      value !== "none" &&
+      value !== "top" &&
+      value !== "bottom" &&
+      value !== "left" &&
+      value !== "right"
+    )
+      return;
+    this.#mutateSelectedTable((table) => {
+      if (value === "outside") {
+        table.borders = { top: {}, right: {}, bottom: {}, left: {} };
+        return;
+      }
+      const clearCell = (cell: TableCellOptions): void => {
+        if (!cell.borders) return;
+        delete cell.borders.top;
+        delete cell.borders.right;
+        delete cell.borders.bottom;
+        delete cell.borders.left;
+      };
+      for (const cell of this.#selectedTableCells()?.cells ?? []) {
+        clearCell(cell);
+        if (value === "none") {
+          cell.borders = {
+            top: { outline: { type: "noFill" } },
+            right: { outline: { type: "noFill" } },
+            bottom: { outline: { type: "noFill" } },
+            left: { outline: { type: "noFill" } },
+          };
+          continue;
+        }
+        cell.borders ??= {};
+        if (value === "all" || value === "top") cell.borders.top = { width: 12700 };
+        if (value === "all" || value === "bottom") cell.borders.bottom = { width: 12700 };
+        if (value === "all" || value === "left") cell.borders.left = { width: 12700 };
+        if (value === "all" || value === "right") cell.borders.right = { width: 12700 };
+      }
+    });
+  }
+
+  /** The live grid range for Layout commands: an explicit block selection, or
+   *  the cell under the text caret. */
+  #tableActiveRange(): TableSelectionRange | null {
+    if (this.#tableSelection) return this.#tableSelection;
+    return this.#tableEdit
+      ? { anchor: { ...this.#tableEdit }, head: { ...this.#tableEdit } }
+      : null;
+  }
+
+  /** Insert a fresh PowerPoint row at the selection's near/far edge. */
+  #insertTableRow(position: "above" | "below"): void {
+    const found = this.#tableMemberOf();
+    const range = this.#tableActiveRange();
+    if (!found || !range) return;
+    const row = Math.min(range.anchor.row, range.head.row);
+    const at = position === "above" ? row : Math.max(range.anchor.row, range.head.row) + 1;
+    const height = found.table.rows[row]?.height;
+    this.#mutateSelectedTable((table) => {
+      table.rows.splice(at, 0, {
+        height,
+        cells: Array.from(
+          { length: table.columnWidths?.length ?? 3 },
+          () => ({ text: "" }) as TableCellOptions,
+        ),
+      });
+    });
+    this.#setTableSelection(null);
+  }
+
+  /** Insert a fresh column at the selection edge, cloning the official width. */
+  #insertTableColumn(position: "left" | "right"): void {
+    const found = this.#tableMemberOf();
+    const range = this.#tableActiveRange();
+    if (!found || !range) return;
+    const col = Math.min(range.anchor.col, range.head.col);
+    const at = position === "left" ? col : Math.max(range.anchor.col, range.head.col) + 1;
+    const width = found.table.columnWidths?.[col];
+    this.#mutateSelectedTable((table) => {
+      for (const row of table.rows) row.cells.splice(at, 0, { text: "" });
+      if (table.columnWidths) table.columnWidths.splice(at, 0, width ?? table.columnWidths[0]);
+    });
+    this.#setTableSelection(null);
+  }
+
+  /** Delete the selected rows/columns; deleting the whole grid deletes the
+   *  table object, matching PowerPoint's Delete menu. */
+  #deleteTablePart(value?: string): void {
+    if (value === "table") return this.#deleteSelected();
+    const found = this.#tableMemberOf();
+    const range = this.#tableActiveRange();
+    if (!found || !range) return;
+    const fromRow = Math.min(range.anchor.row, range.head.row);
+    const toRow = Math.max(range.anchor.row, range.head.row);
+    const fromCol = Math.min(range.anchor.col, range.head.col);
+    const toCol = Math.max(range.anchor.col, range.head.col);
+    if (value === "rows" && fromRow === 0 && toRow >= found.table.rows.length - 1)
+      return this.#deleteSelected();
+    if (
+      value === "columns" &&
+      fromCol === 0 &&
+      toCol >= (found.table.columnWidths?.length ?? found.table.rows[0]?.cells.length ?? 0) - 1
+    )
+      return this.#deleteSelected();
+    this.#mutateSelectedTable((table) => {
+      if (value === "rows") {
+        table.rows.splice(fromRow, toRow - fromRow + 1);
+        return;
+      }
+      if (value !== "columns") return;
+      const selected = new Set(
+        Array.from({ length: toCol - fromCol + 1 }, (_, index) => fromCol + index),
+      );
+      const origins = new Map(tableGridOf(table).origins.map((origin) => [origin.cell, origin]));
+      for (const row of table.rows) {
+        row.cells = row.cells.filter((cell) => {
+          const origin = origins.get(cell);
+          if (!origin) return true;
+          const covered = Array.from({ length: origin.spanW }, (_, index) => origin.col + index);
+          return !covered.some((col) => selected.has(col));
+        });
+      }
+      if (table.columnWidths)
+        table.columnWidths = table.columnWidths.filter((_, col) => !selected.has(col));
+    });
+    this.#setTableSelection(null);
+  }
+
+  /** Merge the selected origins into one rectangular `columnSpan`/`rowSpan`
+   *  cell; all absorbed source cells are removed from their rows. */
+  #mergeSelectedTableCells(): void {
+    const found = this.#tableMemberOf();
+    const range = this.#tableActiveRange();
+    if (!found || !range) return;
+    const origins = tableGridOf(found.table).origins;
+    const slots = tableSelectionCells(found.member, range)
+      .map(({ row, col }) =>
+        origins.find(
+          (origin) =>
+            origin.row <= row &&
+            row < origin.row + origin.spanH &&
+            origin.col <= col &&
+            col < origin.col + origin.spanW,
+        ),
+      )
+      .filter((slot): slot is NonNullable<typeof slot> => Boolean(slot));
+    const fromCol = Math.min(...slots.map((slot) => slot.col));
+    const fromRow = Math.min(...slots.map((slot) => slot.row));
+    const target = slots.find((slot) => slot.row === fromRow && slot.col === fromCol);
+    if (slots.length < 2 || !target) return;
+    const text = slots
+      .filter((slot) => slot.cell !== target.cell)
+      .map((slot) => cellTextOf(slot.cell))
+      .filter(Boolean)
+      .join("\n");
+    const removed = new Set(slots.filter((slot) => slot.cell !== target.cell).map((s) => s.cell));
+    this.#mutateSelectedTable((table) => {
+      for (const row of table.rows) row.cells = row.cells.filter((cell) => !removed.has(cell));
+      const toCol = Math.max(...slots.map((slot) => slot.col + slot.spanW)) - 1;
+      const toRow = Math.max(...slots.map((slot) => slot.row + slot.spanH)) - 1;
+      if (toCol > fromCol) target.cell.columnSpan = toCol - fromCol + 1;
+      else delete target.cell.columnSpan;
+      if (toRow > fromRow) target.cell.rowSpan = toRow - fromRow + 1;
+      else delete target.cell.rowSpan;
+      if (text) writeText({ kind: "cell", cell: target.cell }, text);
+    });
+    this.#setTableSelection({
+      anchor: { row: target.row, col: target.col },
+      head: { row: target.row, col: target.col },
+    });
+  }
+
+  /** Split the selected merged origin back to its grid rectangle. Missing
+   *  continuation slots become real empty cells; parsed merge placeholders are
+   *  replaced rather than duplicated. */
+  #splitSelectedTableCell(): void {
+    const found = this.#tableMemberOf();
+    const range = this.#tableActiveRange();
+    if (!found || !range) return;
+    const at = {
+      row: Math.min(range.anchor.row, range.head.row),
+      col: Math.min(range.anchor.col, range.head.col),
+    };
+    const origins = tableGridOf(found.table).origins;
+    const before = origins.find(
+      (slot) =>
+        slot.row <= at.row &&
+        at.row < slot.row + slot.spanH &&
+        slot.col <= at.col &&
+        at.col < slot.col + slot.spanW,
+    );
+    if (!before || (before.spanW === 1 && before.spanH === 1)) return;
+    const oldWidth = before.spanW;
+    const oldHeight = before.spanH;
+    const blanks = Array.from({ length: oldWidth * oldHeight - 1 }, () => ({ text: "" }));
+    this.#mutateSelectedTable((table) => {
+      delete before.cell.columnSpan;
+      delete before.cell.rowSpan;
+      const slots = tableGridOf(table).origins;
+      const columns = tableGridOf(table).columns;
+      table.rows.forEach((row, rowIndex) => {
+        const rowSlots = slots.filter((slot) => slot.row === rowIndex);
+        const cells: TableCellOptions[] = [];
+        for (let col = 0; col < columns; col += 1) {
+          const insideTarget =
+            rowIndex >= before.row &&
+            rowIndex < before.row + oldHeight &&
+            col >= before.col &&
+            col < before.col + oldWidth;
+          if (insideTarget) {
+            if (rowIndex === before.row && col === before.col) cells.push(before.cell);
+            else cells.push(blanks[(rowIndex - before.row) * oldWidth + (col - before.col) - 1]!);
+            continue;
+          }
+          const slot = rowSlots.find(
+            (candidate) =>
+              candidate.row === rowIndex &&
+              candidate.col <= col &&
+              col < candidate.col + candidate.spanW,
+          );
+          if (slot && slot.col === col) cells.push(slot.cell);
+        }
+        row.cells = cells;
+      });
+    });
+    this.#setTableSelection({ anchor: at, head: at });
+  }
+
+  /** The selected grid rectangle; an active cell is a one-slot rectangle. */
+  #tableGridSelection(): {
+    fromRow: number;
+    toRow: number;
+    fromCol: number;
+    toCol: number;
+  } | null {
+    const found = this.#tableMemberOf();
+    const range = this.#tableActiveRange();
+    if (!found || !range) return null;
+    return {
+      fromRow: Math.min(range.anchor.row, range.head.row),
+      toRow: Math.max(range.anchor.row, range.head.row),
+      fromCol: Math.min(range.anchor.col, range.head.col),
+      toCol: Math.max(range.anchor.col, range.head.col),
+    };
+  }
+
+  /** A typed ribbon measure as centimetres; the official model stays EMU. */
+  #centimetersOf(value?: string): number | null {
+    const match = value?.match(/-?\d+(?:\.\d+)?/);
+    const cm = match ? Number(match[0]) : Number.NaN;
+    return Number.isFinite(cm) && cm > 0 ? cm : null;
+  }
+
+  /** Cell Size boxes write row heights / column widths in EMU; missing width
+   *  tracks are materialized from the official table width first. */
+  #setTableCellSize(kind: "height" | "width", value?: string): void {
+    const cm = this.#centimetersOf(value);
+    const selection = this.#tableGridSelection();
+    if (cm == null || !selection) return;
+    const emu = Math.round(cm * 360000);
+    this.#mutateSelectedTable((table) => {
+      if (kind === "height") {
+        for (let row = selection.fromRow; row <= selection.toRow; row += 1)
+          table.rows[row]!.height = emu;
+        return;
+      }
+      const columns = tableGridOf(table).columns;
+      table.columnWidths ??= Array.from({ length: columns }, () =>
+        Math.round((measureEmu(table.width) ?? 0) / Math.max(1, columns)),
+      );
+      for (let col = selection.fromCol; col <= selection.toCol; col += 1)
+        table.columnWidths[col] = emu;
+    });
+  }
+
+  /** PowerPoint's distribute commands equalize only the selected range. */
+  #distributeTableCells(kind: "rows" | "columns"): void {
+    const found = this.#tableMemberOf();
+    const selection = this.#tableGridSelection();
+    if (!found || !selection) return;
+    this.#mutateSelectedTable((table) => {
+      if (kind === "rows") {
+        const rows = table.rows
+          .slice(selection.fromRow, selection.toRow + 1)
+          .map((_, index) => found.member.table.rows[selection.fromRow + index]?.heightPx ?? 0);
+        const share = Math.round(
+          (rows.reduce((sum, height) => sum + height, 0) * 914400) / 96 / Math.max(1, rows.length),
+        );
+        for (let row = selection.fromRow; row <= selection.toRow; row += 1)
+          table.rows[row]!.height = share;
+        return;
+      }
+      const columns = tableGridOf(table).columns;
+      table.columnWidths ??= Array.from({ length: columns }, () =>
+        Math.round((measureEmu(table.width) ?? 0) / Math.max(1, columns)),
+      );
+      const selected = table.columnWidths.slice(selection.fromCol, selection.toCol + 1);
+      const share = Math.round(
+        selected.reduce((sum: number, width) => sum + (measureEmu(width) ?? 0), 0) /
+          Math.max(1, selected.length),
+      );
+      for (let col = selection.fromCol; col <= selection.toCol; col += 1)
+        table.columnWidths![col] = share;
+    });
+  }
+
+  /** Alignment applies as a range command: paragraph alignment across cells,
+   *  official `anchor` for vertical alignment. */
+  #setTableCellAlignment(value?: string): void {
+    const selected = this.#selectedTableCells();
+    if (!selected) return;
+    const horizontal = ALIGNMENTS.get(
+      value === "left"
+        ? "align-left"
+        : value === "center"
+          ? "align-center"
+          : value === "right"
+            ? "align-right"
+            : "",
+    );
+    const vertical =
+      value === "top" || value === "middle" || value === "bottom"
+        ? value === "middle"
+          ? "center"
+          : value
+        : null;
+    if (!horizontal && !vertical) return;
+    this.#mutateSelectedTable((table) => {
+      const origins = new Set(tableGridOf(table).origins.map((origin) => origin.cell));
+      for (const cell of selected.cells) {
+        if (!origins.has(cell)) continue;
+        if (horizontal) setParagraphAlignment(cellParagraphsOf(cell), horizontal);
+        else if (vertical) cell.verticalAlign = vertical;
+      }
+    });
+  }
+
+  /** Text direction maps PowerPoint's four table commands onto the cell's
+   *  official `vert` token; Horizontal removes the override. */
+  #setTableCellTextDirection(value?: string): void {
+    if (
+      value !== "horizontal" &&
+      value !== "vertical" &&
+      value !== "vertical270" &&
+      value !== "wordArtVertical"
+    )
+      return;
+    const selected = this.#selectedTableCells();
+    if (!selected) return;
+    this.#mutateSelectedTable((table) => {
+      const origins = new Set(tableGridOf(table).origins.map((origin) => origin.cell));
+      for (const cell of selected.cells) {
+        if (!origins.has(cell)) continue;
+        if (value === "horizontal") delete cell.vertical;
+        else cell.vertical = value as TextVertical;
+      }
+    });
+  }
+
+  /** PowerPoint's preset margin table in EMU; Normal removes per-cell values
+   *  so the DrawingML defaults stay authoritative. */
+  #setTableCellMargins(value?: string): void {
+    if (value !== "normal" && value !== "none" && value !== "narrow" && value !== "wide") return;
+    const selected = this.#selectedTableCells();
+    if (!selected) return;
+    const margins =
+      value === "none"
+        ? { top: 0, right: 0, bottom: 0, left: 0 }
+        : value === "narrow"
+          ? { top: 45720, right: 45720, bottom: 45720, left: 45720 }
+          : { top: 91440, right: 182880, bottom: 91440, left: 182880 };
+    this.#mutateSelectedTable((table) => {
+      const origins = new Set(tableGridOf(table).origins.map((origin) => origin.cell));
+      for (const cell of selected.cells) {
+        if (!origins.has(cell)) continue;
+        if (value === "normal") delete cell.margins;
+        else cell.margins = { ...margins };
+      }
+    });
+  }
+
   #pickPicture(): void {
     this.shadowRoot?.querySelector<HTMLInputElement>("#picture-input")?.click();
   }
@@ -4910,12 +5465,19 @@ class DocenPresentation extends AddinHost {
         const rect = table ? this.#cellRectAt(table.member, point.x, point.y) : null;
         if (table && rect) {
           const edit = this.#tableEdit!;
-          if (edit.row !== rect.cell.row || edit.col !== rect.cell.col) {
-            this.#moveTableCellEditing(point.x, point.y, undefined, {
-              caret: { clientX: event.clientX, clientY: event.clientY },
-            });
-          }
-          this.#startTableCellDrag(event, table);
+          const sameCell = edit.row === rect.cell.row && edit.col === rect.cell.col;
+          const activeEditor = this.#textEditor;
+          this.#startTableCellDrag(event, table, () => {
+            if (!sameCell) {
+              this.#moveTableCellEditing(point.x, point.y, undefined, {
+                caret: { clientX: event.clientX, clientY: event.clientY },
+              });
+              return;
+            }
+            this.#setTableSelection(null);
+            activeEditor?.focus();
+            if (activeEditor) this.#placeTableCellCaret(activeEditor, event.clientX, event.clientY);
+          });
         }
       }
       return;

@@ -129,18 +129,17 @@ export function tableSelectionCells(
   const anchor = cells.find((cell) => coversSlot(cell, range.anchor.row, range.anchor.col));
   const head = cells.find((cell) => coversSlot(cell, range.head.row, range.head.col));
   if (!anchor || !head) return [];
-  const { rowEdges: selectionRowEdges } = tableEdges(member);
   const colFrom = Math.min(anchor.col, head.col);
   const colTo = Math.max(anchor.col + anchor.spanW, head.col + head.spanW);
   const rowFrom = Math.min(anchor.row, head.row);
   const rowTo = Math.max(anchor.row + anchor.spanH, head.row + head.spanH);
-  const gridRow = Math.min(rowFrom, selectionRowEdges.length - 2);
-  const gridRowTo = Math.max(rowTo, gridRow + 1);
-  return cells.filter((cell) => {
-    const vertical = cell.row < gridRowTo && cell.row + cell.spanH > gridRow;
-    const horizontal = cell.col < colTo && cell.col + cell.spanW > colFrom;
-    return vertical && horizontal;
-  });
+  return cells.filter(
+    (cell) =>
+      cell.row < rowTo &&
+      cell.row + cell.spanH > rowFrom &&
+      cell.col < colTo &&
+      cell.col + cell.spanW > colFrom,
+  );
 }
 
 /** One DOCX grip → the cell pair that selects that row/column/table. */
