@@ -12,23 +12,9 @@ export const escapeHtml = (s: string): string =>
     c === "&" ? "&amp;" : c === "<" ? "&lt;" : c === ">" ? "&gt;" : c === '"' ? "&quot;" : "&#39;",
   );
 
-export const documentStyles = css`
-  :host {
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    /* Anchors the input layer (see the template comment there). */
-    position: relative;
-  }
-  .input-layer {
-    position: absolute;
-    inset: 0;
-    /* The layer itself must never intercept pointer input — only the bridge's
-       programmatic textarea focus uses it. */
-    pointer-events: none;
-  }
+export const ribbonLayoutStyles = css`
   /* Office ribbon group layout helpers — a large button beside stacked rows of
-       small icon-only buttons. Applied to light-DOM wrappers in the ribbon. */
+    small icon-only buttons. Shared by the document and presentation hosts. */
   .rb-col {
     display: flex;
     flex-direction: column;
@@ -66,6 +52,24 @@ export const documentStyles = css`
     align-self: stretch;
     background: var(--docen-color-divider, #e1e1e1);
     margin: 0 2px;
+  }
+`;
+
+export const documentStyles = css`
+  ${ribbonLayoutStyles}
+  :host {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    /* Anchors the input layer (see the template comment there). */
+    position: relative;
+  }
+  .input-layer {
+    position: absolute;
+    inset: 0;
+    /* The layer itself must never intercept pointer input — only the bridge's
+       programmatic textarea focus uses it. */
+    pointer-events: none;
   }
   .avatar {
     display: inline-flex;

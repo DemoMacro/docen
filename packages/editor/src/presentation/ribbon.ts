@@ -8,6 +8,7 @@
 import type { SlideAnimation, TransitionType } from "@docen/pptx";
 
 import { ensureShapePreviewIcons } from "../document/ribbon";
+import { registerIcon } from "../ui";
 import type {
   RibbonButton,
   RibbonControlOrLayout,
@@ -34,10 +35,11 @@ const splitBtn = (
   opts: { icon?: string; size?: RibbonControlSize; iconOnly?: boolean } = {},
 ): RibbonSplit => ({ type: "split", event, label, items, ...opts });
 
-const input = (event: string, value: string): RibbonInput => ({
+const input = (event: string, value: string, opts: { label?: string } = {}): RibbonInput => ({
   type: "input",
   event,
   value,
+  ...opts,
 });
 
 const group = (id: string, controls: readonly RibbonControlOrLayout[]): RibbonGroup => ({
@@ -226,7 +228,11 @@ const ANIMATIONS = ["none", ...ANIMATION_TYPES] as const;
 export const ANIMATION_PRESETS: ReadonlySet<SlideAnimation["type"]> = new Set(ANIMATION_TYPES);
 
 const animationItems = (): RibbonMenuItem[] =>
-  ANIMATIONS.map((value) => ({ text: `ppt.ribbon.animate.${value}`, value }));
+  ANIMATIONS.map((value) => ({
+    text: `ppt.ribbon.animate.${value}`,
+    icon: `animation-${value}`,
+    value,
+  }));
 
 /** The style flags PowerPoint's Table Design checkbox grid exposes. */
 const TABLE_LOOK_FLAGS = [
@@ -240,13 +246,53 @@ const TABLE_LOOK_FLAGS = [
 
 /** Built-in DrawingML style GUIDs the projector already resolves; values are
  *  passed straight to the official `tableStyleId` field. */
+const tableStyle = (
+  key: string,
+  value: string,
+): RibbonMenuItem & { value: string; icon: string } => ({
+  value,
+  text: `ppt.ribbon.tableStyle.${key}`,
+  icon: value,
+});
+
 const TABLE_STYLES = [
-  { value: "{2D5ABB26-0587-4C30-8999-92F81FD0307C}", text: "ppt.ribbon.tableStyle.none" },
-  { value: "{5940675A-B579-460E-94D1-54222C63F5DA}", text: "ppt.ribbon.tableStyle.grid" },
-  { value: "{9D7B26C5-4107-4FEC-AEDC-1716B250A1EF}", text: "ppt.ribbon.tableStyle.light1" },
-  { value: "{5C22544A-7EE6-4342-B048-85BDC9FD1C3A}", text: "ppt.ribbon.tableStyle.medium2" },
-  { value: "{5202B0CA-FC54-4496-8BCA-5EF66A818D29}", text: "ppt.ribbon.tableStyle.dark2" },
-] satisfies RibbonMenuItem[];
+  tableStyle("none", "{2D5ABB26-0587-4C30-8999-92F81FD0307C}"),
+  tableStyle("grid", "{5940675A-B579-460E-94D1-54222C63F5DA}"),
+  tableStyle("light1", "{9D7B26C5-4107-4FEC-AEDC-1716B250A1EF}"),
+  tableStyle("medium2", "{5C22544A-7EE6-4342-B048-85BDC9FD1C3A}"),
+  tableStyle("dark2", "{5202B0CA-FC54-4496-8BCA-5EF66A818D29}"),
+];
+
+/** PowerPoint-style table style thumbnails: the menu previews the fill/grid
+ *  contract behind each official GUID instead of leaving text-only rows. */
+const tableStylePreview = (background: string, body: string): string =>
+  `<svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><rect x="2.5" y="4.5" width="19" height="15" rx="1.5" fill="${background}" stroke="#595959"/>${body}</svg>`;
+
+const TABLE_STYLE_PREVIEWS: Record<string, string> = {
+  none: tableStylePreview(
+    "#ffffff",
+    '<path d="M8.5 5v14M15.5 5v14M3 10h18M3 15h18" stroke="#bfbfbf" stroke-dasharray="2 2"/>',
+  ),
+  grid: tableStylePreview(
+    "#ffffff",
+    '<path d="M8.5 5v14M15.5 5v14M3 10h18M3 15h18" stroke="#4472c4"/>',
+  ),
+  light1: tableStylePreview(
+    "#ffffff",
+    '<rect x="3" y="5" width="18" height="5" fill="#d9e2f3"/><path d="M8.5 5v14M15.5 5v14M3 10h18M3 15h18" stroke="#8faadc"/>',
+  ),
+  medium2: tableStylePreview(
+    "#ffffff",
+    '<rect x="3" y="5" width="18" height="5" fill="#4472c4"/><rect x="3" y="10" width="18" height="5" fill="#d9e2f3"/><path d="M8.5 5v14M15.5 5v14M3 10h18M3 15h18" stroke="#ffffff"/>',
+  ),
+  dark2: tableStylePreview(
+    "#1f4e79",
+    '<path d="M8.5 5v14M15.5 5v14M3 10h18M3 15h18" stroke="#ffffff"/>',
+  ),
+};
+
+for (const style of TABLE_STYLES)
+  registerIcon(style.value, TABLE_STYLE_PREVIEWS[style.text.split(".").at(-1)!]!);
 
 const TEXT_DIRECTIONS = [
   { text: "ppt.ribbon.textDirection.horizontal", value: "horizontal" },
@@ -292,7 +338,12 @@ export function tableDesignTab(): RibbonTab {
           })),
         },
       ]),
-      group("table-styles", [splitBtn("table-style", cmd("table-style"), [...TABLE_STYLES])]),
+      group("table-styles", [
+        splitBtn("table-style", cmd("table-style"), [...TABLE_STYLES], {
+          icon: TABLE_STYLES[3]!.value,
+          size: "large",
+        }),
+      ]),
       group("table-shading", [
         {
           type: "color-picker",
@@ -304,7 +355,10 @@ export function tableDesignTab(): RibbonTab {
         },
       ]),
       group("table-borders", [
-        splitBtn("table-borders", cmd("table-borders"), tableBorderItems(), { icon: "border" }),
+        splitBtn("table-borders", cmd("table-borders"), tableBorderItems(), {
+          icon: "border",
+          size: "large",
+        }),
       ]),
     ],
   };
@@ -319,15 +373,15 @@ export function tableLayoutTab(): RibbonTab {
     contextual: true,
     groups: [
       group("rows-columns", [
-        columnOf(
-          rowOf(
-            btn("insert-above", cmd("insert-above"), { icon: "row-insert-above", iconOnly: true }),
-            btn("insert-below", cmd("insert-below"), { icon: "row-insert-below", iconOnly: true }),
+        rowOf(
+          columnOf(
+            btn("insert-above", cmd("insert-above"), { icon: "table-stack-above", iconOnly: true }),
+            btn("insert-below", cmd("insert-below"), { icon: "table-stack-below", iconOnly: true }),
           ),
-          rowOf(
-            btn("insert-left", cmd("insert-left"), { icon: "column-insert-left", iconOnly: true }),
+          columnOf(
+            btn("insert-left", cmd("insert-left"), { icon: "table-stack-left", iconOnly: true }),
             btn("insert-right", cmd("insert-right"), {
-              icon: "column-insert-right",
+              icon: "table-stack-right",
               iconOnly: true,
             }),
           ),
@@ -342,74 +396,57 @@ export function tableLayoutTab(): RibbonTab {
             { text: "ppt.ribbon.tableDelete.columns", value: "columns" },
             { text: "ppt.ribbon.tableDelete.table", value: "table" },
           ],
-          { icon: "delete-slide" },
+          { icon: "table-delete", size: "large" },
         ),
       ]),
       group("merge", [
-        btn("merge-cells", cmd("merge-cells"), { icon: "merge-cells" }),
-        btn("split-cells", cmd("split-cells"), { icon: "split-cells" }),
+        btn("merge-cells", cmd("merge-cells"), { icon: "merge-cells", size: "large" }),
+        btn("split-cells", cmd("split-cells"), { icon: "split-cells", size: "large" }),
       ]),
       group("cell-size", [
-        input("cell-height", ""),
-        input("cell-width", ""),
         rowOf(
-          btn("distribute-rows", cmd("distribute-rows"), {
-            icon: "distribute-rows",
-            iconOnly: true,
-          }),
-          btn("distribute-columns", cmd("distribute-columns"), {
-            icon: "distribute-columns",
-            iconOnly: true,
-          }),
+          columnOf(
+            input("cell-height", "", { label: cmd("cell-height") }),
+            input("cell-width", "", { label: cmd("cell-width") }),
+          ),
+          columnOf(
+            btn("distribute-rows", cmd("distribute-rows"), {
+              icon: "distribute-rows",
+              iconOnly: true,
+            }),
+            btn("distribute-columns", cmd("distribute-columns"), {
+              icon: "distribute-columns",
+              iconOnly: true,
+            }),
+          ),
         ),
       ]),
       group("cell-alignment", [
-        rowOf(
-          btn("table-align", cmd("align-left"), {
-            value: "left",
-            icon: "align-left",
-            iconOnly: true,
-          }),
-          btn("table-align", cmd("align-center"), {
-            value: "center",
-            icon: "align-center",
-            iconOnly: true,
-          }),
-          btn("table-align", cmd("align-right"), {
-            value: "right",
-            icon: "align-right",
-            iconOnly: true,
-          }),
+        splitBtn(
+          "table-align",
+          cmd("table-align"),
+          [
+            { text: "ppt.ribbon.cmd.align-left", value: "left" },
+            { text: "ppt.ribbon.cmd.align-center", value: "center" },
+            { text: "ppt.ribbon.cmd.align-right", value: "right" },
+            { text: "ppt.ribbon.cmd.align-top", value: "top" },
+            { text: "ppt.ribbon.cmd.align-middle", value: "middle" },
+            { text: "ppt.ribbon.cmd.align-bottom", value: "bottom" },
+          ],
+          { icon: "align-center", size: "large" },
         ),
-        rowOf(
-          btn("table-align", cmd("align-top"), { value: "top", icon: "align-top", iconOnly: true }),
-          btn("table-align", cmd("align-middle"), {
-            value: "middle",
-            icon: "align-middle",
-            iconOnly: true,
-          }),
-          btn("table-align", cmd("align-bottom"), {
-            value: "bottom",
-            icon: "align-bottom",
-            iconOnly: true,
-          }),
-        ),
-        rowOf(
-          splitBtn("text-direction", cmd("text-direction"), TEXT_DIRECTIONS, {
-            icon: "text-direction",
-            iconOnly: true,
-          }),
-          splitBtn("cell-margins", cmd("cell-margins"), CELL_MARGINS, {
-            icon: "cell-margin",
-            iconOnly: true,
-          }),
-        ),
+        splitBtn("text-direction", cmd("text-direction"), TEXT_DIRECTIONS, {
+          icon: "text-direction",
+          size: "large",
+        }),
+        splitBtn("cell-margins", cmd("cell-margins"), CELL_MARGINS, {
+          icon: "cell-margin",
+          size: "large",
+        }),
       ]),
       group("table-arrange", [
-        rowOf(
-          btn("bring-front", cmd("bring-front"), { icon: "bring-front", iconOnly: true }),
-          btn("send-back", cmd("send-back"), { icon: "send-back", iconOnly: true }),
-        ),
+        btn("bring-front", cmd("bring-front"), { icon: "bring-front", size: "large" }),
+        btn("send-back", cmd("send-back"), { icon: "send-back", size: "large" }),
       ]),
     ],
   };
@@ -424,13 +461,11 @@ export function presentationRibbonTabs(): RibbonTab[] {
         group("clipboard", [btn("paste", cmd("paste"), { icon: "paste", size: "large" })]),
         group("slides", [
           btn("new-slide", cmd("new-slide"), { icon: "new", size: "large" }),
-          columnOf(
-            btn("delete-slide", cmd("delete-slide"), { icon: "delete-slide", iconOnly: true }),
-            btn("duplicate-slide", cmd("duplicate-slide"), {
-              icon: "duplicate-slide",
-              iconOnly: true,
-            }),
-          ),
+          btn("delete-slide", cmd("delete-slide"), { icon: "delete-slide", size: "large" }),
+          btn("duplicate-slide", cmd("duplicate-slide"), {
+            icon: "duplicate-slide",
+            size: "large",
+          }),
           btn("layout", cmd("layout"), { icon: "page-size", size: "large" }),
           btn("reset", cmd("reset"), { icon: "sync", size: "large" }),
           btn("section", cmd("section"), { icon: "columns", size: "large" }),
@@ -517,14 +552,10 @@ export function presentationRibbonTabs(): RibbonTab[] {
           btn("text-box", cmd("text-box"), { icon: "text-box", size: "large" }),
           btn("header-footer", cmd("header-footer"), { icon: "header", size: "large" }),
           btn("wordart", cmd("wordart"), { icon: "wordart", size: "large" }),
-          columnOf(
-            btn("date-time", cmd("date-time"), { icon: "date-time", iconOnly: true }),
-            btn("slide-number", cmd("slide-number"), { icon: "page-number", iconOnly: true }),
-          ),
-          columnOf(
-            btn("object", cmd("object"), { icon: "object", iconOnly: true }),
-            btn("symbol", cmd("symbol"), { icon: "symbol", iconOnly: true }),
-          ),
+          btn("date-time", cmd("date-time"), { icon: "date-time", size: "large" }),
+          btn("slide-number", cmd("slide-number"), { icon: "page-number", size: "large" }),
+          btn("object", cmd("object"), { icon: "object", size: "large" }),
+          btn("symbol", cmd("symbol"), { icon: "symbol", size: "large" }),
         ]),
         group("media", [
           btn("video", cmd("video"), { icon: "video", size: "large" }),
@@ -573,6 +604,7 @@ export function presentationRibbonTabs(): RibbonTab[] {
             cmd("transition"),
             TRANSITIONS.map((value) => ({
               text: `ppt.ribbon.transition.${value}`,
+              icon: `transition-${value}`,
               value,
             })),
             { icon: "transition", size: "large" },
@@ -584,7 +616,7 @@ export function presentationRibbonTabs(): RibbonTab[] {
               text: `ppt.ribbon.effectOptions.${value}`,
               value,
             })),
-            { size: "large" },
+            { icon: "effect-options", size: "large" },
           ),
           btn("apply-to-all", cmd("apply-to-all"), { icon: "repeat", size: "large" }),
         ]),
@@ -650,13 +682,9 @@ export function presentationRibbonTabs(): RibbonTab[] {
         group("show", [btn("gridlines", cmd("gridlines"), { icon: "gridlines", size: "large" })]),
         // Zoom is the one wired group: the stage scales with it.
         group("zoom", [
-          columnOf(
-            rowOf(
-              btn("zoom-out", cmd("zoom-out"), { icon: "zoom-out", iconOnly: true }),
-              btn("zoom-in", cmd("zoom-in"), { icon: "zoom-in", iconOnly: true }),
-            ),
-            rowOf(btn("zoom-100", cmd("zoom-100"))),
-          ),
+          btn("zoom-out", cmd("zoom-out"), { icon: "zoom-out", size: "large" }),
+          btn("zoom-in", cmd("zoom-in"), { icon: "zoom-in", size: "large" }),
+          btn("zoom-100", cmd("zoom-100"), { icon: "zoom-in", size: "large" }),
         ]),
       ],
     },

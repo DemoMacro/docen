@@ -15,6 +15,8 @@ const template = html<DocenRibbonInput>`
   <fluent-text-input
     appearance="outline"
     part="field"
+    aria-label="${(x) => x.visibleLabel}"
+    title="${(x) => x.visibleLabel}"
     value="${(x) => x.hostValue ?? ""}"
     :currentValue="${(x) => x.hostValue ?? ""}"
     ${ref("field")}
@@ -32,10 +34,15 @@ const template = html<DocenRibbonInput>`
 class DocenRibbonInput extends FASTElement {
   @attr({ attribute: "value" }) hostValue?: string;
   @attr event?: string;
+  @attr label?: string;
 
   field?: HTMLElement & { currentValue: string };
 
   private lastCommit = "";
+
+  get visibleLabel(): string {
+    return this.label ?? "";
+  }
 
   connectedCallback(): void {
     super.connectedCallback();

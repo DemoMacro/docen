@@ -1277,6 +1277,7 @@ class DocenPresentation extends AddinHost {
   #setTableSelection(range: TableSelectionRange | null): void {
     this.#tableSelection = range;
     this.#tableOverlay?.setSelection(range);
+    this.#syncTableCellSizeControls();
     if (range) this.#clearTableCellTextSelection();
     else this.#syncTableCellTextSelection();
   }
@@ -1846,6 +1847,7 @@ class DocenPresentation extends AddinHost {
     this.#textEditor = editor;
     this.#tableEdit = { row: cell.row, col: cell.col };
     this.#tableEditBefore = structuredClone(source);
+    this.#syncTableCellSizeControls();
     this.#syncTableCellTextSelection();
     this.#restoreOverlay();
   }
@@ -4523,6 +4525,7 @@ class DocenPresentation extends AddinHost {
     };
     this.#pushEdit({ undo: () => restore(before), redo: () => restore(after) });
     this.#reproject(found.slide);
+    this.#syncTableCellSizeControls();
   }
 
   /** PowerPoint's Table Style Options: the six official tblLook flags. */
@@ -4817,20 +4820,21 @@ class DocenPresentation extends AddinHost {
     };
   }
 
-  /** A typed ribbon measure as centimetres; the official model stays EMU. */
-  #centimetersOf(value?: string): number | null {
-    const match = value?.match(/-?\d+(?:\.\d+)?/);
-    const cm = match ? Number(match[0]) : Number.NaN;
-    return Number.isFinite(cm) && cm > 0 ? cm : null;
+  /** A typed ribbon measure as EMU; a bare number reads as centimetres. */
+  #emuOf(value?: string): number | null {
+    const text = value?.trim() ?? "";
+    const bare = /^-?\d+(?:\.\d+)?$/.exec(text);
+    const cm = bare ? Number(text) : Number.NaN;
+    const emu = Number.isFinite(cm) ? Math.round(cm * 360000) : measureEmu(text);
+    return emu != null && emu > 0 ? emu : null;
   }
 
   /** Cell Size boxes write row heights / column widths in EMU; missing width
    *  tracks are materialized from the official table width first. */
   #setTableCellSize(kind: "height" | "width", value?: string): void {
-    const cm = this.#centimetersOf(value);
+    const emu = this.#emuOf(value);
     const selection = this.#tableGridSelection();
-    if (cm == null || !selection) return;
-    const emu = Math.round(cm * 360000);
+    if (emu == null || !selection) return;
     this.#mutateSelectedTable((table) => {
       if (kind === "height") {
         for (let row = selection.fromRow; row <= selection.toRow; row += 1)
@@ -5346,6 +5350,53 @@ class DocenPresentation extends AddinHost {
       ["font-size", size],
     ] as const) {
       const box = root.querySelector<HTMLElement>(`docen-ribbon-combobox[event='${event}']`);
+      if (box && box.getAttribute("value") !== value) box.setAttribute("value", value);
+    }
+  }
+
+  /** Stamp Cell Size from the selected grid range; mixed extents stay blank. */
+  #syncTableCellSizeControls(): void {
+    const root = this.shadowRoot;
+    const found = this.#tableMemberOf();
+    const selection = this.#tableGridSelection();
+    if (!root || !found || !selection) return;
+    const commonEmu = (values: unknown[]): number | null => {
+      const known = values
+        .map((value) => measureEmu(value))
+        .filter((value): value is number => value != null);
+      return known.length === values.length &&
+        known.length > 0 &&
+        known.every((value) => value === known[0])
+        ? known[0]
+        : null;
+    };
+    const height = commonEmu(
+      Array.from({ length: selection.toRow - selection.fromRow + 1 }, (_, index) => {
+        const row = selection.fromRow + index;
+        return (
+          found.table.rows[row]?.height ??
+          Math.round((found.member.table.rows[row]?.heightPx ?? 0) * (914400 / 96))
+        );
+      }),
+    );
+    const columns = tableGridOf(found.table).columns;
+    const width = commonEmu(
+      Array.from({ length: selection.toCol - selection.fromCol + 1 }, (_, index) => {
+        const column = selection.fromCol + index;
+        return (
+          found.table.columnWidths?.[column] ??
+          (Math.round((found.member.table.columnWidthsPx[column] ?? 0) * (914400 / 96)) ||
+            Math.round((measureEmu(found.table.width) ?? 0) / Math.max(1, columns)))
+        );
+      }),
+    );
+    const format = (emu: number | null): string =>
+      emu == null ? "" : `${(emu / 360000).toFixed(2)} cm`;
+    for (const [event, value] of [
+      ["cell-height", format(height)],
+      ["cell-width", format(width)],
+    ] as const) {
+      const box = root.querySelector<HTMLElement>(`docen-ribbon-input[event='${event}']`);
       if (box && box.getAttribute("value") !== value) box.setAttribute("value", value);
     }
   }

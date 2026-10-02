@@ -5,6 +5,8 @@
 
 import { css, html, ref } from "@microsoft/fast-element";
 
+import { ribbonLayoutStyles } from "../document/chrome";
+
 /** Escape a host-supplied string for safe interpolation into innerHTML. The
  *  `filename` attribute comes from a user-selected File.name, which can
  *  contain markup — without escaping it flows into #renderHeader's template
@@ -15,6 +17,7 @@ export const escapeHtml = (s: string): string =>
   );
 
 export const presentationStyles = css`
+  ${ribbonLayoutStyles}
   :host {
     display: flex;
     flex-direction: column;

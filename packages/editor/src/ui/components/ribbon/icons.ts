@@ -146,6 +146,7 @@ import textSuperscript from "@fluentui/svg-icons/icons/text_superscript_24_regul
 import textUnderline from "@fluentui/svg-icons/icons/text_underline_24_regular.svg?raw";
 import textWrap from "@fluentui/svg-icons/icons/text_wrap_24_regular.svg?raw";
 import video from "@fluentui/svg-icons/icons/video_24_regular.svg?raw";
+import videoBackgroundEffect from "@fluentui/svg-icons/icons/video_background_effect_24_regular.svg?raw";
 import appLogo from "@fluentui/svg-icons/icons/window_apps_24_regular.svg?raw";
 import zoomIn from "@fluentui/svg-icons/icons/zoom_in_24_regular.svg?raw";
 import zoomOut from "@fluentui/svg-icons/icons/zoom_out_24_regular.svg?raw";
@@ -366,6 +367,7 @@ const RIBBON_ICONS: Record<string, string> = {
   video,
   audio: speaker,
   transition: slideTransition,
+  "effect-options": videoBackgroundEffect,
   animate: star,
   "add-animation": starAdd,
   "from-beginning": slidePlay,
@@ -380,6 +382,72 @@ const RIBBON_ICONS: Record<string, string> = {
   "bring-front": layerDiagonal,
   "send-back": layer,
 };
+
+/** Miniature slide previews for PowerPoint-style transition galleries. */
+const transitionTile = (body: string): string =>
+  `<svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><rect x="2.5" y="4.5" width="19" height="15" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/>${body}</svg>`;
+
+const transitionIcon = (body: string): string => transitionTile(body);
+const animationIcon = (body: string): string =>
+  `<svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">${body}</svg>`;
+
+const starPath =
+  "M12 4.4l2.1 4.4 4.8.6-3.5 3.3.9 4.8L12 15.2l-4.3 2.3.9-4.8L5.1 9.4l4.8-.6L12 4.4z";
+
+const transitionPreviewIcons: Record<string, string> = {
+  "transition-none": transitionIcon(
+    '<path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity=".55"/>',
+  ),
+  "transition-fade": transitionIcon(
+    '<rect x="6" y="8" width="12" height="8" rx="1" fill="currentColor" opacity=".28"/><rect x="9" y="10" width="6" height="4" rx="1" fill="currentColor" opacity=".65"/>',
+  ),
+  "transition-push": transitionIcon(
+    '<path d="M4 12h11m0-4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>',
+  ),
+  "transition-wipe": transitionIcon(
+    '<rect x="5" y="7.5" width="9" height="9" fill="currentColor" opacity=".65"/><path d="M15 7.5l4.5 4.5L15 16.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>',
+  ),
+  "transition-split": transitionIcon(
+    '<path d="M12 5v14" stroke="currentColor" stroke-width="1.4"/><path d="M4 6.5l6 5.5-6 5.5V6.5zM20 6.5V17.5l-6-5.5 6-5.5z" fill="currentColor" opacity=".65"/>',
+  ),
+  "transition-blinds": transitionIcon(
+    '<path d="M6.5 5v14M12 5v14M17.5 5v14" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>',
+  ),
+  "transition-checker": transitionIcon(
+    '<rect x="5" y="7" width="6" height="5" fill="currentColor" opacity=".65"/><rect x="13" y="12" width="6" height="5" fill="currentColor" opacity=".65"/>',
+  ),
+  "transition-dissolve": transitionIcon(
+    '<g fill="currentColor"><circle cx="6.5" cy="8" r="1.15"/><circle cx="12" cy="12" r="1.15"/><circle cx="17.5" cy="8" r="1.15"/><circle cx="8" cy="15.5" r="1.15"/><circle cx="16" cy="16" r="1.15"/></g>',
+  ),
+  "transition-circle": transitionIcon(
+    '<circle cx="12" cy="12" r="5" fill="currentColor" opacity=".65"/><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.25" opacity=".55"/>',
+  ),
+  "transition-wheel": transitionIcon(
+    '<g stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M12 4v16M4 12h16M6.5 6.5l11 11M17.5 6.5l-11 11"/></g>',
+  ),
+  "transition-zoom": transitionIcon(
+    '<rect x="7.5" y="8.5" width="9" height="7" rx="1" fill="currentColor" opacity=".7"/><path d="M4.5 4.5v3M19.5 4.5v3M4.5 19.5v-3M19.5 19.5v-3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>',
+  ),
+  "transition-random": transitionIcon(
+    '<g fill="currentColor"><rect x="5.5" y="7" width="5" height="5" rx="1"/><rect x="13.5" y="12" width="5" height="5" rx="1"/><circle cx="16" cy="9.5" r="1.3"/><circle cx="8" cy="14.5" r="1.3"/></g>',
+  ),
+};
+
+const animationPreviewIcons: Record<string, string> = {
+  "animation-none": animationIcon(
+    `<path d="${starPath}" fill="none" stroke="currentColor" stroke-width="1.5" opacity=".6"/><path d="M5.5 5.5l13 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>`,
+  ),
+  "animation-appear": animationIcon(`<path d="${starPath}" fill="currentColor"/>`),
+  "animation-fade": animationIcon(`<path d="${starPath}" fill="currentColor" opacity=".45"/>`),
+  "animation-fly": animationIcon(
+    `<path d="${starPath}" fill="currentColor" opacity=".7"/><path d="M3 17.5h11m0-3.5l3.5 3.5L14 21" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>`,
+  ),
+  "animation-zoom": animationIcon(
+    `<path d="${starPath}" fill="currentColor" opacity=".7"/><path d="M4 8V4h4M20 8V4h-4M4 16v4h4M20 16v4h-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>`,
+  ),
+};
+
+Object.assign(RIBBON_ICONS, transitionPreviewIcons, animationPreviewIcons);
 
 /** Raw SVG markup for a known icon name, else `null`. */
 export function ribbonIcon(name: string): string | null {
