@@ -86,6 +86,11 @@ export {
   type StyleEntry,
 } from "./style-cascade";
 
+// Numbering (list) level index — the same reference → levels table the layout
+// projection resolves markers against, for editor-side list-number probes
+// (the cross-reference commit's `\n` paragraph numbers).
+export { indexNumberings, type NumberingLevel } from "./layout/numbering";
+
 // Preset geometry evaluator (ECMA-376 prstGeom → SVG path data), shared by the
 // layout projection (non-box shapes become path members) and the editor's
 // shapes gallery (live SVG previews) so both render from one evaluator. The

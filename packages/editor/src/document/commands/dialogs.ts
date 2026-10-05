@@ -1,16 +1,26 @@
 import type { ChartOptions, JSONContent, StylesOptions } from "@docen/docx";
 import {
   buildCustomMultilevelLevels,
+  buildListLevels,
   detectHeadingLevel,
+  indexNumberings,
   nextMultilevelReference,
 } from "@docen/docx";
 import type { Editor } from "@docen/docx/core";
+import { formatNumber } from "@docen/layout";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { NodeSelection, TextSelection } from "@tiptap/pm/state";
 import { DocAttrStep } from "@tiptap/pm/transform";
 
 import type { FontDialogPatch } from "../../ui/components/workspace/font-dialog";
 import { textCounter, wordCounter } from "../addin";
+import {
+  CROSS_REFERENCE_CONTENTS,
+  crossReferenceContentAvailable,
+  crossReferenceInstruction,
+  type CrossRefContent,
+  type CrossReferenceTarget,
+} from "../cross-reference";
 import type {
   ChartDataPatch,
   DrawingPropertiesPatch,
@@ -50,6 +60,27 @@ interface NoteExtras {
   contentTypes?: { overrides?: Array<{ partName?: string; contentType?: string }> };
   [key: string]: unknown;
 }
+
+/** The run between a caption's label+number and its text — Word's separator
+ *  options (hyphen/period/colon/en dash/em dash) plus the classic space and
+ *  CJK colon/period, stripped when the caption text starts. */
+const CAPTION_SEPARATOR = /^[\s:：\-—–.。]+/;
+const CAPTION_SEPARATOR_CHAR = /[\s:：\-—–.。]/;
+
+/** Zero-width passthrough marks (w:bookmarkStart/End, comment range markers,
+ *  proofing markers) — they occupy a position but carry no content, so a
+ *  content-range scan must step past them. */
+const MARK_PASSTHROUGH_KEYS = [
+  "bookmarkStart",
+  "bookmarkEnd",
+  "commentRangeStart",
+  "commentRangeEnd",
+  "proofErr",
+] as const;
+
+/** Fields whose value reads the bookmark table — Update All Fields resolves
+ *  them after the pass that renumbers captions (see the two phases). */
+const BOOKMARK_FIELD_NAMES = new Set(["REF", "PAGEREF", "NOTEREF"]);
 
 /** One caption label's settings entry (settings.xml `w:captions/w:caption`,
  *  carried in documentExtras.settings) — the per-label chapter-number shape
@@ -105,6 +136,9 @@ export interface DialogsHost {
    *  PAGEREF) — the pagination's own view of the caret. Absent headless:
    *  page-dependent fields keep their cached value. */
   fieldFrame?: (pos: number) => FieldFrame | undefined;
+  /** The UI language's "above"/"below" for the `\p` switch (Word renders the
+   *  words in the document language). Absent = English. */
+  positionTerms?: () => { above: string; below: string };
 }
 
 /**
@@ -664,50 +698,438 @@ export class DialogCommands {
     return extras;
   }
 
-  /** The document's referenceable bookmarks for the cross-reference dialog —
-   *  a caption's `_Ref` pair (its inner text reads "图 1") plus the user's
-   *  own bookmarks, each with its bookmark position for PAGEREF page lookups. */
-  crossReferenceTargets(): { name: string; text: string; kind: string; pos: number }[] {
-    const target = this.#target();
-    if (!target) return [];
-    const out: { name: string; text: string; kind: string; pos: number }[] = [];
-    target.state.doc.descendants((node, pos) => {
-      if (node.type.name !== "paragraph") return true;
-      let name = "";
-      let open = false;
-      let text = "";
-      node.forEach((child) => {
-        if (child.type.name === "inlinePassthrough") {
-          try {
-            const data = JSON.parse(String(child.attrs.data ?? "{}")) as {
-              bookmarkStart?: { name?: string };
-              bookmarkEnd?: unknown;
-              simpleField?: { cachedValue?: string };
-            };
-            if (data.bookmarkStart?.name && !open) {
-              name = data.bookmarkStart.name;
-              open = true;
-              return;
-            }
-            if (data.bookmarkEnd && open) {
-              open = false;
-              return;
-            }
-            if (open && data.simpleField) text += String(data.simpleField.cachedValue ?? "");
-          } catch {
-            // opaque verbatim blobs — skip
-          }
-        } else if (open && child.type.name === "text") {
-          text += child.textContent ?? "";
+  // ── Cross-reference targets (交叉引用) ──
+  // The scan classifies each paragraph: caption (Caption style / SEQ field),
+  // heading (detectHeadingLevel), numbered item (a resolvable list number),
+  // otherwise the bookmarks it carries are user targets. Note reference atoms
+  // are their own targets. Word creates a hidden `_Ref…` bookmark around a
+  // referenced heading/numbered item on first use; the commit does the same
+  // (onCrossRefOk), while captions/user bookmarks keep their existing one.
+
+  /** One bookmark pair inside a paragraph: name plus the inner (start..end)
+   *  range. */
+  #bookmarkPairs(node: PMNode, pos: number): { name: string; from: number; to: number }[] {
+    const open: { id?: number; name: string; from: number }[] = [];
+    const out: { name: string; from: number; to: number }[] = [];
+    node.forEach((child, offset) => {
+      if (child.type.name !== "inlinePassthrough") return;
+      const at = pos + 1 + offset;
+      try {
+        const data = JSON.parse(String(child.attrs.data ?? "{}")) as {
+          bookmarkStart?: { id?: number; name?: string };
+          bookmarkEnd?: { id?: number };
+        };
+        if (data.bookmarkStart?.name) {
+          open.push({
+            id: data.bookmarkStart.id,
+            name: data.bookmarkStart.name,
+            from: at + child.nodeSize,
+          });
+          return;
         }
+        if (data.bookmarkEnd) {
+          const index =
+            data.bookmarkEnd.id != null
+              ? open.findIndex((entry) => entry.id === data.bookmarkEnd!.id)
+              : 0;
+          const hit = open[index >= 0 ? index : 0];
+          if (!hit) return;
+          out.push({ name: hit.name, from: hit.from, to: at });
+          open.splice(index >= 0 ? index : 0, 1);
+        }
+      } catch {
+        // opaque verbatim blob — not a bookmark pair
+      }
+    });
+    return out;
+  }
+
+  /** The plain text inside [from, to): text runs, field caches, and the note
+   *  reference atoms' displayed numbers (the projection's first-reference
+   *  ordinal — endnotes keep their lowercase-Roman look). */
+  #crossRefText(
+    node: PMNode,
+    pos: number,
+    from: number,
+    to: number,
+    notes: Map<number, { kind: "footnote" | "endnote"; id: number; display: string }>,
+  ): string {
+    let text = "";
+    node.forEach((child, offset) => {
+      const at = pos + 1 + offset;
+      const end = at + child.nodeSize;
+      if (at < from || end > to) return;
+      if (child.type.name === "text") {
+        text += child.textContent;
+        return;
+      }
+      if (child.type.name !== "inlinePassthrough") return;
+      const note = notes.get(at);
+      if (note) {
+        text += note.display;
+        return;
+      }
+      const data = child.attrs.data;
+      if (typeof data !== "string") return;
+      try {
+        const ref = fieldRef(JSON.parse(data) as Record<string, unknown>);
+        if (ref?.result != null) text += ref.result;
+      } catch {
+        // opaque verbatim blob — not a field
+      }
+    });
+    return text;
+  }
+
+  /** The paragraph's first SEQ field's label ("Figure" in `SEQ Figure \* …`),
+   *  or null — the caption scan's rule (same read as the table-of-figures). */
+  #seqLabelOf(node: PMNode): string | null {
+    let label: string | null = null;
+    node.forEach((child) => {
+      if (label || child.type.name !== "inlinePassthrough") return;
+      try {
+        const data = JSON.parse(String(child.attrs.data ?? "{}")) as {
+          simpleField?: { instruction?: string };
+        };
+        const m = /^SEQ\s+(\S+)/i.exec((data.simpleField?.instruction ?? "").trim());
+        if (m) label = m[1]!;
+      } catch {
+        // opaque payload — not a SEQ field
+      }
+    });
+    return label;
+  }
+
+  /** The end position of the paragraph's first SEQ field (inclusive), or
+   *  null — the label+number range of a bookmark-less caption. */
+  #seqEnd(node: PMNode, pos: number): number | null {
+    let end: number | null = null;
+    node.forEach((child, offset) => {
+      if (end != null || child.type.name !== "inlinePassthrough") return;
+      try {
+        const data = JSON.parse(String(child.attrs.data ?? "{}")) as {
+          simpleField?: { instruction?: string };
+        };
+        if (/^SEQ\s/i.test((data.simpleField?.instruction ?? "").trim()))
+          end = pos + 1 + offset + child.nodeSize;
+      } catch {
+        // opaque payload — not a SEQ field
+      }
+    });
+    return end;
+  }
+
+  /** The absolute position of a caption's first non-separator character at or
+   *  after `from` (Word's "Only caption text" starts past the separator).
+   *  Zero-width marks — the label's `bookmarkEnd` sits exactly at `from` —
+   *  are not text; the scan steps past them to the first real character (or
+   *  inline atom), so the resulting bookmark never carries the separator. */
+  #captionTextStart(node: PMNode, pos: number, from: number): number | undefined {
+    let start: number | undefined;
+    node.forEach((child, offset) => {
+      if (start != null) return;
+      const at = pos + 1 + offset;
+      const end = at + child.nodeSize;
+      if (end <= from) return;
+      if (child.type.name === "text") {
+        const text = child.textContent;
+        for (let i = Math.max(0, from - at); i < text.length; i++) {
+          if (!CAPTION_SEPARATOR_CHAR.test(text[i]!)) {
+            start = at + i;
+            return;
+          }
+        }
+        return;
+      }
+      if (child.type.name === "inlinePassthrough") {
+        const data = child.attrs.data;
+        if (typeof data === "string") {
+          try {
+            const branch = JSON.parse(data) as Record<string, unknown>;
+            if (MARK_PASSTHROUGH_KEYS.some((key) => key in branch)) return;
+          } catch {
+            /* opaque verbatim blob — treated as content below */
+          }
+        }
+      }
+      if (at >= from) start = at;
+    });
+    return start;
+  }
+
+  /** Paragraph position → its rendered list number ("1", "1.1", "第1章"),
+   *  trailing periods stripped (Word's REF `\n` shape). The counter walk
+   *  mirrors the projection's marker substitution (per-reference counters,
+   *  deeper levels reset) over the doc's numbering definitions plus the
+   *  generated ones editor-created lists compile to. Style-chain numbering
+   *  is not resolved — the runtime model carries it only in the style
+   *  definition the per-paragraph projection expands, so a heading numbered
+   *  through its style has no `\n` value here (documented deferral). */
+  #paragraphNumbers(doc: PMNode): Map<number, string> {
+    const definitions = indexNumberings((doc.attrs as { numbering?: unknown }).numbering);
+    const generated = new Map<string, { format: string; text: string }[]>();
+    const levelsOf = (reference: string): { format: string; text: string }[] => {
+      const own = definitions.get(reference);
+      if (own) return own;
+      let built = generated.get(reference);
+      if (!built) {
+        built = (buildListLevels(reference) ?? []).map((level) => ({
+          format: level.format != null ? String(level.format) : "decimal",
+          text: level.text ?? "",
+        }));
+        if (built.length > 0) generated.set(reference, built);
+      }
+      return built;
+    };
+    const counters = new Map<string, number[]>();
+    const out = new Map<number, string>();
+    doc.descendants((node, pos) => {
+      if (node.type.name !== "paragraph") return true;
+      const attrs = node.attrs as Record<string, unknown>;
+      // The built-in bullet sugar has no level definition and no number.
+      if (attrs.bullet) return true;
+      const reference = (attrs.numbering as { reference?: string } | null | undefined)?.reference;
+      if (typeof reference !== "string" || !reference) return true;
+      const level = Number((attrs.numbering as { level?: number }).level) || 0;
+      const index = Math.max(0, Math.min(8, Math.trunc(level)));
+      const levels = levelsOf(reference);
+      const def = levels[index];
+      if (!def || def.format === "bullet" || def.format === "none") return true;
+      const counts = counters.get(reference) ?? [];
+      counters.set(reference, counts);
+      counts[index] = (counts[index] ?? 0) + 1;
+      counts.length = index + 1;
+      const marker = (def.text || "%1.").replace(/%([1-9])/g, (_, k: string) => {
+        const at = Number(k) - 1;
+        return formatNumber(levels[at]?.format ?? def.format, counts[at] ?? 1);
       });
-      if (name)
-        out.push({
-          name,
-          text: text.trim(),
-          kind: name.startsWith("_Ref") ? "caption" : "bookmark",
-          pos,
+      out.set(pos, marker.replace(/[.。]+$/, ""));
+      return true;
+    });
+    return out;
+  }
+
+  /** The document's cross-reference candidates: caption, heading, numbered
+   *  item, bookmark, footnote, and endnote targets in document order, each
+   *  with its referenceable text and the range a hidden bookmark wraps. */
+  crossReferenceTargets(): CrossReferenceTarget[] {
+    const editor = this.#target();
+    if (!editor) return [];
+    return this.#crossReferenceTargetsIn(editor, editor.state.doc);
+  }
+
+  /** The candidate scan over one document snapshot — Update All Fields runs
+   *  it again against the transaction's phase-1 doc so references quote the
+   *  numbering just written (positions are stable: attribute patches keep
+   *  node sizes). */
+  #crossReferenceTargetsIn(editor: Editor, doc: PMNode): CrossReferenceTarget[] {
+    const attrs = doc.attrs as { styles?: StylesOptions; documentExtras?: unknown };
+    const styles = attrs.styles;
+    const extras = (attrs.documentExtras ?? {}) as NoteExtras;
+    const numbers = this.#paragraphNumbers(doc);
+    const ordinals = { footnote: new Map<number, number>(), endnote: new Map<number, number>() };
+    const out: CrossReferenceTarget[] = [];
+    const pageAt = (pos: number): number | undefined => {
+      const frame = this.#frameAt(editor, pos);
+      const physical = this.host.bridge()?.pageOf(pos);
+      return frame?.page ?? (typeof physical === "number" ? physical + 1 : undefined);
+    };
+
+    doc.descendants((node, pos) => {
+      if (node.type.name !== "paragraph") return true;
+      const nodeAttrs = node.attrs as Record<string, unknown>;
+      const pairs = this.#bookmarkPairs(node, pos);
+      const contentFrom = pos + 1;
+      const contentTo = pos + 1 + node.content.size;
+      const page = pageAt(pos);
+
+      // Note reference atoms: the projection's first-reference-order ordinal
+      // becomes the displayed number (`NOTEREF`'s value).
+      const notes = new Map<
+        number,
+        { kind: "footnote" | "endnote"; id: number; display: string }
+      >();
+      node.forEach((child, offset) => {
+        if (child.type.name !== "inlinePassthrough") return;
+        const data = child.attrs.data;
+        if (typeof data !== "string") return;
+        let ref: ReturnType<typeof noteRefId>;
+        try {
+          ref = noteRefId(JSON.parse(data) as Record<string, unknown>);
+        } catch {
+          return;
+        }
+        if (!ref || ref.id == null) return;
+        const kind = ref.kind === "endnoteReference" ? "endnote" : "footnote";
+        const seen = ordinals[kind];
+        let ordinal = seen.get(ref.id);
+        if (ordinal == null) {
+          ordinal = seen.size + 1;
+          seen.set(ref.id, ordinal);
+        }
+        notes.set(pos + 1 + offset, {
+          kind,
+          id: ref.id,
+          display: kind === "footnote" ? String(ordinal) : formatNumber("lowerRoman", ordinal),
         });
+      });
+      const texts = pairs.map((pair) => this.#crossRefText(node, pos, pair.from, pair.to, notes));
+
+      const seqLabel = this.#seqLabelOf(node);
+      const heading = detectHeadingLevel(
+        {
+          heading: (nodeAttrs.heading as string) || undefined,
+          style: (nodeAttrs.style as string) || undefined,
+          outlineLevel: nodeAttrs.outlineLevel as number | undefined,
+        },
+        styles,
+      );
+      const number = numbers.get(pos);
+      const caption = nodeAttrs.style === "Caption" || seqLabel != null;
+      const used = new Set<string>();
+
+      if (caption) {
+        // The structural label+number range runs to the SEQ field's end; the
+        // `_Ref` pair wrapping exactly that range is the caption's own pair
+        // (Word's shape). Other hidden pairs (an "entire caption" or "only
+        // caption text" reference's own bookmark) do not displace it.
+        const seqEnd = this.#seqEnd(node, pos);
+        const labelRangeEnd = seqEnd ?? contentTo;
+        // The caption's own pair ends exactly at the SEQ field (Word wraps
+        // label+number); an "entire caption" or "only caption text" reference's
+        // bookmark ends at the paragraph end and does not displace it.
+        const labelPair = pairs
+          .filter((entry) => entry.name.startsWith("_Ref") && entry.to === labelRangeEnd)
+          .sort((a, b) => a.from - b.from)[0];
+        const pair = labelPair ?? pairs.find((entry) => entry.name.startsWith("_Ref")) ?? pairs[0];
+        const labelEnd = labelPair ? labelPair.to : (seqEnd ?? pair?.to ?? contentTo);
+        const index = pair ? pairs.indexOf(pair) : -1;
+        const labelText =
+          index >= 0
+            ? texts[index]!.trim()
+            : this.#crossRefText(node, pos, contentFrom, labelEnd, notes).trim();
+        const rawAfter = this.#crossRefText(node, pos, labelEnd, contentTo, notes);
+        const captionText = rawAfter.replace(CAPTION_SEPARATOR, "");
+        if (pair) used.add(pair.name);
+        out.push({
+          key: `caption:${pair?.name ?? pos}`,
+          kind: "caption",
+          name: pair?.name ?? "",
+          ...(labelPair ? { labelName: labelPair.name } : {}),
+          ...(seqLabel ? { label: seqLabel } : {}),
+          pos,
+          text: labelText,
+          captionFull: `${labelText}${rawAfter}`.trim(),
+          ...(captionText
+            ? {
+                captionText,
+                captionTextFrom: this.#captionTextStart(node, pos, labelEnd),
+              }
+            : {}),
+          ...(number ? { number } : {}),
+          ...(page != null ? { page } : {}),
+          listText: `${labelText}${rawAfter}`.trim(),
+          contentFrom,
+          contentTo,
+          labelTo: labelEnd,
+          ...(pair ? { bookmarkFrom: pair.from, bookmarkTo: pair.to } : {}),
+        });
+      }
+
+      if (heading != null && !caption) {
+        const index = Math.max(
+          0,
+          pairs.findIndex((pair) => pair.name.startsWith("_Ref")),
+        );
+        const pair = pairs[index];
+        if (pair) used.add(pair.name);
+        out.push({
+          key: `heading:${pos}`,
+          kind: "heading",
+          name: pair?.name ?? "",
+          pos,
+          text: pair
+            ? this.#crossRefText(node, pos, pair.from, pair.to, notes).trim()
+            : node.textContent.trim(),
+          ...(number ? { number } : {}),
+          ...(page != null ? { page } : {}),
+          listText: node.textContent.trim(),
+          contentFrom,
+          contentTo,
+          ...(pair ? { bookmarkFrom: pair.from, bookmarkTo: pair.to } : {}),
+        });
+      }
+
+      if (number != null && !caption) {
+        const index = Math.max(
+          0,
+          pairs.findIndex((pair) => pair.name.startsWith("_Ref")),
+        );
+        const pair = pairs[index];
+        if (pair) used.add(pair.name);
+        out.push({
+          key: `numbered:${pos}`,
+          kind: "numbered",
+          name: pair?.name ?? "",
+          pos,
+          text: node.textContent.trim(),
+          number,
+          ...(page != null ? { page } : {}),
+          listText: `${number} ${node.textContent.trim()}`.trim(),
+          contentFrom,
+          contentTo,
+          ...(pair ? { bookmarkFrom: pair.from, bookmarkTo: pair.to } : {}),
+        });
+      }
+
+      // Note reference atoms are their own targets (an existing bookmark pair
+      // around the atom supplies the name).
+      for (const [at, note] of notes) {
+        const pair = pairs.find((entry) => at >= entry.from && at < entry.to);
+        if (pair) used.add(pair.name);
+        const notePage = pageAt(at);
+        const noteEntry = (note.kind === "footnote" ? extras.footnotes : extras.endnotes)?.find(
+          (entry) => entry.id === note.id,
+        );
+        const body = noteEntry
+          ? this.#noteTextOf(noteEntry.children)
+              .split("\n")
+              .find((line) => line.trim() !== "")
+              ?.trim()
+          : "";
+        out.push({
+          key: `${note.kind}:${at}`,
+          kind: note.kind,
+          name: pair?.name ?? "",
+          pos: at,
+          text: note.display,
+          number: note.display,
+          ...(notePage != null ? { page: notePage } : {}),
+          listText: body || note.display,
+          contentFrom: at,
+          contentTo: at + 1,
+          ...(pair ? { bookmarkFrom: pair.from, bookmarkTo: pair.to } : {}),
+        });
+      }
+
+      // The paragraph's remaining bookmark pairs are user targets.
+      pairs.forEach((pair, i) => {
+        if (used.has(pair.name)) return;
+        out.push({
+          key: `bookmark:${pair.name}`,
+          kind: "bookmark",
+          name: pair.name,
+          pos,
+          text: texts[i]!.trim(),
+          ...(page != null ? { page } : {}),
+          listText: texts[i]!.trim() || pair.name,
+          contentFrom,
+          contentTo,
+          bookmarkFrom: pair.from,
+          bookmarkTo: pair.to,
+        });
+      });
+
       return true;
     });
     return out;
@@ -840,39 +1262,156 @@ export class DialogCommands {
     this.host.bridge()?.focus();
   };
 
-  /** Cross-reference dialog 确定 — seed a cached REF field at the caret: a
-   *  REF for "label and number" / "bookmark text" content (the bookmark's
-   *  inner text), a PAGEREF for page content (resolved through the bridge's
-   *  pageOf, the same geometry the TOC's page numbers use). Both carry \h —
-   *  Word's hyperlink form. */
+  /** Cross-reference dialog 确定 — seed a cached REF/PAGEREF/NOTEREF field at
+   *  the caret for the picked target × content, Word's field shapes:
+   *
+   *  - text / label / entire caption / caption text → `REF <name> \h`
+   *  - heading or numbered-item number → `REF <name> \n \h`
+   *  - footnote/endnote number → `NOTEREF <name> \h`
+   *  - page number → `PAGEREF <name> \h`
+   *  - above/below → `REF|NOTEREF <name> \p \h`
+   *
+   *  A target without a bookmark gains Word's hidden `_Ref…` pair around the
+   *  range the chosen content needs (the whole heading/paragraph, a caption's
+   *  label+number, its caption text, or the whole caption) in the same
+   *  transaction; the cache is evaluated from the live document, so the
+   *  insert and a later F9 / Update All Fields agree. */
   readonly onCrossRefOk = (event: Event): void => {
-    const { name, content } =
-      (event as CustomEvent<{ name?: string; content?: string }>).detail ?? {};
-    const target = this.#target();
-    if (!target || !name) return;
-    const hit = this.crossReferenceTargets().find((entry) => entry.name === name);
-    if (!hit) return;
-    // The bridge's pageOf is 0-based; Word's page numbers are 1-based (the
-    // TOC's conversion, with 1 as the fallback when the position has no
-    // laid-out page yet).
-    const page = this.host.bridge()?.pageOf(hit.pos);
-    const cached =
-      content === "page" ? String(typeof page === "number" ? page + 1 : 1) : hit.text || "1";
-    const seed: JSONContent = {
-      type: "inlinePassthrough",
-      attrs: {
-        data: JSON.stringify({
-          simpleField: {
-            instruction: `${content === "page" ? "PAGEREF" : "REF"} ${name} \\h`,
-            cachedValue: cached,
-          },
-        }),
-      },
-    } as JSONContent;
-    const { from } = target.state.selection;
-    target.view.dispatch(target.state.tr.insert(from, target.schema.nodeFromJSON(seed)));
+    const { key, content } =
+      (event as CustomEvent<{ key?: string; content?: CrossRefContent }>).detail ?? {};
+    const editor = this.#target();
+    if (!editor || !key || !content) return;
+    const target = this.crossReferenceTargets().find((entry) => entry.key === key);
+    if (!target || !CROSS_REFERENCE_CONTENTS[target.kind].includes(content)) return;
+    // Options the dialog disables are not inserted as empty references.
+    if (!crossReferenceContentAvailable(target, content)) return;
+    const requested = this.#crossReferenceRange(target, content);
+    if (!requested) return;
+    // Reuse the target's bookmark when it covers the requested range — for
+    // "label and number" the caption's own `_Ref` pair; for text/number/page/
+    // above-below the target's own bookmark (a user bookmark's range is the
+    // reference). Word creates a hidden `_Ref…` pair for the rest.
+    const reuse =
+      content === "label"
+        ? (target.labelName ??
+          (target.bookmarkFrom === requested.from && target.bookmarkTo === requested.to
+            ? target.name
+            : ""))
+        : content === "entire" || content === "captionText"
+          ? target.bookmarkFrom === requested.from && target.bookmarkTo === requested.to
+            ? target.name
+            : ""
+          : (target.name ?? "");
+    const range = reuse ? null : requested;
+    const bookmarkId = range ? this.nextBookmarkId(editor) : null;
+    const name = range ? `_Ref${String(bookmarkId).padStart(8, "0")}` : reuse;
+    const instruction = crossReferenceInstruction(target.kind, content, name);
+    if (!instruction) return;
+
+    const { from } = editor.state.selection;
+    // Above/below resolves from the reading-order relation (before the
+    // bookmark and field inserts shift either position).
+    const position = target.pos < from ? "above" : "below";
+    const terms = this.#positionTerms();
+    const text = this.#crossReferenceText(target, content);
+    const extra = new Map<string, FieldBookmark>();
+    if (range) extra.set(name, this.#fieldBookmark(editor, target.pos, text, target.number));
+    const value =
+      evaluateField(instruction, {
+        ...this.#fieldBase(editor, this.#bookmarks(editor, extra)),
+        frame: this.#frameAt(editor, from),
+        selfPos: from,
+        positionTerms: terms,
+      }) ?? this.#crossReferenceFallback(target, content, position, terms);
+
+    const seed = (data: object): JSONContent =>
+      ({
+        type: "inlinePassthrough",
+        attrs: { data: JSON.stringify(data) },
+      }) as JSONContent;
+    const tr = editor.state.tr;
+    if (range) {
+      tr.insert(
+        tr.mapping.map(range.from),
+        editor.schema.nodeFromJSON(seed({ bookmarkStart: { id: bookmarkId, name } })),
+      );
+      tr.insert(
+        tr.mapping.map(range.to),
+        editor.schema.nodeFromJSON(seed({ bookmarkEnd: { id: bookmarkId } })),
+      );
+    }
+    tr.insert(
+      tr.mapping.map(from),
+      editor.schema.nodeFromJSON(seed({ simpleField: { instruction, cachedValue: value } })),
+    );
+    editor.view.dispatch(tr);
     this.host.bridge()?.focus();
   };
+
+  /** The hidden-bookmark range a content choice needs: the caption's
+   *  label+number or caption text when it is narrower than the target's own
+   *  content range (whole caption, heading/numbered paragraph, note atom). */
+  #crossReferenceRange(
+    target: CrossReferenceTarget,
+    content: CrossRefContent,
+  ): { from: number; to: number } | null {
+    if (content === "label") {
+      return target.labelTo != null ? { from: target.contentFrom, to: target.labelTo } : null;
+    }
+    if (content === "captionText") {
+      return target.captionTextFrom != null
+        ? { from: target.captionTextFrom, to: target.contentTo }
+        : null;
+    }
+    return { from: target.contentFrom, to: target.contentTo };
+  }
+
+  /** The inner text a freshly created hidden bookmark carries (what REF/
+   *  NOTEREF re-derives); undefined for page/above-below content, which
+   *  ignores the text. */
+  #crossReferenceText(target: CrossReferenceTarget, content: CrossRefContent): string | undefined {
+    if (content === "entire") return target.captionFull ?? target.text;
+    if (content === "captionText") return target.captionText;
+    if (content === "page" || content === "aboveBelow") return undefined;
+    return target.text;
+  }
+
+  /** The cached value when no frame/evaluator can supply one — the target's
+   *  own text (Word caches what it just inserted), the page fallback 1, or
+   *  the above/below word. */
+  #crossReferenceFallback(
+    target: CrossReferenceTarget,
+    content: CrossRefContent,
+    position: "above" | "below",
+    terms: { above: string; below: string },
+  ): string {
+    const text = this.#crossReferenceText(target, content);
+    if (text != null) return text;
+    if (content === "number") return target.number ?? "";
+    if (content === "page") return String(target.page ?? 1);
+    return position === "above" ? terms.above : terms.below;
+  }
+
+  /** One bookmark-table entry for REF/PAGEREF/NOTEREF — the target's page
+   *  frame and displayed page with the supplied inner text/number. */
+  #fieldBookmark(editor: Editor, pos: number, text?: string, number?: string): FieldBookmark {
+    const frame = this.#frameAt(editor, pos);
+    const physical = this.host.bridge()?.pageOf(pos);
+    const page = frame?.page ?? (typeof physical === "number" ? physical + 1 : undefined);
+    return {
+      ...(text ? { text } : {}),
+      ...(number ? { number } : {}),
+      pos,
+      ...(page != null ? { page } : {}),
+      ...(frame?.pageFormat ? { pageFormat: frame.pageFormat } : {}),
+    };
+  }
+
+  /** The `\p` switch's words in the host UI's language (Word renders them in
+   *  the document language). English when the host supplies none (headless). */
+  #positionTerms(): { above: string; below: string } {
+    return this.host.positionTerms?.() ?? { above: "above", below: "below" };
+  }
 
   // ── Footnote/endnote bodies ──
   // Note content lives in doc attrs documentExtras.footnotes/endnotes —
@@ -1184,10 +1723,17 @@ export class DialogCommands {
    *  SEQ occurrences take their own ordinal per label (the caption sequence),
    *  restarting at each heading their `\s` switch names; `\*` formats the
    *  number and `\s` prefixes the chapter number, so a deleted or moved
-   *  caption renumbers from the document itself. REF/PAGEREF resolve through
-   *  the bookmark table, and page-dependent fields use the host's pinned
-   *  pagination when it exists. Returns the number of fields whose cache
-   *  changed.
+   *  caption renumbers from the document itself. REF/PAGEREF/NOTEREF resolve
+   *  through the bookmark table, and page-dependent fields use the host's
+   *  pinned pagination when it exists. Returns the number of fields whose
+   *  cache changed.
+   *
+   *  Two phases in one transaction: every other field (captions' SEQ
+   *  included) lands first, then the bookmark table is re-scanned from that
+   *  transaction doc, then the REF family resolves — a reference to a caption
+   *  whose SEQ renumbered in this pass quotes the new number immediately
+   *  instead of needing a second update. Positions are stable across the
+   *  phases (attribute patches never change node sizes).
    *
    *  Limitation: a complex field whose result is structured (`resultRunsXml`
    *  — TOC entries and nested fields) is patched on its flat `result` only;
@@ -1199,21 +1745,20 @@ export class DialogCommands {
     if (!editor) return 0;
     const base = this.#fieldBase(editor);
     const seq = this.#seqWalk(editor);
-    const changes: { pos: number; data: string }[] = [];
-    editor.state.doc.descendants((node, pos) => {
-      if (node.type.name !== "inlinePassthrough") return true;
-      const data = node.attrs.data;
-      if (typeof data !== "string") return true;
-      let branch: Record<string, unknown>;
-      try {
-        branch = JSON.parse(data) as Record<string, unknown>;
-      } catch {
-        return true;
-      }
-      const ref = fieldRef(branch);
-      if (!ref?.instruction || ref.kind === "formField") return true;
-      const field = parseFieldInstruction(ref.instruction);
-      const context: FieldContext = { ...base, frame: this.#frameAt(editor, pos) };
+    const tr = editor.state.tr;
+    const changed = new Set<number>();
+
+    const contextOf = (
+      pos: number,
+      field: ReturnType<typeof parseFieldInstruction>,
+      bookmarks: ReadonlyMap<string, FieldBookmark>,
+    ): FieldContext => {
+      const context: FieldContext = {
+        ...base,
+        bookmarks,
+        frame: this.#frameAt(editor, pos),
+        selfPos: pos,
+      };
       if (field.name === "SEQ") {
         const label = field.args[0];
         const ordinal = label ? seq.ordinals.get(pos) : undefined;
@@ -1222,18 +1767,47 @@ export class DialogCommands {
         const chapter = level != null ? seq.chapters.get(pos) : undefined;
         if (level != null && chapter != null) context.chapters = new Map([[level, chapter]]);
       }
-      const value = evaluateField(ref.instruction, context);
-      if (value == null || value === ref.result) return true;
-      const patch = ref.kind === "simpleField" ? { cachedValue: value } : { result: value };
-      const next = this.#patchField(branch, ref.kind, patch);
-      if (next) changes.push({ pos, data: JSON.stringify(next) });
-      return true;
-    });
-    if (changes.length === 0) return 0;
-    const tr = editor.state.tr;
-    for (const change of changes) tr.setNodeAttribute(change.pos, "data", change.data);
+      return context;
+    };
+
+    const apply = (
+      doc: PMNode,
+      bookmarks: ReadonlyMap<string, FieldBookmark>,
+      refFamily: boolean,
+    ): void => {
+      doc.descendants((node, pos) => {
+        if (node.type.name !== "inlinePassthrough") return true;
+        const data = node.attrs.data;
+        if (typeof data !== "string") return true;
+        let branch: Record<string, unknown>;
+        try {
+          branch = JSON.parse(data) as Record<string, unknown>;
+        } catch {
+          return true;
+        }
+        const ref = fieldRef(branch);
+        if (!ref?.instruction || ref.kind === "formField") return true;
+        const field = parseFieldInstruction(ref.instruction);
+        if (BOOKMARK_FIELD_NAMES.has(field.name) !== refFamily) return true;
+        const value = evaluateField(ref.instruction, contextOf(pos, field, bookmarks));
+        if (value == null || value === ref.result) return true;
+        const patch = ref.kind === "simpleField" ? { cachedValue: value } : { result: value };
+        const next = this.#patchField(branch, ref.kind, patch);
+        if (!next) return true;
+        tr.setNodeAttribute(pos, "data", JSON.stringify(next));
+        changed.add(pos);
+        return true;
+      });
+    };
+
+    // Phase 1: everything but the bookmark-reading REF family.
+    apply(editor.state.doc, base.bookmarks ?? new Map(), false);
+    // Phase 2: the REF family against the phase-1 doc's bookmarks.
+    apply(tr.doc, this.#bookmarks(editor, undefined, tr.doc), true);
+
+    if (changed.size === 0) return 0;
     editor.view.dispatch(tr);
-    return changes.length;
+    return changed.size;
   }
 
   /** Context menu → checkbox toggle: flip the form field's checked flag (the
@@ -1320,11 +1894,15 @@ export class DialogCommands {
   /** The evaluation context slices every field update shares: the doc's core
    *  properties (AUTHOR/TITLE/SUBJECT/KEYWORDS/COMMENTS/CREATEDATE/…), the
    *  filename (FILENAME), the core revision (REVNUM), custom properties
-   *  (DOCPROPERTY), the bookmark table (REF/PAGEREF), the caption separators
-   *  (SEQ chapter numbering) and the live word/char totals
+   *  (DOCPROPERTY), the bookmark table (REF/PAGEREF/NOTEREF, with `extras`
+   *  merged for bookmarks a commit is about to create), the `\p` words, the
+   *  caption separators (SEQ chapter numbering) and the live word/char totals
    *  (NUMWORDS/NUMCHARS). The "now" clock is per call — an update command is a
    *  moment, not a render. */
-  #fieldBase(editor: Editor): Omit<FieldContext, "frame" | "sequences" | "chapters"> {
+  #fieldBase(
+    editor: Editor,
+    bookmarks: ReadonlyMap<string, FieldBookmark> = this.#bookmarks(editor),
+  ): Omit<FieldContext, "frame" | "sequences" | "chapters"> {
     const doc = editor.state.doc;
     const attrs = (doc.attrs ?? {}) as {
       core?: Record<string, unknown>;
@@ -1344,27 +1922,29 @@ export class DialogCommands {
       ...(revision != null ? { revision } : {}),
       ...(customProperties ? { customProperties } : {}),
       ...(captionSeparators ? { captionSeparators } : {}),
-      bookmarks: this.#bookmarks(editor),
+      positionTerms: this.#positionTerms(),
+      bookmarks,
     };
   }
 
-  /** REF/PAGEREF targets: each bookmark's inner text plus the DISPLAYED page
-   *  its start sits on (the host's page frame — restart and numFmt applied)
-   *  with that page's section format. Falls back to the bridge's physical page
-   *  only when no frame is available (headless); absent = the bookmark keeps
-   *  its cached value. */
-  #bookmarks(editor: Editor): ReadonlyMap<string, FieldBookmark> {
+  /** REF/PAGEREF/NOTEREF targets: each bookmark's inner text/number plus the
+   *  DISPLAYED page its start sits on (the host's page frame — restart and
+   *  numFmt applied) with that page's section format. Falls back to the
+   *  bridge's physical page only when no frame is available (headless);
+   *  absent = the bookmark keeps its cached value. `extras` carries bookmarks
+   *  created by the transaction a commit is building; `doc` scans a document
+   *  snapshot other than the live one (Update All's phase-1 doc). */
+  #bookmarks(
+    editor: Editor,
+    extras?: ReadonlyMap<string, FieldBookmark>,
+    doc?: PMNode,
+  ): ReadonlyMap<string, FieldBookmark> {
     const map = new Map<string, FieldBookmark>();
-    for (const target of this.crossReferenceTargets()) {
-      const frame = this.#frameAt(editor, target.pos);
-      const physical = this.host.bridge()?.pageOf(target.pos);
-      const page = frame?.page ?? (typeof physical === "number" ? physical + 1 : undefined);
-      map.set(target.name, {
-        ...(target.text ? { text: target.text } : {}),
-        ...(page != null ? { page } : {}),
-        ...(frame?.pageFormat ? { pageFormat: frame.pageFormat } : {}),
-      });
+    for (const target of this.#crossReferenceTargetsIn(editor, doc ?? editor.state.doc)) {
+      if (!target.name) continue;
+      map.set(target.name, this.#fieldBookmark(editor, target.pos, target.text, target.number));
     }
+    if (extras) for (const [name, bookmark] of extras) map.set(name, bookmark);
     return map;
   }
 
@@ -1386,15 +1966,17 @@ export class DialogCommands {
    *  (the position-bound walk applies the chapter's pending reset, so F9 and
    *  edit agree with Update All Fields). */
   #fieldContext(editor: Editor, pos?: number, instruction?: string): FieldContext {
+    const selfPos = pos ?? editor.state.selection.from;
     const context: FieldContext = {
       ...this.#fieldBase(editor),
-      frame: this.#frameAt(editor, pos),
+      frame: this.#frameAt(editor, selfPos),
+      selfPos,
     };
     if (!instruction) return context;
     const field = parseFieldInstruction(instruction);
     const label = field.name === "SEQ" ? field.args[0] : undefined;
     if (!label) return context;
-    const walk = this.#seqWalk(editor, pos ?? editor.state.selection.from);
+    const walk = this.#seqWalk(editor, selfPos);
     context.sequences = new Map([[label, (walk.counts.get(label) ?? 0) + 1]]);
     const level = seqChapterLevel(field.switches.s);
     if (level != null && walk.chapterCounts[level]! > 0)

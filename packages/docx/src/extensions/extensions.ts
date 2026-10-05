@@ -107,6 +107,7 @@ export {
   ORDERED_FORMATS,
   ORDERED_REFERENCE_PREFIX,
   buildCustomMultilevelLevels,
+  buildListLevels,
   nextMultilevelReference,
   nextOrderedReference,
 } from "./list-numbering";

@@ -114,8 +114,11 @@ import { RevisionsCommands } from "./commands/revisions";
 import { SectionCommands } from "./commands/sections";
 import { SpellingCommands } from "./commands/spelling";
 import type { StylesInspectorData, StylesPaneState } from "./components/styles-pane";
+import type { CrossReferenceTarget } from "./cross-reference";
 import { pagesToPdf } from "./export-pdf";
 import type { ModifyStylePatch, ParagraphDialogPatch } from "./extensions/commands";
+// Side-effect import: registers the ribbon/header translation tables.
+import "./i18n";
 import {
   chartMenuValueOf,
   floatingDrawingAt,
@@ -128,8 +131,6 @@ import {
   wrapMenuValueOf,
   WIRED_DISPATCH,
 } from "./extensions/commands";
-// Side-effect import: registers the ribbon/header translation tables.
-import "./i18n";
 import { collectRevisions } from "./extensions/track-changes";
 import { liveFieldResolver, resolvePageFieldsBounded } from "./field-resolve";
 import { customPropertiesOf, finiteNumber, type FieldContext, type FieldFrame } from "./fields";
@@ -507,6 +508,10 @@ class DocenDocument extends AddinHost<Editor> {
     syncStatusLanguage: () => this.#syncStatusLanguage(),
     filename: () => this.filename,
     fieldFrame: (pos) => this.#fieldFrame(pos),
+    positionTerms: () => ({
+      above: t("crossRef.above", this),
+      below: t("crossRef.below", this),
+    }),
   });
   /** "This section" commands (sectPr read/write, page setup presets, the
    *  page-setup/columns/borders dialogs), split out of this class — see
@@ -5545,14 +5550,16 @@ class DocenDocument extends AddinHost<Editor> {
       (this.shadowRoot?.querySelector("docen-caption-dialog") as { show(): void } | null)?.show();
       return;
     }
-    // Cross-reference — open the dialog over the document's bookmarks; the
-    // commit arrives via cross-ref:ok (#dialogs.onCrossRefOk).
+    // Cross-reference — open the dialog over the document's candidates; the
+    // commit arrives via cross-ref:ok (#dialogs.onCrossRefOk). The caret
+    // position rides along for the dialog's above/below preview.
     if (name === "cross-reference") {
+      const target = this.#bridge?.activeEditor() ?? editor;
       (
         this.shadowRoot?.querySelector("docen-cross-reference-dialog") as {
-          show(targets: { name: string; text: string; kind: string }[]): void;
+          show(targets: CrossReferenceTarget[], caretPos?: number): void;
         } | null
-      )?.show(this.#dialogs.crossReferenceTargets());
+      )?.show(this.#dialogs.crossReferenceTargets(), target?.state.selection.from);
       return;
     }
     // Source Manager / Insert Citation — the same dialog in two modes (Word's
