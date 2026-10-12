@@ -140,8 +140,15 @@ export interface FieldContext {
   revision?: number;
   /** Custom document properties (DOCPROPERTY), name → value. */
   customProperties?: ReadonlyMap<string, string>;
-  /** REF/PAGEREF targets: bookmark name → its inner text and start page. */
+  /** REF/PAGEREF/NOTEREF targets: bookmark name → its inner text, list
+   *  number, start page, and reading-order position. */
   bookmarks?: ReadonlyMap<string, FieldBookmark>;
+  /** The field atom's own document position — the `\p` switch's above/below
+   *  compares it with the target bookmark's position. Absent = no `\p`. */
+  selfPos?: number;
+  /** Localized "above"/"below" for the `\p` switch (Word renders the UI
+   *  language's words). Absent = English. */
+  positionTerms?: { above: string; below: string };
   /** SEQ label → the ordinal this occurrence takes; the update walk assigns
    *  them in document order (each label restarts at 1, and at a heading the
    *  field's `\s` level marks). */
@@ -173,14 +180,23 @@ export interface FieldFrame {
   pageFormat?: string;
 }
 
-/** One REF/PAGEREF target: the bookmark's inner text (REF) and the displayed
- *  page its bookmark start sits on (PAGEREF). `page` is the section-numbering
- *  number (restart applied), `pageFormat` the target section's w:numFmt token
- *  — a bookmark crossing into another section formats with its own. */
+/** One REF/PAGEREF/NOTEREF target: the bookmark's inner text (REF/NOTEREF),
+ *  its paragraph's list/outline number (REF `\n`), the displayed page its
+ *  bookmark start sits on (PAGEREF), and its reading-order position (`\p`).
+ *  `page` is the section-numbering number (restart applied), `pageFormat` the
+ *  target section's w:numFmt token — a bookmark crossing into another section
+ *  formats with its own. */
 export interface FieldBookmark {
   text?: string;
+  /** The bookmarked paragraph's list number with trailing periods stripped
+   *  (Word's REF `\n` shape) — absent when the paragraph carries no numbering
+   *  the runtime can compute. */
+  number?: string;
   page?: number;
   pageFormat?: string;
+  /** The target's reading-order document position — the `\p` switch's
+   *  above/below comparison. */
+  pos?: number;
 }
 
 /** A parsed instruction: the field name plus its positional arguments and
@@ -435,6 +451,16 @@ export const CAPTION_SEPARATOR_CHARS: Readonly<Record<string, string>> = {
   enDash: "\u2013",
 };
 
+/** The `\p` switch's above/below — "above" when the target bookmark sits
+ *  before the field in reading order, "below" otherwise. Word restricts the
+ *  switch to a target on the field's own page; docen compares document
+ *  positions, the order the pages themselves flow in. */
+function aboveBelow(ctx: FieldContext, bookmark: FieldBookmark): string | null {
+  if (bookmark.pos == null || ctx.selfPos == null) return null;
+  const terms = ctx.positionTerms ?? { above: "above", below: "below" };
+  return bookmark.pos < ctx.selfPos ? terms.above : terms.below;
+}
+
 export const FIELD_EVALUATORS: Readonly<Record<string, FieldEvaluator>> = {
   PAGE: (_field, ctx) =>
     ctx.frame?.page != null ? formatNumber(ctx.frame.pageFormat, ctx.frame.page) : null,
@@ -466,14 +492,28 @@ export const FIELD_EVALUATORS: Readonly<Record<string, FieldEvaluator>> = {
   NUMCHARS: (_field, ctx) => (ctx.chars != null ? String(ctx.chars) : null),
   REF: (field, ctx) => {
     const bookmark = field.args[0] ? ctx.bookmarks?.get(field.args[0]) : undefined;
-    return bookmark?.text != null ? bookmark.text : null;
+    if (!bookmark) return null;
+    if ("p" in field.switches) return aboveBelow(ctx, bookmark);
+    if ("n" in field.switches) return bookmark.number ?? null;
+    return bookmark.text != null ? bookmark.text : null;
   },
   PAGEREF: (field, ctx) => {
     const bookmark = field.args[0] ? ctx.bookmarks?.get(field.args[0]) : undefined;
-    if (bookmark?.page == null) return null;
+    if (!bookmark) return null;
+    if ("p" in field.switches) return aboveBelow(ctx, bookmark);
+    if (bookmark.page == null) return null;
     // The bookmark's own section numbering wins — a cross-section reference
     // formats with the target page's numFmt, not the field's.
     return formatNumber(bookmark.pageFormat ?? ctx.frame?.pageFormat, bookmark.page);
+  },
+  // NOTEREF — Word's footnote/endnote cross-reference: the reference mark
+  // (the note's displayed number, which the host's bookmark scan puts in
+  // `text`) instead of the note body. `\p` renders above/below like REF.
+  NOTEREF: (field, ctx) => {
+    const bookmark = field.args[0] ? ctx.bookmarks?.get(field.args[0]) : undefined;
+    if (!bookmark) return null;
+    if ("p" in field.switches) return aboveBelow(ctx, bookmark);
+    return bookmark.text != null ? bookmark.text : null;
   },
   SEQ: (field, ctx) => {
     const label = field.args[0];
