@@ -781,6 +781,91 @@ describe("caption text separator handling (D1)", () => {
   });
 });
 
+describe("caption and bookmark scan edge cases", () => {
+  it("recognizes complex SEQ caption fields", () => {
+    const editor = build([
+      {
+        type: "paragraph",
+        attrs: { style: "Caption" },
+        content: [
+          { type: "text", text: "Figure " },
+          fieldAtom({
+            complexField: { instruction: "SEQ Figure \\* ARABIC", result: "2" },
+          }),
+          { type: "text", text: ": Complex chart" },
+        ],
+      },
+      paragraph("refs"),
+    ]);
+    const dialogs = new DialogCommands(host(editor));
+    caretIn(editor, "refs");
+    const target = targetOfKind(dialogs, "caption");
+    expect(target.label).toBe("Figure");
+    expect(target.text).toBe("Figure 2");
+    expect(target.captionText).toBe("Complex chart");
+    commit(dialogs, target.key, "label");
+    expect(fieldsOf(editor).at(-1)!.cached).toBe("Figure 2");
+    editor.destroy();
+  });
+
+  it("keeps a caption's label target stable after adding caption text only", () => {
+    const editor = build([
+      {
+        type: "paragraph",
+        attrs: { style: "Caption" },
+        content: [
+          { type: "text", text: "Figure " },
+          fieldAtom({ simpleField: { instruction: "SEQ Figure", cachedValue: "1" } }),
+          { type: "text", text: ": Alpha chart" },
+        ],
+      },
+      paragraph("refs"),
+    ]);
+    const dialogs = new DialogCommands(host(editor));
+    caretIn(editor, "refs");
+    commit(dialogs, targetOfKind(dialogs, "caption").key, "captionText");
+
+    const target = targetOfKind(dialogs, "caption");
+    expect(target.text).toBe("Figure 1");
+    expect(target.captionFull).toBe("Figure 1: Alpha chart");
+    expect(dialogs.crossReferenceTargets().some((entry) => entry.kind === "bookmark")).toBe(false);
+
+    commit(dialogs, target.key, "label");
+    expect(
+      fieldsOf(editor)
+        .filter((entry) => entry.instruction.startsWith("REF "))
+        .map((entry) => entry.cached),
+    ).toEqual(["Alpha chart", "Figure 1"]);
+    editor.destroy();
+  });
+
+  it("supports user bookmarks that cross paragraphs", () => {
+    const editor = build([
+      {
+        type: "paragraph",
+        content: [
+          fieldAtom({ bookmarkStart: { id: 7, name: "CrossBookmark" } }),
+          { type: "text", text: "Alpha" },
+        ],
+      },
+      {
+        type: "paragraph",
+        content: [{ type: "text", text: "Beta" }, fieldAtom({ bookmarkEnd: { id: 7 } })],
+      },
+      paragraph("refs"),
+    ]);
+    const dialogs = new DialogCommands(host(editor));
+    caretIn(editor, "refs");
+    const target = targetOfKind(dialogs, "bookmark");
+    expect(target.text).toBe("Alpha\nBeta");
+    commit(dialogs, target.key, "text");
+    expect(fieldsOf(editor).at(-1)!.instruction).toBe("REF CrossBookmark \\h");
+    expect(fieldsOf(editor).at(-1)!.cached).toBe("Alpha\nBeta");
+    expect(dialogs.updateAllFields()).toBe(0);
+    editor.destroy();
+  });
+});
+
 describe("Update All refreshes references to a renumbered caption (D2)", () => {
   it("applies the fresh SEQ number to label/entire references in one pass", () => {
     const editor = build([heading(1, "第一章"), paragraph("内容"), paragraph("refs")]);

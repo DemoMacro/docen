@@ -706,44 +706,6 @@ export class DialogCommands {
   // referenced heading/numbered item on first use; the commit does the same
   // (onCrossRefOk), while captions/user bookmarks keep their existing one.
 
-  /** One bookmark pair inside a paragraph: name plus the inner (start..end)
-   *  range. */
-  #bookmarkPairs(node: PMNode, pos: number): { name: string; from: number; to: number }[] {
-    const open: { id?: number; name: string; from: number }[] = [];
-    const out: { name: string; from: number; to: number }[] = [];
-    node.forEach((child, offset) => {
-      if (child.type.name !== "inlinePassthrough") return;
-      const at = pos + 1 + offset;
-      try {
-        const data = JSON.parse(String(child.attrs.data ?? "{}")) as {
-          bookmarkStart?: { id?: number; name?: string };
-          bookmarkEnd?: { id?: number };
-        };
-        if (data.bookmarkStart?.name) {
-          open.push({
-            id: data.bookmarkStart.id,
-            name: data.bookmarkStart.name,
-            from: at + child.nodeSize,
-          });
-          return;
-        }
-        if (data.bookmarkEnd) {
-          const index =
-            data.bookmarkEnd.id != null
-              ? open.findIndex((entry) => entry.id === data.bookmarkEnd!.id)
-              : 0;
-          const hit = open[index >= 0 ? index : 0];
-          if (!hit) return;
-          out.push({ name: hit.name, from: hit.from, to: at });
-          open.splice(index >= 0 ? index : 0, 1);
-        }
-      } catch {
-        // opaque verbatim blob — not a bookmark pair
-      }
-    });
-    return out;
-  }
-
   /** The plain text inside [from, to): text runs, field caches, and the note
    *  reference atoms' displayed numbers (the projection's first-reference
    *  ordinal — endnotes keep their lowercase-Roman look). */
@@ -788,10 +750,10 @@ export class DialogCommands {
     node.forEach((child) => {
       if (label || child.type.name !== "inlinePassthrough") return;
       try {
-        const data = JSON.parse(String(child.attrs.data ?? "{}")) as {
-          simpleField?: { instruction?: string };
-        };
-        const m = /^SEQ\s+(\S+)/i.exec((data.simpleField?.instruction ?? "").trim());
+        const instruction = fieldRef(
+          JSON.parse(String(child.attrs.data ?? "{}")) as Record<string, unknown>,
+        )?.instruction;
+        const m = /^SEQ\s+(\S+)/i.exec((instruction ?? "").trim());
         if (m) label = m[1]!;
       } catch {
         // opaque payload — not a SEQ field
@@ -801,17 +763,17 @@ export class DialogCommands {
   }
 
   /** The end position of the paragraph's first SEQ field (inclusive), or
-   *  null — the label+number range of a bookmark-less caption. */
+   *  null — the label+number range of a bookmark-less caption. Simple and
+   *  complex fields have the same atom shape after parsing. */
   #seqEnd(node: PMNode, pos: number): number | null {
     let end: number | null = null;
     node.forEach((child, offset) => {
       if (end != null || child.type.name !== "inlinePassthrough") return;
       try {
-        const data = JSON.parse(String(child.attrs.data ?? "{}")) as {
-          simpleField?: { instruction?: string };
-        };
-        if (/^SEQ\s/i.test((data.simpleField?.instruction ?? "").trim()))
-          end = pos + 1 + offset + child.nodeSize;
+        const instruction = fieldRef(
+          JSON.parse(String(child.attrs.data ?? "{}")) as Record<string, unknown>,
+        )?.instruction;
+        if (/^SEQ\s/i.test((instruction ?? "").trim())) end = pos + 1 + offset + child.nodeSize;
       } catch {
         // opaque payload — not a SEQ field
       }
@@ -909,6 +871,119 @@ export class DialogCommands {
     return out;
   }
 
+  /** Bookmark pairs across the whole document — Word bookmarks may cross
+   *  paragraph boundaries, while the paragraph scan below consumes only the
+   *  pairs fully inside that paragraph. */
+  #documentBookmarkPairs(doc: PMNode): { name: string; from: number; to: number }[] {
+    const open: { id?: number; name: string; from: number }[] = [];
+    const out: { name: string; from: number; to: number }[] = [];
+    doc.descendants((node, pos) => {
+      if (node.type.name !== "inlinePassthrough") return true;
+      try {
+        const data = JSON.parse(String(node.attrs.data ?? "{}")) as {
+          bookmarkStart?: { id?: number; name?: string };
+          bookmarkEnd?: { id?: number };
+        };
+        if (data.bookmarkStart?.name) {
+          open.push({
+            id: data.bookmarkStart.id,
+            name: data.bookmarkStart.name,
+            from: pos + node.nodeSize,
+          });
+          return true;
+        }
+        if (data.bookmarkEnd) {
+          const index =
+            data.bookmarkEnd.id != null
+              ? open.findIndex((entry) => entry.id === data.bookmarkEnd!.id)
+              : 0;
+          const hit = open[index >= 0 ? index : 0];
+          if (!hit) return true;
+          out.push({ name: hit.name, from: hit.from, to: pos });
+          open.splice(index >= 0 ? index : 0, 1);
+        }
+      } catch {
+        // opaque verbatim blob — not a bookmark pair
+      }
+      return true;
+    });
+    return out;
+  }
+
+  /** Note reference atoms in document order, keyed by absolute position. */
+  #noteDisplays(
+    doc: PMNode,
+  ): Map<number, { kind: "footnote" | "endnote"; id: number; display: string }> {
+    const ordinals = { footnote: new Map<number, number>(), endnote: new Map<number, number>() };
+    const notes = new Map<number, { kind: "footnote" | "endnote"; id: number; display: string }>();
+    doc.descendants((node, pos) => {
+      if (node.type.name !== "inlinePassthrough") return true;
+      const data = node.attrs.data;
+      if (typeof data !== "string") return true;
+      let ref: ReturnType<typeof noteRefId>;
+      try {
+        ref = noteRefId(JSON.parse(data) as Record<string, unknown>);
+      } catch {
+        return true;
+      }
+      if (!ref || ref.id == null) return true;
+      const kind = ref.kind === "endnoteReference" ? "endnote" : "footnote";
+      const seen = ordinals[kind];
+      let ordinal = seen.get(ref.id);
+      if (ordinal == null) {
+        ordinal = seen.size + 1;
+        seen.set(ref.id, ordinal);
+      }
+      notes.set(pos, {
+        kind,
+        id: ref.id,
+        display: kind === "footnote" ? String(ordinal) : formatNumber("lowerRoman", ordinal),
+      });
+      return true;
+    });
+    return notes;
+  }
+
+  /** Plain text across any node range, including field caches and note marks. */
+  #documentText(
+    doc: PMNode,
+    from: number,
+    to: number,
+    notes: ReadonlyMap<number, { display: string }>,
+  ): string {
+    let text = "";
+    doc.nodesBetween(from, to, (node, pos) => {
+      if (node.type.name === "paragraph") {
+        if (text) text += "\n";
+        return true;
+      }
+      if (node.type.name === "hardBreak") {
+        text += "\n";
+        return false;
+      }
+      if (node.isText && node.text != null) {
+        text += node.text;
+        return false;
+      }
+      if (node.type.name !== "inlinePassthrough") return true;
+      const note = notes.get(pos)?.display;
+      if (note != null) {
+        text += note;
+        return false;
+      }
+      try {
+        const result = fieldRef(
+          JSON.parse(String(node.attrs.data ?? "{}")) as Record<string, unknown>,
+        )?.result;
+        if (result != null) text += result;
+      } catch {
+        // opaque verbatim blob — no readable text
+      }
+      return false;
+    });
+    return text;
+  }
+
   /** The document's cross-reference candidates: caption, heading, numbered
    *  item, bookmark, footnote, and endnote targets in document order, each
    *  with its referenceable text and the range a hidden bookmark wraps. */
@@ -927,7 +1002,9 @@ export class DialogCommands {
     const styles = attrs.styles;
     const extras = (attrs.documentExtras ?? {}) as NoteExtras;
     const numbers = this.#paragraphNumbers(doc);
-    const ordinals = { footnote: new Map<number, number>(), endnote: new Map<number, number>() };
+    const documentPairs = this.#documentBookmarkPairs(doc);
+    const noteDisplays = this.#noteDisplays(doc);
+    const handledBookmarks = new Set<string>();
     const out: CrossReferenceTarget[] = [];
     const pageAt = (pos: number): number | undefined => {
       const frame = this.#frameAt(editor, pos);
@@ -938,9 +1015,12 @@ export class DialogCommands {
     doc.descendants((node, pos) => {
       if (node.type.name !== "paragraph") return true;
       const nodeAttrs = node.attrs as Record<string, unknown>;
-      const pairs = this.#bookmarkPairs(node, pos);
       const contentFrom = pos + 1;
       const contentTo = pos + 1 + node.content.size;
+      const pairs = documentPairs.filter(
+        (pair) => pair.from >= contentFrom && pair.to <= contentTo,
+      );
+      for (const pair of pairs) handledBookmarks.add(pair.name);
       const page = pageAt(pos);
 
       // Note reference atoms: the projection's first-reference-order ordinal
@@ -949,30 +1029,9 @@ export class DialogCommands {
         number,
         { kind: "footnote" | "endnote"; id: number; display: string }
       >();
-      node.forEach((child, offset) => {
-        if (child.type.name !== "inlinePassthrough") return;
-        const data = child.attrs.data;
-        if (typeof data !== "string") return;
-        let ref: ReturnType<typeof noteRefId>;
-        try {
-          ref = noteRefId(JSON.parse(data) as Record<string, unknown>);
-        } catch {
-          return;
-        }
-        if (!ref || ref.id == null) return;
-        const kind = ref.kind === "endnoteReference" ? "endnote" : "footnote";
-        const seen = ordinals[kind];
-        let ordinal = seen.get(ref.id);
-        if (ordinal == null) {
-          ordinal = seen.size + 1;
-          seen.set(ref.id, ordinal);
-        }
-        notes.set(pos + 1 + offset, {
-          kind,
-          id: ref.id,
-          display: kind === "footnote" ? String(ordinal) : formatNumber("lowerRoman", ordinal),
-        });
-      });
+      for (const [at, note] of noteDisplays) {
+        if (at >= contentFrom && at < contentTo) notes.set(at, note);
+      }
       const texts = pairs.map((pair) => this.#crossRefText(node, pos, pair.from, pair.to, notes));
 
       const seqLabel = this.#seqLabelOf(node);
@@ -1003,11 +1062,7 @@ export class DialogCommands {
           .sort((a, b) => a.from - b.from)[0];
         const pair = labelPair ?? pairs.find((entry) => entry.name.startsWith("_Ref")) ?? pairs[0];
         const labelEnd = labelPair ? labelPair.to : (seqEnd ?? pair?.to ?? contentTo);
-        const index = pair ? pairs.indexOf(pair) : -1;
-        const labelText =
-          index >= 0
-            ? texts[index]!.trim()
-            : this.#crossRefText(node, pos, contentFrom, labelEnd, notes).trim();
+        const labelText = this.#crossRefText(node, pos, contentFrom, labelEnd, notes).trim();
         const rawAfter = this.#crossRefText(node, pos, labelEnd, contentTo, notes);
         const captionText = rawAfter.replace(CAPTION_SEPARATOR, "");
         if (pair) used.add(pair.name);
@@ -1114,7 +1169,7 @@ export class DialogCommands {
 
       // The paragraph's remaining bookmark pairs are user targets.
       pairs.forEach((pair, i) => {
-        if (used.has(pair.name)) return;
+        if (used.has(pair.name) || pair.name.startsWith("_Ref")) return;
         out.push({
           key: `bookmark:${pair.name}`,
           kind: "bookmark",
@@ -1132,6 +1187,27 @@ export class DialogCommands {
 
       return true;
     });
+
+    // A user bookmark can start and end in different paragraphs. It is not a
+    // paragraph target above, so expose its whole covered range here.
+    for (const pair of documentPairs) {
+      if (handledBookmarks.has(pair.name) || pair.name.startsWith("_Ref")) continue;
+      const text = this.#documentText(doc, pair.from, pair.to, noteDisplays).trim();
+      const page = pageAt(pair.from);
+      out.push({
+        key: `bookmark:${pair.name}`,
+        kind: "bookmark",
+        name: pair.name,
+        pos: pair.from,
+        text,
+        ...(page != null ? { page } : {}),
+        listText: text || pair.name,
+        contentFrom: pair.from,
+        contentTo: pair.to,
+        bookmarkFrom: pair.from,
+        bookmarkTo: pair.to,
+      });
+    }
     return out;
   }
 
@@ -1939,10 +2015,19 @@ export class DialogCommands {
     extras?: ReadonlyMap<string, FieldBookmark>,
     doc?: PMNode,
   ): ReadonlyMap<string, FieldBookmark> {
+    const snapshot = doc ?? editor.state.doc;
     const map = new Map<string, FieldBookmark>();
-    for (const target of this.#crossReferenceTargetsIn(editor, doc ?? editor.state.doc)) {
+    for (const target of this.#crossReferenceTargetsIn(editor, snapshot)) {
       if (!target.name) continue;
       map.set(target.name, this.#fieldBookmark(editor, target.pos, target.text, target.number));
+    }
+    // Hidden caption-slice bookmarks are not dialog targets, but their REF
+    // fields still resolve against the text each pair covers.
+    const notes = this.#noteDisplays(snapshot);
+    for (const pair of this.#documentBookmarkPairs(snapshot)) {
+      if (map.has(pair.name)) continue;
+      const text = this.#documentText(snapshot, pair.from, pair.to, notes).trim();
+      map.set(pair.name, this.#fieldBookmark(editor, pair.from, text));
     }
     if (extras) for (const [name, bookmark] of extras) map.set(name, bookmark);
     return map;
