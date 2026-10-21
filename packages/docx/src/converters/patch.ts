@@ -35,8 +35,6 @@ export interface DocxPatchOptions<T extends OutputType = OutputType> {
   placeholderDelimiters?: { start?: string; end?: string };
   /** Keep the template's paragraph styles on patched content. */
   keepOriginalStyles?: boolean;
-  /** Recurse into nested patches. */
-  recursive?: boolean;
   /** Output container type. */
   outputType: T;
 }
@@ -58,7 +56,6 @@ export async function patchDOCX<T extends OutputType>(
     prepare = true,
     placeholderDelimiters,
     keepOriginalStyles,
-    recursive,
     outputType,
   } = options;
 
@@ -78,7 +75,6 @@ export async function patchDOCX<T extends OutputType>(
     data: template,
     placeholders: patchesObject,
     ...(keepOriginalStyles !== undefined && { keepOriginalStyles }),
-    ...(recursive !== undefined && { recursive }),
     ...(placeholderDelimiters && {
       placeholderDelimiters: {
         start: placeholderDelimiters.start ?? "{{",
