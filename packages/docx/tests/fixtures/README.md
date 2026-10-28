@@ -22,6 +22,7 @@ fixtures/<name>/
   input.docx           alternative binary input (parsed with parseDOCX)
   layout.golden.json   the projected LayoutDoc, deterministic JSON
   oracle.pdf           maintainer-provided PDF export (never read by the harness)
+  docen.pdf            local docen PDF export; generated and Git-ignored
   meta.json            provenance of oracle.pdf (see below)
 ```
 
@@ -60,8 +61,9 @@ change and must be justified against the oracle PDF.
 
 ## Oracle workflow (Word/WPS parity)
 
-The harness runs headless; the oracle is a **manual** maintainer step. For a
-fixture that must match a real Word processor:
+The layout golden runs headless. Word/WPS PDF capture remains a maintainer
+step; once both PDFs are present, comparison is automated. For a fixture that
+must match a real Word processor:
 
 1. Open the fixture in the pinned WPS Office build (record the exact version;
    do not upgrade mid-comparison — Word/WPS change pagination between builds).
@@ -85,8 +87,20 @@ fixture that must match a real Word processor:
 
 Missing `oracle.pdf`/`meta.json` is fine — the fixture still guards the
 projection golden, and there is simply nothing to compare page-by-page yet.
-`oracle.pdf` is never opened by the automated suite; page-by-page comparison
-(rendered pages vs. PDF pages) is the follow-up step of the parity program.
+
+Export the same document from docen and put it next to the fixture as
+`docen.pdf` (Git-ignored). The test suite then rasterizes both files at 144 DPI
+with Poppler (`pdftoppm`), compares page dimensions, and allows at most 0.2%
+changed pixels per page after antialiasing tolerance:
+
+```bash
+pnpm exec vp test run parity -t "Word PDF oracle"
+
+# diagnostics without the test runner
+pnpm parity:pdf packages/docx/tests/fixtures/<name>/oracle.pdf \
+  packages/docx/tests/fixtures/<name>/docen.pdf \
+  --report=.temp/parity/<name>.json
+```
 
 ## Adding a fixture
 

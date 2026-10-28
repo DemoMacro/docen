@@ -9,7 +9,7 @@
 // followed by `pnpm exec vp check --fix` (the repo formatter re-wraps short
 // arrays; the harness compares structurally, so an unformatted golden still
 // passes tests but fails `vp check`).
-// Maintainer/oracle workflow: packages/docx/tests/fixtures/README.md.
+// Word PDF oracle workflow: packages/docx/tests/fixtures/README.md.
 
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -27,6 +27,7 @@ export const MODEL_FILENAME = "model.json";
 export const DOCX_FILENAME = "input.docx";
 export const GOLDEN_FILENAME = "layout.golden.json";
 export const ORACLE_FILENAME = "oracle.pdf";
+export const DOCEN_PDF_FILENAME = "docen.pdf";
 export const META_FILENAME = "meta.json";
 /** Diff entries reported per mismatch before the list is truncated. */
 export const DIFF_LIMIT = 40;
@@ -39,9 +40,11 @@ export interface ParityFixture {
   goldenPath: string;
   modelPath?: string;
   docxPath?: string;
-  /** The maintainer-provided PDF export (WPS/Word) — never read by the
-   *  harness; present so reports can list which fixtures have been oracled. */
+  /** The maintainer-provided PDF export (WPS/Word) used by the PDF parity
+   *  test when the matching docen export is present. */
   oraclePath?: string;
+  /** The generated docen export; kept out of Git and compared only locally. */
+  docenPath?: string;
   metaPath?: string;
 }
 
@@ -77,6 +80,7 @@ export function discoverFixtures(root: string = FIXTURES_ROOT): ParityFixture[] 
       modelPath: optional(MODEL_FILENAME),
       docxPath: optional(DOCX_FILENAME),
       oraclePath: optional(ORACLE_FILENAME),
+      docenPath: optional(DOCEN_PDF_FILENAME),
       metaPath: optional(META_FILENAME),
     };
   });

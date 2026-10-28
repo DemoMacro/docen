@@ -79,6 +79,8 @@
     "leafer-x-metafile": "workspace:*"
   },
   "devDependencies": {
-    "linkedom": "0.18.13"
+    "@types/pngjs": "6.0.5",
+    "linkedom": "0.18.13",
+    "pngjs": "7.0.0"
   }
 }

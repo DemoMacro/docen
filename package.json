@@ -45,6 +45,7 @@
     "check": "vp check --fix",
     "test": "vp test run",
     "bench": "vp test bench",
+    "parity:pdf": "tsx packages/docx/tests/parity-pdf.ts",
     "version": "pnpm --filter \"./packages/**\" -r exec basis version",
     "publish": "pnpm --filter \"./packages/**\" -r exec basis publish",
     "postinstall": "pnpm build && vp config && basis git setup"
@@ -53,6 +54,7 @@
     "@funish/basis": "0.3.0",
     "@types/node": "26.1.2",
     "happy-dom": "21.0.1",
+    "tsx": "4.23.15",
     "typescript": "6.0.3",
     "vite-plus": "0.3.1"
   },

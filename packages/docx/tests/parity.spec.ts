@@ -23,6 +23,7 @@ import {
   formatDiff,
   updateGoldensRequested,
 } from "./parity";
+import { comparePdfFiles } from "./parity-pdf";
 
 const update = updateGoldensRequested();
 const fixtures = discoverFixtures();
@@ -52,6 +53,20 @@ describe("layout parity fixtures", () => {
       }
       if (outcome.status === "mismatch") throw new Error(outcome.diff);
       expect(outcome.status).toBe("match");
+    });
+  }
+
+  for (const fixture of fixtures.filter((entry) => entry.oraclePath && entry.docenPath)) {
+    it(`${fixture.name} matches the Word PDF oracle`, async () => {
+      const report = await comparePdfFiles(fixture.oraclePath!, fixture.docenPath!);
+      expect(report.pages, `${fixture.name}: page count`).toHaveLength(report.pageCount);
+      for (const page of report.pages) {
+        expect(page.reason, `${fixture.name}: page ${page.page} dimensions`).toBeUndefined();
+        expect(
+          page.changedRatio,
+          `${fixture.name}: page ${page.page} changed ${(page.changedRatio * 100).toFixed(3)}%`,
+        ).toBeLessThanOrEqual(report.maxChangedRatio);
+      }
     });
   }
 });

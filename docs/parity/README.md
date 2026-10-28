@@ -34,9 +34,10 @@ fixture-driven harness at `packages/docx/tests/parity.ts` (spec:
    build in `meta.json`. See
    `packages/docx/tests/fixtures/README.md` for the exact steps and the
    `meta.json` template.
-5. **Compare pages** — page-by-page PDF comparison is a manual/integration step
-   of the program (the harness is headless); the projection golden catches the
-   regressions automatically in the meantime.
+5. **Compare pages** — export the same fixture from docen as local
+   `docen.pdf`; the suite rasterizes oracle and docen PDFs with Poppler and
+   gates page dimensions plus changed-pixel ratio. The projection golden still
+   catches regressions even when a proprietary oracle is unavailable.
 
 ## Commands
 
