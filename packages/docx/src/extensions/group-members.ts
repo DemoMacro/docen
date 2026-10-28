@@ -1,10 +1,9 @@
 import { encodeBase64 } from "@office-open/core";
-import { convertEmuToPixels } from "@office-open/core/util";
+import { convertEmuToPixels, convertToEmu } from "@office-open/core/util";
 import type {
   GroupChildMediaData,
   GroupMediaData,
   GroupOptions,
-  MediaDataTransformation,
   MediaTransformation,
   ParagraphOptions,
   ShapeOptions,
@@ -42,51 +41,16 @@ function childBytesOf(child: object): Uint8Array | null {
   return null;
 }
 
-/** MediaDataTransformation (the group child space: offset.emus + emus/pixels
- *  dual track) → MediaTransformation (the attrs form the wpsShape carrier
- *  reads: offset.{left,top} + width/height, native EMU). */
-function runTransformOf(t: MediaDataTransformation): MediaTransformation {
-  const out: MediaTransformation = {
-    width: t.emus.x,
-    height: t.emus.y,
-  };
-  if (t.offset?.emus) out.offset = { left: t.offset.emus.x, top: t.offset.emus.y };
-  if (t.flipHorizontal === true) out.flipHorizontal = true;
-  if (t.flipVertical === true) out.flipVertical = true;
-  if (t.rotation !== undefined) out.rotation = t.rotation;
-  if (t.effectExtent) out.effectExtent = t.effectExtent;
-  return out;
+/** The union includes unsupported XML members; only modelable members have a
+ *  placement transform. Keep that boundary explicit instead of pretending the
+ *  transform is always present. */
+function transformationOf(child: GroupChildMediaData): MediaTransformation | null {
+  if (!("transformation" in child) || !isRecord(child.transformation)) return null;
+  return child.transformation;
 }
 
-/** MediaTransformation (attrs form) → MediaDataTransformation (group child
- *  space). The pixels track is derived (round of the EMU → px conversion,
- *  office-open's createTransformation formula) — neither stringify nor the
- *  layout projection reads it, so the EMU pair is the single source of truth
- *  the round-trip keeps. */
-function dataTransformOf(t: MediaTransformation): MediaDataTransformation {
-  const left = typeof t.offset?.left === "number" ? t.offset.left : 0;
-  const top = typeof t.offset?.top === "number" ? t.offset.top : 0;
-  const width = t.width as number;
-  const height = t.height as number;
-  return {
-    offset: {
-      emus: { x: left, y: top },
-      pixels: {
-        x: Math.round(convertEmuToPixels(left)),
-        y: Math.round(convertEmuToPixels(top)),
-      },
-    },
-    emus: { x: width, y: height },
-    pixels: {
-      x: Math.round(convertEmuToPixels(width)),
-      y: Math.round(convertEmuToPixels(height)),
-    },
-    ...(t.flipHorizontal === true ? { flipHorizontal: true } : {}),
-    ...(t.flipVertical === true ? { flipVertical: true } : {}),
-    ...(t.rotation !== undefined ? { rotation: t.rotation } : {}),
-    ...(t.effectExtent ? { effectExtent: t.effectExtent } : {}),
-  };
-}
+/** Native EMU scalar for direct canvas/group-attribute arithmetic. */
+const emuOf = (value: MediaTransformation["width"]): number => convertToEmu(value);
 
 /** One group child → a PM member node, or null when the child carries no
  *  modelable payload (missing bytes, non-record shape data) — the caller
@@ -96,7 +60,7 @@ export function groupChildToMemberNode(
   child: GroupChildMediaData,
   ctx: ResolveContext,
 ): JSONContent | null {
-  const t = child.transformation;
+  const t = transformationOf(child);
   if (!isRecord(t)) return null;
 
   if (child.type === "wps") {
@@ -110,7 +74,7 @@ export function groupChildToMemberNode(
         ...data,
         fill: child.fill ?? data.fill,
         outline: child.outline ?? data.outline,
-        transformation: runTransformOf(t),
+        transformation: t,
       } as ShapeOptions,
       ctx,
     );
@@ -147,22 +111,22 @@ export function groupChildToMemberNode(
         ? registerMediaBlob(bytes, child.type)
         : `data:image/${child.type};base64,${encodeBase64(bytes)}`,
     // px display size (UI); the EMU child-space box rides groupXfrm.
-    width: Math.round(convertEmuToPixels(t.emus.x)),
-    height: Math.round(convertEmuToPixels(t.emus.y)),
+    width: Math.round(convertEmuToPixels(emuOf(t.width))),
+    height: Math.round(convertEmuToPixels(emuOf(t.height))),
     groupXfrm: {
-      x: t.offset?.emus?.x ?? 0,
-      y: t.offset?.emus?.y ?? 0,
-      cx: t.emus.x,
-      cy: t.emus.y,
+      x: t.offset?.x === undefined ? 0 : emuOf(t.offset.x),
+      y: t.offset?.y === undefined ? 0 : emuOf(t.offset.y),
+      cx: emuOf(t.width),
+      cy: emuOf(t.height),
     },
   };
   if (t.flipHorizontal === true) attrs.flipH = true;
   if (t.flipVertical === true) attrs.flipV = true;
   if (t.rotation !== undefined) attrs.rotation = t.rotation;
   if (t.effectExtent) attrs.effectExtent = t.effectExtent;
-  if (child.sourceRectangle) attrs.crop = child.sourceRectangle;
-  if (child.nonVisualProperties) attrs.nonVisualProperties = child.nonVisualProperties;
-  if (child.useLocalDpi !== undefined) attrs.useLocalDpi = child.useLocalDpi;
+  if ("sourceRectangle" in child) attrs.crop = child.sourceRectangle;
+  if ("nonVisualProperties" in child) attrs.nonVisualProperties = child.nonVisualProperties;
+  if ("useLocalDpi" in child) attrs.useLocalDpi = child.useLocalDpi;
   // A grouped picture's spPr fill/outline ride the group-child extension.
   if (child.fill) attrs.fill = child.fill;
   if (child.outline) attrs.outline = child.outline;
@@ -188,7 +152,7 @@ export function memberNodeToGroupChild(
     // an alternative carrier of the same field — one authority is enough).
     return cleanAttrs({
       type: "wps",
-      transformation: dataTransformOf(transformation as unknown as MediaTransformation),
+      transformation,
       data: { ...data, children: compileBody(node) },
     }) as unknown as GroupChildMediaData;
   }
@@ -227,15 +191,15 @@ export function memberNodeToGroupChild(
     return cleanAttrs({
       type: media.type,
       data: media.bytes,
-      transformation: dataTransformOf({
-        offset: { left: xfrm.x, top: xfrm.y },
+      transformation: {
+        offset: { x: xfrm.x, y: xfrm.y },
         width: xfrm.cx,
         height: xfrm.cy,
         ...(attrs.flipH === true ? { flipHorizontal: true } : {}),
         ...(attrs.flipV === true ? { flipVertical: true } : {}),
         ...(typeof attrs.rotation === "number" ? { rotation: attrs.rotation } : {}),
         ...(attrs.effectExtent ? { effectExtent: attrs.effectExtent } : {}),
-      } as MediaTransformation),
+      },
       ...(attrs.crop ? { sourceRectangle: attrs.crop } : {}),
       ...(attrs.nonVisualProperties ? { nonVisualProperties: attrs.nonVisualProperties } : {}),
       ...(attrs.useLocalDpi !== null && attrs.useLocalDpi !== undefined

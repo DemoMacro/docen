@@ -78,6 +78,7 @@ const SECTION_FIXTURES: Record<keyof typeof SECTION_CHILD_DISPOSITIONS, () => Se
     altChunk: { data: "PGh0bWw+", contentType: "text/html", extension: "html" },
   }),
   customXml: () => ({ customXml: { element: "CX", children: [] } }),
+  subDoc: () => ({ subDoc: { sourceUrl: "https://example.com/sub.docx" } }),
   bookmarkStart: () => ({ bookmarkStart: { id: 1, name: "bm" } }),
   bookmarkEnd: () => ({ bookmarkEnd: { id: 1 } }),
   rawXml: () => ({ rawXml: "<w:p><w:r><w:t>raw</w:t></w:r></w:p>" }),
@@ -183,6 +184,23 @@ describe("SectionChild dispositions", () => {
 
 const INLINE_FIXTURES: Record<keyof typeof PARAGRAPH_CHILD_DISPOSITIONS, () => ParagraphChild> = {
   // Editable branches.
+  table: () => ({
+    table: { rows: [{ cells: [{ children: [{ paragraph: { text: "inline" } }] }] }] },
+  }),
+  chartEx: () => ({
+    chartEx: {
+      transformation: { width: 100, height: 60 },
+      chart: {
+        plotArea: {
+          region: { series: [{ layout: "waterfall" }] },
+          axes: [{ id: 0, scaling: { kind: "category" }, tickLabels: {} }],
+        },
+      },
+    },
+  }),
+  wordprocessingCanvas: () => ({
+    wordprocessingCanvas: { children: [], transformation: { width: 100, height: 60 } },
+  }),
   picture: () => ({
     picture: {
       type: "png",
@@ -218,9 +236,9 @@ const INLINE_FIXTURES: Record<keyof typeof PARAGRAPH_CHILD_DISPOSITIONS, () => P
       transformation: { width: 100, height: 60 },
     },
   }),
-  // One wps member in child-space form (MediaDataTransformation). EMU values
-  // divide cleanly to px (95250 = 10px) so the pixels track survives the
-  // resolve↔compile unit conversion verbatim.
+  // One wps member in child-space form (MediaTransformation). EMU values are
+  // the canonical placement source; pixel display values are resolved by the
+  // editor extension from the same box.
   wpgGroup: () => ({
     wpgGroup: {
       transformation: { width: 100, height: 60 },
@@ -228,9 +246,9 @@ const INLINE_FIXTURES: Record<keyof typeof PARAGRAPH_CHILD_DISPOSITIONS, () => P
         {
           type: "wps",
           transformation: {
-            offset: { pixels: { x: 0, y: 0 }, emus: { x: 0, y: 0 } },
-            pixels: { x: 10, y: 10 },
-            emus: { x: 95250, y: 95250 },
+            offset: { x: 0, y: 0 },
+            width: 95250,
+            height: 95250,
           },
           data: { children: ["member"], geometry: "rect" },
         },
@@ -245,7 +263,7 @@ const INLINE_FIXTURES: Record<keyof typeof PARAGRAPH_CHILD_DISPOSITIONS, () => P
   bookmarkEnd: () => ({ bookmarkEnd: { id: 1 } }),
   bookmark: () => ({ bookmark: { name: "bm" } }),
   smartArt: () => ({ smartArt: { nodes: [], transformation: { width: 100, height: 60 } } }),
-  math: () => ({ math: { display: true } }),
+  math: () => ({ math: true }),
   symbolRun: () => ({ symbolRun: { char: "§" } }),
   footnoteReference: () => ({ footnoteReference: 1 }),
   endnoteReference: () => ({ endnoteReference: 1 }),
@@ -284,9 +302,24 @@ const INLINE_FIXTURES: Record<keyof typeof PARAGRAPH_CHILD_DISPOSITIONS, () => P
   customXmlMoveFromRangeEnd: () => ({ customXmlMoveFromRangeEnd: 1 }),
   customXmlMoveToRangeStart: () => ({ customXmlMoveToRangeStart: { id: 1 } }),
   customXmlMoveToRangeEnd: () => ({ customXmlMoveToRangeEnd: 1 }),
+  customXmlConflictInsRangeStart: () => ({
+    customXmlConflictInsRangeStart: { id: 2, author: "a", date: "2024-01-01T00:00:00Z" },
+  }),
+  customXmlConflictInsRangeEnd: () => ({ customXmlConflictInsRangeEnd: 2 }),
+  customXmlConflictDelRangeStart: () => ({
+    customXmlConflictDelRangeStart: { id: 3, author: "a", date: "2024-01-01T00:00:00Z" },
+  }),
+  customXmlConflictDelRangeEnd: () => ({ customXmlConflictDelRangeEnd: 3 }),
+  conflictIns: () => ({
+    conflictIns: { id: 4, author: "a", children: [{ text: "conflict" }] },
+  }),
+  conflictDel: () => ({
+    conflictDel: { id: 5, author: "a", children: [{ text: "conflict" }] },
+  }),
   simpleField: () => ({ simpleField: { instruction: "PAGE" } }),
   formField: () => ({ formField: { name: "ff1" } }),
   complexField: () => ({ complexField: { instruction: "PAGE" } }),
+  fieldMarker: () => ({ fieldMarker: { type: "end" } }),
   seqIdentifier: () => ({ seqIdentifier: "Figure" }),
   pageReference: () => ({ pageReference: { bookmarkId: "bm" } }),
   dir: () => ({ dir: { val: "ltr", children: ["body"] } }),
@@ -295,6 +328,14 @@ const INLINE_FIXTURES: Record<keyof typeof PARAGRAPH_CHILD_DISPOSITIONS, () => P
   customXml: () => ({ customXml: { element: "CX", children: ["body"] } }),
   sdt: () => ({ sdt: { properties: { alias: "inline-sdt" }, children: ["body"] } }),
   subDoc: () => ({ subDoc: { data: "x" } }),
+  unsupportedDrawing: () => ({
+    unsupportedDrawing: {
+      anchor: { name: "wp:inline" },
+      anchorMode: "inline",
+      graphicData: { name: "example:graphic" },
+      graphicDataUri: "https://example.com/drawing",
+    },
+  }),
   rawXml: () => ({ rawXml: '<w:fldSimple instr="PAGE"/>' }),
 };
 

@@ -63,7 +63,7 @@ function shapeMember(left: number, top: number, text = "member"): JSONContent {
     type: "wpsShape",
     attrs: {
       wpsShape: {
-        transformation: { width: 1143000, height: 571500, offset: { left, top } },
+        transformation: { width: 1143000, height: 571500, offset: { x: left, y: top } },
         geometry: "ellipse",
         fill: { type: "solid", color: "4472C4" },
         outline: { color: "2F528F", width: 12700 },
@@ -94,9 +94,9 @@ function nestedGroupMember(): JSONContent {
       wpgGroup: {
         type: "wpg",
         transformation: {
-          offset: { emus: { x: 1270000, y: 0 }, pixels: { x: 133, y: 0 } },
-          emus: { x: 1143000, y: 1143000 },
-          pixels: { x: 120, y: 120 },
+          offset: { x: 1270000, y: 0 },
+          width: 1143000,
+          height: 1143000,
         },
         childOffsetX: 0,
         childOffsetY: 0,
@@ -132,7 +132,7 @@ describe("wpgGroup member round-trip", () => {
     expect(member.type).toBe("wpsShape");
     const ws = member.attrs!.wpsShape as Record<string, any>;
     // Child-space offset survives as the shape's transformation.offset, EMU-exact.
-    expect(ws.transformation.offset).toEqual({ left: 1270000, top: 635000 });
+    expect(ws.transformation.offset).toEqual({ x: 1270000, y: 635000 });
     expect(ws.transformation).toMatchObject({ width: 1143000, height: 571500 });
     expect(ws.geometry).toEqual({ preset: "ellipse" });
     expect(ws.fill).toMatchObject({ type: "solid" });
@@ -168,9 +168,10 @@ describe("wpgGroup member round-trip", () => {
     const nested = firstGroup(json).content![0];
     expect(nested.type).toBe("wpgGroup");
     const g = nested.attrs!.wpgGroup as Record<string, any>;
-    // GroupMediaData form: MediaDataTransformation (offset.emus + emus), EMU-exact.
-    expect(g.transformation.offset.emus).toEqual({ x: 1270000, y: 0 });
-    expect(g.transformation.emus).toEqual({ x: 1143000, y: 1143000 });
+    // GroupMediaData form: MediaTransformation carries native EMUs, EMU-exact.
+    expect(g.transformation.offset).toEqual({ x: 1270000, y: 0 });
+    expect(g.transformation.width).toEqual(1143000);
+    expect(g.transformation.height).toEqual(1143000);
     expect(g.childExtentWidth).toBe(1143000);
     expect(nested.content![0].type).toBe("wpsShape");
     expect(JSON.stringify(nested.content)).toContain("inner");
@@ -183,9 +184,9 @@ describe("wpgGroup member round-trip", () => {
     const chartChild = {
       type: "chart",
       transformation: {
-        offset: { pixels: { x: 0, y: 0 }, emus: { x: 0, y: 0 } },
-        pixels: { x: 120, y: 90 },
-        emus: { x: 1143000, y: 857250 },
+        offset: { x: 0, y: 0 },
+        width: 1143000,
+        height: 857250,
       },
       chartKey: "chart-1",
       nonVisualProperties: { id: 2, name: "Chart 2" },
@@ -235,18 +236,18 @@ describe("wpgGroup member round-trip", () => {
 function wpsChildData(): {
   type: "wps";
   transformation: {
-    offset: { pixels: { x: number; y: number }; emus: { x: number; y: number } };
-    pixels: { x: number; y: number };
-    emus: { x: number; y: number };
+    offset?: { x: number; y: number };
+    width: number;
+    height: number;
   };
   data: { children: string[]; geometry: string };
 } {
   return {
     type: "wps",
     transformation: {
-      offset: { pixels: { x: 0, y: 0 }, emus: { x: 1270000, y: 635000 } },
-      pixels: { x: 133, y: 66 },
-      emus: { x: 1143000, y: 571500 },
+      offset: { x: 1270000, y: 635000 },
+      width: 1143000,
+      height: 571500,
     },
     data: { children: ["inner"], geometry: "rect" },
   };

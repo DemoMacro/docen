@@ -26,7 +26,7 @@ import {
 } from "@docen/layout";
 import type { GeometryGuide } from "@office-open/core";
 import type { CustomGeometryOptions } from "@office-open/core/drawing";
-import type { GroupChildMediaData, GroupOptions, MediaDataTransformation } from "@office-open/docx";
+import type { GroupChildMediaData, GroupOptions, MediaTransformation } from "@office-open/docx";
 
 import type { ProjectContext } from "./context";
 import { isRecord, measureEmu, num, str, type BodyParagraph, type Rec } from "./guards";
@@ -160,7 +160,7 @@ function customGeometryPath(
     let cy = 0;
     let startX = 0;
     let startY = 0;
-    for (const cmd of p.commands) {
+    for (const cmd of p.commands ?? []) {
       switch (cmd.command) {
         case "moveTo":
           cx = x(cmd.point.x);
@@ -483,13 +483,25 @@ function walkGroup(
 ): void {
   for (let i = 0; i < group.children.length; i++) {
     const child = group.children[i]!;
-    const t: MediaDataTransformation = child.transformation;
-    const off = t.offset?.emus;
-    if (!off) continue;
-    let x = originX + (off.x - chOffX) * scaleX;
-    let y = originY + (off.y - chOffY) * scaleY;
-    const width = t.emus.x * scaleX;
-    const height = t.emus.y * scaleY;
+    if (!("transformation" in child)) continue;
+    const t: MediaTransformation = child.transformation;
+    const off = t.offset;
+    if (off?.x === undefined || off.y === undefined) continue;
+    const offsetX = measureEmu(off.x);
+    const offsetY = measureEmu(off.y);
+    const widthEmu = measureEmu(t.width);
+    const heightEmu = measureEmu(t.height);
+    if (
+      offsetX === undefined ||
+      offsetY === undefined ||
+      widthEmu === undefined ||
+      heightEmu === undefined
+    )
+      continue;
+    let x = originX + (offsetX - chOffX) * scaleX;
+    let y = originY + (offsetY - chOffY) * scaleY;
+    const width = widthEmu * scaleX;
+    const height = heightEmu * scaleY;
     for (const m of mirrors ?? []) {
       if (m.h) x = 2 * m.x + m.width - x - width;
       if (m.v) y = 2 * m.y + m.height - y - height;
@@ -516,8 +528,8 @@ function walkGroup(
         child,
         x,
         y,
-        childScale(width, child.childExtentWidth, t.emus.x),
-        childScale(height, child.childExtentHeight, t.emus.y),
+        childScale(width, child.childExtentWidth, widthEmu),
+        childScale(height, child.childExtentHeight, heightEmu),
         child.childOffsetX ?? 0,
         child.childOffsetY ?? 0,
         out,

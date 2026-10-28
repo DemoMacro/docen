@@ -24,7 +24,7 @@ import type { DocumentOptions, SectionPropertiesOptions } from "@office-open/doc
 
 import { indexCharacterStyles } from "../style-cascade";
 import type { MarkupDisplay, ProjectContext } from "./context";
-import { isRecord, type BodyParagraph } from "./guards";
+import { isRecord, measureTwip, type BodyParagraph } from "./guards";
 import { indexNumberings } from "./numbering";
 import {
   inheritFurnitureSlots,
@@ -122,8 +122,9 @@ export function projectDocument(
     // The document-wide tab grid (w:defaultTabStop, twips); Word's 720 default
     // applies when settings omit it (the engine carries that fallback).
     defaultTabStopPx:
-      doc.settings?.defaultTabStop != null && doc.settings.defaultTabStop > 0
-        ? twipToPx(doc.settings.defaultTabStop)
+      measureTwip(doc.settings?.defaultTabStop) != null &&
+      measureTwip(doc.settings?.defaultTabStop)! > 0
+        ? twipToPx(measureTwip(doc.settings?.defaultTabStop)!)
         : undefined,
   };
   const sectionBlocks = (doc.sections ?? []).map((section) => {

@@ -23,7 +23,9 @@ import type { ParagraphChild, RunOptions, SectionChild } from "@office-open/docx
  *  and Record<never, …> would satisfy any table (the guard would silently pass).
  *  Branches carrying optional companion keys (e.g. {footnoteReference,
  *  properties?}) yield those too — filtered by the caller's NonTag set. */
-type TagOf<U> = U extends object ? { [K in keyof U]-?: K }[keyof U] : never;
+type TagOf<U> = U extends object
+  ? { [K in keyof U]-?: undefined extends U[K] ? never : K }[keyof U]
+  : never;
 
 /** Keys that appear on union branches but are NOT tags: the companion optional
  *  keys plus everything the untagged RunOptions fallback member contributes.
@@ -34,7 +36,7 @@ type TagOf<U> = U extends object ? { [K in keyof U]-?: K }[keyof U] : never;
  *  endnoteReference (run-level w:*Reference vs the reference branch). */
 type NonTagKeys = Exclude<
   "properties" | keyof RunOptions,
-  "math" | "footnoteReference" | "endnoteReference"
+  "math" | "footnoteReference" | "endnoteReference" | "pageBreak" | "columnBreak"
 >;
 
 type ParagraphChildTag = Exclude<TagOf<ParagraphChild>, NonTagKeys>;
@@ -60,6 +62,7 @@ export const SECTION_CHILD_DISPOSITIONS = {
   bookmarkStart: { passthrough: "block Passthrough atom" },
   bookmarkEnd: { passthrough: "block Passthrough atom" },
   rawXml: { passthrough: "block Passthrough atom" },
+  subDoc: { passthrough: "block Passthrough atom" },
 } satisfies Record<SectionChildTag, Disposition>;
 
 /** ParagraphChild branches (inline level) — resolve direction. Unclaimed
@@ -68,6 +71,9 @@ export const SECTION_CHILD_DISPOSITIONS = {
  *  resolves to text nodes + marks (see resolveRun in converters/docx.ts) —
  *  its keys are all NonTag, so it has no row here. */
 export const PARAGRAPH_CHILD_DISPOSITIONS = {
+  table: { passthrough: "inlinePassthrough atom (legacy tolerated inline table)" },
+  chartEx: { passthrough: "inlinePassthrough atom" },
+  wordprocessingCanvas: { passthrough: "inlinePassthrough atom" },
   picture: { editable: "image node" },
   hyperlink: { editable: "Link mark (container)" },
   insertion: { editable: "Insertion mark (container)" },
@@ -112,9 +118,16 @@ export const PARAGRAPH_CHILD_DISPOSITIONS = {
   customXmlMoveFromRangeEnd: { passthrough: "inlinePassthrough atom" },
   customXmlMoveToRangeStart: { passthrough: "inlinePassthrough atom" },
   customXmlMoveToRangeEnd: { passthrough: "inlinePassthrough atom" },
+  customXmlConflictInsRangeStart: { passthrough: "inlinePassthrough atom" },
+  customXmlConflictInsRangeEnd: { passthrough: "inlinePassthrough atom" },
+  customXmlConflictDelRangeStart: { passthrough: "inlinePassthrough atom" },
+  customXmlConflictDelRangeEnd: { passthrough: "inlinePassthrough atom" },
+  conflictIns: { passthrough: "inlinePassthrough atom" },
+  conflictDel: { passthrough: "inlinePassthrough atom" },
   simpleField: { passthrough: "inlinePassthrough atom" },
   formField: { passthrough: "inlinePassthrough atom" },
   complexField: { passthrough: "inlinePassthrough atom" },
+  fieldMarker: { passthrough: "inlinePassthrough atom" },
   seqIdentifier: { passthrough: "inlinePassthrough atom" },
   pageReference: { passthrough: "inlinePassthrough atom" },
   dir: { passthrough: "inlinePassthrough atom" },
@@ -122,6 +135,7 @@ export const PARAGRAPH_CHILD_DISPOSITIONS = {
   smartTag: { passthrough: "inlinePassthrough atom" },
   customXml: { passthrough: "inlinePassthrough atom" },
   sdt: { editable: "sdtInline node (content editable, control settings verbatim)" },
+  unsupportedDrawing: { passthrough: "inlinePassthrough atom" },
   subDoc: { passthrough: "inlinePassthrough atom" },
   rawXml: { passthrough: "inlinePassthrough atom" },
 } satisfies Record<ParagraphChildTag, Disposition>;

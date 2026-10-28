@@ -123,6 +123,7 @@ export function textBlocks(
           style: runStyle(kid.properties, context, props),
         });
       } else {
+        if ("content" in kid) continue;
         inline.push({ kind: "text", text: kid.text ?? "", style: runStyle(kid, context, props) });
       }
     }
@@ -137,6 +138,7 @@ export function textBlocks(
       props,
       firstRun?.style ?? runStyle(undefined, context, props),
       counters,
+      context,
     );
     if (marker) inline.unshift(...marker);
     const level = (props.indentLevel ?? 0) * LEVEL_STEP_EMU;
@@ -237,6 +239,7 @@ function markerInline(
   props: TextParagraphPropertiesOptions | undefined,
   runStyle: LayoutTextStyle,
   counters: Map<string, number>,
+  context: TextFieldContext,
 ): LayoutInline[] | null {
   const bullet: BulletOptions | undefined = props?.bullet;
   if (!bullet) {
@@ -259,9 +262,12 @@ function markerInline(
   }
   // buFont/buClr/buSz win over the run when explicit; the "follows text"
   // toggles and an unset dimension keep the run's value.
+  const family = bullet.font
+    ? familyOf(typeof bullet.font === "string" ? bullet.font : { latin: bullet.font }, context)
+    : undefined;
   const style: LayoutTextStyle = {
     ...runStyle,
-    ...(bullet.font ? { family: bullet.font } : {}),
+    ...(family ? { family } : {}),
     ...(bullet.sizePoints != null
       ? { sizePx: ptToPx(bullet.sizePoints) }
       : bullet.size != null

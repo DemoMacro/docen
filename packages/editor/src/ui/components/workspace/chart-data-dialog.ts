@@ -1,5 +1,6 @@
 import type { ChartOptions, ChartSeriesData } from "@docen/docx";
 import { FASTElement, css, customElement, html, observable, ref } from "@microsoft/fast-element";
+import type { CategoryPointOptions, ChartValue } from "@office-open/core";
 
 import type { ChartDataPatch } from "../../../document/extensions/commands";
 import { observeLang, t } from "../../i18n/localize";
@@ -60,6 +61,19 @@ const styles = css`
 
 type FluentTextInput = HTMLElement & { value: string };
 type FluentButton = HTMLElement & { textContent: string };
+
+/** The grid edits plain labels — a cached rich category/series point
+ *  degrades to its text. */
+const labelTextOf = (value: string | CategoryPointOptions): string =>
+  typeof value === "string" ? value : value.text;
+
+/** The grid edits numbers — cached string/point values parse like the
+ *  inputs do (#collect), and text/null cells fall back to 0. */
+const numberValueOf = (value: ChartValue): number => {
+  if (typeof value === "number") return value;
+  if (value === null || typeof value !== "object") return 0;
+  return typeof value.value === "number" ? value.value : Number(value.value) || 0;
+};
 
 const template = html<DocenChartDataDialog>`
   <docen-dialog ${ref("dialogEl")}>
@@ -125,10 +139,10 @@ class DocenChartDataDialog extends FASTElement {
     // edits the plain string only.
     if (this.titleInput)
       this.titleInput.value = typeof chart?.title === "string" ? chart.title : "";
-    this.#categories = [...categories];
+    this.#categories = categories.map(labelTextOf);
     this.#series = series.map((s) => ({
-      name: s.name ?? "",
-      values: [...s.values],
+      name: labelTextOf(s.name ?? ""),
+      values: s.values.map(numberValueOf),
     }));
     if (!this.#series.length) this.#series.push({ name: "", values: [] });
     this.#render();

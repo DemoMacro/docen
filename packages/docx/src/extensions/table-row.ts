@@ -60,7 +60,9 @@ const docxTableRowAttrs = {
 
   // Scalar OOXML row properties (stored verbatim; no CSS equivalent)
   cantSplit: attrNative(),
+  rowProperties: attrNative(),
   tableHeader: attrNative(),
+  tableHeaderRaw: attrNative(),
   hidden: attrNative(),
   divId: attrNative(),
   // NOTE gridAfter/widthAfter: declared for round-trip fidelity, but

@@ -64,6 +64,10 @@ const docxTableAttrs = {
   // tblGrid (<w:tblGrid>) — exact twips per column; kept on the table so DOCX
   // round-trips losslessly instead of being split into per-cell colwidth.
   columnWidths: attrNative(),
+  columnWidthsRaw: attrNative(),
+  legacyColumnCount: attrNative(),
+  tableGridOmitted: attrNative(),
+  propertyOrder: attrNative(),
   indent: attrNative(),
   margins: attrNative(),
   float: attrNative(),

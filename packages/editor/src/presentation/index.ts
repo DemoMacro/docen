@@ -53,6 +53,7 @@ import type {
   TextRunOptions,
   TextVertical,
 } from "@office-open/core/drawing";
+import type { AnimationDuration } from "@office-open/pptx";
 // Leafer ships animate() as a stub that only logs — the show's entrance
 // tweens need the real plugin registered.
 import "@leafer-in/animate";
@@ -270,6 +271,11 @@ const readFileAsDataURL = (file: File): Promise<string> =>
     reader.onerror = () => reject(reader.error);
     reader.readAsDataURL(file);
   });
+
+/** The show's tween player needs finite milliseconds — a parsed
+ *  "indefinite" duration/delay falls back to the editing default. */
+const animationMsOf = (value: AnimationDuration | undefined, fallback: number): number =>
+  typeof value === "number" ? value : fallback;
 
 /** Render the embedded object's browser-visible icon as a real PNG. The OLE
  *  payload stays source bytes; this preview is only the `p:pic` the file
@@ -4285,7 +4291,7 @@ class DocenPresentation extends AddinHost {
         ? hits.find((h) => nonVisualOf(slide.children![h.child]!)?.name === entry.shapeName)
         : undefined;
       if (!hit) continue;
-      const duration = entry.duration ?? 500;
+      const duration = animationMsOf(entry.duration, 500);
       const trigger = entry.trigger ?? "onClick";
       const base =
         trigger === "withPrevious"
@@ -4293,7 +4299,7 @@ class DocenPresentation extends AddinHost {
           : trigger === "afterPrevious"
             ? lastEnd
             : clickCursor;
-      const startAt = base + (entry.delay ?? 0);
+      const startAt = base + animationMsOf(entry.delay, 0);
       const options = { duration, delay: startAt, jump: true, easing: "ease-out" as const };
       for (const el of slideGroup.children.filter(
         // An unpainted element carries no position — NaN fails the box test.
@@ -4484,8 +4490,8 @@ class DocenPresentation extends AddinHost {
           <span class="select-name"><strong>${escapeHtml(label)}</strong><br>${escapeHtml(effect)}</span>
           <div class="animation-controls">
             <label><span>${escapeHtml(t("ppt.animation.start", this))}</span><select data-animation-setting="trigger" data-animation-index="${index}">${options.map((option) => `<option value="${option}"${option === trigger ? " selected" : ""}>${escapeHtml(t(`ppt.animation.${option}`, this))}</option>`).join("")}</select></label>
-            <label><span>${escapeHtml(t("ppt.animation.duration", this))}</span><input type="number" min="0" step="0.1" value="${((entry.duration ?? 500) / 1000).toFixed(1)}" data-animation-setting="duration" data-animation-index="${index}"></label>
-            <label><span>${escapeHtml(t("ppt.animation.delay", this))}</span><input type="number" min="0" step="0.1" value="${((entry.delay ?? 0) / 1000).toFixed(1)}" data-animation-setting="delay" data-animation-index="${index}"></label>
+            <label><span>${escapeHtml(t("ppt.animation.duration", this))}</span><input type="number" min="0" step="0.1" value="${(animationMsOf(entry.duration, 500) / 1000).toFixed(1)}" data-animation-setting="duration" data-animation-index="${index}"></label>
+            <label><span>${escapeHtml(t("ppt.animation.delay", this))}</span><input type="number" min="0" step="0.1" value="${(animationMsOf(entry.delay, 0) / 1000).toFixed(1)}" data-animation-setting="delay" data-animation-index="${index}"></label>
           </div>
           <span class="pane-actions"><button data-animation-move="${index}" data-direction="-1" title="${escapeHtml(t("ppt.animation.move-up", this))}">↑</button><button data-animation-move="${index}" data-direction="1" title="${escapeHtml(t("ppt.animation.move-down", this))}">↓</button><button data-animation-delete="${index}" title="${escapeHtml(t("ppt.animation.delete", this))}">×</button></span>
         </div>`;

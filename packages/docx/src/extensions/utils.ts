@@ -128,6 +128,9 @@ export function docxParagraphAttrs() {
     pageBreakBefore: attrNative(),
     widowControl: attrNative(),
     contextualSpacing: attrNative(),
+    contextualSpacingRaw: attrNative(),
+    hyphenationLines: attrNative(),
+    collapsed: attrNative(),
     bidirectional: attrNative(),
     outlineLevel: attrNative(),
     textDirection: attrNative(),
@@ -212,6 +215,7 @@ export function docxTableCellAttrs() {
     deletion: attrNative(),
     cellMerge: attrNative(),
     revision: attrNative(),
+    emptyBorders: attrNative(),
     // Mirror contract: every office-open cell property declared, nothing else.
   } satisfies Record<TableCellAttrKey, DocxAttrSpec>;
 }

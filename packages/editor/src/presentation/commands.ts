@@ -782,6 +782,12 @@ export interface PlaceholderReset {
   after: Partial<Pick<ShapeOptions, "x" | "y" | "width" | "height">>;
 }
 
+/** The master's children add placeholder marker entries the layout tree
+ *  never has — only real slide children carry placeholder shapes. */
+type MasterChild = NonNullable<
+  NonNullable<PresentationOptions["masters"]>[number]["children"]
+>[number];
+
 /** The layout's placeholder shapes by their type token — Reset's first
  *  source. Placeholders without their own xfrm inherit the master's, so a
  *  miss here falls through to {@link masterPlaceholdersOf}. */
@@ -797,7 +803,7 @@ export function masterPlaceholdersOf(
   return placeholdersOf(master.children ?? []);
 }
 
-function placeholdersOf(children: SlideChild[]): Map<string, ShapeOptions> {
+function placeholdersOf(children: MasterChild[]): Map<string, ShapeOptions> {
   const map = new Map<string, ShapeOptions>();
   for (const child of children) {
     if ("shape" in child && typeof child.shape?.placeholder === "string")

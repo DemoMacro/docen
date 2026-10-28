@@ -25,6 +25,10 @@ function tileOf(pattern: PatternFill["pattern"]): string {
     );
   };
 
+  // CT_PatternFillProperties leaves prst optional; keep the prior rendering
+  // behavior of an empty tile instead of inventing a preset.
+  if (pattern === undefined) return "";
+
   switch (pattern) {
     case "percent5":
       return percent(0.05);

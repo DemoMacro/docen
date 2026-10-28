@@ -16,8 +16,6 @@ import type {
   FillOptions,
   GradientStopOptions,
   SolidFillOptions,
-  ShapePropertiesOptions,
-  TextBodyOptions,
   TextListStyleOptions,
   TextStylesOptions,
 } from "@office-open/core/drawing";
@@ -29,6 +27,7 @@ import {
   type LayoutDefinition,
   type MasterDefinition,
   type PresentationOptions,
+  type ShapeOptions,
   type SlideChild,
   type SlideOptions,
 } from "@office-open/pptx";
@@ -38,6 +37,7 @@ import { transformColor, type ResolvedColor } from "./color-transform";
 import { IDENTITY } from "./geometry";
 import { patternBackgroundOf } from "./pattern-background";
 import { pictureSrcOf } from "./pictures";
+import { gradientStopPositionOf } from "./shape-fill";
 import { regionsOf, SCHEME_SLOTS, type ThemeColors } from "./table-style";
 import type { ThemeFonts } from "./text";
 import { childMembers, type ProjectedSlideMember } from "./walk";
@@ -52,6 +52,13 @@ export interface ProjectedPresentation {
 }
 
 type TextLevelStyle = NonNullable<TextListStyleOptions["levels"]>[number];
+type MasterChild = NonNullable<MasterDefinition["children"]>[number];
+
+/** Master parts carry named placeholder references in addition to drawable
+ *  children; only the latter can project onto a slide. */
+function isSlideChild(child: MasterChild): child is SlideChild {
+  return !("placeholder" in child) && !("placeholderShape" in child);
+}
 
 /** One projected slide. */
 export interface ProjectedSlide {
@@ -247,23 +254,10 @@ function inheritedSlideChildrenOf(
   const children = layout?.children ?? [];
   const masterShapes = slide.showMasterShapes !== false && layout?.showMasterShapes !== false;
   const masterChildren = masterShapes ? (owner?.children ?? []) : [];
-  return [...children, ...masterChildren].filter((child) => {
-    const shape = "shape" in child ? (child.shape as PlaceholderShape | undefined) : undefined;
+  return [...children, ...masterChildren.filter(isSlideChild)].filter((child) => {
+    const shape = "shape" in child ? child.shape : undefined;
     return placeholderTypeOf(shape) === undefined;
   });
-}
-
-interface PlaceholderShape {
-  placeholder?: string;
-  placeholderIndex?: number;
-  properties?: ShapePropertiesOptions;
-  hidden?: boolean;
-  style?: unknown;
-  x?: number | string;
-  y?: number | string;
-  width?: number | string;
-  height?: number | string;
-  textBody?: TextBodyOptions;
 }
 
 /** Resolve a slide shape's missing geometry from its layout placeholder.
@@ -279,12 +273,12 @@ function inheritPlaceholderGeometry(
   const layout = preferredLayoutOf(slide, owner) ?? owner?.layouts?.[0];
 
   return children.map((child) => {
-    const shape = "shape" in child ? (child.shape as PlaceholderShape | undefined) : undefined;
+    const shape = "shape" in child ? child.shape : undefined;
     const placeholderType = placeholderTypeOf(shape);
-    if (!shape || !placeholderType) return child;
+    if (!shape || placeholderType === undefined || placeholderType === true) return child;
 
     const resolved = resolvePlaceholder(placeholderType, layout, owner);
-    const next: PlaceholderShape = {
+    const next: ShapeOptions = {
       ...shape,
       ...(resolved.hidden ? { hidden: true } : {}),
     };
@@ -336,7 +330,7 @@ function inheritPlaceholderGeometry(
     ) {
       return child;
     }
-    return { ...child, shape: next } as SlideChild;
+    return { ...child, shape: next };
   });
 }
 
@@ -355,7 +349,7 @@ function preferredLayoutOf(
   );
 }
 
-function placeholderTypeOf(shape: PlaceholderShape | undefined): string | undefined {
+function placeholderTypeOf(shape: ShapeOptions | undefined) {
   return shape?.placeholder;
 }
 
@@ -516,19 +510,18 @@ function resolveFillColors(
     };
   }
   if (fill.type === "gradient") {
-    const resolveStops = <T extends { position: number; color: string | SolidFillOptions }>(
-      stops: readonly T[],
-    ): T[] =>
-      stops.map(
-        (stop) => ({ ...stop, color: stylePaintOf(stop.color, context, phClr) ?? stop.color }) as T,
-      );
+    const resolveStops = (stops: readonly GradientStopOptions[]): GradientStopOptions[] =>
+      stops.map((stop) => ({
+        ...stop,
+        color: stylePaintOf(stop.color, context, phClr) ?? stop.color,
+      }));
     if ("options" in fill) {
       return {
         type: "gradient",
-        options: { ...fill.options, stops: resolveStops(fill.options.stops) },
+        options: { ...fill.options, stops: resolveStops(fill.options.stops ?? []) },
       };
     }
-    return { ...fill, stops: resolveStops(fill.stops) } as FillOptions;
+    return { ...fill, stops: resolveStops(fill.stops) };
   }
   if (fill.type === "pattern") {
     return {
@@ -574,8 +567,11 @@ function backgroundOf(
       if (!color || !("value" in color) || typeof color.value !== "string") return undefined;
       return color.value.replace("#", "").toUpperCase();
     };
-    const stops = opts.stops
-      .map((stop) => ({ color: stopColor(stop.color) ?? "", position: stop.position }))
+    const stops = (opts.stops ?? [])
+      .map((stop) => ({
+        color: stopColor(stop.color) ?? "",
+        position: gradientStopPositionOf(stop.position),
+      }))
       .filter((stop) => stop.color !== "");
     if (stops.length < 2) return undefined;
     // The shorthand carries angle/path at the top level; the full options

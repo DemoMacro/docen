@@ -7,6 +7,7 @@ import type {
   ColorTransformOptions,
   FillOptions,
   GradientFillOptions,
+  GradientStopOptions,
   OutlineFillProperties,
   OutlineOptions,
   SolidFillOptions,
@@ -87,6 +88,11 @@ function colorPaintOf(
   return `rgba(${(raw >> 16) & 255}, ${(raw >> 8) & 255}, ${raw & 255}, ${alpha})`;
 }
 
+/** A gradient stop position as integer percent (50 or "50%" → 50). */
+export function gradientStopPositionOf(position: GradientStopOptions["position"]): number {
+  return typeof position === "string" ? Number.parseFloat(position) : position;
+}
+
 function gradientPaintOf(
   fill: Extract<FillOptions, { type: "gradient" }>,
   width: number,
@@ -95,9 +101,9 @@ function gradientPaintOf(
 ): LayoutDrawingFill | undefined {
   const shorthand = "options" in fill ? undefined : fill;
   const options: GradientFillOptions = "options" in fill ? fill.options : fill;
-  const stops = options.stops
+  const stops = (options.stops ?? [])
     .map((stop) => ({
-      offset: stop.position / 100,
+      offset: gradientStopPositionOf(stop.position) / 100,
       color: colorPaintOf(stop.color, context),
     }))
     .filter((stop): stop is { offset: number; color: string } => stop.color != null);

@@ -1447,7 +1447,7 @@ export function generateDOCXSync<T extends OutputType = "nodebuffer">(
  */
 export async function generateDOCXStream(
   json: JSONContent,
-  options?: DocxGenerateOptions,
+  options?: DocxGenerateOptions<"uint8array">,
 ): Promise<ReadableStream<Uint8Array>> {
   const { prepare = true, packer, document, extensions } = options ?? {};
   if (prepare !== false) {

@@ -57,7 +57,7 @@ export function shapeMembers(
     y: t.sy * emuOf(shape.y) + t.dy,
     w: t.sx * emuOf(shape.width),
     h: t.sy * emuOf(shape.height),
-    ...geometryOf(shape.properties?.geometry),
+    ...geometryOf(shape.properties?.geometry ?? undefined),
     ...(shape.properties?.customGeometry ? { custom: shape.properties.customGeometry } : {}),
     ...shapeFillOf(
       shape.properties?.fill,

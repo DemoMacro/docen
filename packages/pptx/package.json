@@ -42,7 +42,7 @@
   "dependencies": {
     "@docen/core": "workspace:*",
     "@docen/layout": "workspace:*",
-    "@office-open/core": "0.14.6",
-    "@office-open/pptx": "0.14.6"
+    "@office-open/core": "0.15.0",
+    "@office-open/pptx": "0.15.0"
   }
 }

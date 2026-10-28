@@ -6,8 +6,11 @@
 // resolve from p:tblStyleLst or the inline a:tableStyle.
 
 import type {
+  FillOptions,
+  TableCellBorderOptions,
   TableStyleOptions,
   TableStyleRegion,
+  TablePartStyleOptions,
   ThemeableLineStyleOptions,
 } from "@office-open/core/drawing";
 import type { ColorTransformOptions } from "@office-open/core/drawing";
@@ -546,21 +549,42 @@ function fillOf(raw: string, theme: ThemeColors | undefined): string | undefined
   return transformColor(base, transforms as ColorTransformOptions).color;
 }
 
+function lineColorOf(fill: FillOptions | undefined, theme: ThemeColors | undefined) {
+  if (typeof fill === "string") {
+    return fill.trimStart().startsWith("<")
+      ? fillOf(fill, theme)
+      : fill.replace("#", "").toUpperCase();
+  }
+  if (fill?.type !== "solid") return undefined;
+
+  const color = fill.color;
+  if (typeof color === "string") {
+    return color.trimStart().startsWith("<")
+      ? fillOf(color, theme)
+      : color.replace("#", "").toUpperCase();
+  }
+  if (!color || !("value" in color) || typeof color.value !== "string") return undefined;
+  const base = schemeTokenOf(color.value, theme, DEFAULT_ACCENT);
+  return transformColor(base, color.transforms).color;
+}
+
 function lineOf(line: ThemeableLineStyleOptions, theme: ThemeColors | undefined) {
   // ThemeableLineStyleOptions.width is EMU (12700 = 1 pt); absent → 1 px.
   const px = line.width ? Math.max(1, Math.round(line.width / 9525)) : INSIDE_PX;
-  return { px, ...(line.color ? { color: fillOf(line.color, theme) } : {}) };
+  const color = lineColorOf(line.fill, theme);
+  return color ? { px, color } : undefined;
 }
 
 function bordersOf(
-  borders: Record<string, ThemeableLineStyleOptions | undefined> | undefined,
+  borders: TableCellBorderOptions | undefined,
   theme: ThemeColors | undefined,
 ): TableRegionRules["borders"] {
   if (!borders) return undefined;
   const out: NonNullable<TableRegionRules["borders"]> = {};
   for (const key of ["top", "right", "bottom", "left", "insideH", "insideV"] as const) {
     const line = borders[key];
-    if (line && !/noFill/.test(line.color ?? "")) out[key] = lineOf(line, theme);
+    const border = line && lineOf(line, theme);
+    if (border) out[key] = border;
   }
   return Object.keys(out).length > 0 ? out : undefined;
 }
@@ -573,13 +597,7 @@ export function regionsOf(
   const out: TableStyleRegions = {};
   for (const [region, part] of Object.entries(style.regions ?? {}) as [
     TableStyleRegion,
-    (
-      | {
-          cell?: { borders?: Record<string, ThemeableLineStyleOptions | undefined>; fill?: string };
-          text?: { bold?: "on" | "off" | "default"; color?: string };
-        }
-      | undefined
-    ),
+    TablePartStyleOptions | undefined,
   ][]) {
     if (!part) continue;
     const rules: TableRegionRules = {};

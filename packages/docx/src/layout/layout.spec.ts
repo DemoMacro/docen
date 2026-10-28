@@ -895,18 +895,18 @@ describe("projectDocument drawings", () => {
                       fileName: "image1.png",
                       data: new Uint8Array([105, 105]), // "ii" → base64 "aWk="
                       transformation: {
-                        pixels: { x: 50, y: 10 },
-                        emus: { x: 500000, y: 100000 },
-                        offset: { pixels: { x: 0, y: 0 }, emus: { x: 200000, y: 60000 } },
+                        width: 500000,
+                        height: 100000,
+                        offset: { x: 200000, y: 60000 },
                         flipHorizontal: true,
                       },
                     },
                     {
                       type: "wps",
                       transformation: {
-                        pixels: { x: 10, y: 2 },
-                        emus: { x: 100000, y: 20000 },
-                        offset: { pixels: { x: 0, y: 0 }, emus: { x: 300000, y: 0 } },
+                        width: 100000,
+                        height: 20000,
+                        offset: { x: 300000, y: 0 },
                       },
                       data: {
                         geometry: "rect",
@@ -918,9 +918,9 @@ describe("projectDocument drawings", () => {
                     {
                       type: "wps",
                       transformation: {
-                        pixels: { x: 10, y: 2 },
-                        emus: { x: 100000, y: 20000 },
-                        offset: { pixels: { x: 0, y: 0 }, emus: { x: 300000, y: 0 } },
+                        width: 100000,
+                        height: 20000,
+                        offset: { x: 300000, y: 0 },
                       },
                       // Custom geometry carries no canvas path — no member.
                       data: {
@@ -932,9 +932,9 @@ describe("projectDocument drawings", () => {
                     {
                       type: "wps",
                       transformation: {
-                        pixels: { x: 10, y: 2 },
-                        emus: { x: 100000, y: 20000 },
-                        offset: { pixels: { x: 0, y: 0 }, emus: { x: 300000, y: 0 } },
+                        width: 100000,
+                        height: 20000,
+                        offset: { x: 300000, y: 0 },
                       },
                       // Published 0.12.3 parse bug: nested shape data stringified.
                       data: "[object Object]" as unknown as { children: never[] },
@@ -992,12 +992,9 @@ describe("projectDocument drawings", () => {
                     {
                       type: "wpg",
                       transformation: {
-                        pixels: { x: 0, y: 0 },
-                        emus: { x: 500000, y: 100000 },
-                        offset: {
-                          pixels: { x: 0, y: 0 },
-                          emus: { x: 200000, y: 0 },
-                        },
+                        width: 500000,
+                        height: 100000,
+                        offset: { x: 200000, y: 0 },
                         flipHorizontal: true,
                       },
                       childOffsetX: 0,
@@ -1008,9 +1005,9 @@ describe("projectDocument drawings", () => {
                         {
                           type: "wps",
                           transformation: {
-                            pixels: { x: 0, y: 0 },
-                            emus: { x: 250000, y: 100000 },
-                            offset: { pixels: { x: 0, y: 0 }, emus: { x: 0, y: 0 } },
+                            width: 250000,
+                            height: 100000,
+                            offset: { x: 0, y: 0 },
                           },
                           data: {
                             geometry: "rect",
@@ -1055,9 +1052,9 @@ describe("projectDocument drawings", () => {
                     {
                       type: "wps",
                       transformation: {
-                        pixels: { x: 0, y: 0 },
-                        emus: { x: 476250, y: 190500 },
-                        offset: { pixels: { x: 0, y: 0 }, emus: { x: 476250, y: 0 } },
+                        width: 476250,
+                        height: 190500,
+                        offset: { x: 476250, y: 0 },
                       },
                       data: {
                         geometry: "rect",
@@ -1100,9 +1097,9 @@ describe("projectDocument drawings", () => {
                     {
                       type: "wps",
                       transformation: {
-                        pixels: { x: 100, y: 10 },
-                        emus: { x: 952500, y: 95250 },
-                        offset: { pixels: { x: 0, y: 0 }, emus: { x: 0, y: 0 } },
+                        width: 952500,
+                        height: 95250,
+                        offset: { x: 0, y: 0 },
                       },
                       data: {
                         geometry: "rect",
@@ -1190,9 +1187,9 @@ describe("projectDocument drawings", () => {
                     {
                       type: "wpg",
                       transformation: {
-                        pixels: { x: 50, y: 10 },
-                        emus: { x: 476250, y: 95250 },
-                        offset: { pixels: { x: 0, y: 0 }, emus: { x: 190500, y: 0 } },
+                        width: 476250,
+                        height: 95250,
+                        offset: { x: 190500, y: 0 },
                       },
                       childOffsetX: 100000,
                       childOffsetY: 0,
@@ -1202,9 +1199,9 @@ describe("projectDocument drawings", () => {
                         {
                           type: "wps",
                           transformation: {
-                            pixels: { x: 50, y: 10 },
-                            emus: { x: 238125, y: 95250 },
-                            offset: { pixels: { x: 0, y: 0 }, emus: { x: 100000, y: 0 } },
+                            width: 238125,
+                            height: 95250,
+                            offset: { x: 100000, y: 0 },
                           },
                           data: {
                             geometry: "line",
@@ -1257,9 +1254,9 @@ describe("projectDocument drawings", () => {
                     {
                       type: "wps",
                       transformation: {
-                        pixels: { x: 100, y: 5 },
-                        emus: { x: 952500, y: 47625 },
-                        offset: { pixels: { x: 0, y: 0 }, emus: { x: 0, y: 0 } },
+                        width: 952500,
+                        height: 47625,
+                        offset: { x: 0, y: 0 },
                       },
                       data: {
                         customGeometry: {
@@ -1335,15 +1332,15 @@ describe("projectDocument drawings", () => {
                         fileName: "band.png",
                         data: new Uint8Array([105]),
                         transformation: {
-                          pixels: { x: 10, y: 1 },
-                          emus: { x: 95250, y: 9525 },
-                          offset: { pixels: { x: 0, y: 0 }, emus: { x: 0, y: 0 } },
+                          width: 95250,
+                          height: 9525,
+                          offset: { x: 0, y: 0 },
                         },
                       },
                       transformation: {
-                        pixels: { x: 10, y: 1 },
-                        emus: { x: 95250, y: 9525 },
-                        offset: { pixels: { x: 0, y: 0 }, emus: { x: 0, y: 0 } },
+                        width: 95250,
+                        height: 9525,
+                        offset: { x: 0, y: 0 },
                       },
                     },
                     {
@@ -1351,9 +1348,9 @@ describe("projectDocument drawings", () => {
                       fileName: "stripes.png",
                       data: new Uint8Array([105]),
                       transformation: {
-                        pixels: { x: 10, y: 1 },
-                        emus: { x: 95250, y: 9525 },
-                        offset: { pixels: { x: 0, y: 0 }, emus: { x: 0, y: 0 } },
+                        width: 95250,
+                        height: 9525,
+                        offset: { x: 0, y: 0 },
                       },
                       // Raw ST_Percentage ints, as office-open's wpg picture
                       // parse emits them (12632 = 12.632%).
@@ -1362,9 +1359,9 @@ describe("projectDocument drawings", () => {
                     {
                       type: "wps",
                       transformation: {
-                        pixels: { x: 10, y: 1 },
-                        emus: { x: 95250, y: 9525 },
-                        offset: { pixels: { x: 0, y: 0 }, emus: { x: 0, y: 0 } },
+                        width: 95250,
+                        height: 9525,
+                        offset: { x: 0, y: 0 },
                       },
                       data: {
                         geometry: "rect",
