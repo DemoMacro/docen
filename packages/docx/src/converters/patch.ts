@@ -22,9 +22,8 @@ export interface DocxPatchContent {
 /**
  * Options for patching a DOCX template.
  *
- * Mirrors the legacy `@docen/export-docx` DocxPatchOptions minus `exportOptions`
- * — `compileDocument` already derives all styling from the Tiptap attrs, so no
- * separate export configuration is needed.
+ * A high-level placeholder facade over office-open's ordered
+ * `DocumentPatchCommand` API.
  */
 export interface DocxPatchOptions<T extends OutputType = OutputType> {
   /** Template DOCX to patch. */

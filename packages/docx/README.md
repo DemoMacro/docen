@@ -52,6 +52,7 @@ These work without an editor instance — for headless/server/batch use.
 ```typescript
 import {
   parseDOCX,
+  parseDOCXSync,
   generateDOCX,
   generateDOCXSync,
   generateDOCXStream,
@@ -60,10 +61,11 @@ import {
 } from "@docen/docx";
 
 // DOCX pipeline: DOCX binary ↔ Tiptap JSON
-const json = parseDOCX(buffer); // → JSONContent
+const json = await parseDOCX(buffer); // → JSONContent (Blob/Stream-safe)
 const buffer = await generateDOCX(json); // → Buffer (pre-fetches http images by default)
 const blob = await generateDOCX(json, { packer: { type: "blob" } }); // → Blob
 const sync = generateDOCXSync(json); // → Buffer (skips prepare)
+const fastJson = parseDOCXSync(bytes); // → JSONContent (bytes only)
 const stream = await generateDOCXStream(json); // → ReadableStream<Uint8Array>
 
 // Markdown pipeline: Markdown string ↔ Tiptap JSON
@@ -119,9 +121,13 @@ await prepareDocument(json); // in place: http image URLs → data URLs
 
 ## Architecture
 
+Built against `@office-open/docx` 0.15.0: `parseDOCX` accepts office-open's
+async `DataType` (including `Blob`/`File` and `ReadableStream`), while
+`parseDOCXSync` accepts its byte-only `SyncDataType`.
+
 ```
 Standalone Functions (core)
-  parseDOCX / generateDOCX / generateDOCXSync / generateDOCXStream / patchDOCX
+  parseDOCX / parseDOCXSync / generateDOCX / generateDOCXSync / generateDOCXStream / patchDOCX
   parseMarkdown / generateMarkdown
   resolveDocument / compileDocument / prepareDocument  (model bridge, advanced)
         ↕ used by

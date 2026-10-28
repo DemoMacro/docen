@@ -140,9 +140,8 @@ describe("wpgGroup member round-trip", () => {
     expect(JSON.stringify(member.content)).toContain("member");
   });
 
-  // Needs @office-open/docx ≥0.14.5 (office-open da107d4f): earlier emits
-  // r:embed="{undefined}" for a group picture child with no fileName, so
-  // picture members never parse back.
+  // office-open resolves the group picture relationship even when the child
+  // has no fileName; earlier corpus generators did not.
   describe("picture member round-trip", () => {
     it("restores a picture member's groupXfrm box and flip", () => {
       const json = parseDOCXSync(generateDOCXSync(groupDoc([imageMember()])) as Uint8Array);

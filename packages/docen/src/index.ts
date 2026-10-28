@@ -8,6 +8,7 @@ export {
   generateDOCXSync,
   generateDOCXStream,
   parseDOCX,
+  parseDOCXSync,
   patchDOCX,
 } from "@docen/docx";
 export type { DocxGenerateOptions, DocxPatchContent, DocxPatchOptions } from "@docen/docx";

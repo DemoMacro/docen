@@ -44,9 +44,9 @@ Standalone functions are core; extension commands are thin wrappers.
 
 ```typescript
 // Format pipelines — runtime (Tiptap JSON) ↔ external formats
-parseDOCX(buffer) → JSONContent                       // DOCX → Tiptap JSON
+await parseDOCX(data) → JSONContent                   // DOCX → Tiptap JSON (Blob/Stream-safe)
 generateDOCX<T>(json, options?) → Promise<OutputByType[T]>   // prepare + compile + generateDocument
-generateDOCXSync<T>(json, packer?) → OutputByType[T]         // sync; no prepare
+generateDOCXSync<T>(json, options?) → OutputByType[T]        // sync; no prepare
 generateDOCXStream(json, options?) → Promise<ReadableStream>
 parseMarkdown / generateMarkdown                       // Markdown ↔ Tiptap JSON, via the @docen/markdown IR + mapper
 

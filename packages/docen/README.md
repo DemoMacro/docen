@@ -47,10 +47,11 @@ const markdown = generateMarkdown(doc);
 ### DOCX ↔ TipTap JSON
 
 ```typescript
-import { parseDOCX, generateDOCX } from "docen";
+import { parseDOCX, parseDOCXSync, generateDOCX } from "docen";
 
 // Parse DOCX to TipTap JSON
-const doc = parseDOCX(buffer);
+const doc = await parseDOCX(buffer); // Blob/File and ReadableStream are also accepted
+const fastDoc = parseDOCXSync(bytes); // byte-only inputs
 
 // Generate DOCX from TipTap JSON
 const docxBuffer = await generateDOCX(doc); // defaults to a Node.js Buffer
@@ -121,18 +122,36 @@ const markdown = generateMarkdown({ type: 'doc', content: [...] });
 
 #### `parseDOCX(input)`
 
-Parses a DOCX file into TipTap JSON content.
+Parses a DOCX file into TipTap JSON content asynchronously. Built against
+`@office-open/docx` 0.15.0.
 
 **Parameters:**
 
-- `input: Buffer | ArrayBuffer | Uint8Array | string` - DOCX file data or path
+- `input: DataType` - DOCX bytes, base64/data-URL string, `Blob`/`File`, or `ReadableStream`
+
+**Returns:** `Promise<JSONContent>` - TipTap document object
+
+```typescript
+import { readFileSync } from "node:fs";
+const buffer = readFileSync("document.docx");
+const doc = await parseDOCX(buffer);
+```
+
+#### `parseDOCXSync(input)`
+
+Synchronous byte-only counterpart of `parseDOCX`. `Blob` and `ReadableStream`
+inputs are rejected.
+
+**Parameters:**
+
+- `input: SyncDataType` - DOCX bytes or a base64/data-URL string
 
 **Returns:** `JSONContent` - TipTap document object
 
 ```typescript
 import { readFileSync } from "node:fs";
-const buffer = readFileSync("document.docx");
-const doc = parseDOCX(buffer);
+const bytes = readFileSync("document.docx");
+const doc = parseDOCXSync(bytes);
 ```
 
 #### `generateDOCX(docJson, options?)`
@@ -156,7 +175,7 @@ const buffer = await generateDOCX(doc);
 const blob = await generateDOCX(doc, { prepare: false, packer: { type: "blob" } });
 ```
 
-#### `generateDOCXSync(docJson, packerOptions?)`
+#### `generateDOCXSync(docJson, options?)`
 
 Synchronous variant — fastest throughput, blocks the event loop. Does **not** run `prepareDocument` (it is async); call `await prepareDocument(doc)` first when http images need embedding.
 
@@ -208,7 +227,7 @@ const result = await patchDOCX({
 });
 ```
 
-Each patch's `content` is compiled to DOCX (styling derived from attrs) and the first section's children replace the placeholder. `keepOriginalStyles`, `recursive`, and `placeholderDelimiters` mirror the underlying `@office-open/docx` `patchDocument`.
+Each patch's `content` is compiled to DOCX (styling derived from attrs) and the first section's children replace the placeholder. Delimiters can be overridden with `placeholderDelimiters`; replacement is delegated to the ordered `DocumentPatchCommand` API in `@office-open/docx` 0.15.
 
 ## Format Conversion Matrix
 

@@ -6683,7 +6683,7 @@ class DocenDocument extends AddinHost<Editor> {
 
   /** Load a .docx into the editor from a File or a buffer (ArrayBuffer /
    *  Uint8Array). A File also adopts its name as the filename; a bare buffer
-   *  carries no name. parseDOCX is async (office-open 0.14): a File is passed
+   *  carries no name. parseDOCX is async: a File is passed
    *  through whole and its bytes are read inside the parse. While loading, an
    *  "Opening <name>" veil covers the canvas (Office shows the same message
    *  for a slow open) and the scroller stays frozen until the document is

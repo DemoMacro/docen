@@ -1228,7 +1228,7 @@ export class DocxManager {
     const text = opts.text;
     if (text === undefined && !opts.children) return null;
 
-    // office-open 0.10.11+ may nest a run's inline elements under run.children
+    // office-open may nest a run's inline elements under run.children
     // (empty run elements like tab/date/lastRenderedPageBreak, or mixed breaks).
     // Walk the children so pageBreak/columnBreak/hardBreak atoms are still
     // yielded; text fragments join into one text node carrying the run's marks.
@@ -1309,7 +1309,7 @@ export class DocxManager {
   }
 }
 
-// ── Standalone functions (backward compat) ──
+// ── Standalone functions ──
 
 const defaultManager = new DocxManager(docxExtensions);
 
@@ -1324,9 +1324,9 @@ function getDocxManager(extensions?: Extensions): DocxManager {
  * Parse a DOCX file into Tiptap JSON (runtime model).
  *
  * Combines @office-open/docx's `parseDocument` (DOCX binary → DocumentOptions)
- * with `DocxManager.resolve` (DocumentOptions → Tiptap JSON). Async since
- * office-open 0.14, so `Blob` (including `File`) and `ReadableStream` inputs
- * are accepted alongside raw bytes; `parseDOCXSync` covers synchronous bytes.
+ * with `DocxManager.resolve` (DocumentOptions → Tiptap JSON). `Blob` (including
+ * `File`) and `ReadableStream` inputs are accepted alongside raw bytes;
+ * `parseDOCXSync` covers synchronous bytes.
  */
 export async function parseDOCX(
   data: Parameters<typeof parseDocument>[0],

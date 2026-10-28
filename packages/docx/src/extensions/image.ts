@@ -127,7 +127,7 @@ export function renderDocx(node: JSONContent): Record<string, unknown> | null {
   // UniversalMeasure that corrupts the document). Falls back to the default.
   const width = Number.isFinite(attrs.width as number) ? (attrs.width as number) : 400;
   const height = Number.isFinite(attrs.height as number) ? (attrs.height as number) : 300;
-  // office-open 0.10.4+ treats a numeric transformation size as EMU (was px);
+  // office-open treats a numeric transformation size as EMU;
   // emit UniversalMeasure so the px value is interpreted correctly on generate.
   const transformation: Record<string, unknown> = { width: `${width}px`, height: `${height}px` };
   const rotation = attrs.rotation as number | undefined;
@@ -152,7 +152,7 @@ export function renderDocx(node: JSONContent): Record<string, unknown> | null {
   if (attrs.floating) imageOpts.floating = attrs.floating;
   if (attrs.crop) imageOpts.sourceRectangle = attrs.crop;
   if (attrs.outline) imageOpts.outline = attrs.outline;
-  // 0.9.7+ fidelity fields (office-open parses + stringifies each verbatim)
+  // Fidelity fields (office-open parses + stringifies each verbatim)
   if (attrs.nonVisualProperties) imageOpts.nonVisualProperties = attrs.nonVisualProperties;
   if (attrs.effectExtent) transformation.effectExtent = attrs.effectExtent;
   if (attrs.graphicFrameLocks) imageOpts.graphicFrameLocks = attrs.graphicFrameLocks;
@@ -180,7 +180,7 @@ export function parseDocx(picture: PictureOptions): Record<string, unknown> {
   // transformation → width/height/rotation (structural Tiptap attrs)
   const { transformation } = picture;
   if (transformation) {
-    // office-open 0.10.4+ parses wp:extent as EMU verbatim (was px); convert to px.
+    // office-open parses wp:extent as EMU verbatim; convert to px.
     if (typeof transformation.width === "number")
       attrs.width = convertEmuToPixels(transformation.width);
     if (typeof transformation.height === "number")
@@ -204,7 +204,7 @@ export function parseDocx(picture: PictureOptions): Record<string, unknown> {
   if (picture.floating) attrs.floating = picture.floating;
   if (picture.sourceRectangle) attrs.crop = picture.sourceRectangle;
   if (picture.outline) attrs.outline = picture.outline;
-  // 0.9.7+ fidelity fields (reverse of renderDocx)
+  // Fidelity fields (reverse of renderDocx)
   if (picture.nonVisualProperties) attrs.nonVisualProperties = picture.nonVisualProperties;
   if (transformation?.effectExtent) attrs.effectExtent = transformation.effectExtent;
   if (picture.graphicFrameLocks) attrs.graphicFrameLocks = picture.graphicFrameLocks;
@@ -398,7 +398,7 @@ export const Image = Node.create({
       // member compile reads back. Null at the paragraph top level.
       groupXfrm: attrDataJson("data-group-xfrm"),
 
-      // 0.9.7+ round-trip fidelity fields. office-open parses + stringifies
+      // Round-trip fidelity fields. office-open parses + stringifies
       // each; we carry them verbatim as JSON in data-* attrs.
       nonVisualProperties: attrDataJson("data-non-visual"), // pic:cNvPr (id/name/descr)
       effectExtent: attrDataJson("data-effect-extent"), // wp:effectExtent (EMUs)

@@ -207,7 +207,7 @@ export interface ImageAttrs {
   outline: NonNullable<PictureOptions["outline"]> | null;
   crop: NonNullable<PictureOptions["sourceRectangle"]> | null;
   display: string | null;
-  // 0.9.7+ fidelity fields (office-open native; near-identity passthrough)
+  // Fidelity fields (office-open native; near-identity passthrough)
   nonVisualProperties: NonNullable<PictureOptions["nonVisualProperties"]> | null; // pic:cNvPr (id/name/descr)
   effectExtent: { l: number; t: number; r: number; b: number } | null; // wp:effectExtent EMUs
   graphicFrameLocks: NonNullable<PictureOptions["graphicFrameLocks"]> | null;
