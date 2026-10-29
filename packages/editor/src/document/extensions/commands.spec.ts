@@ -125,7 +125,12 @@ const selectCells = (
 
 /** Replace the document with a 2-column table carrying an explicit grid —
  *  the shape the Cell Size commands need (insert-table stamps no widths). */
-const gridTable = (editor: EditorType, widths: number[], text: string[] = []): void => {
+const gridTable = (
+  editor: EditorType,
+  widths: number[],
+  text: string[] = [],
+  extraAttrs: Record<string, unknown> = {},
+): void => {
   const cell = (t: string | undefined): unknown => ({
     type: "tableCell",
     content: [
@@ -138,7 +143,7 @@ const gridTable = (editor: EditorType, widths: number[], text: string[] = []): v
     content: [
       {
         type: "table",
-        attrs: { columnWidths: widths },
+        attrs: { columnWidths: widths, ...extraAttrs },
         content: [
           row(text.length ? text.map((t) => cell(t)) : [cell(undefined), cell(undefined)]),
           row([cell(undefined), cell(undefined)]),
@@ -813,6 +818,21 @@ describe("cell size / autofit commands", () => {
     expect(editor.commands["autofit-window"]("1440")).toBe(true);
     expect(tablesOf(editor)[0]!.attrs.columnWidths).toEqual([480, 960]);
     expect(editor.commands["autofit-window"]("bogus")).toBe(false);
+  });
+
+  it("grid edits retire raw source fields that would override the new widths", () => {
+    const editor = build();
+    gridTable(editor, [720, 1440], [], {
+      columnWidthsRaw: [1, 2],
+      legacyColumnCount: 2,
+      tableGridOmitted: true,
+    });
+    expect(editor.commands["autofit-window"]("1440")).toBe(true);
+    const table = tablesOf(editor)[0]!;
+    expect(table.attrs.columnWidths).toEqual([480, 960]);
+    expect(table.attrs.columnWidthsRaw).toBeNull();
+    expect(table.attrs.legacyColumnCount).toBeNull();
+    expect(table.attrs.tableGridOmitted).toBeNull();
   });
 
   it("autofit-contents shrinks each column to its widest cell", () => {

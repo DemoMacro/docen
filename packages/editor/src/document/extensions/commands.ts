@@ -1072,6 +1072,21 @@ function tableTargets(state: EditorState): {
   return { tablePos, tableNode, cells, rows, cols };
 }
 
+/** Stamp an edited column grid and retire source-grid fields office-open
+ *  would otherwise prefer over the new widths. */
+function stampTableWidths(
+  attrs: Record<string, unknown>,
+  columnWidths: number[],
+): Record<string, unknown> {
+  return {
+    ...attrs,
+    columnWidths,
+    columnWidthsRaw: null,
+    legacyColumnCount: null,
+    tableGridOmitted: null,
+  };
+}
+
 /** The selected rows stamped through one forward walk (markup writes keep
  *  positions stable, so row positions stay valid as they're written). */
 function stampRows(
@@ -3805,8 +3820,7 @@ export const DocumentCommands = Extension.create({
             dispatch(
               state.tr
                 .setNodeMarkup($from.before(anchor.tableAt), undefined, {
-                  ...tableNode.attrs,
-                  columnWidths: next,
+                  ...stampTableWidths(tableNode.attrs, next),
                   layout: null,
                 })
                 .scrollIntoView(),
@@ -3840,8 +3854,7 @@ export const DocumentCommands = Extension.create({
             dispatch(
               state.tr
                 .setNodeMarkup($from.before(anchor.tableAt), undefined, {
-                  ...tableNode.attrs,
-                  columnWidths: next,
+                  ...stampTableWidths(tableNode.attrs, next),
                   layout: null,
                 })
                 .scrollIntoView(),
@@ -3895,8 +3908,7 @@ export const DocumentCommands = Extension.create({
             dispatch(
               state.tr
                 .setNodeMarkup($from.before(anchor.tableAt), undefined, {
-                  ...tableNode.attrs,
-                  columnWidths: next,
+                  ...stampTableWidths(tableNode.attrs, next),
                 })
                 .scrollIntoView(),
             );
@@ -3970,8 +3982,7 @@ export const DocumentCommands = Extension.create({
             dispatch(
               state.tr
                 .setNodeMarkup(targets.tablePos, undefined, {
-                  ...targets.tableNode.attrs,
-                  columnWidths: next,
+                  ...stampTableWidths(targets.tableNode.attrs, next),
                 })
                 .scrollIntoView(),
             );
