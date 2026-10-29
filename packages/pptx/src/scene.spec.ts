@@ -197,6 +197,32 @@ describe("table grid", () => {
 });
 
 describe("shapes", () => {
+  it("projects a full 0.15 SmartArt layout definition by its unique id", () => {
+    const { slides } = project({
+      slides: [
+        {
+          children: [
+            {
+              smartart: {
+                x: 0,
+                y: 0,
+                width: 1828800,
+                height: 914400,
+                nodes: [{ text: "One" }],
+                layout: {
+                  uniqueId: "urn:microsoft.com/office/officeart/2005/8/layout/list1",
+                  layoutNode: { name: "linear" },
+                },
+              },
+            },
+          ],
+        },
+      ],
+    });
+    const member = slides[0]!.members[0]!;
+    expect(member).toMatchObject({ kind: "smartArt", layout: "list1" });
+  });
+
   it("projects a box preset as a shape member with paint", () => {
     const { slides } = project({
       slides: [

@@ -14,7 +14,14 @@ import type { ChartHitContext, ChartPartHit, ChartPartShape } from "./context";
 type Rec = Record<string, unknown>;
 
 const isRecord = (v: unknown): v is Rec => typeof v === "object" && v !== null && !Array.isArray(v);
-const num = (v: unknown): number | undefined => (typeof v === "number" ? v : undefined);
+const num = (v: unknown): number | undefined => {
+  if (typeof v === "number") return Number.isFinite(v) ? v : undefined;
+  if (typeof v === "string" && v.trim() !== "") {
+    const value = Number(v);
+    return Number.isFinite(value) ? value : undefined;
+  }
+  return undefined;
+};
 const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
 
 /** Office theme accent palette (Word 2013+ default chart colors), order the
@@ -389,6 +396,12 @@ function formatChartValue(value: number, format: string | undefined): string {
   return `${Math.round(value * 100) / 100}`;
 }
 
+/** OOXML number formats are either a token or a source-linked object. */
+function formatOf(value: unknown): string | undefined {
+  if (typeof value === "string") return value;
+  return isRecord(value) ? str(value.formatCode) : undefined;
+}
+
 /** A value-axis record by its OOXML axis id. */
 function axisById(model: ChartModel, id: unknown): Rec | undefined {
   return model.axes.find((axis) => num(axis.id) === num(id));
@@ -485,7 +498,7 @@ function paintValueChart(tree: IGroup, model: ChartModel, plot: PlotBox, reg?: E
       if (model.gridlines) segment(tree, plot.x, p, plot.x + plot.width, p, GRID_LINE);
       label(
         tree,
-        formatChartValue(t, str(primaryValueAxis?.numberFormat)),
+        formatChartValue(t, formatOf(primaryValueAxis?.numberFormat)),
         plot.x - 6,
         p,
         LABEL_PX - 1,
@@ -585,7 +598,7 @@ function paintValueChart(tree: IGroup, model: ChartModel, plot: PlotBox, reg?: E
         for (const p of pts) {
           label(
             tree,
-            formatChartValue(vals[p.c]!, str(series.formatCode)),
+            formatChartValue(vals[p.c]!, formatOf(series.formatCode)),
             p.x,
             p.y - 8,
             LABEL_PX - 1,
@@ -652,7 +665,7 @@ function paintValueChart(tree: IGroup, model: ChartModel, plot: PlotBox, reg?: E
               );
           label(
             tree,
-            formatChartValue(v, str(series.formatCode)),
+            formatChartValue(v, formatOf(series.formatCode)),
             anchor.x,
             anchor.y,
             LABEL_PX - 1,
@@ -690,7 +703,7 @@ function paintValueChart(tree: IGroup, model: ChartModel, plot: PlotBox, reg?: E
         );
         label(
           tree,
-          formatChartValue(v, str(series.formatCode)),
+          formatChartValue(v, formatOf(series.formatCode)),
           anchor.x,
           anchor.y,
           LABEL_PX - 1,
@@ -1024,7 +1037,7 @@ function paintSecondaryGroups(tree: IGroup, model: ChartModel, plot: PlotBox): v
         segment(tree, plot.x + plot.width, y, plot.x + plot.width + 4, y, AXIS_LINE);
         label(
           tree,
-          formatChartValue(tick, str(axis?.numberFormat)),
+          formatChartValue(tick, formatOf(axis?.numberFormat)),
           plot.x + plot.width + 7,
           y,
           LABEL_PX - 1,
@@ -1094,7 +1107,7 @@ function paintSecondaryGroups(tree: IGroup, model: ChartModel, plot: PlotBox): v
         points.forEach((point) => {
           label(
             tree,
-            formatChartValue(point.value, str(axis?.numberFormat)),
+            formatChartValue(point.value, formatOf(axis?.numberFormat)),
             point.x,
             point.y - 8,
             LABEL_PX - 1,

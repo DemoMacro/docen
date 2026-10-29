@@ -12,13 +12,19 @@ export function smartArtMember(
   t: Xform,
   childPath: readonly number[] | undefined,
 ): LayoutDrawingMember {
+  const layout =
+    typeof smartArt.layout === "string"
+      ? smartArt.layout
+      : typeof smartArt.layout?.uniqueId === "string"
+        ? (smartArt.layout.uniqueId.split("/").pop() ?? undefined)
+        : undefined;
   return {
     kind: "smartArt",
     x: t.sx * emuOf(smartArt.x) + t.dx,
     y: t.sy * emuOf(smartArt.y) + t.dy,
     width: t.sx * emuOf(smartArt.width),
     height: t.sy * emuOf(smartArt.height),
-    ...(typeof smartArt.layout === "string" ? { layout: smartArt.layout } : {}),
+    ...(layout ? { layout } : {}),
     ...(childPath ? { childPath } : {}),
     nodes: smartArt.nodes ?? [],
   };
