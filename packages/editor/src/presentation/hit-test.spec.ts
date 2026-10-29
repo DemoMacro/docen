@@ -131,6 +131,30 @@ describe("resizeChild", () => {
     expect(child.line.x2).toBe(px(210));
     expect(child.line.y2).toBe(px(20));
   });
+
+  it("scales a table's declared grid with the frame", () => {
+    const child = {
+      table: {
+        x: px(0),
+        y: px(0),
+        width: px(30),
+        height: px(30),
+        columnWidths: [px(20), px(10)],
+        rows: [
+          { height: px(10), cells: [{ text: "a" }, { text: "b" }] },
+          { height: px(20), cells: [{ text: "c" }, { text: "d" }] },
+        ],
+      },
+    } as never;
+    resizeChild(child, { x: 5, y: 6, width: 90, height: 90 });
+    const table = (child as { table: Record<string, any> }).table;
+    expect(table.x).toBe(px(5));
+    expect(table.y).toBe(px(6));
+    expect(table.width).toBe(px(90));
+    expect(table.height).toBe(px(90));
+    expect(table.columnWidths).toEqual([px(60), px(30)]);
+    expect(table.rows.map((row: { height: unknown }) => row.height)).toEqual([px(30), px(60)]);
+  });
 });
 
 describe("rotateChild", () => {

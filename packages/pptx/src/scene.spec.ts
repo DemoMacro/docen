@@ -1240,6 +1240,41 @@ describe("groups", () => {
     });
   });
 
+  it("resizes a nested table member's declared grid", () => {
+    const child: SlideChild = {
+      group: {
+        x: 0,
+        y: 0,
+        width: 200 * 9525,
+        height: 200 * 9525,
+        childOffsetX: 0,
+        childOffsetY: 0,
+        childExtentWidth: 200 * 9525,
+        childExtentHeight: 200 * 9525,
+        children: [
+          {
+            table: {
+              x: 0,
+              y: 0,
+              width: 100 * 9525,
+              height: 100 * 9525,
+              columnWidths: [50 * 9525, 50 * 9525],
+              rows: [
+                { height: 50 * 9525, cells: [{ text: "a" }, { text: "b" }] },
+                { height: 50 * 9525, cells: [{ text: "c" }, { text: "d" }] },
+              ],
+            },
+          },
+        ],
+      },
+    };
+    resizeMemberByPath(child, [0], { x: 0, y: 0, width: 200, height: 200 });
+    const table = groupChildOf(child, 0);
+    if (!("table" in table)) throw new Error("expected a table member");
+    expect(table.table.columnWidths).toEqual([100 * 9525, 100 * 9525]);
+    expect(table.table.rows.map((row) => row.height)).toEqual([100 * 9525, 100 * 9525]);
+  });
+
   it("folds a group's rotation into each flattened member", () => {
     const { slides } = project({
       slides: [

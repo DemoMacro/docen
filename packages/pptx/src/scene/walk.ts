@@ -15,7 +15,7 @@ import { pictureMember } from "./pictures";
 import { shapeMembers } from "./shapes";
 import { smartArtMember } from "./smartart";
 import { SCHEME_SLOTS, type ThemeColors } from "./table-style";
-import { tableMember } from "./tables";
+import { resizeTableGrid, tableMember } from "./tables";
 import type { TextFieldContext } from "./text";
 
 /** A color-scheme slot's hex (a string value or a sysClr's lastClr). */
@@ -633,6 +633,7 @@ export function resizeMemberByPath(
               ? found.node.chart
               : undefined;
   if (!g) return;
+  if ("table" in found.node) resizeTableGrid(found.node.table, box.width, box.height);
   g.x = emu(center.x - sourceWidth / 2);
   g.y = emu(center.y - sourceHeight / 2);
   g.width = emu(sourceWidth);

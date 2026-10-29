@@ -25,7 +25,7 @@ export {
   type ProjectedSlideMember,
 } from "./scene";
 export { textBlocks, type TextFieldContext } from "./scene";
-export { tableGridOf, type CellOrigin } from "./scene/tables";
+export { resizeTableGrid, tableGridOf, type CellOrigin } from "./scene/tables";
 export {
   memberAt,
   memberByPath,

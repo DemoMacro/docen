@@ -3,6 +3,7 @@
 
 import { fillOpacityOf, measureEmu, outerShadowOf, outlineOf } from "@docen/core/geometry";
 import {
+  EMU_PER_PX,
   emuToPx,
   stackBlocks,
   TextMeasurer,
@@ -162,6 +163,31 @@ export function tableGridOf(table: TableOptions): { origins: CellOrigin[]; colum
     }
   });
   return { origins, columns: nCols };
+}
+
+/** Scale the declared grid with a resized frame. PowerPoint keeps relative
+ *  column/row proportions; leaving them stale would make the frame resize
+ *  invisible because the projected table is built from this grid. */
+export function resizeTableGrid(table: TableOptions, widthPx: number, heightPx: number): void {
+  const columns = table.columnWidths?.map((width) => emuToPx(measureEmu(width) ?? 0)) ?? [];
+  const columnTotal = columns.reduce((sum, width) => sum + width, 0);
+  if (columnTotal > 0)
+    table.columnWidths = columns.map((width) =>
+      Math.round((width / columnTotal) * widthPx * EMU_PER_PX),
+    );
+
+  const rows = table.rows.map((row) => emuToPx(measureEmu(row.height) ?? 0));
+  const rowTotal = rows.reduce((sum, height) => sum + height, 0);
+  if (rowTotal > 0) {
+    table.rows.forEach((row, index) => {
+      row.height = Math.round((rows[index]! / rowTotal) * heightPx * EMU_PER_PX);
+    });
+  } else if (table.rows.length > 0) {
+    const height = Math.round((heightPx / table.rows.length) * EMU_PER_PX);
+    table.rows.forEach((row) => {
+      row.height = height;
+    });
+  }
 }
 
 export function tableMember(

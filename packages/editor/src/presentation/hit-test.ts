@@ -9,7 +9,7 @@
 
 import { measureEmu } from "@docen/core/geometry";
 import { EMU_PER_PX, emuToPx } from "@docen/layout";
-import type { SlideChild, SlideOptions } from "@docen/pptx";
+import { resizeTableGrid, type SlideChild, type SlideOptions } from "@docen/pptx";
 
 import type { Box } from "../drawing/geometry";
 
@@ -148,6 +148,7 @@ export function resizeChild(child: SlideChild, box: Box): void {
     o.y2 = emu(box.y + (1 - sy) * box.height);
     return;
   }
+  if ("table" in child) resizeTableGrid(child.table, box.width, box.height);
   const t = transformOf(child);
   if (!t) return;
   t.x = emu(box.x);
