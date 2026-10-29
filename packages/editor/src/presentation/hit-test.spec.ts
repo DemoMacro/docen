@@ -112,6 +112,25 @@ describe("offsetChild", () => {
     expect(child.line.x2).toBe(px(150));
     expect(child.line.y1).toBe(px(10));
   });
+
+  it("edits the renderable alternate-content branch", () => {
+    const child = {
+      alternateContent: {
+        choices: [
+          {
+            requires: "future",
+            child: { shape: { x: px(10), y: px(20), width: px(30), height: px(40) } },
+          },
+        ],
+      },
+    } as never;
+    offsetChild(child, 5, -8);
+    const shape = (
+      child as { alternateContent: { choices: { child: { shape: Record<string, number> } }[] } }
+    ).alternateContent.choices[0]!.child.shape;
+    expect(shape.x).toBe(px(15));
+    expect(shape.y).toBe(px(12));
+  });
 });
 
 describe("resizeChild", () => {
@@ -154,6 +173,26 @@ describe("resizeChild", () => {
     expect(table.height).toBe(px(90));
     expect(table.columnWidths).toEqual([px(60), px(30)]);
     expect(table.rows.map((row: { height: unknown }) => row.height)).toEqual([px(30), px(60)]);
+  });
+
+  it("sees an alternate-content branch for hit testing", () => {
+    const slide = {
+      children: [
+        {
+          alternateContent: {
+            choices: [
+              {
+                requires: "shape",
+                child: { shape: { x: px(1), y: px(2), width: px(30), height: px(40) } },
+              },
+            ],
+          },
+        },
+      ],
+    } as never;
+    expect(slideHits(slide)).toEqual([
+      { child: 0, box: { x: 1, y: 2, width: 30, height: 40 }, rotation: 0 },
+    ]);
   });
 });
 

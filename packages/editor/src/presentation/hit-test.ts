@@ -9,7 +9,7 @@
 
 import { measureEmu } from "@docen/core/geometry";
 import { EMU_PER_PX, emuToPx } from "@docen/layout";
-import { resizeTableGrid, type SlideChild, type SlideOptions } from "@docen/pptx";
+import { renderableChild, resizeTableGrid, type SlideChild, type SlideOptions } from "@docen/pptx";
 
 import type { Box } from "../drawing/geometry";
 
@@ -96,10 +96,11 @@ function hitContains(box: Box, rotation: number, x: number, y: number): boolean 
 }
 
 function childBox(child: SlideChild): Box | null {
+  const target = renderableChild(child);
   // Lines and connectors address endpoints, not a transform: the box is
   // their bounding rectangle.
-  if ("line" in child || "connector" in child) {
-    const o = "line" in child ? child.line : child.connector;
+  if ("line" in target || "connector" in target) {
+    const o = "line" in target ? target.line : target.connector;
     const x1 = px(o.x1);
     const y1 = px(o.y1);
     const x2 = px(o.x2);
@@ -111,7 +112,7 @@ function childBox(child: SlideChild): Box | null {
       height: Math.abs(y2 - y1),
     };
   }
-  const t = transformOf(child);
+  const t = transformOf(target);
   if (!t) return null;
   return { x: px(t.x), y: px(t.y), width: px(t.width), height: px(t.height) };
 }
@@ -121,15 +122,16 @@ function childBox(child: SlideChild): Box | null {
 /** Move a child by a px delta. Values normalize to EMU numbers — a source
  *  that parsed into a measure string re-lands as the integer EMU. */
 export function offsetChild(child: SlideChild, dx: number, dy: number): void {
-  if ("line" in child || "connector" in child) {
-    const o = "line" in child ? child.line : child.connector;
+  const target = renderableChild(child);
+  if ("line" in target || "connector" in target) {
+    const o = "line" in target ? target.line : target.connector;
     o.x1 = emu(px(o.x1) + dx);
     o.y1 = emu(px(o.y1) + dy);
     o.x2 = emu(px(o.x2) + dx);
     o.y2 = emu(px(o.y2) + dy);
     return;
   }
-  const t = transformOf(child);
+  const t = transformOf(target);
   if (!t) return;
   t.x = emu(px(t.x) + dx);
   t.y = emu(px(t.y) + dy);
@@ -138,8 +140,9 @@ export function offsetChild(child: SlideChild, dx: number, dy: number): void {
 /** Resize a child to the dragged box. Lines keep their corner direction:
  *  each endpoint re-lands on the matching corner of the new box. */
 export function resizeChild(child: SlideChild, box: Box): void {
-  if ("line" in child || "connector" in child) {
-    const o = "line" in child ? child.line : child.connector;
+  const target = renderableChild(child);
+  if ("line" in target || "connector" in target) {
+    const o = "line" in target ? target.line : target.connector;
     const sx = px(o.x1) <= px(o.x2) ? 0 : 1;
     const sy = px(o.y1) <= px(o.y2) ? 0 : 1;
     o.x1 = emu(box.x + sx * box.width);
@@ -148,8 +151,8 @@ export function resizeChild(child: SlideChild, box: Box): void {
     o.y2 = emu(box.y + (1 - sy) * box.height);
     return;
   }
-  if ("table" in child) resizeTableGrid(child.table, box.width, box.height);
-  const t = transformOf(child);
+  if ("table" in target) resizeTableGrid(target.table, box.width, box.height);
+  const t = transformOf(target);
   if (!t) return;
   t.x = emu(box.x);
   t.y = emu(box.y);

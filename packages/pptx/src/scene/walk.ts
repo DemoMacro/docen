@@ -90,6 +90,12 @@ function alternateChildOf(
   );
 }
 
+/** The concrete child an editor should read or mutate: the selected
+ *  `mc:AlternateContent` branch when present, otherwise the child itself. */
+export function renderableChild(child: SlideChild): SlideChild {
+  return "alternateContent" in child ? (alternateChildOf(child) ?? child) : child;
+}
+
 export function childMembers(
   children: readonly SlideChild[],
   t: Xform,
@@ -592,6 +598,7 @@ export function resizeMemberByPath(
   if (!("group" in child) || path.length === 0) return;
   const found = memberSpaceByPath(child, path);
   if (!found) return;
+  const target = renderableChild(found.node);
   const t = found.space.xform;
   const center = sourcePointInSpace(found.space, {
     x: box.x + box.width / 2,
@@ -599,8 +606,8 @@ export function resizeMemberByPath(
   });
   const sourceWidth = box.width / t.sx;
   const sourceHeight = box.height / t.sy;
-  if ("line" in found.node || "connector" in found.node) {
-    const o = "line" in found.node ? found.node.line : found.node.connector;
+  if ("line" in target || "connector" in target) {
+    const o = "line" in target ? target.line : target.connector;
     const spin = memberByPath(child, path)?.rotation ?? 0;
     const sx = emuOf(o.x1) <= emuOf(o.x2) ? 0 : 1;
     const sy = emuOf(o.y1) <= emuOf(o.y2) ? 0 : 1;
@@ -621,19 +628,19 @@ export function resizeMemberByPath(
     return;
   }
   const g =
-    "shape" in found.node
-      ? found.node.shape
-      : "picture" in found.node
-        ? found.node.picture
-        : "group" in found.node
-          ? found.node.group
-          : "table" in found.node
-            ? found.node.table
-            : "chart" in found.node
-              ? found.node.chart
+    "shape" in target
+      ? target.shape
+      : "picture" in target
+        ? target.picture
+        : "group" in target
+          ? target.group
+          : "table" in target
+            ? target.table
+            : "chart" in target
+              ? target.chart
               : undefined;
   if (!g) return;
-  if ("table" in found.node) resizeTableGrid(found.node.table, box.width, box.height);
+  if ("table" in target) resizeTableGrid(target.table, box.width, box.height);
   g.x = emu(center.x - sourceWidth / 2);
   g.y = emu(center.y - sourceHeight / 2);
   g.width = emu(sourceWidth);
@@ -650,10 +657,10 @@ export function offsetMemberByPath(
   if (!("group" in child) || path.length === 0) return;
   const found = memberSpaceByPath(child, path);
   if (!found) return;
+  const target = renderableChild(found.node);
   const local = sourceVectorInSpace(found.space, { x: dx, y: dy });
-  const node = found.node;
-  if ("line" in node || "connector" in node) {
-    const o = "line" in node ? node.line : node.connector;
+  if ("line" in target || "connector" in target) {
+    const o = "line" in target ? target.line : target.connector;
     o.x1 = emu(emuOf(o.x1) + local.x);
     o.y1 = emu(emuOf(o.y1) + local.y);
     o.x2 = emu(emuOf(o.x2) + local.x);
@@ -661,16 +668,16 @@ export function offsetMemberByPath(
     return;
   }
   const g =
-    "shape" in node
-      ? node.shape
-      : "picture" in node
-        ? node.picture
-        : "group" in node
-          ? node.group
-          : "table" in node
-            ? node.table
-            : "chart" in node
-              ? node.chart
+    "shape" in target
+      ? target.shape
+      : "picture" in target
+        ? target.picture
+        : "group" in target
+          ? target.group
+          : "table" in target
+            ? target.table
+            : "chart" in target
+              ? target.chart
               : undefined;
   if (!g) return;
   g.x = emu(emuOf(g.x) + local.x);

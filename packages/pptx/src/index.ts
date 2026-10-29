@@ -30,6 +30,7 @@ export {
   memberAt,
   memberByPath,
   offsetMemberByPath,
+  renderableChild,
   resizeMemberByPath,
   type MemberHit,
 } from "./scene/walk";
