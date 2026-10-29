@@ -1,7 +1,7 @@
 // Graphic-frame table (p:graphicFrame a:tbl) projection: the merge/coverage
 // grid walk, frame-border distribution, and the painter's normalized payload.
 
-import { fillOpacityOf, measureEmu, outlineOf } from "@docen/core/geometry";
+import { fillOpacityOf, measureEmu, outerShadowOf, outlineOf } from "@docen/core/geometry";
 import {
   emuToPx,
   stackBlocks,
@@ -352,6 +352,7 @@ export function tableMember(
     width: frameWidth,
     height: frameHeight,
     ...(childPath ? { childPath } : {}),
+    ...(outerShadowOf(table.effects) ? { shadow: outerShadowOf(table.effects) } : {}),
     table: {
       columnWidthsPx: paintedWidths,
       rows: paintedRows,

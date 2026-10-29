@@ -192,6 +192,8 @@ export type LayoutDrawingMember =
        *  insets and laid text blocks — the renderer's frame-table painter
        *  consumes it structurally; the engine never reads beyond the box. */
       table: unknown;
+      /** The table frame's outer shadow (a:tblPr effects list). */
+      shadow?: LayoutDrawingShadow;
     }
   | {
       kind: "smartArt";

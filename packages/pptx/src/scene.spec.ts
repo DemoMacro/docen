@@ -164,6 +164,39 @@ describe("table grid", () => {
     expect(table.fill).toBe("FF0000");
   });
 
+  it("projects a table frame's outer shadow", () => {
+    const { slides } = project({
+      slides: [
+        {
+          children: [
+            {
+              table: {
+                x: 0,
+                y: 0,
+                width: 1828800,
+                height: 914400,
+                columnWidths: [914400, 914400],
+                rows: [{ cells: [{ text: "a" }, { text: "b" }] }],
+                effects: {
+                  outerShadow: {
+                    distance: 914400,
+                    direction: 0,
+                    blurRadius: 914400,
+                    color: { value: "000000" },
+                  },
+                },
+              },
+            },
+          ],
+        },
+      ],
+    });
+    expect(slides[0]!.members[0]).toMatchObject({
+      kind: "table",
+      shadow: { x: 96, y: 0, blur: 96, color: "000000" },
+    });
+  });
+
   it("treats absorbed cells inside a declared span as duplicates, not columns", () => {
     // The WPS spelling: the origin declares gridSpan and the region's own
     // slots repeat hMerge="1" — the row must stay at the declared width.

@@ -5,11 +5,13 @@ import {
   type LayoutBlock,
   type LayoutBorderEdge,
   type LayoutDrawingFill,
+  type LayoutDrawingShadow,
 } from "@docen/layout";
 import { Group, Rect, type IGroup } from "leafer-ui";
 
 import { paintBlock } from "../painter";
 import type { PaintContext } from "./context";
+import { shadowEffectOf } from "./image";
 import { drawCollapsedTableBorders } from "./table";
 
 // ── graphic-frame table painter ──
@@ -48,6 +50,7 @@ interface FrameTablePayload {
   /** The a:tblPr-level fill painted behind every cell. */
   fill?: string | LayoutDrawingFill;
   opacity?: number;
+  shadow?: LayoutDrawingShadow;
 }
 
 export function paintFrameTable(
@@ -113,15 +116,20 @@ export function paintFrameTable(
   const rowY = [0];
   for (const h of rowH) rowY.push(rowY[rowY.length - 1]! + h);
 
-  if (t.fill) {
+  if (t.fill || t.shadow) {
     tree.add(
       new Rect({
         x: member.x,
         y: member.y,
         width: colX[colX.length - 1]!,
         height: rowY[rowY.length - 1]!,
-        fill: typeof t.fill === "string" ? `#${t.fill}` : t.fill,
-        ...(t.opacity != null ? { opacity: t.opacity } : {}),
+        ...(t.fill
+          ? {
+              fill: typeof t.fill === "string" ? `#${t.fill}` : t.fill,
+              ...(t.opacity != null ? { opacity: t.opacity } : {}),
+            }
+          : { fill: "transparent" }),
+        ...shadowEffectOf(t.shadow),
       }),
     );
   }
