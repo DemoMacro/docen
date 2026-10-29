@@ -1248,6 +1248,14 @@ export class DocxManager {
         if (typeof c === "string") {
           parts.push(c);
         } else if (c && typeof c === "object") {
+          if ("text" in c && typeof c.text === "string") {
+            parts.push(c.text);
+            continue;
+          }
+          if ("deletedText" in c && typeof c.deletedText === "string") {
+            parts.push(c.deletedText);
+            continue;
+          }
           // Reflective: reuse the inlineRules dispatch (same as top-level
           // ParagraphChild) so tab/pageBreak/columnBreak — and any custom
           // inline atom — are recognized here too. This replaces a parallel

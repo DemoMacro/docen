@@ -118,6 +118,41 @@ describe("projectDocument style cascade", () => {
     }
   });
 
+  it("applies a parent run's style to nested 0.15 text payloads", () => {
+    const { blocks } = oneSection(
+      doc([
+        {
+          paragraph: {
+            children: [
+              {
+                bold: true,
+                size: 28,
+                children: [{ text: "Nested", preserveSpace: true }],
+              },
+            ],
+          },
+        },
+      ]),
+    );
+    const para = blocks[0];
+    expect(para?.kind).toBe("paragraph");
+    if (para?.kind !== "paragraph") return;
+    const text = para.inline.find((item) => item.kind === "text");
+    expect(text && text.kind === "text" ? text.style.bold : undefined).toBe(true);
+    expect(text && text.kind === "text" ? text.style.sizePx : undefined).toBeCloseTo(
+      28 * (4 / 3),
+      5,
+    );
+  });
+
+  it("converts a 0.15 point-valued default tab stop to pixels", () => {
+    const { blocks } = oneSection({
+      settings: { defaultTabStop: "36pt" },
+      sections: [{ children: [{ paragraph: { text: "hi" } }] }],
+    });
+    expect(blocks[0]).toMatchObject({ defaultTabStopPx: 48 });
+  });
+
   it("keeps the chain font when a run carries an empty font shell", () => {
     // A round-tripped run can carry an rFonts object with no usable slot;
     // that shell must not shadow the style chain's face (it used to resolve

@@ -471,7 +471,7 @@ export function projectRuns(
         if (eff === "all") pushRuns(child.deletion.children, { ...preset, ...DELETION_DISPLAY });
         else if (eff === "original") pushRuns(child.deletion.children, preset);
       }
-      if (Array.isArray(child.children)) pushRuns(child.children, preset);
+      if (Array.isArray(child.children)) pushRuns(child.children, rPr);
     }
   };
   pushRuns(runs, {});
