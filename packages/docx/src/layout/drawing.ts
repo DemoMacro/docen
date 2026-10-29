@@ -13,6 +13,7 @@ import {
   presetShapeTextRect,
   solidFillOf,
 } from "@docen/core/geometry";
+import { resolveChartColors } from "@docen/core/paint";
 
 // The picture-border projection (runs.ts) reads the same stroke extractor.
 export { outlineOf };
@@ -832,7 +833,7 @@ function projectWpsShapeRun(wps: Rec, ctx: ProjectContext): LayoutDrawing | unde
  *  drawing. The chart paints inside its extent box; the anchor spec resolves
  *  exactly like a shape's (floating) or stays inline (the inline-picture
  *  path handles that — here only the floating arm projects). */
-function projectChartRun(chart: Rec): LayoutDrawing | undefined {
+function projectChartRun(chart: Rec, ctx: ProjectContext): LayoutDrawing | undefined {
   const tr = isRecord(chart.transformation) ? chart.transformation : {};
   const w = measureEmu(tr.width);
   const h = measureEmu(tr.height);
@@ -847,7 +848,21 @@ function projectChartRun(chart: Rec): LayoutDrawing | undefined {
     anchor,
     width: emuToPx(w),
     height: emuToPx(h),
-    members: [{ kind: "chart", x: 0, y: 0, width: emuToPx(w), height: emuToPx(h), chart }],
+    members: [
+      {
+        kind: "chart",
+        x: 0,
+        y: 0,
+        width: emuToPx(w),
+        height: emuToPx(h),
+        chart: resolveChartColors(chart, {
+          themeColors: ctx.themeColors,
+          colorMapping: isRecord(chart.colorMappingOverride)
+            ? chart.colorMappingOverride
+            : undefined,
+        }),
+      },
+    ],
     wrap,
     wrapSide,
     ...(contour ? { contour } : {}),
@@ -875,7 +890,7 @@ export function projectDrawings(runs: readonly unknown[], ctx: ProjectContext): 
       if (d) out.push(d);
     }
     if (isRecord(run.chart)) {
-      const d = projectChartRun(run.chart);
+      const d = projectChartRun(run.chart, ctx);
       if (d) out.push(d);
     }
     if (isRecord(run.picture) && isRecord(run.picture.floating)) {

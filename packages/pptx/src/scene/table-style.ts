@@ -5,6 +5,7 @@
 // everything unknown falls back to the default themed look; custom styles
 // resolve from p:tblStyleLst or the inline a:tableStyle.
 
+import { transformColor } from "@docen/core/paint";
 import type {
   FillOptions,
   TableCellBorderOptions,
@@ -16,8 +17,6 @@ import type {
 import type { ColorTransformOptions } from "@office-open/core/drawing";
 import type { ColorSchemeOptions } from "@office-open/core/theme";
 import type { TableOptions } from "@office-open/pptx";
-
-import { transformColor } from "./color-transform";
 
 /** One clrScheme slot's value spelling (hex string or a sysClr object). */
 type SchemeColorValue = NonNullable<ColorSchemeOptions["accent1"]>;

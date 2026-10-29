@@ -285,6 +285,49 @@ describe("projectDocument style cascade", () => {
     expect(para.borders?.bottom).toMatchObject({ color: "111D31" });
   });
 
+  it("resolves chart DrawingML theme colors before rendering", () => {
+    const { blocks } = oneSection({
+      ...doc([
+        {
+          paragraph: {
+            children: [
+              {
+                chart: {
+                  type: "column",
+                  categories: ["Q1"],
+                  series: [
+                    {
+                      name: "Sales",
+                      values: [1],
+                      shapeProperties: {
+                        fill: {
+                          type: "solid",
+                          color: { value: "accent1", transforms: { lumMod: 50 } },
+                        },
+                      },
+                    },
+                  ],
+                  transformation: { width: 914400, height: 914400 },
+                },
+              },
+            ],
+          },
+        },
+      ]),
+      theme: { colorScheme: { accent1: "4472C4" } },
+    });
+    const paragraph = blocks[0];
+    if (paragraph?.kind !== "paragraph") throw new Error("expected paragraph");
+    const picture = paragraph.inline.find((item) => item.kind === "picture");
+    if (picture?.kind !== "picture") throw new Error("expected inline chart picture");
+    const member = picture.members?.find((item) => item.kind === "chart");
+    if (member?.kind !== "chart") throw new Error("expected chart member");
+    const series = (
+      member.chart as { series?: Array<{ shapeProperties?: { fill?: { color?: unknown } } }> }
+    ).series?.[0];
+    expect(series?.shapeProperties?.fill?.color).toBe("203864");
+  });
+
   it("direct attrs win and basedOn ancestors fill gaps (Heading1 → Normal)", () => {
     const { blocks } = oneSection(
       doc([

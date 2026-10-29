@@ -3,6 +3,7 @@
 // (PAGE/NUMPAGES dynamic, complex-field results re-hydrated), and the
 // container children (hyperlink / tracked insertion / deletion).
 
+import { resolveChartColors } from "@docen/core/paint";
 import {
   emuToPx,
   ptToPx,
@@ -433,7 +434,12 @@ export function projectRuns(
         // the transformation, the renderer's chart painter draws the member.
         // A floating chart is an anchored drawing (projectDrawings) — skipped
         // here to avoid double-rendering.
-        const chart = child.chart;
+        const chart = resolveChartColors(child.chart, {
+          themeColors: ctx.themeColors,
+          colorMapping: isRecord(child.chart.colorMappingOverride)
+            ? child.chart.colorMappingOverride
+            : undefined,
+        });
         const tr = isRecord(chart.transformation) ? chart.transformation : {};
         const w = measureEmu(tr.width);
         const h = measureEmu(tr.height);

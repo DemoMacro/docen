@@ -2,7 +2,9 @@
  *  option shape (integer percent and degrees); transforms compose in source
  *  order, exactly as serialized child order specifies. */
 
-import type { ColorTransformOptions } from "@office-open/core/drawing";
+import type { ColorTransformOptions as OfficeColorTransformOptions } from "@office-open/core";
+
+export type ColorTransformOptions = OfficeColorTransformOptions;
 
 export interface ResolvedColor {
   color: string;

@@ -2,6 +2,7 @@
  *  members: solid hex, Leafer gradients, or repeatable/stretched images. */
 
 import { outlineOf } from "@docen/core/geometry";
+import { transformColor } from "@docen/core/paint";
 import type { LayoutDrawingFill, LayoutDrawingLine } from "@docen/layout";
 import type {
   ColorTransformOptions,
@@ -16,7 +17,6 @@ import type { ColorMappingOptions } from "@office-open/core/theme";
 import type { ShapeOptions } from "@office-open/pptx";
 
 import { tilePaintOf } from "./blip-tile";
-import { transformColor } from "./color-transform";
 import { patternTileSrcOf } from "./pattern-background";
 import { pictureSrcOf } from "./pictures";
 import type { ThemeColors } from "./table-style";

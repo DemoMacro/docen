@@ -2,11 +2,11 @@
 // group chains recurse through their chOff/chExt affine map, every other
 // child dispatches to its member domain.
 
+import { resolveChartColors } from "@docen/core/paint";
 import type { LayoutDrawingMember } from "@docen/layout";
 import { EMU_PER_PX } from "@docen/layout";
 import type { GroupOptions, SlideChild } from "@office-open/pptx";
 
-import { resolveChartColors } from "./chart-colors";
 import { IDENTITY, emuOf, geometryOf, type Xform } from "./geometry";
 import { endpointMembers } from "./lines";
 import { mediaMember } from "./media";

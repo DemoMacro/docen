@@ -35,6 +35,10 @@
       "types": "./dist/geometry/index.d.mts",
       "import": "./dist/geometry/index.mjs"
     },
+    "./paint": {
+      "types": "./dist/paint/index.d.mts",
+      "import": "./dist/paint/index.mjs"
+    },
     ".": {
       "types": "./dist/index.d.mts",
       "import": "./dist/index.mjs"

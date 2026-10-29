@@ -10,6 +10,7 @@
 // entries); native media playback stays with its follow-up batch.
 
 import { measureEmu, solidFillOf } from "@docen/core/geometry";
+import { transformColor, type ResolvedColor } from "@docen/core/paint";
 import { browserFontMetrics, emuToPx } from "@docen/layout";
 import type {
   ColorTransformOptions,
@@ -33,7 +34,6 @@ import {
 } from "@office-open/pptx";
 
 import { tilePaintOf } from "./blip-tile";
-import { transformColor, type ResolvedColor } from "./color-transform";
 import { IDENTITY } from "./geometry";
 import { patternBackgroundOf } from "./pattern-background";
 import { pictureSrcOf } from "./pictures";

@@ -1,15 +1,17 @@
 // Chart color resolution: ChartSpaceOptions keeps DrawingML theme tokens, so
-// the PPTX projection resolves them before the format-neutral chart painter
+// DOCX/PPTX projections resolve them before the format-neutral chart painter
 // reads fills, markers and label text.
 
-import type { ColorMappingOptions } from "@office-open/core/theme";
+import { transformColor, type ColorTransformOptions } from "./color-transform";
 
-import { transformColor } from "./color-transform";
-import type { ThemeColors } from "./table-style";
+type ThemeColorToken = {
+  value: string;
+  transforms?: ColorTransformOptions;
+};
 
 interface ChartColorContext {
-  themeColors?: ThemeColors;
-  colorMapping?: ColorMappingOptions;
+  themeColors?: Readonly<Record<string, string | undefined>>;
+  colorMapping?: object;
 }
 
 const LONG_COLOR_TOKEN: Record<string, string> = {
@@ -20,16 +22,16 @@ const LONG_COLOR_TOKEN: Record<string, string> = {
 };
 
 function colorOf(value: unknown, context: ChartColorContext): string | undefined {
-  if (!value || typeof value !== "object") return undefined;
-  const record = value as Record<string, unknown>;
-  const token = record.value;
-  if (typeof token !== "string") return undefined;
-  const tokenValue = token.replace("#", "");
-  const hex = /^[0-9A-Fa-f]{6}$/.test(tokenValue) ? tokenValue.toUpperCase() : tokenValue;
+  if (!isThemeColor(value)) return undefined;
+  const token = value.value.replace("#", "");
+  const hex = /^[0-9A-Fa-f]{6}$/.test(token) ? token.toUpperCase() : token;
   const key = LONG_COLOR_TOKEN[hex.toLowerCase()] ?? hex;
-  const slot = context.colorMapping?.[key as keyof ColorMappingOptions] ?? hex;
-  const base = context.themeColors?.[slot as keyof ThemeColors];
-  const resolved = transformColor(base ?? hex, record.transforms as never);
+  const mapped = context.colorMapping
+    ? Object.entries(context.colorMapping).find(([entryKey]) => entryKey === key)?.[1]
+    : undefined;
+  const slot = typeof mapped === "string" ? mapped : hex;
+  const base = context.themeColors?.[slot];
+  const resolved = transformColor(base ?? hex, value.transforms);
   return resolved.alpha >= 1
     ? resolved.color
     : `rgba(${hexToRgb(resolved.color)}, ${resolved.alpha})`;
@@ -40,12 +42,12 @@ function hexToRgb(hex: string): string {
   return [0, 2, 4].map((offset) => Number.parseInt(value.slice(offset, offset + 2), 16)).join(", ");
 }
 
-function isThemeColor(value: unknown): value is Record<string, unknown> {
+function isThemeColor(value: unknown): value is ThemeColorToken {
   return (
     !!value &&
     typeof value === "object" &&
-    typeof (value as Record<string, unknown>).value === "string" &&
-    Object.keys(value as Record<string, unknown>).every(
+    typeof (value as { value?: unknown }).value === "string" &&
+    Object.keys(value as { value?: unknown }).every(
       (key) => key === "value" || key === "transforms",
     )
   );
