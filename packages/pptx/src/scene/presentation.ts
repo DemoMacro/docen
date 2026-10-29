@@ -219,6 +219,10 @@ function projectSlide(
   size: { widthPx: number; heightPx: number },
 ): ProjectedSlide {
   const context = tableContextOf(pres, slide.master, masters);
+  const override = slide.colorMappingOverride;
+  if (override?.kind === "override") {
+    context.colorMapping = { ...context.colorMapping, ...override.colorMapping };
+  }
   const background = slideBackgroundOf(slide, masters, context, size);
   const inheritedChildren = inheritedSlideChildrenOf(slide, masters);
   const children = inheritPlaceholderGeometry(slide.children ?? [], slide, masters, context);

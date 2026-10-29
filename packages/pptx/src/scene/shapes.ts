@@ -42,6 +42,8 @@ interface ShapePaint {
   line?: LayoutDrawingLine;
   shadow?: LayoutDrawingShadow;
   rotation?: number;
+  flipH?: boolean;
+  flipV?: boolean;
   childPath?: readonly number[];
 }
 
@@ -68,6 +70,8 @@ export function shapeMembers(
     line: outlineLineOf(outline, t.sx * emuOf(shape.width), t.sy * emuOf(shape.height), context),
     shadow: outerShadowOf(shape.properties?.effects),
     ...(shape.rotation ? { rotation: shape.rotation } : {}),
+    ...(shape.flipHorizontal ? { flipH: true } : {}),
+    ...(shape.flipVertical ? { flipV: true } : {}),
     ...(childPath ? { childPath } : {}),
   };
   // A text-carrying shape projects its body (PowerPoint writes an empty a:p
@@ -88,6 +92,8 @@ export function shapeMembers(
     line,
     shadow,
     rotation,
+    flipH,
+    flipV,
     childPath: cp,
   } = paint;
 
@@ -107,6 +113,7 @@ export function shapeMembers(
         ...(outline.stroke && line ? { line } : {}),
         ...(shadow ? { shadow } : {}),
         ...(rotation ? { rotation } : {}),
+        ...(flipH || flipV ? { flipH, flipV } : {}),
         ...(cp ? { childPath: cp } : {}),
       }));
     }
@@ -125,6 +132,7 @@ export function shapeMembers(
         ...(line ? { line } : {}),
         ...(shadow ? { shadow } : {}),
         ...(rotation ? { rotation } : {}),
+        ...(flipH || flipV ? { flipH, flipV } : {}),
         ...(cp ? { childPath: cp } : {}),
       },
     ];
@@ -145,6 +153,7 @@ export function shapeMembers(
         ...(line ? { line } : {}),
         ...(shadow ? { shadow } : {}),
         ...(rotation ? { rotation } : {}),
+        ...(flipH || flipV ? { flipH, flipV } : {}),
         ...(cp ? { childPath: cp } : {}),
       },
       ...lineEndMembersOf(line, 0, 0, w, h).map((m) => ({
@@ -173,6 +182,7 @@ export function shapeMembers(
         ...(line ? { line } : {}),
         ...(shadow ? { shadow } : {}),
         ...(rotation ? { rotation } : {}),
+        ...(flipH || flipV ? { flipH, flipV } : {}),
         ...(cp ? { childPath: cp } : {}),
       },
     ];
@@ -248,6 +258,7 @@ function textBoxMember(
     ...(paint.shadow ? { shadow: paint.shadow } : {}),
     ...(paint.childPath ? { childPath: paint.childPath } : {}),
     ...(paint.rotation ? { rotation: paint.rotation, rotationAbout: "center" as const } : {}),
+    ...(paint.flipH || paint.flipV ? { flipH: paint.flipH, flipV: paint.flipV } : {}),
     insets: {
       left: ins(bp?.lIns, BODY_INSET_EMU.left) + (tr ? Math.max(0, tr.l) : 0),
       top: ins(bp?.tIns, BODY_INSET_EMU.top) + (tr ? Math.max(0, tr.t) : 0),

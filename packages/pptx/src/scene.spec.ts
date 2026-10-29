@@ -263,6 +263,43 @@ describe("table grid", () => {
   });
 });
 
+describe("shape projection", () => {
+  it("projects shape flips and slide color mapping overrides", () => {
+    const { slides } = project({
+      masters: [
+        {
+          name: "master",
+          theme: { colorScheme: { light1: "FFFFFF", accent1: "4472C4" } },
+        },
+      ],
+      slides: [
+        {
+          colorMappingOverride: {
+            kind: "override",
+            colorMapping: { background1: "accent1" },
+          },
+          children: [
+            {
+              shape: {
+                x: 0,
+                y: 0,
+                width: 914400,
+                height: 914400,
+                flipHorizontal: true,
+                flipVertical: true,
+                properties: { fill: { type: "solid", color: { value: "bg1" } } },
+              },
+            },
+          ],
+        },
+      ],
+    });
+    const member = slides[0]!.members[0]!;
+
+    expect(member).toMatchObject({ flipH: true, flipV: true, fill: "4472C4" });
+  });
+});
+
 describe("shapes", () => {
   it("projects a full 0.15 SmartArt layout definition by its unique id", () => {
     const { slides } = project({
