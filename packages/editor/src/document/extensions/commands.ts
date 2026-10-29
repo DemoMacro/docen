@@ -551,7 +551,7 @@ export interface ChartDataPatch {
   /** The category axis labels, one per plotted row. */
   categories: string[];
   /** One entry per series — the legend name and its values. */
-  series: { name: string; values: number[] }[];
+  series: { name: string; values: (number | null)[] }[];
 }
 
 function categoryWithText(
@@ -569,7 +569,8 @@ function labelWithText(
   return categoryWithText(previous, text);
 }
 
-function valueWithNumber(previous: ChartValue, value: number): ChartValue {
+function valueWithNumber(previous: ChartValue, value: number | null): ChartValue {
+  if (value === null) return null;
   return previous !== null && typeof previous === "object" ? { ...previous, value } : value;
 }
 
@@ -4964,7 +4965,7 @@ export const DocumentCommands = Extension.create({
           let parsed: {
             title?: string;
             categories?: string[];
-            series?: { name?: string; values?: number[] }[];
+            series?: { name?: string; values?: (number | null)[] }[];
           };
           try {
             parsed = JSON.parse(value);

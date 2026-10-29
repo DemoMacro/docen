@@ -38,9 +38,16 @@ function chartText(value: unknown): string | undefined {
 
 /** Chart data slots in source order; a null/invalid datum stays `undefined`
  *  so later points do not shift onto an earlier category. */
-function chartValuesOf(raw: unknown): (number | undefined)[] {
+function chartValuesOf(raw: unknown, minimum = 0): (number | undefined)[] {
   if (!Array.isArray(raw)) return [];
-  const values: Array<number | undefined> = Array.from({ length: raw.length }, () => undefined);
+  const explicitLength = raw.reduce((length, value) => {
+    const index = isRecord(value) ? num(value.index) : undefined;
+    return index === undefined ? length : Math.max(length, index + 1);
+  }, 0);
+  const values: Array<number | undefined> = Array.from(
+    { length: Math.max(raw.length, explicitLength, minimum) },
+    () => undefined,
+  );
   raw.forEach((value, index) => {
     const target = isRecord(value) ? (num(value.index) ?? index) : index;
     if (target >= 0 && target < values.length) values[target] = chartNumber(value);
@@ -210,7 +217,18 @@ function readModel(chart: Rec): ChartModel | undefined {
     : Array.isArray(chart.categoryLabels)
       ? chart.categoryLabels
       : [];
-  let categories = declaredCategories.map(chartText);
+  const categoryCount = Math.max(
+    num(chart.categoryPointCount) ?? 0,
+    declaredCategories.reduce((length, category) => {
+      const index = isRecord(category) ? num(category.index) : undefined;
+      return index === undefined ? length : Math.max(length, index + 1);
+    }, declaredCategories.length),
+  );
+  let categories = Array.from({ length: categoryCount }, (): string | undefined => undefined);
+  declaredCategories.forEach((category, index) => {
+    const target = isRecord(category) ? (num(category.index) ?? index) : index;
+    if (target >= 0 && target < categories.length) categories[target] = chartText(category);
+  });
   const levels = Array.isArray(chart.multiLevelCategories)
     ? (chart.multiLevelCategories as readonly unknown[][])
     : [];
@@ -278,6 +296,7 @@ function valuesOf(series: Rec): (number | undefined)[] {
       : Array.isArray(series.yValues)
         ? series.yValues
         : [],
+    num(series.valuePointCount) ?? 0,
   );
 }
 

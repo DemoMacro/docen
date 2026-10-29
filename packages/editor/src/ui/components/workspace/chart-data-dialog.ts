@@ -69,11 +69,13 @@ const labelTextOf = (value: string | CategoryPointOptions): string =>
   typeof value === "string" ? value : value.text;
 
 /** The grid edits numbers — cached string/point values parse like the
- *  inputs do (#collect), and text/null cells fall back to 0. */
-const numberValueOf = (value: ChartValue): number => {
+ *  inputs do (#collect); blank source cells remain null so an edit does not
+ *  invent a zero data point. */
+const numberValueOf = (value: ChartValue): number | null => {
   if (typeof value === "number") return value;
-  if (value === null || typeof value !== "object") return 0;
-  return typeof value.value === "number" ? value.value : Number(value.value) || 0;
+  if (value === null || typeof value !== "object") return null;
+  if (typeof value.value !== "number") return null;
+  return value.value;
 };
 
 const template = html<DocenChartDataDialog>`
@@ -160,7 +162,7 @@ class DocenChartDataDialog extends FASTElement {
       categories: this.#categories.map((c) => c.trim()),
       series: this.#series.map((s, i) => ({
         name: s.name.trim() || `Series ${i + 1}`,
-        values: s.values.map((v) => (Number.isFinite(v) ? v : 0)),
+        values: [...s.values],
       })),
     };
     this.$emit("chart:ok", { patch });
@@ -170,7 +172,7 @@ class DocenChartDataDialog extends FASTElement {
   /** The live grid state — mutated through #collect (before a structural
    *  change) so the user's unsaved edits survive every re-render. */
   #categories: string[] = [];
-  #series: { name: string; values: number[] }[] = [];
+  #series: { name: string; values: (number | null)[] }[] = [];
 
   /** Read the inputs back into the live state. DOM order: the header name
    *  inputs first, then row-major data rows (one category followed by its
@@ -189,7 +191,8 @@ class DocenChartDataDialog extends FASTElement {
       categories.push(inputs[at]!.value);
       for (let s = 0; s < count; s++) {
         const raw = inputs[at + 1 + s]?.value.trim() ?? "";
-        this.#series[s]!.values[r] = raw === "" ? 0 : Number.parseFloat(raw) || 0;
+        const parsed = raw === "" ? null : Number.parseFloat(raw);
+        this.#series[s]!.values[r] = parsed !== null && Number.isFinite(parsed) ? parsed : null;
       }
     }
     this.#categories = categories;
@@ -198,7 +201,7 @@ class DocenChartDataDialog extends FASTElement {
   #addCategory(): void {
     this.#collect();
     this.#categories.push("");
-    for (const s of this.#series) s.values.push(0);
+    for (const s of this.#series) s.values.push(null);
     this.#render();
   }
 
@@ -212,7 +215,7 @@ class DocenChartDataDialog extends FASTElement {
 
   #addSeries(): void {
     this.#collect();
-    this.#series.push({ name: "", values: this.#categories.map(() => 0) });
+    this.#series.push({ name: "", values: this.#categories.map(() => null) });
     this.#render();
   }
 

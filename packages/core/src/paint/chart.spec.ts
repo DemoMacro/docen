@@ -83,6 +83,21 @@ describe("paintChartMember", () => {
     expect(labels).toContain("Cost");
   });
 
+  it("expands sparse category points to their declared slots", () => {
+    const tree = new Group();
+    paintChartMember(
+      tree,
+      member({
+        type: "line",
+        categoryPointCount: 3,
+        categories: [{ index: 2, text: "Third" }],
+        series: [{ values: [1, null, 3] }],
+      }),
+    );
+
+    expect(textOf(tree)).toContain("Third");
+  });
+
   it("aligns scatter values without dropping blank slots", () => {
     const tree = new Group();
     paintChartMember(

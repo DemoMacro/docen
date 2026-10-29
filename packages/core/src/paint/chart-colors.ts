@@ -1,6 +1,6 @@
 // Chart color resolution: ChartSpaceOptions keeps DrawingML theme tokens, so
-// DOCX/PPTX projections resolve them before the format-neutral chart painter
-// reads fills, markers and label text.
+// DOCX/PPTX projections resolve their aliases and color maps before the
+// format-neutral chart painter reads fills, markers and label text.
 
 import { transformColor, type ColorTransformOptions } from "./color-transform";
 
@@ -19,18 +19,53 @@ const LONG_COLOR_TOKEN: Record<string, string> = {
   tx1: "text1",
   bg2: "background2",
   tx2: "text2",
+  dk1: "dark1",
+  lt1: "light1",
+  dk2: "dark2",
+  lt2: "light2",
+  hlink: "hyperlink",
+  folhlink: "followedhyperlink",
+};
+
+const THEME_SLOT_TOKEN: Record<string, string> = {
+  background1: "light1",
+  text1: "dark1",
+  background2: "light2",
+  text2: "dark2",
+  dark1: "dark1",
+  light1: "light1",
+  dark2: "dark2",
+  light2: "light2",
+  hyperlink: "hyperlink",
+  followedhyperlink: "followedHyperlink",
+};
+
+const FALLBACK_THEME_COLORS: Record<string, string> = {
+  dark1: "000000",
+  light1: "FFFFFF",
+  dark2: "44546A",
+  light2: "E7E6E6",
+  hyperlink: "0563C1",
+  followedHyperlink: "954F72",
 };
 
 function colorOf(value: unknown, context: ChartColorContext): string | undefined {
   if (!isThemeColor(value)) return undefined;
   const token = value.value.replace("#", "");
   const hex = /^[0-9A-Fa-f]{6}$/.test(token) ? token.toUpperCase() : token;
-  const key = LONG_COLOR_TOKEN[hex.toLowerCase()] ?? hex;
+  const canonical = LONG_COLOR_TOKEN[hex.toLowerCase()] ?? hex;
   const mapped = context.colorMapping
-    ? Object.entries(context.colorMapping).find(([entryKey]) => entryKey === key)?.[1]
+    ? Object.entries(context.colorMapping).find(
+        ([entryKey]) => (LONG_COLOR_TOKEN[entryKey.toLowerCase()] ?? entryKey) === canonical,
+      )?.[1]
     : undefined;
-  const slot = typeof mapped === "string" ? mapped : hex;
-  const base = context.themeColors?.[slot];
+  const mappedToken =
+    typeof mapped === "string" ? (LONG_COLOR_TOKEN[mapped.toLowerCase()] ?? mapped) : canonical;
+  const slot = THEME_SLOT_TOKEN[mappedToken.toLowerCase()] ?? mappedToken;
+  const base =
+    context.themeColors?.[slot] ??
+    context.themeColors?.[slot.replace("dark", "dk").replace("light", "lt")] ??
+    FALLBACK_THEME_COLORS[slot];
   const resolved = transformColor(base ?? hex, value.transforms);
   return resolved.alpha >= 1
     ? resolved.color
