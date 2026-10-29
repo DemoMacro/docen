@@ -223,6 +223,6 @@ export function projectDocument(
               columns: undefined,
             },
           ],
-    background: projectPageBackground(doc),
+    background: projectPageBackground(doc, ctx.themeColors),
   };
 }

@@ -285,6 +285,16 @@ describe("projectDocument style cascade", () => {
     expect(para.borders?.bottom).toMatchObject({ color: "111D31" });
   });
 
+  it("resolves the page background's theme color", () => {
+    const { background } = projectDocument({
+      ...doc([]),
+      theme: { colorScheme: { accent1: "4472C4" } },
+      background: { themeColor: "accent1" },
+    });
+
+    expect(background).toMatchObject({ color: "4472C4" });
+  });
+
   it("resolves chart DrawingML theme colors before rendering", () => {
     const { blocks } = oneSection({
       ...doc([
