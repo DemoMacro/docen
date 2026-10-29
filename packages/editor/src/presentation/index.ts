@@ -57,7 +57,7 @@ import type { AnimationDuration } from "@office-open/pptx";
 // Leafer ships animate() as a stub that only logs — the show's entrance
 // tweens need the real plugin registered.
 import "@leafer-in/animate";
-import { App, type IGroup } from "leafer-ui";
+import { App, type IGroup, type ILeaf } from "leafer-ui";
 
 import { buildContextualTab, renderRibbonFromSchema } from "../document/ribbon";
 import {
@@ -163,6 +163,19 @@ const ZOOM_MAX = 500;
 
 /** The drawing grid pitch: PowerPoint's 0.5" grid in slide px (96/inch). */
 const GRID_PITCH_PX = 48;
+
+/** A show-animation target resolved against one painted slide. */
+interface ShowAnimationTarget {
+  entry: SlideAnimation;
+  box: Box;
+  elements: ILeaf[];
+}
+
+/** One click-triggered show-animation batch. */
+interface ShowAnimationGroup {
+  targets: ShowAnimationTarget[];
+  elements: ILeaf[];
+}
 
 /** Text/paragraph commands over the selected shape (font/size carry the
  *  combobox value through detail.value; line-spacing's menu items carry
@@ -505,6 +518,8 @@ class DocenPresentation extends AddinHost {
   #showingSlide = 0;
   #savedZoom = 100;
   #showWheelAt = 0;
+  /** Click-triggered show-animation groups still waiting for user input. */
+  #showAnimationGroups: ShowAnimationGroup[] = [];
   /** PowerPoint's Slide Sorter: a modal browser over the existing thumbnail
    *  paints, with drag-and-drop deck reordering. */
   #slideSorter: HTMLDialogElement | null = null;
@@ -2379,18 +2394,19 @@ class DocenPresentation extends AddinHost {
 
   #undo(): void {
     if (!this.#history.canUndo) return;
-    this.#history.undo();
-    // An in-flight text edit commits first, so undo revokes it (the freshest
-    // step) rather than the step before — the user's intent either way.
+    // A live edit is the freshest change. Commit it before walking history so
+    // Ctrl+Z revokes the text just typed instead of mixing it into an older
+    // undo step.
     this.#exitTextEditing(true);
+    this.#history.undo();
     this.#syncQat();
     this.#renderSlideSorter();
   }
 
   #redo(): void {
     if (!this.#history.canRedo) return;
-    this.#history.redo();
     this.#exitTextEditing(true);
+    this.#history.redo();
     this.#syncQat();
     this.#renderSlideSorter();
   }
@@ -4258,12 +4274,13 @@ class DocenPresentation extends AddinHost {
     this.#playShowAnimations(this.#showingSlide);
   }
 
-  /** Play a slide's entrance animations in the live show: each entry tweens
-   *  the elements its shape paints, in listed order with a stagger. Members
-   *  collect by containment (a simple member sits at the shape's box, a
-   *  rotated one at its center, a text body scatters its lines inside it),
-   *  so the paint shape never has to be mirrored here; effects outside the
-   *  preset set play as a fade. */
+  /** Play a slide's entrance animations in the live show. Automatic entries
+   *  play immediately; each click boundary becomes a queued group consumed by
+   *  the next advance gesture. Within a group, with/after chaining follows
+   *  PowerPoint's timing. Members collect by containment (a simple member
+   *  sits at the shape's box, a rotated one at its center, a text body
+   *  scatters its lines inside it), so the paint shape never has to be
+   *  mirrored here; effects outside the preset set play as a fade. */
   #playShowAnimations(index: number): void {
     const slide = this.#presJson?.slides?.[index];
     const entries = slide?.animations;
@@ -4281,18 +4298,69 @@ class DocenPresentation extends AddinHost {
     const hits = slideHits(this.#selectableSlide(index) ?? {});
     const inBox = (box: Box, x: number, y: number): boolean =>
       x >= box.x - 1 && x <= box.x + box.width + 1 && y >= box.y - 1 && y <= box.y + box.height + 1;
+    const targetsFor = (entry: SlideAnimation): ShowAnimationTarget | null => {
+      const child = entry.shapeId
+        ? slide.children?.find((item) => {
+            const surface = nonVisualOf(item);
+            return surface !== null && "id" in surface && surface.id === entry.shapeId;
+          })
+        : undefined;
+      const hit = child
+        ? hits.find((candidate) => slide.children?.[candidate.child] === child)
+        : entry.shapeName
+          ? hits.find((candidate) => {
+              const source = slide.children?.[candidate.child];
+              return source !== undefined && nonVisualOf(source)?.name === entry.shapeName;
+            })
+          : undefined;
+      if (!hit) return null;
+      const elements = slideGroup.children.filter(
+        // An unpainted element carries no position — NaN fails the box test.
+        (member, position) => position > 0 && inBox(hit.box, member.x ?? NaN, member.y ?? NaN),
+      );
+      return { entry, box: hit.box, elements };
+    };
+    const isChained = (entry: SlideAnimation): boolean =>
+      entry.trigger === "withPrevious" || entry.trigger === "afterPrevious";
+    const groups: ShowAnimationGroup[] = [];
+    let pending: SlideAnimation[] = [];
+    for (const entry of entries) {
+      if (entry.class === "exit" || entry.class === "emphasis" || entry.class === "mediaCall")
+        continue;
+      if (pending.length && isChained(entry)) pending.push(entry);
+      else {
+        const targets = pending.map(targetsFor).filter((target) => target !== null);
+        if (targets.length > 0)
+          groups.push({ targets, elements: targets.flatMap((target) => target.elements) });
+        pending = [entry];
+      }
+    }
+    const pendingTargets = pending.map(targetsFor).filter((target) => target !== null);
+    if (pendingTargets.length > 0)
+      groups.push({
+        targets: pendingTargets,
+        elements: pendingTargets.flatMap((target) => target.elements),
+      });
+    this.#showAnimationGroups = groups;
+    for (const group of this.#showAnimationGroups) {
+      if ((group.targets[0]?.entry.trigger ?? "onClick") !== "onClick") continue;
+      for (const element of group.elements) element.set({ opacity: 0 });
+    }
+    const first = this.#showAnimationGroups[0];
+    if (first && (first.targets[0]?.entry.trigger ?? "onClick") !== "onClick") {
+      this.#showAnimationGroups.shift();
+      this.#playShowAnimationTargets(first.targets);
+    }
+  }
+
+  /** Play one already-resolved animation group with group-relative timing. */
+  #playShowAnimationTargets(targets: ShowAnimationTarget[]): void {
+    if (targets.length === 0) return;
     let clickCursor = 0;
     let lastStart = 0;
     let lastEnd = 0;
-    for (const entry of entries) {
-      // Entrances only: a parsed exit/emphasis entry waits for a follow-up
-      // batch rather than playing backwards.
-      if (entry.class === "exit" || entry.class === "emphasis" || entry.class === "mediaCall")
-        continue;
-      const hit = entry.shapeName
-        ? hits.find((h) => nonVisualOf(slide.children![h.child]!)?.name === entry.shapeName)
-        : undefined;
-      if (!hit) continue;
+    for (const target of targets) {
+      const { entry, box, elements } = target;
       const duration = animationMsOf(entry.duration, 500);
       const trigger = entry.trigger ?? "onClick";
       const base =
@@ -4303,22 +4371,19 @@ class DocenPresentation extends AddinHost {
             : clickCursor;
       const startAt = base + animationMsOf(entry.delay, 0);
       const options = { duration, delay: startAt, jump: true, easing: "ease-out" as const };
-      for (const el of slideGroup.children.filter(
-        // An unpainted element carries no position — NaN fails the box test.
-        (member, i) => i > 0 && inBox(hit.box, member.x ?? NaN, member.y ?? NaN),
-      )) {
+      for (const el of elements) {
         const top = el.y ?? 0;
         if (entry.type === "fly") {
-          el.animate(
+          el.animate?.(
             [
-              { y: top + hit.box.height / 3, opacity: 0 },
+              { y: top + box.height / 3, opacity: 0 },
               { y: top, opacity: 1 },
             ],
             options,
           );
         } else if (entry.type === "zoom") {
           el.around = "center";
-          el.animate(
+          el.animate?.(
             [
               { scale: 0.3, opacity: 0 },
               { scale: 1, opacity: 1 },
@@ -4326,7 +4391,7 @@ class DocenPresentation extends AddinHost {
             options,
           );
         } else if (entry.type !== "appear") {
-          el.animate([{ opacity: 0 }, { opacity: 1 }], options);
+          el.animate?.([{ opacity: 0 }, { opacity: 1 }], options);
         }
       }
       clickCursor = Math.max(clickCursor, startAt + duration);
@@ -4335,11 +4400,20 @@ class DocenPresentation extends AddinHost {
     }
   }
 
+  /** Consume one click-triggered animation group before turning the page. */
+  #playNextShowAnimationGroup(): boolean {
+    const group = this.#showAnimationGroups.shift();
+    if (!group) return false;
+    this.#playShowAnimationTargets(group.targets);
+    return true;
+  }
+
   /** Advance within the configured range; `loop` wraps back to its first
    *  slide, otherwise the show stays on the last slide. */
   #advanceShow(): void {
     const pres = this.#pres;
     if (!pres) return;
+    if (this.#playNextShowAnimationGroup()) return;
     const last = Math.min(pres.slides.length - 1, this.#showSetup.to - 1);
     if (this.#showingSlide >= last && this.#showSetup.loop)
       this.#gotoShowSlide(Math.max(0, this.#showSetup.from - 1));
@@ -4353,7 +4427,8 @@ class DocenPresentation extends AddinHost {
     const now = performance.now();
     if (now - this.#showWheelAt < 300) return;
     this.#showWheelAt = now;
-    this.#gotoShowSlide(this.#showingSlide + (event.deltaY > 0 ? 1 : -1));
+    if (event.deltaY > 0) this.#advanceShow();
+    else this.#gotoShowSlide(this.#showingSlide - 1);
   };
 
   /** The browser's Escape leaves fullscreen ahead of us — fold the show up
