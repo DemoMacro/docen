@@ -1,3 +1,5 @@
+import { generateDocumentSync } from "@office-open/docx";
+import type { DocumentOptions } from "@office-open/docx";
 import { describe, expect, it } from "vitest";
 
 import { generateDOCXSync, parseDOCXSync, patchDOCX, type JSONContent } from "../index";
@@ -34,6 +36,26 @@ const tableTemplate = (cells: readonly string[][]): Uint8Array =>
   });
 
 describe("patchDOCX", () => {
+  it("replaces placeholders in default headers", async () => {
+    const source: DocumentOptions = {
+      sections: [
+        {
+          headers: { default: [{ paragraph: { text: "Owner {{name}}" } }] },
+          children: [],
+        },
+      ],
+    };
+    const patched = await patchDOCX({
+      template: generateDocumentSync(source) as Uint8Array,
+      patches: { name: { content: replacement("Ada") } },
+      outputType: "uint8array",
+    });
+    const document = parseDOCXSync(patched);
+
+    expect(JSON.stringify(document)).toContain("Owner Ada");
+    expect(JSON.stringify(document)).not.toContain("{{name}}");
+  });
+
   it("replaces an inline placeholder without splitting the sentence", async () => {
     const patched = await patchDOCX({
       template: template("Hello {{name}}"),

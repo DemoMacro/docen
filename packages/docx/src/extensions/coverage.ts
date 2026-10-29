@@ -140,28 +140,25 @@ export const PARAGRAPH_CHILD_DISPOSITIONS = {
   rawXml: { passthrough: "inlinePassthrough atom" },
 } satisfies Record<ParagraphChildTag, Disposition>;
 
-/** RunOptions children shapes the resolve side drops (the children walk in
- *  resolveRun, converters/docx.ts). Not keyed by a union — an explicit
- *  decision list of the shapes with NO owning inline rule and no `break`:
- *  rule-owned children (tab, pageBreak, picture, …) are handled; a nested
- *  ParagraphChild member with no owning rule (e.g. {object}) drops there too
- *  but keeps its top-level disposition above — office-open parse emits those
- *  top-level, never nested. */
-export const RUN_CHILDREN_DROPPED: readonly { tag: string; reason: string }[] = [
-  { tag: "lastRenderedPageBreak", reason: "renderer pagination hint, not content" },
-  { tag: "noBreakHyphen", reason: "no editable equivalent (would corrupt words)" },
-  { tag: "softHyphen", reason: "no editable equivalent (would corrupt words)" },
-  { tag: "carriageReturn", reason: "vertical-tab break; only w:br is modeled" },
-  { tag: "separator", reason: "footnote/endnote separator run, not body content" },
-  { tag: "continuationSeparator", reason: "footnote/endnote separator run, not body content" },
-  { tag: "annotationRef", reason: "comment anchor marker, not body content" },
-  { tag: "footnoteRef", reason: "footnote anchor marker, not body content" },
-  { tag: "endnoteRef", reason: "endnote anchor marker, not body content" },
-  { tag: "pgNum", reason: "live field, value recomputed at view time" },
-  { tag: "dayShort", reason: "live date field, value recomputed at view time" },
-  { tag: "dayLong", reason: "live date field, value recomputed at view time" },
-  { tag: "monthShort", reason: "live date field, value recomputed at view time" },
-  { tag: "monthLong", reason: "live date field, value recomputed at view time" },
-  { tag: "yearShort", reason: "live date field, value recomputed at view time" },
-  { tag: "yearLong", reason: "live date field, value recomputed at view time" },
+/** RunOptions children with no dedicated editor node ride the inline
+ *  passthrough atom. Rule-owned children (tab, pageBreak, picture, …) are
+ *  handled first; this explicit list pins the shapes most likely to regress
+ *  into a silent drop. */
+export const RUN_CHILDREN_PASSTHROUGH: readonly { tag: string; reason: string }[] = [
+  { tag: "lastRenderedPageBreak", reason: "renderer pagination hint" },
+  { tag: "noBreakHyphen", reason: "Word hyphen atom" },
+  { tag: "softHyphen", reason: "Word hyphen atom" },
+  { tag: "carriageReturn", reason: "vertical-tab break" },
+  { tag: "separator", reason: "footnote/endnote separator marker" },
+  { tag: "continuationSeparator", reason: "footnote/endnote separator marker" },
+  { tag: "annotationRef", reason: "comment anchor marker" },
+  { tag: "footnoteRef", reason: "footnote anchor marker" },
+  { tag: "endnoteRef", reason: "endnote anchor marker" },
+  { tag: "pgNum", reason: "live page-number field" },
+  { tag: "dayShort", reason: "live date field" },
+  { tag: "dayLong", reason: "live date field" },
+  { tag: "monthShort", reason: "live date field" },
+  { tag: "monthLong", reason: "live date field" },
+  { tag: "yearShort", reason: "live date field" },
+  { tag: "yearLong", reason: "live date field" },
 ];

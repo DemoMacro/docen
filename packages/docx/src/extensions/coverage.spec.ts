@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { compileDocument, docxExtensions, resolveDocument } from "../index";
 import {
   PARAGRAPH_CHILD_DISPOSITIONS,
-  RUN_CHILDREN_DROPPED,
+  RUN_CHILDREN_PASSTHROUGH,
   SECTION_CHILD_DISPOSITIONS,
 } from "./coverage";
 
@@ -481,17 +481,17 @@ describe("ParagraphChild dispositions", () => {
   }
 });
 
-// ── Run children drops ──
+// ── Run children passthrough ──
 
-describe("run children drops", () => {
-  for (const { tag, reason } of RUN_CHILDREN_DROPPED) {
-    it(`drops {${tag}} nested in a run (${reason})`, () => {
+describe("run children passthrough", () => {
+  for (const { tag, reason } of RUN_CHILDREN_PASSTHROUGH) {
+    it(`keeps {${tag}} nested in a run (${reason})`, () => {
       const run: ParagraphChild = {
         text: "x",
         children: [{ [tag]: true } as NonNullable<RunOptions["children"]>[number]],
       };
       const { compiled } = roundTrip([{ paragraph: { children: [run] } }]);
-      expect(JSON.stringify(compiled)).not.toContain(`"${tag}"`);
+      expect(JSON.stringify(compiled)).toContain(`"${tag}"`);
     });
   }
 

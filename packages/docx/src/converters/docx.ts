@@ -1284,10 +1284,16 @@ export class DocxManager {
           if ("break" in c) {
             flushText();
             nodes.push({ type: "hardBreak" });
+            continue;
           }
-          // {lastRenderedPageBreak} is a Word render hint — drop (office-open
-          // does not emit it on output). noBreakHyphen/date fields/separator/pgNum
-          // are unsupported inline elements, dropped for now.
+          // 0.15 has more run atoms than the editor owns (render hints,
+          // hyphens, field markers). Preserve them verbatim so an open/edit/
+          // save cycle cannot silently rewrite the document.
+          flushText();
+          nodes.push({
+            type: "inlinePassthrough",
+            attrs: { data: JSON.stringify(serializeJsonBinary(c)) },
+          });
         }
       }
       flushText();

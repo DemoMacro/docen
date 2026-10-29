@@ -94,17 +94,39 @@ function buildPlaceholderCommands(
     const section = sections[index]!;
     const children =
       "children" in section && Array.isArray(section.children) ? section.children : [];
-    return [...children.keys()].reverse().flatMap((childIndex): PlaceholderTarget[] => {
-      const target = children[childIndex];
-      if (!target) return [];
+    const bodyTargets = [...children.keys()]
+      .reverse()
+      .flatMap((childIndex): PlaceholderTarget[] => {
+        const target = children[childIndex];
+        if (!target) return [];
 
-      const baseRoute: PatchRouteStep[] = [
-        { index },
-        { property: "children" },
-        { index: childIndex },
-      ];
-      return placeholderTargets(target, baseRoute, delimiters, replacements);
+        const baseRoute: PatchRouteStep[] = [
+          { index },
+          { property: "children" },
+          { index: childIndex },
+        ];
+        return placeholderTargets(target, baseRoute, delimiters, replacements);
+      });
+
+    const chromeTargets = (["headers", "footers"] as const).flatMap((property) => {
+      const group = section[property];
+      return (["default", "first", "even", "odd"] as const).flatMap((slot): PlaceholderTarget[] => {
+        const parts = group?.[slot];
+        if (!Array.isArray(parts)) return [];
+        return [...parts.keys()].reverse().flatMap((partIndex): PlaceholderTarget[] => {
+          const target = parts[partIndex];
+          if (!target) return [];
+          const baseRoute: PatchRouteStep[] = [
+            { index },
+            { property },
+            { property: slot },
+            { index: partIndex },
+          ];
+          return placeholderTargets(target, baseRoute, delimiters, replacements);
+        });
+      });
     });
+    return [...bodyTargets, ...chromeTargets];
   });
 
   for (const target of targets) {
