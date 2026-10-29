@@ -881,6 +881,7 @@ function paintPie(tree: IGroup, model: ChartModel, plot: PlotBox, reg?: ElementR
         }),
       );
       reg?.({ series: 0, point: i }, cx - r, cy - r, r * 2, r * 2);
+      paintPieLabel(tree, series, i, v, total, cx, cy, hole, r);
       return;
     }
     const paint = piePaintOf(i);
@@ -909,7 +910,53 @@ function paintPie(tree: IGroup, model: ChartModel, plot: PlotBox, reg?: ElementR
       r * 2,
       r * 2,
     );
+    paintPieLabel(tree, series, i, v, total, cx, cy, hole, r, a0 + sweep / 360);
   });
+}
+
+function paintPieLabel(
+  tree: IGroup,
+  series: Rec,
+  index: number,
+  value: number,
+  total: number,
+  cx: number,
+  cy: number,
+  hole: number,
+  radius: number,
+  midAngleDegrees?: number,
+): void {
+  const settings = pointLabelOf(series, index);
+  const labels = isRecord(series.dataLabels) ? series.dataLabels : undefined;
+  if (!labels || settings.deleted) return;
+  const showValue = labels.showVal === true;
+  const showPercent = labels.showPercent === true;
+  if (!settings.custom && !showValue && !showPercent) return;
+  const text =
+    settings.custom ??
+    [
+      showValue ? formatChartValue(value, settings.format) : undefined,
+      showPercent ? `${Math.round((value / total) * 10000) / 100}%` : undefined,
+    ]
+      .filter(Boolean)
+      .join(" ");
+  const distance =
+    settings.position === "outsideEnd"
+      ? radius + 14
+      : settings.position === "insideBase"
+        ? hole + 10
+        : (radius + hole) / 2;
+  const angle = ((midAngleDegrees ?? 0) * Math.PI) / 180;
+  label(
+    tree,
+    text,
+    cx + Math.cos(angle) * distance,
+    cy + Math.sin(angle) * distance,
+    LABEL_PX - 1,
+    "center",
+    undefined,
+    settings.color ?? labelColorOf(series),
+  );
 }
 
 // ── scatter ──

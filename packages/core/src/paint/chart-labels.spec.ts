@@ -69,4 +69,32 @@ describe("chart data-label overrides", () => {
     expect(labels).not.toContain("2.34");
     expect(labels).toContain("300%");
   });
+
+  it("renders pie labels with custom and percent overrides", () => {
+    const tree = new Group();
+    paintChartMember(tree, {
+      kind: "chart",
+      x: 0,
+      y: 0,
+      width: 300,
+      height: 200,
+      chart: {
+        type: "pie",
+        categories: ["A", "B"],
+        series: [
+          {
+            values: [0.5, 0.5],
+            dataLabels: {
+              showPercent: true,
+              labels: [{ index: 0, text: { text: "Custom" } }],
+            },
+          },
+        ],
+      },
+    } satisfies Extract<LayoutDrawingMember, { kind: "chart" }>);
+    const labels = texts(tree);
+
+    expect(labels).toContain("Custom");
+    expect(labels).toContain("50%");
+  });
 });
