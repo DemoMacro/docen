@@ -827,6 +827,28 @@ class DocenPresentation extends AddinHost {
     if (!this.shadowRoot?.querySelector(".stage")) return;
     this.#renderDeck();
     this.#renderChrome();
+    this.#dispatch("docen:ready");
+  }
+
+  /** Dispatch a non-cancelable lifecycle/content event for hosts that own
+   *  persistence, autosave, or framework bindings. */
+  #dispatch(name: "docen:ready" | "docen:change"): void {
+    this.dispatchEvent(new CustomEvent(name, { bubbles: true, composed: true }));
+  }
+
+  /** Dispatch a host-action event and report whether the host took over. */
+  #emitCancelable(
+    name: "docen:open" | "docen:save" | "docen:save-as",
+    detail?: { format?: "pptx" },
+  ): boolean {
+    const event = new CustomEvent(name, {
+      bubbles: true,
+      composed: true,
+      cancelable: true,
+      detail,
+    });
+    this.dispatchEvent(event);
+    return event.defaultPrevented;
   }
 
   // ── Chrome ───────────────────────────────────────────────────────────────
@@ -1015,7 +1037,7 @@ class DocenPresentation extends AddinHost {
     else if (name === "zoom-100") this.#setZoom(100);
     else if (name === "undo") this.#undo();
     else if (name === "redo") this.#redo();
-    else if (name === "save") void this.#saveAs();
+    else if (name === "save") void this.#saveAs("save");
     else if (name === "save-as") void this.#saveAs();
     else if (name === "new-slide") this.#insertSlide();
     else if (name === "delete-slide") this.#deleteSlide();
@@ -2307,6 +2329,7 @@ class DocenPresentation extends AddinHost {
       }
     }
     this.#renderSelectionPane();
+    this.#dispatch("docen:change");
   }
 
   /** Strip-space box → slide-local: drop the slide's strip offset (the
@@ -5695,8 +5718,12 @@ class DocenPresentation extends AddinHost {
   }
 
   /** Generate the edited deck and hand it to the browser as a download. */
-  async #saveAs(): Promise<void> {
+  async #saveAs(action: "save" | "save-as" = "save-as"): Promise<void> {
     if (!this.#presJson) return;
+    if (
+      this.#emitCancelable(action === "save" ? "docen:save" : "docen:save-as", { format: "pptx" })
+    )
+      return;
     const bytes = await this.savePresentation();
     const blob = new Blob([bytes as BlobPart], {
       type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
@@ -5999,7 +6026,7 @@ class DocenPresentation extends AddinHost {
     }
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
       event.preventDefault();
-      return void this.#saveAs();
+      return void this.#saveAs("save");
     }
     if ((event.key === "Delete" || event.key === "Backspace") && this.#selection) {
       event.preventDefault();
@@ -6093,6 +6120,7 @@ class DocenPresentation extends AddinHost {
   }
 
   #pickFile(): void {
+    if (this.#emitCancelable("docen:open")) return;
     this.shadowRoot?.querySelector<HTMLInputElement>("#file-input")?.click();
   }
 
