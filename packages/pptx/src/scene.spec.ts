@@ -130,6 +130,40 @@ describe("table grid", () => {
     expect(table.rows[0]!.cells[1]!.textVertical).toBe("vertical270");
   });
 
+  it("mirrors logical table columns for right-to-left tables", () => {
+    const { slides } = project({
+      slides: [
+        {
+          children: [
+            {
+              table: {
+                x: 0,
+                y: 0,
+                width: 1371600,
+                height: 914400,
+                rightToLeft: true,
+                fill: { type: "solid", color: "FF0000" },
+                columnWidths: [914400, 457200],
+                rows: [{ cells: [{ text: "a" }, { text: "b" }] }],
+              },
+            },
+          ],
+        },
+      ],
+    });
+    const member = slides[0]!.members[0]!;
+    if (member.kind !== "table") throw new Error("expected a table member");
+    const table = (member as Extract<LayoutDrawingMember, { kind: "table" }>).table as {
+      columnWidthsPx: number[];
+      fill?: string;
+      rows: { cells: { col: number; text?: string }[] }[];
+    };
+    expect(table.columnWidthsPx[0]).toBeCloseTo(48, 7);
+    expect(table.columnWidthsPx[1]).toBeCloseTo(96, 7);
+    expect(table.rows[0]!.cells.map((cell) => cell.col)).toEqual([1, 0]);
+    expect(table.fill).toBe("FF0000");
+  });
+
   it("treats absorbed cells inside a declared span as duplicates, not columns", () => {
     // The WPS spelling: the origin declares gridSpan and the region's own
     // slots repeat hMerge="1" — the row must stay at the declared width.
@@ -221,6 +255,52 @@ describe("shapes", () => {
     });
     const member = slides[0]!.members[0]!;
     expect(member).toMatchObject({ kind: "smartArt", layout: "list1" });
+  });
+
+  it("honors chart-owned theme overrides and hidden graphic frames", () => {
+    const { slides } = project({
+      slides: [
+        {
+          children: [
+            {
+              table: {
+                x: 0,
+                y: 0,
+                width: 914400,
+                height: 914400,
+                columnWidths: [457200],
+                rows: [{ cells: [{ text: "Hidden" }] }],
+                hidden: true,
+              },
+            },
+            {
+              chart: {
+                x: 0,
+                y: 0,
+                width: 914400,
+                height: 914400,
+                type: "column",
+                series: [{ name: "Series", values: [1] }],
+                shapeProperties: {
+                  outline: { type: "solidFill", color: { value: "accent1" }, width: 12700 },
+                },
+                themeOverride: {
+                  options: { colorScheme: { accent1: "FF0000" } },
+                  path: "ppt/theme/themeOverride1.xml",
+                },
+              },
+            },
+          ],
+        },
+      ],
+    });
+    expect(slides[0]!.members).toHaveLength(1);
+    const member = slides[0]!.members[0]!;
+    if (member.kind !== "chart") throw new Error("expected a chart member");
+    const chart = member.chart as {
+      shapeProperties?: { outline?: { color?: string } };
+    };
+    expect(chart.shapeProperties?.outline?.color).toBe("FF0000");
   });
 
   it("projects a box preset as a shape member with paint", () => {

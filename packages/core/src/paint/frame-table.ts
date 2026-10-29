@@ -45,6 +45,9 @@ interface FrameRow {
 interface FrameTablePayload {
   columnWidthsPx: number[];
   rows: FrameRow[];
+  /** The a:tblPr-level fill painted behind every cell. */
+  fill?: string | LayoutDrawingFill;
+  opacity?: number;
 }
 
 export function paintFrameTable(
@@ -53,6 +56,7 @@ export function paintFrameTable(
   ctx: PaintContext,
 ): void {
   const t = member.table as FrameTablePayload | undefined;
+  if (!t) return;
   const cols = t?.columnWidthsPx;
   const rows = t?.rows;
   if (!cols?.length || !rows?.length) return;
@@ -108,6 +112,19 @@ export function paintFrameTable(
   });
   const rowY = [0];
   for (const h of rowH) rowY.push(rowY[rowY.length - 1]! + h);
+
+  if (t.fill) {
+    tree.add(
+      new Rect({
+        x: member.x,
+        y: member.y,
+        width: colX[colX.length - 1]!,
+        height: rowY[rowY.length - 1]!,
+        fill: typeof t.fill === "string" ? `#${t.fill}` : t.fill,
+        ...(t.opacity != null ? { opacity: t.opacity } : {}),
+      }),
+    );
+  }
 
   const spanEnd = (v: number[], i: number, n: number): number => v[Math.min(i + n, v.length - 1)]!;
 

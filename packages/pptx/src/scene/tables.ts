@@ -327,13 +327,36 @@ export function tableMember(
       }),
   }));
 
+  // OOXML lists logical cells left-to-right; @rtl mirrors the painted grid.
+  // Keep model col/span values intact and remap the visual origin instead.
+  const paintedRows = table.rightToLeft
+    ? rows.map((row) => ({
+        ...row,
+        cells: row.cells.map((cell) => {
+          const col = nCols - cell.col - cell.spanW;
+          return { ...cell, col };
+        }),
+      }))
+    : rows;
+  const paintedWidths = table.rightToLeft ? [...widths].reverse() : widths;
+
+  const frameWidth = paintedWidths.reduce((sum, width) => sum + width, 0);
+  const frameHeight = rows.reduce((sum, row) => sum + row.heightPx, 0);
+  const frameFill =
+    table.fill === null ? undefined : cellFillOf(table.fill, frameWidth, frameHeight, context);
+
   return {
     kind: "table",
     x: t.sx * emuOf(table.x) + t.dx,
     y: t.sy * emuOf(table.y) + t.dy,
-    width: widths.reduce((a, w) => a + w, 0),
-    height: rows.reduce((sum, row) => sum + row.heightPx, 0),
+    width: frameWidth,
+    height: frameHeight,
     ...(childPath ? { childPath } : {}),
-    table: { columnWidthsPx: widths, rows },
+    table: {
+      columnWidthsPx: paintedWidths,
+      rows: paintedRows,
+      ...(frameFill ? { fill: frameFill } : {}),
+      ...(fillOpacityOf(table.fill) != null ? { opacity: fillOpacityOf(table.fill) } : {}),
+    },
   };
 }

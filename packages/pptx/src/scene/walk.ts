@@ -5,6 +5,7 @@
 import { resolveChartColors } from "@docen/core/paint";
 import type { LayoutDrawingMember } from "@docen/layout";
 import { EMU_PER_PX } from "@docen/layout";
+import type { ColorSchemeOptions } from "@office-open/core/theme";
 import type { GroupOptions, SlideChild } from "@office-open/pptx";
 
 import { IDENTITY, emuOf, geometryOf, type Xform } from "./geometry";
@@ -13,11 +14,32 @@ import { mediaMember } from "./media";
 import { pictureMember, pictureSrcOf } from "./pictures";
 import { shapeMembers } from "./shapes";
 import { smartArtMember } from "./smartart";
+import { SCHEME_SLOTS, type ThemeColors } from "./table-style";
 import { tableMember } from "./tables";
 import type { TextFieldContext } from "./text";
 
-/** The child's cNvPr `@hidden` (a graphicFrame table has no cNvPr surface —
- *  it always shows). Hidden objects drop out of every projection. */
+/** A color-scheme slot's hex (a string value or a sysClr's lastClr). */
+function schemeColorOf(value: string | { lastClr?: string } | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  const hex = typeof value === "string" ? value : value.lastClr;
+  return hex?.replace("#", "").toUpperCase();
+}
+
+/** Merge a chart-owned theme override over its owning master's scheme. */
+function chartThemeColorsOf(
+  base: ThemeColors | undefined,
+  scheme: ColorSchemeOptions | undefined,
+): ThemeColors | undefined {
+  if (!scheme) return base;
+  const overrides = SCHEME_SLOTS.flatMap((key) => {
+    const color = schemeColorOf(scheme[key]);
+    return color ? [[key, color] as const] : [];
+  });
+  return overrides.length > 0 ? { ...base, ...Object.fromEntries(overrides) } : base;
+}
+
+/** The child's cNvPr `@hidden`, including graphic-frame chart/table surfaces.
+ *  Hidden objects drop out of every projection. */
 function hiddenOf(child: SlideChild): boolean {
   const nv =
     "shape" in child
@@ -38,7 +60,11 @@ function hiddenOf(child: SlideChild): boolean {
                     ? child.audio
                     : "ole" in child
                       ? child.ole
-                      : undefined;
+                      : "chart" in child
+                        ? child.chart
+                        : "table" in child
+                          ? child.table
+                          : undefined;
   return nv?.hidden === true;
 }
 
@@ -91,7 +117,14 @@ export function childMembers(
         width: t.sx * emuOf(c.width),
         height: t.sy * emuOf(c.height),
         ...(cp ? { childPath: cp } : {}),
-        chart: resolveChartColors(c, context),
+        chart: resolveChartColors(c, {
+          ...context,
+          themeColors: chartThemeColorsOf(
+            context.themeColors,
+            c.themeOverride?.options.colorScheme,
+          ),
+          colorMapping: c.colorMappingOverride ?? context.colorMapping,
+        }),
       });
     } else if ("ole" in child) {
       const o = child.ole;
