@@ -24,8 +24,15 @@ function dataUrlOf(bytes: Uint8Array, contentType?: string): string {
   return `data:${contentType || BINARY_MIME};base64,${encodeBase64(bytes)}`;
 }
 
+function assertJsonSafeBinary(value: unknown): void {
+  if (value instanceof Blob || value instanceof ReadableStream) {
+    throw new TypeError("Binary input must be a Uint8Array before document JSON serialization.");
+  }
+}
+
 /** Serialize binary values with a JSON-safe binary tag. */
 export function serializeJsonBinary(value: unknown): unknown {
+  assertJsonSafeBinary(value);
   const bytes = bytesOf(value);
   if (bytes) return { [BINARY_TAG]: encodeBase64(bytes) };
   if (Array.isArray(value)) return value.map((item) => serializeJsonBinary(item));
@@ -41,6 +48,7 @@ export function serializeRawParts(value: unknown): unknown {
   return value.map((part) => {
     if (!isPlainObject(part)) return part;
     const contentType = typeof part.contentType === "string" ? part.contentType : undefined;
+    assertJsonSafeBinary(part.data);
     const bytes = bytesOf(part.data);
     return { ...part, data: bytes ? dataUrlOf(bytes, contentType) : part.data };
   });
