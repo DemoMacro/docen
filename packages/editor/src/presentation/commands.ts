@@ -85,7 +85,7 @@ export function childRunsOf(child: SlideChild): TextRunOptions[] {
   return [];
 }
 
-/** The child's cNvPr surface (name/hidden) — a table carries none. */
+/** The child's cNvPr surface (name/hidden), including graphic frames. */
 export function nonVisualOf(child: SlideChild): NonVisualDrawingPropertiesOptions | null {
   if ("shape" in child) return child.shape;
   if ("picture" in child) return child.picture;

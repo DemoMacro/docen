@@ -1,13 +1,9 @@
 // The PPTX scene projection: PresentationOptions → flat slide-absolute drawing
-// members the core painter paints. Batch 1 covers the vector surface —
-// shapes, pictures, lines/connectors, groups, shape text and chart frames —
-// through the same format-neutral extraction helpers the docx projection
-// shares (@docen/core/geometry). Batch 2 adds graphic-frame tables (a:tbl →
-// the frame-table painter's normalized payload). Batch 3 adds SmartArt
-// (dgm:relIds → the painter's normalized fallback). Batch 4 adds media
-// frames (posters plus stable player fallback). Table styles resolve through
-// table-style.ts (tblPr flags, the themed default family, tblStyleLst
-// entries); native media playback stays with its follow-up batch.
+// members the core painter paints. Shapes, pictures, lines/connectors,
+// groups, text, charts, graphic-frame tables, SmartArt and media frames share
+// the format-neutral extraction helpers in @docen/core/geometry. Table
+// styles resolve through table-style.ts (tblPr flags, the themed default
+// family, tblStyleLst entries); media members carry playable browser URLs.
 
 import { measureEmu, solidFillOf } from "@docen/core/geometry";
 import { transformColor, type ResolvedColor } from "@docen/core/paint";
