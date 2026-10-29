@@ -24,6 +24,30 @@ const num = (v: unknown): number | undefined => {
 };
 const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
 
+/** A cached chart datum: scalar text, an explicit indexed point, or a blank
+ *  slot that must keep its category position. */
+function chartNumber(value: unknown): number | undefined {
+  return num(isRecord(value) ? value.value : value);
+}
+
+/** A category or series name: the 0.15 model may carry the cached text as an
+ *  indexed point rather than a bare string. */
+function chartText(value: unknown): string | undefined {
+  return str(value) ?? (isRecord(value) ? str(value.text) : undefined);
+}
+
+/** Chart data slots in source order; a null/invalid datum stays `undefined`
+ *  so later points do not shift onto an earlier category. */
+function chartValuesOf(raw: unknown): (number | undefined)[] {
+  if (!Array.isArray(raw)) return [];
+  const values: Array<number | undefined> = Array.from({ length: raw.length }, () => undefined);
+  raw.forEach((value, index) => {
+    const target = isRecord(value) ? (num(value.index) ?? index) : index;
+    if (target >= 0 && target < values.length) values[target] = chartNumber(value);
+  });
+  return values;
+}
+
 /** Office theme accent palette (Word 2013+ default chart colors), order the
  *  series cycle through. */
 const ACCENTS = ["4472C4", "ED7D31", "A5A5A5", "FFC000", "5B9BD5", "70AD47"];
@@ -150,7 +174,7 @@ function isVariedBarChart(model: ChartModel): boolean {
  *  ChartSpaceOptions record. */
 interface ChartModel {
   type: string;
-  categories: string[];
+  categories: (string | undefined)[];
   series: Rec[];
   /** "clustered" | "stacked" | "percentStacked" (bar/line/area groups). */
   grouping: string;
@@ -181,9 +205,25 @@ function readModel(chart: Rec): ChartModel | undefined {
   const type = str(chart.type);
   if (!type) return undefined;
   const series: Rec[] = Array.isArray(chart.series) ? chart.series.filter(isRecord) : [];
-  const categories = Array.isArray(chart.categories)
-    ? chart.categories.filter((c): c is string => typeof c === "string")
+  const declaredCategories = Array.isArray(chart.categories)
+    ? chart.categories
+    : Array.isArray(chart.categoryLabels)
+      ? chart.categoryLabels
+      : [];
+  let categories = declaredCategories.map(chartText);
+  const levels = Array.isArray(chart.multiLevelCategories)
+    ? (chart.multiLevelCategories as readonly unknown[][])
     : [];
+  if (categories.every((category) => category === undefined) && levels.length > 0) {
+    const columns = levels[0] ?? [];
+    categories = Array.from({ length: columns.length }, (_, column): string | undefined => {
+      for (const row of levels) {
+        const text = chartText(row[column]);
+        if (text !== undefined) return text;
+      }
+      return undefined;
+    });
+  }
   const axes = Array.isArray(chart.axes) ? chart.axes.filter(isRecord) : [];
   const secondaryGroups = Array.isArray(chart.secondaryGroups)
     ? chart.secondaryGroups.filter(isRecord)
@@ -229,15 +269,21 @@ function readModel(chart: Rec): ChartModel | undefined {
   };
 }
 
-/** Series values as numbers (c:val / c:yVal). Scatter/bubble series read the
- *  same slot through `values` here — the projection hands yValues over. */
-function valuesOf(series: Rec): number[] {
-  const raw = Array.isArray(series.values)
-    ? series.values
-    : Array.isArray(series.yValues)
-      ? series.yValues
-      : [];
-  return raw.filter((v): v is number => typeof v === "number");
+/** Series values by category slot (c:val / c:yVal). Scatter/bubble series read
+ *  the same slot through `values` here — the projection hands yValues over. */
+function valuesOf(series: Rec): (number | undefined)[] {
+  return chartValuesOf(
+    Array.isArray(series.values)
+      ? series.values
+      : Array.isArray(series.yValues)
+        ? series.yValues
+        : [],
+  );
+}
+
+/** The numeric data used for axis bounds; blank slots carry no value. */
+function numericValues(values: readonly (number | undefined)[]): number[] {
+  return values.filter((value): value is number => value != null);
 }
 
 /** Nice axis bounds: a 1/2/5×10^k step covering [min, max], zero-based unless
@@ -305,12 +351,12 @@ const LEGEND_GAP = 24;
  *  clamped so long series names cannot consume the plot. */
 function legendWidthOf(model: ChartModel): number {
   const names = isVariedBarChart(model)
-    ? model.categories
+    ? model.categories.filter((name): name is string => name != null)
     : [
-        ...model.series.map((series, si) => str(series.name) ?? `系列${si + 1}`),
+        ...model.series.map((series, si) => chartText(series.name) ?? `系列${si + 1}`),
         ...model.secondaryGroups.flatMap((group) =>
           (Array.isArray(group.series) ? group.series.filter(isRecord) : []).map(
-            (series, si) => str(series.name) ?? `系列${si + 1}`,
+            (series, si) => chartText(series.name) ?? `系列${si + 1}`,
           ),
         ),
       ];
@@ -349,11 +395,10 @@ function segment(
   );
 }
 
-/** Scatter x/y pairs (c:xVal / c:yVal) as equal-length number arrays. */
-function scatterPairs(series: Rec): { x: number[]; y: number[] } {
-  const x = Array.isArray(series.xValues)
-    ? series.xValues.filter((v): v is number => typeof v === "number")
-    : [];
+/** Scatter x/y pairs (c:xVal / c:yVal) as aligned category slots; blanks do
+ *  not renumber later points. */
+function scatterPairs(series: Rec): { x: (number | undefined)[]; y: (number | undefined)[] } {
+  const x = chartValuesOf(series.xValues);
   const y = valuesOf(series);
   const n = Math.min(x.length, y.length);
   return { x: x.slice(0, n), y: y.slice(0, n) };
@@ -409,11 +454,12 @@ function axisById(model: ChartModel, id: unknown): Rec | undefined {
 
 /** Explicit axis bounds honor the declared major unit; auto axes use the
  *  painter's 1/2/5 covering scale. */
-function valueBoundsOf(values: number[], axis: Rec | undefined) {
+function valueBoundsOf(values: (number | undefined)[], axis: Rec | undefined) {
+  const numbers = numericValues(values);
   const unit = num(axis?.majorUnit);
-  if (!unit || unit <= 0) return niceBounds(Math.min(0, ...values), Math.max(0, ...values));
-  const min = Math.min(0, ...values);
-  const max = Math.max(0, ...values);
+  if (!unit || unit <= 0) return niceBounds(Math.min(0, ...numbers), Math.max(0, ...numbers));
+  const min = Math.min(0, ...numbers);
+  const max = Math.max(0, ...numbers);
   const lower = Math.floor(min / unit) * unit;
   const upper = Math.ceil(max / unit) * unit;
   // Office leaves one major division of headroom on a signed axis; this also
@@ -446,7 +492,7 @@ function paintValueChart(tree: IGroup, model: ChartModel, plot: PlotBox, reg?: E
   const horizontal = model.type === "bar";
   const all = model.series.map(valuesOf);
   const flat = all.flat();
-  if (flat.length === 0) return;
+  if (!flat.some((value) => value != null)) return;
   const stacked = model.grouping === "stacked" || model.grouping === "percentStacked";
   // Per-category stacks resolve against the stack total (percentStacked
   // normalizes it to 100); plain clusters use the raw data range.
@@ -564,7 +610,7 @@ function paintValueChart(tree: IGroup, model: ChartModel, plot: PlotBox, reg?: E
     const lineColor = isLine ? strokeColorOf(series, si) : fill;
     if (isLine || isArea) {
       const pts = vals
-        .map((v, c) => ({ x: plot.x + (c + 0.5) * band, y: toPx(v), c }))
+        .flatMap((v, c) => (v == null ? [] : [{ x: plot.x + (c + 0.5) * band, y: toPx(v), c, v }]))
         .filter((p) => p.x >= plot.x && p.x <= plot.x + plot.width);
       if (pts.length === 0) return;
       const d = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
@@ -633,6 +679,7 @@ function paintValueChart(tree: IGroup, model: ChartModel, plot: PlotBox, reg?: E
     }
     // Column / bar rectangles.
     vals.forEach((v, c) => {
+      if (v == null) return;
       const base = toPx(Math.max(bounds.min, 0));
       const p = toPx(v);
       if (stacked) {
@@ -727,7 +774,7 @@ function paintPie(tree: IGroup, model: ChartModel, plot: PlotBox, reg?: ElementR
     return typeof paint === "string" ? `#${paint}` : paint;
   };
   const vals = valuesOf(series);
-  const total = vals.reduce((a, b) => a + Math.max(0, b), 0);
+  const total = numericValues(vals).reduce((a, b) => a + Math.max(0, b), 0);
   if (total <= 0) return;
   const cx = plot.x + plot.width / 2;
   const cy = plot.y + plot.height / 2;
@@ -735,6 +782,7 @@ function paintPie(tree: IGroup, model: ChartModel, plot: PlotBox, reg?: ElementR
   const hole = model.type === "doughnut" ? (r * model.holeSize) / 100 : 0;
   let angle = -90 + model.firstSliceAngle;
   vals.forEach((v, i) => {
+    if (v == null) return;
     const sweep = (Math.max(0, v) / total) * 360;
     if (sweep <= 0) return;
     const a0 = (angle * Math.PI) / 180;
@@ -788,9 +836,9 @@ function paintPie(tree: IGroup, model: ChartModel, plot: PlotBox, reg?: ElementR
 function paintScatter(tree: IGroup, model: ChartModel, plot: PlotBox, reg?: ElementReg): void {
   const pairs = model.series.map(scatterPairs);
   const flat = pairs.flat();
-  if (flat.length === 0) return;
-  const xs = flat.flatMap((p) => p.x);
-  const ys = flat.flatMap((p) => p.y);
+  if (!flat.some((pair) => pair.x.some((x) => x != null) && pair.y.some((y) => y != null))) return;
+  const xs = flat.flatMap((pair) => numericValues(pair.x));
+  const ys = flat.flatMap((pair) => numericValues(pair.y));
   const bx = niceBounds(Math.min(...xs), Math.max(...xs));
   const by = niceBounds(Math.min(0, ...ys), Math.max(0, ...ys));
   const px = (v: number) => plot.x + ((v - bx.min) / (bx.max - bx.min)) * plot.width;
@@ -801,16 +849,18 @@ function paintScatter(tree: IGroup, model: ChartModel, plot: PlotBox, reg?: Elem
     const pair = pairs[si];
     if (!pair) return;
     pair.x.forEach((xv, pi) => {
+      const yv = pair.y[pi];
+      if (xv == null || yv == null) return;
       tree.add(
         new Ellipse({
           x: px(xv) - 3.5,
-          y: py(pair.y[pi]) - 3.5,
+          y: py(yv) - 3.5,
           width: 7,
           height: 7,
           fill: `#${fill}`,
         }),
       );
-      reg?.({ series: si, point: pi }, px(xv) - 4.5, py(pair.y[pi]) - 4.5, 9, 9);
+      reg?.({ series: si, point: pi }, px(xv) - 4.5, py(yv) - 4.5, 9, 9);
     });
   });
 }
@@ -850,12 +900,13 @@ function xyGrid(
 function paintRadar(tree: IGroup, model: ChartModel, plot: PlotBox, reg?: ElementReg): void {
   const all = model.series.map(valuesOf);
   const flat = all.flat();
-  if (flat.length === 0) return;
+  if (!flat.some((value) => value != null)) return;
   const catCount = Math.max(model.categories.length, ...all.map((v) => v.length), 3);
   const cx = plot.x + plot.width / 2;
   const cy = plot.y + plot.height / 2;
   const radius = Math.min(plot.width, plot.height) / 2;
-  const bounds = niceBounds(Math.min(0, ...flat), Math.max(0, ...flat));
+  const numbers = numericValues(flat);
+  const bounds = niceBounds(Math.min(0, ...numbers), Math.max(0, ...numbers));
   const span = bounds.max - bounds.min;
   const pointAt = (c: number, v: number): [number, number] => {
     const angle = (Math.PI * 2 * c) / catCount - Math.PI / 2;
@@ -928,16 +979,15 @@ function paintBubble(tree: IGroup, model: ChartModel, plot: PlotBox, reg?: Eleme
     // Re-typed from a category chart the series carries values only — index
     // the categories instead of dropping the series.
     if (p.x.length === 0) p.x = p.y.map((_, c) => c);
-    const raw = Array.isArray(s.bubbleSize)
-      ? s.bubbleSize.filter((v): v is number => typeof v === "number")
-      : [];
+    const raw = chartValuesOf(s.bubbleSize);
     const sizes = p.y.map((_, c) => raw[c] ?? 1);
     return { p, sizes, fill: seriesFillOf(s, si) };
   });
   const pts = series.flatMap((s) => s.p.x.map((x, c) => ({ x, y: s.p.y[c], s: s.sizes[c] })));
-  if (pts.length === 0) return;
-  const xs = pts.map((d) => d.x);
-  const ys = pts.map((d) => d.y);
+  const valid = pts.filter((point) => point.x != null && point.y != null);
+  if (valid.length === 0) return;
+  const xs = numericValues(valid.map((point) => point.x));
+  const ys = numericValues(valid.map((point) => point.y));
   const bx = niceBounds(Math.min(...xs), Math.max(...xs));
   const by = niceBounds(Math.min(0, ...ys), Math.max(0, ...ys));
   const px = (v: number) => plot.x + ((v - bx.min) / (bx.max - bx.min)) * plot.width;
@@ -951,9 +1001,11 @@ function paintBubble(tree: IGroup, model: ChartModel, plot: PlotBox, reg?: Eleme
       : maxR * Math.sqrt(s / (maxSize || 1));
   series.forEach((s, si) => {
     s.p.x.forEach((xv, c) => {
+      const yv = s.p.y[c];
+      if (xv == null || yv == null) return;
       const r = radiusOf(s.sizes[c]);
       const x = px(xv);
-      const y = py(s.p.y[c]);
+      const y = py(yv);
       tree.add(
         new Ellipse({
           x: x - r,
@@ -979,9 +1031,10 @@ function paintBubble(tree: IGroup, model: ChartModel, plot: PlotBox, reg?: Eleme
 function paintStock(tree: IGroup, model: ChartModel, plot: PlotBox): void {
   const all = model.series.map(valuesOf);
   const flat = all.flat();
-  if (flat.length === 0) return;
+  if (!flat.some((value) => value != null)) return;
   const catCount = Math.max(model.categories.length, ...all.map((v) => v.length), 1);
-  const bounds = niceBounds(Math.min(0, ...flat), Math.max(0, ...flat));
+  const numbers = numericValues(flat);
+  const bounds = niceBounds(Math.min(0, ...numbers), Math.max(0, ...numbers));
   const py = (v: number) =>
     plot.y + plot.height - ((v - bounds.min) / (bounds.max - bounds.min)) * plot.height;
   for (const t of ticksOf(bounds)) {
@@ -1001,9 +1054,12 @@ function paintStock(tree: IGroup, model: ChartModel, plot: PlotBox): void {
     if (hi == null || lo == null) continue;
     segment(tree, cx, py(hi), cx, py(lo), "#595959", 1.5);
     const tick = band * 0.18;
-    if (open && open[c] != null)
-      segment(tree, cx - tick, py(open[c]), cx, py(open[c]), "#595959", 1.5);
-    if (close[c] != null) segment(tree, cx, py(close[c]), cx + tick, py(close[c]), "#595959", 1.5);
+    const openValue = open?.[c];
+    if (openValue != null)
+      segment(tree, cx - tick, py(openValue), cx, py(openValue), "#595959", 1.5);
+    const closeValue = close[c];
+    if (closeValue != null)
+      segment(tree, cx, py(closeValue), cx + tick, py(closeValue), "#595959", 1.5);
     label(
       tree,
       model.categories[c] ?? String(c + 1),
@@ -1027,6 +1083,7 @@ function paintSecondaryGroups(tree: IGroup, model: ChartModel, plot: PlotBox): v
     if (kind !== "scatter" && kind !== "line") return;
     const series = Array.isArray(group.series) ? group.series.filter(isRecord) : [];
     const allValues = series.flatMap(valuesOf);
+    if (!allValues.some((value) => value != null)) return;
     const axis = axisById(model, Array.isArray(group.axisIds) ? group.axisIds[1] : undefined);
     const bounds = valueBoundsOf(allValues, axis);
     if (allValues.length > 0 && axis?.delete !== true) {
@@ -1047,16 +1104,22 @@ function paintSecondaryGroups(tree: IGroup, model: ChartModel, plot: PlotBox): v
     }
     series.forEach((seriesItem) => {
       const values = valuesOf(seriesItem);
-      if (values.length === 0) return;
+      if (!values.some((value) => value != null)) return;
       const py = (value: number) =>
         plot.y + plot.height - ((value - bounds.min) / (bounds.max - bounds.min)) * plot.height;
       const color = strokeColorOf(seriesItem, 0);
-      const points = values.map((value, category) => ({
-        x: plot.x + (category + 0.5) * band,
-        y: py(value),
-        category,
-        value,
-      }));
+      const points = values.flatMap((value, category) =>
+        value == null
+          ? []
+          : [
+              {
+                x: plot.x + (category + 0.5) * band,
+                y: py(value),
+                category,
+                value,
+              },
+            ],
+      );
       const path =
         group.smooth === true && points.length > 2
           ? points
@@ -1162,18 +1225,24 @@ function paintLegend(tree: IGroup, model: ChartModel, box: PlotBox, reg?: Elemen
   };
   const entries: LegendEntry[] =
     pie || isVariedBarChart(model)
-      ? model.categories.map((name, i) => ({
-          name,
-          fill: model.series[0]
-            ? chartFillOf(model.series[0]!, 0, i, 10, 10)
-            : ACCENTS[i % ACCENTS.length]!,
-          line: false,
-          series: 0,
-          point: i,
-        }))
+      ? model.categories.flatMap((name, i) =>
+          name == null
+            ? []
+            : [
+                {
+                  name,
+                  fill: model.series[0]
+                    ? chartFillOf(model.series[0]!, 0, i, 10, 10)
+                    : ACCENTS[i % ACCENTS.length]!,
+                  line: false,
+                  series: 0,
+                  point: i,
+                },
+              ],
+        )
       : [
           ...model.series.map((series, si) => ({
-            name: str(series.name) ?? `系列${si + 1}`,
+            name: chartText(series.name) ?? `系列${si + 1}`,
             fill: chartFillOf(series, si, si, 10, 10),
             line: model.type === "line",
             series: si,
@@ -1181,7 +1250,7 @@ function paintLegend(tree: IGroup, model: ChartModel, box: PlotBox, reg?: Elemen
           ...model.secondaryGroups.flatMap((group) =>
             (Array.isArray(group.series) ? group.series.filter(isRecord) : []).map(
               (series, si) => ({
-                name: str(series.name) ?? `系列${si + 1}`,
+                name: chartText(series.name) ?? `系列${si + 1}`,
                 fill: strokeColorOf(series, si),
                 line: true,
                 series: model.series.length + si,
