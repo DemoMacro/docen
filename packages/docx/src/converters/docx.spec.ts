@@ -74,6 +74,15 @@ describe("compileDocument numbering persistence", () => {
   });
 });
 
+describe("compileDocument inline safety", () => {
+  it("rejects unknown inline nodes instead of dropping them", () => {
+    const json = docWithAttrs({});
+    (json.content![0] as JSONContent).content = [{ type: "unsupportedInline" }];
+    expect(() => compileDocument(json, docxExtensions)).toThrow(TypeError);
+    expect(() => compileDocument(json, docxExtensions)).toThrow("Unsupported inline node");
+  });
+});
+
 describe("document binary persistence", () => {
   const good = { path: "word/theme/theme1.xml", data: new Uint8Array([1, 2, 3]) };
   const text = { path: "customXml/item1.xml", data: "<x/>" };

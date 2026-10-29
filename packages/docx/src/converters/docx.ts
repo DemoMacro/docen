@@ -936,6 +936,8 @@ export class DocxManager {
           } as unknown as ParagraphChild);
           break;
         }
+        default:
+          throw new TypeError(`Unsupported inline node: ${node.type}`);
       }
     }
 
