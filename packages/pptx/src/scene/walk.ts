@@ -6,12 +6,12 @@ import { resolveChartColors } from "@docen/core/paint";
 import type { LayoutDrawingMember } from "@docen/layout";
 import { EMU_PER_PX } from "@docen/layout";
 import type { ColorSchemeOptions } from "@office-open/core/theme";
-import type { GroupOptions, SlideChild } from "@office-open/pptx";
+import type { GroupOptions, PictureOptions, SlideChild } from "@office-open/pptx";
 
 import { IDENTITY, emuOf, geometryOf, type Xform } from "./geometry";
 import { endpointMembers } from "./lines";
 import { mediaMember } from "./media";
-import { pictureMember, pictureSrcOf } from "./pictures";
+import { pictureMember } from "./pictures";
 import { shapeMembers } from "./shapes";
 import { smartArtMember } from "./smartart";
 import { SCHEME_SLOTS, type ThemeColors } from "./table-style";
@@ -171,17 +171,25 @@ export function childMembers(
       });
     } else if ("ole" in child) {
       const o = child.ole;
-      const src = o.iconImage ? pictureSrcOf(o.iconImage.data, o.iconImage.type) : undefined;
-      if (src)
-        out.push({
-          kind: "picture",
-          x: t.sx * emuOf(o.x) + t.dx,
-          y: t.sy * emuOf(o.y) + t.dy,
-          width: t.sx * emuOf(o.width),
-          height: t.sy * emuOf(o.height),
-          src,
-          ...(cp ? { childPath: cp } : {}),
-        });
+      const icon = o.iconImage;
+      if (!icon) return;
+      const member = pictureMember(
+        {
+          x: o.x,
+          y: o.y,
+          width: o.width,
+          height: o.height,
+          data: icon.data,
+          type: icon.type as PictureOptions["type"],
+          ...(icon.fill ? { fill: icon.fill } : {}),
+          ...(icon.outline ? { outline: icon.outline } : {}),
+          ...(icon.geometry !== undefined ? { geometry: icon.geometry } : {}),
+        },
+        t,
+        cp,
+        context,
+      );
+      if (member?.kind === "picture" && (member.src || member.line)) out.push(member);
     }
     for (let index = start; index < out.length; index++) {
       out[index]!.sourceChildIndex = i;

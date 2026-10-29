@@ -7,11 +7,7 @@ import type { LayoutDrawingMember } from "@docen/layout";
 import type { AudioFrameOptions, VideoFrameOptions } from "@office-open/pptx";
 
 import { emuOf, type Xform } from "./geometry";
-
-const POSTER_MIME: Record<string, string> = {
-  png: "image/png",
-  jpg: "image/jpeg",
-};
+import { pictureSrcOf } from "./pictures";
 
 /** The container formats the browser can play, by media family. */
 const PLAYABLE_MIME: Partial<Record<string, string>> = {
@@ -33,11 +29,9 @@ function base64Of(bytes: Uint8Array): string {
 function posterUrlOf(data: unknown, type: string | undefined): string | undefined {
   if (typeof data === "string") {
     if (data.startsWith("data:")) return data;
-    const mime = POSTER_MIME[type ?? ""];
-    return mime ? `data:${mime};base64,${data}` : undefined;
+    return pictureSrcOf(data, type);
   }
-  const mime = POSTER_MIME[type ?? ""];
-  return mime && data instanceof Uint8Array ? `data:${mime};base64,${base64Of(data)}` : undefined;
+  return pictureSrcOf(data, type);
 }
 
 export function mediaMember(

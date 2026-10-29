@@ -1912,6 +1912,26 @@ describe("media frame projection", () => {
     });
   });
 
+  it("projects BMP posters through the shared picture decoder mapping", () => {
+    const video: SlideChild = {
+      video: {
+        x: 0,
+        y: 0,
+        width: 1905000,
+        height: 952500,
+        type: "mp4",
+        poster: new Uint8Array([1, 2, 3]),
+        posterType: "bmp",
+      },
+    } as unknown as SlideChild;
+    const { slides } = project({ slides: [{ children: [video] }] });
+
+    expect(slides[0]!.members[0]).toMatchObject({
+      kind: "mediaFrame",
+      src: "data:image/bmp;base64,AQID",
+    });
+  });
+
   it("carries the playable data URL for the browser-decodable formats", () => {
     const video: SlideChild = {
       video: {
@@ -2108,6 +2128,36 @@ describe("table style projection", () => {
     expect(slides[0]!.members).toEqual([
       { kind: "picture", x: 0, y: 0, width: 96, height: 96, src: pngSrc, sourceChildIndex: 0 },
     ]);
+  });
+
+  it("projects an OLE icon's outline", () => {
+    const { slides } = project({
+      slides: [
+        {
+          children: [
+            {
+              ole: {
+                x: 0,
+                y: 0,
+                width: 914400,
+                height: 914400,
+                embed: { data: png },
+                iconImage: {
+                  data: pngSrc,
+                  type: "png",
+                  outline: { color: "FF0000", width: 19050 },
+                },
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(slides[0]!.members[0]).toMatchObject({
+      kind: "picture",
+      line: { color: "FF0000", px: 2 },
+    });
   });
 
   it("drops a hidden OLE object", () => {

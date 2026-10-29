@@ -15,6 +15,7 @@ const PIC_MIME: Record<string, string> = {
   jpg: "image/jpeg",
   gif: "image/gif",
   bmp: "image/bmp",
+  ico: "image/x-icon",
 };
 
 /** Bytes → base64 (btoa is universal: browsers and Node ≥ 16). */
