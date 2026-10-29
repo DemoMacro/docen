@@ -2454,6 +2454,67 @@ describe("drawing-group / drawing-ungroup", () => {
     expect("wpsShape" in group.attrs).toBe(false);
   });
 
+  it("maps a nested group member to MediaTransformation's canonical shape", () => {
+    const editor = new Editor({
+      element: null,
+      extensions: EXTENSIONS,
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [
+              {
+                type: "image",
+                attrs: {
+                  src: "data:,",
+                  width: 120,
+                  height: 90,
+                  floating: {
+                    horizontalPosition: { relative: "page", offset: 200 * EMU },
+                    verticalPosition: { relative: "page", offset: 100 * EMU },
+                  },
+                },
+              },
+              {
+                type: "wpgGroup",
+                content: [{ type: "text", text: "inner" }],
+                attrs: {
+                  wpgGroup: {
+                    transformation: { width: 60 * EMU, height: 60 * EMU },
+                    floating: {
+                      horizontalPosition: { relative: "page", offset: 400 * EMU },
+                      verticalPosition: { relative: "page", offset: 160 * EMU },
+                    },
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const positions: number[] = [];
+    editor.state.doc.descendants((node, pos) => {
+      if (node.type.name === "image" || node.type.name === "wpgGroup") positions.push(pos);
+    });
+    const payload = JSON.stringify({
+      members: [
+        { pos: positions[0], box: { x: 200, y: 100, width: 120, height: 90 } },
+        { pos: positions[1], box: { x: 400, y: 160, width: 60, height: 60 } },
+      ],
+    });
+    expect(editor.commands["drawing-group"](payload)).toBe(true);
+
+    const outer = firstNodeOf(editor, "wpgGroup");
+    const inner = outer.child(1).attrs.wpgGroup as Record<string, any>;
+    expect(inner.transformation).toEqual({
+      offset: { x: 200 * EMU, y: 60 * EMU },
+      width: 60 * EMU,
+      height: 60 * EMU,
+    });
+  });
+
   it("ungroup returns every member to its pre-group position (round-trip)", () => {
     const editor = buildTwoFloats();
     const before = floatMembers(editor);

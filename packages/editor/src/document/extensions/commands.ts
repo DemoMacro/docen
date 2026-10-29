@@ -1541,19 +1541,15 @@ function memberInGroupAttrs(
     };
     return { ...attrs, wpsShape: shape };
   }
-  // A nested group: GroupOptions form (transformation {width,height} +
-  // floating) → GroupMediaData child form (offset.emus + emus), its own
-  // chOff/chExt preserved — the member's inner space is untouched.
-  const px = (emu: number): number => Math.round(emu / EMU_PER_PX);
   const { transformation: _t, floating: _f, ...rest } = attrs.wpgGroup as Record<string, unknown>;
   return {
     ...attrs,
     wpgGroup: {
       ...rest,
       transformation: {
-        offset: { emus: { x: child.x, y: child.y }, pixels: { x: px(child.x), y: px(child.y) } },
-        emus: { x: child.cx, y: child.cy },
-        pixels: { x: px(child.cx), y: px(child.cy) },
+        offset: { x: child.x, y: child.y },
+        width: child.cx,
+        height: child.cy,
       },
     },
   };
@@ -1580,10 +1576,12 @@ function childBoxOf(member: PMNode): { x: number; y: number; cx: number; cy: num
   }
   if (member.type.name === "wpgGroup") {
     const t = (attrs.wpgGroup as Record<string, unknown>)?.transformation as
-      | { offset?: { emus?: { x?: number; y?: number } }; emus?: { x?: number; y?: number } }
+      | { offset?: { x?: number; y?: number }; width?: unknown; height?: unknown }
       | undefined;
-    if (typeof t?.emus?.x !== "number" || typeof t.emus.y !== "number") return null;
-    return { x: t.offset?.emus?.x ?? 0, y: t.offset?.emus?.y ?? 0, cx: t.emus.x, cy: t.emus.y };
+    const cx = parseMeasureEmu(t?.width);
+    const cy = parseMeasureEmu(t?.height);
+    if (!t || cx == null || cy == null) return null;
+    return { x: t.offset?.x ?? 0, y: t.offset?.y ?? 0, cx, cy };
   }
   return null;
 }
