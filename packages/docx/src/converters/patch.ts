@@ -1,3 +1,4 @@
+import type { PatchRouteStep } from "@office-open/core";
 import { parseDocument, patchDocument } from "@office-open/docx";
 import type {
   DocumentPatchCommand,
@@ -86,61 +87,103 @@ function buildPlaceholderCommands(
   delimiters: { start: string; end: string },
 ): DocumentPatchCommand[] {
   const commands: DocumentPatchCommand[] = [];
-  const indices = [...sections.keys()].reverse();
-
-  for (const index of indices) {
+  const targets = [...sections.keys()].reverse().flatMap((index) => {
     const child = sections[index];
-    if (!child) continue;
+    if (!child) return [];
 
     const section = sections[index]!;
     const children =
       "children" in section && Array.isArray(section.children) ? section.children : [];
-    for (const childIndex of [...children.keys()].reverse()) {
+    return [...children.keys()].reverse().flatMap((childIndex): PlaceholderTarget[] => {
       const target = children[childIndex];
-      if (!target) continue;
+      if (!target) return [];
 
-      for (const [key, value] of replacements) {
-        const placeholder = `${delimiters.start}${key}${delimiters.end}`;
-        if (!containsText(target, placeholder)) continue;
-        const route = [{ index }, { property: "children" }, { index: childIndex }] as const;
-        const simpleText = value.length === 1 ? simpleTextOf(value[0]!) : undefined;
-        if (simpleText !== undefined) {
-          const command: Extract<DocumentPatchCommand, { type: "replace"; value: string }> = {
-            type: "replace",
-            at: { field: "sections", route, text: { placeholder: key, all: true } },
-            value: simpleText,
-          };
-          commands.push(command);
-          continue;
-        }
-        const isOnlyPlaceholder = textOf(target).trim() === placeholder;
-        if (isOnlyPlaceholder) {
-          commands.push({ type: "remove", at: { field: "sections", route } });
-          commands.push({
-            type: "insert",
-            at: { field: "sections", route: route.slice(0, 2) },
-            position: childIndex,
-            value,
-          });
-          continue;
-        }
-        commands.push({
+      const baseRoute: PatchRouteStep[] = [
+        { index },
+        { property: "children" },
+        { index: childIndex },
+      ];
+      return placeholderTargets(target, baseRoute, delimiters, replacements);
+    });
+  });
+
+  for (const target of targets) {
+    for (const [key, value] of replacements) {
+      if (target.placeholder !== key) continue;
+
+      const simpleText = value.length === 1 ? simpleTextOf(value[0]!) : undefined;
+      if (simpleText !== undefined) {
+        const command: Extract<DocumentPatchCommand, { type: "replace"; value: string }> = {
           type: "replace",
-          at: { field: "sections", route, text: { placeholder: key, all: true } },
-          value: "",
-        });
-        commands.push({
-          type: "insert",
-          at: { field: "sections", route: route.slice(0, 2) },
-          position: childIndex + 1,
-          value,
-        });
+          at: { field: "sections", route: target.route, text: { placeholder: key, all: true } },
+          value: simpleText,
+        };
+        commands.push(command);
         continue;
       }
+      if (target.isOnlyPlaceholder) {
+        commands.push({ type: "remove", at: { field: "sections", route: target.route } });
+      } else {
+        commands.push({
+          type: "replace",
+          at: { field: "sections", route: target.route, text: { placeholder: key, all: true } },
+          value: "",
+        });
+      }
+      const parentRoute = target.route.slice(0, -1);
+      const positionStep = target.route.at(-1);
+      if (!positionStep || !("index" in positionStep)) continue;
+      commands.push({
+        type: "insert",
+        at: { field: "sections", route: parentRoute },
+        position: target.isOnlyPlaceholder ? positionStep.index : positionStep.index + 1,
+        value,
+      });
     }
   }
 
   return commands;
+}
+
+interface PlaceholderTarget {
+  route: PatchRouteStep[];
+  placeholder: string;
+  isOnlyPlaceholder: boolean;
+}
+
+function placeholderTargets(
+  value: unknown,
+  route: PatchRouteStep[],
+  delimiters: { start: string; end: string },
+  replacements: ReadonlyMap<string, SectionChild[]>,
+): PlaceholderTarget[] {
+  if (typeof value !== "object" || value === null) return [];
+
+  const paragraph = "paragraph" in value ? value.paragraph : undefined;
+  if (paragraph !== undefined) {
+    return [...replacements.keys()].flatMap((key): PlaceholderTarget[] => {
+      const placeholder = `${delimiters.start}${key}${delimiters.end}`;
+      if (!containsText(paragraph, placeholder)) return [];
+      return [
+        { route, placeholder: key, isOnlyPlaceholder: textOf(paragraph).trim() === placeholder },
+      ];
+    });
+  }
+
+  if (Array.isArray(value)) {
+    return [...value.keys()].reverse().flatMap((index): PlaceholderTarget[] => {
+      const child = value[index];
+      if (!child) return [];
+      return placeholderTargets(child, [...route, { index }], delimiters, replacements);
+    });
+  }
+
+  return Object.entries(value)
+    .reverse()
+    .flatMap(([property, child]): PlaceholderTarget[] => {
+      if (typeof child !== "object" || child === null) return [];
+      return placeholderTargets(child, [...route, { property }], delimiters, replacements);
+    });
 }
 
 function simpleTextOf(value: SectionChild): string | undefined {
