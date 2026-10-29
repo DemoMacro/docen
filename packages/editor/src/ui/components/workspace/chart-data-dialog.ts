@@ -2,6 +2,7 @@ import type { ChartOptions, ChartSeriesData } from "@docen/docx";
 import { FASTElement, css, customElement, html, observable, ref } from "@microsoft/fast-element";
 import type { CategoryPointOptions, ChartValue } from "@office-open/core";
 
+import { chartTitleTextOf } from "../../../document/chart-text";
 import type { ChartDataPatch } from "../../../document/extensions/commands";
 import { observeLang, t } from "../../i18n/localize";
 
@@ -135,10 +136,9 @@ class DocenChartDataDialog extends FASTElement {
     // The grid edits category series; scatter/bubble series (no values field)
     // don't show — their data lives in xValues/yValues/bubbleSize.
     const series = (chart?.series ?? []).filter((s): s is ChartSeriesData => "values" in s);
-    // A round-tripped title can be the rich object form — the flat grid
-    // edits the plain string only.
-    if (this.titleInput)
-      this.titleInput.value = typeof chart?.title === "string" ? chart.title : "";
+    // A rich title keeps its layout/style through the command; the grid edits
+    // only the flattened visible text.
+    if (this.titleInput) this.titleInput.value = chart?.title ? chartTitleTextOf(chart.title) : "";
     this.#categories = categories.map(labelTextOf);
     this.#series = series.map((s) => ({
       name: labelTextOf(s.name ?? ""),

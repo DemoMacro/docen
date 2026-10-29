@@ -6752,8 +6752,9 @@ class DocenDocument extends AddinHost<Editor> {
 
   /** Serialize the current document to a DOCX buffer. */
   async saveDOCX(): Promise<Uint8Array> {
-    const buffer = await generateDOCX(this.getJSON());
-    return buffer as unknown as Uint8Array;
+    return generateDOCX<"uint8array">(this.getJSON(), {
+      packer: { type: "uint8array" },
+    });
   }
 
   /** Serialize the current document to a Markdown string. */

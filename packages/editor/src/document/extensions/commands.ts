@@ -1,4 +1,11 @@
-import type { ChartOptions, ChartType, ImageAttrs, LegendPosition } from "@docen/docx";
+import type {
+  CategoryPointOptions,
+  ChartOptions,
+  ChartType,
+  ChartValue,
+  ImageAttrs,
+  LegendPosition,
+} from "@docen/docx";
 import {
   BULLET_GLYPHS,
   HIGHLIGHT_PALETTE_RGB,
@@ -17,6 +24,7 @@ import { DocAttrStep } from "@tiptap/pm/transform";
 
 import { freshChildEmu, memberEmuOf, unionBox, type Box } from "../../drawing";
 import { CellSelection, cellsInRect } from "../canvas/cell-selection";
+import { chartTitleWithText } from "../chart-text";
 
 /**
  * Document editor commands (Office.js-style "add-in commands") as native
@@ -544,6 +552,25 @@ export interface ChartDataPatch {
   categories: string[];
   /** One entry per series — the legend name and its values. */
   series: { name: string; values: number[] }[];
+}
+
+function categoryWithText(
+  previous: string | CategoryPointOptions | undefined,
+  text: string,
+): string | CategoryPointOptions {
+  if (typeof previous === "string" || previous === undefined) return text;
+  return { ...previous, text };
+}
+
+function labelWithText(
+  previous: string | CategoryPointOptions | undefined,
+  text: string,
+): string | CategoryPointOptions {
+  return categoryWithText(previous, text);
+}
+
+function valueWithNumber(previous: ChartValue, value: number): ChartValue {
+  return previous !== null && typeof previous === "object" ? { ...previous, value } : value;
 }
 
 /**
@@ -4946,10 +4973,14 @@ export const DocumentCommands = Extension.create({
           }
           const chart = { ...target.chart };
           if (parsed.title != null) {
-            if (parsed.title) chart.title = parsed.title;
+            if (parsed.title)
+              chart.title = chartTitleWithText(target.chart.title ?? "", parsed.title);
             else delete chart.title;
           }
-          if (parsed.categories) chart.categories = parsed.categories;
+          if (parsed.categories)
+            chart.categories = parsed.categories.map((text, index) =>
+              categoryWithText(target.chart.categories?.[index], text),
+            );
           if (parsed.series)
             // The grid edits category-series values only; a scatter/bubble
             // series (xValues/yValues/bubbleSize) keeps its shape untouched —
@@ -4960,8 +4991,14 @@ export const DocumentCommands = Extension.create({
               if (prev && !("values" in prev)) return prev;
               return {
                 ...prev,
-                name: s.name ?? prev?.name ?? `Series ${i + 1}`,
-                values: s.values ?? ("values" in prev ? [...prev.values] : []),
+                name: s.name
+                  ? labelWithText(prev?.name, s.name)
+                  : (prev?.name ?? `Series ${i + 1}`),
+                values: s.values
+                  ? s.values.map((value, point) => valueWithNumber(prev?.values[point] ?? 0, value))
+                  : "values" in prev
+                    ? [...prev.values]
+                    : [],
               };
             }) as ChartOptions["series"];
           return stampChart(tr, target, chart);
@@ -5009,7 +5046,7 @@ export const DocumentCommands = Extension.create({
           const prev = target.chart.series?.[series!];
           if (!prev || !("values" in prev)) return false;
           if (point! < 0 || point! >= prev.values.length) return false;
-          const next = prev.values.map((old, pi) => (pi === point ? v : old));
+          const next = prev.values.map((old, pi) => (pi === point ? valueWithNumber(old, v) : old));
           const all = [...(target.chart.series ?? [])];
           all[series!] = { ...prev, values: next };
           return stampChart(tr, target, {

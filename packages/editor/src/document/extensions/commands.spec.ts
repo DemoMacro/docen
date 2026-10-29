@@ -1224,6 +1224,86 @@ describe("arrange — floating drawings", () => {
     expect(editor.commands["chart-value-apply"]("not json")).toBe(false);
   });
 
+  it("chart edits preserve indexed and rich chart values", () => {
+    const editor = new Editor({
+      element: null,
+      extensions: EXTENSIONS,
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [
+              {
+                type: "chart",
+                attrs: {
+                  chart: {
+                    transformation: { width: 200, height: 120 },
+                    title: {
+                      overlay: true,
+                      text: {
+                        paragraphs: [
+                          {
+                            properties: { alignment: "center" },
+                            children: [{ text: "Old", properties: { bold: true } }],
+                          },
+                        ],
+                      },
+                    },
+                    categories: [{ index: 3, text: "Q1" }, "Q2"],
+                    series: [
+                      {
+                        name: { index: 2, text: "Revenue" },
+                        values: [{ index: 5, value: 12 }, 18],
+                      },
+                    ],
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      } as never,
+    });
+    selectFirstNode(editor, "chart");
+    expect(
+      editor.commands["chart-data-apply"](
+        JSON.stringify({
+          title: "New",
+          categories: ["Q1", "Q2"],
+          series: [{ name: "Revenue", values: [13, 19] }],
+        }),
+      ),
+    ).toBe(true);
+
+    const chart = firstNodeOf(editor, "chart").attrs.chart as {
+      title: {
+        overlay?: boolean;
+        text?: {
+          paragraphs?: {
+            properties?: unknown;
+            children?: { properties?: unknown; text?: string }[];
+          }[];
+        };
+      };
+      categories: unknown[];
+      series: {
+        name: unknown;
+        values: unknown[];
+      }[];
+    };
+    expect(chart.title.overlay).toBe(true);
+    expect(chart.title.text?.paragraphs?.[0]?.properties).toEqual({ alignment: "center" });
+    expect(chart.title.text?.paragraphs?.[0]?.children?.[0]).toEqual({
+      text: "New",
+      properties: { bold: true },
+    });
+    expect(chart.categories[0]).toEqual({ index: 3, text: "Q1" });
+    expect(chart.categories[1]).toBe("Q2");
+    expect(chart.series[0]?.name).toEqual({ index: 2, text: "Revenue" });
+    expect(chart.series[0]?.values).toEqual([{ index: 5, value: 13 }, 19]);
+  });
+
   it("rotate steps image rotation and toggles the tri-state flips", () => {
     const editor = build();
     floatDoc(editor);
