@@ -145,9 +145,10 @@ class DocenDocument extends HTMLElement {
 **Events**
 
 All events bubble and compose out of the shadow DOM — listen on the host
-element. `docen:save` / `:save-as` / `:open` / `:print` are cancelable: call
-`preventDefault()` to take over the action (otherwise the built-in behavior runs).
-`docen:save-as` carries `{ format }` (`"docx" | "markdown"`) — which
+element. `docen:save` / `:save-as` / `:open` / `:print` / `:close` are
+cancelable: call `preventDefault()` to take over the action (otherwise the
+built-in behavior runs). `docen:save-as` carries `{ format }`
+(`"docx" | "markdown" | "pdf"`) — which
 Save-As variant the user picked. (`docen:open` is format-agnostic: the host
 auto-detects docx/md from the chosen file's extension, so it carries no
 detail.)
@@ -161,6 +162,7 @@ detail.)
 | `docen:open`                       | Open menu — `preventDefault()` to take over    | —                        |
 | `docen:new`                        | New menu — host-only (no built-in action)      | —                        |
 | `docen:print`                      | Print menu — `preventDefault()` to take over   | —                        |
+| `docen:close`                      | Close menu — `preventDefault()` to keep edits  | —                        |
 | `docen:taskpane-visibility-change` | A task pane opened/closed (method or pane ✕)   | `{ id, visibilityMode }` |
 | `docen:zoom-change`                | Zoom changed (button / slider / `setZoom`)     | `{ zoom }`               |
 | `docen:marks-change`               | Formatting marks toggled                       | `{ showMarks }`          |

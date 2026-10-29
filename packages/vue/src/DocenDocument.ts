@@ -46,10 +46,11 @@ type DocenEl = HTMLElement & {
  * print; `{ format }` for save-as).
  */
 export type DocenSaveEvent = CustomEvent;
-export type DocenSaveAsEvent = CustomEvent<{ format?: "docx" | "markdown" }>;
+export type DocenSaveAsEvent = CustomEvent<{ format?: "docx" | "markdown" | "pdf" }>;
 export type DocenOpenEvent = CustomEvent;
 export type DocenNewEvent = CustomEvent;
 export type DocenPrintEvent = CustomEvent;
+export type DocenCloseEvent = CustomEvent;
 
 /**
  * Vue 3 wrapper around the <docen-document> web component:
@@ -115,13 +116,14 @@ export const DocenDocument = defineComponent({
     "update:modelValue": (_json: JSONContent) => true,
     // Host docen:* events forward the native CustomEvent — read `e.detail` for
     // the payload; call `e.preventDefault()` on the cancelable actions (save,
-    // save-as, open, new, print) to suppress the host's built-in dialog.
+    // save-as, open, new, print, close) to suppress the host's built-in dialog.
     change: (_e: CustomEvent<{ dirty: true }>) => true,
     save: (_e: DocenSaveEvent) => true,
     "save-as": (_e: DocenSaveAsEvent) => true,
     open: (_e: DocenOpenEvent) => true,
     new: (_e: DocenNewEvent) => true,
     print: (_e: DocenPrintEvent) => true,
+    close: (_e: DocenCloseEvent) => true,
     "zoom-change": (_e: CustomEvent<{ zoom: number }>) => true,
     "taskpane-visibility-change": (
       _e: CustomEvent<{ id: TaskPaneId; visibilityMode: VisibilityMode }>,
@@ -274,6 +276,7 @@ export const DocenDocument = defineComponent({
     const onOpen = (e: Event): void => emit("open", e as DocenOpenEvent);
     const onNew = (e: Event): void => emit("new", e as DocenNewEvent);
     const onPrint = (e: Event): void => emit("print", e as DocenPrintEvent);
+    const onClose = (e: Event): void => emit("close", e as DocenCloseEvent);
     const onZoomChange = (e: Event): void =>
       emit("zoom-change", e as CustomEvent<{ zoom: number }>);
     const onTaskpaneVisibilityChange = (e: Event): void =>
@@ -329,6 +332,7 @@ export const DocenDocument = defineComponent({
         "onDocen:ready": onReady,
         "onDocen:save": onSave,
         "onDocen:save-as": onSaveAs,
+        "onDocen:close": onClose,
         "onDocen:zoom-change": onZoomChange,
         "onDocen:taskpane-visibility-change": onTaskpaneVisibilityChange,
         "onDocen:marks-change": onMarksChange,

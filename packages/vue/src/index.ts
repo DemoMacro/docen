@@ -17,6 +17,7 @@ export type {
   DocenOpenEvent,
   DocenNewEvent,
   DocenPrintEvent,
+  DocenCloseEvent,
 } from "./DocenDocument";
 
 // Re-export the web-component bootstrap so a Vue app imports everything from one entry.

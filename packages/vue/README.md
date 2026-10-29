@@ -88,14 +88,15 @@ Re-emitted from the web component's `docen:*` events. Host events forward the
 
 - `update:modelValue` — editor content changed (drives v-model; Tiptap JSON)
 - `@change` — `e.detail: { dirty: true }`; fires on every content-changing transaction (selection-only tx skipped). Lightweight notification only — for the actual content use `v-model` (`update:modelValue` is debounced); don't call `getJSON()` in this handler on large docs (it's O(n)).
-- `@zoom-change` (`{ zoom }`), `@taskpane-visibility-change` (`{ id, visibilityMode }`), `@marks-change` (`{ showMarks }`)
+- `@zoom-change` (`{ zoom }`), `@taskpane-visibility-change` (`{ id, visibilityMode }`), `@marks-change` (`{ showMarks }`), `@close`
 - `@lang-change` (`{ lang }`), `@theme-change` (`{ theme }`)
 
 ### Taking over save / open / print
 
-`@save`, `@save-as`, `@open`, `@new`, `@print` are **cancelable**: call
+`@save`, `@save-as`, `@open`, `@new`, `@print`, `@close` are **cancelable**: call
 `e.preventDefault()` to suppress the host's built-in action (save → native DOCX
-save-as dialog, open → file picker, print → browser print) and take over:
+save-as dialog, open → file picker, print → browser print, close → discard
+protection) and take over:
 
 ```vue
 <script setup lang="ts">
