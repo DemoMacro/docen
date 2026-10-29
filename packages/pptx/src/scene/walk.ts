@@ -100,6 +100,27 @@ export function childMembers(
       );
     } else if ("group" in child) {
       out.push(...groupMembers(child.group, t, [...prefix, i], context));
+    } else if ("alternateContent" in child) {
+      const selected = child.alternateContent.choices[0]?.child ?? child.alternateContent.fallback;
+      if (selected) out.push(...childMembers([selected], t, cp ?? [], context));
+    } else if ("lockedCanvas" in child) {
+      for (const locked of child.lockedCanvas.children ?? []) {
+        out.push(
+          ...shapeMembers(
+            {
+              x: locked.x ?? 0,
+              y: locked.y ?? 0,
+              width: locked.width ?? 0,
+              height: locked.height ?? 0,
+              properties: locked,
+              ...(locked.textBody ? { textBody: { text: locked.textBody } } : {}),
+            },
+            t,
+            cp,
+            context,
+          ),
+        );
+      }
     } else if ("smartart" in child) {
       out.push(smartArtMember(child.smartart, t, cp));
     } else if ("video" in child) {

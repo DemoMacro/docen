@@ -257,6 +257,92 @@ describe("shapes", () => {
     expect(member).toMatchObject({ kind: "smartArt", layout: "list1" });
   });
 
+  it("projects the first alternate branch and locked-canvas children", () => {
+    const { slides } = project({
+      slides: [
+        {
+          children: [
+            {
+              alternateContent: {
+                choices: [
+                  {
+                    requires: "p14",
+                    child: {
+                      shape: {
+                        x: 0,
+                        y: 0,
+                        width: 914400,
+                        height: 914400,
+                        properties: { geometry: "ellipse" },
+                      },
+                    },
+                  },
+                ],
+                fallback: {
+                  shape: { x: 0, y: 0, width: 1, height: 1 },
+                },
+              },
+            },
+            {
+              lockedCanvas: {
+                x: 914400,
+                y: 0,
+                width: 914400,
+                height: 914400,
+                children: [
+                  {
+                    x: 914400,
+                    y: 0,
+                    width: 914400,
+                    height: 914400,
+                    geometry: "roundRect",
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    });
+    expect(slides[0]!.members).toEqual([
+      expect.objectContaining({ kind: "shape", preset: "ellipse" }),
+      expect.objectContaining({ kind: "shape", preset: "roundRect" }),
+    ]);
+  });
+
+  it("derives SmartArt fallback nodes from the complete 0.15 data model", () => {
+    const { slides } = project({
+      slides: [
+        {
+          children: [
+            {
+              smartart: {
+                x: 0,
+                y: 0,
+                width: 1828800,
+                height: 914400,
+                nodes: [],
+                dataModel: {
+                  points: [
+                    { modelId: "1", type: "node", text: "Root" },
+                    { modelId: "2", type: "node", textBody: { text: "Child" } },
+                  ],
+                  connections: [
+                    { modelId: "c1", sourceId: "0", destinationId: "1", type: "parOf" },
+                    { modelId: "c2", sourceId: "1", destinationId: "2", type: "parOf" },
+                  ],
+                },
+              },
+            },
+          ],
+        },
+      ],
+    });
+    const member = slides[0]!.members[0]!;
+    if (member.kind !== "smartArt") throw new Error("expected SmartArt");
+    expect(member.nodes).toEqual([{ text: "Root", children: [{ text: "Child", children: [] }] }]);
+  });
+
   it("honors chart-owned theme overrides and hidden graphic frames", () => {
     const { slides } = project({
       slides: [
