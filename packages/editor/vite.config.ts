@@ -38,6 +38,7 @@ export default defineConfig({
       "@docen/core/geometry": fileURLToPath(
         new URL("../core/src/geometry/index.ts", import.meta.url),
       ),
+      "@docen/core/paint": fileURLToPath(new URL("../core/src/paint/index.ts", import.meta.url)),
       "@docen/core": fileURLToPath(new URL("../core/src/index.ts", import.meta.url)),
       // The layout engine serves from source too: the canvas demo imports it
       // directly, and @docen/docx's dist (not aliased) bare-imports it from
