@@ -281,6 +281,22 @@ export function tableMember(
           right: edge("right"),
           bottom: edge("bottom"),
           left: edge("left"),
+          ...(cell.borders?.diagonalTopLeftToBottomRight
+            ? {
+                diagonalTopLeftToBottomRight: borderEdgeOf(
+                  cell.borders.diagonalTopLeftToBottomRight,
+                  context,
+                ),
+              }
+            : {}),
+          ...(cell.borders?.diagonalBottomLeftToTopRight
+            ? {
+                diagonalBottomLeftToTopRight: borderEdgeOf(
+                  cell.borders.diagonalBottomLeftToTopRight,
+                  context,
+                ),
+              }
+            : {}),
         };
         const borders = Object.fromEntries(Object.entries(edges).filter(([, v]) => v));
         const m = (v: unknown, def: number) => emuToPx(measureEmu(v) ?? def);

@@ -2465,6 +2465,45 @@ describe("table style projection", () => {
     expect(body![0]!.borders).toBeUndefined();
   });
 
+  it("projects cell diagonal borders for the frame painter", () => {
+    const table = tableOf({
+      slides: [
+        {
+          children: [
+            tableChild({
+              ...grid,
+              rows: [
+                {
+                  height: 952500,
+                  cells: [
+                    {
+                      text: "diagonal",
+                      borders: {
+                        diagonalTopLeftToBottomRight: { width: 12700, color: "FF0000" },
+                        diagonalBottomLeftToTopRight: { width: 19050, color: "00AA00" },
+                      },
+                    },
+                    { text: "plain" },
+                  ],
+                },
+              ],
+            }),
+          ],
+        },
+      ],
+    });
+    expect(table.rows[0]!.cells[0]!.borders).toMatchObject({
+      diagonalTopLeftToBottomRight: { px: 4 / 3, color: "FF0000" },
+      diagonalBottomLeftToTopRight: { px: 2, color: "00AA00" },
+    });
+    expect(Object.keys(table.rows[0]!.cells[1]!.borders ?? {})).toEqual([
+      "top",
+      "right",
+      "bottom",
+      "left",
+    ]);
+  });
+
   it("resolves a tblStyleLst entry by GUID and layers the flags", () => {
     const guid = "{11111111-2222-3333-4444-555555555555}";
     const table = tableOf({

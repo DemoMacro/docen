@@ -7,7 +7,7 @@ import {
   type LayoutDrawingFill,
   type LayoutDrawingShadow,
 } from "@docen/layout";
-import { Group, Rect, type IGroup } from "leafer-ui";
+import { Group, Path as LeaferPath, Rect, type IGroup } from "leafer-ui";
 
 import { paintBlock } from "../painter";
 import type { PaintContext } from "./context";
@@ -31,7 +31,17 @@ interface FrameCell {
   spanH: number;
   fill?: string | LayoutDrawingFill;
   opacity?: number;
-  borders?: Partial<Record<"top" | "right" | "bottom" | "left", LayoutBorderEdge>>;
+  borders?: Partial<
+    Record<
+      | "top"
+      | "right"
+      | "bottom"
+      | "left"
+      | "diagonalTopLeftToBottomRight"
+      | "diagonalBottomLeftToTopRight",
+      LayoutBorderEdge
+    >
+  >;
   anchor?: "top" | "center" | "bottom";
   textVertical?: "vertical" | "vertical270";
   marginsPx: { left: number; top: number; right: number; bottom: number };
@@ -136,6 +146,41 @@ export function paintFrameTable(
 
   const spanEnd = (v: number[], i: number, n: number): number => v[Math.min(i + n, v.length - 1)]!;
 
+  const DIAGONAL_DASH: Record<string, number[]> = {
+    dashed: [4, 2],
+    dashSmallGap: [2, 2],
+    dotted: [1, 2],
+    dashDot: [4, 2, 1, 2],
+    dashDotDot: [4, 2, 1, 2, 1, 2],
+  };
+
+  function paintDiagonal(
+    tree: IGroup,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    edge: LayoutBorderEdge,
+    topLeftToBottomRight: boolean,
+  ): void {
+    const px = edge.px ?? 0;
+    if (px <= 0 || edge.style === "none" || edge.style === "nil") return;
+    const start = topLeftToBottomRight ? { x, y } : { x, y: y + height };
+    const end = topLeftToBottomRight ? { x: x + width, y: y + height } : { x: x + width, y };
+    tree.add(
+      new LeaferPath({
+        x: 0,
+        y: 0,
+        path: `M ${start.x} ${start.y} L ${end.x} ${end.y}`,
+        stroke: edge.color ? `#${edge.color}` : "#000000",
+        strokeWidth: px,
+        ...(edge.style && DIAGONAL_DASH[edge.style]
+          ? { dashPattern: DIAGONAL_DASH[edge.style] }
+          : {}),
+      }),
+    );
+  }
+
   // Fills first, then text, then every cell's own edges on top (PowerPoint's
   // paint order — a later cell's border sits over its neighbor's fill).
   for (const { cell } of laid) {
@@ -156,6 +201,28 @@ export function paintFrameTable(
   for (const { cell, innerWidth, stack, heightPx } of laid) {
     const bandHeight = spanEnd(rowY, cell.row, cell.spanH) - rowY[cell.row]!;
     const bandWidth = spanEnd(colX, cell.col, cell.spanW) - colX[cell.col]!;
+    const cellX = member.x + colX[cell.col]!;
+    const cellY = member.y + rowY[cell.row]!;
+    if (cell.borders?.diagonalTopLeftToBottomRight)
+      paintDiagonal(
+        tree,
+        cellX,
+        cellY,
+        bandWidth,
+        bandHeight,
+        cell.borders.diagonalTopLeftToBottomRight,
+        true,
+      );
+    if (cell.borders?.diagonalBottomLeftToTopRight)
+      paintDiagonal(
+        tree,
+        cellX,
+        cellY,
+        bandWidth,
+        bandHeight,
+        cell.borders.diagonalBottomLeftToTopRight,
+        false,
+      );
     const slack = bandHeight - cell.marginsPx.top - cell.marginsPx.bottom - heightPx;
     const lead =
       slack > 0 ? (cell.anchor === "bottom" ? slack : cell.anchor === "center" ? slack / 2 : 0) : 0;
