@@ -4002,6 +4002,7 @@ class DocenPresentation extends AddinHost {
     const host = this.#presJson?.slides?.[this.#activeSlideIndex()];
     if (!host) return;
     const before = host.transition;
+    if (typeof before === "string") return;
     if (value !== "none" && !TRANSITION_PRESETS.has(value as TransitionType)) return;
     const after: TransitionOptions = { type: value as TransitionType };
     // Picking the live effect again records nothing.
@@ -4072,6 +4073,7 @@ class DocenPresentation extends AddinHost {
     if (preset !== "none" && !ANIMATION_PRESETS.has(preset as SlideAnimation["type"])) return;
     const sel = this.#selection;
     const host = this.#presJson?.slides?.[sel?.slide ?? -1];
+    if (typeof host?.animations === "string") return;
     const child = host?.children?.[sel?.child ?? -1];
     const nv = child ? nonVisualOf(child) : null;
     if (!host || !nv) return;
