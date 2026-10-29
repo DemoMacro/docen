@@ -459,9 +459,6 @@ export class DocxManager {
   private resolveInner(docOpts: DocumentOptions): JSONContent {
     this.resolveStyles = docOpts.styles ?? undefined;
     const sections = docOpts.sections ?? [];
-    if (sections.length === 0) {
-      return { type: "doc", content: [{ type: "paragraph" }] };
-    }
     // Per-resolve façade handed to block parse rules. Arrow closures capture
     // `this`; `styles` is a read-only snapshot of the instance field set above
     // (stable for this resolve's lifetime).
@@ -526,10 +523,10 @@ export class DocxManager {
     const core = extractCoreProperties(docOpts);
     if (core) attrs.core = core;
     const lastSection = sections[lastIndex];
-    if (lastSection.properties) attrs.sectionProperties = lastSection.properties;
-    const lastHeaders = this.resolveHeaderFooter(lastSection.headers);
+    if (lastSection?.properties) attrs.sectionProperties = lastSection.properties;
+    const lastHeaders = lastSection ? this.resolveHeaderFooter(lastSection.headers) : null;
     if (lastHeaders) attrs.sectionHeaders = lastHeaders;
-    const lastFooters = this.resolveHeaderFooter(lastSection.footers);
+    const lastFooters = lastSection ? this.resolveHeaderFooter(lastSection.footers) : null;
     if (lastFooters) attrs.sectionFooters = lastFooters;
     // Pass through document-level fields DocxManager doesn't reconstruct
     // (settings.xml flags like displayBackgroundShape, zoom, fonts, footnotes,

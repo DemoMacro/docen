@@ -83,6 +83,27 @@ describe("compileDocument inline safety", () => {
   });
 });
 
+describe("resolveDocument empty sections", () => {
+  it("preserves document-level attrs when no sections exist", () => {
+    const rawPart = { path: "customXml/item1.xml", data: "<x/>" };
+    const json = resolveDocument(
+      {
+        sections: [],
+        styles: { paragraphStyles: [] },
+        numbering: { abstractNumberings: [] },
+        rawParts: [rawPart],
+      } as never,
+      docxExtensions,
+    );
+    const attrs = json.attrs as Record<string, any>;
+    expect(json.content).toEqual([{ type: "paragraph" }]);
+    expect(attrs.styles).toEqual({ paragraphStyles: [] });
+    expect(attrs.numbering).toEqual({ abstractNumberings: [] });
+    expect(attrs.documentExtras.rawParts).toHaveLength(1);
+    expect(compileDocument(json, docxExtensions).rawParts).toEqual([rawPart]);
+  });
+});
+
 describe("document binary persistence", () => {
   const good = { path: "word/theme/theme1.xml", data: new Uint8Array([1, 2, 3]) };
   const text = { path: "customXml/item1.xml", data: "<x/>" };
