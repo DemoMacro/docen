@@ -5,7 +5,7 @@
 import type { LayoutParagraph, LayoutTextStyle } from "@docen/layout";
 import type { StylesOptions } from "@office-open/docx";
 
-import { resolveRFonts } from "../extensions/utils";
+import { resolveRFonts, type ThemeFonts } from "../extensions/utils";
 import { defaultParagraphStyleId, indexParagraphStyles, mergeStyleChain } from "../style-cascade";
 import { colorOf, isRecord, measureTwip, num, str, type Rec } from "./guards";
 
@@ -71,11 +71,15 @@ export function fontAttr(v: unknown): FontAttr {
  *  Theme-only rFonts (Word's default: minorHAnsi/minorEastAsia with no
  *  literal faces) resolve through the Office default theme table — without
  *  this the canvas falls back to its serif default and every width drifts. */
-export function toFamily(font: FontAttr, def: FontAttr): LayoutTextStyle["family"] | undefined {
+export function toFamily(
+  font: FontAttr,
+  def: FontAttr,
+  themeFonts?: ThemeFonts,
+): LayoutTextStyle["family"] | undefined {
   const f = font ?? def;
   if (typeof f === "string") return f || undefined;
   if (!isRecord(f)) return undefined;
-  const { ascii, eastAsia } = resolveRFonts(f)!;
+  const { ascii, eastAsia } = resolveRFonts(f, "zh-CN", themeFonts)!;
   const latin = ascii ?? str(f.hAnsi) ?? undefined;
   return latin || eastAsia ? { latin, eastAsia: eastAsia ?? undefined } : undefined;
 }

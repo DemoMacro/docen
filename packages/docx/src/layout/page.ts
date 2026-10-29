@@ -16,7 +16,7 @@ import {
 } from "@docen/layout";
 import type { DocumentOptions, SectionChild, SectionOptions } from "@office-open/docx";
 
-import { resolvePageSize } from "../extensions/utils";
+import { resolvePageSize, themeFontsOf } from "../extensions/utils";
 import { indexCharacterStyles } from "../style-cascade";
 import type { ProjectContext } from "./context";
 import {
@@ -212,6 +212,10 @@ export function projectPageFurniture(
     styles: doc.styles,
     characterStyles: indexCharacterStyles(doc.styles),
     numberings: indexNumberings(doc.numbering),
+    themeFonts: themeFontsOf(
+      doc.theme?.fontScheme,
+      doc.settings?.themeFontLang?.eastAsia ?? "zh-CN",
+    ),
     listCounters: new Map(),
     openComments: new Set(),
     // Word forbids footnote references in headers/footers — a fresh counter

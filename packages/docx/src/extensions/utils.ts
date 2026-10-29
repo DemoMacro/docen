@@ -2,6 +2,7 @@ import { sectionPageSizeDefaults } from "@office-open/docx";
 import type {
   BorderOptions,
   BordersOptions,
+  DocumentOptions,
   IndentProperties,
   ParagraphPropertiesOptionsBase,
   ShadingProperties,
@@ -294,34 +295,78 @@ export function normalizeColorToHex(color: unknown): string | undefined {
   return hex ?? undefined;
 }
 
-// Office default theme1.xml font tokens → concrete font names. office-open does
-// not parse the theme part, so a run's rFonts *Theme attributes survive as the
-// literal tokens "minorHAnsi"/"minorEastAsia"/…; map them to the Office default
-// theme fonts here (Calibri/等线 on a stock zh-CN template). Documents carrying
-// a custom theme fall back to these defaults — rare, and still better than the
-// browser's Segoe UI fallback. The CJK eastAsia font varies by the document's
-// eastAsia language; zh-CN (等线) is the default, covering the common case.
-const THEME_LATIN_FONTS: Record<string, string> = {
+// Office default theme1.xml font tokens → concrete font names. A parsed 0.15
+// theme wins; these fallbacks preserve stock zh-CN rendering when theme.xml is
+// absent (Calibri/等线). The CJK eastAsia font varies by the document language.
+const FALLBACK_THEME_LATIN_FONTS: Record<string, string> = {
   minorHAnsi: "Calibri",
   majorHAnsi: "Calibri Light",
   minorBidi: "Arial",
   majorBidi: "Arial",
 };
-const THEME_EAST_ASIA_FONTS: Record<string, Record<string, string>> = {
+const FALLBACK_THEME_EAST_ASIA_FONTS: Record<string, Record<string, string>> = {
   "zh-CN": { minorEastAsia: "等线", majorEastAsia: "等线 Light" },
   "zh-TW": { minorEastAsia: "新細明體", majorEastAsia: "微軟正黑體" },
   "ja-JP": { minorEastAsia: "游ゴシック", majorEastAsia: "游ゴシック Light" },
   "ko-KR": { minorEastAsia: "맑은 고딕", majorEastAsia: "맑은 고딕" },
 };
 
+export interface ThemeFonts {
+  majorLatin?: string;
+  minorLatin?: string;
+  majorEastAsia?: string;
+  minorEastAsia?: string;
+}
+
+const THEME_SCRIPTS: Record<string, string> = {
+  "zh-CN": "Hans",
+  "zh-TW": "Hant",
+  "ja-JP": "Jpan",
+  "ko-KR": "Hang",
+};
+
+type FontScheme = NonNullable<NonNullable<DocumentOptions["theme"]>["fontScheme"]>;
+
+/** One theme font collection's CJK face: the explicit eastAsian slot wins,
+ *  then the supplemental face for the document language. */
+function eastAsiaFaceOf(
+  collection: FontScheme["majorFont"],
+  eastAsiaLang: string,
+): string | undefined {
+  const explicit = collection?.eastAsian?.typeface;
+  if (explicit) return explicit;
+  const script = THEME_SCRIPTS[eastAsiaLang] ?? THEME_SCRIPTS["zh-CN"];
+  return collection?.supplementalFonts?.find((font) => font.script === script)?.typeface;
+}
+
+/** Flatten the parsed theme's major/minor faces for the layout resolver. */
+export function themeFontsOf(
+  scheme: FontScheme | undefined,
+  eastAsiaLang = "zh-CN",
+): ThemeFonts | undefined {
+  const majorLatin = scheme?.majorFont?.latin?.typeface;
+  const minorLatin = scheme?.minorFont?.latin?.typeface;
+  const majorEastAsia = eastAsiaFaceOf(scheme?.majorFont, eastAsiaLang);
+  const minorEastAsia = eastAsiaFaceOf(scheme?.minorFont, eastAsiaLang);
+  return majorLatin || minorLatin || majorEastAsia || minorEastAsia
+    ? {
+        ...(majorLatin ? { majorLatin } : {}),
+        ...(minorLatin ? { minorLatin } : {}),
+        ...(majorEastAsia ? { majorEastAsia } : {}),
+        ...(minorEastAsia ? { minorEastAsia } : {}),
+      }
+    : undefined;
+}
+
 /** Resolve a run's rFonts — literal ascii/eastAsia/hAnsi OR *Theme tokens — to
  *  the concrete { ascii, eastAsia } pair used by both font-family renderers.
- *  *Theme tokens map to the Office default theme fonts (office-open leaves them
- *  unresolved). `eastAsiaLang` picks the CJK font for *eastAsiaTheme (zh-CN
- *  default). Returns null only when the value is empty/non-font. */
+ *  *Theme tokens prefer the parsed theme; documents without one use the Office
+ *  default theme table. `eastAsiaLang` picks the CJK font for *eastAsiaTheme
+ *  (zh-CN default). Returns null only when the value is empty/non-font. */
 export function resolveRFonts(
   font: unknown,
   eastAsiaLang = "zh-CN",
+  themeFonts?: ThemeFonts,
 ): { ascii: string | null; eastAsia: string | null } | null {
   if (!font) return null;
   if (typeof font === "string") return { ascii: font, eastAsia: null };
@@ -334,18 +379,37 @@ export function resolveRFonts(
     hAnsiTheme?: string;
     eastAsiaTheme?: string;
   };
-  const eaMap = THEME_EAST_ASIA_FONTS[eastAsiaLang] ?? THEME_EAST_ASIA_FONTS["zh-CN"];
-  const ascii =
-    f.ascii ?? THEME_LATIN_FONTS[f.asciiTheme ?? ""] ?? THEME_LATIN_FONTS[f.hAnsiTheme ?? ""];
-  const hAnsi = f.hAnsi ?? THEME_LATIN_FONTS[f.hAnsiTheme ?? ""] ?? ascii;
-  const eastAsia = f.eastAsia ?? eaMap[f.eastAsiaTheme ?? ""];
+  const latinFont = (token: string | undefined): string | undefined =>
+    token === "majorHAnsi"
+      ? (themeFonts?.majorLatin ?? FALLBACK_THEME_LATIN_FONTS.majorHAnsi)
+      : token === "minorHAnsi"
+        ? (themeFonts?.minorLatin ?? FALLBACK_THEME_LATIN_FONTS.minorHAnsi)
+        : token === "majorBidi"
+          ? FALLBACK_THEME_LATIN_FONTS.majorBidi
+          : token === "minorBidi"
+            ? FALLBACK_THEME_LATIN_FONTS.minorBidi
+            : undefined;
+  const eastAsiaFont = (token: string | undefined): string | undefined => {
+    const fallback =
+      FALLBACK_THEME_EAST_ASIA_FONTS[eastAsiaLang] ?? FALLBACK_THEME_EAST_ASIA_FONTS["zh-CN"];
+    if (token === "majorEastAsia") return themeFonts?.majorEastAsia ?? fallback.majorEastAsia;
+    if (token === "minorEastAsia") return themeFonts?.minorEastAsia ?? fallback.minorEastAsia;
+    return undefined;
+  };
+  const ascii = f.ascii ?? latinFont(f.asciiTheme) ?? latinFont(f.hAnsiTheme);
+  const hAnsi = f.hAnsi ?? latinFont(f.hAnsiTheme) ?? ascii;
+  const eastAsia = f.eastAsia ?? eastAsiaFont(f.eastAsiaTheme);
   return { ascii: ascii ?? hAnsi ?? null, eastAsia: eastAsia ?? null };
 }
 
 /** Resolve a font value (string or OOXML rFonts, incl. *Theme tokens) to a
  *  single CSS family name (ascii/hAnsi/eastAsia). */
-export function resolveFontName(font: unknown, eastAsiaLang = "zh-CN"): string | null {
-  const r = resolveRFonts(font, eastAsiaLang);
+export function resolveFontName(
+  font: unknown,
+  eastAsiaLang = "zh-CN",
+  themeFonts?: ThemeFonts,
+): string | null {
+  const r = resolveRFonts(font, eastAsiaLang, themeFonts);
   return r?.ascii ?? r?.eastAsia ?? null;
 }
 

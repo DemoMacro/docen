@@ -164,7 +164,9 @@ export function projectRuns(
     const chainSize = isNoteRun && chainSizeRaw === 20 ? 10 : chainSizeRaw;
     const effectiveSizePt = own.sizePt ?? chainSize ?? num(docRPr.size) ?? (isNoteRun ? 10 : 12);
     return {
-      family: toFamily(own.font, fontAttr(chainRPr.font) ?? fontAttr(docRPr.font)) ?? defRun.family,
+      family:
+        toFamily(own.font, fontAttr(chainRPr.font) ?? fontAttr(docRPr.font), ctx.themeFonts) ??
+        defRun.family,
       sizePx: ptToPx(effectiveSizePt),
       bold: own.bold ?? defRun.bold,
       italic: own.italic ?? defRun.italic,

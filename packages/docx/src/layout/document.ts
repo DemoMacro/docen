@@ -22,6 +22,7 @@ import type {
 import { twipToPx } from "@docen/layout";
 import type { DocumentOptions, SectionPropertiesOptions } from "@office-open/docx";
 
+import { themeFontsOf } from "../extensions/utils";
 import { indexCharacterStyles } from "../style-cascade";
 import type { MarkupDisplay, ProjectContext } from "./context";
 import { isRecord, measureTwip, type BodyParagraph } from "./guards";
@@ -113,6 +114,10 @@ export function projectDocument(
     styles: doc.styles,
     characterStyles: indexCharacterStyles(doc.styles),
     numberings: indexNumberings(doc.numbering),
+    themeFonts: themeFontsOf(
+      doc.theme?.fontScheme,
+      doc.settings?.themeFontLang?.eastAsia ?? "zh-CN",
+    ),
     listCounters: new Map(),
     openComments: new Set(),
     footnoteOrdinals: new Map(),

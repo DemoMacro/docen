@@ -1,5 +1,6 @@
 import type { StylesOptions } from "@office-open/docx";
 
+import type { ThemeFonts } from "../extensions/utils";
 import type { StyleEntry } from "../style-cascade";
 import type { NumberingIndex } from "./numbering";
 
@@ -22,6 +23,8 @@ export interface ProjectContext {
    *  stays plain). */
   characterStyles: Map<string, StyleEntry>;
   numberings: NumberingIndex;
+  /** Parsed theme font faces for w:*Theme tokens; absent for legacy docs. */
+  themeFonts?: ThemeFonts;
   /** Live list counters per numbering reference (level → count), advanced in
    *  document order as numbered paragraphs project. */
   listCounters: Map<string, number[]>;

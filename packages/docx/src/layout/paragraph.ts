@@ -72,7 +72,7 @@ export function projectParagraph(p: BodyParagraph, ctx: ProjectContext): LayoutP
   // exactly as bold/italic already did.
   const chainDefRun = runStyleOf({ ...docRPr, ...chainRPr });
   const defaultTextStyle: LayoutTextStyle = {
-    family: toFamily(null, defFont) ?? {},
+    family: toFamily(null, defFont, ctx.themeFonts) ?? {},
     sizePx: ptToPx(markSizePt),
     bold: chainDefRun.bold,
     italic: chainDefRun.italic,

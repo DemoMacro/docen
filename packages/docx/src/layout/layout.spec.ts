@@ -153,6 +153,45 @@ describe("projectDocument style cascade", () => {
     expect(blocks[0]).toMatchObject({ defaultTabStopPx: 48 });
   });
 
+  it("resolves 0.15 theme tokens from the parsed theme", () => {
+    const themedStyles: StylesOptions = {
+      ...styles,
+      characterStyles: [
+        ...styles.characterStyles!,
+        {
+          id: "Themed",
+          name: "Themed",
+          run: { font: { asciiTheme: "majorHAnsi", eastAsiaTheme: "majorEastAsia" } },
+        },
+      ],
+    };
+    const { blocks } = oneSection({
+      theme: {
+        fontScheme: {
+          majorFont: {
+            latin: { typeface: "Custom Serif" },
+            eastAsian: { typeface: "Custom Han" },
+          },
+          minorFont: { latin: { typeface: "Custom Sans" } },
+        },
+      },
+      styles: themedStyles,
+      sections: [
+        {
+          children: [{ paragraph: { children: [{ style: "Themed", text: "hi" }] } }],
+        },
+      ],
+    });
+    const para = blocks[0];
+    expect(para?.kind).toBe("paragraph");
+    if (para?.kind !== "paragraph") return;
+    const text = para.inline.find((item) => item.kind === "text");
+    expect(text && text.kind === "text" ? text.style.family : undefined).toEqual({
+      latin: "Custom Serif",
+      eastAsia: "Custom Han",
+    });
+  });
+
   it("keeps the chain font when a run carries an empty font shell", () => {
     // A round-tripped run can carry an rFonts object with no usable slot;
     // that shell must not shadow the style chain's face (it used to resolve
@@ -173,6 +212,45 @@ describe("projectDocument style cascade", () => {
     expect(text && text.kind === "text" ? text.style.family : undefined).toEqual({
       latin: "Times",
       eastAsia: "SimSun",
+    });
+  });
+
+  it("selects theme CJK faces with the document's eastAsia language", () => {
+    const themedStyles: StylesOptions = {
+      ...styles,
+      characterStyles: [
+        ...styles.characterStyles!,
+        {
+          id: "JapaneseTheme",
+          name: "JapaneseTheme",
+          run: { font: { eastAsiaTheme: "majorEastAsia" } },
+        },
+      ],
+    };
+    const { blocks } = oneSection({
+      settings: { themeFontLang: { eastAsia: "ja-JP" } },
+      theme: {
+        fontScheme: {
+          majorFont: {
+            latin: { typeface: "Custom Serif" },
+            supplementalFonts: [{ script: "Jpan", typeface: "Custom Jpan" }],
+          },
+          minorFont: { latin: { typeface: "Custom Sans" } },
+        },
+      },
+      styles: themedStyles,
+      sections: [
+        {
+          children: [{ paragraph: { children: [{ style: "JapaneseTheme", text: "hi" }] } }],
+        },
+      ],
+    });
+    const para = blocks[0];
+    expect(para?.kind).toBe("paragraph");
+    if (para?.kind !== "paragraph") return;
+    const text = para.inline.find((item) => item.kind === "text");
+    expect(text && text.kind === "text" ? text.style.family : undefined).toEqual({
+      eastAsia: "Custom Jpan",
     });
   });
 
