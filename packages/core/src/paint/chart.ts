@@ -420,6 +420,49 @@ function showsValueLabels(series: Rec): boolean {
   return labels?.showVal === true;
 }
 
+/** Resolved per-point label controls after CT_DLbl overrides. */
+function pointLabelOf(series: Rec, index: number) {
+  const labels = isRecord(series.dataLabels) ? series.dataLabels : undefined;
+  const values = Array.isArray(series.values) ? series.values : [];
+  const valuePoint = values.find((item) => isRecord(item) && num(item.index) === index) as
+    | Rec
+    | undefined;
+  const overrides = Array.isArray(labels?.labels) ? labels!.labels.filter(isRecord) : [];
+  const override = overrides.find((item) => num(item.index) === index);
+  const text = override?.text ?? labels?.textProperties;
+  const richText = isRecord(text) ? text : undefined;
+  const directText = str(text) ?? str(richText?.text);
+  const paragraphs = Array.isArray(richText?.paragraphs) ? richText!.paragraphs : [];
+  const custom = paragraphs
+    .map((paragraph) =>
+      typeof paragraph === "string"
+        ? paragraph
+        : isRecord(paragraph)
+          ? (str(paragraph.text) ??
+            (Array.isArray(paragraph.children)
+              ? paragraph.children
+                  .map((child) =>
+                    typeof child === "string" ? child : isRecord(child) ? str(child.text) : "",
+                  )
+                  .join("")
+              : undefined))
+          : undefined,
+    )
+    .filter((value): value is string => typeof value === "string")
+    .join("");
+  const customText = directText || custom;
+  const numberFormat = override?.numberFormat ?? labels?.numberFormat;
+  return {
+    color:
+      text && text !== labels?.textProperties ? labelColorOf({ dataLabels: override }) : undefined,
+    custom: customText || undefined,
+    deleted: labels?.delete === true || override?.delete === true,
+    format: formatOf(numberFormat) ?? str(valuePoint?.formatCode) ?? formatOf(series.formatCode),
+    position: str(override?.position),
+    visible: customText !== undefined || (showsValueLabels(series) && override?.showVal !== false),
+  };
+}
+
 /** A label's resolved fill after the PPTX projection theme pass; Word falls
  *  back to axis gray when the label carries no explicit text fill. */
 function labelColorOf(series: Rec): string {
@@ -481,6 +524,30 @@ function barLabelPoint(
 ): { x: number; y: number } {
   const direction = value >= 0 ? 1 : -1;
   return horizontal ? { x: x + direction * 8, y } : { x, y: y - direction * 8 };
+}
+
+/** Apply a CT_DLbl position override to the painter's natural anchor. */
+function labelAnchorOf(
+  position: string | undefined,
+  anchor: { x: number; y: number },
+  box: { x: number; y: number; width: number; height: number },
+  horizontal: boolean,
+): { x: number; y: number } {
+  if (!position) return anchor;
+  const centerX = box.x + box.width / 2;
+  const centerY = box.y + box.height / 2;
+  if (position === "left") return { x: box.x - 8, y: centerY };
+  if (position === "right") return { x: box.x + box.width + 8, y: centerY };
+  if (position === "top" || position === "outsideEnd")
+    return horizontal ? { x: box.x + box.width + 8, y: centerY } : { x: centerX, y: box.y - 8 };
+  if (position === "bottom")
+    return horizontal ? { x: box.x - 8, y: centerY } : { x: centerX, y: box.y + box.height + 16 };
+  if (position === "center") return { x: centerX, y: centerY };
+  if (position === "insideBase")
+    return horizontal ? { x: box.x + 10, y: centerY } : { x: centerX, y: box.y + box.height - 8 };
+  if (position === "insideEnd")
+    return horizontal ? { x: box.x + box.width - 10, y: centerY } : { x: centerX, y: box.y + 10 };
+  return anchor;
 }
 
 /** A chart sub-element's hit registration — the box and any shape arrive in
@@ -642,15 +709,23 @@ function paintValueChart(tree: IGroup, model: ChartModel, plot: PlotBox, reg?: E
       }
       if (showsValueLabels(series)) {
         for (const p of pts) {
+          const settings = pointLabelOf(series, p.c);
+          if (settings.deleted) continue;
+          const anchor = labelAnchorOf(
+            settings.position,
+            { x: p.x, y: p.y - 8 },
+            { x: p.x, y: p.y, width: 0, height: 0 },
+            false,
+          );
           label(
             tree,
-            formatChartValue(vals[p.c]!, formatOf(series.formatCode)),
-            p.x,
-            p.y - 8,
+            settings.custom ?? formatChartValue(vals[p.c]!, settings.format),
+            anchor.x,
+            anchor.y,
             LABEL_PX - 1,
             "center",
             undefined,
-            labelColorOf(series),
+            settings.color ?? labelColorOf(series),
           );
         }
       }
@@ -695,7 +770,9 @@ function paintValueChart(tree: IGroup, model: ChartModel, plot: PlotBox, reg?: E
         const paint = pointFill(c, horizontal ? bar.width : 0, horizontal ? 0 : bar.height);
         tree.add(new Rect({ ...bar, fill: typeof paint === "string" ? `#${paint}` : paint }));
         if (showsValueLabels(series)) {
-          const anchor = horizontal
+          const settings = pointLabelOf(series, c);
+          if (settings.deleted) return;
+          const natural = horizontal
             ? barLabelPoint(
                 v,
                 base,
@@ -710,15 +787,16 @@ function paintValueChart(tree: IGroup, model: ChartModel, plot: PlotBox, reg?: E
                 bar.y + (v >= 0 ? 0 : bar.height),
                 horizontal,
               );
+          const anchor = labelAnchorOf(settings.position, natural, bar, horizontal);
           label(
             tree,
-            formatChartValue(v, formatOf(series.formatCode)),
+            settings.custom ?? formatChartValue(v, settings.format),
             anchor.x,
             anchor.y,
             LABEL_PX - 1,
             "center",
             undefined,
-            labelColorOf(series),
+            settings.color ?? labelColorOf(series),
           );
         }
         reg?.({ series: si, point: c, valueDrag }, bar.x, bar.y, bar.width, bar.height);
@@ -741,22 +819,25 @@ function paintValueChart(tree: IGroup, model: ChartModel, plot: PlotBox, reg?: E
       const paint = pointFill(c, bar.width, bar.height);
       tree.add(new Rect({ ...bar, fill: typeof paint === "string" ? `#${paint}` : paint }));
       if (showsValueLabels(series)) {
-        const anchor = barLabelPoint(
+        const settings = pointLabelOf(series, c);
+        if (settings.deleted) return;
+        const natural = barLabelPoint(
           v,
           base,
           horizontal ? bar.x + (v >= 0 ? bar.width : 0) : bar.x + bar.width / 2,
           horizontal ? bar.y + bar.height / 2 : bar.y + (v >= 0 ? 0 : bar.height),
           horizontal,
         );
+        const anchor = labelAnchorOf(settings.position, natural, bar, horizontal);
         label(
           tree,
-          formatChartValue(v, formatOf(series.formatCode)),
+          settings.custom ?? formatChartValue(v, settings.format),
           anchor.x,
           anchor.y,
           LABEL_PX - 1,
           "center",
           undefined,
-          labelColorOf(series),
+          settings.color ?? labelColorOf(series),
         );
       }
       reg?.({ series: si, point: c, valueDrag }, bar.x, bar.y, bar.width, bar.height);
