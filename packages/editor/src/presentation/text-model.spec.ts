@@ -1,5 +1,5 @@
 import type { SlideChild } from "@docen/pptx";
-import type { ParagraphDescriptorOptions } from "@office-open/core/drawing";
+import type { ParagraphDescriptorOptions } from "@docen/pptx";
 import { describe, expect, it } from "vitest";
 
 import { formatTextModel, textModelOf, writeTextModel } from "./text-model";

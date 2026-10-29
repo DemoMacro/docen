@@ -1,6 +1,6 @@
 import { EMU_PER_PX } from "@docen/layout";
 import type { PresentationOptions, SlideChild, SlideOptions, TableCellOptions } from "@docen/pptx";
-import type { ParagraphDescriptorOptions, TextBodyOptions } from "@office-open/core/drawing";
+import type { ParagraphDescriptorOptions, TextBodyOptions } from "@docen/pptx";
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 

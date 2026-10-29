@@ -6,7 +6,7 @@ import type {
   TextBodyOptions,
   TextRunOptions,
   UnderlineStyle,
-} from "@office-open/core/drawing";
+} from "@docen/pptx";
 
 import { bodyParagraphsOf, cellParagraphsOf } from "./commands";
 

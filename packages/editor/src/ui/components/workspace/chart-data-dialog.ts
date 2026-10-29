@@ -1,6 +1,6 @@
 import type { ChartOptions, ChartSeriesData } from "@docen/docx";
+import type { CategoryPointOptions, ChartValue } from "@docen/pptx";
 import { FASTElement, css, customElement, html, observable, ref } from "@microsoft/fast-element";
-import type { CategoryPointOptions, ChartValue } from "@office-open/core";
 
 import { chartTitleTextOf } from "../../../document/chart-text";
 import type { ChartDataPatch } from "../../../document/extensions/commands";

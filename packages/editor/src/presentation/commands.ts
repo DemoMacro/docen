@@ -6,9 +6,6 @@
 
 import { EMU_PER_PX } from "@docen/layout";
 import type { PresentationOptions, SlideChild, SlideOptions, TableCellOptions } from "@docen/pptx";
-import type { ColorSchemeOptions, FontSchemeOptions } from "@office-open/core";
-// Text/paragraph types come from @office-open/core/drawing — @docen/pptx's
-// re-export surface doesn't carry them yet.
 import type {
   BulletOptions,
   CustomGeometryOptions,
@@ -20,8 +17,13 @@ import type {
   TextBreakOptions,
   TextRunOptions,
   UnderlineStyle,
-} from "@office-open/core/drawing";
-import type { ChartOptions, ShapeOptions } from "@office-open/pptx";
+} from "@docen/pptx";
+import type {
+  ChartOptions,
+  ColorSchemeOptions,
+  FontSchemeOptions,
+  ShapeOptions,
+} from "@docen/pptx";
 
 /** Normalize the paragraphs in place: string items and paragraph-level text
  *  sugar both become real children. */

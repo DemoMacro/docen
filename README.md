@@ -34,6 +34,7 @@
 | [@docen/vue](./packages/vue/README.md)                      | ![npm](https://img.shields.io/npm/v/@docen/vue)         | Vue 3 adapter — `<DocenDocument>` component (v-model + v-slot editor)                      |
 | [@docen/editor](./packages/editor/README.md)                | ![npm](https://img.shields.io/npm/v/@docen/editor)      | Assembly layer — Fluent UI host + docx engine into `<docen-document>`                      |
 | [@docen/docx](./packages/docx/README.md)                    | ![npm](https://img.shields.io/npm/v/@docen/docx)        | DOCX engine — Tiptap schema + converters + layout projection, powered by @office-open/docx |
+| [@docen/pptx](./packages/pptx/README.md)                    | ![npm](https://img.shields.io/npm/v/@docen/pptx)        | PPTX engine — canonical deck conversion + scene projection for canvas editing              |
 | [@docen/layout](./packages/layout/README.md)                | ![npm](https://img.shields.io/npm/v/@docen/layout)      | Pagination engine — measurement → paginated LayoutDoc, Word's stacking rules               |
 | [@docen/markdown](./packages/markdown/README.md)            | ![npm](https://img.shields.io/npm/v/@docen/markdown)    | Markdown syntax layer — neutral IR + renderer, format mappers bind their own model         |
 | [@docen/pretext](./packages/pretext/README.md)              | ![npm](https://img.shields.io/npm/v/@docen/pretext)     | Vendored fork of @chenglou/pretext — CJK measure correction + Word/CJK layout fixes        |

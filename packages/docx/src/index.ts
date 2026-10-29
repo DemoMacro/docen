@@ -25,6 +25,7 @@ export type {
   ChartSeriesData,
   LegendPosition,
 } from "@office-open/core";
+export type { DataType, SyncDataType } from "@office-open/core";
 // Re-export the engine's section-geometry defaults (MS Office zh-CN "Normal":
 // A4 + top/bottom 1440tw, left/right 1800tw) so editor-side geometry fallbacks
 // — content-width for image capping, page measurement — reuse the SAME defaults

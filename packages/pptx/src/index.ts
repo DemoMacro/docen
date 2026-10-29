@@ -15,8 +15,32 @@ export {
   type TableCellOptions,
   type TransitionOptions,
   type TransitionType,
+  type AnimationDuration,
   type SlideAnimation,
 } from "@office-open/pptx";
+export type {
+  CompressionOptions,
+  OutputByType,
+  OutputType,
+  PackerOptions,
+} from "@office-open/pptx";
+export type { DataType, SyncDataType } from "@office-open/core";
+export type { ColorSchemeOptions, FontSchemeOptions } from "@office-open/core";
+export type { ChartOptions, ShapeOptions } from "@office-open/pptx";
+export type {
+  BulletOptions,
+  CustomGeometryOptions,
+  ParagraphDescriptorOptions,
+  ShapeType,
+  StrikeStyle,
+  TextAlignment,
+  TextBodyOptions,
+  TextBreakOptions,
+  TextRunOptions,
+  UnderlineStyle,
+  TextVertical,
+} from "@office-open/core/drawing";
+export type { CategoryPointOptions, ChartValue } from "@office-open/core";
 export {
   projectPresentation,
   type ProjectedPresentation,

@@ -31,6 +31,10 @@ import {
   offsetMemberByPath,
   resizeMemberByPath,
   textBlocks,
+  type AnimationDuration,
+  type ColorSchemeOptions,
+  type DataType,
+  type FontSchemeOptions,
   type PresentationOptions,
   type ProjectedPresentation,
   type SlideOptions,
@@ -41,19 +45,13 @@ import {
   type TransitionType,
   type SlideAnimation,
   type SlideCommentOptions,
+  type ShapeType,
+  type TextBodyOptions,
+  type TextRunOptions,
+  type TextVertical,
 } from "@docen/pptx";
 import { customElement, observable } from "@microsoft/fast-element";
-import type { DataType } from "@office-open/core";
-import type { ColorSchemeOptions, FontSchemeOptions } from "@office-open/core";
-import type {
-  RunFont,
-  ShapeType,
-  TextBodyOptions,
-  TextFont,
-  TextRunOptions,
-  TextVertical,
-} from "@office-open/core/drawing";
-import type { AnimationDuration } from "@office-open/pptx";
+import type { RunFont, TextFont } from "@office-open/core/drawing";
 // Leafer ships animate() as a stub that only logs — the show's entrance
 // tweens need the real plugin registered.
 import "@leafer-in/animate";
