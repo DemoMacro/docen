@@ -158,7 +158,7 @@ export function projectRuns(
     // solely through this style — the container itself carries no look.
     const styleId = str(rPr.style);
     const charRun = styleId ? mergeStyleChain(ctx.characterStyles, styleId).run : undefined;
-    const own = runStyleOf(charRun ? { ...charRun, ...rPr } : rPr);
+    const own = runStyleOf(charRun ? { ...charRun, ...rPr } : rPr, ctx.themeColors);
     const isNoteRun = ctx.currentNoteOrdinal != null;
     const chainSizeRaw = num(chainRPr.size);
     const chainSize = isNoteRun && chainSizeRaw === 20 ? 10 : chainSizeRaw;

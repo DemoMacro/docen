@@ -10,6 +10,138 @@ import type {
   TableCellOptions,
 } from "@office-open/docx";
 
+/** Theme color slots in a parsed Office theme; Word's four aliases resolve to
+ *  the underlying dark/light pairs at projection time. */
+export type ThemeColorSlot =
+  | "dark1"
+  | "light1"
+  | "dark2"
+  | "light2"
+  | "accent1"
+  | "accent2"
+  | "accent3"
+  | "accent4"
+  | "accent5"
+  | "accent6"
+  | "hyperlink"
+  | "followedHyperlink";
+
+/** Parsed theme palette keyed by canonical Office slot, hex RRGGBB. */
+export type ThemeColors = Partial<Record<ThemeColorSlot, string>>;
+
+type ParsedColorScheme = NonNullable<DocumentOptions["theme"]>["colorScheme"];
+
+/** A Word color value that can defer to a theme slot and carry tint/shade. */
+type ThemedColor = {
+  val?: unknown;
+  color?: unknown;
+  themeColor?: unknown;
+  themeTint?: unknown;
+  themeShade?: unknown;
+};
+
+const THEME_COLOR_SLOTS: Record<string, ThemeColorSlot> = {
+  dark1: "dark1",
+  light1: "light1",
+  dark2: "dark2",
+  light2: "light2",
+  accent1: "accent1",
+  accent2: "accent2",
+  accent3: "accent3",
+  accent4: "accent4",
+  accent5: "accent5",
+  accent6: "accent6",
+  hyperlink: "hyperlink",
+  followedHyperlink: "followedHyperlink",
+  background1: "light1",
+  text1: "dark1",
+  background2: "light2",
+  text2: "dark2",
+};
+
+const hexToRgb = (hex: string): [number, number, number] | undefined => {
+  const value = hex.replace("#", "");
+  if (!/^[0-9a-f]{6}$/i.test(value)) return undefined;
+  return [
+    Number.parseInt(value.slice(0, 2), 16),
+    Number.parseInt(value.slice(2, 4), 16),
+    Number.parseInt(value.slice(4, 6), 16),
+  ];
+};
+
+const rgbToHex = (rgb: [number, number, number]): string =>
+  rgb
+    .map((channel) => Math.round(channel).toString(16).padStart(2, "0"))
+    .join("")
+    .toUpperCase();
+
+const hexFraction = (value: unknown): number | undefined => {
+  if (typeof value !== "string" || !/^[0-9a-f]{2}$/i.test(value)) return undefined;
+  return Number.parseInt(value, 16) / 255;
+};
+
+/** Resolve Word's themeTint/themeShade against a concrete RGB color. */
+function transformThemeColor(hex: string, tint: unknown, shade: unknown): string {
+  const rgb = hexToRgb(hex);
+  if (!rgb) return hex.replace("#", "").toUpperCase();
+  const tintFactor = hexFraction(tint);
+  const shadeFactor = hexFraction(shade);
+  const transformed = rgb.map((channel) => {
+    let value = channel;
+    if (shadeFactor != null) value *= shadeFactor;
+    if (tintFactor != null) value += (255 - value) * tintFactor;
+    return value;
+  }) as [number, number, number];
+  return rgbToHex(transformed);
+}
+
+/** Flatten a theme scheme to RGB slots; system colors use their last known RGB. */
+export function themeColorsOf(scheme: ParsedColorScheme): ThemeColors | undefined {
+  const slots: ThemeColorSlot[] = [
+    "dark1",
+    "light1",
+    "dark2",
+    "light2",
+    "accent1",
+    "accent2",
+    "accent3",
+    "accent4",
+    "accent5",
+    "accent6",
+    "hyperlink",
+    "followedHyperlink",
+  ];
+  const colors: ThemeColors = {};
+  for (const slot of slots) {
+    const value = scheme?.[slot];
+    const hex = typeof value === "string" ? value : value?.lastClr;
+    if (typeof hex === "string" && hexToRgb(hex)) colors[slot] = hex.replace("#", "").toUpperCase();
+  }
+  return Object.keys(colors).length > 0 ? colors : undefined;
+}
+
+/** Resolve a Word color: theme slot first, literal val/color as fallback. */
+export function resolveThemedColor(
+  value: unknown,
+  themeColors: ThemeColors | undefined,
+): string | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const themedColor: ThemedColor = value;
+  const slot =
+    typeof themedColor.themeColor === "string"
+      ? THEME_COLOR_SLOTS[themedColor.themeColor]
+      : undefined;
+  if (slot) {
+    const hex = themeColors?.[slot];
+    if (hex) {
+      return transformThemeColor(hex, themedColor.themeTint, themedColor.themeShade);
+    }
+  }
+  const literal = themedColor.val ?? themedColor.color;
+  if (typeof literal !== "string" || literal === "auto") return undefined;
+  return hexToRgb(literal) ? literal.replace("#", "").toUpperCase() : undefined;
+}
+
 // ── Tiptap attr factory ──
 
 /** Factory for a Tiptap attr that carries an office-open native value: never

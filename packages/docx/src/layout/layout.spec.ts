@@ -254,6 +254,37 @@ describe("projectDocument style cascade", () => {
     });
   });
 
+  it("resolves theme colors with Word tint and shade transforms", () => {
+    const { blocks } = oneSection({
+      ...doc([
+        {
+          paragraph: {
+            children: [
+              {
+                text: "theme",
+                color: { themeColor: "accent1" },
+                underline: { type: "single", themeColor: "accent1", themeShade: "40" },
+              },
+            ],
+            shading: { type: "clear", themeFill: "accent1", themeTint: "80" },
+            border: {
+              bottom: { style: "single", size: 4, themeColor: "accent1", themeShade: "40" },
+            },
+          },
+        },
+      ]),
+      theme: { colorScheme: { accent1: "4472C4" } },
+    });
+    const para = blocks[0];
+    if (para?.kind !== "paragraph") throw new Error("expected paragraph");
+    expect(para.inline[0]).toMatchObject({
+      kind: "text",
+      style: { color: "4472C4", underlineColor: "111D31" },
+    });
+    expect(para.shadingFill).toBe("A2B9E2");
+    expect(para.borders?.bottom).toMatchObject({ color: "111D31" });
+  });
+
   it("direct attrs win and basedOn ancestors fill gaps (Heading1 → Normal)", () => {
     const { blocks } = oneSection(
       doc([

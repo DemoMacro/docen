@@ -5,9 +5,14 @@
 import type { LayoutParagraph, LayoutTextStyle } from "@docen/layout";
 import type { StylesOptions } from "@office-open/docx";
 
-import { resolveRFonts, type ThemeFonts } from "../extensions/utils";
+import {
+  resolveRFonts,
+  resolveThemedColor,
+  type ThemeColors,
+  type ThemeFonts,
+} from "../extensions/utils";
 import { defaultParagraphStyleId, indexParagraphStyles, mergeStyleChain } from "../style-cascade";
-import { colorOf, isRecord, measureTwip, num, str, type Rec } from "./guards";
+import { isRecord, measureTwip, num, str, type Rec } from "./guards";
 
 // ── style cascade (direct pPr → style chain → docDefaults) ──
 
@@ -106,11 +111,11 @@ export interface RunStyle {
  *  Toggle fields stay three-state: an explicit `w:b w:val="0"` resolves to
  *  false so it BEATS an inherited style bold — folding it to undefined would
  *  let the style chain's bold bleed through (Word: direct > style > doc). */
-export function runStyleOf(rPr: Rec): RunStyle {
+export function runStyleOf(rPr: Rec, themeColors?: ThemeColors): RunStyle {
   const u = isRecord(rPr.underline) ? rPr.underline : undefined;
   const underline = u ? u.type !== "none" : undefined;
   const underlineStyle = u && str(u.type) && u.type !== "none" ? str(u.type) : undefined;
-  const underlineColor = u && str(u.color) && str(u.color) !== "auto" ? str(u.color) : undefined;
+  const underlineColor = resolveThemedColor(u, themeColors);
   const tri = (v: unknown): boolean | undefined => (v === undefined ? undefined : v === true);
   return {
     sizePt: num(rPr.size),
@@ -118,11 +123,15 @@ export function runStyleOf(rPr: Rec): RunStyle {
     characterSpacingTw: measureTwip(rPr.characterSpacing),
     bold: tri(rPr.bold),
     italic: tri(rPr.italic),
-    color: colorOf(rPr.color),
+    color: resolveThemedColor(
+      typeof rPr.color === "string" ? { val: rPr.color } : rPr.color,
+      themeColors,
+    ),
     highlight: str(rPr.highlight),
-    // Direct hex fill only — a themeFill-bound shading needs the theme palette
-    // resolved with the document context, which runStyleOf doesn't carry.
-    shadingFill: isRecord(rPr.shading) ? str(rPr.shading.fill) : undefined,
+    shadingFill: isRecord(rPr.shading)
+      ? (resolveThemedColor({ ...rPr.shading, themeColor: rPr.shading.themeFill }, themeColors) ??
+        (str(rPr.shading.fill) !== "auto" ? str(rPr.shading.fill) : undefined))
+      : undefined,
     underline,
     underlineStyle,
     underlineColor,

@@ -16,7 +16,29 @@ import {
 } from "@docen/layout";
 import type { DocumentOptions, SectionChild, SectionOptions } from "@office-open/docx";
 
-import { resolvePageSize, themeFontsOf } from "../extensions/utils";
+type BackgroundRawMedia = { fileName?: string; type?: string; data?: Uint8Array };
+
+/** Read docen's raw package-member fallback fields without widening the public
+ *  background type; the structured image/theme fields stay statically typed. */
+function rawBackgroundFields(value: DocumentOptions["background"]): {
+  rawXml: string;
+  rawMedia: BackgroundRawMedia[];
+} {
+  if (!isRecord(value)) return { rawXml: "", rawMedia: [] };
+  return {
+    rawXml: typeof value.rawXml === "string" ? value.rawXml : "",
+    rawMedia: Array.isArray(value.rawMedia)
+      ? value.rawMedia.filter((item): item is BackgroundRawMedia => isRecord(item))
+      : [],
+  };
+}
+
+import {
+  resolvePageSize,
+  resolveThemedColor,
+  themeColorsOf,
+  themeFontsOf,
+} from "../extensions/utils";
 import { indexCharacterStyles } from "../style-cascade";
 import type { ProjectContext } from "./context";
 import {
@@ -216,6 +238,7 @@ export function projectPageFurniture(
       doc.theme?.fontScheme,
       doc.settings?.themeFontLang?.eastAsia ?? "zh-CN",
     ),
+    themeColors: themeColorsOf(doc.theme?.colorScheme),
     listCounters: new Map(),
     openComments: new Set(),
     // Word forbids footnote references in headers/footers — a fresh counter
@@ -255,26 +278,20 @@ export function projectPageFurniture(
  *  reference shows the same bit coverage with far weaker periodicity), and a
  *  1:1 dot screen on the canvas reads as harsh yellow speckle against it.
  *  Average the two colors by bit coverage into one flat color instead. */
-export function projectPageBackground(doc: DocumentOptions): ProjectedPageBackground | undefined {
-  const bg = doc.background as
-    | {
-        color?: string;
-        image?: { type?: unknown; data?: unknown };
-        rawXml?: string;
-        rawMedia?: Array<{ fileName?: string; type?: string; data?: Uint8Array }>;
-      }
-    | undefined;
+export function projectPageBackground(
+  doc: DocumentOptions,
+  themeColors?: ProjectContext["themeColors"],
+): ProjectedPageBackground | undefined {
+  const bg = doc.background;
   if (!bg) return undefined;
-  const raw = bg.rawXml ?? "";
+  const { rawXml, rawMedia } = rawBackgroundFields(bg);
+  const raw = rawXml;
   const hexOf = (m: RegExpMatchArray | null): string | undefined =>
     m ? m[1].toUpperCase() : undefined;
   // The structured color is the primary source (a plain w:background @w:color
   // parses there and never round-trips a rawXml); the verbatim XML arm is the
   // pattern-fill fallback.
-  const structured =
-    typeof bg.color === "string" && bg.color !== "auto"
-      ? bg.color.replace("#", "").toUpperCase()
-      : undefined;
+  const structured = resolveThemedColor(bg, themeColors);
   const color = structured ?? hexOf(raw.match(/<w:background[^>]*\sw:color="([0-9A-Fa-f]{6})"/));
   const out: ProjectedPageBackground = color ? { color } : {};
   // Word's Fill Effects → Picture: a full-page image fill (v:fill
@@ -284,7 +301,7 @@ export function projectPageBackground(doc: DocumentOptions): ProjectedPageBackgr
   const frameFill = raw.match(/<v:fill[^>]*type="frame"[^>]*>/);
   const frameRid = frameFill?.[0].match(/\sr:id="\{?([^"}]+)\}?"/)?.[1];
   const frameMedia =
-    frameRid !== undefined ? bg.rawMedia?.find((m) => m.fileName === frameRid) : undefined;
+    frameRid !== undefined ? rawMedia.find((m) => m.fileName === frameRid) : undefined;
   const frameData = bg.image?.data ?? frameMedia?.data;
   if (frameData != null) {
     const src = pictureSrc({ type: bg.image?.type ?? frameMedia?.type, data: frameData });
@@ -293,8 +310,8 @@ export function projectPageBackground(doc: DocumentOptions): ProjectedPageBackgr
   const fill = raw.match(/<v:fill[^>]*type="pattern"[^>]*>/);
   const rid = fill?.[0].match(/\sr:id="\{?([^"}]+)\}?"/)?.[1];
   const media =
-    (rid ? bg.rawMedia?.find((m) => m.fileName === rid) : undefined) ??
-    bg.rawMedia?.find((m) => m.type === "bmp");
+    (rid ? rawMedia.find((m) => m.fileName === rid) : undefined) ??
+    rawMedia.find((m) => m.type === "bmp");
   const data = media?.data;
   if (!fill || !data) return Object.keys(out).length > 0 ? out : undefined;
   if (
@@ -352,7 +369,10 @@ export function projectPageBackground(doc: DocumentOptions): ProjectedPageBackgr
 }
 
 /** One side of the projected w:pgBorders (see {@link ProjectedPageBorders}). */
-function projectPageBorderSide(v: unknown): ProjectedPageBorder | undefined {
+function projectPageBorderSide(
+  v: unknown,
+  themeColors?: ProjectContext["themeColors"],
+): ProjectedPageBorder | undefined {
   if (!isRecord(v)) return undefined;
   const style = str(v.style);
   // nil/none explicitly paint nothing; an absent side is simply not rendered.
@@ -362,14 +382,17 @@ function projectPageBorderSide(v: unknown): ProjectedPageBorder | undefined {
     style,
     // w:sz counts 1/8 pt; Word's default 4 = 0.5 pt ≈ 0.67 px.
     widthPx: size != null ? eighthPtToPx(size) : eighthPtToPx(4),
-    color: str(v.color),
+    color: resolveThemedColor(v, themeColors),
     spacePt: num(v.space),
   };
 }
 
 /** Project a section's w:pgBorders for painting: per-side strokes, the pages
  *  that paint them, and the offset reference (page edge vs text margin). */
-export function projectPageBorders(properties: unknown): ProjectedPageBorders | undefined {
+export function projectPageBorders(
+  properties: unknown,
+  themeColors?: ProjectContext["themeColors"],
+): ProjectedPageBorders | undefined {
   const raw =
     isRecord(properties) && isRecord(properties.pageBorders)
       ? (properties.pageBorders as Rec)
@@ -379,10 +402,10 @@ export function projectPageBorders(properties: unknown): ProjectedPageBorders | 
     display: str(raw.display) as ProjectedPageBorders["display"],
     offsetFrom: str(raw.offsetFrom) as ProjectedPageBorders["offsetFrom"],
     behind: raw.zOrder === "back" || undefined,
-    top: projectPageBorderSide(raw.top),
-    right: projectPageBorderSide(raw.right),
-    bottom: projectPageBorderSide(raw.bottom),
-    left: projectPageBorderSide(raw.left),
+    top: projectPageBorderSide(raw.top, themeColors),
+    right: projectPageBorderSide(raw.right, themeColors),
+    bottom: projectPageBorderSide(raw.bottom, themeColors),
+    left: projectPageBorderSide(raw.left, themeColors),
   };
   const hasSide = borders.top || borders.right || borders.bottom || borders.left;
   return hasSide ? borders : undefined;

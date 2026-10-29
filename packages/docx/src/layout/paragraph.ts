@@ -14,6 +14,7 @@ import {
   type LayoutTextStyle,
 } from "@docen/layout";
 
+import { resolveThemedColor } from "../extensions/utils";
 import type { ProjectContext } from "./context";
 import { projectDrawings } from "./drawing";
 import {
@@ -70,7 +71,7 @@ export function projectParagraph(p: BodyParagraph, ctx: ProjectContext): LayoutP
   // chain over docDefaults (Word's effective-rPr resolution), so a style's
   // color/underline/strikethrough reach runs that carry no rPr of their own,
   // exactly as bold/italic already did.
-  const chainDefRun = runStyleOf({ ...docRPr, ...chainRPr });
+  const chainDefRun = runStyleOf({ ...docRPr, ...chainRPr }, ctx.themeColors);
   const defaultTextStyle: LayoutTextStyle = {
     family: toFamily(null, defFont, ctx.themeFonts) ?? {},
     sizePx: ptToPx(markSizePt),
@@ -210,6 +211,7 @@ export function projectParagraph(p: BodyParagraph, ctx: ProjectContext): LayoutP
     return {
       style: typeof v.style === "string" ? v.style : undefined,
       px: size != null ? eighthPtToPx(size) : undefined,
+      color: resolveThemedColor(v, ctx.themeColors),
       spacePx: space != null ? ptToPx(space) : undefined,
     };
   };
@@ -227,8 +229,9 @@ export function projectParagraph(p: BodyParagraph, ctx: ProjectContext): LayoutP
       ? chainPPr.shading
       : {};
   const shadingFill =
-    typeof shdRec.fill === "string" && shdRec.fill !== "auto" && shdRec.type !== "nil"
-      ? shdRec.fill
+    shdRec.type !== "nil"
+      ? (resolveThemedColor({ ...shdRec, themeColor: shdRec.themeFill }, ctx.themeColors) ??
+        (typeof shdRec.fill === "string" && shdRec.fill !== "auto" ? shdRec.fill : undefined))
       : undefined;
 
   // The list marker: a bullet emits its glyph; a numbered level advances its

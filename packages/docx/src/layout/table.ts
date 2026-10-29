@@ -12,6 +12,7 @@ import {
 } from "@docen/layout";
 import type { TableCellOptions, TableOptions } from "@office-open/docx";
 
+import { resolveThemedColor } from "../extensions/utils";
 import { indexTableStyles } from "../style-cascade";
 import type { ProjectContext } from "./context";
 import { eighthPtToPx, isRecord, measureTwip, num, type LayoutCell, type Rec } from "./guards";
@@ -62,10 +63,13 @@ type CellBorders = NonNullable<LayoutCell["borders"]>;
 
 /** One w:tcBorders/w:tblBorders edge → px + color (nil/none survive as declared
  *  zero-weight edges; the conflict resolver skips them). */
-function toBorderEdge(v: unknown): LayoutBorderEdge | undefined {
+function toBorderEdge(
+  v: unknown,
+  themeColors: ProjectContext["themeColors"],
+): LayoutBorderEdge | undefined {
   if (!isRecord(v)) return undefined;
   const size = num(v.size);
-  const color = typeof v.color === "string" && v.color !== "auto" ? v.color : undefined;
+  const color = resolveThemedColor(v, themeColors);
   return {
     style: typeof v.style === "string" ? v.style : undefined,
     px: size != null ? eighthPtToPx(size) : undefined,
@@ -73,20 +77,27 @@ function toBorderEdge(v: unknown): LayoutBorderEdge | undefined {
   };
 }
 
-function toBorders(b: unknown): CellBorders | undefined {
+function toBorders(
+  b: unknown,
+  themeColors: ProjectContext["themeColors"],
+): CellBorders | undefined {
   if (!isRecord(b)) return undefined;
   const out = {
-    top: toBorderEdge(b.top),
-    right: toBorderEdge(b.right),
-    bottom: toBorderEdge(b.bottom),
-    left: toBorderEdge(b.left),
+    top: toBorderEdge(b.top, themeColors),
+    right: toBorderEdge(b.right, themeColors),
+    bottom: toBorderEdge(b.bottom, themeColors),
+    left: toBorderEdge(b.left, themeColors),
   };
   return out.top || out.right || out.bottom || out.left ? out : undefined;
 }
 
 /** w:tblBorders → the engine's table-level defaults, merging the direct
  *  tblPr borders over the table style's per side. */
-function toTableBorders(direct: unknown, styleTable: unknown): LayoutTable["borders"] | undefined {
+function toTableBorders(
+  direct: unknown,
+  styleTable: unknown,
+  themeColors: ProjectContext["themeColors"],
+): LayoutTable["borders"] | undefined {
   const d = isRecord(direct) ? direct : undefined;
   const s = isRecord(styleTable)
     ? isRecord(styleTable.borders)
@@ -95,7 +106,7 @@ function toTableBorders(direct: unknown, styleTable: unknown): LayoutTable["bord
     : undefined;
   if (!d && !s) return undefined;
   const edge = (side: string): LayoutBorderEdge | undefined =>
-    toBorderEdge(d?.[side]) ?? toBorderEdge(s?.[side]);
+    toBorderEdge(d?.[side], themeColors) ?? toBorderEdge(s?.[side], themeColors);
   const out = {
     top: edge("top"),
     bottom: edge("bottom"),
@@ -117,14 +128,15 @@ function toTableBorders(direct: unknown, styleTable: unknown): LayoutTable["bord
 function projectCell(c: TableCellOptions, ctx: ProjectContext, rowspan?: number): LayoutCell {
   const shd = isRecord(c.shading) ? c.shading : undefined;
   const fill =
-    shd && typeof shd.fill === "string" && shd.fill !== "auto" && shd.type !== "nil"
-      ? shd.fill
+    shd && shd.type !== "nil"
+      ? (resolveThemedColor({ ...shd, themeColor: shd.themeFill }, ctx.themeColors) ??
+        (typeof shd.fill === "string" && shd.fill !== "auto" ? shd.fill : undefined))
       : undefined;
   return {
     colspan: c.columnSpan,
     rowspan: rowspan ?? 1,
     insets: toCellInsets(c.margins),
-    borders: toBorders(c.borders),
+    borders: toBorders(c.borders, ctx.themeColors),
     fill,
     verticalAlign:
       c.verticalAlign === "center" || c.verticalAlign === "bottom" ? c.verticalAlign : undefined,
@@ -223,7 +235,7 @@ export function projectTable(t: TableOptions, ctx: ProjectContext): LayoutTable 
     indentPx,
     columnWidthsPx: columnWidthsPx && columnWidthsPx.length > 0 ? columnWidthsPx : undefined,
     cellInsets: toCellInsets(t.margins) ?? WORD_DEFAULT_CELL_INSETS,
-    borders: toTableBorders(t.borders, styleTable),
+    borders: toTableBorders(t.borders, styleTable, ctx.themeColors),
     rows,
   };
 }
