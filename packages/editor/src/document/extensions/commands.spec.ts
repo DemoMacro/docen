@@ -1304,6 +1304,65 @@ describe("arrange — floating drawings", () => {
     expect(chart.series[0]?.values).toEqual([{ index: 5, value: 13 }, 19]);
   });
 
+  it("chart edits sync point counts and prune stale point overrides", () => {
+    const editor = new Editor({
+      element: null,
+      extensions: EXTENSIONS,
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [
+              {
+                type: "chart",
+                attrs: {
+                  chart: {
+                    transformation: { width: 200, height: 120 },
+                    categories: ["A", "B"],
+                    series: [
+                      {
+                        name: "Revenue",
+                        categoryPointCount: 2,
+                        valuePointCount: 2,
+                        values: [1, 2],
+                        dataPoints: [{ index: 1 }],
+                        dataLabels: { labels: [{ index: 1 }] },
+                      },
+                    ],
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      } as never,
+    });
+    selectFirstNode(editor, "chart");
+    expect(
+      editor.commands["chart-data-apply"](
+        JSON.stringify({
+          categories: ["Only"],
+          series: [{ name: "Revenue", values: [9] }],
+        }),
+      ),
+    ).toBe(true);
+
+    const chart = firstNodeOf(editor, "chart").attrs.chart as {
+      series: {
+        categoryPointCount?: number;
+        valuePointCount?: number;
+        dataPoints?: { index: number }[];
+        dataLabels?: { labels?: { index: number }[] };
+      }[];
+    };
+
+    expect(chart.series[0]?.categoryPointCount).toBe(1);
+    expect(chart.series[0]?.valuePointCount).toBe(1);
+    expect(chart.series[0]?.dataPoints).toEqual([]);
+    expect(chart.series[0]?.dataLabels?.labels).toEqual([]);
+  });
+
   it("rotate steps image rotation and toggles the tri-state flips", () => {
     const editor = build();
     floatDoc(editor);

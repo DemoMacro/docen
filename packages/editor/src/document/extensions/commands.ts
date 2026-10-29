@@ -574,6 +574,38 @@ function valueWithNumber(previous: ChartValue, value: number | null): ChartValue
   return previous !== null && typeof previous === "object" ? { ...previous, value } : value;
 }
 
+/** Keep round-trip point counts and point-level decorations aligned after the
+ *  flat Edit Data grid changes row/value lengths. A `false` count explicitly
+ *  means "do not emit ptCount", so that authoring choice stays intact. */
+function syncChartDataCounts(
+  chart: ChartOptions,
+  previous: ChartOptions,
+  categoryLength?: number,
+  seriesLengths?: (number | undefined)[],
+): void {
+  chart.series = (chart.series ?? []).map((series, index) => {
+    if (!("values" in series)) return series;
+    const length = seriesLengths?.[index];
+    const next = { ...series };
+    if (length === undefined) return next;
+    if (
+      categoryLength !== undefined &&
+      previous.series?.[index]?.categoryPointCount !== false &&
+      next.categoryPointCount !== false
+    )
+      next.categoryPointCount = categoryLength;
+    if (previous.series?.[index]?.valuePointCount !== false && next.valuePointCount !== false)
+      next.valuePointCount = length;
+    if (next.dataPoints) next.dataPoints = next.dataPoints.filter((point) => point.index < length);
+    if (next.dataLabels?.labels)
+      next.dataLabels = {
+        ...next.dataLabels,
+        labels: next.dataLabels.labels.filter((label) => label.index < length),
+      };
+    return next;
+  }) as ChartOptions["series"];
+}
+
 /**
  * What the crop mode commits — the selected image's a:srcRect insets as
  * fractions of the source (0.1 = 10% off that edge), stamped by {@link
@@ -5002,6 +5034,12 @@ export const DocumentCommands = Extension.create({
                     : [],
               };
             }) as ChartOptions["series"];
+          syncChartDataCounts(
+            chart,
+            target.chart,
+            parsed.categories?.length,
+            parsed.series?.map((series) => series.values?.length),
+          );
           return stampChart(tr, target, chart);
         },
       // Delete Key on a sub-selected series (Word): the series leaves the

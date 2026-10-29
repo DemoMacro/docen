@@ -36,6 +36,26 @@ function texts(tree: IGroup): string[] {
 }
 
 describe("chart data-label overrides", () => {
+  it("falls back to chart-level data labels", () => {
+    const tree = new Group();
+    paintChartMember(tree, {
+      kind: "chart",
+      x: 0,
+      y: 0,
+      width: 400,
+      height: 200,
+      chart: {
+        type: "column",
+        categories: ["A", "B"],
+        dataLabels: { showVal: true },
+        series: [{ values: [12.3, 4.56] }],
+      },
+    } satisfies Extract<LayoutDrawingMember, { kind: "chart" }>);
+
+    expect(texts(tree)).toContain("12.3");
+    expect(texts(tree)).toContain("4.56");
+  });
+
   it("renders custom, deleted, and point-formatted labels", () => {
     const tree = new Group();
     paintChartMember(tree, {

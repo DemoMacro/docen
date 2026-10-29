@@ -98,6 +98,30 @@ describe("paintChartMember", () => {
     expect(textOf(tree)).toContain("Third");
   });
 
+  it("honors an explicit value-axis range", () => {
+    const tree = new Group();
+    paintChartMember(
+      tree,
+      member({
+        type: "line",
+        categories: ["A", "B"],
+        series: [{ values: [3, 4] }],
+        axes: [
+          {
+            kind: "value",
+            position: "left",
+            scaling: { min: 2, max: 6 },
+          },
+        ],
+      }),
+    );
+    const labels = textOf(tree);
+
+    expect(labels).toContain("2");
+    expect(labels).toContain("2.8");
+    expect(labels).toContain("6");
+  });
+
   it("aligns scatter values without dropping blank slots", () => {
     const tree = new Group();
     paintChartMember(

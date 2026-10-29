@@ -204,6 +204,8 @@ interface ChartModel {
   gapWidth: number;
   /** Secondary plot groups (bar+line combos), in OOXML plot order. */
   secondaryGroups: Rec[];
+  /** Chart-level c:dLbls; a series' own labels override missing flags. */
+  dataLabels: Rec | undefined;
   /** The verbatim axis records; dual value axes resolve combo scales. */
   axes: Rec[];
 }
@@ -283,6 +285,7 @@ function readModel(chart: Rec): ChartModel | undefined {
         : valueAxis.majorGridlines === true || isRecord(valueAxis.majorGridlines),
     gapWidth: num(chart.gapWidth) ?? 150,
     secondaryGroups,
+    dataLabels: isRecord(chart.dataLabels) ? chart.dataLabels : undefined,
     axes,
   };
 }
@@ -434,14 +437,18 @@ interface PlotBox {
 // ── value-axis charts (column / bar / line / area) ──
 
 /** A series' enabled value labels. OOXML defaults every flag off. */
-function showsValueLabels(series: Rec): boolean {
-  const labels = isRecord(series.dataLabels) ? series.dataLabels : undefined;
-  return labels?.showVal === true;
+function effectiveDataLabels(series: Rec, chartLabels?: Rec): Rec | undefined {
+  const seriesLabels = isRecord(series.dataLabels) ? series.dataLabels : undefined;
+  return seriesLabels ?? chartLabels;
+}
+
+function showsValueLabels(series: Rec, chartLabels?: Rec): boolean {
+  return effectiveDataLabels(series, chartLabels)?.showVal === true;
 }
 
 /** Resolved per-point label controls after CT_DLbl overrides. */
-function pointLabelOf(series: Rec, index: number) {
-  const labels = isRecord(series.dataLabels) ? series.dataLabels : undefined;
+function pointLabelOf(series: Rec, index: number, chartLabels?: Rec) {
+  const labels = effectiveDataLabels(series, chartLabels);
   const values = Array.isArray(series.values) ? series.values : [];
   const valuePoint = values.find((item) => isRecord(item) && num(item.index) === index) as
     | Rec
@@ -478,14 +485,16 @@ function pointLabelOf(series: Rec, index: number) {
     deleted: labels?.delete === true || override?.delete === true,
     format: formatOf(numberFormat) ?? str(valuePoint?.formatCode) ?? formatOf(series.formatCode),
     position: str(override?.position),
-    visible: customText !== undefined || (showsValueLabels(series) && override?.showVal !== false),
+    visible:
+      customText !== undefined ||
+      (showsValueLabels(series, chartLabels) && override?.showVal !== false),
   };
 }
 
 /** A label's resolved fill after the PPTX projection theme pass; Word falls
  *  back to axis gray when the label carries no explicit text fill. */
 function labelColorOf(series: Rec): string {
-  const labels = isRecord(series.dataLabels) ? series.dataLabels : undefined;
+  const labels = effectiveDataLabels(series);
   const text = isRecord(labels?.textProperties) ? labels!.textProperties : undefined;
   const paragraphs = Array.isArray(text?.paragraphs) ? text!.paragraphs.filter(isRecord) : [];
   const props = paragraphs
@@ -519,18 +528,46 @@ function axisById(model: ChartModel, id: unknown): Rec | undefined {
 function valueBoundsOf(values: (number | undefined)[], axis: Rec | undefined) {
   const numbers = numericValues(values);
   const unit = num(axis?.majorUnit);
-  if (!unit || unit <= 0) return niceBounds(Math.min(0, ...numbers), Math.max(0, ...numbers));
-  const min = Math.min(0, ...numbers);
-  const max = Math.max(0, ...numbers);
-  const lower = Math.floor(min / unit) * unit;
-  const upper = Math.ceil(max / unit) * unit;
-  // Office leaves one major division of headroom on a signed axis; this also
-  // keeps dual combo axes on the same tick count as the primary scale.
-  return {
-    min: lower,
-    max: upper + unit,
-    step: unit,
-  };
+  let bounds =
+    !unit || unit <= 0
+      ? niceBounds(Math.min(0, ...numbers), Math.max(0, ...numbers))
+      : (() => {
+          const min = Math.min(0, ...numbers);
+          const max = Math.max(0, ...numbers);
+          const lower = Math.floor(min / unit) * unit;
+          const upper = Math.ceil(max / unit) * unit;
+          // Office leaves one major division of headroom on a signed axis;
+          // this also keeps dual combo axes on the same tick count.
+          return { min: lower, max: upper + unit, step: unit };
+        })();
+  const scaling = isRecord(axis?.scaling) ? axis!.scaling : undefined;
+  const declaredMin = num(scaling?.min);
+  const declaredMax = num(scaling?.max);
+  if (declaredMin !== undefined) bounds.min = declaredMin;
+  if (declaredMax !== undefined) bounds.max = declaredMax;
+  if (bounds.max <= bounds.min) bounds.max = bounds.min + (unit || 1);
+  if ((!unit || unit <= 0) && (declaredMin !== undefined || declaredMax !== undefined))
+    bounds.step = (bounds.max - bounds.min) / 5;
+  return bounds;
+}
+
+/** Stacked charts calculate auto totals first, then honor the same declared
+ *  value-axis scale as clustered plots. */
+function declaredBounds(
+  bounds: { min: number; max: number; step: number },
+  axis: Rec | undefined,
+): { min: number; max: number; step: number } {
+  const scaling = isRecord(axis?.scaling) ? axis!.scaling : undefined;
+  const min = num(scaling?.min);
+  const max = num(scaling?.max);
+  const unit = num(axis?.majorUnit);
+  const next = { ...bounds };
+  if (min !== undefined) next.min = min;
+  if (max !== undefined) next.max = max;
+  if (next.max <= next.min) next.max = next.min + (unit || 1);
+  if ((!unit || unit <= 0) && (min !== undefined || max !== undefined))
+    next.step = (next.max - next.min) / 5;
+  return next;
 }
 
 /** A value-label's screen point for OOXML's bar label positions. */
@@ -570,8 +607,8 @@ function labelAnchorOf(
 }
 
 /** A chart sub-element's hit registration — the box and any shape arrive in
- *  chart-local coordinates, the hit table is page-local (the registrar in
- *  {@link paintChartMember} folds the origin in). */
+ * chart-local coordinates, the hit table is page-local (the registrar in
+ * {@link paintChartMember} folds the origin in). */
 type ElementReg = (part: ChartPartHit, x: number, y: number, width: number, height: number) => void;
 
 function paintValueChart(tree: IGroup, model: ChartModel, plot: PlotBox, reg?: ElementReg): void {
@@ -596,7 +633,10 @@ function paintValueChart(tree: IGroup, model: ChartModel, plot: PlotBox, reg?: E
       const sum = all.reduce((acc, vals) => acc + (vals[c] ?? 0), 0);
       totals.push(model.grouping === "percentStacked" ? 100 : sum);
     }
-    bounds = niceBounds(Math.min(0, ...totals), Math.max(0, ...totals));
+    bounds = declaredBounds(
+      niceBounds(Math.min(0, ...totals), Math.max(0, ...totals)),
+      primaryValueAxis,
+    );
   } else {
     bounds = valueBoundsOf(flat, primaryValueAxis);
   }
@@ -726,9 +766,9 @@ function paintValueChart(tree: IGroup, model: ChartModel, plot: PlotBox, reg?: E
           );
         }
       }
-      if (showsValueLabels(series)) {
+      if (showsValueLabels(series, model.dataLabels)) {
         for (const p of pts) {
-          const settings = pointLabelOf(series, p.c);
+          const settings = pointLabelOf(series, p.c, model.dataLabels);
           if (settings.deleted) continue;
           const anchor = labelAnchorOf(
             settings.position,
@@ -788,8 +828,8 @@ function paintValueChart(tree: IGroup, model: ChartModel, plot: PlotBox, reg?: E
           : { x: plot.x + c * band, y: y0, width: band, height: h };
         const paint = pointFill(c, horizontal ? bar.width : 0, horizontal ? 0 : bar.height);
         tree.add(new Rect({ ...bar, fill: typeof paint === "string" ? `#${paint}` : paint }));
-        if (showsValueLabels(series)) {
-          const settings = pointLabelOf(series, c);
+        if (showsValueLabels(series, model.dataLabels)) {
+          const settings = pointLabelOf(series, c, model.dataLabels);
           if (settings.deleted) return;
           const natural = horizontal
             ? barLabelPoint(
@@ -837,8 +877,8 @@ function paintValueChart(tree: IGroup, model: ChartModel, plot: PlotBox, reg?: E
           };
       const paint = pointFill(c, bar.width, bar.height);
       tree.add(new Rect({ ...bar, fill: typeof paint === "string" ? `#${paint}` : paint }));
-      if (showsValueLabels(series)) {
-        const settings = pointLabelOf(series, c);
+      if (showsValueLabels(series, model.dataLabels)) {
+        const settings = pointLabelOf(series, c, model.dataLabels);
         if (settings.deleted) return;
         const natural = barLabelPoint(
           v,
@@ -1313,11 +1353,16 @@ function paintSecondaryGroups(tree: IGroup, model: ChartModel, plot: PlotBox): v
           );
         });
       }
-      if (showsValueLabels(seriesItem)) {
+      const labels = isRecord(group.dataLabels) ? group.dataLabels : model.dataLabels;
+      if (showsValueLabels(seriesItem, labels)) {
         points.forEach((point) => {
           label(
             tree,
-            formatChartValue(point.value, formatOf(axis?.numberFormat)),
+            formatChartValue(
+              point.value,
+              pointLabelOf(seriesItem, point.category, labels).format ??
+                formatOf(axis?.numberFormat),
+            ),
             point.x,
             point.y - 8,
             LABEL_PX - 1,
