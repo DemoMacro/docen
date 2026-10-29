@@ -310,6 +310,31 @@ describe("shapes", () => {
     ]);
   });
 
+  it("prefers a renderable alternate fallback over an opaque extension", () => {
+    const { slides } = project({
+      slides: [
+        {
+          children: [
+            {
+              alternateContent: {
+                choices: [
+                  {
+                    requires: "p14",
+                    child: { rawXml: "<p14:extension />" },
+                  },
+                ],
+                fallback: {
+                  shape: { x: 0, y: 0, width: 914400, height: 914400 },
+                },
+              },
+            },
+          ],
+        },
+      ],
+    });
+    expect(slides[0]!.members).toEqual([expect.objectContaining({ kind: "shape" })]);
+  });
+
   it("derives SmartArt fallback nodes from the complete 0.15 data model", () => {
     const { slides } = project({
       slides: [

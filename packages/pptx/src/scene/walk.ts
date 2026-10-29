@@ -68,6 +68,28 @@ function hiddenOf(child: SlideChild): boolean {
   return nv?.hidden === true;
 }
 
+/** A branch the projection can actually paint. PowerPoint's mc:Choice may
+ *  lead with an opaque extension; a later Choice or the Fallback is often the
+ *  standard shape/table/chart the editor can render. */
+function projectableChildOf(child: SlideChild): boolean {
+  if ("contentPart" in child || "rawXml" in child) return false;
+  if ("alternateContent" in child)
+    return (
+      child.alternateContent.choices.some(({ child: branch }) => projectableChildOf(branch)) ||
+      child.alternateContent.fallback !== undefined
+    );
+  return true;
+}
+
+function alternateChildOf(
+  alternate: Extract<SlideChild, { alternateContent: unknown }>,
+): SlideChild | undefined {
+  return (
+    alternate.alternateContent.choices.map(({ child }) => child).find(projectableChildOf) ??
+    alternate.alternateContent.fallback
+  );
+}
+
 export function childMembers(
   children: readonly SlideChild[],
   t: Xform,
@@ -101,7 +123,7 @@ export function childMembers(
     } else if ("group" in child) {
       out.push(...groupMembers(child.group, t, [...prefix, i], context));
     } else if ("alternateContent" in child) {
-      const selected = child.alternateContent.choices[0]?.child ?? child.alternateContent.fallback;
+      const selected = alternateChildOf(child);
       if (selected) out.push(...childMembers([selected], t, cp ?? [], context));
     } else if ("lockedCanvas" in child) {
       for (const locked of child.lockedCanvas.children ?? []) {
