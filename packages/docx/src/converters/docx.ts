@@ -6,6 +6,7 @@ import {
   parseDocumentSync,
 } from "@office-open/docx";
 import type {
+  TrackChangeChild,
   DocumentOptions,
   SectionChild,
   SectionPropertiesOptions,
@@ -327,10 +328,10 @@ export class DocxManager {
 
     const styles = (docAttrs.styles ?? undefined) as DocumentOptions["styles"] | undefined;
     const core = (docAttrs.core ?? undefined) as DocxCoreProperties | undefined;
-    const background = (docAttrs.background ?? undefined) as
+    const background = parseJsonBinary(docAttrs.background ?? undefined) as
       | DocumentOptions["background"]
       | undefined;
-    const documentExtras = (docAttrs.documentExtras ?? undefined) as
+    const documentExtras = parseJsonBinary(docAttrs.documentExtras ?? undefined) as
       | Partial<DocumentOptions>
       | undefined;
     const bibliography = (docAttrs.bibliography ?? undefined) as
@@ -515,7 +516,7 @@ export class DocxManager {
     // `core` back to docProps/core.xml.
     const attrs: Record<string, unknown> = {};
     if (docOpts.styles) attrs.styles = docOpts.styles;
-    if (docOpts.background) attrs.background = docOpts.background;
+    if (docOpts.background) attrs.background = serializeJsonBinary(docOpts.background);
     // Source numbering definitions (abstractNum) carried verbatim so list
     // markers round-trip; compile merges these with regenerated ordered defs.
     if (docOpts.numbering) attrs.numbering = docOpts.numbering;
@@ -538,7 +539,7 @@ export class DocxManager {
     for (const [k, v] of Object.entries(docOpts as unknown as Record<string, unknown>)) {
       if (COMPILE_OWNED_KEYS.has(k)) continue;
       if (v === undefined || v === null) continue;
-      documentExtras[k] = k === "rawParts" ? serializeRawParts(v) : v;
+      documentExtras[k] = k === "rawParts" ? serializeRawParts(v) : serializeJsonBinary(v);
     }
     if (Object.keys(documentExtras).length > 0) attrs.documentExtras = documentExtras;
     if (Object.keys(attrs).length > 0) doc.attrs = attrs;
@@ -1007,40 +1008,45 @@ export class DocxManager {
       if (render) Object.assign(runOpts, render((mark.attrs ?? {}) as Record<string, unknown>));
     }
 
-    if (rubyMark) {
-      children.push(this.compileRubyRun(rubyMark.attrs, text, runOpts));
+    // Container marks nest in OOXML order: w:ins/w:del → w:hyperlink → w:ruby.
+    // Keeping them compositional preserves Word's common inserted-link case.
+    const leaf = this.compileContainerLeaf(text, runOpts, rubyMark, linkMark);
+    if (!trackMark) {
+      children.push(leaf);
       return;
     }
+    const kind = trackMark.type;
+    if (kind !== "insertion" && kind !== "deletion") return;
+    const trackChildren = [leaf] as TrackChangeChild[];
+    const id = typeof trackMark.attrs?.id === "number" ? trackMark.attrs.id : 0;
+    const author = typeof trackMark.attrs?.author === "string" ? trackMark.attrs.author : "";
+    const date = typeof trackMark.attrs?.date === "string" ? trackMark.attrs.date : "";
+    const body = { id, author, date, children: trackChildren };
+    children.push(kind === "insertion" ? { insertion: body } : { deletion: body });
+  }
 
+  private compileContainerLeaf(
+    text: string,
+    runOpts: Record<string, unknown>,
+    rubyMark: NonNullable<JSONContent["marks"]>[number] | undefined,
+    linkMark: NonNullable<JSONContent["marks"]>[number] | undefined,
+  ): ParagraphChild {
+    if (rubyMark) return this.compileRubyRun(rubyMark.attrs, text, runOpts);
     if (linkMark) {
       const href = linkMark.attrs?.href as string;
       const { text: _, ...runWithoutText } = runOpts;
       const linkChildren: (RunOptions | string)[] = [];
       if (text) linkChildren.push({ ...runWithoutText, text } as RunOptions);
-      children.push({
+      return {
         hyperlink: {
           url: href.startsWith("#") ? undefined : href,
           anchor: href.startsWith("#") ? href.slice(1) : undefined,
-          // resolveHyperlink parks w:tooltip on the mark's title attr.
           tooltip: (linkMark.attrs?.title as string | null | undefined) ?? undefined,
           children: linkChildren,
         },
-      });
-      return;
+      };
     }
-    if (trackMark) {
-      // Wrap the run back into a w:ins/w:del container — the reverse of
-      // resolveTrackedChange. compileTrackedChangeRun returns the typed
-      // ParagraphChild branch, so no cast is needed here. office-open's
-      // stringifyDeletedRun emits <w:delText> for deletion children.
-      const kind = trackMark.type;
-      if (kind === "insertion" || kind === "deletion") {
-        children.push(this.compileTrackedChangeRun(kind, trackMark.attrs, text, runOpts));
-        return;
-      }
-    }
-
-    children.push(runOpts as RunOptions);
+    return runOpts as RunOptions;
   }
 
   /**
@@ -1050,22 +1056,6 @@ export class DocxManager {
    * cast, and `typeof` guards read `attrs` type-safely (no `as number/string`).
    * stringifyDeletedRun emits `<w:delText>` automatically for deletion children.
    */
-  private compileTrackedChangeRun(
-    type: "insertion" | "deletion",
-    attrs: Record<string, unknown> | undefined,
-    text: string,
-    runOpts: Record<string, unknown>,
-  ): ParagraphChild {
-    const { text: _, ...runWithoutText } = runOpts;
-    const trackChildren: (RunOptions | string)[] = [];
-    if (text) trackChildren.push({ ...runWithoutText, text } as RunOptions);
-    const id = typeof attrs?.id === "number" ? attrs.id : 0;
-    const author = typeof attrs?.author === "string" ? attrs.author : "";
-    const date = typeof attrs?.date === "string" ? attrs.date : "";
-    const body = { id, author, date, children: trackChildren };
-    return type === "insertion" ? { insertion: body } : { deletion: body };
-  }
-
   /** Wrap a run back into a w:ruby container — the reverse of resolveRuby.
    *  w:ruby lives INSIDE its w:r (a run-children member, like w:tab), so the
    *  emitted shape is a text-less run `{ children: [{ ruby }] }`. The
@@ -1366,7 +1356,7 @@ export function parseDOCXSync(
 /**
  * Options for {@link generateDOCX} / {@link generateDOCXStream}.
  */
-export interface DocxGenerateOptions<T extends OutputType = "nodebuffer"> {
+export interface DocxGenerateOptions<T extends OutputType = "uint8array"> {
   /**
    * Pre-compilation steps run on the JSON in place (default: `prepareImages()`).
    * - `true` / `undefined`: default image pre-fetch (http(s) → embedded data URL)
@@ -1377,7 +1367,7 @@ export interface DocxGenerateOptions<T extends OutputType = "nodebuffer"> {
    * embedded data (see extensions/image.ts). Mutates the JSON, like `prepareDocument`.
    */
   prepare?: boolean | PrepareStep[];
-  /** Packer options; `type` controls the output format (default `"nodebuffer"` → Buffer). */
+  /** Packer options; `type` controls the output format (default `"uint8array"`). */
   packer?: PackerOptions<T>;
   /**
    * Document-level options injected into the compiled `DocumentOptions` — core
@@ -1423,7 +1413,7 @@ function applyDocumentOptions(
  * (fflate Web Workers). With the default `prepare`, the input `json` is mutated
  * in place (http image URLs become embedded data URLs).
  */
-export async function generateDOCX<T extends OutputType = "nodebuffer">(
+export async function generateDOCX<T extends OutputType = "uint8array">(
   json: JSONContent,
   options?: DocxGenerateOptions<T>,
 ): Promise<OutputByType[T]> {
@@ -1444,7 +1434,7 @@ export async function generateDOCX<T extends OutputType = "nodebuffer">(
  * `prepareDocument` (it is async); call `await prepareDocument(json)` first
  * when http images need embedding. `options.document` is still applied.
  */
-export function generateDOCXSync<T extends OutputType = "nodebuffer">(
+export function generateDOCXSync<T extends OutputType = "uint8array">(
   json: JSONContent,
   options?: DocxGenerateOptions<T>,
 ): OutputByType[T] {

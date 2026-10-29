@@ -1,4 +1,5 @@
 import type { PatchRouteStep } from "@office-open/core";
+import { toUint8ArrayAsync } from "@office-open/core";
 import { parseDocument, patchDocument } from "@office-open/docx";
 import type {
   DocumentPatchCommand,
@@ -26,7 +27,7 @@ export interface DocxPatchContent {
  * A high-level placeholder facade over office-open's ordered
  * `DocumentPatchCommand` API.
  */
-export interface DocxPatchOptions<T extends OutputType = OutputType> {
+export interface DocxPatchOptions<T extends OutputType = "uint8array"> {
   /** Template DOCX to patch. */
   template: Parameters<typeof parseDocument>[0];
   /** Placeholder name → replacement content. */
@@ -40,7 +41,7 @@ export interface DocxPatchOptions<T extends OutputType = OutputType> {
   /** Custom placeholder delimiters (default `{{` / `}}`). */
   placeholderDelimiters?: { start?: string; end?: string };
   /** Output container type. */
-  outputType: T;
+  outputType?: T;
 }
 
 /**
@@ -51,7 +52,7 @@ export interface DocxPatchOptions<T extends OutputType = OutputType> {
  * `children` become the replacement. Patching is delegated to
  * `@office-open/docx`'s `patchDocument`.
  */
-export async function patchDOCX<T extends OutputType>(
+export async function patchDOCX<T extends OutputType = "uint8array">(
   options: DocxPatchOptions<T>,
 ): Promise<OutputByType[T]> {
   const { template, patches, prepare = true, placeholderDelimiters, outputType } = options;
@@ -60,7 +61,10 @@ export async function patchDOCX<T extends OutputType>(
     start: placeholderDelimiters?.start ?? "{{",
     end: placeholderDelimiters?.end ?? "}}",
   };
-  const document = await parseDocument(template);
+  // parseDocument consumes streams; materialize the template once so patching
+  // still has the original bytes instead of a locked stream.
+  const source = await toUint8ArrayAsync(template);
+  const document = await parseDocument(source);
   const replacements = new Map<string, SectionChild[]>();
 
   for (const [key, patchContent] of Object.entries(patches)) {
@@ -75,7 +79,7 @@ export async function patchDOCX<T extends OutputType>(
 
   return patchDocument({
     outputType,
-    data: template,
+    data: source,
     commands,
     placeholderDelimiters: delimiters,
   });

@@ -132,4 +132,47 @@ describe("document binary persistence", () => {
     });
     expect(compiled.rawParts?.[1]).toEqual(text);
   });
+
+  it("serializes document-level binaries for JSON persistence", () => {
+    const source: DocumentOptions = {
+      sections: [{ children: [{ paragraph: { text: "x" } }] }],
+      background: {
+        rawMedia: [{ fileName: "backing.bin", data: new Uint8Array([1, 2, 3]), type: "png" }],
+      },
+      fonts: [{ name: "Custom", embedRegular: { data: new Uint8Array([4, 5, 6]) } }],
+    };
+    const persisted = JSON.parse(
+      JSON.stringify(resolveDocument(source, docxExtensions)),
+    ) as JSONContent;
+    const compiled = compileDocument(persisted, docxExtensions);
+    const extras = compiled as typeof source;
+    expect(Array.from(extras.background?.rawMedia?.[0]?.data as Uint8Array)).toEqual([1, 2, 3]);
+    expect(Array.from(extras.fonts?.[0]?.embedRegular?.data as Uint8Array)).toEqual([4, 5, 6]);
+  });
+
+  it("keeps tracked hyperlink containers nested", () => {
+    const json = docWithAttrs({});
+    const paragraph = json.content![0]! as JSONContent;
+    paragraph.content = [
+      {
+        type: "text",
+        text: "linked",
+        marks: [
+          {
+            type: "insertion",
+            attrs: { id: 3, author: "Ada", date: "2026-01-01T00:00:00Z" },
+          },
+          { type: "link", attrs: { href: "https://example.com" } },
+        ],
+      },
+    ];
+    const compiled = compileDocument(json, docxExtensions);
+    const child = compiled.sections[0]?.children[0] as {
+      paragraph?: { children?: Array<Record<string, unknown>> };
+    };
+    const insertion = child.paragraph?.children?.[0]?.insertion as {
+      children?: Array<{ hyperlink?: { url?: string } }>;
+    };
+    expect(insertion.children?.[0]?.hyperlink?.url).toBe("https://example.com");
+  });
 });

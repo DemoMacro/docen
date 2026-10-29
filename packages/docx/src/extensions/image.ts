@@ -120,8 +120,12 @@ export function renderDocx(node: JSONContent): Record<string, unknown> | null {
     imageOpts.data = media.bytes;
   }
 
-  // Cannot generate an image run without embedded data (external URLs need pre-fetching)
-  if (!imageOpts.data) return null;
+  // A linked-only picture keeps an unreachable image visible as its external
+  // relationship. Data-less non-HTTP sources still cannot become an image run.
+  if (!imageOpts.data) {
+    if (src && /^https?:\/\//i.test(src)) imageOpts.sourceUrl = src;
+    else return null;
+  }
 
   // transformation: width/height are required by OOXML MediaTransformation —
   // default when absent (editor/prepare step normally supplies real dimensions).

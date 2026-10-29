@@ -13,7 +13,13 @@ function bytesOf(value: unknown): Uint8Array | undefined {
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    !ArrayBuffer.isView(value) &&
+    !(value instanceof ArrayBuffer)
+  );
 }
 
 function isBinaryTag(value: unknown): value is { [BINARY_TAG]: string } {

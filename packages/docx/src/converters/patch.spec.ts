@@ -36,6 +36,22 @@ const tableTemplate = (cells: readonly string[][]): Uint8Array =>
   });
 
 describe("patchDOCX", () => {
+  it("accepts a consumed-once stream and defaults to a Uint8Array", async () => {
+    const bytes = template("Hello {{name}}");
+    const patched = await patchDOCX({
+      template: new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(bytes);
+          controller.close();
+        },
+      }),
+      patches: { name: { content: replacement("Ada") } },
+    });
+
+    expect(patched).toBeInstanceOf(Uint8Array);
+    expect(JSON.stringify(parseDOCXSync(patched))).toContain("Hello Ada");
+  });
+
   it("replaces placeholders in default headers", async () => {
     const source: DocumentOptions = {
       sections: [
