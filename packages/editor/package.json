@@ -1,7 +1,7 @@
 {
   "name": "@docen/editor",
   "version": "0.7.0",
-  "description": "Assembly layer for docen editors — bundles a Fluent UI host (ribbon, panes, status bar) with the @docen/docx engine into turnkey <docen-document> web components, with Office.js-style add-ins and Office-style pagination",
+  "description": "Assembly layer for docen editors — bundles Fluent UI document and presentation hosts with Office.js-style add-ins and Office-style pagination",
   "keywords": [
     "add-ins",
     "components",
@@ -47,10 +47,6 @@
       "types": "./dist/document/index.d.mts",
       "import": "./dist/document/index.mjs"
     },
-    "./document/pagination": {
-      "types": "./dist/document/pagination/index.d.mts",
-      "import": "./dist/document/pagination/index.mjs"
-    },
     "./workbook": {
       "types": "./dist/workbook.d.mts",
       "import": "./dist/workbook.mjs"
@@ -58,10 +54,6 @@
     "./presentation": {
       "types": "./dist/presentation.d.mts",
       "import": "./dist/presentation.mjs"
-    },
-    "./render/*": {
-      "types": "./dist/render/*.d.mts",
-      "import": "./dist/render/*.mjs"
     }
   },
   "scripts": {

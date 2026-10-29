@@ -10,7 +10,7 @@
 
 ## Features
 
-- 🧩 **Turnkey `<docen-document>`** — One custom element bundles the Fluent UI host (title bar, ribbon, document area, status bar, panes, find/replace) with the @docen/docx engine
+- 🧩 **Turnkey editors** — `<docen-document>` bundles the Fluent UI host with the @docen/docx engine; `<docen-presentation>` hosts the @docen/pptx canvas editor
 - 🎨 **Canvas rendering** — Pages render on a LeaferJS canvas (no contenteditable, no DOM text); a viewless Tiptap model drives editing through a textarea bridge
 - 📄 **Office-style pagination** — Fixed-height pages with Word's stacking rules (docGrid pitch, table band split, widow/orphan) from @docen/layout; layout re-runs on every edit
 - 🖌️ **Fluent UI surfaces** — Ribbon (buttons, split/toggle buttons, combobox, galleries, color picker), workspace, task/navigation/format panes, context menu
@@ -167,6 +167,7 @@ detail.)
 | `docen:zoom-change`                | Zoom changed (button / slider / `setZoom`)     | `{ zoom }`               |
 | `docen:marks-change`               | Formatting marks toggled                       | `{ showMarks }`          |
 | `docen:lang-change`                | Locale changed (status-bar cycle / Options OK) | `{ lang }`               |
+| `docen:theme-change`               | Theme changed                                  | `{ theme }`              |
 
 **Slots**
 
@@ -219,9 +220,8 @@ doc.addEventListener("docen:change", () => scheduleAutosave());
 
 Plug in ribbon tabs and commands without touching host internals — declaratively
 (JSON attribute, data-only — functions can't cross the attribute boundary) or
-imperatively (full add-in object via `addAddin`). Task-pane contributions are
-reserved for a follow-up (the navigation/format panes are built-in today), so
-only ribbon tabs flow through the `addins` attribute right now.
+imperatively (full add-in object via `addAddin`). The navigation/format panes
+are built-in; add-ins contribute ribbon tabs and commands.
 
 ```html
 <!-- Declarative: a "Citations" ribbon tab -->
@@ -231,7 +231,7 @@ only ribbon tabs flow through the `addins` attribute right now.
 ```
 
 ```typescript
-// Imperative: full add-in (commands / pane-render allowed here)
+// Imperative: full add-in (commands allowed here)
 doc.addAddin({
   id: "citations",
   name: "Citations",
@@ -255,6 +255,35 @@ Ribbon control `event` names route to the engine's native Tiptap commands
 (`editor.chain().focus().<event>(value).run()`), so a built-in name like `bold`
 works directly. Override a command by contributing a Tiptap extension whose
 `addCommands` redefines the same name.
+
+### Web component: `<docen-presentation>`
+
+A turnkey PPTX canvas editor. It parses canonical `PresentationOptions`,
+paints slides and thumbnails with LeaferJS, and edits selection, geometry,
+tables, text, notes, transitions, and animations in place.
+
+| Method                   | Description                                           |
+| ------------------------ | ----------------------------------------------------- |
+| `openPresentation(data)` | Parse a `DataType` PPTX payload and mount the deck    |
+| `getContent()`           | Return a cloned canonical `PresentationOptions` model |
+| `setContent(content)`    | Replace the deck with a cloned canonical model        |
+| `savePresentation()`     | Generate a PPTX `Uint8Array`                          |
+| `closePresentation()`    | Discard the in-memory deck and reset the chrome       |
+
+| Event           | When                                             | Detail               |
+| --------------- | ------------------------------------------------ | -------------------- |
+| `docen:ready`   | Deck mounted                                     | —                    |
+| `docen:change`  | Deck content changed                             | `{ dirty: true }`    |
+| `docen:open`    | Open menu — `preventDefault()` to take over      | —                    |
+| `docen:save`    | Save button — `preventDefault()` to take over    | `{ format: "pptx" }` |
+| `docen:save-as` | Save As menu — `preventDefault()` to take over   | `{ format: "pptx" }` |
+| `docen:close`   | Close menu — `preventDefault()` to keep the deck | —                    |
+
+```typescript
+const pres = document.querySelector<DocenPresentation>("#pres")!;
+await pres.openPresentation(file);
+const output = await pres.savePresentation();
+```
 
 ### Internationalization
 

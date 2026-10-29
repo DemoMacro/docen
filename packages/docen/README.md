@@ -118,6 +118,36 @@ Generates a Markdown string from TipTap JSON content.
 const markdown = generateMarkdown({ type: 'doc', content: [...] });
 ```
 
+### Text Functions
+
+#### `parseText(text)`
+
+Parses newline-delimited plain text into TipTap paragraphs.
+
+**Parameters:**
+
+- `text: string` - Plain text
+
+**Returns:** `JSONContent` - TipTap document object
+
+```typescript
+const doc = parseText("First line\nSecond line");
+```
+
+#### `generateText(doc)`
+
+Generates plain text from every text node in TipTap JSON.
+
+**Parameters:**
+
+- `doc: JSONContent` - TipTap document object
+
+**Returns:** `string` - Plain text
+
+```typescript
+const text = generateText(doc);
+```
+
 ### DOCX Functions
 
 #### `parseDOCX(input)`

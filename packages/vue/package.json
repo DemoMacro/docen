@@ -1,7 +1,7 @@
 {
   "name": "@docen/vue",
   "version": "0.7.0",
-  "description": "Vue 3 adapter for @docen/editor — typed <DocenDocument> component (v-model content, v-slot editor, ref expose)",
+  "description": "Vue 3 adapter for @docen/editor — typed document and presentation components with v-model and template-ref expose",
   "keywords": [
     "adapter",
     "docen",
@@ -50,6 +50,7 @@
   },
   "devDependencies": {
     "@docen/docx": "workspace:*",
+    "@docen/pptx": "workspace:*",
     "@vitejs/plugin-vue": "6.0.8",
     "vue": "3.5.42"
   },

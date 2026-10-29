@@ -31,8 +31,8 @@
 | 包                                                          | 版本                                                    | 说明                                                                    |
 | ----------------------------------------------------------- | ------------------------------------------------------- | ----------------------------------------------------------------------- |
 | [docen](./packages/docen/README.md)                         | ![npm](https://img.shields.io/npm/v/docen)              | 全家桶——headless Markdown/DOCX 转换 + 完整 `<docen-document>` 编辑器    |
-| [@docen/vue](./packages/vue/README.md)                      | ![npm](https://img.shields.io/npm/v/@docen/vue)         | Vue 3 适配器——`<DocenDocument>` 组件（v-model + v-slot 编辑器）         |
-| [@docen/editor](./packages/editor/README.md)                | ![npm](https://img.shields.io/npm/v/@docen/editor)      | 组装层——Fluent UI 宿主 + docx 引擎，产出 `<docen-document>`             |
+| [@docen/vue](./packages/vue/README.md)                      | ![npm](https://img.shields.io/npm/v/@docen/vue)         | Vue 3 适配器——类型化 `<DocenDocument>` 与 `<DocenPresentation>` 组件    |
+| [@docen/editor](./packages/editor/README.md)                | ![npm](https://img.shields.io/npm/v/@docen/editor)      | 组装层——Fluent UI 文档与演示文稿宿主                                    |
 | [@docen/docx](./packages/docx/README.md)                    | ![npm](https://img.shields.io/npm/v/@docen/docx)        | DOCX 引擎——Tiptap schema + 转换器 + 排版投影，由 @office-open/docx 驱动 |
 | [@docen/pptx](./packages/pptx/README.md)                    | ![npm](https://img.shields.io/npm/v/@docen/pptx)        | PPTX 引擎——规范 deck 转换 + 供画布编辑使用的场景投影                    |
 | [@docen/layout](./packages/layout/README.md)                | ![npm](https://img.shields.io/npm/v/@docen/layout)      | 分页引擎——测量 → 分页 LayoutDoc，Word 的堆叠规则                        |

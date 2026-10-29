@@ -625,7 +625,9 @@ class DocenDocument extends AddinHost<Editor> {
   setContent(content: unknown): void {
     if (content && typeof content === "object") {
       this.setJSON(content as JSONContent);
+      return;
     }
+    console.warn("[docen-document] content is not a JSON object — ignored");
   }
 
   // ── @attr change callbacks — every handler is guarded (bridge/shadowRoot
@@ -6766,7 +6768,7 @@ class DocenDocument extends AddinHost<Editor> {
    *  change (see #onTransaction). */
   getJSON(): JSONContent {
     const editor = this.editor;
-    if (!editor) return {} as JSONContent;
+    if (!editor) return { type: "doc", content: [] };
     if (this.#jsonDirty || this.#cachedJSON === undefined) {
       this.#cachedJSON = editor.getJSON();
       this.#jsonDirty = false;

@@ -4,7 +4,7 @@
 ![npm downloads](https://img.shields.io/npm/dw/@docen/vue)
 ![npm license](https://img.shields.io/npm/l/@docen/vue)
 
-> Vue 3 adapter for [`@docen/editor`](../editor) — a typed `<DocenDocument>` component: `v-model` for content, a `v-slot="{ editor }"` scope, and a template-ref expose.
+> Vue 3 adapter for [`@docen/editor`](../editor) — typed `<DocenDocument>` and `<DocenPresentation>` components with `v-model` and template-ref exposes.
 
 The editor UI is a framework-neutral web component (`<docen-document>`); this package wraps it for idiomatic Vue — typed props/emits, two-way content binding, and direct access to the underlying Tiptap editor.
 
@@ -40,6 +40,24 @@ async function open(file: File) {
 
 <template>
   <DocenDocument ref="editorRef" v-model="content" filename="Welcome.docx" editable />
+</template>
+```
+
+Use `DocenPresentation` for the PPTX canvas editor. The model is the canonical
+`PresentationOptions` JSON, and `openPresentation()` / `savePresentation()` use
+the same byte input/output surface as `@docen/pptx`:
+
+```vue
+<script setup lang="ts">
+import { ref } from "vue";
+import { DocenPresentation } from "@docen/vue";
+
+const deckRef = ref();
+const deck = ref();
+</script>
+
+<template>
+  <DocenPresentation ref="deckRef" v-model="deck" filename="Welcome.pptx" />
 </template>
 ```
 
@@ -115,9 +133,14 @@ async function onSave(e: DocenSaveEvent) {
 
 ## Template ref
 
+`DocenPresentation` exposes `{ getElement(), getContent(), setContent(content),
+openPresentation(data), savePresentation(), closePresentation() }`. Its
+`@open`, `@save`, `@save-as`, and `@close` events are cancelable, matching the
+web-component persistence contract.
+
 The ref exposes `{ editor, getElement(), getDisplayLanguage(), getJSON(), setJSON(json), addAddin(addin) }`, where `editor` is the Tiptap `Editor` (undefined until the editor is live). `getJSON()/setJSON()` mirror the host's content surface; `getDisplayLanguage()` returns the current UI locale (`Office.context.displayLanguage` equivalent).
 
-`addAddin(addin)` registers an Office.js-style add-in at runtime (commands / task-pane / ribbon / mini-toolbar). Use it for add-ins carrying functions — the `addins` prop only accepts JSON-serializable data (attribute values are strings), so command handlers and pane render functions must register through the ref. Wait for the host to be live (the exposed `editor` is non-undefined) before calling:
+`addAddin(addin)` registers an Office.js-style add-in at runtime (commands / ribbon). Use it for add-ins carrying functions — the `addins` prop only accepts JSON-serializable data (attribute values are strings), so command handlers must register through the ref. Wait for the host to be live (the exposed `editor` is non-undefined) before calling:
 
 ```vue
 <script setup lang="ts">

@@ -31,7 +31,7 @@ type DocenEl = HTMLElement & {
   getZoom?: () => number;
   setShowMarks?: (on: boolean) => void;
   getShowMarks?: () => boolean;
-  // Runtime add-in registration (commands/task-pane/ribbon/mini-toolbar). Add-ins
+  // Runtime add-in registration (commands/ribbon). Add-ins
   // carrying functions can't cross the attribute boundary — register them here,
   // not through the `addins` prop (which only accepts JSON-serializable data).
   addAddin?: (addin: DocenAddin) => void;
@@ -303,7 +303,7 @@ export const DocenDocument = defineComponent({
       setJSON: (json: JSONContent): void => {
         el.value?.setJSON?.(json);
       },
-      /** Register an add-in (commands/task-pane/ribbon/mini-toolbar). Add-ins
+      /** Register an add-in (commands/ribbon). Add-ins
        *  carrying functions must register here — functions can't survive the
        *  `addins` attribute serialization. */
       addAddin: (addin: DocenAddin): void => {

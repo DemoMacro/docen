@@ -3,9 +3,9 @@ import type { LocalizationInfo } from "../i18n";
 /**
  * Office.js-style add-in model for docen editor hosts.
  *
- * A {@link DocenHost} (e.g. `<docen-document>`) owns the editing surface; every
- * surrounding UI surface — ribbon tabs, task panes, commands — is *contributed*
- * by a {@link DocenAddin}. The host merges contributions and routes commands,
+ * A {@link DocenHost} (e.g. `<docen-document>`) owns the editing surface;
+ * ribbon tabs and commands are *contributed* by a {@link DocenAddin}. The host
+ * merges ribbon contributions and routes commands,
  * so a host ships with a default addin (editor essentials) and users plug in
  * more (citations, mail-merge, …) without touching host internals.
  *
@@ -206,36 +206,6 @@ export interface RibbonContribution {
   groups: RibbonGroup[];
 }
 
-/** Mini-toolbar button — a flat action on the selection floating toolbar (the
- *  Word "mini toolbar"). `event` is the command name the host routes to
- *  `editor.commands.<event>`; `label` is an i18n key resolved at render time
- *  (e.g. "ribbon.cmd.bold"); `activeMark` drives aria-pressed (omit for
- *  non-toggle actions like clear-format). */
-export interface MiniToolbarButton {
-  id?: string;
-  /** Docen icon key (see the RIBBON_ICONS map). */
-  icon: string;
-  /** Command name (editor.commands.<event>). */
-  event: string;
-  /** Tooltip i18n key (resolved at render time), e.g. "ribbon.cmd.bold". */
-  label?: string;
-  /** Mark name for the pressed state; omit for non-toggle actions. */
-  activeMark?: string;
-}
-
-/** Task pane contribution — Office.js `ShowTaskpane` action. `start` is the
- *  navigation side (left in LTR); `end` is the format/properties side (right). */
-export interface TaskPaneContribution<THost extends DocenHost = DocenHost> {
-  id: string;
-  title: string;
-  position: "start" | "end";
-  icon?: string;
-  /** Build the pane's content element. Omitted = the host fills the pane itself
-   *  (e.g. the built-in outline/search navigation). */
-  render?: (host: THost) => HTMLElement | null;
-  defaultOpen?: boolean;
-}
-
 // ── Host + Addin contracts ───────────────────────────────────────────────────
 
 /** A docen editor host — the `<Host>` in Office.js terms (Word/Excel/PowerPoint
@@ -256,7 +226,7 @@ export interface DocenHost<TEditor = unknown> {
 }
 
 /** An Office.js-style addin. Every field is optional except `id` — an addin may
- *  contribute only ribbon tabs, only a task pane, or only commands. */
+ *  contribute only ribbon tabs or only commands. */
 export interface DocenAddin<THost extends DocenHost = DocenHost> {
   readonly id: string;
   readonly name?: string;
@@ -268,13 +238,5 @@ export interface DocenAddin<THost extends DocenHost = DocenHost> {
    *  it across the JSON boundary too. */
   readonly localizationInfo?: LocalizationInfo;
   readonly ribbon?: readonly RibbonContribution[];
-  /** Mini-toolbar buttons (the selection floating toolbar — the Word "mini
-   *  toolbar"). Office.js keeps it internal; docen opens it as an addin
-   *  surface, symmetric to `ribbon`. Merged with built-in defaults
-   *  (`defaultMiniToolbarButtons()` + `mergeMiniToolbar`); runtime `addAddin`
-   *  re-merges immediately (the bar's buttons are `@observable`), so
-   *  contributions appear without re-mounting. */
-  readonly miniToolbar?: readonly MiniToolbarButton[];
-  readonly taskPanes?: readonly TaskPaneContribution<THost>[];
   readonly commands?: Readonly<Record<string, (host: THost, value?: string) => void>>;
 }

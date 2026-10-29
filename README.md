@@ -31,8 +31,8 @@
 | Package                                                     | Version                                                 | Description                                                                                |
 | ----------------------------------------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
 | [docen](./packages/docen/README.md)                         | ![npm](https://img.shields.io/npm/v/docen)              | All-in-one — headless Markdown/DOCX conversion + the full `<docen-document>` editor        |
-| [@docen/vue](./packages/vue/README.md)                      | ![npm](https://img.shields.io/npm/v/@docen/vue)         | Vue 3 adapter — `<DocenDocument>` component (v-model + v-slot editor)                      |
-| [@docen/editor](./packages/editor/README.md)                | ![npm](https://img.shields.io/npm/v/@docen/editor)      | Assembly layer — Fluent UI host + docx engine into `<docen-document>`                      |
+| [@docen/vue](./packages/vue/README.md)                      | ![npm](https://img.shields.io/npm/v/@docen/vue)         | Vue 3 adapters — typed `<DocenDocument>` and `<DocenPresentation>` components              |
+| [@docen/editor](./packages/editor/README.md)                | ![npm](https://img.shields.io/npm/v/@docen/editor)      | Assembly layer — Fluent UI document and presentation hosts                                 |
 | [@docen/docx](./packages/docx/README.md)                    | ![npm](https://img.shields.io/npm/v/@docen/docx)        | DOCX engine — Tiptap schema + converters + layout projection, powered by @office-open/docx |
 | [@docen/pptx](./packages/pptx/README.md)                    | ![npm](https://img.shields.io/npm/v/@docen/pptx)        | PPTX engine — canonical deck conversion + scene projection for canvas editing              |
 | [@docen/layout](./packages/layout/README.md)                | ![npm](https://img.shields.io/npm/v/@docen/layout)      | Pagination engine — measurement → paginated LayoutDoc, Word's stacking rules               |

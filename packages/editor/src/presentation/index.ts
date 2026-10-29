@@ -50,7 +50,7 @@ import {
   type TextRunOptions,
   type TextVertical,
 } from "@docen/pptx";
-import { customElement, observable } from "@microsoft/fast-element";
+import { attr, customElement, observable } from "@microsoft/fast-element";
 import type { RunFont, TextFont } from "@office-open/core/drawing";
 // Leafer ships animate() as a stub that only logs — the show's entrance
 // tweens need the real plugin registered.
@@ -445,6 +445,10 @@ const WIRED_COMMANDS: ReadonlySet<string> = new Set([
   styles: presentationStyles,
 })
 class DocenPresentation extends AddinHost {
+  /** Reactive chrome attributes mirror `<docen-document>`. */
+  @attr filename?: string;
+  @attr theme?: string;
+
   /** The parsed deck — the editable model the gestures write back into. */
   #presJson: PresentationOptions | null = null;
   #pres: ProjectedPresentation | null = null;
@@ -770,6 +774,7 @@ class DocenPresentation extends AddinHost {
 
   /** Drop the open deck and reset the chrome. */
   closePresentation(): void {
+    if (this.#emitCancelable("docen:close")) return;
     this.#presJson = null;
     this.#pres = null;
     this.#exitTextEditing(false);
@@ -828,17 +833,24 @@ class DocenPresentation extends AddinHost {
     this.#renderDeck();
     this.#renderChrome();
     this.#dispatch("docen:ready");
+    this.#dispatch("docen:change");
   }
 
   /** Dispatch a non-cancelable lifecycle/content event for hosts that own
    *  persistence, autosave, or framework bindings. */
   #dispatch(name: "docen:ready" | "docen:change"): void {
-    this.dispatchEvent(new CustomEvent(name, { bubbles: true, composed: true }));
+    this.dispatchEvent(
+      new CustomEvent(name, {
+        bubbles: true,
+        composed: true,
+        detail: name === "docen:change" ? { dirty: true } : undefined,
+      }),
+    );
   }
 
   /** Dispatch a host-action event and report whether the host took over. */
   #emitCancelable(
-    name: "docen:open" | "docen:save" | "docen:save-as",
+    name: "docen:close" | "docen:open" | "docen:save" | "docen:save-as",
     detail?: { format?: "pptx" },
   ): boolean {
     const event = new CustomEvent(name, {
@@ -849,6 +861,20 @@ class DocenPresentation extends AddinHost {
     });
     this.dispatchEvent(event);
     return event.defaultPrevented;
+  }
+
+  /** Addin registry changed — stamp the chrome again so a runtime ribbon
+   * contribution appears without remounting the deck. */
+  protected addinsChanged(): void {
+    this.#renderChrome();
+  }
+
+  filenameChanged(): void {
+    this.#renderChrome();
+  }
+
+  themeChanged(): void {
+    applyTheme(resolveTheme(this.theme ?? ""));
   }
 
   // ── Chrome ───────────────────────────────────────────────────────────────

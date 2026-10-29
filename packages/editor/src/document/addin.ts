@@ -87,8 +87,8 @@ export function createDocumentExtensions(opts: {
 
 /** The default document add-in: engine essentials (extensions) — including
  *  DocumentCommands, which exposes every ribbon command as a native
- *  `editor.commands[name]`. Ribbon and task-pane contributions are layered on
- *  once the host renders from the merged schema. */
+ *  `editor.commands[name]`. Ribbon contributions are layered on once the host
+ *  renders from the merged schema. */
 export function createDefaultAddin(opts: {
   onOutlineUpdate: (anchors: readonly OutlineAnchor[]) => void;
 }): DocumentAddin {

@@ -1,7 +1,7 @@
 import { FASTElement } from "@microsoft/fast-element";
 
 import { registerLocalization } from "../i18n";
-import type { DocenAddin, DocenHost, MiniToolbarButton, RibbonTab } from "./types";
+import type { DocenAddin, DocenHost, RibbonTab } from "./types";
 
 /**
  * Pure merge of every addin's ribbon contributions into the tab order.
@@ -35,33 +35,15 @@ export function mergeRibbonSchema<THost extends DocenHost>(
 }
 
 /**
- * Pure merge of every addin's mini-toolbar buttons into a flat list, in
- * addin-registration then contribution order. Unlike ribbon (tab/group
- * structure) the mini toolbar is a single flat row, so this is a flatten — an
- * addin that wants its own variant of a default button just contributes
- * another entry (both appear). Exported separately so the merge is testable
- * without a live HTMLElement.
- */
-export function mergeMiniToolbar<THost extends DocenHost>(
-  addins: readonly DocenAddin<THost>[],
-): MiniToolbarButton[] {
-  const buttons: MiniToolbarButton[] = [];
-  for (const addin of addins) {
-    if (addin.miniToolbar) buttons.push(...addin.miniToolbar);
-  }
-  return buttons;
-}
-
-/**
  * Base class for docen editor hosts that load add-ins.
  *
  * Subclasses (e.g. `<docen-document>`'s `DocumentHost`) override `editor`,
  * `getContent`, and `setContent`; this base owns the addin registry, the ribbon
- * schema merge, and command routing. Injecting the merged ribbon/panes into the
+ * schema merge, and command routing. Injecting the merged ribbon into the
  * shadow DOM happens in a subclass override of {@link addinsChanged}, invoked
  * whenever the addin set changes.
  *
- * `DocenAddin<this>` lets each addin's commands/panes receive the concrete host
+ * `DocenAddin<this>` lets each addin's commands receive the concrete host
  * subtype, so a `DocumentAddin` command can call `DocumentHost`-specific methods.
  */
 export class AddinHost<TEditor = unknown> extends FASTElement implements DocenHost<TEditor> {
@@ -126,13 +108,6 @@ export class AddinHost<TEditor = unknown> extends FASTElement implements DocenHo
   /** The merged ribbon schema — every addin ribbon contribution, in order. */
   mergedRibbonSchema(): RibbonTab[] {
     return mergeRibbonSchema(this.#addins);
-  }
-
-  /** The merged mini-toolbar buttons — every addin mini-toolbar contribution,
-   *  in order. The host combines these with built-in defaults at editor boot
-   *  (mirror of `ribbonTabs` + `mergedRibbonSchema` for the ribbon). */
-  mergedMiniToolbar(): MiniToolbarButton[] {
-    return mergeMiniToolbar(this.#addins);
   }
 
   /** Route `type` to the first registered addin that declares it. Returns

@@ -198,6 +198,9 @@ importers:
       '@docen/docx':
         specifier: workspace:*
         version: link:../docx
+      '@docen/pptx':
+        specifier: workspace:*
+        version: link:../pptx
       '@vitejs/plugin-vue':
         specifier: 6.0.8
         version: 6.0.8(vite@8.3.5(@types/node@26.1.2)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15))(vue@3.5.42(typescript@6.0.3))
