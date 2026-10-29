@@ -228,12 +228,23 @@ export type LayoutDrawingMember =
       /** The poster frame as a browser-decodable URL; absent → painter's
        *  stable dark player fallback. */
       src?: string;
+      /** Poster crop fractions (a:srcRect percent ÷ 100). */
+      crop?: LayoutPictureCrop;
       /** Source file name shown in the stable fallback. */
       fileName?: string;
       /** The media bytes as a browser-decodable data URL plus its MIME —
        *  the formats the browser can actually play (mp4/mov/mp3/wav/aac);
        *  absent for the exotic containers (wmv/avi/wma) and CD audio. */
       playable?: { src: string; mime: string };
+      /** Player state carried by the source model. */
+      playback?: {
+        loop?: boolean;
+        muted?: boolean;
+        /** Normalized 0-1 browser volume, converted from source volume. */
+        volume?: number;
+        /** Visible play window in seconds. */
+        trim?: { start?: number; end?: number };
+      };
     }
   | {
       kind: "textBox";

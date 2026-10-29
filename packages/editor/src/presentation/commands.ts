@@ -12,7 +12,6 @@ import type { ColorSchemeOptions, FontSchemeOptions } from "@office-open/core";
 import type {
   BulletOptions,
   CustomGeometryOptions,
-  NonVisualDrawingPropertiesOptions,
   ParagraphDescriptorOptions,
   ShapeType,
   StrikeStyle,
@@ -86,16 +85,17 @@ export function childRunsOf(child: SlideChild): TextRunOptions[] {
 }
 
 /** The child's cNvPr surface (name/hidden), including graphic frames. */
-export function nonVisualOf(child: SlideChild): NonVisualDrawingPropertiesOptions | null {
+export interface NonVisualSurface {
+  id?: number;
+  name?: string;
+  hidden?: boolean;
+}
+
+export function nonVisualOf(child: SlideChild): NonVisualSurface | null {
   if ("shape" in child) return child.shape;
   if ("picture" in child) return child.picture;
   if ("table" in child) return child.table;
-  if ("chart" in child)
-    return {
-      name: child.chart.name,
-      description: child.chart.description,
-      hidden: child.chart.hidden,
-    };
+  if ("chart" in child) return child.chart;
   if ("line" in child) return child.line;
   if ("connector" in child) return child.connector;
   if ("group" in child) return child.group;

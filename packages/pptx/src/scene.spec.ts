@@ -156,11 +156,12 @@ describe("table grid", () => {
     const table = (member as Extract<LayoutDrawingMember, { kind: "table" }>).table as {
       columnWidthsPx: number[];
       fill?: string;
-      rows: { cells: { col: number; text?: string }[] }[];
+      rows: { cells: { col: number; sourceCol?: number; text?: string }[] }[];
     };
     expect(table.columnWidthsPx[0]).toBeCloseTo(48, 7);
     expect(table.columnWidthsPx[1]).toBeCloseTo(96, 7);
     expect(table.rows[0]!.cells.map((cell) => cell.col)).toEqual([1, 0]);
+    expect(table.rows[0]!.cells.map((cell) => cell.sourceCol)).toEqual([0, 1]);
     expect(table.fill).toBe("FF0000");
   });
 
@@ -1994,6 +1995,29 @@ describe("media frame projection", () => {
     const { slides } = project({ slides: [{ children: [video] }] });
     expect(slides[0]!.members[0]).toMatchObject({
       playable: { src: "data:video/mp4;base64,AQID", mime: "video/mp4" },
+    });
+  });
+
+  it("projects poster crops and player settings onto the media member", () => {
+    const video: SlideChild = {
+      video: {
+        x: 0,
+        y: 0,
+        width: 1905000,
+        height: 952500,
+        data: new Uint8Array([1, 2, 3]),
+        type: "mp4",
+        poster: new Uint8Array([1, 2, 3]),
+        posterType: "png",
+        sourceRectangle: { left: 10, top: 20, right: 30, bottom: 40 },
+        trim: { start: 2, end: 8 },
+        playback: { loop: true, mute: true, volume: 0.75, zoom: "fit" },
+      },
+    } as unknown as SlideChild;
+    const { slides } = project({ slides: [{ children: [video] }] });
+    expect(slides[0]!.members[0]).toMatchObject({
+      crop: { left: 0.1, top: 0.2, right: 0.3, bottom: 0.4 },
+      playback: { loop: true, muted: true, volume: 0.75, trim: { start: 2, end: 8 } },
     });
   });
 

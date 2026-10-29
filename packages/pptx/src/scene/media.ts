@@ -3,7 +3,8 @@
 // enough identity to paint a stable player, plus the playable data URL for
 // the browser-decodable formats (wmv/avi/wma have no browser decoder).
 
-import type { LayoutDrawingMember } from "@docen/layout";
+import type { LayoutDrawingMember, LayoutPictureCrop } from "@docen/layout";
+import type { SourceRectangleOptions } from "@office-open/core/drawing";
 import type { AudioFrameOptions, VideoFrameOptions } from "@office-open/pptx";
 
 import { emuOf, type Xform } from "./geometry";
@@ -34,6 +35,27 @@ function posterUrlOf(data: unknown, type: string | undefined): string | undefine
   return pictureSrcOf(data, type);
 }
 
+function cropOf(rect: SourceRectangleOptions | undefined): LayoutPictureCrop | undefined {
+  const left = rect?.left ?? 0;
+  const top = rect?.top ?? 0;
+  const right = rect?.right ?? 0;
+  const bottom = rect?.bottom ?? 0;
+  if (!left && !top && !right && !bottom) return undefined;
+  return { left: left / 100, top: top / 100, right: right / 100, bottom: bottom / 100 };
+}
+
+function playbackOf(options: VideoFrameOptions | AudioFrameOptions) {
+  const playback = options.playback;
+  if (!playback && !options.trim) return undefined;
+  const { loop, mute, volume } = playback ?? {};
+  return {
+    ...(loop !== undefined ? { loop } : {}),
+    ...(mute !== undefined ? { muted: mute } : {}),
+    ...(volume !== undefined ? { volume: Math.max(0, Math.min(1, volume)) } : {}),
+    ...(options.trim ? { trim: options.trim } : {}),
+  };
+}
+
 export function mediaMember(
   media: "video" | "audio",
   options: VideoFrameOptions | AudioFrameOptions,
@@ -61,7 +83,9 @@ export function mediaMember(
     ...(childPath ? { childPath } : {}),
     media,
     ...(src ? { src } : {}),
+    ...(cropOf(options.sourceRectangle) ? { crop: cropOf(options.sourceRectangle)! } : {}),
     ...(options.fileName ? { fileName: options.fileName } : {}),
     ...(playableSrc && playableMime ? { playable: { src: playableSrc, mime: playableMime } } : {}),
+    ...(playbackOf(options) ? { playback: playbackOf(options)! } : {}),
   };
 }

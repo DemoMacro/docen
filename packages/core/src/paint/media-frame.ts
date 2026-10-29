@@ -2,7 +2,7 @@ import type { LayoutDrawingMember } from "@docen/layout";
 import { Path as LeaferPath, Rect, Text, type IGroup } from "leafer-ui";
 
 import type { PaintContext } from "./context";
-import { addDecodedImage } from "./image";
+import { addCroppedImage, addDecodedImage } from "./image";
 
 // Stable media-frame rendering: poster frames preserve the deck's visual
 // composition; missing posters get a readable player. Native playback can
@@ -104,7 +104,18 @@ function fileNameLabel(tree: IGroup, member: MediaMember): void {
 
 export function paintMediaFrame(tree: IGroup, member: MediaMember, ctx: PaintContext): void {
   if (member.src) {
-    addDecodedImage(tree, member.src, member.x, member.y, member.width, member.height, ctx);
+    if (member.crop)
+      addCroppedImage(
+        tree,
+        member.src,
+        member.crop,
+        member.x,
+        member.y,
+        member.width,
+        member.height,
+        ctx,
+      );
+    else addDecodedImage(tree, member.src, member.x, member.y, member.width, member.height, ctx);
   } else {
     tree.add(
       new Rect({

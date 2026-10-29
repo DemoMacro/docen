@@ -336,6 +336,8 @@ interface FindHit {
 interface TableCellView {
   col: number;
   row: number;
+  sourceCol?: number;
+  sourceRow?: number;
   spanW: number;
   spanH: number;
   anchor?: "top" | "center" | "bottom";
@@ -1742,9 +1744,7 @@ class DocenPresentation extends AddinHost {
     if (!rect) return;
     this.#setTableSelection(range ?? null);
     const cell = rect.cell;
-    const source = tableGridOf(found.table).origins.find(
-      (o) => o.row === cell.row && o.col === cell.col,
-    )?.cell;
+    const source = this.#sourceTableCellOf(found, cell);
     if (!source) return;
     const pres = this.#pres!;
     const scale = this.#zoom / 100;
@@ -4670,10 +4670,7 @@ class DocenPresentation extends AddinHost {
     const origins = tableGridOf(found.table).origins;
     const cells = this.#tableSelection
       ? tableSelectionCells(found.member, this.#tableSelection)
-          .map(
-            ({ row, col }) =>
-              origins.find((origin) => origin.row === row && origin.col === col)?.cell,
-          )
+          .map((slot) => this.#sourceTableCellOf(found, slot))
           .filter((cell): cell is TableCellOptions => Boolean(cell))
       : (() => {
           const active = this.#editedCell();
@@ -4790,10 +4787,49 @@ class DocenPresentation extends AddinHost {
   /** The live grid range for Layout commands: an explicit block selection, or
    *  the cell under the text caret. */
   #tableActiveRange(): TableSelectionRange | null {
-    if (this.#tableSelection) return this.#tableSelection;
-    return this.#tableAnchor
-      ? { anchor: { ...this.#tableAnchor }, head: { ...this.#tableAnchor } }
-      : null;
+    const range = this.#tableSelection
+      ? this.#tableSelection
+      : this.#tableAnchor
+        ? { anchor: { ...this.#tableAnchor }, head: { ...this.#tableAnchor } }
+        : null;
+    const found = this.#tableMemberOf();
+    if (!range || !found) return range;
+    return {
+      anchor: this.#sourceTableSlotAt(found, range.anchor),
+      head: this.#sourceTableSlotAt(found, range.head),
+    };
+  }
+
+  /** A painted RTL slot as the logical source address its edit must write to. */
+  #sourceTableSlotAt(
+    found: { member: TableMemberView },
+    slot: { row: number; col: number },
+  ): { row: number; col: number } {
+    const painted = found.member.table.rows
+      .flatMap((row) => row.cells)
+      .find(
+        (cell) =>
+          cell.row <= slot.row &&
+          slot.row < cell.row + cell.spanH &&
+          cell.col <= slot.col &&
+          slot.col < cell.col + cell.spanW,
+      );
+    if (!painted) return slot;
+    return {
+      row: painted.sourceRow ?? painted.row,
+      col: painted.sourceCol ?? painted.col,
+    };
+  }
+
+  #sourceTableCellOf(
+    found: { table: TableOptions; member: TableMemberView },
+    painted: Pick<TableCellView, "row" | "col" | "sourceRow" | "sourceCol">,
+  ): TableCellOptions | undefined {
+    return tableGridOf(found.table).origins.find(
+      (origin) =>
+        origin.row === (painted.sourceRow ?? painted.row) &&
+        origin.col === (painted.sourceCol ?? painted.col),
+    )?.cell;
   }
 
   /** Structural table commands commit the live cell first; PowerPoint keeps
@@ -5739,6 +5775,11 @@ class DocenPresentation extends AddinHost {
     return {
       media: member.media,
       src: member.playable.src,
+      ...(member.playback?.loop !== undefined ? { loop: member.playback.loop } : {}),
+      ...(member.playback?.muted !== undefined ? { muted: member.playback.muted } : {}),
+      ...(member.playback?.volume !== undefined ? { volume: member.playback.volume } : {}),
+      ...(member.playback?.trim !== undefined ? { trim: member.playback.trim } : {}),
+      ...(member.crop ? { crop: member.crop } : {}),
       x: stageRect.left - surfaceRect.left + member.x * scale,
       y:
         stageRect.top -

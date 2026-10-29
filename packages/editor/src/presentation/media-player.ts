@@ -12,6 +12,12 @@ export interface MediaPlayback {
   y: number;
   width: number;
   height: number;
+  loop?: boolean;
+  muted?: boolean;
+  /** Normalized 0-1 browser volume. */
+  volume?: number;
+  trim?: { start?: number; end?: number };
+  crop?: { left: number; top: number; right: number; bottom: number };
 }
 
 export class MediaPlayer {
@@ -52,6 +58,9 @@ export class MediaPlayer {
         : document.createElement("audio");
     media.src = playback.src;
     media.controls = true;
+    media.loop = playback.loop === true;
+    media.muted = playback.muted === true;
+    if (playback.volume !== undefined) media.volume = playback.volume;
     // A video fills its frame (letterboxed, black-backed like PowerPoint's
     // player); an audio frame keeps its poster — only a compact control bar
     // docks at the frame's bottom.
@@ -65,9 +74,18 @@ export class MediaPlayer {
       Object.assign(media.style, {
         width: "100%",
         height: "100%",
-        objectFit: "contain",
+        objectFit: playback.crop ? "fill" : "contain",
         background: "#000",
       });
+      if (playback.crop) {
+        const { left, top, right, bottom } = playback.crop;
+        const width = Math.max(0.01, 1 - left - right);
+        const height = Math.max(0.01, 1 - top - bottom);
+        Object.assign(media.style, {
+          transformOrigin: `${(left / width) * 100}% ${(top / height) * 100}%`,
+          transform: `scale(${1 / width}, ${1 / height})`,
+        });
+      }
     } else {
       const barWidth = Math.min(playback.width, 320);
       Object.assign(this.el.style, {
@@ -81,6 +99,26 @@ export class MediaPlayer {
     this.el.style.display = "block";
     this.el.append(media);
     this.#media = media;
+    const trim = playback.trim;
+    if (trim?.start !== undefined)
+      media.addEventListener(
+        "loadedmetadata",
+        () => {
+          if (this.#media === media && media.currentTime < trim.start!)
+            media.currentTime = trim.start!;
+        },
+        { once: true },
+      );
+    if (trim?.end !== undefined)
+      media.addEventListener("timeupdate", () => {
+        if (this.#media !== media || media.currentTime < trim.end!) return;
+        if (media.loop) {
+          if (trim.start !== undefined) media.currentTime = trim.start;
+          return;
+        }
+        media.pause();
+        media.currentTime = trim.end!;
+      });
     // Play right away — PowerPoint's player starts on open. A rejected play
     // (a strict autoplay policy) just leaves the controls waiting.
     void media.play().catch(() => {});

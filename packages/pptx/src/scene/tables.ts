@@ -287,6 +287,8 @@ export function tableMember(
         return {
           col,
           row: r,
+          sourceCol: col,
+          sourceRow: r,
           spanW,
           spanH,
           ...(fill ? { fill } : {}),

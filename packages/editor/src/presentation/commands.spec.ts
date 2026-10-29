@@ -326,8 +326,11 @@ describe("nonVisualOf", () => {
       { chart: { name: "Chart" } },
       { ole: { name: "Workbook", hidden: true } },
     ] as unknown as SlideChild[];
+    const chartChild = children[1]!;
+    if (!("chart" in chartChild)) throw new Error("expected a chart child");
+    const chart = chartChild.chart;
     expect(nonVisualOf(children[0]!)).toMatchObject({ name: "Table", hidden: true });
-    expect(nonVisualOf(children[1]!)).toMatchObject({ name: "Chart" });
+    expect(nonVisualOf(children[1]!)).toBe(chart);
     expect(nonVisualOf(children[2]!)).toMatchObject({ name: "Workbook", hidden: true });
   });
 });
