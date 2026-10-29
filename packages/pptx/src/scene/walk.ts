@@ -404,12 +404,36 @@ const contains = (
   y: number,
 ): boolean => x >= b.x && x <= b.x + b.width && y >= b.y && y <= b.y + b.height;
 
+/** A point in an unrotated box after undoing the member's own spin. Group
+ *  ancestor spins are already removed while mapping into child space. */
+function containsRotated(
+  box: { x: number; y: number; width: number; height: number },
+  rotation: number,
+  x: number,
+  y: number,
+): boolean {
+  if (!rotation) return contains(box, x, y);
+  const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  const rad = (-rotation * Math.PI) / 180;
+  const dx = x - center.x;
+  const dy = y - center.y;
+  return contains(
+    box,
+    center.x + dx * Math.cos(rad) - dy * Math.sin(rad),
+    center.y + dx * Math.sin(rad) + dy * Math.cos(rad),
+  );
+}
+
 /** The child's unspun outer box in its own parent's child coordinates —
  *  transform variants from their xfrm, lines and connectors from endpoints.
  *  Unplaced children hit nothing. */
 function childBoxUnder(
   child: SlideChild,
 ): { x: number; y: number; width: number; height: number } | null {
+  if ("alternateContent" in child) {
+    const selected = alternateChildOf(child);
+    return selected ? childBoxUnder(selected) : null;
+  }
   if ("line" in child || "connector" in child) {
     const o = "line" in child ? child.line : child.connector;
     const x1 = emuOf(o.x1);
@@ -440,7 +464,11 @@ function childBoxUnder(
                   ? child.video
                   : "audio" in child
                     ? child.audio
-                    : undefined;
+                    : "ole" in child
+                      ? child.ole
+                      : "lockedCanvas" in child
+                        ? child.lockedCanvas
+                        : undefined;
   if (!g) return null;
   return {
     x: emuOf(g.x),
@@ -490,8 +518,9 @@ function hitMemberIn(
 ): MemberHit | null {
   for (let i = children.length - 1; i >= 0; i--) {
     const c = children[i]!;
+    if (hiddenOf(c)) continue;
     const box = childBoxUnder(c);
-    if (!box || !contains(box, x, y)) continue;
+    if (!box || !containsRotated(box, ownRotationOf(c), x, y)) continue;
     if ("group" in c) {
       const deeper = hitGroupAt(c.group, space, x, y, [...prefix, i]);
       if (deeper) return deeper;

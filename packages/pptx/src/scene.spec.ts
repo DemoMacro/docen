@@ -1157,6 +1157,54 @@ describe("groups", () => {
     });
   });
 
+  it("skips hidden members during nested hit testing", () => {
+    const child: SlideChild = {
+      group: {
+        x: 0,
+        y: 0,
+        width: 952500,
+        height: 952500,
+        childOffsetX: 0,
+        childOffsetY: 0,
+        childExtentWidth: 952500,
+        childExtentHeight: 952500,
+        children: [{ shape: { x: 0, y: 0, width: 952500, height: 952500, hidden: true } }],
+      },
+    };
+
+    expect(memberAt(child, 50, 50)).toBeNull();
+  });
+
+  it("tests a rotated member's real box, not its axis-aligned bounds", () => {
+    const child: SlideChild = {
+      group: {
+        x: 0,
+        y: 0,
+        width: 952500,
+        height: 190500,
+        childOffsetX: 0,
+        childOffsetY: 0,
+        childExtentWidth: 952500,
+        childExtentHeight: 190500,
+        children: [
+          {
+            shape: {
+              x: 0,
+              y: 0,
+              width: 952500,
+              height: 190500,
+              rotation: 90,
+              properties: { geometry: "rect" },
+            },
+          },
+        ],
+      },
+    };
+
+    expect(memberAt(child, 90, 10)).toBeNull();
+    expect(memberAt(child, 50, 50)).toMatchObject({ path: [0] });
+  });
+
   it("resizes a line member through the group map without flipping it", () => {
     const child: SlideChild = {
       group: {

@@ -52,7 +52,13 @@ export function slideHits(slide: SlideOptions): SlideHit[] {
                       ? child.audio
                       : "ole" in child
                         ? child.ole
-                        : undefined;
+                        : "chart" in child
+                          ? child.chart
+                          : "table" in child
+                            ? child.table
+                            : "lockedCanvas" in child
+                              ? child.lockedCanvas
+                              : undefined;
     if (nv?.hidden === true) return;
     const box = childBox(child);
     if (box) hits.push({ child: i, box, rotation: rotationOf(child) });
@@ -64,10 +70,29 @@ export function slideHits(slide: SlideOptions): SlideHit[] {
  *  later children paint on top, so the scan runs tail-first. */
 export function hitSlide(hits: readonly SlideHit[], x: number, y: number): number {
   for (let i = hits.length - 1; i >= 0; i--) {
-    const b = hits[i]!.box;
-    if (x >= b.x && x <= b.x + b.width && y >= b.y && y <= b.y + b.height) return hits[i]!.child;
+    const hit = hits[i]!;
+    if (hitContains(hit.box, hit.rotation, x, y)) return hit.child;
   }
   return -1;
+}
+
+/** Undo the box's clockwise spin about its center before an AABB test. */
+function hitContains(box: Box, rotation: number, x: number, y: number): boolean {
+  if (!rotation) {
+    return x >= box.x && x <= box.x + box.width && y >= box.y && y <= box.y + box.height;
+  }
+  const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  const rad = (-rotation * Math.PI) / 180;
+  const dx = x - center.x;
+  const dy = y - center.y;
+  const localX = center.x + dx * Math.cos(rad) - dy * Math.sin(rad);
+  const localY = center.y + dx * Math.sin(rad) + dy * Math.cos(rad);
+  return (
+    localX >= box.x &&
+    localX <= box.x + box.width &&
+    localY >= box.y &&
+    localY <= box.y + box.height
+  );
 }
 
 function childBox(child: SlideChild): Box | null {

@@ -84,6 +84,16 @@ describe("hitSlide", () => {
   it("misses outside every box", () => {
     expect(hitSlide(slideHits(slide), 200, 200)).toBe(-1);
   });
+
+  it("uses a rotated box rather than its axis-aligned bounds", () => {
+    const rotated: SlideOptions = {
+      children: [{ shape: { x: px(0), y: px(0), width: px(100), height: px(20), rotation: 90 } }],
+    } as SlideOptions;
+    const hits = slideHits(rotated);
+
+    expect(hitSlide(hits, 90, 10)).toBe(-1);
+    expect(hitSlide(hits, 50, 50)).toBe(0);
+  });
 });
 
 describe("offsetChild", () => {
