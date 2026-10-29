@@ -585,7 +585,7 @@ describe("real-XML round-trip (generateDocument → parseDocument)", { timeout: 
     expect(picture.picture.altText?.name).toBe("probe");
   });
 
-  it("oversized picture skips the base64 round-trip via the media registry", () => {
+  it("oversized picture renders through the registry and survives JSON persistence", () => {
     // Above MEDIA_INLINE_LIMIT the resolve leg must hand out a registered
     // blob: URL (no megabyte base64 string in the attrs) and the compile leg
     // must recover the original bytes from the registry, untouched.
@@ -620,15 +620,24 @@ describe("real-XML round-trip (generateDocument → parseDocument)", { timeout: 
     );
     const node = (
       json.content?.[0] as {
-        content?: { type: string; attrs?: { src?: string } }[];
+        content?: { type: string; attrs?: { src?: string; persistentSrc?: string } }[];
       }
     )?.content?.[0];
     expect(node?.type).toBe("image");
     expect(node?.attrs?.src?.startsWith("blob:")).toBe(true);
+    expect(node?.attrs?.persistentSrc?.startsWith("data:image/png;base64,")).toBe(true);
 
     const compiled = compileDocument(json, docxExtensions).sections[0].children;
     const picture = firstInline(compiled) as { picture: { data?: Uint8Array } };
     expect(picture.picture.data).toStrictEqual(oversized);
+
+    // A host that persists editor JSON loses the registry; the JSON-safe src
+    // fallback must restore the same bytes on the next save.
+    const restored = JSON.parse(JSON.stringify(json)) as typeof json;
+    const persistedPicture = firstInline(
+      compileDocument(restored, docxExtensions).sections[0].children,
+    ) as { picture: { data?: Uint8Array } };
+    expect(persistedPicture.picture.data).toStrictEqual(oversized);
   });
 
   it("table survives real XML with the editable table route", () => {

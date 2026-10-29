@@ -85,12 +85,15 @@ export function mediaOfSrc(
 ): { type: string; bytes: Uint8Array } | undefined {
   const media = src ? mediaBytesOf(src) : undefined;
   if (media) return { type: media.type, bytes: media.bytes };
-  if (src?.startsWith("data:image/")) {
-    const match = src.match(/^data:image\/([\w.+-]+);base64,/);
-    if (match) {
-      const bytes = decodedBytesOf(attrs, src);
-      if (bytes) return { type: match[1] === "jpeg" ? "jpg" : match[1], bytes };
-    }
+  const source =
+    src?.startsWith("blob:") && typeof (attrs as Record<string, unknown>).persistentSrc === "string"
+      ? ((attrs as Record<string, unknown>).persistentSrc as string)
+      : src;
+  if (source?.startsWith("data:image/")) {
+    const match = source.match(/^data:image\/([\w.+-]+);base64,/);
+    if (!match) return undefined;
+    const bytes = decodedBytesOf(attrs, source);
+    return bytes ? { type: match[1] === "jpeg" ? "jpg" : match[1], bytes } : undefined;
   }
   return undefined;
 }
@@ -230,10 +233,13 @@ function resolveImage(picture: PictureOptions, ctx: ResolveContext): JSONContent
   const bytes =
     data instanceof Uint8Array ? data : data instanceof ArrayBuffer ? new Uint8Array(data) : null;
   if (bytes && type) {
-    attrs.src =
-      bytes.byteLength > MEDIA_INLINE_LIMIT
-        ? registerMediaBlob(bytes, type)
-        : `data:image/${type};base64,${encodeBase64(bytes)}`;
+    const dataUrl = `data:image/${type};base64,${encodeBase64(bytes)}`;
+    if (bytes.byteLength > MEDIA_INLINE_LIMIT) {
+      attrs.src = registerMediaBlob(bytes, type);
+      attrs.persistentSrc = dataUrl;
+    } else {
+      attrs.src = dataUrl;
+    }
   }
   return { type: "image", attrs };
 }
@@ -267,6 +273,13 @@ export const Image = Node.create({
       title: {
         default: null,
         parseHTML: (element: HTMLElement) => element.getAttribute("title"),
+      },
+
+      // JSON-safe fallback for a src held only in the transient blob registry.
+      persistentSrc: {
+        default: null,
+        rendered: false,
+        parseHTML: () => null,
       },
 
       // Editor-only display hint (no OOXML equivalent; not round-tripped)

@@ -33,6 +33,7 @@ import { docxExtensions } from "../core";
 import { memberNodeToGroupChild } from "../extensions/group-members";
 import { buildListLevels, isGeneratedListReference } from "../extensions/list-numbering";
 import type { ParseBlockRule, ParseInlineRule, ResolveContext } from "../extensions/types";
+import { parseJsonBinary, serializeJsonBinary, serializeRawParts } from "./json";
 import { prepareDocument, type PrepareStep } from "./prepare";
 import { buildTextBlock } from "./styles";
 
@@ -355,10 +356,9 @@ export class DocxManager {
     // Direct concatenation: the loop above skips every reference the source
     // numbering already carries, so the two lists never intersect.
     const numberingConfig = [...origNumberingConfig, ...this.numberingConfigs];
-    // rawParts entries whose bytes a JSON round-trip already corrupted (see
-    // isLegalDataType) drop on a copy — the theme part regenerates from
-    // scratch without its rawPart — and the input attrs stay untouched
-    // (compile never mutates its input).
+    // Parse emits binaries that cannot survive host JSON persistence. Resolve
+    // encodes rawParts as data URLs on a copy; compile still drops legacy
+    // entries corrupted by an older saved document.
     let extras = documentExtras;
     const sourceParts = extras?.rawParts;
     if (
@@ -538,7 +538,7 @@ export class DocxManager {
     for (const [k, v] of Object.entries(docOpts as unknown as Record<string, unknown>)) {
       if (COMPILE_OWNED_KEYS.has(k)) continue;
       if (v === undefined || v === null) continue;
-      documentExtras[k] = v;
+      documentExtras[k] = k === "rawParts" ? serializeRawParts(v) : v;
     }
     if (Object.keys(documentExtras).length > 0) attrs.documentExtras = documentExtras;
     if (Object.keys(attrs).length > 0) doc.attrs = attrs;
@@ -611,7 +611,7 @@ export class DocxManager {
         // Opaque SectionChild (rawXml/bookmark/toc/altChunk/…) round-tripped verbatim.
         const data = (node.attrs?.data as string) ?? "{}";
         try {
-          return JSON.parse(data) as SectionChild;
+          return parseJsonBinary(JSON.parse(data)) as SectionChild;
         } catch {
           return null;
         }
@@ -871,7 +871,7 @@ export class DocxManager {
           // verbatim — reverse of resolveParagraphChild's fallback.
           const data = (node.attrs?.data as string) ?? "{}";
           try {
-            const parsed = JSON.parse(data) as ParagraphChild;
+            const parsed = parseJsonBinary(JSON.parse(data)) as ParagraphChild;
             if (parsed) children.push(parsed);
           } catch {
             /* malformed JSON — drop */
@@ -1131,7 +1131,7 @@ export class DocxManager {
 
   /** Wrap an opaque SectionChild in a passthrough atom (attrs.data = JSON). */
   private resolvePassthrough(child: SectionChild): JSONContent {
-    return { type: "passthrough", attrs: { data: JSON.stringify(child) } };
+    return { type: "passthrough", attrs: { data: JSON.stringify(serializeJsonBinary(child)) } };
   }
 
   private resolveParagraph(opts: string | ParagraphOptions): JSONContent {
@@ -1217,7 +1217,10 @@ export class DocxManager {
     // round-trip stays byte-faithful — mirrors block resolvePassthrough, which
     // keeps every unrecognized SectionChild instead of dropping it. An
     // inline SDT used to be dropped here; carrying it restores the symmetry.
-    return { type: "inlinePassthrough", attrs: { data: JSON.stringify(child) } };
+    return {
+      type: "inlinePassthrough",
+      attrs: { data: JSON.stringify(serializeJsonBinary(child)) },
+    };
   }
 
   private resolveRun(opts: RunOptions): JSONContent | JSONContent[] | null {

@@ -9,6 +9,7 @@ import type {
   ShapeOptions,
 } from "@office-open/docx";
 
+import { serializeJsonBinary } from "../converters/json";
 import { cleanAttrs } from "../converters/styles";
 import type { JSONContent } from "../core";
 import { mediaOfSrc } from "./image";
@@ -96,7 +97,10 @@ export function groupChildToMemberNode(
   }
 
   if (child.type === "chart" || child.type === "contentPart") {
-    return { type: "inlinePassthrough", attrs: { data: JSON.stringify(child) } };
+    return {
+      type: "inlinePassthrough",
+      attrs: { data: JSON.stringify(serializeJsonBinary(child)) },
+    };
   }
 
   // Raster/svg picture member — same payload contract as the top-level image
@@ -105,11 +109,10 @@ export function groupChildToMemberNode(
   // round-trip) and is not carried.
   const bytes = childBytesOf(child);
   if (!bytes) return null;
+  const dataUrl = `data:image/${child.type};base64,${encodeBase64(bytes)}`;
   const attrs: Record<string, unknown> = {
-    src:
-      bytes.byteLength > MEDIA_INLINE_LIMIT
-        ? registerMediaBlob(bytes, child.type)
-        : `data:image/${child.type};base64,${encodeBase64(bytes)}`,
+    src: bytes.byteLength > MEDIA_INLINE_LIMIT ? registerMediaBlob(bytes, child.type) : dataUrl,
+    ...(bytes.byteLength > MEDIA_INLINE_LIMIT ? { persistentSrc: dataUrl } : {}),
     // px display size (UI); the EMU child-space box rides groupXfrm.
     width: Math.round(convertEmuToPixels(emuOf(t.width))),
     height: Math.round(convertEmuToPixels(emuOf(t.height))),

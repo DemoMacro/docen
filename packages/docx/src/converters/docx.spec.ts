@@ -74,15 +74,16 @@ describe("compileDocument numbering persistence", () => {
   });
 });
 
-describe("compileDocument rawParts sanitation", () => {
+describe("document binary persistence", () => {
   const good = { path: "word/theme/theme1.xml", data: new Uint8Array([1, 2, 3]) };
   const text = { path: "customXml/item1.xml", data: "<x/>" };
   const corrupted = { path: "word/embeddings/ole.bin", data: { 0: 80, 1: 75 } };
 
-  it("drops JSON-corrupted entries and never mutates the input attrs", () => {
+  it("drops legacy JSON-corrupted entries and never mutates the input attrs", () => {
     const json = docWithAttrs({ documentExtras: { rawParts: [good, corrupted, text] } });
     const compiled = compileDocument(json, docxExtensions);
-    expect(compiled.rawParts).toEqual([good, text]);
+    expect(compiled.rawParts?.[0]).toEqual(good);
+    expect(compiled.rawParts?.[1]).toEqual(text);
     expect(json.attrs!.documentExtras).toEqual({ rawParts: [good, corrupted, text] });
   });
 
@@ -92,9 +93,43 @@ describe("compileDocument rawParts sanitation", () => {
     expect("rawParts" in compiled).toBe(false);
   });
 
-  it("keeps a legal rawParts list verbatim", () => {
+  it("keeps a legal rawParts list verbatim before JSON persistence", () => {
+    const rawParts = structuredClone([good, text]);
+    const resolved = resolveDocument(
+      {
+        sections: [{ children: [{ paragraph: { text: "x" } }] }],
+        rawParts,
+      },
+      docxExtensions,
+    );
+    expect(resolved.attrs?.documentExtras).toEqual({
+      rawParts: [{ ...good, data: "data:application/octet-stream;base64,AQID" }, text],
+    });
+  });
+
+  it("survives a JSON round-trip without losing rawPart or altChunk bytes", () => {
+    const bytes = new Uint8Array([0, 255, 8, 16]);
     const rawParts = [good, text];
-    const compiled = compileDocument(docWithAttrs({ documentExtras: { rawParts } }));
-    expect(compiled.rawParts).toBe(rawParts);
+    const source: DocumentOptions = {
+      sections: [
+        {
+          children: [{ altChunk: { data: bytes, contentType: "text/html", extension: "html" } }],
+        },
+      ],
+      rawParts,
+    };
+    const persisted = JSON.parse(
+      JSON.stringify(resolveDocument(source, docxExtensions)),
+    ) as JSONContent;
+    const compiled = compileDocument(persisted, docxExtensions);
+    const child = compiled.sections[0]?.children[0] as {
+      altChunk?: { data?: Uint8Array };
+    };
+    expect(Array.from(child.altChunk?.data ?? [])).toEqual(Array.from(bytes));
+    expect(compiled.rawParts?.[0]).toEqual({
+      ...good,
+      data: "data:application/octet-stream;base64,AQID",
+    });
+    expect(compiled.rawParts?.[1]).toEqual(text);
   });
 });
