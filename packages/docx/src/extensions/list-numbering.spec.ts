@@ -146,6 +146,12 @@ describe("compile registers generated list definitions", () => {
     expect(refs).toContain("docen-ordered-2");
   });
 
+  it("defines the bullet list when the document also has an ordered list", () => {
+    const opts = compileDocument(parseMarkdown("- a\n\n1. x"));
+    const refs = (opts.numbering?.abstractNumberings ?? []).map((a) => a.reference);
+    expect(refs).toContain("docen-bullet");
+  });
+
   it("round-trips a docx with generated list references", () => {
     const doc: JSONContent = {
       type: "doc",
@@ -162,8 +168,7 @@ describe("compile registers generated list definitions", () => {
         },
       ],
     };
-    // The generated document carries the numbering part with both references;
-    // the bullet sugar needs no definition (office-open's built-in numId 1).
+    // The generated document carries the numbering part with both references.
     const bytes = generateDocumentSync(compileDocument(doc));
     expect(bytes.byteLength).toBeGreaterThan(0);
   });
