@@ -234,6 +234,11 @@ describe("markdown flat lists", () => {
     expect(md).toContain("1. x");
     expect(md).toContain("2. y");
   });
+
+  it("keeps DOCX bullet lists as bullets", () => {
+    const bytes = generateDocumentSync(compileDocument(parseMarkdown("- a\n    - b")));
+    expect(generateMarkdown(parseDOCXSync(bytes))).toBe("- a\n    - b");
+  });
 });
 
 describe("html flat lists", () => {

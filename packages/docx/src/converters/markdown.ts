@@ -472,17 +472,20 @@ function nodeToBlocks(node: JSONContent): MdBlock[] {
 
 function toBlocks(doc: JSONContent): MdBlock[] {
   const out: MdBlock[] = [];
-  const content = doc.content ?? [];
   // Custom numbering starts live in the abstract definitions for documents
   // parsed from DOCX (paragraphs carry them only for markdown imports).
   const defStarts: StartLookup = new Map();
   const defs = ((doc.attrs as NodeAttrs | undefined)?.numbering as NodeAttrs | undefined)
     ?.abstractNumberings as
-    | { reference?: string; levels?: { level?: number; start?: number }[] }[]
+    | { reference?: string; levels?: { level?: number; start?: number; format?: string }[] }[]
     | undefined;
+  // DOCX bullet lists carry `numbering` like ordered ones; only the
+  // definition's level format says they are bullets.
+  const bulletLevels = new Set<string>();
   for (const def of defs ?? []) {
     if (!def.reference) continue;
     for (const lvl of def.levels ?? []) {
+      if (lvl.format === "bullet") bulletLevels.add(`${def.reference}:${lvl.level ?? 0}`);
       if (typeof lvl.start === "number" && lvl.start > 1) {
         if (!defStarts.has(def.reference)) defStarts.set(def.reference, new Map());
         if (!defStarts.get(def.reference)!.has(lvl.level ?? 0))
@@ -490,6 +493,14 @@ function toBlocks(doc: JSONContent): MdBlock[] {
       }
     }
   }
+  const content = (doc.content ?? []).map((node) => {
+    const attrs = node.attrs as NodeAttrs | undefined;
+    const numbering = attrs?.numbering;
+    if (!numbering || !bulletLevels.has(`${numbering.reference}:${numbering.level ?? 0}`))
+      return node;
+    const { numbering: _, ...rest } = attrs;
+    return { ...node, attrs: { ...rest, bullet: { level: numbering.level ?? 0 } } };
+  });
   for (let i = 0; i < content.length;) {
     const node = content[i];
     if (listAttrsOf(node)) {
