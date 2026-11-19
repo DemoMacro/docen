@@ -367,8 +367,11 @@ function listToBlock(group: JSONContent[], defStarts: StartLookup): MdBlock {
     items: [],
   };
   const stack: Extract<MdBlock, { type: "list" }>[] = [root];
+  // A list can start below level 0 (a Word list indented one step, `- - x`):
+  // count levels from the shallowest item so there is a parent to nest under.
+  const base = Math.min(...group.map((para) => listAttrsOf(para)!.level));
   for (const para of group) {
-    const { level } = listAttrsOf(para)!;
+    const level = listAttrsOf(para)!.level - base;
     while (stack.length > level + 1) stack.pop();
     // The checkbox rides as a text prefix (parseBlockNodes) — lift it back to
     // GFM task semantics so it exports unescaped.
@@ -377,7 +380,7 @@ function listToBlock(group: JSONContent[], defStarts: StartLookup): MdBlock {
       blocks: [paragraphToBlock(task ? task.body : para)],
       ...(task ? { checked: task.checked } : {}),
     };
-    if (stack.length === level + 1) {
+    if (stack.length === level + 1 || stack[stack.length - 1].items.length === 0) {
       stack[stack.length - 1].items.push(item);
     } else {
       // Deeper level: a new sub-list hangs off the previous item.
