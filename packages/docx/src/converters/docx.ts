@@ -32,7 +32,11 @@ import { flattenExtensions, getExtensionField, getSchema } from "@tiptap/core";
 import type { Extensions, JSONContent } from "../core";
 import { docxExtensions } from "../core";
 import { memberNodeToGroupChild } from "../extensions/group-members";
-import { buildListLevels, isGeneratedListReference } from "../extensions/list-numbering";
+import {
+  BULLET_REFERENCE,
+  buildListLevels,
+  isGeneratedListReference,
+} from "../extensions/list-numbering";
 import type { ParseBlockRule, ParseInlineRule, ResolveContext } from "../extensions/types";
 import { parseJsonBinary, serializeJsonBinary, serializeRawParts } from "./json";
 import { prepareDocument, type PrepareStep } from "./prepare";
@@ -625,6 +629,15 @@ export class DocxManager {
     const numRef = (node.attrs?.numbering as { reference?: string } | null | undefined)?.reference;
     if (typeof numRef === "string" && numRef) this.usedListReferences.add(numRef);
     const opts = this.renderNodeOpts(node);
+    // office-open writes `bullet` as numId 1 but defines numId 1 only when the
+    // document has no other numbering, so bullets next to an ordered list lost
+    // their definition. Route them through our own bullet definition.
+    const bullet = opts.bullet as { level?: number } | undefined;
+    if (bullet && !opts.numbering) {
+      opts.numbering = { reference: BULLET_REFERENCE, level: bullet.level ?? 0 };
+      delete opts.bullet;
+      this.usedListReferences.add(BULLET_REFERENCE);
+    }
     const childList = this.compileInlineContent(node.content);
     if (childList.length > 0) opts.children = childList;
     return this.simplifyParagraph(opts);
