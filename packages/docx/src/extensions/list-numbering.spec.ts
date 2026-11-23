@@ -234,6 +234,20 @@ describe("markdown flat lists", () => {
     expect(md).toContain("1. x");
     expect(md).toContain("2. y");
   });
+
+  it("serializes a list that starts below level 0", () => {
+    const item = (level: number, text: string): JSONContent => ({
+      type: "paragraph",
+      attrs: { bullet: { level } },
+      content: [{ type: "text", text }],
+    });
+    expect(generateMarkdown({ type: "doc", content: [item(1, "a"), item(1, "b")] })).toBe(
+      "- a\n- b",
+    );
+    expect(generateMarkdown({ type: "doc", content: [item(1, "a"), item(0, "b")] })).toBe(
+      "- a\n- b",
+    );
+  });
 });
 
 describe("html flat lists", () => {
